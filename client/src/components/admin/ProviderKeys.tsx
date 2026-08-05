@@ -1,0 +1,261 @@
+import { useState } from "react";
+import { trpc } from "@/lib/trpc";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Loader2, KeyRound } from "lucide-react";
+import { toast } from "sonner";
+
+/**
+ * Admin: per-tab provider keys for long-form video. Each of the 5 video tabs (slots 0–4)
+ * renders its b-roll on its own APIMART account and lip-syncs its host on its own HeyGen
+ * account; APIMART also has a dedicated key for the Edit Images/Videos pages. Keys are stored
+ * encrypted; only the masked tail is ever returned. Leaving a field empty and saving clears
+ * that slot.
+ */
+
+/** Live balance/quota readout for a stored key; doubles as a health check. */
+function BalanceBadge({
+  keySet,
+  value,
+  loading,
+  format,
+  lowThreshold,
+}: {
+  keySet: boolean;
+  /** `null` ⇒ the check failed (or the key is unset). */
+  value: number | null;
+  loading: boolean;
+  format: (value: number) => string;
+  lowThreshold: number;
+}) {
+  if (!keySet) return null;
+  if (loading)
+    return <Loader2 className="h-3 w-3 shrink-0 animate-spin opacity-50" />;
+  if (value == null)
+    return (
+      <span className="shrink-0 text-xs text-destructive">
+        balance check failed
+      </span>
+    );
+  return (
+    <span
+      className={`shrink-0 text-xs ${
+        value < lowThreshold ? "text-destructive" : "text-muted-foreground"
+      }`}
+    >
+      {format(value)}
+    </span>
+  );
+}
+
+/** One label / masked key field / Save-Clear button / badge row. */
+function KeyRow({
+  label,
+  masked,
+  placeholder,
+  draft,
+  onDraftChange,
+  onSave,
+  saving,
+  badge,
+}: {
+  label: string;
+  masked: string | null;
+  placeholder: string;
+  draft: string;
+  onDraftChange: (value: string) => void;
+  onSave: (apiKey: string) => void;
+  saving: boolean;
+  badge: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="w-20 shrink-0 text-sm text-muted-foreground">
+        {label}
+      </span>
+      <Input
+        type="password"
+        autoComplete="off"
+        placeholder={masked ?? placeholder}
+        value={draft}
+        onChange={e => onDraftChange(e.target.value)}
+      />
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={saving}
+        onClick={() => onSave(draft.trim())}
+      >
+        {masked && !draft.trim() ? "Clear" : "Save"}
+      </Button>
+      {badge}
+    </div>
+  );
+}
+
+export function ProviderKeys() {
+  const utils = trpc.useUtils();
+
+  const { data, isLoading } = trpc.longformVideo.getApimartKeys.useQuery();
+  const { data: balances, isLoading: balancesLoading } =
+    trpc.longformVideo.getApimartBalances.useQuery(undefined, {
+      refetchOnWindowFocus: false,
+    });
+  const { data: heygen, isLoading: heygenLoading } =
+    trpc.longformVideo.getHeygenKeys.useQuery();
+  const { data: quotas, isLoading: quotasLoading } =
+    trpc.longformVideo.getHeygenQuotas.useQuery(undefined, {
+      refetchOnWindowFocus: false,
+    });
+
+  const [drafts, setDrafts] = useState<Record<number, string>>({});
+  const [editDraft, setEditDraft] = useState("");
+  const [heygenDrafts, setHeygenDrafts] = useState<Record<number, string>>({});
+
+  const saveMutation = trpc.longformVideo.setApimartKey.useMutation({
+    onSuccess: (_res, vars) => {
+      toast.success(`APIMART key for Video ${vars.slotIndex + 1} saved.`);
+      setDrafts(d => ({ ...d, [vars.slotIndex]: "" }));
+      utils.longformVideo.getApimartKeys.invalidate();
+      utils.longformVideo.getApimartBalances.invalidate();
+    },
+    onError: err => toast.error(err.message ?? "Failed to save."),
+  });
+
+  const saveEditMutation = trpc.longformVideo.setApimartEditKey.useMutation({
+    onSuccess: () => {
+      toast.success("APIMART key for the edit pages saved.");
+      setEditDraft("");
+      utils.longformVideo.getApimartKeys.invalidate();
+      utils.longformVideo.getApimartBalances.invalidate();
+    },
+    onError: err => toast.error(err.message ?? "Failed to save."),
+  });
+
+  const saveHeygenMutation = trpc.longformVideo.setHeygenKey.useMutation({
+    onSuccess: (_res, vars) => {
+      toast.success(`HeyGen key for Video ${vars.slotIndex + 1} saved.`);
+      setHeygenDrafts(d => ({ ...d, [vars.slotIndex]: "" }));
+      utils.longformVideo.getHeygenKeys.invalidate();
+      utils.longformVideo.getHeygenQuotas.invalidate();
+    },
+    onError: err => toast.error(err.message ?? "Failed to save."),
+  });
+
+  return (
+    <div className="space-y-6">
+      <div className="space-y-3">
+        <Label className="flex items-center gap-2 text-sm font-medium">
+          <KeyRound className="h-4 w-4" />
+          APIMART keys — b-roll (per tab)
+        </Label>
+        {isLoading ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+          </div>
+        ) : (
+          <>
+            {data?.slots.map(({ slotIndex, masked }) => (
+              <KeyRow
+                key={slotIndex}
+                label={`Video ${slotIndex + 1}`}
+                masked={masked}
+                placeholder="Not set — uses 69Labs"
+                draft={drafts[slotIndex] ?? ""}
+                onDraftChange={value =>
+                  setDrafts(d => ({ ...d, [slotIndex]: value }))
+                }
+                onSave={apiKey => saveMutation.mutate({ slotIndex, apiKey })}
+                saving={saveMutation.isPending}
+                badge={
+                  <BalanceBadge
+                    keySet={!!masked}
+                    value={
+                      balances?.slots.find(s => s.slotIndex === slotIndex)
+                        ?.balance?.remainBalance ?? null
+                    }
+                    loading={balancesLoading}
+                    format={v => `$${v.toFixed(2)} left`}
+                    lowThreshold={5}
+                  />
+                }
+              />
+            ))}
+            <KeyRow
+              label="Edit pages"
+              masked={data?.editMasked ?? null}
+              placeholder="Not set — edit pages disabled"
+              draft={editDraft}
+              onDraftChange={setEditDraft}
+              onSave={apiKey => saveEditMutation.mutate({ apiKey })}
+              saving={saveEditMutation.isPending}
+              badge={
+                <BalanceBadge
+                  keySet={!!data?.editMasked}
+                  value={balances?.edit?.remainBalance ?? null}
+                  loading={balancesLoading}
+                  format={v => `$${v.toFixed(2)} left`}
+                  lowThreshold={5}
+                />
+              }
+            />
+          </>
+        )}
+        <p className="text-xs text-muted-foreground">
+          Each long-form tab renders b-roll on its own APIMART account. Blank ⇒
+          that tab uses 69Labs. The Edit Images/Videos pages are APIMART-only on
+          their own key; blank ⇒ those pages can&apos;t generate.
+        </p>
+      </div>
+
+      <div className="space-y-3">
+        <Label className="flex items-center gap-2 text-sm font-medium">
+          <KeyRound className="h-4 w-4" />
+          HeyGen keys — host lip-sync (per tab)
+        </Label>
+        {heygenLoading ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+          </div>
+        ) : (
+          heygen?.slots.map(({ slotIndex, masked }) => (
+            <KeyRow
+              key={slotIndex}
+              label={`Video ${slotIndex + 1}`}
+              masked={masked}
+              placeholder="Not set — uses shared HEYGEN_API_KEY"
+              draft={heygenDrafts[slotIndex] ?? ""}
+              onDraftChange={value =>
+                setHeygenDrafts(d => ({ ...d, [slotIndex]: value }))
+              }
+              onSave={apiKey =>
+                saveHeygenMutation.mutate({ slotIndex, apiKey })
+              }
+              saving={saveHeygenMutation.isPending}
+              badge={
+                <BalanceBadge
+                  keySet={!!masked}
+                  value={
+                    quotas?.slots.find(s => s.slotIndex === slotIndex)?.quota ??
+                    null
+                  }
+                  loading={quotasLoading}
+                  format={v => `${Math.round(v)} credits left`}
+                  lowThreshold={20}
+                />
+              }
+            />
+          ))
+        )}
+        <p className="text-xs text-muted-foreground">
+          Each long-form tab lip-syncs its host on its own HeyGen account —
+          HeyGen caps concurrent renders per account, so 5 accounts render 5×
+          wider. Blank ⇒ that tab uses the shared{" "}
+          <code className="text-[11px]">HEYGEN_API_KEY</code>; with that unset
+          too, host scenes fail loudly.
+        </p>
+      </div>
+    </div>
+  );
+}
