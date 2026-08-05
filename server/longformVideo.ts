@@ -39,7 +39,7 @@ import {
   capDeadAirPauses,
 } from "./ttsUnified";
 import { storagePut } from "./storage";
-import { getActiveProvider, getProviderByType } from "./db";
+import { getActiveProvider, getProviderByType, hostNameAliases } from "./db";
 import {
   createLongformVideoJob,
   updateLongformVideoJob,
@@ -3634,7 +3634,7 @@ const QR_TAIL_HOLD_SEC = 3;
 
 /** Patterns that flag a scene's verbatim narration as call-to-action content. */
 const CTA_SIGNAL_PATTERNS: RegExp[] = [
-  // A spoken/written domain like "larrysgardenbooks.com". Curated TLDs + the no-space
+  // A spoken/written domain like "example.com". Curated TLDs + the no-space
   // requirement before the TLD avoid false hits on prose like "St. Augustine" or "e.g.".
   /\b[a-z0-9][a-z0-9-]*\.(?:com|net|org|co|io|shop|store|info|us|club|site|online)\b/i,
   /\bqr[\s-]*code\b/i, // "scan the QR code on screen"
@@ -7739,10 +7739,11 @@ async function runUnifiedPipeline(
   // Safety net: no proper host name may reach 69labs ("well-known person" filter).
   // Scrub every scene's prompt fields once, after the last mutation stage, so
   // `buildClipChain` (69labs) gets clean text.
+  const hostAliases = await hostNameAliases(params.channelKey);
   for (const s of scenes) {
-    s.visualPrompt = stripHostNames(s.visualPrompt, params.channelKey);
+    s.visualPrompt = stripHostNames(s.visualPrompt, hostAliases);
     if (s.splitVisual)
-      s.splitVisual = stripHostNames(s.splitVisual, params.channelKey);
+      s.splitVisual = stripHostNames(s.splitVisual, hostAliases);
   }
 
   // Guarantee the host appears on camera at least once across the CTA — run LAST, after the
@@ -8089,7 +8090,7 @@ async function assembleAndFinalize(
     sliceEndSec: masterAudioUrl ? s.narrationEndSec : undefined,
   }));
 
-  // Host lower third ("Steve Calloway" / "Gardener" / "Fresno, CA"), held continuously across the
+  // Host lower third ("Riley Danvers" / "Gardener" / "Fresno, CA"), held continuously across the
   // locked cold open. Entirely non-fatal: a render failure — or no host identity on the channel,
   // or no host shot at all — just means the film ships without a card.
   let nameCard: { png: Buffer; sceneIndices: number[] } | undefined;
@@ -8635,15 +8636,10 @@ export async function regenerateScene(
           if (regenEnhance.failedScenes.length) {
             appendJobWarning(jobId, enhanceWarningFor(regenEnhance));
           }
-          scene.visualPrompt = stripHostNames(
-            scene.visualPrompt,
-            params.channelKey
-          );
+          const aliases = await hostNameAliases(params.channelKey);
+          scene.visualPrompt = stripHostNames(scene.visualPrompt, aliases);
           if (scene.splitVisual)
-            scene.splitVisual = stripHostNames(
-              scene.splitVisual,
-              params.channelKey
-            );
+            scene.splitVisual = stripHostNames(scene.splitVisual, aliases);
         }
 
         // A split regen renders one still and re-composites — no video model, no TTS, no
@@ -8847,11 +8843,12 @@ export async function regenerateScenes(
             appendJobWarning(jobId, enhanceWarningFor(batchEnhance));
           }
           const reSet = new Set(reEnhanceIndices);
+          const aliases = await hostNameAliases(params.channelKey);
           for (const s of targets) {
             if (!reSet.has(s.index)) continue;
-            s.visualPrompt = stripHostNames(s.visualPrompt, params.channelKey);
+            s.visualPrompt = stripHostNames(s.visualPrompt, aliases);
             if (s.splitVisual)
-              s.splitVisual = stripHostNames(s.splitVisual, params.channelKey);
+              s.splitVisual = stripHostNames(s.splitVisual, aliases);
           }
         }
 

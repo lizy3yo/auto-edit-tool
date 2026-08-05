@@ -1081,8 +1081,8 @@ describe("pickMusicBeds", () => {
 
   it("falls back to the default channel for an unknown or missing key", () => {
     const fallback = pickMusicBeds(5, "job-a", DEFAULT_MUSIC_CHANNEL);
-    // The nine legacy CHANNEL_ORDER channels have no set of their own and land here.
-    expect(pickMusicBeds(5, "job-a", "steve")).toEqual(fallback);
+    // Any channel without a set of its own lands here.
+    expect(pickMusicBeds(5, "job-a", "demo")).toEqual(fallback);
     expect(pickMusicBeds(5, "job-a", "nope")).toEqual(fallback);
     expect(pickMusicBeds(5, "job-a")).toEqual(fallback);
   });

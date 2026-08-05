@@ -351,9 +351,8 @@ export async function deriveVisualDirection(
   knownBible?: string
 ): Promise<ResolvedDirection | null> {
   if (!scenes.length) return null;
-  // getChannelLayer resolves channel_layers → CHANNEL_PROFILES → channel_configs.personaProfile
-  // → null. Reusing it is what keeps the visuals agreeing with the script, which is composed
-  // from the same layer.
+  // getChannelLayer resolves channel_layers → channel_configs.personaProfile → null. Reusing it
+  // is what keeps the visuals agreeing with the script, which is composed from the same layer.
   const layer = await getChannelLayer(params.channelKey).catch(() => null);
   const userMessage = buildVisualDirectionUserMessage(
     layer?.layerContent ?? null,

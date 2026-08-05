@@ -193,7 +193,7 @@ const okStill = () => ({
 const baseParams: LongformInputParams = {
   script: "x",
   lockMode: "ingredients",
-  channelKey: "haven",
+  channelKey: "demo",
   voiceId: "v1",
 };
 
@@ -1447,9 +1447,7 @@ describe("enforceHostSplitMix", () => {
 
 describe("ctaSignalInText", () => {
   it("matches a spoken URL, a QR mention, the description link, and a $price", () => {
-    expect(ctaSignalInText("grab it at larrysgardenbooks.com today")).toBe(
-      true
-    );
+    expect(ctaSignalInText("grab it at example.com today")).toBe(true);
     expect(ctaSignalInText("point your phone at the QR code on screen")).toBe(
       true
     );
@@ -1475,7 +1473,7 @@ describe("ctaVisualIsLiteral", () => {
       ctaVisualIsLiteral("an older man holding the book up to camera")
     ).toBe(true);
     expect(ctaVisualIsLiteral("a hand tapping a phone screen")).toBe(true);
-    expect(ctaVisualIsLiteral("visit larrysgardenbooks.com")).toBe(true);
+    expect(ctaVisualIsLiteral("visit example.com")).toBe(true);
     expect(ctaVisualIsLiteral("the link in the description")).toBe(true);
     expect(ctaVisualIsLiteral("a laptop showing a website")).toBe(true);
   });
@@ -1997,7 +1995,7 @@ describe("brollDepictsBook / non-CTA book guard", () => {
     expect(without).not.toContain("Channel visual direction");
     expect(without).toBe(
       `${CUTAWAY_PERSON_FREE_DIRECTIVE}\n` +
-        `Channel: haven\n` +
+        `Channel: demo\n` +
         `Type: still\n` +
         `Scene narration: "spread the mulch evenly"\n` +
         `Original prompt: a wheelbarrow of mulch\n\n` +
@@ -2048,7 +2046,7 @@ describe("brollDepictsBook / non-CTA book guard", () => {
       expect(sent).toContain("Channel persona");
       expect(sent).toContain("Tom is a tired gardener");
       expect(sent).toContain("NOT content to depict");
-      expect(sent).not.toContain("Channel: haven");
+      expect(sent).not.toContain("Channel: demo");
     }
   });
 
@@ -2178,7 +2176,7 @@ describe("enforceVisualAdjacency", () => {
     // demoted to a still — and must keep cta:true (the QR overlay is flag-driven).
     const scenes = [
       host(0),
-      host(1, { cta: true, scriptText: "grab it at stevesgardenbooks.com" }),
+      host(1, { cta: true, scriptText: "grab it at example.com" }),
       mk(2, { stillImage: true }),
       host(3),
     ];
@@ -2354,7 +2352,7 @@ describe("markCtaScenes", () => {
       mk(2, "Step one. Raise your mowing height for deeper roots."),
       mk(
         3,
-        "I wrote Larry's Protocol — eighty-eight pages at larrysgardenbooks.com."
+        "I wrote The Weekend Protocol — eighty-eight pages at example.com."
       ),
       mk(4, "Take your time finding it, unlock it, I'll be right here."), // no signal — bridged
       mk(
@@ -2366,7 +2364,7 @@ describe("markCtaScenes", () => {
       mk(8, "Mow in the early evening to cut heat stress in half."),
       mk(
         9,
-        "That's Chapter 8. Find it at larrysgardenbooks.com — link in the description."
+        "That's Chapter 8. Find it at example.com — link in the description."
       ),
       mk(10, "Alright, here's the takeaway: mow by height.", {
         hostPresent: true,
@@ -2386,7 +2384,7 @@ describe("markCtaScenes", () => {
 
   it("flags a cutaway CTA scene without touching its register or cutaway fields", () => {
     const scenes: StoryboardScene[] = [
-      mk(1, "Grab the book at larrysgardenbooks.com.", {
+      mk(1, "Grab the book at example.com.", {
         stillImage: true,
         splitVisual: "a book cover",
         visualPrompt: "tight shot of a book on a table",
@@ -3410,7 +3408,7 @@ describe("markCtaFromSpans", () => {
   it("flags exactly the in-span scenes; heuristics and stray flags are overridden", () => {
     const scenes = [
       mk(1, "Intro words here."), // words 0-2
-      mk(2, "Buy the book at larrysgardenbooks.com today please."), // words 3-9
+      mk(2, "Buy the book at example.com today please."), // words 3-9
       mk(3, "Outro about the $2 pantry powder trick.", { cta: true }), // words 10-16, stray flag + price signal
     ];
     markCtaFromSpans(scenes, [{ start: 3, end: 10 }]);
@@ -3452,7 +3450,7 @@ describe("markCtaFromSpans", () => {
   });
 
   it("is a no-op with no spans", () => {
-    const scenes = [mk(1, "Buy at larrysgardenbooks.com.", { cta: true })];
+    const scenes = [mk(1, "Buy at example.com.", { cta: true })];
     markCtaFromSpans(scenes, []);
     expect(scenes[0].cta).toBe(true); // untouched — heuristic path owns this case
   });
@@ -6531,41 +6529,44 @@ describe("dispatchScenesByProvider 69labs image/video lane saturation", () => {
 });
 
 describe("stripHostNames", () => {
+  // Aliases as `hostNameAliases` builds them: [full name, display name, first name].
+  const RILEY = ["Riley Danvers", "Danvers Outdoors", "Riley"];
+
   it("replaces a bare first name with 'the host'", () => {
-    expect(stripHostNames("Larry crouches beside a mower", "larry")).toBe(
+    expect(stripHostNames("Riley crouches beside a mower", RILEY)).toBe(
       "the host crouches beside a mower"
     );
   });
 
   it("handles possessive forms (straight and curly apostrophes)", () => {
-    expect(stripHostNames("Tom holds up Tom's book", "haven")).toBe(
+    expect(stripHostNames("Riley holds up Riley's book", RILEY)).toBe(
       "the host holds up the host's book"
     );
-    expect(stripHostNames("Larry’s protocol", "larry")).toBe(
+    expect(stripHostNames("Riley’s protocol", RILEY)).toBe(
       "the host's protocol"
     );
   });
 
   it("strips a multi-word alias before its bare first name", () => {
-    expect(stripHostNames("Lawncare Larry waves", "larry")).toBe(
-      "the host waves"
+    expect(stripHostNames("Riley Danvers waves", RILEY)).toBe("the host waves");
+    expect(stripHostNames("Danvers Outdoors presents", RILEY)).toBe(
+      "the host presents"
     );
   });
 
   it("is case-insensitive and word-boundaried", () => {
     // "Hank" matches; the substring in "thanks" must not.
-    expect(stripHostNames("HANK says thanks", "hank")).toBe(
+    expect(stripHostNames("HANK says thanks", ["Hank"])).toBe(
       "the host says thanks"
     );
   });
 
-  it("is a no-op for an unknown channel", () => {
-    expect(stripHostNames("Larry waves", "unknownchannel")).toBe("Larry waves");
+  it("is a no-op when the channel has no aliases", () => {
+    expect(stripHostNames("Riley waves", [])).toBe("Riley waves");
   });
 
   it("leaves unrelated proper nouns untouched", () => {
-    // "Daniel" is an Amish neighbour in Bill's profile, not a host alias.
-    expect(stripHostNames("Bill nods at Daniel", "bill")).toBe(
+    expect(stripHostNames("Riley nods at Daniel", RILEY)).toBe(
       "the host nods at Daniel"
     );
   });

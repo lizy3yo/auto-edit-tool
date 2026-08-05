@@ -45,7 +45,7 @@ const scene = (index: number, over: Partial<StoryboardScene> = {}) =>
 
 const params = (over: Partial<LongformInputParams> = {}) =>
   ({
-    channelKey: "haven",
+    channelKey: "demo",
     script: "s",
     lockMode: "none",
     voiceId: "v",
@@ -315,8 +315,8 @@ describe("deriveVisualDirection", () => {
 
   it("reuses getChannelLayer so visuals agree with the script's persona", async () => {
     invokeGemini.mockResolvedValue(ok({ styleBible: "a shed", beats: [] }));
-    await deriveVisualDirection(params({ channelKey: "haven" }), [scene(1)]);
-    expect(getChannelLayer).toHaveBeenCalledWith("haven");
+    await deriveVisualDirection(params({ channelKey: "demo" }), [scene(1)]);
+    expect(getChannelLayer).toHaveBeenCalledWith("demo");
     expect(invokeGemini.mock.calls[0][0].userMessage).toContain(
       "Tom is a tired gardener."
     );
@@ -390,7 +390,7 @@ describe("deriveStyleBible", () => {
     );
     const bible = await deriveStyleBible(params(), "the full spoken script");
     expect(bible).toBe("a cramped backyard, late autumn");
-    expect(getChannelLayer).toHaveBeenCalledWith("haven");
+    expect(getChannelLayer).toHaveBeenCalledWith("demo");
     expect(invokeGemini.mock.calls[0][0].systemPrompt).toBe(STYLE_BIBLE_SYSTEM);
     expect(invokeGemini.mock.calls[0][0].userMessage).toContain(
       "the full spoken script"

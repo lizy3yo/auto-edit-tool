@@ -11,9 +11,25 @@ function buildAllowedPrefixes(): string[] {
   return prefixes;
 }
 
-function isTrustedUrl(url: string): boolean {
-  const allowed = buildAllowedPrefixes();
-  return allowed.some(prefix => url.startsWith(prefix));
+// Host-equality, not prefix matching: `startsWith` let an attacker append their own
+// domain ("https://pub-x.r2.dev.attacker.com") or use userinfo
+// ("https://pub-x.r2.dev@attacker.com") and turn this unauthenticated route into an
+// open proxy. https-only so file:/http: to internal hosts can't be smuggled in.
+export function isTrustedUrl(url: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== "https:") return false;
+  return buildAllowedPrefixes().some(prefix => {
+    try {
+      return new URL(prefix).host === u.host;
+    } catch {
+      return false;
+    }
+  });
 }
 
 function extFromContentType(contentType: string, type: string): string {
@@ -70,7 +86,12 @@ downloadRouter.get("/", async (req, res) => {
   }
 
   try {
-    const upstream = await fetch(decoded);
+    const upstream = await fetch(decoded, {
+      // A 3xx must not walk us off the allowlisted host, and a hung upstream must
+      // not pin the socket open forever.
+      redirect: "manual",
+      signal: AbortSignal.timeout(30_000),
+    });
     if (!upstream.ok) {
       res
         .status(upstream.status)
@@ -88,7 +109,7 @@ downloadRouter.get("/", async (req, res) => {
     const safeName = sanitizeFilename(rawName);
     const filename = safeName
       ? `${safeName}.${ext}`
-      : `gardenflow-${type || "file"}-${Date.now()}.${ext}`;
+      : `download-${type || "file"}-${Date.now()}.${ext}`;
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
 
     if (upstream.body) {

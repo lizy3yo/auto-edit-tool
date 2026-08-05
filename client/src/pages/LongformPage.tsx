@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 
 const MAX_SLOTS = 5;
-const STORAGE_KEY_BASE = "gardenflow_longform_job_id";
+const STORAGE_KEY_BASE = "longform_job_id";
 const slotKey = (i: number) => `${STORAGE_KEY_BASE}_${i}`;
 
 /**

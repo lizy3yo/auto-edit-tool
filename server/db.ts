@@ -353,6 +353,22 @@ export async function getChannelConfig(channelKey: string) {
   return rows[0] ?? null;
 }
 
+/**
+ * Every on-camera name form for `channelKey` that could surface in a script and reach
+ * a video prompt — full host name, channel display name, and the bare first name.
+ * Feeds `stripHostNames` (shared/constants.ts) before clips are submitted to 69labs,
+ * which rejects prompts naming a "well-known person". Unknown channel → [] (no-op).
+ */
+export async function hostNameAliases(channelKey: string): Promise<string[]> {
+  const c = await getChannelConfig(channelKey);
+  if (!c) return [];
+  const names = [c.hostName, c.displayName].filter(Boolean) as string[];
+  const first = c.hostName?.trim().split(/\s+/)[0];
+  // ponytail: >2 chars keeps initials/particles ("A.", "de") from eating whole words.
+  if (first && first.length > 2) names.push(first);
+  return names;
+}
+
 export async function getAllChannelConfigs() {
   const db = await getDb();
   if (!db) return [];

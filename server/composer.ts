@@ -3,12 +3,11 @@
  *
  * Only the channel-layer resolution survives here: longform prompt composition
  * reads the per-channel prompt layer via raw SQL, with a fallback that
- * synthesizes a layer from CHANNEL_PROFILES / channel_configs persona text.
+ * synthesizes a layer from the channel_configs persona text.
  */
 
 import { getDb, getChannelConfig } from "./db";
 import { sql } from "drizzle-orm";
-import { CHANNEL_PROFILES } from "../shared/constants";
 
 export interface ChannelLayer {
   id: number;
@@ -38,18 +37,16 @@ export async function getChannelLayer(
     };
   }
 
-  // Fallback: no channel_layers row (e.g. dynamic channels created via
-  // channel_configs without an authored layer). Synthesize a layer from the
-  // channel's persona text: static CHANNEL_PROFILES first, then channel_configs.
-  const staticProfile = CHANNEL_PROFILES[channelKey];
+  // Fallback: no channel_layers row (a channel created in Admin without an authored
+  // layer). Synthesize one from the channel's persona text.
   const config = await getChannelConfig(channelKey);
-  const personaText = staticProfile?.profile ?? config?.personaProfile ?? null;
+  const personaText = config?.personaProfile ?? null;
   if (!personaText) return null;
 
   return {
     id: 0,
     channelKey,
-    name: config?.displayName ?? staticProfile?.name ?? channelKey,
+    name: config?.displayName ?? channelKey,
     layerContent: personaText,
     isActive: true,
   };

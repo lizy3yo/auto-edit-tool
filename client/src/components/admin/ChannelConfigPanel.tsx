@@ -426,7 +426,7 @@ export function ChannelConfigPanel() {
             onChange={e =>
               setEditForm(f => ({ ...f, hostName: e.target.value }))
             }
-            placeholder="Steve Calloway"
+            placeholder="Riley Danvers"
             className="text-xs h-8"
           />
           <Input
@@ -667,11 +667,6 @@ export function ChannelConfigPanel() {
                           <h3 className="text-sm font-semibold">
                             {channel.name}
                           </h3>
-                          {channel.isDynamic && (
-                            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
-                              custom
-                            </span>
-                          )}
                         </div>
                         <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1.5 text-xs">
                           <div className="flex items-center gap-1.5">
@@ -714,21 +709,19 @@ export function ChannelConfigPanel() {
                         </div>
                       </div>
                       <div className="ml-4 flex items-center gap-2 shrink-0">
-                        {channel.isDynamic && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() =>
-                              setDeleteChannel({
-                                key: channel.key,
-                                name: channel.name,
-                              })
-                            }
-                            className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        )}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() =>
+                            setDeleteChannel({
+                              key: channel.key,
+                              name: channel.name,
+                            })
+                          }
+                          className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
                         <Button
                           variant="outline"
                           size="sm"
@@ -889,7 +882,7 @@ export function ChannelConfigPanel() {
                     onChange={e =>
                       setCreateForm(f => ({ ...f, hostName: e.target.value }))
                     }
-                    placeholder="Steve Calloway"
+                    placeholder="Riley Danvers"
                     className="text-xs h-8"
                   />
                   <Input

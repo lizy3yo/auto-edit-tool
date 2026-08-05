@@ -5,7 +5,7 @@
  * IMPORTANT: This must ONLY trigger for actual credit/quota depletion.
  * Transient API errors (e.g. "Create image error") must NOT be caught here.
  *
- * All users see: "API has no more credits. Please notify Shua on Discord."
+ * All users see: "API has no more credits. Contact your administrator."
  * instead of credit/quota-specific errors.
  */
 
@@ -31,7 +31,7 @@ const CREDIT_ERROR_PATTERNS = [
 ];
 
 const GENERIC_CREDIT_ERROR =
-  "API has no more credits. Please notify Shua on Discord.";
+  "API has no more credits. Contact your administrator.";
 
 /**
  * Check if an error message is specifically about credits/quota depletion.

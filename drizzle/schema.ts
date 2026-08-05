@@ -149,7 +149,7 @@ export const channelConfigs = mysqlTable("channel_configs", {
   hostPhotoUrl: varchar("hostPhotoUrl", { length: 512 }),
   /** Second host photo (R2 URL): alternate camera angle, alternated with hostPhotoUrl across host scenes */
   hostPhotoUrl2: varchar("hostPhotoUrl2", { length: 512 }),
-  /** Host's full name for the on-screen lower third, e.g. "Steve Calloway" */
+  /** Host's full name for the on-screen lower third, e.g. "Riley Danvers" */
   hostName: varchar("hostName", { length: 128 }),
   /** Host's title for the lower third, e.g. "Gardener" */
   hostTitle: varchar("hostTitle", { length: 128 }),

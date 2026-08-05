@@ -5,9 +5,15 @@ const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 16;
 const TAG_LENGTH = 16;
 
+// No dev fallback: a hardcoded secret would encrypt production provider keys under a
+// value published in this repo. Fail loudly instead.
+// The salt is load-bearing — changing it orphans every key already stored in
+// provider_configs / app_settings (they must be re-entered in Admin).
 function getKey(): Buffer {
-  const secret = ENV.cookieSecret || "fallback-secret-key-for-development";
-  return crypto.scryptSync(secret, "gardenflow-salt", 32);
+  if (!ENV.cookieSecret) {
+    throw new Error("JWT_SECRET is required to encrypt/decrypt provider keys");
+  }
+  return crypto.scryptSync(ENV.cookieSecret, "longform-studio", 32);
 }
 
 export function encrypt(plaintext: string): string {

@@ -30,7 +30,6 @@ import {
   deleteLongformVideoJob,
   updateLongformVideoJob,
 } from "./db";
-import { CHANNEL_ORDER, CHANNEL_PROFILES } from "../shared/constants";
 import {
   createLongformJob,
   runLongformPipeline,
@@ -97,7 +96,7 @@ const providerRouter = router({
     }));
   }),
 
-  getStatus: publicProcedure.query(async () => {
+  getStatus: protectedProcedure.query(async () => {
     const config = await getActiveProvider();
     if (!config) {
       return {
@@ -376,39 +375,22 @@ const channelConfigRouter = router({
   delete: adminProcedure
     .input(z.object({ channelKey: z.string() }))
     .mutation(async ({ input }) => {
-      if ((CHANNEL_ORDER as readonly string[]).includes(input.channelKey)) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Cannot delete built-in channels",
-        });
-      }
       await deleteChannelConfig(input.channelKey);
       return { success: true };
     }),
 
+  // Every channel is a channel_configs row created in Admin → Channels; there is no
+  // built-in set, so there is nothing to distinguish and nothing undeletable.
   listAllChannels: approvedProcedure.query(async () => {
     const dbConfigs = await getAllChannelConfigs();
-    const staticChannels = CHANNEL_ORDER.map(key => ({
-      key,
-      name: CHANNEL_PROFILES[key].name,
-      niche: CHANNEL_PROFILES[key].niche,
-      profile: CHANNEL_PROFILES[key].profile,
-      isDynamic: false,
-    }));
-    const dynamicChannels = dbConfigs
-      .filter(
-        c =>
-          c.displayName &&
-          !(CHANNEL_ORDER as readonly string[]).includes(c.channelKey)
-      )
+    return dbConfigs
+      .filter(c => c.displayName)
       .map(c => ({
         key: c.channelKey,
         name: c.displayName!,
-        niche: c.nicheSlug ?? "gardening",
+        niche: c.nicheSlug ?? "",
         profile: c.personaProfile ?? "",
-        isDynamic: true,
       }));
-    return [...staticChannels, ...dynamicChannels];
   }),
 });
 

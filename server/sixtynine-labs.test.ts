@@ -6,8 +6,8 @@
  * you can pick the model for host-face cutaways (see longformVideo `buildClipChain`).
  *
  * Gated — it hits the real 69Labs API (costs credits) and needs:
- *   SIXTYNINE_LABS_API_KEY, R2_* creds, and the face image present on disk.
- * Skips cleanly otherwise. Override the image with FACE_IMAGE_PATH.
+ *   SIXTYNINE_LABS_API_KEY, R2_* creds, and FACE_IMAGE_PATH pointing at a face
+ *   image on disk. Skips cleanly when any of those is missing.
  *
  * Run just this: pnpm vitest run server/sixtynine-labs.test.ts
  */
@@ -17,9 +17,7 @@ import { describe, expect, it } from "vitest";
 import { storagePut } from "./storage";
 
 const BASE_URL = "https://69labs.vip";
-const FACE_IMAGE_PATH =
-  process.env.FACE_IMAGE_PATH ||
-  "/home/workspace/Downloads/ChatGPT Image Jun 11, 2026, 11_05_41 AM.png";
+const FACE_IMAGE_PATH = process.env.FACE_IMAGE_PATH || "";
 const PROMPT =
   "A man stands in a sunny backyard vegetable garden, gesturing toward raised " +
   "garden beds as he speaks to the camera, natural daylight, cinematic, handheld.";

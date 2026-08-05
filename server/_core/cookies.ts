@@ -1,13 +1,5 @@
 import type { CookieOptions, Request } from "express";
 
-const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
-
-function isIpAddress(host: string) {
-  // Basic IPv4 check and IPv6 presence detection.
-  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return true;
-  return host.includes(":");
-}
-
 function isSecureRequest(req: Request) {
   if (req.protocol === "https") return true;
 
@@ -24,26 +16,13 @@ function isSecureRequest(req: Request) {
 export function getSessionCookieOptions(
   req: Request
 ): Pick<CookieOptions, "domain" | "httpOnly" | "path" | "sameSite" | "secure"> {
-  // const hostname = req.hostname;
-  // const shouldSetDomain =
-  //   hostname &&
-  //   !LOCAL_HOSTS.has(hostname) &&
-  //   !isIpAddress(hostname) &&
-  //   hostname !== "127.0.0.1" &&
-  //   hostname !== "::1";
-
-  // const domain =
-  //   shouldSetDomain && !hostname.startsWith(".")
-  //     ? `.${hostname}`
-  //     : shouldSetDomain
-  //       ? hostname
-  //       : undefined;
-
-  const secure = isSecureRequest(req);
+  // sameSite is always "lax": the client is served same-origin by this same Express
+  // process, so cross-site sending buys nothing and "none" made every state-changing
+  // tRPC mutation CSRF-able over HTTPS.
   return {
     httpOnly: true,
     path: "/",
-    sameSite: secure ? "none" : "lax",
-    secure,
+    sameSite: "lax",
+    secure: isSecureRequest(req),
   };
 }

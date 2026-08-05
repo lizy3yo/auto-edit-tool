@@ -46,7 +46,7 @@ export interface CTADetectionResult {
 /**
  * Extract the product URL from the channel layer's CTA STRATEGY section.
  * Looks for the `**URL:**` line under `### Product details`.
- * Returns the domain string (e.g., "havengardeningbooks.com") or null.
+ * Returns the domain string (e.g., "example.com") or null.
  */
 export function extractProductUrl(channelLayer: string): string | null {
   const match = channelLayer.match(/\*\*URL:\*\*\s*(.+)/i);

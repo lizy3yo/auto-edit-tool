@@ -20,7 +20,7 @@ describe("renderNameCardPng", () => {
   it("renders a full-frame transparent PNG so the overlay can sit at 0:0", async () => {
     const png = await renderNameCardPng({
       ...FRAME,
-      name: "Steve Calloway",
+      name: "Riley Danvers",
       title: "Gardener",
       location: "Fresno, CA",
     });
@@ -35,7 +35,7 @@ describe("renderNameCardPng", () => {
   it("draws the card bottom-left, clear of the bottom-right QR corner", async () => {
     const png = (await renderNameCardPng({
       ...FRAME,
-      name: "Steve Calloway",
+      name: "Riley Danvers",
       title: "Gardener",
       location: "Fresno, CA",
     })) as Buffer;
@@ -54,7 +54,7 @@ describe("renderNameCardPng", () => {
   it("renders a still-valid card when only some lines are set", async () => {
     const png = await renderNameCardPng({
       ...FRAME,
-      name: "Steve Calloway",
+      name: "Riley Danvers",
       location: "Fresno, CA",
     });
     expect((await sharp(png as Buffer).metadata()).width).toBe(1920);

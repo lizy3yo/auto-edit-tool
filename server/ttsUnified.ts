@@ -118,12 +118,11 @@ export const PAUSE_FLOOR_DB = -60;
 /**
  * Cap over-long dead-air pauses inside a narration mp3.
  *
- * The Wes Kingfisher clone was trained on noise-gated audio: its pauses collapse to ~-85 dBFS
- * with no room tone at all (every other channel's pauses sit at -52..-58 dBFS), so a 0.7s beat
- * reads as the audio dropping out rather than as a breath — which is exactly what was reported
- * on job 153. Keying the threshold on the *absence* of a floor makes this self-targeting: at
- * -60 dB it strips 35-55s of dead air from the Wes masters and is a byte-for-byte no-op on
- * donna/garry/roy/travis.
+ * A voice clone trained on noise-gated audio has pauses that collapse to ~-85 dBFS with no room
+ * tone at all (a normally-trained clone's pauses sit at -52..-58 dBFS), so a 0.7s beat reads as
+ * the audio dropping out rather than as a breath. Keying the threshold on the *absence* of a
+ * floor makes this self-targeting: at -60 dB it strips 35-55s of dead air from a gated master
+ * and is a byte-for-byte no-op on every other voice.
  *
  * `stop_duration` alone keeps the first PAUSE_CAP_SEC of each gap and drops the remainder.
  * Do NOT add `stop_silence` — it makes silenceremove a near no-op on ffmpeg 6.1. This only

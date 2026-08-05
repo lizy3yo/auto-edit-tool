@@ -10,8 +10,8 @@ describe("PAUSE_CAP_FILTER", () => {
   });
 
   it("stays below every channel's room tone so it only fires on dead air", () => {
-    // Measured pause floors: wes −85 dBFS (noise-gated clone, the defect) vs donna −52,
-    // roy −54, garry −58. A threshold above −60 would start eating real room tone.
+    // Measured pause floors: −85 dBFS for the noise-gated clone (the defect) vs −52, −54
+    // and −58 for normal voices. A threshold above −60 would start eating real room tone.
     expect(PAUSE_FLOOR_DB).toBeLessThanOrEqual(-60);
   });
 

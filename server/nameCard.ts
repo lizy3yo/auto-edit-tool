@@ -17,7 +17,7 @@ type Block = {
 };
 
 /**
- * Render the host lower-third ("Steve Calloway" / "Gardener" / "Fresno, CA") as a
+ * Render the host lower-third ("Riley Danvers" / "Gardener" / "Fresno, CA") as a
  * FULL-FRAME transparent PNG with the card baked in at its final bottom-left
  * position. Full-frame keeps the ffmpeg overlay a fixed `0:0` — no position math
  * in the filter graph (see `buildSceneMuxArgs`).

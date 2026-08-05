@@ -24,8 +24,8 @@ export function triggerCreditErrorPopup() {
 
 /**
  * Full-screen popup shown to ALL users when a credit-related error occurs.
- * Message: "API has no more credits. Please notify Shua on Discord."
- * No mention of GenAI.
+ * Message: "API has no more credits. Contact your administrator."
+ * No mention of the provider.
  */
 export function CreditErrorPopup() {
   const [open, setOpen] = useState(false);
@@ -52,7 +52,7 @@ export function CreditErrorPopup() {
             </AlertDialogTitle>
           </div>
           <AlertDialogDescription className="text-base mt-3 leading-relaxed">
-            API has no more credits. Please notify Shua on Discord.
+            API has no more credits. Contact your administrator.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

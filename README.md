@@ -1,8 +1,7 @@
 # Longform Studio
 
 Standalone long-form faceless-video generator: script → AI storyboard → per-scene
-TTS + video clips → host lip-sync → stitched MP4. Extracted from the GardenFlow
-"Long-form Video" page into its own server, database, and repo.
+TTS + video clips → host lip-sync → stitched MP4.
 
 ## Stack
 
@@ -28,7 +27,7 @@ docker compose up -d           # local MySQL on :3306
 cp .env.example .env           # fill in the values (see below)
 pnpm install
 pnpm db:push                   # create the 5 tables
-node scripts/seed.mjs          # seed the 69Labs provider row (+ channels.json if present)
+node scripts/seed.mjs          # seed the 69Labs provider row
 pnpm dev                       # http://localhost:3000
 ```
 
@@ -38,16 +37,9 @@ Log in with `ADMIN_EMAIL` / `ADMIN_PASSWORD`, then in **Admin**:
    per-tab APIMART keys (slots 0–4), and the per-tab HeyGen keys. These are
    AES-encrypted and stored in the database — they are never env vars.
 2. **Channels** — create channels (persona, voice ID, host photos, CTA QR, book
-   cover) or import them from the old database (below).
+   cover). There is no built-in set; every channel is a row you create here.
 3. **Longform Instruction** — the global directing prompt (a default ships in
    code).
-
-### Importing channels from the old (gardenflow) database
-
-```bash
-OLD_DATABASE_URL="mysql://..." node scripts/export-channels.mjs   # → scripts/channels.json
-node scripts/seed.mjs                                             # upserts them into the new DB
-```
 
 ### Env vars
 
@@ -73,14 +65,13 @@ Provider keys for 69Labs/APIMART/HeyGen live in the DB via the Admin UI.
   renders after a restart (provider results stay downloadable ~24 h).
 - **`JWT_SECRET` does double duty.** It signs the session cookie AND derives the
   AES key for the provider keys stored in `app_settings`/`provider_configs`.
-  Rotating it invalidates every stored key — you must re-enter them in Admin.
-  (To import encrypted keys from the old DB, the new app must use the old
-  `JWT_SECRET`; otherwise just re-enter keys.)
+  It is required — the app throws rather than encrypting under a default.
+  Rotating it invalidates every stored key; you must re-enter them in Admin →
+  Provider Keys.
 - **Music beds** are served from YOUR R2 (`R2_PUBLIC_URL` +
-  `music/beds/<channel>/`). Run `node scripts/migrate-music-beds.mjs` once to
-  copy the 21 bed mp3s from the old gardenflow CDN into your bucket. Until
-  `R2_PUBLIC_URL` is set (and the files copied), films render narration-only
-  with a warn — no external CDN is contacted at runtime.
+  `music/beds/<set>/`, see `server/musicBeds.ts` for the expected object keys).
+  Until `R2_PUBLIC_URL` is set and the mp3s are uploaded, films render
+  narration-only with a warn — no external CDN is contacted at runtime.
 - **whisperx**: deploy `kodxana/whisperx-worker_v2` as a RunPod serverless
   endpoint and set `RUNPOD_WHISPERX_ENDPOINT` — there is no default.
 - **`PUBLIC_BASE_URL`** blank (local dev) means HeyGen host scenes rely on pure
