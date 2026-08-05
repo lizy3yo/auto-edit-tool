@@ -76,9 +76,11 @@ Provider keys for 69Labs/APIMART/HeyGen live in the DB via the Admin UI.
   Rotating it invalidates every stored key — you must re-enter them in Admin.
   (To import encrypted keys from the old DB, the new app must use the old
   `JWT_SECRET`; otherwise just re-enter keys.)
-- **Music beds** are hardcoded CDN URLs on `cdn.gardenflows.com`
-  (`server/musicBeds.ts`). They work as long as that CDN is up; to be fully
-  independent, upload the bed files to your own R2 and edit the URL map.
+- **Music beds** are served from YOUR R2 (`R2_PUBLIC_URL` +
+  `music/beds/<channel>/`). Run `node scripts/migrate-music-beds.mjs` once to
+  copy the 21 bed mp3s from the old gardenflow CDN into your bucket. Until
+  `R2_PUBLIC_URL` is set (and the files copied), films render narration-only
+  with a warn — no external CDN is contacted at runtime.
 - **whisperx**: deploy `kodxana/whisperx-worker_v2` as a RunPod serverless
   endpoint and set `RUNPOD_WHISPERX_ENDPOINT` — there is no default.
 - **`PUBLIC_BASE_URL`** blank (local dev) means HeyGen host scenes rely on pure

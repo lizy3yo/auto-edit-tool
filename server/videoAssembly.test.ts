@@ -24,9 +24,13 @@ import {
 } from "./videoAssembly";
 import {
   pickMusicBeds,
+  musicBedUrl,
   CHANNEL_MUSIC_BEDS,
   DEFAULT_MUSIC_CHANNEL,
 } from "./musicBeds";
+
+// pickMusicBeds resolves URLs lazily off R2_PUBLIC_URL and returns [] without it.
+process.env.R2_PUBLIC_URL ??= "https://r2.test";
 
 describe("isTransientFfmpegError", () => {
   it("matches host-saturation blips, including spawn EAGAIN", () => {
@@ -1041,7 +1045,9 @@ describe("planMusicSchedule (music/silence pattern under the narration)", () => 
     expect(beds).toHaveLength(blocks.length);
     // With one bed per channel every block IS the same track — variety comes entirely from the
     // per-reuse offset, which the buildMusicBedMixArgs tests below cover.
-    expect(new Set(beds)).toEqual(new Set(CHANNEL_MUSIC_BEDS.garrys_lawn));
+    expect(new Set(beds)).toEqual(
+      new Set(CHANNEL_MUSIC_BEDS.garrys_lawn.map(musicBedUrl))
+    );
   });
 });
 
@@ -1064,7 +1070,8 @@ describe("pickMusicBeds", () => {
   it("draws only from the requested channel's set", () => {
     for (const c of CHANNELS) {
       const beds = pickMusicBeds(5, "job-a", c);
-      expect(beds.every(u => CHANNEL_MUSIC_BEDS[c].includes(u))).toBe(true);
+      const urls = CHANNEL_MUSIC_BEDS[c].map(musicBedUrl);
+      expect(beds.every(u => urls.includes(u))).toBe(true);
     }
     // Different personas, different music — that is the whole point of the split.
     expect(pickMusicBeds(5, "job-a", "garrys_lawn")).not.toEqual(
@@ -1081,10 +1088,24 @@ describe("pickMusicBeds", () => {
   });
 
   it("wraps when more blocks than beds are requested", () => {
-    const pool = CHANNEL_MUSIC_BEDS.garrys_lawn;
+    const pool = CHANNEL_MUSIC_BEDS.garrys_lawn.map(musicBedUrl);
     const beds = pickMusicBeds(pool.length + 3, "job-a", "garrys_lawn");
     expect(beds).toHaveLength(pool.length + 3);
     expect(beds.every(u => pool.includes(u))).toBe(true);
+  });
+
+  it("builds URLs from R2_PUBLIC_URL and degrades to [] without it", () => {
+    const saved = process.env.R2_PUBLIC_URL;
+    try {
+      process.env.R2_PUBLIC_URL = "https://media.example.com/";
+      expect(pickMusicBeds(1, "job-a", "garrys_lawn")[0]).toMatch(
+        /^https:\/\/media\.example\.com\/music\/beds\/garrys_lawn\/bed-0[12]\.mp3$/
+      );
+      delete process.env.R2_PUBLIC_URL;
+      expect(pickMusicBeds(5, "job-a", "garrys_lawn")).toEqual([]);
+    } finally {
+      process.env.R2_PUBLIC_URL = saved;
+    }
   });
 });
 

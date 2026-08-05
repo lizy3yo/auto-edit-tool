@@ -2,10 +2,10 @@ import { createHash } from "crypto";
 
 /**
  * Background-music bed library for longform films, one set PER CHANNEL: each channel's beds are
- * generated to match that persona's voice and niche (`scripts/gen-music-beds-suno.ts` holds the
- * per-channel prompts) and uploaded to R2 under `music/beds/<channel>/`
- * (`scripts/upload-music-beds.ts` with BEDS_PREFIX). Assembly lays these under the master
- * narration at MUSIC_BED_DUCK_DB on the `planMusicSchedule` music/silence pattern.
+ * generated to match that persona's voice and niche and stored in THIS app's R2 bucket under
+ * `music/beds/<channel>/` (run `node scripts/migrate-music-beds.mjs` once to copy them in).
+ * Assembly lays these under the master narration at MUSIC_BED_DUCK_DB on the
+ * `planMusicSchedule` music/silence pattern.
  *
  * Common to every set, and driven by the mix rather than taste: instrumental, no
  * drums/percussion/bass (transients raise LRA and fight the static loudnorm duck — there is no
@@ -22,77 +22,70 @@ import { createHash } from "crypto";
  * Every bed clears the 120s music block, so each block is one continuous take with no in-block
  * looping. Adding another bed per channel is a one-line array push.
  *
- * ponytail: a static map, not an R2 listing or a DB table. Ten URLs change about never, and a
- * manifest fetch would be one more thing that can fail inside assembly.
- *
- * ponytail: per-channel subfolders, not a shared flat number range. cdn.gardenflows.com is
- * Cloudflare-cached for 4h and storagePut sets no CacheControl, so a new set must land on fresh
- * keys — overwriting would serve stale audio per-PoP for hours, and each block downloads
- * separately, so one film could mix old and new beds. The retired flat sets still sit at
- * bed-01…20, bed-101…122 and bed-201…220.
+ * ponytail: a static map of R2 object keys, not an R2 listing or a DB table. Ten keys change
+ * about never, and a manifest fetch would be one more thing that can fail inside assembly.
+ * URLs are resolved lazily from R2_PUBLIC_URL so the env can load after this module does.
  *
  * Keys are the `channelKey` values on the ten production `channel_configs` rows that carry a
- * personaProfile. The nine legacy `CHANNEL_ORDER` channels get no set of their own and fall back
- * — they are all gardening/lawncare, so the default fits them, and the one warn line per job is
- * the right signal if they ever come back.
+ * personaProfile. Legacy channels get no set of their own and fall back — the one warn line per
+ * job is the right signal if they ever come back.
  */
 export const CHANNEL_MUSIC_BEDS: Record<string, string[]> = {
   // Garry Strickland — Midwest lawncare, trusted-neighbor tone. Fingerpicked steel-string.
   garrys_lawn: [
-    "https://cdn.gardenflows.com/music/beds/garrys_lawn/bed-01.mp3",
-    "https://cdn.gardenflows.com/music/beds/garrys_lawn/bed-02.mp3",
+    "music/beds/garrys_lawn/bed-01.mp3",
+    "music/beds/garrys_lawn/bed-02.mp3",
   ],
   // Pete Walker — lawncare "secrets". Curious question-and-answer figure; never suspenseful.
   petes_lawn_secrets: [
-    "https://cdn.gardenflows.com/music/beds/petes_lawn_secrets/bed-01.mp3",
-    "https://cdn.gardenflows.com/music/beds/petes_lawn_secrets/bed-02.mp3",
+    "music/beds/petes_lawn_secrets/bed-01.mp3",
+    "music/beds/petes_lawn_secrets/bed-02.mp3",
   ],
   // David Wright — retired lawncare pro. Warm guitar with mandolin above it.
   david_wright: [
-    "https://cdn.gardenflows.com/music/beds/david_wright/bed-01.mp3",
-    "https://cdn.gardenflows.com/music/beds/david_wright/bed-02.mp3",
+    "music/beds/david_wright/bed-01.mp3",
+    "music/beds/david_wright/bed-02.mp3",
   ],
   // David Yoder — Old Order Amish (Lancaster). Guitar + hammered dulcimer, nothing sacred.
   david_yoder: [
-    "https://cdn.gardenflows.com/music/beds/david_yoder/bed-01.mp3",
-    "https://cdn.gardenflows.com/music/beds/david_yoder/bed-02.mp3",
+    "music/beds/david_yoder/bed-01.mp3",
+    "music/beds/david_yoder/bed-02.mp3",
   ],
   // Elias Miller — Old Order Amish (Holmes). Autoharp instead of dulcimer, so the two Amish
   // channels never sound like the same cue.
   elias_miller: [
-    "https://cdn.gardenflows.com/music/beds/elias_miller/bed-01.mp3",
-    "https://cdn.gardenflows.com/music/beds/elias_miller/bed-02.mp3",
+    "music/beds/elias_miller/bed-01.mp3",
+    "music/beds/elias_miller/bed-02.mp3",
   ],
   // Roy Mullins — eastern Kentucky homestead. Mountain idiom in a MAJOR key: modal reads
   // mournful, and the persona is contented.
   roy_mullins: [
-    "https://cdn.gardenflows.com/music/beds/roy_mullins/bed-01.mp3",
-    "https://cdn.gardenflows.com/music/beds/roy_mullins/bed-02.mp3",
+    "music/beds/roy_mullins/bed-01.mp3",
+    "music/beds/roy_mullins/bed-02.mp3",
   ],
   // Travis "Tiny" Kolbe — Texas pitmaster. Western-swing lilt with pedal steel, no kit.
   travis_tiny_kolbe: [
-    "https://cdn.gardenflows.com/music/beds/travis_tiny_kolbe/bed-01.mp3",
-    "https://cdn.gardenflows.com/music/beds/travis_tiny_kolbe/bed-02.mp3",
+    "music/beds/travis_tiny_kolbe/bed-01.mp3",
+    "music/beds/travis_tiny_kolbe/bed-02.mp3",
   ],
   // Wes Kingfisher — Cherokee plant medicine and woodcraft. Sustained guitar + wooden flute;
   // no tom-toms, no vocables, no Hollywood-Indian pastiche — his profile rejects it outright.
   wes_kingfisher: [
-    "https://cdn.gardenflows.com/music/beds/wes_kingfisher/bed-01.mp3",
-    "https://cdn.gardenflows.com/music/beds/wes_kingfisher/bed-02.mp3",
+    "music/beds/wes_kingfisher/bed-01.mp3",
+    "music/beds/wes_kingfisher/bed-02.mp3",
   ],
   // Debra Wilson — flowers. The brightest of the ten; lift comes from register, since the
   // bells/celeste that would be the obvious choice are transients.
   debra_wilson: [
-    "https://cdn.gardenflows.com/music/beds/debra_wilson/bed-01.mp3",
-    "https://cdn.gardenflows.com/music/beds/debra_wilson/bed-02.mp3",
+    "music/beds/debra_wilson/bed-01.mp3",
+    "music/beds/debra_wilson/bed-02.mp3",
   ],
   // Donna Larsen — Northwoods hunting and fishing. Two guitars trading a walking pattern:
   // upbeat here means companionable, not jaunty, under a pre-dawn deer-stand story.
-  // bed-02, not -01: the first take ("sparse and wide over sustained strings") came back
-  // depressing, and the replacement needs a fresh key because bed-01 is already CDN-cached.
+  // bed-02/-03, not -01: the first take came back depressing and was retired.
   donna_larsen: [
-    "https://cdn.gardenflows.com/music/beds/donna_larsen/bed-02.mp3",
-    "https://cdn.gardenflows.com/music/beds/donna_larsen/bed-03.mp3",
+    "music/beds/donna_larsen/bed-02.mp3",
+    "music/beds/donna_larsen/bed-03.mp3",
   ],
 };
 
@@ -103,6 +96,12 @@ export const CHANNEL_MUSIC_BEDS: Record<string, string[]> = {
  */
 export const DEFAULT_MUSIC_CHANNEL = "garrys_lawn";
 
+/** Full public URL for a bed's R2 object key. Read lazily so dotenv can load after import. */
+export function musicBedUrl(key: string): string {
+  const base = (process.env.R2_PUBLIC_URL ?? "").replace(/\/+$/, "");
+  return `${base}/${key}`;
+}
+
 /**
  * `count` bed URLs for one job, drawn from `channelKey`'s set and shuffled deterministically
  * from `seed` (the job id): the pick feels random across jobs, but a retried assembly rebuilds
@@ -110,13 +109,21 @@ export const DEFAULT_MUSIC_CHANNEL = "garrys_lawn";
  * shuffle only when a film needs more blocks than the channel has beds. Pure — unit-tested.
  *
  * An unknown channel falls back to the default set rather than throwing: losing a film's whole
- * soundtrack over a missing config row is out of proportion to the problem.
+ * soundtrack over a missing config row is out of proportion to the problem. No R2_PUBLIC_URL at
+ * all → [] with a warn, and assembly degrades to narration-only.
  */
 export function pickMusicBeds(
   count: number,
   seed: string,
   channelKey?: string
 ): string[] {
+  if (!process.env.R2_PUBLIC_URL) {
+    console.warn(
+      "[music] R2_PUBLIC_URL is not set — skipping music beds (narration only). " +
+        "Set it and run scripts/migrate-music-beds.mjs to enable them."
+    );
+    return [];
+  }
   let beds = channelKey ? CHANNEL_MUSIC_BEDS[channelKey] : undefined;
   if (!beds?.length) {
     if (channelKey && channelKey !== DEFAULT_MUSIC_CHANNEL)
@@ -133,7 +140,7 @@ export function pickMusicBeds(
     const shuffled = seededShuffle(beds, `${seed}:${round}`);
     out.push(...shuffled.slice(0, count - out.length));
   }
-  return out;
+  return out.map(musicBedUrl);
 }
 
 /** Fisher-Yates driven by a sha256 keystream over `seed` — same seed, same order. */
