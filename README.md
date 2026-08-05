@@ -37,7 +37,8 @@ Log in with `ADMIN_EMAIL` / `ADMIN_PASSWORD`, then in **Admin**:
    per-tab APIMART keys (slots 0–4), and the per-tab HeyGen keys. These are
    AES-encrypted and stored in the database — they are never env vars.
 2. **Channels** — create channels (persona, voice ID, host photos, CTA QR, book
-   cover). There is no built-in set; every channel is a row you create here.
+   cover). There is no built-in set; every channel is a row you create here. See
+   [Your first render](#your-first-render) for which fields are required.
 3. **Longform Instruction** — the global directing prompt (a default ships in
    code).
 
@@ -48,6 +49,74 @@ See `.env.example` for the full annotated list. Env keys: `DATABASE_URL`,
 `GEMINI_API_KEY`, `OPENAI_API_KEY`, `R2_*`, `RUN_POD_KEY` +
 `RUNPOD_WHISPERX_ENDPOINT`, `HEYGEN_API_KEY` (fallback), `PUBLIC_BASE_URL`.
 Provider keys for 69Labs/APIMART/HeyGen live in the DB via the Admin UI.
+
+## Your first render
+
+Setup above gets the app running. These three things get a film out of it.
+
+### 1. Channel fields that block a render
+
+In **Admin → Channels**, not every field is optional:
+
+- **Voice ID** — **required.** Generation is rejected with "No voice configured for
+  this channel" without it. It is a 69Labs/ElevenLabs voice ID.
+- **Host photo** — the identity-lock start frame for talking-host scenes and the
+  image HeyGen lip-syncs. It is rehosted onto your R2 up front and treated as a
+  required reference, so a broken URL fails the job rather than degrading. The
+  second host photo is an optional alternate camera angle; if it fails, the job
+  quietly goes single-angle.
+- **Book cover / CTA QR** — optional, but setting either one makes the CTA markers
+  below **mandatory**. A failed QR rehost is non-fatal; a failed cover is not.
+- **Host name / title / location** — the on-screen lower third. All three blank ⇒
+  no card is drawn.
+
+### 2. Script format — the CTA markers
+
+The script you paste is voiced **verbatim** as one continuous master narration, and
+its duration sets the length of the film. The only markup is a pair of marker lines
+fencing each call-to-action block:
+
+```
+Most people plant these far too late in the season.
+
+===START CTA===
+The rest is in the guide — scan the code on screen.
+===END CTA===
+
+Back to the beds themselves.
+```
+
+Each marker sits alone on its own line (surrounding spaces/tabs are tolerated,
+nothing else is). They are stripped before voicing, so they are never spoken — they
+tell the pipeline where the QR overlay and the book-cover reveal go.
+
+- Required as soon as the channel has a book cover or QR configured; submitting
+  without them is rejected.
+- The script template emits two blocks (mid-roll + close). One works, but logs a
+  warning.
+- Malformed pairing — unclosed, nested, or a stray `===END CTA===` — is always
+  rejected, cover/QR configured or not.
+
+### 3. Music beds (optional)
+
+Music is served from **your own** R2 bucket; no external CDN is contacted at
+runtime. Per channel, upload two mp3s:
+
+```
+music/beds/<channelKey>/bed-01.mp3
+music/beds/<channelKey>/bed-02.mp3
+```
+
+`<channelKey>` must match the channel's key exactly, and the set must then be added
+to `CHANNEL_MUSIC_BEDS` in `server/musicBeds.ts` — the map is static, nothing lists
+the bucket at runtime. Each bed should run **longer than ~170 s**: assembly offsets
+every reuse by up to `length − 120 s`, so a shorter bed restarts from the same place
+each time it comes back. The mix constraints that actually matter (instrumental, no
+percussion, major key, flat dynamics) are documented at the top of that file.
+
+The ten sets already in the map are prefixes for a bucket you don't have. Until you
+add your own, each job logs one warning and the film ships narration-only — a
+warning, not a failure.
 
 ## Commands
 
@@ -69,9 +138,9 @@ Provider keys for 69Labs/APIMART/HeyGen live in the DB via the Admin UI.
   Rotating it invalidates every stored key; you must re-enter them in Admin →
   Provider Keys.
 - **Music beds** are served from YOUR R2 (`R2_PUBLIC_URL` +
-  `music/beds/<set>/`, see `server/musicBeds.ts` for the expected object keys).
-  Until `R2_PUBLIC_URL` is set and the mp3s are uploaded, films render
-  narration-only with a warn — no external CDN is contacted at runtime.
+  `music/beds/<channelKey>/`) — see [Music beds](#3-music-beds-optional). Until
+  `R2_PUBLIC_URL` is set and the mp3s are uploaded, films render narration-only
+  with a warn. No external CDN is contacted at runtime.
 - **whisperx**: deploy `kodxana/whisperx-worker_v2` as a RunPod serverless
   endpoint and set `RUNPOD_WHISPERX_ENDPOINT` — there is no default.
 - **`PUBLIC_BASE_URL`** blank (local dev) means HeyGen host scenes rely on pure

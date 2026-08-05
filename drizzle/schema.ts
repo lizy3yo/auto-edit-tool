@@ -101,7 +101,7 @@ export type InsertLongformVideoJob = typeof longformVideoJobs.$inferInsert;
  */
 export const channelConfigs = mysqlTable("channel_configs", {
   id: int("id").autoincrement().primaryKey(),
-  /** Channel key matching CHANNEL_PROFILES (e.g., "haven", "homesteadHank") */
+  /** Channel key — the row's stable id, also the music-bed set prefix (server/musicBeds.ts) */
   channelKey: varchar("channelKey", { length: 64 }).notNull().unique(),
   /** ElevenLabs voice ID for TTS */
   voiceId: varchar("voiceId", { length: 128 }),
@@ -133,11 +133,11 @@ export const channelConfigs = mysqlTable("channel_configs", {
   youtubeUrl: varchar("youtubeUrl", { length: 512 }),
   /** YouTube channel ID (inert) */
   youtubeChannelId: varchar("youtubeChannelId", { length: 128 }),
-  /** Display name for dynamically created channels (null for static/constants-defined channels) */
+  /** Display name shown in the channel picker */
   displayName: varchar("displayName", { length: 255 }),
-  /** Persona profile text for dynamically created channels (drives script generation tone) */
+  /** Persona profile text (drives script generation tone) */
   personaProfile: text("personaProfile"),
-  /** Niche slug for dynamically created channels (e.g., "gardening", "lawncare") */
+  /** Niche slug (e.g., "gardening", "lawncare") */
   nicheSlug: varchar("nicheSlug", { length: 64 }),
   /** Author / pen name */
   authorName: varchar("author_name", { length: 255 }),

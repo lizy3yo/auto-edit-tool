@@ -114,7 +114,7 @@ export function pickMusicBeds(
   if (!process.env.R2_PUBLIC_URL) {
     console.warn(
       "[music] R2_PUBLIC_URL is not set — skipping music beds (narration only). " +
-        "Set it and run scripts/migrate-music-beds.mjs to enable them."
+        "Set it and upload beds to music/beds/<channelKey>/ to enable them."
     );
     return [];
   }

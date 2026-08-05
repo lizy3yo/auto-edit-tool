@@ -1,6 +1,8 @@
 // Seed the longform-studio database:
 //  1. One provider_configs row for 69Labs (isActive=1; key entered later via Admin UI)
-//  2. Channels from scripts/channels.json if present (produced by export-channels.mjs)
+//  2. Channels from scripts/channels.json if present — an optional hand-written
+//     JSON array of channel_configs rows, for bulk-creating what Admin → Channels
+//     creates one at a time. Absent is the normal case.
 //
 // Usage: node scripts/seed.mjs   (reads DATABASE_URL from .env or the environment)
 import "dotenv/config";
