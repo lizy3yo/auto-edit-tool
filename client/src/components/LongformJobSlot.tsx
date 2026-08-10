@@ -48,6 +48,7 @@ import {
   Search,
   Pencil,
   ChevronRight,
+  Trash2,
 } from "lucide-react";
 
 export type SlotStatus = "idle" | "processing" | "completed" | "failed";
@@ -158,6 +159,8 @@ export default function LongformJobSlot({
   const [script, setScript] = useState(defaultScript);
   const [channelKey, setChannelKey] = useState<string>("");
   const [showConfirm, setShowConfirm] = useState(false);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [dismissedJobId, setDismissedJobId] = useState<number | null>(null);
   const [jobId, setJobId] = useState<number | null>(
     () => loadJobId(storageKey) ?? initialJobId ?? null
   );
@@ -196,11 +199,11 @@ export default function LongformJobSlot({
 
   // Adopt a parent-provided id (resume reconciliation) if we don't have one yet.
   useEffect(() => {
-    if (jobId === null && initialJobId != null) {
+    if (jobId === null && initialJobId != null && initialJobId !== dismissedJobId) {
       setJobId(initialJobId);
       saveJobId(storageKey, initialJobId);
     }
-  }, [initialJobId, jobId, storageKey]);
+  }, [initialJobId, jobId, storageKey, dismissedJobId]);
 
   const { data: channelDefaults } = trpc.shuttle.channelDefaults.useQuery(
     { channelKey },
@@ -211,6 +214,7 @@ export default function LongformJobSlot({
 
   const generateMutation = trpc.longformVideo.generate.useMutation({
     onSuccess: ({ jobId: id }) => {
+      setDismissedJobId(null);
       setJobId(id);
       saveJobId(storageKey, id);
       toast.success(`Video ${slotIndex + 1} started`);
@@ -309,10 +313,22 @@ export default function LongformJobSlot({
     onError: err => toast.error(err.message),
   });
 
-  const { data: job } = trpc.longformVideo.pollJob.useQuery(
+  const confirmClearOutput = () => {
+    setShowClearConfirm(false);
+    if (jobId !== null) {
+      setDismissedJobId(jobId);
+    }
+    setJobId(null);
+    saveJobId(storageKey, null);
+    saveTitle(storageKey, "");
+    setDownloadTitle("");
+    toast.success(`Video ${slotIndex + 1} output cleared`);
+  };
+
+  const { data: rawJob } = trpc.longformVideo.pollJob.useQuery(
     { jobId: jobId ?? 0 },
     {
-      enabled: jobId !== null,
+      enabled: jobId !== null && jobId !== dismissedJobId,
       refetchIntervalInBackground: true, // keep polling while the tab is hidden
       // Poll while running or while scenes are queued for regeneration; stop
       // once finished (refresh restores it via the persisted id, but a done
@@ -323,6 +339,8 @@ export default function LongformJobSlot({
           : false,
     }
   );
+
+  const job = jobId !== null && jobId !== dismissedJobId ? rawJob : null;
 
   const isProcessing = job?.status === "processing";
 
@@ -731,7 +749,7 @@ export default function LongformJobSlot({
                   </div>
                 )}
               </div>
-              {isProcessing && (
+              {isProcessing ? (
                 <Button
                   variant="ghost"
                   size="sm"
@@ -741,6 +759,17 @@ export default function LongformJobSlot({
                 >
                   <X className="mr-2 h-4 w-4" />
                   Cancel
+                </Button>
+              ) : (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowClearConfirm(true)}
+                  className="text-muted-foreground hover:text-red-400"
+                  title="Clear output and error log from this slot"
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Clear Output
                 </Button>
               )}
             </div>
@@ -1360,6 +1389,27 @@ export default function LongformJobSlot({
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={confirmGenerate}>
               Generate
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Clear Output Confirmation Modal */}
+      <AlertDialog open={showClearConfirm} onOpenChange={setShowClearConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Clear Video Output?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will clear the current video output, error messages, and storyboard from Video {slotIndex + 1} so you can start a new video run cleanly.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep Output</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmClearOutput}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Clear Output
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
