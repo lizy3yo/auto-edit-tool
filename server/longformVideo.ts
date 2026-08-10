@@ -32,6 +32,11 @@ import {
   truncateWords,
 } from "./visualDirection";
 import { getChannelLayer } from "./composer";
+import {
+  isMockMode,
+  mockVoiceoverUrl,
+  MockProviderAdapter,
+} from "./mockMode";
 import { getBookNameTokens } from "./ctaDetector";
 import {
   createUnifiedTTSTask,
@@ -51,7 +56,7 @@ import {
 import { decrypt, encrypt, maskApiKey } from "./encryption";
 import { createProviderAdapter, type ProviderAdapter } from "./providers";
 import { ApimartAdapter } from "./providers/apimart";
-import { generateOpenAIStill } from "./providers/openai-image";
+import { generateStillWithFallback } from "./providers/fallback";
 import {
   withFaceLockPrompt,
   SIXTYNINE_VIDEO_SLOTS,
@@ -523,9 +528,25 @@ export const setHeygenSlotKey = (slot: number, apiKey: string): Promise<void> =>
  * Resolved from `params.apimartSlot` at render time so a key rotation and job resumes both pick
  * up the current key.
  */
+/**
+ * The video/image provider adapter for a render, or a local stand-in when mock mode is on.
+ * Every `createProviderAdapter` call in the pipeline goes through here so mock mode cannot be
+ * half-applied — one lane still hitting a real provider would spend credits on a "free" run.
+ */
+async function providerAdapterForJob(
+  videoType: ProviderType,
+  videoKey: string
+): Promise<ProviderAdapter> {
+  if (await isMockMode()) return new MockProviderAdapter();
+  return createProviderAdapter(videoType, videoKey);
+}
+
 async function apimartAdapterForJob(
   params: LongformInputParams
 ): Promise<ApimartAdapter | null> {
+  // Mock mode: b-roll renders locally, so a tab with no APIMART key (or an invalid one) still
+  // produces a full film. Checked before the slot guard — mock must not depend on config.
+  if (await isMockMode()) return new MockProviderAdapter() as any;
   if (params.apimartSlot == null) return null;
   const key = await getApimartSlotKey(params.apimartSlot);
   return key ? new ApimartAdapter(key) : null; // no key ⇒ b-roll fails loud
@@ -2496,6 +2517,25 @@ export async function resolveVideoProvider(
 export async function resolveLipsyncAdapter(
   params: LongformInputParams
 ): Promise<LipsyncLane | null> {
+  // Mock mode: host scenes render as a local clip built from the host photo, so a full film
+  // (host + b-roll + CTA) completes with no HeyGen credit and no HeyGen key. Returning a lane
+  // rather than null matters — null makes `generateSceneClips` fail every host scene.
+  if (await isMockMode()) {
+    const mock = new MockProviderAdapter();
+    return {
+      provider: "heygen",
+      submit: ({ scene }) =>
+        mock.submitVideo({
+          prompt: `mock host scene ${scene.index}`,
+          duration: Math.max(1, Math.round(scene.audioDuration ?? 6)),
+        } as any),
+      poll: id => mock.pollVideo(id),
+      slots: heygenSlotsFor("mock"),
+      concurrency: ENV.heygenConcurrency,
+      sceneDeadlineMs: SCENE_DEADLINE_HOST_MS,
+    };
+  }
+
   // Per-tab HeyGen account, shared HEYGEN_API_KEY as the fallback. Read at render time so a key
   // rotation AND a job resume both pick up the current key — same contract as
   // `apimartAdapterForJob`. The `!= null` guard keeps the settings read off the path for a job
@@ -2593,6 +2633,11 @@ async function generateSceneVoiceover(
   // Preserved across attempts: a timeout leaves the task running on the provider, so the next
   // attempt resumes polling the same job instead of re-creating it (which 69Labs rejects with
   // 409 DUPLICATE_TTS_IN_PROGRESS). Cleared on a genuine `failed` status so we create fresh.
+  // Mock mode: a locally synthesised mp3 sized to the word count, uploaded to R2 exactly like
+  // a real one. Placed here (not inside ttsUnified) so the retry/resume loop below — which only
+  // exists to survive provider flakiness — is skipped entirely.
+  if (await isMockMode()) return mockVoiceoverUrl(text);
+
   let taskId: string | undefined;
   for (let attempt = 0; attempt < TTS_MAX_ATTEMPTS; attempt++) {
     try {
@@ -5010,7 +5055,7 @@ export async function generateSceneStillClip(
       scene,
       4,
       referenceImageUrl,
-      generateOpenAIStill,
+      generateStillWithFallback,
       subject,
       undefined,
       square
@@ -5104,7 +5149,7 @@ export async function generateBrollKeyframe(
     scene,
     4,
     referenceImageUrl,
-    generateOpenAIStill,
+    generateStillWithFallback,
     subject,
     visualOverride
   );
@@ -7272,8 +7317,49 @@ export async function enhanceBrollPrompts(
 
   return {
     failedScenes: Array.from(new Set(failedScenes)).sort((a, b) => a - b),
-    failReasons: failReasons.slice(0, 3),
+    // Summarised AND de-duplicated: every scene in a batch fails on the same provider error,
+    // and these strings are raw provider bodies. Un-summarised, one quota outage pasted three
+    // ~900-character JSON blobs into a user-facing job warning.
+    failReasons: Array.from(new Set(failReasons.map(summarizeProviderError))).slice(
+      0,
+      3
+    ),
   };
+}
+
+/**
+ * Collapse a raw provider error body into one human phrase for a job warning.
+ *
+ * Provider SDKs put a whole JSON document in `error.message`. Job warnings are rendered
+ * verbatim in the UI, so passing these through turned a single Gemini quota outage into a
+ * screen-filling wall of repeated JSON that buried the two warnings above it. Unrecognised
+ * errors are truncated rather than dropped — a warning nobody can read is worth no more than
+ * no warning, but an unknown error still needs its first line surfaced. Pure — unit-tested.
+ */
+export function summarizeProviderError(raw: string): string {
+  const s = (raw ?? "").trim();
+  if (!s) return "unknown error";
+  if (/"?quotaId"?\s*:\s*"[^"]*PerDay/i.test(s) || /free_tier_requests/i.test(s)) {
+    const model = s.match(/"model"\s*:\s*"([^"]+)"/)?.[1];
+    const limit = s.match(/limit:\s*(\d+)/)?.[1];
+    return (
+      `Gemini free-tier daily quota exhausted` +
+      (model ? ` for ${model}` : "") +
+      (limit ? ` (${limit}/day)` : "") +
+      " — enable billing or wait for the daily reset"
+    );
+  }
+  // Order matters: OpenAI reports a depleted balance AS a 429, so the specific "no credits"
+  // case must be tested before the generic rate-limit branch — otherwise a billing problem
+  // (permanent, needs a top-up) is mislabelled as a rate limit (transient, resolves itself).
+  if (/no credits remaining|insufficient[_ ]quota|billing/i.test(s))
+    return "provider account has no credits remaining — add credits";
+  if (/RESOURCE_EXHAUSTED|\b429\b/.test(s)) return "provider rate limit (429)";
+  if (/\b401\b|invalid api key|unauthorized/i.test(s))
+    return "provider rejected the API key (401)";
+  // Unknown shape: first line only, hard-capped.
+  const firstLine = s.split("\n")[0];
+  return firstLine.length > 160 ? `${firstLine.slice(0, 157)}…` : firstLine;
 }
 
 /** One warning string for all three enhance call sites, with the reason when we have one. */
@@ -7404,10 +7490,19 @@ async function runUnifiedPipeline(
   // Word timings (for scene assignment) and real pauses (to snap cuts into silence) are both
   // read off the same mono copy, in parallel. The 0.04s scan is the snap's fallback tier: real
   // inter-word gaps can be as short as ~85ms, invisible to the 0.12s pause scan.
+  // Mock mode: whisperx is a paid RunPod GPU call, and a synthesised tone has no words to
+  // align anyway — a "free" render must not spend on it, and word alignment over non-speech
+  // would only produce noise. Skip straight to the proportional-split path.
+  const mock = await isMockMode();
   let [transcript, silences, shortSilences] = await Promise.all([
-    transcribeWordsFromBuffer(monoAudio),
-    detectSilencesFromBuffer(monoAudio),
-    detectSilencesFromBuffer(monoAudio, 0.04),
+    mock
+      ? Promise.resolve({
+          error: "mock mode — transcription skipped",
+          code: "SERVICE_ERROR" as const,
+        })
+      : transcribeWordsFromBuffer(monoAudio),
+    mock ? Promise.resolve([]) : detectSilencesFromBuffer(monoAudio),
+    mock ? Promise.resolve([]) : detectSilencesFromBuffer(monoAudio, 0.04),
   ]);
   if ("error" in transcript) {
     // One retry before the proportional fallback: proportional slicing loses CTA/QR keyword
@@ -7907,7 +8002,7 @@ export async function runLongformPipeline(jobId: number): Promise<void> {
     if (!provider) throw new Error("No active provider configured");
     const { providerType: videoType, apiKey: videoKey } =
       await resolveVideoProvider(provider);
-    const adapter = createProviderAdapter(videoType as ProviderType, videoKey);
+    const adapter = await providerAdapterForJob(videoType as ProviderType, videoKey);
     const { providerType: ttsType, apiKey: ttsKey } =
       await resolveTTSProvider(provider);
 
@@ -8238,7 +8333,7 @@ async function resumePendingRendersLocked(jobId: number): Promise<boolean> {
   if (!provider) return false;
   const { providerType: videoType, apiKey: videoKey } =
     await resolveVideoProvider(provider);
-  const adapter = createProviderAdapter(videoType as ProviderType, videoKey);
+  const adapter = await providerAdapterForJob(videoType as ProviderType, videoKey);
   const lipsync = params.faceImageUrl
     ? await resolveLipsyncAdapter(params)
     : null;
@@ -8650,7 +8745,7 @@ export async function regenerateScene(
           if (!provider) throw new Error("No active provider configured");
           const { providerType: videoType, apiKey: videoKey } =
             await resolveVideoProvider(provider);
-          adapter = createProviderAdapter(videoType as ProviderType, videoKey);
+          adapter = await providerAdapterForJob(videoType as ProviderType, videoKey);
           ({ providerType: ttsType, apiKey: ttsKey } =
             await resolveTTSProvider(provider));
           instruction =
@@ -8856,7 +8951,7 @@ export async function regenerateScenes(
         if (!provider) throw new Error("No active provider configured");
         const { providerType: videoType, apiKey: videoKey } =
           await resolveVideoProvider(provider);
-        const adapter = createProviderAdapter(
+        const adapter = await providerAdapterForJob(
           videoType as ProviderType,
           videoKey
         );
@@ -8987,7 +9082,7 @@ async function retryFailedScenesLocked(jobId: number): Promise<void> {
     if (!provider) throw new Error("No active provider configured");
     const { providerType: videoType, apiKey: videoKey } =
       await resolveVideoProvider(provider);
-    const adapter = createProviderAdapter(videoType as ProviderType, videoKey);
+    const adapter = await providerAdapterForJob(videoType as ProviderType, videoKey);
     const { providerType: ttsType, apiKey: ttsKey } =
       await resolveTTSProvider(provider);
     const instruction =

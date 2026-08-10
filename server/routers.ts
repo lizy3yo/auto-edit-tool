@@ -59,6 +59,7 @@ import { ApimartAdapter } from "./providers/apimart";
 import { HeygenLipsyncAdapter } from "./providers/heygen-lipsync";
 import type { LongformInputParams, StoryboardScene } from "../shared/types";
 import { getChannelLayer } from "./composer";
+import { isMockMode, setMockMode } from "./mockMode";
 import { extractBookName } from "./ctaDetector";
 import { createProviderAdapter } from "./providers";
 import { rehostToR2 } from "./storage";
@@ -478,6 +479,22 @@ const longformVideoRouter = router({
     }),
 
   /** Admin: read the masked per-tab APIMART keys (slots 0–4) + the edit-pages key, null where unset. */
+  /**
+   * Mock mode — every paid provider lane replaced by a locally generated stand-in.
+   * Readable by any approved user (the Longform page shows a banner so nobody mistakes a
+   * mock render for a real one); only an admin can flip it.
+   */
+  getMockMode: approvedProcedure.query(async () => ({
+    enabled: await isMockMode(),
+  })),
+
+  setMockMode: adminProcedure
+    .input(z.object({ enabled: z.boolean() }))
+    .mutation(async ({ input }) => {
+      await setMockMode(input.enabled);
+      return { enabled: input.enabled };
+    }),
+
   getApimartKeys: adminProcedure.query(async () => {
     const [slots, editMasked] = await Promise.all([
       Promise.all(

@@ -2102,7 +2102,25 @@ describe("brollDepictsBook / non-CTA book guard", () => {
     ];
     mockInvoke.mockRejectedValue(new Error("429 rate limit"));
     const { failReasons } = await enhanceBrollPrompts(scenes, baseParams);
-    expect(failReasons).toEqual(["429 rate limit"]);
+    // Summarised, not raw: these strings are rendered verbatim in a job warning, and provider
+    // SDKs put a whole JSON document in `error.message`. See `summarizeProviderError`.
+    expect(failReasons).toEqual(["provider rate limit (429)"]);
+  });
+
+  it("de-duplicates identical provider failures across scenes", async () => {
+    const scenes = [
+      sc({ index: 1, narration: "n1", visualPrompt: "RAW one" }),
+      sc({ index: 2, narration: "n2", visualPrompt: "RAW two" }),
+      sc({ index: 3, narration: "n3", visualPrompt: "RAW three" }),
+    ];
+    // One outage fails every scene with the same body; the warning must say it once.
+    mockInvoke.mockRejectedValue(new Error("429 rate limit"));
+    const { failedScenes, failReasons } = await enhanceBrollPrompts(
+      scenes,
+      baseParams
+    );
+    expect(failedScenes).toEqual([1, 2, 3]);
+    expect(failReasons).toEqual(["provider rate limit (429)"]);
   });
 
   it("returns no failures on a clean run", async () => {

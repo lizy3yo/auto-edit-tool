@@ -3,8 +3,65 @@ import { trpc } from "@/lib/trpc";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Loader2, KeyRound } from "lucide-react";
+import { Loader2, KeyRound, FlaskConical } from "lucide-react";
 import { toast } from "sonner";
+
+/**
+ * Mock mode toggle. Replaces every PAID lane (TTS, stills/keyframes, b-roll video, host
+ * lip-sync) with a locally generated stand-in, so a full render completes end-to-end without
+ * spending a credit or needing those keys at all. Assembly, R2 and the music bed stay real.
+ */
+function MockModeToggle() {
+  const utils = trpc.useUtils();
+  const { data, isLoading } = trpc.longformVideo.getMockMode.useQuery();
+  const setMock = trpc.longformVideo.setMockMode.useMutation({
+    onSuccess: ({ enabled }) => {
+      toast.success(
+        enabled
+          ? "Mock mode ON — renders are free and produce placeholder footage."
+          : "Mock mode OFF — renders now spend real credits."
+      );
+      utils.longformVideo.getMockMode.invalidate();
+    },
+    onError: err => toast.error(err.message ?? "Failed to toggle."),
+  });
+  const enabled = !!data?.enabled;
+
+  return (
+    <div className="space-y-3">
+      <Label className="flex items-center gap-2 text-sm font-medium">
+        <FlaskConical className="h-4 w-4" />
+        Mock mode — free test renders
+      </Label>
+      <div
+        className={`flex items-center justify-between gap-4 rounded-md border p-3 ${
+          enabled ? "border-amber-500/60 bg-amber-500/10" : "border-border"
+        }`}
+      >
+        <div className="text-sm">
+          <div className="font-medium">
+            {isLoading ? "Checking…" : enabled ? "ON — no credits spent" : "OFF — live providers"}
+          </div>
+          <div className="text-xs text-muted-foreground">
+            Replaces voiceover, stills, b-roll video and host lip-sync with local
+            placeholders. Assembly, R2 and music beds stay real, so you still get a
+            playable MP4.
+          </div>
+        </div>
+        <Button
+          variant={enabled ? "destructive" : "default"}
+          disabled={isLoading || setMock.isPending}
+          onClick={() => setMock.mutate({ enabled: !enabled })}
+        >
+          {setMock.isPending ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : null}
+          {enabled ? "Disable" : "Enable"}
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 /**
  * Admin: per-tab provider keys for long-form video. Each of the 5 video tabs (slots 0–4)
@@ -145,6 +202,7 @@ export function ProviderKeys() {
 
   return (
     <div className="space-y-6">
+      <MockModeToggle />
       <div className="space-y-3">
         <Label className="flex items-center gap-2 text-sm font-medium">
           <KeyRound className="h-4 w-4" />

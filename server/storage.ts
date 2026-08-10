@@ -63,6 +63,17 @@ const getBucket = (): string => {
 
 const normalizeKey = (relKey: string): string => relKey.replace(/^\/+/, "");
 
+/**
+ * `R2_PUBLIC_URL` with any trailing slash removed. A base configured as
+ * "https://pub-x.r2.dev/" would otherwise build "https://pub-x.r2.dev//key" — R2 treats the
+ * empty leading segment as part of the key and serves a 404, so every upload lands fine and
+ * every read of it fails. Mirrors the same normalization in musicBeds.ts.
+ */
+const publicBase = (): string | undefined => {
+  const raw = process.env.R2_PUBLIC_URL;
+  return raw ? raw.replace(/\/+$/, "") : undefined;
+};
+
 export async function storagePut(
   relKey: string,
   data: Buffer | Uint8Array | string,
@@ -80,7 +91,7 @@ export async function storagePut(
     })
   );
 
-  const publicUrl = process.env.R2_PUBLIC_URL;
+  const publicUrl = publicBase();
   const url = publicUrl ? `${publicUrl}/${key}` : `r2://${getBucket()}/${key}`;
   return { key, url };
 }
@@ -88,7 +99,7 @@ export async function storagePut(
 // ponytail: rehost an external ref image onto R2 so APIMART/gpt-image only ever fetch our CDN.
 // Passes through URLs already on R2 (near-zero cost for the normal widget-upload case).
 export async function rehostToR2(url: string, prefix: string): Promise<string> {
-  const pub = process.env.R2_PUBLIC_URL;
+  const pub = publicBase();
   if (pub && url.startsWith(pub)) return url; // already ours
   const res = await fetch(url, {
     signal: AbortSignal.timeout(R2_REQUEST_TIMEOUT_MS),

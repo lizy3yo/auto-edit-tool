@@ -129,6 +129,11 @@ export async function generateOpenAIStill(input: {
   /** Render 1:1 instead of 16:9 — the split-screen right panel. */
   square?: boolean;
 }): Promise<GenerationResult> {
+  // Mock mode short-circuits before the key check AND before the rate-limit token: a mock
+  // render must work on an account with no OpenAI key and no credits at all.
+  const { isMockMode, mockStill } = await import("../mockMode");
+  if (await isMockMode()) return mockStill(input.prompt, input.square);
+
   const apiKey = ENV.openaiApiKey;
   if (!apiKey)
     return { success: false, error: "OPENAI_API_KEY is not configured" };

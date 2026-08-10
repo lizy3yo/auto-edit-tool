@@ -82,7 +82,11 @@ async function startServer() {
   }
 
   server.listen(port, () => {
-    console.log(`Server running on http://localhost:${port}/`);
+    console.log(`
+  \x1b[32m\x1b[1m  ➜  Longform Studio is running!\x1b[0m
+  \x1b[36m\x1b[1m  ➜  Local:   \x1b[4mhttp://localhost:${port}/\x1b[0m
+  \x1b[36m\x1b[1m  ➜  Network: \x1b[4mhttp://127.0.0.1:${port}/\x1b[0m
+`);
     // Start the stale-job watchdog (marks stuck jobs failed, resumes orphaned renders)
     startTimeoutChecker();
   });

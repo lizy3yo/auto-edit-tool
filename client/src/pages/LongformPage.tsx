@@ -171,6 +171,10 @@ export default function FaceLockVideo() {
     }
   };
 
+  // Banner only — the render itself reads the setting server-side, so a stale client can
+  // never cause a real spend it didn't warn about.
+  const { data: mockMode } = trpc.longformVideo.getMockMode.useQuery();
+
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
@@ -195,6 +199,14 @@ export default function FaceLockVideo() {
           <HistoryDialog onOpen={openFromHistory} />
         </div>
       </div>
+
+      {mockMode?.enabled && (
+        <div className="rounded-md border border-amber-500/60 bg-amber-500/10 px-3 py-2 text-sm">
+          <span className="font-medium">Mock mode is ON.</span> Renders are free
+          and produce placeholder footage — no credits are spent and no provider
+          is contacted. Turn it off in Admin → Provider Keys before a real run.
+        </div>
+      )}
 
       <p className="text-sm text-muted-foreground">
         Generate {MAX_SLOTS} videos in parallel — each tab is its own job with

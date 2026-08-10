@@ -26,6 +26,68 @@ import { ENV } from "../_core/env";
  * breaker opens and subsequent images route straight to Gemini for a cooldown.
  */
 
+/**
+ * Still/keyframe generation with a Gemini fallback — the signature `generateValidatedStill`
+ * expects for its `genImage` argument.
+ *
+ * Why this exists: `FallbackImageAdapter` only wraps the PROVIDER adapter (69Labs). The still
+ * and b-roll-keyframe lanes call `generateOpenAIStill` directly, so `gpt-image-2` was the sole
+ * source for ~65% of scenes with no fallback at all — an empty OpenAI balance failed whole
+ * renders outright (job 3: "2 scene(s) have no clip"). Routing them through here makes OpenAI
+ * genuinely PRIMARY-with-fallback, which is what the architecture already claimed.
+ *
+ * Deliberately NOT budget-raced like `FallbackImageAdapter`: the OpenAI adapter has its own
+ * call timeout (`OPENAI_IMAGE_CALL_TIMEOUT_MS`), so a second racing timer here would only
+ * fight it. Fallback triggers on a returned `{success:false}` or a throw.
+ */
+export async function generateStillWithFallback(input: {
+  prompt: string;
+  referenceImageUrl?: string;
+  square?: boolean;
+}): Promise<GenerationResult> {
+  const { generateOpenAIStill } = await import("./openai-image");
+  let primaryError = "unknown error";
+  try {
+    const r = await generateOpenAIStill(input);
+    if (r.success) return r;
+    primaryError = r.error ?? "primary returned no image";
+  } catch (err: any) {
+    primaryError = err?.message ?? String(err);
+  }
+
+  if (!ENV.geminiApiKey) {
+    return {
+      success: false,
+      error: `${primaryError} (no GEMINI_API_KEY for image fallback)`,
+    };
+  }
+  console.warn(
+    `[StillFallback] gpt-image-2 failed (${primaryError}) — falling back to Gemini`
+  );
+  try {
+    const gemini = new GeminiImageAdapter();
+    const [r] = await gemini.generateImage({
+      prompt: input.prompt,
+      model: "nano-banana",
+      aspectRatio: input.square ? "1:1" : "16:9",
+      count: 1,
+      ...(input.referenceImageUrl
+        ? { imageUrls: [input.referenceImageUrl] }
+        : {}),
+    });
+    if (r?.success) return r;
+    return {
+      success: false,
+      error: `${primaryError}; Gemini fallback: ${r?.error ?? "no image"}`,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: `${primaryError}; Gemini fallback threw: ${err?.message ?? err}`,
+    };
+  }
+}
+
 // ─── Circuit breaker state (module-level, shared across calls) ───
 let consecutiveTimeouts = 0;
 let breakerOpenUntil = 0; // epoch ms; primary is skipped while now < this
