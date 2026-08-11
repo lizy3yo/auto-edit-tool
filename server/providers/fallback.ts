@@ -44,49 +44,41 @@ export async function generateStillWithFallback(input: {
   prompt: string;
   referenceImageUrl?: string;
   square?: boolean;
+  apimartKey?: string | null;
 }): Promise<GenerationResult> {
-  const { generateOpenAIStill } = await import("./openai-image");
   let primaryError = "unknown error";
   try {
-    const r = await generateOpenAIStill(input);
-    if (r.success) return r;
-    primaryError = r.error ?? "primary returned no image";
+    if (input.apimartKey) {
+      // Architecture Stage 3: APIMART is the sole still/keyframe provider.
+      const { ApimartAdapter } = await import("./apimart");
+      const apimart = new ApimartAdapter(input.apimartKey);
+      const [r] = await apimart.generateImage({
+        prompt: input.prompt,
+        model: "gpt-image-2", // APIMART hardcodes this internally; required by ImageGenerationParams
+        aspectRatio: input.square ? "1:1" : "16:9",
+        count: 1,
+        ...(input.referenceImageUrl
+          ? { imageUrls: [input.referenceImageUrl] }
+          : {}),
+      });
+      if (r?.success) return r;
+      primaryError = r?.error ?? "APIMART returned no image";
+    } else {
+      // No APIMART key configured — fall through to direct OpenAI.
+      const { generateOpenAIStill } = await import("./openai-image");
+      const r = await generateOpenAIStill(input);
+      if (r.success) return r;
+      primaryError = r.error ?? "primary returned no image";
+    }
   } catch (err: any) {
     primaryError = err?.message ?? String(err);
   }
 
-  if (!ENV.geminiApiKey) {
-    return {
-      success: false,
-      error: `${primaryError} (no GEMINI_API_KEY for image fallback)`,
-    };
-  }
-  console.warn(
-    `[StillFallback] gpt-image-2 failed (${primaryError}) — falling back to Gemini`
-  );
-  try {
-    const gemini = new GeminiImageAdapter();
-    const [r] = await gemini.generateImage({
-      prompt: input.prompt,
-      model: "nano-banana",
-      aspectRatio: input.square ? "1:1" : "16:9",
-      count: 1,
-      ...(input.referenceImageUrl
-        ? { imageUrls: [input.referenceImageUrl] }
-        : {}),
-    });
-    if (r?.success) return r;
-    return {
-      success: false,
-      error: `${primaryError}; Gemini fallback: ${r?.error ?? "no image"}`,
-    };
-  } catch (err: any) {
-    return {
-      success: false,
-      error: `${primaryError}; Gemini fallback threw: ${err?.message ?? err}`,
-    };
-  }
+  // No Gemini fallback: per the final architecture, Stage 3 is APIMART-only.
+  // Failing fast surfaces the real error instead of burning the free-tier Gemini quota.
+  return { success: false, error: primaryError };
 }
+
 
 // ─── Circuit breaker state (module-level, shared across calls) ───
 let consecutiveTimeouts = 0;

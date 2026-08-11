@@ -4770,13 +4770,16 @@ async function generateSceneClip(
   // fails rather than degrading to a text-only clip.
   let keyframe: string | undefined;
   if (!scene.hostPresent && !chain[0].imageUrls && !brollKeyframeDisabled()) {
+    const apimartKey = params.apimartSlot != null ? await getApimartSlotKey(params.apimartSlot) : null;
     keyframe = await Promise.race([
       generateBrollKeyframe(
         jobId,
         scene,
         clipIdx,
         undefined,
-        params.videoSubject
+        params.videoSubject,
+        undefined,
+        apimartKey
       ),
       new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error("B-roll keyframe timed out")), 90_000)
@@ -5039,7 +5042,8 @@ export async function generateSceneStillClip(
    * whose slot is a full-height square. Square source into a square slot means the composite's
    * cover-crop takes nothing off the sides.
    */
-  square = false
+  square = false,
+  apimartKey?: string | null
 ): Promise<string[]> {
   let imageUrl: string;
   if (coverImageUrl) {
@@ -5056,7 +5060,7 @@ export async function generateSceneStillClip(
       scene,
       4,
       referenceImageUrl,
-      generateStillWithFallback,
+      (imgInput) => generateStillWithFallback({ ...imgInput, apimartKey }),
       subject,
       undefined,
       square
@@ -5142,7 +5146,8 @@ export async function generateBrollKeyframe(
    * clip text is softened but the keyframe (image-first) must be softened too — else OpenAI keeps
    * emitting the same graphic frame that the video provider rejects. Overrides `scene.visualPrompt`.
    */
-  visualOverride?: string
+  visualOverride?: string,
+  apimartKey?: string | null
 ): Promise<string> {
   // Keyframe stills render on OpenAI's official gpt-image-2, 16:9.
   // Same validate + retry as the still lane (my earlier 10s motion cap tripled these calls).
@@ -5150,7 +5155,7 @@ export async function generateBrollKeyframe(
     scene,
     4,
     referenceImageUrl,
-    generateStillWithFallback,
+    (imgInput) => generateStillWithFallback({ ...imgInput, apimartKey }),
     subject,
     visualOverride
   );
@@ -5888,7 +5893,8 @@ function buildSplitRightScene(scene: StoryboardScene): StoryboardScene {
 async function renderSplitRightClip(
   jobId: number,
   scene: StoryboardScene,
-  params: LongformInputParams
+  params: LongformInputParams,
+  apimartKey?: string | null
 ): Promise<string> {
   const [rightUrl] = await Promise.race([
     generateSceneStillClip(
@@ -5897,7 +5903,8 @@ async function renderSplitRightClip(
       undefined,
       undefined,
       params.videoSubject,
-      true
+      true,
+      apimartKey
     ),
     new Promise<never>((_, reject) =>
       setTimeout(
@@ -5998,7 +6005,8 @@ async function generateSceneLipsyncClips(
 
   if (scene.splitVisual) {
     try {
-      const rightUrl = await renderSplitRightClip(jobId, scene, params);
+      const apimartKey = params.apimartSlot != null ? await getApimartSlotKey(params.apimartSlot) : null;
+      const rightUrl = await renderSplitRightClip(jobId, scene, params, apimartKey);
       const dims = dimensionsFor(TALKING_HEAD_ASPECT_RATIO);
       const composited: string[] = [];
       for (let i = 0; i < urls.length; i++) {
@@ -6049,6 +6057,7 @@ export async function generateSceneClips(
   // render on APIMART grok-imagine ONLY. Resolved once per scene from `params.apimartSlot` so a
   // key rotation is picked up on resume.
   const apimart = await apimartAdapterForJob(params);
+  const apimartKey = params.apimartSlot != null ? await getApimartSlotKey(params.apimartSlot) : null;
 
   // No silent provider swap for b-roll: a missing APIMART key fails the scene loud instead of
   // rendering it on 69Labs, whose grok build has different duration/quality behaviour.
@@ -6105,7 +6114,9 @@ export async function generateSceneClips(
       scene,
       params.bookCoverImageUrl,
       undefined,
-      params.videoSubject
+      params.videoSubject,
+      false,
+      apimartKey
     );
   }
 
@@ -6118,7 +6129,9 @@ export async function generateSceneClips(
       undefined,
       // Book-depicting still → pass the real cover as a reference image.
       scene.showsBook ? params.bookCoverImageUrl : undefined,
-      params.videoSubject
+      params.videoSubject,
+      false,
+      apimartKey
     );
   }
 
@@ -6177,7 +6190,8 @@ export async function generateSceneClips(
             i,
             scene.showsBook ? params.bookCoverImageUrl : undefined,
             kfSubject,
-            kfVisual
+            kfVisual,
+            apimartKey
           );
           // Grok takes the lone input image as the clip's start frame, with no videoInputMode
           // (only gemini-omni supports modes). buildVideoBody caps images and strips any mode;
@@ -8621,7 +8635,8 @@ async function regenerateSplitRight(
     schedulePersist(jobId, { storyboard: scenes });
   }
 
-  const rightUrl = await renderSplitRightClip(jobId, scene, params);
+  const apimartKey = params.apimartSlot != null ? await getApimartSlotKey(params.apimartSlot) : null;
+  const rightUrl = await renderSplitRightClip(jobId, scene, params, apimartKey);
   const composited: string[] = [];
   for (let i = 0; i < scene.hostClipUrls.length; i++) {
     const buf = await compositeSplitScreenClip(
