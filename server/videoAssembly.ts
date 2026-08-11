@@ -23,6 +23,8 @@ import os from "os";
 import { getMediaDuration } from "./mediaProbe";
 import { getFFmpegPath } from "./ffmpegPath";
 import { Semaphore } from "./providers/semaphore";
+import { presignOwnBucketUrl } from "./storage";
+import { describeError } from "./_core/errorDetail";
 import type { VideoAspectRatio } from "../shared/types";
 
 const FPS = 30;
@@ -1237,7 +1239,11 @@ async function retryTransient<T>(
     try {
       return await fn();
     } catch (err: any) {
-      const msg = err?.message ?? String(err);
+      // describeError, not err.message: undici collapses every connection-level failure
+      // into "fetch failed" and hides the actual reason (ENOTFOUND / ECONNREFUSED / TLS)
+      // in err.cause, which made these retry lines useless for diagnosis. It only appends
+      // to the base message, so the ffmpeg substring matching in `isRetryable` is unaffected.
+      const msg = describeError(err);
       if (tryNo >= opts.attempts - 1 || !isRetryable(msg, err)) throw err;
       const ms = backoff(tryNo);
       console.warn(
@@ -1347,12 +1353,18 @@ export async function downloadToTemp(
   // ponytail: a film is ~2 downloads per scene, so at 183 scenes a single transient
   // "fetch failed" reliably drops a scene and fails the whole assembly. Three tries with a
   // short backoff; a permanent failure still throws.
+  //
+  // Our own R2 objects are read through the authenticated S3 endpoint, never the public
+  // r2.dev hostname (see `presignOwnBucketUrl`). Resolved once, outside the retry: the
+  // signature outlives three attempts by an hour, and re-signing per attempt would only
+  // hide a genuine credential failure behind the retry loop.
+  const fetchUrl = await presignOwnBucketUrl(url);
   const buf = await retryTransient(
     async () => {
       // Constructed per attempt — a hoisted signal would start attempts 2 and 3 already
       // aborted. This caps the whole call including the body read, so it can genuinely
       // false-fail a slow-but-progressing download; hence the env override.
-      const resp = await fetch(url, {
+      const resp = await fetch(fetchUrl, {
         redirect: "follow",
         signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
       });

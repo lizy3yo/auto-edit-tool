@@ -130,6 +130,14 @@ Always 16:9. Fire-and-forget; progress persisted to the job row and polled by th
   provider configured" ⇒ re-run `scripts/seed.mjs` or set active in Admin.
 - **FFmpeg needs drawtext** or text overlays silently disable. The startup log names the
   binary it picked (`server/ffmpegPath.ts`); bundled `ffmpeg-static` has drawtext.
+- **`*.r2.dev` is blocked on a lot of managed networks** (DNS NXDOMAIN _and_ TCP to its
+  anycast IPs), while `<bucket>.<account>.r2.cloudflarestorage.com` stays reachable. The
+  symptom is lopsided: every upload succeeds and every read back dies with
+  `ENOTFOUND pub-<hash>.r2.dev`. Server-side reads therefore never use `R2_PUBLIC_URL` —
+  `downloadToTemp` sends our own objects through `presignOwnBucketUrl`
+  (`server/storage.ts`), which presigns them onto the S3 endpoint. Public URLs are still
+  what gets persisted and handed to the browser and to providers, so a blocked network
+  still breaks client-side playback and `/api/download` — check DNS before suspecting R2.
 - **Music beds** come from your own R2 (`R2_PUBLIC_URL` + `music/beds/<set>/`, keys in
   `server/musicBeds.ts`). No external CDN is contacted at runtime.
 - **Never commit `.env`**; never print key values into logs or chat — `maskApiKey()` in

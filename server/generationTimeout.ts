@@ -47,8 +47,18 @@ async function cleanupStaleLongformJobs(): Promise<void> {
     if (longformCount > 0) {
       console.log(`[Timeout] Cleaned up ${longformCount} stale longform jobs`);
     }
-  } catch (err) {
-    console.error("[Timeout] Error cleaning up stale jobs:", err);
+  } catch (err: any) {
+    if (
+      err?.cause?.code === "ECONNREFUSED" ||
+      err?.code === "ECONNREFUSED" ||
+      err?.message?.includes("ECONNREFUSED")
+    ) {
+      console.warn(
+        "[Timeout] Database unreachable (ECONNREFUSED). Ensure MySQL is running (e.g. `docker compose up -d`)."
+      );
+    } else {
+      console.error("[Timeout] Error cleaning up stale jobs:", err);
+    }
   }
 }
 

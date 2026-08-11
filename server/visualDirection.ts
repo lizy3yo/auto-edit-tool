@@ -36,6 +36,7 @@ import type { LongformInputParams, StoryboardScene } from "../shared/types";
 import { invokeGemini } from "./gemini";
 import { getChannelLayer } from "./composer";
 import { safeParseJSON } from "./jsonRepair";
+import { describeError } from "./_core/errorDetail";
 
 /**
  * Ceiling on the derived direction. Enforced by truncation in `parseVisualDirection`, not just
@@ -330,7 +331,7 @@ export async function deriveStyleBible(
       );
     } catch (err: any) {
       console.warn(
-        `[VisualDirection] style bible derive failed (attempt ${attempt + 1}/2): ${err.message}`
+        `[VisualDirection] style bible derive failed (attempt ${attempt + 1}/2): ${describeError(err)}`
       );
     }
   }

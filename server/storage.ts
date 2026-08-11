@@ -132,3 +132,36 @@ export async function storageGet(
 
   return { key, url };
 }
+
+/**
+ * Rewrite one of OUR public `R2_PUBLIC_URL` links into a presigned URL on the S3 API
+ * endpoint (`<account>.r2.cloudflarestorage.com`). Anything else passes through untouched.
+ *
+ * A server-side read of our own bucket has no reason to go out over the public CDN
+ * hostname: it is unauthenticated, it needs public access to stay switched on, and — the
+ * reason this exists — `*.r2.dev` sits on the DNS blocklist of a lot of managed networks.
+ * On one of those, uploads all succeeded (S3 endpoint) while every read back died at
+ * `ENOTFOUND pub-<hash>.r2.dev`, so a render burned its whole clips stage and then failed
+ * at the first `downloadToTemp` in assembly. The S3 endpoint is a different hostname and
+ * stays reachable, so this is also the more robust path even on an unfiltered network.
+ *
+ * Presigning is local HMAC — no network call — and a failure falls back to the original
+ * URL, so this can only widen what works, never narrow it. Signatures last an hour;
+ * resolve immediately before the fetch rather than persisting the result anywhere.
+ */
+export async function presignOwnBucketUrl(url: string): Promise<string> {
+  const pub = publicBase();
+  if (!pub || !url.startsWith(`${pub}/`)) return url;
+  try {
+    // The public URL was built as `${base}/${key}` with no encoding, so decoding the
+    // pathname reverses whatever `new URL` percent-escaped on the way in.
+    const key = decodeURIComponent(new URL(url).pathname).replace(/^\/+/, "");
+    if (!key) return url;
+    return (await storageGet(key)).url;
+  } catch (err: any) {
+    console.warn(
+      `[storage] presign failed, falling back to the public URL: ${err?.message ?? err}`
+    );
+    return url;
+  }
+}

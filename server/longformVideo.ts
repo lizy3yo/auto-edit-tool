@@ -57,6 +57,7 @@ import { decrypt, encrypt, maskApiKey } from "./encryption";
 import { createProviderAdapter, type ProviderAdapter } from "./providers";
 import { ApimartAdapter } from "./providers/apimart";
 import { generateStillWithFallback } from "./providers/fallback";
+import { describeError } from "./_core/errorDetail";
 import {
   withFaceLockPrompt,
   SIXTYNINE_VIDEO_SLOTS,
@@ -8988,7 +8989,7 @@ export async function regenerateScenes(
               scene.regenerated = true;
             } catch (e: any) {
               scene.sceneStatus = "failed";
-              scene.error = e.message;
+              scene.error = describeError(e);
             }
             const scenesDone = scenes.filter(
               s => s.clipUrls?.length || s.clipUrl
@@ -9025,13 +9026,13 @@ export async function regenerateScenes(
         for (const s of targets) {
           if (s.sceneStatus === "processing") {
             s.sceneStatus = "failed";
-            s.error = s.error ?? err.message;
+            s.error = s.error ?? describeError(err);
           }
         }
         await updateLongformVideoJob(jobId, {
           status: "failed",
           storyboard: scenes,
-          errorMessage: err.message || "Scene regeneration failed",
+          errorMessage: describeError(err) || "Scene regeneration failed",
           completedAt: new Date(),
         }).catch(onFailedStatusWriteError(jobId));
         throw err;
