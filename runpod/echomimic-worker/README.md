@@ -18,20 +18,31 @@ pip install "huggingface_hub[cli]"
 mkdir -p /workspace/echomimic && cd /workspace/echomimic
 hf download alibaba-pai/Wan2.1-Fun-V1.1-1.3B-InP --local-dir Wan2.1-Fun-V1.1-1.3B-InP
 hf download BadToBest/EchoMimicV3 --local-dir flash
+# NOT in the weights repo — the audio encoder ships separately:
+hf download TencentGameMate/chinese-wav2vec2-base --local-dir flash/chinese-wav2vec2-base
 ```
 
-Expected layout (the handler's paths depend on it):
+Verified layout (~27 GB total — 19 GB base + 6.7 GB flash + ~1 GB encoder):
 
 ```
 /runpod-volume/echomimic/
-  Wan2.1-Fun-V1.1-1.3B-InP/          # base diffusion model
+  Wan2.1-Fun-V1.1-1.3B-InP/            # base diffusion model, 19 GB
   flash/
-    transformer/diffusion_pytorch_model.safetensors
-    chinese-wav2vec2-base/            # audio encoder
+    transformer/                        # ← handler default
+      diffusion_pytorch_model.safetensors
+    echomimicv3-flash-pro/              # alternate weights, see ECHOMIMIC_TRANSFORMER
+      diffusion_pytorch_model.safetensors
+    chinese-wav2vec2-base/              # audio encoder (separate download)
 ```
 
-Verify the sub-paths against the HF repo after download — upstream has moved them before, and
-a wrong path surfaces as a slow, confusing inference failure rather than a clean error.
+Two gotchas found the hard way: `BadToBest/EchoMimicV3` ships **two** transformers
+(`transformer/` and `echomimicv3-flash-pro/`) — the handler defaults to the first, matching
+`run_flash.sh`, and `ECHOMIMIC_TRANSFORMER` switches to the other without a rebuild. And
+`chinese-wav2vec2-base` is **not in that repo at all**; the upstream README points at
+ModelScope, but the HuggingFace mirror above is equivalent and needs no extra CLI.
+
+Every path is checked by `_preflight()` on each job, so a missing or misplaced weight returns
+an immediate error naming the path rather than a torch stack trace minutes into inference.
 
 ## Build and deploy
 

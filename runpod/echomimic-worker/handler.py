@@ -54,10 +54,44 @@ import runpod
 # ── Paths (Network Volume) ────────────────────────────────────────────────────
 VOLUME = os.environ.get("ECHOMIMIC_VOLUME", "/runpod-volume/echomimic")
 REPO = os.environ.get("ECHOMIMIC_REPO", "/app/echomimic_v3")
-BASE_MODEL = f"{VOLUME}/Wan2.1-Fun-V1.1-1.3B-InP"
-TRANSFORMER = f"{VOLUME}/flash/transformer/diffusion_pytorch_model.safetensors"
-WAV2VEC = f"{VOLUME}/flash/chinese-wav2vec2-base"
-CONFIG = f"{REPO}/config/config.yaml"
+BASE_MODEL = os.environ.get(
+    "ECHOMIMIC_BASE_MODEL", f"{VOLUME}/Wan2.1-Fun-V1.1-1.3B-InP"
+)
+# `BadToBest/EchoMimicV3` ships TWO transformers: `transformer/` (what run_flash.sh's example
+# points at) and `echomimicv3-flash-pro/`. Overridable so you can A/B them without a rebuild:
+#   ECHOMIMIC_TRANSFORMER=/runpod-volume/echomimic/flash/echomimicv3-flash-pro/diffusion_pytorch_model.safetensors
+TRANSFORMER = os.environ.get(
+    "ECHOMIMIC_TRANSFORMER",
+    f"{VOLUME}/flash/transformer/diffusion_pytorch_model.safetensors",
+)
+# NOT in the HuggingFace weights repo — fetched separately from
+# `TencentGameMate/chinese-wav2vec2-base`. See README.
+WAV2VEC = os.environ.get("ECHOMIMIC_WAV2VEC", f"{VOLUME}/flash/chinese-wav2vec2-base")
+CONFIG = os.environ.get("ECHOMIMIC_CONFIG", f"{REPO}/config/config.yaml")
+
+
+def _preflight() -> str | None:
+    """Names any missing model path, or None when everything resolves.
+
+    Run per job rather than at import: a missing weight otherwise surfaces as a torch or
+    diffusers stack trace thrown minutes into inference, on a GPU you are paying for. This
+    turns it into an immediate, readable error naming the exact path.
+    """
+    missing = [
+        f"{label}={path}"
+        for label, path in (
+            ("base_model", BASE_MODEL),
+            ("transformer", TRANSFORMER),
+            ("wav2vec", WAV2VEC),
+            ("config", CONFIG),
+        )
+        if not os.path.exists(path)
+    ]
+    return (
+        "missing model path(s) on the network volume: " + ", ".join(missing)
+        if missing
+        else None
+    )
 
 # Wan-family latent packing needs a 4n+1 frame count. A non-conforming value either errors or
 # is silently truncated, which would trip the pipeline's short-render guard.
@@ -138,8 +172,12 @@ def _detect_host_box(plate_path: str, size: int, fallback: dict) -> tuple:
         }
 
     try:
+        # Resolved at RUNTIME from the echomimic_v3 clone inside the image
+        # (/app/echomimic_v3/src/face_detect.py), which is why sys.path is patched first and
+        # why a local editor cannot see it. Unlike the old soundfile import there is nothing
+        # to remove here — RetinaFace is the point — so the checker is simply told to skip it.
         sys.path.insert(0, REPO)
-        from src.face_detect import get_mask_coord
+        from src.face_detect import get_mask_coord  # pyrefly: ignore[missing-import]  # type: ignore[import-not-found]
 
         coord = get_mask_coord(plate_path)
     except Exception as e:  # detector missing, TF failure, unreadable image
@@ -164,6 +202,10 @@ def handler(job):
     for required in ("plate_url", "audio_url", "upload_url"):
         if not i.get(required):
             return {"error": f"missing required input: {required}"}
+
+    problem = _preflight()
+    if problem:
+        return {"error": problem}
 
     fps = int(i.get("fps", 25))
     size = int(i.get("size", 768))
