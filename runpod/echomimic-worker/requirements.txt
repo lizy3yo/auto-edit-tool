@@ -1,0 +1,7 @@
+# Worker-only deps. EchoMimicV3's own requirements.txt is installed separately in the
+# Dockerfile and owns torch/diffusers/transformers/xformers.
+#
+# Deliberately just two: audio duration is probed with ffprobe (already in the image) rather
+# than pulling in soundfile/librosa for one number.
+runpod>=1.7.0
+requests>=2.32.0

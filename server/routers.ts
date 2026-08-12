@@ -51,12 +51,25 @@ import {
   getHeygenSlotKey,
   getHeygenSlotMasked,
   setHeygenSlotKey,
+  getFalSlotKey,
+  getFalSlotMasked,
+  setFalSlotKey,
   assembleScenePromptPreview,
   validateCtaMarkers,
   syncSceneClipFields,
 } from "./longformVideo";
 import { ApimartAdapter } from "./providers/apimart";
 import { HeygenLipsyncAdapter } from "./providers/heygen-lipsync";
+import { FalLipsyncAdapter, falLipsyncModel } from "./providers/fal-lipsync";
+// AIREITER BOLT-ON (temporary) — delete with the router block below.
+import {
+  AireiterAdapter,
+  aireiterKey,
+  aireiterKeyMasked,
+  aireiterLaneEnabled,
+  setAireiterKey,
+} from "./providers/aireiter";
+import { ENV } from "./_core/env";
 import type { LongformInputParams, StoryboardScene } from "../shared/types";
 import { getChannelLayer } from "./composer";
 import { isMockMode, setMockMode } from "./mockMode";
@@ -590,6 +603,90 @@ const longformVideoRouter = router({
     )
     .mutation(async ({ input }) => {
       await setHeygenSlotKey(input.slotIndex, input.apiKey);
+      return { success: true };
+    }),
+
+  /**
+   * Admin: masked per-tab fal.ai keys (slots 0–4) plus which lip-sync lane is live, so the
+   * panel can say whether these keys are the ones actually being used.
+   */
+  getFalKeys: adminProcedure.query(async () => {
+    const slots = await Promise.all(
+      Array.from({ length: LONGFORM_SLOT_COUNT }, (_, slotIndex) =>
+        getFalSlotMasked(slotIndex).then(masked => ({ slotIndex, masked }))
+      )
+    );
+    return {
+      slots,
+      active: ENV.lipsyncProvider === "fal",
+      model: falLipsyncModel().id,
+    };
+  }),
+
+  /**
+   * Admin: per-key health. fal exposes no credit-balance API, so unlike `getHeygenQuotas` this
+   * is a boolean liveness probe: true = the key authenticates, false = rejected, null = unset
+   * key or the check itself failed.
+   */
+  getFalKeyHealth: adminProcedure.query(async () => {
+    const slots = await Promise.all(
+      Array.from({ length: LONGFORM_SLOT_COUNT }, (_, slotIndex) =>
+        getFalSlotKey(slotIndex)
+          .then(key => (key ? new FalLipsyncAdapter(key).checkKey() : null))
+          .then(ok => ({ slotIndex, ok }))
+      )
+    );
+    return { slots };
+  }),
+
+  // ─── AIREITER BOLT-ON (temporary — delete this block to remove) ─────────
+  /**
+   * Admin: the AIReiter key, its live credit balance, and which lanes it is serving.
+   * One key for all 5 tabs, unlike APIMART/HeyGen — AIReiter is a single account with one
+   * shared credit pool, so per-tab slots would buy nothing.
+   */
+  getAireiter: adminProcedure.query(async () => {
+    const masked = await aireiterKeyMasked();
+    const lanes = {
+      broll: await aireiterLaneEnabled("broll"),
+      stills: await aireiterLaneEnabled("stills"),
+    };
+    return {
+      masked,
+      lanes,
+      // Env fallback in play (key set via AIREITER_API_KEY rather than this field).
+      usingEnvKey: !masked && !!(await aireiterKey()),
+    };
+  }),
+
+  /** Admin: live credit balance for the AIReiter key. Null = unset key or failed check. */
+  getAireiterBalance: adminProcedure.query(async () => ({
+    credits: await (await AireiterAdapter.resolve()).getBalance(),
+  })),
+
+  /** Admin: set (or clear, with an empty string) the AIReiter key. */
+  setAireiterKey: adminProcedure
+    .input(z.object({ apiKey: z.string().max(400) }))
+    .mutation(async ({ input }) => {
+      await setAireiterKey(input.apiKey);
+      return { success: true };
+    }),
+  // ─── END AIREITER BOLT-ON ───────────────────────────────────────────────
+
+  /** Admin: set (or clear, with an empty string) a tab's fal.ai key. */
+  setFalKey: adminProcedure
+    .input(
+      z.object({
+        slotIndex: z
+          .number()
+          .int()
+          .min(0)
+          .max(LONGFORM_SLOT_COUNT - 1),
+        apiKey: z.string().max(400),
+      })
+    )
+    .mutation(async ({ input }) => {
+      await setFalSlotKey(input.slotIndex, input.apiKey);
       return { success: true };
     }),
 

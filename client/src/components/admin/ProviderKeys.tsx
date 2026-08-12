@@ -40,12 +40,16 @@ function MockModeToggle() {
       >
         <div className="text-sm">
           <div className="font-medium">
-            {isLoading ? "Checking…" : enabled ? "ON — no credits spent" : "OFF — live providers"}
+            {isLoading
+              ? "Checking…"
+              : enabled
+                ? "ON — no credits spent"
+                : "OFF — live providers"}
           </div>
           <div className="text-xs text-muted-foreground">
-            Replaces voiceover, stills, b-roll video and host lip-sync with local
-            placeholders. Assembly, R2 and music beds stay real, so you still get a
-            playable MP4.
+            Replaces voiceover, stills, b-roll video and host lip-sync with
+            local placeholders. Assembly, R2 and music beds stay real, so you
+            still get a playable MP4.
           </div>
         </div>
         <Button
@@ -102,6 +106,37 @@ function BalanceBadge({
       }`}
     >
       {format(value)}
+    </span>
+  );
+}
+
+/**
+ * Liveness readout for a stored fal key. fal exposes no credit-balance API (billing lives
+ * behind the dashboard session), so unlike `BalanceBadge` there is no number to show — only
+ * whether the key authenticates.
+ */
+function HealthBadge({
+  keySet,
+  ok,
+  loading,
+}: {
+  keySet: boolean;
+  /** `null` ⇒ the probe itself failed — unknown, not invalid. */
+  ok: boolean | null;
+  loading: boolean;
+}) {
+  if (!keySet) return null;
+  if (loading)
+    return <Loader2 className="h-3 w-3 shrink-0 animate-spin opacity-50" />;
+  if (ok == null)
+    return (
+      <span className="shrink-0 text-xs text-muted-foreground">unknown</span>
+    );
+  return (
+    <span
+      className={`shrink-0 text-xs ${ok ? "text-muted-foreground" : "text-destructive"}`}
+    >
+      {ok ? "key ok" : "key rejected"}
     </span>
   );
 }
@@ -165,10 +200,25 @@ export function ProviderKeys() {
     trpc.longformVideo.getHeygenQuotas.useQuery(undefined, {
       refetchOnWindowFocus: false,
     });
+  const { data: fal, isLoading: falLoading } =
+    trpc.longformVideo.getFalKeys.useQuery();
+  const { data: falHealth, isLoading: falHealthLoading } =
+    trpc.longformVideo.getFalKeyHealth.useQuery(undefined, {
+      refetchOnWindowFocus: false,
+    });
 
   const [drafts, setDrafts] = useState<Record<number, string>>({});
   const [editDraft, setEditDraft] = useState("");
   const [heygenDrafts, setHeygenDrafts] = useState<Record<number, string>>({});
+  const [falDrafts, setFalDrafts] = useState<Record<number, string>>({});
+  // AIREITER BOLT-ON (temporary) — delete with the section below.
+  const { data: aireiter, isLoading: aireiterLoading } =
+    trpc.longformVideo.getAireiter.useQuery();
+  const { data: aireiterBal, isLoading: aireiterBalLoading } =
+    trpc.longformVideo.getAireiterBalance.useQuery(undefined, {
+      refetchOnWindowFocus: false,
+    });
+  const [aireiterDraft, setAireiterDraft] = useState("");
 
   const saveMutation = trpc.longformVideo.setApimartKey.useMutation({
     onSuccess: (_res, vars) => {
@@ -196,6 +246,27 @@ export function ProviderKeys() {
       setHeygenDrafts(d => ({ ...d, [vars.slotIndex]: "" }));
       utils.longformVideo.getHeygenKeys.invalidate();
       utils.longformVideo.getHeygenQuotas.invalidate();
+    },
+    onError: err => toast.error(err.message ?? "Failed to save."),
+  });
+
+  const saveFalMutation = trpc.longformVideo.setFalKey.useMutation({
+    onSuccess: (_res, vars) => {
+      toast.success(`fal.ai key for Video ${vars.slotIndex + 1} saved.`);
+      setFalDrafts(d => ({ ...d, [vars.slotIndex]: "" }));
+      utils.longformVideo.getFalKeys.invalidate();
+      utils.longformVideo.getFalKeyHealth.invalidate();
+    },
+    onError: err => toast.error(err.message ?? "Failed to save."),
+  });
+
+  // AIREITER BOLT-ON (temporary) — delete with the section below.
+  const saveAireiterMutation = trpc.longformVideo.setAireiterKey.useMutation({
+    onSuccess: () => {
+      toast.success("AIReiter key saved.");
+      setAireiterDraft("");
+      utils.longformVideo.getAireiter.invalidate();
+      utils.longformVideo.getAireiterBalance.invalidate();
     },
     onError: err => toast.error(err.message ?? "Failed to save."),
   });
@@ -265,12 +336,85 @@ export function ProviderKeys() {
           that tab uses 69Labs. The Edit Images/Videos pages are APIMART-only on
           their own key; blank ⇒ those pages can&apos;t generate.
         </p>
+        {aireiter?.lanes.broll && (
+          <p className="text-xs text-amber-500">
+            Overridden — b-roll is currently rendering on AIReiter (below), so
+            these APIMART keys are not being billed.
+          </p>
+        )}
       </div>
+
+      {/* ─── AIREITER BOLT-ON (temporary) — delete this whole section ─── */}
+      <div className="space-y-3">
+        <Label className="flex items-center gap-2 text-sm font-medium">
+          <KeyRound className="h-4 w-4" />
+          AIReiter key — b-roll + stills (all tabs)
+        </Label>
+        {aireiterLoading ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+          </div>
+        ) : (
+          <KeyRow
+            label="AIReiter"
+            masked={aireiter?.masked ?? null}
+            placeholder={
+              aireiter?.usingEnvKey
+                ? "Using AIREITER_API_KEY from .env"
+                : "Not set — b-roll/stills stay on APIMART/OpenAI"
+            }
+            draft={aireiterDraft}
+            onDraftChange={setAireiterDraft}
+            onSave={apiKey => saveAireiterMutation.mutate({ apiKey })}
+            saving={saveAireiterMutation.isPending}
+            badge={
+              <BalanceBadge
+                keySet={!!aireiter?.masked || !!aireiter?.usingEnvKey}
+                value={aireiterBal?.credits ?? null}
+                loading={aireiterBalLoading}
+                format={v => `${Math.round(v)} credits left`}
+                lowThreshold={200}
+              />
+            }
+          />
+        )}
+        <p className="text-xs text-muted-foreground">
+          One key for all 5 tabs — AIReiter is a single account with one shared
+          credit pool. Which lanes it takes over is set by{" "}
+          <code className="text-[11px]">AIREITER_LANES</code> in{" "}
+          <code className="text-[11px]">.env</code> (
+          <code className="text-[11px]">broll</code>,{" "}
+          <code className="text-[11px]">stills</code>, or{" "}
+          <code className="text-[11px]">all</code>); a key entered here wins
+          over <code className="text-[11px]">AIREITER_API_KEY</code>. AIReiter
+          has no lip-sync and no TTS, so host scenes and narration are never
+          affected.
+        </p>
+        <p className="text-xs">
+          {aireiter?.lanes.broll || aireiter?.lanes.stills ? (
+            <span className="text-emerald-500">
+              Active on: {aireiter.lanes.broll ? "b-roll" : ""}
+              {aireiter.lanes.broll && aireiter.lanes.stills ? " + " : ""}
+              {aireiter.lanes.stills ? "stills/keyframes" : ""}
+            </span>
+          ) : (
+            <span className="text-muted-foreground">
+              Inactive — set AIREITER_LANES to route work here.
+            </span>
+          )}
+        </p>
+      </div>
+      {/* ─── END AIREITER BOLT-ON ─── */}
 
       <div className="space-y-3">
         <Label className="flex items-center gap-2 text-sm font-medium">
           <KeyRound className="h-4 w-4" />
           HeyGen keys — host lip-sync (per tab)
+          {fal && !fal.active && (
+            <span className="text-xs font-normal text-muted-foreground">
+              · active lane
+            </span>
+          )}
         </Label>
         {heygenLoading ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -312,6 +456,57 @@ export function ProviderKeys() {
           wider. Blank ⇒ that tab uses the shared{" "}
           <code className="text-[11px]">HEYGEN_API_KEY</code>; with that unset
           too, host scenes fail loudly.
+        </p>
+      </div>
+
+      <div className="space-y-3">
+        <Label className="flex items-center gap-2 text-sm font-medium">
+          <KeyRound className="h-4 w-4" />
+          fal.ai keys — host lip-sync alternative (per tab)
+          {fal?.active && (
+            <span className="text-xs font-normal text-muted-foreground">
+              · active lane
+            </span>
+          )}
+        </Label>
+        {falLoading ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+          </div>
+        ) : (
+          fal?.slots.map(({ slotIndex, masked }) => (
+            <KeyRow
+              key={slotIndex}
+              label={`Video ${slotIndex + 1}`}
+              masked={masked}
+              placeholder="Not set — uses shared FAL_API_KEY"
+              draft={falDrafts[slotIndex] ?? ""}
+              onDraftChange={value =>
+                setFalDrafts(d => ({ ...d, [slotIndex]: value }))
+              }
+              onSave={apiKey => saveFalMutation.mutate({ slotIndex, apiKey })}
+              saving={saveFalMutation.isPending}
+              badge={
+                <HealthBadge
+                  keySet={!!masked}
+                  ok={
+                    falHealth?.slots.find(s => s.slotIndex === slotIndex)?.ok ??
+                    null
+                  }
+                  loading={falHealthLoading}
+                />
+              }
+            />
+          ))
+        )}
+        <p className="text-xs text-muted-foreground">
+          Used only when{" "}
+          <code className="text-[11px]">LIPSYNC_PROVIDER=fal</code> — rendering
+          host scenes on{" "}
+          <code className="text-[11px]">{fal?.model ?? "fal.ai"}</code> instead
+          of HeyGen Avatar IV. Blank ⇒ that tab uses the shared{" "}
+          <code className="text-[11px]">FAL_API_KEY</code>. fal has no
+          credit-balance API, so the badge is a liveness probe, not a balance.
         </p>
       </div>
     </div>

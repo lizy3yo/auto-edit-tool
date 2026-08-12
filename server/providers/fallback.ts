@@ -6,6 +6,8 @@ import type {
 } from "./base";
 import { GeminiImageAdapter } from "./gemini-image";
 import { ENV } from "../_core/env";
+// AIREITER BOLT-ON (temporary) — delete with the branch in `generateStillWithFallback`.
+import { aireiterLaneEnabled } from "./aireiter";
 
 /**
  * Wraps a primary provider adapter (e.g. 69Labs) and automatically falls back to
@@ -48,7 +50,18 @@ export async function generateStillWithFallback(input: {
 }): Promise<GenerationResult> {
   let primaryError = "unknown error";
   try {
-    if (input.apimartKey) {
+    // ─── AIREITER BOLT-ON (temporary) ──────────────────────────────────────
+    // Spends prepaid AIReiter credits on stills/keyframes instead of APIMART/OpenAI. Same
+    // gpt-image-2 model, different gateway. Off unless AIREITER_LANES names `stills`.
+    // TO REMOVE: delete this branch and change the `} else if (input.apimartKey) {` below
+    // back to `if (input.apimartKey) {`. See server/providers/aireiter.ts.
+    if (await aireiterLaneEnabled("stills")) {
+      const { aireiterStill } = await import("./aireiter");
+      const r = await aireiterStill(input);
+      if (r.success) return r;
+      primaryError = r.error ?? "AIReiter returned no image";
+      // ─── END AIREITER BOLT-ON ────────────────────────────────────────────
+    } else if (input.apimartKey) {
       // Architecture Stage 3: APIMART is the sole still/keyframe provider.
       const { ApimartAdapter } = await import("./apimart");
       const apimart = new ApimartAdapter(input.apimartKey);
@@ -78,7 +91,6 @@ export async function generateStillWithFallback(input: {
   // Failing fast surfaces the real error instead of burning the free-tier Gemini quota.
   return { success: false, error: primaryError };
 }
-
 
 // ─── Circuit breaker state (module-level, shared across calls) ───
 let consecutiveTimeouts = 0;

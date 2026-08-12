@@ -369,10 +369,17 @@ export interface StoryboardScene {
   /** Error detail when sceneStatus is "failed" */
   error?: string;
   /**
+   * The 1920×1080 contextual "plate" a host scene is composed onto, for lip-sync lanes whose
+   * model cannot render a full 16:9 frame (EchoMimicV3 tops out at 768² square). Persisted
+   * because the compose step runs AFTER the poll, so a resumed job in a fresh process still
+   * needs to know which plate its animated square belongs to. See `server/hostFrame.ts`.
+   */
+  hostPlateUrl?: string;
+  /**
    * Which provider issued the in-flight render task(s) for this scene's clip(s).
    * Set alongside `renderTaskIds` so the resume path knows which adapter to poll.
    */
-  renderProvider?: "runpod" | "heygen" | "sixtynine_labs";
+  renderProvider?: "runpod" | "heygen" | "fal" | "echomimic" | "sixtynine_labs";
   /**
    * Provider-side task/job IDs for this scene's in-flight clip(s), in clip/chunk
    * order. Persisted as soon as a clip is submitted so a poll timeout, crash, or

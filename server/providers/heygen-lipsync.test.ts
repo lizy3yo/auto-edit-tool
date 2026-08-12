@@ -133,8 +133,8 @@ describe("HeygenLipsyncAdapter.submitLipsync", () => {
       video: () =>
         ++videoAttempts === 1
           ? jsonRes(400, {
-              error: { message: "Talking photo has missing image dimensions" },
-            })
+            error: { message: "Talking photo has missing image dimensions" },
+          })
           : jsonRes(200, { data: { video_id: "vid-2" } }),
     });
     const adapter = new HeygenLipsyncAdapter("key");

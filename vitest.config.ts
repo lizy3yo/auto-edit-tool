@@ -19,7 +19,15 @@ export default defineConfig({
     // refill waits.
     // JWT_SECRET: encryption.ts refuses to derive a key without one (no dev fallback, by
     // design). Any value works; the tests only round-trip through it.
-    env: { APIMART_BURST: "1000000", JWT_SECRET: "test-secret" },
+    // AIREITER_LANES: vitest injects the developer's real .env, so a machine running the
+    // AIReiter bolt-on would silently reroute the stills/b-roll lanes under test and fail
+    // suites that assert the OpenAI/APIMART path. Pinned off; the bolt-on's own tests set
+    // ENV.aireiterLanes directly.
+    env: {
+      APIMART_BURST: "1000000",
+      JWT_SECRET: "test-secret",
+      AIREITER_LANES: "",
+    },
     include: [
       "server/**/*.test.ts",
       "server/**/*.spec.ts",

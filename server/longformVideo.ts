@@ -32,11 +32,7 @@ import {
   truncateWords,
 } from "./visualDirection";
 import { getChannelLayer } from "./composer";
-import {
-  isMockMode,
-  mockVoiceoverUrl,
-  MockProviderAdapter,
-} from "./mockMode";
+import { isMockMode, mockVoiceoverUrl, MockProviderAdapter } from "./mockMode";
 import { getBookNameTokens } from "./ctaDetector";
 import {
   createUnifiedTTSTask,
@@ -70,18 +66,39 @@ import {
   heygenSlotsFor,
   HEYGEN_LIPSYNC_TIMEOUT_MS,
 } from "./providers/heygen-lipsync";
+import {
+  FalLipsyncAdapter,
+  falSlotsFor,
+  FAL_LIPSYNC_TIMEOUT_MS,
+} from "./providers/fal-lipsync";
+import os from "os";
+import path from "path";
+import fsp from "fs/promises";
+import {
+  EchomimicLipsyncAdapter,
+  echomimicSlots,
+  ECHOMIMIC_TIMEOUT_MS,
+} from "./providers/echomimic-lipsync";
+import {
+  hostBoxFor,
+  hostPlatePrompt,
+  composeHostFrame,
+  type HostBox,
+} from "./hostFrame";
+// AIREITER BOLT-ON (temporary) — delete with the block in `apimartAdapterForJob`.
+import { aireiterAdapter, aireiterLaneEnabled } from "./providers/aireiter";
 import { Semaphore } from "./providers/semaphore";
 
 /**
  * The host lip-sync lane, resolved once per pipeline pass. Two providers ship today —
- * HeyGen Avatar IV (production) and RunPod InfiniteTalk (staging) — and they differ in more
+ * HeyGen Avatar IV (production) and fal.ai (`LIPSYNC_PROVIDER=fal`) — and they differ in more
  * than an API call: payload shape, concurrency cap, poll ceiling, scene wall clock, and
  * whether the render needs a tail trim. All of that hangs off this object so
  * `resolveLipsyncAdapter` is the ONLY place that branches on `ENV.lipsyncProvider`; every
  * caller downstream just uses the lane it was handed.
  */
 type LipsyncLane = {
-  provider: "runpod" | "heygen";
+  provider: "runpod" | "heygen" | "fal" | "echomimic";
   /** Build + submit one render. The lane owns the provider-specific payload shape. */
   submit(req: {
     scene: StoryboardScene;
@@ -90,7 +107,16 @@ type LipsyncLane = {
     /** True when the scene is pinned to the alt-angle host photo. */
     useAlt: boolean;
   }): Promise<VideoSubmitResult>;
-  poll(taskId: string, timeoutMs?: number): Promise<GenerationResult>;
+  /**
+   * `ctx` carries the scene for lanes that need post-processing after the provider finishes —
+   * EchoMimic composes its 768² square onto `scene.hostPlateUrl` to reach 1080p. Lanes that
+   * return a finished 16:9 frame (HeyGen, fal) ignore it.
+   */
+  poll(
+    taskId: string,
+    timeoutMs?: number,
+    ctx?: { scene: StoryboardScene }
+  ): Promise<GenerationResult>;
   /** Process-global in-flight cap for this provider. */
   slots: Semaphore;
   /** How wide the host `mapPool` runs. */
@@ -241,6 +267,24 @@ export const SCENE_MIN_SEC = 3;
  * `SCENE_MIN_HOLD_SEC`). A `qrTail` beat's spoken part gets `8 - QR_TAIL_HOLD_SEC` = 5s.
  */
 export const LONG_SCENE_MAX_SEC = 8;
+
+/**
+ * Ceiling for HOST beats specifically. Defaults to `LONG_SCENE_MAX_SEC`, i.e. no separate
+ * limit, so nothing changes unless it is set.
+ *
+ * It exists for lip-sync lanes whose model cannot cover a full 8s in one render: EchoMimicV3
+ * standard inference stops at 138 frames ≈ 5.5s. Without this, flipping to that lane makes
+ * every host beat in the 5.5–8s band fail at submit — a broken render, not a degraded one.
+ *
+ * Capping HOST scenes alone (rather than lowering `LONG_SCENE_MAX_SEC`) keeps cutaway pacing
+ * untouched. Over-long host beats are then SPLIT by `splitOverlongScenes` into consecutive
+ * host scenes, which reads as an ordinary cut between two takes — far better than chunking
+ * inside one render, where the model restarts from the same still and the host visibly resets
+ * mid-sentence. Set to 5 when `LIPSYNC_PROVIDER=echomimic`.
+ */
+export const HOST_SCENE_MAX_SEC = Number(
+  process.env.HOST_SCENE_MAX_SEC ?? LONG_SCENE_MAX_SEC
+);
 
 /**
  * Conversational pace assumed across the pipeline for word↔second estimates. Calibrated from
@@ -465,6 +509,13 @@ const APIMART_EDIT_SETTING_KEY = "apimart_key_edit";
  */
 const heygenSlotSettingKey = (slot: number): string =>
   `heygen_key_slot_${slot}`;
+/**
+ * Per-tab fal.ai keys — the `LIPSYNC_PROVIDER=fal` equivalent of the HeyGen slots. Stored
+ * separately rather than reusing `heygen_key_slot_*` so flipping the provider back and forth
+ * never re-enters keys, and so a tab can hold both while the two lanes are being compared.
+ * A blank/unset slot ⇒ that tab falls back to the shared `FAL_API_KEY` env var.
+ */
+const falSlotSettingKey = (slot: number): string => `fal_key_slot_${slot}`;
 
 /** Decrypted raw provider API key for a setting, or null when unset/blank. */
 async function getStoredKey(settingKey: string): Promise<string | null> {
@@ -523,6 +574,13 @@ export const getHeygenSlotMasked = (slot: number): Promise<string | null> =>
 export const setHeygenSlotKey = (slot: number, apiKey: string): Promise<void> =>
   setStoredKey(heygenSlotSettingKey(slot), apiKey);
 
+export const getFalSlotKey = (slot: number): Promise<string | null> =>
+  getStoredKey(falSlotSettingKey(slot));
+export const getFalSlotMasked = (slot: number): Promise<string | null> =>
+  getStoredMasked(falSlotSettingKey(slot));
+export const setFalSlotKey = (slot: number, apiKey: string): Promise<void> =>
+  setStoredKey(falSlotSettingKey(slot), apiKey);
+
 /**
  * The APIMART video adapter for a job's tab, or null when the tab has no key. APIMART is the
  * ONLY b-roll VIDEO provider (no toggle, no fallback — `generateSceneClips` throws on null).
@@ -544,10 +602,15 @@ async function providerAdapterForJob(
 
 async function apimartAdapterForJob(
   params: LongformInputParams
-): Promise<ApimartAdapter | null> {
+): Promise<ProviderAdapter | null> {
   // Mock mode: b-roll renders locally, so a tab with no APIMART key (or an invalid one) still
   // produces a full film. Checked before the slot guard — mock must not depend on config.
   if (await isMockMode()) return new MockProviderAdapter() as any;
+  // ─── AIREITER BOLT-ON (temporary — delete this block to remove) ──────────
+  // Spends prepaid AIReiter credits on b-roll instead of APIMART. Same grok-imagine model,
+  // different gateway. Off unless AIREITER_LANES names `broll`; see providers/aireiter.ts.
+  if (await aireiterLaneEnabled("broll")) return aireiterAdapter();
+  // ─── END AIREITER BOLT-ON ────────────────────────────────────────────────
   if (params.apimartSlot == null) return null;
   const key = await getApimartSlotKey(params.apimartSlot);
   return key ? new ApimartAdapter(key) : null; // no key ⇒ b-roll fails loud
@@ -2507,9 +2570,97 @@ export async function resolveVideoProvider(
 }
 
 /**
+ * Build (once per scene) the 1080p contextual plate an EchoMimic host shot is composed onto.
+ *
+ * The WHOLE plate goes to the worker — it runs RetinaFace to find where the image model
+ * actually placed the host and crops there itself, returning the box it used. Cropping here
+ * instead would bake in a guess, and with per-scene backgrounds every plate is composed
+ * differently, so a fixed rectangle is exactly the wrong assumption.
+ *
+ * Cached on `scene.hostPlateUrl` because it is needed twice: here at submit, and again after
+ * the poll to compose the animated square back. Persisting it on the scene (rather than an
+ * in-memory map) is what lets a watchdog resume in a fresh process finish the compose instead
+ * of stranding a 768² clip.
+ *
+ * Generated with the host photo as an identity reference, so the face stays the channel's host
+ * while the background follows the scene — which is what makes per-scene backgrounds fall out
+ * of this lane for free.
+ */
+async function prepareEchomimicPlate(
+  scene: StoryboardScene,
+  hostPhotoUrl: string,
+  params: LongformInputParams
+): Promise<string> {
+  if (scene.hostPlateUrl) return scene.hostPlateUrl;
+
+  const context =
+    scene.splitVisual?.trim() ||
+    scene.visualPrompt?.trim() ||
+    params.videoSubject?.trim() ||
+    "a clean, softly lit interior";
+  const plate = await generateStillWithFallback({
+    prompt: hostPlatePrompt(context, "left"),
+    referenceImageUrl: hostPhotoUrl,
+    apimartKey:
+      params.apimartSlot != null
+        ? await getApimartSlotKey(params.apimartSlot)
+        : null,
+  });
+  if (!plate.success || !plate.fileData)
+    throw new Error(plate.error || "plate generation returned no image");
+  const { url } = await storagePut(
+    `longform/echomimic/plate-${scene.index}-${nanoid(8)}.png`,
+    Buffer.from(plate.fileData as Buffer),
+    "image/png"
+  );
+  scene.hostPlateUrl = url;
+  return url;
+}
+
+/**
+ * Compose the animated square onto its plate and store the finished 1080p clip.
+ * `box` is the rectangle the WORKER cut from (detected), so the square lands back exactly
+ * where it came from; the fixed box is only the floor when detection failed.
+ */
+async function composeEchomimicFrame(
+  hostClipUrl: string,
+  plateUrl: string,
+  box: HostBox
+): Promise<string> {
+  const buf = await withEchomimicTempDir(workDir =>
+    composeHostFrame({
+      mode: ENV.echomimicLayout,
+      plateUrl,
+      hostClipUrl,
+      box,
+      workDir,
+    })
+  );
+  const { url } = await storagePut(
+    `longform/echomimic/framed-${nanoid(8)}.mp4`,
+    buf,
+    "video/mp4"
+  );
+  return url;
+}
+
+/** Scratch dir for the crop/compose ffmpeg passes, always cleaned up. */
+async function withEchomimicTempDir<T>(
+  fn: (workDir: string) => Promise<T>
+): Promise<T> {
+  const workDir = path.join(os.tmpdir(), `echomimic-${nanoid(8)}`);
+  await fsp.mkdir(workDir, { recursive: true });
+  try {
+    return await fn(workDir);
+  } finally {
+    await fsp.rm(workDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
  * Resolve the host lip-sync lane, independent of which provider is active for b-roll clips.
- * `LIPSYNC_PROVIDER` picks it: `heygen` (Avatar IV — production default) or `runpod`
- * (InfiniteTalk on our own serverless GPU — the cheap staging lane). Returns null when the
+ * `LIPSYNC_PROVIDER` picks it: `heygen` (Avatar IV — production default) or `fal` (fal.ai
+ * queue, still+audio models — see `server/providers/fal-lipsync.ts`). Returns null when the
  * chosen provider's key is unset, and `generateSceneClips` then fails host scenes loudly
  * rather than silently rendering them as non-lip-synced grok video.
  *
@@ -2533,6 +2684,102 @@ export async function resolveLipsyncAdapter(
       poll: id => mock.pollVideo(id),
       slots: heygenSlotsFor("mock"),
       concurrency: ENV.heygenConcurrency,
+      sceneDeadlineMs: SCENE_DEADLINE_HOST_MS,
+    };
+  }
+
+  if (ENV.lipsyncProvider === "echomimic") {
+    // Self-hosted EchoMimicV3 on RunPod. Unlike HeyGen/fal this lane cannot render a 16:9
+    // frame at all — the model is 768² square — so the lane owns a three-step pipeline:
+    // build a contextual 1080p plate, cut the square the model animates out of it, then
+    // compose the animated square back to 1080p. See server/hostFrame.ts.
+    if (!ENV.runPodApiKey || !ENV.runpodEchomimicEndpoint) return null;
+    const echo = new EchomimicLipsyncAdapter();
+    return {
+      provider: "echomimic",
+      submit: async ({ scene, imageUrl, audioUrl }) => {
+        let plateUrl: string;
+        try {
+          plateUrl = await prepareEchomimicPlate(scene, imageUrl, params);
+        } catch (err: any) {
+          return {
+            error: `host plate generation failed: ${err?.message ?? err}`,
+          };
+        }
+        return echo.submitLipsync({
+          plateUrl,
+          audioUrl,
+          durationSec: scene.audioDuration,
+          outputKey: `longform/echomimic/${scene.index}-${nanoid(8)}.mp4`,
+          // Only used if RetinaFace finds no face in the plate.
+          fallbackBox: hostBoxFor("left"),
+        });
+      },
+      poll: async (id, ms, ctx) => {
+        const r = await echo.pollVideo(id, ms ?? ECHOMIMIC_TIMEOUT_MS);
+        if (!r.success || !r.fileUrl) return r;
+        const plateUrl = ctx?.scene.hostPlateUrl;
+        if (!plateUrl) {
+          // Square with nowhere to land — surface it rather than shipping a 768² clip into
+          // a 1080p film, where assembly would blow it up 2.5×.
+          return {
+            success: false,
+            taskId: id,
+            error:
+              "EchoMimic render finished but the scene has no hostPlateUrl to compose onto",
+            infraFailure: true,
+          };
+        }
+        try {
+          // The worker reports the box it cut from. RunPod replays a completed job's output
+          // on every status read, so a resumed poll gets the same box — no persistence needed.
+          const composed = await composeEchomimicFrame(
+            r.fileUrl,
+            plateUrl,
+            r.box ?? hostBoxFor("left")
+          );
+          return { ...r, fileUrl: composed };
+        } catch (err: any) {
+          return {
+            success: false,
+            taskId: id,
+            error: `host frame compose failed: ${err?.message ?? err}`,
+            infraFailure: true,
+          };
+        }
+      },
+      slots: echomimicSlots(),
+      concurrency: ENV.echomimicConcurrency,
+      sceneDeadlineMs: SCENE_DEADLINE_HOST_MS,
+    };
+  }
+
+  if (ENV.lipsyncProvider === "fal") {
+    // Per-tab fal account, shared FAL_API_KEY as the fallback — same slot contract as HeyGen
+    // below, read at render time so a key rotation and a job resume both pick up the current key.
+    const falKey =
+      (params.apimartSlot != null
+        ? await getFalSlotKey(params.apimartSlot)
+        : null) ?? ENV.falApiKey;
+    if (!falKey) return null;
+    const fal = new FalLipsyncAdapter(falKey);
+    return {
+      provider: "fal",
+      // Like Avatar IV, the fal still+audio models take no camera knob and INHERIT the gaze of
+      // the photo they animate, so `useAlt` needs no translation here either — the choice of
+      // photo IS the choice of angle. `audioDuration` rides along because frame-sized models
+      // (InfiniTalk) need a length and the adapter rejects over-long narration locally rather
+      // than paying for a 422.
+      submit: ({ scene, imageUrl, audioUrl }) =>
+        fal.submitLipsync({
+          imageUrl,
+          audioUrl,
+          durationSec: scene.audioDuration,
+        }),
+      poll: (id, ms) => fal.pollVideo(id, ms ?? FAL_LIPSYNC_TIMEOUT_MS),
+      // Per-KEY, matching the HeyGen lane: 5 tabs on 5 fal keys each get their own budget.
+      slots: falSlotsFor(falKey),
+      concurrency: ENV.falConcurrency,
       sceneDeadlineMs: SCENE_DEADLINE_HOST_MS,
     };
   }
@@ -4748,7 +4995,9 @@ export function clipTrimFor(
 
 async function generateSceneClip(
   adapter: ReturnType<typeof createProviderAdapter>,
-  apimart: ApimartAdapter | null,
+  // Widened from `ApimartAdapter` for the AIReiter bolt-on; only the ProviderAdapter surface
+  // (submitVideo/pollVideo/generateVideo) is ever used here, so this is the honest type either way.
+  apimart: ProviderAdapter | null,
   jobId: number,
   scene: StoryboardScene,
   params: LongformInputParams,
@@ -4770,7 +5019,10 @@ async function generateSceneClip(
   // fails rather than degrading to a text-only clip.
   let keyframe: string | undefined;
   if (!scene.hostPresent && !chain[0].imageUrls && !brollKeyframeDisabled()) {
-    const apimartKey = params.apimartSlot != null ? await getApimartSlotKey(params.apimartSlot) : null;
+    const apimartKey =
+      params.apimartSlot != null
+        ? await getApimartSlotKey(params.apimartSlot)
+        : null;
     keyframe = await Promise.race([
       generateBrollKeyframe(
         jobId,
@@ -5060,7 +5312,7 @@ export async function generateSceneStillClip(
       scene,
       4,
       referenceImageUrl,
-      (imgInput) => generateStillWithFallback({ ...imgInput, apimartKey }),
+      imgInput => generateStillWithFallback({ ...imgInput, apimartKey }),
       subject,
       undefined,
       square
@@ -5155,7 +5407,7 @@ export async function generateBrollKeyframe(
     scene,
     4,
     referenceImageUrl,
-    (imgInput) => generateStillWithFallback({ ...imgInput, apimartKey }),
+    imgInput => generateStillWithFallback({ ...imgInput, apimartKey }),
     subject,
     visualOverride
   );
@@ -5192,7 +5444,8 @@ export function clipsNeededFor(
  * added ON TOP of the narration there, so the spoken part must leave room for it.
  */
 const capFor = (s: StoryboardScene): number =>
-  LONG_SCENE_MAX_SEC - (s.qrTail ? QR_TAIL_HOLD_SEC : 0);
+  (s.hostPresent ? HOST_SCENE_MAX_SEC : LONG_SCENE_MAX_SEC) -
+  (s.qrTail ? QR_TAIL_HOLD_SEC : 0);
 
 /** On-screen FLOOR for one scene — host beats hold longer so cuts never flip on a face. */
 const floorFor = (s: StoryboardScene): number =>
@@ -5637,10 +5890,15 @@ export function describeOverlongScenes(
 ): string | null {
   const over = scenes.filter(s => (s.audioDuration ?? 0) > capFor(s));
   if (over.length === 0) return null;
+  // Name each scene's OWN ceiling — host beats can carry a lower one (`HOST_SCENE_MAX_SEC`),
+  // so a single global number in this message would be wrong half the time.
   const detail = over
-    .map(s => `scene ${s.index} (${(s.audioDuration ?? 0).toFixed(1)}s)`)
+    .map(
+      s =>
+        `scene ${s.index} (${(s.audioDuration ?? 0).toFixed(1)}s > ${capFor(s)}s)`
+    )
     .join(", ");
-  return `${over.length} scene(s) over the ${LONG_SCENE_MAX_SEC}s ceiling: ${detail}`;
+  return `${over.length} scene(s) over their ceiling: ${detail}`;
 }
 
 /**
@@ -5727,7 +5985,7 @@ export async function withTransientRetry<T>(
 export async function runChunkTasks(
   jobId: number,
   scene: StoryboardScene,
-  provider: "runpod" | "heygen" | "sixtynine_labs",
+  provider: "runpod" | "heygen" | "fal" | "echomimic" | "sixtynine_labs",
   chunkCount: number,
   submit: (i: number) => Promise<VideoSubmitResult>,
   poll: (taskId: string) => Promise<GenerationResult>,
@@ -5829,7 +6087,11 @@ export async function runChunkTasks(
     for (let i = 0; i < polls.length; i++) {
       const want = expectedDurationSec(i);
       if (!want || want <= 0) continue;
-      const got = await probeBufferDurationSec(polls[i].fileData as Buffer);
+      // A lane whose worker uploaded straight to R2 (EchoMimic) returns `fileUrl` and no
+      // bytes — probe it in place rather than pulling it down just to measure it.
+      const got = polls[i].fileData
+        ? await probeBufferDurationSec(polls[i].fileData as Buffer)
+        : await probeUrlDurationSec(polls[i].fileUrl!);
       const tooShort = got < want - Math.max(0.5, want * 0.1);
       if (tooShort) {
         scene.renderTaskIds = undefined;
@@ -5845,6 +6107,12 @@ export async function runChunkTasks(
   const urls: string[] = [];
   for (let i = 0; i < polls.length; i++) {
     const r = polls[i];
+    // Already in our bucket (the provider's worker PUT it there via a presigned URL) — take
+    // the URL as-is instead of a download + re-upload that would change nothing.
+    if (r.fileUrl && !r.fileData) {
+      urls.push(r.fileUrl);
+      continue;
+    }
     const key = `longform/${jobId}/clip-${scene.index}-${i}-${nanoid(6)}.mp4`;
     const { url } = await storagePut(
       key,
@@ -5984,7 +6252,7 @@ async function generateSceneLipsyncClips(
         audioUrl: chunkUrls[i],
         useAlt: useAltPhoto,
       }),
-    id => lipsync.poll(id, pollTimeoutMs),
+    id => lipsync.poll(id, pollTimeoutMs, { scene }),
     persist,
     lipsync.slots,
     i => chunkDurations[i]
@@ -6005,8 +6273,16 @@ async function generateSceneLipsyncClips(
 
   if (scene.splitVisual) {
     try {
-      const apimartKey = params.apimartSlot != null ? await getApimartSlotKey(params.apimartSlot) : null;
-      const rightUrl = await renderSplitRightClip(jobId, scene, params, apimartKey);
+      const apimartKey =
+        params.apimartSlot != null
+          ? await getApimartSlotKey(params.apimartSlot)
+          : null;
+      const rightUrl = await renderSplitRightClip(
+        jobId,
+        scene,
+        params,
+        apimartKey
+      );
       const dims = dimensionsFor(TALKING_HEAD_ASPECT_RATIO);
       const composited: string[] = [];
       for (let i = 0; i < urls.length; i++) {
@@ -6057,7 +6333,10 @@ export async function generateSceneClips(
   // render on APIMART grok-imagine ONLY. Resolved once per scene from `params.apimartSlot` so a
   // key rotation is picked up on resume.
   const apimart = await apimartAdapterForJob(params);
-  const apimartKey = params.apimartSlot != null ? await getApimartSlotKey(params.apimartSlot) : null;
+  const apimartKey =
+    params.apimartSlot != null
+      ? await getApimartSlotKey(params.apimartSlot)
+      : null;
 
   // No silent provider swap for b-roll: a missing APIMART key fails the scene loud instead of
   // rendering it on 69Labs, whose grok build has different duration/quality behaviour.
@@ -7335,10 +7614,9 @@ export async function enhanceBrollPrompts(
     // Summarised AND de-duplicated: every scene in a batch fails on the same provider error,
     // and these strings are raw provider bodies. Un-summarised, one quota outage pasted three
     // ~900-character JSON blobs into a user-facing job warning.
-    failReasons: Array.from(new Set(failReasons.map(summarizeProviderError))).slice(
-      0,
-      3
-    ),
+    failReasons: Array.from(
+      new Set(failReasons.map(summarizeProviderError))
+    ).slice(0, 3),
   };
 }
 
@@ -7354,7 +7632,10 @@ export async function enhanceBrollPrompts(
 export function summarizeProviderError(raw: string): string {
   const s = (raw ?? "").trim();
   if (!s) return "unknown error";
-  if (/"?quotaId"?\s*:\s*"[^"]*PerDay/i.test(s) || /free_tier_requests/i.test(s)) {
+  if (
+    /"?quotaId"?\s*:\s*"[^"]*PerDay/i.test(s) ||
+    /free_tier_requests/i.test(s)
+  ) {
     const model = s.match(/"model"\s*:\s*"([^"]+)"/)?.[1];
     const limit = s.match(/limit:\s*(\d+)/)?.[1];
     return (
@@ -8017,7 +8298,10 @@ export async function runLongformPipeline(jobId: number): Promise<void> {
     if (!provider) throw new Error("No active provider configured");
     const { providerType: videoType, apiKey: videoKey } =
       await resolveVideoProvider(provider);
-    const adapter = await providerAdapterForJob(videoType as ProviderType, videoKey);
+    const adapter = await providerAdapterForJob(
+      videoType as ProviderType,
+      videoKey
+    );
     const { providerType: ttsType, apiKey: ttsKey } =
       await resolveTTSProvider(provider);
 
@@ -8348,7 +8632,10 @@ async function resumePendingRendersLocked(jobId: number): Promise<boolean> {
   if (!provider) return false;
   const { providerType: videoType, apiKey: videoKey } =
     await resolveVideoProvider(provider);
-  const adapter = await providerAdapterForJob(videoType as ProviderType, videoKey);
+  const adapter = await providerAdapterForJob(
+    videoType as ProviderType,
+    videoKey
+  );
   const lipsync = params.faceImageUrl
     ? await resolveLipsyncAdapter(params)
     : null;
@@ -8635,7 +8922,10 @@ async function regenerateSplitRight(
     schedulePersist(jobId, { storyboard: scenes });
   }
 
-  const apimartKey = params.apimartSlot != null ? await getApimartSlotKey(params.apimartSlot) : null;
+  const apimartKey =
+    params.apimartSlot != null
+      ? await getApimartSlotKey(params.apimartSlot)
+      : null;
   const rightUrl = await renderSplitRightClip(jobId, scene, params, apimartKey);
   const composited: string[] = [];
   for (let i = 0; i < scene.hostClipUrls.length; i++) {
@@ -8761,7 +9051,10 @@ export async function regenerateScene(
           if (!provider) throw new Error("No active provider configured");
           const { providerType: videoType, apiKey: videoKey } =
             await resolveVideoProvider(provider);
-          adapter = await providerAdapterForJob(videoType as ProviderType, videoKey);
+          adapter = await providerAdapterForJob(
+            videoType as ProviderType,
+            videoKey
+          );
           ({ providerType: ttsType, apiKey: ttsKey } =
             await resolveTTSProvider(provider));
           instruction =
@@ -9098,7 +9391,10 @@ async function retryFailedScenesLocked(jobId: number): Promise<void> {
     if (!provider) throw new Error("No active provider configured");
     const { providerType: videoType, apiKey: videoKey } =
       await resolveVideoProvider(provider);
-    const adapter = await providerAdapterForJob(videoType as ProviderType, videoKey);
+    const adapter = await providerAdapterForJob(
+      videoType as ProviderType,
+      videoKey
+    );
     const { providerType: ttsType, apiKey: ttsKey } =
       await resolveTTSProvider(provider);
     const instruction =

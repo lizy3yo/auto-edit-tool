@@ -120,7 +120,7 @@ export function waitForHeygenVideo(videoId: string): {
   cancel: () => void;
 } {
   if (notifiedVideoIds.delete(videoId))
-    return { wait: Promise.resolve(), cancel: () => {} };
+    return { wait: Promise.resolve(), cancel: () => { } };
   let wake!: () => void;
   const wait = new Promise<void>(resolve => (wake = resolve));
   const waiting = heygenWaiters.get(videoId) ?? new Set<() => void>();
@@ -329,7 +329,7 @@ export class HeygenLipsyncAdapter {
             const waitMs =
               response.status === 429 && retryAfter
                 ? Math.min(parseInt(retryAfter, 10) * 1000, 60_000) ||
-                  retryDelay(attempt)
+                retryDelay(attempt)
                 : retryDelay(attempt);
             console.log(
               `[HeyGen] submit ${response.status}, retrying in ${Math.round(waitMs / 1000)}s (attempt ${attempt + 1})...`

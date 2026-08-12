@@ -46,8 +46,10 @@ Read through the single `ENV` object in `server/_core/env.ts`, except `R2_*`, wh
 | `R2_PUBLIC_URL`                                                          | `server/storage.ts:83`, `server/musicBeds.ts:101`                                                      | narration-only films (warns, no crash)    |
 | `RUN_POD_KEY` + `RUNPOD_WHISPERX_ENDPOINT`                               | `server/_core/voiceTranscription.ts` → `kodxana/whisperx-worker_v2` serverless                         | no word-level narration alignment         |
 | `HEYGEN_API_KEY`                                                         | `server/longformVideo.ts:2506` — **fallback only**, used when a tab's slot key is blank                | host lip-sync fails for slot-less tabs    |
-| `PUBLIC_BASE_URL`                                                        | `server/providers/heygen-lipsync.ts:78` (webhook callback URL)                                         | blank ⇒ pure polling; slower, still works |
-| `LIPSYNC_PROVIDER` (`heygen`)                                            | `ENV.lipsyncProvider` — the only branch point, in `resolveLipsyncAdapter`                              | —                                         |
+| `FAL_API_KEY`                                                            | `server/providers/fal-lipsync.ts` — **fallback only**, used when a tab's fal slot key is blank         | host lip-sync fails when `LIPSYNC_PROVIDER=fal` |
+| `PUBLIC_BASE_URL`                                                        | `server/providers/heygen-lipsync.ts:78`, `server/providers/fal-lipsync.ts` (webhook callback URL)      | blank ⇒ pure polling; slower, still works |
+| `RUNPOD_ECHOMIMIC_ENDPOINT`                                              | `server/providers/echomimic-lipsync.ts` — self-hosted lane, auth reuses `RUN_POD_KEY`                  | `echomimic` lane cannot resolve           |
+| `LIPSYNC_PROVIDER` (`heygen` \| `fal` \| `echomimic`)                    | `ENV.lipsyncProvider` — the only branch point, in `resolveLipsyncAdapter`                              | —                                         |
 
 ### Channel B — DB-stored, AES-256-GCM, entered in Admin
 
@@ -56,6 +58,7 @@ Read through the single `ENV` object in `server/_core/env.ts`, except `R2_*`, wh
 | 69Labs            | `provider_configs.apiKeyEncrypted` (`server/db.ts`)                                          | `https://69labs.vip/api/v1` |
 | APIMART ×5 + edit | `app_settings` → `apimart_key_slot_0..4`, `apimart_key_edit` (`server/longformVideo.ts:452`) | `https://api.apimart.ai`    |
 | HeyGen ×5         | `app_settings` → `heygen_key_slot_0..4` (`server/longformVideo.ts:461`)                      | `https://api.heygen.com/v3` |
+| fal.ai ×5         | `app_settings` → `fal_key_slot_0..4` — read only when `LIPSYNC_PROVIDER=fal`                 | `https://queue.fal.run`     |
 
 `LONGFORM_SLOT_COUNT = 5` — one key slot per UI tab, so 5 accounts render 5× wider than
 one shared key. Crypto lives in `server/encryption.ts`:
@@ -96,7 +99,14 @@ Express · tRPC · Drizzle · MySQL.
 - `server/longformVideo.ts` — **9k lines, the whole pipeline. Start here.**
 - `server/routers.ts` — tRPC surface · `server/videoAssembly.ts` — ffmpeg assembly
 - `server/providers/` — one adapter per vendor; `base.ts` is the interface,
-  `fallback.ts` the image chain (primary → Gemini)
+  `fallback.ts` the image chain (primary → Gemini). `heygen-lipsync.ts`,
+  `fal-lipsync.ts` and `echomimic-lipsync.ts` are the three host lip-sync lanes;
+  `LIPSYNC_PROVIDER` picks one and `resolveLipsyncAdapter` is the only place that reads it
+- `server/hostFrame.ts` + `runpod/echomimic-worker/` — the self-hosted lane. EchoMimicV3
+  renders a **768² square**, so `hostFrame.ts` generates a 1080p contextual plate, cuts the
+  square the model animates out of it, and composes the result back (`panel` or `inset`
+  layout). At 768 in a 1080-high frame the host occupies 71% of the height and is placed 1:1,
+  so nothing is upscaled. This is also how per-scene host backgrounds get built
 - `server/narrationAlignment.ts`, `server/_core/voiceTranscription.ts` — whisperx
 - `drizzle/schema.ts` — 5 tables: `provider_configs`, `longform_video_jobs`,
   `channel_configs`, `channel_layers`, `app_settings`

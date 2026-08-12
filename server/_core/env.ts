@@ -52,16 +52,72 @@ export const ENV = {
    * set this — there is no default.
    */
   runpodWhisperxEndpoint: process.env.RUNPOD_WHISPERX_ENDPOINT ?? "",
-  /** Which provider renders host lip-sync scenes. HeyGen only in this app. */
-  lipsyncProvider: (process.env.LIPSYNC_PROVIDER ?? "heygen") as "heygen",
+  /**
+   * Which provider renders host lip-sync scenes: `heygen` (Avatar IV) or `fal`
+   * (fal.ai queue — see `server/providers/fal-lipsync.ts`). `resolveLipsyncAdapter`
+   * is the ONLY place that reads this.
+   */
+  lipsyncProvider: (process.env.LIPSYNC_PROVIDER ?? "heygen") as
+    "heygen" | "fal" | "echomimic",
   /** HeyGen API key — fallback when a per-tab key slot is empty. */
   heygenApiKey: process.env.HEYGEN_API_KEY ?? "",
   /**
    * Public origin of this server (e.g. `https://myapp.example.com`) — used to
-   * build the HeyGen render-completion callback URL. Blank (local dev) ⇒ no
+   * build the HeyGen/fal render-completion callback URLs. Blank (local dev) ⇒ no
    * callback is sent and host scenes fall back to pure polling.
    */
   publicBaseUrl: process.env.PUBLIC_BASE_URL ?? "",
   /** Max concurrent active HeyGen lip-sync jobs. */
   heygenConcurrency: Number(process.env.HEYGEN_CONCURRENCY ?? 8),
+  /**
+   * RunPod serverless endpoint id for the EchoMimicV3 worker
+   * (`runpod/echomimic-worker/`). Auth reuses `RUN_POD_KEY`. Unset ⇒ the
+   * `echomimic` lip-sync lane cannot resolve.
+   */
+  runpodEchomimicEndpoint: process.env.RUNPOD_ECHOMIMIC_ENDPOINT ?? "",
+  /**
+   * In-flight EchoMimic renders. Unlike the other lanes this is a PHYSICAL cap:
+   * set it to the endpoint's max-workers value. Submitting past that only grows
+   * RunPod's queue, which eats the poll ceiling rather than adding throughput.
+   */
+  echomimicConcurrency: Number(process.env.ECHOMIMIC_CONCURRENCY ?? 3),
+  /** Diffusion steps. Flash is tuned for 8; 5 is enough for a talking head. */
+  echomimicSteps: Number(process.env.ECHOMIMIC_STEPS ?? 8),
+  /**
+   * How the 768² render becomes a 1080p 16:9 frame (see `server/hostFrame.ts`):
+   * `panel` (default — hard edge, no seam risk) or `inset` (composited back into
+   * the plate; better looking, but the model's regenerated background can show at
+   * the box edge).
+   */
+  echomimicLayout: (process.env.ECHOMIMIC_LAYOUT ?? "panel") as
+    "panel" | "inset",
+  /** fal.ai API key — fallback when a per-tab fal key slot is empty. */
+  falApiKey: process.env.FAL_API_KEY ?? process.env.FAL_KEY ?? "",
+  /**
+   * Which fal still+audio model renders the host — a key of `FAL_LIPSYNC_MODELS`
+   * (`omnihuman` | `infinitalk`). Unknown values fall back to `omnihuman`.
+   */
+  falLipsyncModel: process.env.FAL_LIPSYNC_MODEL ?? "omnihuman",
+  /**
+   * Max concurrent active fal lip-sync renders PER KEY. fal publishes no hard
+   * per-account cap, so this is a spend governor — every slot is a billed render.
+   */
+  falConcurrency: Number(process.env.FAL_CONCURRENCY ?? 8),
+
+  // ─── AIREITER BOLT-ON (temporary; see server/providers/aireiter.ts) ──────
+  /** AIReiter gateway key. Blank ⇒ the bolt-on is inert regardless of lanes. */
+  aireiterApiKey: process.env.AIREITER_API_KEY ?? "",
+  /**
+   * Which lanes AIReiter takes over: comma-separated `broll`, `stills`, or `all`.
+   * Unset/empty (the default) ⇒ b-roll stays on APIMART and stills on OpenAI.
+   * Host lip-sync and TTS are NEVER affected — AIReiter sells neither.
+   */
+  aireiterLanes: process.env.AIREITER_LANES ?? "",
+  /** Grok Imagine on AIReiter tops out here: `480p` (cheapest) or `720p`. */
+  aireiterVideoResolution: process.env.AIREITER_VIDEO_RESOLUTION ?? "720p",
+  /** gpt_image_2 resolution tier: `1K`, `2K`, or `4K`. */
+  aireiterImageResolution: process.env.AIREITER_IMAGE_RESOLUTION ?? "2K",
+  /** Shared in-flight cap — a spend governor; every slot is a billed generation. */
+  aireiterConcurrency: Number(process.env.AIREITER_CONCURRENCY ?? 4),
+  // ─── END AIREITER BOLT-ON ───────────────────────────────────────────────
 };
