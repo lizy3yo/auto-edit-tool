@@ -13,6 +13,9 @@
  *   npx tsx scripts/test-lipsync.ts --job 181
  *   npx tsx scripts/test-lipsync.ts --job 181 --scene 12 --provider heygen
  *
+ *   # real speech through the channel's own 69Labs voice — the honest test
+ *   npx tsx scripts/test-lipsync.ts --image https://…/host.png --say "Hey, it's Roger."
+ *
  *   # or drive it with explicit URLs
  *   npx tsx scripts/test-lipsync.ts --image https://…/host.png --audio https://…/scene.mp3
  *
@@ -21,16 +24,26 @@
  *
  * Keys come from the same places a render uses: the per-tab Admin slot first, then the env
  * fallback. Nothing here is mocked, so it spends real credits — one clip at a time.
+ *
+ * NOTE: `--job` reads a finished job's scene audio, which on a MOCK render is a silent
+ * placeholder — every provider then returns a closed mouth, which looks like a lip-sync
+ * failure and isn't one. Use `--say` when the job you have was rendered in mock mode.
  */
 import "dotenv/config";
 import { writeFileSync } from "fs";
 import { ENV } from "../server/_core/env";
-import { getLongformVideoJobById } from "../server/db";
+import { getLongformVideoJobById, getChannelConfig } from "../server/db";
 import {
   getHeygenSlotKey,
   getFalSlotKey,
   getWavespeedSlotKey,
+  resolveTTSProvider,
 } from "../server/longformVideo";
+import {
+  createUnifiedTTSTask,
+  pollUnifiedTTSTask,
+  parseVolumeMultiplier,
+} from "../server/ttsUnified";
 import type { StoryboardScene } from "../shared/types";
 
 type Provider = "heygen" | "fal" | "wavespeed";
@@ -38,6 +51,41 @@ type Provider = "heygen" | "fal" | "wavespeed";
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
   return i >= 0 ? process.argv[i + 1] : undefined;
+}
+
+/**
+ * Speak `text` in a channel's own 69Labs voice and return the public audio URL.
+ *
+ * Exists because the obvious test source — a finished job's scene audio — is a placeholder on
+ * any MOCK render, and a near-silent track produces a closed mouth on every provider. That
+ * looks like a lip-sync failure and isn't one. This gives the test real speech without running
+ * a whole film.
+ */
+async function speak(channelKey: string, text: string): Promise<string> {
+  const ch: any = await getChannelConfig(channelKey);
+  if (!ch) throw new Error(`channel "${channelKey}" not found`);
+  if (!ch.voiceId)
+    throw new Error(`channel "${channelKey}" has no voiceId configured`);
+
+  const { providerType, apiKey } = await resolveTTSProvider(null);
+  const taskId = await createUnifiedTTSTask(providerType, apiKey, {
+    text,
+    voiceId: ch.voiceId,
+    modelId: ch.ttsModel ?? undefined,
+    speed: ch.ttsSpeed ? Number(ch.ttsSpeed) : undefined,
+  });
+  console.log(`  TTS submitted (${ch.voiceName ?? ch.voiceId}), polling…`);
+
+  const volume = parseVolumeMultiplier(ch.ttsVolume);
+  const deadline = Date.now() + 5 * 60_000;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 4000));
+    const r = await pollUnifiedTTSTask(providerType, apiKey, taskId, volume);
+    if (r.status === "completed" && r.audioUrl) return r.audioUrl;
+    if (r.status === "failed" || r.status === "censored")
+      throw new Error(`TTS ${r.status}: ${r.error ?? "no detail"}`);
+  }
+  throw new Error("TTS timed out after 5 minutes");
 }
 
 /** Resolve a provider's key the same way `resolveLipsyncAdapter` does: slot, then env. */
@@ -61,9 +109,8 @@ async function renderOne(
 
   const submit = async () => {
     if (provider === "heygen") {
-      const { HeygenLipsyncAdapter } = await import(
-        "../server/providers/heygen-lipsync"
-      );
+      const { HeygenLipsyncAdapter } =
+        await import("../server/providers/heygen-lipsync");
       const a = new HeygenLipsyncAdapter(key);
       return {
         res: await a.submitLipsync({ imageUrl, audioUrl }),
@@ -71,18 +118,16 @@ async function renderOne(
       };
     }
     if (provider === "fal") {
-      const { FalLipsyncAdapter } = await import(
-        "../server/providers/fal-lipsync"
-      );
+      const { FalLipsyncAdapter } =
+        await import("../server/providers/fal-lipsync");
       const a = new FalLipsyncAdapter(key);
       return {
         res: await a.submitLipsync({ imageUrl, audioUrl, durationSec }),
         poll: (id: string) => a.pollVideo(id),
       };
     }
-    const { WavespeedLipsyncAdapter } = await import(
-      "../server/providers/wavespeed-lipsync"
-    );
+    const { WavespeedLipsyncAdapter } =
+      await import("../server/providers/wavespeed-lipsync");
     const a = new WavespeedLipsyncAdapter(key);
     return {
       res: await a.submitLipsync({ imageUrl, audioUrl, durationSec }),
@@ -128,8 +173,12 @@ async function main() {
 
   // Explicit URLs win; otherwise pull them out of a finished job so there is nothing to
   // hand-copy and the inputs are exactly what a real render would have used.
-  let pairs: Array<{ image: string; audio: string; dur?: number; tag: string }> =
-    [];
+  let pairs: Array<{
+    image: string;
+    audio: string;
+    dur?: number;
+    tag: string;
+  }> = [];
   const jobId = arg("job");
   if (jobId) {
     const job = await getLongformVideoJobById(Number(jobId));
@@ -156,10 +205,22 @@ async function main() {
       tag: `scene${s.index}`,
     }));
   } else {
+    const say = arg("say");
     const image = arg("image");
-    const audio = arg("audio");
+    let audio = arg("audio");
+
+    if (say) {
+      // Real speech through the channel's configured voice — the only way to judge lip-sync
+      // without running a full film, since mock renders leave a silent placeholder behind.
+      const channelKey = arg("channel") ?? "roger_the_pipe_guy";
+      console.log(`generating narration on channel "${channelKey}"…`);
+      audio = await speak(channelKey, say);
+      console.log(`  audio: ${audio}\n`);
+    }
     if (!image || !audio)
-      throw new Error("pass --job <id>, or both --image and --audio");
+      throw new Error(
+        'pass --job <id>, or --image <url> with either --audio <url> or --say "text"'
+      );
     pairs = [{ image, audio, tag: "single" }];
   }
 
@@ -174,7 +235,9 @@ async function main() {
       console.error(`  ✗ ${p.tag}: job has no host photo configured`);
       continue;
     }
-    console.log(`${p.tag}  (${p.dur ? p.dur.toFixed(1) + "s" : "?"} narration)`);
+    console.log(
+      `${p.tag}  (${p.dur ? p.dur.toFixed(1) + "s" : "?"} narration)`
+    );
     const wall = await renderOne(
       provider,
       key,
