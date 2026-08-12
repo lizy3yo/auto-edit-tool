@@ -88,6 +88,39 @@ async function speak(channelKey: string, text: string): Promise<string> {
   throw new Error("TTS timed out after 5 minutes");
 }
 
+/**
+ * Confirm a URL is actually fetchable and looks like the media type we claim, BEFORE handing
+ * it to a provider.
+ *
+ * Providers fetch these server-side, so a typo (or an un-substituted `<placeholder>`) comes
+ * back minutes later as an opaque decode error — "cannot identify image file" — after the
+ * submit has already been billed. Ten seconds of checking here turns that into an instant,
+ * obvious local failure.
+ */
+async function assertFetchable(url: string, kind: "image" | "audio") {
+  if (!/^https?:\/\//i.test(url))
+    throw new Error(
+      `--${kind === "image" ? "image" : "audio"} is not a URL: "${url}"` +
+        (url.startsWith("<")
+          ? " — looks like an unsubstituted placeholder"
+          : "")
+    );
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "GET",
+      headers: { Range: "bytes=0-2047" },
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch (e: any) {
+    throw new Error(`${kind} URL unreachable: ${e?.message ?? e}`);
+  }
+  if (!res.ok) throw new Error(`${kind} URL returned ${res.status}: ${url}`);
+  const ct = res.headers.get("content-type") ?? "";
+  if (ct && !ct.startsWith(kind) && !ct.includes("octet-stream"))
+    console.warn(`  ⚠ ${kind} URL content-type is "${ct}"`);
+}
+
 /** Resolve a provider's key the same way `resolveLipsyncAdapter` does: slot, then env. */
 async function keyFor(provider: Provider, slot: number): Promise<string> {
   if (provider === "heygen")
@@ -227,6 +260,13 @@ async function main() {
   console.log(
     `\nlip-sync test — provider=${provider} slot=${slot} clips=${pairs.length}\n`
   );
+
+  // Validate every input before spending anything — a bad URL is the cheapest failure to catch.
+  for (const p of pairs) {
+    if (!p.image) continue;
+    await assertFetchable(p.image, "image");
+    await assertFetchable(p.audio, "audio");
+  }
 
   let total = 0;
   let ok = 0;
