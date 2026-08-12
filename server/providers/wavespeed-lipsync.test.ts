@@ -101,8 +101,9 @@ describe("WavespeedLipsyncAdapter.submitLipsync", () => {
     expect(calls[0].body.resolution).toBe("480p");
   });
 
-  // The cheap lane — $0.015/s against HeyGen's $0.067 — must hit its own endpoint.
-  it("routes to the InfiniteTalk Fast endpoint when that model is selected", async () => {
+  // The cheap lane — $0.015/s against HeyGen's $0.067 — must hit its own endpoint, and its
+  // documented schema has NO resolution field, so sending one risks a 422 we still pay for.
+  it("routes to InfiniteTalk Fast and omits the undocumented resolution field", async () => {
     const calls = installFetchMock({});
     await new WavespeedLipsyncAdapter(
       "ws-key",
@@ -111,6 +112,11 @@ describe("WavespeedLipsyncAdapter.submitLipsync", () => {
     expect(calls[0].url).toBe(
       "https://api.wavespeed.ai/api/v3/wavespeed-ai/infinitetalk-fast"
     );
+    expect("resolution" in calls[0].body).toBe(false);
+    expect(calls[0].body).toMatchObject({
+      image: base.imageUrl,
+      audio: base.audioUrl,
+    });
   });
 
   // Every model takes the identical input shape; only the endpoint and ceiling differ.

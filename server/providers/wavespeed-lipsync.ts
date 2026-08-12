@@ -35,6 +35,12 @@ type WavespeedModelSpec = {
    */
   maxAudioSec: number;
   label: string;
+  /**
+   * Whether the endpoint accepts a `resolution` field. InfiniteTalk Fast does NOT — its schema
+   * is image/audio/mask_image/prompt/seed only, and it bills a flat $0.015/s with no tiers.
+   * Sending an undocumented field risks a 422 on a submit we would still be billed for.
+   */
+  supportsResolution: boolean;
 };
 
 /**
@@ -51,6 +57,7 @@ export const WAVESPEED_MODELS: Record<string, WavespeedModelSpec> = {
     id: "wavespeed-ai/infinitetalk",
     maxAudioSec: 600,
     label: "InfiniteTalk",
+    supportsResolution: true,
   },
   /**
    * InfiniteTalk Fast — **$0.015/s, roughly a quarter of HeyGen**, and the only option here
@@ -69,6 +76,8 @@ export const WAVESPEED_MODELS: Record<string, WavespeedModelSpec> = {
     id: "wavespeed-ai/infinitetalk-fast",
     maxAudioSec: 600,
     label: "InfiniteTalk Fast",
+    // Flat $0.015/s, no tiers, and `resolution` is absent from its documented schema.
+    supportsResolution: false,
   },
   /**
    * Tencent HunyuanVideo-Avatar. Benchmarks above EchoMimic v1/v2 and Hallo-3 on audio-driven
@@ -79,6 +88,7 @@ export const WAVESPEED_MODELS: Record<string, WavespeedModelSpec> = {
     id: "wavespeed-ai/hunyuan-avatar",
     maxAudioSec: 120,
     label: "Hunyuan Avatar",
+    supportsResolution: true,
   },
 };
 
@@ -178,7 +188,10 @@ export class WavespeedLipsyncAdapter {
     const body = JSON.stringify({
       image: params.imageUrl,
       audio: params.audioUrl,
-      resolution: wavespeedResolution(),
+      // Only where the endpoint documents it — see `supportsResolution`.
+      ...(this.model.supportsResolution
+        ? { resolution: wavespeedResolution() }
+        : {}),
       // No prompt: host beats are "seated host talks to camera", and a motion prompt is what
       // makes these models gesticulate. Same reasoning as HeyGen's `expressiveness: "low"`.
       seed: -1,
