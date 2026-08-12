@@ -54,6 +54,9 @@ import {
   getFalSlotKey,
   getFalSlotMasked,
   setFalSlotKey,
+  getWavespeedSlotKey,
+  getWavespeedSlotMasked,
+  setWavespeedSlotKey,
   assembleScenePromptPreview,
   validateCtaMarkers,
   syncSceneClipFields,
@@ -61,6 +64,7 @@ import {
 import { ApimartAdapter } from "./providers/apimart";
 import { HeygenLipsyncAdapter } from "./providers/heygen-lipsync";
 import { FalLipsyncAdapter, falLipsyncModel } from "./providers/fal-lipsync";
+import { WavespeedLipsyncAdapter } from "./providers/wavespeed-lipsync";
 // AIREITER BOLT-ON (temporary) — delete with the router block below.
 import {
   AireiterAdapter,
@@ -638,6 +642,57 @@ const longformVideoRouter = router({
     );
     return { slots };
   }),
+
+  /** Admin: masked per-tab WaveSpeedAI keys, plus whether this lane is live. */
+  getWavespeedKeys: adminProcedure.query(async () => {
+    const slots = await Promise.all(
+      Array.from({ length: LONGFORM_SLOT_COUNT }, (_, slotIndex) =>
+        getWavespeedSlotMasked(slotIndex).then(masked => ({
+          slotIndex,
+          masked,
+        }))
+      )
+    );
+    return {
+      slots,
+      active: ENV.lipsyncProvider === "wavespeed",
+      resolution: ENV.wavespeedResolution,
+    };
+  }),
+
+  /**
+   * Admin: per-key liveness. WaveSpeed exposes no balance endpoint, so this is a boolean
+   * probe: true = authenticates, false = rejected, null = unset key or the check failed.
+   */
+  getWavespeedKeyHealth: adminProcedure.query(async () => {
+    const slots = await Promise.all(
+      Array.from({ length: LONGFORM_SLOT_COUNT }, (_, slotIndex) =>
+        getWavespeedSlotKey(slotIndex)
+          .then(key =>
+            key ? new WavespeedLipsyncAdapter(key).checkKey() : null
+          )
+          .then(ok => ({ slotIndex, ok }))
+      )
+    );
+    return { slots };
+  }),
+
+  /** Admin: set (or clear, with an empty string) a tab's WaveSpeedAI key. */
+  setWavespeedKey: adminProcedure
+    .input(
+      z.object({
+        slotIndex: z
+          .number()
+          .int()
+          .min(0)
+          .max(LONGFORM_SLOT_COUNT - 1),
+        apiKey: z.string().max(400),
+      })
+    )
+    .mutation(async ({ input }) => {
+      await setWavespeedSlotKey(input.slotIndex, input.apiKey);
+      return { success: true };
+    }),
 
   // ─── AIREITER BOLT-ON (temporary — delete this block to remove) ─────────
   /**

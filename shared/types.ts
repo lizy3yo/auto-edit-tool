@@ -372,7 +372,7 @@ export interface StoryboardScene {
    * Which provider issued the in-flight render task(s) for this scene's clip(s).
    * Set alongside `renderTaskIds` so the resume path knows which adapter to poll.
    */
-  renderProvider?: "runpod" | "heygen" | "fal" | "sixtynine_labs";
+  renderProvider?: "runpod" | "heygen" | "fal" | "wavespeed" | "sixtynine_labs";
   /**
    * Provider-side task/job IDs for this scene's in-flight clip(s), in clip/chunk
    * order. Persisted as soon as a clip is submitted so a poll timeout, crash, or

@@ -58,7 +58,7 @@ export const ENV = {
    * is the ONLY place that reads this.
    */
   lipsyncProvider: (process.env.LIPSYNC_PROVIDER ?? "heygen") as
-    "heygen" | "fal",
+    "heygen" | "fal" | "wavespeed",
   /** HeyGen API key — fallback when a per-tab key slot is empty. */
   heygenApiKey: process.env.HEYGEN_API_KEY ?? "",
   /**
@@ -81,6 +81,15 @@ export const ENV = {
    * per-account cap, so this is a spend governor — every slot is a billed render.
    */
   falConcurrency: Number(process.env.FAL_CONCURRENCY ?? 8),
+  /** WaveSpeedAI key — fallback when a per-tab wavespeed slot key is empty. */
+  wavespeedApiKey: process.env.WAVESPEED_API_KEY ?? "",
+  /**
+   * InfiniteTalk output tier: `720p` (~$0.06/s, the ceiling) or `480p` (~$0.03/s).
+   * Neither is 1080p, so assembly upscales either way — 720p is the 1.5× option.
+   */
+  wavespeedResolution: process.env.WAVESPEED_RESOLUTION ?? "720p",
+  /** Max concurrent InfiniteTalk renders PER KEY — a spend governor. */
+  wavespeedConcurrency: Number(process.env.WAVESPEED_CONCURRENCY ?? 6),
 
   // ─── AIREITER BOLT-ON (temporary; see server/providers/aireiter.ts) ──────
   /** AIReiter gateway key. Blank ⇒ the bolt-on is inert regardless of lanes. */

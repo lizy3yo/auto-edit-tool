@@ -211,6 +211,13 @@ export function ProviderKeys() {
   const [editDraft, setEditDraft] = useState("");
   const [heygenDrafts, setHeygenDrafts] = useState<Record<number, string>>({});
   const [falDrafts, setFalDrafts] = useState<Record<number, string>>({});
+  const { data: ws, isLoading: wsLoading } =
+    trpc.longformVideo.getWavespeedKeys.useQuery();
+  const { data: wsHealth, isLoading: wsHealthLoading } =
+    trpc.longformVideo.getWavespeedKeyHealth.useQuery(undefined, {
+      refetchOnWindowFocus: false,
+    });
+  const [wsDrafts, setWsDrafts] = useState<Record<number, string>>({});
   // AIREITER BOLT-ON (temporary) — delete with the section below.
   const { data: aireiter, isLoading: aireiterLoading } =
     trpc.longformVideo.getAireiter.useQuery();
@@ -246,6 +253,16 @@ export function ProviderKeys() {
       setHeygenDrafts(d => ({ ...d, [vars.slotIndex]: "" }));
       utils.longformVideo.getHeygenKeys.invalidate();
       utils.longformVideo.getHeygenQuotas.invalidate();
+    },
+    onError: err => toast.error(err.message ?? "Failed to save."),
+  });
+
+  const saveWsMutation = trpc.longformVideo.setWavespeedKey.useMutation({
+    onSuccess: (_res, vars) => {
+      toast.success(`WaveSpeed key for Video ${vars.slotIndex + 1} saved.`);
+      setWsDrafts(d => ({ ...d, [vars.slotIndex]: "" }));
+      utils.longformVideo.getWavespeedKeys.invalidate();
+      utils.longformVideo.getWavespeedKeyHealth.invalidate();
     },
     onError: err => toast.error(err.message ?? "Failed to save."),
   });
@@ -342,6 +359,57 @@ export function ProviderKeys() {
             these APIMART keys are not being billed.
           </p>
         )}
+      </div>
+
+      <div className="space-y-3">
+        <Label className="flex items-center gap-2 text-sm font-medium">
+          <KeyRound className="h-4 w-4" />
+          WaveSpeed keys — InfiniteTalk lip-sync (per tab)
+          {ws?.active && (
+            <span className="text-xs font-normal text-muted-foreground">
+              · active lane
+            </span>
+          )}
+        </Label>
+        {wsLoading ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+          </div>
+        ) : (
+          ws?.slots.map(({ slotIndex, masked }) => (
+            <KeyRow
+              key={slotIndex}
+              label={`Video ${slotIndex + 1}`}
+              masked={masked}
+              placeholder="Not set — uses shared WAVESPEED_API_KEY"
+              draft={wsDrafts[slotIndex] ?? ""}
+              onDraftChange={value =>
+                setWsDrafts(d => ({ ...d, [slotIndex]: value }))
+              }
+              onSave={apiKey => saveWsMutation.mutate({ slotIndex, apiKey })}
+              saving={saveWsMutation.isPending}
+              badge={
+                <HealthBadge
+                  keySet={!!masked}
+                  ok={
+                    wsHealth?.slots.find(s => s.slotIndex === slotIndex)?.ok ??
+                    null
+                  }
+                  loading={wsHealthLoading}
+                />
+              }
+            />
+          ))
+        )}
+        <p className="text-xs text-muted-foreground">
+          Used only when{" "}
+          <code className="text-[11px]">LIPSYNC_PROVIDER=wavespeed</code> —
+          rendering host scenes on InfiniteTalk at{" "}
+          <code className="text-[11px]">{ws?.resolution ?? "720p"}</code> (its
+          ceiling; assembly upscales to 1080p). Takes up to 10 minutes of audio
+          per render, so no scene-length cap is needed. Blank ⇒ that tab uses
+          the shared <code className="text-[11px]">WAVESPEED_API_KEY</code>.
+        </p>
       </div>
 
       {/* ─── AIREITER BOLT-ON (temporary) — delete this whole section ─── */}

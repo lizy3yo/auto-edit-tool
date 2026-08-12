@@ -48,7 +48,8 @@ Read through the single `ENV` object in `server/_core/env.ts`, except `R2_*`, wh
 | `HEYGEN_API_KEY`                                                         | `server/longformVideo.ts:2506` — **fallback only**, used when a tab's slot key is blank                | host lip-sync fails for slot-less tabs    |
 | `FAL_API_KEY`                                                            | `server/providers/fal-lipsync.ts` — **fallback only**, used when a tab's fal slot key is blank         | host lip-sync fails when `LIPSYNC_PROVIDER=fal` |
 | `PUBLIC_BASE_URL`                                                        | `server/providers/heygen-lipsync.ts:78`, `server/providers/fal-lipsync.ts` (webhook callback URL)      | blank ⇒ pure polling; slower, still works |
-| `LIPSYNC_PROVIDER` (`heygen` \| `fal`)                                   | `ENV.lipsyncProvider` — the only branch point, in `resolveLipsyncAdapter`                              | —                                         |
+| `WAVESPEED_API_KEY`                                                      | `server/providers/wavespeed-lipsync.ts` — **fallback only**, used when a tab's slot key is blank      | host lip-sync fails when `LIPSYNC_PROVIDER=wavespeed` |
+| `LIPSYNC_PROVIDER` (`heygen` \| `fal` \| `wavespeed`)                    | `ENV.lipsyncProvider` — the only branch point, in `resolveLipsyncAdapter`                              | —                                         |
 
 ### Channel B — DB-stored, AES-256-GCM, entered in Admin
 
@@ -58,6 +59,7 @@ Read through the single `ENV` object in `server/_core/env.ts`, except `R2_*`, wh
 | APIMART ×5 + edit | `app_settings` → `apimart_key_slot_0..4`, `apimart_key_edit` (`server/longformVideo.ts:452`) | `https://api.apimart.ai`    |
 | HeyGen ×5         | `app_settings` → `heygen_key_slot_0..4` (`server/longformVideo.ts:461`)                      | `https://api.heygen.com/v3` |
 | fal.ai ×5         | `app_settings` → `fal_key_slot_0..4` — read only when `LIPSYNC_PROVIDER=fal`                 | `https://queue.fal.run`     |
+| WaveSpeed ×5      | `app_settings` → `wavespeed_key_slot_0..4` — read when `LIPSYNC_PROVIDER=wavespeed`          | `https://api.wavespeed.ai`  |
 
 `LONGFORM_SLOT_COUNT = 5` — one key slot per UI tab, so 5 accounts render 5× wider than
 one shared key. Crypto lives in `server/encryption.ts`:
@@ -99,8 +101,8 @@ Express · tRPC · Drizzle · MySQL.
 - `server/routers.ts` — tRPC surface · `server/videoAssembly.ts` — ffmpeg assembly
 - `server/providers/` — one adapter per vendor; `base.ts` is the interface,
   `fallback.ts` the image chain (primary → Gemini). `heygen-lipsync.ts`,
-  `fal-lipsync.ts` are the two host lip-sync lanes; `LIPSYNC_PROVIDER` picks one and
-  `resolveLipsyncAdapter` is the only place that reads it
+  `fal-lipsync.ts` and `wavespeed-lipsync.ts` are the three host lip-sync lanes;
+  `LIPSYNC_PROVIDER` picks one and `resolveLipsyncAdapter` is the only place that reads it
 - `server/narrationAlignment.ts`, `server/_core/voiceTranscription.ts` — whisperx
 - `drizzle/schema.ts` — 5 tables: `provider_configs`, `longform_video_jobs`,
   `channel_configs`, `channel_layers`, `app_settings`

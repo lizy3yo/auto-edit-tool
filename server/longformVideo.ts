@@ -71,6 +71,11 @@ import {
   falSlotsFor,
   FAL_LIPSYNC_TIMEOUT_MS,
 } from "./providers/fal-lipsync";
+import {
+  WavespeedLipsyncAdapter,
+  wavespeedSlotsFor,
+  WAVESPEED_TIMEOUT_MS,
+} from "./providers/wavespeed-lipsync";
 // AIREITER BOLT-ON (temporary) — delete with the block in `apimartAdapterForJob`.
 import { aireiterAdapter, aireiterLaneEnabled } from "./providers/aireiter";
 import { Semaphore } from "./providers/semaphore";
@@ -84,7 +89,7 @@ import { Semaphore } from "./providers/semaphore";
  * caller downstream just uses the lane it was handed.
  */
 type LipsyncLane = {
-  provider: "runpod" | "heygen" | "fal";
+  provider: "runpod" | "heygen" | "fal" | "wavespeed";
   /** Build + submit one render. The lane owns the provider-specific payload shape. */
   submit(req: {
     scene: StoryboardScene;
@@ -532,6 +537,22 @@ export const getHeygenSlotMasked = (slot: number): Promise<string | null> =>
   getStoredMasked(heygenSlotSettingKey(slot));
 export const setHeygenSlotKey = (slot: number, apiKey: string): Promise<void> =>
   setStoredKey(heygenSlotSettingKey(slot), apiKey);
+
+/**
+ * Per-tab WaveSpeedAI keys — the `LIPSYNC_PROVIDER=wavespeed` equivalent of the HeyGen and
+ * fal slots. Blank/unset ⇒ that tab falls back to the shared `WAVESPEED_API_KEY`.
+ */
+const wavespeedSlotSettingKey = (slot: number): string =>
+  `wavespeed_key_slot_${slot}`;
+
+export const getWavespeedSlotKey = (slot: number): Promise<string | null> =>
+  getStoredKey(wavespeedSlotSettingKey(slot));
+export const getWavespeedSlotMasked = (slot: number): Promise<string | null> =>
+  getStoredMasked(wavespeedSlotSettingKey(slot));
+export const setWavespeedSlotKey = (
+  slot: number,
+  apiKey: string
+): Promise<void> => setStoredKey(wavespeedSlotSettingKey(slot), apiKey);
 
 export const getFalSlotKey = (slot: number): Promise<string | null> =>
   getStoredKey(falSlotSettingKey(slot));
@@ -2555,6 +2576,32 @@ export async function resolveLipsyncAdapter(
       poll: id => mock.pollVideo(id),
       slots: heygenSlotsFor("mock"),
       concurrency: ENV.heygenConcurrency,
+      sceneDeadlineMs: SCENE_DEADLINE_HOST_MS,
+    };
+  }
+
+  if (ENV.lipsyncProvider === "wavespeed") {
+    // WaveSpeedAI InfiniteTalk. Same still+audio contract as the other lanes, and it takes
+    // up to 10 minutes of audio per render, so no scene-length ceiling is needed here.
+    const wsKey =
+      (params.apimartSlot != null
+        ? await getWavespeedSlotKey(params.apimartSlot)
+        : null) ?? ENV.wavespeedApiKey;
+    if (!wsKey) return null;
+    const ws = new WavespeedLipsyncAdapter(wsKey);
+    return {
+      provider: "wavespeed",
+      // Like Avatar IV, InfiniteTalk INHERITS the gaze and framing of the still it animates,
+      // so `useAlt` needs no translation — the choice of photo IS the choice of angle.
+      submit: ({ scene, imageUrl, audioUrl }) =>
+        ws.submitLipsync({
+          imageUrl,
+          audioUrl,
+          durationSec: scene.audioDuration,
+        }),
+      poll: (id, ms) => ws.pollVideo(id, ms ?? WAVESPEED_TIMEOUT_MS),
+      slots: wavespeedSlotsFor(wsKey),
+      concurrency: ENV.wavespeedConcurrency,
       sceneDeadlineMs: SCENE_DEADLINE_HOST_MS,
     };
   }
@@ -5784,7 +5831,7 @@ export async function withTransientRetry<T>(
 export async function runChunkTasks(
   jobId: number,
   scene: StoryboardScene,
-  provider: "runpod" | "heygen" | "fal" | "sixtynine_labs",
+  provider: "runpod" | "heygen" | "fal" | "wavespeed" | "sixtynine_labs",
   chunkCount: number,
   submit: (i: number) => Promise<VideoSubmitResult>,
   poll: (taskId: string) => Promise<GenerationResult>,
