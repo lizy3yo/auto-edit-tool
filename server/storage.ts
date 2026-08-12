@@ -118,40 +118,6 @@ export async function rehostToR2(url: string, prefix: string): Promise<string> {
   return r2;
 }
 
-/**
- * Presigned PUT for a key we don't own yet, plus the public URL it will have once written.
- *
- * Lets an external worker (the EchoMimicV3 RunPod endpoint) upload its render straight into
- * our bucket without ever holding R2 credentials, and without pushing multi-MB video back
- * through the provider's JSON response. The signature is local HMAC — no network call.
- *
- * `expiresIn` covers the worker's whole lifetime, not just the upload: a job can sit in
- * RunPod's queue for minutes before it starts, and the URL has to still be valid when it
- * finally runs. Default 2h comfortably exceeds the lane's poll ceiling.
- */
-export async function presignPut(
-  relKey: string,
-  contentType = "video/mp4",
-  expiresIn = 7200
-): Promise<{ key: string; uploadUrl: string; publicUrl: string }> {
-  const key = normalizeKey(relKey);
-  const uploadUrl = await getSignedUrl(
-    getS3Client(),
-    new PutObjectCommand({
-      Bucket: getBucket(),
-      Key: key,
-      ContentType: contentType,
-    }),
-    { expiresIn }
-  );
-  const pub = publicBase();
-  return {
-    key,
-    uploadUrl,
-    publicUrl: pub ? `${pub}/${key}` : `r2://${getBucket()}/${key}`,
-  };
-}
-
 export async function storageGet(
   relKey: string
 ): Promise<{ key: string; url: string }> {

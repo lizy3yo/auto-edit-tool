@@ -58,7 +58,7 @@ export const ENV = {
    * is the ONLY place that reads this.
    */
   lipsyncProvider: (process.env.LIPSYNC_PROVIDER ?? "heygen") as
-    "heygen" | "fal" | "echomimic",
+    "heygen" | "fal",
   /** HeyGen API key — fallback when a per-tab key slot is empty. */
   heygenApiKey: process.env.HEYGEN_API_KEY ?? "",
   /**
@@ -69,28 +69,6 @@ export const ENV = {
   publicBaseUrl: process.env.PUBLIC_BASE_URL ?? "",
   /** Max concurrent active HeyGen lip-sync jobs. */
   heygenConcurrency: Number(process.env.HEYGEN_CONCURRENCY ?? 8),
-  /**
-   * RunPod serverless endpoint id for the EchoMimicV3 worker
-   * (`runpod/echomimic-worker/`). Auth reuses `RUN_POD_KEY`. Unset ⇒ the
-   * `echomimic` lip-sync lane cannot resolve.
-   */
-  runpodEchomimicEndpoint: process.env.RUNPOD_ECHOMIMIC_ENDPOINT ?? "",
-  /**
-   * In-flight EchoMimic renders. Unlike the other lanes this is a PHYSICAL cap:
-   * set it to the endpoint's max-workers value. Submitting past that only grows
-   * RunPod's queue, which eats the poll ceiling rather than adding throughput.
-   */
-  echomimicConcurrency: Number(process.env.ECHOMIMIC_CONCURRENCY ?? 3),
-  /** Diffusion steps. Flash is tuned for 8; 5 is enough for a talking head. */
-  echomimicSteps: Number(process.env.ECHOMIMIC_STEPS ?? 8),
-  /**
-   * How the 768² render becomes a 1080p 16:9 frame (see `server/hostFrame.ts`):
-   * `panel` (default — hard edge, no seam risk) or `inset` (composited back into
-   * the plate; better looking, but the model's regenerated background can show at
-   * the box edge).
-   */
-  echomimicLayout: (process.env.ECHOMIMIC_LAYOUT ?? "panel") as
-    "panel" | "inset",
   /** fal.ai API key — fallback when a per-tab fal key slot is empty. */
   falApiKey: process.env.FAL_API_KEY ?? process.env.FAL_KEY ?? "",
   /**
