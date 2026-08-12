@@ -64,7 +64,10 @@ import {
 import { ApimartAdapter } from "./providers/apimart";
 import { HeygenLipsyncAdapter } from "./providers/heygen-lipsync";
 import { FalLipsyncAdapter, falLipsyncModel } from "./providers/fal-lipsync";
-import { WavespeedLipsyncAdapter } from "./providers/wavespeed-lipsync";
+import {
+  WavespeedLipsyncAdapter,
+  wavespeedModel,
+} from "./providers/wavespeed-lipsync";
 // AIREITER BOLT-ON (temporary) — delete with the router block below.
 import {
   AireiterAdapter,
@@ -657,6 +660,7 @@ const longformVideoRouter = router({
       slots,
       active: ENV.lipsyncProvider === "wavespeed",
       resolution: ENV.wavespeedResolution,
+      model: wavespeedModel().label,
     };
   }),
 

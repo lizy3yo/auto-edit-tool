@@ -364,7 +364,7 @@ export function ProviderKeys() {
       <div className="space-y-3">
         <Label className="flex items-center gap-2 text-sm font-medium">
           <KeyRound className="h-4 w-4" />
-          WaveSpeed keys — InfiniteTalk lip-sync (per tab)
+          WaveSpeed keys — host lip-sync (per tab)
           {ws?.active && (
             <span className="text-xs font-normal text-muted-foreground">
               · active lane
@@ -404,7 +404,8 @@ export function ProviderKeys() {
         <p className="text-xs text-muted-foreground">
           Used only when{" "}
           <code className="text-[11px]">LIPSYNC_PROVIDER=wavespeed</code> —
-          rendering host scenes on InfiniteTalk at{" "}
+          rendering host scenes on{" "}
+          <code className="text-[11px]">{ws?.model ?? "infinitetalk"}</code> at{" "}
           <code className="text-[11px]">{ws?.resolution ?? "720p"}</code> (its
           ceiling; assembly upscales to 1080p). Takes up to 10 minutes of audio
           per render, so no scene-length cap is needed. Blank ⇒ that tab uses

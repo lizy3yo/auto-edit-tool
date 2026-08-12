@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   WavespeedLipsyncAdapter,
-  WAVESPEED_MAX_AUDIO_SEC,
+  WAVESPEED_MODELS,
   wavespeedSlotsFor,
 } from "./wavespeed-lipsync";
 import { ENV } from "../_core/env";
@@ -101,15 +101,35 @@ describe("WavespeedLipsyncAdapter.submitLipsync", () => {
     expect(calls[0].body.resolution).toBe("480p");
   });
 
-  // 10 minutes is the documented ceiling; host scenes cap at 8s so this is a future guard.
-  it("rejects narration past the documented ceiling without paying for it", async () => {
+  // Both models take the identical input shape; only the endpoint and ceiling differ.
+  it("routes to the Hunyuan Avatar endpoint when that model is selected", async () => {
     const calls = installFetchMock({});
-    const res = await adapter().submitLipsync({
-      ...base,
-      durationSec: WAVESPEED_MAX_AUDIO_SEC + 1,
+    await new WavespeedLipsyncAdapter(
+      "ws-key",
+      WAVESPEED_MODELS.hunyuan
+    ).submitLipsync(base);
+    expect(calls[0].url).toBe(
+      "https://api.wavespeed.ai/api/v3/wavespeed-ai/hunyuan-avatar"
+    );
+    expect(calls[0].body).toMatchObject({
+      image: base.imageUrl,
+      audio: base.audioUrl,
+      resolution: "720p",
     });
+  });
+
+  // Host scenes cap at 8s so neither ceiling bites, but a submit past it is a billed reject.
+  it.each([
+    ["infinitetalk", 600],
+    ["hunyuan", 120],
+  ])("rejects narration past %s's %ds ceiling locally", async (key, max) => {
+    const calls = installFetchMock({});
+    const res = await new WavespeedLipsyncAdapter(
+      "ws-key",
+      WAVESPEED_MODELS[key as string]
+    ).submitLipsync({ ...base, durationSec: max + 1 });
     expect(res.taskId).toBeUndefined();
-    expect(res.error).toMatch(/at most/);
+    expect(res.error).toMatch(new RegExp(`at most ${max}s`));
     expect(calls).toHaveLength(0);
   });
 

@@ -88,7 +88,13 @@ export const ENV = {
    * Neither is 1080p, so assembly upscales either way — 720p is the 1.5× option.
    */
   wavespeedResolution: process.env.WAVESPEED_RESOLUTION ?? "720p",
-  /** Max concurrent InfiniteTalk renders PER KEY — a spend governor. */
+  /**
+   * Which WaveSpeed still+audio model renders the host — a key of `WAVESPEED_MODELS`
+   * (`infinitetalk` | `hunyuan`). Same price and protocol; they differ in motion style and
+   * duration ceiling. Unknown values fall back to `infinitetalk`.
+   */
+  wavespeedModel: process.env.WAVESPEED_MODEL ?? "infinitetalk",
+  /** Max concurrent WaveSpeed renders PER KEY — a spend governor. */
   wavespeedConcurrency: Number(process.env.WAVESPEED_CONCURRENCY ?? 6),
   /**
    * `1` renders host scenes onto generated contextual PLATES instead of the raw studio

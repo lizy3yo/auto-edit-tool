@@ -24,20 +24,53 @@ import { ENV } from "../_core/env";
  */
 
 const WAVESPEED_BASE = "https://api.wavespeed.ai/api/v3";
-const MODEL_ID = "wavespeed-ai/infinitetalk";
+
+type WavespeedModelSpec = {
+  /** Endpoint path under /api/v3. */
+  id: string;
+  /**
+   * Documented ceiling on input audio for one render. Host scenes cap at
+   * `LONG_SCENE_MAX_SEC` (8s), so neither model is remotely constrained — but a submit past
+   * the limit is a billed rejection, so it is checked locally.
+   */
+  maxAudioSec: number;
+  label: string;
+};
+
+/**
+ * The WaveSpeed still+audio models. Both take an identical input shape and share the
+ * predictions protocol, so switching between them is a model id and a duration ceiling —
+ * nothing else. `WAVESPEED_MODEL` picks one.
+ */
+export const WAVESPEED_MODELS: Record<string, WavespeedModelSpec> = {
+  /**
+   * MeiGen InfiniteTalk — built for unlimited-length talking video holding identity across the
+   * whole take, which is the property that matters for a host appearing in ~40 scenes.
+   */
+  infinitetalk: {
+    id: "wavespeed-ai/infinitetalk",
+    maxAudioSec: 600,
+    label: "InfiniteTalk",
+  },
+  /**
+   * Tencent HunyuanVideo-Avatar. Benchmarks above EchoMimic v1/v2 and Hallo-3 on audio-driven
+   * portrait animation, and produces more head motion and expression than InfiniteTalk — which
+   * cuts both ways for a calm seated host. Same price; a 2-minute ceiling instead of 10.
+   */
+  hunyuan: {
+    id: "wavespeed-ai/hunyuan-avatar",
+    maxAudioSec: 120,
+    label: "Hunyuan Avatar",
+  },
+};
+
+/** The model this process renders on. Unknown ids fall back to InfiniteTalk. */
+export const wavespeedModel = (): WavespeedModelSpec =>
+  WAVESPEED_MODELS[ENV.wavespeedModel] ?? WAVESPEED_MODELS.infinitetalk;
 
 /** `480p` (~$0.03/s) or `720p` (~$0.06/s). 720p is the ceiling. */
 export const wavespeedResolution = (): string =>
   ENV.wavespeedResolution === "480p" ? "480p" : "720p";
-
-/**
- * Documented ceiling: 10 minutes of audio per render. Host scenes cap at
- * `LONG_SCENE_MAX_SEC` (8s), so this is a guard against future re-chunking rather than a
- * live constraint — but a submit over the limit is a billed rejection, so reject locally.
- */
-export const WAVESPEED_MAX_AUDIO_SEC = Number(
-  process.env.WAVESPEED_MAX_AUDIO_SEC ?? 600
-);
 
 /** Client-side poll ceiling for one render, including queue time. */
 export const WAVESPEED_TIMEOUT_MS = Number(
@@ -96,9 +129,11 @@ type PredictionData = {
 
 export class WavespeedLipsyncAdapter {
   private apiKey: string;
+  private model: WavespeedModelSpec;
 
-  constructor(apiKey: string) {
+  constructor(apiKey: string, model: WavespeedModelSpec = wavespeedModel()) {
     this.apiKey = apiKey;
+    this.model = model;
   }
 
   private headers(): Record<string, string> {
@@ -116,9 +151,9 @@ export class WavespeedLipsyncAdapter {
   async submitLipsync(
     params: WavespeedLipsyncParams
   ): Promise<VideoSubmitResult> {
-    if (params.durationSec && params.durationSec > WAVESPEED_MAX_AUDIO_SEC) {
+    if (params.durationSec && params.durationSec > this.model.maxAudioSec) {
       return {
-        error: `Narration is ${params.durationSec.toFixed(1)}s but InfiniteTalk accepts at most ${WAVESPEED_MAX_AUDIO_SEC}s`,
+        error: `Narration is ${params.durationSec.toFixed(1)}s but ${this.model.label} accepts at most ${this.model.maxAudioSec}s`,
       };
     }
 
@@ -133,7 +168,7 @@ export class WavespeedLipsyncAdapter {
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
-        const res = await fetch(`${WAVESPEED_BASE}/${MODEL_ID}`, {
+        const res = await fetch(`${WAVESPEED_BASE}/${this.model.id}`, {
           method: "POST",
           headers: this.headers(),
           body,
@@ -165,7 +200,7 @@ export class WavespeedLipsyncAdapter {
         }
         const id = body2.data?.id;
         if (!id) return { error: "WaveSpeed returned no prediction id" };
-        console.log(`[WaveSpeed] InfiniteTalk submitted: ${id}`);
+        console.log(`[WaveSpeed] ${this.model.label} submitted: ${id}`);
         return { taskId: id };
       } catch (err: any) {
         const networkish =

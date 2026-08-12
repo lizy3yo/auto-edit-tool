@@ -13,6 +13,9 @@
  *   npx tsx scripts/test-lipsync.ts --job 181
  *   npx tsx scripts/test-lipsync.ts --job 181 --scene 12 --provider heygen
  *
+ *   # A/B the two WaveSpeed models on identical inputs
+ *   npx tsx scripts/test-lipsync.ts --job 9 --provider wavespeed --model hunyuan
+ *
  *   # real speech through the channel's own 69Labs voice — the honest test
  *   npx tsx scripts/test-lipsync.ts --image https://…/host.png --say "Hey, it's Roger."
  *
@@ -159,9 +162,14 @@ async function renderOne(
         poll: (id: string) => a.pollVideo(id),
       };
     }
-    const { WavespeedLipsyncAdapter } =
+    const { WavespeedLipsyncAdapter, WAVESPEED_MODELS, wavespeedModel } =
       await import("../server/providers/wavespeed-lipsync");
-    const a = new WavespeedLipsyncAdapter(key);
+    // --model lets you A/B InfiniteTalk against Hunyuan Avatar without touching .env.
+    const m = arg("model");
+    const a = new WavespeedLipsyncAdapter(
+      key,
+      m ? (WAVESPEED_MODELS[m] ?? wavespeedModel()) : wavespeedModel()
+    );
     return {
       res: await a.submitLipsync({ imageUrl, audioUrl, durationSec }),
       poll: (id: string) => a.pollVideo(id),
@@ -284,7 +292,7 @@ async function main() {
       p.image,
       p.audio,
       p.dur,
-      `lipsync-${provider}-${p.tag}.mp4`
+      `lipsync-${provider}${arg("model") ? "-" + arg("model") : ""}-${p.tag}.mp4`
     );
     if (wall != null) {
       total += wall;
