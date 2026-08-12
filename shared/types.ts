@@ -369,6 +369,19 @@ export interface StoryboardScene {
   /** Error detail when sceneStatus is "failed" */
   error?: string;
   /**
+   * The generated contextual "plate" this host scene is lip-synced FROM (see
+   * `server/hostPlate.ts`), when `HOST_PLATES=1`. Persisted so a resumed job reuses the plate
+   * it already had rather than generating a second, subtly different face for a scene whose
+   * neighbours used the first one. Absent ⇒ the scene animates the raw host photo.
+   */
+  hostPlateUrl?: string;
+  /**
+   * The SETTING this host scene's plate should depict, assigned by `assignHostPlateContexts`
+   * in the planning pass. Scenes in the same "look" share a byte-identical string, and that
+   * string keys the plate cache — so one generated image serves the whole look.
+   */
+  hostPlateContext?: string;
+  /**
    * Which provider issued the in-flight render task(s) for this scene's clip(s).
    * Set alongside `renderTaskIds` so the resume path knows which adapter to poll.
    */

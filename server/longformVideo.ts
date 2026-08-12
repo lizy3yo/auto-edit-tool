@@ -124,6 +124,7 @@ import {
   HOST_INTRO_TRIM_SEC,
 } from "./videoAssembly";
 import { renderNameCardPng } from "./nameCard";
+import { assignHostPlateContexts, resolveHostPlate } from "./hostPlate";
 import { assignSceneRanges, numberWords } from "./narrationAlignment";
 import {
   transcribeWordsFromBuffer,
@@ -6043,9 +6044,22 @@ async function generateSceneLipsyncClips(
   // explicit `camera` knob so InfiniteTalk doesn't pull the off-axis subject onto this lens,
   // while HeyGen simply INHERITS the still's gaze — there, the choice of photo IS the angle.
   const useAltPhoto = scene.hostShot === 1 && !!params.faceImageUrl2;
-  const faceImageUrl = (
+  const hostPhotoUrl = (
     useAltPhoto ? params.faceImageUrl2 : params.faceImageUrl
   ) as string;
+  // Lip-sync models animate the image they are given and never change the setting, so with
+  // HOST_PLATES=1 the scene is synced from a generated frame of the host IN this beat's
+  // setting rather than the studio headshot. Falls back to the raw photo on any failure —
+  // provider-independent, see server/hostPlate.ts.
+  const faceImageUrl = await resolveHostPlate({
+    jobId,
+    scene,
+    hostPhotoUrl,
+    apimartKey:
+      params.apimartSlot != null
+        ? await getApimartSlotKey(params.apimartSlot)
+        : null,
+  });
 
   // One lip-sync task per host scene. `chunkDurations` feeds runChunkTasks' truncation guard:
   // a render materially shorter than the narration is rejected and retried (e.g. if the worker
@@ -7981,6 +7995,11 @@ async function runUnifiedPipeline(
   // re-derive so any surviving pair still reads main → alt. Pure and O(n); this is the last
   // mutation before the storyboard persists and clips render.
   assignHostShots(scenes, !!params.faceImageUrl2);
+  // Decide WHERE each host beat stands. Must run after the balancers and after assignHostShots
+  // (looks are bucketed over the final host-scene list), and before the storyboard persists so
+  // the clip stage — which only ever sees one scene — can read its own setting. Inert unless
+  // HOST_PLATES=1.
+  assignHostPlateContexts(scenes, params.videoSubject);
   // A configured alt photo that reaches the clip stage with no scene assigned to it means the
   // whole film renders single-angle — silently, since every scene still has a valid photo.
   // Job 181 shipped that way (hostShot unset on all 9 host scenes, and visualBeat gone too),

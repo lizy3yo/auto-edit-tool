@@ -90,6 +90,19 @@ export const ENV = {
   wavespeedResolution: process.env.WAVESPEED_RESOLUTION ?? "720p",
   /** Max concurrent InfiniteTalk renders PER KEY — a spend governor. */
   wavespeedConcurrency: Number(process.env.WAVESPEED_CONCURRENCY ?? 6),
+  /**
+   * `1` renders host scenes onto generated contextual PLATES instead of the raw studio
+   * headshot, so the background follows the script. Provider-independent — see
+   * `server/hostPlate.ts`. Off by default; every lip-sync model animates whatever image it
+   * is given, so without this the host stands against the headshot's backdrop all film.
+   */
+  hostPlates: process.env.HOST_PLATES ?? "0",
+  /**
+   * How many distinct host settings ("looks") a film gets. Host scenes are bucketed by
+   * narrative position and share a look's plate. Higher = more variety but more generated
+   * faces to keep consistent, and one image each.
+   */
+  hostPlateLooks: Number(process.env.HOST_PLATE_LOOKS ?? 4),
 
   // ─── AIREITER BOLT-ON (temporary; see server/providers/aireiter.ts) ──────
   /** AIReiter gateway key. Blank ⇒ the bolt-on is inert regardless of lanes. */

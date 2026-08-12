@@ -103,6 +103,12 @@ Express · tRPC · Drizzle · MySQL.
   `fallback.ts` the image chain (primary → Gemini). `heygen-lipsync.ts`,
   `fal-lipsync.ts` and `wavespeed-lipsync.ts` are the three host lip-sync lanes;
   `LIPSYNC_PROVIDER` picks one and `resolveLipsyncAdapter` is the only place that reads it
+- `server/hostPlate.ts` — **provider-independent**. Every lip-sync model animates the image it
+  is handed and never changes the setting, so `HOST_PLATES=1` generates a 16:9 plate of the host
+  IN each beat's setting (host photo as identity reference) and syncs from that instead of the
+  studio headshot. Host beats are bucketed into `HOST_PLATE_LOOKS` looks sharing one plate —
+  fewer generated faces to keep consistent, and fewer images. Falls back to the raw photo on any
+  failure
 - `server/narrationAlignment.ts`, `server/_core/voiceTranscription.ts` — whisperx
 - `drizzle/schema.ts` — 5 tables: `provider_configs`, `longform_video_jobs`,
   `channel_configs`, `channel_layers`, `app_settings`
