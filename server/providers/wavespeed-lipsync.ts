@@ -53,6 +53,24 @@ export const WAVESPEED_MODELS: Record<string, WavespeedModelSpec> = {
     label: "InfiniteTalk",
   },
   /**
+   * InfiniteTalk Fast — **$0.015/s, roughly a quarter of HeyGen**, and the only option here
+   * that is materially cheaper rather than at parity. Same photo+audio inputs and the same
+   * 10-minute ceiling as standard InfiniteTalk.
+   *
+   * The catch is in the name: "fast" variants buy speed and price with fewer sampling steps,
+   * so expect softer detail and less stable identity than the standard model. Whether that
+   * matters is exactly the thing to A/B — at this rate a whole film's host lane is ~$6
+   * against HeyGen's ~$28.
+   *
+   * Wall time runs ~10–30s per second of video, so an 8s host beat is 1.5–4 minutes; the
+   * per-key semaphore is what keeps that from serialising a film.
+   */
+  "infinitetalk-fast": {
+    id: "wavespeed-ai/infinitetalk-fast",
+    maxAudioSec: 600,
+    label: "InfiniteTalk Fast",
+  },
+  /**
    * Tencent HunyuanVideo-Avatar. Benchmarks above EchoMimic v1/v2 and Hallo-3 on audio-driven
    * portrait animation, and produces more head motion and expression than InfiniteTalk — which
    * cuts both ways for a calm seated host. Same price; a 2-minute ceiling instead of 10.

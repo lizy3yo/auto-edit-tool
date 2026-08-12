@@ -101,7 +101,19 @@ describe("WavespeedLipsyncAdapter.submitLipsync", () => {
     expect(calls[0].body.resolution).toBe("480p");
   });
 
-  // Both models take the identical input shape; only the endpoint and ceiling differ.
+  // The cheap lane — $0.015/s against HeyGen's $0.067 — must hit its own endpoint.
+  it("routes to the InfiniteTalk Fast endpoint when that model is selected", async () => {
+    const calls = installFetchMock({});
+    await new WavespeedLipsyncAdapter(
+      "ws-key",
+      WAVESPEED_MODELS["infinitetalk-fast"]
+    ).submitLipsync(base);
+    expect(calls[0].url).toBe(
+      "https://api.wavespeed.ai/api/v3/wavespeed-ai/infinitetalk-fast"
+    );
+  });
+
+  // Every model takes the identical input shape; only the endpoint and ceiling differ.
   it("routes to the Hunyuan Avatar endpoint when that model is selected", async () => {
     const calls = installFetchMock({});
     await new WavespeedLipsyncAdapter(
@@ -121,6 +133,7 @@ describe("WavespeedLipsyncAdapter.submitLipsync", () => {
   // Host scenes cap at 8s so neither ceiling bites, but a submit past it is a billed reject.
   it.each([
     ["infinitetalk", 600],
+    ["infinitetalk-fast", 600],
     ["hunyuan", 120],
   ])("rejects narration past %s's %ds ceiling locally", async (key, max) => {
     const calls = installFetchMock({});
