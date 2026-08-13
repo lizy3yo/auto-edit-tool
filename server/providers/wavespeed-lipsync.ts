@@ -76,8 +76,17 @@ export const WAVESPEED_MODELS: Record<string, WavespeedModelSpec> = {
     id: "wavespeed-ai/infinitetalk-fast",
     maxAudioSec: 600,
     label: "InfiniteTalk Fast",
-    // Flat $0.015/s, no tiers, and `resolution` is absent from its documented schema.
-    supportsResolution: false,
+    /**
+     * `resolution` is absent from its documented schema, and the playground reports a
+     * **576x384** output — a third of 720p's height, i.e. a 3.3x upscale onto the 1080p canvas.
+     *
+     * `WAVESPEED_FAST_RESOLUTION=1` sends the field anyway, on the chance it is merely
+     * undocumented rather than unsupported. Three possible outcomes: honoured (720p at a
+     * quarter of standard's price — the good case), silently ignored (still 576x384), or a 422.
+     * One clip plus `ffprobe` settles it; none of WaveSpeed's landing, model or API pages state
+     * an output size at all.
+     */
+    supportsResolution: !!process.env.WAVESPEED_FAST_RESOLUTION,
   },
   /**
    * Tencent HunyuanVideo-Avatar. Benchmarks above EchoMimic v1/v2 and Hallo-3 on audio-driven
