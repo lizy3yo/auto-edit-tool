@@ -33,23 +33,23 @@ Read through the single `ENV` object in `server/_core/env.ts`, except `R2_*`, wh
 `server/storage.ts`, `server/download.ts` and `server/musicBeds.ts` read straight off
 `process.env`.
 
-| Var                                                                      | Consumer                                                                                               | Missing ⇒                                 |
-| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ | ----------------------------------------- |
-| `DATABASE_URL`                                                           | `server/db.ts`, `drizzle.config.ts`                                                                    | no boot                                   |
-| `JWT_SECRET`                                                             | `server/_core/cookies.ts` + `server/encryption.ts:getKey()`                                            | no login, no stored keys — see gotchas    |
-| `ADMIN_EMAIL` / `ADMIN_PASSWORD`                                         | `server/adminAuth.ts` (single admin)                                                                   | no login                                  |
-| `PORT` (3000)                                                            | `server/_core/index.ts:77` — auto-scans +20 if busy                                                    | —                                         |
-| `ANTHROPIC_API_KEY`                                                      | `server/claude.ts` (`claude-opus-4-8`), `server/overlayTextScan.ts` (`claude-haiku-4-5-20251001`)      | storyboard stage fails                    |
-| `GEMINI_API_KEY`                                                         | `server/gemini.ts` (`gemini-2.5-flash`), `server/providers/gemini-image.ts` (`gemini-3.1-flash-image`) | no visual direction, no image fallback    |
-| `OPENAI_API_KEY`                                                         | `server/providers/openai-image.ts` (`gpt-image-2`, direct api.openai.com)                              | no stills / b-roll keyframes              |
-| `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` | `server/storage.ts` (S3 API)                                                                           | every upload fails                        |
-| `R2_PUBLIC_URL`                                                          | `server/storage.ts:83`, `server/musicBeds.ts:101`                                                      | narration-only films (warns, no crash)    |
-| `RUN_POD_KEY` + `RUNPOD_WHISPERX_ENDPOINT`                               | `server/_core/voiceTranscription.ts` → `kodxana/whisperx-worker_v2` serverless                         | no word-level narration alignment         |
-| `HEYGEN_API_KEY`                                                         | `server/longformVideo.ts:2506` — **fallback only**, used when a tab's slot key is blank                | host lip-sync fails for slot-less tabs    |
-| `FAL_API_KEY`                                                            | `server/providers/fal-lipsync.ts` — **fallback only**, used when a tab's fal slot key is blank         | host lip-sync fails when `LIPSYNC_PROVIDER=fal` |
-| `PUBLIC_BASE_URL`                                                        | `server/providers/heygen-lipsync.ts:78`, `server/providers/fal-lipsync.ts` (webhook callback URL)      | blank ⇒ pure polling; slower, still works |
-| `WAVESPEED_API_KEY`                                                      | `server/providers/wavespeed-lipsync.ts` — **fallback only**, used when a tab's slot key is blank      | host lip-sync fails when `LIPSYNC_PROVIDER=wavespeed` |
-| `LIPSYNC_PROVIDER` (`heygen` \| `fal` \| `wavespeed`)                    | `ENV.lipsyncProvider` — the only branch point, in `resolveLipsyncAdapter`                              | —                                         |
+| Var                                                                      | Consumer                                                                                               | Missing ⇒                                             |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------- |
+| `DATABASE_URL`                                                           | `server/db.ts`, `drizzle.config.ts`                                                                    | no boot                                               |
+| `JWT_SECRET`                                                             | `server/_core/cookies.ts` + `server/encryption.ts:getKey()`                                            | no login, no stored keys — see gotchas                |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD`                                         | `server/adminAuth.ts` (single admin)                                                                   | no login                                              |
+| `PORT` (3000)                                                            | `server/_core/index.ts:77` — auto-scans +20 if busy                                                    | —                                                     |
+| `ANTHROPIC_API_KEY`                                                      | `server/claude.ts` (`claude-opus-4-8`), `server/overlayTextScan.ts` (`claude-haiku-4-5-20251001`)      | storyboard stage fails                                |
+| `GEMINI_API_KEY`                                                         | `server/gemini.ts` (`gemini-2.5-flash`), `server/providers/gemini-image.ts` (`gemini-3.1-flash-image`) | no visual direction, no image fallback                |
+| `OPENAI_API_KEY`                                                         | `server/providers/openai-image.ts` (`gpt-image-2`, direct api.openai.com)                              | no stills / b-roll keyframes                          |
+| `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` | `server/storage.ts` (S3 API)                                                                           | every upload fails                                    |
+| `R2_PUBLIC_URL`                                                          | `server/storage.ts:83`, `server/musicBeds.ts:101`                                                      | narration-only films (warns, no crash)                |
+| `RUN_POD_KEY` + `RUNPOD_WHISPERX_ENDPOINT`                               | `server/_core/voiceTranscription.ts` → `kodxana/whisperx-worker_v2` serverless                         | no word-level narration alignment                     |
+| `HEYGEN_API_KEY`                                                         | `server/longformVideo.ts:2506` — **fallback only**, used when a tab's slot key is blank                | host lip-sync fails for slot-less tabs                |
+| `FAL_API_KEY`                                                            | `server/providers/fal-lipsync.ts` — **fallback only**, used when a tab's fal slot key is blank         | host lip-sync fails when `LIPSYNC_PROVIDER=fal`       |
+| `PUBLIC_BASE_URL`                                                        | `server/providers/heygen-lipsync.ts:78`, `server/providers/fal-lipsync.ts` (webhook callback URL)      | blank ⇒ pure polling; slower, still works             |
+| `WAVESPEED_API_KEY`                                                      | `server/providers/wavespeed-lipsync.ts` — **fallback only**, used when a tab's slot key is blank       | host lip-sync fails when `LIPSYNC_PROVIDER=wavespeed` |
+| `LIPSYNC_PROVIDER` (`heygen` \| `fal` \| `wavespeed`)                    | `ENV.lipsyncProvider` — the only branch point, in `resolveLipsyncAdapter`                              | —                                                     |
 
 ### Channel B — DB-stored, AES-256-GCM, entered in Admin
 
@@ -90,6 +90,21 @@ Gemini, OpenAI, R2, RunPod. Missing ones fail loudly at the first stage that nee
 | `IMAGE_PRIMARY_RETRIES`         | 1               | `IMAGE_RETRY_TIMEOUT_MS`       | 240s                 |
 | `IMAGE_RETRY_TOTAL_BUDGET_MS`   | 600s            |                                |                      |
 
+## Cost rates (`server/pricing.ts`)
+
+Quantities are metered from real calls; **only Anthropic's rates are exact**. Every other rate
+is a list-price estimate because HeyGen/69Labs/APIMART bill per-plan credit bundles — check one
+invoice, then pin the real number via the env var below (or edit the file).
+
+| Var                           | Default     | Var                         | Default |
+| ----------------------------- | ----------- | --------------------------- | ------- |
+| `COST_APIMART_IMAGE`          | $0.02/image | `COST_OPENAI_IMAGE`         | $0.003  |
+| `COST_APIMART_VIDEO_PER_SEC`  | $0.02/s     | `COST_HEYGEN_PER_SEC`       | $0.06/s |
+| `COST_FAL_PER_SEC`            | $0.06/s     | `COST_WAVESPEED_PER_SEC`    | $0.06/s |
+| `COST_WAVESPEED_FAST_PER_SEC` | $0.015/s    | `COST_TTS_PER_1K_CHARS`     | $0.05   |
+| `COST_GEMINI_IMAGE`           | $0.03       | `COST_69LABS_IMAGE`         | $0.05   |
+| `COST_69LABS_VIDEO_PER_SEC`   | $0.05/s     | `COST_WHISPERX_PER_GPU_SEC` | $0.0004 |
+
 ## Architecture
 
 React 19 · wouter · TanStack Query · tRPC 11 · shadcn/ui · Tailwind v4 —
@@ -110,6 +125,11 @@ Express · tRPC · Drizzle · MySQL.
   fewer generated faces to keep consistent, and fewer images. Falls back to the raw photo on any
   failure
 - `server/narrationAlignment.ts`, `server/_core/voiceTranscription.ts` — whisperx
+- `server/costMeter.ts` + `server/pricing.ts` — per-video spend. Every billable adapter calls
+  `recordUsage`; an `AsyncLocalStorage` set inside `withJobLock` attributes it, so the six
+  spending entry points (pipeline, resume, retry-assembly, retry-failed, regen scene/scenes)
+  are metered by construction and the adapters stay job-unaware. Totals persist to
+  `longform_video_jobs.costUsage`; `getCostBreakdown` prices them for the Cost dialog
 - `drizzle/schema.ts` — 5 tables: `provider_configs`, `longform_video_jobs`,
   `channel_configs`, `channel_layers`, `app_settings`
 - `client/src/pages/{LongformPage,AdminPage}.tsx` · aliases `@` → `client/src`,

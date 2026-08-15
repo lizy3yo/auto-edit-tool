@@ -61,6 +61,7 @@ import {
   validateCtaMarkers,
   syncSceneClipFields,
 } from "./longformVideo";
+import { getJobCostBreakdown } from "./costMeter";
 import { ApimartAdapter } from "./providers/apimart";
 import { HeygenLipsyncAdapter } from "./providers/heygen-lipsync";
 import { FalLipsyncAdapter, falLipsyncModel } from "./providers/fal-lipsync";
@@ -480,6 +481,18 @@ const styleReferenceRouter = router({
 
 // ─── Long-form Video Router ───
 const longformVideoRouter = router({
+  /**
+   * Priced spend breakdown for one render.
+   *
+   * Quantities are metered from the real provider calls the job made (`server/costMeter.ts`);
+   * rates come from `server/pricing.ts`, where only Anthropic's are exact. Safe to poll while a
+   * job is still running — the read flushes buffered usage first, so the figure is current to
+   * the second and `inProgress` tells the UI to label it "so far".
+   */
+  getCostBreakdown: approvedProcedure
+    .input(z.object({ jobId: z.number() }))
+    .query(async ({ input }) => getJobCostBreakdown(input.jobId)),
+
   /** Admin: read the saved directing instruction (falls back to the default). */
   getInstructionPrompt: adminProcedure.query(async () => {
     const saved = await getAppSetting(LONGFORM_INSTRUCTION_KEY);

@@ -1,0 +1,1 @@
+ALTER TABLE `longform_video_jobs` ADD `costUsage` json;

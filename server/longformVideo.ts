@@ -69,13 +69,17 @@ import {
 import {
   FalLipsyncAdapter,
   falSlotsFor,
+  falLipsyncModel,
   FAL_LIPSYNC_TIMEOUT_MS,
 } from "./providers/fal-lipsync";
 import {
   WavespeedLipsyncAdapter,
   wavespeedSlotsFor,
+  wavespeedModel,
   WAVESPEED_TIMEOUT_MS,
 } from "./providers/wavespeed-lipsync";
+import { recordUsage, withCostMeter, flushJobUsage } from "./costMeter";
+import { WAVESPEED_MIN_BILLED_SECONDS } from "./pricing";
 // AIREITER BOLT-ON (temporary) — delete with the block in `apimartAdapterForJob`.
 import { aireiterAdapter, aireiterLaneEnabled } from "./providers/aireiter";
 import { Semaphore } from "./providers/semaphore";
@@ -2560,6 +2564,49 @@ export async function resolveVideoProvider(
  * This is the ONLY branch on the provider — see `LipsyncLane`.
  */
 export async function resolveLipsyncAdapter(
+  params: LongformInputParams
+): Promise<LipsyncLane | null> {
+  const lane = await resolveLipsyncLane(params);
+  if (!lane || (await isMockMode())) return lane;
+
+  // Meter the host lane here rather than in each of the three adapters: every provider bills
+  // per second of rendered output, the scene's narration IS that length, and this wrapper sits
+  // on the one path all three share. An accepted submit is billed even if the render is later
+  // discarded (a truncation re-pay, a resume that re-submits), so success is the trigger.
+  //
+  // WaveSpeed's 5-second floor is applied here for the same reason: a 3s host beat bills as 5s,
+  // and charging the true 3s would under-report a WaveSpeed film across every short beat.
+  const billedSeconds = (scene: StoryboardScene): number => {
+    const raw = Math.max(0, scene.audioDuration ?? 0);
+    return lane.provider === "wavespeed"
+      ? Math.max(raw, WAVESPEED_MIN_BILLED_SECONDS)
+      : raw;
+  };
+
+  return {
+    ...lane,
+    submit: async args => {
+      const result = await lane.submit(args);
+      if (result.taskId) {
+        recordUsage({
+          lane: "lipsync",
+          provider: lane.provider,
+          model:
+            lane.provider === "wavespeed"
+              ? wavespeedModel().id
+              : lane.provider === "fal"
+                ? falLipsyncModel().id
+                : "heygen-avatar-iv",
+          calls: 1,
+          quantity: billedSeconds(args.scene),
+        });
+      }
+      return result;
+    },
+  };
+}
+
+async function resolveLipsyncLane(
   params: LongformInputParams
 ): Promise<LipsyncLane | null> {
   // Mock mode: host scenes render as a local clip built from the host photo, so a full film
@@ -8604,6 +8651,11 @@ export function withJobLock<T>(
   // MUST set `updatedAt` explicitly — MySQL fires ON UPDATE CURRENT_TIMESTAMP only when a column
   // value actually changes, so writing `{ status: "processing" }` to an already-processing row is
   // a no-op and would silently heartbeat nothing.
+  // The lock body is also the BILLING scope: "this pass owns this job" is exactly the window
+  // in which provider calls should be charged to it. Wrapping here rather than at each of the
+  // six spending entry points (pipeline, resume, retry-assembly, retry-failed, regen scene,
+  // regen scenes) means every one is metered by construction — including any added later —
+  // and no adapter needs to know a job exists. See `server/costMeter.ts`.
   const guarded = async () => {
     const beat = setInterval(() => {
       void updateLongformVideoJob(jobId, { updatedAt: new Date() }).catch(
@@ -8612,9 +8664,12 @@ export function withJobLock<T>(
     }, 60_000);
     if (typeof beat.unref === "function") beat.unref();
     try {
-      return await fn();
+      return await withCostMeter(jobId, fn);
     } finally {
       clearInterval(beat);
+      // Land the pass's spend on the row now, so a crash before the next debounce tick
+      // doesn't lose it and the breakdown is correct the moment the job goes idle.
+      void flushJobUsage(jobId).catch(() => {});
     }
   };
   const prev = jobLocks.get(jobId) ?? Promise.resolve();

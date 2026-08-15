@@ -1,5 +1,6 @@
 import { ENV } from "../_core/env";
 import type { GenerationResult } from "../../shared/types";
+import { recordUsage } from "../costMeter";
 
 /**
  * OpenAI gpt-image-2 for longform b-roll/still images. Text-to-image via
@@ -173,6 +174,13 @@ export async function generateOpenAIStill(input: {
     const json = (await res.json()) as { data?: { b64_json?: string }[] };
     const b64 = json.data?.[0]?.b64_json;
     if (!b64) return { success: false, error: "OpenAI returned no image data" };
+    recordUsage({
+      lane: "image",
+      provider: "openai",
+      model: OPENAI_IMAGE_MODEL,
+      calls: 1,
+      quantity: 1,
+    });
     return {
       success: true,
       fileData: Buffer.from(b64, "base64"),

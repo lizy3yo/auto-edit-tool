@@ -8,6 +8,7 @@ import type {
 import { sleep } from "./base";
 import { Semaphore } from "./semaphore";
 import { ENV } from "../_core/env";
+import { recordUsage } from "../costMeter";
 
 const BASE_URL = "https://69labs.vip";
 
@@ -979,6 +980,13 @@ export class SixtyNineLabsAdapter implements ProviderAdapter {
         console.log(
           `[69Labs] Video job submitted: ${ids[0]} (queue: ${data.queuePosition || data.jobs?.[0]?.queuePosition || "?"})`
         );
+        recordUsage({
+          lane: "video",
+          provider: "sixtynine_labs",
+          model: body.model ?? "unknown",
+          calls: 1,
+          quantity: body.duration ?? params.duration ?? 0,
+        });
         return { taskId: ids[0] };
       } catch (err: any) {
         const isNetworkErr =
@@ -1310,6 +1318,13 @@ export class SixtyNineLabsAdapter implements ProviderAdapter {
         console.log(
           `[69Labs] Image #${index} job ${jobId} submitted (queue: ${data.queuePosition || data.jobs?.[0]?.queuePosition || "?"})`
         );
+        recordUsage({
+          lane: "image",
+          provider: "sixtynine_labs",
+          model: body.model ?? "unknown",
+          calls: 1,
+          quantity: 1,
+        });
 
         // Poll this specific job (uses global poll throttler)
         const status = await pollJob(

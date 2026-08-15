@@ -10,11 +10,22 @@ for (let i = 0; i < 90; i++) {
   const p = j.progress || {};
   const s = `${j.status}/${j.stage} ${p.scenesDone ?? "-"}/${p.scenesTotal ?? "-"} stale=${j.stale}s`;
   if (s !== last) {
-    console.log(new Date().toISOString().slice(11, 19), s, (p.warnings || []).join(" | "));
+    console.log(
+      new Date().toISOString().slice(11, 19),
+      s,
+      (p.warnings || []).join(" | ")
+    );
     last = s;
   }
   if (j.status === "completed" || j.status === "failed") {
-    console.log("TERMINAL:", j.status, "| err:", j.errorMessage, "| url:", j.finalVideoUrl);
+    console.log(
+      "TERMINAL:",
+      j.status,
+      "| err:",
+      j.errorMessage,
+      "| url:",
+      j.finalVideoUrl
+    );
     break;
   }
   await new Promise(r => setTimeout(r, 10000));

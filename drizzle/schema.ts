@@ -77,6 +77,14 @@ export const longformVideoJobs = mysqlTable("longform_video_jobs", {
   /** Progress counters: { scenesTotal, scenesDone } */
   progress: json("progress"),
   /**
+   * Metered provider spend for this render — an array of `UsageLine`
+   * (`server/pricing.ts`): one entry per lane + vendor + model, carrying real token counts,
+   * image counts and rendered seconds. `server/costMeter.ts` accumulates it; the cost
+   * breakdown dialog prices it. Null on jobs rendered before metering existed, which the UI
+   * reports as unmetered rather than as $0.00.
+   */
+  costUsage: json("costUsage"),
+  /**
    * R2 URL of the ONE continuous master narration (Stage 2). Assembly lays this
    * untouched track over the whole film (per-scene `narrationStartSec/EndSec` map the
    * scenes onto it); absent on pre-overlay jobs → per-scene audio concat fallback.

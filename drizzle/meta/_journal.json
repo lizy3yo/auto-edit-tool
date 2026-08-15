@@ -8,6 +8,13 @@
       "when": 1785892419209,
       "tag": "0000_naive_monster_badoon",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1786798245475,
+      "tag": "0001_mushy_vanisher",
+      "breakpoints": true
     }
   ]
 }

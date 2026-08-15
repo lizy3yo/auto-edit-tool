@@ -11,6 +11,7 @@ import { Semaphore } from "./semaphore";
 import { ENV } from "../_core/env";
 import { getAppSetting, setAppSetting } from "../db";
 import { encrypt, decrypt, maskApiKey } from "../encryption";
+import { recordUsage } from "../costMeter";
 
 /**
  * ════════════════════════════════════════════════════════════════════════════════════════
@@ -249,6 +250,27 @@ export class AireiterAdapter implements ProviderAdapter {
           };
         }
         console.log(`[AIReiter] ${model} submitted: ${outTaskId}`);
+        // An accepted task is a billed task. This lane is a drop-in replacement for the
+        // metered APIMART/OpenAI ones, so without this a job with `AIREITER_LANES` set would
+        // silently report its b-roll and stills as free.
+        if (model === VIDEO_MODEL) {
+          recordUsage({
+            lane: "video",
+            provider: "aireiter",
+            model: VIDEO_MODEL,
+            calls: 1,
+            quantity: Number(params.video_length ?? 0), // billed seconds of 720p clip
+          });
+        } else {
+          // gpt_image_2 returns one image per task, so a submit IS an image.
+          recordUsage({
+            lane: "image",
+            provider: "aireiter",
+            model: IMAGE_MODEL,
+            calls: 1,
+            quantity: 1,
+          });
+        }
         return { taskId: data.data?.out_task_id ?? outTaskId };
       } catch (err: any) {
         const networkish =

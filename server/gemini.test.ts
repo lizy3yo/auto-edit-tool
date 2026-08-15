@@ -19,7 +19,10 @@ function quotaError(quotaId: string) {
         code: 429,
         status: "RESOURCE_EXHAUSTED",
         details: [
-          { "@type": "type.googleapis.com/google.rpc.QuotaFailure", violations: [{ quotaId }] },
+          {
+            "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+            violations: [{ quotaId }],
+          },
         ],
       },
     })

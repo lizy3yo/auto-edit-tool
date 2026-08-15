@@ -4,6 +4,8 @@
  * Mirrors the GenAIPro tts.ts interface (createTTSTask, pollTTSTask, listVoices).
  */
 
+import { recordUsage } from "./costMeter";
+
 const BASE_URL = "https://69labs.vip/api/v1";
 
 export interface TTSParams {
@@ -125,6 +127,17 @@ export async function createTTSTask69Labs(
   console.log(
     `[69Labs TTS] Created task ${taskId} for voice ${params.voiceId}`
   );
+
+  // Billed on accepted characters, so meter at task creation rather than at download —
+  // a task that is created and then abandoned still spent the credits.
+  recordUsage({
+    lane: "tts",
+    provider: "sixtynine_labs",
+    model: body.modelId,
+    calls: 1,
+    quantity: params.text.length,
+  });
+
   return taskId;
 }
 

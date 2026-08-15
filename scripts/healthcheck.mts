@@ -11,12 +11,23 @@ import { decrypt } from "../server/encryption.ts";
 import { storagePut } from "../server/storage.ts";
 
 const line = (n: string, ok: boolean | null, msg: string) =>
-  console.log(`${ok === null ? "??" : ok ? "OK" : "!!"}  ${n.padEnd(22)} ${msg}`);
+  console.log(
+    `${ok === null ? "??" : ok ? "OK" : "!!"}  ${n.padEnd(22)} ${msg}`
+  );
 
-async function probe(name: string, url: string, headers: Record<string, string>) {
+async function probe(
+  name: string,
+  url: string,
+  headers: Record<string, string>
+) {
   try {
-    const r = await fetch(url, { headers, signal: AbortSignal.timeout(20_000) });
-    const body = r.ok ? "" : ` ${(await r.text().catch(() => "")).slice(0, 110)}`;
+    const r = await fetch(url, {
+      headers,
+      signal: AbortSignal.timeout(20_000),
+    });
+    const body = r.ok
+      ? ""
+      : ` ${(await r.text().catch(() => "")).slice(0, 110)}`;
     line(name, r.ok, `HTTP ${r.status}${body}`);
   } catch (e: any) {
     line(name, false, e.message);
@@ -25,7 +36,11 @@ async function probe(name: string, url: string, headers: Record<string, string>)
 
 console.log("── channel resolution (what generate actually reads) ──");
 const layer = await getChannelLayer("roger_the_pipe_guy");
-line("channel layer", !!layer, layer ? `${layer.layerContent.length} chars, "${layer.name}"` : "NONE");
+line(
+  "channel layer",
+  !!layer,
+  layer ? `${layer.layerContent.length} chars, "${layer.name}"` : "NONE"
+);
 const book = layer ? extractBookName(layer.layerContent) : null;
 line("book title", !!book, book ?? "NOT FOUND — cover reveal will be skipped");
 const purl = layer ? extractProductUrl(layer.layerContent) : null;
@@ -41,9 +56,15 @@ try {
   sixtyNine = pc[0]?.apiKeyEncrypted ? decrypt(pc[0].apiKeyEncrypted) : null;
   line("69Labs key", !!sixtyNine, sixtyNine ? "decrypts cleanly" : "absent");
 } catch (e: any) {
-  line("69Labs key", false, `DECRYPT FAILED — ${e.message} (JWT_SECRET rotated?)`);
+  line(
+    "69Labs key",
+    false,
+    `DECRYPT FAILED — ${e.message} (JWT_SECRET rotated?)`
+  );
 }
-const [st] = (await conn.query("SELECT `key`,value FROM app_settings")) as any[];
+const [st] = (await conn.query(
+  "SELECT `key`,value FROM app_settings"
+)) as any[];
 const slots: Record<string, string> = {};
 for (const r of st) {
   try {
@@ -76,24 +97,42 @@ if (process.env.GEMINI_API_KEY)
   );
 const heygenKey = slots["heygen_key_slot_0"] ?? process.env.HEYGEN_API_KEY;
 if (heygenKey)
-  await probe("HeyGen quota", "https://api.heygen.com/v2/user/remaining_quota", {
-    "x-api-key": heygenKey,
-  });
+  await probe(
+    "HeyGen quota",
+    "https://api.heygen.com/v2/user/remaining_quota",
+    {
+      "x-api-key": heygenKey,
+    }
+  );
 if (slots["apimart_key_slot_0"])
   await probe("APIMART", "https://api.apimart.ai/v1/models", {
     Authorization: `Bearer ${slots["apimart_key_slot_0"]}`,
   });
 if (sixtyNine)
-  await probe("69Labs", "https://69labs.vip/api/v1/tts/status/healthcheck-probe", {
-    Authorization: `Bearer ${sixtyNine}`,
-  });
+  await probe(
+    "69Labs",
+    "https://69labs.vip/api/v1/tts/status/healthcheck-probe",
+    {
+      Authorization: `Bearer ${sixtyNine}`,
+    }
+  );
 
 // RunPod: the pipeline builds https://api.runpod.ai/v2/<endpoint>/run — empty endpoint = 401.
 const ep = process.env.RUNPOD_WHISPERX_ENDPOINT;
-line("RunPod whisperx", !!ep, ep ? `endpoint set (${ep})` : "RUNPOD_WHISPERX_ENDPOINT MISSING — proportional slicing fallback");
+line(
+  "RunPod whisperx",
+  !!ep,
+  ep
+    ? `endpoint set (${ep})`
+    : "RUNPOD_WHISPERX_ENDPOINT MISSING — proportional slicing fallback"
+);
 
 try {
-  const { url } = await storagePut(`diagnostics/health-${process.pid}.txt`, Buffer.from("x"), "text/plain");
+  const { url } = await storagePut(
+    `diagnostics/health-${process.pid}.txt`,
+    Buffer.from("x"),
+    "text/plain"
+  );
   const r = await fetch(url);
   line("R2 round-trip", r.ok && !url.includes(".r2.dev//"), `HTTP ${r.status}`);
 } catch (e: any) {

@@ -11,6 +11,7 @@ import {
   isTransientVideoError,
   isCreditsError,
 } from "./sixtynine-labs";
+import { recordUsage } from "../costMeter";
 
 /**
  * APIMART video/image provider. One async gateway — submit returns a task_id, then poll
@@ -279,6 +280,26 @@ export class ApimartAdapter implements ProviderAdapter {
           return { error: "APIMART returned no task_id" };
         }
         console.log(`[APIMART] ${kind} job submitted: ${taskId}`);
+        // An accepted task is a billed task — whether or not the caller later abandons it on
+        // a poll timeout or discards the result on a content-policy re-roll. Meter here, at
+        // the one point both the video and image lanes pass through.
+        if (kind === "Video") {
+          recordUsage({
+            lane: "video",
+            provider: "apimart",
+            model: VIDEO_MODEL,
+            calls: 1,
+            quantity: body.duration ?? 0, // billed seconds of 720p clip
+          });
+        } else {
+          recordUsage({
+            lane: "image",
+            provider: "apimart",
+            model: IMAGE_MODEL,
+            calls: 1,
+            quantity: body.n ?? 1,
+          });
+        }
         return { taskId };
       } catch (err: any) {
         if (attempt < MAX_RETRIES && isNetworkErr(err.message || "")) {

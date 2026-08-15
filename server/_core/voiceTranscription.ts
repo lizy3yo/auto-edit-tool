@@ -51,6 +51,7 @@ import { randomUUID } from "node:crypto";
 import { storagePut } from "../storage";
 import { sleep } from "../providers/base";
 import { ENV } from "./env";
+import { recordUsage } from "../costMeter";
 
 const WHISPERX_BASE = `https://api.runpod.ai/v2/${ENV.runpodWhisperxEndpoint}`;
 /** Client-side poll ceiling. A timeout is non-fatal — both callers fall back proportionally. */
@@ -170,6 +171,8 @@ async function runWhisperX(
         status: RunPodStatus;
         output?: WhisperXOutput;
         error?: string;
+        /** RunPod serverless reports billed GPU time (ms) alongside queue `delayTime`. */
+        executionTime?: number;
       };
 
       if (data.status === "COMPLETED") {
@@ -180,6 +183,15 @@ async function runWhisperX(
             details: JSON.stringify(data.output).slice(0, 200),
           };
         }
+        // RunPod bills GPU execution time, not the wall clock we waited. Prefer its own
+        // `executionTime`; the wall-clock fallback includes queue time and so over-reports.
+        recordUsage({
+          lane: "transcription",
+          provider: "runpod",
+          model: "whisperx-worker_v2",
+          calls: 1,
+          quantity: (data.executionTime ?? Date.now() - start) / 1000,
+        });
         return data.output;
       }
       if (

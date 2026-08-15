@@ -1,5 +1,29 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { ENV } from "./_core/env";
+import { recordUsage } from "./costMeter";
+
+/**
+ * Bill one completed Anthropic call to the ambient job (`server/costMeter.ts`).
+ *
+ * Called only after a 2xx, so retries and failures — which Anthropic does not bill — never
+ * appear. Cache tokens are carried separately because they price differently (reads ~0.1x
+ * input, writes ~1.25x); folding them into `input_tokens` would overcharge a cached prompt
+ * by an order of magnitude. Thinking tokens need no special handling: Anthropic already
+ * counts them in `output_tokens`.
+ */
+function meterClaudeCall(model: string, usage: Anthropic.Usage): void {
+  recordUsage({
+    lane: "llm",
+    provider: "anthropic",
+    model,
+    calls: 1,
+    quantity: 0,
+    inputTokens: usage.input_tokens,
+    outputTokens: usage.output_tokens,
+    cacheReadTokens: usage.cache_read_input_tokens ?? 0,
+    cacheWriteTokens: usage.cache_creation_input_tokens ?? 0,
+  });
+}
 
 let client: Anthropic | null = null;
 
@@ -295,6 +319,8 @@ async function callClaudeWithRetries(opts: {
         );
       }
 
+      meterClaudeCall(resolvedModel, response.usage);
+
       return {
         text: textBlock.text,
         inputTokens: response.usage.input_tokens,
@@ -375,6 +401,8 @@ export async function invokeClaudeMultiTurn(params: {
           `[Claude Multi-Turn] Request succeeded after ${attempt} retry(ies)`
         );
       }
+
+      meterClaudeCall("claude-opus-4-8", response.usage);
 
       return {
         text: textBlock.text,

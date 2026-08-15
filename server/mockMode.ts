@@ -85,9 +85,13 @@ function escapeXml(s: string): string {
   return s.replace(
     /[<>&"']/g,
     c =>
-      ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;", "'": "&apos;" })[
-        c
-      ]!
+      ({
+        "<": "&lt;",
+        ">": "&gt;",
+        "&": "&amp;",
+        '"': "&quot;",
+        "'": "&apos;",
+      })[c]!
   );
 }
 
@@ -273,7 +277,9 @@ export function mockLlmResponse(
 export class MockProviderAdapter implements ProviderAdapter {
   readonly supportsImageGeneration = true;
 
-  async generateVideo(params: VideoGenerationParams): Promise<GenerationResult[]> {
+  async generateVideo(
+    params: VideoGenerationParams
+  ): Promise<GenerationResult[]> {
     const count = params.count ?? 1;
     return Promise.all(
       Array.from({ length: count }, () =>
@@ -282,7 +288,9 @@ export class MockProviderAdapter implements ProviderAdapter {
     );
   }
 
-  async generateImage(params: ImageGenerationParams): Promise<GenerationResult[]> {
+  async generateImage(
+    params: ImageGenerationParams
+  ): Promise<GenerationResult[]> {
     const count = params.count ?? 1;
     return Promise.all(
       Array.from({ length: count }, () => mockStill(params.prompt))

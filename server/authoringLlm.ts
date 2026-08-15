@@ -9,7 +9,8 @@ export async function invokeAuthoringLlm(
   params: ClaudeParams
 ): Promise<ClaudeResult> {
   const { isMockMode, mockLlmResponse } = await import("./mockMode");
-  if (await isMockMode()) return mockLlmResponse(params.systemPrompt, params.userMessage);
+  if (await isMockMode())
+    return mockLlmResponse(params.systemPrompt, params.userMessage);
 
   if (!ENV.anthropicApiKey) {
     throw new Error("ANTHROPIC_API_KEY is not configured");

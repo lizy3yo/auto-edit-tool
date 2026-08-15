@@ -6,6 +6,7 @@ import type {
   ImageGenerationParams,
 } from "./base";
 import { ENV } from "../_core/env";
+import { recordUsage } from "../costMeter";
 
 /**
  * Google Gemini image-generation adapter — used as the automatic fallback when
@@ -107,6 +108,14 @@ export class GeminiImageAdapter implements ProviderAdapter {
       const fileData = Buffer.from(imagePart.inlineData.data, "base64");
       const mimeType =
         imagePart.inlineData.mimeType || detectImageMimeType(fileData);
+
+      recordUsage({
+        lane: "image",
+        provider: "gemini",
+        model: MODEL,
+        calls: 1,
+        quantity: 1,
+      });
 
       return {
         success: true,

@@ -29,6 +29,7 @@ import { downloadFile } from "@/lib/download";
 import { armNotifications, notifyJobDone } from "@/lib/notify";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { LongformVideoPlayer } from "./LongformVideoPlayer";
+import { GenerationCostDialog } from "./GenerationCostDialog";
 import { ChannelVoiceTuning } from "@/components/ChannelVoiceTuning";
 import { sanitizeError, isCreditError } from "@/lib/errorSanitizer";
 import { triggerCreditErrorPopup } from "@/components/CreditErrorPopup";
@@ -49,6 +50,7 @@ import {
   Pencil,
   ChevronRight,
   Trash2,
+  Receipt,
 } from "lucide-react";
 
 export type SlotStatus = "idle" | "processing" | "completed" | "failed";
@@ -160,6 +162,7 @@ export default function LongformJobSlot({
   const [channelKey, setChannelKey] = useState<string>("");
   const [showConfirm, setShowConfirm] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [showCost, setShowCost] = useState(false);
   const [dismissedJobId, setDismissedJobId] = useState<number | null>(null);
   const [jobId, setJobId] = useState<number | null>(
     () => loadJobId(storageKey) ?? initialJobId ?? null
@@ -199,7 +202,11 @@ export default function LongformJobSlot({
 
   // Adopt a parent-provided id (resume reconciliation) if we don't have one yet.
   useEffect(() => {
-    if (jobId === null && initialJobId != null && initialJobId !== dismissedJobId) {
+    if (
+      jobId === null &&
+      initialJobId != null &&
+      initialJobId !== dismissedJobId
+    ) {
       setJobId(initialJobId);
       saveJobId(storageKey, initialJobId);
     }
@@ -749,29 +756,43 @@ export default function LongformJobSlot({
                   </div>
                 )}
               </div>
-              {isProcessing ? (
+              <div className="flex shrink-0 items-center gap-1">
+                {/* Available during the render too, not just after — the total updates as the
+                  job spends, which is when it is most worth watching. */}
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => jobId && cancelMutation.mutate({ jobId })}
-                  disabled={cancelMutation.isPending}
-                  className="text-muted-foreground hover:text-red-400"
+                  onClick={() => setShowCost(true)}
+                  className="text-muted-foreground hover:text-primary"
+                  title="What this video cost to generate"
                 >
-                  <X className="mr-2 h-4 w-4" />
-                  Cancel
+                  <Receipt className="mr-2 h-4 w-4" />
+                  Cost
                 </Button>
-              ) : (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setShowClearConfirm(true)}
-                  className="text-muted-foreground hover:text-red-400"
-                  title="Clear output and error log from this slot"
-                >
-                  <Trash2 className="mr-2 h-4 w-4" />
-                  Clear Output
-                </Button>
-              )}
+                {isProcessing ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => jobId && cancelMutation.mutate({ jobId })}
+                    disabled={cancelMutation.isPending}
+                    className="text-muted-foreground hover:text-red-400"
+                  >
+                    <X className="mr-2 h-4 w-4" />
+                    Cancel
+                  </Button>
+                ) : (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowClearConfirm(true)}
+                    className="text-muted-foreground hover:text-red-400"
+                    title="Clear output and error log from this slot"
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Clear Output
+                  </Button>
+                )}
+              </div>
             </div>
 
             {progress &&
@@ -1395,12 +1416,20 @@ export default function LongformJobSlot({
       </AlertDialog>
 
       {/* Clear Output Confirmation Modal */}
+      <GenerationCostDialog
+        jobId={jobId}
+        open={showCost}
+        onOpenChange={setShowCost}
+      />
+
       <AlertDialog open={showClearConfirm} onOpenChange={setShowClearConfirm}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Clear Video Output?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will clear the current video output, error messages, and storyboard from Video {slotIndex + 1} so you can start a new video run cleanly.
+              This will clear the current video output, error messages, and
+              storyboard from Video {slotIndex + 1} so you can start a new video
+              run cleanly.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

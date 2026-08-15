@@ -17,7 +17,11 @@ vi.mock("./_core/env", () => ({
 
 const { generateStillWithFallback } = await import("./providers/fallback");
 
-const OK = { success: true, fileData: Buffer.from("img"), mimeType: "image/png" };
+const OK = {
+  success: true,
+  fileData: Buffer.from("img"),
+  mimeType: "image/png",
+};
 
 describe("generateStillWithFallback", () => {
   beforeEach(() => {
@@ -46,7 +50,9 @@ describe("generateStillWithFallback", () => {
   it("falls back when OpenAI throws, not just when it returns failure", async () => {
     generateOpenAIStill.mockRejectedValue(new Error("socket hang up"));
     geminiGenerateImage.mockResolvedValue([OK]);
-    expect((await generateStillWithFallback({ prompt: "x" })).success).toBe(true);
+    expect((await generateStillWithFallback({ prompt: "x" })).success).toBe(
+      true
+    );
   });
 
   it("passes the reference image and 1:1 through to Gemini", async () => {
@@ -75,7 +81,10 @@ describe("generateStillWithFallback", () => {
   });
 
   it("reports BOTH errors when the fallback also fails — a one-sided message is undebuggable", async () => {
-    generateOpenAIStill.mockResolvedValue({ success: false, error: "no credits" });
+    generateOpenAIStill.mockResolvedValue({
+      success: false,
+      error: "no credits",
+    });
     geminiGenerateImage.mockResolvedValue([{ success: false, error: "quota" }]);
     const r = await generateStillWithFallback({ prompt: "x" });
     expect(r.success).toBe(false);
