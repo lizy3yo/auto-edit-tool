@@ -14,9 +14,16 @@ function ScrollArea({
       className={cn("relative", className)}
       {...props}
     >
+      {/*
+        `[&>div]:block! [&>div]:w-full!` overrides Radix's own inline style on the viewport's
+        content wrapper, which is `display: table; min-width: 100%`. A table box is
+        shrink-to-fit, so it sizes to its widest child instead of to the viewport — which
+        silently defeats `truncate`/`min-w-0` on anything inside and lets long content overflow
+        the panel horizontally. `!important` is required because Radix sets it inline.
+      */}
       <ScrollAreaPrimitive.Viewport
         data-slot="scroll-area-viewport"
-        className="focus-visible:ring-ring/50 size-full rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:outline-1"
+        className="focus-visible:ring-ring/50 size-full rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:outline-1 [&>div]:block! [&>div]:w-full!"
       >
         {children}
       </ScrollAreaPrimitive.Viewport>

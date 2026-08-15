@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
@@ -9,7 +10,13 @@ import {
   CheckCircle2,
   XCircle,
   ExternalLink,
+  Play,
+  Pencil,
 } from "lucide-react";
+import {
+  VideoPlayerDialog,
+  type PlayableJob,
+} from "@/components/VideoPlayerDialog";
 
 /**
  * Persistent list of every render, alongside the generator.
@@ -20,8 +27,9 @@ import {
  * reads `longformVideo.library` (all statuses) rather than the history queries
  * (completed/failed only).
  *
- * `onOpen` hands a job id back to the page, which loads it into a slot — the same path the
- * old history dialog used, so nothing about how a job is opened changes.
+ * Clicking a row PLAYS the video — that is what a library is for. Loading it into a generator
+ * tab is the secondary action, on the pencil button that appears on hover; it used to be the
+ * only one, which made a click feel like nothing had happened.
  */
 export function VideoLibraryPanel({
   onOpen,
@@ -42,10 +50,15 @@ export function VideoLibraryPanel({
     }
   );
 
+  const [playing, setPlaying] = useState<PlayableJob | null>(null);
   const open = new Set(activeJobIds.filter((id): id is number => id != null));
 
   return (
-    <aside className="flex h-[calc(100vh-6.5rem)] w-72 shrink-0 flex-col rounded-lg border border-border bg-card">
+    // Hidden below `lg`: a fixed 288px column on a narrow viewport squeezes the generator
+    // (script box, storyboard grid) into something unusable. The Library nav item is the
+    // way in at those sizes. `sticky` keeps it in view while the long generator page
+    // scrolls, instead of scrolling away with it.
+    <aside className="sticky top-6 hidden h-[calc(100vh-6rem)] w-64 shrink-0 flex-col rounded-lg border border-border bg-card lg:flex xl:w-72">
       <header className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
         <div className="flex items-center gap-2">
           <h2 className="text-sm font-semibold">Your Library</h2>
@@ -81,28 +94,47 @@ export function VideoLibraryPanel({
             {jobs.map(job => {
               const isOpen = open.has(job.id);
               return (
-                <li key={job.id}>
+                <li key={job.id} className="group relative">
                   <button
                     type="button"
-                    onClick={() => onOpen(job.id)}
-                    className={`flex w-full items-center gap-3 rounded-md p-2 text-left transition-colors ${
+                    onClick={() => setPlaying(job)}
+                    title="Watch this video"
+                    className={`flex w-full items-center gap-3 rounded-md p-2 pr-9 text-left transition-colors ${
                       isOpen
                         ? "bg-secondary ring-1 ring-primary/40"
                         : "hover:bg-secondary/60"
                     }`}
                   >
-                    <VideoPoster
-                      posterUrl={job.posterUrl}
-                      finalVideoUrl={job.finalVideoUrl}
-                      status={job.status}
-                      className="h-11 w-16 shrink-0 rounded"
-                    />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium">
+                    <span className="relative shrink-0">
+                      <VideoPoster
+                        posterUrl={job.posterUrl}
+                        finalVideoUrl={job.finalVideoUrl}
+                        status={job.status}
+                        className="h-11 w-16 rounded"
+                      />
+                      {job.finalVideoUrl && (
+                        <span className="absolute inset-0 flex items-center justify-center rounded bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
+                          <Play className="h-4 w-4 fill-white text-white" />
+                        </span>
+                      )}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium">
                         {job.title || `Video #${job.id}`}
-                      </p>
+                      </span>
                       <StatusLine job={job} />
-                    </div>
+                    </span>
+                  </button>
+                  {/* Same split as the Library page: the row watches the video, this
+                      opens the storyboard workspace. Always visible rather than
+                      hover-only — a hidden control reads as a missing one. */}
+                  <button
+                    type="button"
+                    onClick={() => onOpen(job.id)}
+                    title="Open the storyboard — inspect and regenerate scenes"
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
                   </button>
                 </li>
               );
@@ -118,6 +150,12 @@ export function VideoLibraryPanel({
         <ExternalLink className="h-3 w-3" />
         View all{jobs ? ` ${jobs.length}` : ""} in Library
       </Link>
+
+      <VideoPlayerDialog
+        job={playing}
+        onOpenChange={o => !o && setPlaying(null)}
+        onEdit={onOpen}
+      />
     </aside>
   );
 }

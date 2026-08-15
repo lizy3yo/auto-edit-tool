@@ -11,6 +11,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { VideoPoster } from "@/components/VideoPoster";
+import {
+  VideoPlayerDialog,
+  type PlayableJob,
+} from "@/components/VideoPlayerDialog";
 import { downloadFile } from "@/lib/download";
 import {
   Loader2,
@@ -19,6 +23,7 @@ import {
   Tv,
   Download,
   Pencil,
+  Play,
   CheckCircle2,
   XCircle,
 } from "lucide-react";
@@ -34,6 +39,7 @@ import {
 export default function LibraryPage() {
   const [, navigate] = useLocation();
   const [search, setSearch] = useState("");
+  const [playing, setPlaying] = useState<PlayableJob | null>(null);
   const [channel, setChannel] = useState("all");
 
   const { data: jobs, isLoading } = trpc.longformVideo.library.useQuery(
@@ -136,7 +142,12 @@ export default function LibraryPage() {
               key={job.id}
               className="flex flex-col overflow-hidden rounded-lg border border-border bg-card transition-colors hover:border-primary/40"
             >
-              <div className="relative">
+              <button
+                type="button"
+                onClick={() => setPlaying(job)}
+                title="Play"
+                className="group/play relative block w-full"
+              >
                 <VideoPoster
                   posterUrl={job.posterUrl}
                   finalVideoUrl={job.finalVideoUrl}
@@ -144,12 +155,21 @@ export default function LibraryPage() {
                   className="aspect-video w-full"
                 />
                 <StatusBadge status={job.status} />
-              </div>
+                {job.finalVideoUrl && (
+                  <span className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover/play:opacity-100">
+                    <Play className="h-8 w-8 fill-white text-white" />
+                  </span>
+                )}
+              </button>
 
               <div className="flex flex-1 flex-col gap-1 p-3">
-                <h2 className="line-clamp-2 text-sm font-medium leading-snug">
+                <button
+                  type="button"
+                  onClick={() => setPlaying(job)}
+                  className="line-clamp-2 text-left text-sm font-medium leading-snug hover:text-primary"
+                >
                   {job.title || `Video #${job.id}`}
-                </h2>
+                </button>
                 <p className="text-xs text-muted-foreground">
                   {channelName(job.channelKey) ?? "No channel"}
                   {job.userName ? ` · ${job.userName}` : ""}
@@ -158,12 +178,32 @@ export default function LibraryPage() {
                   {new Date(job.createdAt).toLocaleDateString()}
                 </p>
 
+                {/* Two distinct jobs, so two labelled buttons rather than one ambiguous
+                    click: View watches the finished film, Open goes to the storyboard
+                    workspace where scenes are inspected and regenerated. */}
                 <div className="mt-3 flex gap-2">
                   <Button
                     size="sm"
                     variant="outline"
                     className="flex-1 gap-1.5"
+                    onClick={() => setPlaying(job)}
+                    // Kept enabled with no video: the dialog explains why there is
+                    // nothing to play, which beats a dead button with no reason.
+                    title={
+                      job.finalVideoUrl
+                        ? "Watch the finished video"
+                        : "No finished video — see why"
+                    }
+                  >
+                    <Play className="h-3.5 w-3.5" />
+                    View
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="flex-1 gap-1.5"
                     onClick={() => navigate(`/?open=${job.id}`)}
+                    title="Open the storyboard — inspect and regenerate scenes"
                   >
                     <Pencil className="h-3.5 w-3.5" />
                     Open
@@ -172,7 +212,7 @@ export default function LibraryPage() {
                     <Button
                       size="sm"
                       variant="outline"
-                      className="flex-1 gap-1.5"
+                      className="gap-1.5 px-2.5"
                       onClick={() =>
                         downloadFile(
                           job.finalVideoUrl!,
@@ -180,9 +220,9 @@ export default function LibraryPage() {
                           job.title || undefined
                         )
                       }
+                      title="Download MP4"
                     >
                       <Download className="h-3.5 w-3.5" />
-                      Save
                     </Button>
                   )}
                 </div>
@@ -191,6 +231,12 @@ export default function LibraryPage() {
           ))}
         </div>
       )}
+
+      <VideoPlayerDialog
+        job={playing}
+        onOpenChange={o => !o && setPlaying(null)}
+        onEdit={id => navigate(`/?open=${id}`)}
+      />
     </div>
   );
 }

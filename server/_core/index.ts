@@ -20,6 +20,7 @@ import { createServer } from "http";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerAdminAuthRoutes } from "../adminAuth";
+import { checkSchema } from "../schemaCheck";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
@@ -54,6 +55,9 @@ async function startServer() {
   app.set("trust proxy", 1);
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
+  // Warn loudly (but don't die) if the DB is behind `drizzle/schema.ts` — an unapplied
+  // migration otherwise surfaces as dead buttons rather than an error.
+  void checkSchema();
   // Single-admin email/password auth
   registerAdminAuthRoutes(app);
   // HeyGen / fal render-completion callbacks (wake host-scene poll loops). Both are registered

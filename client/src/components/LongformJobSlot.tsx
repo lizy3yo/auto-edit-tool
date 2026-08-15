@@ -63,36 +63,13 @@ const STAGE_LABELS: Record<string, string> = {
   done: "Done",
 };
 
-function loadJobId(storageKey: string): number | null {
-  try {
-    const raw = localStorage.getItem(storageKey);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
-
-function saveJobId(storageKey: string, id: number | null) {
-  if (id === null) localStorage.removeItem(storageKey);
-  else localStorage.setItem(storageKey, JSON.stringify(id));
-}
-
-function titleKey(storageKey: string) {
-  return `${storageKey}_title`;
-}
-
-function loadTitle(storageKey: string): string {
-  try {
-    return localStorage.getItem(titleKey(storageKey)) ?? "";
-  } catch {
-    return "";
-  }
-}
-
-function saveTitle(storageKey: string, title: string) {
-  if (title) localStorage.setItem(titleKey(storageKey), title);
-  else localStorage.removeItem(titleKey(storageKey));
-}
+/**
+ * The job id and draft title for this tab live in the database (`longform_slots`), reached
+ * through the parent's `onJobIdChange` / `onTitleChange`. They used to be `localStorage`,
+ * which tied the workspace to one browser; the renders were always server-side, but the tabs
+ * were not. Scene-checkbox selection below stays local on purpose — it is throwaway UI state
+ * for a single regenerate click.
+ */
 
 function selKey(storageKey: string, jobId: number) {
   return `${storageKey}_regen_sel_${jobId}`;
@@ -139,6 +116,12 @@ interface LongformJobSlotProps {
   storageKey: string;
   /** Job id handed down by the parent for auto-resume reconciliation. */
   initialJobId?: number | null;
+  /** Draft download title restored from this account's saved workspace. */
+  initialTitle?: string;
+  /** Report a new/cleared job id so the parent can persist the tab server-side. */
+  onJobIdChange?: (jobId: number | null) => void;
+  /** Report a draft-title edit (debounced by the caller) for the same reason. */
+  onTitleChange?: (title: string) => void;
   /** Default script text for this slot (only slot 0 seeds the sample). */
   defaultScript: string;
   /** Channel list, lifted to the parent so it is fetched once. */
@@ -153,6 +136,9 @@ export default function LongformJobSlot({
   slotIndex,
   storageKey,
   initialJobId,
+  initialTitle = "",
+  onJobIdChange,
+  onTitleChange,
   defaultScript,
   channels,
   providerDisplayName,
@@ -164,9 +150,7 @@ export default function LongformJobSlot({
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showCost, setShowCost] = useState(false);
   const [dismissedJobId, setDismissedJobId] = useState<number | null>(null);
-  const [jobId, setJobId] = useState<number | null>(
-    () => loadJobId(storageKey) ?? initialJobId ?? null
-  );
+  const [jobId, setJobId] = useState<number | null>(() => initialJobId ?? null);
   const [expandedScene, setExpandedScene] = useState<number | null>(null);
   // Per-scene prompt edits, keyed by scene index. Survives collapsing/switching
   // scenes so the batch "Regenerate N selected" button can read every edit; both
@@ -186,9 +170,7 @@ export default function LongformJobSlot({
   const queuePhase = useRef<Map<number, "queued" | "confirmed">>(new Map());
   const [selectedScenes, setSelectedScenes] = useState<number[]>([]);
   const [sceneSearch, setSceneSearch] = useState("");
-  const [downloadTitle, setDownloadTitle] = useState(() =>
-    loadTitle(storageKey)
-  );
+  const [downloadTitle, setDownloadTitle] = useState(initialTitle);
   const isAdmin = useAuth().user?.role === "admin";
 
   // Masked APIMART keys (admin-only). B-roll VIDEO renders on this tab's APIMART key; with no key
@@ -208,7 +190,6 @@ export default function LongformJobSlot({
       initialJobId !== dismissedJobId
     ) {
       setJobId(initialJobId);
-      saveJobId(storageKey, initialJobId);
     }
   }, [initialJobId, jobId, storageKey, dismissedJobId]);
 
@@ -223,7 +204,7 @@ export default function LongformJobSlot({
     onSuccess: ({ jobId: id }) => {
       setDismissedJobId(null);
       setJobId(id);
-      saveJobId(storageKey, id);
+      onJobIdChange?.(id);
       toast.success(`Video ${slotIndex + 1} started`);
     },
     onError: err => {
@@ -311,10 +292,10 @@ export default function LongformJobSlot({
 
   const cancelMutation = trpc.longformVideo.cancelJob.useMutation({
     onSuccess: () => {
-      saveTitle(storageKey, "");
       setDownloadTitle("");
+      onTitleChange?.("");
       setJobId(null);
-      saveJobId(storageKey, null);
+      onJobIdChange?.(null);
       toast.success("Job cancelled");
     },
     onError: err => toast.error(err.message),
@@ -326,9 +307,9 @@ export default function LongformJobSlot({
       setDismissedJobId(jobId);
     }
     setJobId(null);
-    saveJobId(storageKey, null);
-    saveTitle(storageKey, "");
+    onJobIdChange?.(null);
     setDownloadTitle("");
+    onTitleChange?.("");
     toast.success(`Video ${slotIndex + 1} output cleared`);
   };
 
@@ -409,11 +390,14 @@ export default function LongformJobSlot({
     saveSelectedScenes(storageKey, jobId, selectedScenes);
   }, [selectedScenes, jobId, storageKey]);
 
-  // Persist the title on-device so it survives refresh/close (incl. before a job
-  // exists). The DB copy is written at generate time and on blur (see below).
+  // Persist the draft title to the account (not the browser) so it follows you to another
+  // machine. Debounced: this fires per keystroke, and a write per character would be a
+  // mutation storm for a field nobody types fast into.
   useEffect(() => {
-    saveTitle(storageKey, downloadTitle);
-  }, [downloadTitle, storageKey]);
+    if (downloadTitle === initialTitle) return;
+    const t = setTimeout(() => onTitleChange?.(downloadTitle), 600);
+    return () => clearTimeout(t);
+  }, [downloadTitle, initialTitle, onTitleChange]);
 
   // Clear scenes from the queued list once the poll confirms they finished — but
   // only after a poll has SEEN them processing (two-phase, see queuePhase): right
@@ -905,7 +889,9 @@ export default function LongformJobSlot({
           regenerated; a regen is render-only, clears finalVideoUrl, and surfaces the
           manual "Assemble final video" button above */}
       {scenes.length > 0 && (
-        <div className="space-y-3">
+        // Anchor for "Open" from the library: the generator form above is tall, so landing
+        // at the top of the page looked like nothing had happened. The page scrolls here.
+        <div className="space-y-3" id={`storyboard-${slotIndex}`}>
           <div className="sticky top-0 z-20 -mx-4 space-y-3 border-b border-border bg-background px-4 py-3">
             <div className="flex items-center justify-between gap-3">
               <h2 className="text-lg font-medium">

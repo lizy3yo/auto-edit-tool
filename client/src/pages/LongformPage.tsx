@@ -23,39 +23,57 @@ Next, sharpen the blade. A dull blade tears the grass instead of cutting it, and
 
 Do those two things for thirty days and you'll see the difference. That's the whole protocol — simple, repeatable, and it works.`;
 
-function loadSlotId(i: number): number | null {
-  try {
-    const raw = localStorage.getItem(slotKey(i));
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
-
-// Same JSON format the slot's loadJobId reads — writing here + remounting the
-// slot (via its React key) makes it adopt this id on the next mount.
-function saveSlotId(i: number, id: number) {
-  try {
-    localStorage.setItem(slotKey(i), JSON.stringify(id));
-  } catch {
-    /* localStorage unavailable — slot just won't persist */
-  }
-}
-
-// Same mechanism in reverse: drop the id so the remounted slot comes up empty.
-function clearSlotId(i: number) {
-  try {
-    localStorage.removeItem(slotKey(i));
-  } catch {
-    /* localStorage unavailable — nothing persisted to clear */
-  }
-}
+/**
+ * The five tabs live in the database (`longform_slots`), not `localStorage`.
+ *
+ * They used to be device-local, which meant signing in on another machine gave you five empty
+ * tabs even though every render was already a row in MySQL with its media on R2. The videos
+ * were never at risk — only the workspace failed to travel. `longformVideo.getSlots` /
+ * `setSlot` now carry it, so the same account picks up where it left off on any PC.
+ */
 
 export default function FaceLockVideo() {
+  const utils = trpc.useUtils();
   const [activeTab, setActiveTab] = useState("0");
-  const [resumeIds, setResumeIds] = useState<(number | null)[]>(() =>
-    Array.from({ length: MAX_SLOTS }, (_, i) => loadSlotId(i))
+  // Null until the server's slots arrive; the tabs render only after that, so a slot never
+  // mounts empty and then jumps to a job a moment later.
+  const [resumeIds, setResumeIds] = useState<(number | null)[] | null>(null);
+  const [draftTitles, setDraftTitles] = useState<string[]>(() =>
+    Array.from({ length: MAX_SLOTS }, () => "")
   );
+
+  const { data: savedSlots, isError: slotsUnavailable } =
+    trpc.longformVideo.getSlots.useQuery(undefined, { retry: false });
+  useEffect(() => {
+    if (savedSlots) {
+      setResumeIds(prev => prev ?? savedSlots.map(s => s.jobId));
+      setDraftTitles(prev =>
+        prev.some(Boolean) ? prev : savedSlots.map(s => s.draftTitle)
+      );
+      return;
+    }
+    // The saved workspace is a convenience, never a prerequisite. If the query fails (an
+    // unapplied migration is the realistic cause), fall back to empty tabs so the generator
+    // still works — leaving `resumeIds` null instead made every open silently no-op.
+    if (slotsUnavailable) {
+      setResumeIds(
+        prev => prev ?? Array.from({ length: MAX_SLOTS }, () => null)
+      );
+    }
+  }, [savedSlots, slotsUnavailable]);
+
+  const { mutate: setSlotMutate } = trpc.longformVideo.setSlot.useMutation({
+    onSuccess: () => void utils.longformVideo.getSlots.invalidate(),
+  });
+  /** Write one tab through to the DB. Fire-and-forget: local state already moved. */
+  const persistSlot = useCallback(
+    (
+      slotIndex: number,
+      patch: { jobId?: number | null; draftTitle?: string | null }
+    ) => setSlotMutate({ slotIndex, ...patch }),
+    [setSlotMutate]
+  );
+
   const [slotStatuses, setSlotStatuses] = useState<SlotStatus[]>(() =>
     Array.from({ length: MAX_SLOTS }, () => "idle")
   );
@@ -81,6 +99,11 @@ export default function FaceLockVideo() {
   useEffect(() => {
     resumeIdsRef.current = resumeIds;
   }, [resumeIds]);
+  // `claimSlot` needs the live statuses without depending on them (which would make every
+  // callback below unstable and re-fire the `?open=` effect on each status tick).
+  const slotStatusesRef = useRef<SlotStatus[]>(
+    Array.from({ length: MAX_SLOTS }, () => "idle")
+  );
 
   const { data: providerStatus } = trpc.provider.getStatus.useQuery();
   const { data: balance } = trpc.provider.getBalance.useQuery(undefined, {
@@ -88,32 +111,30 @@ export default function FaceLockVideo() {
   });
   const { data: allChannels } = trpc.channelConfig.listAllChannels.useQuery();
 
-  // Auto-resume in-flight jobs after reload: claim any active job not already
-  // held by a slot's persisted id, assigning it to the next empty slot.
+  // Auto-resume in-flight jobs: claim any active job no tab already holds into the next
+  // empty one. Still useful with server-side slots — a render started on another machine (or
+  // one whose tab was cleared) otherwise has no tab here.
   const { data: activeJobs } = trpc.longformVideo.myActiveJobs.useQuery();
   useEffect(() => {
-    if (!activeJobs || activeJobs.length === 0) return;
-    const claimed = new Set<number>();
-    for (let i = 0; i < MAX_SLOTS; i++) {
-      const id = loadSlotId(i);
-      if (id != null) claimed.add(id);
-    }
+    if (!activeJobs || activeJobs.length === 0 || !resumeIds) return;
     setResumeIds(prev => {
+      if (!prev) return prev;
       const next = [...prev];
       let changed = false;
       for (const job of activeJobs) {
-        if (claimed.has(job.id) || next.includes(job.id)) continue;
-        const free = next.findIndex(
-          (v, i) => v == null && loadSlotId(i) == null
-        );
+        if (next.includes(job.id)) continue;
+        const free = next.findIndex(v => v == null);
         if (free === -1) break;
         next[free] = job.id;
-        claimed.add(job.id);
+        persistSlot(free, { jobId: job.id });
         changed = true;
       }
       return changed ? next : prev;
     });
-  }, [activeJobs]);
+    // `resumeIds` is read through the guard above only to know slots have loaded; adding it
+    // to the deps would re-run this on every claim and fight its own setState.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeJobs, !!resumeIds, persistSlot]);
 
   const handleStatusChange = useCallback(
     (slotIndex: number, status: SlotStatus) => {
@@ -127,7 +148,9 @@ export default function FaceLockVideo() {
             a[slotIndex] ? a : a.map((v, i) => (i === slotIndex ? true : v))
           );
         }
-        return prev.map((s, i) => (i === slotIndex ? status : s));
+        const next = prev.map((s, i) => (i === slotIndex ? status : s));
+        slotStatusesRef.current = next;
+        return next;
       });
     },
     []
@@ -143,42 +166,74 @@ export default function FaceLockVideo() {
 
   // Load a past job into a slot: prefer the first idle slot so a running job
   // isn't replaced; fall back to the active tab when all slots are busy.
+  //
+  // Reads state through refs and performs its writes at the top level. The previous version
+  // did all of this INSIDE a `setSlotStatuses` updater, which is impure — React may invoke an
+  // updater more than once (it does in StrictMode), so every click fired the persist mutation
+  // twice and bumped the remount nonce by two.
+  const claimSlot = useCallback(() => {
+    const idle = slotStatusesRef.current.findIndex(s => s === "idle");
+    return idle === -1 ? Number(activeTabRef.current) : idle;
+  }, []);
+
+  /**
+   * Bring the storyboard into view after a slot adopts a job. The scenes render only once
+   * the first poll returns, so this retries briefly rather than scrolling to nothing — and
+   * gives up quietly if the job has no storyboard (a render that failed before storyboarding).
+   */
+  const scrollToStoryboard = useCallback((idx: number) => {
+    let tries = 0;
+    const tick = () => {
+      const el = document.getElementById(`storyboard-${idx}`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      }
+      if (++tries < 40) setTimeout(tick, 100); // ~4s, then stop
+    };
+    setTimeout(tick, 100);
+  }, []);
+
   const openFromHistory = useCallback(
     (jobId: number) => {
-      setSlotStatuses(statuses => {
-        // Already open in a slot? Just go there — re-loading it would pointlessly
-        // remount a slot that is already showing this job (and may be mid-render).
-        const existing = resumeIdsRef.current.findIndex(id => id === jobId);
-        if (existing !== -1) {
-          setActiveTab(String(existing));
-          return statuses;
-        }
-        const idle = statuses.findIndex(s => s === "idle");
-        const idx = idle === -1 ? Number(activeTabRef.current) : idle;
-        saveSlotId(idx, jobId);
-        // Keep `resumeIds` in step with localStorage so the library panel can highlight
-        // which rows are open; the slot itself still adopts the id via its remount.
-        setResumeIds(prev => prev.map((v, i) => (i === idx ? jobId : v)));
-        setSlotNonce(n => n.map((v, i) => (i === idx ? v + 1 : v)));
-        setActiveTab(String(idx));
-        return statuses;
+      // Already open in a slot? Just go there — re-loading it would pointlessly
+      // remount a slot that is already showing this job (and may be mid-render).
+      const existing = (resumeIdsRef.current ?? []).findIndex(
+        id => id === jobId
+      );
+      if (existing !== -1) {
+        setActiveTab(String(existing));
+        scrollToStoryboard(existing);
+        return;
+      }
+      const idx = claimSlot();
+      persistSlot(idx, { jobId });
+      setResumeIds(prev => {
+        // Before `getSlots` resolves this is still null. Seeding a fresh array rather than
+        // bailing out is the fix for clicks that used to be silently dropped on a cold load
+        // — the id was discarded and the slot remounted empty.
+        const base = prev ?? Array.from({ length: MAX_SLOTS }, () => null);
+        return base.map((v, i) => (i === idx ? jobId : v));
       });
+      setSlotNonce(n => n.map((v, i) => (i === idx ? v + 1 : v)));
+      setActiveTab(String(idx));
+      scrollToStoryboard(idx);
     },
-    [setActiveTab]
+    [setActiveTab, persistSlot, claimSlot, scrollToStoryboard]
   );
 
   /** Clear a slot back to an empty form and focus it — the panel's "+ New". */
   const handleNewVideo = useCallback(() => {
-    setSlotStatuses(statuses => {
-      const idle = statuses.findIndex(s => s === "idle");
-      const idx = idle === -1 ? Number(activeTabRef.current) : idle;
-      clearSlotId(idx);
-      setResumeIds(prev => prev.map((v, i) => (i === idx ? null : v)));
-      setSlotNonce(n => n.map((v, i) => (i === idx ? v + 1 : v)));
-      setActiveTab(String(idx));
-      return statuses;
+    const idx = claimSlot();
+    persistSlot(idx, { jobId: null, draftTitle: null });
+    setResumeIds(prev => {
+      const base = prev ?? Array.from({ length: MAX_SLOTS }, () => null);
+      return base.map((v, i) => (i === idx ? null : v));
     });
-  }, [setActiveTab]);
+    setDraftTitles(prev => prev.map((v, i) => (i === idx ? "" : v)));
+    setSlotNonce(n => n.map((v, i) => (i === idx ? v + 1 : v)));
+    setActiveTab(String(idx));
+  }, [setActiveTab, persistSlot, claimSlot]);
 
   // Deep link from the Library page: `/?open=<jobId>` loads that job into a slot, then
   // strips the param so a reload doesn't re-open it over whatever you moved on to.
@@ -209,11 +264,11 @@ export default function FaceLockVideo() {
   const { data: mockMode } = trpc.longformVideo.getMockMode.useQuery();
 
   return (
-    <div className="flex gap-6">
+    <div className="flex items-start gap-6">
       <VideoLibraryPanel
         onOpen={openFromHistory}
         onNew={handleNewVideo}
-        activeJobIds={resumeIds}
+        activeJobIds={resumeIds ?? []}
       />
       <div className="min-w-0 flex-1 space-y-6">
         <div className="flex items-center justify-between">
@@ -237,6 +292,18 @@ export default function FaceLockVideo() {
             )}
           </div>
         </div>
+
+        {slotsUnavailable && (
+          <div className="rounded-md border border-amber-500/60 bg-amber-500/10 px-3 py-2 text-sm">
+            <span className="font-medium">Workspace sync is unavailable.</span>{" "}
+            Tabs still work but won't be remembered across devices — usually an
+            unapplied migration. Run{" "}
+            <code className="rounded bg-secondary px-1 py-0.5 text-xs">
+              npx drizzle-kit migrate
+            </code>
+            .
+          </div>
+        )}
 
         {mockMode?.enabled && (
           <div className="rounded-md border border-amber-500/60 bg-amber-500/10 px-3 py-2 text-sm">
@@ -282,7 +349,20 @@ export default function FaceLockVideo() {
                 <LongformJobSlot
                   slotIndex={i}
                   storageKey={slotKey(i)}
-                  initialJobId={resumeIds[i]}
+                  initialJobId={resumeIds?.[i] ?? null}
+                  initialTitle={draftTitles[i] ?? ""}
+                  onTitleChange={title => {
+                    setDraftTitles(prev =>
+                      prev.map((v, j) => (j === i ? title : v))
+                    );
+                    persistSlot(i, { draftTitle: title });
+                  }}
+                  onJobIdChange={jobId => {
+                    setResumeIds(prev =>
+                      prev ? prev.map((v, j) => (j === i ? jobId : v)) : prev
+                    );
+                    persistSlot(i, { jobId });
+                  }}
                   defaultScript={i === 0 ? DEFAULT_SCRIPT : ""}
                   channels={allChannels ?? []}
                   providerDisplayName={providerStatus?.displayName}

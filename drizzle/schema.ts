@@ -4,6 +4,7 @@ import {
   json,
   mysqlEnum,
   mysqlTable,
+  primaryKey,
   text,
   timestamp,
   varchar,
@@ -101,6 +102,36 @@ export const longformVideoJobs = mysqlTable("longform_video_jobs", {
 
 export type LongformVideoJob = typeof longformVideoJobs.$inferSelect;
 export type InsertLongformVideoJob = typeof longformVideoJobs.$inferInsert;
+
+/**
+ * The five long-form tabs, per user — which job each one currently holds and the download
+ * title typed into it.
+ *
+ * This used to live in `localStorage`, which made the workspace device-bound: the same account
+ * on another machine came up with five empty tabs even though every job was already in the
+ * database. The renders themselves were never at risk (they are rows here with media on R2);
+ * it was only the *desk* that didn't travel. Keyed by (userId, slotIndex) so signing in
+ * anywhere restores the same five tabs.
+ *
+ * Scene-checkbox selections stay in `localStorage` on purpose — they are throwaway UI state
+ * for one regenerate click, not something worth syncing.
+ */
+export const longformSlots = mysqlTable(
+  "longform_slots",
+  {
+    userId: int("userId").notNull(),
+    /** 0–4, matching `LONGFORM_SLOT_COUNT`. */
+    slotIndex: int("slotIndex").notNull(),
+    /** Job shown in this tab; null when the tab is a blank form. */
+    jobId: int("jobId"),
+    /** Download title typed into the tab before/while generating. */
+    draftTitle: varchar("draftTitle", { length: 255 }),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  table => [primaryKey({ columns: [table.userId, table.slotIndex] })]
+);
+
+export type LongformSlot = typeof longformSlots.$inferSelect;
 
 /**
  * Channel configurations — per-channel voice, host identity, CTA assets and

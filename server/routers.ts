@@ -28,6 +28,8 @@ import {
   getLongformVideoJobHistory,
   getAllLongformVideoJobHistory,
   getLongformLibrary,
+  getLongformSlots,
+  setLongformSlot,
   deleteLongformVideoJob,
   updateLongformVideoJob,
 } from "./db";
@@ -961,6 +963,42 @@ const longformVideoRouter = router({
   myActiveJobs: approvedProcedure.query(async ({ ctx }) => {
     return getActiveLongformVideoJobs(ctx.user.id);
   }),
+
+  /**
+   * This account's five tabs — which job each holds and its draft title.
+   *
+   * Server-side so the workspace follows the account rather than the browser: sign in on
+   * another machine and the same tabs come back. Always returns exactly
+   * `LONGFORM_SLOT_COUNT` entries; absent rows are empty tabs.
+   */
+  getSlots: approvedProcedure.query(async ({ ctx }) => {
+    const rows = await getLongformSlots(ctx.user.id);
+    const byIndex = new Map(rows.map(r => [r.slotIndex, r]));
+    return Array.from({ length: LONGFORM_SLOT_COUNT }, (_, slotIndex) => ({
+      slotIndex,
+      jobId: byIndex.get(slotIndex)?.jobId ?? null,
+      draftTitle: byIndex.get(slotIndex)?.draftTitle ?? "",
+    }));
+  }),
+
+  /** Persist one tab. Omitted fields are left as they are; null clears. */
+  setSlot: approvedProcedure
+    .input(
+      z.object({
+        slotIndex: z
+          .number()
+          .int()
+          .min(0)
+          .max(LONGFORM_SLOT_COUNT - 1),
+        jobId: z.number().int().nullable().optional(),
+        draftTitle: z.string().max(255).nullable().optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { slotIndex, ...patch } = input;
+      await setLongformSlot(ctx.user.id, slotIndex, patch);
+      return { success: true };
+    }),
 
   /**
    * Every job for the side panel and the Library page — processing included, so a render in

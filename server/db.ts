@@ -6,6 +6,7 @@ import {
   channelConfigs,
   appSettings,
   longformVideoJobs,
+  longformSlots,
 } from "../drizzle/schema";
 import type {
   InsertProviderConfig,
@@ -318,6 +319,44 @@ export async function getAllLongformVideoJobHistory(limit = 100) {
     .where(inArray(longformVideoJobs.status, ["completed", "failed"]))
     .orderBy(desc(longformVideoJobs.createdAt))
     .limit(limit);
+}
+
+// ─── Long-form workspace (the five tabs, per user) ───
+
+/**
+ * This user's five tabs. Missing rows simply mean "empty tab", so a first sign-in needs no
+ * seeding — the caller pads to `LONGFORM_SLOT_COUNT`.
+ */
+export async function getLongformSlots(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select()
+    .from(longformSlots)
+    .where(eq(longformSlots.userId, userId))
+    .orderBy(longformSlots.slotIndex);
+}
+
+/**
+ * Upsert one tab. `jobId`/`draftTitle` are each optional so the caller can change one without
+ * clobbering the other — passing `null` clears, passing nothing leaves it alone.
+ */
+export async function setLongformSlot(
+  userId: number,
+  slotIndex: number,
+  patch: { jobId?: number | null; draftTitle?: string | null }
+) {
+  const db = await getDb();
+  if (!db) return;
+  const set: Record<string, unknown> = {};
+  if ("jobId" in patch) set.jobId = patch.jobId ?? null;
+  if ("draftTitle" in patch) set.draftTitle = patch.draftTitle || null;
+  if (Object.keys(set).length === 0) return;
+
+  await db
+    .insert(longformSlots)
+    .values({ userId, slotIndex, ...set })
+    .onDuplicateKeyUpdate({ set });
 }
 
 export async function deleteLongformVideoJob(id: number, userId: number) {
