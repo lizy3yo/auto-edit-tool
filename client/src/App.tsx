@@ -5,11 +5,13 @@ import { Route, Switch, Link, useLocation } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import LongformPage from "./pages/LongformPage";
+import LibraryPage from "./pages/LibraryPage";
+import ChannelsPage from "./pages/ChannelsPage";
 import AdminPage from "./pages/AdminPage";
 import { useAuth } from "./_core/hooks/useAuth";
 import { LoginScreen } from "./components/LoginScreen";
 import { CreditErrorPopup } from "./components/CreditErrorPopup";
-import { Film, Loader2, LogOut, Settings } from "lucide-react";
+import { Film, LibraryBig, Loader2, LogOut, Settings, Tv } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 function Layout({ children }: { children: React.ReactNode }) {
@@ -35,6 +37,28 @@ function Layout({ children }: { children: React.ReactNode }) {
               }`}
             >
               Long-form Video
+            </Link>
+            <Link
+              href="/library"
+              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 transition-colors ${
+                location.startsWith("/library")
+                  ? "bg-secondary text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <LibraryBig className="h-3.5 w-3.5" />
+              Library
+            </Link>
+            <Link
+              href="/channels"
+              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 transition-colors ${
+                location.startsWith("/channels")
+                  ? "bg-secondary text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <Tv className="h-3.5 w-3.5" />
+              Channels
             </Link>
             <Link
               href="/admin"
@@ -91,6 +115,8 @@ function Router() {
         <Route path="/">
           <LongformPage />
         </Route>
+        <Route path="/library" component={LibraryPage} />
+        <Route path="/channels" component={ChannelsPage} />
         <Route path="/admin" component={AdminPage} />
         <Route component={NotFound} />
       </Switch>

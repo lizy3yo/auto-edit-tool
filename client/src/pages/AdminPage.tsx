@@ -10,7 +10,6 @@ import { Loader2, KeyRound, Plug } from "lucide-react";
 import { toast } from "sonner";
 import { ProviderKeys } from "@/components/admin/ProviderKeys";
 import { LongformInstruction } from "@/components/admin/LongformInstruction";
-import { ChannelConfigPanel } from "@/components/admin/ChannelConfigPanel";
 
 /**
  * 69Labs provider card — the video/image/TTS lane. One provider row lives in
@@ -162,7 +161,6 @@ export default function AdminPage() {
         <TabsList>
           <TabsTrigger value="keys">Provider Keys</TabsTrigger>
           <TabsTrigger value="instruction">Longform Instruction</TabsTrigger>
-          <TabsTrigger value="channels">Channels</TabsTrigger>
         </TabsList>
         <TabsContent value="keys" className="space-y-4 pt-2">
           <SixtyNineLabsCard />
@@ -170,9 +168,6 @@ export default function AdminPage() {
         </TabsContent>
         <TabsContent value="instruction" className="pt-2">
           <LongformInstruction />
-        </TabsContent>
-        <TabsContent value="channels" className="pt-2">
-          <ChannelConfigPanel />
         </TabsContent>
       </Tabs>
     </div>

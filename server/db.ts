@@ -258,6 +258,40 @@ const longformHistoryColumns = {
   >`json_unquote(json_extract(${longformVideoJobs.inputParams}, '$.channelKey'))`,
 };
 
+/**
+ * Library columns — the history set plus what a visual card needs.
+ *
+ * `posterUrl` is the FIRST scene's rendered clip, pulled out with `json_extract` so the
+ * multi-megabyte storyboard array never crosses the wire. Scene 1 is always a host beat
+ * (`buildUnifiedScenes` opens and closes on the host), so it makes a recognisable thumbnail,
+ * and it exists long before the film is assembled — an in-progress render gets a real preview
+ * instead of a grey box. The client falls back to `finalVideoUrl` when it is absent.
+ */
+const longformLibraryColumns = {
+  ...longformHistoryColumns,
+  progress: longformVideoJobs.progress,
+  posterUrl: sql<
+    string | null
+  >`json_unquote(json_extract(${longformVideoJobs.storyboard}, '$[0].clipUrl'))`,
+};
+
+/**
+ * Every job for the library views — unlike the history queries this includes `processing`,
+ * because the side panel's whole point is showing a render while it is still going.
+ * `allUsers` is for admins, matching `getAllLongformVideoJobHistory`.
+ */
+export async function getLongformLibrary(
+  userId: number,
+  opts: { allUsers?: boolean; limit?: number } = {}
+) {
+  const db = await getDb();
+  if (!db) return [];
+  const q = db.select(longformLibraryColumns).from(longformVideoJobs);
+  return (opts.allUsers ? q : q.where(eq(longformVideoJobs.userId, userId)))
+    .orderBy(desc(longformVideoJobs.createdAt))
+    .limit(opts.limit ?? 200);
+}
+
 export async function getLongformVideoJobHistory(userId: number, limit = 50) {
   const db = await getDb();
   if (!db) return [];

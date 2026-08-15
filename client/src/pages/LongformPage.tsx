@@ -2,25 +2,8 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { trpc } from "@/lib/trpc";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import LongformJobSlot, { type SlotStatus } from "@/components/LongformJobSlot";
-import { useAuth } from "@/_core/hooks/useAuth";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import {
-  Loader2,
-  CheckCircle2,
-  XCircle,
-  Coins,
-  Film,
-  History,
-} from "lucide-react";
+import { VideoLibraryPanel } from "@/components/VideoLibraryPanel";
+import { Loader2, CheckCircle2, XCircle, Coins, Film } from "lucide-react";
 
 const MAX_SLOTS = 5;
 const STORAGE_KEY_BASE = "longform_job_id";
@@ -59,6 +42,15 @@ function saveSlotId(i: number, id: number) {
   }
 }
 
+// Same mechanism in reverse: drop the id so the remounted slot comes up empty.
+function clearSlotId(i: number) {
+  try {
+    localStorage.removeItem(slotKey(i));
+  } catch {
+    /* localStorage unavailable — nothing persisted to clear */
+  }
+}
+
 export default function FaceLockVideo() {
   const [activeTab, setActiveTab] = useState("0");
   const [resumeIds, setResumeIds] = useState<(number | null)[]>(() =>
@@ -82,6 +74,13 @@ export default function FaceLockVideo() {
   useEffect(() => {
     activeTabRef.current = activeTab;
   }, [activeTab]);
+  // Same reason: `openFromHistory` needs the current slot ids to detect an already-open job
+  // without taking `resumeIds` as a dependency (which would re-create the callback on every
+  // status change and re-fire the `?open=` effect).
+  const resumeIdsRef = useRef(resumeIds);
+  useEffect(() => {
+    resumeIdsRef.current = resumeIds;
+  }, [resumeIds]);
 
   const { data: providerStatus } = trpc.provider.getStatus.useQuery();
   const { data: balance } = trpc.provider.getBalance.useQuery(undefined, {
@@ -147,9 +146,19 @@ export default function FaceLockVideo() {
   const openFromHistory = useCallback(
     (jobId: number) => {
       setSlotStatuses(statuses => {
+        // Already open in a slot? Just go there — re-loading it would pointlessly
+        // remount a slot that is already showing this job (and may be mid-render).
+        const existing = resumeIdsRef.current.findIndex(id => id === jobId);
+        if (existing !== -1) {
+          setActiveTab(String(existing));
+          return statuses;
+        }
         const idle = statuses.findIndex(s => s === "idle");
         const idx = idle === -1 ? Number(activeTabRef.current) : idle;
         saveSlotId(idx, jobId);
+        // Keep `resumeIds` in step with localStorage so the library panel can highlight
+        // which rows are open; the slot itself still adopts the id via its remount.
+        setResumeIds(prev => prev.map((v, i) => (i === idx ? jobId : v)));
         setSlotNonce(n => n.map((v, i) => (i === idx ? v + 1 : v)));
         setActiveTab(String(idx));
         return statuses;
@@ -157,6 +166,30 @@ export default function FaceLockVideo() {
     },
     [setActiveTab]
   );
+
+  /** Clear a slot back to an empty form and focus it — the panel's "+ New". */
+  const handleNewVideo = useCallback(() => {
+    setSlotStatuses(statuses => {
+      const idle = statuses.findIndex(s => s === "idle");
+      const idx = idle === -1 ? Number(activeTabRef.current) : idle;
+      clearSlotId(idx);
+      setResumeIds(prev => prev.map((v, i) => (i === idx ? null : v)));
+      setSlotNonce(n => n.map((v, i) => (i === idx ? v + 1 : v)));
+      setActiveTab(String(idx));
+      return statuses;
+    });
+  }, [setActiveTab]);
+
+  // Deep link from the Library page: `/?open=<jobId>` loads that job into a slot, then
+  // strips the param so a reload doesn't re-open it over whatever you moved on to.
+  useEffect(() => {
+    const param = new URLSearchParams(window.location.search).get("open");
+    const jobId = param ? Number(param) : NaN;
+    if (Number.isInteger(jobId)) {
+      openFromHistory(jobId);
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, [openFromHistory]);
 
   const statusIcon = (status: SlotStatus) => {
     switch (status) {
@@ -176,173 +209,90 @@ export default function FaceLockVideo() {
   const { data: mockMode } = trpc.longformVideo.getMockMode.useQuery();
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Film className="h-6 w-6 text-primary" />
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Long-form Video
-          </h1>
-        </div>
-        <div className="flex items-center gap-2">
-          {balance && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground bg-secondary/50 rounded-lg px-3 py-1.5">
-              <Coins className="h-4 w-4 text-primary" />
-              <span>
-                {providerStatus?.providerType === "sixtynine_labs" &&
-                (balance as any).dailyVideos
-                  ? `${(balance as any).dailyVideos.remaining}/${(balance as any).dailyVideos.limit} daily · ${(balance as any).monthlyVideos.remaining}/${(balance as any).monthlyVideos.limit} monthly`
-                  : `${balance.availableQuota} / ${balance.totalQuota} credits`}
-              </span>
-            </div>
-          )}
-          <HistoryDialog onOpen={openFromHistory} />
-        </div>
-      </div>
-
-      {mockMode?.enabled && (
-        <div className="rounded-md border border-amber-500/60 bg-amber-500/10 px-3 py-2 text-sm">
-          <span className="font-medium">Mock mode is ON.</span> Renders are free
-          and produce placeholder footage — no credits are spent and no provider
-          is contacted. Turn it off in Admin → Provider Keys before a real run.
-        </div>
-      )}
-
-      <p className="text-sm text-muted-foreground">
-        Generate {MAX_SLOTS} videos in parallel — each tab is its own job with
-        its own script, channel, and b-roll model. They run independently and
-        each consumes credits on its own.
-      </p>
-
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <div className="flex items-center gap-2">
-          <TabsList>
-            {Array.from({ length: MAX_SLOTS }, (_, i) => (
-              <TabsTrigger
-                key={i}
-                value={String(i)}
-                className={`gap-1.5 ${needsAttention[i] ? "tab-pulse" : ""}`}
-              >
-                Video {i + 1}
-                {statusIcon(slotStatuses[i])}
-              </TabsTrigger>
-            ))}
-          </TabsList>
+    <div className="flex gap-6">
+      <VideoLibraryPanel
+        onOpen={openFromHistory}
+        onNew={handleNewVideo}
+        activeJobIds={resumeIds}
+      />
+      <div className="min-w-0 flex-1 space-y-6">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Film className="h-6 w-6 text-primary" />
+            <h1 className="text-2xl font-semibold tracking-tight">
+              Long-form Video
+            </h1>
+          </div>
+          <div className="flex items-center gap-2">
+            {balance && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground bg-secondary/50 rounded-lg px-3 py-1.5">
+                <Coins className="h-4 w-4 text-primary" />
+                <span>
+                  {providerStatus?.providerType === "sixtynine_labs" &&
+                  (balance as any).dailyVideos
+                    ? `${(balance as any).dailyVideos.remaining}/${(balance as any).dailyVideos.limit} daily · ${(balance as any).monthlyVideos.remaining}/${(balance as any).monthlyVideos.limit} monthly`
+                    : `${balance.availableQuota} / ${balance.totalQuota} credits`}
+                </span>
+              </div>
+            )}
+          </div>
         </div>
 
-        {Array.from({ length: MAX_SLOTS }, (_, i) => (
-          // forceMount keeps every slot mounted so background jobs keep polling
-          // even while another tab is in view; Radix hides the inactive ones.
-          <TabsContent
-            key={`${i}-${slotNonce[i]}`}
-            value={String(i)}
-            forceMount
-            className="mt-6"
-          >
-            <div className={activeTab === String(i) ? "" : "hidden"}>
-              <LongformJobSlot
-                slotIndex={i}
-                storageKey={slotKey(i)}
-                initialJobId={resumeIds[i]}
-                defaultScript={i === 0 ? DEFAULT_SCRIPT : ""}
-                channels={allChannels ?? []}
-                providerDisplayName={providerStatus?.displayName}
-                onStatusChange={handleStatusChange}
-              />
-            </div>
-          </TabsContent>
-        ))}
-      </Tabs>
-    </div>
-  );
-}
+        {mockMode?.enabled && (
+          <div className="rounded-md border border-amber-500/60 bg-amber-500/10 px-3 py-2 text-sm">
+            <span className="font-medium">Mock mode is ON.</span> Renders are
+            free and produce placeholder footage — no credits are spent and no
+            provider is contacted. Turn it off in Admin → Provider Keys before a
+            real run.
+          </div>
+        )}
 
-function HistoryDialog({ onOpen }: { onOpen: (jobId: number) => void }) {
-  const [open, setOpen] = useState(false);
-  const { user } = useAuth();
-  const isAdmin = user?.role === "admin";
-  // Admins see every user's jobs (with the maker's name); others see their own.
-  const mine = trpc.longformVideo.myJobHistory.useQuery(undefined, {
-    enabled: open && !isAdmin,
-  });
-  const all = trpc.longformVideo.allJobHistory.useQuery(undefined, {
-    enabled: open && isAdmin,
-  });
-  const history = isAdmin ? all.data : mine.data;
-  const isLoading = isAdmin ? all.isLoading : mine.isLoading;
+        <p className="text-sm text-muted-foreground">
+          Generate {MAX_SLOTS} videos in parallel — each tab is its own job with
+          its own script, channel, and b-roll model. They run independently and
+          each consumes credits on its own.
+        </p>
 
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="gap-1.5">
-          <History className="h-4 w-4" />
-          History
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>Video history</DialogTitle>
-        </DialogHeader>
-        <ScrollArea className="max-h-[60vh] pr-3">
-          {isLoading ? (
-            <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Loading…
-            </div>
-          ) : !history || history.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">
-              No finished videos yet.
-            </p>
-          ) : (
-            <ul className="space-y-2">
-              {history.map(job => (
-                <li
-                  key={job.id}
-                  className="flex items-center gap-3 rounded-lg border p-3"
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <div className="flex items-center gap-2">
+            <TabsList>
+              {Array.from({ length: MAX_SLOTS }, (_, i) => (
+                <TabsTrigger
+                  key={i}
+                  value={String(i)}
+                  className={`gap-1.5 ${needsAttention[i] ? "tab-pulse" : ""}`}
                 >
-                  <div className="min-w-0 flex-1">
-                    <div className="line-clamp-2 break-words text-sm font-medium">
-                      {job.title || `Video #${job.id}`}
-                    </div>
-                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                      <Badge
-                        variant={
-                          job.status === "failed" ? "destructive" : "secondary"
-                        }
-                        className={
-                          job.status === "completed"
-                            ? "bg-emerald-500/15 text-emerald-400"
-                            : undefined
-                        }
-                      >
-                        {job.status}
-                      </Badge>
-                      {isAdmin && job.userName && (
-                        <span className="font-medium text-foreground">
-                          {job.userName}
-                        </span>
-                      )}
-                      {job.channelKey && <span>{job.channelKey}</span>}
-                      <span>{new Date(job.createdAt).toLocaleString()}</span>
-                    </div>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    className="shrink-0"
-                    onClick={() => {
-                      onOpen(job.id);
-                      setOpen(false);
-                    }}
-                  >
-                    Open
-                  </Button>
-                </li>
+                  Video {i + 1}
+                  {statusIcon(slotStatuses[i])}
+                </TabsTrigger>
               ))}
-            </ul>
-          )}
-        </ScrollArea>
-      </DialogContent>
-    </Dialog>
+            </TabsList>
+          </div>
+
+          {Array.from({ length: MAX_SLOTS }, (_, i) => (
+            // forceMount keeps every slot mounted so background jobs keep polling
+            // even while another tab is in view; Radix hides the inactive ones.
+            <TabsContent
+              key={`${i}-${slotNonce[i]}`}
+              value={String(i)}
+              forceMount
+              className="mt-6"
+            >
+              <div className={activeTab === String(i) ? "" : "hidden"}>
+                <LongformJobSlot
+                  slotIndex={i}
+                  storageKey={slotKey(i)}
+                  initialJobId={resumeIds[i]}
+                  defaultScript={i === 0 ? DEFAULT_SCRIPT : ""}
+                  channels={allChannels ?? []}
+                  providerDisplayName={providerStatus?.displayName}
+                  onStatusChange={handleStatusChange}
+                />
+              </div>
+            </TabsContent>
+          ))}
+        </Tabs>
+      </div>
+    </div>
   );
 }

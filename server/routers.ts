@@ -27,6 +27,7 @@ import {
   getActiveLongformVideoJobs,
   getLongformVideoJobHistory,
   getAllLongformVideoJobHistory,
+  getLongformLibrary,
   deleteLongformVideoJob,
   updateLongformVideoJob,
 } from "./db";
@@ -960,6 +961,23 @@ const longformVideoRouter = router({
   myActiveJobs: approvedProcedure.query(async ({ ctx }) => {
     return getActiveLongformVideoJobs(ctx.user.id);
   }),
+
+  /**
+   * Every job for the side panel and the Library page — processing included, so a render in
+   * flight is visible while it runs. Admins see everyone's, matching `allJobHistory`.
+   */
+  library: approvedProcedure
+    .input(
+      z
+        .object({ limit: z.number().int().min(1).max(500).optional() })
+        .optional()
+    )
+    .query(async ({ ctx, input }) =>
+      getLongformLibrary(ctx.user.id, {
+        allUsers: ctx.user.role === "admin",
+        limit: input?.limit,
+      })
+    ),
 
   /** Current user's finished (completed/failed) jobs — for the history panel. */
   myJobHistory: approvedProcedure
