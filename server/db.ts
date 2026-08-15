@@ -18,11 +18,24 @@ let _db: ReturnType<typeof drizzle> | null = null;
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
+      // Log where we're dialing (never the credentials) — a bad DATABASE_URL
+      // surfaces as an opaque ETIMEDOUT per query, with nothing naming the host.
+      try {
+        const u = new URL(process.env.DATABASE_URL);
+        console.log(
+          `[Database] connecting to ${u.hostname}:${u.port || 3306}${u.pathname}`
+        );
+      } catch {
+        console.warn("[Database] DATABASE_URL is not a parseable URL");
+      }
       const pool = createPool({
         uri: process.env.DATABASE_URL,
         connectionLimit: 20,
         waitForConnections: true,
         queueLimit: 0,
+        // Fail fast: the default has queries hanging ~2min on an unreachable
+        // host, which reads as "the app is slow" instead of "the DB is down".
+        connectTimeout: 10_000,
       });
       _db = drizzle(pool);
     } catch (error) {
