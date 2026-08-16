@@ -140,7 +140,6 @@ import {
   HeygenLipsyncAdapter,
   heygenSlotsFor,
 } from "./providers/heygen-lipsync";
-import { falSlotsFor } from "./providers/fal-lipsync";
 import { encrypt } from "./encryption";
 import { ApimartAdapter } from "./providers/apimart";
 import * as storage from "./storage";
@@ -5796,27 +5795,22 @@ describe("scene ceiling (split → coalesce end state)", () => {
 });
 
 describe("generateSceneClips routing (HeyGen lip-sync vs grok-imagine-video)", () => {
-  const originalLipsyncEnv = {
-    provider: ENV.lipsyncProvider,
-    key: ENV.heygenApiKey,
-  };
+  const originalLipsyncEnv = { key: ENV.heygenApiKey };
   // Drain pending macrotasks so a dangling keyframe promise (a runChunkTasks sibling still
   // resolving after its scene rejected) lands on the shared mockGenImage HERE and is then cleared,
   // instead of bleeding a stray call into the next test (the mock is module-level, not per-test).
   afterEach(async () => {
     for (let i = 0; i < 10; i++) await new Promise(r => setTimeout(r, 0));
     vi.restoreAllMocks();
-    ENV.lipsyncProvider = originalLipsyncEnv.provider;
     ENV.heygenApiKey = originalLipsyncEnv.key;
   });
 
   /**
    * The real HeyGen lane from `resolveLipsyncAdapter`, with the provider calls stubbed at the
-   * PROTOTYPE — so these tests exercise the actual `LIPSYNC_PROVIDER` wiring (payload shape,
-   * poll ceiling, semaphore) instead of a hand-built lane object that could drift from it.
+   * PROTOTYPE — so these tests exercise the actual lane wiring (payload shape, poll ceiling,
+   * semaphore) instead of a hand-built lane object that could drift from it.
    */
   async function heygenLane(pollResult?: any) {
-    ENV.lipsyncProvider = "heygen";
     ENV.heygenApiKey = "test-key";
     const submitLipsync = vi
       .spyOn(HeygenLipsyncAdapter.prototype, "submitLipsync")
@@ -7665,18 +7659,14 @@ describe("masterOverlayEligible (seamless master-overlay gate)", () => {
   });
 });
 
-describe("lip-sync provider switch (LIPSYNC_PROVIDER)", () => {
+describe("lip-sync lane resolution", () => {
   const original = {
-    provider: ENV.lipsyncProvider,
     heygen: ENV.heygenApiKey,
     runpod: ENV.runPodApiKey,
-    fal: ENV.falApiKey,
   };
   afterEach(() => {
-    ENV.lipsyncProvider = original.provider;
     ENV.heygenApiKey = original.heygen;
     ENV.runPodApiKey = original.runpod;
-    ENV.falApiKey = original.fal;
   });
 
   // longform-studio carries only the HeyGen lane; the RunPod staging lane was
@@ -7695,7 +7685,6 @@ describe("lip-sync provider switch (LIPSYNC_PROVIDER)", () => {
   // The tab's own HeyGen account is what makes 5 tabs render 5× wider — HeyGen caps
   // concurrency per account, so the lane must also carry that account's OWN semaphore.
   it("prefers the tab's HeyGen key over the env key, and falls back when the slot is blank", async () => {
-    ENV.lipsyncProvider = "heygen";
     ENV.heygenApiKey = "env-key";
     const stored = JSON.stringify({ last4: "-key", enc: encrypt("slot-key") });
     const spy = vi
@@ -7714,44 +7703,6 @@ describe("lip-sync provider switch (LIPSYNC_PROVIDER)", () => {
       apimartSlot: 4,
     });
     expect(blank!.slots).toBe(heygenSlotsFor("env-key"));
-    spy.mockRestore();
-  });
-
-  it("resolves the fal lane when LIPSYNC_PROVIDER=fal", async () => {
-    ENV.lipsyncProvider = "fal";
-    ENV.falApiKey = "fal-key";
-    // HeyGen stays configured — the switch must be the ONLY thing that decides the lane.
-    ENV.heygenApiKey = "hg-key";
-    const lane = await resolveLipsyncAdapter(baseParams);
-    expect(lane?.provider).toBe("fal");
-    expect(lane!.slots).toBe(falSlotsFor("fal-key"));
-  });
-
-  it("returns null when the fal key is unset (no silent fallback to HeyGen)", async () => {
-    ENV.lipsyncProvider = "fal";
-    ENV.falApiKey = "";
-    ENV.heygenApiKey = "hg-key";
-    expect(await resolveLipsyncAdapter(baseParams)).toBeNull();
-  });
-
-  // Same per-tab contract as HeyGen, read from its OWN setting keys so flipping the provider
-  // back and forth never re-enters keys.
-  it("prefers the tab's fal key over the env key", async () => {
-    ENV.lipsyncProvider = "fal";
-    ENV.falApiKey = "fal-env";
-    const stored = JSON.stringify({ last4: "slot", enc: encrypt("fal-slot") });
-    const spy = vi
-      .spyOn(db, "getAppSetting")
-      .mockImplementation(async k => (k === "fal_key_slot_1" ? stored : null));
-
-    const tab = await resolveLipsyncAdapter({ ...baseParams, apimartSlot: 1 });
-    expect(tab!.slots).toBe(falSlotsFor("fal-slot"));
-
-    const blank = await resolveLipsyncAdapter({
-      ...baseParams,
-      apimartSlot: 3,
-    });
-    expect(blank!.slots).toBe(falSlotsFor("fal-env"));
     spy.mockRestore();
   });
 });

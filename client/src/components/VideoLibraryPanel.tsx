@@ -12,11 +12,16 @@ import {
   ExternalLink,
   Play,
   Pencil,
+  Trash2,
 } from "lucide-react";
 import {
   VideoPlayerDialog,
   type PlayableJob,
 } from "@/components/VideoPlayerDialog";
+import {
+  DeleteVideoDialog,
+  type DeletableJob,
+} from "@/components/DeleteVideoDialog";
 
 /**
  * Persistent list of every render, alongside the generator.
@@ -34,10 +39,13 @@ import {
 export function VideoLibraryPanel({
   onOpen,
   onNew,
+  onDeleted,
   activeJobIds,
 }: {
   onOpen: (jobId: number) => void;
   onNew: () => void;
+  /** Fired after a video is deleted — the page clears any tab that was showing it. */
+  onDeleted?: (jobId: number) => void;
   /** Job ids currently loaded in a slot — highlighted so you can see where you are. */
   activeJobIds: (number | null)[];
 }) {
@@ -51,6 +59,7 @@ export function VideoLibraryPanel({
   );
 
   const [playing, setPlaying] = useState<PlayableJob | null>(null);
+  const [deleting, setDeleting] = useState<DeletableJob | null>(null);
   const open = new Set(activeJobIds.filter((id): id is number => id != null));
 
   return (
@@ -99,7 +108,7 @@ export function VideoLibraryPanel({
                     type="button"
                     onClick={() => setPlaying(job)}
                     title="Watch this video"
-                    className={`flex w-full items-center gap-3 rounded-md p-2 pr-9 text-left transition-colors ${
+                    className={`flex w-full items-center gap-3 rounded-md p-2 pr-14 text-left transition-colors ${
                       isOpen
                         ? "bg-secondary ring-1 ring-primary/40"
                         : "hover:bg-secondary/60"
@@ -125,16 +134,24 @@ export function VideoLibraryPanel({
                       <StatusLine job={job} />
                     </span>
                   </button>
-                  {/* Same split as the Library page: the row watches the video, this
-                      opens the storyboard workspace. Always visible rather than
-                      hover-only — a hidden control reads as a missing one. */}
+                  {/* Same split as the Library page: the row watches the video, these
+                      open the storyboard workspace and delete. Always visible rather
+                      than hover-only — a hidden control reads as a missing one. */}
                   <button
                     type="button"
                     onClick={() => onOpen(job.id)}
                     title="Open the storyboard — inspect and regenerate scenes"
-                    className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                    className="absolute right-8 top-1/2 -translate-y-1/2 rounded p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
                   >
                     <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDeleting(job)}
+                    title="Delete this video from your library"
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 </li>
               );
@@ -155,6 +172,16 @@ export function VideoLibraryPanel({
         job={playing}
         onOpenChange={o => !o && setPlaying(null)}
         onEdit={onOpen}
+      />
+
+      <DeleteVideoDialog
+        job={deleting}
+        onOpenChange={o => !o && setDeleting(null)}
+        onDeleted={jobId => {
+          // Close the player too if it was showing the video that just went away.
+          setPlaying(p => (p?.id === jobId ? null : p));
+          onDeleted?.(jobId);
+        }}
       />
     </aside>
   );

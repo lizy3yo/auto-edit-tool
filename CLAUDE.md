@@ -33,23 +33,20 @@ Read through the single `ENV` object in `server/_core/env.ts`, except `R2_*`, wh
 `server/storage.ts`, `server/download.ts` and `server/musicBeds.ts` read straight off
 `process.env`.
 
-| Var                                                                      | Consumer                                                                                               | Missing ⇒                                             |
-| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------- |
-| `DATABASE_URL`                                                           | `server/db.ts`, `drizzle.config.ts`                                                                    | no boot                                               |
-| `JWT_SECRET`                                                             | `server/_core/cookies.ts` + `server/encryption.ts:getKey()`                                            | no login, no stored keys — see gotchas                |
-| `ADMIN_EMAIL` / `ADMIN_PASSWORD`                                         | `server/adminAuth.ts` (single admin)                                                                   | no login                                              |
-| `PORT` (3000)                                                            | `server/_core/index.ts:77` — auto-scans +20 if busy                                                    | —                                                     |
-| `ANTHROPIC_API_KEY`                                                      | `server/claude.ts` (`claude-opus-4-8`), `server/overlayTextScan.ts` (`claude-haiku-4-5-20251001`)      | storyboard stage fails                                |
-| `GEMINI_API_KEY`                                                         | `server/gemini.ts` (`gemini-2.5-flash`), `server/providers/gemini-image.ts` (`gemini-3.1-flash-image`) | no visual direction, no image fallback                |
-| `OPENAI_API_KEY`                                                         | `server/providers/openai-image.ts` (`gpt-image-2`, direct api.openai.com)                              | no stills / b-roll keyframes                          |
-| `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` | `server/storage.ts` (S3 API)                                                                           | every upload fails                                    |
-| `R2_PUBLIC_URL`                                                          | `server/storage.ts:83`, `server/musicBeds.ts:101`                                                      | narration-only films (warns, no crash)                |
-| `RUN_POD_KEY` + `RUNPOD_WHISPERX_ENDPOINT`                               | `server/_core/voiceTranscription.ts` → `kodxana/whisperx-worker_v2` serverless                         | no word-level narration alignment                     |
-| `HEYGEN_API_KEY`                                                         | `server/longformVideo.ts:2506` — **fallback only**, used when a tab's slot key is blank                | host lip-sync fails for slot-less tabs                |
-| `FAL_API_KEY`                                                            | `server/providers/fal-lipsync.ts` — **fallback only**, used when a tab's fal slot key is blank         | host lip-sync fails when `LIPSYNC_PROVIDER=fal`       |
-| `PUBLIC_BASE_URL`                                                        | `server/providers/heygen-lipsync.ts:78`, `server/providers/fal-lipsync.ts` (webhook callback URL)      | blank ⇒ pure polling; slower, still works             |
-| `WAVESPEED_API_KEY`                                                      | `server/providers/wavespeed-lipsync.ts` — **fallback only**, used when a tab's slot key is blank       | host lip-sync fails when `LIPSYNC_PROVIDER=wavespeed` |
-| `LIPSYNC_PROVIDER` (`heygen` \| `fal` \| `wavespeed`)                    | `ENV.lipsyncProvider` — the only branch point, in `resolveLipsyncAdapter`                              | —                                                     |
+| Var                                                                      | Consumer                                                                                               | Missing ⇒                                 |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ | ----------------------------------------- |
+| `DATABASE_URL`                                                           | `server/db.ts`, `drizzle.config.ts`                                                                    | no boot                                   |
+| `JWT_SECRET`                                                             | `server/_core/cookies.ts` + `server/encryption.ts:getKey()`                                            | no login, no stored keys — see gotchas    |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD`                                         | `server/adminAuth.ts` (single admin)                                                                   | no login                                  |
+| `PORT` (3000)                                                            | `server/_core/index.ts:77` — auto-scans +20 if busy                                                    | —                                         |
+| `ANTHROPIC_API_KEY`                                                      | `server/claude.ts` (`claude-opus-4-8`), `server/overlayTextScan.ts` (`claude-haiku-4-5-20251001`)      | storyboard stage fails                    |
+| `GEMINI_API_KEY`                                                         | `server/gemini.ts` (`gemini-2.5-flash`), `server/providers/gemini-image.ts` (`gemini-3.1-flash-image`) | no visual direction, no image fallback    |
+| `OPENAI_API_KEY`                                                         | `server/providers/openai-image.ts` (`gpt-image-2`, direct api.openai.com)                              | no stills / b-roll keyframes              |
+| `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` | `server/storage.ts` (S3 API)                                                                           | every upload fails                        |
+| `R2_PUBLIC_URL`                                                          | `server/storage.ts:83`, `server/musicBeds.ts:101`                                                      | narration-only films (warns, no crash)    |
+| `RUN_POD_KEY` + `RUNPOD_WHISPERX_ENDPOINT`                               | `server/_core/voiceTranscription.ts` → `kodxana/whisperx-worker_v2` serverless                         | no word-level narration alignment         |
+| `HEYGEN_API_KEY`                                                         | `server/longformVideo.ts:2506` — **fallback only**, used when a tab's slot key is blank                | host lip-sync fails for slot-less tabs    |
+| `PUBLIC_BASE_URL`                                                        | `server/providers/heygen-lipsync.ts:78` (webhook callback URL)                                         | blank ⇒ pure polling; slower, still works |
 
 ### Channel B — DB-stored, AES-256-GCM, entered in Admin
 
@@ -58,8 +55,6 @@ Read through the single `ENV` object in `server/_core/env.ts`, except `R2_*`, wh
 | 69Labs            | `provider_configs.apiKeyEncrypted` (`server/db.ts`)                                          | `https://69labs.vip/api/v1` |
 | APIMART ×5 + edit | `app_settings` → `apimart_key_slot_0..4`, `apimart_key_edit` (`server/longformVideo.ts:452`) | `https://api.apimart.ai`    |
 | HeyGen ×5         | `app_settings` → `heygen_key_slot_0..4` (`server/longformVideo.ts:461`)                      | `https://api.heygen.com/v3` |
-| fal.ai ×5         | `app_settings` → `fal_key_slot_0..4` — read only when `LIPSYNC_PROVIDER=fal`                 | `https://queue.fal.run`     |
-| WaveSpeed ×5      | `app_settings` → `wavespeed_key_slot_0..4` — read when `LIPSYNC_PROVIDER=wavespeed`          | `https://api.wavespeed.ai`  |
 
 `LONGFORM_SLOT_COUNT = 5` — one key slot per UI tab, so 5 accounts render 5× wider than
 one shared key. Crypto lives in `server/encryption.ts`:
@@ -96,14 +91,13 @@ Quantities are metered from real calls; **only Anthropic's rates are exact**. Ev
 is a list-price estimate because HeyGen/69Labs/APIMART bill per-plan credit bundles — check one
 invoice, then pin the real number via the env var below (or edit the file).
 
-| Var                           | Default     | Var                         | Default |
-| ----------------------------- | ----------- | --------------------------- | ------- |
-| `COST_APIMART_IMAGE`          | $0.02/image | `COST_OPENAI_IMAGE`         | $0.003  |
-| `COST_APIMART_VIDEO_PER_SEC`  | $0.02/s     | `COST_HEYGEN_PER_SEC`       | $0.06/s |
-| `COST_FAL_PER_SEC`            | $0.06/s     | `COST_WAVESPEED_PER_SEC`    | $0.06/s |
-| `COST_WAVESPEED_FAST_PER_SEC` | $0.015/s    | `COST_TTS_PER_1K_CHARS`     | $0.05   |
-| `COST_GEMINI_IMAGE`           | $0.03       | `COST_69LABS_IMAGE`         | $0.05   |
-| `COST_69LABS_VIDEO_PER_SEC`   | $0.05/s     | `COST_WHISPERX_PER_GPU_SEC` | $0.0004 |
+| Var                          | Default     | Var                         | Default |
+| ---------------------------- | ----------- | --------------------------- | ------- |
+| `COST_APIMART_IMAGE`         | $0.02/image | `COST_OPENAI_IMAGE`         | $0.003  |
+| `COST_APIMART_VIDEO_PER_SEC` | $0.02/s     | `COST_HEYGEN_PER_SEC`       | $0.06/s |
+| `COST_TTS_PER_1K_CHARS`      | $0.05       | `COST_GEMINI_IMAGE`         | $0.03   |
+| `COST_69LABS_IMAGE`          | $0.05       | `COST_69LABS_VIDEO_PER_SEC` | $0.05/s |
+| `COST_WHISPERX_PER_GPU_SEC`  | $0.0004     |                             |         |
 
 ## Architecture
 
@@ -115,10 +109,9 @@ Express · tRPC · Drizzle · MySQL.
 - `server/longformVideo.ts` — **9k lines, the whole pipeline. Start here.**
 - `server/routers.ts` — tRPC surface · `server/videoAssembly.ts` — ffmpeg assembly
 - `server/providers/` — one adapter per vendor; `base.ts` is the interface,
-  `fallback.ts` the image chain (primary → Gemini). `heygen-lipsync.ts`,
-  `fal-lipsync.ts` and `wavespeed-lipsync.ts` are the three host lip-sync lanes;
-  `LIPSYNC_PROVIDER` picks one and `resolveLipsyncAdapter` is the only place that reads it
-- `server/hostPlate.ts` — **provider-independent**. Every lip-sync model animates the image it
+  `fallback.ts` the image chain (primary → Gemini). `heygen-lipsync.ts` is the host lip-sync
+  lane, resolved in `resolveLipsyncAdapter`
+- `server/hostPlate.ts` — **provider-independent**. The lip-sync model animates the image it
   is handed and never changes the setting, so `HOST_PLATES=1` generates a 16:9 plate of the host
   IN each beat's setting (host photo as identity reference) and syncs from that instead of the
   studio headshot. Host beats are bucketed into `HOST_PLATE_LOOKS` looks sharing one plate —
@@ -175,5 +168,5 @@ Always 16:9. Fire-and-forget; progress persisted to the job row and polled by th
 - **Never commit `.env`**; never print key values into logs or chat — `maskApiKey()` in
   `server/encryption.ts` is there for display.
 - **Current local `.env`** sets only `DATABASE_URL`, `JWT_SECRET`, `ADMIN_EMAIL`,
-  `ADMIN_PASSWORD`, `PORT`, `LIPSYNC_PROVIDER` — every provider key is absent, so any
-  generation run fails at stage 1.
+  `ADMIN_PASSWORD`, `PORT` — every provider key is absent, so any generation run fails at
+  stage 1.

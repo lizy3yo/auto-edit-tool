@@ -5,6 +5,9 @@
 
 export type * from "../drizzle/schema";
 export * from "./_core/errors";
+export * from "./pacing";
+
+import type { LongformPacing } from "./pacing";
 
 /** Provider types supported by the system */
 export type ProviderType = "genaipro" | "sixtynine_labs";
@@ -222,6 +225,18 @@ export interface StoryboardScene {
    */
   hostOpener?: true;
   /**
+   * This beat sits inside the FAST-OPEN window (`LongformPacing.fastOpen`): the first `zoneSec`
+   * of narration, where cuts land faster to match the script's opening pace. Set once at
+   * segmentation (`markFastOpenScenes`) and read by `capFor`/`floorFor`/`measuredSizeFor`, so
+   * every later sizing pass — split, merge, hold-floor — applies the window's tighter band
+   * instead of the film-wide one. Rides the spread onto split children and merge survivors.
+   *
+   * HOST beats are exempt in effect: `floorFor` checks `hostPresent` first, so a lip-synced shot
+   * never drops under `HOST_MIN_HOLD_SEC` however tight the window is — a face that cuts at 2s
+   * reads as a glitch. The fast open is carried by the cutaways between host shots.
+   */
+  fastOpen?: true;
+  /**
    * Call-to-action scene: the narration is part of the book/product sales pitch. The flag drives
    * CTA *visual* handling — generic on-topic cutaways (`sanitizeCtaCutaway`), empty host hands, and
    * the `ensureHostInCta` host guarantee — plus the fallback cover-reveal placement
@@ -263,6 +278,23 @@ export interface StoryboardScene {
    */
   coverHero?: boolean;
   /**
+   * An ASSET beat: this scene shows an operator-supplied image (`LongformInputParams.assets` —
+   * e.g. a book render) full-frame instead of anything generated. Placed by `placeAssetBeats`
+   * onto person-free beats inside the CTA pitch window, and rendered through the same literal-
+   * image path as `coverHero` (`generateSceneStillClip`'s `coverImageUrl`), so it costs nothing
+   * and cannot hallucinate.
+   *
+   * Implies `stillImage` and `!hostPresent`, carries the corner QR (`qrCorner`), and is exempt
+   * from the coalesce merge so an asset is never absorbed into a neighbour and lost.
+   */
+  assetImageUrl?: string;
+  /**
+   * The caption burned over this asset beat, bottom-centre (`renderCaptionCardPng`). Set from
+   * the asset's operator-typed caption when `LongformPacing.captions.enabled`. Blank/unset ⇒ the
+   * asset renders clean.
+   */
+  assetCaption?: string;
+  /**
    * The beat visually depicts the physical book (host/hands holding it, book on a table/soil,
    * close-up of the book). Authored by Claude in the storyboard. When set AND a channel cover is
    * configured, the channel `bookCoverImageUrl` is passed to image/video generation as a reference
@@ -293,6 +325,17 @@ export interface StoryboardScene {
   splitVisual?: string;
   /** `visualPromptSeed`'s counterpart for the split right-half lane. */
   splitVisualSeed?: string;
+  /**
+   * Render this split scene's RIGHT panel as a MOVING b-roll clip instead of the default Ken
+   * Burns still. Assigned by `enforceHostSplitMix` to `LongformPacing.splitScreen.motion.share`
+   * of split runtime; only meaningful alongside `splitVisual`.
+   *
+   * The composite is unchanged either way — `buildSplitScreenArgs` already loops the right input
+   * and takes its length from the lip-synced host panel, so a shorter clip tiles and a longer one
+   * is trimmed. A failed motion panel falls back to the still, and a failed still to the
+   * full-frame host, so this never fails a scene.
+   */
+  splitMotion?: boolean;
   /**
    * B-roll cutaway (person-free, script-derived) to fall back to if this host
    * scene is demoted to b-roll while enforcing the host-screen-time budget
@@ -385,7 +428,7 @@ export interface StoryboardScene {
    * Which provider issued the in-flight render task(s) for this scene's clip(s).
    * Set alongside `renderTaskIds` so the resume path knows which adapter to poll.
    */
-  renderProvider?: "runpod" | "heygen" | "fal" | "wavespeed" | "sixtynine_labs";
+  renderProvider?: "runpod" | "heygen" | "sixtynine_labs";
   /**
    * Provider-side task/job IDs for this scene's in-flight clip(s), in clip/chunk
    * order. Persisted as soon as a clip is submitted so a poll timeout, crash, or
@@ -422,6 +465,17 @@ export interface StoryboardScene {
    * Persisted in the storyboard JSON blob (no migration).
    */
   visualBeat?: string;
+}
+
+/**
+ * One operator-supplied image used verbatim in the film (a book render, a product shot). Uploaded
+ * per job — assets belong to one video, unlike the per-channel host photo / cover / QR.
+ */
+export interface LongformAsset {
+  /** R2 URL of the uploaded image. */
+  url: string;
+  /** Optional caption burned bottom-centre over the beat (see `LongformPacing.captions`). */
+  caption?: string;
 }
 
 /** Persisted input parameters for a long-form video job */
@@ -531,6 +585,21 @@ export interface LongformInputParams {
    * for an all-video b-roll diagnostic reel.
    */
   brollMotionOnly?: boolean;
+  /**
+   * The pacing dials this job actually rendered with — resolved from the admin settings ONCE at
+   * job start and snapshotted here. Every later pass (resume, retry-assembly, retry-failed,
+   * regenerate scene) reads this snapshot rather than the live settings, so changing the admin
+   * page never silently re-cuts a film that is already half rendered.
+   *
+   * Absent (a job from before this existed) ⇒ `LEGACY_PACING`: byte-identical to the pre-config
+   * pipeline. See `shared/pacing.ts`.
+   */
+  pacing?: LongformPacing;
+  /**
+   * Operator-supplied images shown verbatim inside the CTA pitch window (`placeAssetBeats`).
+   * Empty/absent ⇒ no asset beats and the film is unchanged.
+   */
+  assets?: LongformAsset[];
 }
 
 /** Progress counters surfaced to the client */

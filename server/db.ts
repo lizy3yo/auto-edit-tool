@@ -369,6 +369,13 @@ export async function deleteLongformVideoJob(id: number, userId: number) {
     .limit(1);
   if (!job.length) throw new Error("Long-form video job not found");
   if (job[0].userId !== userId) throw new Error("Not authorized");
+  // Release any tab still pointing at this job BEFORE the row goes. There is no FK from
+  // `longform_slots`, so a delete would otherwise leave a tab pinned to an id that no longer
+  // loads — and it would come back on every reload, since slots are server-persisted.
+  await db
+    .update(longformSlots)
+    .set({ jobId: null, draftTitle: null })
+    .where(and(eq(longformSlots.userId, userId), eq(longformSlots.jobId, id)));
   await db.delete(longformVideoJobs).where(eq(longformVideoJobs.id, id));
 }
 

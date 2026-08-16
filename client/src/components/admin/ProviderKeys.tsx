@@ -110,37 +110,6 @@ function BalanceBadge({
   );
 }
 
-/**
- * Liveness readout for a stored fal key. fal exposes no credit-balance API (billing lives
- * behind the dashboard session), so unlike `BalanceBadge` there is no number to show — only
- * whether the key authenticates.
- */
-function HealthBadge({
-  keySet,
-  ok,
-  loading,
-}: {
-  keySet: boolean;
-  /** `null` ⇒ the probe itself failed — unknown, not invalid. */
-  ok: boolean | null;
-  loading: boolean;
-}) {
-  if (!keySet) return null;
-  if (loading)
-    return <Loader2 className="h-3 w-3 shrink-0 animate-spin opacity-50" />;
-  if (ok == null)
-    return (
-      <span className="shrink-0 text-xs text-muted-foreground">unknown</span>
-    );
-  return (
-    <span
-      className={`shrink-0 text-xs ${ok ? "text-muted-foreground" : "text-destructive"}`}
-    >
-      {ok ? "key ok" : "key rejected"}
-    </span>
-  );
-}
-
 /** One label / masked key field / Save-Clear button / badge row. */
 function KeyRow({
   label,
@@ -200,24 +169,10 @@ export function ProviderKeys() {
     trpc.longformVideo.getHeygenQuotas.useQuery(undefined, {
       refetchOnWindowFocus: false,
     });
-  const { data: fal, isLoading: falLoading } =
-    trpc.longformVideo.getFalKeys.useQuery();
-  const { data: falHealth, isLoading: falHealthLoading } =
-    trpc.longformVideo.getFalKeyHealth.useQuery(undefined, {
-      refetchOnWindowFocus: false,
-    });
 
   const [drafts, setDrafts] = useState<Record<number, string>>({});
   const [editDraft, setEditDraft] = useState("");
   const [heygenDrafts, setHeygenDrafts] = useState<Record<number, string>>({});
-  const [falDrafts, setFalDrafts] = useState<Record<number, string>>({});
-  const { data: ws, isLoading: wsLoading } =
-    trpc.longformVideo.getWavespeedKeys.useQuery();
-  const { data: wsHealth, isLoading: wsHealthLoading } =
-    trpc.longformVideo.getWavespeedKeyHealth.useQuery(undefined, {
-      refetchOnWindowFocus: false,
-    });
-  const [wsDrafts, setWsDrafts] = useState<Record<number, string>>({});
   // AIREITER BOLT-ON (temporary) — delete with the section below.
   const { data: aireiter, isLoading: aireiterLoading } =
     trpc.longformVideo.getAireiter.useQuery();
@@ -253,26 +208,6 @@ export function ProviderKeys() {
       setHeygenDrafts(d => ({ ...d, [vars.slotIndex]: "" }));
       utils.longformVideo.getHeygenKeys.invalidate();
       utils.longformVideo.getHeygenQuotas.invalidate();
-    },
-    onError: err => toast.error(err.message ?? "Failed to save."),
-  });
-
-  const saveWsMutation = trpc.longformVideo.setWavespeedKey.useMutation({
-    onSuccess: (_res, vars) => {
-      toast.success(`WaveSpeed key for Video ${vars.slotIndex + 1} saved.`);
-      setWsDrafts(d => ({ ...d, [vars.slotIndex]: "" }));
-      utils.longformVideo.getWavespeedKeys.invalidate();
-      utils.longformVideo.getWavespeedKeyHealth.invalidate();
-    },
-    onError: err => toast.error(err.message ?? "Failed to save."),
-  });
-
-  const saveFalMutation = trpc.longformVideo.setFalKey.useMutation({
-    onSuccess: (_res, vars) => {
-      toast.success(`fal.ai key for Video ${vars.slotIndex + 1} saved.`);
-      setFalDrafts(d => ({ ...d, [vars.slotIndex]: "" }));
-      utils.longformVideo.getFalKeys.invalidate();
-      utils.longformVideo.getFalKeyHealth.invalidate();
     },
     onError: err => toast.error(err.message ?? "Failed to save."),
   });
@@ -361,58 +296,6 @@ export function ProviderKeys() {
         )}
       </div>
 
-      <div className="space-y-3">
-        <Label className="flex items-center gap-2 text-sm font-medium">
-          <KeyRound className="h-4 w-4" />
-          WaveSpeed keys — host lip-sync (per tab)
-          {ws?.active && (
-            <span className="text-xs font-normal text-muted-foreground">
-              · active lane
-            </span>
-          )}
-        </Label>
-        {wsLoading ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading…
-          </div>
-        ) : (
-          ws?.slots.map(({ slotIndex, masked }) => (
-            <KeyRow
-              key={slotIndex}
-              label={`Video ${slotIndex + 1}`}
-              masked={masked}
-              placeholder="Not set — uses shared WAVESPEED_API_KEY"
-              draft={wsDrafts[slotIndex] ?? ""}
-              onDraftChange={value =>
-                setWsDrafts(d => ({ ...d, [slotIndex]: value }))
-              }
-              onSave={apiKey => saveWsMutation.mutate({ slotIndex, apiKey })}
-              saving={saveWsMutation.isPending}
-              badge={
-                <HealthBadge
-                  keySet={!!masked}
-                  ok={
-                    wsHealth?.slots.find(s => s.slotIndex === slotIndex)?.ok ??
-                    null
-                  }
-                  loading={wsHealthLoading}
-                />
-              }
-            />
-          ))
-        )}
-        <p className="text-xs text-muted-foreground">
-          Used only when{" "}
-          <code className="text-[11px]">LIPSYNC_PROVIDER=wavespeed</code> —
-          rendering host scenes on{" "}
-          <code className="text-[11px]">{ws?.model ?? "infinitetalk"}</code> at{" "}
-          <code className="text-[11px]">{ws?.resolution ?? "720p"}</code> (its
-          ceiling; assembly upscales to 1080p). Takes up to 10 minutes of audio
-          per render, so no scene-length cap is needed. Blank ⇒ that tab uses
-          the shared <code className="text-[11px]">WAVESPEED_API_KEY</code>.
-        </p>
-      </div>
-
       {/* ─── AIREITER BOLT-ON (temporary) — delete this whole section ─── */}
       <div className="space-y-3">
         <Label className="flex items-center gap-2 text-sm font-medium">
@@ -479,11 +362,6 @@ export function ProviderKeys() {
         <Label className="flex items-center gap-2 text-sm font-medium">
           <KeyRound className="h-4 w-4" />
           HeyGen keys — host lip-sync (per tab)
-          {fal && !fal.active && (
-            <span className="text-xs font-normal text-muted-foreground">
-              · active lane
-            </span>
-          )}
         </Label>
         {heygenLoading ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -525,57 +403,6 @@ export function ProviderKeys() {
           wider. Blank ⇒ that tab uses the shared{" "}
           <code className="text-[11px]">HEYGEN_API_KEY</code>; with that unset
           too, host scenes fail loudly.
-        </p>
-      </div>
-
-      <div className="space-y-3">
-        <Label className="flex items-center gap-2 text-sm font-medium">
-          <KeyRound className="h-4 w-4" />
-          fal.ai keys — host lip-sync alternative (per tab)
-          {fal?.active && (
-            <span className="text-xs font-normal text-muted-foreground">
-              · active lane
-            </span>
-          )}
-        </Label>
-        {falLoading ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading…
-          </div>
-        ) : (
-          fal?.slots.map(({ slotIndex, masked }) => (
-            <KeyRow
-              key={slotIndex}
-              label={`Video ${slotIndex + 1}`}
-              masked={masked}
-              placeholder="Not set — uses shared FAL_API_KEY"
-              draft={falDrafts[slotIndex] ?? ""}
-              onDraftChange={value =>
-                setFalDrafts(d => ({ ...d, [slotIndex]: value }))
-              }
-              onSave={apiKey => saveFalMutation.mutate({ slotIndex, apiKey })}
-              saving={saveFalMutation.isPending}
-              badge={
-                <HealthBadge
-                  keySet={!!masked}
-                  ok={
-                    falHealth?.slots.find(s => s.slotIndex === slotIndex)?.ok ??
-                    null
-                  }
-                  loading={falHealthLoading}
-                />
-              }
-            />
-          ))
-        )}
-        <p className="text-xs text-muted-foreground">
-          Used only when{" "}
-          <code className="text-[11px]">LIPSYNC_PROVIDER=fal</code> — rendering
-          host scenes on{" "}
-          <code className="text-[11px]">{fal?.model ?? "fal.ai"}</code> instead
-          of HeyGen Avatar IV. Blank ⇒ that tab uses the shared{" "}
-          <code className="text-[11px]">FAL_API_KEY</code>. fal has no
-          credit-balance API, so the badge is a liveness probe, not a balance.
         </p>
       </div>
     </div>

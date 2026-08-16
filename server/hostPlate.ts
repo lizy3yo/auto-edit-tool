@@ -8,18 +8,18 @@ import type { StoryboardScene } from "../shared/types";
 /**
  * ── Contextual host plates ───────────────────────────────────────────────────────────────
  *
- * Every audio-driven lip-sync model — HeyGen Avatar IV, fal OmniHuman, WaveSpeed InfiniteTalk
- * — animates the image it is handed. None of them relocate the subject or change the setting.
- * So feeding them the channel's studio headshot yields exactly that: a host talking against a
- * plain backdrop for the whole film, whatever the script is about.
+ * An audio-driven lip-sync model — HeyGen Avatar IV — animates the image it is handed. It does
+ * not relocate the subject or change the setting. So feeding it the channel's studio headshot
+ * yields exactly that: a host talking against a plain backdrop for the whole film, whatever the
+ * script is about.
  *
  * A plate is a 16:9 frame of the host IN the scene's setting, generated with the host photo as
  * an identity reference. Hand that to the lip-sync provider instead of the raw headshot and the
  * background comes along for free, because it is part of the frame being animated.
  *
- * Deliberately PROVIDER-INDEPENDENT — it sits in front of `LipsyncLane`, so all three lanes
- * benefit. It also fixes a WaveSpeed quirk: InfiniteTalk follows its input's aspect ratio, so a
- * 16:9 plate makes it emit 16:9 instead of the square it returns for a square headshot.
+ * Deliberately PROVIDER-INDEPENDENT — it sits in front of `LipsyncLane`, so it keeps working
+ * whichever vendor renders the host. Feeding a 16:9 plate also pins the output aspect ratio for
+ * any model that inherits it from its input, rather than inheriting a square headshot's.
  *
  * ── Why LOOKS rather than one plate per scene ────────────────────────────────────────────
  *

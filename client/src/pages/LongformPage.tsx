@@ -222,6 +222,25 @@ export default function FaceLockVideo() {
     [setActiveTab, persistSlot, claimSlot, scrollToStoryboard]
   );
 
+  /**
+   * A deleted video must not stay loaded in a tab. The server already nulled the slot row, so
+   * this is the live half: reset the tab in place (no focus change — the delete happened over
+   * in the panel, and yanking the active tab would be a second surprise).
+   */
+  const handleJobDeleted = useCallback(
+    (jobId: number) => {
+      const idx = (resumeIdsRef.current ?? []).findIndex(id => id === jobId);
+      if (idx === -1) return;
+      setResumeIds(prev => {
+        const base = prev ?? Array.from({ length: MAX_SLOTS }, () => null);
+        return base.map((v, i) => (i === idx ? null : v));
+      });
+      setDraftTitles(prev => prev.map((v, i) => (i === idx ? "" : v)));
+      setSlotNonce(n => n.map((v, i) => (i === idx ? v + 1 : v)));
+    },
+    [setDraftTitles]
+  );
+
   /** Clear a slot back to an empty form and focus it — the panel's "+ New". */
   const handleNewVideo = useCallback(() => {
     const idx = claimSlot();
@@ -268,6 +287,7 @@ export default function FaceLockVideo() {
       <VideoLibraryPanel
         onOpen={openFromHistory}
         onNew={handleNewVideo}
+        onDeleted={handleJobDeleted}
         activeJobIds={resumeIds ?? []}
       />
       <div className="min-w-0 flex-1 space-y-6">

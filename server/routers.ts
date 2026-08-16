@@ -44,6 +44,8 @@ import {
   cancelLongformJob,
   DEFAULT_LONGFORM_INSTRUCTION,
   LONGFORM_INSTRUCTION_KEY,
+  LONGFORM_PACING_KEY,
+  getLongformPacing,
   LONGFORM_SLOT_COUNT,
   getApimartSlotKey,
   getApimartSlotMasked,
@@ -54,12 +56,6 @@ import {
   getHeygenSlotKey,
   getHeygenSlotMasked,
   setHeygenSlotKey,
-  getFalSlotKey,
-  getFalSlotMasked,
-  setFalSlotKey,
-  getWavespeedSlotKey,
-  getWavespeedSlotMasked,
-  setWavespeedSlotKey,
   assembleScenePromptPreview,
   validateCtaMarkers,
   syncSceneClipFields,
@@ -67,11 +63,6 @@ import {
 import { getJobCostBreakdown } from "./costMeter";
 import { ApimartAdapter } from "./providers/apimart";
 import { HeygenLipsyncAdapter } from "./providers/heygen-lipsync";
-import { FalLipsyncAdapter, falLipsyncModel } from "./providers/fal-lipsync";
-import {
-  WavespeedLipsyncAdapter,
-  wavespeedModel,
-} from "./providers/wavespeed-lipsync";
 // AIREITER BOLT-ON (temporary) — delete with the router block below.
 import {
   AireiterAdapter,
@@ -82,6 +73,11 @@ import {
 } from "./providers/aireiter";
 import { ENV } from "./_core/env";
 import type { LongformInputParams, StoryboardScene } from "../shared/types";
+import {
+  DEFAULT_LONGFORM_PACING,
+  MAX_JOB_ASSETS,
+  resolveLongformPacing,
+} from "../shared/pacing";
 import { getChannelLayer } from "./composer";
 import { isMockMode, setMockMode } from "./mockMode";
 import { extractBookName } from "./ctaDetector";
@@ -514,6 +510,30 @@ const longformVideoRouter = router({
       return { success: true };
     }),
 
+  /**
+   * The pacing dials (visual mix, split screen, fast open, captions) — see `shared/pacing.ts`.
+   * Readable by any approved user so the job form can show what a render will do; only an admin
+   * can change them.
+   */
+  getPacing: approvedProcedure.query(async () => ({
+    pacing: await getLongformPacing(),
+    defaults: DEFAULT_LONGFORM_PACING,
+  })),
+
+  /**
+   * Admin: save the pacing dials. The payload is re-resolved through `resolveLongformPacing`
+   * before it is stored, so what lands in `app_settings` is always complete and in-bounds — a
+   * hand-crafted request cannot write a config the balancers would then have to defend against.
+   * In-flight jobs are unaffected: each snapshots its own pacing at render start.
+   */
+  setPacing: adminProcedure
+    .input(z.object({ pacing: z.unknown() }))
+    .mutation(async ({ input }) => {
+      const resolved = resolveLongformPacing(input.pacing);
+      await setAppSetting(LONGFORM_PACING_KEY, JSON.stringify(resolved));
+      return { pacing: resolved };
+    }),
+
   /** Admin: read the masked per-tab APIMART keys (slots 0–4) + the edit-pages key, null where unset. */
   /**
    * Mock mode — every paid provider lane replaced by a locally generated stand-in.
@@ -629,91 +649,6 @@ const longformVideoRouter = router({
       return { success: true };
     }),
 
-  /**
-   * Admin: masked per-tab fal.ai keys (slots 0–4) plus which lip-sync lane is live, so the
-   * panel can say whether these keys are the ones actually being used.
-   */
-  getFalKeys: adminProcedure.query(async () => {
-    const slots = await Promise.all(
-      Array.from({ length: LONGFORM_SLOT_COUNT }, (_, slotIndex) =>
-        getFalSlotMasked(slotIndex).then(masked => ({ slotIndex, masked }))
-      )
-    );
-    return {
-      slots,
-      active: ENV.lipsyncProvider === "fal",
-      model: falLipsyncModel().id,
-    };
-  }),
-
-  /**
-   * Admin: per-key health. fal exposes no credit-balance API, so unlike `getHeygenQuotas` this
-   * is a boolean liveness probe: true = the key authenticates, false = rejected, null = unset
-   * key or the check itself failed.
-   */
-  getFalKeyHealth: adminProcedure.query(async () => {
-    const slots = await Promise.all(
-      Array.from({ length: LONGFORM_SLOT_COUNT }, (_, slotIndex) =>
-        getFalSlotKey(slotIndex)
-          .then(key => (key ? new FalLipsyncAdapter(key).checkKey() : null))
-          .then(ok => ({ slotIndex, ok }))
-      )
-    );
-    return { slots };
-  }),
-
-  /** Admin: masked per-tab WaveSpeedAI keys, plus whether this lane is live. */
-  getWavespeedKeys: adminProcedure.query(async () => {
-    const slots = await Promise.all(
-      Array.from({ length: LONGFORM_SLOT_COUNT }, (_, slotIndex) =>
-        getWavespeedSlotMasked(slotIndex).then(masked => ({
-          slotIndex,
-          masked,
-        }))
-      )
-    );
-    return {
-      slots,
-      active: ENV.lipsyncProvider === "wavespeed",
-      resolution: ENV.wavespeedResolution,
-      model: wavespeedModel().label,
-    };
-  }),
-
-  /**
-   * Admin: per-key liveness. WaveSpeed exposes no balance endpoint, so this is a boolean
-   * probe: true = authenticates, false = rejected, null = unset key or the check failed.
-   */
-  getWavespeedKeyHealth: adminProcedure.query(async () => {
-    const slots = await Promise.all(
-      Array.from({ length: LONGFORM_SLOT_COUNT }, (_, slotIndex) =>
-        getWavespeedSlotKey(slotIndex)
-          .then(key =>
-            key ? new WavespeedLipsyncAdapter(key).checkKey() : null
-          )
-          .then(ok => ({ slotIndex, ok }))
-      )
-    );
-    return { slots };
-  }),
-
-  /** Admin: set (or clear, with an empty string) a tab's WaveSpeedAI key. */
-  setWavespeedKey: adminProcedure
-    .input(
-      z.object({
-        slotIndex: z
-          .number()
-          .int()
-          .min(0)
-          .max(LONGFORM_SLOT_COUNT - 1),
-        apiKey: z.string().max(400),
-      })
-    )
-    .mutation(async ({ input }) => {
-      await setWavespeedSlotKey(input.slotIndex, input.apiKey);
-      return { success: true };
-    }),
-
   // ─── AIREITER BOLT-ON (temporary — delete this block to remove) ─────────
   /**
    * Admin: the AIReiter key, its live credit balance, and which lanes it is serving.
@@ -748,23 +683,6 @@ const longformVideoRouter = router({
     }),
   // ─── END AIREITER BOLT-ON ───────────────────────────────────────────────
 
-  /** Admin: set (or clear, with an empty string) a tab's fal.ai key. */
-  setFalKey: adminProcedure
-    .input(
-      z.object({
-        slotIndex: z
-          .number()
-          .int()
-          .min(0)
-          .max(LONGFORM_SLOT_COUNT - 1),
-        apiKey: z.string().max(400),
-      })
-    )
-    .mutation(async ({ input }) => {
-      await setFalSlotKey(input.slotIndex, input.apiKey);
-      return { success: true };
-    }),
-
   /** Kick off a long-form video job — returns the job id immediately. */
   generate: approvedProcedure
     .input(
@@ -778,6 +696,21 @@ const longformVideoRouter = router({
           .int()
           .min(0)
           .max(LONGFORM_SLOT_COUNT - 1)
+          .optional(),
+        /**
+         * Operator-supplied images shown verbatim inside the CTA pitch (`placeAssetBeats`) —
+         * uploaded through `styleReference.upload`, so these are already our own R2 URLs. Capped
+         * at `MAX_JOB_ASSETS`: the pitch has only so many person-free beats to place them on, and
+         * anything beyond that would be silently dropped.
+         */
+        assets: z
+          .array(
+            z.object({
+              url: z.string().url(),
+              caption: z.string().max(200).optional(),
+            })
+          )
+          .max(MAX_JOB_ASSETS)
           .optional(),
       })
     )
@@ -874,6 +807,20 @@ const longformVideoRouter = router({
         }
       }
 
+      // Rehost the uploaded assets onto R2 alongside the channel refs above. Same posture as the
+      // QR (non-fatal): a bad asset is skipped with a log line rather than failing the render.
+      const assets: { url: string; caption?: string }[] = [];
+      for (const a of input.assets ?? []) {
+        try {
+          assets.push({
+            url: await rehostToR2(a.url, "asset"),
+            caption: a.caption?.trim() || undefined,
+          });
+        } catch (err) {
+          console.warn("[longform] asset rehost failed, skipping it:", err);
+        }
+      }
+
       const params: LongformInputParams = {
         script: input.script,
         lockMode: "ingredients",
@@ -897,6 +844,11 @@ const longformVideoRouter = router({
         bookTitle,
         title: input.title?.trim() || undefined,
         apimartSlot: input.slotIndex,
+        // Uploaded images shown verbatim in the CTA pitch. Rehosted like every other reference so
+        // the render only ever fetches our own CDN; an asset that can't be rehosted is DROPPED
+        // rather than failing the job — the film is still correct without it, and the pipeline
+        // warns when it places fewer assets than were supplied.
+        assets: assets.length ? assets : undefined,
       };
 
       const jobId = await createLongformJob(

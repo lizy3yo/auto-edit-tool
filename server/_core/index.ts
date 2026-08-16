@@ -26,7 +26,6 @@ import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { startTimeoutChecker } from "../generationTimeout";
 import { registerHeygenWebhook } from "../heygenWebhook";
-import { registerFalWebhook } from "../falWebhook";
 import { downloadRouter } from "../download";
 
 function isPortAvailable(port: number): Promise<boolean> {
@@ -60,11 +59,8 @@ async function startServer() {
   void checkSchema();
   // Single-admin email/password auth
   registerAdminAuthRoutes(app);
-  // HeyGen / fal render-completion callbacks (wake host-scene poll loops). Both are registered
-  // regardless of LIPSYNC_PROVIDER — the unused one is an unreachable route, and registering
-  // only the active one would strand in-flight callbacks across a provider flip.
+  // HeyGen render-completion callback (wakes host-scene poll loops).
   registerHeygenWebhook(app);
-  registerFalWebhook(app);
   // Download proxy (bypasses CORS for R2/CDN URLs)
   app.use("/api/download", downloadRouter);
   // tRPC API

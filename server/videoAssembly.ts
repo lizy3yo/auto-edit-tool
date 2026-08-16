@@ -914,6 +914,16 @@ export function buildSceneMuxArgs(opts: {
    * LAST (ramps down over the final `NAME_CARD_FADE_SEC`, zero exactly on the cut).
    */
   nameCard?: { imagePath: string; fadeIn?: boolean; fadeOut?: boolean };
+  /**
+   * Optional burned-in caption — a full-frame transparent PNG (`renderCaptionCardPng`) drawn over
+   * the whole scene at `overlay=0:0`, like the name card. Added as the LAST `-loop 1 -i` input so
+   * it composites on top of both the QR and the lower third, and so adding it never renumbers the
+   * inputs the other two already use.
+   *
+   * Static for the scene's whole length: an asset beat exists to be read, and a caption that
+   * fades is a caption someone misses.
+   */
+  caption?: { imagePath: string };
 }): string[] {
   const fps = opts.fps ?? FPS;
   const dur = opts.durationSec.toFixed(3);
@@ -932,9 +942,11 @@ export function buildSceneMuxArgs(opts: {
   // Inputs: video=0, audio=1, then whichever overlays are present, in this order.
   const qrIdx = 2;
   const cardIdx = opts.qrOverlay ? 3 : 2;
+  const capIdx = cardIdx + (ncOn ? 1 : 0);
   const inputs: string[] = [];
   if (opts.qrOverlay) inputs.push("-loop", "1", "-i", opts.qrOverlay.imagePath);
   if (ncOn) inputs.push("-loop", "1", "-i", nc.imagePath);
+  if (opts.caption) inputs.push("-loop", "1", "-i", opts.caption.imagePath);
 
   // Each overlay contributes a prep chain plus an `overlay` position; they're stitched into one
   // chain below so the last one lands on `[v]`.
@@ -970,6 +982,15 @@ export function buildSceneMuxArgs(opts: {
     overlays.push({
       prep: `[${cardIdx}:v]format=rgba${fades}[card]`,
       label: "card",
+      pos: "0:0",
+    });
+  }
+  if (opts.caption) {
+    // Already full-frame and pre-positioned, so this is a straight alpha composite — same shape
+    // as the name card, minus the fades.
+    overlays.push({
+      prep: `[${capIdx}:v]format=rgba[cap]`,
+      label: "cap",
       pos: "0:0",
     });
   }
@@ -1885,6 +1906,12 @@ export async function assemblePerSceneFilm(opts: {
      */
     sliceStartSec?: number;
     sliceEndSec?: number;
+    /**
+     * Optional burned-in caption for THIS scene: a full-frame transparent PNG
+     * (`renderCaptionCardPng`). Per-scene rather than per-run because each asset beat carries its
+     * own text. Non-fatal — a caption that can't be staged costs the text, never the film.
+     */
+    captionPng?: Buffer;
   }[];
   aspectRatio: VideoAspectRatio;
   /** R2 URL of the continuous master narration — enables master-overlay mode (see above). */
@@ -1953,6 +1980,22 @@ export async function assemblePerSceneFilm(opts: {
       );
     }
   }
+
+  // Stage each scene's caption PNG. Same posture as the QR and the name card: a failure here
+  // costs that scene's text, never the film.
+  const captionPaths = new Map<number, string>();
+  scenes.forEach((scene, i) => {
+    if (!scene.captionPng) return;
+    try {
+      const p = path.join(workDir, `caption-${i}.png`);
+      writeFileSync(p, scene.captionPng);
+      captionPaths.set(i, p);
+    } catch (err: any) {
+      console.warn(
+        `[Assembly] caption write failed for scene ${i}, continuing without it: ${err.message}`
+      );
+    }
+  });
 
   // Stage the host name card once. Same posture as the QR: a failure here costs the lower third,
   // never the film.
@@ -2114,6 +2157,9 @@ export async function assemblePerSceneFilm(opts: {
                   fadeOut: ncAt === ncRun.length - 1,
                 }
               : undefined,
+          caption: captionPaths.has(s)
+            ? { imagePath: captionPaths.get(s) as string }
+            : undefined,
         })
       );
       // Lock the rebuilt film audio to the scene's ACTUAL encoded length, not the nominal

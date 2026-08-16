@@ -1,20 +1,17 @@
 /**
  * Lip-sync lane test harness — the host lane in isolation.
  *
- * Calls ONE provider's adapter directly with a host photo + a narration clip and writes the
- * mp4 to disk. No storyboard, no TTS, no b-roll, no assembly, no DB writes — so it costs one
+ * Calls the HeyGen Avatar IV adapter directly with a host photo + a narration clip and writes
+ * the mp4 to disk. No storyboard, no TTS, no b-roll, no assembly, no DB writes — so it costs one
  * clip instead of a film, and a failure points at the provider rather than at the pipeline.
  *
- * The point is A/B: run the SAME photo and audio through two providers and compare. A single
- * good-looking clip proves little; what matters is whether the face survives across several
- * consecutive scenes, which is exactly where EchoMimicV3 fell over.
+ * A single good-looking clip proves little; what matters is whether the face survives across
+ * several consecutive scenes, which is exactly where EchoMimicV3 fell over — so render a run of
+ * them with `--scenes`.
  *
  *   # pull the photo + one host scene's audio straight out of a finished job
  *   npx tsx scripts/test-lipsync.ts --job 181
- *   npx tsx scripts/test-lipsync.ts --job 181 --scene 12 --provider heygen
- *
- *   # A/B the two WaveSpeed models on identical inputs
- *   npx tsx scripts/test-lipsync.ts --job 9 --provider wavespeed --model hunyuan
+ *   npx tsx scripts/test-lipsync.ts --job 181 --scene 12
  *
  *   # real speech through the channel's own 69Labs voice — the honest test
  *   npx tsx scripts/test-lipsync.ts --image https://…/host.png --say "Hey, it's Roger."
@@ -22,34 +19,27 @@
  *   # or drive it with explicit URLs
  *   npx tsx scripts/test-lipsync.ts --image https://…/host.png --audio https://…/scene.mp3
  *
- *   # three consecutive host scenes on one provider — the identity-drift test
+ *   # three consecutive host scenes — the identity-drift test
  *   npx tsx scripts/test-lipsync.ts --job 181 --scenes 3
  *
  * Keys come from the same places a render uses: the per-tab Admin slot first, then the env
  * fallback. Nothing here is mocked, so it spends real credits — one clip at a time.
  *
  * NOTE: `--job` reads a finished job's scene audio, which on a MOCK render is a silent
- * placeholder — every provider then returns a closed mouth, which looks like a lip-sync
+ * placeholder — the provider then returns a closed mouth, which looks like a lip-sync
  * failure and isn't one. Use `--say` when the job you have was rendered in mock mode.
  */
 import "dotenv/config";
 import { writeFileSync } from "fs";
 import { ENV } from "../server/_core/env";
 import { getLongformVideoJobById, getChannelConfig } from "../server/db";
-import {
-  getHeygenSlotKey,
-  getFalSlotKey,
-  getWavespeedSlotKey,
-  resolveTTSProvider,
-} from "../server/longformVideo";
+import { getHeygenSlotKey, resolveTTSProvider } from "../server/longformVideo";
 import {
   createUnifiedTTSTask,
   pollUnifiedTTSTask,
   parseVolumeMultiplier,
 } from "../server/ttsUnified";
 import type { StoryboardScene } from "../shared/types";
-
-type Provider = "heygen" | "fal" | "wavespeed";
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
@@ -124,59 +114,26 @@ async function assertFetchable(url: string, kind: "image" | "audio") {
     console.warn(`  ⚠ ${kind} URL content-type is "${ct}"`);
 }
 
-/** Resolve a provider's key the same way `resolveLipsyncAdapter` does: slot, then env. */
-async function keyFor(provider: Provider, slot: number): Promise<string> {
-  if (provider === "heygen")
-    return (await getHeygenSlotKey(slot)) ?? ENV.heygenApiKey;
-  if (provider === "fal") return (await getFalSlotKey(slot)) ?? ENV.falApiKey;
-  return (await getWavespeedSlotKey(slot)) ?? ENV.wavespeedApiKey;
+/** Resolve the HeyGen key the same way `resolveLipsyncAdapter` does: slot, then env. */
+async function keyFor(slot: number): Promise<string> {
+  return (await getHeygenSlotKey(slot)) ?? ENV.heygenApiKey;
 }
 
 /** One submit → poll → write cycle. Returns wall-clock seconds, or null on failure. */
 async function renderOne(
-  provider: Provider,
   key: string,
   imageUrl: string,
   audioUrl: string,
-  durationSec: number | undefined,
   outPath: string
 ): Promise<number | null> {
   const started = Date.now();
 
-  const submit = async () => {
-    if (provider === "heygen") {
-      const { HeygenLipsyncAdapter } =
-        await import("../server/providers/heygen-lipsync");
-      const a = new HeygenLipsyncAdapter(key);
-      return {
-        res: await a.submitLipsync({ imageUrl, audioUrl }),
-        poll: (id: string) => a.pollVideo(id),
-      };
-    }
-    if (provider === "fal") {
-      const { FalLipsyncAdapter } =
-        await import("../server/providers/fal-lipsync");
-      const a = new FalLipsyncAdapter(key);
-      return {
-        res: await a.submitLipsync({ imageUrl, audioUrl, durationSec }),
-        poll: (id: string) => a.pollVideo(id),
-      };
-    }
-    const { WavespeedLipsyncAdapter, WAVESPEED_MODELS, wavespeedModel } =
-      await import("../server/providers/wavespeed-lipsync");
-    // --model lets you A/B InfiniteTalk against Hunyuan Avatar without touching .env.
-    const m = arg("model");
-    const a = new WavespeedLipsyncAdapter(
-      key,
-      m ? (WAVESPEED_MODELS[m] ?? wavespeedModel()) : wavespeedModel()
-    );
-    return {
-      res: await a.submitLipsync({ imageUrl, audioUrl, durationSec }),
-      poll: (id: string) => a.pollVideo(id),
-    };
-  };
+  const { HeygenLipsyncAdapter } =
+    await import("../server/providers/heygen-lipsync");
+  const adapter = new HeygenLipsyncAdapter(key);
+  const res = await adapter.submitLipsync({ imageUrl, audioUrl });
+  const poll = (id: string) => adapter.pollVideo(id);
 
-  const { res, poll } = await submit();
   if (!res.taskId) {
     console.error(`  ✗ submit failed: ${res.error}`);
     return null;
@@ -190,8 +147,8 @@ async function renderOne(
     return null;
   }
 
-  // HeyGen/fal/WaveSpeed all return bytes; a lane that uploaded straight to R2 would set
-  // fileUrl instead, so handle both rather than assuming.
+  // HeyGen returns bytes; a lane that uploaded straight to R2 would set fileUrl instead, so
+  // handle both rather than assuming.
   if (out.fileData) writeFileSync(outPath, Buffer.from(out.fileData as Buffer));
   else if (out.fileUrl) {
     const dl = await fetch(out.fileUrl);
@@ -202,12 +159,11 @@ async function renderOne(
 }
 
 async function main() {
-  const provider = (arg("provider") ?? ENV.lipsyncProvider) as Provider;
   const slot = Number(arg("slot") ?? 0);
-  const key = await keyFor(provider, slot);
+  const key = await keyFor(slot);
   if (!key) {
     console.error(
-      `No ${provider} key. Set it in Admin → Provider Keys (slot ${slot + 1}) or in .env.`
+      `No HeyGen key. Set it in Admin → Provider Keys (slot ${slot + 1}) or in .env.`
     );
     process.exit(1);
   }
@@ -266,7 +222,7 @@ async function main() {
   }
 
   console.log(
-    `\nlip-sync test — provider=${provider} slot=${slot} clips=${pairs.length}\n`
+    `\nlip-sync test — provider=heygen slot=${slot} clips=${pairs.length}\n`
   );
 
   // Validate every input before spending anything — a bad URL is the cheapest failure to catch.
@@ -287,12 +243,10 @@ async function main() {
       `${p.tag}  (${p.dur ? p.dur.toFixed(1) + "s" : "?"} narration)`
     );
     const wall = await renderOne(
-      provider,
       key,
       p.image,
       p.audio,
-      p.dur,
-      `lipsync-${provider}${arg("model") ? "-" + arg("model") : ""}-${p.tag}.mp4`
+      `lipsync-heygen-${p.tag}.mp4`
     );
     if (wall != null) {
       total += wall;

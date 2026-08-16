@@ -31,9 +31,10 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { LongformVideoPlayer } from "./LongformVideoPlayer";
 import { GenerationCostDialog } from "./GenerationCostDialog";
 import { ChannelVoiceTuning } from "@/components/ChannelVoiceTuning";
+import { LongformAssets } from "@/components/LongformAssets";
 import { sanitizeError, isCreditError } from "@/lib/errorSanitizer";
 import { triggerCreditErrorPopup } from "@/components/CreditErrorPopup";
-import type { StoryboardScene } from "@shared/types";
+import type { LongformAsset, StoryboardScene } from "@shared/types";
 import {
   ScanFace,
   Loader2,
@@ -171,6 +172,10 @@ export default function LongformJobSlot({
   const [selectedScenes, setSelectedScenes] = useState<number[]>([]);
   const [sceneSearch, setSceneSearch] = useState("");
   const [downloadTitle, setDownloadTitle] = useState(initialTitle);
+  // Per-job asset images (book renders, product shots) shown verbatim in the CTA pitch. Local
+  // state only: they belong to the NEXT generate click, and the job row persists them once it
+  // starts. Cleared alongside the script when a new job is submitted.
+  const [assets, setAssets] = useState<LongformAsset[]>([]);
   const isAdmin = useAuth().user?.role === "admin";
 
   // Masked APIMART keys (admin-only). B-roll VIDEO renders on this tab's APIMART key; with no key
@@ -557,6 +562,7 @@ export default function LongformJobSlot({
       channelKey,
       title: downloadTitle.trim() || undefined,
       slotIndex,
+      assets: assets.length ? assets : undefined,
     });
   };
 
@@ -645,6 +651,13 @@ export default function LongformJobSlot({
               The voiceover uses this channel's saved voice.
             </p>
           </div>
+
+          {/* Uploaded assets shown verbatim in this video's CTA pitch. */}
+          <LongformAssets
+            assets={assets}
+            onChange={setAssets}
+            disabled={generateMutation.isPending || isProcessing}
+          />
 
           {/* Video title */}
           <div className="space-y-2">

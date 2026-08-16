@@ -66,34 +66,20 @@ import {
   heygenSlotsFor,
   HEYGEN_LIPSYNC_TIMEOUT_MS,
 } from "./providers/heygen-lipsync";
-import {
-  FalLipsyncAdapter,
-  falSlotsFor,
-  falLipsyncModel,
-  FAL_LIPSYNC_TIMEOUT_MS,
-} from "./providers/fal-lipsync";
-import {
-  WavespeedLipsyncAdapter,
-  wavespeedSlotsFor,
-  wavespeedModel,
-  WAVESPEED_TIMEOUT_MS,
-} from "./providers/wavespeed-lipsync";
 import { recordUsage, withCostMeter, flushJobUsage } from "./costMeter";
-import { WAVESPEED_MIN_BILLED_SECONDS } from "./pricing";
 // AIREITER BOLT-ON (temporary) — delete with the block in `apimartAdapterForJob`.
 import { aireiterAdapter, aireiterLaneEnabled } from "./providers/aireiter";
 import { Semaphore } from "./providers/semaphore";
 
 /**
- * The host lip-sync lane, resolved once per pipeline pass. Two providers ship today —
- * HeyGen Avatar IV (production) and fal.ai (`LIPSYNC_PROVIDER=fal`) — and they differ in more
- * than an API call: payload shape, concurrency cap, poll ceiling, scene wall clock, and
- * whether the render needs a tail trim. All of that hangs off this object so
- * `resolveLipsyncAdapter` is the ONLY place that branches on `ENV.lipsyncProvider`; every
- * caller downstream just uses the lane it was handed.
+ * The host lip-sync lane, resolved once per pipeline pass. HeyGen Avatar IV is the only
+ * provider today, but the lane still owns everything provider-specific — payload shape,
+ * concurrency cap, poll ceiling, scene wall clock — so `resolveLipsyncAdapter` stays the one
+ * place that knows which vendor is rendering; every caller downstream just uses the lane it
+ * was handed.
  */
 type LipsyncLane = {
-  provider: "runpod" | "heygen" | "fal" | "wavespeed";
+  provider: "runpod" | "heygen";
   /** Build + submit one render. The lane owns the provider-specific payload shape. */
   submit(req: {
     scene: StoryboardScene;
@@ -137,9 +123,18 @@ import {
 import type {
   StoryboardScene,
   LongformInputParams,
+  LongformAsset,
   ProviderType,
   GenerationResult,
 } from "../shared/types";
+import {
+  type LongformPacing,
+  LEGACY_PACING,
+  MAX_QUARTER_LOAD,
+  resolveLongformPacing,
+  scaleRamp,
+} from "../shared/pacing";
+import { renderCaptionCardPng } from "./captionCard";
 import { stripHostNames } from "../shared/constants";
 import type { VideoSubmitResult } from "./providers/base";
 
@@ -478,13 +473,6 @@ const APIMART_EDIT_SETTING_KEY = "apimart_key_edit";
  */
 const heygenSlotSettingKey = (slot: number): string =>
   `heygen_key_slot_${slot}`;
-/**
- * Per-tab fal.ai keys — the `LIPSYNC_PROVIDER=fal` equivalent of the HeyGen slots. Stored
- * separately rather than reusing `heygen_key_slot_*` so flipping the provider back and forth
- * never re-enters keys, and so a tab can hold both while the two lanes are being compared.
- * A blank/unset slot ⇒ that tab falls back to the shared `FAL_API_KEY` env var.
- */
-const falSlotSettingKey = (slot: number): string => `fal_key_slot_${slot}`;
 
 /** Decrypted raw provider API key for a setting, or null when unset/blank. */
 async function getStoredKey(settingKey: string): Promise<string | null> {
@@ -542,29 +530,6 @@ export const getHeygenSlotMasked = (slot: number): Promise<string | null> =>
   getStoredMasked(heygenSlotSettingKey(slot));
 export const setHeygenSlotKey = (slot: number, apiKey: string): Promise<void> =>
   setStoredKey(heygenSlotSettingKey(slot), apiKey);
-
-/**
- * Per-tab WaveSpeedAI keys — the `LIPSYNC_PROVIDER=wavespeed` equivalent of the HeyGen and
- * fal slots. Blank/unset ⇒ that tab falls back to the shared `WAVESPEED_API_KEY`.
- */
-const wavespeedSlotSettingKey = (slot: number): string =>
-  `wavespeed_key_slot_${slot}`;
-
-export const getWavespeedSlotKey = (slot: number): Promise<string | null> =>
-  getStoredKey(wavespeedSlotSettingKey(slot));
-export const getWavespeedSlotMasked = (slot: number): Promise<string | null> =>
-  getStoredMasked(wavespeedSlotSettingKey(slot));
-export const setWavespeedSlotKey = (
-  slot: number,
-  apiKey: string
-): Promise<void> => setStoredKey(wavespeedSlotSettingKey(slot), apiKey);
-
-export const getFalSlotKey = (slot: number): Promise<string | null> =>
-  getStoredKey(falSlotSettingKey(slot));
-export const getFalSlotMasked = (slot: number): Promise<string | null> =>
-  getStoredMasked(falSlotSettingKey(slot));
-export const setFalSlotKey = (slot: number, apiKey: string): Promise<void> =>
-  setStoredKey(falSlotSettingKey(slot), apiKey);
 
 /**
  * The APIMART video adapter for a job's tab, or null when the tab has no key. APIMART is the
@@ -669,6 +634,107 @@ export const MOTION_RAMP = [0.26, 0.18, 0.1, 0.06];
  * "back half" to settle into anyway.
  */
 export const RAMP_MIN_SCENES = 8;
+
+// ─── Pacing config → the numbers the balancers actually use ─────────
+// Each helper takes the resolved `LongformPacing` and returns either the operator's value or the
+// module constant above, so a DISABLED feature is byte-identical to the pre-config pipeline. They
+// are the only place config is read; every balancer below takes numbers, never the config object,
+// which keeps them pure and unit-testable per value.
+
+/** Share of TOTAL runtime with the host on camera. */
+export const hostFractionFor = (p: LongformPacing): number =>
+  p.visualMix.enabled ? p.visualMix.hostShare : HOST_SCREEN_FRACTION;
+
+/** Share of TOTAL runtime rendered as MOTION b-roll — the mean the motion ramp is scaled to. */
+export const motionFractionFor = (p: LongformPacing): number =>
+  p.visualMix.enabled
+    ? p.visualMix.motionShare
+    : 1 - HOST_SCREEN_FRACTION - STILL_IMAGE_FRACTION;
+
+/** Share of TOTAL runtime rendered as stills — always the derived remainder. */
+export const stillFractionFor = (p: LongformPacing): number =>
+  Math.max(0, 1 - hostFractionFor(p) - motionFractionFor(p));
+
+/**
+ * Share of HOST runtime rendered as a split frame. Disabled ⇒ 0, a genuine removal: the legacy
+ * 7.5% lives in `LEGACY_PACING.splitScreen` as an ENABLED value, so an old job still splits.
+ */
+export const splitFractionFor = (p: LongformPacing): number =>
+  p.splitScreen.enabled ? p.splitScreen.hostShare : 0;
+
+/**
+ * The per-quarter host ramp, rescaled to the configured host share. `HOST_RAMP` is the SHAPE
+ * (front-loaded, mean `HOST_SCREEN_FRACTION`); `scaleRamp` re-means it while water-filling any
+ * quarter that would exceed `MAX_QUARTER_LOAD`, so the front-loading survives as far as the
+ * ceiling allows. Disabled ⇒ the shipped table, unchanged.
+ */
+export function hostRampFor(p: LongformPacing): number[] {
+  if (!p.visualMix.enabled) return HOST_RAMP;
+  return scaleRamp(
+    HOST_RAMP,
+    p.visualMix.hostShare,
+    HOST_RAMP.map(() => MAX_QUARTER_LOAD)
+  );
+}
+
+/**
+ * The per-quarter MOTION ceiling, rescaled to the configured motion share and capped by whatever
+ * each quarter has left after host. Motion yields to host because host is the register an
+ * operator sets deliberately, and because stills — the derived remainder — must keep a share of
+ * every quarter. Disabled ⇒ the shipped table, unchanged.
+ */
+export function motionRampFor(p: LongformPacing, hostRamp: number[]): number[] {
+  if (!p.visualMix.enabled) return MOTION_RAMP;
+  return scaleRamp(
+    MOTION_RAMP,
+    p.visualMix.motionShare,
+    hostRamp.map(h => Math.max(0, MAX_QUARTER_LOAD - h))
+  );
+}
+
+/**
+ * Longest run of adjacent MOTION b-roll beats `enforceVisualAdjacency` will leave alone.
+ *
+ * One (the shipped behaviour) is right at a 15% motion share — a moving beat is rare enough that
+ * two in a row reads as a burst. It is self-defeating above roughly a fifth of the film: the pass
+ * runs AFTER `enforceStillMotionRatio` and converts every pair straight back to a still, so a
+ * raised motion budget would be spent and then undone. Two keeps a still between every third
+ * beat, which is what actually reads as "more video" rather than "constant motion".
+ */
+export const MOTION_RUN_CAP_THRESHOLD = 0.2;
+export const maxAdjacentMotionFor = (p: LongformPacing): number =>
+  motionFractionFor(p) > MOTION_RUN_CAP_THRESHOLD ? 2 : 1;
+
+/**
+ * The pacing this job renders with: the snapshot taken at job start (`LongformInputParams.pacing`),
+ * NOT the live admin settings — a resume or a regenerate must reproduce the film that is already
+ * half rendered. A job from before the config existed has no snapshot and gets `LEGACY_PACING`,
+ * which is the pre-config pipeline exactly.
+ */
+export const pacingFor = (params: {
+  pacing?: LongformPacing;
+}): LongformPacing => params.pacing ?? LEGACY_PACING;
+
+/** app_settings key holding the admin-edited pacing dials (see `shared/pacing.ts`). */
+export const LONGFORM_PACING_KEY = "longform_pacing";
+
+/**
+ * Read the admin-saved pacing dials, falling back to the shipping defaults. Called ONCE per job
+ * (at render start) — everything downstream reads the snapshot on `inputParams` instead, so a
+ * mid-render settings change can never re-cut a film that is already in flight.
+ */
+export async function getLongformPacing(): Promise<LongformPacing> {
+  try {
+    const saved = await getAppSetting(LONGFORM_PACING_KEY);
+    return resolveLongformPacing(saved ? JSON.parse(saved) : undefined);
+  } catch (err: any) {
+    // A malformed row must not stop a render — fall back to the shipping defaults and say so.
+    console.warn(
+      `[Longform] pacing settings unreadable (${err?.message}); using defaults`
+    );
+    return resolveLongformPacing(undefined);
+  }
+}
 
 /**
  * Storyboard batching. The storyboard JSON costs ~250–400 output tokens per scene, so a
@@ -1157,27 +1223,81 @@ export function segmentScriptByDuration(
   /** Speech pace for the word floors/ceilings — the voice's recognized pace when known. */
   wps: number = WORDS_PER_SEC,
   /** Chunks packed to the host floor off the front for the locked host opener (0 = none). */
-  openerChunks: number = 0
+  openerChunks: number = 0,
+  pacing: LongformPacing = LEGACY_PACING
 ): OffsetSpan[] {
   if (units.length === 0) return [];
-  const floorWords = floorWordsFor(wps);
   const longWords = longWordsFor(wps);
+  const out: OffsetSpan[] = [];
+  let rest = units;
+
   // 0. Locked host opener: pack the first `openerChunks` against the host floor, then segment the
-  //    rest normally. Both halves tile their own span, so the concatenation still reproduces
+  //    rest normally. Every stage tiles its own span, so the concatenation still reproduces
   //    `script`. Ceil, not round: a voice faster than `wps` must still clear HOST_MIN_HOLD_SEC.
-  const opener = packOpenerChunks(
-    units,
-    script,
-    Math.ceil(HOST_MIN_HOLD_SEC * wps),
-    openerChunks,
-    longWords
-  );
-  if (opener.chunks.length > 0) {
-    return [
-      ...opener.chunks,
-      ...segmentScriptByDuration(opener.rest, script, wps),
-    ];
+  if (openerChunks > 0) {
+    const opener = packOpenerChunks(
+      units,
+      script,
+      Math.ceil(HOST_MIN_HOLD_SEC * wps),
+      openerChunks,
+      longWords
+    );
+    if (opener.chunks.length > 0) {
+      out.push(...opener.chunks);
+      rest = opener.rest;
+    }
   }
+
+  // 1. Fast-open window: the leading `zoneSec` of narration is packed against a TIGHTER band, so
+  //    two short consecutive sentences stay two shots instead of being glued into one that clears
+  //    the film-wide 3s floor. The window is measured in WORDS at this voice's pace and is net of
+  //    whatever the locked opener already consumed. Same packer, different band — the boundary
+  //    lands on a unit edge, so both halves still tile.
+  if (pacing.fastOpen.enabled) {
+    const consumed = out.reduce(
+      (n, c) => n + wordCount(script.slice(c.start, c.end)),
+      0
+    );
+    const zoneWords = Math.round(pacing.fastOpen.zoneSec * wps) - consumed;
+    if (zoneWords > 0) {
+      const zoneUnits: ScriptUnit[] = [];
+      let taken = 0;
+      let i = 0;
+      for (; i < rest.length && taken < zoneWords; i++) {
+        zoneUnits.push(rest[i]);
+        taken += wordCount(rest[i].text);
+      }
+      if (zoneUnits.length > 0) {
+        out.push(
+          ...packChunks(
+            zoneUnits,
+            script,
+            Math.max(1, Math.round(pacing.fastOpen.minShotSec * wps)),
+            Math.max(2, Math.round(pacing.fastOpen.maxShotSec * wps))
+          )
+        );
+        rest = rest.slice(i);
+      }
+    }
+  }
+
+  // 2. The rest of the film, at the standard band.
+  out.push(...packChunks(rest, script, floorWordsFor(wps), longWords));
+  return out;
+}
+
+/**
+ * The sentence-first packer itself — the algorithm described on `segmentScriptByDuration`, taken
+ * as an explicit word BAND so the same tested logic serves both the standard film-wide band and
+ * the tighter fast-open one. Tiles `units`' span exactly. Pure.
+ */
+function packChunks(
+  units: ScriptUnit[],
+  script: string,
+  floorWords: number,
+  longWords: number
+): OffsetSpan[] {
+  if (units.length === 0) return [];
   const chunks: OffsetSpan[] = [];
   // Open sentence-accumulator chunk (null = none open).
   let cur: { start: number; end: number; words: number } | null = null;
@@ -1253,6 +1373,41 @@ export function segmentScriptByDuration(
     }
   }
   return chunks;
+}
+
+/**
+ * Flag the leading scenes that sit inside the FAST-OPEN window, so every later sizing pass
+ * (`capFor`, `floorFor`, `measuredSizeFor`) applies the window's tighter band to them.
+ *
+ * Marked ONCE, at storyboard build, off the word estimate — deliberately not re-derived from
+ * measured seconds later. A boundary that moved between passes would let a beat be split under
+ * one band and then merged back under another; a stable flag makes the window a property of the
+ * scene, which is also what lets split children and merge survivors inherit it by spread.
+ *
+ * The locked cold open is EXCLUDED: `hostOpener` beats are packed to the host floor and protected
+ * from split/merge/demotion everywhere else in the pipeline, and handing them a 5s ceiling would
+ * be the one pass that re-cuts them. The window starts after them.
+ *
+ * No-op when the window is disabled. Mutates in place; returns the count marked — unit-tested.
+ */
+export function markFastOpenScenes(
+  scenes: StoryboardScene[],
+  pacing: LongformPacing,
+  wps: number = WORDS_PER_SEC
+): number {
+  for (const s of scenes) s.fastOpen = undefined;
+  if (!pacing.fastOpen.enabled) return 0;
+  const zoneWords = pacing.fastOpen.zoneSec * wps;
+  let consumed = 0;
+  let marked = 0;
+  for (const s of scenes) {
+    if (consumed >= zoneWords) break;
+    consumed += wordCount(s.scriptText ?? s.narration ?? "");
+    if (s.hostOpener) continue; // the locked cold open keeps the standard band
+    s.fastOpen = true;
+    marked++;
+  }
+  return marked;
 }
 
 /**
@@ -1489,12 +1644,17 @@ export function parseStoryboard(
  * `brollVisual` when present, else a synthesized one), so it never depends on Claude having
  * written a fallback. Pure aside from the in-place mutation — unit-tested.
  */
-export function rebalanceHostScreenTime(scenes: StoryboardScene[]): {
+export function rebalanceHostScreenTime(
+  scenes: StoryboardScene[],
+  pacing: LongformPacing = LEGACY_PACING
+): {
   total: number;
   before: number;
   after: number;
   demoted: number;
 } {
+  const hostRamp = hostRampFor(pacing);
+  const hostFraction = hostFractionFor(pacing);
   const dur = (s: StoryboardScene) => s.audioDuration ?? 0;
   const total = scenes.reduce((sum, s) => sum + dur(s), 0);
   const hostTime = (set: StoryboardScene[]) =>
@@ -1516,8 +1676,7 @@ export function rebalanceHostScreenTime(scenes: StoryboardScene[]): {
   quarters.forEach((quarter, q) => {
     const quarterSeconds = quarter.reduce((sum, s) => sum + dur(s), 0);
     // One bucket ⇒ the ramp was skipped (short film): fall back to the flat global fraction.
-    const fraction =
-      quarters.length === 1 ? HOST_SCREEN_FRACTION : HOST_RAMP[q];
+    const fraction = quarters.length === 1 ? hostFraction : hostRamp[q];
     const budget = fraction * quarterSeconds;
     if (hostTime(quarter) <= budget) return;
 
@@ -1622,7 +1781,10 @@ export function runtimeQuarters(
  * quarter so changes aren't clustered. Below `RAMP_MIN_SCENES` the film is one bucket at the
  * flat `STILL_IMAGE_FRACTION`. Mutates `scenes` in place; pure otherwise — unit-tested.
  */
-export function enforceStillMotionRatio(scenes: StoryboardScene[]): {
+export function enforceStillMotionRatio(
+  scenes: StoryboardScene[],
+  pacing: LongformPacing = LEGACY_PACING
+): {
   eligible: number;
   stillSeconds: number;
   motionSeconds: number;
@@ -1630,6 +1792,8 @@ export function enforceStillMotionRatio(scenes: StoryboardScene[]): {
   /** Motion seconds in each runtime quarter (one entry when the ramp is skipped). */
   motionPerQuarter: number[];
 } {
+  const motionRamp = motionRampFor(pacing, hostRampFor(pacing));
+  const stillFraction = stillFractionFor(pacing);
   const dur = (s: StoryboardScene) => s.audioDuration ?? 0;
   const isMotion = (s?: StoryboardScene) =>
     !!s && !s.hostPresent && !s.stillImage;
@@ -1663,9 +1827,9 @@ export function enforceStillMotionRatio(scenes: StoryboardScene[]): {
     // the cutaway pool — stills can only come from eligible cutaways (e.g. a host-heavy quarter).
     const target =
       quarters.length === 1
-        ? Math.min(STILL_IMAGE_FRACTION * total, eligibleSeconds)
+        ? Math.min(stillFraction * total, eligibleSeconds)
         : Math.min(
-            Math.max(0, eligibleSeconds - MOTION_RAMP[q] * quarterSeconds),
+            Math.max(0, eligibleSeconds - motionRamp[q] * quarterSeconds),
             eligibleSeconds
           );
     let acc = eligible.reduce((sum, s) => sum + (s.stillImage ? dur(s) : 0), 0);
@@ -1731,16 +1895,42 @@ export function enforceStillMotionRatio(scenes: StoryboardScene[]): {
  * closer to target, walking a spread order. Mutates `scenes` in place; pure otherwise —
  * unit-tested.
  */
-export function enforceHostSplitMix(scenes: StoryboardScene[]): {
+export function enforceHostSplitMix(
+  scenes: StoryboardScene[],
+  pacing: LongformPacing = LEGACY_PACING
+): {
   hostSeconds: number;
   splitSeconds: number;
   aloneSeconds: number;
+  /** Split runtime whose RIGHT panel is a moving clip rather than a still. */
+  motionSeconds: number;
 } {
   const dur = (s: StoryboardScene) => s.audioDuration ?? 0;
   const host = scenes.filter(s => s.hostPresent);
   const hostSeconds = host.reduce((sum, s) => sum + dur(s), 0);
   if (hostSeconds <= 0) {
-    return { hostSeconds: 0, splitSeconds: 0, aloneSeconds: 0 };
+    return {
+      hostSeconds: 0,
+      splitSeconds: 0,
+      aloneSeconds: 0,
+      motionSeconds: 0,
+    };
+  }
+  // Split-screen switched OFF: strip every split the storyboard authored so the host is
+  // full-frame throughout. A zero TARGET would not be enough — the converge loop below only
+  // flips scenes while a flip moves the total closer to target, so Claude's own splits could
+  // survive it. Off means none.
+  if (!pacing.splitScreen.enabled) {
+    for (const s of host) {
+      s.splitVisual = undefined;
+      s.splitMotion = undefined;
+    }
+    return {
+      hostSeconds,
+      splitSeconds: 0,
+      aloneSeconds: hostSeconds,
+      motionSeconds: 0,
+    };
   }
 
   const lastIndex = scenes.length - 1;
@@ -1754,7 +1944,7 @@ export function enforceHostSplitMix(scenes: StoryboardScene[]): {
   // scene would otherwise survive (and be counted against the target). Clear it here too.
   for (const s of host) if (s.hostOpener) s.splitVisual = undefined;
 
-  const target = HOST_SPLITVISUAL_FRACTION * hostSeconds;
+  const target = splitFractionFor(pacing) * hostSeconds;
   let acc = host.reduce((sum, s) => sum + (s.splitVisual ? dur(s) : 0), 0);
 
   if (acc < target) {
@@ -1783,15 +1973,43 @@ export function enforceHostSplitMix(scenes: StoryboardScene[]): {
     }
   }
 
-  return { hostSeconds, splitSeconds: acc, aloneSeconds: hostSeconds - acc };
+  // Right-panel register, over the FINAL split set: `share` of split runtime moves, the rest
+  // stay Ken Burns stills. Same converge-in-spreadOrder shape as the split assignment itself, so
+  // moving panels are spread across the film rather than clustered. Cleared first — a re-run
+  // (regenerate, resume) must not accumulate motion onto scenes that already have it.
+  for (const s of host) s.splitMotion = undefined;
+  let motionSeconds = 0;
+  if (pacing.splitScreen.motion.enabled && acc > 0) {
+    const motionTarget = pacing.splitScreen.motion.share * acc;
+    for (const s of spreadOrder(
+      scenes.filter(s => s.hostPresent && s.splitVisual)
+    )) {
+      if (motionSeconds >= motionTarget) break;
+      if (
+        Math.abs(motionSeconds + dur(s) - motionTarget) <
+        Math.abs(motionSeconds - motionTarget)
+      ) {
+        s.splitMotion = true;
+        motionSeconds += dur(s);
+      }
+    }
+  }
+
+  return {
+    hostSeconds,
+    splitSeconds: acc,
+    aloneSeconds: hostSeconds - acc,
+    motionSeconds,
+  };
 }
 
 /**
  * Keep "heavy" visual registers from piling up: host scenes never sit back-to-back EXCEPT the
  * locked two-angle cold open (scene 1 + scene 2, both `hostOpener`); every later host scene is
- * capped at a run of 1. Two MOTION-video b-roll scenes are never back-to-back either. A STILL
- * cutaway is the intended breather and may sit beside anything, so we break an over-cap run by
- * converting a scene TO a still.
+ * capped at a run of 1. MOTION-video b-roll runs are capped at `opts.maxAdjacentMotion` (1 by
+ * default — the shipped behaviour; 2 once the configured motion share makes a cap of 1
+ * self-defeating, see `maxAdjacentMotionFor`). A STILL cutaway is the intended breather and may
+ * sit beside anything, so we break an over-cap run by converting a scene TO a still.
  *
  * Run LAST, AFTER the ratio passes (`rebalanceHostScreenTime`, `enforceHostSplitMix`,
  * `enforceStillMotionRatio`) — those run after storyboard assembly and can re-introduce a
@@ -1801,7 +2019,7 @@ export function enforceHostSplitMix(scenes: StoryboardScene[]): {
  *
  * Register: `host` (hostPresent), `still` (!hostPresent && stillImage), `motion` (otherwise).
  *
- * - MOTION pair → flip the later scene `stillImage = true` (same mutation
+ * - MOTION run over the cap → flip the OVERFLOWING scene `stillImage = true` (same mutation
  *   `enforceStillMotionRatio` already makes; no content change).
  * - HOST run over the cap → convert the overflowing host scene to a still cutaway
  *   (`demoteHostToStill` synthesizes a person-free frame from the scene when it has no pre-written
@@ -1817,7 +2035,16 @@ export function enforceHostSplitMix(scenes: StoryboardScene[]): {
  */
 export function enforceVisualAdjacency(
   scenes: StoryboardScene[],
-  opts?: { hasAltHost?: boolean; allowAdjacentMotion?: boolean }
+  opts?: {
+    hasAltHost?: boolean;
+    allowAdjacentMotion?: boolean;
+    /**
+     * Longest run of adjacent MOTION beats left alone (default 1 — the shipped behaviour).
+     * `maxAdjacentMotionFor` raises it to 2 once the motion share makes a cap of 1
+     * self-defeating; see that helper.
+     */
+    maxAdjacentMotion?: number;
+  }
 ): {
   hostBroken: number;
   motionBroken: number;
@@ -1825,6 +2052,7 @@ export function enforceVisualAdjacency(
   altSeconds: number;
 } {
   const hasAltHost = opts?.hasAltHost ?? false;
+  const motionCap = Math.max(1, opts?.maxAdjacentMotion ?? 1);
   const lastIndex = scenes.length - 1;
   const isHost = (s: StoryboardScene) => s.hostPresent === true;
   const isMotion = (s: StoryboardScene) => !s.hostPresent && !s.stillImage;
@@ -1839,21 +2067,25 @@ export function enforceVisualAdjacency(
   let motionBroken = 0;
   // Consecutive KEPT-host scenes ending at the previous index.
   let hostRun = isHost(scenes[0]) ? 1 : 0;
+  // Consecutive KEPT-motion scenes ending at the previous index — the counterpart to `hostRun`,
+  // so a cap above 1 breaks only the beat that OVERFLOWS the run instead of every pair.
+  let motionRun = isMotion(scenes[0]) ? 1 : 0;
 
   for (let i = 1; i <= lastIndex; i++) {
     const prev = scenes[i - 1];
     const cur = scenes[i];
 
-    if (isMotion(prev) && isMotion(cur)) {
-      if (opts?.allowAdjacentMotion) {
-        hostRun = 0;
-        continue;
+    if (isMotion(cur)) {
+      motionRun = isMotion(prev) ? motionRun + 1 : 1;
+      if (motionRun > motionCap && !opts?.allowAdjacentMotion) {
+        cur.stillImage = true;
+        motionBroken++;
+        motionRun = 0; // the conversion made this beat a still — the run restarts after it
       }
-      cur.stillImage = true;
-      motionBroken++;
       hostRun = 0;
       continue;
     }
+    motionRun = 0;
 
     if (!isHost(cur)) {
       hostRun = 0;
@@ -2165,6 +2397,22 @@ export function buildUnifiedStoryboardPrompt(opts: {
    */
   mixTarget?: { host: number; video: number; still: number };
   /**
+   * Ask for genuinely MOVING cutaways wherever the beat honestly has movement.
+   *
+   * `parseStoryboard` forces any cutaway that reports neither `humanPresent` nor `objectMotion`
+   * onto the still lane, and `enforceStillMotionRatio` refuses to manufacture motion — so the
+   * video share is bounded by what the storyboard REPORTS, not by the ramp. Raising the ramp
+   * without this just leaves the budget unspent. It never asks for a false flag: a beat with
+   * nothing moving still reports neither, and lands on the still lane as before.
+   */
+  motionBias?: boolean;
+  /**
+   * Share of HOST beats that should carry a `splitVisual` (`splitFractionFor`). Only a nudge —
+   * `enforceHostSplitMix` converges the real number by runtime afterwards. Absent ⇒ the legacy
+   * "about one in five" wording.
+   */
+  splitShare?: number;
+  /**
    * Hero-subject digest of b-roll shots ALREADY chosen by earlier (sequential) batches, so this
    * batch can enforce the whole-video B-ROLL VARIETY rule instead of only its own 25 chunks.
    * Absent/empty → block omitted; batch 0 and single-batch videos are byte-identical to before.
@@ -2215,6 +2463,35 @@ export function buildUnifiedStoryboardPrompt(opts: {
   const scope = opts.mixTarget
     ? "this stretch of the video"
     : "the whole video";
+
+  // Motion bias (see `motionBias`): the video share is bounded by what this prompt REPORTS as
+  // moving, so a raised ceiling has to be met here or not at all. Phrased as "look harder at the
+  // beat", never "flag more" — a falsely-flagged static beat renders a grok clip of nothing
+  // happening, which is the exact failure the still lane exists to prevent.
+  // How often a host beat carries a beside-visual. `enforceHostSplitMix` is the guarantee; this
+  // only stops the model writing a mix the balancer would then have to invent or discard. A share
+  // of 0 (split screen switched off) says so outright rather than asking for "one in five".
+  const splitEvery = Math.max(
+    2,
+    Math.round(1 / Math.max(0.01, opts.splitShare ?? 0.2))
+  );
+  const splitShareRule =
+    opts.splitShare === undefined
+      ? "About ONE IN FIVE host beats is a split-frame"
+      : opts.splitShare <= 0.01
+        ? 'NEVER write a "splitVisual" — every host beat is full-frame'
+        : `About ONE IN ${splitEvery} host beats is a split-frame`;
+
+  const motionBiasRule = opts.motionBias
+    ? `- PREFER REAL MOVEMENT: this video wants a HIGHER share of moving cutaways than usual, so ` +
+      `when a beat genuinely contains movement, choose the moving reading of it. Many beats that ` +
+      `read as static have real motion one step away: soil being crumbled rather than a mound of ` +
+      `soil, steam rising off a mug rather than a mug, a saw part-way through the cut rather than ` +
+      `a cut board, wind through a row rather than a row. Pick the moment the action is HAPPENING ` +
+      `and flag it honestly ("objectMotion" for the thing moving itself, "humanPresent" for hands ` +
+      `doing it). This does NOT relax the rule above: a beat that truly has nothing moving stays ` +
+      `"stillImage":true with both flags false, and a false flag is worse than a still.\n`
+    : "";
   const openers = opts.openerHostScenes ?? 0;
   const coldOpenRule =
     openers <= 0
@@ -2267,7 +2544,7 @@ export function buildUnifiedStoryboardPrompt(opts: {
     `host regularly at pivots, interleaved with b-roll cutaways. Each host appearance is a ` +
     `SUBSTANTIVE beat — roughly a full sentence or two, about 3–8 seconds spoken — NEVER a ` +
     `1–2 second fragment; if a host line would be that short, fold it into the adjacent host ` +
-    `sentence or make the beat b-roll instead. About ONE IN FIVE host beats is a split-frame ` +
+    `sentence or make the beat b-roll instead. ${splitShareRule} ` +
     `(host + a visual beside them — see SPLIT-SCREEN below); the rest are full-frame ` +
     `host alone.\n` +
     `- NO BACK-TO-BACK SAME REGISTER: ${hostRunRule}, and ` +
@@ -2325,6 +2602,7 @@ export function buildUnifiedStoryboardPrompt(opts: {
     `everywhere else — on any beat whose subject just sits there, on host scenes, and whenever ` +
     `the movement would come from a person rather than the thing itself (that is ` +
     `"humanPresent"). Most cutaways are false.\n` +
+    motionBiasRule +
     `- CAMERA CUE (host split-screen ONLY): emit a short "cameraCue" phrase ONLY on a host ` +
     `scene that carries a "splitVisual" — there it styles the lighting/color mood of the ` +
     `right-half panel (one short clause, e.g. "soft overcast light" or "warm low evening ` +
@@ -2556,12 +2834,9 @@ export async function resolveVideoProvider(
 
 /**
  * Resolve the host lip-sync lane, independent of which provider is active for b-roll clips.
- * `LIPSYNC_PROVIDER` picks it: `heygen` (Avatar IV — production default) or `fal` (fal.ai
- * queue, still+audio models — see `server/providers/fal-lipsync.ts`). Returns null when the
- * chosen provider's key is unset, and `generateSceneClips` then fails host scenes loudly
- * rather than silently rendering them as non-lip-synced grok video.
- *
- * This is the ONLY branch on the provider — see `LipsyncLane`.
+ * HeyGen Avatar IV renders it. Returns null when HeyGen's key is unset, and
+ * `generateSceneClips` then fails host scenes loudly rather than silently rendering them as
+ * non-lip-synced grok video.
  */
 export async function resolveLipsyncAdapter(
   params: LongformInputParams
@@ -2569,20 +2844,10 @@ export async function resolveLipsyncAdapter(
   const lane = await resolveLipsyncLane(params);
   if (!lane || (await isMockMode())) return lane;
 
-  // Meter the host lane here rather than in each of the three adapters: every provider bills
-  // per second of rendered output, the scene's narration IS that length, and this wrapper sits
-  // on the one path all three share. An accepted submit is billed even if the render is later
+  // Meter the host lane here rather than inside the adapter: HeyGen bills per second of
+  // rendered output and the scene's narration IS that length, so this wrapper sits on the one
+  // path every host render takes. An accepted submit is billed even if the render is later
   // discarded (a truncation re-pay, a resume that re-submits), so success is the trigger.
-  //
-  // WaveSpeed's 5-second floor is applied here for the same reason: a 3s host beat bills as 5s,
-  // and charging the true 3s would under-report a WaveSpeed film across every short beat.
-  const billedSeconds = (scene: StoryboardScene): number => {
-    const raw = Math.max(0, scene.audioDuration ?? 0);
-    return lane.provider === "wavespeed"
-      ? Math.max(raw, WAVESPEED_MIN_BILLED_SECONDS)
-      : raw;
-  };
-
   return {
     ...lane,
     submit: async args => {
@@ -2591,14 +2856,9 @@ export async function resolveLipsyncAdapter(
         recordUsage({
           lane: "lipsync",
           provider: lane.provider,
-          model:
-            lane.provider === "wavespeed"
-              ? wavespeedModel().id
-              : lane.provider === "fal"
-                ? falLipsyncModel().id
-                : "heygen-avatar-iv",
+          model: "heygen-avatar-iv",
           calls: 1,
-          quantity: billedSeconds(args.scene),
+          quantity: Math.max(0, args.scene.audioDuration ?? 0),
         });
       }
       return result;
@@ -2624,62 +2884,6 @@ async function resolveLipsyncLane(
       poll: id => mock.pollVideo(id),
       slots: heygenSlotsFor("mock"),
       concurrency: ENV.heygenConcurrency,
-      sceneDeadlineMs: SCENE_DEADLINE_HOST_MS,
-    };
-  }
-
-  if (ENV.lipsyncProvider === "wavespeed") {
-    // WaveSpeedAI InfiniteTalk. Same still+audio contract as the other lanes, and it takes
-    // up to 10 minutes of audio per render, so no scene-length ceiling is needed here.
-    const wsKey =
-      (params.apimartSlot != null
-        ? await getWavespeedSlotKey(params.apimartSlot)
-        : null) ?? ENV.wavespeedApiKey;
-    if (!wsKey) return null;
-    const ws = new WavespeedLipsyncAdapter(wsKey);
-    return {
-      provider: "wavespeed",
-      // Like Avatar IV, InfiniteTalk INHERITS the gaze and framing of the still it animates,
-      // so `useAlt` needs no translation — the choice of photo IS the choice of angle.
-      submit: ({ scene, imageUrl, audioUrl }) =>
-        ws.submitLipsync({
-          imageUrl,
-          audioUrl,
-          durationSec: scene.audioDuration,
-        }),
-      poll: (id, ms) => ws.pollVideo(id, ms ?? WAVESPEED_TIMEOUT_MS),
-      slots: wavespeedSlotsFor(wsKey),
-      concurrency: ENV.wavespeedConcurrency,
-      sceneDeadlineMs: SCENE_DEADLINE_HOST_MS,
-    };
-  }
-
-  if (ENV.lipsyncProvider === "fal") {
-    // Per-tab fal account, shared FAL_API_KEY as the fallback — same slot contract as HeyGen
-    // below, read at render time so a key rotation and a job resume both pick up the current key.
-    const falKey =
-      (params.apimartSlot != null
-        ? await getFalSlotKey(params.apimartSlot)
-        : null) ?? ENV.falApiKey;
-    if (!falKey) return null;
-    const fal = new FalLipsyncAdapter(falKey);
-    return {
-      provider: "fal",
-      // Like Avatar IV, the fal still+audio models take no camera knob and INHERIT the gaze of
-      // the photo they animate, so `useAlt` needs no translation here either — the choice of
-      // photo IS the choice of angle. `audioDuration` rides along because frame-sized models
-      // (InfiniTalk) need a length and the adapter rejects over-long narration locally rather
-      // than paying for a 422.
-      submit: ({ scene, imageUrl, audioUrl }) =>
-        fal.submitLipsync({
-          imageUrl,
-          audioUrl,
-          durationSec: scene.audioDuration,
-        }),
-      poll: (id, ms) => fal.pollVideo(id, ms ?? FAL_LIPSYNC_TIMEOUT_MS),
-      // Per-KEY, matching the HeyGen lane: 5 tabs on 5 fal keys each get their own budget.
-      slots: falSlotsFor(falKey),
-      concurrency: ENV.falConcurrency,
       sceneDeadlineMs: SCENE_DEADLINE_HOST_MS,
     };
   }
@@ -4168,6 +4372,66 @@ export function markCornerQrBeforeCover(
 }
 
 /**
+ * Place the operator's uploaded assets (`LongformInputParams.assets` — book renders, product
+ * shots) onto beats inside the CTA pitch window, one asset per beat, so the pitch shows the REAL
+ * artwork instead of a generated approximation of it.
+ *
+ * Candidates are CTA beats that are already person-free cutaways: converting a HOST beat would
+ * undo `ensureHostInCta`'s guarantee that the pitch keeps a face, and the two hero beats
+ * (`qrHero`'s big scan card, `coverHero`'s cover reveal) are the pitch's other deliberate
+ * full-frame moments. Chosen in `spreadOrder`, so five assets land across the pitch rather than in
+ * a block at its head.
+ *
+ * Each placed beat becomes a literal-image still: `assetImageUrl` routes it to the same
+ * generation-free path `coverHero` uses, so it costs nothing and cannot hallucinate. Both motion
+ * flags are cleared (a fixed image has no movement to continue) and the corner QR is switched on,
+ * so the viewer can scan while the render is on screen — which is the whole point of the beat.
+ *
+ * MUST run after the balancers, `ensureHostInCta` and `assignHostShots`: every one of those
+ * rewrites registers, and this pass is deliberately the last word on the beats it claims. Returns
+ * how many assets were placed (fewer than supplied when the pitch has too few beats). Mutates in
+ * place; pure otherwise — unit-tested.
+ */
+export function placeAssetBeats(
+  scenes: StoryboardScene[],
+  assets: LongformAsset[] | undefined,
+  opts: { captions: boolean; qrImageUrl?: string }
+): number {
+  if (!assets?.length) return 0;
+  // Idempotent: a storyboard already carrying asset beats has been through this pass, and a
+  // second run would place the SAME uploads again on whichever beats the first run left free.
+  // Cheap insurance on any path that re-enters planning with a persisted storyboard.
+  if (scenes.some(s => s.assetImageUrl)) return 0;
+  const candidates = scenes.filter(
+    s => s.cta && !s.hostPresent && !s.qrHero && !s.coverHero
+  );
+  if (candidates.length === 0) return 0;
+
+  const targets = spreadOrder(candidates)
+    .slice(0, assets.length)
+    // spreadOrder walks middle-outward; re-sort so asset 1 plays first.
+    .sort((a, b) => a.index - b.index);
+
+  targets.forEach((s, i) => {
+    const asset = assets[i];
+    s.assetImageUrl = asset.url;
+    s.assetCaption = opts.captions
+      ? asset.caption?.trim() || undefined
+      : undefined;
+    s.hostPresent = false;
+    s.stillImage = true;
+    s.splitVisual = undefined;
+    s.splitMotion = undefined;
+    // A fixed image has no movement for the clip lane to continue, and no prompt to enhance.
+    s.humanPresent = undefined;
+    s.objectMotion = undefined;
+    // Scannable while the render is on screen — the reason to show it during the pitch at all.
+    if (opts.qrImageUrl) s.qrCorner = true;
+  });
+  return targets.length;
+}
+
+/**
  * The channel QR to composite on a scene, or undefined for none. Draws ONLY on anchored beats —
  * the big-QR "grab your phone" block (`qrHero`) and the small pre-cover scan window (`qrCorner`) —
  * never on the cover-reveal beat, and never on ordinary cta/price scenes, so a spoken dollar amount
@@ -5343,12 +5607,30 @@ export function clipsNeededFor(
  * tail a `qrTail` beat carries into assembly (`tailHoldSec` → `QR_TAIL_HOLD_SEC`) — that tail is
  * added ON TOP of the narration there, so the spoken part must leave room for it.
  */
-const capFor = (s: StoryboardScene): number =>
-  LONG_SCENE_MAX_SEC - (s.qrTail ? QR_TAIL_HOLD_SEC : 0);
+const capFor = (
+  s: StoryboardScene,
+  pacing: LongformPacing = LEGACY_PACING
+): number =>
+  (s.fastOpen && pacing.fastOpen.enabled
+    ? pacing.fastOpen.maxShotSec
+    : LONG_SCENE_MAX_SEC) - (s.qrTail ? QR_TAIL_HOLD_SEC : 0);
 
-/** On-screen FLOOR for one scene — host beats hold longer so cuts never flip on a face. */
-const floorFor = (s: StoryboardScene): number =>
-  s.hostPresent ? HOST_MIN_HOLD_SEC : SCENE_MIN_HOLD_SEC;
+/**
+ * On-screen FLOOR for one scene — host beats hold longer so cuts never flip on a face.
+ *
+ * The fast-open window lowers the CUTAWAY floor only: `hostPresent` is checked first, so a
+ * lip-synced shot keeps `HOST_MIN_HOLD_SEC` however tight the window is. A talking head that
+ * cuts at 2s reads as a glitch, and no pacing dial is worth that.
+ */
+const floorFor = (
+  s: StoryboardScene,
+  pacing: LongformPacing = LEGACY_PACING
+): number =>
+  s.hostPresent
+    ? HOST_MIN_HOLD_SEC
+    : s.fastOpen && pacing.fastOpen.enabled
+      ? pacing.fastOpen.minShotSec
+      : SCENE_MIN_HOLD_SEC;
 
 /**
  * Split any scene whose MEASURED narration exceeds its ceiling (`capFor`) — a scene the sentence-
@@ -5382,7 +5664,8 @@ const floorFor = (s: StoryboardScene): number =>
 export function splitOverlongScenes(
   scenes: StoryboardScene[],
   /** Speech pace for the child word ceilings — the job's recognized pace when known. */
-  wps: number = WORDS_PER_SEC
+  wps: number = WORDS_PER_SEC,
+  pacing: LongformPacing = LEGACY_PACING
 ): StoryboardScene[] {
   const longWords = longWordsFor(wps);
   const ANGLES: NonNullable<StoryboardScene["shotAngle"]>[] = [
@@ -5396,11 +5679,11 @@ export function splitOverlongScenes(
   for (const scene of scenes) {
     const text = (scene.scriptText ?? "").trim();
     const dur = scene.audioDuration ?? 0;
-    if (!text || dur <= capFor(scene)) {
+    if (!text || dur <= capFor(scene, pacing)) {
       out.push(scene);
       continue;
     }
-    const byCap = Math.ceil(dur / capFor(scene));
+    const byCap = Math.ceil(dur / capFor(scene, pacing));
     // Words one child may carry. `longWords` is the ceiling in WORD space, tightened to the share
     // the MEASURED length demands: a slow-delivered scene runs over the ceiling on fewer than
     // `longWords` words, so gating clause-splitting on `longWords` alone leaves it a single atom
@@ -5435,7 +5718,7 @@ export function splitOverlongScenes(
     // floored by `applySceneHoldFloor`, whereas an over-ceiling scene freeze-pads past the clip.
     n = Math.max(
       byCap,
-      Math.min(n, atoms.length, Math.floor(dur / floorFor(scene)))
+      Math.min(n, atoms.length, Math.floor(dur / floorFor(scene, pacing)))
     );
     // `n <= 1` means the slice can't be split further (e.g. one over-long, clause-less
     // sentence) — leave it whole; one clip at `brollClipDuration` covers it.
@@ -5520,28 +5803,62 @@ type SizeMetric = {
   min: number;
   hostMin: number;
   max: number;
+  /**
+   * Floor/ceiling for a beat inside the FAST-OPEN window (`StoryboardScene.fastOpen`). Absent ⇒
+   * the window is off and every beat uses `min`/`max`, exactly as before the window existed.
+   * Host beats ignore `fastMin` — see `minFor`.
+   */
+  fastMin?: number;
+  fastMax?: number;
   onOrphan?: (s: StoryboardScene) => void;
 };
-/** The floor this scene must clear — host scenes get the taller one. */
+/**
+ * The floor this scene must clear — host scenes get the taller one, fast-open cutaways the
+ * shorter one. Mirrors `floorFor` in the measured metric and its word-space equivalent in the
+ * pre-TTS one, so the merge and the split agree on which beats are short.
+ */
 const minFor = (metric: SizeMetric, s: StoryboardScene): number =>
-  s.hostPresent ? metric.hostMin : metric.min;
-const MEASURED_SIZE: SizeMetric = {
+  s.hostPresent
+    ? metric.hostMin
+    : s.fastOpen && metric.fastMin != null
+      ? metric.fastMin
+      : metric.min;
+/** The ceiling a merge may not cross — tighter inside the fast-open window. */
+const maxFor = (metric: SizeMetric, s: StoryboardScene): number =>
+  s.fastOpen && metric.fastMax != null ? metric.fastMax : metric.max;
+
+/** Post-TTS metric (measured seconds), banded by the job's pacing config. */
+export const measuredSizeFor = (
+  pacing: LongformPacing = LEGACY_PACING
+): SizeMetric => ({
   sizeOf: s => s.audioDuration ?? 0,
   min: SCENE_MIN_HOLD_SEC,
   hostMin: HOST_MIN_HOLD_SEC,
   max: LONG_SCENE_MAX_SEC,
+  fastMin: pacing.fastOpen.enabled ? pacing.fastOpen.minShotSec : undefined,
+  fastMax: pacing.fastOpen.enabled ? pacing.fastOpen.maxShotSec : undefined,
   onOrphan: s => {
-    s.audioDuration = floorFor(s);
+    s.audioDuration = floorFor(s, pacing);
   },
-};
+});
+const MEASURED_SIZE: SizeMetric = measuredSizeFor();
 // pre-TTS: no audioDuration to floor (nothing is voiced yet). The relaxed fallback in
 // coalesceShortScenes folds a sub-floor scene into any non-hero neighbor, so a short scene
 // only survives here when both neighbors are hero beats — then the measured pass handles it.
-export const wordSizeFor = (wps: number): SizeMetric => ({
+export const wordSizeFor = (
+  wps: number,
+  pacing: LongformPacing = LEGACY_PACING
+): SizeMetric => ({
   sizeOf: s => wordCount(s.scriptText ?? s.narration ?? ""),
   min: floorWordsFor(wps),
   hostMin: Math.round(HOST_MIN_HOLD_SEC * wps),
   max: longWordsFor(wps),
+  fastMin: pacing.fastOpen.enabled
+    ? Math.round(pacing.fastOpen.minShotSec * wps)
+    : undefined,
+  fastMax: pacing.fastOpen.enabled
+    ? Math.round(pacing.fastOpen.maxShotSec * wps)
+    : undefined,
 });
 export const WORD_SIZE: SizeMetric = wordSizeFor(WORDS_PER_SEC);
 
@@ -5672,9 +5989,12 @@ export function coalesceShortScenes(
   scenes: StoryboardScene[],
   metric: SizeMetric = MEASURED_SIZE
 ): StoryboardScene[] {
-  // Heroes hold one indivisible beat — never merged, in either direction.
+  // Heroes hold one indivisible beat — never merged, in either direction. An ASSET beat is one
+  // too: merging it away would silently drop one of the operator's uploads, and merging INTO it
+  // would stretch a fixed image over a neighbour's narration. A short asset beat freeze-holds to
+  // its floor instead (`applySceneHoldFloor`), which is the correct read for a still.
   const isHeroBeat = (s: StoryboardScene) =>
-    s.qrHero === true || s.coverHero === true;
+    s.qrHero === true || s.coverHero === true || !!s.assetImageUrl;
   // Exemption for the NEIGHBOR role only: nothing folds BACKWARDS into a locked cold-open scene
   // (see the `prevOk` branch), which would push an opener already packed past the host floor well
   // beyond its intended length. An opener that measures SHORT is still a merge SUBJECT — it folds
@@ -5726,8 +6046,10 @@ export function coalesceShortScenes(
     // The CEILING is not negotiable: a merge that ran over it would undo the split that just ran,
     // and nothing re-splits afterwards. When neither neighbor fits, `onOrphan` floors the scene in
     // place (freeze + silent pad in assembly) — still zero dead air. Heroes are exempt either way.
+    // The ceiling is the SHORT scene's own — a fast-open beat may not be merged up to the
+    // film-wide 8s band, which is exactly the merge that would undo the fast open.
     const foldable = (n: StoryboardScene | undefined): n is StoryboardScene =>
-      !!n && !isExempt(n) && dur + metric.sizeOf(n) <= metric.max;
+      !!n && !isExempt(n) && dur + metric.sizeOf(n) <= maxFor(metric, s);
     const prevOk = foldable(prev);
     const nextOk = foldable(next);
     // Prefer the shorter neighbor; tie → prev (already emitted).
@@ -5768,11 +6090,14 @@ export function coalesceShortScenes(
  * regenerate/retry path, so a scene never reaches assembly below its floor regardless of how it
  * was (re)voiced. Pure — unit-tested.
  */
-export function applySceneHoldFloor(s: StoryboardScene): void {
+export function applySceneHoldFloor(
+  s: StoryboardScene,
+  pacing: LongformPacing = LEGACY_PACING
+): void {
   if (s.qrHero) return;
   if (s.coverHero) return; // cover ends with its narration — no silent hold
   const dur = s.audioDuration ?? 0;
-  const floor = floorFor(s);
+  const floor = floorFor(s, pacing);
   if (dur > 0 && dur < floor) s.audioDuration = floor;
 }
 
@@ -5785,9 +6110,10 @@ export function applySceneHoldFloor(s: StoryboardScene): void {
  * rather than fail, so this is the ONLY thing that surfaces them. Pure — exported for unit testing.
  */
 export function describeOverlongScenes(
-  scenes: StoryboardScene[]
+  scenes: StoryboardScene[],
+  pacing: LongformPacing = LEGACY_PACING
 ): string | null {
-  const over = scenes.filter(s => (s.audioDuration ?? 0) > capFor(s));
+  const over = scenes.filter(s => (s.audioDuration ?? 0) > capFor(s, pacing));
   if (over.length === 0) return null;
   const detail = over
     .map(s => `scene ${s.index} (${(s.audioDuration ?? 0).toFixed(1)}s)`)
@@ -5879,7 +6205,7 @@ export async function withTransientRetry<T>(
 export async function runChunkTasks(
   jobId: number,
   scene: StoryboardScene,
-  provider: "runpod" | "heygen" | "fal" | "wavespeed" | "sixtynine_labs",
+  provider: "runpod" | "heygen" | "sixtynine_labs",
   chunkCount: number,
   submit: (i: number) => Promise<VideoSubmitResult>,
   poll: (taskId: string) => Promise<GenerationResult>,
@@ -6069,6 +6395,67 @@ async function renderSplitRightClip(
 }
 
 /**
+ * Render the split-screen RIGHT panel as a MOVING b-roll clip (`scene.splitMotion`) rather than a
+ * Ken Burns still: the right half is submitted down the ordinary cutaway video lane as a
+ * standalone person-free scene, sized to the host's narration.
+ *
+ * The composite needs no change — `buildSplitScreenArgs` loops the right input and takes its
+ * length from the lip-synced host panel — so a clip shorter than the host tiles and a longer one
+ * is trimmed. Bounded by the same wall-clock ceiling as the still lane so a wedged render cannot
+ * hold the finished host clip hostage; the caller falls back to the still on ANY failure here,
+ * and to the full-frame host if that fails too.
+ */
+async function renderSplitRightMotionClip(
+  jobId: number,
+  scene: StoryboardScene,
+  params: LongformInputParams,
+  adapter: ReturnType<typeof createProviderAdapter>,
+  instruction: string,
+  persist: () => Promise<void>
+): Promise<string> {
+  // A standalone cutaway carrying the right half's prompt. `renderTaskIds`/`clipUrls` are cleared
+  // so it submits fresh and can never be confused with the HOST scene's own in-flight render —
+  // they share an `index`, and the host lane owns that scene's resume state.
+  const right: StoryboardScene = {
+    ...buildSplitRightScene(scene),
+    clipUrls: undefined,
+    clipUrl: undefined,
+    hostClipUrls: undefined,
+    renderTaskIds: undefined,
+    renderModelIndex: undefined,
+    renderAttempts: undefined,
+    sceneStatus: "pending",
+  };
+  const urls = await Promise.race([
+    generateSceneClips(
+      adapter,
+      jobId,
+      right,
+      params,
+      null, // no lip-sync lane: the right half is a person-free cutaway
+      instruction,
+      persist
+    ),
+    new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error("Split-screen right clip timed out")),
+        SPLIT_RIGHT_MOTION_TIMEOUT_MS
+      )
+    ),
+  ]);
+  const url = urls[0];
+  if (!url) throw new Error("Split-screen right clip produced no output");
+  return url;
+}
+
+/**
+ * Wall-clock ceiling on one moving right panel. Deliberately shorter than a full b-roll scene
+ * deadline: the lip-synced host half is already rendered and paid for by the time this runs, so a
+ * slow panel must fall back to the still rather than stall a finished scene.
+ */
+const SPLIT_RIGHT_MOTION_TIMEOUT_MS = 6 * 60_000;
+
+/**
  * Generate a host scene's clip by lip-syncing its OWN narration audio to the host
  * photo via HeyGen Avatar IV — so the host's mouth speaks the verbatim script instead
  * of a text-to-video model's hallucinated speech. The render is the length of the input
@@ -6083,7 +6470,9 @@ async function generateSceneLipsyncClips(
   params: LongformInputParams,
   instruction: string,
   persist: () => Promise<void>,
-  pollTimeoutMs?: number
+  pollTimeoutMs?: number,
+  /** Video adapter for a MOVING split right panel (`scene.splitMotion`); absent ⇒ still panel only. */
+  videoAdapter?: ReturnType<typeof createProviderAdapter>
 ): Promise<string[]> {
   // Scene may be pinned to the alt-angle host photo (assigned by `assignHostShots` so consecutive
   // host cuts differ — an adjacent host pair reads main → alt). Fall back to the primary if no
@@ -6174,12 +6563,29 @@ async function generateSceneLipsyncClips(
         params.apimartSlot != null
           ? await getApimartSlotKey(params.apimartSlot)
           : null;
-      const rightUrl = await renderSplitRightClip(
-        jobId,
-        scene,
-        params,
-        apimartKey
-      );
+      // A MOVING right panel when the pacing config assigned one and a video adapter is available;
+      // the Ken Burns still otherwise. The motion attempt degrades to the still on ANY failure —
+      // the host half is already rendered and paid for, so a slow or refused panel must not cost
+      // the scene. Both feed the same composite.
+      let rightUrl: string | undefined;
+      if (scene.splitMotion && videoAdapter) {
+        try {
+          rightUrl = await renderSplitRightMotionClip(
+            jobId,
+            scene,
+            params,
+            videoAdapter,
+            instruction,
+            persist
+          );
+        } catch (e: any) {
+          console.warn(
+            `[Longform ${jobId}] scene ${scene.index} moving split panel failed ` +
+              `(${e.message}) — falling back to the still panel`
+          );
+        }
+      }
+      rightUrl ??= await renderSplitRightClip(jobId, scene, params, apimartKey);
       const dims = dimensionsFor(TALKING_HEAD_ASPECT_RATIO);
       const composited: string[] = [];
       for (let i = 0; i < urls.length; i++) {
@@ -6253,12 +6659,16 @@ export async function generateSceneClips(
       params,
       instruction,
       persist,
-      pollTimeoutMs
+      pollTimeoutMs,
+      // The b-roll video lane, for a moving split right panel. APIMART when the tab has a key,
+      // else the active provider — the same resolution `generateSceneClips` makes for a cutaway,
+      // because that is exactly what the right half is.
+      apimart ?? adapter
     );
   }
 
-  // A host scene with a face photo + narration is meant to lip-sync on whichever lane
-  // LIPSYNC_PROVIDER selects. If we got here that lane's key is unset/misconfigured.
+  // A host scene with a face photo + narration is meant to lip-sync on the HeyGen lane.
+  // If we got here that lane's key is unset/misconfigured.
   // Fail loud instead of silently rendering a non-lip-synced grok clip on 69labs — that mistake
   // ships a host whose mouth doesn't match the script. `regenerateScene` catches this and
   // marks the scene failed so the misconfig surfaces.
@@ -6281,6 +6691,23 @@ export async function generateSceneClips(
   }
 
   scene.lipsynced = false;
+
+  // Asset beat: the operator's own image, shown as-is. Same literal-image path as the cover
+  // reveal and for the same reason — there is nothing to generate, and generating an
+  // approximation of an image we already have would be strictly worse. Checked BEFORE
+  // `coverHero` so an asset placed on a cover beat still wins (it cannot be, today —
+  // `placeAssetBeats` skips them — but the ordering makes the intent explicit).
+  if (scene.assetImageUrl) {
+    return generateSceneStillClip(
+      jobId,
+      scene,
+      scene.assetImageUrl,
+      undefined,
+      params.videoSubject,
+      false,
+      apimartKey
+    );
+  }
 
   // Cover-reveal beat: always the literal channel cover (full-frame, dark backdrop), regardless of
   // the image-lane kill switch — generating a cover from a prompt would be nonsense.
@@ -7056,6 +7483,9 @@ async function storyboardBatch(args: {
 }): Promise<StoryboardScene[]> {
   const { batch, spokenScript, params, instruction, openerHostScenes } = args;
   const q = args.quarter;
+  const pacing = pacingFor(params);
+  const hostRamp = hostRampFor(pacing);
+  const motionRamp = motionRampFor(pacing, hostRamp);
   const { systemPrompt, userMessage } = buildUnifiedStoryboardPrompt({
     chunks: batch,
     spokenScript,
@@ -7072,10 +7502,15 @@ async function storyboardBatch(args: {
       q === undefined
         ? undefined
         : {
-            host: HOST_RAMP[q],
-            video: MOTION_RAMP[q],
-            still: 1 - HOST_RAMP[q] - MOTION_RAMP[q],
+            host: hostRamp[q],
+            video: motionRamp[q],
+            still: Math.max(0, 1 - hostRamp[q] - motionRamp[q]),
           },
+    // The balancers only DEMOTE host and never manufacture motion, so a raised motion share has
+    // to come from the storyboard writing more genuinely-moving beats. This is where that is
+    // asked for; `enforceStillMotionRatio` is only the ceiling afterwards.
+    motionBias: motionFractionFor(pacing) > MOTION_RUN_CAP_THRESHOLD,
+    splitShare: splitFractionFor(pacing),
   });
 
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -7149,11 +7584,14 @@ export async function buildUnifiedScenes(
   const openerHostScenes = params.faceImageUrl2 ? 2 : 1;
   // Segment at the voice's RECOGNIZED pace when a previous job measured it — chunks then
   // carry enough words to genuinely fill the scene floor at this voice's real speed.
+  const pacing = pacingFor(params);
+  const wps = wpsForVoice(params.voiceId);
   const chunks = segmentScriptByDuration(
     units,
     spokenScript,
-    wpsForVoice(params.voiceId),
-    openerHostScenes
+    wps,
+    openerHostScenes,
+    pacing
   );
 
   if (chunks.length === 0) {
@@ -7224,11 +7662,22 @@ export async function buildUnifiedScenes(
   const flagged = ctaSpans.length
     ? markCtaFromSpans(merged, ctaSpans)
     : markCtaScenes(merged);
-  return markCornerQrBeforeCover(
+  const out = markCornerQrBeforeCover(
     markCtaQrBlock(flagged, params, ctaSpans.length > 0),
     params,
     ctaSpans.length > 0
   );
+  // Band the fast-open window LAST — `hostOpener` is set by `parseStoryboard` and the flag has to
+  // skip it (see `markFastOpenScenes`). No-op when the window is disabled.
+  const fastMarked = markFastOpenScenes(out, pacing, wps);
+  if (fastMarked > 0) {
+    console.log(
+      `[Longform] fast open: ${fastMarked} scene(s) banded to ` +
+        `${pacing.fastOpen.minShotSec}–${pacing.fastOpen.maxShotSec}s ` +
+        `over the first ${pacing.fastOpen.zoneSec}s`
+    );
+  }
+  return out;
 }
 
 /**
@@ -7582,6 +8031,12 @@ async function runUnifiedPipeline(
   const instruction =
     (await getAppSetting(LONGFORM_INSTRUCTION_KEY)) ??
     DEFAULT_LONGFORM_INSTRUCTION;
+  // The pacing dials this render is locked to. Resolved from the admin settings ONCE (only when
+  // the job has no snapshot yet — a resume/retry re-enters here with one already persisted) and
+  // written onto `params`, which the caller persists to `inputParams`. Everything downstream
+  // reads `pacingFor(params)`, so a mid-render settings change can never re-cut a live film.
+  if (!params.pacing) params.pacing = await getLongformPacing();
+  const pacing = params.pacing;
   const {
     script: spokenScript,
     spans: ctaSpans,
@@ -7640,7 +8095,7 @@ async function runUnifiedPipeline(
   // measured post-TTS pass (below) still catches TTS-pace drift the word estimate missed.
   const beforeGate = scenes.length;
   const preWps = wpsForVoice(params.voiceId);
-  scenes = coalesceShortScenes(scenes, wordSizeFor(preWps));
+  scenes = coalesceShortScenes(scenes, wordSizeFor(preWps, pacing));
   if (scenes.length !== beforeGate) {
     console.log(
       `[Longform ${jobId}] pre-TTS text gate: merged sub-floor scenes ` +
@@ -7747,7 +8202,7 @@ async function runUnifiedPipeline(
   // the bound only stops a pathological script from looping.
   for (let pass = 1; pass <= 3; pass++) {
     const beforeSplit = scenes.length;
-    scenes = splitOverlongScenes(scenes, jobWps ?? preWps);
+    scenes = splitOverlongScenes(scenes, jobWps ?? preWps, pacing);
     if (scenes.length === beforeSplit) break;
     assignSceneRanges(scenes, words, masterDurationSec);
     console.log(
@@ -7759,9 +8214,10 @@ async function runUnifiedPipeline(
   // neighbor (kept by reference, audio cleared for the re-cut), or is floored in place — the
   // last of which freeze-pads on screen. Identity + a surviving audioUrl names exactly that set.
   const subFloor = scenes.filter(
-    s => (s.audioDuration ?? 0) > 0 && (s.audioDuration ?? 0) < floorFor(s)
+    s =>
+      (s.audioDuration ?? 0) > 0 && (s.audioDuration ?? 0) < floorFor(s, pacing)
   );
-  scenes = coalesceShortScenes(scenes);
+  scenes = coalesceShortScenes(scenes, measuredSizeFor(pacing));
   if (scenes.length !== beforeCoalesce || subFloor.length) {
     const floored = subFloor.filter(s => s.audioUrl && scenes.includes(s));
     console.log(
@@ -7812,12 +8268,12 @@ async function runUnifiedPipeline(
   // freezes to SCENE_MIN_HOLD_SEC (last-frame freeze + silent apad in assembly). qrHero and
   // coverHero beats are skipped (they play their own narration with no pad). Same helper guards
   // the regenerate/retry path so no scene escapes.
-  for (const s of scenes) applySceneHoldFloor(s);
+  for (const s of scenes) applySceneHoldFloor(s, pacing);
   // Post-condition on the whole band-enforcement sequence, checked against the FINAL durations
   // (silence snapping above rewrites them by up to SNAP_TOLERANCE_SEC). A survivor here is a
   // clause-less over-long sentence — it renders one clip with a frozen tail rather than failing,
   // so this warning is the only thing that surfaces it.
-  const overlong = describeOverlongScenes(scenes);
+  const overlong = describeOverlongScenes(scenes, pacing);
   if (overlong) console.warn(`[Longform ${jobId}] ${overlong}`);
   // A cold-open scene that still measures short here was packed for 4s of words and voiced under it
   // — the pace estimate (`wpsForVoice`) missed for this voice. It pads rather than speaks; log it,
@@ -7844,31 +8300,32 @@ async function runUnifiedPipeline(
   // Enforce the host-screen-time budget by exact runtime now that every scene's
   // narration length is measured — overshoot host scenes become b-roll before any
   // (slow, costly) clip is generated. See `rebalanceHostScreenTime`.
-  const balance = rebalanceHostScreenTime(scenes);
+  const balance = rebalanceHostScreenTime(scenes, pacing);
   if (balance.demoted > 0) {
     const pct = (n: number) =>
       balance.total > 0 ? Math.round((n / balance.total) * 100) : 0;
     console.log(
       `[Longform ${jobId}] host screen time ${pct(balance.before)}% → ` +
-        `${pct(balance.after)}% (target ${Math.round(HOST_SCREEN_FRACTION * 100)}%), ` +
+        `${pct(balance.after)}% (target ${Math.round(hostFractionFor(pacing) * 100)}%), ` +
         `demoted ${balance.demoted} host scene(s) to b-roll`
     );
   }
 
-  // Split the host runtime between full-frame host and host-with-visual-beside, so the split
-  // lane lands at ≈7.5% of total. See `enforceHostSplitMix`.
-  const split = enforceHostSplitMix(scenes);
+  // Split the host runtime between full-frame host and host-with-visual-beside, at whatever
+  // share the pacing config asks for, and pick which of those panels MOVE. See `enforceHostSplitMix`.
+  const split = enforceHostSplitMix(scenes, pacing);
   if (split.hostSeconds > 0) {
     const totalPct = (n: number) =>
       balance.total > 0 ? Math.round((n / balance.total) * 100) : 0;
     console.log(
       `[Longform ${jobId}] host split: ${totalPct(split.splitSeconds)}% beside / ` +
         `${totalPct(split.aloneSeconds)}% alone of total ` +
-        `(target ${Math.round(HOST_SPLITVISUAL_FRACTION * 100)}% of host is split)`
+        `(target ${Math.round(splitFractionFor(pacing) * 100)}% of host is split; ` +
+        `${totalPct(split.motionSeconds)}% of total is a MOVING right panel)`
     );
   }
 
-  // Converge the still-image share to STILL_IMAGE_FRACTION of total runtime before any clip
+  // Converge the still-image share to `stillFractionFor(pacing)` of total runtime before any clip
   // is rendered, so each scene routes down the correct lane (still vs video) with no waste.
   // Motion (plain b-roll + hands-at-work cutaways) is the remainder — the ~15% video-gen bucket.
   let mix: ReturnType<typeof enforceStillMotionRatio>;
@@ -7894,13 +8351,13 @@ async function runUnifiedPipeline(
       `[Longform ${jobId}] brollMotionOnly: forced ${forced} cutaway(s) → 100% video clips (test mode)`
     );
   } else {
-    mix = enforceStillMotionRatio(scenes);
+    mix = enforceStillMotionRatio(scenes, pacing);
     const mixPct = (n: number) =>
       mix.total > 0 ? Math.round((n / mix.total) * 100) : 0;
     console.log(
       `[Longform ${jobId}] cutaway mix: ${mixPct(mix.stillSeconds)}% still / ` +
         `${mixPct(mix.motionSeconds)}% motion of total ` +
-        `(target ${Math.round(STILL_IMAGE_FRACTION * 100)}% still — a FLOOR: only ` +
+        `(target ${Math.round(stillFractionFor(pacing) * 100)}% still — a FLOOR: only ` +
         `flagged moving beats can be motion, so stills absorb the rest)`
     );
   }
@@ -7913,11 +8370,15 @@ async function runUnifiedPipeline(
   const adjacency = enforceVisualAdjacency(scenes, {
     hasAltHost: !!params.faceImageUrl2,
     allowAdjacentMotion: params.brollMotionOnly,
+    // A cap of 1 would convert most of a raised motion budget straight back to stills — this
+    // pass runs after `enforceStillMotionRatio`, so it gets the last word. See `maxAdjacentMotionFor`.
+    maxAdjacentMotion: maxAdjacentMotionFor(pacing),
   });
   if (adjacency.hostBroken > 0 || adjacency.motionBroken > 0) {
     console.log(
       `[Longform ${jobId}] adjacency: broke ${adjacency.hostBroken} host / ` +
-        `${adjacency.motionBroken} motion pair(s) by inserting stills`
+        `${adjacency.motionBroken} motion run(s) by inserting stills ` +
+        `(motion run cap ${maxAdjacentMotionFor(pacing)})`
     );
   }
   if (params.faceImageUrl2) {
@@ -7936,6 +8397,8 @@ async function runUnifiedPipeline(
   // consistently short is the signal that demote-only is not enough and host needs a promote path.
   const rampQuarters = runtimeQuarters(scenes);
   if (rampQuarters.length === 4) {
+    const hostRamp = hostRampFor(pacing);
+    const motionRamp = motionRampFor(pacing, hostRamp);
     const report = rampQuarters.map((quarter, q) => {
       const secs = quarter.reduce((sum, s) => sum + (s.audioDuration ?? 0), 0);
       const share = (pick: (s: StoryboardScene) => boolean) =>
@@ -7959,7 +8422,7 @@ async function runUnifiedPipeline(
       const cap = share(
         s => !s.hostPresent && (!!s.humanPresent || !!s.objectMotion)
       );
-      const target = `${Math.round(HOST_RAMP[q] * 100)}/${Math.round(MOTION_RAMP[q] * 100)}/${Math.round((1 - HOST_RAMP[q] - MOTION_RAMP[q]) * 100)}`;
+      const target = `${Math.round(hostRamp[q] * 100)}/${Math.round(motionRamp[q] * 100)}/${Math.round((1 - hostRamp[q] - motionRamp[q]) * 100)}`;
       return `Q${q + 1} ${host}/${video}/${still} (→${target}, video cap ${cap}%)`;
     });
     console.log(
@@ -8042,6 +8505,31 @@ async function runUnifiedPipeline(
   // re-derive so any surviving pair still reads main → alt. Pure and O(n); this is the last
   // mutation before the storyboard persists and clips render.
   assignHostShots(scenes, !!params.faceImageUrl2);
+  // Operator assets take their beats LAST — after every register-mutating pass, so nothing
+  // downstream can convert one back. No-op without uploads. (Their prompts were enhanced a few
+  // lines above and are now unused: at most one wasted Flash call per asset, against a pass order
+  // that would otherwise have to be re-reasoned. ponytail: skip them in `enhanceBrollPrompts` if
+  // asset counts ever grow.)
+  const placedAssets = placeAssetBeats(scenes, params.assets, {
+    captions: pacing.captions.enabled,
+    qrImageUrl: params.qrImageUrl,
+  });
+  if (params.assets?.length) {
+    console.log(
+      `[Longform ${jobId}] assets: placed ${placedAssets}/${params.assets.length} ` +
+        `uploaded image(s) on CTA beats` +
+        (placedAssets < params.assets.length
+          ? " — the pitch had fewer person-free beats than assets supplied"
+          : "")
+    );
+    if (placedAssets < params.assets.length) {
+      appendJobWarning(
+        jobId,
+        `Only ${placedAssets} of ${params.assets.length} uploaded assets could be placed — ` +
+          `the CTA blocks have too few person-free beats to hold them all`
+      );
+    }
+  }
   // Decide WHERE each host beat stands. Must run after the balancers and after assignHostShots
   // (looks are bucketed over the final host-scene list), and before the storyboard persists so
   // the clip stage — which only ever sees one scene — can read its own setting. Inert unless
@@ -8364,7 +8852,32 @@ async function assembleAndFinalize(
   const readyScenes = scenes
     .filter(s => (s.clipUrls?.length || s.clipUrl) && s.audioUrl)
     .sort((a, b) => a.index - b.index);
-  const ready = readyScenes.map(s => ({
+
+  // Burned-in captions for the asset beats. Rendered here (not at clip time) so a caption edit
+  // needs only a re-assembly, never a re-render. Entirely non-fatal, like the name card: a
+  // failure costs that beat's text and nothing else. Rendered in parallel — each is one small
+  // sharp rasterization, and a long film can carry several.
+  const captionPngs = new Map<number, Buffer>();
+  await Promise.all(
+    readyScenes.map(async (s, i) => {
+      if (!s.assetCaption) return;
+      try {
+        const png = await renderCaptionCardPng({
+          text: s.assetCaption,
+          ...dimensionsFor(TALKING_HEAD_ASPECT_RATIO),
+        });
+        if (png) captionPngs.set(i, png);
+      } catch (err: any) {
+        console.warn(
+          `[Longform ${jobId}] caption render failed for scene ${s.index}, ` +
+            `continuing without it: ${err.message}`
+        );
+      }
+    })
+  );
+
+  const ready = readyScenes.map((s, i) => ({
+    captionPng: captionPngs.get(i),
     clipUrls: s.clipUrls?.length ? s.clipUrls : [s.clipUrl as string],
     trimLeadSec: clipTrimFor(s, params.faceImageUrl),
     audioUrl: s.audioUrl as string,
@@ -8746,11 +9259,11 @@ async function renderSceneClipInPlace(
   }
   // Re-voicing here yields the raw narration length; hold it to the floor like the main pipeline
   // so a regenerated/retried short scene freezes to SCENE_MIN_HOLD_SEC instead of cutting short.
-  applySceneHoldFloor(scene);
+  applySceneHoldFloor(scene, pacingFor(params));
   // The ceiling can't be enforced the same way: splitting one scene here would renumber the whole
   // storyboard mid-render. A re-voice that lands over it renders one clip with a frozen tail — warn
   // so the drift is visible instead of silently padded.
-  const overlong = describeOverlongScenes([scene]);
+  const overlong = describeOverlongScenes([scene], pacingFor(params));
   if (overlong) console.warn(`[Longform ${jobId}] ${overlong}`);
   scene.clipUrls = await withTransientRetry(
     () => {
@@ -8805,7 +9318,9 @@ async function regenerateSplitRight(
   jobId: number,
   scene: StoryboardScene,
   scenes: StoryboardScene[],
-  params: LongformInputParams
+  params: LongformInputParams,
+  /** Video adapter for a moving right panel (`scene.splitMotion`); absent ⇒ still panel. */
+  videoAdapter?: ReturnType<typeof createProviderAdapter>
 ): Promise<void> {
   scene.sceneStatus = "processing";
   scene.error = undefined;
@@ -8836,7 +9351,20 @@ async function regenerateSplitRight(
     params.apimartSlot != null
       ? await getApimartSlotKey(params.apimartSlot)
       : null;
-  const rightUrl = await renderSplitRightClip(jobId, scene, params, apimartKey);
+  // Same register the render path chose for this scene. Unlike the render path there is NO
+  // silent degrade to a still: the operator asked for this panel, so a failed motion render must
+  // surface as a failed scene rather than quietly swapping the register they picked.
+  const rightUrl =
+    scene.splitMotion && videoAdapter
+      ? await renderSplitRightMotionClip(
+          jobId,
+          scene,
+          params,
+          videoAdapter,
+          DEFAULT_LONGFORM_INSTRUCTION,
+          async () => schedulePersist(jobId, { storyboard: scenes })
+        )
+      : await renderSplitRightClip(jobId, scene, params, apimartKey);
   const composited: string[] = [];
   for (let i = 0; i < scene.hostClipUrls.length; i++) {
     const buf = await compositeSplitScreenClip(
@@ -8990,7 +9518,13 @@ export async function regenerateScene(
 
       try {
         if (splitOnly) {
-          await regenerateSplitRight(jobId, scene, scenes, params);
+          await regenerateSplitRight(
+            jobId,
+            scene,
+            scenes,
+            params,
+            (await apimartAdapterForJob(params)) ?? adapter
+          );
         } else {
           await renderSceneClipInPlace(
             jobId,
@@ -9190,7 +9724,13 @@ export async function regenerateScenes(
           async scene => {
             try {
               if (isSplitScene(scene)) {
-                await regenerateSplitRight(jobId, scene, scenes, params);
+                await regenerateSplitRight(
+                  jobId,
+                  scene,
+                  scenes,
+                  params,
+                  (await apimartAdapterForJob(params)) ?? adapter
+                );
               } else {
                 await renderSceneClipInPlace(
                   jobId,

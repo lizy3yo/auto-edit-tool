@@ -17,9 +17,9 @@
  * So: a section badged EXACT is right to the cent. A section badged ESTIMATED has the right
  * count multiplied by a rate you should check against your own invoice once, then pin here.
  *
- * Sources for the defaults are cited per-rate. Where the repo already knew a number — the
- * WaveSpeed per-second rates, gpt-image-2's ~$0.003/image at our 720p/low settings — that
- * number is used rather than a fresh guess.
+ * Sources for the defaults are cited per-rate. Where the repo already knew a number — such as
+ * gpt-image-2's ~$0.003/image at our 720p/low settings — that number is used rather than a
+ * fresh guess.
  */
 
 /** `$X per unit`, read from an env override if present. */
@@ -140,37 +140,15 @@ export const RATES = {
 
   /**
    * HeyGen Avatar IV, USD per second of rendered host video. HeyGen bills API credits whose
-   * dollar value is per-plan, so this is derived from the comparison already recorded in
-   * `server/providers/wavespeed-lipsync.ts`: InfiniteTalk Fast at a known $0.015/s is "roughly
-   * a quarter of HeyGen", and a film's host lane is "~$6 against HeyGen's ~$28". Both put
-   * HeyGen at ~$0.06/s. Note 1080p and 720p cost the same, so resolution is not a lever.
+   * dollar value is per-plan, so this is an estimate benchmarked against comparable still+audio
+   * lanes that publish flat per-second rates — those put HeyGen at ~$0.06/s. Note 1080p and
+   * 720p cost the same, so resolution is not a lever.
    */
   heygenPerSecond: rate("COST_HEYGEN_PER_SEC", 0.06),
-
-  /** fal.ai `bytedance/omnihuman/v1.5`, USD per second of output (= audio length). */
-  falPerSecond: rate("COST_FAL_PER_SEC", 0.06),
-
-  /** WaveSpeed InfiniteTalk 720p — documented at ~$0.06/s (480p is ~$0.03/s). */
-  wavespeedPerSecond: rate("COST_WAVESPEED_PER_SEC", 0.06),
-
-  /** WaveSpeed InfiniteTalk **Fast** — documented flat $0.015/s, no resolution tiers. */
-  wavespeedFastPerSecond: rate("COST_WAVESPEED_FAST_PER_SEC", 0.015),
 } as const;
 
-/**
- * WaveSpeed bills a **5-second minimum per render**. Host beats cap at 8s and can be as short
- * as 3s, so ignoring this would under-report a WaveSpeed film by a third on its shortest beats.
- */
-export const WAVESPEED_MIN_BILLED_SECONDS = 5;
-
-/** Per-second rate for the lip-sync lane actually in use. */
-export function lipsyncRateFor(provider: string, model?: string): number {
-  if (provider === "fal") return RATES.falPerSecond;
-  if (provider === "wavespeed") {
-    return model?.includes("fast")
-      ? RATES.wavespeedFastPerSecond
-      : RATES.wavespeedPerSecond;
-  }
+/** Per-second rate for the lip-sync lane. */
+export function lipsyncRateFor(_provider: string, _model?: string): number {
   return RATES.heygenPerSecond;
 }
 
@@ -234,8 +212,8 @@ const VIDEO_RATES: Record<string, number> = {
   aireiter: RATES.aireiterVideoPerSecond,
 };
 
-/** Per-second-of-host-video rate by lip-sync vendor. No default. */
-const LIPSYNC_PROVIDERS = new Set(["heygen", "fal", "wavespeed"]);
+/** Lip-sync vendors we have a rate for. No default — an unlisted vendor is unpriced. */
+const LIPSYNC_PROVIDERS = new Set(["heygen"]);
 
 export function priceLine(line: UsageLine): PricedLine {
   const priced = (

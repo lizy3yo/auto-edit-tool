@@ -4,7 +4,6 @@ import {
   priceLine,
   lipsyncRateFor,
   RATES,
-  WAVESPEED_MIN_BILLED_SECONDS,
   type UsageLine,
 } from "./pricing";
 
@@ -118,22 +117,11 @@ describe("priceLine — metered non-LLM lanes", () => {
     expect(r.usd).toBeCloseTo(15 * RATES.apimartVideoPerSecond, 6);
   });
 
-  it("prices lip-sync per second at the active lane's rate", () => {
+  it("prices lip-sync per second of rendered host video", () => {
     const heygen = priceLine(
       line({ lane: "lipsync", provider: "heygen", quantity: 100 })
     );
-    const fast = priceLine(
-      line({
-        lane: "lipsync",
-        provider: "wavespeed",
-        model: "wavespeed-ai/infinitetalk-fast",
-        quantity: 100,
-      })
-    );
     expect(heygen.usd).toBeCloseTo(100 * RATES.heygenPerSecond, 6);
-    // The whole point of the Fast lane is that it is materially cheaper — if this ever
-    // stops holding, the rate table has drifted from what the adapter documents.
-    expect(fast.usd).toBeLessThan(heygen.usd);
   });
 });
 
@@ -190,8 +178,6 @@ describe("unmapped providers are visible, never silently mispriced", () => {
       ["video", "sixtynine_labs"],
       ["video", "aireiter"],
       ["lipsync", "heygen"],
-      ["lipsync", "fal"],
-      ["lipsync", "wavespeed"],
     ];
     for (const [lane, provider] of reachable) {
       expect(
@@ -203,22 +189,7 @@ describe("unmapped providers are visible, never silently mispriced", () => {
 });
 
 describe("lipsyncRateFor", () => {
-  it("separates WaveSpeed's Fast variant from standard InfiniteTalk", () => {
-    expect(lipsyncRateFor("wavespeed", "wavespeed-ai/infinitetalk-fast")).toBe(
-      RATES.wavespeedFastPerSecond
-    );
-    expect(lipsyncRateFor("wavespeed", "wavespeed-ai/infinitetalk")).toBe(
-      RATES.wavespeedPerSecond
-    );
-  });
-
-  it("falls back to HeyGen for an unrecognised provider", () => {
-    expect(lipsyncRateFor("something-new")).toBe(RATES.heygenPerSecond);
-  });
-
-  it("exposes WaveSpeed's 5-second minimum so short host beats aren't under-billed", () => {
-    // Host beats floor at 3s (SCENE_MIN_HOLD_SEC); WaveSpeed bills 5. Charging the true
-    // 3s would under-report a WaveSpeed film across every short beat.
-    expect(WAVESPEED_MIN_BILLED_SECONDS).toBe(5);
+  it("prices the HeyGen lane", () => {
+    expect(lipsyncRateFor("heygen")).toBe(RATES.heygenPerSecond);
   });
 });

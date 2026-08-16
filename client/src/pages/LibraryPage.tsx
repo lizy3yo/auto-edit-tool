@@ -15,6 +15,10 @@ import {
   VideoPlayerDialog,
   type PlayableJob,
 } from "@/components/VideoPlayerDialog";
+import {
+  DeleteVideoDialog,
+  type DeletableJob,
+} from "@/components/DeleteVideoDialog";
 import { downloadFile } from "@/lib/download";
 import {
   Loader2,
@@ -24,6 +28,7 @@ import {
   Download,
   Pencil,
   Play,
+  Trash2,
   CheckCircle2,
   XCircle,
 } from "lucide-react";
@@ -40,6 +45,7 @@ export default function LibraryPage() {
   const [, navigate] = useLocation();
   const [search, setSearch] = useState("");
   const [playing, setPlaying] = useState<PlayableJob | null>(null);
+  const [deleting, setDeleting] = useState<DeletableJob | null>(null);
   const [channel, setChannel] = useState("all");
 
   const { data: jobs, isLoading } = trpc.longformVideo.library.useQuery(
@@ -180,7 +186,8 @@ export default function LibraryPage() {
 
                 {/* Two distinct jobs, so two labelled buttons rather than one ambiguous
                     click: View watches the finished film, Open goes to the storyboard
-                    workspace where scenes are inspected and regenerated. */}
+                    workspace where scenes are inspected and regenerated. Download and
+                    Delete stay icon-only — labelling all four overflows the card. */}
                 <div className="mt-3 flex gap-2">
                   <Button
                     size="sm"
@@ -225,6 +232,15 @@ export default function LibraryPage() {
                       <Download className="h-3.5 w-3.5" />
                     </Button>
                   )}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1.5 px-2.5 text-muted-foreground hover:border-destructive/40 hover:text-destructive"
+                    onClick={() => setDeleting(job)}
+                    title="Delete this video from your library"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
                 </div>
               </div>
             </article>
@@ -236,6 +252,12 @@ export default function LibraryPage() {
         job={playing}
         onOpenChange={o => !o && setPlaying(null)}
         onEdit={id => navigate(`/?open=${id}`)}
+      />
+
+      <DeleteVideoDialog
+        job={deleting}
+        onOpenChange={o => !o && setDeleting(null)}
+        onDeleted={jobId => setPlaying(p => (p?.id === jobId ? null : p))}
       />
     </div>
   );

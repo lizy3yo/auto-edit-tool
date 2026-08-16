@@ -1178,3 +1178,67 @@ describe("buildMusicBedMixArgs (calm bed under the narration)", () => {
     });
   });
 });
+
+describe("buildSceneMuxArgs caption (asset beats)", () => {
+  const base = {
+    videoPath: "/tmp/v.mp4",
+    audioPath: "/tmp/a.mp3",
+    outputPath: "/tmp/scene.mp4",
+    durationSec: 6,
+  };
+  const caption = { imagePath: "/tmp/cap.png" };
+  const qr = { imagePath: "/tmp/qr.png", height: 1080 };
+  const card = { imagePath: "/tmp/card.png" };
+  const filterOf = (args: string[]) =>
+    args[args.indexOf("-filter_complex") + 1];
+
+  it("adds no input or overlay when no caption is given (regression)", () => {
+    const args = buildSceneMuxArgs(base);
+    expect(args.filter(a => a === "-i")).toHaveLength(2);
+    expect(filterOf(args)).not.toContain("[cap]");
+  });
+
+  it("composites a full-frame caption at 0:0, static and never drawtext", () => {
+    const args = buildSceneMuxArgs({ ...base, caption });
+    expect(args).toContain("/tmp/cap.png");
+    expect(args.filter(a => a === "-i")).toHaveLength(3);
+    const f = filterOf(args);
+    expect(f).toContain("[2:v]format=rgba[cap]");
+    expect(f).toContain("[base][cap]overlay=0:0[v]");
+    expect(f).not.toContain("fade=");
+    expect(f).not.toContain("drawtext=");
+  });
+
+  it("indexes its input correctly alongside a QR — an asset beat carries both", () => {
+    const args = buildSceneMuxArgs({ ...base, qrOverlay: qr, caption });
+    expect(args.filter(a => a === "-i")).toHaveLength(4);
+    const f = filterOf(args);
+    expect(f).toContain("[2:v]scale="); // QR is input 2
+    expect(f).toContain("[3:v]format=rgba[cap]"); // caption is input 3
+    // Caption composites LAST, so it is never hidden under the QR card.
+    expect(f.indexOf("[qr]overlay")).toBeLessThan(f.indexOf("[cap]overlay"));
+    expect(f).toContain("[cap]overlay=0:0[v]");
+  });
+
+  it("indexes correctly with a QR AND a name card, and draws on top of both", () => {
+    const args = buildSceneMuxArgs({
+      ...base,
+      qrOverlay: qr,
+      nameCard: card,
+      caption,
+    });
+    expect(args.filter(a => a === "-i")).toHaveLength(5);
+    const f = filterOf(args);
+    expect(f).toContain("[4:v]format=rgba[cap]");
+    expect(f.indexOf("[card]overlay")).toBeLessThan(f.indexOf("[cap]overlay"));
+    expect(f).toContain("[cap]overlay=0:0[v]");
+  });
+
+  it("indexes correctly with only a name card beside it", () => {
+    const args = buildSceneMuxArgs({ ...base, nameCard: card, caption });
+    expect(args.filter(a => a === "-i")).toHaveLength(4);
+    const f = filterOf(args);
+    expect(f).toContain("[2:v]format=rgba[card]");
+    expect(f).toContain("[3:v]format=rgba[cap]");
+  });
+});
