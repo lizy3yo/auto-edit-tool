@@ -374,7 +374,11 @@ const channelConfigRouter = router({
     .input(
       z.object({
         displayName: z.string().min(1),
-        personaProfile: z.string().min(1),
+        // Persona is set in the prompt per render, not per channel, so the form no
+        // longer collects one. Kept accepted-but-optional rather than deleted so an
+        // older client posting the field still creates a channel instead of failing
+        // an input validation it can't see.
+        personaProfile: z.string().optional(),
         nicheSlug: z.string().min(1),
         authorName: z.string().min(1),
         ctaQrImageUrl: z.string().url().optional(),
@@ -429,14 +433,18 @@ const channelConfigRouter = router({
   // built-in set, so there is nothing to distinguish and nothing undeletable.
   listAllChannels: approvedProcedure.query(async () => {
     const dbConfigs = await getAllChannelConfigs();
-    return dbConfigs
-      .filter(c => c.displayName)
-      .map(c => ({
-        key: c.channelKey,
-        name: c.displayName!,
-        niche: c.nicheSlug ?? "",
-        profile: c.personaProfile ?? "",
-      }));
+    return (
+      dbConfigs
+        .filter(c => c.displayName)
+        // `profile: c.personaProfile` is gone with the setting: no client read it,
+        // and shipping every channel's stored persona to the browser on each list
+        // fetch outlived the field that produced it.
+        .map(c => ({
+          key: c.channelKey,
+          name: c.displayName!,
+          niche: c.nicheSlug ?? "",
+        }))
+    );
   }),
 });
 
@@ -621,9 +629,9 @@ const bookRouter = router({
     .query(async ({ input }) => {
       const jobs = await getJobsForChannel(input.channelKey, 50);
       return jobs.map(j => {
-        const used = (
-          (j.ctaBooks as LongformCtaBook[] | null) ?? []
-        ).find(b => input.bookId != null && b.bookId === input.bookId);
+        const used = ((j.ctaBooks as LongformCtaBook[] | null) ?? []).find(
+          b => input.bookId != null && b.bookId === input.bookId
+        );
         return {
           id: j.id,
           title: j.title,

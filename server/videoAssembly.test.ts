@@ -160,6 +160,33 @@ describe("buildSplitScreenArgs (host left half + b-roll right half)", () => {
     expect(filter).toContain("drawbox=x=558");
   });
 
+  it("leaves the crop centred when no face position is supplied", () => {
+    const filter = args[args.indexOf("-filter_complex") + 1];
+    // No x argument at all — ffmpeg's own default centres it, and the arg string stays
+    // byte-identical to what shipped before face alignment existed.
+    expect(filter).toContain("crop=560:720,setpts");
+    expect(filter).not.toContain("in_w*");
+  });
+
+  it("pans ONLY the host panel when a face position is supplied", () => {
+    const aligned = buildSplitScreenArgs({
+      hostPath: "/tmp/host.mp4",
+      rightPath: "/tmp/right.mp4",
+      outputPath: "/tmp/split.mp4",
+      width: 1280,
+      height: 720,
+      durationSec: 7.5,
+      hostFocusX: 0.72,
+    });
+    const filter = aligned[aligned.indexOf("-filter_complex") + 1];
+    expect(filter).toContain(
+      "crop=560:720:max(0\\,min(in_w-out_w\\,in_w*0.7200-out_w/2)):0"
+    );
+    // The right panel is a square slot showing a 1:1 still whole — nothing to pan it to.
+    expect(filter).toContain("crop=720:720,setpts");
+    expect((filter.match(/in_w\*/g) ?? []).length).toBe(1);
+  });
+
   it("falls back to 50/50 on a portrait canvas (a square panel wouldn't fit)", () => {
     const portrait = buildSplitScreenArgs({
       hostPath: "/tmp/host.mp4",

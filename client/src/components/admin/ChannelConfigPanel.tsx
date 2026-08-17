@@ -21,7 +21,6 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -157,7 +156,6 @@ export function ChannelConfigPanel() {
         hostName: createForm.hostName,
         hostTitle: createForm.hostTitle,
         hostLocation: createForm.hostLocation,
-        personaProfile: createForm.personaProfile,
         voiceId: createForm.voiceId,
         voiceName: createForm.voiceName,
         ttsModel: createForm.ttsModel || "eleven_multilingual_v2",
@@ -171,7 +169,6 @@ export function ChannelConfigPanel() {
       setCreateForm({
         displayName: "",
         authorName: "",
-        personaProfile: "",
         nicheSlug: "gardening",
         hostPhotoUrl: "",
         hostPhotoUrl2: "",
@@ -208,7 +205,6 @@ export function ChannelConfigPanel() {
     hostName: string;
     hostTitle: string;
     hostLocation: string;
-    personaProfile: string;
     voiceId: string;
     voiceName: string;
     ttsModel: string;
@@ -224,7 +220,6 @@ export function ChannelConfigPanel() {
     hostName: "",
     hostTitle: "",
     hostLocation: "",
-    personaProfile: "",
     voiceId: "",
     voiceName: "",
     ttsModel: "eleven_multilingual_v2",
@@ -239,7 +234,6 @@ export function ChannelConfigPanel() {
   const [createForm, setCreateForm] = useState({
     displayName: "",
     authorName: "",
-    personaProfile: "",
     nicheSlug: "gardening",
     hostPhotoUrl: "",
     hostPhotoUrl2: "",
@@ -269,7 +263,6 @@ export function ChannelConfigPanel() {
       hostName: config?.hostName || "",
       hostTitle: config?.hostTitle || "",
       hostLocation: config?.hostLocation || "",
-      personaProfile: config?.personaProfile || "",
       voiceId: config?.voiceId || "",
       voiceName: config?.voiceName || "",
       ttsModel: config?.ttsModel || "eleven_multilingual_v2",
@@ -298,7 +291,6 @@ export function ChannelConfigPanel() {
       hostName: editForm.hostName || undefined,
       hostTitle: editForm.hostTitle || undefined,
       hostLocation: editForm.hostLocation || undefined,
-      personaProfile: editForm.personaProfile || undefined,
       voiceId: editForm.voiceId || undefined,
       voiceName: editForm.voiceName || undefined,
       ttsModel: editForm.ttsModel || undefined,
@@ -317,14 +309,12 @@ export function ChannelConfigPanel() {
     if (
       !createForm.displayName.trim() ||
       !createForm.authorName.trim() ||
-      !createForm.personaProfile.trim() ||
       !createForm.hostPhotoUrl
     )
       return;
     createMutation.mutate({
       displayName: createForm.displayName.trim(),
       authorName: createForm.authorName.trim(),
-      personaProfile: createForm.personaProfile.trim(),
       nicheSlug: createForm.nicheSlug,
       hostPhotoUrl: createForm.hostPhotoUrl,
       hostPhotoUrl2: createForm.hostPhotoUrl2 || undefined,
@@ -425,22 +415,6 @@ export function ChannelConfigPanel() {
             className="text-xs h-8"
           />
         </div>
-      </div>
-      {/* Persona Profile */}
-      <div>
-        <Label className="text-xs">Persona Profile</Label>
-        <p className="text-[11px] text-muted-foreground mb-1">
-          Describe this channel's voice, personality, and audience. Used to
-          guide AI script generation.
-        </p>
-        <Textarea
-          value={editForm.personaProfile}
-          onChange={e =>
-            setEditForm(f => ({ ...f, personaProfile: e.target.value }))
-          }
-          placeholder="e.g., Jane is a seasoned Midwest gardener in her 50s who speaks plainly..."
-          className="min-h-[100px] text-xs"
-        />
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Voice settings */}
@@ -565,17 +539,21 @@ export function ChannelConfigPanel() {
                 </SelectContent>
               </Select>
             </div>
+            {/* Read-only on purpose. This was a typed target with a "3500"
+                placeholder, but nothing in the pipeline reads
+                `defaultWordCount` — a long-form job voices the pasted script
+                verbatim, so the script's own length is the word count and a
+                number set here changed nothing. Stating where the number comes
+                from beats offering a dial that isn't connected to anything.
+
+                `editForm.defaultWordCount` is still loaded and still submitted
+                by `handleSave`, so whatever a channel already stored survives
+                editing untouched — this removes the control, not the data. */}
             <div>
-              <Label className="text-xs">Word Count</Label>
-              <Input
-                value={editForm.defaultWordCount}
-                onChange={e =>
-                  setEditForm(f => ({ ...f, defaultWordCount: e.target.value }))
-                }
-                placeholder="3500"
-                type="number"
-                className="mt-1 text-xs h-8"
-              />
+              <Label className="text-xs">Word count</Label>
+              <div className="mt-1 flex h-8 items-center rounded-md border border-input bg-muted px-3 text-xs text-muted-foreground">
+                Set by each video's script
+              </div>
             </div>
           </div>
         </div>
@@ -689,8 +667,12 @@ export function ChannelConfigPanel() {
                                   : "text-muted-foreground/50"
                               }
                             >
+                              {/* The `(3500w)` suffix is gone with the field that
+                                  set it: a legacy stored number advertised as a
+                                  channel default reads as the length its videos
+                                  come out at, and it never was. */}
                               {config?.defaultAngle && config?.defaultFormat
-                                ? `${config.defaultAngle} ${config.defaultFormat}${config.defaultWordCount ? ` (${config.defaultWordCount}w)` : ""}`
+                                ? `${config.defaultAngle} ${config.defaultFormat}`
                                 : "Not set"}
                             </span>
                           </div>
@@ -786,26 +768,6 @@ export function ChannelConfigPanel() {
                 <p className="mt-1 text-[11px] text-muted-foreground">
                   Name that appears on ebook covers.
                 </p>
-              </div>
-              <div>
-                <Label className="text-xs">
-                  Persona Profile <span className="text-destructive">*</span>
-                </Label>
-                <p className="text-[11px] text-muted-foreground mb-1">
-                  Describe this channel's voice, personality, and audience. Used
-                  to guide AI script generation.
-                </p>
-                <Textarea
-                  value={createForm.personaProfile}
-                  onChange={e =>
-                    setCreateForm(f => ({
-                      ...f,
-                      personaProfile: e.target.value,
-                    }))
-                  }
-                  placeholder="e.g., Jane is a seasoned Midwest gardener in her 50s who speaks plainly and focuses on cold-climate growing techniques..."
-                  className="min-h-[120px] text-sm"
-                />
               </div>
             </div>
 
@@ -1007,20 +969,13 @@ export function ChannelConfigPanel() {
                       </SelectContent>
                     </Select>
                   </div>
+                  {/* Same as the edit form: the script sets the length, so there
+                      is no target to type here. See the note there. */}
                   <div>
-                    <Label className="text-xs">Word Count</Label>
-                    <Input
-                      value={createForm.defaultWordCount}
-                      onChange={e =>
-                        setCreateForm(f => ({
-                          ...f,
-                          defaultWordCount: e.target.value,
-                        }))
-                      }
-                      placeholder="3500"
-                      type="number"
-                      className="mt-1 text-xs h-8"
-                    />
+                    <Label className="text-xs">Word count</Label>
+                    <div className="mt-1 flex h-8 items-center rounded-md border border-input bg-muted px-3 text-xs text-muted-foreground">
+                      Set by each video's script
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1036,7 +991,6 @@ export function ChannelConfigPanel() {
                 createMutation.isPending ||
                 !createForm.displayName.trim() ||
                 !createForm.authorName.trim() ||
-                !createForm.personaProfile.trim() ||
                 !createForm.hostPhotoUrl
               }
               className="gap-1.5"

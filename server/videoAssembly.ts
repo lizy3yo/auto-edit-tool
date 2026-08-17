@@ -21,6 +21,7 @@ import { randomUUID } from "crypto";
 import path from "path";
 import os from "os";
 import { getMediaDuration } from "./mediaProbe";
+import { detectFaceCenterX, focusCropX } from "./faceAlign";
 import { getFFmpegPath } from "./ffmpegPath";
 import { Semaphore } from "./providers/semaphore";
 import { presignOwnBucketUrl } from "./storage";
@@ -1079,10 +1080,16 @@ export function splitPanelWidths(
  * RIGHT (`height × height` — 1080×1080 on the 1920×1080 canvas), leaving the host the
  * remainder (840px). Deliberately NOT 50/50: the b-roll still is generated 1:1, so a square
  * slot displays it whole, where the old `width/2` slot cover-cropped ~44% of its width away.
- * Each panel is cover-scaled then center-cropped to its own width, hstacked, with a thin black
+ * Each panel is cover-scaled then cropped to its own width, hstacked, with a thin black
  * divider drawn over the seam. The host clip's length is authoritative (`-t durationSec`); the
  * right clip is looped (`-stream_loop -1`) and trimmed to match. Audio is dropped (`-an`) —
  * assembly lays the master narration over the whole film. Pure — no IO.
+ *
+ * The host crop is CENTRED only when `hostFocusX` is null. That panel is the canvas remainder
+ * (840 of 1920), so a centred crop keeps just the middle 43.75% of the source frame — fine for
+ * a centred subject, and a face against the divider or a sliced cheek for anything else. The
+ * host plate is framed by an image model, which does not reliably centre the subject, so
+ * `compositeSplitScreenClip` measures the face and passes its position here to pan the window.
  */
 export function buildSplitScreenArgs(opts: {
   hostPath: string;
@@ -1092,16 +1099,23 @@ export function buildSplitScreenArgs(opts: {
   height: number;
   durationSec: number;
   fps?: number;
+  /**
+   * Horizontal centre of the host's face, 0..1 across the source frame. Null (the default)
+   * keeps ffmpeg's own centred crop, byte-identical to the pre-alignment args.
+   */
+  hostFocusX?: number | null;
 }): string[] {
   const { hostPath, rightPath, outputPath, width, height } = opts;
   const fps = opts.fps ?? FPS;
   const { rightW, hostW } = splitPanelWidths(width, height);
   const dur = opts.durationSec.toFixed(3);
-  const coverCrop = (label: string, w: number) =>
+  const coverCrop = (label: string, w: number, cropX?: string | null) =>
     `scale=${w}:${height}:force_original_aspect_ratio=increase,` +
-    `crop=${w}:${height},setpts=PTS-STARTPTS[${label}]`;
+    `crop=${w}:${height}${cropX ? `:${cropX}:0` : ""},setpts=PTS-STARTPTS[${label}]`;
+  // Only the host lane pans. The right panel is a square slot holding a 1:1 still, so it is
+  // already showing the whole image — there is nothing to pan it to.
   const filter =
-    `[0:v]${coverCrop("L", hostW)};` +
+    `[0:v]${coverCrop("L", hostW, focusCropX(opts.hostFocusX ?? null))};` +
     `[1:v]${coverCrop("R", rightW)};` +
     `[L][R]hstack=inputs=2,` +
     `drawbox=x=${hostW - 2}:y=0:w=4:h=${height}:color=black:t=fill,` +
@@ -1473,10 +1487,14 @@ export async function concatAudio(
 }
 
 /**
- * Composite a lip-synced host clip (LEFT half) with a b-roll clip (RIGHT half) into one
- * 50/50 split-screen clip. Downloads both, measures the host clip's duration (it is the
+ * Composite a lip-synced host clip (LEFT panel) with a b-roll clip (RIGHT panel) into one
+ * split-screen clip. Downloads both, measures the host clip's duration (it is the
  * authoritative length — its mouth is lip-synced to the narration), loops/trims the right
  * clip to match, and returns the composited MP4 bytes. Cleans up its temp dir.
+ *
+ * Before compositing it grabs one frame of the host clip and locates the face, so the host
+ * panel is cropped around the face instead of around the frame's midpoint. See `faceAlign.ts`
+ * for why that is needed and `buildSplitScreenArgs` for what the position does.
  */
 export async function compositeSplitScreenClip(
   hostUrl: string,
@@ -1487,6 +1505,7 @@ export async function compositeSplitScreenClip(
     const hostPath = await downloadToTemp(hostUrl, workDir, "host.mp4");
     const rightPath = await downloadToTemp(rightUrl, workDir, "right.mp4");
     const durationSec = await getMediaDuration(hostPath);
+    const hostFocusX = await measureHostFocusX(hostPath, durationSec, workDir);
     const outputPath = path.join(workDir, "split.mp4");
     await runFfmpegWithRetry(
       buildSplitScreenArgs({
@@ -1497,11 +1516,66 @@ export async function compositeSplitScreenClip(
         height: opts.height,
         durationSec,
         fps: opts.fps,
+        hostFocusX,
       }),
       "split"
     );
     return readFileSync(outputPath);
   });
+}
+
+/** One frame out of a video, as a JPEG. Cheap — decodes to the seek point and stops. Pure. */
+export function buildFrameGrabArgs(
+  inputPath: string,
+  outputPath: string,
+  atSec: number
+): string[] {
+  return [
+    "-y",
+    // Before `-i`: an input-side seek, so ffmpeg jumps rather than decoding up to the point.
+    "-ss",
+    atSec.toFixed(3),
+    "-i",
+    inputPath,
+    "-frames:v",
+    "1",
+    "-q:v",
+    "3",
+    outputPath,
+  ];
+}
+
+/**
+ * Where the host's face sits across the frame, for the split-screen crop. Null ⇒ crop centred.
+ *
+ * Samples a quarter of the way in rather than at 0s: lip-sync providers commonly open on a
+ * held or fading first frame, and a black or half-dissolved frame is the one place a face
+ * detector reliably finds nothing.
+ *
+ * Never throws — a failed grab, a missing key or an unreadable answer all land on null, which
+ * restores the previous centred behaviour. Alignment is an improvement to the crop, never a
+ * precondition for producing the clip.
+ */
+async function measureHostFocusX(
+  hostPath: string,
+  durationSec: number,
+  workDir: string
+): Promise<number | null> {
+  try {
+    const framePath = path.join(workDir, "hostframe.jpg");
+    const at = Math.min(Math.max(durationSec * 0.25, 0.1), 3);
+    await runFfmpeg(buildFrameGrabArgs(hostPath, framePath, at));
+    const focus = await detectFaceCenterX(readFileSync(framePath));
+    if (focus !== null) {
+      console.log(`[FaceAlign] host face at x=${focus.toFixed(2)} of frame`);
+    }
+    return focus;
+  } catch (err: any) {
+    console.warn(
+      `[FaceAlign] could not sample the host clip: ${err.message} — centring the host panel`
+    );
+    return null;
+  }
 }
 
 /**
