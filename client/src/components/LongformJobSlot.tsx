@@ -402,6 +402,31 @@ export default function LongformJobSlot({
     if (!channelKey && job?.channelKey) setChannelKey(job.channelKey);
   }, [channelKey, job?.channelKey]);
 
+  /**
+   * Show the script the tab's job was generated from.
+   *
+   * `script` initialises from `defaultScript` and nothing ever replaced it, so a tab holding a
+   * finished render showed the built-in lawn-care sample (slot 0) or an empty box (the rest) —
+   * the storyboard of one script sitting under the text of another. Opening a past render from
+   * the library was the worst case: the whole point is to read what it was made from.
+   *
+   * Keyed by job id rather than a boolean: adopting a DIFFERENT job has to re-hydrate, but the
+   * ~2s poll returning the same job must not, or it would overwrite the operator mid-sentence
+   * every time they started editing toward a re-generate.
+   */
+  const hydratedScriptFor = useRef<number | null>(null);
+  useEffect(() => {
+    if (jobId === null || job?.script == null) return;
+    if (hydratedScriptFor.current === jobId) return;
+    hydratedScriptFor.current = jobId;
+    setScript(job.script);
+  }, [jobId, job?.script]);
+
+  // A cleared tab is a fresh start, so the next job it adopts must hydrate again.
+  useEffect(() => {
+    if (jobId === null) hydratedScriptFor.current = null;
+  }, [jobId]);
+
   const scenes = useMemo(
     () => (job?.storyboard as StoryboardScene[] | null) ?? [],
     [job?.storyboard]

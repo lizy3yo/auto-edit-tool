@@ -1232,6 +1232,11 @@ const longformVideoRouter = router({
           (job.inputParams as { channelKey?: string } | null)?.channelKey ??
           null,
         title: (job.inputParams as { title?: string } | null)?.title ?? null,
+        // The script this job was actually generated from. `channelKey` and `title` were
+        // already carried out of `inputParams` for exactly this reason — the script was the
+        // one field left behind, so a restored tab showed the storyboard of one script beside
+        // the text of another.
+        script: (job.inputParams as { script?: string } | null)?.script ?? null,
         visualStyleBible:
           (job.inputParams as { visualStyleBible?: string } | null)
             ?.visualStyleBible ?? null,
