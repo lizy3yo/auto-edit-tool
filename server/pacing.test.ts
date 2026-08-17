@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import type { StoryboardScene, LongformAsset } from "../shared/types";
+import type {
+  StoryboardScene,
+  LongformAsset,
+  LongformCtaBook,
+} from "../shared/types";
 import {
   DEFAULT_LONGFORM_PACING,
   LEGACY_PACING,
@@ -41,6 +45,10 @@ import {
   SCENE_MIN_HOLD_SEC,
   HOST_MIN_HOLD_SEC,
   LONG_SCENE_MAX_SEC,
+  bookForScene,
+  coverImageForScene,
+  qrOverlayUrlFor,
+  markCtaFromSpans,
 } from "./longformVideo";
 
 /** A pacing config with everything at its shipping default except the named overrides. */
@@ -828,5 +836,154 @@ describe("full balancer sequence under a dialled config", () => {
     enforceVisualAdjacency(b, { hasAltHost: false });
 
     expect(a).toEqual(b);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Books per CTA block — one video can pitch a different book mid-roll and at the close.
+// ─────────────────────────────────────────────────────────────────────
+
+describe("per-CTA-block books", () => {
+  const bookA: LongformCtaBook = {
+    ctaIndex: 0,
+    bookId: 11,
+    title: "The Soil Handbook",
+    coverImageUrl: "https://r2/cover-a.jpg",
+    shopUrl: "https://shop.example/soil",
+    trackingUrl: "https://shop.example/soil?ref=183",
+    qrImageUrl: "https://r2/qr-a.png",
+    qrVerified: true,
+  };
+  const bookB: LongformCtaBook = {
+    ctaIndex: 1,
+    bookId: 22,
+    title: "The Greenhouse Guide",
+    coverImageUrl: "https://r2/cover-b.jpg",
+    shopUrl: "https://shop.example/greenhouse",
+    trackingUrl: "https://shop.example/greenhouse?ref=183",
+    qrImageUrl: "https://r2/qr-b.png",
+    qrVerified: true,
+  };
+  const ctaBooks = [bookA, bookB];
+  const params = {
+    ctaBooks,
+    bookCoverImageUrl: "https://r2/CHANNEL-cover.jpg",
+  };
+
+  it("resolves a beat to the book of ITS OWN block", () => {
+    expect(bookForScene({ ctaIndex: 0 }, ctaBooks)?.bookId).toBe(11);
+    expect(bookForScene({ ctaIndex: 1 }, ctaBooks)?.bookId).toBe(22);
+  });
+
+  it("returns nothing outside a marked block, or with no books", () => {
+    expect(bookForScene({ ctaIndex: undefined }, ctaBooks)).toBeUndefined();
+    expect(bookForScene({ ctaIndex: 0 }, undefined)).toBeUndefined();
+    expect(bookForScene({ ctaIndex: 0 }, [])).toBeUndefined();
+  });
+
+  it("reveals a DIFFERENT cover in each block of the same video", () => {
+    expect(coverImageForScene({ ctaIndex: 0 }, params)).toBe(
+      bookA.coverImageUrl
+    );
+    expect(coverImageForScene({ ctaIndex: 1 }, params)).toBe(
+      bookB.coverImageUrl
+    );
+  });
+
+  it("falls back to the CHANNEL cover for an unassigned block", () => {
+    expect(coverImageForScene({ ctaIndex: 7 }, params)).toBe(
+      params.bookCoverImageUrl
+    );
+    expect(coverImageForScene({ ctaIndex: undefined }, params)).toBe(
+      params.bookCoverImageUrl
+    );
+  });
+
+  it("shows each block its OWN book's QR", () => {
+    expect(
+      qrOverlayUrlFor({ qrHero: true, ctaIndex: 0 }, "CHANNEL-QR", ctaBooks)
+    ).toBe(bookA.qrImageUrl);
+    expect(
+      qrOverlayUrlFor({ qrCorner: true, ctaIndex: 1 }, "CHANNEL-QR", ctaBooks)
+    ).toBe(bookB.qrImageUrl);
+  });
+
+  it("falls back to the channel QR when the block has no book", () => {
+    expect(
+      qrOverlayUrlFor({ qrHero: true, ctaIndex: 9 }, "CHANNEL-QR", ctaBooks)
+    ).toBe("CHANNEL-QR");
+    expect(qrOverlayUrlFor({ qrHero: true }, "CHANNEL-QR", undefined)).toBe(
+      "CHANNEL-QR"
+    );
+  });
+
+  it("keeps the pre-books behaviour byte-for-byte when no books are passed", () => {
+    expect(qrOverlayUrlFor({ qrHero: true }, "CHANNEL-QR")).toBe("CHANNEL-QR");
+    expect(qrOverlayUrlFor({ qrCorner: true }, "CHANNEL-QR")).toBe(
+      "CHANNEL-QR"
+    );
+    expect(qrOverlayUrlFor({}, "CHANNEL-QR")).toBeUndefined();
+    expect(
+      qrOverlayUrlFor({ qrHero: true, coverHero: true }, "CHANNEL-QR")
+    ).toBeUndefined();
+    expect(qrOverlayUrlFor({ qrHero: true }, undefined)).toBeUndefined();
+  });
+
+  it("never draws a QR over the cover reveal, book or not", () => {
+    expect(
+      qrOverlayUrlFor(
+        { qrHero: true, coverHero: true, ctaIndex: 0 },
+        "CHANNEL-QR",
+        ctaBooks
+      )
+    ).toBeUndefined();
+  });
+
+  it("a block whose book has no generated QR falls back rather than showing none", () => {
+    const noQr = [{ ...bookA, qrImageUrl: undefined }];
+    expect(
+      qrOverlayUrlFor({ qrHero: true, ctaIndex: 0 }, "CHANNEL-QR", noQr)
+    ).toBe("CHANNEL-QR");
+  });
+});
+
+describe("markCtaFromSpans block numbering", () => {
+  const s = (i: number, text: string): StoryboardScene => ({
+    index: i,
+    narration: text,
+    scriptText: text,
+    visualPrompt: "x",
+    hostPresent: false,
+    stillImage: true,
+    audioDuration: 4,
+  });
+
+  it("numbers each block, so the book lookup has a key", () => {
+    const scenes = [
+      s(1, "one two three"),
+      s(2, "four five six"),
+      s(3, "seven eight nine"),
+      s(4, "ten eleven twelve"),
+    ];
+    markCtaFromSpans(scenes, [
+      { start: 3, end: 6 },
+      { start: 9, end: 12 },
+    ]);
+    expect(scenes.map(x => x.ctaIndex)).toEqual([undefined, 0, undefined, 1]);
+    expect(scenes.map(x => !!x.cta)).toEqual([false, true, false, true]);
+  });
+
+  it("leaves ctaIndex unset outside every block", () => {
+    const scenes = [s(1, "one two three"), s(2, "four five six")];
+    markCtaFromSpans(scenes, [{ start: 3, end: 6 }]);
+    expect(scenes[0].ctaIndex).toBeUndefined();
+    expect(scenes[1].ctaIndex).toBe(0);
+  });
+
+  it("is a no-op with no spans, matching the legacy heuristics path", () => {
+    const scenes = [s(1, "one two three")];
+    markCtaFromSpans(scenes, []);
+    expect(scenes[0].ctaIndex).toBeUndefined();
+    expect(scenes[0].cta).toBeUndefined();
   });
 });

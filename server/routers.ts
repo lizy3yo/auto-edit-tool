@@ -32,6 +32,14 @@ import {
   setLongformSlot,
   deleteLongformVideoJob,
   updateLongformVideoJob,
+  getBooks,
+  getBookById,
+  createBook,
+  updateBook,
+  deactivateBook,
+  getSalesByJob,
+  getSalesByProductForJob,
+  getJobsForChannel,
 } from "./db";
 import {
   createLongformJob,
@@ -59,7 +67,20 @@ import {
   assembleScenePromptPreview,
   validateCtaMarkers,
   syncSceneClipFields,
+  parseCtaMarkers,
+  extractSpokenScript,
 } from "./longformVideo";
+import {
+  buildTrackingUrl,
+  stripTrackingParam,
+  renderVerifiedQrPng,
+} from "./tracking";
+import {
+  buildVideoTimeline,
+  summarizeTimeline,
+  SHOT_LABELS,
+} from "./videoTimeline";
+import { buildVideoDescription } from "./videoDescription";
 import { getJobCostBreakdown } from "./costMeter";
 import { ApimartAdapter } from "./providers/apimart";
 import { HeygenLipsyncAdapter } from "./providers/heygen-lipsync";
@@ -72,7 +93,11 @@ import {
   setAireiterKey,
 } from "./providers/aireiter";
 import { ENV } from "./_core/env";
-import type { LongformInputParams, StoryboardScene } from "../shared/types";
+import type {
+  LongformInputParams,
+  LongformCtaBook,
+  StoryboardScene,
+} from "../shared/types";
 import {
   DEFAULT_LONGFORM_PACING,
   MAX_JOB_ASSETS,
@@ -478,6 +503,161 @@ const styleReferenceRouter = router({
     }),
 });
 
+// ─── Books Router (the products a channel's videos pitch) ───
+const bookRouter = router({
+  /** Books for a channel. `activeOnly` for the video form's picker; Admin sees everything. */
+  list: approvedProcedure
+    .input(
+      z.object({
+        channelKey: z.string().min(1),
+        activeOnly: z.boolean().default(false),
+      })
+    )
+    .query(async ({ input }) => getBooks(input.channelKey, input.activeOnly)),
+
+  /**
+   * Create or update a book. `shopUrl` is validated by building a throwaway tracking link from
+   * it — the same function the render uses — so a URL that would silently produce no QR is
+   * rejected here, where the operator can see why, rather than at render time.
+   */
+  save: adminProcedure
+    .input(
+      z.object({
+        id: z.number().optional(),
+        channelKey: z.string().min(1),
+        title: z.string().min(1).max(255),
+        coverImageUrl: z.string().url().max(512).nullish(),
+        shopUrl: z.string().max(512).nullish(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const shopUrl = input.shopUrl?.trim() || null;
+      if (shopUrl && !buildTrackingUrl(shopUrl, 1)) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            "That shop link isn't a usable web address. Use something like " +
+            "https://yourshop.com/the-book",
+        });
+      }
+      const data = {
+        channelKey: input.channelKey,
+        title: input.title.trim(),
+        coverImageUrl: input.coverImageUrl || null,
+        // Store the NORMALIZED url (scheme added, tracking param stripped) so what renders is
+        // what was validated.
+        shopUrl: shopUrl ? stripTrackingParam(shopUrl) : null,
+      };
+      if (input.id) {
+        await updateBook(input.id, data);
+        return { id: input.id };
+      }
+      const id = await createBook({ ...data, isActive: true });
+      return { id };
+    }),
+
+  /** Soft-delete — finished videos keep resolving the book they sold. */
+  deactivate: adminProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input }) => {
+      await deactivateBook(input.id);
+      return { success: true };
+    }),
+
+  /**
+   * Preview a book's plain QR (no video tag), for checking the link is right before any render.
+   * Returned as a data URL so the UI shows exactly the bytes the pipeline would generate.
+   */
+  previewQr: approvedProcedure
+    .input(
+      z.object({
+        shopUrl: z.string().min(1).max(512),
+        /**
+         * Preview the link and QR a SPECIFIC video would get, rather than the book's plain shop
+         * link. The book itself carries no `ref` — the tag identifies a video, and a book does
+         * not know which video will pitch it — so without this there is no way to see or test a
+         * real tracking link short of paying for a render.
+         */
+        jobId: z.number().int().positive().max(999_999_999).optional(),
+      })
+    )
+    .query(async ({ input }) => {
+      const base = stripTrackingParam(input.shopUrl);
+      // With a jobId this is the EXACT link that video would carry; without one it is the plain
+      // shop link. Both go through `buildTrackingUrl`, so a URL that would fail at render time
+      // fails here instead, where it can be fixed.
+      const url = input.jobId ? buildTrackingUrl(base, input.jobId) : base;
+      if (!url || !buildTrackingUrl(base, 1)) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "That shop link isn't a usable web address.",
+        });
+      }
+      const { png, verified, decoded } = await renderVerifiedQrPng(url, 512);
+      return {
+        url,
+        jobId: input.jobId ?? null,
+        verified,
+        decoded,
+        dataUrl: `data:image/png;base64,${png.toString("base64")}`,
+      };
+    }),
+
+  /**
+   * Videos on this channel, for previewing a book's tracking link against a REAL one instead of
+   * a made-up number.
+   *
+   * Videos that ACTUALLY pitched this book come back with the link and QR the pipeline generated
+   * for them — those are not previews, they are the published artefacts. Every other video comes
+   * back bare, and the caller can preview what its link WOULD be.
+   */
+  videosForBook: approvedProcedure
+    .input(
+      z.object({
+        channelKey: z.string().min(1),
+        bookId: z.number().int().positive().optional(),
+      })
+    )
+    .query(async ({ input }) => {
+      const jobs = await getJobsForChannel(input.channelKey, 50);
+      return jobs.map(j => {
+        const used = (
+          (j.ctaBooks as LongformCtaBook[] | null) ?? []
+        ).find(b => input.bookId != null && b.bookId === input.bookId);
+        return {
+          id: j.id,
+          title: j.title,
+          /** True when this render really pitched the book — its link below is the published one. */
+          usedThisBook: !!used,
+          trackingUrl: used?.trackingUrl ?? null,
+          qrImageUrl: used?.qrImageUrl ?? null,
+        };
+      });
+    }),
+
+  /**
+   * How many CTA blocks a script contains, so the video form can ask for one book per block
+   * before anything is rendered. Returns a short excerpt of each block for orientation.
+   */
+  detectCtaBlocks: approvedProcedure
+    .input(z.object({ script: z.string().max(50000) }))
+    .query(async ({ input }) => {
+      const { script, spans, errors } = parseCtaMarkers(
+        extractSpokenScript(input.script)
+      );
+      const words = script.split(/\s+/).filter(Boolean);
+      return {
+        errors,
+        blocks: spans.map((sp, i) => ({
+          ctaIndex: i,
+          excerpt: words
+            .slice(sp.start, Math.min(sp.end, sp.start + 18))
+            .join(" "),
+        })),
+      };
+    }),
+});
+
 // ─── Long-form Video Router ───
 const longformVideoRouter = router({
   /**
@@ -508,6 +688,97 @@ const longformVideoRouter = router({
     .mutation(async ({ input }) => {
       await setAppSetting(LONGFORM_INSTRUCTION_KEY, input.content);
       return { success: true };
+    }),
+
+  /**
+   * Everything needed to publish one finished render: where each kind of shot lands, the
+   * paste-ready description, the tracking links, and the QR codes actually generated.
+   *
+   * Read-only and derived — nothing here is persisted, so it always reflects the current
+   * storyboard rather than a stale copy taken at render time.
+   */
+  getPublishKit: approvedProcedure
+    .input(z.object({ jobId: z.number() }))
+    .query(async ({ ctx, input }) => {
+      const job = await getLongformVideoJobById(input.jobId);
+      if (!job)
+        throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
+      if (job.userId !== ctx.user.id && ctx.user.role !== "admin") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Not your job" });
+      }
+      const params = (job.inputParams ?? {}) as LongformInputParams;
+      const scenes = (job.storyboard ?? []) as StoryboardScene[];
+      const timeline = buildVideoTimeline(scenes);
+      return {
+        jobId: job.id,
+        title: params.title ?? null,
+        youtubeUrl: job.youtubeUrl ?? null,
+        timeline,
+        summary: summarizeTimeline(timeline),
+        labels: SHOT_LABELS,
+        books: (params.ctaBooks ?? []).map(b => ({
+          ctaIndex: b.ctaIndex,
+          bookId: b.bookId,
+          title: b.title,
+          trackingUrl: b.trackingUrl ?? null,
+          qrImageUrl: b.qrImageUrl ?? null,
+          qrVerified: b.qrVerified ?? null,
+        })),
+        description: buildVideoDescription({
+          title: params.title,
+          ctaBooks: params.ctaBooks,
+          timeline,
+        }),
+      };
+    }),
+
+  /**
+   * Store the YouTube URL this render was published to. Nothing in the pipeline reads it — it
+   * exists so a sales report reads by title instead of by job id. Blank clears it.
+   */
+  setYoutubeUrl: approvedProcedure
+    .input(
+      z.object({
+        jobId: z.number(),
+        youtubeUrl: z.string().max(512),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const job = await getLongformVideoJobById(input.jobId);
+      if (!job)
+        throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
+      if (job.userId !== ctx.user.id && ctx.user.role !== "admin") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Not your job" });
+      }
+      const trimmed = input.youtubeUrl.trim();
+      if (trimmed && !/^https?:\/\/\S+$/i.test(trimmed)) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Paste the full YouTube URL, starting with https://",
+        });
+      }
+      await updateLongformVideoJob(input.jobId, {
+        youtubeUrl: trimmed || null,
+      });
+      return { youtubeUrl: trimmed || null };
+    }),
+
+  /** Reported sales for one video, split by the product the store named. */
+  getSales: approvedProcedure
+    .input(z.object({ jobId: z.number() }))
+    .query(async ({ ctx, input }) => {
+      const job = await getLongformVideoJobById(input.jobId);
+      if (!job)
+        throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
+      if (job.userId !== ctx.user.id && ctx.user.role !== "admin") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Not your job" });
+      }
+      const byProduct = await getSalesByProductForJob(input.jobId);
+      return {
+        byProduct,
+        sales: byProduct.reduce((t, r) => t + r.sales, 0),
+        revenueCents: byProduct.reduce((t, r) => t + r.revenueCents, 0),
+      };
     }),
 
   /**
@@ -712,6 +983,19 @@ const longformVideoRouter = router({
           )
           .max(MAX_JOB_ASSETS)
           .optional(),
+        /**
+         * Which book each marked CTA block pitches. One entry per block the operator assigned;
+         * blocks left unassigned fall back to the channel's cover/QR, so this is always optional.
+         */
+        ctaBooks: z
+          .array(
+            z.object({
+              ctaIndex: z.number().int().min(0).max(31),
+              bookId: z.number().int().positive(),
+            })
+          )
+          .max(32)
+          .optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -742,8 +1026,13 @@ const longformVideoRouter = router({
           message: `CTA marker error: ${ctaMarkers.errors.join("; ")}`,
         });
       }
+      // A book assignment is keyed by BLOCK INDEX, so assigning one to a script with no marked
+      // blocks would silently do nothing. Reject it here rather than render a film that quietly
+      // ignored the operator's choice.
       if (
-        (channelConfig.bookCoverImageUrl || channelConfig.ctaQrImageUrl) &&
+        (channelConfig.bookCoverImageUrl ||
+          channelConfig.ctaQrImageUrl ||
+          input.ctaBooks?.length) &&
         ctaMarkers.spans.length === 0
       ) {
         throw new TRPCError({
@@ -821,6 +1110,34 @@ const longformVideoRouter = router({
         }
       }
 
+      // Snapshot each assigned book onto the job — a resume or regenerate months later must
+      // reproduce the film that shipped, even if the book has since been renamed or re-priced.
+      // A book that no longer exists, or belongs to another channel, is dropped rather than
+      // failing the render: that block falls back to the channel cover/QR.
+      const ctaBooks: LongformCtaBook[] = [];
+      for (const a of input.ctaBooks ?? []) {
+        const book = await getBookById(a.bookId);
+        if (!book || book.channelKey !== input.channelKey) {
+          console.warn(
+            `[longform] CTA block ${a.ctaIndex} references book ${a.bookId}, which is missing ` +
+              `or belongs to another channel — that block falls back to the channel cover/QR`
+          );
+          continue;
+        }
+        ctaBooks.push({
+          ctaIndex: a.ctaIndex,
+          bookId: book.id,
+          title: book.title,
+          // Rehost like every other reference image, so the render only fetches our own CDN.
+          coverImageUrl: book.coverImageUrl
+            ? await rehostToR2(book.coverImageUrl, "cover").catch(
+                () => book.coverImageUrl ?? undefined
+              )
+            : undefined,
+          shopUrl: book.shopUrl ?? undefined,
+        });
+      }
+
       const params: LongformInputParams = {
         script: input.script,
         lockMode: "ingredients",
@@ -849,6 +1166,8 @@ const longformVideoRouter = router({
         // rather than failing the job — the film is still correct without it, and the pipeline
         // warns when it places fewer assets than were supplied.
         assets: assets.length ? assets : undefined,
+        // Per-CTA-block books. Empty ⇒ the channel's single cover/QR, i.e. the pre-books film.
+        ctaBooks: ctaBooks.length ? ctaBooks : undefined,
       };
 
       const jobId = await createLongformJob(
@@ -962,12 +1281,22 @@ const longformVideoRouter = router({
         .object({ limit: z.number().int().min(1).max(500).optional() })
         .optional()
     )
-    .query(async ({ ctx, input }) =>
-      getLongformLibrary(ctx.user.id, {
+    .query(async ({ ctx, input }) => {
+      const rows = await getLongformLibrary(ctx.user.id, {
         allUsers: ctx.user.role === "admin",
         limit: input?.limit,
-      })
-    ),
+      });
+      // Attach reported sales so the library answers "which video earns?" at a glance. One
+      // grouped query for the whole page, not one per row.
+      const sales = await getSalesByJob(rows.map(r => r.id)).catch(
+        () => new Map<number, { sales: number; revenueCents: number }>()
+      );
+      return rows.map(r => ({
+        ...r,
+        sales: sales.get(r.id)?.sales ?? 0,
+        revenueCents: sales.get(r.id)?.revenueCents ?? 0,
+      }));
+    }),
 
   /** Current user's finished (completed/failed) jobs — for the history panel. */
   myJobHistory: approvedProcedure
@@ -1215,6 +1544,7 @@ export const appRouter = router({
   shuttle: shuttleRouter,
   styleReference: styleReferenceRouter,
   longformVideo: longformVideoRouter,
+  book: bookRouter,
 });
 
 export type AppRouter = typeof appRouter;

@@ -13,7 +13,19 @@ function formatTime(s: number): string {
 
 const PREVIEW_W = 160;
 
-export function LongformVideoPlayer({ src }: { src: string }) {
+export function LongformVideoPlayer({
+  src,
+  seekRef,
+}: {
+  src: string;
+  /**
+   * Optional handle the parent can call to jump the player to a timestamp — used by the publish
+   * kit's timestamp map, so "check the split screen at 2:14" is one click. A ref rather than a
+   * controlled `currentTime` prop: seeking is an EVENT, and a controlled value would fight the
+   * user every time they scrubbed.
+   */
+  seekRef?: React.MutableRefObject<((sec: number) => void) | null>;
+}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const previewRef = useRef<HTMLVideoElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
@@ -22,6 +34,24 @@ export function LongformVideoPlayer({ src }: { src: string }) {
   const [duration, setDuration] = useState(0);
   const [current, setCurrent] = useState(0);
   const [hover, setHover] = useState<{ t: number; x: number } | null>(null);
+
+  // Expose a seek handle to the parent. Cleared on unmount so a stale closure can never be
+  // called against a detached <video>.
+  useEffect(() => {
+    if (!seekRef) return;
+    seekRef.current = (sec: number) => {
+      const v = videoRef.current;
+      if (!v) return;
+      v.currentTime = Math.max(0, sec);
+      v.play().catch(() => {
+        /* autoplay may be blocked; the seek still landed */
+      });
+      v.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    };
+    return () => {
+      seekRef.current = null;
+    };
+  }, [seekRef]);
 
   // ponytail: per-instance handler bound to THIS player's videoRef. Acts only
   // when this player is the active one (playing / focused / hovered), so

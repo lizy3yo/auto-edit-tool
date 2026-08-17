@@ -246,6 +246,16 @@ export interface StoryboardScene {
    */
   cta?: boolean;
   /**
+   * WHICH marked CTA block this beat belongs to — 0 for the first `===START CTA===` span in the
+   * script, 1 for the second, and so on. Set by `markCtaFromSpans`, undefined outside a marked
+   * block (and on scripts using the legacy heuristics, which have no spans to number).
+   *
+   * This is what lets one video pitch DIFFERENT books in its mid-roll and its close: the block
+   * index selects the book (`LongformInputParams.ctaBooks`), and the cover reveal and QR for that
+   * block resolve from it.
+   */
+  ctaIndex?: number;
+  /**
    * A "QR hero" beat: a person-free still with a LARGE CENTERED QR overlaid (instead of the small
    * bottom-right card) for its whole duration. Set by `markCtaQrBlock` across the fixed CTA block
    * ("Now go ahead and grab your phone" … "I'll wait right here"), so the big QR fills the screen
@@ -468,6 +478,38 @@ export interface StoryboardScene {
 }
 
 /**
+ * A book assigned to one CTA block of one video, snapshotted onto the job at render start.
+ *
+ * Snapshotted rather than referenced by id alone for the same reason as the pacing config: a
+ * resume, a retry, or a regenerate months later must reproduce the film that shipped, even if the
+ * book has since been renamed, re-covered, or moved to a different shop URL.
+ */
+export interface LongformCtaBook {
+  /** Which marked CTA block this applies to (see `StoryboardScene.ctaIndex`). */
+  ctaIndex: number;
+  bookId: number;
+  title: string;
+  /** Revealed full-frame inside this block. Absent ⇒ falls back to the channel cover. */
+  coverImageUrl?: string;
+  /** Where this book is sold, before the tracking parameter is added. */
+  shopUrl?: string;
+  /**
+   * `shopUrl` + `?ref=<jobId>` — the link for this video's description and the payload of its QR.
+   * Filled in at render start (`resolveCtaBookTracking`). Absent ⇒ the book has no shop URL, so
+   * this block shows the cover but carries no QR and no tracking.
+   */
+  trackingUrl?: string;
+  /** R2 URL of the QR generated from `trackingUrl`. Filled in at render start. */
+  qrImageUrl?: string;
+  /**
+   * Whether the generated QR decoded back to `trackingUrl` (`renderVerifiedQrPng`). False means
+   * the code shipped but could not be read back — surfaced as a job warning, never a hard failure,
+   * since a decoder being unsure is not proof the code is bad.
+   */
+  qrVerified?: boolean;
+}
+
+/**
  * One operator-supplied image used verbatim in the film (a book render, a product shot). Uploaded
  * per job — assets belong to one video, unlike the per-channel host photo / cover / QR.
  */
@@ -600,6 +642,15 @@ export interface LongformInputParams {
    * Empty/absent ⇒ no asset beats and the film is unchanged.
    */
   assets?: LongformAsset[];
+  /**
+   * Which book each marked CTA block pitches, one entry per block the operator assigned.
+   *
+   * A video may pitch a DIFFERENT book in its mid-roll and its close, so this is keyed by block
+   * rather than held on the job. A block with no entry falls back to the channel's
+   * `bookCoverImageUrl` / `qrImageUrl` — exactly the pre-books behaviour — so an unassigned
+   * script still renders.
+   */
+  ctaBooks?: LongformCtaBook[];
 }
 
 /** Progress counters surfaced to the client */

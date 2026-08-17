@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import { ProviderKeys } from "@/components/admin/ProviderKeys";
 import { LongformInstruction } from "@/components/admin/LongformInstruction";
 import { LongformPacing } from "@/components/admin/LongformPacing";
+import { BooksPanel } from "@/components/admin/BooksPanel";
 
 /**
  * 69Labs provider card — the video/image/TTS lane. One provider row lives in
@@ -163,6 +164,7 @@ export default function AdminPage() {
           <TabsTrigger value="keys">Provider Keys</TabsTrigger>
           <TabsTrigger value="instruction">Longform Instruction</TabsTrigger>
           <TabsTrigger value="pacing">Longform Pacing</TabsTrigger>
+          <TabsTrigger value="books">Books</TabsTrigger>
         </TabsList>
         <TabsContent value="keys" className="space-y-4 pt-2">
           <SixtyNineLabsCard />
@@ -173,6 +175,9 @@ export default function AdminPage() {
         </TabsContent>
         <TabsContent value="pacing" className="pt-2">
           <LongformPacing />
+        </TabsContent>
+        <TabsContent value="books" className="pt-2">
+          <BooksPanel />
         </TabsContent>
       </Tabs>
     </div>

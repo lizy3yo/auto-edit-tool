@@ -35,32 +35,52 @@ Do those two things for thirty days and you'll see the difference. That's the wh
 export default function FaceLockVideo() {
   const utils = trpc.useUtils();
   const [activeTab, setActiveTab] = useState("0");
-  // Null until the server's slots arrive; the tabs render only after that, so a slot never
-  // mounts empty and then jumps to a job a moment later.
+  // Null until the server's slots arrive. Tabs mount immediately either way and adopt a late
+  // id (see `LongformJobSlot`'s resume effect), so this only decides whether a tab starts
+  // empty or restored.
   const [resumeIds, setResumeIds] = useState<(number | null)[] | null>(null);
   const [draftTitles, setDraftTitles] = useState<string[]>(() =>
     Array.from({ length: MAX_SLOTS }, () => "")
   );
 
-  const { data: savedSlots, isError: slotsUnavailable } =
-    trpc.longformVideo.getSlots.useQuery(undefined, { retry: false });
+  const {
+    data: savedSlots,
+    // `isLoadingError`, not `isError`: only a workspace that never loaded is worth warning
+    // about. A refetch that fails while the tabs are already on screen changes nothing.
+    isLoadingError: slotsUnavailable,
+    error: slotsError,
+  } = trpc.longformVideo.getSlots.useQuery(undefined, {
+    // `tsx watch` restarts the server on every save, so requests get dropped routinely in a
+    // dev session. This used to be `retry: false`, which turned a two-second restart into a
+    // permanently empty workspace and a migration warning for an up-to-date schema.
+    retry: 3,
+    retryDelay: attempt => Math.min(500 * 2 ** attempt, 4000),
+  });
+
+  // Set once the workspace is settled — either the server's slots were adopted, or the user
+  // moved a tab first. Until then a late `getSlots` may still fill the tabs in; after it, it
+  // must never overwrite what is on screen (including this page's own refetches).
+  const workspaceSettled = useRef(false);
   useEffect(() => {
-    if (savedSlots) {
-      setResumeIds(prev => prev ?? savedSlots.map(s => s.jobId));
-      setDraftTitles(prev =>
-        prev.some(Boolean) ? prev : savedSlots.map(s => s.draftTitle)
-      );
-      return;
-    }
-    // The saved workspace is a convenience, never a prerequisite. If the query fails (an
-    // unapplied migration is the realistic cause), fall back to empty tabs so the generator
-    // still works — leaving `resumeIds` null instead made every open silently no-op.
+    if (!savedSlots || workspaceSettled.current) return;
+    workspaceSettled.current = true;
+    setResumeIds(savedSlots.map(s => s.jobId));
+    setDraftTitles(prev =>
+      prev.some(Boolean) ? prev : savedSlots.map(s => s.draftTitle)
+    );
+  }, [savedSlots]);
+
+  useEffect(() => {
+    // The saved workspace is a convenience, never a prerequisite: fall back to empty tabs so
+    // the generator still works — leaving `resumeIds` null made every open silently no-op.
+    // Deliberately does NOT settle the workspace, so slots that arrive on a later refetch are
+    // still adopted rather than discarded — that discard is what actually lost the tabs.
     if (slotsUnavailable) {
       setResumeIds(
         prev => prev ?? Array.from({ length: MAX_SLOTS }, () => null)
       );
     }
-  }, [savedSlots, slotsUnavailable]);
+  }, [slotsUnavailable]);
 
   const { mutate: setSlotMutate } = trpc.longformVideo.setSlot.useMutation({
     onSuccess: () => void utils.longformVideo.getSlots.invalidate(),
@@ -70,7 +90,12 @@ export default function FaceLockVideo() {
     (
       slotIndex: number,
       patch: { jobId?: number | null; draftTitle?: string | null }
-    ) => setSlotMutate({ slotIndex, ...patch }),
+    ) => {
+      // What's on screen is the truth from here on, so a `getSlots` result landing later
+      // (this mutation's own invalidation included) must not overwrite it.
+      workspaceSettled.current = true;
+      setSlotMutate({ slotIndex, ...patch });
+    },
     [setSlotMutate]
   );
 
@@ -231,6 +256,9 @@ export default function FaceLockVideo() {
     (jobId: number) => {
       const idx = (resumeIdsRef.current ?? []).findIndex(id => id === jobId);
       if (idx === -1) return;
+      // No `persistSlot` here (the server already nulled the row), so claim the workspace
+      // explicitly — otherwise a slot list still in flight could put the deleted job back.
+      workspaceSettled.current = true;
       setResumeIds(prev => {
         const base = prev ?? Array.from({ length: MAX_SLOTS }, () => null);
         return base.map((v, i) => (i === idx ? null : v));
@@ -316,12 +344,16 @@ export default function FaceLockVideo() {
         {slotsUnavailable && (
           <div className="rounded-md border border-amber-500/60 bg-amber-500/10 px-3 py-2 text-sm">
             <span className="font-medium">Workspace sync is unavailable.</span>{" "}
-            Tabs still work but won't be remembered across devices — usually an
-            unapplied migration. Run{" "}
-            <code className="rounded bg-secondary px-1 py-0.5 text-xs">
-              npx drizzle-kit migrate
-            </code>
-            .
+            Tabs still work, but this session can't restore or remember which
+            job each one holds. It clears itself as soon as the server answers —
+            if it persists, the server log names the cause (a stale schema is
+            reported there by name).
+            {slotsError?.message && (
+              <span className="text-muted-foreground">
+                {" "}
+                ({slotsError.message})
+              </span>
+            )}
           </div>
         )}
 

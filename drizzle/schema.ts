@@ -94,6 +94,14 @@ export const longformVideoJobs = mysqlTable("longform_video_jobs", {
   /** Final stitched video */
   finalVideoUrl: text("finalVideoUrl"),
   finalFileKey: varchar("finalFileKey", { length: 512 }),
+  /**
+   * The YouTube URL this render was published to, pasted back by the operator after upload.
+   *
+   * Nothing in the pipeline reads it — it exists so a sales report reads as "Never Throw Away
+   * Autumn Leaves → 8 sales" instead of "ref=183 → 8 sales". The tracking link is what ties a
+   * sale to a video; this ties that video to something a human recognises.
+   */
+  youtubeUrl: varchar("youtubeUrl", { length: 512 }),
   errorMessage: text("errorMessage"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   completedAt: timestamp("completedAt"),
@@ -200,6 +208,79 @@ export const channelConfigs = mysqlTable("channel_configs", {
 
 export type ChannelConfig = typeof channelConfigs.$inferSelect;
 export type InsertChannelConfig = typeof channelConfigs.$inferInsert;
+
+/**
+ * Books — the products a channel's videos pitch. One row per book, per channel (a book is not
+ * shared across channels; the same title sold on two channels is two rows, so each keeps its own
+ * shop link and its sales stay separable).
+ *
+ * This replaces the single `channel_configs.bookCoverImageUrl` / `ctaQrImageUrl` pair, which
+ * could only ever describe ONE book per channel. Those columns are retained as the fallback for
+ * videos with no book assigned, so nothing already rendered changes.
+ *
+ * `shopUrl` is the load-bearing field: the per-video tracking link and its QR are both derived
+ * from it (`buildTrackingUrl`). A book with no shop URL still supplies its cover, just no QR.
+ */
+export const books = mysqlTable("books", {
+  id: int("id").autoincrement().primaryKey(),
+  /** Owning channel — books are per-channel, never shared. */
+  channelKey: varchar("channelKey", { length: 64 }).notNull(),
+  /** Display title, and what `markCoverReveal` searches the CTA text for. */
+  title: varchar("title", { length: 255 }).notNull(),
+  /** Cover image (R2 URL) revealed full-frame in this book's CTA block. */
+  coverImageUrl: varchar("coverImageUrl", { length: 512 }),
+  /**
+   * Where this book is sold. The per-video link is this plus `?ref=<jobId>`, and the on-screen QR
+   * encodes that. Null ⇒ the book can still be shown, but carries no QR and no tracking.
+   */
+  shopUrl: varchar("shopUrl", { length: 512 }),
+  /** Soft-delete: an inactive book stays attached to the videos that already used it. */
+  isActive: boolean("isActive").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type Book = typeof books.$inferSelect;
+export type InsertBook = typeof books.$inferInsert;
+
+/**
+ * Sales reported by the webstore, one row per paid line item.
+ *
+ * Written ONLY by `POST /api/sales` (see `server/salesWebhook.ts`), which the store calls after a
+ * payment clears. This is a convenience copy for reporting beside each video — the store's own
+ * orders table remains the source of truth, so a lost or duplicated ping costs a report line, not
+ * money.
+ *
+ * `externalOrderId` is UNIQUE: the store is told to include its own order/line id, so a retried
+ * or replayed ping is ignored rather than counted twice.
+ *
+ * `ref` is stored as the raw string the store sent, and `jobId` is the parse of it. An
+ * unrecognised ref is KEPT (with a null jobId) rather than dropped, so a mis-tagged link shows up
+ * as an unattributed sale instead of silently vanishing.
+ */
+export const longformSales = mysqlTable("longform_sales", {
+  id: int("id").autoincrement().primaryKey(),
+  /** The store's own order (or order-line) id. Unique — this is the duplicate guard. */
+  externalOrderId: varchar("externalOrderId", { length: 128 })
+    .notNull()
+    .unique(),
+  /** Raw `?ref=` value as sent by the store; kept verbatim even when it doesn't parse. */
+  ref: varchar("ref", { length: 64 }),
+  /** The video this sale is attributed to, parsed from `ref`. Null = unattributed. */
+  jobId: int("jobId"),
+  /** The store's product identifier — its SKU/slug/id, matched to a book where possible. */
+  productId: varchar("productId", { length: 128 }),
+  /** Book this maps to, when `productId` matches a known `shopUrl`/title. Null = unmatched. */
+  bookId: int("bookId"),
+  /** Integer minor units (cents). Never a float — money is not a floating-point quantity. */
+  amountCents: int("amountCents").notNull(),
+  currency: varchar("currency", { length: 8 }).default("USD").notNull(),
+  /** When the store reported it (our clock, not theirs). */
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type LongformSale = typeof longformSales.$inferSelect;
+export type InsertLongformSale = typeof longformSales.$inferInsert;
 
 /**
  * Channel layers — per-channel prompt layer read via raw SQL in composer.ts

@@ -26,6 +26,7 @@ import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { startTimeoutChecker } from "../generationTimeout";
 import { registerHeygenWebhook } from "../heygenWebhook";
+import { registerSalesWebhook } from "../salesWebhook";
 import { downloadRouter } from "../download";
 
 function isPortAvailable(port: number): Promise<boolean> {
@@ -61,6 +62,8 @@ async function startServer() {
   registerAdminAuthRoutes(app);
   // HeyGen render-completion callback (wakes host-scene poll loops).
   registerHeygenWebhook(app);
+  // Webstore sales callback — records a paid order against the video whose link brought it.
+  registerSalesWebhook(app);
   // Download proxy (bypasses CORS for R2/CDN URLs)
   app.use("/api/download", downloadRouter);
   // tRPC API

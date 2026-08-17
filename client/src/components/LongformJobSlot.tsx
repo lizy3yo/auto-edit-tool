@@ -32,6 +32,11 @@ import { LongformVideoPlayer } from "./LongformVideoPlayer";
 import { GenerationCostDialog } from "./GenerationCostDialog";
 import { ChannelVoiceTuning } from "@/components/ChannelVoiceTuning";
 import { LongformAssets } from "@/components/LongformAssets";
+import {
+  LongformCtaBooks,
+  type CtaBookAssignment,
+} from "@/components/LongformCtaBooks";
+import { LongformPublishKit } from "@/components/LongformPublishKit";
 import { sanitizeError, isCreditError } from "@/lib/errorSanitizer";
 import { triggerCreditErrorPopup } from "@/components/CreditErrorPopup";
 import type { LongformAsset, StoryboardScene } from "@shared/types";
@@ -176,6 +181,10 @@ export default function LongformJobSlot({
   // state only: they belong to the NEXT generate click, and the job row persists them once it
   // starts. Cleared alongside the script when a new job is submitted.
   const [assets, setAssets] = useState<LongformAsset[]>([]);
+  // Which book each CTA block pitches. Local until generate, then snapshotted onto the job.
+  const [ctaBooks, setCtaBooks] = useState<CtaBookAssignment[]>([]);
+  // Set by the finished-video player; the timestamp map calls it to jump to a shot.
+  const playerSeekRef = useRef<((sec: number) => void) | null>(null);
   const isAdmin = useAuth().user?.role === "admin";
 
   // Masked APIMART keys (admin-only). B-roll VIDEO renders on this tab's APIMART key; with no key
@@ -563,6 +572,7 @@ export default function LongformJobSlot({
       title: downloadTitle.trim() || undefined,
       slotIndex,
       assets: assets.length ? assets : undefined,
+      ctaBooks: ctaBooks.length ? ctaBooks : undefined,
     });
   };
 
@@ -651,6 +661,15 @@ export default function LongformJobSlot({
               The voiceover uses this channel's saved voice.
             </p>
           </div>
+
+          {/* Which book each CTA block pitches — one video can sell more than one. */}
+          <LongformCtaBooks
+            script={script}
+            channelKey={channelKey}
+            value={ctaBooks}
+            onChange={setCtaBooks}
+            disabled={generateMutation.isPending || isProcessing}
+          />
 
           {/* Uploaded assets shown verbatim in this video's CTA pitch. */}
           <LongformAssets
@@ -874,7 +893,10 @@ export default function LongformJobSlot({
 
             {job.status === "completed" && job.finalVideoUrl && (
               <div className="space-y-3">
-                <LongformVideoPlayer src={job.finalVideoUrl} />
+                <LongformVideoPlayer
+                  src={job.finalVideoUrl}
+                  seekRef={playerSeekRef}
+                />
                 <div className="flex justify-end gap-2">
                   <Button
                     variant="outline"
@@ -892,6 +914,15 @@ export default function LongformJobSlot({
                     Download MP4
                   </Button>
                 </div>
+                {/* Links, QR, description, timestamp map — everything needed to publish. */}
+                {jobId != null && (
+                  <div className="border-t border-border pt-4">
+                    <LongformPublishKit
+                      jobId={jobId}
+                      onSeek={sec => playerSeekRef.current?.(sec)}
+                    />
+                  </div>
+                )}
               </div>
             )}
           </CardContent>

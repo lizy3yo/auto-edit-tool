@@ -124,6 +124,7 @@ import type {
   StoryboardScene,
   LongformInputParams,
   LongformAsset,
+  LongformCtaBook,
   ProviderType,
   GenerationResult,
 } from "../shared/types";
@@ -135,6 +136,7 @@ import {
   scaleRamp,
 } from "../shared/pacing";
 import { renderCaptionCardPng } from "./captionCard";
+import { buildTrackingUrl, renderVerifiedQrPng } from "./tracking";
 import { stripHostNames } from "../shared/constants";
 import type { VideoSubmitResult } from "./providers/base";
 
@@ -717,6 +719,79 @@ export const pacingFor = (params: {
 
 /** app_settings key holding the admin-edited pacing dials (see `shared/pacing.ts`). */
 export const LONGFORM_PACING_KEY = "longform_pacing";
+
+/**
+ * Resolve each assigned CTA book's tracking link and render its QR, ONCE per render.
+ *
+ * The link is the book's `shopUrl` plus `?ref=<jobId>` — so two videos selling the same book get
+ * different codes, and the store can tell which video produced a sale. Two BLOCKS pitching the
+ * same book inside one video resolve to the same link, so the QR is generated once and shared.
+ *
+ * Every failure is soft. A book with no shop URL keeps its cover and simply carries no QR; a
+ * render or upload failure drops that book back to the channel's QR image. A pitch without a
+ * scannable code is a worse video; a job that dies because a PNG failed to upload is a lost
+ * render. Mutates the entries in place (they are the job's persisted snapshot) and returns the
+ * count that ended up with a code.
+ */
+export async function resolveCtaBookTracking(
+  jobId: number,
+  ctaBooks: LongformCtaBook[] | undefined
+): Promise<number> {
+  if (!ctaBooks?.length) return 0;
+  // Same shop URL ⇒ same tracking link ⇒ one QR, reused. A video pitching one book across both
+  // its mid-roll and its close must not pay for or store two identical codes.
+  const byUrl = new Map<
+    string,
+    { qrImageUrl?: string; qrVerified?: boolean }
+  >();
+  let ready = 0;
+
+  for (const book of ctaBooks) {
+    const trackingUrl = buildTrackingUrl(book.shopUrl, jobId);
+    book.trackingUrl = trackingUrl ?? undefined;
+    book.qrImageUrl = undefined;
+    book.qrVerified = undefined;
+    if (!trackingUrl) continue;
+
+    const cached = byUrl.get(trackingUrl);
+    if (cached) {
+      book.qrImageUrl = cached.qrImageUrl;
+      book.qrVerified = cached.qrVerified;
+      if (cached.qrImageUrl) ready++;
+      continue;
+    }
+
+    try {
+      const { png, verified, decoded } = await renderVerifiedQrPng(trackingUrl);
+      const key = `longform/${jobId}/qr-book-${book.bookId}-${nanoid(6)}.png`;
+      const { url } = await storagePut(key, png, "image/png");
+      book.qrImageUrl = url;
+      book.qrVerified = verified;
+      byUrl.set(trackingUrl, { qrImageUrl: url, qrVerified: verified });
+      ready++;
+      if (!verified) {
+        // Shipped, but we could not read it back. Worth surfacing — an unscannable code is
+        // invisible until a customer says nothing happened — without failing the render over a
+        // decoder being unsure.
+        appendJobWarning(
+          jobId,
+          `QR for "${book.title}" did not decode back to its link ` +
+            `(got ${decoded ? `"${decoded}"` : "nothing"}) — check it before publishing`
+        );
+      }
+    } catch (err: any) {
+      byUrl.set(trackingUrl, {});
+      console.warn(
+        `[Longform ${jobId}] QR generation failed for "${book.title}": ${err?.message}`
+      );
+      appendJobWarning(
+        jobId,
+        `Could not generate the QR for "${book.title}" — that pitch falls back to the channel QR`
+      );
+    }
+  }
+  return ready;
+}
 
 /**
  * Read the admin-saved pacing dials, falling back to the shipping defaults. Called ONCE per job
@@ -4280,11 +4355,46 @@ export function markCtaFromSpans(
         continue;
       }
     }
-    s.cta = spans.some(sp => ws >= sp.start && we <= sp.end && we > ws);
+    // WHICH span, not just whether — one video can pitch a different book per block, and the
+    // block index is what selects it downstream (`ctaBooksFor`). Boundaries were split above, so
+    // a scene lies wholly inside at most one span.
+    const spanIdx = spans.findIndex(
+      sp => ws >= sp.start && we <= sp.end && we > ws
+    );
+    s.cta = spanIdx >= 0;
+    s.ctaIndex = spanIdx >= 0 ? spanIdx : undefined;
     ws = we;
   }
   scenes.forEach((s, i) => (s.index = i + 1));
   return scenes;
+}
+
+/**
+ * The book assigned to a scene's CTA block, or undefined when the block has none (or the script
+ * used the legacy heuristics, which produce no block numbering). Callers fall back to the
+ * channel-level cover/QR, which is exactly the pre-books behaviour.
+ */
+export function bookForScene(
+  scene: Pick<StoryboardScene, "ctaIndex">,
+  ctaBooks: LongformCtaBook[] | undefined
+): LongformCtaBook | undefined {
+  if (scene.ctaIndex == null || !ctaBooks?.length) return undefined;
+  return ctaBooks.find(b => b.ctaIndex === scene.ctaIndex);
+}
+
+/**
+ * The cover image a CTA block should reveal: its own book's, else the channel's single configured
+ * cover. Keeps every cover lookup in one place so the fallback can't drift between the marking
+ * pass and the render.
+ */
+export function coverImageForScene(
+  scene: Pick<StoryboardScene, "ctaIndex">,
+  params: Pick<LongformInputParams, "ctaBooks" | "bookCoverImageUrl">
+): string | undefined {
+  return (
+    bookForScene(scene, params.ctaBooks)?.coverImageUrl ??
+    params.bookCoverImageUrl
+  );
 }
 
 /** How many scenes right before each cover reveal carry the LARGE CENTERED QR. */
@@ -4438,12 +4548,21 @@ export function placeAssetBeats(
  * can't surface it. No-op without a channel QR. Pure — unit-tested.
  */
 export function qrOverlayUrlFor(
-  scene: Pick<StoryboardScene, "qrHero" | "qrCorner" | "coverHero">,
-  qrImageUrl: string | undefined
+  scene: Pick<
+    StoryboardScene,
+    "qrHero" | "qrCorner" | "coverHero" | "ctaIndex"
+  >,
+  qrImageUrl: string | undefined,
+  /**
+   * Per-block books. When this scene's CTA block has a book with a generated QR, that code —
+   * which encodes THIS video's tracking link for THAT book — wins over the channel-wide image.
+   * Absent, or a block with no book, falls back to `qrImageUrl` exactly as before.
+   */
+  ctaBooks?: LongformCtaBook[]
 ): string | undefined {
-  return (scene.qrHero || scene.qrCorner) && !scene.coverHero && qrImageUrl
-    ? qrImageUrl
-    : undefined;
+  if (scene.coverHero) return undefined;
+  if (!scene.qrHero && !scene.qrCorner) return undefined;
+  return bookForScene(scene, ctaBooks)?.qrImageUrl ?? qrImageUrl ?? undefined;
 }
 
 /**
@@ -4543,8 +4662,10 @@ export function markCoverReveal(
   scenes: StoryboardScene[],
   params: LongformInputParams
 ): StoryboardScene[] {
-  if (!params.bookCoverImageUrl || !params.bookTitle) return scenes;
-  const namesBook = titleMatcher(params.bookTitle);
+  // A block with its own book supplies both the cover and the title to search for; the channel's
+  // single cover+title is the fallback for blocks with no book assigned. With neither there is
+  // nothing to reveal.
+  if (!params.bookCoverImageUrl && !params.ctaBooks?.length) return scenes;
   let i = 0;
   while (i < scenes.length) {
     if (scenes[i].cta !== true) {
@@ -4554,6 +4675,15 @@ export function markCoverReveal(
     // [i, j) is one contiguous CTA run; reveal at the first title mention within it.
     let j = i;
     while (j < scenes.length && scenes[j].cta === true) j++;
+    // Resolve THIS block's book once — every scene in the run shares a ctaIndex.
+    const book = bookForScene(scenes[i], params.ctaBooks);
+    const title = book?.title ?? params.bookTitle;
+    const cover = book?.coverImageUrl ?? params.bookCoverImageUrl;
+    if (!title || !cover) {
+      i = j;
+      continue;
+    }
+    const namesBook = titleMatcher(title);
     for (let k = i; k < j; k++) {
       const s = scenes[k];
       if (s.coverHero) break; // already marked (idempotent)
@@ -4733,8 +4863,8 @@ function markQrFromCtaTails(
 
     const cover = coverBeatFor(scenes, start, params);
     if (
-      params.bookCoverImageUrl &&
       cover &&
+      coverImageForScene(cover, params) &&
       !cover.qrHero &&
       !cover.coverHero
     ) {
@@ -4759,7 +4889,9 @@ export function markCtaQrBlock(
    *  the trigger then only anchors INSIDE a marked block, never on a stray sound-alike line. */
   ctaScoped = false
 ): StoryboardScene[] {
-  if (!params.qrImageUrl) return scenes;
+  // A channel QR OR any assigned book is enough to justify the block — a book brings its own
+  // generated QR, so a channel that has moved entirely to books still gets its scan window.
+  if (!params.qrImageUrl && !params.ctaBooks?.length) return scenes;
   // Segmentation can split the trigger/release phrase across a scene boundary; re-join it first so
   // the per-scene matcher below sees it whole (else the whole block silently skips — the mid-roll bug).
   joinSplitAnchor(scenes, CTA_QR_TRIGGER);
@@ -4829,8 +4961,8 @@ export function markCtaQrBlock(
     // trigger when the pitch never names it). Needs a configured cover image.
     const cover = coverBeatFor(scenes, bs, params);
     if (
-      params.bookCoverImageUrl &&
       cover &&
+      coverImageForScene(cover, params) &&
       !cover.qrHero &&
       !cover.coverHero
     ) {
@@ -6709,13 +6841,18 @@ export async function generateSceneClips(
     );
   }
 
-  // Cover-reveal beat: always the literal channel cover (full-frame, dark backdrop), regardless of
-  // the image-lane kill switch — generating a cover from a prompt would be nonsense.
-  if (scene.coverHero && params.bookCoverImageUrl) {
+  // Cover-reveal beat: always the literal cover (full-frame, dark backdrop), regardless of the
+  // image-lane kill switch — generating a cover from a prompt would be nonsense. Which cover
+  // depends on WHICH CTA block this beat sits in, so a video pitching two books reveals the right
+  // one in each; a block with no book assigned falls back to the channel's single cover.
+  const coverUrl = scene.coverHero
+    ? coverImageForScene(scene, params)
+    : undefined;
+  if (coverUrl) {
     return generateSceneStillClip(
       jobId,
       scene,
-      params.bookCoverImageUrl,
+      coverUrl,
       undefined,
       params.videoSubject,
       false,
@@ -8037,6 +8174,18 @@ async function runUnifiedPipeline(
   // reads `pacingFor(params)`, so a mid-render settings change can never re-cut a live film.
   if (!params.pacing) params.pacing = await getLongformPacing();
   const pacing = params.pacing;
+  // Per-book tracking links + their QR codes, resolved once and snapshotted onto `params` (which
+  // the caller persists). Runs BEFORE the storyboard because `markCtaQrBlock` decides where the
+  // QR blocks and cover reveals go, and it needs to know which blocks actually have a code.
+  // Re-runs on resume only if the codes are missing — an already-generated QR is reused so the
+  // published link never changes under a re-render.
+  if (params.ctaBooks?.length && !params.ctaBooks.some(b => b.qrImageUrl)) {
+    const ready = await resolveCtaBookTracking(jobId, params.ctaBooks);
+    console.log(
+      `[Longform ${jobId}] tracking: ${ready}/${params.ctaBooks.length} CTA book(s) have a QR ` +
+        `(${params.ctaBooks.map(b => `${b.title}${b.trackingUrl ? "" : " [no shop URL]"}`).join(", ")})`
+    );
+  }
   const {
     script: spokenScript,
     spans: ctaSpans,
@@ -8888,7 +9037,7 @@ async function assembleAndFinalize(
     // The QR draws ONLY on anchored beats — the big-QR "grab your phone" block (qrHero) and the
     // small pre-cover scan window (qrCorner) — never on ordinary cta/price scenes, so a spoken
     // dollar amount can't surface it. The cover-reveal beat is left clean so the cover reads.
-    qrOverlayUrl: qrOverlayUrlFor(s, params.qrImageUrl),
+    qrOverlayUrl: qrOverlayUrlFor(s, params.qrImageUrl, params.ctaBooks),
     // qrHero → large centered QR; a qrCorner-only beat → small bottom-right corner QR.
     qrPlacement: (s.qrHero ? "center" : "corner") as "corner" | "center",
     // The block's release beat holds a silent frozen QR_TAIL_HOLD_SEC tail so the QR lingers

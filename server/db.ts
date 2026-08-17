@@ -7,11 +7,16 @@ import {
   appSettings,
   longformVideoJobs,
   longformSlots,
+  books,
+  longformSales,
 } from "../drizzle/schema";
 import type {
   InsertProviderConfig,
   InsertChannelConfig,
   InsertLongformVideoJob,
+  Book,
+  InsertBook,
+  InsertLongformSale,
 } from "../drizzle/schema";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -518,4 +523,215 @@ export async function setAppSetting(key: string, value: string): Promise<void> {
     .insert(appSettings)
     .values({ key, value })
     .onDuplicateKeyUpdate({ set: { value, updatedAt: new Date() } });
+}
+
+// ─── Books ───
+
+/** All books for a channel, newest first. `activeOnly` hides soft-deleted rows from the picker. */
+export async function getBooks(
+  channelKey: string,
+  activeOnly = false
+): Promise<Book[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const where = activeOnly
+    ? and(eq(books.channelKey, channelKey), eq(books.isActive, true))
+    : eq(books.channelKey, channelKey);
+  return db.select().from(books).where(where).orderBy(desc(books.createdAt));
+}
+
+/** One book by id, or null. Used when a job resolves its CTA assignments. */
+export async function getBookById(id: number): Promise<Book | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const [row] = await db.select().from(books).where(eq(books.id, id));
+  return row ?? null;
+}
+
+export async function createBook(data: InsertBook): Promise<number | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const [res] = await db.insert(books).values(data);
+  return (res as any)?.insertId ?? null;
+}
+
+export async function updateBook(
+  id: number,
+  data: Partial<InsertBook>
+): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(books).set(data).where(eq(books.id, id));
+}
+
+/**
+ * Soft-delete. Never a hard delete: finished videos snapshot their book onto the job, but the
+ * Books page still resolves ids to show which book a video sold, and a hard delete would turn
+ * those rows into dangling references.
+ */
+export async function deactivateBook(id: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(books).set({ isActive: false }).where(eq(books.id, id));
+}
+
+// ─── Sales ───
+
+/**
+ * Record one reported sale. Returns `false` when `externalOrderId` was already recorded — the
+ * duplicate guard that makes the store's webhook safe to retry.
+ */
+export async function recordSale(data: InsertLongformSale): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  try {
+    await db.insert(longformSales).values(data);
+    return true;
+  } catch (err: any) {
+    // MySQL duplicate-key on the unique externalOrderId — a replay, not an error.
+    //
+    // Drizzle WRAPS the driver error in a DrizzleQueryError, so the mysql2 code lives on
+    // `.cause`, not on the error itself. Checking only the top level meant the guard never
+    // fired: a retried webhook threw, the endpoint answered 500, and the store retried it
+    // forever without the sale ever being recorded. Walk the cause chain.
+    if (isDuplicateKeyError(err)) return false;
+    throw err;
+  }
+}
+
+/** True when `err` (or anything it wraps) is a MySQL duplicate-key violation. */
+function isDuplicateKeyError(err: unknown): boolean {
+  for (let e: any = err, depth = 0; e && depth < 5; e = e.cause, depth++) {
+    if (e.code === "ER_DUP_ENTRY" || e.errno === 1062) return true;
+  }
+  return false;
+}
+
+/** Per-video sales totals, keyed by jobId. Only attributed sales (a jobId was parsed) count. */
+export async function getSalesByJob(
+  jobIds: number[]
+): Promise<Map<number, { sales: number; revenueCents: number }>> {
+  const out = new Map<number, { sales: number; revenueCents: number }>();
+  const db = await getDb();
+  if (!db || jobIds.length === 0) return out;
+  const rows = await db
+    .select({
+      jobId: longformSales.jobId,
+      sales: sql<number>`COUNT(*)`,
+      revenueCents: sql<number>`COALESCE(SUM(${longformSales.amountCents}), 0)`,
+    })
+    .from(longformSales)
+    .where(inArray(longformSales.jobId, jobIds))
+    .groupBy(longformSales.jobId);
+  for (const r of rows) {
+    if (r.jobId == null) continue;
+    out.set(r.jobId, {
+      sales: Number(r.sales),
+      revenueCents: Number(r.revenueCents),
+    });
+  }
+  return out;
+}
+
+/** Sales for ONE video, split by the product the store reported — a video may pitch two books. */
+export async function getSalesByProductForJob(
+  jobId: number
+): Promise<
+  { productId: string | null; sales: number; revenueCents: number }[]
+> {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db
+    .select({
+      productId: longformSales.productId,
+      sales: sql<number>`COUNT(*)`,
+      revenueCents: sql<number>`COALESCE(SUM(${longformSales.amountCents}), 0)`,
+    })
+    .from(longformSales)
+    .where(eq(longformSales.jobId, jobId))
+    .groupBy(longformSales.productId);
+  return rows.map(r => ({
+    productId: r.productId,
+    sales: Number(r.sales),
+    revenueCents: Number(r.revenueCents),
+  }));
+}
+
+/**
+ * Job id → title, for the ids given. Unknown ids and jobs with no title are simply ABSENT from
+ * the map, so the caller can fall back per id rather than having to distinguish null from missing.
+ *
+ * Selects the title out of the JSON rather than the row: `inputParams` holds the entire script,
+ * and a report page asking for 500 videos would otherwise drag 500 scripts across the wire to
+ * read one string from each.
+ */
+export async function getVideoTitles(
+  ids: number[]
+): Promise<Map<number, string>> {
+  const out = new Map<number, string>();
+  const db = await getDb();
+  if (!db || ids.length === 0) return out;
+  const rows = await db
+    .select({
+      id: longformVideoJobs.id,
+      title: sql<
+        string | null
+      >`json_unquote(json_extract(${longformVideoJobs.inputParams}, '$.title'))`,
+    })
+    .from(longformVideoJobs)
+    .where(inArray(longformVideoJobs.id, ids));
+  for (const r of rows) {
+    const title = r.title?.trim();
+    if (title) out.set(r.id, title);
+  }
+  return out;
+}
+
+/**
+ * Recent jobs for one channel, with just enough to preview a book's tracking link against a REAL
+ * video: the id, the title, and whichever books that render actually pitched.
+ *
+ * `ctaBooks` is pulled out of `inputParams` by JSON path rather than selecting the column — the
+ * column also holds the full script, and a picker listing 50 videos does not need 50 scripts.
+ */
+export async function getJobsForChannel(
+  channelKey: string,
+  limit = 50
+): Promise<{ id: number; title: string | null; ctaBooks: unknown }[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db
+    .select({
+      id: longformVideoJobs.id,
+      title: sql<
+        string | null
+      >`json_unquote(json_extract(${longformVideoJobs.inputParams}, '$.title'))`,
+      ctaBooks: sql<
+        string | null
+      >`json_extract(${longformVideoJobs.inputParams}, '$.ctaBooks')`,
+      channelKey: sql<
+        string | null
+      >`json_unquote(json_extract(${longformVideoJobs.inputParams}, '$.channelKey'))`,
+    })
+    .from(longformVideoJobs)
+    .orderBy(desc(longformVideoJobs.id))
+    .limit(Math.max(1, Math.min(200, limit * 4)));
+  return rows
+    .filter(r => r.channelKey === channelKey)
+    .slice(0, limit)
+    .map(r => ({
+      id: r.id,
+      title: r.title,
+      // mysql2 hands JSON back already parsed on some driver versions and as a string on others.
+      ctaBooks:
+        typeof r.ctaBooks === "string"
+          ? (() => {
+              try {
+                return JSON.parse(r.ctaBooks);
+              } catch {
+                return null;
+              }
+            })()
+          : r.ctaBooks,
+    }));
 }
