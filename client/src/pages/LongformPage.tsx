@@ -3,6 +3,8 @@ import { trpc } from "@/lib/trpc";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import LongformJobSlot, { type SlotStatus } from "@/components/LongformJobSlot";
 import { VideoLibraryPanel } from "@/components/VideoLibraryPanel";
+import { PageHeader } from "@/components/PageHeader";
+import { Alert } from "@/components/ui/alert";
 import { Loader2, CheckCircle2, XCircle, Coins, Film } from "lucide-react";
 
 const MAX_SLOTS = 5;
@@ -293,16 +295,26 @@ export default function FaceLockVideo() {
     }
   }, [openFromHistory]);
 
+  // Leads the tab label rather than trailing it, so the five markers line up in a
+  // column you can read down. Idle is a hollow dot rather than nothing — an absent
+  // marker made the label jump sideways the moment a render started.
   const statusIcon = (status: SlotStatus) => {
     switch (status) {
       case "processing":
-        return <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />;
+        return (
+          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
+        );
       case "completed":
-        return <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />;
+        return <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-success" />;
       case "failed":
-        return <XCircle className="h-3.5 w-3.5 text-red-400" />;
+        return <XCircle className="h-3.5 w-3.5 shrink-0 text-destructive" />;
       default:
-        return null;
+        return (
+          <span
+            aria-hidden
+            className="h-1.5 w-1.5 shrink-0 rounded-full bg-border"
+          />
+        );
     }
   };
 
@@ -319,31 +331,27 @@ export default function FaceLockVideo() {
         activeJobIds={resumeIds ?? []}
       />
       <div className="min-w-0 flex-1 space-y-6">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Film className="h-6 w-6 text-primary" />
-            <h1 className="text-2xl font-semibold tracking-tight">
-              Long-form Video
-            </h1>
-          </div>
-          <div className="flex items-center gap-2">
-            {balance && (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground bg-secondary/50 rounded-lg px-3 py-1.5">
-                <Coins className="h-4 w-4 text-primary" />
-                <span>
+        <PageHeader
+          icon={Film}
+          title="Long-form video"
+          description={`Generate ${MAX_SLOTS} videos in parallel — each tab is its own job with its own script, channel and b-roll model, and each spends credits on its own.`}
+          actions={
+            balance && (
+              <div className="flex items-center gap-2 rounded-lg border border-border bg-muted px-3 py-1.5 text-sm">
+                <Coins className="h-4 w-4 shrink-0 text-primary" />
+                <span className="tabular-nums">
                   {providerStatus?.providerType === "sixtynine_labs" &&
                   (balance as any).dailyVideos
                     ? `${(balance as any).dailyVideos.remaining}/${(balance as any).dailyVideos.limit} daily · ${(balance as any).monthlyVideos.remaining}/${(balance as any).monthlyVideos.limit} monthly`
                     : `${balance.availableQuota} / ${balance.totalQuota} credits`}
                 </span>
               </div>
-            )}
-          </div>
-        </div>
+            )
+          }
+        />
 
         {slotsUnavailable && (
-          <div className="rounded-md border border-amber-500/60 bg-amber-500/10 px-3 py-2 text-sm">
-            <span className="font-medium">Workspace sync is unavailable.</span>{" "}
+          <Alert tone="warning" title="Workspace sync is unavailable">
             Tabs still work, but this session can't restore or remember which
             job each one holds. A momentary blip clears on its own; if this
             stays, the database is behind{" "}
@@ -358,39 +366,42 @@ export default function FaceLockVideo() {
             {slotsError?.message && (
               // The real error, because "unapplied migration" is a guess and this is not:
               // a missing table and an unreachable host produce very different text.
-              <div className="mt-1 truncate font-mono text-xs text-muted-foreground">
+              <div className="mt-1 truncate font-mono text-xs opacity-80">
                 {slotsError.message}
               </div>
             )}
-          </div>
+          </Alert>
         )}
 
         {mockMode?.enabled && (
-          <div className="rounded-md border border-amber-500/60 bg-amber-500/10 px-3 py-2 text-sm">
-            <span className="font-medium">Mock mode is ON.</span> Renders are
-            free and produce placeholder footage — no credits are spent and no
-            provider is contacted. Turn it off in Admin → Provider Keys before a
-            real run.
-          </div>
+          <Alert tone="warning" title="Mock mode is on">
+            Renders are free and produce placeholder footage — no credits are
+            spent and no provider is contacted. Turn it off in Admin → Provider
+            keys before a real run.
+          </Alert>
         )}
 
-        <p className="text-sm text-muted-foreground">
-          Generate {MAX_SLOTS} videos in parallel — each tab is its own job with
-          its own script, channel, and b-roll model. They run independently and
-          each consumes credits on its own.
-        </p>
-
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <div className="flex items-center gap-2">
-            <TabsList>
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="gap-0">
+          {/* Scrolls rather than wraps: five tabs carrying titles overflow a phone,
+              and a wrapped second row used to push the whole form down the page. */}
+          {/* `py-1`, not `pb-1`: `overflow-x-auto` clips vertically too, and the
+              "job finished" pulse is a 3px ring drawn outside the trigger. */}
+          <div className="-mx-4 overflow-x-auto px-4 py-1">
+            <TabsList className="h-auto">
               {Array.from({ length: MAX_SLOTS }, (_, i) => (
                 <TabsTrigger
                   key={i}
                   value={String(i)}
-                  className={`gap-1.5 ${needsAttention[i] ? "tab-pulse" : ""}`}
+                  className={`gap-1.5 px-3 py-1.5 ${needsAttention[i] ? "tab-pulse" : ""}`}
+                  title={draftTitles[i] || `Video ${i + 1}`}
                 >
-                  Video {i + 1}
                   {statusIcon(slotStatuses[i])}
+                  {/* Five tabs all reading "Video N" gave no way to tell which job
+                      was which; the draft title is what the operator actually
+                      recognises, so it wins the label when there is one. */}
+                  <span className="max-w-36 truncate">
+                    {draftTitles[i]?.trim() || `Video ${i + 1}`}
+                  </span>
                 </TabsTrigger>
               ))}
             </TabsList>

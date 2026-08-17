@@ -41,19 +41,21 @@ export function LoginScreen({ onSuccess }: { onSuccess: () => void }) {
   };
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-background">
+    // A flat grey page behind a white card gives the card its edge; on white-on-
+    // white the panel would have to lean entirely on its border to be visible.
+    <div className="flex items-center justify-center min-h-screen bg-muted/50">
       <div className="flex flex-col items-center gap-6 p-4 w-full max-w-sm">
         {/* Logo */}
         <div className="flex items-center gap-3 mb-2">
-          <div className="h-10 w-10 rounded-lg bg-primary/20 flex items-center justify-center">
-            <Film className="h-6 w-6 text-primary" />
+          <div className="h-10 w-10 rounded-lg bg-primary flex items-center justify-center">
+            <Film className="h-5 w-5 text-primary-foreground" />
           </div>
           <span className="text-2xl font-semibold tracking-tight">
             Longform Studio
           </span>
         </div>
 
-        <Card className="w-full bg-card border-border">
+        <Card className="w-full">
           <CardContent className="p-6">
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="text-center mb-2">
@@ -106,7 +108,12 @@ export function LoginScreen({ onSuccess }: { onSuccess: () => void }) {
               </div>
 
               {error && (
-                <p className="text-sm text-red-400 text-center">{error}</p>
+                <p
+                  role="alert"
+                  className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-center text-sm text-destructive"
+                >
+                  {error}
+                </p>
               )}
 
               <Button

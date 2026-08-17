@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Alert } from "@/components/ui/alert";
 import {
   Select,
   SelectContent,
@@ -60,6 +61,54 @@ import {
 } from "lucide-react";
 
 export type SlotStatus = "idle" | "processing" | "completed" | "failed";
+
+/**
+ * One numbered section of the generate form.
+ *
+ * The form was a single undivided card holding six unrelated controls in a flat
+ * `space-y-6` stack — a script box, a channel picker, CTA books, asset uploads, a
+ * title and a warning — with no signal about which were required to press the
+ * button at the bottom. Numbering them says how many decisions there are and how
+ * far along you got; the rules between them say where one ends.
+ */
+function Step({
+  n,
+  title,
+  hint,
+  optional,
+  children,
+}: {
+  n: number;
+  title: string;
+  hint?: React.ReactNode;
+  optional?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="border-t border-border px-5 py-5 first:border-t-0 sm:px-6">
+      <div className="mb-3 flex items-baseline gap-2.5">
+        <span
+          aria-hidden
+          className="flex h-5 w-5 shrink-0 translate-y-0.5 items-center justify-center rounded-full bg-secondary text-[11px] font-medium tabular-nums text-muted-foreground"
+        >
+          {n}
+        </span>
+        <h3 className="text-sm font-medium">{title}</h3>
+        {optional && (
+          <span className="text-xs text-muted-foreground">Optional</span>
+        )}
+      </div>
+      <div className="space-y-2 sm:pl-[30px]">
+        {children}
+        {hint && (
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            {hint}
+          </p>
+        )}
+      </div>
+    </section>
+  );
+}
 
 const STAGE_LABELS: Record<string, string> = {
   storyboard: "Storyboarding script",
@@ -563,6 +612,35 @@ export default function LongformJobSlot({
     !generateMutation.isPending &&
     !isProcessing;
 
+  const wordCount = useMemo(
+    () => script.trim().split(/\s+/).filter(Boolean).length,
+    [script]
+  );
+  // ~150 wpm is a narration pace, not a reading one. Deliberately labelled
+  // "roughly" — the real runtime is measured from the rendered voiceover.
+  const estimatedMinutes = useMemo(() => {
+    const total = Math.round((wordCount / 150) * 60);
+    const m = Math.floor(total / 60);
+    return m > 0 ? `${m}m ${total % 60}s` : `${total}s`;
+  }, [wordCount]);
+
+  /**
+   * Why the generate button is disabled, in the operator's terms. The button used
+   * to just sit greyed out — three separate conditions can disable it and none of
+   * them announced itself, so the fix was guesswork.
+   */
+  const blockedReason = isProcessing
+    ? "This tab is rendering. It'll free up when the job finishes."
+    : generateMutation.isPending
+      ? null
+      : !script.trim()
+        ? "Paste a script to get started."
+        : !channelKey
+          ? "Pick a channel — it supplies the voice and host."
+          : !channelDefaults?.voiceId
+            ? "That channel has no voice configured. Set one under Channels."
+            : null;
+
   const confirmGenerate = () => {
     setShowConfirm(false);
     armNotifications(); // unlock audio + request notification permission on the click
@@ -578,90 +656,83 @@ export default function LongformJobSlot({
 
   return (
     <div className="space-y-6">
-      <Card className="bg-card border-border">
-        <CardContent className="p-6 space-y-6">
-          <p className="text-sm text-muted-foreground">
-            Paste only the spoken script, word-for-word — it is voiced verbatim
-            as one continuous narration. The host look, b-roll style, tone, and
-            16:9 framing are applied automatically from the saved Longform
-            instruction (Admin → Longform); don't put directing notes here. The
-            host photo and face model are configured per channel in Admin →
-            Channels.
+      {/* Deliberately NOT `overflow-hidden`, which would otherwise be the obvious
+          way to keep the full-bleed sections inside the rounded corners: it makes
+          the card a scroll container, and a `sticky` child then resolves against
+          that container instead of the viewport — the generate button below would
+          silently stop sticking. The footer rounds its own bottom corners instead. */}
+      <Card className="gap-0 py-0">
+        <Step
+          n={1}
+          title="Script"
+          hint="Spoken words only, voiced verbatim. Directing notes here would be read aloud — the host look, b-roll style and 16:9 framing come from the saved Longform instruction, and the host photo and face model from the channel."
+        >
+          <Textarea
+            id={`lf-script-${slotIndex}`}
+            value={script}
+            onChange={e => setScript(e.target.value)}
+            placeholder="Paste the spoken script…"
+            className="min-h-[200px] resize-y text-sm leading-relaxed"
+          />
+          {/* Live, because script length is what decides runtime and spend, and
+              that used to be invisible until the voiceover stage reported back. */}
+          <p className="text-xs tabular-nums text-muted-foreground">
+            {wordCount.toLocaleString()} word{wordCount === 1 ? "" : "s"}
+            {wordCount > 0 && ` · roughly ${estimatedMinutes} of narration`}
           </p>
-
-          {/* Script */}
-          <div className="space-y-2">
-            <Label
-              htmlFor={`lf-script-${slotIndex}`}
-              className="text-sm font-medium"
-            >
-              Script
-            </Label>
-            <Textarea
-              id={`lf-script-${slotIndex}`}
-              value={script}
-              onChange={e => setScript(e.target.value)}
-              className="min-h-[200px] bg-secondary/50 border-border resize-y text-sm leading-relaxed"
-            />
-            <p className="text-xs text-muted-foreground">
-              Spoken script only — voiced word-for-word. Directing notes here
-              would be read aloud, so keep them out (look & style come from the
-              saved Longform instruction).
-            </p>
-          </div>
-
           {/* B-roll VIDEO renders on this tab's APIMART key (stills always use OpenAI gpt-image-2).
               Key status is admin-only (getApimartKeys is adminProcedure), so the warning is too. */}
           {apimartKeyMissing && (
-            <p className="text-xs text-amber-400">
-              ⚠ No APIMART key for this tab — set it in Admin → Longform. B-roll
+            <Alert tone="warning" className="text-xs">
+              No APIMART key for this tab — set it in Admin → Longform. B-roll
               video will use 69 Labs.
-            </p>
+            </Alert>
           )}
+        </Step>
 
-          {/* Channel (voice) */}
-          <div className="space-y-2">
-            <Label className="text-sm font-medium">Channel</Label>
-            <Select value={channelKey} onValueChange={setChannelKey}>
-              <SelectTrigger className="bg-secondary/50 border-border">
-                <SelectValue placeholder="Select a channel..." />
-              </SelectTrigger>
-              <SelectContent>
-                {channels.map(ch => (
-                  <SelectItem key={ch.key} value={ch.key}>
-                    {ch.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+        <Step
+          n={2}
+          title="Channel"
+          hint="The voiceover uses this channel's saved voice."
+        >
+          <Select value={channelKey} onValueChange={setChannelKey}>
+            <SelectTrigger className="w-full sm:max-w-sm">
+              <SelectValue placeholder="Select a channel…" />
+            </SelectTrigger>
+            <SelectContent>
+              {channels.map(ch => (
+                <SelectItem key={ch.key} value={ch.key}>
+                  {ch.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
 
-            {channelKey && channelDefaults && (
-              <div className="rounded border border-border/50 bg-secondary/20 p-2 text-xs space-y-2">
-                {channelDefaults.voiceId ? (
-                  <p>
-                    <span className="font-medium text-foreground/70">
-                      Voice:{" "}
-                    </span>
+          {channelKey && channelDefaults && (
+            <div className="space-y-2 rounded-md border border-border bg-muted/50 p-3 text-xs">
+              {channelDefaults.voiceId ? (
+                <p>
+                  <span className="font-medium">Voice: </span>
+                  <span className="text-muted-foreground">
                     {channelDefaults.voiceName ?? channelDefaults.voiceId}
-                  </p>
-                ) : (
-                  <p className="text-red-400 font-medium">
-                    ⚠ No voice configured for this channel
-                  </p>
-                )}
-                <ChannelVoiceTuning
-                  key={channelKey}
-                  channelKey={channelKey}
-                  ttsSpeed={channelDefaults.ttsSpeed}
-                  ttsVolume={channelDefaults.ttsVolume}
-                />
-              </div>
-            )}
-            <p className="text-xs text-muted-foreground">
-              The voiceover uses this channel's saved voice.
-            </p>
-          </div>
+                  </span>
+                </p>
+              ) : (
+                <p className="font-medium text-destructive">
+                  No voice configured for this channel — set one under Channels.
+                </p>
+              )}
+              <ChannelVoiceTuning
+                key={channelKey}
+                channelKey={channelKey}
+                ttsSpeed={channelDefaults.ttsSpeed}
+                ttsVolume={channelDefaults.ttsVolume}
+              />
+            </div>
+          )}
+        </Step>
 
+        <Step n={3} title="Call to action" optional>
           {/* Which book each CTA block pitches — one video can sell more than one. */}
           <LongformCtaBooks
             script={script}
@@ -677,50 +748,56 @@ export default function LongformJobSlot({
             onChange={setAssets}
             disabled={generateMutation.isPending || isProcessing}
           />
+        </Step>
 
-          {/* Video title */}
-          <div className="space-y-2">
-            <Label className="text-sm font-medium">Video title</Label>
-            <Input
-              value={downloadTitle}
-              onChange={e => setDownloadTitle(e.target.value)}
-              placeholder="Video title (optional)"
-              className="bg-secondary/50 border-border"
-            />
-          </div>
+        <Step
+          n={4}
+          title="Video title"
+          optional
+          hint="Names the tab, the library entry and the downloaded MP4."
+        >
+          <Input
+            value={downloadTitle}
+            onChange={e => setDownloadTitle(e.target.value)}
+            placeholder="Untitled video"
+            className="w-full sm:max-w-sm"
+          />
+        </Step>
 
-          <div className="rounded-md bg-amber-500/10 border border-amber-500/20 p-3 text-xs text-amber-300/90">
-            Length is set by your script — it's voiced word-for-word and
-            storyboarded into a 16:9 talking-head video with b-roll cutaways.
-            Clip count and runtime are computed after the voiceover. Longer
-            scripts cost more credits and can take a long time. Each video tab
-            you generate runs as its own job and consumes credits independently.
-          </div>
-
+        {/* Sticky rather than in flow: the form above runs well past a screen, so
+            the button that acts on it used to be off-screen from the moment you
+            started typing — you wrote the script, then scrolled back down to find
+            the control you had just scrolled past. */}
+        <div className="sticky bottom-0 z-10 rounded-b-xl border-t border-border bg-card/95 px-5 py-4 backdrop-blur-sm sm:px-6">
           <Button
             onClick={() => setShowConfirm(true)}
             disabled={!canGenerate}
-            className="w-full h-12 text-base font-medium"
+            className="h-11 w-full text-base font-medium"
             size="lg"
           >
             {generateMutation.isPending ? (
               <>
                 <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                Submitting...
+                Submitting…
               </>
             ) : isProcessing ? (
               <>
                 <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                Generating...
+                Generating…
               </>
             ) : (
               <>
                 <ScanFace className="mr-2 h-5 w-5" />
-                Generate Video {slotIndex + 1}
+                Generate video {slotIndex + 1}
               </>
             )}
           </Button>
-        </CardContent>
+          {/* A disabled button with no reason is the same as a broken one. */}
+          <p className="mt-2 text-center text-xs text-muted-foreground">
+            {blockedReason ??
+              "Voiced word-for-word into a 16:9 film. Length — and cost — follow your script."}
+          </p>
+        </div>
       </Card>
 
       {/* Progress / result */}
@@ -732,14 +809,14 @@ export default function LongformJobSlot({
                 {isProcessing ? (
                   <Loader2 className="h-5 w-5 shrink-0 animate-spin text-primary" />
                 ) : job.status === "completed" ? (
-                  <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-400" />
+                  <CheckCircle2 className="h-5 w-5 shrink-0 text-success" />
                 ) : (
-                  <XCircle className="h-5 w-5 shrink-0 text-red-400" />
+                  <XCircle className="h-5 w-5 shrink-0 text-destructive" />
                 )}
                 {job.status === "completed" ? (
                   <div className="flex min-w-0 flex-1 items-center gap-2">
                     <Select value={channelKey} onValueChange={setChannelKey}>
-                      <SelectTrigger className="h-9 w-40 bg-secondary/50 border-border">
+                      <SelectTrigger className="h-9 w-40 border-border">
                         <SelectValue placeholder="Channel" />
                       </SelectTrigger>
                       <SelectContent>
@@ -791,7 +868,7 @@ export default function LongformJobSlot({
                     size="sm"
                     onClick={() => jobId && cancelMutation.mutate({ jobId })}
                     disabled={cancelMutation.isPending}
-                    className="text-muted-foreground hover:text-red-400"
+                    className="text-muted-foreground hover:text-destructive"
                   >
                     <X className="mr-2 h-4 w-4" />
                     Cancel
@@ -801,7 +878,7 @@ export default function LongformJobSlot({
                     variant="ghost"
                     size="sm"
                     onClick={() => setShowClearConfirm(true)}
-                    className="text-muted-foreground hover:text-red-400"
+                    className="text-muted-foreground hover:text-destructive"
                     title="Clear output and error log from this slot"
                   >
                     <Trash2 className="mr-2 h-4 w-4" />
@@ -830,7 +907,7 @@ export default function LongformJobSlot({
               )}
 
             {job.status === "failed" && (
-              <p className="text-xs text-red-400">
+              <p className="text-xs text-destructive">
                 {sanitizeError(job.errorMessage || "Generation failed")}
               </p>
             )}
@@ -838,7 +915,7 @@ export default function LongformJobSlot({
             {progress?.warnings && progress.warnings.length > 0 && (
               <ul className="space-y-0.5">
                 {progress.warnings.map((w, i) => (
-                  <li key={i} className="text-xs text-amber-500">
+                  <li key={i} className="text-xs text-warning">
                     ⚠ {w}
                   </li>
                 ))}
@@ -936,7 +1013,9 @@ export default function LongformJobSlot({
         // Anchor for "Open" from the library: the generator form above is tall, so landing
         // at the top of the page looked like nothing had happened. The page scrolls here.
         <div className="space-y-3" id={`storyboard-${slotIndex}`}>
-          <div className="sticky top-0 z-20 -mx-4 space-y-3 border-b border-border bg-background px-4 py-3">
+          {/* `top-0` would park this underneath the app header, which is now
+              sticky too — offset by its height so the two stack instead. */}
+          <div className="sticky top-[var(--app-header-h)] z-20 -mx-4 space-y-3 border-b border-border bg-background px-4 py-3">
             <div className="flex items-center justify-between gap-3">
               <h2 className="text-lg font-medium">
                 Storyboard ({scenes.length} scenes)
@@ -1137,7 +1216,7 @@ export default function LongformJobSlot({
                       ) : (
                         <div className="flex items-center justify-center h-24 rounded bg-secondary/40 text-muted-foreground">
                           {scene.sceneStatus === "failed" ? (
-                            <XCircle className="h-5 w-5 text-red-400" />
+                            <XCircle className="h-5 w-5 text-destructive" />
                           ) : (
                             <Loader2 className="h-5 w-5 animate-spin" />
                           )}
@@ -1201,7 +1280,7 @@ export default function LongformJobSlot({
                         {scene.sceneStatus === "rendering" && (
                           <Badge
                             variant="outline"
-                            className="text-[10px] py-0 text-amber-400 border-amber-400/40"
+                            className="text-[10px] py-0 text-warning border-warning/40"
                           >
                             Rendering — retry to resume
                           </Badge>
@@ -1209,7 +1288,7 @@ export default function LongformJobSlot({
                         {isSceneQueued && (
                           <Badge
                             variant="outline"
-                            className="text-[10px] py-0 gap-1 text-blue-400 border-blue-400/40"
+                            className="text-[10px] py-0 gap-1 text-info border-info/40"
                           >
                             <Loader2 className="h-3 w-3 animate-spin" />
                             Regenerating
@@ -1220,7 +1299,7 @@ export default function LongformJobSlot({
                           scene.sceneStatus === "completed" && (
                             <Badge
                               variant="outline"
-                              className="text-[10px] py-0 gap-1 text-green-400 border-green-400/40"
+                              className="text-[10px] py-0 gap-1 text-success border-success/40"
                             >
                               <CheckCircle2 className="h-3 w-3" />
                               Regenerated
@@ -1244,7 +1323,7 @@ export default function LongformJobSlot({
                         </p>
                       </div>
                       {scene.error && (
-                        <p className="text-xs text-red-400">
+                        <p className="text-xs text-destructive">
                           {sanitizeError(scene.error)}
                         </p>
                       )}
@@ -1290,7 +1369,7 @@ export default function LongformJobSlot({
                                   [scene.index]: e.target.value,
                                 }))
                               }
-                              className="text-xs min-h-[80px] bg-secondary/50 border-border resize-y"
+                              className="text-xs min-h-[80px] border-border resize-y"
                               placeholder="Describe the visual for this scene..."
                             />
                             {(scene.assembledClipPrompt ||
@@ -1420,17 +1499,25 @@ export default function LongformJobSlot({
                     scenes.
                   </p>
                 )}
-                <div className="bg-secondary/50 rounded-md p-3 text-xs space-y-1">
-                  <p>
-                    Host lock:{" "}
+                {/* The three facts that decide whether this click is the right
+                    one, together, instead of scattered up the form. */}
+                <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 rounded-md border border-border bg-muted/60 p-3 text-xs">
+                  <dt className="text-muted-foreground">Script</dt>
+                  <dd className="tabular-nums">
+                    {wordCount.toLocaleString()} words · roughly{" "}
+                    {estimatedMinutes}
+                  </dd>
+                  <dt className="text-muted-foreground">Host lock</dt>
+                  <dd>
                     {channelDefaults?.hostPhotoUrl
-                      ? "on"
-                      : "no channel photo — text-only"}
-                  </p>
-                  <p>B-roll model: Grok</p>
-                </div>
-                <p className="text-amber-400">
-                  Length follows your script; long scripts consume many credits
+                      ? "On"
+                      : "No channel photo — text-only"}
+                  </dd>
+                  <dt className="text-muted-foreground">B-roll model</dt>
+                  <dd>Grok</dd>
+                </dl>
+                <p className="text-warning">
+                  Length follows your script; long scripts spend many credits
                   and can run for a long time.
                 </p>
               </div>

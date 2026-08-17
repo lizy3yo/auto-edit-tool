@@ -20,8 +20,10 @@ import {
   type DeletableJob,
 } from "@/components/DeleteVideoDialog";
 import { downloadFile } from "@/lib/download";
+import { PageHeader } from "@/components/PageHeader";
 import {
   Loader2,
+  LibraryBig,
   Plus,
   Search,
   Tv,
@@ -86,21 +88,17 @@ export default function LibraryPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Your Library
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {jobs?.length ?? 0} video{jobs?.length === 1 ? "" : "s"} — open one
-            to keep working, or start a new render.
-          </p>
-        </div>
-        <Button onClick={() => navigate("/")} className="gap-1.5">
-          <Plus className="h-4 w-4" />
-          New video
-        </Button>
-      </div>
+      <PageHeader
+        icon={LibraryBig}
+        title="Your library"
+        description={`${jobs?.length ?? 0} video${jobs?.length === 1 ? "" : "s"} — open one to keep working, or start a new render.`}
+        actions={
+          <Button onClick={() => navigate("/")} className="gap-1.5">
+            <Plus className="h-4 w-4" />
+            New video
+          </Button>
+        }
+      />
 
       <div className="flex flex-wrap items-center gap-3">
         {/* `min-w-64` unconditionally was 256px of hard floor — wider than the content
@@ -152,7 +150,9 @@ export default function LibraryPage() {
           {filtered.map(job => (
             <article
               key={job.id}
-              className="flex flex-col overflow-hidden rounded-lg border border-border bg-card transition-colors hover:border-primary/40"
+              // Hover lifts rather than tinting the border: on white a 40%-primary
+              // hairline is a colour most people won't register as a state change.
+              className="flex flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm transition-shadow hover:shadow-md"
             >
               <button
                 type="button"
@@ -279,11 +279,14 @@ function StatusBadge({
 }: {
   status: "processing" | "completed" | "failed";
 }) {
+  // Sits ON the poster frame, so a translucent tint is not enough — it has to read
+  // against whatever that frame happens to be. Solid fill, light text, and a ring
+  // to lift it off a light thumbnail.
   const base =
-    "absolute left-2 top-2 flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium backdrop-blur";
+    "absolute left-2 top-2 flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium text-white shadow-sm ring-1 ring-black/10";
   if (status === "processing") {
     return (
-      <span className={`${base} bg-primary/20 text-primary`}>
+      <span className={`${base} bg-primary`}>
         <Loader2 className="h-3 w-3 animate-spin" />
         Generating…
       </span>
@@ -291,14 +294,14 @@ function StatusBadge({
   }
   if (status === "failed") {
     return (
-      <span className={`${base} bg-red-500/20 text-red-400`}>
+      <span className={`${base} bg-destructive`}>
         <XCircle className="h-3 w-3" />
         Failed
       </span>
     );
   }
   return (
-    <span className={`${base} bg-emerald-500/20 text-emerald-400`}>
+    <span className={`${base} bg-success`}>
       <CheckCircle2 className="h-3 w-3" />
       Ready
     </span>

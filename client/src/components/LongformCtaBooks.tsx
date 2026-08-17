@@ -115,7 +115,7 @@ export function LongformCtaBooks({
       </Label>
 
       {available.length === 0 ? (
-        <p className="flex items-start gap-1.5 text-xs text-amber-400">
+        <p className="flex items-start gap-1.5 text-xs text-warning">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           No books set up for this channel yet — add them in Admin → Books. This
           video will use the channel's single cover and QR instead, with no
@@ -143,7 +143,7 @@ export function LongformCtaBooks({
                     disabled={disabled}
                     onValueChange={v => set(b.ctaIndex, v)}
                   >
-                    <SelectTrigger className="h-8 bg-secondary/50 text-sm">
+                    <SelectTrigger className="h-8 text-sm">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -159,7 +159,7 @@ export function LongformCtaBooks({
                     </SelectContent>
                   </Select>
                   {book && !book.shopUrl && (
-                    <p className="mt-1.5 flex items-start gap-1.5 text-[11px] text-amber-400">
+                    <p className="mt-1.5 flex items-start gap-1.5 text-[11px] text-warning">
                       <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
                       This book has no shop link, so this pitch gets no QR and
                       no sales tracking. Add one in Admin → Books.

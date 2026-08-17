@@ -81,16 +81,22 @@ function CopyButton({
   );
 }
 
-/** Colour per shot kind, so the map is scannable without reading every row. */
+/**
+ * Colour per shot kind, so the map is scannable without reading every row.
+ *
+ * Light-mode weights: a `50` fill under `700` text, rather than the `500/15` fill
+ * under `300` text a dark surface wants. Those pale 300s measured under 2:1 on
+ * white — legible on the old near-black card, invisible on this one.
+ */
 const KIND_STYLE: Record<string, string> = {
-  host: "bg-sky-500/15 text-sky-300 border-sky-500/30",
-  split: "bg-violet-500/15 text-violet-300 border-violet-500/30",
-  splitMotion: "bg-violet-500/25 text-violet-200 border-violet-400/40",
-  video: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
-  still: "bg-zinc-500/15 text-zinc-300 border-zinc-500/30",
-  asset: "bg-amber-500/15 text-amber-300 border-amber-500/30",
-  cover: "bg-orange-500/15 text-orange-300 border-orange-500/30",
-  qrHero: "bg-fuchsia-500/15 text-fuchsia-300 border-fuchsia-500/30",
+  host: "bg-sky-50 text-sky-700 border-sky-200",
+  split: "bg-violet-50 text-violet-700 border-violet-200",
+  splitMotion: "bg-violet-100 text-violet-800 border-violet-300",
+  video: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  still: "bg-zinc-100 text-zinc-700 border-zinc-300",
+  asset: "bg-amber-50 text-amber-800 border-amber-200",
+  cover: "bg-orange-50 text-orange-700 border-orange-200",
+  qrHero: "bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200",
 };
 
 export function LongformPublishKit({
@@ -165,20 +171,20 @@ export function LongformPublishKit({
                       {b.trackingUrl}
                     </div>
                     {b.qrVerified === false && (
-                      <p className="flex items-center gap-1.5 text-[11px] text-amber-400">
+                      <p className="flex items-center gap-1.5 text-[11px] text-warning">
                         <AlertTriangle className="h-3 w-3" />
                         The QR couldn't be read back — check it scans before
                         publishing.
                       </p>
                     )}
                     {b.qrVerified === true && (
-                      <p className="flex items-center gap-1.5 text-[11px] text-emerald-500">
+                      <p className="flex items-center gap-1.5 text-[11px] text-success">
                         <CheckCircle2 className="h-3 w-3" /> QR verified
                       </p>
                     )}
                   </>
                 ) : (
-                  <p className="flex items-center gap-1.5 text-[11px] text-amber-400">
+                  <p className="flex items-center gap-1.5 text-[11px] text-warning">
                     <AlertTriangle className="h-3 w-3" />
                     No shop link on this book — this pitch has no tracking. Add
                     one in Admin → Books.
@@ -205,7 +211,7 @@ export function LongformPublishKit({
           <Textarea
             readOnly
             value={data.description}
-            className="min-h-[120px] resize-y bg-secondary/50 font-mono text-xs"
+            className="min-h-[120px] resize-y font-mono text-xs"
           />
           <p className="text-xs text-muted-foreground">
             Paste this into the video's YouTube description. The links carry
@@ -287,7 +293,7 @@ export function LongformPublishKit({
             value={youtubeUrl}
             onChange={e => setYoutubeUrl(e.target.value)}
             placeholder="https://youtu.be/…"
-            className="bg-secondary/50 text-sm"
+            className="text-sm"
           />
           <Button
             variant="outline"

@@ -67,7 +67,7 @@ export function VideoLibraryPanel({
     // (script box, storyboard grid) into something unusable. The Library nav item is the
     // way in at those sizes. `sticky` keeps it in view while the long generator page
     // scrolls, instead of scrolling away with it.
-    <aside className="sticky top-6 hidden h-[calc(100vh-6rem)] w-64 shrink-0 flex-col rounded-lg border border-border bg-card lg:flex xl:w-72">
+    <aside className="sticky top-[calc(var(--app-header-h)+1.5rem)] hidden h-[calc(100vh-var(--app-header-h)-3rem)] w-64 shrink-0 flex-col overflow-hidden rounded-lg border border-border bg-card lg:flex xl:w-72">
       <header className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
         <div className="flex items-center gap-2">
           <h2 className="text-sm font-semibold">Your Library</h2>
@@ -215,14 +215,14 @@ function StatusLine({
   }
   if (job.status === "failed") {
     return (
-      <span className="flex items-center gap-1 text-xs text-red-400">
+      <span className="flex items-center gap-1 text-xs text-destructive">
         <XCircle className="h-3 w-3" />
         Failed
       </span>
     );
   }
   return (
-    <span className="flex items-center gap-1 text-xs text-emerald-400">
+    <span className="flex items-center gap-1 text-xs text-success">
       <CheckCircle2 className="h-3 w-3" />
       Ready
     </span>

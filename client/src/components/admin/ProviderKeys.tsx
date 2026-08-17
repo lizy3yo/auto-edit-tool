@@ -35,7 +35,7 @@ function MockModeToggle() {
       </Label>
       <div
         className={`flex items-center justify-between gap-4 rounded-md border p-3 ${
-          enabled ? "border-amber-500/60 bg-amber-500/10" : "border-border"
+          enabled ? "border-warning/40 bg-warning/10" : "border-border"
         }`}
       >
         <div className="text-sm">
@@ -289,7 +289,7 @@ export function ProviderKeys() {
           their own key; blank ⇒ those pages can&apos;t generate.
         </p>
         {aireiter?.lanes.broll && (
-          <p className="text-xs text-amber-500">
+          <p className="text-xs text-warning">
             Overridden — b-roll is currently rendering on AIReiter (below), so
             these APIMART keys are not being billed.
           </p>
@@ -344,7 +344,7 @@ export function ProviderKeys() {
         </p>
         <p className="text-xs">
           {aireiter?.lanes.broll || aireiter?.lanes.stills ? (
-            <span className="text-emerald-500">
+            <span className="text-success">
               Active on: {aireiter.lanes.broll ? "b-roll" : ""}
               {aireiter.lanes.broll && aireiter.lanes.stills ? " + " : ""}
               {aireiter.lanes.stills ? "stills/keyframes" : ""}

@@ -68,7 +68,7 @@ export function VideoPlayerDialog({
               </div>
             ) : (
               <div className="flex flex-col items-center gap-2 rounded-lg border border-border bg-secondary/40 px-6 py-14 text-center">
-                <XCircle className="h-5 w-5 text-red-400" />
+                <XCircle className="h-5 w-5 text-destructive" />
                 <p className="text-sm font-medium">
                   {job.status === "failed"
                     ? "This render failed"

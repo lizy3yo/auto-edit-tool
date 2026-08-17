@@ -78,7 +78,7 @@ export function DeleteVideoDialog({
             {rendering && (
               <>
                 {" "}
-                <span className="font-medium text-amber-500">
+                <span className="font-medium text-warning">
                   This render is still running. Deleting it does not stop the
                   work already submitted to the providers — those scenes finish
                   and bill as normal, with nowhere left to land.

@@ -6,8 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, KeyRound, Plug } from "lucide-react";
+import { Loader2, KeyRound, Plug, Settings } from "lucide-react";
 import { toast } from "sonner";
+import { PageHeader } from "@/components/PageHeader";
 import { ProviderKeys } from "@/components/admin/ProviderKeys";
 import { LongformInstruction } from "@/components/admin/LongformInstruction";
 import { LongformPacing } from "@/components/admin/LongformPacing";
@@ -89,7 +90,7 @@ function SixtyNineLabsCard() {
                     (current: {row.apiKeyMasked})
                   </span>
                 ) : (
-                  <span className="text-amber-500">(not set)</span>
+                  <span className="text-warning">(not set)</span>
                 )}
               </Label>
               <div className="flex gap-2">
@@ -156,22 +157,26 @@ function SixtyNineLabsCard() {
 
 export default function AdminPage() {
   return (
-    <div className="space-y-4">
-      <h1 className="text-xl font-semibold">Admin</h1>
-      <Tabs defaultValue="keys">
+    <div className="space-y-6">
+      <PageHeader
+        icon={Settings}
+        title="Admin"
+        description="Provider keys and the directing instruction — set once, rarely touched. Per-channel settings live under Channels."
+      />
+      <Tabs defaultValue="keys" className="gap-4">
         <TabsList>
-          <TabsTrigger value="keys">Provider Keys</TabsTrigger>
-          <TabsTrigger value="instruction">Longform Instruction</TabsTrigger>
-          <TabsTrigger value="pacing">Longform Pacing</TabsTrigger>
+          <TabsTrigger value="keys">Provider keys</TabsTrigger>
+          <TabsTrigger value="instruction">Longform instruction</TabsTrigger>
+          <TabsTrigger value="pacing">Longform pacing</TabsTrigger>
         </TabsList>
-        <TabsContent value="keys" className="space-y-4 pt-2">
+        <TabsContent value="keys" className="space-y-4">
           <SixtyNineLabsCard />
           <ProviderKeys />
         </TabsContent>
-        <TabsContent value="instruction" className="pt-2">
+        <TabsContent value="instruction">
           <LongformInstruction />
         </TabsContent>
-        <TabsContent value="pacing" className="pt-2">
+        <TabsContent value="pacing">
           <LongformPacing />
         </TabsContent>
       </Tabs>

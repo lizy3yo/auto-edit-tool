@@ -174,7 +174,7 @@ function QrPreview({
           Show link for
         </Label>
         <Select value={pick} onValueChange={setPick}>
-          <SelectTrigger className="h-7 w-full max-w-64 bg-secondary/50 text-xs">
+          <SelectTrigger className="h-7 w-full max-w-64 text-xs">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -211,17 +211,17 @@ function QrPreview({
           />
           <div className="min-w-0 flex-1 space-y-1 text-xs">
             {isPublished ? (
-              <p className="flex items-center gap-1.5 text-emerald-500">
+              <p className="flex items-center gap-1.5 text-success">
                 <CheckCircle2 className="h-3.5 w-3.5" />
                 This is the real code from video #{chosen!.id}
               </p>
             ) : data?.verified ? (
-              <p className="flex items-center gap-1.5 text-emerald-500">
+              <p className="flex items-center gap-1.5 text-success">
                 <CheckCircle2 className="h-3.5 w-3.5" />
                 Scans correctly
               </p>
             ) : (
-              <p className="flex items-center gap-1.5 text-amber-500">
+              <p className="flex items-center gap-1.5 text-warning">
                 <AlertTriangle className="h-3.5 w-3.5" />
                 Could not be read back
               </p>
@@ -352,7 +352,7 @@ export function ChannelBooks({ channelKey }: { channelKey: string }) {
                   </div>
                   <div className="truncate text-xs text-muted-foreground">
                     {b.shopUrl || (
-                      <span className="text-amber-500">
+                      <span className="text-warning">
                         No shop link — this book&apos;s pitch carries no QR and
                         no tracking
                       </span>
@@ -412,7 +412,7 @@ export function ChannelBooks({ channelKey }: { channelKey: string }) {
             value={draft.title}
             onChange={e => setDraft(d => ({ ...d, title: e.target.value }))}
             placeholder="The Backyard Soil Handbook"
-            className="h-8 bg-secondary/50 text-xs"
+            className="h-8 text-xs"
           />
           <p className="text-[11px] text-muted-foreground">
             Also what the pipeline listens for in the pitch, to place the cover
@@ -425,7 +425,7 @@ export function ChannelBooks({ channelKey }: { channelKey: string }) {
             value={draft.shopUrl}
             onChange={e => setDraft(d => ({ ...d, shopUrl: e.target.value }))}
             placeholder="https://yourshop.com/the-backyard-soil-handbook"
-            className="h-8 bg-secondary/50 text-xs"
+            className="h-8 text-xs"
           />
           <p className="text-[11px] text-muted-foreground">
             Where this book is sold. Leave the tracking tag off — each video

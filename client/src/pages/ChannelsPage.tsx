@@ -1,4 +1,6 @@
 import { ChannelConfigPanel } from "@/components/admin/ChannelConfigPanel";
+import { PageHeader } from "@/components/PageHeader";
+import { Tv } from "lucide-react";
 
 /**
  * Channels — promoted out of the Admin tab strip to its own top-level nav item, beside
@@ -15,8 +17,12 @@ import { ChannelConfigPanel } from "@/components/admin/ChannelConfigPanel";
  */
 export default function ChannelsPage() {
   return (
-    <div className="space-y-4">
-      <h1 className="text-xl font-semibold">Channels</h1>
+    <div className="space-y-6">
+      <PageHeader
+        icon={Tv}
+        title="Channels"
+        description="Host photos, voice, persona and CTA assets. A render reads these on every generate, so this is the page you'll come back to most."
+      />
       <ChannelConfigPanel />
     </div>
   );

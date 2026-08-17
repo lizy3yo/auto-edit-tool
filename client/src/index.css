@@ -40,47 +40,78 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  /* Status hues, one definition each. Every "this went well / this needs
+     attention / this is in flight" colour in the app resolves here rather than
+     to a raw Tailwind shade, so a theme change moves them together. Tints come
+     from opacity modifiers (`bg-success/10`, `border-warning/25`) — on a white
+     page that is a light wash, and the same token still reads as text. */
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
 }
 
 :root {
   --radius: 0.5rem;
-  /* Dark theme as default — Google Flow inspired */
-  --background: oklch(0.13 0.005 260);
-  --foreground: oklch(0.93 0.005 260);
-  --card: oklch(0.17 0.005 260);
-  --card-foreground: oklch(0.93 0.005 260);
-  --popover: oklch(0.19 0.005 260);
-  --popover-foreground: oklch(0.93 0.005 260);
-  --primary: oklch(0.65 0.18 145);
-  --primary-foreground: oklch(0.13 0.005 260);
-  --secondary: oklch(0.22 0.005 260);
-  --secondary-foreground: oklch(0.85 0.005 260);
-  --muted: oklch(0.22 0.005 260);
-  --muted-foreground: oklch(0.65 0.015 260);
-  --accent: oklch(0.22 0.005 260);
-  --accent-foreground: oklch(0.93 0.005 260);
-  --destructive: oklch(0.65 0.2 25);
-  --destructive-foreground: oklch(0.98 0 0);
-  --border: oklch(1 0 0 / 8%);
-  --input: oklch(1 0 0 / 12%);
-  --ring: oklch(0.65 0.18 145);
-  --chart-1: oklch(0.65 0.18 145);
-  --chart-2: oklch(0.6 0.15 200);
-  --chart-3: oklch(0.7 0.15 50);
-  --chart-4: oklch(0.55 0.2 280);
-  --chart-5: oklch(0.65 0.15 330);
-  --sidebar: oklch(0.11 0.005 260);
-  --sidebar-foreground: oklch(0.85 0.005 260);
-  --sidebar-primary: oklch(0.65 0.18 145);
-  --sidebar-primary-foreground: oklch(0.13 0.005 260);
-  --sidebar-accent: oklch(0.18 0.005 260);
-  --sidebar-accent-foreground: oklch(0.93 0.005 260);
-  --sidebar-border: oklch(1 0 0 / 8%);
-  --sidebar-ring: oklch(0.65 0.18 145);
+  /* Light theme — white surfaces, near-black text, one green accent.
+     Contrast targets: body text ≥ 12:1, muted text ≥ 4.6:1, and white-on-primary
+     ≥ 4.5:1, which is why `--primary` sits at L=0.50 rather than the L=0.65 the
+     dark theme uses (that green fails against white text). */
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.21 0.006 264);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.21 0.006 264);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.21 0.006 264);
+  --primary: oklch(0.5 0.115 155);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.968 0.003 264);
+  --secondary-foreground: oklch(0.21 0.006 264);
+  --muted: oklch(0.968 0.003 264);
+  --muted-foreground: oklch(0.52 0.012 264);
+  --accent: oklch(0.968 0.003 264);
+  --accent-foreground: oklch(0.21 0.006 264);
+  --destructive: oklch(0.52 0.19 26);
+  --destructive-foreground: oklch(1 0 0);
+  /* Opaque, not a white alpha. The dark theme's `oklch(1 0 0 / 8%)` is white at
+     8% — on a white page every border, divider and input outline vanishes.
+     `--input` is deliberately a step darker than `--border`: a divider between two
+     white panels only has to be findable, but a field's border is the sole thing
+     saying "you can type here", and at the divider's 1.28:1 the inputs read as
+     flat text. They share one value in the dark theme, where the fill does that
+     work instead. */
+  --border: oklch(0.916 0.004 264);
+  --input: oklch(0.865 0.005 264);
+  --ring: oklch(0.5 0.115 155);
+  --success: oklch(0.52 0.12 152);
+  --warning: oklch(0.5 0.11 70);
+  --info: oklch(0.47 0.13 255);
+  --chart-1: oklch(0.5 0.115 155);
+  --chart-2: oklch(0.47 0.13 255);
+  --chart-3: oklch(0.5 0.11 70);
+  --chart-4: oklch(0.48 0.16 292);
+  --chart-5: oklch(0.52 0.16 350);
+  --sidebar: oklch(0.985 0.002 264);
+  --sidebar-foreground: oklch(0.21 0.006 264);
+  --sidebar-primary: oklch(0.5 0.115 155);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: oklch(0.968 0.003 264);
+  --sidebar-accent-foreground: oklch(0.21 0.006 264);
+  --sidebar-border: oklch(0.916 0.004 264);
+  --sidebar-ring: oklch(0.5 0.115 155);
+  /* Native widgets — scrollbars, `<select>` popups, the video scrubber — follow
+     this, not our tokens. Without it they render dark against the white page. */
+  color-scheme: light;
 }
 
+/* Dormant: `ThemeProvider` is not switchable, so `.dark` is never applied. Kept
+   whole (status hues included) so re-enabling the toggle is a one-line change
+   rather than a palette rebuild. */
 .dark {
+  color-scheme: dark;
+  --success: oklch(0.75 0.15 152);
+  --warning: oklch(0.78 0.14 75);
+  --info: oklch(0.7 0.13 255);
   --background: oklch(0.13 0.005 260);
   --foreground: oklch(0.93 0.005 260);
   --card: oklch(0.17 0.005 260);
@@ -121,6 +152,34 @@
   }
   body {
     @apply bg-background text-foreground;
+    /* Near-black on white renders noticeably heavier than the light-on-dark it
+       replaced; smoothing brings the weight back to where the type was drawn. */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  ::selection {
+    background: color-mix(in oklch, var(--primary) 18%, transparent);
+  }
+  /* The default Chromium light scrollbar is a wide grey slab that reads as a
+     second border down the page. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border: 3px solid var(--background);
+    border-radius: 999px;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: var(--muted-foreground);
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
   }
   button:not(:disabled),
   [role="button"]:not([aria-disabled="true"]),
@@ -174,7 +233,7 @@
     box-shadow: 0 0 0 0 transparent;
   }
   50% {
-    box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary) 30%, transparent);
+    box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary) 45%, transparent);
   }
 }
 
@@ -186,6 +245,18 @@
 @media (prefers-reduced-motion: reduce) {
   .tab-pulse {
     animation: none;
-    box-shadow: 0 0 0 2px color-mix(in oklch, var(--primary) 30%, transparent);
+    box-shadow: 0 0 0 2px color-mix(in oklch, var(--primary) 45%, transparent);
   }
+}
+
+/* Height of the sticky app header. The storyboard toolbar is `sticky` too and
+   would slide underneath it, so it offsets by this instead of a magic number
+   copied into a component. */
+:root {
+  --app-header-h: 3.5rem;
+}
+
+/* Anchors (`#storyboard-N`) land under the sticky header without this. */
+html {
+  scroll-padding-top: calc(var(--app-header-h) + 1rem);
 }

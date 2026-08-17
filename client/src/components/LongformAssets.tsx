@@ -84,7 +84,7 @@ export function LongformAssets({
                   next[i] = { ...a, caption: e.target.value };
                   onChange(next);
                 }}
-                className="h-8 bg-secondary/50 border-border text-sm"
+                className="h-8 border-border text-sm"
               />
               <Button
                 variant="ghost"
