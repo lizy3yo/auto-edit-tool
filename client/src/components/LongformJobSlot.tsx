@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useId, useMemo, useRef } from "react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -77,36 +77,92 @@ function Step({
   title,
   hint,
   optional,
+  collapsed,
+  onToggle,
+  summary,
   children,
 }: {
   n: number;
   title: string;
   hint?: React.ReactNode;
   optional?: boolean;
+  /**
+   * Pass a boolean to make the step collapsible; the header becomes the toggle. Undefined
+   * leaves it a plain always-open section, which is what the other three steps want — their
+   * controls are a few rows each and hiding them would only add a click.
+   */
+  collapsed?: boolean;
+  onToggle?: () => void;
+  /** Stand-in shown in place of the body while collapsed. */
+  summary?: React.ReactNode;
   children: React.ReactNode;
 }) {
+  const bodyId = useId();
+  const collapsible = collapsed !== undefined;
+  const isOpen = !collapsed;
+
+  const heading = (
+    <>
+      <span
+        aria-hidden
+        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-secondary text-[11px] font-medium tabular-nums text-muted-foreground"
+      >
+        {n}
+      </span>
+      <h3 className="text-sm font-medium">{title}</h3>
+      {optional && (
+        <span className="text-xs font-normal text-muted-foreground">
+          Optional
+        </span>
+      )}
+    </>
+  );
+
   return (
     <section className="border-t border-border px-5 py-5 first:border-t-0 sm:px-6">
-      <div className="mb-3 flex items-baseline gap-2.5">
-        <span
-          aria-hidden
-          className="flex h-5 w-5 shrink-0 translate-y-0.5 items-center justify-center rounded-full bg-secondary text-[11px] font-medium tabular-nums text-muted-foreground"
+      {collapsible ? (
+        // A real <button> rather than a clickable div: this needs to be tabbable and to
+        // toggle on Space/Enter, and `aria-expanded` is what tells a screen reader the
+        // script is hidden rather than missing.
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={isOpen}
+          aria-controls={bodyId}
+          className="group flex w-full items-center gap-2.5 text-left"
         >
-          {n}
-        </span>
-        <h3 className="text-sm font-medium">{title}</h3>
-        {optional && (
-          <span className="text-xs text-muted-foreground">Optional</span>
-        )}
-      </div>
-      <div className="space-y-2 sm:pl-[30px]">
-        {children}
-        {hint && (
-          <p className="text-xs leading-relaxed text-muted-foreground">
-            {hint}
-          </p>
-        )}
-      </div>
+          {heading}
+          <span className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground transition-colors group-hover:text-foreground">
+            {isOpen ? "Hide" : "Show"}
+            <ChevronRight
+              aria-hidden
+              className={`h-3.5 w-3.5 transition-transform ${isOpen ? "rotate-90" : ""}`}
+            />
+          </span>
+        </button>
+      ) : (
+        <div className="flex items-baseline gap-2.5">{heading}</div>
+      )}
+
+      {/* Unmounted rather than hidden while collapsed: the script box is the tallest thing
+          on the page and a `display:none` textarea still holds its value in the DOM, so
+          there is nothing to preserve by keeping it mounted. */}
+      {isOpen ? (
+        <div id={bodyId} className="mt-3 space-y-2 sm:pl-[30px]">
+          {children}
+          {hint && (
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              {hint}
+            </p>
+          )}
+        </div>
+      ) : (
+        summary && (
+          <div id={bodyId} className="mt-2 sm:pl-[30px]">
+            {summary}
+          </div>
+        )
+      )}
     </section>
   );
 }
@@ -201,6 +257,9 @@ export default function LongformJobSlot({
   onStatusChange,
 }: LongformJobSlotProps) {
   const [script, setScript] = useState(defaultScript);
+  // Open while a tab is still being filled in, folded once it holds a render (see the
+  // hydration effect). Never auto-collapses while you are typing — only adopting a job does it.
+  const [scriptCollapsed, setScriptCollapsed] = useState(false);
   const [channelKey, setChannelKey] = useState<string>("");
   const [showConfirm, setShowConfirm] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
@@ -420,11 +479,21 @@ export default function LongformJobSlot({
     if (hydratedScriptFor.current === jobId) return;
     hydratedScriptFor.current = jobId;
     setScript(job.script);
+    // Fold it away on arrival. A generated script runs to thousands of characters — job 12's
+    // is 7,006 — and left open it pushes the channel, the CTA blocks and the generate button
+    // off the bottom of the screen. Once a tab holds a render the script is reference
+    // material, not the thing being worked on, so it opens on request.
+    setScriptCollapsed(true);
   }, [jobId, job?.script]);
 
-  // A cleared tab is a fresh start, so the next job it adopts must hydrate again.
+  // A cleared tab is a fresh start: hydrate again for the next job, and open the box back up
+  // because an empty collapsed script step is a dead end — there would be nothing to click
+  // toward and no way to see that a script is what's missing.
   useEffect(() => {
-    if (jobId === null) hydratedScriptFor.current = null;
+    if (jobId === null) {
+      hydratedScriptFor.current = null;
+      setScriptCollapsed(false);
+    }
   }, [jobId]);
 
   const scenes = useMemo(
@@ -692,6 +761,23 @@ export default function LongformJobSlot({
           n={1}
           title="Script"
           hint="Spoken words only, voiced verbatim. Directing notes here would be read aloud — the host look, b-roll style and 16:9 framing come from the saved Longform instruction, and the host photo and face model from the channel."
+          collapsed={scriptCollapsed}
+          onToggle={() => setScriptCollapsed(c => !c)}
+          summary={
+            // Enough to recognise WHICH script is folded up in this tab without opening it —
+            // five tabs of "112 words" would say nothing about which is which.
+            <div className="space-y-1">
+              <p className="line-clamp-2 text-xs leading-relaxed text-muted-foreground">
+                {script.trim() || "No script yet."}
+              </p>
+              {wordCount > 0 && (
+                <p className="text-xs tabular-nums text-muted-foreground">
+                  {wordCount.toLocaleString()} words · roughly{" "}
+                  {estimatedMinutes} of narration
+                </p>
+              )}
+            </div>
+          }
         >
           <Textarea
             id={`lf-script-${slotIndex}`}
