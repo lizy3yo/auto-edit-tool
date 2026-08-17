@@ -83,7 +83,15 @@ Gemini, OpenAI, R2, RunPod. Missing ones fail loudly at the first stage that nee
 | `SIXTYNINE_DOWNLOAD_TIMEOUT_MS` | 300s            | `SIXTYNINE_VIDEO_SUBMIT_BURST` | 2                    |
 | `SIXTYNINE_VIDEO_SUBMIT_RATE`   | 5/min (API cap) | `IMAGE_PRIMARY_TIMEOUT_MS`     | 480s                 |
 | `IMAGE_PRIMARY_RETRIES`         | 1               | `IMAGE_RETRY_TIMEOUT_MS`       | 240s                 |
-| `IMAGE_RETRY_TOTAL_BUDGET_MS`   | 600s            |                                |                      |
+| `IMAGE_RETRY_TOTAL_BUDGET_MS`   | 600s            | `MYSQL_SORT_BUFFER_SIZE`       | 8 MB                 |
+| `AUTO_MIGRATE`                  | on (`0` skips)  |                                |                      |
+
+`MYSQL_SORT_BUFFER_SIZE` is set per pooled connection in `server/db.ts`. MySQL's 256 KB default
+is not enough for the library query: filesort sizes its buffer from each column's **declared**
+width, and `json_unquote(json_extract(...))` is typed LONGTEXT (4 GB), so it fails with
+`ER_OUT_OF_SORTMEMORY` on a table holding one row. MySQL 9.4 hits this and 8.4 does not on
+identical settings — so it reproduces in production only. `AUTO_MIGRATE=0` skips the boot-time
+migration in `server/migrate.ts`.
 
 ## Cost rates (`server/pricing.ts`)
 

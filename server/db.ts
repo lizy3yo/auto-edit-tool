@@ -43,6 +43,31 @@ export async function getDb() {
         // host, which reads as "the app is slow" instead of "the DB is down".
         connectTimeout: 10_000,
       });
+      // Raise the per-session sort buffer above MySQL's 256 KB default.
+      //
+      // The library query sorts rows whose select list holds three
+      // `json_unquote(json_extract(...))` expressions. Those are typed LONGTEXT, and filesort
+      // sizes its buffer from each column's DECLARED width (4 GB), never the actual data — so
+      // it blew the buffer on a table holding ONE job. The symptom is
+      // `ER_OUT_OF_SORTMEMORY (1038)`, which Drizzle reports only as `Failed query: select ...`.
+      //
+      // Production (MySQL 9.4) hits this; dev (MySQL 8.4) does not, on identical
+      // `sort_buffer_size` and `max_sort_length` — so it is unreproducible locally, and the
+      // library, side panel and history views 500 in production only. Verified against the
+      // production database: the exact query fails at 262144 and succeeds at this value.
+      //
+      // Allocated incrementally per sort (MySQL 8.0.12+), not reserved per connection.
+      const sortBuffer =
+        Number(process.env.MYSQL_SORT_BUFFER_SIZE) || 8_388_608;
+      pool.on("connection", conn => {
+        conn.query(`SET SESSION sort_buffer_size = ${sortBuffer}`, err => {
+          if (err)
+            console.warn(
+              "[Database] could not raise sort_buffer_size:",
+              (err as { code?: string }).code ?? err.message
+            );
+        });
+      });
       _db = drizzle(pool);
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
