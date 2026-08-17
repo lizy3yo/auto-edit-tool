@@ -38,6 +38,7 @@ import {
   type CtaBookAssignment,
 } from "@/components/LongformCtaBooks";
 import { LongformPublishKit } from "@/components/LongformPublishKit";
+import { LongformScenePreview } from "@/components/LongformScenePreview";
 import { sanitizeError, isCreditError } from "@/lib/errorSanitizer";
 import { triggerCreditErrorPopup } from "@/components/CreditErrorPopup";
 import type { LongformAsset, StoryboardScene } from "@shared/types";
@@ -1206,11 +1207,9 @@ export default function LongformJobSlot({
                           <Loader2 className="h-5 w-5 animate-spin" />
                         </div>
                       ) : scene.clipUrl ? (
-                        <video
-                          src={scene.clipUrl}
-                          controls
-                          preload="none"
-                          onClick={e => e.stopPropagation()}
+                        <LongformScenePreview
+                          clipUrl={scene.clipUrl}
+                          audioUrl={scene.audioUrl}
                           className="w-full rounded bg-black"
                         />
                       ) : (
@@ -1334,11 +1333,11 @@ export default function LongformJobSlot({
                             onClick={e => e.stopPropagation()}
                           >
                             {scene.clipUrl && (
-                              <video
-                                src={scene.clipUrl}
-                                controls
-                                muted
-                                preload="none"
+                              // `muted` is gone with the silent clip: the point of the expanded
+                              // editor is judging a shot against its line, which needs the line.
+                              <LongformScenePreview
+                                clipUrl={scene.clipUrl}
+                                audioUrl={scene.audioUrl}
                                 className="w-full rounded bg-black max-h-[120px]"
                               />
                             )}
