@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ChannelBooks } from "@/components/admin/ChannelBooks";
+import { ChannelAssets } from "@/components/admin/ChannelAssets";
 import {
   Dialog,
   DialogContent,
@@ -564,6 +565,13 @@ export function ChannelConfigPanel() {
       {editingChannel && (
         <div className="border-t border-border pt-4">
           <ChannelBooks channelKey={editingChannel} />
+        </div>
+      )}
+      {/* CTA assets — same treatment as books: per channel, written immediately, used by every
+          video on the channel. Replaces the old per-video upload on the generate form. */}
+      {editingChannel && (
+        <div className="border-t border-border pt-4">
+          <ChannelAssets channelKey={editingChannel} />
         </div>
       )}
       {/* Last thing in the editor. It used to sit above the books block, which left the only

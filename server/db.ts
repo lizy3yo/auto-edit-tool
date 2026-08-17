@@ -8,6 +8,7 @@ import {
   longformVideoJobs,
   longformSlots,
   books,
+  channelAssets,
   longformSales,
 } from "../drizzle/schema";
 import type {
@@ -16,6 +17,8 @@ import type {
   InsertLongformVideoJob,
   Book,
   InsertBook,
+  ChannelAsset,
+  InsertChannelAsset,
   InsertLongformSale,
 } from "../drizzle/schema";
 
@@ -598,6 +601,56 @@ export async function deactivateBook(id: number): Promise<void> {
   const db = await getDb();
   if (!db) return;
   await db.update(books).set({ isActive: false }).where(eq(books.id, id));
+}
+
+// ─── Channel Assets ───
+// Per-channel CTA images, managed like books (define once, reuse every video).
+
+export async function getChannelAssets(
+  channelKey: string,
+  activeOnly = false
+): Promise<ChannelAsset[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const where = activeOnly
+    ? and(
+        eq(channelAssets.channelKey, channelKey),
+        eq(channelAssets.isActive, true)
+      )
+    : eq(channelAssets.channelKey, channelKey);
+  return db
+    .select()
+    .from(channelAssets)
+    .where(where)
+    .orderBy(desc(channelAssets.createdAt));
+}
+
+export async function createChannelAsset(
+  data: InsertChannelAsset
+): Promise<number | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const [res] = await db.insert(channelAssets).values(data);
+  return (res as any)?.insertId ?? null;
+}
+
+export async function updateChannelAsset(
+  id: number,
+  data: Partial<InsertChannelAsset>
+): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(channelAssets).set(data).where(eq(channelAssets.id, id));
+}
+
+/** Soft-delete, same reasoning as `deactivateBook`: keep finished videos' snapshots resolvable. */
+export async function deactivateChannelAsset(id: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db
+    .update(channelAssets)
+    .set({ isActive: false })
+    .where(eq(channelAssets.id, id));
 }
 
 // ─── Sales ───

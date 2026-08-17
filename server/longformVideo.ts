@@ -4683,18 +4683,32 @@ export function markCoverReveal(
       i = j;
       continue;
     }
+    const reveal = (s: StoryboardScene) => {
+      s.coverHero = true;
+      s.stillImage = true;
+      s.hostPresent = false;
+      s.splitVisual = undefined;
+    };
     const namesBook = titleMatcher(title);
+    let done = false;
     for (let k = i; k < j; k++) {
       const s = scenes[k];
-      if (s.coverHero) break; // already marked (idempotent)
+      if (s.coverHero) {
+        done = true;
+        break; // already marked (idempotent)
+      }
       if (namesBook(s.scriptText ?? s.narration ?? "")) {
-        s.coverHero = true;
-        s.stillImage = true;
-        s.hostPresent = false;
-        s.splitVisual = undefined;
+        reveal(s);
+        done = true;
         break;
       }
     }
+    // An UPLOADED book (one assigned to this block via `ctaBooks`) whose title the script never
+    // speaks still has to appear — the operator uploaded it on purpose — so reveal it on the
+    // first beat of the block rather than dropping it. The channel's own fallback cover is
+    // deliberately NOT force-revealed (it shows only when the host actually names it, so a
+    // channel with a cover configured doesn't stamp it onto every CTA), hence the `book` guard.
+    if (!done && book) reveal(scenes[i]);
     i = j;
   }
   return scenes;

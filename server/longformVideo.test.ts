@@ -3014,6 +3014,55 @@ describe("markCoverReveal", () => {
     markCoverReveal(scenes, withCover);
     expect(scenes.some(s => s.coverHero)).toBe(false);
   });
+
+  it("reveals an UPLOADED book on the first beat even when its title is never spoken", () => {
+    // An operator-uploaded book (`ctaBooks`) must appear regardless of the script wording — they
+    // named it "sawdust" but never say the word, so title-matching finds nothing.
+    const scenes = [
+      mk(1, { cta: true, ctaIndex: 0, scriptText: "scan the code below" }),
+      mk(2, { cta: true, ctaIndex: 0, scriptText: "link in the description" }),
+    ];
+    markCoverReveal(scenes, {
+      ...baseParams,
+      ctaBooks: [
+        {
+          ctaIndex: 0,
+          bookId: 0,
+          title: "sawdust",
+          coverImageUrl: "https://r2/sawdust.png",
+        },
+      ],
+    });
+    expect(scenes[0].coverHero).toBe(true);
+    expect(scenes[0].stillImage).toBe(true);
+    expect(scenes[0].hostPresent).toBe(false);
+    // Only the first beat of the block, not every scene.
+    expect(scenes[1].coverHero).toBeFalsy();
+  });
+
+  it("still prefers the named beat for an uploaded book when the title IS spoken", () => {
+    const scenes = [
+      mk(1, { cta: true, ctaIndex: 0, scriptText: "scan the code below" }),
+      mk(2, {
+        cta: true,
+        ctaIndex: 0,
+        scriptText: "grab The Old Way Home now",
+      }),
+    ];
+    markCoverReveal(scenes, {
+      ...baseParams,
+      ctaBooks: [
+        {
+          ctaIndex: 0,
+          bookId: 0,
+          title: "The Old Way Home",
+          coverImageUrl: "https://r2/home.png",
+        },
+      ],
+    });
+    expect(scenes[0].coverHero).toBeFalsy();
+    expect(scenes[1].coverHero).toBe(true); // the beat that names it, not the first
+  });
 });
 
 describe("anchorRegex", () => {

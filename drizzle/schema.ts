@@ -134,6 +134,14 @@ export const longformSlots = mysqlTable(
     jobId: int("jobId"),
     /** Download title typed into the tab before/while generating. */
     draftTitle: varchar("draftTitle", { length: 255 }),
+    /**
+     * Reserved, currently unwritten. Briefly held draft CTA books so an ungenerated tab survived
+     * a reload; that was dropped in favour of saving books only when the video is generated (the
+     * job snapshots them, and reopening the render restores them). Kept as a nullable column so
+     * the schema matches the applied migration without a destructive drop; nothing reads or
+     * writes it now.
+     */
+    draftBooks: text("draftBooks"),
     updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   },
   table => [primaryKey({ columns: [table.userId, table.slotIndex] })]
@@ -242,6 +250,37 @@ export const books = mysqlTable("books", {
 
 export type Book = typeof books.$inferSelect;
 export type InsertBook = typeof books.$inferInsert;
+
+/**
+ * Channel assets — images shown verbatim during a channel's CTA (product shots, extra book
+ * renders), configured once per channel and used by EVERY video on it.
+ *
+ * The same principle as `books`: define once in the channel editor, reuse across renders. It
+ * replaces a per-video upload that made the operator re-attach the same product shots on every
+ * render. At generate time the channel's active rows are snapshotted onto the job's
+ * `inputParams.assets`, so the pipeline (`placeAssetBeats`) is untouched and a finished video
+ * keeps the assets it shipped with even if the channel's list changes later.
+ *
+ * Unlike a book, an asset carries no shop link or QR of its own — it is just an image and an
+ * optional burned-in caption. The QR that rides on its beat is the channel/book QR, exactly as
+ * before.
+ */
+export const channelAssets = mysqlTable("channel_assets", {
+  id: int("id").autoincrement().primaryKey(),
+  /** Owning channel — assets are per-channel, never shared. */
+  channelKey: varchar("channelKey", { length: 64 }).notNull(),
+  /** The image (R2 URL) shown full-beat during the CTA. */
+  imageUrl: varchar("imageUrl", { length: 512 }).notNull(),
+  /** Optional caption burned bottom-centre when captions are enabled in Longform Pacing. */
+  caption: varchar("caption", { length: 200 }),
+  /** Soft-delete: an inactive asset stays snapshotted on the videos that already used it. */
+  isActive: boolean("isActive").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type ChannelAsset = typeof channelAssets.$inferSelect;
+export type InsertChannelAsset = typeof channelAssets.$inferInsert;
 
 /**
  * Sales reported by the webstore, one row per paid line item.

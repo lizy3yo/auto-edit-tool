@@ -32,7 +32,6 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { LongformVideoPlayer } from "./LongformVideoPlayer";
 import { GenerationCostDialog } from "./GenerationCostDialog";
 import { ChannelVoiceTuning } from "@/components/ChannelVoiceTuning";
-import { LongformAssets } from "@/components/LongformAssets";
 import {
   LongformCtaBooks,
   type CtaBookAssignment,
@@ -41,7 +40,7 @@ import { LongformPublishKit } from "@/components/LongformPublishKit";
 import { LongformScenePreview } from "@/components/LongformScenePreview";
 import { sanitizeError, isCreditError } from "@/lib/errorSanitizer";
 import { triggerCreditErrorPopup } from "@/components/CreditErrorPopup";
-import type { LongformAsset, StoryboardScene } from "@shared/types";
+import type { StoryboardScene } from "@shared/types";
 import {
   ScanFace,
   Loader2,
@@ -52,6 +51,7 @@ import {
   RefreshCw,
   Film,
   Image as ImageIcon,
+  Images,
   User,
   Trees,
   Search,
@@ -163,6 +163,37 @@ function Step({
         )
       )}
     </section>
+  );
+}
+
+/**
+ * Read-only pointer to the channel's CTA assets, shown where the per-video uploader used to be.
+ *
+ * Assets moved to the channel (Admin → Channels), configured once and used by every video, so
+ * the generate form no longer collects them. This just reports how many the picked channel has,
+ * so it is clear the CTA already carries them and where to change them.
+ */
+function ChannelAssetsNote({ channelKey }: { channelKey: string }) {
+  const { data } = trpc.channelAsset.list.useQuery(
+    { channelKey, activeOnly: true },
+    { enabled: !!channelKey }
+  );
+  const count = data?.length ?? 0;
+  return (
+    <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
+      <Images className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+      {count > 0 ? (
+        <>
+          {count} channel asset{count === 1 ? "" : "s"} will show in this
+          video&apos;s call-to-action. Manage them under Channels.
+        </>
+      ) : (
+        <>
+          No channel assets set. Add product shots or extra renders under
+          Channels and every video on this channel will show them.
+        </>
+      )}
+    </p>
   );
 }
 
@@ -285,11 +316,10 @@ export default function LongformJobSlot({
   const [selectedScenes, setSelectedScenes] = useState<number[]>([]);
   const [sceneSearch, setSceneSearch] = useState("");
   const [downloadTitle, setDownloadTitle] = useState(initialTitle);
-  // Per-job asset images (book renders, product shots) shown verbatim in the CTA pitch. Local
-  // state only: they belong to the NEXT generate click, and the job row persists them once it
-  // starts. Cleared alongside the script when a new job is submitted.
-  const [assets, setAssets] = useState<LongformAsset[]>([]);
-  // Which book each CTA block pitches. Local until generate, then snapshotted onto the job.
+  // Which books this video pitches. Seeded from the draft saved in localStorage so a reload
+  // doesn't lose them; a tab holding a render replaces this from `job.ctaBooks` (hydration).
+  // Seeded empty; a restored DRAFT is adopted once the workspace arrives (the adopt effect
+  // below), and a tab holding a render replaces this from `job.ctaBooks` (the hydration effect).
   const [ctaBooks, setCtaBooks] = useState<CtaBookAssignment[]>([]);
   // Set by the finished-video player; the timestamp map calls it to jump to a shot.
   const playerSeekRef = useRef<((sec: number) => void) | null>(null);
@@ -487,12 +517,37 @@ export default function LongformJobSlot({
     setScriptCollapsed(true);
   }, [jobId, job?.script]);
 
+  // Same as the script: restore the books this job pitched, so reopening a render shows them in
+  // the uploader instead of a blank list. The snapshot has one entry per CTA block, so a book
+  // used in two pitches comes back twice — de-dupe by title into the uploader's one-row-per-book
+  // shape. Keyed by jobId so the ~2s poll doesn't overwrite an edit in progress.
+  const hydratedBooksFor = useRef<number | null>(null);
+  useEffect(() => {
+    if (jobId === null || job?.ctaBooks == null) return;
+    if (hydratedBooksFor.current === jobId) return;
+    hydratedBooksFor.current = jobId;
+    const seen = new Set<string>();
+    const books: CtaBookAssignment[] = [];
+    for (const b of job.ctaBooks) {
+      const key = b.title.trim().toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      books.push({
+        title: b.title,
+        coverImageUrl: b.coverImageUrl ?? undefined,
+        shopUrl: b.shopUrl ?? undefined,
+      });
+    }
+    setCtaBooks(books);
+  }, [jobId, job?.ctaBooks]);
+
   // A cleared tab is a fresh start: hydrate again for the next job, and open the box back up
   // because an empty collapsed script step is a dead end — there would be nothing to click
   // toward and no way to see that a script is what's missing.
   useEffect(() => {
     if (jobId === null) {
       hydratedScriptFor.current = null;
+      hydratedBooksFor.current = null;
       setScriptCollapsed(false);
     }
   }, [jobId]);
@@ -740,13 +795,23 @@ export default function LongformJobSlot({
   const confirmGenerate = () => {
     setShowConfirm(false);
     armNotifications(); // unlock audio + request notification permission on the click
+    // Drop half-filled rows: a book with no title can't be matched to a CTA line, and an empty
+    // title would fail the server's `title.min(1)` and reject the whole render.
+    const books = ctaBooks
+      .filter(b => b.title.trim())
+      .map(b => ({
+        title: b.title.trim(),
+        coverImageUrl: b.coverImageUrl,
+        shopUrl: b.shopUrl?.trim() || undefined,
+        saveToChannel: b.saveToChannel || undefined,
+      }));
     generateMutation.mutate({
       script: script.trim(),
       channelKey,
       title: downloadTitle.trim() || undefined,
       slotIndex,
-      assets: assets.length ? assets : undefined,
-      ctaBooks: ctaBooks.length ? ctaBooks : undefined,
+      // Assets are no longer sent from here — the server reads them from the channel.
+      ctaBooks: books.length ? books : undefined,
     });
   };
 
@@ -855,12 +920,9 @@ export default function LongformJobSlot({
             disabled={generateMutation.isPending || isProcessing}
           />
 
-          {/* Uploaded assets shown verbatim in this video's CTA pitch. */}
-          <LongformAssets
-            assets={assets}
-            onChange={setAssets}
-            disabled={generateMutation.isPending || isProcessing}
-          />
+          {/* Assets are no longer uploaded per video — they live on the channel and every
+              video uses all of them. This is a read-only pointer to where they are set. */}
+          {channelKey && <ChannelAssetsNote channelKey={channelKey} />}
         </Step>
 
         <Step

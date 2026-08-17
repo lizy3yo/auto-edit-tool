@@ -51,7 +51,12 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 
 async function startServer() {
   const app = express();
-  const server = createServer(app);
+  // Raise the request-line + header limit above Node's 16 KB default. `book.detectCtaBlocks`
+  // sends the script as a GET query param, so a long script (or a batch of them) can push the
+  // URL past 16 KB — Node then rejects it with 431 before any handler runs. The client also caps
+  // batch URL length (`maxURLLength`); this is the server-side headroom. A managed proxy in front
+  // (e.g. Railway) may impose its own lower limit — that's out of this process's control.
+  const server = createServer({ maxHeaderSize: 64 * 1024 }, app);
   // Trust proxy headers so req.protocol and cookies work correctly behind HTTPS proxy
   app.set("trust proxy", 1);
   app.use(express.json({ limit: "50mb" }));
@@ -86,9 +91,9 @@ async function startServer() {
           { code?: string; errno?: number } | undefined;
         console.error(
           `[tRPC] ${type} ${path ?? "<unknown>"} → ${error.code}` +
-            (cause?.code || cause?.errno
-              ? ` (${cause.code ?? cause.errno})`
-              : ""),
+          (cause?.code || cause?.errno
+            ? ` (${cause.code ?? cause.errno})`
+            : ""),
           error.message
         );
       },

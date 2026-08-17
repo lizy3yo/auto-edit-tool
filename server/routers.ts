@@ -33,10 +33,13 @@ import {
   deleteLongformVideoJob,
   updateLongformVideoJob,
   getBooks,
-  getBookById,
   createBook,
   updateBook,
   deactivateBook,
+  getChannelAssets,
+  createChannelAsset,
+  updateChannelAsset,
+  deactivateChannelAsset,
   getSalesByJob,
   getSalesByProductForJob,
   getJobsForChannel,
@@ -65,7 +68,6 @@ import {
   getHeygenSlotMasked,
   setHeygenSlotKey,
   assembleScenePromptPreview,
-  validateCtaMarkers,
   syncSceneClipFields,
   parseCtaMarkers,
   extractSpokenScript,
@@ -666,6 +668,59 @@ const bookRouter = router({
     }),
 });
 
+// ─── Channel Asset Router ───
+// The channel-level counterpart of the per-job asset upload: images shown verbatim during the
+// CTA, configured once per channel and used by every video on it. Same shape as `bookRouter`.
+const channelAssetRouter = router({
+  /** A channel's assets. `activeOnly` for the generate flow; Admin sees soft-deleted ones too. */
+  list: approvedProcedure
+    .input(
+      z.object({
+        channelKey: z.string().min(1),
+        activeOnly: z.boolean().default(false),
+      })
+    )
+    .query(async ({ input }) =>
+      getChannelAssets(input.channelKey, input.activeOnly)
+    ),
+
+  /**
+   * Add or update an asset. `imageUrl` is already an R2 URL from `styleReference.upload`, the same
+   * upload path the book cover and per-video assets used, so it is validated as a URL and stored
+   * as-is.
+   */
+  save: adminProcedure
+    .input(
+      z.object({
+        id: z.number().optional(),
+        channelKey: z.string().min(1),
+        imageUrl: z.string().url().max(512),
+        caption: z.string().max(200).nullish(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const data = {
+        channelKey: input.channelKey,
+        imageUrl: input.imageUrl,
+        caption: input.caption?.trim() || null,
+      };
+      if (input.id) {
+        await updateChannelAsset(input.id, data);
+        return { id: input.id };
+      }
+      const id = await createChannelAsset({ ...data, isActive: true });
+      return { id };
+    }),
+
+  /** Soft-delete — finished videos keep the asset they snapshotted at render time. */
+  deactivate: adminProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input }) => {
+      await deactivateChannelAsset(input.id);
+      return { success: true };
+    }),
+});
+
 // ─── Long-form Video Router ───
 const longformVideoRouter = router({
   /**
@@ -992,14 +1047,19 @@ const longformVideoRouter = router({
           .max(MAX_JOB_ASSETS)
           .optional(),
         /**
-         * Which book each marked CTA block pitches. One entry per block the operator assigned;
-         * blocks left unassigned fall back to the channel's cover/QR, so this is always optional.
+         * Books this video pitches — uploaded on the generate form, NOT assigned to a block. The
+         * operator "calls" a book by naming it in the script's CTA text, and the server places
+         * each one on the CTA block whose text matches its title (see the title-match below), so
+         * there is no per-block picker. Snapshotted onto the job; `saveToChannel` also persists it
+         * as a reusable channel book. Blocks that match no book fall back to the channel cover/QR.
          */
         ctaBooks: z
           .array(
             z.object({
-              ctaIndex: z.number().int().min(0).max(31),
-              bookId: z.number().int().positive(),
+              title: z.string().min(1).max(255),
+              coverImageUrl: z.string().url().max(512).optional(),
+              shopUrl: z.string().max(512).optional(),
+              saveToChannel: z.boolean().optional(),
             })
           )
           .max(32)
@@ -1027,7 +1087,13 @@ const longformVideoRouter = router({
       // Explicit CTA markers are the ground truth for CTA/book-cover placement. Malformed
       // pairing is always rejected; a channel with a cover/QR configured REQUIRES at least
       // one marked block (the script template wraps both the mid-roll and the close).
-      const ctaMarkers = validateCtaMarkers(input.script);
+      //
+      // `parseCtaMarkers` (not `validateCtaMarkers`) because the placement match below needs the
+      // spoken block TEXT, which only this returns. `spans` are word-index ranges into `script`,
+      // and their order is the `ctaIndex` the pipeline keys scenes off — the same derivation the
+      // book form's `detectCtaBlocks` used, so the indices line up.
+      const ctaMarkers = parseCtaMarkers(extractSpokenScript(input.script));
+      const ctaBlockWords = ctaMarkers.script.split(/\s+/).filter(Boolean);
       if (ctaMarkers.errors.length) {
         throw new TRPCError({
           code: "BAD_REQUEST",
@@ -1104,13 +1170,22 @@ const longformVideoRouter = router({
         }
       }
 
-      // Rehost the uploaded assets onto R2 alongside the channel refs above. Same posture as the
-      // QR (non-fatal): a bad asset is skipped with a log line rather than failing the render.
+      // CTA assets now come from the CHANNEL, not this request: they are configured once in
+      // Admin → Channels and every video on the channel uses all of them, the same way books
+      // live on the channel. `input.assets` is still accepted by the schema so an older client
+      // mid-deploy doesn't 400, but it is deliberately ignored — the channel is the source.
+      //
+      // Snapshotted onto the job below exactly as an upload was, so the pipeline
+      // (`placeAssetBeats`) is unchanged and a finished film keeps the assets it shipped with
+      // even after the channel's list is edited. Rehosted (non-fatal, same as the QR): a bad
+      // asset is skipped with a log line rather than failing the render. Capped at
+      // MAX_JOB_ASSETS — the pitch has only so many person-free beats to place them on.
+      const channelAssetRows = await getChannelAssets(input.channelKey, true);
       const assets: { url: string; caption?: string }[] = [];
-      for (const a of input.assets ?? []) {
+      for (const a of channelAssetRows.slice(0, MAX_JOB_ASSETS)) {
         try {
           assets.push({
-            url: await rehostToR2(a.url, "asset"),
+            url: await rehostToR2(a.imageUrl, "asset"),
             caption: a.caption?.trim() || undefined,
           });
         } catch (err) {
@@ -1122,27 +1197,93 @@ const longformVideoRouter = router({
       // reproduce the film that shipped, even if the book has since been renamed or re-priced.
       // A book that no longer exists, or belongs to another channel, is dropped rather than
       // failing the render: that block falls back to the channel cover/QR.
-      const ctaBooks: LongformCtaBook[] = [];
-      for (const a of input.ctaBooks ?? []) {
-        const book = await getBookById(a.bookId);
-        if (!book || book.channelKey !== input.channelKey) {
-          console.warn(
-            `[longform] CTA block ${a.ctaIndex} references book ${a.bookId}, which is missing ` +
-              `or belongs to another channel — that block falls back to the channel cover/QR`
-          );
-          continue;
+      const inputBooks = input.ctaBooks ?? [];
+
+      // Title match: a book named "The Old Way Home" belongs on the CTA block whose spoken text
+      // says "The Old Way Home". Half of the title's words-over-3-letters appearing is a match —
+      // the same rule the book form used client-side to pre-fill, now the whole mechanism. A
+      // shop link is validated up front so a typo fails here (operator present) not mid-render.
+      const normTitle = (s: string) =>
+        s.toLowerCase().replace(/[^a-z0-9 ]/g, " ");
+      const titleMatches = (title: string, text: string) => {
+        const tokens = normTitle(title)
+          .split(/\s+/)
+          .filter(t => t.length > 3);
+        if (tokens.length === 0) return false;
+        const hay = normTitle(text);
+        return (
+          tokens.filter(t => hay.includes(t)).length >=
+          Math.ceil(tokens.length / 2)
+        );
+      };
+      for (const b of inputBooks) {
+        const shop = b.shopUrl?.trim() || undefined;
+        if (shop && !buildTrackingUrl(shop, 1)) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message:
+              `The shop link on "${b.title}" isn't a usable web address. Fix it or clear it ` +
+              "(a book with no link still shows its cover).",
+          });
         }
+      }
+
+      // "Also save to this channel" — persist a reusable channel book, de-duped by title so
+      // repeated renders don't pile up copies. Independent of placement below.
+      if (inputBooks.some(b => b.saveToChannel)) {
+        const existing = await getBooks(input.channelKey, false);
+        const already = (t: string) =>
+          existing.some(
+            e => e.title.trim().toLowerCase() === t.trim().toLowerCase()
+          );
+        for (const b of inputBooks) {
+          if (!b.saveToChannel || already(b.title)) continue;
+          const shop = b.shopUrl?.trim() || null;
+          await createBook({
+            channelKey: input.channelKey,
+            title: b.title.trim(),
+            coverImageUrl: b.coverImageUrl ?? null,
+            shopUrl: shop ? stripTrackingParam(shop) : null,
+            isActive: true,
+          });
+        }
+      }
+
+      // Place a book on each CTA block. Priority: the book the block NAMES (title match) →
+      // otherwise the book at this block's position → otherwise, when only one was uploaded, that
+      // one for every block. So an uploaded book is never silently dropped just because its title
+      // doesn't appear word-for-word in the script; a block that still resolves nothing uses the
+      // channel cover/QR. `markCoverReveal` reveals an assigned-but-unnamed book on the block's
+      // first beat, so the cover shows either way.
+      //
+      // `bookId: 0` marks a snapshot with no channel row behind it (a book that was ALSO saved to
+      // the channel is still snapshotted from the upload, so a later channel edit can't change a
+      // film that already shipped). Covers are rehosted once each, cached across blocks that
+      // share a book, so the render only fetches our own CDN.
+      const coverCache = new Map<string, string | undefined>();
+      const rehostCover = async (url?: string) => {
+        if (!url) return undefined;
+        if (!coverCache.has(url)) {
+          coverCache.set(url, await rehostToR2(url, "cover").catch(() => url));
+        }
+        return coverCache.get(url);
+      };
+      const ctaBooks: LongformCtaBook[] = [];
+      for (let i = 0; i < ctaMarkers.spans.length; i++) {
+        const sp = ctaMarkers.spans[i];
+        const blockText = ctaBlockWords.slice(sp.start, sp.end).join(" ");
+        const b =
+          inputBooks.find(x => titleMatches(x.title, blockText)) ??
+          inputBooks[i] ??
+          (inputBooks.length === 1 ? inputBooks[0] : undefined);
+        if (!b) continue;
+        const shop = b.shopUrl?.trim() || undefined;
         ctaBooks.push({
-          ctaIndex: a.ctaIndex,
-          bookId: book.id,
-          title: book.title,
-          // Rehost like every other reference image, so the render only fetches our own CDN.
-          coverImageUrl: book.coverImageUrl
-            ? await rehostToR2(book.coverImageUrl, "cover").catch(
-                () => book.coverImageUrl ?? undefined
-              )
-            : undefined,
-          shopUrl: book.shopUrl ?? undefined,
+          ctaIndex: i,
+          bookId: 0,
+          title: b.title.trim(),
+          coverImageUrl: await rehostCover(b.coverImageUrl),
+          shopUrl: shop ? stripTrackingParam(shop) : undefined,
         });
       }
 
@@ -1237,6 +1378,12 @@ const longformVideoRouter = router({
         // one field left behind, so a restored tab showed the storyboard of one script beside
         // the text of another.
         script: (job.inputParams as { script?: string } | null)?.script ?? null,
+        // The books this job pitched, so a restored tab shows them in the uploader instead of a
+        // blank list — the same reason `script` is carried. The snapshot has one entry per CTA
+        // block, so a book used on two blocks appears twice; the client de-dupes by title.
+        ctaBooks:
+          (job.inputParams as { ctaBooks?: LongformCtaBook[] } | null)
+            ?.ctaBooks ?? null,
         visualStyleBible:
           (job.inputParams as { visualStyleBible?: string } | null)
             ?.visualStyleBible ?? null,
@@ -1558,6 +1705,7 @@ export const appRouter = router({
   styleReference: styleReferenceRouter,
   longformVideo: longformVideoRouter,
   book: bookRouter,
+  channelAsset: channelAssetRouter,
 });
 
 export type AppRouter = typeof appRouter;

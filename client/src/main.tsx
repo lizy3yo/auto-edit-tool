@@ -42,6 +42,12 @@ const trpcClient = trpc.createClient({
     httpBatchLink({
       url: "/api/trpc",
       transformer: superjson,
+      // Split a batch before its GET URL gets too long. `book.detectCtaBlocks` carries the whole
+      // script as a query param, and several tabs now restore their scripts at once, so an
+      // unbounded batch packed multiple multi-thousand-character scripts into one URL and the
+      // server rejected it with 431 (Request Header Fields Too Large). tRPC breaks the batch into
+      // smaller requests to stay under this, well below Node's 16 KB request-line limit.
+      maxURLLength: 12000,
       fetch(input, init) {
         return globalThis.fetch(input, {
           ...(init ?? {}),

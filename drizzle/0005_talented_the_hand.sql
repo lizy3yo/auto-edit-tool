@@ -1,0 +1,1 @@
+ALTER TABLE `longform_slots` ADD `draftBooks` text;
