@@ -307,7 +307,7 @@ export function ChannelBooks({ channelKey }: { channelKey: string }) {
             avoids the reasonable assumption that a book is lost unless you also save the
             channel. */}
         <p className="mt-1 text-[11px] italic text-muted-foreground">
-          Books save on their own — Save Configuration above covers the channel
+          Books save on their own — Save Configuration below covers the channel
           fields, not this list.
         </p>
       </div>

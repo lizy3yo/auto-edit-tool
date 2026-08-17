@@ -57,7 +57,6 @@ import {
   Search,
   Pencil,
   ChevronRight,
-  Trash2,
   Receipt,
 } from "lucide-react";
 
@@ -433,7 +432,9 @@ export default function LongformJobSlot({
     onJobIdChange?.(null);
     setDownloadTitle("");
     onTitleChange?.("");
-    toast.success(`Video ${slotIndex + 1} output cleared`);
+    toast.success(
+      `Tab ${slotIndex + 1} is free — the video is in your library`
+    );
   };
 
   const { data: rawJob } = trpc.longformVideo.pollJob.useQuery(
@@ -986,15 +987,20 @@ export default function LongformJobSlot({
                     Cancel
                   </Button>
                 ) : (
+                  // "Clear Output" under a bin icon read as "throw this render away", so the
+                  // one control that frees a tab was the last one anybody would risk clicking.
+                  // It has never deleted anything: it nulls this slot's job id, and the render
+                  // stays in the library. The label says that now, and the icon is an X —
+                  // detach — rather than a bin.
                   <Button
                     variant="ghost"
                     size="sm"
                     onClick={() => setShowClearConfirm(true)}
-                    className="text-muted-foreground hover:text-destructive"
-                    title="Clear output and error log from this slot"
+                    className="text-muted-foreground hover:text-foreground"
+                    title="Free this tab — the video stays in your library"
                   >
-                    <Trash2 className="mr-2 h-4 w-4" />
-                    Clear Output
+                    <X className="mr-2 h-4 w-4" />
+                    Remove from tab
                   </Button>
                 )}
               </div>
@@ -1642,30 +1648,33 @@ export default function LongformJobSlot({
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Clear Output Confirmation Modal */}
       <GenerationCostDialog
         jobId={jobId}
         open={showCost}
         onOpenChange={setShowCost}
       />
 
+      {/* Confirms a detach, not a delete. The old copy — "clear the video output, error
+          messages, and storyboard" — described losing three things and never mentioned that
+          the render survives, which is the fact that decides whether you press it. Nothing
+          about the action changed; only what it admits to doing. */}
       <AlertDialog open={showClearConfirm} onOpenChange={setShowClearConfirm}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Clear Video Output?</AlertDialogTitle>
+            <AlertDialogTitle>
+              Remove this video from tab {slotIndex + 1}?
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              This will clear the current video output, error messages, and
-              storyboard from Video {slotIndex + 1} so you can start a new video
-              run cleanly.
+              The render stays in your library — this only frees the tab so you
+              can start another. Open it again any time from the library.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Keep Output</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={confirmClearOutput}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              Clear Output
+            <AlertDialogCancel>Keep here</AlertDialogCancel>
+            {/* Not the destructive red: nothing is destroyed, and dressing a reversible
+                action as one is how a useful control ends up avoided. */}
+            <AlertDialogAction onClick={confirmClearOutput}>
+              Remove from tab
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

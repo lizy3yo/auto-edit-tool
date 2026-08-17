@@ -558,7 +558,20 @@ export function ChannelConfigPanel() {
           </div>
         </div>
       </div>
-      <div className="flex justify-end">
+      {/* Books live here rather than in their own Admin tab: a book belongs to exactly one
+          channel, so editing them anywhere else meant re-picking the channel you already had
+          open. These rows write immediately, unlike the staged fields above. */}
+      {editingChannel && (
+        <div className="border-t border-border pt-4">
+          <ChannelBooks channelKey={editingChannel} />
+        </div>
+      )}
+      {/* Last thing in the editor. It used to sit above the books block, which left the only
+          way to commit the form stranded mid-panel — you scroll to the end of a long editor
+          looking for Save and find a book list instead. The books writing immediately was the
+          reason for the old order; the note on that list says so in words, which does the job
+          without hiding the button. */}
+      <div className="flex justify-end border-t border-border pt-4">
         <Button
           size="sm"
           onClick={handleSave}
@@ -573,15 +586,6 @@ export function ChannelConfigPanel() {
           Save Configuration
         </Button>
       </div>
-      {/* Books live here rather than in their own Admin tab: a book belongs to exactly one
-          channel, so editing them anywhere else meant re-picking the channel you already had
-          open. Below the save button, because these rows write immediately while everything
-          above is staged until Save Configuration. */}
-      {editingChannel && (
-        <div className="border-t border-border pt-4">
-          <ChannelBooks channelKey={editingChannel} />
-        </div>
-      )}
     </div>
   );
 
