@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ChannelBooks } from "@/components/admin/ChannelBooks";
 import {
   Dialog,
   DialogContent,
@@ -151,8 +152,6 @@ export function ChannelConfigPanel() {
       setCreateOpen(false);
       setEditForm({
         authorName: createForm.authorName,
-        ctaQrImageUrl: createForm.ctaQrImageUrl,
-        bookCoverImageUrl: createForm.bookCoverImageUrl,
         hostPhotoUrl: createForm.hostPhotoUrl,
         hostPhotoUrl2: createForm.hostPhotoUrl2,
         hostName: createForm.hostName,
@@ -174,8 +173,6 @@ export function ChannelConfigPanel() {
         authorName: "",
         personaProfile: "",
         nicheSlug: "gardening",
-        ctaQrImageUrl: "",
-        bookCoverImageUrl: "",
         hostPhotoUrl: "",
         hostPhotoUrl2: "",
         hostName: "",
@@ -206,8 +203,6 @@ export function ChannelConfigPanel() {
   const [editingChannel, setEditingChannel] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<{
     authorName: string;
-    ctaQrImageUrl: string;
-    bookCoverImageUrl: string;
     hostPhotoUrl: string;
     hostPhotoUrl2: string;
     hostName: string;
@@ -224,8 +219,6 @@ export function ChannelConfigPanel() {
     defaultWordCount: string;
   }>({
     authorName: "",
-    ctaQrImageUrl: "",
-    bookCoverImageUrl: "",
     hostPhotoUrl: "",
     hostPhotoUrl2: "",
     hostName: "",
@@ -248,8 +241,6 @@ export function ChannelConfigPanel() {
     authorName: "",
     personaProfile: "",
     nicheSlug: "gardening",
-    ctaQrImageUrl: "",
-    bookCoverImageUrl: "",
     hostPhotoUrl: "",
     hostPhotoUrl2: "",
     hostName: "",
@@ -273,8 +264,6 @@ export function ChannelConfigPanel() {
     const config = configs?.find((c: any) => c.channelKey === channelKey);
     setEditForm({
       authorName: config?.authorName || "",
-      ctaQrImageUrl: config?.ctaQrImageUrl || "",
-      bookCoverImageUrl: config?.bookCoverImageUrl || "",
       hostPhotoUrl: config?.hostPhotoUrl || "",
       hostPhotoUrl2: config?.hostPhotoUrl2 || "",
       hostName: config?.hostName || "",
@@ -300,8 +289,10 @@ export function ChannelConfigPanel() {
     upsertMutation.mutate({
       channelKey: editingChannel,
       authorName: editForm.authorName || undefined,
-      ctaQrImageUrl: editForm.ctaQrImageUrl || undefined,
-      bookCoverImageUrl: editForm.bookCoverImageUrl || undefined,
+      // `ctaQrImageUrl` and `bookCoverImageUrl` are deliberately not sent. `upsert` passes a
+      // partial to Drizzle's `.set()`, so omitting them leaves whatever a legacy channel
+      // already stored intact rather than silently wiping it on the next save — they simply
+      // can no longer be set from here. Both now come from the channel's books.
       hostPhotoUrl: editForm.hostPhotoUrl || undefined,
       hostPhotoUrl2: editForm.hostPhotoUrl2 || undefined,
       hostName: editForm.hostName || undefined,
@@ -327,8 +318,6 @@ export function ChannelConfigPanel() {
       !createForm.displayName.trim() ||
       !createForm.authorName.trim() ||
       !createForm.personaProfile.trim() ||
-      !createForm.ctaQrImageUrl ||
-      !createForm.bookCoverImageUrl ||
       !createForm.hostPhotoUrl
     )
       return;
@@ -337,8 +326,6 @@ export function ChannelConfigPanel() {
       authorName: createForm.authorName.trim(),
       personaProfile: createForm.personaProfile.trim(),
       nicheSlug: createForm.nicheSlug,
-      ctaQrImageUrl: createForm.ctaQrImageUrl,
-      bookCoverImageUrl: createForm.bookCoverImageUrl,
       hostPhotoUrl: createForm.hostPhotoUrl,
       hostPhotoUrl2: createForm.hostPhotoUrl2 || undefined,
       hostName: createForm.hostName || undefined,
@@ -379,24 +366,16 @@ export function ChannelConfigPanel() {
           className="text-xs h-8"
         />
       </div>
-      <ImageUploadField
-        label="CTA QR Code"
-        helpText="Overlaid in the corner during call-to-action scenes of long-form videos (e.g. your book/product site). PNG/JPG, under 10 MB."
-        value={editForm.ctaQrImageUrl}
-        onChange={url => setEditForm(f => ({ ...f, ctaQrImageUrl: url }))}
-        fit="contain"
-        whiteBg
-        uploadLabel="Upload QR image"
-      />
-      <ImageUploadField
-        label="Book Cover"
-        helpText="Revealed full-frame (large, white glow) the first time the book is named in each call-to-action of long-form videos. PNG/JPG, under 10 MB."
-        value={editForm.bookCoverImageUrl}
-        onChange={url => setEditForm(f => ({ ...f, bookCoverImageUrl: url }))}
-        fit="contain"
-        whiteBg
-        uploadLabel="Upload book cover"
-      />
+      {/* Neither a CTA QR nor a book cover is uploaded here any more — both now come from the
+          Books list below, per book.
+          - QR: a hand-uploaded image is one fixed code pointing at one fixed URL, so every
+            video showing it is indistinguishable in the sales data. A book's shop link gets
+            the video's own `?ref=` tag and the code is generated from that, which is the
+            whole reason sales are attributable.
+          - Cover: `assignCoverHero` already prefers the assigned book's own cover and title
+            (`book?.coverImageUrl ?? params.bookCoverImageUrl`), so the channel-level pair was
+            only ever the fallback for a CTA block with no book — one cover per channel, in a
+            model where a video can pitch a different book mid-roll and at the close. */}
       <ImageUploadField
         label="Host Photo"
         helpText="Front-facing photo of the host. Used as the on-camera face for talking scenes and lip-sync in long-form videos. PNG/JPG, under 10 MB."
@@ -616,6 +595,15 @@ export function ChannelConfigPanel() {
           Save Configuration
         </Button>
       </div>
+      {/* Books live here rather than in their own Admin tab: a book belongs to exactly one
+          channel, so editing them anywhere else meant re-picking the channel you already had
+          open. Below the save button, because these rows write immediately while everything
+          above is staged until Save Configuration. */}
+      {editingChannel && (
+        <div className="border-t border-border pt-4">
+          <ChannelBooks channelKey={editingChannel} />
+        </div>
+      )}
     </div>
   );
 
@@ -826,28 +814,10 @@ export function ChannelConfigPanel() {
               <h4 className="text-xs font-semibold uppercase text-muted-foreground tracking-wider">
                 Assets (required)
               </h4>
-              <ImageUploadField
-                label="CTA QR Code"
-                helpText="Overlaid in the corner during call-to-action scenes of long-form videos (e.g. your book/product site). PNG/JPG, under 10 MB."
-                value={createForm.ctaQrImageUrl}
-                onChange={url =>
-                  setCreateForm(f => ({ ...f, ctaQrImageUrl: url }))
-                }
-                fit="contain"
-                whiteBg
-                uploadLabel="Upload QR image"
-              />
-              <ImageUploadField
-                label="Book Cover"
-                helpText="Revealed full-frame (large, white glow) the first time the book is named in each call-to-action of long-form videos. PNG/JPG, under 10 MB."
-                value={createForm.bookCoverImageUrl}
-                onChange={url =>
-                  setCreateForm(f => ({ ...f, bookCoverImageUrl: url }))
-                }
-                fit="contain"
-                whiteBg
-                uploadLabel="Upload book cover"
-              />
+              {/* Book cover and CTA QR are not asked for here — see the note in the edit
+                  form. Both belong to a book, and a book belongs to a channel that exists,
+                  so you add them straight after this in the channel's own editor. Only the
+                  host photo is genuinely needed up front: it is the on-camera face. */}
               <ImageUploadField
                 label="Host Photo"
                 helpText="Front-facing photo of the host. Used as the on-camera face for talking scenes and lip-sync in long-form videos. PNG/JPG, under 10 MB."
@@ -1067,8 +1037,6 @@ export function ChannelConfigPanel() {
                 !createForm.displayName.trim() ||
                 !createForm.authorName.trim() ||
                 !createForm.personaProfile.trim() ||
-                !createForm.ctaQrImageUrl ||
-                !createForm.bookCoverImageUrl ||
                 !createForm.hostPhotoUrl
               }
               className="gap-1.5"

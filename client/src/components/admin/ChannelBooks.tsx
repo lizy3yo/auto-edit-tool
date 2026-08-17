@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -23,14 +22,19 @@ import {
 import { toast } from "sonner";
 
 /**
- * Admin editor for a channel's BOOKS — the products its videos pitch.
+ * A channel's BOOKS — the products its videos pitch — edited inside the channel it belongs to.
  *
  * A book carries the cover its CTA reveals and the shop link its QR encodes. The shop link is the
  * load-bearing field: the per-video tracking link is that URL plus `?ref=<video>`, so a book
  * without one still appears on screen but earns no attribution.
  *
  * Books are per channel and never shared, so the same title sold on two channels is two rows and
- * their sales stay separable.
+ * their sales stay separable. That is exactly why this lives in the channel editor rather than a
+ * standalone Admin tab: the channel is already the unit being configured, so its books belong
+ * beside its host photo and voice instead of behind a second channel picker somewhere else.
+ *
+ * `channelKey` is supplied by the editor, so there is no channel selector here — the channel on
+ * screen IS the scope.
  */
 
 const ACCEPTED = ["image/jpeg", "image/png", "image/webp"];
@@ -170,7 +174,7 @@ function QrPreview({
           Show link for
         </Label>
         <Select value={pick} onValueChange={setPick}>
-          <SelectTrigger className="h-7 w-64 bg-secondary/50 text-xs">
+          <SelectTrigger className="h-7 w-full max-w-64 bg-secondary/50 text-xs">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -199,13 +203,13 @@ function QrPreview({
       ) : error && !isPublished ? (
         <p className="text-xs text-destructive">{error.message}</p>
       ) : (
-        <div className="flex items-start gap-3">
+        <div className="flex flex-wrap items-start gap-3">
           <img
             src={shownQr}
             alt="QR"
-            className="h-24 w-24 rounded border border-border bg-white"
+            className="h-24 w-24 shrink-0 rounded border border-border bg-white"
           />
-          <div className="min-w-0 space-y-1 text-xs">
+          <div className="min-w-0 flex-1 space-y-1 text-xs">
             {isPublished ? (
               <p className="flex items-center gap-1.5 text-emerald-500">
                 <CheckCircle2 className="h-3.5 w-3.5" />
@@ -254,10 +258,8 @@ function QrPreview({
   );
 }
 
-export function BooksPanel() {
+export function ChannelBooks({ channelKey }: { channelKey: string }) {
   const utils = trpc.useUtils();
-  const { data: channels } = trpc.channelConfig.listAllChannels.useQuery();
-  const [channelKey, setChannelKey] = useState("");
   const [draft, setDraft] = useState<Draft>(EMPTY);
 
   const { data: books, isLoading } = trpc.book.list.useQuery(
@@ -287,206 +289,184 @@ export function BooksPanel() {
   const canSave = !!channelKey && draft.title.trim().length > 0;
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <BookOpen className="h-4 w-4" />
+    <div className="space-y-3">
+      <div>
+        <Label className="flex items-center gap-1.5 text-xs">
+          <BookOpen className="h-3.5 w-3.5" />
           Books
-        </CardTitle>
-        <p className="mt-2 text-xs text-muted-foreground">
-          The products this channel's videos pitch. Each book has its own cover
-          and its own shop link — a video can pitch a different book in its
-          mid-roll and its close. The shop link is what makes sales traceable:
-          every video appends its own tag to it, and its on-screen QR encodes
-          that.
+        </Label>
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          The products this channel&apos;s videos pitch. Each book has its own
+          cover and its own shop link — a video can pitch a different book in
+          its mid-roll and its close. The shop link is what makes sales
+          traceable: every video appends its own tag to it, and its on-screen QR
+          encodes that.
         </p>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="space-y-1.5">
-          <Label className="text-sm">Channel</Label>
-          <Select value={channelKey} onValueChange={setChannelKey}>
-            <SelectTrigger className="bg-secondary/50">
-              <SelectValue placeholder="Pick a channel…" />
-            </SelectTrigger>
-            <SelectContent>
-              {(channels ?? []).map((ch: any) => (
-                <SelectItem key={ch.key} value={ch.key}>
-                  {ch.name ?? ch.key}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        {/* The channel fields above are staged and written by Save Configuration; these are
+            their own rows and are written the moment you press Add/Save/Remove. Saying so
+            avoids the reasonable assumption that a book is lost unless you also save the
+            channel. */}
+        <p className="mt-1 text-[11px] italic text-muted-foreground">
+          Books save on their own — Save Configuration above covers the channel
+          fields, not this list.
+        </p>
+      </div>
 
-        {!channelKey ? (
-          <p className="text-xs italic text-muted-foreground">
-            Pick a channel to manage its books.
-          </p>
-        ) : (
-          <>
-            {isLoading ? (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" /> Loading…
-              </div>
-            ) : (books ?? []).length === 0 ? (
-              <p className="text-xs italic text-muted-foreground">
-                No books yet. Add the first below.
-              </p>
-            ) : (
-              <div className="space-y-2">
-                {(books ?? []).map(b => (
-                  <div
-                    key={b.id}
-                    className={`rounded-md border border-border p-3 ${
-                      b.isActive ? "" : "opacity-50"
-                    }`}
-                  >
-                    <div className="flex items-start gap-3">
-                      {b.coverImageUrl ? (
-                        <img
-                          src={b.coverImageUrl}
-                          alt=""
-                          className="h-16 w-12 shrink-0 rounded border border-border object-cover"
-                        />
-                      ) : (
-                        <div className="flex h-16 w-12 shrink-0 items-center justify-center rounded border border-dashed border-border">
-                          <BookOpen className="h-4 w-4 text-muted-foreground" />
-                        </div>
-                      )}
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-medium">
-                          {b.title}
-                          {!b.isActive && (
-                            <span className="ml-2 text-xs font-normal text-muted-foreground">
-                              (removed)
-                            </span>
-                          )}
-                        </div>
-                        <div className="truncate text-xs text-muted-foreground">
-                          {b.shopUrl || (
-                            <span className="text-amber-500">
-                              No shop link — this book's pitch carries no QR and
-                              no tracking
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex shrink-0 gap-1">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-7 text-xs"
-                          onClick={() =>
-                            setDraft({
-                              id: b.id,
-                              title: b.title,
-                              coverImageUrl: b.coverImageUrl ?? "",
-                              shopUrl: b.shopUrl ?? "",
-                            })
-                          }
-                        >
-                          Edit
-                        </Button>
-                        {b.isActive && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 w-7 p-0"
-                            aria-label={`Remove ${b.title}`}
-                            onClick={() => remove.mutate({ id: b.id })}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                    {b.shopUrl && (
-                      <div className="mt-2 pl-15">
-                        <QrPreview
-                          shopUrl={b.shopUrl}
-                          bookId={b.id}
-                          channelKey={channelKey}
-                        />
-                      </div>
+      {isLoading ? (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+        </div>
+      ) : (books ?? []).length === 0 ? (
+        <p className="text-[11px] italic text-muted-foreground">
+          No books yet. Add the first below.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {(books ?? []).map(b => (
+            <div
+              key={b.id}
+              className={`rounded-md border border-border p-3 ${
+                b.isActive ? "" : "opacity-50"
+              }`}
+            >
+              <div className="flex flex-wrap items-start gap-3">
+                {b.coverImageUrl ? (
+                  <img
+                    src={b.coverImageUrl}
+                    alt=""
+                    className="h-16 w-12 shrink-0 rounded border border-border object-cover"
+                  />
+                ) : (
+                  <div className="flex h-16 w-12 shrink-0 items-center justify-center rounded border border-dashed border-border">
+                    <BookOpen className="h-4 w-4 text-muted-foreground" />
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-medium">
+                    {b.title}
+                    {!b.isActive && (
+                      <span className="ml-2 text-xs font-normal text-muted-foreground">
+                        (removed)
+                      </span>
                     )}
                   </div>
-                ))}
-              </div>
-            )}
-
-            <div className="space-y-3 rounded-lg border border-border p-4">
-              <div className="text-sm font-medium">
-                {draft.id ? "Edit book" : "Add a book"}
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Title</Label>
-                <Input
-                  value={draft.title}
-                  onChange={e =>
-                    setDraft(d => ({ ...d, title: e.target.value }))
-                  }
-                  placeholder="The Backyard Soil Handbook"
-                  className="bg-secondary/50"
-                />
-                <p className="text-[11px] text-muted-foreground">
-                  Also what the pipeline listens for in the pitch, to place the
-                  cover reveal on the line that names it.
-                </p>
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Shop link</Label>
-                <Input
-                  value={draft.shopUrl}
-                  onChange={e =>
-                    setDraft(d => ({ ...d, shopUrl: e.target.value }))
-                  }
-                  placeholder="https://yourshop.com/the-backyard-soil-handbook"
-                  className="bg-secondary/50"
-                />
-                <p className="text-[11px] text-muted-foreground">
-                  Where this book is sold. Leave the tracking tag off — each
-                  video adds its own.
-                </p>
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Cover</Label>
-                <CoverPicker
-                  value={draft.coverImageUrl}
-                  onChange={url =>
-                    setDraft(d => ({ ...d, coverImageUrl: url }))
-                  }
-                  disabled={save.isPending}
-                />
-              </div>
-              <div className="flex justify-end gap-2">
-                {draft.id && (
-                  <Button variant="outline" onClick={() => setDraft(EMPTY)}>
-                    Cancel
+                  <div className="truncate text-xs text-muted-foreground">
+                    {b.shopUrl || (
+                      <span className="text-amber-500">
+                        No shop link — this book&apos;s pitch carries no QR and
+                        no tracking
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="flex shrink-0 gap-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() =>
+                      setDraft({
+                        id: b.id,
+                        title: b.title,
+                        coverImageUrl: b.coverImageUrl ?? "",
+                        shopUrl: b.shopUrl ?? "",
+                      })
+                    }
+                  >
+                    Edit
                   </Button>
-                )}
-                <Button
-                  disabled={!canSave || save.isPending}
-                  onClick={() =>
-                    save.mutate({
-                      id: draft.id,
-                      channelKey,
-                      title: draft.title,
-                      coverImageUrl: draft.coverImageUrl || null,
-                      shopUrl: draft.shopUrl || null,
-                    })
-                  }
-                >
-                  {save.isPending
-                    ? "Saving…"
-                    : draft.id
-                      ? "Save changes"
-                      : "Add book"}
-                </Button>
+                  {b.isActive && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 p-0"
+                      aria-label={`Remove ${b.title}`}
+                      onClick={() => remove.mutate({ id: b.id })}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
+                </div>
               </div>
+              {b.shopUrl && (
+                <div className="mt-2">
+                  <QrPreview
+                    shopUrl={b.shopUrl}
+                    bookId={b.id}
+                    channelKey={channelKey}
+                  />
+                </div>
+              )}
             </div>
-          </>
-        )}
-      </CardContent>
-    </Card>
+          ))}
+        </div>
+      )}
+
+      <div className="space-y-3 rounded-lg border border-border p-4">
+        <div className="text-sm font-medium">
+          {draft.id ? "Edit book" : "Add a book"}
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs">Title</Label>
+          <Input
+            value={draft.title}
+            onChange={e => setDraft(d => ({ ...d, title: e.target.value }))}
+            placeholder="The Backyard Soil Handbook"
+            className="h-8 bg-secondary/50 text-xs"
+          />
+          <p className="text-[11px] text-muted-foreground">
+            Also what the pipeline listens for in the pitch, to place the cover
+            reveal on the line that names it.
+          </p>
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs">Shop link</Label>
+          <Input
+            value={draft.shopUrl}
+            onChange={e => setDraft(d => ({ ...d, shopUrl: e.target.value }))}
+            placeholder="https://yourshop.com/the-backyard-soil-handbook"
+            className="h-8 bg-secondary/50 text-xs"
+          />
+          <p className="text-[11px] text-muted-foreground">
+            Where this book is sold. Leave the tracking tag off — each video
+            adds its own.
+          </p>
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs">Cover</Label>
+          <CoverPicker
+            value={draft.coverImageUrl}
+            onChange={url => setDraft(d => ({ ...d, coverImageUrl: url }))}
+            disabled={save.isPending}
+          />
+        </div>
+        <div className="flex flex-wrap justify-end gap-2">
+          {draft.id && (
+            <Button size="sm" variant="outline" onClick={() => setDraft(EMPTY)}>
+              Cancel
+            </Button>
+          )}
+          <Button
+            size="sm"
+            disabled={!canSave || save.isPending}
+            onClick={() =>
+              save.mutate({
+                id: draft.id,
+                channelKey,
+                title: draft.title,
+                coverImageUrl: draft.coverImageUrl || null,
+                shopUrl: draft.shopUrl || null,
+              })
+            }
+          >
+            {save.isPending
+              ? "Saving…"
+              : draft.id
+                ? "Save changes"
+                : "Add book"}
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 }
