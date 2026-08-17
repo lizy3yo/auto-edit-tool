@@ -20,17 +20,28 @@ function Layout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="border-b border-border">
-        <div className="mx-auto flex h-14 max-w-[1400px] items-center gap-6 px-4">
-          <Link href="/" className="flex items-center gap-2 font-semibold">
-            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary/20">
+        {/* Wraps below `sm` rather than overflowing. The wordmark, four nav items and
+            Logout need ~700px on one line and there is no mobile nav, so on a narrow
+            window this row used to push the whole document wider than the viewport —
+            which reads as every page being broken, not as the header being too wide. */}
+        <div className="mx-auto flex max-w-[1400px] flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2 sm:h-14 sm:flex-nowrap sm:gap-x-6 sm:py-0">
+          <Link
+            href="/"
+            className="flex shrink-0 items-center gap-2 font-semibold"
+          >
+            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/20">
               <Film className="h-4 w-4 text-primary" />
             </div>
-            Longform Studio
+            {/* Icon alone carries the home link on phones; the wordmark is the widest
+                thing here and the first worth dropping. */}
+            <span className="hidden sm:inline">Longform Studio</span>
           </Link>
-          <nav className="flex items-center gap-1 text-sm">
+          {/* Below `sm` this takes a full-width row of its own beneath the logo and
+              Logout, and wraps within it — so no nav item is ever unreachable. */}
+          <nav className="order-last flex w-full flex-wrap items-center gap-1 text-sm sm:order-none sm:w-auto sm:flex-nowrap">
             <Link
               href="/"
-              className={`rounded-md px-3 py-1.5 transition-colors ${
+              className={`whitespace-nowrap rounded-md px-3 py-1.5 transition-colors ${
                 location === "/"
                   ? "bg-secondary text-foreground"
                   : "text-muted-foreground hover:text-foreground"
@@ -40,7 +51,7 @@ function Layout({ children }: { children: React.ReactNode }) {
             </Link>
             <Link
               href="/library"
-              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 transition-colors ${
+              className={`flex items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1.5 transition-colors ${
                 location.startsWith("/library")
                   ? "bg-secondary text-foreground"
                   : "text-muted-foreground hover:text-foreground"
@@ -51,7 +62,7 @@ function Layout({ children }: { children: React.ReactNode }) {
             </Link>
             <Link
               href="/channels"
-              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 transition-colors ${
+              className={`flex items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1.5 transition-colors ${
                 location.startsWith("/channels")
                   ? "bg-secondary text-foreground"
                   : "text-muted-foreground hover:text-foreground"
@@ -62,7 +73,7 @@ function Layout({ children }: { children: React.ReactNode }) {
             </Link>
             <Link
               href="/admin"
-              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 transition-colors ${
+              className={`flex items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1.5 transition-colors ${
                 location.startsWith("/admin")
                   ? "bg-secondary text-foreground"
                   : "text-muted-foreground hover:text-foreground"
@@ -72,7 +83,7 @@ function Layout({ children }: { children: React.ReactNode }) {
               Admin
             </Link>
           </nav>
-          <div className="ml-auto">
+          <div className="ml-auto shrink-0">
             <Button
               variant="ghost"
               size="sm"

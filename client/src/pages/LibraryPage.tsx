@@ -103,7 +103,10 @@ export default function LibraryPage() {
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
-        <div className="relative min-w-64 flex-1">
+        {/* `min-w-64` unconditionally was 256px of hard floor — wider than the content
+            column on the narrowest phones, so the field itself forced a sideways scroll.
+            Full-width row of its own below `sm`, flexible beside the filter above it. */}
+        <div className="relative w-full min-w-0 flex-1 sm:w-auto sm:min-w-64">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={search}
@@ -113,7 +116,7 @@ export default function LibraryPage() {
           />
         </div>
         <Select value={channel} onValueChange={setChannel}>
-          <SelectTrigger className="w-56">
+          <SelectTrigger className="w-full sm:w-56">
             <Tv className="mr-2 h-4 w-4 text-muted-foreground" />
             <SelectValue />
           </SelectTrigger>
@@ -142,7 +145,10 @@ export default function LibraryPage() {
             : "No videos yet. Generate one and it shows up here."}
         </p>
       ) : (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-4">
+        // `min(240px,100%)` rather than a bare 240px: once the container is narrower than
+        // the track minimum, a fixed 240px keeps its width and pushes the card outside the
+        // grid — one card wide enough to scroll the whole page sideways.
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(min(240px,100%),1fr))] gap-4">
           {filtered.map(job => (
             <article
               key={job.id}
@@ -187,12 +193,17 @@ export default function LibraryPage() {
                 {/* Two distinct jobs, so two labelled buttons rather than one ambiguous
                     click: View watches the finished film, Open goes to the storyboard
                     workspace where scenes are inspected and regenerated. Download and
-                    Delete stay icon-only — labelling all four overflows the card. */}
-                <div className="mt-3 flex gap-2">
+                    Delete stay icon-only — labelling all four overflows the card.
+
+                    Wraps because the four together need ~240px and a card at the grid's
+                    240px minimum only has 216px inside its padding: on one rigid line the
+                    row spilled past the card edge. It stays on one line at any normal card
+                    width and drops the icon buttons underneath only at the narrowest. */}
+                <div className="mt-3 flex flex-wrap gap-2">
                   <Button
                     size="sm"
                     variant="outline"
-                    className="flex-1 gap-1.5"
+                    className="min-w-0 flex-1 basis-20 gap-1.5"
                     onClick={() => setPlaying(job)}
                     // Kept enabled with no video: the dialog explains why there is
                     // nothing to play, which beats a dead button with no reason.
@@ -208,7 +219,7 @@ export default function LibraryPage() {
                   <Button
                     size="sm"
                     variant="outline"
-                    className="flex-1 gap-1.5"
+                    className="min-w-0 flex-1 basis-20 gap-1.5"
                     onClick={() => navigate(`/?open=${job.id}`)}
                     title="Open the storyboard — inspect and regenerate scenes"
                   >
@@ -219,7 +230,7 @@ export default function LibraryPage() {
                     <Button
                       size="sm"
                       variant="outline"
-                      className="gap-1.5 px-2.5"
+                      className="shrink-0 gap-1.5 px-2.5"
                       onClick={() =>
                         downloadFile(
                           job.finalVideoUrl!,
@@ -235,7 +246,7 @@ export default function LibraryPage() {
                   <Button
                     size="sm"
                     variant="outline"
-                    className="gap-1.5 px-2.5 text-muted-foreground hover:border-destructive/40 hover:text-destructive"
+                    className="shrink-0 gap-1.5 px-2.5 text-muted-foreground hover:border-destructive/40 hover:text-destructive"
                     onClick={() => setDeleting(job)}
                     title="Delete this video from your library"
                   >
