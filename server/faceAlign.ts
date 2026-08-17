@@ -76,6 +76,25 @@ export function parseFaceCenter(
 }
 
 /**
+ * Median of the readings that came back, or null if none did.
+ *
+ * A median rather than a mean, and this is the whole point of sampling more than one frame: one
+ * bad frame — a blink, motion blur, a dissolve, a hand across the face — produces one wild
+ * reading, and a mean drags the crop toward it while a median ignores it outright. Two readings
+ * average, which is the honest answer when there is no middle one to pick.
+ *
+ * Pure — unit-tested.
+ */
+export function medianFocus(values: (number | null)[]): number | null {
+  const hits = values
+    .filter((v): v is number => v !== null && Number.isFinite(v))
+    .sort((a, b) => a - b);
+  if (hits.length === 0) return null;
+  const mid = Math.floor(hits.length / 2);
+  return hits.length % 2 === 1 ? hits[mid] : (hits[mid - 1] + hits[mid]) / 2;
+}
+
+/**
  * The `x` argument for ffmpeg's crop filter, panning the window so `focusX` lands in the
  * middle of it.
  *

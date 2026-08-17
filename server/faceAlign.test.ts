@@ -1,5 +1,37 @@
 import { describe, it, expect } from "vitest";
-import { parseFaceCenter, focusCropX } from "./faceAlign";
+import { parseFaceCenter, focusCropX, medianFocus } from "./faceAlign";
+
+describe("medianFocus", () => {
+  it("returns null when nothing was read", () => {
+    expect(medianFocus([])).toBeNull();
+    expect(medianFocus([null, null, null])).toBeNull();
+  });
+
+  it("takes the middle reading", () => {
+    expect(medianFocus([0.3, 0.7, 0.5])).toBe(0.5);
+    expect(medianFocus([0.5])).toBe(0.5);
+  });
+
+  it("averages the middle two when there is no single middle", () => {
+    expect(medianFocus([0.4, 0.6])).toBeCloseTo(0.5, 10);
+  });
+
+  it("ignores the frames that read nothing", () => {
+    expect(medianFocus([null, 0.62, null])).toBe(0.62);
+    expect(medianFocus([0.4, null, 0.6])).toBeCloseTo(0.5, 10);
+  });
+
+  // The reason this is a median and not a mean: one blink or motion-blurred frame must not
+  // drag the crop, because the result is baked into the render.
+  it("is not dragged by a single wild reading", () => {
+    expect(medianFocus([0.6, 0.62, 0.05])).toBe(0.6);
+    expect(medianFocus([0.6, 0.62, 0.99])).toBe(0.62);
+  });
+
+  it("discards non-finite readings", () => {
+    expect(medianFocus([NaN, 0.6, Infinity])).toBe(0.6);
+  });
+});
 
 describe("parseFaceCenter", () => {
   it("reads the fraction out of a well-formed verdict", () => {

@@ -21,7 +21,7 @@ import { randomUUID } from "crypto";
 import path from "path";
 import os from "os";
 import { getMediaDuration } from "./mediaProbe";
-import { detectFaceCenterX, focusCropX } from "./faceAlign";
+import { detectFaceCenterX, focusCropX, medianFocus } from "./faceAlign";
 import { getFFmpegPath } from "./ffmpegPath";
 import { Semaphore } from "./providers/semaphore";
 import { presignOwnBucketUrl } from "./storage";
@@ -1546,11 +1546,23 @@ export function buildFrameGrabArgs(
 }
 
 /**
+ * Fractions of the clip's length that get sampled. Never 0: lip-sync providers commonly open on
+ * a held or fading first frame, and a black or half-dissolved frame is the one place a face
+ * detector reliably finds nothing.
+ */
+const FACE_SAMPLE_POINTS = [0.2, 0.5, 0.8];
+
+/**
  * Where the host's face sits across the frame, for the split-screen crop. Null ⇒ crop centred.
  *
- * Samples a quarter of the way in rather than at 0s: lip-sync providers commonly open on a
- * held or fading first frame, and a black or half-dissolved frame is the one place a face
- * detector reliably finds nothing.
+ * Samples several frames and takes the median rather than trusting one. A single frame is one
+ * blink, one motion blur, one gesture across the face away from mis-cropping the entire scene,
+ * and the crop it decides is baked into the render — so the cheap redundancy is worth it
+ * against a re-render. Frames are measured concurrently; three Haiku calls on a downscaled
+ * still are a rounding error beside the 30-180s clip they protect.
+ *
+ * Resolution-independent by construction: the reading is a FRACTION of frame width and it is
+ * consumed as an ffmpeg expression over `in_w`/`out_w`, so nothing here assumes 1920x1080.
  *
  * Never throws — a failed grab, a missing key or an unreadable answer all land on null, which
  * restores the previous centred behaviour. Alignment is an improvement to the crop, never a
@@ -1562,12 +1574,31 @@ async function measureHostFocusX(
   workDir: string
 ): Promise<number | null> {
   try {
-    const framePath = path.join(workDir, "hostframe.jpg");
-    const at = Math.min(Math.max(durationSec * 0.25, 0.1), 3);
-    await runFfmpeg(buildFrameGrabArgs(hostPath, framePath, at));
-    const focus = await detectFaceCenterX(readFileSync(framePath));
+    const readings = await Promise.all(
+      FACE_SAMPLE_POINTS.map(async (frac, i) => {
+        try {
+          const framePath = path.join(workDir, `hostframe-${i}.jpg`);
+          // Clamped so a very short clip doesn't seek past its own end.
+          const at = Math.min(Math.max(durationSec * frac, 0.1), durationSec);
+          await runFfmpeg(buildFrameGrabArgs(hostPath, framePath, at));
+          return await detectFaceCenterX(readFileSync(framePath));
+        } catch {
+          // One unreadable frame is not a failed measurement — the others still count.
+          return null;
+        }
+      })
+    );
+    const focus = medianFocus(readings);
+    const found = readings.filter(r => r !== null).length;
     if (focus !== null) {
-      console.log(`[FaceAlign] host face at x=${focus.toFixed(2)} of frame`);
+      console.log(
+        `[FaceAlign] host face at x=${focus.toFixed(2)} of frame ` +
+          `(median of ${found}/${FACE_SAMPLE_POINTS.length} frames)`
+      );
+    } else {
+      console.log(
+        `[FaceAlign] no face found in ${FACE_SAMPLE_POINTS.length} frames — centring the host panel`
+      );
     }
     return focus;
   } catch (err: any) {
