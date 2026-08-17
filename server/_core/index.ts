@@ -20,6 +20,7 @@ import { createServer } from "http";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerAdminAuthRoutes } from "../adminAuth";
+import { runMigrations } from "../migrate";
 import { checkSchema } from "../schemaCheck";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
@@ -55,7 +56,11 @@ async function startServer() {
   app.set("trust proxy", 1);
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
-  // Warn loudly (but don't die) if the DB is behind `drizzle/schema.ts` — an unapplied
+  // Bring the database up to `drizzle/schema.ts` BEFORE serving. Nothing else in the deploy
+  // does: the host runs `build` then `start`, so without this a deploy happily ships code
+  // selecting columns the database has never heard of. Awaited so no request lands mid-way.
+  await runMigrations();
+  // Warn loudly (but don't die) if the DB is still behind `drizzle/schema.ts` — an unapplied
   // migration otherwise surfaces as dead buttons rather than an error.
   void checkSchema();
   // Single-admin email/password auth
@@ -72,6 +77,21 @@ async function startServer() {
     createExpressMiddleware({
       router: appRouter,
       createContext,
+      // Without this a 500 leaves NO server-side trace, and the only thing the browser gets
+      // is Drizzle's `Failed query: select ...` — which reads identically whether a column is
+      // missing, the table is missing, or the database is unreachable. The distinguishing
+      // detail (`ER_BAD_FIELD_ERROR`, `ER_NO_SUCH_TABLE`, `ETIMEDOUT`) is on `cause`.
+      onError({ error, path, type }) {
+        const cause = error.cause as
+          { code?: string; errno?: number } | undefined;
+        console.error(
+          `[tRPC] ${type} ${path ?? "<unknown>"} → ${error.code}` +
+            (cause?.code || cause?.errno
+              ? ` (${cause.code ?? cause.errno})`
+              : ""),
+          error.message
+        );
+      },
     })
   );
   // development mode uses Vite, production mode uses static files

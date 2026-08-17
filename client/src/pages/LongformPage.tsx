@@ -345,14 +345,22 @@ export default function FaceLockVideo() {
           <div className="rounded-md border border-amber-500/60 bg-amber-500/10 px-3 py-2 text-sm">
             <span className="font-medium">Workspace sync is unavailable.</span>{" "}
             Tabs still work, but this session can't restore or remember which
-            job each one holds. It clears itself as soon as the server answers —
-            if it persists, the server log names the cause (a stale schema is
-            reported there by name).
+            job each one holds. A momentary blip clears on its own; if this
+            stays, the database is behind{" "}
+            <code className="rounded bg-secondary px-1 py-0.5 text-xs">
+              drizzle/schema.ts
+            </code>{" "}
+            — run{" "}
+            <code className="rounded bg-secondary px-1 py-0.5 text-xs">
+              npx drizzle-kit migrate
+            </code>{" "}
+            against <em>that</em> environment's database, not your local one.
             {slotsError?.message && (
-              <span className="text-muted-foreground">
-                {" "}
-                ({slotsError.message})
-              </span>
+              // The real error, because "unapplied migration" is a guess and this is not:
+              // a missing table and an unreachable host produce very different text.
+              <div className="mt-1 truncate font-mono text-xs text-muted-foreground">
+                {slotsError.message}
+              </div>
             )}
           </div>
         )}
