@@ -38,6 +38,7 @@ import {
   createUnifiedTTSTask,
   pollUnifiedTTSTask,
   capDeadAirPauses,
+  VoiceNotFoundError,
 } from "./ttsUnified";
 import { storagePut } from "./storage";
 import { getActiveProvider, getProviderByType, hostNameAliases } from "./db";
@@ -3105,6 +3106,8 @@ async function generateSceneVoiceover(
       throw new Error("TTS timed out");
     } catch (e: any) {
       if (e instanceof CensoredTTSError) throw e; // never retry moderation blocks
+      // A bad voice ID is config, not flakiness — retrying re-asks the same question.
+      if (e instanceof VoiceNotFoundError) throw e;
       lastError = e.message || "TTS failed";
       if (attempt < TTS_MAX_ATTEMPTS - 1) {
         console.warn(
@@ -7431,6 +7434,9 @@ async function voiceMasterNarration(
     );
   } catch (e: any) {
     if (e instanceof CensoredTTSError) throw e;
+    // Chunking can't fix a bad voice ID any more than it can clear a moderation block —
+    // it would just fail once per chunk with the identical config error.
+    if (e instanceof VoiceNotFoundError) throw e;
     console.warn(
       `[Longform ${jobId}] master one-shot TTS failed (${e?.message}); ` +
         `falling back to chunked master narration`

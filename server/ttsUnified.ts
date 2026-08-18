@@ -10,6 +10,7 @@ import {
   pollTTSTask69Labs,
   downloadTTSAudio69Labs,
 } from "./tts69labs";
+export { VoiceNotFoundError } from "./tts69labs";
 import { storagePut } from "./storage";
 import { nanoid } from "nanoid";
 import { spawn } from "child_process";

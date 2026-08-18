@@ -82,6 +82,7 @@ Gemini, OpenAI, R2, RunPod. Missing ones fail loudly at the first stage that nee
 | `SIXTYNINE_VIDEO_TIMEOUT_MS`    | 360s            | `SIXTYNINE_CALL_TIMEOUT_MS`    | 120s                 |
 | `SIXTYNINE_DOWNLOAD_TIMEOUT_MS` | 300s            | `SIXTYNINE_VIDEO_SUBMIT_BURST` | 2                    |
 | `SIXTYNINE_VIDEO_SUBMIT_RATE`   | 5/min (API cap) | `IMAGE_PRIMARY_TIMEOUT_MS`     | 480s                 |
+| `SIXTYNINE_TTS_SUBMIT_RATE`     | 20/min          | `SIXTYNINE_TTS_SUBMIT_BURST`   | 3                    |
 | `IMAGE_PRIMARY_RETRIES`         | 1               | `IMAGE_RETRY_TIMEOUT_MS`       | 240s                 |
 | `IMAGE_RETRY_TOTAL_BUDGET_MS`   | 600s            | `MYSQL_SORT_BUFFER_SIZE`       | 8 MB                 |
 | `AUTO_MIGRATE`                  | on (`0` skips)  |                                |                      |

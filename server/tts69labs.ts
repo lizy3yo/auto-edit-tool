@@ -8,6 +8,83 @@ import { recordUsage } from "./costMeter";
 
 const BASE_URL = "https://69labs.vip/api/v1";
 
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+/**
+ * Thrown when 69Labs rejects the voice ID outright (400 "This voice ID was not found").
+ * Deterministic config error — retrying, chunking, or falling back cannot fix it, so callers
+ * must NOT retry (a cloned voice only resolves if it exists in the 69Labs account's own voice
+ * library or is a public ElevenLabs voice; a private clone on another account never will).
+ */
+export class VoiceNotFoundError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "VoiceNotFoundError";
+  }
+}
+
+// ─── Per-key rate limiter for TTS submits (Token Bucket + adaptive 429 backpressure) ───
+// The video lane already has a submit bucket (SIXTYNINE_VIDEO_SUBMIT_RATE), but /tts/generate had
+// none — the master narration is ONE call so the main pipeline never noticed, but retry-failed-
+// scenes fans ~23 scene workers out and each with missing audio submits TTS immediately, and
+// 69Labs answers the storm with 429 TOO_MANY_REQUESTS. The numeric ceiling is undisclosed, so
+// pace to a conservative default and let a real 429 self-correct via a shared per-key cooldown.
+const TTS_SUBMIT_RATE = Number(process.env.SIXTYNINE_TTS_SUBMIT_RATE ?? 20); // per minute
+const TTS_SUBMIT_BURST = Number(process.env.SIXTYNINE_TTS_SUBMIT_BURST ?? 3);
+const TTS_REFILL_RATE = TTS_SUBMIT_RATE / 60; // tokens/sec
+type TTSBucket = { tokens: number; lastRefill: number; cooldownUntil: number };
+const _ttsBuckets = new Map<string, TTSBucket>();
+const ttsBucketFor = (key: string): TTSBucket => {
+  let b = _ttsBuckets.get(key);
+  if (!b) {
+    b = { tokens: TTS_SUBMIT_BURST, lastRefill: Date.now(), cooldownUntil: 0 };
+    _ttsBuckets.set(key, b);
+  }
+  return b;
+};
+
+/** Block until this key's bucket has a token, waiting out any active 429 cooldown first. */
+async function acquireTTSToken(key: string): Promise<void> {
+  const b = ttsBucketFor(key);
+  while (true) {
+    const now = Date.now();
+    if (now < b.cooldownUntil) {
+      await sleep(Math.max(b.cooldownUntil - now, 100));
+      continue; // re-check cooldown + refill after waiting out the 429 window
+    }
+    const elapsed = (now - b.lastRefill) / 1000;
+    b.tokens = Math.min(TTS_SUBMIT_BURST, b.tokens + elapsed * TTS_REFILL_RATE);
+    b.lastRefill = now;
+    if (b.tokens >= 1) {
+      b.tokens -= 1;
+      return;
+    }
+    const waitMs = Math.ceil(((1 - b.tokens) / TTS_REFILL_RATE) * 1000);
+    await sleep(Math.max(waitMs, 100));
+  }
+}
+
+/** On a 429, pause ALL TTS submits on this key so every concurrent worker backs off together. */
+function penalizeTTSRateLimit(key: string, retryMs: number): void {
+  const b = ttsBucketFor(key);
+  b.cooldownUntil = Math.max(b.cooldownUntil, Date.now() + retryMs);
+  b.tokens = 0;
+}
+
+/** Bounded 429 retries per createTTSTask call — each waits out the shared cooldown first. */
+const TTS_SUBMIT_MAX_ATTEMPTS = 5;
+/** Cooldown applied on a 429 with no Retry-After header. */
+const TTS_429_COOLDOWN_MS = 30_000;
+
+// Known-bad (key, voiceId) pairs: a batch of 161 scenes sharing one misconfigured voice must
+// fail 161 times INSTANTLY off this cache, not via 161 API calls (which is itself what tripped
+// the 429 storm). TTL'd so fixing the voice on the 69Labs side doesn't need a process restart.
+const BAD_VOICE_TTL_MS = 5 * 60 * 1000;
+const _badVoices = new Map<string, { until: number; message: string }>();
+
+const isVoiceNotFound = (status: number, errText: string): boolean =>
+  status === 400 && /voice id was not found/i.test(errText);
+
 export interface TTSParams {
   text: string;
   voiceId: string;
@@ -79,17 +156,58 @@ export async function createTTSTask69Labs(
     }
   }
 
-  const response = await fetch(`${BASE_URL}/tts/generate`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
+  // Fail instantly on a voice already known bad — no API call, no 429 pressure.
+  const badKey = `${apiKey}:${params.voiceId}`;
+  const bad = _badVoices.get(badKey);
+  if (bad && Date.now() < bad.until) throw new VoiceNotFoundError(bad.message);
+  if (bad) _badVoices.delete(badKey);
 
-  if (!response.ok) {
+  let response: Response;
+  for (let attempt = 1; ; attempt++) {
+    await acquireTTSToken(apiKey); // pace submits under 69Labs' undisclosed per-key rate
+    response = await fetch(`${BASE_URL}/tts/generate`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+    if (response.ok) break;
+
     const errText = await response.text();
+    if (isVoiceNotFound(response.status, errText)) {
+      const message =
+        `69Labs rejected voice ID "${params.voiceId}" — not found. The channel's voice must ` +
+        `exist in this 69Labs account's voice library or be a public voice ID; a private ` +
+        `cloned voice from another account will not resolve. Fix the voice in Admin → Channels.`;
+      _badVoices.set(badKey, {
+        until: Date.now() + BAD_VOICE_TTL_MS,
+        message,
+      });
+      throw new VoiceNotFoundError(message);
+    }
+    // 429 is 69Labs pacing us, not a failure of THIS request: put the whole key in cooldown
+    // (so concurrent workers back off with us) and retry after the window.
+    if (response.status === 429) {
+      const retryAfterSec = Number(response.headers.get("retry-after"));
+      const waitMs =
+        Number.isFinite(retryAfterSec) && retryAfterSec >= 0
+          ? Math.max(retryAfterSec * 1000, 1000)
+          : TTS_429_COOLDOWN_MS;
+      penalizeTTSRateLimit(apiKey, waitMs);
+      if (attempt < TTS_SUBMIT_MAX_ATTEMPTS) {
+        console.warn(
+          `[69Labs TTS] 429 on task creation — cooling down ${Math.round(waitMs / 1000)}s ` +
+            `(attempt ${attempt}/${TTS_SUBMIT_MAX_ATTEMPTS})`
+        );
+        continue;
+      }
+      throw new Error(
+        `69Labs TTS task creation rate-limited (429) after ${attempt} attempts — ` +
+          `the account's request rate is exhausted; retry later.`
+      );
+    }
     const lowerErr = errText.toLowerCase();
     if (
       lowerErr.includes("credit") ||
