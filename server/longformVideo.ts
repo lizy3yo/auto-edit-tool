@@ -6753,6 +6753,7 @@ async function generateSceneLipsyncClips(
         }
       }
       rightUrl ??= await renderSplitRightClip(jobId, scene, params, apimartKey);
+      scene.splitRightUrl = rightUrl; // the panel's own clip — the split editor recomposites from it
       const dims = dimensionsFor(TALKING_HEAD_ASPECT_RATIO);
       const composited: string[] = [];
       for (let i = 0; i < urls.length; i++) {
@@ -9552,6 +9553,7 @@ async function regenerateSplitRight(
           async () => schedulePersist(jobId, { storyboard: scenes })
         )
       : await renderSplitRightClip(jobId, scene, params, apimartKey);
+  scene.splitRightUrl = rightUrl; // backfills pre-field scenes too — see StoryboardScene
   const composited: string[] = [];
   for (let i = 0; i < scene.hostClipUrls.length; i++) {
     const buf = await compositeSplitScreenClip(
@@ -10177,6 +10179,203 @@ export async function retrofitSplitScreens(jobId: number): Promise<void> {
     });
   } finally {
     activeRegenerations.delete(sentinel);
+  }
+}
+
+/**
+ * Ensure `scene.hostClipUrls` holds the BARE host renders this scene's left panel needs,
+ * recovering them if the scene predates the field. The recovery depends on what the finished
+ * clip IS — so this must run BEFORE any split flags are mutated for an edit:
+ * - a split scene's clip is a composite → crop the host panel back out (`extractHostPanel`)
+ * - a full-frame host scene's clip IS the bare host render → adopt it as-is (cropping it would
+ *   slice a panel out of a frame that was never a composite)
+ */
+async function ensureBareHostClips(
+  jobId: number,
+  scene: StoryboardScene,
+  scenes: StoryboardScene[]
+): Promise<string[]> {
+  if (scene.hostClipUrls?.length) return scene.hostClipUrls;
+  const existing = scene.clipUrls?.length
+    ? scene.clipUrls
+    : scene.clipUrl
+      ? [scene.clipUrl]
+      : [];
+  if (!existing.length)
+    throw new Error(
+      `scene ${scene.index} has no rendered clip to reuse — render it first`
+    );
+  if (!isSplitScene(scene)) {
+    scene.hostClipUrls = [...existing];
+  } else {
+    const dims = dimensionsFor(TALKING_HEAD_ASPECT_RATIO);
+    const recovered: string[] = [];
+    for (let i = 0; i < existing.length; i++) {
+      const buf = await extractHostPanel(existing[i], dims);
+      const key = `longform/${jobId}/host-${scene.index}-${i}-${nanoid(6)}.mp4`;
+      const { url } = await storagePut(key, buf, "video/mp4");
+      recovered.push(url);
+    }
+    scene.hostClipUrls = recovered;
+  }
+  schedulePersist(jobId, { storyboard: scenes });
+  return scene.hostClipUrls;
+}
+
+/** One split-editor instruction — see `setSceneSplit`. */
+export type SceneSplitEdit =
+  | { mode: "off" }
+  | { mode: "prompt"; prompt?: string; verbatim?: boolean }
+  | { mode: "scene"; sourceIndex: number };
+
+/**
+ * The SPLIT EDITOR's server half: edit ONE host scene's split state on a rendered job, treating
+ * the scene as the two clips it really is — the lip-synced host (`hostClipUrls`, never
+ * re-rendered here) and the right panel (`splitRightUrl`). Three instructions:
+ *
+ * - `off`    — back to full-frame host: the bare host renders become the scene clip again.
+ *              Pure re-pointing (plus at most one host-panel crop on a pre-field scene).
+ * - `prompt` — (re)render the right panel from a prompt and composite it beside the host.
+ *              `verbatim` renders the text exactly as typed; otherwise it seeds the enhancer.
+ *              Costs one still generation.
+ * - `scene`  — reuse ANOTHER scene's already-rendered footage as this scene's right panel: its
+ *              standalone panel if it has one, else its own clip (Ken Burns still or moving
+ *              b-roll — the composite loops/trims to the host's length either way). Pure
+ *              ffmpeg, no generation — this is the "show what I want beside me" move.
+ *
+ * Settles render-only like every scene edit: preview the new composite, then Assemble.
+ */
+export async function setSceneSplit(
+  jobId: number,
+  sceneIndex: number,
+  edit: SceneSplitEdit
+): Promise<void> {
+  const key = `${jobId}:${sceneIndex}`;
+  if (activeRegenerations.has(key)) {
+    console.warn(
+      `[Longform ${jobId}] Scene ${sceneIndex} already regenerating — ignoring split edit`
+    );
+    return;
+  }
+  activeRegenerations.add(key);
+  try {
+    await withJobLock(jobId, async () => {
+      const job = await getLongformVideoJobById(jobId);
+      if (!job) throw new Error("Job not found");
+      const params = job.inputParams as LongformInputParams;
+      const scenes = (job.storyboard as StoryboardScene[]) || [];
+      const scene = scenes.find(s => s.index === sceneIndex);
+      if (!scene) throw new Error(`Scene ${sceneIndex} not found`);
+      if (!scene.hostPresent)
+        throw new Error(
+          `Scene ${sceneIndex} is b-roll — only host scenes can be split`
+        );
+
+      // Recover the bare host clips while the scene's CURRENT state still says what the
+      // finished clip is (composite vs full-frame) — see ensureBareHostClips.
+      await ensureBareHostClips(jobId, scene, scenes);
+
+      scene.sceneStatus = "processing";
+      scene.error = undefined;
+      await updateLongformVideoJob(jobId, {
+        status: "processing",
+        stage: "clips",
+        errorMessage: null,
+        storyboard: scenes,
+      });
+
+      try {
+        if (edit.mode === "off") {
+          scene.splitVisual = undefined;
+          scene.splitVisualSeed = undefined;
+          scene.splitMotion = undefined;
+          scene.splitRightUrl = undefined;
+          scene.clipUrls = [...scene.hostClipUrls!];
+          syncSceneClipFields(scene);
+          scene.sceneStatus = "completed";
+        } else if (edit.mode === "prompt") {
+          const typed = edit.prompt?.trim();
+          if (typed) {
+            scene.splitVisual = typed;
+            if (edit.verbatim) scene.splitVisualSeed = typed;
+          } else if (!scene.splitVisual) {
+            // Converting to a split with no prompt given — seed like the converge pass does.
+            scene.splitVisual = scene.brollVisual ?? scene.visualPrompt;
+          }
+          // A seeded / non-verbatim prompt goes through the same person-free right-panel
+          // rewrite as the pipeline, so a host-shot seed can't reach the image model raw.
+          if (!edit.verbatim) {
+            await ensureVideoSubject(params);
+            const enh = await enhanceBrollPrompts(scenes, params, [
+              scene.index,
+            ]);
+            if (enh.failedScenes.length)
+              appendJobWarning(jobId, enhanceWarningFor(enh));
+            const aliases = await hostNameAliases(params.channelKey);
+            if (scene.splitVisual)
+              scene.splitVisual = stripHostNames(scene.splitVisual, aliases);
+          }
+          scene.splitMotion = undefined; // an edited panel renders as a still — predictable + cheap
+          await regenerateSplitRight(
+            jobId,
+            scene,
+            scenes,
+            params,
+            (await apimartAdapterForJob(params)) ?? undefined
+          );
+        } else {
+          const source = scenes.find(s => s.index === edit.sourceIndex);
+          if (!source) throw new Error(`Scene ${edit.sourceIndex} not found`);
+          // Its standalone panel when it has one; else its own finished clip. Host sources
+          // only contribute their PANEL — a face beside a face is never wanted.
+          const rightUrl =
+            source.splitRightUrl ??
+            (source.hostPresent
+              ? undefined
+              : (source.clipUrls?.[0] ?? source.clipUrl));
+          if (!rightUrl)
+            throw new Error(
+              `Scene ${edit.sourceIndex} has no footage to reuse as a panel`
+            );
+          const dims = dimensionsFor(TALKING_HEAD_ASPECT_RATIO);
+          const composited: string[] = [];
+          for (let i = 0; i < scene.hostClipUrls!.length; i++) {
+            const buf = await compositeSplitScreenClip(
+              scene.hostClipUrls![i],
+              rightUrl,
+              dims
+            );
+            const clipKey = `longform/${jobId}/split-${scene.index}-${i}-${nanoid(6)}.mp4`;
+            const { url } = await storagePut(clipKey, buf, "video/mp4");
+            composited.push(url);
+          }
+          scene.clipUrls = composited;
+          scene.splitRightUrl = rightUrl;
+          // Label truthfulness: the timeline derives its badges from these flags.
+          scene.splitVisual =
+            source.splitVisual ?? source.visualPrompt ?? "reused footage";
+          scene.splitMotion =
+            !source.hostPresent && !source.stillImage ? true : undefined;
+          syncSceneClipFields(scene);
+          scene.sceneStatus = "completed";
+        }
+        scene.regenerated = true;
+        await flushPersist(jobId);
+        await settleRenderOnly(jobId, scenes);
+      } catch (err: any) {
+        scene.sceneStatus = "failed";
+        scene.error = describeError(err);
+        await updateLongformVideoJob(jobId, {
+          status: "failed",
+          storyboard: scenes,
+          errorMessage: describeError(err) || "Split edit failed",
+          completedAt: new Date(),
+        }).catch(onFailedStatusWriteError(jobId));
+        throw err;
+      }
+    });
+  } finally {
+    activeRegenerations.delete(key);
   }
 }
 

@@ -395,6 +395,44 @@ export default function LongformJobSlot({
     },
   });
 
+  // Split editor: per-scene selection of "use another scene's footage as the right panel".
+  const [splitSource, setSplitSource] = useState<
+    Record<number, number | undefined>
+  >({});
+  const splitEditMutation = trpc.longformVideo.setSceneSplit.useMutation({
+    onSuccess: (_d, vars) => {
+      toast.success(
+        vars.mode === "off"
+          ? "Removing the split — back to full-frame host..."
+          : vars.mode === "scene"
+            ? "Compositing the chosen footage beside the host..."
+            : "Rendering a fresh right panel..."
+      );
+      setExpandedScene(null);
+      if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
+    },
+    onError: (err, vars) => {
+      toast.error(err.message);
+      queuePhase.current.delete(vars.sceneIndex);
+      setQueuedScenes(prev => prev.filter(i => i !== vars.sceneIndex));
+    },
+  });
+  const applySplitEdit = (
+    scene: StoryboardScene,
+    edit:
+      | { mode: "off" }
+      | { mode: "prompt"; prompt?: string; verbatim?: boolean }
+      | { mode: "scene"; sourceIndex: number }
+  ) => {
+    if (!jobId) return;
+    armNotifications();
+    queuePhase.current.set(scene.index, "queued");
+    setQueuedScenes(prev =>
+      prev.includes(scene.index) ? prev : [...prev, scene.index]
+    );
+    splitEditMutation.mutate({ jobId, sceneIndex: scene.index, ...edit });
+  };
+
   const regenBatchMutation = trpc.longformVideo.regenerateScenes.useMutation({
     onSuccess: (_d, vars) => {
       toast.success(`Regenerating ${vars.sceneIndices.length} scenes...`);
@@ -1624,6 +1662,162 @@ export default function LongformJobSlot({
                                   </div>
                                 )}
                               </details>
+                            )}
+                            {scene.hostPresent && (
+                              <div className="rounded-md border border-border p-2.5 space-y-2">
+                                <Label className="text-[10px] text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+                                  <Columns2 className="h-3 w-3" /> Split screen
+                                </Label>
+                                {/* The two halves ARE two separate videos — show them that way. */}
+                                {isSplitScene(scene) &&
+                                  scene.hostClipUrls?.[0] &&
+                                  scene.splitRightUrl && (
+                                    <div className="grid grid-cols-2 gap-2">
+                                      <div>
+                                        <p className="text-[10px] text-muted-foreground mb-1">
+                                          Host (reused, never re-rendered)
+                                        </p>
+                                        <video
+                                          src={scene.hostClipUrls[0]}
+                                          controls
+                                          muted
+                                          preload="none"
+                                          className="w-full rounded bg-black max-h-[100px]"
+                                          onClick={e => e.stopPropagation()}
+                                        />
+                                      </div>
+                                      <div>
+                                        <p className="text-[10px] text-muted-foreground mb-1">
+                                          Right panel (swappable)
+                                        </p>
+                                        <video
+                                          src={scene.splitRightUrl}
+                                          controls
+                                          muted
+                                          preload="none"
+                                          className="w-full rounded bg-black max-h-[100px]"
+                                          onClick={e => e.stopPropagation()}
+                                        />
+                                      </div>
+                                    </div>
+                                  )}
+                                <p className="text-[10px] text-muted-foreground">
+                                  {isSplitScene(scene)
+                                    ? "Swap what shows beside the host, or go back to full-frame. The host video never re-renders."
+                                    : "Put a visual beside the host: render one from the prompt above, or reuse any scene's footage."}
+                                </p>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  {isSplitScene(scene) && (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-7 text-xs"
+                                      disabled={
+                                        splitEditMutation.isPending ||
+                                        isSceneQueued
+                                      }
+                                      onClick={() =>
+                                        applySplitEdit(scene, { mode: "off" })
+                                      }
+                                    >
+                                      Remove split
+                                    </Button>
+                                  )}
+                                  {!isSplitScene(scene) && (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-7 text-xs"
+                                      disabled={
+                                        splitEditMutation.isPending ||
+                                        isSceneQueued
+                                      }
+                                      onClick={() =>
+                                        applySplitEdit(scene, {
+                                          mode: "prompt",
+                                          prompt:
+                                            promptEdits[scene.index]?.trim() ||
+                                            undefined,
+                                          verbatim:
+                                            isEdited(scene.index) || undefined,
+                                        })
+                                      }
+                                    >
+                                      <Columns2 className="mr-1.5 h-3 w-3" />
+                                      Make split screen
+                                    </Button>
+                                  )}
+                                  <Select
+                                    value={
+                                      splitSource[scene.index]?.toString() ?? ""
+                                    }
+                                    onValueChange={v =>
+                                      setSplitSource(p => ({
+                                        ...p,
+                                        [scene.index]: v
+                                          ? Number(v)
+                                          : undefined,
+                                      }))
+                                    }
+                                  >
+                                    <SelectTrigger className="h-7 w-56 text-xs">
+                                      <SelectValue placeholder="Use another scene's footage…" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {scenes
+                                        .filter(
+                                          s =>
+                                            s.index !== scene.index &&
+                                            (s.hostPresent
+                                              ? !!s.splitRightUrl
+                                              : !!(
+                                                  s.clipUrls?.length ||
+                                                  s.clipUrl
+                                                ))
+                                        )
+                                        .map(s => (
+                                          <SelectItem
+                                            key={s.index}
+                                            value={s.index.toString()}
+                                            className="text-xs"
+                                          >
+                                            #{s.index}{" "}
+                                            {s.hostPresent
+                                              ? "(panel)"
+                                              : s.stillImage
+                                                ? "(still)"
+                                                : "(video)"}{" "}
+                                            —{" "}
+                                            {(
+                                              (s.hostPresent
+                                                ? s.splitVisual
+                                                : s.visualPrompt) ?? ""
+                                            ).slice(0, 48)}
+                                          </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                  </Select>
+                                  {splitSource[scene.index] != null && (
+                                    <Button
+                                      size="sm"
+                                      className="h-7 text-xs"
+                                      disabled={
+                                        splitEditMutation.isPending ||
+                                        isSceneQueued
+                                      }
+                                      onClick={() =>
+                                        applySplitEdit(scene, {
+                                          mode: "scene",
+                                          sourceIndex:
+                                            splitSource[scene.index]!,
+                                        })
+                                      }
+                                    >
+                                      Show it beside the host
+                                    </Button>
+                                  )}
+                                </div>
+                              </div>
                             )}
                             <div className="flex gap-2">
                               <Button

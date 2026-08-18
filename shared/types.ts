@@ -409,6 +409,14 @@ export interface StoryboardScene {
    */
   hostClipUrls?: string[];
   /**
+   * The split RIGHT panel as its own standalone clip (Ken Burns still or moving b-roll),
+   * BEFORE compositing — the other half of the pair `hostClipUrls` starts. Persisted so the
+   * split editor can recomposite either half independently (swap the panel, un-split, reuse
+   * this panel elsewhere) without regenerating anything. Absent on scenes rendered before the
+   * field existed — a right-panel re-render backfills it.
+   */
+  splitRightUrl?: string;
+  /**
    * True when this scene's clip(s) were produced by the audio-driven lip-sync model
    * (host shots with a face photo) rather than text-to-video. Lip-synced clips already
    * equal the narration length and carry no reference-photo intro, so assembly must not

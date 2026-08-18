@@ -50,6 +50,7 @@ import {
   regenerateScene as regenerateLongformScene,
   regenerateScenes as regenerateLongformScenes,
   retrofitSplitScreens as retrofitLongformSplitScreens,
+  setSceneSplit as setLongformSceneSplit,
   retryJobAssembly,
   retryFailedScenes as retryLongformFailedScenes,
   describeIncompleteScenes,
@@ -1573,6 +1574,53 @@ const longformVideoRouter = router({
       retrofitLongformSplitScreens(input.jobId).catch(err => {
         console.error(
           `[Longform ${input.jobId}] retrofitSplitScreens error:`,
+          err
+        );
+      });
+      return { ok: true };
+    }),
+
+  /**
+   * Split editor: edit one host scene's split state on a rendered job. The lip-synced host
+   * half is always reused; only the right panel changes. `off` un-splits (free), `prompt`
+   * renders a fresh panel from text (one still), `scene` reuses another scene's footage as
+   * the panel (free — ffmpeg only). Render-only: preview, then Assemble.
+   */
+  setSceneSplit: approvedProcedure
+    .input(
+      z.object({
+        jobId: z.number(),
+        sceneIndex: z.number().int().min(1),
+        mode: z.enum(["off", "prompt", "scene"]),
+        prompt: z.string().optional(),
+        verbatim: z.boolean().optional(),
+        sourceIndex: z.number().int().min(1).optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const job = await getLongformVideoJobById(input.jobId);
+      if (!job || (job.userId !== ctx.user.id && ctx.user.role !== "admin")) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
+      }
+      if (input.mode === "scene" && input.sourceIndex == null) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Pick the scene whose footage the panel should show",
+        });
+      }
+      const edit =
+        input.mode === "off"
+          ? ({ mode: "off" } as const)
+          : input.mode === "prompt"
+            ? ({
+                mode: "prompt",
+                prompt: input.prompt,
+                verbatim: input.verbatim,
+              } as const)
+            : ({ mode: "scene", sourceIndex: input.sourceIndex! } as const);
+      setLongformSceneSplit(input.jobId, input.sceneIndex, edit).catch(err => {
+        console.error(
+          `[Longform ${input.jobId}] setSceneSplit(${input.sceneIndex}) error:`,
           err
         );
       });
