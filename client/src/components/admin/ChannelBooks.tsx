@@ -20,6 +20,16 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 /**
  * A channel's BOOKS — the products its videos pitch — edited inside the channel it belongs to.
@@ -261,9 +271,14 @@ function QrPreview({
 export function ChannelBooks({ channelKey }: { channelKey: string }) {
   const utils = trpc.useUtils();
   const [draft, setDraft] = useState<Draft>(EMPTY);
+  const [pendingDelete, setPendingDelete] = useState<Draft & { id: number } | null>(
+    null
+  );
 
+  // Removed books are soft-deleted server-side (videos that already used one still resolve it
+  // by id), but this list has no undelete — so it only ever shows the live ones.
   const { data: books, isLoading } = trpc.book.list.useQuery(
-    { channelKey, activeOnly: false },
+    { channelKey, activeOnly: true },
     { enabled: !!channelKey }
   );
 
@@ -281,6 +296,7 @@ export function ChannelBooks({ channelKey }: { channelKey: string }) {
       toast.success(
         "Book removed — videos that already used it are unaffected."
       );
+      setPendingDelete(null);
       utils.book.list.invalidate();
     },
     onError: err => toast.error(err.message),
@@ -323,12 +339,7 @@ export function ChannelBooks({ channelKey }: { channelKey: string }) {
       ) : (
         <div className="space-y-2">
           {(books ?? []).map(b => (
-            <div
-              key={b.id}
-              className={`rounded-md border border-border p-3 ${
-                b.isActive ? "" : "opacity-50"
-              }`}
-            >
+            <div key={b.id} className="rounded-md border border-border p-3">
               <div className="flex flex-wrap items-start gap-3">
                 {b.coverImageUrl ? (
                   <img
@@ -344,11 +355,6 @@ export function ChannelBooks({ channelKey }: { channelKey: string }) {
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-medium">
                     {b.title}
-                    {!b.isActive && (
-                      <span className="ml-2 text-xs font-normal text-muted-foreground">
-                        (removed)
-                      </span>
-                    )}
                   </div>
                   <div className="truncate text-xs text-muted-foreground">
                     {b.shopUrl || (
@@ -375,17 +381,22 @@ export function ChannelBooks({ channelKey }: { channelKey: string }) {
                   >
                     Edit
                   </Button>
-                  {b.isActive && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 w-7 p-0"
-                      aria-label={`Remove ${b.title}`}
-                      onClick={() => remove.mutate({ id: b.id })}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 w-7 p-0"
+                    aria-label={`Remove ${b.title}`}
+                    onClick={() =>
+                      setPendingDelete({
+                        id: b.id,
+                        title: b.title,
+                        coverImageUrl: b.coverImageUrl ?? "",
+                        shopUrl: b.shopUrl ?? "",
+                      })
+                    }
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
                 </div>
               </div>
               {b.shopUrl && (
@@ -467,6 +478,43 @@ export function ChannelBooks({ channelKey }: { channelKey: string }) {
           </Button>
         </div>
       </div>
+
+      <AlertDialog
+        open={pendingDelete !== null}
+        onOpenChange={open => {
+          if (!open && !remove.isPending) setPendingDelete(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove {pendingDelete?.title}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes the book from this channel&apos;s list — it can no
+              longer be pitched in new videos. Videos that already used it keep
+              their sales history and are unaffected. This can&apos;t be undone
+              from here.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={remove.isPending}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={e => {
+                e.preventDefault();
+                if (pendingDelete) remove.mutate({ id: pendingDelete.id });
+              }}
+              disabled={remove.isPending}
+              className="bg-destructive hover:bg-destructive/90"
+            >
+              {remove.isPending ? (
+                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+              ) : null}
+              Remove
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
