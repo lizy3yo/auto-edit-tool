@@ -82,8 +82,48 @@ const TTS_429_COOLDOWN_MS = 30_000;
 const BAD_VOICE_TTL_MS = 5 * 60 * 1000;
 const _badVoices = new Map<string, { until: number; message: string }>();
 
-const isVoiceNotFound = (status: number, errText: string): boolean =>
-  status === 400 && /voice id was not found/i.test(errText);
+// Standard lane has a known exact message; the clone lane's wording is unverified, so match
+// any 400/404 "not found" there (a clone-lane request only ever references the one clone ID).
+const isVoiceNotFound = (
+  status: number,
+  errText: string,
+  cloneLane = false
+): boolean =>
+  cloneLane
+    ? (status === 400 || status === 404) && /not found/i.test(errText)
+    : status === 400 && /voice id was not found/i.test(errText);
+
+// ─── Account voice clones (69Labs-native, uploaded via the site's clone lab) ───
+// These IDs are NOT in the /tts/generate voice space — that endpoint 400s "voice ID was not
+// found" for them even though the account owns them. They synthesize through the dedicated
+// POST /voice-clones/generate lane (minimax-backed; status/download endpoints are shared with
+// regular TTS). We detect them lazily: on a voice-not-found 400 we ask GET /voice-clones once,
+// and remember the routing so every later call goes straight to the clone lane.
+const CLONE_LIST_TTL_MS = 5 * 60 * 1000;
+const _cloneLists = new Map<string, { until: number; ids: Set<string> }>();
+const _cloneRoutes = new Set<string>(); // `${apiKey}:${voiceId}` confirmed clone-lane voices
+
+/** IDs of this account's voice clones, cached per key. Null when the lookup itself fails. */
+async function fetchVoiceCloneIds(apiKey: string): Promise<Set<string> | null> {
+  const hit = _cloneLists.get(apiKey);
+  if (hit && Date.now() < hit.until) return hit.ids;
+  try {
+    const resp = await fetch(`${BASE_URL}/voice-clones`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (!resp.ok) return hit?.ids ?? null;
+    const body: any = await resp.json();
+    const ids = new Set<string>(
+      (Array.isArray(body?.voiceClones) ? body.voiceClones : []).map((v: any) =>
+        String(v.id)
+      )
+    );
+    _cloneLists.set(apiKey, { until: Date.now() + CLONE_LIST_TTL_MS, ids });
+    return ids;
+  } catch {
+    return hit?.ids ?? null;
+  }
+}
 
 export interface TTSParams {
   text: string;
@@ -118,10 +158,7 @@ export interface TTSResult {
  * Create a TTS task on 69Labs.
  * Returns the job ID for polling.
  */
-export async function createTTSTask69Labs(
-  apiKey: string,
-  params: TTSParams
-): Promise<string> {
+function buildStandardBody(params: TTSParams): Record<string, any> {
   const isMinimax = params.voiceProvider === "minimax";
   const body: Record<string, any> = {
     text: params.text,
@@ -155,32 +192,80 @@ export async function createTTSTask69Labs(
       body.voiceSettings = voiceSettings;
     }
   }
+  return body;
+}
 
+// /voice-clones/generate contract (from the 69Labs web app): flat body, minimax field names —
+// { voiceCloneId, text, model, speed?, pitch?, volume?, language_boost? }. Stability/similarity/
+// style are elevenlabs-space knobs and do not apply to clones.
+function buildCloneBody(params: TTSParams): Record<string, any> {
+  const mm = params.minimaxSettings ?? {};
+  const body: Record<string, any> = {
+    voiceCloneId: params.voiceId,
+    text: params.text,
+    // Clone synthesis runs on minimax models; an elevenlabs modelId would fail validation here.
+    model:
+      (params.voiceProvider === "minimax" && params.modelId) || "speech-02-hd",
+  };
+  const speed = mm.speed ?? params.speed;
+  if (speed !== undefined) body.speed = speed;
+  if (mm.pitch !== undefined) body.pitch = mm.pitch;
+  if (mm.volume !== undefined) body.volume = mm.volume;
+  if (mm.languageBoost !== undefined) body.language_boost = mm.languageBoost;
+  return body;
+}
+
+export async function createTTSTask69Labs(
+  apiKey: string,
+  params: TTSParams
+): Promise<string> {
   // Fail instantly on a voice already known bad — no API call, no 429 pressure.
   const badKey = `${apiKey}:${params.voiceId}`;
   const bad = _badVoices.get(badKey);
   if (bad && Date.now() < bad.until) throw new VoiceNotFoundError(bad.message);
   if (bad) _badVoices.delete(badKey);
 
+  let useCloneLane = _cloneRoutes.has(badKey);
+  let body: Record<string, any>;
   let response: Response;
   for (let attempt = 1; ; attempt++) {
+    body = useCloneLane ? buildCloneBody(params) : buildStandardBody(params);
     await acquireTTSToken(apiKey); // pace submits under 69Labs' undisclosed per-key rate
-    response = await fetch(`${BASE_URL}/tts/generate`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-    });
+    response = await fetch(
+      `${BASE_URL}/${useCloneLane ? "voice-clones/generate" : "tts/generate"}`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      }
+    );
     if (response.ok) break;
 
     const errText = await response.text();
-    if (isVoiceNotFound(response.status, errText)) {
+    if (isVoiceNotFound(response.status, errText, useCloneLane)) {
+      // An account voice clone is invisible to /tts/generate by design — before declaring the
+      // voice bad, ask the clone list and reroute to /voice-clones/generate if it's there.
+      if (!useCloneLane) {
+        const cloneIds = await fetchVoiceCloneIds(apiKey);
+        if (cloneIds?.has(params.voiceId)) {
+          console.log(
+            `[69Labs TTS] Voice ${params.voiceId} is an account voice clone — ` +
+              `routing via /voice-clones/generate`
+          );
+          _cloneRoutes.add(badKey);
+          useCloneLane = true;
+          continue;
+        }
+      } else {
+        _cloneRoutes.delete(badKey); // clone was deleted on the 69Labs side — stop routing there
+      }
       const message =
         `69Labs rejected voice ID "${params.voiceId}" — not found. The channel's voice must ` +
-        `exist in this 69Labs account's voice library or be a public voice ID; a private ` +
-        `cloned voice from another account will not resolve. Fix the voice in Admin → Channels.`;
+        `exist in this 69Labs account's voice library or voice clones, or be a public voice ` +
+        `ID; a voice from another 69Labs account will not resolve. Fix the voice in Admin → Channels.`;
       _badVoices.set(badKey, {
         until: Date.now() + BAD_VOICE_TTL_MS,
         message,
@@ -243,7 +328,8 @@ export async function createTTSTask69Labs(
   }
 
   console.log(
-    `[69Labs TTS] Created task ${taskId} for voice ${params.voiceId}`
+    `[69Labs TTS] Created task ${taskId} for voice ${params.voiceId}` +
+      (useCloneLane ? " (voice-clone lane)" : "")
   );
 
   // Billed on accepted characters, so meter at task creation rather than at download —
@@ -251,7 +337,7 @@ export async function createTTSTask69Labs(
   recordUsage({
     lane: "tts",
     provider: "sixtynine_labs",
-    model: body.modelId,
+    model: body.modelId ?? body.model,
     calls: 1,
     quantity: params.text.length,
   });
