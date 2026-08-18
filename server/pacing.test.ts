@@ -357,7 +357,9 @@ describe("split-screen dial", () => {
     expect(r.splitSeconds / r.hostSeconds).toBeCloseTo(20 / 35, 1);
   });
 
-  it("STRIPS every split when the feature is switched off — off means none", () => {
+  it("switched off still converges to the legacy floor — no film renders split-free", () => {
+    // Splits are a constant of the format: a snapshot with the toggle off (e.g. taken before
+    // the operator turned it on) must still produce the classic ~7.5%-of-film split share.
     const scenes = hosts().map(s => ({ ...s, splitVisual: "authored beside" }));
     const r = enforceHostSplitMix(
       scenes,
@@ -369,9 +371,29 @@ describe("split-screen dial", () => {
         },
       })
     );
-    expect(r.splitSeconds).toBe(0);
-    expect(scenes.every(s => !s.splitVisual)).toBe(true);
+    expect(r.splitSeconds).toBeGreaterThan(0);
+    expect(r.splitSeconds / r.hostSeconds).toBeCloseTo(
+      LEGACY_PACING.splitScreen.hostShare,
+      1
+    );
+    // The right panel stays a still — motion is genuinely off when disabled.
+    expect(r.motionSeconds).toBe(0);
     expect(scenes.every(s => !s.splitMotion)).toBe(true);
+  });
+
+  it("a dial above the floor wins over it", () => {
+    const scenes = hosts();
+    const r = enforceHostSplitMix(
+      scenes,
+      withPacing({
+        splitScreen: {
+          enabled: true,
+          hostShare: 0.8,
+          motion: { enabled: false, share: 0 },
+        },
+      })
+    );
+    expect(r.splitSeconds / r.hostSeconds).toBeCloseTo(0.8, 1);
   });
 
   it("assigns a MOVING right panel to the dialled share of split runtime", () => {

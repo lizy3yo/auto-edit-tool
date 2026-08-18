@@ -205,8 +205,8 @@ export function LongformPacing() {
 
         <Feature
           title="Split screen"
-          description="The host talking on the left with a visual beside them on the right."
-          offMeans="no split-screen scenes at all — the host is always full-frame."
+          description="The host talking on the left with a visual beside them on the right. Splits are a constant of the format — every film gets at least the classic ~7.5% share."
+          offMeans="the classic baseline — splits on ~7.5% of the film with a still right panel. This dial can only raise the share, never remove splits."
           enabled={splitScreen.enabled}
           onToggle={v =>
             set(p => ({ ...p, splitScreen: { ...p.splitScreen, enabled: v } }))

@@ -58,6 +58,7 @@ import {
   Pencil,
   ChevronRight,
   Receipt,
+  Columns2,
 } from "lucide-react";
 
 export type SlotStatus = "idle" | "processing" | "completed" | "failed";
@@ -442,6 +443,18 @@ export default function LongformJobSlot({
       onError: err => toast.error(err.message),
     });
 
+  const retrofitSplitsMutation =
+    trpc.longformVideo.retrofitSplitScreens.useMutation({
+      onSuccess: () => {
+        toast.success(
+          "Adding split screens — the host clips are reused, only the right panels render."
+        );
+        // Refetch so status flips completed → processing and polling resumes.
+        if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
+      },
+      onError: err => toast.error(err.message),
+    });
+
   const cancelMutation = trpc.longformVideo.cancelJob.useMutation({
     onSuccess: () => {
       setDownloadTitle("");
@@ -561,6 +574,24 @@ export default function LongformJobSlot({
     () => scenes.filter(s => s.regenerated).map(s => s.index),
     [scenes]
   );
+
+  // A finished film rendered with a stale pacing snapshot can be (nearly) split-free.
+  // Offer the retrofit when the split share of host runtime sits clearly under the
+  // pipeline's legacy floor (~21% of host time) — the server reuses every lip-synced
+  // host clip and renders only the right panels.
+  const needsSplitRetrofit = useMemo(() => {
+    const host = scenes.filter(
+      s => s.hostPresent && (s.clipUrls?.length || s.clipUrl)
+    );
+    const dur = (s: StoryboardScene) => s.audioDuration ?? 0;
+    const hostSec = host.reduce((sum, s) => sum + dur(s), 0);
+    if (hostSec <= 0) return false;
+    const splitSec = host.reduce(
+      (sum, s) => sum + (s.splitVisual ? dur(s) : 0),
+      0
+    );
+    return splitSec / hostSec < 0.15;
+  }, [scenes]);
 
   // Report status up to the parent so the tab label can show a badge.
   useEffect(() => {
@@ -1155,6 +1186,26 @@ export default function LongformJobSlot({
                   seekRef={playerSeekRef}
                 />
                 <div className="flex justify-end gap-2">
+                  {needsSplitRetrofit && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        if (!jobId) return;
+                        armNotifications();
+                        retrofitSplitsMutation.mutate({ jobId });
+                      }}
+                      disabled={retrofitSplitsMutation.isPending}
+                      title="This film rendered without split screens. Add them — the host clips are reused, only the right panels render."
+                    >
+                      {retrofitSplitsMutation.isPending ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Columns2 className="mr-2 h-4 w-4" />
+                      )}
+                      Add split screens
+                    </Button>
+                  )}
                   <Button
                     variant="outline"
                     size="sm"

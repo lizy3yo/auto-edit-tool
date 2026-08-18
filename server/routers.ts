@@ -49,6 +49,7 @@ import {
   runLongformPipeline,
   regenerateScene as regenerateLongformScene,
   regenerateScenes as regenerateLongformScenes,
+  retrofitSplitScreens as retrofitLongformSplitScreens,
   retryJobAssembly,
   retryFailedScenes as retryLongformFailedScenes,
   describeIncompleteScenes,
@@ -1547,6 +1548,33 @@ const longformVideoRouter = router({
         input.verbatimIndices
       ).catch(err => {
         console.error("[Longform] Batch scene regeneration failed:", err);
+      });
+      return { ok: true };
+    }),
+
+  /**
+   * Add split screens to an already-rendered film whose pacing snapshot predates the operator's
+   * split settings. Right panels only — every lip-synced host clip is reused as the left half.
+   * Render-only like batch regeneration: preview the new panels, then Assemble.
+   */
+  retrofitSplitScreens: approvedProcedure
+    .input(z.object({ jobId: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      const job = await getLongformVideoJobById(input.jobId);
+      if (!job || (job.userId !== ctx.user.id && ctx.user.role !== "admin")) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
+      }
+      if (job.status === "processing") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Job is still processing — wait for it to settle first",
+        });
+      }
+      retrofitLongformSplitScreens(input.jobId).catch(err => {
+        console.error(
+          `[Longform ${input.jobId}] retrofitSplitScreens error:`,
+          err
+        );
       });
       return { ok: true };
     }),

@@ -659,11 +659,16 @@ export const stillFractionFor = (p: LongformPacing): number =>
   Math.max(0, 1 - hostFractionFor(p) - motionFractionFor(p));
 
 /**
- * Share of HOST runtime rendered as a split frame. Disabled ⇒ 0, a genuine removal: the legacy
- * 7.5% lives in `LEGACY_PACING.splitScreen` as an ENABLED value, so an old job still splits.
+ * Share of HOST runtime rendered as a split frame. Splits are a CONSTANT of the format: every
+ * film gets at least the legacy share (7.5% of the film — the pre-config pipeline's look), and
+ * the dial can only raise it. Disabled ⇒ the legacy floor, not zero — a job whose snapshot was
+ * taken while the toggle was off must still look like the format, never split-free.
  */
 export const splitFractionFor = (p: LongformPacing): number =>
-  p.splitScreen.enabled ? p.splitScreen.hostShare : 0;
+  Math.max(
+    p.splitScreen.enabled ? p.splitScreen.hostShare : 0,
+    LEGACY_PACING.splitScreen.hostShare
+  );
 
 /**
  * The per-quarter host ramp, rescaled to the configured host share. `HOST_RAMP` is the SHAPE
@@ -1992,23 +1997,10 @@ export function enforceHostSplitMix(
       motionSeconds: 0,
     };
   }
-  // Split-screen switched OFF: strip every split the storyboard authored so the host is
-  // full-frame throughout. A zero TARGET would not be enough — the converge loop below only
-  // flips scenes while a flip moves the total closer to target, so Claude's own splits could
-  // survive it. Off means none.
-  if (!pacing.splitScreen.enabled) {
-    for (const s of host) {
-      s.splitVisual = undefined;
-      s.splitMotion = undefined;
-    }
-    return {
-      hostSeconds,
-      splitSeconds: 0,
-      aloneSeconds: hostSeconds,
-      motionSeconds: 0,
-    };
-  }
-
+  // Split screen is a constant of the format: `splitFractionFor` floors the target at the
+  // legacy share even when the toggle is off, so the converge below always runs and no film
+  // renders split-free. (Off used to strip every split here; the operator asked for the
+  // opposite — the classic look is the guaranteed minimum, the dial only raises it.)
   const lastIndex = scenes.length - 1;
   // Scenes that may be FORCED to/from a split: interior host scenes (CTA included — the QR
   // overlay is independent of the split, so a CTA host beat can be split like any other).
@@ -9967,6 +9959,198 @@ export async function regenerateScenes(
     });
   } finally {
     wanted.forEach(i => activeRegenerations.delete(`${jobId}:${i}`));
+  }
+}
+
+/**
+ * Retrofit split screens onto an ALREADY-RENDERED film. The split converge pass normally runs
+ * at storyboard time, so a job whose pacing snapshot predates the operator's split settings can
+ * finish split-free — this re-runs `enforceHostSplitMix` (whose target is floored at the legacy
+ * share, see `splitFractionFor`) over the finished storyboard and renders ONLY the right panels:
+ * each newly-split scene's existing full-frame lip-sync render becomes the reusable bare-host
+ * clip (`hostClipUrls`) and `regenerateSplitRight` composites a fresh panel beside it. No HeyGen
+ * call, no TTS — the expensive halves are all reused.
+ *
+ * ADDITIVE by design: scenes that already carry a split keep their composite and flags exactly
+ * as rendered (the converge might want to remove or re-register them to hit its target, but
+ * those panels are already paid for and on screen). Settles render-only like every other
+ * user-initiated clip action — the operator previews the new panels, then hits Assemble.
+ */
+export async function retrofitSplitScreens(jobId: number): Promise<void> {
+  const sentinel = `${jobId}:retrofit`;
+  if (activeRegenerations.has(sentinel)) {
+    console.warn(
+      `[Longform ${jobId}] Split retrofit already in progress — ignoring duplicate`
+    );
+    return;
+  }
+  activeRegenerations.add(sentinel);
+  try {
+    await withJobLock(jobId, async () => {
+      const job = await getLongformVideoJobById(jobId);
+      if (!job) throw new Error("Job not found");
+      const params = job.inputParams as LongformInputParams;
+      const scenes = (job.storyboard as StoryboardScene[]) || [];
+      if (!scenes.length) throw new Error("Job has no storyboard to retrofit");
+
+      // Snapshot existing splits so the converge below can't touch them.
+      const prior = new Map(
+        scenes
+          .filter(isSplitScene)
+          .map(s => [
+            s.index,
+            { splitVisual: s.splitVisual, splitMotion: s.splitMotion },
+          ])
+      );
+
+      enforceHostSplitMix(scenes, pacingFor(params));
+      for (const s of scenes) {
+        const was = prior.get(s.index);
+        if (was) {
+          s.splitVisual = was.splitVisual;
+          s.splitMotion = was.splitMotion;
+        }
+      }
+
+      // Only scenes with a rendered clip can composite — there is no host half to reuse
+      // otherwise. Clear the assignment on any others so the storyboard stays truthful.
+      const assigned = scenes.filter(s => !prior.has(s.index) && isSplitScene(s));
+      const targets = assigned.filter(s => s.clipUrls?.length || s.clipUrl);
+      for (const s of assigned) {
+        if (!targets.includes(s)) {
+          s.splitVisual = undefined;
+          s.splitMotion = undefined;
+        }
+      }
+      if (!targets.length) {
+        console.log(
+          `[Longform ${jobId}] Split retrofit: film already at/above the split target — nothing to do`
+        );
+        await updateLongformVideoJob(jobId, { storyboard: scenes });
+        return;
+      }
+      console.log(
+        `[Longform ${jobId}] Split retrofit: adding a right panel to ${targets.length} host scene(s) ` +
+          `(${prior.size} already split)`
+      );
+
+      for (const s of targets) {
+        s.sceneStatus = "processing";
+        s.error = undefined;
+      }
+      await updateLongformVideoJob(jobId, {
+        status: "processing",
+        stage: "clips",
+        errorMessage: null,
+        storyboard: scenes,
+      });
+
+      try {
+        // The converge seeds `splitVisual` from `brollVisual ?? visualPrompt` — on a host beat
+        // that is often the host's own talking-head prompt. Same fix as the main pipeline:
+        // enhance every seed into a person-free right-panel prompt, then scrub host names.
+        await ensureVideoSubject(params);
+        const enh = await enhanceBrollPrompts(
+          scenes,
+          params,
+          targets.map(s => s.index)
+        );
+        if (enh.failedScenes.length) {
+          appendJobWarning(jobId, enhanceWarningFor(enh));
+        }
+        const aliases = await hostNameAliases(params.channelKey);
+        for (const s of targets) {
+          if (s.splitVisual)
+            s.splitVisual = stripHostNames(s.splitVisual, aliases);
+        }
+
+        const provider = await getActiveProvider();
+        if (!provider) throw new Error("No active provider configured");
+        const { providerType: videoType, apiKey: videoKey } =
+          await resolveVideoProvider(provider);
+        const adapter = await providerAdapterForJob(
+          videoType as ProviderType,
+          videoKey
+        );
+
+        // No lip-sync lane: this pass never calls the provider (the host halves are reused),
+        // so route every target through the b-roll lanes' concurrency instead of requiring a
+        // resolvable lip-sync adapter just to schedule ffmpeg composites.
+        await dispatchScenesByProvider(
+          targets,
+          null,
+          params,
+          async scene => {
+            try {
+              // The full-frame lip-sync render IS the left panel the composite expects — adopt
+              // it as the bare-host clip before regenerateSplitRight overwrites clipUrls. (Do
+              // NOT let its extractHostPanel recovery run: that crops a panel out of a clip
+              // that was never a composite.)
+              if (!scene.hostClipUrls?.length) {
+                scene.hostClipUrls = scene.clipUrls?.length
+                  ? [...scene.clipUrls]
+                  : scene.clipUrl
+                    ? [scene.clipUrl]
+                    : [];
+              }
+              await regenerateSplitRight(
+                jobId,
+                scene,
+                scenes,
+                params,
+                (await apimartAdapterForJob(params)) ?? adapter
+              );
+              scene.regenerated = true;
+            } catch (e: any) {
+              scene.sceneStatus = "failed";
+              scene.error = describeError(e);
+            }
+            const scenesDone = scenes.filter(
+              s => s.clipUrls?.length || s.clipUrl
+            ).length;
+            schedulePersist(jobId, {
+              storyboard: scenes,
+              progress: jobProgress(jobId, {
+                scenesTotal: scenes.length,
+                scenesDone,
+              }),
+            });
+          },
+          jobId
+        );
+        await flushPersist(jobId);
+
+        const incomplete = describeIncompleteScenes(scenes);
+        if (incomplete) {
+          await updateLongformVideoJob(jobId, {
+            status: "failed",
+            storyboard: scenes,
+            errorMessage: incomplete,
+            completedAt: new Date(),
+          });
+          return;
+        }
+        // Render-only: the operator previews the new panels, then the manual Assemble
+        // button rebuilds the final cut.
+        await settleRenderOnly(jobId, scenes);
+      } catch (err: any) {
+        for (const s of targets) {
+          if (s.sceneStatus === "processing") {
+            s.sceneStatus = "failed";
+            s.error = s.error ?? describeError(err);
+          }
+        }
+        await updateLongformVideoJob(jobId, {
+          status: "failed",
+          storyboard: scenes,
+          errorMessage: describeError(err) || "Split retrofit failed",
+          completedAt: new Date(),
+        }).catch(onFailedStatusWriteError(jobId));
+        throw err;
+      }
+    });
+  } finally {
+    activeRegenerations.delete(sentinel);
   }
 }
 
