@@ -11,7 +11,48 @@ vi.mock("./claude", async importOriginal => {
 import { invokeClaude } from "./claude";
 const mockInvoke = vi.mocked(invokeClaude);
 
-import { hasOverlayText, parseOverlayVerdict } from "./overlayTextScan";
+import {
+  hasOverlayText,
+  parseOverlayVerdict,
+  parseStillDefectVerdict,
+  scanStillDefects,
+} from "./overlayTextScan";
+
+describe("parseStillDefectVerdict", () => {
+  it("parses both bits independently", () => {
+    expect(
+      parseStillDefectVerdict(
+        '{"overlay":false,"broken":true,"what":"board floating above the table"}'
+      )
+    ).toEqual({
+      overlay: false,
+      broken: true,
+      what: "board floating above the table",
+    });
+  });
+
+  it("a verdict missing one bit still counts for the other", () => {
+    // The old overlay-only shape must keep working — and vice versa.
+    expect(parseStillDefectVerdict('{"overlay":true}')).toEqual({
+      overlay: true,
+      broken: false,
+      what: "",
+    });
+    expect(parseStillDefectVerdict('{"broken":true}')).toEqual({
+      overlay: false,
+      broken: true,
+      what: "",
+    });
+  });
+
+  it("treats prose and off-shape values as no defect, never a re-roll", () => {
+    expect(parseStillDefectVerdict("looks broken to me").broken).toBe(false);
+    expect(parseStillDefectVerdict('{"broken":"yes"}').broken).toBe(false);
+    expect(parseStillDefectVerdict('{"overlay":false,"broken":false,"what":"x"}').what).toBe(
+      ""
+    );
+  });
+});
 
 describe("parseOverlayVerdict", () => {
   it("parses a fenced verdict", () => {
@@ -118,5 +159,29 @@ describe("hasOverlayText", () => {
       text: '{"overlay":true,"what":"title across the top"}',
     } as any);
     expect(await hasOverlayText(await imageOf(1280, 720))).toBe(true);
+  });
+});
+
+describe("scanStillDefects", () => {
+  it("reports broken geometry when the judge finds it", async () => {
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue({
+      text: '{"overlay":false,"broken":true,"what":"shelf merging into the wall"}',
+    } as any);
+    expect(await scanStillDefects(await imageOf(1280, 720))).toEqual({
+      overlay: false,
+      broken: true,
+      what: "shelf merging into the wall",
+    });
+  });
+
+  it("fails open all-false when the vision call throws", async () => {
+    mockInvoke.mockReset();
+    mockInvoke.mockRejectedValue(new Error("529 overloaded"));
+    expect(await scanStillDefects(await imageOf(1280, 720))).toEqual({
+      overlay: false,
+      broken: false,
+      what: "",
+    });
   });
 });

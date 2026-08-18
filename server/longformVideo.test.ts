@@ -176,10 +176,16 @@ vi.mock("./providers/openai-image", () => ({
 // rides the same mocked invokeClaude above, and its extra call would break the mockInvoke
 // call-count assertions in the content-policy tests. Default false = "no overlay text", so every
 // existing still/keyframe test is unaffected.
-const { mockHasOverlayText } = vi.hoisted(() => ({
-  mockHasOverlayText: vi.fn(async () => false),
+const { mockScanStillDefects } = vi.hoisted(() => ({
+  mockScanStillDefects: vi.fn(async () => ({
+    overlay: false,
+    broken: false,
+    what: "",
+  })),
 }));
-vi.mock("./overlayTextScan", () => ({ hasOverlayText: mockHasOverlayText }));
+vi.mock("./overlayTextScan", () => ({
+  scanStillDefects: mockScanStillDefects,
+}));
 // A valid 1×1 PNG the still lane's sharp() validation and landscape-normalize can parse.
 const okStill = () => ({
   success: true as const,
@@ -7349,10 +7355,22 @@ describe("generateValidatedStill", () => {
       .png()
       .toBuffer();
 
+  const defect = (over: Partial<StillDefectVerdictShape> = {}) => ({
+    overlay: false,
+    broken: false,
+    what: "",
+    ...over,
+  });
+  type StillDefectVerdictShape = {
+    overlay: boolean;
+    broken: boolean;
+    what: string;
+  };
+
   it("re-rolls a still with stamped overlay text, then returns the clean one", async () => {
     const texty = await pngOf("#111");
     const clean = await pngOf("#3a5");
-    mockHasOverlayText.mockResolvedValueOnce(true); // then falls back to the false default
+    mockScanStillDefects.mockResolvedValueOnce(defect({ overlay: true })); // then the false default
     const genImage = vi
       .fn()
       .mockResolvedValueOnce({ success: true, fileData: texty })
@@ -7367,9 +7385,24 @@ describe("generateValidatedStill", () => {
     );
   });
 
+  it("re-rolls a still with broken geometry, then returns the sound one", async () => {
+    const broken = await pngOf("#822");
+    const sound = await pngOf("#284");
+    mockScanStillDefects.mockResolvedValueOnce(
+      defect({ broken: true, what: "board floating above table" })
+    );
+    const genImage = vi
+      .fn()
+      .mockResolvedValueOnce({ success: true, fileData: broken })
+      .mockResolvedValueOnce({ success: true, fileData: sound });
+    const out = await generateValidatedStill(scene, 3, undefined, genImage);
+    expect(out.buffer.equals(sound)).toBe(true);
+    expect(genImage).toHaveBeenCalledTimes(2);
+  });
+
   it("ships the still when text survives the whole attempt budget (fails open)", async () => {
     const texty = await pngOf("#111");
-    mockHasOverlayText.mockResolvedValue(true);
+    mockScanStillDefects.mockResolvedValue(defect({ overlay: true }));
     const genImage = vi.fn().mockResolvedValue({
       success: true,
       fileData: texty,
@@ -7379,11 +7412,30 @@ describe("generateValidatedStill", () => {
     const out = await generateValidatedStill(scene, 3, undefined, genImage);
     expect(out.buffer.equals(texty)).toBe(true);
     expect(genImage).toHaveBeenCalledTimes(3);
-    mockHasOverlayText.mockResolvedValue(false); // restore the default for later tests
+    mockScanStillDefects.mockResolvedValue(defect()); // restore the default for later tests
+  });
+
+  it("prefers a texty frame over a broken one when every attempt is defective", async () => {
+    // Stamped text is cosmetic; impossible geometry reads as fake — the fail-open ladder
+    // must ship the least-bad frame.
+    const brokenFrame = await pngOf("#611");
+    const textyFrame = await pngOf("#161");
+    mockScanStillDefects
+      .mockResolvedValueOnce(defect({ broken: true, what: "melted shelf" }))
+      .mockResolvedValueOnce(defect({ overlay: true }))
+      .mockResolvedValueOnce(defect({ broken: true, what: "melted shelf" }));
+    const genImage = vi
+      .fn()
+      .mockResolvedValueOnce({ success: true, fileData: brokenFrame })
+      .mockResolvedValueOnce({ success: true, fileData: textyFrame })
+      .mockResolvedValueOnce({ success: true, fileData: brokenFrame });
+    const out = await generateValidatedStill(scene, 3, undefined, genImage);
+    expect(out.buffer.equals(textyFrame)).toBe(true);
+    mockScanStillDefects.mockResolvedValue(defect()); // restore the default
   });
 
   it("skips the gate when a reference image is attached (the cover asked for text)", async () => {
-    mockHasOverlayText.mockClear(); // call history only — keeps the false default impl
+    mockScanStillDefects.mockClear(); // call history only — keeps the false default impl
     const good = await validPng();
     const genImage = vi
       .fn()
@@ -7395,7 +7447,7 @@ describe("generateValidatedStill", () => {
       genImage
     );
     expect(out.buffer.equals(good)).toBe(true);
-    expect(mockHasOverlayText).not.toHaveBeenCalled();
+    expect(mockScanStillDefects).not.toHaveBeenCalled();
   });
 
   it("retries on a transient failure and succeeds on a later attempt", async () => {

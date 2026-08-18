@@ -25,7 +25,7 @@ import sharp from "sharp";
 import { invokeClaude } from "./claude";
 import { invokeGemini } from "./gemini";
 import { safeParseJSON, stripMarkdownFences } from "./jsonRepair";
-import { hasOverlayText } from "./overlayTextScan";
+import { scanStillDefects } from "./overlayTextScan";
 import {
   deriveStyleBible,
   deriveVisualDirection,
@@ -5451,8 +5451,10 @@ export async function generateValidatedStill(
   let prompt = buildStillPrompt(scene, false, visualOverride, subject, square);
   let tier = 0; // 0 normal → 1 aggressive → 2 llm-rewrite → 3 subject-generic → 4 generic
   let lastError = "Still image generation failed";
-  // Fail-open ballast for the overlay-text gate below — see the return past the loop.
+  // Fail-open ballast for the defect gates below — see the return past the loop. Kept separate:
+  // if every attempt is defective, a texty-but-physically-sound frame ships before a broken one.
   let textyFallback: { buffer: Buffer; mimeType?: string } | undefined;
+  let brokenFallback: { buffer: Buffer; mimeType?: string } | undefined;
   // A content-policy block can't be cleared by resubmitting the same prompt — escalate the
   // ladder instead: aggressively-softened variant, then a Claude policy-safe rewrite, then a
   // subject-anchored generic, then the guaranteed-generic visual. Escalations don't burn the
@@ -5538,23 +5540,38 @@ export async function generateValidatedStill(
       lastError = "OpenAI returned an undecodable image";
       continue; // regenerate
     }
-    // Overlay-text gate. gpt-image-2 stamps a caption/title/watermark over the frame despite
+    // Defect gate: ONE vision call, two verdicts — overlay text AND broken geometry (floating
+    // objects, misaligned surfaces, merged/warped structure — the split right panel's classic
+    // failure, sitting full-height beside a real face). gpt-image-2 stamps captions despite
     // NO_OVERLAY_TEXT_SUFFIX, and the b-roll VIDEO lane hands this exact frame to grok as its
-    // keyframe — so a texty frame here becomes a texty clip. Same shape as the decode check
-    // above: reject, keep the prompt, regenerate on a fresh seed. Runs AFTER the decode check so
-    // no vision call is spent on a corrupt buffer.
+    // keyframe — so a defective frame here becomes a defective clip. Same shape as the decode
+    // check above: reject, keep the prompt, regenerate on a fresh seed. Runs AFTER the decode
+    // check so no vision call is spent on a corrupt buffer.
     // NOT free like the content-policy ladder (no `attempt--`): a tier escalation is a bounded
     // state change that mutates the prompt, but a re-roll is a stochastic retry of the SAME
-    // prompt, so a free one would loop forever on a visual that always renders text.
-    // Skipped when a reference image is attached — that caller (the book cover) asked for text.
-    if (!referenceImageUrl && (await hasOverlayText(buffer))) {
-      lastError = "Still image has overlaid text";
-      textyFallback ??= { buffer, mimeType: r.mimeType };
-      console.warn(
-        `[Longform] scene ${scene.index} still has overlay text ` +
-          `(attempt ${attempt}/${attempts}) → regenerating`
-      );
-      continue; // fresh seed — the prompt already bans it, so a re-roll is the fix
+    // prompt, so a free one would loop forever on a visual that always renders defective.
+    // Skipped when a reference image is attached — that caller (the book cover) asked for text,
+    // and the real cover art trips the geometry judge on stylised artwork.
+    if (!referenceImageUrl) {
+      const defects = await scanStillDefects(buffer);
+      if (defects.broken) {
+        lastError = `Still image has broken geometry (${defects.what})`;
+        brokenFallback ??= { buffer, mimeType: r.mimeType };
+        console.warn(
+          `[Longform] scene ${scene.index} still has broken geometry ` +
+            `(${defects.what}, attempt ${attempt}/${attempts}) → regenerating`
+        );
+        continue; // fresh seed
+      }
+      if (defects.overlay) {
+        lastError = "Still image has overlaid text";
+        textyFallback ??= { buffer, mimeType: r.mimeType };
+        console.warn(
+          `[Longform] scene ${scene.index} still has overlay text ` +
+            `(attempt ${attempt}/${attempts}) → regenerating`
+        );
+        continue; // fresh seed — the prompt already bans it, so a re-roll is the fix
+      }
     }
     if (attempt > 1)
       console.log(
@@ -5562,19 +5579,28 @@ export async function generateValidatedStill(
       );
     return { buffer, mimeType: r.mimeType };
   }
-  // Fail open: a decodable-but-texty still renders fine, it's just ugly. Shipping it beats
-  // failing a scene over a caption — the still lane has no resume, so a throw here kills the job
-  // at the completeness gate. Nothing downstream badges it, so the warn below is the only trace.
+  // Fail open: a decodable-but-defective still renders fine, it's just ugly. Shipping it beats
+  // failing a scene over a caption or a wonky shelf — the still lane has no resume, so a throw
+  // here kills the job at the completeness gate. Nothing downstream badges it, so the warns
+  // below are the only trace. A texty frame ships before a broken one: stamped text is cosmetic,
+  // impossible geometry reads as fake.
   // ponytail: the ceiling this names is a visualPrompt that literally asks for lettering ("a
-  // packet labeled X"). No suffix fixes that — a second anti-text clause just stacks negation,
-  // which NO_BOOK_SUFFIX already warns doesn't work. Log the visual so the fix lands in the
-  // storyboard prompt instead.
+  // packet labeled X") or un-renderable structure. No suffix fixes that — a second negation
+  // clause just stacks, which NO_BOOK_SUFFIX already warns doesn't work. Log the visual so the
+  // fix lands in the storyboard prompt instead.
   if (textyFallback) {
     console.warn(
       `[Longform] scene ${scene.index} still has overlay text after ${attempts} ` +
         `attempts → shipping it: ${scene.visualPrompt.slice(0, 80)}`
     );
     return textyFallback;
+  }
+  if (brokenFallback) {
+    console.warn(
+      `[Longform] scene ${scene.index} still has broken geometry after ${attempts} ` +
+        `attempts → shipping the least-bad frame: ${scene.visualPrompt.slice(0, 80)}`
+    );
+    return brokenFallback;
   }
   throw new Error(lastError);
 }
