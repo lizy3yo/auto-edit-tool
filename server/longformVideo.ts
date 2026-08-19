@@ -132,6 +132,13 @@ import type {
   SplitLayout,
 } from "../shared/types";
 import {
+  extractSpokenScript,
+  CTA_START_LINE,
+  CTA_END_LINE,
+  CTA_QR_TRIGGER,
+  CTA_QR_RELEASE,
+} from "../shared/ctaMarkers";
+import {
   type LongformPacing,
   LEGACY_PACING,
   MAX_QUARTER_LOAD,
@@ -853,75 +860,18 @@ TONE: slow, trustworthy, educational, aimed at viewers aged 50+.
 
 FRAMING: every shot is 16:9 horizontal landscape.`;
 
-// Tolerant spoken-script markers: case-insensitive, any run of "=", optional spaces.
-const SCRIPT_START_MARKER = /^[ \t]*={2,}[ \t]*SCRIPT[ \t]*={2,}[ \t]*$/im;
-const SCRIPT_END_MARKER =
-  /^[ \t]*={2,}[ \t]*END[ \t]+SCRIPT[ \t]*={2,}[ \t]*$/im;
-
-/** True if a blank-line-delimited paragraph is part of the known template preamble. */
-function isPreambleParagraph(p: string): boolean {
-  const t = p.trim();
-  if (!t) return true;
-  if (/^reference image\b.*identity lock/i.test(t)) return true;
-  if (/^this is the spoken script\b/i.test(t)) return true;
-  if (/^host\s*\(/i.test(t)) return true;
-  if (/^look\s*&?\s*pacing/i.test(t)) return true;
-  // A paragraph made entirely of "* …" bullets (optionally led by a Host:/Look header).
-  const lines = t
-    .split("\n")
-    .map(l => l.trim())
-    .filter(Boolean);
-  return (
-    lines.length > 0 &&
-    lines.every(
-      l =>
-        l.startsWith("*") ||
-        /^host\s*\(/i.test(l) ||
-        /^look\s*&?\s*pacing/i.test(l)
-    )
-  );
-}
-
-/**
- * Return ONLY the spoken portion of a pasted script — the text that should be voiced
- * verbatim. Directing text (identity lock, host look, look & pacing) must never be
- * spoken; that lives in the saved instruction (`DEFAULT_LONGFORM_INSTRUCTION`).
- *
- * - If a tolerant `=== SCRIPT ===` marker is present, return what's after it (up to an
- *   optional `=== END SCRIPT ===`).
- * - Otherwise strip a recognized leading template-preamble block only, stopping at the
- *   first normal narration paragraph. A pure script (no marker/preamble) is unchanged.
- *
- * Conservative: never returns empty when the input is non-empty (falls back to the raw
- * text if stripping would remove everything). Pure — unit-tested.
- */
-export function extractSpokenScript(raw: string): string {
-  if (!raw || !raw.trim()) return "";
-  const start = raw.match(SCRIPT_START_MARKER);
-  if (start && start.index !== undefined) {
-    let after = raw.slice(start.index + start[0].length);
-    const end = after.match(SCRIPT_END_MARKER);
-    if (end && end.index !== undefined) after = after.slice(0, end.index);
-    const trimmed = after.trim();
-    return trimmed || raw.trim();
-  }
-  const paras = raw.split(/\n\s*\n/);
-  let i = 0;
-  while (i < paras.length && isPreambleParagraph(paras[i])) i++;
-  if (i === 0 || i >= paras.length) return raw.trim(); // nothing stripped, or would empty
-  return paras.slice(i).join("\n\n").trim();
-}
-
-// Exact CTA block markers (own line; surrounding spaces/tabs tolerated, nothing else).
-// Deliberately NOT tolerant like the SCRIPT markers — the script template emits them verbatim.
-const CTA_START_LINE = /^[ \t]*===START CTA===[ \t]*$/;
-const CTA_END_LINE = /^[ \t]*===END CTA===[ \t]*$/;
+// Spoken-script extraction and the CTA marker regexes moved to shared/ctaMarkers.ts so the
+// client's generate-dialog preview scans with the SAME rules this file validates with.
+// Re-exported here because this module has always been their home — server imports stay put.
+export { extractSpokenScript };
 
 /** One marked CTA block, as WORD offsets (whitespace-split, end-exclusive) into the cleaned
  *  script — word offsets because downstream scene chunking whitespace-normalizes text. */
 export interface CtaSpan {
   start: number;
   end: number;
+  /** Book name from `===START CTA (name)===` — an explicit assignment; never voiced. */
+  label?: string;
 }
 
 /**
@@ -942,20 +892,27 @@ export function parseCtaMarkers(spoken: string): {
   const spans: CtaSpan[] = [];
   const errors: string[] = [];
   let open: number | null = null;
+  let openLabel: string | undefined;
   let words = 0;
   for (const line of spoken.split("\n")) {
-    if (CTA_START_LINE.test(line)) {
+    const start = line.match(CTA_START_LINE);
+    if (start) {
       if (open != null)
         errors.push("===START CTA=== while the previous block is still open");
-      else open = words;
+      else {
+        open = words;
+        openLabel = start[1]?.trim() || undefined;
+      }
       continue;
     }
     if (CTA_END_LINE.test(line)) {
       if (open == null)
         errors.push("===END CTA=== without a preceding ===START CTA===");
       else {
-        if (words > open) spans.push({ start: open, end: words });
+        if (words > open)
+          spans.push({ start: open, end: words, label: openLabel });
         open = null;
+        openLabel = undefined;
       }
       continue;
     }
@@ -4094,8 +4051,8 @@ const CTA_HOST_SCENES = 1;
  * frozen tail (`QR_TAIL_HOLD_SEC`); the book-cover reveal plays on the beat right before the
  * trigger. See `markCtaQrBlock`. Matched whitespace/apostrophe-tolerantly (`anchorRegex`).
  */
-const CTA_QR_TRIGGER = "Now go ahead and grab your phone";
-const CTA_QR_RELEASE = "I'll wait right here.";
+// CTA_QR_TRIGGER / CTA_QR_RELEASE moved to shared/ctaMarkers.ts (imported above) so the
+// client's per-book CTA template emits the exact lines this file anchors the QR block to.
 
 /** Silent frozen-frame tail (seconds) the QR holds after the RELEASE line — the host just said
  *  "I'll wait right here" — added to the held scene length in assembly (mux tpad/apad). */
@@ -9564,10 +9521,14 @@ async function regenerateSplitRight(
   scene.splitRightUrl = rightUrl; // backfills pre-field scenes too — see StoryboardScene
   const composited: string[] = [];
   for (let i = 0; i < scene.hostClipUrls.length; i++) {
-    const buf = await compositeSplitScreenClip(scene.hostClipUrls[i], rightUrl, {
-      ...dims,
-      layout: scene.splitLayout,
-    });
+    const buf = await compositeSplitScreenClip(
+      scene.hostClipUrls[i],
+      rightUrl,
+      {
+        ...dims,
+        layout: scene.splitLayout,
+      }
+    );
     const key = `longform/${jobId}/split-${scene.index}-${i}-${nanoid(6)}.mp4`;
     const { url } = await storagePut(key, buf, "video/mp4");
     composited.push(url);
@@ -10049,7 +10010,9 @@ export async function retrofitSplitScreens(jobId: number): Promise<void> {
 
       // Only scenes with a rendered clip can composite — there is no host half to reuse
       // otherwise. Clear the assignment on any others so the storyboard stays truthful.
-      const assigned = scenes.filter(s => !prior.has(s.index) && isSplitScene(s));
+      const assigned = scenes.filter(
+        s => !prior.has(s.index) && isSplitScene(s)
+      );
       const targets = assigned.filter(s => s.clipUrls?.length || s.clipUrl);
       for (const s of assigned) {
         if (!targets.includes(s)) {

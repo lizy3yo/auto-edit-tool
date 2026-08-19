@@ -271,9 +271,9 @@ function QrPreview({
 export function ChannelBooks({ channelKey }: { channelKey: string }) {
   const utils = trpc.useUtils();
   const [draft, setDraft] = useState<Draft>(EMPTY);
-  const [pendingDelete, setPendingDelete] = useState<Draft & { id: number } | null>(
-    null
-  );
+  const [pendingDelete, setPendingDelete] = useState<
+    (Draft & { id: number }) | null
+  >(null);
 
   // Removed books are soft-deleted server-side (videos that already used one still resolve it
   // by id), but this list has no undelete — so it only ever shows the live ones.
@@ -353,9 +353,7 @@ export function ChannelBooks({ channelKey }: { channelKey: string }) {
                   </div>
                 )}
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium">
-                    {b.title}
-                  </div>
+                  <div className="truncate text-sm font-medium">{b.title}</div>
                   <div className="truncate text-xs text-muted-foreground">
                     {b.shopUrl || (
                       <span className="text-warning">

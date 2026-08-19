@@ -128,7 +128,9 @@ describe("69Labs TTS voice-not-found handling", () => {
       });
       expect(taskId).toBe("clone-task-1");
 
-      const cloneCall = calls.find(c => c.url.endsWith("/voice-clones/generate"));
+      const cloneCall = calls.find(c =>
+        c.url.endsWith("/voice-clones/generate")
+      );
       expect(cloneCall?.body).toMatchObject({
         voiceCloneId: CLONE_ID,
         text: "Hello from Hank.",

@@ -43,6 +43,13 @@ import { sanitizeError, isCreditError } from "@/lib/errorSanitizer";
 import { triggerCreditErrorPopup } from "@/components/CreditErrorPopup";
 import type { SplitLayout, StoryboardScene } from "@shared/types";
 import {
+  scanCtaBlocks,
+  previewBookAssignments,
+  ctaLabelMatches,
+  CTA_MARKER_TEMPLATE,
+  CTA_TEMPLATE_PLACEHOLDER,
+} from "@shared/ctaMarkers";
+import {
   ScanFace,
   Loader2,
   Download,
@@ -840,6 +847,49 @@ export default function LongformJobSlot({
     () => script.trim().split(/\s+/).filter(Boolean).length,
     [script]
   );
+
+  // CTA preview for the generate confirmation: the same marker scan and book→block title
+  // match the server runs at submit, so the dialog can say — before the click — whether the
+  // render would be rejected (unmarked script on a channel with a cover/QR or with books
+  // assigned) and which block each named book lands on.
+  const ctaScan = useMemo(() => scanCtaBlocks(script), [script]);
+  const ctaBookTitles = useMemo(
+    () => ctaBooks.map(b => b.title.trim()).filter(Boolean),
+    [ctaBooks]
+  );
+  // The channel's saved books auto-place when a block calls them (marker name or spoken
+  // title) — same rule the server runs, so the preview needs the same candidate list:
+  // this video's own rows first (they win ties), channel books behind as call-only.
+  const { data: dialogChannelBooks } = trpc.book.list.useQuery(
+    { channelKey, activeOnly: true },
+    { enabled: !!channelKey }
+  );
+  const ctaCandidates = useMemo(
+    () => [
+      ...ctaBookTitles.map(title => ({ title })),
+      ...(dialogChannelBooks ?? [])
+        .filter(r => !ctaBookTitles.some(t => ctaLabelMatches(t, r.title)))
+        .map(r => ({ title: r.title, requiresCall: true })),
+    ],
+    [ctaBookTitles, dialogChannelBooks]
+  );
+  const ctaAssignments = useMemo(
+    () => previewBookAssignments(ctaScan.blocks, ctaCandidates),
+    [ctaScan.blocks, ctaCandidates]
+  );
+  // The exact condition the router 400s on — surfacing it here turns a failed submit into a
+  // disabled button with the fix written next to it.
+  const ctaWouldReject =
+    ctaScan.errors.length > 0 ||
+    ((channelDefaults?.hasCtaCoverOrQr || ctaBookTitles.length > 0) &&
+      ctaScan.blocks.length === 0);
+  // An inserted-but-unedited template would be VOICED verbatim — hold Generate until replaced.
+  const ctaPlaceholderLeft = ctaScan.blocks.some(b =>
+    b.text.includes(CTA_TEMPLATE_PLACEHOLDER)
+  );
+  const insertCtaTemplate = () => {
+    setScript(s => `${s.trimEnd()}\n\n${CTA_MARKER_TEMPLATE}\n`);
+  };
   // ~150 wpm is a narration pace, not a reading one. Deliberately labelled
   // "roughly" — the real runtime is measured from the rendered voiceover.
   const estimatedMinutes = useMemo(() => {
@@ -1968,6 +2018,103 @@ export default function LongformJobSlot({
                   <dt className="text-muted-foreground">B-roll model</dt>
                   <dd>Grok</dd>
                 </dl>
+                {/* CTA check — the cases the router would reject are announced HERE, with the
+                    fix next to them, instead of surfacing as a server error after the click. */}
+                <div className="space-y-1.5 rounded-md border border-border p-3 text-xs">
+                  <p className="font-medium text-foreground">Call to action</p>
+                  {ctaScan.errors.length > 0 ? (
+                    <p className="text-destructive">
+                      Broken CTA markers: {ctaScan.errors.join("; ")}. Fix the
+                      script to generate.
+                    </p>
+                  ) : ctaScan.blocks.length === 0 ? (
+                    <>
+                      <p
+                        className={
+                          ctaWouldReject ? "text-destructive" : "text-warning"
+                        }
+                      >
+                        {ctaScan.empty > 0
+                          ? `Your CTA markers are empty — write the spoken pitch between ===START CTA=== and ===END CTA===${ctaWouldReject ? ", or generating would fail" : ""}.`
+                          : ctaWouldReject
+                            ? ctaBookTitles.length > 0
+                              ? `You assigned ${ctaBookTitles.length === 1 ? "a book" : `${ctaBookTitles.length} books`} (${ctaBookTitles.map(t => `“${t}”`).join(", ")}) but the script has no marked CTA block — generating would fail.`
+                              : "This channel has a book cover/QR configured, so the script needs marked CTA blocks — generating would fail."
+                            : "No CTA blocks marked. Books, covers, QR and channel assets only appear inside ===START CTA=== / ===END CTA=== blocks."}
+                      </p>
+                      {ctaScan.empty === 0 && (
+                        <>
+                          <p className="text-muted-foreground">
+                            Wrap your pitch paragraphs in ===START CTA=== /
+                            ===END CTA=== lines (they are never voiced), or:
+                          </p>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 text-xs"
+                            onClick={insertCtaTemplate}
+                          >
+                            Insert CTA template at the end of the script
+                          </Button>
+                        </>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <p>
+                        {ctaScan.blocks.length} CTA block
+                        {ctaScan.blocks.length === 1 ? "" : "s"} marked
+                        {ctaScan.blocks.length === 1 &&
+                          " — most films carry 2 (mid-roll + close)"}
+                        .
+                      </p>
+                      {ctaCandidates.length > 0 && (
+                        <ul className="space-y-0.5">
+                          {ctaAssignments.map((a, i) => (
+                            <li key={i}>
+                              Block {i + 1} →{" "}
+                              {a.bookIndex != null ? (
+                                <>
+                                  “{ctaCandidates[a.bookIndex].title}”{" "}
+                                  <span className="text-muted-foreground">
+                                    (
+                                    {a.bookIndex >= ctaBookTitles.length
+                                      ? "channel book — "
+                                      : ""}
+                                    {a.byLabel
+                                      ? "named in the marker"
+                                      : a.byTitle
+                                        ? "title spoken in this block"
+                                        : "by order — the block never names it"}
+                                    )
+                                  </span>
+                                </>
+                              ) : (
+                                <span className="text-muted-foreground">
+                                  channel cover/QR fallback
+                                </span>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      {ctaScan.empty > 0 && (
+                        <p className="text-warning">
+                          {ctaScan.empty} marker pair
+                          {ctaScan.empty === 1 ? " is" : "s are"} still empty —
+                          write the pitch between those markers or remove them.
+                        </p>
+                      )}
+                      {ctaPlaceholderLeft && (
+                        <p className="text-destructive">
+                          A CTA block still contains the inserted template
+                          placeholder — replace it with your spoken pitch, or it
+                          would be read aloud word-for-word.
+                        </p>
+                      )}
+                    </>
+                  )}
+                </div>
                 <p className="text-warning">
                   Length follows your script; long scripts spend many credits
                   and can run for a long time.
@@ -1977,7 +2124,12 @@ export default function LongformJobSlot({
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmGenerate}>
+            <AlertDialogAction
+              onClick={confirmGenerate}
+              // The CTA section above says WHY and carries the fix (markers / template edit) —
+              // submitting anyway would just bounce off the router's own validation.
+              disabled={ctaWouldReject || ctaPlaceholderLeft}
+            >
               Generate
             </AlertDialogAction>
           </AlertDialogFooter>

@@ -47,7 +47,11 @@ function objectPositionX(
   panelAR: number
 ): number {
   if (!srcAR || srcAR <= panelAR) return 50;
-  return clamp(((focus * srcAR - panelAR / 2) / (srcAR - panelAR)) * 100, 0, 100);
+  return clamp(
+    ((focus * srcAR - panelAR / 2) / (srcAR - panelAR)) * 100,
+    0,
+    100
+  );
 }
 
 type DragState =
@@ -139,7 +143,11 @@ export function SplitPositionEditor(props: {
     e.preventDefault();
     if (d.kind === "seam") {
       edit({
-        seamX: clamp((e.clientX - d.containerLeft) / d.containerW, SEAM_MIN, SEAM_MAX),
+        seamX: clamp(
+          (e.clientX - d.containerLeft) / d.containerW,
+          SEAM_MIN,
+          SEAM_MAX
+        ),
       });
       return;
     }
@@ -212,7 +220,9 @@ export function SplitPositionEditor(props: {
         ref={containerRef}
         className="relative w-full aspect-video bg-black rounded overflow-hidden select-none touch-none flex"
       >
-        {hostOnLeft ? [panel("host"), panel("broll")] : [panel("broll"), panel("host")]}
+        {hostOnLeft
+          ? [panel("host"), panel("broll")]
+          : [panel("broll"), panel("host")]}
         {/* Seam handle — the black divider the compositor draws, draggable. */}
         <div
           className="absolute inset-y-0 z-10 cursor-col-resize"

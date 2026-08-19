@@ -74,6 +74,7 @@ import {
   parseCtaMarkers,
   extractSpokenScript,
 } from "./longformVideo";
+import { previewBookAssignments, ctaLabelMatches } from "../shared/ctaMarkers";
 import {
   buildTrackingUrl,
   stripTrackingParam,
@@ -472,6 +473,10 @@ const shuttleRouter = router({
         defaultWordCount: config?.defaultWordCount || null,
         hostPhotoUrl: config?.hostPhotoUrl || null,
         hostPhotoUrl2: config?.hostPhotoUrl2 || null,
+        // The generate dialog's CTA preview needs to know whether an unmarked script would be
+        // REJECTED (the router requires ===CTA=== markers when the channel has a cover/QR) or
+        // merely warned about. Just the boolean — the URLs themselves stay server-side.
+        hasCtaCoverOrQr: !!(config?.bookCoverImageUrl || config?.ctaQrImageUrl),
       };
     }),
 });
@@ -1201,23 +1206,8 @@ const longformVideoRouter = router({
       // failing the render: that block falls back to the channel cover/QR.
       const inputBooks = input.ctaBooks ?? [];
 
-      // Title match: a book named "The Old Way Home" belongs on the CTA block whose spoken text
-      // says "The Old Way Home". Half of the title's words-over-3-letters appearing is a match —
-      // the same rule the book form used client-side to pre-fill, now the whole mechanism. A
-      // shop link is validated up front so a typo fails here (operator present) not mid-render.
-      const normTitle = (s: string) =>
-        s.toLowerCase().replace(/[^a-z0-9 ]/g, " ");
-      const titleMatches = (title: string, text: string) => {
-        const tokens = normTitle(title)
-          .split(/\s+/)
-          .filter(t => t.length > 3);
-        if (tokens.length === 0) return false;
-        const hay = normTitle(text);
-        return (
-          tokens.filter(t => hay.includes(t)).length >=
-          Math.ceil(tokens.length / 2)
-        );
-      };
+      // A shop link is validated up front so a typo fails here (operator present) not
+      // mid-render. Book→block placement itself happens below via previewBookAssignments.
       for (const b of inputBooks) {
         const shop = b.shopUrl?.trim() || undefined;
         if (shop && !buildTrackingUrl(shop, 1)) {
@@ -1270,21 +1260,45 @@ const longformVideoRouter = router({
         }
         return coverCache.get(url);
       };
+      // The placement rule lives in shared/ctaMarkers.ts (previewBookAssignments) — the same
+      // function the generate dialog previews with: a block's `===START CTA (name)===` label
+      // first, then the spoken-title match, then order / single-book fallbacks.
+      //
+      // AUTO-ADD: every book saved on the channel is a candidate too, no picking required —
+      // but as `requiresCall`, so it places itself ONLY on a block that calls it (marker name
+      // or spoken title), never by position. The video's own rows are listed first, so a
+      // manual row always beats a channel book with the same name, and a channel duplicate of
+      // a manual row is dropped up front.
+      const channelBookRows = (await getBooks(input.channelKey, true)).filter(
+        row => !inputBooks.some(x => ctaLabelMatches(x.title, row.title))
+      );
+      const assignments = previewBookAssignments(
+        ctaMarkers.spans.map(sp => ({
+          text: ctaBlockWords.slice(sp.start, sp.end).join(" "),
+          label: sp.label,
+        })),
+        [
+          ...inputBooks.map(x => ({ title: x.title })),
+          ...channelBookRows.map(r => ({ title: r.title, requiresCall: true })),
+        ]
+      );
       const ctaBooks: LongformCtaBook[] = [];
       for (let i = 0; i < ctaMarkers.spans.length; i++) {
-        const sp = ctaMarkers.spans[i];
-        const blockText = ctaBlockWords.slice(sp.start, sp.end).join(" ");
-        const b =
-          inputBooks.find(x => titleMatches(x.title, blockText)) ??
-          inputBooks[i] ??
-          (inputBooks.length === 1 ? inputBooks[0] : undefined);
-        if (!b) continue;
-        const shop = b.shopUrl?.trim() || undefined;
+        const idx = assignments[i].bookIndex;
+        if (idx == null) continue;
+        const manual = idx < inputBooks.length ? inputBooks[idx] : undefined;
+        const row = manual
+          ? undefined
+          : channelBookRows[idx - inputBooks.length];
+        const shop = (manual?.shopUrl ?? row?.shopUrl ?? undefined)?.trim();
         ctaBooks.push({
           ctaIndex: i,
-          bookId: 0,
-          title: b.title.trim(),
-          coverImageUrl: await rehostCover(b.coverImageUrl),
+          // A real row id marks the channel as the source; 0 stays the per-video marker.
+          bookId: row?.id ?? 0,
+          title: (manual?.title ?? row!.title).trim(),
+          coverImageUrl: await rehostCover(
+            manual?.coverImageUrl ?? row?.coverImageUrl ?? undefined
+          ),
           shopUrl: shop ? stripTrackingParam(shop) : undefined,
         });
       }

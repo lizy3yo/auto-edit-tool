@@ -48,9 +48,10 @@ describe("parseStillDefectVerdict", () => {
   it("treats prose and off-shape values as no defect, never a re-roll", () => {
     expect(parseStillDefectVerdict("looks broken to me").broken).toBe(false);
     expect(parseStillDefectVerdict('{"broken":"yes"}').broken).toBe(false);
-    expect(parseStillDefectVerdict('{"overlay":false,"broken":false,"what":"x"}').what).toBe(
-      ""
-    );
+    expect(
+      parseStillDefectVerdict('{"overlay":false,"broken":false,"what":"x"}')
+        .what
+    ).toBe("");
   });
 });
 

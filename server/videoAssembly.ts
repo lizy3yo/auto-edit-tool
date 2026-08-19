@@ -1178,7 +1178,11 @@ export function buildSplitScreenArgs(opts: {
   // pan it to, and focusCropX(centre) emits nothing — args stay byte-identical), but a moved
   // seam makes the panel narrower than its cover-scaled source, so the pan becomes real.
   const host = coverCrop("H", hostW, focusCropX(opts.hostFocusX ?? null));
-  const broll = coverCrop("B", brollW, focusCropX(opts.layout?.brollFocusX ?? null));
+  const broll = coverCrop(
+    "B",
+    brollW,
+    focusCropX(opts.layout?.brollFocusX ?? null)
+  );
   const stackOrder = hostOnLeft ? "[H][B]" : "[B][H]";
   const filter =
     `[0:v]${host};` +

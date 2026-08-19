@@ -120,8 +120,7 @@ export function parseStillDefectVerdict(
   stopReason?: string
 ): StillDefectVerdict {
   const parsed = safeParseJSON<any>(raw, stopReason);
-  if (!parsed.success)
-    return { overlay: false, broken: false, what: "" };
+  if (!parsed.success) return { overlay: false, broken: false, what: "" };
   const overlay = parsed.data?.overlay === true;
   const broken = parsed.data?.broken === true;
   const what = parsed.data?.what;

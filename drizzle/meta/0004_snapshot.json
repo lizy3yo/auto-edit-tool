@@ -35,9 +35,7 @@
       "compositePrimaryKeys": {
         "app_settings_key": {
           "name": "app_settings_key",
-          "columns": [
-            "key"
-          ]
+          "columns": ["key"]
         }
       },
       "uniqueConstraints": {},
@@ -112,9 +110,7 @@
       "compositePrimaryKeys": {
         "books_id": {
           "name": "books_id",
-          "columns": [
-            "id"
-          ]
+          "columns": ["id"]
         }
       },
       "uniqueConstraints": {},
@@ -182,9 +178,7 @@
       "compositePrimaryKeys": {
         "channel_assets_id": {
           "name": "channel_assets_id",
-          "columns": [
-            "id"
-          ]
+          "columns": ["id"]
         }
       },
       "uniqueConstraints": {},
@@ -406,17 +400,13 @@
       "compositePrimaryKeys": {
         "channel_configs_id": {
           "name": "channel_configs_id",
-          "columns": [
-            "id"
-          ]
+          "columns": ["id"]
         }
       },
       "uniqueConstraints": {
         "channel_configs_channelKey_unique": {
           "name": "channel_configs_channelKey_unique",
-          "columns": [
-            "channelKey"
-          ]
+          "columns": ["channelKey"]
         }
       },
       "checkConstraint": {}
@@ -483,17 +473,13 @@
       "compositePrimaryKeys": {
         "channel_layers_id": {
           "name": "channel_layers_id",
-          "columns": [
-            "id"
-          ]
+          "columns": ["id"]
         }
       },
       "uniqueConstraints": {
         "channel_layers_channel_key_unique": {
           "name": "channel_layers_channel_key_unique",
-          "columns": [
-            "channel_key"
-          ]
+          "columns": ["channel_key"]
         }
       },
       "checkConstraint": {}
@@ -572,17 +558,13 @@
       "compositePrimaryKeys": {
         "longform_sales_id": {
           "name": "longform_sales_id",
-          "columns": [
-            "id"
-          ]
+          "columns": ["id"]
         }
       },
       "uniqueConstraints": {
         "longform_sales_externalOrderId_unique": {
           "name": "longform_sales_externalOrderId_unique",
-          "columns": [
-            "externalOrderId"
-          ]
+          "columns": ["externalOrderId"]
         }
       },
       "checkConstraint": {}
@@ -633,10 +615,7 @@
       "compositePrimaryKeys": {
         "longform_slots_userId_slotIndex_pk": {
           "name": "longform_slots_userId_slotIndex_pk",
-          "columns": [
-            "userId",
-            "slotIndex"
-          ]
+          "columns": ["userId", "slotIndex"]
         }
       },
       "uniqueConstraints": {},
@@ -775,9 +754,7 @@
       "compositePrimaryKeys": {
         "longform_video_jobs_id": {
           "name": "longform_video_jobs_id",
-          "columns": [
-            "id"
-          ]
+          "columns": ["id"]
         }
       },
       "uniqueConstraints": {},
@@ -874,9 +851,7 @@
       "compositePrimaryKeys": {
         "provider_configs_id": {
           "name": "provider_configs_id",
-          "columns": [
-            "id"
-          ]
+          "columns": ["id"]
         }
       },
       "uniqueConstraints": {},

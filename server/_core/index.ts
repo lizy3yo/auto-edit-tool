@@ -91,9 +91,9 @@ async function startServer() {
           { code?: string; errno?: number } | undefined;
         console.error(
           `[tRPC] ${type} ${path ?? "<unknown>"} → ${error.code}` +
-          (cause?.code || cause?.errno
-            ? ` (${cause.code ?? cause.errno})`
-            : ""),
+            (cause?.code || cause?.errno
+              ? ` (${cause.code ?? cause.errno})`
+              : ""),
           error.message
         );
       },

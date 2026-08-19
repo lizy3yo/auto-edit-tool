@@ -272,7 +272,10 @@ describe("resolveSplitLayout (manual split geometry)", () => {
   });
 
   it("mirrors the panels on hostSide right — the seam is still measured from the left", () => {
-    const g = resolveSplitLayout(1920, 1080, { hostSide: "right", seamX: 0.5625 });
+    const g = resolveSplitLayout(1920, 1080, {
+      hostSide: "right",
+      seamX: 0.5625,
+    });
     expect(g).toEqual({
       hostW: 840,
       brollW: 1080,
