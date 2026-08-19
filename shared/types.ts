@@ -166,6 +166,32 @@ export type FaceLockMode = "ingredients" | "keyframes";
 /** Output format for a long-form video job */
 export type LongformVideoFormat = "vlog" | "talkingHead";
 
+/**
+ * Manual geometry for a split-screen composite, set from the split editor's position tool.
+ * Fractions are of the 16:9 canvas (or the source frame for the focus fields), so the values
+ * are resolution-independent. All fields optional — an unset field keeps its default.
+ */
+export interface SplitLayout {
+  /** Which side the host panel sits on. Default "left". */
+  hostSide?: "left" | "right";
+  /**
+   * The dividing line between the two panels, as a fraction of canvas width measured from the
+   * LEFT edge (clamped to 0.2..0.8 server-side). Default: the b-roll panel is a full-height
+   * square and the host takes the remainder (seam at 0.4375 on 16:9 with the host left).
+   */
+  seamX?: number;
+  /**
+   * Horizontal centre of the host panel's crop window, 0..1 across the host source frame
+   * (0.5 = centred). Unset ⇒ automatic face detection decides, as before.
+   */
+  hostFocusX?: number;
+  /**
+   * Horizontal centre of the b-roll panel's crop window, 0..1 across its source frame.
+   * Unset ⇒ centred. Only visible when the panel is narrower than its (cover-scaled) source.
+   */
+  brollFocusX?: number;
+}
+
 /** A single storyboard scene = one beat (its own verbatim script slice) + clip(s) */
 export interface StoryboardScene {
   index: number;
@@ -416,6 +442,14 @@ export interface StoryboardScene {
    * field existed — a right-panel re-render backfills it.
    */
   splitRightUrl?: string;
+  /**
+   * Operator-chosen geometry of the split composite. Absent ⇒ the historical default layout
+   * (host LEFT at the canvas remainder, b-roll in a full-height square panel, host crop panned
+   * by automatic face detection). Every field is optional so a partial edit (say, just a seam
+   * drag) leaves the rest on their defaults. Applied by ffmpeg recomposite only — changing it
+   * never regenerates either half.
+   */
+  splitLayout?: SplitLayout;
   /**
    * True when this scene's clip(s) were produced by the audio-driven lip-sync model
    * (host shots with a face photo) rather than text-to-video. Lip-synced clips already

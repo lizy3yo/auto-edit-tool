@@ -1584,17 +1584,27 @@ const longformVideoRouter = router({
    * Split editor: edit one host scene's split state on a rendered job. The lip-synced host
    * half is always reused; only the right panel changes. `off` un-splits (free), `prompt`
    * renders a fresh panel from text (one still), `scene` reuses another scene's footage as
-   * the panel (free — ffmpeg only). Render-only: preview, then Assemble.
+   * the panel (free — ffmpeg only), `layout` repositions the composite — host side, seam,
+   * per-panel pan — from the operator's drag (free — ffmpeg only, and a manual host position
+   * skips the face-detection calls). Render-only: preview, then Assemble.
    */
   setSceneSplit: approvedProcedure
     .input(
       z.object({
         jobId: z.number(),
         sceneIndex: z.number().int().min(1),
-        mode: z.enum(["off", "prompt", "scene"]),
+        mode: z.enum(["off", "prompt", "scene", "layout"]),
         prompt: z.string().optional(),
         verbatim: z.boolean().optional(),
         sourceIndex: z.number().int().min(1).optional(),
+        layout: z
+          .object({
+            hostSide: z.enum(["left", "right"]).optional(),
+            seamX: z.number().min(0).max(1).optional(),
+            hostFocusX: z.number().min(0).max(1).optional(),
+            brollFocusX: z.number().min(0).max(1).optional(),
+          })
+          .optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -1608,6 +1618,12 @@ const longformVideoRouter = router({
           message: "Pick the scene whose footage the panel should show",
         });
       }
+      if (input.mode === "layout" && input.layout == null) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "A layout edit needs the layout to apply",
+        });
+      }
       const edit =
         input.mode === "off"
           ? ({ mode: "off" } as const)
@@ -1617,7 +1633,9 @@ const longformVideoRouter = router({
                 prompt: input.prompt,
                 verbatim: input.verbatim,
               } as const)
-            : ({ mode: "scene", sourceIndex: input.sourceIndex! } as const);
+            : input.mode === "layout"
+              ? ({ mode: "layout", layout: input.layout! } as const)
+              : ({ mode: "scene", sourceIndex: input.sourceIndex! } as const);
       setLongformSceneSplit(input.jobId, input.sceneIndex, edit).catch(err => {
         console.error(
           `[Longform ${input.jobId}] setSceneSplit(${input.sceneIndex}) error:`,

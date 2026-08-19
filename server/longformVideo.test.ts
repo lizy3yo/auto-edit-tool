@@ -124,6 +124,7 @@ import {
   USE_IMAGE_LANE,
   masterOverlayEligible,
   resolveLipsyncAdapter,
+  sanitizeSplitLayout,
 } from "./longformVideo";
 import { ENV } from "./_core/env";
 import { getBookNameTokens } from "./ctaDetector";
@@ -6335,6 +6336,30 @@ describe("generateSceneClips routing (HeyGen lip-sync vs grok-imagine-video)", (
     const sub = adapter.submitVideo.mock.calls[0][0];
     expect(sub.imageUrls).toEqual(["https://cdn.example.com/face.jpg"]);
     expect(sub.videoInputMode).toBe("ingredients");
+  });
+});
+
+describe("sanitizeSplitLayout (split editor position input)", () => {
+  it("returns undefined when every field is a default — the scene stores nothing", () => {
+    expect(sanitizeSplitLayout({})).toBeUndefined();
+    expect(sanitizeSplitLayout({ hostSide: "left" })).toBeUndefined();
+  });
+
+  it("clamps the seam into 0.2..0.8 and every focus into 0..1", () => {
+    expect(
+      sanitizeSplitLayout({ seamX: 0.05, hostFocusX: 1.7, brollFocusX: -2 })
+    ).toEqual({ seamX: 0.2, hostFocusX: 1, brollFocusX: 0 });
+  });
+
+  it("keeps a real layout intact and drops non-finite noise", () => {
+    expect(
+      sanitizeSplitLayout({
+        hostSide: "right",
+        seamX: 0.6,
+        hostFocusX: NaN,
+        brollFocusX: 0.3,
+      })
+    ).toEqual({ hostSide: "right", seamX: 0.6, brollFocusX: 0.3 });
   });
 });
 

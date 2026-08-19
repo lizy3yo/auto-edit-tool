@@ -38,9 +38,10 @@ import {
 } from "@/components/LongformCtaBooks";
 import { LongformPublishKit } from "@/components/LongformPublishKit";
 import { LongformScenePreview } from "@/components/LongformScenePreview";
+import { SplitPositionEditor } from "@/components/SplitPositionEditor";
 import { sanitizeError, isCreditError } from "@/lib/errorSanitizer";
 import { triggerCreditErrorPopup } from "@/components/CreditErrorPopup";
-import type { StoryboardScene } from "@shared/types";
+import type { SplitLayout, StoryboardScene } from "@shared/types";
 import {
   ScanFace,
   Loader2,
@@ -406,7 +407,9 @@ export default function LongformJobSlot({
           ? "Removing the split — back to full-frame host..."
           : vars.mode === "scene"
             ? "Compositing the chosen footage beside the host..."
-            : "Rendering a fresh right panel..."
+            : vars.mode === "layout"
+              ? "Repositioning the split — pure ffmpeg, nothing regenerates..."
+              : "Rendering a fresh right panel..."
       );
       setExpandedScene(null);
       if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
@@ -423,6 +426,7 @@ export default function LongformJobSlot({
       | { mode: "off" }
       | { mode: "prompt"; prompt?: string; verbatim?: boolean }
       | { mode: "scene"; sourceIndex: number }
+      | { mode: "layout"; layout: SplitLayout }
   ) => {
     if (!jobId) return;
     armNotifications();
@@ -1699,6 +1703,31 @@ export default function LongformJobSlot({
                                           onClick={e => e.stopPropagation()}
                                         />
                                       </div>
+                                    </div>
+                                  )}
+                                {isSplitScene(scene) &&
+                                  scene.hostClipUrls?.[0] &&
+                                  scene.splitRightUrl && (
+                                    <div className="space-y-1">
+                                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide">
+                                        Position (drag — applies with one free
+                                        ffmpeg recomposite)
+                                      </p>
+                                      <SplitPositionEditor
+                                        hostUrl={scene.hostClipUrls[0]}
+                                        rightUrl={scene.splitRightUrl}
+                                        layout={scene.splitLayout}
+                                        pending={
+                                          splitEditMutation.isPending ||
+                                          isSceneQueued
+                                        }
+                                        onApply={layout =>
+                                          applySplitEdit(scene, {
+                                            mode: "layout",
+                                            layout,
+                                          })
+                                        }
+                                      />
                                     </div>
                                   )}
                                 <p className="text-[10px] text-muted-foreground">

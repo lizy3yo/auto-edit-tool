@@ -26,7 +26,7 @@ import { getFFmpegPath } from "./ffmpegPath";
 import { Semaphore } from "./providers/semaphore";
 import { presignOwnBucketUrl } from "./storage";
 import { describeError } from "./_core/errorDetail";
-import type { VideoAspectRatio } from "../shared/types";
+import type { SplitLayout, VideoAspectRatio } from "../shared/types";
 
 const FPS = 30;
 
@@ -1074,6 +1074,57 @@ export function splitPanelWidths(
   return { rightW, hostW: width - rightW };
 }
 
+/** Round down to even — yuv420p 4:2:0 subsampling needs even panel widths. */
+const evenPx = (x: number) => x - (x % 2);
+
+/**
+ * Resolved pixel geometry of a split layout: where each panel sits and how wide it is.
+ * With no layout (or no seam override) this reproduces `splitPanelWidths` exactly — square
+ * b-roll panel, host the remainder — so legacy composites are byte-identical. A `seamX`
+ * override places the dividing line at that fraction of canvas width (clamped to 0.2..0.8 so
+ * neither panel collapses, rounded to even pixels for yuv420p). `hostSide: "right"` mirrors
+ * the panel order; the seam is still measured from the LEFT edge either way.
+ *
+ * Shared by the compositor and both panel extractors so the three can never disagree about
+ * where the seam is. Pure — unit-tested.
+ */
+export function resolveSplitLayout(
+  width: number,
+  height: number,
+  layout?: SplitLayout | null
+): {
+  hostW: number;
+  brollW: number;
+  /** x offset of the host panel on the canvas. */
+  hostX: number;
+  /** x offset of the b-roll panel on the canvas. */
+  brollX: number;
+  hostOnLeft: boolean;
+  /** Width of whichever panel is on the left — the divider's x position. */
+  leftW: number;
+} {
+  const hostOnLeft = (layout?.hostSide ?? "left") !== "right";
+  let hostW: number;
+  const seam = layout?.seamX;
+  if (seam != null && Number.isFinite(seam)) {
+    const seamPx = evenPx(
+      Math.round(Math.min(0.8, Math.max(0.2, seam)) * width)
+    );
+    hostW = hostOnLeft ? seamPx : width - seamPx;
+  } else {
+    hostW = splitPanelWidths(width, height).hostW;
+  }
+  const brollW = width - hostW;
+  return {
+    hostW,
+    brollW,
+    hostX: hostOnLeft ? 0 : brollW,
+    brollX: hostOnLeft ? hostW : 0,
+    hostOnLeft,
+    leftW: hostOnLeft ? hostW : brollW,
+  };
+}
+
 /**
  * Build FFmpeg args for the split-screen: the lip-synced host clip (input 0) fills the LEFT
  * panel, a separately-generated b-roll clip (input 1) fills a full-height SQUARE panel on the
@@ -1101,24 +1152,39 @@ export function buildSplitScreenArgs(opts: {
   fps?: number;
   /**
    * Horizontal centre of the host's face, 0..1 across the source frame. Null (the default)
-   * keeps ffmpeg's own centred crop, byte-identical to the pre-alignment args.
+   * keeps ffmpeg's own centred crop, byte-identical to the pre-alignment args. This is the
+   * EFFECTIVE focus — the caller resolves manual-vs-measured; `layout.hostFocusX` is NOT read
+   * here so the two sources can't fight.
    */
   hostFocusX?: number | null;
+  /**
+   * Manual geometry (side, seam, b-roll pan). Absent ⇒ the historical layout: host LEFT at
+   * the canvas remainder, square b-roll panel, b-roll centred.
+   */
+  layout?: SplitLayout | null;
 }): string[] {
   const { hostPath, rightPath, outputPath, width, height } = opts;
   const fps = opts.fps ?? FPS;
-  const { rightW, hostW } = splitPanelWidths(width, height);
+  const { hostW, brollW, hostOnLeft, leftW } = resolveSplitLayout(
+    width,
+    height,
+    opts.layout
+  );
   const dur = opts.durationSec.toFixed(3);
   const coverCrop = (label: string, w: number, cropX?: string | null) =>
     `scale=${w}:${height}:force_original_aspect_ratio=increase,` +
     `crop=${w}:${height}${cropX ? `:${cropX}:0` : ""},setpts=PTS-STARTPTS[${label}]`;
-  // Only the host lane pans. The right panel is a square slot holding a 1:1 still, so it is
-  // already showing the whole image — there is nothing to pan it to.
+  // Both lanes can pan. The default square b-roll panel shows its 1:1 still whole (nothing to
+  // pan it to, and focusCropX(centre) emits nothing — args stay byte-identical), but a moved
+  // seam makes the panel narrower than its cover-scaled source, so the pan becomes real.
+  const host = coverCrop("H", hostW, focusCropX(opts.hostFocusX ?? null));
+  const broll = coverCrop("B", brollW, focusCropX(opts.layout?.brollFocusX ?? null));
+  const stackOrder = hostOnLeft ? "[H][B]" : "[B][H]";
   const filter =
-    `[0:v]${coverCrop("L", hostW, focusCropX(opts.hostFocusX ?? null))};` +
-    `[1:v]${coverCrop("R", rightW)};` +
-    `[L][R]hstack=inputs=2,` +
-    `drawbox=x=${hostW - 2}:y=0:w=4:h=${height}:color=black:t=fill,` +
+    `[0:v]${host};` +
+    `[1:v]${broll};` +
+    `${stackOrder}hstack=inputs=2,` +
+    `drawbox=x=${leftW - 2}:y=0:w=4:h=${height}:color=black:t=fill,` +
     `setsar=1,fps=${fps}[v]`;
   return [
     "-y",
@@ -1167,16 +1233,65 @@ export function buildHostPanelArgs(opts: {
   width: number;
   height: number;
   fps?: number;
+  /** The layout the composite was RENDERED with — not the layout being edited toward. */
+  layout?: SplitLayout | null;
 }): string[] {
   const { inputPath, outputPath, width, height } = opts;
   const fps = opts.fps ?? FPS;
-  const { hostW } = splitPanelWidths(width, height);
+  const { hostW, hostX } = resolveSplitLayout(width, height, opts.layout);
   return [
     "-y",
     "-i",
     inputPath,
     "-filter_complex",
-    `[0:v]crop=${hostW}:${height}:0:0,setsar=1,fps=${fps}[v]`,
+    `[0:v]crop=${hostW}:${height}:${hostX}:0,setsar=1,fps=${fps}[v]`,
+    "-map",
+    "[v]",
+    "-an",
+    "-c:v",
+    "libx264",
+    // ponytail: cap encoder threads so N concurrent scenes don't oversubscribe the host.
+    "-threads",
+    "2",
+    "-preset",
+    PRESET_INTERMEDIATE,
+    "-crf",
+    CRF_INTERMEDIATE,
+    "-pix_fmt",
+    "yuv420p",
+    "-r",
+    String(fps),
+    "-movflags",
+    "+faststart",
+    outputPath,
+  ];
+}
+
+/**
+ * `buildHostPanelArgs`' mirror for the OTHER half: crop the b-roll panel back out of a
+ * finished split-screen clip. Used when a layout edit lands on a scene rendered before
+ * `splitRightUrl` existed — the panel is recovered once from the composite, stored, and every
+ * later recomposite reuses it. Same geometry source as the compositor, so the crop always
+ * lands exactly on the panel. Pure — no IO.
+ */
+export function buildBrollPanelArgs(opts: {
+  inputPath: string;
+  outputPath: string;
+  width: number;
+  height: number;
+  fps?: number;
+  /** The layout the composite was RENDERED with — not the layout being edited toward. */
+  layout?: SplitLayout | null;
+}): string[] {
+  const { inputPath, outputPath, width, height } = opts;
+  const fps = opts.fps ?? FPS;
+  const { brollW, brollX } = resolveSplitLayout(width, height, opts.layout);
+  return [
+    "-y",
+    "-i",
+    inputPath,
+    "-filter_complex",
+    `[0:v]crop=${brollW}:${height}:${brollX}:0,setsar=1,fps=${fps}[v]`,
     "-map",
     "[v]",
     "-an",
@@ -1494,18 +1609,29 @@ export async function concatAudio(
  *
  * Before compositing it grabs one frame of the host clip and locates the face, so the host
  * panel is cropped around the face instead of around the frame's midpoint. See `faceAlign.ts`
- * for why that is needed and `buildSplitScreenArgs` for what the position does.
+ * for why that is needed and `buildSplitScreenArgs` for what the position does. A MANUAL
+ * `layout.hostFocusX` overrides all of that: the operator has placed the host themselves, so
+ * the detection (three Haiku calls) is skipped entirely and the recomposite is deterministic.
  */
 export async function compositeSplitScreenClip(
   hostUrl: string,
   rightUrl: string,
-  opts: { width: number; height: number; fps?: number }
+  opts: {
+    width: number;
+    height: number;
+    fps?: number;
+    layout?: SplitLayout | null;
+  }
 ): Promise<Buffer> {
   return withTempDir("split", async workDir => {
     const hostPath = await downloadToTemp(hostUrl, workDir, "host.mp4");
     const rightPath = await downloadToTemp(rightUrl, workDir, "right.mp4");
     const durationSec = await getMediaDuration(hostPath);
-    const hostFocusX = await measureHostFocusX(hostPath, durationSec, workDir);
+    const manualFocus = opts.layout?.hostFocusX;
+    const hostFocusX =
+      manualFocus != null && Number.isFinite(manualFocus)
+        ? manualFocus
+        : await measureHostFocusX(hostPath, durationSec, workDir);
     const outputPath = path.join(workDir, "split.mp4");
     await runFfmpegWithRetry(
       buildSplitScreenArgs({
@@ -1517,6 +1643,7 @@ export async function compositeSplitScreenClip(
         durationSec,
         fps: opts.fps,
         hostFocusX,
+        layout: opts.layout,
       }),
       "split"
     );
@@ -1617,7 +1744,13 @@ async function measureHostFocusX(
  */
 export async function extractHostPanel(
   splitUrl: string,
-  opts: { width: number; height: number; fps?: number }
+  opts: {
+    width: number;
+    height: number;
+    fps?: number;
+    /** The layout the composite was RENDERED with, so the crop lands on the panel. */
+    layout?: SplitLayout | null;
+  }
 ): Promise<Buffer> {
   return withTempDir("hostpanel", async workDir => {
     const inputPath = await downloadToTemp(splitUrl, workDir, "split.mp4");
@@ -1626,11 +1759,45 @@ export async function extractHostPanel(
       buildHostPanelArgs({
         inputPath,
         outputPath,
+        layout: opts.layout,
         width: opts.width,
         height: opts.height,
         fps: opts.fps,
       }),
       "hostpanel"
+    );
+    return readFileSync(outputPath);
+  });
+}
+
+/**
+ * `extractHostPanel`'s mirror: recover the b-roll panel from an already-composited
+ * split-screen clip. Back-fills `scene.splitRightUrl` on scenes rendered before that field
+ * existed so a layout edit can recomposite them without regenerating the panel.
+ */
+export async function extractBrollPanel(
+  splitUrl: string,
+  opts: {
+    width: number;
+    height: number;
+    fps?: number;
+    /** The layout the composite was RENDERED with, so the crop lands on the panel. */
+    layout?: SplitLayout | null;
+  }
+): Promise<Buffer> {
+  return withTempDir("brollpanel", async workDir => {
+    const inputPath = await downloadToTemp(splitUrl, workDir, "split.mp4");
+    const outputPath = path.join(workDir, "broll.mp4");
+    await runFfmpegWithRetry(
+      buildBrollPanelArgs({
+        inputPath,
+        outputPath,
+        layout: opts.layout,
+        width: opts.width,
+        height: opts.height,
+        fps: opts.fps,
+      }),
+      "brollpanel"
     );
     return readFileSync(outputPath);
   });

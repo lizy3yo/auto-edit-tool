@@ -105,6 +105,7 @@ import {
   concatAudio,
   compositeSplitScreenClip,
   extractHostPanel,
+  extractBrollPanel,
   renderKenBurnsClip,
   dimensionsFor,
   probeBufferDurationSec,
@@ -128,6 +129,7 @@ import type {
   LongformCtaBook,
   ProviderType,
   GenerationResult,
+  SplitLayout,
 } from "../shared/types";
 import {
   type LongformPacing,
@@ -6757,7 +6759,10 @@ async function generateSceneLipsyncClips(
       const dims = dimensionsFor(TALKING_HEAD_ASPECT_RATIO);
       const composited: string[] = [];
       for (let i = 0; i < urls.length; i++) {
-        const buf = await compositeSplitScreenClip(urls[i], rightUrl, dims);
+        const buf = await compositeSplitScreenClip(urls[i], rightUrl, {
+          ...dims,
+          layout: scene.splitLayout,
+        });
         const key = `longform/${jobId}/split-${scene.index}-${i}-${nanoid(6)}.mp4`;
         const { url } = await storagePut(key, buf, "video/mp4");
         composited.push(url);
@@ -9526,7 +9531,10 @@ async function regenerateSplitRight(
       );
     const recovered: string[] = [];
     for (let i = 0; i < existing.length; i++) {
-      const buf = await extractHostPanel(existing[i], dims);
+      const buf = await extractHostPanel(existing[i], {
+        ...dims,
+        layout: scene.splitLayout,
+      });
       const key = `longform/${jobId}/host-${scene.index}-${i}-${nanoid(6)}.mp4`;
       const { url } = await storagePut(key, buf, "video/mp4");
       recovered.push(url);
@@ -9556,11 +9564,10 @@ async function regenerateSplitRight(
   scene.splitRightUrl = rightUrl; // backfills pre-field scenes too — see StoryboardScene
   const composited: string[] = [];
   for (let i = 0; i < scene.hostClipUrls.length; i++) {
-    const buf = await compositeSplitScreenClip(
-      scene.hostClipUrls[i],
-      rightUrl,
-      dims
-    );
+    const buf = await compositeSplitScreenClip(scene.hostClipUrls[i], rightUrl, {
+      ...dims,
+      layout: scene.splitLayout,
+    });
     const key = `longform/${jobId}/split-${scene.index}-${i}-${nanoid(6)}.mp4`;
     const { url } = await storagePut(key, buf, "video/mp4");
     composited.push(url);
@@ -10211,7 +10218,11 @@ async function ensureBareHostClips(
     const dims = dimensionsFor(TALKING_HEAD_ASPECT_RATIO);
     const recovered: string[] = [];
     for (let i = 0; i < existing.length; i++) {
-      const buf = await extractHostPanel(existing[i], dims);
+      // The layout the composite was rendered with — this runs before edits mutate the scene.
+      const buf = await extractHostPanel(existing[i], {
+        ...dims,
+        layout: scene.splitLayout,
+      });
       const key = `longform/${jobId}/host-${scene.index}-${i}-${nanoid(6)}.mp4`;
       const { url } = await storagePut(key, buf, "video/mp4");
       recovered.push(url);
@@ -10226,7 +10237,30 @@ async function ensureBareHostClips(
 export type SceneSplitEdit =
   | { mode: "off" }
   | { mode: "prompt"; prompt?: string; verbatim?: boolean }
-  | { mode: "scene"; sourceIndex: number };
+  | { mode: "scene"; sourceIndex: number }
+  | { mode: "layout"; layout: SplitLayout };
+
+/**
+ * Clamp an operator-supplied layout into the geometry the compositor accepts, dropping
+ * defaults so a scene that was dragged back to stock stores nothing. Returns undefined when
+ * every field is a default — `scene.splitLayout` then stays absent and the legacy path
+ * (square panel, auto face detection) is untouched.
+ */
+export function sanitizeSplitLayout(
+  layout: SplitLayout
+): SplitLayout | undefined {
+  const clamp01 = (v: number | undefined) =>
+    v != null && Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : undefined;
+  const out: SplitLayout = {};
+  if (layout.hostSide === "right") out.hostSide = "right";
+  const seam = clamp01(layout.seamX);
+  if (seam != null) out.seamX = Math.min(0.8, Math.max(0.2, seam));
+  const host = clamp01(layout.hostFocusX);
+  if (host != null) out.hostFocusX = host;
+  const broll = clamp01(layout.brollFocusX);
+  if (broll != null) out.brollFocusX = broll;
+  return Object.keys(out).length ? out : undefined;
+}
 
 /**
  * The SPLIT EDITOR's server half: edit ONE host scene's split state on a rendered job, treating
@@ -10242,6 +10276,10 @@ export type SceneSplitEdit =
  *              standalone panel if it has one, else its own clip (Ken Burns still or moving
  *              b-roll — the composite loops/trims to the host's length either way). Pure
  *              ffmpeg, no generation — this is the "show what I want beside me" move.
+ * - `layout` — reposition the composite: host side, seam position, per-panel pan (see
+ *              `SplitLayout`). Both halves are reused as-is, so this is pure ffmpeg — and a
+ *              manual `hostFocusX` also skips the face-detection Haiku calls the automatic
+ *              crop needs. The layout persists on the scene, so later panel swaps keep it.
  *
  * Settles render-only like every scene edit: preview the new composite, then Assemble.
  */
@@ -10290,7 +10328,46 @@ export async function setSceneSplit(
           scene.splitVisualSeed = undefined;
           scene.splitMotion = undefined;
           scene.splitRightUrl = undefined;
+          scene.splitLayout = undefined; // geometry of a composite that no longer exists
           scene.clipUrls = [...scene.hostClipUrls!];
+          syncSceneClipFields(scene);
+          scene.sceneStatus = "completed";
+        } else if (edit.mode === "layout") {
+          if (!isSplitScene(scene))
+            throw new Error(
+              `Scene ${sceneIndex} is not a split screen — make it one first`
+            );
+          const dims = dimensionsFor(TALKING_HEAD_ASPECT_RATIO);
+          // Recover the panel from the current composite BEFORE the layout changes —
+          // the crop has to land where the OLD geometry put it (host recovery already
+          // ran the same way in ensureBareHostClips above).
+          if (!scene.splitRightUrl) {
+            const composite = scene.clipUrls?.[0] ?? scene.clipUrl;
+            if (!composite)
+              throw new Error(
+                `Scene ${sceneIndex} has no rendered composite to reposition — render it first`
+              );
+            const buf = await extractBrollPanel(composite, {
+              ...dims,
+              layout: scene.splitLayout,
+            });
+            const key = `longform/${jobId}/panel-${scene.index}-${nanoid(6)}.mp4`;
+            const { url } = await storagePut(key, buf, "video/mp4");
+            scene.splitRightUrl = url;
+          }
+          scene.splitLayout = sanitizeSplitLayout(edit.layout);
+          const composited: string[] = [];
+          for (let i = 0; i < scene.hostClipUrls!.length; i++) {
+            const buf = await compositeSplitScreenClip(
+              scene.hostClipUrls![i],
+              scene.splitRightUrl,
+              { ...dims, layout: scene.splitLayout }
+            );
+            const clipKey = `longform/${jobId}/split-${scene.index}-${i}-${nanoid(6)}.mp4`;
+            const { url } = await storagePut(clipKey, buf, "video/mp4");
+            composited.push(url);
+          }
+          scene.clipUrls = composited;
           syncSceneClipFields(scene);
           scene.sceneStatus = "completed";
         } else if (edit.mode === "prompt") {

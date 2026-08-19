@@ -14,7 +14,9 @@ import {
   buildAudioSegmentArgs,
   buildSplitScreenArgs,
   buildHostPanelArgs,
+  buildBrollPanelArgs,
   splitPanelWidths,
+  resolveSplitLayout,
   buildKenBurnsArgs,
   parseSilenceLog,
   isTransientFfmpegError,
@@ -242,6 +244,121 @@ describe("buildHostPanelArgs (crop the host back out of a composite)", () => {
 
   it("falls back to 50/50 on a portrait canvas, like the composite does", () => {
     expect(splitPanelWidths(1080, 1920)).toEqual({ rightW: 540, hostW: 540 });
+  });
+});
+
+describe("resolveSplitLayout (manual split geometry)", () => {
+  it("reproduces the legacy layout with no layout at all", () => {
+    expect(resolveSplitLayout(1920, 1080)).toEqual({
+      hostW: 840,
+      brollW: 1080,
+      hostX: 0,
+      brollX: 840,
+      hostOnLeft: true,
+      leftW: 840,
+    });
+  });
+
+  it("places the seam at the given fraction, rounded to even pixels", () => {
+    const g = resolveSplitLayout(1920, 1080, { seamX: 0.5 });
+    expect(g).toMatchObject({ hostW: 960, brollW: 960, leftW: 960 });
+    // 0.333 * 1920 = 639.36 → 639 → even 638
+    expect(resolveSplitLayout(1920, 1080, { seamX: 0.333 }).hostW).toBe(638);
+  });
+
+  it("clamps the seam so neither panel collapses", () => {
+    expect(resolveSplitLayout(1920, 1080, { seamX: 0.01 }).hostW).toBe(384);
+    expect(resolveSplitLayout(1920, 1080, { seamX: 0.99 }).hostW).toBe(1536);
+  });
+
+  it("mirrors the panels on hostSide right — the seam is still measured from the left", () => {
+    const g = resolveSplitLayout(1920, 1080, { hostSide: "right", seamX: 0.5625 });
+    expect(g).toEqual({
+      hostW: 840,
+      brollW: 1080,
+      hostX: 1080,
+      brollX: 0,
+      hostOnLeft: false,
+      leftW: 1080,
+    });
+  });
+});
+
+describe("buildSplitScreenArgs with a manual layout", () => {
+  const base = {
+    hostPath: "/tmp/host.mp4",
+    rightPath: "/tmp/right.mp4",
+    outputPath: "/tmp/split.mp4",
+    width: 1920,
+    height: 1080,
+    durationSec: 5,
+  };
+
+  it("stacks b-roll first and moves the divider when the host is on the right", () => {
+    const args = buildSplitScreenArgs({
+      ...base,
+      layout: { hostSide: "right" },
+    });
+    const filter = args[args.indexOf("-filter_complex") + 1];
+    // Default widths kept (host 840 / broll 1080), but the broll panel now leads the stack
+    // and the divider sits at ITS right edge.
+    expect(filter).toContain("[B][H]hstack");
+    expect(filter).toContain("drawbox=x=1078");
+  });
+
+  it("pans the b-roll panel when it is narrower than its source and a focus is given", () => {
+    const args = buildSplitScreenArgs({
+      ...base,
+      layout: { seamX: 0.7, brollFocusX: 0.8 },
+    });
+    const filter = args[args.indexOf("-filter_complex") + 1];
+    expect(filter).toContain("crop=1344:1080"); // host: 0.7*1920 even
+    expect(filter).toContain(
+      "crop=576:1080:max(0\\,min(in_w-out_w\\,in_w*0.8000-out_w/2)):0"
+    );
+  });
+
+  it("keeps the legacy args byte-compatible when the layout is empty", () => {
+    const legacy = buildSplitScreenArgs(base);
+    const withEmpty = buildSplitScreenArgs({ ...base, layout: {} });
+    expect(withEmpty).toEqual(legacy);
+  });
+});
+
+describe("buildBrollPanelArgs (crop the b-roll back out of a composite)", () => {
+  it("crops exactly the panel buildSplitScreenArgs gave the b-roll", () => {
+    const args = buildBrollPanelArgs({
+      inputPath: "/tmp/split.mp4",
+      outputPath: "/tmp/broll.mp4",
+      width: 1920,
+      height: 1080,
+    });
+    const filter = args[args.indexOf("-filter_complex") + 1];
+    expect(filter).toContain("crop=1080:1080:840:0");
+  });
+
+  it("follows the rendered layout, mirroring buildHostPanelArgs", () => {
+    const layout = { hostSide: "right" as const, seamX: 0.5 };
+    const host = buildHostPanelArgs({
+      inputPath: "/tmp/split.mp4",
+      outputPath: "/tmp/host.mp4",
+      width: 1920,
+      height: 1080,
+      layout,
+    });
+    const broll = buildBrollPanelArgs({
+      inputPath: "/tmp/split.mp4",
+      outputPath: "/tmp/broll.mp4",
+      width: 1920,
+      height: 1080,
+      layout,
+    });
+    expect(host[host.indexOf("-filter_complex") + 1]).toContain(
+      "crop=960:1080:960:0"
+    );
+    expect(broll[broll.indexOf("-filter_complex") + 1]).toContain(
+      "crop=960:1080:0:0"
+    );
   });
 });
 
