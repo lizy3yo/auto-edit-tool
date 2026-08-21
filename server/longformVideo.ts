@@ -4828,6 +4828,9 @@ function markQrFromCtaTails(
     for (let k = start; k <= end; k++) {
       const s = scenes[k];
       s.qrHero = true;
+      // Same rule as markCtaQrBlock's toQr: a beat already showing the host or the cover keeps
+      // its visual (small corner QR at assembly) instead of being blanked for the big card.
+      if (s.hostPresent || s.coverHero) continue;
       s.stillImage = true;
       s.hostPresent = false;
       s.splitVisual = undefined;
@@ -4889,6 +4892,10 @@ export function markCtaQrBlock(
   const toQr = (s: StoryboardScene) => {
     s.qrHero = true;
     s.cta = true; // the centered overlay only draws on cta scenes (assembly gate)
+    // A beat that's already host or cover keeps its visual — only genuine filler gets blanked
+    // to carry the big centered card. `qrPlacement` (assembly) reads hostPresent/coverHero to
+    // fall back to the small corner card on these instead of drawing over a face or the cover.
+    if (s.hostPresent || s.coverHero) return;
     s.stillImage = true;
     s.hostPresent = false;
     s.splitVisual = undefined;
@@ -9044,10 +9051,13 @@ async function assembleAndFinalize(
     // small pre-cover scan window (qrCorner), and the cover-reveal beat (coverHero) — never on
     // ordinary cta/price scenes, so a spoken dollar amount can't surface it.
     qrOverlayUrl: qrOverlayUrlFor(s, params.qrImageUrl, params.ctaBooks),
-    // qrHero → large centered QR; everything else that gets an overlay (qrCorner, or the
-    // cover-reveal beat itself) → small bottom-right corner QR. coverHero and qrHero never
-    // coincide on the same scene (the reveal picks a beat outside the qrHero run).
-    qrPlacement: (s.qrHero ? "center" : "corner") as "corner" | "center",
+    // qrHero → large centered QR, UNLESS the beat is still showing the host or the cover (both
+    // preserved by toQr/markQrFromCtaTails instead of being blanked) — those always stay small
+    // corner so the big card never draws over a face or the cover art. Everything else that
+    // gets an overlay (qrCorner, or the cover-reveal beat itself) is already corner-sized.
+    qrPlacement: (s.qrHero && !s.hostPresent && !s.coverHero
+      ? "center"
+      : "corner") as "corner" | "center",
     // The block's release beat holds a silent frozen QR_TAIL_HOLD_SEC tail so the QR lingers
     // ~3s past "I'll wait right here" (extended in assembly via tpad/apad).
     tailHoldSec: s.qrTail ? QR_TAIL_HOLD_SEC : undefined,
@@ -10267,18 +10277,27 @@ export async function retrofitBookCover(
 
           if (title && cover) {
             const namesBook = titleMatcher(title);
-            const eligible = (s: StoryboardScene) =>
-              !s.qrHero && !s.assetImageUrl;
+            // Asset beats are never repurposed — the operator's own upload wins. A qrHero beat
+            // is fine to pick now: `qrPlacement` respects `coverHero` and drops to the small
+            // corner card instead of the big one, so there's no more "big QR over the real
+            // cover" risk from a short CTA run getting entirely swept into the big-QR window.
+            const eligible = (s: StoryboardScene) => !s.assetImageUrl;
             const named = run.find(
               s => eligible(s) && namesBook(s.scriptText ?? s.narration ?? "")
             );
-            const target = named ?? run.find(eligible) ?? run[0];
-            target.coverHero = true;
-            target.stillImage = true;
-            target.hostPresent = false;
-            target.splitVisual = undefined;
-            targets.push(target);
-            coverByIndex.set(target.index, cover);
+            // Prefer a beat that isn't already the big-QR card when there's a choice, purely
+            // for a simpler-looking result — falls back to one that is when the whole run got
+            // swept and nothing else is left.
+            const clean = run.find(s => eligible(s) && !s.qrHero);
+            const target = named ?? clean ?? run.find(eligible);
+            if (target) {
+              target.coverHero = true;
+              target.stillImage = true;
+              target.hostPresent = false;
+              target.splitVisual = undefined;
+              targets.push(target);
+              coverByIndex.set(target.index, cover);
+            }
           }
         }
         i = j;

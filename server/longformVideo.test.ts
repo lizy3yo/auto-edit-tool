@@ -3138,14 +3138,37 @@ describe("markCtaQrBlock", () => {
     [2, 3, 4, 8, 9, 10].forEach(i => {
       expect(out[i].qrHero).toBe(true);
       expect(out[i].cta).toBe(true);
-      expect(out[i].stillImage).toBe(true);
-      expect(out[i].hostPresent).toBe(false);
+      // twoBlockScenes() defaults every beat to hostPresent:true — a host beat inside the
+      // window keeps the host on screen (small corner QR at assembly) instead of being
+      // blanked to a filler still. See the dedicated tests below for both cases.
+      expect(out[i].hostPresent).toBe(true);
+      expect(out[i].stillImage).toBeFalsy();
     });
     // Only the release beat of each block carries the +3s tail flag.
     expect(out.filter(s => s.qrTail)).toHaveLength(2);
     expect(out[4].qrTail).toBe(true);
     expect(out[10].qrTail).toBe(true);
     expect(out[2].qrTail).toBeFalsy(); // interior QR beat, no tail
+  });
+
+  it("keeps the host on screen instead of blanking it, when a host beat falls inside the QR window", () => {
+    const out = markCtaQrBlock(twoBlockScenes(), withBoth); // every beat defaults hostPresent:true
+    [2, 3, 4, 8, 9, 10].forEach(i => {
+      expect(out[i].qrHero).toBe(true);
+      expect(out[i].hostPresent).toBe(true);
+      expect(out[i].stillImage).toBeFalsy();
+      expect(out[i].splitVisual).toBeUndefined();
+    });
+  });
+
+  it("blanks a beat with no host or cover to carry the big-QR card, same as before", () => {
+    const scenes = twoBlockScenes().map(s => ({ ...s, hostPresent: false }));
+    const out = markCtaQrBlock(scenes, withBoth);
+    [2, 3, 4, 8, 9, 10].forEach(i => {
+      expect(out[i].qrHero).toBe(true);
+      expect(out[i].stillImage).toBe(true);
+      expect(out[i].hostPresent).toBe(false);
+    });
   });
 
   it("falls back to the beat right before each trigger when the pitch never names the book", () => {
