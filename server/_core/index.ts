@@ -82,6 +82,11 @@ async function startServer() {
     createExpressMiddleware({
       router: appRouter,
       createContext,
+      // Client sets `methodOverride: "POST"` (main.tsx) so a long-input query (a full script)
+      // isn't URL-length-limited on GET. tRPC requires the server to opt in to accepting POST
+      // for query procedures too — without this every query 405s ("Unsupported POST-request to
+      // query procedure"), which is exactly what broke `auth.me` and locked everyone out.
+      allowMethodOverride: true,
       // Without this a 500 leaves NO server-side trace, and the only thing the browser gets
       // is Drizzle's `Failed query: select ...` — which reads identically whether a column is
       // missing, the table is missing, or the database is unreachable. The distinguishing
