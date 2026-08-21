@@ -19,6 +19,7 @@ import {
   DeleteVideoDialog,
   type DeletableJob,
 } from "@/components/DeleteVideoDialog";
+import { GenerationCostDialog } from "@/components/GenerationCostDialog";
 import { downloadFile } from "@/lib/download";
 import { PageHeader } from "@/components/PageHeader";
 import {
@@ -33,6 +34,7 @@ import {
   Trash2,
   CheckCircle2,
   XCircle,
+  Receipt,
 } from "lucide-react";
 
 /**
@@ -48,6 +50,7 @@ export default function LibraryPage() {
   const [search, setSearch] = useState("");
   const [playing, setPlaying] = useState<PlayableJob | null>(null);
   const [deleting, setDeleting] = useState<DeletableJob | null>(null);
+  const [costJobId, setCostJobId] = useState<number | null>(null);
   const [channel, setChannel] = useState("all");
 
   const { data: jobs, isLoading } = trpc.longformVideo.library.useQuery(
@@ -143,10 +146,9 @@ export default function LibraryPage() {
             : "No videos yet. Generate one and it shows up here."}
         </p>
       ) : (
-        // `min(240px,100%)` rather than a bare 240px: once the container is narrower than
-        // the track minimum, a fixed 240px keeps its width and pushes the card outside the
-        // grid — one card wide enough to scroll the whole page sideways.
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(min(240px,100%),1fr))] gap-4">
+        // Explicit breakpoints rather than auto-fill: caps out at 3 per row on large
+        // screens so cards stay a proper size instead of auto-packing many narrow ones.
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map(job => (
             <article
               key={job.id}
@@ -246,6 +248,15 @@ export default function LibraryPage() {
                   <Button
                     size="sm"
                     variant="outline"
+                    className="shrink-0 gap-1.5 px-2.5"
+                    onClick={() => setCostJobId(job.id)}
+                    title="What this video cost to generate"
+                  >
+                    <Receipt className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
                     className="shrink-0 gap-1.5 px-2.5 text-muted-foreground hover:border-destructive/40 hover:text-destructive"
                     onClick={() => setDeleting(job)}
                     title="Delete this video from your library"
@@ -269,6 +280,12 @@ export default function LibraryPage() {
         job={deleting}
         onOpenChange={o => !o && setDeleting(null)}
         onDeleted={jobId => setPlaying(p => (p?.id === jobId ? null : p))}
+      />
+
+      <GenerationCostDialog
+        jobId={costJobId}
+        open={costJobId != null}
+        onOpenChange={o => !o && setCostJobId(null)}
       />
     </div>
   );
