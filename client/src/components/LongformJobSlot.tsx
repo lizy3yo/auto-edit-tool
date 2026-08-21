@@ -482,6 +482,18 @@ export default function LongformJobSlot({
     onError: err => toast.error(err.message),
   });
 
+  const reassembleFinalMutation = trpc.longformVideo.reassembleFinal.useMutation(
+    {
+      onSuccess: () => {
+        toast.success(
+          "Re-stitching the final video from the existing clips — no scenes re-render."
+        );
+        if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
+      },
+      onError: err => toast.error(err.message),
+    }
+  );
+
   const retryFailedScenesMutation =
     trpc.longformVideo.retryFailedScenes.useMutation({
       onSuccess: () => {
@@ -1383,6 +1395,24 @@ export default function LongformJobSlot({
                       Add split screens
                     </Button>
                   )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (!jobId) return;
+                      armNotifications();
+                      reassembleFinalMutation.mutate({ jobId });
+                    }}
+                    disabled={reassembleFinalMutation.isPending}
+                    title="Re-stitch the final video from the clips already rendered — no scenes regenerate, free."
+                  >
+                    {reassembleFinalMutation.isPending ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                    )}
+                    Reassemble
+                  </Button>
                   <Button
                     variant="outline"
                     size="sm"

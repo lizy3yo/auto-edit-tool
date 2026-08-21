@@ -1741,6 +1741,32 @@ const longformVideoRouter = router({
     }),
 
   /**
+   * Force a re-stitch of an ALREADY-FINISHED film — the one case `assembleFinal` can't reach,
+   * because its short-circuit deliberately skips re-encoding a job that already has a good
+   * final and no incomplete scenes. This is for when the operator explicitly wants a fresh
+   * assembly anyway: e.g. an assembly-time-only fix (QR placement, cover resolution) that a
+   * plain re-stitch of the SAME already-rendered clips picks up, no scene regeneration needed.
+   */
+  reassembleFinal: approvedProcedure
+    .input(z.object({ jobId: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      const job = await getLongformVideoJobById(input.jobId);
+      if (!job || (job.userId !== ctx.user.id && ctx.user.role !== "admin")) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
+      }
+      if (job.status === "processing") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Job is still processing — wait for it to settle first",
+        });
+      }
+      retryJobAssembly(input.jobId, true).catch(err => {
+        console.error(`[Longform ${input.jobId}] reassembleFinal error:`, err);
+      });
+      return { ok: true };
+    }),
+
+  /**
    * Retry every clip-less scene (host + b-roll). A job that never reached its first assembly
    * is stitched automatically once the holes are filled; a job that already shipped a cut is
    * render-only, leaving the re-stitch to the manual Assemble button.

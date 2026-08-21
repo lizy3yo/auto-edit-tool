@@ -9247,8 +9247,18 @@ async function resumePendingRendersLocked(jobId: number): Promise<boolean> {
  * Resets the job to processing/assembly so the UI and watchdog see active state.
  * First resumes any scenes still rendering on the provider so a timed-out job
  * completes on Retry instead of failing again (and without re-submitting renders).
+ *
+ * `force` bypasses the "already finished, nothing to do" short-circuit below — for the operator
+ * explicitly asking to re-stitch a completed film (e.g. an assembly-time-only code change, like a
+ * QR-placement fix, that a fresh assembly picks up from the SAME clips with no regeneration).
+ * Automatic callers (the watchdog, error-recovery retries) must never pass this: re-encoding an
+ * already-good cut gains them nothing and risks re-breaking it, which is exactly what the
+ * short-circuit exists to avoid for anything the operator didn't explicitly ask for.
  */
-export async function retryJobAssembly(jobId: number): Promise<void> {
+export async function retryJobAssembly(
+  jobId: number,
+  force = false
+): Promise<void> {
   if (jobLocks.has(jobId)) return; // an active pass will finish + assemble this job
   await withJobLock(jobId, async () => {
     const job = await getLongformVideoJobById(jobId);
@@ -9258,8 +9268,13 @@ export async function retryJobAssembly(jobId: number): Promise<void> {
     // Already-finished job: a valid final exists and every scene has a clip. Re-encoding it
     // gains nothing and, on a big film, risks re-breaking a good cut when the host runs out of
     // ffmpeg headroom (EAGAIN). Just settle the row to done — don't touch the existing final.
+    // Skipped entirely when `force` is set (see the doc comment above).
     const scenes0 = (job.storyboard as StoryboardScene[]) || [];
-    if (job.finalVideoUrl && describeIncompleteScenes(scenes0) === null) {
+    if (
+      !force &&
+      job.finalVideoUrl &&
+      describeIncompleteScenes(scenes0) === null
+    ) {
       await updateLongformVideoJob(jobId, {
         status: "completed",
         stage: "done",
