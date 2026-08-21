@@ -67,6 +67,7 @@ import {
   ChevronRight,
   Receipt,
   Columns2,
+  BookOpen,
 } from "lucide-react";
 
 export type SlotStatus = "idle" | "processing" | "completed" | "failed";
@@ -504,6 +505,17 @@ export default function LongformJobSlot({
       onError: err => toast.error(err.message),
     });
 
+  const retrofitBookCoverMutation =
+    trpc.longformVideo.retrofitBookCover.useMutation({
+      onSuccess: () => {
+        toast.success(
+          "Adding the book cover reveal — free, no clips regenerate except the cover beat itself."
+        );
+        if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
+      },
+      onError: err => toast.error(err.message),
+    });
+
   const cancelMutation = trpc.longformVideo.cancelJob.useMutation({
     onSuccess: () => {
       setDownloadTitle("");
@@ -641,6 +653,17 @@ export default function LongformJobSlot({
     );
     return splitSec / hostSec < 0.15;
   }, [scenes]);
+
+  // A finished film can have a book configured but no cover-reveal beat anywhere in the
+  // storyboard — the storyboard-time marking pass couldn't place one. Offer the retrofit only
+  // when there's actually a cover to place (per-video book or channel fallback) and the film
+  // has CTA beats at all (no CTA, nothing to attach a cover to).
+  const needsBookCoverRetrofit = useMemo(() => {
+    const hasBook = !!job?.bookCoverImageUrl || !!job?.ctaBooks?.length;
+    if (!hasBook) return false;
+    if (!scenes.some(s => s.cta)) return false;
+    return !scenes.some(s => s.coverHero);
+  }, [scenes, job?.bookCoverImageUrl, job?.ctaBooks]);
 
   // Report status up to the parent so the tab label can show a badge.
   useEffect(() => {
@@ -1296,6 +1319,26 @@ export default function LongformJobSlot({
                         <Columns2 className="mr-2 h-4 w-4" />
                       )}
                       Add split screens
+                    </Button>
+                  )}
+                  {needsBookCoverRetrofit && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        if (!jobId) return;
+                        armNotifications();
+                        retrofitBookCoverMutation.mutate({ jobId });
+                      }}
+                      disabled={retrofitBookCoverMutation.isPending}
+                      title="This film has a book but no cover reveal. Add it — free, only the cover beat renders."
+                    >
+                      {retrofitBookCoverMutation.isPending ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <BookOpen className="mr-2 h-4 w-4" />
+                      )}
+                      Add book cover
                     </Button>
                   )}
                   <Button

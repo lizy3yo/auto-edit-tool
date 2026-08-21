@@ -10156,6 +10156,152 @@ export async function retrofitSplitScreens(jobId: number): Promise<void> {
 }
 
 /**
+ * Retrofit a book-cover reveal onto an ALREADY-RENDERED film whose storyboard has none — the
+ * companion to `retrofitSplitScreens` for the other class of "shipped without X" job. A CTA
+ * block ends up cover-less when the storyboard-time marking pass couldn't resolve a title+cover
+ * for it; this repairs it after the fact instead of requiring a full re-render.
+ *
+ * For each contiguous CTA run with no `coverHero` scene yet and a resolvable cover image: picks
+ * the scene that speaks the book's OWN title (`bookForScene`, not the channel-wide fallback),
+ * falling back to the run's first scene — the same "an uploaded book always appears" guarantee
+ * `markCoverReveal` gives a fresh render — flips it into a cover-reveal beat, and re-renders ONLY
+ * that scene's clip. A cover beat is the literal image (`generateSceneStillClip`'s
+ * `coverImageUrl` path) — no text-to-image call and no provider/adapter needed at all, so this
+ * costs nothing. Existing narration/audio is left exactly as recorded — only the visual changes.
+ * Render-only like every other retrofit — the operator previews it, then Assemble rebuilds the
+ * final cut.
+ */
+export async function retrofitBookCover(jobId: number): Promise<void> {
+  const sentinel = `${jobId}:cover-retrofit`;
+  if (activeRegenerations.has(sentinel)) {
+    console.warn(
+      `[Longform ${jobId}] Book-cover retrofit already in progress — ignoring duplicate`
+    );
+    return;
+  }
+  activeRegenerations.add(sentinel);
+  try {
+    await withJobLock(jobId, async () => {
+      const job = await getLongformVideoJobById(jobId);
+      if (!job) throw new Error("Job not found");
+      const params = job.inputParams as LongformInputParams;
+      const scenes = (job.storyboard as StoryboardScene[]) || [];
+      if (!scenes.length) throw new Error("Job has no storyboard to retrofit");
+      if (!params.bookCoverImageUrl && !params.ctaBooks?.length) {
+        throw new Error("This video has no book cover configured.");
+      }
+
+      // Walk contiguous cta:true runs — the same grouping the storyboard-time marking pass uses.
+      const targets: StoryboardScene[] = [];
+      let i = 0;
+      while (i < scenes.length) {
+        if (scenes[i].cta !== true) {
+          i++;
+          continue;
+        }
+        let j = i;
+        while (j < scenes.length && scenes[j].cta === true) j++;
+        const run = scenes.slice(i, j);
+        if (!run.some(s => s.coverHero)) {
+          const book = bookForScene(run[0], params.ctaBooks);
+          const title = book?.title ?? params.bookTitle;
+          const cover = book?.coverImageUrl ?? params.bookCoverImageUrl;
+          if (title && cover) {
+            const namesBook = titleMatcher(title);
+            const eligible = (s: StoryboardScene) =>
+              !s.qrHero && !s.assetImageUrl;
+            const named = run.find(
+              s => eligible(s) && namesBook(s.scriptText ?? s.narration ?? "")
+            );
+            const target = named ?? run.find(eligible) ?? run[0];
+            target.coverHero = true;
+            target.stillImage = true;
+            target.hostPresent = false;
+            target.splitVisual = undefined;
+            targets.push(target);
+          }
+        }
+        i = j;
+      }
+
+      if (!targets.length) {
+        console.log(
+          `[Longform ${jobId}] Book-cover retrofit: every CTA block already has a cover ` +
+            `(or none resolves a title+image) — nothing to do`
+        );
+        return;
+      }
+      console.log(
+        `[Longform ${jobId}] Book-cover retrofit: adding a cover reveal to ${targets.length} scene(s)`
+      );
+
+      for (const s of targets) {
+        s.sceneStatus = "processing";
+        s.error = undefined;
+      }
+      await updateLongformVideoJob(jobId, {
+        status: "processing",
+        stage: "clips",
+        errorMessage: null,
+        storyboard: scenes,
+      });
+
+      try {
+        for (const s of targets) {
+          try {
+            s.clipUrls = await generateSceneStillClip(
+              jobId,
+              s,
+              coverImageForScene(s, params),
+              undefined,
+              params.videoSubject
+            );
+            syncSceneClipFields(s);
+            s.sceneStatus = "completed";
+            s.regenerated = true;
+          } catch (e: any) {
+            s.sceneStatus = "failed";
+            s.error = describeError(e);
+          }
+          schedulePersist(jobId, { storyboard: scenes });
+        }
+        await flushPersist(jobId);
+
+        const incomplete = describeIncompleteScenes(scenes);
+        if (incomplete) {
+          await updateLongformVideoJob(jobId, {
+            status: "failed",
+            storyboard: scenes,
+            errorMessage: incomplete,
+            completedAt: new Date(),
+          });
+          return;
+        }
+        // Render-only: the operator previews the new cover, then the manual Assemble
+        // button rebuilds the final cut.
+        await settleRenderOnly(jobId, scenes);
+      } catch (err: any) {
+        for (const s of targets) {
+          if (s.sceneStatus === "processing") {
+            s.sceneStatus = "failed";
+            s.error = s.error ?? describeError(err);
+          }
+        }
+        await updateLongformVideoJob(jobId, {
+          status: "failed",
+          storyboard: scenes,
+          errorMessage: describeError(err) || "Book-cover retrofit failed",
+          completedAt: new Date(),
+        }).catch(onFailedStatusWriteError(jobId));
+        throw err;
+      }
+    });
+  } finally {
+    activeRegenerations.delete(sentinel);
+  }
+}
+
+/**
  * Ensure `scene.hostClipUrls` holds the BARE host renders this scene's left panel needs,
  * recovering them if the scene predates the field. The recovery depends on what the finished
  * clip IS — so this must run BEFORE any split flags are mutated for an edit:

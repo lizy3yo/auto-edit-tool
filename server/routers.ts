@@ -50,6 +50,7 @@ import {
   regenerateScene as regenerateLongformScene,
   regenerateScenes as regenerateLongformScenes,
   retrofitSplitScreens as retrofitLongformSplitScreens,
+  retrofitBookCover as retrofitLongformBookCover,
   setSceneSplit as setLongformSceneSplit,
   retryJobAssembly,
   retryFailedScenes as retryLongformFailedScenes,
@@ -1400,6 +1401,11 @@ const longformVideoRouter = router({
         ctaBooks:
           (job.inputParams as { ctaBooks?: LongformCtaBook[] } | null)
             ?.ctaBooks ?? null,
+        // Whether a book-cover reveal is even possible for this job — gates the "Add book
+        // cover" retrofit button (per-video books above already gate it via ctaBooks).
+        bookCoverImageUrl:
+          (job.inputParams as { bookCoverImageUrl?: string } | null)
+            ?.bookCoverImageUrl ?? null,
         visualStyleBible:
           (job.inputParams as { visualStyleBible?: string } | null)
             ?.visualStyleBible ?? null,
@@ -1588,6 +1594,33 @@ const longformVideoRouter = router({
       retrofitLongformSplitScreens(input.jobId).catch(err => {
         console.error(
           `[Longform ${input.jobId}] retrofitSplitScreens error:`,
+          err
+        );
+      });
+      return { ok: true };
+    }),
+
+  /**
+   * Add a book-cover reveal to an already-rendered film whose storyboard has none — the book
+   * cover counterpart to `retrofitSplitScreens`. Costs nothing (literal cover image, no
+   * generation). Render-only: preview the new cover, then Assemble.
+   */
+  retrofitBookCover: approvedProcedure
+    .input(z.object({ jobId: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      const job = await getLongformVideoJobById(input.jobId);
+      if (!job || (job.userId !== ctx.user.id && ctx.user.role !== "admin")) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
+      }
+      if (job.status === "processing") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Job is still processing — wait for it to settle first",
+        });
+      }
+      retrofitLongformBookCover(input.jobId).catch(err => {
+        console.error(
+          `[Longform ${input.jobId}] retrofitBookCover error:`,
           err
         );
       });
