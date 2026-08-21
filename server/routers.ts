@@ -1603,7 +1603,9 @@ const longformVideoRouter = router({
   /**
    * Add a book-cover reveal to an already-rendered film whose storyboard has none — the book
    * cover counterpart to `retrofitSplitScreens`. Costs nothing (literal cover image, no
-   * generation). Render-only: preview the new cover, then Assemble.
+   * generation). Falls back to the channel's live Books library when the job's own snapshot has
+   * none — a manual click here counts as "calling" an otherwise-uncalled channel book, unlike
+   * generation itself. Render-only: preview the new cover, then Assemble.
    */
   retrofitBookCover: approvedProcedure
     .input(z.object({ jobId: z.number() }))
@@ -1618,7 +1620,12 @@ const longformVideoRouter = router({
           message: "Job is still processing — wait for it to settle first",
         });
       }
-      retrofitLongformBookCover(input.jobId).catch(err => {
+      const channelKey = (job.inputParams as { channelKey?: string } | null)
+        ?.channelKey;
+      const channelBooks = channelKey
+        ? await getBooks(channelKey, true)
+        : [];
+      retrofitLongformBookCover(input.jobId, channelBooks).catch(err => {
         console.error(
           `[Longform ${input.jobId}] retrofitBookCover error:`,
           err

@@ -146,7 +146,11 @@ import {
   scaleRamp,
 } from "../shared/pacing";
 import { renderCaptionCardPng } from "./captionCard";
-import { buildTrackingUrl, renderVerifiedQrPng } from "./tracking";
+import {
+  buildTrackingUrl,
+  renderVerifiedQrPng,
+  stripTrackingParam,
+} from "./tracking";
 import { stripHostNames } from "../shared/constants";
 import type { VideoSubmitResult } from "./providers/base";
 
@@ -10161,17 +10165,35 @@ export async function retrofitSplitScreens(jobId: number): Promise<void> {
  * block ends up cover-less when the storyboard-time marking pass couldn't resolve a title+cover
  * for it; this repairs it after the fact instead of requiring a full re-render.
  *
- * For each contiguous CTA run with no `coverHero` scene yet and a resolvable cover image: picks
- * the scene that speaks the book's OWN title (`bookForScene`, not the channel-wide fallback),
- * falling back to the run's first scene — the same "an uploaded book always appears" guarantee
- * `markCoverReveal` gives a fresh render — flips it into a cover-reveal beat, and re-renders ONLY
- * that scene's clip. A cover beat is the literal image (`generateSceneStillClip`'s
- * `coverImageUrl` path) — no text-to-image call and no provider/adapter needed at all, so this
- * costs nothing. Existing narration/audio is left exactly as recorded — only the visual changes.
- * Render-only like every other retrofit — the operator previews it, then Assemble rebuilds the
- * final cut.
+ * Two sources, tried in order, per CTA run missing a cover:
+ *  1. Whatever the job already snapshotted (`bookForScene`/`params.bookCoverImageUrl`) — the
+ *     same resolution generation itself uses.
+ *  2. `channelBooks` — the channel's LIVE book library (Admin → Channels → Books), passed in by
+ *     the caller. Normal generation only attaches a channel book when the script CALLS it by
+ *     name (marker label or spoken title) — `previewBookAssignments`'s `requiresCall` guard, so
+ *     a shelf of channel books can't leak into an unrelated video. That guard doesn't apply here:
+ *     the operator clicking this button IS the call. Still prefers a run that speaks the book's
+ *     title; falls back to the channel's one-and-only book when there's no ambiguity (multiple
+ *     uncalled channel books stay unresolved rather than guessing which one was meant).
+ *
+ * Whichever source resolves: picks the scene that speaks the title, falling back to the run's
+ * first scene — the same "an uploaded book always appears" guarantee `markCoverReveal` gives a
+ * fresh render — flips it into a cover-reveal beat, and re-renders ONLY that scene's clip. A
+ * cover beat is the literal image (`generateSceneStillClip`'s `coverImageUrl` path) — no
+ * text-to-image call and no provider/adapter needed, so this costs nothing; a channel book's QR
+ * (`resolveCtaBookTracking`) is a local render too. Existing narration/audio is left exactly as
+ * recorded — only the visual changes. Render-only like every other retrofit — the operator
+ * previews it, then Assemble rebuilds the final cut.
  */
-export async function retrofitBookCover(jobId: number): Promise<void> {
+export async function retrofitBookCover(
+  jobId: number,
+  channelBooks: {
+    id: number;
+    title: string;
+    coverImageUrl: string | null;
+    shopUrl: string | null;
+  }[] = []
+): Promise<void> {
   const sentinel = `${jobId}:cover-retrofit`;
   if (activeRegenerations.has(sentinel)) {
     console.warn(
@@ -10187,12 +10209,21 @@ export async function retrofitBookCover(jobId: number): Promise<void> {
       const params = job.inputParams as LongformInputParams;
       const scenes = (job.storyboard as StoryboardScene[]) || [];
       if (!scenes.length) throw new Error("Job has no storyboard to retrofit");
-      if (!params.bookCoverImageUrl && !params.ctaBooks?.length) {
-        throw new Error("This video has no book cover configured.");
+      const liveBooks = channelBooks.filter(b => b.coverImageUrl);
+      if (
+        !params.bookCoverImageUrl &&
+        !params.ctaBooks?.length &&
+        !liveBooks.length
+      ) {
+        throw new Error(
+          "No book cover is configured for this video or channel."
+        );
       }
 
       // Walk contiguous cta:true runs — the same grouping the storyboard-time marking pass uses.
       const targets: StoryboardScene[] = [];
+      const coverByIndex = new Map<number, string>();
+      const newCtaBooks: LongformCtaBook[] = [];
       let i = 0;
       while (i < scenes.length) {
         if (scenes[i].cta !== true) {
@@ -10204,8 +10235,36 @@ export async function retrofitBookCover(jobId: number): Promise<void> {
         const run = scenes.slice(i, j);
         if (!run.some(s => s.coverHero)) {
           const book = bookForScene(run[0], params.ctaBooks);
-          const title = book?.title ?? params.bookTitle;
-          const cover = book?.coverImageUrl ?? params.bookCoverImageUrl;
+          let title = book?.title ?? params.bookTitle;
+          let cover = book?.coverImageUrl ?? params.bookCoverImageUrl;
+
+          // Not attached at generation time (the script never called it). A manual retrofit
+          // click IS the operator's call, so fall back to a live channel book here even though
+          // normal generation requires the script to name it.
+          if (!cover && liveBooks.length) {
+            const runText = run
+              .map(s => s.scriptText ?? s.narration ?? "")
+              .join(" ");
+            const chosen =
+              liveBooks.find(b => titleMatcher(b.title)(runText)) ??
+              (liveBooks.length === 1 ? liveBooks[0] : undefined);
+            if (chosen) {
+              title = chosen.title;
+              cover = chosen.coverImageUrl!;
+              if (run[0].ctaIndex != null) {
+                newCtaBooks.push({
+                  ctaIndex: run[0].ctaIndex,
+                  bookId: chosen.id,
+                  title: chosen.title,
+                  coverImageUrl: chosen.coverImageUrl!,
+                  shopUrl: chosen.shopUrl
+                    ? stripTrackingParam(chosen.shopUrl)
+                    : undefined,
+                });
+              }
+            }
+          }
+
           if (title && cover) {
             const namesBook = titleMatcher(title);
             const eligible = (s: StoryboardScene) =>
@@ -10219,6 +10278,7 @@ export async function retrofitBookCover(jobId: number): Promise<void> {
             target.hostPresent = false;
             target.splitVisual = undefined;
             targets.push(target);
+            coverByIndex.set(target.index, cover);
           }
         }
         i = j;
@@ -10232,8 +10292,19 @@ export async function retrofitBookCover(jobId: number): Promise<void> {
         return;
       }
       console.log(
-        `[Longform ${jobId}] Book-cover retrofit: adding a cover reveal to ${targets.length} scene(s)`
+        `[Longform ${jobId}] Book-cover retrofit: adding a cover reveal to ${targets.length} scene(s)` +
+          (newCtaBooks.length
+            ? `, attaching ${newCtaBooks.length} uncalled channel book(s)`
+            : "")
       );
+
+      // Attach newly-resolved channel books to the job's own snapshot BEFORE rendering, so
+      // `coverImageForScene`/`qrOverlayUrlFor` resolve them the same way a fresh render would —
+      // and so a later Assemble or regenerate sees the same assignment, not a one-off.
+      if (newCtaBooks.length) {
+        params.ctaBooks = [...(params.ctaBooks ?? []), ...newCtaBooks];
+        await resolveCtaBookTracking(jobId, newCtaBooks);
+      }
 
       for (const s of targets) {
         s.sceneStatus = "processing";
@@ -10244,6 +10315,7 @@ export async function retrofitBookCover(jobId: number): Promise<void> {
         stage: "clips",
         errorMessage: null,
         storyboard: scenes,
+        inputParams: params,
       });
 
       try {
@@ -10252,7 +10324,7 @@ export async function retrofitBookCover(jobId: number): Promise<void> {
             s.clipUrls = await generateSceneStillClip(
               jobId,
               s,
-              coverImageForScene(s, params),
+              coverByIndex.get(s.index),
               undefined,
               params.videoSubject
             );

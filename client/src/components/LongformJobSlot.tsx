@@ -654,17 +654,6 @@ export default function LongformJobSlot({
     return splitSec / hostSec < 0.15;
   }, [scenes]);
 
-  // A finished film can have a book configured but no cover-reveal beat anywhere in the
-  // storyboard — the storyboard-time marking pass couldn't place one. Offer the retrofit only
-  // when there's actually a cover to place (per-video book or channel fallback) and the film
-  // has CTA beats at all (no CTA, nothing to attach a cover to).
-  const needsBookCoverRetrofit = useMemo(() => {
-    const hasBook = !!job?.bookCoverImageUrl || !!job?.ctaBooks?.length;
-    if (!hasBook) return false;
-    if (!scenes.some(s => s.cta)) return false;
-    return !scenes.some(s => s.coverHero);
-  }, [scenes, job?.bookCoverImageUrl, job?.ctaBooks]);
-
   // Report status up to the parent so the tab label can show a badge.
   useEffect(() => {
     const status: SlotStatus =
@@ -887,6 +876,23 @@ export default function LongformJobSlot({
     { channelKey, activeOnly: true },
     { enabled: !!channelKey }
   );
+
+  // A finished film can have a book configured but no cover-reveal beat anywhere in the
+  // storyboard — the storyboard-time marking pass couldn't place one (or the channel's book was
+  // never called by name in the script, so it was never attached at all). Offer the retrofit
+  // when there's a cover to place from ANY source it now falls back to (per-video book, channel
+  // fallback cover, or the channel's live Books library — `dialogChannelBooks`, same query the
+  // CTA dialog above uses) and the film has CTA beats at all.
+  const needsBookCoverRetrofit = useMemo(() => {
+    const hasBook =
+      !!job?.bookCoverImageUrl ||
+      !!job?.ctaBooks?.length ||
+      !!dialogChannelBooks?.some(b => b.coverImageUrl);
+    if (!hasBook) return false;
+    if (!scenes.some(s => s.cta)) return false;
+    return !scenes.some(s => s.coverHero);
+  }, [scenes, job?.bookCoverImageUrl, job?.ctaBooks, dialogChannelBooks]);
+
   const ctaCandidates = useMemo(
     () => [
       ...ctaBookTitles.map(title => ({ title })),
