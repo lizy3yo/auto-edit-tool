@@ -945,20 +945,16 @@ describe("per-CTA-block books", () => {
       "CHANNEL-QR"
     );
     expect(qrOverlayUrlFor({}, "CHANNEL-QR")).toBeUndefined();
-    expect(
-      qrOverlayUrlFor({ qrHero: true, coverHero: true }, "CHANNEL-QR")
-    ).toBeUndefined();
+    expect(qrOverlayUrlFor({ coverHero: true }, "CHANNEL-QR")).toBe(
+      "CHANNEL-QR"
+    );
     expect(qrOverlayUrlFor({ qrHero: true }, undefined)).toBeUndefined();
   });
 
-  it("never draws a QR over the cover reveal, book or not", () => {
+  it("draws the block's OWN book QR over the cover reveal too", () => {
     expect(
-      qrOverlayUrlFor(
-        { qrHero: true, coverHero: true, ctaIndex: 0 },
-        "CHANNEL-QR",
-        ctaBooks
-      )
-    ).toBeUndefined();
+      qrOverlayUrlFor({ coverHero: true, ctaIndex: 0 }, "CHANNEL-QR", ctaBooks)
+    ).toBe(bookA.qrImageUrl);
   });
 
   it("a block whose book has no generated QR falls back rather than showing none", () => {

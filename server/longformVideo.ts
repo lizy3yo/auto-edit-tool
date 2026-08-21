@@ -4497,9 +4497,11 @@ export function placeAssetBeats(
 
 /**
  * The channel QR to composite on a scene, or undefined for none. Draws ONLY on anchored beats —
- * the big-QR "grab your phone" block (`qrHero`) and the small pre-cover scan window (`qrCorner`) —
- * never on the cover-reveal beat, and never on ordinary cta/price scenes, so a spoken dollar amount
- * can't surface it. No-op without a channel QR. Pure — unit-tested.
+ * the big-QR "grab your phone" block (`qrHero`), the small pre-cover scan window (`qrCorner`),
+ * and the cover-reveal beat itself (`coverHero` — small corner card, same as `qrCorner`, so the
+ * scan code rides along on the shot most likely to hold the viewer's attention) — never on
+ * ordinary cta/price scenes, so a spoken dollar amount can't surface it. No-op without a channel
+ * QR. Pure — unit-tested.
  */
 export function qrOverlayUrlFor(
   scene: Pick<
@@ -4514,8 +4516,7 @@ export function qrOverlayUrlFor(
    */
   ctaBooks?: LongformCtaBook[]
 ): string | undefined {
-  if (scene.coverHero) return undefined;
-  if (!scene.qrHero && !scene.qrCorner) return undefined;
+  if (!scene.qrHero && !scene.qrCorner && !scene.coverHero) return undefined;
   return bookForScene(scene, ctaBooks)?.qrImageUrl ?? qrImageUrl ?? undefined;
 }
 
@@ -9035,11 +9036,13 @@ async function assembleAndFinalize(
     // COVER_HOLD_SEC floor into audioDuration, which would freeze the cover over
     // trailing silence; the cover must end with its measured narration.
     audioDurationSec: s.coverHero ? undefined : s.audioDuration,
-    // The QR draws ONLY on anchored beats — the big-QR "grab your phone" block (qrHero) and the
-    // small pre-cover scan window (qrCorner) — never on ordinary cta/price scenes, so a spoken
-    // dollar amount can't surface it. The cover-reveal beat is left clean so the cover reads.
+    // The QR draws ONLY on anchored beats — the big-QR "grab your phone" block (qrHero), the
+    // small pre-cover scan window (qrCorner), and the cover-reveal beat (coverHero) — never on
+    // ordinary cta/price scenes, so a spoken dollar amount can't surface it.
     qrOverlayUrl: qrOverlayUrlFor(s, params.qrImageUrl, params.ctaBooks),
-    // qrHero → large centered QR; a qrCorner-only beat → small bottom-right corner QR.
+    // qrHero → large centered QR; everything else that gets an overlay (qrCorner, or the
+    // cover-reveal beat itself) → small bottom-right corner QR. coverHero and qrHero never
+    // coincide on the same scene (the reveal picks a beat outside the qrHero run).
     qrPlacement: (s.qrHero ? "center" : "corner") as "corner" | "center",
     // The block's release beat holds a silent frozen QR_TAIL_HOLD_SEC tail so the QR lingers
     // ~3s past "I'll wait right here" (extended in assembly via tpad/apad).

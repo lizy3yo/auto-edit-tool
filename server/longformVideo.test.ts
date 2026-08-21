@@ -2691,17 +2691,16 @@ describe("markCornerQrBeforeCover", () => {
 
 describe("qrOverlayUrlFor", () => {
   const QR = "https://r2/qr.png";
-  it("draws the QR only on anchored beats — never on plain cta/price or cover scenes", () => {
+  it("draws the QR only on anchored beats — never on plain cta/price scenes", () => {
     expect(qrOverlayUrlFor({ qrHero: true }, QR)).toBe(QR);
     expect(qrOverlayUrlFor({ qrCorner: true }, QR)).toBe(QR);
-    // a plain scene (no qrHero/qrCorner — e.g. a dollar-mention cta scene) gets nothing
+    // the cover-reveal beat also gets the small corner QR
+    expect(qrOverlayUrlFor({ coverHero: true }, QR)).toBe(QR);
+    // a plain scene (no qrHero/qrCorner/coverHero — e.g. a dollar-mention cta scene) gets nothing
     expect(qrOverlayUrlFor({}, QR)).toBeUndefined();
-    // the cover-reveal beat stays clean even if flagged qrHero
-    expect(
-      qrOverlayUrlFor({ qrHero: true, coverHero: true }, QR)
-    ).toBeUndefined();
     // no channel QR configured → nothing
     expect(qrOverlayUrlFor({ qrHero: true }, undefined)).toBeUndefined();
+    expect(qrOverlayUrlFor({ coverHero: true }, undefined)).toBeUndefined();
   });
 });
 
