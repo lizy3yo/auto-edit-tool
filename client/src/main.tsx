@@ -42,11 +42,15 @@ const trpcClient = trpc.createClient({
     httpBatchLink({
       url: "/api/trpc",
       transformer: superjson,
-      // Split a batch before its GET URL gets too long. `book.detectCtaBlocks` carries the whole
-      // script as a query param, and several tabs now restore their scripts at once, so an
-      // unbounded batch packed multiple multi-thousand-character scripts into one URL and the
-      // server rejected it with 431 (Request Header Fields Too Large). tRPC breaks the batch into
-      // smaller requests to stay under this, well below Node's 16 KB request-line limit.
+      // Every batch goes over POST, body-encoded — never GET. `book.detectCtaBlocks` carries the
+      // whole script (up to 50 KB) as its input, and `maxURLLength` alone can't save a GET: it
+      // only splits a batch of several small queries apart, but one query whose OWN input already
+      // exceeds the limit can't be split further — tRPC just throws ("Input is too big for a
+      // single dispatch") instead of sending it. That's exactly what a long script hit. POST puts
+      // the payload in the body (`express.json({ limit: "50mb" })` server-side already), which has
+      // no URL-length ceiling at all — Node's 16 KB request-line limit and the 431 it used to throw
+      // were both a GET-only problem. `maxURLLength` stays as a harmless no-op safety net.
+      methodOverride: "POST",
       maxURLLength: 12000,
       fetch(input, init) {
         return globalThis.fetch(input, {
