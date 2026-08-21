@@ -1277,6 +1277,41 @@ export default function LongformJobSlot({
 
             {retryFailedScenesButton}
 
+            {/* Available whenever the job isn't actively rendering and has SOME clips to work
+                with — not tied to "completed", so it also covers a failed/cancelled-mid-assembly
+                job like this one. The server's own retrofit guard (job.status !== "processing")
+                is the real safety net; this just decides when to show the control at all. */}
+            {job.status !== "processing" &&
+              scenes.some(s => s.clipUrls?.length || s.clipUrl) && (
+                <>
+                  {bookCoverStatusNote && (
+                    <p className="text-xs text-muted-foreground">
+                      {bookCoverStatusNote}
+                    </p>
+                  )}
+                  {needsBookCoverRetrofit && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        if (!jobId) return;
+                        armNotifications();
+                        retrofitBookCoverMutation.mutate({ jobId });
+                      }}
+                      disabled={retrofitBookCoverMutation.isPending}
+                      title="This film has a book but no cover reveal. Add it — free, only the cover beat renders."
+                    >
+                      {retrofitBookCoverMutation.isPending ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <BookOpen className="mr-2 h-4 w-4" />
+                      )}
+                      Add book cover
+                    </Button>
+                  )}
+                </>
+              )}
+
             {job.stage === "assembly" && (
               <Button
                 variant="outline"
@@ -1301,54 +1336,23 @@ export default function LongformJobSlot({
                     Scenes re-rendered. Preview them below, then rebuild the
                     final cut.
                   </p>
-                  {bookCoverStatusNote && (
-                    <p className="text-xs text-muted-foreground">
-                      {bookCoverStatusNote}
-                    </p>
-                  )}
-                  <div className="flex flex-wrap gap-2">
-                    {/* Also offered here, not just once a final video exists — a job that has
-                        never been assembled yet (or just got un-assembled by a regen) would
-                        otherwise need a pointless round trip: Assemble first just to unlock
-                        the button, then Assemble again after adding the cover. */}
-                    {needsBookCoverRetrofit && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          if (!jobId) return;
-                          armNotifications();
-                          retrofitBookCoverMutation.mutate({ jobId });
-                        }}
-                        disabled={retrofitBookCoverMutation.isPending}
-                        title="This film has a book but no cover reveal. Add it — free, only the cover beat renders."
-                      >
-                        {retrofitBookCoverMutation.isPending ? (
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        ) : (
-                          <BookOpen className="mr-2 h-4 w-4" />
-                        )}
-                        Add book cover
-                      </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (!jobId) return;
+                      armNotifications();
+                      assembleFinalMutation.mutate({ jobId });
+                    }}
+                    disabled={assembleFinalMutation.isPending}
+                  >
+                    {assembleFinalMutation.isPending ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="mr-2 h-4 w-4" />
                     )}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        if (!jobId) return;
-                        armNotifications();
-                        assembleFinalMutation.mutate({ jobId });
-                      }}
-                      disabled={assembleFinalMutation.isPending}
-                    >
-                      {assembleFinalMutation.isPending ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : (
-                        <RefreshCw className="mr-2 h-4 w-4" />
-                      )}
-                      Assemble final video
-                    </Button>
-                  </div>
+                    Assemble final video
+                  </Button>
                 </div>
               )}
 
@@ -1358,11 +1362,6 @@ export default function LongformJobSlot({
                   src={job.finalVideoUrl}
                   seekRef={playerSeekRef}
                 />
-                {bookCoverStatusNote && (
-                  <p className="text-xs text-muted-foreground">
-                    {bookCoverStatusNote}
-                  </p>
-                )}
                 <div className="flex justify-end gap-2">
                   {needsSplitRetrofit && (
                     <Button
@@ -1382,26 +1381,6 @@ export default function LongformJobSlot({
                         <Columns2 className="mr-2 h-4 w-4" />
                       )}
                       Add split screens
-                    </Button>
-                  )}
-                  {needsBookCoverRetrofit && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        if (!jobId) return;
-                        armNotifications();
-                        retrofitBookCoverMutation.mutate({ jobId });
-                      }}
-                      disabled={retrofitBookCoverMutation.isPending}
-                      title="This film has a book but no cover reveal. Add it — free, only the cover beat renders."
-                    >
-                      {retrofitBookCoverMutation.isPending ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : (
-                        <BookOpen className="mr-2 h-4 w-4" />
-                      )}
-                      Add book cover
                     </Button>
                   )}
                   <Button
