@@ -883,15 +883,36 @@ export default function LongformJobSlot({
   // when there's a cover to place from ANY source it now falls back to (per-video book, channel
   // fallback cover, or the channel's live Books library — `dialogChannelBooks`, same query the
   // CTA dialog above uses) and the film has CTA beats at all.
-  const needsBookCoverRetrofit = useMemo(() => {
+  //
+  // Computed as a REASON, not just a boolean — this button went through a round of "why isn't
+  // it showing" guesswork with no way for the operator to see which condition failed. Same fix
+  // as `blockedReason` on the Generate button: a hidden control with no explanation is
+  // indistinguishable from a broken one.
+  const bookCoverGateReason = useMemo(():
+    | "eligible"
+    | "no-book"
+    | "no-cta"
+    | "already-has-cover" => {
     const hasBook =
       !!job?.bookCoverImageUrl ||
       !!job?.ctaBooks?.length ||
       !!dialogChannelBooks?.some(b => b.coverImageUrl);
-    if (!hasBook) return false;
-    if (!scenes.some(s => s.cta)) return false;
-    return !scenes.some(s => s.coverHero);
+    if (!hasBook) return "no-book";
+    if (!scenes.some(s => s.cta)) return "no-cta";
+    if (scenes.some(s => s.coverHero)) return "already-has-cover";
+    return "eligible";
   }, [scenes, job?.bookCoverImageUrl, job?.ctaBooks, dialogChannelBooks]);
+  const needsBookCoverRetrofit = bookCoverGateReason === "eligible";
+  // Only worth explaining when there's an actual CTA pitch to ask about — a video with no CTA
+  // at all is the normal, silent case and needs no note.
+  const bookCoverStatusNote =
+    !needsBookCoverRetrofit && scenes.some(s => s.cta)
+      ? bookCoverGateReason === "no-book"
+        ? "No book/cover found for this CTA — checked this video's own snapshot, the channel's fallback cover, and the channel's Books library."
+        : bookCoverGateReason === "already-has-cover"
+          ? "This CTA already has a cover reveal."
+          : null
+      : null;
 
   const ctaCandidates = useMemo(
     () => [
@@ -1280,6 +1301,11 @@ export default function LongformJobSlot({
                     Scenes re-rendered. Preview them below, then rebuild the
                     final cut.
                   </p>
+                  {bookCoverStatusNote && (
+                    <p className="text-xs text-muted-foreground">
+                      {bookCoverStatusNote}
+                    </p>
+                  )}
                   <div className="flex flex-wrap gap-2">
                     {/* Also offered here, not just once a final video exists — a job that has
                         never been assembled yet (or just got un-assembled by a regen) would
@@ -1332,6 +1358,11 @@ export default function LongformJobSlot({
                   src={job.finalVideoUrl}
                   seekRef={playerSeekRef}
                 />
+                {bookCoverStatusNote && (
+                  <p className="text-xs text-muted-foreground">
+                    {bookCoverStatusNote}
+                  </p>
+                )}
                 <div className="flex justify-end gap-2">
                   {needsSplitRetrofit && (
                     <Button
