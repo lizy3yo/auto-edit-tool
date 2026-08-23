@@ -170,7 +170,7 @@ export function LongformScenePreview({
         ref={videoRef}
         src={clipUrl}
         controls
-        preload="none"
+        preload="metadata"
         onClick={e => e.stopPropagation()}
         onLoadedMetadata={clampIntoScene}
         onPlay={handlePlay}
