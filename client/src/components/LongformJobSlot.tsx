@@ -323,6 +323,9 @@ export default function LongformJobSlot({
   // first terminal status would un-queue against the STALE pre-regen snapshot
   // and stop polling while the server is still working.
   const queuePhase = useRef<Map<number, "queued" | "confirmed">>(new Map());
+  // When each scene was queued locally — the settle fallback for an edit so fast (ffmpeg-only
+  // split edits) that no poll ever catches it in flight.
+  const queuedAt = useRef<Map<number, number>>(new Map());
   const [selectedScenes, setSelectedScenes] = useState<number[]>([]);
   const [sceneSearch, setSceneSearch] = useState("");
   const [downloadTitle, setDownloadTitle] = useState(initialTitle);
@@ -385,22 +388,43 @@ export default function LongformJobSlot({
     onError: err => toast.error(err.message),
   });
 
+  // Drop a scene from the optimistic queue — on a rejected request, or when the server says
+  // it ignored it (that scene is rendering right now).
+  const unqueueScene = (sceneIndex: number) => {
+    queuePhase.current.delete(sceneIndex);
+    queuedAt.current.delete(sceneIndex);
+    setQueuedScenes(prev => prev.filter(i => i !== sceneIndex));
+  };
+
   const regenMutation = trpc.longformVideo.regenerateScene.useMutation({
-    onSuccess: (_d, vars) => {
-      toast.success("Regenerating scene...");
-      setExpandedScene(null);
+    onSuccess: (d, vars) => {
+      if (d.accepted === "ignored") {
+        unqueueScene(vars.sceneIndex);
+        if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
+        toast.info(
+          `Scene ${vars.sceneIndex} is already rendering — wait for it, then regenerate again`
+        );
+        return;
+      }
+      toast.success(
+        d.accepted === "superseded"
+          ? "Updated the queued regenerate with your latest prompt"
+          : "Queued — rendering alongside your other edits"
+      );
+      // Collapse only THIS scene's editor; another scene's may be open mid-edit.
+      setExpandedScene(cur => (cur === vars.sceneIndex ? null : cur));
       // Edit is now persisted server-side; drop the local override so the next
       // poll's scene.visualPrompt becomes the source of truth.
       setPromptEdits(p => {
         const { [vars.sceneIndex]: _, ...rest } = p;
         return rest;
       });
+      if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
     },
     onError: (err, vars) => {
       toast.error(err.message);
       // Roll back the optimistic queue so the spinner doesn't hang forever.
-      queuePhase.current.delete(vars.sceneIndex);
-      setQueuedScenes(prev => prev.filter(i => i !== vars.sceneIndex));
+      unqueueScene(vars.sceneIndex);
     },
   });
 
@@ -409,7 +433,15 @@ export default function LongformJobSlot({
     Record<number, number | undefined>
   >({});
   const splitEditMutation = trpc.longformVideo.setSceneSplit.useMutation({
-    onSuccess: (_d, vars) => {
+    onSuccess: (d, vars) => {
+      if (d.accepted === "ignored") {
+        unqueueScene(vars.sceneIndex);
+        if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
+        toast.info(
+          `Scene ${vars.sceneIndex} is already rendering — wait for it, then apply the split edit`
+        );
+        return;
+      }
       toast.success(
         vars.mode === "off"
           ? "Removing the split — back to full-frame host..."
@@ -419,13 +451,12 @@ export default function LongformJobSlot({
               ? "Repositioning the split — pure ffmpeg, nothing regenerates..."
               : "Rendering a fresh right panel..."
       );
-      setExpandedScene(null);
+      setExpandedScene(cur => (cur === vars.sceneIndex ? null : cur));
       if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
     },
     onError: (err, vars) => {
       toast.error(err.message);
-      queuePhase.current.delete(vars.sceneIndex);
-      setQueuedScenes(prev => prev.filter(i => i !== vars.sceneIndex));
+      unqueueScene(vars.sceneIndex);
     },
   });
   const applySplitEdit = (
@@ -439,6 +470,7 @@ export default function LongformJobSlot({
     if (!jobId) return;
     armNotifications();
     queuePhase.current.set(scene.index, "queued");
+    queuedAt.current.set(scene.index, Date.now());
     setQueuedScenes(prev =>
       prev.includes(scene.index) ? prev : [...prev, scene.index]
     );
@@ -446,8 +478,20 @@ export default function LongformJobSlot({
   };
 
   const regenBatchMutation = trpc.longformVideo.regenerateScenes.useMutation({
-    onSuccess: (_d, vars) => {
-      toast.success(`Regenerating ${vars.sceneIndices.length} scenes...`);
+    onSuccess: (d, vars) => {
+      const ignored = vars.sceneIndices.filter(
+        i => d.accepted?.[i] === "ignored"
+      );
+      for (const i of ignored) unqueueScene(i);
+      const taken = vars.sceneIndices.length - ignored.length;
+      if (ignored.length)
+        toast.info(
+          `Scene${ignored.length > 1 ? "s" : ""} ${ignored.join(", ")} already rendering — skipped`
+        );
+      if (taken > 0)
+        toast.success(
+          `Queued ${taken} scene${taken > 1 ? "s" : ""} — rendering together`
+        );
       // queuedScenes was set optimistically in onClick (so polling starts on the
       // click itself, not a round-trip later).
       // Overrides are persisted server-side now; clear the local copies.
@@ -552,7 +596,7 @@ export default function LongformJobSlot({
     );
   };
 
-  const { data: rawJob } = trpc.longformVideo.pollJob.useQuery(
+  const { data: rawJob, dataUpdatedAt } = trpc.longformVideo.pollJob.useQuery(
     { jobId: jobId ?? 0 },
     {
       enabled: jobId !== null && jobId !== dismissedJobId,
@@ -561,7 +605,9 @@ export default function LongformJobSlot({
       // once finished (refresh restores it via the persisted id, but a done
       // job with nothing queued shouldn't be re-fetched every 3s).
       refetchInterval: q =>
-        q.state.data?.status === "processing" || queuedScenes.length > 0
+        q.state.data?.status === "processing" ||
+        q.state.data?.sceneEdits?.editing ||
+        queuedScenes.length > 0
           ? 3000
           : false,
     }
@@ -570,6 +616,21 @@ export default function LongformJobSlot({
   const job = jobId !== null && jobId !== dismissedJobId ? rawJob : null;
 
   const isProcessing = job?.status === "processing";
+  // The job's live scene-edit queue, from the server (which scenes wait / render right now).
+  // Both "the pipeline is rendering" and "the operator is editing scenes" read status
+  // "processing" on the job row; this is what tells them apart. The local optimistic queue is
+  // folded in so the click itself counts, before the first poll comes back.
+  const sceneEdits = job?.sceneEdits ?? {
+    queued: [] as number[],
+    active: [] as number[],
+    editing: false,
+  };
+  // Server-owned: true only while an edit session HOLDS the job lock. A request parked
+  // behind a pipeline/assembly pass is not editing yet — that pass is what's running, and
+  // the UI must show it as such. The local optimistic queue drives badges and polling only.
+  const isEditing = sceneEdits.editing;
+  // Only an initial/pipeline render takes the editors away — scene edits keep them live.
+  const isPipelineRunning = isProcessing && !isEditing;
 
   // Pre-fill the channel from the job after a refresh (local state resets to ""
   // on reload, but the restored job carries the channel it was generated with).
@@ -699,6 +760,7 @@ export default function LongformJobSlot({
     setSelectedGroup(0);
     setQueuedScenes([]);
     queuePhase.current.clear();
+    queuedAt.current.clear();
     setSelectedScenes(loadSelectedScenes(storageKey, jobId));
   }, [jobId, storageKey]);
 
@@ -726,23 +788,45 @@ export default function LongformJobSlot({
     if (!job?.storyboard || queuedScenes.length === 0) return;
     const sb = job.storyboard as StoryboardScene[];
     const status = (i: number) => sb.find(sc => sc.index === i)?.sceneStatus;
+    const server = job.sceneEdits;
+    const inServerQueue = (i: number) =>
+      !!server && (server.queued.includes(i) || server.active.includes(i));
     const settled: number[] = [];
     for (const i of queuedScenes) {
       const s = status(i);
       const phase = queuePhase.current.get(i) ?? "queued";
-      if (phase === "queued" && (s === "processing" || s === "rendering")) {
+      if (
+        phase === "queued" &&
+        (inServerQueue(i) || s === "processing" || s === "rendering")
+      ) {
         queuePhase.current.set(i, "confirmed");
       } else if (
         phase === "confirmed" &&
+        !inServerQueue(i) &&
         (s === "completed" || s === "failed")
       ) {
+        settled.push(i);
+      } else if (
+        phase === "queued" &&
+        !inServerQueue(i) &&
+        job.status !== "processing" &&
+        Date.now() - (queuedAt.current.get(i) ?? 0) > 12_000
+      ) {
+        // Never seen in flight: the edit finished between two polls (ffmpeg-only edits take
+        // seconds) and the job has settled. Without this the spinner would never stop.
         settled.push(i);
       }
     }
     if (settled.length === 0) return;
-    for (const i of settled) queuePhase.current.delete(i);
+    for (const i of settled) {
+      queuePhase.current.delete(i);
+      queuedAt.current.delete(i);
+    }
     setQueuedScenes(prev => prev.filter(i => !settled.includes(i)));
-  }, [job, queuedScenes]);
+    // `dataUpdatedAt` advances on every successful poll even when the payload is structurally
+    // identical (react-query keeps the same object reference then), so the 12 s fallback above
+    // is re-evaluated each poll rather than only when the job changes.
+  }, [job, queuedScenes, dataUpdatedAt]);
 
   const minuteGroups = useMemo(() => {
     if (scenes.length === 0) return [];
@@ -815,6 +899,7 @@ export default function LongformJobSlot({
     if (!prompt) return;
     armNotifications();
     queuePhase.current.set(scene.index, "queued");
+    queuedAt.current.set(scene.index, Date.now());
     setQueuedScenes(prev =>
       prev.includes(scene.index) ? prev : [...prev, scene.index]
     );
@@ -962,7 +1047,9 @@ export default function LongformJobSlot({
    * them announced itself, so the fix was guesswork.
    */
   const blockedReason = isProcessing
-    ? "This tab is rendering. It'll free up when the job finishes."
+    ? isEditing
+      ? "Scene edits are rendering on this tab. It'll free up when they finish."
+      : "This tab is rendering. It'll free up when the job finishes."
     : generateMutation.isPending
       ? null
       : !script.trim()
@@ -1169,7 +1256,7 @@ export default function LongformJobSlot({
                 ) : (
                   <XCircle className="h-5 w-5 shrink-0 text-destructive" />
                 )}
-                {job.status === "completed" ? (
+                {job.status === "completed" || isEditing ? (
                   <div className="flex min-w-0 flex-1 items-center gap-2">
                     <Select value={channelKey} onValueChange={setChannelKey}>
                       <SelectTrigger className="h-9 w-40 border-border">
@@ -1218,7 +1305,7 @@ export default function LongformJobSlot({
                   <Receipt className="mr-2 h-4 w-4" />
                   Cost
                 </Button>
-                {isProcessing ? (
+                {isPipelineRunning ? (
                   <Button
                     variant="ghost"
                     size="sm"
@@ -1249,7 +1336,21 @@ export default function LongformJobSlot({
               </div>
             </div>
 
+            {isEditing && (
+              <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Editing scenes — {sceneEdits.active.length} rendering ·{" "}
+                {sceneEdits.queued.length +
+                  queuedScenes.filter(
+                    i =>
+                      !sceneEdits.active.includes(i) &&
+                      !sceneEdits.queued.includes(i)
+                  ).length}{" "}
+                queued. Other scenes stay editable.
+              </p>
+            )}
             {progress &&
+              !isEditing &&
               (job.stage === "voiceover" || job.stage === "clips") && (
                 <div className="h-2 w-full rounded-full bg-secondary overflow-hidden">
                   <div
@@ -1469,7 +1570,7 @@ export default function LongformJobSlot({
                     <Button
                       size="sm"
                       className="h-7 text-xs"
-                      disabled={batchRegenLoading || isProcessing}
+                      disabled={batchRegenLoading || isPipelineRunning}
                       onClick={() => {
                         if (!jobId) return;
                         armNotifications();
@@ -1492,8 +1593,10 @@ export default function LongformJobSlot({
                         // Queue optimistically so spinners + polling start on
                         // this click, not a round-trip later (onError rolls back).
                         for (const i of selectedScenes)
-                          if (!queuedScenes.includes(i))
+                          if (!queuedScenes.includes(i)) {
                             queuePhase.current.set(i, "queued");
+                            queuedAt.current.set(i, Date.now());
+                          }
                         setQueuedScenes(prev =>
                           prev.concat(
                             selectedScenes.filter(i => !prev.includes(i))
@@ -1622,7 +1725,11 @@ export default function LongformJobSlot({
           </div>
           <div className="grid gap-3">
             {displayScenes.map(scene => {
-              const isSceneQueued = queuedScenes.includes(scene.index);
+              const isSceneRendering = sceneEdits.active.includes(scene.index);
+              const isSceneQueued =
+                queuedScenes.includes(scene.index) ||
+                isSceneRendering ||
+                sceneEdits.queued.includes(scene.index);
               const isSelected = selectedScenes.includes(scene.index);
               return (
                 <Card
@@ -1723,7 +1830,7 @@ export default function LongformJobSlot({
                             className="text-[10px] py-0 gap-1 text-info border-info/40"
                           >
                             <Loader2 className="h-3 w-3 animate-spin" />
-                            Regenerating
+                            {isSceneRendering ? "Rendering" : "Queued"}
                           </Badge>
                         )}
                         {regeneratedScenes.includes(scene.index) &&
@@ -1759,7 +1866,7 @@ export default function LongformJobSlot({
                           {sanitizeError(scene.error)}
                         </p>
                       )}
-                      {!isProcessing &&
+                      {!isPipelineRunning &&
                         (expandedScene === scene.index ? (
                           <div
                             className="space-y-2 pt-1"
@@ -1879,10 +1986,7 @@ export default function LongformJobSlot({
                                         rightUrl={scene.splitRightUrl}
                                         layout={scene.splitLayout}
                                         autoHostFocusX={scene.splitAutoFocusX}
-                                        pending={
-                                          splitEditMutation.isPending ||
-                                          isSceneQueued
-                                        }
+                                        pending={isSceneQueued}
                                         onApply={layout =>
                                           applySplitEdit(scene, {
                                             mode: "layout",
@@ -1903,10 +2007,7 @@ export default function LongformJobSlot({
                                       size="sm"
                                       variant="outline"
                                       className="h-7 text-xs"
-                                      disabled={
-                                        splitEditMutation.isPending ||
-                                        isSceneQueued
-                                      }
+                                      disabled={isSceneQueued}
                                       onClick={() =>
                                         applySplitEdit(scene, { mode: "off" })
                                       }
@@ -1919,10 +2020,7 @@ export default function LongformJobSlot({
                                       size="sm"
                                       variant="outline"
                                       className="h-7 text-xs"
-                                      disabled={
-                                        splitEditMutation.isPending ||
-                                        isSceneQueued
-                                      }
+                                      disabled={isSceneQueued}
                                       onClick={() =>
                                         applySplitEdit(scene, {
                                           mode: "prompt",
@@ -1992,10 +2090,7 @@ export default function LongformJobSlot({
                                     <Button
                                       size="sm"
                                       className="h-7 text-xs"
-                                      disabled={
-                                        splitEditMutation.isPending ||
-                                        isSceneQueued
-                                      }
+                                      disabled={isSceneQueued}
                                       onClick={() =>
                                         applySplitEdit(scene, {
                                           mode: "scene",
@@ -2015,8 +2110,7 @@ export default function LongformJobSlot({
                                 size="sm"
                                 className="h-7 text-xs"
                                 disabled={
-                                  regenMutation.isPending ||
-                                  queuedScenes.includes(scene.index) ||
+                                  isSceneQueued ||
                                   !(
                                     promptEdits[scene.index] ??
                                     ownedPrompt(scene)
@@ -2024,7 +2118,7 @@ export default function LongformJobSlot({
                                 }
                                 onClick={() => regenerateSingle(scene)}
                               >
-                                {regenMutation.isPending || isSceneQueued ? (
+                                {isSceneQueued ? (
                                   <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
                                 ) : (
                                   <RefreshCw className="mr-1.5 h-3 w-3" />
@@ -2047,9 +2141,7 @@ export default function LongformJobSlot({
                               variant="ghost"
                               size="sm"
                               className="h-7 text-xs"
-                              disabled={
-                                regenMutation.isPending || isSceneQueued
-                              }
+                              disabled={isSceneQueued}
                               onClick={e => {
                                 e.stopPropagation();
                                 regenerateSingle(scene);

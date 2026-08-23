@@ -49,6 +49,7 @@ import {
   runLongformPipeline,
   regenerateScene as regenerateLongformScene,
   regenerateScenes as regenerateLongformScenes,
+  getSceneEditState,
   retrofitSplitScreens as retrofitLongformSplitScreens,
   retrofitBookCover as retrofitLongformBookCover,
   setSceneSplit as setLongformSceneSplit,
@@ -1359,6 +1360,11 @@ const longformVideoRouter = router({
   pollJob: approvedProcedure
     .input(z.object({ jobId: z.number() }))
     .query(async ({ ctx, input }) => {
+      // Sampled BEFORE the row read so the two can only disagree in the harmless direction:
+      // a session that settles between them reads "editing + (processing|completed)", never
+      // "not editing + processing" — which the client would show as a pipeline render for one
+      // poll cycle (editors gone, Cancel shown).
+      const sceneEdits = getSceneEditState(input.jobId);
       const job = await getLongformVideoJobById(input.jobId);
       if (!job) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
@@ -1384,6 +1390,11 @@ const longformVideoRouter = router({
         stage: job.stage,
         progress: job.progress,
         storyboard,
+        // The job's live scene-edit queue (which scenes wait / render right now). Lets every
+        // tab — and a reloaded one — show per-scene state, and lets the client tell "the
+        // operator is editing scenes" apart from "the pipeline is rendering": both read
+        // status "processing" on the row.
+        sceneEdits,
         finalVideoUrl: job.finalVideoUrl,
         errorMessage: job.errorMessage,
         channelKey:
@@ -1523,16 +1534,23 @@ const longformVideoRouter = router({
       if (job.userId !== ctx.user.id && ctx.user.role !== "admin") {
         throw new TRPCError({ code: "FORBIDDEN", message: "Not authorized" });
       }
-      regenerateLongformScene(
+      if (!hasScene(job.storyboard, input.sceneIndex))
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `Scene ${input.sceneIndex} not found`,
+        });
+      // Queues on the job's edit session and returns at once; the render runs in the
+      // background, concurrently with any other queued scene. `accepted` tells the client
+      // whether it was queued, replaced an unstarted request, or was ignored because that
+      // scene is rendering right now.
+      const accepted = await regenerateLongformScene(
         input.jobId,
         input.sceneIndex,
         input.customVisualPrompt,
         input.verbatim,
         input.customSplitVisual
-      ).catch(err => {
-        console.error("[Longform] Scene regeneration failed:", err);
-      });
-      return { ok: true };
+      );
+      return { ok: true, accepted };
     }),
 
   /** Batch-regenerate a multi-selected set of scenes (re-render each, assemble once). */
@@ -1562,15 +1580,19 @@ const longformVideoRouter = router({
       if (job.userId !== ctx.user.id && ctx.user.role !== "admin") {
         throw new TRPCError({ code: "FORBIDDEN", message: "Not authorized" });
       }
-      regenerateLongformScenes(
+      const known = input.sceneIndices.filter(i => hasScene(job.storyboard, i));
+      if (!known.length)
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "None of the selected scenes exist on this job",
+        });
+      const accepted = await regenerateLongformScenes(
         input.jobId,
-        input.sceneIndices,
+        known,
         input.prompts,
         input.verbatimIndices
-      ).catch(err => {
-        console.error("[Longform] Batch scene regeneration failed:", err);
-      });
-      return { ok: true };
+      );
+      return { ok: true, accepted };
     }),
 
   /**
@@ -1622,9 +1644,7 @@ const longformVideoRouter = router({
       }
       const channelKey = (job.inputParams as { channelKey?: string } | null)
         ?.channelKey;
-      const channelBooks = channelKey
-        ? await getBooks(channelKey, true)
-        : [];
+      const channelBooks = channelKey ? await getBooks(channelKey, true) : [];
       retrofitLongformBookCover(input.jobId, channelBooks).catch(err => {
         console.error(
           `[Longform ${input.jobId}] retrofitBookCover error:`,
@@ -1690,13 +1710,17 @@ const longformVideoRouter = router({
             : input.mode === "layout"
               ? ({ mode: "layout", layout: input.layout! } as const)
               : ({ mode: "scene", sourceIndex: input.sourceIndex! } as const);
-      setLongformSceneSplit(input.jobId, input.sceneIndex, edit).catch(err => {
-        console.error(
-          `[Longform ${input.jobId}] setSceneSplit(${input.sceneIndex}) error:`,
-          err
-        );
-      });
-      return { ok: true };
+      if (!hasScene(job.storyboard, input.sceneIndex))
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `Scene ${input.sceneIndex} not found`,
+        });
+      const accepted = await setLongformSceneSplit(
+        input.jobId,
+        input.sceneIndex,
+        edit
+      );
+      return { ok: true, accepted };
     }),
 
   /** Re-run the assembly stage for a stuck/failed job whose clips are ready. */
@@ -1870,6 +1894,14 @@ const longformVideoRouter = router({
       return { ok: true };
     }),
 });
+
+/** Whether a job's storyboard carries a scene with this index. */
+function hasScene(storyboard: unknown, sceneIndex: number): boolean {
+  return (
+    Array.isArray(storyboard) &&
+    storyboard.some(sc => sc && (sc as StoryboardScene).index === sceneIndex)
+  );
+}
 
 export const appRouter = router({
   auth: authRouter,

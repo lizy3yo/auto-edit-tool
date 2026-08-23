@@ -71,6 +71,11 @@ import { recordUsage, withCostMeter, flushJobUsage } from "./costMeter";
 // AIREITER BOLT-ON (temporary) — delete with the block in `apimartAdapterForJob`.
 import { aireiterAdapter, aireiterLaneEnabled } from "./providers/aireiter";
 import { Semaphore } from "./providers/semaphore";
+import {
+  SceneEditQueue,
+  type EditAccept,
+  type EditQueueState,
+} from "./sceneEditQueue";
 
 /**
  * The host lip-sync lane, resolved once per pipeline pass. HeyGen Avatar IV is the only
@@ -170,10 +175,36 @@ const _pendingPersist = new Map<
   { timer: ReturnType<typeof setTimeout>; updates: Record<string, unknown> }
 >();
 
+/**
+ * Storyboard documents whose owning pass has ended. A worker abandoned by a wall-clock deadline
+ * keeps running with the old pass's `scenes` array and still calls its persist closure when the
+ * provider finally answers — on a job that a LATER pass may since have rewritten. Such a write
+ * would revert that later work (last writer wins on the whole-array column), so a storyboard
+ * registered here is dropped on sight. WeakSet: the array is collected with the ghost.
+ */
+const deadStoryboards = new WeakSet<object>();
+
+/** Mark a pass's storyboard document as retired — see `deadStoryboards`. */
+export function retireStoryboard(scenes: object): void {
+  deadStoryboards.add(scenes);
+}
+
 export function schedulePersist(
   jobId: number,
   updates: Record<string, unknown>
 ): void {
+  if (
+    updates.storyboard &&
+    typeof updates.storyboard === "object" &&
+    deadStoryboards.has(updates.storyboard as object)
+  ) {
+    const { storyboard: _dead, ...rest } = updates;
+    console.warn(
+      `[Longform ${jobId}] dropping a storyboard persist from a retired pass (abandoned worker)`
+    );
+    if (Object.keys(rest).length === 0) return;
+    updates = rest;
+  }
   const existing = _pendingPersist.get(jobId);
   if (existing) {
     Object.assign(existing.updates, updates);
@@ -9346,14 +9377,17 @@ export async function retryJobAssembly(
   });
 }
 
-// Tracks jobId:sceneIndex pairs currently regenerating so duplicate concurrent requests
-// (caused by the fire-and-forget tRPC pattern re-enabling the button before work starts)
-// don't each submit a fresh 69Labs job.
+// Sentinels for the whole-storyboard retrofit passes (`${jobId}:retrofit`,
+// `${jobId}:cover-retrofit`) so a duplicate fire-and-forget click doesn't start a second one.
+// Per-scene edits no longer live here — they are queued on the job's edit session
+// (`enqueueSceneEdit`), which dedupes per scene itself.
 const activeRegenerations = new Set<string>();
 
-/** True while any scene of this job is mid-regeneration — so the recovery watchdog
- * doesn't auto-assemble a job the user is actively editing. */
+/** True while any scene of this job is mid-edit (a live edit session, or a retrofit pass) —
+ * so the recovery watchdog doesn't auto-assemble a job the user is actively editing. */
 export function isJobRegenerating(jobId: number): boolean {
+  const session = sceneEditSessions.get(jobId);
+  if (session && !session.queue.closed && !session.queue.idle) return true;
   const prefix = `${jobId}:`;
   return Array.from(activeRegenerations).some(k => k.startsWith(prefix));
 }
@@ -9601,9 +9635,551 @@ async function regenerateSplitRight(
   scene.sceneStatus = "completed";
 }
 
+// ─── Scene edit sessions ───────────────────────────────────────────────────────────────────
+//
+// Every operator edit on a rendered job — regenerate one scene, regenerate a selection, change
+// a split screen — is a SCENE EDIT REQUEST. Requests for one job are queued (`SceneEditQueue`)
+// and drained by ONE edit session per job, which runs inside `withJobLock` and renders the
+// queued scenes CONCURRENTLY through the same provider lanes the pipeline uses, picking up new
+// requests while it runs. The session flips the job row to "processing" once when it starts and
+// settles it once when the last task finishes.
+//
+// Before this, each click was its own `withJobLock` pass — a strict per-job FIFO — so the second
+// scene clicked did not start until the first had fully rendered (LLM enhance + image/video/
+// HeyGen + upload), and because each pass flipped the job to "processing", the client hid every
+// scene's editor for the duration. The lock itself is unchanged and still the right tool: the
+// storyboard is one JSON column and every pass writes the whole array back, so concurrency has
+// to live INSIDE one lock pass, over one live `scenes` document — exactly what the session is.
+
+/** One operator edit, keyed by scene. */
+export type SceneEditRequest =
+  | {
+      kind: "regen";
+      sceneIndex: number;
+      /** Cutaway / still prompt override (ignored by host lip-sync, which has its own prompt). */
+      customVisualPrompt?: string;
+      /** Split scene's right-panel prompt override. */
+      customSplitVisual?: string;
+      /** Operator edited the prompt — render it exactly as typed (skip re-enhance). */
+      verbatim?: boolean;
+      /**
+       * Batch semantics: drop the old clip up front so the scene reads as in-flight (a hole) and
+       * a clip-less outcome fails the job. A single regenerate keeps the old clip until the new
+       * one lands, so a failure leaves the film playable.
+       */
+      clearClip?: boolean;
+    }
+  | { kind: "split"; sceneIndex: number; edit: SceneSplitEdit };
+
+interface SceneEditSession {
+  queue: SceneEditQueue<SceneEditRequest>;
+  /** Settles when the session has released the job lock. */
+  done: Promise<void>;
+  /** Test seam: replaces `runSceneEdit` so the loop can be exercised without providers. */
+  runOne?: (ctx: SceneEditContext, req: SceneEditRequest) => Promise<void>;
+}
+
+/** Live sessions by job. One per job; a closed session is replaced on the next request. */
+const sceneEditSessions = new Map<number, SceneEditSession>();
+
 /**
- * Regenerate a single scene's clip (and voiceover if missing), then re-stitch.
- * Used by the review/regenerate path. Returns when finished.
+ * Jobs whose lock is currently HELD by an edit session (not merely requested). A session
+ * parked behind a pipeline/assembly/retrofit pass is not "editing" yet — the job row reads
+ * "processing" because of THAT pass, and the client must keep showing it as such (progress,
+ * Cancel, editors hidden) instead of an edit session. Set/cleared inside the lock body, so the
+ * session→session hand-off is microtask-tight and no poll can observe a gap.
+ */
+const sceneEditLockHeld = new Set<number>();
+
+/** Resolves when the job's current edit session (if any) has settled and released the lock. */
+export function sceneEditsSettled(jobId: number): Promise<void> {
+  return sceneEditSessions.get(jobId)?.done ?? Promise.resolve();
+}
+
+/**
+ * What the session is doing, for `pollJob` — so every tab and a reload see the real queue.
+ * `editing` stays true from the first request until the session has released the job lock
+ * (through its final settle write), so the client never mistakes the settle window — queue
+ * already empty, row still "processing" — for a pipeline render.
+ */
+export function getSceneEditState(
+  jobId: number
+): EditQueueState & { editing: boolean } {
+  const editing = sceneEditLockHeld.has(jobId);
+  const s = sceneEditSessions.get(jobId);
+  if (!s) return { queued: [], active: [], editing };
+  const state = s.queue.closed ? { queued: [], active: [] } : s.queue.state();
+  return { ...state, editing };
+}
+
+/**
+ * Hand a request to the job's edit session, starting one if none is running. Returns whether
+ * it was queued, replaced an unstarted request for the same scene, or was ignored because that
+ * scene is rendering right now — callers surface that instead of dropping it silently.
+ */
+export function enqueueSceneEdit(
+  jobId: number,
+  req: SceneEditRequest,
+  testSeam?: { runOne: SceneEditSession["runOne"] }
+): EditAccept {
+  const existing = sceneEditSessions.get(jobId);
+  if (existing && !existing.queue.closed) return existing.queue.enqueue(req);
+  const queue = new SceneEditQueue<SceneEditRequest>();
+  const accept = queue.enqueue(req);
+  const session: SceneEditSession = {
+    queue,
+    done: Promise.resolve(),
+    runOne: testSeam?.runOne,
+  };
+  sceneEditSessions.set(jobId, session);
+  session.done = runSceneEditSession(jobId, session)
+    .catch(err => {
+      console.error(
+        `[Longform ${jobId}] scene edit session failed:`,
+        describeError(err)
+      );
+    })
+    .finally(() => {
+      if (sceneEditSessions.get(jobId) === session)
+        sceneEditSessions.delete(jobId);
+    });
+  return accept;
+}
+
+/**
+ * Everything a task needs that is resolved ONCE per session: the live storyboard, the job's
+ * params, and the provider lane (adapter, TTS, lip-sync, instruction) resolved lazily on first
+ * use so a split-only session never asks for a video provider it does not need — the same
+ * reason the old single-scene path skipped that resolution for split regens.
+ */
+interface SceneEditContext {
+  jobId: number;
+  params: LongformInputParams;
+  scenes: StoryboardScene[];
+  queue: SceneEditQueue<SceneEditRequest>;
+  /**
+   * The render lane, resolved PER TASK (not per session): provider keys, the lip-sync lane and
+   * the instruction are documented as read at render time so a rotation mid-session is picked
+   * up — and the old per-click passes resolved them per click. A few cached DB reads per task.
+   */
+  renderLane: () => Promise<{
+    adapter: ReturnType<typeof createProviderAdapter>;
+    ttsType: string;
+    ttsKey: string;
+    instruction: string;
+    lipsync: LipsyncLane | null;
+  }>;
+  apimart: () => Promise<Awaited<ReturnType<typeof apimartAdapterForJob>>>;
+  subject: () => Promise<unknown>;
+  /** Concurrency lanes, mirroring `dispatchScenesByProvider`'s per-call caps. */
+  lanes: {
+    host: Semaphore;
+    motion: Semaphore;
+    still: Semaphore;
+    light: Semaphore;
+  };
+  /** Latest outcome per scene for the settle message — a later success clears an earlier failure. */
+  failures: Map<number, string>;
+  /** True once any task in this session replaced a clip — only then is the old cut stale. */
+  changed: boolean;
+}
+
+/** ffmpeg-only edits (un-split, reposition, reuse footage) — no provider, seconds each. */
+const LIGHT_EDIT_CONCURRENCY = 4;
+const SCENE_EDIT_LIGHT_DEADLINE_MS = 20 * 60_000;
+
+/**
+ * The session loop. Holds the job lock for as long as requests keep arriving, renders them
+ * concurrently, and settles the job row once at the end.
+ */
+async function runSceneEditSession(
+  jobId: number,
+  session: SceneEditSession
+): Promise<void> {
+  const { queue } = session;
+  await withJobLock(jobId, async () => {
+    const job = await getLongformVideoJobById(jobId);
+    if (!job) {
+      queue.close();
+      throw new Error("Job not found");
+    }
+    const params = job.inputParams as LongformInputParams;
+    const scenes = (job.storyboard as StoryboardScene[]) || [];
+    const lipsyncCap = params.faceImageUrl
+      ? await resolveLipsyncAdapter(params)
+          .then(l => l?.concurrency ?? ENV.heygenConcurrency)
+          .catch(() => ENV.heygenConcurrency)
+      : ENV.heygenConcurrency;
+    const ctx: SceneEditContext = {
+      jobId,
+      params,
+      scenes,
+      queue,
+      renderLane: async () => {
+        const provider = await getActiveProvider();
+        if (!provider) throw new Error("No active provider configured");
+        const { providerType: videoType, apiKey: videoKey } =
+          await resolveVideoProvider(provider);
+        const adapter = await providerAdapterForJob(
+          videoType as ProviderType,
+          videoKey
+        );
+        const { providerType: ttsType, apiKey: ttsKey } =
+          await resolveTTSProvider(provider);
+        const instruction =
+          (await getAppSetting(LONGFORM_INSTRUCTION_KEY)) ??
+          DEFAULT_LONGFORM_INSTRUCTION;
+        const lipsync = params.faceImageUrl
+          ? await resolveLipsyncAdapter(params)
+          : null;
+        return { adapter, ttsType, ttsKey, instruction, lipsync };
+      },
+      apimart: () => apimartAdapterForJob(params),
+      // Anchor on the title first (wins over any stale/empty persisted subject) so every
+      // re-enhance is subject-grounded — a titled job resolves synchronously.
+      subject: () => ensureVideoSubject(params),
+      lanes: {
+        host: new Semaphore(Math.max(1, lipsyncCap)),
+        motion: new Semaphore(Math.max(1, ENV.sixtynineVideoConcurrency)),
+        still: new Semaphore(Math.max(1, ENV.sixtynineImageConcurrency)),
+        light: new Semaphore(LIGHT_EDIT_CONCURRENCY),
+      },
+      failures: new Map(),
+      changed: false,
+    };
+
+    const inflight = new Set<Promise<void>>();
+    let flipped = false;
+    sceneEditLockHeld.add(jobId);
+    try {
+      for (;;) {
+        // A request for a scene this storyboard does not have is dropped here, before it can
+        // flip the row — the old path threw "Scene not found" before any DB write, and a
+        // stale client must not be able to un-stitch a finished film with a bad index.
+        const batch = queue.drain().filter(req => {
+          if (scenes.some(sc => sc.index === req.sceneIndex)) return true;
+          console.warn(
+            `[Longform ${jobId}] scene ${req.sceneIndex} not found — edit request dropped`
+          );
+          queue.finish(req.sceneIndex);
+          return false;
+        });
+        if (batch.length) {
+          // Title / style bible / books can be edited while a session runs (their routers
+          // write inputParams outside the lock and promise "takes effect on the next
+          // regenerate"); refresh the params in place so later-picked-up requests see them.
+          const fresh = await getLongformVideoJobById(jobId);
+          if (fresh?.inputParams)
+            Object.assign(params, fresh.inputParams as LongformInputParams);
+          // Apply the operator's text and mark the scenes in flight BEFORE any slow work, and
+          // persist immediately, so the client's very next poll shows them queued/rendering.
+          for (const req of batch) prepareSceneEdit(ctx, req);
+          await updateLongformVideoJob(jobId, {
+            ...(flipped
+              ? {}
+              : { status: "processing", stage: "clips", errorMessage: null }),
+            storyboard: scenes,
+          });
+          flipped = true;
+          for (const req of batch) {
+            const run = session.runOne ?? runSceneEdit;
+            const task: Promise<void> = run(ctx, req)
+              .catch(err =>
+                // runSceneEdit never throws; a test seam might. Never let one task's
+                // rejection escape the loop — the session settles regardless.
+                console.error(
+                  `[Longform ${jobId}] scene ${req.sceneIndex} edit task threw:`,
+                  describeError(err)
+                )
+              )
+              .finally(() => {
+                recordSceneEditOutcome(ctx, req);
+                queue.finish(req.sceneIndex);
+                inflight.delete(task);
+              });
+            inflight.add(task);
+          }
+        }
+        if (queue.idle) {
+          // Seal in the same tick we observe idle: a request arriving after this belongs to
+          // a NEW session, which queues behind this lock pass — nothing can fall between.
+          queue.close();
+          break;
+        }
+        await queue.waitForChange();
+      }
+      await Promise.all(inflight);
+      // Every request was dropped as unknown — nothing was flipped, nothing to settle.
+      if (!flipped) return;
+      await flushPersist(jobId);
+
+      // Settle once, union of the old single/batch rules: a clip-less scene (a batch regen
+      // that failed, or a hole it opened) fails the job so the UI offers "Retry failed
+      // scenes"; otherwise the job is done-with-errors and the failed scenes carry their own
+      // message. Render-only: the film stays un-stitched so the operator can preview before
+      // committing to a re-encode (regeneration and assembly are separate) — but ONLY when a
+      // clip actually changed; a session whose every edit failed leaves the existing cut
+      // playable, as the old single-scene failure path did.
+      const incomplete = describeIncompleteScenes(scenes);
+      if (incomplete) {
+        await updateLongformVideoJob(jobId, {
+          status: "failed",
+          storyboard: scenes,
+          errorMessage: incomplete,
+          completedAt: new Date(),
+        });
+        return;
+      }
+      await updateLongformVideoJob(jobId, {
+        status: "completed",
+        stage: "done",
+        storyboard: scenes,
+        ...(ctx.changed ? { finalVideoUrl: null } : {}),
+        errorMessage: ctx.failures.size
+          ? Array.from(ctx.failures.values()).join(" · ")
+          : null,
+        completedAt: new Date(),
+      });
+    } catch (err: any) {
+      // Session-level failure (DB, provider resolution) after the "processing" flip must not
+      // strand the job: fail the scenes still marked in flight and settle so the client stops
+      // polling and the editors unlock — "failed" if a batch edit left a clip-less hole (so
+      // Retry failed scenes is offered), done-with-error otherwise.
+      queue.close();
+      for (const s of scenes) {
+        if (s.sceneStatus === "processing" && queue.isActive(s.index)) {
+          s.sceneStatus = "failed";
+          s.error = s.error ?? describeError(err);
+        }
+      }
+      await Promise.allSettled(inflight);
+      // Land any per-task debounced persist BEFORE the settle write, as the main path does,
+      // so a stale timer can't overtake the settle 2.5 s later.
+      await flushPersist(jobId).catch(() => {});
+      const incomplete = describeIncompleteScenes(scenes);
+      await updateLongformVideoJob(jobId, {
+        status: incomplete ? "failed" : "completed",
+        stage: "done",
+        storyboard: scenes,
+        errorMessage:
+          `Scene edits failed: ${describeError(err)}` +
+          (incomplete ? ` — ${incomplete}` : ""),
+        completedAt: new Date(),
+      }).catch(onFailedStatusWriteError(jobId));
+      throw err;
+    } finally {
+      sceneEditLockHeld.delete(jobId);
+      // This document is done. A worker abandoned by a deadline may still be running with it
+      // and would otherwise persist it over a later pass's work — see `deadStoryboards`.
+      retireStoryboard(scenes);
+    }
+  });
+}
+
+/**
+ * Synchronous part of a request: land the operator's prompt on the scene and mark it in
+ * flight. Runs before the persist that announces the batch, so it must not await.
+ */
+function prepareSceneEdit(ctx: SceneEditContext, req: SceneEditRequest): void {
+  const scene = ctx.scenes.find(s => s.index === req.sceneIndex);
+  if (!scene) return; // runSceneEdit reports it
+  if (req.kind === "regen") {
+    const splitOnly = isSplitScene(scene);
+    // A split scene regenerates its RIGHT panel only — its editable prompt is `splitVisual`.
+    // On a host scene visualPrompt reaches no model (lip-sync has its own prompt), so it is
+    // effectively verbatim metadata either way.
+    const typedSplit = req.customSplitVisual?.trim();
+    const typedVisual = req.customVisualPrompt?.trim();
+    if (typedVisual) scene.visualPrompt = typedVisual;
+    if (splitOnly && typedSplit) scene.splitVisual = typedSplit;
+    const edited = splitOnly ? !!typedSplit : !!typedVisual;
+    // A verbatim edit is the operator taking this scene's direction by hand, so it becomes
+    // the baseline any LATER re-enhance rewrites from — otherwise the next non-verbatim regen
+    // rewrites the pre-edit seed and the typed intent vanishes with no trace.
+    // ponytail: visualBeat is deliberately NOT cleared — a verbatim render skips the enhancer.
+    if (req.verbatim && edited) {
+      if (splitOnly) scene.splitVisualSeed = scene.splitVisual;
+      else scene.visualPromptSeed = scene.visualPrompt;
+    } else if (edited && (!scene.hostPresent || splitOnly)) {
+      // Loud because it is invisible in the output: a non-verbatim override is only a SEED —
+      // enhanceBrollPrompts rewrites it, so a hand-typed clause can silently not ship (22
+      // scenes of job 181 rendered white bottles this way).
+      console.warn(
+        `[Longform ${ctx.jobId}] Prompt override on scene ${scene.index} is NOT verbatim — ` +
+          `it seeds the enhancer and will be reworded, not rendered as typed`
+      );
+    }
+    // Batch semantics: clear clips so the scene reads as in-flight and re-renders — same
+    // fields renderSceneClipInPlace overwrites. Split targets keep theirs: the existing
+    // composite is the only source the host panel can be recovered from on a pre-`hostClipUrls`
+    // scene, and regenerateSplitRight overwrites clipUrls itself when the new composite is up.
+    if (req.clearClip && !splitOnly) {
+      scene.clipUrl = undefined;
+      scene.clipUrls = [];
+    }
+  }
+  scene.sceneStatus = "processing";
+  scene.error = undefined;
+}
+
+/** Which session lane a request renders on, and the wall clock it gets. */
+function sceneEditLane(
+  ctx: SceneEditContext,
+  scene: StoryboardScene,
+  req: SceneEditRequest
+): { sem: Semaphore; deadlineMs: number } {
+  if (req.kind === "split" && req.edit.mode !== "prompt")
+    return { sem: ctx.lanes.light, deadlineMs: SCENE_EDIT_LIGHT_DEADLINE_MS };
+  if (req.kind === "split" || isSplitScene(scene)) {
+    // Right panel only: a square still (image lane) or, when the scene carries one, a moving
+    // b-roll panel (video lane). The host clip is reused, never re-synced.
+    return scene.splitMotion
+      ? { sem: ctx.lanes.motion, deadlineMs: SCENE_DEADLINE_MOTION_MS }
+      : { sem: ctx.lanes.still, deadlineMs: SCENE_DEADLINE_STILL_MS };
+  }
+  if (scene.hostPresent && ctx.params.faceImageUrl)
+    return { sem: ctx.lanes.host, deadlineMs: SCENE_DEADLINE_HOST_MS };
+  if (USE_IMAGE_LANE && scene.stillImage)
+    return { sem: ctx.lanes.still, deadlineMs: SCENE_DEADLINE_STILL_MS };
+  return { sem: ctx.lanes.motion, deadlineMs: SCENE_DEADLINE_MOTION_MS };
+}
+
+/**
+ * One request, start to finish: take a lane slot, run the edit under a wall clock, fold the
+ * outcome into the scene (never throws — a failed edit is a failed SCENE, the session goes
+ * on), and persist. Ordered so the job-level settle can count on every scene being terminal.
+ */
+async function runSceneEdit(
+  ctx: SceneEditContext,
+  req: SceneEditRequest
+): Promise<void> {
+  const { jobId, scenes } = ctx;
+  const scene = scenes.find(s => s.index === req.sceneIndex);
+  if (!scene) {
+    ctx.failures.set(req.sceneIndex, `Scene ${req.sceneIndex} not found`);
+    return;
+  }
+  const { sem, deadlineMs } = sceneEditLane(ctx, scene, req);
+  await sem.acquire();
+  try {
+    let settled = false;
+    const body = async (s: StoryboardScene) => {
+      try {
+        if (req.kind === "regen") await runRegenEdit(ctx, s, req);
+        else await runSplitEdit(ctx, s, req.edit);
+        s.regenerated = true;
+      } catch (e: any) {
+        s.sceneStatus = "failed";
+        s.error = describeError(e);
+        console.warn(
+          `[Longform ${jobId}] scene ${s.index} edit failed: ${s.error}`
+        );
+      } finally {
+        settled = true;
+      }
+    };
+    await withSceneDeadline(scene, deadlineMs, body);
+    if (!settled) {
+      // The deadline expired and the worker was abandoned — it keeps running and will keep
+      // writing into THIS object when the provider finally answers. Every other pass loads its
+      // own snapshot, so a ghost could never share an object with live work; this session
+      // holds one live document, so DETACH: swap a copy into the document and leave the ghost
+      // its orphan. A re-queued edit on this scene then renders on the copy, untouched by
+      // whatever the ghost writes later.
+      const at = scenes.indexOf(scene);
+      if (at >= 0) scenes[at] = { ...scene };
+    }
+  } finally {
+    sem.release();
+  }
+}
+
+/**
+ * After a task settles (any way): fold a failed scene into the settle message and persist the
+ * live storyboard. Runs in the session loop, not in the task body, so it is shared by every
+ * task runner — including the test seam.
+ */
+function recordSceneEditOutcome(
+  ctx: SceneEditContext,
+  req: SceneEditRequest
+): void {
+  const { jobId, scenes } = ctx;
+  const scene = scenes.find(s => s.index === req.sceneIndex);
+  if (scene?.sceneStatus === "failed") {
+    ctx.failures.set(
+      scene.index,
+      `Scene ${scene.index}: ${scene.error ?? "failed"}`
+    );
+  } else if (scene) {
+    ctx.failures.delete(scene.index);
+    if (scene.sceneStatus === "completed") ctx.changed = true;
+  }
+  const scenesDone = scenes.filter(s => s.clipUrls?.length || s.clipUrl).length;
+  schedulePersist(jobId, {
+    storyboard: scenes,
+    progress: jobProgress(jobId, {
+      scenesTotal: scenes.length,
+      scenesDone,
+    }),
+  });
+}
+
+/** A regenerate request's body — the old single-scene path, per task. */
+async function runRegenEdit(
+  ctx: SceneEditContext,
+  scene: StoryboardScene,
+  req: Extract<SceneEditRequest, { kind: "regen" }>
+): Promise<void> {
+  const { jobId, scenes, params } = ctx;
+  const splitOnly = isSplitScene(scene);
+  if ((!scene.hostPresent || splitOnly) && !req.verbatim) {
+    // Default: the prompt is a SEED — enhanceBrollPrompts rewrites it with the video subject
+    // threaded in (subjectLine), so regenerates never lose topic context. Then scrub host
+    // names like the main pipeline. Verbatim (operator-edited prompt) skips both.
+    await ctx.subject();
+    const regenEnhance = await enhanceBrollPrompts(scenes, params, [
+      scene.index,
+    ]);
+    if (regenEnhance.failedScenes.length)
+      appendJobWarning(jobId, enhanceWarningFor(regenEnhance));
+    const aliases = await hostNameAliases(params.channelKey);
+    scene.visualPrompt = stripHostNames(scene.visualPrompt, aliases);
+    if (scene.splitVisual)
+      scene.splitVisual = stripHostNames(scene.splitVisual, aliases);
+  }
+  if (splitOnly) {
+    // A split regen renders one panel and re-composites — no TTS, no lip-sync lane. The video
+    // adapter is only wanted for a MOVING panel; a missing/paused provider must not fail a
+    // regenerate that never needed one, so its resolution failure degrades to a still panel.
+    const videoAdapter =
+      (await ctx.apimart()) ??
+      (scene.splitMotion
+        ? await ctx
+            .renderLane()
+            .then(l => l.adapter)
+            .catch(() => undefined)
+        : undefined);
+    await regenerateSplitRight(jobId, scene, scenes, params, videoAdapter);
+    return;
+  }
+  const lane = await ctx.renderLane();
+  await renderSceneClipInPlace(
+    jobId,
+    scene,
+    scenes,
+    params,
+    lane.adapter,
+    lane.ttsType,
+    lane.ttsKey,
+    lane.lipsync,
+    lane.instruction
+  );
+}
+
+/**
+ * Regenerate a single scene's clip (and voiceover if missing). Queues the request on the job's
+ * edit session and returns at once with how it was taken (`queued` / `superseded` / `ignored`);
+ * the render runs concurrently with any other queued scene. Used by the review/regenerate path.
  *
  * `verbatim` renders a non-host `customVisualPrompt` EXACTLY as given — it skips the
  * enhanceBrollPrompts rewrite (and its host-name scrub), matching the batch
@@ -9620,176 +10196,28 @@ export async function regenerateScene(
   customVisualPrompt?: string,
   verbatim?: boolean,
   customSplitVisual?: string
-): Promise<void> {
-  const key = `${jobId}:${sceneIndex}`;
-  if (activeRegenerations.has(key)) {
+): Promise<EditAccept> {
+  const accept = enqueueSceneEdit(jobId, {
+    kind: "regen",
+    sceneIndex,
+    customVisualPrompt,
+    customSplitVisual,
+    verbatim,
+  });
+  if (accept === "ignored")
     console.warn(
-      `[Longform ${jobId}] Scene ${sceneIndex} regeneration already in progress — ignoring duplicate`
+      `[Longform ${jobId}] Scene ${sceneIndex} is rendering — regenerate request ignored`
     );
-    return;
-  }
-  activeRegenerations.add(key);
-  try {
-    await withJobLock(jobId, async () => {
-      const job = await getLongformVideoJobById(jobId);
-      if (!job) throw new Error("Job not found");
-      const params = job.inputParams as LongformInputParams;
-      const scenes = (job.storyboard as StoryboardScene[]) || [];
-      const scene = scenes.find(s => s.index === sceneIndex);
-      if (!scene) throw new Error(`Scene ${sceneIndex} not found`);
-
-      // Apply the operator's prompt before the early persist below, so the client can
-      // drop its local override on mutation success and poll the new value back. (On a
-      // host scene visualPrompt isn't rendered — lip-sync uses its own prompt — so it's
-      // effectively verbatim metadata either way.)
-      if (customVisualPrompt) scene.visualPrompt = customVisualPrompt;
-
-      // A split scene regenerates its RIGHT panel only — the host clip on the left is reused.
-      // Its editable prompt is `splitVisual`, so that (not visualPrompt) is what the operator's
-      // text lands on.
-      const splitOnly = isSplitScene(scene);
-      if (splitOnly && customSplitVisual) scene.splitVisual = customSplitVisual;
-      const edited = splitOnly ? !!customSplitVisual : !!customVisualPrompt;
-
-      // A verbatim edit is the operator taking this scene's direction by hand, so it becomes the
-      // baseline any LATER re-enhance rewrites from — otherwise the next non-verbatim regen
-      // rewrites the pre-edit seed and the typed intent vanishes with no trace.
-      // ponytail: visualBeat is deliberately NOT cleared here — a verbatim render skips the
-      // enhancer, so clearing only stripped the script arc off that later re-enhance. The batch
-      // path never cleared it either.
-      if (verbatim && edited) {
-        if (splitOnly) scene.splitVisualSeed = scene.splitVisual;
-        else scene.visualPromptSeed = scene.visualPrompt;
-      }
-
-      // Flip processing BEFORE the slow LLM re-enhance below and persist the scene's
-      // in-flight status, so the client's very next poll confirms the regen started
-      // (its queued-scene spinner settles on seen-processing → terminal, not on the
-      // stale pre-regen snapshot). Any throw before the render must un-strand this.
-      scene.sceneStatus = "processing";
-      scene.error = undefined;
-      await updateLongformVideoJob(jobId, {
-        status: "processing",
-        stage: "clips",
-        storyboard: scenes,
-      });
-
-      // Definite-assignment (!): the catch below re-throws, so past it these are set.
-      let adapter!: ReturnType<typeof createProviderAdapter>;
-      let ttsType!: string;
-      let ttsKey!: string;
-      let instruction!: string;
-      let lipsync!: LipsyncLane | null;
-      try {
-        if ((!scene.hostPresent || splitOnly) && !(verbatim && edited)) {
-          // Default: customVisualPrompt is a SEED — enhanceBrollPrompts rewrites it with the
-          // video subject threaded in (subjectLine), so regenerates never lose topic context.
-          // Then scrub host names like the main pipeline (longformVideo.ts:5108-5112).
-          // Verbatim (operator-edited prompt) skips both, like batch verbatimIndices.
-          // Anchor on the title first (wins over any stale/empty persisted subject) so the
-          // re-enhance is always subject-grounded — a titled job resolves synchronously.
-          await ensureVideoSubject(params);
-          const regenEnhance = await enhanceBrollPrompts(scenes, params, [
-            sceneIndex,
-          ]);
-          if (regenEnhance.failedScenes.length) {
-            appendJobWarning(jobId, enhanceWarningFor(regenEnhance));
-          }
-          const aliases = await hostNameAliases(params.channelKey);
-          scene.visualPrompt = stripHostNames(scene.visualPrompt, aliases);
-          if (scene.splitVisual)
-            scene.splitVisual = stripHostNames(scene.splitVisual, aliases);
-        }
-
-        // A split regen renders one still and re-composites — no video model, no TTS, no
-        // lip-sync lane. Skip resolving them so a missing/paused provider can't fail a
-        // regenerate that never needed one.
-        if (!splitOnly) {
-          const provider = await getActiveProvider();
-          if (!provider) throw new Error("No active provider configured");
-          const { providerType: videoType, apiKey: videoKey } =
-            await resolveVideoProvider(provider);
-          adapter = await providerAdapterForJob(
-            videoType as ProviderType,
-            videoKey
-          );
-          ({ providerType: ttsType, apiKey: ttsKey } =
-            await resolveTTSProvider(provider));
-          instruction =
-            (await getAppSetting(LONGFORM_INSTRUCTION_KEY)) ??
-            DEFAULT_LONGFORM_INSTRUCTION;
-          lipsync = params.faceImageUrl
-            ? await resolveLipsyncAdapter(params)
-            : null;
-        }
-      } catch (e: any) {
-        // Pre-render failure after the early "processing" flip — settle the job back to
-        // done-with-error exactly like the render-failure path so it can't strand "processing".
-        scene.sceneStatus = "failed";
-        scene.error = e.message;
-        await updateLongformVideoJob(jobId, {
-          status: "completed",
-          stage: "done",
-          storyboard: scenes,
-          errorMessage: `Scene ${sceneIndex} regeneration failed: ${e.message}`,
-        });
-        throw e;
-      }
-
-      try {
-        if (splitOnly) {
-          await regenerateSplitRight(
-            jobId,
-            scene,
-            scenes,
-            params,
-            (await apimartAdapterForJob(params)) ?? adapter
-          );
-        } else {
-          await renderSceneClipInPlace(
-            jobId,
-            scene,
-            scenes,
-            params,
-            adapter,
-            ttsType,
-            ttsKey,
-            lipsync,
-            instruction
-          );
-        }
-      } catch (e: any) {
-        scene.sceneStatus = "failed";
-        scene.error = e.message;
-        await flushPersist(jobId);
-        await updateLongformVideoJob(jobId, {
-          status: "completed",
-          stage: "done",
-          storyboard: scenes,
-          errorMessage: `Scene ${sceneIndex} regeneration failed: ${e.message}`,
-        });
-        throw e;
-      }
-
-      scene.regenerated = true;
-      await flushPersist(jobId);
-      // Render-only: leave the film un-stitched so the operator can preview this clip
-      // before committing to a re-encode. The stale cut is hidden and the manual
-      // Assemble button rebuilds it (regeneration and assembly are separate).
-      await settleRenderOnly(jobId, scenes);
-    });
-  } finally {
-    activeRegenerations.delete(key);
-  }
+  return accept;
 }
 
 /**
- * Regenerate a chosen set of scenes (storyboard multi-select → batch regen), then assemble
- * once. Mirrors `retryFailedScenes` but targets scenes by index and force-clears their clips
- * so they actually re-render (vs. retry, which only fills clip-less scenes). `promptOverrides`
- * (from the storyboard editor) replace a scene's `visualPrompt` before render; unedited scenes
- * keep their existing prompt. Renders concurrently via `dispatchScenesByProvider`, then
- * stitches once; fails loudly listing any holdouts.
+ * Regenerate a chosen set of scenes (storyboard multi-select → batch regen). Each target is
+ * queued on the job's edit session with BATCH semantics — its clip is cleared up front so it
+ * reads as in-flight and a clip-less outcome fails the job (the UI then offers "Retry failed
+ * scenes") — and they render concurrently with anything else queued. `promptOverrides` (from
+ * the storyboard editor) replace a scene's `visualPrompt` before render; unedited scenes keep
+ * their existing prompt. Returns the per-scene acceptance.
  *
  * `verbatimIndices` lists non-host scenes whose override must render EXACTLY as given — they skip
  * `enhanceBrollPrompts`. Use only when the enhancer keeps steering a scene wrong (e.g. narration
@@ -9807,218 +10235,29 @@ export async function regenerateScenes(
     splitVisual?: string;
   }>,
   verbatimIndices?: number[]
-): Promise<void> {
-  // Dedup against in-flight single/batch regens (fire-and-forget tRPC can double-fire).
-  const wanted = sceneIndices.filter(
-    i => !activeRegenerations.has(`${jobId}:${i}`)
-  );
-  if (wanted.length === 0) {
-    console.warn(
-      `[Longform ${jobId}] All requested scenes already regenerating — ignoring`
-    );
-    return;
-  }
-  wanted.forEach(i => activeRegenerations.add(`${jobId}:${i}`));
-  const wantedSet = new Set(wanted);
-  try {
-    await withJobLock(jobId, async () => {
-      const job = await getLongformVideoJobById(jobId);
-      if (!job) throw new Error("Job not found");
-      const params = job.inputParams as LongformInputParams;
-      const scenes = (job.storyboard as StoryboardScene[]) || [];
-      const targets = scenes.filter(s => wantedSet.has(s.index));
-      if (targets.length === 0)
-        throw new Error("No matching scenes to regenerate");
-
-      // Apply edited prompts as SEEDS (not verbatim): the b-roll/still render lanes read
-      // scene.visualPrompt downstream, and enhanceBrollPrompts below rewrites every cutaway seed
-      // with the video subject threaded in, so overrides stay topic-anchored. Host lip-sync
-      // ignores visualPrompt by design (buildLipsyncPrompt), so host overrides are left verbatim.
-      // A split target's editable prompt is `splitVisual` (its host half is reused and its
-      // visualPrompt reaches no model), so its override lands there instead.
-      if (promptOverrides?.length) {
-        const asTyped = new Set(verbatimIndices ?? []);
-        const overrides = new Map(promptOverrides.map(p => [p.index, p]));
-        const reworded: number[] = [];
-        for (const s of targets) {
-          const o = overrides.get(s.index);
-          if (!o) continue;
-          if (isSplitScene(s)) {
-            if (!o.splitVisual?.trim()) continue;
-            s.splitVisual = o.splitVisual.trim();
-            if (asTyped.has(s.index)) s.splitVisualSeed = s.splitVisual;
-            else reworded.push(s.index);
-          } else if (o.visualPrompt?.trim()) {
-            s.visualPrompt = o.visualPrompt.trim();
-            // Verbatim ⇒ the operator owns this prompt; make it the baseline a later
-            // re-enhance rewrites from, not just this render's text.
-            if (asTyped.has(s.index)) s.visualPromptSeed = s.visualPrompt;
-            else reworded.push(s.index);
-          }
-        }
-        // Loud because it is invisible in the output: a non-verbatim override is only a seed —
-        // enhanceBrollPrompts below rewrites it, so a hand-typed clause can silently not ship
-        // (22 scenes of job 181 rendered white bottles this way).
-        if (reworded.length)
-          console.warn(
-            `[Longform ${jobId}] Prompt override(s) on scene(s) ${reworded.join(", ")} are ` +
-              `NOT verbatim — they seed the enhancer and will be reworded, not rendered as typed`
-          );
-      }
-
-      // ponytail: clear clips so the chosen scenes re-render — same fields renderSceneClipInPlace
-      // overwrites. Done (and persisted) BEFORE the slow LLM re-enhance below so the client's very
-      // next poll shows the targets in-flight and its queued-scene spinners confirm the regen
-      // started (settle is seen-processing → terminal, not the stale pre-regen snapshot).
-      for (const s of targets) {
-        // Split targets keep their clips: the existing composite is the only source the host
-        // panel can be recovered from on a scene rendered before `hostClipUrls` existed, and
-        // regenerateSplitRight overwrites clipUrls itself when the new composite is up.
-        if (!isSplitScene(s)) {
-          s.clipUrl = undefined;
-          s.clipUrls = [];
-        }
-        s.sceneStatus = "processing";
-        s.error = undefined;
-      }
-      await updateLongformVideoJob(jobId, {
-        status: "processing",
-        stage: "clips",
-        errorMessage: null,
-        storyboard: scenes,
-      });
-
-      try {
-        // Every cutaway target re-enhances so it picks up the current enhancer wording AND the
-        // title-anchored subject, then gets the same host-name scrub as the main pipeline
-        // (5108-5112). Host scenes are a no-op in enhanceBrollPrompts and are excluded here,
-        // as are verbatim targets (operator-edited prompts render exactly as typed).
-        const verbatim = new Set(verbatimIndices ?? []);
-        const reEnhanceIndices = targets
-          .filter(
-            s => (!s.hostPresent || isSplitScene(s)) && !verbatim.has(s.index)
-          )
-          .map(s => s.index);
-        if (reEnhanceIndices.length) {
-          // Anchor on the title (wins over stale/empty persisted subject); titled → no LLM call.
-          await ensureVideoSubject(params);
-          const batchEnhance = await enhanceBrollPrompts(
-            scenes,
-            params,
-            reEnhanceIndices
-          );
-          if (batchEnhance.failedScenes.length) {
-            appendJobWarning(jobId, enhanceWarningFor(batchEnhance));
-          }
-          const reSet = new Set(reEnhanceIndices);
-          const aliases = await hostNameAliases(params.channelKey);
-          for (const s of targets) {
-            if (!reSet.has(s.index)) continue;
-            s.visualPrompt = stripHostNames(s.visualPrompt, aliases);
-            if (s.splitVisual)
-              s.splitVisual = stripHostNames(s.splitVisual, aliases);
-          }
-        }
-
-        const provider = await getActiveProvider();
-        if (!provider) throw new Error("No active provider configured");
-        const { providerType: videoType, apiKey: videoKey } =
-          await resolveVideoProvider(provider);
-        const adapter = await providerAdapterForJob(
-          videoType as ProviderType,
-          videoKey
-        );
-        const { providerType: ttsType, apiKey: ttsKey } =
-          await resolveTTSProvider(provider);
-        const instruction =
-          (await getAppSetting(LONGFORM_INSTRUCTION_KEY)) ??
-          DEFAULT_LONGFORM_INSTRUCTION;
-        const lipsync = params.faceImageUrl
-          ? await resolveLipsyncAdapter(params)
-          : null;
-
-        await dispatchScenesByProvider(
-          targets,
-          lipsync,
-          params,
-          async scene => {
-            try {
-              if (isSplitScene(scene)) {
-                await regenerateSplitRight(
-                  jobId,
-                  scene,
-                  scenes,
-                  params,
-                  (await apimartAdapterForJob(params)) ?? adapter
-                );
-              } else {
-                await renderSceneClipInPlace(
-                  jobId,
-                  scene,
-                  scenes,
-                  params,
-                  adapter,
-                  ttsType,
-                  ttsKey,
-                  lipsync,
-                  instruction
-                );
-              }
-              scene.regenerated = true;
-            } catch (e: any) {
-              scene.sceneStatus = "failed";
-              scene.error = describeError(e);
-            }
-            const scenesDone = scenes.filter(
-              s => s.clipUrls?.length || s.clipUrl
-            ).length;
-            schedulePersist(jobId, {
-              storyboard: scenes,
-              progress: jobProgress(jobId, {
-                scenesTotal: scenes.length,
-                scenesDone,
-              }),
-            });
-          },
-          jobId
-        );
-        await flushPersist(jobId);
-
-        const incomplete = describeIncompleteScenes(scenes);
-        if (incomplete) {
-          await updateLongformVideoJob(jobId, {
-            status: "failed",
-            storyboard: scenes,
-            errorMessage: incomplete,
-            completedAt: new Date(),
-          });
-          return;
-        }
-        // Render-only: leave the film un-stitched so the operator can preview the
-        // new clips before a re-encode; the manual Assemble button rebuilds it.
-        await settleRenderOnly(jobId, scenes);
-      } catch (err: any) {
-        // Any throw after the early "processing" flip (re-enhance, provider resolution, or
-        // assembly — dispatch already catches per scene) must not strand the job "processing":
-        // the client would poll forever and the regen buttons would stay locked out.
-        for (const s of targets) {
-          if (s.sceneStatus === "processing") {
-            s.sceneStatus = "failed";
-            s.error = s.error ?? describeError(err);
-          }
-        }
-        await updateLongformVideoJob(jobId, {
-          status: "failed",
-          storyboard: scenes,
-          errorMessage: describeError(err) || "Scene regeneration failed",
-          completedAt: new Date(),
-        }).catch(onFailedStatusWriteError(jobId));
-        throw err;
-      }
+): Promise<Record<number, EditAccept>> {
+  const overrides = new Map((promptOverrides ?? []).map(p => [p.index, p]));
+  const verbatim = new Set(verbatimIndices ?? []);
+  const out: Record<number, EditAccept> = {};
+  for (const sceneIndex of sceneIndices) {
+    const o = overrides.get(sceneIndex);
+    out[sceneIndex] = enqueueSceneEdit(jobId, {
+      kind: "regen",
+      sceneIndex,
+      customVisualPrompt: o?.visualPrompt,
+      customSplitVisual: o?.splitVisual,
+      verbatim: verbatim.has(sceneIndex),
+      clearClip: true,
     });
-  } finally {
-    wanted.forEach(i => activeRegenerations.delete(`${jobId}:${i}`));
   }
+  const ignored = Object.entries(out)
+    .filter(([, a]) => a === "ignored")
+    .map(([i]) => i);
+  if (ignored.length)
+    console.warn(
+      `[Longform ${jobId}] Scene(s) ${ignored.join(", ")} are rendering — batch request ignored for them`
+    );
+  return out;
 }
 
 /**
@@ -10514,7 +10753,7 @@ export function sanitizeSplitLayout(
 /**
  * The SPLIT EDITOR's server half: edit ONE host scene's split state on a rendered job, treating
  * the scene as the two clips it really is — the lip-synced host (`hostClipUrls`, never
- * re-rendered here) and the right panel (`splitRightUrl`). Three instructions:
+ * re-rendered here) and the right panel (`splitRightUrl`). Four instructions:
  *
  * - `off`    — back to full-frame host: the bare host renders become the scene clip again.
  *              Pure re-pointing (plus at most one host-panel crop on a pre-field scene).
@@ -10527,170 +10766,147 @@ export function sanitizeSplitLayout(
  *              ffmpeg, no generation — this is the "show what I want beside me" move.
  * - `layout` — reposition the composite: host side, seam position, per-panel pan (see
  *              `SplitLayout`). Both halves are reused as-is, so this is pure ffmpeg — and a
- *              manual `hostFocusX` also skips the face-detection Haiku calls the automatic
- *              crop needs. The layout persists on the scene, so later panel swaps keep it.
+ *              manual `hostFocusX` also skips the face-detection pass the automatic crop
+ *              needs. The layout persists on the scene, so later panel swaps keep it.
  *
- * Settles render-only like every scene edit: preview the new composite, then Assemble.
+ * Queued on the job's edit session like a regenerate (returns at once with the acceptance) and
+ * runs concurrently with other queued scenes; the session settles render-only — preview the new
+ * composite, then Assemble.
  */
 export async function setSceneSplit(
   jobId: number,
   sceneIndex: number,
   edit: SceneSplitEdit
-): Promise<void> {
-  const key = `${jobId}:${sceneIndex}`;
-  if (activeRegenerations.has(key)) {
+): Promise<EditAccept> {
+  const accept = enqueueSceneEdit(jobId, { kind: "split", sceneIndex, edit });
+  if (accept === "ignored")
     console.warn(
-      `[Longform ${jobId}] Scene ${sceneIndex} already regenerating — ignoring split edit`
+      `[Longform ${jobId}] Scene ${sceneIndex} is rendering — split edit ignored`
     );
-    return;
-  }
-  activeRegenerations.add(key);
-  try {
-    await withJobLock(jobId, async () => {
-      const job = await getLongformVideoJobById(jobId);
-      if (!job) throw new Error("Job not found");
-      const params = job.inputParams as LongformInputParams;
-      const scenes = (job.storyboard as StoryboardScene[]) || [];
-      const scene = scenes.find(s => s.index === sceneIndex);
-      if (!scene) throw new Error(`Scene ${sceneIndex} not found`);
-      if (!scene.hostPresent)
+  return accept;
+}
+
+/** A split request's body — one instruction on one host scene, inside the edit session. */
+async function runSplitEdit(
+  ctx: SceneEditContext,
+  scene: StoryboardScene,
+  edit: SceneSplitEdit
+): Promise<void> {
+  const { jobId, scenes, params } = ctx;
+  if (!scene.hostPresent)
+    throw new Error(
+      `Scene ${scene.index} is b-roll — only host scenes can be split`
+    );
+  // Recover the bare host clips while the scene's CURRENT state still says what the
+  // finished clip is (composite vs full-frame) — see ensureBareHostClips.
+  await ensureBareHostClips(jobId, scene, scenes);
+
+  if (edit.mode === "off") {
+    scene.splitVisual = undefined;
+    scene.splitVisualSeed = undefined;
+    scene.splitMotion = undefined;
+    scene.splitRightUrl = undefined;
+    scene.splitLayout = undefined; // geometry of a composite that no longer exists
+    scene.clipUrls = [...scene.hostClipUrls!];
+    syncSceneClipFields(scene);
+    scene.sceneStatus = "completed";
+  } else if (edit.mode === "layout") {
+    if (!isSplitScene(scene))
+      throw new Error(
+        `Scene ${scene.index} is not a split screen — make it one first`
+      );
+    const dims = dimensionsFor(TALKING_HEAD_ASPECT_RATIO);
+    // Recover the panel from the current composite BEFORE the layout changes —
+    // the crop has to land where the OLD geometry put it (host recovery already
+    // ran the same way in ensureBareHostClips above).
+    if (!scene.splitRightUrl) {
+      const composite = scene.clipUrls?.[0] ?? scene.clipUrl;
+      if (!composite)
         throw new Error(
-          `Scene ${sceneIndex} is b-roll — only host scenes can be split`
+          `Scene ${scene.index} has no rendered composite to reposition — render it first`
         );
-
-      // Recover the bare host clips while the scene's CURRENT state still says what the
-      // finished clip is (composite vs full-frame) — see ensureBareHostClips.
-      await ensureBareHostClips(jobId, scene, scenes);
-
-      scene.sceneStatus = "processing";
-      scene.error = undefined;
-      await updateLongformVideoJob(jobId, {
-        status: "processing",
-        stage: "clips",
-        errorMessage: null,
-        storyboard: scenes,
+      const buf = await extractBrollPanel(composite, {
+        ...dims,
+        layout: scene.splitLayout,
       });
-
-      try {
-        if (edit.mode === "off") {
-          scene.splitVisual = undefined;
-          scene.splitVisualSeed = undefined;
-          scene.splitMotion = undefined;
-          scene.splitRightUrl = undefined;
-          scene.splitLayout = undefined; // geometry of a composite that no longer exists
-          scene.clipUrls = [...scene.hostClipUrls!];
-          syncSceneClipFields(scene);
-          scene.sceneStatus = "completed";
-        } else if (edit.mode === "layout") {
-          if (!isSplitScene(scene))
-            throw new Error(
-              `Scene ${sceneIndex} is not a split screen — make it one first`
-            );
-          const dims = dimensionsFor(TALKING_HEAD_ASPECT_RATIO);
-          // Recover the panel from the current composite BEFORE the layout changes —
-          // the crop has to land where the OLD geometry put it (host recovery already
-          // ran the same way in ensureBareHostClips above).
-          if (!scene.splitRightUrl) {
-            const composite = scene.clipUrls?.[0] ?? scene.clipUrl;
-            if (!composite)
-              throw new Error(
-                `Scene ${sceneIndex} has no rendered composite to reposition — render it first`
-              );
-            const buf = await extractBrollPanel(composite, {
-              ...dims,
-              layout: scene.splitLayout,
-            });
-            const key = `longform/${jobId}/panel-${scene.index}-${nanoid(6)}.mp4`;
-            const { url } = await storagePut(key, buf, "video/mp4");
-            scene.splitRightUrl = url;
-          }
-          scene.splitLayout = sanitizeSplitLayout(edit.layout);
-          scene.clipUrls = await compositeSceneSplit(
-            jobId,
-            scene,
-            scene.hostClipUrls!,
-            scene.splitRightUrl,
-            scene.splitLayout
-          );
-          syncSceneClipFields(scene);
-          scene.sceneStatus = "completed";
-        } else if (edit.mode === "prompt") {
-          const typed = edit.prompt?.trim();
-          if (typed) {
-            scene.splitVisual = typed;
-            if (edit.verbatim) scene.splitVisualSeed = typed;
-          } else if (!scene.splitVisual) {
-            // Converting to a split with no prompt given — seed like the converge pass does.
-            scene.splitVisual = scene.brollVisual ?? scene.visualPrompt;
-          }
-          // A seeded / non-verbatim prompt goes through the same person-free right-panel
-          // rewrite as the pipeline, so a host-shot seed can't reach the image model raw.
-          if (!edit.verbatim) {
-            await ensureVideoSubject(params);
-            const enh = await enhanceBrollPrompts(scenes, params, [
-              scene.index,
-            ]);
-            if (enh.failedScenes.length)
-              appendJobWarning(jobId, enhanceWarningFor(enh));
-            const aliases = await hostNameAliases(params.channelKey);
-            if (scene.splitVisual)
-              scene.splitVisual = stripHostNames(scene.splitVisual, aliases);
-          }
-          scene.splitMotion = undefined; // an edited panel renders as a still — predictable + cheap
-          await regenerateSplitRight(
-            jobId,
-            scene,
-            scenes,
-            params,
-            (await apimartAdapterForJob(params)) ?? undefined
-          );
-        } else {
-          const source = scenes.find(s => s.index === edit.sourceIndex);
-          if (!source) throw new Error(`Scene ${edit.sourceIndex} not found`);
-          // Its standalone panel when it has one; else its own finished clip. Host sources
-          // only contribute their PANEL — a face beside a face is never wanted.
-          const rightUrl =
-            source.splitRightUrl ??
-            (source.hostPresent
-              ? undefined
-              : (source.clipUrls?.[0] ?? source.clipUrl));
-          if (!rightUrl)
-            throw new Error(
-              `Scene ${edit.sourceIndex} has no footage to reuse as a panel`
-            );
-          scene.clipUrls = await compositeSceneSplit(
-            jobId,
-            scene,
-            scene.hostClipUrls!,
-            rightUrl,
-            scene.splitLayout
-          );
-          scene.splitRightUrl = rightUrl;
-          // Label truthfulness: the timeline derives its badges from these flags.
-          scene.splitVisual =
-            source.splitVisual ?? source.visualPrompt ?? "reused footage";
-          scene.splitMotion =
-            !source.hostPresent && !source.stillImage ? true : undefined;
-          syncSceneClipFields(scene);
-          scene.sceneStatus = "completed";
-        }
-        scene.regenerated = true;
-        await flushPersist(jobId);
-        await settleRenderOnly(jobId, scenes);
-      } catch (err: any) {
-        scene.sceneStatus = "failed";
-        scene.error = describeError(err);
-        await updateLongformVideoJob(jobId, {
-          status: "failed",
-          storyboard: scenes,
-          errorMessage: describeError(err) || "Split edit failed",
-          completedAt: new Date(),
-        }).catch(onFailedStatusWriteError(jobId));
-        throw err;
-      }
-    });
-  } finally {
-    activeRegenerations.delete(key);
+      const key = `longform/${jobId}/panel-${scene.index}-${nanoid(6)}.mp4`;
+      const { url } = await storagePut(key, buf, "video/mp4");
+      scene.splitRightUrl = url;
+    }
+    scene.splitLayout = sanitizeSplitLayout(edit.layout);
+    scene.clipUrls = await compositeSceneSplit(
+      jobId,
+      scene,
+      scene.hostClipUrls!,
+      scene.splitRightUrl,
+      scene.splitLayout
+    );
+    syncSceneClipFields(scene);
+    scene.sceneStatus = "completed";
+  } else if (edit.mode === "prompt") {
+    const typed = edit.prompt?.trim();
+    if (typed) {
+      scene.splitVisual = typed;
+      if (edit.verbatim) scene.splitVisualSeed = typed;
+    } else if (!scene.splitVisual) {
+      // Converting to a split with no prompt given — seed like the converge pass does.
+      scene.splitVisual = scene.brollVisual ?? scene.visualPrompt;
+    }
+    // A seeded / non-verbatim prompt goes through the same person-free right-panel
+    // rewrite as the pipeline, so a host-shot seed can't reach the image model raw.
+    if (!edit.verbatim) {
+      await ctx.subject();
+      const enh = await enhanceBrollPrompts(scenes, params, [scene.index]);
+      if (enh.failedScenes.length)
+        appendJobWarning(jobId, enhanceWarningFor(enh));
+      const aliases = await hostNameAliases(params.channelKey);
+      if (scene.splitVisual)
+        scene.splitVisual = stripHostNames(scene.splitVisual, aliases);
+    }
+    scene.splitMotion = undefined; // an edited panel renders as a still — predictable + cheap
+    await regenerateSplitRight(
+      jobId,
+      scene,
+      scenes,
+      params,
+      (await ctx.apimart()) ?? undefined
+    );
+  } else {
+    const source = scenes.find(s => s.index === edit.sourceIndex);
+    if (!source) throw new Error(`Scene ${edit.sourceIndex} not found`);
+    // The source is mid-edit in this very session: its clip is about to be replaced (or,
+    // for a batch regen, already cleared), so compositing from it would show stale or no
+    // footage. Refuse with a reason rather than render the wrong thing.
+    if (ctx.queue.has(source.index))
+      throw new Error(
+        `Scene ${source.index} is rendering — wait for it to finish, then reuse its footage`
+      );
+    // Its standalone panel when it has one; else its own finished clip. Host sources
+    // only contribute their PANEL — a face beside a face is never wanted.
+    const rightUrl =
+      source.splitRightUrl ??
+      (source.hostPresent
+        ? undefined
+        : (source.clipUrls?.[0] ?? source.clipUrl));
+    if (!rightUrl)
+      throw new Error(
+        `Scene ${edit.sourceIndex} has no footage to reuse as a panel`
+      );
+    scene.clipUrls = await compositeSceneSplit(
+      jobId,
+      scene,
+      scene.hostClipUrls!,
+      rightUrl,
+      scene.splitLayout
+    );
+    scene.splitRightUrl = rightUrl;
+    // Label truthfulness: the timeline derives its badges from these flags.
+    scene.splitVisual =
+      source.splitVisual ?? source.visualPrompt ?? "reused footage";
+    scene.splitMotion =
+      !source.hostPresent && !source.stillImage ? true : undefined;
+    syncSceneClipFields(scene);
+    scene.sceneStatus = "completed";
   }
 }
 

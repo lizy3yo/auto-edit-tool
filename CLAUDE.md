@@ -133,6 +133,14 @@ Express · tRPC · Drizzle · MySQL.
   way ffmpeg will and re-detects to VERIFY the face sits mid-panel. The result persists as
   `scene.splitAutoFocusX` and is reused by every recomposite; manual `splitLayout.hostFocusX`
   overrides it
+- `server/sceneEditQueue.ts` + `enqueueSceneEdit`/`runSceneEditSession` (longformVideo) — operator
+  edits on a rendered job (regenerate scene, batch regenerate, split edits) are queued per job and
+  run by ONE edit session inside a single `withJobLock` pass: one live storyboard document, tasks
+  rendered concurrently through lane semaphores, new clicks picked up while it runs, job flipped
+  `processing` once and settled once. Same scene: pending ⇒ superseded, rendering ⇒ ignored (the
+  router returns `accepted`). `pollJob.sceneEdits {queued, active, editing}` drives the client's
+  per-scene Queued/Rendering badges and keeps the editors live (`isPipelineRunning`, not
+  `isProcessing`, hides them)
 - `server/narrationAlignment.ts`, `server/_core/voiceTranscription.ts` — whisperx
 - `server/costMeter.ts` + `server/pricing.ts` — per-video spend. Every billable adapter calls
   `recordUsage`; an `AsyncLocalStorage` set inside `withJobLock` attributes it, so the six
