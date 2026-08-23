@@ -126,6 +126,13 @@ Express · tRPC · Drizzle · MySQL.
   studio headshot. Host beats are bucketed into `HOST_PLATE_LOOKS` looks sharing one plate —
   fewer generated faces to keep consistent, and fewer images. Falls back to the raw photo on any
   failure
+- `server/faceAlign.ts` + `server/pico.ts` — split-screen host centring. The host panel is the
+  middle ~44% of the 16:9 host clip, so the crop is panned to the face: `pico.ts` is a vendored
+  pure-JS frontal-face cascade (asset `server/assets/facefinder`, offline, deterministic),
+  Haiku is the fallback, and `measureHostFocusX` (videoAssembly) crops the sampled frames the
+  way ffmpeg will and re-detects to VERIFY the face sits mid-panel. The result persists as
+  `scene.splitAutoFocusX` and is reused by every recomposite; manual `splitLayout.hostFocusX`
+  overrides it
 - `server/narrationAlignment.ts`, `server/_core/voiceTranscription.ts` — whisperx
 - `server/costMeter.ts` + `server/pricing.ts` — per-video spend. Every billable adapter calls
   `recordUsage`; an `AsyncLocalStorage` set inside `withJobLock` attributes it, so the six

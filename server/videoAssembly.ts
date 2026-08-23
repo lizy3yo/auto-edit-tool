@@ -21,7 +21,16 @@ import { randomUUID } from "crypto";
 import path from "path";
 import os from "os";
 import { getMediaDuration } from "./mediaProbe";
-import { detectFaceCenterX, focusCropX, medianFocus } from "./faceAlign";
+import {
+  correctFocus,
+  cropWindow,
+  detectFace,
+  focusCropX,
+  medianFocus,
+  panelFraction,
+  type FaceSource,
+} from "./faceAlign";
+import sharp from "sharp";
 import { getFFmpegPath } from "./ffmpegPath";
 import { Semaphore } from "./providers/semaphore";
 import { presignOwnBucketUrl } from "./storage";
@@ -1605,17 +1614,35 @@ export async function concatAudio(
   });
 }
 
+/** What `compositeSplitScreenClip` decided about the host crop, for logging and persistence. */
+export interface SplitCompositeResult {
+  buffer: Buffer;
+  /** Host focus the composite was rendered with; null ⇒ ffmpeg's centred crop. */
+  hostFocusX: number | null;
+  /**
+   * Where that focus came from: the operator (`manual`), a value persisted from an earlier
+   * composite of the same host clip (`hint`), a detector (`pico` / `haiku`), or nothing at all
+   * (`centre` — no face found, legacy behaviour).
+   */
+  focusSource: "manual" | "hint" | FaceSource | "centre";
+}
+
 /**
  * Composite a lip-synced host clip (LEFT panel) with a b-roll clip (RIGHT panel) into one
  * split-screen clip. Downloads both, measures the host clip's duration (it is the
  * authoritative length — its mouth is lip-synced to the narration), loops/trims the right
- * clip to match, and returns the composited MP4 bytes. Cleans up its temp dir.
+ * clip to match, and returns the composited MP4 bytes plus the host focus it used. Cleans up
+ * its temp dir.
  *
- * Before compositing it grabs one frame of the host clip and locates the face, so the host
- * panel is cropped around the face instead of around the frame's midpoint. See `faceAlign.ts`
- * for why that is needed and `buildSplitScreenArgs` for what the position does. A MANUAL
- * `layout.hostFocusX` overrides all of that: the operator has placed the host themselves, so
- * the detection (three Haiku calls) is skipped entirely and the recomposite is deterministic.
+ * The host crop is decided in this order:
+ *   1. `layout.hostFocusX` — the operator placed the host; no detection, deterministic.
+ *   2. `autoFocusHint` — a focus this host clip was measured at before (callers persist it on
+ *      the scene as `splitAutoFocusX`), so a recomposite — retrofit, panel swap, seam drag —
+ *      lands on the same pixels without re-measuring.
+ *   3. `measureHostFocusX` — sample frames, find the face, pan the crop to it, then crop those
+ *      frames the way ffmpeg will and CHECK the face sits mid-panel, correcting if not. See
+ *      `faceAlign.ts` for why a measured crop is needed and `buildSplitScreenArgs` for what the
+ *      focus does.
  */
 export async function compositeSplitScreenClip(
   hostUrl: string,
@@ -1625,17 +1652,35 @@ export async function compositeSplitScreenClip(
     height: number;
     fps?: number;
     layout?: SplitLayout | null;
+    /** A previously measured auto focus for THIS host clip — reused instead of re-measuring. */
+    autoFocusHint?: number | null;
   }
-): Promise<Buffer> {
+): Promise<SplitCompositeResult> {
   return withTempDir("split", async workDir => {
     const hostPath = await downloadToTemp(hostUrl, workDir, "host.mp4");
     const rightPath = await downloadToTemp(rightUrl, workDir, "right.mp4");
     const durationSec = await getMediaDuration(hostPath);
+    const { hostW } = resolveSplitLayout(opts.width, opts.height, opts.layout);
     const manualFocus = opts.layout?.hostFocusX;
-    const hostFocusX =
-      manualFocus != null && Number.isFinite(manualFocus)
-        ? manualFocus
-        : await measureHostFocusX(hostPath, durationSec, workDir);
+    let hostFocusX: number | null;
+    let focusSource: SplitCompositeResult["focusSource"];
+    if (manualFocus != null && Number.isFinite(manualFocus)) {
+      hostFocusX = manualFocus;
+      focusSource = "manual";
+    } else if (
+      opts.autoFocusHint != null &&
+      Number.isFinite(opts.autoFocusHint)
+    ) {
+      hostFocusX = opts.autoFocusHint;
+      focusSource = "hint";
+    } else {
+      const m = await measureHostFocusX(hostPath, durationSec, workDir, {
+        panelW: hostW,
+        panelH: opts.height,
+      });
+      hostFocusX = m.focus;
+      focusSource = m.source;
+    }
     const outputPath = path.join(workDir, "split.mp4");
     await runFfmpegWithRetry(
       buildSplitScreenArgs({
@@ -1651,7 +1696,7 @@ export async function compositeSplitScreenClip(
       }),
       "split"
     );
-    return readFileSync(outputPath);
+    return { buffer: readFileSync(outputPath), hostFocusX, focusSource };
   });
 }
 
@@ -1677,23 +1722,45 @@ export function buildFrameGrabArgs(
 }
 
 /**
- * Fractions of the clip's length that get sampled. Never 0: lip-sync providers commonly open on
- * a held or fading first frame, and a black or half-dissolved frame is the one place a face
- * detector reliably finds nothing.
+ * Fractions of the clip's length that get sampled. Never 0 or 1: lip-sync providers commonly
+ * open and close on a held or fading frame, and a black or half-dissolved frame is the one
+ * place a face detector reliably finds nothing. Five, so the median survives two bad frames.
  */
-const FACE_SAMPLE_POINTS = [0.2, 0.5, 0.8];
+const FACE_SAMPLE_POINTS = [0.15, 0.33, 0.5, 0.67, 0.85];
 
 /**
- * Where the host's face sits across the frame, for the split-screen crop. Null ⇒ crop centred.
+ * How far off mid-panel the verified face may sit, as a fraction of panel width, before the
+ * focus is corrected. 3% of an 840 px panel is ~25 px — invisible; below that the correction
+ * would be chasing detector jitter.
+ */
+const PANEL_CENTER_TOLERANCE = 0.03;
+
+/** Correct-and-recheck rounds. One is almost always enough; two covers a coarse first read. */
+const VERIFY_ROUNDS = 2;
+
+/**
+ * Where the host's face sits across the frame, for the split-screen crop, and which detector
+ * said so. `focus` null ⇒ crop centred (`source: "centre"`).
  *
- * Samples several frames and takes the median rather than trusting one. A single frame is one
- * blink, one motion blur, one gesture across the face away from mis-cropping the entire scene,
- * and the crop it decides is baked into the render — so the cheap redundancy is worth it
- * against a re-render. Frames are measured concurrently; three Haiku calls on a downscaled
- * still are a rounding error beside the 30-180s clip they protect.
+ * Two passes:
  *
- * Resolution-independent by construction: the reading is a FRACTION of frame width and it is
- * consumed as an ffmpeg expression over `in_w`/`out_w`, so nothing here assumes 1920x1080.
+ * MEASURE — sample several frames and take the median reading rather than trusting one. A
+ * single frame is one blink, one motion blur, one gesture across the face away from
+ * mis-cropping the entire scene, and the crop it decides is baked into the render. Frames are
+ * measured concurrently; pico is ~100 ms on the CPU per frame, and the Haiku fallback only
+ * runs for frames pico could not read.
+ *
+ * VERIFY — the part that makes this robust to the detector rather than dependent on it. Crop
+ * the same frames to the panel window the focus implies (the exact clamp ffmpeg will apply —
+ * `cropWindow`), run the deterministic detector on THAT, and measure where the face sits in
+ * the panel. Off by more than `PANEL_CENTER_TOLERANCE` ⇒ shift the focus by the error and
+ * check again. So a coarse or biased first read converges, a two-person frame that picked the
+ * wrong face gets caught, and a face the window can't reach (pressed against the source edge,
+ * window already clamped) is logged as such rather than fought.
+ *
+ * Resolution-independent by construction: every reading is a FRACTION of frame width, the
+ * panel is a fraction of the cover-scaled source (`panelFraction`), and the result is consumed
+ * as an ffmpeg expression over `in_w`/`out_w`, so nothing here assumes 1920x1080.
  *
  * Never throws — a failed grab, a missing key or an unreadable answer all land on null, which
  * restores the previous centred behaviour. Alignment is an improvement to the crop, never a
@@ -1702,41 +1769,119 @@ const FACE_SAMPLE_POINTS = [0.2, 0.5, 0.8];
 async function measureHostFocusX(
   hostPath: string,
   durationSec: number,
-  workDir: string
-): Promise<number | null> {
+  workDir: string,
+  panel: { panelW: number; panelH: number }
+): Promise<{ focus: number | null; source: FaceSource | "centre" }> {
   try {
-    const readings = await Promise.all(
-      FACE_SAMPLE_POINTS.map(async (frac, i) => {
-        try {
-          const framePath = path.join(workDir, `hostframe-${i}.jpg`);
-          // Clamped so a very short clip doesn't seek past its own end.
-          const at = Math.min(Math.max(durationSec * frac, 0.1), durationSec);
-          await runFfmpeg(buildFrameGrabArgs(hostPath, framePath, at));
-          return await detectFaceCenterX(readFileSync(framePath));
-        } catch {
-          // One unreadable frame is not a failed measurement — the others still count.
-          return null;
-        }
-      })
-    );
-    const focus = medianFocus(readings);
-    const found = readings.filter(r => r !== null).length;
-    if (focus !== null) {
+    // Grab the frames once; both passes read them.
+    const frames: Buffer[] = (
+      await Promise.all(
+        FACE_SAMPLE_POINTS.map(async (frac, i): Promise<Buffer | null> => {
+          try {
+            const framePath = path.join(workDir, `hostframe-${i}.jpg`);
+            // Clamped so a very short clip doesn't seek past its own end.
+            const at = Math.min(Math.max(durationSec * frac, 0.1), durationSec);
+            await runFfmpeg(buildFrameGrabArgs(hostPath, framePath, at));
+            return readFileSync(framePath);
+          } catch {
+            // One unreadable frame is not a failed measurement — the others still count.
+            return null;
+          }
+        })
+      )
+    ).filter((b): b is Buffer => b !== null);
+    if (!frames.length) {
       console.log(
-        `[FaceAlign] host face at x=${focus.toFixed(2)} of frame ` +
-          `(median of ${found}/${FACE_SAMPLE_POINTS.length} frames)`
+        `[FaceAlign] no frames could be read — centring the host panel`
       );
-    } else {
-      console.log(
-        `[FaceAlign] no face found in ${FACE_SAMPLE_POINTS.length} frames — centring the host panel`
-      );
+      return { focus: null, source: "centre" };
     }
-    return focus;
+
+    // MEASURE
+    const readings = await Promise.all(frames.map(f => detectFace(f)));
+    const hits = readings.filter(
+      (r): r is { x: number; source: FaceSource } => r !== null
+    );
+    let focus = medianFocus(hits.map(h => h.x));
+    if (focus === null) {
+      console.log(
+        `[FaceAlign] no face found in ${frames.length} frames — centring the host panel`
+      );
+      return { focus: null, source: "centre" };
+    }
+    const source: FaceSource =
+      hits.filter(h => h.source === "pico").length * 2 >= hits.length
+        ? "pico"
+        : "haiku";
+    const spread =
+      Math.max(...hits.map(h => h.x)) - Math.min(...hits.map(h => h.x));
+    console.log(
+      `[FaceAlign] host face at x=${focus.toFixed(3)} of frame ` +
+        `(${source}, median of ${hits.length}/${frames.length} frames, spread ${spread.toFixed(3)})`
+    );
+
+    // VERIFY — crop the frames the way ffmpeg will and look again.
+    const meta = await sharp(frames[0]).metadata();
+    const srcW = meta.width ?? 0;
+    const srcH = meta.height ?? 0;
+    const frac = panelFraction(srcW, srcH, panel.panelW, panel.panelH);
+    if (frac >= 1) {
+      // The panel shows the whole source width — there is nothing to pan.
+      return { focus, source };
+    }
+    for (let round = 1; round <= VERIFY_ROUNDS; round++) {
+      const win = cropWindow(focus, frac);
+      const left = Math.round(win.left * srcW);
+      const width = Math.max(
+        1,
+        Math.min(srcW - left, Math.round(win.width * srcW))
+      );
+      const panelReadings = await Promise.all(
+        frames.map(async f => {
+          try {
+            const crop = await sharp(f)
+              .extract({ left, top: 0, width, height: srcH })
+              .png()
+              .toBuffer();
+            return (await detectFace(crop, { allowHaiku: false }))?.x ?? null;
+          } catch {
+            return null;
+          }
+        })
+      );
+      const seen = medianFocus(panelReadings);
+      if (seen === null) {
+        console.log(
+          `[FaceAlign] verify round ${round}: no face readable in the cropped panel — keeping x=${focus.toFixed(3)}`
+        );
+        break;
+      }
+      const err = seen - 0.5;
+      if (Math.abs(err) <= PANEL_CENTER_TOLERANCE) {
+        console.log(
+          `[FaceAlign] verified: face at ${(seen * 100).toFixed(0)}% of the host panel ` +
+            `(round ${round}, focus x=${focus.toFixed(3)})`
+        );
+        return { focus, source };
+      }
+      const corrected = correctFocus(focus, seen, frac);
+      // The window can't move any further — the face is pressed against the source edge.
+      const clampedAtEdge = cropWindow(corrected, frac).left === win.left;
+      console.log(
+        `[FaceAlign] verify round ${round}: face at ${(seen * 100).toFixed(0)}% of the panel — ` +
+          (clampedAtEdge
+            ? `crop window already at the frame edge, cannot centre further`
+            : `correcting focus x=${focus.toFixed(3)} → ${corrected.toFixed(3)}`)
+      );
+      if (clampedAtEdge) break;
+      focus = corrected;
+    }
+    return { focus, source };
   } catch (err: any) {
     console.warn(
       `[FaceAlign] could not sample the host clip: ${err.message} — centring the host panel`
     );
-    return null;
+    return { focus: null, source: "centre" };
   }
 }
 

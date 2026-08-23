@@ -15,8 +15,16 @@
  * lip-sync provider animates whatever it is handed, so an off-centre plate becomes an
  * off-centre clip, and the centred crop then pushes the face against the divider or slices it.
  *
- * So: look at one frame, ask where the face is, and pan the crop window to put it in the
- * middle of the panel.
+ * So: look at a few frames, ask where the face is, pan the crop window to put it in the middle
+ * of the panel — and then CHECK the panel (`verifyPanelFocus` in videoAssembly) rather than
+ * trusting the estimate.
+ *
+ * Two detectors, tried in order:
+ *   1. pico (`pico.ts`) — a real frontal-face cascade, pure JS, offline, deterministic, pixel
+ *      precise. This is what does the work.
+ *   2. Claude Haiku — only when pico finds no face (profile, heavy occlusion, stylised plate).
+ *      Asked for the face's left/right EDGES, not a centre, which a vision model reads more
+ *      honestly; still a coarse ruler, which is why the verify pass exists.
  *
  * NEVER THROWS. Every failure path — no key, a 529, an unparseable answer, no face in frame —
  * returns null, and null means "crop centred", which is exactly the behaviour that existed
@@ -25,6 +33,10 @@
 import sharp from "sharp";
 import { invokeClaude, type ClaudeImage } from "./claude";
 import { safeParseJSON } from "./jsonRepair";
+import { detectFaces } from "./pico";
+
+/** Which detector produced a reading. Logged and persisted so a bad crop can be traced. */
+export type FaceSource = "pico" | "haiku";
 
 /**
  * Haiku, for the same reason `overlayTextScan.ts` uses it: `invokeClaude` sends no `thinking`
@@ -35,30 +47,32 @@ import { safeParseJSON } from "./jsonRepair";
 const FACE_ALIGN_MODEL = "claude-haiku-4-5-20251001";
 
 /**
- * Downscale before the call. Vision tokens are ~(w*h)/750, so the pixels dominate the cost of a
- * call this small. 512 wide is far more than enough to say WHERE a face is — this is not
- * reading an expression, it is locating a head-sized region.
+ * Downscale before either detector. For Haiku, vision tokens are ~(w*h)/750, so the pixels
+ * dominate the cost of a call this small. For pico, 640 wide keeps the dense multi-scale scan
+ * under ~100 ms while a waist-up host's face is still 60-150 px — well inside the cascade's
+ * comfortable range.
  */
-const FACE_SCAN_WIDTH = 512;
+const FACE_SCAN_WIDTH = 640;
 
 const FACE_ALIGN_SYSTEM =
   "You are given ONE frame from a talking-head video. Locate the main person's FACE and " +
-  "report its horizontal centre as a fraction of the image width.\n\n" +
+  "report its horizontal extent as fractions of the image width.\n\n" +
   "0.0 is the very left edge of the image, 0.5 is the exact horizontal middle, 1.0 is the " +
-  "very right edge. Measure to the centre of the FACE — between the eyes — not to the centre " +
-  "of the body, the shoulders, or the hair.\n\n" +
+  "very right edge. Report the LEFT edge and RIGHT edge of the face itself — the skin of the " +
+  "face from ear to ear — not the hair, not the shoulders, not the body.\n\n" +
   "If several people are visible, use the largest, most in-focus, most central face — the one " +
   "the shot is of. If no human face is visible at all, say so instead of guessing.\n\n" +
-  'Return ONLY this JSON, no prose: {"found":true|false,"x":0.00}\n' +
-  "x: the fraction, 2 decimal places. Use 0.5 when found is false.";
+  'Return ONLY this JSON, no prose: {"found":true|false,"left":0.00,"right":0.00}\n' +
+  "left/right: the fractions, 2 decimal places, left < right. Use 0.5 for both when found is false.";
 
 /**
  * Read a verdict into a horizontal fraction, or null when there is nothing usable.
  *
- * Null on anything off-shape, out of range, or not-found. The caller treats null as "leave the
- * crop centred", so a garbled answer must reach null rather than a plausible-looking number —
- * a confidently wrong 0.9 would pan the face straight out of the panel, which is worse than
- * the miscentring this module exists to fix.
+ * Accepts the current `{left,right}` shape (centre is their midpoint) and the older bare `{x}`
+ * shape. Null on anything off-shape, out of range, inverted, or not-found. The caller treats
+ * null as "leave the crop centred", so a garbled answer must reach null rather than a
+ * plausible-looking number — a confidently wrong 0.9 would pan the face straight out of the
+ * panel, which is worse than the miscentring this module exists to fix.
  *
  * Pure — unit-tested.
  */
@@ -68,11 +82,16 @@ export function parseFaceCenter(
 ): number | null {
   const parsed = safeParseJSON<any>(raw, stopReason);
   if (!parsed.success) return null;
-  if (parsed.data?.found !== true) return null;
-  const x = parsed.data.x;
-  if (typeof x !== "number" || !Number.isFinite(x)) return null;
-  if (x < 0 || x > 1) return null;
-  return x;
+  const d = parsed.data;
+  if (d?.found !== true) return null;
+  const inUnit = (v: unknown): v is number =>
+    typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 1;
+  if (inUnit(d.left) && inUnit(d.right)) {
+    if (d.right <= d.left) return null;
+    return (d.left + d.right) / 2;
+  }
+  if (inUnit(d.x)) return d.x;
+  return null;
 }
 
 /**
@@ -121,38 +140,141 @@ export function focusCropX(focusX: number | null): string | null {
 }
 
 /**
- * Horizontal centre of the face in this frame as a 0..1 fraction, or null when it cannot be
- * determined. Fails open (null ⇒ centred crop) on every error.
+ * The crop window `focusCropX` will produce, in FRACTIONS of the source width — the same
+ * clamp, done in JS so a frame can be cropped with sharp exactly the way ffmpeg will crop the
+ * clip. `panelFrac` is the panel's width as a fraction of the cover-scaled source width (see
+ * `panelFraction`); ≥ 1 means no horizontal slack, the whole frame shows and the window is
+ * the whole frame.
  *
- * Takes no mimeType: sharp sniffs the format from the bytes and re-encodes png, so the declared
+ * Pure — unit-tested.
+ */
+export function cropWindow(
+  focusX: number | null,
+  panelFrac: number
+): { left: number; width: number } {
+  if (!(panelFrac > 0) || panelFrac >= 1) return { left: 0, width: 1 };
+  const f = focusX == null || !Number.isFinite(focusX) ? 0.5 : focusX;
+  const left = Math.min(1 - panelFrac, Math.max(0, f - panelFrac / 2));
+  return { left, width: panelFrac };
+}
+
+/**
+ * How much of the cover-scaled host source the panel shows, as a fraction of its width. The
+ * source (`srcW×srcH`) is scaled to the panel height and then `panelW` is cropped from it, so
+ * the visible fraction is `panelW / (srcW * panelH / srcH)`. On the stock layout that is
+ * 840 / 1920 = 0.4375 for a 16:9 host clip. Pure — unit-tested.
+ */
+export function panelFraction(
+  srcW: number,
+  srcH: number,
+  panelW: number,
+  panelH: number
+): number {
+  if (!(srcW > 0) || !(srcH > 0) || !(panelW > 0) || !(panelH > 0)) return 1;
+  return panelW / ((srcW * panelH) / srcH);
+}
+
+/**
+ * Where a face at `faceX` (fraction of the source) lands inside the panel cropped around
+ * `focusX`, as a fraction of the panel width (0.5 = dead centre). Pure — unit-tested.
+ */
+export function faceInPanel(
+  faceX: number,
+  focusX: number | null,
+  panelFrac: number
+): number {
+  const w = cropWindow(focusX, panelFrac);
+  return (faceX - w.left) / w.width;
+}
+
+/**
+ * Correct a focus by an observed panel error: the face was seen at `observedPanelX` of the
+ * panel (0.5 is the goal), so shift the focus by that error converted back into source
+ * fractions. Clamped to 0..1. Pure — unit-tested.
+ */
+export function correctFocus(
+  focusX: number,
+  observedPanelX: number,
+  panelFrac: number
+): number {
+  const err = observedPanelX - 0.5;
+  return Math.min(1, Math.max(0, focusX + err * panelFrac));
+}
+
+/** Deterministic detector: pico on a downscaled grayscale copy. Null when no face clears `minQ`. */
+async function picoFaceCenterX(buffer: Buffer): Promise<number | null> {
+  const { data, info } = await sharp(buffer)
+    .resize({ width: FACE_SCAN_WIDTH, withoutEnlargement: true })
+    .grayscale()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  if (info.channels !== 1) return null;
+  const faces = detectFaces(
+    new Uint8Array(data.buffer, data.byteOffset, data.byteLength),
+    info.width,
+    info.height
+  );
+  if (!faces.length) return null;
+  return faces[0].x / info.width;
+}
+
+/** LLM detector: the fallback for faces the cascade cannot see. Null on any failure. */
+async function haikuFaceCenterX(buffer: Buffer): Promise<number | null> {
+  const small = await sharp(buffer)
+    .resize({ width: 512, withoutEnlargement: true })
+    .png()
+    .toBuffer();
+  const image: ClaudeImage = {
+    base64: small.toString("base64"),
+    mediaType: "image/png",
+  };
+  const result = await invokeClaude({
+    systemPrompt: FACE_ALIGN_SYSTEM,
+    userMessage: "Where is the face horizontally in this frame?",
+    imageInput: image,
+    maxTokens: 64,
+    model: FACE_ALIGN_MODEL,
+  });
+  return parseFaceCenter(result.text, result.stopReason);
+}
+
+/**
+ * Horizontal centre of the face in this frame as a 0..1 fraction plus which detector found
+ * it, or null when it cannot be determined. Fails open (null ⇒ centred crop) on every error.
+ *
+ * `allowHaiku: false` restricts it to the deterministic detector — used by the verify pass,
+ * which wants a measurement it can trust, not a second opinion from a coarse ruler.
+ *
+ * Takes no mimeType: sharp sniffs the format from the bytes and re-encodes, so the declared
  * media type cannot drift from what is actually sent.
  */
-export async function detectFaceCenterX(
-  buffer: Buffer
-): Promise<number | null> {
+export async function detectFace(
+  buffer: Buffer,
+  opts: { allowHaiku?: boolean } = {}
+): Promise<{ x: number; source: FaceSource } | null> {
   try {
-    const small = await sharp(buffer)
-      .resize({ width: FACE_SCAN_WIDTH, withoutEnlargement: true })
-      .png()
-      .toBuffer();
-    const image: ClaudeImage = {
-      base64: small.toString("base64"),
-      mediaType: "image/png",
-    };
-    const result = await invokeClaude({
-      systemPrompt: FACE_ALIGN_SYSTEM,
-      userMessage: "Where is the face horizontally in this frame?",
-      imageInput: image,
-      maxTokens: 64,
-      model: FACE_ALIGN_MODEL,
-    });
-    return parseFaceCenter(result.text, result.stopReason);
+    const x = await picoFaceCenterX(buffer);
+    if (x !== null) return { x, source: "pico" };
+  } catch (err: any) {
+    console.warn(`[FaceAlign] pico detection failed: ${err.message}`);
+  }
+  if (opts.allowHaiku === false) return null;
+  try {
+    const x = await haikuFaceCenterX(buffer);
+    if (x !== null) return { x, source: "haiku" };
   } catch (err: any) {
     // Fail open. Nothing downstream catches this, so the warn is the only trace; the split
     // renders with the old centred crop.
     console.warn(
-      `[FaceAlign] detection failed: ${err.message} — centring the host panel`
+      `[FaceAlign] haiku detection failed: ${err.message} — centring the host panel`
     );
-    return null;
   }
+  return null;
+}
+
+/** Back-compat shape of `detectFace`: just the fraction. */
+export async function detectFaceCenterX(
+  buffer: Buffer
+): Promise<number | null> {
+  return (await detectFace(buffer))?.x ?? null;
 }

@@ -482,8 +482,8 @@ export default function LongformJobSlot({
     onError: err => toast.error(err.message),
   });
 
-  const reassembleFinalMutation = trpc.longformVideo.reassembleFinal.useMutation(
-    {
+  const reassembleFinalMutation =
+    trpc.longformVideo.reassembleFinal.useMutation({
       onSuccess: () => {
         toast.success(
           "Re-stitching the final video from the existing clips — no scenes re-render."
@@ -491,8 +491,7 @@ export default function LongformJobSlot({
         if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
       },
       onError: err => toast.error(err.message),
-    }
-  );
+    });
 
   const retryFailedScenesMutation =
     trpc.longformVideo.retryFailedScenes.useMutation({
@@ -901,10 +900,7 @@ export default function LongformJobSlot({
   // as `blockedReason` on the Generate button: a hidden control with no explanation is
   // indistinguishable from a broken one.
   const bookCoverGateReason = useMemo(():
-    | "eligible"
-    | "no-book"
-    | "no-cta"
-    | "already-has-cover" => {
+    "eligible" | "no-book" | "no-cta" | "already-has-cover" => {
     const hasBook =
       !!job?.bookCoverImageUrl ||
       !!job?.ctaBooks?.length ||
@@ -1882,6 +1878,7 @@ export default function LongformJobSlot({
                                         hostUrl={scene.hostClipUrls[0]}
                                         rightUrl={scene.splitRightUrl}
                                         layout={scene.splitLayout}
+                                        autoHostFocusX={scene.splitAutoFocusX}
                                         pending={
                                           splitEditMutation.isPending ||
                                           isSceneQueued

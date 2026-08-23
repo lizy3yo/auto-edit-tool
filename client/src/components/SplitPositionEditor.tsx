@@ -70,11 +70,17 @@ export function SplitPositionEditor(props: {
   rightUrl: string;
   /** The persisted layout — the editor re-seeds from it whenever it changes. */
   layout?: SplitLayout;
+  /**
+   * The server's automatically measured host focus (`scene.splitAutoFocusX`), so the "auto"
+   * preview shows the host where it actually rendered and a drag starts from there. Undefined
+   * ⇒ not measured yet (preview centred).
+   */
+  autoHostFocusX?: number;
   pending?: boolean;
   disabled?: boolean;
   onApply: (layout: SplitLayout) => void;
 }) {
-  const { layout, pending, disabled } = props;
+  const { layout, pending, disabled, autoHostFocusX } = props;
   const [draft, setDraft] = useState<SplitLayout>(() => ({ ...layout }));
   const [dirty, setDirty] = useState(false);
   // Natural aspect of each source, once metadata arrives — needed for the crop math.
@@ -99,6 +105,8 @@ export function SplitPositionEditor(props: {
   const hostAR = hostFrac * CANVAS_AR;
   const brollAR = brollFrac * CANVAS_AR;
   const hostFocus = draft.hostFocusX; // undefined ⇒ auto face detection on the server
+  // What "auto" means on screen: the measured focus when the server has one, else centred.
+  const effectiveHostFocus = hostFocus ?? autoHostFocusX ?? 0.5;
   const brollFocus = draft.brollFocusX ?? 0.5;
 
   const edit = (patch: Partial<SplitLayout>) => {
@@ -118,7 +126,7 @@ export function SplitPositionEditor(props: {
     dragRef.current = {
       kind,
       startX: e.clientX,
-      startFocus: kind === "host" ? (hostFocus ?? 0.5) : brollFocus,
+      startFocus: kind === "host" ? effectiveHostFocus : brollFocus,
       panelW: e.currentTarget.getBoundingClientRect().width,
       panelAR,
       srcAR: ar,
@@ -176,7 +184,7 @@ export function SplitPositionEditor(props: {
 
   const panel = (kind: "host" | "broll") => {
     const isHost = kind === "host";
-    const focus = isHost ? (hostFocus ?? 0.5) : brollFocus;
+    const focus = isHost ? effectiveHostFocus : brollFocus;
     const posX = objectPositionX(
       focus,
       isHost ? srcAR.host : srcAR.broll,
@@ -240,7 +248,9 @@ export function SplitPositionEditor(props: {
         Drag a clip to position it in its panel · drag the divider to resize the
         panels ·{" "}
         {hostFocus == null
-          ? "host is auto-centered on the face until you drag it"
+          ? autoHostFocusX != null
+            ? `host auto-centered on the face (x ${(autoHostFocusX * 100).toFixed(0)}%) — drag to override`
+            : "host is auto-centered on the face until you drag it"
           : `host position ${(hostFocus * 100).toFixed(0)}% (manual)`}{" "}
         · seam {(seam * 100).toFixed(0)}%
       </p>

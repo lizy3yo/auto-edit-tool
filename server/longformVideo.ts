@@ -6500,6 +6500,48 @@ function buildSplitRightScene(scene: StoryboardScene): StoryboardScene {
 }
 
 /**
+ * Composite every host render of a split scene beside `rightUrl` and upload the results. The
+ * ONE place host clips meet the compositor, so the auto face focus is handled the same way on
+ * all four paths (pipeline, right-panel regen, layout edit, panel reuse):
+ *
+ * - a manual `layout.hostFocusX` wins outright (the compositor skips detection);
+ * - else the scene's persisted `splitAutoFocusX` is reused as-is, so recomposites are
+ *   deterministic and free of detector calls;
+ * - else the compositor measures + verifies the face on the first host render and the result
+ *   is persisted on the scene for every later composite. Chunks of one scene share a plate, so
+ *   one measurement serves them all.
+ */
+async function compositeSceneSplit(
+  jobId: number,
+  scene: StoryboardScene,
+  hostUrls: string[],
+  rightUrl: string,
+  layout: SplitLayout | undefined
+): Promise<string[]> {
+  const dims = dimensionsFor(TALKING_HEAD_ASPECT_RATIO);
+  const composited: string[] = [];
+  for (let i = 0; i < hostUrls.length; i++) {
+    const res = await compositeSplitScreenClip(hostUrls[i], rightUrl, {
+      ...dims,
+      layout,
+      autoFocusHint: scene.splitAutoFocusX,
+    });
+    if (res.focusSource !== "manual" && res.hostFocusX != null) {
+      if (scene.splitAutoFocusX !== res.hostFocusX) {
+        console.log(
+          `[Longform ${jobId}] scene ${scene.index} host panel auto focus x=${res.hostFocusX.toFixed(3)} (${res.focusSource})`
+        );
+      }
+      scene.splitAutoFocusX = res.hostFocusX;
+    }
+    const key = `longform/${jobId}/split-${scene.index}-${i}-${nanoid(6)}.mp4`;
+    const { url } = await storagePut(key, res.buffer, "video/mp4");
+    composited.push(url);
+  }
+  return composited;
+}
+
+/**
  * Render the split-screen RIGHT panel: a gpt-image-2 still from `splitVisual`, Ken Burns'd to
  * the scene length — same still lane as every other still in the video, so the right panel
  * never hallucinates b-roll motion. Square, because the panel is a full-height 1:1 slot (see
@@ -6694,6 +6736,8 @@ async function generateSceneLipsyncClips(
   // this the composite below is the only surviving URL and a regenerate has to re-run the
   // lip-sync provider just to change the right half. See `regenerateSplitRight`.
   scene.hostClipUrls = urls;
+  // A fresh host render is a fresh framing — the auto focus measured on the old one is stale.
+  scene.splitAutoFocusX = undefined;
 
   if (scene.splitVisual) {
     try {
@@ -6725,18 +6769,13 @@ async function generateSceneLipsyncClips(
       }
       rightUrl ??= await renderSplitRightClip(jobId, scene, params, apimartKey);
       scene.splitRightUrl = rightUrl; // the panel's own clip — the split editor recomposites from it
-      const dims = dimensionsFor(TALKING_HEAD_ASPECT_RATIO);
-      const composited: string[] = [];
-      for (let i = 0; i < urls.length; i++) {
-        const buf = await compositeSplitScreenClip(urls[i], rightUrl, {
-          ...dims,
-          layout: scene.splitLayout,
-        });
-        const key = `longform/${jobId}/split-${scene.index}-${i}-${nanoid(6)}.mp4`;
-        const { url } = await storagePut(key, buf, "video/mp4");
-        composited.push(url);
-      }
-      return composited;
+      return await compositeSceneSplit(
+        jobId,
+        scene,
+        urls,
+        rightUrl,
+        scene.splitLayout
+      );
     } catch (e: any) {
       console.warn(
         `[Longform ${jobId}] scene ${scene.index} split-screen composite failed, using full-frame host: ${e.message}`
@@ -9551,21 +9590,13 @@ async function regenerateSplitRight(
         )
       : await renderSplitRightClip(jobId, scene, params, apimartKey);
   scene.splitRightUrl = rightUrl; // backfills pre-field scenes too — see StoryboardScene
-  const composited: string[] = [];
-  for (let i = 0; i < scene.hostClipUrls.length; i++) {
-    const buf = await compositeSplitScreenClip(
-      scene.hostClipUrls[i],
-      rightUrl,
-      {
-        ...dims,
-        layout: scene.splitLayout,
-      }
-    );
-    const key = `longform/${jobId}/split-${scene.index}-${i}-${nanoid(6)}.mp4`;
-    const { url } = await storagePut(key, buf, "video/mp4");
-    composited.push(url);
-  }
-  scene.clipUrls = composited;
+  scene.clipUrls = await compositeSceneSplit(
+    jobId,
+    scene,
+    scene.hostClipUrls,
+    rightUrl,
+    scene.splitLayout
+  );
   syncSceneClipFields(scene);
   scene.sceneStatus = "completed";
 }
@@ -10574,18 +10605,13 @@ export async function setSceneSplit(
             scene.splitRightUrl = url;
           }
           scene.splitLayout = sanitizeSplitLayout(edit.layout);
-          const composited: string[] = [];
-          for (let i = 0; i < scene.hostClipUrls!.length; i++) {
-            const buf = await compositeSplitScreenClip(
-              scene.hostClipUrls![i],
-              scene.splitRightUrl,
-              { ...dims, layout: scene.splitLayout }
-            );
-            const clipKey = `longform/${jobId}/split-${scene.index}-${i}-${nanoid(6)}.mp4`;
-            const { url } = await storagePut(clipKey, buf, "video/mp4");
-            composited.push(url);
-          }
-          scene.clipUrls = composited;
+          scene.clipUrls = await compositeSceneSplit(
+            jobId,
+            scene,
+            scene.hostClipUrls!,
+            scene.splitRightUrl,
+            scene.splitLayout
+          );
           syncSceneClipFields(scene);
           scene.sceneStatus = "completed";
         } else if (edit.mode === "prompt") {
@@ -10632,19 +10658,13 @@ export async function setSceneSplit(
             throw new Error(
               `Scene ${edit.sourceIndex} has no footage to reuse as a panel`
             );
-          const dims = dimensionsFor(TALKING_HEAD_ASPECT_RATIO);
-          const composited: string[] = [];
-          for (let i = 0; i < scene.hostClipUrls!.length; i++) {
-            const buf = await compositeSplitScreenClip(
-              scene.hostClipUrls![i],
-              rightUrl,
-              dims
-            );
-            const clipKey = `longform/${jobId}/split-${scene.index}-${i}-${nanoid(6)}.mp4`;
-            const { url } = await storagePut(clipKey, buf, "video/mp4");
-            composited.push(url);
-          }
-          scene.clipUrls = composited;
+          scene.clipUrls = await compositeSceneSplit(
+            jobId,
+            scene,
+            scene.hostClipUrls!,
+            rightUrl,
+            scene.splitLayout
+          );
           scene.splitRightUrl = rightUrl;
           // Label truthfulness: the timeline derives its badges from these flags.
           scene.splitVisual =

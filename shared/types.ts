@@ -435,6 +435,15 @@ export interface StoryboardScene {
    */
   hostClipUrls?: string[];
   /**
+   * The AUTOMATICALLY measured horizontal centre of the host's face in `hostClipUrls`, 0..1
+   * across the source frame — what the split compositor panned the host panel to when no
+   * manual `splitLayout.hostFocusX` was set. Written by the first composite of a host render
+   * and reused by every later recomposite (retrofit, panel swap, seam drag) so they all land on
+   * the same pixels with no re-measurement; cleared whenever the host is re-rendered. Also the
+   * position the split editor shows for "auto", so what you see is what rendered.
+   */
+  splitAutoFocusX?: number;
+  /**
    * The split RIGHT panel as its own standalone clip (Ken Burns still or moving b-roll),
    * BEFORE compositing — the other half of the pair `hostClipUrls` starts. Persisted so the
    * split editor can recomposite either half independently (swap the panel, un-split, reuse

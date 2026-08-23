@@ -59,12 +59,19 @@ export function lookIndexFor(
  * "Do not crop" is load-bearing: image models will happily frame a portrait that cuts the
  * shoulders, and lip-sync models animate whatever they are given, so a bad crop becomes a bad
  * clip rather than a retry.
+ *
+ * "Horizontally centred" is the upstream half of split-screen face alignment: the split host
+ * panel is the middle ~44% of this frame, and `faceAlign.ts` pans the crop to the face — but a
+ * pan can only reach as far as the frame edge, so a subject generated at the very edge can never
+ * be fully centred. Asking for a centred subject keeps the needed correction small.
  */
 export function hostPlatePrompt(context: string): string {
   return (
     `Cinematic 16:9 photograph of this exact person — same face, same age, same build. ` +
     `They are in this setting: ${context}. ` +
     `Shown from the waist up, facing the camera directly, calm neutral expression, mouth closed. ` +
+    `The person is horizontally CENTRED in the frame — their head in the middle third of the ` +
+    `image width, equal space either side of them. ` +
     `The environment is clearly visible behind and around them, in focus enough to read. ` +
     `Even, soft, flattering light on the face. Photographic, not illustrated. ` +
     `Do not crop the head or shoulders; leave clear space above the head.`
