@@ -50,6 +50,11 @@ import {
   regenerateScene as regenerateLongformScene,
   regenerateScenes as regenerateLongformScenes,
   getSceneEditState,
+  setSceneTiming as setLongformSceneTiming,
+  splitSceneInTwo as splitLongformScene,
+  undoSceneSplit as undoLongformSceneSplit,
+  moveSceneCut as moveLongformSceneCut,
+  setScenePieceClipIn as setLongformScenePieceClipIn,
   retrofitSplitScreens as retrofitLongformSplitScreens,
   retrofitBookCover as retrofitLongformBookCover,
   setSceneSplit as setLongformSceneSplit,
@@ -76,6 +81,15 @@ import {
   parseCtaMarkers,
   extractSpokenScript,
 } from "./longformVideo";
+// Cut-room pre-checks, so a refused edit is an error the operator reads, not a silent no-op.
+import {
+  validateTimingEdit,
+  validateAddCut,
+  validateMoveCut,
+  validateSetPieceClipIn,
+  cutPoints,
+  MAX_TAIL_HOLD_SEC,
+} from "./sceneTiming";
 import { previewBookAssignments, ctaLabelMatches } from "../shared/ctaMarkers";
 import {
   buildTrackingUrl,
@@ -1395,6 +1409,10 @@ const longformVideoRouter = router({
         // operator is editing scenes" apart from "the pipeline is rendering": both read
         // status "processing" on the row.
         sceneEdits,
+        // The continuous master narration — the cut-room preview plays the exact slice under a
+        // scene (seeking into this) so a moved cut previews with the right words, where the
+        // per-scene `audioUrl` slice was cut at the ORIGINAL boundaries.
+        masterAudioUrl: job.masterAudioUrl ?? null,
         finalVideoUrl: job.finalVideoUrl,
         errorMessage: job.errorMessage,
         channelKey:
@@ -1662,6 +1680,188 @@ const longformVideoRouter = router({
    * per-panel pan — from the operator's drag (free — ffmpeg only, and a manual host position
    * skips the face-detection calls). Render-only: preview, then Assemble.
    */
+  /**
+   * Cut room: change WHEN a scene's picture shows — trim its clip, move the cut with a
+   * neighbour, hold its last frame — without re-rendering or re-voicing anything. Persists on
+   * the scene (via the job's edit session) and marks it `timingEdited`; the operator re-stitches
+   * with Reassemble when done. Validated against the stored storyboard first so a refused edit
+   * comes back as an error with the reason.
+   */
+  setSceneTiming: approvedProcedure
+    .input(
+      z.object({
+        jobId: z.number(),
+        sceneIndex: z.number().int().min(1),
+        clipInSec: z.number().min(0).optional(),
+        startSec: z.number().min(0).optional(),
+        endSec: z.number().min(0).optional(),
+        tailHoldSec: z.number().min(0).max(MAX_TAIL_HOLD_SEC).optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const job = await getLongformVideoJobById(input.jobId);
+      if (!job || (job.userId !== ctx.user.id && ctx.user.role !== "admin")) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
+      }
+      const { jobId, ...edit } = input;
+      const scenes = (job.storyboard ?? []) as StoryboardScene[];
+      const v = validateTimingEdit(scenes, edit);
+      if (!v.ok)
+        throw new TRPCError({ code: "BAD_REQUEST", message: v.reason });
+      const accepted = await setLongformSceneTiming(jobId, edit);
+      return { ok: true, accepted };
+    }),
+
+  /**
+   * Cut room: split one scene into two at an offset into its slice. The second half keeps the
+   * same footage, continuing seamlessly, until it is regenerated. Scenes renumber.
+   */
+  splitScene: approvedProcedure
+    .input(
+      z.object({
+        jobId: z.number(),
+        sceneIndex: z.number().int().min(1),
+        atOffsetSec: z.number().min(0),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const job = await getLongformVideoJobById(input.jobId);
+      if (!job || (job.userId !== ctx.user.id && ctx.user.role !== "admin")) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
+      }
+      const scenes = (job.storyboard ?? []) as StoryboardScene[];
+      const v = validateAddCut(scenes, input.sceneIndex, input.atOffsetSec);
+      if (!v.ok)
+        throw new TRPCError({ code: "BAD_REQUEST", message: v.reason });
+      const live = getSceneEditState(input.jobId);
+      if (live.active.length || live.queued.length)
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            "Can't cut while scenes are rendering or queued — wait for them to finish",
+        });
+      const accepted = await splitLongformScene(
+        input.jobId,
+        input.sceneIndex,
+        input.atOffsetSec
+      );
+      return { ok: true, accepted };
+    }),
+
+  /**
+   * Cut room: undo a split — rejoin the group containing this scene back into one. Reverses
+   * `splitScene`; metadata only, no render.
+   */
+  undoSplit: approvedProcedure
+    .input(
+      z.object({
+        jobId: z.number(),
+        sceneIndex: z.number().int().min(1),
+        // Remove the cut nearest this offset; omit to clear every cut on the scene.
+        atOffsetSec: z.number().min(0).optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const job = await getLongformVideoJobById(input.jobId);
+      if (!job || (job.userId !== ctx.user.id && ctx.user.role !== "admin")) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
+      }
+      const scenes = (job.storyboard ?? []) as StoryboardScene[];
+      const scene = scenes.find(sc => sc.index === input.sceneIndex);
+      if (!scene || cutPoints(scene).length === 0)
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "This scene has no cut to undo",
+        });
+      const live = getSceneEditState(input.jobId);
+      if (live.active.length || live.queued.length)
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            "Can't undo a cut while scenes are rendering or queued — wait for them to finish",
+        });
+      const accepted = await undoLongformSceneSplit(
+        input.jobId,
+        input.sceneIndex,
+        input.atOffsetSec
+      );
+      return { ok: true, accepted };
+    }),
+
+  /**
+   * Cut room: drag an existing cut marker to a new position — CapCut's move-the-split-point.
+   * The clip is unchanged; only where it's marked cut moves. Metadata only, no render.
+   */
+  moveCut: approvedProcedure
+    .input(
+      z.object({
+        jobId: z.number(),
+        sceneIndex: z.number().int().min(1),
+        fromOffsetSec: z.number().min(0),
+        toOffsetSec: z.number().min(0),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const job = await getLongformVideoJobById(input.jobId);
+      if (!job || (job.userId !== ctx.user.id && ctx.user.role !== "admin")) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
+      }
+      const scenes = (job.storyboard ?? []) as StoryboardScene[];
+      const v = validateMoveCut(
+        scenes,
+        input.sceneIndex,
+        input.fromOffsetSec,
+        input.toOffsetSec
+      );
+      if (!v.ok)
+        throw new TRPCError({ code: "BAD_REQUEST", message: v.reason });
+      const accepted = await moveLongformSceneCut(
+        input.jobId,
+        input.sceneIndex,
+        input.fromOffsetSec,
+        input.toOffsetSec
+      );
+      return { ok: true, accepted };
+    }),
+
+  /**
+   * Cut room: slip one piece of a cut scene to a different moment of the SAME footage — its own
+   * independent trim, separate from its neighbours (`clipInSec: null` clears it back to the
+   * continuous default). The clip is unchanged; this changes what plays, so it marks
+   * `timingEdited` and needs a reassemble.
+   */
+  setPieceClipIn: approvedProcedure
+    .input(
+      z.object({
+        jobId: z.number(),
+        sceneIndex: z.number().int().min(1),
+        cutOffsetSec: z.number().min(0),
+        clipInSec: z.number().min(0).nullable(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const job = await getLongformVideoJobById(input.jobId);
+      if (!job || (job.userId !== ctx.user.id && ctx.user.role !== "admin")) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
+      }
+      const scenes = (job.storyboard ?? []) as StoryboardScene[];
+      const v = validateSetPieceClipIn(
+        scenes,
+        input.sceneIndex,
+        input.cutOffsetSec,
+        input.clipInSec
+      );
+      if (!v.ok)
+        throw new TRPCError({ code: "BAD_REQUEST", message: v.reason });
+      const accepted = await setLongformScenePieceClipIn(
+        input.jobId,
+        input.sceneIndex,
+        input.cutOffsetSec,
+        input.clipInSec
+      );
+      return { ok: true, accepted };
+    }),
+
   setSceneSplit: approvedProcedure
     .input(
       z.object({

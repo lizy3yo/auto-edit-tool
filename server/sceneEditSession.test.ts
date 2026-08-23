@@ -388,4 +388,221 @@ describe("scene edit session", () => {
     ).toHaveLength(0);
     expect(getSceneEditState(jobId).editing).toBe(false);
   });
+
+  // ── Cut-room requests run their REAL bodies here (pure, no providers): timing / cut.
+  const timedBoard = (n: number) =>
+    storyboard(n).map((sc, i) => ({
+      ...sc,
+      narrationStartSec: i * 10,
+      narrationEndSec: (i + 1) * 10,
+      audioDuration: 10,
+    }));
+
+  it("applies a timing edit (hold 0) without touching the clip or the existing cut", async () => {
+    const jobId = ++nextJob;
+    const scenes = timedBoard(3);
+    scenes[1].qrTail = true;
+    getJobSpy.mockResolvedValue({
+      id: jobId,
+      inputParams: {},
+      storyboard: scenes,
+    });
+    expect(
+      enqueueSceneEdit(jobId, {
+        kind: "timing",
+        sceneIndex: 2,
+        edit: { sceneIndex: 2, tailHoldSec: 0, clipInSec: 1.5 },
+      })
+    ).toBe("queued");
+    await sceneEditsSettled(jobId);
+    expect(scenes[1].tailHoldSec).toBe(0);
+    expect(scenes[1].clipInSec).toBe(1.5);
+    expect(scenes[1].timingEdited).toBe(true);
+    expect(scenes[1].sceneStatus).toBe("completed"); // never flipped to processing
+    // A cut-room-only session is an instant metadata write: the storyboard lands, but the job
+    // row's status/finalVideoUrl/completedAt are never touched — nothing "renders".
+    const writes = updateSpy.mock.calls.map(c => (c as any)[1]);
+    expect(writes.some(w => w.status !== undefined)).toBe(false);
+    expect(writes.some(w => "finalVideoUrl" in w)).toBe(false);
+    expect(writes.some(w => Array.isArray(w.storyboard))).toBe(true);
+    expect(getSceneEditState(jobId)).toEqual({
+      queued: [],
+      active: [],
+      editing: false,
+    });
+  });
+
+  it("reports a refused timing edit on the job row without failing the scene", async () => {
+    const jobId = ++nextJob;
+    const scenes = timedBoard(2);
+    getJobSpy.mockResolvedValue({
+      id: jobId,
+      inputParams: {},
+      storyboard: scenes,
+    });
+    // Scene 1 is first: its start is pinned to the narration.
+    enqueueSceneEdit(jobId, {
+      kind: "timing",
+      sceneIndex: 1,
+      edit: { sceneIndex: 1, startSec: 2 },
+    });
+    await sceneEditsSettled(jobId);
+    expect(scenes[0].sceneStatus).toBe("completed");
+    expect(scenes[0].narrationStartSec).toBe(0);
+    // No settle (nothing rendered) — the refusal reaches the row as the error message only.
+    const writes = updateSpy.mock.calls.map(c => (c as any)[1]);
+    expect(writes.some(w => w.status !== undefined)).toBe(false);
+    const err = writes.find(w => typeof w.errorMessage === "string");
+    expect(err?.errorMessage).toMatch(/Scene 1: .*first scene starts/);
+  });
+
+  it("a cut marks the clip in place — no new scene, no renumber, no reassemble", async () => {
+    const jobId = ++nextJob;
+    const scenes = timedBoard(3);
+    getJobSpy.mockResolvedValue({
+      id: jobId,
+      inputParams: {},
+      storyboard: scenes,
+    });
+    enqueueSceneEdit(jobId, { kind: "cut", sceneIndex: 2, atOffsetSec: 4 });
+    await sceneEditsSettled(jobId);
+    // Same three scenes; scene 2 just carries a cut marker.
+    expect(scenes).toHaveLength(3);
+    expect(scenes.map(sc => sc.index)).toEqual([1, 2, 3]);
+    expect(scenes[1].cutPoints).toEqual([4]);
+    expect(scenes[1].timingEdited).toBeUndefined(); // output-neutral
+    // Metadata only: the job row's status/finalVideoUrl are never touched.
+    const writes = updateSpy.mock.calls.map(c => (c as any)[1]);
+    expect(writes.some(w => w.status !== undefined)).toBe(false);
+    expect(writes.some(w => Array.isArray(w.storyboard))).toBe(true);
+  });
+
+  it("undo removes the cut marker", async () => {
+    const jobId = ++nextJob;
+    const scenes = timedBoard(3);
+    scenes[1].cutPoints = [4, 7];
+    getJobSpy.mockResolvedValue({
+      id: jobId,
+      inputParams: {},
+      storyboard: scenes,
+    });
+    enqueueSceneEdit(jobId, { kind: "uncut", sceneIndex: 2, atOffsetSec: 4 });
+    await sceneEditsSettled(jobId);
+    expect(scenes[1].cutPoints).toEqual([7]);
+    // Undo with no offset clears the rest.
+    enqueueSceneEdit(jobId, { kind: "uncut", sceneIndex: 2 });
+    await sceneEditsSettled(jobId);
+    expect(scenes[1].cutPoints).toBeUndefined();
+  });
+
+  it("moves a cut marker — still metadata only, still the same scene", async () => {
+    const jobId = ++nextJob;
+    const scenes = timedBoard(3);
+    scenes[1].cutPoints = [4];
+    getJobSpy.mockResolvedValue({
+      id: jobId,
+      inputParams: {},
+      storyboard: scenes,
+    });
+    enqueueSceneEdit(jobId, {
+      kind: "movecut",
+      sceneIndex: 2,
+      fromOffsetSec: 4,
+      toOffsetSec: 6.5,
+    });
+    await sceneEditsSettled(jobId);
+    expect(scenes).toHaveLength(3); // no new scene
+    expect(scenes[1].cutPoints).toEqual([6.5]);
+    expect(scenes[1].timingEdited).toBeUndefined();
+    const writes = updateSpy.mock.calls.map(c => (c as any)[1]);
+    expect(writes.some(w => w.status !== undefined)).toBe(false);
+  });
+
+  it("refuses to move a cut past the slice edge and reports it on the row", async () => {
+    const jobId = ++nextJob;
+    const scenes = timedBoard(3);
+    scenes[1].cutPoints = [4];
+    getJobSpy.mockResolvedValue({
+      id: jobId,
+      inputParams: {},
+      storyboard: scenes,
+    });
+    enqueueSceneEdit(jobId, {
+      kind: "movecut",
+      sceneIndex: 2,
+      fromOffsetSec: 4,
+      toOffsetSec: 9.9,
+    });
+    await sceneEditsSettled(jobId);
+    expect(scenes[1].cutPoints).toEqual([4]); // unchanged
+    const writes = updateSpy.mock.calls.map(c => (c as any)[1]);
+    expect(writes.some(w => w.status !== undefined)).toBe(false);
+    const err = writes.find(w => typeof w.errorMessage === "string");
+    expect(err?.errorMessage).toMatch(/Scene 2: /);
+  });
+
+  it("slips a piece's footage offset — same clip, marks timingEdited (a real output change)", async () => {
+    const jobId = ++nextJob;
+    const scenes = timedBoard(3);
+    scenes[1].cutPoints = [4];
+    getJobSpy.mockResolvedValue({
+      id: jobId,
+      inputParams: {},
+      storyboard: scenes,
+    });
+    enqueueSceneEdit(jobId, {
+      kind: "piececlip",
+      sceneIndex: 2,
+      cutOffsetSec: 4,
+      clipInSec: 12,
+    });
+    await sceneEditsSettled(jobId);
+    expect(scenes).toHaveLength(3); // still one scene
+    expect(scenes[1].cutPoints).toEqual([4]); // the cut itself is untouched
+    expect(scenes[1].pieceClipIns).toEqual({ "4": 12 });
+    expect(scenes[1].timingEdited).toBe(true); // unlike a bare cut, this DOES change output
+    const writes = updateSpy.mock.calls.map(c => (c as any)[1]);
+    expect(writes.some(w => w.status !== undefined)).toBe(false);
+  });
+
+  it("clearing a piece's slip (clipInSec: null) drops the override", async () => {
+    const jobId = ++nextJob;
+    const scenes = timedBoard(3);
+    scenes[1].cutPoints = [4];
+    scenes[1].pieceClipIns = { "4": 12 };
+    getJobSpy.mockResolvedValue({
+      id: jobId,
+      inputParams: {},
+      storyboard: scenes,
+    });
+    enqueueSceneEdit(jobId, {
+      kind: "piececlip",
+      sceneIndex: 2,
+      cutOffsetSec: 4,
+      clipInSec: null,
+    });
+    await sceneEditsSettled(jobId);
+    expect(scenes[1].pieceClipIns).toBeUndefined();
+  });
+
+  it("refuses to slip a piece where there is no cut and reports it on the row", async () => {
+    const jobId = ++nextJob;
+    const scenes = timedBoard(3);
+    getJobSpy.mockResolvedValue({
+      id: jobId,
+      inputParams: {},
+      storyboard: scenes,
+    });
+    enqueueSceneEdit(jobId, {
+      kind: "piececlip",
+      sceneIndex: 2,
+      cutOffsetSec: 4,
+      clipInSec: 12,
+    });
+    await sceneEditsSettled(jobId);
+    expect(scenes[1].pieceClipIns).toBeUndefined();
+    const writes = updateSpy.mock.calls.map(c => (c as any)[1]);
+    const err = writes.find(w => typeof w.errorMessage === "string");
+    expect(err?.errorMessage).toMatch(/Scene 2: /);
+  });
 });

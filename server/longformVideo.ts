@@ -76,6 +76,19 @@ import {
   type EditAccept,
   type EditQueueState,
 } from "./sceneEditQueue";
+import {
+  applyTimingEdit,
+  addCutPoint,
+  removeCutPoint,
+  moveCutPoint,
+  cutPoints,
+  validateAddCut,
+  validateMoveCut,
+  validateTimingEdit,
+  validateSetPieceClipIn,
+  setPieceClipIn,
+  type SceneTimingEdit,
+} from "./sceneTiming";
 
 /**
  * The host lip-sync lane, resolved once per pipeline pass. HeyGen Avatar IV is the only
@@ -9129,8 +9142,19 @@ async function assembleAndFinalize(
       ? "center"
       : "corner") as "corner" | "center",
     // The block's release beat holds a silent frozen QR_TAIL_HOLD_SEC tail so the QR lingers
-    // ~3s past "I'll wait right here" (extended in assembly via tpad/apad).
-    tailHoldSec: s.qrTail ? QR_TAIL_HOLD_SEC : undefined,
+    // ~3s past "I'll wait right here" (extended in assembly via tpad/apad) — unless the operator
+    // set a hold themselves (`scene.tailHoldSec`, 0 to remove it; see sceneTiming.ts).
+    tailHoldSec:
+      s.tailHoldSec !== undefined
+        ? s.tailHoldSec
+        : s.qrTail
+          ? QR_TAIL_HOLD_SEC
+          : undefined,
+    // Operator trim — which part of the rendered clip the scene shows.
+    clipInSec: s.clipInSec,
+    // Operator cut markers and their per-piece footage overrides (CapCut-style split).
+    cutPoints: s.cutPoints,
+    pieceClipIns: s.pieceClipIns,
     // The scene's slice of the master timeline (overlay mode only).
     sliceStartSec: masterAudioUrl ? s.narrationStartSec : undefined,
     sliceEndSec: masterAudioUrl ? s.narrationEndSec : undefined,
@@ -9212,12 +9236,18 @@ async function assembleAndFinalize(
     `[Longform ${jobId}] final upload done in ${Math.round((Date.now() - uploadStart) / 1000)}s | assembly total ${sinceStart()}s`
   );
 
+  // This cut reflects every timing edit made so far — clear the "Reassemble to apply" markers.
+  // Written with the storyboard only when any were set, so an ordinary run's final write is
+  // unchanged.
+  const hadTimingEdits = scenes.some(s => s.timingEdited);
+  if (hadTimingEdits) for (const s of scenes) delete s.timingEdited;
   await updateLongformVideoJob(jobId, {
     status: "completed",
     stage: "done",
     finalVideoUrl: url,
     finalFileKey: key,
     completedAt: new Date(),
+    ...(hadTimingEdits ? { storyboard: scenes } : {}),
   });
 }
 
@@ -9669,7 +9699,40 @@ export type SceneEditRequest =
        */
       clearClip?: boolean;
     }
-  | { kind: "split"; sceneIndex: number; edit: SceneSplitEdit };
+  | { kind: "split"; sceneIndex: number; edit: SceneSplitEdit }
+  /** Cut-room edit: trim / move a cut / hold (see `sceneTiming.ts`). Metadata only, no render. */
+  | { kind: "timing"; sceneIndex: number; edit: SceneTimingEdit }
+  /** Cut-room split of one scene into two at an offset into its slice. Metadata only. */
+  | { kind: "cut"; sceneIndex: number; atOffsetSec: number }
+  /** Remove a cut marker (nearest to `atOffsetSec`, or ALL when omitted). Metadata only. */
+  | { kind: "uncut"; sceneIndex: number; atOffsetSec?: number }
+  /** Drag an existing cut marker to a new position — CapCut's move-the-split-point. Metadata only. */
+  | {
+      kind: "movecut";
+      sceneIndex: number;
+      fromOffsetSec: number;
+      toOffsetSec: number;
+    }
+  /**
+   * Slip one piece of a cut scene to a different moment of the SAME footage (or clear its
+   * override with `clipInSec: null`, reverting it to the continuous default). Metadata only —
+   * no render here — but unlike a bare cut it DOES change the eventual output, so it marks
+   * `timingEdited` (see `setPieceClipIn`).
+   */
+  | {
+      kind: "piececlip";
+      sceneIndex: number;
+      cutOffsetSec: number;
+      clipInSec: number | null;
+    };
+
+/** Requests that change how a scene ASSEMBLES without rendering anything. */
+const isTimingKind = (req: SceneEditRequest): boolean =>
+  req.kind === "timing" ||
+  req.kind === "cut" ||
+  req.kind === "uncut" ||
+  req.kind === "movecut" ||
+  req.kind === "piececlip";
 
 interface SceneEditSession {
   queue: SceneEditQueue<SceneEditRequest>;
@@ -9708,7 +9771,11 @@ export function getSceneEditState(
   const editing = sceneEditLockHeld.has(jobId);
   const s = sceneEditSessions.get(jobId);
   if (!s) return { queued: [], active: [], editing };
-  const state = s.queue.closed ? { queued: [], active: [] } : s.queue.state();
+  // Cut-room edits (trim / move / split / hold) are instant metadata writes — they are not
+  // "rendering" and must not show as such; only render work is reported.
+  const state = s.queue.closed
+    ? { queued: [], active: [] }
+    : s.queue.state(req => !isTimingKind(req));
   return { ...state, editing };
 }
 
@@ -9757,6 +9824,8 @@ interface SceneEditContext {
   params: LongformInputParams;
   scenes: StoryboardScene[];
   queue: SceneEditQueue<SceneEditRequest>;
+  /** The continuous master narration, when the job has one — a split re-slices from it. */
+  masterAudioUrl: string | null;
   /**
    * The render lane, resolved PER TASK (not per session): provider keys, the lip-sync lane and
    * the instruction are documented as read at render time so a rotation mid-session is picked
@@ -9815,6 +9884,7 @@ async function runSceneEditSession(
       params,
       scenes,
       queue,
+      masterAudioUrl: job.masterAudioUrl ?? null,
       renderLane: async () => {
         const provider = await getActiveProvider();
         if (!provider) throw new Error("No active provider configured");
@@ -9849,8 +9919,10 @@ async function runSceneEditSession(
     };
 
     const inflight = new Set<Promise<void>>();
+    // Set when the first RENDER request is taken: the job flips to "processing" and the client
+    // is told an edit session owns it. Cut-room edits alone never flip anything — a split or a
+    // trim is an instant metadata write, and must look like one (no spinner, no status blip).
     let flipped = false;
-    sceneEditLockHeld.add(jobId);
     try {
       for (;;) {
         // A request for a scene this storyboard does not have is dropped here, before it can
@@ -9874,13 +9946,21 @@ async function runSceneEditSession(
           // Apply the operator's text and mark the scenes in flight BEFORE any slow work, and
           // persist immediately, so the client's very next poll shows them queued/rendering.
           for (const req of batch) prepareSceneEdit(ctx, req);
-          await updateLongformVideoJob(jobId, {
-            ...(flipped
-              ? {}
-              : { status: "processing", stage: "clips", errorMessage: null }),
-            storyboard: scenes,
-          });
-          flipped = true;
+          const rendersNow = batch.some(req => !isTimingKind(req));
+          if (rendersNow && !flipped) {
+            flipped = true;
+            sceneEditLockHeld.add(jobId);
+            await updateLongformVideoJob(jobId, {
+              status: "processing",
+              stage: "clips",
+              errorMessage: null,
+              storyboard: scenes,
+            });
+          } else if (rendersNow) {
+            await updateLongformVideoJob(jobId, { storyboard: scenes });
+          }
+          // A timing-only batch persists through its tasks (recordSceneEditOutcome → flush at
+          // the end); nothing to announce up front.
           for (const req of batch) {
             const run = session.runOne ?? runSceneEdit;
             const task: Promise<void> = run(ctx, req)
@@ -9909,8 +9989,18 @@ async function runSceneEditSession(
         await queue.waitForChange();
       }
       await Promise.all(inflight);
-      // Every request was dropped as unknown — nothing was flipped, nothing to settle.
-      if (!flipped) return;
+      // Nothing rendered (cut-room edits only, or every request dropped as unknown): land the
+      // storyboard and leave the job row exactly as it was — no status change, no settle.
+      if (!flipped) {
+        await flushPersist(jobId);
+        // A refused cut-room edit (validated against the LIVE document) still needs to reach
+        // the operator: the only row-level channel without a settle is the error message.
+        if (ctx.failures.size)
+          await updateLongformVideoJob(jobId, {
+            errorMessage: Array.from(ctx.failures.values()).join(" · "),
+          });
+        return;
+      }
       await flushPersist(jobId);
 
       // Settle once, union of the old single/batch rules: a clip-less scene (a batch regen
@@ -9983,6 +10073,9 @@ async function runSceneEditSession(
 function prepareSceneEdit(ctx: SceneEditContext, req: SceneEditRequest): void {
   const scene = ctx.scenes.find(s => s.index === req.sceneIndex);
   if (!scene) return; // runSceneEdit reports it
+  // A cut-room edit changes no clip: the scene stays whatever it was (a failed scene stays
+  // failed, a completed one completed) — only its timing fields move.
+  if (isTimingKind(req)) return;
   if (req.kind === "regen") {
     const splitOnly = isSplitScene(scene);
     // A split scene regenerates its RIGHT panel only — its editable prompt is `splitVisual`.
@@ -10028,7 +10121,7 @@ function sceneEditLane(
   scene: StoryboardScene,
   req: SceneEditRequest
 ): { sem: Semaphore; deadlineMs: number } {
-  if (req.kind === "split" && req.edit.mode !== "prompt")
+  if (isTimingKind(req) || (req.kind === "split" && req.edit.mode !== "prompt"))
     return { sem: ctx.lanes.light, deadlineMs: SCENE_EDIT_LIGHT_DEADLINE_MS };
   if (req.kind === "split" || isSplitScene(scene)) {
     // Right panel only: a square still (image lane) or, when the scene carries one, a moving
@@ -10065,10 +10158,32 @@ async function runSceneEdit(
     let settled = false;
     const body = async (s: StoryboardScene) => {
       try {
-        if (req.kind === "regen") await runRegenEdit(ctx, s, req);
-        else await runSplitEdit(ctx, s, req.edit);
-        s.regenerated = true;
+        if (req.kind === "timing") {
+          runTimingEdit(ctx, s, req.edit);
+        } else if (req.kind === "cut") {
+          await runCutEdit(ctx, s, req.atOffsetSec);
+        } else if (req.kind === "uncut") {
+          runUncutEdit(ctx, s, req.atOffsetSec);
+        } else if (req.kind === "movecut") {
+          runMoveCutEdit(ctx, s, req.fromOffsetSec, req.toOffsetSec);
+        } else if (req.kind === "piececlip") {
+          runPieceClipEdit(ctx, s, req.cutOffsetSec, req.clipInSec);
+        } else {
+          if (req.kind === "regen") await runRegenEdit(ctx, s, req);
+          else await runSplitEdit(ctx, s, req.edit);
+          s.regenerated = true;
+        }
       } catch (e: any) {
+        if (isTimingKind(req)) {
+          // Nothing was rendered and the clip is untouched — the scene is not "failed"; the
+          // edit was refused. Surface the reason on the job row (settle message) and move on.
+          const msg = describeError(e);
+          ctx.failures.set(s.index, `Scene ${s.index}: ${msg}`);
+          console.warn(
+            `[Longform ${jobId}] scene ${s.index} timing edit refused: ${msg}`
+          );
+          return;
+        }
         s.sceneStatus = "failed";
         s.error = describeError(e);
         console.warn(
@@ -10105,7 +10220,10 @@ function recordSceneEditOutcome(
 ): void {
   const { jobId, scenes } = ctx;
   const scene = scenes.find(s => s.index === req.sceneIndex);
-  if (scene?.sceneStatus === "failed") {
+  if (isTimingKind(req)) {
+    // Metadata only: no clip changed (so the existing cut is NOT invalidated — the operator
+    // re-stitches when ready, see `timingEdited`), and any refusal was already recorded.
+  } else if (scene?.sceneStatus === "failed") {
     ctx.failures.set(
       scene.index,
       `Scene ${scene.index}: ${scene.error ?? "failed"}`
@@ -10121,6 +10239,196 @@ function recordSceneEditOutcome(
       scenesTotal: scenes.length,
       scenesDone,
     }),
+  });
+}
+
+/**
+ * A cut-room timing edit: validate against the LIVE document (a sibling task may have split or
+ * moved something since the router's pre-check), apply in place, mark the touched scenes
+ * pending re-assembly. A lip-synced host keeps its mouth locked to the narration across a
+ * start move (see `applyTimingEdit`).
+ */
+function runTimingEdit(
+  ctx: SceneEditContext,
+  scene: StoryboardScene,
+  edit: SceneTimingEdit
+): void {
+  const v = validateTimingEdit(ctx.scenes, {
+    ...edit,
+    sceneIndex: scene.index,
+  });
+  if (!v.ok) throw new Error(v.reason);
+  const keepsLipSync =
+    !!scene.hostPresent && (!!scene.lipsynced || !!ctx.params.faceImageUrl);
+  const touched = applyTimingEdit(
+    ctx.scenes,
+    { ...edit, sceneIndex: scene.index },
+    { keepsLipSync }
+  );
+  console.log(
+    `[Longform ${ctx.jobId}] scene ${scene.index} timing edit applied (${Object.keys(
+      edit
+    )
+      .filter(k => k !== "sceneIndex")
+      .join(", ")}) — scenes ${touched.join(", ")} pending re-assembly`
+  );
+}
+
+/**
+ * Place a cut marker on this scene at `atOffsetSec` — CapCut's split: the clip stays ONE clip,
+ * the cut just marks where it's divided on the timeline. Pure metadata, output-neutral, so no
+ * reslice and no reassemble. Refused only while a RENDER is in flight (defensive).
+ */
+function runCutEdit(
+  ctx: SceneEditContext,
+  scene: StoryboardScene,
+  atOffsetSec: number
+): void {
+  const renders = ctx.queue.state(req => !isTimingKind(req));
+  if (renders.active.length || renders.queued.length)
+    throw new Error(
+      `Can't cut while scenes are rendering or queued (${[
+        ...renders.active,
+        ...renders.queued,
+      ].join(", ")}) — wait for them to finish`
+    );
+  const v = validateAddCut(ctx.scenes, scene.index, atOffsetSec);
+  if (!v.ok) throw new Error(v.reason);
+  const cuts = addCutPoint(ctx.scenes, scene.index, atOffsetSec);
+  console.log(
+    `[Longform ${ctx.jobId}] scene ${scene.index} cut at +${atOffsetSec.toFixed(2)}s ` +
+      `(${cuts?.length ?? 0} cut${(cuts?.length ?? 0) === 1 ? "" : "s"})`
+  );
+}
+
+/**
+ * Remove a cut marker (nearest to `atOffsetSec`, or every cut when omitted) — undo a split.
+ * Pure metadata, output-neutral.
+ */
+function runUncutEdit(
+  ctx: SceneEditContext,
+  scene: StoryboardScene,
+  atOffsetSec?: number
+): void {
+  const before = cutPoints(scene).length;
+  if (!before) throw new Error(`Scene ${scene.index} has no cut to undo`);
+  removeCutPoint(ctx.scenes, scene.index, atOffsetSec);
+  console.log(
+    `[Longform ${ctx.jobId}] scene ${scene.index} cut removed ` +
+      `(${cutPoints(scene).length} left)`
+  );
+}
+
+/**
+ * Slide an existing cut marker to a new position. Pure metadata, output-neutral — the clip is
+ * unchanged, only where it is marked cut. Re-validated against the LIVE document (a sibling
+ * task may have added/moved a neighbouring cut since the router's pre-check).
+ */
+function runMoveCutEdit(
+  ctx: SceneEditContext,
+  scene: StoryboardScene,
+  fromOffsetSec: number,
+  toOffsetSec: number
+): void {
+  const v = validateMoveCut(
+    ctx.scenes,
+    scene.index,
+    fromOffsetSec,
+    toOffsetSec
+  );
+  if (!v.ok) throw new Error(v.reason);
+  moveCutPoint(ctx.scenes, scene.index, fromOffsetSec, toOffsetSec);
+  console.log(
+    `[Longform ${ctx.jobId}] scene ${scene.index} cut moved ${fromOffsetSec.toFixed(2)}s → ${toOffsetSec.toFixed(2)}s`
+  );
+}
+
+/**
+ * Slip one piece of a cut scene to a different moment of the same footage (or clear the
+ * override, `clipInSec: null`). The clip itself is untouched — only which moment each piece
+ * shows — but unlike a bare cut this DOES change the eventual output, so it marks
+ * `timingEdited` (assembly re-renders the scene from its pieces; see `buildPiecedSceneVideo`).
+ */
+function runPieceClipEdit(
+  ctx: SceneEditContext,
+  scene: StoryboardScene,
+  cutOffsetSec: number,
+  clipInSec: number | null
+): void {
+  const v = validateSetPieceClipIn(
+    ctx.scenes,
+    scene.index,
+    cutOffsetSec,
+    clipInSec
+  );
+  if (!v.ok) throw new Error(v.reason);
+  setPieceClipIn(ctx.scenes, scene.index, cutOffsetSec, clipInSec);
+  console.log(
+    `[Longform ${ctx.jobId}] scene ${scene.index} piece at +${cutOffsetSec.toFixed(2)}s ` +
+      (clipInSec === null
+        ? "slip cleared"
+        : `slipped to +${clipInSec.toFixed(2)}s of footage`)
+  );
+}
+
+/**
+ * Cut-room entry points. Both queue on the job's edit session (so they land on the one live
+ * storyboard document and can never be clobbered by a render in flight) and return at once.
+ * Validation against the stored row happens in the router so the operator gets the reason as
+ * an error; the task re-validates against the live document.
+ */
+export async function setSceneTiming(
+  jobId: number,
+  edit: SceneTimingEdit
+): Promise<EditAccept> {
+  return enqueueSceneEdit(jobId, {
+    kind: "timing",
+    sceneIndex: edit.sceneIndex,
+    edit,
+  });
+}
+
+export async function splitSceneInTwo(
+  jobId: number,
+  sceneIndex: number,
+  atOffsetSec: number
+): Promise<EditAccept> {
+  return enqueueSceneEdit(jobId, { kind: "cut", sceneIndex, atOffsetSec });
+}
+
+export async function undoSceneSplit(
+  jobId: number,
+  sceneIndex: number,
+  atOffsetSec?: number
+): Promise<EditAccept> {
+  return enqueueSceneEdit(jobId, { kind: "uncut", sceneIndex, atOffsetSec });
+}
+
+export async function moveSceneCut(
+  jobId: number,
+  sceneIndex: number,
+  fromOffsetSec: number,
+  toOffsetSec: number
+): Promise<EditAccept> {
+  return enqueueSceneEdit(jobId, {
+    kind: "movecut",
+    sceneIndex,
+    fromOffsetSec,
+    toOffsetSec,
+  });
+}
+
+export async function setScenePieceClipIn(
+  jobId: number,
+  sceneIndex: number,
+  cutOffsetSec: number,
+  clipInSec: number | null
+): Promise<EditAccept> {
+  return enqueueSceneEdit(jobId, {
+    kind: "piececlip",
+    sceneIndex,
+    cutOffsetSec,
+    clipInSec,
   });
 }
 

@@ -299,6 +299,196 @@ export function buildKenBurnsArgs(opts: {
 }
 
 /**
+ * Build the FFmpeg args for ONE PIECE of a cut clip: trim its footage to start at `startSec`
+ * (the piece's own — possibly overridden — footage offset) and hold it to exactly
+ * `durationSec` of on-screen time. `tpad` clones the last frame if the footage runs out before
+ * the piece's time is up (the "independent trim, freeze on run-out" behaviour — see
+ * `shared/types.ts` `pieceClipIns`); it's a no-op when the footage already covers the whole
+ * piece. Input is the scene's own already-normalized silent video (post `buildSilentSceneArgs`
+ * + concat), so no scale/crop here — just trim + hold. Silent, fixed length. Pure — no IO.
+ */
+export function buildScenePieceArgs(opts: {
+  videoPath: string;
+  outputPath: string;
+  /** Seconds into the (already-normalized) video where this piece's footage starts. */
+  startSec: number;
+  /** This piece's on-screen duration, seconds. */
+  durationSec: number;
+  fps?: number;
+}): string[] {
+  const fps = opts.fps ?? FPS;
+  const dur = opts.durationSec.toFixed(3);
+  const trim =
+    opts.startSec > 0
+      ? `trim=start=${opts.startSec.toFixed(3)},setpts=PTS-STARTPTS,`
+      : "";
+  const filter = `[0:v]${trim}tpad=stop_mode=clone:stop_duration=${dur}[v]`;
+  return [
+    "-y",
+    "-i",
+    opts.videoPath,
+    "-filter_complex",
+    filter,
+    "-map",
+    "[v]",
+    "-an",
+    "-t",
+    dur,
+    "-c:v",
+    "libx264",
+    // ponytail: cap encoder threads so N concurrent scenes don't oversubscribe the host.
+    "-threads",
+    "2",
+    "-preset",
+    PRESET_INTERMEDIATE,
+    "-crf",
+    CRF_INTERMEDIATE,
+    "-pix_fmt",
+    "yuv420p",
+    "-r",
+    String(fps),
+    "-movflags",
+    "+faststart",
+    opts.outputPath,
+  ];
+}
+
+/**
+ * Rebuild a CUT scene's silent video as separate independently-trimmed PIECES, concatenated —
+ * the render side of the operator's cut markers + per-piece footage slip. `sceneVideoPath` is
+ * the scene's already-normalized (scaled/cropped/concatenated) silent video; `cuts` are its
+ * sorted cut offsets (seconds into the slice); `totalDurationSec` is the scene's full on-screen
+ * time (the same value the mux step will hold the whole scene to).
+ *
+ * Piece 0 (before the first cut) uses `scene.clipInSec` — the EXISTING scene-wide slip — for
+ * continuity with an un-cut scene. Every later piece starts, by default, exactly where the
+ * previous one's footage would have continued (so an untouched cut is invisible in the output);
+ * an entry in `scene.pieceClipIns`, keyed by the cut that starts that piece, overrides it to a
+ * different moment of the SAME footage. The last piece absorbs whatever `totalDurationSec` has
+ * beyond the sum of the others (a hold-floor or CTA tail), matching how the whole-scene tpad
+ * already worked before per-piece trimming existed. Each piece is held (`tpad`) to exactly its
+ * own share, so a piece whose footage runs out freezes on ITS OWN last frame rather than
+ * jump-cutting into the next piece's — the "independent trim" this feature is for.
+ *
+ * Returns the path to the concatenated pieced video (same directory, `s{sceneIndex}-pieced.mp4`).
+ */
+export interface ScenePiecePlan {
+  /** Footage-seconds where this piece's trim starts (already clamped to the source's length). */
+  startSec: number;
+  /** This piece's on-screen duration, seconds. */
+  durationSec: number;
+}
+
+/**
+ * The pure math behind a cut scene's per-piece render: where each piece's footage starts and
+ * how long it stays on screen. Split out from `buildPiecedSceneVideo` (which just runs ffmpeg
+ * per plan entry) so the arithmetic — bounds, override lookup, last-piece absorption, clamping
+ * — is unit-testable without IO. See `shared/types.ts` `pieceClipIns` for the semantics. Pure.
+ */
+/** A piece below this on-screen length is not worth its own encode — merged into its neighbour. */
+const MIN_PIECE_SEC = 0.05;
+
+export function planScenePieces(opts: {
+  cuts: number[];
+  totalDurationSec: number;
+  /** The source video's real length, seconds — every start clamps inside it. */
+  videoDurationSec: number;
+  clipInSec?: number;
+  pieceClipIns?: Record<string, number>;
+}): ScenePiecePlan[] {
+  const { cuts, totalDurationSec, videoDurationSec, clipInSec, pieceClipIns } = opts;
+  // `totalDurationSec` can exceed the last cut only by a hold-floor/tail (bounds is otherwise
+  // in slice-seconds); clamp so a stale cut past a since-shortened slice can't sit beyond it.
+  // Then MERGE any bound that doesn't leave the previous one a real (MIN_PIECE_SEC) piece —
+  // a stale cut collapsed onto (or past) the end folds into the piece before it instead of
+  // producing a near-zero flash frame.
+  const raw = [0, ...cuts.map(c => Math.min(c, totalDurationSec)), totalDurationSec];
+  const bounds: number[] = [raw[0]];
+  for (let i = 1; i < raw.length; i++) {
+    if (raw[i] - bounds[bounds.length - 1] >= MIN_PIECE_SEC) bounds.push(raw[i]);
+  }
+  const plan: ScenePiecePlan[] = [];
+  let consumed = 0;
+  for (let i = 0; i < bounds.length - 1; i++) {
+    const isLast = i === bounds.length - 2;
+    // The last piece gets whatever's left, so the pieces always sum to EXACTLY
+    // totalDurationSec regardless of float drift or a hold beyond the last cut.
+    const durationSec = isLast
+      ? Math.max(MIN_PIECE_SEC, totalDurationSec - consumed)
+      : bounds[i + 1] - bounds[i];
+    consumed += durationSec;
+    // Piece 0 has no cut to key an override by — it's governed by the scene's own slip.
+    // Later pieces default to CONTINUING the footage (clipIn + how far into the slice this
+    // piece starts), unless the operator slipped this specific piece.
+    const cutKey = i === 0 ? undefined : String(bounds[i]);
+    const override = cutKey ? pieceClipIns?.[cutKey] : undefined;
+    const defaultStart = (clipInSec ?? 0) + bounds[i];
+    const startSec = Math.max(
+      0,
+      Math.min(
+        override ?? defaultStart,
+        Math.max(0, videoDurationSec - MIN_PIECE_SEC)
+      )
+    );
+    plan.push({ startSec, durationSec });
+  }
+  return plan;
+}
+
+/**
+ * Rebuild a CUT scene's silent video as separate independently-trimmed PIECES, concatenated —
+ * the render side of the operator's cut markers + per-piece footage slip. `sceneVideoPath` is
+ * the scene's already-normalized (scaled/cropped/concatenated) silent video; `cuts` are its
+ * sorted cut offsets (seconds into the slice); `totalDurationSec` is the scene's full on-screen
+ * time (the same value the mux step will hold the whole scene to). The actual per-piece timing
+ * is `planScenePieces` (pure, unit-tested); this is just the ffmpeg-per-plan-entry + concat
+ * shell around it. Each piece is held (`tpad`) to exactly its own share, so a piece whose
+ * footage runs out freezes on ITS OWN last frame rather than jump-cutting into the next piece's
+ * — the "independent trim" this feature is for.
+ *
+ * Returns the path to the concatenated pieced video (same directory, `s{sceneIndex}-pieced.mp4`).
+ */
+async function buildPiecedSceneVideo(opts: {
+  scene: { clipInSec?: number; pieceClipIns?: Record<string, number> };
+  cuts: number[];
+  sceneVideoPath: string;
+  totalDurationSec: number;
+  workDir: string;
+  sceneIndex: number;
+}): Promise<string> {
+  const { scene, cuts, sceneVideoPath, totalDurationSec, workDir, sceneIndex: s } = opts;
+  const videoDurationSec = await getMediaDuration(sceneVideoPath);
+  const plan = planScenePieces({
+    cuts,
+    totalDurationSec,
+    videoDurationSec,
+    clipInSec: scene.clipInSec,
+    pieceClipIns: scene.pieceClipIns,
+  });
+  const pieceOuts: string[] = [];
+  for (let i = 0; i < plan.length; i++) {
+    const pieceOut = path.join(workDir, `s${s}-piece${i}.mp4`);
+    await runFfmpeg(
+      buildScenePieceArgs({
+        videoPath: sceneVideoPath,
+        outputPath: pieceOut,
+        startSec: plan[i].startSec,
+        durationSec: plan[i].durationSec,
+      })
+    );
+    pieceOuts.push(pieceOut);
+  }
+  if (pieceOuts.length === 1) return pieceOuts[0];
+  const piecedVideo = path.join(workDir, `s${s}-pieced.mp4`);
+  const plist = path.join(workDir, `s${s}-plist.txt`);
+  writeFileSync(plist, pieceOuts.map(concatListLine).join("\n") + "\n");
+  await runFfmpeg(
+    buildConcatCopyArgs({ listPath: plist, outputPath: piecedVideo })
+  );
+  return piecedVideo;
+}
+
+/**
  * Build the FFmpeg args that normalize ONE raw clip into a uniform, SILENT scene
  * file (no audio). Used by the continuous-narration (talking-head) assembly, where
  * one master voiceover is laid over the whole concatenated video. The video filter
@@ -900,6 +1090,13 @@ export function buildSceneMuxArgs(opts: {
   durationSec: number;
   fps?: number;
   /**
+   * Operator trim: seconds dropped from the head of the (already concatenated) scene video
+   * before it is held/cut to `durationSec` — `scene.clipInSec`, "cut forward". Applied here, on
+   * the whole scene video, so a multi-clip host scene trims across its chunks as one piece.
+   * The caller clamps it inside the video's real length; 0/undefined ⇒ from the top.
+   */
+  startSec?: number;
+  /**
    * Optional QR-code PNG overlaid on a CTA scene. The QR is scaled-to-fit and padded onto a
    * white "quiet-zone" card so it stays scannable over any backdrop. `height` sizes the card
    * relative to the frame. `placement` (default `"corner"`) picks the layout: `"corner"` is the
@@ -1005,11 +1202,19 @@ export function buildSceneMuxArgs(opts: {
     });
   }
 
+  // Head trim first, then the hold: tpad clones the LAST frame, which must be the last frame of
+  // the trimmed picture, not of the untrimmed source.
+  const head =
+    opts.startSec && opts.startSec > 0
+      ? `trim=start=${opts.startSec.toFixed(3)},setpts=PTS-STARTPTS,`
+      : "";
   let filter: string;
   if (overlays.length === 0) {
-    filter = `[0:v]tpad=stop_mode=clone:stop_duration=${dur}[v]`;
+    filter = `[0:v]${head}tpad=stop_mode=clone:stop_duration=${dur}[v]`;
   } else {
-    const parts = [`[0:v]tpad=stop_mode=clone:stop_duration=${dur}[base]`];
+    const parts = [
+      `[0:v]${head}tpad=stop_mode=clone:stop_duration=${dur}[base]`,
+    ];
     let cur = "base";
     overlays.forEach((o, i) => {
       const out = i === overlays.length - 1 ? "v" : `ov${i}`;
@@ -2317,8 +2522,15 @@ export async function assemblePerSceneFilm(opts: {
     /** QR layout: `"center"` (large, centered — the QR-hero beat) or `"corner"` (default, small bottom-right). */
     qrPlacement?: "corner" | "center";
     /** Extra silent frozen tail (seconds) appended past the held length — the CTA QR-block release
-     *  beat lingers so the QR stays on screen ~3s after the release line. */
+     *  beat lingers so the QR stays on screen ~3s after the release line (or the operator's
+     *  override, which may be 0). */
     tailHoldSec?: number;
+    /** Operator trim: seconds into the scene's clip(s) where the picture starts. */
+    clipInSec?: number;
+    /** Operator cut markers (CapCut-style split), seconds into the scene's slice. */
+    cutPoints?: number[];
+    /** Per-piece footage offset overrides, keyed by the cut that starts each piece. */
+    pieceClipIns?: Record<string, number>;
     /**
      * This scene's slice of the master narration, seconds on the master timeline. When every
      * scene has both AND `masterAudioUrl` is set, assembly runs in master-overlay mode: scene
@@ -2551,7 +2763,40 @@ export async function assemblePerSceneFilm(opts: {
             await getMediaDuration(audioPath),
             scene.audioDurationSec ?? 0
           ) + (scene.tailHoldSec ?? 0);
+
+      // 3.5. A CUT scene: rebuild its video as separate PIECES, each independently trimmed
+      // (own footage offset) and held to its own on-screen share, then concatenated — so a
+      // piece that was slipped away from its neighbour's footage freezes on its OWN last frame
+      // instead of jump-cutting into whatever the continuous default would have shown. A
+      // scene with no cuts is untouched (falls straight to the single-trim path below,
+      // byte-identical args to before this feature existed).
+      const cuts = [...(scene.cutPoints ?? [])].sort((a, b) => a - b);
+      if (cuts.length > 0) {
+        sceneVideo = await buildPiecedSceneVideo({
+          scene,
+          cuts,
+          sceneVideoPath: sceneVideo,
+          totalDurationSec: durationSec,
+          workDir,
+          sceneIndex: s,
+        });
+      }
+
       const sceneOut = path.join(workDir, `scene-${s}.mp4`);
+      // Operator trim ("cut forward"): drop the head of the scene video, clamped so it can never
+      // trim past the footage — a trim at/after the end would leave zero frames for tpad to
+      // clone. Probed only when set, so untrimmed scenes cost nothing extra. Skipped for a cut
+      // scene: piece 0's own trim (still `scene.clipInSec`) was already applied while building
+      // the pieced video above, so trimming again here would double it.
+      let startSec = 0;
+      if (cuts.length === 0 && scene.clipInSec && scene.clipInSec > 0) {
+        const videoDur = await getMediaDuration(sceneVideo);
+        startSec = Math.max(0, Math.min(scene.clipInSec, videoDur - 0.25));
+        if (startSec < scene.clipInSec)
+          console.warn(
+            `[Assembly] scene ${s} trim ${scene.clipInSec}s clamped to ${startSec.toFixed(3)}s (clip is ${videoDur.toFixed(2)}s)`
+          );
+      }
       // Where this scene sits in the name-card run: the head fades in, the tail fades out,
       // everything between draws it static.
       const ncRun = opts.nameCard?.sceneIndices ?? [];
@@ -2562,6 +2807,7 @@ export async function assemblePerSceneFilm(opts: {
           audioPath,
           outputPath: sceneOut,
           durationSec,
+          startSec,
           qrOverlay:
             scene.qrOverlayUrl && qrPath
               ? {

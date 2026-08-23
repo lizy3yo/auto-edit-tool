@@ -23,6 +23,8 @@ import {
   planMusicSchedule,
   buildMusicBedMixArgs,
   MUSIC_BED_DUCK_DB,
+  buildScenePieceArgs,
+  planScenePieces,
 } from "./videoAssembly";
 import {
   pickMusicBeds,
@@ -431,6 +433,34 @@ describe("buildSceneMuxArgs base scene", () => {
   it("caps encoder threads so concurrent scenes don't oversubscribe the host", () => {
     const args = buildSceneMuxArgs(base);
     expect(args[args.indexOf("-threads") + 1]).toBe("2");
+  });
+
+  // The operator's trim ("cut forward"): the head is dropped BEFORE the hold, so tpad clones
+  // the last frame of the trimmed picture — never a frame the trim removed.
+  it("drops the trimmed head before the hold when startSec is set", () => {
+    const args = buildSceneMuxArgs({ ...base, startSec: 1.25 });
+    const f = args[args.indexOf("-filter_complex") + 1];
+    expect(f).toBe(
+      "[0:v]trim=start=1.250,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=7.500[v]"
+    );
+  });
+
+  it("emits no trim for a zero/absent startSec (byte-identical args)", () => {
+    expect(buildSceneMuxArgs({ ...base, startSec: 0 })).toEqual(
+      buildSceneMuxArgs(base)
+    );
+  });
+
+  it("keeps the trim ahead of the overlays too", () => {
+    const args = buildSceneMuxArgs({
+      ...base,
+      startSec: 2,
+      qrOverlay: { imagePath: "/tmp/qr.png", height: 1080 },
+    });
+    const f = args[args.indexOf("-filter_complex") + 1];
+    expect(
+      f.startsWith("[0:v]trim=start=2.000,setpts=PTS-STARTPTS,tpad=")
+    ).toBe(true);
   });
 });
 
@@ -1387,5 +1417,167 @@ describe("buildSceneMuxArgs caption (asset beats)", () => {
     const f = filterOf(args);
     expect(f).toContain("[2:v]format=rgba[card]");
     expect(f).toContain("[3:v]format=rgba[cap]");
+  });
+});
+
+describe("buildScenePieceArgs (one piece of a cut scene)", () => {
+  const base = {
+    videoPath: "/tmp/v.mp4",
+    outputPath: "/tmp/piece.mp4",
+    startSec: 0,
+    durationSec: 4.5,
+  };
+
+  it("holds to the piece's own duration with no trim when startSec is 0", () => {
+    const args = buildScenePieceArgs(base);
+    const f = args[args.indexOf("-filter_complex") + 1];
+    expect(f).toBe("[0:v]tpad=stop_mode=clone:stop_duration=4.500[v]");
+    expect(args[args.indexOf("-t") + 1]).toBe("4.500");
+    expect(args).not.toContain("-c:a"); // silent — no audio stream
+    expect(args).toContain("-an");
+  });
+
+  it("trims to the piece's footage offset before holding", () => {
+    const args = buildScenePieceArgs({ ...base, startSec: 2.25 });
+    const f = args[args.indexOf("-filter_complex") + 1];
+    expect(f).toBe(
+      "[0:v]trim=start=2.250,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=4.500[v]"
+    );
+  });
+
+  it("caps encoder threads like the other intermediate encodes", () => {
+    const args = buildScenePieceArgs(base);
+    expect(args[args.indexOf("-threads") + 1]).toBe("2");
+  });
+});
+
+describe("planScenePieces (per-piece footage timing, pure)", () => {
+  it("with no cuts, produces one piece using the scene's own clipIn", () => {
+    const plan = planScenePieces({
+      cuts: [],
+      totalDurationSec: 10,
+      videoDurationSec: 20,
+      clipInSec: 3,
+    });
+    expect(plan).toEqual([{ startSec: 3, durationSec: 10 }]);
+  });
+
+  it("splits into pieces at each cut, continuing the SAME footage by default", () => {
+    // A 10s scene cut at 4s: piece 0 = [0,4) footage from clipIn; piece 1 = [4,10) footage
+    // continuing where piece 0 would have been at t=4 (clipIn + 4) — no jump, untouched cut.
+    const plan = planScenePieces({
+      cuts: [4],
+      totalDurationSec: 10,
+      videoDurationSec: 20,
+      clipInSec: 1,
+    });
+    expect(plan).toEqual([
+      { startSec: 1, durationSec: 4 },
+      { startSec: 5, durationSec: 6 }, // 1 + 4 = continuous
+    ]);
+  });
+
+  it("an overridden piece shows a DIFFERENT moment of the same footage", () => {
+    const plan = planScenePieces({
+      cuts: [4],
+      totalDurationSec: 10,
+      videoDurationSec: 20,
+      clipInSec: 1,
+      pieceClipIns: { "4": 12 }, // piece 1 slipped to footage t=12 instead of continuing at 5
+    });
+    expect(plan[1]).toEqual({ startSec: 12, durationSec: 6 });
+    expect(plan[0]).toEqual({ startSec: 1, durationSec: 4 }); // piece 0 unaffected
+  });
+
+  it("the LAST piece absorbs a hold/tail beyond the narration span exactly", () => {
+    // Slice is 10s but the scene HOLDS to 13s (a floor or CTA tail) — the extra 3s must land
+    // entirely on the last piece, so the pieces still sum to exactly totalDurationSec.
+    const plan = planScenePieces({
+      cuts: [4, 7],
+      totalDurationSec: 13,
+      videoDurationSec: 20,
+      clipInSec: 0,
+    });
+    expect(plan.map(p => p.durationSec)).toEqual([4, 3, 6]); // 4 + 3 + 6 = 13
+    const total = plan.reduce((sum, p) => sum + p.durationSec, 0);
+    expect(total).toBeCloseTo(13, 10);
+  });
+
+  it("clamps a piece's footage start inside the real video length", () => {
+    // clipIn + bound would run past a short 6s video — clamp rather than request nothing.
+    const plan = planScenePieces({
+      cuts: [],
+      totalDurationSec: 10,
+      videoDurationSec: 6,
+      clipInSec: 50,
+    });
+    expect(plan[0].startSec).toBeCloseTo(5.95, 10); // videoDurationSec - 0.05
+  });
+
+  it("clamps an override past the video length the same way", () => {
+    const plan = planScenePieces({
+      cuts: [4],
+      totalDurationSec: 10,
+      videoDurationSec: 6,
+      pieceClipIns: { "4": 99 },
+    });
+    expect(plan[1].startSec).toBeCloseTo(5.95, 10);
+  });
+
+  it("merges a stale cut that now sits past a since-shortened total duration", () => {
+    // A cut at 8s survives a boundary move that shrank the scene to 5s total — rather than
+    // produce a near-zero flash piece, it folds back into the one piece before it.
+    const plan = planScenePieces({
+      cuts: [8],
+      totalDurationSec: 5,
+      videoDurationSec: 20,
+      clipInSec: 0,
+    });
+    expect(plan).toEqual([{ startSec: 0, durationSec: 5 }]);
+  });
+
+  it("merges a cut that lands within MIN_PIECE_SEC of a real boundary, on either side", () => {
+    // Within MIN_PIECE_SEC (0.05s) of the START: merges into nothing new — same as no cut.
+    const nearStart = planScenePieces({
+      cuts: [0.02],
+      totalDurationSec: 10,
+      videoDurationSec: 20,
+      clipInSec: 0,
+    });
+    expect(nearStart).toEqual([{ startSec: 0, durationSec: 10 }]);
+    // Within MIN_PIECE_SEC of the END: the trailing sliver merges into the piece before it.
+    const nearEnd = planScenePieces({
+      cuts: [9.98],
+      totalDurationSec: 10,
+      videoDurationSec: 20,
+      clipInSec: 0,
+    });
+    expect(nearEnd).toEqual([{ startSec: 0, durationSec: 10 }]);
+    // Two cuts close together: the second merges into the first, leaving ONE real division.
+    const twoClose = planScenePieces({
+      cuts: [4, 4.03],
+      totalDurationSec: 10,
+      videoDurationSec: 20,
+      clipInSec: 0,
+    });
+    expect(twoClose).toHaveLength(2);
+    expect(twoClose[0].durationSec).toBeCloseTo(4, 10);
+    expect(twoClose[1].durationSec).toBeCloseTo(6, 10);
+  });
+
+  it("three cuts produce four pieces, each independently addressable", () => {
+    const plan = planScenePieces({
+      cuts: [2, 5, 8],
+      totalDurationSec: 12,
+      videoDurationSec: 30,
+      clipInSec: 0,
+      pieceClipIns: { "5": 20 }, // only piece 2 (starting at cut 5) is overridden
+    });
+    expect(plan).toHaveLength(4);
+    expect(plan.map(p => p.durationSec)).toEqual([2, 3, 3, 4]);
+    expect(plan[0].startSec).toBe(0); // continuous default
+    expect(plan[1].startSec).toBe(2); // continuous default
+    expect(plan[2].startSec).toBe(20); // overridden
+    expect(plan[3].startSec).toBe(8); // continuous default (own override absent)
   });
 });

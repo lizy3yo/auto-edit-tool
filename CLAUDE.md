@@ -141,6 +141,29 @@ Express · tRPC · Drizzle · MySQL.
   router returns `accepted`). `pollJob.sceneEdits {queued, active, editing}` drives the client's
   per-scene Queued/Rendering badges and keeps the editors live (`isPipelineRunning`, not
   `isProcessing`, hides them)
+- `server/sceneTiming.ts` — the cut room: pure edits to WHEN a scene's picture shows, on top of a
+  narration that never moves. Trim (`scene.clipInSec`), move a cut between neighbours
+  (`narrationStartSec/EndSec`, lip-synced hosts keep sync by trimming), split a scene in two (same
+  footage continues; renumbers), hold the last frame (`scene.tailHoldSec` — the CTA release beat's
+  hard-wired `QR_TAIL_HOLD_SEC = 3` is its default; 0 removes the pause). Queued on the edit
+  session as `timing` / `cut` requests — instant metadata writes: they never mark a scene failed,
+  never flip the job to `processing`, and are hidden from `pollJob.sceneEdits`, so a split looks
+  like a split (moving the cut between two continuous same-footage neighbours carries the footage across it —
+  `isContinuousPair`). SPLIT is CapCut-style: it places a cut MARKER on the one clip
+  (`scene.cutPoints`, `addCutPoint`) — the scene stays one clip/one card, the marker just shows
+  the division on the timeline; output is unchanged (no reassemble) until a piece is acted on.
+  Remove a marker to undo (`removeCutPoint`); drag a marker to slide it (`moveCutPoint`), clamped
+  off the slice edges and off every other cut, carrying that piece's slip (below) to the new key.
+  Queued as `cut`/`uncut`/`movecut` requests — instant metadata, never flip the job. A piece IS
+  acted on by slipping it (`scene.pieceClipIns`, keyed by the cut that starts it — `setPieceClipIn`
+  / `pieceClipIn`): each piece between cuts can show a different moment of the SAME footage,
+  independent of its neighbour — no separate AI regeneration per piece. Queued as a `piececlip`
+  request; unlike a bare cut this DOES set `timingEdited` (a real render change). Assembly
+  (`buildPiecedSceneVideo`/`planScenePieces` in `videoAssembly.ts`) trims+holds each piece
+  separately then concats them — a piece whose chosen footage runs out before its on-screen time
+  ends freezes on its own last frame, independent of its neighbour's freeze. `timingEdited` drives
+  the "Reassemble to apply" notice until a final is written. UI:
+  `client/src/components/SceneTimingEditor.tsx`
 - `server/narrationAlignment.ts`, `server/_core/voiceTranscription.ts` — whisperx
 - `server/costMeter.ts` + `server/pricing.ts` — per-video spend. Every billable adapter calls
   `recordUsage`; an `AsyncLocalStorage` set inside `withJobLock` attributes it, so the six

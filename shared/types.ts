@@ -421,6 +421,25 @@ export interface StoryboardScene {
   narrationStartSec?: number;
   narrationEndSec?: number;
   /**
+   * Operator trim: seconds into the rendered clip(s) where this scene's picture starts. Assembly
+   * drops that head before laying the clip over the narration slice, so the same footage can be
+   * "cut forward". Unset/0 ⇒ from the top. A split scene's second half starts here so the
+   * picture continues seamlessly across the new cut. See `server/sceneTiming.ts`.
+   */
+  clipInSec?: number;
+  /**
+   * Operator override of the silent frozen tail held after the scene's last word, seconds.
+   * SET ⇒ used as-is — 0 removes the CTA release beat's default hold; UNSET ⇒ the default:
+   * `QR_TAIL_HOLD_SEC` on a `qrTail` beat, nothing elsewhere.
+   */
+  tailHoldSec?: number;
+  /**
+   * A timing edit (trim, cut move, split, hold) changed how this scene assembles and the
+   * finished film has not been re-stitched since. Drives the "Reassemble to apply" notice;
+   * cleared when a final is written.
+   */
+  timingEdited?: boolean;
+  /**
    * R2 URLs of this scene's generated clip(s), in order. B-roll is always ONE clip sized to
    * the narration; only a HOST scene whose narration outruns one clip gets several.
    */
@@ -459,6 +478,27 @@ export interface StoryboardScene {
    * never regenerates either half.
    */
   splitLayout?: SplitLayout;
+  /**
+   * Operator CUT markers on this scene, in seconds into its narration slice (sorted). A split
+   * (`sceneTiming.ts`) records a cut here — like CapCut, the scene stays ONE clip and the cut is
+   * just shown as a division on the timeline; the output is unchanged until a piece is acted on,
+   * so this needs no reassemble. Absent/empty ⇒ no cuts.
+   */
+  cutPoints?: number[];
+  /**
+   * Per-PIECE footage offset — the independent "⇄ slip" for a piece that starts at a cut,
+   * keyed by that cut's current offset (moving the cut moves its key; removing the cut drops
+   * it; see `moveCutPoint`/`removeCutPoint`). Absent for a piece ⇒ it continues the SAME
+   * footage its neighbour left off at (`scene.clipInSec` plus its position in the slice) — the
+   * default, unedited behaviour. A present entry decouples that piece: it can show a different
+   * moment of the SAME clip, and if that moment runs out before the piece's on-screen time is
+   * up, the piece freezes on its last frame (assembly renders each piece as its own
+   * trim(+hold), then concatenates — see `buildScenePieceArgs`). The scene's OWN slip
+   * (`clipInSec`) still governs the FIRST piece (offset 0 has no cut to key by). This is a REAL
+   * output change (unlike a bare cut marker) — setting or clearing an entry marks
+   * `timingEdited`.
+   */
+  pieceClipIns?: Record<string, number>;
   /**
    * True when this scene's clip(s) were produced by the audio-driven lip-sync model
    * (host shots with a face photo) rather than text-to-video. Lip-synced clips already

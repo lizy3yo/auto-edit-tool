@@ -1,0 +1,428 @@
+import { describe, it, expect } from "vitest";
+import {
+  validateTimingEdit,
+  applyTimingEdit,
+  isContinuousPair,
+  validateAddCut,
+  addCutPoint,
+  removeCutPoint,
+  cutPoints,
+  nearestCut,
+  validateMoveCut,
+  moveCutPoint,
+  pieceClipIn,
+  validateSetPieceClipIn,
+  setPieceClipIn,
+  MIN_SLICE_SEC,
+} from "./sceneTiming";
+import type { StoryboardScene } from "../shared/types";
+
+/** Three contiguous scenes on a 30 s master: [0,10) [10,20) [20,30). */
+const board = (): StoryboardScene[] =>
+  [0, 1, 2].map(i => ({
+    index: i + 1,
+    narration: `line ${i + 1}`,
+    scriptText: `one two three four five six seven eight nine ten`,
+    visualPrompt: `p${i + 1}`,
+    hostPresent: false,
+    clipUrl: `https://x/${i + 1}.mp4`,
+    clipUrls: [`https://x/${i + 1}.mp4`],
+    sceneStatus: "completed",
+    narrationStartSec: i * 10,
+    narrationEndSec: (i + 1) * 10,
+    audioDuration: 10,
+  })) as StoryboardScene[];
+
+describe("validateTimingEdit", () => {
+  it("accepts a trim and a hold in range", () => {
+    expect(
+      validateTimingEdit(board(), { sceneIndex: 2, clipInSec: 1.5 })
+    ).toEqual({ ok: true });
+    expect(
+      validateTimingEdit(board(), { sceneIndex: 2, tailHoldSec: 0 })
+    ).toEqual({ ok: true });
+    expect(
+      validateTimingEdit(board(), { sceneIndex: 2, tailHoldSec: 10 })
+    ).toEqual({ ok: true });
+  });
+
+  it("rejects a negative trim and an out-of-range hold", () => {
+    expect(
+      validateTimingEdit(board(), { sceneIndex: 2, clipInSec: -1 }).ok
+    ).toBe(false);
+    expect(
+      validateTimingEdit(board(), { sceneIndex: 2, tailHoldSec: 11 }).ok
+    ).toBe(false);
+    expect(
+      validateTimingEdit(board(), { sceneIndex: 2, tailHoldSec: -0.1 }).ok
+    ).toBe(false);
+  });
+
+  it("rejects an unknown scene", () => {
+    expect(validateTimingEdit(board(), { sceneIndex: 9 }).ok).toBe(false);
+  });
+
+  // The cut between two scenes can move either way, but never past the neighbour's own floor.
+  it("lets a boundary move within both neighbours' floors", () => {
+    expect(validateTimingEdit(board(), { sceneIndex: 2, startSec: 8 })).toEqual(
+      { ok: true }
+    );
+    expect(
+      validateTimingEdit(board(), { sceneIndex: 2, startSec: 12 })
+    ).toEqual({ ok: true });
+    expect(validateTimingEdit(board(), { sceneIndex: 2, endSec: 29 })).toEqual({
+      ok: true,
+    });
+    // Scene 1 would keep < MIN_SLICE_SEC.
+    expect(
+      validateTimingEdit(board(), { sceneIndex: 2, startSec: 0.2 }).ok
+    ).toBe(false);
+    // Scene 3 would keep < MIN_SLICE_SEC.
+    expect(
+      validateTimingEdit(board(), { sceneIndex: 2, endSec: 29.8 }).ok
+    ).toBe(false);
+    // Scene 2 itself would keep < MIN_SLICE_SEC.
+    expect(
+      validateTimingEdit(board(), { sceneIndex: 2, startSec: 19.8 }).ok
+    ).toBe(false);
+  });
+
+  it("pins the first start and the last end to the narration", () => {
+    expect(validateTimingEdit(board(), { sceneIndex: 1, startSec: 1 }).ok).toBe(
+      false
+    );
+    expect(validateTimingEdit(board(), { sceneIndex: 3, endSec: 29 }).ok).toBe(
+      false
+    );
+    expect(validateTimingEdit(board(), { sceneIndex: 1, startSec: 0 })).toEqual(
+      { ok: true }
+    );
+  });
+
+  it("refuses a move on a scene without narration timing", () => {
+    const b = board();
+    delete b[1].narrationStartSec;
+    expect(validateTimingEdit(b, { sceneIndex: 2, endSec: 18 }).ok).toBe(false);
+    // A trim/hold is still fine — it doesn't need the timeline.
+    expect(validateTimingEdit(b, { sceneIndex: 2, clipInSec: 1 })).toEqual({
+      ok: true,
+    });
+  });
+});
+
+describe("applyTimingEdit", () => {
+  it("moves the shared boundary on BOTH neighbours and marks both pending", () => {
+    const b = board();
+    const touched = applyTimingEdit(b, { sceneIndex: 2, startSec: 8 });
+    expect(touched.sort()).toEqual([1, 2]);
+    expect(b[0].narrationEndSec).toBe(8);
+    expect(b[1].narrationStartSec).toBe(8);
+    expect(b[0].timingEdited).toBe(true);
+    expect(b[1].timingEdited).toBe(true);
+    expect(b[2].timingEdited).toBeUndefined();
+  });
+
+  it("moves the end boundary with the next scene", () => {
+    const b = board();
+    applyTimingEdit(b, { sceneIndex: 2, endSec: 23.25 });
+    expect(b[1].narrationEndSec).toBe(23.25);
+    expect(b[2].narrationStartSec).toBe(23.25);
+  });
+
+  it("sets trim and hold, and drops a zero trim rather than persisting noise", () => {
+    const b = board();
+    applyTimingEdit(b, { sceneIndex: 2, clipInSec: 2.5, tailHoldSec: 0 });
+    expect(b[1].clipInSec).toBe(2.5);
+    expect(b[1].tailHoldSec).toBe(0); // 0 is meaningful: "remove the default hold"
+    applyTimingEdit(b, { sceneIndex: 2, clipInSec: 0 });
+    expect(b[1].clipInSec).toBeUndefined();
+  });
+
+  // A lip-synced host's frame 0 is the first word of ITS slice: moving the start later by d
+  // without trimming d would play the mouth d seconds early against the master narration.
+  it("keeps a lip-synced host in sync by advancing the trim with a later start", () => {
+    const b = board();
+    applyTimingEdit(
+      b,
+      { sceneIndex: 2, startSec: 11.5 },
+      { keepsLipSync: true }
+    );
+    expect(b[1].narrationStartSec).toBe(11.5);
+    expect(b[1].clipInSec).toBe(1.5);
+    // Moving it back earlier than the clip allows clamps at 0 (can't invent footage).
+    applyTimingEdit(b, { sceneIndex: 2, startSec: 9 }, { keepsLipSync: true });
+    expect(b[1].clipInSec).toBeUndefined(); // 1.5 - 2.5 → clamped to 0 → dropped
+  });
+
+  it("does not touch the trim of a b-roll scene on a start move", () => {
+    const b = board();
+    applyTimingEdit(b, { sceneIndex: 2, startSec: 11.5 });
+    expect(b[1].clipInSec).toBeUndefined();
+  });
+
+  it("rounds to milliseconds", () => {
+    const b = board();
+    applyTimingEdit(b, { sceneIndex: 2, clipInSec: 1.23456789 });
+    expect(b[1].clipInSec).toBe(1.235);
+  });
+});
+
+describe("continuous-pair cuts (CapCut split-then-move)", () => {
+  // A split leaves two halves of one clip playing continuously: [10,15) clipIn 0 and
+  // [15,20) clipIn 5. board() has 3 SEPARATE clips, so build the split pair explicitly.
+  const splitPair = (): StoryboardScene[] => {
+    const b = board();
+    b[1].clipUrl = b[0].clipUrl; // scenes 1 & 2 are the SAME footage…
+    b[1].clipUrls = [...(b[0].clipUrls as string[])];
+    b[0].clipInSec = 0; // …playing continuously: 0→10 then 10→20
+    b[1].clipInSec = 10;
+    return b;
+  };
+
+  it("recognises a continuous same-footage pair and rejects unrelated shots", () => {
+    const b = splitPair();
+    expect(isContinuousPair(b[0], b[1])).toBe(true);
+    // Scene 3 is a different clip.
+    expect(isContinuousPair(b[1], b[2])).toBe(false);
+    // Same clip but NOT continuous (a gap in footage) ⇒ not a pair.
+    b[1].clipInSec = 3;
+    expect(isContinuousPair(b[0], b[1])).toBe(false);
+  });
+
+  it("carries the second half's footage when the shared cut moves later (end drag)", () => {
+    const b = splitPair();
+    applyTimingEdit(b, { sceneIndex: 1, endSec: 12 });
+    expect(b[0].narrationEndSec).toBe(12);
+    expect(b[1].narrationStartSec).toBe(12);
+    // Second half now starts 2s later in the FOOTAGE too → still continuous, no jump.
+    expect(b[1].clipInSec).toBe(12);
+    expect(isContinuousPair(b[0], b[1])).toBe(true);
+  });
+
+  it("carries the footage when the cut moves earlier from the second half (start drag)", () => {
+    const b = splitPair(); // scene 2 is [10,20), clipIn 10
+    applyTimingEdit(b, { sceneIndex: 2, startSec: 8 });
+    expect(b[0].narrationEndSec).toBe(8);
+    expect(b[1].narrationStartSec).toBe(8);
+    expect(b[1].clipInSec).toBe(8); // 10 + (8 - 10)
+    expect(isContinuousPair(b[0], b[1])).toBe(true);
+  });
+
+  it("does NOT touch clipIn when the cut is between two DIFFERENT shots", () => {
+    const b = board(); // 3 separate clips
+    applyTimingEdit(b, { sceneIndex: 2, endSec: 22 });
+    expect(b[1].narrationEndSec).toBe(22);
+    expect(b[2].narrationStartSec).toBe(22);
+    expect(b[2].clipInSec).toBeUndefined(); // each shot keeps its own footage
+  });
+});
+
+describe("cut markers (CapCut-style split)", () => {
+  it("accepts a cut clear of the edges", () => {
+    expect(validateAddCut(board(), 2, 5)).toEqual({ ok: true });
+    expect(validateAddCut(board(), 2, MIN_SLICE_SEC)).toEqual({ ok: true });
+    expect(validateAddCut(board(), 2, 0.2).ok).toBe(false);
+    expect(validateAddCut(board(), 2, 9.8).ok).toBe(false);
+    expect(validateAddCut(board(), 9, 5).ok).toBe(false);
+  });
+
+  it("refuses a cut too close to an existing one", () => {
+    const b = board();
+    addCutPoint(b, 2, 5);
+    expect(validateAddCut(b, 2, 5.3).ok).toBe(false); // within MIN_SLICE_SEC
+    expect(validateAddCut(b, 2, 6).ok).toBe(true);
+  });
+
+  it("adds cuts sorted and de-duplicated, without creating a scene or renumbering", () => {
+    const b = board();
+    const before = b.length;
+    addCutPoint(b, 2, 6);
+    addCutPoint(b, 2, 3);
+    addCutPoint(b, 2, 3); // dupe
+    expect(b).toHaveLength(before); // no new scene
+    expect(b.map(s => s.index)).toEqual([1, 2, 3]); // no renumber
+    expect(b[1].cutPoints).toEqual([3, 6]);
+    // The clip is untouched — output-neutral, so no reassemble flag.
+    expect(b[1].timingEdited).toBeUndefined();
+    expect(b[1].clipUrl).toBe("https://x/2.mp4");
+  });
+
+  it("reads a scene's cut points sorted", () => {
+    const b = board();
+    b[1].cutPoints = [6, 3];
+    expect(cutPoints(b[1])).toEqual([3, 6]);
+    expect(cutPoints(b[0])).toEqual([]);
+  });
+
+  it("removes the nearest cut, and clears all when no offset is given", () => {
+    const b = board();
+    addCutPoint(b, 2, 3);
+    addCutPoint(b, 2, 6);
+    removeCutPoint(b, 2, 3.1); // nearest to 3
+    expect(b[1].cutPoints).toEqual([6]);
+    removeCutPoint(b, 2); // clear the rest
+    expect(b[1].cutPoints).toBeUndefined();
+  });
+
+  it("nearestCut finds a cut within tolerance only", () => {
+    const b = board();
+    addCutPoint(b, 2, 5);
+    expect(nearestCut(b[1], 5.2)).toBe(5);
+    expect(nearestCut(b[1], 8)).toBeNull();
+  });
+
+  it("returns null removing from a scene with no cuts", () => {
+    expect(removeCutPoint(board(), 2, 5)).toBeNull();
+  });
+});
+
+describe("moving a cut (CapCut's drag-the-split-point)", () => {
+  it("slides a cut to a new position", () => {
+    const b = board();
+    addCutPoint(b, 2, 5);
+    expect(validateMoveCut(b, 2, 5, 7)).toEqual({ ok: true });
+    const cuts = moveCutPoint(b, 2, 5, 7);
+    expect(cuts).toEqual([7]);
+    expect(b[1].cutPoints).toEqual([7]);
+  });
+
+  it("finds the cut nearest the drag start, not an exact match", () => {
+    const b = board();
+    addCutPoint(b, 2, 5);
+    moveCutPoint(b, 2, 5.2, 8); // 5.2 is within tolerance of the cut at 5
+    expect(b[1].cutPoints).toEqual([8]);
+  });
+
+  it("refuses to move past the slice edges", () => {
+    const b = board();
+    addCutPoint(b, 2, 5);
+    expect(validateMoveCut(b, 2, 5, 0.2).ok).toBe(false);
+    expect(validateMoveCut(b, 2, 5, 9.8).ok).toBe(false);
+  });
+
+  it("refuses to move on top of ANOTHER cut, but allows passing through its own start", () => {
+    const b = board();
+    addCutPoint(b, 2, 3);
+    addCutPoint(b, 2, 7);
+    // Moving the cut at 3 close to the OTHER cut at 7 is refused.
+    expect(validateMoveCut(b, 2, 3, 6.8).ok).toBe(false);
+    // Moving it to exactly where it already is (its own position) is fine.
+    expect(validateMoveCut(b, 2, 3, 3)).toEqual({ ok: true });
+    // And it can cross freely as long as it lands clear of the other cut.
+    expect(validateMoveCut(b, 2, 3, 4.5)).toEqual({ ok: true });
+  });
+
+  it("returns null when there is no cut near the given start", () => {
+    const b = board();
+    addCutPoint(b, 2, 5);
+    expect(moveCutPoint(b, 2, 1, 8)).toBeNull();
+    expect(b[1].cutPoints).toEqual([5]); // untouched
+  });
+
+  it("stays output-neutral: no timingEdited flag", () => {
+    const b = board();
+    addCutPoint(b, 2, 5);
+    moveCutPoint(b, 2, 5, 7);
+    expect(b[1].timingEdited).toBeUndefined();
+  });
+
+  it("de-duplicates if moved exactly onto a position already vacated in the same call", () => {
+    const b = board();
+    addCutPoint(b, 2, 5);
+    addCutPoint(b, 2, 8);
+    // Move 5 -> 8 is refused by validation (too close), but moveCutPoint itself is defensive:
+    // exercise it directly to confirm it de-dupes rather than producing [8, 8].
+    moveCutPoint(b, 2, 5, 8);
+    expect(b[1].cutPoints).toEqual([8]);
+  });
+});
+
+describe("per-piece footage offset (independent trim after a cut)", () => {
+  it("reads undefined for a piece with no override — the continuous default", () => {
+    const b = board();
+    addCutPoint(b, 2, 5);
+    expect(pieceClipIn(b[1], 5)).toBeUndefined();
+  });
+
+  it("refuses to set a piece offset where there is no cut", () => {
+    const b = board();
+    expect(validateSetPieceClipIn(b, 2, 5, 3).ok).toBe(false);
+    // The FIRST piece (offset 0, no cut) is governed by clipInSec, not this — refused too.
+    addCutPoint(b, 2, 5);
+    expect(validateSetPieceClipIn(b, 2, 0, 3).ok).toBe(false);
+  });
+
+  it("rejects a negative or non-finite offset; null (clear) always passes", () => {
+    const b = board();
+    addCutPoint(b, 2, 5);
+    expect(validateSetPieceClipIn(b, 2, 5, -1).ok).toBe(false);
+    expect(validateSetPieceClipIn(b, 2, 5, NaN).ok).toBe(false);
+    expect(validateSetPieceClipIn(b, 2, 5, null)).toEqual({ ok: true });
+  });
+
+  it("sets an override, reads it back by the cut's offset, and marks timingEdited", () => {
+    const b = board();
+    addCutPoint(b, 2, 5);
+    expect(b[1].timingEdited).toBeUndefined(); // the bare cut alone is output-neutral
+    const ok = setPieceClipIn(b, 2, 5, 12);
+    expect(ok).toBe(true);
+    expect(pieceClipIn(b[1], 5)).toBe(12);
+    expect(b[1].cutPoints).toEqual([5]); // the cut itself is untouched
+    expect(b[1].timingEdited).toBe(true); // but THIS is a real output change
+  });
+
+  it("clearing (null) removes the override and cleans up an empty map", () => {
+    const b = board();
+    addCutPoint(b, 2, 5);
+    setPieceClipIn(b, 2, 5, 12);
+    setPieceClipIn(b, 2, 5, null);
+    expect(pieceClipIn(b[1], 5)).toBeUndefined();
+    expect(b[1].pieceClipIns).toBeUndefined();
+  });
+
+  it("multiple pieces keep independent overrides", () => {
+    const b = board();
+    addCutPoint(b, 2, 3);
+    addCutPoint(b, 2, 6);
+    setPieceClipIn(b, 2, 3, 10);
+    setPieceClipIn(b, 2, 6, 20);
+    expect(pieceClipIn(b[1], 3)).toBe(10);
+    expect(pieceClipIn(b[1], 6)).toBe(20);
+    setPieceClipIn(b, 2, 3, null);
+    expect(pieceClipIn(b[1], 3)).toBeUndefined();
+    expect(pieceClipIn(b[1], 6)).toBe(20); // the other survives
+  });
+
+  it("moving a cut carries its piece's override to the new position", () => {
+    const b = board();
+    addCutPoint(b, 2, 5);
+    setPieceClipIn(b, 2, 5, 12);
+    moveCutPoint(b, 2, 5, 7);
+    expect(pieceClipIn(b[1], 7)).toBe(12); // followed the cut
+    expect(pieceClipIn(b[1], 5)).toBeUndefined(); // old key is gone
+    expect(b[1].pieceClipIns).toEqual({ "7": 12 });
+  });
+
+  it("removing a cut drops its piece's override", () => {
+    const b = board();
+    addCutPoint(b, 2, 3);
+    addCutPoint(b, 2, 6);
+    setPieceClipIn(b, 2, 3, 10);
+    setPieceClipIn(b, 2, 6, 20);
+    removeCutPoint(b, 2, 3); // removes the cut at 3 — its override goes with it
+    expect(b[1].cutPoints).toEqual([6]);
+    expect(pieceClipIn(b[1], 6)).toBe(20); // untouched
+    expect(b[1].pieceClipIns).toEqual({ "6": 20 });
+  });
+
+  it("removing ALL cuts (undo) drops every override", () => {
+    const b = board();
+    addCutPoint(b, 2, 3);
+    addCutPoint(b, 2, 6);
+    setPieceClipIn(b, 2, 3, 10);
+    setPieceClipIn(b, 2, 6, 20);
+    removeCutPoint(b, 2); // no offset ⇒ clear everything
+    expect(b[1].cutPoints).toBeUndefined();
+    expect(b[1].pieceClipIns).toBeUndefined();
+  });
+});

@@ -31,6 +31,7 @@ export default defineConfig({
     include: [
       "server/**/*.test.ts",
       "server/**/*.spec.ts",
+      "shared/**/*.test.ts",
       "client/src/stores/**/*.test.ts",
       // Pure logic lifted out of components so it can be tested without a DOM — the
       // scene-preview A/V sync is the first. Still `environment: "node"`: these must not

@@ -43,7 +43,7 @@ export interface EditQueueState {
 
 export class SceneEditQueue<Req extends SceneKeyed> {
   private readonly pending = new Map<number, Req>();
-  private readonly active = new Set<number>();
+  private readonly active = new Map<number, Req>();
   private waiters: Array<() => void> = [];
   /** Set by the session when it has decided to end; no further requests are accepted here. */
   closed = false;
@@ -65,7 +65,7 @@ export class SceneEditQueue<Req extends SceneKeyed> {
   drain(): Req[] {
     const out = Array.from(this.pending.values());
     this.pending.clear();
-    for (const r of out) this.active.add(r.sceneIndex);
+    for (const r of out) this.active.set(r.sceneIndex, r);
     return out;
   }
 
@@ -93,11 +93,13 @@ export class SceneEditQueue<Req extends SceneKeyed> {
     return this.pending.has(sceneIndex) || this.active.has(sceneIndex);
   }
 
-  state(): EditQueueState {
-    return {
-      queued: Array.from(this.pending.keys()),
-      active: Array.from(this.active),
-    };
+  /** Snapshot; `include` narrows it to the requests worth showing (e.g. hide instant metadata edits). */
+  state(include: (req: Req) => boolean = () => true): EditQueueState {
+    const pick = (m: Map<number, Req>) =>
+      Array.from(m.entries())
+        .filter(([, r]) => include(r))
+        .map(([i]) => i);
+    return { queued: pick(this.pending), active: pick(this.active) };
   }
 
   /** Resolves on the next enqueue or finish. Resolves immediately if work is already waiting. */

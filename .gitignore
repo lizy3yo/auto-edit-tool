@@ -9,3 +9,9 @@ mysql-data/
 *.log
 .manus-logs/
 scripts/channels.json
+
+# UI harness output (client/__harness)
+.harness-out/
+
+# UI harness synthetic media (regenerate via client/__harness/README.md)
+client/__harness/media/

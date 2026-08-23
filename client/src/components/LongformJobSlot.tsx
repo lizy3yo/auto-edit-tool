@@ -39,6 +39,7 @@ import {
 import { LongformPublishKit } from "@/components/LongformPublishKit";
 import { LongformScenePreview } from "@/components/LongformScenePreview";
 import { SplitPositionEditor } from "@/components/SplitPositionEditor";
+import { SceneTimingEditor } from "@/components/SceneTimingEditor";
 import { sanitizeError, isCreditError } from "@/lib/errorSanitizer";
 import { triggerCreditErrorPopup } from "@/components/CreditErrorPopup";
 import type { SplitLayout, StoryboardScene } from "@shared/types";
@@ -67,6 +68,7 @@ import {
   ChevronRight,
   Receipt,
   Columns2,
+  Scissors,
   BookOpen,
 } from "lucide-react";
 
@@ -326,6 +328,12 @@ export default function LongformJobSlot({
   // When each scene was queued locally — the settle fallback for an edit so fast (ffmpeg-only
   // split edits) that no poll ever catches it in flight.
   const queuedAt = useRef<Map<number, number>>(new Map());
+  // Cut-room edits (split / trim / move / hold) apply as instant metadata — they never flip the
+  // job to "processing", so the normal poll gate stays off. This keeps a short, fast poll window
+  // open after such an edit so its result (a re-sliced storyboard, an extra scene) shows up in
+  // ~1s, then polling goes quiet again. Timestamp = poll until this ms.
+  const [cutRoomWatchUntil, setCutRoomWatchUntil] = useState(0);
+  const watchCutRoom = () => setCutRoomWatchUntil(Date.now() + 12_000);
   const [selectedScenes, setSelectedScenes] = useState<number[]>([]);
   const [sceneSearch, setSceneSearch] = useState("");
   const [downloadTitle, setDownloadTitle] = useState(initialTitle);
@@ -477,6 +485,84 @@ export default function LongformJobSlot({
     splitEditMutation.mutate({ jobId, sceneIndex: scene.index, ...edit });
   };
 
+  // Cut room: timing edits are metadata only (no render) — they persist at once and the film
+  // re-stitches on Reassemble. The scene flashes through the edit session for a moment; no
+  // optimistic spinner is worth it.
+  const timingMutation = trpc.longformVideo.setSceneTiming.useMutation({
+    onSuccess: (d, vars) => {
+      if (d.accepted === "ignored") {
+        toast.info(
+          `Scene ${vars.sceneIndex} is rendering — apply the timing change once it finishes`
+        );
+        return;
+      }
+      toast.success("Timing saved — Reassemble to apply it to the film");
+      watchCutRoom();
+      if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
+    },
+    onError: err => toast.error(err.message),
+  });
+  const splitSceneMutation = trpc.longformVideo.splitScene.useMutation({
+    onSuccess: (d, vars) => {
+      if (d.accepted === "ignored") {
+        toast.info(
+          `Scene ${vars.sceneIndex} is rendering — cut it once it finishes`
+        );
+        return;
+      }
+      toast.success("Cut added — the clip is marked, still one scene");
+      // A cut is a marker on the SAME clip (CapCut-style): no new scene, no renumber, nothing
+      // re-renders. The editor stays put; just refetch so the marker shows.
+      watchCutRoom();
+      if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
+    },
+    onError: err => toast.error(err.message),
+  });
+
+  const undoSplitMutation = trpc.longformVideo.undoSplit.useMutation({
+    onSuccess: (d, vars) => {
+      if (d.accepted === "ignored") {
+        toast.info(
+          `Scene ${vars.sceneIndex} is rendering — remove the cut once it finishes`
+        );
+        return;
+      }
+      toast.success("Cut removed");
+      watchCutRoom();
+      if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
+    },
+    onError: err => toast.error(err.message),
+  });
+
+  const moveCutMutation = trpc.longformVideo.moveCut.useMutation({
+    onSuccess: (d, vars) => {
+      if (d.accepted === "ignored") {
+        toast.info(
+          `Scene ${vars.sceneIndex} is rendering — move the cut once it finishes`
+        );
+        return;
+      }
+      watchCutRoom();
+      if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
+    },
+    onError: err => toast.error(err.message),
+  });
+
+  const setPieceClipInMutation = trpc.longformVideo.setPieceClipIn.useMutation({
+    onSuccess: (d, vars) => {
+      if (d.accepted === "ignored") {
+        toast.info(
+          `Scene ${vars.sceneIndex} is rendering — slip the piece once it finishes`
+        );
+        return;
+      }
+      toast.success("Piece slipped — Reassemble to apply it to the film");
+      watchCutRoom();
+      if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
+    },
+    onError: err => toast.error(err.message),
+  });
+
   const regenBatchMutation = trpc.longformVideo.regenerateScenes.useMutation({
     onSuccess: (d, vars) => {
       const ignored = vars.sceneIndices.filter(
@@ -609,7 +695,9 @@ export default function LongformJobSlot({
         q.state.data?.sceneEdits?.editing ||
         queuedScenes.length > 0
           ? 3000
-          : false,
+          : Date.now() < cutRoomWatchUntil
+            ? 1000
+            : false,
     }
   );
 
@@ -1465,6 +1553,17 @@ export default function LongformJobSlot({
                 </div>
               )}
 
+            {job.status === "completed" &&
+              job.finalVideoUrl &&
+              scenes.some(sc => sc.timingEdited) && (
+                <p className="flex items-center gap-2 rounded border border-warning/40 bg-warning/10 px-3 py-2 text-xs">
+                  <Scissors className="h-3.5 w-3.5 shrink-0" />
+                  Timing edits pending on{" "}
+                  {scenes.filter(sc => sc.timingEdited).length} scene(s) — the
+                  film below is the previous cut. Click <b>Reassemble</b> to
+                  apply them (ffmpeg only, no credits).
+                </p>
+              )}
             {job.status === "completed" && job.finalVideoUrl && (
               <div className="space-y-3">
                 <LongformVideoPlayer
@@ -1750,6 +1849,13 @@ export default function LongformJobSlot({
                         <LongformScenePreview
                           clipUrl={scene.clipUrl}
                           audioUrl={scene.audioUrl}
+                          startSec={scene.clipInSec}
+                          durationSec={
+                            scene.narrationStartSec != null &&
+                            scene.narrationEndSec != null
+                              ? scene.narrationEndSec - scene.narrationStartSec
+                              : undefined
+                          }
                           className="w-full rounded bg-black"
                         />
                       ) : (
@@ -1878,6 +1984,14 @@ export default function LongformJobSlot({
                               <LongformScenePreview
                                 clipUrl={scene.clipUrl}
                                 audioUrl={scene.audioUrl}
+                                startSec={scene.clipInSec}
+                                durationSec={
+                                  scene.narrationStartSec != null &&
+                                  scene.narrationEndSec != null
+                                    ? scene.narrationEndSec -
+                                      scene.narrationStartSec
+                                    : undefined
+                                }
                                 className="w-full rounded bg-black max-h-[120px]"
                               />
                             )}
@@ -1887,6 +2001,101 @@ export default function LongformJobSlot({
                             <p className="text-xs text-muted-foreground italic">
                               {scene.scriptText ?? scene.narration}
                             </p>
+                            {scene.clipUrl &&
+                              scene.narrationStartSec != null &&
+                              scene.narrationEndSec != null &&
+                              (() => {
+                                const pos = scenes.findIndex(
+                                  sc => sc.index === scene.index
+                                );
+                                const prev =
+                                  pos > 0 ? scenes[pos - 1] : undefined;
+                                const next =
+                                  pos >= 0 && pos < scenes.length - 1
+                                    ? scenes[pos + 1]
+                                    : undefined;
+                                return (
+                                  <SceneTimingEditor
+                                    sceneIndex={scene.index}
+                                    clipUrl={scene.clipUrl}
+                                    startSec={scene.narrationStartSec}
+                                    endSec={scene.narrationEndSec}
+                                    clipInSec={scene.clipInSec}
+                                    tailHoldSec={scene.tailHoldSec}
+                                    qrTail={scene.qrTail}
+                                    prevStartSec={prev?.narrationStartSec}
+                                    nextEndSec={next?.narrationEndSec}
+                                    lipsync={
+                                      !!scene.hostPresent && !!scene.lipsynced
+                                    }
+                                    masterAudioUrl={job?.masterAudioUrl}
+                                    audioUrl={scene.audioUrl}
+                                    prevAudioUrl={prev?.audioUrl}
+                                    nextAudioUrl={next?.audioUrl}
+                                    prevClipUrl={prev?.clipUrl}
+                                    prevClipInSec={prev?.clipInSec}
+                                    nextClipUrl={next?.clipUrl}
+                                    nextClipInSec={next?.clipInSec}
+                                    prevIndex={prev?.index}
+                                    nextIndex={next?.index}
+                                    onSelectScene={i => setExpandedScene(i)}
+                                    pending={
+                                      timingMutation.isPending ||
+                                      splitSceneMutation.isPending ||
+                                      moveCutMutation.isPending ||
+                                      setPieceClipInMutation.isPending ||
+                                      isSceneQueued
+                                    }
+                                    onApply={edit => {
+                                      if (!jobId) return;
+                                      timingMutation.mutate({
+                                        jobId,
+                                        sceneIndex: scene.index,
+                                        ...edit,
+                                      });
+                                    }}
+                                    onSplit={atOffsetSec => {
+                                      if (!jobId) return;
+                                      splitSceneMutation.mutate({
+                                        jobId,
+                                        sceneIndex: scene.index,
+                                        atOffsetSec,
+                                      });
+                                    }}
+                                    cutPoints={scene.cutPoints}
+                                    onRemoveCut={atOffsetSec => {
+                                      if (!jobId) return;
+                                      undoSplitMutation.mutate({
+                                        jobId,
+                                        sceneIndex: scene.index,
+                                        atOffsetSec,
+                                      });
+                                    }}
+                                    onMoveCut={(fromOffsetSec, toOffsetSec) => {
+                                      if (!jobId) return;
+                                      moveCutMutation.mutate({
+                                        jobId,
+                                        sceneIndex: scene.index,
+                                        fromOffsetSec,
+                                        toOffsetSec,
+                                      });
+                                    }}
+                                    pieceClipIns={scene.pieceClipIns}
+                                    onSetPieceClipIn={(
+                                      cutOffsetSec,
+                                      clipInSec
+                                    ) => {
+                                      if (!jobId) return;
+                                      setPieceClipInMutation.mutate({
+                                        jobId,
+                                        sceneIndex: scene.index,
+                                        cutOffsetSec,
+                                        clipInSec,
+                                      });
+                                    }}
+                                  />
+                                );
+                              })()}
                             <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">
                               {isSplitScene(scene)
                                 ? "Right panel (still) → gpt-image-2"

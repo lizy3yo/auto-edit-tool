@@ -55,38 +55,88 @@ export function LongformScenePreview({
   clipUrl,
   audioUrl,
   className,
+  startSec = 0,
+  durationSec,
 }: {
   clipUrl: string;
   /** This scene's narration slice. Absent ⇒ silent preview, same as before. */
   audioUrl?: string;
   className?: string;
+  /**
+   * The operator's trim (`scene.clipInSec`): seconds into the footage where THIS scene's picture
+   * starts. The preview plays from here — a split's second half shows its own part of the
+   * clip, not the whole clip from the top. Default 0.
+   */
+  startSec?: number;
+  /**
+   * How long this scene is on screen (its narration slice). With it, playback stops at the end
+   * of the scene's part of the footage instead of running on into what the next scene shows.
+   */
+  durationSec?: number;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const endSec =
+    durationSec !== undefined && Number.isFinite(durationSec)
+      ? startSec + durationSec
+      : undefined;
 
-  const sync = useCallback((hard: boolean) => {
+  // The picture and the narration share a clock only once the trim is taken off the picture's
+  // time: the narration slice starts at the first word of THIS scene, i.e. at `startSec` of
+  // the footage.
+  const sync = useCallback(
+    (hard: boolean) => {
+      const v = videoRef.current;
+      const a = audioRef.current;
+      if (!v || !a) return;
+      const target = syncTargetTime(
+        v.currentTime - startSec,
+        a.currentTime,
+        a.duration,
+        hard
+      );
+      if (target !== null) a.currentTime = target;
+    },
+    [startSec]
+  );
+
+  // Keep the picture inside this scene's part of the footage: a play from outside it (the
+  // element's own start, or past the scene's end) jumps to the trim point first.
+  const clampIntoScene = useCallback(() => {
     const v = videoRef.current;
-    const a = audioRef.current;
-    if (!v || !a) return;
-    const target = syncTargetTime(
-      v.currentTime,
-      a.currentTime,
-      a.duration,
-      hard
-    );
-    if (target !== null) a.currentTime = target;
-  }, []);
+    if (!v) return;
+    const t = v.currentTime;
+    if (t < startSec - 0.05 || (endSec !== undefined && t >= endSec - 0.05)) {
+      try {
+        v.currentTime = startSec;
+      } catch {
+        /* metadata not loaded yet */
+      }
+    }
+  }, [startSec, endSec]);
 
   const handlePlay = useCallback(() => {
+    clampIntoScene();
     const a = audioRef.current;
     if (!a) return;
     sync(true);
     // Autoplay policy: this only ever runs from the user's own click on the video's play
     // control, so the gesture carries. Rejection is not worth surfacing — the picture plays.
     void a.play().catch(() => {});
-  }, [sync]);
+  }, [sync, clampIntoScene]);
 
   const handlePause = useCallback(() => audioRef.current?.pause(), []);
+
+  // Stop at the end of the scene's part of the footage (the next scene shows what follows).
+  const handleTimeUpdate = useCallback(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (endSec !== undefined && v.currentTime >= endSec) {
+      v.pause();
+      return;
+    }
+    sync(false);
+  }, [endSec, sync]);
 
   // Mirror the native controls onto the element that actually carries sound. Without this the
   // video's own volume slider and mute button are dead, because the video has no audio track.
@@ -122,12 +172,13 @@ export function LongformScenePreview({
         controls
         preload="none"
         onClick={e => e.stopPropagation()}
+        onLoadedMetadata={clampIntoScene}
         onPlay={handlePlay}
         onPlaying={() => sync(false)}
         onPause={handlePause}
         onEnded={handlePause}
         onSeeked={() => sync(true)}
-        onTimeUpdate={() => sync(false)}
+        onTimeUpdate={handleTimeUpdate}
         onRateChange={handleRate}
         onVolumeChange={handleVolume}
         className={className}
