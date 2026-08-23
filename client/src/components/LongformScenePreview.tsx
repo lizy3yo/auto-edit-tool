@@ -115,6 +115,22 @@ export function LongformScenePreview({
     }
   }, [startSec, endSec]);
 
+  // Paint a real thumbnail instead of the black rectangle a video shows before its first seek.
+  // With `preload="metadata"` the element loads dimensions/duration but, in most engines, never
+  // actually decodes and presents a frame until told to seek — even to where it already sits.
+  // A tiny nudge past the trim point (never literally 0 → 0, which some engines treat as a
+  // no-op) forces that seek, and lands just past the clip's opening keyframe, which is often a
+  // black flash on encoded video.
+  const showPosterFrame = useCallback(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    try {
+      v.currentTime = startSec + 0.05;
+    } catch {
+      /* metadata not loaded yet (shouldn't happen inside onLoadedMetadata) */
+    }
+  }, [startSec]);
+
   const handlePlay = useCallback(() => {
     clampIntoScene();
     const a = audioRef.current;
@@ -172,7 +188,7 @@ export function LongformScenePreview({
         controls
         preload="metadata"
         onClick={e => e.stopPropagation()}
-        onLoadedMetadata={clampIntoScene}
+        onLoadedMetadata={showPosterFrame}
         onPlay={handlePlay}
         onPlaying={() => sync(false)}
         onPause={handlePause}
