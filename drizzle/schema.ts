@@ -366,7 +366,7 @@ export type InsertAppSetting = typeof appSettings.$inferInsert;
  *
  * - `admin`   — everything, and the only tier that can see or set provider API keys or manage
  *               accounts.
- * - `manager` — the project manager: channels, books, CTA assets, the directing instruction
+ * - `manager` — the operations manager: channels, books, CTA assets, the directing instruction
  *               and pacing, plus oversight of every render. Never the keys.
  * - `editor`  — long-form video and the library, scoped to their OWN renders (their own five
  *               tabs, their own history).

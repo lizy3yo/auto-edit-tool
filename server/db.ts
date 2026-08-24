@@ -398,7 +398,7 @@ export async function setLongformSlot(
 /**
  * Delete a job.
  *
- * `allowAny` is the oversight tier's key: admins and project managers see every render in the
+ * `allowAny` is the oversight tier's key: admins and operations managers see every render in the
  * library (`canSeeAllJobs`), so a delete button they can SEE has to be one they can press.
  * Editors stay pinned to their own.
  */

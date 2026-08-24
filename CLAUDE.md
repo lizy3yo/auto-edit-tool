@@ -180,7 +180,7 @@ Express · tRPC · Drizzle · MySQL.
 - **Accounts & roles** — `shared/roles.ts` is the single definition of the three tiers, and
   BOTH the tRPC gates (`server/_core/trpc.ts`) and the nav (`client/src/App.tsx`) answer from
   it, so what the UI hides and what the server refuses cannot drift. `admin` = everything
-  including provider keys and account management; `manager` (project manager) = channels,
+  including provider keys and account management; `manager` (operations manager) = channels,
   books, CTA assets, directing instruction, pacing and oversight of every render, never the
   keys; `editor` = long-form video and the library, scoped to their OWN renders (own five tabs,
   own history — `canSeeAllJobs`). Passwords are scrypt (`server/passwords.ts`, no native dep);

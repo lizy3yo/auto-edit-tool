@@ -72,7 +72,7 @@ export const approvedProcedure = t.procedure.use(
 );
 
 /**
- * Admin or project manager: channels, books, CTA assets, the directing instruction, pacing,
+ * Admin or operations manager: channels, books, CTA assets, the directing instruction, pacing,
  * and oversight of every render. Never provider API keys — those stay on `adminProcedure`.
  */
 export const managerProcedure = t.procedure.use(

@@ -13,7 +13,7 @@ export type AccountStatus = "active" | "disabled";
 
 export const ROLE_LABEL: Record<Role, string> = {
   admin: "Admin",
-  manager: "Project manager",
+  manager: "Operations manager",
   editor: "Editor",
 };
 
@@ -44,7 +44,7 @@ export function canManageChannels(role: Role): boolean {
  * Whether the library, history and per-job editors span every account.
  *
  * Editors are scoped to their own renders — their own five tabs, their own library. Admins and
- * project managers oversee all of them.
+ * operations managers oversee all of them.
  */
 export function canSeeAllJobs(role: Role): boolean {
   return role === "admin" || role === "manager";

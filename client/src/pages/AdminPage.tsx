@@ -160,7 +160,7 @@ function SixtyNineLabsCard() {
 /**
  * Admin — two audiences, one page.
  *
- * An admin gets everything. A project manager gets the directing instruction and pacing but
+ * An admin gets everything. A operations manager gets the directing instruction and pacing but
  * never the provider keys or the account list, so those tabs are not rendered at all rather
  * than rendered-and-disabled: a key field they cannot use is an invitation to ask why. The
  * procedures behind each tab are gated to match (`adminProcedure` vs `managerProcedure`), so

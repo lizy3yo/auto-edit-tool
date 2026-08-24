@@ -1506,7 +1506,7 @@ const longformVideoRouter = router({
 
   /**
    * Every job for the side panel and the Library page — processing included, so a render in
-   * flight is visible while it runs. Admins and project managers see every account's, matching
+   * flight is visible while it runs. Admins and operations managers see every account's, matching
    * `allJobHistory`; editors see their own.
    */
   library: approvedProcedure
@@ -1543,7 +1543,7 @@ const longformVideoRouter = router({
       getLongformVideoJobHistory(ctx.user.id, input?.limit ?? 50)
     ),
 
-  /** Oversight (admin / project manager): every account's finished jobs, with the maker's name. */
+  /** Oversight (admin / operations manager): every account's finished jobs, with the maker's name. */
   allJobHistory: managerProcedure
     .input(
       z

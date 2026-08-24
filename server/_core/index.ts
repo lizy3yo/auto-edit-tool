@@ -72,7 +72,7 @@ async function startServer() {
   // Awaited: without an admin row nobody can sign in, so this has to settle before the login
   // route starts answering.
   await ensureRootAdmin();
-  // Email/password auth against the users table (admin · project manager · editor)
+  // Email/password auth against the users table (admin · operations manager · editor)
   registerAdminAuthRoutes(app);
   // HeyGen render-completion callback (wakes host-scene poll loops).
   registerHeygenWebhook(app);

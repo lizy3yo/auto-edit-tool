@@ -9283,7 +9283,7 @@ export async function cancelLongformJob(
   opts: { allowAny?: boolean } = {}
 ): Promise<void> {
   const job = await getLongformVideoJobById(jobId);
-  // `allowAny` is the oversight tier (admin / project manager), which sees every render in the
+  // `allowAny` is the oversight tier (admin / operations manager), which sees every render in the
   // library and so must be able to stop one. Editors stay pinned to their own.
   if (!job || (!opts.allowAny && job.userId !== userId)) {
     throw new Error("Job not found");
