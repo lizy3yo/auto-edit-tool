@@ -2229,6 +2229,35 @@ const userRouter = router({
     return rows.map(u => ({ ...u, jobCount: jobCounts.get(u.id) ?? 0 }));
   }),
 
+  /**
+   * One account's renders — the "who did what" view behind the Videos count.
+   *
+   * Deliberately the SAME shape `longformVideo.library` returns (poster, title, channel,
+   * status, sales), because it is the same question asked with the maker fixed instead of the
+   * viewer. Reusing `getLongformLibrary` means it also inherits the light column set: no
+   * script, no storyboard JSON, so listing a prolific account costs a page of text, not
+   * megabytes.
+   */
+  videos: adminProcedure
+    .input(
+      z.object({
+        id: z.number().int().positive(),
+        limit: z.number().int().min(1).max(500).optional(),
+      })
+    )
+    .query(async ({ input }) => {
+      const rows = await getLongformLibrary(input.id, { limit: input.limit });
+      // One grouped sales query for the whole list, not one per row — same as the library.
+      const sales = await getSalesByJob(rows.map(r => r.id)).catch(
+        () => new Map<number, { sales: number; revenueCents: number }>()
+      );
+      return rows.map(r => ({
+        ...r,
+        sales: sales.get(r.id)?.sales ?? 0,
+        revenueCents: sales.get(r.id)?.revenueCents ?? 0,
+      }));
+    }),
+
   create: adminProcedure
     .input(
       z.object({

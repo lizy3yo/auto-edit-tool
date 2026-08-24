@@ -33,6 +33,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  Film,
   KeyRound,
   Loader2,
   Trash2,
@@ -40,6 +41,7 @@ import {
   Users as UsersIcon,
 } from "lucide-react";
 import { toast } from "sonner";
+import { UserVideosDialog } from "@/components/admin/UserVideosDialog";
 
 /** Kept in step with `MIN_PASSWORD_LENGTH` in `server/passwords.ts`, which is the real gate. */
 const MIN_LENGTH = 8;
@@ -325,6 +327,7 @@ export function UserManagement() {
   const [addOpen, setAddOpen] = useState(false);
   const [resetting, setResetting] = useState<UserRow | null>(null);
   const [deleting, setDeleting] = useState<UserRow | null>(null);
+  const [viewingVideos, setViewingVideos] = useState<UserRow | null>(null);
 
   const updateMutation = trpc.user.update.useMutation({
     onSuccess: () => {
@@ -465,8 +468,25 @@ export function UserManagement() {
                         </Badge>
                       </td>
 
-                      <td className="px-3 py-2.5 text-muted-foreground">
-                        {user.jobCount}
+                      {/* The count is the way IN to the list — "4" answers how much and
+                          nothing else, so it is a button whenever there is something to
+                          show, and inert text when there is not. */}
+                      <td className="px-3 py-2.5">
+                        {user.jobCount > 0 ? (
+                          <button
+                            type="button"
+                            onClick={() => setViewingVideos(user)}
+                            title={`See the ${user.jobCount} video${user.jobCount === 1 ? "" : "s"} ${user.name} made`}
+                            className="inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 font-medium text-primary transition-colors hover:bg-primary/10"
+                          >
+                            <Film className="h-3.5 w-3.5" />
+                            {user.jobCount}
+                          </button>
+                        ) : (
+                          <span className="px-1.5 text-muted-foreground">
+                            0
+                          </span>
+                        )}
                       </td>
 
                       <td className="px-3 py-2.5 text-muted-foreground">
@@ -529,6 +549,10 @@ export function UserManagement() {
       </CardContent>
 
       <AddUserDialog open={addOpen} onOpenChange={setAddOpen} />
+      <UserVideosDialog
+        user={viewingVideos}
+        onClose={() => setViewingVideos(null)}
+      />
       <ResetPasswordDialog
         user={resetting}
         onClose={() => setResetting(null)}
