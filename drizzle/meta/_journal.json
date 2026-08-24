@@ -43,6 +43,13 @@
       "when": 1786967946915,
       "tag": "0005_talented_the_hand",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1787592466744,
+      "tag": "0006_jittery_doctor_strange",
+      "breakpoints": true
     }
   ]
 }

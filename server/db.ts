@@ -10,6 +10,7 @@ import {
   books,
   channelAssets,
   longformSales,
+  users,
 } from "../drizzle/schema";
 import type {
   InsertProviderConfig,
@@ -20,6 +21,8 @@ import type {
   ChannelAsset,
   InsertChannelAsset,
   InsertLongformSale,
+  User,
+  InsertUser,
 } from "../drizzle/schema";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -392,7 +395,18 @@ export async function setLongformSlot(
     .onDuplicateKeyUpdate({ set });
 }
 
-export async function deleteLongformVideoJob(id: number, userId: number) {
+/**
+ * Delete a job.
+ *
+ * `allowAny` is the oversight tier's key: admins and project managers see every render in the
+ * library (`canSeeAllJobs`), so a delete button they can SEE has to be one they can press.
+ * Editors stay pinned to their own.
+ */
+export async function deleteLongformVideoJob(
+  id: number,
+  userId: number,
+  opts: { allowAny?: boolean } = {}
+) {
   const db = await getDb();
   if (!db) throw new Error("DB unavailable");
   const job = await db
@@ -401,14 +415,19 @@ export async function deleteLongformVideoJob(id: number, userId: number) {
     .where(eq(longformVideoJobs.id, id))
     .limit(1);
   if (!job.length) throw new Error("Long-form video job not found");
-  if (job[0].userId !== userId) throw new Error("Not authorized");
+  if (!opts.allowAny && job[0].userId !== userId) {
+    throw new Error("Not authorized");
+  }
   // Release any tab still pointing at this job BEFORE the row goes. There is no FK from
   // `longform_slots`, so a delete would otherwise leave a tab pinned to an id that no longer
-  // loads — and it would come back on every reload, since slots are server-persisted.
+  // loads — and it would come back on every reload, since slots are server-persisted. The tab
+  // to clear belongs to the job's OWNER, who is not necessarily whoever pressed delete.
   await db
     .update(longformSlots)
     .set({ jobId: null, draftTitle: null })
-    .where(and(eq(longformSlots.userId, userId), eq(longformSlots.jobId, id)));
+    .where(
+      and(eq(longformSlots.userId, job[0].userId), eq(longformSlots.jobId, id))
+    );
   await db.delete(longformVideoJobs).where(eq(longformVideoJobs.id, id));
 }
 
@@ -812,4 +831,160 @@ export async function getJobsForChannel(
             })()
           : r.ctaBooks,
     }));
+}
+
+// ─── Accounts (`users`) ───
+
+/** Public shape of an account — everything the admin table shows, and never the hash. */
+export type PublicUser = Omit<User, "passwordHash">;
+
+const publicUserColumns = {
+  id: users.id,
+  email: users.email,
+  name: users.name,
+  role: users.role,
+  status: users.status,
+  lastLoginAt: users.lastLoginAt,
+  createdAt: users.createdAt,
+  updatedAt: users.updatedAt,
+};
+
+/** Emails are stored lower-cased so sign-in is case-insensitive and the unique index bites. */
+export function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+/** Full row INCLUDING the hash — for the login path only. */
+export async function getUserByEmail(email: string): Promise<User | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db
+    .select()
+    .from(users)
+    .where(eq(users.email, normalizeEmail(email)))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+/** Full row INCLUDING the hash — for the change-password path only. */
+export async function getUserByIdWithHash(id: number): Promise<User | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db.select().from(users).where(eq(users.id, id)).limit(1);
+  return rows[0] ?? null;
+}
+
+/** One account, hash-free. Resolves the session on every authenticated request. */
+export async function getPublicUserById(
+  id: number
+): Promise<PublicUser | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db
+    .select(publicUserColumns)
+    .from(users)
+    .where(eq(users.id, id))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+/** Every account, oldest first — the admin Users table. Hash-free by construction. */
+export async function listUsers(): Promise<PublicUser[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select(publicUserColumns).from(users).orderBy(users.id);
+}
+
+/**
+ * The bootstrap admin.
+ *
+ * `getPublicUserById(1)` is not good enough: id 1 is the seeded root, but if it were ever
+ * deleted a legacy `openId: "admin"` cookie has to resolve to SOME admin rather than to
+ * nobody. Lowest id wins, so it is stable across restarts.
+ */
+export async function getRootAdmin(): Promise<PublicUser | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db
+    .select(publicUserColumns)
+    .from(users)
+    .where(and(eq(users.role, "admin"), eq(users.status, "active")))
+    .orderBy(users.id)
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+/** How many admins can still sign in — the lockout guard's denominator. */
+export async function countActiveAdmins(): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  const rows = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(users)
+    .where(and(eq(users.role, "admin"), eq(users.status, "active")));
+  return Number(rows[0]?.n ?? 0);
+}
+
+/**
+ * Insert an account. `id` is only ever passed by `ensureRootAdmin`, which pins the bootstrap
+ * admin at 1 so the jobs, slots and library already stamped `userId = 1` stay attached to it.
+ */
+export async function createUser(
+  data: InsertUser & { id?: number }
+): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
+  const [res] = await db
+    .insert(users)
+    .values({ ...data, email: normalizeEmail(data.email) })
+    .$returningId();
+  return data.id ?? res.id;
+}
+
+export async function updateUser(
+  id: number,
+  patch: Partial<
+    Pick<User, "name" | "email" | "role" | "status" | "passwordHash">
+  >
+): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
+  const set = { ...patch };
+  if (set.email) set.email = normalizeEmail(set.email);
+  if (Object.keys(set).length === 0) return;
+  await db.update(users).set(set).where(eq(users.id, id));
+}
+
+export async function deleteUser(id: number): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
+  // Jobs deliberately keep the dangling `userId` (and their `userName` snapshot): a departed
+  // editor's renders are the channel's work product, not theirs to take with them. Their five
+  // tabs are workspace state and do go.
+  await db.delete(longformSlots).where(eq(longformSlots.userId, id));
+  await db.delete(users).where(eq(users.id, id));
+}
+
+/** Stamped on every successful sign-in — the "is this account still in use?" column. */
+export async function touchUserLogin(id: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db
+    .update(users)
+    .set({ lastLoginAt: new Date() })
+    .where(eq(users.id, id));
+}
+
+/** How many renders each account owns — shown before an admin deletes one. */
+export async function countJobsByUser(): Promise<Map<number, number>> {
+  const db = await getDb();
+  if (!db) return new Map();
+  const rows = await db
+    .select({
+      userId: longformVideoJobs.userId,
+      n: sql<number>`count(*)`,
+    })
+    .from(longformVideoJobs)
+    .groupBy(longformVideoJobs.userId);
+  return new Map(rows.map(r => [Number(r.userId), Number(r.n)]));
 }

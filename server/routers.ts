@@ -5,10 +5,31 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import {
   adminProcedure,
   approvedProcedure,
+  managerProcedure,
   protectedProcedure,
   publicProcedure,
   router,
 } from "./_core/trpc";
+import { ROLES, ROLE_LABEL, canSeeAllJobs, type Role } from "../shared/roles";
+import {
+  countActiveAdmins,
+  countJobsByUser,
+  createUser,
+  deleteUser,
+  getPublicUserById,
+  getUserByEmail,
+  getUserByIdWithHash,
+  listUsers,
+  normalizeEmail,
+  updateUser,
+} from "./db";
+import { invalidateUserCache } from "./_core/sdk";
+import {
+  MAX_PASSWORD_LENGTH,
+  hashPassword,
+  passwordProblem,
+  verifyPassword,
+} from "./passwords";
 import {
   getActiveProvider,
   getAllProviderConfigs,
@@ -334,17 +355,17 @@ const ttsVolumeInput = z
   .optional();
 
 const channelConfigRouter = router({
-  list: adminProcedure.query(async () => {
+  list: managerProcedure.query(async () => {
     return getAllChannelConfigs();
   }),
 
-  get: adminProcedure
+  get: managerProcedure
     .input(z.object({ channelKey: z.string() }))
     .query(async ({ input }) => {
       return getChannelConfig(input.channelKey);
     }),
 
-  upsert: adminProcedure
+  upsert: managerProcedure
     .input(
       z.object({
         channelKey: z.string(),
@@ -392,7 +413,7 @@ const channelConfigRouter = router({
       return { success: true };
     }),
 
-  create: adminProcedure
+  create: managerProcedure
     .input(
       z.object({
         displayName: z.string().min(1),
@@ -444,7 +465,7 @@ const channelConfigRouter = router({
       return { channelKey };
     }),
 
-  delete: adminProcedure
+  delete: managerProcedure
     .input(z.object({ channelKey: z.string() }))
     .mutation(async ({ input }) => {
       await deleteChannelConfig(input.channelKey);
@@ -554,7 +575,7 @@ const bookRouter = router({
    * it — the same function the render uses — so a URL that would silently produce no QR is
    * rejected here, where the operator can see why, rather than at render time.
    */
-  save: adminProcedure
+  save: managerProcedure
     .input(
       z.object({
         id: z.number().optional(),
@@ -591,7 +612,7 @@ const bookRouter = router({
     }),
 
   /** Soft-delete — finished videos keep resolving the book they sold. */
-  deactivate: adminProcedure
+  deactivate: managerProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
       await deactivateBook(input.id);
@@ -713,7 +734,7 @@ const channelAssetRouter = router({
    * upload path the book cover and per-video assets used, so it is validated as a URL and stored
    * as-is.
    */
-  save: adminProcedure
+  save: managerProcedure
     .input(
       z.object({
         id: z.number().optional(),
@@ -737,7 +758,7 @@ const channelAssetRouter = router({
     }),
 
   /** Soft-delete — finished videos keep the asset they snapshotted at render time. */
-  deactivate: adminProcedure
+  deactivate: managerProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
       await deactivateChannelAsset(input.id);
@@ -760,7 +781,7 @@ const longformVideoRouter = router({
     .query(async ({ input }) => getJobCostBreakdown(input.jobId)),
 
   /** Admin: read the saved directing instruction (falls back to the default). */
-  getInstructionPrompt: adminProcedure.query(async () => {
+  getInstructionPrompt: managerProcedure.query(async () => {
     const saved = await getAppSetting(LONGFORM_INSTRUCTION_KEY);
     return {
       content: saved ?? DEFAULT_LONGFORM_INSTRUCTION,
@@ -770,7 +791,7 @@ const longformVideoRouter = router({
   }),
 
   /** Admin: save the directing instruction applied to every long-form session. */
-  setInstructionPrompt: adminProcedure
+  setInstructionPrompt: managerProcedure
     .input(z.object({ content: z.string().min(1).max(20000) }))
     .mutation(async ({ input }) => {
       await setAppSetting(LONGFORM_INSTRUCTION_KEY, input.content);
@@ -790,7 +811,7 @@ const longformVideoRouter = router({
       const job = await getLongformVideoJobById(input.jobId);
       if (!job)
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
-      if (job.userId !== ctx.user.id && ctx.user.role !== "admin") {
+      if (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role)) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Not your job" });
       }
       const params = (job.inputParams ?? {}) as LongformInputParams;
@@ -834,7 +855,7 @@ const longformVideoRouter = router({
       const job = await getLongformVideoJobById(input.jobId);
       if (!job)
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
-      if (job.userId !== ctx.user.id && ctx.user.role !== "admin") {
+      if (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role)) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Not your job" });
       }
       const trimmed = input.youtubeUrl.trim();
@@ -857,7 +878,7 @@ const longformVideoRouter = router({
       const job = await getLongformVideoJobById(input.jobId);
       if (!job)
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
-      if (job.userId !== ctx.user.id && ctx.user.role !== "admin") {
+      if (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role)) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Not your job" });
       }
       const byProduct = await getSalesByProductForJob(input.jobId);
@@ -884,7 +905,7 @@ const longformVideoRouter = router({
    * hand-crafted request cannot write a config the balancers would then have to defend against.
    * In-flight jobs are unaffected: each snapshots its own pacing at render start.
    */
-  setPacing: adminProcedure
+  setPacing: managerProcedure
     .input(z.object({ pacing: z.unknown() }))
     .mutation(async ({ input }) => {
       const resolved = resolveLongformPacing(input.pacing);
@@ -1384,7 +1405,7 @@ const longformVideoRouter = router({
       if (!job) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
       }
-      if (job.userId !== ctx.user.id && ctx.user.role !== "admin") {
+      if (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role)) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Not authorized" });
       }
       // Attach the exact assembled provider prompts per scene (read-only preview) so the UI
@@ -1485,7 +1506,8 @@ const longformVideoRouter = router({
 
   /**
    * Every job for the side panel and the Library page — processing included, so a render in
-   * flight is visible while it runs. Admins see everyone's, matching `allJobHistory`.
+   * flight is visible while it runs. Admins and project managers see every account's, matching
+   * `allJobHistory`; editors see their own.
    */
   library: approvedProcedure
     .input(
@@ -1495,7 +1517,7 @@ const longformVideoRouter = router({
     )
     .query(async ({ ctx, input }) => {
       const rows = await getLongformLibrary(ctx.user.id, {
-        allUsers: ctx.user.role === "admin",
+        allUsers: canSeeAllJobs(ctx.user.role),
         limit: input?.limit,
       });
       // Attach reported sales so the library answers "which video earns?" at a glance. One
@@ -1521,8 +1543,8 @@ const longformVideoRouter = router({
       getLongformVideoJobHistory(ctx.user.id, input?.limit ?? 50)
     ),
 
-  /** Admin: every user's finished jobs, with the maker's name. */
-  allJobHistory: adminProcedure
+  /** Oversight (admin / project manager): every account's finished jobs, with the maker's name. */
+  allJobHistory: managerProcedure
     .input(
       z
         .object({ limit: z.number().int().min(1).max(200).optional() })
@@ -1550,7 +1572,7 @@ const longformVideoRouter = router({
       if (!job) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
       }
-      if (job.userId !== ctx.user.id && ctx.user.role !== "admin") {
+      if (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role)) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Not authorized" });
       }
       if (!hasScene(job.storyboard, input.sceneIndex))
@@ -1596,7 +1618,7 @@ const longformVideoRouter = router({
       if (!job) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
       }
-      if (job.userId !== ctx.user.id && ctx.user.role !== "admin") {
+      if (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role)) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Not authorized" });
       }
       const known = input.sceneIndices.filter(i => hasScene(job.storyboard, i));
@@ -1623,7 +1645,10 @@ const longformVideoRouter = router({
     .input(z.object({ jobId: z.number() }))
     .mutation(async ({ ctx, input }) => {
       const job = await getLongformVideoJobById(input.jobId);
-      if (!job || (job.userId !== ctx.user.id && ctx.user.role !== "admin")) {
+      if (
+        !job ||
+        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
+      ) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
       }
       if (job.status === "processing") {
@@ -1652,7 +1677,10 @@ const longformVideoRouter = router({
     .input(z.object({ jobId: z.number() }))
     .mutation(async ({ ctx, input }) => {
       const job = await getLongformVideoJobById(input.jobId);
-      if (!job || (job.userId !== ctx.user.id && ctx.user.role !== "admin")) {
+      if (
+        !job ||
+        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
+      ) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
       }
       if (job.status === "processing") {
@@ -1702,7 +1730,10 @@ const longformVideoRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const job = await getLongformVideoJobById(input.jobId);
-      if (!job || (job.userId !== ctx.user.id && ctx.user.role !== "admin")) {
+      if (
+        !job ||
+        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
+      ) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
       }
       const { jobId, ...edit } = input;
@@ -1728,7 +1759,10 @@ const longformVideoRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const job = await getLongformVideoJobById(input.jobId);
-      if (!job || (job.userId !== ctx.user.id && ctx.user.role !== "admin")) {
+      if (
+        !job ||
+        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
+      ) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
       }
       const scenes = (job.storyboard ?? []) as StoryboardScene[];
@@ -1765,7 +1799,10 @@ const longformVideoRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const job = await getLongformVideoJobById(input.jobId);
-      if (!job || (job.userId !== ctx.user.id && ctx.user.role !== "admin")) {
+      if (
+        !job ||
+        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
+      ) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
       }
       const scenes = (job.storyboard ?? []) as StoryboardScene[];
@@ -1805,7 +1842,10 @@ const longformVideoRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const job = await getLongformVideoJobById(input.jobId);
-      if (!job || (job.userId !== ctx.user.id && ctx.user.role !== "admin")) {
+      if (
+        !job ||
+        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
+      ) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
       }
       const scenes = (job.storyboard ?? []) as StoryboardScene[];
@@ -1843,7 +1883,10 @@ const longformVideoRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const job = await getLongformVideoJobById(input.jobId);
-      if (!job || (job.userId !== ctx.user.id && ctx.user.role !== "admin")) {
+      if (
+        !job ||
+        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
+      ) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
       }
       const scenes = (job.storyboard ?? []) as StoryboardScene[];
@@ -1885,7 +1928,10 @@ const longformVideoRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const job = await getLongformVideoJobById(input.jobId);
-      if (!job || (job.userId !== ctx.user.id && ctx.user.role !== "admin")) {
+      if (
+        !job ||
+        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
+      ) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
       }
       if (input.mode === "scene" && input.sourceIndex == null) {
@@ -1930,7 +1976,10 @@ const longformVideoRouter = router({
     .input(z.object({ jobId: z.number() }))
     .mutation(async ({ ctx, input }) => {
       const job = await getLongformVideoJobById(input.jobId);
-      if (!job || (job.userId !== ctx.user.id && ctx.user.role !== "admin")) {
+      if (
+        !job ||
+        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
+      ) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
       }
       if (job.stage !== "assembly") {
@@ -1957,7 +2006,10 @@ const longformVideoRouter = router({
     .input(z.object({ jobId: z.number() }))
     .mutation(async ({ ctx, input }) => {
       const job = await getLongformVideoJobById(input.jobId);
-      if (!job || (job.userId !== ctx.user.id && ctx.user.role !== "admin")) {
+      if (
+        !job ||
+        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
+      ) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
       }
       retryJobAssembly(input.jobId).catch(err => {
@@ -1977,7 +2029,10 @@ const longformVideoRouter = router({
     .input(z.object({ jobId: z.number() }))
     .mutation(async ({ ctx, input }) => {
       const job = await getLongformVideoJobById(input.jobId);
-      if (!job || (job.userId !== ctx.user.id && ctx.user.role !== "admin")) {
+      if (
+        !job ||
+        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
+      ) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
       }
       if (job.status === "processing") {
@@ -2001,7 +2056,10 @@ const longformVideoRouter = router({
     .input(z.object({ jobId: z.number() }))
     .mutation(async ({ ctx, input }) => {
       const job = await getLongformVideoJobById(input.jobId);
-      if (!job || (job.userId !== ctx.user.id && ctx.user.role !== "admin")) {
+      if (
+        !job ||
+        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
+      ) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
       }
       // ponytail: read-then-act guard, not an atomic CAS. Covers rapid
@@ -2041,7 +2099,7 @@ const longformVideoRouter = router({
       if (!job) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
       }
-      if (job.userId !== ctx.user.id && ctx.user.role !== "admin") {
+      if (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role)) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Not authorized" });
       }
       await updateLongformVideoJob(input.jobId, {
@@ -2068,7 +2126,7 @@ const longformVideoRouter = router({
       if (!job) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
       }
-      if (job.userId !== ctx.user.id && ctx.user.role !== "admin") {
+      if (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role)) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Not authorized" });
       }
       await updateLongformVideoJob(input.jobId, {
@@ -2084,7 +2142,9 @@ const longformVideoRouter = router({
   cancelJob: approvedProcedure
     .input(z.object({ jobId: z.number() }))
     .mutation(async ({ ctx, input }) => {
-      await cancelLongformJob(input.jobId, ctx.user.id);
+      await cancelLongformJob(input.jobId, ctx.user.id, {
+        allowAny: canSeeAllJobs(ctx.user.role),
+      });
       return { ok: true };
     }),
 
@@ -2092,7 +2152,9 @@ const longformVideoRouter = router({
   deleteJob: approvedProcedure
     .input(z.object({ jobId: z.number() }))
     .mutation(async ({ ctx, input }) => {
-      await deleteLongformVideoJob(input.jobId, ctx.user.id);
+      await deleteLongformVideoJob(input.jobId, ctx.user.id, {
+        allowAny: canSeeAllJobs(ctx.user.role),
+      });
       return { ok: true };
     }),
 });
@@ -2105,8 +2167,251 @@ function hasScene(storyboard: unknown, sceneIndex: number): boolean {
   );
 }
 
+// ─── User Router ───
+
+const roleEnum = z.enum(ROLES);
+/**
+ * Deliberately only bounded, not length-checked: zod's own `too_small` issue serialises as a
+ * raw JSON blob, which is what the operator would see in the toast. `assertPasswordOk` runs
+ * first in every mutation below and produces a sentence instead. The cap stays here because an
+ * unbounded string is a scrypt-sized denial of service, not a policy question.
+ */
+const passwordField = z.string().min(1).max(MAX_PASSWORD_LENGTH);
+
+/** Reject a password the shared policy refuses, as a message the operator can act on. */
+function assertPasswordOk(password: string) {
+  const problem = passwordProblem(password);
+  if (problem) throw new TRPCError({ code: "BAD_REQUEST", message: problem });
+}
+
+/**
+ * Refuse any change that would leave the studio with no way in.
+ *
+ * Deleting the last admin, disabling them, or demoting them to editor all end the same way: a
+ * running deploy nobody can administer, recoverable only by editing the database by hand. The
+ * check runs on the CURRENT state, so it also covers "two admins, one already disabled".
+ */
+async function assertNotLastAdmin(
+  target: { id: number; role: Role; status: string },
+  next: { role?: Role; status?: "active" | "disabled"; deleting?: boolean }
+) {
+  const stillAdmin =
+    (next.role ?? target.role) === "admin" &&
+    (next.status ?? target.status) === "active" &&
+    !next.deleting;
+  if (stillAdmin) return;
+  if (target.role !== "admin" || target.status !== "active") return;
+
+  if ((await countActiveAdmins()) <= 1) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message:
+        "This is the last active admin. Promote another account to admin first.",
+    });
+  }
+}
+
+/**
+ * Accounts — admin-only, except `changePassword`, which is every user's own.
+ *
+ * The three tiers are defined in `shared/roles.ts` and enforced by the procedures in
+ * `server/_core/trpc.ts`; this router is only where they are handed out. Password hashes never
+ * appear in any response: `listUsers` selects around the column rather than deleting it
+ * afterwards, so a field added later cannot leak by being forgotten.
+ */
+const userRouter = router({
+  /** Every account, with how many renders each one owns (shown before a delete). */
+  list: adminProcedure.query(async () => {
+    const [rows, jobCounts] = await Promise.all([
+      listUsers(),
+      countJobsByUser(),
+    ]);
+    return rows.map(u => ({ ...u, jobCount: jobCounts.get(u.id) ?? 0 }));
+  }),
+
+  create: adminProcedure
+    .input(
+      z.object({
+        name: z.string().trim().min(1).max(128),
+        email: z.string().trim().email().max(255),
+        password: passwordField,
+        role: roleEnum,
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      assertPasswordOk(input.password);
+      const email = normalizeEmail(input.email);
+      if (await getUserByEmail(email)) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "An account with that email already exists",
+        });
+      }
+
+      const id = await createUser({
+        email,
+        name: input.name,
+        passwordHash: await hashPassword(input.password),
+        role: input.role,
+        status: "active",
+      });
+      console.log(
+        `[Accounts] ${ctx.user.email} created ${ROLE_LABEL[input.role]} ${email} (id ${id})`
+      );
+      return { id };
+    }),
+
+  /** Rename, re-tier or switch an account off. Password changes go through `resetPassword`. */
+  update: adminProcedure
+    .input(
+      z.object({
+        id: z.number().int().positive(),
+        name: z.string().trim().min(1).max(128).optional(),
+        email: z.string().trim().email().max(255).optional(),
+        role: roleEnum.optional(),
+        status: z.enum(["active", "disabled"]).optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { id, ...patch } = input;
+      const target = await getPublicUserById(id);
+      if (!target) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Account not found",
+        });
+      }
+
+      // Self-demotion and self-disabling are how an admin locks themselves out one click at a
+      // time; the last-admin guard below would not catch it while a second admin exists.
+      if (id === ctx.user.id && patch.role && patch.role !== "admin") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "You cannot change your own role",
+        });
+      }
+      if (id === ctx.user.id && patch.status === "disabled") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "You cannot disable your own account",
+        });
+      }
+      await assertNotLastAdmin(target, {
+        role: patch.role,
+        status: patch.status,
+      });
+
+      if (patch.email) {
+        const email = normalizeEmail(patch.email);
+        const clash = await getUserByEmail(email);
+        if (clash && clash.id !== id) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "An account with that email already exists",
+          });
+        }
+      }
+
+      await updateUser(id, patch);
+      invalidateUserCache(id);
+      console.log(
+        `[Accounts] ${ctx.user.email} updated ${target.email} (${Object.keys(patch).join(", ") || "no-op"})`
+      );
+      return { success: true };
+    }),
+
+  /** Admin sets a new password for someone else — the "they forgot it" path. */
+  resetPassword: adminProcedure
+    .input(
+      z.object({
+        id: z.number().int().positive(),
+        password: passwordField,
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      assertPasswordOk(input.password);
+      const target = await getPublicUserById(input.id);
+      if (!target) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Account not found",
+        });
+      }
+
+      await updateUser(input.id, {
+        passwordHash: await hashPassword(input.password),
+      });
+      console.log(
+        `[Accounts] ${ctx.user.email} reset the password for ${target.email}`
+      );
+      return { success: true };
+    }),
+
+  delete: adminProcedure
+    .input(z.object({ id: z.number().int().positive() }))
+    .mutation(async ({ ctx, input }) => {
+      const target = await getPublicUserById(input.id);
+      if (!target) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Account not found",
+        });
+      }
+      if (input.id === ctx.user.id) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "You cannot delete your own account",
+        });
+      }
+      await assertNotLastAdmin(target, { deleting: true });
+
+      await deleteUser(input.id);
+      invalidateUserCache(input.id);
+      console.log(
+        `[Accounts] ${ctx.user.email} deleted account ${target.email}`
+      );
+      return { success: true };
+    }),
+
+  /**
+   * Change your OWN password. Requires the current one even though the session already proves
+   * identity — it is what stops an unattended signed-in browser from becoming a permanent
+   * takeover.
+   */
+  changePassword: protectedProcedure
+    .input(
+      z.object({
+        currentPassword: z.string().min(1).max(MAX_PASSWORD_LENGTH),
+        newPassword: passwordField,
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      assertPasswordOk(input.newPassword);
+      const me = await getUserByIdWithHash(ctx.user.id);
+      if (!me) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Account not found",
+        });
+      }
+      if (!(await verifyPassword(input.currentPassword, me.passwordHash))) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Current password is incorrect",
+        });
+      }
+
+      await updateUser(me.id, {
+        passwordHash: await hashPassword(input.newPassword),
+      });
+      console.log(`[Accounts] ${me.email} changed their own password`);
+      return { success: true };
+    }),
+});
+
 export const appRouter = router({
   auth: authRouter,
+  user: userRouter,
   provider: providerRouter,
   channelConfig: channelConfigRouter,
   shuttle: shuttleRouter,

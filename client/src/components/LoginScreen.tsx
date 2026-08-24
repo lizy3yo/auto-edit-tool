@@ -61,7 +61,7 @@ export function LoginScreen({ onSuccess }: { onSuccess: () => void }) {
               <div className="text-center mb-2">
                 <h1 className="text-lg font-medium text-foreground">Sign in</h1>
                 <p className="text-sm text-muted-foreground mt-1">
-                  Enter your admin credentials to continue
+                  Enter your account credentials to continue
                 </p>
               </div>
 
@@ -135,8 +135,11 @@ export function LoginScreen({ onSuccess }: { onSuccess: () => void }) {
           </CardContent>
         </Card>
 
+        {/* Accounts are created in Admin → Users, not self-service — there is no sign-up link
+            and no password-reset mail to send, so the only honest instruction is who to ask. */}
         <p className="text-xs text-muted-foreground text-center">
-          Credentials are set via ADMIN_EMAIL / ADMIN_PASSWORD in .env
+          Accounts are created by an admin. Forgot your password? Ask them to
+          reset it.
         </p>
       </div>
     </div>

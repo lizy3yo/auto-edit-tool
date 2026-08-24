@@ -27,6 +27,11 @@ const EXPECTED = [
     what: "longform_slots",
     why: "the saved workspace (which job each tab holds)",
   },
+  {
+    probe: sql`SELECT role FROM users LIMIT 1`,
+    what: "users",
+    why: "accounts and roles — without it NOBODY can sign in",
+  },
 ];
 
 /**

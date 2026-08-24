@@ -7,11 +7,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, KeyRound, Plug, Settings } from "lucide-react";
+import { useAuth } from "@/_core/hooks/useAuth";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/PageHeader";
 import { ProviderKeys } from "@/components/admin/ProviderKeys";
 import { LongformInstruction } from "@/components/admin/LongformInstruction";
 import { LongformPacing } from "@/components/admin/LongformPacing";
+import { UserManagement } from "@/components/admin/UserManagement";
 
 /**
  * 69Labs provider card — the video/image/TTS lane. One provider row lives in
@@ -155,30 +157,58 @@ function SixtyNineLabsCard() {
   );
 }
 
+/**
+ * Admin — two audiences, one page.
+ *
+ * An admin gets everything. A project manager gets the directing instruction and pacing but
+ * never the provider keys or the account list, so those tabs are not rendered at all rather
+ * than rendered-and-disabled: a key field they cannot use is an invitation to ask why. The
+ * procedures behind each tab are gated to match (`adminProcedure` vs `managerProcedure`), so
+ * hiding is the courtesy and the server is the lock.
+ */
 export default function AdminPage() {
+  const { canManageKeys } = useAuth();
+
   return (
     <div className="space-y-6">
       <PageHeader
         icon={Settings}
         title="Admin"
-        description="Provider keys and the directing instruction — set once, rarely touched. Per-channel settings live under Channels."
+        description={
+          canManageKeys
+            ? "Provider keys, accounts and the directing instruction — set once, rarely touched. Per-channel settings live under Channels."
+            : "The directing instruction and pacing — set once, rarely touched. Per-channel settings live under Channels."
+        }
       />
-      <Tabs defaultValue="keys" className="gap-4">
+      <Tabs
+        defaultValue={canManageKeys ? "keys" : "instruction"}
+        className="gap-4"
+      >
         <TabsList>
-          <TabsTrigger value="keys">Provider keys</TabsTrigger>
+          {canManageKeys && (
+            <TabsTrigger value="keys">Provider keys</TabsTrigger>
+          )}
           <TabsTrigger value="instruction">Longform instruction</TabsTrigger>
           <TabsTrigger value="pacing">Longform pacing</TabsTrigger>
+          {canManageKeys && <TabsTrigger value="users">Users</TabsTrigger>}
         </TabsList>
-        <TabsContent value="keys" className="space-y-4">
-          <SixtyNineLabsCard />
-          <ProviderKeys />
-        </TabsContent>
+        {canManageKeys && (
+          <TabsContent value="keys" className="space-y-4">
+            <SixtyNineLabsCard />
+            <ProviderKeys />
+          </TabsContent>
+        )}
         <TabsContent value="instruction">
           <LongformInstruction />
         </TabsContent>
         <TabsContent value="pacing">
           <LongformPacing />
         </TabsContent>
+        {canManageKeys && (
+          <TabsContent value="users">
+            <UserManagement />
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   );

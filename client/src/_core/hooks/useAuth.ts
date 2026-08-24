@@ -1,4 +1,11 @@
 import { trpc } from "@/lib/trpc";
+import {
+  canManageChannels,
+  canManageKeys,
+  canOpenAdmin,
+  canSeeAllJobs,
+  type Role,
+} from "@shared/roles";
 import { TRPCClientError } from "@trpc/client";
 import { useCallback, useEffect, useMemo } from "react";
 
@@ -42,11 +49,22 @@ export function useAuth(options?: UseAuthOptions) {
 
   const state = useMemo(() => {
     localStorage.setItem("user-info", JSON.stringify(meQuery.data));
+    // Null until `auth.me` resolves. Every capability below reads false while it is, so a
+    // half-loaded page never flashes a tab the account is not entitled to.
+    const role = (meQuery.data?.role ?? null) as Role | null;
     return {
       user: meQuery.data ?? null,
+      role,
       loading: meQuery.isLoading || logoutMutation.isPending,
       error: meQuery.error ?? logoutMutation.error ?? null,
       isAuthenticated: Boolean(meQuery.data),
+      // Answered from `shared/roles.ts` — the same predicates the tRPC procedures gate on, so
+      // what the UI hides and what the server refuses cannot drift apart.
+      isAdmin: role === "admin",
+      canManageKeys: role ? canManageKeys(role) : false,
+      canManageChannels: role ? canManageChannels(role) : false,
+      canSeeAllJobs: role ? canSeeAllJobs(role) : false,
+      canOpenAdmin: role ? canOpenAdmin(role) : false,
     };
   }, [
     meQuery.data,

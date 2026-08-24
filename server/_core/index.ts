@@ -19,7 +19,7 @@ import express from "express";
 import { createServer } from "http";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
-import { registerAdminAuthRoutes } from "../adminAuth";
+import { ensureRootAdmin, registerAdminAuthRoutes } from "../adminAuth";
 import { runMigrations } from "../migrate";
 import { checkSchema } from "../schemaCheck";
 import { appRouter } from "../routers";
@@ -68,7 +68,11 @@ async function startServer() {
   // Warn loudly (but don't die) if the DB is still behind `drizzle/schema.ts` — an unapplied
   // migration otherwise surfaces as dead buttons rather than an error.
   void checkSchema();
-  // Single-admin email/password auth
+  // Create the first admin from ADMIN_EMAIL / ADMIN_PASSWORD if the users table has none.
+  // Awaited: without an admin row nobody can sign in, so this has to settle before the login
+  // route starts answering.
+  await ensureRootAdmin();
+  // Email/password auth against the users table (admin · project manager · editor)
   registerAdminAuthRoutes(app);
   // HeyGen render-completion callback (wakes host-scene poll loops).
   registerHeygenWebhook(app);

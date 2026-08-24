@@ -353,3 +353,46 @@ export const appSettings = mysqlTable("app_settings", {
 
 export type AppSetting = typeof appSettings.$inferSelect;
 export type InsertAppSetting = typeof appSettings.$inferInsert;
+
+/**
+ * Application accounts — the three tiers the studio is operated at.
+ *
+ * Before this table there was exactly one user: `ADMIN_EMAIL` / `ADMIN_PASSWORD` compared in
+ * `server/adminAuth.ts`, hard-coded to `id: 1` in `server/_core/sdk.ts`. Every job row still
+ * carries that `userId`, so the bootstrap admin is seeded AT id 1 (`ensureRootAdmin`) and the
+ * existing library, history and five tabs stay attached to it.
+ *
+ * Roles are a strict ladder, enforced server-side in `server/_core/trpc.ts`:
+ *
+ * - `admin`   — everything, and the only tier that can see or set provider API keys or manage
+ *               accounts.
+ * - `manager` — the project manager: channels, books, CTA assets, the directing instruction
+ *               and pacing, plus oversight of every render. Never the keys.
+ * - `editor`  — long-form video and the library, scoped to their OWN renders (their own five
+ *               tabs, their own history).
+ *
+ * `status` is the off switch: a `disabled` row keeps its renders and its attribution but
+ * cannot authenticate, and an already-signed-in session stops resolving on its next request.
+ */
+export const users = mysqlTable("users", {
+  id: int("id").autoincrement().primaryKey(),
+  /** Login identity. Stored lower-cased so sign-in is case-insensitive and the unique index bites. */
+  email: varchar("email", { length: 255 }).notNull().unique(),
+  /** Display name — shown in the account menu and stamped onto jobs as `userName`. */
+  name: varchar("name", { length: 128 }).notNull(),
+  /** scrypt digest from `server/passwords.ts` (`scrypt$N$r$p$salt$hash`). Never leaves the server. */
+  passwordHash: varchar("passwordHash", { length: 255 }).notNull(),
+  role: mysqlEnum("role", ["admin", "manager", "editor"])
+    .default("editor")
+    .notNull(),
+  status: mysqlEnum("status", ["active", "disabled"])
+    .default("active")
+    .notNull(),
+  /** Last successful sign-in — the "is this account still in use?" column in the admin table. */
+  lastLoginAt: timestamp("lastLoginAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type User = typeof users.$inferSelect;
+export type InsertUser = typeof users.$inferInsert;

@@ -37,7 +37,7 @@ Read through the single `ENV` object in `server/_core/env.ts`, except `R2_*`, wh
 | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ | ----------------------------------------- |
 | `DATABASE_URL`                                                           | `server/db.ts`, `drizzle.config.ts`                                                                    | no boot                                   |
 | `JWT_SECRET`                                                             | `server/_core/cookies.ts` + `server/encryption.ts:getKey()`                                            | no login, no stored keys — see gotchas    |
-| `ADMIN_EMAIL` / `ADMIN_PASSWORD`                                         | `server/adminAuth.ts` (single admin)                                                                   | no login                                  |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD`                                         | `server/adminAuth.ts:ensureRootAdmin` — **seeds the first admin only**                                 | no login on a fresh DB                    |
 | `PORT` (3000)                                                            | `server/_core/index.ts:77` — auto-scans +20 if busy                                                    | —                                         |
 | `ANTHROPIC_API_KEY`                                                      | `server/claude.ts` (`claude-opus-4-8`), `server/overlayTextScan.ts` (`claude-haiku-4-5-20251001`)      | storyboard stage fails                    |
 | `GEMINI_API_KEY`                                                         | `server/gemini.ts` (`gemini-2.5-flash`), `server/providers/gemini-image.ts` (`gemini-3.1-flash-image`) | no visual direction, no image fallback    |
@@ -177,8 +177,20 @@ Express · tRPC · Drizzle · MySQL.
   spending entry points (pipeline, resume, retry-assembly, retry-failed, regen scene/scenes)
   are metered by construction and the adapters stay job-unaware. Totals persist to
   `longform_video_jobs.costUsage`; `getCostBreakdown` prices them for the Cost dialog
-- `drizzle/schema.ts` — 5 tables: `provider_configs`, `longform_video_jobs`,
-  `channel_configs`, `channel_layers`, `app_settings`
+- **Accounts & roles** — `shared/roles.ts` is the single definition of the three tiers, and
+  BOTH the tRPC gates (`server/_core/trpc.ts`) and the nav (`client/src/App.tsx`) answer from
+  it, so what the UI hides and what the server refuses cannot drift. `admin` = everything
+  including provider keys and account management; `manager` (project manager) = channels,
+  books, CTA assets, directing instruction, pacing and oversight of every render, never the
+  keys; `editor` = long-form video and the library, scoped to their OWN renders (own five tabs,
+  own history — `canSeeAllJobs`). Passwords are scrypt (`server/passwords.ts`, no native dep);
+  `server/adminAuth.ts` holds the login route, the in-memory failed-attempt throttle and
+  `ensureRootAdmin`. Sessions carry only a `uid` — `sdk.authenticateRequest` reloads the row on
+  every request (2 s memo), so a role change or a disable takes effect immediately. Managed in
+  Admin → Users (`client/src/components/admin/UserManagement.tsx`)
+- `drizzle/schema.ts` — `users`, `provider_configs`, `longform_video_jobs`,
+  `channel_configs`, `channel_layers`, `app_settings` (+ `books`, `channel_assets`,
+  `longform_slots`, `longform_sales`)
 - `client/src/pages/{LongformPage,AdminPage}.tsx` · aliases `@` → `client/src`,
   `@shared` → `shared`
 
@@ -205,6 +217,12 @@ Always 16:9. Fire-and-forget; progress persisted to the job row and polled by th
   HeyGen webhook wake-up all assume it. No serverless, no horizontal scaling — one
   instance with restart-on-crash. The 1-min watchdog (`server/generationTimeout.ts`)
   resumes orphaned renders (provider results stay downloadable ~24 h).
+- **`ADMIN_EMAIL` / `ADMIN_PASSWORD` are a bootstrap, not the login.** They create the first
+  admin when `users` is empty and are ignored forever after — in particular they never
+  overwrite a password changed in Admin → Users, so a stale value in the deploy's environment
+  cannot silently reset it. The seed is pinned at **`id = 1`** because every pre-accounts job,
+  slot and library row carries `userId = 1`; seeding anywhere else orphans all of it. With no
+  admin row and no env vars, nobody can sign in and boot says so loudly.
 - **Provider gate**: generation needs an _active_ `provider_configs` row. "No active
   provider configured" ⇒ re-run `scripts/seed.mjs` or set active in Admin.
 - **FFmpeg needs drawtext** or text overlays silently disable. The startup log names the

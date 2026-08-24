@@ -11,10 +11,14 @@ import AdminPage from "./pages/AdminPage";
 import { useAuth } from "./_core/hooks/useAuth";
 import { LoginScreen } from "./components/LoginScreen";
 import { CreditErrorPopup } from "./components/CreditErrorPopup";
+import { ChangePasswordDialog } from "./components/ChangePasswordDialog";
+import { ROLE_LABEL, type Role } from "@shared/roles";
 import {
   Film,
+  KeyRound,
   LibraryBig,
   Loader2,
+  Lock,
   LogOut,
   Menu,
   Settings,
@@ -33,25 +37,54 @@ import { useEffect, useState } from "react";
  * the active-state ternary copy-pasted into each — which is how "Long-form Video"
  * ended up as the only item without an icon, and how the mobile row drifted out of
  * sync with the desktop one.
+ *
+ * `needs` is the capability an account must hold for the item to appear, answered from
+ * `shared/roles.ts` — the same predicates the tRPC procedures gate on. Long-form video and the
+ * library carry none: every tier gets those, scoped to their own renders.
  */
 const NAV = [
-  { href: "/", label: "Long-form video", icon: Film },
-  { href: "/library", label: "Library", icon: LibraryBig },
-  { href: "/channels", label: "Channels", icon: Tv },
-  { href: "/admin", label: "Admin", icon: Settings },
+  { href: "/", label: "Long-form video", icon: Film, needs: null },
+  { href: "/library", label: "Library", icon: LibraryBig, needs: null },
+  {
+    href: "/channels",
+    label: "Channels",
+    icon: Tv,
+    needs: "channels",
+  },
+  { href: "/admin", label: "Admin", icon: Settings, needs: "admin" },
 ] as const;
+
+type NavItem = (typeof NAV)[number];
+
+/** The nav items this account may see. Empty-ish while `auth.me` is still in flight. */
+function useVisibleNav(): readonly NavItem[] {
+  const { canManageChannels, canOpenAdmin } = useAuth();
+  return NAV.filter(item =>
+    item.needs === "channels"
+      ? canManageChannels
+      : item.needs === "admin"
+        ? canOpenAdmin
+        : true
+  );
+}
 
 /** `/` must match exactly — every path starts with it. */
 const isActive = (location: string, href: string) =>
   href === "/" ? location === "/" : location.startsWith(href);
 
-function DesktopNav({ location }: { location: string }) {
+function DesktopNav({
+  location,
+  items,
+}: {
+  location: string;
+  items: readonly NavItem[];
+}) {
   return (
     <nav
       aria-label="Main"
       className="hidden h-full items-center gap-0.5 sm:flex"
     >
-      {NAV.map(({ href, label, icon: Icon }) => {
+      {items.map(({ href, label, icon: Icon }) => {
         const active = isActive(location, href);
         return (
           <Link
@@ -81,14 +114,20 @@ function DesktopNav({ location }: { location: string }) {
  * the header two-and-a-bit lines tall and pushed the page content down on every
  * screen. A menu keeps the header one 56px line at every width.
  */
-function MobileNav({ location }: { location: string }) {
+function MobileNav({
+  location,
+  items,
+}: {
+  location: string;
+  items: readonly NavItem[];
+}) {
   const [open, setOpen] = useState(false);
 
   // Navigating closes it — wouter swaps the route in place, so without this the
   // menu stays open over the page you just asked for.
   useEffect(() => setOpen(false), [location]);
 
-  const current = NAV.find(n => isActive(location, n.href));
+  const current = items.find(n => isActive(location, n.href));
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -100,7 +139,7 @@ function MobileNav({ location }: { location: string }) {
       </PopoverTrigger>
       <PopoverContent align="start" className="w-56 p-1.5">
         <nav aria-label="Main">
-          {NAV.map(({ href, label, icon: Icon }) => {
+          {items.map(({ href, label, icon: Icon }) => {
             const active = isActive(location, href);
             return (
               <Link
@@ -135,6 +174,7 @@ function MobileNav({ location }: { location: string }) {
 function AccountMenu() {
   const { user, logout } = useAuth();
   const [open, setOpen] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
 
   const name = user?.name || user?.email || "Account";
   const initials = name
@@ -163,7 +203,23 @@ function AccountMenu() {
               {user.email}
             </p>
           )}
+          {user?.role && (
+            <span className="mt-1.5 inline-flex rounded-md border border-border bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+              {ROLE_LABEL[user.role as Role]}
+            </span>
+          )}
         </div>
+        <button
+          type="button"
+          onClick={() => {
+            setOpen(false);
+            setChangingPassword(true);
+          }}
+          className="mt-1 flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm text-foreground transition-colors hover:bg-muted"
+        >
+          <KeyRound className="h-4 w-4 shrink-0" />
+          Change password
+        </button>
         <button
           type="button"
           onClick={() => {
@@ -172,18 +228,23 @@ function AccountMenu() {
               window.location.href = "/";
             });
           }}
-          className="mt-1 flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm text-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+          className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm text-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
         >
           <LogOut className="h-4 w-4 shrink-0" />
           Sign out
         </button>
       </PopoverContent>
+      <ChangePasswordDialog
+        open={changingPassword}
+        onOpenChange={setChangingPassword}
+      />
     </Popover>
   );
 }
 
 function Layout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
+  const navItems = useVisibleNav();
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -204,8 +265,8 @@ function Layout({ children }: { children: React.ReactNode }) {
             <span className="hidden text-sm sm:inline">Longform Studio</span>
           </Link>
 
-          <MobileNav location={location} />
-          <DesktopNav location={location} />
+          <MobileNav location={location} items={navItems} />
+          <DesktopNav location={location} items={navItems} />
 
           <div className="ml-auto flex shrink-0 items-center gap-2">
             <AccountMenu />
@@ -220,8 +281,38 @@ function Layout({ children }: { children: React.ReactNode }) {
   );
 }
 
+/**
+ * What a tier is not allowed to open.
+ *
+ * Hiding the nav item is not a guard — the URL is still typeable and still bookmarked from a
+ * previous role. This is the second lock, and it says "not authorised" rather than 404: the page
+ * exists, it just is not theirs. The third and real lock is the tRPC procedure behind it, which
+ * refuses whatever this misses.
+ */
+function NotAuthorized() {
+  return (
+    <div className="mx-auto flex max-w-md flex-col items-center gap-3 py-20 text-center">
+      <div className="flex h-11 w-11 items-center justify-center rounded-full bg-muted">
+        <Lock className="h-5 w-5 text-muted-foreground" />
+      </div>
+      <h1 className="text-lg font-medium">Not authorized</h1>
+      <p className="text-sm text-muted-foreground">
+        Your account does not have access to this page. Ask an admin if you need
+        it.
+      </p>
+      <Link
+        href="/"
+        className="text-sm font-medium text-primary hover:underline"
+      >
+        Back to Long-form video
+      </Link>
+    </div>
+  );
+}
+
 function Router() {
-  const { isAuthenticated, loading, refresh } = useAuth();
+  const { isAuthenticated, loading, refresh, canManageChannels, canOpenAdmin } =
+    useAuth();
 
   if (loading) {
     return (
@@ -242,8 +333,12 @@ function Router() {
           <LongformPage />
         </Route>
         <Route path="/library" component={LibraryPage} />
-        <Route path="/channels" component={ChannelsPage} />
-        <Route path="/admin" component={AdminPage} />
+        <Route path="/channels">
+          {canManageChannels ? <ChannelsPage /> : <NotAuthorized />}
+        </Route>
+        <Route path="/admin">
+          {canOpenAdmin ? <AdminPage /> : <NotAuthorized />}
+        </Route>
         <Route component={NotFound} />
       </Switch>
     </Layout>
