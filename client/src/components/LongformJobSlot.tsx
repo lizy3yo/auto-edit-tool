@@ -38,6 +38,7 @@ import {
 } from "@/components/LongformCtaBooks";
 import { LongformPublishKit } from "@/components/LongformPublishKit";
 import { LongformScenePreview } from "@/components/LongformScenePreview";
+import { SceneStripThumb } from "@/components/SceneStripThumb";
 import { SplitPositionEditor } from "@/components/SplitPositionEditor";
 import { SceneTimingEditor } from "@/components/SceneTimingEditor";
 import { sanitizeError, isCreditError } from "@/lib/errorSanitizer";
@@ -1869,12 +1870,10 @@ export default function LongformJobSlot({
                         <Loader2 className="h-4 w-4 animate-spin" />
                       </div>
                     ) : scene.clipUrl ? (
-                      <video
-                        src={scene.clipUrl}
-                        preload="metadata"
-                        muted
-                        playsInline
-                        className="w-full h-full object-cover bg-black"
+                      <SceneStripThumb
+                        clipUrl={scene.clipUrl}
+                        startSec={scene.clipInSec}
+                        className="absolute inset-0"
                       />
                     ) : (
                       <div className="flex items-center justify-center h-full text-muted-foreground">
@@ -2137,6 +2136,7 @@ export default function LongformJobSlot({
                                       endSec={scene.narrationEndSec}
                                       clipInSec={scene.clipInSec}
                                       tailHoldSec={scene.tailHoldSec}
+                                      headHoldSec={scene.headHoldSec}
                                       qrTail={scene.qrTail}
                                       prevStartSec={prev?.narrationStartSec}
                                       nextEndSec={next?.narrationEndSec}

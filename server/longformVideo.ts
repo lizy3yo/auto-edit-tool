@@ -9150,6 +9150,9 @@ async function assembleAndFinalize(
         : s.qrTail
           ? QR_TAIL_HOLD_SEC
           : undefined,
+    // Operator hold before the FIRST scene's own first word — tailHoldSec's mirror, at the
+    // front. No default: unlike the CTA tail, there's no beat that wants this on by itself.
+    headHoldSec: s.headHoldSec,
     // Operator trim — which part of the rendered clip the scene shows.
     clipInSec: s.clipInSec,
     // Operator cut markers and their per-piece footage overrides (CapCut-style split).

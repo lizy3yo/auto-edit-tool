@@ -19,6 +19,12 @@
  * - HOLD   `tailHoldSec`: freeze the last frame N seconds after the last word while the
  *          narration pauses. This is the CTA QR-block release beat's hard-wired 3 s tail,
  *          exposed (and made removable) for any scene.
+ * - HEAD HOLD `headHoldSec`: the mirror of `tailHoldSec`, at the front instead of the back —
+ *          freeze the FIRST scene's own first frame for N seconds before its first word. Only
+ *          the first scene qualifies: every other scene's start is a shared boundary with a
+ *          neighbour (MOVE, above); the first scene has no neighbour before it, so a pause
+ *          there can only come from holding on its own opening frame. Extends the film's total
+ *          runtime at the front; the master narration itself never moves.
  *
  * Every function here mutates the given `scenes` array in place and returns what changed, so
  * the caller (the job's edit session) persists one live document.
@@ -29,6 +35,8 @@ import type { StoryboardScene } from "../shared/types";
 export const MIN_SLICE_SEC = 0.5;
 /** Upper bound on an operator hold; longer than this reads as a stall, not a beat. */
 export const MAX_TAIL_HOLD_SEC = 10;
+/** Same ceiling, for the head hold — kept as a separate constant since the two are independent. */
+export const MAX_HEAD_HOLD_SEC = 10;
 
 /** One timing edit on one scene. Every field optional — set only what moved. */
 export interface SceneTimingEdit {
@@ -41,6 +49,8 @@ export interface SceneTimingEdit {
   endSec?: number;
   /** Silent frozen tail after the last word (0 removes a default hold). */
   tailHoldSec?: number;
+  /** Silent frozen hold before the FIRST scene's own first word (0 removes it). First scene only. */
+  headHoldSec?: number;
 }
 
 export type TimingValidation = { ok: true } | { ok: false; reason: string };
@@ -103,6 +113,22 @@ export function validateTimingEdit(
       return {
         ok: false,
         reason: `Hold must be between 0 and ${MAX_TAIL_HOLD_SEC} seconds`,
+      };
+  }
+  if (edit.headHoldSec !== undefined) {
+    if (
+      !fin(edit.headHoldSec) ||
+      edit.headHoldSec < 0 ||
+      edit.headHoldSec > MAX_HEAD_HOLD_SEC
+    )
+      return {
+        ok: false,
+        reason: `Hold must be between 0 and ${MAX_HEAD_HOLD_SEC} seconds`,
+      };
+    if (scenes[at - 1])
+      return {
+        ok: false,
+        reason: "Only the first scene can hold before it starts",
       };
   }
   const wantsMove = edit.startSec !== undefined || edit.endSec !== undefined;
@@ -188,6 +214,8 @@ export function applyTimingEdit(
   if (edit.clipInSec !== undefined) scene.clipInSec = roundMs(edit.clipInSec);
   if (edit.tailHoldSec !== undefined)
     scene.tailHoldSec = roundMs(edit.tailHoldSec);
+  if (edit.headHoldSec !== undefined)
+    scene.headHoldSec = roundMs(edit.headHoldSec);
   if (edit.startSec !== undefined && fin(scene.narrationStartSec)) {
     const delta = edit.startSec - scene.narrationStartSec;
     if (Math.abs(delta) > 1e-6) {

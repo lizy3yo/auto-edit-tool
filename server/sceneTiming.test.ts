@@ -426,3 +426,43 @@ describe("per-piece footage offset (independent trim after a cut)", () => {
     expect(b[1].pieceClipIns).toBeUndefined();
   });
 });
+
+describe("head hold (a pause before the FIRST scene's first word — tailHoldSec's mirror)", () => {
+  it("sets a hold on the first scene", () => {
+    const b = board();
+    const v = validateTimingEdit(b, { sceneIndex: 1, headHoldSec: 2 });
+    expect(v).toEqual({ ok: true });
+    applyTimingEdit(b, { sceneIndex: 1, headHoldSec: 2 });
+    expect(b[0].headHoldSec).toBe(2);
+    // Untouched: the narration itself never moves.
+    expect(b[0].narrationStartSec).toBe(0);
+  });
+
+  it("refuses a hold on any scene but the first", () => {
+    const b = board();
+    const v = validateTimingEdit(b, { sceneIndex: 2, headHoldSec: 2 });
+    expect(v.ok).toBe(false);
+    if (!v.ok) expect(v.reason).toMatch(/Only the first scene/);
+  });
+
+  it("refuses an out-of-range or non-finite hold", () => {
+    const b = board();
+    expect(validateTimingEdit(b, { sceneIndex: 1, headHoldSec: -1 }).ok).toBe(
+      false
+    );
+    expect(validateTimingEdit(b, { sceneIndex: 1, headHoldSec: 11 }).ok).toBe(
+      false
+    );
+    expect(validateTimingEdit(b, { sceneIndex: 1, headHoldSec: NaN }).ok).toBe(
+      false
+    );
+  });
+
+  it("0 removes an existing hold", () => {
+    const b = board();
+    applyTimingEdit(b, { sceneIndex: 1, headHoldSec: 3 });
+    expect(b[0].headHoldSec).toBe(3);
+    applyTimingEdit(b, { sceneIndex: 1, headHoldSec: 0 });
+    expect(b[0].headHoldSec).toBe(0);
+  });
+});

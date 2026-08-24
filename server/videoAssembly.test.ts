@@ -413,6 +413,27 @@ describe("buildSceneMuxArgs (per-scene narration locked to audio length)", () =>
     expect(args).toContain("aac");
     expect(args[args.length - 1]).toBe("/tmp/scene.mp4");
   });
+
+  it("headHoldSec clones the FIRST frame too — tpad gets both a start and a stop pad", () => {
+    const withHold = buildSceneMuxArgs({
+      videoPath: "/tmp/v.mp4",
+      audioPath: "/tmp/a.mp3",
+      outputPath: "/tmp/scene.mp4",
+      durationSec: 9.5, // already includes the 2s hold, per planMasterOverlayScenes
+      headHoldSec: 2,
+    });
+    const f = withHold[withHold.indexOf("-filter_complex") + 1];
+    expect(f).toContain(
+      "tpad=start_mode=clone:start_duration=2.000:stop_mode=clone:stop_duration=9.500[v]"
+    );
+    // The final -t still does the exact trim regardless of how generous the pads are.
+    expect(withHold[withHold.indexOf("-t") + 1]).toBe("9.500");
+  });
+
+  it("no headHoldSec ⇒ byte-identical to today (no start pad at all)", () => {
+    const f = args[args.indexOf("-filter_complex") + 1];
+    expect(f).toBe("[0:v]tpad=stop_mode=clone:stop_duration=7.500[v]");
+  });
 });
 
 describe("buildSceneMuxArgs base scene", () => {
@@ -958,6 +979,33 @@ describe("planMasterOverlayScenes (master-timeline frame plan)", () => {
     expect(plan.totalSec).toBeCloseTo(3 + 5 + 3.8 + 3, 1);
   });
 
+  it("a headHoldSec on the first scene inserts silence at ITS OWN sliceStartSec, before everything", () => {
+    const plan = planMasterOverlayScenes({
+      scenes: [
+        { sliceStartSec: 0, sliceEndSec: 5, headHoldSec: 2 },
+        { sliceStartSec: 5, sliceEndSec: 8 },
+      ],
+    });
+    expect(plan.inserts).toEqual([{ atSec: 0, durSec: 2 }]);
+    // The held scene's on-screen length grows by the hold; the master narration itself
+    // (5s of slice) is untouched — the extra 2s is silence, not narration content.
+    expect(plan.scenes[0].frames / 30).toBeCloseTo(7, 1);
+    expect(plan.totalSec).toBeCloseTo(2 + 5 + 3, 1);
+  });
+
+  it("a headHoldSec and a tailHoldSec on the SAME scene insert on both sides of it", () => {
+    const plan = planMasterOverlayScenes({
+      scenes: [
+        { sliceStartSec: 0, sliceEndSec: 5, headHoldSec: 1, tailHoldSec: 2 },
+      ],
+    });
+    expect(plan.inserts).toEqual([
+      { atSec: 0, durSec: 1 },
+      { atSec: 5, durSec: 2 },
+    ]);
+    expect(plan.totalSec).toBeCloseTo(1 + 5 + 2, 1);
+  });
+
   it("a coverHero-style scene (no holdSec) ends exactly with its slice — no insert", () => {
     const plan = planMasterOverlayScenes({
       scenes: [{ sliceStartSec: 0, sliceEndSec: 4.5 }],
@@ -1033,6 +1081,42 @@ describe("buildMasterOverlayAudioArgs (untouched master over the whole film)", (
     );
     // The whole point: the master's speech is never cut or re-concatenated per scene.
     expect(filter).not.toContain("silenceremove");
+  });
+
+  it("a lead hold (first scene's headHoldSec) prepends silence — no master chunk to trim before it", () => {
+    const args = buildMasterOverlayAudioArgs({
+      masterPath: "/tmp/master.mp3",
+      inserts: [{ atSec: 0, durSec: 2 }],
+      totalSec: 12,
+      outputPath: "/tmp/film-audio.m4a",
+    });
+    const filter = args[args.indexOf("-filter_complex") + 1];
+    expect(filter).toBe(
+      "[0:a]aformat=sample_rates=48000:channel_layouts=stereo:sample_fmts=fltp[base];" +
+        "anullsrc=r=48000:cl=stereo,aformat=sample_rates=48000:channel_layouts=stereo:sample_fmts=fltp,atrim=end=2.000[g0];" +
+        "[g0][base]concat=n=2:v=0:a=1,apad,atrim=end=12.000[a]"
+    );
+    // Never a zero-length chunk trimmed off the master before the hold.
+    expect(filter).not.toContain("atrim=end=0.000");
+  });
+
+  it("a lead hold alongside a real (tail-style) insert prepends, then splices as usual", () => {
+    const args = buildMasterOverlayAudioArgs({
+      masterPath: "/tmp/master.mp3",
+      inserts: [
+        { atSec: 0, durSec: 2 }, // headHoldSec on the first scene
+        { atSec: 10, durSec: 1.8 }, // a normal hold-floor pad further in
+      ],
+      totalSec: 25,
+      outputPath: "/tmp/film-audio.m4a",
+    });
+    const filter = args[args.indexOf("-filter_complex") + 1];
+    expect(filter).toContain("asplit=2[c0][c1]");
+    expect(filter).toContain("atrim=end=2.000[g0]"); // the lead hold's own silence
+    expect(filter).toContain("atrim=end=1.800[g1]"); // the later insert, untouched by the lead hold
+    expect(filter).toContain(
+      "[g0][p0][g1][p1]concat=n=4:v=0:a=1,apad,atrim=end=25.000[a]"
+    );
   });
 });
 

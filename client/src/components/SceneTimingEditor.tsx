@@ -48,6 +48,8 @@ const MIN_SLICE_SEC = 0.5;
 const MAX_TAIL_HOLD_SEC = 10;
 /** The CTA release beat's default hold when the operator hasn't set one (server QR_TAIL_HOLD_SEC). */
 const DEFAULT_QR_TAIL_HOLD_SEC = 3;
+/** Mirrors server/sceneTiming.ts MAX_HEAD_HOLD_SEC. */
+const MAX_HEAD_HOLD_SEC = 10;
 /** How far picture and voice may drift during playback before the voice is snapped back. */
 const MAX_DRIFT_SEC = 0.15;
 
@@ -96,11 +98,13 @@ export interface SceneTimingDraft {
   startSec?: number;
   endSec?: number;
   tailHoldSec?: number;
+  headHoldSec?: number;
 }
 
 type Drag =
   | { kind: "clip"; startX: number; startClipIn: number }
   | { kind: "start" | "end"; startX: number; startVal: number }
+  | { kind: "headhold"; startX: number; startVal: number }
   | { kind: "cutmove"; startX: number; startVal: number }
   | {
       kind: "pieceslip";
@@ -315,6 +319,13 @@ export function SceneTimingEditor(props: {
   tailHoldSec?: number;
   /** CTA release beat — carries the default 3 s hold. */
   qrTail?: boolean;
+  /**
+   * Persisted hold BEFORE this scene's own first word — tailHoldSec's mirror, at the front.
+   * Only meaningful (and only shown, via the start handle) when `prevStartSec` is undefined —
+   * this scene has no neighbour before it, so a pause there can only come from holding on its
+   * own opening frame. No default: undefined ⇒ 0.
+   */
+  headHoldSec?: number;
   /** Earliest this scene's start may move to (previous scene's start + floor); undefined ⇒ pinned. */
   prevStartSec?: number;
   /** Latest this scene's end may move to (next scene's end − floor); undefined ⇒ pinned. */
@@ -374,11 +385,13 @@ export function SceneTimingEditor(props: {
     ) < 0.05;
   const defaultHold = props.qrTail ? DEFAULT_QR_TAIL_HOLD_SEC : 0;
   const persistedHold = props.tailHoldSec ?? defaultHold;
+  const persistedHeadHold = props.headHoldSec ?? 0;
 
   const [start, setStart] = useState(startSec);
   const [end, setEnd] = useState(endSec);
   const [clipIn, setClipIn] = useState(persistedClipIn);
   const [hold, setHold] = useState(persistedHold);
+  const [headHold, setHeadHold] = useState(persistedHeadHold);
   const [playhead, setPlayhead] = useState(0); // offset into the slice
   const [playing, setPlaying] = useState(false);
   const [clipDur, setClipDur] = useState<number | undefined>(undefined);
@@ -406,12 +419,13 @@ export function SceneTimingEditor(props: {
 
   // Re-seed whenever the persisted values change (apply round-trip). Keyed by value: polling
   // recreates objects every few seconds and a reset on identity would fight the operator's drag.
-  const seedKey = `${startSec}|${endSec}|${persistedClipIn}|${persistedHold}`;
+  const seedKey = `${startSec}|${endSec}|${persistedClipIn}|${persistedHold}|${persistedHeadHold}`;
   useEffect(() => {
     setStart(startSec);
     setEnd(endSec);
     setClipIn(persistedClipIn);
     setHold(persistedHold);
+    setHeadHold(persistedHeadHold);
     // The slice may have shrunk (a split keeps this editor on the first half): keep the
     // playhead inside it.
     setPlayhead(p => clamp(p, 0, Math.max(0, endSec - startSec)));
@@ -452,7 +466,8 @@ export function SceneTimingEditor(props: {
     start !== startSec ||
     end !== endSec ||
     clipIn !== persistedClipIn ||
-    hold !== persistedHold;
+    hold !== persistedHold ||
+    headHold !== persistedHeadHold;
   const voiceSrc = props.masterAudioUrl ?? props.audioUrl;
   /** Where an offset into the slice sits in the viewer's voice track. */
   const voiceTime = useCallback(
@@ -959,8 +974,16 @@ export function SceneTimingEditor(props: {
         px < Math.min(stripW, x1);
         px++
       ) {
+        // `px` is floored to an integer pixel but `x0` usually isn't, so the very first pixel
+        // of a segment can sit fractionally BEFORE x0 — `f` goes slightly negative, floors to
+        // -1, and indexes the peaks array from the end (`undefined` past index 0), turning that
+        // bar into `NaN` height, which `fillRect` silently skips: a blank sliver at the start of
+        // every drawn segment (i.e. right where a scene's own waveform begins).
         const f = (px - x0) / Math.max(1, x1 - x0);
-        const i = Math.min(p.peaks.length - 1, Math.floor(f * p.peaks.length));
+        const i = Math.max(
+          0,
+          Math.min(p.peaks.length - 1, Math.floor(f * p.peaks.length))
+        );
         const h = Math.max(1, p.peaks[i] * (VOICE_H - 4));
         ctx.fillRect(px, mid - h / 2, 1, h);
       }
@@ -1057,6 +1080,11 @@ export function SceneTimingEditor(props: {
       }
       setPlayhead(0); // preview the new first frame
       seekTo(0, ns, cIn);
+    } else if (d.kind === "headhold") {
+      // The first scene's own handle: nothing to trade with, so dragging right just grows the
+      // pause before the picture (and its narration) starts — clamped at 0, never negative.
+      const next = r3(clamp(d.startVal + dSec, 0, MAX_HEAD_HOLD_SEC));
+      setHeadHold(next);
     } else if (d.kind === "cutmove") {
       // Bounds: both slice edges, and MIN_SLICE_SEC clear of every OTHER cut (this one is free
       // to slide through where it started).
@@ -1139,6 +1167,7 @@ export function SceneTimingEditor(props: {
     setEnd(endSec);
     setClipIn(persistedClipIn);
     setHold(persistedHold);
+    setHeadHold(persistedHeadHold);
     setPlayhead(0);
     seekTo(0, startSec, persistedClipIn);
   };
@@ -1150,6 +1179,7 @@ export function SceneTimingEditor(props: {
     if (start !== startSec) edit.startSec = start;
     if (end !== endSec) edit.endSec = end;
     if (hold !== persistedHold) edit.tailHoldSec = hold;
+    if (headHold !== persistedHeadHold) edit.headHoldSec = headHold;
     if (Object.keys(edit).length === 0) return;
     props.onApply(edit);
   };
@@ -1383,7 +1413,7 @@ export function SceneTimingEditor(props: {
             </div>
           )}
           {/* Cut handles — CapCut-style white grips at the clip edges. */}
-          {prevStartSec !== undefined && (
+          {prevStartSec !== undefined ? (
             <div
               className="absolute inset-y-0 flex w-3 -translate-x-1/2 cursor-col-resize items-center justify-center rounded-l bg-white hover:bg-primary"
               style={{ left: `${pct(start)}%` }}
@@ -1393,6 +1423,31 @@ export function SceneTimingEditor(props: {
               }
             >
               <div className="h-4 w-0.5 rounded bg-black/50" />
+            </div>
+          ) : (
+            // The FIRST scene of the film: no neighbour to trade time with, so this handle
+            // holds instead of moves — drag right to add a silent pause before playback starts.
+            <div
+              className="absolute inset-y-0 flex w-3 -translate-x-1/2 cursor-col-resize items-center justify-center rounded-l bg-white hover:bg-primary"
+              style={{ left: `${pct(start)}%` }}
+              title={
+                headHold > 0
+                  ? `Hold before this scene's first word (+${fmt(headHold)}) — drag to adjust`
+                  : "Drag to hold before this scene's first word (a pause before playback starts)"
+              }
+              onPointerDown={e =>
+                begin(
+                  { kind: "headhold", startX: e.clientX, startVal: headHold },
+                  e
+                )
+              }
+            >
+              <div className="h-4 w-0.5 rounded bg-black/50" />
+              {headHold > 0 && (
+                <span className="pointer-events-none absolute bottom-5 left-0 whitespace-nowrap rounded bg-black/60 px-1 font-mono text-[9px] text-white/90">
+                  hold +{fmt(headHold)}
+                </span>
+              )}
             </div>
           )}
           {nextEndSec !== undefined && (

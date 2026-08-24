@@ -89,6 +89,7 @@ import {
   validateSetPieceClipIn,
   cutPoints,
   MAX_TAIL_HOLD_SEC,
+  MAX_HEAD_HOLD_SEC,
 } from "./sceneTiming";
 import { previewBookAssignments, ctaLabelMatches } from "../shared/ctaMarkers";
 import {
@@ -1696,6 +1697,7 @@ const longformVideoRouter = router({
         startSec: z.number().min(0).optional(),
         endSec: z.number().min(0).optional(),
         tailHoldSec: z.number().min(0).max(MAX_TAIL_HOLD_SEC).optional(),
+        headHoldSec: z.number().min(0).max(MAX_HEAD_HOLD_SEC).optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {

@@ -145,8 +145,15 @@ Express · tRPC · Drizzle · MySQL.
   narration that never moves. Trim (`scene.clipInSec`), move a cut between neighbours
   (`narrationStartSec/EndSec`, lip-synced hosts keep sync by trimming), split a scene in two (same
   footage continues; renumbers), hold the last frame (`scene.tailHoldSec` — the CTA release beat's
-  hard-wired `QR_TAIL_HOLD_SEC = 3` is its default; 0 removes the pause). Queued on the edit
-  session as `timing` / `cut` requests — instant metadata writes: they never mark a scene failed,
+  hard-wired `QR_TAIL_HOLD_SEC = 3` is its default; 0 removes the pause) or hold the FIRST frame
+  (`scene.headHoldSec` — `tailHoldSec`'s mirror, at the front; only the film's actual first scene
+  qualifies, since every other scene's start is a shared boundary with a neighbour instead). A
+  head hold prepends silence to the master-overlay audio at that scene's own `sliceStartSec`
+  (`atSec: 0` — spliced in specially, `buildMasterOverlayAudioArgs`'s `leadHold`, since there's no
+  master-audio chunk before it to trim) and clones the FIRST frame in `buildSceneMuxArgs`
+  (`tpad`'s `start_duration`, the mirror of its existing `stop_duration` tail hold) — the master
+  narration itself never moves. Queued on the edit session as `timing` / `cut` requests — instant
+  metadata writes: they never mark a scene failed,
   never flip the job to `processing`, and are hidden from `pollJob.sceneEdits`, so a split looks
   like a split (moving the cut between two continuous same-footage neighbours carries the footage across it —
   `isContinuousPair`). SPLIT is CapCut-style: it places a cut MARKER on the one clip

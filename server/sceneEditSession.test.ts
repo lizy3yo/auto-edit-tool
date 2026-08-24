@@ -432,6 +432,45 @@ describe("scene edit session", () => {
     });
   });
 
+  it("applies a head hold on the first scene — the narration start itself never moves", async () => {
+    const jobId = ++nextJob;
+    const scenes = timedBoard(3);
+    getJobSpy.mockResolvedValue({
+      id: jobId,
+      inputParams: {},
+      storyboard: scenes,
+    });
+    enqueueSceneEdit(jobId, {
+      kind: "timing",
+      sceneIndex: 1,
+      edit: { sceneIndex: 1, headHoldSec: 2 },
+    });
+    await sceneEditsSettled(jobId);
+    expect(scenes[0].headHoldSec).toBe(2);
+    expect(scenes[0].narrationStartSec).toBe(0);
+    expect(scenes[0].timingEdited).toBe(true);
+  });
+
+  it("refuses a head hold on any scene but the first and reports it on the row", async () => {
+    const jobId = ++nextJob;
+    const scenes = timedBoard(3);
+    getJobSpy.mockResolvedValue({
+      id: jobId,
+      inputParams: {},
+      storyboard: scenes,
+    });
+    enqueueSceneEdit(jobId, {
+      kind: "timing",
+      sceneIndex: 2,
+      edit: { sceneIndex: 2, headHoldSec: 2 },
+    });
+    await sceneEditsSettled(jobId);
+    expect(scenes[1].headHoldSec).toBeUndefined();
+    const writes = updateSpy.mock.calls.map(c => (c as any)[1]);
+    const err = writes.find(w => typeof w.errorMessage === "string");
+    expect(err?.errorMessage).toMatch(/Only the first scene/);
+  });
+
   it("reports a refused timing edit on the job row without failing the scene", async () => {
     const jobId = ++nextJob;
     const scenes = timedBoard(2);

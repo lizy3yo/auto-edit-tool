@@ -434,6 +434,15 @@ export interface StoryboardScene {
    */
   tailHoldSec?: number;
   /**
+   * Silent frozen hold BEFORE this scene's own first word, seconds — the mirror of
+   * `tailHoldSec`, at the front instead of the back. Only meaningful on the very first scene of
+   * the film: there's no previous scene to trade time with, so its narration start is pinned
+   * (see `server/sceneTiming.ts`), and the only way to add a pause there is to hold the first
+   * frame before playback (and the master narration under it) begins. Extends the film's total
+   * runtime at the front; the master narration itself is never touched.
+   */
+  headHoldSec?: number;
+  /**
    * A timing edit (trim, cut move, split, hold) changed how this scene assembles and the
    * finished film has not been re-stitched since. Drives the "Reassemble to apply" notice;
    * cleared when a final is written.

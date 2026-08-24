@@ -396,16 +396,22 @@ export function planScenePieces(opts: {
   clipInSec?: number;
   pieceClipIns?: Record<string, number>;
 }): ScenePiecePlan[] {
-  const { cuts, totalDurationSec, videoDurationSec, clipInSec, pieceClipIns } = opts;
+  const { cuts, totalDurationSec, videoDurationSec, clipInSec, pieceClipIns } =
+    opts;
   // `totalDurationSec` can exceed the last cut only by a hold-floor/tail (bounds is otherwise
   // in slice-seconds); clamp so a stale cut past a since-shortened slice can't sit beyond it.
   // Then MERGE any bound that doesn't leave the previous one a real (MIN_PIECE_SEC) piece —
   // a stale cut collapsed onto (or past) the end folds into the piece before it instead of
   // producing a near-zero flash frame.
-  const raw = [0, ...cuts.map(c => Math.min(c, totalDurationSec)), totalDurationSec];
+  const raw = [
+    0,
+    ...cuts.map(c => Math.min(c, totalDurationSec)),
+    totalDurationSec,
+  ];
   const bounds: number[] = [raw[0]];
   for (let i = 1; i < raw.length; i++) {
-    if (raw[i] - bounds[bounds.length - 1] >= MIN_PIECE_SEC) bounds.push(raw[i]);
+    if (raw[i] - bounds[bounds.length - 1] >= MIN_PIECE_SEC)
+      bounds.push(raw[i]);
   }
   const plan: ScenePiecePlan[] = [];
   let consumed = 0;
@@ -456,7 +462,14 @@ async function buildPiecedSceneVideo(opts: {
   workDir: string;
   sceneIndex: number;
 }): Promise<string> {
-  const { scene, cuts, sceneVideoPath, totalDurationSec, workDir, sceneIndex: s } = opts;
+  const {
+    scene,
+    cuts,
+    sceneVideoPath,
+    totalDurationSec,
+    workDir,
+    sceneIndex: s,
+  } = opts;
   const videoDurationSec = await getMediaDuration(sceneVideoPath);
   const plan = planScenePieces({
     cuts,
@@ -701,6 +714,9 @@ export function planMasterOverlayScenes(opts: {
     holdSec?: number;
     /** Extra silent frozen tail (the CTA QR release beat). */
     tailHoldSec?: number;
+    /** Extra silent frozen hold BEFORE this slice starts — only meaningful on the first scene
+     *  (see `sceneTiming.ts`'s `headHoldSec`); an insert at this scene's OWN sliceStartSec. */
+    headHoldSec?: number;
   }[];
   fps?: number;
 }): {
@@ -716,9 +732,14 @@ export function planMasterOverlayScenes(opts: {
   let framesCum = 0;
   for (const s of opts.scenes) {
     const sliceLen = Math.max(0, s.sliceEndSec - s.sliceStartSec);
-    const target = Math.max(sliceLen, s.holdSec ?? 0) + (s.tailHoldSec ?? 0);
-    const extra = target - sliceLen;
-    if (extra > 1e-3) inserts.push({ atSec: s.sliceEndSec, durSec: extra });
+    const headExtra = s.headHoldSec ?? 0;
+    if (headExtra > 1e-3)
+      inserts.push({ atSec: s.sliceStartSec, durSec: headExtra });
+    const target =
+      headExtra + Math.max(sliceLen, s.holdSec ?? 0) + (s.tailHoldSec ?? 0);
+    const tailExtra = target - headExtra - sliceLen;
+    if (tailExtra > 1e-3)
+      inserts.push({ atSec: s.sliceEndSec, durSec: tailExtra });
     idealCum += target;
     const frames = Math.max(1, Math.round(idealCum * fps) - framesCum);
     framesCum += frames;
@@ -955,10 +976,17 @@ export function sanitizeInsertBoundaries(
  * No per-scene cuts at all — scene transitions are seamless by construction. Callers must drop
  * inserts at/after the master's end (`atSec` within ~50ms of the master duration): the trailing
  * `apad` covers them, and a zero-length tail chunk would break `concat`. Pure — no IO.
+ *
+ * A LEAD hold (the first scene's `headHoldSec`) surfaces as an insert at `atSec` 0 — silence
+ * before the master has played ANY of itself. It can't be spliced in like the others (there's
+ * no chunk of master audio before it to trim — that chunk would be zero-length, which breaks
+ * `concat` the same way a zero-length trailing chunk does), so it's pulled out here and simply
+ * prepended to the chain once the rest of the plan is built exactly as it would without it —
+ * the no-lead-hold path below is untouched, byte-for-byte, when there isn't one.
  */
 export function buildMasterOverlayAudioArgs(opts: {
   masterPath: string;
-  /** Ascending, strictly inside (0, masterDuration). */
+  /** Ascending, strictly inside (0, masterDuration) — except a single lead hold at exactly 0. */
   inserts: { atSec: number; durSec: number }[];
   totalSec: number;
   outputPath: string;
@@ -966,10 +994,22 @@ export function buildMasterOverlayAudioArgs(opts: {
   const FMT =
     "aformat=sample_rates=48000:channel_layouts=stereo:sample_fmts=fltp";
   const end = opts.totalSec.toFixed(3);
-  const n = opts.inserts.length;
+  const leadHold =
+    opts.inserts.length && opts.inserts[0].atSec <= 1e-3
+      ? opts.inserts[0]
+      : null;
+  const inserts = leadHold ? opts.inserts.slice(1) : opts.inserts;
+  const leadGap = leadHold
+    ? `anullsrc=r=48000:cl=stereo,${FMT},atrim=end=${leadHold.durSec.toFixed(3)}[g0]`
+    : null;
+  const n = inserts.length;
   let filter: string;
-  if (n === 0) {
+  if (n === 0 && !leadHold) {
     filter = `[0:a]${FMT},apad,atrim=end=${end}[a]`;
+  } else if (n === 0) {
+    filter =
+      `[0:a]${FMT}[base];${leadGap};` +
+      `[g0][base]concat=n=2:v=0:a=1,apad,atrim=end=${end}[a]`;
   } else {
     // Split the master into N+1 chunks at the insert points, interleave a silence per insert,
     // and re-join in the PCM domain: [c0][g1][c1][g2]…[gN][cN]. Each seam gets a sub-audible
@@ -977,29 +1017,36 @@ export function buildMasterOverlayAudioArgs(opts: {
     const fadeIn = `afade=t=in:st=0:d=${OVERLAY_SEAM_FADE_SEC}`;
     const fadeOut = (chunkLen: number) =>
       `afade=t=out:st=${Math.max(0, chunkLen - OVERLAY_SEAM_FADE_SEC).toFixed(3)}:d=${OVERLAY_SEAM_FADE_SEC}`;
-    const t = opts.inserts.map(i => i.atSec.toFixed(3));
+    const t = inserts.map(i => i.atSec.toFixed(3));
     const split =
       `[0:a]${FMT},asplit=${n + 1}` +
-      opts.inserts.map((_, i) => `[c${i}]`).join("") +
+      inserts.map((_, i) => `[c${i}]`).join("") +
       `[c${n}]`;
-    const chunks = opts.inserts.map((ins, i) => {
+    const chunks = inserts.map((ins, i) => {
       const from = i === 0 ? "" : `start=${t[i - 1]}:`;
-      const chunkLen =
-        i === 0 ? ins.atSec : ins.atSec - opts.inserts[i - 1].atSec;
+      const chunkLen = i === 0 ? ins.atSec : ins.atSec - inserts[i - 1].atSec;
       const lead = i === 0 ? "" : `${fadeIn},`;
       return `[c${i}]atrim=${from}end=${t[i]},asetpts=PTS-STARTPTS,${lead}${fadeOut(chunkLen)}[p${i}]`;
     });
     chunks.push(
       `[c${n}]atrim=start=${t[n - 1]},asetpts=PTS-STARTPTS,${fadeIn}[p${n}]`
     );
-    const gaps = opts.inserts.map(
+    const gaps = inserts.map(
       (ins, i) =>
         `anullsrc=r=48000:cl=stereo,${FMT},atrim=end=${ins.durSec.toFixed(3)}[g${i + 1}]`
     );
-    const order = opts.inserts.map((_, i) => `[p${i}][g${i + 1}]`).join("");
+    const order =
+      (leadHold ? "[g0]" : "") +
+      inserts.map((_, i) => `[p${i}][g${i + 1}]`).join("");
+    const total = leadHold ? 2 * n + 2 : 2 * n + 1;
     filter =
-      [split, ...chunks, ...gaps].join(";") +
-      `;${order}[p${n}]concat=n=${2 * n + 1}:v=0:a=1,apad,atrim=end=${end}[a]`;
+      [
+        split,
+        ...chunks,
+        ...(leadHold ? [leadGap as string] : []),
+        ...gaps,
+      ].join(";") +
+      `;${order}[p${n}]concat=n=${total}:v=0:a=1,apad,atrim=end=${end}[a]`;
   }
   return [
     "-y",
@@ -1096,6 +1143,13 @@ export function buildSceneMuxArgs(opts: {
    * The caller clamps it inside the video's real length; 0/undefined ⇒ from the top.
    */
   startSec?: number;
+  /**
+   * `scene.headHoldSec` — clone the (post-trim) FIRST frame for this many seconds before the
+   * picture starts playing; the mirror of the tail hold, at the front. `durationSec` already
+   * includes it (see `planMasterOverlayScenes`), so this only needs to tell `tpad` where the
+   * extra time goes: the trailing `-t durationSec` still does the final, exact trim.
+   */
+  headHoldSec?: number;
   /**
    * Optional QR-code PNG overlaid on a CTA scene. The QR is scaled-to-fit and padded onto a
    * white "quiet-zone" card so it stays scannable over any backdrop. `height` sizes the card
@@ -1203,17 +1257,23 @@ export function buildSceneMuxArgs(opts: {
   }
 
   // Head trim first, then the hold: tpad clones the LAST frame, which must be the last frame of
-  // the trimmed picture, not of the untrimmed source.
+  // the trimmed picture, not of the untrimmed source. `start_duration` (the head hold) is
+  // generous the same way `stop_duration` already is — it clones more than strictly needed, and
+  // the trailing `-t durationSec` trims the whole thing down to exactly the planned length.
   const head =
     opts.startSec && opts.startSec > 0
       ? `trim=start=${opts.startSec.toFixed(3)},setpts=PTS-STARTPTS,`
       : "";
+  const headPad =
+    opts.headHoldSec && opts.headHoldSec > 0
+      ? `start_mode=clone:start_duration=${opts.headHoldSec.toFixed(3)}:`
+      : "";
   let filter: string;
   if (overlays.length === 0) {
-    filter = `[0:v]${head}tpad=stop_mode=clone:stop_duration=${dur}[v]`;
+    filter = `[0:v]${head}tpad=${headPad}stop_mode=clone:stop_duration=${dur}[v]`;
   } else {
     const parts = [
-      `[0:v]${head}tpad=stop_mode=clone:stop_duration=${dur}[base]`,
+      `[0:v]${head}tpad=${headPad}stop_mode=clone:stop_duration=${dur}[base]`,
     ];
     let cur = "base";
     overlays.forEach((o, i) => {
@@ -2525,6 +2585,9 @@ export async function assemblePerSceneFilm(opts: {
      *  beat lingers so the QR stays on screen ~3s after the release line (or the operator's
      *  override, which may be 0). */
     tailHoldSec?: number;
+    /** Extra silent frozen hold (seconds) BEFORE this scene's own first word — the mirror of
+     *  `tailHoldSec`, at the front. Only meaningful on the first scene of the film. */
+    headHoldSec?: number;
     /** Operator trim: seconds into the scene's clip(s) where the picture starts. */
     clipInSec?: number;
     /** Operator cut markers (CapCut-style split), seconds into the scene's slice. */
@@ -2591,6 +2654,7 @@ export async function assemblePerSceneFilm(opts: {
           sliceEndSec: s.sliceEndSec as number,
           holdSec: s.audioDurationSec,
           tailHoldSec: s.tailHoldSec,
+          headHoldSec: s.headHoldSec,
         }))
       : null;
 
@@ -2762,7 +2826,9 @@ export async function assemblePerSceneFilm(opts: {
         : Math.max(
             await getMediaDuration(audioPath),
             scene.audioDurationSec ?? 0
-          ) + (scene.tailHoldSec ?? 0);
+          ) +
+          (scene.tailHoldSec ?? 0) +
+          (scene.headHoldSec ?? 0);
 
       // 3.5. A CUT scene: rebuild its video as separate PIECES, each independently trimmed
       // (own footage offset) and held to its own on-screen share, then concatenated — so a
@@ -2808,6 +2874,7 @@ export async function assemblePerSceneFilm(opts: {
           outputPath: sceneOut,
           durationSec,
           startSec,
+          headHoldSec: scene.headHoldSec,
           qrOverlay:
             scene.qrOverlayUrl && qrPath
               ? {
