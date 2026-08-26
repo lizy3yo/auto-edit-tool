@@ -60,8 +60,9 @@ export type CtaBookAssignment = CtaBookUpload;
  * That is gone: you upload the book(s) here and CALL them in the script's CTA text, and the
  * pipeline reveals each cover on the line that names it. Upload once, name it in the prompt.
  *
- * Only renders once the script actually has CTA blocks — there is nowhere to place a book
- * otherwise, and offering the upload then would be a control that does nothing.
+ * Always rendered. A book can be uploaded before the script carries CTA markers — Copy CTA
+ * hands back the marker lines to paste in — so the upload comes first and the script follows.
+ * With no marked block the section says so instead of disappearing.
  */
 export function LongformCtaBooks({
   script,
@@ -100,8 +101,6 @@ export function LongformCtaBooks({
   // editing a saved book after saving flips the button back to "Save now" (it IS a new state).
   const [savedKeys, setSavedKeys] = useState<Set<string>>(new Set());
   const [savingIndex, setSavingIndex] = useState<number | null>(null);
-
-  if (!trimmed || blocks.length === 0) return null;
 
   const keyFor = (b: CtaBookUpload) =>
     `${b.title.trim().toLowerCase()}|${b.shopUrl?.trim() ?? ""}`;
@@ -212,9 +211,12 @@ export function LongformCtaBooks({
     <div className="space-y-2">
       <Label className="text-sm font-medium">
         Books in this video{" "}
-        <span className="font-normal text-muted-foreground">
-          ({blocks.length} call{blocks.length === 1 ? "" : "s"} to action found)
-        </span>
+        {blocks.length > 0 && (
+          <span className="font-normal text-muted-foreground">
+            ({blocks.length} call{blocks.length === 1 ? "" : "s"} to action
+            found)
+          </span>
+        )}
       </Label>
       <p className="text-xs text-muted-foreground">
         Upload each book you pitch and give it the title you use in the script.
@@ -222,6 +224,24 @@ export function LongformCtaBooks({
         script and it lands there. A book with a shop link also gets a QR and a
         tracking link.
       </p>
+
+      {/* No marked block: the books still upload, but nothing places them yet. Say it here —
+          the server refuses a generate that attaches a book to an unmarked script. */}
+      {blocks.length === 0 &&
+        (value.length > 0 ? (
+          <p className="flex items-start gap-1.5 text-xs text-warning">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            The script has no CTA block yet — wrap the pitch in ===START CTA===
+            / ===END CTA=== lines (Copy CTA gives you the exact text). Until it
+            does, this book has nowhere to land and generating is refused.
+          </p>
+        ) : (
+          <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
+            <BookOpen className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            No CTA block marked in the script yet — add the book here, then use
+            Copy CTA to paste its lines into the script.
+          </p>
+        ))}
 
       {value.length > 0 && (
         <div className="space-y-2">
