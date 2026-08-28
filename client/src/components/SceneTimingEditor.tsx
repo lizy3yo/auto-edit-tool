@@ -38,6 +38,7 @@ import {
   Pause,
   Play,
   RotateCcw,
+  History,
   Scissors,
   X,
   SkipBack,
@@ -45,6 +46,14 @@ import {
 
 /** Shortest slice a move/split may leave — mirrors server/sceneTiming.ts MIN_SLICE_SEC. */
 const MIN_SLICE_SEC = 0.5;
+/**
+ * One frame at the pipeline's 30fps. Every footage-addressing edit — the two slips, placing a
+ * cut, dragging one — stops here short of the clip's end, i.e. ON its last frame and never past
+ * it. Deliberately NOT `MIN_SLICE_SEC`: that reserved half a second of footage, which is both
+ * too strict at the top (a clip may legitimately be left with a sliver) and fatal for a clip
+ * SHORTER than 0.5s, whose limit collapsed to 0 and left it un-slippable.
+ */
+const FRAME_SEC = 1 / 30;
 const MAX_TAIL_HOLD_SEC = 10;
 /** The CTA release beat's default hold when the operator hasn't set one (server QR_TAIL_HOLD_SEC). */
 const DEFAULT_QR_TAIL_HOLD_SEC = 3;
@@ -111,9 +120,88 @@ type Drag =
       startX: number;
       startVal: number;
       cutKey: string;
-      maxIn: number;
+      /** Furthest footage offset this piece may show. `undefined` while the clip's duration is
+       *  still unknown — the drag then does nothing rather than run unbounded. */
+      maxIn: number | undefined;
     }
   | { kind: "scrub" };
+
+/**
+ * The furthest footage offset a slip may address: the clip's LAST frame, never past it.
+ *
+ * `undefined` when the clip's duration isn't known yet. That case used to read `Infinity`, so a
+ * drag begun before the video's metadata arrived was bounded by nothing and could park the
+ * footage beyond the end of the file. Unknown now means "don't move".
+ *
+ * Deliberately not `MIN_SLICE_SEC`: reserving half a second of footage is both too strict at the
+ * top (a sliver is a legitimate choice) and fatal for a clip SHORTER than 0.5s, whose limit
+ * collapsed to 0 and left it un-slippable. Pure — unit-tested.
+ */
+export function maxSlipSec(clipDurationSec?: number): number | undefined {
+  if (clipDurationSec === undefined || !Number.isFinite(clipDurationSec))
+    return undefined;
+  return Math.max(0, clipDurationSec - FRAME_SEC);
+}
+
+/**
+ * How far a scene's own boundary handles may be dragged.
+ *
+ * A handle may only make the scene it belongs to SHORTER: its start moves later, its end moves
+ * earlier, and neither leaves the scene's own persisted range. Editing scene 2 therefore can
+ * never reach into scene 1 or scene 3 — which is what the old bounds allowed, since they were
+ * measured from the NEIGHBOUR's far edge (a 11–17 scene could be dragged out to 5.5–23, and a
+ * 17–24 scene's start down to 11.5).
+ *
+ * The narration still tiles: time given up at a boundary goes to the neighbour on that side. So
+ * lengthening a scene means shortening its neighbour, from that neighbour's own editor, where
+ * the same rule applies — the operation stays reversible, it just always shrinks whatever you
+ * are pointing at.
+ *
+ * `draftStart`/`draftEnd` are the live (uncommitted) values, so the two handles cannot cross:
+ * each keeps `MIN_SLICE_SEC` of picture against where the other one currently sits. A scene
+ * already shorter than that floor simply cannot shrink further — both handles pin.
+ *
+ * The first scene's start and the last scene's end are fixed to the narration's own ends (the
+ * server requires it), so with no neighbour on that side the handle does not move at all.
+ * Pure — unit-tested.
+ */
+export function boundaryLimits(o: {
+  /** The scene's persisted range — the outer limit in both directions. */
+  startSec: number;
+  endSec: number;
+  /** The live draft, for keeping the two handles `MIN_SLICE_SEC` apart. */
+  draftStart: number;
+  draftEnd: number;
+  hasPrev: boolean;
+  hasNext: boolean;
+}): { minStart: number; maxStart: number; minEnd: number; maxEnd: number } {
+  return {
+    minStart: o.startSec,
+    maxStart: o.hasPrev
+      ? Math.max(o.startSec, o.draftEnd - MIN_SLICE_SEC)
+      : o.startSec,
+    minEnd: o.hasNext
+      ? Math.min(o.endSec, o.draftStart + MIN_SLICE_SEC)
+      : o.endSec,
+    maxEnd: o.endSec,
+  };
+}
+
+/**
+ * The slice offset at which a piece's picture runs out — where its footage ends and assembly
+ * starts holding the last frame. `pieceBoundSec` is where the piece begins on the slice,
+ * `pieceStartSec` the footage offset it opens on. `undefined` when the duration isn't known.
+ * Pure — unit-tested.
+ */
+export function pieceLiveEnd(
+  pieceBoundSec: number,
+  pieceStartSec: number,
+  clipDurationSec?: number
+): number | undefined {
+  if (clipDurationSec === undefined || !Number.isFinite(clipDurationSec))
+    return undefined;
+  return pieceBoundSec + Math.max(0, clipDurationSec - pieceStartSec);
+}
 
 /**
  * Which piece (0-based) an offset into the slice falls in, given `bounds = [0, ...cuts, sliceLen]`.
@@ -367,6 +455,14 @@ export function SceneTimingEditor(props: {
   pieceClipIns?: Record<string, number>;
   /** Slip one piece to a different footage offset, or clear it (`clipInSec: null`). */
   onSetPieceClipIn?: (cutOffsetSec: number, clipInSec: number | null) => void;
+  /**
+   * Whether this scene has a pristine cut on file to go back to (`scene.timingOriginal`) — set
+   * by its first timing edit. Absent ⇒ nothing has been changed here, or the job predates the
+   * snapshot, and the control is hidden rather than shown doing nothing.
+   */
+  canRevert?: boolean;
+  /** Put this scene back to that pristine cut. */
+  onRevert?: () => void;
 }) {
   const { startSec, endSec, prevStartSec, nextEndSec, pending, disabled } =
     props;
@@ -664,6 +760,15 @@ export function SceneTimingEditor(props: {
     playheadPieceIdx === 0 ? undefined : String(cuts[playheadPieceIdx - 1]);
   const playheadPieceStart = pieceStartFor(playheadPieceIdx, playheadPieceKey);
   const pieceLen = playheadPieceB - playheadPieceA;
+  const maxSlipIn = maxSlipSec(clipDur);
+  /** Where piece `i`'s picture runs out, in slice-seconds. A cut may not be placed or dragged
+   *  past it: a marker inside a freeze divides one still frame from the same still frame. */
+  const liveEndOf = (i: number) =>
+    pieceLiveEnd(
+      bounds[i],
+      pieceStartFor(i, i === 0 ? undefined : String(cuts[i - 1])),
+      clipDur
+    );
   const clipStartT = start + playheadPieceA - playheadPieceStart;
   const clipEndT = clipDur !== undefined ? clipStartT + clipDur : undefined;
   const coveredSec =
@@ -673,17 +778,15 @@ export function SceneTimingEditor(props: {
   const freezeSec =
     coveredSec !== undefined ? Math.max(0, pieceLen - coveredSec) : undefined;
 
-  // Cut limits: the neighbour's floor, and never off the visible strip.
-  const minStart =
-    prevStartSec !== undefined
-      ? Math.max(prevStartSec + MIN_SLICE_SEC, winStart)
-      : start;
-  const maxStart = end - MIN_SLICE_SEC;
-  const minEnd = start + MIN_SLICE_SEC;
-  const maxEnd =
-    nextEndSec !== undefined
-      ? Math.min(nextEndSec - MIN_SLICE_SEC, winEnd)
-      : end;
+  // Cut limits: a handle may only shorten THIS scene, never push into a neighbour.
+  const { minStart, maxStart, minEnd, maxEnd } = boundaryLimits({
+    startSec,
+    endSec,
+    draftStart: start,
+    draftEnd: end,
+    hasPrev: prevStartSec !== undefined,
+    hasNext: nextEndSec !== undefined,
+  });
 
   // Ruler ticks: the coarsest step that keeps labels ≥ 70 px apart.
   const ticks = useMemo(() => {
@@ -1062,9 +1165,8 @@ export function SceneTimingEditor(props: {
     const dSec = (e.clientX - d.startX) / pxPerSec;
     if (d.kind === "clip") {
       // Slipping the footage right shows an EARLIER part of it → smaller clipIn.
-      const maxIn =
-        clipDur !== undefined ? Math.max(0, clipDur - MIN_SLICE_SEC) : Infinity;
-      const next = r3(clamp(d.startClipIn - dSec, 0, maxIn));
+      if (maxSlipIn === undefined) return; // duration not in yet; never slip blind
+      const next = r3(clamp(d.startClipIn - dSec, 0, maxSlipIn));
       setClipIn(next);
       seekTo(live.current.playhead, live.current.start, next);
     } else if (d.kind === "start") {
@@ -1095,6 +1197,10 @@ export function SceneTimingEditor(props: {
         if (c < d.startVal) lo = Math.max(lo, c + MIN_SLICE_SEC);
         else hi = Math.min(hi, c - MIN_SLICE_SEC);
       }
+      // ...and never past where the piece it ends still HAS picture: a cut dropped inside a
+      // frozen tail divides one still frame from the same still frame.
+      const cutLiveEnd = liveEndOf(Math.max(0, cuts.indexOf(d.startVal)));
+      if (cutLiveEnd !== undefined) hi = Math.min(hi, cutLiveEnd);
       const next = r3(clamp(d.startVal + dSec, lo, hi));
       setDraggingCut({ original: d.startVal, current: next });
       setPlayhead(next);
@@ -1102,6 +1208,7 @@ export function SceneTimingEditor(props: {
     } else if (d.kind === "pieceslip") {
       // Slipping right shows an EARLIER part of the footage → smaller offset, same as the
       // whole-scene ⇄ slip — but scoped to this ONE piece, independent of its neighbour.
+      if (d.maxIn === undefined) return; // duration not in yet; never slip blind
       const next = r3(clamp(d.startVal - dSec, 0, d.maxIn));
       setDraggingPieceSlip({ cutKey: d.cutKey, current: next });
       // Live-preview: if the playhead is inside THIS piece, reseek the viewer to it directly
@@ -1184,8 +1291,14 @@ export function SceneTimingEditor(props: {
     props.onApply(edit);
   };
 
+  // A split may only land where there is real picture. Past `liveEnd` the scene is holding its
+  // last frame, and a marker there divides a still from itself.
+  const splitLiveEnd = liveEndOf(playheadPieceIdx);
+  const splitPastFootage =
+    splitLiveEnd !== undefined && playhead > splitLiveEnd + 1e-6;
   const canSplit =
     !dirty &&
+    !splitPastFootage &&
     playhead >= MIN_SLICE_SEC &&
     sliceLen - playhead >= MIN_SLICE_SEC &&
     !cuts.some(c => Math.abs(c - playhead) < MIN_SLICE_SEC);
@@ -1485,17 +1598,13 @@ export function SceneTimingEditor(props: {
                     className="cursor-grab rounded bg-black/60 px-1 font-mono text-[10px] text-white/90 hover:bg-primary active:cursor-grabbing"
                     title="Drag to slip this piece's footage — independent of its neighbour"
                     onPointerDown={e => {
-                      const maxIn =
-                        clipDur !== undefined
-                          ? Math.max(0, clipDur - MIN_SLICE_SEC)
-                          : Infinity;
                       begin(
                         {
                           kind: "pieceslip",
                           startX: e.clientX,
                           startVal: pieceStart,
                           cutKey: key,
-                          maxIn,
+                          maxIn: maxSlipIn,
                         },
                         e
                       );
@@ -1616,18 +1725,37 @@ export function SceneTimingEditor(props: {
             title={
               dirty
                 ? "Apply or reset your timing changes first"
-                : `Cut the clip here (+${fmt(playhead)}) — a marker on the same clip, like a CapCut split`
+                : splitPastFootage
+                  ? "The footage has run out here — the picture is holding its last frame. Move the playhead back into the clip to split it."
+                  : `Cut the clip here (+${fmt(playhead)}) — a marker on the same clip, like a CapCut split`
             }
             onClick={addCut}
           >
             <Scissors className="mr-1.5 h-3 w-3" />
             Split here
           </Button>
+          {props.canRevert && props.onRevert && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 text-xs"
+              disabled={disabled || pending}
+              title="Put this scene back to the cut it had before your first timing edit — trim, splits, slips and holds. Its start and end are shared with the scenes either side, so those move back with it."
+              onClick={() => {
+                pause();
+                props.onRevert?.();
+              }}
+            >
+              <History className="mr-1.5 h-3 w-3" />
+              Revert to original
+            </Button>
+          )}
           <Button
             size="sm"
             variant="ghost"
             className="h-7 text-xs"
             disabled={disabled || pending || !dirty}
+            title="Discard the changes you haven't applied yet"
             onClick={reset}
           >
             <RotateCcw className="mr-1.5 h-3 w-3" />

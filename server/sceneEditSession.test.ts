@@ -644,4 +644,86 @@ describe("scene edit session", () => {
     const err = writes.find(w => typeof w.errorMessage === "string");
     expect(err?.errorMessage).toMatch(/Scene 2: /);
   });
+
+  /**
+   * "Revert to original" through the REAL edit path — no `runOne` seam, because a timing edit is
+   * pure and needs no provider. What this guards is the wiring: that `reverttiming` routes to the
+   * revert, lands on the one live storyboard, and is persisted. The arithmetic itself is covered
+   * in sceneTiming.test.ts.
+   */
+  it("reverts a scene's timing through the queue and persists the pristine cut", async () => {
+    const jobId = ++nextJob;
+    const scenes = storyboard(3).map((s, i) => ({
+      ...s,
+      narrationStartSec: i * 10,
+      narrationEndSec: (i + 1) * 10,
+      audioDuration: 10,
+      audioUrl: `https://x/${i + 1}.mp3`,
+    })) as any[];
+    getJobSpy.mockResolvedValue({
+      id: jobId,
+      inputParams: {},
+      storyboard: scenes,
+    });
+
+    // Move the cut between scenes 1 and 2, trim scene 2, and split it.
+    enqueueSceneEdit(jobId, {
+      kind: "timing",
+      sceneIndex: 2,
+      edit: { sceneIndex: 2, startSec: 13, clipInSec: 4 },
+    });
+    await sceneEditsSettled(jobId);
+    enqueueSceneEdit(jobId, { kind: "cut", sceneIndex: 2, atOffsetSec: 3 });
+    await sceneEditsSettled(jobId);
+
+    expect(scenes[1].narrationStartSec).toBe(13);
+    expect(scenes[0].narrationEndSec).toBe(13);
+    expect(scenes[1].clipInSec).toBe(4);
+    expect(scenes[1].cutPoints).toEqual([3]);
+    // The snapshot was taken by the FIRST edit and not moved by the second.
+    expect(scenes[1].timingOriginal?.narrationStartSec).toBe(10);
+    expect(scenes[1].timingOriginal?.clipInSec).toBeUndefined();
+
+    enqueueSceneEdit(jobId, { kind: "reverttiming", sceneIndex: 2 });
+    await sceneEditsSettled(jobId);
+
+    expect(scenes[1].narrationStartSec).toBe(10);
+    expect(scenes[0].narrationEndSec).toBe(10); // the shared edge moved on both sides
+    expect(scenes[1].clipInSec).toBeUndefined();
+    expect(scenes[1].cutPoints).toBeUndefined();
+    expect(scenes[1].timingOriginal).toBeUndefined();
+    expect(scenes[1].timingEdited).toBe(true);
+    // A revert renders nothing, so it must never mark the scene failed or put an error on the
+    // job — a timing pass settles quietly (see `isTimingKind`).
+    expect(scenes[1].sceneStatus).toBe("completed");
+    expect(scenes[1].error).toBeUndefined();
+    expect(updateSpy.mock.calls.some(c => (c as any)[1]?.errorMessage)).toBe(
+      false
+    );
+  });
+
+  it("refuses to revert a scene that was never edited, without failing it", async () => {
+    const jobId = ++nextJob;
+    const scenes = storyboard(2) as any[];
+    getJobSpy.mockResolvedValue({
+      id: jobId,
+      inputParams: {},
+      storyboard: scenes,
+    });
+
+    enqueueSceneEdit(jobId, { kind: "reverttiming", sceneIndex: 1 });
+    await sceneEditsSettled(jobId);
+
+    // Refused, not broken: the reason reaches the job row, the clip is untouched, and the scene
+    // is NOT marked failed — nothing was rendered.
+    expect(
+      updateSpy.mock.calls.some(c =>
+        String((c as any)[1]?.errorMessage ?? "").includes(
+          "no timing edits to revert"
+        )
+      )
+    ).toBe(true);
+    expect(scenes[0].sceneStatus).toBe("completed");
+    expect(scenes[0].clipUrl).toBe("https://x/1.mp4");
+  });
 });

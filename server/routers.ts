@@ -80,6 +80,8 @@ import {
   retrofitBookCover as retrofitLongformBookCover,
   setSceneSplit as setLongformSceneSplit,
   retryJobAssembly,
+  revertJobTiming,
+  revertSceneTimingEdits as revertLongformSceneTiming,
   retryFailedScenes as retryLongformFailedScenes,
   describeIncompleteScenes,
   cancelLongformJob,
@@ -1920,6 +1922,71 @@ const longformVideoRouter = router({
         input.clipInSec
       );
       return { ok: true, accepted };
+    }),
+
+  /**
+   * Cut room: put ONE scene back to the cut it had before its first timing edit. The scene's own
+   * settings (trim, splits, piece slips, holds) always come back; a shared start/end edge only
+   * does when the neighbour on that side was never edited itself, since taking it back moves
+   * that neighbour too. Metadata only — needs a reassemble, spends nothing.
+   */
+  revertSceneTiming: approvedProcedure
+    .input(z.object({ jobId: z.number(), sceneIndex: z.number().int().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      const job = await getLongformVideoJobById(input.jobId);
+      if (
+        !job ||
+        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
+      ) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
+      }
+      const scenes = (job.storyboard ?? []) as StoryboardScene[];
+      const scene = scenes.find(s => s.index === input.sceneIndex);
+      if (!scene)
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Scene ${input.sceneIndex} not found`,
+        });
+      if (!scene.timingOriginal)
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Scene ${input.sceneIndex} has no timing edits to revert`,
+        });
+      const accepted = await revertLongformSceneTiming(
+        input.jobId,
+        input.sceneIndex
+      );
+      return { ok: true, accepted };
+    }),
+
+  /**
+   * Cut room: put the WHOLE job back to its pristine cut. Safe where the per-scene revert has to
+   * hold an edge back — restoring every scene at once moves both sides of every shared boundary
+   * together, so the narration cannot end up with a gap or an overlap.
+   */
+  revertJobTiming: approvedProcedure
+    .input(z.object({ jobId: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      const job = await getLongformVideoJobById(input.jobId);
+      if (
+        !job ||
+        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
+      ) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
+      }
+      try {
+        return {
+          ok: true,
+          ...(await revertJobTiming(input.jobId, ctx.user.id, {
+            allowAny: canSeeAllJobs(ctx.user.role),
+          })),
+        };
+      } catch (err: any) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: err?.message ?? "Could not revert",
+        });
+      }
     }),
 
   setSceneSplit: approvedProcedure

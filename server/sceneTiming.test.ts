@@ -13,6 +13,10 @@ import {
   pieceClipIn,
   validateSetPieceClipIn,
   setPieceClipIn,
+  snapshotTiming,
+  forgetTimingSnapshot,
+  revertSceneTiming,
+  revertAllSceneTiming,
   MIN_SLICE_SEC,
 } from "./sceneTiming";
 import type { StoryboardScene } from "../shared/types";
@@ -319,11 +323,24 @@ describe("moving a cut (CapCut's drag-the-split-point)", () => {
     expect(b[1].cutPoints).toEqual([5]); // untouched
   });
 
-  it("stays output-neutral: no timingEdited flag", () => {
+  it("stays output-neutral while nothing is slipped: no timingEdited flag", () => {
     const b = board();
     addCutPoint(b, 2, 5);
     moveCutPoint(b, 2, 5, 7);
     expect(b[1].timingEdited).toBeUndefined();
+  });
+
+  it("DOES need a reassemble once it drags a slipped piece with it", () => {
+    // Dragging a cut that starts a slipped piece changes where that piece begins on screen and
+    // how long it runs, and re-derives the next piece's continuous default from the new
+    // position. Both reach the rendered film, so the operator has to be told.
+    const b = board();
+    addCutPoint(b, 2, 5);
+    setPieceClipIn(b, 2, 5, 12);
+    delete b[1].timingEdited; // pretend the slip was already reassembled
+    moveCutPoint(b, 2, 5, 7);
+    expect(b[1].pieceClipIns).toEqual({ "7": 12 }); // the slip followed its piece
+    expect(b[1].timingEdited).toBe(true);
   });
 
   it("de-duplicates if moved exactly onto a position already vacated in the same call", () => {
@@ -425,6 +442,23 @@ describe("per-piece footage offset (independent trim after a cut)", () => {
     expect(b[1].cutPoints).toBeUndefined();
     expect(b[1].pieceClipIns).toBeUndefined();
   });
+
+  it("removing a SLIPPED piece's cut needs a reassemble; a bare one does not", () => {
+    // Dropping a slip reverts that region to the continuous footage it was slipped away from —
+    // a real change to the rendered film, and the mirror of moveCutPoint carrying one across.
+    const bare = board();
+    addCutPoint(bare, 2, 3);
+    removeCutPoint(bare, 2, 3);
+    expect(bare[1].timingEdited).toBeUndefined();
+
+    const slipped = board();
+    addCutPoint(slipped, 2, 3);
+    setPieceClipIn(slipped, 2, 3, 10);
+    delete slipped[1].timingEdited; // pretend the slip was already reassembled
+    removeCutPoint(slipped, 2, 3);
+    expect(slipped[1].pieceClipIns).toBeUndefined();
+    expect(slipped[1].timingEdited).toBe(true);
+  });
 });
 
 describe("head hold (a pause before the FIRST scene's first word — tailHoldSec's mirror)", () => {
@@ -464,5 +498,180 @@ describe("head hold (a pause before the FIRST scene's first word — tailHoldSec
     expect(b[0].headHoldSec).toBe(3);
     applyTimingEdit(b, { sceneIndex: 1, headHoldSec: 0 });
     expect(b[0].headHoldSec).toBe(0);
+  });
+});
+
+/**
+ * "Revert to original". Nothing else in the system keeps a scene's pristine timing — the
+ * narration ranges come from whisperx at voicing time and are overwritten in place — so the
+ * snapshot these tests guard IS the original. Miss it and the cut is unrecoverable.
+ */
+describe("timing snapshots", () => {
+  it("records the pristine state on the first edit and never overwrites it", () => {
+    const b = board();
+    applyTimingEdit(b, { sceneIndex: 2, clipInSec: 3 });
+    expect(b[1].timingOriginal).toEqual({
+      narrationStartSec: 10,
+      narrationEndSec: 20,
+      clipInSec: undefined,
+      tailHoldSec: undefined,
+      headHoldSec: undefined,
+      cutPoints: undefined,
+      pieceClipIns: undefined,
+    });
+    // A second edit must not move the goalposts — the target is the ORIGINAL, not one undo step.
+    applyTimingEdit(b, { sceneIndex: 2, clipInSec: 7 });
+    expect(b[1].timingOriginal?.clipInSec).toBeUndefined();
+  });
+
+  it("snapshots the NEIGHBOUR too when a shared boundary moves", () => {
+    const b = board();
+    applyTimingEdit(b, { sceneIndex: 2, startSec: 12 });
+    expect(b[0].timingOriginal?.narrationEndSec).toBe(10); // scene 1's end was rewritten
+    expect(b[1].timingOriginal?.narrationStartSec).toBe(10);
+    // The far neighbour was untouched, so it has nothing to revert.
+    expect(b[2].timingOriginal).toBeUndefined();
+  });
+
+  it("is taken by every cut-room mutation, not just the boundary ones", () => {
+    for (const edit of [
+      (b: StoryboardScene[]) => addCutPoint(b, 2, 5),
+      (b: StoryboardScene[]) => {
+        addCutPoint(b, 2, 5);
+        delete b[1].timingOriginal;
+        moveCutPoint(b, 2, 5, 6);
+      },
+      (b: StoryboardScene[]) => {
+        addCutPoint(b, 2, 5);
+        delete b[1].timingOriginal;
+        removeCutPoint(b, 2, 5);
+      },
+      (b: StoryboardScene[]) => {
+        addCutPoint(b, 2, 5);
+        delete b[1].timingOriginal;
+        setPieceClipIn(b, 2, 5, 12);
+      },
+    ]) {
+      const b = board();
+      edit(b);
+      expect(b[1].timingOriginal).toBeDefined();
+    }
+  });
+
+  it("forgets the snapshot when a scene is re-voiced off-master", () => {
+    const b = board();
+    snapshotTiming(b[1]);
+    forgetTimingSnapshot(b[1]);
+    expect(b[1].timingOriginal).toBeUndefined();
+  });
+});
+
+describe("revertSceneTiming", () => {
+  it("puts the scene's OWN settings back and clears the snapshot", () => {
+    const b = board();
+    applyTimingEdit(b, { sceneIndex: 2, clipInSec: 4, tailHoldSec: 2 });
+    addCutPoint(b, 2, 5);
+    setPieceClipIn(b, 2, 5, 12);
+
+    const r = revertSceneTiming(b, 2);
+    expect(r.ok).toBe(true);
+    expect(b[1].clipInSec).toBeUndefined();
+    expect(b[1].tailHoldSec).toBeUndefined();
+    expect(b[1].cutPoints).toBeUndefined();
+    expect(b[1].pieceClipIns).toBeUndefined();
+    expect(b[1].timingOriginal).toBeUndefined();
+    // A revert changes the cut, so the film needs re-stitching like any other timing edit.
+    expect(b[1].timingEdited).toBe(true);
+  });
+
+  it("takes a moved boundary back on BOTH sides, keeping the board tiled", () => {
+    const b = board();
+    applyTimingEdit(b, { sceneIndex: 2, startSec: 13 });
+    expect(b[0].narrationEndSec).toBe(13);
+
+    const r = revertSceneTiming(b, 2);
+    expect(r.ok).toBe(true);
+    expect(b[1].narrationStartSec).toBe(10);
+    expect(b[0].narrationEndSec).toBe(10); // the neighbour came with it
+    expect(r.touched.sort()).toEqual([1, 2]);
+  });
+
+  it("says which neighbour moved with it", () => {
+    const b = board();
+    applyTimingEdit(b, { sceneIndex: 2, startSec: 13 });
+    const r = revertSceneTiming(b, 2);
+    expect(r.reason).toMatch(/Scene 1 moved with it/);
+  });
+
+  it("leaves a neighbour's OTHER settings alone, and its own snapshot intact", () => {
+    const b = board();
+    applyTimingEdit(b, { sceneIndex: 2, startSec: 13 }); // snapshots scenes 1 and 2
+    applyTimingEdit(b, { sceneIndex: 1, clipInSec: 2 }); // scene 1 gains edits of its own
+
+    const r = revertSceneTiming(b, 2);
+    expect(r.ok).toBe(true);
+    // The shared edge went back — and 10 is scene 1's OWN original end, so this restores it
+    // rather than overwriting it with something foreign.
+    expect(b[1].narrationStartSec).toBe(10);
+    expect(b[0].narrationEndSec).toBe(10);
+    expect(b[0].timingOriginal?.narrationEndSec).toBe(10);
+    // Scene 1's own trim is untouched, and it can still be reverted in full afterwards.
+    expect(b[0].clipInSec).toBe(2);
+    expect(b[0].timingOriginal).toBeDefined();
+    revertSceneTiming(b, 1);
+    expect(b[0].clipInSec).toBeUndefined();
+    // Still tiled throughout.
+    expect(b[0].narrationEndSec).toBe(b[1].narrationStartSec);
+  });
+
+  it("refuses a scene that was never edited", () => {
+    const b = board();
+    const r = revertSceneTiming(b, 2);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/no timing edits/);
+    expect(r.touched).toEqual([]);
+  });
+
+  it("refuses a scene that isn't there", () => {
+    expect(revertSceneTiming(board(), 99).ok).toBe(false);
+  });
+});
+
+describe("revertAllSceneTiming", () => {
+  it("puts the whole board back, tiled, however tangled the edits were", () => {
+    const b = board();
+    applyTimingEdit(b, { sceneIndex: 2, startSec: 13, clipInSec: 4 });
+    applyTimingEdit(b, { sceneIndex: 3, startSec: 22 });
+    addCutPoint(b, 2, 3);
+    setPieceClipIn(b, 2, 3, 9);
+    applyTimingEdit(b, { sceneIndex: 1, tailHoldSec: 4 });
+
+    const r = revertAllSceneTiming(b);
+    expect(r.ok).toBe(true);
+    expect(b.map(s => [s.narrationStartSec, s.narrationEndSec])).toEqual([
+      [0, 10],
+      [10, 20],
+      [20, 30],
+    ]);
+    expect(b[1].clipInSec).toBeUndefined();
+    expect(b[1].cutPoints).toBeUndefined();
+    expect(b[1].pieceClipIns).toBeUndefined();
+    expect(b[0].tailHoldSec).toBeUndefined();
+    expect(b.every(s => s.timingOriginal === undefined)).toBe(true);
+    expect(b.every(s => s.timingEdited === true)).toBe(true);
+  });
+
+  it("leaves an un-edited scene alone", () => {
+    const b = board();
+    applyTimingEdit(b, { sceneIndex: 2, clipInSec: 4 });
+    const r = revertAllSceneTiming(b);
+    expect(r.touched).toEqual([2]);
+    expect(b[2].timingEdited).toBeUndefined();
+  });
+
+  it("refuses a board with nothing to revert", () => {
+    const r = revertAllSceneTiming(board());
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/No timing edits/);
   });
 });

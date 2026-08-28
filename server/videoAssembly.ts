@@ -35,9 +35,27 @@ import { getFFmpegPath } from "./ffmpegPath";
 import { Semaphore } from "./providers/semaphore";
 import { presignOwnBucketUrl } from "./storage";
 import { describeError } from "./_core/errorDetail";
+import {
+  beginRun as beginAssemblyCacheRun,
+  cacheEnabled,
+  cacheKey,
+  endRun as endAssemblyCacheRun,
+  getOrBuild,
+  hashBuffer,
+  sweep as sweepAssemblyCache,
+} from "./assemblyCache";
 import type { SplitLayout, VideoAspectRatio } from "../shared/types";
-
-const FPS = 30;
+// The film timeline's arithmetic moved to `shared/` so the browser's live cut preview runs the
+// SAME code this does rather than a second implementation that can drift — see
+// shared/filmTimeline.ts. Re-exported because both planners have always been part of this
+// module's surface (videoTimeline.ts and the tests import them from here).
+import {
+  FPS,
+  planMasterOverlayScenes,
+  planScenePieces,
+  type ScenePiecePlan,
+} from "../shared/filmTimeline";
+export { FPS, planMasterOverlayScenes, planScenePieces, type ScenePiecePlan };
 
 /**
  * Cap on simultaneous local ffmpeg processes, PROCESS-WIDE (every concurrent longform job shares
@@ -358,94 +376,6 @@ export function buildScenePieceArgs(opts: {
  * the render side of the operator's cut markers + per-piece footage slip. `sceneVideoPath` is
  * the scene's already-normalized (scaled/cropped/concatenated) silent video; `cuts` are its
  * sorted cut offsets (seconds into the slice); `totalDurationSec` is the scene's full on-screen
- * time (the same value the mux step will hold the whole scene to).
- *
- * Piece 0 (before the first cut) uses `scene.clipInSec` — the EXISTING scene-wide slip — for
- * continuity with an un-cut scene. Every later piece starts, by default, exactly where the
- * previous one's footage would have continued (so an untouched cut is invisible in the output);
- * an entry in `scene.pieceClipIns`, keyed by the cut that starts that piece, overrides it to a
- * different moment of the SAME footage. The last piece absorbs whatever `totalDurationSec` has
- * beyond the sum of the others (a hold-floor or CTA tail), matching how the whole-scene tpad
- * already worked before per-piece trimming existed. Each piece is held (`tpad`) to exactly its
- * own share, so a piece whose footage runs out freezes on ITS OWN last frame rather than
- * jump-cutting into the next piece's — the "independent trim" this feature is for.
- *
- * Returns the path to the concatenated pieced video (same directory, `s{sceneIndex}-pieced.mp4`).
- */
-export interface ScenePiecePlan {
-  /** Footage-seconds where this piece's trim starts (already clamped to the source's length). */
-  startSec: number;
-  /** This piece's on-screen duration, seconds. */
-  durationSec: number;
-}
-
-/**
- * The pure math behind a cut scene's per-piece render: where each piece's footage starts and
- * how long it stays on screen. Split out from `buildPiecedSceneVideo` (which just runs ffmpeg
- * per plan entry) so the arithmetic — bounds, override lookup, last-piece absorption, clamping
- * — is unit-testable without IO. See `shared/types.ts` `pieceClipIns` for the semantics. Pure.
- */
-/** A piece below this on-screen length is not worth its own encode — merged into its neighbour. */
-const MIN_PIECE_SEC = 0.05;
-
-export function planScenePieces(opts: {
-  cuts: number[];
-  totalDurationSec: number;
-  /** The source video's real length, seconds — every start clamps inside it. */
-  videoDurationSec: number;
-  clipInSec?: number;
-  pieceClipIns?: Record<string, number>;
-}): ScenePiecePlan[] {
-  const { cuts, totalDurationSec, videoDurationSec, clipInSec, pieceClipIns } =
-    opts;
-  // `totalDurationSec` can exceed the last cut only by a hold-floor/tail (bounds is otherwise
-  // in slice-seconds); clamp so a stale cut past a since-shortened slice can't sit beyond it.
-  // Then MERGE any bound that doesn't leave the previous one a real (MIN_PIECE_SEC) piece —
-  // a stale cut collapsed onto (or past) the end folds into the piece before it instead of
-  // producing a near-zero flash frame.
-  const raw = [
-    0,
-    ...cuts.map(c => Math.min(c, totalDurationSec)),
-    totalDurationSec,
-  ];
-  const bounds: number[] = [raw[0]];
-  for (let i = 1; i < raw.length; i++) {
-    if (raw[i] - bounds[bounds.length - 1] >= MIN_PIECE_SEC)
-      bounds.push(raw[i]);
-  }
-  const plan: ScenePiecePlan[] = [];
-  let consumed = 0;
-  for (let i = 0; i < bounds.length - 1; i++) {
-    const isLast = i === bounds.length - 2;
-    // The last piece gets whatever's left, so the pieces always sum to EXACTLY
-    // totalDurationSec regardless of float drift or a hold beyond the last cut.
-    const durationSec = isLast
-      ? Math.max(MIN_PIECE_SEC, totalDurationSec - consumed)
-      : bounds[i + 1] - bounds[i];
-    consumed += durationSec;
-    // Piece 0 has no cut to key an override by — it's governed by the scene's own slip.
-    // Later pieces default to CONTINUING the footage (clipIn + how far into the slice this
-    // piece starts), unless the operator slipped this specific piece.
-    const cutKey = i === 0 ? undefined : String(bounds[i]);
-    const override = cutKey ? pieceClipIns?.[cutKey] : undefined;
-    const defaultStart = (clipInSec ?? 0) + bounds[i];
-    const startSec = Math.max(
-      0,
-      Math.min(
-        override ?? defaultStart,
-        Math.max(0, videoDurationSec - MIN_PIECE_SEC)
-      )
-    );
-    plan.push({ startSec, durationSec });
-  }
-  return plan;
-}
-
-/**
- * Rebuild a CUT scene's silent video as separate independently-trimmed PIECES, concatenated —
- * the render side of the operator's cut markers + per-piece footage slip. `sceneVideoPath` is
- * the scene's already-normalized (scaled/cropped/concatenated) silent video; `cuts` are its
- * sorted cut offsets (seconds into the slice); `totalDurationSec` is the scene's full on-screen
  * time (the same value the mux step will hold the whole scene to). The actual per-piece timing
  * is `planScenePieces` (pure, unit-tested); this is just the ffmpeg-per-plan-entry + concat
  * shell around it. Each piece is held (`tpad`) to exactly its own share, so a piece whose
@@ -695,60 +625,6 @@ export function buildFilmAudioConcatArgs(opts: {
     "2",
     opts.outputPath,
   ];
-}
-
-/**
- * Plan the master-overlay frame timeline: give every scene an exact whole-frame length so the
- * concatenated video reproduces the MASTER narration timeline (each scene's start lands within
- * half a frame of its slice's start — keeps lip-synced host scenes in sync with the untouched
- * master), and collect the silence inserts (hold-floor pads, qrTail holds) the overlay audio
- * must carry where the video intentionally freezes past its narration. Cumulative rounding
- * against the ideal timeline, so error never accumulates. Pure — unit-tested.
- */
-export function planMasterOverlayScenes(opts: {
-  scenes: {
-    /** This scene's slice of the master narration, seconds on the master timeline. */
-    sliceStartSec: number;
-    sliceEndSec: number;
-    /** On-screen hold floor (the scene's floored `audioDurationSec`), if any. */
-    holdSec?: number;
-    /** Extra silent frozen tail (the CTA QR release beat). */
-    tailHoldSec?: number;
-    /** Extra silent frozen hold BEFORE this slice starts — only meaningful on the first scene
-     *  (see `sceneTiming.ts`'s `headHoldSec`); an insert at this scene's OWN sliceStartSec. */
-    headHoldSec?: number;
-  }[];
-  fps?: number;
-}): {
-  scenes: { frames: number; muxDurationSec: number }[];
-  /** Silence gaps to insert into the master at `atSec` (master time), ascending. */
-  inserts: { atSec: number; durSec: number }[];
-  totalSec: number;
-} {
-  const fps = opts.fps ?? FPS;
-  const planned: { frames: number; muxDurationSec: number }[] = [];
-  const inserts: { atSec: number; durSec: number }[] = [];
-  let idealCum = 0;
-  let framesCum = 0;
-  for (const s of opts.scenes) {
-    const sliceLen = Math.max(0, s.sliceEndSec - s.sliceStartSec);
-    const headExtra = s.headHoldSec ?? 0;
-    if (headExtra > 1e-3)
-      inserts.push({ atSec: s.sliceStartSec, durSec: headExtra });
-    const target =
-      headExtra + Math.max(sliceLen, s.holdSec ?? 0) + (s.tailHoldSec ?? 0);
-    const tailExtra = target - headExtra - sliceLen;
-    if (tailExtra > 1e-3)
-      inserts.push({ atSec: s.sliceEndSec, durSec: tailExtra });
-    idealCum += target;
-    const frames = Math.max(1, Math.round(idealCum * fps) - framesCum);
-    framesCum += frames;
-    // Half-frame midpoint: `-t frames/fps` through decimal rounding can emit frames±1 (the
-    // sub-frame drift the old encodedSec re-probe papered over); the midpoint cutoff always
-    // emits exactly `frames` frames.
-    planned.push({ frames, muxDurationSec: (frames - 0.5) / fps });
-  }
-  return { scenes: planned, inserts, totalSec: framesCum / fps };
 }
 
 /**
@@ -2663,6 +2539,9 @@ export async function assemblePerSceneFilm(opts: {
   // here for no behaviour change. Fold it in whenever this function gets split up.
   const workDir = path.join(os.tmpdir(), `longform-${randomUUID()}`);
   mkdirSync(workDir, { recursive: true });
+  // Hold off cache eviction for as long as this film is running (see `beginRun`): it keeps cache
+  // paths open for minutes, and a sweep triggered by another job finishing must not delete one.
+  beginAssemblyCacheRun();
 
   // Download the CTA QR overlay once (same image for every CTA scene). A failure here is
   // non-fatal — the CTA host scenes still render, just without the QR card.
@@ -2681,12 +2560,18 @@ export async function assemblePerSceneFilm(opts: {
   // Stage each scene's caption PNG. Same posture as the QR and the name card: a failure here
   // costs that scene's text, never the film.
   const captionPaths = new Map<number, string>();
+  // Content hash of each STAGED caption, for the scene cache key: the mux output depends on the
+  // caption's pixels, and two runs render the same text to the same PNG. Only populated for
+  // captions that actually made it to disk, so a staging failure keys as "no caption" — which is
+  // exactly what the encode below will then do.
+  const captionHashes = new Map<number, string>();
   scenes.forEach((scene, i) => {
     if (!scene.captionPng) return;
     try {
       const p = path.join(workDir, `caption-${i}.png`);
       writeFileSync(p, scene.captionPng);
       captionPaths.set(i, p);
+      captionHashes.set(i, hashBuffer(scene.captionPng));
     } catch (err: any) {
       console.warn(
         `[Assembly] caption write failed for scene ${i}, continuing without it: ${err.message}`
@@ -2697,10 +2582,12 @@ export async function assemblePerSceneFilm(opts: {
   // Stage the host name card once. Same posture as the QR: a failure here costs the lower third,
   // never the film.
   let nameCardPath: string | undefined;
+  let nameCardHash: string | undefined;
   if (opts.nameCard) {
     try {
       nameCardPath = path.join(workDir, "name-card.png");
       writeFileSync(nameCardPath, opts.nameCard.png);
+      nameCardHash = hashBuffer(opts.nameCard.png);
     } catch (err: any) {
       nameCardPath = undefined;
       console.warn(
@@ -2771,27 +2658,144 @@ export async function assemblePerSceneFilm(opts: {
 
     const SCENE_ENCODE_ATTEMPTS = 4;
 
+    // Cache bookkeeping, for the one summary line at the end of the run.
+    let normHits = 0;
+    let muxHits = 0;
+    /** Scene-mux cache keys, in scene order — the film-audio concat key is built from them. */
+    const sceneKeys: string[] = new Array(scenes.length).fill("");
+
+    /**
+     * Name a normalized silent clip from everything that can change its bytes. Deliberately
+     * NOT a function of the scene it sits in: the same clip at the same head-trim normalizes
+     * identically wherever it appears, so a timing edit anywhere reuses every one of these.
+     */
+    const normKeyFor = (clipUrl: string, trimLeadSec: number): string =>
+      cacheKey("norm", {
+        clipUrl,
+        trimLeadSec,
+        width,
+        height,
+        fps: FPS,
+        crf: CRF_INTERMEDIATE,
+        preset: PRESET_INTERMEDIATE,
+      });
+
     const attemptScene = async (s: number): Promise<void> => {
       const scene = scenes[s];
-      // 1. Normalize each clip to a uniform, silent, head-trimmed scene file.
+      const normKeys = scene.clipUrls.map(u =>
+        normKeyFor(u, scene.trimLeadSec)
+      );
+      if (normKeys.length === 0) throw new Error("no clips");
+
+      // Where this scene sits in the name-card run: the head fades in, the tail fades out,
+      // everything between draws it static. Resolved before the key so the key can name it.
+      const ncRun = opts.nameCard?.sceneIndices ?? [];
+      const ncAt = ncRun.indexOf(s);
+      const ncKey =
+        nameCardPath && nameCardHash && ncAt >= 0
+          ? {
+              hash: nameCardHash,
+              fadeIn: ncAt === 0,
+              fadeOut: ncAt === ncRun.length - 1,
+            }
+          : undefined;
+
+      // The finished scene MP4 is a pure function of these. Two determinants are named
+      // INDIRECTLY on purpose, so the key can be computed without doing any IO first:
+      //  - the head-trim is keyed as the operator's raw `clipInSec`, not the clamped `startSec`
+      //    (the clamp is a deterministic function of it and the normalized clips, both already
+      //    named here) — so the clamp's probe only runs on a miss;
+      //  - outside overlay mode the on-screen length is keyed as `{audioUrl, audioDurationSec,
+      //    holds}` rather than the measured duration, which is a deterministic function of the
+      //    same audio file — so the audio only gets downloaded on a miss.
+      // Overlays are keyed on what was actually STAGED (a QR whose download failed, or a caption
+      // that could not be written, keys as absent) so the key matches the encode that follows.
+      const muxKey = cacheKey("mux", {
+        normKeys,
+        audioUrl: scene.audioUrl,
+        length: overlayPlan
+          ? {
+              mode: "overlay",
+              frames: overlayPlan.scenes[s].frames,
+              muxDurationSec: overlayPlan.scenes[s].muxDurationSec,
+            }
+          : {
+              mode: "scene",
+              audioDurationSec: scene.audioDurationSec,
+              tailHoldSec: scene.tailHoldSec,
+              headHoldSec: scene.headHoldSec,
+            },
+        headHoldSec: scene.headHoldSec,
+        clipInSec: scene.clipInSec,
+        cutPoints: scene.cutPoints,
+        pieceClipIns: scene.pieceClipIns,
+        qr:
+          scene.qrOverlayUrl && qrPath
+            ? {
+                url: scene.qrOverlayUrl,
+                placement: scene.qrPlacement ?? "corner",
+                height,
+              }
+            : undefined,
+        nameCard: ncKey,
+        caption: captionHashes.get(s),
+        crf: CRF_DELIVERY,
+        preset: PRESET_DELIVERY,
+      });
+      sceneKeys[s] = muxKey;
+
+      const cached = await getOrBuild<{ encodedSec: number }>({
+        kind: "scene",
+        key: muxKey,
+        ext: "mp4",
+        fallbackDir: workDir,
+        build: async sceneOut => buildScene(s, normKeys, ncKey, sceneOut),
+      });
+      if (cached.hit) muxHits++;
+      // The sidecar carries the length measured when this scene was encoded, so a hit skips the
+      // probe too. A missing/unreadable sidecar just means we measure again.
+      const encodedSec =
+        cached.meta?.encodedSec ?? (await getMediaDuration(cached.path));
+      sceneOuts[s] = { path: cached.path, durationSec: encodedSec };
+    };
+
+    /** Encode one scene from scratch into `sceneOut`. Only reached on a scene-cache miss. */
+    const buildScene = async (
+      s: number,
+      normKeys: string[],
+      ncKey: { fadeIn: boolean; fadeOut: boolean } | undefined,
+      sceneOut: string
+    ): Promise<{ encodedSec: number }> => {
+      const scene = scenes[s];
+      // 1. Normalize each clip to a uniform, silent, head-trimmed scene file. Cached on its own
+      //    key: a trim/split/hold edit never changes these, so only a REGENERATED clip re-encodes.
       const silent: string[] = [];
       for (let c = 0; c < scene.clipUrls.length; c++) {
-        const raw = await downloadToTemp(
-          scene.clipUrls[c],
-          workDir,
-          `s${s}-c${c}.mp4`
-        );
-        const norm = path.join(workDir, `s${s}-c${c}-norm.mp4`);
-        await runFfmpeg(
-          buildSilentSceneArgs({
-            videoPath: raw,
-            outputPath: norm,
-            width,
-            height,
-            trimLeadSec: scene.trimLeadSec,
-          })
-        );
-        silent.push(norm);
+        const norm = await getOrBuild({
+          kind: "norm",
+          key: normKeys[c],
+          ext: "mp4",
+          fallbackDir: workDir,
+          build: async out => {
+            const raw = await downloadToTemp(
+              scene.clipUrls[c],
+              workDir,
+              `s${s}-c${c}.mp4`
+            );
+            await runFfmpeg(
+              buildSilentSceneArgs({
+                videoPath: raw,
+                outputPath: out,
+                width,
+                height,
+                trimLeadSec: scene.trimLeadSec,
+              })
+            );
+            return undefined;
+          },
+        });
+        if (norm.hit) normHits++;
+        silent.push(norm.path);
       }
       if (silent.length === 0) throw new Error("no clips");
 
@@ -2848,7 +2852,6 @@ export async function assemblePerSceneFilm(opts: {
         });
       }
 
-      const sceneOut = path.join(workDir, `scene-${s}.mp4`);
       // Operator trim ("cut forward"): drop the head of the scene video, clamped so it can never
       // trim past the footage — a trim at/after the end would leave zero frames for tpad to
       // clone. Probed only when set, so untrimmed scenes cost nothing extra. Skipped for a cut
@@ -2863,10 +2866,6 @@ export async function assemblePerSceneFilm(opts: {
             `[Assembly] scene ${s} trim ${scene.clipInSec}s clamped to ${startSec.toFixed(3)}s (clip is ${videoDur.toFixed(2)}s)`
           );
       }
-      // Where this scene sits in the name-card run: the head fades in, the tail fades out,
-      // everything between draws it static.
-      const ncRun = opts.nameCard?.sceneIndices ?? [];
-      const ncAt = ncRun.indexOf(s);
       await runFfmpeg(
         buildSceneMuxArgs({
           videoPath: sceneVideo,
@@ -2884,11 +2883,11 @@ export async function assemblePerSceneFilm(opts: {
                 }
               : undefined,
           nameCard:
-            nameCardPath && ncAt >= 0
+            nameCardPath && ncKey
               ? {
                   imagePath: nameCardPath,
-                  fadeIn: ncAt === 0,
-                  fadeOut: ncAt === ncRun.length - 1,
+                  fadeIn: ncKey.fadeIn,
+                  fadeOut: ncKey.fadeOut,
                 }
               : undefined,
           caption: captionPaths.has(s)
@@ -2902,8 +2901,8 @@ export async function assemblePerSceneFilm(opts: {
       // (video is the longer stream). Feeding nominal durationSec to buildFilmAudioConcatArgs would
       // let that sub-frame remainder accumulate and drift the continuous audio ahead of the picture
       // over a long film. apad fills the tiny remainder with silence at the (paused) scene seam.
-      const encodedSec = await getMediaDuration(sceneOut);
-      sceneOuts[s] = { path: sceneOut, durationSec: encodedSec };
+      // Persisted as the cache entry's sidecar so a later hit skips this probe too.
+      return { encodedSec: await getMediaDuration(sceneOut) };
     };
 
     const processScene = async (s: number): Promise<void> => {
@@ -2944,6 +2943,9 @@ export async function assemblePerSceneFilm(opts: {
     const sceneFiles = sceneOuts.filter(
       (f): f is { path: string; durationSec: number } => f !== null
     );
+    // Cache keys of the scenes that SURVIVED, in film order — the per-scene audio-concat key is
+    // built from these (content, not temp paths) so the same cut hits in a fresh workDir.
+    const keptSceneKeys = sceneKeys.filter((_, i) => sceneOuts[i] !== null);
     skipped.sort((a, b) => a.index - b.index);
 
     if (sceneFiles.length === 0) {
@@ -2982,68 +2984,124 @@ export async function assemblePerSceneFilm(opts: {
       })
     );
 
-    const audioPath = path.join(workDir, "film-audio.m4a");
-    let overlaid = false;
+    // The film's narration track. Cached like the scenes: a picture-only edit (a trim, a slip,
+    // a regenerated clip) changes none of its inputs, so the whole-film audio encode — plus the
+    // master download it needs — is skipped entirely on a reassemble.
+    //
+    // The two paths get DIFFERENT keys, and the overlay key is only ever published when the
+    // overlay actually succeeded: a build that throws leaves nothing behind (`getOrBuild`
+    // publishes on success only), so a transient master-download failure degrades to the concat
+    // path for that run without poisoning the cache for the next one.
+    let overlayAudio: { path: string; key: string } | null = null;
+    const lastSliceEnd = overlaySlices?.length
+      ? overlaySlices[overlaySlices.length - 1].sliceEndSec
+      : undefined;
     if (activePlan) {
+      const overlayKey = cacheKey("filmaudio-overlay", {
+        masterAudioUrl: opts.masterAudioUrl,
+        inserts: activePlan.inserts,
+        totalSec: activePlan.totalSec,
+        lastSliceEnd,
+      });
       try {
-        if (!masterPath) {
-          masterPath = await downloadToTemp(
-            opts.masterAudioUrl as string,
-            workDir,
-            "master-vo.mp3"
-          );
-        }
-        const masterDur = await getMediaDuration(masterPath);
-        const lastSliceEnd =
-          overlaySlices![overlaySlices!.length - 1].sliceEndSec;
-        // A master that doesn't match the scene ranges (stale URL, re-voiced job) would lay the
-        // wrong words under every scene — fall back rather than desync.
-        if (Math.abs(masterDur - lastSliceEnd) > 0.25) {
-          throw new Error(
-            `master narration ${masterDur.toFixed(2)}s doesn't match scene ranges' ${lastSliceEnd.toFixed(2)}s`
-          );
-        }
-        await runFfmpeg(
-          buildMasterOverlayAudioArgs({
-            masterPath,
-            // End-of-master inserts (the closing qrTail hold) are covered by the trailing apad;
-            // a zero-length tail chunk would break the concat filter.
-            inserts: activePlan.inserts.filter(
-              g => g.atSec < lastSliceEnd - 0.05
-            ),
-            totalSec: activePlan.totalSec,
-            outputPath: audioPath,
-          })
-        );
-        overlaid = true;
+        const built = await getOrBuild({
+          kind: "filmaudio",
+          key: overlayKey,
+          ext: "m4a",
+          fallbackDir: workDir,
+          build: async out => {
+            if (!masterPath) {
+              masterPath = await downloadToTemp(
+                opts.masterAudioUrl as string,
+                workDir,
+                "master-vo.mp3"
+              );
+            }
+            const masterDur = await getMediaDuration(masterPath);
+            // A master that doesn't match the scene ranges (stale URL, re-voiced job) would lay
+            // the wrong words under every scene — fall back rather than desync.
+            if (Math.abs(masterDur - (lastSliceEnd as number)) > 0.25) {
+              throw new Error(
+                `master narration ${masterDur.toFixed(2)}s doesn't match scene ranges' ${(lastSliceEnd as number).toFixed(2)}s`
+              );
+            }
+            await runFfmpeg(
+              buildMasterOverlayAudioArgs({
+                masterPath,
+                // End-of-master inserts (the closing qrTail hold) are covered by the trailing
+                // apad; a zero-length tail chunk would break the concat filter.
+                inserts: activePlan.inserts.filter(
+                  g => g.atSec < (lastSliceEnd as number) - 0.05
+                ),
+                totalSec: activePlan.totalSec,
+                outputPath: out,
+              })
+            );
+            return undefined;
+          },
+        });
+        overlayAudio = { path: built.path, key: overlayKey };
       } catch (err: any) {
         console.warn(
           `[Assembly] master overlay failed (${err?.message}) — falling back to per-scene audio concat`
         );
       }
     }
-    if (!overlaid) {
-      await runFfmpeg(
-        buildFilmAudioConcatArgs({
-          segments: activePlan
-            ? // The video was already joined on the frame plan — lock the rebuilt audio to the
-              // same plan (encodedSec would drift: per-scene AAC can outlast the video stream).
-              sceneFiles.map((f, i) => ({
-                path: f.path,
-                durationSec: activePlan.scenes[i].frames / FPS,
-              }))
-            : sceneFiles,
-          outputPath: audioPath,
-        })
-      );
+    let audioPath: string;
+    let audioKey: string;
+    if (overlayAudio) {
+      audioPath = overlayAudio.path;
+      audioKey = overlayAudio.key;
+    } else {
+      // Keyed on the scene CONTENT hashes rather than their temp paths, so the same cut rebuilt
+      // in a fresh workDir still hits. A scene that was skipped simply isn't in the list.
+      const segments = activePlan
+        ? // The video was already joined on the frame plan — lock the rebuilt audio to the
+          // same plan (encodedSec would drift: per-scene AAC can outlast the video stream).
+          sceneFiles.map((f, i) => ({
+            path: f.path,
+            durationSec: activePlan.scenes[i].frames / FPS,
+          }))
+        : sceneFiles;
+      audioKey = cacheKey("filmaudio-concat", {
+        segments: segments.map((seg, i) => ({
+          scene: keptSceneKeys[i],
+          durationSec: seg.durationSec,
+        })),
+      });
+      const built = await getOrBuild({
+        kind: "filmaudio",
+        key: audioKey,
+        ext: "m4a",
+        fallbackDir: workDir,
+        build: async out => {
+          await runFfmpeg(
+            buildFilmAudioConcatArgs({ segments, outputPath: out })
+          );
+          return undefined;
+        },
+      });
+      audioPath = built.path;
     }
 
     // Music bed, laid over whichever audio path won above (master overlay or per-scene concat)
     // so both get it from one block. Every failure here — a bed 404, a bad loudness read, an
     // ffmpeg error — degrades to the narration-only track rather than losing the film.
+    //
+    // Cached on the narration track's own key plus the bed list: everything downstream of those
+    // (the block schedule, the reuse offsets, the measured LUFS) is a deterministic function of
+    // them, so naming them names the mix. On a hit this skips the bed downloads, the loudness
+    // scan and the full-length mix encode. A build that throws publishes nothing, so a dead CDN
+    // costs this run its music and the next run retries.
     let mixedPath = audioPath;
     if (opts.musicBedUrls?.length) {
       try {
+        const mixKey = cacheKey("filmmix", {
+          audioKey,
+          musicBedUrls: opts.musicBedUrls,
+          duckDb: MUSIC_BED_DUCK_DB,
+          repeatOffsetSec: MUSIC_REPEAT_OFFSET_SEC,
+        });
         const narrationSec = await getMediaDuration(audioPath);
         const blocks = planMusicSchedule(narrationSec);
         if (blocks.length === 0)
@@ -3054,56 +3112,64 @@ export async function assemblePerSceneFilm(opts: {
         // regression than a silent film, and if the first bed is unreachable too the CDN is
         // down and narration-only is the honest outcome.
         const firstBedUrl = opts.musicBedUrls[0];
-        const bedPaths = await Promise.all(
-          blocks.map(async (b, i) => {
-            // Fewer beds than blocks would only happen if a caller under-fills the list;
-            // wrap rather than crash (pickMusicBeds already sizes it correctly).
-            const url = opts.musicBedUrls![i % opts.musicBedUrls!.length];
-            try {
-              return await downloadToTemp(url, workDir, `bed-${i}.mp3`);
-            } catch (err: any) {
-              console.warn(
-                `[Assembly] bed ${i} (${url}) failed (${err?.message}) — falling back to ${firstBedUrl}`
-              );
-              return downloadToTemp(firstBedUrl, workDir, `bed-${i}.mp3`);
-            }
-          })
-        );
-        // A film with more blocks than the channel has beds reuses them — with one bed per
-        // channel that is EVERY block after the first. Start each reuse further into the track
-        // so it is a different passage, not the same 120s again, clamped to what the file
-        // actually holds (168–321s against a 120s block). First use always gets 0.
-        const seen = new Map<string, number>();
-        const bedOffsets = await Promise.all(
-          blocks.map(async (b, i) => {
-            const url = opts.musicBedUrls![i % opts.musicBedUrls!.length];
-            const n = seen.get(url) ?? 0;
-            seen.set(url, n + 1);
-            if (n === 0) return 0;
-            const bedSec = await getMediaDuration(bedPaths[i]);
-            return Math.max(
-              0,
-              Math.min(n * MUSIC_REPEAT_OFFSET_SEC, bedSec - b.durSec)
+        const mixed = await getOrBuild({
+          kind: "filmmix",
+          key: mixKey,
+          ext: "m4a",
+          fallbackDir: workDir,
+          build: async bgmPath => {
+            const bedPaths = await Promise.all(
+              blocks.map(async (b, i) => {
+                // Fewer beds than blocks would only happen if a caller under-fills the list;
+                // wrap rather than crash (pickMusicBeds already sizes it correctly).
+                const url = opts.musicBedUrls![i % opts.musicBedUrls!.length];
+                try {
+                  return await downloadToTemp(url, workDir, `bed-${i}.mp3`);
+                } catch (err: any) {
+                  console.warn(
+                    `[Assembly] bed ${i} (${url}) failed (${err?.message}) — falling back to ${firstBedUrl}`
+                  );
+                  return downloadToTemp(firstBedUrl, workDir, `bed-${i}.mp3`);
+                }
+              })
             );
-          })
-        );
-        const narrationLufs = await measureLoudness(audioPath);
-        const bgmPath = path.join(workDir, "film-audio-bgm.m4a");
-        await runFfmpeg(
-          buildMusicBedMixArgs({
-            narrationPath: audioPath,
-            bedPaths,
-            bedOffsets,
-            blocks,
-            narrationLufs,
-            outputPath: bgmPath,
-          })
-        );
-        mixedPath = bgmPath;
-        console.log(
-          `[Assembly] music bed: ${blocks.length} block(s), narration ${narrationLufs.toFixed(1)} LUFS ` +
-            `→ bed ${(narrationLufs + MUSIC_BED_DUCK_DB).toFixed(1)} LUFS`
-        );
+            // A film with more blocks than the channel has beds reuses them — with one bed per
+            // channel that is EVERY block after the first. Start each reuse further into the track
+            // so it is a different passage, not the same 120s again, clamped to what the file
+            // actually holds (168–321s against a 120s block). First use always gets 0.
+            const seen = new Map<string, number>();
+            const bedOffsets = await Promise.all(
+              blocks.map(async (b, i) => {
+                const url = opts.musicBedUrls![i % opts.musicBedUrls!.length];
+                const n = seen.get(url) ?? 0;
+                seen.set(url, n + 1);
+                if (n === 0) return 0;
+                const bedSec = await getMediaDuration(bedPaths[i]);
+                return Math.max(
+                  0,
+                  Math.min(n * MUSIC_REPEAT_OFFSET_SEC, bedSec - b.durSec)
+                );
+              })
+            );
+            const narrationLufs = await measureLoudness(audioPath);
+            await runFfmpeg(
+              buildMusicBedMixArgs({
+                narrationPath: audioPath,
+                bedPaths,
+                bedOffsets,
+                blocks,
+                narrationLufs,
+                outputPath: bgmPath,
+              })
+            );
+            console.log(
+              `[Assembly] music bed: ${blocks.length} block(s), narration ${narrationLufs.toFixed(1)} LUFS ` +
+                `→ bed ${(narrationLufs + MUSIC_BED_DUCK_DB).toFixed(1)} LUFS`
+            );
+            return undefined;
+          },
+        });
+        mixedPath = mixed.path;
       } catch (err: any) {
         console.warn(
           `[Assembly] music bed failed (${err?.message}) — shipping narration-only audio`
@@ -3122,6 +3188,12 @@ export async function assemblePerSceneFilm(opts: {
 
     const buffer = readFileSync(finalPath);
     const durationSec = await getMediaDuration(finalPath);
+    if (cacheEnabled()) {
+      console.log(
+        `[Assembly] cache: ${muxHits}/${scenes.length} scenes reused, ` +
+          `${normHits} normalized clip(s) reused`
+      );
+    }
     return {
       buffer,
       usedScenes: sceneFiles.length,
@@ -3136,5 +3208,10 @@ export async function assemblePerSceneFilm(opts: {
         /* best-effort temp cleanup */
       }
     }
+    // Evict AFTER the run, never during it: mid-run eviction could delete an entry this very
+    // film is about to concat. `endRun` first, so the last assembly standing is the one that
+    // actually sweeps. Best-effort — a failed sweep only means the cache stays large.
+    endAssemblyCacheRun();
+    sweepAssemblyCache();
   }
 }

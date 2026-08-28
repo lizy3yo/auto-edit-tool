@@ -82,6 +82,9 @@ import {
   removeCutPoint,
   moveCutPoint,
   cutPoints,
+  forgetTimingSnapshot,
+  revertAllSceneTiming,
+  revertSceneTiming,
   validateAddCut,
   validateMoveCut,
   validateTimingEdit,
@@ -9549,6 +9552,9 @@ async function renderSceneClipInPlace(
     // audioUrl off-master must do the same.
     scene.narrationStartSec = undefined;
     scene.narrationEndSec = undefined;
+    // The revert snapshot describes the OLD alignment's edges; off-master they no longer point
+    // at anything real, so "Revert to original" must stop offering them (see `snapshotTiming`).
+    forgetTimingSnapshot(scene);
   }
   // Re-voicing here yields the raw narration length; hold it to the floor like the main pipeline
   // so a regenerated/retried short scene freezes to SCENE_MIN_HOLD_SEC instead of cutting short.
@@ -9732,7 +9738,14 @@ export type SceneEditRequest =
       sceneIndex: number;
       cutOffsetSec: number;
       clipInSec: number | null;
-    };
+    }
+  /**
+   * Put ONE scene back to its pristine cut (`scene.timingOriginal`). Metadata only, but it does
+   * change the eventual output, so it marks `timingEdited` like any other real timing edit. A
+   * shared edge only comes back when the neighbour on that side was never edited — see
+   * `revertSceneTiming`.
+   */
+  | { kind: "reverttiming"; sceneIndex: number };
 
 /** Requests that change how a scene ASSEMBLES without rendering anything. */
 const isTimingKind = (req: SceneEditRequest): boolean =>
@@ -9740,7 +9753,8 @@ const isTimingKind = (req: SceneEditRequest): boolean =>
   req.kind === "cut" ||
   req.kind === "uncut" ||
   req.kind === "movecut" ||
-  req.kind === "piececlip";
+  req.kind === "piececlip" ||
+  req.kind === "reverttiming";
 
 interface SceneEditSession {
   queue: SceneEditQueue<SceneEditRequest>;
@@ -10176,6 +10190,8 @@ async function runSceneEdit(
           runMoveCutEdit(ctx, s, req.fromOffsetSec, req.toOffsetSec);
         } else if (req.kind === "piececlip") {
           runPieceClipEdit(ctx, s, req.cutOffsetSec, req.clipInSec);
+        } else if (req.kind === "reverttiming") {
+          runRevertTimingEdit(ctx, s);
         } else {
           if (req.kind === "regen") await runRegenEdit(ctx, s, req);
           else await runSplitEdit(ctx, s, req.edit);
@@ -10352,6 +10368,25 @@ function runMoveCutEdit(
 }
 
 /**
+ * Put ONE scene back to the cut it had before the operator's first timing edit.
+ *
+ * `revertSceneTiming` owns the rule, including the fact that a shared start/end edge carries its
+ * neighbour's opposite edge with it. On success its `reason` is a NOTE about that (which
+ * neighbour moved), not a problem — so it is logged, never recorded as a scene failure.
+ */
+function runRevertTimingEdit(
+  ctx: SceneEditContext,
+  scene: StoryboardScene
+): void {
+  const r = revertSceneTiming(ctx.scenes, scene.index);
+  if (!r.ok) throw new Error(r.reason ?? "Nothing to revert");
+  console.log(
+    `[Longform ${ctx.jobId}] scene ${scene.index} timing reverted (touched ${r.touched.join(", ")})` +
+      (r.reason ? ` — ${r.reason}` : "")
+  );
+}
+
+/**
  * Slip one piece of a cut scene to a different moment of the same footage (or clear the
  * override, `clipInSec: null`). The clip itself is untouched — only which moment each piece
  * shows — but unlike a bare cut this DOES change the eventual output, so it marks
@@ -10437,6 +10472,47 @@ export async function setScenePieceClipIn(
     sceneIndex,
     cutOffsetSec,
     clipInSec,
+  });
+}
+
+export async function revertSceneTimingEdits(
+  jobId: number,
+  sceneIndex: number
+): Promise<EditAccept> {
+  return enqueueSceneEdit(jobId, { kind: "reverttiming", sceneIndex });
+}
+
+/**
+ * Put the WHOLE job back to its pristine cut.
+ *
+ * A locked pass rather than a queue request: the queue is keyed by scene, and this is a
+ * job-level operation whose whole safety argument is that every shared edge moves on both sides
+ * at once (`revertAllSceneTiming`). Refuses while an edit session is live, so it can never race
+ * a half-applied per-scene edit onto the same document.
+ *
+ * Returns how many scenes were put back. Marks them `timingEdited`, so the film shows the
+ * "Reassemble to apply" notice until it is re-stitched — a revert changes the cut like any
+ * other timing edit.
+ */
+export async function revertJobTiming(
+  jobId: number,
+  userId: number,
+  opts: { allowAny?: boolean } = {}
+): Promise<{ reverted: number }> {
+  if (isJobRegenerating(jobId))
+    throw new Error("Scenes are still being edited — try again in a moment");
+  return withJobLock(jobId, async () => {
+    const job = await getLongformVideoJobById(jobId);
+    if (!job || (!opts.allowAny && job.userId !== userId))
+      throw new Error("Job not found");
+    const scenes = (job.storyboard as StoryboardScene[]) || [];
+    const r = revertAllSceneTiming(scenes);
+    if (!r.ok) throw new Error(r.reason ?? "Nothing to revert");
+    await updateLongformVideoJob(jobId, { storyboard: scenes });
+    console.log(
+      `[Longform ${jobId}] reverted timing on ${r.touched.length} scene(s): ${r.touched.join(", ")}`
+    );
+    return { reverted: r.touched.length };
   });
 }
 

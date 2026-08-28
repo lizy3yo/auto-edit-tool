@@ -41,6 +41,12 @@ import { LongformScenePreview } from "@/components/LongformScenePreview";
 import { SceneStripThumb } from "@/components/SceneStripThumb";
 import { SplitPositionEditor } from "@/components/SplitPositionEditor";
 import { SceneTimingEditor } from "@/components/SceneTimingEditor";
+import {
+  CutPreviewSwitch,
+  LongformCutPreview,
+  QR_TAIL_HOLD_SEC,
+} from "@/components/LongformCutPreview";
+import { FPS, planMasterOverlayScenes } from "@shared/filmTimeline";
 import { sanitizeError, isCreditError } from "@/lib/errorSanitizer";
 import { triggerCreditErrorPopup } from "@/components/CreditErrorPopup";
 import type { SplitLayout, StoryboardScene } from "@shared/types";
@@ -71,6 +77,7 @@ import {
   Columns2,
   Scissors,
   BookOpen,
+  History,
 } from "lucide-react";
 
 export type SlotStatus = "idle" | "processing" | "completed" | "failed";
@@ -344,6 +351,12 @@ export default function LongformJobSlot({
   const [selectedScenes, setSelectedScenes] = useState<number[]>([]);
   const [sceneSearch, setSceneSearch] = useState("");
   const [downloadTitle, setDownloadTitle] = useState(initialTitle);
+  // Whether the no-render cut preview is open (see LongformCutPreview): the browser plays the
+  // scene clips against the master narration so an edit can be judged without a Reassemble.
+  const [showCutPreview, setShowCutPreview] = useState(false);
+  // Guard on the whole-job revert: it throws away every timing edit on the film at once, and
+  // there is no snapshot of a snapshot to undo it with.
+  const [confirmRevertAll, setConfirmRevertAll] = useState(false);
   // Which books this video pitches. Seeded from the draft saved in localStorage so a reload
   // doesn't lose them; a tab holding a render replaces this from `job.ctaBooks` (hydration).
   // Seeded empty; a restored DRAFT is adopted once the workspace arrives (the adopt effect
@@ -351,6 +364,10 @@ export default function LongformJobSlot({
   const [ctaBooks, setCtaBooks] = useState<CtaBookAssignment[]>([]);
   // Set by the finished-video player; the timestamp map calls it to jump to a shot.
   const playerSeekRef = useRef<((sec: number) => void) | null>(null);
+  // Timestamps map onto the RENDERED film, so a click while the live preview is on screen has to
+  // switch back first — and the player it seeks does not exist until that render lands. Park the
+  // target here and let the effect below fire it once the player has remounted.
+  const pendingSeekRef = useRef<number | null>(null);
   const isAdmin = useAuth().user?.role === "admin";
 
   // Masked APIMART keys (admin-only). B-roll VIDEO renders on this tab's APIMART key; with no key
@@ -554,6 +571,36 @@ export default function LongformJobSlot({
     },
     onError: err => toast.error(err.message),
   });
+
+  const revertSceneTimingMutation =
+    trpc.longformVideo.revertSceneTiming.useMutation({
+      onSuccess: (d, vars) => {
+        if (d.accepted === "ignored") {
+          toast.info(
+            `Scene ${vars.sceneIndex} is rendering — revert it once it finishes`
+          );
+          return;
+        }
+        toast.success(
+          `Scene ${vars.sceneIndex} back to its original cut — Reassemble to apply it`
+        );
+        watchCutRoom();
+        if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
+      },
+      onError: err => toast.error(err.message),
+    });
+
+  const revertJobTimingMutation =
+    trpc.longformVideo.revertJobTiming.useMutation({
+      onSuccess: d => {
+        toast.success(
+          `${d.reverted} scene(s) back to their original cut — Reassemble to apply it`
+        );
+        setConfirmRevertAll(false);
+        if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
+      },
+      onError: err => toast.error(err.message),
+    });
 
   const setPieceClipInMutation = trpc.longformVideo.setPieceClipIn.useMutation({
     onSuccess: (d, vars) => {
@@ -820,6 +867,97 @@ export default function LongformJobSlot({
     );
     return splitSec / hostSec < 0.15;
   }, [scenes]);
+
+  // Deliver a timestamp click that had to wait for the rendered player to come back. Child
+  // effects run before the parent's, so by the time this fires the player has already published
+  // its seek handle.
+  useEffect(() => {
+    if (showCutPreview || pendingSeekRef.current == null) return;
+    const sec = pendingSeekRef.current;
+    pendingSeekRef.current = null;
+    playerSeekRef.current?.(sec);
+  }, [showCutPreview]);
+
+  /** Jump the rendered film to `sec`, switching away from the live preview if it is on screen. */
+  const seekRenderedFilm = (sec: number) => {
+    if (showCutPreview) {
+      pendingSeekRef.current = sec;
+      setShowCutPreview(false);
+      return;
+    }
+    playerSeekRef.current?.(sec);
+  };
+
+  /**
+   * Where each scene lands in the finished film, as `m:ss`.
+   *
+   * Laid out with `planMasterOverlayScenes` — the renderer's own function — rather than by
+   * summing narration lengths, because a scene freezes past its words wherever there's a hold
+   * (the sub-floor pad, a CTA release tail, an operator's hold) and every later scene sits that
+   * much further in. Keyed by `scene.index`; a scene with no narration range yet (pre-voicing)
+   * simply isn't in the map and shows its number alone.
+   */
+  const sceneTimecodes = useMemo(() => {
+    const usable = scenes
+      .filter(
+        s =>
+          Number.isFinite(s.narrationStartSec as number) &&
+          Number.isFinite(s.narrationEndSec as number) &&
+          (s.narrationEndSec as number) > (s.narrationStartSec as number)
+      )
+      .sort((a, b) => a.index - b.index);
+    const out = new Map<number, string>();
+    if (!usable.length) return out;
+    // Mirrors assembleAndFinalize: a cover-reveal beat ends with its narration, everything else
+    // is floored to its stored duration, and an operator's hold overrides the CTA default.
+    const plan = planMasterOverlayScenes({
+      scenes: usable.map(s => ({
+        sliceStartSec: s.narrationStartSec as number,
+        sliceEndSec: s.narrationEndSec as number,
+        holdSec: s.coverHero ? undefined : s.audioDuration,
+        tailHoldSec: s.tailHoldSec ?? (s.qrTail ? QR_TAIL_HOLD_SEC : undefined),
+        headHoldSec: s.headHoldSec,
+      })),
+    });
+    let at = 0;
+    usable.forEach((s, i) => {
+      const t = Math.max(0, Math.floor(at));
+      const h = Math.floor(t / 3600);
+      const m = Math.floor((t % 3600) / 60);
+      const sec = String(t % 60).padStart(2, "0");
+      out.set(
+        s.index,
+        h > 0 ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`
+      );
+      at += plan.scenes[i].frames / FPS;
+    });
+    return out;
+  }, [scenes]);
+
+  /**
+   * Scenes carrying a pristine cut to go back to. Empty for a job whose timing has never been
+   * edited — and also for one edited BEFORE snapshots existed, whose original is genuinely
+   * unrecoverable; the control stays hidden rather than appearing and failing.
+   */
+  const revertableScenes = useMemo(
+    () => scenes.filter(s => s.timingOriginal).map(s => s.index),
+    [scenes]
+  );
+
+  // Whether the browser can play this cut without an assembly: the master narration exists and
+  // at least one scene has both a clip and its slice of that narration. Deliberately not gated
+  // on `finalVideoUrl` — the whole point is to see a cut BEFORE (or instead of) rendering one.
+  const cutPreviewReady = useMemo(
+    () =>
+      !!job?.masterAudioUrl &&
+      scenes.some(
+        s =>
+          (s.clipUrls?.length || s.clipUrl) &&
+          Number.isFinite(s.narrationStartSec as number) &&
+          Number.isFinite(s.narrationEndSec as number)
+      ),
+    [job?.masterAudioUrl, scenes]
+  );
 
   // Report status up to the parent so the tab label can show a badge.
   useEffect(() => {
@@ -1549,6 +1687,14 @@ export default function LongformJobSlot({
                     Scenes re-rendered. Preview them below, then rebuild the
                     final cut.
                   </p>
+                  {/* No final exists yet, so the preview IS the only way to see the cut — show
+                      it inline rather than behind a toggle. */}
+                  {cutPreviewReady && (
+                    <LongformCutPreview
+                      scenes={scenes}
+                      masterAudioUrl={job.masterAudioUrl as string}
+                    />
+                  )}
                   <Button
                     variant="outline"
                     size="sm"
@@ -1576,16 +1722,84 @@ export default function LongformJobSlot({
                   <Scissors className="h-3.5 w-3.5 shrink-0" />
                   Timing edits pending on{" "}
                   {scenes.filter(sc => sc.timingEdited).length} scene(s) — the
-                  film below is the previous cut. Click <b>Reassemble</b> to
-                  apply them (ffmpeg only, no credits).
+                  rendered film is the previous cut. Switch to{" "}
+                  <b>Live preview</b> to see them now, or <b>Reassemble</b> to
+                  bake them in (ffmpeg only, no credits).
                 </p>
               )}
+            {job.status === "completed" && revertableScenes.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <span>
+                  {revertableScenes.length} scene(s) have timing edits.
+                </span>
+                {confirmRevertAll ? (
+                  <>
+                    <span className="text-foreground">
+                      Put every one back to its original cut? This cannot be
+                      undone.
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      className="h-7 text-xs"
+                      disabled={revertJobTimingMutation.isPending}
+                      onClick={() => {
+                        if (!jobId) return;
+                        revertJobTimingMutation.mutate({ jobId });
+                      }}
+                    >
+                      {revertJobTimingMutation.isPending ? (
+                        <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+                      ) : (
+                        <History className="mr-1.5 h-3 w-3" />
+                      )}
+                      Revert all
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 text-xs"
+                      onClick={() => setConfirmRevertAll(false)}
+                    >
+                      Cancel
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 text-xs"
+                    onClick={() => setConfirmRevertAll(true)}
+                    title="Put every scene back to the cut it had before its first timing edit. Metadata only — Reassemble afterwards to apply it to the film."
+                  >
+                    <History className="mr-1.5 h-3 w-3" />
+                    Revert all timing
+                  </Button>
+                )}
+              </div>
+            )}
             {job.status === "completed" && job.finalVideoUrl && (
               <div className="space-y-3">
-                <LongformVideoPlayer
-                  src={job.finalVideoUrl}
-                  seekRef={playerSeekRef}
-                />
+                {/* One player slot, two sources. The switcher sits directly above the picture so
+                    the two cuts occupy the same place on screen and can be compared by clicking
+                    between them — a second player below the film would read as a second film. */}
+                {cutPreviewReady && (
+                  <CutPreviewSwitch
+                    live={showCutPreview}
+                    onChange={setShowCutPreview}
+                  />
+                )}
+                {cutPreviewReady && showCutPreview ? (
+                  <LongformCutPreview
+                    scenes={scenes}
+                    masterAudioUrl={job.masterAudioUrl as string}
+                  />
+                ) : (
+                  <LongformVideoPlayer
+                    src={job.finalVideoUrl}
+                    seekRef={playerSeekRef}
+                  />
+                )}
                 <div className="flex justify-end gap-2">
                   {needsSplitRetrofit && (
                     <Button
@@ -1646,7 +1860,7 @@ export default function LongformJobSlot({
                   <div className="border-t border-border pt-4">
                     <LongformPublishKit
                       jobId={jobId}
-                      onSeek={sec => playerSeekRef.current?.(sec)}
+                      onSeek={seekRenderedFilm}
                     />
                   </div>
                 )}
@@ -1886,6 +2100,12 @@ export default function LongformJobSlot({
                     )}
                     <span className="absolute top-1 left-1 rounded bg-black/60 px-1 text-[10px] font-mono text-white">
                       #{scene.index}
+                      {sceneTimecodes.has(scene.index) && (
+                        <span className="text-white/70">
+                          {" · "}
+                          {sceneTimecodes.get(scene.index)}
+                        </span>
+                      )}
                     </span>
                     <Checkbox
                       checked={isTileSelected}
@@ -1997,6 +2217,9 @@ export default function LongformJobSlot({
                           />
                           <span className="text-xs font-mono text-muted-foreground">
                             #{scene.index}
+                            {sceneTimecodes.has(scene.index) && (
+                              <> · {sceneTimecodes.get(scene.index)}</>
+                            )}
                           </span>
                           <Badge
                             variant="outline"
@@ -2159,6 +2382,7 @@ export default function LongformJobSlot({
                                         splitSceneMutation.isPending ||
                                         moveCutMutation.isPending ||
                                         setPieceClipInMutation.isPending ||
+                                        revertSceneTimingMutation.isPending ||
                                         isSceneQueued
                                       }
                                       onApply={edit => {
@@ -2209,6 +2433,14 @@ export default function LongformJobSlot({
                                           sceneIndex: scene.index,
                                           cutOffsetSec,
                                           clipInSec,
+                                        });
+                                      }}
+                                      canRevert={!!scene.timingOriginal}
+                                      onRevert={() => {
+                                        if (!jobId) return;
+                                        revertSceneTimingMutation.mutate({
+                                          jobId,
+                                          sceneIndex: scene.index,
                                         });
                                       }}
                                     />

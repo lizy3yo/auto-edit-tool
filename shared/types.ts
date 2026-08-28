@@ -449,6 +449,29 @@ export interface StoryboardScene {
    */
   timingEdited?: boolean;
   /**
+   * This scene's cut-room state as it was BEFORE the operator's first timing edit — what
+   * "Revert to original" puts back.
+   *
+   * Written once, by the first edit to touch this scene, and never overwritten (see
+   * `snapshotTiming` in `server/sceneTiming.ts`): the point is the pristine cut, not one step
+   * of undo. Absent ⇒ this scene has never been edited, so there is nothing to revert to and
+   * the UI hides the control.
+   *
+   * The narration ranges in here are the ones whisperx produced at voicing time; nothing else
+   * keeps them, and the word timings that produced them are not persisted either. So a scene
+   * re-voiced off-master (which recomputes its range from scratch) DROPS this — the old edges
+   * would no longer describe anything real.
+   */
+  timingOriginal?: {
+    narrationStartSec?: number;
+    narrationEndSec?: number;
+    clipInSec?: number;
+    tailHoldSec?: number;
+    headHoldSec?: number;
+    cutPoints?: number[];
+    pieceClipIns?: Record<string, number>;
+  };
+  /**
    * R2 URLs of this scene's generated clip(s), in order. B-roll is always ONE clip sized to
    * the narration; only a HOST scene whose narration outruns one clip gets several.
    */

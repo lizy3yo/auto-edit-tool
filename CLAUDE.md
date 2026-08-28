@@ -68,24 +68,25 @@ Gemini, OpenAI, R2, RunPod. Missing ones fail loudly at the first stage that nee
 
 ## Optional tuning vars (defaults from code; most are not in `.env.example`)
 
-| Var                             | Default         | Var                            | Default              |
-| ------------------------------- | --------------- | ------------------------------ | -------------------- |
-| `FFMPEG_PATH`                   | auto-probe      | `FFMPEG_CONCURRENCY`           | cpu-derived          |
-| `FFMPEG_PROBE_MAX_MS`           | 600s            | `ASSEMBLY_DOWNLOAD_TIMEOUT_MS` | 120s                 |
-| `PROBE_MAX_MS`                  | 60s             | `BROLL_NO_KEYFRAME`            | unset (`1` disables) |
-| `R2_CONNECTION_TIMEOUT_MS`      | 10s             | `R2_REQUEST_TIMEOUT_MS`        | 120s                 |
-| `APIMART_RATE_PER_MIN`          | 40              | `APIMART_BURST`                | 5                    |
-| `HEYGEN_CONCURRENCY`            | 8               | `HEYGEN_CALL_TIMEOUT_MS`       | 120s                 |
-| `HEYGEN_DOWNLOAD_TIMEOUT_MS`    | 300s            | `OPENAI_IMAGE_CALL_TIMEOUT_MS` | 300s                 |
-| `OPENAI_IMAGE_BURST`            | 1               | `OPENAI_IMAGE_RATE_PER_MIN`    | 50 (Tier-3 cap)      |
-| `SIXTYNINE_VIDEO_CONCURRENCY`   | 8               | `SIXTYNINE_IMAGE_CONCURRENCY`  | 7                    |
-| `SIXTYNINE_VIDEO_TIMEOUT_MS`    | 360s            | `SIXTYNINE_CALL_TIMEOUT_MS`    | 120s                 |
-| `SIXTYNINE_DOWNLOAD_TIMEOUT_MS` | 300s            | `SIXTYNINE_VIDEO_SUBMIT_BURST` | 2                    |
-| `SIXTYNINE_VIDEO_SUBMIT_RATE`   | 5/min (API cap) | `IMAGE_PRIMARY_TIMEOUT_MS`     | 480s                 |
-| `SIXTYNINE_TTS_SUBMIT_RATE`     | 20/min          | `SIXTYNINE_TTS_SUBMIT_BURST`   | 3                    |
-| `IMAGE_PRIMARY_RETRIES`         | 1               | `IMAGE_RETRY_TIMEOUT_MS`       | 240s                 |
-| `IMAGE_RETRY_TOTAL_BUDGET_MS`   | 600s            | `MYSQL_SORT_BUFFER_SIZE`       | 8 MB                 |
-| `AUTO_MIGRATE`                  | on (`0` skips)  |                                |                      |
+| Var                             | Default         | Var                            | Default                     |
+| ------------------------------- | --------------- | ------------------------------ | --------------------------- |
+| `FFMPEG_PATH`                   | auto-probe      | `FFMPEG_CONCURRENCY`           | cpu-derived                 |
+| `FFMPEG_PROBE_MAX_MS`           | 600s            | `ASSEMBLY_DOWNLOAD_TIMEOUT_MS` | 120s                        |
+| `PROBE_MAX_MS`                  | 60s             | `BROLL_NO_KEYFRAME`            | unset (`1` disables)        |
+| `R2_CONNECTION_TIMEOUT_MS`      | 10s             | `R2_REQUEST_TIMEOUT_MS`        | 120s                        |
+| `APIMART_RATE_PER_MIN`          | 40              | `APIMART_BURST`                | 5                           |
+| `HEYGEN_CONCURRENCY`            | 8               | `HEYGEN_CALL_TIMEOUT_MS`       | 120s                        |
+| `HEYGEN_DOWNLOAD_TIMEOUT_MS`    | 300s            | `OPENAI_IMAGE_CALL_TIMEOUT_MS` | 300s                        |
+| `OPENAI_IMAGE_BURST`            | 1               | `OPENAI_IMAGE_RATE_PER_MIN`    | 50 (Tier-3 cap)             |
+| `SIXTYNINE_VIDEO_CONCURRENCY`   | 8               | `SIXTYNINE_IMAGE_CONCURRENCY`  | 7                           |
+| `SIXTYNINE_VIDEO_TIMEOUT_MS`    | 360s            | `SIXTYNINE_CALL_TIMEOUT_MS`    | 120s                        |
+| `SIXTYNINE_DOWNLOAD_TIMEOUT_MS` | 300s            | `SIXTYNINE_VIDEO_SUBMIT_BURST` | 2                           |
+| `SIXTYNINE_VIDEO_SUBMIT_RATE`   | 5/min (API cap) | `IMAGE_PRIMARY_TIMEOUT_MS`     | 480s                        |
+| `SIXTYNINE_TTS_SUBMIT_RATE`     | 20/min          | `SIXTYNINE_TTS_SUBMIT_BURST`   | 3                           |
+| `IMAGE_PRIMARY_RETRIES`         | 1               | `IMAGE_RETRY_TIMEOUT_MS`       | 240s                        |
+| `IMAGE_RETRY_TOTAL_BUDGET_MS`   | 600s            | `MYSQL_SORT_BUFFER_SIZE`       | 8 MB                        |
+| `AUTO_MIGRATE`                  | on (`0` skips)  | `ASSEMBLY_CACHE`               | on (`0` skips)              |
+| `ASSEMBLY_CACHE_MAX_GB`         | 20              | `ASSEMBLY_CACHE_DIR`           | tmp/longform-assembly-cache |
 
 `MYSQL_SORT_BUFFER_SIZE` is set per pooled connection in `server/db.ts`. MySQL's 256 KB default
 is not enough for the library query: filesort sizes its buffer from each column's **declared**
@@ -117,6 +118,26 @@ Express · tRPC · Drizzle · MySQL.
   HeyGen webhook → `/api/download` proxy → tRPC → Vite/static → watchdog
 - `server/longformVideo.ts` — **9k lines, the whole pipeline. Start here.**
 - `server/routers.ts` — tRPC surface · `server/videoAssembly.ts` — ffmpeg assembly
+- `shared/filmTimeline.ts` — `planMasterOverlayScenes` + `planScenePieces`, the pure arithmetic
+  deciding where every frame of a film comes from. In `shared/` so the renderer
+  (`videoAssembly.ts`), the chapter map (`videoTimeline.ts`) and the browser's live cut preview
+  all run the SAME code — a second implementation would drift and the preview would show a cut
+  Reassemble does not produce. `videoAssembly.ts` re-exports both, so existing importers are
+  unchanged
+- `server/assemblyCache.ts` — content-addressed disk cache for assembly's intermediates. Each
+  normalized clip, muxed scene, film narration track and music mix is named by a hash of its
+  own inputs, so a Reassemble after a one-scene edit re-encodes that one scene and reuses the
+  rest. `CACHE_EPOCH` in that file MUST be bumped whenever a cached arg builder changes —
+  bumping is free, forgetting ships a film assembled from stale bytes. Every failure mode
+  (no dir, full disk, corrupt entry) degrades to "encode it now"
+- `client/src/components/LongformCutPreview.tsx` — the same film with NO assembly: the browser
+  plays the scene clips against the master narration, so an edit is judged in a second instead
+  of a re-encode. Its clock is FILM time, planned by `shared/filmTimeline.ts`, so trims, splits,
+  per-piece slips and frozen holds are exact: during a hold the picture freezes and the narration
+  pauses, precisely where assembly splices its silence in. Outside a hold the NARRATION is the
+  clock and nothing seeks it — slaving the voice to a wall clock livelocks, because every
+  correction is a seek, a seek drops readyState, that stalls the clock, and the drift grows.
+  Still a preview of the CUT, not the FILE — no burned-in QR/lower third/captions, no music bed
 - `server/providers/` — one adapter per vendor; `base.ts` is the interface,
   `fallback.ts` the image chain (primary → Gemini). `heygen-lipsync.ts` is the host lip-sync
   lane, resolved in `resolveLipsyncAdapter`
@@ -143,7 +164,11 @@ Express · tRPC · Drizzle · MySQL.
   `isProcessing`, hides them)
 - `server/sceneTiming.ts` — the cut room: pure edits to WHEN a scene's picture shows, on top of a
   narration that never moves. Trim (`scene.clipInSec`), move a cut between neighbours
-  (`narrationStartSec/EndSec`, lip-synced hosts keep sync by trimming), split a scene in two (same
+  (`narrationStartSec/EndSec`, lip-synced hosts keep sync by trimming) — one-directional, in that
+  a boundary handle only ever SHORTENS the scene it belongs to and never leaves that scene's own
+  range (`boundaryLimits`); the bounds used to come from the NEIGHBOUR's far edge, so an 11–17
+  scene could be dragged out to 5.5–23. Time given up goes to the neighbour on that side, so
+  lengthening a scene means shortening its neighbour from that neighbour's editor. Split a scene in two (same
   footage continues; renumbers), hold the last frame (`scene.tailHoldSec` — the CTA release beat's
   hard-wired `QR_TAIL_HOLD_SEC = 3` is its default; 0 removes the pause) or hold the FIRST frame
   (`scene.headHoldSec` — `tailHoldSec`'s mirror, at the front; only the film's actual first scene
@@ -159,6 +184,11 @@ Express · tRPC · Drizzle · MySQL.
   `isContinuousPair`). SPLIT is CapCut-style: it places a cut MARKER on the one clip
   (`scene.cutPoints`, `addCutPoint`) — the scene stays one clip/one card, the marker just shows
   the division on the timeline; output is unchanged (no reassemble) until a piece is acted on.
+  Every footage-addressing edit — both slips, placing a cut, dragging one — stops on the clip's
+  LAST FRAME and never past it (`maxSlipSec` / `pieceLiveEnd` in `SceneTimingEditor.tsx`), and
+  does nothing at all while the clip's duration is still unknown (that case used to be
+  `Infinity`). The old bound reserved `MIN_SLICE_SEC`, which was too strict at the top and left a
+  clip shorter than 0.5s un-slippable.
   Remove a marker to undo (`removeCutPoint`); drag a marker to slide it (`moveCutPoint`), clamped
   off the slice edges and off every other cut, carrying that piece's slip (below) to the new key.
   Queued as `cut`/`uncut`/`movecut` requests — instant metadata, never flip the job. A piece IS
@@ -168,8 +198,22 @@ Express · tRPC · Drizzle · MySQL.
   request; unlike a bare cut this DOES set `timingEdited` (a real render change). Assembly
   (`buildPiecedSceneVideo`/`planScenePieces` in `videoAssembly.ts`) trims+holds each piece
   separately then concats them — a piece whose chosen footage runs out before its on-screen time
-  ends freezes on its own last frame, independent of its neighbour's freeze. `timingEdited` drives
-  the "Reassemble to apply" notice until a final is written. UI:
+  ends freezes on its own last frame, independent of its neighbour's freeze. A cut marker is free
+  to add, drag or remove ONLY while nothing is slipped across it: dragging a cut that starts a
+  slipped piece changes where that piece begins and how long it runs (and re-derives the next
+  piece's continuous default), and removing one reverts that region to continuous footage — both
+  real render changes, so `moveCutPoint`/`removeCutPoint` set `timingEdited` in exactly those
+  cases. `timingEdited` drives
+  the "Reassemble to apply" notice until a final is written. The FIRST edit to touch a scene
+  saves its pristine cut to `scene.timingOriginal` (`snapshotTiming`, never overwritten — the
+  target is the original, not one undo step), which is the only copy that exists: the narration
+  ranges come from whisperx at voicing time and are overwritten in place, and the word timings
+  behind them aren't persisted. `revertSceneTiming` puts one scene back and
+  `revertAllSceneTiming` the whole job; a shared start/end edge carries the neighbour's opposite
+  edge with it, which is safe because `applyTimingEdit` snapshots BOTH sides of a boundary while
+  the board is still tiled, so the two recorded edges are the same number. A re-voice drops the
+  snapshot (`forgetTimingSnapshot`) — the old edges stop describing anything. Jobs edited before
+  this existed have no snapshot and the controls stay hidden. UI:
   `client/src/components/SceneTimingEditor.tsx`
 - `server/narrationAlignment.ts`, `server/_core/voiceTranscription.ts` — whisperx
 - `server/costMeter.ts` + `server/pricing.ts` — per-video spend. Every billable adapter calls

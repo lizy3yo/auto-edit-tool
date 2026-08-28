@@ -210,6 +210,14 @@ export function applyTimingEdit(
   const at = scenes.findIndex(s => s.index === edit.sceneIndex);
   if (at < 0) return [];
   const scene = scenes[at];
+  // Preserve the pristine cut before the first edit lands on it. Both neighbours too: a boundary
+  // is shared, so a move here rewrites one of theirs, and a scene whose stored timing changed
+  // without a snapshot could never be reverted.
+  snapshotTiming(scene);
+  if (edit.startSec !== undefined && scenes[at - 1])
+    snapshotTiming(scenes[at - 1]);
+  if (edit.endSec !== undefined && scenes[at + 1])
+    snapshotTiming(scenes[at + 1]);
   const touched = new Set<number>([scene.index]);
   if (edit.clipInSec !== undefined) scene.clipInSec = roundMs(edit.clipInSec);
   if (edit.tailHoldSec !== undefined)
@@ -315,6 +323,7 @@ export function addCutPoint(
 ): number[] | null {
   const scene = scenes.find(s => s.index === sceneIndex);
   if (!scene) return null;
+  snapshotTiming(scene);
   const next = Array.from(
     new Set([...cutPoints(scene), roundMs(atOffsetSec)])
   ).sort((a, b) => a - b);
@@ -363,9 +372,20 @@ export function validateMoveCut(
 }
 
 /**
- * Slide the cut nearest `fromOffsetSec` to `toOffsetSec`, in place (validate first). Still just
- * a marker on the one clip — output-neutral, no reassemble. Returns the scene's cut points, or
- * null when the scene or the cut is missing. Pure.
+ * Slide the cut nearest `fromOffsetSec` to `toOffsetSec`, in place (validate first).
+ *
+ * A cut with nothing slipped on either side is a pure marker: every piece continues the same
+ * footage, so dragging it changes where the timeline draws a line and nothing else — no
+ * `timingEdited`, no reassemble.
+ *
+ * The moment a piece HAS been slipped, that stops being true. The slipped piece now starts at a
+ * different on-screen moment and runs for a different length, and the piece after it re-derives
+ * its own continuous default (`clipInSec + bounds[i]`) from the new position — both real changes
+ * to the rendered film. So a move that carries a slip across DOES mark `timingEdited`, and the
+ * operator gets the "Reassemble to apply" notice instead of a film that quietly no longer
+ * matches its own timeline.
+ *
+ * Returns the scene's cut points, or null when the scene or the cut is missing. Pure.
  */
 export function moveCutPoint(
   scenes: StoryboardScene[],
@@ -377,6 +397,7 @@ export function moveCutPoint(
   if (!scene) return null;
   const moving = nearestCut(scene, fromOffsetSec);
   if (moving === null) return null;
+  snapshotTiming(scene);
   const landed = roundMs(toOffsetSec);
   const next = Array.from(
     new Set([...cutPoints(scene).filter(c => c !== moving), landed])
@@ -391,6 +412,7 @@ export function moveCutPoint(
     delete rest[String(moving)];
     rest[String(landed)] = val;
     scene.pieceClipIns = rest;
+    scene.timingEdited = true;
   }
   return next;
 }
@@ -426,6 +448,7 @@ export function removeCutPoint(
   if (!scene) return null;
   const cuts = cutPoints(scene);
   if (!cuts.length) return null;
+  snapshotTiming(scene);
   let dropped: number[];
   let next: number[];
   if (atOffsetSec === undefined) {
@@ -443,8 +466,13 @@ export function removeCutPoint(
   // whatever the earlier piece was already showing).
   if (scene.pieceClipIns) {
     const rest = { ...scene.pieceClipIns };
+    const before = Object.keys(rest).length;
     for (const d of dropped) delete rest[String(d)];
     scene.pieceClipIns = Object.keys(rest).length ? rest : undefined;
+    // Dropping a slip is an output change in the other direction: the region reverts to the
+    // continuous footage it was slipped away from. Same reasoning as `moveCutPoint` — removing
+    // a bare marker stays free, removing a slipped one needs a reassemble.
+    if (Object.keys(rest).length !== before) scene.timingEdited = true;
   }
   return next;
 }
@@ -500,6 +528,7 @@ export function setPieceClipIn(
   if (!scene) return false;
   const cut = nearestCut(scene, cutOffsetSec);
   if (cut === null) return false;
+  snapshotTiming(scene);
   const key = String(cut);
   if (clipInSec === null) {
     if (!scene.pieceClipIns || !(key in scene.pieceClipIns)) return true; // nothing to clear
@@ -514,4 +543,180 @@ export function setPieceClipIn(
   }
   scene.timingEdited = true;
   return true;
+}
+
+/**
+ * Record a scene's cut-room state before it is first changed — what "Revert to original" puts
+ * back. A no-op once a snapshot exists: the point is the PRISTINE cut, not one step of undo, so
+ * the second edit must not overwrite what the first one preserved.
+ *
+ * Every mutating function below calls this before it touches anything. `applyTimingEdit` calls
+ * it for the neighbour too, because moving a cut moves both sides of that boundary.
+ *
+ * Nothing else keeps these values: the narration ranges come from whisperx at voicing time and
+ * are written straight onto the scene, and the word timings behind them are not persisted. Miss
+ * the snapshot and the original is gone for good. Pure.
+ */
+export function snapshotTiming(scene: StoryboardScene): void {
+  if (scene.timingOriginal) return;
+  scene.timingOriginal = {
+    narrationStartSec: scene.narrationStartSec,
+    narrationEndSec: scene.narrationEndSec,
+    clipInSec: scene.clipInSec,
+    tailHoldSec: scene.tailHoldSec,
+    headHoldSec: scene.headHoldSec,
+    cutPoints: scene.cutPoints ? [...scene.cutPoints] : undefined,
+    pieceClipIns: scene.pieceClipIns ? { ...scene.pieceClipIns } : undefined,
+  };
+}
+
+/** Drop a scene's snapshot — its edges no longer describe anything real (a re-voice). Pure. */
+export function forgetTimingSnapshot(scene: StoryboardScene): void {
+  delete scene.timingOriginal;
+}
+
+/** Assign `v` to `scene[key]`, deleting the field when the original had nothing there. */
+function restore<K extends keyof StoryboardScene>(
+  scene: StoryboardScene,
+  key: K,
+  v: StoryboardScene[K] | undefined
+): void {
+  if (v === undefined) delete scene[key];
+  else scene[key] = v;
+}
+
+/** What a revert actually managed to put back. */
+export interface TimingRevert {
+  ok: boolean;
+  /** Why it was refused (`ok` false), or — on success — a note about what moved with it. */
+  reason?: string;
+  /** Indices whose stored timing changed — the caller marks these for re-assembly. */
+  touched: number[];
+}
+
+/**
+ * Revert ONE scene to its snapshot.
+ *
+ * The scene's own settings — trim, cut markers, per-piece slips, both holds — come back and
+ * nothing else moves.
+ *
+ * Its START and END are different: each is a boundary SHARED with a neighbour, one line both
+ * scenes sit against, so putting it back necessarily moves that neighbour's opposite edge too.
+ * That is safe, and provably so rather than by luck: a boundary is only ever moved by
+ * `applyTimingEdit`, which snapshots BOTH scenes before it moves anything, and the board is
+ * tiled at that moment — so the neighbour's recorded edge and this scene's recorded edge are the
+ * same number. Restoring it puts each of the two back to its OWN original; it cannot destroy
+ * anything except the edge move itself, which is the thing being reverted. The neighbour keeps
+ * its own snapshot, so it can still be reverted in full afterwards.
+ *
+ * (An earlier draft refused the edge whenever the neighbour had a snapshot of its own. That
+ * turned out to be useless: the very edit that moves a boundary snapshots the neighbour, so the
+ * ordinary case — move one cut, take it back — would never have restored anything.)
+ *
+ * `touched` names every scene whose stored timing changed, so the caller can tell the operator a
+ * neighbour moved with it. Mutates in place. Pure.
+ */
+export function revertSceneTiming(
+  scenes: StoryboardScene[],
+  sceneIndex: number
+): TimingRevert {
+  const at = scenes.findIndex(s => s.index === sceneIndex);
+  if (at < 0)
+    return { ok: false, reason: `Scene ${sceneIndex} not found`, touched: [] };
+  const scene = scenes[at];
+  const original = scene.timingOriginal;
+  if (!original)
+    return {
+      ok: false,
+      reason: `Scene ${sceneIndex} has no timing edits to revert`,
+      touched: [],
+    };
+
+  const touched = new Set<number>([sceneIndex]);
+
+  // 1. This scene's own settings.
+  restore(scene, "clipInSec", original.clipInSec);
+  restore(scene, "tailHoldSec", original.tailHoldSec);
+  restore(scene, "headHoldSec", original.headHoldSec);
+  restore(
+    scene,
+    "cutPoints",
+    original.cutPoints ? [...original.cutPoints] : undefined
+  );
+  restore(
+    scene,
+    "pieceClipIns",
+    original.pieceClipIns ? { ...original.pieceClipIns } : undefined
+  );
+
+  // 2. The shared edges, each carrying its neighbour's opposite edge so the board stays tiled.
+  const moved: number[] = [];
+  const prev = scenes[at - 1];
+  if (
+    fin(original.narrationStartSec) &&
+    Math.abs((scene.narrationStartSec ?? 0) - original.narrationStartSec) > 1e-6
+  ) {
+    scene.narrationStartSec = original.narrationStartSec;
+    if (prev) {
+      prev.narrationEndSec = original.narrationStartSec;
+      touched.add(prev.index);
+      moved.push(prev.index);
+    }
+  }
+  const next = scenes[at + 1];
+  if (
+    fin(original.narrationEndSec) &&
+    Math.abs((scene.narrationEndSec ?? 0) - original.narrationEndSec) > 1e-6
+  ) {
+    scene.narrationEndSec = original.narrationEndSec;
+    if (next) {
+      next.narrationStartSec = original.narrationEndSec;
+      touched.add(next.index);
+      moved.push(next.index);
+    }
+  }
+
+  delete scene.timingOriginal;
+  const list = Array.from(touched);
+  for (const i of list) {
+    const t = scenes.find(x => x.index === i);
+    if (t) t.timingEdited = true;
+  }
+  return {
+    ok: true,
+    reason: moved.length
+      ? `Scene ${moved.join(" and ")} moved with it — the cut between them is one boundary.`
+      : undefined,
+    touched: list,
+  };
+}
+
+/**
+ * Revert EVERY snapshotted scene at once — the whole job back to its pristine cut.
+ *
+ * Safe where the per-scene revert has to be careful: this restores a board state that was
+ * already consistent, so every shared edge moves on both sides at the same time and the
+ * narration cannot end up with a gap or an overlap. Mutates in place. Pure.
+ */
+export function revertAllSceneTiming(scenes: StoryboardScene[]): TimingRevert {
+  const edited = scenes.filter(s => s.timingOriginal);
+  if (!edited.length)
+    return { ok: false, reason: "No timing edits to revert", touched: [] };
+  for (const scene of edited) {
+    const o = scene.timingOriginal!;
+    restore(scene, "narrationStartSec", o.narrationStartSec);
+    restore(scene, "narrationEndSec", o.narrationEndSec);
+    restore(scene, "clipInSec", o.clipInSec);
+    restore(scene, "tailHoldSec", o.tailHoldSec);
+    restore(scene, "headHoldSec", o.headHoldSec);
+    restore(scene, "cutPoints", o.cutPoints ? [...o.cutPoints] : undefined);
+    restore(
+      scene,
+      "pieceClipIns",
+      o.pieceClipIns ? { ...o.pieceClipIns } : undefined
+    );
+    delete scene.timingOriginal;
+    scene.timingEdited = true;
+  }
+  return { ok: true, touched: edited.map(s => s.index) };
 }
