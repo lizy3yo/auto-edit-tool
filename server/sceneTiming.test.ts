@@ -15,6 +15,10 @@ import {
   setPieceClipIn,
   snapshotTiming,
   forgetTimingSnapshot,
+  snapToPause,
+  planRippleTrim,
+  applyRippleTrim,
+  RIPPLE_SNAP_SEC,
   revertSceneTiming,
   revertAllSceneTiming,
   MIN_SLICE_SEC,
@@ -673,5 +677,143 @@ describe("revertAllSceneTiming", () => {
     const r = revertAllSceneTiming(board());
     expect(r.ok).toBe(false);
     expect(r.reason).toMatch(/No timing edits/);
+  });
+});
+
+/**
+ * Ripple trim. The distinction that matters: MOVING a cut keeps every word and only decides which
+ * picture covers it, so the film's length never changes; a RIPPLE removes the words and the film
+ * gets shorter by exactly that much. Job 12 is why — shortening three scenes there changed the
+ * film's length by 0.000s, because every second came off one scene and went straight onto its
+ * neighbour.
+ */
+describe("snapToPause", () => {
+  const silences = [
+    { start: 9.8, end: 10.4 },
+    { start: 20.0, end: 20.1 },
+  ];
+
+  it("moves the cut into a nearby pause, clear of the next word's onset", () => {
+    const t = snapToPause(9.6, silences);
+    expect(t).toBeGreaterThanOrEqual(9.84);
+    expect(t).toBeLessThanOrEqual(10.36);
+  });
+
+  it("leaves a cut that is already inside a pause where it is", () => {
+    expect(snapToPause(10.0, silences)).toBeCloseTo(10.0, 3);
+  });
+
+  it("gives up rather than drag the cut somewhere unrelated", () => {
+    // Nothing within RIPPLE_SNAP_SEC — cut where the operator asked and let the caller say so.
+    expect(snapToPause(50, silences)).toBe(50);
+    expect(RIPPLE_SNAP_SEC).toBe(0.75);
+  });
+
+  it("passes the time straight through when no silences were recorded", () => {
+    expect(snapToPause(9.6, undefined)).toBe(9.6);
+    expect(snapToPause(9.6, [])).toBe(9.6);
+  });
+
+  it("ignores a pause too short to hold a clean cut", () => {
+    expect(snapToPause(30, [{ start: 29.99, end: 30.01 }])).toBe(30);
+  });
+});
+
+describe("planRippleTrim / applyRippleTrim", () => {
+  it("trims the START edge, deleting the words before it", () => {
+    const b = board(); // [0,10) [10,20) [20,30)
+    const plan = planRippleTrim(b, 2, 14, undefined, "start");
+    expect(plan.ok).toBe(true);
+    expect(plan.removedSec).toBeCloseTo(4, 3);
+
+    applyRippleTrim(b, 2, plan);
+    expect(b[1].narrationStartSec).toBeCloseTo(14, 3);
+    expect(b[0].narrationEndSec).toBe(10); // the neighbour stays put — the hole is the cut
+    // Its opening words are gone, so its own picture starts that much further in, or a
+    // lip-synced host's mouth would run ahead of the voice.
+    expect(b[1].clipInSec).toBeCloseTo(4, 3);
+  });
+
+  it("refuses to trim the FIRST scene's start — that audio would play under no picture", () => {
+    const r = planRippleTrim(board(), 1, 3, undefined, "start");
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/first scene starts/);
+  });
+
+  it("refuses a start edge dragged the wrong way", () => {
+    const r = planRippleTrim(board(), 2, 8, undefined, "start");
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/only shortens/);
+  });
+
+  it("carries a SPLIT pair's footage across the cut so the picture doesn't jump", () => {
+    // Two halves of one continuous shot: the second starts where the first leaves off.
+    const b = board();
+    b[1].clipUrl = b[2].clipUrl = "https://x/same.mp4";
+    b[1].clipUrls = b[2].clipUrls = ["https://x/same.mp4"];
+    b[1].clipInSec = 2;
+    b[2].clipInSec = 12; // 2 + the first half's 10s
+    expect(isContinuousPair(b[1], b[2])).toBe(true);
+
+    const plan = planRippleTrim(b, 2, 16);
+    const touched = applyRippleTrim(b, 2, plan);
+    expect(plan.removedSec).toBeCloseTo(4, 3);
+    // The first half is 4s shorter, so the second must start 4s earlier in the SAME footage.
+    expect(b[2].clipInSec).toBeCloseTo(8, 3);
+    expect(touched.sort()).toEqual([2, 3]);
+  });
+
+  it("leaves an unrelated neighbour's footage alone", () => {
+    const b = board(); // different clips per scene
+    applyRippleTrim(b, 2, planRippleTrim(b, 2, 16));
+    expect(b[2].clipInSec).toBeUndefined();
+  });
+
+  it("removes the span and leaves a HOLE, rather than moving the neighbour", () => {
+    const b = board(); // [0,10) [10,20) [20,30)
+    const plan = planRippleTrim(b, 2, 14);
+    expect(plan.ok).toBe(true);
+    expect(plan.removedSec).toBeCloseTo(6, 3);
+
+    applyRippleTrim(b, 2, plan);
+    expect(b[1].narrationEndSec).toBeCloseTo(14, 3);
+    // The neighbour does NOT move — the gap is what tells assembly to drop those words.
+    expect(b[2].narrationStartSec).toBe(20);
+    expect(b[1].timingEdited).toBe(true);
+    // ...and the pristine cut is preserved, so it can be reverted.
+    expect(b[1].timingOriginal?.narrationEndSec).toBe(20);
+  });
+
+  it("snaps onto a pause and reports that it did", () => {
+    const b = board();
+    const plan = planRippleTrim(b, 2, 14, [{ start: 14.5, end: 15.2 }]);
+    expect(plan.snapped).toBe(true);
+    expect(plan.cutFromSec).toBeGreaterThan(14.5);
+    expect(plan.cutFromSec).toBeLessThan(15.2);
+  });
+
+  it("refuses to lengthen — a ripple only ever shortens", () => {
+    const r = planRippleTrim(board(), 2, 25);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/only shortens/);
+  });
+
+  it("refuses to cut a scene below the picture floor", () => {
+    const r = planRippleTrim(board(), 2, 10.2);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(new RegExp(`${MIN_SLICE_SEC}s of picture`));
+  });
+
+  it("refuses a scene with no narration timing, or none at all", () => {
+    expect(planRippleTrim(board(), 99, 5).ok).toBe(false);
+    const b = board();
+    delete b[1].narrationEndSec;
+    expect(planRippleTrim(b, 2, 12).ok).toBe(false);
+  });
+
+  it("applies nothing for a plan that was refused", () => {
+    const b = board();
+    expect(applyRippleTrim(b, 2, planRippleTrim(b, 2, 25))).toEqual([]);
+    expect(b[1].narrationEndSec).toBe(20);
   });
 });

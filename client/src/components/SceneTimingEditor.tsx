@@ -463,6 +463,12 @@ export function SceneTimingEditor(props: {
   canRevert?: boolean;
   /** Put this scene back to that pristine cut. */
   onRevert?: () => void;
+  /**
+   * Ripple trim: shorten the scene at one edge and DELETE the narration between there and where
+   * that edge is now, instead of handing those words to the neighbour. Absent ⇒ the control is
+   * hidden (a job with no master narration has nothing to cut out of).
+   */
+  onRipple?: (newSec: number, edge: "start" | "end") => void;
 }) {
   const { startSec, endSec, prevStartSec, nextEndSec, pending, disabled } =
     props;
@@ -488,6 +494,18 @@ export function SceneTimingEditor(props: {
   const [clipIn, setClipIn] = useState(persistedClipIn);
   const [hold, setHold] = useState(persistedHold);
   const [headHold, setHeadHold] = useState(persistedHeadHold);
+  /**
+   * What shortening a scene does with the time it gives up.
+   *
+   * DEFAULT (false): the words are DELETED and the film gets shorter — "reduce" means reduce.
+   * Ticked: the old behaviour, where the time moves to the neighbour and every word survives.
+   *
+   * The default was the other way round and it was wrong. Handing the time over means the
+   * neighbour grows, and a scene stretched past its own footage freezes on its last frame — so
+   * the common edit produced exactly the frozen tail an operator is usually trying to remove.
+   * Transfer is still a real operation, it just isn't what happens when you say nothing.
+   */
+  const [giveToNeighbour, setGiveToNeighbour] = useState(false);
   const [playhead, setPlayhead] = useState(0); // offset into the slice
   const [playing, setPlaying] = useState(false);
   const [clipDur, setClipDur] = useState<number | undefined>(undefined);
@@ -1281,6 +1299,12 @@ export function SceneTimingEditor(props: {
 
   const apply = () => {
     pause();
+    // Shortening at either edge removes those words by default. Anything else — a hold, a trim,
+    // or an explicit hand-over to the neighbour — is an ordinary timing edit.
+    if (props.onRipple && !giveToNeighbour) {
+      if (end < endSec - 1e-6) return props.onRipple(r3(end), "end");
+      if (start > startSec + 1e-6) return props.onRipple(r3(start), "start");
+    }
     const edit: SceneTimingDraft = {};
     if (clipIn !== persistedClipIn) edit.clipInSec = clipIn;
     if (start !== startSec) edit.startSec = start;
@@ -1734,6 +1758,20 @@ export function SceneTimingEditor(props: {
             <Scissors className="mr-1.5 h-3 w-3" />
             Split here
           </Button>
+          {props.onRipple && (
+            <label
+              className="mr-1 flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground"
+              title="Shortening a scene normally DELETES the words it gives up, and the film gets shorter. Tick this to hand them to the neighbouring scene instead — every word survives and the film keeps its length, but that scene grows and will freeze if its clip is too short to fill it."
+            >
+              <input
+                type="checkbox"
+                checked={giveToNeighbour}
+                disabled={disabled || pending}
+                onChange={e => setGiveToNeighbour(e.target.checked)}
+              />
+              Give time to neighbour
+            </label>
+          )}
           {props.canRevert && props.onRevert && (
             <Button
               size="sm"

@@ -7789,16 +7789,30 @@ describe("masterOverlayEligible (seamless master-overlay gate)", () => {
     expect(masterOverlayEligible(scenes, "https://r2/master.mp3")).toBe(false);
   });
 
-  it("rejects broken tiling (gap or overlap beyond 1ms) and a non-zero first start", () => {
+  it("rejects an OVERLAP — two pictures cannot own the same words", () => {
+    expect(
+      masterOverlayEligible(
+        [scene(0, 4.2), scene(4.0, 9)],
+        "https://r2/master.mp3"
+      )
+    ).toBe(false);
+  });
+
+  it("rejects a non-zero first start: that opening audio would play under no picture", () => {
+    expect(
+      masterOverlayEligible([scene(0.5, 4)], "https://r2/master.mp3")
+    ).toBe(false);
+  });
+
+  it("ACCEPTS a gap between scenes — that is a ripple cut, not broken tiling", () => {
+    // The operator shortened scene 1 and those words leave the film; assembly concatenates the
+    // spans either side of the hole (`buildMasterOverlayAudioArgs`'s `drops`).
     expect(
       masterOverlayEligible(
         [scene(0, 4.2), scene(4.5, 9)],
         "https://r2/master.mp3"
       )
-    ).toBe(false);
-    expect(
-      masterOverlayEligible([scene(0.5, 4)], "https://r2/master.mp3")
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("tolerates float noise at shared boundaries", () => {

@@ -8,6 +8,7 @@ import {
   buildAudioConcatFilterArgs,
   buildFilmAudioConcatArgs,
   planMasterOverlayScenes,
+  planMasterOverlayParts,
   sanitizeInsertBoundaries,
   buildMasterOverlayAudioArgs,
   buildFilmRemuxArgs,
@@ -26,6 +27,7 @@ import {
   buildScenePieceArgs,
   planScenePieces,
 } from "./videoAssembly";
+import { operatorSetLength, sceneHoldPlan } from "../shared/filmTimeline";
 import {
   pickMusicBeds,
   musicBedUrl,
@@ -937,6 +939,183 @@ describe("buildAudioSegmentArgs", () => {
 });
 
 describe("planMasterOverlayScenes (master-timeline frame plan)", () => {
+  /**
+   * `holdSec` carries the narration length MEASURED AT VOICING, so it stops describing the scene
+   * the moment an operator shortens it. Uncapped it out-voted the new slice: the scene kept its
+   * old length, silence was spliced into the narration to cover the difference, and the film got
+   * LONGER when it had been asked to get shorter. `minHoldSec` is the floor that hold is allowed
+   * to reach, and nothing beyond it.
+   */
+  describe("minHoldSec caps a stale hold", () => {
+    /** Three 6s scenes on an 18s master, with scene 2 shortened to 3s by an operator. */
+    const shortened = (minHoldSec?: number) => [
+      { sliceStartSec: 0, sliceEndSec: 6, holdSec: 6, minHoldSec },
+      { sliceStartSec: 6, sliceEndSec: 9, holdSec: 6, minHoldSec },
+      { sliceStartSec: 9, sliceEndSec: 18, holdSec: 9, minHoldSec },
+    ];
+
+    it("lets a shortened scene actually get shorter, and keeps the film's length", () => {
+      const plan = planMasterOverlayScenes({ scenes: shortened(3) });
+      expect(plan.scenes.map(s => s.frames / 30)).toEqual([6, 3, 9]);
+      expect(plan.totalSec).toBeCloseTo(18, 6);
+      // No phantom silence: the narration is untouched, which is the whole premise of a cut move.
+      expect(plan.inserts).toEqual([]);
+    });
+
+    it("still holds a genuinely sub-floor beat to its floor", () => {
+      const plan = planMasterOverlayScenes({
+        scenes: [
+          { sliceStartSec: 0, sliceEndSec: 6, holdSec: 6, minHoldSec: 3 },
+          { sliceStartSec: 6, sliceEndSec: 7, holdSec: 3, minHoldSec: 3 },
+          { sliceStartSec: 7, sliceEndSec: 13, holdSec: 6, minHoldSec: 3 },
+        ],
+      });
+      // 1s of words, 3s on screen — and the 2s of frozen tail is paid for with real silence.
+      expect(plan.scenes[1].frames / 30).toBeCloseTo(3, 6);
+      expect(plan.inserts).toEqual([{ atSec: 7, durSec: 2 }]);
+    });
+
+    it("honours the floor even when the operator cuts BELOW it", () => {
+      const plan = planMasterOverlayScenes({
+        scenes: [
+          { sliceStartSec: 0, sliceEndSec: 1, holdSec: 6, minHoldSec: 3 },
+        ],
+      });
+      expect(plan.scenes[0].frames / 30).toBeCloseTo(3, 6);
+    });
+
+    it("changes nothing for a scene that was never shortened", () => {
+      const scenes = [
+        { sliceStartSec: 0, sliceEndSec: 6, holdSec: 6, minHoldSec: 3 },
+        { sliceStartSec: 6, sliceEndSec: 12, holdSec: 6, minHoldSec: 3 },
+      ];
+      const capped = planMasterOverlayScenes({ scenes });
+      const uncapped = planMasterOverlayScenes({
+        scenes: scenes.map(({ minHoldSec, ...rest }) => rest),
+      });
+      expect(capped).toEqual(uncapped);
+    });
+
+    it("falls back to the largest floor when the scene carries none", () => {
+      // The last resort, and deliberately conservative: with no floor recorded the plan cannot
+      // tell whether this beat's floor is 3s or 4s, so it assumes the larger rather than risk a
+      // flash. Rarely reached in practice — the server derives the exact floor for a storyboard
+      // that predates the field (`sceneFloorSec`), for assembly and for the preview alike.
+      const plan = planMasterOverlayScenes({ scenes: shortened(undefined) });
+      expect(plan.scenes.map(s => s.frames / 30)).toEqual([6, 4, 9]);
+      expect(plan.totalSec).toBeCloseTo(19, 6);
+    });
+  });
+
+  /**
+   * An operator-set length is THE length. A floor and a CTA tail default exist to stop the
+   * PIPELINE emitting a beat that flashes past or a QR nobody can scan; neither may overrule a
+   * length a person chose in the cut room. Job 12 scene 73 was the case: cut to 0.81s, it stayed
+   * on screen for 6.30s — the stale measured length floored it back up and the tail default put
+   * three seconds on top.
+   */
+  describe("sceneHoldPlan: an operator-set length wins", () => {
+    const cut = {
+      narrationStartSec: 470.393,
+      narrationEndSec: 471.203, // the operator cut it here
+      audioDuration: 3.332, // measured BEFORE that cut
+      qrTail: true,
+      timingOriginal: { narrationStartSec: 470.393, narrationEndSec: 473.725 },
+    };
+
+    it("drops the stale hold AND the tail default on a re-timed beat", () => {
+      expect(operatorSetLength(cut)).toBe(true);
+      expect(sceneHoldPlan(cut, 3)).toEqual({
+        holdSec: undefined,
+        minHoldSec: undefined,
+        tailHoldSec: undefined,
+        headHoldSec: undefined,
+      });
+      const plan = planMasterOverlayScenes({
+        scenes: [
+          {
+            sliceStartSec: cut.narrationStartSec,
+            sliceEndSec: cut.narrationEndSec,
+            ...sceneHoldPlan(cut, 3),
+          },
+        ],
+      });
+      // 0.81s of slice, 0.81s on screen — 6.30s before.
+      expect(plan.scenes[0].frames / 30).toBeCloseTo(0.81, 1);
+      expect(plan.inserts).toEqual([]);
+    });
+
+    it("keeps both on a beat the operator has NOT re-timed", () => {
+      const { timingOriginal, ...untouched } = cut;
+      expect(operatorSetLength(untouched)).toBe(false);
+      expect(sceneHoldPlan(untouched, 3)).toMatchObject({
+        holdSec: 3.332,
+        minHoldSec: 3,
+        tailHoldSec: 3,
+      });
+    });
+
+    it("an EXPLICIT hold is the operator's own number and always wins, including 0", () => {
+      expect(sceneHoldPlan({ ...cut, tailHoldSec: 2 }, 3).tailHoldSec).toBe(2);
+      const untouched = { ...cut, timingOriginal: undefined, tailHoldSec: 0 };
+      expect(sceneHoldPlan(untouched, 3).tailHoldSec).toBe(0);
+    });
+
+    it("a cut marker or a slip is not a length change, so nothing is dropped", () => {
+      // `timingOriginal` is written by ANY cut-room edit; only a moved boundary means the
+      // operator set the length.
+      const slipped = {
+        ...cut,
+        narrationEndSec: 473.725, // unchanged from the original
+        timingOriginal: {
+          narrationStartSec: 470.393,
+          narrationEndSec: 473.725,
+        },
+      };
+      expect(operatorSetLength(slipped)).toBe(false);
+      expect(sceneHoldPlan(slipped, 3).tailHoldSec).toBe(3);
+    });
+
+    it("a cover reveal still ends with its narration", () => {
+      expect(
+        sceneHoldPlan({ coverHero: true, audioDuration: 9 }, 3).holdSec
+      ).toBeUndefined();
+    });
+  });
+
+  /**
+   * The bug this cap was really hiding. `holdSec` is measured at TTS time, but the scene ranges
+   * are afterwards snapped onto real pauses (`SNAP_TOLERANCE_SEC` = 0.75s) — so on an ORDINARY,
+   * never-edited scene the measured length routinely sits a fraction of a second above the slice.
+   * Uncapped, every one of those froze its last frame for the difference and had that much
+   * silence spliced into the narration beneath it.
+   */
+  describe("pause-snapping drift is not a hold", () => {
+    const drift = [0.42, 0.11, 0.68, 0.03, 0.55, 0.2];
+    const film = (minHoldSec?: number) =>
+      drift.map((d, i) => ({
+        sliceStartSec: i * 6,
+        sliceEndSec: (i + 1) * 6,
+        holdSec: 6 + d,
+        minHoldSec,
+      }));
+
+    it("leaves an untouched film exactly as long as its narration", () => {
+      const plan = planMasterOverlayScenes({ scenes: film() });
+      expect(plan.scenes.map(s => s.frames / 30)).toEqual([6, 6, 6, 6, 6, 6]);
+      expect(plan.totalSec).toBeCloseTo(36, 6);
+      expect(plan.inserts).toEqual([]);
+    });
+
+    it("held every one of them before the cap", () => {
+      const plan = planMasterOverlayScenes({
+        scenes: film(Infinity),
+      });
+      expect(plan.inserts).toHaveLength(6);
+      expect(plan.totalSec).toBeCloseTo(38, 6);
+    });
+  });
+
   it("keeps every scene start within half a frame of the master timeline (carry never accumulates)", () => {
     // Pseudo-random but deterministic slice lengths — the property that matters over a long
     // film is |framesCum/fps − idealCum| ≤ 0.5/fps at EVERY boundary.
@@ -1032,6 +1211,79 @@ describe("planMasterOverlayScenes (master-timeline frame plan)", () => {
   });
 });
 
+/**
+ * A ripple trim removes words from the film. The hole it leaves between one scene's end and the
+ * next one's start IS the instruction — these check the plan that turns it into a filter graph.
+ */
+describe("planMasterOverlayParts (ripple drops and hold inserts)", () => {
+  it("keeps the whole master when there is nothing to do", () => {
+    expect(planMasterOverlayParts({ inserts: [] })).toEqual([
+      { kind: "master", fromSec: 0 },
+    ]);
+  });
+
+  it("skips a dropped span, joining the two sides", () => {
+    expect(
+      planMasterOverlayParts({ inserts: [], drops: [{ fromSec: 4, toSec: 8 }] })
+    ).toEqual([
+      { kind: "master", fromSec: 0, toSec: 4 },
+      { kind: "master", fromSec: 8 },
+    ]);
+  });
+
+  it("composes a drop with a hold insert, in timeline order", () => {
+    expect(
+      planMasterOverlayParts({
+        inserts: [{ atSec: 2, durSec: 1 }],
+        drops: [{ fromSec: 4, toSec: 8 }],
+      })
+    ).toEqual([
+      { kind: "master", fromSec: 0, toSec: 2 },
+      { kind: "silence", durSec: 1 },
+      { kind: "master", fromSec: 2, toSec: 4 },
+      { kind: "master", fromSec: 8 },
+    ]);
+  });
+
+  it("discards an insert that fell inside a dropped span", () => {
+    // It belonged to a scene boundary the ripple removed; keeping it would splice silence into
+    // a seam that no longer exists.
+    expect(
+      planMasterOverlayParts({
+        inserts: [{ atSec: 6, durSec: 3 }],
+        drops: [{ fromSec: 4, toSec: 8 }],
+      })
+    ).toEqual([
+      { kind: "master", fromSec: 0, toSec: 4 },
+      { kind: "master", fromSec: 8 },
+    ]);
+  });
+
+  it("puts a lead hold before any of the master", () => {
+    expect(
+      planMasterOverlayParts({ inserts: [{ atSec: 0, durSec: 2 }] })
+    ).toEqual([
+      { kind: "silence", durSec: 2 },
+      { kind: "master", fromSec: 0 },
+    ]);
+  });
+
+  it("merges back-to-back drops into one join", () => {
+    expect(
+      planMasterOverlayParts({
+        inserts: [],
+        drops: [
+          { fromSec: 4, toSec: 6 },
+          { fromSec: 6, toSec: 9 },
+        ],
+      })
+    ).toEqual([
+      { kind: "master", fromSec: 0, toSec: 4 },
+      { kind: "master", fromSec: 9 },
+    ]);
+  });
+});
+
 describe("buildMasterOverlayAudioArgs (untouched master over the whole film)", () => {
   it("with no inserts just pads/trims the master to the film length, one AAC encode", () => {
     const args = buildMasterOverlayAudioArgs({
@@ -1074,10 +1326,10 @@ describe("buildMasterOverlayAudioArgs (untouched master over the whole film)", (
     expect(filter).toContain(
       "[c2]atrim=start=25.500,asetpts=PTS-STARTPTS,afade=t=in:st=0:d=0.015[p2]"
     );
-    expect(filter).toContain("atrim=end=1.800[g1]");
-    expect(filter).toContain("atrim=end=3.000[g2]");
+    expect(filter).toContain("atrim=end=1.800[g0]");
+    expect(filter).toContain("atrim=end=3.000[g1]");
     expect(filter).toContain(
-      "[p0][g1][p1][g2][p2]concat=n=5:v=0:a=1,apad,atrim=end=40.000[a]"
+      "[p0][g0][p1][g1][p2]concat=n=5:v=0:a=1,apad,atrim=end=40.000[a]"
     );
     // The whole point: the master's speech is never cut or re-concatenated per scene.
     expect(filter).not.toContain("silenceremove");
@@ -1091,10 +1343,10 @@ describe("buildMasterOverlayAudioArgs (untouched master over the whole film)", (
       outputPath: "/tmp/film-audio.m4a",
     });
     const filter = args[args.indexOf("-filter_complex") + 1];
-    expect(filter).toBe(
-      "[0:a]aformat=sample_rates=48000:channel_layouts=stereo:sample_fmts=fltp[base];" +
-        "anullsrc=r=48000:cl=stereo,aformat=sample_rates=48000:channel_layouts=stereo:sample_fmts=fltp,atrim=end=2.000[g0];" +
-        "[g0][base]concat=n=2:v=0:a=1,apad,atrim=end=12.000[a]"
+    // Silence first, then the whole master — nothing is cut out of it.
+    expect(filter).toContain("atrim=end=2.000[g0]");
+    expect(filter).toContain(
+      "[g0][p0]concat=n=2:v=0:a=1,apad,atrim=end=12.000[a]"
     );
     // Never a zero-length chunk trimmed off the master before the hold.
     expect(filter).not.toContain("atrim=end=0.000");

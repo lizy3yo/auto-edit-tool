@@ -83,6 +83,8 @@ import {
   moveCutPoint,
   cutPoints,
   forgetTimingSnapshot,
+  applyRippleTrim,
+  planRippleTrim,
   revertAllSceneTiming,
   revertSceneTiming,
   validateAddCut,
@@ -91,7 +93,10 @@ import {
   validateSetPieceClipIn,
   setPieceClipIn,
   type SceneTimingEdit,
+  type Silence,
+  type RippleEdge,
 } from "./sceneTiming";
+import { sceneHoldPlan } from "../shared/filmTimeline";
 
 /**
  * The host lip-sync lane, resolved once per pipeline pass. HeyGen Avatar IV is the only
@@ -5818,6 +5823,16 @@ const floorFor = (
       : SCENE_MIN_HOLD_SEC;
 
 /**
+ * The shortest a scene may sit on screen, for a job whose storyboard predates `minHoldSec`.
+ * Exported because the tRPC layer hands it to the browser: `floorFor` reads the channel's
+ * pacing, so the live preview cannot derive it and would otherwise disagree with the render.
+ */
+export const sceneFloorSec = (
+  s: StoryboardScene,
+  params: LongformInputParams
+): number => floorFor(s, pacingFor(params));
+
+/**
  * Split any scene whose MEASURED narration exceeds its ceiling (`capFor`) — a scene the sentence-
  * first segmenter expected to fit one clip but TTS pace drift pushed over. Runs post-TTS.
  * Scenes at/under the ceiling pass through untouched.
@@ -6283,6 +6298,11 @@ export function applySceneHoldFloor(
   if (s.coverHero) return; // cover ends with its narration — no silent hold
   const dur = s.audioDuration ?? 0;
   const floor = floorFor(s, pacing);
+  // Record the floor as well as applying it. It depends on the beat's register and the channel's
+  // pacing, so neither assembly nor the browser's preview can re-derive it — and both need it to
+  // tell "this scene is short, hold it" apart from "this scene was voiced longer than the
+  // operator has since made it" (see `minHoldSec`).
+  s.minHoldSec = floor;
   if (dur > 0 && dur < floor) s.audioDuration = floor;
 }
 
@@ -8539,6 +8559,10 @@ async function runUnifiedPipeline(
   await updateLongformVideoJob(jobId, {
     storyboard: scenes,
     masterAudioUrl: master.url,
+    // Keep the pauses the aligner just found. A ripple trim physically removes a span of the
+    // narration, and both the cut room (at edit time) and assembly (at render time) have to snap
+    // that span onto the SAME pause or the operator drags to one length and gets another.
+    masterSilences: silences,
     progress: jobProgress(jobId, {
       scenesTotal: scenes.length,
       scenesDone: 0,
@@ -9039,10 +9063,17 @@ function summarizeSkips(skipped: { index: number; reason: string }[]): string {
 }
 
 /**
- * Whether assembly may lay the continuous master narration over the whole film: the master
- * must be persisted and every scene must still carry a CONTIGUOUS slice of its timeline
- * (`narrationStartSec/EndSec` tile [0, master end] — a re-voiced or hand-edited scene breaks
- * the tiling and drops the job back to the per-scene audio concat path). Pure — unit-tested.
+ * Whether assembly may lay the master narration over the whole film: it must be persisted and
+ * every scene must carry a slice of its timeline that runs FORWARD and never overlaps its
+ * neighbour's (a re-voiced scene clears its range and drops the job back to the per-scene audio
+ * concat path).
+ *
+ * A GAP between one scene's end and the next one's start is allowed, and means exactly one
+ * thing: the operator ripple-trimmed that span out, so those words are dropped from the film
+ * (assembly concatenates the kept spans — see `buildMasterOverlayAudioArgs`). Gaps used to be
+ * rejected along with overlaps, which is why shortening a scene could only hand its words to the
+ * neighbour instead of removing them. Overlaps stay illegal: two pictures cannot own the same
+ * words. Pure — unit-tested.
  */
 export function masterOverlayEligible(
   scenes: StoryboardScene[],
@@ -9051,12 +9082,19 @@ export function masterOverlayEligible(
   if (!masterAudioUrl || scenes.length === 0) return false;
   const eps = 1e-3;
   let prevEnd = 0;
-  for (const s of scenes) {
+  for (let i = 0; i < scenes.length; i++) {
+    const s = scenes[i];
     const start = s.narrationStartSec;
     const end = s.narrationEndSec;
     if (!Number.isFinite(start) || !Number.isFinite(end)) return false;
     if ((end as number) < (start as number) - eps) return false;
-    if (Math.abs((start as number) - prevEnd) > eps) return false;
+    // The film must start at the start of the narration: a gap BEFORE the first scene is not a
+    // ripple cut (those are computed between scenes), so that opening audio would play under no
+    // picture at all.
+    if (i === 0 && Math.abs(start as number) > eps) return false;
+    // Forward-only after that: a start BEFORE the previous end is an overlap — two pictures
+    // cannot own the same words. A start AFTER it is a ripple cut, and legal.
+    if ((start as number) < prevEnd - eps) return false;
     prevEnd = end as number;
   }
   return true;
@@ -9129,10 +9167,14 @@ async function assembleAndFinalize(
     clipUrls: s.clipUrls?.length ? s.clipUrls : [s.clipUrl as string],
     trimLeadSec: clipTrimFor(s, params.faceImageUrl),
     audioUrl: s.audioUrl as string,
-    // Covers ignore the stored duration — pre-6db7131 jobs persisted the old 5s
-    // COVER_HOLD_SEC floor into audioDuration, which would freeze the cover over
-    // trailing silence; the cover must end with its measured narration.
-    audioDurationSec: s.coverHero ? undefined : s.audioDuration,
+    // Every hold input — the on-screen floor, the CTA release tail, an operator's own hold —
+    // comes from one shared helper, so assembly, the chapter map and the
+    // browser's live preview cannot disagree about how long a scene is on screen. The floor is
+    // derived here when the storyboard predates `minHoldSec`: `floorFor` needs the channel's
+    // pacing, which only the server has.
+    ...(({ holdSec, ...hold }) => ({ audioDurationSec: holdSec, ...hold }))(
+      sceneHoldPlan(s, s.minHoldSec ?? floorFor(s, pacingFor(params)))
+    ),
     // The QR draws ONLY on anchored beats — the big-QR "grab your phone" block (qrHero), the
     // small pre-cover scan window (qrCorner), and the cover-reveal beat (coverHero) — never on
     // ordinary cta/price scenes, so a spoken dollar amount can't surface it.
@@ -9144,18 +9186,6 @@ async function assembleAndFinalize(
     qrPlacement: (s.qrHero && !s.hostPresent && !s.coverHero
       ? "center"
       : "corner") as "corner" | "center",
-    // The block's release beat holds a silent frozen QR_TAIL_HOLD_SEC tail so the QR lingers
-    // ~3s past "I'll wait right here" (extended in assembly via tpad/apad) — unless the operator
-    // set a hold themselves (`scene.tailHoldSec`, 0 to remove it; see sceneTiming.ts).
-    tailHoldSec:
-      s.tailHoldSec !== undefined
-        ? s.tailHoldSec
-        : s.qrTail
-          ? QR_TAIL_HOLD_SEC
-          : undefined,
-    // Operator hold before the FIRST scene's own first word — tailHoldSec's mirror, at the
-    // front. No default: unlike the CTA tail, there's no beat that wants this on by itself.
-    headHoldSec: s.headHoldSec,
     // Operator trim — which part of the rendered clip the scene shows.
     clipInSec: s.clipInSec,
     // Operator cut markers and their per-piece footage overrides (CapCut-style split).
@@ -9745,7 +9775,19 @@ export type SceneEditRequest =
    * shared edge only comes back when the neighbour on that side was never edited — see
    * `revertSceneTiming`.
    */
-  | { kind: "reverttiming"; sceneIndex: number };
+  | { kind: "reverttiming"; sceneIndex: number }
+  /**
+   * RIPPLE trim: end this scene earlier and DELETE the narration between there and where it used
+   * to end, instead of handing those words to the next scene (which is what moving a cut does).
+   * The film gets shorter by exactly that much. Metadata only — the hole left in the master
+   * timeline is what tells assembly to drop the words.
+   */
+  | {
+      kind: "ripple";
+      sceneIndex: number;
+      newSec: number;
+      edge: RippleEdge;
+    };
 
 /** Requests that change how a scene ASSEMBLES without rendering anything. */
 const isTimingKind = (req: SceneEditRequest): boolean =>
@@ -9754,7 +9796,8 @@ const isTimingKind = (req: SceneEditRequest): boolean =>
   req.kind === "uncut" ||
   req.kind === "movecut" ||
   req.kind === "piececlip" ||
-  req.kind === "reverttiming";
+  req.kind === "reverttiming" ||
+  req.kind === "ripple";
 
 interface SceneEditSession {
   queue: SceneEditQueue<SceneEditRequest>;
@@ -10192,6 +10235,8 @@ async function runSceneEdit(
           runPieceClipEdit(ctx, s, req.cutOffsetSec, req.clipInSec);
         } else if (req.kind === "reverttiming") {
           runRevertTimingEdit(ctx, s);
+        } else if (req.kind === "ripple") {
+          await runRippleEdit(ctx, s, req.newSec, req.edge);
         } else {
           if (req.kind === "regen") await runRegenEdit(ctx, s, req);
           else await runSplitEdit(ctx, s, req.edit);
@@ -10289,6 +10334,15 @@ function runTimingEdit(
     { ...edit, sceneIndex: scene.index },
     { keepsLipSync }
   );
+  // Backfill the on-screen floor on anything this moved. A storyboard written before
+  // `minHoldSec` existed has none, and a boundary move is exactly the edit that needs it — the
+  // scene's voiced length would otherwise hold it at its old size (see `applySceneHoldFloor`).
+  const pacing = pacingFor(ctx.params);
+  for (const i of touched) {
+    const t = ctx.scenes.find(x => x.index === i);
+    if (t && t.minHoldSec === undefined && !t.qrHero && !t.coverHero)
+      t.minHoldSec = floorFor(t, pacing);
+  }
   console.log(
     `[Longform ${ctx.jobId}] scene ${scene.index} timing edit applied (${Object.keys(
       edit
@@ -10364,6 +10418,41 @@ function runMoveCutEdit(
   moveCutPoint(ctx.scenes, scene.index, fromOffsetSec, toOffsetSec);
   console.log(
     `[Longform ${ctx.jobId}] scene ${scene.index} cut moved ${fromOffsetSec.toFixed(2)}s → ${toOffsetSec.toFixed(2)}s`
+  );
+}
+
+/**
+ * Ripple trim: end this scene earlier and take those words OUT of the narration.
+ *
+ * The difference from moving a cut is the whole point — a move keeps every word and only decides
+ * which picture covers it, so the film's length never changes; a ripple removes the words, and
+ * the film gets shorter by exactly that much. What makes it work downstream is that the scene's
+ * end no longer meets its neighbour's start: `masterOverlayEligible` allows that hole, and
+ * `buildMasterOverlayAudioArgs` concatenates the spans either side of it.
+ *
+ * The cut is snapped onto a real pause using the silences kept at voicing time, so it never lands
+ * mid-word. A job voiced before those were kept has none — the cut then lands exactly where the
+ * operator dragged, and the log says so rather than pretending otherwise.
+ */
+async function runRippleEdit(
+  ctx: SceneEditContext,
+  scene: StoryboardScene,
+  newSec: number,
+  edge: RippleEdge
+): Promise<void> {
+  const job = await getLongformVideoJobById(ctx.jobId);
+  const silences = (job?.masterSilences as Silence[] | null) ?? undefined;
+  const plan = planRippleTrim(ctx.scenes, scene.index, newSec, silences, edge);
+  if (!plan.ok) throw new Error(plan.reason ?? "Cannot ripple here");
+  applyRippleTrim(ctx.scenes, scene.index, plan);
+  console.log(
+    `[Longform ${ctx.jobId}] scene ${scene.index} ripple (${edge}): removed ${plan.removedSec.toFixed(2)}s ` +
+      `of narration (${plan.cutFromSec.toFixed(2)}s–${plan.cutToSec.toFixed(2)}s)` +
+      (plan.snapped
+        ? " — snapped onto a pause"
+        : silences?.length
+          ? " — no pause within reach, cut as dragged"
+          : " — no silences recorded for this job, cut as dragged")
   );
 }
 
@@ -10480,6 +10569,15 @@ export async function revertSceneTimingEdits(
   sceneIndex: number
 ): Promise<EditAccept> {
   return enqueueSceneEdit(jobId, { kind: "reverttiming", sceneIndex });
+}
+
+export async function rippleTrimScene(
+  jobId: number,
+  sceneIndex: number,
+  newSec: number,
+  edge: RippleEdge = "end"
+): Promise<EditAccept> {
+  return enqueueSceneEdit(jobId, { kind: "ripple", sceneIndex, newSec, edge });
 }
 
 /**

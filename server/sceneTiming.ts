@@ -720,3 +720,210 @@ export function revertAllSceneTiming(scenes: StoryboardScene[]): TimingRevert {
   }
   return { ok: true, touched: edited.map(s => s.index) };
 }
+
+/** A silent stretch of the master narration, seconds. Mirrors `SilenceInterval` in assembly. */
+export interface Silence {
+  start: number;
+  end: number;
+}
+
+/**
+ * How far a ripple cut may be nudged to land in a pause. Mirrors the aligner's own
+ * `SNAP_TOLERANCE_SEC` — the same budget every other physical cut in the pipeline gets.
+ */
+export const RIPPLE_SNAP_SEC = 0.75;
+/** Keep the cut this far inside the pause, so the next word still has real silence before it.
+ *  Same convention as assembly's `sanitizeInsertBoundaries`. */
+const CLEAN_LEAD_SEC = 0.04;
+
+/**
+ * Move `t` onto the nearest genuine pause, within `RIPPLE_SNAP_SEC`.
+ *
+ * A ripple trim DELETES narration, so its boundary has to sit in silence or the cut chops a
+ * word — the one failure an operator cannot undo by re-dragging, because the words are gone from
+ * the film. Returns `t` unchanged when no pause is near enough (or none are known, on a job
+ * voiced before the silences were kept), which is the honest fallback: cut where they asked and
+ * let the caller warn. Pure — unit-tested.
+ */
+export function snapToPause(
+  t: number,
+  silences: Silence[] | undefined
+): number {
+  if (!silences?.length) return t;
+  let best = t;
+  let bestDist = Infinity;
+  for (const sil of silences) {
+    // Anywhere inside the pause is clean, so aim for the point closest to what was asked —
+    // clamped off the very edges so a word's onset keeps its lead-in.
+    const lo = sil.start + CLEAN_LEAD_SEC;
+    const hi = sil.end - CLEAN_LEAD_SEC;
+    if (hi <= lo) continue;
+    const cand = Math.min(Math.max(t, lo), hi);
+    const d = Math.abs(cand - t);
+    if (d < bestDist) {
+      bestDist = d;
+      best = cand;
+    }
+  }
+  return bestDist <= RIPPLE_SNAP_SEC ? roundMs(best) : t;
+}
+
+/** Which end of a scene a ripple takes its bite out of. */
+export type RippleEdge = "start" | "end";
+
+/** What a ripple trim would do, for the UI to show before it is applied. */
+export interface RipplePlan {
+  ok: boolean;
+  reason?: string;
+  /** Which edge moved. */
+  edge: RippleEdge;
+  /** Master-timeline span that would be deleted from the narration. */
+  cutFromSec: number;
+  cutToSec: number;
+  /** Seconds removed — the film gets exactly this much shorter. */
+  removedSec: number;
+  /** True when the requested cut was moved to land in a pause. */
+  snapped: boolean;
+}
+
+/**
+ * Plan a RIPPLE trim: shorten a scene to `newSec` at one edge and DELETE the narration between
+ * there and where that edge used to be, instead of handing those words to the neighbour.
+ *
+ * This is the difference the operator is really asking about. Moving a cut (`applyTimingEdit`)
+ * keeps every word and only decides which picture covers it, so the film's length never changes —
+ * and the neighbour that gains the time often has no footage for it, which is where a frozen last
+ * frame comes from. A ripple removes the words, and the film gets shorter by exactly that much.
+ *
+ * Either edge: `"end"` cuts the words after `newSec`, `"start"` cuts the ones before it. Both
+ * leave a hole in the master timeline, which is what tells assembly to drop them.
+ *
+ * The cut is snapped onto a real pause (see `snapToPause`), so the scene can land up to
+ * `RIPPLE_SNAP_SEC` off the requested length — reported, so the UI can show what will actually
+ * ship rather than what was dragged to. Pure — unit-tested.
+ */
+export function planRippleTrim(
+  scenes: StoryboardScene[],
+  sceneIndex: number,
+  newSec: number,
+  silences?: Silence[],
+  edge: RippleEdge = "end"
+): RipplePlan {
+  const nothing = {
+    edge,
+    cutFromSec: 0,
+    cutToSec: 0,
+    removedSec: 0,
+    snapped: false,
+  };
+  const at = scenes.findIndex(s => s.index === sceneIndex);
+  if (at < 0)
+    return { ok: false, reason: `Scene ${sceneIndex} not found`, ...nothing };
+  const scene = scenes[at];
+  if (!fin(scene.narrationStartSec) || !fin(scene.narrationEndSec))
+    return {
+      ok: false,
+      reason: `Scene ${sceneIndex} has no narration timing yet — render the film first`,
+      ...nothing,
+    };
+  if (!fin(newSec))
+    return { ok: false, reason: "Position must be a number", ...nothing };
+
+  // The first scene's start is pinned to the start of the narration: cutting there would leave
+  // opening words under no picture at all (`masterOverlayEligible` rejects it outright).
+  if (edge === "start" && at === 0)
+    return {
+      ok: false,
+      reason: "The first scene starts where the narration starts",
+      ...nothing,
+    };
+
+  const shortensBy =
+    edge === "end"
+      ? (scene.narrationEndSec as number) - newSec
+      : newSec - (scene.narrationStartSec as number);
+  if (shortensBy <= 1e-6)
+    return {
+      ok: false,
+      reason:
+        edge === "end"
+          ? "A ripple trim only shortens — drag the end earlier"
+          : "A ripple trim only shortens — drag the start later",
+      ...nothing,
+    };
+
+  const snappedSec = snapToPause(newSec, silences);
+  const snapped = Math.abs(snappedSec - newSec) > 1e-6;
+  const cutFrom =
+    edge === "end" ? snappedSec : (scene.narrationStartSec as number);
+  const cutTo = edge === "end" ? (scene.narrationEndSec as number) : snappedSec;
+  const kept =
+    edge === "end"
+      ? snappedSec - (scene.narrationStartSec as number)
+      : (scene.narrationEndSec as number) - snappedSec;
+  const base = {
+    edge,
+    cutFromSec: roundMs(cutFrom),
+    cutToSec: roundMs(cutTo),
+    removedSec: roundMs(cutTo - cutFrom),
+    snapped,
+  };
+  if (kept < MIN_SLICE_SEC)
+    return {
+      ok: false,
+      reason: `A scene must keep at least ${MIN_SLICE_SEC}s of picture`,
+      ...base,
+    };
+  return { ok: true, ...base };
+}
+
+/**
+ * Apply a validated ripple trim in place.
+ *
+ * The neighbour is NOT moved — the hole left in the master timeline is exactly what tells
+ * assembly to drop those words (`masterOverlayEligible` allows gaps; the audio builder
+ * concatenates the spans either side).
+ *
+ * Two footage offsets follow the cut, for the same reasons `applyTimingEdit` moves them:
+ *  - trimming a scene's START drops its opening words, so its own clip has to advance by the
+ *    same amount or a lip-synced host's mouth runs ahead of the voice;
+ *  - trimming a scene's END inside one CONTINUOUS shot (a scene split in two — `isContinuousPair`)
+ *    means the second half must start that much earlier in the footage, or the picture jumps at a
+ *    seam that is supposed to be invisible.
+ *
+ * Returns the indices whose stored timing changed. Pure.
+ */
+export function applyRippleTrim(
+  scenes: StoryboardScene[],
+  sceneIndex: number,
+  plan: RipplePlan
+): number[] {
+  const at = scenes.findIndex(s => s.index === sceneIndex);
+  if (at < 0 || !plan.ok) return [];
+  const scene = scenes[at];
+  const touched = new Set<number>([sceneIndex]);
+  snapshotTiming(scene);
+
+  if (plan.edge === "end") {
+    const next = scenes[at + 1];
+    const continuous = next ? isContinuousPair(scene, next) : false;
+    scene.narrationEndSec = roundMs(plan.cutFromSec);
+    if (continuous && next) {
+      snapshotTiming(next);
+      next.clipInSec = roundMs(
+        Math.max(0, (next.clipInSec ?? 0) - plan.removedSec)
+      );
+      next.timingEdited = true;
+      touched.add(next.index);
+    }
+  } else {
+    scene.narrationStartSec = roundMs(plan.cutToSec);
+    // Its opening words are gone, so its own picture starts that much further in.
+    scene.clipInSec = roundMs((scene.clipInSec ?? 0) + plan.removedSec);
+  }
+
+  if (scene.clipInSec !== undefined && scene.clipInSec <= 0)
+    delete scene.clipInSec;
+  scene.timingEdited = true;
+  return Array.from(touched);
+}

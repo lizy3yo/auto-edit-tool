@@ -46,7 +46,11 @@ import {
   LongformCutPreview,
   QR_TAIL_HOLD_SEC,
 } from "@/components/LongformCutPreview";
-import { FPS, planMasterOverlayScenes } from "@shared/filmTimeline";
+import {
+  FPS,
+  planMasterOverlayScenes,
+  sceneHoldPlan,
+} from "@shared/filmTimeline";
 import { sanitizeError, isCreditError } from "@/lib/errorSanitizer";
 import { triggerCreditErrorPopup } from "@/components/CreditErrorPopup";
 import type { SplitLayout, StoryboardScene } from "@shared/types";
@@ -572,6 +576,25 @@ export default function LongformJobSlot({
     onError: err => toast.error(err.message),
   });
 
+  const rippleMutation = trpc.longformVideo.rippleTrimScene.useMutation({
+    onSuccess: (d, vars) => {
+      if (d.accepted === "ignored") {
+        toast.info(
+          `Scene ${vars.sceneIndex} is rendering — trim it once it finishes`
+        );
+        return;
+      }
+      toast.success(
+        `Removed ${d.removedSec.toFixed(2)}s of narration` +
+          (d.snapped ? " (snapped onto a pause)" : "") +
+          " — Reassemble to apply it"
+      );
+      watchCutRoom();
+      if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
+    },
+    onError: err => toast.error(err.message),
+  });
+
   const revertSceneTimingMutation =
     trpc.longformVideo.revertSceneTiming.useMutation({
       onSuccess: (d, vars) => {
@@ -914,9 +937,7 @@ export default function LongformJobSlot({
       scenes: usable.map(s => ({
         sliceStartSec: s.narrationStartSec as number,
         sliceEndSec: s.narrationEndSec as number,
-        holdSec: s.coverHero ? undefined : s.audioDuration,
-        tailHoldSec: s.tailHoldSec ?? (s.qrTail ? QR_TAIL_HOLD_SEC : undefined),
-        headHoldSec: s.headHoldSec,
+        ...sceneHoldPlan(s),
       })),
     });
     let at = 0;
@@ -2383,6 +2404,7 @@ export default function LongformJobSlot({
                                         moveCutMutation.isPending ||
                                         setPieceClipInMutation.isPending ||
                                         revertSceneTimingMutation.isPending ||
+                                        rippleMutation.isPending ||
                                         isSceneQueued
                                       }
                                       onApply={edit => {
@@ -2435,6 +2457,19 @@ export default function LongformJobSlot({
                                           clipInSec,
                                         });
                                       }}
+                                      onRipple={
+                                        job?.masterAudioUrl
+                                          ? (newSec, edge) => {
+                                              if (!jobId) return;
+                                              rippleMutation.mutate({
+                                                jobId,
+                                                sceneIndex: scene.index,
+                                                newSec,
+                                                edge,
+                                              });
+                                            }
+                                          : undefined
+                                      }
                                       canRevert={!!scene.timingOriginal}
                                       onRevert={() => {
                                         if (!jobId) return;

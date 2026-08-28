@@ -860,76 +860,186 @@ export function sanitizeInsertBoundaries(
  * prepended to the chain once the rest of the plan is built exactly as it would without it —
  * the no-lead-hold path below is untouched, byte-for-byte, when there isn't one.
  */
+/** One piece of the finished narration track: a span of the master, or silence. */
+export interface OverlayPart {
+  kind: "master" | "silence";
+  /** master: where the span starts. */
+  fromSec?: number;
+  /** master: where it ends; absent means "to the end of the track". */
+  toSec?: number;
+  /** silence: how long. */
+  durSec?: number;
+}
+
+/**
+ * Lay out the finished narration as an ordered list of parts — spans of the master, and the
+ * silences between them.
+ *
+ * Two things reshape the master, and they are opposites, so one walk handles both:
+ *  - an INSERT adds silence at a point where the picture freezes past its words (a hold floor,
+ *    a CTA release tail, a lead-in hold);
+ *  - a DROP removes a span outright — the hole a ripple trim leaves between one scene's end and
+ *    the next one's start, i.e. words the operator deleted from the film.
+ *
+ * An insert that lands inside a dropped span is discarded: it belonged to a scene boundary that
+ * no longer exists. Pure — unit-tested.
+ */
+export function planMasterOverlayParts(opts: {
+  inserts: { atSec: number; durSec: number }[];
+  drops?: { fromSec: number; toSec: number }[];
+}): OverlayPart[] {
+  const eps = 1e-6;
+  const drops = [...(opts.drops ?? [])]
+    .filter(d => d.toSec - d.fromSec > eps)
+    .sort((a, b) => a.fromSec - b.fromSec);
+  const inserts = [...opts.inserts].sort((a, b) => a.atSec - b.atSec);
+  const parts: OverlayPart[] = [];
+
+  // A lead hold sits at exactly 0, before any of the master.
+  let rest = inserts;
+  if (rest.length && rest[0].atSec <= 1e-3) {
+    parts.push({ kind: "silence", durSec: rest[0].durSec });
+    rest = rest.slice(1);
+  }
+
+  type Stop =
+    | { at: number; kind: "insert"; durSec: number }
+    | { at: number; kind: "drop"; toSec: number };
+  const stops: Stop[] = [
+    ...rest
+      .filter(
+        i =>
+          !drops.some(d => i.atSec > d.fromSec + eps && i.atSec < d.toSec - eps)
+      )
+      .map(i => ({ at: i.atSec, kind: "insert" as const, durSec: i.durSec })),
+    ...drops.map(d => ({
+      at: d.fromSec,
+      kind: "drop" as const,
+      toSec: d.toSec,
+    })),
+    // A drop and an insert at the same point: cut first, so the silence lands after the join.
+  ].sort((a, b) => a.at - b.at || (a.kind === "drop" ? -1 : 1));
+
+  let cursor = 0;
+  for (const st of stops) {
+    if (st.at > cursor + eps)
+      parts.push({ kind: "master", fromSec: cursor, toSec: st.at });
+    if (st.kind === "insert") {
+      parts.push({ kind: "silence", durSec: st.durSec });
+      cursor = Math.max(cursor, st.at);
+    } else {
+      cursor = Math.max(cursor, st.toSec);
+    }
+  }
+  parts.push({ kind: "master", fromSec: cursor });
+  return parts;
+}
+
+/**
+ * Build the finished narration track from the master: keep the spans the film still uses, splice
+ * silence where the picture freezes past its words, and drop what a ripple trim removed.
+ *
+ * Joined in the PCM domain and padded/trimmed to the film's exact length. Every seam gets a
+ * sub-audible fade — which matters most on a ripple seam, where two moments that were never
+ * adjacent are being butted together. Pure — no IO.
+ */
 export function buildMasterOverlayAudioArgs(opts: {
   masterPath: string;
   /** Ascending, strictly inside (0, masterDuration) — except a single lead hold at exactly 0. */
   inserts: { atSec: number; durSec: number }[];
+  /**
+   * Spans of the master to DROP, ascending and non-overlapping — the holes a ripple trim leaves
+   * between one scene's end and the next one's start. Absent/empty ⇒ the whole master is kept,
+   * which is every film that has never been ripple-trimmed.
+   */
+  drops?: { fromSec: number; toSec: number }[];
   totalSec: number;
   outputPath: string;
 }): string[] {
   const FMT =
     "aformat=sample_rates=48000:channel_layouts=stereo:sample_fmts=fltp";
   const end = opts.totalSec.toFixed(3);
-  const leadHold =
-    opts.inserts.length && opts.inserts[0].atSec <= 1e-3
-      ? opts.inserts[0]
-      : null;
-  const inserts = leadHold ? opts.inserts.slice(1) : opts.inserts;
-  const leadGap = leadHold
-    ? `anullsrc=r=48000:cl=stereo,${FMT},atrim=end=${leadHold.durSec.toFixed(3)}[g0]`
-    : null;
-  const n = inserts.length;
-  let filter: string;
-  if (n === 0 && !leadHold) {
-    filter = `[0:a]${FMT},apad,atrim=end=${end}[a]`;
-  } else if (n === 0) {
-    filter =
-      `[0:a]${FMT}[base];${leadGap};` +
-      `[g0][base]concat=n=2:v=0:a=1,apad,atrim=end=${end}[a]`;
-  } else {
-    // Split the master into N+1 chunks at the insert points, interleave a silence per insert,
-    // and re-join in the PCM domain: [c0][g1][c1][g2]…[gN][cN]. Each seam gets a sub-audible
-    // fade so even a cut over room tone (or an unsanitizable one over speech) never clicks.
-    const fadeIn = `afade=t=in:st=0:d=${OVERLAY_SEAM_FADE_SEC}`;
-    const fadeOut = (chunkLen: number) =>
-      `afade=t=out:st=${Math.max(0, chunkLen - OVERLAY_SEAM_FADE_SEC).toFixed(3)}:d=${OVERLAY_SEAM_FADE_SEC}`;
-    const t = inserts.map(i => i.atSec.toFixed(3));
-    const split =
-      `[0:a]${FMT},asplit=${n + 1}` +
-      inserts.map((_, i) => `[c${i}]`).join("") +
-      `[c${n}]`;
-    const chunks = inserts.map((ins, i) => {
-      const from = i === 0 ? "" : `start=${t[i - 1]}:`;
-      const chunkLen = i === 0 ? ins.atSec : ins.atSec - inserts[i - 1].atSec;
-      const lead = i === 0 ? "" : `${fadeIn},`;
-      return `[c${i}]atrim=${from}end=${t[i]},asetpts=PTS-STARTPTS,${lead}${fadeOut(chunkLen)}[p${i}]`;
-    });
-    chunks.push(
-      `[c${n}]atrim=start=${t[n - 1]},asetpts=PTS-STARTPTS,${fadeIn}[p${n}]`
-    );
-    const gaps = inserts.map(
-      (ins, i) =>
-        `anullsrc=r=48000:cl=stereo,${FMT},atrim=end=${ins.durSec.toFixed(3)}[g${i + 1}]`
-    );
-    const order =
-      (leadHold ? "[g0]" : "") +
-      inserts.map((_, i) => `[p${i}][g${i + 1}]`).join("");
-    const total = leadHold ? 2 * n + 2 : 2 * n + 1;
-    filter =
-      [
-        split,
-        ...chunks,
-        ...(leadHold ? [leadGap as string] : []),
-        ...gaps,
-      ].join(";") +
-      `;${order}[p${n}]concat=n=${total}:v=0:a=1,apad,atrim=end=${end}[a]`;
+  const parts = planMasterOverlayParts(opts);
+  const masterParts = parts.filter(p => p.kind === "master");
+
+  // The whole master, untouched — every film with no holds and no ripple cuts.
+  if (parts.length === 1) {
+    return [
+      "-y",
+      "-i",
+      opts.masterPath,
+      "-filter_complex",
+      `[0:a]${FMT},apad,atrim=end=${end}[a]`,
+      "-map",
+      "[a]",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "192k",
+      "-ar",
+      "48000",
+      "-ac",
+      "2",
+      opts.outputPath,
+    ];
   }
+
+  const fadeIn = `afade=t=in:st=0:d=${OVERLAY_SEAM_FADE_SEC}`;
+  const fadeOut = (len: number) =>
+    `afade=t=out:st=${Math.max(0, len - OVERLAY_SEAM_FADE_SEC).toFixed(3)}:d=${OVERLAY_SEAM_FADE_SEC}`;
+
+  // One `asplit` output per master span, so each can be trimmed independently.
+  const chains: string[] = [
+    `[0:a]${FMT},asplit=${masterParts.length}` +
+      masterParts.map((_, i) => `[c${i}]`).join(""),
+  ];
+  const labels: string[] = [];
+  let m = 0;
+  let g = 0;
+  parts.forEach((part, idx) => {
+    if (part.kind === "silence") {
+      const label = `g${g++}`;
+      chains.push(
+        `anullsrc=r=48000:cl=stereo,${FMT},atrim=end=${(part.durSec as number).toFixed(3)}[${label}]`
+      );
+      labels.push(`[${label}]`);
+      return;
+    }
+    const i = m++;
+    const label = `p${i}`;
+    const from = part.fromSec as number;
+    const range =
+      part.toSec === undefined
+        ? `start=${from.toFixed(3)}`
+        : from <= 1e-6
+          ? `end=${part.toSec.toFixed(3)}`
+          : `start=${from.toFixed(3)}:end=${part.toSec.toFixed(3)}`;
+    // Fade in on every span but the first, out on every span but the last: those are the seams.
+    const lead = idx === 0 ? "" : `${fadeIn},`;
+    const tail =
+      idx === parts.length - 1
+        ? ""
+        : `,${fadeOut(part.toSec === undefined ? opts.totalSec : part.toSec - from)}`;
+    // No re-`aformat` here: the source was formatted once before the split, so every chunk is
+    // already in the concat filter's required layout.
+    chains.push(
+      `[c${i}]atrim=${range},asetpts=PTS-STARTPTS,${lead}${tail.replace(/^,/, "")}[${label}]`.replace(
+        ",[",
+        "["
+      )
+    );
+    labels.push(`[${label}]`);
+  });
+  chains.push(
+    `${labels.join("")}concat=n=${labels.length}:v=0:a=1,apad,atrim=end=${end}[a]`
+  );
+
   return [
     "-y",
     "-i",
     opts.masterPath,
     "-filter_complex",
-    filter,
+    chains.join(";"),
     "-map",
     "[a]",
     "-c:a",
@@ -943,7 +1053,6 @@ export function buildMasterOverlayAudioArgs(opts: {
     opts.outputPath,
   ];
 }
-
 /**
  * Build args to concat uniformly-encoded media files (concat demuxer, stream copy).
  * Used both to join a scene's silent clips and to join the finished scene MP4s — all of
@@ -2453,6 +2562,10 @@ export async function assemblePerSceneFilm(opts: {
     trimLeadSec: number;
     audioUrl: string;
     audioDurationSec?: number;
+    /** `scene.minHoldSec` — the shortest this scene may be on screen. Caps the hold above, so a
+     *  scene the operator has SHORTENED stops being pinned to the length it was voiced at.
+     *  Omitted ⇒ uncapped, the behaviour before the field existed. */
+    minHoldSec?: number;
     /** Optional QR-code PNG (R2 URL) overlaid on CTA scenes. */
     qrOverlayUrl?: string;
     /** QR layout: `"center"` (large, centered — the QR-hero beat) or `"corner"` (default, small bottom-right). */
@@ -2529,6 +2642,7 @@ export async function assemblePerSceneFilm(opts: {
           sliceStartSec: s.sliceStartSec as number,
           sliceEndSec: s.sliceEndSec as number,
           holdSec: s.audioDurationSec,
+          minHoldSec: s.minHoldSec,
           tailHoldSec: s.tailHoldSec,
           headHoldSec: s.headHoldSec,
         }))
@@ -2620,8 +2734,14 @@ export async function assemblePerSceneFilm(opts: {
         // beyond 1.5s means a stale/re-voiced master and is left for the guard to reject.
         const masterDur = await getMediaDuration(masterPath);
         const lastSlice = overlaySlices[overlaySlices.length - 1];
+        // A film carrying a ripple cut has ends the operator chose; stretching the last slice
+        // would silently put back narration they deliberately removed from the tail.
+        const rippled = overlaySlices.some(
+          (sl, i) =>
+            i > 0 && sl.sliceStartSec - overlaySlices[i - 1].sliceEndSec > 1e-3
+        );
         const drift = masterDur - lastSlice.sliceEndSec;
-        if (drift > 1e-3 && drift <= 1.5) {
+        if (!rippled && drift > 1e-3 && drift <= 1.5) {
           console.log(
             `[Assembly] stretched final slice ${lastSlice.sliceEndSec.toFixed(3)}→${masterDur.toFixed(3)} to cover the master's real tail`
           );
@@ -2997,9 +3117,19 @@ export async function assemblePerSceneFilm(opts: {
       ? overlaySlices[overlaySlices.length - 1].sliceEndSec
       : undefined;
     if (activePlan) {
+      // Spans of the master no scene covers any more: a ripple trim shortened a scene without
+      // handing its words to the neighbour, so those words leave the film. On a film that has
+      // never been ripple-trimmed the slices still tile and this is empty.
+      const drops: { fromSec: number; toSec: number }[] = [];
+      for (let i = 1; i < overlaySlices!.length; i++) {
+        const from = overlaySlices![i - 1].sliceEndSec;
+        const to = overlaySlices![i].sliceStartSec;
+        if (to - from > 1e-3) drops.push({ fromSec: from, toSec: to });
+      }
       const overlayKey = cacheKey("filmaudio-overlay", {
         masterAudioUrl: opts.masterAudioUrl,
         inserts: activePlan.inserts,
+        drops,
         totalSec: activePlan.totalSec,
         lastSliceEnd,
       });
@@ -3020,11 +3150,20 @@ export async function assemblePerSceneFilm(opts: {
             const masterDur = await getMediaDuration(masterPath);
             // A master that doesn't match the scene ranges (stale URL, re-voiced job) would lay
             // the wrong words under every scene — fall back rather than desync.
-            if (Math.abs(masterDur - (lastSliceEnd as number)) > 0.25) {
+            // Slices claiming MORE than the master holds means a stale or re-voiced track — the
+            // wrong words would land under every scene, so fall back rather than desync. The
+            // other direction is fine and expected: a ripple trim on the last scene leaves the
+            // master's tail uncovered, and the drop below removes it.
+            if ((lastSliceEnd as number) - masterDur > 0.25) {
               throw new Error(
-                `master narration ${masterDur.toFixed(2)}s doesn't match scene ranges' ${(lastSliceEnd as number).toFixed(2)}s`
+                `master narration ${masterDur.toFixed(2)}s is shorter than the scene ranges' ${(lastSliceEnd as number).toFixed(2)}s`
               );
             }
+            if (masterDur - (lastSliceEnd as number) > 0.25)
+              drops.push({
+                fromSec: lastSliceEnd as number,
+                toSec: masterDur,
+              });
             await runFfmpeg(
               buildMasterOverlayAudioArgs({
                 masterPath,
@@ -3033,6 +3172,7 @@ export async function assemblePerSceneFilm(opts: {
                 inserts: activePlan.inserts.filter(
                   g => g.atSec < (lastSliceEnd as number) - 0.05
                 ),
+                drops,
                 totalSec: activePlan.totalSec,
                 outputPath: out,
               })

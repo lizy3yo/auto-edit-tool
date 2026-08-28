@@ -138,7 +138,9 @@ describe("planCutBeats", () => {
     const auto = planCutBeats(threeScenes([{}, { qrTail: true }]));
     expect(auto[1].tailHoldSec).toBeCloseTo(QR_TAIL_HOLD_SEC, 2);
     // 0 is a real value, not "unset" — the operator removing the pause must remove it.
-    const off = planCutBeats(threeScenes([{}, { qrTail: true, tailHoldSec: 0 }]));
+    const off = planCutBeats(
+      threeScenes([{}, { qrTail: true, tailHoldSec: 0 }])
+    );
     expect(off[1].tailHoldSec).toBeCloseTo(0, 2);
   });
 
@@ -150,6 +152,47 @@ describe("planCutBeats", () => {
     expect(masterTimeFor(beats[0], 1.6)).toBeCloseTo(0.1, 2); // words start after the hold
   });
 
+  it("does NOT hold when the measured narration merely drifted past the slice", () => {
+    // The bug the HOLD badge was showing across a whole film: scene ranges are snapped onto real
+    // pauses AFTER the per-scene audio is measured, so an ordinary untouched scene routinely
+    // carries an `audioDuration` a fraction of a second longer than its slice. That is snapping
+    // drift, not a hold — the floor caps it, in the preview exactly as in the render.
+    const drifted = planCutBeats(
+      [0, 1, 2].map(i =>
+        scene({
+          index: i + 1,
+          clipUrl: `c${i}.mp4`,
+          narrationStartSec: i * 6,
+          narrationEndSec: (i + 1) * 6,
+          audioDuration: 6.4,
+          minHoldSec: 3,
+        })
+      )
+    );
+    expect(drifted.every(b => b.tailHoldSec === 0)).toBe(true);
+    expect(drifted.map(b => +(b.endSec - b.startSec).toFixed(3))).toEqual([
+      6, 6, 6,
+    ]);
+    for (const b of drifted)
+      expect(masterTimeFor(b, b.endSec - 0.01)).not.toBeNull();
+  });
+
+  it("treats a sub-frame remainder as no hold at all", () => {
+    // The frame plan quantizes to whole frames, so a beat's arithmetic tail can come out a
+    // fraction of a frame long. Calling that a hold would pause the narration at every cut.
+    const beats = planCutBeats([
+      scene({
+        index: 1,
+        clipUrl: "a.mp4",
+        narrationStartSec: 0,
+        narrationEndSec: 4.017,
+        audioDuration: 4.017,
+        minHoldSec: 3,
+      }),
+    ]);
+    expect(beats[0].tailHoldSec).toBe(0);
+  });
+
   it("holds a scene to its floored duration when the narration is shorter", () => {
     // A sub-floor beat: 1s of words, floored to 3s on screen. The extra 2s is frozen tail.
     const beats = planCutBeats([
@@ -159,6 +202,7 @@ describe("planCutBeats", () => {
         narrationStartSec: 0,
         narrationEndSec: 1,
         audioDuration: 3,
+        minHoldSec: 3,
       }),
     ]);
     expect(beats[0].endSec - beats[0].startSec).toBeCloseTo(3, 2);
@@ -181,9 +225,10 @@ describe("planCutBeats", () => {
     ]);
     expect(beats).toHaveLength(2);
     // 1s lead-in + 2s of chunk A, then 2s of chunk B + 1s frozen tail.
-    expect([+beats[0].startSec.toFixed(2), +beats[0].endSec.toFixed(2)]).toEqual(
-      [0, 3]
-    );
+    expect([
+      +beats[0].startSec.toFixed(2),
+      +beats[0].endSec.toFixed(2),
+    ]).toEqual([0, 3]);
     expect(beats[0].headHoldSec).toBeCloseTo(1, 2);
     expect(beats[0].tailHoldSec).toBe(0);
     expect(beats[1].tailHoldSec).toBeCloseTo(1, 2);

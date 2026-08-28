@@ -163,7 +163,41 @@ Express · tRPC · Drizzle · MySQL.
   per-scene Queued/Rendering badges and keeps the editors live (`isPipelineRunning`, not
   `isProcessing`, hides them)
 - `server/sceneTiming.ts` — the cut room: pure edits to WHEN a scene's picture shows, on top of a
-  narration that never moves. Trim (`scene.clipInSec`), move a cut between neighbours
+  narration that never moves — with ONE exception, the ripple trim below. A scene sits on screen for `max(its slice, its floor)` — the FLOOR
+  being `scene.minHoldSec` (`applySceneHoldFloor`), NEVER `audioDuration`. That distinction is
+  load-bearing twice over: `audioDuration` is measured at TTS time and the ranges are then
+  snapped onto real pauses (`SNAP_TOLERANCE_SEC` 0.75s), so on an ORDINARY untouched scene the
+  measured length routinely exceeds the slice — uncapped, every such scene froze its last frame
+  for the difference and had that much silence spliced under it; and it goes stale outright when
+  a scene is shortened, pinning it to its old length so the film got LONGER when asked to get
+  shorter. A storyboard predating `minHoldSec` gets the floor DERIVED server-side
+  (`sceneFloorSec`) for assembly and for `pollJob`, since `floorFor` needs the channel's pacing
+  and the browser cannot work it out; `shared/filmTimeline.ts` falls back to `MAX_SCENE_FLOOR_SEC`
+  only if neither reaches it. And an OPERATOR-SET length wins over both the floor and the CTA tail
+  default (`operatorSetLength` — the narration range differs from `timingOriginal`'s): those
+  defaults exist to stop the PIPELINE emitting a flash beat or an unscannable QR, not to overrule
+  a length a person chose. All four consumers map a scene through the one `sceneHoldPlan` helper
+  so they cannot disagree. Consequence worth knowing: re-timing a `qrTail` beat drops its 3s QR
+  linger — set "Hold after line" explicitly to keep one. RIPPLE TRIM (`planRippleTrim`/`applyRippleTrim`) is the one edit that changes the
+  film's LENGTH: it ends a scene earlier and DELETES the narration between there and where it
+  ended, instead of handing those words to the next scene. The hole it leaves between one
+  scene's end and the next one's start IS the instruction — `masterOverlayEligible` allows gaps
+  (an overlap, and a non-zero FIRST start, stay illegal), and `buildMasterOverlayAudioArgs`
+  concatenates the spans either side of it via `planMasterOverlayParts`, the one walk that
+  handles inserts and drops together. The cut snaps onto a real pause (`snapToPause`) using
+  `job.masterSilences`, kept at voicing instead of thrown away, so it never lands mid-word; a job
+  voiced before that column existed cuts exactly where the operator dragged and says so. It is the DEFAULT for
+  both handles: shortening a scene removes what it gives up, at either edge. The old
+  hand-it-to-the-neighbour behaviour is still there behind "Give time to neighbour", but it is no
+  longer what happens when you say nothing — handing the time over grows the neighbour, and a
+  scene stretched past its own footage freezes on its last frame, so the commonest edit used to
+  produce exactly the frozen tail an operator was trying to remove. Trimming a START drops that
+  scene's opening words, so its own `clipInSec` advances to keep a lip-synced mouth on the voice;
+  trimming an END inside one continuous shot (`isContinuousPair`) pulls the second half's
+  `clipInSec` back by the same amount so the picture doesn't jump at an invisible seam. The first
+  scene's start cannot be rippled at all. A rippled film also
+  suppresses assembly's "stretch the final slice" fix-up, which would otherwise put a trailing cut
+  straight back. Trim (`scene.clipInSec`), move a cut between neighbours
   (`narrationStartSec/EndSec`, lip-synced hosts keep sync by trimming) — one-directional, in that
   a boundary handle only ever SHORTENS the scene it belongs to and never leaves that scene's own
   range (`boundaryLimits`); the bounds used to come from the NEIGHBOUR's far edge, so an 11–17

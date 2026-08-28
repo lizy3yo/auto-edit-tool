@@ -91,6 +91,17 @@ export const longformVideoJobs = mysqlTable("longform_video_jobs", {
    * scenes onto it); absent on pre-overlay jobs → per-scene audio concat fallback.
    */
   masterAudioUrl: text("masterAudioUrl"),
+  /**
+   * Silent intervals in the master narration, `{ start, end }[]` in master seconds — the same
+   * detection the aligner already runs at voicing time, kept instead of thrown away.
+   *
+   * A ripple trim physically REMOVES a span of the narration, so its boundaries have to land in
+   * a real pause or the cut chops a word. Assembly could re-detect them, but the cut room needs
+   * the same answer at edit time — otherwise the operator drags to one length and the film comes
+   * back another. Null on jobs voiced before this existed: those fall back to cutting exactly
+   * where the operator dragged, and the UI says so.
+   */
+  masterSilences: json("masterSilences"),
   /** Final stitched video */
   finalVideoUrl: text("finalVideoUrl"),
   finalFileKey: varchar("finalFileKey", { length: 512 }),

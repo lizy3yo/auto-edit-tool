@@ -80,7 +80,9 @@ import {
   retrofitBookCover as retrofitLongformBookCover,
   setSceneSplit as setLongformSceneSplit,
   retryJobAssembly,
+  sceneFloorSec,
   revertJobTiming,
+  rippleTrimScene,
   revertSceneTimingEdits as revertLongformSceneTiming,
   retryFailedScenes as retryLongformFailedScenes,
   describeIncompleteScenes,
@@ -110,6 +112,8 @@ import {
   validateAddCut,
   validateMoveCut,
   validateSetPieceClipIn,
+  planRippleTrim,
+  type Silence,
   cutPoints,
   MAX_TAIL_HOLD_SEC,
   MAX_HEAD_HOLD_SEC,
@@ -1434,6 +1438,15 @@ const longformVideoRouter = router({
         ? rawScenes.map(scene =>
             syncSceneClipFields({
               ...scene,
+              // The on-screen floor, derived when the storyboard predates the field. `floorFor`
+              // needs the channel's pacing, so the browser cannot work it out — and without it
+              // the live preview would hold every scene that pause-snapping left with a measured
+              // narration longer than its slice, which the rendered film no longer does.
+              minHoldSec:
+                scene.minHoldSec ??
+                (scene.coverHero
+                  ? undefined
+                  : sceneFloorSec(scene, previewParams)),
               ...assembleScenePromptPreview(scene, previewParams),
             })
           )
@@ -1922,6 +1935,53 @@ const longformVideoRouter = router({
         input.clipInSec
       );
       return { ok: true, accepted };
+    }),
+
+  /**
+   * Cut room: RIPPLE trim — end a scene earlier and delete the narration between there and where
+   * it used to end, instead of handing those words to the next scene. The film gets shorter by
+   * exactly that much. The cut snaps onto a real pause so it never lands mid-word; the response
+   * carries what will actually be removed, so the UI can show it before it is applied.
+   */
+  rippleTrimScene: approvedProcedure
+    .input(
+      z.object({
+        jobId: z.number(),
+        sceneIndex: z.number().int().min(1),
+        newSec: z.number().min(0),
+        edge: z.enum(["start", "end"]).default("end"),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const job = await getLongformVideoJobById(input.jobId);
+      if (
+        !job ||
+        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
+      ) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
+      }
+      const scenes = (job.storyboard ?? []) as StoryboardScene[];
+      const plan = planRippleTrim(
+        scenes,
+        input.sceneIndex,
+        input.newSec,
+        (job.masterSilences as Silence[] | null) ?? undefined,
+        input.edge
+      );
+      if (!plan.ok)
+        throw new TRPCError({ code: "BAD_REQUEST", message: plan.reason });
+      const accepted = await rippleTrimScene(
+        input.jobId,
+        input.sceneIndex,
+        input.newSec,
+        input.edge
+      );
+      return {
+        ok: true,
+        accepted,
+        removedSec: plan.removedSec,
+        snapped: plan.snapped,
+      };
     }),
 
   /**

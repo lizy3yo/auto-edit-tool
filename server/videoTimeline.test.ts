@@ -275,6 +275,17 @@ describe("buildChapters", () => {
 });
 
 describe("cross-module constants", () => {
+  it("MAX_SCENE_FLOOR_SEC covers every floor the pipeline can ask for", async () => {
+    // `shared/filmTimeline.ts` cannot import from `server/`, so the ceiling it caps a scene's
+    // hold at is mirrored. It must stay at or above every value `floorFor` can return, or a
+    // legitimately-held beat would be cut short.
+    const { HOST_MIN_HOLD_SEC, SCENE_MIN_HOLD_SEC } =
+      await import("./longformVideo");
+    const { MAX_SCENE_FLOOR_SEC } = await import("../shared/filmTimeline");
+    expect(MAX_SCENE_FLOOR_SEC).toBeGreaterThanOrEqual(HOST_MIN_HOLD_SEC);
+    expect(MAX_SCENE_FLOOR_SEC).toBeGreaterThanOrEqual(SCENE_MIN_HOLD_SEC);
+  });
+
   it("QR_TAIL_HOLD_SEC mirrors the pipeline's own value", async () => {
     // Mirrored rather than imported to avoid a module cycle; this test is what keeps them equal.
     const { QR_TAIL_HOLD_SEC: pipelineValue } =

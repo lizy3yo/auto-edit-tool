@@ -412,6 +412,22 @@ export interface StoryboardScene {
   /** Measured duration of the scene voiceover, seconds */
   audioDuration?: number;
   /**
+   * The shortest this scene may sit on screen, seconds — `floorFor`, recorded by
+   * `applySceneHoldFloor` at voicing time (host beats get a longer floor than b-roll, and a
+   * fast-open channel a shorter one, so it cannot be re-derived without the channel's pacing).
+   *
+   * It exists because the on-screen floor used to be smuggled inside `audioDuration`: assembly
+   * held every scene to `max(slice, audioDuration)`, which is right for a scene whose narration
+   * is shorter than the floor, and WRONG the moment an operator shortens a scene — the stale
+   * measured length out-voted the shorter slice, so the scene refused to get shorter, silence
+   * was spliced into the narration, and the film grew. With the floor recorded separately the
+   * hold can be capped at it, and a deliberate shortening does what it says.
+   *
+   * Absent on a storyboard written before this field: assembly and the preview then fall back to
+   * the old behaviour together, so the two never disagree. A timing edit backfills it.
+   */
+  minHoldSec?: number;
+  /**
    * This scene's slice of the continuous master narration, in seconds on the MASTER
    * timeline (set in Stage 2 alongside the physical slice). Assembly uses these to lay
    * the untouched master over the whole film (seamless audio) instead of re-concatenating

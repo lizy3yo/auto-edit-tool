@@ -16,6 +16,100 @@
 export const FPS = 30;
 
 /**
+ * The largest on-screen floor the pipeline can ask for — `HOST_MIN_HOLD_SEC`, the biggest value
+ * `floorFor` returns (host 4s, b-roll 3s, fast-open less). Mirrored here because `shared/` cannot
+ * import from `server/`; `videoAssembly.test.ts` asserts it still covers every floor.
+ *
+ * It is the DEFAULT ceiling on a scene's hold when the scene doesn't carry its own `minHoldSec`.
+ * Capping by default matters more than it looks: `holdSec` is the narration length measured at
+ * TTS time, but the scene ranges are afterwards snapped onto real pauses (`SNAP_TOLERANCE_SEC`,
+ * 0.75s), so on an ordinary never-edited scene the measured length routinely exceeds the slice by
+ * a fraction of a second. Uncapped, every one of those froze its last frame for the difference
+ * and had that much silence spliced into the narration under it. Capping at the largest real
+ * floor removes the phantom hold while leaving every genuine one — a sub-floor beat's
+ * `audioDuration` already IS its floor, so the cap never bites there.
+ */
+export const MAX_SCENE_FLOOR_SEC = 4;
+
+/**
+ * The CTA QR-block release beat's default frozen tail — the QR stays up this long after the
+ * release line so a viewer can still scan it. `longformVideo.ts` owns the value; mirrored here
+ * because `shared/` cannot import from `server/`, and `videoTimeline.test.ts` keeps them equal.
+ */
+export const QR_TAIL_HOLD_SEC = 3;
+
+/**
+ * Whether the operator has set this scene's LENGTH by hand — its narration range differs from
+ * the pristine one recorded before their first edit (`scene.timingOriginal`).
+ *
+ * It gates every automatic extension below. A floor and a default tail exist to stop the
+ * PIPELINE emitting a beat that flashes past or a QR nobody can scan; neither is a reason to
+ * overrule a length a person chose deliberately in the cut room, which enforces its own
+ * `MIN_SLICE_SEC` minimum anyway. Before this, cutting a beat to 0.8s left it on screen for 6.3s
+ * — the stale measured length floored it back up, and the tail default added three seconds on
+ * top of that.
+ *
+ * Deliberately NOT "has any timing edit": a cut marker or a piece slip doesn't touch the length,
+ * so those leave the floor and the tail exactly as they were. Pure — unit-tested.
+ */
+export function operatorSetLength(scene: {
+  narrationStartSec?: number;
+  narrationEndSec?: number;
+  timingOriginal?: { narrationStartSec?: number; narrationEndSec?: number };
+}): boolean {
+  const o = scene.timingOriginal;
+  if (!o) return false;
+  const moved = (now?: number, was?: number) =>
+    was !== undefined && Math.abs((now ?? 0) - was) > 1e-6;
+  return (
+    moved(scene.narrationStartSec, o.narrationStartSec) ||
+    moved(scene.narrationEndSec, o.narrationEndSec)
+  );
+}
+
+/**
+ * The hold inputs `planMasterOverlayScenes` needs for one scene, in ONE place so the renderer,
+ * the chapter map and the browser's live preview cannot answer differently.
+ *
+ * `floorSec` is the scene's own on-screen floor (`scene.minHoldSec`, or `floorFor` derived
+ * server-side for a storyboard that predates it). Omit it and the plan falls back to
+ * `MAX_SCENE_FLOOR_SEC`. Pure — unit-tested.
+ */
+export function sceneHoldPlan(
+  scene: {
+    narrationStartSec?: number;
+    narrationEndSec?: number;
+    audioDuration?: number;
+    minHoldSec?: number;
+    tailHoldSec?: number;
+    headHoldSec?: number;
+    qrTail?: boolean;
+    coverHero?: boolean;
+    timingOriginal?: { narrationStartSec?: number; narrationEndSec?: number };
+  },
+  floorSec?: number
+): {
+  holdSec?: number;
+  minHoldSec?: number;
+  tailHoldSec?: number;
+  headHoldSec?: number;
+} {
+  // A cover reveal ends with its narration and was always exempt; an operator-set length is
+  // exempt for the reason above. Both mean: this scene is exactly as long as its slice.
+  const exempt = !!scene.coverHero || operatorSetLength(scene);
+  return {
+    holdSec: exempt ? undefined : scene.audioDuration,
+    minHoldSec: exempt ? undefined : (floorSec ?? scene.minHoldSec),
+    // An explicit hold is the operator's own number and always wins — including 0, which is how
+    // they remove the CTA pause. The DEFAULT only applies to a beat they have not re-timed.
+    tailHoldSec:
+      scene.tailHoldSec ??
+      (!exempt && scene.qrTail ? QR_TAIL_HOLD_SEC : undefined),
+    headHoldSec: scene.headHoldSec,
+  };
+}
+
+/**
  * Plan the master-overlay frame timeline: give every scene an exact whole-frame length so the
  * concatenated video reproduces the MASTER narration timeline (each scene's start lands within
  * half a frame of its slice's start — keeps lip-synced host scenes in sync with the untouched
@@ -30,6 +124,18 @@ export function planMasterOverlayScenes(opts: {
     sliceEndSec: number;
     /** On-screen hold floor (the scene's floored `audioDurationSec`), if any. */
     holdSec?: number;
+    /**
+     * The shortest this scene may be on screen (`scene.minHoldSec`). Caps `holdSec`, because
+     * `holdSec` carries the narration length MEASURED AT VOICING and that stops describing the
+     * scene the moment an operator shortens it: without the cap the stale value out-votes the
+     * new slice, the scene holds its old length, silence is spliced into the narration to cover
+     * the difference and the film gets LONGER when it was asked to get shorter.
+     *
+     * Omitted ⇒ capped at `MAX_SCENE_FLOOR_SEC` instead, which is the largest floor the pipeline
+     * can ask for. Storyboards written before `minHoldSec` existed land there, and still lose the
+     * phantom hold that pause-snapping gives an ordinary scene.
+     */
+    minHoldSec?: number;
     /** Extra silent frozen tail (the CTA QR release beat). */
     tailHoldSec?: number;
     /** Extra silent frozen hold BEFORE this slice starts — only meaningful on the first scene
@@ -53,8 +159,10 @@ export function planMasterOverlayScenes(opts: {
     const headExtra = s.headHoldSec ?? 0;
     if (headExtra > 1e-3)
       inserts.push({ atSec: s.sliceStartSec, durSec: headExtra });
-    const target =
-      headExtra + Math.max(sliceLen, s.holdSec ?? 0) + (s.tailHoldSec ?? 0);
+    // The hold may raise a scene to its FLOOR; it may not pin it to whatever length it happened
+    // to be voiced at (see `minHoldSec`).
+    const hold = Math.min(s.holdSec ?? 0, s.minHoldSec ?? MAX_SCENE_FLOOR_SEC);
+    const target = headExtra + Math.max(sliceLen, hold) + (s.tailHoldSec ?? 0);
     const tailExtra = target - headExtra - sliceLen;
     if (tailExtra > 1e-3)
       inserts.push({ atSec: s.sliceEndSec, durSec: tailExtra });

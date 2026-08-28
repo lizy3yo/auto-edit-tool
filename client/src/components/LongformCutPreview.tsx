@@ -5,6 +5,7 @@ import {
   FPS,
   planMasterOverlayScenes,
   planScenePieces,
+  sceneHoldPlan,
 } from "@shared/filmTimeline";
 import type { StoryboardScene } from "@shared/types";
 
@@ -42,6 +43,15 @@ import type { StoryboardScene } from "@shared/types";
 
 /** How far the picture may drift from the film clock before it is snapped back. */
 export const MAX_DRIFT_SEC = 0.25;
+
+/**
+ * Shortest stretch that counts as a frozen hold. The frame plan quantizes every scene to whole
+ * frames, so a beat's arithmetic tail can come out a fraction of a frame long — which is not a
+ * hold, it is rounding. Treating one as real would pause the narration at every cut and flash the
+ * badge across the whole film; worse, pausing and resuming an <audio> element costs more than the
+ * remainder itself, so the clock could never get past it. Two frames.
+ */
+export const MIN_HOLD_SEC = 2 / FPS;
 
 /** A moment of the film where the picture freezes and the narration does not advance. */
 export interface HoldSpan {
@@ -106,9 +116,9 @@ export function planCutBeats(scenes: StoryboardScene[]): CutBeat[] {
     scenes: usable.map(s => ({
       sliceStartSec: s.narrationStartSec as number,
       sliceEndSec: s.narrationEndSec as number,
-      holdSec: s.coverHero ? undefined : s.audioDuration,
-      tailHoldSec: s.tailHoldSec ?? (s.qrTail ? QR_TAIL_HOLD_SEC : undefined),
-      headHoldSec: s.headHoldSec,
+      // The renderer's own mapping — holds, the CTA tail and the on-screen floor all come from
+      // `sceneHoldPlan`, so the preview cannot claim a length the file won't have.
+      ...sceneHoldPlan(s),
     })),
   });
 
@@ -147,8 +157,8 @@ export function planCutBeats(scenes: StoryboardScene[]): CutBeat[] {
         // The last sub-beat takes the scene's real end, so float division can't leave a gap.
         endSec: last ? filmAt + span : at + len,
         masterStartSec: (s.narrationStartSec as number) + c * each,
-        headHoldSec: first ? head : 0,
-        tailHoldSec: last ? tail : 0,
+        headHoldSec: first && head >= MIN_HOLD_SEC ? head : 0,
+        tailHoldSec: last && tail >= MIN_HOLD_SEC ? tail : 0,
         clipInSec: first ? (s.clipInSec ?? 0) : 0,
         cutPoints: first ? [...(s.cutPoints ?? [])].sort((a, b) => a - b) : [],
         pieceClipIns: first ? (s.pieceClipIns ?? {}) : {},
@@ -160,12 +170,7 @@ export function planCutBeats(scenes: StoryboardScene[]): CutBeat[] {
   return out;
 }
 
-/**
- * `QR_TAIL_HOLD_SEC` mirrored from the server (longformVideo.ts) the same way
- * `videoTimeline.ts` mirrors it — a beat whose tail the operator has not overridden holds the
- * QR for this long, and the preview has to account for it or every later scene sits early.
- */
-export const QR_TAIL_HOLD_SEC = 3;
+export { QR_TAIL_HOLD_SEC } from "@shared/filmTimeline";
 
 /** Total runtime of the planned cut — the film's length, holds included. Pure. */
 export function totalFilmSec(beats: CutBeat[]): number {
@@ -491,7 +496,15 @@ export function LongformCutPreview({
         // which grows the drift, which forces another seek. Reading the time the viewer is
         // actually hearing has none of that, and it absorbs a stall or a backgrounded tab for
         // free: the picture simply waits wherever the voice is.
-        const fromAudio = bodyStart + (a.currentTime - beat.masterStartSec);
+        // A ripple trim leaves a hole in the master, so the narration has to JUMP at that seam
+        // rather than play on through words the film no longer contains. Anything further off
+        // than a drift correction is a real gap: seek, don't nudge.
+        const want = bodyStart + (a.currentTime - beat.masterStartSec);
+        if (want < beat.startSec - MAX_DRIFT_SEC) {
+          a.currentTime = beat.masterStartSec + (now - bodyStart);
+          return;
+        }
+        const fromAudio = want;
         // A beat that ends in a hold stops at its last word, so the branch above can take over
         // on the next frame; one that doesn't may run to its own end, which is the cut.
         const ceil = beat.tailHoldSec > 0 ? bodyEnd : beat.endSec;

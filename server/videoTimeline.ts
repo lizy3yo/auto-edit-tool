@@ -15,6 +15,7 @@
  */
 import type { StoryboardScene } from "../shared/types";
 import { planMasterOverlayScenes } from "./videoAssembly";
+import { sceneHoldPlan } from "../shared/filmTimeline";
 
 /** What a viewer sees during a stretch of the film. Ordered roughly by how much it stands out. */
 export type ShotKind =
@@ -113,8 +114,8 @@ export function buildVideoTimeline(scenes: StoryboardScene[]): TimelineEntry[] {
         scenes: usable.map(s => ({
           sliceStartSec: s.narrationStartSec as number,
           sliceEndSec: s.narrationEndSec as number,
-          holdSec: s.coverHero ? undefined : s.audioDuration,
-          tailHoldSec: s.qrTail ? QR_TAIL_HOLD_SEC : undefined,
+          // One shared mapping, so a chapter mark can't sit where the film doesn't cut.
+          ...sceneHoldPlan(s),
         })),
       }).scenes.map(p => p.muxDurationSec)
     : usable.map(fallbackDurationSec);
