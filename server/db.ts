@@ -1,4 +1,4 @@
-import { eq, desc, and, inArray, lt, sql } from "drizzle-orm";
+import { eq, desc, and, gte, inArray, lt, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { createPool } from "mysql2";
 import {
@@ -355,6 +355,48 @@ export async function getAllLongformVideoJobHistory(limit = 100) {
     .where(inArray(longformVideoJobs.status, ["completed", "failed"]))
     .orderBy(desc(longformVideoJobs.createdAt))
     .limit(limit);
+}
+
+/**
+ * Every render since `since`, with its metered spend — the raw material of the monthly cost
+ * report (`server/costRollup.ts`).
+ *
+ * Deliberately narrow and deliberately unsorted. `inputParams` holds the full script, so title
+ * and channel are pulled out by JSON path rather than by selecting the column; and there is no
+ * ORDER BY because the caller buckets these into months anyway, which keeps a report over a
+ * year of renders off MySQL's filesort entirely (see the `MYSQL_SORT_BUFFER_SIZE` note at the
+ * top of this file — `json_unquote` columns are typed LONGTEXT and sort expensively).
+ *
+ * Every status is included: a failed render still spent real money, and a report that hid it
+ * would understate the month.
+ */
+export async function getJobCostRows(since: Date): Promise<
+  {
+    id: number;
+    createdAt: Date;
+    status: "processing" | "completed" | "failed";
+    costUsage: unknown;
+    title: string | null;
+    channelKey: string | null;
+  }[]
+> {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select({
+      id: longformVideoJobs.id,
+      createdAt: longformVideoJobs.createdAt,
+      status: longformVideoJobs.status,
+      costUsage: longformVideoJobs.costUsage,
+      title: sql<
+        string | null
+      >`json_unquote(json_extract(${longformVideoJobs.inputParams}, '$.title'))`,
+      channelKey: sql<
+        string | null
+      >`json_unquote(json_extract(${longformVideoJobs.inputParams}, '$.channelKey'))`,
+    })
+    .from(longformVideoJobs)
+    .where(gte(longformVideoJobs.createdAt, since));
 }
 
 // ─── Long-form workspace (the five tabs, per user) ───

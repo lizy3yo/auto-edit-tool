@@ -14,6 +14,7 @@ import { ProviderKeys } from "@/components/admin/ProviderKeys";
 import { LongformInstruction } from "@/components/admin/LongformInstruction";
 import { LongformPacing } from "@/components/admin/LongformPacing";
 import { UserManagement } from "@/components/admin/UserManagement";
+import { MonthlySpend } from "@/components/admin/MonthlySpend";
 
 /**
  * 69Labs provider card — the video/image/TTS lane. One provider row lives in
@@ -176,7 +177,7 @@ export default function AdminPage() {
         title="Admin"
         description={
           canManageKeys
-            ? "Provider keys, accounts and the directing instruction — set once, rarely touched. Per-channel settings live under Channels."
+            ? "Provider keys, accounts, provider spend and the directing instruction. Per-channel settings live under Channels."
             : "The directing instruction and pacing — set once, rarely touched. Per-channel settings live under Channels."
         }
       />
@@ -190,6 +191,7 @@ export default function AdminPage() {
           )}
           <TabsTrigger value="instruction">Longform instruction</TabsTrigger>
           <TabsTrigger value="pacing">Longform pacing</TabsTrigger>
+          {canManageKeys && <TabsTrigger value="spend">Spend</TabsTrigger>}
           {canManageKeys && <TabsTrigger value="users">Users</TabsTrigger>}
         </TabsList>
         {canManageKeys && (
@@ -204,6 +206,11 @@ export default function AdminPage() {
         <TabsContent value="pacing">
           <LongformPacing />
         </TabsContent>
+        {canManageKeys && (
+          <TabsContent value="spend">
+            <MonthlySpend />
+          </TabsContent>
+        )}
         {canManageKeys && (
           <TabsContent value="users">
             <UserManagement />

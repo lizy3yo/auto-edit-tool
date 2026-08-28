@@ -125,6 +125,7 @@ import {
 } from "./videoTimeline";
 import { buildVideoDescription } from "./videoDescription";
 import { getJobCostBreakdown } from "./costMeter";
+import { getMonthlyCostReport } from "./costRollup";
 import { ApimartAdapter } from "./providers/apimart";
 import { HeygenLipsyncAdapter } from "./providers/heygen-lipsync";
 // AIREITER BOLT-ON (temporary) — delete with the router block below.
@@ -779,6 +780,20 @@ const longformVideoRouter = router({
   getCostBreakdown: approvedProcedure
     .input(z.object({ jobId: z.number() }))
     .query(async ({ input }) => getJobCostBreakdown(input.jobId)),
+
+  /**
+   * Monthly provider spend across every render — total, per channel, and per generation, in USD
+   * and EUR (`server/costRollup.ts`).
+   *
+   * `adminProcedure`, not `managerProcedure`: this is the company's spend across all accounts,
+   * which sits with the provider keys rather than with the people directing renders. The Admin
+   * page hides the tab on the same rule.
+   */
+  getMonthlyCostReport: adminProcedure
+    .input(z.object({ months: z.number().int().min(1).max(36) }).optional())
+    .query(async ({ input }) =>
+      getMonthlyCostReport({ months: input?.months })
+    ),
 
   /** Admin: read the saved directing instruction (falls back to the default). */
   getInstructionPrompt: managerProcedure.query(async () => {

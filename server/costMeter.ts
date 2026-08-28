@@ -212,7 +212,8 @@ export interface CostBreakdown {
   sections: CostSection[];
 }
 
-const SECTION_META: Record<
+/** Lane → how it renders. Shared with `server/costRollup.ts` so the two reports agree. */
+export const SECTION_META: Record<
   UsageLine["lane"],
   { label: string; showCount: boolean; order: number }
 > = {
