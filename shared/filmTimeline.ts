@@ -71,9 +71,10 @@ export function operatorSetLength(scene: {
  * The hold inputs `planMasterOverlayScenes` needs for one scene, in ONE place so the renderer,
  * the chapter map and the browser's live preview cannot answer differently.
  *
- * `floorSec` is the scene's own on-screen floor (`scene.minHoldSec`, or `floorFor` derived
- * server-side for a storyboard that predates it). Omit it and the plan falls back to
- * `MAX_SCENE_FLOOR_SEC`. Pure — unit-tested.
+ * Since the freeze-pad was retired this emits only the EXPLICIT holds — the operator's own
+ * head/tail holds and the CTA QR linger default — never an automatic floor pad. `floorSec` is
+ * kept for signature compatibility (assembly still derives it) but no longer read. Pure —
+ * unit-tested.
  */
 export function sceneHoldPlan(
   scene: {
@@ -98,8 +99,13 @@ export function sceneHoldPlan(
   // exempt for the reason above. Both mean: this scene is exactly as long as its slice.
   const exempt = !!scene.coverHero || operatorSetLength(scene);
   return {
-    holdSec: exempt ? undefined : scene.audioDuration,
-    minHoldSec: exempt ? undefined : (floorSec ?? scene.minHoldSec),
+    // The automatic freeze-pad is retired: no scene is held past its narration slice, so a beat
+    // voiced shorter than its floor cuts when its words end instead of freezing with silence
+    // spliced under it. The floors still shape the STORYBOARD (merge/split at scripting time);
+    // they no longer stretch the finished film. `holdSec`/`minHoldSec` stay in the return type
+    // so the callers' spreads keep compiling, but nothing emits them any more.
+    holdSec: undefined,
+    minHoldSec: undefined,
     // An explicit hold is the operator's own number and always wins — including 0, which is how
     // they remove the CTA pause. The DEFAULT only applies to a beat they have not re-timed.
     tailHoldSec:

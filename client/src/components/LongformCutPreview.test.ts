@@ -193,8 +193,9 @@ describe("planCutBeats", () => {
     expect(beats[0].tailHoldSec).toBe(0);
   });
 
-  it("holds a scene to its floored duration when the narration is shorter", () => {
-    // A sub-floor beat: 1s of words, floored to 3s on screen. The extra 2s is frozen tail.
+  it("no longer pads a sub-floor beat — it runs exactly its slice length", () => {
+    // The automatic freeze-pad is retired: 1s of words is 1s on screen, even though the beat was
+    // voiced/floored to 3s. Only explicit holds (head/tail/QR) freeze the picture now.
     const beats = planCutBeats([
       scene({
         index: 1,
@@ -205,8 +206,8 @@ describe("planCutBeats", () => {
         minHoldSec: 3,
       }),
     ]);
-    expect(beats[0].endSec - beats[0].startSec).toBeCloseTo(3, 2);
-    expect(beats[0].tailHoldSec).toBeCloseTo(2, 2);
+    expect(beats[0].endSec - beats[0].startSec).toBeCloseTo(1, 2);
+    expect(beats[0].tailHoldSec).toBe(0);
   });
 
   it("splits a multi-clip scene across the SPOKEN middle, bracketing it with the holds", () => {

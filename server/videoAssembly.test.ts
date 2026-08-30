@@ -1045,13 +1045,16 @@ describe("planMasterOverlayScenes (master-timeline frame plan)", () => {
       expect(plan.inserts).toEqual([]);
     });
 
-    it("keeps both on a beat the operator has NOT re-timed", () => {
+    it("keeps the tail default — but never a floor pad — on a beat the operator has NOT re-timed", () => {
       const { timingOriginal, ...untouched } = cut;
       expect(operatorSetLength(untouched)).toBe(false);
-      expect(sceneHoldPlan(untouched, 3)).toMatchObject({
-        holdSec: 3.332,
-        minHoldSec: 3,
+      // The automatic freeze-pad is retired: even an untouched sub-floor beat runs exactly its
+      // slice length. Only the explicit holds (here the CTA tail default) survive.
+      expect(sceneHoldPlan(untouched, 3)).toEqual({
+        holdSec: undefined,
+        minHoldSec: undefined,
         tailHoldSec: 3,
+        headHoldSec: undefined,
       });
     });
 
