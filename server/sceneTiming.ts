@@ -927,3 +927,209 @@ export function applyRippleTrim(
   scene.timingEdited = true;
   return Array.from(touched);
 }
+
+/** How far apart two "adjacent" slices may sit and still count as meeting — anything wider is a
+ *  real hole a ripple trim left, and merging across it would resurrect deleted words. */
+export const MERGE_GAP_EPS_SEC = 0.05;
+
+/**
+ * Whether scene `sceneIndex` can be MERGED with the scene after it into ONE scene.
+ *
+ * A merge exists to remove the visible cut between two neighbouring shots: the two slices
+ * become one, and the caller re-renders a single continuous clip over the combined narration.
+ * The rules are the ones a watchable film imposes:
+ *  - both scenes need narration timing, and their slices must actually MEET — a ripple trim's
+ *    hole between them means words were deleted there, and a merged slice would speak them again;
+ *  - set-piece beats (big QR, book-cover reveal, an operator's asset) never merge, in either
+ *    role — stretching a QR/cover/asset over a neighbour's words breaks what the beat is FOR;
+ *  - split-screen scenes are refused for now: their regenerate path reuses the lip-synced host
+ *    and re-renders only the right panel, which cannot cover a longer slice;
+ *  - both scenes must be the same register (host, or b-roll) — the merged scene keeps the
+ *    first one's visuals, and a host scene absorbing b-roll words (or vice versa) silently
+ *    changes who is on screen for them.
+ * Pure — unit-tested.
+ */
+export function validateMergeWithNext(
+  scenes: StoryboardScene[],
+  sceneIndex: number
+): TimingValidation {
+  const at = scenes.findIndex(s => s.index === sceneIndex);
+  if (at < 0)
+    return { ok: false, reason: `Scene ${sceneIndex} not found` };
+  const a = scenes[at];
+  const b = scenes[at + 1];
+  if (!b)
+    return {
+      ok: false,
+      reason: "This is the last scene — there is no next scene to merge with",
+    };
+  if (
+    !fin(a.narrationStartSec) ||
+    !fin(a.narrationEndSec) ||
+    !fin(b.narrationStartSec) ||
+    !fin(b.narrationEndSec)
+  )
+    return {
+      ok: false,
+      reason: "Both scenes need narration timing — render the film first",
+    };
+  if (Math.abs(b.narrationStartSec - a.narrationEndSec) > MERGE_GAP_EPS_SEC)
+    return {
+      ok: false,
+      reason:
+        "Narration was trimmed away between these scenes — they no longer meet, so they can't merge",
+    };
+  const setPiece = (s: StoryboardScene): string | undefined =>
+    s.qrHero
+      ? "the big-QR beat"
+      : s.coverHero
+        ? "the book-cover reveal"
+        : s.assetImageUrl
+          ? "an asset beat"
+          : undefined;
+  for (const s of [a, b]) {
+    const piece = setPiece(s);
+    if (piece)
+      return {
+        ok: false,
+        reason: `Scene ${s.index} is ${piece} — set-piece beats can't be merged`,
+      };
+    if (s.hostPresent && s.splitVisual)
+      return {
+        ok: false,
+        reason: `Scene ${s.index} is a split screen — merge isn't supported for splits yet`,
+      };
+  }
+  if (!!a.hostPresent !== !!b.hostPresent)
+    return {
+      ok: false,
+      reason:
+        "Only two host scenes or two b-roll scenes can merge — these are different shot types",
+    };
+  return { ok: true };
+}
+
+/**
+ * Merge scene `sceneIndex` with the scene after it, in place: the first scene's slice extends
+ * to the second's end, the script texts join, the second scene's card disappears and everything
+ * after renumbers.
+ *
+ * The merged scene keeps the FIRST scene's visual identity and head-side fields, and takes the
+ * SECOND's tail-side ones (`tailHoldSec`, `qrTail`) since that is now where the scene ends;
+ * `cta` is OR'd so a merge can never drop a QR overlay. Footage-addressing edits (trim, cut
+ * markers, piece slips) and the timing snapshot are cleared — they describe two clips that are
+ * about to be replaced by one, and the pristine cut no longer describes this geometry.
+ *
+ * Deliberately does NOT touch `audioUrl`/`audioDuration` or clear the clips: the caller slices
+ * the merged narration from the master and re-renders, and until that lands the old fields keep
+ * the film playable. Pure metadata — unit-tested; the render is the caller's job.
+ */
+export function applyMergeWithNext(
+  scenes: StoryboardScene[],
+  sceneIndex: number
+): { ok: true; absorbedIndex: number } | { ok: false; reason: string } {
+  const v = validateMergeWithNext(scenes, sceneIndex);
+  if (!v.ok) return v;
+  const at = scenes.findIndex(s => s.index === sceneIndex);
+  const a = scenes[at];
+  const b = scenes[at + 1];
+  const absorbedIndex = b.index;
+
+  // Snapshot both originals FIRST — what "Unmerge" puts back. Shallow copies are enough: the
+  // merge only deletes/reassigns top-level keys on `a`, never mutates a nested object in place
+  // (later edits on the merged scene allocate fresh arrays/objects too, since these were
+  // cleared). `a` arrives marked "processing" by the edit session, which is not a state worth
+  // restoring — a snapshot with its clip is a completed scene.
+  const asRestorable = (s: StoryboardScene): StoryboardScene => ({
+    ...s,
+    sceneStatus: s.clipUrls?.length || s.clipUrl ? "completed" : s.sceneStatus,
+    error: undefined,
+  });
+  const mergeOriginal = { a: asRestorable(a), b: asRestorable(b) };
+
+  a.narrationEndSec = b.narrationEndSec;
+  const text = `${(a.scriptText ?? a.narration ?? "").trim()} ${(
+    b.scriptText ??
+    b.narration ??
+    ""
+  ).trim()}`.trim();
+  a.scriptText = text;
+  a.narration = text.split(/\s+/).slice(0, 8).join(" ");
+  a.tailHoldSec = b.tailHoldSec;
+  a.qrTail = b.qrTail;
+  a.cta = a.cta || b.cta || undefined;
+  delete a.clipInSec;
+  delete a.cutPoints;
+  delete a.pieceClipIns;
+  delete a.timingEdited;
+  forgetTimingSnapshot(a);
+  a.mergeOriginal = mergeOriginal;
+
+  scenes.splice(at + 1, 1);
+  scenes.forEach((s, i) => (s.index = i + 1));
+  return { ok: true, absorbedIndex };
+}
+
+/**
+ * Whether a merged scene can be UNMERGED — split back into the two scenes it was made from.
+ *
+ * Needs the `mergeOriginal` snapshot, and the merged scene's boundaries must still be where the
+ * merge put them: once an operator has moved either edge, the restored pair's ranges would no
+ * longer tile with the neighbours (an overlap or a gap in the master timeline), so the unmerge
+ * refuses and says why rather than corrupting the board. Interior edits — a trim, cut markers,
+ * a hold — don't move the edges and don't block it; they belong to the merged clip and are
+ * simply discarded with it. Pure — unit-tested.
+ */
+export function validateUnmerge(
+  scenes: StoryboardScene[],
+  sceneIndex: number
+): TimingValidation {
+  const at = scenes.findIndex(s => s.index === sceneIndex);
+  if (at < 0) return { ok: false, reason: `Scene ${sceneIndex} not found` };
+  const s = scenes[at];
+  const snap = s.mergeOriginal;
+  if (!snap)
+    return {
+      ok: false,
+      reason: `Scene ${sceneIndex} was not made by a merge — nothing to unmerge`,
+    };
+  if (
+    !fin(s.narrationStartSec) ||
+    !fin(s.narrationEndSec) ||
+    !fin(snap.a.narrationStartSec) ||
+    !fin(snap.b.narrationEndSec) ||
+    Math.abs(s.narrationStartSec - (snap.a.narrationStartSec as number)) >
+      MERGE_GAP_EPS_SEC ||
+    Math.abs(s.narrationEndSec - (snap.b.narrationEndSec as number)) >
+      MERGE_GAP_EPS_SEC
+  )
+    return {
+      ok: false,
+      reason:
+        "This scene was re-timed after the merge — the original pair no longer fits its slot. Revert its timing first",
+    };
+  return { ok: true };
+}
+
+/**
+ * Undo a merge in place: the merged scene's card is replaced by the two originals from its
+ * `mergeOriginal` snapshot — their own clips, audio slices, prompts and cut-room state exactly
+ * as they were — and everything after renumbers back. Instant metadata; the originals' media
+ * still exists, so nothing re-renders. The restored first scene is marked `timingEdited` so the
+ * "Reassemble to apply" notice shows — if the merged clip was ever stitched into a final, that
+ * file no longer matches the board. Pure — unit-tested.
+ */
+export function applyUnmerge(
+  scenes: StoryboardScene[],
+  sceneIndex: number
+): { ok: true } | { ok: false; reason: string } {
+  const v = validateUnmerge(scenes, sceneIndex);
+  if (!v.ok) return v;
+  const at = scenes.findIndex(s => s.index === sceneIndex);
+  const snap = scenes[at].mergeOriginal!;
+  const a: StoryboardScene = { ...snap.a, timingEdited: true };
+  const b: StoryboardScene = { ...snap.b };
+  scenes.splice(at, 1, a, b);
+  scenes.forEach((s, i) => (s.index = i + 1));
+  return { ok: true };
+}

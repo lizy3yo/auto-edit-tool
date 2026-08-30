@@ -82,6 +82,7 @@ import {
   Scissors,
   BookOpen,
   History,
+  Merge,
 } from "lucide-react";
 
 export type SlotStatus = "idle" | "processing" | "completed" | "failed";
@@ -590,6 +591,38 @@ export default function LongformJobSlot({
           " — Reassemble to apply it"
       );
       watchCutRoom();
+      if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
+    },
+    onError: err => toast.error(err.message),
+  });
+
+  const mergeScenesMutation = trpc.longformVideo.mergeScenes.useMutation({
+    onSuccess: (d, vars) => {
+      if (d.accepted === "ignored") {
+        toast.info(
+          `Scene ${vars.sceneIndex} is rendering — merge it once it finishes`
+        );
+        return;
+      }
+      toast.success(
+        "Merging with the next scene — re-rendering as one continuous clip"
+      );
+      if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
+    },
+    onError: err => toast.error(err.message),
+  });
+
+  const unmergeScenesMutation = trpc.longformVideo.unmergeScenes.useMutation({
+    onSuccess: (d, vars) => {
+      if (d.accepted === "ignored") {
+        toast.info(
+          `Scene ${vars.sceneIndex} is rendering — unmerge it once it finishes`
+        );
+        return;
+      }
+      toast.success(
+        "Unmerged — the original two scenes are back. Reassemble to apply"
+      );
       if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
     },
     onError: err => toast.error(err.message),
@@ -2481,6 +2514,88 @@ export default function LongformJobSlot({
                                     />
                                   );
                                 })()}
+                              {/* Merge two neighbouring shots into ONE continuous clip — the fix
+                                  for a cut that chops the host mid-flow (e.g. the two-angle cold
+                                  open). Shown only where the server would accept it, so the
+                                  button never appears just to refuse. */}
+                              {(() => {
+                                if (!job?.masterAudioUrl) return null;
+                                const pos = scenes.findIndex(
+                                  sc => sc.index === scene.index
+                                );
+                                const next =
+                                  pos >= 0 && pos < scenes.length - 1
+                                    ? scenes[pos + 1]
+                                    : undefined;
+                                const setPiece = (s: StoryboardScene) =>
+                                  s.qrHero || s.coverHero || !!s.assetImageUrl;
+                                if (
+                                  !next ||
+                                  scene.narrationStartSec == null ||
+                                  scene.narrationEndSec == null ||
+                                  next.narrationStartSec == null ||
+                                  next.narrationEndSec == null ||
+                                  Math.abs(
+                                    next.narrationStartSec -
+                                      scene.narrationEndSec
+                                  ) > 0.05 ||
+                                  setPiece(scene) ||
+                                  setPiece(next) ||
+                                  isSplitScene(scene) ||
+                                  isSplitScene(next) ||
+                                  !!scene.hostPresent !== !!next.hostPresent
+                                )
+                                  return null;
+                                return (
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="w-full"
+                                    disabled={
+                                      mergeScenesMutation.isPending ||
+                                      isSceneQueued
+                                    }
+                                    title="Glue this scene and the next into one scene and re-render them as a single continuous clip — removes the cut between them. Costs one clip render."
+                                    onClick={() => {
+                                      if (!jobId) return;
+                                      mergeScenesMutation.mutate({
+                                        jobId,
+                                        sceneIndex: scene.index,
+                                      });
+                                    }}
+                                  >
+                                    <Merge className="mr-1.5 h-3.5 w-3.5" />
+                                    Merge with scene #{next.index} — one
+                                    continuous clip
+                                  </Button>
+                                );
+                              })()}
+                              {/* Undo a merge: the originals' clips and audio still exist, so
+                                  the two cards come back instantly — nothing re-renders. */}
+                              {scene.mergeOriginal && (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="w-full"
+                                  disabled={
+                                    unmergeScenesMutation.isPending ||
+                                    isSceneQueued
+                                  }
+                                  title="Put back the two scenes this one was merged from, with their original clips — free, nothing re-renders."
+                                  onClick={() => {
+                                    if (!jobId) return;
+                                    unmergeScenesMutation.mutate({
+                                      jobId,
+                                      sceneIndex: scene.index,
+                                    });
+                                  }}
+                                >
+                                  <History className="mr-1.5 h-3.5 w-3.5" />
+                                  Unmerge — restore the original two scenes
+                                </Button>
+                              )}
                               <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">
                                 {isSplitScene(scene)
                                   ? "Right panel (still) → gpt-image-2"

@@ -22,6 +22,11 @@ import {
   revertSceneTiming,
   revertAllSceneTiming,
   MIN_SLICE_SEC,
+  validateMergeWithNext,
+  applyMergeWithNext,
+  validateUnmerge,
+  applyUnmerge,
+  MERGE_GAP_EPS_SEC,
 } from "./sceneTiming";
 import type { StoryboardScene } from "../shared/types";
 
@@ -815,5 +820,184 @@ describe("planRippleTrim / applyRippleTrim", () => {
     const b = board();
     expect(applyRippleTrim(b, 2, planRippleTrim(b, 2, 25))).toEqual([]);
     expect(b[1].narrationEndSec).toBe(20);
+  });
+});
+
+describe("merge with next", () => {
+  it("accepts two contiguous same-register scenes", () => {
+    expect(validateMergeWithNext(board(), 1)).toEqual({ ok: true });
+    expect(validateMergeWithNext(board(), 2)).toEqual({ ok: true });
+  });
+
+  it("refuses the last scene, an unknown scene, and untimed scenes", () => {
+    expect(validateMergeWithNext(board(), 3).ok).toBe(false);
+    expect(validateMergeWithNext(board(), 9).ok).toBe(false);
+    const b = board();
+    delete b[1].narrationStartSec;
+    expect(validateMergeWithNext(b, 1).ok).toBe(false);
+  });
+
+  it("refuses across a ripple hole — those words were deleted, not reassigned", () => {
+    const b = board();
+    b[0].narrationEndSec = 10 - MERGE_GAP_EPS_SEC - 1; // scene 1 rippled short
+    const r = validateMergeWithNext(b, 1);
+    expect(r.ok).toBe(false);
+    expect(r.ok ? "" : r.reason).toMatch(/no longer meet/);
+  });
+
+  it("refuses set-piece beats and split screens, in either role", () => {
+    for (const flags of [
+      { qrHero: true },
+      { coverHero: true },
+      { assetImageUrl: "https://x/a.jpg" },
+      { hostPresent: true, splitVisual: "a chart" },
+    ]) {
+      let b = board();
+      Object.assign(b[0], flags, { hostPresent: !!(flags as any).hostPresent });
+      Object.assign(b[1], { hostPresent: !!(flags as any).hostPresent });
+      expect(validateMergeWithNext(b, 1).ok).toBe(false);
+      b = board();
+      Object.assign(b[1], flags, { hostPresent: !!(flags as any).hostPresent });
+      Object.assign(b[0], { hostPresent: !!(flags as any).hostPresent });
+      expect(validateMergeWithNext(b, 1).ok).toBe(false);
+    }
+  });
+
+  it("refuses a host/b-roll pair — the merged scene would change who covers the words", () => {
+    const b = board();
+    b[0].hostPresent = true;
+    const r = validateMergeWithNext(b, 1);
+    expect(r.ok).toBe(false);
+    expect(r.ok ? "" : r.reason).toMatch(/shot types/);
+  });
+
+  it("merges: extends the slice, joins the text, drops a card, renumbers", () => {
+    const b = board();
+    const r = applyMergeWithNext(b, 1);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.absorbedIndex).toBe(2);
+    expect(b).toHaveLength(2);
+    expect(b[0].narrationStartSec).toBe(0);
+    expect(b[0].narrationEndSec).toBe(20);
+    expect(b[0].scriptText).toBe(
+      "one two three four five six seven eight nine ten one two three four five six seven eight nine ten"
+    );
+    expect(b.map(s => s.index)).toEqual([1, 2]); // old scene 3 renumbered
+    expect(b[1].narrationStartSec).toBe(20); // untouched neighbour
+  });
+
+  it("takes the tail-side fields from the absorbed scene and ORs cta", () => {
+    const b = board();
+    b[1].tailHoldSec = 2;
+    b[1].qrTail = true;
+    b[1].cta = true;
+    const r = applyMergeWithNext(b, 1);
+    expect(r.ok).toBe(true);
+    expect(b[0].tailHoldSec).toBe(2);
+    expect(b[0].qrTail).toBe(true);
+    expect(b[0].cta).toBe(true);
+  });
+
+  it("clears footage edits and the timing snapshot — they describe replaced clips", () => {
+    const b = board();
+    b[0].clipInSec = 1.5;
+    b[0].cutPoints = [3];
+    b[0].pieceClipIns = { "3": 7 };
+    b[0].timingEdited = true;
+    b[0].timingOriginal = { narrationStartSec: 0, narrationEndSec: 10 };
+    const r = applyMergeWithNext(b, 1);
+    expect(r.ok).toBe(true);
+    expect(b[0].clipInSec).toBeUndefined();
+    expect(b[0].cutPoints).toBeUndefined();
+    expect(b[0].pieceClipIns).toBeUndefined();
+    expect(b[0].timingEdited).toBeUndefined();
+    expect(b[0].timingOriginal).toBeUndefined();
+  });
+
+  it("keeps audio and clips in place — the caller re-slices and re-renders", () => {
+    const b = board();
+    b[0].audioUrl = "https://x/vo1.mp3";
+    const r = applyMergeWithNext(b, 1);
+    expect(r.ok).toBe(true);
+    expect(b[0].audioUrl).toBe("https://x/vo1.mp3");
+    expect(b[0].clipUrl).toBe("https://x/1.mp4");
+  });
+
+  it("applies nothing when validation refuses", () => {
+    const b = board();
+    const r = applyMergeWithNext(b, 3);
+    expect(r.ok).toBe(false);
+    expect(b).toHaveLength(3);
+  });
+});
+
+describe("unmerge", () => {
+  /** Merge scenes 1+2 of a fresh board and return it. */
+  const merged = () => {
+    const b = board();
+    b[0].audioUrl = "https://x/vo1.mp3";
+    b[1].audioUrl = "https://x/vo2.mp3";
+    expect(applyMergeWithNext(b, 1).ok).toBe(true);
+    // The render the merge kicks off replaces the clip and audio on the merged card.
+    b[0].clipUrl = "https://x/merged.mp4";
+    b[0].clipUrls = ["https://x/merged.mp4"];
+    b[0].audioUrl = "https://x/merged-vo.mp3";
+    b[0].audioDuration = 20;
+    return b;
+  };
+
+  it("round-trips: the original pair comes back with its own clips and audio", () => {
+    const b = merged();
+    expect(validateUnmerge(b, 1)).toEqual({ ok: true });
+    expect(applyUnmerge(b, 1).ok).toBe(true);
+    expect(b).toHaveLength(3);
+    expect(b.map(s => s.index)).toEqual([1, 2, 3]);
+    expect(b[0].narrationEndSec).toBe(10);
+    expect(b[1].narrationStartSec).toBe(10);
+    expect(b[0].clipUrl).toBe("https://x/1.mp4");
+    expect(b[1].clipUrl).toBe("https://x/2.mp4");
+    expect(b[0].audioUrl).toBe("https://x/vo1.mp3");
+    expect(b[1].audioUrl).toBe("https://x/vo2.mp3");
+    expect(b[0].mergeOriginal).toBeUndefined();
+    // The restored cut differs from any file stitched with the merged clip.
+    expect(b[0].timingEdited).toBe(true);
+  });
+
+  it("refuses a scene that was never merged", () => {
+    const r = validateUnmerge(board(), 1);
+    expect(r.ok).toBe(false);
+    expect(r.ok ? "" : r.reason).toMatch(/nothing to unmerge/);
+  });
+
+  it("refuses once the merged scene's boundaries were re-timed", () => {
+    const b = merged();
+    b[0].narrationEndSec = 18; // operator moved the cut with scene 2 (old 3)
+    const r = validateUnmerge(b, 1);
+    expect(r.ok).toBe(false);
+    expect(r.ok ? "" : r.reason).toMatch(/re-timed/);
+    expect(b).toHaveLength(2); // nothing applied
+  });
+
+  it("interior edits don't block it — they belong to the merged clip and go with it", () => {
+    const b = merged();
+    b[0].clipInSec = 2;
+    b[0].cutPoints = [5];
+    expect(validateUnmerge(b, 1)).toEqual({ ok: true });
+    expect(applyUnmerge(b, 1).ok).toBe(true);
+    expect(b[0].clipInSec).toBeUndefined();
+    expect(b[0].cutPoints).toBeUndefined();
+  });
+
+  it("a merged scene merged AGAIN unmerges one step at a time", () => {
+    const b = merged(); // scenes: [merged(1+2) 0–20, scene3 20–30]
+    expect(applyMergeWithNext(b, 1).ok).toBe(true); // merge again with old scene 3
+    expect(b).toHaveLength(1);
+    expect(applyUnmerge(b, 1).ok).toBe(true); // peel one merge
+    expect(b).toHaveLength(2);
+    expect(b[0].narrationEndSec).toBe(20);
+    expect(b[0].mergeOriginal).toBeDefined(); // the inner merge survives
+    expect(applyUnmerge(b, 1).ok).toBe(true); // peel the other
+    expect(b).toHaveLength(3);
+    expect(b.map(s => s.narrationStartSec)).toEqual([0, 10, 20]);
   });
 });

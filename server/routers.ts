@@ -83,6 +83,8 @@ import {
   sceneFloorSec,
   revertJobTiming,
   rippleTrimScene,
+  mergeSceneWithNext,
+  unmergeScene,
   revertSceneTimingEdits as revertLongformSceneTiming,
   retryFailedScenes as retryLongformFailedScenes,
   describeIncompleteScenes,
@@ -112,6 +114,8 @@ import {
   validateAddCut,
   validateMoveCut,
   validateSetPieceClipIn,
+  validateMergeWithNext,
+  validateUnmerge,
   planRippleTrim,
   type Silence,
   cutPoints,
@@ -1982,6 +1986,74 @@ const longformVideoRouter = router({
         removedSec: plan.removedSec,
         snapped: plan.snapped,
       };
+    }),
+
+  /**
+   * Cut room: merge one scene with the scene after it and re-render the pair as ONE continuous
+   * clip — removes the visible cut between two neighbouring shots. A RENDER edit (costs one
+   * clip generation); the merged narration is sliced from the existing master, never re-voiced.
+   * Refused while anything else renders: the merge renumbers every later scene, and a queued
+   * request keyed by an old index would land on the wrong card.
+   */
+  mergeScenes: approvedProcedure
+    .input(z.object({ jobId: z.number(), sceneIndex: z.number().int().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      const job = await getLongformVideoJobById(input.jobId);
+      if (
+        !job ||
+        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
+      ) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
+      }
+      if (!job.masterAudioUrl)
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "This job has no master narration — merge needs one",
+        });
+      const scenes = (job.storyboard ?? []) as StoryboardScene[];
+      const v = validateMergeWithNext(scenes, input.sceneIndex);
+      if (!v.ok)
+        throw new TRPCError({ code: "BAD_REQUEST", message: v.reason });
+      const live = getSceneEditState(input.jobId);
+      if (live.active.length || live.queued.length)
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            "Can't merge while scenes are rendering or queued — wait for them to finish",
+        });
+      const accepted = await mergeSceneWithNext(input.jobId, input.sceneIndex);
+      return { ok: true, accepted };
+    }),
+
+  /**
+   * Cut room: undo a merge — put back the two scenes a merged scene was made from, with their
+   * own clips and audio exactly as they were. Instant metadata, nothing re-renders (the
+   * originals' media still exists on R2). Refused once the merged scene's boundaries have been
+   * re-timed (the restored pair would no longer tile) and while anything renders (renumbers).
+   */
+  unmergeScenes: approvedProcedure
+    .input(z.object({ jobId: z.number(), sceneIndex: z.number().int().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      const job = await getLongformVideoJobById(input.jobId);
+      if (
+        !job ||
+        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
+      ) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
+      }
+      const scenes = (job.storyboard ?? []) as StoryboardScene[];
+      const v = validateUnmerge(scenes, input.sceneIndex);
+      if (!v.ok)
+        throw new TRPCError({ code: "BAD_REQUEST", message: v.reason });
+      const live = getSceneEditState(input.jobId);
+      if (live.active.length || live.queued.length)
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            "Can't unmerge while scenes are rendering or queued — wait for them to finish",
+        });
+      const accepted = await unmergeScene(input.jobId, input.sceneIndex);
+      return { ok: true, accepted };
     }),
 
   /**

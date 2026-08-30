@@ -488,6 +488,22 @@ export interface StoryboardScene {
     pieceClipIns?: Record<string, number>;
   };
   /**
+   * The two scenes as they were BEFORE they were merged into this one — what "Unmerge" puts
+   * back (`applyMergeWithNext` writes it, `applyUnmerge` consumes it; server/sceneTiming.ts).
+   *
+   * Full snapshots rather than a diff because unmerge must be FREE: the originals' clips and
+   * audio slices still exist on R2, so restoring the two cards is an instant metadata write —
+   * no re-render, no reassembly cost beyond the one already owed. A merged scene that is merged
+   * AGAIN nests naturally (the `a` snapshot carries its own `mergeOriginal`), so repeated
+   * unmerges peel back one merge at a time. Dropped once the merged scene's boundaries are
+   * re-timed past recognition — see `validateUnmerge`, which refuses instead of restoring
+   * ranges that no longer tile.
+   */
+  mergeOriginal?: {
+    a: StoryboardScene;
+    b: StoryboardScene;
+  };
+  /**
    * R2 URLs of this scene's generated clip(s), in order. B-roll is always ONE clip sized to
    * the narration; only a HOST scene whose narration outruns one clip gets several.
    */

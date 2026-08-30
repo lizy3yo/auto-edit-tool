@@ -91,7 +91,12 @@ import {
   validateMoveCut,
   validateTimingEdit,
   validateSetPieceClipIn,
+  validateMergeWithNext,
+  applyMergeWithNext,
+  validateUnmerge,
+  applyUnmerge,
   setPieceClipIn,
+  roundMs,
   type SceneTimingEdit,
   type Silence,
   type RippleEdge,
@@ -9787,7 +9792,22 @@ export type SceneEditRequest =
       sceneIndex: number;
       newSec: number;
       edge: RippleEdge;
-    };
+    }
+  /**
+   * MERGE this scene with the one after it and re-render the pair as ONE continuous clip —
+   * removes the visible cut between two neighbouring shots (e.g. the two-angle cold open). A
+   * RENDER edit, not a timing one: the merged narration is sliced from the master (never
+   * re-voiced — fresh TTS would knock the job off the overlay path) and one clip is generated
+   * over it. Renumbers every later scene, so the router refuses it while other edits are live.
+   */
+  | { kind: "merge"; sceneIndex: number }
+  /**
+   * UNMERGE a merged scene — put back the two scenes it was made from (`scene.mergeOriginal`).
+   * Metadata only and instant: the originals' clips and audio slices still exist on R2, so the
+   * two cards return with their own footage and nothing re-renders. Renumbers, so it takes the
+   * same "nothing else rendering" guard the merge does.
+   */
+  | { kind: "unmerge"; sceneIndex: number };
 
 /** Requests that change how a scene ASSEMBLES without rendering anything. */
 const isTimingKind = (req: SceneEditRequest): boolean =>
@@ -9797,7 +9817,8 @@ const isTimingKind = (req: SceneEditRequest): boolean =>
   req.kind === "movecut" ||
   req.kind === "piececlip" ||
   req.kind === "reverttiming" ||
-  req.kind === "ripple";
+  req.kind === "ripple" ||
+  req.kind === "unmerge";
 
 interface SceneEditSession {
   queue: SceneEditQueue<SceneEditRequest>;
@@ -10237,6 +10258,11 @@ async function runSceneEdit(
           runRevertTimingEdit(ctx, s);
         } else if (req.kind === "ripple") {
           await runRippleEdit(ctx, s, req.newSec, req.edge);
+        } else if (req.kind === "merge") {
+          await runMergeEdit(ctx, s);
+          s.regenerated = true;
+        } else if (req.kind === "unmerge") {
+          runUnmergeEdit(ctx, s);
         } else {
           if (req.kind === "regen") await runRegenEdit(ctx, s, req);
           else await runSplitEdit(ctx, s, req.edit);
@@ -10580,6 +10606,20 @@ export async function rippleTrimScene(
   return enqueueSceneEdit(jobId, { kind: "ripple", sceneIndex, newSec, edge });
 }
 
+export async function mergeSceneWithNext(
+  jobId: number,
+  sceneIndex: number
+): Promise<EditAccept> {
+  return enqueueSceneEdit(jobId, { kind: "merge", sceneIndex });
+}
+
+export async function unmergeScene(
+  jobId: number,
+  sceneIndex: number
+): Promise<EditAccept> {
+  return enqueueSceneEdit(jobId, { kind: "unmerge", sceneIndex });
+}
+
 /**
  * Put the WHOLE job back to its pristine cut.
  *
@@ -10663,6 +10703,95 @@ async function runRegenEdit(
     lane.ttsKey,
     lane.lipsync,
     lane.instruction
+  );
+}
+
+/**
+ * A merge request's body: fold the NEXT scene into this one and re-render the pair as ONE
+ * continuous clip.
+ *
+ * Ordered so every failure leaves the job coherent:
+ *  1. slice the merged narration out of the EXISTING master track first (`sliceAudioSegments`)
+ *     — never re-voice: fresh TTS would clear the master-timeline ranges and knock the whole
+ *     job off the overlay path (see `renderSceneClipInPlace`). A slice failure merges nothing.
+ *  2. only then apply the metadata merge (`applyMergeWithNext` — extends the slice, joins the
+ *     text, drops the next scene's card, renumbers) and point the scene at the new audio.
+ *  3. render. If THIS fails the scene is failed-but-merged with the CORRECT merged audio in
+ *     place, so a plain "Regenerate" retry finishes the job — no special retry path.
+ *
+ * Refuses while any other render is queued or active: the renumber would misdirect requests
+ * keyed by the old indices. The router pre-checks the same thing; this is the race backstop.
+ */
+async function runMergeEdit(
+  ctx: SceneEditContext,
+  scene: StoryboardScene
+): Promise<void> {
+  const { jobId, scenes, params } = ctx;
+  const renders = ctx.queue.state(req => !isTimingKind(req));
+  const others = [
+    ...renders.active.filter(i => i !== scene.index),
+    ...renders.queued,
+  ];
+  if (others.length)
+    throw new Error(
+      `Can't merge while other scenes are rendering or queued (${others.join(", ")}) — wait for them to finish`
+    );
+  if (!ctx.masterAudioUrl)
+    throw new Error("This job has no master narration — merge needs one");
+  const v = validateMergeWithNext(scenes, scene.index);
+  if (!v.ok) throw new Error(v.reason);
+  const at = scenes.findIndex(s => s.index === scene.index);
+  const next = scenes[at + 1];
+  const startSec = scene.narrationStartSec as number;
+  const endSec = next.narrationEndSec as number;
+
+  const [buf] = await sliceAudioSegments(ctx.masterAudioUrl, [
+    { startSec, lenSec: Math.max(0.1, endSec - startSec) },
+  ]);
+  const key = `longform/${jobId}/scene-${scene.index}-merged-vo-${nanoid(6)}.mp3`;
+  const { url } = await storagePut(key, buf, "audio/mpeg");
+
+  const merged = applyMergeWithNext(scenes, scene.index);
+  if (!merged.ok) throw new Error(merged.reason);
+  scene.audioUrl = url;
+  scene.audioDuration = roundMs(endSec - startSec);
+  console.log(
+    `[Longform ${jobId}] scene ${scene.index} merged with old scene ${merged.absorbedIndex} ` +
+      `(${startSec.toFixed(2)}s–${endSec.toFixed(2)}s) — re-rendering as one continuous clip`
+  );
+
+  const lane = await ctx.renderLane();
+  await renderSceneClipInPlace(
+    jobId,
+    scene,
+    scenes,
+    params,
+    lane.adapter,
+    lane.ttsType,
+    lane.ttsKey,
+    lane.lipsync,
+    lane.instruction
+  );
+}
+
+/**
+ * An unmerge request's body: replace the merged scene's card with the two originals from its
+ * snapshot. Instant metadata — the originals' clips and audio still exist, nothing re-renders.
+ * Refuses while any render is queued or active for the same reason merge does: it renumbers.
+ */
+function runUnmergeEdit(ctx: SceneEditContext, scene: StoryboardScene): void {
+  const renders = ctx.queue.state(req => !isTimingKind(req));
+  if (renders.active.length || renders.queued.length)
+    throw new Error(
+      `Can't unmerge while scenes are rendering or queued (${[
+        ...renders.active,
+        ...renders.queued,
+      ].join(", ")}) — wait for them to finish`
+    );
+  const r = applyUnmerge(ctx.scenes, scene.index);
+  if (!r.ok) throw new Error(r.reason);
+  console.log(
+    `[Longform ${ctx.jobId}] scene ${scene.index} unmerged — original pair restored`
   );
 }
 
