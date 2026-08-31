@@ -159,6 +159,13 @@ import {
 } from "../shared/pacing";
 import { getChannelLayer } from "./composer";
 import { isMockMode, setMockMode } from "./mockMode";
+import {
+  getLipsyncProvider,
+  setLipsyncProvider,
+  getLipsyncQuality,
+  setLipsyncQuality,
+  runpodLipsyncReadiness,
+} from "./lipsyncProvider";
 import { extractBookName } from "./ctaDetector";
 import { createProviderAdapter } from "./providers";
 import { rehostToR2 } from "./storage";
@@ -953,6 +960,43 @@ const longformVideoRouter = router({
     .mutation(async ({ input }) => {
       await setMockMode(input.enabled);
       return { enabled: input.enabled };
+    }),
+
+  /**
+   * Which vendor renders host scenes, and (RunPod only) at which quality tier. Returns the
+   * RunPod readiness flags alongside, so the Admin UI can name what is missing instead of
+   * offering a switch the pipeline would silently ignore — `resolveLipsyncLane` falls back
+   * to HeyGen when the endpoint or key is absent.
+   */
+  getLipsyncProvider: adminProcedure.query(async () => {
+    const [provider, quality] = await Promise.all([
+      getLipsyncProvider(),
+      getLipsyncQuality(),
+    ]);
+    return { provider, quality, runpod: runpodLipsyncReadiness() };
+  }),
+
+  setLipsyncProvider: adminProcedure
+    .input(z.object({ provider: z.enum(["heygen", "runpod"]) }))
+    .mutation(async ({ input }) => {
+      // Refuse rather than accept a setting the pipeline would ignore: silently writing
+      // "runpod" while every render kept going to HeyGen is the confusing failure here.
+      if (input.provider === "runpod" && !runpodLipsyncReadiness().ready) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message:
+            "RunPod InfiniteTalk is not configured — set RUNPOD_INFINITETALK_ENDPOINT and RUN_POD_KEY first.",
+        });
+      }
+      await setLipsyncProvider(input.provider);
+      return { provider: input.provider };
+    }),
+
+  setLipsyncQuality: adminProcedure
+    .input(z.object({ quality: z.enum(["fast", "full"]) }))
+    .mutation(async ({ input }) => {
+      await setLipsyncQuality(input.quality);
+      return { quality: input.quality };
     }),
 
   getApimartKeys: adminProcedure.query(async () => {

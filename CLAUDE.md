@@ -46,6 +46,7 @@ Read through the single `ENV` object in `server/_core/env.ts`, except `R2_*`, wh
 | `R2_PUBLIC_URL`                                                          | `server/storage.ts:83`, `server/musicBeds.ts:101`                                                      | narration-only films (warns, no crash)    |
 | `RUN_POD_KEY` + `RUNPOD_WHISPERX_ENDPOINT`                               | `server/_core/voiceTranscription.ts` → `kodxana/whisperx-worker_v2` serverless                         | no word-level narration alignment         |
 | `HEYGEN_API_KEY`                                                         | `server/longformVideo.ts:2506` — **fallback only**, used when a tab's slot key is blank                | host lip-sync fails for slot-less tabs    |
+| `RUNPOD_INFINITETALK_ENDPOINT` + `LIPSYNC_PROVIDER=runpod`                | `server/providers/runpod-lipsync.ts` — **optional**, moves host lip-sync off HeyGen                   | host lane stays on HeyGen (the default)   |
 | `PUBLIC_BASE_URL`                                                        | `server/providers/heygen-lipsync.ts:78` (webhook callback URL)                                         | blank ⇒ pure polling; slower, still works |
 
 ### Channel B — DB-stored, AES-256-GCM, entered in Admin
@@ -107,7 +108,7 @@ invoice, then pin the real number via the env var below (or edit the file).
 | `COST_APIMART_VIDEO_PER_SEC` | $0.02/s     | `COST_HEYGEN_PER_SEC`       | $0.06/s |
 | `COST_TTS_PER_1K_CHARS`      | $0.05       | `COST_GEMINI_IMAGE`         | $0.03   |
 | `COST_69LABS_IMAGE`          | $0.05       | `COST_69LABS_VIDEO_PER_SEC` | $0.05/s |
-| `COST_WHISPERX_PER_GPU_SEC`  | $0.0004     |                             |         |
+| `COST_WHISPERX_PER_GPU_SEC`  | $0.0004     | `COST_RUNPOD_LIPSYNC_PER_GPU_SEC` | $0.00097 |
 
 ## Architecture
 
@@ -139,8 +140,25 @@ Express · tRPC · Drizzle · MySQL.
   correction is a seek, a seek drops readyState, that stalls the clock, and the drift grows.
   Still a preview of the CUT, not the FILE — no burned-in QR/lower third/captions, no music bed
 - `server/providers/` — one adapter per vendor; `base.ts` is the interface,
-  `fallback.ts` the image chain (primary → Gemini). `heygen-lipsync.ts` is the host lip-sync
-  lane, resolved in `resolveLipsyncAdapter`
+  `fallback.ts` the image chain (primary → Gemini). The host lip-sync lane has TWO adapters,
+  picked in `resolveLipsyncLane` and handed to callers that know neither: `heygen-lipsync.ts`
+  (Avatar IV, 1080p, per-tab account keys, billed per second of output) and
+  `runpod-lipsync.ts` (self-hosted InfiniteTalk, ≤720p, one shared endpoint, billed per GPU
+  second — so it meters itself from RunPod's `executionTime` instead of being wrapped by the
+  per-output-second meter in `resolveLipsyncAdapter`). HeyGen is the default; RunPod requires
+  an explicit opt-in, since a deployed endpoint should be testable without silently moving
+  every render onto it. That choice (and the RunPod quality tier) lives in `app_settings` via
+  `server/lipsyncProvider.ts` and is flipped in Admin → Provider Keys, with
+  `LIPSYNC_PROVIDER` / `RUNPOD_LIPSYNC_QUALITY` as the DEFAULTS an unset row falls back to —
+  so switching vendors needs no redeploy, and switching away from HeyGen never touches the
+  stored HeyGen keys. Only the RunPod lane is prompted
+  (`buildLipsyncPrompt`) and only it needs `useAlt` spelled out — Avatar IV inherits the
+  still's gaze, InfiniteTalk squares an off-axis subject up to the lens unless told not to.
+  Being billed by RUNNING time also makes abandonment expensive there and free on HeyGen, so
+  the lane carries an optional `cancel` that `withSceneDeadline` fires when it gives up on a
+  host scene — otherwise a wedged render bills on to the endpoint's own execution timeout.
+  A poll TIMEOUT deliberately does not cancel: it returns `pending` so a resume can still
+  collect a render already paid for
 - `server/hostPlate.ts` — **provider-independent**. The lip-sync model animates the image it
   is handed and never changes the setting, so `HOST_PLATES=1` generates a 16:9 plate of the host
   IN each beat's setting (host photo as identity reference) and syncs from that instead of the

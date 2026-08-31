@@ -145,11 +145,26 @@ export const RATES = {
    * 720p cost the same, so resolution is not a lever.
    */
   heygenPerSecond: rate("COST_HEYGEN_PER_SEC", 0.06),
+
+  /**
+   * Self-hosted InfiniteTalk on RunPod, USD per GPU-SECOND — not per second of rendered
+   * video like HeyGen above. RunPod bills the GPU by the millisecond and the adapter meters
+   * its reported `executionTime`, so the unit that survives a change of GPU tier is this one.
+   * The default is a 96GB Blackwell at $3.49/hr; divide your endpoint's hourly rate by 3600
+   * and set the var if you deploy on anything else.
+   */
+  runpodLipsyncPerGpuSecond: rate("COST_RUNPOD_LIPSYNC_PER_GPU_SEC", 0.00097),
 } as const;
 
-/** Per-second rate for the lip-sync lane. */
-export function lipsyncRateFor(_provider: string, _model?: string): number {
-  return RATES.heygenPerSecond;
+/**
+ * Rate for one lip-sync line, in the unit that vendor's `quantity` is metered in: seconds
+ * of finished video for HeyGen, GPU seconds for the self-hosted RunPod lane. Mixing the two
+ * is safe only because each adapter records the quantity its own rate is quoted against.
+ */
+export function lipsyncRateFor(provider: string, _model?: string): number {
+  return provider === "runpod"
+    ? RATES.runpodLipsyncPerGpuSecond
+    : RATES.heygenPerSecond;
 }
 
 // ---------------------------------------------------------------------------
@@ -213,7 +228,7 @@ const VIDEO_RATES: Record<string, number> = {
 };
 
 /** Lip-sync vendors we have a rate for. No default — an unlisted vendor is unpriced. */
-const LIPSYNC_PROVIDERS = new Set(["heygen"]);
+const LIPSYNC_PROVIDERS = new Set(["heygen", "runpod"]);
 
 export function priceLine(line: UsageLine): PricedLine {
   const priced = (

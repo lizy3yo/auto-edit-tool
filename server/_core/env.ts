@@ -52,6 +52,40 @@ export const ENV = {
    * set this — there is no default.
    */
   runpodWhisperxEndpoint: process.env.RUNPOD_WHISPERX_ENDPOINT ?? "",
+  /**
+   * RunPod serverless endpoint ID for the self-hosted InfiniteTalk host lip-sync worker.
+   * Deploy your own (Metropolis-Media/infinitetalk-runpod-hub) and set this; blank keeps
+   * the host lane on HeyGen no matter what `LIPSYNC_PROVIDER` says.
+   */
+  runpodInfinitetalkEndpoint: process.env.RUNPOD_INFINITETALK_ENDPOINT ?? "",
+  /**
+   * Which vendor renders host scenes: `heygen` (default) or `runpod`. Deliberately an
+   * explicit opt-in rather than "use RunPod if its endpoint is set" — a configured
+   * endpoint should be testable without silently moving every render onto it.
+   */
+  lipsyncProvider: (process.env.LIPSYNC_PROVIDER ?? "heygen").toLowerCase(),
+  /**
+   * InfiniteTalk quality tier: `fast` (8-step distill, the default) or `full` (40 steps,
+   * real CFG). CFG above 1 costs two forward passes per step, so full is ~10x the model
+   * evaluations (40 x 2 vs 8 x 1) and ~10x the cost, not the 6x a step count alone suggests.
+   * Both render 720p from the same base model, and full additionally makes the PROMPT bite:
+   * at fast's CFG 1 the framing/minimal-motion direction is only weakly applied.
+   *
+   * The default here is only that — a default. Admin -> Provider Keys stores the live value
+   * (`server/lipsyncProvider.ts`), so the tier can change without a redeploy.
+   */
+  runpodLipsyncQuality:
+    (process.env.RUNPOD_LIPSYNC_QUALITY ?? "fast").toLowerCase() === "full"
+      ? ("full" as const)
+      : ("fast" as const),
+  /**
+   * Host renders kept in flight on the RunPod lane. Track your endpoint's max-workers
+   * setting: RunPod queues anything beyond it, and a queued job's wait counts against
+   * `RUNPOD_LIPSYNC_TIMEOUT_MS` while doing no work.
+   */
+  runpodLipsyncConcurrency: Number(
+    process.env.RUNPOD_LIPSYNC_CONCURRENCY ?? 4
+  ),
   /** HeyGen API key — fallback when a per-tab key slot is empty. */
   heygenApiKey: process.env.HEYGEN_API_KEY ?? "",
   /**

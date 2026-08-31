@@ -67,6 +67,12 @@ import {
   heygenSlotsFor,
   HEYGEN_LIPSYNC_TIMEOUT_MS,
 } from "./providers/heygen-lipsync";
+import {
+  RunpodLipsyncAdapter,
+  runpodLipsyncSlotsFor,
+  RUNPOD_LIPSYNC_TIMEOUT_MS,
+} from "./providers/runpod-lipsync";
+import { getLipsyncProvider, getLipsyncQuality } from "./lipsyncProvider";
 import { recordUsage, withCostMeter, flushJobUsage } from "./costMeter";
 // AIREITER BOLT-ON (temporary) — delete with the block in `apimartAdapterForJob`.
 import { aireiterAdapter, aireiterLaneEnabled } from "./providers/aireiter";
@@ -121,6 +127,13 @@ type LipsyncLane = {
     useAlt: boolean;
   }): Promise<VideoSubmitResult>;
   poll(taskId: string, timeoutMs?: number): Promise<GenerationResult>;
+  /**
+   * Tell the provider to stop a render we have given up on, where that saves money. Present
+   * only on lanes billed by RUNNING TIME (RunPod): HeyGen bills per second of finished output,
+   * so an abandoned render there costs the same whether it is cancelled or not. Absent means
+   * "nothing useful to do" — never a missing feature to work around.
+   */
+  cancel?(taskId: string): Promise<void>;
   /** Process-global in-flight cap for this provider. */
   slots: Semaphore;
   /** How wide the host `mapPool` runs. */
@@ -2932,6 +2945,11 @@ export async function resolveLipsyncAdapter(
   const lane = await resolveLipsyncLane(params);
   if (!lane || (await isMockMode())) return lane;
 
+  // Only HeyGen is metered here. The self-hosted RunPod lane is billed on GPU time rather
+  // than on seconds of finished video, and only the poll response knows how much of it was
+  // used — so that adapter records its own usage and must not be double-counted.
+  if (lane.provider !== "heygen") return lane;
+
   // Meter the host lane here rather than inside the adapter: HeyGen bills per second of
   // rendered output and the scene's narration IS that length, so this wrapper sits on the one
   // path every host render takes. An accepted submit is billed even if the render is later
@@ -2973,6 +2991,57 @@ async function resolveLipsyncLane(
       slots: heygenSlotsFor("mock"),
       concurrency: ENV.heygenConcurrency,
       sceneDeadlineMs: SCENE_DEADLINE_HOST_MS,
+    };
+  }
+
+  // Self-hosted InfiniteTalk on RunPod. Opt-in: the endpoint being configured is NOT enough,
+  // because a deployed endpoint should be testable without silently moving every host scene
+  // onto it. The choice comes from `app_settings` (Admin → Provider Keys) with LIPSYNC_PROVIDER
+  // as its default, so switching vendors needs no redeploy. A half-set config (provider chosen,
+  // endpoint or key missing) falls through to HeyGen rather than failing every host scene —
+  // the same shape as the key fallback below, and the reason the Admin toggle reads
+  // `runpodLipsyncReadiness()` rather than offering a switch it cannot honour.
+  const [lipsyncProvider, lipsyncQuality] = await Promise.all([
+    getLipsyncProvider(),
+    getLipsyncQuality(),
+  ]);
+  if (
+    lipsyncProvider === "runpod" &&
+    ENV.runpodInfinitetalkEndpoint &&
+    ENV.runPodApiKey
+  ) {
+    // InfiniteTalk renders exactly what it is asked for, so the resolution hint is a real
+    // argument here (HeyGen ignores one and always returns 1080p). Both sizes are Wan 2.1
+    // natives and divisible by 16 — off-grid dimensions get silently rounded.
+    const [width, height] =
+      LIPSYNC_RESOLUTION === "720p" ? [1280, 720] : [832, 480];
+    const runpod = new RunpodLipsyncAdapter(
+      ENV.runpodInfinitetalkEndpoint,
+      ENV.runPodApiKey,
+      lipsyncQuality
+    );
+    return {
+      provider: "runpod",
+      // Unlike Avatar IV this lane is prompted, and it does NOT inherit the still's gaze —
+      // left alone it squares an off-axis subject up to the lens, so `useAlt` has to be
+      // spelled out in the prompt to keep the alt-angle photo's framing.
+      submit: ({ scene, imageUrl, audioUrl, useAlt }) =>
+        runpod.submitLipsync({
+          imageUrl,
+          audioUrl,
+          prompt: buildLipsyncPrompt(scene, useAlt),
+          width,
+          height,
+        }),
+      poll: (id, ms) => runpod.pollVideo(id, ms ?? RUNPOD_LIPSYNC_TIMEOUT_MS),
+      // Billed by GPU time, so an abandoned render keeps costing until RunPod's own execution
+      // timeout. `withSceneDeadline` calls this when it gives up on a host scene.
+      cancel: id => runpod.cancelJob(id),
+      // One endpoint serves every tab (it is our own GPU, not a per-account allowance), so
+      // unlike HeyGen this semaphore is deliberately shared across all five slots.
+      slots: runpodLipsyncSlotsFor(ENV.runpodInfinitetalkEndpoint),
+      concurrency: ENV.runpodLipsyncConcurrency,
+      sceneDeadlineMs: SCENE_DEADLINE_HOST_RUNPOD_MS,
     };
   }
 
@@ -3783,6 +3852,18 @@ export const LIPSYNC_HOST_DIRECTION =
   "his mouth articulates every word and stays fully visible, hands never near his " +
   "face. He is calm and still — torso, shoulders, and head barely move, no swaying or " +
   "gesturing, hands resting quietly out of frame. One person speaking, no one else talking.";
+
+/**
+ * Appended to `LIPSYNC_HOST_DIRECTION` for a scene pinned to the ALT host photo
+ * (`scene.hostShot === 1`), which is shot off-axis so consecutive host cuts do not repeat the
+ * same angle. Needed only on the RunPod lane: HeyGen's Avatar IV inherits whatever gaze the
+ * still has, whereas InfiniteTalk follows the prompt and will quietly rotate an off-axis
+ * subject to face the lens — collapsing the alt angle back into the main one and undoing
+ * `assignHostShots`. Overrides the "looking at the lens" clause above, so it comes after it.
+ */
+export const LIPSYNC_ALT_ANGLE_SUFFIX =
+  "He is turned slightly off-axis, at a three-quarter angle, holding exactly the head and " +
+  "body orientation of the reference photo rather than squaring up to the camera.";
 
 /**
  * Ordered term→synonym map that rewrites harm-adjacent words Grok's 69labs content classifier
@@ -5022,9 +5103,14 @@ export function markCtaQrBlock(
  * contradicts the minimal-motion restriction. The only per-scene variation is the empty-hands
  * clause on CTA scenes. The narration audio drives speech, so no script text is included.
  */
-export function buildLipsyncPrompt(scene: StoryboardScene): string {
+export function buildLipsyncPrompt(
+  scene: StoryboardScene,
+  /** True when the scene renders from the ALT (off-axis) host photo — see the suffix. */
+  useAlt = false
+): string {
+  const angle = useAlt ? ` ${LIPSYNC_ALT_ANGLE_SUFFIX}` : "";
   const cta = scene.cta ? ` ${CTA_EMPTY_HANDS_SUFFIX}` : "";
-  return `${LIPSYNC_HOST_DIRECTION}${cta}`.trim();
+  return `${LIPSYNC_HOST_DIRECTION}${angle}${cta}`.trim();
 }
 
 /**
@@ -7287,7 +7373,13 @@ export const SCENE_DEADLINE_STILL_MS = 20 * 60_000;
 async function withSceneDeadline(
   scene: StoryboardScene,
   ms: number,
-  processOne: (s: StoryboardScene) => Promise<void>
+  processOne: (s: StoryboardScene) => Promise<void>,
+  /**
+   * Cleanup for a scene being given up on — today, telling a provider to stop a render that
+   * is still billing. Runs AFTER the scene is marked failed and cannot change that outcome,
+   * and its own failure is swallowed: this exists to save money, not to gate the pass.
+   */
+  onAbandon?: (s: StoryboardScene) => Promise<void>
 ): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const expired = new Promise<"expired">(resolve => {
@@ -7304,6 +7396,17 @@ async function withSceneDeadline(
       console.error(
         `[Longform] scene ${scene.index} abandoned after ${ms}ms — marked failed, retryable`
       );
+      // The render itself is still running provider-side: `processOne` is racing, not
+      // cancellable, so nothing above has told the provider to stop.
+      if (onAbandon) {
+        try {
+          await onAbandon(scene);
+        } catch (err: any) {
+          console.warn(
+            `[Longform] scene ${scene.index} abandon cleanup failed: ${err?.message ?? err}`
+          );
+        }
+      }
     }
   } finally {
     clearTimeout(timer);
@@ -7331,6 +7434,18 @@ export async function dispatchScenesByProvider(
   );
   const stopUsageLog =
     jobId !== undefined ? startSixtyNineLaneUsageLogger(jobId) : () => {};
+  // Hoisted out of the mapPool callback so the optional `cancel` narrows once. Undefined on a
+  // lane with nothing worth cancelling (HeyGen), which skips the cleanup entirely.
+  const cancelHostRender = lipsync?.cancel;
+  const cancelAbandonedHostRender = cancelHostRender
+    ? async (abandoned: StoryboardScene) => {
+        // One task per host scene today, but iterate: `renderTaskIds` is an array and a
+        // chunked host render would otherwise leave its siblings billing.
+        for (const id of abandoned.renderTaskIds ?? []) {
+          if (id) await cancelHostRender(id);
+        }
+      }
+    : undefined;
   // Motion b-roll renders on the 69Labs grok video lane (cap ENV.sixtynineVideoConcurrency).
   try {
     await Promise.all([
@@ -7343,7 +7458,8 @@ export async function dispatchScenesByProvider(
           withSceneDeadline(
             s,
             lipsync?.sceneDeadlineMs ?? SCENE_DEADLINE_HOST_MS,
-            processOne
+            processOne,
+            cancelAbandonedHostRender
           )
       ),
       mapPool(motion, Math.max(1, ENV.sixtynineVideoConcurrency), s =>

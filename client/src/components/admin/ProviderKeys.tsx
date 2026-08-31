@@ -3,7 +3,17 @@ import { trpc } from "@/lib/trpc";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Loader2, KeyRound, FlaskConical } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Loader2, KeyRound, FlaskConical, Mic } from "lucide-react";
 import { toast } from "sonner";
 
 /**
@@ -63,6 +73,184 @@ function MockModeToggle() {
           {enabled ? "Disable" : "Enable"}
         </Button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Host lip-sync vendor switch, plus the InfiniteTalk quality tier.
+ *
+ * Switching to InfiniteTalk does NOT clear the HeyGen keys — they stay encrypted in place and
+ * come straight back on switching return, because turning a vendor off is a routing decision
+ * and not a credential one. One switch covers all five tabs: the per-tab HeyGen keys exist
+ * because HeyGen throttles per ACCOUNT, whereas RunPod is a single endpoint we own.
+ *
+ * The server refuses `runpod` when its endpoint or key is missing rather than accepting a
+ * setting the pipeline would ignore, so the button is disabled here with the actual reason.
+ */
+export function HostLipsyncToggle() {
+  const utils = trpc.useUtils();
+  const { data, isLoading } = trpc.longformVideo.getLipsyncProvider.useQuery();
+  const [confirmFull, setConfirmFull] = useState(false);
+
+  const setProvider = trpc.longformVideo.setLipsyncProvider.useMutation({
+    onSuccess: ({ provider }) => {
+      toast.success(
+        provider === "runpod"
+          ? "Host lip-sync → InfiniteTalk (RunPod). HeyGen keys kept."
+          : "Host lip-sync → HeyGen Avatar IV."
+      );
+      utils.longformVideo.getLipsyncProvider.invalidate();
+    },
+    onError: err => toast.error(err.message ?? "Failed to switch provider."),
+  });
+
+  const setQuality = trpc.longformVideo.setLipsyncQuality.useMutation({
+    onSuccess: ({ quality }) => {
+      toast.success(
+        quality === "full"
+          ? "InfiniteTalk → full quality. Renders are slower and cost ~10× fast."
+          : "InfiniteTalk → fast quality."
+      );
+      utils.longformVideo.getLipsyncProvider.invalidate();
+    },
+    onError: err => toast.error(err.message ?? "Failed to change quality."),
+  });
+
+  const provider = data?.provider ?? "heygen";
+  const quality = data?.quality ?? "fast";
+  const onRunpod = provider === "runpod";
+  const ready = data?.runpod.ready ?? false;
+  const busy = isLoading || setProvider.isPending || setQuality.isPending;
+  // Name the missing half rather than greying the button out silently.
+  const blockedReason = data?.runpod.endpointSet
+    ? data?.runpod.keySet
+      ? null
+      : "RUN_POD_KEY is not set"
+    : "RUNPOD_INFINITETALK_ENDPOINT is not set";
+
+  return (
+    <div className="space-y-3">
+      <Label className="flex items-center gap-2 text-sm font-medium">
+        <Mic className="h-4 w-4" />
+        Host lip-sync provider
+      </Label>
+
+      <div className="flex items-center justify-between gap-4 rounded-md border border-border p-3">
+        <div className="text-sm">
+          <div className="font-medium">
+            {isLoading
+              ? "Checking…"
+              : onRunpod
+                ? "InfiniteTalk (RunPod) — self-hosted"
+                : "HeyGen Avatar IV"}
+          </div>
+          <div className="text-xs text-muted-foreground">
+            {onRunpod
+              ? "Your own GPU: 720p, billed by GPU second. HeyGen keys below are kept but unused."
+              : "1080p, per-tab accounts, billed per second of finished video."}
+            {!ready && blockedReason ? (
+              <>
+                {" "}
+                InfiniteTalk unavailable —{" "}
+                <code className="text-[11px]">{blockedReason}</code>.
+              </>
+            ) : null}
+          </div>
+        </div>
+        <Button
+          variant="outline"
+          disabled={busy || (!onRunpod && !ready)}
+          onClick={() =>
+            setProvider.mutate({ provider: onRunpod ? "heygen" : "runpod" })
+          }
+        >
+          {setProvider.isPending ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : null}
+          {onRunpod ? "Use HeyGen" : "Use InfiniteTalk"}
+        </Button>
+      </div>
+
+      {/* Quality is an InfiniteTalk-only knob — Avatar IV renders one way at one price. */}
+      {onRunpod ? (
+        <div
+          className={`flex items-center justify-between gap-4 rounded-md border p-3 ${
+            quality === "full"
+              ? "border-warning/40 bg-warning/10"
+              : "border-border"
+          }`}
+        >
+          <div className="text-sm">
+            <div className="font-medium">
+              {quality === "full"
+                ? "Full quality — 40 steps"
+                : "Fast quality — 8 steps"}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {quality === "full"
+                ? "Prompt direction (framing, minimal motion) is enforced. ~10× the GPU time and cost of fast."
+                : "Cheapest tier. Prompt direction is only weakly applied at this step count."}
+            </div>
+          </div>
+          <Button
+            variant="outline"
+            disabled={busy}
+            onClick={() =>
+              quality === "full"
+                ? setQuality.mutate({ quality: "fast" })
+                : setConfirmFull(true)
+            }
+          >
+            {setQuality.isPending ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : null}
+            {quality === "full" ? "Switch to fast" : "Switch to full"}
+          </Button>
+        </div>
+      ) : null}
+
+      {/* Only the upgrade is gated. Dropping back to fast is cheaper and needs no ceremony. */}
+      <AlertDialog open={confirmFull} onOpenChange={setConfirmFull}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Switch to full quality?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 text-sm">
+                <p>
+                  Full runs 40 sampling steps with real CFG against fast&apos;s
+                  8 — roughly <strong>10× the GPU time and cost</strong>. Scenes
+                  that take minutes on fast take tens of minutes on full, and a
+                  film&apos;s host footage goes from about{" "}
+                  <strong>$1–2 per minute to $10–15 per minute</strong> — more
+                  than HeyGen, not less.
+                </p>
+                <p>
+                  What you gain: the prompt direction (tight framing, minimal
+                  motion, the alt-angle shots) is actually enforced, plus finer
+                  detail. At fast&apos;s CFG it is only weakly applied.
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Those are estimates. The Cost dialog on a finished render
+                  shows what your endpoint actually charged.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={e => {
+                e.preventDefault();
+                setQuality.mutate({ quality: "full" });
+                setConfirmFull(false);
+              }}
+            >
+              Use full quality
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -223,9 +411,15 @@ export function ProviderKeys() {
     onError: err => toast.error(err.message ?? "Failed to save."),
   });
 
+  // Drives the muted state on the HeyGen key rows below — they stay editable, they are just
+  // no longer the live configuration while InfiniteTalk is the host provider.
+  const { data: lipsync } = trpc.longformVideo.getLipsyncProvider.useQuery();
+  const lipsyncOnRunpod = lipsync?.provider === "runpod";
+
   return (
     <div className="space-y-6">
       <MockModeToggle />
+      <HostLipsyncToggle />
       <div className="space-y-3">
         <Label className="flex items-center gap-2 text-sm font-medium">
           <KeyRound className="h-4 w-4" />
@@ -358,10 +552,25 @@ export function ProviderKeys() {
       </div>
       {/* ─── END AIREITER BOLT-ON ─── */}
 
-      <div className="space-y-3">
+      {/*
+        Dimmed, not disabled, while host lip-sync runs on InfiniteTalk: the keys are still
+        editable and are never cleared by the switch, so coming back to HeyGen needs no
+        re-entry. The muting only stops these five fields reading as the live configuration.
+      */}
+      <div
+        className={`space-y-3 ${lipsyncOnRunpod ? "opacity-60" : ""}`}
+        aria-label={
+          lipsyncOnRunpod ? "HeyGen keys (not currently in use)" : undefined
+        }
+      >
         <Label className="flex items-center gap-2 text-sm font-medium">
           <KeyRound className="h-4 w-4" />
           HeyGen keys — host lip-sync (per tab)
+          {lipsyncOnRunpod ? (
+            <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] font-normal text-muted-foreground">
+              not in use — host lip-sync is on InfiniteTalk
+            </span>
+          ) : null}
         </Label>
         {heygenLoading ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
