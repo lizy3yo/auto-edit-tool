@@ -22,6 +22,14 @@
  *   that motivated this (a 5.4s 1280x720 host scene) they measured 6.25 and 5.86 against a
  *   mouth of 14.05 — 44% and 42%, i.e. the body moving nearly as much as the jaw.
  *
+ * THE THRESHOLDS ARE CALIBRATED TO A HEYGEN AVATAR IV CLIP the operator accepted as the
+ * target look ("smooth"): background 0.11, hair 2.69, eyes 6.59, mouth 7.02, torso 3.39,
+ * bg morph 0.99. Two lessons priced in below: HeyGen is NOT frozen — gentle body motion is
+ * part of reading as alive, so an over-anchored render that "wins" on stillness (hair 0.89,
+ *  mouth 2.0) reads as a mannequin and FAILS the mouth floor; and its mouth articulates at
+ * ~7, not the ~13 of an unanchored InfiniteTalk render — 13 is over-animation, not quality.
+ * PASS therefore means "moves like the accepted HeyGen example", nothing more.
+ *
  * Regions are fractions of the frame, so they hold at any resolution, and assume the framing
  * `LIPSYNC_HOST_DIRECTION` asks for: a centred medium close-up. They are deliberately crude —
  * this is a before/after comparator, not a face tracker.
@@ -49,9 +57,9 @@ const REGIONS = {
   "torso/shoulders": [0.33, 0.72, 0.36, 0.21],
 };
 
-/** Pass/fail thresholds — see the header for where these came from. */
-const LIMITS = { "hair/head": 3.0, "torso/shoulders": 3.0 };
-const MOUTH_FLOOR = 10.0;
+/** Pass/fail thresholds — calibrated to the accepted HeyGen reference (see header). */
+const LIMITS = { "hair/head": 3.0, "torso/shoulders": 3.5 };
+const MOUTH_FLOOR = 5.5;
 /** Accumulated background drift vs frame 0. Baseline clips: ~1.9. Real tripod footage: ~0.2. */
 const MORPH_LIMIT = 1.0;
 

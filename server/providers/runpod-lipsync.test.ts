@@ -135,6 +135,25 @@ describe("RunpodLipsyncAdapter.submitLipsync", () => {
     expect(input).not.toHaveProperty("image_url");
   });
 
+  it("sends the V2V anchor-dial overrides only when set", async () => {
+    const calls = installFetchMock({});
+    const adapter = new RunpodLipsyncAdapter("ep-1", "key-1", "fast");
+    await adapter.submitLipsync({
+      ...params,
+      videoUrl: "https://cdn.example/plate.mp4",
+      samplerSteps: 8,
+      samplerStartStep: 1,
+    });
+    expect(calls[0].body.input.steps).toBe(8);
+    expect(calls[0].body.input.start_step).toBe(1);
+
+    // Unset must mean absent — the worker's workflow defaults rule, and an older worker
+    // image must not receive keys it would misread.
+    await adapter.submitLipsync(params);
+    expect(calls[1].body.input).not.toHaveProperty("steps");
+    expect(calls[1].body.input).not.toHaveProperty("start_step");
+  });
+
   it("passes quality=full through so the 40-step workflow is selectable per render", async () => {
     const calls = installFetchMock({});
     await new RunpodLipsyncAdapter("ep-1", "key-1", "full").submitLipsync(

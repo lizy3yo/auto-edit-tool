@@ -36,6 +36,12 @@ export interface RunpodLipsyncParams {
    * photo itself is not sent; the plate IS the photo, repeated.
    */
   videoUrl?: string;
+  /**
+   * V2V sampler overrides (pinned mode only): the anchor-strength dial. Sent only when set;
+   * the worker falls back to its workflow defaults, so an older image keeps rendering.
+   */
+  samplerSteps?: number;
+  samplerStartStep?: number;
   /** Our own TTS narration (R2 URL). Drives both the mouth and the clip's length. */
   audioUrl: string;
   /** InfiniteTalk direction — see `buildLipsyncPrompt`; short and framing-focused. */
@@ -159,6 +165,10 @@ export class RunpodLipsyncAdapter {
         prompt: params.prompt,
         ...(params.negativePrompt
           ? { negative_prompt: params.negativePrompt }
+          : {}),
+        ...(params.samplerSteps != null ? { steps: params.samplerSteps } : {}),
+        ...(params.samplerStartStep != null
+          ? { start_step: params.samplerStartStep }
           : {}),
         width: params.width,
         height: params.height,

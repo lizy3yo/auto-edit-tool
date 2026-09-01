@@ -3055,6 +3055,14 @@ async function resolveLipsyncLane(
           audioUrl,
           prompt: buildLipsyncPrompt(scene, useAlt),
           negativePrompt: LIPSYNC_NEGATIVE_DIRECTION,
+          // The V2V anchor dial rides only on plate renders — sending sampler overrides to
+          // the I2V workflow would silently change the photo tier too.
+          ...(videoUrl
+            ? {
+                samplerSteps: ENV.runpodLipsyncV2vSteps,
+                samplerStartStep: ENV.runpodLipsyncV2vStartStep,
+              }
+            : {}),
           width,
           height,
         });

@@ -97,6 +97,19 @@ export const ENV = {
     (process.env.RUNPOD_LIPSYNC_INPUT ?? "image").toLowerCase() === "video"
       ? ("video" as const)
       : ("image" as const),
+  /**
+   * Pinned-camera anchor dial, sent to the worker's V2V sampler when set. `steps` is the
+   * total schedule and `start_step` how many are skipped at the noisy end — active steps =
+   * steps − start_step, and MORE active steps = more motion freedom, LESS anchoring to the
+   * static plate. The workflow ships 8/2 (75% free); walk start_step 2→1 if the mouth is
+   * still too quiet, 2→3 if drift returns. Unset sends nothing and the workflow default rules.
+   */
+  runpodLipsyncV2vSteps: process.env.RUNPOD_LIPSYNC_V2V_STEPS
+    ? Number(process.env.RUNPOD_LIPSYNC_V2V_STEPS)
+    : undefined,
+  runpodLipsyncV2vStartStep: process.env.RUNPOD_LIPSYNC_V2V_START_STEP
+    ? Number(process.env.RUNPOD_LIPSYNC_V2V_START_STEP)
+    : undefined,
   /** HeyGen API key — fallback when a per-tab key slot is empty. */
   heygenApiKey: process.env.HEYGEN_API_KEY ?? "",
   /**
