@@ -3030,6 +3030,7 @@ async function resolveLipsyncLane(
           imageUrl,
           audioUrl,
           prompt: buildLipsyncPrompt(scene, useAlt),
+          negativePrompt: LIPSYNC_NEGATIVE_DIRECTION,
           width,
           height,
         }),
@@ -3795,9 +3796,9 @@ export const ANON_PERSON_SUFFIX =
  * a product in-hand clutters the frame and fights the QR overlay.
  */
 export const CTA_EMPTY_HANDS_SUFFIX =
-  "In this shot the host's hands are empty and relaxed (resting naturally or gesturing " +
-  "lightly) — he is NOT holding, lifting, showing, or displaying any product, book, " +
-  "bottle, container, or object of any kind. He only talks calmly to the camera.";
+  "In this shot the host's hands are empty and relaxed, resting naturally — they are " +
+  "NOT holding, lifting, showing, or displaying any product, book, " +
+  "bottle, container, or object of any kind. They only talk calmly to the camera.";
 
 /**
  * Appended to every b-roll generation prompt (still lane, b-roll keyframe, and b-roll video).
@@ -3843,15 +3844,21 @@ export const NO_FIGURES_SUFFIX =
  * comes from the reference photo, and a long brief produces noisy output, so we do NOT prepend
  * the rich per-scene visualPrompt. Encodes: the host descriptor (so the prompt stands alone),
  * face large + front-facing (better sync), clear unobstructed mouth articulation, single speaker,
- * and a firm minimal-motion restriction (the on-screen host is elderly — head/body sway and
- * gesturing read as jittery).
+ * and a firm minimal-motion restriction (head/body sway and gesturing read as jittery).
+ *
+ * Deliberately says NOTHING about who the host is — no age, no gender, no pronouns. The host
+ * photo is per-channel (`channel_configs.hostPhotoUrl`) while this string is one constant shared
+ * by every channel, so any descriptor here is wrong for somebody: it used to open "An older man
+ * in his early 60s" and was sent verbatim alongside photos of hosts who are neither. Identity
+ * comes from the reference image, and a description contradicting that image is noise the model
+ * has to reconcile instead of following the minimal-motion clause that follows it.
  */
 export const LIPSYNC_HOST_DIRECTION =
-  "An older man in his early 60s speaks straight to the camera in a tight medium " +
+  "The person in the reference photo speaks straight to the camera in a tight medium " +
   "close-up, face large and centered, looking at the lens. Clear, precise lip-sync: " +
-  "his mouth articulates every word and stays fully visible, hands never near his " +
-  "face. He is calm and still — torso, shoulders, and head barely move, no swaying or " +
-  "gesturing, hands resting quietly out of frame. One person speaking, no one else talking.";
+  "their mouth articulates every word and stays fully visible, hands never near their " +
+  "face. They are calm and still — torso, shoulders, and head barely move, no swaying " +
+  "or gesturing, hands resting quietly out of frame. One person speaking, no one else talking.";
 
 /**
  * Appended to `LIPSYNC_HOST_DIRECTION` for a scene pinned to the ALT host photo
@@ -3862,8 +3869,37 @@ export const LIPSYNC_HOST_DIRECTION =
  * `assignHostShots`. Overrides the "looking at the lens" clause above, so it comes after it.
  */
 export const LIPSYNC_ALT_ANGLE_SUFFIX =
-  "He is turned slightly off-axis, at a three-quarter angle, holding exactly the head and " +
+  "They are turned slightly off-axis, at a three-quarter angle, holding exactly the head and " +
   "body orientation of the reference photo rather than squaring up to the camera.";
+
+/**
+ * The NEGATIVE half of the InfiniteTalk prompt — what the render must not do — sent alongside
+ * `buildLipsyncPrompt`'s positive direction on the RunPod lane only.
+ *
+ * It exists because the worker's stock Wan negative prompt listed "static" (twice) and "still
+ * picture": correct for general text-to-video, where a frozen frame is the failure mode, and
+ * exactly backwards for a talking head, where the host is meant to sit still and only the mouth
+ * moves. Measured on a rendered host clip, the top of the head and the shoulders were moving at
+ * ~44% and ~42% of the mouth's frame-to-frame rate against a provably locked camera (background
+ * ~1/70th of the mouth) — the model was doing what the negative prompt asked.
+ *
+ * Sending it from here rather than relying on the workflow JSON means motion can be retuned
+ * without rebuilding and re-releasing the worker image; `handler.py` falls back to its own
+ * default when this is absent, so an older worker still renders.
+ *
+ * CAVEAT: classifier-free guidance is what makes a negative prompt bite, so this is fully
+ * applied only on the `full` tier (cfg 5). The `fast` tier runs cfg 1 for the lightx2v
+ * step-distill LoRA, where a negative prompt is close to inert — there the sampler's `shift`
+ * is the lever that actually moves motion.
+ */
+export const LIPSYNC_NEGATIVE_DIRECTION =
+  "bright tones, overexposed, blurred details, subtitles, style, works, paintings, " +
+  "images, overall gray, worst quality, low quality, JPEG compression residue, ugly, " +
+  "incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, " +
+  "disfigured, misshapen limbs, fused fingers, messy background, three legs, " +
+  "many people in the background, walking backwards, head shaking, head bobbing, " +
+  "nodding, swaying, rocking, leaning, fidgeting, jitter, sudden movement, " +
+  "body turning, shifting posture, camera shake";
 
 /**
  * Ordered term→synonym map that rewrites harm-adjacent words Grok's 69labs content classifier
@@ -11657,8 +11693,36 @@ async function runSplitEdit(
  * button would just be friction), while a job that already has a final settles render-only like
  * every other user-initiated clip action.
  */
+/**
+ * Jobs with a retry pass PARKED behind a running one. Not a lock — `withJobLock` already
+ * queues — just the one bit the UI needs ("your click was taken") and the dedupe that stops
+ * five impatient clicks from stacking five identical passes.
+ */
+const queuedRetries = new Set<number>();
+
+/** Is a retry waiting for the current pass to finish? Drives the client's button state. */
+export const isRetryQueued = (jobId: number): boolean => queuedRetries.has(jobId);
+
 export async function retryFailedScenes(jobId: number): Promise<void> {
-  if (jobLocks.has(jobId)) return; // an active pass owns this job's lock
+  // A running pass no longer DROPS the click. `withJobLock` queues rather than rejects, so a
+  // retry asked for mid-render simply starts when the render releases the lock — the operator
+  // can act on the first failed scene they see instead of watching ~280 others finish first.
+  // Worth knowing: `retryFailedScenesLocked` reads the storyboard when it RUNS, not when it
+  // was clicked, so one click also collects whatever fails during the rest of that pass.
+  if (jobLocks.has(jobId)) {
+    if (queuedRetries.has(jobId)) return; // one parked retry is enough — later clicks are it
+    queuedRetries.add(jobId);
+    try {
+      await withJobLock(jobId, () => {
+        // We own the lock now: no longer merely queued, so the button stops saying so.
+        queuedRetries.delete(jobId);
+        return retryFailedScenesLocked(jobId);
+      });
+    } finally {
+      queuedRetries.delete(jobId); // also on a throw before the body ran
+    }
+    return;
+  }
   return withJobLock(jobId, () => retryFailedScenesLocked(jobId));
 }
 

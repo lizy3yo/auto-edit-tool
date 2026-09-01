@@ -33,6 +33,12 @@ export interface RunpodLipsyncParams {
   audioUrl: string;
   /** InfiniteTalk direction — see `buildLipsyncPrompt`; short and framing-focused. */
   prompt: string;
+  /**
+   * What the render must NOT do (`LIPSYNC_NEGATIVE_DIRECTION`). Optional: an older worker
+   * image ignores the field and falls back to the negative prompt baked into its workflow,
+   * so a lagging endpoint still renders rather than 400ing.
+   */
+  negativePrompt?: string;
   width: number;
   height: number;
 }
@@ -142,6 +148,9 @@ export class RunpodLipsyncAdapter {
         image_url: imageUrl,
         wav_url: audioUrl,
         prompt: params.prompt,
+        ...(params.negativePrompt
+          ? { negative_prompt: params.negativePrompt }
+          : {}),
         width: params.width,
         height: params.height,
         quality: this.quality,

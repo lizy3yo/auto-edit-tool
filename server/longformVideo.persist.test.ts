@@ -6,6 +6,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 const { updateSpy } = vi.hoisted(() => ({ updateSpy: vi.fn(async () => {}) }));
 vi.mock("./db", () => ({
   updateLongformVideoJob: updateSpy,
+  // The queued-retry test only cares that the click is PARKED, never that the pass succeeds;
+  // a missing row makes the locked core fail fast instead of reaching for a provider.
+  getLongformVideoJobById: async () => null,
 }));
 
 import {
@@ -13,6 +16,8 @@ import {
   flushPersist,
   withJobLock,
   dispatchScenesByProvider,
+  retryFailedScenes,
+  isRetryQueued,
   SCENE_DEADLINE_STILL_MS,
 } from "./longformVideo";
 
@@ -99,5 +104,39 @@ describe("clip-stage liveness guards", () => {
     updateSpy.mockClear();
     await vi.advanceTimersByTimeAsync(180_000);
     expect(updateSpy).not.toHaveBeenCalled(); // interval cleared
+  });
+});
+
+/**
+ * Real timers: `withJobLock` installs a 60s heartbeat, and these cases release the lock
+ * immediately, so there is nothing to fast-forward.
+ */
+describe("retry parked behind a running pass", () => {
+  it("queues the click instead of dropping it, and does not stack repeats", async () => {
+    let release!: () => void;
+    const pass = withJobLock(42, () => new Promise<void>(r => (release = r)));
+    expect(isRetryQueued(42)).toBe(false);
+
+    // Previously this returned immediately and silently: an operator who saw a scene fail at
+    // 151/282 had to wait out the other 131 before the button appeared at all.
+    const retry = retryFailedScenes(42).catch(() => {});
+    expect(isRetryQueued(42)).toBe(true);
+
+    // Impatient second click is absorbed by the parked one — five clicks must not become
+    // five identical passes queued behind each other.
+    await retryFailedScenes(42);
+    expect(isRetryQueued(42)).toBe(true);
+
+    release();
+    await pass;
+    await retry;
+    // Cleared once it owns the lock, so the button stops reading "queued" and the NEXT
+    // failure during the retry pass can be asked for in turn.
+    expect(isRetryQueued(42)).toBe(false);
+  });
+
+  it("runs straight away when no pass owns the job", async () => {
+    await retryFailedScenes(43).catch(() => {});
+    expect(isRetryQueued(43)).toBe(false);
   });
 });

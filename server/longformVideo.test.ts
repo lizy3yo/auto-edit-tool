@@ -106,6 +106,10 @@ import {
   NO_FIGURES_SUFFIX,
   CUTAWAY_PERSON_FREE_DIRECTIVE,
   CTA_EMPTY_HANDS_SUFFIX,
+  LIPSYNC_HOST_DIRECTION,
+  LIPSYNC_ALT_ANGLE_SUFFIX,
+  LIPSYNC_NEGATIVE_DIRECTION,
+  buildLipsyncPrompt,
   NO_BOOK_SUFFIX,
   NO_PEOPLE_SUFFIX,
   SPLIT_PANEL_PERSON_FREE_DIRECTIVE,
@@ -8009,5 +8013,52 @@ describe("clip lane invariant: no motion flag ⇒ no video clip", () => {
     }
     // …and the pipeline still actually used the clip lane on the flagged beats.
     expect(scenes.some(s => !s.hostPresent && !s.stillImage)).toBe(true);
+  });
+});
+
+describe("InfiniteTalk host prompt", () => {
+  /**
+   * The host photo is per-CHANNEL and these strings are one constant shared by all of them,
+   * so any word describing who the host is will be wrong for somebody. It used to open "An
+   * older man in his early 60s" and was sent verbatim beside photos of hosts who were not
+   * that — a description the model then had to reconcile against the image instead of
+   * following the minimal-motion clause beside it.
+   */
+  const GENDERED = /(he|him|his|she|her|hers|man|woman|male|female)/i;
+
+  it("describes framing and behaviour, never who the host is", () => {
+    for (const [name, text] of [
+      ["host direction", LIPSYNC_HOST_DIRECTION],
+      ["alt-angle suffix", LIPSYNC_ALT_ANGLE_SUFFIX],
+      ["cta suffix", CTA_EMPTY_HANDS_SUFFIX],
+    ] as const) {
+      expect(`${name}: ${text}`).not.toMatch(GENDERED);
+    }
+  });
+
+  it("still carries the minimal-motion restriction that keeps the host from swaying", () => {
+    const prompt = buildLipsyncPrompt({ index: 0, narration: "n" } as never);
+    expect(prompt).toContain("calm and still");
+    expect(prompt).toContain("no swaying");
+  });
+
+  describe("negative direction", () => {
+    /**
+     * The worker's stock Wan negative prompt listed "static" and "still picture" — right for
+     * general video, where a frozen frame is the failure, and backwards for a talking head.
+     * Measured on a real host clip, head and shoulders moved at ~44%/~42% of the mouth's rate
+     * against a locked camera. These two assertions are the regression guard for that.
+     */
+    it("does not penalise stillness", () => {
+      expect(LIPSYNC_NEGATIVE_DIRECTION).not.toMatch(/static/);
+      expect(LIPSYNC_NEGATIVE_DIRECTION).not.toContain("still picture");
+    });
+
+    it("penalises the motion we actually see, and keeps the quality terms", () => {
+      for (const term of ["head shaking", "swaying", "jitter", "camera shake"])
+        expect(LIPSYNC_NEGATIVE_DIRECTION).toContain(term);
+      for (const term of ["worst quality", "deformed", "extra fingers"])
+        expect(LIPSYNC_NEGATIVE_DIRECTION).toContain(term);
+    });
   });
 });

@@ -100,6 +100,27 @@ describe("RunpodLipsyncAdapter.submitLipsync", () => {
     });
   });
 
+  it("forwards the negative prompt so motion can be retuned without a worker rebuild", async () => {
+    const calls = installFetchMock({});
+    await new RunpodLipsyncAdapter("ep-1", "key-1", "fast").submitLipsync({
+      ...params,
+      negativePrompt: "head shaking, swaying, jitter",
+    });
+    expect(calls[0].body.input.negative_prompt).toBe(
+      "head shaking, swaying, jitter"
+    );
+  });
+
+  it("omits the field entirely when unset, so an older worker keeps its own default", async () => {
+    const calls = installFetchMock({});
+    await new RunpodLipsyncAdapter("ep-1", "key-1", "fast").submitLipsync(
+      params
+    );
+    // Sending `undefined` would serialise to null and blank the workflow's own negative
+    // prompt on a worker that predates the override — absent must mean absent.
+    expect(calls[0].body.input).not.toHaveProperty("negative_prompt");
+  });
+
   it("passes quality=full through so the 40-step workflow is selectable per render", async () => {
     const calls = installFetchMock({});
     await new RunpodLipsyncAdapter("ep-1", "key-1", "full").submitLipsync(

@@ -1218,7 +1218,20 @@ export default function LongformJobSlot({
     () => scenes.filter(s => !(s.clipUrls?.length || s.clipUrl)).length,
     [scenes]
   );
-  const canRetryFailed = job?.status === "failed" && missingClipCount > 0;
+  // Mid-pass, `missingClipCount` counts every scene not yet REACHED, which would label the
+  // button with ~half the film. While the pipeline runs, only genuinely failed scenes count.
+  const failedSceneCount = useMemo(
+    () => scenes.filter(s => s.sceneStatus === "failed").length,
+    [scenes]
+  );
+  const retryRunning = job?.status === "processing";
+  const retryQueued = job?.retryQueued === true;
+  // Offered DURING a pass too: the click parks behind the job lock and runs the moment the
+  // pass releases it, so an operator who sees a scene fail at 151/282 no longer has to sit
+  // and wait for the other 131 before asking for it back.
+  const retryCount = retryRunning ? failedSceneCount : missingClipCount;
+  const canRetryFailed =
+    retryCount > 0 && (job?.status === "failed" || retryRunning);
 
   const retryFailedScenesButton = canRetryFailed ? (
     <Button
@@ -1229,10 +1242,14 @@ export default function LongformJobSlot({
         armNotifications(); // a retry can run for an hour — notify even in a background tab
         retryFailedScenesMutation.mutate({ jobId });
       }}
-      disabled={retryFailedScenesMutation.isPending}
+      disabled={retryFailedScenesMutation.isPending || retryQueued}
     >
       <RefreshCw className="mr-2 h-4 w-4" />
-      Retry failed scenes ({missingClipCount})
+      {retryQueued
+        ? "Retry queued"
+        : retryRunning
+          ? `Retry failed after this pass (${retryCount})`
+          : `Retry failed scenes (${retryCount})`}
     </Button>
   ) : null;
 

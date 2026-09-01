@@ -87,6 +87,7 @@ import {
   unmergeScene,
   revertSceneTimingEdits as revertLongformSceneTiming,
   retryFailedScenes as retryLongformFailedScenes,
+  isRetryQueued,
   describeIncompleteScenes,
   cancelLongformJob,
   DEFAULT_LONGFORM_INSTRUCTION,
@@ -1509,6 +1510,9 @@ const longformVideoRouter = router({
         // operator is editing scenes" apart from "the pipeline is rendering": both read
         // status "processing" on the row.
         sceneEdits,
+        // True while a "retry failed scenes" click is parked behind the running pass, so the
+        // button can read "queued" instead of looking like it did nothing.
+        retryQueued: isRetryQueued(input.jobId),
         // The continuous master narration — the cut-room preview plays the exact slice under a
         // scene (seeking into this) so a moved cut previews with the right words, where the
         // per-scene `audioUrl` slice was cut at the ORIGINAL boundaries.
@@ -2320,17 +2324,22 @@ const longformVideoRouter = router({
       ) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
       }
-      // ponytail: read-then-act guard, not an atomic CAS. Covers rapid
-      // single-client spam (serialized) and the common cross-tab case. If
-      // exact-simultaneous cross-device clicks must be blocked, switch to a
-      // conditional UPDATE (status='processing' WHERE status='failed').
-      if (job.status === "processing") {
-        throw new TRPCError({
-          code: "CONFLICT",
-          message: "Retry already in progress",
-        });
+      // A running pass no longer refuses the click. `retryFailedScenes` parks ONE retry behind
+      // the job lock (which queues, never drops), so the operator can ask for the holdouts the
+      // moment a scene fails instead of waiting out ~280 siblings — and because the parked pass
+      // reads the storyboard when it RUNS, that one click also collects whatever fails after it.
+      // `queued` is reported so the client can say "waiting" rather than looking inert.
+      const queued = job.status === "processing";
+      // ponytail: read-then-act, not an atomic CAS — `queuedRetries` dedupes a parked retry
+      // in-process, which covers rapid single-client spam and the common cross-tab case. If
+      // exact-simultaneous cross-device clicks must be deduped, move that set to the DB.
+      if (queued && isRetryQueued(input.jobId)) {
+        return { ok: true, queued: true, already: true };
       }
+      // Only meaningful on a settled job: mid-pass, scenes are legitimately incomplete because
+      // they have not been reached yet, so this would pass trivially and prove nothing.
       if (
+        !queued &&
         describeIncompleteScenes(
           (job.storyboard as StoryboardScene[]) || []
         ) === null
@@ -2346,7 +2355,7 @@ const longformVideoRouter = router({
           err
         );
       });
-      return { ok: true };
+      return { ok: true, queued, already: false };
     }),
 
   /** Set/update the job's video title (merged into inputParams; names the download). */
