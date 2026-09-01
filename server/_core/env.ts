@@ -98,11 +98,23 @@ export const ENV = {
       ? ("video" as const)
       : ("image" as const),
   /**
+   * Host lip-sync render size on the RunPod lane (HeyGen ignores it — Avatar IV is always
+   * 1080p). 720p everywhere by default. This used to follow NODE_ENV — 720p in production,
+   * 480p on a dev box — which meant every local A/B of the InfiniteTalk lane was judging a
+   * different product (softer, 2.25x fewer pixels, faster and cheaper) than the deploy
+   * ships. Opt into 480p explicitly for cheap experiments; never inherit it from the env.
+   */
+  lipsyncResolution:
+    (process.env.LIPSYNC_RESOLUTION ?? "720p").toLowerCase() === "480p"
+      ? ("480p" as const)
+      : ("720p" as const),
+  /**
    * Pinned-camera anchor dial, sent to the worker's V2V sampler when set. `steps` is the
    * total schedule and `start_step` how many are skipped at the noisy end — active steps =
    * steps − start_step, and MORE active steps = more motion freedom, LESS anchoring to the
-   * static plate. The workflow ships 8/2 (75% free); walk start_step 2→1 if the mouth is
-   * still too quiet, 2→3 if drift returns. Unset sends nothing and the workflow default rules.
+   * static plate. The workflow ships 8/1 (87.5% free — measured ~80% of HeyGen's motion at
+   * 8/2); walk start_step 1→2 if drift creeps back, 1→0 only as a last resort. Unset sends
+   * nothing and the workflow default rules.
    */
   runpodLipsyncV2vSteps: process.env.RUNPOD_LIPSYNC_V2V_STEPS
     ? Number(process.env.RUNPOD_LIPSYNC_V2V_STEPS)

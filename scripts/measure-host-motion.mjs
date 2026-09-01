@@ -62,6 +62,43 @@ const LIMITS = { "hair/head": 3.0, "torso/shoulders": 3.5 };
 const MOUTH_FLOOR = 5.5;
 /** Accumulated background drift vs frame 0. Baseline clips: ~1.9. Real tripod footage: ~0.2. */
 const MORPH_LIMIT = 1.0;
+/**
+ * Window-seam pop: InfiniteTalk renders in 81-frame windows and the background can jump at
+ * each handoff — a static corner that changes ~0.07/frame spiked to 1.46 at frame 81 on the
+ * clip that motivated this. Reported as the worst single-frame background change divided by
+ * the clip's median. HeyGen has no windows and measured 0 spikes; anything over the ratio
+ * below (plus an absolute floor so a near-zero median cannot flag noise) is a visible hitch.
+ */
+const SEAM_RATIO_LIMIT = 8;
+const SEAM_ABS_FLOOR = 0.3;
+
+/** Per-frame series for one region (same filter as `probe`, unaveraged). */
+const probeSeries = (file, region) =>
+  new Promise((resolve, reject) => {
+    const [x, y, w, h] = region;
+    const crop = `crop=iw*${w}:ih*${h}:iw*${x}:ih*${y}`;
+    const p = spawn(FFMPEG, [
+      "-hide_banner",
+      "-i",
+      file,
+      "-vf",
+      `${crop},tblend=all_mode=difference,signalstats,metadata=print:key=lavfi.signalstats.YAVG`,
+      "-f",
+      "null",
+      "-",
+    ]);
+    let err = "";
+    p.stderr.on("data", d => (err += d));
+    p.on("error", reject);
+    p.on("close", code => {
+      if (code !== 0)
+        return reject(
+          new Error(`ffmpeg exited ${code}
+${err.slice(-800)}`)
+        );
+      resolve([...err.matchAll(/YAVG=([0-9.]+)/g)].map(m => Number(m[1])));
+    });
+  });
 
 const probe = (file, region) =>
   new Promise((resolve, reject) => {
@@ -138,6 +175,14 @@ for (const [name, region] of Object.entries(REGIONS)) {
 }
 
 const morph = await probeMorph(file);
+// Seam check on the background corner: worst frame vs the median frame (frame 1 excluded — the
+// first diff is against nothing).
+const bgSeries = (await probeSeries(file, REGIONS.background)).slice(1);
+const sortedBg = [...bgSeries].sort((a, b) => a - b);
+const bgMedian = sortedBg[Math.floor(sortedBg.length / 2)] ?? 0;
+const seamFrames = bgSeries
+  .map((v, i) => ({ frame: i + 1, v }))
+  .filter(({ v }) => v > SEAM_RATIO_LIMIT * bgMedian + SEAM_ABS_FLOOR);
 
 const mouth = means.mouth;
 console.log(`\n  ${file}\n`);
@@ -148,6 +193,12 @@ for (const [name, mean] of Object.entries(means)) {
 }
 console.log(
   `  ${"bg morph (vs f0)".padEnd(18)} ${morph.toFixed(2).padStart(7)}   limit ${MORPH_LIMIT}`
+);
+console.log(
+  `  ${"window seams".padEnd(18)} ${String(seamFrames.length).padStart(7)}   ` +
+    (seamFrames.length
+      ? `at frame ${seamFrames.map(f => `${f.frame} (${f.v.toFixed(2)})`).join(", ")}`
+      : "none")
 );
 
 const failures = [];
@@ -167,6 +218,10 @@ if (mouth < MOUTH_FLOOR)
 if (morph > MORPH_LIMIT)
   failures.push(
     `bg morph ${morph.toFixed(2)} > ${MORPH_LIMIT} — background objects still being re-hallucinated`
+  );
+if (seamFrames.length)
+  failures.push(
+    `${seamFrames.length} window seam(s) — background pops at a render-window handoff (motion_frame / colormatch)`
   );
 
 console.log("");

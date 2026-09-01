@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   dimensionsFor,
   buildSilentSceneArgs,
+  HOST_UPSCALE_SHARPEN,
   buildOverlayMuxArgs,
   buildSceneMuxArgs,
   buildConcatCopyArgs,
@@ -132,6 +133,31 @@ describe("buildSilentSceneArgs (continuous-narration assembly)", () => {
 
   it("caps encoder threads so concurrent scenes don't oversubscribe the host", () => {
     expect(args[args.indexOf("-threads") + 1]).toBe("2");
+  });
+
+  it("sharpens ONLY when asked: lanczos on the way up, unsharp after the scale, else byte-identical", () => {
+    const base = {
+      videoPath: "/tmp/clip.mp4",
+      outputPath: "/tmp/scene.mp4",
+      width: 1920,
+      height: 1080,
+    };
+    const plain = buildSilentSceneArgs(base);
+    const sharp = buildSilentSceneArgs({ ...base, sharpen: true });
+    const filterOf = (a: string[]) => a[a.indexOf("-filter_complex") + 1];
+
+    // Off is the default and must not change a single byte — every cached normalization of
+    // every existing job keys off these args.
+    expect(plain).toEqual(buildSilentSceneArgs({ ...base, sharpen: false }));
+    expect(filterOf(plain)).not.toContain("unsharp");
+    expect(filterOf(plain)).not.toContain("lanczos");
+
+    const f = filterOf(sharp);
+    expect(f).toContain("scale=1920:1080:force_original_aspect_ratio=increase:flags=lanczos");
+    expect(f).toContain(HOST_UPSCALE_SHARPEN);
+    // Sharpen at the OUTPUT size: after the crop, before the fps/sar normalisation.
+    expect(f.indexOf("crop=1920:1080")).toBeLessThan(f.indexOf("unsharp"));
+    expect(f.indexOf("unsharp")).toBeLessThan(f.indexOf("setsar=1"));
   });
 });
 

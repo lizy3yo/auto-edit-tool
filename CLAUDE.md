@@ -87,6 +87,7 @@ Gemini, OpenAI, R2, RunPod. Missing ones fail loudly at the first stage that nee
 | `IMAGE_PRIMARY_RETRIES`         | 1               | `IMAGE_RETRY_TIMEOUT_MS`       | 240s                        |
 | `IMAGE_RETRY_TOTAL_BUDGET_MS`   | 600s            | `MYSQL_SORT_BUFFER_SIZE`       | 8 MB                        |
 | `AUTO_MIGRATE`                  | on (`0` skips)  | `ASSEMBLY_CACHE`               | on (`0` skips)              |
+| `LIPSYNC_RESOLUTION`            | 720p (all envs) | `RUNPOD_LIPSYNC_INPUT`         | image (`video` = pinned)    |
 | `ASSEMBLY_CACHE_MAX_GB`         | 20              | `ASSEMBLY_CACHE_DIR`           | tmp/longform-assembly-cache |
 
 `MYSQL_SORT_BUFFER_SIZE` is set per pooled connection in `server/db.ts`. MySQL's 256 KB default

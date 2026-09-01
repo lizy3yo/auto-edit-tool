@@ -6514,11 +6514,12 @@ export function describeIncompleteScenes(
 }
 
 /**
- * Resolution hint for lip-synced host clips on the RunPod lane (the InfiniteTalk worker renders
- * 720p natively, so this is advisory): 720p in production; 480p on localhost/dev. HeyGen is
- * always 1080p and takes no resolution argument.
+ * Render size for lip-synced host clips on the RunPod lane (InfiniteTalk renders exactly what it
+ * is asked for, so this is a real argument). HeyGen is always 1080p and takes none. Comes from
+ * `LIPSYNC_RESOLUTION`, 720p by default IN EVERY ENVIRONMENT — it used to key off NODE_ENV,
+ * which quietly made local test renders 480p and every dev-box A/B non-representative.
  */
-const LIPSYNC_RESOLUTION: "480p" | "720p" = ENV.isProduction ? "720p" : "480p";
+const LIPSYNC_RESOLUTION: "480p" | "720p" = ENV.lipsyncResolution;
 
 /**
  * Short poll ceiling used when RESUMING an already-submitted render (retry / watchdog).
@@ -9366,6 +9367,10 @@ async function assembleAndFinalize(
     captionPng: captionPngs.get(i),
     clipUrls: s.clipUrls?.length ? s.clipUrls : [s.clipUrl as string],
     trimLeadSec: clipTrimFor(s, params.faceImageUrl),
+    // InfiniteTalk renders 720p onto a 1080p canvas: lanczos + mild sharpen on the way up.
+    // `renderProvider` is what the lip-sync lane recorded at render time, so a HeyGen-rendered
+    // host (native 1080p) and every b-roll clip stay untouched.
+    sharpenHost: !!s.hostPresent && s.renderProvider === "runpod",
     audioUrl: s.audioUrl as string,
     // Every hold input — the on-screen floor, the CTA release tail, an operator's own hold —
     // comes from one shared helper, so assembly, the chapter map and the

@@ -116,6 +116,8 @@ const DOWNLOAD_TIMEOUT_MS = Number(
  * this only stops US being the encode bottleneck; the cost is larger transient temp/R2 bytes. Push
  * back toward `medium` only if those bytes hurt or a delivered still reads soft.
  */
+/** `unsharp` for upscaled InfiniteTalk host clips — see `buildSilentSceneArgs.sharpen`. */
+export const HOST_UPSCALE_SHARPEN = "unsharp=5:5:0.5:5:5:0.0";
 const CRF_INTERMEDIATE = "18";
 const CRF_DELIVERY = "20";
 const PRESET_INTERMEDIATE = "veryfast";
@@ -446,6 +448,15 @@ export function buildSilentSceneArgs(opts: {
   fps?: number;
   /** Seconds to drop from the front of the clip (Grok's reference-photo intro). */
   trimLeadSec?: number;
+  /**
+   * Upscale with lanczos and apply a mild unsharp mask AFTER the scale. For InfiniteTalk host
+   * clips only: the worker renders 720p and the canvas is 1080p, and its 8-step fp8 output
+   * measured ~12% lower edge energy than HeyGen's native 1080p on the same host (64.8 vs 56.9
+   * at a common size). Bicubic upscale + no sharpening compounds that. HeyGen clips arrive at
+   * canvas size and must not be touched; b-roll is not the thing being compared to HeyGen.
+   * Off ⇒ args byte-identical to before the option existed, so the norm cache is unaffected.
+   */
+  sharpen?: boolean;
 }): string[] {
   const { videoPath, outputPath, width, height } = opts;
   const fps = opts.fps ?? FPS;
@@ -454,9 +465,13 @@ export function buildSilentSceneArgs(opts: {
     trimLeadSec > 0
       ? `trim=start=${trimLeadSec.toFixed(3)},setpts=PTS-STARTPTS,`
       : "";
+  // Broadcast-mild: 5x5 luma, amount 0.5, chroma untouched. Enough to bring a 720p upscale
+  // back toward native-1080p edge energy without haloing hair or lip edges.
+  const sharpen = opts.sharpen ? `,${HOST_UPSCALE_SHARPEN}` : "";
+  const scaleFlags = opts.sharpen ? ":flags=lanczos" : "";
   const vf =
-    `[0:v]${trim}scale=${width}:${height}:force_original_aspect_ratio=increase,` +
-    `crop=${width}:${height},setsar=1,fps=${fps}[v]`;
+    `[0:v]${trim}scale=${width}:${height}:force_original_aspect_ratio=increase${scaleFlags},` +
+    `crop=${width}:${height}${sharpen},setsar=1,fps=${fps}[v]`;
   return [
     "-y",
     "-i",
@@ -2597,6 +2612,12 @@ export async function assemblePerSceneFilm(opts: {
      * own text. Non-fatal — a caption that can't be staged costs the text, never the film.
      */
     captionPng?: Buffer;
+    /**
+     * Lanczos-upscale + mild sharpen this scene's clips (`buildSilentSceneArgs.sharpen`). Set
+     * by the caller for host scenes lip-synced on the RunPod lane — 720p sources on a 1080p
+     * canvas — never for HeyGen (native 1080p) or b-roll.
+     */
+    sharpenHost?: boolean;
   }[];
   aspectRatio: VideoAspectRatio;
   /** R2 URL of the continuous master narration — enables master-overlay mode (see above). */
@@ -2789,7 +2810,11 @@ export async function assemblePerSceneFilm(opts: {
      * NOT a function of the scene it sits in: the same clip at the same head-trim normalizes
      * identically wherever it appears, so a timing edit anywhere reuses every one of these.
      */
-    const normKeyFor = (clipUrl: string, trimLeadSec: number): string =>
+    const normKeyFor = (
+      clipUrl: string,
+      trimLeadSec: number,
+      sharpen: boolean
+    ): string =>
       cacheKey("norm", {
         clipUrl,
         trimLeadSec,
@@ -2798,12 +2823,14 @@ export async function assemblePerSceneFilm(opts: {
         fps: FPS,
         crf: CRF_INTERMEDIATE,
         preset: PRESET_INTERMEDIATE,
+        // Only present when set, so every pre-existing (unsharpened) entry keeps its key.
+        ...(sharpen ? { sharpen: HOST_UPSCALE_SHARPEN } : {}),
       });
 
     const attemptScene = async (s: number): Promise<void> => {
       const scene = scenes[s];
       const normKeys = scene.clipUrls.map(u =>
-        normKeyFor(u, scene.trimLeadSec)
+        normKeyFor(u, scene.trimLeadSec, !!scene.sharpenHost)
       );
       if (normKeys.length === 0) throw new Error("no clips");
 
@@ -2909,6 +2936,7 @@ export async function assemblePerSceneFilm(opts: {
                 width,
                 height,
                 trimLeadSec: scene.trimLeadSec,
+                sharpen: !!scene.sharpenHost,
               })
             );
             return undefined;
