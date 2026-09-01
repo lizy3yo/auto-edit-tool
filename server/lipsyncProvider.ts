@@ -21,14 +21,24 @@ import { ENV } from "./_core/env";
 /** app_settings keys. Persisted so a toggle survives a restart, like every other setting. */
 export const LIPSYNC_PROVIDER_KEY = "lipsync_provider";
 export const LIPSYNC_QUALITY_KEY = "lipsync_quality";
+export const LIPSYNC_CAMERA_KEY = "lipsync_camera";
 
 export type LipsyncProvider = "heygen" | "runpod";
 /** `fast` = 8-step distill; `full` = 40 steps with real CFG. RunPod lane only. */
 export type LipsyncQuality = "fast" | "full";
+/**
+ * What the RunPod worker is conditioned on. `photo` = the host image (I2V, today's behaviour).
+ * `pinned` = a static VIDEO synthesised from that same image (V2V): InfiniteTalk mimics the
+ * input video's camera, and a video in which nothing moves has no camera to mimic — the
+ * maintainer's own fix for Wan I2V's drift toward the speaker. The operator still only ever
+ * uploads a photo; the static clip is built and uploaded by the pipeline per render.
+ */
+export type LipsyncCameraMode = "photo" | "pinned";
 
 const CACHE_MS = 5_000;
 let providerCache: { value: LipsyncProvider; at: number } | null = null;
 let qualityCache: { value: LipsyncQuality; at: number } | null = null;
+let cameraCache: { value: LipsyncCameraMode; at: number } | null = null;
 
 /**
  * The vendor host scenes render on. `runpod` here is a REQUEST, not a guarantee:
@@ -80,6 +90,32 @@ export async function setLipsyncQuality(
 }
 
 /**
+ * Camera conditioning for the RunPod lane (ignored on HeyGen — Avatar IV animates the still,
+ * so its camera is pinned by construction). Defaults to `photo` via `RUNPOD_LIPSYNC_INPUT`;
+ * `pinned` is the experimental V2V path and stays opt-in until an A/B says otherwise.
+ */
+export async function getLipsyncCameraMode(): Promise<LipsyncCameraMode> {
+  if (cameraCache && Date.now() - cameraCache.at < CACHE_MS)
+    return cameraCache.value;
+  const raw = await getAppSetting(LIPSYNC_CAMERA_KEY).catch(() => null);
+  const value: LipsyncCameraMode =
+    raw === "pinned" || raw === "photo"
+      ? raw
+      : ENV.runpodLipsyncInput === "video"
+        ? "pinned"
+        : "photo";
+  cameraCache = { value, at: Date.now() };
+  return value;
+}
+
+export async function setLipsyncCameraMode(
+  mode: LipsyncCameraMode
+): Promise<void> {
+  await setAppSetting(LIPSYNC_CAMERA_KEY, mode);
+  cameraCache = { value: mode, at: Date.now() };
+}
+
+/**
  * Whether the RunPod lane could actually run right now. Split into its two causes so the
  * Admin UI can name the missing piece instead of greying a button out silently.
  */
@@ -97,4 +133,5 @@ export function runpodLipsyncReadiness(): {
 export function __resetLipsyncCaches(): void {
   providerCache = null;
   qualityCache = null;
+  cameraCache = null;
 }

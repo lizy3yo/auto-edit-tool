@@ -117,11 +117,28 @@ export function HostLipsyncToggle() {
     onError: err => toast.error(err.message ?? "Failed to change quality."),
   });
 
+  const setCamera = trpc.longformVideo.setLipsyncCameraMode.useMutation({
+    onSuccess: ({ camera }) => {
+      toast.success(
+        camera === "pinned"
+          ? "InfiniteTalk → pinned camera. Renders condition on a static clip of the host photo."
+          : "InfiniteTalk → photo conditioning."
+      );
+      utils.longformVideo.getLipsyncProvider.invalidate();
+    },
+    onError: err => toast.error(err.message ?? "Failed to change camera mode."),
+  });
+
   const provider = data?.provider ?? "heygen";
   const quality = data?.quality ?? "fast";
+  const camera = data?.camera ?? "photo";
   const onRunpod = provider === "runpod";
   const ready = data?.runpod.ready ?? false;
-  const busy = isLoading || setProvider.isPending || setQuality.isPending;
+  const busy =
+    isLoading ||
+    setProvider.isPending ||
+    setQuality.isPending ||
+    setCamera.isPending;
   // Name the missing half rather than greying the button out silently.
   const blockedReason = data?.runpod.endpointSet
     ? data?.runpod.keySet
@@ -190,7 +207,7 @@ export function HostLipsyncToggle() {
             <div className="text-xs text-muted-foreground">
               {quality === "full"
                 ? "Prompt direction (framing, minimal motion) is enforced. ~10× the GPU time and cost of fast."
-                : "Cheapest tier. Prompt direction is only weakly applied at this step count."}
+                : "Cheapest tier. The don't-do-this direction (sway, drift) is enforced via NAG; positive framing is only weakly applied."}
             </div>
           </div>
           <Button
@@ -206,6 +223,39 @@ export function HostLipsyncToggle() {
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : null}
             {quality === "full" ? "Switch to fast" : "Switch to full"}
+          </Button>
+        </div>
+      ) : null}
+
+      {/* Camera conditioning — InfiniteTalk-only (Avatar IV animates the still, so its
+          camera is pinned by construction). Pinned = V2V on a static clip of the host photo. */}
+      {onRunpod ? (
+        <div className="flex items-center justify-between gap-4 rounded-md border border-border p-3">
+          <div className="text-sm">
+            <div className="font-medium">
+              {camera === "pinned"
+                ? "Pinned camera — static-plate video"
+                : "Photo conditioning"}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {camera === "pinned"
+                ? "Each render is conditioned on a still video of the host photo, so the camera and background hold. Experimental — compare a scene against photo mode before adopting."
+                : "Renders from the host photo directly. The camera can drift slightly toward the host over a clip."}
+            </div>
+          </div>
+          <Button
+            variant="outline"
+            disabled={busy}
+            onClick={() =>
+              setCamera.mutate({
+                camera: camera === "pinned" ? "photo" : "pinned",
+              })
+            }
+          >
+            {setCamera.isPending ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : null}
+            {camera === "pinned" ? "Use photo" : "Pin the camera"}
           </Button>
         </div>
       ) : null}

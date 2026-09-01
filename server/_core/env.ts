@@ -86,6 +86,17 @@ export const ENV = {
   runpodLipsyncConcurrency: Number(
     process.env.RUNPOD_LIPSYNC_CONCURRENCY ?? 4
   ),
+  /**
+   * Default camera conditioning for the RunPod lane: `image` sends the host photo (I2V),
+   * `video` sends a static clip built from that photo (V2V) so the model has no camera
+   * motion to mimic — the InfiniteTalk maintainer's fix for Wan's drift toward the speaker.
+   * Admin -> Provider Keys stores the live value (`server/lipsyncProvider.ts`); this is
+   * only the fallback for a never-set row.
+   */
+  runpodLipsyncInput:
+    (process.env.RUNPOD_LIPSYNC_INPUT ?? "image").toLowerCase() === "video"
+      ? ("video" as const)
+      : ("image" as const),
   /** HeyGen API key — fallback when a per-tab key slot is empty. */
   heygenApiKey: process.env.HEYGEN_API_KEY ?? "",
   /**

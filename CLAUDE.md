@@ -158,7 +158,19 @@ Express · tRPC · Drizzle · MySQL.
   the lane carries an optional `cancel` that `withSceneDeadline` fires when it gives up on a
   host scene — otherwise a wedged render bills on to the endpoint's own execution timeout.
   A poll TIMEOUT deliberately does not cancel: it returns `pending` so a resume can still
-  collect a render already paid for
+  collect a render already paid for. The RunPod lane also sends a NEGATIVE prompt
+  (`LIPSYNC_NEGATIVE_DIRECTION`): the fast tier's cfg 1 skips the uncond pass entirely, so
+  the worker workflow wires it through NAG (attention-level guidance, ~10-25% per step vs
+  CFG's +100%) — before that, no negative wording did anything on the tier renders actually
+  use. Its camera has two conditioning modes (`lipsync_camera` in app_settings, same
+  Admin panel): `photo` sends the host photo (I2V — Wan's prior drifts slowly toward the
+  speaker and re-hallucinates the background), `pinned` sends a static VIDEO of that photo
+  built per render by `server/cameraPlate.ts` (V2V mimics the input's camera; a video where
+  nothing moves has none to mimic — the InfiniteTalk maintainer's own fix). The operator
+  still only uploads a photo; plates are bucketed 15s and cached per (photo, bucket), and
+  any plate failure falls back to photo conditioning. `scripts/measure-host-motion.mjs`
+  turns "she moves too much" into numbers (per-region jitter + background morph vs frame 0)
+  so a worker/prompt change is judged against the clip that prompted it
 - `server/hostPlate.ts` — **provider-independent**. The lip-sync model animates the image it
   is handed and never changes the setting, so `HOST_PLATES=1` generates a 16:9 plate of the host
   IN each beat's setting (host photo as identity reference) and syncs from that instead of the

@@ -29,6 +29,13 @@ import { recordUsage } from "../costMeter";
 export interface RunpodLipsyncParams {
   /** Host photo or generated plate (R2 URL) — the identity reference. */
   imageUrl: string;
+  /**
+   * Pinned-camera mode: a static video built from `imageUrl` (R2 URL). When set, the worker
+   * runs its V2V workflow conditioned on this clip instead of the photo — InfiniteTalk mimics
+   * the input video's camera, and a video in which nothing moves has none to mimic. The
+   * photo itself is not sent; the plate IS the photo, repeated.
+   */
+  videoUrl?: string;
   /** Our own TTS narration (R2 URL). Drives both the mouth and the clip's length. */
   audioUrl: string;
   /** InfiniteTalk direction — see `buildLipsyncPrompt`; short and framing-focused. */
@@ -136,16 +143,18 @@ export class RunpodLipsyncAdapter {
    * persisted — a job that sat in the queue that long has already blown its deadline.
    */
   async submitLipsync(params: RunpodLipsyncParams): Promise<VideoSubmitResult> {
-    const [imageUrl, audioUrl] = await Promise.all([
-      presignOwnBucketUrl(params.imageUrl),
+    const [mediaUrl, audioUrl] = await Promise.all([
+      presignOwnBucketUrl(params.videoUrl ?? params.imageUrl),
       presignOwnBucketUrl(params.audioUrl),
     ]);
 
     const body = JSON.stringify({
       input: {
-        input_type: "image",
+        input_type: params.videoUrl ? "video" : "image",
         person_count: "single",
-        image_url: imageUrl,
+        ...(params.videoUrl
+          ? { video_url: mediaUrl }
+          : { image_url: mediaUrl }),
         wav_url: audioUrl,
         prompt: params.prompt,
         ...(params.negativePrompt

@@ -21,6 +21,7 @@ import { HostLipsyncToggle } from "@/components/admin/ProviderKeys";
 const state = {
   provider: "heygen" as "heygen" | "runpod",
   quality: "fast" as "fast" | "full",
+  camera: "photo" as "photo" | "pinned",
   endpointSet: true,
   keySet: true,
 };
@@ -37,11 +38,13 @@ window.fetch = (async (input: any, init?: RequestInit) => {
 
   if (path.includes("setLipsyncProvider")) state.provider = input0.provider;
   if (path.includes("setLipsyncQuality")) state.quality = input0.quality;
+  if (path.includes("setLipsyncCameraMode")) state.camera = input0.camera;
 
   const data = path.includes("getLipsyncProvider")
     ? {
         provider: state.provider,
         quality: state.quality,
+        camera: state.camera,
         runpod: {
           endpointSet: state.endpointSet,
           keySet: state.keySet,
@@ -50,7 +53,9 @@ window.fetch = (async (input: any, init?: RequestInit) => {
       }
     : path.includes("setLipsyncProvider")
       ? { provider: state.provider }
-      : { quality: state.quality };
+      : path.includes("setLipsyncCameraMode")
+        ? { camera: state.camera }
+        : { quality: state.quality };
 
   return new Response(JSON.stringify([{ result: { data: { json: data } } }]), {
     status: 200,

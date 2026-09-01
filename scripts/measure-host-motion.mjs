@@ -25,6 +25,14 @@
  * Regions are fractions of the frame, so they hold at any resolution, and assume the framing
  * `LIPSYNC_HOST_DIRECTION` asks for: a centred medium close-up. They are deliberately crude —
  * this is a before/after comparator, not a face tracker.
+ *
+ * BACKGROUND MORPH is the second failure mode and needs a second instrument: the model slowly
+ * re-hallucinates background objects (a chair widens, a lamp slides) with almost no
+ * frame-to-frame change, so the jitter metric above never sees it. It shows up only against
+ * FRAME 0: each frame is diffed against the first, in the top-left background corner, and the
+ * mean is the accumulated drift. Real locked-off footage sits ~0.1–0.3; the clips that
+ * motivated this measured ~1.8–2.0. Honest only when the camera-jitter check also passes —
+ * a moving camera inflates it for free.
  */
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
@@ -44,6 +52,8 @@ const REGIONS = {
 /** Pass/fail thresholds — see the header for where these came from. */
 const LIMITS = { "hair/head": 3.0, "torso/shoulders": 3.0 };
 const MOUTH_FLOOR = 10.0;
+/** Accumulated background drift vs frame 0. Baseline clips: ~1.9. Real tripod footage: ~0.2. */
+const MORPH_LIMIT = 1.0;
 
 const probe = (file, region) =>
   new Promise((resolve, reject) => {
@@ -74,6 +84,40 @@ const probe = (file, region) =>
     });
   });
 
+/** Mean luma difference of every frame against FRAME 0, in the top-left background corner. */
+const probeMorph = file =>
+  new Promise((resolve, reject) => {
+    const p = spawn(FFMPEG, [
+      "-hide_banner",
+      // The clip twice: input 0 trimmed to frame 0 and looped as the reference layer;
+      // shortest=1 ends the diff at the real clip's end.
+      "-i",
+      file,
+      "-i",
+      file,
+      "-filter_complex",
+      "[0:v]trim=start_frame=0:end_frame=1,loop=loop=-1:size=1:start=0[ref];" +
+        "[1:v][ref]blend=all_mode=difference:shortest=1," +
+        "crop=iw*0.18:ih*0.30:0:0,signalstats,metadata=print:key=lavfi.signalstats.YAVG",
+      "-f",
+      "null",
+      "-",
+    ]);
+    let err = "";
+    p.stderr.on("data", d => (err += d));
+    p.on("error", reject);
+    p.on("close", code => {
+      if (code !== 0)
+        return reject(
+          new Error(`ffmpeg exited ${code}
+${err.slice(-800)}`)
+        );
+      const vals = [...err.matchAll(/YAVG=([0-9.]+)/g)].map(m => Number(m[1]));
+      if (!vals.length) return reject(new Error("no frames measured"));
+      resolve(vals.reduce((a, b) => a + b, 0) / vals.length);
+    });
+  });
+
 const file = process.argv[2];
 if (!file) {
   console.error("usage: node scripts/measure-host-motion.mjs <clip.mp4>");
@@ -85,6 +129,8 @@ for (const [name, region] of Object.entries(REGIONS)) {
   means[name] = await probe(file, region);
 }
 
+const morph = await probeMorph(file);
+
 const mouth = means.mouth;
 console.log(`\n  ${file}\n`);
 for (const [name, mean] of Object.entries(means)) {
@@ -92,6 +138,9 @@ for (const [name, mean] of Object.entries(means)) {
     mouth > 0 ? `${Math.round((mean / mouth) * 100)}% of mouth` : "";
   console.log(`  ${name.padEnd(18)} ${mean.toFixed(2).padStart(7)}   ${share}`);
 }
+console.log(
+  `  ${"bg morph (vs f0)".padEnd(18)} ${morph.toFixed(2).padStart(7)}   limit ${MORPH_LIMIT}`
+);
 
 const failures = [];
 if (means.background > 1.0)
@@ -106,6 +155,10 @@ for (const [name, limit] of Object.entries(LIMITS))
 if (mouth < MOUTH_FLOOR)
   failures.push(
     `mouth ${mouth.toFixed(2)} < ${MOUTH_FLOOR} — lip-sync was damaged, not just calmed`
+  );
+if (morph > MORPH_LIMIT)
+  failures.push(
+    `bg morph ${morph.toFixed(2)} > ${MORPH_LIMIT} — background objects still being re-hallucinated`
   );
 
 console.log("");

@@ -16,6 +16,7 @@ vi.mock("./db", () => ({
 const env = {
   lipsyncProvider: "heygen" as "heygen" | "runpod",
   runpodLipsyncQuality: "fast" as "fast" | "full",
+  runpodLipsyncInput: "image" as "image" | "video",
   runpodInfinitetalkEndpoint: "",
   runPodApiKey: "",
 };
@@ -30,10 +31,13 @@ import {
   setLipsyncProvider,
   getLipsyncQuality,
   setLipsyncQuality,
+  getLipsyncCameraMode,
+  setLipsyncCameraMode,
   runpodLipsyncReadiness,
   __resetLipsyncCaches,
   LIPSYNC_PROVIDER_KEY,
   LIPSYNC_QUALITY_KEY,
+  LIPSYNC_CAMERA_KEY,
 } from "./lipsyncProvider";
 
 beforeEach(() => {
@@ -41,6 +45,7 @@ beforeEach(() => {
   __resetLipsyncCaches();
   env.lipsyncProvider = "heygen";
   env.runpodLipsyncQuality = "fast";
+  env.runpodLipsyncInput = "image";
   env.runpodInfinitetalkEndpoint = "";
   env.runPodApiKey = "";
 });
@@ -116,5 +121,28 @@ describe("runpodLipsyncReadiness", () => {
 
     env.runPodApiKey = "key-1";
     expect(runpodLipsyncReadiness()).toMatchObject({ ready: true });
+  });
+});
+
+describe("getLipsyncCameraMode", () => {
+  it("defaults to photo, follows the env default, and is overridden by the stored row", async () => {
+    expect(await getLipsyncCameraMode()).toBe("photo");
+
+    __resetLipsyncCaches();
+    // RUNPOD_LIPSYNC_INPUT=video flips the never-set default to the pinned (V2V) path.
+    env.runpodLipsyncInput = "video";
+    expect(await getLipsyncCameraMode()).toBe("pinned");
+
+    await setLipsyncCameraMode("photo");
+    expect(await getLipsyncCameraMode()).toBe("photo");
+    expect(settings.get(LIPSYNC_CAMERA_KEY)).toBe("photo");
+
+    await setLipsyncCameraMode("pinned");
+    expect(await getLipsyncCameraMode()).toBe("pinned");
+  });
+
+  it("ignores a junk stored value rather than sending it to the lane", async () => {
+    settings.set(LIPSYNC_CAMERA_KEY, "handheld");
+    expect(await getLipsyncCameraMode()).toBe("photo");
   });
 });

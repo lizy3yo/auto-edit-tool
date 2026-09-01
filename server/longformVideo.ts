@@ -72,7 +72,12 @@ import {
   runpodLipsyncSlotsFor,
   RUNPOD_LIPSYNC_TIMEOUT_MS,
 } from "./providers/runpod-lipsync";
-import { getLipsyncProvider, getLipsyncQuality } from "./lipsyncProvider";
+import {
+  getLipsyncProvider,
+  getLipsyncQuality,
+  getLipsyncCameraMode,
+} from "./lipsyncProvider";
+import { buildCameraPlate } from "./cameraPlate";
 import { recordUsage, withCostMeter, flushJobUsage } from "./costMeter";
 // AIREITER BOLT-ON (temporary) — delete with the block in `apimartAdapterForJob`.
 import { aireiterAdapter, aireiterLaneEnabled } from "./providers/aireiter";
@@ -3001,9 +3006,10 @@ async function resolveLipsyncLane(
   // endpoint or key missing) falls through to HeyGen rather than failing every host scene —
   // the same shape as the key fallback below, and the reason the Admin toggle reads
   // `runpodLipsyncReadiness()` rather than offering a switch it cannot honour.
-  const [lipsyncProvider, lipsyncQuality] = await Promise.all([
+  const [lipsyncProvider, lipsyncQuality, lipsyncCamera] = await Promise.all([
     getLipsyncProvider(),
     getLipsyncQuality(),
+    getLipsyncCameraMode(),
   ]);
   if (
     lipsyncProvider === "runpod" &&
@@ -3025,15 +3031,34 @@ async function resolveLipsyncLane(
       // Unlike Avatar IV this lane is prompted, and it does NOT inherit the still's gaze —
       // left alone it squares an off-axis subject up to the lens, so `useAlt` has to be
       // spelled out in the prompt to keep the alt-angle photo's framing.
-      submit: ({ scene, imageUrl, audioUrl, useAlt }) =>
-        runpod.submitLipsync({
+      submit: async ({ scene, imageUrl, audioUrl, useAlt }) => {
+        // Pinned camera: hand the worker a static VIDEO of the same photo (V2V) so it has no
+        // camera motion to mimic — the maintainer-endorsed fix for Wan I2V's slow push-in and
+        // background morph. Fail-open to the plain photo: a drifting host beats a failed scene,
+        // and the plate is rebuilt fresh on the next attempt.
+        let videoUrl: string | undefined;
+        if (lipsyncCamera === "pinned") {
+          try {
+            videoUrl = await buildCameraPlate(
+              imageUrl,
+              scene.audioDuration ?? 60
+            );
+          } catch (e: any) {
+            console.warn(
+              `[Longform] camera plate failed (${e?.message ?? e}) — falling back to photo conditioning`
+            );
+          }
+        }
+        return runpod.submitLipsync({
           imageUrl,
+          videoUrl,
           audioUrl,
           prompt: buildLipsyncPrompt(scene, useAlt),
           negativePrompt: LIPSYNC_NEGATIVE_DIRECTION,
           width,
           height,
-        }),
+        });
+      },
       poll: (id, ms) => runpod.pollVideo(id, ms ?? RUNPOD_LIPSYNC_TIMEOUT_MS),
       // Billed by GPU time, so an abandoned render keeps costing until RunPod's own execution
       // timeout. `withSceneDeadline` calls this when it gives up on a host scene.
@@ -3858,7 +3883,13 @@ export const LIPSYNC_HOST_DIRECTION =
   "close-up, face large and centered, looking at the lens. Clear, precise lip-sync: " +
   "their mouth articulates every word and stays fully visible, hands never near their " +
   "face. They are calm and still — torso, shoulders, and head barely move, no swaying " +
-  "or gesturing, hands resting quietly out of frame. One person speaking, no one else talking.";
+  "or gesturing, hands resting quietly out of frame. One person speaking, no one else talking. " +
+  // Wan I2V's documented default is a mild push-in toward the speaker when the prompt says
+  // nothing about the camera, so the camera must be named explicitly. The background sentence
+  // attacks the other half of the drift — objects being slowly re-hallucinated ("the chair
+  // moved") — which camera vocabulary alone does not touch.
+  "Locked-off camera on a tripod: the camera never moves, pushes in, or zooms. " +
+  "The room behind them stays exactly as it is, nothing in the background changes.";
 
 /**
  * Appended to `LIPSYNC_HOST_DIRECTION` for a scene pinned to the ALT host photo
@@ -3887,10 +3918,12 @@ export const LIPSYNC_ALT_ANGLE_SUFFIX =
  * without rebuilding and re-releasing the worker image; `handler.py` falls back to its own
  * default when this is absent, so an older worker still renders.
  *
- * CAVEAT: classifier-free guidance is what makes a negative prompt bite, so this is fully
- * applied only on the `full` tier (cfg 5). The `fast` tier runs cfg 1 for the lightx2v
- * step-distill LoRA, where a negative prompt is close to inert — there the sampler's `shift`
- * is the lever that actually moves motion.
+ * On the `full` tier (cfg 5) this bites through ordinary classifier-free guidance. The
+ * `fast` tier runs cfg 1 for the lightx2v step-distill LoRA — which SKIPS the unconditional
+ * pass entirely, leaving a negative prompt mathematically inert — so the fast workflow wires
+ * this through NAG (WanVideoApplyNAG: attention-level negative guidance on the single pass,
+ * ~10-25% per step instead of CFG's +100%). Before NAG, none of these words did anything on
+ * the tier every render actually uses.
  */
 export const LIPSYNC_NEGATIVE_DIRECTION =
   "bright tones, overexposed, blurred details, subtitles, style, works, paintings, " +
@@ -3899,7 +3932,9 @@ export const LIPSYNC_NEGATIVE_DIRECTION =
   "disfigured, misshapen limbs, fused fingers, messy background, three legs, " +
   "many people in the background, walking backwards, head shaking, head bobbing, " +
   "nodding, swaying, rocking, leaning, fidgeting, jitter, sudden movement, " +
-  "body turning, shifting posture, camera shake";
+  "body turning, shifting posture, camera shake, camera push in, camera zoom, " +
+  "dolly, pan, tilt, camera drift, camera movement, background warping, " +
+  "background morphing, background drift";
 
 /**
  * Ordered term→synonym map that rewrites harm-adjacent words Grok's 69labs content classifier

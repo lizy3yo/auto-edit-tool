@@ -121,6 +121,20 @@ describe("RunpodLipsyncAdapter.submitLipsync", () => {
     expect(calls[0].body.input).not.toHaveProperty("negative_prompt");
   });
 
+  it("switches to V2V conditioning when a pinned-camera plate video is supplied", async () => {
+    const calls = installFetchMock({});
+    await new RunpodLipsyncAdapter("ep-1", "key-1", "fast").submitLipsync({
+      ...params,
+      videoUrl: "https://cdn.example/plate.mp4",
+    });
+    const input = calls[0].body.input;
+    expect(input.input_type).toBe("video");
+    expect(input.video_url).toBe("https://cdn.example/plate.mp4?signed");
+    // The photo is not sent alongside — the plate IS the photo, repeated; sending both
+    // would leave the worker to pick, and which one wins is not our contract.
+    expect(input).not.toHaveProperty("image_url");
+  });
+
   it("passes quality=full through so the 40-step workflow is selectable per render", async () => {
     const calls = installFetchMock({});
     await new RunpodLipsyncAdapter("ep-1", "key-1", "full").submitLipsync(

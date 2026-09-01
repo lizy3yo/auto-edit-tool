@@ -166,6 +166,8 @@ import {
   setLipsyncProvider,
   getLipsyncQuality,
   setLipsyncQuality,
+  getLipsyncCameraMode,
+  setLipsyncCameraMode,
   runpodLipsyncReadiness,
 } from "./lipsyncProvider";
 import { extractBookName } from "./ctaDetector";
@@ -971,11 +973,12 @@ const longformVideoRouter = router({
    * to HeyGen when the endpoint or key is absent.
    */
   getLipsyncProvider: adminProcedure.query(async () => {
-    const [provider, quality] = await Promise.all([
+    const [provider, quality, camera] = await Promise.all([
       getLipsyncProvider(),
       getLipsyncQuality(),
+      getLipsyncCameraMode(),
     ]);
-    return { provider, quality, runpod: runpodLipsyncReadiness() };
+    return { provider, quality, camera, runpod: runpodLipsyncReadiness() };
   }),
 
   setLipsyncProvider: adminProcedure
@@ -999,6 +1002,14 @@ const longformVideoRouter = router({
     .mutation(async ({ input }) => {
       await setLipsyncQuality(input.quality);
       return { quality: input.quality };
+    }),
+
+  /** RunPod camera conditioning: photo (I2V, default) vs pinned (static-plate V2V). */
+  setLipsyncCameraMode: adminProcedure
+    .input(z.object({ camera: z.enum(["photo", "pinned"]) }))
+    .mutation(async ({ input }) => {
+      await setLipsyncCameraMode(input.camera);
+      return { camera: input.camera };
     }),
 
   getApimartKeys: adminProcedure.query(async () => {
