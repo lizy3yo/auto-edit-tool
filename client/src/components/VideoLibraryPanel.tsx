@@ -22,18 +22,27 @@ import {
   type DeletableJob,
 } from "@/components/DeleteVideoDialog";
 
-/** Most rows the panel will ever show — and all it asks the server for. */
-const PANEL_MAX = 10;
+/**
+ * Rows fetched — a ceiling, not the number shown.
+ *
+ * How many rows the panel shows is decided by the WINDOW (`useFitCount`), so this only has to
+ * be more than the tallest realistic display can fit: a 2160px monitor leaves the list about
+ * 1960px, or 32 rows. Fetching a fixed ceiling and slicing it keeps the query key constant, so
+ * dragging the window edge re-slices rows already in hand instead of firing a request per pixel.
+ * These rows are light — no script, no storyboard — so the slack costs little.
+ */
+const PANEL_FETCH = 36;
 
 /** One row: an `h-11` poster inside `p-2`. Used to work out how many fit. */
 const ROW_H = 60;
 
 /**
- * How many rows fit the panel right now, `PANEL_MAX` at most.
+ * How many rows fit the panel right now.
  *
- * Measured rather than guessed from a breakpoint: the panel is `100vh` minus the header, so the
- * answer is a browser-window height, not a device class. A `ResizeObserver` keeps it right
- * through a resize, and the count only ever slices data already fetched — so it never refetches.
+ * Measured rather than capped at a number: the panel is `100vh` minus the header, so the answer
+ * is a browser-window height, not a device class, and a tall monitor should use the room it has.
+ * A `ResizeObserver` keeps it right through a resize. The floor of 3 is there because below it
+ * the panel stops being a list at all — at that size the footer link is the way through.
  */
 function useFitCount(max: number) {
   const ref = useRef<HTMLDivElement>(null);
@@ -69,10 +78,10 @@ function useFitCount(max: number) {
  *
  * It shows the MOST RECENT few and nothing else: an account with dozens of renders turned this
  * into a second scroll column beside a page that already scrolls, and the older rows were never
- * what anyone came here for — the Library page is. So it asks the server for `PANEL_MAX` rows
- * and then shows only as many as actually FIT (`useFitCount`), which is what stops it scrolling
- * on a short window instead of merely capping the count. The footer keeps the true total, from
- * `libraryCounts`, so "View all 19" still means nineteen.
+ * what anyone came here for — the Library page is. How many is decided by the WINDOW, not by a
+ * fixed number: it shows exactly as many as fit (`useFitCount`), so a laptop gets a short list
+ * and a tall monitor fills its column, and neither one scrolls. The footer keeps the true total,
+ * from `libraryCounts`, so "View all 19" still means nineteen.
  */
 export function VideoLibraryPanel({
   onOpen,
@@ -90,7 +99,7 @@ export function VideoLibraryPanel({
   const { data: page, isLoading } = trpc.longformVideo.library.useQuery(
     // A fixed limit, so resizing the window never changes the query key and never refetches —
     // the fitted count slices this page instead.
-    { limit: PANEL_MAX },
+    { limit: PANEL_FETCH },
     {
       // Cheap query (no script, no storyboard), and it carries live "Generating…" rows,
       // so keep it fresh while a render runs.
@@ -104,7 +113,7 @@ export function VideoLibraryPanel({
     }
   );
 
-  const { ref: listRef, fit } = useFitCount(PANEL_MAX);
+  const { ref: listRef, fit } = useFitCount(PANEL_FETCH);
   const jobs = page?.items.slice(0, fit);
   const total = counts?.total;
 

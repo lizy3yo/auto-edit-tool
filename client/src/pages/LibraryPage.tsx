@@ -126,8 +126,11 @@ export default function LibraryPage() {
     if (filtering && hasNextPage && !isFetchingNextPage) fetchNextPage();
   }, [filtering, hasNextPage, isFetchingNextPage, fetchNextPage]);
 
-  // Batch loading: fetch the next page as its sentinel nears the viewport, so the following
-  // twelve are usually there before you scroll to where they go. `rootMargin` is the lead time.
+  // Batch loading: the next page is fetched when the foot of the list reaches the viewport.
+  // A generous `rootMargin` was worse, not better — pulling the batch in 400px early meant it
+  // had always already happened by the time you looked, so a two-page library loaded whole on
+  // the first flick of the wheel and the batching may as well not have existed. A small lead
+  // keeps the fetch ahead of the eye without swallowing the page boundary.
   const sentinel = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = sentinel.current;
@@ -136,7 +139,7 @@ export default function LibraryPage() {
       entries => {
         if (entries[0]?.isIntersecting) fetchNextPage();
       },
-      { rootMargin: "400px" }
+      { rootMargin: "64px" }
     );
     io.observe(el);
     return () => io.disconnect();
@@ -328,19 +331,36 @@ export default function LibraryPage() {
         </div>
       )}
 
-      {/* The next batch is requested when this comes within `rootMargin` of the viewport,
-          which is why it sits below the grid rather than inside it. */}
+      {/* Foot of the list: what is loaded, and the next batch.
+
+          The button is not decoration. Auto-loading on its own is indistinguishable from
+          having loaded everything up front — you scroll, more appears, and nothing says a
+          batch arrived — and it leaves no way forward at all on a browser where the observer
+          never fires. So the count states the position, the button always works, and the
+          observer just saves you from having to press it. The sentinel sits BELOW the button
+          so reaching it means reaching the actual end of the loaded rows. */}
       {hasNextPage && (
-        <div
-          ref={sentinel}
-          className="flex items-center justify-center py-8 text-sm text-muted-foreground"
-        >
-          {isFetchingNextPage && (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Loading more…
-            </>
-          )}
+        <div className="flex flex-col items-center gap-2 py-8">
+          <p className="text-xs text-muted-foreground">
+            Showing {filtered.length} of {total}
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            disabled={isFetchingNextPage}
+            onClick={() => fetchNextPage()}
+          >
+            {isFetchingNextPage ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Loading…
+              </>
+            ) : (
+              `Load ${Math.min(PAGE_SIZE, Math.max(total - (jobs?.length ?? 0), 1))} more`
+            )}
+          </Button>
+          <div ref={sentinel} aria-hidden />
         </div>
       )}
 
