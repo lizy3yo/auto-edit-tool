@@ -1,4 +1,4 @@
-import { eq, desc, and, gte, inArray, lt, sql } from "drizzle-orm";
+import { eq, desc, and, gte, inArray, lt, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { createPool } from "mysql2";
 import {
@@ -312,21 +312,76 @@ const longformLibraryColumns = {
   >`json_unquote(json_extract(${longformVideoJobs.storyboard}, '$[0].clipUrl'))`,
 };
 
+/** Where a library page left off — the last row it returned. */
+export type LibraryCursor = { createdAt: Date; id: number };
+
 /**
  * Every job for the library views — unlike the history queries this includes `processing`,
  * because the side panel's whole point is showing a render while it is still going.
  * `allUsers` is for admins, matching `getAllLongformVideoJobHistory`.
+ *
+ * `cursor` pages KEYSET-style — "older than the last row you were given" — rather than by
+ * OFFSET, so page N costs the same as page 1 and a render finishing mid-scroll cannot shift
+ * a row across a page boundary and make it show twice or not at all. `createdAt` alone is not
+ * unique (a burst of renders shares a second), so the comparison carries `id` as a tie-break
+ * and matches the ORDER BY exactly.
  */
 export async function getLongformLibrary(
   userId: number,
-  opts: { allUsers?: boolean; limit?: number } = {}
+  opts: { allUsers?: boolean; limit?: number; cursor?: LibraryCursor } = {}
 ) {
   const db = await getDb();
   if (!db) return [];
+  const scope = opts.allUsers
+    ? undefined
+    : eq(longformVideoJobs.userId, userId);
+  const after = opts.cursor
+    ? or(
+        lt(longformVideoJobs.createdAt, opts.cursor.createdAt),
+        and(
+          eq(longformVideoJobs.createdAt, opts.cursor.createdAt),
+          lt(longformVideoJobs.id, opts.cursor.id)
+        )
+      )
+    : undefined;
+  const where = and(...[scope, after].filter(Boolean));
   const q = db.select(longformLibraryColumns).from(longformVideoJobs);
-  return (opts.allUsers ? q : q.where(eq(longformVideoJobs.userId, userId)))
-    .orderBy(desc(longformVideoJobs.createdAt))
+  return (where ? q.where(where) : q)
+    .orderBy(desc(longformVideoJobs.createdAt), desc(longformVideoJobs.id))
     .limit(opts.limit ?? 200);
+}
+
+/**
+ * How many videos the library holds, and how many each channel holds.
+ *
+ * A paged library can no longer count its own rows — the first page knows about twelve videos
+ * and the header claims to describe all of them. One grouped query answers both the total and
+ * the channel filter's options, so neither goes wrong as pages arrive, and it stays a single
+ * round trip instead of one per page.
+ */
+export async function countLongformLibrary(
+  userId: number,
+  opts: { allUsers?: boolean } = {}
+): Promise<{ total: number; byChannel: Record<string, number> }> {
+  const db = await getDb();
+  if (!db) return { total: 0, byChannel: {} };
+  const channelKey = sql<
+    string | null
+  >`json_unquote(json_extract(${longformVideoJobs.inputParams}, '$.channelKey'))`;
+  const q = db
+    .select({ channelKey, n: sql<number>`count(*)` })
+    .from(longformVideoJobs);
+  const rows = await (
+    opts.allUsers ? q : q.where(eq(longformVideoJobs.userId, userId))
+  ).groupBy(channelKey);
+  let total = 0;
+  const byChannel: Record<string, number> = {};
+  for (const r of rows) {
+    const n = Number(r.n);
+    total += n;
+    if (r.channelKey) byChannel[r.channelKey] = n;
+  }
+  return { total, byChannel };
 }
 
 export async function getLongformVideoJobHistory(userId: number, limit = 50) {

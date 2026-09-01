@@ -1,8 +1,7 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { VideoPoster } from "@/components/VideoPoster";
 import {
   Loader2,
@@ -23,8 +22,40 @@ import {
   type DeletableJob,
 } from "@/components/DeleteVideoDialog";
 
+/** Most rows the panel will ever show — and all it asks the server for. */
+const PANEL_MAX = 10;
+
+/** One row: an `h-11` poster inside `p-2`. Used to work out how many fit. */
+const ROW_H = 60;
+
 /**
- * Persistent list of every render, alongside the generator.
+ * How many rows fit the panel right now, `PANEL_MAX` at most.
+ *
+ * Measured rather than guessed from a breakpoint: the panel is `100vh` minus the header, so the
+ * answer is a browser-window height, not a device class. A `ResizeObserver` keeps it right
+ * through a resize, and the count only ever slices data already fetched — so it never refetches.
+ */
+function useFitCount(max: number) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [fit, setFit] = useState(max);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => {
+      // `p-2` on the list, top and bottom.
+      const usable = el.clientHeight - 16;
+      setFit(Math.max(3, Math.min(max, Math.floor(usable / ROW_H))));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [max]);
+  return { ref, fit };
+}
+
+/**
+ * Persistent list of the latest renders, alongside the generator.
  *
  * The five job slots are workspaces, not a record: a finished film scrolls out of reach the
  * moment its slot is reused, and the only way back was a modal. This panel keeps the whole
@@ -35,6 +66,13 @@ import {
  * Clicking a row PLAYS the video — that is what a library is for. Loading it into a generator
  * tab is the secondary action, on the pencil button that appears on hover; it used to be the
  * only one, which made a click feel like nothing had happened.
+ *
+ * It shows the MOST RECENT few and nothing else: an account with dozens of renders turned this
+ * into a second scroll column beside a page that already scrolls, and the older rows were never
+ * what anyone came here for — the Library page is. So it asks the server for `PANEL_MAX` rows
+ * and then shows only as many as actually FIT (`useFitCount`), which is what stops it scrolling
+ * on a short window instead of merely capping the count. The footer keeps the true total, from
+ * `libraryCounts`, so "View all 19" still means nineteen.
  */
 export function VideoLibraryPanel({
   onOpen,
@@ -49,14 +87,26 @@ export function VideoLibraryPanel({
   /** Job ids currently loaded in a slot — highlighted so you can see where you are. */
   activeJobIds: (number | null)[];
 }) {
-  const { data: jobs, isLoading } = trpc.longformVideo.library.useQuery(
-    undefined,
+  const { data: page, isLoading } = trpc.longformVideo.library.useQuery(
+    // A fixed limit, so resizing the window never changes the query key and never refetches —
+    // the fitted count slices this page instead.
+    { limit: PANEL_MAX },
     {
       // Cheap query (no script, no storyboard), and it carries live "Generating…" rows,
       // so keep it fresh while a render runs.
       refetchInterval: 20_000,
     }
   );
+  const { data: counts } = trpc.longformVideo.libraryCounts.useQuery(
+    undefined,
+    {
+      refetchInterval: 60_000,
+    }
+  );
+
+  const { ref: listRef, fit } = useFitCount(PANEL_MAX);
+  const jobs = page?.items.slice(0, fit);
+  const total = counts?.total;
 
   const [playing, setPlaying] = useState<PlayableJob | null>(null);
   const [deleting, setDeleting] = useState<DeletableJob | null>(null);
@@ -71,9 +121,9 @@ export function VideoLibraryPanel({
       <header className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
         <div className="flex items-center gap-2">
           <h2 className="text-sm font-semibold">Your Library</h2>
-          {jobs && (
+          {total != null && (
             <span className="rounded-full bg-secondary px-2 py-0.5 text-xs tabular-nums text-muted-foreground">
-              {jobs.length}
+              {total}
             </span>
           )}
         </div>
@@ -88,7 +138,12 @@ export function VideoLibraryPanel({
         </Button>
       </header>
 
-      <ScrollArea className="flex-1">
+      {/* Not a ScrollArea any more: the list is cut to what fits, so there is nothing to
+          scroll — and a scroller here competed with the page's own scrollbar. */}
+      {/* `min-h-0` is what makes the measurement mean anything: a flex item's min-height is
+          `auto`, so without it this box grows to its content and always reports room for every
+          row it already renders — the fitted count could then never come down. */}
+      <div ref={listRef} className="min-h-0 flex-1 overflow-hidden">
         {isLoading ? (
           <div className="flex items-center justify-center py-10 text-sm text-muted-foreground">
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -158,14 +213,14 @@ export function VideoLibraryPanel({
             })}
           </ul>
         )}
-      </ScrollArea>
+      </div>
 
       <Link
         href="/library"
         className="flex items-center justify-center gap-1.5 border-t border-border px-4 py-2.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
       >
         <ExternalLink className="h-3 w-3" />
-        View all{jobs ? ` ${jobs.length}` : ""} in Library
+        View all{total != null ? ` ${total}` : ""} in Library
       </Link>
 
       <VideoPlayerDialog

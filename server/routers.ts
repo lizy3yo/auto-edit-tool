@@ -49,6 +49,7 @@ import {
   getLongformVideoJobHistory,
   getAllLongformVideoJobHistory,
   getLongformLibrary,
+  countLongformLibrary,
   getLongformSlots,
   setLongformSlot,
   deleteLongformVideoJob,
@@ -1590,29 +1591,61 @@ const longformVideoRouter = router({
    * Every job for the side panel and the Library page — processing included, so a render in
    * flight is visible while it runs. Admins and operations managers see every account's, matching
    * `allJobHistory`; editors see their own.
+   *
+   * Returns ONE page and where the next one starts. The Library page walks the cursor as you
+   * scroll, so a first paint costs a dozen rows instead of every render the account has ever
+   * made, and the side panel simply asks for the handful it can show. `nextCursor` is null once
+   * a page comes back short — the only signal that stays right when a render finishes between
+   * two pages.
    */
   library: approvedProcedure
     .input(
       z
-        .object({ limit: z.number().int().min(1).max(500).optional() })
+        .object({
+          limit: z.number().int().min(1).max(500).optional(),
+          cursor: z
+            .object({ createdAt: z.date(), id: z.number().int() })
+            .nullish(),
+        })
         .optional()
     )
     .query(async ({ ctx, input }) => {
+      const limit = input?.limit ?? 200;
       const rows = await getLongformLibrary(ctx.user.id, {
         allUsers: canSeeAllJobs(ctx.user.role),
-        limit: input?.limit,
+        limit,
+        cursor: input?.cursor ?? undefined,
       });
       // Attach reported sales so the library answers "which video earns?" at a glance. One
       // grouped query for the whole page, not one per row.
       const sales = await getSalesByJob(rows.map(r => r.id)).catch(
         () => new Map<number, { sales: number; revenueCents: number }>()
       );
-      return rows.map(r => ({
-        ...r,
-        sales: sales.get(r.id)?.sales ?? 0,
-        revenueCents: sales.get(r.id)?.revenueCents ?? 0,
-      }));
+      const last = rows[rows.length - 1];
+      return {
+        items: rows.map(r => ({
+          ...r,
+          sales: sales.get(r.id)?.sales ?? 0,
+          revenueCents: sales.get(r.id)?.revenueCents ?? 0,
+        })),
+        nextCursor:
+          last && rows.length === limit
+            ? { createdAt: last.createdAt, id: last.id }
+            : null,
+      };
     }),
+
+  /**
+   * The library's totals — what a paged list can no longer count for itself.
+   *
+   * Feeds the header count, the side panel's badge and the channel filter's options, so all
+   * three describe the whole library even while only the first page is on screen.
+   */
+  libraryCounts: approvedProcedure.query(async ({ ctx }) =>
+    countLongformLibrary(ctx.user.id, {
+      allUsers: canSeeAllJobs(ctx.user.role),
+    })
+  ),
 
   /** Current user's finished (completed/failed) jobs — for the history panel. */
   myJobHistory: approvedProcedure

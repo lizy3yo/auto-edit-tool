@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
@@ -37,6 +37,9 @@ import {
   Receipt,
 } from "lucide-react";
 
+/** One batch: four rows at `lg:grid-cols-3`, six at `sm:grid-cols-2`. */
+const PAGE_SIZE = 12;
+
 /**
  * Every render as a browsable grid — the counterpart to the side panel, for when you want to
  * find something rather than glance at it.
@@ -44,6 +47,17 @@ import {
  * "Open" routes back to the generator and loads the job into a slot, via a `?open=<id>` query
  * param the Long-form page consumes on mount. A query param rather than shared state so the
  * link survives a reload and can be pasted.
+ *
+ * Loaded a PAGE AT A TIME. The grid used to wait on every render the account has ever made —
+ * one query, every row, every poster starting to load at once — so the whole page sat on a
+ * spinner for the slowest of them. Now the first `PAGE_SIZE` paint immediately and the rest
+ * arrive in batches as you approach the bottom, each keyed off the last row's cursor.
+ *
+ * Two things that a paged list would otherwise get wrong, and how they are handled:
+ * the header count and the channel filter come from `libraryCounts` (the whole library, one
+ * cheap grouped query) rather than from the rows on screen; and searching, which filters
+ * client-side, first DRAINS the remaining pages — otherwise "no videos match" would really
+ * mean "none in the twelve you happen to have scrolled past".
  */
 export default function LibraryPage() {
   const [, navigate] = useLocation();
@@ -53,11 +67,27 @@ export default function LibraryPage() {
   const [costJobId, setCostJobId] = useState<number | null>(null);
   const [channel, setChannel] = useState("all");
 
-  const { data: jobs, isLoading } = trpc.longformVideo.library.useQuery(
+  const { data, isLoading, hasNextPage, isFetchingNextPage, fetchNextPage } =
+    trpc.longformVideo.library.useInfiniteQuery(
+      { limit: PAGE_SIZE },
+      {
+        getNextPageParam: page => page.nextCursor,
+        // Live "Generating…" cards, same as the side panel. Refetches the pages already
+        // loaded, not the whole table.
+        refetchInterval: 20_000,
+      }
+    );
+  const { data: counts } = trpc.longformVideo.libraryCounts.useQuery(
     undefined,
-    { refetchInterval: 20_000 }
+    {
+      refetchInterval: 60_000,
+    }
   );
   const { data: channels } = trpc.channelConfig.listAllChannels.useQuery();
+
+  const jobs = useMemo(() => data?.pages.flatMap(p => p.items), [data]);
+  const total = counts?.total ?? 0;
+  const filtering = search.trim() !== "" || channel !== "all";
 
   const channelName = useMemo(() => {
     const map = new Map((channels ?? []).map(c => [c.key, c.name]));
@@ -82,19 +112,42 @@ export default function LibraryPage() {
   }, [jobs, search, channel, channelName]);
 
   // Only offer channels that actually have videos — a filter that returns nothing is noise.
-  const usedChannels = useMemo(() => {
-    const keys = new Set(
-      (jobs ?? []).map(j => j.channelKey).filter((k): k is string => !!k)
+  // Counted across the WHOLE library, not the pages loaded so far, or the list would grow as
+  // you scrolled and a channel further down would be unpickable until you reached it.
+  const usedChannels = useMemo(
+    () => (channels ?? []).filter(c => (counts?.byChannel[c.key] ?? 0) > 0),
+    [channels, counts]
+  );
+
+  // Search and the channel filter run over the rows in hand, so with pages outstanding they
+  // would answer for part of the library and say it was all of it. While a filter is on, pull
+  // the rest in — bounded, and it stops the moment the filter clears.
+  useEffect(() => {
+    if (filtering && hasNextPage && !isFetchingNextPage) fetchNextPage();
+  }, [filtering, hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+  // Batch loading: fetch the next page as its sentinel nears the viewport, so the following
+  // twelve are usually there before you scroll to where they go. `rootMargin` is the lead time.
+  const sentinel = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = sentinel.current;
+    if (!el || !hasNextPage) return;
+    const io = new IntersectionObserver(
+      entries => {
+        if (entries[0]?.isIntersecting) fetchNextPage();
+      },
+      { rootMargin: "400px" }
     );
-    return (channels ?? []).filter(c => keys.has(c.key));
-  }, [jobs, channels]);
+    io.observe(el);
+    return () => io.disconnect();
+  }, [hasNextPage, fetchNextPage]);
 
   return (
     <div className="space-y-6">
       <PageHeader
         icon={LibraryBig}
         title="Your library"
-        description={`${jobs?.length ?? 0} video${jobs?.length === 1 ? "" : "s"} — open one to keep working, or start a new render.`}
+        description={`${total} video${total === 1 ? "" : "s"} — open one to keep working, or start a new render.`}
         actions={
           <Button onClick={() => navigate("/")} className="gap-1.5">
             <Plus className="h-4 w-4" />
@@ -122,9 +175,7 @@ export default function LibraryPage() {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">
-              All channels ({jobs?.length ?? 0})
-            </SelectItem>
+            <SelectItem value="all">All channels ({total})</SelectItem>
             {usedChannels.map(c => (
               <SelectItem key={c.key} value={c.key}>
                 {c.name}
@@ -139,9 +190,16 @@ export default function LibraryPage() {
           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
           Loading library…
         </div>
+      ) : filtered.length === 0 && filtering && hasNextPage ? (
+        // Nothing matched YET, but pages are still coming in — "no matches" here would be a
+        // lie that corrects itself a second later.
+        <div className="flex items-center justify-center py-20 text-sm text-muted-foreground">
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          Searching all {total} videos…
+        </div>
       ) : filtered.length === 0 ? (
         <p className="py-20 text-center text-sm text-muted-foreground">
-          {jobs?.length
+          {total
             ? "No videos match that search."
             : "No videos yet. Generate one and it shows up here."}
         </p>
@@ -267,6 +325,22 @@ export default function LibraryPage() {
               </div>
             </article>
           ))}
+        </div>
+      )}
+
+      {/* The next batch is requested when this comes within `rootMargin` of the viewport,
+          which is why it sits below the grid rather than inside it. */}
+      {hasNextPage && (
+        <div
+          ref={sentinel}
+          className="flex items-center justify-center py-8 text-sm text-muted-foreground"
+        >
+          {isFetchingNextPage && (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Loading more…
+            </>
+          )}
         </div>
       )}
 

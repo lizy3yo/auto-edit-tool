@@ -45,6 +45,9 @@ export function DeleteVideoDialog({
     onSuccess: (_res, vars) => {
       toast.success("Video deleted.");
       utils.longformVideo.library.invalidate();
+      // The header count, the panel badge and the channel filter are counted separately
+      // now that the list is paged — they go stale on their own.
+      utils.longformVideo.libraryCounts.invalidate();
       utils.longformVideo.myJobHistory.invalidate();
       utils.longformVideo.allJobHistory.invalidate();
       // The server clears any tab pinned to this job, so the slot query is now stale too.
