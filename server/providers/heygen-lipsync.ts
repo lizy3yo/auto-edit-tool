@@ -4,6 +4,7 @@ import type { VideoSubmitResult } from "./base";
 import { sleep } from "./base";
 import { Semaphore } from "./semaphore";
 import { ENV } from "../_core/env";
+import { summarizeHttpBody } from "../_core/errorDetail";
 
 const HEYGEN_API_BASE = "https://api.heygen.com/v3";
 
@@ -338,7 +339,7 @@ export class HeygenLipsyncAdapter {
             continue;
           }
           return {
-            error: `HeyGen API error (${response.status}): ${errText.substring(0, 500)}`,
+            error: `HeyGen API error (${response.status}): ${summarizeHttpBody(errText, 500)}`,
           };
         }
 
@@ -409,7 +410,7 @@ export class HeygenLipsyncAdapter {
           return {
             success: false,
             taskId,
-            error: `HeyGen video not found (${resp.status}): ${errText.substring(0, 200)}`,
+            error: `HeyGen video not found (${resp.status}): ${summarizeHttpBody(errText, 200)}`,
             infraFailure: true,
           };
         }
@@ -417,7 +418,7 @@ export class HeygenLipsyncAdapter {
         if (!resp.ok) {
           const errText = await resp.text();
           console.warn(
-            `[HeyGen] Poll error (${resp.status}): ${errText.substring(0, 200)}`
+            `[HeyGen] Poll error (${resp.status}): ${summarizeHttpBody(errText, 200)}`
           );
           await sleep(5_000 + Math.floor(Math.random() * 3000));
           continue;

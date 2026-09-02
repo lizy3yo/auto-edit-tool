@@ -12,6 +12,7 @@ import {
   isCreditsError,
 } from "./sixtynine-labs";
 import { recordUsage } from "../costMeter";
+import { summarizeHttpBody } from "../_core/errorDetail";
 
 /**
  * APIMART video/image provider. One async gateway — submit returns a task_id, then poll
@@ -431,9 +432,10 @@ export class ApimartAdapter implements ProviderAdapter {
     if (isContentPolicyError(raw)) return CONTENT_POLICY_MESSAGE;
     if (isCreditsError(raw))
       return "APIMART credits depleted. Check your APIMART dashboard.";
-    if (isTransientVideoError(raw)) return `APIMART: ${raw.substring(0, 300)}`;
+    if (isTransientVideoError(raw))
+      return `APIMART: ${summarizeHttpBody(raw, 300)}`;
     const prefix = status ? `APIMART API error (${status}): ` : "APIMART: ";
-    return `${prefix}${raw.substring(0, 500)}`;
+    return `${prefix}${summarizeHttpBody(raw, 500)}`;
   }
 
   async generateVideo(

@@ -27,6 +27,8 @@ import {
   describeOverlongScenes,
   BROLL_CLIP_MAX_SEC,
   withTransientRetry,
+  runChunkTasks,
+  MAX_INFRA_RESUBMITS,
   stillRetryDelayMs,
   PendingRenderError,
   splitScriptForNarration,
@@ -107,8 +109,10 @@ import {
   CUTAWAY_PERSON_FREE_DIRECTIVE,
   CTA_EMPTY_HANDS_SUFFIX,
   LIPSYNC_HOST_DIRECTION,
+  LIPSYNC_HOST_DIRECTION_PINNED,
   LIPSYNC_ALT_ANGLE_SUFFIX,
   LIPSYNC_NEGATIVE_DIRECTION,
+  LIPSYNC_NEGATIVE_DIRECTION_PINNED,
   buildLipsyncPrompt,
   NO_BOOK_SUFFIX,
   NO_PEOPLE_SUFFIX,
@@ -8060,5 +8064,155 @@ describe("InfiniteTalk host prompt", () => {
       for (const term of ["worst quality", "deformed", "extra fingers"])
         expect(LIPSYNC_NEGATIVE_DIRECTION).toContain(term);
     });
+  });
+});
+
+describe("runChunkTasks failure routing", () => {
+  const persist = async () => {};
+  const scene = (): StoryboardScene => ({
+    index: 1,
+    narration: "n",
+    visualPrompt: "host on camera",
+    hostPresent: true,
+  });
+  const submit = async () => ({ taskId: "task-1" });
+
+  it("fails the scene outright on a terminal result — a render the provider said cannot complete is never resubmitted", async () => {
+    const s = scene();
+    // The real verdict's wording: "timeout" is exactly what the transient classifier keys on,
+    // so this proves the terminal flag is honoured BEFORE that classifier gets a look.
+    const poll = async () => ({
+      success: false,
+      taskId: "task-1",
+      terminal: true,
+      error: "RunPod job FAILED: executionTimeout exceeded",
+    });
+    const err = await runChunkTasks(
+      7,
+      s,
+      "runpod",
+      1,
+      submit,
+      poll,
+      persist,
+      SIXTYNINE_VIDEO_SLOTS
+    ).catch(e => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(PendingRenderError);
+    expect(err.message).toContain("executionTimeout exceeded");
+    // Nothing left for a resume pass to re-poll or re-submit.
+    expect(s.renderTaskIds).toBeUndefined();
+  });
+
+  it("resubmits an infra failure MAX_INFRA_RESUBMITS times, then gives up with the provider's last word", async () => {
+    const s = scene();
+    const poll = async () => ({
+      success: false,
+      taskId: "task-1",
+      infraFailure: true,
+      error: "CUDA OOM",
+    });
+    const run = () =>
+      runChunkTasks(
+        7,
+        s,
+        "runpod",
+        1,
+        submit,
+        poll,
+        persist,
+        SIXTYNINE_VIDEO_SLOTS
+      ).catch(e => e);
+    for (let i = 1; i <= MAX_INFRA_RESUBMITS; i++) {
+      const err = await run();
+      expect(err).toBeInstanceOf(PendingRenderError); // resume path resubmits fresh
+      expect(s.renderTaskIds).toBeUndefined();
+      expect(s.infraRetries).toBe(i);
+    }
+    const err = await run();
+    expect(err).not.toBeInstanceOf(PendingRenderError);
+    expect(err.message).toContain("CUDA OOM");
+    expect(err.message).toContain(
+      `${MAX_INFRA_RESUBMITS + 1} renders in a row`
+    );
+    expect(s.infraRetries).toBeUndefined();
+    expect(s.renderTaskIds).toBeUndefined();
+  });
+});
+
+describe("pinned-camera prompt pair", () => {
+  const SUPPRESSORS = [
+    "swaying",
+    "rocking",
+    "leaning",
+    "nodding",
+    "head bobbing",
+    "body turning",
+    "shifting posture",
+    "fidgeting",
+  ];
+
+  /**
+   * Photo mode needs these: in I2V, body sway and camera drift are the same failure, so
+   * suppressing one suppresses the other. Under a static plate they are not — the plate holds
+   * the frame and the suppressors only freeze the torso, which measured as head-torso motion
+   * correlating at 0.48 against the reference's 0.66-0.68 and reads as a bobblehead.
+   */
+  it("keeps photo mode's body suppression exactly as it was", () => {
+    expect(LIPSYNC_HOST_DIRECTION).toContain("calm and still");
+    expect(LIPSYNC_HOST_DIRECTION).toContain("no swaying");
+    for (const term of SUPPRESSORS)
+      expect(LIPSYNC_NEGATIVE_DIRECTION).toContain(term);
+  });
+
+  it("asks the pinned body to move WITH the head, and stops forbidding it", () => {
+    expect(LIPSYNC_HOST_DIRECTION_PINNED).toContain("move");
+    expect(LIPSYNC_HOST_DIRECTION_PINNED).not.toContain("barely move");
+    expect(LIPSYNC_HOST_DIRECTION_PINNED).not.toContain("no swaying");
+    for (const term of SUPPRESSORS)
+      expect(LIPSYNC_NEGATIVE_DIRECTION_PINNED).not.toContain(term);
+    // NAG enforces the negative on the fast tier, so naming the actual failure earns its place.
+    for (const term of ["stiff", "rigid", "mannequin", "motionless torso"])
+      expect(LIPSYNC_NEGATIVE_DIRECTION_PINNED).toContain(term);
+  });
+
+  it("keeps every camera, background and quality guard in the pinned negative", () => {
+    for (const term of [
+      "camera push in",
+      "camera zoom",
+      "camera drift",
+      "background morphing",
+      "background warping",
+      "worst quality",
+      "deformed",
+      "extra fingers",
+    ])
+      expect(LIPSYNC_NEGATIVE_DIRECTION_PINNED).toContain(term);
+  });
+
+  it("keeps the camera lock and the framing in both directions", () => {
+    for (const text of [LIPSYNC_HOST_DIRECTION, LIPSYNC_HOST_DIRECTION_PINNED]) {
+      expect(text).toContain("Locked-off camera on a tripod");
+      expect(text).toContain("nothing in the background changes");
+      expect(text).toContain("Clear, precise lip-sync");
+      // Still says nothing about who the host is — the photo carries identity.
+      expect(text).not.toMatch(
+        /(he|him|his|she|her|hers|man|woman|male|female)/i
+      );
+    }
+  });
+
+  it("selects the direction by camera mode, defaulting to photo", () => {
+    const scene = { index: 0, narration: "n" } as never;
+    // Default preserved so every pre-existing caller is byte-identical.
+    expect(buildLipsyncPrompt(scene)).toContain("calm and still");
+    expect(buildLipsyncPrompt(scene, false, "photo")).toContain("calm and still");
+    expect(buildLipsyncPrompt(scene, false, "pinned")).toContain(
+      "one relaxed, connected body"
+    );
+    // The alt-angle suffix still rides along on either.
+    expect(buildLipsyncPrompt(scene, true, "pinned")).toContain(
+      LIPSYNC_ALT_ANGLE_SUFFIX
+    );
   });
 });

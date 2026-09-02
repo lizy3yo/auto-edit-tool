@@ -46,7 +46,7 @@ Read through the single `ENV` object in `server/_core/env.ts`, except `R2_*`, wh
 | `R2_PUBLIC_URL`                                                          | `server/storage.ts:83`, `server/musicBeds.ts:101`                                                      | narration-only films (warns, no crash)    |
 | `RUN_POD_KEY` + `RUNPOD_WHISPERX_ENDPOINT`                               | `server/_core/voiceTranscription.ts` → `kodxana/whisperx-worker_v2` serverless                         | no word-level narration alignment         |
 | `HEYGEN_API_KEY`                                                         | `server/longformVideo.ts:2506` — **fallback only**, used when a tab's slot key is blank                | host lip-sync fails for slot-less tabs    |
-| `RUNPOD_INFINITETALK_ENDPOINT` + `LIPSYNC_PROVIDER=runpod`                | `server/providers/runpod-lipsync.ts` — **optional**, moves host lip-sync off HeyGen                   | host lane stays on HeyGen (the default)   |
+| `RUNPOD_INFINITETALK_ENDPOINT` + `LIPSYNC_PROVIDER=runpod`               | `server/providers/runpod-lipsync.ts` — **optional**, moves host lip-sync off HeyGen                    | host lane stays on HeyGen (the default)   |
 | `PUBLIC_BASE_URL`                                                        | `server/providers/heygen-lipsync.ts:78` (webhook callback URL)                                         | blank ⇒ pure polling; slower, still works |
 
 ### Channel B — DB-stored, AES-256-GCM, entered in Admin
@@ -69,26 +69,35 @@ Gemini, OpenAI, R2, RunPod. Missing ones fail loudly at the first stage that nee
 
 ## Optional tuning vars (defaults from code; most are not in `.env.example`)
 
-| Var                             | Default         | Var                            | Default                     |
-| ------------------------------- | --------------- | ------------------------------ | --------------------------- |
-| `FFMPEG_PATH`                   | auto-probe      | `FFMPEG_CONCURRENCY`           | cpu-derived                 |
-| `FFMPEG_PROBE_MAX_MS`           | 600s            | `ASSEMBLY_DOWNLOAD_TIMEOUT_MS` | 120s                        |
-| `PROBE_MAX_MS`                  | 60s             | `BROLL_NO_KEYFRAME`            | unset (`1` disables)        |
-| `R2_CONNECTION_TIMEOUT_MS`      | 10s             | `R2_REQUEST_TIMEOUT_MS`        | 120s                        |
-| `APIMART_RATE_PER_MIN`          | 40              | `APIMART_BURST`                | 5                           |
-| `HEYGEN_CONCURRENCY`            | 8               | `HEYGEN_CALL_TIMEOUT_MS`       | 120s                        |
-| `HEYGEN_DOWNLOAD_TIMEOUT_MS`    | 300s            | `OPENAI_IMAGE_CALL_TIMEOUT_MS` | 300s                        |
-| `OPENAI_IMAGE_BURST`            | 1               | `OPENAI_IMAGE_RATE_PER_MIN`    | 50 (Tier-3 cap)             |
-| `SIXTYNINE_VIDEO_CONCURRENCY`   | 8               | `SIXTYNINE_IMAGE_CONCURRENCY`  | 7                           |
-| `SIXTYNINE_VIDEO_TIMEOUT_MS`    | 360s            | `SIXTYNINE_CALL_TIMEOUT_MS`    | 120s                        |
-| `SIXTYNINE_DOWNLOAD_TIMEOUT_MS` | 300s            | `SIXTYNINE_VIDEO_SUBMIT_BURST` | 2                           |
-| `SIXTYNINE_VIDEO_SUBMIT_RATE`   | 5/min (API cap) | `IMAGE_PRIMARY_TIMEOUT_MS`     | 480s                        |
-| `SIXTYNINE_TTS_SUBMIT_RATE`     | 20/min          | `SIXTYNINE_TTS_SUBMIT_BURST`   | 3                           |
-| `IMAGE_PRIMARY_RETRIES`         | 1               | `IMAGE_RETRY_TIMEOUT_MS`       | 240s                        |
-| `IMAGE_RETRY_TOTAL_BUDGET_MS`   | 600s            | `MYSQL_SORT_BUFFER_SIZE`       | 8 MB                        |
-| `AUTO_MIGRATE`                  | on (`0` skips)  | `ASSEMBLY_CACHE`               | on (`0` skips)              |
-| `LIPSYNC_RESOLUTION`            | 720p (all envs) | `RUNPOD_LIPSYNC_INPUT`         | image (`video` = pinned)    |
-| `ASSEMBLY_CACHE_MAX_GB`         | 20              | `ASSEMBLY_CACHE_DIR`           | tmp/longform-assembly-cache |
+| Var                             | Default         | Var                                   | Default                     |
+| ------------------------------- | --------------- | ------------------------------------- | --------------------------- |
+| `FFMPEG_PATH`                   | auto-probe      | `FFMPEG_CONCURRENCY`                  | cpu-derived                 |
+| `FFMPEG_PROBE_MAX_MS`           | 600s            | `ASSEMBLY_DOWNLOAD_TIMEOUT_MS`        | 120s                        |
+| `PROBE_MAX_MS`                  | 60s             | `BROLL_NO_KEYFRAME`                   | unset (`1` disables)        |
+| `R2_CONNECTION_TIMEOUT_MS`      | 10s             | `R2_REQUEST_TIMEOUT_MS`               | 120s                        |
+| `APIMART_RATE_PER_MIN`          | 40              | `APIMART_BURST`                       | 5                           |
+| `HEYGEN_CONCURRENCY`            | 8               | `HEYGEN_CALL_TIMEOUT_MS`              | 120s                        |
+| `HEYGEN_DOWNLOAD_TIMEOUT_MS`    | 300s            | `OPENAI_IMAGE_CALL_TIMEOUT_MS`        | 300s                        |
+| `OPENAI_IMAGE_BURST`            | 1               | `OPENAI_IMAGE_RATE_PER_MIN`           | 50 (Tier-3 cap)             |
+| `SIXTYNINE_VIDEO_CONCURRENCY`   | 8               | `SIXTYNINE_IMAGE_CONCURRENCY`         | 7                           |
+| `SIXTYNINE_VIDEO_TIMEOUT_MS`    | 360s            | `SIXTYNINE_CALL_TIMEOUT_MS`           | 120s                        |
+| `SIXTYNINE_DOWNLOAD_TIMEOUT_MS` | 300s            | `SIXTYNINE_VIDEO_SUBMIT_BURST`        | 2                           |
+| `SIXTYNINE_VIDEO_SUBMIT_RATE`   | 5/min (API cap) | `IMAGE_PRIMARY_TIMEOUT_MS`            | 480s                        |
+| `SIXTYNINE_TTS_SUBMIT_RATE`     | 20/min          | `SIXTYNINE_TTS_SUBMIT_BURST`          | 3                           |
+| `IMAGE_PRIMARY_RETRIES`         | 1               | `IMAGE_RETRY_TIMEOUT_MS`              | 240s                        |
+| `IMAGE_RETRY_TOTAL_BUDGET_MS`   | 600s            | `MYSQL_SORT_BUFFER_SIZE`              | 8 MB                        |
+| `AUTO_MIGRATE`                  | on (`0` skips)  | `ASSEMBLY_CACHE`                      | on (`0` skips)              |
+| `LIPSYNC_RESOLUTION`            | 720p (all envs) | `RUNPOD_LIPSYNC_INPUT`                | image (`video` = pinned)    |
+| `ASSEMBLY_CACHE_MAX_GB`         | 20              | `ASSEMBLY_CACHE_DIR`                  | tmp/longform-assembly-cache |
+| `RUNPOD_LIPSYNC_TIMEOUT_MS`     | 35 min (poll)   | `RUNPOD_LIPSYNC_EXECUTION_TIMEOUT_MS` | 40 min (per-job GPU cap)    |
+
+`RUNPOD_LIPSYNC_EXECUTION_TIMEOUT_MS` is sent with every submit as RunPod's `policy.executionTimeout`
+and overrides the endpoint's own setting (dashboard default 20 min). InfiniteTalk at 720p on the
+A40/A6000 class costs ~800 GPU-s per 81-frame window — a 6 s host beat is three windows, ~30 min —
+so under a 20-min cap any beat over ~4 s was killed on every attempt and resubmitted identically for
+as long as the job lived. A render RunPod stops at the cap now comes back `terminal` and fails its
+scene with the levers named (shorter beat, 480p, faster GPU, higher cap); an ordinary provider
+failure is resubmitted at most `MAX_INFRA_RESUBMITS` (2) times before the scene fails too.
 
 `MYSQL_SORT_BUFFER_SIZE` is set per pooled connection in `server/db.ts`. MySQL's 256 KB default
 is not enough for the library query: filesort sizes its buffer from each column's **declared**
@@ -103,12 +112,12 @@ Quantities are metered from real calls; **only Anthropic's rates are exact**. Ev
 is a list-price estimate because HeyGen/69Labs/APIMART bill per-plan credit bundles — check one
 invoice, then pin the real number via the env var below (or edit the file).
 
-| Var                          | Default     | Var                         | Default |
-| ---------------------------- | ----------- | --------------------------- | ------- |
-| `COST_APIMART_IMAGE`         | $0.02/image | `COST_OPENAI_IMAGE`         | $0.003  |
-| `COST_APIMART_VIDEO_PER_SEC` | $0.02/s     | `COST_HEYGEN_PER_SEC`       | $0.06/s |
-| `COST_TTS_PER_1K_CHARS`      | $0.05       | `COST_GEMINI_IMAGE`         | $0.03   |
-| `COST_69LABS_IMAGE`          | $0.05       | `COST_69LABS_VIDEO_PER_SEC` | $0.05/s |
+| Var                          | Default     | Var                               | Default  |
+| ---------------------------- | ----------- | --------------------------------- | -------- |
+| `COST_APIMART_IMAGE`         | $0.02/image | `COST_OPENAI_IMAGE`               | $0.003   |
+| `COST_APIMART_VIDEO_PER_SEC` | $0.02/s     | `COST_HEYGEN_PER_SEC`             | $0.06/s  |
+| `COST_TTS_PER_1K_CHARS`      | $0.05       | `COST_GEMINI_IMAGE`               | $0.03    |
+| `COST_69LABS_IMAGE`          | $0.05       | `COST_69LABS_VIDEO_PER_SEC`       | $0.05/s  |
 | `COST_WHISPERX_PER_GPU_SEC`  | $0.0004     | `COST_RUNPOD_LIPSYNC_PER_GPU_SEC` | $0.00097 |
 
 ## Architecture

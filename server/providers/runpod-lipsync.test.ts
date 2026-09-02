@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { RunpodLipsyncAdapter } from "./runpod-lipsync";
+import {
+  RunpodLipsyncAdapter,
+  RUNPOD_LIPSYNC_EXECUTION_TIMEOUT_MS,
+} from "./runpod-lipsync";
 
 // Instant sleeps so the poll cadence and retry backoffs don't slow the suite.
 vi.mock("./base", async importOriginal => {
@@ -152,6 +155,30 @@ describe("RunpodLipsyncAdapter.submitLipsync", () => {
     await adapter.submitLipsync(params);
     expect(calls[1].body.input).not.toHaveProperty("steps");
     expect(calls[1].body.input).not.toHaveProperty("start_step");
+  });
+
+  it("sends the motion dials in either mode, and only when set", async () => {
+    const calls = installFetchMock({});
+    const adapter = new RunpodLipsyncAdapter("ep-1", "key-1", "fast");
+    // Photo mode — the dials are not tied to the plate.
+    await adapter.submitLipsync({
+      ...params,
+      shift: 3,
+      audioScale: 0.7,
+      audioCfgScale: 2,
+      nagScale: 14,
+    });
+    expect(calls[0].body.input).toMatchObject({
+      input_type: "image",
+      shift: 3,
+      audio_scale: 0.7,
+      audio_cfg_scale: 2,
+      nag_scale: 14,
+    });
+    // Unset ⇒ absent, so the workflow's own defaults rule and an older worker sees no keys.
+    await adapter.submitLipsync(params);
+    for (const k of ["shift", "audio_scale", "audio_cfg_scale", "nag_scale"])
+      expect(calls[1].body.input).not.toHaveProperty(k);
   });
 
   it("passes quality=full through so the 40-step workflow is selectable per render", async () => {
@@ -309,6 +336,79 @@ describe("RunpodLipsyncAdapter.pollVideo", () => {
     expect(res.success).toBe(false);
     expect(res.infraFailure).toBe(true);
     expect(res.error).toContain("404");
+  });
+});
+
+describe("RunpodLipsyncAdapter execution cap", () => {
+  beforeEach(() => vi.clearAllMocks());
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("sends a per-request executionTimeout so the endpoint's own 20-min default cannot kill a long beat", async () => {
+    const calls = installFetchMock({});
+    await new RunpodLipsyncAdapter("ep-1", "key-1", "fast").submitLipsync(
+      params
+    );
+    expect(calls[0].body.policy).toEqual({
+      executionTimeout: RUNPOD_LIPSYNC_EXECUTION_TIMEOUT_MS,
+    });
+    // Must clear the 20-min dashboard default the lane was first deployed under, and stay
+    // under the 45-min scene deadline so RunPod's verdict arrives before the app abandons.
+    expect(RUNPOD_LIPSYNC_EXECUTION_TIMEOUT_MS).toBeGreaterThan(20 * 60_000);
+    expect(RUNPOD_LIPSYNC_EXECUTION_TIMEOUT_MS).toBeLessThan(45 * 60_000);
+  });
+
+  it("marks a render RunPod stopped at the execution cap as terminal — never an infra failure to resubmit", async () => {
+    // Verbatim shape of the real verdict: status FAILED (not TIMED_OUT), executionTime just
+    // past the cap. Resubmitting this identically was the loop that ran job 17 for 90 min.
+    installFetchMock({
+      status: () =>
+        jsonRes(200, {
+          status: "FAILED",
+          error: "executionTimeout exceeded",
+          executionTime: 1_207_946,
+          delayTime: 19_590,
+        }),
+    });
+    const res = await new RunpodLipsyncAdapter(
+      "ep-1",
+      "key-1",
+      "fast"
+    ).pollVideo("job-1");
+
+    expect(res.success).toBe(false);
+    expect(res.terminal).toBe(true);
+    expect(res.infraFailure).toBeUndefined();
+    expect(res.pending).toBeUndefined();
+    // The operator gets the minutes burned and the levers, not a bare status word.
+    expect(res.error).toContain("20 min");
+    expect(res.error).toMatch(/480p|faster GPU|EXECUTION_TIMEOUT/);
+  });
+
+  it("treats a TIMED_OUT status the same way", async () => {
+    installFetchMock({
+      status: () =>
+        jsonRes(200, { status: "TIMED_OUT", executionTime: 60_000 }),
+    });
+    const res = await new RunpodLipsyncAdapter(
+      "ep-1",
+      "key-1",
+      "fast"
+    ).pollVideo("job-1");
+    expect(res.terminal).toBe(true);
+    expect(res.infraFailure).toBeUndefined();
+  });
+
+  it("still resubmits an ordinary FAILED job (a crashed worker is not deterministic)", async () => {
+    installFetchMock({
+      status: () => jsonRes(200, { status: "FAILED", error: "CUDA OOM" }),
+    });
+    const res = await new RunpodLipsyncAdapter(
+      "ep-1",
+      "key-1",
+      "fast"
+    ).pollVideo("job-1");
+    expect(res.infraFailure).toBe(true);
+    expect(res.terminal).toBeUndefined();
   });
 });
 

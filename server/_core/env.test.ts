@@ -55,3 +55,21 @@ describe("ENV.lipsyncResolution", () => {
     ).toBe("720p");
   });
 });
+
+describe("ENV.runpodLipsyncV2vStartStep", () => {
+  it("defaults to the measured-at-parity value so no host needs a variable", async () => {
+    // 8/1 overshot to ~150% of the reference's body motion, 8/2 landed on it. Baking 2 means
+    // a fresh deploy renders correctly without anyone remembering to set this.
+    expect(
+      (await loadEnv({ RUNPOD_LIPSYNC_V2V_START_STEP: undefined }))
+        .runpodLipsyncV2vStartStep
+    ).toBe(2);
+  });
+
+  it("still yields to an explicit override for experiments", async () => {
+    expect(
+      (await loadEnv({ RUNPOD_LIPSYNC_V2V_START_STEP: "1" }))
+        .runpodLipsyncV2vStartStep
+    ).toBe(1);
+  });
+});

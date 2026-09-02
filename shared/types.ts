@@ -116,6 +116,15 @@ export interface GenerationResult {
    * provider instead of surfacing the error to the user.
    */
   infraFailure?: boolean;
+  /**
+   * True when the failure is deterministic for THIS request: the provider has said the render
+   * cannot complete as submitted (RunPod stopped it at the per-job execution cap), so
+   * resubmitting the same body would fail the same way at the same cost. The caller fails the
+   * scene with `error` instead of retrying. Checked BEFORE `infraFailure` and before any
+   * wording-based transient classifier — the provider's own verdict says "timeout", which
+   * those classifiers would otherwise read as "try again".
+   */
+  terminal?: boolean;
 }
 
 /** Custom provider config shape */
@@ -616,6 +625,15 @@ export interface StoryboardScene {
    * advance and on success. Only read for b-roll. Persisted in the storyboard JSON blob.
    */
   renderAttempts?: number;
+  /**
+   * Consecutive provider-side terminal failures (`infraFailure`) this scene has been
+   * resubmitted after. `runChunkTasks` gives up at `MAX_INFRA_RESUBMITS` instead of
+   * resubmitting for as long as the job lives: a render that fails the same way every time
+   * (OOM at this resolution, a worker that dies on this input) otherwise bills one full
+   * attempt per retry with nothing to show for it. Reset on success and on regenerate.
+   * Persisted in the storyboard JSON blob (no migration).
+   */
+  infraRetries?: number;
   /**
    * What this stretch of the video should physically show, and how it differs from the stretches
    * around it — the scene's slice of the whole-video arc (`deriveVisualDirection`). Claude writes

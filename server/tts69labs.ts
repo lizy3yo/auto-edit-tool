@@ -5,6 +5,7 @@
  */
 
 import { recordUsage } from "./costMeter";
+import { summarizeHttpBody } from "./_core/errorDetail";
 
 const BASE_URL = "https://69labs.vip/api/v1";
 
@@ -75,6 +76,14 @@ function penalizeTTSRateLimit(key: string, retryMs: number): void {
 const TTS_SUBMIT_MAX_ATTEMPTS = 5;
 /** Cooldown applied on a 429 with no Retry-After header. */
 const TTS_429_COOLDOWN_MS = 30_000;
+/**
+ * Backoff base for a 5xx on task creation (doubles per attempt: 5s, 10s, 20s, 40s ≈ 75s total).
+ * 69Labs sits behind Cloudflare, and an origin blip answers as a 521/522/523 HTML page for tens
+ * of seconds — long enough to fail a single un-retried submit, short enough to ride out here
+ * instead of failing the whole voiceover stage. Env override exists so tests can run it fast.
+ */
+const TTS_5XX_BASE_DELAY_MS =
+  Number(process.env.SIXTYNINE_TTS_5XX_BASE_DELAY_MS) || 5_000;
 
 // Known-bad (key, voiceId) pairs: a batch of 161 scenes sharing one misconfigured voice must
 // fail 161 times INSTANTLY off this cache, not via 161 API calls (which is itself what tripped
@@ -293,6 +302,23 @@ export async function createTTSTask69Labs(
           `the account's request rate is exhausted; retry later.`
       );
     }
+    // 5xx (including Cloudflare's 52x "origin down" pages) is the provider, not this request:
+    // back off and resubmit the same body. Only after the budget is spent does it become an error.
+    if (response.status >= 500) {
+      if (attempt < TTS_SUBMIT_MAX_ATTEMPTS) {
+        const waitMs = TTS_5XX_BASE_DELAY_MS * 2 ** (attempt - 1);
+        console.warn(
+          `[69Labs TTS] ${response.status} on task creation — ${summarizeHttpBody(errText, 120)}; ` +
+            `retrying in ${Math.round(waitMs / 1000)}s (attempt ${attempt}/${TTS_SUBMIT_MAX_ATTEMPTS})`
+        );
+        await sleep(waitMs);
+        continue;
+      }
+      throw new Error(
+        `69Labs TTS is unavailable (${response.status}) after ${attempt} attempts — ` +
+          `${summarizeHttpBody(errText)}. The provider's server is down; retry the job in a few minutes.`
+      );
+    }
     const lowerErr = errText.toLowerCase();
     if (
       lowerErr.includes("credit") ||
@@ -315,7 +341,7 @@ export async function createTTSTask69Labs(
       );
     }
     throw new Error(
-      `69Labs TTS task creation failed (${response.status}): ${errText}`
+      `69Labs TTS task creation failed (${response.status}): ${summarizeHttpBody(errText)}`
     );
   }
 
@@ -360,7 +386,18 @@ export async function pollTTSTask69Labs(
 
   if (!response.ok) {
     const errText = await response.text();
-    throw new Error(`69Labs TTS poll failed (${response.status}): ${errText}`);
+    // A 5xx/429 on a STATUS read says nothing about the task — it is still running on the
+    // provider. Report it as in progress so the caller keeps polling through the blip instead of
+    // abandoning a job already paid for. A 4xx (task gone, key revoked) is genuinely terminal.
+    if (response.status >= 500 || response.status === 429) {
+      console.warn(
+        `[69Labs TTS] poll ${taskId} got ${response.status} — ${summarizeHttpBody(errText, 120)}; will retry`
+      );
+      return { taskId, status: "processing" };
+    }
+    throw new Error(
+      `69Labs TTS poll failed (${response.status}): ${summarizeHttpBody(errText)}`
+    );
   }
 
   const data = await response.json();
@@ -426,7 +463,7 @@ export async function downloadTTSAudio69Labs(
   if (!response.ok) {
     const errText = await response.text();
     throw new Error(
-      `69Labs TTS download failed (${response.status}): ${errText}`
+      `69Labs TTS download failed (${response.status}): ${summarizeHttpBody(errText)}`
     );
   }
 

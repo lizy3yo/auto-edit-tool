@@ -12,6 +12,7 @@ import { ENV } from "../_core/env";
 import { getAppSetting, setAppSetting } from "../db";
 import { encrypt, decrypt, maskApiKey } from "../encryption";
 import { recordUsage } from "../costMeter";
+import { summarizeHttpBody } from "../_core/errorDetail";
 
 /**
  * ════════════════════════════════════════════════════════════════════════════════════════
@@ -221,7 +222,7 @@ export class AireiterAdapter implements ProviderAdapter {
             continue;
           }
           return {
-            error: `AIReiter ${model} error (${res.status}): ${errText.substring(0, 400)}`,
+            error: `AIReiter ${model} error (${res.status}): ${summarizeHttpBody(errText, 400)}`,
           };
         }
         // AIReiter answers an unrecognised route/method with 200 + the marketing HTML page

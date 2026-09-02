@@ -71,12 +71,22 @@ const MORPH_LIMIT = 1.0;
  */
 const SEAM_RATIO_LIMIT = 8;
 const SEAM_ABS_FLOOR = 0.3;
+/** Head-torso motion correlation. Reference clips: 0.66-0.68. Bobblehead renders: 0.46-0.48. */
+const COUPLING_FLOOR = 0.55;
+/** Blur radius that removes fabric/knit texture, leaving only real displacement. */
+const TEXTURE_BLUR_SIGMA = 6;
 
-/** Per-frame series for one region (same filter as `probe`, unaveraged). */
-const probeSeries = (file, region) =>
+/**
+ * Per-frame series for one region (same filter as `probe`, unaveraged). With `blur`, the region
+ * is softened BEFORE differencing, so fine texture (a knit sweater, generative shimmer) drops
+ * out and only genuine displacement survives.
+ */
+const probeSeries = (file, region, blur = false) =>
   new Promise((resolve, reject) => {
     const [x, y, w, h] = region;
-    const crop = `crop=iw*${w}:ih*${h}:iw*${x}:ih*${y}`;
+    const crop =
+      `crop=iw*${w}:ih*${h}:iw*${x}:ih*${y}` +
+      (blur ? `,gblur=sigma=${TEXTURE_BLUR_SIGMA}` : "");
     const p = spawn(FFMPEG, [
       "-hide_banner",
       "-i",
@@ -184,6 +194,28 @@ const seamFrames = bgSeries
   .map((v, i) => ({ frame: i + 1, v }))
   .filter(({ v }) => v > SEAM_RATIO_LIMIT * bgMedian + SEAM_ABS_FLOOR);
 
+// Does the body move WITH the head? Both series blurred — see TEXTURE_BLUR_SIGMA.
+const [headSeries, torsoSeries] = await Promise.all([
+  probeSeries(file, REGIONS["hair/head"], true),
+  probeSeries(file, REGIONS["torso/shoulders"], true),
+]);
+const pearson = (a, b) => {
+  const n = Math.min(a.length, b.length);
+  if (n < 2) return 0;
+  const ma = a.slice(0, n).reduce((x, y) => x + y, 0) / n;
+  const mb = b.slice(0, n).reduce((x, y) => x + y, 0) / n;
+  let num = 0;
+  let da = 0;
+  let db = 0;
+  for (let i = 0; i < n; i++) {
+    num += (a[i] - ma) * (b[i] - mb);
+    da += (a[i] - ma) ** 2;
+    db += (b[i] - mb) ** 2;
+  }
+  return da && db ? num / Math.sqrt(da * db) : 0;
+};
+const coupling = pearson(headSeries, torsoSeries);
+
 const mouth = means.mouth;
 console.log(`\n  ${file}\n`);
 for (const [name, mean] of Object.entries(means)) {
@@ -199,6 +231,9 @@ console.log(
     (seamFrames.length
       ? `at frame ${seamFrames.map(f => `${f.frame} (${f.v.toFixed(2)})`).join(", ")}`
       : "none")
+);
+console.log(
+  `  ${"body follows head".padEnd(18)} ${coupling.toFixed(2).padStart(7)}   floor ${COUPLING_FLOOR}`
 );
 
 const failures = [];
@@ -222,6 +257,10 @@ if (morph > MORPH_LIMIT)
 if (seamFrames.length)
   failures.push(
     `${seamFrames.length} window seam(s) — background pops at a render-window handoff (motion_frame / colormatch)`
+  );
+if (coupling < COUPLING_FLOOR)
+  failures.push(
+    `body follows head ${coupling.toFixed(2)} < ${COUPLING_FLOOR} — head moves but the torso does not go with it (reads as stiff)`
   );
 
 console.log("");

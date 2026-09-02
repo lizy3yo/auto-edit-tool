@@ -9,6 +9,7 @@ import { sleep } from "./base";
 import { Semaphore } from "./semaphore";
 import { ENV } from "../_core/env";
 import { recordUsage } from "../costMeter";
+import { summarizeHttpBody } from "../_core/errorDetail";
 
 const BASE_URL = "https://69labs.vip";
 
@@ -734,7 +735,7 @@ async function pollJob(
       if (!resp.ok) {
         const errText = await resp.text();
         console.warn(
-          `[69Labs] ${label} poll error (${resp.status}): ${errText.substring(0, 200)}`
+          `[69Labs] ${label} poll error (${resp.status}): ${summarizeHttpBody(errText, 200)}`
         );
         if (resp.status >= 500) {
           // 5xx: backoff and retry
@@ -744,7 +745,7 @@ async function pollJob(
         return {
           id: jobId,
           status: "FAILED",
-          error: `Poll error (${resp.status}): ${errText.substring(0, 200)}`,
+          error: `Poll error (${resp.status}): ${summarizeHttpBody(errText, 200)}`,
         };
       }
 
@@ -828,7 +829,7 @@ async function downloadFile(
     if (!resp.ok) {
       const errText = await resp.text();
       return {
-        error: `Download failed (${resp.status}): ${errText.substring(0, 200)}`,
+        error: `Download failed (${resp.status}): ${summarizeHttpBody(errText, 200)}`,
       };
     }
 
@@ -962,7 +963,7 @@ export class SixtyNineLabsAdapter implements ProviderAdapter {
               ? "69Labs credits depleted. Check your 69Labs dashboard."
               : isContentPolicyError(errText)
                 ? CONTENT_POLICY_MESSAGE
-                : `69Labs API error (${response.status}): ${errText.substring(0, 500)}`,
+                : `69Labs API error (${response.status}): ${summarizeHttpBody(errText, 500)}`,
           };
         }
 
@@ -1289,7 +1290,7 @@ export class SixtyNineLabsAdapter implements ProviderAdapter {
           const isCredits = isCreditsError(errText);
           const userMsg = isCredits
             ? `69Labs credits depleted. Check your 69Labs dashboard for remaining credits.`
-            : `69Labs API error (${response.status}): ${errText.substring(0, 500)}`;
+            : `69Labs API error (${response.status}): ${summarizeHttpBody(errText, 500)}`;
 
           // A 5xx here means we exhausted retries on a server-availability failure — let the caller
           // try a fallback model. 4xx/429/credits are terminal for this model (a different one
@@ -1428,7 +1429,7 @@ export class SixtyNineLabsAdapter implements ProviderAdapter {
       const errText = await response.text();
       return {
         success: false,
-        message: `Connection failed (${response.status}): ${errText.substring(0, 200)}`,
+        message: `Connection failed (${response.status}): ${summarizeHttpBody(errText, 200)}`,
       };
     } catch (err: any) {
       return { success: false, message: err.message || "Connection failed" };

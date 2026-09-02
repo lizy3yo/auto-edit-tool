@@ -112,15 +112,41 @@ export const ENV = {
    * Pinned-camera anchor dial, sent to the worker's V2V sampler when set. `steps` is the
    * total schedule and `start_step` how many are skipped at the noisy end — active steps =
    * steps − start_step, and MORE active steps = more motion freedom, LESS anchoring to the
-   * static plate. The workflow ships 8/1 (87.5% free — measured ~80% of HeyGen's motion at
-   * 8/2); walk start_step 1→2 if drift creeps back, 1→0 only as a last resort. Unset sends
-   * nothing and the workflow default rules.
+   * static plate. Defaults to 8/2 (75% free), the value that measured at parity with the
+   * reference; 8/1 overshot to ~150%. Walk start_step 2→1 for more motion, 2→3 for less.
    */
   runpodLipsyncV2vSteps: process.env.RUNPOD_LIPSYNC_V2V_STEPS
     ? Number(process.env.RUNPOD_LIPSYNC_V2V_STEPS)
     : undefined,
+  // Defaulted, not left to the workflow: 8/1 measured at ~150% of the reference's body motion
+  // and 8/2 at parity, so 2 is the confirmed value and every host — local, Railway, anywhere —
+  // should get it without setting a variable. The env var stays as an override for experiments.
   runpodLipsyncV2vStartStep: process.env.RUNPOD_LIPSYNC_V2V_START_STEP
     ? Number(process.env.RUNPOD_LIPSYNC_V2V_START_STEP)
+    : 2,
+  /**
+   * Motion-tuning dials sent to the worker on EVERY RunPod render (photo and pinned), each
+   * only when set — unset means the workflow's own default rules. Every one maps to a worker
+   * override, so tuning is an env change and a restart, never an image rebuild.
+   *
+   * - shift: how far the sampler may wander from the photo per frame (framing creep, room
+   *   morph). Workflow default 4; the official InfiniteTalk lightx2v recipe runs 2.
+   * - audioScale: how hard the voice drives motion, body and mouth alike — the lever for
+   *   "exaggerated". Workflow default 0.8.
+   * - audioCfgScale: audio guidance strength; >1 adds a forward pass (~2x GPU). Default 1.
+   * - nagScale: strength of the negative prompt on the fast tier. Default 11.
+   */
+  runpodLipsyncShift: process.env.RUNPOD_LIPSYNC_SHIFT
+    ? Number(process.env.RUNPOD_LIPSYNC_SHIFT)
+    : undefined,
+  runpodLipsyncAudioScale: process.env.RUNPOD_LIPSYNC_AUDIO_SCALE
+    ? Number(process.env.RUNPOD_LIPSYNC_AUDIO_SCALE)
+    : undefined,
+  runpodLipsyncAudioCfgScale: process.env.RUNPOD_LIPSYNC_AUDIO_CFG
+    ? Number(process.env.RUNPOD_LIPSYNC_AUDIO_CFG)
+    : undefined,
+  runpodLipsyncNagScale: process.env.RUNPOD_LIPSYNC_NAG_SCALE
+    ? Number(process.env.RUNPOD_LIPSYNC_NAG_SCALE)
     : undefined,
   /** HeyGen API key — fallback when a per-tab key slot is empty. */
   heygenApiKey: process.env.HEYGEN_API_KEY ?? "",

@@ -5,6 +5,7 @@ import { Semaphore } from "./semaphore";
 import { ENV } from "../_core/env";
 import { presignOwnBucketUrl } from "../storage";
 import { recordUsage } from "../costMeter";
+import { summarizeHttpBody } from "../_core/errorDetail";
 
 /**
  * Host lip-sync on self-hosted InfiniteTalk (MeiGen-AI) running as a RunPod serverless
@@ -42,6 +43,14 @@ export interface RunpodLipsyncParams {
    */
   samplerSteps?: number;
   samplerStartStep?: number;
+  /**
+   * Motion dials, any mode (see `ENV.runpodLipsyncShift` and siblings). Sent only when set;
+   * the worker keeps its workflow defaults otherwise, so an older image ignores them safely.
+   */
+  shift?: number;
+  audioScale?: number;
+  audioCfgScale?: number;
+  nagScale?: number;
   /** Our own TTS narration (R2 URL). Drives both the mouth and the clip's length. */
   audioUrl: string;
   /** InfiniteTalk direction — see `buildLipsyncPrompt`; short and framing-focused. */
@@ -60,13 +69,32 @@ const RUNPOD_API_BASE = "https://api.runpod.ai/v2";
 
 /**
  * Client-side poll ceiling for one InfiniteTalk render. Far longer than HeyGen's 15 min
- * because the worker is our own single GPU rather than a fleet: at ~10-25 GPU-seconds per
- * second of output on the fast tier, a long host scene is minutes of compute on its own, and
- * anything queued behind another scene waits through that too. `SCENE_DEADLINE_HOST_RUNPOD_MS`
- * sits above this so the deadline never fires first.
+ * because the worker is our own single GPU rather than a fleet, and the fast tier is not fast
+ * at 720p on the A40/A6000 class the endpoint runs on: a one-window clip (≤3.2 s of speech)
+ * measured ~800 GPU-seconds including model load, and every further 81-frame window (56 new
+ * frames at motion_frame 25, ~2.2 s of speech) costs about the same again — so a 6 s host
+ * beat is three windows and ~30 min. Anything queued behind another scene waits through
+ * that too. `SCENE_DEADLINE_HOST_RUNPOD_MS` sits above this so the deadline never fires
+ * first; a poll that runs out here returns `pending` and the resume path keeps collecting.
  */
 export const RUNPOD_LIPSYNC_TIMEOUT_MS = Number(
   process.env.RUNPOD_LIPSYNC_TIMEOUT_MS ?? 2_100_000 // 35 minutes
+);
+
+/**
+ * Server-side cap sent with every submit as `policy.executionTimeout`. RunPod stops the job
+ * (and the billing) there whatever the endpoint's own setting says — which is why it travels
+ * per request: the endpoint this lane runs on was deployed with the dashboard default of
+ * 20 min, under which a 720p render of any host beat over ~4 s was killed every attempt,
+ * resubmitted identically by the resume path, and killed again, for as long as the job
+ * lived (local job 17 sat 90 min in its clip stage on one 6 s beat this way, each
+ * attempt billed in full, no clip). Sits UNDER
+ * `SCENE_DEADLINE_HOST_RUNPOD_MS` (45 min) so a render that cannot finish is stopped by
+ * RunPod, with its own "executionTimeout exceeded" verdict, before the app abandons the
+ * scene — that verdict is what `pollVideo` turns into a terminal, non-resubmittable failure.
+ */
+export const RUNPOD_LIPSYNC_EXECUTION_TIMEOUT_MS = Number(
+  process.env.RUNPOD_LIPSYNC_EXECUTION_TIMEOUT_MS ?? 2_400_000 // 40 minutes
 );
 
 /**
@@ -170,10 +198,22 @@ export class RunpodLipsyncAdapter {
         ...(params.samplerStartStep != null
           ? { start_step: params.samplerStartStep }
           : {}),
+        ...(params.shift != null ? { shift: params.shift } : {}),
+        ...(params.audioScale != null
+          ? { audio_scale: params.audioScale }
+          : {}),
+        ...(params.audioCfgScale != null
+          ? { audio_cfg_scale: params.audioCfgScale }
+          : {}),
+        ...(params.nagScale != null ? { nag_scale: params.nagScale } : {}),
         width: params.width,
         height: params.height,
         quality: this.quality,
       },
+      // Per-request override of the endpoint's execution cap — see the constant. Only the
+      // execution clock: queue time is governed by RunPod's default `ttl` (24 h), which no
+      // scene reaches because `withSceneDeadline` cancels it long before.
+      policy: { executionTimeout: RUNPOD_LIPSYNC_EXECUTION_TIMEOUT_MS },
     });
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
@@ -200,7 +240,7 @@ export class RunpodLipsyncAdapter {
             continue;
           }
           return {
-            error: `RunPod submit failed (${res.status}): ${errText.substring(0, 200)}`,
+            error: `RunPod submit failed (${res.status}): ${summarizeHttpBody(errText, 200)}`,
           };
         }
 
@@ -266,7 +306,7 @@ export class RunpodLipsyncAdapter {
         if (!res.ok) {
           const errText = await res.text();
           console.warn(
-            `[RunPod] Poll error (${res.status}): ${errText.substring(0, 200)}`
+            `[RunPod] Poll error (${res.status}): ${summarizeHttpBody(errText, 200)}`
           );
           await sleep(5_000);
           continue;
@@ -291,6 +331,29 @@ export class RunpodLipsyncAdapter {
           typeof data.error === "string"
             ? data.error
             : JSON.stringify(data.error ?? data.status);
+        // Killed at the execution cap (RunPod reports it as FAILED with this exact wording,
+        // not as TIMED_OUT). The GPU time IS billed, so it is metered like a success; and the
+        // failure is deterministic — the same render, resubmitted, runs the same windows and
+        // is stopped at the same minute — so it is `terminal`, not `infraFailure`: the
+        // orchestrator fails the scene with a reason instead of paying for it again.
+        if (data.status === "TIMED_OUT" || /executionTimeout/i.test(detail)) {
+          const gpuSeconds = this.meterGpuTime(data);
+          const minutes = Math.round(gpuSeconds / 60);
+          console.error(
+            `[RunPod] Job ${taskId} stopped at the execution cap after ${minutes} min of GPU — ` +
+              `not resubmitting (the same render would be stopped at the same point)`
+          );
+          return {
+            success: false,
+            taskId,
+            terminal: true,
+            error:
+              `RunPod stopped this render at its execution cap after ${minutes} min of GPU time. ` +
+              `The beat needs more compute than one job is allowed, and resubmitting it would be ` +
+              `stopped at the same point. Shorten the host beat, render at 480p (LIPSYNC_RESOLUTION), ` +
+              `move the endpoint to a faster GPU, or raise RUNPOD_LIPSYNC_EXECUTION_TIMEOUT_MS.`,
+          };
+        }
         console.log(`[RunPod] Job ${taskId} terminal: ${detail.slice(0, 300)}`);
         return {
           success: false,
@@ -410,10 +473,26 @@ export class RunpodLipsyncAdapter {
       };
     }
 
-    // RunPod bills the GPU time it reports, not the wall clock we waited (which includes
-    // queueing) and not the seconds of video produced — so that is what gets metered. Only
-    // a success is recorded: a crashed worker's partial compute is not something we can
-    // attribute, and over-reporting spend is worse than under-reporting it.
+    const gpuSeconds = this.meterGpuTime(data);
+
+    console.log(
+      `[RunPod] Job ${taskId} completed — ${(fileData.length / 1024 / 1024).toFixed(1)}MB | ` +
+        `gpu ${gpuSeconds.toFixed(0)}s | queue ${Math.round((data.delayTime ?? 0) / 1000)}s | ` +
+        `wall ${Math.round((Date.now() - startTime) / 1000)}s | polls ${pollCount}`
+    );
+
+    return { success: true, fileData, mimeType: "video/mp4", taskId };
+  }
+
+  /**
+   * Meter what RunPod says a job cost and return it in seconds. RunPod bills the GPU time it
+   * reports, not the wall clock we waited (which includes queueing) and not the seconds of
+   * video produced — so that is what gets metered. Recorded for a success and for a render
+   * stopped at the execution cap (both are billed in full); a crashed worker's partial
+   * compute is not something we can attribute, and over-reporting spend is worse than
+   * under-reporting it.
+   */
+  private meterGpuTime(data: RunPodStatusBody): number {
     const gpuSeconds = (data.executionTime ?? 0) / 1000;
     if (gpuSeconds > 0) {
       recordUsage({
@@ -424,14 +503,7 @@ export class RunpodLipsyncAdapter {
         quantity: gpuSeconds,
       });
     }
-
-    console.log(
-      `[RunPod] Job ${taskId} completed — ${(fileData.length / 1024 / 1024).toFixed(1)}MB | ` +
-        `gpu ${gpuSeconds.toFixed(0)}s | queue ${Math.round((data.delayTime ?? 0) / 1000)}s | ` +
-        `wall ${Math.round((Date.now() - startTime) / 1000)}s | polls ${pollCount}`
-    );
-
-    return { success: true, fileData, mimeType: "video/mp4", taskId };
+    return gpuSeconds;
   }
 
   /**

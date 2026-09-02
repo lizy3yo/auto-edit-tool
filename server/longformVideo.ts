@@ -76,6 +76,7 @@ import {
   getLipsyncProvider,
   getLipsyncQuality,
   getLipsyncCameraMode,
+  type LipsyncCameraMode,
 } from "./lipsyncProvider";
 import { buildCameraPlate } from "./cameraPlate";
 import { recordUsage, withCostMeter, flushJobUsage } from "./costMeter";
@@ -3049,12 +3050,21 @@ async function resolveLipsyncLane(
             );
           }
         }
+        // The prompt pair follows the conditioning that will ACTUALLY run, not the setting: if
+        // the plate failed and this render fell back to the photo, the pinned wording (no body
+        // suppression) on top of I2V is the worst of both — free to sway AND free to drift.
+        const conditioning: LipsyncCameraMode = videoUrl ? "pinned" : "photo";
         return runpod.submitLipsync({
           imageUrl,
           videoUrl,
           audioUrl,
-          prompt: buildLipsyncPrompt(scene, useAlt),
-          negativePrompt: LIPSYNC_NEGATIVE_DIRECTION,
+          prompt: buildLipsyncPrompt(scene, useAlt, conditioning),
+          // Paired with the direction above: the pinned pair asks for connected body motion
+          // and drops the suppressors that were freezing the torso under a plate.
+          negativePrompt:
+            conditioning === "pinned"
+              ? LIPSYNC_NEGATIVE_DIRECTION_PINNED
+              : LIPSYNC_NEGATIVE_DIRECTION,
           // The V2V anchor dial rides only on plate renders — sending sampler overrides to
           // the I2V workflow would silently change the photo tier too.
           ...(videoUrl
@@ -3063,6 +3073,12 @@ async function resolveLipsyncLane(
                 samplerStartStep: ENV.runpodLipsyncV2vStartStep,
               }
             : {}),
+          // Motion dials ride on every RunPod render, either mode — each is undefined unless
+          // the operator set it, in which case the workflow default is what runs.
+          shift: ENV.runpodLipsyncShift,
+          audioScale: ENV.runpodLipsyncAudioScale,
+          audioCfgScale: ENV.runpodLipsyncAudioCfgScale,
+          nagScale: ENV.runpodLipsyncNagScale,
           width,
           height,
         });
@@ -3900,6 +3916,32 @@ export const LIPSYNC_HOST_DIRECTION =
   "The room behind them stays exactly as it is, nothing in the background changes.";
 
 /**
+ * `LIPSYNC_HOST_DIRECTION` for PINNED-camera renders — the same directive with the opposite
+ * body instruction.
+ *
+ * The photo-mode wording forbids body motion because nothing else holds the frame: in I2V,
+ * "sway" and "drift" are the same failure, so suppressing one suppresses the other. Under a
+ * static plate the camera is pinned by construction, and that suppression stops being free —
+ * it is the only thing still telling the body not to move. Measured on the A/B: the head
+ * (audio-driven, so unsuppressed) and the torso (suppressed) came apart, head-torso motion
+ * correlating at 0.46-0.48 against 0.66-0.68 on the HeyGen renders the operator accepts.
+ * Total body motion was actually HIGHER than HeyGen's — the complaint "the torso is stiff" is
+ * about the body not moving WITH the head, not about it moving too little.
+ *
+ * So this asks for exactly what the other one forbids, and keeps every camera and background
+ * clause verbatim, since those are what the plate is there to reinforce.
+ */
+export const LIPSYNC_HOST_DIRECTION_PINNED =
+  "The person in the reference photo speaks straight to the camera in a tight medium " +
+  "close-up, face large and centered, looking at the lens. Clear, precise lip-sync: " +
+  "their mouth articulates every word and stays fully visible, hands never near their " +
+  "face. They speak naturally and comfortably: their head, shoulders and upper body move " +
+  "together as one relaxed, connected body, the way a seated person shifts and settles " +
+  "while talking. One person speaking, no one else talking. " +
+  "Locked-off camera on a tripod: the camera never moves, pushes in, or zooms. " +
+  "The room behind them stays exactly as it is, nothing in the background changes.";
+
+/**
  * Appended to `LIPSYNC_HOST_DIRECTION` for a scene pinned to the ALT host photo
  * (`scene.hostShot === 1`), which is shot off-axis so consecutive host cuts do not repeat the
  * same angle. Needed only on the RunPod lane: HeyGen's Avatar IV inherits whatever gaze the
@@ -3943,6 +3985,25 @@ export const LIPSYNC_NEGATIVE_DIRECTION =
   "body turning, shifting posture, camera shake, camera push in, camera zoom, " +
   "dolly, pan, tilt, camera drift, camera movement, background warping, " +
   "background morphing, background drift";
+
+/**
+ * `LIPSYNC_NEGATIVE_DIRECTION` for PINNED-camera renders. Every camera, background-morph and
+ * quality term is kept verbatim — those still do real work under a plate. What is dropped is
+ * the body-motion block (head shaking/bobbing, nodding, swaying, rocking, leaning, fidgeting,
+ * body turning, shifting posture): NAG enforces this list on the fast tier, so with the camera
+ * already pinned those words were spending their entire effect on freezing the torso while the
+ * audio kept driving the head. The additions name that failure directly, since a negative
+ * prompt only helps if it describes what actually goes wrong.
+ */
+export const LIPSYNC_NEGATIVE_DIRECTION_PINNED =
+  "bright tones, overexposed, blurred details, subtitles, style, works, paintings, " +
+  "images, overall gray, worst quality, low quality, JPEG compression residue, ugly, " +
+  "incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, " +
+  "disfigured, misshapen limbs, fused fingers, messy background, three legs, " +
+  "many people in the background, walking backwards, jitter, camera shake, " +
+  "camera push in, camera zoom, dolly, pan, tilt, camera drift, camera movement, " +
+  "background warping, background morphing, background drift, stiff, rigid, " +
+  "frozen body, motionless torso, mannequin, head moving on a still body";
 
 /**
  * Ordered term→synonym map that rewrites harm-adjacent words Grok's 69labs content classifier
@@ -5185,11 +5246,20 @@ export function markCtaQrBlock(
 export function buildLipsyncPrompt(
   scene: StoryboardScene,
   /** True when the scene renders from the ALT (off-axis) host photo — see the suffix. */
-  useAlt = false
+  useAlt = false,
+  /**
+   * Camera conditioning this render will use. `pinned` swaps in the direction that asks the
+   * body to move WITH the head: a static plate already holds the frame, so photo mode's
+   * minimal-motion clause stops buying stability there and only costs the torso. Defaults to
+   * `photo`, so every non-RunPod caller is byte-identical to before this argument existed.
+   */
+  camera: LipsyncCameraMode = "photo"
 ): string {
+  const direction =
+    camera === "pinned" ? LIPSYNC_HOST_DIRECTION_PINNED : LIPSYNC_HOST_DIRECTION;
   const angle = useAlt ? ` ${LIPSYNC_ALT_ANGLE_SUFFIX}` : "";
   const cta = scene.cta ? ` ${CTA_EMPTY_HANDS_SUFFIX}` : "";
-  return `${LIPSYNC_HOST_DIRECTION}${angle}${cta}`.trim();
+  return `${direction}${angle}${cta}`.trim();
 }
 
 /**
@@ -6541,6 +6611,14 @@ export class PendingRenderError extends Error {
   }
 }
 
+/**
+ * How many times `runChunkTasks` resubmits a scene after a provider-side terminal failure
+ * (`infraFailure`) before failing it for good. Two covers the genuinely transient cases
+ * (a worker that crashed once, a HeyGen id that aged out) without paying a third full
+ * render for a failure that has already repeated itself.
+ */
+export const MAX_INFRA_RESUBMITS = 2;
+
 /** Retry `fn` when it throws a transient PendingRenderError (provider timeout / self-fail /
  * "job failed to complete"). Non-transient errors and the final attempt propagate unchanged. */
 export async function withTransientRetry<T>(
@@ -6644,6 +6722,17 @@ export async function runChunkTasks(
   }
   const failed = polls.find(r => !r.success);
   if (failed) {
+    // A DETERMINISTIC failure first: the provider has said this exact render cannot complete
+    // (RunPod stopped it at the execution cap), so resubmitting the same body would fail the
+    // same way at the same cost. It must never reach the resubmit paths below — and it is
+    // checked before the transient classifier because the provider's own verdict says
+    // "timeout", which that classifier reads as "try again".
+    if (failed.terminal) {
+      scene.renderTaskIds = undefined;
+      scene.infraRetries = undefined;
+      await persist();
+      throw new Error(failed.error || "clip render failed");
+    }
     // Use the canonical classifier (single source of truth) so grok's provider-timeout phrasing
     // ("took too long", "did not respond" — the ~320s 69Labs self-fail) is treated transient like
     // "try again", instead of hard-failing the scene. Guarded so a content-policy block (which a
@@ -6665,11 +6754,23 @@ export async function runChunkTasks(
     if (failed.infraFailure) {
       // Provider-side terminal failure (HeyGen render failed, unknown/expired video id) —
       // clear IDs and re-submit fresh on the same provider via the resume path. Never fail
-      // over to another provider.
+      // over to another provider. BOUNDED: a failure that repeats identically (OOM at this
+      // resolution, a worker that dies on this input) used to be resubmitted for as long as
+      // the job lived, each attempt billed in full; after MAX_INFRA_RESUBMITS the scene fails
+      // with the provider's last word so the operator can change something.
+      const retries = (scene.infraRetries ?? 0) + 1;
       scene.renderTaskIds = undefined;
+      if (retries > MAX_INFRA_RESUBMITS) {
+        scene.infraRetries = undefined;
+        await persist();
+        throw new Error(
+          `${provider} failed ${retries} renders in a row (${failed.error || "provider infra failure"}) — not resubmitting again`
+        );
+      }
+      scene.infraRetries = retries;
       await persist();
       throw new PendingRenderError(
-        `${provider} render failure (${failed.error || "provider infra failure"}) — will retry on ${provider}`
+        `${provider} render failure (${failed.error || "provider infra failure"}) — will retry on ${provider} (${retries}/${MAX_INFRA_RESUBMITS})`
       );
     }
     throw new Error(failed.error || "clip render failed");
@@ -6708,6 +6809,7 @@ export async function runChunkTasks(
     urls.push(url);
   }
   scene.renderTaskIds = undefined; // complete — no longer needs resume
+  scene.infraRetries = undefined;
   return urls;
 }
 
@@ -6842,6 +6944,7 @@ async function renderSplitRightMotionClip(
     renderTaskIds: undefined,
     renderModelIndex: undefined,
     renderAttempts: undefined,
+    infraRetries: undefined,
     sceneStatus: "pending",
   };
   const urls = await Promise.race([
@@ -7244,6 +7347,7 @@ export async function generateSceneClips(
         );
         scene.renderModelIndex = undefined; // success — reset chain position
         scene.renderAttempts = undefined; // success — reset grok-stall budget
+        scene.infraRetries = undefined;
         return urls;
       } catch (e: any) {
         // grok transient stalls surface as PendingRenderError and are retried on grok via the
@@ -7431,8 +7535,11 @@ export const SCENE_DEADLINE_HOST_MS = 25 * 60_000;
 /**
  * Host deadline on the RunPod InfiniteTalk lane. Nearly double the HeyGen one because the poll
  * ceiling underneath it is: `RUNPOD_LIPSYNC_TIMEOUT_MS` is 35min vs HeyGen's 15, and that clock
- * only starts once the scene wins a global RunPod slot. `resolveLipsyncAdapter` hands the right
- * one to `dispatchScenesByProvider`; nothing else picks between them.
+ * only starts once the scene wins a global RunPod slot. Between the two sits the per-request
+ * `RUNPOD_LIPSYNC_EXECUTION_TIMEOUT_MS` (40min) the adapter sends RunPod, so a render that
+ * cannot finish is stopped server-side, with a verdict the adapter turns into a terminal
+ * failure, before this clock abandons it. `resolveLipsyncAdapter` hands the right one to
+ * `dispatchScenesByProvider`; nothing else picks between them.
  */
 export const SCENE_DEADLINE_HOST_RUNPOD_MS = 45 * 60_000;
 export const SCENE_DEADLINE_MOTION_MS = 20 * 60_000;
@@ -7600,6 +7707,7 @@ async function renderSceneClip(
       scene.renderTaskIds = undefined;
       scene.renderModelIndex = undefined;
       scene.renderAttempts = undefined;
+      scene.infraRetries = undefined;
     }
   }
 }
@@ -7624,7 +7732,13 @@ async function resumeRenderingScenes(
   // Short-circuit rendering scenes that already have a clip (completed before the crash).
   const toResume: StoryboardScene[] = [];
   for (const scene of scenes) {
-    if (scene.sceneStatus !== "rendering") continue;
+    // "processing" WITH task ids is a scene the process died under mid-attempt (the status
+    // only flips to "rendering" when its own poll gives up) — the render is still running
+    // provider-side, paid for and re-pollable, so a restart resumes it instead of reporting
+    // the scene clip-less and paying for it again on the operator's Retry.
+    const orphanedMidAttempt =
+      scene.sceneStatus === "processing" && !!scene.renderTaskIds?.length;
+    if (scene.sceneStatus !== "rendering" && !orphanedMidAttempt) continue;
     if (scene.clipUrls?.length || scene.clipUrl) {
       scene.sceneStatus = "completed";
       scene.renderTaskIds = undefined;
@@ -9765,6 +9879,7 @@ async function renderSceneClipInPlace(
   scene.renderProvider = undefined;
   scene.renderModelIndex = undefined;
   scene.renderAttempts = undefined;
+  scene.infraRetries = undefined;
   const persist = async () => {
     schedulePersist(jobId, { storyboard: scenes });
   };
@@ -9807,6 +9922,7 @@ async function renderSceneClipInPlace(
       scene.renderProvider = undefined;
       scene.renderModelIndex = undefined;
       scene.renderAttempts = undefined;
+      scene.infraRetries = undefined;
       scene.sceneStatus = "processing";
       scene.error = undefined;
       return generateSceneClips(
@@ -11749,7 +11865,8 @@ async function runSplitEdit(
 const queuedRetries = new Set<number>();
 
 /** Is a retry waiting for the current pass to finish? Drives the client's button state. */
-export const isRetryQueued = (jobId: number): boolean => queuedRetries.has(jobId);
+export const isRetryQueued = (jobId: number): boolean =>
+  queuedRetries.has(jobId);
 
 export async function retryFailedScenes(jobId: number): Promise<void> {
   // A running pass no longer DROPS the click. `withJobLock` queues rather than rejects, so a
