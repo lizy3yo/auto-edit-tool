@@ -289,9 +289,12 @@ export function ChannelConfigPanel() {
       // can no longer be set from here. Both now come from the channel's books.
       hostPhotoUrl: editForm.hostPhotoUrl || undefined,
       hostPhotoUrl2: editForm.hostPhotoUrl2 || undefined,
-      hostName: editForm.hostName || undefined,
-      hostTitle: editForm.hostTitle || undefined,
-      hostLocation: editForm.hostLocation || undefined,
+      // The identity card fields send `null` when blanked, not `undefined`: `upsert` passes
+      // a partial to `.set()`, which skips undefined columns, so `|| undefined` made a
+      // cleared name silently keep its old value.
+      hostName: editForm.hostName.trim() || null,
+      hostTitle: editForm.hostTitle.trim() || null,
+      hostLocation: editForm.hostLocation.trim() || null,
       voiceId: editForm.voiceId || undefined,
       voiceName: editForm.voiceName || undefined,
       ttsModel: editForm.ttsModel || undefined,

@@ -399,9 +399,10 @@ const channelConfigRouter = router({
         bookCoverImageUrl: z.string().url().optional(),
         hostPhotoUrl: z.string().url().optional(),
         hostPhotoUrl2: z.string().url().optional(),
-        hostName: z.string().optional(),
-        hostTitle: z.string().optional(),
-        hostLocation: z.string().optional(),
+        // `null` clears the stored value; `undefined` (omitted) leaves it untouched.
+        hostName: z.string().nullish(),
+        hostTitle: z.string().nullish(),
+        hostLocation: z.string().nullish(),
         voiceId: z.string().optional(),
         voiceName: z.string().optional(),
         ttsModel: z.string().optional(),

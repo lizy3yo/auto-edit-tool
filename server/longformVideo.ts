@@ -41,7 +41,12 @@ import {
   VoiceNotFoundError,
 } from "./ttsUnified";
 import { storagePut } from "./storage";
-import { getActiveProvider, getProviderByType, hostNameAliases } from "./db";
+import {
+  getActiveProvider,
+  getChannelConfig,
+  getProviderByType,
+  hostNameAliases,
+} from "./db";
 import {
   createLongformVideoJob,
   updateLongformVideoJob,
@@ -9724,6 +9729,23 @@ export async function retryJobAssembly(
     const job = await getLongformVideoJobById(jobId);
     if (!job) throw new Error("Job not found");
     const params = job.inputParams as LongformInputParams;
+
+    // The host lower third is a channel setting (Admin → Channels), but `inputParams` holds a
+    // snapshot taken when the job was created — so a name cleared or changed on the channel
+    // afterwards never reached a Reassemble, and the old card was burned in again. Refresh
+    // the three identity fields from the live channel row and persist them, so the film and
+    // the job agree with what the channel says NOW. Blank on the channel ⇒ no card.
+    if (params.channelKey) {
+      const channel = await getChannelConfig(params.channelKey).catch(
+        () => null
+      );
+      if (channel) {
+        params.hostName = channel.hostName ?? undefined;
+        params.hostTitle = channel.hostTitle ?? undefined;
+        params.hostLocation = channel.hostLocation ?? undefined;
+        await updateLongformVideoJob(jobId, { inputParams: params });
+      }
+    }
 
     // Already-finished job: a valid final exists and every scene has a clip. Re-encoding it
     // gains nothing and, on a big film, risks re-breaking a good cut when the host runs out of
