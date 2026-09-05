@@ -87,6 +87,13 @@ import { buildCameraPlate } from "./cameraPlate";
 import { buildLipsyncLeadTrack, trimClipHead } from "./lipsyncLead";
 import { smoothWindowSeams } from "./lipsyncSeams";
 import {
+  assignLipsyncGroups,
+  buildGroupTrack,
+  cutGroupPiece,
+  sceneNarrationFromMaster,
+  downloadClip,
+} from "./lipsyncBatch";
+import {
   planDelivery,
   applyDeliveryToScenes,
   deliverySpeedFor,
@@ -146,6 +153,11 @@ type LipsyncLane = {
     audioUrl: string;
     /** True when the scene is pinned to the alt-angle host photo. */
     useAlt: boolean;
+    /**
+     * Length of the audio actually submitted, when it is not the scene's own narration (a
+     * group render carries several beats plus the run-up). Sizes the camera plate.
+     */
+    audioDurationSec?: number;
   }): Promise<VideoSubmitResult>;
   poll(taskId: string, timeoutMs?: number): Promise<GenerationResult>;
   /**
@@ -3047,7 +3059,13 @@ async function resolveLipsyncLane(
       // Unlike Avatar IV this lane is prompted, and it does NOT inherit the still's gaze —
       // left alone it squares an off-axis subject up to the lens, so `useAlt` has to be
       // spelled out in the prompt to keep the alt-angle photo's framing.
-      submit: async ({ scene, imageUrl, audioUrl, useAlt }) => {
+      submit: async ({
+        scene,
+        imageUrl,
+        audioUrl,
+        useAlt,
+        audioDurationSec,
+      }) => {
         // Pinned camera: hand the worker a static VIDEO of the same photo (V2V) so it has no
         // camera motion to mimic — the maintainer-endorsed fix for Wan I2V's slow push-in and
         // background morph. Fail-open to the plain photo: a drifting host beats a failed scene,
@@ -3057,7 +3075,7 @@ async function resolveLipsyncLane(
           try {
             videoUrl = await buildCameraPlate(
               imageUrl,
-              scene.audioDuration ?? 60
+              audioDurationSec ?? scene.audioDuration ?? 60
             );
           } catch (e: any) {
             console.warn(
@@ -3097,6 +3115,7 @@ async function resolveLipsyncLane(
           scheduler: ENV.runpodLipsyncScheduler,
           motionFrame: ENV.runpodLipsyncMotionFrame,
           fetaWeight: ENV.runpodLipsyncFetaWeight,
+          torchCompile: ENV.runpodLipsyncTorchCompile,
           width,
           height,
         });
@@ -7107,6 +7126,23 @@ async function generateSceneLipsyncClips(
         : null,
   });
 
+  // A group LEADER renders its members with it — see `renderHostGroup`.
+  const groupMembers = groupMembersOf.get(scene) ?? [];
+  if (groupMembers.length && lipsync.provider === "runpod")
+    return renderHostGroup({
+      lipsync,
+      jobId,
+      leader: scene,
+      members: groupMembers,
+      params,
+      instruction,
+      persist,
+      pollTimeoutMs,
+      videoAdapter,
+      faceImageUrl,
+      useAltPhoto,
+    });
+
   // One lip-sync task per host scene. `chunkDurations` feeds runChunkTasks' truncation guard:
   // a render materially shorter than the narration is rejected and retried (e.g. if the worker
   // ever regressed to a fixed-length clip). On RESUME (`renderTaskIds` already set) the audio is
@@ -7176,6 +7212,182 @@ async function generateSceneLipsyncClips(
     scene.lipsyncLeadSec
   );
 
+  return composeHostScene(
+    jobId,
+    scene,
+    urls,
+    params,
+    instruction,
+    persist,
+    videoAdapter
+  );
+}
+
+/** Group leaders → the member scenes they render. Set by `dispatchScenesByProvider`. */
+const groupMembersOf = new WeakMap<StoryboardScene, StoryboardScene[]>();
+
+/**
+ * Several host beats in ONE RunPod call (`server/lipsyncBatch.ts`). The leader's task id and
+ * cut list carry the group through a resume; each piece is cut from the delivered group clip
+ * (already lead-trimmed and seam-smoothed by `runChunkTasks`), given its own clean narration,
+ * and finished exactly as a solo render is. Members are completed here, never dispatched.
+ */
+async function renderHostGroup(opts: {
+  lipsync: LipsyncLane;
+  jobId: number;
+  leader: StoryboardScene;
+  members: StoryboardScene[];
+  params: LongformInputParams;
+  instruction: string;
+  persist: () => Promise<void>;
+  pollTimeoutMs?: number;
+  videoAdapter?: ReturnType<typeof createProviderAdapter>;
+  faceImageUrl: string;
+  useAltPhoto: boolean;
+}): Promise<string[]> {
+  const {
+    lipsync,
+    jobId,
+    leader,
+    members,
+    params,
+    instruction,
+    persist,
+    pollTimeoutMs,
+    videoAdapter,
+    faceImageUrl,
+    useAltPhoto,
+  } = opts;
+  // Members show as rendering from the start, so a resume after a crash picks them up and
+  // re-attaches them to this leader (`assignLipsyncGroups`).
+  for (const m of members) {
+    m.sceneStatus = "rendering";
+    m.error = undefined;
+  }
+  try {
+    const job = await getLongformVideoJobById(jobId);
+    const masterAudioUrl = job?.masterAudioUrl;
+    if (!masterAudioUrl)
+      throw new Error("group render needs the master narration");
+    let chunkUrls: string[] = [];
+    if (!leader.renderTaskIds?.length) {
+      const g = await buildGroupTrack({
+        jobId,
+        leader,
+        members,
+        masterAudioUrl,
+        leadSec: ENV.runpodLipsyncLeadSec,
+      });
+      chunkUrls = [g.url];
+      leader.lipsyncLeadSec = g.leadSec;
+      leader.lipsyncNarrationUrl = g.narrationUrl;
+      leader.lipsyncGroup = {
+        leader: leader.index,
+        members: members.map(m => m.index),
+        cuts: g.cuts,
+        totalSec: g.totalSec,
+      };
+      await persist();
+    }
+    const cuts = leader.lipsyncGroup?.cuts;
+    if (!cuts?.length) throw new Error("group render lost its cut list");
+    const last = cuts[cuts.length - 1];
+    const groupSec = last.startSec + last.durationSec;
+    const urls = await runChunkTasks(
+      jobId,
+      leader,
+      "runpod",
+      1,
+      () =>
+        lipsync.submit({
+          scene: leader,
+          imageUrl: faceImageUrl,
+          audioUrl: chunkUrls[0],
+          useAlt: useAltPhoto,
+          audioDurationSec: leader.lipsyncGroup?.totalSec,
+        }),
+      id => lipsync.poll(id, pollTimeoutMs),
+      persist,
+      lipsync.slots,
+      () => groupSec,
+      leader.lipsyncLeadSec
+    );
+    // The delivered group clip → one piece per scene.
+    const groupBuf = await downloadClip(urls[0]);
+    let leaderUrls: string[] = [];
+    for (const s of [leader, ...members]) {
+      const cut = cuts.find(c => c.index === s.index);
+      if (!cut) throw new Error(`group render has no cut for scene ${s.index}`);
+      const narrationUrl = await sceneNarrationFromMaster(
+        jobId,
+        s,
+        masterAudioUrl
+      );
+      const piece = await cutGroupPiece(groupBuf, cut, narrationUrl);
+      const { url } = await storagePut(
+        `longform/${jobId}/clip-${s.index}-0-${nanoid(6)}.mp4`,
+        piece,
+        "video/mp4"
+      );
+      if (s === leader) leaderUrls = [url];
+      else {
+        s.clipUrls = await composeHostScene(
+          jobId,
+          s,
+          [url],
+          params,
+          instruction,
+          persist,
+          videoAdapter
+        );
+        syncSceneClipFields(s);
+        s.sceneStatus = "completed";
+        s.lipsyncGroup = undefined;
+        s.renderTaskIds = undefined;
+      }
+    }
+    console.log(
+      `[Longform ${jobId}] group ${[leader, ...members].map(s => s.index).join("+")}: ` +
+        `one RunPod call, ${members.length + 1} clips cut`
+    );
+    leader.lipsyncGroup = undefined;
+    await persist();
+    return composeHostScene(
+      jobId,
+      leader,
+      leaderUrls,
+      params,
+      instruction,
+      persist,
+      videoAdapter
+    );
+  } catch (e: any) {
+    // The leader's own status is settled by `renderSceneClip`; the members follow it.
+    for (const m of members) {
+      if (e instanceof PendingRenderError) m.sceneStatus = "rendering";
+      else {
+        m.sceneStatus = "failed";
+        m.error = `Clip: ${e?.message ?? e}`;
+        m.lipsyncGroup = undefined;
+      }
+    }
+    throw e;
+  }
+}
+
+/**
+ * Finish a host render: remember the bare host clip, then composite the split-screen right
+ * panel when the scene has one (falling back to the full-frame host on any failure).
+ */
+async function composeHostScene(
+  jobId: number,
+  scene: StoryboardScene,
+  urls: string[],
+  params: LongformInputParams,
+  instruction: string,
+  persist: () => Promise<void>,
+  videoAdapter?: ReturnType<typeof createProviderAdapter>
+): Promise<string[]> {
   // Split-screen: keep the lip-synced host on the LEFT half and composite a Ken Burns still
   // (from `splitVisual`) onto the RIGHT half — same gpt-image-2 still + slow pan/zoom as every
   // other still in the video, so the right panel never hallucinates b-roll motion. The host's
@@ -7719,15 +7931,35 @@ export async function dispatchScenesByProvider(
   processOne: (scene: StoryboardScene) => Promise<void>,
   jobId?: number
 ): Promise<void> {
-  const host = scenes.filter(s => isHostLipsyncScene(s, lipsync, params));
+  const hostAll = scenes.filter(s => isHostLipsyncScene(s, lipsync, params));
   const broll = scenes.filter(s => !isHostLipsyncScene(s, lipsync, params));
+  // RunPod host beats render in GROUPS (`server/lipsyncBatch.ts`): the dispatcher runs each
+  // group's leader once, and the leader cuts and completes its members. Members are never
+  // dispatched on their own while their leader is in the batch.
+  const grouped =
+    lipsync?.provider === "runpod" && ENV.runpodLipsyncBatch > 1
+      ? assignLipsyncGroups(hostAll, {
+          maxScenes: ENV.runpodLipsyncBatch,
+          maxSec: ENV.runpodLipsyncBatchMaxSec,
+        })
+      : {
+          dispatch: hostAll,
+          membersOf: new Map<StoryboardScene, StoryboardScene[]>(),
+        };
+  const host = grouped.dispatch;
+  let groupsFormed = 0;
+  grouped.membersOf.forEach((members, leader) => {
+    groupMembersOf.set(leader, members);
+    if (members.length) groupsFormed++;
+  });
   // Mirror generateSceneClips' still-vs-motion routing so each medium gets its own lane, sized to
   // its own cap — stills (OpenAI image) no longer share the motion (video) worker pool. (OpenAI's
   // own process-global gpt-image-2 rate limiter paces the actual image calls within this lane.)
   const stills = broll.filter(s => USE_IMAGE_LANE && s.stillImage);
   const motion = broll.filter(s => !(USE_IMAGE_LANE && s.stillImage));
   console.log(
-    `[Longform ${jobId ?? "?"}] clip dispatch: ${host.length} host(${lipsync?.provider ?? "none"}) + ` +
+    `[Longform ${jobId ?? "?"}] clip dispatch: ${hostAll.length} host(${lipsync?.provider ?? "none"}` +
+      `${groupsFormed ? `, ${host.length} call(s) — ${groupsFormed} group(s)` : ""}) + ` +
       `${stills.length} still(OpenAI image) + ${motion.length} motion(69labs video)`
   );
   const stopUsageLog =
@@ -7735,15 +7967,21 @@ export async function dispatchScenesByProvider(
   // Hoisted out of the mapPool callback so the optional `cancel` narrows once. Undefined on a
   // lane with nothing worth cancelling (HeyGen), which skips the cleanup entirely.
   const cancelHostRender = lipsync?.cancel;
-  const cancelAbandonedHostRender = cancelHostRender
-    ? async (abandoned: StoryboardScene) => {
-        // One task per host scene today, but iterate: `renderTaskIds` is an array and a
-        // chunked host render would otherwise leave its siblings billing.
-        for (const id of abandoned.renderTaskIds ?? []) {
-          if (id) await cancelHostRender(id);
-        }
+  const cancelAbandonedHostRender = async (abandoned: StoryboardScene) => {
+    // A group leader given up on takes its members with it — they were never dispatched on
+    // their own and would otherwise sit "rendering" forever.
+    for (const m of groupMembersOf.get(abandoned) ?? []) {
+      m.sceneStatus = "failed";
+      m.error = abandoned.error;
+      m.lipsyncGroup = undefined;
+    }
+    // One task per host scene today, but iterate: `renderTaskIds` is an array and a
+    // chunked host render would otherwise leave its siblings billing.
+    if (cancelHostRender)
+      for (const id of abandoned.renderTaskIds ?? []) {
+        if (id) await cancelHostRender(id);
       }
-    : undefined;
+  };
   // Motion b-roll renders on the 69Labs grok video lane (cap ENV.sixtynineVideoConcurrency).
   try {
     await Promise.all([
@@ -7755,7 +7993,9 @@ export async function dispatchScenesByProvider(
         s =>
           withSceneDeadline(
             s,
-            lipsync?.sceneDeadlineMs ?? SCENE_DEADLINE_HOST_MS,
+            // A group's wall clock scales with the beats it carries.
+            (lipsync?.sceneDeadlineMs ?? SCENE_DEADLINE_HOST_MS) *
+              (1 + (groupMembersOf.get(s)?.length ?? 0)),
             processOne,
             cancelAbandonedHostRender
           )

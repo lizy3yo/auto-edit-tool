@@ -619,6 +619,18 @@ export interface StoryboardScene {
    */
   lipsyncNarrationUrl?: string;
   /**
+   * Host beats rendered in ONE RunPod call (`server/lipsyncBatch.ts`). On the group's LEADER:
+   * the member indices, each scene's cut inside the delivered group clip, and the padded
+   * track's length (for the camera plate). On a MEMBER: only the leader's index. Cleared when
+   * the piece is cut and stored; a member whose leader is gone renders solo.
+   */
+  lipsyncGroup?: {
+    leader: number;
+    members?: number[];
+    cuts?: { index: number; startSec: number; durationSec: number }[];
+    totalSec?: number;
+  };
+  /**
    * Which provider issued the in-flight render task(s) for this scene's clip(s).
    * Set alongside `renderTaskIds` so the resume path knows which adapter to poll.
    */

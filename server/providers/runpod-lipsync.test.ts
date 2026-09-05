@@ -191,8 +191,12 @@ describe("RunpodLipsyncAdapter.submitLipsync", () => {
       "scheduler",
       "motion_frame",
       "feta_weight",
+      "torch_compile",
     ])
       expect(calls[1].body.input).not.toHaveProperty(k);
+    // The compiler is on in the workflow; only an explicit OFF is sent.
+    await adapter.submitLipsync({ ...params, torchCompile: false });
+    expect(calls[2].body.input).toMatchObject({ torch_compile: false });
   });
 
   it("passes quality=full through so the 40-step workflow is selectable per render", async () => {

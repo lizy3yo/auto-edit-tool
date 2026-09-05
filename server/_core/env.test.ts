@@ -80,6 +80,28 @@ describe("ENV pinned-camera anchor defaults", () => {
   });
 });
 
+describe("ENV.runpodLipsyncBatch", () => {
+  it("defaults to two beats per call and never drops below one", async () => {
+    const d = await loadEnv({
+      RUNPOD_LIPSYNC_BATCH: undefined,
+      RUNPOD_LIPSYNC_BATCH_MAX_SEC: undefined,
+    });
+    expect(d.runpodLipsyncBatch).toBe(2);
+    expect(d.runpodLipsyncBatchMaxSec).toBe(14);
+    expect(
+      (await loadEnv({ RUNPOD_LIPSYNC_BATCH: "0" })).runpodLipsyncBatch
+    ).toBe(1);
+    expect(
+      (
+        await loadEnv({
+          RUNPOD_LIPSYNC_BATCH: "3",
+          RUNPOD_LIPSYNC_BATCH_MAX_SEC: "20",
+        })
+      ).runpodLipsyncBatchMaxSec
+    ).toBe(20);
+  });
+});
+
 describe("ENV.runpodLipsyncLeadSec", () => {
   it("defaults to a 2s run-up and can be switched off", async () => {
     expect(

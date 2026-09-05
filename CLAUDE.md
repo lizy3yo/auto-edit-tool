@@ -69,27 +69,29 @@ Gemini, OpenAI, R2, RunPod. Missing ones fail loudly at the first stage that nee
 
 ## Optional tuning vars (defaults from code; most are not in `.env.example`)
 
-| Var                             | Default         | Var                                   | Default                     |
-| ------------------------------- | --------------- | ------------------------------------- | --------------------------- |
-| `FFMPEG_PATH`                   | auto-probe      | `FFMPEG_CONCURRENCY`                  | cpu-derived                 |
-| `FFMPEG_PROBE_MAX_MS`           | 600s            | `ASSEMBLY_DOWNLOAD_TIMEOUT_MS`        | 120s                        |
-| `PROBE_MAX_MS`                  | 60s             | `BROLL_NO_KEYFRAME`                   | unset (`1` disables)        |
-| `R2_CONNECTION_TIMEOUT_MS`      | 10s             | `R2_REQUEST_TIMEOUT_MS`               | 120s                        |
-| `APIMART_RATE_PER_MIN`          | 40              | `APIMART_BURST`                       | 5                           |
-| `HEYGEN_CONCURRENCY`            | 8               | `HEYGEN_CALL_TIMEOUT_MS`              | 120s                        |
-| `HEYGEN_DOWNLOAD_TIMEOUT_MS`    | 300s            | `OPENAI_IMAGE_CALL_TIMEOUT_MS`        | 300s                        |
-| `OPENAI_IMAGE_BURST`            | 1               | `OPENAI_IMAGE_RATE_PER_MIN`           | 50 (Tier-3 cap)             |
-| `SIXTYNINE_VIDEO_CONCURRENCY`   | 8               | `SIXTYNINE_IMAGE_CONCURRENCY`         | 7                           |
-| `SIXTYNINE_VIDEO_TIMEOUT_MS`    | 360s            | `SIXTYNINE_CALL_TIMEOUT_MS`           | 120s                        |
-| `SIXTYNINE_DOWNLOAD_TIMEOUT_MS` | 300s            | `SIXTYNINE_VIDEO_SUBMIT_BURST`        | 2                           |
-| `SIXTYNINE_VIDEO_SUBMIT_RATE`   | 5/min (API cap) | `IMAGE_PRIMARY_TIMEOUT_MS`            | 480s                        |
-| `SIXTYNINE_TTS_SUBMIT_RATE`     | 20/min          | `SIXTYNINE_TTS_SUBMIT_BURST`          | 3                           |
-| `IMAGE_PRIMARY_RETRIES`         | 1               | `IMAGE_RETRY_TIMEOUT_MS`              | 240s                        |
-| `IMAGE_RETRY_TOTAL_BUDGET_MS`   | 600s            | `MYSQL_SORT_BUFFER_SIZE`              | 8 MB                        |
-| `AUTO_MIGRATE`                  | on (`0` skips)  | `ASSEMBLY_CACHE`                      | on (`0` skips)              |
-| `LIPSYNC_RESOLUTION`            | 720p (all envs) | `RUNPOD_LIPSYNC_INPUT`                | image (`video` = pinned)    |
-| `ASSEMBLY_CACHE_MAX_GB`         | 20              | `ASSEMBLY_CACHE_DIR`                  | tmp/longform-assembly-cache |
-| `RUNPOD_LIPSYNC_TIMEOUT_MS`     | 35 min (poll)   | `RUNPOD_LIPSYNC_EXECUTION_TIMEOUT_MS` | 40 min (per-job GPU cap)    |
+| Var                             | Default         | Var                                   | Default                      |
+| ------------------------------- | --------------- | ------------------------------------- | ---------------------------- |
+| `FFMPEG_PATH`                   | auto-probe      | `FFMPEG_CONCURRENCY`                  | cpu-derived                  |
+| `FFMPEG_PROBE_MAX_MS`           | 600s            | `ASSEMBLY_DOWNLOAD_TIMEOUT_MS`        | 120s                         |
+| `PROBE_MAX_MS`                  | 60s             | `BROLL_NO_KEYFRAME`                   | unset (`1` disables)         |
+| `R2_CONNECTION_TIMEOUT_MS`      | 10s             | `R2_REQUEST_TIMEOUT_MS`               | 120s                         |
+| `APIMART_RATE_PER_MIN`          | 40              | `APIMART_BURST`                       | 5                            |
+| `HEYGEN_CONCURRENCY`            | 8               | `HEYGEN_CALL_TIMEOUT_MS`              | 120s                         |
+| `HEYGEN_DOWNLOAD_TIMEOUT_MS`    | 300s            | `OPENAI_IMAGE_CALL_TIMEOUT_MS`        | 300s                         |
+| `OPENAI_IMAGE_BURST`            | 1               | `OPENAI_IMAGE_RATE_PER_MIN`           | 50 (Tier-3 cap)              |
+| `SIXTYNINE_VIDEO_CONCURRENCY`   | 8               | `SIXTYNINE_IMAGE_CONCURRENCY`         | 7                            |
+| `SIXTYNINE_VIDEO_TIMEOUT_MS`    | 360s            | `SIXTYNINE_CALL_TIMEOUT_MS`           | 120s                         |
+| `SIXTYNINE_DOWNLOAD_TIMEOUT_MS` | 300s            | `SIXTYNINE_VIDEO_SUBMIT_BURST`        | 2                            |
+| `SIXTYNINE_VIDEO_SUBMIT_RATE`   | 5/min (API cap) | `IMAGE_PRIMARY_TIMEOUT_MS`            | 480s                         |
+| `SIXTYNINE_TTS_SUBMIT_RATE`     | 20/min          | `SIXTYNINE_TTS_SUBMIT_BURST`          | 3                            |
+| `IMAGE_PRIMARY_RETRIES`         | 1               | `IMAGE_RETRY_TIMEOUT_MS`              | 240s                         |
+| `IMAGE_RETRY_TOTAL_BUDGET_MS`   | 600s            | `MYSQL_SORT_BUFFER_SIZE`              | 8 MB                         |
+| `AUTO_MIGRATE`                  | on (`0` skips)  | `ASSEMBLY_CACHE`                      | on (`0` skips)               |
+| `LIPSYNC_RESOLUTION`            | 720p (all envs) | `RUNPOD_LIPSYNC_INPUT`                | image (`video` = pinned)     |
+| `ASSEMBLY_CACHE_MAX_GB`         | 20              | `ASSEMBLY_CACHE_DIR`                  | tmp/longform-assembly-cache  |
+| `RUNPOD_LIPSYNC_TIMEOUT_MS`     | 35 min (poll)   | `RUNPOD_LIPSYNC_EXECUTION_TIMEOUT_MS` | 40 min (per-job GPU cap)     |
+| `RUNPOD_LIPSYNC_TORCH_COMPILE`  | on (`0` = off)  | `RUNPOD_LIPSYNC_BATCH`                | 2 beats per call (`1` = off) |
+| `RUNPOD_LIPSYNC_BATCH_MAX_SEC`  | 14 s per call   |                                       |                              |
 
 `RUNPOD_LIPSYNC_EXECUTION_TIMEOUT_MS` is sent with every submit as RunPod's `policy.executionTimeout`
 and overrides the endpoint's own setting (dashboard default 20 min). InfiniteTalk at 720p on the
@@ -189,7 +191,15 @@ Express · tRPC · Drizzle · MySQL.
   metric never saw it). The handoff frames are arithmetic (81 + k·(81−overlap) − trimmed lead),
   each is judged against its own neighbourhood, and one that stands out gets the two frames
   either side replaced by motion-compensated interpolations, so the change spreads over ~200 ms.
-  Frame count and audio are untouched; any failure keeps the clip as rendered. DELIVERY is
+  Frame count and audio are untouched; any failure keeps the clip as rendered. Host beats are
+  rendered in GROUPS (`server/lipsyncBatch.ts`, `RUNPOD_LIPSYNC_BATCH`, default 2): a solo beat
+  pays for ~40% frames nobody sees (the run-up and the padding out to the last 81-frame
+  window), so consecutive host scenes sharing a photo/plate are packed into one call — run-up,
+  beat, 500 ms room-tone gap, beat — rendered once and cut back at offsets measured from the
+  real slice lengths. The group's LEADER carries the task id and cut list (`scene.lipsyncGroup`),
+  members are marked `rendering` and never dispatched alone while their leader is in the batch;
+  a member whose leader is gone renders solo (paid again, never lost). The compiler is wired
+  into the worker's workflows (`RUNPOD_LIPSYNC_TORCH_COMPILE=0` unlinks it per job). DELIVERY is
   script-based (`server/delivery.ts`): before the master is voiced, one Claude call reads the
   script paragraph by paragraph and returns a pace (slow/measured/natural/brisk → ±15% on the
   channel's speed dial), a pause to leave after it (0/300/600 ms of -56 dBFS room tone, not

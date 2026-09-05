@@ -54,6 +54,8 @@ export interface RunpodLipsyncParams {
   scheduler?: string;
   motionFrame?: number;
   fetaWeight?: number;
+  /** `false` unlinks the worker's torch.compile node for this render; undefined = the workflow default (on). */
+  torchCompile?: boolean;
   /** Our own TTS narration (R2 URL). Drives both the mouth and the clip's length. */
   audioUrl: string;
   /** InfiniteTalk direction — see `buildLipsyncPrompt`; short and framing-focused. */
@@ -216,6 +218,7 @@ export class RunpodLipsyncAdapter {
         ...(params.fetaWeight != null
           ? { feta_weight: params.fetaWeight }
           : {}),
+        ...(params.torchCompile === false ? { torch_compile: false } : {}),
         width: params.width,
         height: params.height,
         quality: this.quality,

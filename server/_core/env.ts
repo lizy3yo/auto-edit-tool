@@ -83,9 +83,7 @@ export const ENV = {
    * setting: RunPod queues anything beyond it, and a queued job's wait counts against
    * `RUNPOD_LIPSYNC_TIMEOUT_MS` while doing no work.
    */
-  runpodLipsyncConcurrency: Number(
-    process.env.RUNPOD_LIPSYNC_CONCURRENCY ?? 4
-  ),
+  runpodLipsyncConcurrency: Number(process.env.RUNPOD_LIPSYNC_CONCURRENCY ?? 4),
   /**
    * Default camera conditioning for the RunPod lane: `image` sends the host photo (I2V),
    * `video` sends a static clip built from that photo (V2V) so the model has no camera
@@ -169,6 +167,29 @@ export const ENV = {
   runpodLipsyncFetaWeight: process.env.RUNPOD_LIPSYNC_FETA_WEIGHT
     ? Number(process.env.RUNPOD_LIPSYNC_FETA_WEIGHT)
     : undefined,
+  /**
+   * torch.compile in the worker (inductor, transformer blocks only): identical frames,
+   * 15-30% less GPU time per window after a one-off compile on each cold worker. On by
+   * default in the workflow; `0` sends `torch_compile: false` so a compile failure on a new
+   * base image can be worked around from here without a worker rebuild.
+   */
+  runpodLipsyncTorchCompile:
+    process.env.RUNPOD_LIPSYNC_TORCH_COMPILE === "0" ? false : undefined,
+  /**
+   * Host beats per RunPod call (`server/lipsyncBatch.ts`): consecutive host scenes are
+   * rendered as one clip so the run-up and the last-window padding — ~40% of a solo beat's
+   * frames — are paid once per group. `1` = one call per scene (the old behaviour). The
+   * per-job GPU cap has to hold the whole group, so `RUNPOD_LIPSYNC_BATCH_MAX_SEC` bounds the
+   * narration a group may carry. Defaults sized to ~6-14 min per beat; raise both once the
+   * compiler and the step cut have landed.
+   */
+  runpodLipsyncBatch: Math.max(
+    1,
+    Math.round(Number(process.env.RUNPOD_LIPSYNC_BATCH ?? 2)) || 1
+  ),
+  runpodLipsyncBatchMaxSec: Number(
+    process.env.RUNPOD_LIPSYNC_BATCH_MAX_SEC ?? 14
+  ),
   /**
    * Run-up handed to the lip-sync worker and trimmed off the returned clip
    * (`server/lipsyncLead.ts`): the model starts from a frozen photo and its first ~2 s are a
