@@ -6916,6 +6916,11 @@ export async function runChunkTasks(
     );
     urls.push(url);
   }
+  // What this render cost and where the worker spent it — kept for the cost/quality bench.
+  const gpuSec = polls.reduce((a, r) => a + (r.gpuSeconds ?? 0), 0);
+  if (gpuSec > 0) scene.renderGpuSec = Math.round(gpuSec);
+  const timings = polls.find(r => r.workerTimings)?.workerTimings;
+  if (timings) scene.renderTimings = timings;
   scene.renderTaskIds = undefined; // complete — no longer needs resume
   scene.infraRetries = undefined;
   scene.lipsyncLeadSec = undefined; // trimmed and stored — nothing left to cut on a resume
@@ -10971,8 +10976,18 @@ function sceneEditLane(
       ? { sem: ctx.lanes.motion, deadlineMs: SCENE_DEADLINE_MOTION_MS }
       : { sem: ctx.lanes.still, deadlineMs: SCENE_DEADLINE_STILL_MS };
   }
+  // The longer host wall clock: the pipeline allows a RunPod render 45 min, and the regenerate
+  // path abandoned (and cancelled) one at 25 min — HeyGen's figure — while it was still
+  // rendering. The lane is resolved lazily here, so take the larger of the two: an abandoned
+  // HeyGen render costs nothing either way, an abandoned RunPod one is paid for and lost.
   if (scene.hostPresent && ctx.params.faceImageUrl)
-    return { sem: ctx.lanes.host, deadlineMs: SCENE_DEADLINE_HOST_MS };
+    return {
+      sem: ctx.lanes.host,
+      deadlineMs: Math.max(
+        SCENE_DEADLINE_HOST_MS,
+        SCENE_DEADLINE_HOST_RUNPOD_MS
+      ),
+    };
   if (USE_IMAGE_LANE && scene.stillImage)
     return { sem: ctx.lanes.still, deadlineMs: SCENE_DEADLINE_STILL_MS };
   return { sem: ctx.lanes.motion, deadlineMs: SCENE_DEADLINE_MOTION_MS };

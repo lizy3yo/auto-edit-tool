@@ -34,12 +34,14 @@ const clip = argv.find(
 );
 if (!clip) {
   console.error(
-    "usage: npx tsx scripts/lipsync-bench.mts <clip.mp4> [--job ID] [--label TEXT] [--lead SEC]"
+    "usage: npx tsx scripts/lipsync-bench.mts <clip.mp4> [--baseline accepted.mp4] [--job ID | --gpu-sec N] [--label TEXT] [--lead SEC]"
   );
   process.exit(2);
 }
 const label = opt("--label") ?? path.basename(clip);
 const jobId = opt("--job");
+/** GPU seconds the app recorded on the scene (`scene.renderGpuSec`) — skips the RunPod lookup. */
+const gpuSecArg = opt("--gpu-sec");
 const RATE = Number(process.env.COST_RUNPOD_LIPSYNC_PER_GPU_SEC ?? 0.00097);
 const FFMPEG = process.env.FFMPEG_PATH || (ffmpegPath as unknown as string);
 
@@ -56,6 +58,7 @@ async function gpuSeconds(): Promise<{ sec: number; id: string } | null> {
   const ep = (process.env.RUNPOD_INFINITETALK_ENDPOINT ?? "")
     .replace(/^https?:\/\/api\.runpod\.ai\/v2\//, "")
     .split("/")[0];
+  if (gpuSecArg) return { sec: Number(gpuSecArg), id: "scene" };
   if (!key || !ep) return null;
   const h = { Authorization: `Bearer ${key}` };
   if (jobId) {

@@ -116,6 +116,10 @@ export interface GenerationResult {
    * provider instead of surfacing the error to the user.
    */
   infraFailure?: boolean;
+  /** Billed GPU seconds RunPod reported for this render (RunPod lane only). */
+  gpuSeconds?: number;
+  /** The worker's own per-node seconds (model load, sampler, decode…), when it returns them. */
+  workerTimings?: Record<string, number>;
   /**
    * True when the failure is deterministic for THIS request: the provider has said the render
    * cannot complete as submitted (RunPod stopped it at the per-job execution cap), so
@@ -643,6 +647,14 @@ export interface StoryboardScene {
    * Cleared once the clip URLs are downloaded.
    */
   renderTaskIds?: string[];
+  /**
+   * What the last RunPod render of this scene cost and where the time went: billed GPU
+   * seconds and the worker's per-node timings. Kept after completion (unlike `renderTaskIds`)
+   * so the cost/quality bench can read GPU-seconds per finished second off the scene instead
+   * of chasing RunPod's short-lived job status.
+   */
+  renderGpuSec?: number;
+  renderTimings?: Record<string, number>;
   /**
    * Index into this scene's `buildClipChain()` of the video model currently being
    * rendered/resumed. Advanced (and `renderTaskIds` cleared) when a b-roll clip fails

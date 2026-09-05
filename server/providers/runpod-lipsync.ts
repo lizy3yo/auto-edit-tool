@@ -150,7 +150,13 @@ type RunPodStatus =
 type RunPodStatusBody = {
   status?: RunPodStatus;
   /** Handler return value. `video` is base64 MP4; `error` is its own failure channel. */
-  output?: { video?: string; video_path?: string; error?: string };
+  output?: {
+    video?: string;
+    video_path?: string;
+    error?: string;
+    /** Worker's per-node seconds — see the handler's `timings`. */
+    timings?: Record<string, number>;
+  };
   error?: unknown;
   /** Billed GPU milliseconds — the metered quantity for this lane. */
   executionTime?: number;
@@ -496,13 +502,27 @@ export class RunpodLipsyncAdapter {
 
     const gpuSeconds = this.meterGpuTime(data);
 
+    const workerTimings =
+      out.timings && typeof out.timings === "object" ? out.timings : undefined;
     console.log(
       `[RunPod] Job ${taskId} completed — ${(fileData.length / 1024 / 1024).toFixed(1)}MB | ` +
         `gpu ${gpuSeconds.toFixed(0)}s | queue ${Math.round((data.delayTime ?? 0) / 1000)}s | ` +
-        `wall ${Math.round((Date.now() - startTime) / 1000)}s | polls ${pollCount}`
+        `wall ${Math.round((Date.now() - startTime) / 1000)}s | polls ${pollCount}` +
+        (workerTimings
+          ? ` | worker ${Object.entries(workerTimings)
+              .map(([k, v]) => `${k} ${v}s`)
+              .join(", ")}`
+          : "")
     );
 
-    return { success: true, fileData, mimeType: "video/mp4", taskId };
+    return {
+      success: true,
+      fileData,
+      mimeType: "video/mp4",
+      taskId,
+      gpuSeconds,
+      workerTimings,
+    };
   }
 
   /**
