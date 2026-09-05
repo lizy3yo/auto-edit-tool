@@ -90,9 +90,9 @@ Gemini, OpenAI, R2, RunPod. Missing ones fail loudly at the first stage that nee
 | `LIPSYNC_RESOLUTION`            | 720p (all envs) | `RUNPOD_LIPSYNC_INPUT`                | image (`video` = pinned)     |
 | `ASSEMBLY_CACHE_MAX_GB`         | 20              | `ASSEMBLY_CACHE_DIR`                  | tmp/longform-assembly-cache  |
 | `RUNPOD_LIPSYNC_TIMEOUT_MS`     | 35 min (poll)   | `RUNPOD_LIPSYNC_EXECUTION_TIMEOUT_MS` | 40 min (per-job GPU cap)     |
-| `RUNPOD_LIPSYNC_TORCH_COMPILE`  | on (`0` = off)  | `RUNPOD_LIPSYNC_BATCH`                | 2 beats per call (`1` = off) |
-| `RUNPOD_LIPSYNC_BATCH_MAX_SEC`  | 14 s per call   | `RUNPOD_LIPSYNC_AUDIO_CFG_STEPS`      | unset (all steps guided)     |
-| `RUNPOD_LIPSYNC_QUANTIZATION`   | unset (bf16)    |                                       |                              |
+| `RUNPOD_LIPSYNC_TORCH_COMPILE`  | off (`1` = on)  | `RUNPOD_LIPSYNC_BATCH`                | 2 beats per call (`1` = off) |
+| `RUNPOD_LIPSYNC_BATCH_MAX_SEC`  | 14 s per call   | `RUNPOD_LIPSYNC_AUDIO_CFG_STEPS`      | 0.5 (first half guided)      |
+| `RUNPOD_LIPSYNC_QUANTIZATION`   | fp8_e4m3fn      |                                       |                              |
 
 `RUNPOD_LIPSYNC_EXECUTION_TIMEOUT_MS` is sent with every submit as RunPod's `policy.executionTimeout`
 and overrides the endpoint's own setting (dashboard default 20 min). InfiniteTalk at 720p on the

@@ -65,8 +65,8 @@ describe("ENV pinned-camera anchor defaults", () => {
       RUNPOD_LIPSYNC_V2V_STEPS: undefined,
       RUNPOD_LIPSYNC_V2V_START_STEP: undefined,
     });
-    expect(env.runpodLipsyncV2vSteps).toBe(16);
-    expect(env.runpodLipsyncV2vStartStep).toBe(4);
+    expect(env.runpodLipsyncV2vSteps).toBe(8);
+    expect(env.runpodLipsyncV2vStartStep).toBe(2);
     expect(env.runpodLipsyncV2vStartStep / env.runpodLipsyncV2vSteps).toBe(
       0.25
     );
@@ -77,6 +77,32 @@ describe("ENV pinned-camera anchor defaults", () => {
       (await loadEnv({ RUNPOD_LIPSYNC_V2V_START_STEP: "1" }))
         .runpodLipsyncV2vStartStep
     ).toBe(1);
+  });
+});
+
+describe("ENV render dials — the accepted settings are the defaults", () => {
+  it("bakes the judged values so a fresh deploy renders like the accepted clip", async () => {
+    const d = await loadEnv({
+      RUNPOD_LIPSYNC_AUDIO_CFG: undefined,
+      RUNPOD_LIPSYNC_NAG_SCALE: undefined,
+      RUNPOD_LIPSYNC_MOTION_FRAME: undefined,
+      RUNPOD_LIPSYNC_FETA_WEIGHT: undefined,
+      RUNPOD_LIPSYNC_AUDIO_CFG_STEPS: undefined,
+      RUNPOD_LIPSYNC_QUANTIZATION: undefined,
+      RUNPOD_LIPSYNC_TORCH_COMPILE: undefined,
+    });
+    expect(d.runpodLipsyncAudioCfgScale).toBe(2.5);
+    expect(d.runpodLipsyncNagScale).toBe(13);
+    expect(d.runpodLipsyncMotionFrame).toBe(25);
+    expect(d.runpodLipsyncFetaWeight).toBe(0);
+    expect(d.runpodLipsyncAudioCfgSteps).toBe(0.5);
+    expect(d.runpodLipsyncQuantization).toBe("fp8_e4m3fn");
+    // The compiler is off unless asked for; the off-signal is what the worker receives.
+    expect(d.runpodLipsyncTorchCompile).toBe(false);
+    expect(
+      (await loadEnv({ RUNPOD_LIPSYNC_TORCH_COMPILE: "1" }))
+        .runpodLipsyncTorchCompile
+    ).toBeUndefined();
   });
 });
 

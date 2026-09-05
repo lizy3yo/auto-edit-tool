@@ -117,12 +117,15 @@ export const ENV = {
   // the measured-at-parity 8/2, with twice the refinement per frame (texture crawl was the
   // remaining gap to the reference). Sent on every pinned render, so the worker's own
   // workflow default cannot silently disagree with the ratio.
+  // 8/2, not 16/4: the operator judged the 8-step renders by eye on 2026-09-06 and chose
+  // them (the mouth judge reads softer p/b/m closure than at 16; the bench row for the
+  // everything-on render then held HeyGen's closure bar at 0.056). Half the GPU time.
   runpodLipsyncV2vSteps: process.env.RUNPOD_LIPSYNC_V2V_STEPS
     ? Number(process.env.RUNPOD_LIPSYNC_V2V_STEPS)
-    : 16,
+    : 8,
   runpodLipsyncV2vStartStep: process.env.RUNPOD_LIPSYNC_V2V_START_STEP
     ? Number(process.env.RUNPOD_LIPSYNC_V2V_START_STEP)
-    : 4,
+    : 2,
   /**
    * Motion-tuning dials sent to the worker on EVERY RunPod render (photo and pinned), each
    * only when set — unset means the workflow's own default rules. Every one maps to a worker
@@ -141,12 +144,14 @@ export const ENV = {
   runpodLipsyncAudioScale: process.env.RUNPOD_LIPSYNC_AUDIO_SCALE
     ? Number(process.env.RUNPOD_LIPSYNC_AUDIO_SCALE)
     : undefined,
+  // The accepted-render dials, baked (2026-09-05/06): audio guidance 2.5 is what makes the lips
+  // meet on p/b/m (a viseme audit failed without it — never off), NAG 13 calmed the eyes.
   runpodLipsyncAudioCfgScale: process.env.RUNPOD_LIPSYNC_AUDIO_CFG
     ? Number(process.env.RUNPOD_LIPSYNC_AUDIO_CFG)
-    : undefined,
+    : 2.5,
   runpodLipsyncNagScale: process.env.RUNPOD_LIPSYNC_NAG_SCALE
     ? Number(process.env.RUNPOD_LIPSYNC_NAG_SCALE)
-    : undefined,
+    : 13,
   /**
    * Sampler scheduler name, passed through verbatim (e.g. `euler`, `flowmatch_distill`,
    * `dpm++_sde`). The stochastic `dpm++_sde` injects fresh noise every step, which measured as
@@ -161,20 +166,26 @@ export const ENV = {
    * measured as a 4-5x face/torso jump at frame 82 with the background flat). Enhance-A-Video
    * strengthens coherence INSIDE a window, which can make the boundary stand out more.
    */
+  // Overlap 25 (the worker's own default) now that `lipsyncSeams.ts` repairs the handoffs
+  // that made 37 necessary: 56 new frames per window instead of 44. Enhance-A-Video 0: it
+  // made the boundary stand out and cost a subject cut at frame 81.
   runpodLipsyncMotionFrame: process.env.RUNPOD_LIPSYNC_MOTION_FRAME
     ? Number(process.env.RUNPOD_LIPSYNC_MOTION_FRAME)
-    : undefined,
+    : 25,
   runpodLipsyncFetaWeight: process.env.RUNPOD_LIPSYNC_FETA_WEIGHT
     ? Number(process.env.RUNPOD_LIPSYNC_FETA_WEIGHT)
-    : undefined,
+    : 0,
   /**
    * torch.compile in the worker (inductor, transformer blocks only): identical frames,
    * 15-30% less GPU time per window after a one-off compile on each cold worker. On by
    * default in the workflow; `0` sends `torch_compile: false` so a compile failure on a new
    * base image can be worked around from here without a worker rebuild.
    */
+  // OFF by default (`1` turns it on): on a scale-to-zero endpoint every render lands on a cold
+  // worker and pays the compile again — a 5.7 s beat ran past 26 min compiled vs 14 without.
+  // Worth revisiting only with a network volume holding the inductor cache.
   runpodLipsyncTorchCompile:
-    process.env.RUNPOD_LIPSYNC_TORCH_COMPILE === "0" ? false : undefined,
+    process.env.RUNPOD_LIPSYNC_TORCH_COMPILE === "1" ? undefined : false,
   /**
    * Host beats per RunPod call (`server/lipsyncBatch.ts`): consecutive host scenes are
    * rendered as one clip so the run-up and the last-window padding — ~40% of a solo beat's
@@ -190,13 +201,15 @@ export const ENV = {
    */
   runpodLipsyncAudioCfgSteps: process.env.RUNPOD_LIPSYNC_AUDIO_CFG_STEPS
     ? Number(process.env.RUNPOD_LIPSYNC_AUDIO_CFG_STEPS)
-    : undefined,
+    : 0.5, // the everything-on render held lip closure at 0.056 (bar 0.068) with guidance on the first half
   /**
    * Weight quantization in the worker's model loader (`fp8_e4m3fn_fast` etc.); the bf16
    * weights are cast at load. Unset = the workflow's own setting (bf16, no quantization).
    */
+  // Standard fp8 as the default (the `_fast` matmul path needs the LoRA merged at load and
+  // is being proven separately; `.env` selects it once it is).
   runpodLipsyncQuantization:
-    process.env.RUNPOD_LIPSYNC_QUANTIZATION || undefined,
+    process.env.RUNPOD_LIPSYNC_QUANTIZATION || "fp8_e4m3fn",
   runpodLipsyncBatch: Math.max(
     1,
     Math.round(Number(process.env.RUNPOD_LIPSYNC_BATCH ?? 2)) || 1
