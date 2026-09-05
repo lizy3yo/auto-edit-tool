@@ -42,6 +42,7 @@
  * motivated this measured ~1.8–2.0. Honest only when the camera-jitter check also passes —
  * a moving camera inflates it for free.
  */
+import "dotenv/config";
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 
@@ -59,7 +60,10 @@ const REGIONS = {
 
 /** Pass/fail thresholds — calibrated to the accepted HeyGen reference (see header). */
 const LIMITS = { "hair/head": 3.0, "torso/shoulders": 3.5 };
-const MOUTH_FLOOR = 5.5;
+// 4.5, not the 5.5 first set from one reference clip at 7.0: the second accepted reference
+// articulates at 4.9, and the floor must clear every accepted clip while still failing the
+// over-anchored render that measured 2.0.
+const MOUTH_FLOOR = 4.5;
 /** Accumulated background drift vs frame 0. Baseline clips: ~1.9. Real tripod footage: ~0.2. */
 const MORPH_LIMIT = 1.0;
 /**
@@ -73,6 +77,50 @@ const SEAM_RATIO_LIMIT = 8;
 const SEAM_ABS_FLOOR = 0.3;
 /** Head-torso motion correlation. Reference clips: 0.66-0.68. Bobblehead renders: 0.46-0.48. */
 const COUPLING_FLOOR = 0.55;
+/**
+ * SMOOTHNESS, in two numbers the eye reads as "smooth like HeyGen":
+ * - cheek texture flicker: raw frame-to-frame change on a cheek MINUS the same after blur —
+ *   i.e. how much the skin surface shimmers beyond its real movement. A photo-warping engine
+ *   pins texture to the pixels (reference 3.0); a re-painting sampler jitters it (4.8 on the
+ *   render that motivated this, with real cheek motion identical at ~2.1).
+ * - motion roughness: RMS second difference of the blurred face-motion curve over its mean —
+ *   how abruptly movement starts and stops. Reference 0.49; the same render 0.77.
+ */
+// The two accepted references measure 3.5 and 4.9 here — they vary more than expected — so
+// the limit clears both; the shimmering render measured 5.4, i.e. ~10% past the worse
+// reference and ~50% past the better one.
+const CHEEK_FLICKER_LIMIT = 5.0;
+const ROUGHNESS_LIMIT = 0.7; // references 0.50 and 0.67; the jerky render 0.77
+const CHEEK_REGION = [0.4, 0.3, 0.07, 0.1];
+/**
+ * SUBJECT CUT: a hard jump on the PERSON at a window handoff while the background stays
+ * flat — the seam check above cannot see it, because it watches a background corner precisely
+ * so subject motion does not pollute it. Measured on the render that motivated this: face and
+ * torso both jumped ~4-5x their own typical frame change at frame 82 (an 81-frame window
+ * boundary) with both background corners flat. Same spike rule as the seam check.
+ */
+const SUBJECT_REGION = [0.33, 0.05, 0.36, 0.88];
+/**
+ * COLD START: real body motion (blurred head + torso) in the FIRST second as a fraction of the
+ * clip's average. The render that motivated this sat at 0.17/0.38 for two seconds and reached
+ * 0.4-0.7 only from the third — a talking statue that wakes up — while the reference engine is
+ * flat from frame 0. Below the floor, the clip opens stiff however good its average is.
+ */
+const COLD_START_FLOOR = 0.75; // motivating clip 0.66; references 0.82 (RunPod 8-step) and 1.15 (HeyGen)
+const CUT_RATIO_LIMIT = 3.5;
+/**
+ * WINDOW HANDOFFS, by arithmetic rather than by hunting for spikes: InfiniteTalk renders
+ * 81-frame windows overlapping by `motion_frame`, so a new window begins every 81-motion_frame
+ * frames after the first, less the run-up the app trims (`--lead`, `--motion-frame`; defaults
+ * from the same env the app reads). At those exact frames a much smaller jump is a seam — the
+ * 3.5x rule above needs a jump that big to be sure a spike anywhere is a cut; a 1.8x jump AT a
+ * predicted handoff is one (measured 2.9x on the clip that motivated this, invisible to the
+ * rule above). Same threshold the app's own repair uses (`server/lipsyncSeams.ts`).
+ */
+const HANDOFF_RATIO_LIMIT = 1.8;
+const HANDOFF_ABS_FLOOR = 0.3;
+const WINDOW_FRAMES = 81;
+const FACE_REGION = [0.38, 0.15, 0.24, 0.3];
 /** Blur radius that removes fabric/knit texture, leaving only real displacement. */
 const TEXTURE_BLUR_SIGMA = 6;
 
@@ -173,11 +221,28 @@ ${err.slice(-800)}`)
     });
   });
 
-const file = process.argv[2];
+const argv = process.argv.slice(2);
+const file = argv.find(
+  a => !a.startsWith("--") && !argv[argv.indexOf(a) - 1]?.startsWith("--")
+);
+const flag = (name, dflt) => {
+  const i = argv.indexOf(name);
+  return i >= 0 ? Number(argv[i + 1]) : dflt;
+};
 if (!file) {
-  console.error("usage: node scripts/measure-host-motion.mjs <clip.mp4>");
+  console.error(
+    "usage: node scripts/measure-host-motion.mjs <clip.mp4> [--lead SEC] [--motion-frame N]"
+  );
   process.exit(2);
 }
+const leadSec = flag(
+  "--lead",
+  Number(process.env.RUNPOD_LIPSYNC_LEAD_SEC ?? 2)
+);
+const motionFrame = flag(
+  "--motion-frame",
+  Number(process.env.RUNPOD_LIPSYNC_MOTION_FRAME ?? 25)
+);
 
 const means = {};
 for (const [name, region] of Object.entries(REGIONS)) {
@@ -193,6 +258,38 @@ const bgMedian = sortedBg[Math.floor(sortedBg.length / 2)] ?? 0;
 const seamFrames = bgSeries
   .map((v, i) => ({ frame: i + 1, v }))
   .filter(({ v }) => v > SEAM_RATIO_LIMIT * bgMedian + SEAM_ABS_FLOOR);
+
+// Subject cut: whole-person jump vs its own median (a pose/expression snap at a handoff).
+const subjSeries = (await probeSeries(file, SUBJECT_REGION)).slice(1);
+const subjSorted = [...subjSeries].sort((a, b) => a - b);
+const subjMedian = subjSorted[Math.floor(subjSorted.length / 2)] ?? 0;
+const cutFrames = subjSeries
+  .map((v, i) => ({ frame: i + 1, v }))
+  .filter(({ v }) => v > CUT_RATIO_LIMIT * subjMedian + SEAM_ABS_FLOOR);
+
+// Predicted window handoffs, each judged against its own neighbourhood (±10 frames, the seam
+// frames themselves excluded) on the whole-person series.
+const handoffs = [];
+{
+  const step = WINDOW_FRAMES - motionFrame;
+  const lead = Math.round(leadSec * 25);
+  const total = subjSeries.length + 1;
+  for (let raw = WINDOW_FRAMES; step > 0 && raw < total + lead; raw += step) {
+    const b = raw - lead; // delivered frame index; subjSeries[i-1] is the jump INTO frame i
+    if (b < 3 || b > total - 4) continue;
+    const near = [];
+    for (let i = b - 10; i <= b + 10; i++)
+      if (i > 0 && i < total && Math.abs(i - b) > 1)
+        near.push(subjSeries[i - 1]);
+    near.sort((x, y) => x - y);
+    const med = near[Math.floor(near.length / 2)] ?? 0;
+    const v = subjSeries[b - 1];
+    handoffs.push({ frame: b, ratio: med > 0 ? v / med : Infinity, v });
+  }
+}
+const badHandoffs = handoffs.filter(
+  h => h.ratio >= HANDOFF_RATIO_LIMIT && h.v >= HANDOFF_ABS_FLOOR
+);
 
 // Does the body move WITH the head? Both series blurred — see TEXTURE_BLUR_SIGMA.
 const [headSeries, torsoSeries] = await Promise.all([
@@ -215,6 +312,30 @@ const pearson = (a, b) => {
   return da && db ? num / Math.sqrt(da * db) : 0;
 };
 const coupling = pearson(headSeries, torsoSeries);
+const mean = xs => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
+const bodySeries = headSeries.map((h, i) => h + (torsoSeries[i] ?? 0));
+const coldStart =
+  bodySeries.length > 25
+    ? mean(bodySeries.slice(0, 25)) / (mean(bodySeries) || 1)
+    : 1;
+
+// Smoothness: cheek shimmer beyond real motion, and how jerky the face's motion curve is.
+const [cheekRaw, cheekBlur, faceBlur] = await Promise.all([
+  probeSeries(file, CHEEK_REGION),
+  probeSeries(file, CHEEK_REGION, true),
+  probeSeries(file, FACE_REGION, true),
+]);
+const cheekFlicker = mean(cheekRaw) - mean(cheekBlur);
+const roughness = (() => {
+  const m = mean(faceBlur);
+  if (faceBlur.length < 3 || !m) return 0;
+  let acc = 0;
+  for (let i = 2; i < faceBlur.length; i++) {
+    const d = faceBlur[i] - 2 * faceBlur[i - 1] + faceBlur[i - 2];
+    acc += d * d;
+  }
+  return Math.sqrt(acc / (faceBlur.length - 2)) / m;
+})();
 
 const mouth = means.mouth;
 console.log(`\n  ${file}\n`);
@@ -233,7 +354,28 @@ console.log(
       : "none")
 );
 console.log(
+  `  ${"subject cuts".padEnd(18)} ${String(cutFrames.length).padStart(7)}   ` +
+    (cutFrames.length
+      ? `at frame ${cutFrames.map(f => `${f.frame} (${(f.v / subjMedian).toFixed(1)}x)`).join(", ")}`
+      : "none")
+);
+console.log(
+  `  ${"window handoffs".padEnd(18)} ${String(badHandoffs.length).padStart(7)}   ` +
+    (handoffs.length
+      ? `at frame ${handoffs.map(h => `${h.frame} (${h.ratio.toFixed(1)}x${badHandoffs.includes(h) ? " SEAM" : ""})`).join(", ")}   (lead ${leadSec}s, overlap ${motionFrame}; seam ≥ ${HANDOFF_RATIO_LIMIT}x)`
+      : "none predicted")
+);
+console.log(
   `  ${"body follows head".padEnd(18)} ${coupling.toFixed(2).padStart(7)}   floor ${COUPLING_FLOOR}`
+);
+console.log(
+  `  ${"cold start".padEnd(18)} ${coldStart.toFixed(2).padStart(7)}   floor ${COLD_START_FLOOR} (first-second body motion / average)`
+);
+console.log(
+  `  ${"cheek flicker".padEnd(18)} ${cheekFlicker.toFixed(2).padStart(7)}   limit ${CHEEK_FLICKER_LIMIT}`
+);
+console.log(
+  `  ${"motion roughness".padEnd(18)} ${roughness.toFixed(2).padStart(7)}   limit ${ROUGHNESS_LIMIT}`
 );
 
 const failures = [];
@@ -258,9 +400,29 @@ if (seamFrames.length)
   failures.push(
     `${seamFrames.length} window seam(s) — background pops at a render-window handoff (motion_frame / colormatch)`
   );
+if (cutFrames.length)
+  failures.push(
+    `${cutFrames.length} subject cut(s) — the person jumps at a window handoff while the background holds (motion_frame / feta_weight)`
+  );
+if (badHandoffs.length)
+  failures.push(
+    `${badHandoffs.length} window handoff seam(s) at frame ${badHandoffs.map(h => h.frame).join(", ")} — the person jumps where one render window hands off to the next (app repair: server/lipsyncSeams.ts; source: motion_frame)`
+  );
+if (coldStart < COLD_START_FLOOR)
+  failures.push(
+    `cold start ${coldStart.toFixed(2)} < ${COLD_START_FLOOR} — the body is still for the opening second (run-up / RUNPOD_LIPSYNC_LEAD_SEC)`
+  );
 if (coupling < COUPLING_FLOOR)
   failures.push(
     `body follows head ${coupling.toFixed(2)} < ${COUPLING_FLOOR} — head moves but the torso does not go with it (reads as stiff)`
+  );
+if (cheekFlicker > CHEEK_FLICKER_LIMIT)
+  failures.push(
+    `cheek flicker ${cheekFlicker.toFixed(2)} > ${CHEEK_FLICKER_LIMIT} — skin shimmers frame to frame (sampler noise; scheduler / steps)`
+  );
+if (roughness > ROUGHNESS_LIMIT)
+  failures.push(
+    `motion roughness ${roughness.toFixed(2)} > ${ROUGHNESS_LIMIT} — movement starts and stops abruptly`
   );
 
 console.log("");

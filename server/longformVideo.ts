@@ -84,6 +84,16 @@ import {
   type LipsyncCameraMode,
 } from "./lipsyncProvider";
 import { buildCameraPlate } from "./cameraPlate";
+import { buildLipsyncLeadTrack, trimClipHead } from "./lipsyncLead";
+import { smoothWindowSeams } from "./lipsyncSeams";
+import {
+  planDelivery,
+  applyDeliveryToScenes,
+  deliverySpeedFor,
+  deliveryRuns,
+  planChangesTheRead,
+  concatWithPauses,
+} from "./delivery";
 import { recordUsage, withCostMeter, flushJobUsage } from "./costMeter";
 // AIREITER BOLT-ON (temporary) — delete with the block in `apimartAdapterForJob`.
 import { aireiterAdapter, aireiterLaneEnabled } from "./providers/aireiter";
@@ -3084,6 +3094,9 @@ async function resolveLipsyncLane(
           audioScale: ENV.runpodLipsyncAudioScale,
           audioCfgScale: ENV.runpodLipsyncAudioCfgScale,
           nagScale: ENV.runpodLipsyncNagScale,
+          scheduler: ENV.runpodLipsyncScheduler,
+          motionFrame: ENV.runpodLipsyncMotionFrame,
+          fetaWeight: ENV.runpodLipsyncFetaWeight,
           width,
           height,
         });
@@ -3942,7 +3955,20 @@ export const LIPSYNC_HOST_DIRECTION_PINNED =
   "their mouth articulates every word and stays fully visible, hands never near their " +
   "face. They speak naturally and comfortably: their head, shoulders and upper body move " +
   "together as one relaxed, connected body, the way a seated person shifts and settles " +
-  "while talking. One person speaking, no one else talking. " +
+  "while talking. " +
+  // The visemes an audio-driven model blurs are the ones the eye checks hardest: a viseme
+  // audit against the reference showed vowels landing but lips never meeting on p/b/m and
+  // never rounding on oo/w — a generic half-open shape for every consonant, ~40% of the
+  // reference's articulation range. Name the shapes explicitly.
+  // "Precise but relaxed", not "expressive": at audio guidance 3 the whole face swung between
+  // wide-eyed surprise and a full grin on every phrase (motion roughness 0.86 against the
+  // reference's 0.50) while the lips finally landed. The lips are the precision; the rest of
+  // the face is asked to stay calm.
+  "Precise but relaxed articulation: the lips press fully together on p, b and m, round " +
+  "tightly on oo and w, the lower lip meets the teeth on f and v, and the mouth opens " +
+  "naturally on open vowels — while the brows, eyes and cheeks stay calm and gentle, " +
+  "settling softly between words. The eyes stay soft and slightly smiling exactly as in the " +
+  "reference photo, brows resting. One person speaking, no one else talking. " +
   "Locked-off camera on a tripod: the camera never moves, pushes in, or zooms. " +
   "The room behind them stays exactly as it is, nothing in the background changes.";
 
@@ -4008,7 +4034,14 @@ export const LIPSYNC_NEGATIVE_DIRECTION_PINNED =
   "many people in the background, walking backwards, jitter, camera shake, " +
   "camera push in, camera zoom, dolly, pan, tilt, camera drift, camera movement, " +
   "background warping, background morphing, background drift, stiff, rigid, " +
-  "frozen body, motionless torso, mannequin, head moving on a still body";
+  "frozen body, motionless torso, mannequin, head moving on a still body, mumbling, " +
+  "slack mouth, lips never closing, half-open mouth on every sound, blurred consonants, " +
+  // The eyes: the source photo has soft, slightly smiling eyes with resting brows; at audio
+  // guidance the render invented a wide-eyed, raised-brow look in 5 of 6 seconds that the
+  // photo never had. The positive prompt asking for calm eyes did nothing at cfg 1 — NAG is
+  // the enforcement path, so the shapes to avoid are named here.
+  "wide eyes, raised eyebrows, surprised expression, staring, lifted forehead, " +
+  "eyebrows lifting on every word";
 
 /**
  * Ordered term→synonym map that rewrites harm-adjacent words Grok's 69labs content classifier
@@ -5245,8 +5278,10 @@ export function markCtaQrBlock(
  * Deliberately a FIXED, self-contained directive (`LIPSYNC_HOST_DIRECTION`) — the per-scene
  * `visualPrompt` is NOT prepended: InfiniteTalk degrades on long prompts, identity comes from the
  * reference photo, and the rich storyboard visualPrompt injects gesture/lean/nod motion that
- * contradicts the minimal-motion restriction. The only per-scene variation is the empty-hands
- * clause on CTA scenes. The narration audio drives speech, so no script text is included.
+ * contradicts the minimal-motion restriction. The per-scene variation is the empty-hands
+ * clause on CTA scenes and, when the delivery plan set one, a 3-5 word expression cue
+ * (`scene.deliveryCue`) — short enough not to dilute the direction. The narration audio drives
+ * speech, so no script text is included.
  */
 export function buildLipsyncPrompt(
   scene: StoryboardScene,
@@ -5261,10 +5296,15 @@ export function buildLipsyncPrompt(
   camera: LipsyncCameraMode = "photo"
 ): string {
   const direction =
-    camera === "pinned" ? LIPSYNC_HOST_DIRECTION_PINNED : LIPSYNC_HOST_DIRECTION;
+    camera === "pinned"
+      ? LIPSYNC_HOST_DIRECTION_PINNED
+      : LIPSYNC_HOST_DIRECTION;
   const angle = useAlt ? ` ${LIPSYNC_ALT_ANGLE_SUFFIX}` : "";
   const cta = scene.cta ? ` ${CTA_EMPTY_HANDS_SUFFIX}` : "";
-  return `${direction}${angle}${cta}`.trim();
+  const mood = scene.deliveryCue?.trim()
+    ? ` Their expression while speaking: ${scene.deliveryCue.trim()}.`
+    : "";
+  return `${direction}${angle}${cta}${mood}`.trim();
 }
 
 /**
@@ -6677,7 +6717,13 @@ export async function runChunkTasks(
   // materially shorter than its expected length is treated as a truncated render and retried
   // (see the `tooShort` check below). Lip-sync passes this; b-roll omits it (its clips are
   // legitimately clone-padded to the audio at assembly time).
-  expectedDurationSec?: (i: number) => number | undefined
+  expectedDurationSec?: (i: number) => number | undefined,
+  /**
+   * Seconds of run-up at the head of every returned clip to cut away before it is judged or
+   * stored (`server/lipsyncLead.ts`). The truncation guard below then compares the TRIMMED
+   * clip with the un-padded narration length, which is what `expectedDurationSec` gives.
+   */
+  trimLeadSec?: number
 ): Promise<string[]> {
   // Pre-size the id array (preserve any ids already persisted on a resume). Each chunk fills
   // its own index after submit, so concurrent submits below are index-safe.
@@ -6781,6 +6827,42 @@ export async function runChunkTasks(
     throw new Error(failed.error || "clip render failed");
   }
 
+  // Cut the run-up off the front of each clip before anything looks at its length or stores it.
+  if (trimLeadSec && trimLeadSec > 0) {
+    for (const r of polls) {
+      if (r.success && r.fileData) {
+        r.fileData = await trimClipHead(
+          Buffer.from(r.fileData as Buffer),
+          trimLeadSec,
+          // The clip carries the scene's narration cut from the master by range, not the
+          // worker's re-encode of the padded lead track — see `trimClipHead`. Falls back to
+          // the stored file only for a scene that never had a range.
+          { narrationUrl: scene.lipsyncNarrationUrl ?? scene.audioUrl }
+        );
+      }
+    }
+  }
+
+  // InfiniteTalk renders in windows and the person can jump where one window hands off to the
+  // next — smooth any handoff that stands out (`server/lipsyncSeams.ts`). RunPod only: HeyGen
+  // has no windows. Runs AFTER the trim so the seam arithmetic is in delivered frames.
+  if (provider === "runpod") {
+    for (let i = 0; i < polls.length; i++) {
+      const r = polls[i];
+      if (r.success && r.fileData) {
+        const { video } = await smoothWindowSeams(
+          Buffer.from(r.fileData as Buffer),
+          {
+            leadSec: trimLeadSec ?? 0,
+            motionFrame: ENV.runpodLipsyncMotionFrame,
+            label: `scene ${scene.index} chunk ${i}`,
+          }
+        );
+        r.fileData = video;
+      }
+    }
+  }
+
   // Duration guard: a provider can return a clip materially SHORTER than the audio it was given
   // (a partial/truncated render under load). Assembly's last-frame clone-pad
   // (`tpad`) would silently mask that as a frozen face, so detect it here and retry the whole
@@ -6815,6 +6897,8 @@ export async function runChunkTasks(
   }
   scene.renderTaskIds = undefined; // complete — no longer needs resume
   scene.infraRetries = undefined;
+  scene.lipsyncLeadSec = undefined; // trimmed and stored — nothing left to cut on a resume
+  scene.lipsyncNarrationUrl = undefined;
   return urls;
 }
 
@@ -7044,7 +7128,28 @@ async function generateSceneLipsyncClips(
   if (!scene.renderTaskIds?.length) {
     const audioUrl = scene.audioUrl;
     if (!audioUrl) throw new Error("scene has no narration audio for lip-sync");
-    chunkUrls = [audioUrl];
+    // Run-up (RunPod only): the worker starts from a frozen photo and its first ~2 s are a
+    // talking statue, so it is handed the preceding narration as a lead-in and that much is
+    // trimmed off the returned clip (`server/lipsyncLead.ts`). The lead is remembered on the
+    // scene with `renderTaskIds` so a RESUMED poll trims the same amount. Fail-open: no lead,
+    // plain track. HeyGen is billed per output second and has no cold start, so it gets none.
+    scene.lipsyncLeadSec = undefined;
+    scene.lipsyncNarrationUrl = undefined;
+    if (lipsync.provider === "runpod" && ENV.runpodLipsyncLeadSec > 0) {
+      const job = await getLongformVideoJobById(jobId);
+      const lead = await buildLipsyncLeadTrack({
+        jobId,
+        scene,
+        masterAudioUrl: job?.masterAudioUrl,
+        leadSec: ENV.runpodLipsyncLeadSec,
+      });
+      if (lead) {
+        chunkUrls = [lead.url];
+        scene.lipsyncLeadSec = lead.leadSec;
+        scene.lipsyncNarrationUrl = lead.narrationUrl;
+      }
+    }
+    if (!chunkUrls.length) chunkUrls = [audioUrl];
   }
   const chunkCount = scene.renderTaskIds?.length ?? chunkUrls.length;
 
@@ -7067,7 +7172,8 @@ async function generateSceneLipsyncClips(
     id => lipsync.poll(id, pollTimeoutMs),
     persist,
     lipsync.slots,
-    i => chunkDurations[i]
+    i => chunkDurations[i],
+    scene.lipsyncLeadSec
   );
 
   // Split-screen: keep the lip-synced host on the LEFT half and composite a Ken Burns still
@@ -7796,7 +7902,8 @@ export async function buildSceneNarration(
     (scene.scriptText ?? scene.narration ?? "").trim()
   );
   const segments = splitScriptForNarration(text);
-  const speed = params.ttsSpeed;
+  // The scene's own pace from the delivery plan, so a regenerated scene matches the master.
+  const speed = deliverySpeedFor(params.ttsSpeed, scene.deliveryPace);
   const audioUrls: string[] = [];
   for (const seg of segments) {
     audioUrls.push(
@@ -7828,6 +7935,12 @@ export async function buildSceneNarration(
  * `concatAudio`): far fewer prosody breaks than the old per-scene voicing. A `CensoredTTSError`
  * propagates unchanged — chunking can't clear a moderation block, and it already failed the job
  * under the per-scene design.
+ *
+ * With a delivery plan that changes the read (`planChangesTheRead`: more than one pace, or a
+ * pause), the script is voiced as RUNS instead — consecutive paragraphs at one pace in one
+ * request each, at that pace's speed, with a beat of room tone spliced between runs where the
+ * plan asks (`concatWithPauses`). Far fewer breaks than per-scene voicing, and each break is
+ * where the delivery actually changes. Any failure on that path falls through to the one-shot.
  */
 async function voiceMasterNarration(
   jobId: number,
@@ -7838,6 +7951,51 @@ async function voiceMasterNarration(
 ): Promise<{ url: string }> {
   const speed = params.ttsSpeed;
   let providerUrl: string;
+  if (planChangesTheRead(params.deliveryPlan)) {
+    try {
+      const runs = deliveryRuns(spokenScript, params.deliveryPlan!);
+      const runUrls: string[] = [];
+      for (const run of runs) {
+        runUrls.push(
+          await generateSceneVoiceover(
+            providerType,
+            apiKey,
+            run.text,
+            params.voiceId,
+            params.ttsModel,
+            deliverySpeedFor(speed, run.pace),
+            params.ttsVolume,
+            TTS_STABILITY,
+            TTS_STYLE,
+            TTS_SIMILARITY
+          )
+        );
+      }
+      const buffer = await concatWithPauses(
+        runUrls,
+        runs.map(r => r.pauseAfterMs)
+      );
+      const key = `longform/${jobId}/master-vo-${nanoid(6)}.mp3`;
+      const { url } = await storagePut(key, buffer, "audio/mpeg");
+      console.log(
+        `[Longform ${jobId}] master narration voiced as ${runs.length} delivery run(s): ` +
+          runs
+            .map(
+              r =>
+                `${r.pace}×${r.paragraphIndices.length}${r.pauseAfterMs ? `+${r.pauseAfterMs}ms` : ""}`
+            )
+            .join(", ")
+      );
+      return { url };
+    } catch (e: any) {
+      if (e instanceof CensoredTTSError) throw e;
+      if (e instanceof VoiceNotFoundError) throw e;
+      console.warn(
+        `[Longform ${jobId}] delivery-run master TTS failed (${e?.message}); ` +
+          `falling back to the one-shot read`
+      );
+    }
+  }
   try {
     providerUrl = await generateSceneVoiceover(
       providerType,
@@ -8697,9 +8855,26 @@ async function runUnifiedPipeline(
       `[Longform ${jobId}] brollOnly: demoted ${demoted} host scene(s) → cutaways (0% host target)`
     );
   }
+  // Script-based delivery: pace + pauses for the voice, a mood cue for the face, decided from
+  // the script itself (`server/delivery.ts`). Snapshotted on `params` so a resume re-voices
+  // the same film; skipped in mock mode (a paid Claude call for a free render).
+  if (!params.deliveryPlan && !(await isMockMode())) {
+    const plan = await planDelivery(spokenScript, {
+      hostName: params.hostName,
+      log: m => console.log(`[Longform ${jobId}] ${m}`),
+    });
+    if (plan) params.deliveryPlan = plan;
+  }
+  if (params.deliveryPlan) {
+    const n = applyDeliveryToScenes(scenes, params.deliveryPlan, spokenScript);
+    console.log(
+      `[Longform ${jobId}] delivery: ${n}/${scenes.length} scene(s) carry a pace + mood cue`
+    );
+  }
   await updateLongformVideoJob(jobId, {
     stage: "voiceover",
     storyboard: scenes,
+    inputParams: params,
     progress: jobProgress(jobId, {
       scenesTotal: scenes.length,
       scenesDone: 0,

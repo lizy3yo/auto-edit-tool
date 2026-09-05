@@ -167,17 +167,31 @@ describe("RunpodLipsyncAdapter.submitLipsync", () => {
       audioScale: 0.7,
       audioCfgScale: 2,
       nagScale: 14,
+      scheduler: "flowmatch_distill",
+      motionFrame: 37,
+      fetaWeight: 1,
     });
     expect(calls[0].body.input).toMatchObject({
+      motion_frame: 37,
+      feta_weight: 1,
       input_type: "image",
       shift: 3,
       audio_scale: 0.7,
       audio_cfg_scale: 2,
       nag_scale: 14,
+      scheduler: "flowmatch_distill",
     });
     // Unset ⇒ absent, so the workflow's own defaults rule and an older worker sees no keys.
     await adapter.submitLipsync(params);
-    for (const k of ["shift", "audio_scale", "audio_cfg_scale", "nag_scale"])
+    for (const k of [
+      "shift",
+      "audio_scale",
+      "audio_cfg_scale",
+      "nag_scale",
+      "scheduler",
+      "motion_frame",
+      "feta_weight",
+    ])
       expect(calls[1].body.input).not.toHaveProperty(k);
   });
 

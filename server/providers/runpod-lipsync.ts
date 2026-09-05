@@ -51,6 +51,9 @@ export interface RunpodLipsyncParams {
   audioScale?: number;
   audioCfgScale?: number;
   nagScale?: number;
+  scheduler?: string;
+  motionFrame?: number;
+  fetaWeight?: number;
   /** Our own TTS narration (R2 URL). Drives both the mouth and the clip's length. */
   audioUrl: string;
   /** InfiniteTalk direction — see `buildLipsyncPrompt`; short and framing-focused. */
@@ -206,6 +209,13 @@ export class RunpodLipsyncAdapter {
           ? { audio_cfg_scale: params.audioCfgScale }
           : {}),
         ...(params.nagScale != null ? { nag_scale: params.nagScale } : {}),
+        ...(params.scheduler ? { scheduler: params.scheduler } : {}),
+        ...(params.motionFrame != null
+          ? { motion_frame: params.motionFrame }
+          : {}),
+        ...(params.fetaWeight != null
+          ? { feta_weight: params.fetaWeight }
+          : {}),
         width: params.width,
         height: params.height,
         quality: this.quality,

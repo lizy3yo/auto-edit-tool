@@ -237,6 +237,14 @@ export interface StoryboardScene {
    * talking host.
    */
   cameraCue?: string;
+  /**
+   * Script-based delivery (`server/delivery.ts`): the pace Claude chose for the paragraph this
+   * scene's words come from, and the facial-expression cue for the host while saying them.
+   * `deliveryPace` shades the TTS speed when the scene is re-voiced; `deliveryCue` is appended
+   * to the RunPod lip-sync prompt. Absent → the channel's one speed and the fixed direction.
+   */
+  deliveryPace?: "slow" | "measured" | "natural" | "brisk";
+  deliveryCue?: string;
   /** Whether the on-camera host appears (gets the reference face + face-lock) */
   hostPresent: boolean;
   /**
@@ -599,6 +607,18 @@ export interface StoryboardScene {
    */
   hostPlateContext?: string;
   /**
+   * Seconds of run-up prepended to the narration handed to the lip-sync worker, to be trimmed
+   * off the front of the returned clip (`server/lipsyncLead.ts`). Persisted with
+   * `renderTaskIds` so a resumed poll trims the same amount; cleared when the render completes.
+   */
+  lipsyncLeadSec?: number;
+  /**
+   * The clean, un-padded narration muxed into the delivered clip when the run-up is trimmed
+   * (`server/lipsyncLead.ts`) — cut from the master by range, since `audioUrl` goes stale
+   * after cut-room edits. Persisted with `renderTaskIds` for a resume; cleared on completion.
+   */
+  lipsyncNarrationUrl?: string;
+  /**
    * Which provider issued the in-flight render task(s) for this scene's clip(s).
    * Set alongside `renderTaskIds` so the resume path knows which adapter to poll.
    */
@@ -752,6 +772,18 @@ export interface LongformInputParams {
   ttsModel?: string;
   /** TTS speed multiplier (resolved from the channel config) */
   ttsSpeed?: number;
+  /**
+   * Script-based delivery plan (`server/delivery.ts`), decided once per render from the script
+   * and snapshotted here so a resume voices and directs the same film. Absent → one speed.
+   */
+  deliveryPlan?: {
+    paragraphs: {
+      index: number;
+      pace: "slow" | "measured" | "natural" | "brisk";
+      pauseAfterMs: number;
+      mood: string;
+    }[];
+  };
   /** TTS volume multiplier (resolved from the channel config; applied as an ffmpeg gain) */
   ttsVolume?: number;
   /** User-supplied video title (optional). Names the downloaded MP4; persisted so it survives refresh/cross-device. */

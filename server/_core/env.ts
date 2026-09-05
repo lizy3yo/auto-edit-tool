@@ -115,15 +115,16 @@ export const ENV = {
    * static plate. Defaults to 8/2 (75% free), the value that measured at parity with the
    * reference; 8/1 overshot to ~150%. Walk start_step 2→1 for more motion, 2→3 for less.
    */
+  // Both defaulted together so the anchor stays a FRACTION: 16/4 is the same 75% freedom as
+  // the measured-at-parity 8/2, with twice the refinement per frame (texture crawl was the
+  // remaining gap to the reference). Sent on every pinned render, so the worker's own
+  // workflow default cannot silently disagree with the ratio.
   runpodLipsyncV2vSteps: process.env.RUNPOD_LIPSYNC_V2V_STEPS
     ? Number(process.env.RUNPOD_LIPSYNC_V2V_STEPS)
-    : undefined,
-  // Defaulted, not left to the workflow: 8/1 measured at ~150% of the reference's body motion
-  // and 8/2 at parity, so 2 is the confirmed value and every host — local, Railway, anywhere —
-  // should get it without setting a variable. The env var stays as an override for experiments.
+    : 16,
   runpodLipsyncV2vStartStep: process.env.RUNPOD_LIPSYNC_V2V_START_STEP
     ? Number(process.env.RUNPOD_LIPSYNC_V2V_START_STEP)
-    : 2,
+    : 4,
   /**
    * Motion-tuning dials sent to the worker on EVERY RunPod render (photo and pinned), each
    * only when set — unset means the workflow's own default rules. Every one maps to a worker
@@ -148,6 +149,34 @@ export const ENV = {
   runpodLipsyncNagScale: process.env.RUNPOD_LIPSYNC_NAG_SCALE
     ? Number(process.env.RUNPOD_LIPSYNC_NAG_SCALE)
     : undefined,
+  /**
+   * Sampler scheduler name, passed through verbatim (e.g. `euler`, `flowmatch_distill`,
+   * `dpm++_sde`). The stochastic `dpm++_sde` injects fresh noise every step, which measured as
+   * ~1.5x the reference's skin shimmer and 2.2x on fabric; the workflow default is now
+   * deterministic `euler`. Unset sends nothing.
+   */
+  runpodLipsyncScheduler: process.env.RUNPOD_LIPSYNC_SCHEDULER || undefined,
+  /**
+   * Window-handoff dials. InfiniteTalk renders 81-frame windows and carries `motion_frame`
+   * frames of the previous window into the next; too few and the SUBJECT snaps at the
+   * boundary (the background is held by the plate, so the cut shows only on the person —
+   * measured as a 4-5x face/torso jump at frame 82 with the background flat). Enhance-A-Video
+   * strengthens coherence INSIDE a window, which can make the boundary stand out more.
+   */
+  runpodLipsyncMotionFrame: process.env.RUNPOD_LIPSYNC_MOTION_FRAME
+    ? Number(process.env.RUNPOD_LIPSYNC_MOTION_FRAME)
+    : undefined,
+  runpodLipsyncFetaWeight: process.env.RUNPOD_LIPSYNC_FETA_WEIGHT
+    ? Number(process.env.RUNPOD_LIPSYNC_FETA_WEIGHT)
+    : undefined,
+  /**
+   * Run-up handed to the lip-sync worker and trimmed off the returned clip
+   * (`server/lipsyncLead.ts`): the model starts from a frozen photo and its first ~2 s are a
+   * talking statue — mouth moving, body still — so every host beat opened stiff. 2 s of the
+   * preceding narration (silence where there is none) lets the body arrive before the visible
+   * start. Costs that many extra seconds of GPU per host scene. 0 disables. RunPod lane only.
+   */
+  runpodLipsyncLeadSec: Number(process.env.RUNPOD_LIPSYNC_LEAD_SEC ?? 2),
   /** HeyGen API key — fallback when a per-tab key slot is empty. */
   heygenApiKey: process.env.HEYGEN_API_KEY ?? "",
   /**

@@ -195,6 +195,16 @@ const { mockScanStillDefects } = vi.hoisted(() => ({
 vi.mock("./overlayTextScan", () => ({
   scanStillDefects: mockScanStillDefects,
 }));
+// The delivery plan is one more invokeClaude call in the pipeline; like the overlay scan it is
+// neutralized here so the call-count assertions hold. Default null = the one-speed read and
+// the fixed face direction every pre-delivery test expects; delivery has its own test file.
+const { mockPlanDelivery } = vi.hoisted(() => ({
+  mockPlanDelivery: vi.fn(async () => null as any),
+}));
+vi.mock("./delivery", async importOriginal => {
+  const actual = await importOriginal<typeof import("./delivery")>();
+  return { ...actual, planDelivery: mockPlanDelivery };
+});
 // A valid 1×1 PNG the still lane's sharp() validation and landscape-normalize can parse.
 const okStill = () => ({
   success: true as const,
@@ -8176,6 +8186,30 @@ describe("pinned-camera prompt pair", () => {
       expect(LIPSYNC_NEGATIVE_DIRECTION_PINNED).toContain(term);
   });
 
+  it("names the visemes an audio-driven model blurs, in both halves of the pinned pair", () => {
+    // Viseme audit vs the reference: vowels landed, but lips never met on p/b/m and never
+    // rounded on oo/w — ~40% of the reference's articulation range.
+    for (const term of [
+      "press fully together on p, b and m",
+      "round tightly on oo and w",
+    ])
+      expect(LIPSYNC_HOST_DIRECTION_PINNED).toContain(term);
+    for (const term of ["mumbling", "lips never closing", "blurred consonants"])
+      expect(LIPSYNC_NEGATIVE_DIRECTION_PINNED).toContain(term);
+    // Precision is asked of the LIPS only — "expressive" over-drove the whole face.
+    expect(LIPSYNC_HOST_DIRECTION_PINNED).not.toContain("expressive");
+    expect(LIPSYNC_HOST_DIRECTION_PINNED).toContain("stay calm and gentle");
+    // Eyes: the render widened them and raised the brows in 5 of 6 seconds against a photo
+    // with soft, smiling eyes. Enforced through the NAG negative, named in the positive.
+    for (const term of ["wide eyes", "raised eyebrows", "surprised expression"])
+      expect(LIPSYNC_NEGATIVE_DIRECTION_PINNED).toContain(term);
+    expect(LIPSYNC_HOST_DIRECTION_PINNED).toContain(
+      "as in the reference photo"
+    );
+    // Photo mode is untouched — one variable at a time.
+    expect(LIPSYNC_HOST_DIRECTION).not.toContain("press fully together");
+  });
+
   it("keeps every camera, background and quality guard in the pinned negative", () => {
     for (const term of [
       "camera push in",
@@ -8191,7 +8225,10 @@ describe("pinned-camera prompt pair", () => {
   });
 
   it("keeps the camera lock and the framing in both directions", () => {
-    for (const text of [LIPSYNC_HOST_DIRECTION, LIPSYNC_HOST_DIRECTION_PINNED]) {
+    for (const text of [
+      LIPSYNC_HOST_DIRECTION,
+      LIPSYNC_HOST_DIRECTION_PINNED,
+    ]) {
       expect(text).toContain("Locked-off camera on a tripod");
       expect(text).toContain("nothing in the background changes");
       expect(text).toContain("Clear, precise lip-sync");
@@ -8206,11 +8243,23 @@ describe("pinned-camera prompt pair", () => {
     const scene = { index: 0, narration: "n" } as never;
     // Default preserved so every pre-existing caller is byte-identical.
     expect(buildLipsyncPrompt(scene)).toContain("calm and still");
-    expect(buildLipsyncPrompt(scene, false, "photo")).toContain("calm and still");
+    expect(buildLipsyncPrompt(scene, false, "photo")).toContain(
+      "calm and still"
+    );
     expect(buildLipsyncPrompt(scene, false, "pinned")).toContain(
       "one relaxed, connected body"
     );
     // The alt-angle suffix still rides along on either.
+    expect(
+      buildLipsyncPrompt(
+        { ...scene, deliveryCue: "warm gentle smile" },
+        false,
+        "pinned"
+      )
+    ).toMatch(/expression while speaking: warm gentle smile\.$/);
+    expect(buildLipsyncPrompt(scene, false, "pinned")).not.toContain(
+      "expression while"
+    );
     expect(buildLipsyncPrompt(scene, true, "pinned")).toContain(
       LIPSYNC_ALT_ANGLE_SUFFIX
     );

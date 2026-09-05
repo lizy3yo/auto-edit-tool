@@ -56,14 +56,20 @@ describe("ENV.lipsyncResolution", () => {
   });
 });
 
-describe("ENV.runpodLipsyncV2vStartStep", () => {
-  it("defaults to the measured-at-parity value so no host needs a variable", async () => {
-    // 8/1 overshot to ~150% of the reference's body motion, 8/2 landed on it. Baking 2 means
-    // a fresh deploy renders correctly without anyone remembering to set this.
-    expect(
-      (await loadEnv({ RUNPOD_LIPSYNC_V2V_START_STEP: undefined }))
-        .runpodLipsyncV2vStartStep
-    ).toBe(2);
+describe("ENV pinned-camera anchor defaults", () => {
+  it("defaults steps and start_step TOGETHER at the measured 75% ratio", async () => {
+    // 8/2 measured at parity with the reference and 8/1 overshot to ~150%, so the ratio is
+    // what is calibrated, not the step count. 16/4 keeps it while doubling refinement; both
+    // are baked so a fresh deploy renders correctly with no variable set.
+    const env = await loadEnv({
+      RUNPOD_LIPSYNC_V2V_STEPS: undefined,
+      RUNPOD_LIPSYNC_V2V_START_STEP: undefined,
+    });
+    expect(env.runpodLipsyncV2vSteps).toBe(16);
+    expect(env.runpodLipsyncV2vStartStep).toBe(4);
+    expect(env.runpodLipsyncV2vStartStep / env.runpodLipsyncV2vSteps).toBe(
+      0.25
+    );
   });
 
   it("still yields to an explicit override for experiments", async () => {
@@ -71,5 +77,17 @@ describe("ENV.runpodLipsyncV2vStartStep", () => {
       (await loadEnv({ RUNPOD_LIPSYNC_V2V_START_STEP: "1" }))
         .runpodLipsyncV2vStartStep
     ).toBe(1);
+  });
+});
+
+describe("ENV.runpodLipsyncLeadSec", () => {
+  it("defaults to a 2s run-up and can be switched off", async () => {
+    expect(
+      (await loadEnv({ RUNPOD_LIPSYNC_LEAD_SEC: undefined }))
+        .runpodLipsyncLeadSec
+    ).toBe(2);
+    expect(
+      (await loadEnv({ RUNPOD_LIPSYNC_LEAD_SEC: "0" })).runpodLipsyncLeadSec
+    ).toBe(0);
   });
 });

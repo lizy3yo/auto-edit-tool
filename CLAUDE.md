@@ -178,9 +178,53 @@ Express · tRPC · Drizzle · MySQL.
   built per render by `server/cameraPlate.ts` (V2V mimics the input's camera; a video where
   nothing moves has none to mimic — the InfiniteTalk maintainer's own fix). The operator
   still only uploads a photo; plates are bucketed 15s and cached per (photo, bucket), and
-  any plate failure falls back to photo conditioning. `scripts/measure-host-motion.mjs`
+  any plate failure falls back to photo conditioning. The RunPod lane also hands the worker a
+  RUN-UP (`server/lipsyncLead.ts`, `RUNPOD_LIPSYNC_LEAD_SEC`, default 2): the model starts
+  from a frozen photo and its first ~2 s are a talking statue, so the preceding narration is
+  prepended and that much trimmed off the returned clip (`trimClipHead` in `runChunkTasks`,
+  lead remembered on `scene.lipsyncLeadSec` for a resume). After the trim, `server/lipsyncSeams.ts`
+  smooths the WINDOW HANDOFFS: InfiniteTalk renders 81-frame windows overlapping by
+  `motion_frame`, and the person can jump where a new window begins (closed mouth to full smile
+  in one frame, measured 2.8× the clip's typical frame change, background flat so the seam
+  metric never saw it). The handoff frames are arithmetic (81 + k·(81−overlap) − trimmed lead),
+  each is judged against its own neighbourhood, and one that stands out gets the two frames
+  either side replaced by motion-compensated interpolations, so the change spreads over ~200 ms.
+  Frame count and audio are untouched; any failure keeps the clip as rendered. DELIVERY is
+  script-based (`server/delivery.ts`): before the master is voiced, one Claude call reads the
+  script paragraph by paragraph and returns a pace (slow/measured/natural/brisk → ±15% on the
+  channel's speed dial), a pause to leave after it (0/300/600 ms of -56 dBFS room tone, not
+  digital silence — the pause cap strips that and the ear hears a dropout) and a 3-5 word mood.
+  When the plan changes the read, the master is voiced as RUNS of same-pace paragraphs joined
+  with those beats instead of one request (`voiceMasterNarration`), the scene re-voice
+  follows its paragraph's pace (`scene.deliveryPace`), and the mood is appended to the RunPod
+  lip-sync prompt (`scene.deliveryCue`). The plan is snapshotted on `inputParams.deliveryPlan`
+  so a resume voices the same film; no plan (mock mode, a failed call) means exactly the old
+  behaviour. `scripts/measure-host-motion.mjs`
   turns "she moves too much" into numbers (per-region jitter + background morph vs frame 0)
-  so a worker/prompt change is judged against the clip that prompted it
+  so a worker/prompt change is judged against the clip that prompted it, and
+  `scripts/measure-lipsync.mts` (tsx; transcribes via whisperx, tracks the face with `pico.ts`)
+  scores whether the mouth SAYS the words, with no reference needed: every word is looked up
+  in the CMU Pronouncing Dictionary, each sound is given the opening speech requires (p/b/m
+  shut, "ah" wide, t/d/s parted, silence shut), and that predicted curve is correlated with
+  the measured mouth over ±600 ms of lag. Peak height is how well the mouth tracks the words,
+  peak position is the sync offset (a mouth leads its sound by 40-120 ms, so small negative
+  lags are normal), and the far-lag level is the built-in out-of-sync control — a SyncNet-style
+  offset/confidence pair driven by the script instead of a learned audio model, so it is
+  host- and sentence-independent. A per-sound pass/fail table names WHERE it missed but is
+  informational: shifted 400 ms it barely changes, and it prints that shifted score beside
+  itself. A host's accepted HeyGen clip can still be saved as a profile
+  (`--save-reference NAME` → `scripts/lipsync-reference/NAME.json`) and passed with
+  `--reference NAME` — that adds HeyGen's column on the same judge plus the older per-class
+  A-Z table and contact sheet. `scripts/measure-host-body.mts` does the same for the REST of
+  the host with no reference: every region follows the tracked face (one median box per
+  clip — a box that wobbled with the detector manufactured an 11 px head "jump"), and each
+  verdict is a rule of human behaviour: blink rate 8-40/min and 80-400 ms each, no one-frame
+  flicker, eyes still between blinks, head motion below 4 Hz (energy above it is sampler
+  jitter), head travel 1-40% of face size, shoulders moving less than the head and with it.
+  Head-motion-vs-loudness and eyes-vs-photo are printed but informational: over a 5 s beat
+  even the accepted clip shows no head/speech correlation, and a box-cut eye band reads the
+  photo ~25% narrower than that clip — landmarks would fix the second. `--beside other.mp4`
+  prints a second clip in a side column; `--photo host.jpg` adds the photo line
 - `server/hostPlate.ts` — **provider-independent**. The lip-sync model animates the image it
   is handed and never changes the setting, so `HOST_PLATES=1` generates a 16:9 plate of the host
   IN each beat's setting (host photo as identity reference) and syncs from that instead of the
