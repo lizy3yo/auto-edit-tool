@@ -6763,6 +6763,8 @@ export async function runChunkTasks(
         await slots.acquire();
         try {
           if (!taskIds[i]) {
+            if (abandonedScenes.has(scene))
+              throw new Error("scene abandoned — not submitting");
             let taskId = "";
             for (let attempt = 0; attempt < 2 && !taskId; attempt++) {
               const sub = await submit(i);
@@ -6794,6 +6796,12 @@ export async function runChunkTasks(
   }
   const failed = polls.find(r => !r.success);
   if (failed) {
+    // Given up on by the deadline while this poll was still running: fail quietly, never
+    // resubmit — the money is already spent once.
+    if (abandonedScenes.has(scene)) {
+      scene.renderTaskIds = undefined;
+      throw new Error(failed.error || "scene abandoned");
+    }
     // A DETERMINISTIC failure first: the provider has said this exact render cannot complete
     // (RunPod stopped it at the execution cap), so resubmitting the same body would fail the
     // same way at the same cost. It must never reach the resubmit paths below — and it is
@@ -7871,7 +7879,10 @@ export const SCENE_DEADLINE_HOST_MS = 25 * 60_000;
  * failure, before this clock abandons it. `resolveLipsyncAdapter` hands the right one to
  * `dispatchScenesByProvider`; nothing else picks between them.
  */
-export const SCENE_DEADLINE_HOST_RUNPOD_MS = 45 * 60_000;
+// 60, not 45: the per-job GPU cap (40 min) already bounds what a render can bill, so this only
+// guards a stuck poll — and RunPod has taken minutes to serve a COMPLETED status carrying the
+// clip, long enough that a paid 28-minute render was abandoned at 45 while being collected.
+export const SCENE_DEADLINE_HOST_RUNPOD_MS = 60 * 60_000;
 export const SCENE_DEADLINE_MOTION_MS = 20 * 60_000;
 export const SCENE_DEADLINE_STILL_MS = 20 * 60_000;
 
@@ -7887,6 +7898,9 @@ export const SCENE_DEADLINE_STILL_MS = 20 * 60_000;
  * lane slots. `renderTaskIds` is deliberately NOT cleared, so a Retry re-polls the provider task
  * instead of re-paying a submit.
  */
+/** Scenes `withSceneDeadline` has given up on — their still-running render path must not resubmit. */
+const abandonedScenes = new WeakSet<StoryboardScene>();
+
 async function withSceneDeadline(
   scene: StoryboardScene,
   ms: number,
@@ -7908,6 +7922,11 @@ async function withSceneDeadline(
       expired,
     ]);
     if (outcome === "expired") {
+      // The race's loser keeps running: `processOne` cannot be cancelled, so it is told, via
+      // this set, that the scene has been given up on. `runChunkTasks` checks it before any
+      // submit or resubmit — otherwise the abandoned path treated its own cancelled job as a
+      // transient failure and quietly submitted a fresh render nobody was waiting for.
+      abandonedScenes.add(scene);
       scene.sceneStatus = "failed";
       scene.error = `Clip: scene exceeded ${Math.round(ms / 60_000)}min wall clock (worker abandoned)`;
       console.error(

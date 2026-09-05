@@ -51,9 +51,14 @@ export interface GroupPlan {
   members: StoryboardScene[]; // excludes the leader
 }
 
-/** The plate a scene syncs from: photo choice plus, with host plates on, the plate itself. */
+/**
+ * The plate a scene syncs from: photo choice plus, with host plates on, the plate itself.
+ * NOT the plate CONTEXT: the storyboard writes a context string on every host scene whether
+ * or not plates are generated, and keying on it left every real film ungrouped (two solo
+ * calls, 1,859 GPU-s, where one call would have done).
+ */
 const plateKeyOf = (s: StoryboardScene) =>
-  `${s.hostShot ?? 0}|${s.hostPlateUrl ?? ""}|${s.hostPlateContext ?? ""}`;
+  `${s.hostShot ?? 0}|${s.hostPlateUrl ?? ""}`;
 const onMaster = (s: StoryboardScene) =>
   s.narrationStartSec != null &&
   s.narrationEndSec != null &&

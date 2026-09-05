@@ -381,6 +381,21 @@ export class RunpodLipsyncAdapter {
               `move the endpoint to a faster GPU, or raise RUNPOD_LIPSYNC_EXECUTION_TIMEOUT_MS.`,
           };
         }
+        // CANCELLED is a decision, not a fault: the app cancels a render it has given up on
+        // (`withSceneDeadline`) and an operator can cancel from the dashboard. Treating it as
+        // an infrastructure failure resubmitted the same render — twice in one day a cancelled
+        // job came back as a fresh one nobody was polling, billing to completion for nothing.
+        if (data.status === "CANCELLED") {
+          console.log(
+            `[RunPod] Job ${taskId} was cancelled — not resubmitting`
+          );
+          return {
+            success: false,
+            taskId,
+            terminal: true,
+            error: `RunPod job was cancelled (${detail.slice(0, 200)})`,
+          };
+        }
         console.log(`[RunPod] Job ${taskId} terminal: ${detail.slice(0, 300)}`);
         return {
           success: false,
