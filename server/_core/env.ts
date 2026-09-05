@@ -183,6 +183,20 @@ export const ENV = {
    * narration a group may carry. Defaults sized to ~6-14 min per beat; raise both once the
    * compiler and the step cut have landed.
    */
+  /**
+   * Audio-guidance schedule: keep audio guidance (and its extra model pass per step) on only
+   * the first fraction of the active steps — the mouth's shape is settled early, the late
+   * steps refine texture. 0.5 halves the guidance cost. Unset = guidance on every step.
+   */
+  runpodLipsyncAudioCfgSteps: process.env.RUNPOD_LIPSYNC_AUDIO_CFG_STEPS
+    ? Number(process.env.RUNPOD_LIPSYNC_AUDIO_CFG_STEPS)
+    : undefined,
+  /**
+   * Weight quantization in the worker's model loader (`fp8_e4m3fn_fast` etc.); the bf16
+   * weights are cast at load. Unset = the workflow's own setting (bf16, no quantization).
+   */
+  runpodLipsyncQuantization:
+    process.env.RUNPOD_LIPSYNC_QUANTIZATION || undefined,
   runpodLipsyncBatch: Math.max(
     1,
     Math.round(Number(process.env.RUNPOD_LIPSYNC_BATCH ?? 2)) || 1

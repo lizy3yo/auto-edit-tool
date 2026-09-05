@@ -3116,6 +3116,8 @@ async function resolveLipsyncLane(
           motionFrame: ENV.runpodLipsyncMotionFrame,
           fetaWeight: ENV.runpodLipsyncFetaWeight,
           torchCompile: ENV.runpodLipsyncTorchCompile,
+          audioCfgSteps: ENV.runpodLipsyncAudioCfgSteps,
+          quantization: ENV.runpodLipsyncQuantization,
           width,
           height,
         });

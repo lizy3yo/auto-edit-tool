@@ -56,6 +56,10 @@ export interface RunpodLipsyncParams {
   fetaWeight?: number;
   /** `false` unlinks the worker's torch.compile node for this render; undefined = the workflow default (on). */
   torchCompile?: boolean;
+  /** Fraction (0-1) of the active steps that keep audio guidance; undefined = every step. */
+  audioCfgSteps?: number;
+  /** Model-loader weight quantization, e.g. `fp8_e4m3fn_fast`; undefined = the workflow's own. */
+  quantization?: string;
   /** Our own TTS narration (R2 URL). Drives both the mouth and the clip's length. */
   audioUrl: string;
   /** InfiniteTalk direction — see `buildLipsyncPrompt`; short and framing-focused. */
@@ -219,6 +223,10 @@ export class RunpodLipsyncAdapter {
           ? { feta_weight: params.fetaWeight }
           : {}),
         ...(params.torchCompile === false ? { torch_compile: false } : {}),
+        ...(params.audioCfgSteps != null
+          ? { audio_cfg_steps: params.audioCfgSteps }
+          : {}),
+        ...(params.quantization ? { quantization: params.quantization } : {}),
         width: params.width,
         height: params.height,
         quality: this.quality,

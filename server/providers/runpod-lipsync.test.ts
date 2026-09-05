@@ -192,11 +192,23 @@ describe("RunpodLipsyncAdapter.submitLipsync", () => {
       "motion_frame",
       "feta_weight",
       "torch_compile",
+      "audio_cfg_steps",
+      "quantization",
     ])
       expect(calls[1].body.input).not.toHaveProperty(k);
     // The compiler is on in the workflow; only an explicit OFF is sent.
     await adapter.submitLipsync({ ...params, torchCompile: false });
     expect(calls[2].body.input).toMatchObject({ torch_compile: false });
+    // Cost dials: guidance on the first half of the steps, fp8 weights.
+    await adapter.submitLipsync({
+      ...params,
+      audioCfgSteps: 0.5,
+      quantization: "fp8_e4m3fn_fast",
+    });
+    expect(calls[3].body.input).toMatchObject({
+      audio_cfg_steps: 0.5,
+      quantization: "fp8_e4m3fn_fast",
+    });
   });
 
   it("passes quality=full through so the 40-step workflow is selectable per render", async () => {

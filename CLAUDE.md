@@ -91,7 +91,8 @@ Gemini, OpenAI, R2, RunPod. Missing ones fail loudly at the first stage that nee
 | `ASSEMBLY_CACHE_MAX_GB`         | 20              | `ASSEMBLY_CACHE_DIR`                  | tmp/longform-assembly-cache  |
 | `RUNPOD_LIPSYNC_TIMEOUT_MS`     | 35 min (poll)   | `RUNPOD_LIPSYNC_EXECUTION_TIMEOUT_MS` | 40 min (per-job GPU cap)     |
 | `RUNPOD_LIPSYNC_TORCH_COMPILE`  | on (`0` = off)  | `RUNPOD_LIPSYNC_BATCH`                | 2 beats per call (`1` = off) |
-| `RUNPOD_LIPSYNC_BATCH_MAX_SEC`  | 14 s per call   |                                       |                              |
+| `RUNPOD_LIPSYNC_BATCH_MAX_SEC`  | 14 s per call   | `RUNPOD_LIPSYNC_AUDIO_CFG_STEPS`      | unset (all steps guided)     |
+| `RUNPOD_LIPSYNC_QUANTIZATION`   | unset (bf16)    |                                       |                              |
 
 `RUNPOD_LIPSYNC_EXECUTION_TIMEOUT_MS` is sent with every submit as RunPod's `policy.executionTimeout`
 and overrides the endpoint's own setting (dashboard default 20 min). InfiniteTalk at 720p on the
@@ -199,7 +200,17 @@ Express · tRPC · Drizzle · MySQL.
   real slice lengths. The group's LEADER carries the task id and cut list (`scene.lipsyncGroup`),
   members are marked `rendering` and never dispatched alone while their leader is in the batch;
   a member whose leader is gone renders solo (paid again, never lost). The compiler is wired
-  into the worker's workflows (`RUNPOD_LIPSYNC_TORCH_COMPILE=0` unlinks it per job). DELIVERY is
+  into the worker's workflows (`RUNPOD_LIPSYNC_TORCH_COMPILE=0` unlinks it per job). Two more
+  COST dials ride the same override contract and are judge-gated (one scene, one variable, the
+  three measure scripts against the accepted clip): `RUNPOD_LIPSYNC_AUDIO_CFG_STEPS` keeps
+  audio guidance — and its second model pass per step, ~45% of a beat's GPU time — on only the
+  first fraction of the active steps (the mouth's shape is settled early; the sampler takes a
+  per-step list and skips the pass where the value is 1.0, delivered via a KJNodes
+  StringToFloatList node the handler inserts), and `RUNPOD_LIPSYNC_QUANTIZATION` casts the bf16
+  weights to fp8 at load (`fp8_e4m3fn_fast`, native on Blackwell). The floor with guidance on
+  every step is ~$0.05/s; the schedule is the lever that reaches ~$0.03/s at HeyGen's measured
+  quality (mouth-tracking r 0.21, closure 0.059) — `scripts/lipsync-bench.mts` prints GPU-s per
+  finished second beside the three verdicts for exactly that comparison. DELIVERY is
   script-based (`server/delivery.ts`): before the master is voiced, one Claude call reads the
   script paragraph by paragraph and returns a pace (slow/measured/natural/brisk → ±15% on the
   channel's speed dial), a pause to leave after it (0/300/600 ms of -56 dBFS room tone, not
