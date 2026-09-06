@@ -184,12 +184,22 @@ export const ENV = {
    * measured as a 4-5x face/torso jump at frame 82 with the background flat). Enhance-A-Video
    * strengthens coherence INSIDE a window, which can make the boundary stand out more.
    */
-  // Overlap 25 (the worker's own default) now that `lipsyncSeams.ts` repairs the handoffs
-  // that made 37 necessary: 56 new frames per window instead of 44. Enhance-A-Video 0: it
-  // made the boundary stand out and cost a subject cut at frame 81.
+  // 37, not the worker's default 25. Dropping to 25 was justified by "`lipsyncSeams.ts`
+  // repairs the handoffs that made 37 necessary" — and that was wrong in a way only a viewer
+  // caught. The repair fixes a ONE-FRAME jump. Measured on the same join frame of the same
+  // sentence, 2 s run-up, overlap 37 vs 25:
+  //
+  //   overlap 37   f29 .0004  f30 .0021  f31 .0160  f32 .0018  f33 .0105  f34 .0005
+  //   overlap 25   f29 .0006  f30 .0057  f31 .0075  f32 .0061  f33 .0062  f34 .0070
+  //
+  // 37 gives one sharp spike the repair is built for and the eye skips over. 25 gives a
+  // SUSTAINED plateau: with less context carried across, the new window renders the head at a
+  // slightly different scale and the model itself blends over ~6 frames — a quarter-second
+  // morph that reads as a dissolve mid-sentence, and that no spike-based check can see.
+  // Costs what it saves: 44 new frames per window instead of 56, so ~27% more windows.
   runpodLipsyncMotionFrame: process.env.RUNPOD_LIPSYNC_MOTION_FRAME
     ? Number(process.env.RUNPOD_LIPSYNC_MOTION_FRAME)
-    : 25,
+    : 37,
   runpodLipsyncFetaWeight: process.env.RUNPOD_LIPSYNC_FETA_WEIGHT
     ? Number(process.env.RUNPOD_LIPSYNC_FETA_WEIGHT)
     : 0,

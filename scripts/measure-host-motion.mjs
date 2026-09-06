@@ -119,6 +119,20 @@ const CUT_RATIO_LIMIT = 3.5;
  */
 const HANDOFF_RATIO_LIMIT = 1.8;
 const HANDOFF_ABS_FLOOR = 0.3;
+/**
+ * A handoff can also fail WITHOUT a spike, and that one reached a viewer before any check saw
+ * it: with too little context carried across (`motion_frame` 25), the new window renders the
+ * subject at a slightly different scale and the model blends its way there over ~6 frames — a
+ * quarter-second morph mid-sentence. Measured on the same join of the same sentence, whole
+ * frame: overlap 37 gave .0021 / [.0160] / .0018 (one frame, settled), overlap 25 gave .0057 /
+ * [.0075] / .0061 / .0062 / .0070 (still moving six frames on).
+ *
+ * A settle-length rule on the SUBJECT region was tried here and could not separate the two —
+ * that series is dominated by her own movement, and both clips read the same. The signal lives
+ * in the WHOLE frame (the background is where a scale change shows), which this script does not
+ * currently carry. Left unbuilt rather than shipped green: a check that passes a clip with a
+ * visible defect is worse than no check. The cure is upstream anyway — `motion_frame` 37.
+ */
 const WINDOW_FRAMES = 81;
 const FACE_REGION = [0.38, 0.15, 0.24, 0.3];
 /** Blur radius that removes fabric/knit texture, leaving only real displacement. */

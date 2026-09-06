@@ -201,7 +201,14 @@ Express · tRPC · Drizzle · MySQL.
   metric never saw it). The handoff frames are arithmetic (81 + k·(81−overlap) − trimmed lead),
   each is judged against its own neighbourhood, and one that stands out gets the two frames
   either side replaced by motion-compensated interpolations, so the change spreads over ~200 ms.
-  Frame count and audio are untouched; any failure keeps the clip as rendered. Host beats are
+  Frame count and audio are untouched; any failure keeps the clip as rendered. That repair is
+  for a ONE-FRAME jump, and `motion_frame` must stay wide enough (37, not the worker's 25) for
+  the join to BE one: measured on the same join of the same sentence, overlap 37 gives a single
+  spike the eye skips (.0021 / .0160 / .0018) while overlap 25 gives a sustained plateau (.0057
+  / .0075 / .0061 / .0062 / .0070) — with less context carried across, the new window renders
+  the head at a slightly different scale and the model blends its way there over a quarter of a
+  second, which a viewer reads as a dissolve mid-sentence. Dropping to 25 to save ~27% of the
+  windows was a false economy, and no spike-based check could see it. Host beats are
   rendered in GROUPS (`server/lipsyncBatch.ts`, `RUNPOD_LIPSYNC_BATCH`, default 2): a solo beat
   pays for ~40% frames nobody sees (the run-up and the padding out to the last 81-frame
   window), so consecutive host scenes sharing a photo/plate are packed into one call — run-up,
