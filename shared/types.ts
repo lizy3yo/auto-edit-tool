@@ -255,6 +255,13 @@ export interface StoryboardScene {
    * movement belongs to the line instead of being generic. Free — no extra render.
    */
   gestureCue?: string;
+  /**
+   * Which camera conditioning this scene's lip-sync ACTUALLY rendered with (`server/
+   * cameraPlate.ts`). `pinned` is the intended path; `photo` means the plate build failed and
+   * the render fell back — a measured quality cliff (background morph, plainer body), so it is
+   * recorded rather than left to be inferred from the picture.
+   */
+  lipsyncConditioning?: "photo" | "pinned";
   /** Whether the on-camera host appears (gets the reference face + face-lock) */
   hostPresent: boolean;
   /**

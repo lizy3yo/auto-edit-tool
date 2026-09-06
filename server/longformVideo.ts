@@ -3079,8 +3079,14 @@ async function resolveLipsyncLane(
               audioDurationSec ?? scene.audioDuration ?? 60
             );
           } catch (e: any) {
-            console.warn(
-              `[Longform] camera plate failed (${e?.message ?? e}) — falling back to photo conditioning`
+            // Loud, not a warning: this is a measured quality cliff, not a nicety. Photo
+            // conditioning re-hallucinates the background (morph 2.22 vs a 1.0 limit) and
+            // swaps in the "calm and still" direction, so the render loses the body, brow
+            // and background work the pinned path carries.
+            console.error(
+              `[Longform] camera plate FAILED after retries (${e?.message ?? e}) — this scene ` +
+                `renders with photo conditioning: expect background drift and a plainer body. ` +
+                `Usually a transient R2/network failure; see server/cameraPlate.ts.`
             );
           }
         }
@@ -3088,6 +3094,9 @@ async function resolveLipsyncLane(
         // the plate failed and this render fell back to the photo, the pinned wording (no body
         // suppression) on top of I2V is the worst of both — free to sway AND free to drift.
         const conditioning: LipsyncCameraMode = videoUrl ? "pinned" : "photo";
+        // Recorded on the scene so a degraded render is visible afterwards instead of being
+        // a mystery: every quality judgement depends on which of the two paths actually ran.
+        scene.lipsyncConditioning = conditioning;
         return runpod.submitLipsync({
           imageUrl,
           videoUrl,
@@ -3947,7 +3956,16 @@ export const LIPSYNC_HOST_DIRECTION =
   "close-up, face large and centered, looking at the lens. Clear, precise lip-sync: " +
   "their mouth articulates every word and stays fully visible, hands never near their " +
   "face. They are calm and still — torso, shoulders, and head barely move, no swaying " +
-  "or gesturing, hands resting quietly out of frame. One person speaking, no one else talking. " +
+  "or gesturing, hands resting quietly out of frame. " +
+  // The BODY stays suppressed here and only here: with no plate holding the frame, "sway"
+  // and "camera drift" are the same failure in I2V, so freeing the body would buy drift.
+  // The FACE is a different matter, and a fallback render used to lose all of it — the
+  // reference clips do their work with the lips while the brows stay alive, and none of that
+  // risks the frame. So the mouth-region balance is carried over, the body clause is not.
+  "The work is done by the lips alone: the jaw and cheeks stay quiet and settle softly " +
+  "between words, never chewing or working, while the eyes stay soft and warm as in the " +
+  "reference photo and the brows lift briefly on the words that matter. " +
+  "One person speaking, no one else talking. " +
   // Wan I2V's documented default is a mild push-in toward the speaker when the prompt says
   // nothing about the camera, so the camera must be named explicitly. The background sentence
   // attacks the other half of the drift — objects being slowly re-hallucinated ("the chair

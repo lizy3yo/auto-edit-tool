@@ -181,7 +181,16 @@ Express · tRPC · Drizzle · MySQL.
   built per render by `server/cameraPlate.ts` (V2V mimics the input's camera; a video where
   nothing moves has none to mimic — the InfiniteTalk maintainer's own fix). The operator
   still only uploads a photo; plates are bucketed 15s and cached per (photo, bucket), and
-  any plate failure falls back to photo conditioning. The RunPod lane also hands the worker a
+  any plate failure falls back to photo conditioning — which is a measured quality CLIFF, not a
+  nicety: a render whose plate build failed (transient R2 unreachability) came back with
+  background morph 2.22 against a 1.0 limit and a plain body, because the PHOTO direction says
+  "calm and still" while every body/brow improvement lives on the PINNED one. So the build
+  retries with backoff (`PLATE_ATTEMPTS`) before giving up, the fallback logs at error level,
+  and the lane records `scene.lipsyncConditioning` so a degraded render is visible afterwards
+  instead of having to be inferred from the picture. The photo direction now carries the
+  mouth-region half of the pinned work (lips do the work, jaw and cheeks quiet, brows alive)
+  but keeps its body suppression: with no plate holding the frame, "sway" and "camera drift"
+  are the same failure in I2V. The RunPod lane also hands the worker a
   RUN-UP (`server/lipsyncLead.ts`, `RUNPOD_LIPSYNC_LEAD_SEC`, default 2): the model starts
   from a frozen photo and its first ~2 s are a talking statue, so the preceding narration is
   prepended and that much trimmed off the returned clip (`trimClipHead` in `runChunkTasks`,

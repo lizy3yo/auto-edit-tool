@@ -18,6 +18,14 @@
  *
  * Failures throw; the lip-sync lane catches and falls back to the plain photo path, same
  * fail-open shape as `hostPlate.ts` — a worse render beats no render.
+ *
+ * But that fallback is EXPENSIVE in quality, and it was silent. Measured on a render where
+ * R2 was briefly unreachable (`UND_ERR_CONNECT_TIMEOUT` on Cloudflare's anycast IPs): every
+ * host scene fell through to photo conditioning, background morph came back at 2.22 against
+ * a limit of 1.0, and the body read plain — because the PHOTO direction deliberately says
+ * "calm and still" while every recent body/brow improvement lives on the PINNED one. So the
+ * build now retries with backoff before giving up (a plate serves the whole render, so it is
+ * worth seconds), and the lane records which conditioning actually ran on the scene.
  */
 import path from "path";
 import os from "os";
@@ -40,6 +48,14 @@ const PLATE_FPS = 25;
 const plateCache = new Map<string, Promise<string>>();
 
 /**
+ * Attempts at building one plate before the caller falls back to photo conditioning, and the
+ * pause before each retry. Sized against the failure this exists for — a network blip of a few
+ * seconds — and cheap: the encode itself is ~1 s of a static frame.
+ */
+const PLATE_ATTEMPTS = 3;
+const PLATE_RETRY_MS = [0, 3_000, 9_000];
+
+/**
  * Build (or reuse) a static video of `imageUrl` at least `durationSec` long and return its
  * R2 public URL.
  */
@@ -55,13 +71,35 @@ export async function buildCameraPlate(
   const key = `${imageUrl}|${bucket}`;
   let pending = plateCache.get(key);
   if (!pending) {
-    pending = encodePlate(imageUrl, bucket).catch(err => {
+    pending = encodePlateWithRetries(imageUrl, bucket).catch(err => {
       plateCache.delete(key);
       throw err;
     });
     plateCache.set(key, pending);
   }
   return pending;
+}
+
+/** `encodePlate` with backoff — see `PLATE_ATTEMPTS`. Throws the last error. */
+async function encodePlateWithRetries(
+  imageUrl: string,
+  seconds: number
+): Promise<string> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < PLATE_ATTEMPTS; attempt++) {
+    if (PLATE_RETRY_MS[attempt])
+      await new Promise(r => setTimeout(r, PLATE_RETRY_MS[attempt]));
+    try {
+      return await encodePlate(imageUrl, seconds);
+    } catch (err: any) {
+      lastErr = err;
+      console.warn(
+        `[CameraPlate] build attempt ${attempt + 1}/${PLATE_ATTEMPTS} failed ` +
+          `(${err?.message ?? err})${attempt + 1 < PLATE_ATTEMPTS ? " — retrying" : ""}`
+      );
+    }
+  }
+  throw lastErr;
 }
 
 async function encodePlate(imageUrl: string, seconds: number): Promise<string> {
