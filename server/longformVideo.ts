@@ -3046,10 +3046,15 @@ async function resolveLipsyncLane(
     ENV.runPodApiKey
   ) {
     // InfiniteTalk renders exactly what it is asked for, so the resolution hint is a real
-    // argument here (HeyGen ignores one and always returns 1080p). Both sizes are Wan 2.1
-    // natives and divisible by 16 — off-grid dimensions get silently rounded.
+    // argument here (HeyGen ignores one and always returns 1080p). All three are divisible by
+    // 16 — off-grid dimensions get silently rounded — but only 480p and 720p are Wan 2.1
+    // natives; 1080p is off-distribution and ~2.25x the GPU seconds (see `lipsyncResolution`).
     const [width, height] =
-      LIPSYNC_RESOLUTION === "720p" ? [1280, 720] : [832, 480];
+      LIPSYNC_RESOLUTION === "1080p"
+        ? [1920, 1080]
+        : LIPSYNC_RESOLUTION === "720p"
+          ? [1280, 720]
+          : [832, 480];
     const runpod = new RunpodLipsyncAdapter(
       ENV.runpodInfinitetalkEndpoint,
       ENV.runPodApiKey,
@@ -6722,7 +6727,7 @@ export function describeIncompleteScenes(
  * `LIPSYNC_RESOLUTION`, 720p by default IN EVERY ENVIRONMENT — it used to key off NODE_ENV,
  * which quietly made local test renders 480p and every dev-box A/B non-representative.
  */
-const LIPSYNC_RESOLUTION: "480p" | "720p" = ENV.lipsyncResolution;
+const LIPSYNC_RESOLUTION: "480p" | "720p" | "1080p" = ENV.lipsyncResolution;
 
 /**
  * Short poll ceiling used when RESUMING an already-submitted render (retry / watchdog).

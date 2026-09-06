@@ -101,11 +101,18 @@ export const ENV = {
    * 480p on a dev box — which meant every local A/B of the InfiniteTalk lane was judging a
    * different product (softer, 2.25x fewer pixels, faster and cheaper) than the deploy
    * ships. Opt into 480p explicitly for cheap experiments; never inherit it from the env.
+   *
+   * `1080p` is selectable and deliberately NOT the default. It is the only way to close the
+   * real gap to HeyGen's native 1080p — a 720p host clip is upscaled 1.5x into the film, and
+   * that is what reads as soft around the eyes — but it costs what it says: 2.25x the pixels
+   * is ~2.25x the GPU seconds, and the checkpoint (`wan2.1_i2v_720p_14B`) is TRAINED at 720p,
+   * so 1080p is off-distribution and can duplicate features rather than add detail. Judge one
+   * scene with `scripts/lipsync-bench.mts` before believing it is better, not just dearer.
    */
   lipsyncResolution:
-    (process.env.LIPSYNC_RESOLUTION ?? "720p").toLowerCase() === "480p"
-      ? ("480p" as const)
-      : ("720p" as const),
+    (["480p", "720p", "1080p"] as const).find(
+      r => r === (process.env.LIPSYNC_RESOLUTION ?? "720p").toLowerCase()
+    ) ?? "720p",
   /**
    * Pinned-camera anchor dial, sent to the worker's V2V sampler when set. `steps` is the
    * total schedule and `start_step` how many are skipped at the noisy end — active steps =

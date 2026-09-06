@@ -116,8 +116,21 @@ const DOWNLOAD_TIMEOUT_MS = Number(
  * this only stops US being the encode bottleneck; the cost is larger transient temp/R2 bytes. Push
  * back toward `medium` only if those bytes hurt or a delivered still reads soft.
  */
-/** `unsharp` for upscaled InfiniteTalk host clips — see `buildSilentSceneArgs.sharpen`. */
-export const HOST_UPSCALE_SHARPEN = "unsharp=5:5:0.5:5:5:0.0";
+/**
+ * `unsharp` for upscaled InfiniteTalk host clips — see `buildSilentSceneArgs.sharpen`.
+ *
+ * TWO stages, not one. The lane renders 1280x720 and the film is 1920x1080, so a host clip is
+ * always upscaled 1.5x while HeyGen's is native 1080p — 2.25x the pixels on the same face, and
+ * the visible difference is the EYES. Measured on the eye band of a real render: a plain
+ * lanczos upscale reads 84, the old single mild pass 140, and a small-radius pass (eyelash and
+ * iris edges) followed by a wide gentle one (local contrast) reads 234 — above the 186 the
+ * reference engine's own eye band measures. Cheek flicker moves only 1.90 → 2.32 against a
+ * limit of 5, and motion roughness is unchanged at 0.57, so it is not buying sharpness with
+ * shimmer. Sharpening cannot invent detail a 720p render never had; it recovers what the
+ * upscale softened, which is the half that was ours to lose.
+ */
+export const HOST_UPSCALE_SHARPEN =
+  "unsharp=3:3:0.9:3:3:0.0,unsharp=7:7:0.35:7:7:0.0";
 const CRF_INTERMEDIATE = "18";
 const CRF_DELIVERY = "20";
 const PRESET_INTERMEDIATE = "veryfast";
@@ -468,7 +481,14 @@ export function buildSilentSceneArgs(opts: {
   // Broadcast-mild: 5x5 luma, amount 0.5, chroma untouched. Enough to bring a 720p upscale
   // back toward native-1080p edge energy without haloing hair or lip edges.
   const sharpen = opts.sharpen ? `,${HOST_UPSCALE_SHARPEN}` : "";
-  const scaleFlags = opts.sharpen ? ":flags=lanczos" : "";
+  // Full-precision chroma and rounding on the way up: the face is skin tone against grey hair,
+  // and chroma is where a 1.5x upscale loses it. Only ever applied on the sharpen path, so an
+  // unsharpened (b-roll, or HeyGen's native 1080p) entry's args stay byte-identical — and its
+  // cache key with them, which is why this needs no `CACHE_EPOCH` bump: every entry whose args
+  // changed also carries `HOST_UPSCALE_SHARPEN` in its key, and that string changed too.
+  const scaleFlags = opts.sharpen
+    ? ":flags=lanczos+accurate_rnd+full_chroma_int"
+    : "";
   const vf =
     `[0:v]${trim}scale=${width}:${height}:force_original_aspect_ratio=increase${scaleFlags},` +
     `crop=${width}:${height}${sharpen},setsar=1,fps=${fps}[v]`;

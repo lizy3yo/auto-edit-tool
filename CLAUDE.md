@@ -69,30 +69,30 @@ Gemini, OpenAI, R2, RunPod. Missing ones fail loudly at the first stage that nee
 
 ## Optional tuning vars (defaults from code; most are not in `.env.example`)
 
-| Var                             | Default         | Var                                   | Default                      |
-| ------------------------------- | --------------- | ------------------------------------- | ---------------------------- |
-| `FFMPEG_PATH`                   | auto-probe      | `FFMPEG_CONCURRENCY`                  | cpu-derived                  |
-| `FFMPEG_PROBE_MAX_MS`           | 600s            | `ASSEMBLY_DOWNLOAD_TIMEOUT_MS`        | 120s                         |
-| `PROBE_MAX_MS`                  | 60s             | `BROLL_NO_KEYFRAME`                   | unset (`1` disables)         |
-| `R2_CONNECTION_TIMEOUT_MS`      | 10s             | `R2_REQUEST_TIMEOUT_MS`               | 120s                         |
-| `APIMART_RATE_PER_MIN`          | 40              | `APIMART_BURST`                       | 5                            |
-| `HEYGEN_CONCURRENCY`            | 8               | `HEYGEN_CALL_TIMEOUT_MS`              | 120s                         |
-| `HEYGEN_DOWNLOAD_TIMEOUT_MS`    | 300s            | `OPENAI_IMAGE_CALL_TIMEOUT_MS`        | 300s                         |
-| `OPENAI_IMAGE_BURST`            | 1               | `OPENAI_IMAGE_RATE_PER_MIN`           | 50 (Tier-3 cap)              |
-| `SIXTYNINE_VIDEO_CONCURRENCY`   | 8               | `SIXTYNINE_IMAGE_CONCURRENCY`         | 7                            |
-| `SIXTYNINE_VIDEO_TIMEOUT_MS`    | 360s            | `SIXTYNINE_CALL_TIMEOUT_MS`           | 120s                         |
-| `SIXTYNINE_DOWNLOAD_TIMEOUT_MS` | 300s            | `SIXTYNINE_VIDEO_SUBMIT_BURST`        | 2                            |
-| `SIXTYNINE_VIDEO_SUBMIT_RATE`   | 5/min (API cap) | `IMAGE_PRIMARY_TIMEOUT_MS`            | 480s                         |
-| `SIXTYNINE_TTS_SUBMIT_RATE`     | 20/min          | `SIXTYNINE_TTS_SUBMIT_BURST`          | 3                            |
-| `IMAGE_PRIMARY_RETRIES`         | 1               | `IMAGE_RETRY_TIMEOUT_MS`              | 240s                         |
-| `IMAGE_RETRY_TOTAL_BUDGET_MS`   | 600s            | `MYSQL_SORT_BUFFER_SIZE`              | 8 MB                         |
-| `AUTO_MIGRATE`                  | on (`0` skips)  | `ASSEMBLY_CACHE`                      | on (`0` skips)               |
-| `LIPSYNC_RESOLUTION`            | 720p (all envs) | `RUNPOD_LIPSYNC_INPUT`                | image (`video` = pinned)     |
-| `ASSEMBLY_CACHE_MAX_GB`         | 20              | `ASSEMBLY_CACHE_DIR`                  | tmp/longform-assembly-cache  |
-| `RUNPOD_LIPSYNC_TIMEOUT_MS`     | 35 min (poll)   | `RUNPOD_LIPSYNC_EXECUTION_TIMEOUT_MS` | 40 min (per-job GPU cap)     |
-| `RUNPOD_LIPSYNC_TORCH_COMPILE`  | off (`1` = on)  | `RUNPOD_LIPSYNC_BATCH`                | 2 beats per call (`1` = off) |
-| `RUNPOD_LIPSYNC_BATCH_MAX_SEC`  | 14 s per call   | `RUNPOD_LIPSYNC_AUDIO_CFG_STEPS`      | 0.5 (first half guided)      |
-| `RUNPOD_LIPSYNC_QUANTIZATION`   | fp8_e4m3fn      |                                       |                              |
+| Var                             | Default           | Var                                   | Default                      |
+| ------------------------------- | ----------------- | ------------------------------------- | ---------------------------- |
+| `FFMPEG_PATH`                   | auto-probe        | `FFMPEG_CONCURRENCY`                  | cpu-derived                  |
+| `FFMPEG_PROBE_MAX_MS`           | 600s              | `ASSEMBLY_DOWNLOAD_TIMEOUT_MS`        | 120s                         |
+| `PROBE_MAX_MS`                  | 60s               | `BROLL_NO_KEYFRAME`                   | unset (`1` disables)         |
+| `R2_CONNECTION_TIMEOUT_MS`      | 10s               | `R2_REQUEST_TIMEOUT_MS`               | 120s                         |
+| `APIMART_RATE_PER_MIN`          | 40                | `APIMART_BURST`                       | 5                            |
+| `HEYGEN_CONCURRENCY`            | 8                 | `HEYGEN_CALL_TIMEOUT_MS`              | 120s                         |
+| `HEYGEN_DOWNLOAD_TIMEOUT_MS`    | 300s              | `OPENAI_IMAGE_CALL_TIMEOUT_MS`        | 300s                         |
+| `OPENAI_IMAGE_BURST`            | 1                 | `OPENAI_IMAGE_RATE_PER_MIN`           | 50 (Tier-3 cap)              |
+| `SIXTYNINE_VIDEO_CONCURRENCY`   | 8                 | `SIXTYNINE_IMAGE_CONCURRENCY`         | 7                            |
+| `SIXTYNINE_VIDEO_TIMEOUT_MS`    | 360s              | `SIXTYNINE_CALL_TIMEOUT_MS`           | 120s                         |
+| `SIXTYNINE_DOWNLOAD_TIMEOUT_MS` | 300s              | `SIXTYNINE_VIDEO_SUBMIT_BURST`        | 2                            |
+| `SIXTYNINE_VIDEO_SUBMIT_RATE`   | 5/min (API cap)   | `IMAGE_PRIMARY_TIMEOUT_MS`            | 480s                         |
+| `SIXTYNINE_TTS_SUBMIT_RATE`     | 20/min            | `SIXTYNINE_TTS_SUBMIT_BURST`          | 3                            |
+| `IMAGE_PRIMARY_RETRIES`         | 1                 | `IMAGE_RETRY_TIMEOUT_MS`              | 240s                         |
+| `IMAGE_RETRY_TOTAL_BUDGET_MS`   | 600s              | `MYSQL_SORT_BUFFER_SIZE`              | 8 MB                         |
+| `AUTO_MIGRATE`                  | on (`0` skips)    | `ASSEMBLY_CACHE`                      | on (`0` skips)               |
+| `LIPSYNC_RESOLUTION`            | 720p (480p/1080p) | `RUNPOD_LIPSYNC_INPUT`                | image (`video` = pinned)     |
+| `ASSEMBLY_CACHE_MAX_GB`         | 20                | `ASSEMBLY_CACHE_DIR`                  | tmp/longform-assembly-cache  |
+| `RUNPOD_LIPSYNC_TIMEOUT_MS`     | 35 min (poll)     | `RUNPOD_LIPSYNC_EXECUTION_TIMEOUT_MS` | 40 min (per-job GPU cap)     |
+| `RUNPOD_LIPSYNC_TORCH_COMPILE`  | off (`1` = on)    | `RUNPOD_LIPSYNC_BATCH`                | 2 beats per call (`1` = off) |
+| `RUNPOD_LIPSYNC_BATCH_MAX_SEC`  | 14 s per call     | `RUNPOD_LIPSYNC_AUDIO_CFG_STEPS`      | 0.5 (first half guided)      |
+| `RUNPOD_LIPSYNC_QUANTIZATION`   | fp8_e4m3fn        |                                       |                              |
 
 `RUNPOD_LIPSYNC_EXECUTION_TIMEOUT_MS` is sent with every submit as RunPod's `policy.executionTimeout`
 and overrides the endpoint's own setting (dashboard default 20 min). InfiniteTalk at 720p on the
@@ -259,7 +259,16 @@ Express · tRPC · Drizzle · MySQL.
   invents them (one reference clip drifts 20 in the lap band doing exactly that).
   The plan is snapshotted on `inputParams.deliveryPlan`
   so a resume voices the same film; no plan (mock mode, a failed call) means exactly the old
-  behaviour. `scripts/measure-host-motion.mjs`
+  behaviour. RESOLUTION is the one quality gap that
+  is not a prompt or a dial: the lane renders 1280x720 and the film is 1920x1080, so a host
+  clip is upscaled 1.5x while HeyGen's is native — 2.25x the pixels on the same face, and it
+  shows in the eyes. `HOST_UPSCALE_SHARPEN` recovers the half that is the upscale's fault (two
+  unsharp stages, small radius for iris and eyelash edges then wide for local contrast: the eye
+  band reads 84 plain, 140 with the old single pass, 234 with both, against 186 for the
+  reference engine's own eye band — and cheek flicker only moves 1.90 → 2.32 of a limit of 5).
+  The other half needs real pixels: `LIPSYNC_RESOLUTION=1080p` is selectable and deliberately
+  not the default, since it is ~2.25x the GPU seconds and off the checkpoint's trained 720p.
+  `scripts/measure-host-motion.mjs`
   turns "she moves too much" into numbers (per-region jitter + background morph vs frame 0)
   so a worker/prompt change is judged against the clip that prompted it, and
   `scripts/measure-lipsync.mts` (tsx; transcribes via whisperx, tracks the face with `pico.ts`)

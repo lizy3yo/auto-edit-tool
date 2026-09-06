@@ -48,9 +48,15 @@ describe("ENV.lipsyncResolution", () => {
       (await loadEnv({ LIPSYNC_RESOLUTION: "480p", NODE_ENV: "production" }))
         .lipsyncResolution
     ).toBe("480p");
-    // Junk is not an invitation to guess — it falls back to the default.
+    // 1080p is selectable now — the only way to close the real gap to HeyGen's native 1080p,
+    // at ~2.25x the GPU seconds and off the checkpoint's trained resolution.
     expect(
       (await loadEnv({ LIPSYNC_RESOLUTION: "1080p", NODE_ENV: "development" }))
+        .lipsyncResolution
+    ).toBe("1080p");
+    // Junk is still not an invitation to guess — it falls back to the default.
+    expect(
+      (await loadEnv({ LIPSYNC_RESOLUTION: "4k", NODE_ENV: "development" }))
         .lipsyncResolution
     ).toBe("720p");
   });
