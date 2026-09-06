@@ -463,11 +463,44 @@ export async function getJobCostRows(since: Date): Promise<
 export async function getLongformSlots(userId: number) {
   const db = await getDb();
   if (!db) return [];
-  return db
+  const rows = await db
     .select()
     .from(longformSlots)
     .where(eq(longformSlots.userId, userId))
     .orderBy(longformSlots.slotIndex);
+
+  // Release any slots whose jobs were deleted / no longer exist
+  const jobIds = rows
+    .map(r => r.jobId)
+    .filter((id): id is number => typeof id === "number");
+
+  if (jobIds.length > 0) {
+    const existingJobs = await db
+      .select({ id: longformVideoJobs.id })
+      .from(longformVideoJobs)
+      .where(inArray(longformVideoJobs.id, jobIds));
+    const existingSet = new Set(existingJobs.map(j => j.id));
+
+    const invalidSlots = rows.filter(
+      r => typeof r.jobId === "number" && !existingSet.has(r.jobId)
+    );
+    if (invalidSlots.length > 0) {
+      for (const slot of invalidSlots) {
+        slot.jobId = null;
+        await db
+          .update(longformSlots)
+          .set({ jobId: null })
+          .where(
+            and(
+              eq(longformSlots.userId, userId),
+              eq(longformSlots.slotIndex, slot.slotIndex)
+            )
+          );
+      }
+    }
+  }
+
+  return rows;
 }
 
 /**
@@ -492,6 +525,16 @@ export async function setLongformSlot(
     .onDuplicateKeyUpdate({ set });
 }
 
+/** Clear all slots pointing to a job across all users. */
+export async function clearLongformSlotsByJobId(jobId: number) {
+  const db = await getDb();
+  if (!db) return;
+  await db
+    .update(longformSlots)
+    .set({ jobId: null })
+    .where(eq(longformSlots.jobId, jobId));
+}
+
 /**
  * Delete a job.
  *
@@ -511,20 +554,24 @@ export async function deleteLongformVideoJob(
     .from(longformVideoJobs)
     .where(eq(longformVideoJobs.id, id))
     .limit(1);
-  if (!job.length) throw new Error("Long-form video job not found");
+  if (!job.length) {
+    // If the job row is already gone, still clear any slots pointing to it
+    await db
+      .update(longformSlots)
+      .set({ jobId: null, draftTitle: null })
+      .where(eq(longformSlots.jobId, id));
+    return;
+  }
   if (!opts.allowAny && job[0].userId !== userId) {
     throw new Error("Not authorized");
   }
   // Release any tab still pointing at this job BEFORE the row goes. There is no FK from
   // `longform_slots`, so a delete would otherwise leave a tab pinned to an id that no longer
-  // loads — and it would come back on every reload, since slots are server-persisted. The tab
-  // to clear belongs to the job's OWNER, who is not necessarily whoever pressed delete.
+  // loads — and it would come back on every reload, since slots are server-persisted.
   await db
     .update(longformSlots)
     .set({ jobId: null, draftTitle: null })
-    .where(
-      and(eq(longformSlots.userId, job[0].userId), eq(longformSlots.jobId, id))
-    );
+    .where(eq(longformSlots.jobId, id));
   await db.delete(longformVideoJobs).where(eq(longformVideoJobs.id, id));
 }
 

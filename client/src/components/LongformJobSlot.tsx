@@ -775,7 +775,20 @@ export default function LongformJobSlot({
       onJobIdChange?.(null);
       toast.success("Job cancelled");
     },
-    onError: err => toast.error(err.message),
+    onError: err => {
+      if (
+        err.data?.code === "NOT_FOUND" ||
+        err.message?.includes("Job not found")
+      ) {
+        setDownloadTitle("");
+        onTitleChange?.("");
+        setJobId(null);
+        onJobIdChange?.(null);
+        toast.info("Job was already removed");
+      } else {
+        toast.error(err.message);
+      }
+    },
   });
 
   const confirmClearOutput = () => {
@@ -792,24 +805,56 @@ export default function LongformJobSlot({
     );
   };
 
-  const { data: rawJob, dataUpdatedAt } = trpc.longformVideo.pollJob.useQuery(
+  const {
+    data: rawJob,
+    dataUpdatedAt,
+    error: pollError,
+  } = trpc.longformVideo.pollJob.useQuery(
     { jobId: jobId ?? 0 },
     {
       enabled: jobId !== null && jobId !== dismissedJobId,
+      retry: (failureCount, error) => {
+        if (
+          error?.data?.code === "NOT_FOUND" ||
+          error?.message?.includes("Job not found")
+        ) {
+          return false;
+        }
+        return failureCount < 3;
+      },
       refetchIntervalInBackground: true, // keep polling while the tab is hidden
       // Poll while running or while scenes are queued for regeneration; stop
       // once finished (refresh restores it via the persisted id, but a done
       // job with nothing queued shouldn't be re-fetched every 3s).
-      refetchInterval: q =>
-        q.state.data?.status === "processing" ||
-        q.state.data?.sceneEdits?.editing ||
-        queuedScenes.length > 0
-          ? 3000
-          : Date.now() < cutRoomWatchUntil
-            ? 1000
-            : false,
+      refetchInterval: q => {
+        if (
+          q.state.error?.data?.code === "NOT_FOUND" ||
+          q.state.error?.message?.includes("Job not found")
+        ) {
+          return false;
+        }
+        return q.state.data?.status === "processing" ||
+          q.state.data?.sceneEdits?.editing ||
+          queuedScenes.length > 0
+            ? 3000
+            : Date.now() < cutRoomWatchUntil
+              ? 1000
+              : false;
+      },
     }
   );
+
+  // If the server confirms this job does not exist, release the slot immediately
+  useEffect(() => {
+    if (
+      pollError &&
+      (pollError.data?.code === "NOT_FOUND" ||
+        pollError.message?.includes("Job not found"))
+    ) {
+      setJobId(null);
+      onJobIdChange?.(null);
+    }
+  }, [pollError, onJobIdChange]);
 
   const job = jobId !== null && jobId !== dismissedJobId ? rawJob : null;
 
