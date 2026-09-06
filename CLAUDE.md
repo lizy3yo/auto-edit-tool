@@ -200,7 +200,14 @@ Express · tRPC · Drizzle · MySQL.
   RUN-UP (`server/lipsyncLead.ts`, `RUNPOD_LIPSYNC_LEAD_SEC`, default 2): the model starts
   from a frozen photo and its first ~2 s are a talking statue, so the preceding narration is
   prepended and that much trimmed off the returned clip (`trimClipHead` in `runChunkTasks`,
-  lead remembered on `scene.lipsyncLeadSec` for a resume). After the trim, `server/lipsyncSeams.ts`
+  lead remembered on `scene.lipsyncLeadSec` for a resume). Its LENGTH is then snapped to the
+  render-window grid (`fitLeadToWindowGrid`): cost is a step function — 81 frames for the first
+  window, `81 - motion_frame` new ones for each after — so a run-up that pushes a beat a few
+  frames past a boundary buys a whole extra window for warm-up nobody sees. Measured on a 6.9 s
+  beat at overlap 37: 2 s made 222 frames and 5 windows, 1.64 s makes 213 and 4 — same delivered
+  picture, 20% less GPU, 82% of the warm-up kept. It only ever shrinks, never below
+  `MIN_LEAD_SEC` (1 s, under which the cold start returns), and leaves a beat that is not near a
+  boundary untouched. After the trim, `server/lipsyncSeams.ts`
   smooths the WINDOW HANDOFFS: InfiniteTalk renders 81-frame windows overlapping by
   `motion_frame`, and the person can jump where a new window begins (closed mouth to full smile
   in one frame, measured 2.8× the clip's typical frame change, background flat so the seam

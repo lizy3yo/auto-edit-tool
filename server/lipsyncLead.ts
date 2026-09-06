@@ -25,6 +25,59 @@ import { randomUUID } from "crypto";
 import { sliceAudioSegments, runFfmpeg, downloadToTemp } from "./videoAssembly";
 import { storagePut } from "./storage";
 
+/** InfiniteTalk's render window, and the frame rate the worker derives its count at. */
+const WINDOW_FRAMES = 81;
+const FPS = 25;
+/**
+ * Never trim the run-up below this: the cold start it cures is ~2 s of talking statue, and
+ * anything under a second buys back the stiff opening the run-up exists to remove.
+ */
+export const MIN_LEAD_SEC = 1;
+
+/** Windows InfiniteTalk needs for `frames`, carrying `motionFrame` across each join. */
+export function windowsFor(frames: number, motionFrame: number): number {
+  const step = WINDOW_FRAMES - motionFrame;
+  if (frames <= WINDOW_FRAMES || step <= 0) return 1;
+  return 1 + Math.ceil((frames - WINDOW_FRAMES) / step);
+}
+
+/**
+ * The largest run-up that does not buy an extra render window.
+ *
+ * Render cost is a STEP function of length: a window is 81 frames and each one after it adds
+ * `81 - motion_frame` new frames, so a beat a few frames past a boundary pays for a whole
+ * extra window. The run-up is prepended to the audio and then thrown away, so it is exactly
+ * the kind of length that can push a beat over one for nothing. Measured on a real 6.9 s beat
+ * at overlap 37: a 2 s run-up made 222 frames and 5 windows; 1.64 s makes 213 and 4 — the same
+ * delivered picture, 20% less GPU, and 82% of the warm-up kept.
+ *
+ * Only ever shrinks, never below `MIN_LEAD_SEC`, and returns `leadSec` untouched when there is
+ * no window to save — so a beat that is not near a boundary is unaffected.
+ */
+export function fitLeadToWindowGrid(opts: {
+  narrationSec: number;
+  leadSec: number;
+  motionFrame: number;
+  minLeadSec?: number;
+}): number {
+  const { narrationSec, leadSec, motionFrame } = opts;
+  const minLead = opts.minLeadSec ?? MIN_LEAD_SEC;
+  if (!(leadSec > minLead) || !(narrationSec > 0)) return leadSec;
+  const framesAt = (lead: number) => Math.round((narrationSec + lead) * FPS);
+  const asked = windowsFor(framesAt(leadSec), motionFrame);
+  const cheapest = windowsFor(framesAt(minLead), motionFrame);
+  if (cheapest >= asked) return leadSec; // nothing to save
+  // Walk down one FRAME at a time and keep the longest run-up that still lands in the
+  // cheaper window count — the warm-up is worth keeping as much of as the grid allows.
+  for (let f = framesAt(leadSec); f >= framesAt(minLead); f--) {
+    if (windowsFor(f, motionFrame) <= cheapest) {
+      const lead = f / FPS - narrationSec;
+      return Math.max(minLead, Math.round(lead * 100) / 100);
+    }
+  }
+  return minLead;
+}
+
 export interface LeadTrackScene {
   index: number;
   audioUrl?: string;

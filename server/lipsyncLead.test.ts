@@ -36,7 +36,13 @@ vi.mock("./storage", () => ({
   },
 }));
 
-import { buildLipsyncLeadTrack, trimClipHead } from "./lipsyncLead";
+import {
+  buildLipsyncLeadTrack,
+  trimClipHead,
+  fitLeadToWindowGrid,
+  windowsFor,
+  MIN_LEAD_SEC,
+} from "./lipsyncLead";
 
 /** The `-t <sec>` a silence-prepend call generated, if any. */
 const silenceSecOf = (call: string[]) =>
@@ -192,5 +198,64 @@ describe("trimClipHead", () => {
     );
     expect(inputs).toHaveLength(2);
     expect(args.indexOf("-ss")).toBeLessThan(inputs[0]);
+  });
+});
+
+describe("fitLeadToWindowGrid", () => {
+  // Render cost is a STEP function: 81 frames for the first window, then 81-motion_frame new
+  // ones each. A run-up that pushes a beat a few frames past a boundary buys a whole extra
+  // window for warm-up nobody sees.
+  it("shrinks the run-up when that saves a whole window, keeping as much of it as it can", () => {
+    // The measured case: 6.9 s beat, overlap 37 (step 44). 2 s → 222 frames → 5 windows.
+    expect(windowsFor(222, 37)).toBe(5);
+    const fitted = fitLeadToWindowGrid({
+      narrationSec: 6.897,
+      leadSec: 2,
+      motionFrame: 37,
+    });
+    expect(fitted).toBeLessThan(2);
+    expect(fitted).toBeGreaterThanOrEqual(MIN_LEAD_SEC);
+    // Same delivered picture, one window cheaper.
+    expect(windowsFor(Math.round((6.897 + fitted) * 25), 37)).toBe(4);
+    // And it keeps the LONGEST run-up that fits, not the shortest that works.
+    expect(fitted).toBeGreaterThan(1.5);
+  });
+
+  it("leaves a beat alone when shrinking would not save a window", () => {
+    // 3 s + 2 s = 125 frames, the last frame of the 2nd window at step 44; 3 s + 1 s = 100 is
+    // inside the same window. Nothing to buy, so the full run-up is kept.
+    const fitted = fitLeadToWindowGrid({
+      narrationSec: 3,
+      leadSec: 2,
+      motionFrame: 37,
+    });
+    expect(fitted).toBe(2);
+    expect(windowsFor(125, 37)).toBe(windowsFor(100, 37));
+  });
+
+  it("never trims below the floor, and never grows a lead", () => {
+    // Even where a shorter run-up would save a window, the cold-start cure wins below 1 s.
+    const fitted = fitLeadToWindowGrid({
+      narrationSec: 3.2,
+      leadSec: 1,
+      motionFrame: 37,
+    });
+    expect(fitted).toBe(1);
+    expect(
+      fitLeadToWindowGrid({ narrationSec: 5, leadSec: 0, motionFrame: 37 })
+    ).toBe(0);
+  });
+
+  it("counts windows the way the worker does", () => {
+    expect(windowsFor(81, 37)).toBe(1);
+    expect(windowsFor(82, 37)).toBe(2);
+    expect(windowsFor(125, 37)).toBe(2); // 81 + 44
+    expect(windowsFor(126, 37)).toBe(3);
+    // A wider overlap carries more context across each join and so needs MORE windows for the
+    // same length — that is what restoring 37 costs, and why it is worth spending elsewhere.
+    expect(windowsFor(180, 25)).toBe(3);
+    expect(windowsFor(180, 37)).toBe(4);
+    expect(windowsFor(250, 25)).toBe(5);
+    expect(windowsFor(250, 37)).toBe(5);
   });
 });

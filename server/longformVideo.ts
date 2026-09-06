@@ -85,7 +85,11 @@ import {
   type LipsyncCameraMode,
 } from "./lipsyncProvider";
 import { buildCameraPlate } from "./cameraPlate";
-import { buildLipsyncLeadTrack, trimClipHead } from "./lipsyncLead";
+import {
+  buildLipsyncLeadTrack,
+  trimClipHead,
+  fitLeadToWindowGrid,
+} from "./lipsyncLead";
 import { smoothWindowSeams } from "./lipsyncSeams";
 import { cancelJobProviderRenders } from "./cancelRenders";
 import {
@@ -7261,11 +7265,18 @@ async function generateSceneLipsyncClips(
     scene.lipsyncNarrationUrl = undefined;
     if (lipsync.provider === "runpod" && ENV.runpodLipsyncLeadSec > 0) {
       const job = await getLongformVideoJobById(jobId);
+      // Trim the run-up to whatever the render-window grid gives away free — a beat a few
+      // frames past a boundary pays for a whole extra window (~20% on a 7 s beat).
+      const fittedLead = fitLeadToWindowGrid({
+        narrationSec: realNarrationSec || (scene.audioDuration ?? 0),
+        leadSec: ENV.runpodLipsyncLeadSec,
+        motionFrame: ENV.runpodLipsyncMotionFrame ?? 25,
+      });
       const lead = await buildLipsyncLeadTrack({
         jobId,
         scene,
         masterAudioUrl: job?.masterAudioUrl,
-        leadSec: ENV.runpodLipsyncLeadSec,
+        leadSec: fittedLead,
       });
       if (lead) {
         chunkUrls = [lead.url];
