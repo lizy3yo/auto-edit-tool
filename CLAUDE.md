@@ -92,7 +92,7 @@ Gemini, OpenAI, R2, RunPod. Missing ones fail loudly at the first stage that nee
 | `RUNPOD_LIPSYNC_TIMEOUT_MS`     | 35 min (poll)     | `RUNPOD_LIPSYNC_EXECUTION_TIMEOUT_MS` | 40 min (per-job GPU cap)     |
 | `RUNPOD_LIPSYNC_TORCH_COMPILE`  | off (`1` = on)    | `RUNPOD_LIPSYNC_BATCH`                | 2 beats per call (`1` = off) |
 | `RUNPOD_LIPSYNC_BATCH_MAX_SEC`  | 14 s per call     | `RUNPOD_LIPSYNC_AUDIO_CFG_STEPS`      | 0.5 (first half guided)      |
-| `RUNPOD_LIPSYNC_QUANTIZATION`   | fp8_e4m3fn        |                                       |                              |
+| `RUNPOD_LIPSYNC_QUANTIZATION`   | fp8_e4m3fn        | `RUNPOD_LIPSYNC_V2V_STEPS` / `_START_STEP` | 12 / 3 (9 active)       |
 
 `RUNPOD_LIPSYNC_EXECUTION_TIMEOUT_MS` is sent with every submit as RunPod's `policy.executionTimeout`
 and overrides the endpoint's own setting (dashboard default 20 min). InfiniteTalk at 720p on the
@@ -292,6 +292,23 @@ Express · tRPC · Drizzle · MySQL.
   720p so 1080p is off-distribution and can duplicate features rather than add detail. It stays
   selectable per render; the sharpen carries the gap by default, and the bench settles whether
   1080p is actually better or merely dearer.
+  STEP COUNT is the first thing to check when a host render looks soft, and on 2026-09-07 it
+  was the last: `RUNPOD_LIPSYNC_V2V_STEPS`/`_START_STEP` set COST (the active count,
+  `steps - start_step`), FREEDOM (the ratio) and QUALITY (how fine each denoising jump is,
+  which only the TOTAL controls) all at once, and conflating them wasted a day. Renders at 6
+  active steps — 8/2, half of what commit fca64a1 ran — came back with background morph 1.7-3.1
+  against a limit of 1, motion roughness up to 0.79 against 0.7, and whole-frame Laplacian
+  sharpness 374-431 against the reference engine's 463, and were reported for hours as "blurry"
+  and "the resolution is off". Under-refined diffusion output is soft, morphy and rough: that
+  IS the symptom list. Schedulers, plate anchors, sharpening, framing and `audio_scale` were
+  all investigated first, and every conclusion drawn from those renders is suspect because the
+  refinement was halved underneath them. The default is now 12/3 (9 active, ~$0.137 per
+  finished second against 8/2's ~$0.095); fca64a1's 16/4 with guidance on every step and bf16
+  weights was 24 model passes per window against today's 13, ~$0.31/s. Walk back toward it ONE
+  change at a time and stop when it looks right. Two traps: these two are commonly set in
+  `.env`, which silently beats every default in `env.ts` — check there before believing any
+  code value — and the render-to-render NOISE FLOOR is +-40%, so judge a change on the median
+  of two or three renders of the same beat, never on one clip.
   `scripts/measure-host-motion.mjs`
   turns "she moves too much" into numbers (per-region jitter + background morph vs frame 0)
   so a worker/prompt change is judged against the clip that prompted it, and

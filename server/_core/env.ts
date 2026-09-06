@@ -127,15 +127,35 @@ export const ENV = {
   // the measured-at-parity 8/2, with twice the refinement per frame (texture crawl was the
   // remaining gap to the reference). Sent on every pinned render, so the worker's own
   // workflow default cannot silently disagree with the ratio.
-  // 8/2, not 16/4: the operator judged the 8-step renders by eye on 2026-09-06 and chose
-  // them (the mouth judge reads softer p/b/m closure than at 16; the bench row for the
-  // everything-on render then held HeyGen's closure bar at 0.056). Half the GPU time.
+  // 12/3 (2026-09-07), up from 8/2. Three quantities live here and confusing them wasted a
+  // day: COST is the ACTIVE step count (`steps - start_step`), FREEDOM is the ratio
+  // (`1 - start_step/steps`), and QUALITY is how FINE each denoising jump is, which only the
+  // TOTAL step count controls. 12/3 holds the 75% freedom of the 8/2 it replaces — so this is
+  // a refinement change and nothing else — at 9 active steps instead of 6.
+  //
+  // Why: commit fca64a1, the last state the operator remembers as good, ran 16/4 (12 active)
+  // with audio guidance on EVERY step and bf16 weights — 24 model passes per window. 8/2 with
+  // `audio_cfg_steps` 0.5 and fp8 is 9. Renders at 6 active steps came back with background
+  // morph 1.7-3.1 (limit 1), motion roughness up to 0.79 (limit 0.7) and whole-frame sharpness
+  // 374-431 against the reference engine's 463, and were reported for hours as "blurry" and
+  // "the resolution is off". Under-refined output is soft, morphy and rough — that is the
+  // symptom list, and halving the steps is its textbook cause. A day was spent on schedulers,
+  // plate anchors, sharpening and framing before checking the step count.
+  //
+  // 9 active is the compromise, not a restoration: 16/4 is ~$0.19 per finished second against
+  // this ~$0.137 and 8/2's ~$0.095. If 9 is still short, walk back toward fca64a1 ONE change
+  // at a time — `RUNPOD_LIPSYNC_V2V_STEPS=16`/`_START_STEP=4`, then unset
+  // `RUNPOD_LIPSYNC_AUDIO_CFG_STEPS` for guidance on every step, then
+  // `RUNPOD_LIPSYNC_QUANTIZATION=disabled` for bf16 — and stop when it looks right, so the
+  // price of the quality is known rather than guessed.
+  //
+  // NOTE these are commonly overridden in `.env`, which silently beats every default here.
   runpodLipsyncV2vSteps: process.env.RUNPOD_LIPSYNC_V2V_STEPS
     ? Number(process.env.RUNPOD_LIPSYNC_V2V_STEPS)
-    : 8,
+    : 12,
   runpodLipsyncV2vStartStep: process.env.RUNPOD_LIPSYNC_V2V_START_STEP
     ? Number(process.env.RUNPOD_LIPSYNC_V2V_START_STEP)
-    : 2,
+    : 3,
   /**
    * Motion-tuning dials sent to the worker on EVERY RunPod render (photo and pinned), each
    * only when set — unset means the workflow's own default rules. Every one maps to a worker

@@ -64,15 +64,18 @@ describe("ENV.lipsyncResolution", () => {
 
 describe("ENV pinned-camera anchor defaults", () => {
   it("defaults steps and start_step TOGETHER at the measured 75% ratio", async () => {
-    // 8/2 measured at parity with the reference and 8/1 overshot to ~150%, so the ratio is
-    // what is calibrated, not the step count. 16/4 keeps it while doubling refinement; both
-    // are baked so a fresh deploy renders correctly with no variable set.
+    // The RATIO is what was calibrated (8/2 measured at parity with the reference; 8/1
+    // overshot to ~150%), so 12/3 raises refinement without touching freedom. Cost is the
+    // ACTIVE count and quality is the TOTAL — 8/2 was 6 active against the last known-good
+    // state's 12, and those renders came back soft, morphy and rough.
     const env = await loadEnv({
       RUNPOD_LIPSYNC_V2V_STEPS: undefined,
       RUNPOD_LIPSYNC_V2V_START_STEP: undefined,
     });
-    expect(env.runpodLipsyncV2vSteps).toBe(8);
-    expect(env.runpodLipsyncV2vStartStep).toBe(2);
+    expect(env.runpodLipsyncV2vSteps).toBe(12);
+    expect(env.runpodLipsyncV2vStartStep).toBe(3);
+    // 9 active steps: 1.5x the refinement of the 8/2 it replaces, same freedom.
+    expect(env.runpodLipsyncV2vSteps - env.runpodLipsyncV2vStartStep).toBe(9);
     expect(env.runpodLipsyncV2vStartStep / env.runpodLipsyncV2vSteps).toBe(
       0.25
     );
