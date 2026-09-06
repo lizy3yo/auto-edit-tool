@@ -146,11 +146,15 @@ export const ENV = {
    * 1.0). Above 1 the same audio produces more head and shoulder movement — the free half of
    * the "she looks plain" fix, the other half being the gesture cue in `server/delivery.ts`.
    * Costs nothing: it scales an embedding, it does not add a pass. Judged by the body script's
-   * liveliness line (head travel 3-8% of face size) against its exaggeration caps.
+   * liveliness line (head travel 6-12% of face size) against its exaggeration caps.
+   *
+   * 1.3, not 1.15: four accepted reference-engine clips measured 9-12% head travel and head
+   * motion at 114-163% of the mouth's, where ours read 1-3% and ~40%. The dial is the free
+   * half of closing that gap; the gesture cue in `server/delivery.ts` is the directed half.
    */
   runpodLipsyncAudioScale: process.env.RUNPOD_LIPSYNC_AUDIO_SCALE
     ? Number(process.env.RUNPOD_LIPSYNC_AUDIO_SCALE)
-    : 1.15,
+    : 1.3,
   // The accepted-render dials, baked (2026-09-05/06): audio guidance 2.5 is what makes the lips
   // meet on p/b/m (a viseme audit failed without it — never off), NAG 13 calmed the eyes.
   runpodLipsyncAudioCfgScale: process.env.RUNPOD_LIPSYNC_AUDIO_CFG

@@ -3995,11 +3995,20 @@ export const LIPSYNC_HOST_DIRECTION_PINNED =
   // wide-eyed surprise and a full grin on every phrase (motion roughness 0.86 against the
   // reference's 0.50) while the lips finally landed. The lips are the precision; the rest of
   // the face is asked to stay calm.
+  // Measured against four accepted reference-engine clips (2026-09-06): their MOUTHS move
+  // LESS than ours (articulation 2.6-2.9 against our 4.5-7.0) while their heads and brows
+  // move MORE (114-163% of the mouth's motion against our ~40%; head travel 9-12% of face
+  // size against our 1-3%). The realism is in the balance, not the amount: the work is done
+  // by the lips, the jaw and cheeks stay quiet, and the life comes from the head and brows.
+  // So the calm is moved onto the jaw/cheeks and the brows are released — the wide-eyed
+  // failure the old "brows resting" clause cured is still blocked, by name, in the negative.
   "Precise but relaxed articulation: the lips press fully together on p, b and m, round " +
   "tightly on oo and w, the lower lip meets the teeth on f and v, and the mouth opens " +
-  "naturally on open vowels — while the brows, eyes and cheeks stay calm and gentle, " +
-  "settling softly between words. The eyes stay soft and slightly smiling exactly as in the " +
-  "reference photo, brows resting. One person speaking, no one else talking. " +
+  "naturally on open vowels. The work is done by the lips alone: the jaw and cheeks stay " +
+  "quiet and settle softly between words, never chewing or working. Above the mouth they " +
+  "are alive — the eyes stay soft and warm as in the reference photo, holding the lens, " +
+  "with brief eyebrow lifts and small glances on the words that matter, easing back to rest " +
+  "in between. One person speaking, no one else talking. " +
   "Locked-off camera on a tripod: the camera never moves, pushes in, or zooms. " +
   "The room behind them stays exactly as it is, nothing in the background changes.";
 
@@ -4071,8 +4080,12 @@ export const LIPSYNC_NEGATIVE_DIRECTION_PINNED =
   // guidance the render invented a wide-eyed, raised-brow look in 5 of 6 seconds that the
   // photo never had. The positive prompt asking for calm eyes did nothing at cfg 1 — NAG is
   // the enforcement path, so the shapes to avoid are named here.
-  "wide eyes, raised eyebrows, surprised expression, staring, lifted forehead, " +
-  "eyebrows lifting on every word";
+  // "raised eyebrows"/"eyebrows lifting on every word" are gone: they froze the brows, and
+  // the accepted reference clips brow-burst on 16-25% of frames. What is actually wrong is
+  // the SURPRISED face and the every-word tic, so those stay named; the shapes below still
+  // block the wide-eyed look the old clause was written for.
+  "wide eyes, surprised expression, alarmed expression, staring, lifted forehead, " +
+  "eyebrows raised on every single word, chewing, working jaw, mouth chewing between words";
 
 /**
  * Ordered term→synonym map that rewrites harm-adjacent words Grok's 69labs content classifier

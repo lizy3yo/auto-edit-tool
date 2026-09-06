@@ -101,7 +101,7 @@ describe("planDelivery", () => {
     expect(msg).toContain("exactly 3 entries");
     // The body cue is asked for in the SAME call — gestures cost nothing extra.
     expect(msg).toContain('"gesture"');
-    expect(msg).toContain("head, shoulders and upper body only");
+    expect(msg).toContain("use the head above all");
     expect(p?.paragraphs.map(x => x.pace)).toEqual(["natural", "slow", "slow"]);
   });
 

@@ -8198,11 +8198,27 @@ describe("pinned-camera prompt pair", () => {
       expect(LIPSYNC_NEGATIVE_DIRECTION_PINNED).toContain(term);
     // Precision is asked of the LIPS only — "expressive" over-drove the whole face.
     expect(LIPSYNC_HOST_DIRECTION_PINNED).not.toContain("expressive");
-    expect(LIPSYNC_HOST_DIRECTION_PINNED).toContain("stay calm and gentle");
+    // The calm sits on the JAW and CHEEKS, not on the whole face: four accepted
+    // reference-engine clips move their mouths LESS than ours and their heads and brows MORE,
+    // so the direction quiets the mouth region and frees everything above it.
+    expect(LIPSYNC_HOST_DIRECTION_PINNED).toContain(
+      "jaw and cheeks stay quiet"
+    );
+    expect(LIPSYNC_HOST_DIRECTION_PINNED).toContain("brief eyebrow lifts");
     // Eyes: the render widened them and raised the brows in 5 of 6 seconds against a photo
-    // with soft, smiling eyes. Enforced through the NAG negative, named in the positive.
-    for (const term of ["wide eyes", "raised eyebrows", "surprised expression"])
+    // with soft, smiling eyes. The wide-eyed SHAPE is still blocked through NAG — but the
+    // blanket brow freeze is gone (the reference clips brow-burst on 16-25% of frames), so
+    // what is named is the surprised face and the every-word tic.
+    for (const term of [
+      "wide eyes",
+      "surprised expression",
+      "eyebrows raised on every single word",
+      "chewing",
+    ])
       expect(LIPSYNC_NEGATIVE_DIRECTION_PINNED).toContain(term);
+    expect(LIPSYNC_NEGATIVE_DIRECTION_PINNED).not.toContain(
+      "eyebrows lifting on every word"
+    );
     expect(LIPSYNC_HOST_DIRECTION_PINNED).toContain(
       "as in the reference photo"
     );

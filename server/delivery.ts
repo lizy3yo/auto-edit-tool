@@ -114,14 +114,17 @@ export function deliveryUserPrompt(
     `say it to the actor — e.g. "warm gentle smile", "serious and concerned", "amused, playful", ` +
     `"calm and reassuring", "matter-of-fact". Modest, on-camera expressions only; never ` +
     `"laughing", "shouting", "crying".\n` +
-    `- gesture: what the host's BODY does while saying this paragraph, as a director would ` +
-    `say it — e.g. "small nod on the number", "leans in slightly", "settles back, still", ` +
-    `"counts the points with small beats", "gentle shoulder shrug". The host is SEATED in a ` +
-    `medium close-up with hands out of frame, so use head, shoulders and upper body only: ` +
-    `small nods, a slight lean, a weight shift, a tilt. One movement per paragraph, tied to ` +
-    `what the words are doing (emphasis, a list, a reveal, a warning). Never big, never ` +
-    `repeated, never hands or arms, never standing or walking. Prefer stillness ("holds ` +
-    `still", "settles") on warnings and precise instructions.\n\n` +
+    `- gesture: what the host's HEAD and BODY do while saying this paragraph, as a director ` +
+    `would say it — e.g. "small nod on the number", "tilts her head on the question", ` +
+    `"glances away, then back on the answer", "leans in slightly", "brows lift on the ` +
+    `surprise", "settles back, still", "counts the points with small beats". The host is ` +
+    `SEATED in a medium close-up with hands out of frame, so use the head above all — nods, ` +
+    `tilts, small glances, a lift of the brows — plus shoulders and a slight lean. Head ` +
+    `language is what makes a talking head look alive, so prefer it. One or two small ` +
+    `movements per paragraph, tied to what the words are doing (emphasis, a list, a reveal, ` +
+    `a question, a warning). Never big, never rhythmic or repeated, never hands or arms, ` +
+    `never standing or walking. Prefer stillness ("holds still", "settles") on warnings and ` +
+    `precise instructions.\n\n` +
     `Return {"paragraphs":[...]} with exactly ${paragraphs.length} entries, index 1..${paragraphs.length}.\n\n` +
     paragraphs.map((p, i) => `[${i + 1}] ${p}`).join("\n\n")
   );

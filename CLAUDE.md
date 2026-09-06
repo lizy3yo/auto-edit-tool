@@ -227,10 +227,17 @@ Express · tRPC · Drizzle · MySQL.
   sentences) with its own ceiling ("small, occasional, never rhythmic"), and `audio_scale`
   defaults to 1.15 — the voice drives the body harder for free, since it scales an embedding
   rather than adding a pass. `scripts/measure-host-body.mts` gates the result with a
-  LIVELINESS line: head travel 3-8% of face size with shoulders at 0.3+ of the head's motion
-  is the target band (the reference engine sits at 5%; the pre-gesture renders read 1-3% and
-  were "alive but plain"), reported as a target rather than a failure so a deliberately still
-  beat is allowed, while the jitter/roughness/flicker caps above it still catch exaggeration.
+  LIVELINESS line: head travel 6-12% of face size with shoulders at 0.1+ of the head's motion
+  is the target band, measured off FOUR accepted reference-engine clips of two hosts (9, 9, 9
+  and 12% travel; shoulders 0.12-0.24) rather than guessed. Those clips also settled what the
+  balance should be: their MOUTHS move less than ours (articulation 2.6-2.9 against 4.5-7.0)
+  while their heads and brows move more (114-163% of the mouth's motion against ~40%), so the
+  pinned direction now puts the calm on the JAW AND CHEEKS ("the work is done by the lips
+  alone") and frees what is above — brief brow lifts and small glances on the words that
+  matter — with the wide-eyed shape still blocked by name in the negative and the blanket brow
+  freeze removed. `audio_scale` 1.3 is the free half of the same gap. Reported as a target
+  rather than a failure so a deliberately still beat is allowed, while the
+  jitter/roughness/flicker caps above it still catch exaggeration.
   The plan is snapshotted on `inputParams.deliveryPlan`
   so a resume voices the same film; no plan (mock mode, a failed call) means exactly the old
   behaviour. `scripts/measure-host-motion.mjs`

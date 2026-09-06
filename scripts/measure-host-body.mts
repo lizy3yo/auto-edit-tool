@@ -79,15 +79,18 @@ const HEAD_RANGE_MIN = 0.01; // head travel over the clip, as a fraction of face
 const HEAD_RANGE_MAX = 0.4;
 /**
  * ALIVE, not just not-broken. The range above only fails a statue or a swayer; a host can sit
- * inside it and still read as plain, which is exactly what the pinned direction produced
- * (1-3% travel against the reference engine's 5%). This narrower band is the target a
- * gesture-directed render should land in: enough movement to read as a person, well under the
- * caps that catch exaggeration (head jitter, roughness, cheek flicker). Reported as a target,
- * never a failure — a deliberately still beat (a warning, a precise instruction) is allowed.
+ * inside it and still read as plain, which is exactly what the pinned direction produced.
+ * The band is measured, not guessed: four accepted reference-engine clips of two different
+ * hosts read 9%, 9%, 9% and 12% head travel, with shoulders at 0.12-0.24 of the head's own
+ * motion. So the target is 6-12% travel — our own renders read 1-3% and were "alive but
+ * plain" — and the shoulder floor is deliberately LOW (0.1): the reference engine moves the
+ * head far more than the shoulders, and demanding busy shoulders would buy sway, not life.
+ * Reported as a target, never a failure: a deliberately still beat (a warning, a precise
+ * instruction) is allowed, and the jitter/roughness/flicker caps above still catch overacting.
  */
-const LIVELY_TRAVEL_MIN = 0.03;
-const LIVELY_TRAVEL_MAX = 0.08;
-const LIVELY_SHOULDER_MIN = 0.3;
+const LIVELY_TRAVEL_MIN = 0.06;
+const LIVELY_TRAVEL_MAX = 0.12;
+const LIVELY_SHOULDER_MIN = 0.1;
 const SHOULDER_RATIO_MAX = 1.0; // shoulders move less than the head
 const SHOULDER_COUPLING_MIN = 0.3; // and with it
 const SYNC_MAX_FRAMES = 15;
@@ -807,7 +810,7 @@ line(
     R.headRange <= LIVELY_TRAVEL_MAX &&
     R.shoulderRatio >= LIVELY_SHOULDER_MIN;
   const verdict = inBand
-    ? "alive"
+    ? "alive — in the reference engine's band"
     : R.headRange < LIVELY_TRAVEL_MIN || R.shoulderRatio < LIVELY_SHOULDER_MIN
       ? "PLAIN — moves, but not enough to read as a person"
       : "BUSY — over the target band (check jitter/roughness above)";
