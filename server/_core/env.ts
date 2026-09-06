@@ -102,22 +102,20 @@ export const ENV = {
    * different product (softer, 2.25x fewer pixels, faster and cheaper) than the deploy
    * ships. Opt into 480p explicitly for cheap experiments; never inherit it from the env.
    *
-   * `1080p` is the DEFAULT, by the operator's call on 2026-09-06: the film is assembled at
-   * 1920x1080 and every other source (b-roll, stills) is native there, so a 720p host clip was
-   * the one piece being upscaled 1.5x — visible as softness around the eyes against HeyGen's
-   * native 1080p. `HOST_UPSCALE_SHARPEN` recovered what the upscale lost; only real pixels
-   * recover the rest.
-   *
-   * Two things to hold onto. It costs what it says: 2.25x the pixels is ~2.25x the GPU
-   * seconds. And the checkpoint (`wan2.1_i2v_720p_14B`) is TRAINED at 720p, so 1080p is
-   * off-distribution — it can duplicate features rather than add detail. `720p` remains one
-   * env var away, and `scripts/lipsync-bench.mts` is how to settle which looks better rather
-   * than which is dearer.
+   * `1080p` is SELECTABLE but not the default. It was briefly made the default on 2026-09-06
+   * and reverted the same day: the film is assembled at 1920x1080 and every other source
+   * (b-roll, stills) is native there, so the 720p host clip is the one piece upscaled 1.5x —
+   * but closing that gap costs 2.25x the pixels and therefore ~2.25x the GPU seconds, which
+   * undoes the cost work, and the checkpoint (`wan2.1_i2v_720p_14B`) is TRAINED at 720p, so
+   * 1080p is off-distribution and can duplicate features rather than add detail. What is left
+   * carrying the gap is `HOST_UPSCALE_SHARPEN`, which recovers the half the upscale itself
+   * loses. Set `LIPSYNC_RESOLUTION=1080p` and judge one scene with `scripts/lipsync-bench.mts`
+   * before believing it is better rather than merely dearer.
    */
   lipsyncResolution:
     (["480p", "720p", "1080p"] as const).find(
-      r => r === (process.env.LIPSYNC_RESOLUTION ?? "1080p").toLowerCase()
-    ) ?? "1080p",
+      r => r === (process.env.LIPSYNC_RESOLUTION ?? "720p").toLowerCase()
+    ) ?? "720p",
   /**
    * Pinned-camera anchor dial, sent to the worker's V2V sampler when set. `steps` is the
    * total schedule and `start_step` how many are skipped at the noisy end — active steps =

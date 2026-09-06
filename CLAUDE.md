@@ -87,7 +87,7 @@ Gemini, OpenAI, R2, RunPod. Missing ones fail loudly at the first stage that nee
 | `IMAGE_PRIMARY_RETRIES`         | 1                 | `IMAGE_RETRY_TIMEOUT_MS`              | 240s                         |
 | `IMAGE_RETRY_TOTAL_BUDGET_MS`   | 600s              | `MYSQL_SORT_BUFFER_SIZE`              | 8 MB                         |
 | `AUTO_MIGRATE`                  | on (`0` skips)    | `ASSEMBLY_CACHE`                      | on (`0` skips)               |
-| `LIPSYNC_RESOLUTION`            | 1080p (480p/720p) | `RUNPOD_LIPSYNC_INPUT`                | image (`video` = pinned)     |
+| `LIPSYNC_RESOLUTION`            | 720p (480p/1080p) | `RUNPOD_LIPSYNC_INPUT`                | image (`video` = pinned)     |
 | `ASSEMBLY_CACHE_MAX_GB`         | 20                | `ASSEMBLY_CACHE_DIR`                  | tmp/longform-assembly-cache  |
 | `RUNPOD_LIPSYNC_TIMEOUT_MS`     | 35 min (poll)     | `RUNPOD_LIPSYNC_EXECUTION_TIMEOUT_MS` | 40 min (per-job GPU cap)     |
 | `RUNPOD_LIPSYNC_TORCH_COMPILE`  | off (`1` = on)    | `RUNPOD_LIPSYNC_BATCH`                | 2 beats per call (`1` = off) |
@@ -273,11 +273,12 @@ Express · tRPC · Drizzle · MySQL.
   unsharp stages, small radius for iris and eyelash edges then wide for local contrast: the eye
   band reads 84 plain, 140 with the old single pass, 234 with both, against 186 for the
   reference engine's own eye band — and cheek flicker only moves 1.90 → 2.32 of a limit of 5).
-  The other half needs real pixels, so `LIPSYNC_RESOLUTION` DEFAULTS to `1080p` (operator's
-  call, 2026-09-06) — the host clip was the one source in a 1080p film that was not native.
-  It costs ~2.25x the GPU seconds and is off the checkpoint's trained 720p, so it can duplicate
-  features rather than add detail; `720p` is one variable away and the bench settles which
-  actually looks better.
+  The other half needs real pixels: `LIPSYNC_RESOLUTION=1080p` renders the host natively at the
+  film's own size. It was made the default on 2026-09-06 and reverted the same day — 2.25x the
+  pixels is ~2.25x the GPU seconds, which undoes the cost work, and the checkpoint is trained at
+  720p so 1080p is off-distribution and can duplicate features rather than add detail. It stays
+  selectable per render; the sharpen carries the gap by default, and the bench settles whether
+  1080p is actually better or merely dearer.
   `scripts/measure-host-motion.mjs`
   turns "she moves too much" into numbers (per-region jitter + background morph vs frame 0)
   so a worker/prompt change is judged against the clip that prompted it, and
