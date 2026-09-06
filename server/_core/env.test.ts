@@ -25,7 +25,7 @@ async function loadEnv(vars: Record<string, string | undefined>) {
 afterEach(() => vi.resetModules());
 
 describe("ENV.lipsyncResolution", () => {
-  it("is 720p by default regardless of NODE_ENV", async () => {
+  it("is 1080p by default regardless of NODE_ENV", async () => {
     // The old rule was `isProduction ? 720p : 480p`, which silently made every local A/B of
     // the InfiniteTalk lane a softer, cheaper product than the deploy ships. A dev box and
     // production must render the same size unless someone asks otherwise.
@@ -36,11 +36,11 @@ describe("ENV.lipsyncResolution", () => {
           NODE_ENV: "development",
         })
       ).lipsyncResolution
-    ).toBe("720p");
+    ).toBe("1080p");
     expect(
       (await loadEnv({ LIPSYNC_RESOLUTION: undefined, NODE_ENV: "production" }))
         .lipsyncResolution
-    ).toBe("720p");
+    ).toBe("1080p");
   });
 
   it("drops to 480p only when explicitly asked, in any environment", async () => {
@@ -48,17 +48,21 @@ describe("ENV.lipsyncResolution", () => {
       (await loadEnv({ LIPSYNC_RESOLUTION: "480p", NODE_ENV: "production" }))
         .lipsyncResolution
     ).toBe("480p");
-    // 1080p is selectable now — the only way to close the real gap to HeyGen's native 1080p,
-    // at ~2.25x the GPU seconds and off the checkpoint's trained resolution.
+    // 1080p is the DEFAULT: the film is 1080p and every other source is native there, so the
+    // host clip was the only piece being upscaled. 720p stays one variable away.
     expect(
-      (await loadEnv({ LIPSYNC_RESOLUTION: "1080p", NODE_ENV: "development" }))
+      (await loadEnv({ LIPSYNC_RESOLUTION: undefined, NODE_ENV: "production" }))
         .lipsyncResolution
     ).toBe("1080p");
+    expect(
+      (await loadEnv({ LIPSYNC_RESOLUTION: "720p", NODE_ENV: "development" }))
+        .lipsyncResolution
+    ).toBe("720p");
     // Junk is still not an invitation to guess — it falls back to the default.
     expect(
       (await loadEnv({ LIPSYNC_RESOLUTION: "4k", NODE_ENV: "development" }))
         .lipsyncResolution
-    ).toBe("720p");
+    ).toBe("1080p");
   });
 });
 
@@ -99,7 +103,7 @@ describe("ENV render dials — the accepted settings are the defaults", () => {
     });
     expect(d.runpodLipsyncAudioCfgScale).toBe(2.5);
     expect(d.runpodLipsyncNagScale).toBe(13);
-    expect(d.runpodLipsyncMotionFrame).toBe(25);
+    expect(d.runpodLipsyncMotionFrame).toBe(37);
     expect(d.runpodLipsyncFetaWeight).toBe(0);
     expect(d.runpodLipsyncAudioCfgSteps).toBe(0.5);
     expect(d.runpodLipsyncQuantization).toBe("fp8_e4m3fn");
