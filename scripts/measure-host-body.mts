@@ -30,7 +30,9 @@
  *             one is INFORMATIONAL: over a 5 s beat even the accepted HeyGen clip shows no
  *             correlation (its head barely moves), so it is not a rule a short clip can be
  *             failed on. The cold-start check stays in `measure-host-motion.mjs`.
- *   SHOULDERS follow the head and move less than it — the head sits on the spine.
+ *   SHOULDERS follow the head and move less than it — the head sits on the spine. Their share
+ *             of the head's motion is also the LIVELINESS reading: a host whose shoulders
+ *             barely move with her head reads as a talking photograph.
  *   BROWS     move in short bursts on emphasis, not continuously (informational).
  *
  * Camera, background morph, window seams and subject cuts are NOT here — those already had
@@ -75,6 +77,17 @@ const HEAD_HF_MAX = 0.35; // fraction of head-velocity energy above HEAD_HF_HZ
 const HEAD_HF_HZ = 4;
 const HEAD_RANGE_MIN = 0.01; // head travel over the clip, as a fraction of face size
 const HEAD_RANGE_MAX = 0.4;
+/**
+ * ALIVE, not just not-broken. The range above only fails a statue or a swayer; a host can sit
+ * inside it and still read as plain, which is exactly what the pinned direction produced
+ * (1-3% travel against the reference engine's 5%). This narrower band is the target a
+ * gesture-directed render should land in: enough movement to read as a person, well under the
+ * caps that catch exaggeration (head jitter, roughness, cheek flicker). Reported as a target,
+ * never a failure — a deliberately still beat (a warning, a precise instruction) is allowed.
+ */
+const LIVELY_TRAVEL_MIN = 0.03;
+const LIVELY_TRAVEL_MAX = 0.08;
+const LIVELY_SHOULDER_MIN = 0.3;
 const SHOULDER_RATIO_MAX = 1.0; // shoulders move less than the head
 const SHOULDER_COUPLING_MIN = 0.3; // and with it
 const SYNC_MAX_FRAMES = 15;
@@ -787,6 +800,21 @@ line(
   R.shoulderCoupling >= SHOULDER_COUPLING_MIN,
   `shoulders move independently of the head (r ${f2(R.shoulderCoupling)})`
 );
+// Liveliness: the target band a directed, gesturing host should land in.
+{
+  const inBand =
+    R.headRange >= LIVELY_TRAVEL_MIN &&
+    R.headRange <= LIVELY_TRAVEL_MAX &&
+    R.shoulderRatio >= LIVELY_SHOULDER_MIN;
+  const verdict = inBand
+    ? "alive"
+    : R.headRange < LIVELY_TRAVEL_MIN || R.shoulderRatio < LIVELY_SHOULDER_MIN
+      ? "PLAIN — moves, but not enough to read as a person"
+      : "BUSY — over the target band (check jitter/roughness above)";
+  console.log(
+    `  ${"liveliness".padEnd(10)} ${"head travel + shoulders".padEnd(30)} ${`${pctS(R.headRange)} / ${f2(R.shoulderRatio)}`.padStart(14)}${B ? `   ${`${pctS(B.headRange)} / ${f2(B.shoulderRatio)}`.padStart(14)}` : ""}   ${verdict}  target ${pctS(LIVELY_TRAVEL_MIN)}-${pctS(LIVELY_TRAVEL_MAX)} travel, shoulders ≥ ${LIVELY_SHOULDER_MIN}`
+  );
+}
 line(
   "brows",
   "frames in a brow burst",

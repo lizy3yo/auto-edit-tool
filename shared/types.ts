@@ -249,6 +249,12 @@ export interface StoryboardScene {
    */
   deliveryPace?: "slow" | "measured" | "natural" | "brisk";
   deliveryCue?: string;
+  /**
+   * What the host's BODY does while saying this beat ("small nod on the number", "leans in
+   * slightly"), from the same delivery pass. Appended to the RunPod lip-sync prompt so the
+   * movement belongs to the line instead of being generic. Free — no extra render.
+   */
+  gestureCue?: string;
   /** Whether the on-camera host appears (gets the reference face + face-lock) */
   hostPresent: boolean;
   /**
@@ -806,6 +812,7 @@ export interface LongformInputParams {
       pace: "slow" | "measured" | "natural" | "brisk";
       pauseAfterMs: number;
       mood: string;
+      gesture?: string;
     }[];
   };
   /** TTS volume multiplier (resolved from the channel config; applied as an ffmpeg gain) */

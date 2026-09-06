@@ -218,7 +218,20 @@ Express · tRPC · Drizzle · MySQL.
   When the plan changes the read, the master is voiced as RUNS of same-pace paragraphs joined
   with those beats instead of one request (`voiceMasterNarration`), the scene re-voice
   follows its paragraph's pace (`scene.deliveryPace`), and the mood is appended to the RunPod
-  lip-sync prompt (`scene.deliveryCue`). The plan is snapshotted on `inputParams.deliveryPlan`
+  lip-sync prompt (`scene.deliveryCue`), as is a 3-6 word BODY cue (`scene.gestureCue`: "small
+  nod on the number", "leans in slightly", "holds still") — the fixed direction can only ask for
+  natural body language in general, and a host who moves BECAUSE of what she is saying is the
+  difference between alive and plain. All of it rides the one Claude call and the same render,
+  so gestures cost nothing. The pinned direction's body clause now names what a seated host
+  does (small nods on stressed words, a slight lean on a point, weight shifts between
+  sentences) with its own ceiling ("small, occasional, never rhythmic"), and `audio_scale`
+  defaults to 1.15 — the voice drives the body harder for free, since it scales an embedding
+  rather than adding a pass. `scripts/measure-host-body.mts` gates the result with a
+  LIVELINESS line: head travel 3-8% of face size with shoulders at 0.3+ of the head's motion
+  is the target band (the reference engine sits at 5%; the pre-gesture renders read 1-3% and
+  were "alive but plain"), reported as a target rather than a failure so a deliberately still
+  beat is allowed, while the jitter/roughness/flicker caps above it still catch exaggeration.
+  The plan is snapshotted on `inputParams.deliveryPlan`
   so a resume voices the same film; no plan (mock mode, a failed call) means exactly the old
   behaviour. `scripts/measure-host-motion.mjs`
   turns "she moves too much" into numbers (per-region jitter + background morph vs frame 0)

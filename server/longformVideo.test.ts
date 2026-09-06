@@ -8246,8 +8246,12 @@ describe("pinned-camera prompt pair", () => {
     expect(buildLipsyncPrompt(scene, false, "photo")).toContain(
       "calm and still"
     );
+    // The pinned pair asks the body to MOVE — and names what a seated host actually does.
     expect(buildLipsyncPrompt(scene, false, "pinned")).toContain(
-      "one relaxed, connected body"
+      "one connected body"
+    );
+    expect(buildLipsyncPrompt(scene, false, "pinned")).toContain(
+      "small nods on the words they stress"
     );
     // The alt-angle suffix still rides along on either.
     expect(
@@ -8257,6 +8261,23 @@ describe("pinned-camera prompt pair", () => {
         "pinned"
       )
     ).toMatch(/expression while speaking: warm gentle smile\.$/);
+    // The body cue is its own clause, after the mood — free direction, no extra render.
+    expect(
+      buildLipsyncPrompt(
+        {
+          ...scene,
+          deliveryCue: "warm",
+          gestureCue: "small nod on the number",
+        },
+        false,
+        "pinned"
+      )
+    ).toMatch(
+      /expression while speaking: warm\. While saying this line, their body: small nod on the number\.$/
+    );
+    expect(buildLipsyncPrompt(scene, false, "pinned")).not.toContain(
+      "their body:"
+    );
     expect(buildLipsyncPrompt(scene, false, "pinned")).not.toContain(
       "expression while"
     );

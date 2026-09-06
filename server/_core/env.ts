@@ -141,9 +141,16 @@ export const ENV = {
   runpodLipsyncShift: process.env.RUNPOD_LIPSYNC_SHIFT
     ? Number(process.env.RUNPOD_LIPSYNC_SHIFT)
     : undefined,
+  /**
+   * How hard the VOICE drives the body (the wav2vec embed's `audio_scale`, workflow default
+   * 1.0). Above 1 the same audio produces more head and shoulder movement — the free half of
+   * the "she looks plain" fix, the other half being the gesture cue in `server/delivery.ts`.
+   * Costs nothing: it scales an embedding, it does not add a pass. Judged by the body script's
+   * liveliness line (head travel 3-8% of face size) against its exaggeration caps.
+   */
   runpodLipsyncAudioScale: process.env.RUNPOD_LIPSYNC_AUDIO_SCALE
     ? Number(process.env.RUNPOD_LIPSYNC_AUDIO_SCALE)
-    : undefined,
+    : 1.15,
   // The accepted-render dials, baked (2026-09-05/06): audio guidance 2.5 is what makes the lips
   // meet on p/b/m (a viseme audit failed without it — never off), NAG 13 calmed the eyes.
   runpodLipsyncAudioCfgScale: process.env.RUNPOD_LIPSYNC_AUDIO_CFG

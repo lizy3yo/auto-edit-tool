@@ -14,6 +14,11 @@
  *   mood   → the face. Three to five words appended to the lip-sync prompt of every host scene
  *            drawn from that paragraph (`applyDeliveryToScenes` → `scene.deliveryCue`), kept
  *            that short because InfiniteTalk degrades on long prompts.
+ *   gesture→ the body. The same, for what the host DOES while saying it: a nod on the number,
+ *            a small lean on the reveal, stillness on the warning (`scene.gestureCue`). The
+ *            fixed direction can only ask for "natural body language" in general; a line's own
+ *            gesture is the difference between a host who moves and a host who moves BECAUSE
+ *            of what she is saying. Free: it rides the same Claude call and the same render.
  *
  * One Claude call per script. Fail-open everywhere: no plan means the film is voiced and
  * directed exactly as before this file existed.
@@ -49,6 +54,7 @@ export const PAUSE_STEPS_MS = [0, 300, 600];
 export const SPEED_MIN = 0.6;
 export const SPEED_MAX = 1.3;
 const MOOD_MAX_WORDS = 5;
+const GESTURE_MAX_WORDS = 6;
 
 export interface DeliveryParagraph {
   /** 1-based paragraph number in `scriptParagraphs` order. */
@@ -57,6 +63,11 @@ export interface DeliveryParagraph {
   pauseAfterMs: number;
   /** Facial expression while speaking, ≤5 words; "" = no cue. */
   mood: string;
+  /**
+   * What the body does while speaking, ≤6 words; "" = no cue. Optional so a plan snapshotted
+   * on a job before gestures existed still loads and voices the same film.
+   */
+  gesture?: string;
 }
 export interface DeliveryPlan {
   paragraphs: DeliveryParagraph[];
@@ -91,7 +102,8 @@ export function deliveryUserPrompt(
   return (
     `${who}${persona}\n\n` +
     `For EVERY paragraph below return one object: {"index": n, "pace": "slow" | "measured" | ` +
-    `"natural" | "brisk", "pauseAfterMs": 0 | 300 | 600, "mood": "<3-5 words>"}.\n` +
+    `"natural" | "brisk", "pauseAfterMs": 0 | 300 | 600, "mood": "<3-5 words>", ` +
+    `"gesture": "<3-6 words>"}.\n` +
     `- pace: how fast this paragraph should be spoken relative to the host's normal read. ` +
     `"slow" for instructions, warnings, numbers or anything the viewer must catch; "measured" ` +
     `for explanation; "natural" for ordinary narration; "brisk" only for asides and lists the ` +
@@ -101,7 +113,15 @@ export function deliveryUserPrompt(
     `- mood: the host's facial expression WHILE speaking this paragraph, as a director would ` +
     `say it to the actor — e.g. "warm gentle smile", "serious and concerned", "amused, playful", ` +
     `"calm and reassuring", "matter-of-fact". Modest, on-camera expressions only; never ` +
-    `"laughing", "shouting", "crying" or anything that would move the head or hands.\n\n` +
+    `"laughing", "shouting", "crying".\n` +
+    `- gesture: what the host's BODY does while saying this paragraph, as a director would ` +
+    `say it — e.g. "small nod on the number", "leans in slightly", "settles back, still", ` +
+    `"counts the points with small beats", "gentle shoulder shrug". The host is SEATED in a ` +
+    `medium close-up with hands out of frame, so use head, shoulders and upper body only: ` +
+    `small nods, a slight lean, a weight shift, a tilt. One movement per paragraph, tied to ` +
+    `what the words are doing (emphasis, a list, a reveal, a warning). Never big, never ` +
+    `repeated, never hands or arms, never standing or walking. Prefer stillness ("holds ` +
+    `still", "settles") on warnings and precise instructions.\n\n` +
     `Return {"paragraphs":[...]} with exactly ${paragraphs.length} entries, index 1..${paragraphs.length}.\n\n` +
     paragraphs.map((p, i) => `[${i + 1}] ${p}`).join("\n\n")
   );
@@ -140,20 +160,21 @@ export function parseDeliveryPlan(
     const pace = DELIVERY_PACES.includes(e?.pace)
       ? (e.pace as DeliveryPace)
       : "natural";
-    const mood =
-      typeof e?.mood === "string"
-        ? e.mood
+    const words = (v: unknown, max: number) =>
+      typeof v === "string"
+        ? v
             .replace(/[^A-Za-z0-9 ,'-]/g, "")
             .trim()
             .split(/\s+/)
-            .slice(0, MOOD_MAX_WORDS)
+            .slice(0, max)
             .join(" ")
         : "";
     paragraphs.push({
       index: i,
       pace,
       pauseAfterMs: snapPause(e?.pauseAfterMs),
-      mood,
+      mood: words(e?.mood, MOOD_MAX_WORDS),
+      gesture: words(e?.gesture, GESTURE_MAX_WORDS),
     });
   }
   return { paragraphs };
@@ -188,7 +209,8 @@ export async function planDelivery(
     ctx.log?.(
       `delivery plan: ${paragraphs.length} paragraph(s) — ${counts}; ` +
         `${plan.paragraphs.filter(p => p.pauseAfterMs).length} pause(s); ` +
-        `${plan.paragraphs.filter(p => p.mood).length} mood cue(s)`
+        `${plan.paragraphs.filter(p => p.mood).length} mood cue(s); ` +
+        `${plan.paragraphs.filter(p => p.gesture).length} gesture cue(s)`
     );
     return plan;
   } catch (err: any) {
@@ -236,6 +258,7 @@ export function deliveryRuns(
       pace: "natural" as DeliveryPace,
       pauseAfterMs: 0,
       mood: "",
+      gesture: "",
     };
     if (cur && cur.pace === p.pace && cur.pauseAfterMs === 0) {
       cur.text += "\n\n" + text;
@@ -356,6 +379,7 @@ export function applyDeliveryToScenes(
     if (!p) continue;
     scene.deliveryPace = p.pace;
     scene.deliveryCue = p.mood || undefined;
+    scene.gestureCue = p.gesture || undefined;
     applied++;
   }
   return applied;

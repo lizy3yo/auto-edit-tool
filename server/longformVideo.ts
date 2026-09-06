@@ -54,6 +54,7 @@ import {
   getLongformVideoJobStatus,
   getAppSetting,
   setAppSetting,
+  clearLongformSlotsByJobId,
 } from "./db";
 import { decrypt, encrypt, maskApiKey } from "./encryption";
 import { createProviderAdapter, type ProviderAdapter } from "./providers";
@@ -3974,9 +3975,18 @@ export const LIPSYNC_HOST_DIRECTION_PINNED =
   "The person in the reference photo speaks straight to the camera in a tight medium " +
   "close-up, face large and centered, looking at the lens. Clear, precise lip-sync: " +
   "their mouth articulates every word and stays fully visible, hands never near their " +
-  "face. They speak naturally and comfortably: their head, shoulders and upper body move " +
-  "together as one relaxed, connected body, the way a seated person shifts and settles " +
-  "while talking. " +
+  // The body: "one relaxed, connected body" cured the shaking but left her plain — measured
+  // head travel 1-3% of face size per beat against the reference engine's 5%. What a seated
+  // host actually does is small, occasional and MOTIVATED: a nod on the emphasis, a slight
+  // lean into a point, a weight shift between sentences. Named explicitly, with the ceiling
+  // ("small", "never large or repeated") in the same breath, since the negative prompt
+  // carries the rest of the guard.
+  "face. They speak naturally and comfortably, with the easy body language of a person " +
+  "telling you something across a kitchen table: head, shoulders and upper body move " +
+  "together as one connected body, with small nods on the words they stress, a slight " +
+  "lean or turn toward the camera when a point matters, and gentle weight shifts between " +
+  "sentences. The movement is small, occasional and motivated by what they are saying — " +
+  "never large, never rhythmic or repeated, never bouncing. " +
   // The visemes an audio-driven model blurs are the ones the eye checks hardest: a viseme
   // audit against the reference showed vowels landing but lips never meeting on p/b/m and
   // never rounding on oo/w — a generic half-open shape for every consonant, ~40% of the
@@ -5301,8 +5311,9 @@ export function markCtaQrBlock(
  * reference photo, and the rich storyboard visualPrompt injects gesture/lean/nod motion that
  * contradicts the minimal-motion restriction. The per-scene variation is the empty-hands
  * clause on CTA scenes and, when the delivery plan set one, a 3-5 word expression cue
- * (`scene.deliveryCue`) — short enough not to dilute the direction. The narration audio drives
- * speech, so no script text is included.
+ * (`scene.deliveryCue`) plus a 3-6 word body cue (`scene.gestureCue`) — short enough not to
+ * dilute the direction, and the reason a host nods on HER number instead of moving at random.
+ * The narration audio drives speech, so no script text is included.
  */
 export function buildLipsyncPrompt(
   scene: StoryboardScene,
@@ -5325,7 +5336,12 @@ export function buildLipsyncPrompt(
   const mood = scene.deliveryCue?.trim()
     ? ` Their expression while speaking: ${scene.deliveryCue.trim()}.`
     : "";
-  return `${direction}${angle}${cta}${mood}`.trim();
+  // The line's own movement, from the delivery pass (`server/delivery.ts`). Kept to its own
+  // short clause after the mood so the fixed direction still reads first.
+  const gesture = scene.gestureCue?.trim()
+    ? ` While saying this line, their body: ${scene.gestureCue.trim()}.`
+    : "";
+  return `${direction}${angle}${cta}${mood}${gesture}`.trim();
 }
 
 /**
@@ -8076,9 +8092,42 @@ async function renderSceneClip(
         `[Longform ${jobId}] scene ${scene.index} ${e.message} — will resume`
       );
     } else {
-      // Reaching here means the render terminally failed: a grok clip failed with no
-      // cross-model fallback (b-roll or host scene). Either way the scene fails — there is no
-      // still-image recovery.
+      // If a b-roll cutaway fails to render as motion video, gracefully fall back to high-res
+      // Ken Burns still animation (industry standard: avoid failing the full video over one b-roll clip).
+      if (!scene.hostPresent) {
+        try {
+          console.warn(
+            `[Longform ${jobId}] scene ${scene.index} b-roll video failed (${e.message}) — falling back to Ken Burns still animation`
+          );
+          const apimartKey =
+            params.apimartSlot != null
+              ? await getApimartSlotKey(params.apimartSlot)
+              : null;
+          scene.clipUrls = await generateSceneStillClip(
+            jobId,
+            scene,
+            undefined,
+            scene.showsBook ? params.bookCoverImageUrl : undefined,
+            params.videoSubject,
+            false,
+            apimartKey
+          );
+          syncSceneClipFields(scene);
+          scene.stillImage = true;
+          scene.sceneStatus = "completed";
+          scene.error = undefined;
+          scene.renderTaskIds = undefined;
+          scene.renderModelIndex = undefined;
+          scene.renderAttempts = undefined;
+          scene.infraRetries = undefined;
+          return;
+        } catch (stillErr: any) {
+          console.error(
+            `[Longform ${jobId}] scene ${scene.index} still fallback failed:`,
+            stillErr
+          );
+        }
+      }
       scene.sceneStatus = "failed";
       scene.error = `Clip: ${e.message}`;
       scene.renderTaskIds = undefined;
@@ -9661,6 +9710,44 @@ async function runUnifiedPipeline(
       );
     }
 
+    // Completeness safeguard: if any b-roll scene still lacks a clip after main and resume passes,
+    // generate a high-res Ken Burns still so the full film can assemble without dropping narration.
+    for (const scene of scenes) {
+      if (!scene.hostPresent && !(scene.clipUrls?.length || scene.clipUrl)) {
+        console.warn(
+          `[Longform ${jobId}] scene ${scene.index} b-roll still lacking a clip — generating Ken Burns still fallback`
+        );
+        try {
+          const apimartKey =
+            params.apimartSlot != null
+              ? await getApimartSlotKey(params.apimartSlot)
+              : null;
+          scene.clipUrls = await generateSceneStillClip(
+            jobId,
+            scene,
+            undefined,
+            scene.showsBook ? params.bookCoverImageUrl : undefined,
+            params.videoSubject,
+            false,
+            apimartKey
+          );
+          syncSceneClipFields(scene);
+          scene.stillImage = true;
+          scene.sceneStatus = "completed";
+          scene.error = undefined;
+          scene.renderTaskIds = undefined;
+          scene.renderModelIndex = undefined;
+          scene.renderAttempts = undefined;
+          scene.infraRetries = undefined;
+        } catch (err: any) {
+          console.error(
+            `[Longform ${jobId}] scene ${scene.index} fallback still failed:`,
+            err
+          );
+        }
+      }
+    }
+
     // ── Completeness gate: never assemble a script-incomplete cut ──
     // If any scene ended without a clip, its narration would be silently dropped from the
     // final video (the audio would skip part of the script). Fail loudly instead — the user
@@ -10081,11 +10168,17 @@ export async function cancelLongformJob(
   opts: { allowAny?: boolean } = {}
 ): Promise<void> {
   const job = await getLongformVideoJobById(jobId);
+  // If the job row doesn't exist anymore, clear any slots pointing to it and return cleanly.
+  if (!job) {
+    await clearLongformSlotsByJobId(jobId);
+    return;
+  }
   // `allowAny` is the oversight tier (admin / operations manager), which sees every render in the
   // library and so must be able to stop one. Editors stay pinned to their own.
-  if (!job || (!opts.allowAny && job.userId !== userId)) {
-    throw new Error("Job not found");
+  if (!opts.allowAny && job.userId !== userId) {
+    throw new Error("Not authorized");
   }
+  await clearLongformSlotsByJobId(jobId);
   await updateLongformVideoJob(jobId, {
     status: "failed",
     errorMessage: "Cancelled by user",
@@ -10112,7 +10205,11 @@ async function resumePendingRendersLocked(jobId: number): Promise<boolean> {
   if (!job) return false;
   const params = job.inputParams as LongformInputParams;
   const scenes = (job.storyboard as StoryboardScene[]) || [];
-  if (!scenes.some(s => s.renderTaskIds?.length)) {
+  if (
+    !scenes.some(
+      s => s.sceneStatus === "rendering" || (s.renderTaskIds?.length ?? 0) > 0
+    )
+  ) {
     return describeIncompleteScenes(scenes) === null;
   }
 
@@ -10377,35 +10474,59 @@ async function renderSceneClipInPlace(
   // so the drift is visible instead of silently padded.
   const overlong = describeOverlongScenes([scene], pacingFor(params));
   if (overlong) console.warn(`[Longform ${jobId}] ${overlong}`);
-  scene.clipUrls = await withTransientRetry(
-    () => {
-      // Fresh resubmit each attempt — discard any in-flight taskIds from the prior try
-      // and restart the clip chain at element 0.
-      scene.renderTaskIds = undefined;
-      scene.renderProvider = undefined;
-      scene.renderModelIndex = undefined;
-      scene.renderAttempts = undefined;
-      scene.infraRetries = undefined;
-      scene.sceneStatus = "processing";
-      scene.error = undefined;
-      return generateSceneClips(
-        adapter,
+  try {
+    scene.clipUrls = await withTransientRetry(
+      () => {
+        // Fresh resubmit each attempt — discard any in-flight taskIds from the prior try
+        // and restart the clip chain at element 0.
+        scene.renderTaskIds = undefined;
+        scene.renderProvider = undefined;
+        scene.renderModelIndex = undefined;
+        scene.renderAttempts = undefined;
+        scene.infraRetries = undefined;
+        scene.sceneStatus = "processing";
+        scene.error = undefined;
+        return generateSceneClips(
+          adapter,
+          jobId,
+          scene,
+          params,
+          lipsync,
+          instruction,
+          persist
+        );
+      },
+      {
+        onRetry: (attempt, err) =>
+          console.warn(
+            `[Longform ${jobId}] scene ${scene.index} transient render failure ` +
+              `(attempt ${attempt}) — retrying: ${err.message}`
+          ),
+      }
+    );
+  } catch (err: any) {
+    if (!scene.hostPresent) {
+      console.warn(
+        `[Longform ${jobId}] scene ${scene.index} b-roll video retry failed (${err.message}) — falling back to Ken Burns still animation`
+      );
+      const apimartKey =
+        params.apimartSlot != null
+          ? await getApimartSlotKey(params.apimartSlot)
+          : null;
+      scene.clipUrls = await generateSceneStillClip(
         jobId,
         scene,
-        params,
-        lipsync,
-        instruction,
-        persist
+        undefined,
+        scene.showsBook ? params.bookCoverImageUrl : undefined,
+        params.videoSubject,
+        false,
+        apimartKey
       );
-    },
-    {
-      onRetry: (attempt, err) =>
-        console.warn(
-          `[Longform ${jobId}] scene ${scene.index} transient render failure ` +
-            `(attempt ${attempt}) — retrying: ${err.message}`
-        ),
+      scene.stillImage = true;
+    } else {
+      throw err;
     }
-  );
+  }
   syncSceneClipFields(scene);
   scene.sceneStatus = "completed";
 }
@@ -12440,6 +12561,43 @@ async function retryFailedScenesLocked(jobId: number): Promise<void> {
       jobId
     );
     await flushPersist(jobId);
+
+    // Fallback: if any b-roll scene still lacks a clip on retry, generate a Ken Burns still so assembly can succeed.
+    for (const scene of scenes) {
+      if (!scene.hostPresent && !(scene.clipUrls?.length || scene.clipUrl)) {
+        console.warn(
+          `[Longform ${jobId}] scene ${scene.index} still lacks a clip on retry — generating Ken Burns still fallback`
+        );
+        try {
+          const apimartKey =
+            params.apimartSlot != null
+              ? await getApimartSlotKey(params.apimartSlot)
+              : null;
+          scene.clipUrls = await generateSceneStillClip(
+            jobId,
+            scene,
+            undefined,
+            scene.showsBook ? params.bookCoverImageUrl : undefined,
+            params.videoSubject,
+            false,
+            apimartKey
+          );
+          syncSceneClipFields(scene);
+          scene.stillImage = true;
+          scene.sceneStatus = "completed";
+          scene.error = undefined;
+          scene.renderTaskIds = undefined;
+          scene.renderModelIndex = undefined;
+          scene.renderAttempts = undefined;
+          scene.infraRetries = undefined;
+        } catch (err: any) {
+          console.error(
+            `[Longform ${jobId}] scene ${scene.index} retry still fallback failed:`,
+            err
+          );
+        }
+      }
+    }
 
     // 3) Every scene has a clip → finalize; else fail loudly listing holdouts.
     const incomplete = describeIncompleteScenes(scenes);

@@ -37,13 +37,15 @@ const SCRIPT =
 const plan = (
   paces: string[],
   pauses: number[] = [],
-  moods: string[] = []
+  moods: string[] = [],
+  gestures: string[] = []
 ): DeliveryPlan => ({
   paragraphs: paces.map((pace, i) => ({
     index: i + 1,
     pace: pace as any,
     pauseAfterMs: pauses[i] ?? 0,
     mood: moods[i] ?? "",
+    gesture: gestures[i] ?? "",
   })),
 });
 
@@ -55,7 +57,7 @@ beforeEach(() => {
 describe("parseDeliveryPlan", () => {
   it("reads Claude's JSON, defaults what is missing, snaps pauses and trims moods", () => {
     const text =
-      'Here you go:\n{"paragraphs":[{"index":1,"pace":"measured","pauseAfterMs":250,"mood":"warm, gentle smile — eyes soft and kind"},' +
+      'Here you go:\n{"paragraphs":[{"index":1,"pace":"measured","pauseAfterMs":250,"mood":"warm, gentle smile — eyes soft and kind","gesture":"small nod on the number, then settles back"},' +
       '{"index":3,"pace":"loud","pauseAfterMs":"600","mood":"serious"}]}';
     const p = parseDeliveryPlan(text, 3)!;
     expect(p.paragraphs).toEqual([
@@ -64,9 +66,18 @@ describe("parseDeliveryPlan", () => {
         pace: "measured",
         pauseAfterMs: 300,
         mood: "warm, gentle smile eyes soft",
+        gesture: "small nod on the number, then", // trimmed to 6 words
       },
-      { index: 2, pace: "natural", pauseAfterMs: 0, mood: "" }, // not returned → defaults
-      { index: 3, pace: "natural", pauseAfterMs: 600, mood: "serious" }, // bad pace → natural
+      // not returned → defaults
+      { index: 2, pace: "natural", pauseAfterMs: 0, mood: "", gesture: "" },
+      // bad pace → natural; no gesture given → ""
+      {
+        index: 3,
+        pace: "natural",
+        pauseAfterMs: 600,
+        mood: "serious",
+        gesture: "",
+      },
     ]);
   });
 
@@ -88,6 +99,9 @@ describe("planDelivery", () => {
     expect(msg).toContain("[1] Your first blanket");
     expect(msg).toContain("[3] Habit one.");
     expect(msg).toContain("exactly 3 entries");
+    // The body cue is asked for in the SAME call — gestures cost nothing extra.
+    expect(msg).toContain('"gesture"');
+    expect(msg).toContain("head, shoulders and upper body only");
     expect(p?.paragraphs.map(x => x.pace)).toEqual(["natural", "slow", "slow"]);
   });
 
@@ -170,7 +184,8 @@ describe("applyDeliveryToScenes", () => {
       plan(
         ["natural", "measured", "slow"],
         [],
-        ["warm gentle smile", "", "serious, patient"]
+        ["warm gentle smile", "", "serious, patient"],
+        ["small nod on the number", "leans in slightly", ""]
       ),
       SCRIPT
     );
@@ -187,6 +202,14 @@ describe("applyDeliveryToScenes", () => {
       "warm gentle smile",
       undefined,
       "serious, patient",
+      undefined,
+    ]);
+    // The body cue rides the same paragraph mapping as the mood.
+    expect(scenes.map(s => s.gestureCue)).toEqual([
+      "small nod on the number",
+      "small nod on the number",
+      "leans in slightly",
+      undefined,
       undefined,
     ]);
   });
