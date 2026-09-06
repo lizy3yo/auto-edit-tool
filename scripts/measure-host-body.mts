@@ -33,6 +33,10 @@
  *   SHOULDERS follow the head and move less than it — the head sits on the spine. Their share
  *             of the head's motion is also the LIVELINESS reading: a host whose shoulders
  *             barely move with her head reads as a talking photograph.
+ *   CHAIN     the whole seated body, head → shoulders → chest → lap, plus the arms. Movement
+ *             DECAYS down a real body; a flat or inverted profile is the torso drifting as one
+ *             mass, which no other line here can see. Arms ride the shoulders and never
+ *             gesture — the reference clips gesture with none of them.
  *   BROWS     move in short bursts on emphasis, not continuously (informational).
  *
  * Camera, background morph, window seams and subject cuts are NOT here — those already had
@@ -110,6 +114,10 @@ type BodyFrame = {
   head: number;
   shoulders: number;
   brows: number;
+  /** The rest of the chain: what a seated body does BELOW the shoulders. */
+  chest: number;
+  lap: number;
+  arms: number;
 };
 
 const ff = (args: string[]) => {
@@ -211,7 +219,7 @@ function eyeStats(data: Buffer): { eye: number; luma: number } {
   return { eye: nonSkin / data.length, luma: sum / data.length };
 }
 
-const BODY_VERSION = 2;
+const BODY_VERSION = 3; // chest/lap/arm bands added
 async function bodyFrames(clip: string, work: string): Promise<BodyFrame[]> {
   const cacheDir = path.join(os.tmpdir(), "lipsync-body");
   mkdirSync(cacheDir, { recursive: true });
@@ -246,6 +254,27 @@ const shoulderBox = (f: Box, frameH: number) => ({
   top: Math.min(frameH - 2, f.y + f.size * 0.85),
   width: f.size * 2.2,
   height: f.size * 0.6,
+});
+/** Chest: below the shoulder line, centred — it should only breathe. */
+const chestBox = (f: Box, frameH: number) => ({
+  left: f.x - f.size * 0.8,
+  top: Math.min(frameH - 2, f.y + f.size * 1.5),
+  width: f.size * 1.6,
+  height: f.size * 0.6,
+});
+/** Lap: the bottom of the chain, and the band most prone to being re-invented past the frame edge. */
+const lapBox = (f: Box, frameH: number) => ({
+  left: f.x - f.size * 0.8,
+  top: Math.min(frameH - 2, f.y + f.size * 2.1),
+  width: f.size * 1.6,
+  height: f.size * 0.7,
+});
+/** Both arms at once, at the sides of a seated medium shot: they ride the shoulders, nothing more. */
+const armBox = (f: Box, frameH: number) => ({
+  left: Math.max(0, f.x - f.size * 2.0),
+  top: Math.min(frameH - 2, f.y + f.size * 1.4),
+  width: f.size * 4.0,
+  height: f.size * 0.9,
 });
 
 async function extractBodyFrames(
@@ -297,6 +326,9 @@ async function extractBodyFrames(
     headT: Buffer;
     sh: Buffer;
     br: Buffer;
+    ch: Buffer;
+    lp: Buffer;
+    ar: Buffer;
   } | null = null;
   for (const f of files) {
     const img = sharp(path.join(dir, f));
@@ -310,6 +342,9 @@ async function extractBodyFrames(
         head: 0,
         shoulders: 0,
         brows: 0,
+        chest: 0,
+        lap: 0,
+        arms: 0,
       });
       continue;
     }
@@ -326,15 +361,24 @@ async function extractBodyFrames(
       96
     );
     const br = await crop(img, browBand(face), frameW, frameH, 2, 96);
+    const ch = await crop(img, chestBox(face, frameH), frameW, frameH, 3, 96);
+    const lp = await crop(img, lapBox(face, frameH), frameW, frameH, 3, 96);
+    const ar = await crop(img, armBox(face, frameH), frameW, frameH, 3, 128);
     let d = { dx: 0, dy: 0 };
     let headM = 0;
     let shM = 0;
     let brM = 0;
+    let chM = 0;
+    let lpM = 0;
+    let arM = 0;
     if (prev) {
       d = shift(prev.headT, headT.data, headT.info.width, headT.info.height);
       headM = meanAbsDiff(prev.head, head.data);
       shM = meanAbsDiff(prev.sh, sh.data);
       brM = meanAbsDiff(prev.br, br.data);
+      chM = meanAbsDiff(prev.ch, ch.data);
+      lpM = meanAbsDiff(prev.lp, lp.data);
+      arM = meanAbsDiff(prev.ar, ar.data);
     }
     // Template pixels → frame pixels: the head crop is `face.size` wide, resized to 96.
     const px = face.size / headT.info.width;
@@ -347,8 +391,19 @@ async function extractBodyFrames(
       head: headM,
       shoulders: shM,
       brows: brM,
+      chest: chM,
+      lap: lpM,
+      arms: arM,
     });
-    prev = { head: head.data, headT: headT.data, sh: sh.data, br: br.data };
+    prev = {
+      head: head.data,
+      headT: headT.data,
+      sh: sh.data,
+      br: br.data,
+      ch: ch.data,
+      lp: lp.data,
+      ar: ar.data,
+    };
   }
   return out;
 }
@@ -562,6 +617,14 @@ type Report = {
   shoulderRatio: number;
   shoulderCoupling: number;
   browBurst: number;
+  /** The chain, head → shoulders → chest → lap, plus the arms. Mean frame-to-frame change. */
+  chain: {
+    head: number;
+    shoulders: number;
+    chest: number;
+    lap: number;
+    arms: number;
+  };
 };
 
 async function analyse(clip: string, photo?: string): Promise<Report> {
@@ -627,6 +690,13 @@ async function analyse(clip: string, photo?: string): Promise<Report> {
     // shoulders, brows
     const headM = fr.map(f => f.head);
     const shM = fr.map(f => f.shoulders);
+    const chain = {
+      head: mean(headM),
+      shoulders: mean(shM),
+      chest: mean(fr.map(f => f.chest)),
+      lap: mean(fr.map(f => f.lap)),
+      arms: mean(fr.map(f => f.arms)),
+    };
     const shoulderRatio = mean(headM) > 0 ? mean(shM) / mean(headM) : 0;
     const shoulderCoupling = pearson(smooth(headM, 3), smooth(shM, 3), 0);
     const brM = fr.map(f => f.brows);
@@ -650,6 +720,7 @@ async function analyse(clip: string, photo?: string): Promise<Report> {
       headSpeech,
       shoulderRatio,
       shoulderCoupling,
+      chain,
       browBurst,
     };
   } finally {
@@ -816,6 +887,33 @@ line(
       : "BUSY — over the target band (check jitter/roughness above)";
   console.log(
     `  ${"liveliness".padEnd(10)} ${"head travel + shoulders".padEnd(30)} ${`${pctS(R.headRange)} / ${f2(R.shoulderRatio)}`.padStart(14)}${B ? `   ${`${pctS(B.headRange)} / ${f2(B.shoulderRatio)}`.padStart(14)}` : ""}   ${verdict}  target ${pctS(LIVELY_TRAVEL_MIN)}-${pctS(LIVELY_TRAVEL_MAX)} travel, shoulders ≥ ${LIVELY_SHOULDER_MIN}`
+  );
+}
+// The CHAIN: a seated body's movement decays from head to lap. Four accepted
+// reference-engine clips: head 0.67-1.62, shoulders 0.38-0.56, chest 0.33-0.35, lap 0.23,
+// arms 0.10-0.16. A FLAT profile (every band alike) is the torso floating as one mass; an
+// INVERTED one (lower louder than the head) is worse still — both read as unnatural even
+// when no single frame looks wrong, and neither is caught by any other line here.
+{
+  const c = R.chain;
+  const fmt = (v: number) => v.toFixed(2).padStart(5);
+  const decays =
+    c.head > c.shoulders && c.shoulders >= c.chest && c.chest >= c.lap * 0.9;
+  const armsRest = c.head > 0 && c.arms <= c.head * 0.45;
+  const verdict = !decays
+    ? c.lap > c.head || c.chest > c.head
+      ? "INVERTED — the lower body moves more than the head"
+      : "FLAT — the torso drifts as one mass instead of a body settling"
+    : armsRest
+      ? "chain decays head to lap, arms at rest"
+      : "arms too active — they should ride the shoulders, not gesture";
+  const row = (x: typeof c) =>
+    `${fmt(x.head)}${fmt(x.shoulders)}${fmt(x.chest)}${fmt(x.lap)}`;
+  console.log(
+    `  ${"chain".padEnd(10)} ${"head>shoulders>chest>lap".padEnd(30)} ${row(c).padStart(14)}${B ? `   ${row(B.chain).padStart(14)}` : ""}   ${verdict}`
+  );
+  console.log(
+    `  ${"".padEnd(10)} ${"arms (ride, never gesture)".padEnd(30)} ${fmt(c.arms).padStart(14)}${B ? `   ${fmt(B.chain.arms).padStart(14)}` : ""}   under 45% of the head`
   );
 }
 line(

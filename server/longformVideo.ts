@@ -3982,11 +3982,23 @@ export const LIPSYNC_HOST_DIRECTION_PINNED =
   // ("small", "never large or repeated") in the same breath, since the negative prompt
   // carries the rest of the guard.
   "face. They speak naturally and comfortably, with the easy body language of a person " +
-  "telling you something across a kitchen table: head, shoulders and upper body move " +
-  "together as one connected body, with small nods on the words they stress, a slight " +
-  "lean or turn toward the camera when a point matters, and gentle weight shifts between " +
-  "sentences. The movement is small, occasional and motivated by what they are saying — " +
-  "never large, never rhythmic or repeated, never bouncing. " +
+  // A seated body is a CHAIN, and the movement DECAYS down it. Measured on four accepted
+  // reference-engine clips: head 0.67-1.62, shoulders 0.38-0.56, chest 0.33-0.35, lap 0.23,
+  // arms 0.10-0.16 — each band a fraction of the one above. Our renders read almost FLAT
+  // (head 0.42, shoulders 0.49, chest 0.55, lap 0.48): every band drifting by the same amount,
+  // which is the whole torso moving as one soft mass and is why it read as unnatural even
+  // where no single frame looked wrong. "One connected body" is what produced that, so the
+  // hierarchy is now spelled out, band by band, with the arms explicitly at rest — the
+  // reference clips gesture with NONE of them, and asking for hands at this framing invites
+  // the melting lap visible in their own worst clip.
+  "telling you something across a kitchen table. Their body moves as a chain, and the " +
+  "movement gets smaller the further down it goes: the head leads with small nods and " +
+  "turns on the words they stress, the shoulders follow with a fraction of that, the chest " +
+  "only breathes, and the lap, arms and hands stay settled and still, resting exactly where " +
+  "they are. The head is the most alive part of the frame and the lower body is the " +
+  "quietest. The movement is small, occasional and motivated by what they are saying — " +
+  "never large, never rhythmic or repeated, never bouncing, and the torso never drifts or " +
+  "sways as one block. " +
   // The visemes an audio-driven model blurs are the ones the eye checks hardest: a viseme
   // audit against the reference showed vowels landing but lips never meeting on p/b/m and
   // never rounding on oo/w — a generic half-open shape for every consonant, ~40% of the
@@ -4074,7 +4086,15 @@ export const LIPSYNC_NEGATIVE_DIRECTION_PINNED =
   "many people in the background, walking backwards, jitter, camera shake, " +
   "camera push in, camera zoom, dolly, pan, tilt, camera drift, camera movement, " +
   "background warping, background morphing, background drift, stiff, rigid, " +
-  "frozen body, motionless torso, mannequin, head moving on a still body, mumbling, " +
+  "frozen body, motionless torso, mannequin, head moving on a still body, " +
+  // The flat profile: every band moving alike, which reads as the torso floating rather
+  // than a person shifting. Named as shapes so NAG can push against them — and deliberately
+  // NOT as the blanket suppressors ("swaying", "rocking", "leaning", "nodding") that froze
+  // the body before: what is wrong is the whole trunk moving TOGETHER, not that it moves.
+  "torso drifting, whole upper body moving as one block, floating body, chest swelling, " +
+  "clothing shifting on its own, lap moving on its own, arms drifting, hands rising, " +
+  "gesturing, waving, " +
+  "mumbling, " +
   "slack mouth, lips never closing, half-open mouth on every sound, blurred consonants, " +
   // The eyes: the source photo has soft, slightly smiling eyes with resting brows; at audio
   // guidance the render invented a wide-eyed, raised-brow look in 5 of 6 seconds that the

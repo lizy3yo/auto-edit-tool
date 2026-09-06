@@ -8184,6 +8184,15 @@ describe("pinned-camera prompt pair", () => {
     // NAG enforces the negative on the fast tier, so naming the actual failure earns its place.
     for (const term of ["stiff", "rigid", "mannequin", "motionless torso"])
       expect(LIPSYNC_NEGATIVE_DIRECTION_PINNED).toContain(term);
+    // The OTHER failure, measured against four reference clips: not a frozen torso but a
+    // floating one — every band drifting alike instead of the chain decaying head → lap.
+    for (const term of [
+      "torso drifting",
+      "whole upper body moving as one block",
+      "lap moving on its own",
+      "gesturing",
+    ])
+      expect(LIPSYNC_NEGATIVE_DIRECTION_PINNED).toContain(term);
   });
 
   it("names the visemes an audio-driven model blurs, in both halves of the pinned pair", () => {
@@ -8262,12 +8271,20 @@ describe("pinned-camera prompt pair", () => {
     expect(buildLipsyncPrompt(scene, false, "photo")).toContain(
       "calm and still"
     );
-    // The pinned pair asks the body to MOVE — and names what a seated host actually does.
+    // The pinned pair asks the body to MOVE, as a CHAIN that decays head → lap. "One
+    // connected body" is what it used to say, and that is precisely what produced the flat
+    // profile the reference clips do not have.
     expect(buildLipsyncPrompt(scene, false, "pinned")).toContain(
-      "one connected body"
+      "moves as a chain"
     );
     expect(buildLipsyncPrompt(scene, false, "pinned")).toContain(
-      "small nods on the words they stress"
+      "smaller the further down it goes"
+    );
+    expect(buildLipsyncPrompt(scene, false, "pinned")).toContain(
+      "lap, arms and hands stay settled and still"
+    );
+    expect(buildLipsyncPrompt(scene, false, "pinned")).not.toContain(
+      "one connected body"
     );
     // The alt-angle suffix still rides along on either.
     expect(

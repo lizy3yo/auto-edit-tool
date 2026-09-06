@@ -237,7 +237,17 @@ Express · tRPC · Drizzle · MySQL.
   matter — with the wide-eyed shape still blocked by name in the negative and the blanket brow
   freeze removed. `audio_scale` 1.3 is the free half of the same gap. Reported as a target
   rather than a failure so a deliberately still beat is allowed, while the
-  jitter/roughness/flicker caps above it still catch exaggeration.
+  jitter/roughness/flicker caps above it still catch exaggeration. The CHAIN line measures the
+  seated body band by band — head, shoulders, chest, lap, plus the arms — because a real body's
+  movement DECAYS downward (reference clips: head 0.67-2.03, shoulders 0.25-0.56, chest
+  0.20-0.35, lap 0.11-0.23, arms 0.10-0.16) while ours read almost flat (0.86 / 0.35 / 0.45 /
+  0.64): the whole torso drifting as one mass, which no other line here can see and which is
+  why a render can pass every check and still look wrong. The pinned direction now asks for the
+  chain in those words ("the head leads … the chest only breathes … the lap, arms and hands
+  stay settled"), and the negative names the floating-torso shapes without re-introducing the
+  blanket suppressors that froze the body. Arms are deliberately NOT asked to gesture: none of
+  the reference clips gesture, and at this framing hands sit on the frame edge where the model
+  invents them (one reference clip drifts 20 in the lap band doing exactly that).
   The plan is snapshotted on `inputParams.deliveryPlan`
   so a resume voices the same film; no plan (mock mode, a failed call) means exactly the old
   behaviour. `scripts/measure-host-motion.mjs`
