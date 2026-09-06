@@ -87,6 +87,7 @@ import {
 import { buildCameraPlate } from "./cameraPlate";
 import { buildLipsyncLeadTrack, trimClipHead } from "./lipsyncLead";
 import { smoothWindowSeams } from "./lipsyncSeams";
+import { cancelJobProviderRenders } from "./cancelRenders";
 import {
   assignLipsyncGroups,
   buildGroupTrack,
@@ -10234,6 +10235,9 @@ export async function cancelLongformJob(
   if (!opts.allowAny && job.userId !== userId) {
     throw new Error("Not authorized");
   }
+  // Stop the GPU before the bookkeeping: marking the row failed only stops the pipeline
+  // starting more work, it does not stop what is already running and billing.
+  await cancelJobProviderRenders(job, "cancelled by user");
   await clearLongformSlotsByJobId(jobId);
   await updateLongformVideoJob(jobId, {
     status: "failed",

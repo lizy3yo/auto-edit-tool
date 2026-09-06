@@ -110,6 +110,7 @@ import {
   parseCtaMarkers,
   extractSpokenScript,
 } from "./longformVideo";
+import { cancelJobProviderRenders } from "./cancelRenders";
 // Cut-room pre-checks, so a refused edit is an error the operator reads, not a silent no-op.
 import {
   validateTimingEdit,
@@ -2464,6 +2465,13 @@ const longformVideoRouter = router({
   deleteJob: approvedProcedure
     .input(z.object({ jobId: z.number() }))
     .mutation(async ({ ctx, input }) => {
+      // Stop the GPU FIRST: once the row is gone the task ids are gone with it, and a RunPod
+      // render nobody is waiting for bills until it finishes or hits the execution cap.
+      // Read-only and authorization-neutral — `deleteLongformVideoJob` still owns the
+      // ownership check below and throws before anything is removed.
+      const job = await getLongformVideoJobById(input.jobId);
+      if (job && (canSeeAllJobs(ctx.user.role) || job.userId === ctx.user.id))
+        await cancelJobProviderRenders(job, "deleted by user");
       await deleteLongformVideoJob(input.jobId, ctx.user.id, {
         allowAny: canSeeAllJobs(ctx.user.role),
       });

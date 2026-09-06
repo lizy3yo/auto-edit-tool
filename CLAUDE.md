@@ -171,7 +171,13 @@ Express · tRPC · Drizzle · MySQL.
   the lane carries an optional `cancel` that `withSceneDeadline` fires when it gives up on a
   host scene — otherwise a wedged render bills on to the endpoint's own execution timeout.
   A poll TIMEOUT deliberately does not cancel: it returns `pending` so a resume can still
-  collect a render already paid for. The RunPod lane also sends a NEGATIVE prompt
+  collect a render already paid for. CANCELLING or DELETING a job now stops the GPU too
+  (`server/cancelRenders.ts`): both used to touch database rows only, so a render already
+  submitted ran on unwatched — one left over from a removed job billed 8 minutes of GPU before
+  it was spotted, and would have run to the execution cap. `cancelJobProviderRenders` is called
+  before the row is written or removed (the ids die with it), touches only scenes whose
+  `renderProvider` is `runpod` (a 69Labs or HeyGen task is billed per OUTPUT, so abandoning one
+  costs the same as stopping it), and is best-effort — `cancelJob` never throws. The RunPod lane also sends a NEGATIVE prompt
   (`LIPSYNC_NEGATIVE_DIRECTION`): the fast tier's cfg 1 skips the uncond pass entirely, so
   the worker workflow wires it through NAG (attention-level guidance, ~10-25% per step vs
   CFG's +100%) — before that, no negative wording did anything on the tier renders actually
