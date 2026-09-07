@@ -255,7 +255,12 @@ Express · tRPC · Drizzle · MySQL.
   does (small nods on stressed words, a slight lean on a point, weight shifts between
   sentences) with its own ceiling ("small, occasional, never rhythmic"), and `audio_scale`
   defaults to 1.15 — the voice drives the body harder for free, since it scales an embedding
-  rather than adding a pass. `scripts/measure-host-body.mts` gates the result with a
+  rather than adding a pass. A PINNED-only `audio_scale` of 1.8 was tried on 2026-09-07 and
+  REVERTED: the plate damps this dial hard (at 1.3 the photo path measured 13-21% head travel
+  of face size against pinned's 1-2%), so raising it looked like the obvious fix for a head
+  that moves in TIME with the emphasis but only 1% of a face width. It did not raise the head
+  and the render came back visibly softer. Whatever holds the pinned body still is not this
+  dial being too low. `scripts/measure-host-body.mts` gates the result with a
   LIVELINESS line: head travel 6-12% of face size with shoulders at 0.1+ of the head's motion
   is the target band, measured off FOUR accepted reference-engine clips of two hosts (9, 9, 9
   and 12% travel; shoulders 0.12-0.24) rather than guessed. Those clips also settled what the
