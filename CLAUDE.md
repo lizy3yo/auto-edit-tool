@@ -367,6 +367,25 @@ Express · tRPC · Drizzle · MySQL.
   The untested lever is `LONGCAT_INT8=0`: INT8 halves the DiT to fit a 48 GB card but this
   architecture cannot do 8-bit arithmetic, so every weight is unpacked to bf16 at use — on an
   80 GB card that tax buys nothing.
+  The MOUTH dial is `LONGCAT_AUDIO_SCALE` (default 0.75): the worker scales the audio
+  embedding before the DiT's audio cross-attention, the same mechanism as InfiniteTalk's
+  `audio_scale` but used in the opposite direction, because this model OVER-moves for the
+  format. Measured against the accepted HeyGen clip of the same host in the same room: mouth
+  motion 9.30 on the first render and 8.17 after a full rewrite of the host direction, against
+  HeyGen's 2.75 and an accepted-reference band of 2.6-2.9 — a 12% gain for rewriting every
+  clause, which is what a prompt is worth here. Wording is structurally weak on this lane and
+  it is worth knowing WHY before trying more of it: `use_distill` pins text AND audio guidance
+  to 1.0, the pipeline only runs a classifier-free pass when a scale EXCEEDS 1.0, so there is
+  nothing to amplify a prompt and `audio_guidance_scale` below 1.0 does nothing at all. The
+  same rewrite did fix the BODY (chain head 2.52/shoulders 0.50/chest 2.63/lap 4.97 —
+  inverted, the lap at twice the head — came back to a passing profile, and background morph
+  5.05 fell to 0.59, confirming that first figure was aspect-ratio contamination in
+  `measure-host-motion.mjs`'s fixed regions rather than a real defect). Two clauses in the
+  first draft were imported fixes for problems LongCat does not have and were arguing FOR the
+  failure: "articulates every word"/"the jaw opens properly on open vowels" counter
+  InfiniteTalk's mumbling, and "relaxed and alive rather than stiff" counters its stiffness.
+  `scene.gestureCue` is withheld from this lane for the same reason — it exists to move a host
+  who under-moves. `scene.deliveryCue` is kept: it steers the face, not the body.
 - `server/hostPlate.ts` — **provider-independent**. The lip-sync model animates the image it
   is handed and never changes the setting, so `HOST_PLATES=1` generates a 16:9 plate of the host
   IN each beat's setting (host photo as identity reference) and syncs from that instead of the

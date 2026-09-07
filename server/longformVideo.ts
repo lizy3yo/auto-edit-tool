@@ -3207,6 +3207,7 @@ async function resolveLipsyncLane(
           numSegments: segments,
           useInt8: ENV.longcatInt8,
           useDistill: ENV.longcatDistill,
+          audioScale: ENV.longcatAudioScale,
         });
       },
       poll: (id, ms) => longcat.pollVideo(id, ms ?? LONGCAT_LIPSYNC_TIMEOUT_MS),

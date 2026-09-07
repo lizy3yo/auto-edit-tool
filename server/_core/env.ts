@@ -113,6 +113,25 @@ export const ENV = {
     process.env.LONGCAT_LIPSYNC_CONCURRENCY ?? 2
   ),
   /**
+   * How hard the narration drives the host's face on the LongCat lane. The worker multiplies
+   * the audio embedding by this before it reaches the DiT's audio cross-attention, so it is a
+   * direct dial on mouth (and brow, and head) motion rather than a request in a prompt.
+   *
+   * Default 0.75, below the worker's own 1.0, because this model OVER-moves for our format.
+   * Measured against the accepted HeyGen clip of the same host in the same room: mouth motion
+   * 9.30 on the first render, 8.17 after a full rewrite of the host direction, against
+   * HeyGen's 2.75 and an accepted-reference band of 2.6-2.9. Wording had reached its ceiling —
+   * the distilled path pins text and audio guidance to 1.0, so there is no classifier-free
+   * pass for a prompt to be amplified by, and `audio_guidance_scale` below 1.0 does nothing
+   * at all (the pipeline only runs a CFG pass above it).
+   *
+   * Walk it one value per render and judge the median of two or three: the motion numbers
+   * carry a large render-to-render noise floor. Below ~0.5 expect the mouth to stop matching
+   * the words before it stops moving — the model trained on un-scaled embeddings, so this is
+   * off-distribution by construction. `scripts/measure-lipsync.mts` is the check for that.
+   */
+  longcatAudioScale: Number(process.env.LONGCAT_AUDIO_SCALE ?? 0.75),
+  /**
    * InfiniteTalk quality tier: `fast` (8-step distill, the default) or `full` (40 steps,
    * real CFG). CFG above 1 costs two forward passes per step, so full is ~10x the model
    * evaluations (40 x 2 vs 8 x 1) and ~10x the cost, not the 6x a step count alone suggests.

@@ -73,6 +73,14 @@ export interface LongcatLipsyncParams {
   useInt8?: boolean;
   /** `false` runs the undistilled 50-step path — ~6x the cost, and makes the negative bite. */
   useDistill?: boolean;
+  /**
+   * Scales the audio embedding before it reaches the DiT's audio cross-attention — how hard
+   * the voice drives the face. The one real dial on mouth motion on this lane: prompt wording
+   * is weak here because the distilled path pins both guidance scales to 1.0, and
+   * `audio_guidance_scale` below 1.0 does nothing (the pipeline only runs a CFG pass above
+   * it). Omitted, the worker uses 1.0 and renders as it always did.
+   */
+  audioScale?: number;
   /** Fixed seed for an A/B; omitted, the worker draws a new one per render. */
   seed?: number;
 }
@@ -251,6 +259,9 @@ export class LongcatLipsyncAdapter {
         ...(params.useInt8 != null ? { use_int8: params.useInt8 } : {}),
         ...(params.useDistill != null
           ? { use_distill: params.useDistill }
+          : {}),
+        ...(params.audioScale != null
+          ? { audio_scale: params.audioScale }
           : {}),
         ...(params.seed != null ? { seed: params.seed } : {}),
       },

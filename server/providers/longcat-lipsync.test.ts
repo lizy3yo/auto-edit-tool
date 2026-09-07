@@ -128,6 +128,21 @@ describe("LongcatLipsyncAdapter.submitLipsync", () => {
     );
   });
 
+  /**
+   * The one real dial on mouth motion here — prompt wording measured 9.30 -> 8.17 against an
+   * accepted 2.75, because the distilled path leaves nothing for a prompt to be amplified by.
+   * If this stops reaching the worker, the lane silently reverts to the exaggerated mouth.
+   */
+  it("sends audio_scale, the mouth dial, when the lane sets one", async () => {
+    const calls = installFetchMock({});
+    await new LongcatLipsyncAdapter("ep-1", "key-1").submitLipsync({
+      ...params,
+      audioScale: 0.75,
+    });
+    const input = calls.find(c => c.url.includes("/run"))!.body.input;
+    expect(input.audio_scale).toBe(0.75);
+  });
+
   it("omits optional dials so the worker keeps its own defaults", async () => {
     const calls = installFetchMock({});
     await new LongcatLipsyncAdapter("ep-1", "key-1").submitLipsync(params);
