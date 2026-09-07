@@ -81,6 +81,12 @@ export interface LongcatLipsyncParams {
    * it). Omitted, the worker uses 1.0 and renders as it always did.
    */
   audioScale?: number;
+  /**
+   * `false` runs the DiT eager instead of compiled. Load-time on the worker, so flipping it
+   * costs that worker a reload — it is a lever for isolating a compile problem, not a
+   * per-render choice. Omitted, the worker uses its own default (on).
+   */
+  torchCompile?: boolean;
   /** Fixed seed for an A/B; omitted, the worker draws a new one per render. */
   seed?: number;
 }
@@ -262,6 +268,9 @@ export class LongcatLipsyncAdapter {
           : {}),
         ...(params.audioScale != null
           ? { audio_scale: params.audioScale }
+          : {}),
+        ...(params.torchCompile != null
+          ? { torch_compile: params.torchCompile }
           : {}),
         ...(params.seed != null ? { seed: params.seed } : {}),
       },

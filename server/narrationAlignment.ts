@@ -174,7 +174,9 @@ export function assignSceneRanges(
   words: WhisperWord[] | null,
   masterDurationSec: number,
   silences?: SilenceInterval[] | null,
-  shortSilences?: SilenceInterval[] | null
+  shortSilences?: SilenceInterval[] | null,
+  /** Host-lane cost grid; omitted, cuts snap to the nearest pause exactly as before. */
+  grid?: BeatGrid | null
 ): SceneRange[] {
   const n = scenes.length;
   if (n === 0) return [];
@@ -198,7 +200,8 @@ export function assignSceneRanges(
       boundaries,
       silences,
       plan.gaps,
-      shortSilences ?? []
+      shortSilences ?? [],
+      grid
     );
     rescueSilentQrTails(scenes, boundaries, silences);
   }
@@ -538,11 +541,32 @@ function cutPointInSilence(boundary: number, sil: SilenceInterval): number {
  * chance against `shortSilences` (a finer scan that sees sub-120ms inter-word gaps). Keeps
  * `boundaries` monotonic and tiling `[0, dur]`. Pure — unit-tested.
  */
+/**
+ * How the active host lane charges for a beat, when it charges in STEPS rather than per
+ * second. LongCat renders a 93-frame first segment and then 80-frame continuations, so a
+ * host beat costs the same anywhere inside a step: 3.72s, 6.92s, 10.12s… A 7.24s beat pays
+ * for 10.12s and throws 28% of the frames away, and across realistic beat lengths about 18%
+ * of the GPU is rendered and discarded.
+ *
+ * Passing one of these lets the pause-snapper BREAK TIES toward a cut that lands just under
+ * a step. It never widens the tolerance, never invents a cut, and never picks anything but a
+ * real detected pause — worst case it chooses exactly the cut it chooses today. Omit it and
+ * this file behaves identically to before it existed, which is what every other lane wants:
+ * HeyGen bills per second of output and InfiniteTalk has a different grid entirely.
+ */
+export interface BeatGrid {
+  /** Cost units a beat of `sec` seconds occupies. Lower is cheaper. */
+  segmentsFor(sec: number): number;
+  /** True when scene `i` (0-based) renders on that lane at all — b-roll does not. */
+  isHost(i: number): boolean;
+}
+
 function snapBoundariesToSilence(
   boundaries: number[],
   silences: SilenceInterval[],
   gaps: Gap[] = [],
-  shortSilences: SilenceInterval[] = []
+  shortSilences: SilenceInterval[] = [],
+  grid?: BeatGrid | null
 ): number[] {
   const n = boundaries.length - 1; // scene count
   const pick: { cut: number; interval: number; dist: number }[] = new Array(
@@ -551,16 +575,42 @@ function snapBoundariesToSilence(
   for (let s = 1; s < n; s++)
     pick[s] = { cut: boundaries[s], interval: -1, dist: Infinity };
 
+  /**
+   * Cost of the two scenes either side of boundary `s` if it were cut at `cut`, in the host
+   * lane's step units. The FAR edges are read from the unsnapped boundaries: each cut is
+   * chosen independently in this pass, so this is a local estimate, not a global optimum —
+   * which is the right ambition for a tie-break.
+   */
+  const gridCost = (s: number, cut: number): number => {
+    if (!grid) return 0;
+    let cost = 0;
+    if (grid.isHost(s - 1)) cost += grid.segmentsFor(cut - boundaries[s - 1]);
+    if (grid.isHost(s)) cost += grid.segmentsFor(boundaries[s + 1] - cut);
+    return cost;
+  };
+
   // Tier 1: real pauses; tier 2 (only for boundaries tier 1 left unsnapped): short-gap scan.
-  for (const tier of [silences, shortSilences]) {
+  const tiers = [silences, shortSilences];
+  for (let tierIdx = 0; tierIdx < tiers.length; tierIdx++) {
+    const tier = tiers[tierIdx];
+    // The grid only steers among REAL pauses. A short-gap fallback is already a compromise
+    // on where the cut belongs; letting cost move it further would be trading the edit for
+    // GPU seconds, which is not a trade worth making.
+    const steer = tierIdx === 0 ? grid : null;
     for (let s = 1; s < n; s++) {
       if (pick[s].interval >= 0) continue;
       const gap = gaps[s] ?? null;
+      let bestCost = steer ? gridCost(s, pick[s].cut) : 0;
       for (let c = 0; c < tier.length; c++) {
         const cut = cutPointInSilence(boundaries[s], tier[c]);
         if (gap && (cut <= gap[0] || cut >= gap[1])) continue;
         const d = Math.abs(cut - boundaries[s]);
-        if (d <= SNAP_TOLERANCE_SEC && d < pick[s].dist) {
+        if (d > SNAP_TOLERANCE_SEC) continue;
+        // Cheaper wins; equal cost falls back to nearest, which is the existing rule and
+        // the only rule when no grid is supplied.
+        const cost = steer ? gridCost(s, cut) : 0;
+        if (cost < bestCost || (cost === bestCost && d < pick[s].dist)) {
+          bestCost = cost;
           pick[s] = { cut, interval: c, dist: d };
         }
       }

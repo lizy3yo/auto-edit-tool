@@ -206,7 +206,11 @@ import {
 } from "./videoAssembly";
 import { renderNameCardPng } from "./nameCard";
 import { assignHostPlateContexts, resolveHostPlate } from "./hostPlate";
-import { assignSceneRanges, numberWords } from "./narrationAlignment";
+import {
+  assignSceneRanges,
+  numberWords,
+  type BeatGrid,
+} from "./narrationAlignment";
 import {
   transcribeWordsFromBuffer,
   type WhisperWord,
@@ -2984,6 +2988,34 @@ export async function resolveVideoProvider(
  * `generateSceneClips` then fails host scenes loudly rather than silently rendering them as
  * non-lip-synced grok video.
  */
+/**
+ * The host lane's cost grid, for the pause snapper — or null when the active lane has no
+ * grid to exploit.
+ *
+ * LongCat charges in STEPS: a 93-frame first segment then 80-frame continuations, so a beat
+ * costs the same anywhere inside a step and about 18% of the GPU across realistic beat
+ * lengths is rendered and then discarded. Handing the grid to `assignSceneRanges` lets it
+ * break ties toward a cut that lands just under a step — a whole segment of GPU saved for a
+ * fraction of a second of narration, with no change to the picture at all.
+ *
+ * Deliberately mirrors `resolveLipsyncLane`'s readiness test rather than just reading the
+ * setting: a half-configured LongCat lane falls back to HeyGen, and optimising the CUT for a
+ * grid that will not be used would move a boundary for nothing. HeyGen bills per second of
+ * output and InfiniteTalk has a different geometry, so both correctly get null.
+ */
+async function longcatBeatGrid(
+  scenes: StoryboardScene[]
+): Promise<BeatGrid | null> {
+  if (await isMockMode()) return null;
+  if (!ENV.runpodLongcatEndpoint || !ENV.runPodApiKey) return null;
+  if ((await getLipsyncProvider()) !== "longcat") return null;
+  return {
+    segmentsFor: longcatSegmentsFor,
+    // b-roll never touches this lane, so its length is free as far as the grid is concerned.
+    isHost: i => !!scenes[i]?.hostPresent,
+  };
+}
+
 export async function resolveLipsyncAdapter(
   params: LongformInputParams
 ): Promise<LipsyncLane | null> {
@@ -3208,6 +3240,7 @@ async function resolveLipsyncLane(
           useInt8: ENV.longcatInt8,
           useDistill: ENV.longcatDistill,
           audioScale: ENV.longcatAudioScale,
+          torchCompile: ENV.longcatTorchCompile,
         });
       },
       poll: (id, ms) => longcat.pollVideo(id, ms ?? LONGCAT_LIPSYNC_TIMEOUT_MS),
@@ -9553,7 +9586,8 @@ async function runUnifiedPipeline(
     words,
     masterDurationSec,
     silences,
-    shortSilences
+    shortSilences,
+    await longcatBeatGrid(scenes)
   );
   await assertNotCancelled(jobId);
   const sceneClips = await sliceAudioSegments(

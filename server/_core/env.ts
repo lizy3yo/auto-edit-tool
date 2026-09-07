@@ -132,6 +132,22 @@ export const ENV = {
    */
   longcatAudioScale: Number(process.env.LONGCAT_AUDIO_SCALE ?? 0.75),
   /**
+   * Compile the LongCat DiT (`torch.compile`) — graph capture and kernel fusion on the module
+   * the sampler calls once per step. Nothing is approximated: same weights, same 8 steps, same
+   * sampler, so this is a speed change and not a quality one.
+   *
+   * It is NOT bit-identical, though — fusion reorders floating-point operations and diffusion
+   * compounds that across its steps, so the same seed gives a slightly different draw of
+   * equivalent quality. Judge a compiled render with the measure scripts, never by diffing
+   * frames against an uncompiled one.
+   *
+   * Costs: the first render after a worker boot pays the compile (a minute or two), and the
+   * worker recompiles per input SHAPE — this model's frame size follows the host image's
+   * aspect ratio, so plates sharing an aspect compile once and mixed aspects pay again.
+   * A compile failure falls back to eager and reports `compiled: false` rather than failing.
+   */
+  longcatTorchCompile: process.env.LONGCAT_TORCH_COMPILE !== "0",
+  /**
    * InfiniteTalk quality tier: `fast` (8-step distill, the default) or `full` (40 steps,
    * real CFG). CFG above 1 costs two forward passes per step, so full is ~10x the model
    * evaluations (40 x 2 vs 8 x 1) and ~10x the cost, not the 6x a step count alone suggests.

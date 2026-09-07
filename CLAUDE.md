@@ -386,6 +386,22 @@ Express · tRPC · Drizzle · MySQL.
   InfiniteTalk's mumbling, and "relaxed and alive rather than stiff" counters its stiffness.
   `scene.gestureCue` is withheld from this lane for the same reason — it exists to move a host
   who under-moves. `scene.deliveryCue` is kept: it steers the face, not the body.
+  Two COST levers ride on top, together taking the measured $0.134 per finished second to
+  roughly $0.093 with no change to the picture. `LONGCAT_TORCH_COMPILE` (default on) compiles
+  the DiT — same weights, same 8 steps, same sampler, so unlike the block-sparse attention the
+  repo also ships (and which upstream pointedly does NOT enable on the avatar path) nothing is
+  approximated; it is not bit-identical though, because fusion reorders float operations and
+  diffusion compounds that, so judge a compiled render with the measure scripts rather than by
+  diffing frames against an eager one. And BEAT SNAPPING: this lane charges in STEPS (93
+  frames, then +80), so a beat costs the same anywhere inside a step and ~18% of the GPU
+  across realistic beat lengths is rendered then discarded — a measured 7.24s beat paid for
+  10.12s. `longcatBeatGrid` hands `assignSceneRanges` a `BeatGrid` so the pause snapper BREAKS
+  TIES toward a cut that lands just under a step. It is strictly a tie-break: it can only
+  choose a pause the snapper would already have accepted, never widens `SNAP_TOLERANCE_SEC`,
+  never steers the short-gap fallback tier, and with no grid supplied `narrationAlignment.ts`
+  is byte-identical to before it existed. The grid is withheld unless the LongCat lane is
+  actually READY (the same test `resolveLipsyncLane` makes), since optimising a cut for a lane
+  that falls back to HeyGen moves a boundary for nothing.
 - `server/hostPlate.ts` — **provider-independent**. The lip-sync model animates the image it
   is handed and never changes the setting, so `HOST_PLATES=1` generates a 16:9 plate of the host
   IN each beat's setting (host photo as identity reference) and syncs from that instead of the
