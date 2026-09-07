@@ -10016,32 +10016,161 @@ export function masterOverlayEligible(
   return true;
 }
 
+/** A scene carries a usable slice of the master timeline, so its narration can be re-cut. */
+const hasMasterRange = (s: StoryboardScene): boolean =>
+  Number.isFinite(s.narrationStartSec) &&
+  Number.isFinite(s.narrationEndSec) &&
+  (s.narrationEndSec as number) >= (s.narrationStartSec as number);
+
+/**
+ * Re-cut any missing per-scene narration slice from the master track, in place.
+ *
+ * A scene's `audioUrl` is a deterministic cut of the master at its own
+ * `narrationStartSec/EndSec` (`voiceMasterNarration` makes them together), so a scene that has
+ * lost the slice but kept the range can be repaired EXACTLY — the re-cut bytes are the ones
+ * assembly would have used. Without this, such a scene is a permanent dead end: it has a clip,
+ * so it is not "failed" and the operator's "Retry failed scenes" button never appears for it;
+ * and Retry assembly only re-polls provider renders, so it re-runs the whole pass and fails on
+ * the identical message forever.
+ *
+ * Deliberately NOT a re-voice. Fresh TTS (`renderSceneClipInPlace`) costs credits and clears the
+ * scene's master ranges, which drops the WHOLE film off the seamless master-overlay path — a
+ * repair that degrades the other 200 scenes to fix 9. One `sliceAudioSegments` call for all of
+ * them: it downloads the master once and cuts each segment, the same way the voicing pass does.
+ *
+ * Best-effort by construction — a failure here leaves the scenes exactly as they were and the
+ * gate below reports them, rather than surfacing an ffmpeg/R2 error in place of the real one.
+ * Repairs are logged and recorded as a job warning: this restores a film, it does not explain
+ * how the slice went missing, and papering over that silently would hide the next occurrence.
+ */
+async function restoreMissingNarrationSlices(
+  jobId: number,
+  scenes: StoryboardScene[],
+  masterAudioUrl: string | null | undefined
+): Promise<void> {
+  if (!masterAudioUrl) return;
+  const repairable = scenes.filter(s => !s.audioUrl && hasMasterRange(s));
+  if (repairable.length === 0) return;
+
+  const indices = repairable.map(s => s.index).join(", ");
+  try {
+    const cuts = await sliceAudioSegments(
+      masterAudioUrl,
+      repairable.map(s => ({
+        startSec: s.narrationStartSec as number,
+        // Same 0.1s floor the voicing pass uses, so a degenerate range never yields an empty cut.
+        lenSec: Math.max(
+          0.1,
+          (s.narrationEndSec as number) - (s.narrationStartSec as number)
+        ),
+      }))
+    );
+    await Promise.all(
+      repairable.map(async (s, i) => {
+        const key = `longform/${jobId}/scene-${s.index}-vo-${nanoid(6)}.mp3`;
+        const { url } = await storagePut(key, cuts[i], "audio/mpeg");
+        s.audioUrl = url;
+        // Only when absent: a surviving measured duration is the one the film was planned
+        // against (pause-snapping and the hold floor both read it), and the range length is
+        // an approximation of it.
+        if (s.audioDuration == null) {
+          s.audioDuration = roundMs(
+            (s.narrationEndSec as number) - (s.narrationStartSec as number)
+          );
+        }
+      })
+    );
+    appendJobWarning(
+      jobId,
+      `Re-cut ${repairable.length} missing narration slice(s) from the master before assembly ` +
+        `(scene ${indices}) — the film is complete, but those scenes had lost their audio`
+    );
+    // Persist immediately so a later Reassemble reuses the repair, and the cut room and live
+    // preview see the restored slices. The progress write is what carries the warning above
+    // onto the job row; every clip is rendered by the time assembly runs, so the counts are final.
+    await updateLongformVideoJob(jobId, {
+      storyboard: scenes,
+      progress: jobProgress(jobId, {
+        scenesTotal: scenes.length,
+        scenesDone: scenes.length,
+      }),
+    });
+  } catch (err: any) {
+    console.error(
+      `[Longform ${jobId}] could not re-cut narration for scene ${indices}: ${err?.message ?? err}`
+    );
+  }
+}
+
+/**
+ * Why this storyboard cannot be assembled, or null when every scene has both a clip and its
+ * narration. Reports the two causes SEPARATELY: they have different recoveries, and one shared
+ * message for both ("missing clip or narration") is indistinguishable on the job card — a
+ * missing clip is re-rendered by "Retry failed scenes", while a missing narration slice leaves
+ * that button hidden (the scene has a clip, so it is not failed) and Retry assembly is a closed
+ * loop. Runs AFTER `restoreMissingNarrationSlices`, so a narration reported here is one that
+ * could not be re-cut. Pure — exported for unit testing.
+ */
+export function describeUnassemblableScenes(
+  scenes: StoryboardScene[],
+  hasMasterNarration: boolean
+): string | null {
+  const noClip: StoryboardScene[] = [];
+  const noNarration: StoryboardScene[] = [];
+  for (const s of scenes) {
+    if (!(s.clipUrls?.length || s.clipUrl)) noClip.push(s);
+    else if (!s.audioUrl) noNarration.push(s);
+  }
+  if (noClip.length === 0 && noNarration.length === 0) return null;
+  const list = (group: StoryboardScene[]) =>
+    group
+      .map(s => `scene ${s.index}${s.error ? ` (${s.error})` : ""}`)
+      .join(", ");
+
+  const parts: string[] = [];
+  if (noClip.length > 0) {
+    parts.push(
+      `${noClip.length} scene(s) have no clip — re-render them with "Retry failed scenes", ` +
+        `then Retry assembly: ${list(noClip)}`
+    );
+  }
+  if (noNarration.length > 0) {
+    parts.push(
+      `${noNarration.length} scene(s) have a clip but no narration audio, and it could not be ` +
+        `re-cut from the master (${
+          hasMasterNarration
+            ? "no usable narration range on those scenes"
+            : "this job has no master narration track"
+        }) — Regenerate them to re-voice: ${list(noNarration)}`
+    );
+  }
+  return `Not assembling a partial video. ${parts.join(" ")}`;
+}
+
 async function assembleAndFinalize(
   jobId: number,
   scenes: StoryboardScene[],
   params: LongformInputParams
 ): Promise<void> {
+  const job = await getLongformVideoJobById(jobId);
+
+  // Repair the one failure mode that is recoverable for free, before judging completeness.
+  await restoreMissingNarrationSlices(jobId, scenes, job?.masterAudioUrl);
+
   // Completeness gate: every scene must have BOTH a clip and its narration, or its words
   // would be silently dropped from the final cut (desyncing the video from the script).
   // Fail loudly instead of shipping a partial video — covers the pipeline, regenerate, and
-  // retry-assembly entry points. Recover via per-scene Regenerate, then Retry assembly.
-  const notReady = scenes.filter(
-    s => !((s.clipUrls?.length || s.clipUrl) && s.audioUrl)
+  // retry-assembly entry points, and names which of the two is missing per scene.
+  const unassemblable = describeUnassemblableScenes(
+    scenes,
+    !!job?.masterAudioUrl
   );
-  if (notReady.length > 0) {
-    const detail = notReady
-      .map(s => `scene ${s.index}${s.error ? ` (${s.error})` : ""}`)
-      .join(", ");
-    throw new Error(
-      `${notReady.length} scene(s) not ready (missing clip or narration) — not assembling a partial video: ${detail}`
-    );
-  }
+  if (unassemblable) throw new Error(unassemblable);
 
   // Master-overlay eligibility: pass the persisted master + per-scene timeline slices through
   // to assembly (seamless audio); an ineligible job (pre-overlay, or a scene re-voiced
   // off-master) simply omits them and assembly keeps the per-scene audio concat path.
   const sorted = scenes.slice().sort((a, b) => a.index - b.index);
-  const job = await getLongformVideoJobById(jobId);
   const masterAudioUrl = masterOverlayEligible(sorted, job?.masterAudioUrl)
     ? (job?.masterAudioUrl as string)
     : undefined;

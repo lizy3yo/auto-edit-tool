@@ -24,6 +24,7 @@ import {
   wpsForVoice,
   WORDS_PER_SEC,
   describeIncompleteScenes,
+  describeUnassemblableScenes,
   describeOverlongScenes,
   BROLL_CLIP_MAX_SEC,
   withTransientRetry,
@@ -5828,6 +5829,77 @@ describe("describeIncompleteScenes (pre-assembly completeness gate)", () => {
     expect(msg).not.toBeNull();
     expect(msg).toContain("scene 2");
     expect(msg).toContain("1 scene(s) have no clip");
+  });
+});
+
+describe("describeUnassemblableScenes (assembly readiness gate)", () => {
+  const scene = (
+    i: number,
+    extra: Partial<StoryboardScene> = {}
+  ): StoryboardScene => ({
+    index: i,
+    narration: "n",
+    visualPrompt: "v",
+    hostPresent: true,
+    ...extra,
+  });
+  const ready = (i: number, extra: Partial<StoryboardScene> = {}) =>
+    scene(i, { clipUrls: [`${i}.mp4`], audioUrl: `${i}.mp3`, ...extra });
+
+  it("returns null when every scene has both a clip and its narration", () => {
+    expect(describeUnassemblableScenes([ready(1), ready(2)], true)).toBeNull();
+  });
+
+  it("reports a missing CLIP and a missing NARRATION separately, each with its own recovery", () => {
+    // The whole point of the split: these two look identical on the job card but recover
+    // differently — one re-renders, the other re-voices.
+    const scenes = [
+      ready(1),
+      scene(2, { audioUrl: "2.mp3", error: "Clip: 69Labs timeout" }),
+      scene(3, { clipUrls: ["3.mp4"] }),
+    ];
+    const msg = describeUnassemblableScenes(scenes, true);
+    expect(msg).not.toBeNull();
+    expect(msg).toContain("1 scene(s) have no clip");
+    expect(msg).toContain("scene 2 (Clip: 69Labs timeout)");
+    expect(msg).toContain("Retry failed scenes");
+    expect(msg).toContain("1 scene(s) have a clip but no narration audio");
+    expect(msg).toContain("scene 3");
+    expect(msg).toContain("Regenerate");
+  });
+
+  it("names the reason a narration slice could not be re-cut", () => {
+    // With a master track, the scene's own range is what's unusable; with no master track at
+    // all, nothing could have been re-cut for any scene. Different fixes, so say which.
+    const orphan = [scene(1, { clipUrls: ["1.mp4"] })];
+    expect(describeUnassemblableScenes(orphan, true)).toContain(
+      "no usable narration range"
+    );
+    expect(describeUnassemblableScenes(orphan, false)).toContain(
+      "no master narration track"
+    );
+  });
+
+  it("counts a scene missing BOTH once, as a missing clip — the render has to come first", () => {
+    const msg = describeUnassemblableScenes([ready(1), scene(2)], true);
+    expect(msg).toContain("1 scene(s) have no clip");
+    expect(msg).not.toContain("no narration audio");
+  });
+
+  it("treats an empty clip list as no clip (a scene still rendering is not assemblable)", () => {
+    const scenes = [
+      ready(1),
+      scene(2, {
+        clipUrls: [],
+        audioUrl: "2.mp3",
+        sceneStatus: "rendering",
+        renderProvider: "runpod",
+        renderTaskIds: ["task-abc"],
+      }),
+    ];
+    expect(describeUnassemblableScenes(scenes, true)).toContain(
+      "1 scene(s) have no clip"
+    );
   });
 });
 
