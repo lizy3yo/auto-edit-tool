@@ -257,3 +257,43 @@ describe("LongcatLipsyncAdapter.pollVideo", () => {
     expect(recorded[0].quantity).toBe(12);
   });
 });
+
+describe("longcat host direction", () => {
+  /**
+   * The distilled path runs at guidance 1.0, which skips the classifier-free pass — so there
+   * is no negative-prompt channel at all. Both InfiniteTalk directions delegate their guards
+   * to one; this asserts the LongCat direction does not, because a guard that only exists in
+   * the negative is a guard that never runs on this lane.
+   */
+  it("states its guards positively, since the negative prompt is inert under distill", async () => {
+    const { buildLipsyncPrompt } = await import("../longformVideo");
+    const prompt = buildLipsyncPrompt({ index: 1 } as any, false, "longcat");
+
+    // The mouth guard the InfiniteTalk negative carries as "slack mouth, lips never closing".
+    expect(prompt).toMatch(/lips close completely on p, b and m/i);
+    // The floating-torso guard, carried there as "torso drifting, ... as one block".
+    expect(prompt).toMatch(/torso holds its own shape/i);
+    // The stiffness guard, carried there as "stiff, rigid, frozen body".
+    expect(prompt).toMatch(/relaxed and alive rather than stiff/i);
+    // The wide-eyed/raised-brow guard.
+    expect(prompt).toMatch(/brows rest where they are/i);
+    // The body chain — the one finding that IS model-independent and must survive the port.
+    expect(prompt).toMatch(/head leads/i);
+    expect(prompt).toMatch(/chest only breathes/i);
+  });
+
+  it("still carries the per-scene delivery and gesture cues", async () => {
+    const { buildLipsyncPrompt } = await import("../longformVideo");
+    const prompt = buildLipsyncPrompt(
+      {
+        index: 1,
+        deliveryCue: "warm and certain",
+        gestureCue: "small nod on the number",
+      } as any,
+      false,
+      "longcat"
+    );
+    expect(prompt).toContain("warm and certain");
+    expect(prompt).toContain("small nod on the number");
+  });
+});

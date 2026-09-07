@@ -3194,15 +3194,14 @@ async function resolveLipsyncLane(
         // where it can be logged and reasoned about rather than inferred inside the worker.
         const beatSec = audioDurationSec ?? scene.audioDuration ?? 6;
         const segments = longcatSegmentsFor(beatSec);
-        // Same direction as the InfiniteTalk photo path: both animate a still with no plate
-        // behind them, so the body-suppression wording applies for the same reason. A
-        // LongCat-specific direction is worth writing once this lane has a measured baseline
-        // — its prompt handling is different enough (richer scene description, and a negative
-        // that is inert under distill) that porting the pinned wording blind would be guessing.
+        // Its OWN direction (`LIPSYNC_HOST_DIRECTION_LONGCAT`), not either InfiniteTalk one:
+        // the negative prompt is inert under distill, so every guard those two delegate to it
+        // has to be stated positively here. The negative is still sent — free, and it becomes
+        // live the moment LONGCAT_DISTILL=0 turns real guidance back on.
         return longcat.submitLipsync({
           imageUrl,
           audioUrl,
-          prompt: buildLipsyncPrompt(scene, useAlt, "photo"),
+          prompt: buildLipsyncPrompt(scene, useAlt, "longcat"),
           negativePrompt: LIPSYNC_NEGATIVE_DIRECTION,
           resolution: ENV.longcatResolution,
           numSegments: segments,
@@ -5435,6 +5434,70 @@ export function markCtaQrBlock(
 }
 
 /**
+ * Host direction for the LONGCAT lane.
+ *
+ * Not a variant of the other two — it is rebuilt around three differences that make copying
+ * either of them wrong:
+ *
+ * 1. THE NEGATIVE PROMPT DOES NOTHING HERE. `use_distill` forces text and audio guidance to
+ *    1.0, which skips the classifier-free pass entirely, so there is no channel for a "do not
+ *    do this" list at all. Both InfiniteTalk directions lean on one — the pinned one says so
+ *    outright ("the negative prompt carries the rest of the guard"). Every guard therefore has
+ *    to be stated POSITIVELY here: not "no slack mouth" but "the lips meet fully"; not "no
+ *    floating torso" but "the chest only breathes".
+ * 2. LONG PROMPTS ARE FINE. InfiniteTalk degrades on them, which is why its direction is
+ *    terse and the storyboard's `visualPrompt` is withheld. LongCat has real text
+ *    cross-attention and its model card asks for detail, so this can afford to describe the
+ *    shot properly. `visualPrompt` is STILL withheld, for the unchanged reason: it injects
+ *    gesture and lean motion that contradicts the body hierarchy below.
+ * 3. THE WAN DRIFT CLAUSES ARE FIGHTING A PROBLEM THIS MODEL DOES NOT HAVE. InfiniteTalk's
+ *    camera push-in and background morph are what `cameraPlate.ts` exists for; LongCat holds
+ *    its frame through reference-skip-attention, measured over a 173-frame render with an
+ *    invisible segment join. A light static-camera clause is kept as free insurance, but the
+ *    suppression that costs the torso its motion is not.
+ *
+ * What IS carried over verbatim is the body CHAIN, because it is a description of human
+ * behaviour rather than a workaround: measured on four accepted reference clips, a seated
+ * person's motion decays down the body (head 0.67-2.03, shoulders 0.25-0.56, chest 0.20-0.35,
+ * lap 0.11-0.23, arms 0.10-0.16) while our renders read almost flat. That finding is
+ * model-independent and the reason this asks for the hierarchy band by band.
+ *
+ * Untested against a render. It is a first draft built from the model card and the measured
+ * behaviour of one clip — judge it with `scripts/measure-host-body.mts` before trusting it.
+ */
+export const LIPSYNC_HOST_DIRECTION_LONGCAT =
+  "The person in the reference photo speaks straight to the camera in a tight medium " +
+  "close-up, face large and centered in frame, eyes on the lens. The setting, lighting and " +
+  "background are exactly those of the reference photo and stay unchanged for the whole " +
+  "shot; the camera is locked off and does not move, push in, zoom or pan. " +
+  // Mouth. Stated as what the lips DO, because there is no negative channel to forbid the
+  // failure: a viseme audit against the reference showed vowels landing but the lips never
+  // meeting on p/b/m, which reads as mumbling even when the timing is right.
+  "Their lip-sync is clear and precise: the mouth articulates every word and stays fully " +
+  "visible, the lips close completely on p, b and m sounds, the jaw opens properly on open " +
+  "vowels, and consonants land crisply. The work is done by the lips — the jaw and cheeks " +
+  "stay calm rather than chewing the words. " +
+  // Body chain, carried from the pinned direction. Positive-only phrasing, with the ceiling
+  // in the same breath since nothing else can impose one.
+  "They speak naturally and comfortably, with the easy body language of a person telling " +
+  "you something across a kitchen table. Their body is relaxed and alive rather than stiff, " +
+  "and it moves as a chain in which the movement gets smaller the further down it goes: the " +
+  "head leads with small nods and turns on the words they stress, the shoulders follow with " +
+  "a fraction of that, the chest only breathes, and the lap, arms and hands stay settled and " +
+  "still, resting exactly where they are. The head is the most alive part of the frame and " +
+  "the lower body is the quietest. Each movement is small, occasional and motivated by what " +
+  "they are saying, never rhythmic or repeated, and the torso holds its own shape rather " +
+  "than drifting as one block. Their hands stay down and out of frame and they do not " +
+  "gesture. " +
+  // Eyes and brows. The photo has soft, slightly smiling eyes with resting brows; at audio
+  // guidance the InfiniteTalk render invented a wide-eyed, raised-brow look the photo never
+  // had. Same risk here, and again no negative channel, so the resting state is described.
+  "Their eyes stay soft and steady on the lens with natural, occasional blinks, and their " +
+  "brows rest where they are in the photo, lifting only briefly on a word that matters. " +
+  "The image is sharp and clean throughout, and the person's face and identity stay exactly " +
+  "the same from the first frame to the last.";
+
+/**
  * Prompt for the RunPod InfiniteTalk lip-sync call (HeyGen Avatar IV ignores prompts entirely).
  * Deliberately a FIXED, self-contained directive (`LIPSYNC_HOST_DIRECTION`) — the per-scene
  * `visualPrompt` is NOT prepended: InfiniteTalk degrades on long prompts, identity comes from the
@@ -5455,12 +5518,14 @@ export function buildLipsyncPrompt(
    * minimal-motion clause stops buying stability there and only costs the torso. Defaults to
    * `photo`, so every non-RunPod caller is byte-identical to before this argument existed.
    */
-  camera: LipsyncCameraMode = "photo"
+  camera: LipsyncCameraMode | "longcat" = "photo"
 ): string {
   const direction =
-    camera === "pinned"
-      ? LIPSYNC_HOST_DIRECTION_PINNED
-      : LIPSYNC_HOST_DIRECTION;
+    camera === "longcat"
+      ? LIPSYNC_HOST_DIRECTION_LONGCAT
+      : camera === "pinned"
+        ? LIPSYNC_HOST_DIRECTION_PINNED
+        : LIPSYNC_HOST_DIRECTION;
   const angle = useAlt ? ` ${LIPSYNC_ALT_ANGLE_SUFFIX}` : "";
   const cta = scene.cta ? ` ${CTA_EMPTY_HANDS_SUFFIX}` : "";
   const mood = scene.deliveryCue?.trim()
