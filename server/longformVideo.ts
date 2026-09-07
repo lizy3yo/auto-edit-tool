@@ -7611,6 +7611,21 @@ export async function generateSceneClips(
     );
   }
 
+  // A host scene with the lane available but NO narration cannot lip-sync — and must not
+  // quietly become a cutaway. `isHostLipsyncScene` mirrors the condition above, so such a
+  // scene is classed as b-roll and rendered as a still: the wrong picture for the beat, no
+  // mouth on the words, `sceneStatus: "completed"`, no error, and nothing visible until
+  // assembly refuses the film for the missing audio. Failing here marks the scene failed,
+  // which is what puts it in front of the operator on "Retry failed scenes". The pipeline's
+  // two narration checkpoints mean this should be unreachable; it is the backstop that keeps
+  // a silent wrong render from being the failure mode if they are ever bypassed.
+  if (lipsync && scene.hostPresent && params.faceImageUrl && !scene.audioUrl) {
+    throw new Error(
+      `Scene ${scene.index} is a host shot with no narration audio — refusing to render it ` +
+        `as a silent cutaway. Re-voice it (Regenerate, or "Retry failed scenes").`
+    );
+  }
+
   // A host scene with a face photo + narration is meant to lip-sync on the HeyGen lane.
   // If we got here that lane's key is unset/misconfigured.
   // Fail loud instead of silently rendering a non-lip-synced grok clip on 69labs — that mistake
@@ -9447,6 +9462,30 @@ async function runUnifiedPipeline(
     }),
   });
 
+  // ── Checkpoint: the voicing stage's own output, verified against the ROW ──
+  // Read back rather than trust the write. Everything downstream — the lane predicate, the
+  // lip-sync lane, the cut room, assembly — is built on "the master exists and every scene
+  // carries a slice of it", and a job that reaches the clip stage without that renders host
+  // beats as silent stills and only admits it at assembly, after every clip is paid for.
+  // A master URL that did not land is re-written from the value in hand (we still have it);
+  // a scene that did not get its slice is re-cut. Neither is expected to fire — that is the
+  // point of checking, and each one logs what it repaired.
+  const persisted = await getLongformVideoJobById(jobId);
+  if (!persisted?.masterAudioUrl) {
+    console.error(
+      `[Longform ${jobId}] master narration did not persist — re-writing the row`
+    );
+    await updateLongformVideoJob(jobId, { masterAudioUrl: master.url });
+    const recheck = await getLongformVideoJobById(jobId);
+    if (!recheck?.masterAudioUrl) {
+      throw new Error(
+        "The master narration track was voiced but could not be persisted to the job row — " +
+          "every scene's audio is cut from it, so the render cannot continue without it"
+      );
+    }
+  }
+  await ensureEverySceneVoiced(jobId, scenes, master.url, "the end of voicing");
+
   // Enforce the host-screen-time budget by exact runtime now that every scene's
   // narration length is measured — overshoot host scenes become b-roll before any
   // (slow, costly) clip is generated. See `rebalanceHostScreenTime`.
@@ -9718,6 +9757,20 @@ async function runUnifiedPipeline(
   // rendering — that race produced duplicate 69Labs jobs and clobbered storyboard writes.
   // withJobLock releases automatically when the body settles (throw or return).
   await withJobLock(jobId, async () => {
+    // ── Checkpoint: narration survived the lock-free window above ──
+    // Everything between the voicing checkpoint and this line runs WITHOUT the job lock, and
+    // includes two Claude calls (visual direction, prompt enhancement) — minutes on a long
+    // film, during which any concurrent pass can write the whole storyboard back from an older
+    // snapshot. Verified HERE, immediately before the first clip is paid for: a host beat that
+    // has lost its narration by now would be classed as b-roll and rendered as a silent still
+    // (`isHostLipsyncScene`), which is invisible until assembly refuses the film.
+    await ensureEverySceneVoiced(
+      jobId,
+      scenes,
+      (await getLongformVideoJobById(jobId))?.masterAudioUrl,
+      "the start of the clip stage"
+    );
+
     // Two provider lanes run concurrently: host (HeyGen) at heygenConcurrency, b-roll (69Labs)
     // at sixtynineVideoConcurrency. Feeds both providers to capacity instead of one shared pool
     // where host scenes blocking on HeyGen starve idle 69Labs capacity.
@@ -10098,6 +10151,52 @@ async function restoreMissingNarrationSlices(
   } catch (err: any) {
     console.error(
       `[Longform ${jobId}] could not re-cut narration for scene ${indices}: ${err?.message ?? err}`
+    );
+  }
+}
+
+/**
+ * Assert that every scene still has its narration, repairing from the master first, at a point
+ * in the pipeline where losing it is still cheap to act on.
+ *
+ * Two checkpoints call this, and they are placed where they are on purpose:
+ *
+ *  - Right after the voicing stage persists, so a scene that never got its slice is caught
+ *    before the clip stage spends real money — an unvoiced beat used to surface only at
+ *    assembly, hours and a full render later.
+ *  - Again inside the clip stage's job lock. Between those two points the pipeline holds NO
+ *    lock while it makes two Claude calls (visual direction, prompt enhancement), and any
+ *    concurrent pass — the watchdog, a regenerate, a retry — writes the whole storyboard back
+ *    from its own snapshot. If narration is present at the first checkpoint and gone at the
+ *    second, that window is where it went; the log says so, which is the evidence needed to
+ *    fix the race rather than keep repairing its damage.
+ *
+ * Repair is a free re-cut of the master (`restoreMissingNarrationSlices`), which keeps the
+ * film on the seamless master-overlay path — re-voicing one scene with fresh TTS would drop
+ * the WHOLE film onto the per-scene concat path. What cannot be repaired fails the job HERE,
+ * loudly, naming the scenes: a host beat with no narration is silently demoted to a still by
+ * the lane predicate (`isHostLipsyncScene`), so letting one through renders the wrong picture,
+ * un-lip-synced, and hides it behind a clip that looks fine.
+ */
+async function ensureEverySceneVoiced(
+  jobId: number,
+  scenes: StoryboardScene[],
+  masterAudioUrl: string | null | undefined,
+  where: string
+): Promise<void> {
+  const missing = scenes.filter(s => !s.audioUrl);
+  if (missing.length === 0) return;
+  console.error(
+    `[Longform ${jobId}] ${missing.length} scene(s) have no narration at ${where}: ` +
+      `${missing.map(s => s.index).join(", ")} — restoring from the master`
+  );
+  await restoreMissingNarrationSlices(jobId, scenes, masterAudioUrl);
+  const unrepaired = scenes.filter(s => !s.audioUrl);
+  if (unrepaired.length > 0) {
+    throw new Error(
+      `${unrepaired.length} scene(s) have no narration audio and it could not be restored ` +
+        `from the master at ${where} — refusing to render a film whose host beats would be ` +
+        `silently demoted to stills: scene ${unrepaired.map(s => s.index).join(", ")}`
     );
   }
 }
@@ -10638,6 +10737,50 @@ export function isJobRendering(jobId: number): boolean {
  * caller decides how to surface it (single-scene regen vs. batch retry). Shared by
  * `regenerateScene` and `retryFailedScenes`.
  */
+/**
+ * Give a scene its own narration if it has none, by voicing its `scriptText`. Returns true when
+ * it actually voiced.
+ *
+ * Each scene voices its own slice; if its audio is missing (or we lack a measured duration to
+ * size clips), (re)build it from `scriptText`. The visuals may change, the spoken slice does not
+ * — so existing audio is kept.
+ *
+ * Split out of `renderSceneClipInPlace` because the retry pass has to run it BEFORE the render
+ * lanes are chosen, not during: `isHostLipsyncScene` keys on `audioUrl`, so a host beat with no
+ * narration is classed as b-roll and dispatched onto the still lane's 20-minute deadline — and
+ * then voiced, and then routed to InfiniteTalk by `generateSceneClips` anyway, where a host
+ * render that legitimately takes up to an hour is abandoned at 20 minutes. Voicing first makes
+ * the lane, the deadline and the concurrency cap match what the scene will actually render on.
+ */
+async function ensureSceneNarration(
+  jobId: number,
+  scene: StoryboardScene,
+  params: LongformInputParams,
+  ttsType: string,
+  ttsKey: string
+): Promise<boolean> {
+  if (scene.audioUrl && scene.audioDuration != null) return false;
+  const { url, durationSec } = await buildSceneNarration(
+    jobId,
+    ttsType,
+    ttsKey,
+    scene,
+    params
+  );
+  scene.audioUrl = url;
+  scene.audioDuration = durationSec;
+  // Fresh TTS is NOT a slice of the master narration — clear the scene's master-timeline
+  // range so assembly drops the whole job back to the per-scene audio concat path (a
+  // master overlay would desync from here on). Any ops script that replaces a scene's
+  // audioUrl off-master must do the same.
+  scene.narrationStartSec = undefined;
+  scene.narrationEndSec = undefined;
+  // The revert snapshot describes the OLD alignment's edges; off-master they no longer point
+  // at anything real, so "Revert to original" must stop offering them (see `snapshotTiming`).
+  forgetTimingSnapshot(scene);
+  return true;
+}
+
 async function renderSceneClipInPlace(
   jobId: number,
   scene: StoryboardScene,
@@ -10662,29 +10805,7 @@ async function renderSceneClipInPlace(
   const persist = async () => {
     schedulePersist(jobId, { storyboard: scenes });
   };
-  // Each scene voices its own slice; if its audio is missing (or we lack a measured
-  // duration to size clips), (re)build it from `scriptText`. The visuals may change, the
-  // spoken slice does not — so we keep the existing audio when it's present.
-  if (!scene.audioUrl || scene.audioDuration == null) {
-    const { url, durationSec } = await buildSceneNarration(
-      jobId,
-      ttsType,
-      ttsKey,
-      scene,
-      params
-    );
-    scene.audioUrl = url;
-    scene.audioDuration = durationSec;
-    // Fresh TTS is NOT a slice of the master narration — clear the scene's master-timeline
-    // range so assembly drops the whole job back to the per-scene audio concat path (a
-    // master overlay would desync from here on). Any ops script that replaces a scene's
-    // audioUrl off-master must do the same.
-    scene.narrationStartSec = undefined;
-    scene.narrationEndSec = undefined;
-    // The revert snapshot describes the OLD alignment's edges; off-master they no longer point
-    // at anything real, so "Revert to original" must stop offering them (see `snapshotTiming`).
-    forgetTimingSnapshot(scene);
-  }
+  await ensureSceneNarration(jobId, scene, params, ttsType, ttsKey);
   // Re-voicing here yields the raw narration length; hold it to the floor like the main pipeline
   // so a regenerated/retried short scene freezes to SCENE_MIN_HOLD_SEC instead of cutting short.
   applySceneHoldFloor(scene, pacingFor(params));
@@ -12744,17 +12865,44 @@ async function retryFailedScenesLocked(jobId: number): Promise<void> {
     // slice. It used to be the clip-less ones only, which made this button useless for the
     // failure it was most needed for: a scene with a clip but no audio is not "failed", so it
     // showed no error, kept the button hidden, and Retry assembly could not repair it either —
-    // the render dead-ended with no control anywhere that would fix it. `renderSceneClipInPlace`
-    // already re-voices a scene whose `audioUrl` is missing before it re-renders, so widening
-    // the selection is all this needs; the clip is re-rendered too, which is what a host beat
-    // requires anyway (it was never lip-synced — the lane skips a scene with no narration).
+    // the render dead-ended with no control anywhere that would fix it.
     const missing = scenes.filter(s => !sceneIsAssemblable(s));
+
+    // Voice the narration-less ones FIRST, before any lane is chosen. `dispatchScenesByProvider`
+    // classifies on `audioUrl` (`isHostLipsyncScene`), so a host beat still missing its audio
+    // would be sent down the still lane and killed by that lane's 20-minute deadline part-way
+    // through an InfiniteTalk render that is allowed an hour. Voicing here also means the clip
+    // is sized against a real measured duration instead of the fixed fallback length.
+    // A scene whose TTS fails is marked failed and left out of the render pass entirely — there
+    // is nothing to lip-sync to, and the gate below names it rather than a render timeout doing so.
+    const unvoiced = missing.filter(
+      s => !s.audioUrl || s.audioDuration == null
+    );
+    if (unvoiced.length > 0) {
+      console.log(
+        `[Longform ${jobId}] retry: re-voicing ${unvoiced.length} scene(s) with no narration ` +
+          `before dispatch (${unvoiced.map(s => s.index).join(", ")})`
+      );
+      await Promise.all(
+        unvoiced.map(async scene => {
+          try {
+            await ensureSceneNarration(jobId, scene, params, ttsType, ttsKey);
+          } catch (e: any) {
+            scene.sceneStatus = "failed";
+            scene.error = `Narration: ${describeError(e)}`;
+          }
+        })
+      );
+      await flushPersist(jobId);
+      await updateLongformVideoJob(jobId, { storyboard: scenes });
+    }
+    const renderable = missing.filter(s => s.audioUrl);
     // Re-render the missing scenes across all three provider lanes concurrently (was a
     // sequential for-loop that submitted only one scene's chunks at a time and blocked ~25min
     // on its polls before touching the next scene), mirroring resumeRenderingScenes. Host
     // scenes now fan out up to ENV.heygenConcurrency instead of one-at-a-time.
     await dispatchScenesByProvider(
-      missing,
+      renderable,
       lipsync,
       params,
       async scene => {

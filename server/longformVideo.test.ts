@@ -6056,6 +6056,28 @@ describe("generateSceneClips routing (HeyGen lip-sync vs grok-imagine-video)", (
     faceImageUrl: "https://cdn.example.com/face.jpg",
   };
 
+  it("refuses to render a host beat with no narration as a silent cutaway", async () => {
+    // The failure this guards: with no `audioUrl` the lane predicate classes a host beat as
+    // b-roll, so it used to render as a STILL — completed, no error, wrong picture, no mouth on
+    // the words — and stayed invisible until assembly refused the film for the missing audio.
+    const { lane: lipsync, submitLipsync } = await heygenLane();
+    const { audioUrl: _dropped, ...noNarration } = hostScene;
+    await expect(
+      generateSceneClips(
+        null as any,
+        0,
+        { ...(noNarration as StoryboardScene), index: 7 },
+        params,
+        lipsync,
+        "instruction",
+        async () => {}
+      )
+    ).rejects.toThrow(/host shot with no narration audio/);
+    // It must fail rather than quietly take another lane — nothing was rendered.
+    expect(submitLipsync).not.toHaveBeenCalled();
+    expect(mockGenImage).not.toHaveBeenCalled();
+  });
+
   it("routes host+face to lip-sync: lipsynced=true and submitLipsync called once", async () => {
     const { lane: lipsync, submitLipsync } = await heygenLane();
     vi.spyOn(storage, "storagePut").mockResolvedValue({
@@ -6675,6 +6697,18 @@ describe("dispatchScenesByProvider (two provider lanes)", () => {
     expect(isHostLipsyncScene(brollScene(2), lipsync, params)).toBe(false);
     // No lip-sync adapter → host scene falls to the 69Labs lane.
     expect(isHostLipsyncScene(hostScene(3), null, params)).toBe(false);
+  });
+
+  it("a host beat with NO narration is not on the host lane — so a retry must voice it first", () => {
+    // The trap this locks down: lane choice keys on `audioUrl`, so a host scene that has lost
+    // its narration classifies as b-roll and takes the still lane's 20-minute deadline — then
+    // gets voiced and routed to InfiniteTalk anyway, where an hour is legitimate. The retry
+    // pass therefore voices before it dispatches, not during.
+    const { audioUrl: _dropped, ...noAudio } = hostScene(1);
+    expect(
+      isHostLipsyncScene(noAudio as StoryboardScene, lipsync, params)
+    ).toBe(false);
+    expect(isHostLipsyncScene(hostScene(1), lipsync, params)).toBe(true);
   });
 
   it("never exceeds each provider's concurrency and runs both lanes at once", async () => {

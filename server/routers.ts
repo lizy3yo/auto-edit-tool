@@ -89,7 +89,7 @@ import {
   revertSceneTimingEdits as revertLongformSceneTiming,
   retryFailedScenes as retryLongformFailedScenes,
   isRetryQueued,
-  describeIncompleteScenes,
+  sceneIsAssemblable,
   cancelLongformJob,
   DEFAULT_LONGFORM_INSTRUCTION,
   LONGFORM_INSTRUCTION_KEY,
@@ -2384,12 +2384,14 @@ const longformVideoRouter = router({
       }
       // Only meaningful on a settled job: mid-pass, scenes are legitimately incomplete because
       // they have not been reached yet, so this would pass trivially and prove nothing.
-      if (
-        !queued &&
-        describeIncompleteScenes(
-          (job.storyboard as StoryboardScene[]) || []
-        ) === null
-      ) {
+      //
+      // Asks the SAME question the assembly gate and the retry pass ask (`sceneIsAssemblable`:
+      // a clip AND the narration under it), not "does every scene have a clip". Those two
+      // disagreed, and this guard is where it bit: on a film whose scenes all had clips but
+      // nine had lost their narration, the button was offered, the click was refused as
+      // "No failed scenes to retry", and the render had no recovery left at all.
+      const board = (job.storyboard as StoryboardScene[]) || [];
+      if (!queued && board.every(sceneIsAssemblable)) {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "No failed scenes to retry",
