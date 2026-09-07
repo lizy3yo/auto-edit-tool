@@ -1258,12 +1258,19 @@ export default function LongformJobSlot({
     | { scenesTotal: number; scenesDone: number; warnings?: string[] }
     | undefined;
 
-  // Scenes with no clip — the holes a "Retry failed scenes" pass would fill.
-  const missingClipCount = useMemo(
-    () => scenes.filter(s => !(s.clipUrls?.length || s.clipUrl)).length,
+  // Scenes the film cannot be assembled from — the holes a "Retry failed scenes" pass would
+  // fill. A scene needs BOTH a clip and the narration that plays under it (the server answers
+  // from the same rule, `sceneIsAssemblable`). Counting only the clip-less ones hid this button
+  // on exactly the render that needed it most: a scene with a clip but no narration audio is
+  // never marked "failed", so nothing on the card offered to repair it, and Retry assembly
+  // rebuilt the identical error every time.
+  const unassemblableCount = useMemo(
+    () =>
+      scenes.filter(s => !(s.clipUrls?.length || s.clipUrl) || !s.audioUrl)
+        .length,
     [scenes]
   );
-  // Mid-pass, `missingClipCount` counts every scene not yet REACHED, which would label the
+  // Mid-pass, `unassemblableCount` counts every scene not yet REACHED, which would label the
   // button with ~half the film. While the pipeline runs, only genuinely failed scenes count.
   const failedSceneCount = useMemo(
     () => scenes.filter(s => s.sceneStatus === "failed").length,
@@ -1274,7 +1281,7 @@ export default function LongformJobSlot({
   // Offered DURING a pass too: the click parks behind the job lock and runs the moment the
   // pass releases it, so an operator who sees a scene fail at 151/282 no longer has to sit
   // and wait for the other 131 before asking for it back.
-  const retryCount = retryRunning ? failedSceneCount : missingClipCount;
+  const retryCount = retryRunning ? failedSceneCount : unassemblableCount;
   const canRetryFailed =
     retryCount > 0 && (job?.status === "failed" || retryRunning);
 

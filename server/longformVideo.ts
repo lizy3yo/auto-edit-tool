@@ -10103,6 +10103,25 @@ async function restoreMissingNarrationSlices(
 }
 
 /**
+ * A scene has a picture. `clipUrls` is the source of truth; `clipUrl` mirrors its first entry
+ * (`syncSceneClipFields`), and an EMPTY array means no clip — a scene still rendering, not a
+ * rendered one.
+ */
+export const sceneHasClip = (s: StoryboardScene): boolean =>
+  !!(s.clipUrls?.length || s.clipUrl);
+
+/**
+ * A scene assembly can actually use: a picture AND the narration that plays under it. THE one
+ * definition of "ready", answered from by the assembly gate, the assembly filter and the
+ * retry-failed-scenes selector alike — so what the film refuses to stitch and what the operator's
+ * retry offers to fix cannot drift apart. They did: the gate refused a scene with no narration
+ * while the retry only ever looked for a missing CLIP, which left a film that would not assemble
+ * and no button anywhere that would repair it.
+ */
+export const sceneIsAssemblable = (s: StoryboardScene): boolean =>
+  sceneHasClip(s) && !!s.audioUrl;
+
+/**
  * Why this storyboard cannot be assembled, or null when every scene has both a clip and its
  * narration. Reports the two causes SEPARATELY: they have different recoveries, and one shared
  * message for both ("missing clip or narration") is indistinguishable on the job card — a
@@ -10118,7 +10137,7 @@ export function describeUnassemblableScenes(
   const noClip: StoryboardScene[] = [];
   const noNarration: StoryboardScene[] = [];
   for (const s of scenes) {
-    if (!(s.clipUrls?.length || s.clipUrl)) noClip.push(s);
+    if (!sceneHasClip(s)) noClip.push(s);
     else if (!s.audioUrl) noNarration.push(s);
   }
   if (noClip.length === 0 && noNarration.length === 0) return null;
@@ -10181,7 +10200,7 @@ async function assembleAndFinalize(
   }
 
   const readyScenes = scenes
-    .filter(s => (s.clipUrls?.length || s.clipUrl) && s.audioUrl)
+    .filter(sceneIsAssemblable)
     .sort((a, b) => a.index - b.index);
 
   // Burned-in captions for the asset beats. Rendered here (not at clip time) so a caption edit
@@ -12721,7 +12740,15 @@ async function retryFailedScenesLocked(jobId: number): Promise<void> {
       ? await resolveLipsyncAdapter(params)
       : null;
 
-    const missing = scenes.filter(s => !(s.clipUrls?.length || s.clipUrl));
+    // Every scene the assembly gate would refuse — a missing CLIP or a missing NARRATION
+    // slice. It used to be the clip-less ones only, which made this button useless for the
+    // failure it was most needed for: a scene with a clip but no audio is not "failed", so it
+    // showed no error, kept the button hidden, and Retry assembly could not repair it either —
+    // the render dead-ended with no control anywhere that would fix it. `renderSceneClipInPlace`
+    // already re-voices a scene whose `audioUrl` is missing before it re-renders, so widening
+    // the selection is all this needs; the clip is re-rendered too, which is what a host beat
+    // requires anyway (it was never lip-synced — the lane skips a scene with no narration).
+    const missing = scenes.filter(s => !sceneIsAssemblable(s));
     // Re-render the missing scenes across all three provider lanes concurrently (was a
     // sequential for-loop that submitted only one scene's chunks at a time and blocked ~25min
     // on its polls before touching the next scene), mirroring resumeRenderingScenes. Host
@@ -12747,9 +12774,7 @@ async function retryFailedScenesLocked(jobId: number): Promise<void> {
           scene.sceneStatus = "failed";
           scene.error = e.message;
         }
-        const scenesDone = scenes.filter(
-          s => s.clipUrls?.length || s.clipUrl
-        ).length;
+        const scenesDone = scenes.filter(sceneIsAssemblable).length;
         schedulePersist(jobId, {
           storyboard: scenes,
           progress: jobProgress(jobId, {
@@ -12764,7 +12789,7 @@ async function retryFailedScenesLocked(jobId: number): Promise<void> {
 
     // Fallback: if any b-roll scene still lacks a clip on retry, generate a Ken Burns still so assembly can succeed.
     for (const scene of scenes) {
-      if (!scene.hostPresent && !(scene.clipUrls?.length || scene.clipUrl)) {
+      if (!scene.hostPresent && !sceneHasClip(scene)) {
         console.warn(
           `[Longform ${jobId}] scene ${scene.index} still lacks a clip on retry — generating Ken Burns still fallback`
         );
@@ -12799,8 +12824,14 @@ async function retryFailedScenesLocked(jobId: number): Promise<void> {
       }
     }
 
-    // 3) Every scene has a clip → finalize; else fail loudly listing holdouts.
-    const incomplete = describeIncompleteScenes(scenes);
+    // 3) Every scene is assemblable → finalize; else fail loudly listing holdouts. Judged on
+    // the SAME readiness the retry above selected on, so a pass that could not repair a scene
+    // says exactly which scene and which half — a clip-only check here reported a job "ready"
+    // that `assembleAndFinalize` then refused for its narration, two errors for one cause.
+    const incomplete = describeUnassemblableScenes(
+      scenes,
+      !!job.masterAudioUrl
+    );
     if (incomplete) {
       await updateLongformVideoJob(jobId, {
         status: "failed",

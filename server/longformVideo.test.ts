@@ -25,6 +25,7 @@ import {
   WORDS_PER_SEC,
   describeIncompleteScenes,
   describeUnassemblableScenes,
+  sceneIsAssemblable,
   describeOverlongScenes,
   BROLL_CLIP_MAX_SEC,
   withTransientRetry,
@@ -5900,6 +5901,47 @@ describe("describeUnassemblableScenes (assembly readiness gate)", () => {
     expect(describeUnassemblableScenes(scenes, true)).toContain(
       "1 scene(s) have no clip"
     );
+  });
+});
+
+describe("sceneIsAssemblable (the one readiness rule)", () => {
+  const scene = (
+    i: number,
+    extra: Partial<StoryboardScene> = {}
+  ): StoryboardScene => ({
+    index: i,
+    narration: "n",
+    visualPrompt: "v",
+    hostPresent: true,
+    ...extra,
+  });
+
+  it("rejects exactly the scenes the assembly gate names — the retry pass selects on this", () => {
+    // The invariant the two-sided bug broke: assembly refused a scene the retry would not pick
+    // up, so the render dead-ended with no control that could repair it.
+    const scenes = [
+      scene(1, { clipUrls: ["1.mp4"], audioUrl: "1.mp3" }),
+      scene(2, { audioUrl: "2.mp3" }),
+      scene(3, { clipUrls: ["3.mp4"] }),
+      scene(4),
+    ];
+    const rejected = scenes
+      .filter(s => !sceneIsAssemblable(s))
+      .map(s => s.index);
+    expect(rejected).toEqual([2, 3, 4]);
+
+    const msg = describeUnassemblableScenes(scenes, true) as string;
+    for (const i of rejected) expect(msg).toContain(`scene ${i}`);
+    expect(msg).not.toContain("scene 1");
+  });
+
+  it("an empty clip array is not a clip, and clipUrl alone is", () => {
+    expect(
+      sceneIsAssemblable(scene(1, { clipUrls: [], audioUrl: "a.mp3" }))
+    ).toBe(false);
+    expect(
+      sceneIsAssemblable(scene(1, { clipUrl: "1.mp4", audioUrl: "a.mp3" }))
+    ).toBe(true);
   });
 });
 
