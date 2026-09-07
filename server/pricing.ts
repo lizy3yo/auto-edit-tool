@@ -240,7 +240,20 @@ const VIDEO_RATES: Record<string, number> = {
 };
 
 /** Lip-sync vendors we have a rate for. No default — an unlisted vendor is unpriced. */
-const LIPSYNC_PROVIDERS = new Set(["heygen", "runpod"]);
+/**
+ * Host lanes billed by GPU RUNNING time rather than by seconds of finished output. Exported
+ * because two places must agree about it: the rate applied here, and the unit `costMeter`
+ * prints. They did not — `longcat` was added to `lipsyncRateFor` but to neither list, so the
+ * Cost dialog showed "rate not set" beside a quantity labelled "of video" that was really
+ * GPU seconds, off by more than an order of magnitude.
+ */
+export const GPU_BILLED_LIPSYNC_PROVIDERS = new Set(["runpod", "longcat"]);
+
+/** Every lip-sync provider we can price at all. A provider missing here reads "rate not set". */
+const LIPSYNC_PROVIDERS = new Set([
+  "heygen",
+  ...Array.from(GPU_BILLED_LIPSYNC_PROVIDERS),
+]);
 
 export function priceLine(line: UsageLine): PricedLine {
   const priced = (

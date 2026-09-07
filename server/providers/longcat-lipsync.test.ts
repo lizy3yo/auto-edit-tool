@@ -339,3 +339,35 @@ describe("longcat host direction", () => {
     expect(photo).toContain("small nod on the number");
   });
 });
+
+describe("longcat cost metering", () => {
+  /**
+   * The Cost dialog showed "rate not set" beside "1,321s of video" for a lane metered in GPU
+   * seconds. Two allowlists gate on the provider name and neither had `longcat`, even though
+   * `lipsyncRateFor` did — so the rate was never applied and the unit was labelled as output
+   * seconds, which understates a ~700 GPU-second beat as if it were 7 seconds of billing.
+   */
+  it("prices the lane and labels its quantity as GPU time, not video", async () => {
+    const { priceLine } = await import("../pricing");
+    const line = {
+      lane: "lipsync" as const,
+      provider: "longcat",
+      model: "longcat-avatar-1.5",
+      calls: 1,
+      quantity: 696,
+    };
+
+    const priced = priceLine(line);
+    expect(priced.rateKnown).toBe(true);
+    // 696 GPU-s on H100 PCIe at $4.79/h. Wrong by ~75x if the HeyGen per-output rate is used.
+    expect(priced.usd).toBeGreaterThan(0.5);
+    expect(priced.usd).toBeLessThan(1.5);
+  });
+
+  it("keeps both GPU-billed lanes in one set so the rate and the unit cannot disagree", async () => {
+    const { GPU_BILLED_LIPSYNC_PROVIDERS } = await import("../pricing");
+    expect(GPU_BILLED_LIPSYNC_PROVIDERS.has("runpod")).toBe(true);
+    expect(GPU_BILLED_LIPSYNC_PROVIDERS.has("longcat")).toBe(true);
+    expect(GPU_BILLED_LIPSYNC_PROVIDERS.has("heygen")).toBe(false);
+  });
+});

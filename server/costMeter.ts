@@ -24,7 +24,12 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import { priceLine, type PricedLine, type UsageLine } from "./pricing";
+import {
+  priceLine,
+  GPU_BILLED_LIPSYNC_PROVIDERS,
+  type PricedLine,
+  type UsageLine,
+} from "./pricing";
 
 /**
  * `./db` is imported lazily, not at module scope.
@@ -245,9 +250,11 @@ function detailFor(line: PricedLine): string {
     case "video":
       return `${calls} · ${nf.format(Math.round(line.quantity))}s of video`;
     case "lipsync":
-      // The self-hosted RunPod lane is billed (and therefore metered) in GPU seconds, so
-      // labelling its quantity "of video" would misread by roughly an order of magnitude.
-      return line.provider === "runpod"
+      // The self-hosted lanes are billed (and therefore metered) in GPU seconds, so labelling
+      // their quantity "of video" misreads by roughly an order of magnitude — a 6.9s LongCat
+      // beat costs ~700 GPU-seconds. Driven off the shared set so adding a third GPU-billed
+      // vendor cannot label it correctly in one place and wrongly in the other.
+      return GPU_BILLED_LIPSYNC_PROVIDERS.has(line.provider)
         ? `${calls} · ${nf.format(Math.round(line.quantity))}s of GPU time`
         : `${calls} · ${nf.format(Math.round(line.quantity))}s of video`;
     case "transcription":
