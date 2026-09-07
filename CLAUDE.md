@@ -543,6 +543,10 @@ Always 16:9. Fire-and-forget; progress persisted to the job row and polled by th
   `server/musicBeds.ts`). No external CDN is contacted at runtime.
 - **Never commit `.env`**; never print key values into logs or chat — `maskApiKey()` in
   `server/encryption.ts` is there for display.
-- **Current local `.env`** sets only `DATABASE_URL`, `JWT_SECRET`, `ADMIN_EMAIL`,
-  `ADMIN_PASSWORD`, `PORT` — every provider key is absent, so any generation run fails at
-  stage 1.
+- **Current local `.env`** carries live keys for the whole Channel-A set: Anthropic, Gemini,
+  OpenAI, all five `R2_*`, `RUN_POD_KEY` + both RunPod endpoints (whisperx and InfiniteTalk,
+  plus `RUNPOD_LONGCAT_ENDPOINT`), HeyGen, 69Labs and `PUBLIC_BASE_URL`. A full render works
+  locally. (This note previously said only the five boot vars were set and that every
+  generation failed at stage 1 — that stopped being true and is worth re-checking rather
+  than trusting, since `.env` is gitignored and drifts silently.) The Channel-B keys are
+  still DB rows entered in Admin and are unaffected by any of this.
