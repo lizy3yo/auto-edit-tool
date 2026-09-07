@@ -5470,32 +5470,43 @@ export const LIPSYNC_HOST_DIRECTION_LONGCAT =
   "close-up, face large and centered in frame, eyes on the lens. The setting, lighting and " +
   "background are exactly those of the reference photo and stay unchanged for the whole " +
   "shot; the camera is locked off and does not move, push in, zoom or pan. " +
-  // Mouth. Stated as what the lips DO, because there is no negative channel to forbid the
-  // failure: a viseme audit against the reference showed vowels landing but the lips never
-  // meeting on p/b/m, which reads as mumbling even when the timing is right.
-  "Their lip-sync is clear and precise: the mouth articulates every word and stays fully " +
-  "visible, the lips close completely on p, b and m sounds, the jaw opens properly on open " +
-  "vowels, and consonants land crisply. The work is done by the lips — the jaw and cheeks " +
-  "stay calm rather than chewing the words. " +
-  // Body chain, carried from the pinned direction. Positive-only phrasing, with the ceiling
-  // in the same breath since nothing else can impose one.
-  "They speak naturally and comfortably, with the easy body language of a person telling " +
-  "you something across a kitchen table. Their body is relaxed and alive rather than stiff, " +
-  "and it moves as a chain in which the movement gets smaller the further down it goes: the " +
-  "head leads with small nods and turns on the words they stress, the shoulders follow with " +
-  "a fraction of that, the chest only breathes, and the lap, arms and hands stay settled and " +
-  "still, resting exactly where they are. The head is the most alive part of the frame and " +
-  "the lower body is the quietest. Each movement is small, occasional and motivated by what " +
-  "they are saying, never rhythmic or repeated, and the torso holds its own shape rather " +
-  "than drifting as one block. Their hands stay down and out of frame and they do not " +
-  "gesture. " +
-  // Eyes and brows. The photo has soft, slightly smiling eyes with resting brows; at audio
-  // guidance the InfiniteTalk render invented a wide-eyed, raised-brow look the photo never
-  // had. Same risk here, and again no negative channel, so the resting state is described.
-  "Their eyes stay soft and steady on the lens with natural, occasional blinks, and their " +
-  "brows rest where they are in the photo, lifting only briefly on a word that matters. " +
-  "The image is sharp and clean throughout, and the person's face and identity stay exactly " +
-  "the same from the first frame to the last.";
+  // MOUTH — restraint, not articulation.
+  //
+  // The first draft asked for "articulates every word" and "the jaw opens properly on open
+  // vowels". Both are imported fixes for InfiniteTalk's MUMBLING (lips never meeting on
+  // p/b/m, blurred consonants), and LongCat does not have that problem — a Whisper-large-v3
+  // audio encoder is its headline feature. Measured on the first host render: mouth motion
+  // 9.30 against HeyGen's 2.75 and an accepted-reference band of 2.6-2.9, i.e. more than 3x
+  // the accepted level. Those clauses also directly contradicted the "jaw and cheeks stay
+  // calm" sentence two lines later. Only the closure requirement survives; everything else
+  // now pushes the other way.
+  "Their speech is quiet and contained. The lips do the work and the jaw barely moves: the " +
+  "mouth opens only as far as each word actually needs, never wide, and the cheeks do not " +
+  "puff, stretch or work at the words. The lips still close completely on p, b and m " +
+  "sounds. It is the small, easy mouth of someone talking calmly to one person, not " +
+  "performing to a room. " +
+  // BODY — the lower half first.
+  //
+  // Measured chain on the first render: head 2.52, shoulders 0.50, chest 2.63, lap 4.97 —
+  // INVERTED, the lap moving twice the head, with the arms at 0.74 of head motion against a
+  // 0.45 limit. The hierarchy was in the first draft but buried after two sentences of
+  // "relaxed and alive rather than stiff" — wording written to counter InfiniteTalk's
+  // stiffness, which on a model that already over-moves pushes the wrong way entirely. It is
+  // gone, and the stillness now leads.
+  "Their hands rest where they are and do not move, lift or gesture. Their arms, lap and " +
+  "torso are still, holding their own shape rather than drifting or shifting about. The " +
+  "chest only breathes. Above that the shoulders barely move, and the head is calm — the " +
+  "occasional small nod on a word that matters, and nothing else. The movement in the " +
+  "frame gets smaller the further down the body it goes, and the lower body is completely " +
+  "settled. " +
+  // EYES AND BROWS — the brow lift is gone for the same reason as the jaw.
+  //
+  // "lifting only briefly on a word that matters" produced brow activity in 20% of frames
+  // against HeyGen's 0%. The permission was read as an instruction.
+  "Their eyes stay soft and steady on the lens with natural, occasional blinks. Their brows " +
+  "stay resting exactly where they are in the photo, and their expression stays warm and " +
+  "even rather than animated. The image is sharp and clean throughout, and the person's " +
+  "face and identity stay exactly the same from the first frame to the last.";
 
 /**
  * Prompt for the RunPod InfiniteTalk lip-sync call (HeyGen Avatar IV ignores prompts entirely).
@@ -5533,9 +5544,15 @@ export function buildLipsyncPrompt(
     : "";
   // The line's own movement, from the delivery pass (`server/delivery.ts`). Kept to its own
   // short clause after the mood so the fixed direction still reads first.
-  const gesture = scene.gestureCue?.trim()
-    ? ` While saying this line, their body: ${scene.gestureCue.trim()}.`
-    : "";
+  // The body cue is withheld from the LongCat lane. It exists because InfiniteTalk UNDER-moves
+  // — a host who moves because of what she is saying is the difference between alive and
+  // plain — but LongCat over-moves, measured at an inverted body chain with the lap at twice
+  // the head's motion. Appending "their body: small nod on the number" to that is adding
+  // motion to the failure. The EXPRESSION cue above is kept: it steers the face, not the body.
+  const gesture =
+    camera !== "longcat" && scene.gestureCue?.trim()
+      ? ` While saying this line, their body: ${scene.gestureCue.trim()}.`
+      : "";
   return `${direction}${angle}${cta}${mood}${gesture}`.trim();
 }
 

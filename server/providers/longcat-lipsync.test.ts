@@ -259,41 +259,68 @@ describe("LongcatLipsyncAdapter.pollVideo", () => {
 });
 
 describe("longcat host direction", () => {
+  const build = async (scene: any = { index: 1 }, mode: any = "longcat") => {
+    const { buildLipsyncPrompt } = await import("../longformVideo");
+    return buildLipsyncPrompt(scene as any, false, mode);
+  };
+
   /**
    * The distilled path runs at guidance 1.0, which skips the classifier-free pass — so there
    * is no negative-prompt channel at all. Both InfiniteTalk directions delegate their guards
-   * to one; this asserts the LongCat direction does not, because a guard that only exists in
-   * the negative is a guard that never runs on this lane.
+   * to one; this lane cannot, so every guard has to be a positive statement.
    */
   it("states its guards positively, since the negative prompt is inert under distill", async () => {
-    const { buildLipsyncPrompt } = await import("../longformVideo");
-    const prompt = buildLipsyncPrompt({ index: 1 } as any, false, "longcat");
-
-    // The mouth guard the InfiniteTalk negative carries as "slack mouth, lips never closing".
-    expect(prompt).toMatch(/lips close completely on p, b and m/i);
-    // The floating-torso guard, carried there as "torso drifting, ... as one block".
-    expect(prompt).toMatch(/torso holds its own shape/i);
-    // The stiffness guard, carried there as "stiff, rigid, frozen body".
-    expect(prompt).toMatch(/relaxed and alive rather than stiff/i);
-    // The wide-eyed/raised-brow guard.
-    expect(prompt).toMatch(/brows rest where they are/i);
-    // The body chain — the one finding that IS model-independent and must survive the port.
-    expect(prompt).toMatch(/head leads/i);
+    const prompt = await build();
+    expect(prompt).toMatch(/lips still close completely on p, b and m/i);
+    expect(prompt).toMatch(/holding their own shape/i);
+    expect(prompt).toMatch(/brows stay resting/i);
     expect(prompt).toMatch(/chest only breathes/i);
   });
 
-  it("still carries the per-scene delivery and gesture cues", async () => {
-    const { buildLipsyncPrompt } = await import("../longformVideo");
-    const prompt = buildLipsyncPrompt(
-      {
-        index: 1,
-        deliveryCue: "warm and certain",
-        gestureCue: "small nod on the number",
-      } as any,
-      false,
-      "longcat"
-    );
-    expect(prompt).toContain("warm and certain");
-    expect(prompt).toContain("small nod on the number");
+  /**
+   * Measured 9.30 mouth motion against HeyGen's 2.75 and an accepted band of 2.6-2.9. The
+   * cause was InfiniteTalk's anti-mumbling wording imported into a model that does not
+   * mumble, contradicting the restraint clause two sentences later. If either phrase comes
+   * back, the exaggerated mouth comes back with it.
+   */
+  it("asks the mouth for restraint, never for articulation", async () => {
+    const prompt = await build();
+    expect(prompt).toMatch(/jaw barely moves/i);
+    expect(prompt).toMatch(/never wide/i);
+    expect(prompt).not.toMatch(/articulates every word/i);
+    expect(prompt).not.toMatch(/jaw opens/i);
+  });
+
+  /**
+   * "relaxed and alive rather than stiff" is a counter to InfiniteTalk's stiffness. On a
+   * model whose body chain measured INVERTED (lap 4.97 against head 2.52) it argues for the
+   * failure, so the stillness has to lead instead.
+   */
+  it("leads with the lower body and drops the anti-stiffness wording", async () => {
+    const prompt = await build();
+    expect(prompt).not.toMatch(/relaxed and alive rather than stiff/i);
+    const hands = prompt.search(/hands rest where they are/i);
+    const head = prompt.search(/the head is calm/i);
+    expect(hands).toBeGreaterThan(-1);
+    expect(head).toBeGreaterThan(hands);
+  });
+
+  /**
+   * `gestureCue` exists because InfiniteTalk under-moves. Appending it here adds motion to a
+   * model already over-moving. The EXPRESSION cue stays — it steers the face, not the body.
+   */
+  it("withholds the body cue on this lane but keeps the expression cue", async () => {
+    const scene = {
+      index: 1,
+      deliveryCue: "warm and certain",
+      gestureCue: "small nod on the number",
+    };
+    const longcat = await build(scene);
+    expect(longcat).toContain("warm and certain");
+    expect(longcat).not.toContain("small nod on the number");
+
+    // Unchanged for every other lane — this gate must not leak into InfiniteTalk.
+    const photo = await build(scene, "photo");
+    expect(photo).toContain("small nod on the number");
   });
 });
