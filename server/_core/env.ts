@@ -59,11 +59,59 @@ export const ENV = {
    */
   runpodInfinitetalkEndpoint: process.env.RUNPOD_INFINITETALK_ENDPOINT ?? "",
   /**
-   * Which vendor renders host scenes: `heygen` (default) or `runpod`. Deliberately an
-   * explicit opt-in rather than "use RunPod if its endpoint is set" — a configured
-   * endpoint should be testable without silently moving every render onto it.
+   * RunPod serverless endpoint ID for the self-hosted LongCat-Video-Avatar-1.5 host lane.
+   * Deploy your own (Metropolis-Media/longcat) and set this; blank keeps the host lane off
+   * LongCat no matter what `LIPSYNC_PROVIDER` says.
+   *
+   * The worker image is built against torch 2.6 + cu124, whose kernels cover Ampere, Ada and
+   * Hopper (sm_80-90) only. Restrict the endpoint's enabled GPU types accordingly — a
+   * Blackwell card (RTX 5090, B200, RTX PRO 6000) fails every render with "no kernel image
+   * is available", after the worker has booted and accepted the job.
+   */
+  runpodLongcatEndpoint: process.env.RUNPOD_LONGCAT_ENDPOINT ?? "",
+  /**
+   * Which vendor renders host scenes: `heygen` (default), `runpod` (InfiniteTalk) or
+   * `longcat`. Deliberately an explicit opt-in rather than "use it if its endpoint is set" —
+   * a configured endpoint should be testable without silently moving every render onto it.
    */
   lipsyncProvider: (process.env.LIPSYNC_PROVIDER ?? "heygen").toLowerCase(),
+  /**
+   * Host render size on the LongCat lane. Separate from `LIPSYNC_RESOLUTION` because it is
+   * NOT a pixel size: LongCat buckets by the INPUT IMAGE's aspect ratio
+   * (`longcat_video/utils/bukcet_config.py`), so "720p" with a 16:9 plate means 1248x736 —
+   * the nearest bucket, 1.70, not 1.78 — and with a 1.44:1 photo it means 1152x800. The
+   * frame the worker actually produced comes back on the render and is what assembly must
+   * crop from; never assume the size you asked for.
+   */
+  longcatResolution:
+    (["480p", "720p"] as const).find(
+      r => r === (process.env.LONGCAT_RESOLUTION ?? "720p").toLowerCase()
+    ) ?? "720p",
+  /**
+   * Weight precision on the LongCat lane. INT8 (default) halves the DiT to ~15.9GB so it
+   * fits a 48GB card, but this architecture cannot do the arithmetic in 8 bits — every
+   * weight is unpacked to bf16 at use, on every operation. On an 80GB card the bf16 DiT
+   * (31.7GB) fits with room to spare and that tax is pure loss, so `LONGCAT_INT8=0` is the
+   * first thing to try against the measured 100.7 GPU-s per finished second.
+   *
+   * Load-time, not per-render: flipping it costs the worker a full reload.
+   */
+  longcatInt8: process.env.LONGCAT_INT8 !== "0",
+  /**
+   * The 8-step DMD2 distill (default). `LONGCAT_DISTILL=0` runs the undistilled 50-step
+   * path at real guidance — roughly 6x the cost, and the only way a negative prompt does
+   * anything at all on this lane (distill forces guidance to 1.0, which skips the
+   * classifier-free pass entirely). Load-time, like `longcatInt8`.
+   */
+  longcatDistill: process.env.LONGCAT_DISTILL !== "0",
+  /**
+   * Host renders kept in flight on the LongCat lane. Track the endpoint's max-workers
+   * setting: RunPod queues anything beyond it, and a queued job's wait counts against
+   * `LONGCAT_LIPSYNC_TIMEOUT_MS` while doing no work.
+   */
+  longcatLipsyncConcurrency: Number(
+    process.env.LONGCAT_LIPSYNC_CONCURRENCY ?? 2
+  ),
   /**
    * InfiniteTalk quality tier: `fast` (8-step distill, the default) or `full` (40 steps,
    * real CFG). CFG above 1 costs two forward passes per step, so full is ~10x the model

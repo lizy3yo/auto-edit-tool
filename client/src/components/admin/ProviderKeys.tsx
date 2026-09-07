@@ -98,7 +98,9 @@ export function HostLipsyncToggle() {
       toast.success(
         provider === "runpod"
           ? "Host lip-sync → InfiniteTalk (RunPod). HeyGen keys kept."
-          : "Host lip-sync → HeyGen Avatar IV."
+          : provider === "longcat"
+            ? "Host lip-sync → LongCat Avatar 1.5. HeyGen keys kept."
+            : "Host lip-sync → HeyGen Avatar IV."
       );
       utils.longformVideo.getLipsyncProvider.invalidate();
     },
@@ -133,18 +135,57 @@ export function HostLipsyncToggle() {
   const quality = data?.quality ?? "fast";
   const camera = data?.camera ?? "photo";
   const onRunpod = provider === "runpod";
-  const ready = data?.runpod.ready ?? false;
+  const onLongcat = provider === "longcat";
   const busy =
     isLoading ||
     setProvider.isPending ||
     setQuality.isPending ||
     setCamera.isPending;
-  // Name the missing half rather than greying the button out silently.
-  const blockedReason = data?.runpod.endpointSet
-    ? data?.runpod.keySet
-      ? null
-      : "RUN_POD_KEY is not set"
-    : "RUNPOD_INFINITETALK_ENDPOINT is not set";
+
+  // Name the missing half rather than greying a button out silently. Each self-hosted lane
+  // has its own endpoint but they share RUN_POD_KEY, so the two can be independently unready.
+  const blockedFor = (
+    lane?: { endpointSet: boolean; keySet: boolean },
+    envVar?: string
+  ) =>
+    lane?.endpointSet
+      ? lane.keySet
+        ? null
+        : "RUN_POD_KEY is not set"
+      : `${envVar} is not set`;
+
+  /**
+   * The three lanes, in the order they are offered. HeyGen is always available (its key is
+   * per-tab and falls back), so it carries no readiness gate — the other two are refused by
+   * `setLipsyncProvider` when their endpoint or key is missing, and this mirrors that rather
+   * than letting the UI offer a switch the server will reject.
+   */
+  const lanes = [
+    {
+      id: "heygen" as const,
+      label: "HeyGen Avatar IV",
+      blurb: "1080p, per-tab accounts, billed per second of finished video.",
+      ready: true,
+      blocked: null as string | null,
+    },
+    {
+      id: "runpod" as const,
+      label: "InfiniteTalk (RunPod)",
+      blurb:
+        "Your own GPU: 720p, billed by GPU second. Measured $0.101 per finished second.",
+      ready: data?.runpod.ready ?? false,
+      blocked: blockedFor(data?.runpod, "RUNPOD_INFINITETALK_ENDPOINT"),
+    },
+    {
+      id: "longcat" as const,
+      label: "LongCat Avatar 1.5",
+      blurb:
+        "Your own GPU, billed by GPU second. Seamless segment joins and stronger identity hold, " +
+        "but measured $0.134 per finished second — dearer than InfiniteTalk at the same pixel count.",
+      ready: data?.longcat.ready ?? false,
+      blocked: blockedFor(data?.longcat, "RUNPOD_LONGCAT_ENDPOINT"),
+    },
+  ];
 
   return (
     <div className="space-y-3">
@@ -153,41 +194,57 @@ export function HostLipsyncToggle() {
         Host lip-sync provider
       </Label>
 
-      <div className="flex items-center justify-between gap-4 rounded-md border border-border p-3">
-        <div className="text-sm">
-          <div className="font-medium">
-            {isLoading
-              ? "Checking…"
-              : onRunpod
-                ? "InfiniteTalk (RunPod) — self-hosted"
-                : "HeyGen Avatar IV"}
+      {lanes.map(lane => {
+        const active = provider === lane.id;
+        return (
+          <div
+            key={lane.id}
+            className={`flex items-center justify-between gap-4 rounded-md border p-3 ${
+              active ? "border-primary/50 bg-primary/5" : "border-border"
+            }`}
+          >
+            <div className="text-sm">
+              <div className="font-medium">
+                {lane.label}
+                {active ? (
+                  <span className="ml-2 text-xs font-normal text-primary">
+                    in use
+                  </span>
+                ) : null}
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {lane.blurb}
+                {!lane.ready && lane.blocked ? (
+                  <>
+                    {" "}
+                    Unavailable —{" "}
+                    <code className="text-[11px]">{lane.blocked}</code>.
+                  </>
+                ) : null}
+              </div>
+            </div>
+            <Button
+              variant="outline"
+              disabled={busy || active || !lane.ready}
+              onClick={() => setProvider.mutate({ provider: lane.id })}
+            >
+              {setProvider.isPending ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : null}
+              {active ? "Active" : isLoading ? "Checking…" : "Use this"}
+            </Button>
           </div>
-          <div className="text-xs text-muted-foreground">
-            {onRunpod
-              ? "Your own GPU: 720p, billed by GPU second. HeyGen keys below are kept but unused."
-              : "1080p, per-tab accounts, billed per second of finished video."}
-            {!ready && blockedReason ? (
-              <>
-                {" "}
-                InfiniteTalk unavailable —{" "}
-                <code className="text-[11px]">{blockedReason}</code>.
-              </>
-            ) : null}
-          </div>
-        </div>
-        <Button
-          variant="outline"
-          disabled={busy || (!onRunpod && !ready)}
-          onClick={() =>
-            setProvider.mutate({ provider: onRunpod ? "heygen" : "runpod" })
-          }
-        >
-          {setProvider.isPending ? (
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          ) : null}
-          {onRunpod ? "Use HeyGen" : "Use InfiniteTalk"}
-        </Button>
-      </div>
+        );
+      })}
+
+      {/* The stored HeyGen keys are untouched by a switch — say so where it is decided,
+          rather than leaving the muted key rows below to imply it. */}
+      {onRunpod || onLongcat ? (
+        <p className="text-xs text-muted-foreground">
+          HeyGen keys below are kept but unused while a self-hosted lane is
+          active.
+        </p>
+      ) : null}
 
       {/* Quality is an InfiniteTalk-only knob — Avatar IV renders one way at one price. */}
       {onRunpod ? (
@@ -464,7 +521,10 @@ export function ProviderKeys() {
   // Drives the muted state on the HeyGen key rows below — they stay editable, they are just
   // no longer the live configuration while InfiniteTalk is the host provider.
   const { data: lipsync } = trpc.longformVideo.getLipsyncProvider.useQuery();
-  const lipsyncOnRunpod = lipsync?.provider === "runpod";
+  // True for EITHER self-hosted lane: what mutes the HeyGen rows is "HeyGen is not rendering
+  // host scenes", not "InfiniteTalk specifically is".
+  const lipsyncOnRunpod =
+    lipsync?.provider === "runpod" || lipsync?.provider === "longcat";
 
   return (
     <div className="space-y-6">

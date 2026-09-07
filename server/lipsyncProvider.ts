@@ -23,7 +23,7 @@ export const LIPSYNC_PROVIDER_KEY = "lipsync_provider";
 export const LIPSYNC_QUALITY_KEY = "lipsync_quality";
 export const LIPSYNC_CAMERA_KEY = "lipsync_camera";
 
-export type LipsyncProvider = "heygen" | "runpod";
+export type LipsyncProvider = "heygen" | "runpod" | "longcat";
 /** `fast` = 8-step distill; `full` = 40 steps with real CFG. RunPod lane only. */
 export type LipsyncQuality = "fast" | "full";
 /**
@@ -52,11 +52,13 @@ export async function getLipsyncProvider(): Promise<LipsyncProvider> {
   const raw = await getAppSetting(LIPSYNC_PROVIDER_KEY).catch(() => null);
   // An unset row (not an empty string) means "never chosen" — that is the env default's job.
   const value: LipsyncProvider =
-    raw === "runpod" || raw === "heygen"
+    raw === "runpod" || raw === "heygen" || raw === "longcat"
       ? raw
       : ENV.lipsyncProvider === "runpod"
         ? "runpod"
-        : "heygen";
+        : ENV.lipsyncProvider === "longcat"
+          ? "longcat"
+          : "heygen";
   providerCache = { value, at: Date.now() };
   return value;
 }
@@ -125,6 +127,21 @@ export function runpodLipsyncReadiness(): {
   ready: boolean;
 } {
   const endpointSet = !!ENV.runpodInfinitetalkEndpoint;
+  const keySet = !!ENV.runPodApiKey;
+  return { endpointSet, keySet, ready: endpointSet && keySet };
+}
+
+/**
+ * Same for the LongCat lane. Separate endpoint, same RunPod key — so a deployment can have
+ * one lane ready and not the other, and the Admin UI can say which piece is missing rather
+ * than greying a button out silently.
+ */
+export function longcatLipsyncReadiness(): {
+  endpointSet: boolean;
+  keySet: boolean;
+  ready: boolean;
+} {
+  const endpointSet = !!ENV.runpodLongcatEndpoint;
   const keySet = !!ENV.runPodApiKey;
   return { endpointSet, keySet, ready: endpointSet && keySet };
 }

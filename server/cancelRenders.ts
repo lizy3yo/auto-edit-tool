@@ -17,6 +17,7 @@
  */
 import { ENV } from "./_core/env";
 import { RunpodLipsyncAdapter } from "./providers/runpod-lipsync";
+import { LongcatLipsyncAdapter } from "./providers/longcat-lipsync";
 
 /** The shape this needs from a job row — anything with a storyboard will do. */
 export interface CancellableJob {
@@ -36,23 +37,48 @@ export async function cancelJobProviderRenders(
   job: CancellableJob | null | undefined,
   reason: string
 ): Promise<number> {
-  if (!job || !ENV.runpodInfinitetalkEndpoint || !ENV.runPodApiKey) return 0;
+  if (!job || !ENV.runPodApiKey) return 0;
   const scenes = job.storyboard;
   if (!Array.isArray(scenes)) return 0;
-  const ids = scenes
-    .filter(s => s?.renderProvider === "runpod")
-    .flatMap((s): string[] => s.renderTaskIds ?? [])
-    .filter((id): id is string => !!id);
-  if (!ids.length) return 0;
-  const runpod = new RunpodLipsyncAdapter(
-    ENV.runpodInfinitetalkEndpoint,
-    ENV.runPodApiKey,
-    // Irrelevant to cancelling — the adapter only needs the endpoint and the key here.
-    "fast"
-  );
-  for (const id of ids) await runpod.cancelJob(id);
+
+  /** Task ids on one GPU-billed lane. `renderProvider` is what makes this safe to cancel. */
+  const idsFor = (provider: string): string[] =>
+    scenes
+      .filter(s => s?.renderProvider === provider)
+      .flatMap((s): string[] => s.renderTaskIds ?? [])
+      .filter((id): id is string => !!id);
+
+  // Both self-hosted lanes bill by RUNNING time and both leak the same way, so both are
+  // stopped. They are separate endpoints with separate ids, so a scene's `renderProvider`
+  // decides which endpoint is asked — cancelling a LongCat id against the InfiniteTalk
+  // endpoint would 404 and leave the GPU running.
+  let stopped = 0;
+
+  const runpodIds = idsFor("runpod");
+  if (runpodIds.length && ENV.runpodInfinitetalkEndpoint) {
+    const runpod = new RunpodLipsyncAdapter(
+      ENV.runpodInfinitetalkEndpoint,
+      ENV.runPodApiKey,
+      // Irrelevant to cancelling — the adapter only needs the endpoint and the key here.
+      "fast"
+    );
+    for (const id of runpodIds) await runpod.cancelJob(id);
+    stopped += runpodIds.length;
+  }
+
+  const longcatIds = idsFor("longcat");
+  if (longcatIds.length && ENV.runpodLongcatEndpoint) {
+    const longcat = new LongcatLipsyncAdapter(
+      ENV.runpodLongcatEndpoint,
+      ENV.runPodApiKey
+    );
+    for (const id of longcatIds) await longcat.cancelJob(id);
+    stopped += longcatIds.length;
+  }
+
+  if (!stopped) return 0;
   console.log(
-    `[Longform ${job.id ?? "?"}] ${reason}: told RunPod to stop ${ids.length} in-flight host render(s)`
+    `[Longform ${job.id ?? "?"}] ${reason}: told RunPod to stop ${stopped} in-flight host render(s)`
   );
-  return ids.length;
+  return stopped;
 }

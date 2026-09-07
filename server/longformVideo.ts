@@ -79,6 +79,12 @@ import {
   RUNPOD_LIPSYNC_TIMEOUT_MS,
 } from "./providers/runpod-lipsync";
 import {
+  LongcatLipsyncAdapter,
+  longcatLipsyncSlotsFor,
+  longcatSegmentsFor,
+  LONGCAT_LIPSYNC_TIMEOUT_MS,
+} from "./providers/longcat-lipsync";
+import {
   getLipsyncProvider,
   getLipsyncQuality,
   getLipsyncCameraMode,
@@ -151,7 +157,7 @@ import { sceneHoldPlan } from "../shared/filmTimeline";
  * was handed.
  */
 type LipsyncLane = {
-  provider: "runpod" | "heygen";
+  provider: "runpod" | "heygen" | "longcat";
   /** Build + submit one render. The lane owns the provider-specific payload shape. */
   submit(req: {
     scene: StoryboardScene;
@@ -3150,6 +3156,69 @@ async function resolveLipsyncLane(
       // unlike HeyGen this semaphore is deliberately shared across all five slots.
       slots: runpodLipsyncSlotsFor(ENV.runpodInfinitetalkEndpoint),
       concurrency: ENV.runpodLipsyncConcurrency,
+      sceneDeadlineMs: SCENE_DEADLINE_HOST_RUNPOD_MS,
+    };
+  }
+
+  // Self-hosted LongCat-Video-Avatar-1.5 on RunPod. Opt-in on the same terms as the
+  // InfiniteTalk lane above, and falling through to HeyGen the same way when the endpoint or
+  // key is missing — a config gap must never fail a film.
+  //
+  // Deliberately NOT wired to the plate/camera machinery. `cameraPlate.ts` exists to give
+  // InfiniteTalk's V2V path a video with no camera motion to mimic, a fix for Wan I2V's drift
+  // toward the speaker. LongCat holds its frame through reference-skip-attention instead, so a
+  // plate here would be cost with nothing to buy. Same for `lipsyncSeams.ts`: this model
+  // discards its 13-frame conditioning overlap rather than blending it, so there is no window
+  // handoff to repair and InfiniteTalk's frame arithmetic would land on ordinary frames.
+  if (
+    lipsyncProvider === "longcat" &&
+    ENV.runpodLongcatEndpoint &&
+    ENV.runPodApiKey
+  ) {
+    const longcat = new LongcatLipsyncAdapter(
+      ENV.runpodLongcatEndpoint,
+      ENV.runPodApiKey
+    );
+    return {
+      provider: "longcat",
+      submit: async ({
+        scene,
+        imageUrl,
+        audioUrl,
+        useAlt,
+        audioDurationSec,
+      }) => {
+        // Segment count is sent explicitly rather than letting the worker derive it. In
+        // production the two agree — the audio IS the beat — but the count is what this
+        // render COSTS, and cost is a step function (3.72s, then +3.2s each), so it belongs
+        // where it can be logged and reasoned about rather than inferred inside the worker.
+        const beatSec = audioDurationSec ?? scene.audioDuration ?? 6;
+        const segments = longcatSegmentsFor(beatSec);
+        // Same direction as the InfiniteTalk photo path: both animate a still with no plate
+        // behind them, so the body-suppression wording applies for the same reason. A
+        // LongCat-specific direction is worth writing once this lane has a measured baseline
+        // — its prompt handling is different enough (richer scene description, and a negative
+        // that is inert under distill) that porting the pinned wording blind would be guessing.
+        return longcat.submitLipsync({
+          imageUrl,
+          audioUrl,
+          prompt: buildLipsyncPrompt(scene, useAlt, "photo"),
+          negativePrompt: LIPSYNC_NEGATIVE_DIRECTION,
+          resolution: ENV.longcatResolution,
+          numSegments: segments,
+          useInt8: ENV.longcatInt8,
+          useDistill: ENV.longcatDistill,
+        });
+      },
+      poll: (id, ms) => longcat.pollVideo(id, ms ?? LONGCAT_LIPSYNC_TIMEOUT_MS),
+      // Billed by GPU time, exactly like the InfiniteTalk lane, so an abandoned render keeps
+      // costing until RunPod's own execution timeout.
+      cancel: id => longcat.cancelJob(id),
+      // One endpoint serves every tab — our own GPU, not a per-account allowance.
+      slots: longcatLipsyncSlotsFor(ENV.runpodLongcatEndpoint),
+      concurrency: ENV.longcatLipsyncConcurrency,
+      // Shares the RunPod deadline: measured ~350 GPU-seconds per segment at 720p, so a 3-
+      // segment beat is ~18 min and the 25-min HeyGen clock would abandon renders mid-flight.
       sceneDeadlineMs: SCENE_DEADLINE_HOST_RUNPOD_MS,
     };
   }
@@ -6802,7 +6871,7 @@ export async function withTransientRetry<T>(
 export async function runChunkTasks(
   jobId: number,
   scene: StoryboardScene,
-  provider: "runpod" | "heygen" | "sixtynine_labs",
+  provider: "runpod" | "heygen" | "sixtynine_labs" | "longcat",
   chunkCount: number,
   submit: (i: number) => Promise<VideoSubmitResult>,
   poll: (taskId: string) => Promise<GenerationResult>,

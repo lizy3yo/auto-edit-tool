@@ -47,6 +47,7 @@ Read through the single `ENV` object in `server/_core/env.ts`, except `R2_*`, wh
 | `RUN_POD_KEY` + `RUNPOD_WHISPERX_ENDPOINT`                               | `server/_core/voiceTranscription.ts` → `kodxana/whisperx-worker_v2` serverless                         | no word-level narration alignment         |
 | `HEYGEN_API_KEY`                                                         | `server/longformVideo.ts:2506` — **fallback only**, used when a tab's slot key is blank                | host lip-sync fails for slot-less tabs    |
 | `RUNPOD_INFINITETALK_ENDPOINT` + `LIPSYNC_PROVIDER=runpod`               | `server/providers/runpod-lipsync.ts` — **optional**, moves host lip-sync off HeyGen                    | host lane stays on HeyGen (the default)   |
+| `RUNPOD_LONGCAT_ENDPOINT` + `LIPSYNC_PROVIDER=longcat`                   | `server/providers/longcat-lipsync.ts` — **optional**, third host lane (LongCat Avatar 1.5)             | host lane stays on HeyGen (the default)   |
 | `PUBLIC_BASE_URL`                                                        | `server/providers/heygen-lipsync.ts:78` (webhook callback URL)                                         | blank ⇒ pure polling; slower, still works |
 
 ### Channel B — DB-stored, AES-256-GCM, entered in Admin
@@ -69,30 +70,30 @@ Gemini, OpenAI, R2, RunPod. Missing ones fail loudly at the first stage that nee
 
 ## Optional tuning vars (defaults from code; most are not in `.env.example`)
 
-| Var                             | Default           | Var                                   | Default                      |
-| ------------------------------- | ----------------- | ------------------------------------- | ---------------------------- |
-| `FFMPEG_PATH`                   | auto-probe        | `FFMPEG_CONCURRENCY`                  | cpu-derived                  |
-| `FFMPEG_PROBE_MAX_MS`           | 600s              | `ASSEMBLY_DOWNLOAD_TIMEOUT_MS`        | 120s                         |
-| `PROBE_MAX_MS`                  | 60s               | `BROLL_NO_KEYFRAME`                   | unset (`1` disables)         |
-| `R2_CONNECTION_TIMEOUT_MS`      | 10s               | `R2_REQUEST_TIMEOUT_MS`               | 120s                         |
-| `APIMART_RATE_PER_MIN`          | 40                | `APIMART_BURST`                       | 5                            |
-| `HEYGEN_CONCURRENCY`            | 8                 | `HEYGEN_CALL_TIMEOUT_MS`              | 120s                         |
-| `HEYGEN_DOWNLOAD_TIMEOUT_MS`    | 300s              | `OPENAI_IMAGE_CALL_TIMEOUT_MS`        | 300s                         |
-| `OPENAI_IMAGE_BURST`            | 1                 | `OPENAI_IMAGE_RATE_PER_MIN`           | 50 (Tier-3 cap)              |
-| `SIXTYNINE_VIDEO_CONCURRENCY`   | 8                 | `SIXTYNINE_IMAGE_CONCURRENCY`         | 7                            |
-| `SIXTYNINE_VIDEO_TIMEOUT_MS`    | 360s              | `SIXTYNINE_CALL_TIMEOUT_MS`           | 120s                         |
-| `SIXTYNINE_DOWNLOAD_TIMEOUT_MS` | 300s              | `SIXTYNINE_VIDEO_SUBMIT_BURST`        | 2                            |
-| `SIXTYNINE_VIDEO_SUBMIT_RATE`   | 5/min (API cap)   | `IMAGE_PRIMARY_TIMEOUT_MS`            | 480s                         |
-| `SIXTYNINE_TTS_SUBMIT_RATE`     | 20/min            | `SIXTYNINE_TTS_SUBMIT_BURST`          | 3                            |
-| `IMAGE_PRIMARY_RETRIES`         | 1                 | `IMAGE_RETRY_TIMEOUT_MS`              | 240s                         |
-| `IMAGE_RETRY_TOTAL_BUDGET_MS`   | 600s              | `MYSQL_SORT_BUFFER_SIZE`              | 8 MB                         |
-| `AUTO_MIGRATE`                  | on (`0` skips)    | `ASSEMBLY_CACHE`                      | on (`0` skips)               |
-| `LIPSYNC_RESOLUTION`            | 720p (480p/1080p) | `RUNPOD_LIPSYNC_INPUT`                | image (`video` = pinned)     |
-| `ASSEMBLY_CACHE_MAX_GB`         | 20                | `ASSEMBLY_CACHE_DIR`                  | tmp/longform-assembly-cache  |
-| `RUNPOD_LIPSYNC_TIMEOUT_MS`     | 35 min (poll)     | `RUNPOD_LIPSYNC_EXECUTION_TIMEOUT_MS` | 40 min (per-job GPU cap)     |
-| `RUNPOD_LIPSYNC_TORCH_COMPILE`  | off (`1` = on)    | `RUNPOD_LIPSYNC_BATCH`                | 2 beats per call (`1` = off) |
-| `RUNPOD_LIPSYNC_BATCH_MAX_SEC`  | 14 s per call     | `RUNPOD_LIPSYNC_AUDIO_CFG_STEPS`      | 0.5 (first half guided)      |
-| `RUNPOD_LIPSYNC_QUANTIZATION`   | fp8_e4m3fn        | `RUNPOD_LIPSYNC_V2V_STEPS` / `_START_STEP` | 12 / 3 (9 active)       |
+| Var                             | Default           | Var                                        | Default                      |
+| ------------------------------- | ----------------- | ------------------------------------------ | ---------------------------- |
+| `FFMPEG_PATH`                   | auto-probe        | `FFMPEG_CONCURRENCY`                       | cpu-derived                  |
+| `FFMPEG_PROBE_MAX_MS`           | 600s              | `ASSEMBLY_DOWNLOAD_TIMEOUT_MS`             | 120s                         |
+| `PROBE_MAX_MS`                  | 60s               | `BROLL_NO_KEYFRAME`                        | unset (`1` disables)         |
+| `R2_CONNECTION_TIMEOUT_MS`      | 10s               | `R2_REQUEST_TIMEOUT_MS`                    | 120s                         |
+| `APIMART_RATE_PER_MIN`          | 40                | `APIMART_BURST`                            | 5                            |
+| `HEYGEN_CONCURRENCY`            | 8                 | `HEYGEN_CALL_TIMEOUT_MS`                   | 120s                         |
+| `HEYGEN_DOWNLOAD_TIMEOUT_MS`    | 300s              | `OPENAI_IMAGE_CALL_TIMEOUT_MS`             | 300s                         |
+| `OPENAI_IMAGE_BURST`            | 1                 | `OPENAI_IMAGE_RATE_PER_MIN`                | 50 (Tier-3 cap)              |
+| `SIXTYNINE_VIDEO_CONCURRENCY`   | 8                 | `SIXTYNINE_IMAGE_CONCURRENCY`              | 7                            |
+| `SIXTYNINE_VIDEO_TIMEOUT_MS`    | 360s              | `SIXTYNINE_CALL_TIMEOUT_MS`                | 120s                         |
+| `SIXTYNINE_DOWNLOAD_TIMEOUT_MS` | 300s              | `SIXTYNINE_VIDEO_SUBMIT_BURST`             | 2                            |
+| `SIXTYNINE_VIDEO_SUBMIT_RATE`   | 5/min (API cap)   | `IMAGE_PRIMARY_TIMEOUT_MS`                 | 480s                         |
+| `SIXTYNINE_TTS_SUBMIT_RATE`     | 20/min            | `SIXTYNINE_TTS_SUBMIT_BURST`               | 3                            |
+| `IMAGE_PRIMARY_RETRIES`         | 1                 | `IMAGE_RETRY_TIMEOUT_MS`                   | 240s                         |
+| `IMAGE_RETRY_TOTAL_BUDGET_MS`   | 600s              | `MYSQL_SORT_BUFFER_SIZE`                   | 8 MB                         |
+| `AUTO_MIGRATE`                  | on (`0` skips)    | `ASSEMBLY_CACHE`                           | on (`0` skips)               |
+| `LIPSYNC_RESOLUTION`            | 720p (480p/1080p) | `RUNPOD_LIPSYNC_INPUT`                     | image (`video` = pinned)     |
+| `ASSEMBLY_CACHE_MAX_GB`         | 20                | `ASSEMBLY_CACHE_DIR`                       | tmp/longform-assembly-cache  |
+| `RUNPOD_LIPSYNC_TIMEOUT_MS`     | 35 min (poll)     | `RUNPOD_LIPSYNC_EXECUTION_TIMEOUT_MS`      | 40 min (per-job GPU cap)     |
+| `RUNPOD_LIPSYNC_TORCH_COMPILE`  | off (`1` = on)    | `RUNPOD_LIPSYNC_BATCH`                     | 2 beats per call (`1` = off) |
+| `RUNPOD_LIPSYNC_BATCH_MAX_SEC`  | 14 s per call     | `RUNPOD_LIPSYNC_AUDIO_CFG_STEPS`           | 0.5 (first half guided)      |
+| `RUNPOD_LIPSYNC_QUANTIZATION`   | fp8_e4m3fn        | `RUNPOD_LIPSYNC_V2V_STEPS` / `_START_STEP` | 12 / 3 (9 active)            |
 
 `RUNPOD_LIPSYNC_EXECUTION_TIMEOUT_MS` is sent with every submit as RunPod's `policy.executionTimeout`
 and overrides the endpoint's own setting (dashboard default 20 min). InfiniteTalk at 720p on the
@@ -153,8 +154,8 @@ Express · tRPC · Drizzle · MySQL.
   correction is a seek, a seek drops readyState, that stalls the clock, and the drift grows.
   Still a preview of the CUT, not the FILE — no burned-in QR/lower third/captions, no music bed
 - `server/providers/` — one adapter per vendor; `base.ts` is the interface,
-  `fallback.ts` the image chain (primary → Gemini). The host lip-sync lane has TWO adapters,
-  picked in `resolveLipsyncLane` and handed to callers that know neither: `heygen-lipsync.ts`
+  `fallback.ts` the image chain (primary → Gemini). The host lip-sync lane has THREE adapters,
+  picked in `resolveLipsyncLane` and handed to callers that know none of them: `heygen-lipsync.ts`
   (Avatar IV, 1080p, per-tab account keys, billed per second of output) and
   `runpod-lipsync.ts` (self-hosted InfiniteTalk, ≤720p, one shared endpoint, billed per GPU
   second — so it meters itself from RunPod's `executionTime` instead of being wrapped by the
@@ -340,6 +341,32 @@ Express · tRPC · Drizzle · MySQL.
   even the accepted clip shows no head/speech correlation, and a box-cut eye band reads the
   photo ~25% narrower than that clip — landmarks would fix the second. `--beside other.mp4`
   prints a second clip in a side column; `--photo host.jpg` adds the photo line
+  The THIRD host lane is `longcat-lipsync.ts` — self-hosted
+  LongCat-Video-Avatar-1.5 (Meituan, MIT) on its own RunPod endpoint, worker repo
+  `Metropolis-Media/longcat`. Opt-in like the RunPod lane, GPU-second billed like it, and
+  carrying its own `cancel` for the same reason. What is genuinely different, all measured on
+  the first real render (2026-09-08): its GEOMETRY is a 93-frame first segment then +80-frame
+  continuations at 25 fps, where 13 frames of context are re-rendered and then DISCARDED
+  rather than blended — so unlike InfiniteTalk there is no window handoff to repair, and
+  `lipsyncSeams.ts` is deliberately NOT wired to it (its 81-frame arithmetic would land on
+  ordinary frames). `cameraPlate.ts` is likewise not wired: the plate exists to give Wan's
+  V2V path a camera with nothing to mimic, and this model holds its frame through
+  reference-skip-attention instead. Cost is a STEP FUNCTION of the segment count
+  (`longcatSegmentsFor`) — a 3.8 s beat costs exactly what a 6.9 s beat costs, so trimming
+  below a boundary saves nothing. Output SIZE follows the INPUT IMAGE's aspect ratio, not a
+  preset: LongCat buckets the request, so a 1.44:1 photo rendered 1152x800 and a 16:9 plate
+  lands on the 1.70 bucket (1248x736) — assembly crops from what came back. NEGATIVE PROMPTS
+  ARE INERT on the default path: `use_distill` forces text and audio guidance to 1.0, which
+  skips the classifier-free pass entirely; the worker reports `negative_prompt_active` and the
+  adapter warns when it was ignored. And the worker image is torch 2.6 + cu124, so it has
+  kernels for Ampere/Ada/Hopper ONLY — a Blackwell card boots, accepts the job, then fails
+  every render with "no kernel image is available"; the adapter names that specifically rather
+  than reporting a broken build. It is opt-in because the case for it is PICTURE QUALITY, not
+  price: measured 696 GPU-s for 6.91 s of 720p = 100.7 GPU-s per finished second = $0.134/s on
+  H100 PCIe, against InfiniteTalk's $0.101/s at an identical pixel count (both 921,600 px).
+  The untested lever is `LONGCAT_INT8=0`: INT8 halves the DiT to fit a 48 GB card but this
+  architecture cannot do 8-bit arithmetic, so every weight is unpacked to bf16 at use — on an
+  80 GB card that tax buys nothing.
 - `server/hostPlate.ts` — **provider-independent**. The lip-sync model animates the image it
   is handed and never changes the setting, so `HOST_PLATES=1` generates a 16:9 plate of the host
   IN each beat's setting (host photo as identity reference) and syncs from that instead of the

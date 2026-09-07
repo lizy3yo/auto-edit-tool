@@ -170,6 +170,7 @@ import {
   getLipsyncCameraMode,
   setLipsyncCameraMode,
   runpodLipsyncReadiness,
+  longcatLipsyncReadiness,
 } from "./lipsyncProvider";
 import { extractBookName } from "./ctaDetector";
 import { createProviderAdapter } from "./providers";
@@ -980,11 +981,17 @@ const longformVideoRouter = router({
       getLipsyncQuality(),
       getLipsyncCameraMode(),
     ]);
-    return { provider, quality, camera, runpod: runpodLipsyncReadiness() };
+    return {
+      provider,
+      quality,
+      camera,
+      runpod: runpodLipsyncReadiness(),
+      longcat: longcatLipsyncReadiness(),
+    };
   }),
 
   setLipsyncProvider: adminProcedure
-    .input(z.object({ provider: z.enum(["heygen", "runpod"]) }))
+    .input(z.object({ provider: z.enum(["heygen", "runpod", "longcat"]) }))
     .mutation(async ({ input }) => {
       // Refuse rather than accept a setting the pipeline would ignore: silently writing
       // "runpod" while every render kept going to HeyGen is the confusing failure here.
@@ -993,6 +1000,13 @@ const longformVideoRouter = router({
           code: "PRECONDITION_FAILED",
           message:
             "RunPod InfiniteTalk is not configured — set RUNPOD_INFINITETALK_ENDPOINT and RUN_POD_KEY first.",
+        });
+      }
+      if (input.provider === "longcat" && !longcatLipsyncReadiness().ready) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message:
+            "LongCat is not configured — set RUNPOD_LONGCAT_ENDPOINT and RUN_POD_KEY first.",
         });
       }
       await setLipsyncProvider(input.provider);

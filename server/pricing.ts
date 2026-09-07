@@ -154,6 +154,18 @@ export const RATES = {
    * and set the var if you deploy on anything else.
    */
   runpodLipsyncPerGpuSecond: rate("COST_RUNPOD_LIPSYNC_PER_GPU_SEC", 0.00097),
+
+  /**
+   * Self-hosted LongCat-Video-Avatar-1.5 on RunPod, USD per GPU-SECOND. Its own key rather
+   * than sharing InfiniteTalk's: the two run on separate endpoints and there is no reason
+   * they sit on the same GPU tier — the default here is H100 PCIe at $4.79/h, the card the
+   * lane was first measured on, against InfiniteTalk's 96GB Blackwell at $3.49/h.
+   *
+   * For scale: that first render was 696 GPU-s for 6.91 s of 720p video — 100.7 GPU-s per
+   * finished second, i.e. $0.134/s against InfiniteTalk's $0.101/s at an identical pixel
+   * count. Divide your endpoint's hourly rate by 3600 and set the var if you move tiers.
+   */
+  longcatLipsyncPerGpuSecond: rate("COST_LONGCAT_PER_GPU_SEC", 0.00133),
 } as const;
 
 /**
@@ -162,9 +174,9 @@ export const RATES = {
  * is safe only because each adapter records the quantity its own rate is quoted against.
  */
 export function lipsyncRateFor(provider: string, _model?: string): number {
-  return provider === "runpod"
-    ? RATES.runpodLipsyncPerGpuSecond
-    : RATES.heygenPerSecond;
+  if (provider === "runpod") return RATES.runpodLipsyncPerGpuSecond;
+  if (provider === "longcat") return RATES.longcatLipsyncPerGpuSecond;
+  return RATES.heygenPerSecond;
 }
 
 // ---------------------------------------------------------------------------
