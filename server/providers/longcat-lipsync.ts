@@ -92,6 +92,12 @@ export interface LongcatLipsyncParams {
    * part of the render that dominates. An approximation, so it is opt-in and the worker
    * defaults it off; a missing library falls back to FlashAttention rather than failing.
    */
+  /**
+   * FlashAttention-3 instead of FA2. Hopper-only and EXACT — same maths, faster kernels — so
+   * unlike `sageAttention` it carries no quality risk. Load-time on the worker; a missing
+   * wheel keeps FA2 and says so rather than failing.
+   */
+  flashAttn3?: boolean;
   sageAttention?: boolean;
   /** Fixed seed for an A/B; omitted, the worker draws a new one per render. */
   seed?: number;
@@ -280,6 +286,9 @@ export class LongcatLipsyncAdapter {
           : {}),
         ...(params.sageAttention != null
           ? { sage_attention: params.sageAttention }
+          : {}),
+        ...(params.flashAttn3 != null
+          ? { flash_attn_3: params.flashAttn3 }
           : {}),
         ...(params.seed != null ? { seed: params.seed } : {}),
       },

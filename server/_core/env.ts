@@ -163,6 +163,17 @@ export const ENV = {
    */
   longcatSageAttention: process.env.LONGCAT_SAGE_ATTENTION === "1",
   /**
+   * FlashAttention-3 on the LongCat lane. Hopper-only (the H100 class), and unlike
+   * SageAttention it is EXACT — the same attention, better kernels for that hardware,
+   * typically 1.5-2x over FlashAttention-2. There is no quality question to answer.
+   *
+   * Worth asking for because the checkpoint ships `enable_flashattn2: true`, so the model
+   * runs FA2 by default even on hardware FA3 was written for. The worker verifies the import
+   * before switching and reports `attention_backend` on every render, so a request that could
+   * not be honoured is visible rather than assumed. Load-time on the worker.
+   */
+  longcatFlashAttn3: process.env.LONGCAT_FLASH_ATTN_3 === "1",
+  /**
    * InfiniteTalk quality tier: `fast` (8-step distill, the default) or `full` (40 steps,
    * real CFG). CFG above 1 costs two forward passes per step, so full is ~10x the model
    * evaluations (40 x 2 vs 8 x 1) and ~10x the cost, not the 6x a step count alone suggests.
