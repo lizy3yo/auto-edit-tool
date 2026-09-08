@@ -82,6 +82,12 @@ export interface LongcatLipsyncParams {
    */
   audioScale?: number;
   /**
+   * Temporal smoothing of the audio embedding (0-1). Files down the mouth's widest openings
+   * without weakening the signal — unlike `audioScale`, which starves the model of the
+   * conditioning that anchors the scene and measurably destabilises the render.
+   */
+  audioSmooth?: number;
+  /**
    * `false` runs the DiT eager instead of compiled. Load-time on the worker, so flipping it
    * costs that worker a reload — it is a lever for isolating a compile problem, not a
    * per-render choice. Omitted, the worker uses its own default (on).
@@ -287,6 +293,9 @@ export class LongcatLipsyncAdapter {
           : {}),
         ...(params.audioScale != null
           ? { audio_scale: params.audioScale }
+          : {}),
+        ...(params.audioSmooth != null
+          ? { audio_smooth: params.audioSmooth }
           : {}),
         ...(params.torchCompile != null
           ? { torch_compile: params.torchCompile }

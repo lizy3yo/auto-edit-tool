@@ -3247,6 +3247,7 @@ async function resolveLipsyncLane(
           useInt8: ENV.longcatInt8,
           useDistill: ENV.longcatDistill,
           audioScale: ENV.longcatAudioScale,
+          audioSmooth: ENV.longcatAudioSmooth,
           torchCompile: ENV.longcatTorchCompile,
           sageAttention: ENV.longcatSageAttention,
           flashAttn3: ENV.longcatFlashAttn3,

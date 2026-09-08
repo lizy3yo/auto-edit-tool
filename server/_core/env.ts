@@ -132,6 +132,22 @@ export const ENV = {
    */
   longcatAudioScale: Number(process.env.LONGCAT_AUDIO_SCALE ?? 0.75),
   /**
+   * Files down the frame-to-frame peaks in the audio embedding — the mouth's widest openings
+   * come down while the shapes stay right. 0 (default) is untouched.
+   *
+   * This exists because `LONGCAT_AUDIO_SCALE` is the WRONG instrument for an over-wide mouth.
+   * Scaling the audio contribution down starves the model of the signal that also anchors the
+   * scene: measured at 0.3, mouth motion went UP (8.95 -> 9.42) and background morph hit 23.1
+   * against a limit of 1 — the render fell apart. Leave that at 1.0.
+   *
+   * Smoothing keeps the signal at full strength and only changes its shape over time
+   * (Savitzky-Golay, 15-frame window), then restores each frame's magnitude — so it cannot
+   * cause that failure by construction. Published work reports audio temporal filtering
+   * IMPROVES SyncNet scores, since sharp per-frame audio produces jitter that reads as poor
+   * sync. Per render, so walking it costs no reload.
+   */
+  longcatAudioSmooth: Number(process.env.LONGCAT_AUDIO_SMOOTH ?? 0),
+  /**
    * Compile the LongCat DiT (`torch.compile`) — graph capture and kernel fusion on the module
    * the sampler calls once per step. Nothing is approximated: same weights, same 8 steps, same
    * sampler, so this is a speed change and not a quality one.
