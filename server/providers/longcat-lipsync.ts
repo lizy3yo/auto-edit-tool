@@ -87,6 +87,12 @@ export interface LongcatLipsyncParams {
    * per-render choice. Omitted, the worker uses its own default (on).
    */
   torchCompile?: boolean;
+  /**
+   * 8-bit attention (SageAttention) instead of FlashAttention — roughly 2-3x faster on the
+   * part of the render that dominates. An approximation, so it is opt-in and the worker
+   * defaults it off; a missing library falls back to FlashAttention rather than failing.
+   */
+  sageAttention?: boolean;
   /** Fixed seed for an A/B; omitted, the worker draws a new one per render. */
   seed?: number;
 }
@@ -271,6 +277,9 @@ export class LongcatLipsyncAdapter {
           : {}),
         ...(params.torchCompile != null
           ? { torch_compile: params.torchCompile }
+          : {}),
+        ...(params.sageAttention != null
+          ? { sage_attention: params.sageAttention }
           : {}),
         ...(params.seed != null ? { seed: params.seed } : {}),
       },

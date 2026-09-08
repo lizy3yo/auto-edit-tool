@@ -388,3 +388,31 @@ describe("segment sizing", () => {
     expect(longcatSegmentsFor(6)).toBe(2);
   });
 });
+
+describe("sage attention flag", () => {
+  /**
+   * 8-bit attention is the one lever with real leverage on render cost — attention dominates
+   * every denoising step at this sequence length. It is also an approximation, so it must be
+   * OPT-IN: if this ever starts defaulting on, renders silently change quality.
+   */
+  it("is omitted unless the lane asks for it", async () => {
+    const calls = installFetchMock({});
+    await new LongcatLipsyncAdapter("ep-1", "key-1").submitLipsync(params);
+    expect(
+      calls.find(c => c.url.includes("/run"))!.body.input
+    ).not.toHaveProperty("sage_attention");
+  });
+
+  it("is sent explicitly in both directions once set", async () => {
+    for (const on of [true, false]) {
+      const calls = installFetchMock({});
+      await new LongcatLipsyncAdapter("ep-1", "key-1").submitLipsync({
+        ...params,
+        sageAttention: on,
+      });
+      expect(
+        calls.find(c => c.url.includes("/run"))!.body.input.sage_attention
+      ).toBe(on);
+    }
+  });
+});

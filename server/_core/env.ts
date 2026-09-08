@@ -148,6 +148,21 @@ export const ENV = {
    */
   longcatTorchCompile: process.env.LONGCAT_TORCH_COMPILE !== "0",
   /**
+   * 8-bit attention (SageAttention) on the LongCat lane. OFF by default.
+   *
+   * Attention is where this model spends its time — at 93 frames of 720p the sequence is long
+   * enough that it dominates every denoising step, measured at 35-40s per step — so it is the
+   * one lever with real leverage on render cost. Published at 2.1-3.1x over FlashAttention2,
+   * 2.61x measured on H100.
+   *
+   * Unlike `torch.compile` this is an APPROXIMATION: the same attention computed in 8 bits
+   * rather than 16. The published benchmarks cover general video and image quality and NOT
+   * lip-sync, which is this lane's whole job — so judge a render with
+   * `scripts/measure-lipsync.mts` against the accepted clip before turning it on for real
+   * work. Per render on the worker, so an A/B costs no reload.
+   */
+  longcatSageAttention: process.env.LONGCAT_SAGE_ATTENTION === "1",
+  /**
    * InfiniteTalk quality tier: `fast` (8-step distill, the default) or `full` (40 steps,
    * real CFG). CFG above 1 costs two forward passes per step, so full is ~10x the model
    * evaluations (40 x 2 vs 8 x 1) and ~10x the cost, not the 6x a step count alone suggests.
