@@ -3220,12 +3220,19 @@ async function resolveLipsyncLane(
         useAlt,
         audioDurationSec,
       }) => {
-        // Segment count is sent explicitly rather than letting the worker derive it. In
-        // production the two agree — the audio IS the beat — but the count is what this
-        // render COSTS, and cost is a step function (3.72s, then +3.2s each), so it belongs
-        // where it can be logged and reasoned about rather than inferred inside the worker.
-        const beatSec = audioDurationSec ?? scene.audioDuration ?? 6;
-        const segments = longcatSegmentsFor(beatSec);
+        // Segment count is sent explicitly WHEN WE KNOW THE LENGTH, because the count is
+        // what this render costs and cost is a step function (3.72s, then +3.2s each), so it
+        // belongs where it can be logged and reasoned about.
+        //
+        // When we do NOT know it, send nothing and let the worker size itself from the audio
+        // file it is holding. This used to fall back to a hard-coded 6s, which rounds up to
+        // TWO segments: measured in production, a 1.74s beat was billed 673 GPU-seconds —
+        // 431 per finished second, four times the normal rate and about $0.90 for under two
+        // seconds of video — for a beat the worker would have rendered in one segment. A
+        // guess that can only ever be wrong upward is worse than no guess at all.
+        const beatSec = audioDurationSec ?? scene.audioDuration;
+        const segments =
+          beatSec && beatSec > 0 ? longcatSegmentsFor(beatSec) : undefined;
         // Its OWN direction (`LIPSYNC_HOST_DIRECTION_LONGCAT`), not either InfiniteTalk one:
         // the negative prompt is inert under distill, so every guard those two delegate to it
         // has to be stated positively here. The negative is still sent — free, and it becomes

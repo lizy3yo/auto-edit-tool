@@ -371,3 +371,20 @@ describe("longcat cost metering", () => {
     expect(GPU_BILLED_LIPSYNC_PROVIDERS.has("heygen")).toBe(false);
   });
 });
+
+describe("segment sizing", () => {
+  /**
+   * Measured in production: a 1.74s beat was submitted as TWO segments and billed 673
+   * GPU-seconds — 431 per finished second against a normal ~100, roughly $0.90 for under two
+   * seconds of video. The lane fell back to a hard-coded 6s when the beat length was not yet
+   * known, and 6s rounds up to two segments. A guess that can only be wrong upward costs
+   * money on every short beat, so an unknown length now sends nothing and the worker sizes
+   * itself from the audio file it is holding.
+   */
+  it("sizes a short beat to one segment, not two", () => {
+    expect(longcatSegmentsFor(1.74)).toBe(1);
+    expect(longcatSegmentsFor(3.72)).toBe(1);
+    // The value the old fallback used, and why it was expensive.
+    expect(longcatSegmentsFor(6)).toBe(2);
+  });
+});
