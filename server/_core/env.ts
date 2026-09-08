@@ -174,6 +174,24 @@ export const ENV = {
    */
   longcatFlashAttn3: process.env.LONGCAT_FLASH_ATTN_3 === "1",
   /**
+   * FP8 weights on the LongCat lane, converted from the shipped INT8 at load. OFF by default.
+   *
+   * Worth having because the checkpoint's INT8 is WEIGHT-ONLY: `QuantizedLinear.forward`
+   * rebuilds the full bf16 weight tensor on every forward pass and then runs an ordinary bf16
+   * matmul, so INT8 tensor cores are never used. Per pass it reads 15.9GB, materialises a
+   * 31.7GB temporary, and does exactly the matmul bf16 would have done unaided. On Hopper, fp8
+   * has real tensor cores and needs no unpacking — and e4m3 carries more precision than int8.
+   *
+   * No extra weights ship for it: the fp8 tensors are derived from the INT8 already on disk,
+   * once, at load. That is deliberate — adding a second weight set is what made the image
+   * unpackable when bf16 was tried.
+   *
+   * It IS a change to the arithmetic, so it defaults off. The worker verifies every layer
+   * against its INT8 original and keeps INT8 wherever they disagree, then reports `fp8_layers`
+   * on the render so a partial conversion cannot pass for a complete one.
+   */
+  longcatFp8: process.env.LONGCAT_FP8 === "1",
+  /**
    * InfiniteTalk quality tier: `fast` (8-step distill, the default) or `full` (40 steps,
    * real CFG). CFG above 1 costs two forward passes per step, so full is ~10x the model
    * evaluations (40 x 2 vs 8 x 1) and ~10x the cost, not the 6x a step count alone suggests.

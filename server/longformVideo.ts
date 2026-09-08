@@ -3250,6 +3250,7 @@ async function resolveLipsyncLane(
           torchCompile: ENV.longcatTorchCompile,
           sageAttention: ENV.longcatSageAttention,
           flashAttn3: ENV.longcatFlashAttn3,
+          useFp8: ENV.longcatFp8,
         });
       },
       poll: (id, ms) => longcat.pollVideo(id, ms ?? LONGCAT_LIPSYNC_TIMEOUT_MS),

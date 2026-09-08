@@ -98,6 +98,13 @@ export interface LongcatLipsyncParams {
    * wheel keeps FA2 and says so rather than failing.
    */
   flashAttn3?: boolean;
+  /**
+   * FP8 weights instead of INT8, converted from the same files at load — no extra download.
+   * The shipped INT8 is weight-only and dequantises to bf16 on every forward pass; fp8 uses
+   * Hopper's tensor cores directly. Load-time; the worker verifies each layer and falls back
+   * per layer, reporting `fp8_layers` on the render.
+   */
+  useFp8?: boolean;
   sageAttention?: boolean;
   /** Fixed seed for an A/B; omitted, the worker draws a new one per render. */
   seed?: number;
@@ -290,6 +297,7 @@ export class LongcatLipsyncAdapter {
         ...(params.flashAttn3 != null
           ? { flash_attn_3: params.flashAttn3 }
           : {}),
+        ...(params.useFp8 != null ? { use_fp8: params.useFp8 } : {}),
         ...(params.seed != null ? { seed: params.seed } : {}),
       },
       policy: { executionTimeout: LONGCAT_EXECUTION_TIMEOUT_MS },
