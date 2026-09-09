@@ -370,6 +370,65 @@ export const ENV = {
     ? Number(process.env.RUNPOD_LIPSYNC_FETA_WEIGHT)
     : 0,
   /**
+   * Transformer blocks the worker parks in CPU RAM between steps. The workflows inherited
+   * `20` from the upstream template, which targets a 24 GB card; this endpoint is pinned to
+   * one 96 GB card where a 14B model fits whole, so every swapped block is pure round-trip
+   * for nothing. `0` on a card with the headroom, higher only if the endpoint is ever moved
+   * to a smaller GPU. No effect on the picture either way — the same weights run.
+   */
+  runpodLipsyncBlocksToSwap: process.env.RUNPOD_LIPSYNC_BLOCKS_TO_SWAP
+    ? Number(process.env.RUNPOD_LIPSYNC_BLOCKS_TO_SWAP)
+    : 0,
+  /**
+   * Attention kernel. The workflows ship `sageattn` (8-bit attention, ~10% faster); one
+   * report on the wrapper's tracker (issue #1118) says the loss is visible to a trained eye,
+   * and `sdpa` is the unapproximated reference. Unset keeps the workflow's own choice.
+   */
+  runpodLipsyncAttention: process.env.RUNPOD_LIPSYNC_ATTENTION || undefined,
+  /**
+   * H.264 CRF the worker encodes the returned clip at (workflow 19, range 0-51, lower is
+   * better). Costs bytes, not GPU seconds — and it is the last thing that touches the face
+   * before `HOST_UPSCALE_SHARPEN` magnifies it 1.5x and sharpens twice, so whatever this
+   * throws away is what those passes amplify. Unset keeps the workflow's 19.
+   */
+  runpodLipsyncCrf: process.env.RUNPOD_LIPSYNC_CRF
+    ? Number(process.env.RUNPOD_LIPSYNC_CRF)
+    : undefined,
+  /**
+   * How hard the render is held to the HOST PHOTO: the multiplier on its CLIP-vision
+   * embedding (`WanVideoClipVisionEncode.strength_1`, node range 0-10, workflow default 1).
+   * Lower gives the model more freedom to move at the cost of identity-lock, which is the
+   * direction `scripts/measure-host-body.mts` keeps asking for — head travel reads 1-3% of
+   * face size against an accepted-reference band of 6-12%.
+   *
+   * Rides on BOTH modes: I2V encodes the photo, V2V the plate's first frame, and the plate
+   * IS the photo repeated. Expect a SMALLER effect on pinned, where the encoded plate latent
+   * is a second anchor holding the same frame — `runpodLipsyncLatentStrength` below is that
+   * one. Watch background morph (limit 1.0) as it comes down: the grip being loosened is
+   * also what keeps the room from re-hallucinating.
+   *
+   * Unset sends nothing, so the workflow default runs and an older worker image is unaffected.
+   */
+  runpodLipsyncClipStrength: process.env.RUNPOD_LIPSYNC_CLIP_STRENGTH
+    ? Number(process.env.RUNPOD_LIPSYNC_CLIP_STRENGTH)
+    : undefined,
+  /**
+   * PINNED-ONLY plate anchors (`WanVideoEncode`, a node no I2V workflow contains):
+   * `latent_strength` scales the encoded plate latent (workflow default 1),
+   * `noise_aug_strength` adds noise to it before encoding (default 0). Together they are the
+   * other half of the grip described above — reach for them only once
+   * `runpodLipsyncClipStrength` has been benched on the PHOTO path, where it acts alone and
+   * its real effect is visible without the plate confounding it.
+   *
+   * Both unset by default, same optional contract.
+   */
+  runpodLipsyncLatentStrength: process.env.RUNPOD_LIPSYNC_LATENT_STRENGTH
+    ? Number(process.env.RUNPOD_LIPSYNC_LATENT_STRENGTH)
+    : undefined,
+  runpodLipsyncNoiseAug: process.env.RUNPOD_LIPSYNC_NOISE_AUG
+    ? Number(process.env.RUNPOD_LIPSYNC_NOISE_AUG)
+    : undefined,
+  /**
    * torch.compile in the worker (inductor, transformer blocks only): identical frames,
    * 15-30% less GPU time per window after a one-off compile on each cold worker. On by
    * default in the workflow; `0` sends `torch_compile: false` so a compile failure on a new

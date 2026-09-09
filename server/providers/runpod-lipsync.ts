@@ -54,6 +54,25 @@ export interface RunpodLipsyncParams {
   scheduler?: string;
   motionFrame?: number;
   fetaWeight?: number;
+  /** Transformer blocks parked in CPU RAM per step; 0 on a card with the headroom. */
+  blocksToSwap?: number;
+  /** Attention kernel, e.g. `sdpa` or `sageattn`; undefined = the workflow's own. */
+  attentionMode?: string;
+  /** H.264 CRF for the returned clip (0-51, workflow 19). Bytes, not GPU seconds. */
+  crf?: number;
+  /**
+   * Multiplier on the host photo's CLIP-vision embedding (`strength_1`, 0-10, workflow
+   * default 1) — how hard the render is held to that image. Both modes: I2V encodes the
+   * photo, V2V the plate's first frame. Undefined = the workflow's own.
+   */
+  clipStrength?: number;
+  /**
+   * Plate-latent anchors, PINNED mode only (`WanVideoEncode`, absent from every I2V
+   * workflow, so the worker's branch simply never fires on a photo render). The second grip
+   * holding a pinned render to its frame, alongside `clipStrength`.
+   */
+  latentStrength?: number;
+  noiseAugStrength?: number;
   /** `false` unlinks the worker's torch.compile node for this render; undefined = the workflow default (on). */
   torchCompile?: boolean;
   /** Fraction (0-1) of the active steps that keep audio guidance; undefined = every step. */
@@ -227,6 +246,22 @@ export class RunpodLipsyncAdapter {
           : {}),
         ...(params.fetaWeight != null
           ? { feta_weight: params.fetaWeight }
+          : {}),
+        ...(params.blocksToSwap != null
+          ? { blocks_to_swap: params.blocksToSwap }
+          : {}),
+        ...(params.attentionMode
+          ? { attention_mode: params.attentionMode }
+          : {}),
+        ...(params.crf != null ? { crf: params.crf } : {}),
+        ...(params.clipStrength != null
+          ? { clip_strength: params.clipStrength }
+          : {}),
+        ...(params.latentStrength != null
+          ? { latent_strength: params.latentStrength }
+          : {}),
+        ...(params.noiseAugStrength != null
+          ? { noise_aug_strength: params.noiseAugStrength }
           : {}),
         ...(params.torchCompile === false ? { torch_compile: false } : {}),
         ...(params.audioCfgSteps != null

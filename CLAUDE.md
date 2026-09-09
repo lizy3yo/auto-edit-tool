@@ -94,6 +94,9 @@ Gemini, OpenAI, R2, RunPod. Missing ones fail loudly at the first stage that nee
 | `RUNPOD_LIPSYNC_TORCH_COMPILE`  | off (`1` = on)    | `RUNPOD_LIPSYNC_BATCH`                     | 2 beats per call (`1` = off) |
 | `RUNPOD_LIPSYNC_BATCH_MAX_SEC`  | 14 s per call     | `RUNPOD_LIPSYNC_AUDIO_CFG_STEPS`           | 0.5 (first half guided)      |
 | `RUNPOD_LIPSYNC_QUANTIZATION`   | fp8_e4m3fn        | `RUNPOD_LIPSYNC_V2V_STEPS` / `_START_STEP` | 12 / 3 (9 active)            |
+| `RUNPOD_LIPSYNC_CLIP_STRENGTH`  | unset (1.0)       | `RUNPOD_LIPSYNC_LATENT_STRENGTH`           | unset (1.0, pinned only)     |
+| `RUNPOD_LIPSYNC_NOISE_AUG`      | unset (0, pinned) | `RUNPOD_LIPSYNC_BLOCKS_TO_SWAP`            | 0 (workflows ship 20)        |
+| `RUNPOD_LIPSYNC_ATTENTION`      | unset (sageattn)  | `RUNPOD_LIPSYNC_CRF`                       | unset (19)                   |
 
 `RUNPOD_LIPSYNC_EXECUTION_TIMEOUT_MS` is sent with every submit as RunPod's `policy.executionTimeout`
 and overrides the endpoint's own setting (dashboard default 20 min). InfiniteTalk at 720p on the
@@ -261,8 +264,23 @@ Express · tRPC · Drizzle · MySQL.
   of face size against pinned's 1-2%), so raising it looked like the obvious fix for a head
   that moves in TIME with the emphasis but only 1% of a face width. It did not raise the head
   and the render came back visibly softer. Whatever holds the pinned body still is not this
-  dial being too low. `scripts/measure-host-body.mts` gates the result with a
-  LIVELINESS line: head travel 6-12% of face size with shoulders at 0.1+ of the head's motion
+  dial being too low. The candidates that ARE holding it are the CONDITIONING anchors, all
+  three plumbed 2026-09-09 and all three unset by default (workflow values run):
+  `RUNPOD_LIPSYNC_CLIP_STRENGTH` scales the host photo's CLIP-vision embedding on BOTH modes
+  (I2V encodes the photo, V2V the plate's first frame — the plate IS the photo repeated), and
+  `RUNPOD_LIPSYNC_LATENT_STRENGTH` / `RUNPOD_LIPSYNC_NOISE_AUG` scale and noise the encoded
+  plate latent on PINNED only. That split is the point: pinned holds the render with TWO grips
+  and photo with one, so the clip dial is benched on the photo path FIRST, where its real
+  effect is visible without the plate confounding it. Background morph (limit 1.0) is what
+  degrades first as any of them come down — the grip being loosened is also what keeps the room
+  from re-hallucinating. What does NOT exist, checked against WanVideoWrapper HEAD rather than
+  a tutorial: pose-stabilization and camera-control toggles. `WanVideoImageToVideoMultiTalk`
+  takes `vae, width, height, frame_window_size, motion_frame, force_offload, colormatch` plus
+  optional `start_image, tiled_vae, clip_embeds, mode, output_path` and nothing else, and the
+  worker clones the wrapper unpinned, so we already run the newest node — there is no version
+  to upgrade to. The nearest real thing upstream is UniAnimate pose driving, which needs
+  another model and a driving pose video: a project, not a dial.
+  `scripts/measure-host-body.mts` gates the result with a LIVELINESS line: head travel 6-12% of face size with shoulders at 0.1+ of the head's motion
   is the target band, measured off FOUR accepted reference-engine clips of two hosts (9, 9, 9
   and 12% travel; shoulders 0.12-0.24) rather than guessed. Those clips also settled what the
   balance should be: their MOUTHS move less than ours (articulation 2.6-2.9 against 4.5-7.0)

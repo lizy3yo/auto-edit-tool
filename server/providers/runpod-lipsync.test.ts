@@ -211,6 +211,75 @@ describe("RunpodLipsyncAdapter.submitLipsync", () => {
     });
   });
 
+  it("sends the conditioning anchors: the clip dial in either mode, the plate dials only with a plate", async () => {
+    const calls = installFetchMock({});
+    const adapter = new RunpodLipsyncAdapter("ep-1", "key-1", "fast");
+    // The photo's clip embed exists in both workflows (I2V encodes the photo, V2V the
+    // plate's first frame), so this dial is not tied to the plate.
+    await adapter.submitLipsync({ ...params, clipStrength: 0.8 });
+    expect(calls[0].body.input).toMatchObject({
+      clip_strength: 0.8,
+      input_type: "image",
+    });
+
+    // The plate latent is the pinned path's second anchor, and `WanVideoEncode` exists in no
+    // I2V workflow — the caller withholds these on a photo render, and the worker's branch
+    // would never fire anyway.
+    await adapter.submitLipsync({
+      ...params,
+      videoUrl: "https://cdn.example/plate.mp4",
+      clipStrength: 0.8,
+      latentStrength: 0.9,
+      noiseAugStrength: 0.02,
+    });
+    expect(calls[1].body.input).toMatchObject({
+      clip_strength: 0.8,
+      latent_strength: 0.9,
+      noise_aug_strength: 0.02,
+      input_type: "video",
+    });
+
+    // Unset ⇒ absent: the workflow's own 1.0/1.0/0 rule, and a worker image predating these
+    // overrides must not receive keys it would ignore silently or misread.
+    await adapter.submitLipsync(params);
+    for (const k of ["clip_strength", "latent_strength", "noise_aug_strength"])
+      expect(calls[2].body.input).not.toHaveProperty(k);
+
+    // Zero is a legal value on both — `!= null`, not truthiness. Fully unanchored, but the
+    // dial has to be able to say it.
+    await adapter.submitLipsync({
+      ...params,
+      clipStrength: 0,
+      noiseAugStrength: 0,
+    });
+    expect(calls[3].body.input).toMatchObject({
+      clip_strength: 0,
+      noise_aug_strength: 0,
+    });
+  });
+
+  it("sends the cost/output dials — block swap, attention kernel, output CRF", async () => {
+    const calls = installFetchMock({});
+    const adapter = new RunpodLipsyncAdapter("ep-1", "key-1", "fast");
+    await adapter.submitLipsync({
+      ...params,
+      blocksToSwap: 0,
+      attentionMode: "sdpa",
+      crf: 12,
+    });
+    // 0 is the point of the block-swap dial, not a missing value: the workflows inherit 20
+    // from a 24 GB-card template and this endpoint has 96 GB.
+    expect(calls[0].body.input).toMatchObject({
+      blocks_to_swap: 0,
+      attention_mode: "sdpa",
+      crf: 12,
+    });
+
+    await adapter.submitLipsync({ ...params, blocksToSwap: undefined });
+    for (const k of ["blocks_to_swap", "attention_mode", "crf"])
+      expect(calls[1].body.input).not.toHaveProperty(k);
+  });
+
   it("passes quality=full through so the 40-step workflow is selectable per render", async () => {
     const calls = installFetchMock({});
     await new RunpodLipsyncAdapter("ep-1", "key-1", "full").submitLipsync(

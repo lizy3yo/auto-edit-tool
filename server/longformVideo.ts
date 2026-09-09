@@ -3162,6 +3162,11 @@ async function resolveLipsyncLane(
             ? {
                 samplerSteps: ENV.runpodLipsyncV2vSteps,
                 samplerStartStep: ENV.runpodLipsyncV2vStartStep,
+                // The plate latent is the pinned path's SECOND anchor, alongside the clip
+                // embed below — which is why lowering that one alone moves a pinned render
+                // less than a photo one. Absent from the I2V workflow, hence pinned-only.
+                latentStrength: ENV.runpodLipsyncLatentStrength,
+                noiseAugStrength: ENV.runpodLipsyncNoiseAug,
               }
             : {}),
           // Motion dials ride on every RunPod render, either mode — each is undefined unless
@@ -3173,6 +3178,10 @@ async function resolveLipsyncLane(
           scheduler: ENV.runpodLipsyncScheduler,
           motionFrame: ENV.runpodLipsyncMotionFrame,
           fetaWeight: ENV.runpodLipsyncFetaWeight,
+          clipStrength: ENV.runpodLipsyncClipStrength,
+          blocksToSwap: ENV.runpodLipsyncBlocksToSwap,
+          attentionMode: ENV.runpodLipsyncAttention,
+          crf: ENV.runpodLipsyncCrf,
           torchCompile: ENV.runpodLipsyncTorchCompile,
           audioCfgSteps: ENV.runpodLipsyncAudioCfgSteps,
           quantization: ENV.runpodLipsyncQuantization,
