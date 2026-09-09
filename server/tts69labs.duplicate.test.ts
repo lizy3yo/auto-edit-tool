@@ -111,6 +111,62 @@ describe("69Labs TTS duplicate (409) handling", () => {
     expect((err as Error).message).toContain("DUPLICATE_TTS_IN_PROGRESS");
   });
 
+  // Waiting a duplicate out is right for ONE orphan. It is wrong for an account full of them:
+  // the wait is per submit, so a retry across 200 unvoiced scenes spends minutes each to learn
+  // the identical fact — hours of it, with nothing on screen but "Failed".
+  it("fails the next scene instantly once the account is known jammed", async () => {
+    const { createTTSTask69Labs, DuplicateTTSError } =
+      await import("./tts69labs");
+    const fetchMock = vi.fn(async () =>
+      duplicate('{"error":"DUPLICATE_TTS_IN_PROGRESS"}')
+    );
+    globalThis.fetch = fetchMock as any;
+
+    // Scene one spends the whole budget discovering it.
+    await createTTSTask69Labs("vk_jam_key", params).catch(e => e);
+    const spent = fetchMock.mock.calls.length;
+    expect(spent).toBeGreaterThan(1);
+
+    // Scene two asks nothing and is told the same thing.
+    const err = await createTTSTask69Labs("vk_jam_key", {
+      ...params,
+      text: "A different scene entirely.",
+    }).catch(e => e as Error);
+    expect(err).toBeInstanceOf(DuplicateTTSError);
+    expect((err as Error).message).toContain("DUPLICATE_TTS_IN_PROGRESS");
+    expect(fetchMock).toHaveBeenCalledTimes(spent); // no further API calls at all
+  });
+
+  // The note must not outlive the condition it describes — a jam that drains on 69Labs' side
+  // has to be noticed by the next scene, not short-circuited for the rest of the run.
+  it("lets the key through again once the note lapses", async () => {
+    const { createTTSTask69Labs } = await import("./tts69labs");
+    const responses = [
+      duplicate('{"error":"DUPLICATE_TTS_IN_PROGRESS"}'),
+      duplicate('{"error":"DUPLICATE_TTS_IN_PROGRESS"}'),
+      duplicate('{"error":"DUPLICATE_TTS_IN_PROGRESS"}'),
+      duplicate('{"error":"DUPLICATE_TTS_IN_PROGRESS"}'),
+      duplicate('{"error":"DUPLICATE_TTS_IN_PROGRESS"}'),
+      okTask("job-once-drained"),
+    ];
+    globalThis.fetch = vi.fn(async () => responses.shift()!) as any;
+
+    await createTTSTask69Labs("vk_drain_key", params).catch(e => e);
+
+    // Only Date is faked — `sleep` inside the submit loop must keep real timers, or the retry
+    // path never resolves. Forward only: winding the clock BACK starves the key's token bucket,
+    // which sizes its wait from the elapsed time since the last refill.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 5 * 60 * 1000); // well past the note's TTL
+    try {
+      await expect(createTTSTask69Labs("vk_drain_key", params)).resolves.toBe(
+        "job-once-drained"
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   // A named job is a recovery, not a failure: it is almost always one of ours, and the account
   // has already been billed for it.
   it("surfaces the blocking task id so the caller can adopt it", async () => {

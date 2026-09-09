@@ -11268,6 +11268,11 @@ async function renderSceneClipInPlace(
   const persist = async () => {
     schedulePersist(jobId, { storyboard: scenes });
   };
+  // Persist the CLAIM, not just the result. The status above was set in memory and only reached
+  // the row when the scene finished, which could be an hour later — so for that whole hour the
+  // card showed "Failed" and the error from the previous attempt, indistinguishable from a scene
+  // nobody was working on. An operator watching a long retry has nothing else to go on.
+  persist();
   await ensureSceneNarration(jobId, scene, params, ttsType, ttsKey, persist);
   // Re-voicing here yields the raw narration length; hold it to the floor like the main pipeline
   // so a regenerated/retried short scene freezes to SCENE_MIN_HOLD_SEC instead of cutting short.
@@ -13380,6 +13385,12 @@ async function retryFailedScenesLocked(jobId: number): Promise<void> {
       // for five minutes and fails "TTS timed out", which is how a pacing problem disguised
       // itself as a provider outage.
       await mapPool(unvoiced, TTS_REVOICE_CONCURRENCY, async scene => {
+        // Claimed, and said so on the row before the work starts. Voicing a scene can sit on a
+        // provider queue for minutes; leaving the old "failed" status and its error message up
+        // for that whole time is what makes a working retry look like a dead one.
+        scene.sceneStatus = "processing";
+        scene.error = undefined;
+        schedulePersist(jobId, { storyboard: scenes });
         try {
           await ensureSceneNarration(
             jobId,

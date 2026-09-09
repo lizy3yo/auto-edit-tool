@@ -172,6 +172,23 @@ const TTS_5XX_BASE_DELAY_MS =
 const BAD_VOICE_TTL_MS = 5 * 60 * 1000;
 const _badVoices = new Map<string, { until: number; message: string }>();
 
+// Keys whose account is DUPLICATE-JAMMED: a submit there has already spent its full 409 budget
+// waiting for a blocking job that never finished. The same reasoning as `_badVoices` one line up,
+// applied to a condition that is about the ACCOUNT rather than one request — so the second scene
+// to hit it must not rediscover it the slow way.
+//
+// Waiting a duplicate out is right when ONE orphan blocks ONE scene: the job finishes, the slot
+// frees, the resubmit lands. It is wrong when the account is full of them, because the wait is
+// per submit — five 45s cooldowns, twice over in `generateSceneVoiceover` — so a retry across 200
+// unvoiced scenes spends roughly eight minutes each to learn the identical fact, hours of it, with
+// nothing on screen but "Failed". Short-circuiting turns that into one legible failure in seconds.
+//
+// Deliberately short-lived and self-clearing: the TTL is well under how long a stuck job survives,
+// and the first accepted submit on the key drops it, so a jam that clears on 69Labs' side is
+// noticed by the next scene rather than waited out.
+const TTS_JAM_TTL_MS = Number(process.env.SIXTYNINE_TTS_JAM_TTL_MS) || 60_000;
+const _duplicateJams = new Map<string, { until: number; message: string }>();
+
 // Standard lane has a known exact message; the clone lane's wording is unverified, so match
 // any 400/404 "not found" there (a clone-lane request only ever references the one clone ID).
 const isVoiceNotFound = (
@@ -314,6 +331,11 @@ export async function createTTSTask69Labs(
   const bad = _badVoices.get(badKey);
   if (bad && Date.now() < bad.until) throw new VoiceNotFoundError(bad.message);
   if (bad) _badVoices.delete(badKey);
+  // Likewise for an account already known to be duplicate-jammed — see `_duplicateJams`. No
+  // task id to hand back: the whole point is that we never got one.
+  const jam = _duplicateJams.get(apiKey);
+  if (jam && Date.now() < jam.until) throw new DuplicateTTSError(jam.message);
+  if (jam) _duplicateJams.delete(apiKey);
 
   let useCloneLane = _cloneRoutes.has(badKey);
   let body: Record<string, any>;
@@ -444,11 +466,18 @@ export async function createTTSTask69Labs(
         );
         continue; // `acquireTTSToken` at the top of the loop waits out the cooldown
       }
-      throw new DuplicateTTSError(
+      const jammed =
         `69Labs TTS job already in progress (DUPLICATE_TTS_IN_PROGRESS) after ${attempt} ` +
-          `attempts — a matching job is still running on the account and did not finish. ` +
-          `Provider said: ${summarizeHttpBody(errText)}`
-      );
+        `attempts — a matching job is still running on this 69Labs account and did not ` +
+        `finish. Check the account's TTS queue; nothing here can clear it. ` +
+        `Provider said: ${summarizeHttpBody(errText)}`;
+      // The account, not this request: every other scene would spend the same minutes to reach
+      // the same answer, so tell them now.
+      _duplicateJams.set(apiKey, {
+        until: Date.now() + TTS_JAM_TTL_MS,
+        message: jammed,
+      });
+      throw new DuplicateTTSError(jammed);
     }
     // Deliberately AFTER the 409 branch: this heuristic matches the bare word "limit", so a
     // duplicate body that mentions a concurrency limit was being reported as an empty wallet —
@@ -467,6 +496,9 @@ export async function createTTSTask69Labs(
       `69Labs TTS task creation failed (${response.status}): ${summarizeHttpBody(errText)}`
     );
   }
+
+  // Accepted — whatever was blocking this key has cleared, so stop failing other scenes fast.
+  _duplicateJams.delete(apiKey);
 
   const data = await response.json();
   const taskId = data.id || data.jobId;

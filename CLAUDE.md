@@ -86,6 +86,7 @@ Gemini, OpenAI, R2, RunPod. Missing ones fail loudly at the first stage that nee
 | `SIXTYNINE_VIDEO_SUBMIT_RATE`   | 5/min (API cap)   | `IMAGE_PRIMARY_TIMEOUT_MS`                 | 480s                         |
 | `SIXTYNINE_TTS_SUBMIT_RATE`     | 20/min            | `SIXTYNINE_TTS_SUBMIT_BURST`               | 3                            |
 | `SIXTYNINE_TTS_409_COOLDOWN_MS` | 45s               | `SIXTYNINE_TTS_5XX_BASE_DELAY_MS`          | 5s                           |
+| `SIXTYNINE_TTS_JAM_TTL_MS`      | 60s               | —                                          | —                            |
 | `IMAGE_PRIMARY_RETRIES`         | 1                 | `IMAGE_RETRY_TIMEOUT_MS`                   | 240s                         |
 | `IMAGE_RETRY_TOTAL_BUDGET_MS`   | 600s              | `MYSQL_SORT_BUFFER_SIZE`                   | 8 MB                         |
 | `AUTO_MIGRATE`                  | on (`0` skips)    | `ASSEMBLY_CACHE`                           | on (`0` skips)               |
@@ -591,6 +592,13 @@ Always 16:9. Fire-and-forget; progress persisted to the job row and polled by th
   A 409 is now recoverable rather than terminal — if the body names the blocking job
   (`parseDuplicateTaskId`) the caller ADOPTS that id and polls it, and if it names nothing the
   submit waits out a shared per-key cooldown sized to a TTS job's runtime, not a rate window.
+  That wait is right for ONE orphan and wrong for an account full of them — it is per submit, so
+  a retry across 200 unvoiced scenes spent minutes each to learn the identical fact — hence
+  `_duplicateJams`: once a submit spends its whole 409 budget, other submits on that key fail
+  instantly for `SIXTYNINE_TTS_JAM_TTL_MS` (60s), cleared by the first accepted submit. And a
+  pass now writes `sceneStatus: "processing"` to the row when it CLAIMS a scene, not when the
+  scene finishes, so a beat being re-voiced reads as "Working" instead of showing the previous
+  attempt's "Failed" badge for the whole wait.
   Two consequences worth knowing: a scene carrying `ttsTaskIds` will POLL rather than submit, so
   clearing that field by hand is what forces a genuinely fresh read; and the duplicate body's
   shape is still unverified, so `parseDuplicateTaskId` reads it defensively and rejects

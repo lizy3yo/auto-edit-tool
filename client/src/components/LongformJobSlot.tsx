@@ -2307,9 +2307,17 @@ export default function LongformJobSlot({
           <div className="flex gap-2 overflow-x-auto pb-2">
             {displayScenes.map(scene => {
               const isSceneRendering = sceneEdits.active.includes(scene.index);
+              // A pass claims a scene by writing sceneStatus "processing" to the row before it
+              // starts the work (`renderSceneClipInPlace`, and the retry pass's re-voice
+              // fan-out). Folded in with the edit queue's own claim because the operator's
+              // question is the same either way — is anything happening to this scene — and
+              // until now the answer for a scene a retry was actively re-voicing was the
+              // "Failed" badge plus the error from its previous attempt.
+              const isScenePassWorking = scene.sceneStatus === "processing";
               const isSceneQueued =
                 queuedScenes.includes(scene.index) ||
                 isSceneRendering ||
+                isScenePassWorking ||
                 sceneEdits.queued.includes(scene.index);
               const isTileSelected = selectedScenes.includes(scene.index);
               return (
@@ -2410,9 +2418,12 @@ export default function LongformJobSlot({
                 const isSceneRendering = sceneEdits.active.includes(
                   scene.index
                 );
+                // See the tile above — a pass's own claim counts as work in progress here too.
+                const isScenePassWorking = scene.sceneStatus === "processing";
                 const isSceneQueued =
                   queuedScenes.includes(scene.index) ||
                   isSceneRendering ||
+                  isScenePassWorking ||
                   sceneEdits.queued.includes(scene.index);
                 const isSelected = selectedScenes.includes(scene.index);
                 return (
@@ -2525,7 +2536,11 @@ export default function LongformJobSlot({
                               className="text-[10px] py-0 gap-1 text-info border-info/40"
                             >
                               <Loader2 className="h-3 w-3 animate-spin" />
-                              {isSceneRendering ? "Rendering" : "Queued"}
+                              {isSceneRendering
+                                ? "Rendering"
+                                : isScenePassWorking
+                                  ? "Working"
+                                  : "Queued"}
                             </Badge>
                           )}
                           {regeneratedScenes.includes(scene.index) &&
