@@ -3018,6 +3018,59 @@ export async function resolveTTSProvider(
 }
 
 /**
+ * The TTS vendor this job voices on, and its credentials.
+ *
+ * The choice is the OPERATOR'S, made before anything is voiced and pinned to
+ * `params.ttsVendor`; this only reads it back. Nothing here falls back at runtime — a vendor
+ * swapped mid-render would return a film in a voice nobody asked for, and could leave a master
+ * stitched from two of them. A pinned vendor that is no longer configured therefore THROWS
+ * rather than quietly reverting to the other one.
+ *
+ * The MiniMax Group ID rides after a "|" in the key string: `createUnifiedTTSTask` routes on a
+ * providerType and a single credential, and widening that signature for one vendor's second
+ * field would touch every caller.
+ */
+export async function resolveTTSVendor(
+  params: LongformInputParams
+): Promise<{ providerType: string; apiKey: string }> {
+  if (params.ttsVendor === "minimax") {
+    const row = await getProviderByType("minimax");
+    if (!row?.apiKeyEncrypted) {
+      throw new Error(
+        "This render is set to voice on MiniMax, but no MiniMax API key is configured — " +
+          "add one in Admin → Provider Keys."
+      );
+    }
+    if (!params.minimaxVoiceId) {
+      throw new Error(
+        "This render is set to voice on MiniMax, but its channel has no MiniMax voice id — " +
+          "set one in Admin → Channels."
+      );
+    }
+    const groupId =
+      (row.customConfig as { groupId?: string } | null)?.groupId ?? "";
+    const key = await getProviderApiKey(row);
+    return {
+      providerType: "minimax",
+      apiKey: groupId ? `${key}|${groupId}` : key,
+    };
+  }
+  return resolveTTSProvider(null);
+}
+
+/**
+ * The voice id for whichever vendor is voicing this film. The two ids live in different voice
+ * SPACES — an ElevenLabs id or a 69Labs account clone resolves on neither the other vendor nor
+ * MiniMax — so every synthesis call has to pick the one matching the vendor, or it fails with a
+ * "voice not found" that looks like a config error rather than a routing bug.
+ */
+export function voiceIdForVendor(params: LongformInputParams): string {
+  return params.ttsVendor === "minimax"
+    ? (params.minimaxVoiceId ?? "")
+    : params.voiceId;
+}
+
+/**
  * Return the providerType + apiKey to use for clip (video) generation.
  * Prefer a configured 69Labs provider — it owns video clips for longform
  * regardless of which provider is active. Fall back to the active provider
@@ -8390,7 +8443,9 @@ export async function buildSceneNarration(
         providerType,
         apiKey,
         seg,
-        params.voiceId,
+        // The vendor's OWN voice space — a 69Labs clone id does not resolve on MiniMax and
+        // vice versa, so this must follow the pinned vendor, not the channel's default field.
+        voiceIdForVendor(params),
         params.ttsModel,
         speed,
         params.ttsVolume,
@@ -8492,7 +8547,7 @@ async function voiceMasterNarration(
       providerType,
       apiKey,
       spokenScript,
-      params.voiceId,
+      voiceIdForVendor(params),
       params.ttsModel,
       speed,
       params.ttsVolume,
@@ -8517,7 +8572,7 @@ async function voiceMasterNarration(
           providerType,
           apiKey,
           seg,
-          params.voiceId,
+          voiceIdForVendor(params),
           params.ttsModel,
           speed,
           params.ttsVolume,
@@ -10036,11 +10091,11 @@ export async function runLongformPipeline(jobId: number): Promise<void> {
     // pipeline reaches the seam that would have skipped it anyway. Every other lane (APIMART
     // b-roll, gpt-image-2 stills, HeyGen/RunPod host) resolves independently.
     const tts = params.manualNarrationUrl
-      ? await resolveTTSProvider(provider).catch(() => ({
+      ? await resolveTTSVendor(params).catch(() => ({
           providerType: "",
           apiKey: "",
         }))
-      : await resolveTTSProvider(provider);
+      : await resolveTTSVendor(params);
     const { providerType: ttsType, apiKey: ttsKey } = tts;
 
     // Single unified path: verbatim continuous narration + AI host/b-roll storyboard.
@@ -11340,8 +11395,11 @@ async function runSceneEditSession(
           videoType as ProviderType,
           videoKey
         );
+        // The PINNED vendor, not the default one: a film voiced on MiniMax whose scene is
+        // re-voiced on 69Labs gets a second voice spliced into it — the same failure the
+        // manual-narration ban exists to prevent, arrived at from the other direction.
         const { providerType: ttsType, apiKey: ttsKey } =
-          await resolveTTSProvider(provider);
+          await resolveTTSVendor(params);
         const instruction =
           (await getAppSetting(LONGFORM_INSTRUCTION_KEY)) ??
           DEFAULT_LONGFORM_INSTRUCTION;
@@ -12972,8 +13030,9 @@ async function retryFailedScenesLocked(jobId: number): Promise<void> {
       videoType as ProviderType,
       videoKey
     );
+    // The PINNED vendor — see the note in regenerateScene.
     const { providerType: ttsType, apiKey: ttsKey } =
-      await resolveTTSProvider(provider);
+      await resolveTTSVendor(params);
     const instruction =
       (await getAppSetting(LONGFORM_INSTRUCTION_KEY)) ??
       DEFAULT_LONGFORM_INSTRUCTION;

@@ -35,6 +35,8 @@ import {
   getAllProviderConfigs,
   upsertProviderConfig,
   updateProviderConnectionStatus,
+  getProviderByType,
+  saveMinimaxProvider,
   setActiveProvider,
   deleteProviderConfig,
   getChannelConfig,
@@ -117,6 +119,7 @@ import {
   wpsForVoice,
 } from "./longformVideo";
 import { verifyNarrationRead } from "./narrationIngest";
+import { testMinimaxConnection } from "./ttsMinimax";
 import { planDelivery, scriptParagraphs } from "./delivery";
 import { extractMonoAudio, probeUrlDurationSec } from "./videoAssembly";
 import { isTrustedUrl } from "./download";
@@ -315,6 +318,96 @@ const providerRouter = router({
       return { success: true };
     }),
 
+  /**
+   * Whether a render can be offered the MiniMax option, and why not when it cannot.
+   *
+   * Two independent halves have to be in place — an account-wide API key, and a voice for THIS
+   * channel — and they are configured on two different Admin screens by possibly two different
+   * people. Reporting one boolean would send an operator to the wrong screen, so each is
+   * answered separately.
+   */
+  minimaxStatus: approvedProcedure
+    .input(z.object({ channelKey: z.string().optional() }))
+    .query(async ({ input }) => {
+      const row = await getProviderByType("minimax");
+      const config = input.channelKey
+        ? await getChannelConfig(input.channelKey)
+        : null;
+      return {
+        keySet: !!row?.apiKeyEncrypted,
+        groupIdSet: !!(row?.customConfig as { groupId?: string } | null)?.groupId,
+        connectionStatus: row?.connectionStatus ?? "untested",
+        // Only meaningful with a channelKey; false without one.
+        voiceSet: !!config?.minimaxVoiceId,
+        voiceName: config?.minimaxVoiceName ?? null,
+      };
+    }),
+
+  /**
+   * Save the MiniMax credentials. The key is AES-encrypted into `provider_configs` exactly like
+   * the 69Labs one (`server/encryption.ts`); the Group ID is not a secret and rides in the
+   * row's existing `customConfig` JSON rather than earning a column.
+   *
+   * Never marked active. "Active" selects the ONE provider a render uses for video and images,
+   * and MiniMax does neither — it is reached only when a job is explicitly pinned to it.
+   */
+  saveMinimax: adminProcedure
+    .input(
+      z.object({
+        apiKey: z.string().min(1).optional(),
+        groupId: z.string().max(128).optional(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      await saveMinimaxProvider({
+        // Encrypted here, matching `providers.save` — the db layer stores ciphertext and never
+        // sees a plaintext key.
+        apiKeyEncrypted: input.apiKey ? encrypt(input.apiKey) : undefined,
+        apiKeyLast4: input.apiKey?.slice(-4),
+        groupId: input.groupId,
+      });
+      return { success: true };
+    }),
+
+  /**
+   * Liveness probe for the Admin button. MiniMax has no free list/quota endpoint, so this is one
+   * very short synthesis — which also proves the key can actually SYNTHESIZE, not merely
+   * authenticate. Needs a voice id, so it borrows the named channel's.
+   */
+  testMinimax: adminProcedure
+    .input(z.object({ channelKey: z.string().min(1) }))
+    .mutation(async ({ input }) => {
+      const row = await getProviderByType("minimax");
+      if (!row?.apiKeyEncrypted) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "No MiniMax API key saved yet.",
+        });
+      }
+      const config = await getChannelConfig(input.channelKey);
+      if (!config?.minimaxVoiceId) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            "That channel has no MiniMax voice id — set one in Admin → Channels, then test.",
+        });
+      }
+      const result = await testMinimaxConnection(
+        {
+          apiKey: await getProviderApiKey(row),
+          groupId:
+            (row.customConfig as { groupId?: string } | null)?.groupId ||
+            undefined,
+        },
+        config.minimaxVoiceId
+      );
+      await updateProviderConnectionStatus(
+        row.id,
+        result.success ? "connected" : "disconnected"
+      );
+      return result;
+    }),
+
   testConnection: adminProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
@@ -419,6 +512,10 @@ const channelConfigRouter = router({
         hostLocation: z.string().nullish(),
         voiceId: z.string().optional(),
         voiceName: z.string().optional(),
+        // The channel's MiniMax voice — a DIFFERENT voice space to `voiceId`, used only when a
+        // render is set to voice on MiniMax. Blank ⇒ no MiniMax option for this channel.
+        minimaxVoiceId: z.string().optional(),
+        minimaxVoiceName: z.string().optional(),
         ttsModel: z.string().optional(),
         ttsSpeed: ttsSpeedInput,
         ttsVolume: ttsVolumeInput,
@@ -470,6 +567,10 @@ const channelConfigRouter = router({
         hostLocation: z.string().optional(),
         voiceId: z.string().optional(),
         voiceName: z.string().optional(),
+        // The channel's MiniMax voice — a DIFFERENT voice space to `voiceId`, used only when a
+        // render is set to voice on MiniMax. Blank ⇒ no MiniMax option for this channel.
+        minimaxVoiceId: z.string().optional(),
+        minimaxVoiceName: z.string().optional(),
         ttsModel: z.string().optional(),
         ttsSpeed: ttsSpeedInput,
         ttsVolume: ttsVolumeInput,
@@ -553,6 +654,8 @@ const shuttleRouter = router({
       return {
         voiceId: config?.voiceId || null,
         voiceName: config?.voiceName || null,
+        minimaxVoiceId: config?.minimaxVoiceId || null,
+        minimaxVoiceName: config?.minimaxVoiceName || null,
         ttsModel: config?.ttsModel || "eleven_multilingual_v2",
         ttsSpeed: config?.ttsSpeed || null,
         ttsVolume: config?.ttsVolume || null,
@@ -1466,6 +1569,11 @@ const longformVideoRouter = router({
          */
         manualNarrationUrl: z.string().url().max(1024).optional(),
         /**
+         * Voice this film on MiniMax instead of 69Labs. An explicit operator choice, never an
+         * automatic failover — see `ttsVendor` on LongformInputParams.
+         */
+        ttsVendor: z.enum(["sixtynine_labs", "minimax"]).optional(),
+        /**
          * Delivery direction the operator was shown BEFORE recording (`planDelivery`), pinned so
          * the render reuses it instead of making its own. Only meaningful alongside
          * `manualNarrationUrl`: it is what makes the host's body cues agree with a read that
@@ -1761,6 +1869,10 @@ const longformVideoRouter = router({
         ttsModel: channelConfig.ttsModel || "eleven_multilingual_v2",
         // Present ⇒ the voicing stage returns this instead of calling the TTS provider.
         manualNarrationUrl: input.manualNarrationUrl,
+        // Which vendor voices this film, chosen on the form and pinned here so a resume, a
+        // retry and a per-scene re-voice all use the one that voiced the rest of it.
+        ttsVendor: input.ttsVendor,
+        minimaxVoiceId: channelConfig.minimaxVoiceId ?? undefined,
         // Only honoured alongside a supplied narration: pinning a plan the operator never saw
         // would just freeze one non-deterministic draw for no benefit, and skip the call the
         // pipeline makes with the same inputs anyway.

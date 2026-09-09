@@ -335,6 +335,11 @@ export default function LongformJobSlot({
   const [manualDeliveryPlan, setManualDeliveryPlan] = useState<
     DeliveryPlan | undefined
   >(undefined);
+  // Which vendor voices this film. Undefined ⇒ the channel's default (69Labs), i.e. exactly
+  // the pre-feature behaviour — an explicit operator choice, never a runtime failover.
+  const [ttsVendor, setTtsVendor] = useState<
+    "sixtynine_labs" | "minimax" | undefined
+  >(undefined);
   const [showConfirm, setShowConfirm] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showCost, setShowCost] = useState(false);
@@ -1491,6 +1496,7 @@ export default function LongformJobSlot({
       // Only meaningful with a supplied narration — the server drops it otherwise, since
       // pinning a plan the operator never saw would just freeze one arbitrary draw.
       deliveryPlan: manualNarrationUrl ? manualDeliveryPlan : undefined,
+      ttsVendor,
     });
   };
 
@@ -1601,6 +1607,8 @@ export default function LongformJobSlot({
                 onChange={setManualNarrationUrl}
                 deliveryPlan={manualDeliveryPlan}
                 onDeliveryPlanChange={setManualDeliveryPlan}
+                vendor={ttsVendor}
+                onVendorChange={setTtsVendor}
                 voice={channelDefaults}
                 disabled={generateMutation.isPending || isProcessing}
               />

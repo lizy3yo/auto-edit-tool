@@ -54,6 +54,7 @@ Read through the single `ENV` object in `server/_core/env.ts`, except `R2_*`, wh
 | Key               | Storage                                                                                      | Base URL                    |
 | ----------------- | -------------------------------------------------------------------------------------------- | --------------------------- |
 | 69Labs            | `provider_configs.apiKeyEncrypted` (`server/db.ts`)                                          | `https://69labs.vip/api/v1` |
+| MiniMax (TTS)     | `provider_configs` row + `customConfig.groupId` (`saveMinimaxProvider`)                      | `https://api.minimax.io/v1` |
 | APIMART ×5 + edit | `app_settings` → `apimart_key_slot_0..4`, `apimart_key_edit` (`server/longformVideo.ts:452`) | `https://api.apimart.ai`    |
 | HeyGen ×5         | `app_settings` → `heygen_key_slot_0..4` (`server/longformVideo.ts:461`)                      | `https://api.heygen.com/v3` |
 
@@ -449,6 +450,33 @@ Express · tRPC · Drizzle · MySQL.
   this existed have no snapshot and the controls stay hidden. UI:
   `client/src/components/SceneTimingEditor.tsx`
 - `server/narrationAlignment.ts`, `server/_core/voiceTranscription.ts` — whisperx
+- `server/ttsMinimax.ts` — the SECOND voice lane, and the third narration option beside the
+  channel voice and a supplied file. Deliberately NOT an automatic failover: the vendor is an
+  operator's choice made before anything is voiced and pinned to `inputParams.ttsVendor`, so a
+  film is never returned in a voice nobody asked for, and — the failure a `catch` would actually
+  cause — a master is never stitched from two vendors when only some delivery runs had landed.
+  The pin is read by `resolveTTSVendor`, and by regenerate/retry too: a MiniMax film whose scene
+  is re-voiced on 69Labs gets a second voice spliced in, which is the manual-narration ban
+  arrived at from the other direction. `voiceIdForVendor` picks the id, because the two live in
+  different voice SPACES — `channel_configs.voiceId` is an ElevenLabs id or a 69Labs account
+  clone and resolves on neither the other vendor nor MiniMax, so each channel carries its own
+  `minimaxVoiceId`. Three traps this lane does not share with 69Labs: it is SYNCHRONOUS (one
+  POST returns the audio, so `create` does the work and parks it for the `poll` microseconds
+  later, keeping the retry loop unforked); its errors arrive as **HTTP 200** with
+  `base_resp.status_code != 0`, so checking `resp.ok` reports an auth failure as success; and
+  44100 is its sample-rate CEILING while our masters are 48k — the shared completion tail only
+  resamples when a volume gain or dead-air cap actually runs, both no-ops on a clean file, so
+  every clip goes through `normalizeNarrationAudio` unconditionally. The key is stored the way
+  69Labs' is (AES row) but the row is NEVER active — active selects the one video/image
+  provider, and marking MiniMax active would deactivate 69Labs and break every other lane. Its
+  Group ID is not a secret and rides in `customConfig`; it also gets its own Test-connection
+  route, since the generic one builds a `ProviderAdapter` and wraps it in `FallbackImageAdapter`,
+  which is all about images. `pricing.ts` grew a per-provider `TTS_RATES` map for the same
+  reason the image lane has one: reporting MiniMax spend at 69Labs' rate is a wrong number that
+  looks right. UI: the MiniMax card in `AdminPage.tsx`, the voice field in
+  `ChannelConfigPanel.tsx`, and the three-way chooser in `LongformNarrationUpload.tsx` — which
+  names WHICH half is missing (no key ⇒ Provider Keys; no voice ⇒ Channels) rather than only
+  greying out, because the two are configured on different screens
 - `server/narrationUpload.ts` + `server/narrationIngest.ts` — the MANUAL-VO hatch, for a TTS
   vendor that is down. 69Labs is the only voiceover lane (`resolveTTSProvider` throws without
   it) while every other lane — APIMART b-roll, `gpt-image-2` stills, HeyGen/RunPod host,

@@ -92,11 +92,30 @@ describe("priceLine — LLM", () => {
 });
 
 describe("priceLine — metered non-LLM lanes", () => {
-  it("prices TTS per thousand characters", () => {
-    const r = priceLine(line({ lane: "tts", quantity: 10_000 }));
+  it("prices TTS per thousand characters, per vendor", () => {
+    const r = priceLine(
+      line({ lane: "tts", provider: "sixtynine_labs", quantity: 10_000 })
+    );
     expect(r.usd).toBeCloseTo(10 * RATES.ttsPer1kChars, 6);
     // Rate is a list-price assumption, so this must never claim to be exact.
     expect(r.exact).toBe(false);
+
+    // A second vendor must NOT be priced at the first one's rate — the whole reason this lane
+    // stopped being a single flat number when MiniMax was added.
+    const mm = priceLine(
+      line({ lane: "tts", provider: "minimax", quantity: 10_000 })
+    );
+    expect(mm.usd).toBeCloseTo(10 * RATES.minimaxTtsPer1kChars, 6);
+  });
+
+  it("reports an unmapped TTS vendor as unpriced rather than guessing", () => {
+    // Same rule the image and video lanes follow: a rate we cannot vouch for is a visible gap,
+    // never a neighbour's number wearing this vendor's name.
+    const r = priceLine(
+      line({ lane: "tts", provider: "whoever", quantity: 1000 })
+    );
+    expect(r.usd).toBe(0);
+    expect(r.rateKnown).toBe(false);
   });
 
   it("prices images per image, per vendor", () => {

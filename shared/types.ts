@@ -864,6 +864,25 @@ export interface LongformInputParams {
    * master (`restoreMissingNarrationSlices`).
    */
   manualNarrationUrl?: string;
+  /**
+   * Which TTS vendor voices this film. Chosen by the operator BEFORE anything is voiced and
+   * pinned here, never decided at runtime.
+   *
+   * Deliberately not an automatic failover. A `catch` that switched vendors mid-render would
+   * return a film in a different voice than the one asked for, and — worse — could stitch a
+   * master from two vendors if some delivery runs had already landed. Pinning also means a
+   * RESUME, a retry and a per-scene re-voice all use the vendor that voiced the rest of the
+   * film, which is the same guarantee `manualNarrationUrl` needs and for the same reason.
+   *
+   * Unset ⇒ 69Labs, i.e. exactly the pre-feature behaviour.
+   */
+  ttsVendor?: "sixtynine_labs" | "minimax";
+  /**
+   * The channel's MiniMax voice, snapshotted at submit like `voiceId`. Separate field because
+   * it is a different voice SPACE: `voiceId` is an ElevenLabs id or a 69Labs account clone and
+   * resolves against neither MiniMax nor the other. Only read when `ttsVendor` is "minimax".
+   */
+  minimaxVoiceId?: string;
   /** User-supplied video title (optional). Names the downloaded MP4; persisted so it survives refresh/cross-device. */
   title?: string;
   /**

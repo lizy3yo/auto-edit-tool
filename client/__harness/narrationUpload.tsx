@@ -24,7 +24,12 @@ import {
  *   http://localhost:5199/__harness/narration-upload.html
  */
 type Mode = "ok" | "mismatch" | "unverified" | "tooShort";
-const state = { mode: "ok" as Mode };
+const state = {
+  mode: "ok" as Mode,
+  // The three MiniMax availability states an operator can land in, each of which must name a
+  // DIFFERENT Admin screen.
+  mmStatus: { keySet: true, voiceSet: true, voiceName: "Roger (MiniMax)" },
+};
 
 const VERDICTS: Record<Mode, Record<string, unknown>> = {
   ok: {
@@ -87,6 +92,20 @@ window.fetch = (async (input: any, init?: RequestInit) => {
   if (!url.includes("/api/trpc/")) return realFetch(input, init);
 
   const path = url.split("/api/trpc/")[1].split("?")[0];
+  if (path.includes("minimaxStatus")) {
+    return new Response(
+      JSON.stringify([
+        {
+          result: {
+            data: {
+              json: { ...state.mmStatus, connectionStatus: "connected" },
+            },
+          },
+        },
+      ]),
+      { status: 200, headers: { "content-type": "application/json" } }
+    );
+  }
   if (path.includes("planDelivery")) {
     await new Promise(r => setTimeout(r, 700));
     return new Response(
@@ -158,6 +177,15 @@ function Harness() {
   const [value, setValue] = useState<string | undefined>(undefined);
   const [plan, setPlan] = useState<DeliveryPlan | undefined>(undefined);
   const [compact, setCompact] = useState(false);
+  const [vendor, setVendor] = useState<
+    "sixtynine_labs" | "minimax" | undefined
+  >(undefined);
+  const [mm, setMm] = useState<"both" | "noKey" | "noVoice">("both");
+  state.mmStatus = {
+    keySet: mm !== "noKey",
+    voiceSet: mm === "both",
+    voiceName: "Roger (MiniMax)",
+  };
   const [queryClient] = useState(() => new QueryClient());
   const [client] = useState(() =>
     trpc.createClient({
@@ -190,8 +218,22 @@ function Harness() {
               )}
             </div>
             <p className="text-muted-foreground">
-              Accepted URL: <code>{value ?? "(none)"}</code>
+              Accepted URL: <code>{value ?? "(none)"}</code> · vendor:{" "}
+              <code>{vendor ?? "(default)"}</code>
             </p>
+            <div className="flex flex-wrap gap-3">
+              {(["both", "noKey", "noVoice"] as const).map(m => (
+                <label key={m} className="flex items-center gap-1.5">
+                  <input
+                    type="radio"
+                    name="mm"
+                    checked={mm === m}
+                    onChange={() => setMm(m)}
+                  />
+                  minimax: {m}
+                </label>
+              ))}
+            </div>
             <div className="flex gap-2">
               <button
                 className="rounded border px-2 py-1"
@@ -212,11 +254,16 @@ function Harness() {
             key={compact ? "compact" : "full"}
             compact={compact}
             script={script}
-            channelKey="roger_the_pipe_guy"
+            // The MiniMax availability query is keyed on channelKey, so varying it per mode is
+            // what forces a refetch when the stubbed status changes. A real app changes the
+            // channel to change the answer; this mirrors that.
+            channelKey={`roger_the_pipe_guy_${mm}`}
             value={value}
             onChange={setValue}
             deliveryPlan={plan}
             onDeliveryPlanChange={setPlan}
+            vendor={vendor}
+            onVendorChange={setVendor}
             voice={{
               voiceName: "Roger (clone)",
               voiceId: "abc123",

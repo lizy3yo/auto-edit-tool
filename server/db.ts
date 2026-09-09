@@ -172,6 +172,57 @@ export async function getProviderByType(type: string) {
   return result.length > 0 ? result[0] : null;
 }
 
+/**
+ * Create or update the MiniMax provider row (the TTS fallback lane).
+ *
+ * Its own helper rather than a `upsertProviderConfig` call because two things about this row
+ * are unlike every other provider's:
+ *
+ *  - It is NEVER active. `isActive` selects the one provider a render uses for video and
+ *    images; MiniMax does neither, and marking it active would deactivate 69Labs and break
+ *    every lane at once.
+ *  - The API key and the Group ID are saved INDEPENDENTLY. The Admin form sends only what the
+ *    operator typed, so saving a Group ID must not blank a key that is already stored (and
+ *    which the form never sees in the first place — it is write-only).
+ */
+export async function saveMinimaxProvider(input: {
+  /** ALREADY ENCRYPTED — the router owns encryption for every other provider too. */
+  apiKeyEncrypted?: string;
+  apiKeyLast4?: string;
+  groupId?: string;
+}) {
+  const db = await getDb();
+  if (!db) return;
+  const existing = await getProviderByType("minimax");
+  const patch: Record<string, unknown> = {};
+  if (input.apiKeyEncrypted) {
+    patch.apiKeyEncrypted = input.apiKeyEncrypted;
+    patch.apiKeyLast4 = input.apiKeyLast4;
+    // A new key invalidates whatever the last probe concluded about the old one.
+    patch.connectionStatus = "untested";
+  }
+  if (input.groupId !== undefined) {
+    patch.customConfig = {
+      ...((existing?.customConfig as Record<string, unknown>) ?? {}),
+      groupId: input.groupId,
+    };
+  }
+  if (Object.keys(patch).length === 0) return;
+  if (existing) {
+    await db
+      .update(providerConfigs)
+      .set(patch)
+      .where(eq(providerConfigs.id, existing.id));
+    return;
+  }
+  await db.insert(providerConfigs).values({
+    providerType: "minimax" as any,
+    displayName: "MiniMax (TTS fallback)",
+    isActive: false,
+    ...patch,
+  } as any);
+}
+
 export async function deleteProviderConfig(id: number) {
   const db = await getDb();
   if (!db) return;

@@ -24,6 +24,10 @@ export const providerConfigs = mysqlTable("provider_configs", {
     "replicate",
     "kie_ai",
     "sixtynine_labs",
+    // TTS-only fallback lane. Never "active" — 69Labs owns video/image/TTS and this is
+    // reached only when a render is explicitly asked for it, so it has no ProviderAdapter
+    // and does not go through `createProviderAdapter`.
+    "minimax",
     "custom",
   ]).notNull(),
   displayName: varchar("displayName", { length: 128 }).notNull(),
@@ -175,6 +179,15 @@ export const channelConfigs = mysqlTable("channel_configs", {
   voiceName: varchar("voiceName", { length: 255 }),
   /** TTS model to use */
   ttsModel: varchar("ttsModel", { length: 64 }),
+  /**
+   * MiniMax voice id for this channel — the FALLBACK voice, used only when a render is
+   * explicitly asked to voice on MiniMax. Separate column because it is a different voice
+   * space: `voiceId` above is an ElevenLabs id or a 69Labs account clone, and neither
+   * resolves against MiniMax's API. Blank ⇒ this channel has no MiniMax fallback.
+   */
+  minimaxVoiceId: varchar("minimaxVoiceId", { length: 128 }),
+  /** MiniMax voice name, for display beside the id (mirrors `voiceName`). */
+  minimaxVoiceName: varchar("minimaxVoiceName", { length: 255 }),
   /** TTS speed multiplier (e.g., 0.90, 1.0, 1.10) */
   ttsSpeed: varchar("ttsSpeed", { length: 8 }),
   /** TTS volume multiplier applied as an ffmpeg gain (0.5–2, null/1.0 = neutral) */

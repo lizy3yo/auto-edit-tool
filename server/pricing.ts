@@ -87,6 +87,7 @@ export const RATES = {
    * A 10-minute film is ~9k characters, i.e. cents — this is never the line that hurts.
    */
   ttsPer1kChars: rate("COST_TTS_PER_1K_CHARS", 0.05),
+  minimaxTtsPer1kChars: rate("COST_MINIMAX_TTS_PER_1K_CHARS", 0.03),
 
   /**
    * RunPod WhisperX serverless, USD per GPU-second, billed on wall time of the run.
@@ -212,6 +213,12 @@ export interface PricedLine extends UsageLine {
 }
 
 /** Per-image rate by vendor. No default — an unlisted vendor is reported as unpriced. */
+/** USD per 1,000 characters accepted, by TTS provider. */
+const TTS_RATES: Record<string, number> = {
+  sixtynine_labs: RATES.ttsPer1kChars,
+  minimax: RATES.minimaxTtsPer1kChars,
+};
+
 const IMAGE_RATES: Record<string, number> = {
   apimart: RATES.apimartImage,
   openai: RATES.openaiImage,
@@ -266,8 +273,15 @@ export function priceLine(line: UsageLine): PricedLine {
       return priced(usd, { exact: true });
     }
 
-    case "tts":
-      return priced((line.quantity / 1000) * RATES.ttsPer1kChars);
+    case "tts": {
+      // Per PROVIDER, not one flat rate: reporting MiniMax spend at 69Labs' number is exactly
+      // the "wrong number that looks right" this file refuses to ship elsewhere. An unmapped
+      // provider reports UNPRICED rather than borrowing a neighbour's rate — the same rule the
+      // image and video lanes follow.
+      const r = TTS_RATES[line.provider];
+      if (r == null) return priced(0, { rateKnown: false });
+      return priced((line.quantity / 1000) * r);
+    }
 
     case "transcription":
       return priced(line.quantity * RATES.whisperxPerGpuSecond);

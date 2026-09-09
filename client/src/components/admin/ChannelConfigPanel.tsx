@@ -175,6 +175,7 @@ type EditForm = {
   hostLocation: string;
   voiceId: string;
   voiceName: string;
+  minimaxVoiceId: string;
   ttsModel: string;
   ttsSpeed: string;
   ttsVolume: string;
@@ -192,6 +193,7 @@ const EDIT_FIELDS: FieldSpec<EditForm>[] = [
   { field: "hostLocation", label: "Host Location" },
   { field: "voiceId", label: "Voice ID" },
   { field: "voiceName", label: "Voice Name" },
+  { field: "minimaxVoiceId", label: "MiniMax Voice ID" },
   { field: "ttsModel", label: "TTS Model" },
   { field: "ttsSpeed", label: "Speed" },
   { field: "ttsVolume", label: "Volume" },
@@ -232,6 +234,7 @@ export function ChannelConfigPanel() {
         hostTitle: createForm.hostTitle,
         hostLocation: createForm.hostLocation,
         voiceId: createForm.voiceId,
+        minimaxVoiceId: createForm.minimaxVoiceId,
         voiceName: createForm.voiceName,
         ttsModel: createForm.ttsModel || "eleven_multilingual_v2",
         ttsSpeed: createForm.ttsSpeed,
@@ -253,6 +256,7 @@ export function ChannelConfigPanel() {
         hostTitle: "",
         hostLocation: "",
         voiceId: "",
+    minimaxVoiceId: "",
         voiceName: "",
         ttsModel: "eleven_multilingual_v2",
         ttsSpeed: "",
@@ -281,6 +285,7 @@ export function ChannelConfigPanel() {
     hostTitle: "",
     hostLocation: "",
     voiceId: "",
+    minimaxVoiceId: "",
     voiceName: "",
     ttsModel: "eleven_multilingual_v2",
     ttsSpeed: "",
@@ -304,6 +309,7 @@ export function ChannelConfigPanel() {
     hostTitle: "",
     hostLocation: "",
     voiceId: "",
+    minimaxVoiceId: "",
     voiceName: "",
     ttsModel: "eleven_multilingual_v2",
     ttsSpeed: "",
@@ -325,6 +331,7 @@ export function ChannelConfigPanel() {
       hostTitle: config?.hostTitle || "",
       hostLocation: config?.hostLocation || "",
       voiceId: config?.voiceId || "",
+      minimaxVoiceId: config?.minimaxVoiceId || "",
       voiceName: config?.voiceName || "",
       ttsModel: config?.ttsModel || "eleven_multilingual_v2",
       ttsSpeed: config?.ttsSpeed || "",
@@ -374,6 +381,7 @@ export function ChannelConfigPanel() {
       hostTitle: editForm.hostTitle.trim() || null,
       hostLocation: editForm.hostLocation.trim() || null,
       voiceId: editForm.voiceId || undefined,
+      minimaxVoiceId: editForm.minimaxVoiceId || undefined,
       voiceName: editForm.voiceName || undefined,
       ttsModel: editForm.ttsModel || undefined,
       ttsSpeed: editForm.ttsSpeed || undefined,
@@ -406,6 +414,7 @@ export function ChannelConfigPanel() {
       hostTitle: createForm.hostTitle || undefined,
       hostLocation: createForm.hostLocation || undefined,
       voiceId: createForm.voiceId || undefined,
+      minimaxVoiceId: createForm.minimaxVoiceId || undefined,
       voiceName: createForm.voiceName || undefined,
       ttsModel: createForm.ttsModel || undefined,
       ttsSpeed: createForm.ttsSpeed || undefined,
@@ -507,6 +516,31 @@ export function ChannelConfigPanel() {
               placeholder="e.g., wAGzRVkxKEs8La0lmdrE"
               className="mt-1 text-xs h-8"
             />
+          </div>
+          <div>
+            <Label className="text-xs">
+              MiniMax Voice ID{" "}
+              <span className="font-normal text-muted-foreground">
+                (fallback)
+              </span>
+            </Label>
+            <Input
+              value={editForm.minimaxVoiceId}
+              onChange={e =>
+                setEditForm(f => ({ ...f, minimaxVoiceId: e.target.value }))
+              }
+              placeholder="a voice cloned in YOUR MiniMax account"
+              className="mt-1 text-xs h-8"
+            />
+            {/* Spelled out because the ids look interchangeable and are not: the field above is
+                an ElevenLabs id or a 69Labs account clone, and neither resolves on MiniMax. An
+                operator pasting the same string into both gets "voice not found" at render
+                time, which reads like a broken integration rather than a wrong id. */}
+            <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
+              A different voice space to the field above — a 69Labs or ElevenLabs
+              id will not work here. Leave blank if this channel has no MiniMax
+              fallback.
+            </p>
           </div>
           <div>
             <Label className="text-xs">Voice Name</Label>

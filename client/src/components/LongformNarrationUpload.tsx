@@ -50,6 +50,8 @@ export function LongformNarrationUpload({
   deliveryPlan,
   onDeliveryPlanChange,
   voice,
+  vendor,
+  onVendorChange,
   disabled,
   /** Rescue mode (a failed job): the caller owns the "start it" action, so no runbook step 5. */
   compact,
@@ -68,6 +70,9 @@ export function LongformNarrationUpload({
     ttsModel?: string | null;
     ttsSpeed?: string | null;
   };
+  /** Which vendor voices this film. Undefined ⇒ the channel's default (69Labs). */
+  vendor?: "sixtynine_labs" | "minimax";
+  onVendorChange?: (v: "sixtynine_labs" | "minimax" | undefined) => void;
   disabled?: boolean;
   compact?: boolean;
 }) {
@@ -81,6 +86,13 @@ export function LongformNarrationUpload({
 
   const verify = trpc.longformVideo.verifyNarration.useMutation();
   const plan = trpc.longformVideo.planDelivery.useMutation();
+  // Two independent halves — an account-wide key and a per-channel voice — configured on two
+  // different Admin screens. The option names whichever is missing rather than just greying out,
+  // so an operator is sent to the right screen instead of guessing.
+  const mm = trpc.provider.minimaxStatus.useQuery(
+    { channelKey },
+    { enabled: !compact && !!channelKey }
+  );
 
   // The CTA marker LINES are instructions to the pipeline, not speech — the narration is voiced
   // from the script with them removed. Showing them here would have an operator read
@@ -416,27 +428,100 @@ export function LongformNarrationUpload({
   );
 
   // Rescue mode is reached BECAUSE the render already failed to voice itself — there is nothing
-  // to opt into, so the toggle would only be a click between the operator and the fix.
+  // to opt into, so a chooser would only be a click between the operator and the fix.
   if (compact) return panel;
+
+  const mmUnavailable = !mm.data?.keySet
+    ? "no MiniMax API key — add one in Admin → Provider Keys"
+    : !mm.data?.voiceSet
+      ? "this channel has no MiniMax voice — set one in Admin → Channels"
+      : null;
+
+  const Choice = ({
+    id,
+    label,
+    hint,
+    checked,
+    onSelect,
+    disabled: off,
+  }: {
+    id: string;
+    label: string;
+    hint: string;
+    checked: boolean;
+    onSelect: () => void;
+    disabled?: boolean;
+  }) => (
+    <label
+      htmlFor={id}
+      className={`flex cursor-pointer items-start gap-2 ${
+        off ? "cursor-not-allowed opacity-60" : ""
+      }`}
+    >
+      <input
+        id={id}
+        type="radio"
+        name="narration-source"
+        className="mt-0.5"
+        checked={checked}
+        disabled={disabled || off}
+        onChange={onSelect}
+      />
+      <span className="text-sm leading-tight">
+        {label}
+        <span className="block text-xs text-muted-foreground">{hint}</span>
+      </span>
+    </label>
+  );
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-2">
-        <Switch
-          id="manual-vo"
-          checked={on}
-          disabled={disabled}
-          onCheckedChange={next => {
-            setOn(next);
-            if (!next) {
-              clear();
-              onDeliveryPlanChange?.(undefined);
-            }
+      <div className="space-y-2">
+        <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+          Narration
+        </span>
+        <Choice
+          id="vo-default"
+          label="Use the channel voice"
+          hint={
+            voice?.voiceName || voice?.voiceId || "the channel's 69Labs voice"
+          }
+          checked={!on && vendor !== "minimax"}
+          onSelect={() => {
+            setOn(false);
+            clear();
+            onDeliveryPlanChange?.(undefined);
+            onVendorChange?.(undefined);
           }}
         />
-        <Label htmlFor="manual-vo" className="cursor-pointer text-sm">
-          I&rsquo;ll supply the narration
-        </Label>
+        <Choice
+          id="vo-minimax"
+          label="Voice it on MiniMax"
+          hint={
+            mmUnavailable ??
+            `fallback voice${mm.data?.voiceName ? ` — ${mm.data.voiceName}` : ""}`
+          }
+          checked={!on && vendor === "minimax"}
+          disabled={!!mmUnavailable}
+          onSelect={() => {
+            setOn(false);
+            clear();
+            onDeliveryPlanChange?.(undefined);
+            onVendorChange?.("minimax");
+          }}
+        />
+        <Choice
+          id="vo-manual"
+          label="I'll supply the narration"
+          hint="upload your own audio, made anywhere"
+          checked={on}
+          onSelect={() => {
+            setOn(true);
+            // A supplied master is not voiced by any vendor — leaving a pin set would make
+            // `resolveTTSVendor` demand credentials for a lane this render never touches.
+            onVendorChange?.(undefined);
+          }}
+        />
       </div>
       {on && panel}
     </div>

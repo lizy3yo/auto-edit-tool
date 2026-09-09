@@ -10,6 +10,7 @@ import {
   pollTTSTask69Labs,
   downloadTTSAudio69Labs,
 } from "./tts69labs";
+import { createTTSTaskMinimax, pollTTSTaskMinimax } from "./ttsMinimax";
 export { VoiceNotFoundError } from "./tts69labs";
 import { storagePut } from "./storage";
 import { nanoid } from "nanoid";
@@ -224,6 +225,12 @@ export async function createUnifiedTTSTask(
   if (providerType === "sixtynine_labs") {
     return createTTSTask69Labs(apiKey, params);
   }
+  if (providerType === "minimax") {
+    // The key carries the optional Group ID appended after a "|" (see `resolveTTSVendor`) —
+    // this layer routes on providerType and has no room for a second credential field.
+    const [key, groupId] = apiKey.split("|");
+    return createTTSTaskMinimax({ apiKey: key, groupId: groupId || undefined }, params);
+  }
   throw new Error(`Unsupported TTS provider: ${providerType}`);
 }
 
@@ -286,6 +293,23 @@ export async function pollUnifiedTTSTask(
     }
 
     return result;
+  }
+
+  if (providerType === "minimax") {
+    // Synchronous lane: the audio was synthesized during `create` and is handed straight back.
+    const result = pollTTSTaskMinimax(taskId);
+    if (result.status !== "completed" || !result.buffer) return result;
+    // Same completion tail the 69Labs branch runs — the channel's volume gain must not be
+    // silently skipped just because the vendor differs. (The 48k/stereo resample already
+    // happened inside the adapter, since MiniMax cannot emit above 44100.)
+    const audioBuffer =
+      volume !== undefined
+        ? await applyVolumeGain(result.buffer, volume)
+        : result.buffer;
+    const fileKey = `voiceovers/${taskId}-${nanoid(6)}.mp3`;
+    const { url } = await storagePut(fileKey, audioBuffer, "audio/mpeg");
+    console.log(`[MiniMax TTS] Synthesized and uploaded to S3: ${url}`);
+    return { taskId, status: "completed", audioUrl: url };
   }
 
   throw new Error(`Unsupported TTS provider: ${providerType}`);
