@@ -2170,6 +2170,51 @@ export function enforceHostSplitMix(
 }
 
 /**
+ * Converge the format's split share over the scenes that have NOT rendered yet, leaving every
+ * rendered scene exactly as it is. Returns the scenes that GAINED a split.
+ *
+ * `enforceHostSplitMix` is called once, inside the voicing stage. A job whose master voicing
+ * failed never reaches that call: the operator repairs it with "Retry failed scenes", which
+ * voices each beat individually through `ensureSceneNarration` and renders the clips — so the
+ * film reaches the clip stage having never converged and ships split-free, which splits being a
+ * CONSTANT of the format (`splitFractionFor`) says it must not. The only remaining route was
+ * `retrofitSplitScreens`, i.e. paying for a second pass to add what the first should have.
+ *
+ * It cannot simply re-run there, because a rendered clip is already paid for and on screen:
+ * registering a split on one would leave the flag disagreeing with its footage (adopting the
+ * host half is exactly what the retrofit exists to do), and clearing one would throw away a
+ * composite. So every rendered scene is snapshotted and put back verbatim, and only clip-less
+ * scenes keep what the converge decided. Their existing splits still count toward the target,
+ * which is what makes the additive result land near it rather than over.
+ *
+ * Pure (mutates `scenes` in place, makes no calls) — unit-tested.
+ */
+export function addMissingSplitsToUnrendered(
+  scenes: StoryboardScene[],
+  pacing: LongformPacing = LEGACY_PACING
+): StoryboardScene[] {
+  const before = new Map(
+    scenes.map(s => [
+      s,
+      { splitVisual: s.splitVisual, splitMotion: s.splitMotion },
+    ])
+  );
+  enforceHostSplitMix(scenes, pacing);
+  const added: StoryboardScene[] = [];
+  for (const s of scenes) {
+    const was = before.get(s)!;
+    if (sceneHasClip(s)) {
+      // Rendered: the footage is the truth, whatever the converge just decided about it.
+      s.splitVisual = was.splitVisual;
+      s.splitMotion = was.splitMotion;
+    } else if (s.splitVisual && !was.splitVisual) {
+      added.push(s);
+    }
+  }
+  return added;
+}
+
+/**
  * Keep "heavy" visual registers from piling up: host scenes never sit back-to-back EXCEPT the
  * locked two-angle cold open (scene 1 + scene 2, both `hostOpener`); every later host scene is
  * capped at a run of 1. MOTION-video b-roll runs are capped at `opts.maxAdjacentMotion` (1 by
@@ -12667,10 +12712,30 @@ export async function retrofitSplitScreens(jobId: number): Promise<void> {
         }
       }
       if (!targets.length) {
-        console.log(
-          `[Longform ${jobId}] Split retrofit: film already at/above the split target — nothing to do`
+        // Say so on the ROW, not only in the log. This branch leaves the job exactly as it was
+        // — same status, same film, same button — so a silent return is indistinguishable from
+        // a click that never arrived, and the operator's only move is to click again. It is
+        // reachable on a real film: `enforceHostSplitMix` may only place a split on an INTERIOR
+        // host beat, so a film whose only host beats are the locked cold open and the closer has
+        // nowhere legal to put one however far under the target it sits.
+        const why = prior.size
+          ? "the film is already at or above the format's split share"
+          : "every host beat on this film is the locked cold open or the closing beat, and a " +
+            "split may only be placed on an interior host beat";
+        appendJobWarning(
+          jobId,
+          `Add split screens: nothing to do — ${why}. The film is unchanged.`
         );
-        await updateLongformVideoJob(jobId, { storyboard: scenes });
+        console.log(
+          `[Longform ${jobId}] Split retrofit: nothing to do — ${why}`
+        );
+        await updateLongformVideoJob(jobId, {
+          storyboard: scenes,
+          progress: jobProgress(jobId, {
+            scenesTotal: scenes.length,
+            scenesDone: scenes.filter(sceneHasClip).length,
+          }),
+        });
         return;
       }
       console.log(
@@ -13408,6 +13473,41 @@ async function retryFailedScenesLocked(jobId: number): Promise<void> {
       await flushPersist(jobId);
       await updateLongformVideoJob(jobId, { storyboard: scenes });
     }
+    // Splits are a CONSTANT of the format, but the converge that places them runs inside the
+    // VOICING stage — which a job repaired here never finished (its master failed; the beats
+    // above were voiced one at a time instead). Such a film reached the clip stage with the
+    // share never converged and rendered split-free, leaving `retrofitSplitScreens` — a second,
+    // billed pass — as the only way to add what the first should have. Converging now, before
+    // dispatch, gets it right the first time; already-rendered scenes are untouched, so this
+    // costs nothing on a retry that has nothing left to render.
+    const newSplits = addMissingSplitsToUnrendered(scenes, pacingFor(params));
+    if (newSplits.length) {
+      console.log(
+        `[Longform ${jobId}] retry: registering a split on ${newSplits.length} un-rendered host ` +
+          `scene(s) (${newSplits.map(s => s.index).join(", ")}) — the format's split share had ` +
+          `never been converged for this job`
+      );
+      // The converge seeds `splitVisual` from `brollVisual ?? visualPrompt`, which on a host
+      // beat is often the talking-head prompt. Same fix the main pipeline and the retrofit
+      // apply: enhance each seed into a person-free right panel, then scrub host names before
+      // any of it reaches a provider.
+      await ensureVideoSubject(params);
+      const enh = await enhanceBrollPrompts(
+        scenes,
+        params,
+        newSplits.map(s => s.index)
+      );
+      if (enh.failedScenes.length) {
+        appendJobWarning(jobId, enhanceWarningFor(enh));
+      }
+      const aliases = await hostNameAliases(params.channelKey);
+      for (const s of newSplits) {
+        if (s.splitVisual)
+          s.splitVisual = stripHostNames(s.splitVisual, aliases);
+      }
+      await updateLongformVideoJob(jobId, { storyboard: scenes });
+    }
+
     // Voiced AND still clip-less. `missing` is "not assemblable", which is a missing clip OR a
     // missing narration — so a scene whose ONLY fault was its audio is repaired by the block
     // above and needs no render at all. Filtering on `audioUrl` alone sent it into

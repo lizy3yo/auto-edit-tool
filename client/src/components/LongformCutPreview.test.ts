@@ -13,7 +13,7 @@ import { describe, it, expect } from "vitest";
 import {
   beatAt,
   clipTimeFor,
-  masterTimeFor,
+  audioTimeFor,
   planCutBeats,
   totalFilmSec,
   QR_TAIL_HOLD_SEC,
@@ -29,6 +29,11 @@ const scene = (over: Partial<StoryboardScene>): StoryboardScene =>
     narration: "",
     ...over,
   }) as StoryboardScene;
+
+/** The film's one narration track. Every case is a master-overlay job unless it says otherwise. */
+const MASTER = "master.mp3";
+const planOnMaster = (scenes: StoryboardScene[]) =>
+  planCutBeats(scenes, MASTER);
 
 /** Three 4s scenes tiling a 12s master, each with a clip. The baseline every case edits. */
 const threeScenes = (over: Partial<StoryboardScene>[] = []) =>
@@ -48,7 +53,8 @@ const beat = (over: Partial<CutBeat>): CutBeat => ({
   clipUrl: "a.mp4",
   startSec: 0,
   endSec: 10,
-  masterStartSec: 0,
+  audioUrl: MASTER,
+  audioStartSec: 0,
   headHoldSec: 0,
   tailHoldSec: 0,
   clipInSec: 0,
@@ -59,7 +65,7 @@ const beat = (over: Partial<CutBeat>): CutBeat => ({
 
 describe("planCutBeats", () => {
   it("keeps only scenes with a clip AND a narration range, in index order", () => {
-    const beats = planCutBeats([
+    const beats = planOnMaster([
       scene({
         index: 2,
         clipUrl: "b.mp4",
@@ -81,7 +87,7 @@ describe("planCutBeats", () => {
 
   it("drops a zero-length or inverted range rather than emitting a flash frame", () => {
     expect(
-      planCutBeats([
+      planOnMaster([
         scene({
           index: 1,
           clipUrl: "a.mp4",
@@ -99,7 +105,7 @@ describe("planCutBeats", () => {
   });
 
   it("prefers clipUrls over the back-compat clipUrl mirror", () => {
-    const beats = planCutBeats([
+    const beats = planOnMaster([
       scene({
         index: 1,
         clipUrl: "stale.mp4",
@@ -112,7 +118,7 @@ describe("planCutBeats", () => {
   });
 
   it("lays scenes end to end on the FILM timeline, not the master timeline", () => {
-    const beats = planCutBeats(threeScenes());
+    const beats = planOnMaster(threeScenes());
     expect(
       beats.map(b => [+b.startSec.toFixed(3), +b.endSec.toFixed(3)])
     ).toEqual([
@@ -124,32 +130,32 @@ describe("planCutBeats", () => {
   });
 
   it("makes room for a tail hold and pushes every later scene back by it", () => {
-    const held = planCutBeats(threeScenes([{}, { tailHoldSec: 2 }]));
-    const plain = planCutBeats(threeScenes());
+    const held = planOnMaster(threeScenes([{}, { tailHoldSec: 2 }]));
+    const plain = planOnMaster(threeScenes());
     expect(held[1].tailHoldSec).toBeCloseTo(2, 2);
     // Scene 2 is 2s longer, and scene 3 starts 2s later than it otherwise would.
     expect(held[1].endSec - held[1].startSec).toBeCloseTo(6, 2);
     expect(held[2].startSec - plain[2].startSec).toBeCloseTo(2, 2);
     // Its narration still sits where it always did on the master.
-    expect(held[2].masterStartSec).toBe(8);
+    expect(held[2].audioStartSec).toBe(8);
   });
 
   it("defaults a qrTail beat to the pipeline's own hold, and lets an override replace it", () => {
-    const auto = planCutBeats(threeScenes([{}, { qrTail: true }]));
+    const auto = planOnMaster(threeScenes([{}, { qrTail: true }]));
     expect(auto[1].tailHoldSec).toBeCloseTo(QR_TAIL_HOLD_SEC, 2);
     // 0 is a real value, not "unset" — the operator removing the pause must remove it.
-    const off = planCutBeats(
+    const off = planOnMaster(
       threeScenes([{}, { qrTail: true, tailHoldSec: 0 }])
     );
     expect(off[1].tailHoldSec).toBeCloseTo(0, 2);
   });
 
   it("puts a head hold at the front of the first scene and delays its narration", () => {
-    const beats = planCutBeats(threeScenes([{ headHoldSec: 1.5 }]));
+    const beats = planOnMaster(threeScenes([{ headHoldSec: 1.5 }]));
     expect(beats[0].headHoldSec).toBeCloseTo(1.5, 3);
     expect(beats[0].endSec - beats[0].startSec).toBeCloseTo(5.5, 2);
-    expect(masterTimeFor(beats[0], 0)).toBeNull(); // frozen
-    expect(masterTimeFor(beats[0], 1.6)).toBeCloseTo(0.1, 2); // words start after the hold
+    expect(audioTimeFor(beats[0], 0)).toBeNull(); // frozen
+    expect(audioTimeFor(beats[0], 1.6)).toBeCloseTo(0.1, 2); // words start after the hold
   });
 
   it("does NOT hold when the measured narration merely drifted past the slice", () => {
@@ -157,7 +163,7 @@ describe("planCutBeats", () => {
     // pauses AFTER the per-scene audio is measured, so an ordinary untouched scene routinely
     // carries an `audioDuration` a fraction of a second longer than its slice. That is snapping
     // drift, not a hold — the floor caps it, in the preview exactly as in the render.
-    const drifted = planCutBeats(
+    const drifted = planOnMaster(
       [0, 1, 2].map(i =>
         scene({
           index: i + 1,
@@ -174,13 +180,13 @@ describe("planCutBeats", () => {
       6, 6, 6,
     ]);
     for (const b of drifted)
-      expect(masterTimeFor(b, b.endSec - 0.01)).not.toBeNull();
+      expect(audioTimeFor(b, b.endSec - 0.01)).not.toBeNull();
   });
 
   it("treats a sub-frame remainder as no hold at all", () => {
     // The frame plan quantizes to whole frames, so a beat's arithmetic tail can come out a
     // fraction of a frame long. Calling that a hold would pause the narration at every cut.
-    const beats = planCutBeats([
+    const beats = planOnMaster([
       scene({
         index: 1,
         clipUrl: "a.mp4",
@@ -196,7 +202,7 @@ describe("planCutBeats", () => {
   it("no longer pads a sub-floor beat — it runs exactly its slice length", () => {
     // The automatic freeze-pad is retired: 1s of words is 1s on screen, even though the beat was
     // voiced/floored to 3s. Only explicit holds (head/tail/QR) freeze the picture now.
-    const beats = planCutBeats([
+    const beats = planOnMaster([
       scene({
         index: 1,
         clipUrl: "a.mp4",
@@ -211,7 +217,7 @@ describe("planCutBeats", () => {
   });
 
   it("splits a multi-clip scene across the SPOKEN middle, bracketing it with the holds", () => {
-    const beats = planCutBeats([
+    const beats = planOnMaster([
       scene({
         index: 1,
         clipUrls: ["a.mp4", "b.mp4"],
@@ -247,8 +253,69 @@ describe("planCutBeats", () => {
   });
 
   it("sorts cut markers, so a marker added out of order still reads left to right", () => {
-    const beats = planCutBeats(threeScenes([{ cutPoints: [6, 2] }]));
+    const beats = planOnMaster(threeScenes([{ cutPoints: [6, 2] }]));
     expect(beats[0].cutPoints).toEqual([2, 6]);
+  });
+
+  // A film whose master voicing failed is repaired beat by beat ("Retry failed scenes"), which
+  // re-voices each scene and clears its master range. Such a job has no master and no slices —
+  // assembly concatenates the per-scene tracks, and the preview has to play the same film.
+  describe("a job voiced scene by scene", () => {
+    /** Three 4s scenes, each with its OWN narration file and no master range. */
+    const perScene = (over: Partial<StoryboardScene>[] = []) =>
+      [0, 1, 2].map(i =>
+        scene({
+          index: i + 1,
+          clipUrl: `clip${i}.mp4`,
+          audioUrl: `scene${i}.mp3`,
+          audioDuration: 4,
+          ...(over[i] ?? {}),
+        })
+      );
+
+    it("lays the per-scene slices end to end and gives each beat its own track", () => {
+      const beats = planCutBeats(perScene());
+      expect(beats).toHaveLength(3);
+      expect(beats.map(b => b.startSec)).toEqual([0, 4, 8]);
+      expect(totalFilmSec(beats)).toBeCloseTo(12, 5);
+      expect(beats.map(b => b.audioUrl)).toEqual([
+        "scene0.mp3",
+        "scene1.mp3",
+        "scene2.mp3",
+      ]);
+      // Each beat starts at the head of its OWN file, not at an offset into a master.
+      expect(beats.map(b => b.audioStartSec)).toEqual([0, 0, 0]);
+    });
+
+    it("holds a scene the same way the renderer does", () => {
+      const beats = planCutBeats(perScene([{}, { tailHoldSec: 2 }]));
+      expect(beats[1].tailHoldSec).toBeCloseTo(2, 5);
+      expect(beats[1].endSec - beats[1].startSec).toBeCloseTo(6, 5);
+      expect(beats[2].startSec).toBeCloseTo(10, 5);
+      // The frozen tail has no words under it, exactly as on a master job.
+      expect(audioTimeFor(beats[1], beats[1].endSec - 0.1)).toBeNull();
+    });
+
+    it("drops a scene with a clip but no voice rather than playing silence", () => {
+      const beats = planCutBeats(
+        perScene([{}, { audioUrl: undefined, audioDuration: undefined }])
+      );
+      expect(beats.map(b => b.index)).toEqual([1, 3]);
+    });
+
+    it("still prefers the master when the job has one", () => {
+      // Same scenes, but carrying master ranges too: the master wins, so an ordinary job's
+      // playback is untouched by the per-scene path existing.
+      const beats = planOnMaster(
+        perScene().map((s, i) => ({
+          ...s,
+          narrationStartSec: i * 4,
+          narrationEndSec: (i + 1) * 4,
+        }))
+      );
+      expect(beats.map(b => b.audioUrl)).toEqual([MASTER, MASTER, MASTER]);
+      expect(beats.map(b => b.audioStartSec)).toEqual([0, 4, 8]);
+    });
   });
 });
 
@@ -272,27 +339,27 @@ describe("beatAt", () => {
   });
 });
 
-describe("masterTimeFor", () => {
+describe("audioTimeFor", () => {
   it("maps film time to master time one-for-one on an unheld beat", () => {
-    const b = beat({ startSec: 10, endSec: 14, masterStartSec: 30 });
-    expect(masterTimeFor(b, 10)).toBe(30);
-    expect(masterTimeFor(b, 12.5)).toBe(32.5);
+    const b = beat({ startSec: 10, endSec: 14, audioStartSec: 30 });
+    expect(audioTimeFor(b, 10)).toBe(30);
+    expect(audioTimeFor(b, 12.5)).toBe(32.5);
   });
 
   it("reports null inside a frozen lead-in or tail — where assembly splices silence", () => {
     const b = beat({
       startSec: 0,
       endSec: 8,
-      masterStartSec: 20,
+      audioStartSec: 20,
       headHoldSec: 2,
       tailHoldSec: 3,
     });
-    expect(masterTimeFor(b, 0)).toBeNull();
-    expect(masterTimeFor(b, 1.9)).toBeNull();
-    expect(masterTimeFor(b, 2)).toBe(20); // first word
-    expect(masterTimeFor(b, 4)).toBe(22);
-    expect(masterTimeFor(b, 5.1)).toBeNull(); // into the tail
-    expect(masterTimeFor(b, 7.9)).toBeNull();
+    expect(audioTimeFor(b, 0)).toBeNull();
+    expect(audioTimeFor(b, 1.9)).toBeNull();
+    expect(audioTimeFor(b, 2)).toBe(20); // first word
+    expect(audioTimeFor(b, 4)).toBe(22);
+    expect(audioTimeFor(b, 5.1)).toBeNull(); // into the tail
+    expect(audioTimeFor(b, 7.9)).toBeNull();
   });
 });
 

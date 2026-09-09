@@ -40,6 +40,7 @@ import {
   rebalanceHostScreenTime,
   enforceStillMotionRatio,
   enforceHostSplitMix,
+  addMissingSplitsToUnrendered,
   enforceVisualAdjacency,
   runtimeQuarters,
   HOST_RAMP,
@@ -1473,6 +1474,63 @@ describe("enforceHostSplitMix", () => {
     expect(r.hostSeconds).toBe(0);
     expect(r.splitSeconds).toBe(0);
     expect(scenes[0].splitVisual).toBeUndefined();
+  });
+
+  // The converge runs inside the VOICING stage, which a job whose master voicing failed never
+  // finishes — it is repaired beat by beat by "Retry failed scenes" instead, and used to reach
+  // the clip stage with the format's split share never applied. This is that pass, run late.
+  describe("addMissingSplitsToUnrendered", () => {
+    const withClip = (s: StoryboardScene): StoryboardScene => ({
+      ...s,
+      clipUrls: [`clip${s.index}.mp4`],
+    });
+
+    it("splits the interior host beats that have not rendered yet", () => {
+      const scenes = Array.from({ length: 6 }, (_, i) => host(i));
+      const added = addMissingSplitsToUnrendered(scenes);
+      expect(added.length).toBeGreaterThan(0);
+      for (const s of added) expect(s.splitVisual).toBeTruthy();
+      // Same rule as the converge itself: the bookends stay clean full-frame host.
+      expect(scenes[0].splitVisual).toBeUndefined();
+      expect(scenes[5].splitVisual).toBeUndefined();
+    });
+
+    it("never registers a split on a scene whose clip is already rendered", () => {
+      // Every interior beat is already on screen full-frame — flagging one would leave the
+      // storyboard claiming a composite the footage does not contain. That repair is the
+      // retrofit, which re-renders the right panel; this pass must decline.
+      const scenes = Array.from({ length: 6 }, (_, i) => withClip(host(i)));
+      const added = addMissingSplitsToUnrendered(scenes);
+      expect(added).toEqual([]);
+      expect(scenes.every(s => s.splitVisual === undefined)).toBe(true);
+    });
+
+    it("leaves a rendered composite alone instead of clearing it back", () => {
+      // Enough rendered splits to sit OVER the target: the converge would strip some, which
+      // would throw away right panels already paid for and on screen.
+      const scenes = Array.from({ length: 6 }, (_, i) =>
+        withClip(
+          host(i, i !== 0 && i !== 5 ? { splitVisual: `beside ${i}` } : {})
+        )
+      );
+      addMissingSplitsToUnrendered(scenes);
+      for (let i = 1; i <= 4; i++)
+        expect(scenes[i].splitVisual).toBe(`beside ${i}`);
+    });
+
+    it("counts the splits already on screen toward the target", () => {
+      // Four interior beats; two are rendered composites (20s of 60s host, already past the
+      // ~21% target), so the two un-rendered ones need no split of their own.
+      const scenes = [
+        withClip(host(0)),
+        withClip(host(1, { splitVisual: "beside 1" })),
+        withClip(host(2, { splitVisual: "beside 2" })),
+        host(3),
+        host(4),
+        withClip(host(5)),
+      ];
+      expect(addMissingSplitsToUnrendered(scenes)).toEqual([]);
+    });
   });
 });
 

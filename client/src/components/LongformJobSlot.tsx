@@ -371,12 +371,22 @@ export default function LongformJobSlot({
   // When each scene was queued locally — the settle fallback for an edit so fast (ffmpeg-only
   // split edits) that no poll ever catches it in flight.
   const queuedAt = useRef<Map<number, number>>(new Map());
-  // Cut-room edits (split / trim / move / hold) apply as instant metadata — they never flip the
-  // job to "processing", so the normal poll gate stays off. This keeps a short, fast poll window
-  // open after such an edit so its result (a re-sliced storyboard, an extra scene) shows up in
-  // ~1s, then polling goes quiet again. Timestamp = poll until this ms.
-  const [cutRoomWatchUntil, setCutRoomWatchUntil] = useState(0);
-  const watchCutRoom = () => setCutRoomWatchUntil(Date.now() + 12_000);
+  // A short, fast poll window. The normal gate is `status === "processing"`, and two kinds of
+  // click leave that gate shut at the moment they are made:
+  //  - Cut-room edits (split / trim / move / hold) apply as instant metadata and NEVER flip the
+  //    job, so their result (a re-sliced storyboard, an extra scene) would not show at all.
+  //  - A pipeline click on a FINISHED job (the split retrofit) does flip it, but only once the
+  //    server reaches the write inside its job lock. The single invalidate the mutation fires
+  //    races that write and usually loses, reads back "completed", and — because the gate is
+  //    still shut — switches polling off again. The render then ran to completion with the UI
+  //    insisting the click had done nothing.
+  // Either way: poll at 1s until this timestamp, then go quiet again.
+  const [jobWatchUntil, setJobWatchUntil] = useState(0);
+  const watchJob = () => setJobWatchUntil(Date.now() + 12_000);
+  // A retrofit click held until a poll confirms the job actually flipped. `isPending` covers the
+  // HTTP call alone — a few milliseconds, since the route is fire-and-forget — so the button
+  // snapped straight back to its idle label while the pass it started was still spinning up.
+  const [splitRetrofitStarting, setSplitRetrofitStarting] = useState(false);
   const [selectedScenes, setSelectedScenes] = useState<number[]>([]);
   const [sceneSearch, setSceneSearch] = useState("");
   const [downloadTitle, setDownloadTitle] = useState(initialTitle);
@@ -550,7 +560,7 @@ export default function LongformJobSlot({
         return;
       }
       toast.success("Timing saved — Reassemble to apply it to the film");
-      watchCutRoom();
+      watchJob();
       if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
     },
     onError: err => toast.error(err.message),
@@ -566,7 +576,7 @@ export default function LongformJobSlot({
       toast.success("Cut added — the clip is marked, still one scene");
       // A cut is a marker on the SAME clip (CapCut-style): no new scene, no renumber, nothing
       // re-renders. The editor stays put; just refetch so the marker shows.
-      watchCutRoom();
+      watchJob();
       if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
     },
     onError: err => toast.error(err.message),
@@ -581,7 +591,7 @@ export default function LongformJobSlot({
         return;
       }
       toast.success("Cut removed");
-      watchCutRoom();
+      watchJob();
       if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
     },
     onError: err => toast.error(err.message),
@@ -595,7 +605,7 @@ export default function LongformJobSlot({
         );
         return;
       }
-      watchCutRoom();
+      watchJob();
       if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
     },
     onError: err => toast.error(err.message),
@@ -614,7 +624,7 @@ export default function LongformJobSlot({
           (d.snapped ? " (snapped onto a pause)" : "") +
           " — Reassemble to apply it"
       );
-      watchCutRoom();
+      watchJob();
       if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
     },
     onError: err => toast.error(err.message),
@@ -664,7 +674,7 @@ export default function LongformJobSlot({
         toast.success(
           `Scene ${vars.sceneIndex} back to its original cut — Reassemble to apply it`
         );
-        watchCutRoom();
+        watchJob();
         if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
       },
       onError: err => toast.error(err.message),
@@ -691,7 +701,7 @@ export default function LongformJobSlot({
         return;
       }
       toast.success("Piece slipped — Reassemble to apply it to the film");
-      watchCutRoom();
+      watchJob();
       if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
     },
     onError: err => toast.error(err.message),
@@ -774,10 +784,16 @@ export default function LongformJobSlot({
         toast.success(
           "Adding split screens — the host clips are reused, only the right panels render."
         );
-        // Refetch so status flips completed → processing and polling resumes.
+        // The route is fire-and-forget: it returns before the pass has flipped the job. One
+        // invalidate would land on "completed" and shut polling back off, so keep a fast
+        // window open until a poll sees the flip (see `watchJob`).
+        watchJob();
         if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
       },
-      onError: err => toast.error(err.message),
+      onError: err => {
+        setSplitRetrofitStarting(false);
+        toast.error(err.message);
+      },
     });
 
   const retrofitBookCoverMutation =
@@ -861,7 +877,7 @@ export default function LongformJobSlot({
           q.state.data?.sceneEdits?.editing ||
           queuedScenes.length > 0
           ? 3000
-          : Date.now() < cutRoomWatchUntil
+          : Date.now() < jobWatchUntil
             ? 1000
             : false;
       },
@@ -993,6 +1009,21 @@ export default function LongformJobSlot({
     return splitSec / hostSec < 0.15;
   }, [scenes]);
 
+  // Release the retrofit button's "Starting…" hold the moment a poll shows the pass running.
+  // The timer is the other exit: the pass can legitimately decide it has nothing to do (the
+  // film is already at the target, or every host beat is the cold open or the closer), and the
+  // job is then never flipped at all — so without it the button would spin for good. The server
+  // says WHY on the job's warning list, which the fast poll window brings back with it.
+  useEffect(() => {
+    if (!splitRetrofitStarting) return;
+    if (job?.status === "processing") {
+      setSplitRetrofitStarting(false);
+      return;
+    }
+    const t = setTimeout(() => setSplitRetrofitStarting(false), 15_000);
+    return () => clearTimeout(t);
+  }, [splitRetrofitStarting, job?.status]);
+
   // Deliver a timestamp click that had to wait for the rendered player to come back. Child
   // effects run before the parent's, so by the time this fires the player has already published
   // its seek handle.
@@ -1067,17 +1098,23 @@ export default function LongformJobSlot({
     [scenes]
   );
 
-  // Whether the browser can play this cut without an assembly: the master narration exists and
-  // at least one scene has both a clip and its slice of that narration. Deliberately not gated
-  // on `finalVideoUrl` — the whole point is to see a cut BEFORE (or instead of) rendering one.
+  // Whether the browser can play this cut without an assembly: some scene has a clip AND a
+  // voice to play under it. That voice is a slice of the film's master track on an ordinary
+  // job, and the scene's OWN narration on a job that has no master — the shape a film left by a
+  // failed voicing takes once "Retry failed scenes" re-voices it beat by beat, which assembly
+  // renders by concatenating those slices and `planCutBeats` previews the same way. Requiring a
+  // master hid the preview on exactly those jobs while the copy above it still said "preview
+  // them below". Deliberately not gated on `finalVideoUrl` — the whole point is to see a cut
+  // BEFORE (or instead of) rendering one.
   const cutPreviewReady = useMemo(
     () =>
-      !!job?.masterAudioUrl &&
       scenes.some(
         s =>
           (s.clipUrls?.length || s.clipUrl) &&
-          Number.isFinite(s.narrationStartSec as number) &&
-          Number.isFinite(s.narrationEndSec as number)
+          ((!!job?.masterAudioUrl &&
+            Number.isFinite(s.narrationStartSec as number) &&
+            Number.isFinite(s.narrationEndSec as number)) ||
+            (!!s.audioUrl && (s.audioDuration ?? 0) > 0))
       ),
     [job?.masterAudioUrl, scenes]
   );
@@ -1944,7 +1981,7 @@ export default function LongformJobSlot({
                   {cutPreviewReady && (
                     <LongformCutPreview
                       scenes={scenes}
-                      masterAudioUrl={job.masterAudioUrl as string}
+                      masterAudioUrl={job.masterAudioUrl}
                     />
                   )}
                   <Button
@@ -2044,7 +2081,7 @@ export default function LongformJobSlot({
                 {cutPreviewReady && showCutPreview ? (
                   <LongformCutPreview
                     scenes={scenes}
-                    masterAudioUrl={job.masterAudioUrl as string}
+                    masterAudioUrl={job.masterAudioUrl}
                   />
                 ) : (
                   <LongformVideoPlayer
@@ -2060,17 +2097,28 @@ export default function LongformJobSlot({
                       onClick={() => {
                         if (!jobId) return;
                         armNotifications();
+                        // Show the click landing on THIS render, not on the next poll: the
+                        // route returns before the pass has flipped the job, so the button
+                        // holds itself until one confirms it (see `splitRetrofitStarting`).
+                        setSplitRetrofitStarting(true);
+                        watchJob();
                         retrofitSplitsMutation.mutate({ jobId });
                       }}
-                      disabled={retrofitSplitsMutation.isPending}
+                      disabled={
+                        retrofitSplitsMutation.isPending ||
+                        splitRetrofitStarting
+                      }
                       title="This film rendered without split screens. Add them — the host clips are reused, only the right panels render."
                     >
-                      {retrofitSplitsMutation.isPending ? (
+                      {retrofitSplitsMutation.isPending ||
+                      splitRetrofitStarting ? (
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                       ) : (
                         <Columns2 className="mr-2 h-4 w-4" />
                       )}
-                      Add split screens
+                      {splitRetrofitStarting
+                        ? "Starting…"
+                        : "Add split screens"}
                     </Button>
                   )}
                   <Button
