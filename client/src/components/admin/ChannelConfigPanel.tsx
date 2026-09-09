@@ -969,6 +969,10 @@ export function ChannelConfigPanel() {
                 Operational Settings (optional)
               </h4>
               <div className="space-y-3">
+                {/* The two VOICE IDS sit side by side: they are the same kind of thing for two
+                    vendors, and pairing them is what makes it obvious they are not
+                    interchangeable. Voice Name is a display label for the left one only, so it
+                    drops below rather than competing for the right column. */}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <Label className="text-xs">Voice ID</Label>
@@ -982,46 +986,47 @@ export function ChannelConfigPanel() {
                     />
                   </div>
                   <div>
-                    <Label className="text-xs">Voice Name</Label>
+                    <Label className="text-xs">
+                      MiniMax Voice ID{" "}
+                      <span className="font-normal text-muted-foreground">
+                        (fallback)
+                      </span>
+                    </Label>
                     <Input
-                      value={createForm.voiceName}
+                      value={createForm.minimaxVoiceId}
                       onChange={e =>
                         setCreateForm(f => ({
                           ...f,
-                          voiceName: e.target.value,
+                          minimaxVoiceId: e.target.value,
                         }))
                       }
-                      placeholder="Display name for voice"
+                      placeholder="a voice cloned in YOUR MiniMax account"
                       className="mt-1 text-xs h-8"
                     />
                   </div>
                 </div>
+                {/* Full width under both, because it explains the RELATIONSHIP between them —
+                    the two ids look interchangeable and are not, and pasting the 69Labs voice
+                    into both only fails at render time, where it reads as a broken integration
+                    rather than a wrong id. */}
+                <p className="-mt-1 text-[11px] leading-snug text-muted-foreground">
+                  A different voice space to the field above — a 69Labs or
+                  ElevenLabs id will not work here. Leave blank for no MiniMax
+                  fallback.
+                </p>
                 <div>
-                  <Label className="text-xs">
-                    MiniMax Voice ID{" "}
-                    <span className="font-normal text-muted-foreground">
-                      (fallback)
-                    </span>
-                  </Label>
+                  <Label className="text-xs">Voice Name</Label>
                   <Input
-                    value={createForm.minimaxVoiceId}
+                    value={createForm.voiceName}
                     onChange={e =>
                       setCreateForm(f => ({
                         ...f,
-                        minimaxVoiceId: e.target.value,
+                        voiceName: e.target.value,
                       }))
                     }
-                    placeholder="a voice cloned in YOUR MiniMax account"
+                    placeholder="Display name for voice"
                     className="mt-1 text-xs h-8"
                   />
-                  {/* Same note as the edit form: the two ids look interchangeable and are not.
-                      Pasting the 69Labs voice into both fields yields "voice not found" only at
-                      render time, which reads like a broken integration rather than a wrong id. */}
-                  <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
-                    A different voice space to the field above — a 69Labs or
-                    ElevenLabs id will not work here. Leave blank for no MiniMax
-                    fallback.
-                  </p>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
