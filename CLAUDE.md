@@ -148,12 +148,24 @@ Express · tRPC · Drizzle · MySQL.
   bumping is free, forgetting ships a film assembled from stale bytes. Every failure mode
   (no dir, full disk, corrupt entry) degrades to "encode it now"
 - `client/src/components/LongformCutPreview.tsx` — the same film with NO assembly: the browser
-  plays the scene clips against the master narration, so an edit is judged in a second instead
-  of a re-encode. Its clock is FILM time, planned by `shared/filmTimeline.ts`, so trims, splits,
-  per-piece slips and frozen holds are exact: during a hold the picture freezes and the narration
-  pauses, precisely where assembly splices its silence in. Outside a hold the NARRATION is the
-  clock and nothing seeks it — slaving the voice to a wall clock livelocks, because every
+  plays the scene clips against the film's own narration, so an edit is judged in a second
+  instead of a re-encode. Its clock is FILM time, planned by `shared/filmTimeline.ts`, so trims,
+  splits, per-piece slips and frozen holds are exact: during a hold the picture freezes and the
+  narration pauses, precisely where assembly splices its silence in. Outside a hold the NARRATION
+  is the clock and nothing seeks it — slaving the voice to a wall clock livelocks, because every
   correction is a seek, a seek drops readyState, that stalls the clock, and the drift grows.
+  TWO NARRATION SHAPES feed that clock, and `planCutBeats` picks between them. An ordinary job
+  has one master track with every scene carrying its slice, and plays on that track's own
+  timeline. A job with NO master has each scene's own voice file instead, laid end to end to
+  recover the very timeline assembly's per-scene concat path builds — which is what a film whose
+  master voicing FAILED becomes once "Retry failed scenes" repairs it beat by beat, since
+  `ensureSceneNarration` clears a scene's master range as it re-voices it. That shape is not
+  exotic and it is not broken: it renders and ships. Requiring a master here hid the preview on
+  exactly those jobs, under copy that still said "preview them below". The narration therefore
+  gets the video's ping-pong pair too, swapped ONLY where the track actually changes — on a
+  master job it never changes, so one element still plays through every cut untouched, which is
+  what the "nothing seeks it" rule above depends on. The beat signature carries the track for the
+  same reason: a poll can change a scene's audio while its clip and its timings do not move.
   Still a preview of the CUT, not the FILE — no burned-in QR/lower third/captions, no music bed
 - `server/providers/` — one adapter per vendor; `base.ts` is the interface,
   `fallback.ts` the image chain (primary → Gemini). The host lip-sync lane has TWO adapters,
