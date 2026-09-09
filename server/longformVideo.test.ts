@@ -66,6 +66,9 @@ import {
   WORD_SIZE,
   FLOOR_WORDS,
   applySceneHoldFloor,
+  extendQrHeroWindow,
+  QR_HERO_MIN_WINDOW_SEC,
+  CTA_SPLIT_PANEL_DIRECTIVE,
   SCENE_MIN_HOLD_SEC,
   HOST_MIN_HOLD_SEC,
   ctaSignalInText,
@@ -146,6 +149,7 @@ import {
   SIXTYNINE_IMAGE_SLOTS,
 } from "./providers/sixtynine-labs";
 import { HOST_INTRO_TRIM_SEC } from "./videoAssembly";
+import { sceneHoldPlan } from "../shared/filmTimeline";
 import * as videoAssembly from "./videoAssembly";
 import {
   HeygenLipsyncAdapter,
@@ -2169,6 +2173,129 @@ describe("brollDepictsBook / non-CTA book guard", () => {
   });
 });
 
+// The panel beside the host during a sales pitch. It was the one b-roll lane never wired to the
+// CTA guards: `enhanceSplit` handed the pitch narration to the ordinary enhancer, whose
+// script-alignment rule obeyed it — "point your phone at the QR code" rendered a phone showing
+// an invented, unscannable QR code beside the real composited one, and "the link's in the
+// description" rendered a phone showing a video's description page.
+describe("CTA split panel (splitVisual on a pitch beat)", () => {
+  const sc = (extra: Partial<StoryboardScene>): StoryboardScene => ({
+    index: 1,
+    narration: "n",
+    visualPrompt: "vp",
+    hostPresent: true,
+    ...extra,
+  });
+
+  /** A pitch beat carrying a panel, plus an ordinary cutaway for the on-topic fallback to find. */
+  const pitchScenes = (splitVisual: string) => [
+    sc({
+      index: 1,
+      cta: true,
+      splitVisual,
+      scriptText:
+        "Point your phone at the QR code; the link's in the description below.",
+    }),
+    sc({
+      index: 2,
+      hostPresent: false,
+      visualPrompt: "a wheelbarrow of dark mulch beside a flower bed",
+    }),
+  ];
+
+  afterEach(() => mockInvoke.mockReset());
+
+  it("sends the CTA lane's system prompt, not the ordinary enhancer's", async () => {
+    mockInvoke.mockResolvedValue({
+      text: "a coiled hose on damp paving",
+    } as any);
+    // Only the pitch beat: the cutaway beside it exists to be the on-topic fallback, and
+    // enhancing it too would put the mocked reply in front of the fallback as well.
+    await enhanceBrollPrompts(
+      pitchScenes("a phone showing the code"),
+      baseParams,
+      [1]
+    );
+    const { systemPrompt, userMessage } = mockInvoke.mock.calls[0][0] as any;
+    expect(systemPrompt).toMatch(/SALES PITCH/);
+    expect(systemPrompt).not.toBe(STILL_BROLL_ENHANCER_SYSTEM);
+    // The panel's stricter person rule rides the user message (the CTA system prompt still
+    // allows bare hands — that is a full-frame cutaway's licence, not a panel's).
+    expect(userMessage).toContain(CTA_SPLIT_PANEL_DIRECTIVE);
+    // The pitch reaches the model only as register context, never as a prompt to seed from.
+    expect(userMessage).not.toMatch(/Original prompt:/);
+  });
+
+  it("swaps a literal pitch panel the enhancer wrote for on-topic b-roll", async () => {
+    const scenes = pitchScenes("the beat's subject");
+    mockInvoke.mockResolvedValue({
+      text: "a smartphone displaying a QR code on a kitchen table",
+    } as any);
+    await enhanceBrollPrompts(scenes, baseParams, [1]);
+    expect(ctaVisualIsLiteral(scenes[0].splitVisual!)).toBe(false);
+    expect(scenes[0].splitVisual).toMatch(/mulch/);
+  });
+
+  it("swaps a literal pitch panel even when the enhancer LLM fails", async () => {
+    const scenes = pitchScenes(
+      "a phone screen showing the link in the description"
+    );
+    mockInvoke.mockRejectedValue(new Error("429 quota"));
+    await enhanceBrollPrompts(scenes, baseParams, [1]);
+    expect(ctaVisualIsLiteral(scenes[0].splitVisual!)).toBe(false);
+    expect(scenes[0].splitVisual).toMatch(/mulch/);
+  });
+
+  it("catches a literal panel the lane itself let through (the deterministic net)", async () => {
+    const scenes = pitchScenes("hands scanning a QR code with a smartphone");
+    // The rewrite lands on a value that is still literal in a different way — the post-pass is
+    // the net BEHIND the lane, not a duplicate of it.
+    mockInvoke.mockResolvedValue({
+      text: "a tablet showing the shop website",
+    } as any);
+    await enhanceBrollPrompts(scenes, baseParams, [1]);
+    expect(ctaVisualIsLiteral(scenes[0].splitVisual!)).toBe(false);
+  });
+
+  it("leaves a NON-CTA panel on the ordinary lane, unchanged", async () => {
+    const scenes = [
+      sc({
+        index: 1,
+        splitVisual: "a watering can beside a seed tray",
+        scriptText: "Water the tray until it runs clear.",
+      }),
+    ];
+    mockInvoke.mockResolvedValue({
+      text: "a galvanised can beside a damp seed tray",
+    } as any);
+    await enhanceBrollPrompts(scenes, baseParams);
+    const { systemPrompt, userMessage } = mockInvoke.mock.calls[0][0] as any;
+    expect(systemPrompt).toBe(STILL_BROLL_ENHANCER_SYSTEM);
+    expect(userMessage).toMatch(
+      /Original prompt: a watering can beside a seed tray/
+    );
+    expect(scenes[0].splitVisual).toBe(
+      "a galvanised can beside a damp seed tray"
+    );
+  });
+
+  it("still swaps a booky panel on a non-CTA beat (the guard that already existed)", async () => {
+    const scenes = [
+      sc({ index: 1, splitVisual: "seed trays" }),
+      sc({
+        index: 2,
+        hostPresent: false,
+        visualPrompt: "a wheelbarrow of dark mulch beside a flower bed",
+      }),
+    ];
+    mockInvoke.mockResolvedValue({
+      text: "an open handbook on the potting bench",
+    } as any);
+    await enhanceBrollPrompts(scenes, baseParams);
+    expect(brollDepictsBook(scenes[0].splitVisual!)).toBe(false);
+  });
+});
+
 describe("enforceVisualAdjacency", () => {
   const mk = (
     i: number,
@@ -4090,6 +4217,125 @@ describe("applySceneHoldFloor", () => {
     const long = mk({ audioDuration: 7, coverHero: true });
     applySceneHoldFloor(long);
     expect(long.audioDuration).toBe(7);
+  });
+});
+
+describe("extendQrHeroWindow", () => {
+  const sc = (
+    extra: Partial<StoryboardScene> & { startSec?: number; endSec?: number }
+  ): StoryboardScene => {
+    const { startSec, endSec, ...rest } = extra;
+    return {
+      index: 0,
+      narration: "n",
+      visualPrompt: "vp",
+      narrationStartSec: startSec,
+      narrationEndSec: endSec,
+      ...rest,
+    };
+  };
+
+  /** A block whose spoken part totals `sec`, as one trigger beat + one release beat. */
+  const block = (sec: number): StoryboardScene[] => [
+    sc({ index: 1, qrHero: true, cta: true, startSec: 0, endSec: sec / 2 }),
+    sc({
+      index: 2,
+      qrHero: true,
+      qrTail: true,
+      cta: true,
+      startSec: sec / 2,
+      endSec: sec,
+    }),
+  ];
+
+  it("tops the tail up so the whole card window reaches the minimum", () => {
+    const scenes = block(2); // 2s spoken — the flat 3s tail leaves a 5s window
+    extendQrHeroWindow(scenes);
+    expect(scenes[1].qrHoldSec).toBe(QR_HERO_MIN_WINDOW_SEC - 2);
+    // The window it produces IS the minimum.
+    expect(2 + scenes[1].qrHoldSec!).toBe(QR_HERO_MIN_WINDOW_SEC);
+  });
+
+  it("leaves a block that already clears the minimum on the flat default", () => {
+    const scenes = block(7);
+    extendQrHeroWindow(scenes);
+    expect(scenes[1].qrHoldSec).toBeUndefined();
+  });
+
+  it("never shortens: a block under the minimum but over the flat tail keeps 3s", () => {
+    // 4s spoken needs 2s to reach 6 — less than the flat 3s tail it already gets.
+    const scenes = block(4);
+    extendQrHeroWindow(scenes);
+    expect(scenes[1].qrHoldSec).toBeUndefined();
+  });
+
+  it("measures the WHOLE block, not just the tail beat", () => {
+    const scenes = [
+      sc({ index: 1, qrHero: true, startSec: 0, endSec: 0.5 }),
+      sc({ index: 2, qrHero: true, startSec: 0.5, endSec: 1 }),
+      sc({ index: 3, qrHero: true, qrTail: true, startSec: 1, endSec: 1.5 }),
+    ];
+    extendQrHeroWindow(scenes);
+    // 1.5s across three beats, not the 0.5s of the tail beat alone.
+    expect(scenes[2].qrHoldSec).toBe(QR_HERO_MIN_WINDOW_SEC - 1.5);
+  });
+
+  it("handles each block of a two-block pitch on its own", () => {
+    const scenes = [
+      ...block(2),
+      sc({ index: 3, startSec: 2, endSec: 9 }), // body beat between the two pitches
+      sc({ index: 4, qrHero: true, startSec: 9, endSec: 12 }),
+      sc({ index: 5, qrHero: true, qrTail: true, startSec: 12, endSec: 16 }),
+    ];
+    extendQrHeroWindow(scenes);
+    expect(scenes[1].qrHoldSec).toBe(QR_HERO_MIN_WINDOW_SEC - 2); // short block
+    expect(scenes[4].qrHoldSec).toBeUndefined(); // 7s block, already long enough
+  });
+
+  it("is idempotent, and drops a stale top-up when the block is re-voiced longer", () => {
+    const scenes = block(2);
+    extendQrHeroWindow(scenes);
+    const first = scenes[1].qrHoldSec;
+    extendQrHeroWindow(scenes);
+    expect(scenes[1].qrHoldSec).toBe(first);
+
+    // Re-voiced longer (a slower read, or an operator's re-time): the top-up must go.
+    scenes[0].narrationEndSec = 4;
+    scenes[1].narrationStartSec = 4;
+    scenes[1].narrationEndSec = 8;
+    extendQrHeroWindow(scenes);
+    expect(scenes[1].qrHoldSec).toBeUndefined();
+  });
+
+  it("falls back to audioDuration when a block has no persisted slices", () => {
+    const scenes = [
+      sc({ index: 1, qrHero: true, audioDuration: 1 }),
+      sc({ index: 2, qrHero: true, qrTail: true, audioDuration: 1 }),
+    ];
+    extendQrHeroWindow(scenes);
+    expect(scenes[1].qrHoldSec).toBe(QR_HERO_MIN_WINDOW_SEC - 2);
+  });
+
+  it("does nothing to a block with no qrTail beat (an older storyboard's flags)", () => {
+    const scenes = [
+      sc({ index: 1, qrHero: true, startSec: 0, endSec: 1 }),
+      sc({ index: 2, qrHero: true, startSec: 1, endSec: 2 }),
+    ];
+    extendQrHeroWindow(scenes);
+    expect(scenes.every(s => s.qrHoldSec === undefined)).toBe(true);
+  });
+
+  it("sceneHoldPlan uses it as a DEFAULT — the operator's own hold still wins", () => {
+    const scenes = block(2);
+    extendQrHeroWindow(scenes);
+    expect(sceneHoldPlan(scenes[1]).tailHoldSec).toBe(
+      QR_HERO_MIN_WINDOW_SEC - 2
+    );
+    // Including 0, which is how the operator removes the pause entirely.
+    expect(sceneHoldPlan({ ...scenes[1], tailHoldSec: 0 }).tailHoldSec).toBe(0);
+    expect(sceneHoldPlan({ ...scenes[1], tailHoldSec: 1.5 }).tailHoldSec).toBe(
+      1.5
+    );
   });
 });
 

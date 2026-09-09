@@ -55,7 +55,9 @@ const MIN_SLICE_SEC = 0.5;
  */
 const FRAME_SEC = 1 / 30;
 const MAX_TAIL_HOLD_SEC = 10;
-/** The CTA release beat's default hold when the operator hasn't set one (server QR_TAIL_HOLD_SEC). */
+/** The CTA release beat's flat default hold when neither the operator nor the pipeline set one
+ *  (server QR_TAIL_HOLD_SEC). A block whose narration was too short to be scannable carries a
+ *  bigger computed default on `qrHoldSec` — see `qrHoldDefault`. */
 const DEFAULT_QR_TAIL_HOLD_SEC = 3;
 /** Mirrors server/sceneTiming.ts MAX_HEAD_HOLD_SEC. */
 const MAX_HEAD_HOLD_SEC = 10;
@@ -407,6 +409,10 @@ export function SceneTimingEditor(props: {
   tailHoldSec?: number;
   /** CTA release beat — carries the default 3 s hold. */
   qrTail?: boolean;
+  /** Pipeline-computed QR tail for this block (server `extendQrHeroWindow`), used as the DEFAULT
+   *  in place of the flat 3 s when the block's own narration is too short to scan against. The
+   *  operator's `tailHoldSec` still wins over it. */
+  qrHoldSec?: number;
   /**
    * Persisted hold BEFORE this scene's own first word — tailHoldSec's mirror, at the front.
    * Only meaningful (and only shown, via the start handle) when `prevStartSec` is undefined —
@@ -485,7 +491,9 @@ export function SceneTimingEditor(props: {
         (props.startSec - props.prevStartSec) -
         persistedClipIn
     ) < 0.05;
-  const defaultHold = props.qrTail ? DEFAULT_QR_TAIL_HOLD_SEC : 0;
+  // Mirrors sceneHoldPlan: tailHoldSec ?? qrHoldSec ?? QR_TAIL_HOLD_SEC.
+  const qrHoldDefault = props.qrHoldSec ?? DEFAULT_QR_TAIL_HOLD_SEC;
+  const defaultHold = props.qrTail ? qrHoldDefault : 0;
   const persistedHold = props.tailHoldSec ?? defaultHold;
   const persistedHeadHold = props.headHoldSec ?? 0;
 
@@ -1735,8 +1743,7 @@ export function SceneTimingEditor(props: {
           s
           {props.qrTail && (
             <span className="text-[10px]">
-              (CTA release beat — default {DEFAULT_QR_TAIL_HOLD_SEC}s; 0 removes
-              the pause)
+              (CTA release beat — default {qrHoldDefault}s; 0 removes the pause)
             </span>
           )}
         </label>

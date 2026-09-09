@@ -345,6 +345,18 @@ export interface StoryboardScene {
    */
   qrTail?: boolean;
   /**
+   * The frozen tail this `qrTail` beat should take INSTEAD of the flat `QR_TAIL_HOLD_SEC`
+   * default, in seconds — set by `extendQrHeroWindow` after voicing when the QR block's own
+   * narration is too short to leave the centered card up long enough to actually scan. The block
+   * is exempt from the on-screen floor (`applySceneHoldFloor` returns early on `qrHero`), so
+   * without this a two-second trigger line was the entire scan window.
+   *
+   * It is a DEFAULT, not an override: `sceneHoldPlan` reads `tailHoldSec ?? qrHoldSec ??
+   * QR_TAIL_HOLD_SEC`, so an operator's own "Hold after line" still wins outright — including 0,
+   * which is how they remove the pause.
+   */
+  qrHoldSec?: number;
+  /**
    * The "book cover reveal" beat: shown full-frame as the literal channel cover image (large,
    * white outer glow, slight Ken Burns) instead of a host/b-roll shot. Set by `markCtaQrBlock` on
    * the beat right before the CTA QR block (or, as a fallback when the block is absent, by

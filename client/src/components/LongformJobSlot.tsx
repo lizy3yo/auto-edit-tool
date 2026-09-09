@@ -2604,6 +2604,7 @@ export default function LongformJobSlot({
                                       tailHoldSec={scene.tailHoldSec}
                                       headHoldSec={scene.headHoldSec}
                                       qrTail={scene.qrTail}
+                                      qrHoldSec={scene.qrHoldSec}
                                       prevStartSec={prev?.narrationStartSec}
                                       nextEndSec={next?.narrationEndSec}
                                       lipsync={

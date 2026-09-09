@@ -85,6 +85,9 @@ export function sceneHoldPlan(
     tailHoldSec?: number;
     headHoldSec?: number;
     qrTail?: boolean;
+    /** Per-block QR tail computed at voicing (`extendQrHeroWindow`); overrides the flat
+     *  `QR_TAIL_HOLD_SEC` default but not the operator's own `tailHoldSec`. */
+    qrHoldSec?: number;
     coverHero?: boolean;
     timingOriginal?: { narrationStartSec?: number; narrationEndSec?: number };
   },
@@ -107,10 +110,14 @@ export function sceneHoldPlan(
     holdSec: undefined,
     minHoldSec: undefined,
     // An explicit hold is the operator's own number and always wins — including 0, which is how
-    // they remove the CTA pause. The DEFAULT only applies to a beat they have not re-timed.
+    // they remove the CTA pause. The DEFAULT only applies to a beat they have not re-timed, and
+    // is `qrHoldSec` when the pipeline computed one for this block (a QR window whose narration
+    // was too short to be scannable) or the flat constant otherwise.
     tailHoldSec:
       scene.tailHoldSec ??
-      (!exempt && scene.qrTail ? QR_TAIL_HOLD_SEC : undefined),
+      (!exempt && scene.qrTail
+        ? (scene.qrHoldSec ?? QR_TAIL_HOLD_SEC)
+        : undefined),
     headHoldSec: scene.headHoldSec,
   };
 }

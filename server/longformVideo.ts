@@ -3947,6 +3947,23 @@ export const SPLIT_PANEL_PERSON_FREE_DIRECTIVE =
   'describe the narrated subject instead — here that outranks the "do not add new objects" rule.';
 
 /**
+ * The CTA lane's replacement for `SPLIT_PANEL_PERSON_FREE_DIRECTIVE`, prepended to the split
+ * panel's user message when the beat is a sales pitch. It carries the panel's stricter
+ * person/hands rule (`CTA_BROLL_ENHANCER_SYSTEM` still allows bare hands — a cutaway is the whole
+ * frame, a panel sits beside the host who already carries the person) and deliberately DROPS the
+ * "narration decides the SUBJECT" clause: on a pitch beat the narration IS the pitch, and
+ * obeying it is what put an invented QR code and a video-description page in the panel. The CTA
+ * system prompt supplies the subject from the video's topic instead.
+ */
+export const CTA_SPLIT_PANEL_DIRECTIVE =
+  "IMPORTANT: this is a split-screen RIGHT PANEL shown beside the talking host — it must be " +
+  "OBJECT / PRODUCT / SETTING ONLY, with NO people, NO hands, and NO body parts of any kind " +
+  "(the host on the LEFT already carries the person, and a second figure or a stray pair of " +
+  "hands beside her reads off). If the subject you would otherwise describe involves a person " +
+  "or their hands, show the physical thing the action happens to or leaves behind instead, " +
+  "unattended and at rest.";
+
+/**
  * Cutaway sibling of `SPLIT_PANEL_PERSON_FREE_DIRECTIVE`, prepended to the b-roll enhancer's
  * user message. Same job — rewrite any person out of the POSITIVE description before it reaches
  * render — but a cutaway is the whole frame rather than a panel beside the host, so bare hands
@@ -4599,6 +4616,16 @@ const CTA_HOST_SCENES = 1;
 /** Silent frozen-frame tail (seconds) the QR holds after the RELEASE line — the host just said
  *  "I'll wait right here" — added to the held scene length in assembly (mux tpad/apad). */
 const QR_TAIL_HOLD_SEC = 3;
+
+/**
+ * Shortest the big centered QR may be on screen, counting the whole `qrHero` block: its beats'
+ * narration plus the frozen tail. A viewer has to notice the code, pick a phone up, open a
+ * camera and hold it steady, and the trigger line ("Now go ahead and grab your phone") is under
+ * two seconds of speech — so the flat `QR_TAIL_HOLD_SEC` alone left blocks whose card was gone
+ * before anyone could aim at it. `extendQrHeroWindow` tops the tail up to reach this; a block
+ * already over it is untouched, so a long pitch keeps exactly the timing it has today.
+ */
+export const QR_HERO_MIN_WINDOW_SEC = 6;
 
 /** Patterns that flag a scene's verbatim narration as call-to-action content. */
 const CTA_SIGNAL_PATTERNS: RegExp[] = [
@@ -6817,6 +6844,53 @@ export function applySceneHoldFloor(
   // operator has since made it" (see `minHoldSec`).
   s.minHoldSec = floor;
   if (dur > 0 && dur < floor) s.audioDuration = floor;
+}
+
+/**
+ * Give each big-QR block a scannable minimum on screen (`QR_HERO_MIN_WINDOW_SEC`), recorded as
+ * `qrHoldSec` on the block's `qrTail` beat. The `qrHero` block is the one register with NO
+ * on-screen floor — `applySceneHoldFloor` returns early on it, deliberately, so the card is
+ * never freeze-padded mid-block — which left the scan window equal to however long the trigger
+ * line happened to take to say. "Now go ahead and grab your phone" is ~1.7s; with the flat 3s
+ * tail that is under 5s from the code appearing to the cut, most of it spent while the viewer is
+ * still reaching for a phone.
+ *
+ * The window is the WHOLE contiguous `qrHero` run — the code is on screen across all of it, big
+ * on the filler beats and small bottom-right on any beat that kept the host (`toQr`), so the
+ * scan window is the run, not one beat of it. Measured from the persisted narration slices so it
+ * reflects what was actually voiced; the top-up lands entirely on the last beat's frozen tail,
+ * which is the only place that can
+ * grow without moving the master narration. Never shortens: a block already at or over the
+ * minimum keeps the flat default and is byte-identical to before this pass existed. Idempotent
+ * (it recomputes from the slices, not from its own last answer), and it writes `qrHoldSec`, not
+ * `tailHoldSec`, so an operator's own hold still wins. Mutates in place. Pure — unit-tested.
+ */
+export function extendQrHeroWindow(
+  scenes: StoryboardScene[],
+  minWindowSec = QR_HERO_MIN_WINDOW_SEC
+): void {
+  const spokenSec = (s: StoryboardScene) => {
+    const slice = (s.narrationEndSec ?? 0) - (s.narrationStartSec ?? 0);
+    return slice > 0 ? slice : (s.audioDuration ?? 0);
+  };
+  for (let i = 0; i < scenes.length; i++) {
+    if (!scenes[i].qrHero) continue;
+    let end = i;
+    while (end + 1 < scenes.length && scenes[end + 1].qrHero) end++;
+    // The block's tail beat. `markCtaQrBlock` flags the last one; a storyboard whose flags were
+    // written by an older build (or a block the release line never closed) has none, and there
+    // is then no beat whose tail may grow — leave it exactly as it is.
+    const tail = scenes.slice(i, end + 1).find(s => s.qrTail);
+    if (tail) {
+      let spoken = 0;
+      for (let k = i; k <= end; k++) spoken += spokenSec(scenes[k]);
+      const needed = minWindowSec - spoken;
+      if (needed > QR_TAIL_HOLD_SEC)
+        tail.qrHoldSec = Math.round(needed * 100) / 100;
+      else delete tail.qrHoldSec; // back under the minimum's reach — flat default again
+    }
+    i = end;
+  }
 }
 
 /**
@@ -9182,35 +9256,72 @@ export async function enhanceBrollPrompts(
   // seeds splitVisual from `brollVisual ?? visualPrompt`, so a host scene with no brollVisual
   // renders the host's OWN talking-head prompt as the right half. Always the motion lane — the
   // right half is a grok clip, never a Ken Burns still.
+  //
+  // A CTA beat takes the SAME lane the CTA cutaway takes (`CTA_BROLL_ENHANCER_SYSTEM` +
+  // `sanitizeCtaCutaway`), which until now was wired to cutaways only. On a pitch beat the
+  // narration is the pitch, and `STILL_BROLL_ENHANCER_SYSTEM`'s script-alignment rule obeys it
+  // literally: "point your phone at the QR code" rendered a phone displaying an invented,
+  // unscannable QR code beside the real composited one, and "the link's in the description"
+  // rendered a phone showing a video's description page. The panel is not the place to depict
+  // the pitch — the QR card is composited in code — so the pitch is ignored here exactly as it
+  // is in the cutaway lane, and the panel shows calm on-topic b-roll instead.
   const enhanceSplit = async ({
     scene,
+    i,
   }: {
     scene: StoryboardScene;
+    i: number;
   }): Promise<unknown> => {
+    const isCta = scene.cta === true;
     try {
       const result = await invokeGemini({
-        systemPrompt: STILL_BROLL_ENHANCER_SYSTEM,
-        userMessage:
-          `${SPLIT_PANEL_PERSON_FREE_DIRECTIVE}\n` +
-          channelLine +
-          subjectLine +
-          directionLine +
-          beatLineFor(scene) +
-          `Scene narration: "${scene.scriptText ?? scene.narration}"\n` +
-          `Original prompt: ${splitSeedOf(scene)}\n\n` +
-          `Enhanced prompt:`,
+        systemPrompt: isCta
+          ? CTA_BROLL_ENHANCER_SYSTEM
+          : STILL_BROLL_ENHANCER_SYSTEM,
+        userMessage: isCta
+          ? `${CTA_SPLIT_PANEL_DIRECTIVE}\n` +
+            channelLine +
+            subjectLine +
+            directionLine +
+            `Type: still\n` +
+            `Topic context (other cutaways in this video): ${topicContext || "the video's general subject"}\n` +
+            `Scene narration (a SALES PITCH — never depict the pitch itself; use it only to stay ` +
+            `in the video's topic register): "${scene.scriptText ?? scene.narration}"\n\n` +
+            `Enhanced prompt:`
+          : `${SPLIT_PANEL_PERSON_FREE_DIRECTIVE}\n` +
+            channelLine +
+            subjectLine +
+            directionLine +
+            beatLineFor(scene) +
+            `Scene narration: "${scene.scriptText ?? scene.narration}"\n` +
+            `Original prompt: ${splitSeedOf(scene)}\n\n` +
+            `Enhanced prompt:`,
         maxTokens: 600,
       });
       if (result.stopReason === "max_tokens")
         throw new Error("rewrite truncated (max_tokens)");
       const enhanced = stripPromptArtifacts(result.text);
-      if (enhanced) scene.splitVisual = enhanced;
+      if (isCta) {
+        scene.splitVisual = sanitizeCtaCutaway(
+          enhanced || scene.splitVisual,
+          scenes,
+          i
+        );
+      } else if (enhanced) {
+        scene.splitVisual = enhanced;
+      }
       return null;
     } catch (err) {
       console.warn(
         `[enhanceBrollPrompts] splitVisual ${scene.index} failed, keeping original:`,
         err
       );
+      // Mirror of the cutaway lane: a CTA panel must never keep a literal pitch prompt, even
+      // when the rewrite failed open — the seed it would keep is `brollVisual ?? visualPrompt`,
+      // which on a CTA host beat is often the talking-head prompt itself.
+      if (isCta) {
+        scene.splitVisual = sanitizeCtaCutaway(scene.splitVisual, scenes, i);
+      }
       return err ?? new Error("unknown error");
     }
   };
@@ -9224,13 +9335,20 @@ export async function enhanceBrollPrompts(
     if (err) noteFailure(item.scene.index, err);
   }
 
-  // Deterministic book→on-topic swap over every scene's splitVisual. No LLM.
-  // MUST stay AFTER the pass above: it is the only guard on splitVisual, so enhancing after it
-  // would let an LLM-introduced book straight through — reintroducing what ac2cb89 fixed.
-  // Unconditional over all scenes (not just `only`): idempotent, cheap, and catches a booky
-  // splitVisual that predates this call.
+  // Deterministic book→on-topic swap over every scene's splitVisual, plus the literal-pitch swap
+  // on CTA beats (a phone, a screen, a QR code, a scan, a link — `ctaVisualIsLiteral`). No LLM.
+  // MUST stay AFTER the pass above: these are the only guards on splitVisual, so enhancing after
+  // them would let an LLM-introduced book or phone straight through — reintroducing what ac2cb89
+  // fixed. Unconditional over all scenes (not just `only`): idempotent, cheap, and it catches a
+  // splitVisual Claude authored directly as well as one that predates this call. The literal
+  // check is scoped to `cta` beats because its vocabulary is ordinary content elsewhere — a
+  // gardening video may legitimately show a screen or link a tool's name.
   scenes.forEach((scene, i) => {
-    if (scene.splitVisual && brollDepictsBook(scene.splitVisual)) {
+    if (!scene.splitVisual) return;
+    if (
+      brollDepictsBook(scene.splitVisual) ||
+      (scene.cta && ctaVisualIsLiteral(scene.splitVisual))
+    ) {
       scene.splitVisual = genericCtaBrollFor(scenes, i);
     }
   });
@@ -9578,6 +9696,10 @@ async function runUnifiedPipeline(
   // coverHero beats are skipped (they play their own narration with no pad). Same helper guards
   // the regenerate/retry path so no scene escapes.
   for (const s of scenes) applySceneHoldFloor(s, pacing);
+  // The one register that pass skips gets its own minimum here: the big QR must stay up long
+  // enough to actually be scanned, and the block's narration alone does not guarantee that.
+  // Runs after the slices are persisted above — it measures the window from them.
+  extendQrHeroWindow(scenes);
   // Post-condition on the whole band-enforcement sequence, checked against the FINAL durations
   // (silence snapping above rewrites them by up to SNAP_TOLERANCE_SEC). A survivor here is a
   // clause-less over-long sentence — it renders one clip with a frozen tail rather than failing,
@@ -10984,6 +11106,10 @@ async function renderSceneClipInPlace(
   // Re-voicing here yields the raw narration length; hold it to the floor like the main pipeline
   // so a regenerated/retried short scene freezes to SCENE_MIN_HOLD_SEC instead of cutting short.
   applySceneHoldFloor(scene, pacingFor(params));
+  // A re-voiced QR beat changes how long its block's card is on screen, so the scan window is
+  // recomputed the same way the main pipeline computes it. Whole-list (the window spans the
+  // block, not this one scene) and idempotent, so it costs nothing on a non-QR regenerate.
+  if (scene.qrHero) extendQrHeroWindow(scenes);
   // The ceiling can't be enforced the same way: splitting one scene here would renumber the whole
   // storyboard mid-render. A re-voice that lands over it renders one clip with a frozen tail — warn
   // so the drift is visible instead of silently padded.
