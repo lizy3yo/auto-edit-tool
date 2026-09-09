@@ -398,8 +398,11 @@ const channelConfigRouter = router({
         authorName: z.string().optional(),
         ctaQrImageUrl: z.string().url().optional(),
         bookCoverImageUrl: z.string().url().optional(),
-        hostPhotoUrl: z.string().url().optional(),
-        hostPhotoUrl2: z.string().url().optional(),
+        // Nullish for the same reason as the identity fields below: Remove in the
+        // channel editor has to be able to CLEAR a photo, and `|| undefined` made
+        // that a no-op against `.set()`.
+        hostPhotoUrl: z.string().url().nullish(),
+        hostPhotoUrl2: z.string().url().nullish(),
         // `null` clears the stored value; `undefined` (omitted) leaves it untouched.
         hostName: z.string().nullish(),
         hostTitle: z.string().nullish(),

@@ -4,6 +4,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ChannelBooks } from "@/components/admin/ChannelBooks";
 import { ChannelAssets } from "@/components/admin/ChannelAssets";
 import {
+  diffFields,
+  fieldCountLabel,
+  SummaryList,
+  type FieldSpec,
+} from "@/components/admin/ChangeSummary";
+import {
   Dialog,
   DialogContent,
   DialogFooter,
@@ -50,6 +56,8 @@ function ImageUploadField({
   fit,
   whiteBg,
   uploadLabel,
+  confirmRemove,
+  shortLabel,
 }: {
   label: string;
   helpText: string;
@@ -58,7 +66,15 @@ function ImageUploadField({
   fit: "contain" | "cover";
   whiteBg?: boolean;
   uploadLabel: string;
+  /** Ask before clearing. On for the channel editor, where a removed photo is a
+      real change to a saved channel; off in the Create dialog, where there is
+      nothing stored yet to lose. */
+  confirmRemove?: boolean;
+  /** Name for the confirm dialog. `label` carries field-form suffixes like
+      "— Alt Angle (optional)" that read badly in a sentence. */
+  shortLabel?: string;
 }) {
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const upload = trpc.styleReference.upload.useMutation({
     onSuccess: ({ url }) => {
       onChange(url);
@@ -83,10 +99,35 @@ function ImageUploadField({
             variant="outline"
             size="sm"
             className="text-xs h-7"
-            onClick={() => onChange("")}
+            onClick={() =>
+              confirmRemove ? setConfirmOpen(true) : onChange("")
+            }
           >
             Remove
           </Button>
+          <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>
+                  Remove {shortLabel ?? label}?
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  The channel will have no {(shortLabel ?? label).toLowerCase()}{" "}
+                  until you upload a new one. This takes effect when you save
+                  the configuration.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() => onChange("")}
+                  className="bg-destructive hover:bg-destructive/90"
+                >
+                  Remove
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       ) : (
         <label className="inline-flex cursor-pointer items-center gap-2 h-8 px-3 rounded-md border border-dashed border-border bg-secondary/30 text-xs text-muted-foreground hover:text-foreground hover:bg-secondary/50">
@@ -126,6 +167,46 @@ function ImageUploadField({
   );
 }
 
+type EditForm = {
+  authorName: string;
+  hostPhotoUrl: string;
+  hostPhotoUrl2: string;
+  hostName: string;
+  hostTitle: string;
+  hostLocation: string;
+  voiceId: string;
+  voiceName: string;
+  ttsModel: string;
+  ttsSpeed: string;
+  ttsVolume: string;
+  defaultAngle: string;
+  defaultFormat: string;
+  defaultWordCount: string;
+};
+
+/** Field order and wording for the "review changes" step. Ordered as the form is,
+    so the summary reads top-to-bottom like the panel the operator just filled in. */
+const EDIT_FIELDS: FieldSpec<EditForm>[] = [
+  { field: "authorName", label: "Author Name" },
+  { field: "hostPhotoUrl", label: "Host Photo", image: true },
+  {
+    field: "hostPhotoUrl2",
+    label: "Alt Angle Host Photo",
+    image: true,
+  },
+  { field: "hostName", label: "Host Name" },
+  { field: "hostTitle", label: "Host Title" },
+  { field: "hostLocation", label: "Host Location" },
+  { field: "voiceId", label: "Voice ID" },
+  { field: "voiceName", label: "Voice Name" },
+  { field: "ttsModel", label: "TTS Model" },
+  { field: "ttsSpeed", label: "Speed" },
+  { field: "ttsVolume", label: "Volume" },
+  { field: "defaultAngle", label: "Default Angle" },
+  { field: "defaultFormat", label: "Default Format" },
+  { field: "defaultWordCount", label: "Word Count" },
+];
+
 export function ChannelConfigPanel() {
   const utils = trpc.useUtils();
   const {
@@ -150,7 +231,9 @@ export function ChannelConfigPanel() {
       utils.channelConfig.listAllChannels.invalidate();
       toast.success("Channel created");
       setCreateOpen(false);
-      setEditForm({
+      // The new channel opens straight into the editor, so its just-created values
+      // are also the baseline the Save summary diffs against.
+      const created: EditForm = {
         authorName: createForm.authorName,
         hostPhotoUrl: createForm.hostPhotoUrl,
         hostPhotoUrl2: createForm.hostPhotoUrl2,
@@ -165,7 +248,9 @@ export function ChannelConfigPanel() {
         defaultAngle: createForm.defaultAngle,
         defaultFormat: createForm.defaultFormat,
         defaultWordCount: createForm.defaultWordCount,
-      });
+      };
+      setEditForm(created);
+      setOriginalForm(created);
       setEditingChannel(data.channelKey);
       setCreateForm({
         displayName: "",
@@ -199,22 +284,7 @@ export function ChannelConfigPanel() {
   });
 
   const [editingChannel, setEditingChannel] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState<{
-    authorName: string;
-    hostPhotoUrl: string;
-    hostPhotoUrl2: string;
-    hostName: string;
-    hostTitle: string;
-    hostLocation: string;
-    voiceId: string;
-    voiceName: string;
-    ttsModel: string;
-    ttsSpeed: string;
-    ttsVolume: string;
-    defaultAngle: string;
-    defaultFormat: string;
-    defaultWordCount: string;
-  }>({
+  const [editForm, setEditForm] = useState<EditForm>({
     authorName: "",
     hostPhotoUrl: "",
     hostPhotoUrl2: "",
@@ -230,6 +300,9 @@ export function ChannelConfigPanel() {
     defaultFormat: "",
     defaultWordCount: "",
   });
+  /** The form as it was loaded, so Save can show what actually changed. */
+  const [originalForm, setOriginalForm] = useState<EditForm | null>(null);
+  const [saveConfirmOpen, setSaveConfirmOpen] = useState(false);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createForm, setCreateForm] = useState({
@@ -257,7 +330,7 @@ export function ChannelConfigPanel() {
 
   const handleEdit = (channelKey: string) => {
     const config = configs?.find((c: any) => c.channelKey === channelKey);
-    setEditForm({
+    const loaded: EditForm = {
       authorName: config?.authorName || "",
       hostPhotoUrl: config?.hostPhotoUrl || "",
       hostPhotoUrl2: config?.hostPhotoUrl2 || "",
@@ -274,11 +347,28 @@ export function ChannelConfigPanel() {
       defaultWordCount: config?.defaultWordCount
         ? String(config.defaultWordCount)
         : "",
-    });
+    };
+    setEditForm(loaded);
+    setOriginalForm(loaded);
     setEditingChannel(channelKey);
   };
 
+  const pendingChanges = originalForm
+    ? diffFields(originalForm, editForm, EDIT_FIELDS)
+    : [];
+
+  // Save is a two-step: review what changed, then commit. A bare "are you sure?"
+  // protects nothing — the summary is the point.
   const handleSave = () => {
+    if (!editingChannel) return;
+    if (originalForm && pendingChanges.length === 0) {
+      toast.info("No changes to save");
+      return;
+    }
+    setSaveConfirmOpen(true);
+  };
+
+  const commitSave = () => {
     if (!editingChannel) return;
     upsertMutation.mutate({
       channelKey: editingChannel,
@@ -287,8 +377,11 @@ export function ChannelConfigPanel() {
       // partial to Drizzle's `.set()`, so omitting them leaves whatever a legacy channel
       // already stored intact rather than silently wiping it on the next save — they simply
       // can no longer be set from here. Both now come from the channel's books.
-      hostPhotoUrl: editForm.hostPhotoUrl || undefined,
-      hostPhotoUrl2: editForm.hostPhotoUrl2 || undefined,
+      // Same `null`-not-`undefined` rule as the identity fields below: a photo
+      // cleared with Remove has to reach `.set()` as an explicit null, or the
+      // column is skipped and the old URL survives the save.
+      hostPhotoUrl: editForm.hostPhotoUrl || null,
+      hostPhotoUrl2: editForm.hostPhotoUrl2 || null,
       // The identity card fields send `null` when blanked, not `undefined`: `upsert` passes
       // a partial to `.set()`, which skips undefined columns, so `|| undefined` made a
       // cleared name silently keep its old value.
@@ -306,7 +399,9 @@ export function ChannelConfigPanel() {
         ? parseInt(editForm.defaultWordCount)
         : undefined,
     });
+    setSaveConfirmOpen(false);
     setEditingChannel(null);
+    setOriginalForm(null);
   };
 
   const handleCreate = () => {
@@ -377,6 +472,8 @@ export function ChannelConfigPanel() {
         onChange={url => setEditForm(f => ({ ...f, hostPhotoUrl: url }))}
         fit="cover"
         uploadLabel="Upload host photo"
+        confirmRemove
+        shortLabel="Host Photo"
       />
       <ImageUploadField
         label="Host Photo — Alt Angle (optional)"
@@ -385,6 +482,8 @@ export function ChannelConfigPanel() {
         onChange={url => setEditForm(f => ({ ...f, hostPhotoUrl2: url }))}
         fit="cover"
         uploadLabel="Upload alt host photo"
+        confirmRemove
+        shortLabel="Alt Angle Host Photo"
       />
       {/* On-screen host identity (lower third) */}
       <div>
@@ -710,11 +809,14 @@ export function ChannelConfigPanel() {
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() =>
-                            isEditing
-                              ? setEditingChannel(null)
-                              : handleEdit(channel.key)
-                          }
+                          onClick={() => {
+                            if (isEditing) {
+                              setEditingChannel(null);
+                              setOriginalForm(null);
+                            } else {
+                              handleEdit(channel.key);
+                            }
+                          }}
                         >
                           <Settings className="h-3.5 w-3.5" />
                           {isEditing ? "Cancel" : "Edit"}
@@ -1020,6 +1122,33 @@ export function ChannelConfigPanel() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Save Confirmation — a review of what changes, not a bare "are you sure?".
+          The operator approves a specific list, so a stray edit made while
+          scrolling a long form is visible before it is written. */}
+      <AlertDialog open={saveConfirmOpen} onOpenChange={setSaveConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Save changes to this channel?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {fieldCountLabel(pendingChanges.length)}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <SummaryList rows={pendingChanges} />
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={commitSave}
+              disabled={upsertMutation.isPending}
+            >
+              {upsertMutation.isPending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
+              ) : null}
+              Save Changes
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Delete Confirmation */}
       <AlertDialog

@@ -30,6 +30,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  diffFields,
+  fieldCountLabel,
+  SummaryList,
+  type FieldSpec,
+} from "@/components/admin/ChangeSummary";
 
 /**
  * A channel's BOOKS — the products its videos pitch — edited inside the channel it belongs to.
@@ -58,8 +64,60 @@ type Draft = {
 
 const EMPTY: Draft = { title: "", coverImageUrl: "", shopUrl: "" };
 
+/** Field order and wording for the add/save review step, same order as the form. */
+const BOOK_FIELDS: FieldSpec<Draft>[] = [
+  { field: "title", label: "Title" },
+  { field: "shopUrl", label: "Shop Link" },
+  { field: "coverImageUrl", label: "Cover", image: true },
+];
+
 /** Sentinel for "no video picked" — a Select value may not be an empty string. */
 const NO_VIDEO = "__none__";
+
+/**
+ * A book's identity as the list shows it — cover, title, shop link.
+ *
+ * The Add/Save confirmation previews the book with this same component rather than its own
+ * markup, so what an operator approves is literally the row they are about to get. It also
+ * carries the no-shop-link warning, which means the dialog raises it in the same words as
+ * the list instead of a second phrasing that could drift.
+ */
+function BookPreview({
+  title,
+  coverImageUrl,
+  shopUrl,
+}: {
+  title: string;
+  coverImageUrl: string;
+  shopUrl: string;
+}) {
+  return (
+    <div className="flex min-w-0 flex-1 items-start gap-3">
+      {coverImageUrl ? (
+        <img
+          src={coverImageUrl}
+          alt=""
+          className="h-16 w-12 shrink-0 rounded border border-border object-cover"
+        />
+      ) : (
+        <div className="flex h-16 w-12 shrink-0 items-center justify-center rounded border border-dashed border-border">
+          <BookOpen className="h-4 w-4 text-muted-foreground" />
+        </div>
+      )}
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium">{title}</div>
+        <div className="truncate text-xs text-muted-foreground">
+          {shopUrl || (
+            <span className="text-warning">
+              No shop link — this book&apos;s pitch carries no QR and no
+              tracking
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /** Cover upload — same flow as the channel assets. */
 function CoverPicker({
@@ -271,6 +329,9 @@ function QrPreview({
 export function ChannelBooks({ channelKey }: { channelKey: string }) {
   const utils = trpc.useUtils();
   const [draft, setDraft] = useState<Draft>(EMPTY);
+  /** The row as it was when Edit was pressed, so Save can show what actually changed. */
+  const [originalDraft, setOriginalDraft] = useState<Draft | null>(null);
+  const [saveConfirmOpen, setSaveConfirmOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<
     (Draft & { id: number }) | null
   >(null);
@@ -286,6 +347,8 @@ export function ChannelBooks({ channelKey }: { channelKey: string }) {
     onSuccess: () => {
       toast.success(draft.id ? "Book updated." : "Book added.");
       setDraft(EMPTY);
+      setOriginalDraft(null);
+      setSaveConfirmOpen(false);
       utils.book.list.invalidate();
     },
     onError: err => toast.error(err.message),
@@ -303,6 +366,44 @@ export function ChannelBooks({ channelKey }: { channelKey: string }) {
   });
 
   const canSave = !!channelKey && draft.title.trim().length > 0;
+  const isEditingBook = draft.id !== undefined;
+
+  // Books write the moment this is confirmed — there is no Save Configuration step
+  // downstream to catch a mistake — so both writes go through a review. Adding shows
+  // the book itself, since the preview already carries all three fields; editing shows
+  // it too, with the list of what changed beneath.
+  const changedFields =
+    isEditingBook && originalDraft
+      ? diffFields(originalDraft, draft, BOOK_FIELDS)
+      : [];
+
+  const startEdit = (row: Draft) => {
+    setDraft(row);
+    setOriginalDraft(row);
+  };
+
+  const cancelEdit = () => {
+    setDraft(EMPTY);
+    setOriginalDraft(null);
+  };
+
+  const handleSave = () => {
+    if (!canSave) return;
+    if (isEditingBook && originalDraft && changedFields.length === 0) {
+      toast.info("No changes to save");
+      return;
+    }
+    setSaveConfirmOpen(true);
+  };
+
+  const commitSave = () =>
+    save.mutate({
+      id: draft.id,
+      channelKey,
+      title: draft.title,
+      coverImageUrl: draft.coverImageUrl || null,
+      shopUrl: draft.shopUrl || null,
+    });
 
   return (
     <div className="space-y-3">
@@ -341,35 +442,18 @@ export function ChannelBooks({ channelKey }: { channelKey: string }) {
           {(books ?? []).map(b => (
             <div key={b.id} className="rounded-md border border-border p-3">
               <div className="flex flex-wrap items-start gap-3">
-                {b.coverImageUrl ? (
-                  <img
-                    src={b.coverImageUrl}
-                    alt=""
-                    className="h-16 w-12 shrink-0 rounded border border-border object-cover"
-                  />
-                ) : (
-                  <div className="flex h-16 w-12 shrink-0 items-center justify-center rounded border border-dashed border-border">
-                    <BookOpen className="h-4 w-4 text-muted-foreground" />
-                  </div>
-                )}
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium">{b.title}</div>
-                  <div className="truncate text-xs text-muted-foreground">
-                    {b.shopUrl || (
-                      <span className="text-warning">
-                        No shop link — this book&apos;s pitch carries no QR and
-                        no tracking
-                      </span>
-                    )}
-                  </div>
-                </div>
+                <BookPreview
+                  title={b.title}
+                  coverImageUrl={b.coverImageUrl ?? ""}
+                  shopUrl={b.shopUrl ?? ""}
+                />
                 <div className="flex shrink-0 gap-1">
                   <Button
                     variant="outline"
                     size="sm"
                     className="h-7 text-xs"
                     onClick={() =>
-                      setDraft({
+                      startEdit({
                         id: b.id,
                         title: b.title,
                         coverImageUrl: b.coverImageUrl ?? "",
@@ -451,31 +535,79 @@ export function ChannelBooks({ channelKey }: { channelKey: string }) {
         </div>
         <div className="flex flex-wrap justify-end gap-2">
           {draft.id && (
-            <Button size="sm" variant="outline" onClick={() => setDraft(EMPTY)}>
+            <Button size="sm" variant="outline" onClick={cancelEdit}>
               Cancel
             </Button>
           )}
           <Button
             size="sm"
             disabled={!canSave || save.isPending}
-            onClick={() =>
-              save.mutate({
-                id: draft.id,
-                channelKey,
-                title: draft.title,
-                coverImageUrl: draft.coverImageUrl || null,
-                shopUrl: draft.shopUrl || null,
-              })
-            }
+            onClick={handleSave}
           >
             {save.isPending
               ? "Saving…"
-              : draft.id
+              : isEditingBook
                 ? "Save changes"
                 : "Add book"}
           </Button>
         </div>
       </div>
+
+      {/* Add / Save review. Adding lists what the row will hold; editing lists only what
+          changed. Either way the operator approves a specific list, not a bare prompt. */}
+      <AlertDialog
+        open={saveConfirmOpen}
+        onOpenChange={open => {
+          if (!open && !save.isPending) setSaveConfirmOpen(false);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {isEditingBook
+                ? "Save changes to this book?"
+                : "Add this book to the channel?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {isEditingBook
+                ? "This is how the book will read in the channel's list:"
+                : "This is written to the channel immediately."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="flex rounded-md border border-border p-3">
+            <BookPreview
+              title={draft.title.trim()}
+              coverImageUrl={draft.coverImageUrl}
+              shopUrl={draft.shopUrl.trim()}
+            />
+          </div>
+          {isEditingBook && (
+            <>
+              <p className="text-xs text-muted-foreground">
+                {fieldCountLabel(changedFields.length)}
+              </p>
+              <SummaryList rows={changedFields} />
+            </>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={save.isPending}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={e => {
+                e.preventDefault();
+                commitSave();
+              }}
+              disabled={save.isPending}
+            >
+              {save.isPending ? (
+                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+              ) : null}
+              {isEditingBook ? "Save changes" : "Add book"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog
         open={pendingDelete !== null}
