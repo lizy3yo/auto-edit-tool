@@ -39,6 +39,7 @@ import {
   pollUnifiedTTSTask,
   capDeadAirPauses,
   VoiceNotFoundError,
+  DuplicateTTSError,
 } from "./ttsUnified";
 import { storagePut } from "./storage";
 import {
@@ -195,6 +196,7 @@ import {
   probeUrlDurationSec,
   extractMonoAudio,
   sliceAudioSegments,
+  sliceAudioSegmentsBestEffort,
   detectSilencesFromBuffer,
   HOST_INTRO_TRIM_SEC,
 } from "./videoAssembly";
@@ -3365,6 +3367,50 @@ const TTS_MAX_ATTEMPTS = 2;
  */
 const TTS_REVOICE_CONCURRENCY = 4;
 
+/**
+ * A durable home for ONE narration segment's in-flight TTS task id, so a task that outlives the
+ * call that created it can be resumed rather than abandoned.
+ *
+ * `generateSceneVoiceover` used to hold the id in a local, which meant a segment that timed out
+ * twice walked away from a job STILL RUNNING on 69Labs — and 69Labs then refused the identical
+ * resubmit with 409 DUPLICATE_TTS_IN_PROGRESS for as long as the orphan sat in its queue. Every
+ * later retry of that scene collided with a ghost of our own making, failed in milliseconds, and
+ * the audio the account had already been billed for was unreachable. The clip lane has persisted
+ * `renderTaskIds` for exactly this reason since it was written; this is the TTS mirror.
+ *
+ * Deliberately an interface rather than a scene field: the MASTER narration's delivery runs and
+ * chunks are voiced through the same function and belong to no scene.
+ */
+interface TTSResumeSlot {
+  /** The id remembered for this segment, if an earlier attempt got that far. */
+  get(): string | undefined;
+  /** Remember an id (at submit) or forget it (once collected, or once known dead). */
+  set(taskId: string | undefined): void;
+}
+
+/**
+ * Back a resume slot with `scene.ttsTaskIds[segment]`, persisting through `onChange`. Writes are
+ * debounced by the caller's persist closure, so the id reaches the row long before the poll it
+ * protects against times out.
+ */
+function sceneTTSResumeSlot(
+  scene: StoryboardScene,
+  segment: number,
+  onChange: () => void
+): TTSResumeSlot {
+  return {
+    get: () => scene.ttsTaskIds?.[segment] || undefined,
+    set: (taskId: string | undefined) => {
+      const ids = (scene.ttsTaskIds ??= []);
+      while (ids.length <= segment) ids.push("");
+      ids[segment] = taskId ?? "";
+      // Nothing left in flight — drop the array rather than persist a row of empty strings.
+      if (ids.every(id => !id)) scene.ttsTaskIds = undefined;
+      onChange();
+    },
+  };
+}
+
 async function generateSceneVoiceover(
   providerType: string,
   apiKey: string,
@@ -3375,19 +3421,32 @@ async function generateSceneVoiceover(
   volume?: number,
   stability?: number,
   style?: number,
-  similarity?: number
+  similarity?: number,
+  /** Where this segment's in-flight task id is remembered across attempts and across passes. */
+  resume?: TTSResumeSlot
 ): Promise<string> {
   let lastError = "TTS failed";
-  // Preserved across attempts: a timeout leaves the task running on the provider, so the next
-  // attempt resumes polling the same job instead of re-creating it (which 69Labs rejects with
-  // 409 DUPLICATE_TTS_IN_PROGRESS). Cleared on a genuine `failed` status so we create fresh.
   // Mock mode: a locally synthesised mp3 sized to the word count, uploaded to R2 exactly like
   // a real one. Placed here (not inside ttsUnified) so the retry/resume loop below — which only
   // exists to survive provider flakiness — is skipped entirely.
   if (await isMockMode()) return mockVoiceoverUrl(text);
 
-  let taskId: string | undefined;
-  for (let attempt = 0; attempt < TTS_MAX_ATTEMPTS; attempt++) {
+  // Preserved across attempts AND across passes: a timeout leaves the task running on the
+  // provider, so the next attempt — and any later retry, resume or watchdog sweep — polls that
+  // same job instead of re-creating it (which 69Labs rejects with 409 DUPLICATE_TTS_IN_PROGRESS).
+  // Cleared once the audio is collected, and on a genuine `failed` status so we create fresh.
+  let taskId: string | undefined = resume?.get();
+  if (taskId) {
+    console.log(
+      `[Longform] Resuming persisted TTS task ${taskId} from an earlier pass`
+    );
+  }
+  // A duplicate that NAMES its blocking job buys one extra attempt: adopting the id costs a
+  // poll rather than a submit, and the alternative is failing on audio already paid for.
+  let maxAttempts = TTS_MAX_ATTEMPTS;
+  let adopted = false;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    let created = false;
     try {
       if (!taskId) {
         taskId = await createUnifiedTTSTask(providerType, apiKey, {
@@ -3399,37 +3458,70 @@ async function generateSceneVoiceover(
           style,
           similarity,
         });
+        created = true;
+        // Persist BEFORE the first poll — the entire point is that a timeout, a crash or a
+        // killed pass between here and completion still leaves the job findable.
+        resume?.set(taskId);
       } else {
         console.log(`[Longform] Resuming in-progress TTS task ${taskId}`);
       }
       const start = Date.now();
       while (Date.now() - start < TTS_TIMEOUT_MS) {
         await sleep(4000);
-        const r = await pollUnifiedTTSTask(
-          providerType,
-          apiKey,
-          taskId,
-          volume
-        );
-        if (r.status === "completed" && r.audioUrl) return r.audioUrl;
+        let r;
+        try {
+          r = await pollUnifiedTTSTask(providerType, apiKey, taskId, volume);
+        } catch (pollErr: any) {
+          // A status read only throws on a 4xx (`pollTTSTask69Labs` reports 5xx/429 as "still
+          // processing"), so on an id carried in from an earlier pass this means the task is
+          // gone — expired, purged, or never ours. Forget it, so the next attempt submits fresh
+          // instead of re-reading a dead id forever. An id created in THIS call is kept: that
+          // job may well be running, and resubmitting would only duplicate it.
+          if (!created) {
+            taskId = undefined;
+            resume?.set(undefined);
+          }
+          throw pollErr;
+        }
+        if (r.status === "completed" && r.audioUrl) {
+          resume?.set(undefined); // collected — nothing left to resume
+          return r.audioUrl;
+        }
         // "censored" is deterministic content moderation — retrying the same text won't help.
         if (r.status === "censored") {
+          resume?.set(undefined);
           throw new CensoredTTSError(r.error || "TTS censored");
         }
         if (r.status === "failed") {
           // A failed job won't complete on resume — create a fresh one next attempt.
           taskId = undefined;
+          resume?.set(undefined);
           throw new Error(r.error || "TTS failed");
         }
       }
-      // Timeout: leave `taskId` set so the next attempt resumes polling this same job.
+      // Timeout: leave `taskId` set — and now PERSISTED — so the next attempt, or an operator
+      // retry hours later, resumes polling this same job rather than duplicating it.
       throw new Error("TTS timed out");
     } catch (e: any) {
       if (e instanceof CensoredTTSError) throw e; // never retry moderation blocks
       // A bad voice ID is config, not flakiness — retrying re-asks the same question.
       if (e instanceof VoiceNotFoundError) throw e;
+      // A duplicate that names its job is a RECOVERY, not a failure: the blocker is one of ours
+      // that an earlier pass walked away from, and its audio is already billed. Adopt and poll.
+      if (e instanceof DuplicateTTSError && e.taskId) {
+        console.warn(
+          `[Longform] TTS duplicate names task ${e.taskId} — adopting the running job`
+        );
+        taskId = e.taskId;
+        resume?.set(taskId);
+        if (!adopted) {
+          adopted = true;
+          maxAttempts++;
+        }
+        continue; // poll it now; nothing was submitted, so there is no backoff to serve
+      }
       lastError = e.message || "TTS failed";
-      if (attempt < TTS_MAX_ATTEMPTS - 1) {
+      if (attempt < maxAttempts - 1) {
         console.warn(
           `[Longform] TTS attempt ${attempt + 1} failed (${lastError}) — retrying`
         );
@@ -8502,7 +8594,14 @@ export async function buildSceneNarration(
   providerType: string,
   apiKey: string,
   scene: StoryboardScene,
-  params: LongformInputParams
+  params: LongformInputParams,
+  /**
+   * Persist the storyboard. Called the moment a TTS task id lands on the scene, so a timeout,
+   * crash or killed pass leaves a resumable id on the row instead of an orphan on 69Labs.
+   * Optional only because a caller without the scenes array cannot write one — such a call
+   * simply keeps the old, orphan-prone behaviour within its own attempts.
+   */
+  persist?: () => void
 ): Promise<{ url: string; durationSec: number }> {
   const text = fixClauseOnset(
     (scene.scriptText ?? scene.narration ?? "").trim()
@@ -8511,7 +8610,9 @@ export async function buildSceneNarration(
   // The scene's own pace from the delivery plan, so a regenerated scene matches the master.
   const speed = deliverySpeedFor(params.ttsSpeed, scene.deliveryPace);
   const audioUrls: string[] = [];
-  for (const seg of segments) {
+  const noteIds = persist ?? (() => {});
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
     audioUrls.push(
       await generateSceneVoiceover(
         providerType,
@@ -8525,7 +8626,10 @@ export async function buildSceneNarration(
         params.ttsVolume,
         TTS_STABILITY,
         TTS_STYLE,
-        TTS_SIMILARITY
+        TTS_SIMILARITY,
+        // Keyed by SEGMENT INDEX, so a scene whose script splits into three parts resumes each
+        // part against its own task rather than replaying the first one three times.
+        sceneTTSResumeSlot(scene, i, noteIds)
       )
     );
   }
@@ -10390,8 +10494,16 @@ async function restoreMissingNarrationSlices(
   if (repairable.length === 0) return;
 
   const indices = repairable.map(s => s.index).join(", ");
+  // Per-scene, not all-or-nothing. Every scene here is an INDEPENDENT repair, so one that cannot
+  // be cut or uploaded must not take the others down with it: this used to be one strict slice
+  // plus one `Promise.all` of uploads inside a single try, and either throwing meant the persist
+  // below never ran and ZERO scenes were repaired. On a job with 200 missing slices that turned
+  // one degenerate range into 200 scenes falling through to fresh paid TTS — which then met
+  // 69Labs' duplicate guard and wedged the render. The failures are named individually so the
+  // real cause is legible instead of arriving as one exception for the whole batch.
+  const failed: number[] = [];
   try {
-    const cuts = await sliceAudioSegments(
+    const cuts = await sliceAudioSegmentsBestEffort(
       masterAudioUrl,
       repairable.map(s => ({
         startSec: s.narrationStartSec as number,
@@ -10400,43 +10512,77 @@ async function restoreMissingNarrationSlices(
           0.1,
           (s.narrationEndSec as number) - (s.narrationStartSec as number)
         ),
-      }))
+      })),
+      (i, err: any) =>
+        console.error(
+          `[Longform ${jobId}] scene ${repairable[i].index}: could not cut ` +
+            `${repairable[i].narrationStartSec}s–${repairable[i].narrationEndSec}s ` +
+            `out of the master: ${err?.message ?? err}`
+        )
     );
     await Promise.all(
       repairable.map(async (s, i) => {
-        const key = `longform/${jobId}/scene-${s.index}-vo-${nanoid(6)}.mp3`;
-        const { url } = await storagePut(key, cuts[i], "audio/mpeg");
-        s.audioUrl = url;
-        // Only when absent: a surviving measured duration is the one the film was planned
-        // against (pause-snapping and the hold floor both read it), and the range length is
-        // an approximation of it.
-        if (s.audioDuration == null) {
-          s.audioDuration = roundMs(
-            (s.narrationEndSec as number) - (s.narrationStartSec as number)
+        const cut = cuts[i];
+        if (!cut) {
+          failed.push(s.index);
+          return;
+        }
+        try {
+          const key = `longform/${jobId}/scene-${s.index}-vo-${nanoid(6)}.mp3`;
+          const { url } = await storagePut(key, cut, "audio/mpeg");
+          s.audioUrl = url;
+          // Only when absent: a surviving measured duration is the one the film was planned
+          // against (pause-snapping and the hold floor both read it), and the range length is
+          // an approximation of it.
+          if (s.audioDuration == null) {
+            s.audioDuration = roundMs(
+              (s.narrationEndSec as number) - (s.narrationStartSec as number)
+            );
+          }
+        } catch (err: any) {
+          failed.push(s.index);
+          console.error(
+            `[Longform ${jobId}] scene ${s.index}: re-cut narration would not upload: ` +
+              `${err?.message ?? err}`
           );
         }
       })
     );
-    appendJobWarning(
-      jobId,
-      `Re-cut ${repairable.length} missing narration slice(s) from the master before assembly ` +
-        `(scene ${indices}) — the film is complete, but those scenes had lost their audio`
-    );
-    // Persist immediately so a later Reassemble reuses the repair, and the cut room and live
-    // preview see the restored slices. The progress write is what carries the warning above
-    // onto the job row; every clip is rendered by the time assembly runs, so the counts are final.
-    await updateLongformVideoJob(jobId, {
-      storyboard: scenes,
-      progress: jobProgress(jobId, {
-        scenesTotal: scenes.length,
-        scenesDone: scenes.length,
-      }),
-    });
   } catch (err: any) {
+    // Only a failure to reach the master itself lands here — nothing was repairable.
     console.error(
       `[Longform ${jobId}] could not re-cut narration for scene ${indices}: ${err?.message ?? err}`
     );
+    return;
   }
+
+  const repaired = repairable.filter(s => s.audioUrl);
+  if (repaired.length === 0) {
+    console.error(
+      `[Longform ${jobId}] re-cut repaired none of ${repairable.length} scene(s) ` +
+        `(${indices}) — they now fall through to fresh TTS`
+    );
+    return;
+  }
+  appendJobWarning(
+    jobId,
+    `Re-cut ${repaired.length} missing narration slice(s) from the master before assembly ` +
+      `(scene ${repaired.map(s => s.index).join(", ")}) — the film is complete, but those ` +
+      `scenes had lost their audio` +
+      (failed.length > 0
+        ? `. ${failed.length} could NOT be re-cut (scene ${failed.sort((a, b) => a - b).join(", ")})`
+        : "")
+  );
+  // Persist immediately so a later Reassemble reuses the repair, and the cut room and live
+  // preview see the restored slices. The progress write is what carries the warning above
+  // onto the job row; every clip is rendered by the time assembly runs, so the counts are final.
+  await updateLongformVideoJob(jobId, {
+    storyboard: scenes,
+    progress: jobProgress(jobId, {
+      scenesTotal: scenes.length,
+      scenesDone: scenes.length,
+    }),
+  });
 }
 
 /**
@@ -11041,9 +11187,28 @@ async function ensureSceneNarration(
   scene: StoryboardScene,
   params: LongformInputParams,
   ttsType: string,
-  ttsKey: string
+  ttsKey: string,
+  /** Persists a TTS task id the moment it exists — see `buildSceneNarration`. */
+  persist?: () => void
 ): Promise<boolean> {
   if (scene.audioUrl && scene.audioDuration != null) return false;
+  // Audio present, only the MEASURED LENGTH missing: that is a probe, not a re-voice. Voicing
+  // here bought a second reading of a slice that was already correct — real credits spent, a
+  // fresh 69Labs task queued (and, when an earlier one was orphaned, a 409 duplicate earned)
+  // and the scene's master range cleared, dropping the WHOLE film off the master-overlay path
+  // to recover a number sitting in the file's own header. `probeUrlDurationSec` is best-effort
+  // and answers 0 on any failure, so an unreachable object still falls through to TTS below.
+  if (scene.audioUrl) {
+    const measured = await probeUrlDurationSec(scene.audioUrl, "mp3");
+    if (measured > 0) {
+      scene.audioDuration = roundMs(measured);
+      console.log(
+        `[Longform ${jobId}] scene ${scene.index} kept its narration — measured ` +
+          `${scene.audioDuration}s from the existing audio instead of re-voicing`
+      );
+      return false;
+    }
+  }
   // A film whose master was SUPPLIED can never be repaired with fresh TTS: the provider did not
   // read the other 200 scenes, so the repair lands a second voice inside one video — and unlike
   // a missing slice, that failure still assembles and ships. The legal repair is a re-cut of the
@@ -11062,7 +11227,8 @@ async function ensureSceneNarration(
     ttsType,
     ttsKey,
     scene,
-    params
+    params,
+    persist
   );
   scene.audioUrl = url;
   scene.audioDuration = durationSec;
@@ -11102,7 +11268,7 @@ async function renderSceneClipInPlace(
   const persist = async () => {
     schedulePersist(jobId, { storyboard: scenes });
   };
-  await ensureSceneNarration(jobId, scene, params, ttsType, ttsKey);
+  await ensureSceneNarration(jobId, scene, params, ttsType, ttsKey, persist);
   // Re-voicing here yields the raw narration length; hold it to the floor like the main pipeline
   // so a regenerated/retried short scene freezes to SCENE_MIN_HOLD_SEC instead of cutting short.
   applySceneHoldFloor(scene, pacingFor(params));
@@ -13215,7 +13381,14 @@ async function retryFailedScenesLocked(jobId: number): Promise<void> {
       // itself as a provider outage.
       await mapPool(unvoiced, TTS_REVOICE_CONCURRENCY, async scene => {
         try {
-          await ensureSceneNarration(jobId, scene, params, ttsType, ttsKey);
+          await ensureSceneNarration(
+            jobId,
+            scene,
+            params,
+            ttsType,
+            ttsKey,
+            () => schedulePersist(jobId, { storyboard: scenes })
+          );
         } catch (e: any) {
           scene.sceneStatus = "failed";
           scene.error = `Narration: ${describeError(e)}`;
@@ -13224,7 +13397,14 @@ async function retryFailedScenesLocked(jobId: number): Promise<void> {
       await flushPersist(jobId);
       await updateLongformVideoJob(jobId, { storyboard: scenes });
     }
-    const renderable = missing.filter(s => s.audioUrl);
+    // Voiced AND still clip-less. `missing` is "not assemblable", which is a missing clip OR a
+    // missing narration — so a scene whose ONLY fault was its audio is repaired by the block
+    // above and needs no render at all. Filtering on `audioUrl` alone sent it into
+    // `renderSceneClipInPlace`, which clears `renderTaskIds` and re-submits unconditionally:
+    // a fresh, billed render of a clip that was already sitting on the row, for every such
+    // scene in the batch. The comment below has always said "still lacks a clip"; now the
+    // filter does too.
+    const renderable = missing.filter(s => s.audioUrl && !sceneHasClip(s));
     // Re-render the missing scenes across all three provider lanes concurrently (was a
     // sequential for-loop that submitted only one scene's chunks at a time and blocked ~25min
     // on its polls before touching the next scene), mirroring resumeRenderingScenes. Host

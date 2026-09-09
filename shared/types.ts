@@ -679,6 +679,21 @@ export interface StoryboardScene {
    */
   renderTaskIds?: string[];
   /**
+   * Provider-side TTS task IDs for this scene's in-flight narration segment(s), in segment
+   * order (`splitScriptForNarration` order — usually one). The exact TTS mirror of
+   * `renderTaskIds`, and added for the same reason after the clip lane had it for years: the
+   * id used to live only in a local, so a poll timeout ABANDONED a running job. 69Labs then
+   * refuses the identical resubmit with 409 DUPLICATE_TTS_IN_PROGRESS for as long as the
+   * orphan sits in its queue — which made every later retry of that scene fail instantly
+   * against a ghost we ourselves had created, with the paid-for audio unreachable.
+   *
+   * Written the moment a task is created, so a timeout, crash, watchdog sweep or operator
+   * retry RESUMES it. A slot is cleared once its audio is collected, and on a genuine `failed`
+   * status (a failed job never completes on resume, so the next attempt must submit fresh).
+   * Persisted in the storyboard JSON blob — no migration.
+   */
+  ttsTaskIds?: string[];
+  /**
    * What the last RunPod render of this scene cost and where the time went: billed GPU
    * seconds and the worker's per-node timings. Kept after completion (unlike `renderTaskIds`)
    * so the cost/quality bench can read GPU-seconds per finished second off the scene instead

@@ -11,7 +11,7 @@ import {
   downloadTTSAudio69Labs,
 } from "./tts69labs";
 import { createTTSTaskMinimax, pollTTSTaskMinimax } from "./ttsMinimax";
-export { VoiceNotFoundError } from "./tts69labs";
+export { VoiceNotFoundError, DuplicateTTSError } from "./tts69labs";
 import { storagePut } from "./storage";
 import { nanoid } from "nanoid";
 import { spawn } from "child_process";

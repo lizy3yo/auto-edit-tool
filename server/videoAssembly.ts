@@ -2357,25 +2357,70 @@ export async function extractMonoAudio(audioUrl: string): Promise<Buffer> {
  * Cut one audio URL into segments `[startSec, startSec+lenSec)`, in order, returning the MP3
  * bytes for each. Downloads the source ONCE, then re-encodes each segment (`buildAudioSegmentArgs`).
  * Used to slice the single master narration back into per-scene tracks. Cleans up its temp dir.
+ *
+ * ALL-OR-NOTHING: one segment that ffmpeg refuses fails the whole call. Correct for callers that
+ * need every cut (a lip-sync batch is meaningless with a hole in it); callers repairing a batch of
+ * independent scenes want `sliceAudioSegmentsBestEffort` instead.
  */
 export async function sliceAudioSegments(
   audioUrl: string,
   segments: { startSec: number; lenSec: number }[]
 ): Promise<Buffer[]> {
+  const cuts = await cutAudioSegments(audioUrl, segments);
+  return cuts as Buffer[];
+}
+
+/**
+ * `sliceAudioSegments` that survives a bad segment: the cuts it could make come back as buffers
+ * and the ones it could not come back as `null`, with each failure handed to `onError`.
+ *
+ * Exists because the all-or-nothing form made a whole-film repair depend on its worst range. A
+ * job with 200 scenes missing their narration slice re-cuts them in ONE call, and a single
+ * degenerate range — a start past the end of the master, a NaN out of an older alignment — threw
+ * before any buffer was returned, so ZERO of the 200 free repairs landed and every one of them
+ * fell through to fresh paid TTS. The caller could not tell that apart from "the master is
+ * unreachable", because both arrive as one exception.
+ *
+ * A failure to DOWNLOAD the master still throws: nothing can be repaired without it, and
+ * reporting that as 200 individual segment failures would bury the one cause.
+ */
+export async function sliceAudioSegmentsBestEffort(
+  audioUrl: string,
+  segments: { startSec: number; lenSec: number }[],
+  onError?: (index: number, err: unknown) => void
+): Promise<(Buffer | null)[]> {
+  return cutAudioSegments(audioUrl, segments, onError ?? (() => {}));
+}
+
+/**
+ * Shared body of the two slicers above. With no `onError` a segment failure propagates
+ * (strict); with one, it is reported and that slot comes back `null`.
+ */
+async function cutAudioSegments(
+  audioUrl: string,
+  segments: { startSec: number; lenSec: number }[],
+  onError?: (index: number, err: unknown) => void
+): Promise<(Buffer | null)[]> {
   return withTempDir("slice", async workDir => {
     const inPath = await downloadToTemp(audioUrl, workDir, "master.mp3");
-    const out: Buffer[] = [];
+    const out: (Buffer | null)[] = [];
     for (let i = 0; i < segments.length; i++) {
       const outPath = path.join(workDir, `seg-${i}.mp3`);
-      await runFfmpeg(
-        buildAudioSegmentArgs({
-          inputPath: inPath,
-          outputPath: outPath,
-          startSec: segments[i].startSec,
-          lenSec: segments[i].lenSec,
-        })
-      );
-      out.push(readFileSync(outPath));
+      try {
+        await runFfmpeg(
+          buildAudioSegmentArgs({
+            inputPath: inPath,
+            outputPath: outPath,
+            startSec: segments[i].startSec,
+            lenSec: segments[i].lenSec,
+          })
+        );
+        out.push(readFileSync(outPath));
+      } catch (err) {
+        if (!onError) throw err;
+        onError(i, err);
+        out.push(null);
+      }
     }
     return out;
   });
@@ -2480,13 +2525,19 @@ export async function probeBufferDurationSec(
 /**
  * Probe the duration (seconds) of media at a URL. Best-effort: any fetch/probe failure
  * returns 0 (callers treat 0 as "unknown" and skip), mirroring probeBufferDurationSec.
+ *
+ * Reads our own objects through the S3 endpoint like every other server-side read
+ * (`presignOwnBucketUrl`): `*.r2.dev` is DNS-blocked on a lot of managed networks, and a probe
+ * that answers 0 there is not merely slower — it is indistinguishable from "unknown", so a
+ * caller measuring a track it already has decides it must pay to voice one instead. A URL that
+ * is not ours passes through untouched.
  */
 export async function probeUrlDurationSec(
   url: string,
   ext = "mp4"
 ): Promise<number> {
   try {
-    const resp = await fetch(url, {
+    const resp = await fetch(await presignOwnBucketUrl(url), {
       redirect: "follow",
       signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
     });

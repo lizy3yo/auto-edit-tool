@@ -70,30 +70,31 @@ Gemini, OpenAI, R2, RunPod. Missing ones fail loudly at the first stage that nee
 
 ## Optional tuning vars (defaults from code; most are not in `.env.example`)
 
-| Var                             | Default           | Var                                   | Default                      |
-| ------------------------------- | ----------------- | ------------------------------------- | ---------------------------- |
-| `FFMPEG_PATH`                   | auto-probe        | `FFMPEG_CONCURRENCY`                  | cpu-derived                  |
-| `FFMPEG_PROBE_MAX_MS`           | 600s              | `ASSEMBLY_DOWNLOAD_TIMEOUT_MS`        | 120s                         |
-| `PROBE_MAX_MS`                  | 60s               | `BROLL_NO_KEYFRAME`                   | unset (`1` disables)         |
-| `R2_CONNECTION_TIMEOUT_MS`      | 10s               | `R2_REQUEST_TIMEOUT_MS`               | 120s                         |
-| `APIMART_RATE_PER_MIN`          | 40                | `APIMART_BURST`                       | 5                            |
-| `HEYGEN_CONCURRENCY`            | 8                 | `HEYGEN_CALL_TIMEOUT_MS`              | 120s                         |
-| `HEYGEN_DOWNLOAD_TIMEOUT_MS`    | 300s              | `OPENAI_IMAGE_CALL_TIMEOUT_MS`        | 300s                         |
-| `OPENAI_IMAGE_BURST`            | 1                 | `OPENAI_IMAGE_RATE_PER_MIN`           | 50 (Tier-3 cap)              |
-| `SIXTYNINE_VIDEO_CONCURRENCY`   | 8                 | `SIXTYNINE_IMAGE_CONCURRENCY`         | 7                            |
-| `SIXTYNINE_VIDEO_TIMEOUT_MS`    | 360s              | `SIXTYNINE_CALL_TIMEOUT_MS`           | 120s                         |
-| `SIXTYNINE_DOWNLOAD_TIMEOUT_MS` | 300s              | `SIXTYNINE_VIDEO_SUBMIT_BURST`        | 2                            |
-| `SIXTYNINE_VIDEO_SUBMIT_RATE`   | 5/min (API cap)   | `IMAGE_PRIMARY_TIMEOUT_MS`            | 480s                         |
-| `SIXTYNINE_TTS_SUBMIT_RATE`     | 20/min            | `SIXTYNINE_TTS_SUBMIT_BURST`          | 3                            |
-| `IMAGE_PRIMARY_RETRIES`         | 1                 | `IMAGE_RETRY_TIMEOUT_MS`              | 240s                         |
-| `IMAGE_RETRY_TOTAL_BUDGET_MS`   | 600s              | `MYSQL_SORT_BUFFER_SIZE`              | 8 MB                         |
-| `AUTO_MIGRATE`                  | on (`0` skips)    | `ASSEMBLY_CACHE`                      | on (`0` skips)               |
-| `LIPSYNC_RESOLUTION`            | 720p (480p/1080p) | `RUNPOD_LIPSYNC_INPUT`                | image (`video` = pinned)     |
-| `ASSEMBLY_CACHE_MAX_GB`         | 20                | `ASSEMBLY_CACHE_DIR`                  | tmp/longform-assembly-cache  |
-| `RUNPOD_LIPSYNC_TIMEOUT_MS`     | 35 min (poll)     | `RUNPOD_LIPSYNC_EXECUTION_TIMEOUT_MS` | 40 min (per-job GPU cap)     |
-| `RUNPOD_LIPSYNC_TORCH_COMPILE`  | off (`1` = on)    | `RUNPOD_LIPSYNC_BATCH`                | 2 beats per call (`1` = off) |
-| `RUNPOD_LIPSYNC_BATCH_MAX_SEC`  | 14 s per call     | `RUNPOD_LIPSYNC_AUDIO_CFG_STEPS`      | 0.5 (first half guided)      |
-| `RUNPOD_LIPSYNC_QUANTIZATION`   | fp8_e4m3fn        | `RUNPOD_LIPSYNC_V2V_STEPS` / `_START_STEP` | 12 / 3 (9 active)       |
+| Var                             | Default           | Var                                        | Default                      |
+| ------------------------------- | ----------------- | ------------------------------------------ | ---------------------------- |
+| `FFMPEG_PATH`                   | auto-probe        | `FFMPEG_CONCURRENCY`                       | cpu-derived                  |
+| `FFMPEG_PROBE_MAX_MS`           | 600s              | `ASSEMBLY_DOWNLOAD_TIMEOUT_MS`             | 120s                         |
+| `PROBE_MAX_MS`                  | 60s               | `BROLL_NO_KEYFRAME`                        | unset (`1` disables)         |
+| `R2_CONNECTION_TIMEOUT_MS`      | 10s               | `R2_REQUEST_TIMEOUT_MS`                    | 120s                         |
+| `APIMART_RATE_PER_MIN`          | 40                | `APIMART_BURST`                            | 5                            |
+| `HEYGEN_CONCURRENCY`            | 8                 | `HEYGEN_CALL_TIMEOUT_MS`                   | 120s                         |
+| `HEYGEN_DOWNLOAD_TIMEOUT_MS`    | 300s              | `OPENAI_IMAGE_CALL_TIMEOUT_MS`             | 300s                         |
+| `OPENAI_IMAGE_BURST`            | 1                 | `OPENAI_IMAGE_RATE_PER_MIN`                | 50 (Tier-3 cap)              |
+| `SIXTYNINE_VIDEO_CONCURRENCY`   | 8                 | `SIXTYNINE_IMAGE_CONCURRENCY`              | 7                            |
+| `SIXTYNINE_VIDEO_TIMEOUT_MS`    | 360s              | `SIXTYNINE_CALL_TIMEOUT_MS`                | 120s                         |
+| `SIXTYNINE_DOWNLOAD_TIMEOUT_MS` | 300s              | `SIXTYNINE_VIDEO_SUBMIT_BURST`             | 2                            |
+| `SIXTYNINE_VIDEO_SUBMIT_RATE`   | 5/min (API cap)   | `IMAGE_PRIMARY_TIMEOUT_MS`                 | 480s                         |
+| `SIXTYNINE_TTS_SUBMIT_RATE`     | 20/min            | `SIXTYNINE_TTS_SUBMIT_BURST`               | 3                            |
+| `SIXTYNINE_TTS_409_COOLDOWN_MS` | 45s               | `SIXTYNINE_TTS_5XX_BASE_DELAY_MS`          | 5s                           |
+| `IMAGE_PRIMARY_RETRIES`         | 1                 | `IMAGE_RETRY_TIMEOUT_MS`                   | 240s                         |
+| `IMAGE_RETRY_TOTAL_BUDGET_MS`   | 600s              | `MYSQL_SORT_BUFFER_SIZE`                   | 8 MB                         |
+| `AUTO_MIGRATE`                  | on (`0` skips)    | `ASSEMBLY_CACHE`                           | on (`0` skips)               |
+| `LIPSYNC_RESOLUTION`            | 720p (480p/1080p) | `RUNPOD_LIPSYNC_INPUT`                     | image (`video` = pinned)     |
+| `ASSEMBLY_CACHE_MAX_GB`         | 20                | `ASSEMBLY_CACHE_DIR`                       | tmp/longform-assembly-cache  |
+| `RUNPOD_LIPSYNC_TIMEOUT_MS`     | 35 min (poll)     | `RUNPOD_LIPSYNC_EXECUTION_TIMEOUT_MS`      | 40 min (per-job GPU cap)     |
+| `RUNPOD_LIPSYNC_TORCH_COMPILE`  | off (`1` = on)    | `RUNPOD_LIPSYNC_BATCH`                     | 2 beats per call (`1` = off) |
+| `RUNPOD_LIPSYNC_BATCH_MAX_SEC`  | 14 s per call     | `RUNPOD_LIPSYNC_AUDIO_CFG_STEPS`           | 0.5 (first half guided)      |
+| `RUNPOD_LIPSYNC_QUANTIZATION`   | fp8_e4m3fn        | `RUNPOD_LIPSYNC_V2V_STEPS` / `_START_STEP` | 12 / 3 (9 active)            |
 
 `RUNPOD_LIPSYNC_EXECUTION_TIMEOUT_MS` is sent with every submit as RunPod's `policy.executionTimeout`
 and overrides the endpoint's own setting (dashboard default 20 min). InfiniteTalk at 720p on the
@@ -579,6 +580,34 @@ Always 16:9. Fire-and-forget; progress persisted to the job row and polled by th
   cannot silently reset it. The seed is pinned at **`id = 1`** because every pre-accounts job,
   slot and library row carries `userId = 1`; seeding anywhere else orphans all of it. With no
   admin row and no env vars, nobody can sign in and boot says so loudly.
+- **A 69Labs TTS task is never abandoned.** `generateSceneVoiceover` persists the provider's
+  task id on `scene.ttsTaskIds` (the TTS mirror of `renderTaskIds`) the moment it is created,
+  and clears it once the audio is collected or the job reports `failed`. Before that the id
+  lived only in a local, so a segment that spent both its 5-minute polling attempts walked away
+  from a job STILL RUNNING on the account — and 69Labs then refuses the identical resubmit with
+  409 `DUPLICATE_TTS_IN_PROGRESS` for as long as the orphan sits in its queue. The result was a
+  render that could not be retried at all: every click resubmitted the same text, collided with
+  a ghost of our own making, failed in milliseconds, and left the paid-for audio unreachable.
+  A 409 is now recoverable rather than terminal — if the body names the blocking job
+  (`parseDuplicateTaskId`) the caller ADOPTS that id and polls it, and if it names nothing the
+  submit waits out a shared per-key cooldown sized to a TTS job's runtime, not a rate window.
+  Two consequences worth knowing: a scene carrying `ttsTaskIds` will POLL rather than submit, so
+  clearing that field by hand is what forces a genuinely fresh read; and the duplicate body's
+  shape is still unverified, so `parseDuplicateTaskId` reads it defensively and rejects
+  SCREAMING_SNAKE tokens (`DUPLICATE_TTS_IN_PROGRESS` is itself 25 characters of the id
+  alphabet) and anything with no digit in it.
+- **A batch repair must not be hostage to its worst member.** `restoreMissingNarrationSlices`
+  re-cuts every missing per-scene slice out of the master in ONE call, and both halves of it
+  used to be all-or-nothing — a strict `sliceAudioSegments` plus a `Promise.all` of uploads
+  inside a single `try`. On a job with 200 missing slices, one range ffmpeg refused meant ZERO
+  free repairs landed and all 200 fell through to fresh paid TTS (which is how the duplicate
+  storm above got started). It now cuts through `sliceAudioSegmentsBestEffort`, uploads each
+  scene independently, names every scene it could not repair, and persists whatever did land.
+  The strict `sliceAudioSegments` remains for callers that need every cut (a lip-sync batch is
+  meaningless with a hole in it). Related: `ensureSceneNarration` PROBES a scene that still has
+  its audio but lost only the measured length — voicing there paid for a second reading of a
+  correct slice and cleared the scene's master range, dropping the whole film off the
+  master-overlay path to recover a number in the file's own header.
 - **Provider gate**: generation needs an _active_ `provider_configs` row. "No active
   provider configured" ⇒ re-run `scripts/seed.mjs` or set active in Admin.
 - **FFmpeg needs drawtext** or text overlays silently disable. The startup log names the

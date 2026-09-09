@@ -24,6 +24,78 @@ export class VoiceNotFoundError extends Error {
   }
 }
 
+/**
+ * Thrown when 69Labs refuses a submit because a matching TTS job is still running
+ * (409 DUPLICATE_TTS_IN_PROGRESS) and the backoff budget above could not outwait it.
+ *
+ * Carries `taskId` when the provider's body names the blocking job: the duplicate is almost
+ * always ONE WE STARTED and lost, so a caller that can adopt that id collects audio already
+ * paid for instead of colliding with it forever. `taskId` is undefined when the body names
+ * nothing — the caller then has no choice but to surface the failure.
+ */
+export class DuplicateTTSError extends Error {
+  readonly taskId?: string;
+  constructor(message: string, taskId?: string) {
+    super(message);
+    this.name = "DuplicateTTSError";
+    this.taskId = taskId;
+  }
+}
+
+/**
+ * Pull the blocking job's id out of a 409 body, or undefined when it names none.
+ *
+ * The shape is unverified — nothing logged the body until now — so read it defensively:
+ * any of the id spellings the rest of this file already accepts (`id`, `jobId`, `taskId`),
+ * nested one level under the common error wrappers, then a bare-string fallback for a body
+ * that mentions an id in prose. A wrong guess is safe: an adopted id that isn't real fails
+ * its first status read and the caller falls back to a fresh submit.
+ */
+export function parseDuplicateTaskId(errText: string): string | undefined {
+  const fromObject = (o: any): string | undefined => {
+    if (!o || typeof o !== "object") return undefined;
+    for (const k of [
+      "taskId",
+      "jobId",
+      "id",
+      "existingJobId",
+      "runningJobId",
+    ]) {
+      const v = o[k];
+      if (typeof v === "string" && v.trim()) return v.trim();
+    }
+    return undefined;
+  };
+  try {
+    const body = JSON.parse(errText);
+    const hit =
+      fromObject(body) ??
+      fromObject(body?.error) ??
+      fromObject(body?.data) ??
+      fromObject(body?.details);
+    if (hit) return hit;
+  } catch {
+    // Not JSON (a Cloudflare page, a bare string) — fall through to the prose scan.
+  }
+  // A UUID, or a 20+ character opaque id quoted in a sentence. The run match is greedy, so it
+  // already stops at the first character outside the id alphabet — no word anchors needed.
+  // Two candidates are rejected, because adopting a NON-id here sends the caller off to poll
+  // something that does not exist instead of waiting the real duplicate out: SCREAMING_SNAKE
+  // tokens (`DUPLICATE_TTS_IN_PROGRESS` is itself 25 characters of this alphabet) and anything
+  // with no digit in it (prose has long words; task ids have numbers).
+  for (const m of Array.from(
+    errText.matchAll(
+      /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[A-Za-z0-9_-]{20,}/g
+    )
+  )) {
+    const id = m[0];
+    if (/^[A-Z0-9_]+$/.test(id)) continue;
+    if (!/[0-9]/.test(id)) continue;
+    return id;
+  }
+  return undefined;
+}
+
 // ─── Per-key rate limiter for TTS submits (Token Bucket + adaptive 429 backpressure) ───
 // The video lane already has a submit bucket (SIXTYNINE_VIDEO_SUBMIT_RATE), but /tts/generate had
 // none — the master narration is ONE call so the main pipeline never noticed, but retry-failed-
@@ -76,6 +148,15 @@ function penalizeTTSRateLimit(key: string, retryMs: number): void {
 const TTS_SUBMIT_MAX_ATTEMPTS = 5;
 /** Cooldown applied on a 429 with no Retry-After header. */
 const TTS_429_COOLDOWN_MS = 30_000;
+/**
+ * Cooldown applied on a 409 duplicate. Much longer than the 429 window on purpose: a 429 is
+ * pacing (the next second may be fine), while a 409 means a whole TTS JOB has to finish before
+ * this submit can be accepted, and those run for minutes. Shared per key like the 429 cooldown,
+ * so every concurrent worker waits out the same window instead of each burning its own budget.
+ * Env override exists so tests can run it fast.
+ */
+const TTS_409_COOLDOWN_MS =
+  Number(process.env.SIXTYNINE_TTS_409_COOLDOWN_MS) || 45_000;
 /**
  * Backoff base for a 5xx on task creation (doubles per attempt: 5s, 10s, 20s, 40s ≈ 75s total).
  * 69Labs sits behind Cloudflare, and an origin blip answers as a 521/522/523 HTML page for tens
@@ -319,6 +400,59 @@ export async function createTTSTask69Labs(
           `${summarizeHttpBody(errText)}. The provider's server is down; retry the job in a few minutes.`
       );
     }
+    // 409: an identical TTS job is still running on the account — typically one WE started and
+    // then lost, since the task id used to live only in a local in `generateSceneVoiceover` and
+    // was discarded when that function finally threw. A new submit is then refused for as long
+    // as the orphan sits in their queue, which is why this shows up AFTER a run of timeouts.
+    //
+    // It is therefore NOT terminal, and treating it as such is what wedged a render: every
+    // retry resubmitted the same text, collided with its own ghost, and failed in milliseconds
+    // — so the operator's Retry button did nothing at all, for hours. Two recoveries, in order:
+    //
+    //  1. If the body names the blocking job, hand that id to the caller (`DuplicateTTSError`)
+    //     so it can poll and collect audio the account has ALREADY been billed for.
+    //  2. Otherwise wait it out like a 429 — a shared per-key cooldown sized to a TTS job's
+    //     runtime rather than a rate window. The duplicate finishes, the slot frees, the same
+    //     body is accepted. Only when that budget is spent does this become an error.
+    //
+    // The body is logged raw either way: its shape is still unverified, and `parseDuplicateTaskId`
+    // can only be made accurate against real examples.
+    if (
+      response.status === 409 ||
+      errText.includes("DUPLICATE_TTS_IN_PROGRESS")
+    ) {
+      console.warn(
+        `[69Labs TTS] 409 duplicate for voice ${params.voiceId} — raw body: ${errText}`
+      );
+      const runningId = parseDuplicateTaskId(errText);
+      if (runningId) {
+        console.log(
+          `[69Labs TTS] duplicate names task ${runningId} — adopting it instead of resubmitting`
+        );
+        throw new DuplicateTTSError(
+          `69Labs TTS job already in progress (DUPLICATE_TTS_IN_PROGRESS) — adopting the ` +
+            `running task ${runningId}.`,
+          runningId
+        );
+      }
+      penalizeTTSRateLimit(apiKey, TTS_409_COOLDOWN_MS);
+      if (attempt < TTS_SUBMIT_MAX_ATTEMPTS) {
+        console.warn(
+          `[69Labs TTS] duplicate names no task — waiting ` +
+            `${Math.round(TTS_409_COOLDOWN_MS / 1000)}s for it to finish ` +
+            `(attempt ${attempt}/${TTS_SUBMIT_MAX_ATTEMPTS})`
+        );
+        continue; // `acquireTTSToken` at the top of the loop waits out the cooldown
+      }
+      throw new DuplicateTTSError(
+        `69Labs TTS job already in progress (DUPLICATE_TTS_IN_PROGRESS) after ${attempt} ` +
+          `attempts — a matching job is still running on the account and did not finish. ` +
+          `Provider said: ${summarizeHttpBody(errText)}`
+      );
+    }
+    // Deliberately AFTER the 409 branch: this heuristic matches the bare word "limit", so a
+    // duplicate body that mentions a concurrency limit was being reported as an empty wallet —
+    // an error the operator cannot act on, about a condition that clears by itself.
     const lowerErr = errText.toLowerCase();
     if (
       lowerErr.includes("credit") ||
@@ -327,30 +461,6 @@ export async function createTTSTask69Labs(
     ) {
       throw new Error(
         "TTS credits depleted on 69Labs. Check your 69Labs dashboard for remaining credits."
-      );
-    }
-    // 409: an identical TTS job is still running on the account — typically one WE started and
-    // then lost, since the task id lives only in a local in `generateSceneVoiceover` and is
-    // discarded when that function finally throws. A new submit is then refused for as long as
-    // the orphan sits in their queue, which is why this shows up AFTER a run of timeouts.
-    //
-    // This branch used to replace `errText` with a fixed sentence — the only branch in this
-    // function that dropped the body instead of passing it through `summarizeHttpBody`. The
-    // comment here asserted the body "carries no task ID", but since nothing ever logged it,
-    // that could not be checked: if 69Labs does name the running job, we were deleting the one
-    // value that would let us collect audio already paid for. So log it raw and surface a
-    // summary. Once a real body is seen, either resume the named job or persist the id at
-    // submit time so it is never lost in the first place.
-    if (
-      response.status === 409 ||
-      errText.includes("DUPLICATE_TTS_IN_PROGRESS")
-    ) {
-      console.warn(
-        `[69Labs TTS] 409 duplicate for voice ${params.voiceId} — raw body: ${errText}`
-      );
-      throw new Error(
-        `69Labs TTS job already in progress (DUPLICATE_TTS_IN_PROGRESS) — a matching job is ` +
-          `still running. Provider said: ${summarizeHttpBody(errText)}`
       );
     }
     throw new Error(
