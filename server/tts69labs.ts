@@ -329,15 +329,28 @@ export async function createTTSTask69Labs(
         "TTS credits depleted on 69Labs. Check your 69Labs dashboard for remaining credits."
       );
     }
-    // 409: an identical TTS job is still running. The error body carries no task ID, so we
-    // can't resume it here — surface a clear, retryable message. (The caller normally avoids
-    // this by reusing the original task ID across retries instead of re-creating.)
+    // 409: an identical TTS job is still running on the account — typically one WE started and
+    // then lost, since the task id lives only in a local in `generateSceneVoiceover` and is
+    // discarded when that function finally throws. A new submit is then refused for as long as
+    // the orphan sits in their queue, which is why this shows up AFTER a run of timeouts.
+    //
+    // This branch used to replace `errText` with a fixed sentence — the only branch in this
+    // function that dropped the body instead of passing it through `summarizeHttpBody`. The
+    // comment here asserted the body "carries no task ID", but since nothing ever logged it,
+    // that could not be checked: if 69Labs does name the running job, we were deleting the one
+    // value that would let us collect audio already paid for. So log it raw and surface a
+    // summary. Once a real body is seen, either resume the named job or persist the id at
+    // submit time so it is never lost in the first place.
     if (
       response.status === 409 ||
       errText.includes("DUPLICATE_TTS_IN_PROGRESS")
     ) {
+      console.warn(
+        `[69Labs TTS] 409 duplicate for voice ${params.voiceId} — raw body: ${errText}`
+      );
       throw new Error(
-        "69Labs TTS job already in progress (DUPLICATE_TTS_IN_PROGRESS) — a matching job is still running."
+        `69Labs TTS job already in progress (DUPLICATE_TTS_IN_PROGRESS) — a matching job is ` +
+          `still running. Provider said: ${summarizeHttpBody(errText)}`
       );
     }
     throw new Error(
