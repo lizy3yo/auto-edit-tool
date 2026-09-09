@@ -8,6 +8,8 @@ import { extractSpokenScript, stripCtaMarkerLines } from "@shared/ctaMarkers";
 import type { LongformInputParams } from "@shared/types";
 import {
   Check,
+  ChevronDown,
+  ChevronUp,
   Copy,
   Loader2,
   Upload,
@@ -81,6 +83,7 @@ export function LongformNarrationUpload({
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [copied, setCopied] = useState<null | "script" | "settings">(null);
+  const [scriptOpen, setScriptOpen] = useState(false);
   const [planNote, setPlanNote] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -247,29 +250,53 @@ export function LongformNarrationUpload({
           <span className="text-xs font-medium">
             Read exactly this ({words.toLocaleString()} words)
           </span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => copy(spoken, "script")}
-            disabled={!spoken.trim()}
-          >
-            {copied === "script" ? (
-              <Check className="mr-1.5 h-3.5 w-3.5" />
-            ) : (
-              <Copy className="mr-1.5 h-3.5 w-3.5" />
-            )}
-            {copied === "script" ? "Copied" : "Copy script"}
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setScriptOpen(o => !o)}
+              disabled={!spoken.trim()}
+            >
+              {scriptOpen ? (
+                <ChevronUp className="mr-1.5 h-3.5 w-3.5" />
+              ) : (
+                <ChevronDown className="mr-1.5 h-3.5 w-3.5" />
+              )}
+              {scriptOpen ? "Collapse" : "Show all"}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => copy(spoken, "script")}
+              disabled={!spoken.trim()}
+            >
+              {copied === "script" ? (
+                <Check className="mr-1.5 h-3.5 w-3.5" />
+              ) : (
+                <Copy className="mr-1.5 h-3.5 w-3.5" />
+              )}
+              {copied === "script" ? "Copied" : "Copy script"}
+            </Button>
+          </div>
         </div>
         {/* Read-only rather than a plain <p>: the operator needs to be able to select it,
             and it must be impossible to edit here — the text is checked against the script
-            that will actually be rendered. */}
+            that will actually be rendered.
+
+            The height is capped in CSS, not by `rows`: the shared Textarea sets
+            `field-sizing-content`, which sizes the element to its own content and overrides the
+            row count outright — so a 4,000-word script rendered as a wall of text with every
+            control below it pushed off screen. `max-h` + scroll is what actually holds it, and
+            "Show all" only raises the cap. The full text is what Copy script copies either way;
+            the read is checked against it, so it is never the preview that gets voiced. */}
         <Textarea
           readOnly
           value={spoken}
-          rows={4}
-          className="resize-none bg-background font-mono text-xs"
+          className={`resize-none overflow-y-auto bg-background font-mono text-xs ${
+            scriptOpen ? "max-h-80" : "max-h-24"
+          }`}
         />
       </div>
 

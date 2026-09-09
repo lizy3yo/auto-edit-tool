@@ -1312,12 +1312,21 @@ export default function LongformJobSlot({
       },
       onError: e => toast.error(e.message),
     });
-  // Offered only while there is NO master: a job that has one may have paid for clips, and
-  // continuing restarts from the storyboard. Mirrors the server's own guard exactly.
+  // Offered only to a render that has generated NOTHING. Two independent conditions, because
+  // either one alone lets a paid render be thrown away: no master (a job that has one may have
+  // paid for clips), and no clip on any scene — supplying a narration restarts from the
+  // storyboard and re-renders the lot, while the panel's own copy promises "nothing has been
+  // billed for clips yet". A board with rendered scenes makes that promise false, so the offer
+  // must not be there. Mirrors the server's own guard exactly.
+  const hasRenderedClips = useMemo(
+    () => scenes.some(s => !!(s.clipUrls?.length || s.clipUrl)),
+    [scenes]
+  );
   const canSupplyNarration =
     !!jobId &&
     job?.status !== "processing" &&
     !job?.masterAudioUrl &&
+    !hasRenderedClips &&
     !!job?.script;
 
   const retryRunning = job?.status === "processing";

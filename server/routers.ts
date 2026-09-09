@@ -1493,6 +1493,25 @@ const longformVideoRouter = router({
             "the top and re-render every clip.",
         });
       }
+      // Second, independent condition. A supplied narration restarts the pipeline from the
+      // storyboard, so a board that already carries clips would have every one of them
+      // re-rendered and re-billed — and the panel offering this says in as many words that
+      // nothing has been billed for clips yet. The master check above does not cover it: it
+      // asks only whether a voice EXISTS, not whether money has been spent since.
+      const rendered = Array.isArray(job.storyboard)
+        ? (job.storyboard as StoryboardScene[]).filter(
+            s => !!(s.clipUrls?.length || s.clipUrl)
+          ).length
+        : 0;
+      if (rendered > 0) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            `This render has already generated ${rendered} clip(s). Supplying a narration ` +
+            "restarts it from the storyboard and would re-render every one of them. Use " +
+            '"Retry failed scenes" instead, or start a new render.',
+        });
+      }
       const params = job.inputParams as LongformInputParams;
       await updateLongformVideoJob(input.jobId, {
         inputParams: { ...params, manualNarrationUrl: input.url },
