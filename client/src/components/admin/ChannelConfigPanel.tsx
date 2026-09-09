@@ -256,7 +256,7 @@ export function ChannelConfigPanel() {
         hostTitle: "",
         hostLocation: "",
         voiceId: "",
-    minimaxVoiceId: "",
+        minimaxVoiceId: "",
         voiceName: "",
         ttsModel: "eleven_multilingual_v2",
         ttsSpeed: "",
@@ -537,9 +537,9 @@ export function ChannelConfigPanel() {
                 operator pasting the same string into both gets "voice not found" at render
                 time, which reads like a broken integration rather than a wrong id. */}
             <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
-              A different voice space to the field above — a 69Labs or ElevenLabs
-              id will not work here. Leave blank if this channel has no MiniMax
-              fallback.
+              A different voice space to the field above — a 69Labs or
+              ElevenLabs id will not work here. Leave blank if this channel has
+              no MiniMax fallback.
             </p>
           </div>
           <div>
@@ -995,6 +995,33 @@ export function ChannelConfigPanel() {
                       className="mt-1 text-xs h-8"
                     />
                   </div>
+                </div>
+                <div>
+                  <Label className="text-xs">
+                    MiniMax Voice ID{" "}
+                    <span className="font-normal text-muted-foreground">
+                      (fallback)
+                    </span>
+                  </Label>
+                  <Input
+                    value={createForm.minimaxVoiceId}
+                    onChange={e =>
+                      setCreateForm(f => ({
+                        ...f,
+                        minimaxVoiceId: e.target.value,
+                      }))
+                    }
+                    placeholder="a voice cloned in YOUR MiniMax account"
+                    className="mt-1 text-xs h-8"
+                  />
+                  {/* Same note as the edit form: the two ids look interchangeable and are not.
+                      Pasting the 69Labs voice into both fields yields "voice not found" only at
+                      render time, which reads like a broken integration rather than a wrong id. */}
+                  <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
+                    A different voice space to the field above — a 69Labs or
+                    ElevenLabs id will not work here. Leave blank for no MiniMax
+                    fallback.
+                  </p>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
