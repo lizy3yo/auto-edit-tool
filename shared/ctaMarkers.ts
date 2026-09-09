@@ -137,6 +137,28 @@ const normTitle = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]/g, " ");
  * pitches it, shared here so the confirmation dialog previews the same assignment the render
  * will make. Pure — unit-tested.
  */
+/**
+ * The spoken script with the `===CTA===` / `===END CTA===` marker LINES removed — i.e. exactly
+ * the words the narration is voiced from.
+ *
+ * The markers are instructions to the pipeline, not speech: `parseCtaMarkers` drops those two
+ * lines and everything downstream (TTS, whisperx alignment, scene text) sees only what is left.
+ * This is the browser-side twin of that transformation, for the one place the CLIENT has to show
+ * an operator the exact text to read aloud (the manual-narration hatch) — `parseCtaMarkers` lives
+ * server-side because it also computes word offsets and span labels, which no client needs.
+ *
+ * Kept honest by a test asserting the two agree; a divergence would tell an operator to read
+ * "equals equals equals CTA" into the master narration.
+ */
+export function stripCtaMarkerLines(spoken: string): string {
+  return spoken
+    .split("\n")
+    .filter(line => !CTA_START_LINE.test(line) && !CTA_END_LINE.test(line))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 export function ctaTitleMatches(title: string, text: string): boolean {
   const tokens = normTitle(title)
     .split(/\s+/)

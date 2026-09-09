@@ -449,6 +449,57 @@ Express · tRPC · Drizzle · MySQL.
   this existed have no snapshot and the controls stay hidden. UI:
   `client/src/components/SceneTimingEditor.tsx`
 - `server/narrationAlignment.ts`, `server/_core/voiceTranscription.ts` — whisperx
+- `server/narrationUpload.ts` + `server/narrationIngest.ts` — the MANUAL-VO hatch, for a TTS
+  vendor that is down. 69Labs is the only voiceover lane (`resolveTTSProvider` throws without
+  it) while every other lane — APIMART b-roll, `gpt-image-2` stills, HeyGen/RunPod host,
+  assembly — is independent of it, so one supplied mp3 is the difference between no film and a
+  complete render. It is ONE substitution at ONE line: `voiceMasterNarration` returns
+  `params.manualNarrationUrl` and makes no provider call, and everything after that statement
+  (whisperx, `detectSilences`, `assignSceneRanges`, per-scene slicing, both lip-sync lanes,
+  assembly) is alignment-driven and cannot tell a supplied master from a voiced one. Chosen over
+  a parallel ingest pipeline precisely so the two paths cannot drift. The upload is a RAW
+  streaming Express route, not the base64 data-URL mutation the image uploads use: a 20-minute
+  narration is ~29 MB, ~39 MB once encoded, against a 50 MB JSON body cap — it fits today with
+  no headroom for a longer film. `normalizeNarrationAudio` re-encodes any accepted container to
+  the exact shape a voiced master has (mp3/48k/stereo, volume gain, dead-air cap), because every
+  ffmpeg stage downstream was written against that and a 44.1k mono export surfaces as a subtly
+  wrong film rather than an error. `verifyNarrationRead` is the gate that makes the whole thing
+  safe, and it is not a formality: scene boundaries are recovered by locating each scene's text
+  inside the transcript (`findPhrase`), so a wrong file, an older draft or an ad-libbed read does
+  not FAIL — it degrades to the proportional split, losing CTA/QR keyword alignment invisibly
+  until someone watches the finished film, after every clip has been paid for. `readCoverage` is
+  a greedy in-order word match with a bounded look-ahead (unbounded, a skipped paragraph is
+  "covered" by finding its words 900 words later); `MIN_READ_COVERAGE` is 0.85 because whisper
+  mishears proper nouns and numerals, so a perfect read of the right script scores 0.93-0.98 and
+  a different recording scores near zero — nothing realistic lands in between. A transcription
+  OUTAGE returns `unverified` rather than a rejection: it says nothing about the read, and
+  refusing there would block a correct upload on an unrelated failure. Consequence that is
+  load-bearing elsewhere: fresh per-scene TTS is BANNED on such a job (`ensureSceneNarration`
+  throws) — re-voicing one scene from a provider that did not read the other 200 puts a second
+  voice inside one film, which unlike a missing slice still assembles and ships. The only legal
+  repair is a re-cut of the supplied master. Lip-sync is unaffected: both lanes are handed
+  `scene.audioUrl` and animate whatever waveform arrives, though the MOUTH is only as good as the
+  slice boundaries, so a clean TTS export from another vendor aligns better than a room recording.
+  The panel also hands out the DELIVERY DIRECTION before the operator records (`planDelivery` in
+  the router) and pins it onto `inputParams.deliveryPlan`, which the pipeline reuses verbatim
+  (`if (!params.deliveryPlan)` at the voicing stage). Without that, a supplied read and the
+  host's BODY disagree: the plan's mood/gesture become `scene.deliveryCue`/`gestureCue` in the
+  lip-sync prompt, and on an automatic render they and the voice come from one Claude call so
+  they agree by construction — while a supplied read is fixed BEFORE the pipeline plans, and the
+  plan is non-deterministic, so even a correctly-guessed mood would not survive into the render.
+  Fetching it up front and pinning it makes the direction the host is given the same direction
+  that was read. The voice settings (`TTS_STABILITY` 0.5 / `TTS_STYLE` 0.3 / `TTS_SIMILARITY`
+  0.8, tuned as a SET) are shown with their OWN copy button, never concatenated into the script
+  copy — a single blob pasted into a TTS text box would speak "Stability: 0.5" into the master,
+  the `===START CTA===` failure again with nothing downstream to catch it. `supplyNarration`
+  is the RESCUE path for a job that already died at voicing: it restarts through
+  `runLongformPipeline` (the same entry point, so the pinned subject/style-bible/delivery-plan
+  are reused and only the storyboard call repeats — one code path to keep correct instead of a
+  bespoke resume lane), gated on `!masterAudioUrl` because a job that HAS voiced may have paid
+  for clips that restarting would re-render. "Retry failed scenes" cannot serve this case at all:
+  it re-renders CLIPS, and a job dead at voicing has none.
+  UI: `client/src/components/LongformNarrationUpload.tsx` (`compact` = rescue mode, no toggle),
+  harness `client/__harness/narration-upload.html`
 - `server/costMeter.ts` + `server/pricing.ts` — per-video spend. Every billable adapter calls
   `recordUsage`; an `AsyncLocalStorage` set inside `withJobLock` attributes it, so the six
   spending entry points (pipeline, resume, retry-assembly, retry-failed, regen scene/scenes)

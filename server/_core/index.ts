@@ -24,6 +24,7 @@ import { runMigrations } from "../migrate";
 import { checkSchema } from "../schemaCheck";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
+import { narrationUploadRouter } from "../narrationUpload";
 import { serveStatic, setupVite } from "./vite";
 import { startTimeoutChecker } from "../generationTimeout";
 import { registerHeygenWebhook } from "../heygenWebhook";
@@ -80,6 +81,11 @@ async function startServer() {
   registerSalesWebhook(app);
   // Download proxy (bypasses CORS for R2/CDN URLs)
   app.use("/api/download", downloadRouter);
+  // Operator-supplied master narration — raw audio upload, streamed rather than base64'd
+  // through the JSON body (a 20-minute narration is ~29 MB, ~39 MB encoded, against the 50 MB
+  // cap above). `express.json` dispatches on content-type, so an audio/* body reaches this
+  // handler unparsed even though the parser is mounted first.
+  app.use("/api/narration-upload", narrationUploadRouter);
   // tRPC API
   app.use(
     "/api/trpc",

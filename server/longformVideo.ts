@@ -3302,6 +3302,16 @@ const TTS_TIMEOUT_MS = 5 * 60 * 1000;
 /** Bounded attempts for one TTS segment — a timeout or transient failure is retried fresh. */
 const TTS_MAX_ATTEMPTS = 2;
 
+/**
+ * Concurrent scenes voiced by the retry pass. The SUBMIT side is already paced per key
+ * (`SIXTYNINE_TTS_SUBMIT_RATE`), but the poll that follows is not rate-limited at all, so an
+ * unbounded fan-out puts N status reads per 4s against the provider and earns 429s — which a
+ * status read cannot distinguish from "still working", so the scene polls a healthy task until
+ * it times out. Small enough that the polls stay under any plausible ceiling, large enough that
+ * repairing a dozen scenes is not serial.
+ */
+const TTS_REVOICE_CONCURRENCY = 4;
+
 async function generateSceneVoiceover(
   providerType: string,
   apiKey: string,
@@ -8418,6 +8428,18 @@ async function voiceMasterNarration(
   spokenScript: string,
   params: LongformInputParams
 ): Promise<{ url: string }> {
+  // Operator-supplied master: return it and make no provider call at all. This is the whole
+  // manual-narration hatch — one substitution at the single line that produces the master,
+  // chosen over a parallel "ingest" pipeline precisely so the two paths CANNOT drift: a
+  // supplied film and a voiced film are the same code from the next statement onward.
+  // Already normalized and verified against this script by the upload route, so there is
+  // nothing to re-check and nothing to mirror (it is our own R2 object).
+  if (params.manualNarrationUrl) {
+    console.log(
+      `[Longform ${jobId}] master narration supplied by the operator — skipping TTS`
+    );
+    return { url: params.manualNarrationUrl };
+  }
   const speed = params.ttsSpeed;
   let providerUrl: string;
   if (planChangesTheRead(params.deliveryPlan)) {
@@ -10009,8 +10031,17 @@ export async function runLongformPipeline(jobId: number): Promise<void> {
       videoType as ProviderType,
       videoKey
     );
-    const { providerType: ttsType, apiKey: ttsKey } =
-      await resolveTTSProvider(provider);
+    // A supplied master needs no TTS vendor at all, and 69Labs being GONE is the case this
+    // hatch exists for — so a missing/unconfigured TTS row must not fail the job before the
+    // pipeline reaches the seam that would have skipped it anyway. Every other lane (APIMART
+    // b-roll, gpt-image-2 stills, HeyGen/RunPod host) resolves independently.
+    const tts = params.manualNarrationUrl
+      ? await resolveTTSProvider(provider).catch(() => ({
+          providerType: "",
+          apiKey: "",
+        }))
+      : await resolveTTSProvider(provider);
+    const { providerType: ttsType, apiKey: ttsKey } = tts;
 
     // Single unified path: verbatim continuous narration + AI host/b-roll storyboard.
     await runUnifiedPipeline(jobId, params, adapter, ttsType, ttsKey);
@@ -10836,6 +10867,19 @@ async function ensureSceneNarration(
   ttsKey: string
 ): Promise<boolean> {
   if (scene.audioUrl && scene.audioDuration != null) return false;
+  // A film whose master was SUPPLIED can never be repaired with fresh TTS: the provider did not
+  // read the other 200 scenes, so the repair lands a second voice inside one video — and unlike
+  // a missing slice, that failure still assembles and ships. The legal repair is a re-cut of the
+  // supplied master (`restoreMissingNarrationSlices`), which callers run first; reaching here
+  // means the re-cut could not help (no master range), so fail loudly and name the reason.
+  if (params.manualNarrationUrl) {
+    throw new Error(
+      `scene ${scene.index} has no narration and this film's master was supplied by the ` +
+        `operator — re-voicing one scene would put a second voice in the film. It has no ` +
+        `master range to re-cut from, so it must be fixed by re-timing its neighbours or ` +
+        `re-rendering the job with a new narration.`
+    );
+  }
   const { url, durationSec } = await buildSceneNarration(
     jobId,
     ttsType,
@@ -12951,6 +12995,25 @@ async function retryFailedScenesLocked(jobId: number): Promise<void> {
     // is sized against a real measured duration instead of the fixed fallback length.
     // A scene whose TTS fails is marked failed and left out of the render pass entirely — there
     // is nothing to lip-sync to, and the gate below names it rather than a render timeout doing so.
+    // FREE, EXACT repair first: a scene that kept its master range but lost its slice is re-cut
+    // from the master, which is the bytes assembly would have used anyway. Fresh TTS costs
+    // credits, clears the scene's master ranges and drops the WHOLE film onto the per-scene
+    // concat path — a repair that degrades 200 scenes to fix one. The assembly gate has always
+    // preferred the re-cut (`ensureEverySceneVoiced`); this button used to go straight to TTS,
+    // so the same missing slice was repaired one way at assembly and another way here.
+    await restoreMissingNarrationSlices(jobId, scenes, fresh?.masterAudioUrl);
+
+    // A scene that kept its audio but lost only the MEASURED length is not a re-voice either:
+    // the master range is that length. Without this it fell into the TTS fan-out below and paid
+    // for a fresh read of a scene whose audio was already correct.
+    for (const s of missing) {
+      if (s.audioUrl && s.audioDuration == null && hasMasterRange(s)) {
+        s.audioDuration = roundMs(
+          (s.narrationEndSec as number) - (s.narrationStartSec as number)
+        );
+      }
+    }
+
     const unvoiced = missing.filter(
       s => !s.audioUrl || s.audioDuration == null
     );
@@ -12959,16 +13022,20 @@ async function retryFailedScenesLocked(jobId: number): Promise<void> {
         `[Longform ${jobId}] retry: re-voicing ${unvoiced.length} scene(s) with no narration ` +
           `before dispatch (${unvoiced.map(s => s.index).join(", ")})`
       );
-      await Promise.all(
-        unvoiced.map(async scene => {
-          try {
-            await ensureSceneNarration(jobId, scene, params, ttsType, ttsKey);
-          } catch (e: any) {
-            scene.sceneStatus = "failed";
-            scene.error = `Narration: ${describeError(e)}`;
-          }
-        })
-      );
+      // Bounded, not `Promise.all`: every one of these submits a TTS task immediately, and the
+      // poll that follows has no rate limiter at all — a wide fan-out answers itself with 429s
+      // on the STATUS endpoint, which `pollTTSTask69Labs` reports as "processing" (correctly:
+      // a rate-limited read says nothing about the task). The scene then polls a healthy job
+      // for five minutes and fails "TTS timed out", which is how a pacing problem disguised
+      // itself as a provider outage.
+      await mapPool(unvoiced, TTS_REVOICE_CONCURRENCY, async scene => {
+        try {
+          await ensureSceneNarration(jobId, scene, params, ttsType, ttsKey);
+        } catch (e: any) {
+          scene.sceneStatus = "failed";
+          scene.error = `Narration: ${describeError(e)}`;
+        }
+      });
       await flushPersist(jobId);
       await updateLongformVideoJob(jobId, { storyboard: scenes });
     }

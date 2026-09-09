@@ -1,6 +1,10 @@
 import { useState, useEffect, useId, useMemo, useRef } from "react";
 import { trpc } from "@/lib/trpc";
 import { LongformHostPhotoPicker } from "@/components/LongformHostPhotoPicker";
+import {
+  LongformNarrationUpload,
+  type DeliveryPlan,
+} from "@/components/LongformNarrationUpload";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -320,6 +324,17 @@ export default function LongformJobSlot({
   // Which of the channel's host photos this video may use. Empty = every active one, which is
   // also how the server reads an omitted list, so an untouched form behaves as it always did.
   const [hostPhotoIds, setHostPhotoIds] = useState<number[]>([]);
+  // Operator-supplied master narration, set only once the server has VERIFIED the upload is a
+  // read of this script. Undefined ⇒ the pipeline voices the film itself, exactly as before.
+  const [manualNarrationUrl, setManualNarrationUrl] = useState<
+    string | undefined
+  >(undefined);
+  // The delivery direction the operator was shown BEFORE recording. Pinned onto the job so the
+  // render reuses it instead of drawing its own — which is what makes the host's face and body
+  // agree with a read that has already happened.
+  const [manualDeliveryPlan, setManualDeliveryPlan] = useState<
+    DeliveryPlan | undefined
+  >(undefined);
   const [showConfirm, setShowConfirm] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showCost, setShowCost] = useState(false);
@@ -1280,6 +1295,26 @@ export default function LongformJobSlot({
     () => scenes.filter(s => s.sceneStatus === "failed").length,
     [scenes]
   );
+  // Rescue narration for a job that died before it was ever voiced (see the block below).
+  const [rescueNarrationUrl, setRescueNarrationUrl] = useState<
+    string | undefined
+  >(undefined);
+  const supplyNarrationMutation =
+    trpc.longformVideo.supplyNarration.useMutation({
+      onSuccess: () => {
+        setRescueNarrationUrl(undefined);
+        void utils.longformVideo.pollJob.invalidate();
+      },
+      onError: e => toast.error(e.message),
+    });
+  // Offered only while there is NO master: a job that has one may have paid for clips, and
+  // continuing restarts from the storyboard. Mirrors the server's own guard exactly.
+  const canSupplyNarration =
+    !!jobId &&
+    job?.status !== "processing" &&
+    !job?.masterAudioUrl &&
+    !!job?.script;
+
   const retryRunning = job?.status === "processing";
   const retryQueued = job?.retryQueued === true;
   // Offered DURING a pass too: the click parks behind the job lock and runs the moment the
@@ -1450,6 +1485,12 @@ export default function LongformJobSlot({
       // Assets are no longer sent from here — the server reads them from the channel.
       ctaBooks: books.length ? books : undefined,
       hostPhotoIds: hostPhotoIds.length ? hostPhotoIds : undefined,
+      // Set only when the operator supplied (and the server verified) their own narration —
+      // the voicing stage then makes no TTS call at all.
+      manualNarrationUrl,
+      // Only meaningful with a supplied narration — the server drops it otherwise, since
+      // pinning a plan the operator never saw would just freeze one arbitrary draw.
+      deliveryPlan: manualNarrationUrl ? manualDeliveryPlan : undefined,
     });
   };
 
@@ -1549,6 +1590,18 @@ export default function LongformJobSlot({
                 channelKey={channelKey}
                 value={hostPhotoIds}
                 onChange={setHostPhotoIds}
+                disabled={generateMutation.isPending || isProcessing}
+              />
+              {/* Escape hatch for a TTS vendor that is down. Sits under the voice because it
+                  REPLACES it: with a supplied narration the channel's voice is not used. */}
+              <LongformNarrationUpload
+                script={script}
+                channelKey={channelKey}
+                value={manualNarrationUrl}
+                onChange={setManualNarrationUrl}
+                deliveryPlan={manualDeliveryPlan}
+                onDeliveryPlanChange={setManualDeliveryPlan}
+                voice={channelDefaults}
                 disabled={generateMutation.isPending || isProcessing}
               />
             </div>
@@ -1759,6 +1812,53 @@ export default function LongformJobSlot({
                   </li>
                 ))}
               </ul>
+            )}
+
+            {/* The film never got a voice. "Retry failed scenes" cannot help — it re-renders
+                CLIPS, and a job that died at voicing has none — so without this the only
+                recovery was to re-create the job by hand. Gated on the ABSENCE of a master:
+                once one exists, clips may already be paid for and restarting would re-render
+                them (the server enforces the same rule). */}
+            {canSupplyNarration && (
+              <div className="space-y-2 rounded-md border border-warning/40 bg-warning/5 p-3">
+                <p className="text-xs font-medium">
+                  This render has no narration — the voice provider never
+                  delivered one.
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Supply the voiceover yourself and it will carry on from here:
+                  storyboard, b-roll, host lip-sync and assembly all run as
+                  normal. Nothing has been billed for clips yet.
+                </p>
+                <LongformNarrationUpload
+                  compact
+                  script={job?.script ?? ""}
+                  channelKey={job?.channelKey ?? ""}
+                  value={rescueNarrationUrl}
+                  onChange={setRescueNarrationUrl}
+                  voice={channelDefaults ?? undefined}
+                  disabled={supplyNarrationMutation.isPending}
+                />
+                <Button
+                  size="sm"
+                  disabled={
+                    !rescueNarrationUrl || supplyNarrationMutation.isPending
+                  }
+                  onClick={() => {
+                    if (!jobId || !rescueNarrationUrl) return;
+                    armNotifications();
+                    supplyNarrationMutation.mutate({
+                      jobId,
+                      url: rescueNarrationUrl,
+                    });
+                  }}
+                >
+                  {supplyNarrationMutation.isPending ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : null}
+                  Continue this render
+                </Button>
+              </div>
             )}
 
             {retryFailedScenesButton}

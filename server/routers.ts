@@ -114,7 +114,12 @@ import {
   syncSceneClipFields,
   parseCtaMarkers,
   extractSpokenScript,
+  wpsForVoice,
 } from "./longformVideo";
+import { verifyNarrationRead } from "./narrationIngest";
+import { planDelivery, scriptParagraphs } from "./delivery";
+import { extractMonoAudio, probeUrlDurationSec } from "./videoAssembly";
+import { isTrustedUrl } from "./download";
 import { cancelJobProviderRenders } from "./cancelRenders";
 // Cut-room pre-checks, so a refused edit is an error the operator reads, not a silent no-op.
 import {
@@ -1238,6 +1243,164 @@ const longformVideoRouter = router({
     }),
   // ─── END AIREITER BOLT-ON ───────────────────────────────────────────────
 
+  /**
+   * Check that an uploaded narration is a read of THIS script, before a job is created from it.
+   *
+   * Split from the upload route because the script is large and already travels over tRPC, while
+   * the audio is large and should not travel as base64. The upload stores and normalizes bytes;
+   * this decides whether those bytes belong to this script.
+   *
+   * Answering here rather than at render time is the whole point: alignment DEGRADES rather than
+   * fails on a wrong file (`assignSceneRanges` falls back to a proportional split), so an
+   * unverified upload produces a film whose CTA and QR beats sit on the wrong words — invisible
+   * until someone watches it, after every clip has been paid for.
+   */
+  verifyNarration: approvedProcedure
+    .input(
+      z.object({
+        url: z.string().url().max(1024),
+        script: z.string().min(1),
+        channelKey: z.string().min(1),
+      })
+    )
+    .mutation(async ({ input }) => {
+      if (!isTrustedUrl(input.url)) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Narration must be an upload from this app.",
+        });
+      }
+      // Check against what is actually VOICED: `runUnifiedPipeline` narrates
+      // `parseCtaMarkers(extractSpokenScript(...)).script`, so verifying against the un-stripped
+      // text would count the marker lines as words the recording failed to say.
+      const spoken = parseCtaMarkers(extractSpokenScript(input.script)).script;
+      if (!spoken.trim()) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "The script has no spoken text to check the recording against.",
+        });
+      }
+      const config = await getChannelConfig(input.channelKey);
+      // Expected length from the channel voice's MEASURED pace (`wpsForVoice` learns it from
+      // finished jobs), so the cheap length check is calibrated to this channel rather than to
+      // a global guess.
+      const words = spoken.split(/\s+/).filter(Boolean).length;
+      const expectedSec = words / wpsForVoice(config?.voiceId);
+      // Transcribe the same mono-16k copy the pipeline itself aligns against — same bytes, same
+      // model, so a verdict here predicts the alignment that will actually run.
+      const mono = await extractMonoAudio(input.url);
+      const durationSec = await probeUrlDurationSec(input.url, "mp3");
+      const verdict = await verifyNarrationRead({
+        audio: mono,
+        spokenScript: spoken,
+        durationSec,
+        expectedSec,
+      });
+      return { ...verdict, expectedSec, words };
+    }),
+
+  /**
+   * The delivery direction for a script — pace, pause, mood and gesture per paragraph — asked
+   * for BEFORE the render rather than during it.
+   *
+   * On an automatic render this plan is made inside the pipeline and the operator never sees it:
+   * the voice and the host's body are derived from the same reading of the script, so they agree
+   * by construction. A SUPPLIED narration breaks that. The operator reads however they choose,
+   * and the pipeline then makes its own plan afterwards whose mood and gesture cues drive the
+   * host's face and body in the lip-sync prompt — over a read that ignored them. Worse, the plan
+   * is a Claude call, so it is non-deterministic: even a correctly-guessed mood would not
+   * survive into the render.
+   *
+   * Handing the plan out here fixes both halves at once. The operator reads to it, and the
+   * client sends it back with `generate`, where it is pinned onto `inputParams.deliveryPlan` —
+   * which the pipeline reuses verbatim (`if (!params.deliveryPlan)`) instead of regenerating.
+   * The direction the host is given is then, by construction, the direction that was read.
+   */
+  planDelivery: approvedProcedure
+    .input(
+      z.object({
+        script: z.string().min(1),
+        channelKey: z.string().min(1),
+      })
+    )
+    .mutation(async ({ input }) => {
+      // Direct against the VOICED text, the same string the pipeline plans over — paragraph
+      // indices are positional, so planning over the un-stripped script would shift every cue
+      // by however many marker lines precede it.
+      const spoken = parseCtaMarkers(extractSpokenScript(input.script)).script;
+      const config = await getChannelConfig(input.channelKey);
+      const plan = await planDelivery(spoken, {
+        hostName: config?.hostName ?? undefined,
+      });
+      // Null is not an error: the pipeline treats a missing plan as "one speed, no cues", which
+      // is exactly the pre-feature behaviour. The panel says so rather than blocking the upload.
+      return {
+        plan,
+        paragraphs: scriptParagraphs(spoken),
+      };
+    }),
+
+  /**
+   * Supply a narration for a job that could not voice itself, and let it carry on.
+   *
+   * The rescue half of the manual hatch. A render that dies at the voicing stage — the TTS
+   * vendor down, out of credits, or accepting tasks it never finishes — leaves a job with a
+   * storyboard, no master and no way forward: "Retry failed scenes" only re-renders CLIPS, and
+   * there are none yet. Before this, the only recovery was to re-create the job by hand.
+   *
+   * Restarts through `runLongformPipeline`, the same entry point the original render used,
+   * rather than a bespoke resume lane: the pinned `videoSubject`, `visualStyleBible` and
+   * `deliveryPlan` on `inputParams` are all reused, so the only repeated work is the storyboard
+   * call. One code path to keep correct instead of two.
+   *
+   * Gated on `!masterAudioUrl` — a job that HAS voiced is one whose clips may already be paid
+   * for, and restarting from the top would re-render them. That is the exact boundary: no
+   * master means nothing downstream of voicing has been spent yet.
+   */
+  supplyNarration: approvedProcedure
+    .input(
+      z.object({
+        jobId: z.number(),
+        url: z.string().url().max(1024),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      if (!isTrustedUrl(input.url)) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Narration must be an upload from this app.",
+        });
+      }
+      const job = await getLongformVideoJobById(input.jobId);
+      if (!job) throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
+      if (!canSeeAllJobs(ctx.user.role) && job.userId !== ctx.user.id) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Not your render." });
+      }
+      if (job.status === "processing") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "This render is still running — cancel it first.",
+        });
+      }
+      if (job.masterAudioUrl) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            "This render already has a narration track. Supplying one would restart it from " +
+            "the top and re-render every clip.",
+        });
+      }
+      const params = job.inputParams as LongformInputParams;
+      await updateLongformVideoJob(input.jobId, {
+        inputParams: { ...params, manualNarrationUrl: input.url },
+        status: "processing",
+        stage: "storyboard",
+        errorMessage: null,
+      });
+      void runLongformPipeline(input.jobId);
+      return { started: true };
+    }),
+
   /** Kick off a long-form video job — returns the job id immediately. */
   generate: approvedProcedure
     .input(
@@ -1294,6 +1457,35 @@ const longformVideoRouter = router({
          * appears so briefly it reads as a glitch while still costing its own set of host plates.
          */
         hostPhotoIds: z.array(z.number()).max(8).optional(),
+        /**
+         * Operator-supplied master narration (an R2 URL from `POST /api/narration-upload`,
+         * already normalized and checked against this script by `verifyNarration`). Set only
+         * when the operator ticked "I'll supply the narration" — the escape hatch for a TTS
+         * vendor that is down, since 69Labs is the only voiceover lane and no other stage of
+         * the pipeline depends on it. When present the voicing stage makes no provider call.
+         */
+        manualNarrationUrl: z.string().url().max(1024).optional(),
+        /**
+         * Delivery direction the operator was shown BEFORE recording (`planDelivery`), pinned so
+         * the render reuses it instead of making its own. Only meaningful alongside
+         * `manualNarrationUrl`: it is what makes the host's body cues agree with a read that
+         * already happened. Absent ⇒ the pipeline plans for itself, exactly as before.
+         */
+        deliveryPlan: z
+          .object({
+            paragraphs: z
+              .array(
+                z.object({
+                  index: z.number().int().min(0),
+                  pace: z.enum(["slow", "measured", "natural", "brisk"]),
+                  pauseAfterMs: z.number().int().min(0).max(2000),
+                  mood: z.string().max(120),
+                  gesture: z.string().max(120).optional(),
+                })
+              )
+              .max(400),
+          })
+          .optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -1567,6 +1759,12 @@ const longformVideoRouter = router({
         channelKey: input.channelKey,
         voiceId: channelConfig.voiceId,
         ttsModel: channelConfig.ttsModel || "eleven_multilingual_v2",
+        // Present ⇒ the voicing stage returns this instead of calling the TTS provider.
+        manualNarrationUrl: input.manualNarrationUrl,
+        // Only honoured alongside a supplied narration: pinning a plan the operator never saw
+        // would just freeze one non-deterministic draw for no benefit, and skip the call the
+        // pipeline makes with the same inputs anyway.
+        deliveryPlan: input.manualNarrationUrl ? input.deliveryPlan : undefined,
         ttsSpeed,
         ttsVolume,
         // QR overlaid on CTA scenes; resolved from the channel config (saved once in Admin).

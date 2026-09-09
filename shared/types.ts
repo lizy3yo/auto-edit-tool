@@ -843,6 +843,27 @@ export interface LongformInputParams {
   };
   /** TTS volume multiplier (resolved from the channel config; applied as an ffmpeg gain) */
   ttsVolume?: number;
+  /**
+   * Operator-supplied master narration (R2 URL), uploaded through `POST /api/narration-upload`
+   * and already normalized + verified against `spokenScript` by the time it lands here.
+   *
+   * When set, `voiceMasterNarration` returns it INSTEAD of calling the TTS provider — the one
+   * seam the whole hatch turns on. Everything after that line (whisperx alignment, silence
+   * detection, `assignSceneRanges`, per-scene slicing, the lip-sync lanes, assembly) is
+   * alignment-driven and provider-agnostic, so it runs byte-identically to a voiced film.
+   *
+   * The escape hatch for a dead TTS vendor: with 69Labs unreachable there is no other TTS lane
+   * (`resolveTTSProvider` throws), and every OTHER lane in the pipeline — APIMART b-roll,
+   * gpt-image-2 stills, HeyGen/RunPod host — is independent of it. So one supplied mp3 is the
+   * difference between no film at all and a complete render.
+   *
+   * Consequence that is load-bearing elsewhere: fresh per-scene TTS is BANNED on such a job
+   * (`manualNarrationJob`). Re-voicing one scene from a provider that did not read the rest of
+   * the film puts a second voice inside one video — worse than the missing-slice it repairs,
+   * because the film still assembles and ships. The only legal repair is a re-cut of this
+   * master (`restoreMissingNarrationSlices`).
+   */
+  manualNarrationUrl?: string;
   /** User-supplied video title (optional). Names the downloaded MP4; persisted so it survives refresh/cross-device. */
   title?: string;
   /**
