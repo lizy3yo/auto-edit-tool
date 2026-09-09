@@ -62,6 +62,11 @@ import {
   createChannelAsset,
   updateChannelAsset,
   deactivateChannelAsset,
+  getChannelHostPhotos,
+  createChannelHostPhoto,
+  updateChannelHostPhoto,
+  deactivateChannelHostPhoto,
+  setPrimaryChannelHostPhoto,
   getSalesByJob,
   getSalesByProductForJob,
   getJobsForChannel,
@@ -489,6 +494,21 @@ const channelConfigRouter = router({
         nicheSlug,
         ...rest,
       });
+      // Seed the host photo LIST from what the create form collected. The form still asks for
+      // one (and optionally two) photos up front, because a channel with no host photo cannot
+      // render a host scene — but the list is what the pipeline reads, so a channel created
+      // after migration 0008 has to land in it too, not only in the legacy columns.
+      const seeds = [input.hostPhotoUrl, input.hostPhotoUrl2].filter(
+        (u): u is string => !!u
+      );
+      for (let i = 0; i < seeds.length; i++) {
+        await createChannelHostPhoto({
+          channelKey,
+          imageUrl: seeds[i],
+          sortOrder: i,
+          isActive: true,
+        });
+      }
       return { channelKey };
     }),
 
@@ -789,6 +809,75 @@ const channelAssetRouter = router({
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
       await deactivateChannelAsset(input.id);
+      return { success: true };
+    }),
+});
+
+/**
+ * A channel's HOST PHOTOS — the camera angles its videos can be shot from.
+ *
+ * `list` is `approvedProcedure` because the Long-form page has to render the per-video picker
+ * for whoever is generating; writing the library stays with managers, like every other piece
+ * of channel configuration.
+ */
+const channelHostPhotoRouter = router({
+  /** Ordered, primary first. `activeOnly` for the generate picker; Admin sees removed ones too. */
+  list: approvedProcedure
+    .input(
+      z.object({
+        channelKey: z.string().min(1),
+        activeOnly: z.boolean().default(true),
+      })
+    )
+    .query(async ({ input }) =>
+      getChannelHostPhotos(input.channelKey, input.activeOnly)
+    ),
+
+  /**
+   * Add or update one angle. `imageUrl` is already an R2 URL from `styleReference.upload` — the
+   * same upload path the old two host-photo fields used — so it is validated and stored as-is.
+   * A new photo lands at the END of the order: appending never silently demotes the angle the
+   * channel's finished films opened on.
+   */
+  save: managerProcedure
+    .input(
+      z.object({
+        id: z.number().optional(),
+        channelKey: z.string().min(1),
+        imageUrl: z.string().url().max(512),
+      })
+    )
+    .mutation(async ({ input }) => {
+      // No name: an angle is identified by its PICTURE, which every surface shows, and by its
+      // POSITION, which is the half that carries meaning (0 is the primary). A name field was
+      // a worse second copy of the thumbnail and friction on every upload.
+      const data = { channelKey: input.channelKey, imageUrl: input.imageUrl };
+      if (input.id) {
+        await updateChannelHostPhoto(input.id, data);
+        return { id: input.id };
+      }
+      const existing = await getChannelHostPhotos(input.channelKey, false);
+      const id = await createChannelHostPhoto({
+        ...data,
+        sortOrder: existing.length,
+        isActive: true,
+      });
+      return { id };
+    }),
+
+  /** Soft-delete — finished videos keep the angle they snapshotted at render time. */
+  deactivate: managerProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input }) => {
+      await deactivateChannelHostPhoto(input.id);
+      return { success: true };
+    }),
+
+  /** Promote one angle to the front of the order, making it the channel's primary camera. */
+  setPrimary: managerProcedure
+    .input(z.object({ channelKey: z.string().min(1), id: z.number() }))
+    .mutation(async ({ input }) => {
+      await setPrimaryChannelHostPhoto(input.channelKey, input.id);
       return { success: true };
     }),
 });
@@ -1196,6 +1285,15 @@ const longformVideoRouter = router({
           )
           .max(32)
           .optional(),
+        /**
+         * Which of the channel's host photos this video may be shot from, by row id. Omitted or
+         * empty means every active angle the channel has — the default the picker starts on, and
+         * what a caller that predates the picker sends.
+         *
+         * Capped at 8: the film only has so many host beats, and past a handful each extra angle
+         * appears so briefly it reads as a glitch while still costing its own set of host plates.
+         */
+        hostPhotoIds: z.array(z.number()).max(8).optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -1277,16 +1375,42 @@ const longformVideoRouter = router({
       // only ever fetch our CDN — an external/slow/bad-cert host in the channel config otherwise
       // fails every host/book scene at render time. face + cover fail fast (they're required refs);
       // QR is non-fatal (videoAssembly treats a missing QR as a no-op), so drop it on failure.
-      const faceImageUrl = channelConfig.hostPhotoUrl
-        ? await rehostToR2(channelConfig.hostPhotoUrl, "face")
+      //
+      // Host photos come from the channel's LIBRARY, narrowed to what this video selected. An
+      // empty/absent selection means "every active angle", which is what a channel migrated
+      // from the old two-column pair gets — so an operator who never opens the picker keeps
+      // exactly the behaviour they had. Unknown ids are ignored rather than rejected: a photo
+      // can be removed from the channel between opening the form and pressing generate, and
+      // that should cost an angle, not the render.
+      const libraryPhotos = await getChannelHostPhotos(input.channelKey, true);
+      const wanted = input.hostPhotoIds?.length
+        ? libraryPhotos.filter(p => input.hostPhotoIds!.includes(p.id))
+        : libraryPhotos;
+      // Legacy fallback: a channel whose library is somehow empty (created before migration
+      // 0008 and never edited since) still renders from its original columns.
+      const selectedUrls = wanted.length
+        ? wanted.map(p => p.imageUrl)
+        : [channelConfig.hostPhotoUrl, channelConfig.hostPhotoUrl2].filter(
+            (u): u is string => !!u
+          );
+      // The PRIMARY is a required reference and fails the job loudly; every further angle is a
+      // nice-to-have on top of it, so a bad one drops out and the film renders with fewer.
+      const faceImageUrl = selectedUrls[0]
+        ? await rehostToR2(selectedUrls[0], "face")
         : undefined;
-      // Optional alt-angle host photo — never fail the job if it's missing/bad, just fall back
-      // to single-angle (the whole feature is a nice-to-have on top of the primary face).
-      const faceImageUrl2 = channelConfig.hostPhotoUrl2
-        ? await rehostToR2(channelConfig.hostPhotoUrl2, "face").catch(
-            () => undefined
-          )
+      const extraFaces = (
+        await Promise.all(
+          selectedUrls
+            .slice(1)
+            .map(u => rehostToR2(u, "face").catch(() => undefined))
+        )
+      ).filter((u): u is string => !!u);
+      const faceImageUrls = faceImageUrl
+        ? [faceImageUrl, ...extraFaces]
         : undefined;
+      // Kept in step with the list so a job snapshotted now is still readable by anything that
+      // predates `faceImageUrls` (and so `hostFaces` agrees whichever field it reaches for).
+      const faceImageUrl2 = extraFaces[0];
       const bookCoverImageUrl = channelConfig.bookCoverImageUrl
         ? await rehostToR2(channelConfig.bookCoverImageUrl, "cover")
         : undefined;
@@ -1434,6 +1558,7 @@ const longformVideoRouter = router({
         // Host images are configured per channel (Admin → Channels), not per job.
         faceImageUrl,
         faceImageUrl2,
+        faceImageUrls,
         // On-screen lower third for the host, drawn once on the 2nd host shot. Plain strings —
         // nothing to rehost. All three blank → no card.
         hostName: channelConfig.hostName ?? undefined,
@@ -2773,6 +2898,7 @@ export const appRouter = router({
   longformVideo: longformVideoRouter,
   book: bookRouter,
   channelAsset: channelAssetRouter,
+  channelHostPhoto: channelHostPhotoRouter,
 });
 
 export type AppRouter = typeof appRouter;

@@ -294,6 +294,48 @@ export type ChannelAsset = typeof channelAssets.$inferSelect;
 export type InsertChannelAsset = typeof channelAssets.$inferInsert;
 
 /**
+ * A channel's HOST PHOTOS — the camera angles its videos can be shot from.
+ *
+ * Supersedes the fixed `channelConfigs.hostPhotoUrl` / `hostPhotoUrl2` pair, which could hold
+ * exactly two. A channel now holds as many angles as it has, and each video picks which of them
+ * it uses, so one film can run on a single photo and the next on four.
+ *
+ * `sortOrder` decides the order and the LOWEST is the primary — the angle split-screen scenes
+ * and the locked cold open are pinned to (`hostShot === 0`). It is a real position rather than
+ * a boolean because "which one is the main camera" is now a choice among many, not a column.
+ *
+ * These are ANGLES OF ONE PERSON in one setting, not costumes: the lip-sync lane is told a
+ * non-primary photo is the same host shot off-axis, so a different outfit or room reads as a
+ * continuity error mid-film rather than variety.
+ *
+ * Soft-deleted like `channel_assets` — a removed angle stays snapshotted on the videos that
+ * already rendered from it.
+ */
+export const channelHostPhotos = mysqlTable("channel_host_photos", {
+  id: int("id").autoincrement().primaryKey(),
+  /** Owning channel — host photos are per-channel, never shared. */
+  channelKey: varchar("channelKey", { length: 64 }).notNull(),
+  /** The photo (R2 URL) a host scene is lip-synced from. */
+  imageUrl: varchar("imageUrl", { length: 512 }).notNull(),
+  /**
+   * UNUSED. An angle is identified by its picture — which every surface showing one also shows —
+   * and by its position, which is the half that carries meaning (0 is the primary). Nothing
+   * writes or reads this; it holds only the "Primary"/"Alt angle" strings migration 0008
+   * backfilled, and is kept rather than dropped so that migration stays a single step.
+   */
+  label: varchar("label", { length: 120 }),
+  /** Ascending. The lowest active row is the primary angle. */
+  sortOrder: int("sortOrder").default(0).notNull(),
+  /** Soft-delete: an inactive angle stays snapshotted on the videos that already used it. */
+  isActive: boolean("isActive").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type ChannelHostPhoto = typeof channelHostPhotos.$inferSelect;
+export type InsertChannelHostPhoto = typeof channelHostPhotos.$inferInsert;
+
+/**
  * Sales reported by the webstore, one row per paid line item.
  *
  * Written ONLY by `POST /api/sales` (see `server/salesWebhook.ts`), which the store calls after a

@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ChannelBooks } from "@/components/admin/ChannelBooks";
 import { ChannelAssets } from "@/components/admin/ChannelAssets";
+import { ChannelHostPhotos } from "@/components/admin/ChannelHostPhotos";
 import {
   diffFields,
   fieldCountLabel,
@@ -169,8 +170,6 @@ function ImageUploadField({
 
 type EditForm = {
   authorName: string;
-  hostPhotoUrl: string;
-  hostPhotoUrl2: string;
   hostName: string;
   hostTitle: string;
   hostLocation: string;
@@ -188,12 +187,6 @@ type EditForm = {
     so the summary reads top-to-bottom like the panel the operator just filled in. */
 const EDIT_FIELDS: FieldSpec<EditForm>[] = [
   { field: "authorName", label: "Author Name" },
-  { field: "hostPhotoUrl", label: "Host Photo", image: true },
-  {
-    field: "hostPhotoUrl2",
-    label: "Alt Angle Host Photo",
-    image: true,
-  },
   { field: "hostName", label: "Host Name" },
   { field: "hostTitle", label: "Host Title" },
   { field: "hostLocation", label: "Host Location" },
@@ -235,8 +228,6 @@ export function ChannelConfigPanel() {
       // are also the baseline the Save summary diffs against.
       const created: EditForm = {
         authorName: createForm.authorName,
-        hostPhotoUrl: createForm.hostPhotoUrl,
-        hostPhotoUrl2: createForm.hostPhotoUrl2,
         hostName: createForm.hostName,
         hostTitle: createForm.hostTitle,
         hostLocation: createForm.hostLocation,
@@ -286,8 +277,6 @@ export function ChannelConfigPanel() {
   const [editingChannel, setEditingChannel] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<EditForm>({
     authorName: "",
-    hostPhotoUrl: "",
-    hostPhotoUrl2: "",
     hostName: "",
     hostTitle: "",
     hostLocation: "",
@@ -332,8 +321,6 @@ export function ChannelConfigPanel() {
     const config = configs?.find((c: any) => c.channelKey === channelKey);
     const loaded: EditForm = {
       authorName: config?.authorName || "",
-      hostPhotoUrl: config?.hostPhotoUrl || "",
-      hostPhotoUrl2: config?.hostPhotoUrl2 || "",
       hostName: config?.hostName || "",
       hostTitle: config?.hostTitle || "",
       hostLocation: config?.hostLocation || "",
@@ -377,11 +364,9 @@ export function ChannelConfigPanel() {
       // partial to Drizzle's `.set()`, so omitting them leaves whatever a legacy channel
       // already stored intact rather than silently wiping it on the next save — they simply
       // can no longer be set from here. Both now come from the channel's books.
-      // Same `null`-not-`undefined` rule as the identity fields below: a photo
-      // cleared with Remove has to reach `.set()` as an explicit null, or the
-      // column is skipped and the old URL survives the save.
-      hostPhotoUrl: editForm.hostPhotoUrl || null,
-      hostPhotoUrl2: editForm.hostPhotoUrl2 || null,
+      // `hostPhotoUrl` / `hostPhotoUrl2` are deliberately not sent either — host photos are
+      // rows in `channel_host_photos` now, managed by their own list above. Omitting them
+      // leaves the legacy columns exactly as migration 0008 read them.
       // The identity card fields send `null` when blanked, not `undefined`: `upsert` passes
       // a partial to `.set()`, which skips undefined columns, so `|| undefined` made a
       // cleared name silently keep its old value.
@@ -465,26 +450,13 @@ export function ChannelConfigPanel() {
             (`book?.coverImageUrl ?? params.bookCoverImageUrl`), so the channel-level pair was
             only ever the fallback for a CTA block with no book — one cover per channel, in a
             model where a video can pitch a different book mid-roll and at the close. */}
-      <ImageUploadField
-        label="Host Photo"
-        helpText="Front-facing photo of the host. Used as the on-camera face for talking scenes and lip-sync in long-form videos. PNG/JPG, under 10 MB."
-        value={editForm.hostPhotoUrl}
-        onChange={url => setEditForm(f => ({ ...f, hostPhotoUrl: url }))}
-        fit="cover"
-        uploadLabel="Upload host photo"
-        confirmRemove
-        shortLabel="Host Photo"
-      />
-      <ImageUploadField
-        label="Host Photo — Alt Angle (optional)"
-        helpText="Optional second host photo from a DIFFERENT camera angle. When set, host scenes alternate between the two angles so consecutive host cuts don't look identical (and two host scenes may sit back-to-back). PNG/JPG, under 10 MB."
-        value={editForm.hostPhotoUrl2}
-        onChange={url => setEditForm(f => ({ ...f, hostPhotoUrl2: url }))}
-        fit="cover"
-        uploadLabel="Upload alt host photo"
-        confirmRemove
-        shortLabel="Alt Angle Host Photo"
-      />
+      {/* Host photos are their own rows now, not two columns on this form — a channel holds as
+          many camera angles as it has and each video picks which it uses. They are therefore
+          NOT part of `editForm` and Save Configuration does not touch them: leaving them in the
+          staged form would mean an empty field wiping a photo on the next save. The legacy
+          `hostPhotoUrl` / `hostPhotoUrl2` columns are left exactly as they are — migration 0008
+          copied them into the list, and nothing writes them from here any more. */}
+      {editingChannel && <ChannelHostPhotos channelKey={editingChannel} />}
       {/* On-screen host identity (lower third) */}
       <div>
         <Label className="text-xs">On-Screen Host Identity</Label>

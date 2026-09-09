@@ -1,4 +1,4 @@
-import { eq, desc, and, gte, inArray, lt, or, sql } from "drizzle-orm";
+import { asc, eq, desc, and, gte, inArray, lt, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { createPool } from "mysql2";
 import {
@@ -9,6 +9,7 @@ import {
   longformSlots,
   books,
   channelAssets,
+  channelHostPhotos,
   longformSales,
   users,
 } from "../drizzle/schema";
@@ -20,6 +21,8 @@ import type {
   InsertBook,
   ChannelAsset,
   InsertChannelAsset,
+  ChannelHostPhoto,
+  InsertChannelHostPhoto,
   InsertLongformSale,
   User,
   InsertUser,
@@ -814,6 +817,87 @@ export async function deactivateChannelAsset(id: number): Promise<void> {
     .update(channelAssets)
     .set({ isActive: false })
     .where(eq(channelAssets.id, id));
+}
+
+// ─── Channel host photos ───
+// The channel's camera angles. Ordered, and the first ACTIVE row is the primary — every read
+// goes through `getChannelHostPhotos` so "which photo is the main camera" has one answer.
+
+export async function getChannelHostPhotos(
+  channelKey: string,
+  activeOnly = true
+): Promise<ChannelHostPhoto[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const where = activeOnly
+    ? and(
+        eq(channelHostPhotos.channelKey, channelKey),
+        eq(channelHostPhotos.isActive, true)
+      )
+    : eq(channelHostPhotos.channelKey, channelKey);
+  return db
+    .select()
+    .from(channelHostPhotos)
+    .where(where)
+    .orderBy(asc(channelHostPhotos.sortOrder), asc(channelHostPhotos.id));
+}
+
+export async function createChannelHostPhoto(
+  data: InsertChannelHostPhoto
+): Promise<number | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const [res] = await db.insert(channelHostPhotos).values(data);
+  return (res as any)?.insertId ?? null;
+}
+
+export async function updateChannelHostPhoto(
+  id: number,
+  data: Partial<InsertChannelHostPhoto>
+): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db
+    .update(channelHostPhotos)
+    .set(data)
+    .where(eq(channelHostPhotos.id, id));
+}
+
+export async function deactivateChannelHostPhoto(id: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db
+    .update(channelHostPhotos)
+    .set({ isActive: false })
+    .where(eq(channelHostPhotos.id, id));
+}
+
+/**
+ * Move one photo to the front of its channel's order, making it the primary.
+ *
+ * Renumbers the whole channel rather than assigning the target `min - 1`: sortOrder would drift
+ * negative over repeated promotions, and two rows that tie on it fall back to insertion id,
+ * which is not what the operator just asked for. Renumbering keeps the column meaning exactly
+ * "position", so the list and the pipeline can never disagree about which angle is index 0.
+ */
+export async function setPrimaryChannelHostPhoto(
+  channelKey: string,
+  id: number
+): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  const rows = await getChannelHostPhotos(channelKey, false);
+  const ordered = [
+    ...rows.filter(r => r.id === id),
+    ...rows.filter(r => r.id !== id),
+  ];
+  for (let i = 0; i < ordered.length; i++) {
+    if (ordered[i].sortOrder === i) continue;
+    await db
+      .update(channelHostPhotos)
+      .set({ sortOrder: i })
+      .where(eq(channelHostPhotos.id, ordered[i].id));
+  }
 }
 
 // ─── Sales ───

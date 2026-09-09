@@ -265,14 +265,20 @@ export interface StoryboardScene {
   /** Whether the on-camera host appears (gets the reference face + face-lock) */
   hostPresent: boolean;
   /**
-   * Which host photo drives this scene's lip-sync: 0 = primary (`faceImageUrl`), 1 = alt angle
-   * (`faceImageUrl2`). Assigned by `assignHostShots` only when the channel has a second host
-   * photo: shots alternate across the film, and the cold-open host pair (scenes 1 & 2, the only
-   * adjacent host pair) always reads main → alt (its first scene is pinned to the primary). Only
-   * meaningful when `hostPresent`; undefined = primary. Persisted in the storyboard JSON so
+   * Which host photo drives this scene's lip-sync: an INDEX into `faceImageUrls`, where 0 is the
+   * primary angle. Assigned by `assignHostShots` only when the video was given more than one
+   * photo: angles rotate across the film so no two consecutive host beats repeat one, and the
+   * cold-open host pair (scenes 1 & 2, the only adjacent host pair) always reads angle 0 → 1.
+   *
+   * It was a `0 | 1` flag while a channel could hold exactly two photos. It is a number because
+   * a channel now holds a library and each video picks any subset of it, so "which angle" is a
+   * position among many rather than "is this the alt one". Anything non-zero is off-axis as far
+   * as the lip-sync lane is concerned (see `useAlt` in `buildLipsyncPrompt`).
+   *
+   * Only meaningful when `hostPresent`; undefined = primary. Persisted in the storyboard JSON so
    * resume/regenerate reuse it.
    */
-  hostShot?: 0 | 1;
+  hostShot?: number;
   /**
    * Part of the LOCKED host cold open: scene 1, plus scene 2 when the channel has an alt host
    * photo (`faceImageUrl2`) — a fixed two-angle opener that every longform film shares. Set once
@@ -776,6 +782,19 @@ export interface LongformInputParams {
    * scene stands alone. Unset ⇒ single-angle, single-scene open, and no host pair anywhere.
    */
   faceImageUrl2?: string;
+  /**
+   * Every host camera angle this video may use, primary FIRST — resolved from the channel's
+   * photo library filtered by the operator's per-video selection, and snapshotted so a resume
+   * renders the same set. `StoryboardScene.hostShot` indexes into it.
+   *
+   * Supersedes the `faceImageUrl` / `faceImageUrl2` pair above, which could hold exactly two.
+   * Those two are kept because jobs rendered before this existed still carry them and must stay
+   * resumable; `hostFaces()` is the single reader that prefers this and falls back to the pair,
+   * so nothing else needs to know which vintage a job is.
+   *
+   * One entry ⇒ every host scene uses it, no angle changes, and the cold open is a single scene.
+   */
+  faceImageUrls?: string[];
   /**
    * The host's on-screen identity, resolved from the channel config. Rendered as a lower-third
    * card over the SECOND host shot of the film (see `nameCardSceneIndex` / `renderNameCardPng`).

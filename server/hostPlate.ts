@@ -146,14 +146,17 @@ export function __resetPlateCache(): void {
 }
 
 /**
- * Cache key for one plate. The host photo is part of it because a scene pinned to the alt-angle
- * photo (`hostShot === 1`) must plate FROM that photo — otherwise the two-angle cut rhythm the
- * storyboard planned collapses to a single face.
+ * Cache key for one plate. The camera angle is part of it because a scene pinned to a
+ * non-primary photo must plate FROM that photo — otherwise the cut rhythm the storyboard
+ * planned collapses to a single face.
+ *
+ * `hostShot` is an index into the video's selected photos (0 = primary), not the 0/1 flag it
+ * was when a channel could hold exactly two: plate count is therefore looks x angles in use.
  */
 export const plateKey = (
   jobId: number,
   context: string,
-  hostShot: 0 | 1
+  hostShot: number
 ): string =>
   `${jobId}:${createHash("sha1").update(context).digest("hex").slice(0, 12)}:${hostShot}`;
 
@@ -167,7 +170,7 @@ export const plateKey = (
 export async function resolveHostPlate(opts: {
   jobId: number;
   scene: StoryboardScene;
-  /** The photo this scene is pinned to (primary or alt) — the identity reference. */
+  /** The photo this scene is pinned to (its camera angle) — the identity reference. */
   hostPhotoUrl: string;
   apimartKey?: string | null;
 }): Promise<string> {
@@ -180,7 +183,7 @@ export async function resolveHostPlate(opts: {
   const context = opts.scene.hostPlateContext?.trim();
   if (!context) return opts.hostPhotoUrl; // planning pass didn't run (older storyboard)
 
-  const shot = (opts.scene.hostShot === 1 ? 1 : 0) as 0 | 1;
+  const shot = opts.scene.hostShot ?? 0;
   const key = plateKey(opts.jobId, context, shot);
 
   let pending = _plates.get(key);

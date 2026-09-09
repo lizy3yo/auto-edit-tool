@@ -1,5 +1,6 @@
 import { useState, useEffect, useId, useMemo, useRef } from "react";
 import { trpc } from "@/lib/trpc";
+import { LongformHostPhotoPicker } from "@/components/LongformHostPhotoPicker";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -316,6 +317,9 @@ export default function LongformJobSlot({
   // hydration effect). Never auto-collapses while you are typing — only adopting a job does it.
   const [scriptCollapsed, setScriptCollapsed] = useState(false);
   const [channelKey, setChannelKey] = useState<string>("");
+  // Which of the channel's host photos this video may use. Empty = every active one, which is
+  // also how the server reads an omitted list, so an untouched form behaves as it always did.
+  const [hostPhotoIds, setHostPhotoIds] = useState<number[]>([]);
   const [showConfirm, setShowConfirm] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showCost, setShowCost] = useState(false);
@@ -836,10 +840,10 @@ export default function LongformJobSlot({
         return q.state.data?.status === "processing" ||
           q.state.data?.sceneEdits?.editing ||
           queuedScenes.length > 0
-            ? 3000
-            : Date.now() < cutRoomWatchUntil
-              ? 1000
-              : false;
+          ? 3000
+          : Date.now() < cutRoomWatchUntil
+            ? 1000
+            : false;
       },
     }
   );
@@ -1445,6 +1449,7 @@ export default function LongformJobSlot({
       slotIndex,
       // Assets are no longer sent from here — the server reads them from the channel.
       ctaBooks: books.length ? books : undefined,
+      hostPhotoIds: hostPhotoIds.length ? hostPhotoIds : undefined,
     });
   };
 
@@ -1538,6 +1543,13 @@ export default function LongformJobSlot({
                 channelKey={channelKey}
                 ttsSpeed={channelDefaults.ttsSpeed}
                 ttsVolume={channelDefaults.ttsVolume}
+              />
+              <LongformHostPhotoPicker
+                key={channelKey}
+                channelKey={channelKey}
+                value={hostPhotoIds}
+                onChange={setHostPhotoIds}
+                disabled={generateMutation.isPending || isProcessing}
               />
             </div>
           )}

@@ -716,12 +716,36 @@ export const STILL_IMAGE_FRACTION = 0.5;
  */
 export const HOST_SPLITVISUAL_FRACTION = 7.5 / 35;
 /**
- * Target share of HOST runtime rendered from the channel's SECOND host photo
- * (`faceImageUrl2`, the alt camera angle): 10% of total out of the 35% host budget, leaving
- * 17.5% on the main camera. `assignHostShots` converges the actual alt share by runtime.
- * Without a second photo the whole 27.5% non-split host budget stays on the main camera.
+ * Target share of HOST runtime rendered from a NON-PRIMARY camera angle: 10% of total out of
+ * the 35% host budget, leaving 17.5% on the main camera. `assignHostShots` converges the actual
+ * share by runtime. With only one photo the whole 27.5% non-split host budget stays on it.
+ *
+ * With three or more angles this whole fraction is SHARED between them — the primary keeps its
+ * ~71% of host runtime whatever the count. That is deliberate and it is a cost decision, not an
+ * aesthetic one: `planLipsyncGroups` batches consecutive host beats into one GPU call only when
+ * they share an angle, so an even rotation (A, B, C, A, B, C) never lets two neighbours match
+ * and every beat renders solo — and a solo beat pays for ~40% frames nobody sees (the run-up
+ * plus the padding out to the last 81-frame window). Keeping one dominant angle preserves long
+ * runs of it, so adding photos costs plate images rather than a step change in GPU seconds.
  */
 export const HOST_ALT_CAMERA_FRACTION = 10 / 35;
+
+/**
+ * The host camera angles this video may use, primary first — the ONE place that decides what
+ * `hostShot` indexes into.
+ *
+ * Prefers the modern `faceImageUrls` list and falls back to the `faceImageUrl` / `faceImageUrl2`
+ * pair, so a job snapshotted before the library existed resumes with exactly the angles it
+ * rendered with. Every consumer goes through here rather than reading the fields, which is why
+ * "how many angles does this film have" cannot be answered two different ways.
+ */
+export function hostFaces(params: LongformInputParams): string[] {
+  const list = params.faceImageUrls?.filter(Boolean);
+  if (list?.length) return list;
+  return [params.faceImageUrl, params.faceImageUrl2].filter(
+    (u): u is string => !!u
+  );
+}
 
 /**
  * THE RAMP — the visual mix is NOT flat across the video. The film opens energetic (talking
@@ -2176,7 +2200,14 @@ export function enforceHostSplitMix(
 export function enforceVisualAdjacency(
   scenes: StoryboardScene[],
   opts?: {
+    /** Whether an adjacent host PAIR is legal — true once the video has more than one angle. */
     hasAltHost?: boolean;
+    /**
+     * How many host photos this video may use, for `assignHostShots`. Defaults to what
+     * `hasAltHost` implies (2 when set, else 1), so a caller that only knows "is there an alt"
+     * — every existing one, and every existing test — behaves exactly as before.
+     */
+    angleCount?: number;
     allowAdjacentMotion?: boolean;
     /**
      * Longest run of adjacent MOTION beats left alone (default 1 — the shipped behaviour).
@@ -2257,7 +2288,10 @@ export function enforceVisualAdjacency(
   }
 
   // Assign the host camera angle last, once the runs are final.
-  const shots = assignHostShots(scenes, hasAltHost);
+  const shots = assignHostShots(
+    scenes,
+    opts?.angleCount ?? (hasAltHost ? 2 : 1)
+  );
 
   return { hostBroken, motionBroken, altSeconds: shots.altSeconds };
 }
@@ -2271,30 +2305,41 @@ export function enforceVisualAdjacency(
 export const MAX_ADJACENT_HOST = 2;
 
 /**
- * Assign each host scene its camera angle by RUNTIME: 0 = primary photo (`faceImageUrl`),
- * 1 = alt angle (`faceImageUrl2`). The alt camera targets `HOST_ALT_CAMERA_FRACTION` of host
- * runtime (10% of total), leaving the main camera at ~17.5% and split-screen at ~7.5%.
+ * Assign each host scene its camera angle by RUNTIME. `hostShot` is an INDEX into the video's
+ * selected host photos, 0 being the primary. Non-primary angles together target
+ * `HOST_ALT_CAMERA_FRACTION` of host runtime (10% of total), leaving the primary at ~17.5% and
+ * split-screen at ~7.5%.
  *
- * Three angles are MANDATORY and assigned first (they can push alt above target, which is fine):
- * the locked cold open (`hostOpener`) is pinned by ordinal — main then alt; an adjacent host PAIR
- * always reads main → alt (that angle change is the only reason a pair is allowed); and a
- * split-screen scene always renders from the PRIMARY photo. Every remaining host scene starts on
- * the main camera and is promoted to alt in `spreadOrder` only while the promotion moves the alt
- * seconds CLOSER to target — the same converge shape as `enforceHostSplitMix`.
+ * `angleCount` is how many photos this video was given. 1 is a no-op — every host scene stays on
+ * the primary. 2 reproduces the original two-angle behaviour exactly, which is what the existing
+ * tests pin. 3+ share the same non-primary budget between them (see `HOST_ALT_CAMERA_FRACTION`
+ * for why the primary stays dominant instead of rotating evenly).
  *
- * Without a second host photo this is a no-op (all host scenes stay on the primary, so the
- * alt budget falls to the main camera). Mutates in place; pure otherwise — unit-tested.
+ * Three placements are MANDATORY and assigned first (they can push the non-primary share above
+ * target, which is fine): the locked cold open (`hostOpener`) is pinned by ordinal — angle 0 then
+ * angle 1; an adjacent host PAIR always reads 0 → 1 (that angle change is the only reason a pair
+ * is allowed); and a split-screen scene always renders from the PRIMARY photo. Every remaining
+ * host scene starts on the primary and is promoted in `spreadOrder` only while the promotion
+ * moves the non-primary seconds CLOSER to target — the same converge shape as
+ * `enforceHostSplitMix`.
+ *
+ * Promotions cycle through angles 1..n-1 so the budget is shared evenly among them, and a
+ * promotion that would repeat an adjacent host neighbour's angle takes the next one instead —
+ * the no-two-in-a-row rule is what makes a rotation read as a cut rather than a glitch.
+ *
+ * Mutates in place; pure otherwise — unit-tested.
  */
 export function assignHostShots(
   scenes: StoryboardScene[],
-  hasAltHost: boolean
+  angleCount: number
 ): { hostSeconds: number; altSeconds: number } {
   const dur = (s: StoryboardScene) => s.audioDuration ?? 0;
   const hostSeconds = scenes.reduce(
     (sum, s) => sum + (s.hostPresent ? dur(s) : 0),
     0
   );
-  if (!hasAltHost) return { hostSeconds, altSeconds: 0 };
+  const angles = Math.max(1, Math.floor(angleCount));
+  if (angles < 2) return { hostSeconds, altSeconds: 0 };
 
   // Pass 1 — mandatory angles. Everything else lands on the main camera and becomes a
   // candidate for the alt budget below.
@@ -2319,29 +2364,51 @@ export function assignHostShots(
     }
     const prev = scenes[i - 1];
     if (prev?.hostPresent && !prev.splitVisual) {
-      s.hostShot = prev.hostShot === 0 ? 1 : 0; // never repeat the neighbor's angle
+      // Never repeat the neighbour's angle. With two photos this is the old flip; with more,
+      // step to the next one so a run of pairs walks the library instead of ping-ponging.
+      s.hostShot = ((prev.hostShot ?? 0) + 1) % angles;
       continue;
     }
     if (scenes[i + 1]?.hostPresent && !scenes[i + 1].splitVisual) {
-      s.hostShot = 0; // a pair opens on the main photo (so it reads main → alt)
+      s.hostShot = 0; // a pair opens on the primary (so it reads 0 → 1)
       continue;
     }
     s.hostShot = 0;
     free.push(s);
   }
 
-  // Pass 2 — converge the alt-camera runtime toward its share of the host budget.
+  // Pass 2 — converge non-primary runtime toward its share of the host budget. Promotions cycle
+  // through 1..angles-1 so the one budget is split evenly between whatever angles are in play.
   const target = HOST_ALT_CAMERA_FRACTION * hostSeconds;
   let acc = scenes.reduce(
-    (sum, s) => sum + (s.hostPresent && s.hostShot === 1 ? dur(s) : 0),
+    (sum, s) => sum + (s.hostPresent && (s.hostShot ?? 0) !== 0 ? dur(s) : 0),
     0
   );
+  let next = 1;
   for (const s of spreadOrder(free)) {
     if (acc >= target) break;
-    if (Math.abs(acc + dur(s) - target) < Math.abs(acc - target)) {
-      s.hostShot = 1;
-      acc += dur(s);
+    if (Math.abs(acc + dur(s) - target) >= Math.abs(acc - target)) continue;
+    // Don't hand a promoted scene the same angle as an adjacent host neighbour — that would
+    // undo the very thing the rotation is for. With one non-primary angle there is nothing to
+    // step to, so such a scene simply stays on the primary.
+    const i = scenes.indexOf(s);
+    const taken = new Set(
+      [scenes[i - 1], scenes[i + 1]]
+        .filter(n => n?.hostPresent)
+        .map(n => n!.hostShot ?? 0)
+    );
+    let angle = 0;
+    for (let step = 0; step < angles - 1; step++) {
+      const candidate = ((next - 1 + step) % (angles - 1)) + 1;
+      if (!taken.has(candidate)) {
+        angle = candidate;
+        next = (candidate % (angles - 1)) + 1;
+        break;
+      }
     }
+    if (angle === 0) continue;
+    s.hostShot = angle;
+    acc += dur(s);
   }
 
   return { hostSeconds, altSeconds: acc };
@@ -5378,7 +5445,7 @@ export function markCtaQrBlock(
  */
 export function buildLipsyncPrompt(
   scene: StoryboardScene,
-  /** True when the scene renders from the ALT (off-axis) host photo — see the suffix. */
+  /** True when the scene renders from any NON-PRIMARY (off-axis) host photo — see the suffix. */
   useAlt = false,
   /**
    * Camera conditioning this render will use. `pinned` swaps in the direction that asks the
@@ -7195,15 +7262,19 @@ async function generateSceneLipsyncClips(
   /** Video adapter for a MOVING split right panel (`scene.splitMotion`); absent ⇒ still panel only. */
   videoAdapter?: ReturnType<typeof createProviderAdapter>
 ): Promise<string[]> {
-  // Scene may be pinned to the alt-angle host photo (assigned by `assignHostShots` so consecutive
-  // host cuts differ — an adjacent host pair reads main → alt). Fall back to the primary if no
-  // alt photo is configured. `useAlt` also rides along to the lane: RunPod needs it as an
-  // explicit `camera` knob so InfiniteTalk doesn't pull the off-axis subject onto this lens,
-  // while HeyGen simply INHERITS the still's gaze — there, the choice of photo IS the angle.
-  const useAltPhoto = scene.hostShot === 1 && !!params.faceImageUrl2;
-  const hostPhotoUrl = (
-    useAltPhoto ? params.faceImageUrl2 : params.faceImageUrl
-  ) as string;
+  // Scene may be pinned to a non-primary angle (assigned by `assignHostShots` so consecutive
+  // host cuts differ — an adjacent host pair reads 0 → 1). An index past the end falls back to
+  // the primary rather than rendering nothing: a storyboard can outlive the selection it was
+  // planned against (a photo removed from the channel between planning and a resume).
+  // `useAlt` also rides along to the lane as a boolean: RunPod needs it as an explicit `camera`
+  // knob so InfiniteTalk doesn't pull an off-axis subject onto this lens, and EVERY non-primary
+  // angle is off-axis for that purpose. HeyGen simply INHERITS the still's gaze — there, the
+  // choice of photo IS the angle.
+  const faces = hostFaces(params);
+  const shot = scene.hostShot ?? 0;
+  const useAltPhoto = shot > 0 && shot < faces.length;
+  const hostPhotoUrl = (faces[useAltPhoto ? shot : 0] ??
+    params.faceImageUrl) as string;
   // Lip-sync models animate the image they are given and never change the setting, so with
   // HOST_PLATES=1 the scene is synced from a generated frame of the host IN this beat's
   // setting rather than the studio headshot. Falls back to the raw photo on any failure —
@@ -8713,7 +8784,7 @@ export async function buildUnifiedScenes(
   // second host photo, else the single open-on-host scene. Its chunks are packed against the
   // HOST_MIN_HOLD_SEC floor rather than the snappy target, so each opening shot speaks its whole
   // 4s+ instead of voicing short and freeze-holding a face over inserted silence.
-  const openerHostScenes = params.faceImageUrl2 ? 2 : 1;
+  const openerHostScenes = hostFaces(params).length > 1 ? 2 : 1;
   // Segment at the voice's RECOGNIZED pace when a previous job measured it — chunks then
   // carry enough words to genuinely fill the scene floor at this voice's real speed.
   const pacing = pacingFor(params);
@@ -9557,7 +9628,8 @@ async function runUnifiedPipeline(
   // each host scene its camera angle (hostShot). Runs LAST so the ratio passes above can't
   // re-introduce a forbidden pair. See `enforceVisualAdjacency`.
   const adjacency = enforceVisualAdjacency(scenes, {
-    hasAltHost: !!params.faceImageUrl2,
+    hasAltHost: hostFaces(params).length > 1,
+    angleCount: hostFaces(params).length,
     allowAdjacentMotion: params.brollMotionOnly,
     // A cap of 1 would convert most of a raised motion budget straight back to stills — this
     // pass runs after `enforceStillMotionRatio`, so it gets the last word. See `maxAdjacentMotionFor`.
@@ -9570,12 +9642,13 @@ async function runUnifiedPipeline(
         `(motion run cap ${maxAdjacentMotionFor(pacing)})`
     );
   }
-  if (params.faceImageUrl2) {
+  if (hostFaces(params).length > 1) {
     const totalPct = (n: number) =>
       mix.total > 0 ? Math.round((n / mix.total) * 100) : 0;
     console.log(
-      `[Longform ${jobId}] host cameras: ${totalPct(adjacency.altSeconds)}% alt / ` +
-        `${totalPct(split.aloneSeconds - adjacency.altSeconds)}% main / ` +
+      `[Longform ${jobId}] host cameras (${hostFaces(params).length} angles): ` +
+        `${totalPct(adjacency.altSeconds)}% non-primary / ` +
+        `${totalPct(split.aloneSeconds - adjacency.altSeconds)}% primary / ` +
         `${totalPct(split.splitSeconds)}% split of total ` +
         `(targets 10 / 17.5 / 7.5)`
     );
@@ -9693,7 +9766,7 @@ async function runUnifiedPipeline(
   // ensureHostInCta may have created a new host beat after the adjacency pass assigned angles —
   // re-derive so any surviving pair still reads main → alt. Pure and O(n); this is the last
   // mutation before the storyboard persists and clips render.
-  assignHostShots(scenes, !!params.faceImageUrl2);
+  assignHostShots(scenes, hostFaces(params).length);
   // Operator assets take their beats LAST — after every register-mutating pass, so nothing
   // downstream can convert one back. No-op without uploads. (Their prompts were enhanced a few
   // lines above and are now unused: at most one wasted Flash call per asset, against a pass order
@@ -9731,7 +9804,10 @@ async function runUnifiedPipeline(
   // were clobbered, not skipped (`withJobLock` only opens below, so a watchdog/regen pass can
   // snapshot the pre-balancer storyboard here and write the whole array back). Warn rather
   // than widen the lock across this block for a race seen once.
-  if (params.faceImageUrl2 && !scenes.some(s => s.hostShot === 1)) {
+  if (
+    hostFaces(params).length > 1 &&
+    !scenes.some(s => (s.hostShot ?? 0) !== 0)
+  ) {
     console.warn(
       `[Longform ${jobId}] alt host photo configured but NO scene got the alt camera — ` +
         `every host shot will render from the primary photo`
