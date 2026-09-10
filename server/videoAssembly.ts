@@ -1186,6 +1186,13 @@ export function buildSceneMuxArgs(opts: {
     /** The b-roll panel on the canvas, px (`resolveSplitLayout`). Required by `"panel"`; a
      *  `"panel"` QR without one falls back to the corner rather than guessing a rectangle. */
     panel?: { x: number; w: number };
+    /**
+     * Seconds into the scene at which a `"corner"` card becomes the big centred one — the start
+     * of a host beat's frozen wait (`qrBigDuringHold`): small while the host talks, big once
+     * nobody is. Two overlays of the one QR input, each `enable`d for its own side of the
+     * switch. Ignored on a card that is already big, and outside (0, durationSec).
+     */
+    bigFromSec?: number;
   };
   /**
    * Optional host lower-third ("name card") — a full-frame transparent PNG (see
@@ -1235,30 +1242,69 @@ export function buildSceneMuxArgs(opts: {
 
   // Each overlay contributes a prep chain plus an `overlay` position; they're stitched into one
   // chain below so the last one lands on `[v]`.
-  const overlays: { prep: string; label: string; pos: string }[] = [];
+  const overlays: {
+    prep: string;
+    label: string;
+    pos: string;
+    /** ffmpeg timeline expression — the overlay draws only while it is true. */
+    enable?: string;
+  }[] = [];
   if (opts.qrOverlay) {
     // A white card with the QR centered and padded. `corner` (default) is a small card (~28% of
     // frame height) composited bottom-right with a small margin; `center` is a large card (~66%
     // of frame height) composited dead-center; `panel` is the large card centered in the split's
     // b-roll panel, shrunk only if the operator dragged the seam so the panel can't hold it.
-    const { placement, panel } = opts.qrOverlay;
+    const { placement, panel, bigFromSec } = opts.qrOverlay;
     const inPanel = placement === "panel" && !!panel;
     const big = placement === "center" || inPanel;
     const margin = Math.round(opts.qrOverlay.height * 0.045);
-    let card = Math.round(opts.qrOverlay.height * (big ? 0.66 : 0.28));
+    const bigCard = Math.round(opts.qrOverlay.height * 0.66);
+    let card = big ? bigCard : Math.round(opts.qrOverlay.height * 0.28);
     if (inPanel) card = Math.min(card, panel.w - 2 * margin);
-    const inner = Math.round(card * 0.86);
-    overlays.push({
-      prep:
-        `[${qrIdx}:v]scale=${inner}:${inner}:force_original_aspect_ratio=decrease,` +
-        `pad=${card}:${card}:(ow-iw)/2:(oh-ih)/2:color=white,setsar=1[qr]`,
-      label: "qr",
-      pos: inPanel
-        ? `${panel.x + Math.round((panel.w - card) / 2)}:(H-h)/2`
-        : big
-          ? `(W-w)/2:(H-h)/2`
-          : `W-w-${margin}:H-h-${margin}`,
-    });
+    const cardChain = (src: string, size: number, out: string) => {
+      const inner = Math.round(size * 0.86);
+      return (
+        `${src}scale=${inner}:${inner}:force_original_aspect_ratio=decrease,` +
+        `pad=${size}:${size}:(ow-iw)/2:(oh-ih)/2:color=white,setsar=1[${out}]`
+      );
+    };
+    const cornerPos = `W-w-${margin}:H-h-${margin}`;
+    const switchAt =
+      !big &&
+      bigFromSec != null &&
+      bigFromSec > 0 &&
+      bigFromSec < opts.durationSec
+        ? bigFromSec.toFixed(3)
+        : undefined;
+    if (switchAt) {
+      // Small while the host talks, big for the wait: the one QR input split in two, each copy
+      // drawn only on its own side of the switch, so exactly one card is ever on screen.
+      overlays.push(
+        {
+          prep:
+            `[${qrIdx}:v]split=2[qrs][qrb];` + cardChain("[qrs]", card, "qr"),
+          label: "qr",
+          pos: cornerPos,
+          enable: `lt(t,${switchAt})`,
+        },
+        {
+          prep: cardChain("[qrb]", bigCard, "qrbig"),
+          label: "qrbig",
+          pos: `(W-w)/2:(H-h)/2`,
+          enable: `gte(t,${switchAt})`,
+        }
+      );
+    } else {
+      overlays.push({
+        prep: cardChain(`[${qrIdx}:v]`, card, "qr"),
+        label: "qr",
+        pos: inPanel
+          ? `${panel.x + Math.round((panel.w - card) / 2)}:(H-h)/2`
+          : big
+            ? `(W-w)/2:(H-h)/2`
+            : cornerPos,
+      });
+    }
   }
   if (ncOn) {
     // The PNG is `-loop 1`, so a bare overlay covers frame 0 → cut with no timing at all. The
@@ -1310,7 +1356,11 @@ export function buildSceneMuxArgs(opts: {
     let cur = "base";
     overlays.forEach((o, i) => {
       const out = i === overlays.length - 1 ? "v" : `ov${i}`;
-      parts.push(o.prep, `[${cur}][${o.label}]overlay=${o.pos}[${out}]`);
+      const enable = o.enable ? `:enable='${o.enable}'` : "";
+      parts.push(
+        o.prep,
+        `[${cur}][${o.label}]overlay=${o.pos}${enable}[${out}]`
+      );
       cur = out;
     });
     filter = parts.join(";");
@@ -2671,6 +2721,9 @@ export async function assemblePerSceneFilm(opts: {
     qrPlacement?: "corner" | "center" | "panel";
     /** The split's geometry, so a `"panel"` QR finds the b-roll panel (`resolveSplitLayout`). */
     splitLayout?: SplitLayout;
+    /** A host beat's corner card goes big for its frozen tail hold (`qrBigDuringHold`). No-op
+     *  without a `tailHoldSec`. */
+    qrBigDuringHold?: boolean;
     /** Extra silent frozen tail (seconds) appended past the held length — the CTA QR-block release
      *  beat lingers so the QR stays on screen ~3s after the release line (or the operator's
      *  override, which may be 0). */
@@ -2923,6 +2976,11 @@ export async function assemblePerSceneFilm(opts: {
             resolveSplitLayout(width, height, scene.splitLayout)
           )
         : undefined;
+    /** The frozen wait a host beat's QR goes big for (`qrBigDuringHold`), or undefined. */
+    const qrWaitHoldFor = (scene: (typeof scenes)[number]) =>
+      scene.qrBigDuringHold && (scene.tailHoldSec ?? 0) > 0
+        ? scene.tailHoldSec
+        : undefined;
 
     const attemptScene = async (s: number): Promise<void> => {
       const scene = scenes[s];
@@ -2982,6 +3040,10 @@ export async function assemblePerSceneFilm(opts: {
                 placement: scene.qrPlacement ?? "corner",
                 height,
                 ...(qrPanel ? { panel: qrPanel } : {}),
+                // The switch point is the planned length minus this hold, both already keyed.
+                ...(qrWaitHoldFor(scene)
+                  ? { bigForHold: qrWaitHoldFor(scene) }
+                  : {}),
               }
             : undefined,
         nameCard: ncKey,
@@ -3129,6 +3191,10 @@ export async function assemblePerSceneFilm(opts: {
                   height,
                   placement: scene.qrPlacement ?? "corner",
                   panel: qrPanelFor(scene),
+                  // The tail hold is the last part of `durationSec` (tpad clones it there).
+                  bigFromSec: qrWaitHoldFor(scene)
+                    ? durationSec - qrWaitHoldFor(scene)!
+                    : undefined,
                 }
               : undefined,
           nameCard:

@@ -54,6 +54,9 @@ import {
   CORNER_QR_SCENES_BEFORE_COVER,
   qrOverlayUrlFor,
   qrPlacementFor,
+  qrBigDuringHold,
+  lengthenPitchShots,
+  shapePitchQrStretches,
   nameCardSceneIndices,
   ensureHostInCta,
   markCoverReveal,
@@ -3085,6 +3088,282 @@ describe("qrPlacementFor", () => {
   });
 });
 
+describe("qrBigDuringHold", () => {
+  it("switches a full-frame host's corner card to big for the wait", () => {
+    expect(qrBigDuringHold({ qrHero: true, hostPresent: true })).toBe(true);
+    expect(qrBigDuringHold({ qrCorner: true, hostPresent: true })).toBe(true);
+    // a split whose composite failed back to the bare host is a full-frame host too
+    expect(
+      qrBigDuringHold({
+        qrHero: true,
+        hostPresent: true,
+        splitVisual: "a feeder",
+        hostClipUrls: ["https://r2/host.mp4"],
+        clipUrls: ["https://r2/host.mp4"],
+      })
+    ).toBe(true);
+  });
+
+  it("leaves cards that are already big, the book, and QR-less scenes alone", () => {
+    expect(qrBigDuringHold({ qrHero: true })).toBe(false); // b-roll: already big
+    expect(
+      qrBigDuringHold({
+        qrHero: true,
+        hostPresent: true,
+        splitVisual: "a feeder",
+        hostClipUrls: ["https://r2/host.mp4"],
+        clipUrls: ["https://r2/composite.mp4"],
+      })
+    ).toBe(false); // split: already big in its panel
+    expect(qrBigDuringHold({ coverHero: true })).toBe(false);
+    expect(
+      qrBigDuringHold({ qrCorner: true, assetImageUrl: "https://r2/book.png" })
+    ).toBe(false);
+    expect(qrBigDuringHold({ hostPresent: true })).toBe(false); // no QR at all
+  });
+});
+
+describe("lengthenPitchShots", () => {
+  const sc = (
+    index: number,
+    sec: number,
+    extra: Partial<StoryboardScene> = {}
+  ): StoryboardScene => ({
+    index,
+    narration: `s${index}`,
+    scriptText: `Line ${index}.`,
+    visualPrompt: `shot ${index}`,
+    audioDuration: sec,
+    ...extra,
+  });
+  const pitch = { cta: true, qrCorner: true, ctaIndex: 0 };
+
+  it("folds short pitch shots into longer ones, and only in the pitch", () => {
+    const out = lengthenPitchShots([
+      sc(1, 3), // body beat: not the pitch, left alone
+      sc(2, 3, pitch),
+      sc(3, 3, pitch),
+      sc(4, 3),
+    ]);
+    expect(out.map(s => s.scriptText)).toEqual([
+      "Line 1.",
+      "Line 2. Line 3.",
+      "Line 4.",
+    ]);
+    expect(out.map(s => s.index)).toEqual([1, 2, 3]);
+    expect(out[1].audioDuration).toBeUndefined(); // re-sliced from the master next
+  });
+
+  it("settles a run of short shots in one call", () => {
+    const out = lengthenPitchShots([
+      sc(1, 2, pitch),
+      sc(2, 2, pitch),
+      sc(3, 2, pitch),
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0].scriptText).toBe("Line 1. Line 2. Line 3.");
+  });
+
+  it("never crosses the 8s shot ceiling, and never pads a shot it cannot merge", () => {
+    const out = lengthenPitchShots([sc(1, 4, pitch), sc(2, 5, pitch)]);
+    expect(out).toHaveLength(2); // 9s would breach the band
+    expect(out[0].audioDuration).toBe(4); // left short — not frozen up to 5
+  });
+
+  it("leaves the QR block, the cover, assets and the cold open untouched", () => {
+    for (const fixed of [
+      { qrHero: true },
+      { coverHero: true },
+      { assetImageUrl: "https://r2/book.png" },
+      { hostOpener: true as const },
+    ]) {
+      const out = lengthenPitchShots([
+        sc(1, 3, pitch),
+        sc(2, 3, { ...pitch, ...fixed }),
+      ]);
+      expect(out).toHaveLength(2);
+    }
+  });
+
+  it("never merges across two different CTA blocks", () => {
+    const out = lengthenPitchShots([
+      sc(1, 3, pitch),
+      sc(2, 3, { ...pitch, ctaIndex: 1 }),
+    ]);
+    expect(out).toHaveLength(2);
+  });
+
+  it("keeps the longer side's picture, and the QR", () => {
+    const out = lengthenPitchShots([
+      sc(1, 2, { cta: true, ctaIndex: 0, qrCorner: true }),
+      sc(2, 4, { cta: true, ctaIndex: 0 }),
+    ]);
+    expect(out[0].visualPrompt).toBe("shot 2");
+    expect(out[0].qrCorner).toBe(true);
+  });
+});
+
+describe("shapePitchQrStretches", () => {
+  /**
+   * H host moment · B b-roll · S split · C cover · A asset — all one pitch, seconds each.
+   * Every scene is `cta`; the scan-window beats carry `qrCorner` like a marked script's do.
+   */
+  const pitch = (spec: [string, number][]): StoryboardScene[] => {
+    let at = 0;
+    return spec.map(([kind, sec], i) => {
+      const start = at;
+      at += sec;
+      return {
+        index: i + 1,
+        narration: `beat ${i + 1}`,
+        scriptText: `Beat ${i + 1}.`,
+        visualPrompt: kind === "H" || kind === "S" ? "host" : `shot ${i + 1}`,
+        brollVisual:
+          kind === "H" || kind === "S" ? `cutaway ${i + 1}` : undefined,
+        narrationStartSec: start,
+        narrationEndSec: at,
+        cta: true,
+        ctaIndex: 0,
+        qrCorner: kind === "C" ? undefined : true,
+        hostPresent: kind === "H" || kind === "S" || undefined,
+        stillImage: kind === "B" || kind === "C" || kind === "A" || undefined,
+        splitVisual: kind === "S" ? `panel ${i + 1}` : undefined,
+        coverHero: kind === "C" || undefined,
+        assetImageUrl: kind === "A" ? "https://r2/book.png" : undefined,
+      };
+    });
+  };
+  const kinds = (scenes: StoryboardScene[]) =>
+    scenes
+      .map(s =>
+        s.coverHero
+          ? "C"
+          : s.assetImageUrl
+            ? "A"
+            : s.hostPresent
+              ? s.splitVisual
+                ? "S"
+                : "H"
+              : "B"
+      )
+      .join("");
+  const opts = { canPromote: true, hostsMayTouch: false };
+
+  it("lengthens a flashing big-QR stretch by absorbing the host moment beside it", () => {
+    // B4 is a 4s flash; absorbing the 4s host joins it to B3 beyond: 11s, in band.
+    const scenes = pitch([
+      ["H", 5],
+      ["B", 4],
+      ["H", 4],
+      ["B", 3],
+      ["H", 5],
+    ]);
+    const r = shapePitchQrStretches(scenes, opts);
+    expect(kinds(scenes)).toBe("HBBBH");
+    expect(r.demoted).toEqual([3]);
+    // demoted onto its own clean cutaway, ready for the CTA rewrite + guard
+    expect(scenes[2].visualPrompt).toBe("cutaway 3");
+    expect(scenes[2].stillImage).toBe(true);
+  });
+
+  it("never removes the pitch's last host moment", () => {
+    const scenes = pitch([
+      ["H", 5],
+      ["B", 3],
+      ["B", 3],
+    ]);
+    expect(shapePitchQrStretches(scenes, opts).demoted).toEqual([]);
+    expect(kinds(scenes)).toBe("HBB");
+  });
+
+  it("works around the cover and the book images without touching them", () => {
+    const scenes = pitch([
+      ["H", 5],
+      ["B", 6],
+      ["C", 5],
+      ["A", 4],
+      ["B", 6],
+      ["H", 6],
+    ]);
+    shapePitchQrStretches(scenes, opts);
+    expect(scenes[2].coverHero).toBe(true);
+    expect(scenes[3].assetImageUrl).toBe("https://r2/book.png");
+    expect(kinds(scenes).slice(2, 4)).toBe("CA");
+  });
+
+  it("breaks a stretch past 15s with a host moment, where both halves still hold 10s", () => {
+    const scenes = pitch([
+      ["H", 5],
+      ["B", 6],
+      ["B", 6],
+      ["B", 6],
+      ["B", 6],
+      ["B", 6],
+      ["H", 5],
+    ]);
+    const r = shapePitchQrStretches(scenes, opts);
+    expect(kinds(scenes)).toBe("HBBHBBH"); // 12s big · host · 12s big
+    expect(r.promoted).toEqual([4]);
+    expect(scenes[3].visualPrompt).not.toBe("shot 4"); // a talking-head prompt now
+    expect(scenes[3].brollVisual).toBe("shot 4"); // its clean cutaway kept
+    expect(scenes[3].stillImage).toBe(false);
+  });
+
+  it("breaks it with a split first — already lip-synced, so it costs nothing", () => {
+    const scenes = pitch([
+      ["H", 5],
+      ["B", 6],
+      ["B", 6],
+      ["S", 6],
+      ["B", 6],
+      ["B", 6],
+      ["H", 5],
+    ]);
+    shapePitchQrStretches(scenes, opts);
+    expect(kinds(scenes)).toBe("HBBHBBH");
+    expect(scenes[3].splitVisual).toBeUndefined();
+    expect(scenes[3].visualPrompt).toBe("host"); // same render, full frame
+  });
+
+  it("lets a long stretch run when no break keeps both halves at 10s", () => {
+    const scenes = pitch([
+      ["H", 5],
+      ["B", 6],
+      ["B", 6],
+      ["B", 6],
+      ["H", 5],
+    ]);
+    expect(shapePitchQrStretches(scenes, opts).promoted).toEqual([]);
+    expect(kinds(scenes)).toBe("HBBBH");
+  });
+
+  it("adds no host moment without a face photo or in a b-roll-only run", () => {
+    const scenes = pitch([
+      ["H", 5],
+      ["B", 6],
+      ["B", 6],
+      ["B", 6],
+      ["B", 6],
+      ["B", 6],
+      ["H", 5],
+    ]);
+    shapePitchQrStretches(scenes, { ...opts, canPromote: false });
+    expect(kinds(scenes)).toBe("HBBBBBH");
+  });
+
+  it("leaves beats that carry no QR alone", () => {
+    const scenes = pitch([
+      ["H", 5],
+      ["B", 4],
+      ["H", 4],
+      ["B", 3],
+      ["H", 5],
+    ]).map(s => ({ ...s, qrCorner: undefined }));
+    shapePitchQrStretches(scenes, opts);
+    expect(kinds(scenes)).toBe("HBHBH");
+  });
+});
+
 describe("guardPitchVisuals", () => {
   const sc = (
     index: number,
@@ -4572,17 +4851,29 @@ describe("extendQrHeroWindow", () => {
     expect(2 + scenes[1].qrHoldSec!).toBe(QR_HERO_MIN_WINDOW_SEC);
   });
 
-  it("leaves a block that already clears the minimum on the flat default", () => {
-    const scenes = block(7);
-    extendQrHeroWindow(scenes);
-    expect(scenes[1].qrHoldSec).toBeUndefined();
+  it("follows the script: spoken time + a ~6s wait, held to 10–15s", () => {
+    // spoken → wait (undefined = the flat 3s default) → card on screen
+    const rows: [number, number | undefined, number][] = [
+      [2, 8, 10], // a bare trigger + release: the floor, so the wait runs longer
+      [4, 6, 10],
+      [6, 6, 12],
+      [9, 6, 15],
+      [12, undefined, 15], // only 3s left under the ceiling: the flat default covers it
+      [14, undefined, 17], // talking past the ceiling: no extra freeze at all
+    ];
+    for (const [spoken, wait, onScreen] of rows) {
+      const scenes = block(spoken);
+      extendQrHeroWindow(scenes);
+      expect(scenes[1].qrHoldSec).toBe(wait);
+      expect(spoken + sceneHoldPlan(scenes[1]).tailHoldSec!).toBe(onScreen);
+    }
   });
 
-  it("never shortens: a block under the minimum but over the flat tail keeps 3s", () => {
-    // 4s spoken needs 2s to reach 6 — less than the flat 3s tail it already gets.
-    const scenes = block(4);
+  it("never goes under the flat 3s tail", () => {
+    // 12s spoken reaches the 15s ceiling with 3s — never a shorter wait than before.
+    const scenes = block(12);
     extendQrHeroWindow(scenes);
-    expect(scenes[1].qrHoldSec).toBeUndefined();
+    expect(sceneHoldPlan(scenes[1]).tailHoldSec).toBe(3);
   });
 
   it("measures the WHOLE block, not just the tail beat", () => {
@@ -4600,12 +4891,12 @@ describe("extendQrHeroWindow", () => {
     const scenes = [
       ...block(2),
       sc({ index: 3, startSec: 2, endSec: 9 }), // body beat between the two pitches
-      sc({ index: 4, qrHero: true, startSec: 9, endSec: 12 }),
-      sc({ index: 5, qrHero: true, qrTail: true, startSec: 12, endSec: 16 }),
+      sc({ index: 4, qrHero: true, startSec: 9, endSec: 14 }),
+      sc({ index: 5, qrHero: true, qrTail: true, startSec: 14, endSec: 25 }),
     ];
     extendQrHeroWindow(scenes);
     expect(scenes[1].qrHoldSec).toBe(QR_HERO_MIN_WINDOW_SEC - 2); // short block
-    expect(scenes[4].qrHoldSec).toBeUndefined(); // 7s block, already long enough
+    expect(scenes[4].qrHoldSec).toBeUndefined(); // 16s block, already past the ceiling
   });
 
   it("is idempotent, and drops a stale top-up when the block is re-voiced longer", () => {
@@ -4616,9 +4907,9 @@ describe("extendQrHeroWindow", () => {
     expect(scenes[1].qrHoldSec).toBe(first);
 
     // Re-voiced longer (a slower read, or an operator's re-time): the top-up must go.
-    scenes[0].narrationEndSec = 4;
-    scenes[1].narrationStartSec = 4;
-    scenes[1].narrationEndSec = 8;
+    scenes[0].narrationEndSec = 8;
+    scenes[1].narrationStartSec = 8;
+    scenes[1].narrationEndSec = 16;
     extendQrHeroWindow(scenes);
     expect(scenes[1].qrHoldSec).toBeUndefined();
   });

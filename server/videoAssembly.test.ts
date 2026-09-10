@@ -573,6 +573,54 @@ describe("buildSceneMuxArgs QR overlay (CTA scenes)", () => {
     expect(f).not.toMatch(/overlay=W-w-\d+/);
   });
 
+  describe("bigFromSec — a host beat's card goes big for its frozen wait", () => {
+    const filterOf = (args: string[]) =>
+      args[args.indexOf("-filter_complex") + 1];
+    const qr = (extra: Record<string, unknown>) =>
+      filterOf(
+        buildSceneMuxArgs({
+          ...base, // 5s
+          qrOverlay: { imagePath: "/tmp/qr.png", height: 1080, ...extra },
+        })
+      );
+
+    it("draws the small corner card until the wait, then the big centred one", () => {
+      const f = qr({ bigFromSec: 2 });
+      // one QR input, split so exactly one card is drawn at any moment
+      expect(f).toContain("[2:v]split=2[qrs][qrb]");
+      expect(f).toContain("pad=302:302:"); // corner, 1080*0.28
+      expect(f).toContain("pad=713:713:"); // big, 1080*0.66
+      expect(f).toContain("overlay=W-w-49:H-h-49:enable='lt(t,2.000)'");
+      expect(f).toContain("overlay=(W-w)/2:(H-h)/2:enable='gte(t,2.000)'[v]");
+    });
+
+    it("keeps the single corner card byte-identical when there is no wait", () => {
+      expect(qr({})).toBe(qr({ bigFromSec: undefined }));
+      expect(qr({})).not.toContain("split=2");
+      // a switch at or past the end of the scene would never show — ignored
+      expect(qr({ bigFromSec: 5 })).toBe(qr({}));
+      expect(qr({ bigFromSec: 0 })).toBe(qr({}));
+    });
+
+    it("does nothing to a card that is already big", () => {
+      expect(qr({ placement: "center", bigFromSec: 2 })).toBe(
+        qr({ placement: "center" })
+      );
+    });
+
+    it("keeps the other overlays on their own inputs after the split", () => {
+      const f = filterOf(
+        buildSceneMuxArgs({
+          ...base,
+          qrOverlay: { imagePath: "/tmp/qr.png", height: 1080, bigFromSec: 2 },
+          caption: { imagePath: "/tmp/cap.png" },
+        })
+      );
+      expect(f).toContain("[3:v]format=rgba[cap]"); // caption is still input 3
+      expect(f).toMatch(/\[cap\]overlay=0:0\[v\]$/);
+    });
+  });
+
   describe("'panel' — the big card in a split's b-roll panel", () => {
     const panelArgs = (panel?: { x: number; w: number }) =>
       buildSceneMuxArgs({

@@ -4755,14 +4755,23 @@ const CTA_HOST_SCENES = 1;
 const QR_TAIL_HOLD_SEC = 3;
 
 /**
- * Shortest the big centered QR may be on screen, counting the whole `qrHero` block: its beats'
- * narration plus the frozen tail. A viewer has to notice the code, pick a phone up, open a
- * camera and hold it steady, and the trigger line ("Now go ahead and grab your phone") is under
- * two seconds of speech — so the flat `QR_TAIL_HOLD_SEC` alone left blocks whose card was gone
- * before anyone could aim at it. `extendQrHeroWindow` tops the tail up to reach this; a block
- * already over it is untouched, so a long pitch keeps exactly the timing it has today.
+ * How long the "grab your phone" block keeps the QR on screen, counting the whole `qrHero` block:
+ * its beats' narration plus the frozen wait after the release line. Most of the sales happen
+ * here, and a viewer has to notice the code, pick a phone up, open a camera and hold it steady —
+ * the trigger line alone is under two seconds of speech.
+ *
+ * The window FOLLOWS THE SCRIPT between the two bounds: it is the block's own spoken time plus
+ * `QR_HERO_WAIT_SEC` of waiting, clamped to [MIN, MAX]. So a block that talks longer earns a
+ * longer window without a longer freeze, a two-second block is still held to the minimum, and
+ * the freeze is a steady ~6s instead of whatever a flat number happens to leave. The operator
+ * asked for "10 - 15 depending on the script so that it isn't that frozen" (2026-09-10); the
+ * old flat 6s minimum ended the block before most viewers had a phone out. `extendQrHeroWindow`
+ * applies it; a block already talking past MAX just keeps the flat `QR_TAIL_HOLD_SEC`.
  */
-export const QR_HERO_MIN_WINDOW_SEC = 6;
+export const QR_HERO_MIN_WINDOW_SEC = 10;
+export const QR_HERO_MAX_WINDOW_SEC = 15;
+/** The wait the block aims to leave after the release line, inside the window above. */
+export const QR_HERO_WAIT_SEC = 6;
 
 /** Patterns that flag a scene's verbatim narration as call-to-action content. */
 const CTA_SIGNAL_PATTERNS: RegExp[] = [
@@ -5230,8 +5239,9 @@ export function markCornerQrBeforeCover(
  * flags are cleared (a fixed image has no movement to continue) and the corner QR is switched on,
  * so the viewer can scan while the render is on screen — which is the whole point of the beat.
  *
- * MUST run after the balancers, `ensureHostInCta` and `assignHostShots`: every one of those
- * rewrites registers, and this pass is deliberately the last word on the beats it claims. Returns
+ * MUST run after the balancers and `ensureHostInCta`: every one of those rewrites registers, and
+ * this pass is deliberately the last word on the beats it claims (`shapePitchQrStretches`, which
+ * runs after it, treats an asset beat as fixed; `assignHostShots` only touches host beats). Returns
  * how many assets were placed (fewer than supplied when the pitch has too few beats). Mutates in
  * place; pure otherwise — unit-tested.
  */
@@ -5342,6 +5352,27 @@ export function qrPlacementFor(
   const composited =
     !!scene.splitVisual && !!clip && clip !== scene.hostClipUrls?.[0];
   return composited ? "panel" : "corner";
+}
+
+/**
+ * Whether this scene's QR card should switch from the small corner to the big centred card for
+ * its frozen tail hold. The card is small on a full-frame host because the host is TALKING; once
+ * the words end and the picture freezes into the wait (the "I'll wait right here" beat's
+ * `qrHoldSec`, or an operator's own "Hold after line"), nobody is — so by the same rule that
+ * sizes every other beat, the card goes big for the wait. The book (cover reveal, uploaded asset)
+ * keeps its small card throughout: there the card is small because of what is shown, not who is
+ * speaking. Assembly only acts on it when the scene actually has a tail hold. Pure — unit-tested.
+ */
+export function qrBigDuringHold(
+  scene: Parameters<typeof qrPlacementFor>[0]
+): boolean {
+  return (
+    !!(scene.qrHero || scene.qrCorner) &&
+    !!scene.hostPresent &&
+    !scene.coverHero &&
+    !scene.assetImageUrl &&
+    qrPlacementFor(scene) === "corner"
+  );
 }
 
 /**
@@ -5868,6 +5899,211 @@ export function ensureHostInCta(scenes: StoryboardScene[]): StoryboardScene[] {
     i = j;
   }
   return scenes;
+}
+
+/** How long a big-QR stretch of the pitch should hold — see `shapePitchQrStretches`. */
+export const PITCH_QR_STRETCH_MIN_SEC = 10;
+export const PITCH_QR_STRETCH_MAX_SEC = 15;
+
+/**
+ * Arrange the pitch so the big QR card holds long enough to scan: host moment (small corner
+ * card) → 10–15s of big card on b-roll/split → host moment → … The card's size follows the
+ * register (`qrPlacementFor`), so the pitch's REGISTERS decide how long it stays big — and the
+ * balancers above know nothing about QR cards, so a pitch used to flash the big card for 3–7s
+ * between host shots, gone before a viewer had a phone out (operator, 2026-09-10: "most of the
+ * sales are in there … it should be big every time in the b-roll").
+ *
+ * Works on the scan window's beats (`qrCorner`), between the fixed points it may not change —
+ * the "grab your phone" block (`qrHero`, timed by `extendQrHeroWindow`), the cover reveal, an
+ * operator's asset, the cold open. A "stretch" is a run of consecutive big-card beats: b-roll,
+ * or a split (card in its b-roll panel). A "host moment" is a full-frame host.
+ *
+ * 1. A stretch under MIN absorbs the adjacent host moment that brings it closest to 10–15s
+ *    (demoted to a still — `demoteHostToStill`; the join can also swallow the stretch beyond).
+ *    Never the cold open, and never the pitch's LAST host moment: `ensureHostInCta`'s guarantee
+ *    that the pitch keeps a face still holds.
+ * 2. A stretch over MAX gets a host moment near its middle when `canPromote` (a face photo, not
+ *    b-roll-only): a split first — it is already lip-synced, so it becomes full-frame for free —
+ *    else a b-roll beat long enough for the host floor (`HOST_MIN_HOLD_SEC`), which costs one
+ *    lip-sync render. Only where BOTH halves still reach MIN (a long card beats a flash), and
+ *    only away from another host shot unless `hostsMayTouch` (a second host photo alternates
+ *    angles, as `enforceVisualAdjacency` allows).
+ *
+ * Returns the scene indices it demoted and promoted; the caller rewrites the demoted beats'
+ * prompts (the CTA lane + `guardPitchVisuals`) since their b-roll text was never checked.
+ * Runs after `ensureHostInCta` and `placeAssetBeats`: an asset lands on pitch b-roll with the
+ * SMALL card, so it has to be in place before the stretches are measured around it. Mutates in
+ * place; pure otherwise — unit-tested.
+ */
+export function shapePitchQrStretches(
+  scenes: StoryboardScene[],
+  opts: { canPromote: boolean; hostsMayTouch: boolean }
+): { demoted: number[]; promoted: number[] } {
+  const demoted: number[] = [];
+  const promoted: number[] = [];
+  const secOf = (s: StoryboardScene) => {
+    const slice = (s.narrationEndSec ?? 0) - (s.narrationStartSec ?? 0);
+    return slice > 0 ? slice : (s.audioDuration ?? 0);
+  };
+  const shapeable = (s: StoryboardScene | undefined): s is StoryboardScene =>
+    !!s &&
+    !!s.qrCorner &&
+    !s.qrHero &&
+    !s.coverHero &&
+    !s.assetImageUrl &&
+    !s.hostOpener;
+  const bigCard = (s: StoryboardScene) => !s.hostPresent || !!s.splitVisual;
+  const hostMoment = (s: StoryboardScene) => !!s.hostPresent && !s.splitVisual;
+
+  // Which contiguous CTA run each scene sits in — the unit `ensureHostInCta` guarantees a face for.
+  const runOf: number[] = [];
+  scenes.forEach((s, i) => {
+    runOf[i] =
+      s.cta !== true
+        ? -1
+        : i > 0 && scenes[i - 1].cta === true
+          ? runOf[i - 1]
+          : i;
+  });
+  const hostMomentsIn = (run: number) =>
+    scenes.filter(
+      (s, i) => runOf[i] === run && !s.qrHero && !s.coverHero && hostMoment(s)
+    ).length;
+  const demotable = (i: number) => {
+    const s = scenes[i];
+    return (
+      shapeable(s) &&
+      hostMoment(s) &&
+      (runOf[i] < 0 || hostMomentsIn(runOf[i]) > 1)
+    );
+  };
+
+  // Segments: maximal runs of shapeable beats, bounded by the fixed points above.
+  const segments: number[][] = [];
+  scenes.forEach((s, i) => {
+    if (!shapeable(s)) return;
+    const last = segments[segments.length - 1];
+    if (last && last[last.length - 1] === i - 1) last.push(i);
+    else segments.push([i]);
+  });
+
+  /** Maximal big-card runs inside one segment, as scene-index ranges with their length. */
+  const stretchesOf = (seg: number[]) => {
+    const out: { from: number; to: number; sec: number }[] = [];
+    for (const i of seg) {
+      if (!bigCard(scenes[i])) continue;
+      const cur = out[out.length - 1];
+      if (cur && cur.to === i - 1) {
+        cur.to = i;
+        cur.sec += secOf(scenes[i]);
+      } else out.push({ from: i, to: i, sec: secOf(scenes[i]) });
+    }
+    return out;
+  };
+  const inSeg = (seg: number[], i: number) => seg.includes(i);
+
+  for (const seg of segments) {
+    // 1. Pull every short stretch up to MIN by absorbing an adjacent host moment.
+    const stuck = new Set<number>();
+    for (;;) {
+      const short = stretchesOf(seg).find(
+        r => r.sec < PITCH_QR_STRETCH_MIN_SEC && !stuck.has(r.from)
+      );
+      if (!short) break;
+      const all = stretchesOf(seg);
+      const options = [short.from - 1, short.to + 1]
+        .filter(h => inSeg(seg, h) && demotable(h))
+        .map(h => {
+          // Absorbing the host also joins the stretch on its far side, if one touches it.
+          const beyond = all.find(r => r.from === h + 1 || r.to === h - 1);
+          return {
+            h,
+            total: short.sec + secOf(scenes[h]) + (beyond?.sec ?? 0),
+          };
+        });
+      if (options.length === 0) {
+        stuck.add(short.from);
+        continue;
+      }
+      const inBand = (t: number) =>
+        t >= PITCH_QR_STRETCH_MIN_SEC && t <= PITCH_QR_STRETCH_MAX_SEC;
+      options.sort((a, b) => {
+        const band = Number(inBand(b.total)) - Number(inBand(a.total));
+        if (band) return band;
+        const reach =
+          Number(b.total >= PITCH_QR_STRETCH_MIN_SEC) -
+          Number(a.total >= PITCH_QR_STRETCH_MIN_SEC);
+        if (reach) return reach;
+        return a.total >= PITCH_QR_STRETCH_MIN_SEC
+          ? a.total - b.total // both over: the smaller overshoot
+          : b.total - a.total; // both under: the bigger gain
+      });
+      const h = scenes[options[0].h];
+      demoteHostToStill(h);
+      demoted.push(h.index);
+    }
+
+    // 2. Break every over-long stretch with a host moment where both halves still reach MIN.
+    if (!opts.canPromote) continue;
+    const unbreakable = new Set<number>();
+    for (;;) {
+      const long = stretchesOf(seg).find(
+        r => r.sec > PITCH_QR_STRETCH_MAX_SEC && !unbreakable.has(r.from)
+      );
+      if (!long) break;
+      const target = (PITCH_QR_STRETCH_MIN_SEC + PITCH_QR_STRETCH_MAX_SEC) / 2;
+      let before = 0;
+      const candidates: { i: number; left: number; free: boolean }[] = [];
+      for (let i = long.from; i <= long.to; i++) {
+        const s = scenes[i];
+        const sec = secOf(s);
+        const left = before;
+        const right = long.sec - before - sec;
+        before += sec;
+        const touchesHost = [scenes[i - 1], scenes[i + 1]].some(
+          n => !!n?.hostPresent
+        );
+        if (
+          left >= PITCH_QR_STRETCH_MIN_SEC &&
+          right >= PITCH_QR_STRETCH_MIN_SEC &&
+          sec >= HOST_MIN_HOLD_SEC &&
+          (opts.hostsMayTouch || !touchesHost)
+        ) {
+          candidates.push({ i, left, free: !!s.hostPresent });
+        }
+      }
+      if (candidates.length === 0) {
+        unbreakable.add(long.from); // no clean break — a long card beats a flash
+        continue;
+      }
+      candidates.sort(
+        (a, b) =>
+          Number(b.free) - Number(a.free) ||
+          Math.abs(a.left - target) - Math.abs(b.left - target)
+      );
+      const s = scenes[candidates[0].i];
+      if (s.hostPresent) {
+        // A split: already lip-synced — dropping the panel makes it full-frame at no cost.
+        s.splitVisual = undefined;
+        s.splitMotion = undefined;
+      } else {
+        // Keep the clean cutaway it was, so a later demotion has an on-topic still to go back to.
+        s.brollVisual ??= s.visualPrompt;
+        s.hostPresent = true;
+        s.stillImage = false;
+        s.humanPresent = undefined;
+        s.objectMotion = undefined;
+        s.splitVisual = undefined;
+        s.visualPrompt = talkingHeadVisualPrompt(
+          DEFAULT_HOST_DESCRIPTOR,
+          s.index
+        );
+        s.minHoldSec = Math.max(s.minHoldSec ?? 0, HOST_MIN_HOLD_SEC);
+      }
+      promoted.push(s.index);
+    }
+  }
+  return { demoted, promoted };
 }
 
 /**
@@ -6958,6 +7194,125 @@ function borrowIntoShortScene(
 }
 
 /**
+ * Join two ADJACENT scenes into one: the two verbatim `scriptText` slices in script order, the
+ * visuals and flags of `keep`, and every audio/clip field cleared so the caller re-voices — or,
+ * after voicing, re-slices from the master (`assignSceneRanges`) — the combined text as one
+ * continuous take. Shared by `coalesceShortScenes` and `lengthenPitchShots` so the two merges
+ * cannot drift. Pure.
+ */
+function mergeScenePair(
+  first: StoryboardScene,
+  second: StoryboardScene,
+  keep: StoryboardScene
+): StoryboardScene {
+  const text = `${(first.scriptText ?? first.narration ?? "").trim()} ${(
+    second.scriptText ??
+    second.narration ??
+    ""
+  ).trim()}`.trim();
+  return {
+    ...keep,
+    scriptText: text,
+    narration: firstWords(text, 8),
+    // Keep the QR overlay if either side was a CTA — a relaxed cross-CTA fold
+    // must never drop the QR (at most extends it over one short beat).
+    cta: first.cta || second.cta || undefined,
+    sceneStatus: "pending",
+    // Cleared so the caller re-voices the combined slice as one continuous take.
+    audioUrl: undefined,
+    audioDuration: undefined,
+    clipUrls: undefined,
+    clipUrl: undefined,
+    renderTaskIds: undefined,
+    renderModelIndex: undefined,
+    error: undefined,
+  };
+}
+
+/**
+ * The shortest a pitch shot should run. The pitch used to cut every 3–5s like the rest of the
+ * film, so a big QR card on b-roll was gone again before a viewer had a phone out; with the
+ * shots at 5–8s a big-QR stretch (`shapePitchQrStretches`) is two pictures, not four flashes.
+ */
+export const PITCH_MIN_SHOT_SEC = 5;
+
+/**
+ * Lengthen the pitch's shots: inside a CTA pitch, fold any beat shorter than `PITCH_MIN_SHOT_SEC`
+ * into a pitch neighbour of the SAME block, as long as the pair stays under the ordinary shot
+ * ceiling (`maxFor` — the 8s band `splitOverlongScenes` enforced, which nothing re-splits).
+ *
+ * Only merges — never pads. A beat with no neighbour that fits simply stays short; freezing a
+ * frame to reach 5s is exactly what this exists to avoid. Runs after voicing and BEFORE the final
+ * `assignSceneRanges`, so it costs nothing: the merged text is re-sliced from the same master
+ * word timeline. The "grab your phone" block (`qrHero`), the cover reveal, operator assets and the
+ * cold open are untouched. Keeps the LONGER side's visuals (it covers most of the words; a host
+ * wins a tie) and ORs `qrCorner`, so the merged beat keeps its QR. Runs up to three passes, so a
+ * run of short beats settles. Renumbers. Pure — unit-tested.
+ */
+export function lengthenPitchShots(
+  scenes: StoryboardScene[],
+  metric: SizeMetric = MEASURED_SIZE
+): StoryboardScene[] {
+  const pitchBeat = (s: StoryboardScene | undefined): s is StoryboardScene =>
+    !!s &&
+    s.cta === true &&
+    !s.qrHero &&
+    !s.coverHero &&
+    !s.assetImageUrl &&
+    !s.hostOpener;
+  // Merged scenes have no measured length until the ranges are re-assigned, so carry it here.
+  const size = new Map<StoryboardScene, number>();
+  const sz = (s: StoryboardScene) => size.get(s) ?? metric.sizeOf(s);
+
+  let list = scenes;
+  for (let pass = 0; pass < 3; pass++) {
+    const out: StoryboardScene[] = [];
+    let merged = false;
+    for (let i = 0; i < list.length; i++) {
+      const s = list[i];
+      const d = sz(s);
+      if (!pitchBeat(s) || d <= 0 || d >= PITCH_MIN_SHOT_SEC) {
+        out.push(s);
+        continue;
+      }
+      const prev = out[out.length - 1];
+      const next = list[i + 1];
+      const fits = (n: StoryboardScene | undefined): n is StoryboardScene =>
+        pitchBeat(n) &&
+        sz(n) > 0 &&
+        n.ctaIndex === s.ctaIndex &&
+        d + sz(n) <= maxFor(metric, s);
+      const prevOk = fits(prev);
+      const nextOk = fits(next);
+      if (!prevOk && !nextOk) {
+        out.push(s);
+        continue;
+      }
+      // The shorter neighbour, so the merged shot lands as close to the floor as it can.
+      const useNext = nextOk && (!prevOk || sz(next) < sz(prev));
+      const n = useNext ? next : prev;
+      const [first, second] = useNext ? [s, n] : [n, s];
+      const keep =
+        sz(n) > d || (sz(n) === d && n.hostPresent && !s.hostPresent) ? n : s;
+      const joined = mergeScenePair(first, second, keep);
+      joined.qrCorner = first.qrCorner || second.qrCorner || undefined;
+      size.set(joined, d + sz(n));
+      if (useNext) {
+        out.push(joined);
+        i++; // consumed next
+      } else {
+        out[out.length - 1] = joined;
+      }
+      merged = true;
+    }
+    list = out;
+    if (!merged) break;
+  }
+  list.forEach((s, i) => (s.index = i + 1));
+  return list;
+}
+
+/**
  * Merge any scene shorter than its floor (`metric.min`, or `metric.hostMin` for a host scene)
  * into an adjacent neighbor so cuts never flip faster than the floor. For each short, non-exempt
  * scene we fold into any FOLDABLE neighbor — not a `qrHero`/`coverHero` beat, combined size ≤
@@ -6997,34 +7352,7 @@ export function coalesceShortScenes(
   // a face over inserted silence.
   const isExempt = (s: StoryboardScene) =>
     isHeroBeat(s) || s.hostOpener === true;
-  const merge = (
-    first: StoryboardScene,
-    second: StoryboardScene,
-    keep: StoryboardScene
-  ): StoryboardScene => {
-    const text = `${(first.scriptText ?? first.narration ?? "").trim()} ${(
-      second.scriptText ??
-      second.narration ??
-      ""
-    ).trim()}`.trim();
-    return {
-      ...keep,
-      scriptText: text,
-      narration: firstWords(text, 8),
-      // Keep the QR overlay if either side was a CTA — a relaxed cross-CTA fold
-      // must never drop the QR (at most extends it over one short beat).
-      cta: first.cta || second.cta || undefined,
-      sceneStatus: "pending",
-      // Cleared so the caller re-voices the combined slice as one continuous take.
-      audioUrl: undefined,
-      audioDuration: undefined,
-      clipUrls: undefined,
-      clipUrl: undefined,
-      renderTaskIds: undefined,
-      renderModelIndex: undefined,
-      error: undefined,
-    };
-  };
+  const merge = mergeScenePair;
   const out: StoryboardScene[] = [];
   for (let i = 0; i < scenes.length; i++) {
     const s = scenes[i];
@@ -7102,8 +7430,10 @@ export function applySceneHoldFloor(
 }
 
 /**
- * Give each big-QR block a scannable minimum on screen (`QR_HERO_MIN_WINDOW_SEC`), recorded as
- * `qrHoldSec` on the block's `qrTail` beat. The `qrHero` block is the one register with NO
+ * Give each big-QR block its scan window (`QR_HERO_MIN_WINDOW_SEC`..`QR_HERO_MAX_WINDOW_SEC`,
+ * spoken time + `QR_HERO_WAIT_SEC`), recorded as `qrHoldSec` on the block's `qrTail` beat. Also
+ * run by `assembleAndFinalize`, so a film voiced under an older window picks up the current one
+ * on its next Reassemble. The `qrHero` block is the one register with NO
  * on-screen floor — `applySceneHoldFloor` returns early on it, deliberately, so the card is
  * never freeze-padded mid-block — which left the scan window equal to however long the trigger
  * line happened to take to say. "Now go ahead and grab your phone" is ~1.7s; with the flat 3s
@@ -7122,7 +7452,11 @@ export function applySceneHoldFloor(
  */
 export function extendQrHeroWindow(
   scenes: StoryboardScene[],
-  minWindowSec = QR_HERO_MIN_WINDOW_SEC
+  window: { minSec: number; maxSec: number; waitSec: number } = {
+    minSec: QR_HERO_MIN_WINDOW_SEC,
+    maxSec: QR_HERO_MAX_WINDOW_SEC,
+    waitSec: QR_HERO_WAIT_SEC,
+  }
 ): void {
   const spokenSec = (s: StoryboardScene) => {
     const slice = (s.narrationEndSec ?? 0) - (s.narrationStartSec ?? 0);
@@ -7139,7 +7473,11 @@ export function extendQrHeroWindow(
     if (tail) {
       let spoken = 0;
       for (let k = i; k <= end; k++) spoken += spokenSec(scenes[k]);
-      const needed = minWindowSec - spoken;
+      const target = Math.min(
+        window.maxSec,
+        Math.max(window.minSec, spoken + window.waitSec)
+      );
+      const needed = target - spoken;
       if (needed > QR_TAIL_HOLD_SEC)
         tail.qrHoldSec = Math.round(needed * 100) / 100;
       else delete tail.qrHoldSec; // back under the minimum's reach — flat default again
@@ -9929,6 +10267,16 @@ async function runUnifiedPipeline(
         }`
     );
   }
+  // The pitch runs on longer shots (5–8s) than the rest of the film, so a big QR card on b-roll
+  // is two pictures, not four flashes. Merge-only, same master re-slice as the pass above.
+  const beforePitchMerge = scenes.length;
+  scenes = lengthenPitchShots(scenes, measuredSizeFor(pacing));
+  if (scenes.length !== beforePitchMerge) {
+    console.log(
+      `[Longform ${jobId}] pitch shots: merged ${beforePitchMerge} → ${scenes.length} scenes ` +
+        `(pitch floor ${PITCH_MIN_SHOT_SEC}s, ceiling ${LONG_SCENE_MAX_SEC}s)`
+    );
+  }
 
   // Final ranges after all reshaping has settled, then physically cut the master into per-scene
   // tracks and upload each (downstream stages consume scene.audioUrl exactly as before). Cuts are
@@ -10236,42 +10584,11 @@ async function runUnifiedPipeline(
     scenes.filter(s => s.hostPresent).map(s => s.index)
   );
   ensureHostInCta(scenes);
-  // ...but to keep host shots apart it can demote a host NEIGHBOUR onto a still built from its raw
-  // storyboard `brollVisual`, after the enhancer above has already run — so that prompt was never
-  // rewritten or checked. On the QR block's own host beat that shipped "a tablet showing the
-  // video's description page" under the big centred card. Give every demoted beat the same
-  // rewrite every other cutaway got (a pitch beat takes the CTA lane: an on-topic shot written
-  // from the video's subject and its other cutaways, the pitch ignored), scrub it like the rest,
-  // then run the pitch guard as the last word before render.
-  const demotedByCta = scenes
-    .filter(s => hostBeforeCta.has(s.index) && !s.hostPresent)
-    .map(s => s.index);
-  if (demotedByCta.length > 0) {
-    const reEnhance = await enhanceBrollPrompts(scenes, params, demotedByCta);
-    if (reEnhance.failedScenes.length) {
-      appendJobWarning(jobId, enhanceWarningFor(reEnhance));
-    }
-    for (const s of scenes) {
-      if (demotedByCta.includes(s.index))
-        s.visualPrompt = stripHostNames(s.visualPrompt, hostAliases);
-    }
-  }
-  const guarded = guardPitchVisuals(scenes, params.videoSubject);
-  if (guarded.length > 0) {
-    console.log(
-      `[Longform ${jobId}] pitch guard: swapped a literal phone/screen/QR/link/book prompt ` +
-        `for on-topic b-roll on scene(s) ${guarded.join(", ")}`
-    );
-  }
-  // ensureHostInCta may have created a new host beat after the adjacency pass assigned angles —
-  // re-derive so any surviving pair still reads main → alt. Pure and O(n); this is the last
-  // mutation before the storyboard persists and clips render.
-  assignHostShots(scenes, hostFaces(params).length);
-  // Operator assets take their beats LAST — after every register-mutating pass, so nothing
-  // downstream can convert one back. No-op without uploads. (Their prompts were enhanced a few
-  // lines above and are now unused: at most one wasted Flash call per asset, against a pass order
-  // that would otherwise have to be re-reasoned. ponytail: skip them in `enhanceBrollPrompts` if
-  // asset counts ever grow.)
+  // Operator assets take their beats next — after every balancer, so nothing downstream converts
+  // one back (`shapePitchQrStretches` treats them as fixed). No-op without uploads. (Their prompts
+  // were enhanced above and are now unused: at most one wasted Flash call per asset, against a
+  // pass order that would otherwise have to be re-reasoned. ponytail: skip them in
+  // `enhanceBrollPrompts` if asset counts ever grow.)
   const placedAssets = placeAssetBeats(scenes, params.assets, {
     captions: pacing.captions.enabled,
     qrImageUrl: params.qrImageUrl,
@@ -10292,6 +10609,53 @@ async function runUnifiedPipeline(
       );
     }
   }
+  // Arrange the pitch so the big QR card holds 10–15s at a time between host moments. Last
+  // register change before render: it has to see the assets (small card) where they landed.
+  const shaped = shapePitchQrStretches(scenes, {
+    canPromote: !!params.faceImageUrl && !params.brollOnly,
+    hostsMayTouch: hostFaces(params).length > 1,
+  });
+  if (shaped.demoted.length || shaped.promoted.length) {
+    console.log(
+      `[Longform ${jobId}] pitch QR stretches: ${shaped.demoted.length} host moment(s) → b-roll ` +
+        `[${shaped.demoted.join(", ")}], ${shaped.promoted.length} → host ` +
+        `[${shaped.promoted.join(", ")}] (target ${PITCH_QR_STRETCH_MIN_SEC}–` +
+        `${PITCH_QR_STRETCH_MAX_SEC}s of big QR)`
+    );
+  }
+  // Both passes above can demote a host beat onto a still built from its raw storyboard
+  // `brollVisual`, after the enhancer has already run — so that prompt was never rewritten or
+  // checked. On the QR block's own host beat that shipped "a tablet showing the video's
+  // description page" under the big centred card. Give every demoted beat the same rewrite every
+  // other cutaway got (a pitch beat takes the CTA lane: an on-topic shot written from the video's
+  // subject and its other cutaways, the pitch ignored), scrub it like the rest, then run the
+  // pitch guard as the last word before render. (A beat an asset took has no prompt to render.)
+  const demotedLate = scenes
+    .filter(
+      s => hostBeforeCta.has(s.index) && !s.hostPresent && !s.assetImageUrl
+    )
+    .map(s => s.index);
+  if (demotedLate.length > 0) {
+    const reEnhance = await enhanceBrollPrompts(scenes, params, demotedLate);
+    if (reEnhance.failedScenes.length) {
+      appendJobWarning(jobId, enhanceWarningFor(reEnhance));
+    }
+    for (const s of scenes) {
+      if (demotedLate.includes(s.index))
+        s.visualPrompt = stripHostNames(s.visualPrompt, hostAliases);
+    }
+  }
+  const guarded = guardPitchVisuals(scenes, params.videoSubject);
+  if (guarded.length > 0) {
+    console.log(
+      `[Longform ${jobId}] pitch guard: swapped a literal phone/screen/QR/link/book prompt ` +
+        `for on-topic b-roll on scene(s) ${guarded.join(", ")}`
+    );
+  }
+  // The passes above created and removed host beats after the adjacency pass assigned angles —
+  // re-derive so any surviving pair still reads main → alt. Pure and O(n); the last register
+  // mutation before the storyboard persists and clips render.
+  assignHostShots(scenes, hostFaces(params).length);
   // Decide WHERE each host beat stands. Must run after the balancers and after assignHostShots
   // (looks are bucketed over the final host-scene list), and before the storyboard persists so
   // the clip stage — which only ever sees one scene — can read its own setting. Inert unless
@@ -10916,6 +11280,12 @@ async function assembleAndFinalize(
   // to assembly (seamless audio); an ineligible job (pre-overlay, or a scene re-voiced
   // off-master) simply omits them and assembly keeps the per-scene audio concat path.
   const sorted = scenes.slice().sort((a, b) => a.index - b.index);
+  // Re-derive the "grab your phone" window from the persisted slices, so a film voiced under an
+  // older window rule gets the current one on Reassemble with no re-voice. Idempotent; an
+  // operator's own "Hold after line" (`tailHoldSec`) still wins in `sceneHoldPlan`.
+  const holdsBefore = sorted.map(s => s.qrHoldSec);
+  extendQrHeroWindow(sorted);
+  const qrWindowChanged = sorted.some((s, i) => s.qrHoldSec !== holdsBefore[i]);
   const masterAudioUrl = masterOverlayEligible(sorted, job?.masterAudioUrl)
     ? (job?.masterAudioUrl as string)
     : undefined;
@@ -10978,6 +11348,9 @@ async function assembleAndFinalize(
     // so the card follows a moved seam or a host swapped to the right.
     qrPlacement: qrPlacementFor(s),
     splitLayout: s.splitLayout,
+    // A host beat's card is small because someone is TALKING; in its frozen wait nobody is, so
+    // the card goes big for the wait — see `qrBigDuringHold`.
+    qrBigDuringHold: qrBigDuringHold(s),
     // Operator trim — which part of the rendered clip the scene shows.
     clipInSec: s.clipInSec,
     // Operator cut markers and their per-piece footage overrides (CapCut-style split).
@@ -11065,8 +11438,9 @@ async function assembleAndFinalize(
   );
 
   // This cut reflects every timing edit made so far — clear the "Reassemble to apply" markers.
-  // Written with the storyboard only when any were set, so an ordinary run's final write is
-  // unchanged.
+  // Written with the storyboard only when any were set (or the QR window was re-derived above,
+  // so the timing editor shows the hold this cut actually used), so an ordinary run's final
+  // write is unchanged.
   const hadTimingEdits = scenes.some(s => s.timingEdited);
   if (hadTimingEdits) for (const s of scenes) delete s.timingEdited;
   await updateLongformVideoJob(jobId, {
@@ -11075,7 +11449,7 @@ async function assembleAndFinalize(
     finalVideoUrl: url,
     finalFileKey: key,
     completedAt: new Date(),
-    ...(hadTimingEdits ? { storyboard: scenes } : {}),
+    ...(hadTimingEdits || qrWindowChanged ? { storyboard: scenes } : {}),
   });
 }
 
