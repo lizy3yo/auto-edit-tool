@@ -4802,6 +4802,18 @@ const CTA_VISUAL_BANNED_PATTERNS: RegExp[] = [
   /\bclick(?:s|ing|ed)?\b/i,
   /\b(?:buy|buys|buying|bought|purchase[ds]?|purchasing|order(?:s|ed|ing)?)\b/i,
   /\bapps?\b/i,
+  // Devices and the pages they show, by the names an image prompt actually uses. "A tablet propped
+  // on the kitchen table showing the video's description page" shipped under the big QR card: the
+  // brand names, "device" and the YouTube page furniture were all words nothing here matched.
+  /\bi(?:pad|phone)s?\b/i,
+  /\be-?readers?\b/i,
+  /\bdevices?\b/i,
+  // "display" the screen, not "on display" / "a display of jars".
+  /\b(?<!on )displays?\b(?!\s+of\b)/i,
+  /\byoutube\b/i,
+  /\bvideo\s*players?\b/i,
+  /\bdescriptions?\b/i,
+  /\bsubscrib(?:e|es|ed|ing|ers?)\b/i,
 ];
 
 /** True when a VISUAL prompt would render literal CTA/sales imagery. Pure — unit-tested. */
@@ -4882,8 +4894,8 @@ export function brollDepictsBook(text: string): boolean {
   return BOOK_VISUAL_PATTERNS.some(re => re.test(t));
 }
 
-/** Calm, generic topic-neutral cutaway subjects — used only when a CTA cutaway has no
- *  on-topic neighbor to borrow from. */
+/** Calm, generic topic-neutral cutaway subjects — the LAST resort, used only when a CTA cutaway
+ *  has no on-topic neighbor to borrow from AND the video has no usable subject line. */
 const GENERIC_CTA_BROLL: string[] = [
   "a clean, tidy home surface in soft, even daylight",
   "a simple unbranded product resting on a wooden table",
@@ -4892,25 +4904,36 @@ const GENERIC_CTA_BROLL: string[] = [
   "a calm, uncluttered corner of a lived-in home",
 ];
 
+/** A prompt safe to put under a QR card: not the pitch, not a book. */
+const cleanPitchVisual = (text: string | undefined): text is string =>
+  !!text?.trim() && !ctaVisualIsLiteral(text) && !brollDepictsBook(text);
+
 /**
- * Deterministic, on-topic fallback for a CTA cutaway's visual: reuse the subject of the
- * nearest non-CTA, non-host scene (the real subject this video discusses); if
- * the video has no such cutaway, fall back to the generic pool, varied by index. Pure —
- * unit-tested.
+ * Deterministic, on-topic fallback for a CTA cutaway's visual, in order of how specific it is to
+ * THIS video: the subject of the nearest non-CTA, non-host scene (a concrete shot the video
+ * already shows); else the video's own subject line (`params.videoSubject` — "cedar bird feeder
+ * build"), so even a film with no clean cutaway to borrow from stays on its topic; else the
+ * generic pool, varied by index. Pure — unit-tested.
  */
 export function genericCtaBrollFor(
   scenes: StoryboardScene[],
-  i: number
+  i: number,
+  videoSubject?: string
 ): string {
   for (let d = 1; d < scenes.length; d++) {
     for (const j of [i - d, i + d]) {
       const s = scenes[j];
       if (!s || s.cta || s.hostPresent) continue;
       const subject = s.visualPrompt ?? s.brollVisual;
-      if (subject && !ctaVisualIsLiteral(subject) && !brollDepictsBook(subject))
-        return subject;
+      if (cleanPitchVisual(subject)) return subject;
     }
   }
+  const topic = videoSubject?.trim();
+  const fromTopic = topic
+    ? `${topic} — the real-world subject of this video, shown as a calm, photoreal cutaway ` +
+      `with no people in the frame`
+    : undefined;
+  if (cleanPitchVisual(fromTopic)) return fromTopic;
   return GENERIC_CTA_BROLL[i % GENERIC_CTA_BROLL.length];
 }
 
@@ -4921,12 +4944,61 @@ export function genericCtaBrollFor(
 export function sanitizeCtaCutaway(
   candidate: string | undefined,
   scenes: StoryboardScene[],
-  i: number
+  i: number,
+  videoSubject?: string
 ): string {
-  const c = candidate?.trim() ?? "";
-  return c && !ctaVisualIsLiteral(c) && !brollDepictsBook(c)
-    ? c
-    : genericCtaBrollFor(scenes, i);
+  return cleanPitchVisual(candidate)
+    ? candidate.trim()
+    : genericCtaBrollFor(scenes, i, videoSubject);
+}
+
+/**
+ * The last word on what a pitch beat may SHOW: every beat a QR card draws on (`qrHero`,
+ * `qrCorner`) or that sits in a pitch (`cta`) gets on-topic b-roll, never a phone, tablet,
+ * screen, QR, link or book. The card is composited in code; a picture of the pitch underneath it
+ * is an invented, unscannable second code or a stranger's video page.
+ *
+ * `enhanceBrollPrompts` sanitizes a CTA beat as it rewrites it, but that only protects the
+ * prompts that exist when it runs. `ensureHostInCta` runs AFTER it and can demote a host beat
+ * onto a still from its raw storyboard `brollVisual` — including the QR block's own host beat,
+ * which then carries the big centred card over whatever that text described. And an un-marked
+ * script's scan window puts `qrCorner` on beats the `cta` flag never reached, so the enhancer's
+ * CTA lane never saw them. This pass covers both, so it runs at the end of the enhancer AND
+ * after the last register change before render.
+ *
+ * Checks the full-frame prompt of a person-free beat and the split panel of a split beat. Leaves
+ * cover reveals and operator assets alone (literal images, no prompt renders) and a full-frame
+ * host (no b-roll prompt at all). A book in ANY split panel is swapped too — the long-standing
+ * book guard this pass absorbed. Deterministic, idempotent, no LLM. Returns the indices it
+ * changed. Mutates in place; pure otherwise — unit-tested.
+ */
+export function guardPitchVisuals(
+  scenes: StoryboardScene[],
+  videoSubject?: string
+): number[] {
+  const changed: number[] = [];
+  scenes.forEach((s, i) => {
+    const pitch = !!(s.cta || s.qrHero || s.qrCorner);
+    const literal = (text: string) =>
+      brollDepictsBook(text) || (pitch && ctaVisualIsLiteral(text));
+    let touched = false;
+    if (s.splitVisual && literal(s.splitVisual)) {
+      s.splitVisual = genericCtaBrollFor(scenes, i, videoSubject);
+      touched = true;
+    }
+    if (
+      pitch &&
+      !s.hostPresent &&
+      !s.coverHero &&
+      !s.assetImageUrl &&
+      !cleanPitchVisual(s.visualPrompt)
+    ) {
+      s.visualPrompt = genericCtaBrollFor(scenes, i, videoSubject);
+      touched = true;
+    }
+    if (touched) changed.push(s.index);
+  });
+  return changed;
 }
 
 /**
@@ -5098,14 +5170,15 @@ export function markQrBeforeCover(
   return scenes;
 }
 
-/** How many scenes right before each cover reveal carry the SMALL corner QR when the script has
+/** How many scenes right before each cover reveal carry the scan-window QR when the script has
  *  NO ===CTA=== markers (legacy scripts, fuzzy `markCtaScenes` flags — the fixed window can't ride
  *  them). With markers the window is the marked pitch itself, not this constant. */
 export const CORNER_QR_SCENES_BEFORE_COVER = 6;
 
 /**
- * Put the SMALL bottom-right QR on the book pitch — the scan window that leads into the cover +
- * big-QR block. `ctaScoped` (script had explicit ===CTA=== markers, so `cta` flags are ground
+ * Put the scan-window QR on the book pitch — the window that leads into the cover + "grab your
+ * phone" block. The card's SIZE is decided at assembly by `qrPlacementFor` from each beat's
+ * register (big on b-roll, small over a host), not here. `ctaScoped` (script had explicit ===CTA=== markers, so `cta` flags are ground
  * truth): EVERY marked pitch beat carries it, minus the beats that own a bigger treatment
  * (`qrHero`'s centered QR, the clean `coverHero`). So the QR appears exactly at ===START CTA===,
  * never leaks onto a pre-marker scene (staging job 204 had both failures), and does not blink off
@@ -5114,8 +5187,8 @@ export const CORNER_QR_SCENES_BEFORE_COVER = 6;
  * `CORNER_QR_SCENES_BEFORE_COVER` lookback walked back from each `coverHero`, since fuzzy cta flags
  * can't be trusted; it stops at the array start, a `qrHero` beat, or another cover beat (so a
  * mid-roll and close don't bleed into each other). Unlike `markQrBeforeCover` / `markCtaQrBlock` it
- * does NOT change register (a corner card never covers a centered face), so scenes keep their
- * host/still/motion. No-op without a channel QR. Runs AFTER `markCtaQrBlock` (which sets
+ * does NOT change register (the card is sized to the beat, so it never covers a face), so scenes
+ * keep their host/still/motion. No-op without a channel QR. Runs AFTER `markCtaQrBlock` (which sets
  * `coverHero`). Mutates in place; returns it. Pure — unit-tested.
  */
 export function markCornerQrBeforeCover(
@@ -5224,6 +5297,51 @@ export function qrOverlayUrlFor(
 ): string | undefined {
   if (!scene.qrHero && !scene.qrCorner && !scene.coverHero) return undefined;
   return bookForScene(scene, ctaBooks)?.qrImageUrl ?? qrImageUrl ?? undefined;
+}
+
+/**
+ * How big, and where, the QR card draws on a scene that carries one (`qrOverlayUrlFor`). The
+ * card's size follows who owns the frame, and the rule is the same across the whole pitch — the
+ * "grab your phone" block (`qrHero`) and the scan window around it (`qrCorner`) alike:
+ *
+ * - `"center"` — the big card, dead-centre: b-roll, nothing else in frame.
+ * - `"panel"` — the SAME big card, centred in the b-roll half of a SPLIT. The host is still
+ *   talking on the other half, but that panel is person-free, so the card goes BESIDE the host
+ *   instead of shrinking to the corner of a product shot.
+ * - `"corner"` — the small bottom-right card: a full-frame host (the big card never draws over a
+ *   face), and the BOOK — the cover reveal and an operator's uploaded asset (a book render), which
+ *   are the thing those beats exist to show.
+ *
+ * Operator's rule, 2026-09-10: "it should be big every time in the b-roll … only small when it
+ * has a host", and "in the book of course the QR code is small".
+ *
+ * "Split" means the clip really IS the composite. A scene whose composite failed keeps its
+ * `splitVisual` but ships the bare host render (`composeHostScene`'s fallback), so its clip is
+ * its own `hostClipUrls[0]` — a panel card there would land over a full-frame host. A scene
+ * rendered before `hostClipUrls` existed has nothing to compare and is taken at its word.
+ * Pure — unit-tested.
+ */
+export function qrPlacementFor(
+  scene: Pick<
+    StoryboardScene,
+    | "qrHero"
+    | "qrCorner"
+    | "coverHero"
+    | "assetImageUrl"
+    | "hostPresent"
+    | "splitVisual"
+    | "clipUrls"
+    | "clipUrl"
+    | "hostClipUrls"
+  >
+): "corner" | "center" | "panel" {
+  if (!scene.qrHero && !scene.qrCorner) return "corner";
+  if (scene.coverHero || scene.assetImageUrl) return "corner";
+  if (!scene.hostPresent) return "center";
+  const clip = scene.clipUrls?.[0] ?? scene.clipUrl;
+  const composited =
+    !!scene.splitVisual && !!clip && clip !== scene.hostClipUrls?.[0];
+  return composited ? "panel" : "corner";
 }
 
 /**
@@ -9160,7 +9278,7 @@ export async function buildUnifiedScenes(
   // ahead and grab your phone … I'll wait right here" block and reveals the cover on the pitch beat
   // that NAMES the book (falling back to the beat right before the block, and to the legacy
   // markCoverReveal → markQrBeforeCover pair if a script lacks the block); finally
-  // `markCornerQrBeforeCover` puts the small corner QR on the pitch. All pre-TTS, so the beats flow through
+  // `markCornerQrBeforeCover` puts the scan-window QR on the pitch (sized per beat at assembly). All pre-TTS, so the beats flow through
   // narration + render.
   const flagged = ctaSpans.length
     ? markCtaFromSpans(merged, ctaSpans)
@@ -9359,7 +9477,8 @@ export async function enhanceBrollPrompts(
         scene.visualPrompt = sanitizeCtaCutaway(
           enhanced || scene.visualPrompt,
           scenes,
-          i
+          i,
+          subject
         );
       } else if (enhanced) {
         scene.visualPrompt = enhanced;
@@ -9372,7 +9491,12 @@ export async function enhanceBrollPrompts(
       );
       // CTA cutaways must never keep a literal pitch prompt, even on LLM failure.
       if (isCta) {
-        scene.visualPrompt = sanitizeCtaCutaway(scene.visualPrompt, scenes, i);
+        scene.visualPrompt = sanitizeCtaCutaway(
+          scene.visualPrompt,
+          scenes,
+          i,
+          subject
+        );
       }
     }
     // Book guard for non-CTA cutaways (CTA lane already bans books via sanitizeCtaCutaway):
@@ -9382,7 +9506,7 @@ export async function enhanceBrollPrompts(
     // same on-topic fallback the CTA lane uses. Runs on both the enhanced and the
     // LLM-failure/original prompt.
     if (!isCta && brollDepictsBook(scene.visualPrompt ?? "")) {
-      scene.visualPrompt = genericCtaBrollFor(scenes, i);
+      scene.visualPrompt = genericCtaBrollFor(scenes, i, subject);
     }
     return failure;
   };
@@ -9454,7 +9578,8 @@ export async function enhanceBrollPrompts(
         scene.splitVisual = sanitizeCtaCutaway(
           enhanced || scene.splitVisual,
           scenes,
-          i
+          i,
+          subject
         );
       } else if (enhanced) {
         scene.splitVisual = enhanced;
@@ -9469,7 +9594,12 @@ export async function enhanceBrollPrompts(
       // when the rewrite failed open — the seed it would keep is `brollVisual ?? visualPrompt`,
       // which on a CTA host beat is often the talking-head prompt itself.
       if (isCta) {
-        scene.splitVisual = sanitizeCtaCutaway(scene.splitVisual, scenes, i);
+        scene.splitVisual = sanitizeCtaCutaway(
+          scene.splitVisual,
+          scenes,
+          i,
+          subject
+        );
       }
       return err ?? new Error("unknown error");
     }
@@ -9485,22 +9615,14 @@ export async function enhanceBrollPrompts(
   }
 
   // Deterministic book→on-topic swap over every scene's splitVisual, plus the literal-pitch swap
-  // on CTA beats (a phone, a screen, a QR code, a scan, a link — `ctaVisualIsLiteral`). No LLM.
-  // MUST stay AFTER the pass above: these are the only guards on splitVisual, so enhancing after
-  // them would let an LLM-introduced book or phone straight through — reintroducing what ac2cb89
-  // fixed. Unconditional over all scenes (not just `only`): idempotent, cheap, and it catches a
-  // splitVisual Claude authored directly as well as one that predates this call. The literal
-  // check is scoped to `cta` beats because its vocabulary is ordinary content elsewhere — a
-  // gardening video may legitimately show a screen or link a tool's name.
-  scenes.forEach((scene, i) => {
-    if (!scene.splitVisual) return;
-    if (
-      brollDepictsBook(scene.splitVisual) ||
-      (scene.cta && ctaVisualIsLiteral(scene.splitVisual))
-    ) {
-      scene.splitVisual = genericCtaBrollFor(scenes, i);
-    }
-  });
+  // on every pitch beat's panel AND full-frame prompt (a phone, a screen, a QR code, a scan, a
+  // link — `ctaVisualIsLiteral`). No LLM. MUST stay AFTER the passes above: these are the last
+  // guards, so enhancing after them would let an LLM-introduced book or phone straight through —
+  // reintroducing what ac2cb89 fixed. Unconditional over all scenes (not just `only`): idempotent,
+  // cheap, and it catches a prompt Claude authored directly as well as one that predates this
+  // call. The literal check is scoped to pitch beats because its vocabulary is ordinary content
+  // elsewhere — a gardening video may legitimately show a screen or link a tool's name.
+  guardPitchVisuals(scenes, subject);
 
   return {
     failedScenes: Array.from(new Set(failedScenes)).sort((a, b) => a - b),
@@ -10110,7 +10232,37 @@ async function runUnifiedPipeline(
   // Guarantee the host appears on camera at least once across the CTA — run LAST, after the
   // balancers and prompt scrub, so nothing demotes it before clip generation. Its talking-head
   // prompt uses the generic descriptor (no host name), so it needs no further scrub.
+  const hostBeforeCta = new Set(
+    scenes.filter(s => s.hostPresent).map(s => s.index)
+  );
   ensureHostInCta(scenes);
+  // ...but to keep host shots apart it can demote a host NEIGHBOUR onto a still built from its raw
+  // storyboard `brollVisual`, after the enhancer above has already run — so that prompt was never
+  // rewritten or checked. On the QR block's own host beat that shipped "a tablet showing the
+  // video's description page" under the big centred card. Give every demoted beat the same
+  // rewrite every other cutaway got (a pitch beat takes the CTA lane: an on-topic shot written
+  // from the video's subject and its other cutaways, the pitch ignored), scrub it like the rest,
+  // then run the pitch guard as the last word before render.
+  const demotedByCta = scenes
+    .filter(s => hostBeforeCta.has(s.index) && !s.hostPresent)
+    .map(s => s.index);
+  if (demotedByCta.length > 0) {
+    const reEnhance = await enhanceBrollPrompts(scenes, params, demotedByCta);
+    if (reEnhance.failedScenes.length) {
+      appendJobWarning(jobId, enhanceWarningFor(reEnhance));
+    }
+    for (const s of scenes) {
+      if (demotedByCta.includes(s.index))
+        s.visualPrompt = stripHostNames(s.visualPrompt, hostAliases);
+    }
+  }
+  const guarded = guardPitchVisuals(scenes, params.videoSubject);
+  if (guarded.length > 0) {
+    console.log(
+      `[Longform ${jobId}] pitch guard: swapped a literal phone/screen/QR/link/book prompt ` +
+        `for on-topic b-roll on scene(s) ${guarded.join(", ")}`
+    );
+  }
   // ensureHostInCta may have created a new host beat after the adjacency pass assigned angles —
   // re-derive so any surviving pair still reads main → alt. Pure and O(n); this is the last
   // mutation before the storyboard persists and clips render.
@@ -10821,13 +10973,11 @@ async function assembleAndFinalize(
     // small pre-cover scan window (qrCorner), and the cover-reveal beat (coverHero) — never on
     // ordinary cta/price scenes, so a spoken dollar amount can't surface it.
     qrOverlayUrl: qrOverlayUrlFor(s, params.qrImageUrl, params.ctaBooks),
-    // qrHero → large centered QR, UNLESS the beat is still showing the host or the cover (both
-    // preserved by toQr/markQrFromCtaTails instead of being blanked) — those always stay small
-    // corner so the big card never draws over a face or the cover art. Everything else that
-    // gets an overlay (qrCorner, or the cover-reveal beat itself) is already corner-sized.
-    qrPlacement: (s.qrHero && !s.hostPresent && !s.coverHero
-      ? "center"
-      : "corner") as "corner" | "center",
+    // Big centered card on b-roll, big card in the b-roll panel of a split, small corner over a
+    // full-frame host or the book — see `qrPlacementFor`. The split's own geometry rides along
+    // so the card follows a moved seam or a host swapped to the right.
+    qrPlacement: qrPlacementFor(s),
+    splitLayout: s.splitLayout,
     // Operator trim — which part of the rendered clip the scene shows.
     clipInSec: s.clipInSec,
     // Operator cut markers and their per-piece footage overrides (CapCut-style split).

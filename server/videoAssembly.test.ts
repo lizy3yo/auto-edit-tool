@@ -572,6 +572,54 @@ describe("buildSceneMuxArgs QR overlay (CTA scenes)", () => {
     expect(f).toContain("overlay=(W-w)/2:(H-h)/2[v]");
     expect(f).not.toMatch(/overlay=W-w-\d+/);
   });
+
+  describe("'panel' — the big card in a split's b-roll panel", () => {
+    const panelArgs = (panel?: { x: number; w: number }) =>
+      buildSceneMuxArgs({
+        ...base,
+        qrOverlay: {
+          imagePath: "/tmp/qr.png",
+          height: 1080,
+          placement: "panel",
+          panel,
+        },
+      });
+    const filterOf = (args: string[]) =>
+      args[args.indexOf("-filter_complex") + 1];
+    const toPanel = (g: { brollX: number; brollW: number }) => ({
+      x: g.brollX,
+      w: g.brollW,
+    });
+
+    it("is the center card's size, centred in the default square panel", () => {
+      const f = filterOf(panelArgs(toPanel(resolveSplitLayout(1920, 1080))));
+      // 1080*0.66 → 713, the same card a person-free QR beat gets; the panel is 840..1920,
+      // so it sits at 840 + (1080-713)/2.
+      expect(f).toContain("pad=713:713:");
+      expect(f).toContain("overlay=1024:(H-h)/2[v]");
+    });
+
+    it("follows a host swapped to the right", () => {
+      const g = resolveSplitLayout(1920, 1080, { hostSide: "right" });
+      const f = filterOf(panelArgs(toPanel(g)));
+      expect(f).toContain("pad=713:713:");
+      expect(f).toContain("overlay=184:(H-h)/2[v]");
+    });
+
+    it("shrinks to fit a panel narrowed by a dragged seam, never past its edges", () => {
+      const g = resolveSplitLayout(1920, 1080, { seamX: 0.8 }); // 384px b-roll panel
+      const f = filterOf(panelArgs(toPanel(g)));
+      // 384 minus a 49px margin each side
+      expect(f).toContain("pad=286:286:");
+      expect(f).toContain(`overlay=${1536 + 49}:(H-h)/2[v]`);
+    });
+
+    it("falls back to the corner card when no panel rectangle was resolved", () => {
+      const f = filterOf(panelArgs(undefined));
+      expect(f).toContain("pad=302:302:");
+      expect(f).toMatch(/overlay=W-w-\d+:H-h-\d+\[v\]/);
+    });
+  });
 });
 
 describe("buildSceneMuxArgs name card (host lower third)", () => {

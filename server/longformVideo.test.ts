@@ -53,6 +53,7 @@ import {
   markCornerQrBeforeCover,
   CORNER_QR_SCENES_BEFORE_COVER,
   qrOverlayUrlFor,
+  qrPlacementFor,
   nameCardSceneIndices,
   ensureHostInCta,
   markCoverReveal,
@@ -74,6 +75,7 @@ import {
   HOST_MIN_HOLD_SEC,
   ctaSignalInText,
   ctaVisualIsLiteral,
+  guardPitchVisuals,
   genericCtaBrollFor,
   sanitizeCtaCutaway,
   brollDepictsBook,
@@ -1567,6 +1569,29 @@ describe("ctaVisualIsLiteral", () => {
     expect(ctaVisualIsLiteral("a laptop showing a website")).toBe(true);
   });
 
+  it("flags a device by the names image prompts actually use", () => {
+    // the frame that shipped under the big QR card
+    expect(
+      ctaVisualIsLiteral(
+        "a tablet propped on a kitchen table showing the video's description page"
+      )
+    ).toBe(true);
+    expect(ctaVisualIsLiteral("an iPad leaning on the fruit bowl")).toBe(true);
+    expect(ctaVisualIsLiteral("an iPhone face-up on the workbench")).toBe(true);
+    expect(ctaVisualIsLiteral("a device resting on the counter")).toBe(true);
+    expect(ctaVisualIsLiteral("a YouTube video paused mid-frame")).toBe(true);
+    expect(ctaVisualIsLiteral("a video player with a red progress bar")).toBe(
+      true
+    );
+    expect(ctaVisualIsLiteral("a glowing display on the desk")).toBe(true);
+    expect(ctaVisualIsLiteral("a subscribe button")).toBe(true);
+  });
+
+  it("leaves 'on display' and 'a display of' alone — those are objects, not screens", () => {
+    expect(ctaVisualIsLiteral("finished cedar feeders on display")).toBe(false);
+    expect(ctaVisualIsLiteral("a display of seed jars on a shelf")).toBe(false);
+  });
+
   it("does NOT flag clean on-topic gardening b-roll", () => {
     expect(ctaVisualIsLiteral("a healthy green lawn at golden hour")).toBe(
       false
@@ -1608,6 +1633,34 @@ describe("genericCtaBrollFor / sanitizeCtaCutaway", () => {
     const out = genericCtaBrollFor(scenes, 0);
     expect(out.length).toBeGreaterThan(0);
     expect(ctaVisualIsLiteral(out)).toBe(false); // never literal CTA text
+  });
+
+  it("falls back to the video's own subject before the generic pool", () => {
+    const scenes = [
+      sc({ cta: true, visualPrompt: "scan the QR code" }),
+      sc({ hostPresent: true, visualPrompt: "host" }),
+    ];
+    const out = genericCtaBrollFor(scenes, 0, "cedar bird feeder build");
+    expect(out).toContain("cedar bird feeder build");
+    expect(ctaVisualIsLiteral(out)).toBe(false);
+    // a subject that is itself the pitch ("… handbook") never becomes the picture
+    const booky = genericCtaBrollFor(
+      scenes,
+      0,
+      "the backyard birder's handbook"
+    );
+    expect(booky).not.toContain("handbook");
+    expect(ctaVisualIsLiteral(booky)).toBe(false);
+  });
+
+  it("still prefers a concrete neighbouring shot over the subject line", () => {
+    const scenes = [
+      sc({ cta: true, visualPrompt: "scan the QR code" }),
+      sc({ visualPrompt: "a cedar feeder hanging from a maple branch" }),
+    ];
+    expect(genericCtaBrollFor(scenes, 0, "cedar bird feeder build")).toBe(
+      "a cedar feeder hanging from a maple branch"
+    );
   });
 
   it("never borrows a neighbor that is itself literal CTA imagery", () => {
@@ -2972,6 +3025,211 @@ describe("qrOverlayUrlFor", () => {
     // no channel QR configured → nothing
     expect(qrOverlayUrlFor({ qrHero: true }, undefined)).toBeUndefined();
     expect(qrOverlayUrlFor({ coverHero: true }, undefined)).toBeUndefined();
+  });
+});
+
+describe("qrPlacementFor", () => {
+  const split = {
+    qrHero: true,
+    hostPresent: true,
+    splitVisual: "a cedar bird feeder on the bench",
+    hostClipUrls: ["https://r2/host.mp4"],
+    clipUrls: ["https://r2/composite.mp4"],
+  };
+
+  it("draws the big card dead-centre on a person-free QR-block beat", () => {
+    expect(qrPlacementFor({ qrHero: true })).toBe("center");
+  });
+
+  it("draws the big card in the b-roll panel of a QR-block split", () => {
+    expect(qrPlacementFor(split)).toBe("panel");
+    // rendered before hostClipUrls existed — nothing to compare, taken at its word
+    expect(qrPlacementFor({ ...split, hostClipUrls: undefined })).toBe("panel");
+  });
+
+  it("keeps the corner card on a split whose composite failed back to the bare host", () => {
+    expect(
+      qrPlacementFor({ ...split, clipUrls: ["https://r2/host.mp4"] })
+    ).toBe("corner");
+  });
+
+  it("keeps the corner card over a full-frame host", () => {
+    expect(qrPlacementFor({ qrHero: true, hostPresent: true })).toBe("corner");
+    expect(qrPlacementFor({ qrCorner: true, hostPresent: true })).toBe(
+      "corner"
+    );
+  });
+
+  it("sizes the scan window by the same rule — big on b-roll, big in a split's panel", () => {
+    expect(qrPlacementFor({ qrCorner: true })).toBe("center");
+    expect(
+      qrPlacementFor({ ...split, qrHero: undefined, qrCorner: true })
+    ).toBe("panel");
+  });
+
+  it("keeps the card small on the book — the cover reveal and an uploaded asset", () => {
+    expect(qrPlacementFor({ qrHero: true, coverHero: true })).toBe("corner");
+    expect(qrPlacementFor({ ...split, coverHero: true })).toBe("corner");
+    // the cover-reveal beat carries a QR with neither qrHero nor qrCorner set
+    expect(qrPlacementFor({ coverHero: true })).toBe("corner");
+    expect(
+      qrPlacementFor({
+        qrCorner: true,
+        assetImageUrl: "https://r2/book-render.png",
+      })
+    ).toBe("corner");
+  });
+
+  it("has nothing to size on a scene that carries no QR", () => {
+    expect(qrPlacementFor({})).toBe("corner");
+  });
+});
+
+describe("guardPitchVisuals", () => {
+  const sc = (
+    index: number,
+    extra: Partial<StoryboardScene>
+  ): StoryboardScene => ({
+    index,
+    narration: "n",
+    visualPrompt: "vp",
+    ...extra,
+  });
+  const TABLET =
+    "a tablet propped on a kitchen table showing the video's description page";
+  const SUBJECT = "cedar bird feeder build";
+
+  it("repairs the QR block's host beat that ensureHostInCta demoted onto its raw brollVisual", () => {
+    // The pitch as it stands AFTER enhanceBrollPrompts: the host beat saying "I'll wait right
+    // here" kept its host (toQr), so it was never enhanced; the b-roll after the block gets
+    // flipped to host, and this beat yields to a still.
+    const scenes = [
+      sc(1, { hostPresent: true, visualPrompt: "host" }),
+      sc(2, { cta: true, coverHero: true, stillImage: true, visualPrompt: "" }),
+      sc(3, {
+        cta: true,
+        qrHero: true,
+        stillImage: true,
+        visualPrompt: "a cedar feeder on a fence post",
+      }),
+      sc(4, {
+        cta: true,
+        qrHero: true,
+        qrTail: true,
+        hostPresent: true,
+        visualPrompt: "host",
+        brollVisual: TABLET,
+      }),
+      sc(5, {
+        cta: true,
+        stillImage: true,
+        visualPrompt: "sanded cedar boards on a bench",
+      }),
+      sc(6, {
+        cta: true,
+        stillImage: true,
+        visualPrompt: "a feeder hanging in a yard",
+      }),
+      sc(7, {
+        stillImage: true,
+        visualPrompt: "seed spilling from a cedar tray",
+      }),
+      sc(8, { hostPresent: true, visualPrompt: "host" }),
+    ];
+    ensureHostInCta(scenes);
+    const beat = scenes[3];
+    // the leak: a person-free QR-hero still carrying the literal prompt
+    expect(beat.hostPresent).toBe(false);
+    expect(beat.visualPrompt).toBe(TABLET);
+
+    expect(guardPitchVisuals(scenes, SUBJECT)).toEqual([4]);
+    expect(ctaVisualIsLiteral(beat.visualPrompt)).toBe(false);
+    // on the video's topic: the nearest clean non-CTA shot
+    expect(beat.visualPrompt).toBe("seed spilling from a cedar tray");
+  });
+
+  it("uses the video's subject when the film has no clean shot to borrow", () => {
+    const scenes = [
+      sc(1, { hostPresent: true }),
+      sc(2, {
+        cta: true,
+        qrHero: true,
+        stillImage: true,
+        visualPrompt: TABLET,
+      }),
+    ];
+    guardPitchVisuals(scenes, SUBJECT);
+    expect(scenes[1].visualPrompt).toContain(SUBJECT);
+  });
+
+  it("covers a scan-window beat the cta flag never reached (un-marked script)", () => {
+    const scenes = [
+      sc(1, {
+        qrCorner: true,
+        stillImage: true,
+        visualPrompt: "an iPad showing the shop page",
+      }),
+      sc(2, { stillImage: true, visualPrompt: "a cedar feeder on a post" }),
+    ];
+    expect(guardPitchVisuals(scenes, SUBJECT)).toEqual([1]);
+    expect(scenes[0].visualPrompt).toBe("a cedar feeder on a post");
+  });
+
+  it("swaps a literal split panel on a pitch beat, and a book in any panel", () => {
+    const scenes = [
+      sc(1, {
+        cta: true,
+        qrHero: true,
+        hostPresent: true,
+        splitVisual: "a phone showing a QR code",
+      }),
+      sc(2, {
+        hostPresent: true,
+        splitVisual: "an open handbook on the bench",
+      }),
+      sc(3, {
+        stillImage: true,
+        visualPrompt: "cedar offcuts in a coffee can",
+      }),
+    ];
+    expect(guardPitchVisuals(scenes, SUBJECT)).toEqual([1, 2]);
+    expect(scenes[0].splitVisual).toBe("cedar offcuts in a coffee can");
+    expect(scenes[1].splitVisual).toBe("cedar offcuts in a coffee can");
+  });
+
+  it("leaves host shots, cover reveals, assets, clean prompts and non-pitch beats alone", () => {
+    const scenes = [
+      sc(1, {
+        cta: true,
+        hostPresent: true,
+        visualPrompt: "host with a phone",
+      }),
+      sc(2, { cta: true, coverHero: true, stillImage: true, visualPrompt: "" }),
+      sc(3, {
+        cta: true,
+        assetImageUrl: "https://r2/asset.png",
+        visualPrompt: "a tablet",
+      }),
+      sc(4, {
+        cta: true,
+        stillImage: true,
+        visualPrompt: "a cedar feeder on a post",
+      }),
+      // ordinary content may show a screen — the vocabulary is pitch-only
+      sc(5, { stillImage: true, visualPrompt: "a screen door onto the porch" }),
+    ];
+    const before = scenes.map(s => s.visualPrompt);
+    expect(guardPitchVisuals(scenes, SUBJECT)).toEqual([]);
+    expect(scenes.map(s => s.visualPrompt)).toEqual(before);
+  });
+
+  it("is idempotent", () => {
+    const scenes = [
+      sc(1, { cta: true, stillImage: true, visualPrompt: TABLET }),
+      sc(2, { stillImage: true, visualPrompt: "a cedar feeder on a post" }),
+    ];
+    guardPitchVisuals(scenes, SUBJECT);
+    expect(guardPitchVisuals(scenes, SUBJECT)).toEqual([]);
   });
 });
 

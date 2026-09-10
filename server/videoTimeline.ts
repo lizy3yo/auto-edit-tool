@@ -36,7 +36,7 @@ export interface TimelineEntry {
   kind: ShotKind;
   /** `m:ss` of `startSec` — YouTube chapter format, and what the UI shows. */
   timecode: string;
-  /** True while this beat carries the small corner QR (independent of `kind`). */
+  /** True while this beat carries the scan-window QR (independent of `kind`). */
   qrCorner: boolean;
   /** True while this beat is inside a CTA pitch. */
   cta: boolean;

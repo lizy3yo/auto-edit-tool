@@ -1174,14 +1174,18 @@ export function buildSceneMuxArgs(opts: {
    * Optional QR-code PNG overlaid on a CTA scene. The QR is scaled-to-fit and padded onto a
    * white "quiet-zone" card so it stays scannable over any backdrop. `height` sizes the card
    * relative to the frame. `placement` (default `"corner"`) picks the layout: `"corner"` is the
-   * small bottom-right card used across the pitch; `"center"` is the large, centered card for
-   * the injected QR-hero beat. Added as a third ffmpeg input (`-loop 1 -i`), so the video stays
-   * input 0 and audio input 1.
+   * small bottom-right card over a full-frame host or a book; `"center"` is the large, centered
+   * card on b-roll; `"panel"` is that same large card centered inside `panel` — the b-roll half
+   * of a split, so it sits beside the host instead of over them (`qrPlacementFor` decides). Added as a third
+   * ffmpeg input (`-loop 1 -i`), so the video stays input 0 and audio input 1.
    */
   qrOverlay?: {
     imagePath: string;
     height: number;
-    placement?: "corner" | "center";
+    placement?: "corner" | "center" | "panel";
+    /** The b-roll panel on the canvas, px (`resolveSplitLayout`). Required by `"panel"`; a
+     *  `"panel"` QR without one falls back to the corner rather than guessing a rectangle. */
+    panel?: { x: number; w: number };
   };
   /**
    * Optional host lower-third ("name card") — a full-frame transparent PNG (see
@@ -1235,17 +1239,25 @@ export function buildSceneMuxArgs(opts: {
   if (opts.qrOverlay) {
     // A white card with the QR centered and padded. `corner` (default) is a small card (~28% of
     // frame height) composited bottom-right with a small margin; `center` is a large card (~66%
-    // of frame height) composited dead-center.
-    const center = opts.qrOverlay.placement === "center";
-    const card = Math.round(opts.qrOverlay.height * (center ? 0.66 : 0.28));
-    const inner = Math.round(card * 0.86);
+    // of frame height) composited dead-center; `panel` is the large card centered in the split's
+    // b-roll panel, shrunk only if the operator dragged the seam so the panel can't hold it.
+    const { placement, panel } = opts.qrOverlay;
+    const inPanel = placement === "panel" && !!panel;
+    const big = placement === "center" || inPanel;
     const margin = Math.round(opts.qrOverlay.height * 0.045);
+    let card = Math.round(opts.qrOverlay.height * (big ? 0.66 : 0.28));
+    if (inPanel) card = Math.min(card, panel.w - 2 * margin);
+    const inner = Math.round(card * 0.86);
     overlays.push({
       prep:
         `[${qrIdx}:v]scale=${inner}:${inner}:force_original_aspect_ratio=decrease,` +
         `pad=${card}:${card}:(ow-iw)/2:(oh-ih)/2:color=white,setsar=1[qr]`,
       label: "qr",
-      pos: center ? `(W-w)/2:(H-h)/2` : `W-w-${margin}:H-h-${margin}`,
+      pos: inPanel
+        ? `${panel.x + Math.round((panel.w - card) / 2)}:(H-h)/2`
+        : big
+          ? `(W-w)/2:(H-h)/2`
+          : `W-w-${margin}:H-h-${margin}`,
     });
   }
   if (ncOn) {
@@ -2654,8 +2666,11 @@ export async function assemblePerSceneFilm(opts: {
     minHoldSec?: number;
     /** Optional QR-code PNG (R2 URL) overlaid on CTA scenes. */
     qrOverlayUrl?: string;
-    /** QR layout: `"center"` (large, centered — the QR-hero beat) or `"corner"` (default, small bottom-right). */
-    qrPlacement?: "corner" | "center";
+    /** QR layout: `"center"` (large, centered — the QR-hero beat), `"panel"` (the same large card
+     *  centered in a split's b-roll panel) or `"corner"` (default, small bottom-right). */
+    qrPlacement?: "corner" | "center" | "panel";
+    /** The split's geometry, so a `"panel"` QR finds the b-roll panel (`resolveSplitLayout`). */
+    splitLayout?: SplitLayout;
     /** Extra silent frozen tail (seconds) appended past the held length — the CTA QR-block release
      *  beat lingers so the QR stays on screen ~3s after the release line (or the operator's
      *  override, which may be 0). */
@@ -2898,6 +2913,17 @@ export async function assemblePerSceneFilm(opts: {
         ...(sharpen ? { sharpen: HOST_UPSCALE_SHARPEN } : {}),
       });
 
+    /**
+     * A split's b-roll panel on the canvas — where a `"panel"` QR card centres itself. Resolved
+     * by the same function the compositor used, so it lands on the panel actually rendered.
+     */
+    const qrPanelFor = (scene: (typeof scenes)[number]) =>
+      scene.qrPlacement === "panel"
+        ? (({ brollX, brollW }) => ({ x: brollX, w: brollW }))(
+            resolveSplitLayout(width, height, scene.splitLayout)
+          )
+        : undefined;
+
     const attemptScene = async (s: number): Promise<void> => {
       const scene = scenes[s];
       const normKeys = scene.clipUrls.map(u =>
@@ -2917,6 +2943,8 @@ export async function assemblePerSceneFilm(opts: {
               fadeOut: ncAt === ncRun.length - 1,
             }
           : undefined;
+
+      const qrPanel = qrPanelFor(scene);
 
       // The finished scene MP4 is a pure function of these. Two determinants are named
       // INDIRECTLY on purpose, so the key can be computed without doing any IO first:
@@ -2953,6 +2981,7 @@ export async function assemblePerSceneFilm(opts: {
                 url: scene.qrOverlayUrl,
                 placement: scene.qrPlacement ?? "corner",
                 height,
+                ...(qrPanel ? { panel: qrPanel } : {}),
               }
             : undefined,
         nameCard: ncKey,
@@ -3099,6 +3128,7 @@ export async function assemblePerSceneFilm(opts: {
                   imagePath: qrPath,
                   height,
                   placement: scene.qrPlacement ?? "corner",
+                  panel: qrPanelFor(scene),
                 }
               : undefined,
           nameCard:

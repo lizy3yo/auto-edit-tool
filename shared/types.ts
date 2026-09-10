@@ -331,10 +331,11 @@ export interface StoryboardScene {
    */
   qrHero?: boolean;
   /**
-   * A small bottom-right QR beat that is NOT a hero still: the corner QR card is overlaid but the
-   * scene KEEPS its normal register (host/still/motion) — a corner card never covers a centered
-   * face. Set by `markCornerQrBeforeCover` on the `CORNER_QR_SCENES_BEFORE_COVER` scenes right
-   * before each cover reveal (the book-pitch scan window). Independent of `cta`, so a dollar
+   * A scan-window QR beat that is NOT a hero still: the QR card is overlaid but the scene KEEPS
+   * its normal register (host/still/motion). Named for the corner card it always used to carry;
+   * the card's SIZE now follows the register (`qrPlacementFor`) — big on b-roll and in a split's
+   * b-roll panel, small in the corner over a full-frame host or a book asset. Set by
+   * `markCornerQrBeforeCover` on the book-pitch scan window. Independent of `cta`, so a dollar
    * mention in the body never surfaces a QR.
    */
   qrCorner?: boolean;
