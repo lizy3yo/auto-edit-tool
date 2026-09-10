@@ -173,6 +173,8 @@ import {
   MAX_JOB_ASSETS,
   resolveLongformPacing,
 } from "../shared/pacing";
+import { HOST_MINUTES_OPTIONS } from "../shared/hostMinutes";
+import { RATES } from "./pricing";
 import { getChannelLayer } from "./composer";
 import { isMockMode, setMockMode } from "./mockMode";
 import {
@@ -1135,6 +1137,9 @@ const longformVideoRouter = router({
   getPacing: approvedProcedure.query(async () => ({
     pacing: await getLongformPacing(),
     defaults: DEFAULT_LONGFORM_PACING,
+    // USD per second of host video (`COST_HEYGEN_PER_SEC`), so the form's host-minutes
+    // estimate is priced at the same rate the Cost dialog uses afterwards.
+    hostRatePerSec: RATES.heygenPerSecond,
   })),
 
   /**
@@ -1613,6 +1618,18 @@ const longformVideoRouter = router({
               .max(400),
           })
           .optional(),
+        /**
+         * Minutes of talking head (`HOST_MINUTES_OPTIONS`). Absent ⇒ the percentage mix, which is
+         * what a client from before this existed gets. See `LongformInputParams.hostMinutes`.
+         */
+        hostMinutes: z
+          .number()
+          .int()
+          .min(HOST_MINUTES_OPTIONS[0])
+          .max(HOST_MINUTES_OPTIONS[HOST_MINUTES_OPTIONS.length - 1])
+          .optional(),
+        /** The operator's answer to the over-the-guide warning; absent ⇒ never asked. */
+        hostMinutesOverride: z.boolean().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -1912,6 +1929,11 @@ const longformVideoRouter = router({
         assets: assets.length ? assets : undefined,
         // Per-CTA-block books. Empty ⇒ the channel's single cover/QR, i.e. the pre-books film.
         ctaBooks: ctaBooks.length ? ctaBooks : undefined,
+        // Host budget in minutes, resolved against the MEASURED film after voicing
+        // (`resolveHostBudget`). Snapshotted so a resume or retry plans the same host time.
+        hostMinutes: input.hostMinutes,
+        hostMinutesOverride:
+          input.hostMinutes != null ? input.hostMinutesOverride : undefined,
       };
 
       const jobId = await createLongformJob(

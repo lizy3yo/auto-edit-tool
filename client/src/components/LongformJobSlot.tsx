@@ -42,6 +42,15 @@ import {
   type CtaBookAssignment,
 } from "@/components/LongformCtaBooks";
 import { LongformPublishKit } from "@/components/LongformPublishKit";
+import { LongformHostMinutes } from "@/components/LongformHostMinutes";
+import {
+  DEFAULT_HOST_MINUTES,
+  ESTIMATE_WORDS_PER_SEC,
+  formatMinSec,
+  hostGuideFraction,
+  resolveHostBudget,
+} from "@shared/hostMinutes";
+import { LEGACY_PACING } from "@shared/pacing";
 import { LongformScenePreview } from "@/components/LongformScenePreview";
 import { SceneStripThumb } from "@/components/SceneStripThumb";
 import { SplitPositionEditor } from "@/components/SplitPositionEditor";
@@ -340,6 +349,8 @@ export default function LongformJobSlot({
   const [ttsVendor, setTtsVendor] = useState<
     "sixtynine_labs" | "minimax" | undefined
   >(undefined);
+  // Minutes of talking head — the host budget, and with it the video's biggest cost.
+  const [hostMinutes, setHostMinutes] = useState<number>(DEFAULT_HOST_MINUTES);
   const [showConfirm, setShowConfirm] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showCost, setShowCost] = useState(false);
@@ -1488,13 +1499,35 @@ export default function LongformJobSlot({
   const insertCtaTemplate = () => {
     setScript(s => `${s.trimEnd()}\n\n${CTA_MARKER_TEMPLATE}\n`);
   };
-  // ~150 wpm is a narration pace, not a reading one. Deliberately labelled
-  // "roughly" — the real runtime is measured from the rendered voiceover.
+  // The pipeline's calibrated narration pace (2.8 words/s, measured across finished jobs) — the
+  // same number the host-minutes warning below is decided on, so the length shown and the
+  // length judged are one estimate. Deliberately labelled "roughly": the real runtime is
+  // measured from the rendered voiceover.
+  const estimatedFilmSec = Math.round(wordCount / ESTIMATE_WORDS_PER_SEC);
   const estimatedMinutes = useMemo(() => {
-    const total = Math.round((wordCount / 150) * 60);
-    const m = Math.floor(total / 60);
-    return m > 0 ? `${m}m ${total % 60}s` : `${total}s`;
-  }, [wordCount]);
+    const m = Math.floor(estimatedFilmSec / 60);
+    return m > 0 ? `${m}m ${estimatedFilmSec % 60}s` : `${estimatedFilmSec}s`;
+  }, [estimatedFilmSec]);
+
+  // The host budget on the ESTIMATED length: decides whether the confirm dialog asks. The
+  // server re-runs `resolveHostBudget` on the measured narration.
+  const { data: pacingInfo } = trpc.longformVideo.getPacing.useQuery();
+  const hostGuide = pacingInfo
+    ? hostGuideFraction(pacingInfo.pacing)
+    : LEGACY_PACING.visualMix.hostShare;
+  const hostEstimate = resolveHostBudget({
+    minutes: hostMinutes,
+    filmSec: estimatedFilmSec,
+    guideFraction: hostGuide,
+  });
+  const hostOverride = resolveHostBudget({
+    minutes: hostMinutes,
+    override: true,
+    filmSec: estimatedFilmSec,
+    guideFraction: hostGuide,
+  });
+  const askHostOverride =
+    !!channelDefaults?.hostPhotoUrl && wordCount > 0 && hostEstimate.overGuide;
 
   /**
    * Why the generate button is disabled, in the operator's terms. The button used
@@ -1515,7 +1548,12 @@ export default function LongformJobSlot({
             ? "That channel has no voice configured. Set one under Channels."
             : null;
 
-  const confirmGenerate = () => {
+  /**
+   * `hostOverride` is the operator's answer to the over-the-guide warning — true "use my minutes
+   * anyway", false "use the guide". Left undefined when the dialog never asked, which tells the
+   * server a shorter-than-estimated film should fall back to the guide with a note.
+   */
+  const confirmGenerate = (hostOverride?: boolean) => {
     setShowConfirm(false);
     armNotifications(); // unlock audio + request notification permission on the click
     // Drop half-filled rows: a book with no title can't be matched to a CTA line, and an empty
@@ -1543,6 +1581,8 @@ export default function LongformJobSlot({
       // pinning a plan the operator never saw would just freeze one arbitrary draw.
       deliveryPlan: manualNarrationUrl ? manualDeliveryPlan : undefined,
       ttsVendor,
+      hostMinutes,
+      hostMinutesOverride: askHostOverride ? hostOverride : undefined,
     });
   };
 
@@ -1662,7 +1702,23 @@ export default function LongformJobSlot({
           )}
         </Step>
 
-        <Step n={3} title="Call to action" optional>
+        <Step
+          n={3}
+          title="Talking head"
+          hint="Minutes of host on camera. Lip-sync is billed by the second, so this sets the video's biggest cost."
+        >
+          <LongformHostMinutes
+            value={hostMinutes}
+            onChange={setHostMinutes}
+            estimate={hostEstimate}
+            filmSec={wordCount > 0 ? estimatedFilmSec : 0}
+            ratePerSec={pacingInfo?.hostRatePerSec}
+            hasHostPhoto={!channelKey || !!channelDefaults?.hostPhotoUrl}
+            disabled={generateMutation.isPending || isProcessing}
+          />
+        </Step>
+
+        <Step n={4} title="Call to action" optional>
           {/* Which book each CTA block pitches — one video can sell more than one. */}
           <LongformCtaBooks
             script={script}
@@ -1678,7 +1734,7 @@ export default function LongformJobSlot({
         </Step>
 
         <Step
-          n={4}
+          n={5}
           title="Video title"
           optional
           hint="Names the tab, the library entry and the downloaded MP4."
@@ -3167,9 +3223,10 @@ export default function LongformJobSlot({
                     This will voice your full script word-for-word and
                     storyboard it into a 16:9 video. The on-camera host
                     (talking-head) scenes are lip-synced with{" "}
-                    <strong>HeyGen Avatar IV</strong> and make up a small share
-                    of the runtime; b-roll cutaways and image scenes are
-                    generated with <strong>69Labs</strong>.
+                    <strong>HeyGen Avatar IV</strong> for up to{" "}
+                    <strong>{hostMinutes} min</strong> of the runtime; b-roll
+                    cutaways and image scenes are generated with{" "}
+                    <strong>69Labs</strong>.
                   </p>
                 ) : (
                   <p>
@@ -3180,8 +3237,8 @@ export default function LongformJobSlot({
                     scenes.
                   </p>
                 )}
-                {/* The three facts that decide whether this click is the right
-                    one, together, instead of scattered up the form. */}
+                {/* The facts that decide whether this click is the right one,
+                    together, instead of scattered up the form. */}
                 <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 rounded-md border border-border bg-muted/60 p-3 text-xs">
                   <dt className="text-muted-foreground">Script</dt>
                   <dd className="tabular-nums">
@@ -3194,9 +3251,45 @@ export default function LongformJobSlot({
                       ? "On"
                       : "No channel photo — text-only"}
                   </dd>
+                  {channelDefaults?.hostPhotoUrl && (
+                    <>
+                      <dt className="text-muted-foreground">Talking head</dt>
+                      <dd className="tabular-nums">
+                        {hostMinutes} min
+                        {pacingInfo &&
+                          ` · ~$${(hostMinutes * 60 * pacingInfo.hostRatePerSec).toFixed(2).replace(/\.00$/, "")}`}
+                      </dd>
+                    </>
+                  )}
                   <dt className="text-muted-foreground">B-roll model</dt>
                   <dd>Grok</dd>
                 </dl>
+                {/* Asked only when the ESTIMATED film puts the pick over the guide. Either
+                    answer is pinned on the job; the server re-applies it to the measured film. */}
+                {askHostOverride && (
+                  <Alert
+                    tone="warning"
+                    className="text-xs"
+                    title="More talking head than the guide"
+                  >
+                    <p>
+                      {hostMinutes} min of host is{" "}
+                      {Math.round(
+                        (hostEstimate.requestedSec / estimatedFilmSec) * 100
+                      )}
+                      % of this ~{formatMinSec(estimatedFilmSec)} film. The
+                      guide for this length is{" "}
+                      {formatMinSec(hostEstimate.guideSec)} (
+                      {Math.round(hostGuide * 100)}%).
+                    </p>
+                    {hostOverride.clampedToMax && (
+                      <p>
+                        Half the film is the most any video gets, so "anyway"
+                        means {formatMinSec(hostOverride.budgetSec)}.
+                      </p>
+                    )}
+                  </Alert>
+                )}
                 {/* CTA check — the cases the router would reject are announced HERE, with the
                     fix next to them, instead of surfacing as a server error after the click. */}
                 <div className="space-y-1.5 rounded-md border border-border p-3 text-xs">
@@ -3303,14 +3396,32 @@ export default function LongformJobSlot({
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={confirmGenerate}
-              // The CTA section above says WHY and carries the fix (markers / template edit) —
-              // submitting anyway would just bounce off the router's own validation.
-              disabled={ctaWouldReject || ctaPlaceholderLeft}
-            >
-              Generate
-            </AlertDialogAction>
+            {/* The CTA section above says WHY and carries the fix (markers / template edit) —
+                submitting anyway would just bounce off the router's own validation. */}
+            {askHostOverride ? (
+              <>
+                <AlertDialogAction
+                  onClick={() => confirmGenerate(false)}
+                  disabled={ctaWouldReject || ctaPlaceholderLeft}
+                  className="bg-secondary text-secondary-foreground hover:bg-secondary/80"
+                >
+                  Use the guide — {formatMinSec(hostEstimate.guideSec)}
+                </AlertDialogAction>
+                <AlertDialogAction
+                  onClick={() => confirmGenerate(true)}
+                  disabled={ctaWouldReject || ctaPlaceholderLeft}
+                >
+                  Use {formatMinSec(hostOverride.budgetSec)} anyway
+                </AlertDialogAction>
+              </>
+            ) : (
+              <AlertDialogAction
+                onClick={() => confirmGenerate()}
+                disabled={ctaWouldReject || ctaPlaceholderLeft}
+              >
+                Generate
+              </AlertDialogAction>
+            )}
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

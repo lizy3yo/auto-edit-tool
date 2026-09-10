@@ -230,6 +230,12 @@ import {
   resolveLongformPacing,
   scaleRamp,
 } from "../shared/pacing";
+import {
+  ESTIMATE_WORDS_PER_SEC,
+  formatMinSec,
+  resolveHostBudget,
+  type HostBudget,
+} from "../shared/hostMinutes";
 import { renderCaptionCardPng } from "./captionCard";
 import {
   buildTrackingUrl,
@@ -381,8 +387,11 @@ export const LONG_SCENE_MAX_SEC = 8;
  * Conversational pace assumed across the pipeline for word↔second estimates. Calibrated from
  * 197 scenes across 19 completed jobs (median 2.78, mean 2.82 words/sec at default TTS speed) —
  * tune if the default voice/speed changes. Was 2.5, which undershot the real rate.
+ *
+ * The value lives in shared/hostMinutes.ts so the generate form estimates a film's length (and so
+ * whether a host-minutes pick needs its warning) with the same number.
  */
-export const WORDS_PER_SEC = 2.8;
+export const WORDS_PER_SEC = ESTIMATE_WORDS_PER_SEC;
 /**
  * ~`SCENE_MIN_SEC` worth of words at pace `wps` — a chunk keeps absorbing whole sentences
  * while under this. Sizing helpers take a pace so a voice whose RECOGNIZED pace (see
@@ -1884,6 +1893,381 @@ export function rebalanceHostScreenTime(
   };
 }
 
+// ─── Host MINUTES budget (per video, chosen on the generate form) ────────────
+// The percentage mix above makes host cost grow with the film. When a job carries
+// `hostMinutes`, `planHostMinutes` replaces `rebalanceHostScreenTime`: a fixed number of host
+// seconds, spent where the host matters (hook, CTAs, outro) and then as short check-ins about
+// once a minute so the face never disappears for long. `capHostMinutes` re-checks the total
+// after the CTA passes, which can add host beats late. The budget itself is `resolveHostBudget`.
+
+/** Target spacing between host check-ins — "every minute or so". */
+export const HOST_CHECKIN_CADENCE_SEC = 60;
+/**
+ * Spacings tried, tightest first. The first one the budget can cover at EVERY target wins, so a
+ * small budget on a long film spreads its check-ins evenly instead of spending them all in the
+ * first half and going faceless for the rest.
+ */
+const HOST_CHECKIN_CADENCES = [60, 75, 90, 120, 150, 180, 240];
+/**
+ * Longest cutaway `planHostMinutes` will turn into a host check-in when no host beat sits near a
+ * target. A check-in is a glimpse of the host, not a monologue; anything longer eats the budget
+ * two check-ins could have used.
+ */
+export const HOST_CHECKIN_PROMOTE_MAX_SEC = 10;
+
+/** Seconds a scene occupies on the narration: its master slice, else its measured length. */
+function narrationSecOf(s: StoryboardScene): number {
+  const slice = (s.narrationEndSec ?? 0) - (s.narrationStartSec ?? 0);
+  return slice > 0 ? slice : (s.audioDuration ?? 0);
+}
+
+/**
+ * The host budget this job renders with, resolved against the MEASURED film — or null when the job
+ * has no host-minutes pick (the percentage mix applies) or no host at all (`brollOnly`).
+ */
+export function hostBudgetForJob(
+  params: LongformInputParams,
+  scenes: StoryboardScene[],
+  pacing: LongformPacing
+): HostBudget | null {
+  if (params.hostMinutes == null || params.brollOnly) return null;
+  return resolveHostBudget({
+    minutes: params.hostMinutes,
+    override: params.hostMinutesOverride,
+    filmSec: scenes.reduce((sum, s) => sum + narrationSecOf(s), 0),
+    guideFraction: hostFractionFor(pacing),
+  });
+}
+
+/**
+ * Host beats the budget must never remove: the hook (scene 1 / the locked cold open), the outro
+ * (the closing bookend) and the pitch (a CTA beat or a QR scan-window beat — the pitch has its
+ * own host rhythm, `ensureHostInCta` + `shapePitchQrStretches`, and most of the sales are there).
+ */
+function hostAnchorKind(
+  scenes: StoryboardScene[],
+  i: number
+): "hook" | "cta" | "outro" | null {
+  const s = scenes[i];
+  if (!s.hostPresent) return null;
+  if (i === 0 || s.hostOpener) return "hook";
+  if (s.cta === true || s.qrCorner) return "cta";
+  if (i === scenes.length - 1) return "outro";
+  return null;
+}
+
+export interface HostMinutesPlan {
+  budgetSec: number;
+  hookSec: number;
+  /** CTA host beats already in the storyboard. */
+  ctaSec: number;
+  /** Seconds held back for the beats `ensureHostInCta` will flip to host later. */
+  ctaReserveSec: number;
+  outroSec: number;
+  checkIns: number;
+  checkInSec: number;
+  /** Extra existing host beats kept to use what the check-ins left of the budget. */
+  topUps: number;
+  topUpSec: number;
+  /** Spacing the check-ins were planned at; null when there was no room for any. */
+  cadenceSec: number | null;
+  /** Scene indices turned from cutaway into a host check-in. */
+  promoted: number[];
+  /** Host beats sent to the still lane. */
+  demoted: number;
+  /** Host seconds after planning, plus the CTA reserve — what the film is expected to use. */
+  plannedSec: number;
+  /** The hook, CTAs and outro alone already exceed the budget. */
+  anchorsOverBudget: boolean;
+}
+
+/**
+ * Spend a fixed host budget across the film. Runs after voicing (every scene is measured) and
+ * before any clip is paid for, in place of `rebalanceHostScreenTime`.
+ *
+ *  1. ANCHORS stay host: hook, CTA/pitch host beats, outro — plus a reserve for the beats
+ *     `ensureHostInCta` will flip later (the same walk, read-only), so the check-ins don't spend
+ *     seconds the pitch is about to take.
+ *  2. CHECK-INS: each stretch of film between anchors (the hook's end, each CTA run, the outro)
+ *     gets evenly spaced targets ~`cadence` apart. Each target keeps the nearest existing host
+ *     beat inside its window, else (when `canPromote`) turns the nearest short cutaway into one.
+ *     Never beside another kept host beat — the adjacency pass would only undo it. The cadence
+ *     widens (`HOST_CHECKIN_CADENCES`) until the budget covers every target.
+ *  3. TOP-UPS: what the check-ins left of the budget goes on further existing host beats, spread
+ *     across the film — the operator asked for minutes of host, not for the minimum.
+ *  4. Every other host beat goes to the still lane (`demoteHostToStill`), as the percentage
+ *     balancer does, so the freed time lands on the cheapest register.
+ *
+ * Mutates `scenes` in place; pure otherwise — unit-tested.
+ */
+export function planHostMinutes(
+  scenes: StoryboardScene[],
+  budgetSec: number,
+  opts: { canPromote: boolean }
+): HostMinutesPlan {
+  const n = scenes.length;
+  const sec = scenes.map(narrationSecOf);
+  const start: number[] = [];
+  let acc = 0;
+  for (const d of sec) {
+    start.push(acc);
+    acc += d;
+  }
+  const total = acc;
+  const mid = (i: number) => start[i] + sec[i] / 2;
+
+  // 1. Anchors, and the CTA reserve (mirrors `ensureHostInCta`'s walk without mutating).
+  const kept = new Set<number>();
+  let hookSec = 0;
+  let ctaSec = 0;
+  let outroSec = 0;
+  for (let i = 0; i < n; i++) {
+    const kind = hostAnchorKind(scenes, i);
+    if (!kind) continue;
+    kept.add(i);
+    if (kind === "hook") hookSec += sec[i];
+    else if (kind === "cta") ctaSec += sec[i];
+    else outroSec += sec[i];
+  }
+  const reserved = new Set<number>();
+  let ctaReserveSec = 0;
+  // Film intervals where the viewer already sees the host: hook, every CTA run, outro.
+  const covered: [number, number][] = [];
+  for (let i = 0; i < n;) {
+    if (scenes[i].cta !== true) {
+      i++;
+      continue;
+    }
+    let j = i;
+    while (j < n && scenes[j].cta === true) j++;
+    covered.push([start[i], start[j - 1] + sec[j - 1]]);
+    let hosts = 0;
+    for (let k = i; k < j; k++) {
+      const s = scenes[k];
+      if (!s.qrHero && !s.coverHero && s.hostPresent) hosts++;
+    }
+    for (let k = i; k < j && hosts < CTA_HOST_SCENES; k++) {
+      const s = scenes[k];
+      if (s.qrHero || s.coverHero || s.hostPresent) continue;
+      reserved.add(k);
+      ctaReserveSec += sec[k];
+      hosts++;
+    }
+    i = j;
+  }
+  let hookEnd = 0;
+  for (let i = 0; i < n; i++) {
+    if (hostAnchorKind(scenes, i) === "hook") hookEnd = start[i] + sec[i];
+  }
+  covered.push([0, hookEnd]);
+  const outroAnchored = n > 1 && hostAnchorKind(scenes, n - 1) === "outro";
+  covered.push([outroAnchored ? start[n - 1] : total, total]);
+  covered.sort((a, b) => a[0] - b[0]);
+
+  const anchorSec = hookSec + ctaSec + outroSec + ctaReserveSec;
+  const anchorsOverBudget = anchorSec > budgetSec + 1e-6;
+  const isKept = (i: number) => kept.has(i) || reserved.has(i);
+  const besideKept = (i: number, extra: Set<number>) =>
+    [i - 1, i + 1].some(k => k >= 0 && k < n && (isKept(k) || extra.has(k)));
+
+  const existingCandidate = (i: number) => scenes[i].hostPresent && !isKept(i);
+  const promotable = (i: number) => {
+    const s = scenes[i];
+    return (
+      opts.canPromote &&
+      !s.hostPresent &&
+      s.cta !== true &&
+      !s.qrHero &&
+      !s.qrCorner &&
+      !s.coverHero &&
+      !s.assetImageUrl &&
+      !reserved.has(i) &&
+      sec[i] >= HOST_MIN_HOLD_SEC &&
+      sec[i] <= HOST_CHECKIN_PROMOTE_MAX_SEC
+    );
+  };
+
+  // Uncovered stretches between the anchors, merged where anchors overlap.
+  const gaps: [number, number][] = [];
+  let cursor = 0;
+  for (const [a, b] of covered) {
+    if (a > cursor) gaps.push([cursor, a]);
+    cursor = Math.max(cursor, b);
+  }
+  if (cursor < total) gaps.push([cursor, total]);
+
+  // 2. Check-ins at the tightest cadence the budget can cover.
+  const plan = (cadence: number) => {
+    // Every gap's evenly spaced targets, each with the window it may pick from.
+    const targets: { t: number; lo: number; hi: number }[] = [];
+    for (const [g0, g1] of gaps) {
+      const len = g1 - g0;
+      const count = Math.max(0, Math.round(len / cadence) - 1);
+      for (let k = 1; k <= count; k++) {
+        const t = g0 + (k * len) / (count + 1);
+        targets.push({
+          t,
+          lo: Math.max(g0, t - cadence / 2),
+          hi: Math.min(g1, t + cadence / 2),
+        });
+      }
+    }
+    const chosen = new Set<number>();
+    let remaining = budgetSec - anchorSec;
+    let budgetMisses = 0;
+    // Middle-out, not front-to-back: when even the widest cadence cannot cover every target, the
+    // check-ins that do fit stay spread across the film instead of all landing in its first half.
+    for (const { t, lo, hi } of spreadOrder(targets)) {
+      let pick = -1;
+      let pickScore = Infinity;
+      let blockedByBudget = false;
+      for (let i = 0; i < n; i++) {
+        const m = mid(i);
+        if (m < lo || m > hi || chosen.has(i)) continue;
+        const existing = existingCandidate(i);
+        if (!existing && !promotable(i)) continue;
+        if (besideKept(i, chosen)) continue;
+        if (sec[i] > remaining + 1e-6) {
+          blockedByBudget = true;
+          continue;
+        }
+        // An existing host beat was the storyboard's own choice — prefer it anywhere in the
+        // window over promoting a cutaway, then prefer whichever sits nearest the target.
+        const score = (existing ? 0 : 1e6) + Math.abs(m - t);
+        if (score < pickScore) {
+          pick = i;
+          pickScore = score;
+        }
+      }
+      if (pick < 0) {
+        if (blockedByBudget) budgetMisses++;
+        continue;
+      }
+      chosen.add(pick);
+      remaining -= sec[pick];
+    }
+    return { chosen, remaining, budgetMisses };
+  };
+
+  let best: ReturnType<typeof plan> | null = null;
+  let cadenceSec: number | null = null;
+  if (!anchorsOverBudget && budgetSec - anchorSec >= HOST_MIN_HOLD_SEC) {
+    for (const cadence of HOST_CHECKIN_CADENCES) {
+      best = plan(cadence);
+      cadenceSec = cadence;
+      if (best.budgetMisses === 0) break;
+    }
+  }
+  const chosen = best?.chosen ?? new Set<number>();
+  let remaining = best?.remaining ?? budgetSec - anchorSec;
+
+  // 3. Top-ups: more of the storyboard's own host beats, spread across the film, while they fit.
+  const topUp = new Set<number>();
+  if (!anchorsOverBudget) {
+    const pool = scenes
+      .map((_, i) => i)
+      .filter(i => existingCandidate(i) && !chosen.has(i));
+    for (const i of spreadOrder(pool)) {
+      if (remaining < HOST_MIN_HOLD_SEC) break;
+      if (sec[i] > remaining + 1e-6) continue;
+      if (besideKept(i, chosen) || besideKept(i, topUp)) continue;
+      topUp.add(i);
+      remaining -= sec[i];
+    }
+  }
+
+  // 4. Apply: promote the chosen cutaways, demote every host beat the plan did not keep.
+  const promoted: number[] = [];
+  let demoted = 0;
+  let checkInSec = 0;
+  let topUpSec = 0;
+  for (let i = 0; i < n; i++) {
+    const s = scenes[i];
+    if (chosen.has(i)) {
+      checkInSec += sec[i];
+      if (!s.hostPresent) {
+        promoteCutawayToHost(s);
+        promoted.push(s.index);
+      }
+      continue;
+    }
+    if (topUp.has(i)) {
+      topUpSec += sec[i];
+      continue;
+    }
+    if (s.hostPresent && !isKept(i)) {
+      demoteHostToStill(s);
+      demoted++;
+    }
+  }
+
+  const plannedSec =
+    scenes.reduce((sum, s, i) => sum + (s.hostPresent ? sec[i] : 0), 0) +
+    ctaReserveSec;
+  return {
+    budgetSec,
+    hookSec,
+    ctaSec,
+    ctaReserveSec,
+    outroSec,
+    checkIns: chosen.size,
+    checkInSec,
+    topUps: topUp.size,
+    topUpSec,
+    cadenceSec: chosen.size > 0 ? cadenceSec : null,
+    promoted,
+    demoted,
+    plannedSec,
+    anchorsOverBudget,
+  };
+}
+
+/**
+ * The final word on the host budget, after `ensureHostInCta` and `shapePitchQrStretches` — both
+ * can add host beats the plan could only estimate. While the film is over budget, demote the most
+ * REDUNDANT non-anchor host beat (the one nearest another host beat, so the check-in cadence
+ * suffers least). Anchors are never touched: if they alone exceed the budget the result says so
+ * rather than cutting the hook, a pitch or the outro. Mutates in place; pure otherwise.
+ */
+export function capHostMinutes(
+  scenes: StoryboardScene[],
+  budgetSec: number
+): { hostSec: number; demoted: number[]; overBudget: boolean } {
+  const sec = scenes.map(narrationSecOf);
+  const start: number[] = [];
+  let acc = 0;
+  for (const d of sec) {
+    start.push(acc);
+    acc += d;
+  }
+  const mid = (i: number) => start[i] + sec[i] / 2;
+  const hostSec = () =>
+    scenes.reduce((sum, s, i) => sum + (s.hostPresent ? sec[i] : 0), 0);
+
+  const demoted: number[] = [];
+  while (hostSec() > budgetSec + 1e-6) {
+    const hosts = scenes.map((_, i) => i).filter(i => scenes[i].hostPresent);
+    let pick = -1;
+    let nearest = Infinity;
+    for (const i of hosts) {
+      if (hostAnchorKind(scenes, i)) continue;
+      // A lone host beat has no neighbour (Infinity) and is still demotable.
+      const d = Math.min(
+        ...hosts.filter(k => k !== i).map(k => Math.abs(mid(k) - mid(i)))
+      );
+      if (pick < 0 || d < nearest) {
+        nearest = d;
+        pick = i;
+      }
+    }
+    if (pick < 0) break;
+    demoteHostToStill(scenes[pick]);
+    demoted.push(scenes[pick].index);
+  }
+  const final = hostSec();
+  return { hostSec: final, demoted, overBudget: final > budgetSec + 1e-6 };
+}
+
 /**
  * Reorder `items` for even timeline coverage: visit the middle first, then the quarter
  * points, then the eighths, and so on (a breadth-first bisection). Greedily flipping scene
@@ -2490,6 +2874,23 @@ function demoteHostToStill(s: StoryboardScene): void {
   s.visualPrompt = seed;
   s.splitVisual = undefined;
   if (!s.shotAngle) s.shotAngle = "wide";
+}
+
+/**
+ * The inverse of `demoteHostToStill`: turn a cutaway into a full-frame talking-head beat. Shared
+ * by `shapePitchQrStretches` and `planHostMinutes` so "promote to host" is one mutation too.
+ * Mutates in place.
+ */
+function promoteCutawayToHost(s: StoryboardScene): void {
+  // Keep the clean cutaway it was, so a later demotion has an on-topic still to go back to.
+  s.brollVisual ??= s.visualPrompt;
+  s.hostPresent = true;
+  s.stillImage = false;
+  s.humanPresent = undefined;
+  s.objectMotion = undefined;
+  s.splitVisual = undefined;
+  s.visualPrompt = talkingHeadVisualPrompt(DEFAULT_HOST_DESCRIPTOR, s.index);
+  s.minHoldSec = Math.max(s.minHoldSec ?? 0, HOST_MIN_HOLD_SEC);
 }
 
 /**
@@ -6087,18 +6488,7 @@ export function shapePitchQrStretches(
         s.splitVisual = undefined;
         s.splitMotion = undefined;
       } else {
-        // Keep the clean cutaway it was, so a later demotion has an on-topic still to go back to.
-        s.brollVisual ??= s.visualPrompt;
-        s.hostPresent = true;
-        s.stillImage = false;
-        s.humanPresent = undefined;
-        s.objectMotion = undefined;
-        s.splitVisual = undefined;
-        s.visualPrompt = talkingHeadVisualPrompt(
-          DEFAULT_HOST_DESCRIPTOR,
-          s.index
-        );
-        s.minHoldSec = Math.max(s.minHoldSec ?? 0, HOST_MIN_HOLD_SEC);
+        promoteCutawayToHost(s);
       }
       promoted.push(s.index);
     }
@@ -10377,16 +10767,57 @@ async function runUnifiedPipeline(
 
   // Enforce the host-screen-time budget by exact runtime now that every scene's
   // narration length is measured — overshoot host scenes become b-roll before any
-  // (slow, costly) clip is generated. See `rebalanceHostScreenTime`.
-  const balance = rebalanceHostScreenTime(scenes, pacing);
-  if (balance.demoted > 0) {
-    const pct = (n: number) =>
-      balance.total > 0 ? Math.round((n / balance.total) * 100) : 0;
+  // (slow, costly) clip is generated. A job with a HOST MINUTES pick spends that fixed budget
+  // (`planHostMinutes`); every other job keeps the percentage mix (`rebalanceHostScreenTime`).
+  const filmTotal = scenes.reduce((sum, s) => sum + (s.audioDuration ?? 0), 0);
+  const hostBudget = hostBudgetForJob(params, scenes, pacing);
+  if (hostBudget) {
+    const plan = planHostMinutes(scenes, hostBudget.budgetSec, {
+      canPromote: !!params.faceImageUrl,
+    });
     console.log(
-      `[Longform ${jobId}] host screen time ${pct(balance.before)}% → ` +
-        `${pct(balance.after)}% (target ${Math.round(hostFractionFor(pacing) * 100)}%), ` +
-        `demoted ${balance.demoted} host scene(s) to b-roll`
+      `[Longform ${jobId}] host budget ${formatMinSec(hostBudget.budgetSec)} ` +
+        `(${params.hostMinutes} min picked, ${hostBudget.basis}; guide ` +
+        `${formatMinSec(hostBudget.guideSec)} of a ${formatMinSec(filmTotal)} film) — ` +
+        `hook ${formatMinSec(plan.hookSec)}, CTA ${formatMinSec(plan.ctaSec)}` +
+        `${plan.ctaReserveSec > 0 ? ` (+${formatMinSec(plan.ctaReserveSec)} reserved)` : ""}, ` +
+        `outro ${formatMinSec(plan.outroSec)}, ${plan.checkIns} check-in(s) ` +
+        `${formatMinSec(plan.checkInSec)}` +
+        `${plan.cadenceSec ? ` (~every ${plan.cadenceSec}s)` : ""}, ${plan.topUps} top-up(s) ` +
+        `${formatMinSec(plan.topUpSec)} → ${formatMinSec(plan.plannedSec)} planned; ` +
+        `promoted ${plan.promoted.length}, demoted ${plan.demoted}`
     );
+    if (
+      hostBudget.basis === "guide" &&
+      params.hostMinutesOverride === undefined
+    ) {
+      // The form only asks when its ESTIMATE puts the pick over the guide. The measured film came
+      // out shorter than that estimate, so nobody was asked — take the cheaper answer and say so.
+      appendJobWarning(
+        jobId,
+        `Host capped at ${formatMinSec(hostBudget.budgetSec)} instead of ` +
+          `${params.hostMinutes}:00 — the film ran shorter than the script estimate, which puts ` +
+          `${params.hostMinutes} min over the ${Math.round(hostFractionFor(pacing) * 100)}% guide`
+      );
+    }
+    if (plan.anchorsOverBudget) {
+      appendJobWarning(
+        jobId,
+        `The hook, CTAs and outro alone use ${formatMinSec(plan.plannedSec)} of host — over the ` +
+          `${formatMinSec(hostBudget.budgetSec)} budget, so there is no room for check-ins`
+      );
+    }
+  } else {
+    const balance = rebalanceHostScreenTime(scenes, pacing);
+    if (balance.demoted > 0) {
+      const pct = (n: number) =>
+        balance.total > 0 ? Math.round((n / balance.total) * 100) : 0;
+      console.log(
+        `[Longform ${jobId}] host screen time ${pct(balance.before)}% → ` +
+          `${pct(balance.after)}% (target ${Math.round(hostFractionFor(pacing) * 100)}%), ` +
+          `demoted ${balance.demoted} host scene(s) to b-roll`
+      );
+    }
   }
 
   // Split the host runtime between full-frame host and host-with-visual-beside, at whatever
@@ -10394,7 +10825,7 @@ async function runUnifiedPipeline(
   const split = enforceHostSplitMix(scenes, pacing);
   if (split.hostSeconds > 0) {
     const totalPct = (n: number) =>
-      balance.total > 0 ? Math.round((n / balance.total) * 100) : 0;
+      filmTotal > 0 ? Math.round((n / filmTotal) * 100) : 0;
     console.log(
       `[Longform ${jobId}] host split: ${totalPct(split.splitSeconds)}% beside / ` +
         `${totalPct(split.aloneSeconds)}% alone of total ` +
@@ -10502,7 +10933,11 @@ async function runUnifiedPipeline(
       const cap = share(
         s => !s.hostPresent && (!!s.humanPresent || !!s.objectMotion)
       );
-      const target = `${Math.round(hostRamp[q] * 100)}/${Math.round(motionRamp[q] * 100)}/${Math.round((1 - hostRamp[q] - motionRamp[q]) * 100)}`;
+      // Under a host-minutes budget the host column follows the budget, not the ramp, and stills
+      // take whatever host and motion leave.
+      const target = hostBudget
+        ? `budget/${Math.round(motionRamp[q] * 100)}/rest`
+        : `${Math.round(hostRamp[q] * 100)}/${Math.round(motionRamp[q] * 100)}/${Math.round((1 - hostRamp[q] - motionRamp[q]) * 100)}`;
       return `Q${q + 1} ${host}/${video}/${still} (→${target}, video cap ${cap}%)`;
     });
     console.log(
@@ -10622,6 +11057,23 @@ async function runUnifiedPipeline(
         `[${shaped.promoted.join(", ")}] (target ${PITCH_QR_STRETCH_MIN_SEC}–` +
         `${PITCH_QR_STRETCH_MAX_SEC}s of big QR)`
     );
+  }
+  // The host budget's last word: the CTA passes above add host beats the plan only estimated.
+  // Anything this demotes was host before `ensureHostInCta`, so `demotedLate` below re-enhances it.
+  if (hostBudget) {
+    const capped = capHostMinutes(scenes, hostBudget.budgetSec);
+    if (capped.demoted.length) {
+      console.log(
+        `[Longform ${jobId}] host budget re-check: demoted ${capped.demoted.length} check-in(s) ` +
+          `[${capped.demoted.join(", ")}] after the CTA passes → ${formatMinSec(capped.hostSec)}`
+      );
+    }
+    if (capped.overBudget) {
+      console.warn(
+        `[Longform ${jobId}] host ${formatMinSec(capped.hostSec)} is over the ` +
+          `${formatMinSec(hostBudget.budgetSec)} budget on hook/CTA/outro beats alone — left as is`
+      );
+    }
   }
   // Both passes above can demote a host beat onto a still built from its raw storyboard
   // `brollVisual`, after the enhancer has already run — so that prompt was never rewritten or

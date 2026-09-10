@@ -968,6 +968,24 @@ export interface LongformInputParams {
    */
   pacing?: LongformPacing;
   /**
+   * Minutes of talking head this video may use — the per-video host budget chosen on the generate
+   * form (`HOST_MINUTES_OPTIONS`, default 3). When set, `planHostMinutes` replaces the percentage
+   * balancer: the hook, every CTA's host beats and the outro are kept, and the rest of the budget
+   * is spent as short host check-ins about once a minute. The measured budget follows
+   * `resolveHostBudget` (shared/hostMinutes.ts).
+   *
+   * Absent (every job from before this existed) ⇒ the percentage mix, byte-identical to before.
+   */
+  hostMinutes?: number;
+  /**
+   * The operator's answer to the "more host than the guide" warning on the generate form:
+   * `true` = use the selected minutes anyway (capped at half the film), `false` = use the guide.
+   * Absent ⇒ they were never asked, because the ESTIMATED length kept the pick within the guide;
+   * if the MEASURED film comes out shorter and the pick no longer fits, the guide applies and the
+   * job carries a warning saying so.
+   */
+  hostMinutesOverride?: boolean;
+  /**
    * Operator-supplied images shown verbatim inside the CTA pitch window (`placeAssetBeats`).
    * Empty/absent ⇒ no asset beats and the film is unchanged.
    */

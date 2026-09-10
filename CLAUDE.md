@@ -355,6 +355,31 @@ Express · tRPC · Drizzle · MySQL.
   even the accepted clip shows no head/speech correlation, and a box-cut eye band reads the
   photo ~25% narrower than that clip — landmarks would fix the second. `--beside other.mp4`
   prints a second clip in a side column; `--photo host.jpg` adds the photo line
+- **Host minutes** (`shared/hostMinutes.ts` + `planHostMinutes`/`capHostMinutes` in
+  longformVideo) — the per-video host budget, picked on the generate form ("Talking head": 3 /
+  4 / 5 / 6 / 7 min, default 3, `client/src/components/LongformHostMinutes.tsx`). Lip-sync is
+  billed per second of output, so the old percentage mix (35%) made a film's biggest cost grow
+  with its length; a job carrying `inputParams.hostMinutes` spends a fixed number of seconds
+  instead, and a job without it runs `rebalanceHostScreenTime` exactly as before. The budget is
+  `resolveHostBudget`, run TWICE on the same function: by the form on the word-count estimate
+  (`ESTIMATE_WORDS_PER_SEC`, which `WORDS_PER_SEC` now re-exports, so the form's "roughly N min"
+  moved from 150 wpm to the calibrated 168) to decide whether the confirm dialog asks, and by the
+  pipeline on the measured narration. Within the guide (the visual-mix host share) ⇒ the pick;
+  over it ⇒ the dialog asks, "use anyway" (`hostMinutesOverride: true`) honours the pick up to
+  HALF the film, "use the guide" (`false`) takes the guide. `undefined` means nobody was asked —
+  the estimate fitted — so a film that measures shorter falls back to the guide and the job
+  carries a warning saying so. The plan, after voicing and before any clip is paid for: the hook,
+  every CTA/scan-window host beat and the outro are ANCHORS (never removed), with a reserve for
+  the beat `ensureHostInCta` will flip later; the rest of the budget becomes check-ins at evenly
+  spaced targets ~60 s apart in each stretch between anchors — nearest existing host beat in the
+  window, else a ≤10 s cutaway promoted (`promoteCutawayToHost`, shared with
+  `shapePitchQrStretches`) — widening the spacing until the budget covers every target and
+  visiting targets middle-out so a short budget still spreads; leftover budget keeps more of the
+  storyboard's own host beats; every other host beat goes to the still lane. Splits and alt
+  angles are host renders and count toward it. `capHostMinutes` re-checks after the CTA passes
+  (which add host beats late) and demotes the most redundant check-in, never an anchor. The
+  storyboard prompt is unchanged: it still writes host at the ramp's shares, which is what gives
+  the planner candidates near every target. Harness: `client/__harness/host-minutes.html`
 - `server/hostPlate.ts` — **provider-independent**. The lip-sync model animates the image it
   is handed and never changes the setting, so `HOST_PLATES=1` generates a 16:9 plate of the host
   IN each beat's setting (host photo as identity reference) and syncs from that instead of the
