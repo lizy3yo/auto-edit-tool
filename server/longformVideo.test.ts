@@ -9001,7 +9001,11 @@ describe("buildLtxLipsyncPrompt", () => {
     expect(prompt).toContain("three-quarter angle");
     expect(prompt).toContain("hands are empty");
     expect(prompt).toContain("warm, reassuring");
-    expect(prompt).toContain("small nod on the number");
+    // The body cue is deliberately NOT sent on this lane: LTX reads "leans in" as a camera
+    // move (measured: a push-in to an extreme close-up), so only the mood rides along.
+    expect(prompt).not.toContain("small nod on the number");
+    // The camera is spelled out positively — the negative prompt is never read at CFG 1.
+    expect(prompt).toContain("locked off");
     // None of the InfiniteTalk-specific direction leaks in.
     expect(prompt).not.toContain("calm and still");
   });

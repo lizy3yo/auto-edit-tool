@@ -3756,7 +3756,14 @@ async function resolveLipsyncLane(
           imageUrl,
           audioUrl,
           prompt: buildLtxLipsyncPrompt(scene, useAlt),
+          // Inert on the distilled graph (CFG 1 runs no pass that reads it) — sent for a
+          // worker that ever runs a guided tier, never relied on. Everything the render
+          // must NOT do is in the POSITIVE prompt for that reason.
           negativePrompt: LTX_LIPSYNC_NEGATIVE_DIRECTION,
+          enhancePrompt: ENV.ltxLipsyncEnhancePrompt,
+          imgStrength: ENV.ltxLipsyncImgStrength,
+          sampler: ENV.ltxLipsyncSampler,
+          decodeTile: ENV.ltxLipsyncDecodeTile,
           ...size,
         }),
       poll: (id, ms) => ltx.pollVideo(id, ms ?? LTX_LIPSYNC_TIMEOUT_MS),
@@ -6296,18 +6303,26 @@ export function buildLipsyncPrompt(
 }
 
 /**
- * The LTX lane's direction. Short and generic on purpose: the lane starts at the model's
- * own defaults, and the InfiniteTalk directions above are a year of tuning against THAT
- * model's failure modes (window handoffs, plate anchoring, NAG) which mean nothing here.
- * What carries over is what describes the shot — the framing, the alt angle, the CTA's empty
- * hands, and the line's own mood and gesture from the delivery pass — so a scene reads the
- * same whichever lane renders it.
+ * The LTX lane's direction. Short on purpose: the InfiniteTalk directions above are a year
+ * of tuning against THAT model's failure modes (window handoffs, plate anchoring, NAG) which
+ * mean nothing here. What carries over is what describes the shot — the alt angle, the CTA's
+ * empty hands, and the line's mood from the delivery pass.
+ *
+ * The CAMERA clause is the load-bearing part and it is deliberately long. Measured on job
+ * 94's scene 1: the first wording ("The camera is static.") rendered a push-in from a wide
+ * shot to an extreme close-up (background morph 31.6, limit 1). LTX treats a prompt as a
+ * shot description and, on the distilled graph, the negative prompt is never read (CFG 1),
+ * so every "do not" has to be said positively here — "locked off", "no zoom", "framing and
+ * distance exactly as the reference photo". With this wording and the enhancer off the
+ * same beat measured 2.3. The GESTURE cue is left out on this lane for the same reason:
+ * "leans in on the reveal" is a body note on InfiniteTalk and a camera move here.
  */
 export const LTX_LIPSYNC_DIRECTION =
-  "The person in the reference photo speaks directly to the camera, seated, in a medium " +
-  "close-up with their face centered and looking at the lens. The camera is static. Their " +
-  "mouth articulates every word of the speech clearly; natural small head movement and " +
-  "facial expression; hands out of frame.";
+  "The person in the reference photo speaks directly to the camera, framed exactly as in " +
+  "the reference photo, looking at the lens. The camera is completely static and locked " +
+  "off: no zoom, no push-in, no dolly, no pan, no change of framing or distance for the " +
+  "whole clip. Their mouth articulates every word of the speech clearly, lips meeting on " +
+  "consonants; small natural head movement and facial expression; hands out of frame.";
 
 export const LTX_LIPSYNC_NEGATIVE_DIRECTION =
   "blurry, distorted face, deformed, extra fingers, text, subtitles, watermark, camera " +
@@ -6322,10 +6337,9 @@ export function buildLtxLipsyncPrompt(
   const mood = scene.deliveryCue?.trim()
     ? ` Their expression while speaking: ${scene.deliveryCue.trim()}.`
     : "";
-  const gesture = scene.gestureCue?.trim()
-    ? ` While saying this line, their body: ${scene.gestureCue.trim()}.`
-    : "";
-  return `${LTX_LIPSYNC_DIRECTION}${angle}${cta}${mood}${gesture}`.trim();
+  // No `gestureCue` here — see LTX_LIPSYNC_DIRECTION: on this model a body note reads as a
+  // camera move, and the one measured render with it pushed in to an extreme close-up.
+  return `${LTX_LIPSYNC_DIRECTION}${angle}${cta}${mood}`.trim();
 }
 
 /**

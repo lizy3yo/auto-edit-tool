@@ -47,6 +47,19 @@ export interface LtxLipsyncParams {
   height?: number;
   /** Fixed seed for an A/B; unset lets the workflow pick. */
   seed?: number;
+  /**
+   * Whether the worker runs the graph's Gemma prompt ENHANCER before encoding. The graph
+   * ships with it ON, and measured on the first host renders it is where the push-in came
+   * from: it rewrites our "camera is static" direction into LTX's cinematic house style,
+   * which reads as a slow dolly. `false` sends the prompt verbatim. Unset = the graph's own.
+   */
+  enhancePrompt?: boolean;
+  /** Stage-1 photo anchor strength (0-1; the graph ships 0.7). Unset = the graph's own. */
+  imgStrength?: number;
+  /** Sampler name for both stages (the graph ships `euler_ancestral`). Unset = the graph's own. */
+  sampler?: string;
+  /** VAE decode tiling `tile/overlap/temporal/temporal_overlap`. Unset = the graph's own. */
+  decodeTile?: string;
 }
 
 const RUNPOD_API_BASE = "https://api.runpod.ai/v2";
@@ -161,6 +174,14 @@ export class LtxLipsyncAdapter {
           ? { width: params.width, height: params.height }
           : {}),
         ...(params.seed != null ? { seed: params.seed } : {}),
+        ...(params.enhancePrompt != null
+          ? { enhance_prompt: params.enhancePrompt }
+          : {}),
+        ...(params.imgStrength != null
+          ? { img_strength: params.imgStrength }
+          : {}),
+        ...(params.sampler ? { sampler: params.sampler } : {}),
+        ...(params.decodeTile ? { decode_tile: params.decodeTile } : {}),
       },
       policy: { executionTimeout: LTX_LIPSYNC_EXECUTION_TIMEOUT_MS },
     });

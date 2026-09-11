@@ -99,6 +99,34 @@ describe("LtxLipsyncAdapter.submitLipsync", () => {
     );
   });
 
+  it("sends the enhancer switch and the render dials only when set", async () => {
+    const calls = installFetchMock({});
+    const adapter = new LtxLipsyncAdapter("ep-ltx", "key-1");
+    await adapter.submitLipsync({
+      ...params,
+      enhancePrompt: false,
+      imgStrength: 1,
+      sampler: "euler",
+      decodeTile: "1536/384/192/48",
+    });
+    expect(calls[0].body.input).toMatchObject({
+      enhance_prompt: false,
+      img_strength: 1,
+      sampler: "euler",
+      decode_tile: "1536/384/192/48",
+    });
+    // Unset ⇒ absent: the worker's graph defaults rule, and `false` must be sendable (it is
+    // the value that turns the shipped-on enhancer off), so the check is on presence.
+    await adapter.submitLipsync(params);
+    for (const k of [
+      "enhance_prompt",
+      "img_strength",
+      "sampler",
+      "decode_tile",
+    ])
+      expect(calls[1].body.input).not.toHaveProperty(k);
+  });
+
   it("sends size, seed and the negative prompt only when set", async () => {
     const calls = installFetchMock({});
     const adapter = new LtxLipsyncAdapter("ep-ltx", "key-1");

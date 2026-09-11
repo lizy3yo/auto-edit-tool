@@ -83,6 +83,30 @@ export const ENV = {
       r => r === (process.env.LTX_LIPSYNC_RESOLUTION ?? "").toLowerCase()
     ) ?? undefined,
   /**
+   * The graph's Gemma prompt ENHANCER. OFF by default here although the graph ships it on:
+   * measured on job 94's scene 1 it rewrote "the camera is static" into a cinematic
+   * push-in (background morph 31.6 against a limit of 1; 2.3 with it off and the camera
+   * spelled out). `1` re-enables it for an A/B.
+   */
+  ltxLipsyncEnhancePrompt: process.env.LTX_LIPSYNC_ENHANCE_PROMPT === "1",
+  /**
+   * Override-only render dials, each absent unless set so the worker's graph defaults rule:
+   * stage-1 photo anchor strength (graph 0.7), sampler for both stages (graph
+   * `euler_ancestral`; the LTX-2.5 custom-audio thread blames it for broken sync), VAE
+   * decode tiling `tile/overlap/temporal/temporal_overlap` (graph 512/64/128/32, sized for
+   * small cards; the graph's own note lists 1536/384/192/48 for big ones).
+   */
+  ltxLipsyncImgStrength: process.env.LTX_LIPSYNC_IMG_STRENGTH
+    ? Number(process.env.LTX_LIPSYNC_IMG_STRENGTH)
+    : undefined,
+  // `euler`, not the graph's `euler_ancestral`, is the ONE dial this lane bakes in — measured
+  // on two hosts (jobs 94 and 96, scene 1 of each): the mouth's correlation with the words
+  // went from chance (r 0.05) to r 0.47-0.49 with nothing else changed; the ancestral
+  // sampler's fresh noise per step is what the LTX-2.5 custom-audio thread blamed, and it
+  // was right. `LTX_LIPSYNC_SAMPLER=euler_ancestral` restores the graph's own for an A/B.
+  ltxLipsyncSampler: process.env.LTX_LIPSYNC_SAMPLER || "euler",
+  ltxLipsyncDecodeTile: process.env.LTX_LIPSYNC_DECODE_TILE || undefined,
+  /**
    * Which vendor renders host scenes: `heygen` (default), `runpod` (InfiniteTalk) or `ltx`.
    * Deliberately an explicit opt-in rather than "use RunPod if its endpoint is set" — a
    * configured endpoint should be testable without silently moving every render onto it.

@@ -174,11 +174,24 @@ Express · tRPC · Drizzle · MySQL.
   Still a preview of the CUT, not the FILE — no burned-in QR/lower third/captions, no music bed
 - `server/providers/ltx-lipsync.ts` — the THIRD host lane: self-hosted LTX-2 (Lightricks,
   open weights) on its own RunPod endpoint (`RUNPOD_LTX_ENDPOINT`, shared `RUN_POD_KEY`),
-  chosen as `ltx` in Admin → Provider Keys beside HeyGen and InfiniteTalk. Deliberately
-  UNTUNED: the lane sends the photo, the narration and a short direction
-  (`buildLtxLipsyncPrompt` — framing, alt angle, CTA empty hands, the delivery pass's mood and
-  gesture cues) and nothing else unless `LTX_LIPSYNC_RESOLUTION` is set, so the worker's own
-  workflow defaults are the standard every later dial is measured against. None of the
+  chosen as `ltx` in Admin → Provider Keys beside HeyGen and InfiniteTalk. It started at the
+  graph's own defaults and now departs from them in exactly the ways the first renders
+  measured (2026-09-12, jobs 94 and 96, `scripts/measure-host-motion.mjs` +
+  `measure-lipsync.mts`, one variable per render): the Gemma prompt ENHANCER is off
+  (`LTX_LIPSYNC_ENHANCE_PROMPT`; on, it rewrote "static camera" into a push-in — background
+  morph 31.6 against a limit of 1, 2.3 with it off), the direction spells the locked-off camera
+  out positively and carries NO gesture cue (`LTX_LIPSYNC_DIRECTION`; the negative prompt is
+  never read at CFG 1, and "leans in" is a camera move to this model), the sampler is `euler`
+  (`LTX_LIPSYNC_SAMPLER`; on the graph's `euler_ancestral` the mouth's correlation with the
+  words was CHANCE, r 0.05, and r 0.47 on euler with nothing else changed), and the worker
+  compensates a measured 10-frame MOUTH LAG (renders the narration padded on the 1+8n grid,
+  drops the first 10 frames, muxes the original back — `LTX_LAG_FRAMES` on the endpoint) that
+  put the mouth 400-520 ms behind the sound on every render of both hosts. Final numbers on
+  Granny Mae: r 0.34 at 0 ms, 83% of sounds matched, lips closing at 0.051 — at or above the
+  HeyGen reference (r 0.21, 0.059) — for ~$0.037 per finished second. The photo-anchor dial
+  (`LTX_LIPSYNC_IMG_STRENGTH`) measured NO effect and audio guidance (`a2v_scale`, the pack's
+  MultimodalGuider) did not beat euler; both stay as overrides. The lane still sends nothing
+  else unless `LTX_LIPSYNC_RESOLUTION` / `_DECODE_TILE` are set. None of the
   InfiniteTalk machinery below (run-up, batching, plate, seams, sharpen) runs on it — that
   is a year of tuning against Wan's failure modes, not LTX's. The model renders at most 20 s
   per call, so `server/lipsyncChunks.ts` cuts a longer beat at real pauses (the master's
