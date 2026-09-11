@@ -155,17 +155,26 @@ export const RATES = {
    * and set the var if you deploy on anything else.
    */
   runpodLipsyncPerGpuSecond: rate("COST_RUNPOD_LIPSYNC_PER_GPU_SEC", 0.00097),
+
+  /**
+   * Self-hosted LTX-2 on RunPod, USD per GPU-SECOND — its own endpoint, so its own rate:
+   * the card it runs on need not be the InfiniteTalk one. Defaults to the same 96GB figure
+   * until the endpoint is deployed; divide its hourly rate by 3600 and set the var.
+   */
+  ltxLipsyncPerGpuSecond: rate("COST_LTX_LIPSYNC_PER_GPU_SEC", 0.00097),
 } as const;
 
 /**
  * Rate for one lip-sync line, in the unit that vendor's `quantity` is metered in: seconds
- * of finished video for HeyGen, GPU seconds for the self-hosted RunPod lane. Mixing the two
+ * of finished video for HeyGen, GPU seconds for the self-hosted RunPod lanes. Mixing them
  * is safe only because each adapter records the quantity its own rate is quoted against.
  */
 export function lipsyncRateFor(provider: string, _model?: string): number {
   return provider === "runpod"
     ? RATES.runpodLipsyncPerGpuSecond
-    : RATES.heygenPerSecond;
+    : provider === "ltx"
+      ? RATES.ltxLipsyncPerGpuSecond
+      : RATES.heygenPerSecond;
 }
 
 // ---------------------------------------------------------------------------
@@ -235,7 +244,7 @@ const VIDEO_RATES: Record<string, number> = {
 };
 
 /** Lip-sync vendors we have a rate for. No default — an unlisted vendor is unpriced. */
-const LIPSYNC_PROVIDERS = new Set(["heygen", "runpod"]);
+const LIPSYNC_PROVIDERS = new Set(["heygen", "runpod", "ltx"]);
 
 export function priceLine(line: UsageLine): PricedLine {
   const priced = (

@@ -18,9 +18,22 @@ vi.mock("./providers/runpod-lipsync", () => ({
     }
   },
 }));
+const ltxCancelled: string[] = [];
+vi.mock("./providers/ltx-lipsync", () => ({
+  LtxLipsyncAdapter: class {
+    constructor(
+      public ep: string,
+      public key: string
+    ) {}
+    async cancelJob(id: string) {
+      ltxCancelled.push(id);
+    }
+  },
+}));
 vi.mock("./_core/env", () => ({
   ENV: {
     runpodInfinitetalkEndpoint: "ep-1",
+    runpodLtxEndpoint: "ep-ltx",
     runPodApiKey: "key-1",
   },
 }));
@@ -29,6 +42,7 @@ const { cancelJobProviderRenders } = await import("./cancelRenders");
 
 beforeEach(() => {
   cancelled.length = 0;
+  ltxCancelled.length = 0;
 });
 
 const scene = (index: number, provider?: string, ids?: string[]) => ({
@@ -70,6 +84,22 @@ describe("cancelJobProviderRenders", () => {
     );
     expect(n).toBe(1);
     expect(cancelled).toEqual(["task-a"]);
+  });
+
+  it("stops LTX renders on the LTX endpoint — a second self-hosted lane, billed the same way", async () => {
+    const n = await cancelJobProviderRenders(
+      {
+        id: 52,
+        storyboard: [
+          scene(1, "ltx", ["ltx-a", "ltx-b"]),
+          scene(2, "runpod", ["task-a"]),
+        ],
+      },
+      "cancelled by user"
+    );
+    expect(n).toBe(3);
+    expect(cancelled).toEqual(["task-a"]);
+    expect(ltxCancelled).toEqual(["ltx-a", "ltx-b"]);
   });
 
   it("is a no-op on a job with nothing in flight, a missing job, or a junk storyboard", async () => {

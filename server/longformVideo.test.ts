@@ -144,7 +144,10 @@ import {
   masterOverlayEligible,
   resolveLipsyncAdapter,
   sanitizeSplitLayout,
+  buildLtxLipsyncPrompt,
+  LTX_LIPSYNC_DIRECTION,
 } from "./longformVideo";
+import { __resetLipsyncCaches, LIPSYNC_PROVIDER_KEY } from "./lipsyncProvider";
 import { ENV } from "./_core/env";
 import { getBookNameTokens } from "./ctaDetector";
 import {
@@ -8951,6 +8954,56 @@ describe("lip-sync lane resolution", () => {
     });
     expect(blank!.slots).toBe(heygenSlotsFor("env-key"));
     spy.mockRestore();
+  });
+
+  it("resolves the LTX lane when chosen and configured, and falls back to HeyGen when not", async () => {
+    ENV.heygenApiKey = "hg-key";
+    const originalLtx = ENV.runpodLtxEndpoint;
+    const spy = vi
+      .spyOn(db, "getAppSetting")
+      .mockImplementation(async k =>
+        k === LIPSYNC_PROVIDER_KEY ? "ltx" : null
+      );
+    try {
+      // Chosen but no endpoint: a config gap must never fail a film.
+      __resetLipsyncCaches();
+      ENV.runpodLtxEndpoint = "";
+      ENV.runPodApiKey = "rp-key";
+      expect((await resolveLipsyncAdapter(baseParams))?.provider).toBe(
+        "heygen"
+      );
+
+      __resetLipsyncCaches();
+      ENV.runpodLtxEndpoint = "ep-ltx";
+      const lane = await resolveLipsyncAdapter(baseParams);
+      expect(lane?.provider).toBe("ltx");
+      // Billed by GPU time, so an abandoned render must be stoppable.
+      expect(typeof lane?.cancel).toBe("function");
+    } finally {
+      ENV.runpodLtxEndpoint = originalLtx;
+      __resetLipsyncCaches();
+      spy.mockRestore();
+    }
+  });
+});
+
+describe("buildLtxLipsyncPrompt", () => {
+  it("starts from the short LTX direction and carries the scene's own cues", () => {
+    const scene = {
+      index: 3,
+      narration: "n",
+      cta: true,
+      deliveryCue: "warm, reassuring",
+      gestureCue: "small nod on the number",
+    } as never;
+    const prompt = buildLtxLipsyncPrompt(scene, true);
+    expect(prompt.startsWith(LTX_LIPSYNC_DIRECTION)).toBe(true);
+    expect(prompt).toContain("three-quarter angle");
+    expect(prompt).toContain("hands are empty");
+    expect(prompt).toContain("warm, reassuring");
+    expect(prompt).toContain("small nod on the number");
+    // None of the InfiniteTalk-specific direction leaks in.
+    expect(prompt).not.toContain("calm and still");
   });
 });
 

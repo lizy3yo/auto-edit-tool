@@ -77,16 +77,21 @@ function MockModeToggle() {
   );
 }
 
+type HostProvider = "heygen" | "runpod" | "ltx";
+
 /**
- * Host lip-sync vendor switch, plus the InfiniteTalk quality tier.
+ * Host lip-sync vendor switch (HeyGen / InfiniteTalk / LTX), plus the InfiniteTalk-only
+ * quality and camera knobs.
  *
- * Switching to InfiniteTalk does NOT clear the HeyGen keys — they stay encrypted in place and
- * come straight back on switching return, because turning a vendor off is a routing decision
- * and not a credential one. One switch covers all five tabs: the per-tab HeyGen keys exist
- * because HeyGen throttles per ACCOUNT, whereas RunPod is a single endpoint we own.
+ * Switching off HeyGen does NOT clear the HeyGen keys — they stay encrypted in place and come
+ * straight back on switching return, because turning a vendor off is a routing decision and
+ * not a credential one. One switch covers all five tabs: the per-tab HeyGen keys exist
+ * because HeyGen throttles per ACCOUNT, whereas each self-hosted lane is a single endpoint
+ * we own.
  *
- * The server refuses `runpod` when its endpoint or key is missing rather than accepting a
- * setting the pipeline would ignore, so the button is disabled here with the actual reason.
+ * The server refuses a self-hosted lane whose endpoint or key is missing rather than
+ * accepting a setting the pipeline would ignore, so that option is disabled here with the
+ * actual reason.
  */
 export function HostLipsyncToggle() {
   const utils = trpc.useUtils();
@@ -98,7 +103,9 @@ export function HostLipsyncToggle() {
       toast.success(
         provider === "runpod"
           ? "Host lip-sync → InfiniteTalk (RunPod). HeyGen keys kept."
-          : "Host lip-sync → HeyGen Avatar IV."
+          : provider === "ltx"
+            ? "Host lip-sync → LTX-2 (RunPod). HeyGen keys kept."
+            : "Host lip-sync → HeyGen Avatar IV."
       );
       utils.longformVideo.getLipsyncProvider.invalidate();
     },
@@ -129,22 +136,58 @@ export function HostLipsyncToggle() {
     onError: err => toast.error(err.message ?? "Failed to change camera mode."),
   });
 
-  const provider = data?.provider ?? "heygen";
+  const provider: HostProvider = data?.provider ?? "heygen";
   const quality = data?.quality ?? "fast";
   const camera = data?.camera ?? "photo";
   const onRunpod = provider === "runpod";
-  const ready = data?.runpod.ready ?? false;
   const busy =
     isLoading ||
     setProvider.isPending ||
     setQuality.isPending ||
     setCamera.isPending;
-  // Name the missing half rather than greying the button out silently.
-  const blockedReason = data?.runpod.endpointSet
-    ? data?.runpod.keySet
+  // Name the missing half rather than greying an option out silently.
+  const blockedReason = (
+    readiness: { endpointSet: boolean; keySet: boolean } | undefined,
+    endpointVar: string
+  ): string | null =>
+    !readiness
       ? null
-      : "RUN_POD_KEY is not set"
-    : "RUNPOD_INFINITETALK_ENDPOINT is not set";
+      : readiness.endpointSet
+        ? readiness.keySet
+          ? null
+          : "RUN_POD_KEY is not set"
+        : `${endpointVar} is not set`;
+  const options: {
+    id: HostProvider;
+    label: string;
+    detail: string;
+    blocked: string | null;
+  }[] = [
+    {
+      id: "heygen",
+      label: "HeyGen Avatar IV",
+      detail: "1080p, per-tab accounts, billed per second of finished video.",
+      blocked: null,
+    },
+    {
+      id: "runpod",
+      label: "InfiniteTalk (RunPod)",
+      detail:
+        "Your own GPU: 720p, billed by GPU second. Tuned lane — run-up, batching, pinned camera.",
+      blocked: data?.runpod.ready
+        ? null
+        : blockedReason(data?.runpod, "RUNPOD_INFINITETALK_ENDPOINT"),
+    },
+    {
+      id: "ltx",
+      label: "LTX-2 (RunPod)",
+      detail:
+        "Your own GPU, billed by GPU second. Untuned: the worker's own defaults, beats over 20 s cut at pauses.",
+      blocked: data?.ltx.ready
+        ? null
+        : blockedReason(data?.ltx, "RUNPOD_LTX_ENDPOINT"),
+    },
+  ];
 
   return (
     <div className="space-y-3">
@@ -153,40 +196,53 @@ export function HostLipsyncToggle() {
         Host lip-sync provider
       </Label>
 
-      <div className="flex items-center justify-between gap-4 rounded-md border border-border p-3">
-        <div className="text-sm">
-          <div className="font-medium">
-            {isLoading
-              ? "Checking…"
-              : onRunpod
-                ? "InfiniteTalk (RunPod) — self-hosted"
-                : "HeyGen Avatar IV"}
-          </div>
-          <div className="text-xs text-muted-foreground">
-            {onRunpod
-              ? "Your own GPU: 720p, billed by GPU second. HeyGen keys below are kept but unused."
-              : "1080p, per-tab accounts, billed per second of finished video."}
-            {!ready && blockedReason ? (
-              <>
-                {" "}
-                InfiniteTalk unavailable —{" "}
-                <code className="text-[11px]">{blockedReason}</code>.
-              </>
-            ) : null}
-          </div>
-        </div>
-        <Button
-          variant="outline"
-          disabled={busy || (!onRunpod && !ready)}
-          onClick={() =>
-            setProvider.mutate({ provider: onRunpod ? "heygen" : "runpod" })
-          }
-        >
-          {setProvider.isPending ? (
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          ) : null}
-          {onRunpod ? "Use HeyGen" : "Use InfiniteTalk"}
-        </Button>
+      <div className="space-y-2 rounded-md border border-border p-3">
+        {options.map(o => {
+          const live = provider === o.id;
+          const disabled = busy || (!live && !!o.blocked);
+          return (
+            <div key={o.id} className="flex items-center justify-between gap-4">
+              <div className="text-sm">
+                <div className="font-medium">
+                  {o.label}
+                  {live ? (
+                    <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[11px] font-normal text-muted-foreground">
+                      {isLoading ? "checking…" : "live"}
+                    </span>
+                  ) : null}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {o.detail}
+                  {o.blocked ? (
+                    <>
+                      {" "}
+                      Unavailable —{" "}
+                      <code className="text-[11px]">{o.blocked}</code>.
+                    </>
+                  ) : null}
+                </div>
+              </div>
+              <Button
+                variant={live ? "default" : "outline"}
+                size="sm"
+                disabled={disabled || live}
+                onClick={() => setProvider.mutate({ provider: o.id })}
+              >
+                {setProvider.isPending &&
+                setProvider.variables?.provider === o.id ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : null}
+                {live ? "In use" : "Use"}
+              </Button>
+            </div>
+          );
+        })}
+        {provider !== "heygen" ? (
+          <p className="text-xs text-muted-foreground">
+            HeyGen keys below are kept but unused while a self-hosted lane is
+            live.
+          </p>
+        ) : null}
       </div>
 
       {/* Quality is an InfiniteTalk-only knob — Avatar IV renders one way at one price. */}
@@ -462,9 +518,10 @@ export function ProviderKeys() {
   });
 
   // Drives the muted state on the HeyGen key rows below — they stay editable, they are just
-  // no longer the live configuration while InfiniteTalk is the host provider.
+  // no longer the live configuration while a self-hosted lane is the host provider.
   const { data: lipsync } = trpc.longformVideo.getLipsyncProvider.useQuery();
-  const lipsyncOnRunpod = lipsync?.provider === "runpod";
+  const lipsyncOnRunpod = !!lipsync && lipsync.provider !== "heygen";
+  const lipsyncLaneName = lipsync?.provider === "ltx" ? "LTX" : "InfiniteTalk";
 
   return (
     <div className="space-y-6">
@@ -603,8 +660,8 @@ export function ProviderKeys() {
       {/* ─── END AIREITER BOLT-ON ─── */}
 
       {/*
-        Dimmed, not disabled, while host lip-sync runs on InfiniteTalk: the keys are still
-        editable and are never cleared by the switch, so coming back to HeyGen needs no
+        Dimmed, not disabled, while host lip-sync runs on a self-hosted lane: the keys are
+        still editable and are never cleared by the switch, so coming back to HeyGen needs no
         re-entry. The muting only stops these five fields reading as the live configuration.
       */}
       <div
@@ -618,7 +675,7 @@ export function ProviderKeys() {
           HeyGen keys — host lip-sync (per tab)
           {lipsyncOnRunpod ? (
             <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] font-normal text-muted-foreground">
-              not in use — host lip-sync is on InfiniteTalk
+              not in use — host lip-sync is on {lipsyncLaneName}
             </span>
           ) : null}
         </Label>

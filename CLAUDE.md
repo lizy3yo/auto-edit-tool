@@ -47,6 +47,7 @@ Read through the single `ENV` object in `server/_core/env.ts`, except `R2_*`, wh
 | `RUN_POD_KEY` + `RUNPOD_WHISPERX_ENDPOINT`                               | `server/_core/voiceTranscription.ts` → `kodxana/whisperx-worker_v2` serverless                         | no word-level narration alignment         |
 | `HEYGEN_API_KEY`                                                         | `server/longformVideo.ts:2506` — **fallback only**, used when a tab's slot key is blank                | host lip-sync fails for slot-less tabs    |
 | `RUNPOD_INFINITETALK_ENDPOINT` + `LIPSYNC_PROVIDER=runpod`               | `server/providers/runpod-lipsync.ts` — **optional**, moves host lip-sync off HeyGen                    | host lane stays on HeyGen (the default)   |
+| `RUNPOD_LTX_ENDPOINT` + `LIPSYNC_PROVIDER=ltx`                           | `server/providers/ltx-lipsync.ts` — **optional**, the third host lane (self-hosted LTX-2)              | host lane stays on HeyGen (the default)   |
 | `PUBLIC_BASE_URL`                                                        | `server/providers/heygen-lipsync.ts:78` (webhook callback URL)                                         | blank ⇒ pure polling; slower, still works |
 
 ### Channel B — DB-stored, AES-256-GCM, entered in Admin
@@ -96,6 +97,9 @@ Gemini, OpenAI, R2, RunPod. Missing ones fail loudly at the first stage that nee
 | `RUNPOD_LIPSYNC_TORCH_COMPILE`  | off (`1` = on)    | `RUNPOD_LIPSYNC_BATCH`                     | 2 beats per call (`1` = off) |
 | `RUNPOD_LIPSYNC_BATCH_MAX_SEC`  | 14 s per call     | `RUNPOD_LIPSYNC_AUDIO_CFG_STEPS`           | 0.5 (first half guided)      |
 | `RUNPOD_LIPSYNC_QUANTIZATION`   | fp8_e4m3fn        | `RUNPOD_LIPSYNC_V2V_STEPS` / `_START_STEP` | 12 / 3 (9 active)            |
+| `LTX_LIPSYNC_MAX_SEC`           | 20 s per call     | `LTX_LIPSYNC_RESOLUTION`                   | unset (worker default)       |
+| `LTX_LIPSYNC_TIMEOUT_MS`        | 20 min (poll)     | `LTX_LIPSYNC_EXECUTION_TIMEOUT_MS`         | 25 min (per-job GPU cap)     |
+| `LTX_LIPSYNC_CONCURRENCY`       | 4                 | —                                          | —                            |
 
 `RUNPOD_LIPSYNC_EXECUTION_TIMEOUT_MS` is sent with every submit as RunPod's `policy.executionTimeout`
 and overrides the endpoint's own setting (dashboard default 20 min). InfiniteTalk at 720p on the
@@ -125,6 +129,7 @@ invoice, then pin the real number via the env var below (or edit the file).
 | `COST_TTS_PER_1K_CHARS`      | $0.05       | `COST_GEMINI_IMAGE`               | $0.03    |
 | `COST_69LABS_IMAGE`          | $0.05       | `COST_69LABS_VIDEO_PER_SEC`       | $0.05/s  |
 | `COST_WHISPERX_PER_GPU_SEC`  | $0.0004     | `COST_RUNPOD_LIPSYNC_PER_GPU_SEC` | $0.00097 |
+| `COST_LTX_LIPSYNC_PER_GPU_SEC` | $0.00097  | —                                 | —        |
 
 ## Architecture
 
@@ -167,6 +172,26 @@ Express · tRPC · Drizzle · MySQL.
   what the "nothing seeks it" rule above depends on. The beat signature carries the track for the
   same reason: a poll can change a scene's audio while its clip and its timings do not move.
   Still a preview of the CUT, not the FILE — no burned-in QR/lower third/captions, no music bed
+- `server/providers/ltx-lipsync.ts` — the THIRD host lane: self-hosted LTX-2 (Lightricks,
+  open weights) on its own RunPod endpoint (`RUNPOD_LTX_ENDPOINT`, shared `RUN_POD_KEY`),
+  chosen as `ltx` in Admin → Provider Keys beside HeyGen and InfiniteTalk. Deliberately
+  UNTUNED: the lane sends the photo, the narration and a short direction
+  (`buildLtxLipsyncPrompt` — framing, alt angle, CTA empty hands, the delivery pass's mood and
+  gesture cues) and nothing else unless `LTX_LIPSYNC_RESOLUTION` is set, so the worker's own
+  workflow defaults are the standard every later dial is measured against. None of the
+  InfiniteTalk machinery below (run-up, batching, plate, seams, sharpen) runs on it — that
+  is a year of tuning against Wan's failure modes, not LTX's. The model renders at most 20 s
+  per call, so `server/lipsyncChunks.ts` cuts a longer beat at real pauses (the master's
+  silences mapped into scene time, else detected on the file) into chunks of the same scene,
+  which `runChunkTasks` renders and `composeHostScene` joins as it always could; a resume
+  re-runs the plan only, for the chunk lengths the truncation guard needs. Billed by GPU time
+  like InfiniteTalk, so it meters its own `executionTime` (provider `ltx`, its own
+  `COST_LTX_LIPSYNC_PER_GPU_SEC`) and `cancelJobProviderRenders` stops its renders too. The
+  worker contract is in the adapter's header: `{ image_url, audio_url, prompt, negative_prompt?,
+  width?, height?, seed? }` in, `{ video: base64 mp4, error?, timings? }` out, input audio
+  returned untouched. Worker source: `Metropolis-Media/ltx-auto-edit-test` (a mirror of
+  `Lightricks/ComfyUI-LTXVideo`; the image+audio graph is
+  `example_workflows/2.5/LTX-2.5_A2V_Two_Stage_Distilled.json`)
 - `server/providers/` — one adapter per vendor; `base.ts` is the interface,
   `fallback.ts` the image chain (primary → Gemini). The host lip-sync lane has TWO adapters,
   picked in `resolveLipsyncLane` and handed to callers that know neither: `heygen-lipsync.ts`

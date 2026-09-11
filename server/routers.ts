@@ -185,6 +185,7 @@ import {
   getLipsyncCameraMode,
   setLipsyncCameraMode,
   runpodLipsyncReadiness,
+  ltxLipsyncReadiness,
 } from "./lipsyncProvider";
 import { extractBookName } from "./ctaDetector";
 import { createProviderAdapter } from "./providers";
@@ -1174,10 +1175,10 @@ const longformVideoRouter = router({
     }),
 
   /**
-   * Which vendor renders host scenes, and (RunPod only) at which quality tier. Returns the
-   * RunPod readiness flags alongside, so the Admin UI can name what is missing instead of
-   * offering a switch the pipeline would silently ignore — `resolveLipsyncLane` falls back
-   * to HeyGen when the endpoint or key is absent.
+   * Which vendor renders host scenes, and (InfiniteTalk only) at which quality tier. Returns
+   * each self-hosted lane's readiness flags alongside, so the Admin UI can name what is
+   * missing instead of offering a switch the pipeline would silently ignore —
+   * `resolveLipsyncLane` falls back to HeyGen when a lane's endpoint or key is absent.
    */
   getLipsyncProvider: adminProcedure.query(async () => {
     const [provider, quality, camera] = await Promise.all([
@@ -1185,11 +1186,17 @@ const longformVideoRouter = router({
       getLipsyncQuality(),
       getLipsyncCameraMode(),
     ]);
-    return { provider, quality, camera, runpod: runpodLipsyncReadiness() };
+    return {
+      provider,
+      quality,
+      camera,
+      runpod: runpodLipsyncReadiness(),
+      ltx: ltxLipsyncReadiness(),
+    };
   }),
 
   setLipsyncProvider: adminProcedure
-    .input(z.object({ provider: z.enum(["heygen", "runpod"]) }))
+    .input(z.object({ provider: z.enum(["heygen", "runpod", "ltx"]) }))
     .mutation(async ({ input }) => {
       // Refuse rather than accept a setting the pipeline would ignore: silently writing
       // "runpod" while every render kept going to HeyGen is the confusing failure here.
@@ -1198,6 +1205,13 @@ const longformVideoRouter = router({
           code: "PRECONDITION_FAILED",
           message:
             "RunPod InfiniteTalk is not configured — set RUNPOD_INFINITETALK_ENDPOINT and RUN_POD_KEY first.",
+        });
+      }
+      if (input.provider === "ltx" && !ltxLipsyncReadiness().ready) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message:
+            "RunPod LTX is not configured — set RUNPOD_LTX_ENDPOINT and RUN_POD_KEY first.",
         });
       }
       await setLipsyncProvider(input.provider);

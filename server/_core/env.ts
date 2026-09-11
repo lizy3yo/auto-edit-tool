@@ -59,9 +59,33 @@ export const ENV = {
    */
   runpodInfinitetalkEndpoint: process.env.RUNPOD_INFINITETALK_ENDPOINT ?? "",
   /**
-   * Which vendor renders host scenes: `heygen` (default) or `runpod`. Deliberately an
-   * explicit opt-in rather than "use RunPod if its endpoint is set" — a configured
-   * endpoint should be testable without silently moving every render onto it.
+   * RunPod serverless endpoint ID for the self-hosted LTX-2 host lip-sync worker
+   * (`server/providers/ltx-lipsync.ts`) — the third host lane beside HeyGen and InfiniteTalk.
+   * Shares `RUN_POD_KEY`. Blank keeps the host lane wherever it is, whatever
+   * `LIPSYNC_PROVIDER` says, for the same reason as the InfiniteTalk endpoint above.
+   */
+  runpodLtxEndpoint: process.env.RUNPOD_LTX_ENDPOINT ?? "",
+  /**
+   * Longest narration one LTX call may carry. LTX-2.3 generates at most 20 s per render, so a
+   * host beat over this is cut at pauses into pieces of at most this length
+   * (`server/lipsyncChunks.ts`) and rendered as separate chunks of the same scene.
+   */
+  ltxLipsyncMaxSec: Number(process.env.LTX_LIPSYNC_MAX_SEC ?? 20),
+  /** Host renders kept in flight on the LTX endpoint — same reasoning as the InfiniteTalk cap. */
+  ltxLipsyncConcurrency: Number(process.env.LTX_LIPSYNC_CONCURRENCY ?? 4),
+  /**
+   * Render size for the LTX lane, OVERRIDE ONLY: unset sends no `width`/`height` and the
+   * worker's own workflow default rules — the lane starts at the graph's standard and every
+   * dial is a deliberate change from it. `480p` | `720p` | `1080p`.
+   */
+  ltxLipsyncResolution:
+    (["480p", "720p", "1080p"] as const).find(
+      r => r === (process.env.LTX_LIPSYNC_RESOLUTION ?? "").toLowerCase()
+    ) ?? undefined,
+  /**
+   * Which vendor renders host scenes: `heygen` (default), `runpod` (InfiniteTalk) or `ltx`.
+   * Deliberately an explicit opt-in rather than "use RunPod if its endpoint is set" — a
+   * configured endpoint should be testable without silently moving every render onto it.
    */
   lipsyncProvider: (process.env.LIPSYNC_PROVIDER ?? "heygen").toLowerCase(),
   /**

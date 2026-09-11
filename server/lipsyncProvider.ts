@@ -23,7 +23,16 @@ export const LIPSYNC_PROVIDER_KEY = "lipsync_provider";
 export const LIPSYNC_QUALITY_KEY = "lipsync_quality";
 export const LIPSYNC_CAMERA_KEY = "lipsync_camera";
 
-export type LipsyncProvider = "heygen" | "runpod";
+/**
+ * `heygen` = Avatar IV; `runpod` = self-hosted InfiniteTalk; `ltx` = self-hosted LTX-2, also
+ * on RunPod but its own endpoint and adapter (`server/providers/ltx-lipsync.ts`).
+ */
+export type LipsyncProvider = "heygen" | "runpod" | "ltx";
+const LIPSYNC_PROVIDERS: readonly LipsyncProvider[] = [
+  "heygen",
+  "runpod",
+  "ltx",
+];
 /** `fast` = 8-step distill; `full` = 40 steps with real CFG. RunPod lane only. */
 export type LipsyncQuality = "fast" | "full";
 /**
@@ -40,9 +49,12 @@ let providerCache: { value: LipsyncProvider; at: number } | null = null;
 let qualityCache: { value: LipsyncQuality; at: number } | null = null;
 let cameraCache: { value: LipsyncCameraMode; at: number } | null = null;
 
+const asProvider = (raw: unknown): LipsyncProvider | null =>
+  LIPSYNC_PROVIDERS.find(p => p === raw) ?? null;
+
 /**
- * The vendor host scenes render on. `runpod` here is a REQUEST, not a guarantee:
- * `resolveLipsyncLane` still falls back to HeyGen when the RunPod endpoint or key is
+ * The vendor host scenes render on. `runpod` / `ltx` here is a REQUEST, not a guarantee:
+ * `resolveLipsyncLane` still falls back to HeyGen when that lane's endpoint or key is
  * missing, because a config gap must never fail a film. The Admin UI reads the same
  * readiness flags so it can refuse to offer a switch it cannot honour.
  */
@@ -52,11 +64,7 @@ export async function getLipsyncProvider(): Promise<LipsyncProvider> {
   const raw = await getAppSetting(LIPSYNC_PROVIDER_KEY).catch(() => null);
   // An unset row (not an empty string) means "never chosen" — that is the env default's job.
   const value: LipsyncProvider =
-    raw === "runpod" || raw === "heygen"
-      ? raw
-      : ENV.lipsyncProvider === "runpod"
-        ? "runpod"
-        : "heygen";
+    asProvider(raw) ?? asProvider(ENV.lipsyncProvider) ?? "heygen";
   providerCache = { value, at: Date.now() };
   return value;
 }
@@ -125,6 +133,17 @@ export function runpodLipsyncReadiness(): {
   ready: boolean;
 } {
   const endpointSet = !!ENV.runpodInfinitetalkEndpoint;
+  const keySet = !!ENV.runPodApiKey;
+  return { endpointSet, keySet, ready: endpointSet && keySet };
+}
+
+/** The same readiness split for the LTX lane: its own endpoint, the shared RunPod key. */
+export function ltxLipsyncReadiness(): {
+  endpointSet: boolean;
+  keySet: boolean;
+  ready: boolean;
+} {
+  const endpointSet = !!ENV.runpodLtxEndpoint;
   const keySet = !!ENV.runPodApiKey;
   return { endpointSet, keySet, ready: endpointSet && keySet };
 }

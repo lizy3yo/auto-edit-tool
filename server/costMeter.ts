@@ -245,9 +245,9 @@ function detailFor(line: PricedLine): string {
     case "video":
       return `${calls} · ${nf.format(Math.round(line.quantity))}s of video`;
     case "lipsync":
-      // The self-hosted RunPod lane is billed (and therefore metered) in GPU seconds, so
-      // labelling its quantity "of video" would misread by roughly an order of magnitude.
-      return line.provider === "runpod"
+      // The self-hosted RunPod lanes are billed (and therefore metered) in GPU seconds, so
+      // labelling their quantity "of video" would misread by roughly an order of magnitude.
+      return line.provider === "runpod" || line.provider === "ltx"
         ? `${calls} · ${nf.format(Math.round(line.quantity))}s of GPU time`
         : `${calls} · ${nf.format(Math.round(line.quantity))}s of video`;
     case "transcription":

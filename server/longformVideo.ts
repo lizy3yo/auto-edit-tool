@@ -80,6 +80,16 @@ import {
   RUNPOD_LIPSYNC_TIMEOUT_MS,
 } from "./providers/runpod-lipsync";
 import {
+  LtxLipsyncAdapter,
+  ltxLipsyncSlotsFor,
+  LTX_LIPSYNC_TIMEOUT_MS,
+} from "./providers/ltx-lipsync";
+import {
+  planLipsyncChunks,
+  scenePauses,
+  cutNarrationChunks,
+} from "./lipsyncChunks";
+import {
   getLipsyncProvider,
   getLipsyncQuality,
   getLipsyncCameraMode,
@@ -145,14 +155,14 @@ import {
 import { sceneHoldPlan } from "../shared/filmTimeline";
 
 /**
- * The host lip-sync lane, resolved once per pipeline pass. HeyGen Avatar IV is the only
- * provider today, but the lane still owns everything provider-specific — payload shape,
- * concurrency cap, poll ceiling, scene wall clock — so `resolveLipsyncAdapter` stays the one
- * place that knows which vendor is rendering; every caller downstream just uses the lane it
- * was handed.
+ * The host lip-sync lane, resolved once per pipeline pass. HeyGen Avatar IV is the default,
+ * InfiniteTalk (`runpod`) and LTX-2 (`ltx`) the self-hosted alternatives, but the lane owns
+ * everything provider-specific — payload shape, concurrency cap, poll ceiling, scene wall
+ * clock — so `resolveLipsyncAdapter` stays the one place that knows which vendor is
+ * rendering; every caller downstream just uses the lane it was handed.
  */
 type LipsyncLane = {
-  provider: "runpod" | "heygen";
+  provider: "runpod" | "ltx" | "heygen";
   /** Build + submit one render. The lane owns the provider-specific payload shape. */
   submit(req: {
     scene: StoryboardScene;
@@ -3722,6 +3732,42 @@ async function resolveLipsyncLane(
     };
   }
 
+  // Self-hosted LTX-2 on RunPod (`server/providers/ltx-lipsync.ts`). Same opt-in and same
+  // half-set fallback as InfiniteTalk above. Deliberately UNTUNED: the photo, the narration
+  // and a short direction go out, and nothing else unless `LTX_LIPSYNC_RESOLUTION` is set —
+  // the worker's workflow defaults are the standard this lane is judged from. None of the
+  // InfiniteTalk machinery (run-up, batching, plate, seams, sharpen) applies; a beat over the
+  // model's 20 s cap is cut at pauses into chunks of the same scene instead
+  // (`generateSceneLipsyncClips`).
+  if (lipsyncProvider === "ltx" && ENV.runpodLtxEndpoint && ENV.runPodApiKey) {
+    const ltx = new LtxLipsyncAdapter(ENV.runpodLtxEndpoint, ENV.runPodApiKey);
+    const size =
+      ENV.ltxLipsyncResolution === "1080p"
+        ? { width: 1920, height: 1080 }
+        : ENV.ltxLipsyncResolution === "720p"
+          ? { width: 1280, height: 720 }
+          : ENV.ltxLipsyncResolution === "480p"
+            ? { width: 832, height: 480 }
+            : {};
+    return {
+      provider: "ltx",
+      submit: ({ scene, imageUrl, audioUrl, useAlt }) =>
+        ltx.submitLipsync({
+          imageUrl,
+          audioUrl,
+          prompt: buildLtxLipsyncPrompt(scene, useAlt),
+          negativePrompt: LTX_LIPSYNC_NEGATIVE_DIRECTION,
+          ...size,
+        }),
+      poll: (id, ms) => ltx.pollVideo(id, ms ?? LTX_LIPSYNC_TIMEOUT_MS),
+      // Billed by GPU time like InfiniteTalk, so an abandoned render is stopped, not left.
+      cancel: id => ltx.cancelJob(id),
+      slots: ltxLipsyncSlotsFor(ENV.runpodLtxEndpoint),
+      concurrency: ENV.ltxLipsyncConcurrency,
+      sceneDeadlineMs: SCENE_DEADLINE_HOST_RUNPOD_MS,
+    };
+  }
+
   // Per-tab HeyGen account, shared HEYGEN_API_KEY as the fallback. Read at render time so a key
   // rotation AND a job resume both pick up the current key — same contract as
   // `apimartAdapterForJob`. The `!= null` guard keeps the settings read off the path for a job
@@ -6250,6 +6296,39 @@ export function buildLipsyncPrompt(
 }
 
 /**
+ * The LTX lane's direction. Short and generic on purpose: the lane starts at the model's
+ * own defaults, and the InfiniteTalk directions above are a year of tuning against THAT
+ * model's failure modes (window handoffs, plate anchoring, NAG) which mean nothing here.
+ * What carries over is what describes the shot — the framing, the alt angle, the CTA's empty
+ * hands, and the line's own mood and gesture from the delivery pass — so a scene reads the
+ * same whichever lane renders it.
+ */
+export const LTX_LIPSYNC_DIRECTION =
+  "The person in the reference photo speaks directly to the camera, seated, in a medium " +
+  "close-up with their face centered and looking at the lens. The camera is static. Their " +
+  "mouth articulates every word of the speech clearly; natural small head movement and " +
+  "facial expression; hands out of frame.";
+
+export const LTX_LIPSYNC_NEGATIVE_DIRECTION =
+  "blurry, distorted face, deformed, extra fingers, text, subtitles, watermark, camera " +
+  "movement, zoom, pan, background warping, flicker";
+
+export function buildLtxLipsyncPrompt(
+  scene: StoryboardScene,
+  useAlt = false
+): string {
+  const angle = useAlt ? ` ${LIPSYNC_ALT_ANGLE_SUFFIX}` : "";
+  const cta = scene.cta ? ` ${CTA_EMPTY_HANDS_SUFFIX}` : "";
+  const mood = scene.deliveryCue?.trim()
+    ? ` Their expression while speaking: ${scene.deliveryCue.trim()}.`
+    : "";
+  const gesture = scene.gestureCue?.trim()
+    ? ` While saying this line, their body: ${scene.gestureCue.trim()}.`
+    : "";
+  return `${LTX_LIPSYNC_DIRECTION}${angle}${cta}${mood}${gesture}`.trim();
+}
+
+/**
  * Guarantee the host appears on camera during EACH CTA run. Walk every contiguous CTA span and
  * flip non-hero (`!qrHero`) scenes to talking-head shots until `CTA_HOST_SCENES` are host,
  * counting any already-host scene toward the quota. Runs LAST — after the
@@ -7989,7 +8068,7 @@ export async function withTransientRetry<T>(
 export async function runChunkTasks(
   jobId: number,
   scene: StoryboardScene,
-  provider: "runpod" | "heygen" | "sixtynine_labs",
+  provider: "runpod" | "ltx" | "heygen" | "sixtynine_labs",
   chunkCount: number,
   submit: (i: number) => Promise<VideoSubmitResult>,
   poll: (taskId: string) => Promise<GenerationResult>,
@@ -8440,10 +8519,33 @@ async function generateSceneLipsyncClips(
   const realNarrationSec = scene.audioUrl
     ? await probeUrlDurationSec(scene.audioUrl)
     : 0;
-  const chunkDurations: number[] = [
+  let chunkDurations: number[] = [
     realNarrationSec || (scene.audioDuration ?? 0),
   ];
   let chunkUrls: string[] = [];
+  // LTX renders at most `LTX_LIPSYNC_MAX_SEC` per call, so a longer beat is cut at pauses
+  // into chunks of the same scene (`server/lipsyncChunks.ts`). The plan is deterministic in
+  // the scene's audio and the master's silences, so a RESUME re-plans for the chunk lengths
+  // alone and polls the ids it already holds; only a fresh run cuts and uploads.
+  if (
+    lipsync.provider === "ltx" &&
+    scene.audioUrl &&
+    chunkDurations[0] > ENV.ltxLipsyncMaxSec
+  ) {
+    const job = await getLongformVideoJobById(jobId);
+    const pauses = await scenePauses(
+      scene,
+      job?.masterSilences as { start: number; end: number }[] | null
+    );
+    const plan = planLipsyncChunks(
+      chunkDurations[0],
+      ENV.ltxLipsyncMaxSec,
+      pauses
+    );
+    chunkDurations = plan.map(c => c.lenSec);
+    if (!scene.renderTaskIds?.length)
+      chunkUrls = await cutNarrationChunks(jobId, scene, plan);
+  }
   if (!scene.renderTaskIds?.length) {
     const audioUrl = scene.audioUrl;
     if (!audioUrl) throw new Error("scene has no narration audio for lip-sync");
@@ -8479,8 +8581,8 @@ async function generateSceneLipsyncClips(
   }
   const chunkCount = scene.renderTaskIds?.length ?? chunkUrls.length;
 
-  // Lip-sync runs on whichever lane `resolveLipsyncAdapter` handed us (HeyGen in production,
-  // RunPod InfiniteTalk in staging) — the payload difference lives there, not here. A terminal
+  // Lip-sync runs on whichever lane `resolveLipsyncAdapter` handed us (HeyGen, InfiniteTalk
+  // or LTX) — the payload difference lives there, not here. A terminal
   // provider failure surfaces as a PendingRenderError (from runChunkTasks) so the scene
   // re-submits ON THE SAME PROVIDER via the resume pass; there is no cross-provider fallback.
   let urls = await runChunkTasks(

@@ -14,10 +14,11 @@ vi.mock("./db", () => ({
  * `vi.mock` is hoisted above this declaration, hence the getter indirection.
  */
 const env = {
-  lipsyncProvider: "heygen" as "heygen" | "runpod",
+  lipsyncProvider: "heygen" as "heygen" | "runpod" | "ltx",
   runpodLipsyncQuality: "fast" as "fast" | "full",
   runpodLipsyncInput: "image" as "image" | "video",
   runpodInfinitetalkEndpoint: "",
+  runpodLtxEndpoint: "",
   runPodApiKey: "",
 };
 vi.mock("./_core/env", () => ({
@@ -34,6 +35,7 @@ import {
   getLipsyncCameraMode,
   setLipsyncCameraMode,
   runpodLipsyncReadiness,
+  ltxLipsyncReadiness,
   __resetLipsyncCaches,
   LIPSYNC_PROVIDER_KEY,
   LIPSYNC_QUALITY_KEY,
@@ -47,6 +49,7 @@ beforeEach(() => {
   env.runpodLipsyncQuality = "fast";
   env.runpodLipsyncInput = "image";
   env.runpodInfinitetalkEndpoint = "";
+  env.runpodLtxEndpoint = "";
   env.runPodApiKey = "";
 });
 
@@ -73,6 +76,17 @@ describe("getLipsyncProvider", () => {
   it("falls back to the env default on an unrecognised stored value", async () => {
     settings.set(LIPSYNC_PROVIDER_KEY, "wav2lip-from-the-future");
     expect(await getLipsyncProvider()).toBe("heygen");
+  });
+
+  it("accepts the LTX lane from the store and from the env default alike", async () => {
+    env.lipsyncProvider = "ltx";
+    expect(await getLipsyncProvider()).toBe("ltx");
+
+    await setLipsyncProvider("heygen");
+    expect(await getLipsyncProvider()).toBe("heygen");
+    await setLipsyncProvider("ltx");
+    expect(await getLipsyncProvider()).toBe("ltx");
+    expect(settings.get(LIPSYNC_PROVIDER_KEY)).toBe("ltx");
   });
 
   it("serves a cached read, so a per-scene caller costs one DB round trip", async () => {
@@ -121,6 +135,21 @@ describe("runpodLipsyncReadiness", () => {
 
     env.runPodApiKey = "key-1";
     expect(runpodLipsyncReadiness()).toMatchObject({ ready: true });
+  });
+});
+
+describe("ltxLipsyncReadiness", () => {
+  it("needs its OWN endpoint and the shared RunPod key", () => {
+    env.runpodInfinitetalkEndpoint = "ep-1";
+    env.runPodApiKey = "key-1";
+    // The InfiniteTalk endpoint does not make LTX ready — they are different workers.
+    expect(ltxLipsyncReadiness()).toEqual({
+      endpointSet: false,
+      keySet: true,
+      ready: false,
+    });
+    env.runpodLtxEndpoint = "ep-ltx";
+    expect(ltxLipsyncReadiness()).toMatchObject({ ready: true });
   });
 });
 
