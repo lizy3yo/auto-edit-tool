@@ -3763,6 +3763,13 @@ async function resolveLipsyncLane(
           imageUrl,
           audioUrl,
           crop: framing.crop ?? undefined,
+          face: framing.face ?? undefined,
+          // A seed per SCENE, stable across retries of that scene. The graph's own seed (42
+          // for every render) is a liability: a seed that collapses this host's mouth into
+          // the photo's held smile collapses it on every retry, deterministically — measured
+          // (seed 42 dead, seed 7 alive, same everything). The worker's liveness gate then
+          // steps the seed when a mouth comes back frozen.
+          seed: sceneSeed(scene),
           prompt: buildLtxLipsyncPrompt(scene, useAlt),
           // Read because `textCfg` below is > 1; at the graph's own cfg 1 it would be inert,
           // which is why the camera is ALSO spelled out in the positive prompt.
@@ -6339,12 +6346,16 @@ export const LTX_LIPSYNC_DIRECTION =
   // under every line reads as vacant. Measured request, 2026-09-12.
   "Their face is relaxed and neutral at rest, composed, not smiling: eyebrows at rest, " +
   "forehead smooth, eyes soft and steady, no wide-eyed or surprised look. " +
-  // "Small movements" rather than "articulates every word clearly": the latter over-drives the
-  // mouth (big vowel shapes that read as bad sync even when timed); this wording measured the
-  // best closure of the run (0.023) with tracking intact.
-  "The mouth moves naturally and precisely with the words, small movements, lips meeting on " +
-  "consonants; the rest of the face stays calm. Small natural head movement; hands out of " +
-  "frame.";
+  // The MOUTH clause, the most-measured line here. "small movements" (the previous wording)
+  // gave Granny the best closure of the run but held the bearded host's mouth SHUT on two of
+  // three seeds (motion 0.9-1.6 against 4-8), with or without the mouth negative, at cfg 1 or
+  // 3 — the photo's closed-lip smile just stayed. "opens and closes clearly ... parting on
+  // vowels and meeting on consonants" woke his mouth (5.5 / 4.6 on two seeds) and, with the
+  // calm-face clause above and text guidance 3, did NOT make Granny shout again (5.2 / 6.5,
+  // lips 0.10 / 0.04, r 0.44) the way the original "articulates every word clearly" did
+  // without them. One wording for every host measured so far.
+  "Their mouth opens and closes clearly with every word of the speech, lips parting on " +
+  "vowels and meeting on consonants. Small natural head movement; hands out of frame.";
 
 /**
  * Read only when `text_cfg` > 1 (the lane's default is 3); at the graph's cfg 1 it is inert.
@@ -6353,8 +6364,23 @@ export const LTX_LIPSYNC_DIRECTION =
  */
 export const LTX_LIPSYNC_NEGATIVE_DIRECTION =
   "raised eyebrows, wide eyes, startled, surprised expression, exaggerated facial " +
-  "expression, exaggerated mouth movement, camera movement, zoom, push-in, blurry, " +
-  "distorted face";
+  "expression, camera movement, zoom, push-in, blurry, distorted face, " +
+  // The frozen-mouth shapes, named: with text guidance on, the negative pushes AWAY from
+  // the photo's held smile that swallowed the bearded host's articulation.
+  "closed mouth, still lips, frozen face, mouth not moving";
+
+/** A stable per-scene seed: the same scene renders the same way, different scenes differ. */
+export function sceneSeed(scene: {
+  index: number;
+  narration?: string;
+}): number {
+  let h = 2166136261 ^ scene.index;
+  for (const ch of scene.narration ?? "") {
+    h ^= ch.charCodeAt(0);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return h % 2147483647;
+}
 
 export function buildLtxLipsyncPrompt(
   scene: StoryboardScene,

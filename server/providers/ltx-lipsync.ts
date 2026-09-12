@@ -73,6 +73,11 @@ export interface LtxLipsyncParams {
    * model to animate. Photo pixels. Absent = the whole photo, as before.
    */
   crop?: { x: number; y: number; w: number; h: number };
+  /**
+   * The host's face box in photo pixels (`server/ltxFraming.ts`). Enables the worker's
+   * mouth-liveness gate: a render whose mouth did not move is re-rendered on the next seed.
+   */
+  face?: { x: number; y: number; size: number };
 }
 
 const RUNPOD_API_BASE = "https://api.runpod.ai/v2";
@@ -197,6 +202,15 @@ export class LtxLipsyncAdapter {
         ...(params.decodeTile ? { decode_tile: params.decodeTile } : {}),
         ...(params.textCfg != null ? { text_cfg: params.textCfg } : {}),
         ...(params.crop ? { crop: params.crop } : {}),
+        ...(params.face
+          ? {
+              face: {
+                x: params.face.x,
+                y: params.face.y,
+                size: params.face.size,
+              },
+            }
+          : {}),
       },
       policy: { executionTimeout: LTX_LIPSYNC_EXECUTION_TIMEOUT_MS },
     });

@@ -9010,6 +9010,9 @@ describe("buildLtxLipsyncPrompt", () => {
     // is neutral, so the mood cue (not a default smile) sets the line's expression.
     expect(prompt).toContain("eyebrows at rest");
     expect(prompt).toContain("neutral at rest");
+    // The mouth clause that keeps a bearded, closed-lip-smiling host articulating.
+    expect(prompt).toContain("opens and closes clearly");
+    expect(prompt).not.toContain("small movements");
     // None of the InfiniteTalk-specific direction leaks in.
     expect(prompt).not.toContain("calm and still");
   });
