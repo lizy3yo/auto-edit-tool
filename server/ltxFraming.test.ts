@@ -5,7 +5,9 @@ vi.mock("./claude", () => ({ invokeClaude: vi.fn() }));
 
 import {
   planLtxCrop,
+  planLtxBase,
   parseFaceBox,
+  FACE_MIN_PX,
   TARGET_FACE_FRAC,
   SKIP_ABOVE_FACE_FRAC,
   MIN_CROP_H,
@@ -139,5 +141,33 @@ describe("parseFaceBox (the LLM fallback's verdict)", () => {
         800
       )
     ).toBeNull();
+  });
+});
+
+describe("planLtxBase (the smallest base pass where the face articulates)", () => {
+  it("leaves a close-up on the graph's own 544p and sends no size", () => {
+    const b = planLtxBase(0.39);
+    expect(b.name).toBe("544p");
+    expect(b.sizeToSend).toBeNull();
+    expect(b.facePx).toBeGreaterThanOrEqual(FACE_MIN_PX);
+  });
+
+  it("raises a wide shot to the first base that reaches the floor", () => {
+    // 25% of 544 = 136 (dead); of 736 = 184.
+    const b = planLtxBase(0.25);
+    expect(b.name).toBe("720p");
+    expect(b.sizeToSend).toEqual({ width: 2560, height: 1440 });
+    expect(b.capped).toBe(false);
+  });
+
+  it("goes to 1080p for a very wide shot, and flags it when capped at 720p", () => {
+    expect(planLtxBase(0.16).name).toBe("1080p");
+    const capped = planLtxBase(0.16, "720p");
+    expect(capped.name).toBe("720p");
+    expect(capped.capped).toBe(true);
+  });
+
+  it("stays at 544p with nothing sent when no face was found", () => {
+    expect(planLtxBase(null)).toMatchObject({ name: "544p", sizeToSend: null });
   });
 });

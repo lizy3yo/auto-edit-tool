@@ -12,7 +12,7 @@
  */
 import "dotenv/config";
 import { readFile } from "fs/promises";
-import { analyzeHostPhoto, describe } from "../server/ltxFraming";
+import { analyzeHostPhoto, describe, planLtxBase } from "../server/ltxFraming";
 
 async function bytesFor(src: string): Promise<Buffer> {
   if (/^https?:\/\//.test(src)) {
@@ -56,7 +56,16 @@ if (!items.length) {
   process.exit(0);
 }
 
-const rows: string[][] = [["photo", "size", "faces", "host face", "decision"]];
+const rows: string[][] = [
+  [
+    "photo",
+    "size",
+    "faces",
+    "host face",
+    "auto: base pass",
+    "crop mode: window",
+  ],
+];
 for (const it of items) {
   try {
     const f = await analyzeHostPhoto(await bytesFor(it.url));
@@ -67,8 +76,14 @@ for (const it of items) {
       f.face
         ? `${f.face.size}px = ${Math.round((f.faceFrac ?? 0) * 100)}% (q ${f.face.q})`
         : "—",
+      (() => {
+        const b = planLtxBase(f.faceFrac);
+        return f.face
+          ? `${b.name} (face ${b.facePx} px)${b.capped ? " CAPPED — re-frame" : ""}`
+          : "544p — no face";
+      })(),
       f.crop
-        ? `CROP ${f.crop.w}x${f.crop.h} @ (${f.crop.x},${f.crop.y}) → face ${Math.round((f.cropFaceFrac ?? 0) * 100)}% of window`
+        ? `${f.crop.w}x${f.crop.h} @ (${f.crop.x},${f.crop.y}) → face ${Math.round((f.cropFaceFrac ?? 0) * 100)}%`
         : `as is — ${f.reason}`,
     ]);
     console.error(`  ${it.label}: ${describe(f)}`);

@@ -237,6 +237,18 @@ export interface LtxFraming {
   crop: LtxCrop | null;
   /** Host face height as a fraction of the crop's height. */
   cropFaceFrac: number | null;
+  /**
+   * The model's base pass chosen for this photo when framing is `auto` (`planLtxBase`): the
+   * smallest of 544p/720p/1080p at which the host face reaches the pixel size that
+   * articulates, capped by `LTX_LIPSYNC_MAX_BASE`. `sizeToSend` is the OUTPUT size the worker
+   * is asked for (twice the base — the graph upscales 2x); the worker delivers 1920x1080.
+   */
+  base?: {
+    name: "544p" | "720p" | "1080p";
+    facePx: number;
+    sizeToSend: { width: number; height: number } | null;
+    capped: boolean;
+  };
   /** One human-readable line of what was decided and why. */
   reason: string;
 }

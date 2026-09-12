@@ -89,7 +89,7 @@ import {
   scenePauses,
   cutNarrationChunks,
 } from "./lipsyncChunks";
-import { ltxFramingForUrl } from "./ltxFraming";
+import { ltxFramingForUrl, planLtxBase } from "./ltxFraming";
 import {
   getLipsyncProvider,
   getLipsyncQuality,
@@ -3742,14 +3742,6 @@ async function resolveLipsyncLane(
   // (`generateSceneLipsyncClips`).
   if (lipsyncProvider === "ltx" && ENV.runpodLtxEndpoint && ENV.runPodApiKey) {
     const ltx = new LtxLipsyncAdapter(ENV.runpodLtxEndpoint, ENV.runPodApiKey);
-    const size =
-      ENV.ltxLipsyncResolution === "1080p"
-        ? { width: 1920, height: 1080 }
-        : ENV.ltxLipsyncResolution === "720p"
-          ? { width: 1280, height: 720 }
-          : ENV.ltxLipsyncResolution === "480p"
-            ? { width: 832, height: 480 }
-            : {};
     return {
       provider: "ltx",
       submit: async ({ scene, imageUrl, audioUrl, useAlt }) => {
@@ -3758,19 +3750,33 @@ async function resolveLipsyncLane(
         // window around the face and pasted back by the worker. Cached per photo; recorded on
         // the scene so the decision is readable afterwards; fails open to "as is".
         const framing = await ltxFramingForUrl(imageUrl);
-        scene.ltxFraming = framing;
+        // Three ways to make a small face articulate — see ENV.ltxLipsyncFraming. `auto`
+        // renders the whole photo (body and hands move) and only raises the base pass for
+        // the photos whose face needs it; `crop` renders a window around the face.
+        const mode = ENV.ltxLipsyncFraming;
+        const base =
+          mode === "auto"
+            ? planLtxBase(framing.faceFrac, ENV.ltxLipsyncMaxBase)
+            : undefined;
+        const crop = mode === "crop" ? (framing.crop ?? undefined) : undefined;
+        scene.ltxFraming = { ...framing, base, crop: crop ?? null };
+        if (base && base.name !== "544p")
+          console.log(
+            `[LTX framing] scene ${scene.index}: base ${base.name} (face ${base.facePx} px)${base.capped ? " — CAPPED, re-frame this photo" : ""}`
+          );
         return ltx.submitLipsync({
           imageUrl,
           audioUrl,
-          crop: framing.crop ?? undefined,
+          crop,
           face: framing.face ?? undefined,
+          ...(base?.sizeToSend ?? {}),
           // A seed per SCENE, stable across retries of that scene. The graph's own seed (42
           // for every render) is a liability: a seed that collapses this host's mouth into
           // the photo's held smile collapses it on every retry, deterministically — measured
           // (seed 42 dead, seed 7 alive, same everything). The worker's liveness gate then
           // steps the seed when a mouth comes back frozen.
           seed: sceneSeed(scene),
-          prompt: buildLtxLipsyncPrompt(scene, useAlt),
+          prompt: buildLtxLipsyncPrompt(scene, useAlt, { wholePhoto: !crop }),
           // Read because `textCfg` below is > 1; at the graph's own cfg 1 it would be inert,
           // which is why the camera is ALSO spelled out in the positive prompt.
           negativePrompt: LTX_LIPSYNC_NEGATIVE_DIRECTION,
@@ -3779,7 +3785,6 @@ async function resolveLipsyncLane(
           sampler: ENV.ltxLipsyncSampler,
           decodeTile: ENV.ltxLipsyncDecodeTile,
           textCfg: ENV.ltxLipsyncTextCfg,
-          ...size,
         });
       },
       poll: (id, ms) => ltx.pollVideo(id, ms ?? LTX_LIPSYNC_TIMEOUT_MS),
@@ -6355,7 +6360,12 @@ export const LTX_LIPSYNC_DIRECTION =
   // lips 0.10 / 0.04, r 0.44) the way the original "articulates every word clearly" did
   // without them. One wording for every host measured so far.
   "Their mouth opens and closes clearly with every word of the speech, lips parting on " +
-  "vowels and meeting on consonants. Small natural head movement; hands out of frame.";
+  "vowels and meeting on consonants. Small natural head movement; ";
+
+/** The hands clause: a face window has none in it; a whole photo usually does. */
+export const LTX_HANDS_OUT = "hands out of frame.";
+export const LTX_HANDS_IN =
+  "hands rest naturally with small movements, never raised to the face.";
 
 /**
  * Read only when `text_cfg` > 1 (the lane's default is 3); at the graph's cfg 1 it is inert.
@@ -6384,8 +6394,10 @@ export function sceneSeed(scene: {
 
 export function buildLtxLipsyncPrompt(
   scene: StoryboardScene,
-  useAlt = false
+  useAlt = false,
+  opts: { wholePhoto?: boolean } = {}
 ): string {
+  const hands = opts.wholePhoto ? LTX_HANDS_IN : LTX_HANDS_OUT;
   const angle = useAlt ? ` ${LIPSYNC_ALT_ANGLE_SUFFIX}` : "";
   const cta = scene.cta ? ` ${CTA_EMPTY_HANDS_SUFFIX}` : "";
   const mood = scene.deliveryCue?.trim()
@@ -6393,7 +6405,7 @@ export function buildLtxLipsyncPrompt(
     : "";
   // No `gestureCue` here — see LTX_LIPSYNC_DIRECTION: on this model a body note reads as a
   // camera move, and the one measured render with it pushed in to an extreme close-up.
-  return `${LTX_LIPSYNC_DIRECTION}${angle}${cta}${mood}`.trim();
+  return `${LTX_LIPSYNC_DIRECTION}${hands}${angle}${cta}${mood}`.trim();
 }
 
 /**

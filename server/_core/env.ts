@@ -74,14 +74,24 @@ export const ENV = {
   /** Host renders kept in flight on the LTX endpoint — same reasoning as the InfiniteTalk cap. */
   ltxLipsyncConcurrency: Number(process.env.LTX_LIPSYNC_CONCURRENCY ?? 4),
   /**
-   * Render size for the LTX lane, OVERRIDE ONLY: unset sends no `width`/`height` and the
-   * worker's own workflow default rules — the lane starts at the graph's standard and every
-   * dial is a deliberate change from it. `480p` | `720p` | `1080p`.
+   * How the LTX lane deals with a host face too small to articulate (`server/ltxFraming.ts`):
+   * `auto` — render the WHOLE photo (body and hands move) at the smallest base pass where the
+   *          face is big enough, so only the photos that need it pay for a bigger pass;
+   * `crop`  — render a 16:9 window around the face and paste it back (face only moves);
+   * `off`   — whole photo at the graph's own 544p base, whatever the face size.
    */
-  ltxLipsyncResolution:
-    (["480p", "720p", "1080p"] as const).find(
-      r => r === (process.env.LTX_LIPSYNC_RESOLUTION ?? "").toLowerCase()
-    ) ?? undefined,
+  ltxLipsyncFraming:
+    (["auto", "crop", "off"] as const).find(
+      m => m === (process.env.LTX_LIPSYNC_FRAMING ?? "auto").toLowerCase()
+    ) ?? ("auto" as const),
+  /**
+   * The dearest base pass `auto` may pick. 720p caps the cost at ~2x; a photo that would need
+   * 1080p is then rendered at 720p and flagged in the framing report as one to re-frame.
+   */
+  ltxLipsyncMaxBase:
+    (["720p", "1080p"] as const).find(
+      b => b === (process.env.LTX_LIPSYNC_MAX_BASE ?? "1080p").toLowerCase()
+    ) ?? ("1080p" as const),
   /**
    * The graph's Gemma prompt ENHANCER. OFF by default here although the graph ships it on:
    * measured on job 94's scene 1 it rewrote "the camera is static" into a cinematic

@@ -73,6 +73,47 @@ const FACE_BOX_SYSTEM =
 
 const even = (n: number) => 2 * Math.round(n / 2);
 
+/** The model's base passes: stage-1 height, and the output size that asks for it (2x). */
+export const BASES = [
+  { name: "544p", h: 544, width: 1920, height: 1088 },
+  { name: "720p", h: 736, width: 2560, height: 1440 },
+  { name: "1080p", h: 1088, width: 3840, height: 2176 },
+] as const;
+export type BaseName = (typeof BASES)[number]["name"];
+/**
+ * Host face height, in stage-1 pixels, below which the mouth does not articulate. Set from
+ * the renders: 136 px (the workshop wide shot at 544p) was dead, 212 px (Granny at 544p) and
+ * 194 px (the man cropped to 36% of a 544p window) were alive. The 720p / 1080p test on the
+ * man (180 / 272 px) pins the floor; until then it sits between the measured dead and alive.
+ */
+export const FACE_MIN_PX = Number(process.env.LTX_FACE_MIN_PX ?? 170);
+
+/**
+ * Pick the smallest base pass at which this photo's face reaches `FACE_MIN_PX`, capped at
+ * `maxBase`. Pure. A photo that needs more than the cap gets the cap and `capped: true` —
+ * the report names it as one to re-frame.
+ */
+export function planLtxBase(
+  faceFrac: number | null,
+  maxBase: BaseName = "1080p"
+): NonNullable<LtxFraming["base"]> {
+  const cap = BASES.findIndex(b => b.name === maxBase);
+  const allowed = BASES.slice(0, cap + 1);
+  if (faceFrac == null) {
+    return { name: "544p", facePx: 0, sizeToSend: null, capped: false };
+  }
+  const fits = allowed.find(b => faceFrac * b.h >= FACE_MIN_PX);
+  const pick = fits ?? allowed[allowed.length - 1];
+  return {
+    name: pick.name,
+    facePx: Math.round(faceFrac * pick.h),
+    // The default base needs no size at all — the graph's own — so nothing is sent.
+    sizeToSend:
+      pick.name === "544p" ? null : { width: pick.width, height: pick.height },
+    capped: !fits,
+  };
+}
+
 /**
  * The crop for a photo of `photoW`x`photoH` whose host face is `face` (full-resolution
  * pixels, box centre + side), or `null` when the photo should be rendered as it is. Pure.

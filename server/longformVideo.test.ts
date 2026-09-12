@@ -9013,6 +9013,11 @@ describe("buildLtxLipsyncPrompt", () => {
     // The mouth clause that keeps a bearded, closed-lip-smiling host articulating.
     expect(prompt).toContain("opens and closes clearly");
     expect(prompt).not.toContain("small movements");
+    // Hands: out of frame for a face window, resting naturally for a whole photo.
+    expect(prompt).toContain("hands out of frame");
+    expect(buildLtxLipsyncPrompt(scene, true, { wholePhoto: true })).toContain(
+      "hands rest naturally"
+    );
     // None of the InfiniteTalk-specific direction leaks in.
     expect(prompt).not.toContain("calm and still");
   });
