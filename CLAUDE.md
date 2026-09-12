@@ -249,7 +249,17 @@ Express · tRPC · Drizzle · MySQL.
   `stabilize: "tripod"` (ffmpeg vidstab, first-frame lock) is the candidate fix, unmeasured
   as of this note. A wide host photo can only be animated face OR body: the hands outside
   the window stay still. Face + body + hands together needs the photo framed waist-up with
-  the face ≥ a third of the frame — then the report says "as is" and nothing is cropped
+  the face ≥ a third of the frame — then the report says "as is" and nothing is cropped.
+  THREE FRAMING MODES exist (`LTX_LIPSYNC_FRAMING`): `crop` (default, above), `auto` — the
+  whole photo at the smallest base pass where the face reaches `FACE_MIN_PX` (`planLtxBase`,
+  544p/720p/1080p, capped by `LTX_LIPSYNC_MAX_BASE`; the worker delivers 1920x1080 either
+  way) — and `off`. `auto` was MEASURED WORSE the same day and is kept only as an option:
+  the man at a 720p base had a moving mouth (5.8) but a drifting, jittery frame (bg morph
+  8.1, head 3.6 against a cap of 3) for 1.5x the GPU; at 1080p the mouth was softer than at
+  720p (articulation below the floor) for 4.7x; Granny at 720p lost closure and gained
+  flicker. More pixels in the base pass do not buy a better mouth on this checkpoint; the
+  crop's still plate is what makes the render steady. The report's "auto: base pass"
+  column still shows what each photo would cost under it
 - `server/providers/` — one adapter per vendor; `base.ts` is the interface,
   `fallback.ts` the image chain (primary → Gemini). The host lip-sync lane has TWO adapters,
   picked in `resolveLipsyncLane` and handed to callers that know neither: `heygen-lipsync.ts`
