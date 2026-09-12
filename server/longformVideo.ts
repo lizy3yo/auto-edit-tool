@@ -3759,6 +3759,9 @@ async function resolveLipsyncLane(
             ? planLtxBase(framing.faceFrac, ENV.ltxLipsyncMaxBase)
             : undefined;
         const crop = mode === "crop" ? (framing.crop ?? undefined) : undefined;
+        // `whole` keeps the body and hands moving; the stabilizer is what makes it watchable
+        // (measured drift 11.5 → 2.5). It does nothing useful inside a crop, so only here.
+        const stabilize = mode === "whole" ? ("tripod" as const) : undefined;
         scene.ltxFraming = { ...framing, base, crop: crop ?? null };
         if (base && base.name !== "544p")
           console.log(
@@ -3769,6 +3772,7 @@ async function resolveLipsyncLane(
           audioUrl,
           crop,
           face: framing.face ?? undefined,
+          stabilize,
           ...(base?.sizeToSend ?? {}),
           // A seed per SCENE, stable across retries of that scene. The graph's own seed (42
           // for every render) is a liability: a seed that collapses this host's mouth into

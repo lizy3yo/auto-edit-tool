@@ -84,10 +84,15 @@ export const ENV = {
    *           than at 720p (articulation 0.039, below the floor) for 4.7x; Granny at 720p
    *           lost closure (0.105 vs 0.04-0.10) and gained flicker (4.6 of 5). More pixels
    *           in the base pass do not buy a better mouth on this checkpoint.
-   * `off`   — whole photo at the graph's own 544p base, whatever the face size.
+   * `whole` — the whole photo at the graph's own 544p base, the direction's hands clause on,
+   *           and the worker's tripod STABILIZER undoing the model's camera drift. Measured
+   *           on the man: body and hands move, mouth alive (motion 4.8, liveness 22), drift
+   *           11.5 → 2.5, for today's cost plus ~8 s. The price is mouth PRECISION at this
+   *           face size (r 0.15, 64% of sounds, against the crop's r 0.24-0.36 / 78-81%):
+   *           the choice between a sharper mouth and a moving body, per deployment.
    */
   ltxLipsyncFraming:
-    (["auto", "crop", "off"] as const).find(
+    (["auto", "crop", "whole"] as const).find(
       m => m === (process.env.LTX_LIPSYNC_FRAMING ?? "crop").toLowerCase()
     ) ?? ("crop" as const),
   /**

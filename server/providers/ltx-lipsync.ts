@@ -78,6 +78,12 @@ export interface LtxLipsyncParams {
    * mouth-liveness gate: a render whose mouth did not move is re-rendered on the next seed.
    */
   face?: { x: number; y: number; size: number };
+  /**
+   * `tripod`: the worker undoes the model's camera drift against the first frame (ffmpeg
+   * vidstab) before delivering. Measured on a whole-photo render: background morph 11.5 →
+   * 2.5 with the body's own motion kept. Does nothing useful inside a face crop.
+   */
+  stabilize?: "tripod";
 }
 
 const RUNPOD_API_BASE = "https://api.runpod.ai/v2";
@@ -202,6 +208,7 @@ export class LtxLipsyncAdapter {
         ...(params.decodeTile ? { decode_tile: params.decodeTile } : {}),
         ...(params.textCfg != null ? { text_cfg: params.textCfg } : {}),
         ...(params.crop ? { crop: params.crop } : {}),
+        ...(params.stabilize ? { stabilize: params.stabilize } : {}),
         ...(params.face
           ? {
               face: {
