@@ -259,7 +259,16 @@ Express · tRPC · Drizzle · MySQL.
   720p (articulation below the floor) for 4.7x; Granny at 720p lost closure and gained
   flicker. More pixels in the base pass do not buy a better mouth on this checkpoint; the
   crop's still plate is what makes the render steady. The report's "auto: base pass"
-  column still shows what each photo would cost under it
+  column still shows what each photo would cost under it. The mode that DOES give a moving body is `whole`:
+  the whole photo at 544p with the hands clause on and the worker's `stabilize: "tripod"`
+  (ffmpeg vidstab, first-frame lock) undoing the model's camera drift. Measured on the man
+  across three seeds: mouth alive (4.6-4.8 motion, liveness 22, lips 0.20-0.25, r 0.13-0.21,
+  75-83% of sounds), body and hands moving, drift 11.5 → 2.0-2.5, head under the cap, for
+  today's cost plus ~8 s; on Granny: mouth 5.2, r 0.40, lips 0.10, drift 0.98. The crop is
+  still the sharper mouth (r 0.24-0.36 on the man) with a still body — so `crop` stays the
+  default and `whole` is the per-deployment choice. The stabilizer measured NO effect inside
+  a crop window (12.6 vs 12.0): the drift there is content re-hallucination, not a camera
+  move it can undo
 - `server/providers/` — one adapter per vendor; `base.ts` is the interface,
   `fallback.ts` the image chain (primary → Gemini). The host lip-sync lane has TWO adapters,
   picked in `resolveLipsyncLane` and handed to callers that know neither: `heygen-lipsync.ts`
