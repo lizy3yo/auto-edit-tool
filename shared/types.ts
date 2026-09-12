@@ -205,6 +205,42 @@ export interface SplitLayout {
   brollFocusX?: number;
 }
 
+/** A detected face: box centre and side, in the photo's full-resolution pixels. */
+export interface LtxFace {
+  x: number;
+  y: number;
+  size: number;
+  /** pico's confidence; 0 when the box came from the LLM fallback. */
+  q: number;
+  /** Which detector produced it — the fallback is worth seeing in the job JSON. */
+  source?: "pico" | "haiku";
+}
+
+/** A 16:9 window of the host photo, in its full-resolution pixels. */
+export interface LtxCrop {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** The LTX lane's framing decision for one host photo — see `server/ltxFraming.ts`. */
+export interface LtxFraming {
+  photoW: number;
+  photoH: number;
+  /** Faces the detector found; the largest is the host. */
+  faces: number;
+  face: LtxFace | null;
+  /** Host face height as a fraction of the photo's height. */
+  faceFrac: number | null;
+  /** The window rendered and pasted back, or null = rendered as is. */
+  crop: LtxCrop | null;
+  /** Host face height as a fraction of the crop's height. */
+  cropFaceFrac: number | null;
+  /** One human-readable line of what was decided and why. */
+  reason: string;
+}
+
 /** A single storyboard scene = one beat (its own verbatim script slice) + clip(s) */
 export interface StoryboardScene {
   index: number;
@@ -262,6 +298,13 @@ export interface StoryboardScene {
    * recorded rather than left to be inferred from the picture.
    */
   lipsyncConditioning?: "photo" | "pinned";
+  /**
+   * What the LTX lane saw in this scene's host photo and what it did about it
+   * (`server/ltxFraming.ts`): the face found, its size as a fraction of the photo, and the
+   * 16:9 crop rendered and pasted back — or `crop: null` with the reason. Recorded so a
+   * dead or drifting mouth can be read against the framing decision instead of guessed.
+   */
+  ltxFraming?: LtxFraming;
   /** Whether the on-camera host appears (gets the reference face + face-lock) */
   hostPresent: boolean;
   /**

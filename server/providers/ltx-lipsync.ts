@@ -67,6 +67,12 @@ export interface LtxLipsyncParams {
    * wordings all rendered a startled, wide-eyed host. Unset = the graph's own.
    */
   textCfg?: number;
+  /**
+   * Render only this 16:9 window of the photo and paste the result back into the still at
+   * full size (`server/ltxFraming.ts`): a face too small in the frame has no mouth for the
+   * model to animate. Photo pixels. Absent = the whole photo, as before.
+   */
+  crop?: { x: number; y: number; w: number; h: number };
 }
 
 const RUNPOD_API_BASE = "https://api.runpod.ai/v2";
@@ -190,6 +196,7 @@ export class LtxLipsyncAdapter {
         ...(params.sampler ? { sampler: params.sampler } : {}),
         ...(params.decodeTile ? { decode_tile: params.decodeTile } : {}),
         ...(params.textCfg != null ? { text_cfg: params.textCfg } : {}),
+        ...(params.crop ? { crop: params.crop } : {}),
       },
       policy: { executionTimeout: LTX_LIPSYNC_EXECUTION_TIMEOUT_MS },
     });

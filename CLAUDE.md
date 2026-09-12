@@ -217,6 +217,26 @@ Express · tRPC · Drizzle · MySQL.
   returned untouched. Worker source: `Metropolis-Media/ltx-auto-edit-test` (a mirror of
   `Lightricks/ComfyUI-LTXVideo`; the image+audio graph is
   `example_workflows/2.5/LTX-2.5_A2V_Two_Stage_Distilled.json`)
+- `server/ltxFraming.ts` — the LTX lane's FACE FRAMING, decided per host photo before a render.
+  The model articulates at its working size (stage 1 is 960x544), so the face's SIZE in the
+  frame decides whether there is a mouth to animate: a host at 39% of the photo's height
+  (Granny Mae's close-up) tracks the words at r 0.3-0.5; one at 24% (the workshop wide shot)
+  rendered a mouth that did not move (motion 1.15 against 5-8, articulation at the floor) —
+  and no wording fixes it, because the words that woke his mouth made hers shout. A face under
+  33% gets a 16:9 window sized so the face is ~38% of it (never under 544 px tall, which the
+  model would upscale), placed with the eye line at the upper third and clamped inside the
+  photo; the worker renders the window and pastes the clip back into the still photo at
+  1920x1080 with a feathered edge (`crop` in the worker contract) — camera locked by
+  construction, ~1.6x the pixels on the face, one mouth direction for every host. Portrait
+  photos take the full width; a photo under 360 px tall is left alone and named as one to
+  replace (a 160x160 channel avatar); no face ⇒ rendered as is, said so. DETECTION is careful
+  on purpose: pico at two scan widths with the strongest box kept (a clear frontal portrait
+  scored q 20.8 at one width and nothing at another — one scan and a bar of 20 missed it, which
+  on this lane is a silently dead mouth), then a Haiku box as the fallback. The decision is
+  logged and saved on the scene (`scene.ltxFraming`: photo size, faces seen, host face size and
+  fraction, the crop, the reason) so a dead mouth is read against the framing instead of
+  guessed. `scripts/ltx-framing-report.mts` prints the decision for every channel's host photos
+  (or given files) — run it before trusting a new host photo
 - `server/providers/` — one adapter per vendor; `base.ts` is the interface,
   `fallback.ts` the image chain (primary → Gemini). The host lip-sync lane has TWO adapters,
   picked in `resolveLipsyncLane` and handed to callers that know neither: `heygen-lipsync.ts`

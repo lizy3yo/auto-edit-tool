@@ -109,6 +109,7 @@ describe("LtxLipsyncAdapter.submitLipsync", () => {
       sampler: "euler",
       decodeTile: "1536/384/192/48",
       textCfg: 3,
+      crop: { x: 244, y: 20, w: 966, h: 544 },
     });
     expect(calls[0].body.input).toMatchObject({
       enhance_prompt: false,
@@ -116,6 +117,7 @@ describe("LtxLipsyncAdapter.submitLipsync", () => {
       sampler: "euler",
       decode_tile: "1536/384/192/48",
       text_cfg: 3,
+      crop: { x: 244, y: 20, w: 966, h: 544 },
     });
     // Unset ⇒ absent: the worker's graph defaults rule, and `false` must be sendable (it is
     // the value that turns the shipped-on enhancer off), so the check is on presence.
@@ -126,6 +128,7 @@ describe("LtxLipsyncAdapter.submitLipsync", () => {
       "sampler",
       "decode_tile",
       "text_cfg",
+      "crop",
     ])
       expect(calls[1].body.input).not.toHaveProperty(k);
   });

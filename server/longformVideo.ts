@@ -89,6 +89,7 @@ import {
   scenePauses,
   cutNarrationChunks,
 } from "./lipsyncChunks";
+import { ltxFramingForUrl } from "./ltxFraming";
 import {
   getLipsyncProvider,
   getLipsyncQuality,
@@ -3751,10 +3752,17 @@ async function resolveLipsyncLane(
             : {};
     return {
       provider: "ltx",
-      submit: ({ scene, imageUrl, audioUrl, useAlt }) =>
-        ltx.submitLipsync({
+      submit: async ({ scene, imageUrl, audioUrl, useAlt }) => {
+        // Frame the photo for the model (`server/ltxFraming.ts`): a face under a third of the
+        // frame has no mouth to animate at LTX's working size, so it is rendered from a 16:9
+        // window around the face and pasted back by the worker. Cached per photo; recorded on
+        // the scene so the decision is readable afterwards; fails open to "as is".
+        const framing = await ltxFramingForUrl(imageUrl);
+        scene.ltxFraming = framing;
+        return ltx.submitLipsync({
           imageUrl,
           audioUrl,
+          crop: framing.crop ?? undefined,
           prompt: buildLtxLipsyncPrompt(scene, useAlt),
           // Read because `textCfg` below is > 1; at the graph's own cfg 1 it would be inert,
           // which is why the camera is ALSO spelled out in the positive prompt.
@@ -3765,7 +3773,8 @@ async function resolveLipsyncLane(
           decodeTile: ENV.ltxLipsyncDecodeTile,
           textCfg: ENV.ltxLipsyncTextCfg,
           ...size,
-        }),
+        });
+      },
       poll: (id, ms) => ltx.pollVideo(id, ms ?? LTX_LIPSYNC_TIMEOUT_MS),
       // Billed by GPU time like InfiniteTalk, so an abandoned render is stopped, not left.
       cancel: id => ltx.cancelJob(id),
