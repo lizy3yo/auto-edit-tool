@@ -6325,8 +6325,11 @@ export const LTX_LIPSYNC_DIRECTION =
   // The FACE clause. Without it (and without text guidance to make it count) the model's
   // talking prior hoists the brows and widens the eyes on every line — a startled, credulous
   // look against a calm reference photo. Measured on job 97 scene 1.
-  "Their face is relaxed and at ease: eyebrows at rest, forehead smooth, eyes soft and " +
-  "steady, no wide-eyed or surprised look. " +
+  // NEUTRAL at rest, not smiling: the expression a line needs comes from the delivery pass's
+  // mood cue appended below (serious on a warning, warm on a kindness), and a default smile
+  // under every line reads as vacant. Measured request, 2026-09-12.
+  "Their face is relaxed and neutral at rest, composed, not smiling: eyebrows at rest, " +
+  "forehead smooth, eyes soft and steady, no wide-eyed or surprised look. " +
   // "Small movements" rather than "articulates every word clearly": the latter over-drives the
   // mouth (big vowel shapes that read as bad sync even when timed); this wording measured the
   // best closure of the run (0.023) with tracking intact.

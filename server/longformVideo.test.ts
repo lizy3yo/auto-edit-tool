@@ -9006,8 +9006,10 @@ describe("buildLtxLipsyncPrompt", () => {
     expect(prompt).not.toContain("small nod on the number");
     // The camera is spelled out positively — the negative prompt is inert below cfg 2.
     expect(prompt).toContain("locked off");
-    // The face clause: the talking prior hoists the brows without it.
+    // The face clause: the talking prior hoists the brows without it — and the resting face
+    // is neutral, so the mood cue (not a default smile) sets the line's expression.
     expect(prompt).toContain("eyebrows at rest");
+    expect(prompt).toContain("neutral at rest");
     // None of the InfiniteTalk-specific direction leaks in.
     expect(prompt).not.toContain("calm and still");
   });

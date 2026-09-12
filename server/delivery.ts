@@ -111,9 +111,13 @@ export function deliveryUserPrompt(
     `- pauseAfterMs: a beat AFTER the paragraph — 600 before a new section or a big reveal, ` +
     `300 after a point that should land, otherwise 0.\n` +
     `- mood: the host's facial expression WHILE speaking this paragraph, as a director would ` +
-    `say it to the actor — e.g. "warm gentle smile", "serious and concerned", "amused, playful", ` +
-    `"calm and reassuring", "matter-of-fact". Modest, on-camera expressions only; never ` +
-    `"laughing", "shouting", "crying".\n` +
+    `say it to the actor, and it must follow what THESE WORDS are doing: a warning reads ` +
+    `serious, a caution concerned, a plain explanation neutral and composed, a wry line ` +
+    `quietly amused, a kindness warm. The resting face is NEUTRAL — "neutral, attentive", ` +
+    `"matter-of-fact", "calm and composed", "serious and concerned", "quietly amused", ` +
+    `"warm, kind". A smile only where the words themselves are warm or funny, never as a ` +
+    `default; most paragraphs of an explainer are neutral or serious. Modest, on-camera ` +
+    `expressions only; never "laughing", "shouting", "crying", never "wide-eyed".\n` +
     `- gesture: what the host's HEAD and BODY do while saying this paragraph, as a director ` +
     `would say it — e.g. "small nod on the number", "tilts her head on the question", ` +
     `"glances away, then back on the answer", "leans in slightly", "brows lift on the ` +
