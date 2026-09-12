@@ -60,6 +60,13 @@ export interface LtxLipsyncParams {
   sampler?: string;
   /** VAE decode tiling `tile/overlap/temporal/temporal_overlap`. Unset = the graph's own. */
   decodeTile?: string;
+  /**
+   * Classifier-free guidance on the video stream's TEXT conditioning (the pack's
+   * MultimodalGuider replaces the graph's plain cfg-1 guider on stage 1). At the graph's 1
+   * the prompt barely bites and the negative prompt is never read: three "eyebrows at rest"
+   * wordings all rendered a startled, wide-eyed host. Unset = the graph's own.
+   */
+  textCfg?: number;
 }
 
 const RUNPOD_API_BASE = "https://api.runpod.ai/v2";
@@ -182,6 +189,7 @@ export class LtxLipsyncAdapter {
           : {}),
         ...(params.sampler ? { sampler: params.sampler } : {}),
         ...(params.decodeTile ? { decode_tile: params.decodeTile } : {}),
+        ...(params.textCfg != null ? { text_cfg: params.textCfg } : {}),
       },
       policy: { executionTimeout: LTX_LIPSYNC_EXECUTION_TIMEOUT_MS },
     });

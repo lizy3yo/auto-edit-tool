@@ -186,9 +186,21 @@ Express · tRPC · Drizzle · MySQL.
   words was CHANCE, r 0.05, and r 0.47 on euler with nothing else changed), and the worker
   compensates a measured 10-frame MOUTH LAG (renders the narration padded on the 1+8n grid,
   drops the first 10 frames, muxes the original back — `LTX_LAG_FRAMES` on the endpoint) that
-  put the mouth 400-520 ms behind the sound on every render of both hosts. Final numbers on
-  Granny Mae: r 0.34 at 0 ms, 83% of sounds matched, lips closing at 0.051 — at or above the
-  HeyGen reference (r 0.21, 0.059) — for ~$0.037 per finished second. The photo-anchor dial
+  put the mouth 400-520 ms behind the sound on every render of both hosts, and TEXT GUIDANCE
+  on stage 1 (`LTX_LIPSYNC_TEXT_CFG`, default 3, via the pack's MultimodalGuider in the
+  worker) so the prompt bites and the negative prompt exists at all: at the graph's cfg 1
+  three "eyebrows at rest, eyes soft" wordings all rendered the same hoisted brows and wide
+  eyes — a startled, credulous look — because the model's talking prior overrides words it is
+  barely applying. The direction now asks for the relaxed face and for SMALL mouth movements
+  (the first wording, "articulates every word clearly", over-drove the mouth into big vowel
+  shapes that read as bad sync even when timed). Two traps found on the way: the guider's
+  modality combo is `VIDEO`/`AUDIO` in caps (lowercase failed validation, and ComfyUI answers
+  a partially-invalid prompt with 200 + `node_errors` and silently drops the output branch —
+  the handler now fails loudly on that), and the calm-face wording has a ceiling: "speaks
+  quietly, eyelids heavy, never raises her eyebrows" gave the relaxed face wanted but damped
+  the mouth to r 0.12. Numbers on Granny Mae at the defaults: r 0.40 at 0 ms, 83% of sounds
+  matched (91% at cfg 4), lips closing 0.04-0.09 — at or above the HeyGen reference (r 0.21,
+  0.059) — for ~$0.04 per finished second. The photo-anchor dial
   (`LTX_LIPSYNC_IMG_STRENGTH`) measured NO effect and audio guidance (`a2v_scale`, the pack's
   MultimodalGuider) did not beat euler; both stay as overrides. The lane still sends nothing
   else unless `LTX_LIPSYNC_RESOLUTION` / `_DECODE_TILE` are set. None of the

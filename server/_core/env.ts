@@ -107,6 +107,15 @@ export const ENV = {
   ltxLipsyncSampler: process.env.LTX_LIPSYNC_SAMPLER || "euler",
   ltxLipsyncDecodeTile: process.env.LTX_LIPSYNC_DECODE_TILE || undefined,
   /**
+   * Text guidance on stage 1 (`text_cfg`), default 3 — the second dial baked in, for the
+   * FACE. At the graph's cfg 1 the prompt is only weakly applied and the negative prompt is
+   * never read, so three "eyebrows at rest, eyes soft" wordings all rendered the same
+   * hoisted brows and wide eyes (job 97 scene 1). At 3 the brows settle and the negative
+   * prompt exists, with sync intact (r 0.40 at 0 ms, 83% of sounds) for ~+15% GPU. `1`
+   * restores the graph's own guider.
+   */
+  ltxLipsyncTextCfg: Number(process.env.LTX_LIPSYNC_TEXT_CFG ?? 3),
+  /**
    * Which vendor renders host scenes: `heygen` (default), `runpod` (InfiniteTalk) or `ltx`.
    * Deliberately an explicit opt-in rather than "use RunPod if its endpoint is set" — a
    * configured endpoint should be testable without silently moving every render onto it.

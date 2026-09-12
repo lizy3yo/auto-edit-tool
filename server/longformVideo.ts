@@ -3756,14 +3756,14 @@ async function resolveLipsyncLane(
           imageUrl,
           audioUrl,
           prompt: buildLtxLipsyncPrompt(scene, useAlt),
-          // Inert on the distilled graph (CFG 1 runs no pass that reads it) — sent for a
-          // worker that ever runs a guided tier, never relied on. Everything the render
-          // must NOT do is in the POSITIVE prompt for that reason.
+          // Read because `textCfg` below is > 1; at the graph's own cfg 1 it would be inert,
+          // which is why the camera is ALSO spelled out in the positive prompt.
           negativePrompt: LTX_LIPSYNC_NEGATIVE_DIRECTION,
           enhancePrompt: ENV.ltxLipsyncEnhancePrompt,
           imgStrength: ENV.ltxLipsyncImgStrength,
           sampler: ENV.ltxLipsyncSampler,
           decodeTile: ENV.ltxLipsyncDecodeTile,
+          textCfg: ENV.ltxLipsyncTextCfg,
           ...size,
         }),
       poll: (id, ms) => ltx.pollVideo(id, ms ?? LTX_LIPSYNC_TIMEOUT_MS),
@@ -6318,15 +6318,31 @@ export function buildLipsyncPrompt(
  * "leans in on the reveal" is a body note on InfiniteTalk and a camera move here.
  */
 export const LTX_LIPSYNC_DIRECTION =
-  "The person in the reference photo speaks directly to the camera, framed exactly as in " +
+  "The person in the reference photo speaks calmly to the camera, framed exactly as in " +
   "the reference photo, looking at the lens. The camera is completely static and locked " +
   "off: no zoom, no push-in, no dolly, no pan, no change of framing or distance for the " +
-  "whole clip. Their mouth articulates every word of the speech clearly, lips meeting on " +
-  "consonants; small natural head movement and facial expression; hands out of frame.";
+  "whole clip. " +
+  // The FACE clause. Without it (and without text guidance to make it count) the model's
+  // talking prior hoists the brows and widens the eyes on every line — a startled, credulous
+  // look against a calm reference photo. Measured on job 97 scene 1.
+  "Their face is relaxed and at ease: eyebrows at rest, forehead smooth, eyes soft and " +
+  "steady, no wide-eyed or surprised look. " +
+  // "Small movements" rather than "articulates every word clearly": the latter over-drives the
+  // mouth (big vowel shapes that read as bad sync even when timed); this wording measured the
+  // best closure of the run (0.023) with tracking intact.
+  "The mouth moves naturally and precisely with the words, small movements, lips meeting on " +
+  "consonants; the rest of the face stays calm. Small natural head movement; hands out of " +
+  "frame.";
 
+/**
+ * Read only when `text_cfg` > 1 (the lane's default is 3); at the graph's cfg 1 it is inert.
+ * Names the two things the renders actually did wrong — the startled face and the
+ * over-driven mouth — plus the camera moves, in case guidance ever lets one back in.
+ */
 export const LTX_LIPSYNC_NEGATIVE_DIRECTION =
-  "blurry, distorted face, deformed, extra fingers, text, subtitles, watermark, camera " +
-  "movement, zoom, pan, background warping, flicker";
+  "raised eyebrows, wide eyes, startled, surprised expression, exaggerated facial " +
+  "expression, exaggerated mouth movement, camera movement, zoom, push-in, blurry, " +
+  "distorted face";
 
 export function buildLtxLipsyncPrompt(
   scene: StoryboardScene,
