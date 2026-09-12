@@ -86,6 +86,7 @@ export type BaseName = (typeof BASES)[number]["name"];
  * 194 px (the man cropped to 36% of a 544p window) were alive. The 720p / 1080p test on the
  * man (180 / 272 px) pins the floor; until then it sits between the measured dead and alive.
  */
+// Pinned by the 720p/1080p test: 180 px (the man at a 720p base) articulated, 136 did not.
 export const FACE_MIN_PX = Number(process.env.LTX_FACE_MIN_PX ?? 170);
 
 /**

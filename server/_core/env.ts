@@ -75,15 +75,21 @@ export const ENV = {
   ltxLipsyncConcurrency: Number(process.env.LTX_LIPSYNC_CONCURRENCY ?? 4),
   /**
    * How the LTX lane deals with a host face too small to articulate (`server/ltxFraming.ts`):
-   * `auto` — render the WHOLE photo (body and hands move) at the smallest base pass where the
-   *          face is big enough, so only the photos that need it pay for a bigger pass;
-   * `crop`  — render a 16:9 window around the face and paste it back (face only moves);
+   * `crop`  — DEFAULT: render a 16:9 window around the face and paste it back into the still
+   *           photo. Face only moves; camera locked by construction; best face quality.
+   * `auto`  — render the WHOLE photo (body and hands move) at the smallest base pass where the
+   *           face is big enough. MEASURED WORSE on 2026-09-12 and left as an option: at a
+   *           720p base the man's mouth moved (5.8) but the frame drifted (bg morph 8.1) and
+   *           the head jittered (3.6, cap 3) for 1.5x the GPU; at 1080p the mouth was softer
+   *           than at 720p (articulation 0.039, below the floor) for 4.7x; Granny at 720p
+   *           lost closure (0.105 vs 0.04-0.10) and gained flicker (4.6 of 5). More pixels
+   *           in the base pass do not buy a better mouth on this checkpoint.
    * `off`   — whole photo at the graph's own 544p base, whatever the face size.
    */
   ltxLipsyncFraming:
     (["auto", "crop", "off"] as const).find(
-      m => m === (process.env.LTX_LIPSYNC_FRAMING ?? "auto").toLowerCase()
-    ) ?? ("auto" as const),
+      m => m === (process.env.LTX_LIPSYNC_FRAMING ?? "crop").toLowerCase()
+    ) ?? ("crop" as const),
   /**
    * The dearest base pass `auto` may pick. 720p caps the cost at ~2x; a photo that would need
    * 1080p is then rendered at 720p and flagged in the framing report as one to re-frame.
