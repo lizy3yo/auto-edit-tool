@@ -236,7 +236,20 @@ Express · tRPC · Drizzle · MySQL.
   logged and saved on the scene (`scene.ltxFraming`: photo size, faces seen, host face size and
   fraction, the crop, the reason) so a dead mouth is read against the framing instead of
   guessed. `scripts/ltx-framing-report.mts` prints the decision for every channel's host photos
-  (or given files) — run it before trusting a new host photo
+  (or given files) — run it before trusting a new host photo. Two more facts the same day's
+  renders settled: the graph's FIXED SEED (42 for every render) is a liability — on the
+  bearded host, seed 42 collapsed the mouth into the photo's closed-lip smile on every retry,
+  deterministically, and seed 7 did not, same everything — so the lane sends a stable
+  per-scene seed (`sceneSeed`: index + narration hash) and the WORKER runs a mouth-liveness
+  gate (frame-to-frame change in the mouth band of the face box the lane sends; frozen clips
+  measured 2.9-7.2, talking 13.7-25.1; floor 10) that re-renders on the next seed, up to two
+  more times, reporting `seed`, `liveness` and `attempts`. And the crop path's remaining
+  artefact is DRIFT INSIDE THE WINDOW (the model's slow push-in, bg morph ~12 measured on the
+  cropped region) which reads as a zoom against the locked surroundings; the worker's
+  `stabilize: "tripod"` (ffmpeg vidstab, first-frame lock) is the candidate fix, unmeasured
+  as of this note. A wide host photo can only be animated face OR body: the hands outside
+  the window stay still. Face + body + hands together needs the photo framed waist-up with
+  the face ≥ a third of the frame — then the report says "as is" and nothing is cropped
 - `server/providers/` — one adapter per vendor; `base.ts` is the interface,
   `fallback.ts` the image chain (primary → Gemini). The host lip-sync lane has TWO adapters,
   picked in `resolveLipsyncLane` and handed to callers that know neither: `heygen-lipsync.ts`
