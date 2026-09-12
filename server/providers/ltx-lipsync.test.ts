@@ -110,6 +110,7 @@ describe("LtxLipsyncAdapter.submitLipsync", () => {
       decodeTile: "1536/384/192/48",
       textCfg: 3,
       crop: { x: 244, y: 20, w: 966, h: 544 },
+      stabilize: "tripod",
     });
     expect(calls[0].body.input).toMatchObject({
       enhance_prompt: false,
@@ -118,6 +119,7 @@ describe("LtxLipsyncAdapter.submitLipsync", () => {
       decode_tile: "1536/384/192/48",
       text_cfg: 3,
       crop: { x: 244, y: 20, w: 966, h: 544 },
+      stabilize: "tripod",
     });
     // Unset ⇒ absent: the worker's graph defaults rule, and `false` must be sendable (it is
     // the value that turns the shipped-on enhancer off), so the check is on presence.
@@ -129,6 +131,7 @@ describe("LtxLipsyncAdapter.submitLipsync", () => {
       "decode_tile",
       "text_cfg",
       "crop",
+      "stabilize",
     ])
       expect(calls[1].body.input).not.toHaveProperty(k);
   });
