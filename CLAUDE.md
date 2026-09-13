@@ -272,23 +272,28 @@ Express · tRPC · Drizzle · MySQL.
   fourth mode, `person`: a 16:9 window around the whole AVATAR — head to hands, the box
   from the same Haiku call that backs the face detector (`parsePersonBox`; one call per
   photo, cached), or `personFromFace`'s proportional guess when it has no answer — fitted
-  by `planLtxPersonCrop` (5% margin, never under 544 px, clamped to the photo; null when it
-  would be ≥90% of the photo on both sides, and then the render is `whole`). It is the face
+  by `planLtxPersonCrop` (5% margin, never under 544 px, clamped to the photo, and ALWAYS
+  running to the photo's bottom edge: the operator's requirement is the host seen from the
+  top of the head all the way down with room, and Haiku's box stops at the lap and cut the
+  hands off the first render; null when the window would be ≥90% of the photo on both
+  sides, and then the render is `whole`). It is the face
   crop's paste-back with the whole photo's body and hands: the empty room is what gets cut
   away, so the face grows without losing the hands. Rendered with the hands clause and the
   tripod stabilizer like `whole`. The window and the face's share of it are saved on the
   scene (`personCrop`, `personFaceFrac`, `personReason`) and printed by the report beside
   the face window; a face still under a third of the window is named as a photo to reframe
-  waist-up. On the workshop wide shot: face 25% of the photo → 29-35% of the person window
-  (36% of the face crop; Haiku's box varies a little run to run, and the window with it);
-  on Granny's close-up 40% → 49%. A person who spans the full height of a 16:9 photo gets
-  no window at all — the 16:9 box at that height IS the photo. MEASURED on the man, two
-  seeds, against the same beat in `whole` mode: the mouth tracks the words at r 0.43 / 0.39
+  waist-up. On BOTH current host photos (16:9, head near the top) the bottom-edge rule
+  makes the window the whole photo, so they render as `whole`; the window earns its keep on
+  a photo with headroom or a person small in a big room. Before that rule, a window that
+  stopped at Haiku's lap line (976x548 on the workshop shot, face 29-35% against 25% whole
+  and 36% face-crop) was MEASURED on the man, two seeds, against the same beat in `whole`
+  mode: the mouth tracks the words at r 0.43 / 0.39
   (loudness witness 0.56 / 0.55 — the strongest readings this lane has produced, both
   witnesses agreeing) against whole's 0.22 / 0.27, 81-83% of sounds against 61-81%, mouth
   motion 5.2 / 5.0, torso 3.8 / 2.9 (the body moves), and background morph 0.42 / 0.52
   against whole's 2.48 (limit 1) — the paste-back's still plate is what whole never had.
-  It beats `whole` on every axis and keeps what `crop` threw away
+  That is what a tighter window buys when a photo has the room for one; it cut the hands
+  off, which is why the rule now runs to the bottom
 - `server/lipsyncJudge.ts` + `server/lipsyncSyncGate.ts` — the LTX lane's SYNC GATE
   (`LTX_SYNC_GATE`, on by default; `LTX_SYNC_RETRIES` 2). The judge is the measure script's
   core, moved in-process so a render is judged the moment it lands: the mouth's opening per

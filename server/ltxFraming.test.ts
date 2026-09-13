@@ -179,18 +179,28 @@ describe("planLtxBase (the smallest base pass where the face articulates)", () =
 describe("planLtxPersonCrop (the window around the whole avatar)", () => {
   it("cuts the room away on a wide shot: the face grows, the body and hands stay inside", () => {
     // The workshop wide shot: 1376x768, face 188 px (24%), Haiku's person box mid-frame.
-    const person = { x: 540, y: 100, w: 300, h: 500 };
-    const f = planLtxPersonCrop(1376, 768, face(715, 192, 188), person);
+    // A person small in a big room: 1920x1080 photo, face 140 px, Haiku's box mid-frame.
+    const person = { x: 760, y: 300, w: 400, h: 600 };
+    const f = planLtxPersonCrop(1920, 1080, face(960, 380, 140), person);
     expect(f.personCrop).not.toBeNull();
     const c = f.personCrop!;
     expect(aspect(c)).toBeCloseTo(ASPECT, 2);
-    // Holds the person box plus its margin (to the even-pixel grid the window snaps to).
-    expect(c.x).toBeLessThanOrEqual(540 - 300 * 0.05 + 2);
-    expect(c.x + c.w).toBeGreaterThanOrEqual(840 + 300 * 0.05 - 2);
-    expect(c.y).toBeLessThanOrEqual(100 - 500 * 0.05 + 2);
-    expect(c.y + c.h).toBeGreaterThanOrEqual(600 + 500 * 0.05 - 2);
+    // Holds the person box plus its margin (to the even-pixel grid the window snaps to)...
+    expect(c.x).toBeLessThanOrEqual(760 - 400 * 0.05 + 2);
+    expect(c.x + c.w).toBeGreaterThanOrEqual(1160 + 400 * 0.05 - 2);
+    expect(c.y).toBeLessThanOrEqual(300 - 600 * 0.05 + 2);
+    // ...and ALWAYS runs to the photo's bottom edge: the hands and lap are never cut off.
+    expect(c.y + c.h).toBe(1080);
     // And the face is a bigger share of the window than of the photo.
-    expect(f.personFaceFrac!).toBeGreaterThan(188 / 768);
+    expect(f.personFaceFrac!).toBeGreaterThan(140 / 1080);
+  });
+
+  it("is the whole photo on a 16:9 shot where the head sits near the top (the workshop wide shot)", () => {
+    // Haiku's box stopped at the lap (y 77..626 of 768); the window runs to the bottom
+    // regardless, and a 16:9 box from y 52 to 768 is the photo.
+    const f = planLtxPersonCrop(1376, 768, face(715, 192, 188), { x: 344, y: 77, w: 757, h: 499 });
+    expect(f.personCrop).toBeNull();
+    expect(f.personReason).toMatch(/rendered whole/);
   });
 
   it("renders whole when the avatar already fills the photo — or spans its full height on a 16:9 photo", () => {
@@ -213,17 +223,18 @@ describe("planLtxPersonCrop (the window around the whole avatar)", () => {
   });
 
   it("never goes below the model's own 544 px, and stays inside the photo", () => {
-    const f = planLtxPersonCrop(1376, 768, face(300, 200, 150), { x: 200, y: 80, w: 220, h: 300 });
+    // A small person low in the frame, near the left edge of a 1920x1080 photo.
+    const f = planLtxPersonCrop(1920, 1080, face(300, 620, 150), { x: 200, y: 500, w: 220, h: 300 });
     const c = f.personCrop!;
     expect(c.h).toBeGreaterThanOrEqual(544);
     expect(c.x).toBeGreaterThanOrEqual(0);
     expect(c.y).toBeGreaterThanOrEqual(0);
-    expect(c.x + c.w).toBeLessThanOrEqual(1376);
-    expect(c.y + c.h).toBeLessThanOrEqual(768);
+    expect(c.x + c.w).toBeLessThanOrEqual(1920);
+    expect(c.y + c.h).toBe(1080);
   });
 
   it("says so when even the person window leaves the face small", () => {
-    const f = planLtxPersonCrop(3840, 2160, face(1900, 500, 300), { x: 1400, y: 300, w: 1000, h: 1200 });
+    const f = planLtxPersonCrop(3840, 2160, face(1900, 500, 300), { x: 1400, y: 300, w: 1000, h: 900 });
     expect(f.personFaceFrac!).toBeLessThan(0.33);
     expect(f.personReason).toMatch(/mouth may be soft/);
   });

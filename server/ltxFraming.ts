@@ -233,8 +233,11 @@ export function personFromFace(
 }
 
 /**
- * The `person` window: the smallest 16:9 box that holds the whole avatar (plus a margin),
- * never shorter than the model's own 544 px, clamped inside the photo. Pure. The face's
+ * The `person` window: the smallest 16:9 box that holds the whole avatar (plus a margin)
+ * from above the head to the photo's bottom edge, never shorter than the model's own 544 px,
+ * clamped inside the photo. Pure. On a 16:9 photo whose head sits near the top that box IS
+ * the photo, and the render is `whole`; the window earns its keep on photos with headroom
+ * or a person small in a big room. The face's
  * share of that window is what decides whether the mouth will articulate — it is reported
  * and saved, never enforced: the point of this mode is the body and hands, and a face that
  * ends up under a third of the window is a photo to reframe, said so in the reason.
@@ -265,7 +268,11 @@ export function planLtxPersonCrop(
   const bl = clamp(box.x - mx, 0, photoW);
   const br = clamp(box.x + box.w + mx, 0, photoW);
   const bt = clamp(box.y - my, 0, photoH);
-  const bb = clamp(box.y + box.h + my, 0, photoH);
+  // The window always runs to the photo's BOTTOM edge. A host's lower body runs out of the
+  // frame at the bottom of any photo a photographer framed, and Haiku's box stops at the
+  // lap (833x549 of a 768-tall photo on the workshop shot, hands cut off) — the operator's
+  // requirement is the person seen from the top of the head all the way down, with room.
+  const bb = photoH;
   const bw = br - bl;
   const bh = bb - bt;
 
