@@ -137,6 +137,14 @@ export const ENV = {
    */
   ltxLipsyncTextCfg: Number(process.env.LTX_LIPSYNC_TEXT_CFG ?? 3),
   /**
+   * The SYNC GATE (`server/lipsyncSyncGate.ts`): every LTX host clip is judged against its
+   * words before it is stored — shifted by the measured offset, or re-rendered on the next
+   * seed when the mouth does not trace the words at all. `0` ships every render as it came.
+   */
+  ltxSyncGate: process.env.LTX_SYNC_GATE !== "0",
+  /** Fresh seeds the gate may ask for per scene before shipping the last render, flagged. */
+  ltxSyncRetries: Number(process.env.LTX_SYNC_RETRIES ?? 2),
+  /**
    * Which vendor renders host scenes: `heygen` (default), `runpod` (InfiniteTalk) or `ltx`.
    * Deliberately an explicit opt-in rather than "use RunPod if its endpoint is set" — a
    * configured endpoint should be testable without silently moving every render onto it.

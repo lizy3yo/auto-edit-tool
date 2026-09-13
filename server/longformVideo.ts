@@ -90,6 +90,7 @@ import {
   cutNarrationChunks,
 } from "./lipsyncChunks";
 import { ltxFramingForUrl, planLtxBase } from "./ltxFraming";
+import { syncGate, wordsForChunk, summarize } from "./lipsyncSyncGate";
 import {
   getLipsyncProvider,
   getLipsyncQuality,
@@ -3779,7 +3780,7 @@ async function resolveLipsyncLane(
           // the photo's held smile collapses it on every retry, deterministically — measured
           // (seed 42 dead, seed 7 alive, same everything). The worker's liveness gate then
           // steps the seed when a mouth comes back frozen.
-          seed: sceneSeed(scene),
+          seed: sceneSeed(scene) + (scene.ltxSeedBump ?? 0),
           prompt: buildLtxLipsyncPrompt(scene, useAlt, { wholePhoto: !crop }),
           // Read because `textCfg` below is > 1; at the graph's own cfg 1 it would be inert,
           // which is why the camera is ALSO spelled out in the positive prompt.
@@ -8105,6 +8106,13 @@ export class PendingRenderError extends Error {
 }
 
 /**
+ * Thrown by `runChunkTasks` when the sync gate wants a fresh seed: the scene's task ids are
+ * already cleared and its seed bump persisted, so the caller simply submits again. Not a
+ * `PendingRenderError` — nothing is pending, the render was judged and discarded.
+ */
+export class SyncRetryError extends Error {}
+
+/**
  * How many times `runChunkTasks` resubmits a scene after a provider-side terminal failure
  * (`infraFailure`) before failing it for good. Two covers the genuinely transient cases
  * (a worker that crashed once, a HeyGen id that aged out) without paying a third full
@@ -8171,7 +8179,12 @@ export async function runChunkTasks(
    * stored (`server/lipsyncLead.ts`). The truncation guard below then compares the TRIMMED
    * clip with the un-padded narration length, which is what `expectedDurationSec` gives.
    */
-  trimLeadSec?: number
+  trimLeadSec?: number,
+  /**
+   * Where each chunk starts inside the scene's narration (seconds), so the sync gate can
+   * hand each chunk the words it carries. One chunk ⇒ `[0]`.
+   */
+  chunkStartsSec?: number[]
 ): Promise<string[]> {
   // Pre-size the id array (preserve any ids already persisted on a resume). Each chunk fills
   // its own index after submit, so concurrent submits below are index-safe.
@@ -8317,6 +8330,45 @@ export async function runChunkTasks(
         r.fileData = video;
       }
     }
+  }
+
+  // THE SYNC GATE (LTX only, `server/lipsyncSyncGate.ts`): judge every chunk against its
+  // words. A clip that tracks them but sits off by more than a frame or two is shifted by the
+  // measured offset; a clip that does not trace them at all asks for a fresh seed — bounded,
+  // then the last render ships flagged. The record goes on the scene either way.
+  if (provider === "ltx" && ENV.ltxSyncGate) {
+    const judged: NonNullable<StoryboardScene["lipsyncJudge"]> = [];
+    let wantsRetry = false;
+    for (let i = 0; i < polls.length; i++) {
+      const r = polls[i];
+      if (!(r.success && r.fileData)) continue;
+      const start = chunkStartsSec?.[i] ?? 0;
+      const len = expectedDurationSec?.(i) ?? scene.audioDuration ?? 0;
+      const outcome = await syncGate(
+        Buffer.from(r.fileData as Buffer),
+        wordsForChunk(scene.words, start, len),
+        { durationSec: len, label: `scene ${scene.index} chunk ${i}` }
+      );
+      r.fileData = outcome.video;
+      const { _fps, ...record } = summarize(outcome);
+      judged.push(record);
+      if (outcome.decision.action === "retry") wantsRetry = true;
+    }
+    scene.lipsyncJudge = judged;
+    const bump = scene.ltxSeedBump ?? 0;
+    if (wantsRetry && bump < ENV.ltxSyncRetries) {
+      scene.ltxSeedBump = bump + 1;
+      scene.renderTaskIds = undefined;
+      await persist();
+      throw new SyncRetryError(
+        `scene ${scene.index}: mouth does not trace the words — re-rendering on seed +${bump + 1} (${bump + 1}/${ENV.ltxSyncRetries})`
+      );
+    }
+    if (wantsRetry)
+      console.warn(
+        `[LipsyncGate] scene ${scene.index}: still out of sync after ${bump} fresh seed(s) — shipping the last render, flagged`
+      );
+    await persist();
   }
 
   // Duration guard: a provider can return a clip materially SHORTER than the audio it was given
@@ -8669,24 +8721,40 @@ async function generateSceneLipsyncClips(
   // or LTX) — the payload difference lives there, not here. A terminal
   // provider failure surfaces as a PendingRenderError (from runChunkTasks) so the scene
   // re-submits ON THE SAME PROVIDER via the resume pass; there is no cross-provider fallback.
-  let urls = await runChunkTasks(
-    jobId,
-    scene,
-    lipsync.provider,
-    chunkCount,
-    i =>
-      lipsync.submit({
-        scene,
-        imageUrl: faceImageUrl,
-        audioUrl: chunkUrls[i],
-        useAlt: useAltPhoto,
-      }),
-    id => lipsync.poll(id, pollTimeoutMs),
-    persist,
-    lipsync.slots,
-    i => chunkDurations[i],
-    scene.lipsyncLeadSec
+  // Chunk starts inside the narration, for the sync gate's per-chunk words.
+  const chunkStartsSec = chunkDurations.map((_, i) =>
+    chunkDurations.slice(0, i).reduce((a, b) => a + b, 0)
   );
+  let urls: string[];
+  // The sync gate may reject a render and ask for a fresh seed (`SyncRetryError`); it bounds
+  // itself with `scene.ltxSeedBump`, so this loop can only go round that many times.
+  for (;;) {
+    try {
+      urls = await runChunkTasks(
+        jobId,
+        scene,
+        lipsync.provider,
+        chunkCount,
+        i =>
+          lipsync.submit({
+            scene,
+            imageUrl: faceImageUrl,
+            audioUrl: chunkUrls[i],
+            useAlt: useAltPhoto,
+          }),
+        id => lipsync.poll(id, pollTimeoutMs),
+        persist,
+        lipsync.slots,
+        i => chunkDurations[i],
+        scene.lipsyncLeadSec,
+        chunkStartsSec
+      );
+      break;
+    } catch (err) {
+      if (!(err instanceof SyncRetryError)) throw err;
+      console.log(`[Longform ${jobId}] ${err.message}`);
+    }
+  }
 
   return composeHostScene(
     jobId,
@@ -12445,6 +12513,8 @@ async function ensureSceneNarration(
   // audioUrl off-master must do the same.
   scene.narrationStartSec = undefined;
   scene.narrationEndSec = undefined;
+  // The saved word timings described the master slice; the fresh read has its own.
+  scene.words = undefined;
   // The revert snapshot describes the OLD alignment's edges; off-master they no longer point
   // at anything real, so "Revert to original" must stop offering them (see `snapshotTiming`).
   forgetTimingSnapshot(scene);

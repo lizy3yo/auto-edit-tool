@@ -317,6 +317,37 @@ export interface StoryboardScene {
    * dead or drifting mouth can be read against the framing decision instead of guessed.
    */
   ltxFraming?: LtxFraming;
+  /**
+   * This scene's word timings, seconds from the scene's own first sample — the master
+   * narration's whisperx alignment cut to the slice (`assignSceneRanges`). What the LTX
+   * lane's sync gate judges the mouth against, so a render costs no transcription. Cleared
+   * when the scene is re-voiced off the master.
+   */
+  words?: { word: string; start: number; end: number }[];
+  /**
+   * What the LTX lane's sync gate measured on this scene's last render and what it did
+   * (`server/lipsyncSyncGate.ts`): the mouth's correlation with the words, the offset, the
+   * fraction of sounds matched, lips-closed, and ship / shift / retry. One entry per chunk.
+   */
+  lipsyncJudge?: {
+    r: number;
+    lagMs: number;
+    soundsPct: number;
+    closure: number | null;
+    action: "ship" | "shift" | "retry";
+    shiftedMs: number;
+    wordsSource: "scene" | "transcribed";
+    /** The audio-envelope witness (mouth opening against loudness). */
+    envR: number | null;
+    envLagMs: number | null;
+    reason: string;
+    frames: number;
+  }[];
+  /**
+   * How many times the sync gate has asked for a fresh seed on this scene. Added to the
+   * per-scene seed so a retry renders something different; bounded by `LTX_SYNC_RETRIES`.
+   */
+  ltxSeedBump?: number;
   /** Whether the on-camera host appears (gets the reference face + face-lock) */
   hostPresent: boolean;
   /**

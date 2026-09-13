@@ -269,6 +269,31 @@ Express · tRPC · Drizzle · MySQL.
   default and `whole` is the per-deployment choice. The stabilizer measured NO effect inside
   a crop window (12.6 vs 12.0): the drift there is content re-hallucination, not a camera
   move it can undo
+- `server/lipsyncJudge.ts` + `server/lipsyncSyncGate.ts` — the LTX lane's SYNC GATE
+  (`LTX_SYNC_GATE`, on by default; `LTX_SYNC_RETRIES` 2). The judge is the measure script's
+  core, moved in-process so a render is judged the moment it lands: the mouth's opening per
+  frame (pico face box, native frame rate — `probeFps`, because mapping a 24 fps clip at 25
+  drifted 4%, ~250 ms by the end of a 6 s beat, and that drift sat inside every lag figure
+  measured before 2026-09-14) correlated over ±600 ms with the opening the words demand
+  (CMU dictionary, `scene.words` kept by `assignSceneRanges`, whisperx when a scene has none)
+  — and, as a SECOND WITNESS, with the audio's loudness envelope, which needs no dictionary
+  and fails differently. The result is saved on the scene (`scene.lipsyncJudge[]`: both
+  witnesses' r/lag/far, sounds matched, the decision). The table (`decide`): the phonetic
+  peak at chance (r < 0.15, or on the scan's edge) with the envelope not tracking either ⇒
+  a fresh seed (`scene.ltxSeedBump`, `SyncRetryError` re-runs the chunk); both witnesses
+  confident (r ≥ 0.3, 0.15 over their far level) AND agreeing within 100 ms, off the −40 ms
+  target by more than 80 ms ⇒ the picture is trimmed/padded by their mean (`shiftClip`,
+  re-judged, reverted if worse); anything else ships as rendered. Measured on 14 clips, the
+  two witnesses NEVER agreed while both confident — the phonetic lag alone read +208, 0,
+  −542, +560, +125 ms on five compensated renders of the same hosts — so in practice
+  nothing is shifted: the single-witness version moved one clip 248 ms and took it from 86%
+  to 75% of sounds matched. The gate's real work is the record and the re-seed. The retry
+  test is the PEAK alone, not the margin over the far level: that level is noisy on a 6 s
+  clip (0.06-0.33 on one host), a margin test retried two clips that ship fine (r 0.27 at
+  83%; r 0.22 in whole mode), and the dead mouth reads r 0.02. The worker's 10-frame lag
+  compensation stands unverified by this judge either way; a by-eye plosive check on
+  renders at lag 0 / 5 / 10 is the way to settle it. Off, `LTX_SYNC_GATE=0` ships every
+  render untouched and unjudged
 - `server/providers/` — one adapter per vendor; `base.ts` is the interface,
   `fallback.ts` the image chain (primary → Gemini). The host lip-sync lane has TWO adapters,
   picked in `resolveLipsyncLane` and handed to callers that know neither: `heygen-lipsync.ts`

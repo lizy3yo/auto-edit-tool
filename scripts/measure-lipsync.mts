@@ -84,27 +84,38 @@ import path from "path";
 import { fileURLToPath } from "url";
 import sharp from "sharp";
 import ffmpegPath from "ffmpeg-static";
-import { detectFaces } from "../server/pico";
 import { transcribeWordsFromBuffer } from "../server/_core/voiceTranscription";
-// The CMU Pronouncing Dictionary: word → ARPAbet sounds. This is what turns "how it should
-// be" from a HeyGen clip into a rule of speech.
-import * as cmuModule from "cmu-pronouncing-dictionary";
-const CMU: Record<string, string> = ((cmuModule as any).dictionary ??
-  (cmuModule as any).default ??
-  cmuModule) as Record<string, string>;
+// The judge itself lives in the server so the pipeline's sync gate runs the SAME arithmetic
+// this report prints (server/lipsyncJudge.ts). Everything below is the CLI: caching, the
+// reference profiles, the A-Z table and the contact sheet.
+import {
+  FPS as DEFAULT_FPS,
+  probeFps,
+  SYNC_MARGIN,
+  SYNC_OFFSET_MAX_MS,
+  CLASS_ORDER,
+  classesOf,
+  extractMouthFrames,
+  phoneticScore,
+  type Word,
+  type Frame,
+  type ClassName,
+  type Phonetic,
+} from "../server/lipsyncJudge";
 
-const FPS = 25;
 const FFMPEG = process.env.FFMPEG_PATH || (ffmpegPath as unknown as string);
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REFERENCE_DIR = path.join(HERE, "lipsync-reference");
 
+/**
+ * The clip's own frame rate, set per measurement (`measure`). Until 2026-09-14 this was a
+ * constant 25 while frames were read at the clip's native 24 — a 4% drift in every lag.
+ */
+let FPS = DEFAULT_FPS;
+
 /** Whole-clip limits, calibrated to the accepted HeyGen reference of this host. */
 const CLOSURE_LIMIT = 0.068;
 const RANGE_FLOOR = 0.045;
-
-type Word = { word: string; start: number; end: number };
-/** open: dark fraction of the mouth window; aspect: dark-region w/h; width: lip line span / face size. */
-type Frame = { open: number; aspect: number; width: number };
 
 const ff = (args: string[]) => {
   const r = spawnSync(FFMPEG, ["-hide_banner", "-loglevel", "error", ...args], {
@@ -165,121 +176,7 @@ async function mouthFrames(clip: string, work: string): Promise<Frame[]> {
   writeFileSync(cached, JSON.stringify(out));
   return out;
 }
-async function extractMouthFrames(
-  clip: string,
-  work: string
-): Promise<Frame[]> {
-  const dir = path.join(work, "frames");
-  mkdirSync(dir, { recursive: true });
-  ff(["-y", "-i", clip, "-vf", "scale=1280:-2", path.join(dir, "%04d.png")]);
-  const files = readdirSync(dir).sort();
-  const out: Frame[] = [];
-  let last: { x: number; y: number; size: number } | null = null;
-  for (const f of files) {
-    const img = sharp(path.join(dir, f));
-    const { data, info } = await img
-      .clone()
-      .resize({ width: 640 })
-      .grayscale()
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-    const faces = detectFaces(
-      new Uint8Array(data.buffer, data.byteOffset, data.byteLength),
-      info.width,
-      info.height
-    );
-    const s = 1280 / info.width;
-    const face = faces.length
-      ? { x: faces[0].x * s, y: faces[0].y * s, size: faces[0].size * s }
-      : last;
-    if (face) last = face;
-    if (!face) {
-      out.push(
-        out.length ? out[out.length - 1] : { open: 0, aspect: 0, width: 0 }
-      );
-      continue;
-    }
-    const mw = Math.round(face.size * 0.42);
-    const mh = Math.round(face.size * 0.26);
-    const m = await img
-      .clone()
-      .extract({
-        left: Math.max(0, Math.round(face.x - mw / 2)),
-        top: Math.max(0, Math.round(face.y + face.size * 0.22)),
-        width: mw,
-        height: mh,
-      })
-      .grayscale()
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-    // Openness: dark fraction. Aspect: extent of the dark region — columns and rows that
-    // hold at least a few dark pixels — width over height.
-    const W = m.info.width;
-    const H = m.info.height;
-    const cols = new Array<number>(W).fill(0);
-    const rows = new Array<number>(H).fill(0);
-    let dark = 0;
-    for (let y = 0; y < H; y++)
-      for (let x = 0; x < W; x++)
-        if (m.data[y * W + x] < 60) {
-          dark++;
-          cols[x]++;
-          rows[y]++;
-        }
-    const minRun = Math.max(2, Math.round(H * 0.06));
-    const width = cols.filter(c => c >= minRun).length;
-    const height = rows.filter(r => r >= minRun).length;
-    // Lip width, corner to corner. The lip line is the darkest thing in each column whether
-    // the mouth is shut or teeth split the cavity, so the span of columns whose darkest pixel
-    // sits well below the window's median luma is the mouth's width — the thing "oo" narrows
-    // and "ee" widens, which the cavity aspect could not separate. Divided by the face size
-    // so hosts of different scale compare.
-    const colMin = new Array<number>(W).fill(255);
-    const lumas = new Array<number>(W * H);
-    for (let y = 0; y < H; y++)
-      for (let x = 0; x < W; x++) {
-        const v = m.data[y * W + x];
-        lumas[y * W + x] = v;
-        if (v < colMin[x]) colMin[x] = v;
-      }
-    lumas.sort((a, b) => a - b);
-    const medLuma = lumas[Math.floor(lumas.length / 2)];
-    let first = -1;
-    let lastCol = -1;
-    for (let x = 0; x < W; x++)
-      if (colMin[x] < medLuma - 25) {
-        if (first < 0) first = x;
-        lastCol = x;
-      }
-    out.push({
-      open: dark / m.data.length,
-      aspect: height >= 2 ? width / height : 0,
-      width: first >= 0 ? (lastCol - first + 1) / face.size : 0,
-    });
-  }
-  return out;
-}
 
-// ── viseme classes from spelling ────────────────────────────────────────────
-const clean = (w: string) => w.toLowerCase().replace(/[^a-z']/g, "");
-type ClassName =
-  "closed" | "lip-teeth" | "rounded" | "spread" | "open" | "neutral" | "rest";
-const CLASS_RULES: [ClassName, RegExp][] = [
-  ["closed", /[pbm]/],
-  ["lip-teeth", /[fv]/],
-  ["rounded", /(oo|ou|ow|^w|u|o$)/],
-  ["spread", /(ee|ea|^i[^aeiou]|y$|ie)/],
-  ["open", /(^i$|ai|igh|ar|aw|ay|a[^eiouy]|o[^ouw])/],
-];
-const CLASS_ORDER: ClassName[] = [
-  "closed",
-  "lip-teeth",
-  "rounded",
-  "spread",
-  "open",
-  "neutral",
-  "rest",
-];
 /** What each class expects, how it is read, and which direction is "good". */
 const CLASS_META: Record<
   ClassName,
@@ -333,336 +230,6 @@ const CLASS_META: Record<
     expects: "settled",
   },
 };
-const classesOf = (w: string): ClassName[] => {
-  const c = clean(w);
-  const hits = CLASS_RULES.filter(([, re]) => re.test(c)).map(([n]) => n);
-  return hits.length ? hits : ["neutral"];
-};
-
-// ── the rule of speech: sound → mouth shape (ARPAbet → viseme class) ──────────
-const PHONE_CLASS: Record<string, ClassName> = {
-  P: "closed",
-  B: "closed",
-  M: "closed",
-  F: "lip-teeth",
-  V: "lip-teeth",
-  UW: "rounded",
-  UH: "rounded",
-  OW: "rounded",
-  AO: "rounded",
-  OY: "rounded",
-  W: "rounded",
-  IY: "spread",
-  IH: "spread",
-  EY: "spread",
-  Y: "spread",
-  AA: "open",
-  AE: "open",
-  AH: "open",
-  AY: "open",
-  AW: "open",
-  // parted with little lip commitment — tallied for information, never scored
-  T: "neutral",
-  D: "neutral",
-  S: "neutral",
-  Z: "neutral",
-  N: "neutral",
-  L: "neutral",
-  K: "neutral",
-  G: "neutral",
-  NG: "neutral",
-  TH: "neutral",
-  DH: "neutral",
-  SH: "neutral",
-  ZH: "neutral",
-  CH: "neutral",
-  JH: "neutral",
-  HH: "neutral",
-  R: "neutral",
-  ER: "neutral",
-  EH: "neutral",
-};
-const CLASS_STANDIN: Record<ClassName, string> = {
-  closed: "M",
-  "lip-teeth": "F",
-  rounded: "UW",
-  spread: "IY",
-  open: "AA",
-  neutral: "T",
-  rest: "T",
-};
-const cmuKey = (w: string) => clean(w).replace(/[\u2018\u2019]/g, "'");
-const inDictionary = (w: string) =>
-  !!(CMU[cmuKey(w)] ?? CMU[cmuKey(w).replace(/'/g, "")]);
-/** A word's sounds from the dictionary; a word it lacks falls back to its spelling classes. */
-function phonesOf(word: string): string[] {
-  const k = cmuKey(word);
-  const entry = CMU[k] ?? CMU[k.replace(/'/g, "")];
-  if (entry) return entry.split(/\s+/).map(p => p.replace(/[0-9]/g, ""));
-  return classesOf(word).map(cls => CLASS_STANDIN[cls]);
-}
-
-type PhoneScore = { n: number; right: number; missed: string[] };
-type LagScan = {
-  /** Pearson r between predicted and measured opening at the best lag within ±SYNC_MAX. */
-  peakR: number;
-  /** Where that peak sits, ms; negative = the mouth moves BEFORE the sound. */
-  peakLagMs: number;
-  /** Median |r| at lags ≥ 320 ms away — what "out of sync" scores on this clip. */
-  farR: number;
-  /** r at every lag, for the curve. */
-  curve: { lagMs: number; r: number }[];
-};
-type Phonetic = {
-  /** The verdict: predicted-vs-measured OPENING over lag. */
-  open: LagScan;
-  /** Predicted-vs-measured LIP WIDTH (rounded narrow, spread wide) — informational. */
-  width: LagScan;
-  perClass: Partial<Record<ClassName, PhoneScore>>;
-  overall: { n: number; right: number };
-  /** The per-sound table re-run with every word shifted 400 ms: its own out-of-sync control. */
-  controlPct: number;
-  unknownWords: string[];
-};
-
-/**
- * How open the mouth is for each sound, 0 (shut) to 1 (jaw dropped), and how wide the lips
- * are, -1 (pursed) to +1 (corners pulled). Standard viseme targets; a sound not listed is
- * parted-neutral. Only the ORDER matters much — the correlation is scale-free.
- */
-const PHONE_OPEN: Record<string, number> = {
-  P: 0,
-  B: 0,
-  M: 0,
-  F: 0.1,
-  V: 0.1,
-  UW: 0.45,
-  UH: 0.5,
-  OW: 0.6,
-  AO: 0.7,
-  OY: 0.6,
-  W: 0.3,
-  IY: 0.4,
-  IH: 0.45,
-  EY: 0.5,
-  Y: 0.35,
-  EH: 0.6,
-  ER: 0.5,
-  AA: 1,
-  AE: 0.9,
-  AH: 0.8,
-  AY: 0.9,
-  AW: 0.9,
-  T: 0.35,
-  D: 0.35,
-  S: 0.3,
-  Z: 0.3,
-  N: 0.35,
-  L: 0.45,
-  K: 0.45,
-  G: 0.45,
-  NG: 0.4,
-  TH: 0.3,
-  DH: 0.3,
-  SH: 0.35,
-  ZH: 0.35,
-  CH: 0.35,
-  JH: 0.35,
-  HH: 0.5,
-  R: 0.45,
-};
-const PHONE_WIDTH: Record<string, number> = {
-  UW: -1,
-  UH: -0.6,
-  OW: -0.8,
-  AO: -0.6,
-  OY: -0.6,
-  W: -1,
-  IY: 1,
-  IH: 0.6,
-  EY: 0.8,
-  Y: 0.6,
-  AE: 0.4,
-  EH: 0.3,
-};
-const SYNC_MAX_FRAMES = 15; // ±600 ms scanned
-const FAR_LAG_FRAMES = 8; // ≥320 ms away counts as "out of sync"
-
-/** The curve a mouth saying these words should trace, one value per frame, lightly smoothed. */
-function predictedTrack(
-  ws: Word[],
-  n: number,
-  table: Record<string, number>,
-  fill: number
-): number[] {
-  const p = new Array<number>(n).fill(fill);
-  for (const w of ws) {
-    const phones = phonesOf(w.word);
-    const per = Math.max(0.04, w.end - w.start) / phones.length;
-    phones.forEach((ph, i) => {
-      const lo = Math.round((w.start + i * per) * FPS);
-      const hi = Math.round((w.start + (i + 1) * per) * FPS);
-      for (let f = Math.max(0, lo); f <= hi && f < n; f++)
-        p[f] = table[ph] ?? fill;
-    });
-  }
-  // Three-frame smoothing: lips glide between sounds (co-articulation), they do not step.
-  return p.map(
-    (_, i) => (p[Math.max(0, i - 1)] + p[i] + p[Math.min(n - 1, i + 1)]) / 3
-  );
-}
-
-function pearson(a: number[], b: number[], lag: number): number {
-  const xs: number[] = [];
-  const ys: number[] = [];
-  for (let i = 0; i < a.length; i++) {
-    const j = i + lag;
-    if (j >= 0 && j < b.length) {
-      xs.push(a[i]);
-      ys.push(b[j]);
-    }
-  }
-  if (xs.length < 8) return 0;
-  const mx = xs.reduce((s, v) => s + v, 0) / xs.length;
-  const my = ys.reduce((s, v) => s + v, 0) / ys.length;
-  let sxy = 0;
-  let sxx = 0;
-  let syy = 0;
-  for (let i = 0; i < xs.length; i++) {
-    sxy += (xs[i] - mx) * (ys[i] - my);
-    sxx += (xs[i] - mx) ** 2;
-    syy += (ys[i] - my) ** 2;
-  }
-  return sxx > 0 && syy > 0 ? sxy / Math.sqrt(sxx * syy) : 0;
-}
-
-/** Correlate predicted against measured at every lag; report the peak, its offset and the far level. */
-function lagScan(pred: number[], meas: number[]): LagScan {
-  const curve: LagScan["curve"] = [];
-  let peak = { r: -Infinity, lag: 0 };
-  const far: number[] = [];
-  for (let lag = -SYNC_MAX_FRAMES; lag <= SYNC_MAX_FRAMES; lag++) {
-    const r = pearson(pred, meas, lag);
-    curve.push({ lagMs: (lag * 1000) / FPS, r });
-    if (r > peak.r) peak = { r, lag };
-    if (Math.abs(lag) >= FAR_LAG_FRAMES) far.push(Math.abs(r));
-  }
-  far.sort((a, b) => a - b);
-  return {
-    peakR: peak.r,
-    peakLagMs: (peak.lag * 1000) / FPS,
-    farR: far.length ? far[Math.floor(far.length / 2)] : 0,
-    curve,
-  };
-}
-
-/**
- * Per-sound pass/fail against the clip's own median, kept for the WHERE: closed, lip-teeth
- * and rest want the opening below the median, open sounds above; rounded want the lip width
- * below, spread above. Each sound is looked for one frame either side of its slot.
- * Informational only — see the header.
- */
-const PHONE_PAD = 1;
-function perSoundTable(
-  ws: Word[],
-  fr: Frame[]
-): Pick<Phonetic, "perClass" | "overall" | "unknownWords"> {
-  const median = (xs: number[]) => {
-    const a = [...xs].sort((x, y) => x - y);
-    return a.length ? a[Math.floor(a.length / 2)] : 0;
-  };
-  const openMed = median(fr.map(f => f.open));
-  const widthMed = median(fr.filter(f => f.width > 0).map(f => f.width));
-  const perClass: Phonetic["perClass"] = {};
-  const overall = { n: 0, right: 0 };
-  const unknownWords: string[] = [];
-  const tally = (cls: ClassName, ok: boolean, where: string) => {
-    const p = (perClass[cls] ??= { n: 0, right: 0, missed: [] });
-    p.n++;
-    if (ok) p.right++;
-    else if (p.missed.length < 6) p.missed.push(where);
-    if (cls !== "neutral") {
-      overall.n++;
-      if (ok) overall.right++;
-    }
-  };
-  for (const w of ws) {
-    if (!inDictionary(w.word)) unknownWords.push(w.word);
-    const phones = phonesOf(w.word);
-    const per = Math.max(0.04, w.end - w.start) / phones.length;
-    phones.forEach((ph, i) => {
-      const cls = PHONE_CLASS[ph];
-      if (!cls) return;
-      const t0 = w.start + i * per;
-      const lo = Math.max(0, Math.round(t0 * FPS) - PHONE_PAD);
-      const hi = Math.min(
-        fr.length - 1,
-        Math.round((t0 + per) * FPS) + PHONE_PAD
-      );
-      if (lo > hi) return;
-      const seg = fr.slice(lo, hi + 1);
-      const opens = seg.map(f => f.open);
-      const widths = seg.map(f => f.width).filter(v => v > 0);
-      const where = `${w.word}:${ph.toLowerCase()}`;
-      if (cls === "closed" || cls === "lip-teeth")
-        tally(cls, Math.min(...opens) < openMed, where);
-      else if (cls === "open") tally(cls, Math.max(...opens) > openMed, where);
-      else if (cls === "rounded")
-        tally(cls, widths.length > 0 && Math.min(...widths) < widthMed, where);
-      else if (cls === "spread")
-        tally(cls, widths.length > 0 && Math.max(...widths) > widthMed, where);
-      else tally(cls, true, where);
-    });
-  }
-  for (let i = 1; i < ws.length; i++) {
-    const gap = ws[i].start - ws[i - 1].end;
-    if (gap < 0.12) continue;
-    const lo = Math.round(ws[i - 1].end * FPS);
-    const hi = Math.min(fr.length - 1, Math.round(ws[i].start * FPS));
-    if (lo > hi) continue;
-    const opens = fr.slice(lo, hi + 1).map(f => f.open);
-    tally(
-      "rest",
-      opens.reduce((a, b) => a + b, 0) / opens.length < openMed,
-      `(pause ${Math.round(gap * 1000)}ms)`
-    );
-  }
-  return { perClass, overall, unknownWords };
-}
-
-function phoneticScore(ws: Word[], fr: Frame[]): Phonetic {
-  const n = fr.length;
-  const open = lagScan(
-    predictedTrack(ws, n, PHONE_OPEN, 0),
-    fr.map(f => f.open)
-  );
-  const width = lagScan(
-    predictedTrack(ws, n, PHONE_WIDTH, 0),
-    fr.map(f => f.width)
-  );
-  const table = perSoundTable(ws, fr);
-  const ctl = perSoundTable(
-    ws.map(w => ({ ...w, start: w.start + 0.4, end: w.end + 0.4 })),
-    fr
-  ).overall;
-  return {
-    open,
-    width,
-    ...table,
-    controlPct: ctl.n ? ctl.right / ctl.n : 0,
-  };
-}
-
-/**
- * The universal bar, calibrated by running an accepted HeyGen render of this host through the
- * same judge (it scored peak r 0.21 at -80 ms against a far-lag level of 0.05; the render
- * that prompted this scored 0.46 at -80 ms against 0.03). "Tracks the words" means the peak
- * clears the out-of-sync level by SYNC_MARGIN; "in sync" means the peak sits within
- * SYNC_OFFSET_MAX_MS of zero — a mouth normally LEADS its sound by 40-100 ms (lips close
- * before the "b" is heard), so a small negative lag is how speech looks, not an error.
- */
-const SYNC_MARGIN = 0.1;
-const SYNC_OFFSET_MAX_MS = 200;
 
 type ClassStat = {
   value: number;
@@ -777,7 +344,7 @@ function profileOf(ws: Word[], fr: Frame[]): Profile {
     opening,
     range: opening - closure,
     classes,
-    phonetic: phoneticScore(ws, fr),
+    phonetic: phoneticScore(ws, fr, FPS),
   };
 }
 
@@ -788,6 +355,7 @@ async function measure(clip: string): Promise<Profile> {
   );
   mkdirSync(work, { recursive: true });
   try {
+    FPS = probeFps(clip);
     const [ws, fr] = await Promise.all([
       words(clip, work),
       mouthFrames(clip, work),

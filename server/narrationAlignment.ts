@@ -209,6 +209,21 @@ export function assignSceneRanges(
     const endSec = Math.max(startSec, boundaries[i + 1]);
     ranges.push({ startSec, endSec });
     scenes[i].audioDuration = endSec - startSec;
+    // Keep the words that fall in this slice, re-based to it: the lip-sync judge reads them
+    // (`server/lipsyncSyncGate.ts`), so a host render is checked against its words for free.
+    // The proportional (Whisper-less) path leaves them unset and the gate transcribes.
+    if (words && words.length > 0) {
+      scenes[i].words = words
+        .filter(w => w.end > startSec && w.start < endSec)
+        .map(w => ({
+          word: w.word,
+          start: Math.max(0, Math.round((w.start - startSec) * 1000) / 1000),
+          end: Math.min(
+            endSec - startSec,
+            Math.round((w.end - startSec) * 1000) / 1000
+          ),
+        }));
+    }
   }
   return ranges;
 }
