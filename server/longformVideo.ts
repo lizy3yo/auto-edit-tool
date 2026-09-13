@@ -3754,7 +3754,19 @@ async function resolveLipsyncLane(
         // Three ways to make a small face articulate — see ENV.ltxLipsyncFraming. `auto`
         // renders the whole photo (body and hands move) and only raises the base pass for
         // the photos whose face needs it; `crop` renders a window around the face.
-        const mode = ENV.ltxLipsyncFraming;
+        const engine = ENV.ltxLipsyncEngine;
+        const mode = engine === "inpaint" ? ("inpaint" as const) : ENV.ltxLipsyncFraming;
+        // The inpaint engine's MASK: the person's box (Haiku's, or the proportional guess),
+        // run to the photo's bottom like the person window; the graph dilates and blends it.
+        const mask =
+          engine === "inpaint" && framing.person
+            ? {
+                x: framing.person.x,
+                y: framing.person.y,
+                w: framing.person.w,
+                h: framing.photoH - framing.person.y,
+              }
+            : undefined;
         const base =
           mode === "auto"
             ? planLtxBase(framing.faceFrac, ENV.ltxLipsyncMaxBase)
@@ -3773,7 +3785,7 @@ async function resolveLipsyncLane(
         // crop, so not there.
         const stabilize =
           mode === "whole" || mode === "person" ? ("tripod" as const) : undefined;
-        scene.ltxFraming = { ...framing, base, crop: crop ?? null };
+        scene.ltxFraming = { ...framing, base, crop: crop ?? null, ...(mask ? { mask } : {}) };
         if (base && base.name !== "544p")
           console.log(
             `[LTX framing] scene ${scene.index}: base ${base.name} (face ${base.facePx} px)${base.capped ? " — CAPPED, re-frame this photo" : ""}`
@@ -3802,6 +3814,7 @@ async function resolveLipsyncLane(
           sampler: ENV.ltxLipsyncSampler,
           decodeTile: ENV.ltxLipsyncDecodeTile,
           textCfg: ENV.ltxLipsyncTextCfg,
+          ...(engine === "inpaint" ? { engine, mask } : {}),
         });
       },
       poll: (id, ms) => ltx.pollVideo(id, ms ?? LTX_LIPSYNC_TIMEOUT_MS),

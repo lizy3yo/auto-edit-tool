@@ -143,6 +143,17 @@ export const ENV = {
    */
   ltxLipsyncTextCfg: Number(process.env.LTX_LIPSYNC_TEXT_CFG ?? 3),
   /**
+   * Which worker graph renders a host beat. `a2v` (default) is the audio-to-video graph with
+   * the lane's framing modes above. `inpaint` is Lightricks' inpaint IC-LoRA graph: the
+   * photo becomes a still plate carrying the narration, the model paints only inside the
+   * person's box and blends the result into the untouched plate — the paste-back done by
+   * the model, and the camera locked by construction. An experiment until measured.
+   */
+  ltxLipsyncEngine:
+    (["a2v", "inpaint"] as const).find(
+      m => m === (process.env.LTX_LIPSYNC_ENGINE ?? "a2v").toLowerCase()
+    ) ?? ("a2v" as const),
+  /**
    * The SYNC GATE (`server/lipsyncSyncGate.ts`): every LTX host clip is judged against its
    * words before it is stored — shifted by the measured offset, or re-rendered on the next
    * seed when the mouth does not trace the words at all. `0` ships every render as it came.

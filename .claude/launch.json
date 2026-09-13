@@ -32,6 +32,19 @@
         "--strictPort"
       ],
       "port": 5199
+    },
+    {
+      "name": "comfy-export",
+      "runtimeExecutable": "C:\\ltxc\\venv\\Scripts\\python.exe",
+      "runtimeArgs": [
+        "C:\\ltxc\\main.py",
+        "--cpu",
+        "--listen",
+        "127.0.0.1",
+        "--port",
+        "8199"
+      ],
+      "port": 8199
     }
   ]
 }

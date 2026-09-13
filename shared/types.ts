@@ -251,6 +251,8 @@ export interface LtxFraming {
   /** Host face height as a fraction of the person window's height. */
   personFaceFrac?: number | null;
   personReason?: string;
+  /** The inpaint engine's mask (photo pixels): where the model was allowed to paint. */
+  mask?: LtxCrop;
   /**
    * The model's base pass chosen for this photo when framing is `auto` (`planLtxBase`): the
    * smallest of 544p/720p/1080p at which the host face reaches the pixel size that

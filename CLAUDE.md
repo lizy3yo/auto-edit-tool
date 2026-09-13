@@ -99,7 +99,7 @@ Gemini, OpenAI, R2, RunPod. Missing ones fail loudly at the first stage that nee
 | `RUNPOD_LIPSYNC_QUANTIZATION`   | fp8_e4m3fn        | `RUNPOD_LIPSYNC_V2V_STEPS` / `_START_STEP` | 12 / 3 (9 active)            |
 | `LTX_LIPSYNC_MAX_SEC`           | 20 s per call     | `LTX_LIPSYNC_RESOLUTION`                   | unset (worker default)       |
 | `LTX_LIPSYNC_TIMEOUT_MS`        | 20 min (poll)     | `LTX_LIPSYNC_EXECUTION_TIMEOUT_MS`         | 25 min (per-job GPU cap)     |
-| `LTX_LIPSYNC_CONCURRENCY`       | 4                 | —                                          | —                            |
+| `LTX_LIPSYNC_CONCURRENCY`       | 4                 | `LTX_LIPSYNC_ENGINE`                       | a2v (`inpaint` = experiment) |
 
 `RUNPOD_LIPSYNC_EXECUTION_TIMEOUT_MS` is sent with every submit as RunPod's `policy.executionTimeout`
 and overrides the endpoint's own setting (dashboard default 20 min). InfiniteTalk at 720p on the
@@ -293,7 +293,18 @@ Express · tRPC · Drizzle · MySQL.
   motion 5.2 / 5.0, torso 3.8 / 2.9 (the body moves), and background morph 0.42 / 0.52
   against whole's 2.48 (limit 1) — the paste-back's still plate is what whole never had.
   That is what a tighter window buys when a photo has the room for one; it cut the hands
-  off, which is why the rule now runs to the bottom
+  off, which is why the rule now runs to the bottom. A SECOND ENGINE exists behind
+  `LTX_LIPSYNC_ENGINE=inpaint` (2026-09-14, unmeasured as of this note): Lightricks' inpaint
+  IC-LoRA graph, where the worker turns the photo into a still plate video carrying the
+  narration, paints only inside the person's box (`scene.ltxFraming.mask`, Haiku's person
+  box run to the bottom) with the audio frozen through, and the graph Laplacian-blends the
+  result into the untouched plate — the crop's paste-back done by the model, camera locked
+  by construction, body and hands inside the mask. Why it exists: the community's fix for
+  a wandering camera is Lightricks' Static Camera LoRA, which is published only for the 19B
+  LTX-2.0 and cannot load on this 22B 2.5; the popular workflows handle wide shots exactly
+  as `crop` does (a face crop stitched back), and the inpaint graph is the model's own
+  version of that. The open question it was built to answer is whether the frozen audio
+  drives the lips inside the mask on 2.5; the judge decides
 - `server/lipsyncJudge.ts` + `server/lipsyncSyncGate.ts` — the LTX lane's SYNC GATE
   (`LTX_SYNC_GATE`, on by default; `LTX_SYNC_RETRIES` 2). The judge is the measure script's
   core, moved in-process so a render is judged the moment it lands: the mouth's opening per

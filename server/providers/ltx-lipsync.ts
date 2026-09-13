@@ -84,6 +84,15 @@ export interface LtxLipsyncParams {
    * 2.5 with the body's own motion kept. Does nothing useful inside a face crop.
    */
   stabilize?: "tripod";
+  /**
+   * `inpaint`: Lightricks' inpaint IC-LoRA graph instead of the A2V graph. The worker turns
+   * the photo into a still plate video carrying the narration, paints only inside `mask`
+   * (the person's box in photo pixels) with the audio frozen through, and the graph blends
+   * the result back into the untouched plate — the camera cannot move by construction.
+   * Absent = the A2V graph (`a2v`).
+   */
+  engine?: "a2v" | "inpaint";
+  mask?: { x: number; y: number; w: number; h: number };
 }
 
 const RUNPOD_API_BASE = "https://api.runpod.ai/v2";
@@ -209,6 +218,8 @@ export class LtxLipsyncAdapter {
         ...(params.textCfg != null ? { text_cfg: params.textCfg } : {}),
         ...(params.crop ? { crop: params.crop } : {}),
         ...(params.stabilize ? { stabilize: params.stabilize } : {}),
+        ...(params.engine === "inpaint" ? { engine: "inpaint" } : {}),
+        ...(params.mask ? { mask: params.mask } : {}),
         ...(params.face
           ? {
               face: {
