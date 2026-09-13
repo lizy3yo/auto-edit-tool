@@ -183,10 +183,11 @@ Express · tRPC · Drizzle · MySQL.
   out positively and carries NO gesture cue (`LTX_LIPSYNC_DIRECTION`; the negative prompt is
   never read at CFG 1, and "leans in" is a camera move to this model), the sampler is `euler`
   (`LTX_LIPSYNC_SAMPLER`; on the graph's `euler_ancestral` the mouth's correlation with the
-  words was CHANCE, r 0.05, and r 0.47 on euler with nothing else changed), and the worker
-  compensates a measured 10-frame MOUTH LAG (renders the narration padded on the 1+8n grid,
-  drops the first 10 frames, muxes the original back — `LTX_LAG_FRAMES` on the endpoint) that
-  put the mouth 400-520 ms behind the sound on every render of both hosts, and TEXT GUIDANCE
+  words was CHANCE, r 0.05, and r 0.47 on euler with nothing else changed), NO mouth-lag
+  compensation (the worker pads the narration UP to the 1+8n grid so the picture is never
+  shorter than the voice, and `LTX_LAG_FRAMES` on the endpoint can drop leading frames — it
+  was 10 for two days on a judge that read the mouth 400-520 ms late, and that judge was
+  drifting; see the sync gate below), and TEXT GUIDANCE
   on stage 1 (`LTX_LIPSYNC_TEXT_CFG`, default 3, via the pack's MultimodalGuider in the
   worker) so the prompt bites and the negative prompt exists at all: at the graph's cfg 1
   three "eyebrows at rest, eyes soft" wordings all rendered the same hoisted brows and wide
@@ -290,10 +291,15 @@ Express · tRPC · Drizzle · MySQL.
   to 75% of sounds matched. The gate's real work is the record and the re-seed. The retry
   test is the PEAK alone, not the margin over the far level: that level is noisy on a 6 s
   clip (0.06-0.33 on one host), a margin test retried two clips that ship fine (r 0.27 at
-  83%; r 0.22 in whole mode), and the dead mouth reads r 0.02. The worker's 10-frame lag
-  compensation stands unverified by this judge either way; a by-eye plosive check on
-  renders at lag 0 / 5 / 10 is the way to settle it. Off, `LTX_SYNC_GATE=0` ships every
-  render untouched and unjudged
+  83%; r 0.22 in whole mode), and the dead mouth reads r 0.02. The corrected judge also
+  RETIRED the worker's 10-frame lag compensation (`LTX_LAG_FRAMES` 10 → 0, 2026-09-14): the
+  same beat rendered at lag 0 / 5 / 10 on two hosts, judged by both witnesses and read by
+  eye on eleven-frame strips around every p/b/m onset — at lag 0 both witnesses agree the
+  mouth is on time (the man −40 / −40 ms at r 0.36 / 0.44, Granny −83 / −125) and the lip
+  closures sit on their onsets; at lag 10 the compensated renders read ~500 ms EARLY
+  wherever the witnesses agreed (n2 −542 / −500). The 400-520 ms figure was the fps drift
+  plus noise, and the two-day compensation was over-correcting. Off, `LTX_SYNC_GATE=0`
+  ships every render untouched and unjudged
 - `server/providers/` — one adapter per vendor; `base.ts` is the interface,
   `fallback.ts` the image chain (primary → Gemini). The host lip-sync lane has TWO adapters,
   picked in `resolveLipsyncLane` and handed to callers that know neither: `heygen-lipsync.ts`
