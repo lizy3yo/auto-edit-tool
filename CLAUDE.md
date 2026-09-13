@@ -294,7 +294,7 @@ Express · tRPC · Drizzle · MySQL.
   against whole's 2.48 (limit 1) — the paste-back's still plate is what whole never had.
   That is what a tighter window buys when a photo has the room for one; it cut the hands
   off, which is why the rule now runs to the bottom. A SECOND ENGINE exists behind
-  `LTX_LIPSYNC_ENGINE=inpaint` (2026-09-14, unmeasured as of this note): Lightricks' inpaint
+  `LTX_LIPSYNC_ENGINE=inpaint` (2026-09-14, MEASURED WORSE, kept as an option): Lightricks' inpaint
   IC-LoRA graph, where the worker turns the photo into a still plate video carrying the
   narration, paints only inside the person's box (`scene.ltxFraming.mask`, Haiku's person
   box run to the bottom) with the audio frozen through, and the graph Laplacian-blends the
@@ -303,8 +303,16 @@ Express · tRPC · Drizzle · MySQL.
   a wandering camera is Lightricks' Static Camera LoRA, which is published only for the 19B
   LTX-2.0 and cannot load on this 22B 2.5; the popular workflows handle wide shots exactly
   as `crop` does (a face crop stitched back), and the inpaint graph is the model's own
-  version of that. The open question it was built to answer is whether the frozen audio
-  drives the lips inside the mask on 2.5; the judge decides
+  version of that. Measured the same day on both hosts against the A2V renders of the same
+  beats: the picture is exactly what the design promises — background motion 0.02-0.04,
+  no seam, identity intact — and the MOUTH is the casualty: the man's mouth motion 0.13
+  on both seeds against 5.2 on A2V (a still with a faint lip tremor; phonetic r 0.15-0.32,
+  one seed at chance), Granny's 2.7 against 6.9 (r 0.25 / 0.32 at −83 ms, both witnesses
+  agreeing, 80% of sounds — driven, but half the movement), for 2-3x the GPU (219-384 s
+  against 121 s). The guide conditions the mask region on a reference that never moves, and
+  the model obliges. Untried levers, one render each: the IC-LoRA guide strength (1.0 in the
+  graph), the first-frame anchor off (`bypass_i2v`), a larger mask dilation. `a2v` stays the
+  default
 - `server/lipsyncJudge.ts` + `server/lipsyncSyncGate.ts` — the LTX lane's SYNC GATE
   (`LTX_SYNC_GATE`, on by default; `LTX_SYNC_RETRIES` 2). The judge is the measure script's
   core, moved in-process so a render is judged the moment it lands: the mouth's opening per
