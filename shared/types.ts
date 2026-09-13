@@ -238,6 +238,20 @@ export interface LtxFraming {
   /** Host face height as a fraction of the crop's height. */
   cropFaceFrac: number | null;
   /**
+   * The whole AVATAR's extent (head top to hands or lap, shoulder to shoulder) in photo
+   * pixels, from Haiku, or guessed from the face's proportions when it could not answer.
+   */
+  person?: (LtxCrop & { source: "haiku" | "proportional" }) | null;
+  /**
+   * The `person` framing mode's window: the smallest 16:9 box holding the avatar, so the
+   * face is as large as it can be with the body and hands still inside. null = the avatar
+   * already fills the photo, rendered as is.
+   */
+  personCrop?: LtxCrop | null;
+  /** Host face height as a fraction of the person window's height. */
+  personFaceFrac?: number | null;
+  personReason?: string;
+  /**
    * The model's base pass chosen for this photo when framing is `auto` (`planLtxBase`): the
    * smallest of 544p/720p/1080p at which the host face reaches the pixel size that
    * articulates, capped by `LTX_LIPSYNC_MAX_BASE`. `sizeToSend` is the OUTPUT size the worker

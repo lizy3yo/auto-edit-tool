@@ -90,11 +90,17 @@ export const ENV = {
    *           11.5 → 2.5, for today's cost plus ~8 s. The price is mouth PRECISION at this
    *           face size (r 0.15, 64% of sounds, against the crop's r 0.24-0.36 / 78-81%):
    *           the choice between a sharper mouth and a moving body, per deployment.
+   * `person` — the DEFAULT since 2026-09-14: a 16:9 window around the whole AVATAR (head to
+   *           hands, Haiku's box or a proportional guess from the face), rendered with the
+   *           hands clause and the stabilizer like `whole` and pasted back like `crop`. The
+   *           empty room around the person is what gets cut away, so the face is larger
+   *           than in the whole photo while the body and hands stay in the picture. On a
+   *           photo the person already fills it is `whole`.
    */
   ltxLipsyncFraming:
-    (["auto", "crop", "whole"] as const).find(
-      m => m === (process.env.LTX_LIPSYNC_FRAMING ?? "crop").toLowerCase()
-    ) ?? ("crop" as const),
+    (["auto", "crop", "whole", "person"] as const).find(
+      m => m === (process.env.LTX_LIPSYNC_FRAMING ?? "person").toLowerCase()
+    ) ?? ("person" as const),
   /**
    * The dearest base pass `auto` may pick. 720p caps the cost at ~2x; a photo that would need
    * 1080p is then rendered at 720p and flagged in the framing report as one to re-frame.

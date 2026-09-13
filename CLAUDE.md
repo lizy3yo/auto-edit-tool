@@ -251,7 +251,7 @@ Express · tRPC · Drizzle · MySQL.
   as of this note. A wide host photo can only be animated face OR body: the hands outside
   the window stay still. Face + body + hands together needs the photo framed waist-up with
   the face ≥ a third of the frame — then the report says "as is" and nothing is cropped.
-  THREE FRAMING MODES exist (`LTX_LIPSYNC_FRAMING`): `crop` (default, above), `auto` — the
+  FOUR FRAMING MODES exist (`LTX_LIPSYNC_FRAMING`): `crop` (the face window above), `auto` — the
   whole photo at the smallest base pass where the face reaches `FACE_MIN_PX` (`planLtxBase`,
   544p/720p/1080p, capped by `LTX_LIPSYNC_MAX_BASE`; the worker delivers 1920x1080 either
   way) — and `off`. `auto` was MEASURED WORSE the same day and is kept only as an option:
@@ -266,10 +266,29 @@ Express · tRPC · Drizzle · MySQL.
   across three seeds: mouth alive (4.6-4.8 motion, liveness 22, lips 0.20-0.25, r 0.13-0.21,
   75-83% of sounds), body and hands moving, drift 11.5 → 2.0-2.5, head under the cap, for
   today's cost plus ~8 s; on Granny: mouth 5.2, r 0.40, lips 0.10, drift 0.98. The crop is
-  still the sharper mouth (r 0.24-0.36 on the man) with a still body — so `crop` stays the
-  default and `whole` is the per-deployment choice. The stabilizer measured NO effect inside
-  a crop window (12.6 vs 12.0): the drift there is content re-hallucination, not a camera
-  move it can undo
+  still the sharper mouth (r 0.24-0.36 on the man) with a still body. The stabilizer
+  measured NO effect inside a face crop (12.6 vs 12.0): the drift there is content
+  re-hallucination, not a camera move it can undo. The DEFAULT since 2026-09-14 is the
+  fourth mode, `person`: a 16:9 window around the whole AVATAR — head to hands, the box
+  from the same Haiku call that backs the face detector (`parsePersonBox`; one call per
+  photo, cached), or `personFromFace`'s proportional guess when it has no answer — fitted
+  by `planLtxPersonCrop` (5% margin, never under 544 px, clamped to the photo; null when it
+  would be ≥90% of the photo on both sides, and then the render is `whole`). It is the face
+  crop's paste-back with the whole photo's body and hands: the empty room is what gets cut
+  away, so the face grows without losing the hands. Rendered with the hands clause and the
+  tripod stabilizer like `whole`. The window and the face's share of it are saved on the
+  scene (`personCrop`, `personFaceFrac`, `personReason`) and printed by the report beside
+  the face window; a face still under a third of the window is named as a photo to reframe
+  waist-up. On the workshop wide shot: face 25% of the photo → 29-35% of the person window
+  (36% of the face crop; Haiku's box varies a little run to run, and the window with it);
+  on Granny's close-up 40% → 49%. A person who spans the full height of a 16:9 photo gets
+  no window at all — the 16:9 box at that height IS the photo. MEASURED on the man, two
+  seeds, against the same beat in `whole` mode: the mouth tracks the words at r 0.43 / 0.39
+  (loudness witness 0.56 / 0.55 — the strongest readings this lane has produced, both
+  witnesses agreeing) against whole's 0.22 / 0.27, 81-83% of sounds against 61-81%, mouth
+  motion 5.2 / 5.0, torso 3.8 / 2.9 (the body moves), and background morph 0.42 / 0.52
+  against whole's 2.48 (limit 1) — the paste-back's still plate is what whole never had.
+  It beats `whole` on every axis and keeps what `crop` threw away
 - `server/lipsyncJudge.ts` + `server/lipsyncSyncGate.ts` — the LTX lane's SYNC GATE
   (`LTX_SYNC_GATE`, on by default; `LTX_SYNC_RETRIES` 2). The judge is the measure script's
   core, moved in-process so a render is judged the moment it lands: the mouth's opening per

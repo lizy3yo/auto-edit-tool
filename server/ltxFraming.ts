@@ -62,14 +62,29 @@ const SCAN_WIDTHS = [640, 1280];
 /** The LLM fallback, for a photo the cascade cannot read at any scale. */
 const FACE_BOX_MODEL = "claude-haiku-4-5-20251001";
 const FACE_BOX_SYSTEM =
-  "You are given ONE photo of a person who will present a video. Locate the main person's " +
-  "FACE and report its bounding box as fractions of the image: 0.0 is the left/top edge, " +
-  "1.0 the right/bottom edge. The box covers the skin of the face — forehead to chin, ear to " +
-  "ear — not the hair, not the shoulders.\n\n" +
-  "If several people are visible, use the largest, most central face. If no human face is " +
-  "visible, say so instead of guessing.\n\n" +
-  'Return ONLY this JSON, no prose: {"found":true|false,"left":0.00,"top":0.00,"right":0.00,"bottom":0.00}\n' +
-  "Fractions to 2 decimals; left < right, top < bottom. Use 0 for all four when found is false.";
+  "You are given ONE photo of a person who will present a video. Report TWO bounding boxes " +
+  "as fractions of the image: 0.0 is the left/top edge, 1.0 the right/bottom edge.\n" +
+  "1. face: the skin of the main person's face — forehead to chin, ear to ear — not the " +
+  "hair, not the shoulders.\n" +
+  "2. person: the whole visible person — top of the hair to the hands or lap (or the bottom " +
+  "edge if they are cut off), shoulder to shoulder including the arms and hands. Not the " +
+  "furniture, not the room.\n\n" +
+  "If several people are visible, use the largest, most central one. If no human is visible, " +
+  "say so instead of guessing.\n\n" +
+  'Return ONLY this JSON, no prose: {"found":true|false,"left":0.00,"top":0.00,"right":0.00,"bottom":0.00,' +
+  '"person":{"left":0.00,"top":0.00,"right":0.00,"bottom":0.00}}\n' +
+  "Fractions to 2 decimals; left < right, top < bottom. Use 0 for every value when found is false.";
+
+/** Breathing room around the avatar's box before the 16:9 window is fitted, per side. */
+export const PERSON_MARGIN = 0.05;
+/** A person window at or above this share of the photo (both sides) is the photo itself. */
+export const PERSON_FILLS_PHOTO = 0.9;
+/**
+ * The proportional guess when Haiku has no answer, in face sizes from the face box's centre:
+ * hair above, lap or resting hands below, arms out to the sides. A seated or standing host
+ * framed by a photographer sits inside these; a wider box only costs some face size.
+ */
+export const PERSON_GUESS = { up: 0.9, down: 4.0, side: 2.25 };
 
 const even = (n: number) => 2 * Math.round(n / 2);
 
@@ -198,6 +213,104 @@ export function planLtxCrop(
   };
 }
 
+/** The avatar's box guessed from the face alone, clamped to the photo. Pure. */
+export function personFromFace(
+  photoW: number,
+  photoH: number,
+  face: LtxFace
+): LtxCrop & { source: "proportional" } {
+  const l = clamp(face.x - PERSON_GUESS.side * face.size, 0, photoW);
+  const r = clamp(face.x + PERSON_GUESS.side * face.size, 0, photoW);
+  const t = clamp(face.y - PERSON_GUESS.up * face.size, 0, photoH);
+  const b = clamp(face.y + PERSON_GUESS.down * face.size, 0, photoH);
+  return {
+    x: Math.round(l),
+    y: Math.round(t),
+    w: Math.round(r - l),
+    h: Math.round(b - t),
+    source: "proportional",
+  };
+}
+
+/**
+ * The `person` window: the smallest 16:9 box that holds the whole avatar (plus a margin),
+ * never shorter than the model's own 544 px, clamped inside the photo. Pure. The face's
+ * share of that window is what decides whether the mouth will articulate — it is reported
+ * and saved, never enforced: the point of this mode is the body and hands, and a face that
+ * ends up under a third of the window is a photo to reframe, said so in the reason.
+ */
+export function planLtxPersonCrop(
+  photoW: number,
+  photoH: number,
+  face: LtxFace | null,
+  person: LtxCrop | null
+): Pick<LtxFraming, "personCrop" | "personFaceFrac" | "personReason"> {
+  if (!face) {
+    return {
+      personCrop: null,
+      personFaceFrac: null,
+      personReason: "no face found — rendered as is",
+    };
+  }
+  if (photoH < MIN_PHOTO_H || photoW < MIN_PHOTO_H * ASPECT) {
+    return {
+      personCrop: null,
+      personFaceFrac: face.size / photoH,
+      personReason: `photo ${photoW}x${photoH} is too small to crop — rendered as is; use a larger photo`,
+    };
+  }
+  const box = person ?? personFromFace(photoW, photoH, face);
+  const mx = box.w * PERSON_MARGIN;
+  const my = box.h * PERSON_MARGIN;
+  const bl = clamp(box.x - mx, 0, photoW);
+  const br = clamp(box.x + box.w + mx, 0, photoW);
+  const bt = clamp(box.y - my, 0, photoH);
+  const bb = clamp(box.y + box.h + my, 0, photoH);
+  const bw = br - bl;
+  const bh = bb - bt;
+
+  // Fit 16:9 around the box: whichever side is short grows; then the model's floor; then
+  // the photo's own edges.
+  let w = Math.max(bw, bh * ASPECT, MIN_CROP_H * ASPECT);
+  let h = w / ASPECT;
+  let note = "";
+  if (w > photoW) {
+    w = photoW;
+    h = w / ASPECT;
+    note = " (full width)";
+  }
+  if (h > photoH) {
+    h = photoH;
+    w = h * ASPECT;
+    note = " (full height)";
+  }
+  w = even(w);
+  h = even(h);
+  const share = `person ${Math.round(bw)}x${Math.round(bh)} (${person ? "haiku" : "guessed from the face"})`;
+  if (w >= PERSON_FILLS_PHOTO * photoW && h >= PERSON_FILLS_PHOTO * photoH) {
+    return {
+      personCrop: null,
+      personFaceFrac: face.size / photoH,
+      personReason: `${share} fills the ${photoW}x${photoH} photo — rendered whole`,
+    };
+  }
+  // Place: centred on the avatar, clamped inside the photo.
+  const cx = (bl + br) / 2;
+  const cy = (bt + bb) / 2;
+  const x = even(clamp(cx - w / 2, 0, photoW - w));
+  const y = even(clamp(cy - h / 2, 0, photoH - h));
+  const personFaceFrac = face.size / h;
+  const small =
+    personFaceFrac < SKIP_ABOVE_FACE_FRAC
+      ? ` — face only ${pct(personFaceFrac)} of it, the mouth may be soft; a waist-up photo would fix that`
+      : "";
+  return {
+    personCrop: { x, y, w, h },
+    personFaceFrac,
+    personReason: `${share} → window ${w}x${h} at (${x},${y}), face ${pct(personFaceFrac)} of the window${note}${small}`,
+  };
+}
+
 /**
  * Detect the host's face in a photo and plan its crop. EXIF orientation is applied first
  * (phone photos are stored sideways with a rotation tag; a box on the raw pixels would land on
@@ -244,11 +357,12 @@ export async function analyzeHostPhoto(buffer: Buffer): Promise<LtxFraming> {
 
   let face: (LtxFace & { source: "pico" | "haiku" }) | null =
     distinct[0] ?? null;
-  if (!face) {
-    // The cascade saw nothing at any scale. Ask the LLM for a box before giving up: a
-    // missed face here is not a cosmetic miss, it is a host whose mouth will not move.
-    face = await haikuFaceBox(oriented.data, photoW, photoH);
-  }
+  // Haiku is asked once per photo either way: for the avatar's extent (the `person` window
+  // needs it; the cascade only finds faces), and — when the cascade saw nothing at any
+  // scale — for the face too, because a missed face here is not a cosmetic miss, it is a
+  // host whose mouth will not move.
+  const boxes = await haikuBoxes(oriented.data, photoW, photoH);
+  if (!face) face = boxes.face;
   const rounded = face
     ? {
         x: Math.round(face.x),
@@ -258,12 +372,19 @@ export async function analyzeHostPhoto(buffer: Buffer): Promise<LtxFraming> {
         source: face.source,
       }
     : null;
-  return planLtxCrop(
-    photoW,
-    photoH,
-    rounded,
-    face ? Math.max(1, distinct.length) : 0
-  );
+  const person = rounded
+    ? (boxes.person ?? personFromFace(photoW, photoH, rounded))
+    : null;
+  return {
+    ...planLtxCrop(
+      photoW,
+      photoH,
+      rounded,
+      face ? Math.max(1, distinct.length) : 0
+    ),
+    person,
+    ...planLtxPersonCrop(photoW, photoH, rounded, person),
+  };
 }
 
 /** Collapse the same face seen at two scan widths (or twice at one) into one entry. */
@@ -310,11 +431,43 @@ export function parseFaceBox(
   };
 }
 
-async function haikuFaceBox(
+/** Read the fallback's person box, or null. Pure — unit-tested. */
+export function parsePersonBox(
+  text: string,
+  photoW: number,
+  photoH: number
+): (LtxCrop & { source: "haiku" }) | null {
+  const m = text.match(/\{[\s\S]*\}/);
+  if (!m) return null;
+  let j: any;
+  try {
+    j = JSON.parse(m[0]);
+  } catch {
+    return null;
+  }
+  const p = j?.person;
+  if (!j?.found || !p) return null;
+  const [l, t, r, b] = [p.left, p.top, p.right, p.bottom].map(Number);
+  if (![l, t, r, b].every(v => Number.isFinite(v) && v >= 0 && v <= 1))
+    return null;
+  if (r - l < 0.05 || b - t < 0.05) return null;
+  return {
+    x: Math.round(l * photoW),
+    y: Math.round(t * photoH),
+    w: Math.round((r - l) * photoW),
+    h: Math.round((b - t) * photoH),
+    source: "haiku",
+  };
+}
+
+async function haikuBoxes(
   oriented: Buffer,
   photoW: number,
   photoH: number
-): Promise<(LtxFace & { source: "haiku" }) | null> {
+): Promise<{
+  face: (LtxFace & { source: "haiku" }) | null;
+  person: (LtxCrop & { source: "haiku" }) | null;
+}> {
   try {
     const small = await sharp(oriented)
       .resize({ width: 768, withoutEnlargement: true })
@@ -326,15 +479,18 @@ async function haikuFaceBox(
     };
     const result = await invokeClaude({
       systemPrompt: FACE_BOX_SYSTEM,
-      userMessage: "Where is the face in this photo?",
+      userMessage: "Where are the face and the whole person in this photo?",
       imageInput: image,
-      maxTokens: 96,
+      maxTokens: 160,
       model: FACE_BOX_MODEL,
     });
-    return parseFaceBox(result.text, photoW, photoH);
+    return {
+      face: parseFaceBox(result.text, photoW, photoH),
+      person: parsePersonBox(result.text, photoW, photoH),
+    };
   } catch (err: any) {
-    console.warn(`[LTX framing] haiku fallback failed: ${err?.message ?? err}`);
-    return null;
+    console.warn(`[LTX framing] haiku boxes failed: ${err?.message ?? err}`);
+    return { face: null, person: null };
   }
 }
 
@@ -389,7 +545,8 @@ export function describe(f: LtxFraming): string {
   const seen = f.face
     ? `${f.faces} face${f.faces === 1 ? "" : "s"}, host ${f.face.size} px (${f.face.source ?? "pico"}, q ${f.face.q})`
     : "no face";
-  return `photo ${f.photoW}x${f.photoH}, ${seen} — ${f.reason}`;
+  const person = f.personReason ? `; person: ${f.personReason}` : "";
+  return `photo ${f.photoW}x${f.photoH}, ${seen} — face crop: ${f.reason}${person}`;
 }
 
 /** Test-only. */

@@ -4,7 +4,19 @@
     {
       "name": "longform-studio",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["dev"],
+      "runtimeArgs": [
+        "dev"
+      ],
+      "port": 3000
+    },
+    {
+      "name": "longform-studio-nowatch",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "exec",
+        "tsx",
+        "server/_core/index.ts"
+      ],
       "port": 3000
     },
     {

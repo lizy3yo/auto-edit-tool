@@ -3759,10 +3759,20 @@ async function resolveLipsyncLane(
           mode === "auto"
             ? planLtxBase(framing.faceFrac, ENV.ltxLipsyncMaxBase)
             : undefined;
-        const crop = mode === "crop" ? (framing.crop ?? undefined) : undefined;
-        // `whole` keeps the body and hands moving; the stabilizer is what makes it watchable
-        // (measured drift 11.5 → 2.5). It does nothing useful inside a crop, so only here.
-        const stabilize = mode === "whole" ? ("tripod" as const) : undefined;
+        // `person` (the default) is the window around the whole avatar: the face crop's
+        // paste-back with the whole photo's body and hands. Its window is null when the
+        // avatar already fills the photo, and the render is then `whole`.
+        const crop =
+          mode === "crop"
+            ? (framing.crop ?? undefined)
+            : mode === "person"
+              ? (framing.personCrop ?? undefined)
+              : undefined;
+        // `whole` and `person` keep the body and hands moving; the stabilizer is what makes
+        // that watchable (measured drift 11.5 → 2.5). It does nothing useful inside a face
+        // crop, so not there.
+        const stabilize =
+          mode === "whole" || mode === "person" ? ("tripod" as const) : undefined;
         scene.ltxFraming = { ...framing, base, crop: crop ?? null };
         if (base && base.name !== "544p")
           console.log(
@@ -3781,7 +3791,9 @@ async function resolveLipsyncLane(
           // (seed 42 dead, seed 7 alive, same everything). The worker's liveness gate then
           // steps the seed when a mouth comes back frozen.
           seed: sceneSeed(scene) + (scene.ltxSeedBump ?? 0),
-          prompt: buildLtxLipsyncPrompt(scene, useAlt, { wholePhoto: !crop }),
+          // The hands clause goes in whenever the hands are in the picture — every mode
+          // but the face crop.
+          prompt: buildLtxLipsyncPrompt(scene, useAlt, { wholePhoto: mode !== "crop" }),
           // Read because `textCfg` below is > 1; at the graph's own cfg 1 it would be inert,
           // which is why the camera is ALSO spelled out in the positive prompt.
           negativePrompt: LTX_LIPSYNC_NEGATIVE_DIRECTION,

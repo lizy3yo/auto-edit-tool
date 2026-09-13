@@ -64,6 +64,7 @@ const rows: string[][] = [
     "host face",
     "auto: base pass",
     "crop mode: window",
+    "person mode (default): window",
   ],
 ];
 for (const it of items) {
@@ -85,10 +86,13 @@ for (const it of items) {
       f.crop
         ? `${f.crop.w}x${f.crop.h} @ (${f.crop.x},${f.crop.y}) → face ${Math.round((f.cropFaceFrac ?? 0) * 100)}%`
         : `as is — ${f.reason}`,
+      f.personCrop
+        ? `${f.personCrop.w}x${f.personCrop.h} @ (${f.personCrop.x},${f.personCrop.y}) → face ${Math.round((f.personFaceFrac ?? 0) * 100)}% (${f.person?.source})`
+        : `whole — ${f.personReason}`,
     ]);
     console.error(`  ${it.label}: ${describe(f)}`);
   } catch (e: any) {
-    rows.push([it.label, "?", "?", "?", `FAILED: ${e?.message ?? e}`]);
+    rows.push([it.label, "?", "?", "?", `FAILED: ${e?.message ?? e}`, ""]);
   }
 }
 const widths = rows[0].map((_, i) => Math.max(...rows.map(r => r[i].length)));
