@@ -93,6 +93,8 @@ export interface LtxLipsyncParams {
    */
   engine?: "a2v" | "inpaint";
   mask?: { x: number; y: number; w: number; h: number };
+  /** An adapter on the model for both stages: a file in the worker's `models/loras`. */
+  lora?: { name: string; strength: number };
 }
 
 const RUNPOD_API_BASE = "https://api.runpod.ai/v2";
@@ -220,6 +222,7 @@ export class LtxLipsyncAdapter {
         ...(params.stabilize ? { stabilize: params.stabilize } : {}),
         ...(params.engine === "inpaint" ? { engine: "inpaint" } : {}),
         ...(params.mask ? { mask: params.mask } : {}),
+        ...(params.lora ? { lora: params.lora } : {}),
         ...(params.face
           ? {
               face: {

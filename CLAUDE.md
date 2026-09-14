@@ -310,9 +310,31 @@ Express · tRPC · Drizzle · MySQL.
   one seed at chance), Granny's 2.7 against 6.9 (r 0.25 / 0.32 at −83 ms, both witnesses
   agreeing, 80% of sounds — driven, but half the movement), for 2-3x the GPU (219-384 s
   against 121 s). The guide conditions the mask region on a reference that never moves, and
-  the model obliges. Untried levers, one render each: the IC-LoRA guide strength (1.0 in the
-  graph), the first-frame anchor off (`bypass_i2v`), a larger mask dilation. `a2v` stays the
-  default
+  the model obliges. The face-size explanation was then TESTED and ruled out: the graph
+  works at 512 px tall (the man's face 128 px, under the 170 px floor), so the worker grew
+  an `inpaint_short_side` override and both hosts were rendered at 720 tall (the man's
+  face 180 px) — the man was still a still (mouth 0.11, liveness 0.45, judge at chance) and
+  Granny's mouth got no better (2.1), for 367-1084 s of GPU. The static reference is the
+  whole story. Untried: the IC-LoRA guide strength (1.0 in the graph) and `bypass_i2v`.
+  `a2v` stays the default. What DID hold the room is an ADAPTER: Lightricks' Cinemagraph
+  LoRA for 2.5 (`LTX_LIPSYNC_LORA`, default on since 2026-09-14; `none` disables), trained
+  on locked-off cameras where only the named elements move, with its trigger clause at the
+  head of the prompt (`LTX_LIPSYNC_LORA_TRIGGER`: `CINEMAGRAPH_MOTION. Only the person
+  moves … everything else remains completely frozen`). The worker inserts ComfyUI's
+  model-only LoRA loader in front of both guiders (`lora: {name, strength}` in the
+  contract; the file comes from its own gated repo at boot). Measured on the man's whole
+  photo, no crop, no stabilizer, three renders (1.0 on two seeds, 1.2): room motion 0.04 /
+  0.05 / 0.04 against 0.39 raw and 0.56 with the stabilizer, mouth 6.3 / 5.4 / 4.9 against
+  4.75 stabilized, torso 3.1 / 1.7 / 2.2 (the body still moves), whole-frame drift 1.7 /
+  2.0 / 1.6 against 11.5 raw and 2.5 stabilized, and the sync: both witnesses AGREE at −42
+  ms on two of the three (r 0.35 / 0.45 and 0.32 / 0.52, 64-83% of sounds), the best
+  whole-photo sync this lane has produced. Granny (whose photo never drifted) is unchanged:
+  room 0.03, mouth 6.2 against 6.9, r 0.30 / 0.28. Cost: the adapter loads in 0.1 s; the
+  man's sampler read 97-121 s against Granny's 57 s in the same batch, so up to ~1.7x on
+  one host and nothing on the other — one batch, not yet separated from the beat itself.
+  This is the community's "static camera LoRA" answer, reached through the one adapter
+  Lightricks published for THIS model. The stabilizer stays on in whole/person mode: it
+  measured a no-op where nothing drifts and it costs 8 s
 - `server/lipsyncJudge.ts` + `server/lipsyncSyncGate.ts` — the LTX lane's SYNC GATE
   (`LTX_SYNC_GATE`, on by default; `LTX_SYNC_RETRIES` 2). The judge is the measure script's
   core, moved in-process so a render is judged the moment it lands: the mouth's opening per

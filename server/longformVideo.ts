@@ -3805,7 +3805,10 @@ async function resolveLipsyncLane(
           seed: sceneSeed(scene) + (scene.ltxSeedBump ?? 0),
           // The hands clause goes in whenever the hands are in the picture — every mode
           // but the face crop.
-          prompt: buildLtxLipsyncPrompt(scene, useAlt, { wholePhoto: mode !== "crop" }),
+          prompt: buildLtxLipsyncPrompt(scene, useAlt, {
+            wholePhoto: mode !== "crop",
+            loraTrigger: ENV.ltxLipsyncLora ? ENV.ltxLipsyncLoraTrigger : undefined,
+          }),
           // Read because `textCfg` below is > 1; at the graph's own cfg 1 it would be inert,
           // which is why the camera is ALSO spelled out in the positive prompt.
           negativePrompt: LTX_LIPSYNC_NEGATIVE_DIRECTION,
@@ -3815,6 +3818,7 @@ async function resolveLipsyncLane(
           decodeTile: ENV.ltxLipsyncDecodeTile,
           textCfg: ENV.ltxLipsyncTextCfg,
           ...(engine === "inpaint" ? { engine, mask } : {}),
+          ...(ENV.ltxLipsyncLora ? { lora: ENV.ltxLipsyncLora } : {}),
         });
       },
       poll: (id, ms) => ltx.pollVideo(id, ms ?? LTX_LIPSYNC_TIMEOUT_MS),
@@ -6425,8 +6429,11 @@ export function sceneSeed(scene: {
 export function buildLtxLipsyncPrompt(
   scene: StoryboardScene,
   useAlt = false,
-  opts: { wholePhoto?: boolean } = {}
+  opts: { wholePhoto?: boolean; loraTrigger?: string } = {}
 ): string {
+  // An adapter's trigger clause goes FIRST: the Cinemagraph LoRA reads its trigger word and
+  // its "only X moves" rule from the head of the prompt.
+  const trigger = opts.loraTrigger?.trim() ? `${opts.loraTrigger.trim()} ` : "";
   const hands = opts.wholePhoto ? LTX_HANDS_IN : LTX_HANDS_OUT;
   const angle = useAlt ? ` ${LIPSYNC_ALT_ANGLE_SUFFIX}` : "";
   const cta = scene.cta ? ` ${CTA_EMPTY_HANDS_SUFFIX}` : "";
@@ -6435,7 +6442,7 @@ export function buildLtxLipsyncPrompt(
     : "";
   // No `gestureCue` here — see LTX_LIPSYNC_DIRECTION: on this model a body note reads as a
   // camera move, and the one measured render with it pushed in to an extreme close-up.
-  return `${LTX_LIPSYNC_DIRECTION}${hands}${angle}${cta}${mood}`.trim();
+  return `${trigger}${LTX_LIPSYNC_DIRECTION}${hands}${angle}${cta}${mood}`.trim();
 }
 
 /**

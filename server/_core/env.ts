@@ -132,6 +132,30 @@ export const ENV = {
   // sampler's fresh noise per step is what the LTX-2.5 custom-audio thread blamed, and it
   // was right. `LTX_LIPSYNC_SAMPLER=euler_ancestral` restores the graph's own for an A/B.
   ltxLipsyncSampler: process.env.LTX_LIPSYNC_SAMPLER || "euler",
+  /**
+   * An adapter the worker puts on the model for both stages (`lora` in the worker contract):
+   * `<file in the worker's models/loras>[:strength]`. Empty = none. Built for Lightricks'
+   * Cinemagraph LoRA (`ltx-2.5-22b-lora-cinemagraph-0.9.safetensors`), trained on locked-off
+   * cameras where only the named elements move: with `LTX_LIPSYNC_LORA_TRIGGER` in front of
+   * the prompt it holds the room of a whole-photo render still — the DEFAULT since
+   * 2026-09-14 (see CLAUDE.md): room motion 0.04 against the stabilizer's 0.56, the mouth
+   * alive, both sync witnesses agreeing at -42 ms on two of three renders. `none` turns it
+   * off. The worker fetches the adapter at boot from its own gated repo; a deployment whose
+   * token has not accepted it fails every LTX render with the repo named, which is louder
+   * than a drifting room.
+   */
+  ltxLipsyncLora: (() => {
+    const raw = (
+      process.env.LTX_LIPSYNC_LORA ?? "ltx-2.5-22b-lora-cinemagraph-0.9.safetensors:1.0"
+    ).trim();
+    if (!raw || /^(none|off|0)$/i.test(raw)) return null;
+    const m = /^(.+?)(?::([\d.]+))?$/.exec(raw)!;
+    return { name: m[1], strength: m[2] ? Number(m[2]) : 1.0 };
+  })(),
+  /** The clause the adapter needs at the FRONT of the prompt (its trigger word and its rule). */
+  ltxLipsyncLoraTrigger:
+    process.env.LTX_LIPSYNC_LORA_TRIGGER ??
+    "CINEMAGRAPH_MOTION. Only the person moves: their face, mouth, head, shoulders and hands. Everything else in the frame remains completely frozen. Locked-off static camera.",
   ltxLipsyncDecodeTile: process.env.LTX_LIPSYNC_DECODE_TILE || undefined,
   /**
    * Text guidance on stage 1 (`text_cfg`), default 3 — the second dial baked in, for the
