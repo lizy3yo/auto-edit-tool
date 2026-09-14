@@ -334,7 +334,10 @@ Express · tRPC · Drizzle · MySQL.
   one host and nothing on the other — one batch, not yet separated from the beat itself.
   This is the community's "static camera LoRA" answer, reached through the one adapter
   Lightricks published for THIS model. The stabilizer stays on in whole/person mode: it
-  measured a no-op where nothing drifts and it costs 8 s
+  measured a no-op where nothing drifts and it costs 8 s. END TO END through the app (job
+  101 scene 1, the man's whole photo, everything at its defaults): phonetic r 0.47 at −42
+  ms, envelope r 0.55 at −83 ms, 89% of sounds matched, liveness 21, 175 s of GPU — the
+  best host clip this lane has produced, and the one a new host photo gets
 - `server/lipsyncJudge.ts` + `server/lipsyncSyncGate.ts` — the LTX lane's SYNC GATE
   (`LTX_SYNC_GATE`, on by default; `LTX_SYNC_RETRIES` 2). The judge is the measure script's
   core, moved in-process so a render is judged the moment it lands: the mouth's opening per
