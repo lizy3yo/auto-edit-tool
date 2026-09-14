@@ -3780,11 +3780,16 @@ async function resolveLipsyncLane(
             : mode === "person"
               ? (framing.personCrop ?? undefined)
               : undefined;
-        // `whole` and `person` keep the body and hands moving; the stabilizer is what makes
-        // that watchable (measured drift 11.5 → 2.5). It does nothing useful inside a face
-        // crop, so not there.
+        // `whole` and `person` keep the body and hands moving; the stabilizer is what made
+        // that watchable before the adapter (measured drift 11.5 → 2.5). It does nothing
+        // useful inside a face crop, and with the Cinemagraph adapter holding the room it
+        // HURTS: same seed, adapter alone read background motion 0.04, adapter + stabilizer
+        // 0.42 — vidstab's own sub-pixel warps on a frame that was not moving. So only
+        // without the adapter.
         const stabilize =
-          mode === "whole" || mode === "person" ? ("tripod" as const) : undefined;
+          (mode === "whole" || mode === "person") && !ENV.ltxLipsyncLora
+            ? ("tripod" as const)
+            : undefined;
         scene.ltxFraming = { ...framing, base, crop: crop ?? null, ...(mask ? { mask } : {}) };
         if (base && base.name !== "544p")
           console.log(
