@@ -378,7 +378,14 @@ Express · tRPC · Drizzle · MySQL.
   render's worth of GPU; a seed calm on a short line is very likely but not guaranteed calm
   on a long one, which is what a post-render expression gate (not built) would catch.
   Fails open: any failure renders on the hash seed and says so. CTA scenes keep the hash
-  seed (their photo may be a plate)
+  seed (their photo may be a plate). The PRE-RENDER levers were tried first on Granny's
+  startled seed and are NOT adopted: naming the eyes in the adapter's frozen list took the
+  eyes from 1.44 to 1.23, text guidance 4 alone did nothing (1.39) and 5 made it worse
+  (1.58), and the two together reached 1.13 with the sync intact on THAT seed — but the same
+  pair left her calm seed unchanged (1.24) with the sync gone to chance, and on the man it
+  damped the mouth (3.2 against 4.1-4.9) and the sync (r 0.24 at the scan's edge against
+  0.38 / 0.42). A setting that fixes one seed of one host and hurts the other host is not a
+  default; picking the seed per photo is
 - `server/lipsyncJudge.ts` + `server/lipsyncSyncGate.ts` — the LTX lane's SYNC GATE
   (`LTX_SYNC_GATE`, on by default; `LTX_SYNC_RETRIES` 2). The judge is the measure script's
   core, moved in-process so a render is judged the moment it lands: the mouth's opening per
