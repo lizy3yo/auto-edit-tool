@@ -4013,7 +4013,11 @@ async function resolveLipsyncLane(
         // Everything the worker gets, minus the seed and the audio: the seed audit below
         // renders the SAME job on a short snippet, so what it measures is what production
         // renders.
-        const paramsFor = (seed: number, audio: string): LtxLipsyncParams => ({
+        const paramsFor = (
+          seed: number,
+          audio: string,
+          strength?: number | null
+        ): LtxLipsyncParams => ({
           imageUrl,
           audioUrl: audio,
           crop,
@@ -4036,7 +4040,14 @@ async function resolveLipsyncLane(
           decodeTile: ENV.ltxLipsyncDecodeTile,
           textCfg: ENV.ltxLipsyncTextCfg,
           ...(engine === "inpaint" ? { engine, mask } : {}),
-          ...(ENV.ltxLipsyncLora ? { lora: ENV.ltxLipsyncLora } : {}),
+          ...(ENV.ltxLipsyncLora
+            ? {
+                lora: {
+                  name: ENV.ltxLipsyncLora.name,
+                  strength: strength ?? ENV.ltxLipsyncLora.strength,
+                },
+              }
+            : {}),
         });
         // A seed per SCENE, stable across retries of that scene. The graph's own seed (42
         // for every render) is a liability: a seed that collapses this host's mouth into
@@ -4047,25 +4058,32 @@ async function resolveLipsyncLane(
         // and brows are seed-driven too, and the audit measured them once per photo.
         const bump = scene.ltxSeedBump ?? 0;
         let seed = sceneSeed(scene) + bump;
+        let strength: number | null = null;
         if (ENV.ltxSeedAudit && !scene.cta) {
           const audit = await ensureLtxSeedAudit(imageUrl, audioUrl, {
             count: ENV.ltxSeedAuditCount,
             sampleSec: ENV.ltxSeedAuditSec,
-            render: async (candidate, snippet) => {
-              const sub = await ltx.submitLipsync(paramsFor(candidate, snippet));
+            strength: ENV.ltxLipsyncLora?.strength ?? null,
+            render: async (candidate, snippet, candidateStrength) => {
+              const sub = await ltx.submitLipsync(
+                paramsFor(candidate, snippet, candidateStrength)
+              );
               if (!sub.taskId) throw new Error(sub.error ?? "submit failed");
               const res = await ltx.pollVideo(sub.taskId, LTX_LIPSYNC_TIMEOUT_MS);
               if (!res.success) throw new Error(res.error ?? "render failed");
               return res.workerTimings as Record<string, unknown> | undefined;
             },
           });
+          // Stable per scene among the photo's passing picks; a retry (the sync or body
+          // gate's `ltxSeedBump`) steps DOWN the ranking, so it never repeats a seed.
           const picked = audit ? pickAuditedSeed(audit, scene, bump) : null;
           if (picked != null) {
-            seed = picked;
+            seed = picked.seed;
+            strength = picked.strength;
             scene.ltxSeedAudited = true;
           }
         }
-        return ltx.submitLipsync(paramsFor(seed, audioUrl));
+        return ltx.submitLipsync(paramsFor(seed, audioUrl, strength));
       },
       poll: (id, ms) => ltx.pollVideo(id, ms ?? LTX_LIPSYNC_TIMEOUT_MS),
       // Billed by GPU time like InfiniteTalk, so an abandoned render is stopped, not left.
@@ -6650,12 +6668,18 @@ export const LTX_LIPSYNC_DIRECTION =
   // 0.10-0.12; HeyGen's own hosts differ by that much too.
   "Their lips move naturally with every word, parting on vowels and meeting on consonants, " +
   "in easy unforced movements, never a wide open mouth or a big vowel shape. " +
-  "Small natural head movement; ";
+  // The BODY clause (2026-09-16). With the room-locking adapter on, some renders moved the
+  // head on a still body: Granny Mae's cardigan and braid frozen (body 0.11 of the head's
+  // travel, HeyGen 0.18-0.31), Granny Ruth's hands frozen on her hoop. The adapter freezes
+  // what it does not read as the moving person, so the person is described as one body.
+  "Small natural head movement, and the shoulders, chest, arms and hair move with the head " +
+  "as one body, never a moving head on a still body; ";
 
 /** The hands clause: a face window has none in it; a whole photo usually does. */
 export const LTX_HANDS_OUT = "hands out of frame.";
 export const LTX_HANDS_IN =
-  "hands rest naturally with small movements, never raised to the face.";
+  "the arms and hands shift slightly with the body, and whatever the hands hold moves with " +
+  "them, never raised to the face.";
 
 /**
  * Read only when `text_cfg` > 1 (the lane's default is 3); at the graph's cfg 1 it is inert.
@@ -8617,6 +8641,34 @@ export async function runChunkTasks(
         );
         r.fileData = video;
       }
+    }
+  }
+
+  // THE BODY GATE (LTX only): the worker reports whether the body moved WITH the head
+  // (`timings.body`, measured against HeyGen's four hosts — see the worker's
+  // `body_coherence`). A clip with a still body under a moving head, or frozen hands, asks for
+  // the next pick down the photo's audited ranking — bounded by the same retry count as the
+  // sync gate, then the last render ships flagged. The readings go on the scene either way.
+  if (provider === "ltx" && ENV.ltxBodyGate) {
+    const bodies = polls
+      .map(r => (r.workerTimings as Record<string, unknown> | undefined)?.body)
+      .filter((b): b is Record<string, unknown> => !!b && typeof b === "object");
+    if (bodies.length) {
+      scene.ltxBody = bodies as NonNullable<StoryboardScene["ltxBody"]>;
+      const frozen = bodies.find(b => b.frozen === true);
+      const bump = scene.ltxSeedBump ?? 0;
+      if (frozen && bump < ENV.ltxSyncRetries) {
+        scene.ltxSeedBump = bump + 1;
+        scene.renderTaskIds = undefined;
+        await persist();
+        throw new SyncRetryError(
+          `scene ${scene.index}: ${String(frozen.reason ?? "the body did not move with the head")} — re-rendering on the next audited pick (${bump + 1}/${ENV.ltxSyncRetries})`
+        );
+      }
+      if (frozen)
+        console.warn(
+          `[LTX body gate] scene ${scene.index}: body still frozen after ${bump} retr${bump === 1 ? "y" : "ies"} (${String(frozen.reason)}) — shipping the last render, flagged`
+        );
     }
   }
 

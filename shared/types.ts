@@ -366,6 +366,11 @@ export interface StoryboardScene {
   ltxSeedBump?: number;
   /** True when the seed came from the photo's audited list (`server/ltxSeedAudit.ts`). */
   ltxSeedAudited?: boolean;
+  /**
+   * The worker's body readings per chunk (`timings.body`): head/shoulder/hands travel as a
+   * fraction of the face, `body_score`, `hands_score`, and `frozen` with its reason.
+   */
+  ltxBody?: Record<string, unknown>[];
   /** How a non-16:9 host photo was widened before the render (`server/ltxWidescreen.ts`). */
   ltxWidescreen?: { method: "as-is" | "outpaint" | "blur-pad" | "failed"; url: string; reason: string };
   /** Whether the on-camera host appears (gets the reference face + face-lock) */

@@ -390,7 +390,33 @@ Express · tRPC · Drizzle · MySQL.
   (1.16); the production render on it read eyes 1.18, liveness 22.8, both witnesses at −42
   ms. Granny's photo passed all four (1.02-1.12); her render on seed 23 read eyes 1.005 —
   the photo's own — liveness 19.1. One audit per photo, ~4 x 60 s of GPU, stored under
-  `ltx_seed_audit:<photo hash>` in `app_settings`; `scene.ltxSeedAudited` marks the clips
+  `ltx_seed_audit:<photo hash>` in `app_settings`; `scene.ltxSeedAudited` marks the clips.
+  THE BODY (2026-09-16): with the room-locking adapter on, some renders moved the head on a
+  still body — Granny Mae's cardigan and braid frozen while her head moved, Granny Ruth's hands
+  frozen on her hoop, which reads as a head pasted onto a photo. The adapter freezes what it
+  does not read as the moving person. Three layers now, meant to hold for ANY uploaded photo:
+  (1) WORDING — the adapter's clause describes the person as one connected body (head, hair,
+  shoulders, chest, arms, hands, whatever they hold, clothing) with only the room frozen, the
+  direction adds "the shoulders, chest, arms and hair move with the head as one body, never a
+  moving head on a still body", and the hands clause says what the hands hold moves with
+  them; (2) the worker's BODY READING (`timings.body`, `body_coherence`): phase-correlation
+  travel of the head, a band either side of the neck (clear of hair and braids) and a hands
+  band below the chest, as fractions of the face size. Calibrated on HeyGen's clips of all
+  four hosts and 10 of ours: `max(shoulders, hands) / head` reads 0.18-0.31 on HeyGen and
+  0.11 / 0.12 on the frozen Granny Mae renders (floor `LTX_BODY_SCORE_FLOOR` 0.15); Ruth's
+  frozen hands pass that line (her shoulders move) and show only in the hands band, 0.05 /
+  0.08 against 0.11 on a moving-hands render (floor `LTX_HANDS_SCORE_FLOOR` 0.10, checked
+  only when the band is ≥80% inside the frame — HeyGen frames hands off the bottom edge). 13 of
+  14 calibration clips classify right at those floors; the hands line is the thin one;
+  (3) the SEED AUDIT v2 requires the body to pass as well as the mouth and eyes, and when
+  fewer than two of the first four seeds pass it tries four more with the adapter at 0.7×
+  strength (it is what freezes the body); every candidate is ranked, passing first and then
+  least-bad (a frozen mouth worst, a frozen body next, wide eyes last), each pick carries its
+  own adapter strength, scenes draw from the passing picks and a retry steps DOWN the ranking
+  so a seed is never repeated. The version is in the key (`ltx_seed_audit_v2:`), so every photo
+  audited under the old rule is audited again. Then the BODY GATE (`LTX_BODY_GATE`, on) catches
+  a production clip that still froze and re-renders it on the next pick, sharing
+  `LTX_SYNC_RETRIES` with the sync gate; the readings persist on `scene.ltxBody`
 - `server/ltxWidescreen.ts` — a host photo that is NOT 16:9 is widened before the LTX lane
   frames or renders it (`LTX_WIDESCREEN`: `outpaint` default, `blur`, `off`). The worker
   cover-scales any photo onto its 1920x1080 plate, and on a 4:3 photo that zooms in until

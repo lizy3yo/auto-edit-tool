@@ -9094,8 +9094,10 @@ describe("buildLtxLipsyncPrompt", () => {
     // Hands: out of frame for a face window, resting naturally for a whole photo.
     expect(prompt).toContain("hands out of frame");
     expect(buildLtxLipsyncPrompt(scene, true, { wholePhoto: true })).toContain(
-      "hands rest naturally"
+      "whatever the hands hold moves with them"
     );
+    // The body clause: the head never moves on a still body (Granny Mae's frozen cardigan).
+    expect(prompt).toContain("never a moving head on a still body");
     // None of the InfiniteTalk-specific direction leaks in.
     expect(prompt).not.toContain("calm and still");
   });

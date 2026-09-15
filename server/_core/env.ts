@@ -183,7 +183,14 @@ export const ENV = {
   /** The clause the adapter needs at the FRONT of the prompt (its trigger word and its rule). */
   ltxLipsyncLoraTrigger:
     process.env.LTX_LIPSYNC_LORA_TRIGGER ??
-    "CINEMAGRAPH_MOTION. Only the person moves: their face, mouth, head, shoulders and hands. Everything else in the frame remains completely frozen. Locked-off static camera.",
+    "CINEMAGRAPH_MOTION. Only the person moves, as one connected body: their face, mouth, head, hair, shoulders, chest, arms, hands, whatever the hands are holding, and their clothing all move together. Only the room, the furniture and the background remain completely frozen. Locked-off static camera.",
+  /**
+   * The BODY GATE: a render whose body did not move with the head (the worker's
+   * `timings.body.frozen` — a still torso under a moving head, or frozen hands) is re-rendered
+   * on the next pick of the photo's audited ranking, up to `LTX_SYNC_RETRIES`. `0` records the
+   * reading and ships whatever came back.
+   */
+  ltxBodyGate: process.env.LTX_BODY_GATE !== "0",
   ltxLipsyncDecodeTile: process.env.LTX_LIPSYNC_DECODE_TILE || undefined,
   /**
    * Text guidance on stage 1 (`text_cfg`), default 3 — the second dial baked in, for the
