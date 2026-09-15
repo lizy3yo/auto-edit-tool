@@ -92,6 +92,7 @@ import {
 } from "./lipsyncChunks";
 import { ltxFramingForUrl, planLtxBase } from "./ltxFraming";
 import { ensureLtxSeedAudit, pickAuditedSeed } from "./ltxSeedAudit";
+import { ensureWidescreenPhoto } from "./ltxWidescreen";
 import { syncGate, wordsForChunk, summarize } from "./lipsyncSyncGate";
 import {
   getLipsyncProvider,
@@ -3788,12 +3789,24 @@ async function resolveLipsyncLane(
     const ltx = new LtxLipsyncAdapter(ENV.runpodLtxEndpoint, ENV.runPodApiKey);
     return {
       provider: "ltx",
-      submit: async ({ scene, imageUrl, audioUrl, useAlt }) => {
+      submit: async ({ scene, imageUrl: photoUrl, audioUrl, useAlt }) => {
+        // A photo that is not 16:9 is WIDENED first (`server/ltxWidescreen.ts`): the worker
+        // cover-scales whatever it gets, and on a 4:3 photo that cut the top of the head off.
+        // The original's face makes the outpaint verifiable; the widened photo is then the one
+        // framed, audited and rendered. Cached per photo; fails open to the original.
+        const original = await ltxFramingForUrl(photoUrl);
+        const wide = await ensureWidescreenPhoto(photoUrl, {
+          face: original.face,
+          mode: ENV.ltxWidescreen,
+        });
+        const imageUrl = wide.url;
+        scene.ltxWidescreen = { method: wide.method, url: wide.url, reason: wide.reason };
         // Frame the photo for the model (`server/ltxFraming.ts`): a face under a third of the
         // frame has no mouth to animate at LTX's working size, so it is rendered from a 16:9
         // window around the face and pasted back by the worker. Cached per photo; recorded on
         // the scene so the decision is readable afterwards; fails open to "as is".
-        const framing = await ltxFramingForUrl(imageUrl);
+        const framing =
+          imageUrl === photoUrl ? original : await ltxFramingForUrl(imageUrl);
         // Three ways to make a small face articulate — see ENV.ltxLipsyncFraming. `auto`
         // renders the whole photo (body and hands move) and only raises the base pass for
         // the photos whose face needs it; `crop` renders a window around the face.

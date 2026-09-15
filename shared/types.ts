@@ -366,6 +366,8 @@ export interface StoryboardScene {
   ltxSeedBump?: number;
   /** True when the seed came from the photo's audited list (`server/ltxSeedAudit.ts`). */
   ltxSeedAudited?: boolean;
+  /** How a non-16:9 host photo was widened before the render (`server/ltxWidescreen.ts`). */
+  ltxWidescreen?: { method: "as-is" | "outpaint" | "blur-pad" | "failed"; url: string; reason: string };
   /** Whether the on-camera host appears (gets the reference face + face-lock) */
   hostPresent: boolean;
   /**

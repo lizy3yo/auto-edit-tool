@@ -194,6 +194,63 @@ export async function generateOpenAIStill(input: {
   }
 }
 
+/**
+ * OUTPAINT: fill the transparent parts of `png` (a canvas with the photo placed on it) guided
+ * by `mask` (transparent = paint here, opaque = keep), at `size` (both dims /16). Used by
+ * `server/ltxWidescreen.ts` to widen a 4:3 host photo to 16:9 the way HeyGen does — the room
+ * grows to the sides, the person is untouched. Paced by the same token bucket as every other
+ * image call; metered as one image. Mock mode returns a failure so the caller's deterministic
+ * fallback runs instead of a stub.
+ */
+export async function outpaintImage(input: {
+  png: Buffer;
+  mask: Buffer;
+  prompt: string;
+  size: string;
+}): Promise<GenerationResult> {
+  const { isMockMode } = await import("../mockMode");
+  if (await isMockMode()) return { success: false, error: "mock mode: no outpaint" };
+  const apiKey = ENV.openaiApiKey;
+  if (!apiKey) return { success: false, error: "OPENAI_API_KEY is not configured" };
+  try {
+    await acquireImageToken();
+    const form = new FormData();
+    form.append("model", OPENAI_IMAGE_MODEL);
+    form.append("prompt", input.prompt);
+    form.append("size", input.size);
+    form.append("quality", OPENAI_IMAGE_QUALITY);
+    form.append("n", "1");
+    form.append("image", new Blob([new Uint8Array(input.png)], { type: "image/png" }), "canvas.png");
+    form.append("mask", new Blob([new Uint8Array(input.mask)], { type: "image/png" }), "mask.png");
+    const res = await fetch("https://api.openai.com/v1/images/edits", {
+      method: "POST",
+      headers: { authorization: `Bearer ${apiKey}` },
+      body: form,
+      signal: callSignal(),
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      let msg = body;
+      try {
+        const j = JSON.parse(body);
+        msg = j?.error?.message || j?.error?.code || body;
+      } catch {
+        // non-JSON body — use as-is
+      }
+      if (res.status === 429)
+        penalizeImageRateLimit(parseImageRetryMs(res.headers.get("retry-after"), msg));
+      return { success: false, error: `OpenAI outpaint ${res.status}: ${msg}` };
+    }
+    const json = (await res.json()) as { data?: { b64_json?: string }[] };
+    const b64 = json.data?.[0]?.b64_json;
+    if (!b64) return { success: false, error: "OpenAI returned no image data" };
+    recordUsage({ lane: "image", provider: "openai", model: OPENAI_IMAGE_MODEL, calls: 1, quantity: 1 });
+    return { success: true, fileData: Buffer.from(b64, "base64"), mimeType: "image/png" };
+  } catch (e: any) {
+    return { success: false, error: e?.message || "OpenAI outpaint request failed" };
+  }
+}
+
 function generateFromText(
   apiKey: string,
   prompt: string,

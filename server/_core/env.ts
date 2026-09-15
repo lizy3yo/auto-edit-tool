@@ -159,6 +159,17 @@ export const ENV = {
    */
   ltxHostSharpen: process.env.LTX_HOST_SHARPEN !== "0",
   /**
+   * A host photo that is not 16:9 is WIDENED before the lane sees it (`server/ltxWidescreen.ts`):
+   * `outpaint` (default) paints the room wider with gpt-image-2 and verifies the face stayed
+   * put, falling back to `blur` (the photo fitted by height over a blurred copy of itself);
+   * `blur` skips the paint; `off` renders the photo as is — which cover-scales it and cuts a
+   * 4:3 photo's head off (jobs 99 and 100, 2026-09-15).
+   */
+  ltxWidescreen:
+    (["outpaint", "blur", "off"] as const).find(
+      m => m === (process.env.LTX_WIDESCREEN ?? "outpaint").toLowerCase()
+    ) ?? ("outpaint" as const),
+  /**
    * The SEED AUDIT (`server/ltxSeedAudit.ts`): the first time a host photo renders, a few
    * short clips are rendered on candidate seeds and the seeds whose eyes stay the photo's
    * size (and whose mouth moves) are saved for that photo; every scene then draws from that

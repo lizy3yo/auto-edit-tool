@@ -391,6 +391,23 @@ Express · tRPC · Drizzle · MySQL.
   ms. Granny's photo passed all four (1.02-1.12); her render on seed 23 read eyes 1.005 —
   the photo's own — liveness 19.1. One audit per photo, ~4 x 60 s of GPU, stored under
   `ltx_seed_audit:<photo hash>` in `app_settings`; `scene.ltxSeedAudited` marks the clips
+- `server/ltxWidescreen.ts` — a host photo that is NOT 16:9 is widened before the LTX lane
+  frames or renders it (`LTX_WIDESCREEN`: `outpaint` default, `blur`, `off`). The worker
+  cover-scales any photo onto its 1920x1080 plate, and on a 4:3 photo that zooms in until
+  16:9 fits and throws a quarter of the height away — the first two 4:3 host photos through
+  the lane (jobs 99 and 100, 2026-09-15) came back with the top of the head cut off and the
+  picture pushed in, while HeyGen's clips of the same photos show MORE room than the photo
+  on both sides: HeyGen paints the room wider. So does this, the same way: the photo is
+  placed at full height on a 1920x1088 canvas and gpt-image-2 paints the side bands
+  (`outpaintImage`, a masked `/images/edits` call, told to change nothing on the person),
+  then the result is VERIFIED — the face detector must find the host's face where the
+  placement put it, at the same size (`acceptOutpaint`, ±25%), else the result is rejected.
+  The fallback, and the `blur` mode, is deterministic: the photo fitted by height over a
+  blurred, darkened cover-scaled copy of itself — nothing invented, nothing cut off. The
+  widened copy is re-hosted on R2 and remembered in `app_settings` (`ltx_widescreen:<hash>`),
+  one image call per photo ever; the widened URL is what gets framed, seed-audited and sent
+  to the worker, and `scene.ltxWidescreen` records the method. Any failure renders from the
+  original and says so
 - `server/lipsyncJudge.ts` + `server/lipsyncSyncGate.ts` — the LTX lane's SYNC GATE
   (`LTX_SYNC_GATE`, on by default; `LTX_SYNC_RETRIES` 2). The judge is the measure script's
   core, moved in-process so a render is judged the moment it lands: the mouth's opening per
