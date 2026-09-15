@@ -385,7 +385,12 @@ Express · tRPC · Drizzle · MySQL.
   pair left her calm seed unchanged (1.24) with the sync gone to chance, and on the man it
   damped the mouth (3.2 against 4.1-4.9) and the sync (r 0.24 at the scan's edge against
   0.38 / 0.42). A setting that fixes one seed of one host and hurts the other host is not a
-  default; picking the seed per photo is
+  default; picking the seed per photo is. END TO END (2026-09-15, jobs 101 and 97): the
+  man's photo failed three of four candidates (eyes 1.25 / 1.25 / 1.37) and kept seed 7
+  (1.16); the production render on it read eyes 1.18, liveness 22.8, both witnesses at −42
+  ms. Granny's photo passed all four (1.02-1.12); her render on seed 23 read eyes 1.005 —
+  the photo's own — liveness 19.1. One audit per photo, ~4 x 60 s of GPU, stored under
+  `ltx_seed_audit:<photo hash>` in `app_settings`; `scene.ltxSeedAudited` marks the clips
 - `server/lipsyncJudge.ts` + `server/lipsyncSyncGate.ts` — the LTX lane's SYNC GATE
   (`LTX_SYNC_GATE`, on by default; `LTX_SYNC_RETRIES` 2). The judge is the measure script's
   core, moved in-process so a render is judged the moment it lands: the mouth's opening per
