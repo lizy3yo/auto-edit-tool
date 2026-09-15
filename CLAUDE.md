@@ -407,7 +407,15 @@ Express · tRPC · Drizzle · MySQL.
   widened copy is re-hosted on R2 and remembered in `app_settings` (`ltx_widescreen:<hash>`),
   one image call per photo ever; the widened URL is what gets framed, seed-audited and sent
   to the worker, and `scene.ltxWidescreen` records the method. Any failure renders from the
-  original and says so
+  original and says so. END TO END the same day on both photos (jobs 99 and 100): the
+  outpaint could not run — the OpenAI account had no credits (`429 You have no credits
+  remaining`) — so both went through the blur-pad, framed as the whole 1920x1088 picture
+  (head to hands, "fills the photo — rendered whole"), were seed-audited on the widened
+  photo (Ruth: seeds 7 and 11 froze the mouth and were dropped, 42 and 23 kept; Hannah:
+  7, 42, 11 kept), and rendered with nothing cut off: Ruth eyes 1.10, r 0.27 / 0.29;
+  Hannah eyes 1.19, r 0.41 / 0.33. Adding OpenAI credits switches new photos to the painted
+  sides with no code change; the two already-widened photos keep their blur-pad until the
+  `ltx_widescreen:` rows are deleted. A settings write that fails is logged, never fatal
 - `server/lipsyncJudge.ts` + `server/lipsyncSyncGate.ts` — the LTX lane's SYNC GATE
   (`LTX_SYNC_GATE`, on by default; `LTX_SYNC_RETRIES` 2). The judge is the measure script's
   core, moved in-process so a render is judged the moment it lands: the mouth's opening per
