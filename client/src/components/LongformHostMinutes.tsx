@@ -1,6 +1,7 @@
 import {
   HOST_MINUTES_OPTIONS,
   formatMinSec,
+  hostSectionSecFor,
   type HostBudget,
 } from "@shared/hostMinutes";
 
@@ -72,8 +73,9 @@ export function LongformHostMinutes({
         )}
       </p>
       <p className="text-xs text-muted-foreground">
-        The host is always on camera for the hook, every call to action and the
-        outro. The rest of the time is spread as short check-ins, about one a
+        The first and last {hostSectionSecFor(value)} seconds cut back and forth
+        between the host and b-roll, and the host is on camera in every call to
+        action. The rest of the time is spread as short check-ins, about one a
         minute. The time that frees up goes to still images.
       </p>
 

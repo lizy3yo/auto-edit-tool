@@ -236,6 +236,7 @@ import {
   resolveHostBudget,
   type HostBudget,
   hostAngleGuideWarning,
+  hostSectionSecFor,
 } from "../shared/hostMinutes";
 import { renderCaptionCardPng } from "./captionCard";
 import {
@@ -1940,24 +1941,155 @@ export function hostBudgetForJob(
 }
 
 /**
- * Host beats the budget must never remove: the hook (scene 1 / the locked cold open), the outro
- * (the closing bookend) and the pitch (a CTA beat or a QR scan-window beat — the pitch has its
- * own host rhythm, `ensureHostInCta` + `shapePitchQrStretches`, and most of the sales are there).
+ * The job's intro/outro section length (`hostSectionSecFor`), capped against the MEASURED film —
+ * 0 when the job has no host-minutes pick, which leaves the hook and outro as single shots.
+ */
+export function hostSectionSecForJob(
+  params: LongformInputParams,
+  scenes: StoryboardScene[]
+): number {
+  if (params.hostMinutes == null || params.brollOnly) return 0;
+  return hostSectionSecFor(
+    params.hostMinutes,
+    scenes.reduce((sum, s) => sum + narrationSecOf(s), 0)
+  );
+}
+
+/**
+ * Which host section each scene sits in: "intro" when its midpoint falls in the film's first
+ * `sectionSec`, "outro" in its last, else null. By midpoint, like `runtimeQuarters`, so a scene
+ * straddling the line belongs where most of it plays. `sectionSec` 0 ⇒ no sections.
+ */
+function hostSectionsOf(
+  scenes: StoryboardScene[],
+  sectionSec: number
+): ("intro" | "outro" | null)[] {
+  const sec = scenes.map(narrationSecOf);
+  const total = sec.reduce((a, b) => a + b, 0);
+  let at = 0;
+  return sec.map(d => {
+    const mid = at + d / 2;
+    at += d;
+    if (sectionSec <= 0) return null;
+    if (mid < sectionSec) return "intro";
+    if (mid > total - sectionSec) return "outro";
+    return null;
+  });
+}
+
+/** A beat the section pass must not change: the pitch, its QR window, the cover, an asset. */
+const fixedForHostSection = (s: StoryboardScene): boolean =>
+  s.cta === true ||
+  !!s.qrHero ||
+  !!s.qrCorner ||
+  !!s.coverHero ||
+  !!s.assetImageUrl;
+
+/**
+ * Make the intro and outro sections CUT between the host and b-roll: host, b-roll, host, b-roll.
+ * The intro is walked forward from the cold open, the outro BACKWARD from the closing shot, so
+ * both bookends anchor the pattern — the film opens on the host and, where a closing beat can be
+ * the host, closes on it.
+ *
+ * On each step: after a host beat the next is b-roll (a host beat there goes to the still lane,
+ * except the locked two-angle cold open); after b-roll the next is the host — the storyboard's own
+ * host beat if it wrote one, else a cutaway of 4–10 s turned into one when `canPromote`. A beat
+ * too short or too long for the host stays b-roll and the one after takes the turn. Pitch, QR,
+ * cover and asset beats are left exactly as they are and simply count as whatever they show; a
+ * cutaway is never promoted beside one of them that shows the host, nor beside the cold open.
+ *
+ * Mutates in place; returns what it changed. Pure otherwise — unit-tested.
+ */
+export function shapeHostSections(
+  scenes: StoryboardScene[],
+  sectionSec: number,
+  opts: { canPromote: boolean }
+): { promoted: number[]; demoted: number[] } {
+  const promoted: number[] = [];
+  const demoted: number[] = [];
+  if (sectionSec <= 0 || scenes.length === 0) return { promoted, demoted };
+  const n = scenes.length;
+  const section = hostSectionsOf(scenes, sectionSec);
+  const sec = scenes.map(narrationSecOf);
+  const protectedHost = (k: number) =>
+    k === 0 || k === n - 1 || !!scenes[k].hostOpener;
+  // A neighbour that shows the host and that nothing here will change.
+  const fixedHostAt = (k: number) =>
+    k >= 0 &&
+    k < n &&
+    scenes[k].hostPresent &&
+    (fixedForHostSection(scenes[k]) || !!scenes[k].hostOpener);
+  const canBecomeHost = (i: number) => {
+    const s = scenes[i];
+    return (
+      opts.canPromote &&
+      !s.hostPresent &&
+      sec[i] >= HOST_MIN_HOLD_SEC &&
+      sec[i] <= HOST_CHECKIN_PROMOTE_MAX_SEC &&
+      !fixedHostAt(i - 1) &&
+      !fixedHostAt(i + 1)
+    );
+  };
+
+  const walk = (order: number[], step: -1 | 1) => {
+    // The beat just outside the section, on the side the walk comes from.
+    const before = order.length ? order[0] - step : -1;
+    let lastWasHost = before >= 0 && before < n && !!scenes[before].hostPresent;
+    for (const i of order) {
+      const s = scenes[i];
+      if (fixedForHostSection(s)) {
+        lastWasHost = !!s.hostPresent;
+        continue;
+      }
+      if (lastWasHost) {
+        const openerPair = !!s.hostOpener && !!scenes[i - step]?.hostOpener;
+        if (s.hostPresent && !openerPair && !protectedHost(i)) {
+          demoteHostToStill(s);
+          demoted.push(s.index);
+        }
+        lastWasHost = !!s.hostPresent;
+        continue;
+      }
+      if (!s.hostPresent && canBecomeHost(i)) {
+        promoteCutawayToHost(s);
+        promoted.push(s.index);
+      }
+      lastWasHost = !!s.hostPresent;
+    }
+  };
+
+  const intro = section.flatMap((z, i) => (z === "intro" ? [i] : []));
+  const outro = section.flatMap((z, i) => (z === "outro" ? [i] : []));
+  walk(intro, 1);
+  walk(outro.reverse(), -1);
+  return { promoted, demoted };
+}
+
+/**
+ * Host beats the budget must never remove: the hook (scene 1 / the locked cold open, and every
+ * host beat of the intro section), the outro (the closing bookend, and every host beat of the
+ * outro section) and the pitch (a CTA beat or a QR scan-window beat — the pitch has its own host
+ * rhythm, `ensureHostInCta` + `shapePitchQrStretches`, and most of the sales are there).
  */
 function hostAnchorKind(
   scenes: StoryboardScene[],
-  i: number
+  i: number,
+  sections: ("intro" | "outro" | null)[] = []
 ): "hook" | "cta" | "outro" | null {
   const s = scenes[i];
   if (!s.hostPresent) return null;
   if (i === 0 || s.hostOpener) return "hook";
   if (s.cta === true || s.qrCorner) return "cta";
-  if (i === scenes.length - 1) return "outro";
+  if (sections[i] === "intro") return "hook";
+  if (sections[i] === "outro" || i === scenes.length - 1) return "outro";
   return null;
 }
 
 export interface HostMinutesPlan {
   budgetSec: number;
+  /** Intro/outro section length the plan used (0 ⇒ single-shot bookends). */
+  sectionSec: number;
+  /** Cold open plus every host beat of the intro section. */
   hookSec: number;
   /** CTA host beats already in the storyboard. */
   ctaSec: number;
@@ -2003,7 +2135,11 @@ export interface HostMinutesPlan {
 export function planHostMinutes(
   scenes: StoryboardScene[],
   budgetSec: number,
-  opts: { canPromote: boolean }
+  opts: {
+    canPromote: boolean;
+    /** Intro/outro section length (`hostSectionSecFor`); 0 or absent ⇒ single-shot bookends. */
+    sectionSec?: number;
+  }
 ): HostMinutesPlan {
   const n = scenes.length;
   const sec = scenes.map(narrationSecOf);
@@ -2016,13 +2152,19 @@ export function planHostMinutes(
   const total = acc;
   const mid = (i: number) => start[i] + sec[i] / 2;
 
+  // 0. The intro and outro sections cut between host and b-roll before anything is budgeted, so
+  // their host beats are anchors below and the check-ins spend only what they leave.
+  const sectionSec = opts.sectionSec ?? 0;
+  const shaped = shapeHostSections(scenes, sectionSec, opts);
+  const sections = hostSectionsOf(scenes, sectionSec);
+
   // 1. Anchors, and the CTA reserve (mirrors `ensureHostInCta`'s walk without mutating).
   const kept = new Set<number>();
   let hookSec = 0;
   let ctaSec = 0;
   let outroSec = 0;
   for (let i = 0; i < n; i++) {
-    const kind = hostAnchorKind(scenes, i);
+    const kind = hostAnchorKind(scenes, i, sections);
     if (!kind) continue;
     kept.add(i);
     if (kind === "hook") hookSec += sec[i];
@@ -2056,12 +2198,22 @@ export function planHostMinutes(
     i = j;
   }
   let hookEnd = 0;
+  let outroStart = total;
   for (let i = 0; i < n; i++) {
-    if (hostAnchorKind(scenes, i) === "hook") hookEnd = start[i] + sec[i];
+    // The whole intro/outro section is host-covered, not just its host beats — check-ins belong
+    // between the sections.
+    if (
+      hostAnchorKind(scenes, i, sections) === "hook" ||
+      sections[i] === "intro"
+    )
+      hookEnd = Math.max(hookEnd, start[i] + sec[i]);
+    if (sections[i] === "outro") outroStart = Math.min(outroStart, start[i]);
   }
   covered.push([0, hookEnd]);
-  const outroAnchored = n > 1 && hostAnchorKind(scenes, n - 1) === "outro";
-  covered.push([outroAnchored ? start[n - 1] : total, total]);
+  const outroAnchored =
+    n > 1 && hostAnchorKind(scenes, n - 1, sections) === "outro";
+  if (outroAnchored) outroStart = Math.min(outroStart, start[n - 1]);
+  covered.push([outroStart, total]);
   covered.sort((a, b) => a[0] - b[0]);
 
   const anchorSec = hookSec + ctaSec + outroSec + ctaReserveSec;
@@ -2070,11 +2222,14 @@ export function planHostMinutes(
   const besideKept = (i: number, extra: Set<number>) =>
     [i - 1, i + 1].some(k => k >= 0 && k < n && (isKept(k) || extra.has(k)));
 
-  const existingCandidate = (i: number) => scenes[i].hostPresent && !isKept(i);
+  // Section beats were settled by `shapeHostSections` — never a check-in or a top-up.
+  const existingCandidate = (i: number) =>
+    scenes[i].hostPresent && !isKept(i) && sections[i] == null;
   const promotable = (i: number) => {
     const s = scenes[i];
     return (
       opts.canPromote &&
+      sections[i] == null &&
       !s.hostPresent &&
       s.cta !== true &&
       !s.qrHero &&
@@ -2206,6 +2361,7 @@ export function planHostMinutes(
     ctaReserveSec;
   return {
     budgetSec,
+    sectionSec,
     hookSec,
     ctaSec,
     ctaReserveSec,
@@ -2215,8 +2371,8 @@ export function planHostMinutes(
     topUps: topUp.size,
     topUpSec,
     cadenceSec: chosen.size > 0 ? cadenceSec : null,
-    promoted,
-    demoted,
+    promoted: [...shaped.promoted, ...promoted],
+    demoted: demoted + shaped.demoted.length,
     plannedSec,
     anchorsOverBudget,
   };
@@ -2231,8 +2387,11 @@ export function planHostMinutes(
  */
 export function capHostMinutes(
   scenes: StoryboardScene[],
-  budgetSec: number
+  budgetSec: number,
+  /** The plan's intro/outro section length, so a section's host beats stay anchors here too. */
+  sectionSec = 0
 ): { hostSec: number; demoted: number[]; overBudget: boolean } {
+  const sections = hostSectionsOf(scenes, sectionSec);
   const sec = scenes.map(narrationSecOf);
   const start: number[] = [];
   let acc = 0;
@@ -2250,7 +2409,7 @@ export function capHostMinutes(
     let pick = -1;
     let nearest = Infinity;
     for (const i of hosts) {
-      if (hostAnchorKind(scenes, i)) continue;
+      if (hostAnchorKind(scenes, i, sections)) continue;
       // A lone host beat has no neighbour (Infinity) and is still demotable.
       const d = Math.min(
         ...hosts.filter(k => k !== i).map(k => Math.abs(mid(k) - mid(i)))
@@ -10852,14 +11011,18 @@ async function runUnifiedPipeline(
   // (`planHostMinutes`); every other job keeps the percentage mix (`rebalanceHostScreenTime`).
   const filmTotal = scenes.reduce((sum, s) => sum + (s.audioDuration ?? 0), 0);
   const hostBudget = hostBudgetForJob(params, scenes, pacing);
+  // Intro/outro sections that cut between host and b-roll, sized by the pick (20 s at 3 min).
+  const hostSectionSec = hostSectionSecForJob(params, scenes);
   if (hostBudget) {
     const plan = planHostMinutes(scenes, hostBudget.budgetSec, {
       canPromote: !!params.faceImageUrl,
+      sectionSec: hostSectionSec,
     });
     console.log(
       `[Longform ${jobId}] host budget ${formatMinSec(hostBudget.budgetSec)} ` +
         `(${params.hostMinutes} min picked, ${hostBudget.basis}; guide ` +
         `${formatMinSec(hostBudget.guideSec)} of a ${formatMinSec(filmTotal)} film) — ` +
+        `intro/outro sections ${Math.round(plan.sectionSec)}s each, ` +
         `hook ${formatMinSec(plan.hookSec)}, CTA ${formatMinSec(plan.ctaSec)}` +
         `${plan.ctaReserveSec > 0 ? ` (+${formatMinSec(plan.ctaReserveSec)} reserved)` : ""}, ` +
         `outro ${formatMinSec(plan.outroSec)}, ${plan.checkIns} check-in(s) ` +
@@ -11151,7 +11314,7 @@ async function runUnifiedPipeline(
   // The host budget's last word: the CTA passes above add host beats the plan only estimated.
   // Anything this demotes was host before `ensureHostInCta`, so `demotedLate` below re-enhances it.
   if (hostBudget) {
-    const capped = capHostMinutes(scenes, hostBudget.budgetSec);
+    const capped = capHostMinutes(scenes, hostBudget.budgetSec, hostSectionSec);
     if (capped.demoted.length) {
       console.log(
         `[Longform ${jobId}] host budget re-check: demoted ${capped.demoted.length} check-in(s) ` +

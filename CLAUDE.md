@@ -368,7 +368,15 @@ Express · tRPC · Drizzle · MySQL.
   over it ⇒ the dialog asks, "use anyway" (`hostMinutesOverride: true`) honours the pick up to
   HALF the film, "use the guide" (`false`) takes the guide. `undefined` means nobody was asked —
   the estimate fitted — so a film that measures shorter falls back to the guide and the job
-  carries a warning saying so. The plan, after voicing and before any clip is paid for: the hook,
+  carries a warning saying so. INTRO AND OUTRO SECTIONS come first (`shapeHostSections`,
+  `hostSectionSecFor`): the film's first and last 20 s at 3 min, +15 s per extra minute (35 / 50 /
+  65 / 80), capped at a fifth of the film, CUT between host and b-roll — the intro walked forward
+  from the cold open, the outro backward from the closing shot, keeping the storyboard's host
+  beats where the alternation allows, promoting a 4–10 s cutaway where it needs one and sending a
+  host beat that would sit beside another to the still lane. CTA/QR/cover/asset beats inside a
+  section are left alone. Every section host beat is an anchor (hook/outro) in both the plan and
+  `capHostMinutes`, and the sections spend the SAME budget — check-ins only run between them. The
+  plan, after voicing and before any clip is paid for: the hook,
   every CTA/scan-window host beat and the outro are ANCHORS (never removed), with a reserve for
   the beat `ensureHostInCta` will flip later; the rest of the budget becomes check-ins at evenly
   spaced targets ~60 s apart in each stretch between anchors — nearest existing host beat in the
