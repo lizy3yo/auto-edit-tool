@@ -210,7 +210,12 @@ export async function ensureWidescreenPhoto(
         }
         const put = await storagePut(`ltx-widescreen/${key.split(":")[1]}-${method}.jpg`, png, "image/jpeg");
         const r: WidescreenResult = { url: put.url, method, photoW, photoH, placed, reason };
-        await setAppSetting(key, JSON.stringify(r));
+        // Remembering it is a convenience; a database hiccup must not discard a good widening.
+        try {
+          await setAppSetting(key, JSON.stringify(r));
+        } catch (err: any) {
+          log(`${name}: widened but not remembered (${err?.message ?? err}) — will widen again next boot`);
+        }
         log(`${name}: ${reason} → ${put.url.split("/").pop()}`);
         return r;
       } catch (err: any) {

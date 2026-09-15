@@ -192,7 +192,13 @@ export async function ensureLtxSeedAudit(
             .map(t => `${t.seed}: eyes ${t.eyeRatio ?? "?"} live ${t.liveness ?? "?"}${t.error ? " ERR" : ""}`)
             .join(" | ")} → seeds [${audit.seeds.join(", ")}]${audit.noneCalm ? " (none calm — least wide kept)" : ""}`
         );
-        if (audit.seeds.length) await setAppSetting(key, JSON.stringify(audit));
+        if (audit.seeds.length) {
+          try {
+            await setAppSetting(key, JSON.stringify(audit));
+          } catch (err: any) {
+            log(`audit not remembered (${err?.message ?? err}) — it still applies to this run`);
+          }
+        }
         return audit.seeds.length ? audit : null;
       } catch (err: any) {
         log(`audit failed (${err?.message ?? err}) — rendering on the hash seed`);
