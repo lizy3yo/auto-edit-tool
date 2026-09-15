@@ -6,8 +6,24 @@ import {
   HOST_MINUTES_MAX_FRACTION,
   recommendedAngleCount,
   hostAngleGuideWarning,
+  hostSectionSecFor,
 } from "./hostMinutes";
 import { DEFAULT_LONGFORM_PACING, LEGACY_PACING } from "./pacing";
+
+describe("hostSectionSecFor", () => {
+  it("is 20 s at 3 minutes and grows 15 s per extra minute", () => {
+    expect([3, 4, 5, 6, 7].map(m => hostSectionSecFor(m))).toEqual([
+      20, 35, 50, 65, 80,
+    ]);
+  });
+
+  it("is capped at a fifth of a short film, so intro and outro never meet", () => {
+    // A 3-minute film at 7 min: 80 s wanted, 36 s allowed.
+    expect(hostSectionSecFor(7, 180)).toBe(36);
+    // A 20-minute film leaves every option untouched.
+    expect(hostSectionSecFor(7, 1200)).toBe(80);
+  });
+});
 
 describe("resolveHostBudget", () => {
   it("gives the selected minutes when they sit within the guide", () => {

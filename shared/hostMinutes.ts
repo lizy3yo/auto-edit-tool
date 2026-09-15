@@ -38,6 +38,32 @@ export const HOST_MINUTES_OPTIONS = [3, 4, 5, 6, 7] as const;
 export const DEFAULT_HOST_MINUTES = 3;
 
 /**
+ * INTRO and OUTRO host sections. The first and the last stretch of the film cut back and forth
+ * between the host and b-roll (`shapeHostSections`), so the host carries the open and the close
+ * instead of one cold-open shot and one closing shot. The stretch is 20 s at the default 3 minutes
+ * and grows 15 s per extra minute (3 → 20, 4 → 35, 5 → 50, 6 → 65, 7 → 80) — the section's
+ * LENGTH, with roughly half of it on the host. It spends the same budget: the more of it the
+ * sections take, the less the mid-film check-ins get.
+ */
+export const HOST_SECTION_BASE_SEC = 20;
+export const HOST_SECTION_STEP_SEC = 15;
+/** Each section is at most this share of the film, so on a short film intro and outro never meet. */
+export const HOST_SECTION_MAX_FRACTION = 0.2;
+
+/**
+ * Length of the intro section, and of the outro section, for a host budget in minutes. With
+ * `filmSec`, capped at `HOST_SECTION_MAX_FRACTION` of the film. Pure — unit-tested.
+ */
+export function hostSectionSecFor(minutes: number, filmSec?: number): number {
+  const sec =
+    HOST_SECTION_BASE_SEC +
+    HOST_SECTION_STEP_SEC * Math.max(0, minutes - DEFAULT_HOST_MINUTES);
+  return filmSec == null
+    ? sec
+    : Math.min(sec, HOST_SECTION_MAX_FRACTION * Math.max(0, filmSec));
+}
+
+/**
  * Hard ceiling on host screen time even after an override: half the film. Past it a "faceless"
  * video is mostly face, and the b-roll the format is built around becomes the minority.
  */

@@ -4,6 +4,8 @@ import {
   capHostMinutes,
   ensureHostInCta,
   hostBudgetForJob,
+  hostSectionSecForJob,
+  shapeHostSections,
   HOST_MIN_HOLD_SEC,
   WORDS_PER_SEC,
 } from "./longformVideo";
@@ -37,6 +39,122 @@ const hostSec = (scenes: StoryboardScene[]) =>
 /** Start times (s) of every host beat, in order. */
 const hostStarts = (scenes: StoryboardScene[]) =>
   scenes.flatMap((s, i) => (s.hostPresent ? [i * SCENE_SEC] : []));
+
+/** Host (H) / b-roll (B) pattern of a run of scenes. */
+const pattern = (scenes: StoryboardScene[], from: number, to: number) =>
+  scenes
+    .slice(from, to + 1)
+    .map(s => (s.hostPresent ? "H" : "B"))
+    .join("");
+
+describe("shapeHostSections", () => {
+  // 40 × 6 s = 4:00. A 20 s section holds scenes 0–2 (intro) and 37–39 (outro).
+  it("builds host/b-roll switching from pure b-roll, opening and closing on the host", () => {
+    const scenes = film(40, i => i === 0 || i === 39);
+    const r = shapeHostSections(scenes, 20, { canPromote: true });
+    expect(pattern(scenes, 0, 2)).toBe("HBH");
+    expect(pattern(scenes, 37, 39)).toBe("HBH");
+    expect(r.promoted.sort((a, b) => a - b)).toEqual([2, 37]);
+    // Nothing outside the sections is touched.
+    expect(pattern(scenes, 3, 36)).toBe("B".repeat(34));
+  });
+
+  it("breaks up a section the storyboard wrote as solid host", () => {
+    const scenes = film(40, i => i < 3 || i > 36);
+    const r = shapeHostSections(scenes, 20, { canPromote: true });
+    expect(pattern(scenes, 0, 2)).toBe("HBH");
+    expect(pattern(scenes, 37, 39)).toBe("HBH");
+    expect(r.demoted.sort((a, b) => a - b)).toEqual([1, 38]);
+  });
+
+  it("keeps the locked two-angle cold open together", () => {
+    const scenes = film(
+      40,
+      i => i < 3 || i === 39,
+      i => (i === 1 ? { hostOpener: true } : {})
+    );
+    shapeHostSections(scenes, 20, { canPromote: true });
+    expect(pattern(scenes, 0, 2)).toBe("HHB");
+  });
+
+  it("leaves a CTA beat inside a section exactly as it is", () => {
+    const scenes = film(
+      40,
+      i => i === 0 || i >= 38,
+      i => (i === 38 ? { cta: true } : {})
+    );
+    shapeHostSections(scenes, 20, { canPromote: true });
+    expect(scenes[38].hostPresent).toBe(true);
+    expect(scenes[38].cta).toBe(true);
+    // The closer is kept; the beat before the CTA host is not promoted beside it.
+    expect(pattern(scenes, 37, 39)).toBe("BHH");
+  });
+
+  it("skips a beat too short or too long for the host, and does not promote without a photo", () => {
+    const scenes = film(40, i => i === 0 || i === 39);
+    scenes[2].audioDuration = 2; // under the host floor
+    scenes[3].audioDuration = 6;
+    const r = shapeHostSections(scenes, 25, { canPromote: true });
+    expect(scenes[2].hostPresent).toBe(false);
+    expect(scenes[3].hostPresent).toBe(true); // the next beat takes the turn
+
+    const noPhoto = film(40, i => i === 0 || i === 39);
+    expect(
+      shapeHostSections(noPhoto, 20, { canPromote: false }).promoted
+    ).toEqual([]);
+    expect(r.promoted).toContain(3);
+  });
+
+  it("does nothing without a section length", () => {
+    const scenes = film(40, i => i < 3 || i > 36);
+    const r = shapeHostSections(scenes, 0, { canPromote: true });
+    expect(r).toEqual({ promoted: [], demoted: [] });
+    expect(pattern(scenes, 0, 2)).toBe("HHH");
+  });
+});
+
+describe("planHostMinutes with intro/outro sections", () => {
+  // 20-minute film, host on every other beat, one CTA block at 10:00–11:00.
+  const twentyMin = () =>
+    film(
+      200,
+      i => i % 2 === 0 || i === 199,
+      i => (i >= 100 && i < 110 ? { cta: true } : {})
+    );
+
+  it("keeps every section host beat, counts it as hook/outro, and stays in budget", () => {
+    const scenes = twentyMin();
+    // 30 s sections: intro scenes 0–4, outro scenes 195–199.
+    const plan = planHostMinutes(scenes, 180, {
+      canPromote: true,
+      sectionSec: 30,
+    });
+    expect(pattern(scenes, 0, 4)).toBe("HBHBH");
+    expect(pattern(scenes, 195, 199)).toBe("HBHBH");
+    expect(plan.hookSec).toBe(3 * SCENE_SEC);
+    expect(plan.outroSec).toBe(3 * SCENE_SEC);
+    expect(hostSec(scenes)).toBeLessThanOrEqual(180);
+    // Check-ins run between the sections, not inside them.
+    expect(plan.checkIns).toBeGreaterThan(0);
+  });
+
+  it("never lets the final cap remove a section host beat", () => {
+    const scenes = twentyMin();
+    planHostMinutes(scenes, 180, { canPromote: true, sectionSec: 30 });
+    const r = capHostMinutes(scenes, 30, 30); // far under what the anchors need
+    expect(r.overBudget).toBe(true);
+    expect(pattern(scenes, 0, 4)).toBe("HBHBH");
+    expect(pattern(scenes, 195, 199)).toBe("HBHBH");
+  });
+
+  it("sizes the sections from the job's pick, and not at all without one", () => {
+    const scenes = twentyMin();
+    const base = { script: "x" } as LongformInputParams;
+    expect(hostSectionSecForJob({ ...base, hostMinutes: 3 }, scenes)).toBe(20);
+    expect(hostSectionSecForJob({ ...base, hostMinutes: 7 }, scenes)).toBe(80);
+    expect(hostSectionSecForJob(base, scenes)).toBe(0);
+  });
+});
 
 describe("planHostMinutes", () => {
   // 20-minute film, host on every other beat (the storyboard writes host heavily), one CTA
