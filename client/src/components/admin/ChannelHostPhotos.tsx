@@ -132,7 +132,7 @@ export function ChannelHostPhotos({ channelKey }: { channelKey: string }) {
                   alt=""
                   className="h-16 w-16 shrink-0 rounded border border-border object-cover"
                 />
-                <div className="min-w-0 flex-1">
+                <div className="min-w-0 flex-1 space-y-1">
                   {i === 0 ? (
                     <span className="inline-flex items-center gap-1 rounded bg-secondary px-1.5 py-0.5 text-xs font-medium">
                       <Star className="h-3 w-3" />
@@ -141,6 +141,13 @@ export function ChannelHostPhotos({ channelKey }: { channelKey: string }) {
                   ) : (
                     <span className="text-xs text-muted-foreground">
                       Angle {i + 1}
+                    </span>
+                  )}
+                  {/* The tick lives on the generate form's picker and is saved to the channel;
+                      shown here so a manager can see which angles the editors switched off. */}
+                  {!p.isSelected && (
+                    <span className="block text-[11px] italic text-muted-foreground">
+                      Not used — unticked on the long-form page
                     </span>
                   )}
                 </div>

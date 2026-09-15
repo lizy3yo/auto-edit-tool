@@ -7,6 +7,8 @@ import {
   panelFraction,
   faceInPanel,
   correctFocus,
+  resolveFaceReadings,
+  PHOTO_CLIP_DISAGREEMENT,
 } from "./faceAlign";
 
 describe("medianFocus", () => {
@@ -220,5 +222,44 @@ describe("faceInPanel / correctFocus", () => {
     focus = correctFocus(focus, seen, FRAC);
     expect(focus).toBeLessThanOrEqual(1);
     expect(cropWindow(focus, FRAC).left).toBeCloseTo(before, 10);
+  });
+});
+
+describe("resolveFaceReadings", () => {
+  it("prefers the photo when both agree", () => {
+    const r = resolveFaceReadings(0.31, 0.34, "pico");
+    expect(r).toEqual({ focus: 0.31, source: "photo", clipDiscarded: false });
+  });
+
+  it("keeps the photo and flags a clip reading that lands somewhere else", () => {
+    // The clip detector found the wood-stove, not the face.
+    const r = resolveFaceReadings(
+      0.31,
+      0.31 + PHOTO_CLIP_DISAGREEMENT + 0.01,
+      "pico"
+    );
+    expect(r.focus).toBe(0.31);
+    expect(r.source).toBe("photo");
+    expect(r.clipDiscarded).toBe(true);
+  });
+
+  it("falls back to the clip, with its detector named, when the photo read nothing", () => {
+    expect(resolveFaceReadings(null, 0.62, "haiku")).toEqual({
+      focus: 0.62,
+      source: "haiku",
+      clipDiscarded: false,
+    });
+  });
+
+  it("is centred, and says so, only when neither source read a face", () => {
+    expect(resolveFaceReadings(null, null, null)).toEqual({
+      focus: null,
+      source: "centre",
+      clipDiscarded: false,
+    });
+  });
+
+  it("treats a non-finite reading as absent", () => {
+    expect(resolveFaceReadings(Number.NaN, 0.4, "pico").focus).toBe(0.4);
   });
 });

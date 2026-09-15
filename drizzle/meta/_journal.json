@@ -71,6 +71,13 @@
       "when": 1788973237858,
       "tag": "0009_uneven_sersi",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1789443896870,
+      "tag": "0010_lucky_cargill",
+      "breakpoints": true
     }
   ]
 }

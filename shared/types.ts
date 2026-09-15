@@ -580,6 +580,14 @@ export interface StoryboardScene {
    */
   splitAutoFocusX?: number;
   /**
+   * Where `splitAutoFocusX` came from on the last composite: the operator (`manual`), the
+   * value reused from an earlier composite (`hint`), the host PHOTO the scene was synced from
+   * (`photo` — the preferred source, since the lip-sync lane animates the photo without
+   * reframing it), a detector on the clip's own frames (`pico` / `haiku`), or nothing at all
+   * (`centre` — no face found anywhere; the job carries a warning naming the scene).
+   */
+  splitFocusSource?: "manual" | "hint" | "photo" | "pico" | "haiku" | "centre";
+  /**
    * The split RIGHT panel as its own standalone clip (Ken Burns still or moving b-roll),
    * BEFORE compositing — the other half of the pair `hostClipUrls` starts. Persisted so the
    * split editor can recomposite either half independently (swap the panel, un-split, reuse
@@ -636,6 +644,14 @@ export interface StoryboardScene {
    * neighbours used the first one. Absent ⇒ the scene animates the raw host photo.
    */
   hostPlateUrl?: string;
+  /**
+   * The exact image this host scene was lip-synced FROM — the plate when one was used, else
+   * the angle's photo. Persisted at render time so the split compositor can read the face
+   * off that still (`measureHostFocusX`) instead of guessing from video frames, on every
+   * later recomposite too. Absent on scenes rendered before this existed; the compositor
+   * then falls back to the angle's photo, then to the clip frames.
+   */
+  lipsyncImageUrl?: string;
   /**
    * The SETTING this host scene's plate should depict, assigned by `assignHostPlateContexts`
    * in the planning pass. Scenes in the same "look" share a byte-identical string, and that
@@ -823,6 +839,12 @@ export interface LongformInputParams {
    * One entry ⇒ every host scene uses it, no angle changes, and the cold open is a single scene.
    */
   faceImageUrls?: string[];
+  /**
+   * How many of the operator's SELECTED host photos failed to rehost when the job was created
+   * and were left out of `faceImageUrls`. The pipeline turns it into a job warning at start,
+   * because a photo that quietly vanished here looks exactly like the planner ignoring it.
+   */
+  droppedHostPhotos?: number;
   /**
    * The host's on-screen identity, resolved from the channel config. Rendered as a lower-third
    * card over the SECOND host shot of the film (see `nameCardSceneIndex` / `renderNameCardPng`).

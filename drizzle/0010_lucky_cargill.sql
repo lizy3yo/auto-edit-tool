@@ -1,0 +1,1 @@
+ALTER TABLE `channel_host_photos` ADD `isSelected` boolean DEFAULT true NOT NULL;

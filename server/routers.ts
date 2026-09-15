@@ -186,6 +186,7 @@ import {
   setLipsyncCameraMode,
   runpodLipsyncReadiness,
 } from "./lipsyncProvider";
+import { selectedHostPhotos, canDeselectHostPhoto } from "./hostPhotoSelection";
 import { extractBookName } from "./ctaDetector";
 import { createProviderAdapter } from "./providers";
 import { rehostToR2 } from "./storage";
@@ -337,7 +338,8 @@ const providerRouter = router({
         : null;
       return {
         keySet: !!row?.apiKeyEncrypted,
-        groupIdSet: !!(row?.customConfig as { groupId?: string } | null)?.groupId,
+        groupIdSet: !!(row?.customConfig as { groupId?: string } | null)
+          ?.groupId,
         connectionStatus: row?.connectionStatus ?? "untested",
         // Only meaningful with a channelKey; false without one.
         voiceSet: !!config?.minimaxVoiceId,
@@ -983,12 +985,54 @@ const channelHostPhotoRouter = router({
       return { success: true };
     }),
 
-  /** Promote one angle to the front of the order, making it the channel's primary camera. */
-  setPrimary: managerProcedure
+  /**
+   * Promote one angle to the front of the order, making it the channel's primary camera. Open to
+   * every signed-in role, not just managers: the generate form's picker offers it too, since
+   * which photo opens a film is a choice the person cutting that film makes.
+   */
+  setPrimary: approvedProcedure
     .input(z.object({ channelKey: z.string().min(1), id: z.number() }))
     .mutation(async ({ input }) => {
       await setPrimaryChannelHostPhoto(input.channelKey, input.id);
+      // A primary that is not ticked would not render at all — the film's primary is the first
+      // TICKED photo — so promoting one ticks it.
+      await updateChannelHostPhoto(input.id, { isSelected: true });
       return { success: true };
+    }),
+
+  /**
+   * Tick or untick one angle for the channel's videos — the picker's saved state, shared by every
+   * operator and device. The channel's last ticked photo cannot be unticked: a video with no host
+   * photo cannot render a host scene. Returns the resulting list so the client can reconcile.
+   */
+  setSelected: approvedProcedure
+    .input(
+      z.object({
+        channelKey: z.string().min(1),
+        id: z.number(),
+        selected: z.boolean(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const library = await getChannelHostPhotos(input.channelKey, true);
+      const row = library.find(p => p.id === input.id);
+      if (!row) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "That host photo is no longer on the channel.",
+        });
+      }
+      if (!input.selected && !canDeselectHostPhoto(library, input.id)) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            "At least one host photo must stay ticked — a video needs one to render host scenes.",
+        });
+      }
+      if (row.isSelected !== input.selected) {
+        await updateChannelHostPhoto(input.id, { isSelected: input.selected });
+      }
+      return getChannelHostPhotos(input.channelKey, true);
     }),
 });
 
@@ -1385,7 +1429,8 @@ const longformVideoRouter = router({
       if (!spoken.trim()) {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: "The script has no spoken text to check the recording against.",
+          message:
+            "The script has no spoken text to check the recording against.",
         });
       }
       const config = await getChannelConfig(input.channelKey);
@@ -1480,7 +1525,8 @@ const longformVideoRouter = router({
         });
       }
       const job = await getLongformVideoJobById(input.jobId);
-      if (!job) throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
+      if (!job)
+        throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
       if (!canSeeAllJobs(ctx.user.role) && job.userId !== ctx.user.id) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Not your render." });
       }
@@ -1583,6 +1629,7 @@ const longformVideoRouter = router({
          * Capped at 8: the film only has so many host beats, and past a handful each extra angle
          * appears so briefly it reads as a glitch while still costing its own set of host plates.
          */
+        // Absent ⇒ the channel's SAVED ticks (`isSelected`), which the picker keeps in step with.
         hostPhotoIds: z.array(z.number()).max(8).optional(),
         /**
          * Operator-supplied master narration (an R2 URL from `POST /api/narration-upload`,
@@ -1712,16 +1759,12 @@ const longformVideoRouter = router({
       // fails every host/book scene at render time. face + cover fail fast (they're required refs);
       // QR is non-fatal (videoAssembly treats a missing QR as a no-op), so drop it on failure.
       //
-      // Host photos come from the channel's LIBRARY, narrowed to what this video selected. An
-      // empty/absent selection means "every active angle", which is what a channel migrated
-      // from the old two-column pair gets — so an operator who never opens the picker keeps
-      // exactly the behaviour they had. Unknown ids are ignored rather than rejected: a photo
-      // can be removed from the channel between opening the form and pressing generate, and
-      // that should cost an angle, not the render.
+      // Host photos come from the channel's LIBRARY, narrowed to the angles ticked for it. The
+      // form sends the ids it shows as ticked; with none (an older client, a script) the
+      // channel's SAVED ticks apply, which is the same choice every operator sees in the picker.
+      // See `selectedHostPhotos` for the fallbacks (unknown ids cost an angle, not the render).
       const libraryPhotos = await getChannelHostPhotos(input.channelKey, true);
-      const wanted = input.hostPhotoIds?.length
-        ? libraryPhotos.filter(p => input.hostPhotoIds!.includes(p.id))
-        : libraryPhotos;
+      const wanted = selectedHostPhotos(libraryPhotos, input.hostPhotoIds);
       // Legacy fallback: a channel whose library is somehow empty (created before migration
       // 0008 and never edited since) still renders from its original columns.
       const selectedUrls = wanted.length
@@ -1736,14 +1779,23 @@ const longformVideoRouter = router({
         : undefined;
       const extraFaces = (
         await Promise.all(
-          selectedUrls
-            .slice(1)
-            .map(u => rehostToR2(u, "face").catch(() => undefined))
+          selectedUrls.slice(1).map(u =>
+            rehostToR2(u, "face").catch(err => {
+              console.warn(
+                `[longform] host photo rehost failed, rendering without it: ${u}`,
+                err
+              );
+              return undefined;
+            })
+          )
         )
       ).filter((u): u is string => !!u);
       const faceImageUrls = faceImageUrl
         ? [faceImageUrl, ...extraFaces]
         : undefined;
+      // A dropped photo is invisible in the film (every scene still has a valid one), so the
+      // count rides on the job and becomes a warning the operator can see.
+      const droppedHostPhotos = selectedUrls.length - 1 - extraFaces.length;
       // Kept in step with the list so a job snapshotted now is still readable by anything that
       // predates `faceImageUrls` (and so `hostFaces` agrees whichever field it reaches for).
       const faceImageUrl2 = extraFaces[0];
@@ -1895,6 +1947,8 @@ const longformVideoRouter = router({
         faceImageUrl,
         faceImageUrl2,
         faceImageUrls,
+        droppedHostPhotos:
+          droppedHostPhotos > 0 ? droppedHostPhotos : undefined,
         // On-screen lower third for the host, drawn once on the 2nd host shot. Plain strings —
         // nothing to rehost. All three blank → no card.
         hostName: channelConfig.hostName ?? undefined,

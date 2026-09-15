@@ -50,6 +50,56 @@ export const HOST_MINUTES_MAX_FRACTION = 0.5;
  */
 export const ESTIMATE_WORDS_PER_SEC = 2.8;
 
+/**
+ * How many host CAMERA ANGLES a host budget can carry before the extra ones read as random
+ * cuts. Angles rotate evenly across the host beats (`assignHostShots`), so every photo ticked
+ * takes an equal share of a fixed number of shots: at 3 minutes a film has ~25 host beats, and
+ * four angles leaves each one ~6 appearances scattered over 17 minutes — a camera that turns
+ * up every few minutes reads as a mistake, not a set-up. Two angles at 3 minutes gives each
+ * ~12, which reads as a two-camera interview. The rule behind the table: an angle should carry
+ * about 1.5 minutes of host time to feel established.
+ *
+ * A GUIDE, not a cap: the picker warns past it and the job records the warning, but nothing
+ * is unticked — an operator may want the variety on purpose.
+ */
+export const HOST_ANGLE_GUIDE: Readonly<Record<number, number>> = {
+  3: 2,
+  4: 3,
+  5: 3,
+  6: 4,
+  7: 4,
+};
+
+/** Seconds of host time an angle should carry — what the table above is derived from. */
+const HOST_ANGLE_MIN_SEC = 90;
+
+/** Recommended maximum angle count for a host budget in minutes (never below 1). */
+export function recommendedAngleCount(minutes: number): number {
+  const fromTable = HOST_ANGLE_GUIDE[minutes];
+  if (fromTable) return fromTable;
+  return Math.max(
+    1,
+    Math.floor((Math.max(0, minutes) * 60) / HOST_ANGLE_MIN_SEC)
+  );
+}
+
+/**
+ * The warning shown when more angles are selected than the guide allows, or null when the
+ * selection fits. One copy for the picker and the job warning, so the film says the same thing
+ * the form said.
+ */
+export function hostAngleGuideWarning(
+  minutes: number,
+  selectedAngles: number
+): string | null {
+  const max = recommendedAngleCount(minutes);
+  if (selectedAngles <= max) return null;
+  return (
+    `${minutes} min of talking head is best with up to ${max} angle${max === 1 ? "" : "s"}. ` +
+    `${selectedAngles} selected: each one gets fewer shots and can read as random cuts.`
+  );
+}
+
 /** Which branch of the rule decided the budget. */
 export type HostBudgetBasis = "selected" | "override" | "guide";
 

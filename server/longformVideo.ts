@@ -235,6 +235,7 @@ import {
   formatMinSec,
   resolveHostBudget,
   type HostBudget,
+  hostAngleGuideWarning,
 } from "../shared/hostMinutes";
 import { renderCaptionCardPng } from "./captionCard";
 import {
@@ -727,17 +728,16 @@ export const STILL_IMAGE_FRACTION = 0.5;
  */
 export const HOST_SPLITVISUAL_FRACTION = 7.5 / 35;
 /**
- * Target share of HOST runtime rendered from a NON-PRIMARY camera angle: 10% of total out of
- * the 35% host budget, leaving 17.5% on the main camera. `assignHostShots` converges the actual
- * share by runtime. With only one photo the whole 27.5% non-split host budget stays on it.
- *
- * With three or more angles this whole fraction is SHARED between them — the primary keeps its
- * ~71% of host runtime whatever the count. That is deliberate and it is a cost decision, not an
- * aesthetic one: `planLipsyncGroups` batches consecutive host beats into one GPU call only when
- * they share an angle, so an even rotation (A, B, C, A, B, C) never lets two neighbours match
- * and every beat renders solo — and a solo beat pays for ~40% frames nobody sees (the run-up
- * plus the padding out to the last 81-frame window). Keeping one dominant angle preserves long
- * runs of it, so adding photos costs plate images rather than a step change in GPU seconds.
+ * RUNPOD LANE ONLY (`HostRotation` "budget"): target share of HOST runtime rendered from a
+ * NON-PRIMARY camera angle — 10% of total out of the 35% host budget, leaving 17.5% on the main
+ * camera and shared between however many non-primary angles there are, so the primary keeps
+ * ~71% of host runtime whatever the count. A cost decision, not an aesthetic one:
+ * `planLipsyncGroups` batches consecutive host beats into one GPU call only when they share an
+ * angle, so an even rotation never lets two neighbours match and every beat renders solo — and a
+ * solo beat pays for ~40% frames nobody sees (the run-up plus the padding out to the last
+ * 81-frame window). On HeyGen, where the photo is free either way, angles rotate EVENLY instead
+ * and this fraction is not consulted — a 3-minute host budget placed this way showed the primary
+ * on 18 of 25 host beats and each other photo two or three times, which read as one photo.
  */
 export const HOST_ALT_CAMERA_FRACTION = 10 / 35;
 
@@ -2639,6 +2639,8 @@ export function enforceVisualAdjacency(
      * — every existing one, and every existing test — behaves exactly as before.
      */
     angleCount?: number;
+    /** How the free host beats are spread over the angles — see `HostRotation`. */
+    hostRotation?: HostRotation;
     allowAdjacentMotion?: boolean;
     /**
      * Longest run of adjacent MOTION beats left alone (default 1 — the shipped behaviour).
@@ -2721,7 +2723,8 @@ export function enforceVisualAdjacency(
   // Assign the host camera angle last, once the runs are final.
   const shots = assignHostShots(
     scenes,
-    opts?.angleCount ?? (hasAltHost ? 2 : 1)
+    opts?.angleCount ?? (hasAltHost ? 2 : 1),
+    opts?.hostRotation
   );
 
   return { hostBroken, motionBroken, altSeconds: shots.altSeconds };
@@ -2736,33 +2739,45 @@ export function enforceVisualAdjacency(
 export const MAX_ADJACENT_HOST = 2;
 
 /**
- * Assign each host scene its camera angle by RUNTIME. `hostShot` is an INDEX into the video's
- * selected host photos, 0 being the primary. Non-primary angles together target
- * `HOST_ALT_CAMERA_FRACTION` of host runtime (10% of total), leaving the primary at ~17.5% and
- * split-screen at ~7.5%.
+ * How the non-mandatory host beats are spread over the video's camera angles.
+ *
+ *  - `even` (the default): every angle takes an equal turn, in film order, so no two consecutive
+ *    host shots anywhere in the film repeat one and every photo the operator ticked is seen as
+ *    often as every other. Right for the HeyGen lane, where the photo a beat animates from costs
+ *    nothing either way.
+ *  - `budget`: the primary keeps ~71% of host runtime and the other angles share
+ *    `HOST_ALT_CAMERA_FRACTION` between them. Kept for the RunPod lane only, whose
+ *    `planLipsyncGroups` batches consecutive host beats into one GPU call only when they share
+ *    an angle — an even rotation never lets two neighbours match, so every beat renders solo and
+ *    pays for ~40% frames nobody sees (the run-up plus the padding to the last 81-frame window).
+ */
+export type HostRotation = "even" | "budget";
+
+/**
+ * Assign each host scene its camera angle. `hostShot` is an INDEX into the video's selected host
+ * photos, 0 being the primary.
  *
  * `angleCount` is how many photos this video was given. 1 is a no-op — every host scene stays on
- * the primary. 2 reproduces the original two-angle behaviour exactly, which is what the existing
- * tests pin. 3+ share the same non-primary budget between them (see `HOST_ALT_CAMERA_FRACTION`
- * for why the primary stays dominant instead of rotating evenly).
+ * the primary. With more, three placements are MANDATORY and come first: the locked cold open
+ * (`hostOpener`) is pinned by ordinal — angle 0 then angle 1; an adjacent host PAIR never repeats
+ * an angle (that angle change is the only reason a pair is allowed); and a split-screen scene
+ * always renders from the PRIMARY photo — the split IS the visual change.
  *
- * Three placements are MANDATORY and assigned first (they can push the non-primary share above
- * target, which is fine): the locked cold open (`hostOpener`) is pinned by ordinal — angle 0 then
- * angle 1; an adjacent host PAIR always reads 0 → 1 (that angle change is the only reason a pair
- * is allowed); and a split-screen scene always renders from the PRIMARY photo. Every remaining
- * host scene starts on the primary and is promoted in `spreadOrder` only while the promotion
- * moves the non-primary seconds CLOSER to target — the same converge shape as
- * `enforceHostSplitMix`.
- *
- * Promotions cycle through angles 1..n-1 so the budget is shared evenly among them, and a
- * promotion that would repeat an adjacent host neighbour's angle takes the next one instead —
- * the no-two-in-a-row rule is what makes a rotation read as a cut rather than a glitch.
+ * Every other host beat is placed by `rotation` (see `HostRotation`). Under `even` it takes the
+ * angle after the previous host shot's, cycling through all of them, which is what makes a
+ * 4-photo film actually show four cameras: the old share-based placement gave the primary ~72%
+ * of a 3-minute host budget and each other angle two or three appearances in a 17-minute film,
+ * which read as a single photo. Under `budget` a beat starts on the primary and is promoted in
+ * `spreadOrder` only while that moves the non-primary seconds CLOSER to the
+ * `HOST_ALT_CAMERA_FRACTION` target, cycling through angles 1..n-1 and skipping one an adjacent
+ * host neighbour already has.
  *
  * Mutates in place; pure otherwise — unit-tested.
  */
 export function assignHostShots(
   scenes: StoryboardScene[],
-  angleCount: number
+  angleCount: number,
+  rotation: HostRotation = "even"
 ): { hostSeconds: number; altSeconds: number } {
   const dur = (s: StoryboardScene) => s.audioDuration ?? 0;
   const hostSeconds = scenes.reduce(
@@ -2772,10 +2787,12 @@ export function assignHostShots(
   const angles = Math.max(1, Math.floor(angleCount));
   if (angles < 2) return { hostSeconds, altSeconds: 0 };
 
-  // Pass 1 — mandatory angles. Everything else lands on the main camera and becomes a
-  // candidate for the alt budget below.
+  // Pass 1 — mandatory angles. Under `even` the free beats are placed here too, since each one
+  // only needs the previous host shot's angle; under `budget` they land on the main camera and
+  // become candidates for the alt share below.
   const free: StoryboardScene[] = [];
   let openerOrdinal = 0;
+  let prevShot: number | null = null;
   for (let i = 0; i < scenes.length; i++) {
     const s = scenes[i];
     if (!s.hostPresent) continue;
@@ -2785,36 +2802,42 @@ export function assignHostShots(
     if (s.hostOpener) {
       s.hostShot = openerOrdinal === 0 ? 0 : 1;
       openerOrdinal++;
-      continue;
-    }
-    // A split-frame scene always renders from the PRIMARY photo — the split IS the visual
-    // change, so a pair containing one needs no angle change either.
-    if (s.splitVisual) {
+    } else if (s.splitVisual) {
+      // A split-frame scene always renders from the PRIMARY photo — the split IS the visual
+      // change, so a pair containing one needs no angle change either.
       s.hostShot = 0;
-      continue;
+    } else if (rotation === "even") {
+      // Take a turn: the angle after the last host shot's. A pair is covered by construction
+      // (the next angle is never the previous one), and after a split (0) the rotation resumes.
+      s.hostShot = prevShot === null ? 0 : (prevShot + 1) % angles;
+    } else {
+      const prev = scenes[i - 1];
+      if (prev?.hostPresent && !prev.splitVisual) {
+        // Never repeat the neighbour's angle. With two photos this is the old flip; with more,
+        // step to the next one so a run of pairs walks the library instead of ping-ponging.
+        s.hostShot = ((prev.hostShot ?? 0) + 1) % angles;
+      } else if (scenes[i + 1]?.hostPresent && !scenes[i + 1].splitVisual) {
+        s.hostShot = 0; // a pair opens on the primary (so it reads 0 → 1)
+      } else {
+        s.hostShot = 0;
+        free.push(s);
+      }
     }
-    const prev = scenes[i - 1];
-    if (prev?.hostPresent && !prev.splitVisual) {
-      // Never repeat the neighbour's angle. With two photos this is the old flip; with more,
-      // step to the next one so a run of pairs walks the library instead of ping-ponging.
-      s.hostShot = ((prev.hostShot ?? 0) + 1) % angles;
-      continue;
-    }
-    if (scenes[i + 1]?.hostPresent && !scenes[i + 1].splitVisual) {
-      s.hostShot = 0; // a pair opens on the primary (so it reads 0 → 1)
-      continue;
-    }
-    s.hostShot = 0;
-    free.push(s);
+    prevShot = s.hostShot ?? 0;
   }
 
-  // Pass 2 — converge non-primary runtime toward its share of the host budget. Promotions cycle
-  // through 1..angles-1 so the one budget is split evenly between whatever angles are in play.
+  const altSecondsOf = () =>
+    scenes.reduce(
+      (sum, s) => sum + (s.hostPresent && (s.hostShot ?? 0) !== 0 ? dur(s) : 0),
+      0
+    );
+  if (rotation === "even") return { hostSeconds, altSeconds: altSecondsOf() };
+
+  // Pass 2 (`budget`) — converge non-primary runtime toward its share of the host budget.
+  // Promotions cycle through 1..angles-1 so the one budget is split evenly between whatever
+  // angles are in play.
   const target = HOST_ALT_CAMERA_FRACTION * hostSeconds;
-  let acc = scenes.reduce(
-    (sum, s) => sum + (s.hostPresent && (s.hostShot ?? 0) !== 0 ? dur(s) : 0),
-    0
-  );
+  let acc = altSecondsOf();
   let next = 1;
   for (const s of spreadOrder(free)) {
     if (acc >= target) break;
@@ -2843,6 +2866,23 @@ export function assignHostShots(
   }
 
   return { hostSeconds, altSeconds: acc };
+}
+
+/**
+ * Beats per angle, for the log line — `[7, 6, 6, 6]` on a four-photo film — so "did the film use
+ * every photo" is read off the render log instead of the finished video.
+ */
+export function hostShotCounts(
+  scenes: StoryboardScene[],
+  angleCount: number
+): number[] {
+  const counts = Array.from({ length: Math.max(1, angleCount) }, () => 0);
+  for (const s of scenes) {
+    if (!s.hostPresent) continue;
+    const shot = s.hostShot ?? 0;
+    if (shot < counts.length) counts[shot]++;
+  }
+  return counts;
 }
 
 /**
@@ -8236,22 +8276,33 @@ function buildSplitRightScene(scene: StoryboardScene): StoryboardScene {
  *   deterministic and free of detector calls;
  * - else the compositor measures + verifies the face on the first host render and the result
  *   is persisted on the scene for every later composite. Chunks of one scene share a plate, so
- *   one measurement serves them all.
+ *   one measurement serves them all. The measurement reads the face off the STILL the scene
+ *   was synced from first (`lipsyncImageUrl`, else the angle's photo) and uses the clip's
+ *   frames as a check — a video frame is where the detector used to miss and ship a centred
+ *   crop with the face at the panel's edge. When nothing at all is found the crop is centred
+ *   AND the job carries a warning naming the scene, so it is caught before the film is watched.
  */
 async function compositeSceneSplit(
   jobId: number,
   scene: StoryboardScene,
   hostUrls: string[],
   rightUrl: string,
-  layout: SplitLayout | undefined
+  layout: SplitLayout | undefined,
+  params: LongformInputParams
 ): Promise<string[]> {
   const dims = dimensionsFor(TALKING_HEAD_ASPECT_RATIO);
   const composited: string[] = [];
+  const photoUrl =
+    scene.lipsyncImageUrl ??
+    scene.hostPlateUrl ??
+    hostFaces(params)[scene.hostShot ?? 0] ??
+    null;
   for (let i = 0; i < hostUrls.length; i++) {
     const res = await compositeSplitScreenClip(hostUrls[i], rightUrl, {
       ...dims,
       layout,
       autoFocusHint: scene.splitAutoFocusX,
+      photoUrl,
     });
     if (res.focusSource !== "manual" && res.hostFocusX != null) {
       if (scene.splitAutoFocusX !== res.hostFocusX) {
@@ -8260,6 +8311,15 @@ async function compositeSceneSplit(
         );
       }
       scene.splitAutoFocusX = res.hostFocusX;
+    }
+    if (res.focusSource !== "hint") scene.splitFocusSource = res.focusSource;
+    if (res.focusSource === "centre" && i === 0) {
+      appendJobWarning(
+        jobId,
+        `Scene ${scene.index}: the split-screen host panel could not be centred on the face ` +
+          `(no face found in the host photo or the clip) — it is cropped at the frame's centre. ` +
+          `Drag the host panel in the split editor to place it, then Reassemble.`
+      );
     }
     const key = `longform/${jobId}/split-${scene.index}-${i}-${nanoid(6)}.mp4`;
     const { url } = await storagePut(key, res.buffer, "video/mp4");
@@ -8408,6 +8468,8 @@ async function generateSceneLipsyncClips(
         ? await getApimartSlotKey(params.apimartSlot)
         : null,
   });
+  // What the split compositor reads the face off — see `lipsyncImageUrl` on StoryboardScene.
+  scene.lipsyncImageUrl = faceImageUrl;
 
   // A group LEADER renders its members with it — see `renderHostGroup`.
   const groupMembers = groupMembersOf.get(scene) ?? [];
@@ -8692,6 +8754,7 @@ async function composeHostScene(
   scene.hostClipUrls = urls;
   // A fresh host render is a fresh framing — the auto focus measured on the old one is stale.
   scene.splitAutoFocusX = undefined;
+  scene.splitFocusSource = undefined;
 
   if (scene.splitVisual) {
     try {
@@ -8728,7 +8791,8 @@ async function composeHostScene(
         scene,
         urls,
         rightUrl,
-        scene.splitLayout
+        scene.splitLayout,
+        params
       );
     } catch (e: any) {
       console.warn(
@@ -10422,6 +10486,23 @@ async function runUnifiedPipeline(
 ): Promise<void> {
   // Fresh run, fresh warnings — a completed job keeps its warnings, a re-run starts clean.
   clearJobWarnings(jobId);
+  // Two facts the generate route learned before the job existed, carried on `params` so they
+  // survive that reset (and a resume, since they are still true then).
+  if (params.droppedHostPhotos) {
+    appendJobWarning(
+      jobId,
+      `${params.droppedHostPhotos} of the selected host photo(s) could not be fetched when the ` +
+        `job was created and were dropped — the film renders from ${hostFaces(params).length} ` +
+        `angle(s) instead`
+    );
+  }
+  if (params.hostMinutes != null) {
+    const guide = hostAngleGuideWarning(
+      params.hostMinutes,
+      hostFaces(params).length
+    );
+    if (guide) appendJobWarning(jobId, guide);
+  }
   // The saved directing instruction is read once per session (admin-editable;
   // falls back to the default). Only the SPOKEN portion of the script is voiced —
   // any stray template preamble/marker is stripped so direction text is never read.
@@ -10876,9 +10957,17 @@ async function runUnifiedPipeline(
   // alt host photo, host pairs are kept and rendered from alternating angles instead. Also assigns
   // each host scene its camera angle (hostShot). Runs LAST so the ratio passes above can't
   // re-introduce a forbidden pair. See `enforceVisualAdjacency`.
+  // Which way the host angles are spread: evenly on HeyGen (the photo is free either way), the
+  // primary-dominant share on RunPod, where only same-angle neighbours batch into one GPU call.
+  // Resolved once here and reused by the final `assignHostShots` below so the two agree.
+  const hostRotation: HostRotation =
+    hostFaces(params).length > 1 && (await getLipsyncProvider()) === "runpod"
+      ? "budget"
+      : "even";
   const adjacency = enforceVisualAdjacency(scenes, {
     hasAltHost: hostFaces(params).length > 1,
     angleCount: hostFaces(params).length,
+    hostRotation,
     allowAdjacentMotion: params.brollMotionOnly,
     // A cap of 1 would convert most of a raised motion budget straight back to stills — this
     // pass runs after `enforceStillMotionRatio`, so it gets the last word. See `maxAdjacentMotionFor`.
@@ -10895,11 +10984,12 @@ async function runUnifiedPipeline(
     const totalPct = (n: number) =>
       mix.total > 0 ? Math.round((n / mix.total) * 100) : 0;
     console.log(
-      `[Longform ${jobId}] host cameras (${hostFaces(params).length} angles): ` +
+      `[Longform ${jobId}] host cameras (${hostFaces(params).length} angles, ${hostRotation}): ` +
+        `${hostShotCounts(scenes, hostFaces(params).length).join(" / ")} beats per angle; ` +
         `${totalPct(adjacency.altSeconds)}% non-primary / ` +
         `${totalPct(split.aloneSeconds - adjacency.altSeconds)}% primary / ` +
-        `${totalPct(split.splitSeconds)}% split of total ` +
-        `(targets 10 / 17.5 / 7.5)`
+        `${totalPct(split.splitSeconds)}% split of total` +
+        (hostRotation === "budget" ? ` (targets 10 / 17.5 / 7.5)` : "")
     );
   }
 
@@ -11107,7 +11197,13 @@ async function runUnifiedPipeline(
   // The passes above created and removed host beats after the adjacency pass assigned angles —
   // re-derive so any surviving pair still reads main → alt. Pure and O(n); the last register
   // mutation before the storyboard persists and clips render.
-  assignHostShots(scenes, hostFaces(params).length);
+  assignHostShots(scenes, hostFaces(params).length, hostRotation);
+  if (hostFaces(params).length > 1) {
+    console.log(
+      `[Longform ${jobId}] host cameras final: ` +
+        `${hostShotCounts(scenes, hostFaces(params).length).join(" / ")} beats per angle`
+    );
+  }
   // Decide WHERE each host beat stands. Must run after the balancers and after assignHostShots
   // (looks are bucketed over the final host-scene list), and before the storyboard persists so
   // the clip stage — which only ever sees one scene — can read its own setting. Inert unless
@@ -12441,7 +12537,8 @@ async function regenerateSplitRight(
     scene,
     scene.hostClipUrls,
     rightUrl,
-    scene.splitLayout
+    scene.splitLayout,
+    params
   );
   syncSceneClipFields(scene);
   scene.sceneStatus = "completed";
@@ -14224,7 +14321,8 @@ async function runSplitEdit(
       scene,
       scene.hostClipUrls!,
       scene.splitRightUrl,
-      scene.splitLayout
+      scene.splitLayout,
+      params
     );
     syncSceneClipFields(scene);
     scene.sceneStatus = "completed";
@@ -14282,7 +14380,8 @@ async function runSplitEdit(
       scene,
       scene.hostClipUrls!,
       rightUrl,
-      scene.splitLayout
+      scene.splitLayout,
+      params
     );
     scene.splitRightUrl = rightUrl;
     // Label truthfulness: the timeline derives its badges from these flags.
