@@ -201,6 +201,46 @@ export function correctFocus(
   return Math.min(1, Math.max(0, focusX + err * panelFrac));
 }
 
+/**
+ * How far (fraction of frame width) a reading off the CLIP may sit from the reading off the
+ * PHOTO before the clip reading is called wrong. The lip-sync lane animates the photo without
+ * reframing it, so the two should agree to within head movement — a few percent. A clip reading
+ * this far off is a detector that found something other than the face (a knot in the wood, a
+ * second person) or a frame it could not read cleanly, and it is discarded rather than averaged
+ * in — an average would move the face halfway toward the mistake.
+ */
+export const PHOTO_CLIP_DISAGREEMENT = 0.15;
+
+/**
+ * Combine the face read off the host PHOTO with the median read off the CLIP frames into one
+ * focus. The photo wins whenever it exists — it is sharp, still, frontal and exactly what the
+ * clip animates — and the clip is the answer only when there is no photo reading. A clip reading
+ * that disagrees with the photo by more than `PHOTO_CLIP_DISAGREEMENT` is dropped. Null when
+ * neither read anything, which the caller turns into a centred crop AND a warning.
+ *
+ * Pure — unit-tested.
+ */
+export function resolveFaceReadings(
+  photoX: number | null,
+  clipX: number | null,
+  clipSource: FaceSource | null
+): {
+  focus: number | null;
+  source: "photo" | FaceSource | "centre";
+  clipDiscarded: boolean;
+} {
+  const ok = (v: number | null): v is number =>
+    v !== null && Number.isFinite(v);
+  if (ok(photoX)) {
+    const clipDiscarded =
+      ok(clipX) && Math.abs(clipX - photoX) > PHOTO_CLIP_DISAGREEMENT;
+    return { focus: photoX, source: "photo", clipDiscarded };
+  }
+  if (ok(clipX))
+    return { focus: clipX, source: clipSource ?? "pico", clipDiscarded: false };
+  return { focus: null, source: "centre", clipDiscarded: false };
+}
+
 /** Deterministic detector: pico on a downscaled grayscale copy. Null when no face clears `minQ`. */
 async function picoFaceCenterX(buffer: Buffer): Promise<number | null> {
   const { data, info } = await sharp(buffer)

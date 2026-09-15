@@ -332,6 +332,8 @@ export default function LongformJobSlot({
   const [channelKey, setChannelKey] = useState<string>("");
   // Which of the channel's host photos this video may use. Empty = every active one, which is
   // also how the server reads an omitted list, so an untouched form behaves as it always did.
+  // Mirrors the picker's SAVED ticks (channel_host_photos.isSelected) and rides on the generate
+  // call so the film and the picker agree even if a tick is still being written.
   const [hostPhotoIds, setHostPhotoIds] = useState<number[]>([]);
   // Operator-supplied master narration, set only once the server has VERIFIED the upload is a
   // read of this script. Undefined ⇒ the pipeline voices the film itself, exactly as before.
@@ -1682,6 +1684,7 @@ export default function LongformJobSlot({
                 channelKey={channelKey}
                 value={hostPhotoIds}
                 onChange={setHostPhotoIds}
+                hostMinutes={hostMinutes}
                 disabled={generateMutation.isPending || isProcessing}
               />
               {/* Escape hatch for a TTS vendor that is down. Sits under the voice because it

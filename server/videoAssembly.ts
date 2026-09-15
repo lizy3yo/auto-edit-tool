@@ -28,6 +28,7 @@ import {
   focusCropX,
   medianFocus,
   panelFraction,
+  resolveFaceReadings,
   type FaceSource,
 } from "./faceAlign";
 import sharp from "sharp";
@@ -1981,10 +1982,11 @@ export interface SplitCompositeResult {
   hostFocusX: number | null;
   /**
    * Where that focus came from: the operator (`manual`), a value persisted from an earlier
-   * composite of the same host clip (`hint`), a detector (`pico` / `haiku`), or nothing at all
-   * (`centre` — no face found, legacy behaviour).
+   * composite of the same host clip (`hint`), the host photo the clip animates (`photo`), a
+   * detector on the clip's own frames (`pico` / `haiku`), or nothing at all (`centre` — no
+   * face found anywhere; the caller should say so rather than ship it quietly).
    */
-  focusSource: "manual" | "hint" | FaceSource | "centre";
+  focusSource: "manual" | "hint" | "photo" | FaceSource | "centre";
 }
 
 /**
@@ -1999,10 +2001,11 @@ export interface SplitCompositeResult {
  *   2. `autoFocusHint` — a focus this host clip was measured at before (callers persist it on
  *      the scene as `splitAutoFocusX`), so a recomposite — retrofit, panel swap, seam drag —
  *      lands on the same pixels without re-measuring.
- *   3. `measureHostFocusX` — sample frames, find the face, pan the crop to it, then crop those
- *      frames the way ffmpeg will and CHECK the face sits mid-panel, correcting if not. See
- *      `faceAlign.ts` for why a measured crop is needed and `buildSplitScreenArgs` for what the
- *      focus does.
+ *   3. `measureHostFocusX` — read the face off the host PHOTO (`photoUrl`) when the caller
+ *      knows it, sample the clip's frames as a check (or as the only source when it does
+ *      not), pan the crop to it, then crop those frames the way ffmpeg will and CHECK the
+ *      face sits mid-panel, correcting if not. See `faceAlign.ts` for why a measured crop is
+ *      needed and `buildSplitScreenArgs` for what the focus does.
  */
 export async function compositeSplitScreenClip(
   hostUrl: string,
@@ -2014,6 +2017,12 @@ export async function compositeSplitScreenClip(
     layout?: SplitLayout | null;
     /** A previously measured auto focus for THIS host clip — reused instead of re-measuring. */
     autoFocusHint?: number | null;
+    /**
+     * The still the host clip was lip-synced from (plate or photo). The lane animates it
+     * without reframing, so the face is where it is in this image in every frame — and a
+     * sharp, still, frontal image is the detector's easy case, where a video frame is not.
+     */
+    photoUrl?: string | null;
   }
 ): Promise<SplitCompositeResult> {
   return withTempDir("split", async workDir => {
@@ -2034,10 +2043,13 @@ export async function compositeSplitScreenClip(
       hostFocusX = opts.autoFocusHint;
       focusSource = "hint";
     } else {
-      const m = await measureHostFocusX(hostPath, durationSec, workDir, {
-        panelW: hostW,
-        panelH: opts.height,
-      });
+      const m = await measureHostFocusX(
+        hostPath,
+        durationSec,
+        workDir,
+        { panelW: hostW, panelH: opts.height },
+        opts.photoUrl ?? null
+      );
       hostFocusX = m.focus;
       focusSource = m.source;
     }
@@ -2099,6 +2111,47 @@ const PANEL_CENTER_TOLERANCE = 0.03;
 const VERIFY_ROUNDS = 2;
 
 /**
+ * How far (fraction of frame width) the verify pass may move a focus that came from the host
+ * PHOTO. The lane animates the photo without reframing it, so the photo's reading is exact to
+ * within head movement — a few percent — and a panel reading further off than that is the
+ * detector finding something else in the cropped panel (measured: a hidden face let it lock
+ * onto the backdrop and drag a correct focus 7% off). A CLIP-sourced focus is a guess and keeps
+ * the unbounded correction the verify pass exists for.
+ */
+const PHOTO_VERIFY_MAX_SHIFT = 0.05;
+
+/**
+ * Face position per host PHOTO URL, for the process lifetime. A film with a dozen split scenes
+ * on the same angle measures the photo once; the entry is dropped on failure so a transient
+ * download error is retried by the next scene rather than remembered.
+ */
+const photoFaceByUrl = new Map<string, Promise<number | null>>();
+
+/** The face's horizontal centre in the host photo at `url`, or null. Never throws. */
+async function measurePhotoFaceX(
+  url: string,
+  workDir: string
+): Promise<number | null> {
+  let pending = photoFaceByUrl.get(url);
+  if (!pending) {
+    pending = (async () => {
+      const file = await downloadToTemp(url, workDir, "hostphoto.img");
+      return (await detectFace(readFileSync(file)))?.x ?? null;
+    })();
+    photoFaceByUrl.set(url, pending);
+    pending.catch(() => photoFaceByUrl.delete(url));
+  }
+  try {
+    return await pending;
+  } catch (err: any) {
+    console.warn(
+      `[FaceAlign] could not read the host photo (${err.message}) — using the clip frames only`
+    );
+    return null;
+  }
+}
+
+/**
  * Where the host's face sits across the frame, for the split-screen crop, and which detector
  * said so. `focus` null ⇒ crop centred (`source: "centre"`).
  *
@@ -2130,9 +2183,20 @@ async function measureHostFocusX(
   hostPath: string,
   durationSec: number,
   workDir: string,
-  panel: { panelW: number; panelH: number }
-): Promise<{ focus: number | null; source: FaceSource | "centre" }> {
+  panel: { panelW: number; panelH: number },
+  photoUrl: string | null = null
+): Promise<{ focus: number | null; source: "photo" | FaceSource | "centre" }> {
   try {
+    // The photo first: it is what the clip animates, and the easy case for the detector.
+    const photoX = photoUrl ? await measurePhotoFaceX(photoUrl, workDir) : null;
+    if (photoUrl) {
+      console.log(
+        photoX === null
+          ? `[FaceAlign] no face found in the host photo — relying on the clip frames`
+          : `[FaceAlign] host face at x=${photoX.toFixed(3)} of the host photo`
+      );
+    }
+
     // Grab the frames once; both passes read them.
     const frames: Buffer[] = (
       await Promise.all(
@@ -2152,33 +2216,51 @@ async function measureHostFocusX(
     ).filter((b): b is Buffer => b !== null);
     if (!frames.length) {
       console.log(
-        `[FaceAlign] no frames could be read — centring the host panel`
+        `[FaceAlign] no frames could be read` +
+          (photoX === null
+            ? ` — centring the host panel`
+            : ` — using the host photo's reading unverified`)
       );
-      return { focus: null, source: "centre" };
+      return photoX === null
+        ? { focus: null, source: "centre" }
+        : { focus: photoX, source: "photo" };
     }
 
-    // MEASURE
+    // MEASURE the clip — the only source without a photo, a cross-check with one.
     const readings = await Promise.all(frames.map(f => detectFace(f)));
     const hits = readings.filter(
       (r): r is { x: number; source: FaceSource } => r !== null
     );
-    let focus = medianFocus(hits.map(h => h.x));
-    if (focus === null) {
+    const clipX = medianFocus(hits.map(h => h.x));
+    const clipSource: FaceSource | null =
+      hits.length === 0
+        ? null
+        : hits.filter(h => h.source === "pico").length * 2 >= hits.length
+          ? "pico"
+          : "haiku";
+    if (clipX !== null) {
+      const spread =
+        Math.max(...hits.map(h => h.x)) - Math.min(...hits.map(h => h.x));
       console.log(
-        `[FaceAlign] no face found in ${frames.length} frames — centring the host panel`
+        `[FaceAlign] host face at x=${clipX.toFixed(3)} of frame ` +
+          `(${clipSource}, median of ${hits.length}/${frames.length} frames, spread ${spread.toFixed(3)})`
+      );
+    }
+    const resolved = resolveFaceReadings(photoX, clipX, clipSource);
+    if (resolved.clipDiscarded) {
+      console.log(
+        `[FaceAlign] clip reading x=${clipX!.toFixed(3)} disagrees with the photo's ` +
+          `x=${photoX!.toFixed(3)} — trusting the photo`
+      );
+    }
+    if (resolved.focus === null) {
+      console.log(
+        `[FaceAlign] no face found in the photo or in ${frames.length} frames — centring the host panel`
       );
       return { focus: null, source: "centre" };
     }
-    const source: FaceSource =
-      hits.filter(h => h.source === "pico").length * 2 >= hits.length
-        ? "pico"
-        : "haiku";
-    const spread =
-      Math.max(...hits.map(h => h.x)) - Math.min(...hits.map(h => h.x));
-    console.log(
-      `[FaceAlign] host face at x=${focus.toFixed(3)} of frame ` +
-        `(${source}, median of ${hits.length}/${frames.length} frames, spread ${spread.toFixed(3)})`
-    );
+    let focus: number = resolved.focus;
+    const source = resolved.source;
 
     // VERIFY — crop the frames the way ffmpeg will and look again.
     const meta = await sharp(frames[0]).metadata();
@@ -2225,6 +2307,17 @@ async function measureHostFocusX(
         return { focus, source };
       }
       const corrected = correctFocus(focus, seen, frac);
+      if (
+        source === "photo" &&
+        Math.abs(corrected - focus) > PHOTO_VERIFY_MAX_SHIFT
+      ) {
+        console.log(
+          `[FaceAlign] verify round ${round}: panel reading ${(seen * 100).toFixed(0)}% would move ` +
+            `the photo's focus x=${focus.toFixed(3)} → ${corrected.toFixed(3)}, further than head ` +
+            `movement allows — keeping the photo's reading`
+        );
+        break;
+      }
       // The window can't move any further — the face is pressed against the source edge.
       const clampedAtEdge = cropWindow(corrected, frac).left === win.left;
       console.log(

@@ -341,6 +341,14 @@ export const channelHostPhotos = mysqlTable("channel_host_photos", {
   sortOrder: int("sortOrder").default(0).notNull(),
   /** Soft-delete: an inactive angle stays snapshotted on the videos that already used it. */
   isActive: boolean("isActive").default(true).notNull(),
+  /**
+   * TICKED for the channel's videos. The generate form's picker reads and writes this, so which
+   * angles a channel shoots from is one saved choice shared by every operator and device,
+   * rather than a per-browser default that reset to "all" on reload. Distinct from `isActive`
+   * (the photo exists) — an unticked angle stays in the library, ready to tick again. The
+   * channel's last ticked photo cannot be unticked (`channelHostPhoto.setSelected`).
+   */
+  isSelected: boolean("isSelected").default(true).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });

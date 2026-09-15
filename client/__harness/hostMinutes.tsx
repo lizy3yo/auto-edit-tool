@@ -2,12 +2,14 @@ import "@/index.css";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { LongformHostMinutes } from "@/components/LongformHostMinutes";
+import { HostAngleGuideNote } from "@/components/LongformHostPhotoPicker";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
   DEFAULT_HOST_MINUTES,
   ESTIMATE_WORDS_PER_SEC,
   formatMinSec,
+  recommendedAngleCount,
   resolveHostBudget,
 } from "@shared/hostMinutes";
 
@@ -19,6 +21,10 @@ import {
  *
  * The dialog block mirrors `LongformJobSlot`'s copy and conditions; the arithmetic is the shared
  * `resolveHostBudget`, the same function the pipeline runs on the measured narration.
+ *
+ * The "Host photos" block stands in for the picker (which needs a channel): an angle count
+ * beside the minutes shows the over-the-guide note the picker renders, from the same shared
+ * `hostAngleGuideWarning` the job warning uses.
  */
 const GUIDE = 0.35;
 const RATE = 0.06;
@@ -26,6 +32,7 @@ const RATE = 0.06;
 function Harness() {
   const [minutes, setMinutes] = useState(DEFAULT_HOST_MINUTES);
   const [words, setWords] = useState(1700);
+  const [angles, setAngles] = useState(4);
   const filmSec = Math.round(words / ESTIMATE_WORDS_PER_SEC);
   const estimate = resolveHostBudget({
     minutes,
@@ -64,6 +71,25 @@ function Harness() {
           ratePerSec={RATE}
           hasHostPhoto
         />
+      </section>
+
+      <section className="space-y-2 rounded-lg border border-border p-4">
+        <h2 className="text-sm font-medium">Host photos</h2>
+        <label className="block space-y-1 text-xs text-muted-foreground">
+          {angles} angle{angles === 1 ? "" : "s"} selected — guide for {minutes}{" "}
+          min is up to {recommendedAngleCount(minutes)}
+          <input
+            type="range"
+            min={1}
+            max={8}
+            step={1}
+            value={angles}
+            onChange={e => setAngles(Number(e.target.value))}
+            className="block w-full"
+            data-testid="angle-count"
+          />
+        </label>
+        <HostAngleGuideNote minutes={minutes} angles={angles} />
       </section>
 
       <section className="space-y-3 rounded-lg border border-border p-4 text-sm">

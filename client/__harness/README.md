@@ -16,4 +16,10 @@ confirmation and the "endpoint not configured" state can be exercised without a 
 `host-minutes.html` → `hostMinutes.tsx` mounts the generate form's "Talking head" step and the
 confirm dialog's over-the-guide question, with a script-length slider so both sides of the guide
 can be seen (~1,700 words ≈ 10 min, where 5+ min needs confirming; ~3,400 ≈ 20 min, where every
-pick fits).
+pick fits). An angle-count slider beside it shows the host-photo picker's "too many angles for
+these minutes" note (3 min → 2 angles, 7 → 4).
+
+`host-photos.html` → `hostPhotos.tsx` mounts the generate form's "Host photos" picker against a
+stubbed `channelHostPhoto` router (list / setSelected / setPrimary) backed by in-page state, so
+ticking, the last-ticked guard, "make primary" and the angle guide can be exercised; "Remount"
+clears the query cache to prove the ticks come back from the channel, not the component.

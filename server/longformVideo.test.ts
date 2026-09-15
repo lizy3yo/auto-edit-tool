@@ -146,6 +146,8 @@ import {
   sanitizeSplitLayout,
   buildLtxLipsyncPrompt,
   LTX_LIPSYNC_DIRECTION,
+  hostShotCounts,
+  planHostMinutes,
 } from "./longformVideo";
 import { __resetLipsyncCaches, LIPSYNC_PROVIDER_KEY } from "./lipsyncProvider";
 import { ENV } from "./_core/env";
@@ -2540,25 +2542,83 @@ describe("enforceVisualAdjacency", () => {
     expect(scenes.map(s => s.hostShot)).toEqual([0, 1]);
   });
 
-  it("holds solo host shots to the alt-camera runtime budget", () => {
-    // 8 solo host shots × 5s = 40s host; the alt budget is 40 × 10/35 ≈ 11.4s, so only
-    // two 5s scenes go alt — the rest stay on the main camera (no more alternating).
+  it("alternates solo host shots between two angles (even rotation is the default)", () => {
+    // 8 solo host shots × 5s = 40s host. With two photos every other host shot is the alt one,
+    // so half the host time is non-primary and no two host shots in a row share a photo.
     const scenes = Array.from({ length: 16 }, (_, i) =>
       i % 2 === 0 ? host(i) : mk(i, { stillImage: true })
     );
     const r = enforceVisualAdjacency(scenes, { hasAltHost: true });
+    const shots = scenes.filter(s => s.hostPresent).map(s => s.hostShot);
+    expect(shots).toEqual([0, 1, 0, 1, 0, 1, 0, 1]);
+    expect(r.altSeconds).toBe(20);
+  });
+
+  it("keeps the primary-dominant share under the RunPod `budget` rotation", () => {
+    // The old placement, kept for the RunPod lane where only same-angle neighbours batch into
+    // one GPU call: 40s host × 10/35 ≈ 11.4s non-primary, so only two 5s scenes go alt.
+    const scenes = Array.from({ length: 16 }, (_, i) =>
+      i % 2 === 0 ? host(i) : mk(i, { stillImage: true })
+    );
+    const r = enforceVisualAdjacency(scenes, {
+      hasAltHost: true,
+      hostRotation: "budget",
+    });
     const altScenes = scenes.filter(s => s.hostShot === 1);
     expect(altScenes).toHaveLength(2);
     expect(r.altSeconds).toBe(10);
-    expect(Math.abs(r.altSeconds - (10 / 35) * 40)).toBeLessThanOrEqual(5);
     // Alt shots are spread across the film, not clustered at one end.
     expect(altScenes[1].index - altScenes[0].index).toBeGreaterThan(2);
   });
 
   // ── More than two angles. `angleCount` defaults to what `hasAltHost` implies, so every test
-  // above still pins the original two-angle behaviour; these cover the library case.
+  // above still pins the two-angle behaviour; these cover the library case.
 
-  it("shares the one non-primary budget across three angles, keeping the primary dominant", () => {
+  it("rotates through every angle in turn so each photo is seen equally", () => {
+    // 12 solo host shots on 4 photos: three appearances each, in library order, no two in a
+    // row alike — the case that used to render 9 of 12 from the primary.
+    const scenes = Array.from({ length: 24 }, (_, i) =>
+      i % 2 === 0 ? host(i) : mk(i, { stillImage: true })
+    );
+    enforceVisualAdjacency(scenes, { hasAltHost: true, angleCount: 4 });
+    const shots = scenes.filter(s => s.hostPresent).map(s => s.hostShot);
+    expect(shots).toEqual([0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3]);
+    expect(hostShotCounts(scenes, 4)).toEqual([3, 3, 3, 3]);
+  });
+
+  it("uses every angle on a host-minutes film whose host beats are never adjacent", () => {
+    // planHostMinutes spaces check-ins apart on purpose, so the pair rule never fires; the
+    // rotation alone has to spread the angles. 17.5-min film, 3-min budget, four photos.
+    const scenes: StoryboardScene[] = Array.from({ length: 150 }, (_, i) => ({
+      index: i + 1,
+      narration: `line ${i}`,
+      visualPrompt: i < 2 || i % 3 === 0 ? "host talks" : `b-roll ${i}`,
+      hostPresent: i < 2 || i % 3 === 0,
+      stillImage: i < 2 || i % 3 === 0 ? undefined : i % 2 === 0,
+      audioDuration: 7,
+      ...(i < 2 || i % 3 === 0 ? { brollVisual: `cutaway ${i}` } : {}),
+      ...(i < 2 ? { hostOpener: true as const } : {}),
+    }));
+    planHostMinutes(scenes, 180, { canPromote: true });
+    enforceVisualAdjacency(scenes, { hasAltHost: true, angleCount: 4 });
+    const counts = hostShotCounts(scenes, 4);
+    const hosts = scenes.filter(s => s.hostPresent);
+    expect(hosts.length).toBeGreaterThan(12);
+    // Every angle carries roughly a quarter of the host beats.
+    for (const c of counts) {
+      expect(c).toBeGreaterThanOrEqual(Math.floor(hosts.length / 4) - 1);
+      expect(c).toBeLessThanOrEqual(Math.ceil(hosts.length / 4) + 1);
+    }
+    // And no two consecutive host shots, anywhere in the film, repeat a photo.
+    for (let i = 1; i < hosts.length; i++) {
+      expect(hosts[i].hostShot).not.toBe(hosts[i - 1].hostShot);
+    }
+    // The cold open still reads primary → angle 2.
+    expect(hosts[0].hostShot).toBe(0);
+    expect(hosts[1].hostShot).toBe(1);
+  });
+
+  it("shares the one non-primary budget across three angles under `budget` rotation", () => {
     // Same shape as the two-angle budget test: 8 solo host shots x 5s = 40s host, budget
     // 40 x 10/35 ≈ 11.4s. A third angle must NOT buy more non-primary time — it splits the
     // same slice, which is what keeps lip-sync batching alive (see HOST_ALT_CAMERA_FRACTION).
@@ -2568,6 +2628,7 @@ describe("enforceVisualAdjacency", () => {
     const r = enforceVisualAdjacency(scenes, {
       hasAltHost: true,
       angleCount: 3,
+      hostRotation: "budget",
     });
     expect(r.altSeconds).toBe(10);
     const promoted = scenes.filter(s => (s.hostShot ?? 0) !== 0);
@@ -2575,6 +2636,22 @@ describe("enforceVisualAdjacency", () => {
     // The two promotions land on DIFFERENT angles rather than both on angle 1.
     expect(new Set(promoted.map(s => s.hostShot)).size).toBe(2);
     expect(promoted.every(s => (s.hostShot as number) < 3)).toBe(true);
+  });
+
+  it("resumes the rotation after a split-screen beat, which stays on the primary", () => {
+    const scenes = [
+      host(0),
+      mk(1, { stillImage: true }),
+      host(2, { splitVisual: "beside" }),
+      mk(3, { stillImage: true }),
+      host(4),
+      mk(5, { stillImage: true }),
+      host(6),
+    ];
+    enforceVisualAdjacency(scenes, { hasAltHost: true, angleCount: 3 });
+    expect(scenes.filter(s => s.hostPresent).map(s => s.hostShot)).toEqual([
+      0, 0, 1, 2,
+    ]);
   });
 
   it("never assigns an angle past the count it was given", () => {

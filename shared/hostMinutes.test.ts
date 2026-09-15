@@ -4,6 +4,8 @@ import {
   hostGuideFraction,
   formatMinSec,
   HOST_MINUTES_MAX_FRACTION,
+  recommendedAngleCount,
+  hostAngleGuideWarning,
 } from "./hostMinutes";
 import { DEFAULT_LONGFORM_PACING, LEGACY_PACING } from "./pacing";
 
@@ -82,5 +84,30 @@ describe("formatMinSec", () => {
     expect(formatMinSec(180)).toBe("3:00");
     expect(formatMinSec(65.4)).toBe("1:05");
     expect(formatMinSec(-3)).toBe("0:00");
+  });
+});
+
+describe("hostAngleGuideWarning", () => {
+  it("follows the table for the form's options", () => {
+    expect(recommendedAngleCount(3)).toBe(2);
+    expect(recommendedAngleCount(4)).toBe(3);
+    expect(recommendedAngleCount(5)).toBe(3);
+    expect(recommendedAngleCount(6)).toBe(4);
+    expect(recommendedAngleCount(7)).toBe(4);
+  });
+
+  it("derives a count for a budget outside the table and never goes below one", () => {
+    expect(recommendedAngleCount(10)).toBe(6);
+    expect(recommendedAngleCount(1)).toBe(1);
+    expect(recommendedAngleCount(0)).toBe(1);
+  });
+
+  it("is silent within the guide and names both numbers past it", () => {
+    expect(hostAngleGuideWarning(3, 1)).toBeNull();
+    expect(hostAngleGuideWarning(3, 2)).toBeNull();
+    expect(hostAngleGuideWarning(3, 4)).toBe(
+      "3 min of talking head is best with up to 2 angles. 4 selected: each one gets fewer shots and can read as random cuts."
+    );
+    expect(hostAngleGuideWarning(6, 5)).toContain("up to 4 angles");
   });
 });

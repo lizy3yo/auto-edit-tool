@@ -630,7 +630,29 @@ Express · tRPC · Drizzle · MySQL.
   `shapePitchQrStretches`) — widening the spacing until the budget covers every target and
   visiting targets middle-out so a short budget still spreads; leftover budget keeps more of the
   storyboard's own host beats; every other host beat goes to the still lane. Splits and alt
-  angles are host renders and count toward it. `capHostMinutes` re-checks after the CTA passes
+  angles are host renders and count toward it. HOST ANGLES (`assignHostShots`) rotate EVENLY
+  through the video's selected photos by default: the cold open reads primary → angle 2, split
+  beats stay on the primary, and every other host beat takes the next angle in turn, so no two
+  consecutive host shots repeat one and each photo is seen about as often. The old
+  primary-dominant share (`HOST_ALT_CAMERA_FRACTION`, ~71% on the primary) is kept ONLY for the
+  RunPod lane (`HostRotation` "budget"), where same-angle neighbours batch into one GPU call —
+  on a host-minutes film, whose check-ins are never adjacent by design, it showed the primary
+  on 18 of 25 host beats and each other photo two or three times, which read as one photo.
+  Even rotation means more angles = fewer shots each, so `shared/hostMinutes.ts` carries an
+  ANGLE GUIDE per host minute (3 → 2, 4-5 → 3, 6-7 → 4, ~1.5 min of host per angle); the
+  picker warns past it and the job records the same line (`hostAngleGuideWarning`), nothing is
+  unticked. A selected photo that fails to rehost at generate is counted on
+  `inputParams.droppedHostPhotos` and warned about at pipeline start, since a photo that
+  quietly vanished there looks exactly like the planner ignoring it. The render log's
+  `host cameras` line prints beats per angle. WHICH photos a channel shoots from is SAVED ON
+  THE CHANNEL (`channel_host_photos.isSelected`, migration 0010): the picker on the generate
+  form reads and writes it through `channelHostPhoto.setSelected`, so the ticks are one shared
+  choice on every device and survive a reload (they used to be component state that reset to
+  "all" on mount). The generate route defaults to those ticks when the form sends no ids
+  (`server/hostPhotoSelection.ts`, pure, tested); the last ticked photo cannot be unticked. The
+  picker's star calls the same `setPrimary` Admin has — it reorders the channel library, so
+  both are open to every signed-in role, not managers only. Admin shows an unticked photo as
+  "Not used". Harness: `client/__harness/host-photos.html` `capHostMinutes` re-checks after the CTA passes
   (which add host beats late) and demotes the most redundant check-in, never an anchor. The
   storyboard prompt is unchanged: it still writes host at the ramp's shares, which is what gives
   the planner candidates near every target. Harness: `client/__harness/host-minutes.html`
@@ -644,7 +666,14 @@ Express · tRPC · Drizzle · MySQL.
   middle ~44% of the 16:9 host clip, so the crop is panned to the face: `pico.ts` is a vendored
   pure-JS frontal-face cascade (asset `server/assets/facefinder`, offline, deterministic),
   Haiku is the fallback, and `measureHostFocusX` (videoAssembly) crops the sampled frames the
-  way ffmpeg will and re-detects to VERIFY the face sits mid-panel. The result persists as
+  way ffmpeg will and re-detects to VERIFY the face sits mid-panel. The face is read off the
+  STILL the scene was synced from FIRST (`scene.lipsyncImageUrl`, persisted at render; else the
+  angle's photo) and the clip frames are a cross-check (`resolveFaceReadings` — a clip reading
+  more than `PHOTO_CLIP_DISAGREEMENT` from the photo's is discarded, never averaged in): the
+  lane animates the photo without reframing it, so the photo IS the framing, and a clean still
+  is the detector's easy case where a video frame is where it used to miss and ship the face at
+  the panel's edge. Nothing found anywhere ⇒ centred crop plus a JOB WARNING naming the scene
+  (`scene.splitFocusSource` "centre"), never a silent centre. The result persists as
   `scene.splitAutoFocusX` and is reused by every recomposite; manual `splitLayout.hostFocusX`
   overrides it
 - `server/sceneEditQueue.ts` + `enqueueSceneEdit`/`runSceneEditSession` (longformVideo) — operator
