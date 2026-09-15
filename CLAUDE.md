@@ -359,7 +359,10 @@ Express · tRPC · Drizzle · MySQL.
   wordings, same seed, same brows; the other seed is calm) — a seed artefact, and the next
   lever is an EXPRESSION GATE like the liveness gate (re-seed on wide eyes), not more words.
   Mouth range now: the man 0.03-0.05, Granny 0.10-0.12, where HeyGen's own two hosts sit at
-  0.073 and 0.054 — the model's per-host mouth, not a dial
+  0.073 and 0.054 — the model's per-host mouth, not a dial. END TO END with the new
+  direction (job 101 scene 1): both witnesses agree at 0 / −42 ms (r 0.38 / 0.42), 78% of
+  sounds, blinks 20/min (HeyGen 21), room 0.04, and after the assembly pass the frame reads
+  66.5 against HeyGen's 67.0
 - `server/lipsyncJudge.ts` + `server/lipsyncSyncGate.ts` — the LTX lane's SYNC GATE
   (`LTX_SYNC_GATE`, on by default; `LTX_SYNC_RETRIES` 2). The judge is the measure script's
   core, moved in-process so a render is judged the moment it lands: the mouth's opening per
