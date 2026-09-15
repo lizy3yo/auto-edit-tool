@@ -152,6 +152,12 @@ export const ENV = {
     const m = /^(.+?)(?::([\d.]+))?$/.exec(raw)!;
     return { name: m[1], strength: m[2] ? Number(m[2]) : 1.0 };
   })(),
+  /**
+   * The sharpen pass assembly gives LTX host clips (`LTX_HOST_SHARPEN` in videoAssembly):
+   * HeyGen's clips read whole-frame Laplacian 67 / 73 on the two hosts, ours 43 / 39, and the
+   * mild single-stage pass lands 68 / 64. `0` skips it.
+   */
+  ltxHostSharpen: process.env.LTX_HOST_SHARPEN !== "0",
   /** The clause the adapter needs at the FRONT of the prompt (its trigger word and its rule). */
   ltxLipsyncLoraTrigger:
     process.env.LTX_LIPSYNC_LORA_TRIGGER ??

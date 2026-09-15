@@ -131,6 +131,14 @@ const DOWNLOAD_TIMEOUT_MS = Number(
  */
 export const HOST_UPSCALE_SHARPEN =
   "unsharp=3:3:0.9:3:3:0.0,unsharp=7:7:0.35:7:7:0.0";
+/**
+ * The LTX lane's pass — MILDER, one small-radius stage. LTX delivers native 1920x1080, so
+ * there is no upscale to undo; what it lacks against HeyGen is edge energy: whole-frame
+ * Laplacian 43 / 39 on the two hosts against HeyGen's 67 / 73 (2026-09-15). The two-stage
+ * InfiniteTalk pass overshoots to 131; this one lands at 68 / 64, with cheek flicker
+ * 0.84 → 0.97 on the man and 4.76 → 5.21 on Granny (HeyGen's own Granny reads 4.50).
+ */
+export const LTX_HOST_SHARPEN = "unsharp=3:3:0.5:3:3:0.0";
 const CRF_INTERMEDIATE = "18";
 const CRF_DELIVERY = "20";
 const PRESET_INTERMEDIATE = "veryfast";
@@ -468,8 +476,11 @@ export function buildSilentSceneArgs(opts: {
    * at a common size). Bicubic upscale + no sharpening compounds that. HeyGen clips arrive at
    * canvas size and must not be touched; b-roll is not the thing being compared to HeyGen.
    * Off ⇒ args byte-identical to before the option existed, so the norm cache is unaffected.
+   * The value is the ffmpeg filter chain to apply (`HOST_UPSCALE_SHARPEN` for a 720p
+   * InfiniteTalk clip, `LTX_HOST_SHARPEN` for a native-1080p LTX clip); `true` keeps the
+   * InfiniteTalk pass for older callers.
    */
-  sharpen?: boolean;
+  sharpen?: boolean | string;
 }): string[] {
   const { videoPath, outputPath, width, height } = opts;
   const fps = opts.fps ?? FPS;
@@ -480,7 +491,9 @@ export function buildSilentSceneArgs(opts: {
       : "";
   // Broadcast-mild: 5x5 luma, amount 0.5, chroma untouched. Enough to bring a 720p upscale
   // back toward native-1080p edge energy without haloing hair or lip edges.
-  const sharpen = opts.sharpen ? `,${HOST_UPSCALE_SHARPEN}` : "";
+  const sharpen = opts.sharpen
+    ? `,${typeof opts.sharpen === "string" ? opts.sharpen : HOST_UPSCALE_SHARPEN}`
+    : "";
   // Full-precision chroma and rounding on the way up: the face is skin tone against grey hair,
   // and chroma is where a 1.5x upscale loses it. Only ever applied on the sharpen path, so an
   // unsharpened (b-roll, or HeyGen's native 1080p) entry's args stay byte-identical — and its
@@ -2754,9 +2767,10 @@ export async function assemblePerSceneFilm(opts: {
     /**
      * Lanczos-upscale + mild sharpen this scene's clips (`buildSilentSceneArgs.sharpen`). Set
      * by the caller for host scenes lip-synced on the RunPod lane — 720p sources on a 1080p
-     * canvas — never for HeyGen (native 1080p) or b-roll.
+     * canvas — and, with its own milder chain, the LTX lane; never for HeyGen (native 1080p)
+     * or b-roll. A string is the filter chain to apply; `true` is the InfiniteTalk chain.
      */
-    sharpenHost?: boolean;
+    sharpenHost?: boolean | string;
   }[];
   aspectRatio: VideoAspectRatio;
   /** R2 URL of the continuous master narration — enables master-overlay mode (see above). */
@@ -2952,7 +2966,7 @@ export async function assemblePerSceneFilm(opts: {
     const normKeyFor = (
       clipUrl: string,
       trimLeadSec: number,
-      sharpen: boolean
+      sharpen: boolean | string
     ): string =>
       cacheKey("norm", {
         clipUrl,
@@ -2962,8 +2976,11 @@ export async function assemblePerSceneFilm(opts: {
         fps: FPS,
         crf: CRF_INTERMEDIATE,
         preset: PRESET_INTERMEDIATE,
-        // Only present when set, so every pre-existing (unsharpened) entry keeps its key.
-        ...(sharpen ? { sharpen: HOST_UPSCALE_SHARPEN } : {}),
+        // Only present when set, so every pre-existing (unsharpened) entry keeps its key —
+        // and the CHAIN is the key, so the LTX pass and the InfiniteTalk pass never share one.
+        ...(sharpen
+          ? { sharpen: typeof sharpen === "string" ? sharpen : HOST_UPSCALE_SHARPEN }
+          : {}),
       });
 
     /**
@@ -2985,7 +3002,7 @@ export async function assemblePerSceneFilm(opts: {
     const attemptScene = async (s: number): Promise<void> => {
       const scene = scenes[s];
       const normKeys = scene.clipUrls.map(u =>
-        normKeyFor(u, scene.trimLeadSec, !!scene.sharpenHost)
+        normKeyFor(u, scene.trimLeadSec, scene.sharpenHost ?? false)
       );
       if (normKeys.length === 0) throw new Error("no clips");
 
@@ -3098,7 +3115,7 @@ export async function assemblePerSceneFilm(opts: {
                 width,
                 height,
                 trimLeadSec: scene.trimLeadSec,
-                sharpen: !!scene.sharpenHost,
+                sharpen: scene.sharpenHost ?? false,
               })
             );
             return undefined;

@@ -9007,11 +9007,12 @@ describe("buildLtxLipsyncPrompt", () => {
     // The camera is spelled out positively — the negative prompt is inert below cfg 2.
     expect(prompt).toContain("locked off");
     // The face clause: the talking prior hoists the brows without it — and the resting face
-    // is neutral, so the mood cue (not a default smile) sets the line's expression.
-    expect(prompt).toContain("eyebrows at rest");
-    expect(prompt).toContain("neutral at rest");
-    // The mouth clause that keeps a bearded, closed-lip-smiling host articulating.
-    expect(prompt).toContain("opens and closes clearly");
+    // is the PHOTO'S OWN smile (the HeyGen reference keeps it), with the mood cue on top.
+    expect(prompt).toContain("eyebrows relaxed and still");
+    expect(prompt).toContain("gentle smile stays on their face");
+    // The mouth clause: natural movements with the big shapes excluded — "small movements"
+    // froze the bearded host's mouth twice, so it must never come back.
+    expect(prompt).toContain("never a wide open mouth");
     expect(prompt).not.toContain("small movements");
     // Hands: out of frame for a face window, resting naturally for a whole photo.
     expect(prompt).toContain("hands out of frame");

@@ -3,6 +3,7 @@ import {
   dimensionsFor,
   buildSilentSceneArgs,
   HOST_UPSCALE_SHARPEN,
+  LTX_HOST_SHARPEN,
   buildOverlayMuxArgs,
   buildSceneMuxArgs,
   buildConcatCopyArgs,
@@ -133,6 +134,19 @@ describe("buildSilentSceneArgs (continuous-narration assembly)", () => {
 
   it("caps encoder threads so concurrent scenes don't oversubscribe the host", () => {
     expect(args[args.indexOf("-threads") + 1]).toBe("2");
+  });
+
+  it("takes a filter chain as the sharpen value — the LTX lane's milder single pass", () => {
+    const base = { videoPath: "/tmp/clip.mp4", outputPath: "/tmp/scene.mp4", width: 1920, height: 1080 };
+    const filterOf = (a: string[]) => a[a.indexOf("-filter_complex") + 1];
+    const ltx = filterOf(buildSilentSceneArgs({ ...base, sharpen: LTX_HOST_SHARPEN }));
+    expect(ltx).toContain(LTX_HOST_SHARPEN);
+    expect(ltx).not.toContain(HOST_UPSCALE_SHARPEN);
+    // Still a single unsharp stage, and it still rides the accurate-chroma lanczos path.
+    expect(ltx.split("unsharp").length - 1).toBe(1);
+    expect(ltx).toContain("flags=lanczos");
+    // `true` keeps the InfiniteTalk chain for older callers.
+    expect(filterOf(buildSilentSceneArgs({ ...base, sharpen: true }))).toContain(HOST_UPSCALE_SHARPEN);
   });
 
   it("sharpens ONLY when asked: lanczos on the way up, unsharp after the scale, else byte-identical", () => {

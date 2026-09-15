@@ -211,6 +211,7 @@ import {
   sliceAudioSegmentsBestEffort,
   detectSilencesFromBuffer,
   HOST_INTRO_TRIM_SEC,
+  LTX_HOST_SHARPEN,
 } from "./videoAssembly";
 import { renderNameCardPng } from "./nameCard";
 import { assignHostPlateContexts, resolveHostPlate } from "./hostPlate";
@@ -6385,11 +6386,15 @@ export const LTX_LIPSYNC_DIRECTION =
   // The FACE clause. Without it (and without text guidance to make it count) the model's
   // talking prior hoists the brows and widens the eyes on every line — a startled, credulous
   // look against a calm reference photo. Measured on job 97 scene 1.
-  // NEUTRAL at rest, not smiling: the expression a line needs comes from the delivery pass's
-  // mood cue appended below (serious on a warning, warm on a kindness), and a default smile
-  // under every line reads as vacant. Measured request, 2026-09-12.
-  "Their face is relaxed and neutral at rest, composed, not smiling: eyebrows at rest, " +
-  "forehead smooth, eyes soft and steady, no wide-eyed or surprised look. " +
+  // The PHOTO'S OWN SMILE is the resting face (2026-09-15, against the HeyGen reference
+  // clips): both host photos smile, HeyGen keeps that smile and talks through it, and the
+  // earlier "neutral at rest, not smiling" forced a straight face onto a smiling photo —
+  // which is where the intense look came from. With this wording the man's frame matches
+  // HeyGen's warm look; Granny's brows still go up on some seeds (three wordings, same seed,
+  // same brows — a seed artefact, not a wording one). The delivery mood cue is still appended.
+  "A warm, gentle smile stays on their face while they speak, exactly as in the photo. " +
+  "Eyes soft and steady on the lens, eyebrows relaxed and still, forehead smooth, no " +
+  "wide-eyed or surprised look. " +
   // The MOUTH clause, the most-measured line here. "small movements" (the previous wording)
   // gave Granny the best closure of the run but held the bearded host's mouth SHUT on two of
   // three seeds (motion 0.9-1.6 against 4-8), with or without the mouth negative, at cfg 1 or
@@ -6398,8 +6403,14 @@ export const LTX_LIPSYNC_DIRECTION =
   // calm-face clause above and text guidance 3, did NOT make Granny shout again (5.2 / 6.5,
   // lips 0.10 / 0.04, r 0.44) the way the original "articulates every word clearly" did
   // without them. One wording for every host measured so far.
-  "Their mouth opens and closes clearly with every word of the speech, lips parting on " +
-  "vowels and meeting on consonants. Small natural head movement; ";
+  // 2026-09-15, against HeyGen: our mouth opened ~2x wider (opening range 0.109 / 0.115 vs
+  // HeyGen's 0.073 / 0.054). "small movements, part only slightly" over-corrected — the man's
+  // range fell to 0.016 on one seed, the frozen-mouth trap again — so the ask is NATURAL
+  // movements with the big shapes named and excluded. Measured: the man 0.03-0.05, Granny
+  // 0.10-0.12; HeyGen's own hosts differ by that much too.
+  "Their lips move naturally with every word, parting on vowels and meeting on consonants, " +
+  "in easy unforced movements, never a wide open mouth or a big vowel shape. " +
+  "Small natural head movement; ";
 
 /** The hands clause: a face window has none in it; a whole photo usually does. */
 export const LTX_HANDS_OUT = "hands out of frame.";
@@ -12070,9 +12081,17 @@ async function assembleAndFinalize(
     clipUrls: s.clipUrls?.length ? s.clipUrls : [s.clipUrl as string],
     trimLeadSec: clipTrimFor(s, params.faceImageUrl),
     // InfiniteTalk renders 720p onto a 1080p canvas: lanczos + mild sharpen on the way up.
+    // LTX delivers native 1080p but ~40% softer than HeyGen (Laplacian 43/39 vs 67/73), so it
+    // gets its own milder chain (`LTX_HOST_SHARPEN`, `LTX_HOST_SHARPEN=0` to skip).
     // `renderProvider` is what the lip-sync lane recorded at render time, so a HeyGen-rendered
     // host (native 1080p) and every b-roll clip stay untouched.
-    sharpenHost: !!s.hostPresent && s.renderProvider === "runpod",
+    sharpenHost: !s.hostPresent
+      ? false
+      : s.renderProvider === "runpod"
+        ? true
+        : s.renderProvider === "ltx" && ENV.ltxHostSharpen
+          ? LTX_HOST_SHARPEN
+          : false,
     audioUrl: s.audioUrl as string,
     // Every hold input — the on-screen floor, the CTA release tail, an operator's own hold —
     // comes from one shared helper, so assembly, the chapter map and the

@@ -341,7 +341,25 @@ Express · tRPC · Drizzle · MySQL.
   END TO END through the app (job 101 scene 1, the man's whole photo, defaults of the day):
   phonetic r 0.47 at −42 ms, envelope r 0.55 at −83 ms, 89% of sounds matched, liveness
   21, 175 s of GPU — the best host clip this lane has produced, and the one a new host
-  photo gets
+  photo gets. AGAINST THE HEYGEN REFERENCE (2026-09-15, the operator's accepted HeyGen clips
+  of both hosts, same photos, run through every measure here): framing identical (the full
+  photo), camera and body in the same band (room motion 0.18 / 0.11 on HeyGen vs 0.04-0.28
+  ours; head travel 9% / 6% vs 10-13%; blinks in range on both), and lip-sync equal or
+  better (the man r 0.47 at 89% of sounds vs HeyGen's 0.25 at 75%). Three real gaps: our
+  MOUTH opened ~2x wider (opening range 0.109 / 0.115 vs 0.073 / 0.054), our direction
+  FORCED A STRAIGHT FACE onto smiling photos ("neutral, not smiling") where HeyGen keeps the
+  photo's smile and talks through it — the source of the intense look — and our picture was
+  ~40% SOFTER (whole-frame Laplacian 43 / 39 vs 67 / 73). Fixes, measured: the direction
+  now keeps the photo's smile and asks for natural lip movements with the big shapes named
+  and excluded (the man's frame matches HeyGen's warm look; "small movements, part only
+  slightly" was tried first and froze his mouth again, range 0.016), and assembly gives LTX
+  host clips a mild single-stage unsharp (`LTX_HOST_SHARPEN` in videoAssembly, on by
+  default, `LTX_HOST_SHARPEN=0` off) that lands 68 / 64 — the InfiniteTalk two-stage pass
+  overshoots to 131. What no wording fixed: Granny's raised brows on some seeds (three
+  wordings, same seed, same brows; the other seed is calm) — a seed artefact, and the next
+  lever is an EXPRESSION GATE like the liveness gate (re-seed on wide eyes), not more words.
+  Mouth range now: the man 0.03-0.05, Granny 0.10-0.12, where HeyGen's own two hosts sit at
+  0.073 and 0.054 — the model's per-host mouth, not a dial
 - `server/lipsyncJudge.ts` + `server/lipsyncSyncGate.ts` — the LTX lane's SYNC GATE
   (`LTX_SYNC_GATE`, on by default; `LTX_SYNC_RETRIES` 2). The judge is the measure script's
   core, moved in-process so a render is judged the moment it lands: the mouth's opening per
