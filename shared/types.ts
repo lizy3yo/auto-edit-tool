@@ -364,6 +364,8 @@ export interface StoryboardScene {
    * per-scene seed so a retry renders something different; bounded by `LTX_SYNC_RETRIES`.
    */
   ltxSeedBump?: number;
+  /** True when the seed came from the photo's audited list (`server/ltxSeedAudit.ts`). */
+  ltxSeedAudited?: boolean;
   /** Whether the on-camera host appears (gets the reference face + face-lock) */
   hostPresent: boolean;
   /**

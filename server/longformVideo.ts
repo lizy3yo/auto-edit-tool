@@ -83,6 +83,7 @@ import {
   LtxLipsyncAdapter,
   ltxLipsyncSlotsFor,
   LTX_LIPSYNC_TIMEOUT_MS,
+  type LtxLipsyncParams,
 } from "./providers/ltx-lipsync";
 import {
   planLipsyncChunks,
@@ -90,6 +91,7 @@ import {
   cutNarrationChunks,
 } from "./lipsyncChunks";
 import { ltxFramingForUrl, planLtxBase } from "./ltxFraming";
+import { ensureLtxSeedAudit, pickAuditedSeed } from "./ltxSeedAudit";
 import { syncGate, wordsForChunk, summarize } from "./lipsyncSyncGate";
 import {
   getLipsyncProvider,
@@ -3796,19 +3798,17 @@ async function resolveLipsyncLane(
           console.log(
             `[LTX framing] scene ${scene.index}: base ${base.name} (face ${base.facePx} px)${base.capped ? " — CAPPED, re-frame this photo" : ""}`
           );
-        return ltx.submitLipsync({
+        // Everything the worker gets, minus the seed and the audio: the seed audit below
+        // renders the SAME job on a short snippet, so what it measures is what production
+        // renders.
+        const paramsFor = (seed: number, audio: string): LtxLipsyncParams => ({
           imageUrl,
-          audioUrl,
+          audioUrl: audio,
           crop,
           face: framing.face ?? undefined,
           stabilize,
           ...(base?.sizeToSend ?? {}),
-          // A seed per SCENE, stable across retries of that scene. The graph's own seed (42
-          // for every render) is a liability: a seed that collapses this host's mouth into
-          // the photo's held smile collapses it on every retry, deterministically — measured
-          // (seed 42 dead, seed 7 alive, same everything). The worker's liveness gate then
-          // steps the seed when a mouth comes back frozen.
-          seed: sceneSeed(scene) + (scene.ltxSeedBump ?? 0),
+          seed,
           // The hands clause goes in whenever the hands are in the picture — every mode
           // but the face crop.
           prompt: buildLtxLipsyncPrompt(scene, useAlt, {
@@ -3826,6 +3826,34 @@ async function resolveLipsyncLane(
           ...(engine === "inpaint" ? { engine, mask } : {}),
           ...(ENV.ltxLipsyncLora ? { lora: ENV.ltxLipsyncLora } : {}),
         });
+        // A seed per SCENE, stable across retries of that scene. The graph's own seed (42
+        // for every render) is a liability: a seed that collapses this host's mouth into
+        // the photo's held smile collapses it on every retry, deterministically — measured
+        // (seed 42 dead, seed 7 alive, same everything). The worker's liveness gate then
+        // steps the seed when a mouth comes back frozen. With the SEED AUDIT on, the seed
+        // comes from the photo's audited list instead (`server/ltxSeedAudit.ts`): the eyes
+        // and brows are seed-driven too, and the audit measured them once per photo.
+        const bump = scene.ltxSeedBump ?? 0;
+        let seed = sceneSeed(scene) + bump;
+        if (ENV.ltxSeedAudit && !scene.cta) {
+          const audit = await ensureLtxSeedAudit(imageUrl, audioUrl, {
+            count: ENV.ltxSeedAuditCount,
+            sampleSec: ENV.ltxSeedAuditSec,
+            render: async (candidate, snippet) => {
+              const sub = await ltx.submitLipsync(paramsFor(candidate, snippet));
+              if (!sub.taskId) throw new Error(sub.error ?? "submit failed");
+              const res = await ltx.pollVideo(sub.taskId, LTX_LIPSYNC_TIMEOUT_MS);
+              if (!res.success) throw new Error(res.error ?? "render failed");
+              return res.workerTimings as Record<string, unknown> | undefined;
+            },
+          });
+          const picked = audit ? pickAuditedSeed(audit, scene, bump) : null;
+          if (picked != null) {
+            seed = picked;
+            scene.ltxSeedAudited = true;
+          }
+        }
+        return ltx.submitLipsync(paramsFor(seed, audioUrl));
       },
       poll: (id, ms) => ltx.pollVideo(id, ms ?? LTX_LIPSYNC_TIMEOUT_MS),
       // Billed by GPU time like InfiniteTalk, so an abandoned render is stopped, not left.

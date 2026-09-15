@@ -362,7 +362,23 @@ Express · tRPC · Drizzle · MySQL.
   0.073 and 0.054 — the model's per-host mouth, not a dial. END TO END with the new
   direction (job 101 scene 1): both witnesses agree at 0 / −42 ms (r 0.38 / 0.42), 78% of
   sounds, blinks 20/min (HeyGen 21), room 0.04, and after the assembly pass the frame reads
-  66.5 against HeyGen's 67.0
+  66.5 against HeyGen's 67.0. The startled look was then MEASURED: eye opening per frame
+  against the first frame (the photo), reported by the worker as `timings.expression`
+  (`eye_ratio`, `wide_frac`). HeyGen keeps the eyes at the photo's size (0.96 / 1.09); our
+  Granny renders read 1.23-1.44 on EVERY seed — the worst seed was the far end of a
+  pattern, not a one-off — and the man's good renders 1.06-1.10. It is seed-driven and there
+  is no dial for it (the eyes only exist once drawn), so the check moved BEFORE production:
+  the SEED AUDIT (`server/ltxSeedAudit.ts`, `LTX_SEED_AUDIT`, on by default; count 4,
+  snippet 2.5 s) renders a few short clips of the scene's own narration on candidate seeds
+  the first time a host photo is rendered, reads liveness and the eyes from the worker,
+  keeps the seeds that pass (calmest first; the least-wide living seeds when none pass,
+  flagged `noneCalm`), stores the audit in `app_settings` under the photo's key, and every
+  scene of that photo draws its seed from the list (`pickAuditedSeed`: stable per scene,
+  stepping on a retry; `scene.ltxSeedAudited`). One cost per new photo, roughly one normal
+  render's worth of GPU; a seed calm on a short line is very likely but not guaranteed calm
+  on a long one, which is what a post-render expression gate (not built) would catch.
+  Fails open: any failure renders on the hash seed and says so. CTA scenes keep the hash
+  seed (their photo may be a plate)
 - `server/lipsyncJudge.ts` + `server/lipsyncSyncGate.ts` — the LTX lane's SYNC GATE
   (`LTX_SYNC_GATE`, on by default; `LTX_SYNC_RETRIES` 2). The judge is the measure script's
   core, moved in-process so a render is judged the moment it lands: the mouth's opening per

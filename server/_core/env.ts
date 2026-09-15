@@ -158,6 +158,17 @@ export const ENV = {
    * mild single-stage pass lands 68 / 64. `0` skips it.
    */
   ltxHostSharpen: process.env.LTX_HOST_SHARPEN !== "0",
+  /**
+   * The SEED AUDIT (`server/ltxSeedAudit.ts`): the first time a host photo renders, a few
+   * short clips are rendered on candidate seeds and the seeds whose eyes stay the photo's
+   * size (and whose mouth moves) are saved for that photo; every scene then draws from that
+   * list. Prevents the wide-eyed "startled" seed BEFORE production instead of catching it
+   * after. `0` renders on the hash seed as before. Count and snippet length are the cost
+   * dials: 4 x 2.5 s is roughly one normal render's worth of GPU, once per photo.
+   */
+  ltxSeedAudit: process.env.LTX_SEED_AUDIT !== "0",
+  ltxSeedAuditCount: Number(process.env.LTX_SEED_AUDIT_COUNT ?? 4),
+  ltxSeedAuditSec: Number(process.env.LTX_SEED_AUDIT_SEC ?? 2.5),
   /** The clause the adapter needs at the FRONT of the prompt (its trigger word and its rule). */
   ltxLipsyncLoraTrigger:
     process.env.LTX_LIPSYNC_LORA_TRIGGER ??
