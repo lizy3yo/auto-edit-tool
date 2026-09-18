@@ -253,6 +253,52 @@ describe("scene edit session", () => {
     expect(settle[1].errorMessage).toMatch(/scene 1/);
   });
 
+  it("make-b-roll converts the host scene BEFORE its task runs, so it never queues on the host lane", async () => {
+    const jobId = ++nextJob;
+    const scenes = storyboard(2) as any[];
+    // Scene 2: a host beat the lip-sync lane never delivered.
+    Object.assign(scenes[1], {
+      hostPresent: true,
+      clipUrl: undefined,
+      clipUrls: [],
+      sceneStatus: "failed",
+      error: "HeyGen render failed",
+      renderTaskIds: ["heygen-task"],
+      narrationStartSec: 4,
+      narrationEndSec: 9,
+    });
+    getJobSpy.mockResolvedValue({
+      id: jobId,
+      inputParams: {},
+      storyboard: scenes,
+    });
+
+    let seen: any;
+    const runOne = async (_ctx: any, req: SceneEditRequest) => {
+      const scene = scenes.find(s => s.index === req.sceneIndex)!;
+      seen = { ...scene };
+      scene.clipUrls = ["https://x/2-still.mp4"];
+      scene.clipUrl = "https://x/2-still.mp4";
+      scene.sceneStatus = "completed";
+    };
+    expect(
+      enqueueSceneEdit(jobId, { kind: "tobroll", sceneIndex: 2 }, { runOne })
+    ).toBe("queued");
+    await sceneEditsSettled(jobId);
+
+    expect(seen.hostPresent).toBe(false);
+    expect(seen.stillImage).toBe(true);
+    expect(seen.renderTaskIds).toBeUndefined();
+    expect(seen.sceneStatus).toBe("processing");
+    expect(seen.error).toBeUndefined();
+    // The voice is untouched.
+    expect(scenes[1].narrationStartSec).toBe(4);
+    expect(scenes[1].narrationEndSec).toBe(9);
+    expect(
+      updateSpy.mock.calls.some(c => (c as any)[1]?.status === "completed")
+    ).toBe(true);
+  });
+
   it("a new click after the session closed starts a fresh session (nothing lost between them)", async () => {
     const jobId = ++nextJob;
     const scenes = storyboard(1);

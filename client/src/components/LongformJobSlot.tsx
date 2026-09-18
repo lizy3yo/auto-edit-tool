@@ -512,6 +512,38 @@ export default function LongformJobSlot({
     },
   });
 
+  // "Make b-roll": a host scene the lip-sync lane won't deliver (or nobody wants) becomes a still
+  // cutaway. Confirmed first — there is no button back; the host would need a fresh render.
+  const [toBrollScene, setToBrollScene] = useState<number | null>(null);
+  const toBrollMutation = trpc.longformVideo.convertSceneToBroll.useMutation({
+    onSuccess: (d, vars) => {
+      if (d.accepted === "ignored") {
+        unqueueScene(vars.sceneIndex);
+        toast.info(
+          `Scene ${vars.sceneIndex} is already rendering — wait for it, then try again`
+        );
+      } else {
+        toast.success(`Scene ${vars.sceneIndex} is becoming b-roll — rendering...`);
+        setExpandedScene(cur => (cur === vars.sceneIndex ? null : cur));
+      }
+      if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
+    },
+    onError: (err, vars) => {
+      toast.error(err.message);
+      unqueueScene(vars.sceneIndex);
+    },
+  });
+  const makeBroll = (sceneIndex: number) => {
+    if (!jobId) return;
+    armNotifications();
+    queuePhase.current.set(sceneIndex, "queued");
+    queuedAt.current.set(sceneIndex, Date.now());
+    setQueuedScenes(prev =>
+      prev.includes(sceneIndex) ? prev : [...prev, sceneIndex]
+    );
+    toBrollMutation.mutate({ jobId, sceneIndex });
+  };
+
   // Split editor: per-scene selection of "use another scene's footage as the right panel".
   const [splitSource, setSplitSource] = useState<
     Record<number, number | undefined>
@@ -3201,6 +3233,22 @@ export default function LongformJobSlot({
                                 <Pencil className="mr-1.5 h-3 w-3" />
                                 Edit
                               </Button>
+                              {scene.hostPresent && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 text-xs"
+                                  disabled={isSceneQueued}
+                                  title="Replace the host on this beat with a b-roll still — skips lip-sync"
+                                  onClick={e => {
+                                    e.stopPropagation();
+                                    setToBrollScene(scene.index);
+                                  }}
+                                >
+                                  <Trees className="mr-1.5 h-3 w-3" />
+                                  Make b-roll
+                                </Button>
+                              )}
                             </div>
                           ))}
                       </div>
@@ -3211,6 +3259,39 @@ export default function LongformJobSlot({
           </div>
         </div>
       )}
+
+      {/* Make b-roll */}
+      <AlertDialog
+        open={toBrollScene != null}
+        onOpenChange={open => {
+          if (!open) setToBrollScene(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Make scene {toBrollScene} b-roll?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              The host won't appear on this beat. It becomes a still cutaway of
+              what the narration is talking about, and lip-sync is skipped. The
+              voice doesn't change. There's no button back — returning the host
+              would need a fresh host render.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (toBrollScene != null) makeBroll(toBrollScene);
+                setToBrollScene(null);
+              }}
+            >
+              Make b-roll
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Confirmation */}
       <AlertDialog open={showConfirm} onOpenChange={setShowConfirm}>

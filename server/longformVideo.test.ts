@@ -84,6 +84,7 @@ import {
   brollDepictsBook,
   enhanceBrollPrompts,
   demoteAllHostsToBroll,
+  convertHostSceneToBroll,
   forceAllBrollMotion,
   HOST_SCREEN_FRACTION,
   talkingHeadClipCount,
@@ -1029,6 +1030,38 @@ describe("rebalanceHostScreenTime", () => {
     expect(scenes[1].stillImage).toBe(true);
     expect(scenes[0].visualPrompt).toContain("cutaway");
     expect(scenes[2].visualPrompt).toBe("vinegar on counter");
+  });
+
+  it("convertHostSceneToBroll makes one host beat a still cutaway and keeps its narration", () => {
+    const scene = mk(7, true, 6, {
+      brollVisual: "two canvas bag straps on a table",
+      splitVisual: "a bag strap close-up",
+      hostShot: 2,
+      hostClipUrls: ["https://r2/host-7.mp4"],
+      renderTaskIds: ["heygen-task"],
+      narrationStartSec: 18,
+      narrationEndSec: 24,
+      audioUrl: "https://r2/scene-7-vo.mp3",
+      sceneStatus: "failed",
+    });
+    expect(convertHostSceneToBroll(scene)).toBe(true);
+    expect(scene.hostPresent).toBe(false);
+    expect(scene.stillImage).toBe(true);
+    expect(scene.visualPrompt).toBe("two canvas bag straps on a table");
+    expect(scene.splitVisual).toBeUndefined();
+    expect(scene.hostShot).toBeUndefined();
+    expect(scene.hostClipUrls).toBeUndefined();
+    // In-flight host task ids would make the next render RESUME the host job.
+    expect(scene.renderTaskIds).toBeUndefined();
+    // The voice is untouched — the film stays on the master-overlay path.
+    expect(scene.narrationStartSec).toBe(18);
+    expect(scene.narrationEndSec).toBe(24);
+    expect(scene.audioUrl).toBe("https://r2/scene-7-vo.mp3");
+
+    const cutaway = mk(8, false, 6, { stillImage: true });
+    const before = { ...cutaway };
+    expect(convertHostSceneToBroll(cutaway)).toBe(false);
+    expect(cutaway).toEqual(before);
   });
 
   it("forceAllBrollMotion puts every cutaway on the video lane", () => {
