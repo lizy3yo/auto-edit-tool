@@ -78,6 +78,7 @@ import {
   runLongformPipeline,
   regenerateScene as regenerateLongformScene,
   regenerateScenes as regenerateLongformScenes,
+  convertSceneToBroll as convertLongformSceneToBroll,
   getSceneEditState,
   setSceneTiming as setLongformSceneTiming,
   splitSceneInTwo as splitLongformScene,
@@ -2265,6 +2266,47 @@ const longformVideoRouter = router({
         input.customVisualPrompt,
         input.verbatim,
         input.customSplitVisual
+      );
+      return { ok: true, accepted };
+    }),
+
+  /**
+   * "Make b-roll": turn one host scene into a still cutaway and render it — the way past a host
+   * beat the lip-sync lane will not deliver, since a regenerate only returns to that lane.
+   */
+  convertSceneToBroll: approvedProcedure
+    .input(
+      z.object({
+        jobId: z.number(),
+        sceneIndex: z.number().int().min(1),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const job = await getLongformVideoJobById(input.jobId);
+      if (!job) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
+      }
+      if (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Not authorized" });
+      }
+      const scene = (
+        Array.isArray(job.storyboard)
+          ? (job.storyboard as StoryboardScene[])
+          : []
+      ).find(s => s && s.index === input.sceneIndex);
+      if (!scene)
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `Scene ${input.sceneIndex} not found`,
+        });
+      if (!scene.hostPresent)
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Scene ${input.sceneIndex} is already b-roll`,
+        });
+      const accepted = await convertLongformSceneToBroll(
+        input.jobId,
+        input.sceneIndex
       );
       return { ok: true, accepted };
     }),

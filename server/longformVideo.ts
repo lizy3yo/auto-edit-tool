@@ -3109,6 +3109,40 @@ function promoteCutawayToHost(s: StoryboardScene): void {
 }
 
 /**
+ * The OPERATOR's demotion ("Make b-roll" on a scene card): one host scene becomes a person-free
+ * still cutaway, for a host beat the lip-sync lane will not deliver — or one nobody wants. The
+ * same mutation the pipeline's own demotions use, plus everything the host lane left behind: a
+ * stale `hostClipUrls` / split panel would be picked up by a later split edit, and in-flight
+ * task ids would make the next render RESUME the host job instead of submitting a still.
+ * Narration is untouched — the scene keeps its master slice, so the film stays on the overlay
+ * path. Returns false (and changes nothing) on a scene that is not a host beat. Mutates in place.
+ */
+export function convertHostSceneToBroll(s: StoryboardScene): boolean {
+  if (!s.hostPresent) return false;
+  demoteHostToStill(s);
+  s.hostOpener = undefined;
+  s.hostShot = undefined;
+  s.lipsynced = false;
+  s.humanPresent = false;
+  s.objectMotion = undefined;
+  s.splitVisualSeed = undefined;
+  s.splitMotion = undefined;
+  s.splitLayout = undefined;
+  s.splitRightUrl = undefined;
+  s.hostClipUrls = undefined;
+  // The enhancer rewrites FROM the seed — a host beat's seed (if any) is the talking-head prompt.
+  s.visualPromptSeed = undefined;
+  s.clipUrl = undefined;
+  s.clipUrls = [];
+  s.renderTaskIds = undefined;
+  s.renderProvider = undefined;
+  s.renderModelIndex = undefined;
+  s.renderAttempts = undefined;
+  s.infraRetries = undefined;
+  return true;
+}
+
+/**
  * Demote every host scene to a person-free b-roll cutaway and re-gate any flagless motion clips
  * to the still lane. Returns how many host scenes were converted. Mutates in place.
  */
@@ -13147,6 +13181,12 @@ export type SceneEditRequest =
       clearClip?: boolean;
     }
   | { kind: "split"; sceneIndex: number; edit: SceneSplitEdit }
+  /**
+   * "Make b-roll": turn a HOST scene into a person-free still cutaway and render it — the way
+   * out when the lip-sync lane will not deliver a beat (a plain regenerate only goes back to the
+   * same lane). A render edit; the narration slice is untouched (`convertHostSceneToBroll`).
+   */
+  | { kind: "tobroll"; sceneIndex: number }
   /** Cut-room edit: trim / move a cut / hold (see `sceneTiming.ts`). Metadata only, no render. */
   | { kind: "timing"; sceneIndex: number; edit: SceneTimingEdit }
   /** Cut-room split of one scene into two at an offset into its slice. Metadata only. */
@@ -13598,6 +13638,9 @@ function prepareSceneEdit(ctx: SceneEditContext, req: SceneEditRequest): void {
       scene.clipUrls = [];
     }
   }
+  // Converted HERE, not in the task body: `sceneEditLane` reads the scene's register to pick its
+  // lane, and a scene still marked host would queue behind the lip-sync lane it is leaving.
+  if (req.kind === "tobroll") convertHostSceneToBroll(scene);
   scene.sceneStatus = "processing";
   scene.error = undefined;
 }
@@ -13675,7 +13718,11 @@ async function runSceneEdit(
         } else if (req.kind === "unmerge") {
           runUnmergeEdit(ctx, s);
         } else {
-          if (req.kind === "regen") await runRegenEdit(ctx, s, req);
+          // A converted scene IS a b-roll scene by now (`prepareSceneEdit`), so its render is
+          // the ordinary cutaway regenerate: enhance against the subject, scrub names, render.
+          if (req.kind === "tobroll")
+            await runRegenEdit(ctx, s, { kind: "regen", sceneIndex: s.index });
+          else if (req.kind === "regen") await runRegenEdit(ctx, s, req);
           else await runSplitEdit(ctx, s, req.edit);
           s.regenerated = true;
         }
@@ -14237,6 +14284,23 @@ export async function regenerateScene(
   if (accept === "ignored")
     console.warn(
       `[Longform ${jobId}] Scene ${sceneIndex} is rendering — regenerate request ignored`
+    );
+  return accept;
+}
+
+/**
+ * "Make b-roll": convert one HOST scene into a still cutaway and render it, skipping the
+ * lip-sync lane entirely. Queued on the edit session like a regenerate, so it runs beside
+ * anything else in flight and reports the same `queued` / `superseded` / `ignored`.
+ */
+export async function convertSceneToBroll(
+  jobId: number,
+  sceneIndex: number
+): Promise<EditAccept> {
+  const accept = enqueueSceneEdit(jobId, { kind: "tobroll", sceneIndex });
+  if (accept === "ignored")
+    console.warn(
+      `[Longform ${jobId}] Scene ${sceneIndex} is rendering — make-b-roll request ignored`
     );
   return accept;
 }
