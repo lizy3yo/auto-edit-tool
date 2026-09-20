@@ -1,10 +1,12 @@
 /**
  * server/alignmentHeal.ts — repair a transcript that came back with a HOLE in it.
  *
- * Every scene cut in a film is recovered from whisperx word timings, and whisperx can return a
- * transcript that is simply missing a stretch: production job 94 got no words at all for
- * 9:23–14:37 of a clean, continuously spoken 14:45 master (the same audio transcribes perfectly
- * on a second try, so it is intermittent on the worker side and cannot be fixed at its source).
+ * Every scene cut in a film is recovered from whisperx word timings, so a transcript that is
+ * missing a stretch of clean speech takes every scene in that stretch down with it: they
+ * collapse to zero width and the next scene that matches swallows the gap. (This is the
+ * DEFENCE-IN-DEPTH half of the job-94 work. Job 94 itself turned out to be a mis-bound CTA
+ * anchor — see `alignBoundaries` — which produces the identical picture; a transcript hole was
+ * the first diagnosis, reproduces the same symptom exactly, and nothing else guarded against it.)
  * The aligner's plausibility gate (`repairImplausibleRuns`) spots the damage and can re-split the
  * stretch by word count, but that lands cuts a median ~2.6 s off the words — fine as a last
  * resort, poor as the answer. The better repair is to ask again, for THAT STRETCH ONLY: a few

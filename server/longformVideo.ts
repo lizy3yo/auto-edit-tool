@@ -10891,8 +10891,8 @@ async function runUnifiedPipeline(
   }
   // Give every scene its slice of the master (sets scene.audioDuration; split/merge passes read it).
   // The report names any stretch the aligner's plausibility gate had to re-split by word count —
-  // the signature of a transcript that came back with a HOLE in it (job 94: no words for
-  // 9:23–14:37 of a clean master). Ask again for just those stretches before anything below reads
+  // the signature of a transcript that came back with a HOLE in it (minutes of clean speech
+  // with no words). Ask again for just those stretches before anything below reads
   // the durations: the merge passes fold short scenes together, and the proportional cuts the
   // gate leaves behind are a last resort, not the answer.
   const firstAlign = newAlignmentReport();
@@ -14837,9 +14837,9 @@ export function planTimelineRepair(opts: {
  * REPAIR TIMELINE — fix a voiced film whose scene ranges are wrong, without paying for the film
  * again.
  *
- * The case it exists for (production job 94): the transcript the scenes were cut from had a
- * five-minute hole, so seven scenes collapsed to a fraction of a second and the next one took
- * 319 s under a single still. Everything about that film is otherwise fine — the narration is
+ * The case it exists for (production job 94): the closing QR block's release anchor bound to an
+ * earlier occurrence of its five words (see `alignBoundaries`), so the scenes in front of that
+ * pin were crushed to a fraction of a second and the one after it took 319 s under a single still. Everything about that film is otherwise fine — the narration is
  * clean, and the first nine minutes are correctly timed and already rendered — but nothing on
  * the job could repair it: Regenerate re-renders the SAME broken slice, and "Retry failed
  * scenes" sees no failure, because every scene has a clip and audio.

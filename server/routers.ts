@@ -2080,8 +2080,8 @@ const longformVideoRouter = router({
         // True while a "retry failed scenes" click is parked behind the running pass, so the
         // button can read "queued" instead of looking like it did nothing.
         retryQueued: isRetryQueued(input.jobId),
-        // Stretches whose narration slices their words cannot explain (a transcript hole at
-        // voicing — job 94). Nothing else surfaces these: every scene has a clip and audio, so
+        // Stretches whose narration slices their words cannot explain (a mis-bound CTA anchor
+        // — job 94 — or a transcript hole at voicing). Nothing else surfaces these: every scene has a clip and audio, so
         // nothing reads as failed, and Regenerate re-renders the same broken slice. Drives the
         // "Repair timeline" banner. Pure and cheap; empty while a pass is running, when the
         // ranges are legitimately in flux.

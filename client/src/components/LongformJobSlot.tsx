@@ -1979,8 +1979,8 @@ export default function LongformJobSlot({
               </ul>
             )}
 
-            {/* A stretch of scenes whose narration slices don't fit their words — the transcript
-                had a hole when the film was voiced. Nothing else on the job can fix this:
+            {/* A stretch of scenes whose narration slices don't fit their words — the aligner
+                mis-timed them when the film was voiced. Nothing else on the job can fix this:
                 every scene has a clip, so nothing reads as failed, and Regenerate re-renders
                 the same broken slice. Says so, and offers the one action that works. */}
             {timelineIssues.length > 0 && (

@@ -558,7 +558,7 @@ describe("assignSceneRanges", () => {
 /**
  * A film of `n` ten-word scenes read at a steady 3 words/sec, with every word timed. `holeFrom`
  * / `holeTo` (scene positions, inclusive) drop those scenes' words from the transcript — the
- * shape production job 94 hit, where whisperx returned no words for five minutes of clean speech.
+ * shape a transcript hole produces: no words for a stretch of clean speech.
  */
 function steadyFilm(n: number, holeFrom = -1, holeTo = -1) {
   const scenes: StoryboardScene[] = [];
@@ -675,5 +675,59 @@ describe("assignSceneRanges — transcript hole", () => {
     assignSceneRanges(scenes, words, dur, null, null, report);
     expect(report.repaired).toHaveLength(0);
     expect(report.unrepairable).toHaveLength(0);
+  });
+});
+
+describe("assignSceneRanges — CTA anchor on a phrase the script says twice", () => {
+  /**
+   * Production job 94. The closing pitch ended "...come back with three quarters of an inch",
+   * so the QR block's release anchor was those five words — which the host had ALSO said at
+   * 9:15, mid-explanation. The anchor bound to the first occurrence it met and, being
+   * authoritative, crushed five minutes of scenes in front of it.
+   */
+  function filmWithRepeatedPhrase() {
+    const phrase = "three quarters of an inch";
+    const scenes: StoryboardScene[] = [];
+    const words: WhisperWord[] = [];
+    let t = 0;
+    for (let s = 0; s < 40; s++) {
+      const filler = Array.from({ length: 5 }, (_, k) => `w${s}x${k}`).join(
+        " "
+      );
+      // Scene 10 says the phrase in passing; scene 35 is the block's release and ENDS on it.
+      const text =
+        s === 10 || s === 35
+          ? `${filler} ${phrase}`
+          : `${filler} v${s}a v${s}b v${s}c v${s}d v${s}e`;
+      const sc = scene(text, s + 1);
+      if (s >= 33 && s <= 35) sc.qrHero = true;
+      if (s === 35) sc.qrTail = true;
+      scenes.push(sc);
+      // Whisper mishears the first two words of the block's opening line, so its START anchor
+      // (one miss tolerated) goes unfound — and the release search begins far too early.
+      text.split(" ").forEach((tok, k) => {
+        words.push(w(s === 33 && k < 2 ? `misheard${k}` : tok, t, t + 0.3));
+        t += 1 / 3;
+      });
+    }
+    return { scenes, words, dur: t };
+  }
+
+  it("pins the release to the occurrence its own scene is at, not the first sound-alike", () => {
+    const { scenes, words, dur } = filmWithRepeatedPhrase();
+    const report = newAlignmentReport();
+    const ranges = assignSceneRanges(scenes, words, dur, null, null, report);
+    expectTiles(ranges, dur);
+    expect(report.repaired).toHaveLength(0);
+    expect(report.unrepairable).toHaveLength(0);
+    // Every scene is ten words at 3 words/sec (3.33 s). The two misheard words stay with the
+    // scene before them — a cut lands on the next scene's first MATCHED word — so that pair
+    // reads 4.0 s / 2.67 s. Nothing is crushed and nothing runs for minutes.
+    for (const r of ranges) {
+      expect(r.endSec - r.startSec).toBeGreaterThan(2.6);
+      expect(r.endSec - r.startSec).toBeLessThan(4.1);
+    }
+    // The block ends where scene 36 actually finishes speaking.
+    expect(ranges[35].endSec).toBeCloseTo((36 * 10) / 3, 1);
   });
 });

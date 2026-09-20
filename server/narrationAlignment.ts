@@ -44,6 +44,13 @@ const ANCHOR_HEAD_TOKENS = 7;
 const ANCHOR_TAIL_TOKENS = 5;
 /** An anchor phrase must have at least this many tokens to be distinctive enough to pin. */
 const ANCHOR_MIN_TOKENS = 3;
+/**
+ * How far (in transcript tokens, ~3 per second) an anchor phrase may sit from where the global
+ * alignment put its scene and still be that scene's line. Wide enough to absorb the local drift
+ * anchors exist to correct (a price pitch desyncs the walk by a handful of words); far too narrow
+ * for a repeat of the phrase elsewhere in the script, which is minutes away.
+ */
+const ANCHOR_MAX_DRIFT_TOKENS = 30;
 /** Below this matched-token ratio the word alignment is treated as noise → proportional split. */
 const MIN_MATCH_RATIO = 0.5;
 /** A boundary within this of a real silence gap is snapped onto it so cuts never land mid-word. */
@@ -120,8 +127,9 @@ type SceneAnchor = { scene: number; edge: "start" | "end"; tokens: string[] };
  * CTA anchors from the storyboard flags: each contiguous `qrHero` run pins its first scene's START
  * to the scene's leading tokens (the trigger line — `markCtaQrBlock` splits scenes so the trigger
  * IS the scene head) and the `qrTail` scene's END to its trailing tokens (the release line ends the
- * scene the same way). Scene order = anchor order, which `alignBoundaries` relies on to match the
- * k-th block to the k-th spoken occurrence of the (verbatim-repeated) phrase.
+ * scene the same way). `alignBoundaries` binds each to the occurrence of its phrase nearest where
+ * the global alignment put that scene — a script repeats ordinary phrases, and verbatim-repeated
+ * CTA blocks (mid-roll + close) each resolve to their own neighbourhood.
  */
 function ctaAnchors(scenes: StoryboardScene[]): SceneAnchor[] {
   const anchors: SceneAnchor[] = [];
@@ -200,8 +208,8 @@ export function assignSceneRanges(
         };
   let boundaries = plan.boundaries;
   // Word-aligned boundaries are only as good as the transcript, and a transcript can come back
-  // with a HOLE — minutes of speech with no words in it (production job 94: 9:23–14:37 of a
-  // 14:45 master). Every scene whose words sit in the hole collapses to zero width and the next
+  // with a HOLE — minutes of speech with no words in it — and a CTA anchor can pin a boundary
+  // minutes from where it belongs (production job 94). Either way every scene whose words sit in the hole collapses to zero width and the next
   // scene that does match swallows the whole gap, while the global match ratio stays comfortably
   // above `MIN_MATCH_RATIO`. Re-split any such stretch by word count BEFORE anything reads the
   // durations: the merge passes fold "short" scenes together, and fed zeros they fold dozens.
@@ -282,19 +290,12 @@ function alignBoundaries(
   let matched = 0;
   let total = 0;
 
-  // Resolve each anchor phrase to its position, consuming occurrences in order (a CTA block
-  // repeats verbatim mid-roll + close, so block k must bind to spoken occurrence k). An unfound
-  // phrase is skipped — the walk below then behaves exactly as without that anchor.
+  // Anchor positions, resolved AFTER the global alignment below (see there for why).
   const startCk = new Map<number, number>(); // scene → expanded-token start index
   const endCk = new Map<number, number>(); // scene → exclusive expanded-token end index
-  let searchFrom = 0;
-  for (const a of anchors) {
-    const m = findPhrase(E, a.tokens, searchFrom);
-    if (!m) continue;
-    if (a.edge === "start") startCk.set(a.scene, m[0]);
-    else endCk.set(a.scene, m[1]);
-    searchFrom = m[1];
-  }
+  /** Where the global alignment put each scene's first / last matched token (exp space), or -1. */
+  const expFirst: number[] = new Array(n).fill(-1);
+  const expLast: number[] = new Array(n).fill(-1);
 
   // ── Global alignment (edit distance with traceback) between the script's expanded tokens and
   // the transcript's. A greedy forward cursor is unfixable here: one local paraphrase desyncs it,
@@ -376,7 +377,44 @@ function alignBoundaries(
       lastIdx[s] = last >= 0 ? wordEndAt(last + 1) : firstIdx[s];
       if (lastIdx[s] < firstIdx[s]) lastIdx[s] = firstIdx[s];
       cursor = Math.max(cursor, lastIdx[s]);
+      expFirst[s] = first;
+      expLast[s] = last;
     }
+  }
+
+  // Resolve each anchor to the occurrence of its phrase NEAREST where the global alignment
+  // already put that scene — never simply the first one in the file. An anchor is a five-to-seven
+  // word fingerprint, and a script says ordinary phrases more than once: job 94's closing pitch
+  // ended "…come back with three quarters of an inch", the host had said those five words at
+  // 9:15 mid-explanation, and (the block's START anchor having gone unfound on two misheard
+  // words) the release bound there — five minutes early. A pin is AUTHORITATIVE, so every scene
+  // that belonged in those five minutes was crushed in front of it and the scene after it ran
+  // 319 s under one still; deterministic, so no re-transcription or regenerate could fix it.
+  // The alignment is the right judge of WHICH occurrence: it is global, so a repeat elsewhere
+  // costs it nothing. The anchor then does the one job it is good at — placing the cut exactly
+  // on the phrase, which the alignment can miss by a word or two around a price pitch. A phrase
+  // found only far from its own scene is not this scene's line: skipped, and the walk behaves
+  // exactly as without that anchor. Verbatim-repeated CTA blocks (mid-roll + close) resolve the
+  // same way, each to its own neighbourhood, with no "k-th occurrence" bookkeeping.
+  for (const a of anchors) {
+    const want = a.edge === "start" ? expFirst[a.scene] : expLast[a.scene] + 1;
+    if (expFirst[a.scene] < 0) continue; // the alignment never found this scene — no judge
+    let best: [number, number] | null = null;
+    let bestDist = Infinity;
+    for (
+      let m = findPhrase(E, a.tokens, 0);
+      m;
+      m = findPhrase(E, a.tokens, m[0] + 1)
+    ) {
+      const dist = Math.abs((a.edge === "start" ? m[0] : m[1]) - want);
+      if (dist < bestDist) {
+        best = m;
+        bestDist = dist;
+      }
+    }
+    if (!best || bestDist > ANCHOR_MAX_DRIFT_TOKENS) continue;
+    if (a.edge === "start") startCk.set(a.scene, best[0]);
+    else endCk.set(a.scene, best[1]);
   }
   // The last scene owns any trailing words Whisper heard past the final matched token.
   lastIdx[n - 1] = words.length;

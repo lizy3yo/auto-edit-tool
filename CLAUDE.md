@@ -527,15 +527,30 @@ Express · tRPC · Drizzle · MySQL.
   `client/src/components/SceneTimingEditor.tsx`
 - `server/narrationAlignment.ts`, `server/_core/voiceTranscription.ts` — whisperx
 - `server/alignmentHeal.ts` + the PLAUSIBILITY GATE in `narrationAlignment.ts`
-  (`implausibleScenes` / `repairImplausibleRuns`) — every scene cut is recovered from whisperx
-  word timings, and whisperx can return a transcript with a HOLE in it. Production job 94 got no
-  words at all for 9:23–14:37 of a clean 14:45 master (the same audio transcribes perfectly on a
-  second try — intermittent, worker-side). Every scene whose words sat in the hole collapsed to
-  zero width, the next scene that matched swallowed 319 s under one still, and nothing noticed:
-  the only check was a GLOBAL match ratio (`MIN_MATCH_RATIO` 0.5), which a five-minute hole in a
-  fifteen-minute film passes at ~66%. The merge passes then ran on those zero-length scenes and
-  folded dozens together. The shipped film "freezes" at 9:20 while the narrator carries on, and
-  Regenerate cannot help — it re-renders the same broken slice. The gate judges each scene's
+  (`implausibleScenes` / `repairImplausibleRuns`) — production job 94 shipped a film that
+  "freezes" at 9:20 while the narrator carries on for five minutes: seven scenes a fraction of a
+  second long, then ONE still held for 319 s. ROOT CAUSE, and the fix that matters: a CTA ANCHOR
+  BOUND TO THE WRONG OCCURRENCE OF ITS PHRASE. The QR block's release is pinned by finding the
+  qrTail scene's last five words in the transcript; the closing pitch ended "…come back with
+  three quarters of an inch", the host had ALSO said those five words at 9:15, and — the block's
+  START anchor having gone unfound (one misheard word is tolerated, two are not), which left the
+  search starting back at the mid-roll CTA — the release bound there, five minutes early. A pin
+  is AUTHORITATIVE ("predecessors that overshot are pulled back"), so everything belonging to
+  9:17–14:34 was crushed in front of it and the scene after it ran to the outro. Deterministic:
+  a fresh transcript reproduces it exactly, which is why the first diagnosis (a HOLE in the
+  transcript — same picture, and reproducible by deleting words) was wrong, and why the repair
+  built on that diagnosis refused job 94 with "does not match the script at 8:44–9:17,
+  9:17–14:45" — two runs split at the bad pin. `alignBoundaries` now resolves anchors AFTER the
+  global alignment, to the occurrence NEAREST where that alignment put the scene, and drops one
+  further than `ANCHOR_MAX_DRIFT_TOKENS` (30 ≈ 10 s) away: the alignment is global, so a repeat
+  elsewhere costs it nothing, and the anchor keeps the one job it is good at — placing the cut
+  exactly on the phrase. On job 94's real narration: old aligner, 170 scenes under 1 s and one of
+  800 s; new, the block at 14:17–14:36, none under 1 s, longest 10.7 s. The rest of this entry
+  is DEFENCE IN DEPTH against anything that produces the same picture (a genuine transcript hole
+  does): the only check used to be a GLOBAL match ratio (`MIN_MATCH_RATIO` 0.5), which a
+  five-minute fault in a fifteen-minute film passes at ~66%, and the merge passes then ran on the
+  zero-length scenes and folded dozens together. Regenerate cannot help such a film — it
+  re-renders the same broken slice. The gate judges each scene's
   slice against its word count at the film's own MEDIAN pace (median, not mean: one scene holding
   five stray minutes drags the mean until every healthy scene reads as starved) and re-splits a
   bad stretch by word count — but only when the stretch's audio FITS its words (0.6–1.6×), never
