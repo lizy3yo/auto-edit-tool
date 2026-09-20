@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { assignSceneRanges, tokenizeNarration } from "./narrationAlignment";
+import {
+  assignSceneRanges,
+  implausibleScenes,
+  newAlignmentReport,
+  repairImplausibleRuns,
+  tokenizeNarration,
+} from "./narrationAlignment";
 import type { WhisperWord } from "./_core/voiceTranscription";
 import type { StoryboardScene } from "../shared/types";
 
@@ -546,5 +552,128 @@ describe("assignSceneRanges", () => {
     expectTiles(ranges, 3.6);
     // Outgoing host keeps the whole pause; incoming host starts exactly on its first word (2.4).
     expect(ranges[0].endSec).toBeCloseTo(2.4, 5);
+  });
+});
+
+/**
+ * A film of `n` ten-word scenes read at a steady 3 words/sec, with every word timed. `holeFrom`
+ * / `holeTo` (scene positions, inclusive) drop those scenes' words from the transcript — the
+ * shape production job 94 hit, where whisperx returned no words for five minutes of clean speech.
+ */
+function steadyFilm(n: number, holeFrom = -1, holeTo = -1) {
+  const scenes: StoryboardScene[] = [];
+  const words: WhisperWord[] = [];
+  let t = 0;
+  for (let s = 0; s < n; s++) {
+    const toks: string[] = [];
+    for (let k = 0; k < 10; k++) {
+      const tok = `w${s}x${k}`;
+      toks.push(tok);
+      if (s < holeFrom || s > holeTo) words.push(w(tok, t, t + 0.3));
+      t += 1 / 3;
+    }
+    scenes.push(scene(toks.join(" "), s + 1));
+  }
+  return { scenes, words, dur: t };
+}
+
+describe("implausibleScenes", () => {
+  it("flags nothing on an evenly read film", () => {
+    const flags = implausibleScenes(
+      new Array(20).fill(10),
+      new Array(20).fill(3.3)
+    );
+    expect(flags.some(Boolean)).toBe(false);
+  });
+
+  it("flags a collapsed scene and the scene that swallowed the gap", () => {
+    const durations = new Array(20).fill(3.3);
+    durations[8] = 0;
+    durations[9] = 0;
+    durations[10] = 60;
+    const flags = implausibleScenes(new Array(20).fill(10), durations);
+    expect(flags[8] && flags[9] && flags[10]).toBe(true);
+    expect(flags.filter(Boolean)).toHaveLength(3);
+  });
+
+  it("leaves a short line followed by a scripted pause alone", () => {
+    const tokens = new Array(20).fill(10);
+    const durations = new Array(20).fill(3.3);
+    tokens[5] = 3; // ~1s of words…
+    durations[5] = 3.2; // …plus a 2s beat
+    expect(implausibleScenes(tokens, durations)[5]).toBe(false);
+  });
+
+  it("honours skip, and never judges a film too short to have a pace", () => {
+    const durations = new Array(20).fill(3.3);
+    durations[4] = 0;
+    const skip = new Array(20).fill(false);
+    skip[4] = true;
+    expect(implausibleScenes(new Array(20).fill(10), durations, skip)[4]).toBe(
+      false
+    );
+    expect(implausibleScenes([10, 10, 10], [0, 30, 0]).some(Boolean)).toBe(
+      false
+    );
+  });
+});
+
+describe("repairImplausibleRuns", () => {
+  it("re-splits a collapsed stretch by word count and touches nothing else", () => {
+    // 20 scenes × 10 tokens; scenes 9–13 collapsed at 27s, scene 14 owns their audio.
+    const b: number[] = [];
+    for (let i = 0; i <= 20; i++) b.push(i * 3);
+    for (let i = 10; i <= 14; i++) b[i] = 27; // scenes 9..13 zero-width, scene 14 = 27→45
+    const fix = repairImplausibleRuns(b, new Array(20).fill(10));
+    expect(fix.unrepairable).toHaveLength(0);
+    expect(fix.repaired).toEqual([
+      { fromScene: 9, toScene: 14, startSec: 27, endSec: 45 },
+    ]);
+    for (let i = 0; i <= 20; i++)
+      expect(fix.boundaries[i]).toBeCloseTo(i * 3, 5);
+    expect(b[10]).toBe(27); // input not mutated
+  });
+
+  it("refuses a stretch whose audio its words cannot fill", () => {
+    // One scene owns five minutes and there are no starved neighbours to explain it.
+    const b: number[] = [0];
+    for (let i = 1; i <= 20; i++) b.push(b[i - 1] + (i === 11 ? 300 : 3));
+    const fix = repairImplausibleRuns(b, new Array(20).fill(10));
+    expect(fix.repaired).toHaveLength(0);
+    expect(fix.unrepairable).toHaveLength(1);
+    expect(fix.unrepairable[0].fromScene).toBeLessThanOrEqual(10);
+    expect(fix.unrepairable[0].toScene).toBeGreaterThanOrEqual(10);
+    expect(fix.boundaries).toEqual(b);
+  });
+
+  it("never moves a pinned boundary", () => {
+    const b: number[] = [];
+    for (let i = 0; i <= 20; i++) b.push(i * 3);
+    for (let i = 10; i <= 14; i++) b[i] = 27;
+    const fix = repairImplausibleRuns(b, new Array(20).fill(10), [12]);
+    expect(fix.boundaries[12]).toBe(27);
+  });
+});
+
+describe("assignSceneRanges — transcript hole", () => {
+  it("keeps every scene near its true length when the transcript loses a stretch", () => {
+    const { scenes, words, dur } = steadyFilm(40, 20, 33);
+    const report = newAlignmentReport();
+    const ranges = assignSceneRanges(scenes, words, dur, null, null, report);
+    expectTiles(ranges, dur);
+    expect(report.repaired).toHaveLength(1);
+    expect(report.unrepairable).toHaveLength(0);
+    for (const r of ranges) {
+      expect(r.endSec - r.startSec).toBeGreaterThan(2);
+      expect(r.endSec - r.startSec).toBeLessThan(5);
+    }
+  });
+
+  it("reports nothing on a clean transcript", () => {
+    const { scenes, words, dur } = steadyFilm(40);
+    const report = newAlignmentReport();
+    assignSceneRanges(scenes, words, dur, null, null, report);
+    expect(report.repaired).toHaveLength(0);
+    expect(report.unrepairable).toHaveLength(0);
   });
 });

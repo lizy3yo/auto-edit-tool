@@ -523,7 +523,9 @@ export default function LongformJobSlot({
           `Scene ${vars.sceneIndex} is already rendering — wait for it, then try again`
         );
       } else {
-        toast.success(`Scene ${vars.sceneIndex} is becoming b-roll — rendering...`);
+        toast.success(
+          `Scene ${vars.sceneIndex} is becoming b-roll — rendering...`
+        );
         setExpandedScene(cur => (cur === vars.sceneIndex ? null : cur));
       }
       if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
@@ -822,6 +824,18 @@ export default function LongformJobSlot({
       },
       onError: err => toast.error(err.message),
     });
+
+  const repairTimelineMutation = trpc.longformVideo.repairTimeline.useMutation({
+    onSuccess: () => {
+      toast.success(
+        "Repairing the timeline — only the affected scenes re-render."
+      );
+      // Fire-and-forget on the server: keep polling fast until a poll sees the job flip.
+      watchJob();
+      if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
+    },
+    onError: err => toast.error(err.message),
+  });
 
   const retrofitSplitsMutation =
     trpc.longformVideo.retrofitSplitScreens.useMutation({
@@ -1413,6 +1427,12 @@ export default function LongformJobSlot({
 
   const retryRunning = job?.status === "processing";
   const retryQueued = job?.retryQueued === true;
+  // Stretches the server's timeline audit flagged (see `pollJob.timelineIssues`).
+  const timelineIssues = job?.timelineIssues ?? [];
+  const clock = (sec: number) => {
+    const s = Math.max(0, Math.round(sec));
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  };
   // Offered DURING a pass too: the click parks behind the job lock and runs the moment the
   // pass releases it, so an operator who sees a scene fail at 151/282 no longer has to sit
   // and wait for the other 131 before asking for it back.
@@ -1957,6 +1977,51 @@ export default function LongformJobSlot({
                   </li>
                 ))}
               </ul>
+            )}
+
+            {/* A stretch of scenes whose narration slices don't fit their words — the transcript
+                had a hole when the film was voiced. Nothing else on the job can fix this:
+                every scene has a clip, so nothing reads as failed, and Regenerate re-renders
+                the same broken slice. Says so, and offers the one action that works. */}
+            {timelineIssues.length > 0 && (
+              <div className="space-y-2 rounded-md border border-warning/40 bg-warning/5 p-3">
+                <p className="text-xs font-medium">
+                  The timeline is broken at{" "}
+                  {timelineIssues
+                    .map(
+                      i =>
+                        `${i.fromIndex === i.toIndex ? `scene ${i.fromIndex}` : `scenes ${i.fromIndex}–${i.toIndex}`} (${clock(i.startSec)}–${clock(i.endSec)})`
+                    )
+                    .join(", ")}
+                  .
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Those scenes were given the wrong share of the narration, so
+                  the picture freezes or flashes past while the voice carries
+                  on. Regenerating them won&apos;t help — it renders the same
+                  wrong length. Repair re-times them from the same narration and
+                  re-renders only the scenes that change; everything that was
+                  already right is kept.
+                </p>
+                {job.errorMessage?.startsWith("Timeline repair:") && (
+                  <p className="text-xs text-destructive">
+                    {sanitizeError(job.errorMessage)}
+                  </p>
+                )}
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    if (jobId) repairTimelineMutation.mutate({ jobId });
+                  }}
+                  disabled={repairTimelineMutation.isPending}
+                >
+                  {repairTimelineMutation.isPending
+                    ? "Starting…"
+                    : "Repair timeline"}
+                </Button>
+              </div>
             )}
 
             {/* The film never got a voice. "Retry failed scenes" cannot help — it re-renders

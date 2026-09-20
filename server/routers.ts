@@ -1,4 +1,5 @@
 import { COOKIE_NAME } from "@shared/const";
+import { auditStoryboardTimeline } from "./alignmentHeal";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { getSessionCookieOptions } from "./_core/cookies";
@@ -96,6 +97,7 @@ import {
   unmergeScene,
   revertSceneTimingEdits as revertLongformSceneTiming,
   retryFailedScenes as retryLongformFailedScenes,
+  repairJobTimeline,
   isRetryQueued,
   sceneIsAssemblable,
   cancelLongformJob,
@@ -2078,6 +2080,15 @@ const longformVideoRouter = router({
         // True while a "retry failed scenes" click is parked behind the running pass, so the
         // button can read "queued" instead of looking like it did nothing.
         retryQueued: isRetryQueued(input.jobId),
+        // Stretches whose narration slices their words cannot explain (a transcript hole at
+        // voicing — job 94). Nothing else surfaces these: every scene has a clip and audio, so
+        // nothing reads as failed, and Regenerate re-renders the same broken slice. Drives the
+        // "Repair timeline" banner. Pure and cheap; empty while a pass is running, when the
+        // ranges are legitimately in flux.
+        timelineIssues:
+          job.status === "processing" || !Array.isArray(rawScenes)
+            ? []
+            : auditStoryboardTimeline(rawScenes),
         // The continuous master narration — the cut-room preview plays the exact slice under a
         // scene (seeking into this) so a moved cut previews with the right words, where the
         // per-scene `audioUrl` slice was cut at the ORIGINAL boundaries.
@@ -2996,6 +3007,46 @@ const longformVideoRouter = router({
         );
       });
       return { ok: true, queued, already: false };
+    }),
+
+  /**
+   * Re-time a voiced film whose scene ranges are wrong (see `repairJobTimeline`): re-transcribe
+   * the master, keep every scene that was already right, and re-render only the ones that moved.
+   * Fire-and-forget like the other render actions — progress arrives through `pollJob`.
+   */
+  repairTimeline: approvedProcedure
+    .input(z.object({ jobId: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      const job = await getLongformVideoJobById(input.jobId);
+      if (
+        !job ||
+        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
+      ) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
+      }
+      if (job.status === "processing") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "This job is still rendering — repair it once it settles",
+        });
+      }
+      const board = (job.storyboard as StoryboardScene[]) || [];
+      const issues = auditStoryboardTimeline(board);
+      if (issues.length === 0) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "This job's timeline looks healthy — nothing to repair",
+        });
+      }
+      repairJobTimeline(input.jobId).catch(async err => {
+        console.error(`[Longform ${input.jobId}] repairTimeline error:`, err);
+        // The repair throws BEFORE it writes anything, so the film is exactly as it was — say
+        // why on the row instead of leaving a click that appeared to do nothing.
+        await updateLongformVideoJob(input.jobId, {
+          errorMessage: `Timeline repair: ${err?.message ?? err}`,
+        }).catch(() => {});
+      });
+      return { ok: true, issues };
     }),
 
   /** Set/update the job's video title (merged into inputParams; names the download). */

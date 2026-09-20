@@ -32,7 +32,12 @@ export type SceneRange = { startSec: number; endSec: number };
  * but never beyond the neighbor words, so a genuinely separate word can't change scenes.
  * null = no word timings. */
 type Gap = readonly [number, number] | null;
-type BoundaryPlan = { boundaries: number[]; gaps: Gap[] };
+type BoundaryPlan = {
+  boundaries: number[];
+  gaps: Gap[];
+  /** Boundary indexes pinned by a CTA anchor — found verbatim, so never moved by a repair. */
+  pinned: number[];
+};
 
 /** Leading/trailing token counts used to fingerprint a CTA anchor phrase in the word stream. */
 const ANCHOR_HEAD_TOKENS = 7;
@@ -174,7 +179,9 @@ export function assignSceneRanges(
   words: WhisperWord[] | null,
   masterDurationSec: number,
   silences?: SilenceInterval[] | null,
-  shortSilences?: SilenceInterval[] | null
+  shortSilences?: SilenceInterval[] | null,
+  /** Filled with every stretch the plausibility gate re-split, and every one it could not. */
+  report?: AlignmentReport
 ): SceneRange[] {
   const n = scenes.length;
   if (n === 0) return [];
@@ -186,8 +193,36 @@ export function assignSceneRanges(
   const plan: BoundaryPlan =
     words && words.length > 0
       ? alignBoundaries(sceneTokens, words, dur, ctaAnchors(scenes))
-      : { boundaries: proportionalByTokens(sceneTokens, dur), gaps: [] };
+      : {
+          boundaries: proportionalByTokens(sceneTokens, dur),
+          gaps: [],
+          pinned: [],
+        };
   let boundaries = plan.boundaries;
+  // Word-aligned boundaries are only as good as the transcript, and a transcript can come back
+  // with a HOLE — minutes of speech with no words in it (production job 94: 9:23–14:37 of a
+  // 14:45 master). Every scene whose words sit in the hole collapses to zero width and the next
+  // scene that does match swallows the whole gap, while the global match ratio stays comfortably
+  // above `MIN_MATCH_RATIO`. Re-split any such stretch by word count BEFORE anything reads the
+  // durations: the merge passes fold "short" scenes together, and fed zeros they fold dozens.
+  if (words && words.length > 0) {
+    const fix = repairImplausibleRuns(
+      boundaries,
+      sceneTokens.map(t => t.length),
+      plan.pinned
+    );
+    boundaries = fix.boundaries;
+    for (const run of fix.repaired) {
+      // Walk indexes inside a repaired stretch are garbage — snap tolerance-only, as the
+      // anchor-spread path does.
+      for (let k = run.fromScene + 1; k <= run.toScene; k++)
+        plan.gaps[k] = null;
+    }
+    if (report) {
+      report.repaired.push(...fix.repaired);
+      report.unrepairable.push(...fix.unrepairable);
+    }
+  }
   // Snap each cut onto a real pause so it never lands inside a word — a physical guarantee that
   // also rescues the proportional (Whisper-less) path, whose boundaries ignore audio. On the
   // word-aligned path each snap is clamped to the boundary's snap window (`plan.gaps` — the
@@ -352,6 +387,7 @@ function alignBoundaries(
     return {
       boundaries: proportionalByTokens(sceneTokens, masterDurationSec),
       gaps: [],
+      pinned: [],
     };
   }
 
@@ -426,7 +462,179 @@ function alignBoundaries(
   for (let s = 1; s <= n; s++) {
     if (boundaries[s] < boundaries[s - 1]) boundaries[s] = boundaries[s - 1];
   }
-  return { boundaries, gaps };
+  return { boundaries, gaps, pinned: anchorIdxs };
+}
+
+/** A contiguous stretch of scenes (positions in the scene array, inclusive) and its audio span. */
+export type SceneRun = {
+  fromScene: number;
+  toScene: number;
+  startSec: number;
+  endSec: number;
+};
+
+/** What the plausibility gate did to one alignment — see `repairImplausibleRuns`. */
+export type AlignmentReport = {
+  repaired: SceneRun[];
+  unrepairable: SceneRun[];
+};
+
+export const newAlignmentReport = (): AlignmentReport => ({
+  repaired: [],
+  unrepairable: [],
+});
+
+/** A slice this many times longer than its words warrant (plus the slack) is not a slow read. */
+const IMPLAUSIBLE_LONG_RATIO = 3;
+/** Absolute slack on the long side — room for a scripted pause or a breath after a short line. */
+const IMPLAUSIBLE_LONG_SLACK_SEC = 3;
+/** A slice under this fraction of what its words need has lost them to a neighbour. */
+const IMPLAUSIBLE_SHORT_RATIO = 0.25;
+/** …but only when that costs real time: a two-word beat voiced fast is not a fault. */
+const IMPLAUSIBLE_SHORT_MIN_LOSS_SEC = 1;
+/** A stretch may be re-split by word count only when its audio fits its words this well. */
+const RUN_FIT_MIN = 0.6;
+const RUN_FIT_MAX = 1.6;
+/** How many neighbours a stretch may absorb looking for the audio its scenes lost. */
+const RUN_MAX_EXTEND = 6;
+/** Below this there is no meaningful "typical pace" to judge a scene against. */
+const PLAUSIBILITY_MIN_SCENES = 4;
+
+/**
+ * The film's own reading pace, seconds per token: the MEDIAN over scenes that have both words
+ * and time. Median, not mean — one scene holding five stray minutes drags the mean far enough
+ * that every HEALTHY scene reads as starved and the whole film becomes one "run". Zero-width
+ * scenes are left out for the mirror reason. 0 when nothing qualifies. Pure.
+ */
+function typicalSecPerToken(tokens: number[], durations: number[]): number {
+  const rates: number[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    if (tokens[i] >= 3 && durations[i] > 0.05)
+      rates.push(durations[i] / tokens[i]);
+  }
+  if (!rates.length) return 0;
+  rates.sort((a, b) => a - b);
+  return rates[Math.floor(rates.length / 2)];
+}
+
+/**
+ * Which scenes hold a slice their words cannot explain. The film's own typical pace is the
+ * yardstick (`typicalSecPerToken`), so this is voice- and speed-independent. `skip[i]` exempts a scene (an operator-set
+ * length is a decision, not a fault). Returns one flag per scene. Pure — unit-tested.
+ */
+export function implausibleScenes(
+  tokenCounts: number[],
+  durations: number[],
+  skip: boolean[] = []
+): boolean[] {
+  const n = tokenCounts.length;
+  const flags: boolean[] = new Array(n).fill(false);
+  if (n < PLAUSIBILITY_MIN_SCENES) return flags;
+  const tokens = tokenCounts.map(t => Math.max(1, t));
+  const secPerToken = typicalSecPerToken(tokens, durations);
+  if (secPerToken <= 0) return flags;
+  for (let i = 0; i < n; i++) {
+    if (skip[i]) continue;
+    const expected = tokens[i] * secPerToken;
+    const actual = Math.max(0, durations[i]);
+    const long =
+      actual > expected * IMPLAUSIBLE_LONG_RATIO + IMPLAUSIBLE_LONG_SLACK_SEC;
+    const short =
+      actual < expected * IMPLAUSIBLE_SHORT_RATIO &&
+      expected - actual > IMPLAUSIBLE_SHORT_MIN_LOSS_SEC;
+    flags[i] = long || short;
+  }
+  return flags;
+}
+
+/**
+ * Find every stretch of scenes whose slices their words cannot explain and re-split it by word
+ * count — the local version of the whole-film proportional fallback, applied only where the word
+ * alignment demonstrably failed, so the other 150 scenes keep their exact word-aligned cuts.
+ *
+ * A stretch is a run of consecutive flagged scenes, grown by up to `RUN_MAX_EXTEND` neighbours
+ * until its audio FITS its words (`RUN_FIT_MIN`–`RUN_FIT_MAX` of the film's pace): a collapsed
+ * scene's seconds went to a neighbour, and that neighbour is not always far enough out to be
+ * flagged itself. A stretch that never fits is NOT touched and is returned as `unrepairable` —
+ * five minutes of audio for ten words is a wrong master or a wrong script, and spreading ten
+ * words over it would hide that. Never crosses a `pinned` (CTA-anchored) boundary: those were
+ * found verbatim in the transcript. Returns new boundaries; the input is not mutated. Pure —
+ * unit-tested.
+ */
+export function repairImplausibleRuns(
+  boundaries: number[],
+  tokenCounts: number[],
+  pinned: number[] = []
+): { boundaries: number[]; repaired: SceneRun[]; unrepairable: SceneRun[] } {
+  const n = tokenCounts.length;
+  const out = boundaries.slice();
+  const repaired: SceneRun[] = [];
+  const unrepairable: SceneRun[] = [];
+  const durations = tokenCounts.map((_, i) => out[i + 1] - out[i]);
+  const flags = implausibleScenes(tokenCounts, durations);
+  if (!flags.some(Boolean)) return { boundaries: out, repaired, unrepairable };
+
+  const tokens = tokenCounts.map(t => Math.max(1, t));
+  const secPerToken = typicalSecPerToken(tokens, durations);
+  const isPinned = new Set(pinned);
+  const sumTokens = (a: number, b: number) => {
+    let t = 0;
+    for (let i = a; i <= b; i++) t += tokens[i];
+    return t;
+  };
+  const fit = (a: number, b: number) =>
+    (out[b + 1] - out[a]) / (sumTokens(a, b) * secPerToken);
+  const fits = (f: number) => f >= RUN_FIT_MIN && f <= RUN_FIT_MAX;
+
+  let i = 0;
+  while (i < n) {
+    if (!flags[i]) {
+      i++;
+      continue;
+    }
+    let a = i;
+    let b = i;
+    // A pinned boundary ends the run: the scene past it starts on words that were found.
+    while (b + 1 < n && flags[b + 1] && !isPinned.has(b + 1)) b++;
+    const flaggedEnd = b;
+    for (let step = 0; step < RUN_MAX_EXTEND && !fits(fit(a, b)); step++) {
+      const canLeft = a > 0 && !isPinned.has(a);
+      const canRight = b + 1 < n && !isPinned.has(b + 1);
+      if (!canLeft && !canRight) break;
+      // Too little audio → take the neighbour holding the most surplus; too much → the one
+      // holding the least. Either way the side that moves the fit furthest toward 1.
+      const ratio = (k: number) =>
+        (out[k + 1] - out[k]) / (tokens[k] * secPerToken);
+      const left = canLeft ? ratio(a - 1) : null;
+      const right = canRight ? ratio(b + 1) : null;
+      const starved = fit(a, b) < RUN_FIT_MIN;
+      const takeLeft =
+        right === null ||
+        (left !== null && (starved ? left > right : left < right));
+      if (takeLeft) a--;
+      else b++;
+    }
+    const run: SceneRun = {
+      fromScene: a,
+      toScene: b,
+      startSec: out[a],
+      endSec: out[b + 1],
+    };
+    if (fits(fit(a, b)) && b > a) {
+      const span = out[b + 1] - out[a];
+      const total = sumTokens(a, b);
+      let acc = 0;
+      for (let k = a; k < b; k++) {
+        acc += tokens[k];
+        out[k + 1] = out[a] + (span * acc) / total;
+      }
+      repaired.push(run);
+    } else {
+      unrepairable.push(run);
+    }
+    i = Math.max(flaggedEnd, b) + 1;
+  }
+  return { boundaries: out, repaired, unrepairable };
 }
 
 /** Split `[0, masterDurationSec]` by each scene's share of the total word (token) count. */

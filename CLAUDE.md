@@ -526,6 +526,36 @@ Express · tRPC · Drizzle · MySQL.
   this existed have no snapshot and the controls stay hidden. UI:
   `client/src/components/SceneTimingEditor.tsx`
 - `server/narrationAlignment.ts`, `server/_core/voiceTranscription.ts` — whisperx
+- `server/alignmentHeal.ts` + the PLAUSIBILITY GATE in `narrationAlignment.ts`
+  (`implausibleScenes` / `repairImplausibleRuns`) — every scene cut is recovered from whisperx
+  word timings, and whisperx can return a transcript with a HOLE in it. Production job 94 got no
+  words at all for 9:23–14:37 of a clean 14:45 master (the same audio transcribes perfectly on a
+  second try — intermittent, worker-side). Every scene whose words sat in the hole collapsed to
+  zero width, the next scene that matched swallowed 319 s under one still, and nothing noticed:
+  the only check was a GLOBAL match ratio (`MIN_MATCH_RATIO` 0.5), which a five-minute hole in a
+  fifteen-minute film passes at ~66%. The merge passes then ran on those zero-length scenes and
+  folded dozens together. The shipped film "freezes" at 9:20 while the narrator carries on, and
+  Regenerate cannot help — it re-renders the same broken slice. The gate judges each scene's
+  slice against its word count at the film's own MEDIAN pace (median, not mean: one scene holding
+  five stray minutes drags the mean until every healthy scene reads as starved) and re-splits a
+  bad stretch by word count — but only when the stretch's audio FITS its words (0.6–1.6×), never
+  across a CTA-pinned boundary, and it runs inside `assignSceneRanges`, i.e. BEFORE the merge
+  passes read a duration. Proportional cuts land a median ~2.6 s off the words, so they are the
+  last resort: the voicing stage first calls `healTranscriptHoles`, which re-transcribes JUST the
+  damaged stretch and splices the words in (`mergePatchedWords`), and only a stretch still
+  unheard keeps the word-count cuts, with a job warning naming the time range. A stretch that
+  does not fit at all (minutes of audio for a line of text) is `unrepairable` and FAILS THE JOB AT
+  VOICING with the range named — before a single clip is paid for. For films already rendered:
+  `auditStoryboardTimeline` runs on every poll (`pollJob.timelineIssues`; scenes whose length an
+  operator set are exempt) and drives a "Repair timeline" banner, and `repairJobTimeline` →
+  `planTimelineRepair` (pure, tested) re-transcribes the master, re-aligns the EXISTING scenes
+  (their text was never lost, only their timing), re-splits damaged scenes that come back over
+  the ceiling, and touches ONLY scenes whose range moved more than 0.25 s: their slice is re-cut
+  from the same master, their clip cleared, and the ordinary retry pass renders them. Every other
+  scene is returned as the original object — range, slice and paid-for clip byte-identical — and
+  the moved stretch's outer edges are clamped onto those stored neighbours so the film still
+  tiles to the millisecond and stays on the master-overlay path. Audited against 70 real jobs:
+  one flag, and it was a second genuine case (461 words in 1.4 s)
 - `server/ttsMinimax.ts` — the SECOND voice lane, and the third narration option beside the
   channel voice and a supplied file. Deliberately NOT an automatic failover: the vendor is an
   operator's choice made before anything is voiced and pinned to `inputParams.ttsVendor`, so a

@@ -199,10 +199,23 @@ import {
   sliceAudioSegmentsBestEffort,
   detectSilencesFromBuffer,
   HOST_INTRO_TRIM_SEC,
+  type SilenceInterval,
 } from "./videoAssembly";
 import { renderNameCardPng } from "./nameCard";
 import { assignHostPlateContexts, resolveHostPlate } from "./hostPlate";
-import { assignSceneRanges, numberWords } from "./narrationAlignment";
+import {
+  assignSceneRanges,
+  newAlignmentReport,
+  numberWords,
+  type SceneRun,
+} from "./narrationAlignment";
+import {
+  auditStoryboardTimeline,
+  type TimelineIssue,
+  describeIssue,
+  describeRuns,
+  healTranscriptHoles,
+} from "./alignmentHeal";
 import {
   transcribeWordsFromBuffer,
   type WhisperWord,
@@ -10877,7 +10890,38 @@ async function runUnifiedPipeline(
     );
   }
   // Give every scene its slice of the master (sets scene.audioDuration; split/merge passes read it).
-  assignSceneRanges(scenes, words, masterDurationSec);
+  // The report names any stretch the aligner's plausibility gate had to re-split by word count —
+  // the signature of a transcript that came back with a HOLE in it (job 94: no words for
+  // 9:23–14:37 of a clean master). Ask again for just those stretches before anything below reads
+  // the durations: the merge passes fold short scenes together, and the proportional cuts the
+  // gate leaves behind are a last resort, not the answer.
+  const firstAlign = newAlignmentReport();
+  assignSceneRanges(
+    scenes,
+    words,
+    masterDurationSec,
+    undefined,
+    undefined,
+    firstAlign
+  );
+  const damaged = [...firstAlign.repaired, ...firstAlign.unrepairable];
+  if (words && damaged.length > 0) {
+    console.warn(
+      `[Longform ${jobId}] word alignment is implausible over ${describeRuns(damaged)} ` +
+        `— re-transcribing just that narration`
+    );
+    const healed = await healTranscriptHoles({
+      monoAudio,
+      words,
+      runs: damaged,
+      masterDurationSec,
+      log: m => console.log(`[Longform ${jobId}] ${m}`),
+    });
+    if (healed.patched > 0) {
+      words = healed.words;
+      assignSceneRanges(scenes, words, masterDurationSec);
+    }
+  }
 
   // Every scene is now voiced AND measured, so the job's real speech pace is recognized
   // (median words/sec) — used for the post-TTS split below and cached so future jobs with
@@ -10945,13 +10989,36 @@ async function runUnifiedPipeline(
   // Final ranges after all reshaping has settled, then physically cut the master into per-scene
   // tracks and upload each (downstream stages consume scene.audioUrl exactly as before). Cuts are
   // snapped onto real pauses (never mid-word), so each slice is clean for lip-sync too.
+  const finalAlign = newAlignmentReport();
   const sceneRanges = assignSceneRanges(
     scenes,
     words,
     masterDurationSec,
     silences,
-    shortSilences
+    shortSilences,
+    finalAlign
   );
+  // The last gate before money is spent. A stretch the aligner could not make sense of even by
+  // word count means the narration and the script disagree there (minutes of audio for a line of
+  // text, or the reverse) — every clip rendered over it would be the wrong length. Job 94 shipped
+  // a 5-minute still this way and no amount of regenerating could fix it, because a regenerate
+  // re-renders the same broken slice. Stop here, where it costs nothing, and say where.
+  if (finalAlign.unrepairable.length > 0) {
+    throw new Error(
+      `The narration does not line up with the script at ${describeRuns(finalAlign.unrepairable)} ` +
+        `— the scenes there cannot be timed, so no clips were rendered. This is usually a ` +
+        `transcription fault: run the job again. If it repeats, the narration audio differs ` +
+        `from the script in that stretch.`
+    );
+  }
+  if (finalAlign.repaired.length > 0) {
+    appendJobWarning(
+      jobId,
+      `Word timings were missing for the narration at ${describeRuns(finalAlign.repaired)} even ` +
+        `after a second transcription — scene cuts there were placed by word count, so they may ` +
+        `sit a second or two off the words. Check that stretch in the live preview.`
+    );
+  }
   await assertNotCancelled(jobId);
   const sceneClips = await sliceAudioSegments(
     master.url,
@@ -14643,6 +14710,321 @@ const queuedRetries = new Set<number>();
 /** Is a retry waiting for the current pass to finish? Drives the client's button state. */
 export const isRetryQueued = (jobId: number): boolean =>
   queuedRetries.has(jobId);
+
+/** How far a scene's re-measured range may sit from its stored one and still count as untouched. */
+const TIMELINE_REPAIR_TOLERANCE_SEC = 0.25;
+
+/**
+ * The pure half of `repairJobTimeline`: given a stored storyboard, the stretches its audit
+ * flagged and a GOOD transcript, decide the repaired scene list and exactly which scenes moved.
+ *
+ * Works on copies — the aligner writes `audioDuration` onto every scene it is handed, and a
+ * healthy scene must come out exactly as it went in. Scenes inside a flagged stretch are re-split
+ * when they come back over the shot ceiling (the merge passes ran on zero-length scenes when the
+ * film was made, so one can carry several shots' worth of words); a healthy scene over the
+ * ceiling is left alone — it was accepted once already and re-cutting it would cost its clip.
+ *
+ * A scene that re-measures within `TIMELINE_REPAIR_TOLERANCE_SEC` of its stored range is
+ * returned as the ORIGINAL object (only renumbered). The moved stretch's outer edges are clamped
+ * onto those untouched neighbours' STORED edges, so the ranges tile to the millisecond — an
+ * overlap would drop the film off the master-overlay path. Moved scenes come back with their new
+ * range set and nothing else changed; the caller re-cuts their audio and clears their clips.
+ * `unrepairable` non-empty ⇒ nothing else in the result should be used. Pure — unit-tested.
+ */
+export function planTimelineRepair(opts: {
+  stored: StoryboardScene[];
+  issues: TimelineIssue[];
+  words: WhisperWord[];
+  masterDurationSec: number;
+  silences?: SilenceInterval[] | null;
+  shortSilences?: SilenceInterval[] | null;
+  wps?: number;
+  pacing?: LongformPacing;
+}): {
+  scenes: StoryboardScene[];
+  movedScenes: StoryboardScene[];
+  /** The moved scenes that did not exist before (children of a re-split scene). */
+  freshScenes: StoryboardScene[];
+  unrepairable: SceneRun[];
+} {
+  const { stored, issues, words, masterDurationSec } = opts;
+  const originalOf = new Map<StoryboardScene, StoryboardScene>();
+  let work = stored.map(s => {
+    const copy = { ...s };
+    originalOf.set(copy, s);
+    return copy;
+  });
+  const damaged = new Set<StoryboardScene>();
+  for (const issue of issues)
+    for (const w of work)
+      if (w.index >= issue.fromIndex && w.index <= issue.toIndex)
+        damaged.add(w);
+
+  assignSceneRanges(work, words, masterDurationSec);
+  for (let pass = 0; pass < 3; pass++) {
+    const out: StoryboardScene[] = [];
+    let grew = false;
+    for (const w of work) {
+      const parts = damaged.has(w)
+        ? splitOverlongScenes([w], opts.wps, opts.pacing)
+        : [w];
+      if (parts.length > 1) {
+        grew = true;
+        for (const p of parts) damaged.add(p);
+      }
+      out.push(...parts);
+    }
+    work = out;
+    work.forEach((s, i) => (s.index = i + 1));
+    if (!grew) break;
+    assignSceneRanges(work, words, masterDurationSec);
+  }
+  const report = newAlignmentReport();
+  const ranges = assignSceneRanges(
+    work,
+    words,
+    masterDurationSec,
+    opts.silences,
+    opts.shortSilences,
+    report
+  );
+  if (report.unrepairable.length > 0)
+    return {
+      scenes: stored,
+      movedScenes: [],
+      freshScenes: [],
+      unrepairable: report.unrepairable,
+    };
+
+  const moved: boolean[] = work.map((w, i) => {
+    const o = originalOf.get(w);
+    if (!o || !hasMasterRange(o)) return true;
+    return (
+      Math.abs((o.narrationStartSec as number) - ranges[i].startSec) >
+        TIMELINE_REPAIR_TOLERANCE_SEC ||
+      Math.abs((o.narrationEndSec as number) - ranges[i].endSec) >
+        TIMELINE_REPAIR_TOLERANCE_SEC
+    );
+  });
+  const movedScenes: StoryboardScene[] = [];
+  const scenes: StoryboardScene[] = work.map((w, i) => {
+    if (!moved[i]) {
+      const o = originalOf.get(w) as StoryboardScene;
+      o.index = i + 1;
+      return o;
+    }
+    const prev = i > 0 && !moved[i - 1] ? originalOf.get(work[i - 1]) : null;
+    const next =
+      i + 1 < work.length && !moved[i + 1] ? originalOf.get(work[i + 1]) : null;
+    w.narrationStartSec = prev
+      ? (prev.narrationEndSec as number)
+      : ranges[i].startSec;
+    w.narrationEndSec = next
+      ? (next.narrationStartSec as number)
+      : ranges[i].endSec;
+    movedScenes.push(w);
+    return w;
+  });
+  return {
+    scenes,
+    movedScenes,
+    freshScenes: movedScenes.filter(s => !originalOf.has(s)),
+    unrepairable: [],
+  };
+}
+
+/**
+ * REPAIR TIMELINE — fix a voiced film whose scene ranges are wrong, without paying for the film
+ * again.
+ *
+ * The case it exists for (production job 94): the transcript the scenes were cut from had a
+ * five-minute hole, so seven scenes collapsed to a fraction of a second and the next one took
+ * 319 s under a single still. Everything about that film is otherwise fine — the narration is
+ * clean, and the first nine minutes are correctly timed and already rendered — but nothing on
+ * the job could repair it: Regenerate re-renders the SAME broken slice, and "Retry failed
+ * scenes" sees no failure, because every scene has a clip and audio.
+ *
+ * So: transcribe the master again, re-run the aligner (with the plausibility gate it has now)
+ * over the EXISTING scenes — their text is intact; only their timing was lost — and re-split
+ * anything inside the damaged stretch that comes back over the shot ceiling. Then touch ONLY the
+ * scenes whose range actually moved: re-cut their narration slice from the same master, clear
+ * their clip, and hand them to the ordinary retry pass to render. A scene that re-measures
+ * within `TIMELINE_REPAIR_TOLERANCE_SEC` of where it already was keeps its stored range, its
+ * slice and its paid-for clip BYTE-IDENTICAL — the moved stretch's outer edges are clamped onto
+ * those stored neighbours, so the ranges still tile and the film stays on the master-overlay path.
+ *
+ * Operator timing edits inside the moved stretch are dropped (they addressed footage that no
+ * longer exists); everything outside it, edits included, is untouched. Throws — changing nothing
+ * — when there is nothing to repair, when transcription is unavailable, or when the narration
+ * genuinely does not match the script there.
+ */
+export async function repairJobTimeline(
+  jobId: number
+): Promise<{ moved: number }> {
+  return withJobLock(jobId, async () => {
+    const job = await getLongformVideoJobById(jobId);
+    if (!job) throw new Error("Job not found");
+    const params = job.inputParams as LongformInputParams;
+    const pacing = pacingFor(params);
+    const stored = (job.storyboard as StoryboardScene[]) || [];
+    const masterAudioUrl = job.masterAudioUrl;
+    if (!masterAudioUrl)
+      throw new Error("This job has no master narration to re-time from");
+    const issues = auditStoryboardTimeline(stored);
+    if (issues.length === 0)
+      throw new Error("This job's timeline looks healthy — nothing to repair");
+    console.log(
+      `[Longform ${jobId}] timeline repair: ${issues.map(describeIssue).join("; ")}`
+    );
+
+    const monoAudio = await extractMonoAudio(masterAudioUrl);
+    let [transcript, silences, shortSilences] = await Promise.all([
+      transcribeWordsFromBuffer(monoAudio),
+      detectSilencesFromBuffer(monoAudio),
+      detectSilencesFromBuffer(monoAudio, 0.04),
+    ]);
+    if ("error" in transcript)
+      transcript = await transcribeWordsFromBuffer(monoAudio);
+    if ("error" in transcript)
+      throw new Error(
+        `Could not transcribe the narration (${transcript.error}) — nothing was changed, try again`
+      );
+    let words = transcript.words;
+    const masterDurationSec = transcript.duration;
+
+    // A throwaway alignment first, only for its report: if THIS transcript has a hole too, ask
+    // again for just that stretch before planning anything on it.
+    const probe = newAlignmentReport();
+    assignSceneRanges(
+      stored.map(s => ({ ...s })),
+      words,
+      masterDurationSec,
+      undefined,
+      undefined,
+      probe
+    );
+    const holes = [...probe.repaired, ...probe.unrepairable];
+    if (holes.length > 0) {
+      const healed = await healTranscriptHoles({
+        monoAudio,
+        words,
+        runs: holes,
+        masterDurationSec,
+        log: m => console.log(`[Longform ${jobId}] ${m}`),
+      });
+      words = healed.words;
+    }
+    const plan = planTimelineRepair({
+      stored,
+      issues,
+      words,
+      masterDurationSec,
+      silences,
+      shortSilences,
+      wps: wpsForVoice(params.voiceId),
+      pacing,
+    });
+    if (plan.unrepairable.length > 0)
+      throw new Error(
+        `The narration does not match the script at ${describeRuns(plan.unrepairable)} — ` +
+          `this film cannot be re-timed there. Nothing was changed.`
+      );
+    const { scenes, movedScenes, freshScenes } = plan;
+    if (movedScenes.length === 0)
+      throw new Error(
+        "Re-timing found every scene already where it should be — nothing was changed"
+      );
+
+    const cuts = await sliceAudioSegments(
+      masterAudioUrl,
+      movedScenes.map(s => ({
+        startSec: s.narrationStartSec as number,
+        lenSec: Math.max(
+          0.1,
+          (s.narrationEndSec as number) - (s.narrationStartSec as number)
+        ),
+      }))
+    );
+    await Promise.all(
+      movedScenes.map(async (s, i) => {
+        const key = `longform/${jobId}/scene-${s.index}-vo-${nanoid(6)}.mp3`;
+        const { url } = await storagePut(key, cuts[i], "audio/mpeg");
+        s.audioUrl = url;
+        s.audioDuration = roundMs(
+          (s.narrationEndSec as number) - (s.narrationStartSec as number)
+        );
+        // The old clip was rendered for the old slice; every field derived from it goes too.
+        s.clipUrls = undefined;
+        s.clipUrl = undefined;
+        s.renderTaskIds = undefined;
+        s.renderProvider = undefined;
+        s.renderModelIndex = undefined;
+        s.renderAttempts = undefined;
+        s.infraRetries = undefined;
+        s.ttsTaskIds = undefined;
+        s.lipsyncGroup = undefined;
+        s.lipsyncLeadSec = undefined;
+        s.lipsyncNarrationUrl = undefined;
+        s.lipsyncImageUrl = undefined;
+        s.splitAutoFocusX = undefined;
+        s.splitFocusSource = undefined;
+        s.clipInSec = undefined;
+        s.cutPoints = undefined;
+        s.pieceClipIns = undefined;
+        s.minHoldSec = undefined;
+        forgetTimingSnapshot(s);
+        s.sceneStatus = "failed";
+        s.error = "Timeline repaired — waiting to re-render at its real length";
+        applySceneHoldFloor(s, pacing);
+      })
+    );
+    extendQrHeroWindow(scenes);
+
+    // Children of one split scene share their parent's prompt; rewrite each against its own
+    // words so a re-split stretch is not the same picture five times. Best-effort.
+    const fresh = freshScenes;
+    if (fresh.length > 0) {
+      try {
+        const enhance = await enhanceBrollPrompts(
+          scenes,
+          params,
+          fresh.map(s => s.index)
+        );
+        if (enhance.failedScenes.length)
+          appendJobWarning(jobId, enhanceWarningFor(enhance));
+        const aliases = await hostNameAliases(params.channelKey);
+        for (const s of fresh) {
+          s.visualPrompt = stripHostNames(s.visualPrompt, aliases);
+          if (s.splitVisual)
+            s.splitVisual = stripHostNames(s.splitVisual, aliases);
+        }
+      } catch (e: any) {
+        console.warn(
+          `[Longform ${jobId}] timeline repair: prompt rewrite failed (${e?.message}) — ` +
+            `rendering from the inherited prompts`
+        );
+      }
+    }
+
+    appendJobWarning(
+      jobId,
+      `Timeline repaired: ${issues.map(describeIssue).join("; ")} had narration slices that ` +
+        `did not match their words. ${movedScenes.length} scene(s) were re-timed from the same ` +
+        `narration and are re-rendering; the other ${scenes.length - movedScenes.length} were ` +
+        `not touched. Reassemble when they finish.`
+    );
+    await updateLongformVideoJob(jobId, {
+      storyboard: scenes,
+      masterSilences: silences,
+    });
+    console.log(
+      `[Longform ${jobId}] timeline repair: ${stored.length} → ${scenes.length} scenes, ` +
+        `${movedScenes.length} re-timed (${movedScenes[0].index}–${movedScenes[movedScenes.length - 1].index})`
+    );
+    await retryFailedScenesLocked(jobId);
+    return { moved: movedScenes.length };
+  });
+}
 
 export async function retryFailedScenes(jobId: number): Promise<void> {
   // A running pass no longer DROPS the click. `withJobLock` queues rather than rejects, so a

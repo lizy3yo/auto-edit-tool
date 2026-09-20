@@ -401,6 +401,8 @@ export function LongformCutPreview({
   beatIdxRef.current = beatIdx;
   const slotRef = useRef<0 | 1>(0);
   slotRef.current = slot;
+  /** True while a cut is waiting for the incoming player to have a frame — see the tick. */
+  const pendingFlip = useRef(false);
   /** The transport's position in FILM time — the clock everything else is slaved to. */
   const filmT = useRef(0);
   /** Last `t` pushed to state — the slider needs ~10Hz, not one render per frame. */
@@ -511,6 +513,7 @@ export function LongformCutPreview({
       const i = Math.max(0, beatAt(bs, clamped));
       // Stages the narration too, including its seek — a jump to a beat on another track needs
       // the src swapped, not just the playhead moved.
+      pendingFlip.current = false;
       stagePair(i, clamped);
       setBeatIdx(i);
       beatIdxRef.current = i;
@@ -565,6 +568,19 @@ export function LongformCutPreview({
   const setHoldingState = (v: boolean) => {
     holdingRef.current = v;
     setHolding(v);
+  };
+
+  /** HAVE_CURRENT_DATA: the element can paint the frame at its playhead. */
+  const hasFrame = (el: HTMLVideoElement | null) => !!el && el.readyState >= 2;
+  /** Reveal the standby player (already holding beat `i`) and pre-roll beat `i + 1` onto the
+   *  one it replaces. Reads everything through refs, so it is safe inside the rAF loop. */
+  const flipTo = (i: number) => {
+    const bs = beatsRef.current;
+    const next: 0 | 1 = slotRef.current === 0 ? 1 : 0;
+    slotRef.current = next;
+    setSlot(next);
+    const nowStandby = next === 0 ? vidB.current : vidA.current;
+    if (bs[i + 1]) stage(nowStandby, i + 1, bs[i + 1].startSec);
   };
 
   /**
@@ -655,12 +671,20 @@ export function LongformCutPreview({
         const cur = beatIdxRef.current;
         if (want === cur + 1) {
           // The expected cut: the standby player is already holding this beat — flip to it and
-          // start pre-rolling the one after.
-          const next: 0 | 1 = slotRef.current === 0 ? 1 : 0;
-          slotRef.current = next;
-          setSlot(next);
-          const nowStandby = next === 0 ? vidB.current : vidA.current;
-          if (bs[want + 1]) stage(nowStandby, want + 1, bs[want + 1].startSec);
+          // start pre-rolling the one after. UNLESS it has no decoded frame yet: a player with
+          // nothing to show is a black rectangle, and a run of one-second beats gives the
+          // standby under a second to load each clip. Then the cut is DEFERRED — the outgoing
+          // picture stays up, frozen, and `settlePendingFlip` below reveals the new one the
+          // frame it can be shown. A second cut arriving while still waiting re-aims the hidden
+          // player at the beat that is now current.
+          const standbyEl = slotRef.current === 0 ? vidB.current : vidA.current;
+          if (pendingFlip.current) {
+            stage(standbyEl, want, now);
+          } else if (hasFrame(standbyEl)) {
+            flipTo(want);
+          } else {
+            pendingFlip.current = true;
+          }
           // The narration only changes hands when the track does — on a master-overlay film it
           // never does, and the one element plays straight through the cut. When it does, the
           // incoming file is already loaded and parked on the standby, so this is a handover
@@ -683,6 +707,7 @@ export function LongformCutPreview({
           }
         } else {
           // A jump (the viewer scrubbed): restage rather than trust the pre-roll.
+          pendingFlip.current = false;
           stagePair(want, now);
           a = liveAudio();
         }
@@ -690,6 +715,20 @@ export function LongformCutPreview({
         setBeatIdx(want);
         idx = want;
         beat = bs[want];
+      }
+
+      // A cut deferred above: reveal the incoming player the moment it can show a frame; until
+      // then hold the outgoing picture still rather than driving it with the new beat's clock.
+      if (pendingFlip.current) {
+        const standbyEl = slotRef.current === 0 ? vidB.current : vidA.current;
+        if (hasFrame(standbyEl)) {
+          pendingFlip.current = false;
+          flipTo(idx);
+        } else {
+          const showing = slotRef.current === 0 ? vidA.current : vidB.current;
+          if (showing && !showing.paused) showing.pause();
+          return;
+        }
       }
 
       const el = slotRef.current === 0 ? vidA.current : vidB.current;

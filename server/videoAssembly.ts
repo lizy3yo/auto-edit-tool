@@ -2509,6 +2509,35 @@ export async function extractMonoAudio(audioUrl: string): Promise<Buffer> {
 }
 
 /**
+ * Cut `[startSec, startSec+lenSec)` out of an audio BUFFER as mono 16 kHz MP3 — the shape
+ * whisperx is fed. For re-transcribing one stretch of a master already in memory
+ * (`server/alignmentHeal.ts`) without downloading it again. Cleans up its temp dir.
+ */
+export async function sliceMonoAudioBuffer(
+  audio: Buffer,
+  startSec: number,
+  lenSec: number
+): Promise<Buffer> {
+  return withTempDir("monoslice", async workDir => {
+    const inPath = path.join(workDir, "in.mp3");
+    const outPath = path.join(workDir, "slice.mp3");
+    writeFileSync(inPath, audio);
+    await runFfmpeg([
+      "-y",
+      "-ss",
+      Math.max(0, startSec).toFixed(3),
+      "-t",
+      Math.max(0.1, lenSec).toFixed(3),
+      ...buildMonoDownsampleArgs({
+        inputPath: inPath,
+        outputPath: outPath,
+      }).slice(1),
+    ]);
+    return readFileSync(outPath);
+  });
+}
+
+/**
  * Cut one audio URL into segments `[startSec, startSec+lenSec)`, in order, returning the MP3
  * bytes for each. Downloads the source ONCE, then re-encodes each segment (`buildAudioSegmentArgs`).
  * Used to slice the single master narration back into per-scene tracks. Cleans up its temp dir.
