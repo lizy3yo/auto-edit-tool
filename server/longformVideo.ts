@@ -105,6 +105,7 @@ import {
   applyDeliveryToScenes,
   deliverySpeedFor,
   deliveryRuns,
+  paragraphRuns,
   planChangesTheRead,
   concatWithPauses,
 } from "./delivery";
@@ -9748,8 +9749,12 @@ export async function buildSceneNarration(
     (scene.scriptText ?? scene.narration ?? "").trim()
   );
   const segments = splitScriptForNarration(text);
-  // The scene's own pace from the delivery plan, so a regenerated scene matches the master.
-  const speed = deliverySpeedFor(params.ttsSpeed, scene.deliveryPace);
+  // The scene's own pace from the delivery plan, so a regenerated scene matches the master —
+  // except on a one-take film, whose master was voiced at the channel's one speed throughout.
+  const speed = deliverySpeedFor(
+    params.ttsSpeed,
+    params.ttsReadMode === "oneTake" ? undefined : scene.deliveryPace
+  );
   const audioUrls: string[] = [];
   const noteIds = persist ?? (() => {});
   for (let i = 0; i < segments.length; i++) {
@@ -9794,8 +9799,13 @@ export async function buildSceneNarration(
  * request each, at that pace's speed, with a beat of room tone spliced between runs where the
  * plan asks (`concatWithPauses`). Far fewer breaks than per-scene voicing, and each break is
  * where the delivery actually changes. Any failure on that path falls through to the one-shot.
+ *
+ * All of the above is `params.ttsReadMode` "auto". The operator can also pin "oneTake" (always
+ * the single request — the plan's paces and pauses then shape only the host's cues, not the
+ * voice) or "paragraphs" (one request per paragraph at its own pace, `paragraphRuns`); see
+ * `shared/voiceRead.ts`.
  */
-async function voiceMasterNarration(
+export async function voiceMasterNarration(
   jobId: number,
   providerType: string,
   apiKey: string,
@@ -9815,8 +9825,60 @@ async function voiceMasterNarration(
     return { url: params.manualNarrationUrl };
   }
   const speed = params.ttsSpeed;
+  // The operator's "Voice read" pick (`shared/voiceRead.ts`). Unset ⇒ auto, the old behaviour.
+  const readMode = params.ttsReadMode ?? "auto";
   let providerUrl: string;
-  if (planChangesTheRead(params.deliveryPlan)) {
+  if (readMode === "paragraphs") {
+    try {
+      const runs = paragraphRuns(spokenScript, params.deliveryPlan);
+      const urls: string[] = [];
+      const pauses: number[] = [];
+      for (const run of runs) {
+        // A paragraph over one request's size is sub-split on sentences; its beat goes after
+        // the LAST piece only.
+        const pieces = splitScriptForNarration(run.text);
+        for (let i = 0; i < pieces.length; i++) {
+          urls.push(
+            await generateSceneVoiceover(
+              providerType,
+              apiKey,
+              pieces[i],
+              voiceIdForVendor(params),
+              params.ttsModel,
+              deliverySpeedFor(speed, run.pace),
+              params.ttsVolume,
+              TTS_STABILITY,
+              TTS_STYLE,
+              TTS_SIMILARITY
+            )
+          );
+          pauses.push(i === pieces.length - 1 ? run.pauseAfterMs : 0);
+        }
+      }
+      // Capped, unlike the delivery runs: hundreds of requests each bake their own edge
+      // silence in, and it adds up. The room-tone beats sit above the cap's floor and survive.
+      const buffer = await capMasterPauses(
+        jobId,
+        await concatWithPauses(urls, pauses)
+      );
+      const key = `longform/${jobId}/master-vo-${nanoid(6)}.mp3`;
+      const { url } = await storagePut(key, buffer, "audio/mpeg");
+      console.log(
+        `[Longform ${jobId}] master narration voiced BY PARAGRAPH (operator's pick): ` +
+          `${runs.length} paragraph(s), ${urls.length} request(s)`
+      );
+      return { url };
+    } catch (e: any) {
+      if (e instanceof CensoredTTSError) throw e;
+      if (e instanceof VoiceNotFoundError) throw e;
+      console.warn(
+        `[Longform ${jobId}] by-paragraph master TTS failed (${e?.message}); ` +
+          `falling back to the one-shot read`
+      );
+    }
+  }
+  // "oneTake" skips the runs on purpose: one request has one speed, which is the point of it.
+  if (readMode === "auto" && planChangesTheRead(params.deliveryPlan)) {
     try {
       const runs = deliveryRuns(spokenScript, params.deliveryPlan!);
       const runUrls: string[] = [];
@@ -9826,7 +9888,9 @@ async function voiceMasterNarration(
             providerType,
             apiKey,
             run.text,
-            params.voiceId,
+            // The vendor's own voice space, like the other two paths — `params.voiceId` here
+            // sent a 69Labs id to MiniMax on any MiniMax film whose plan changed the read.
+            voiceIdForVendor(params),
             params.ttsModel,
             deliverySpeedFor(speed, run.pace),
             params.ttsVolume,

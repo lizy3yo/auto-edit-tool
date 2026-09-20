@@ -167,6 +167,7 @@ import {
   resolveLongformPacing,
 } from "../shared/pacing";
 import { HOST_MINUTES_OPTIONS } from "../shared/hostMinutes";
+import { VOICE_READ_MODES } from "../shared/voiceRead";
 import { RATES } from "./pricing";
 import { getChannelLayer } from "./composer";
 import { isMockMode, setMockMode } from "./mockMode";
@@ -1621,6 +1622,11 @@ const longformVideoRouter = router({
          */
         ttsVendor: z.enum(["sixtynine_labs", "minimax"]).optional(),
         /**
+         * How the master narration is cut up before it is sent to the vendor — the form's
+         * "Voice read" pick (`shared/voiceRead.ts`). Absent ⇒ auto, the pre-feature behaviour.
+         */
+        ttsReadMode: z.enum(VOICE_READ_MODES).optional(),
+        /**
          * Delivery direction the operator was shown BEFORE recording (`planDelivery`), pinned so
          * the render reuses it instead of making its own. Only meaningful alongside
          * `manualNarrationUrl`: it is what makes the host's body cues agree with a read that
@@ -1939,6 +1945,12 @@ const longformVideoRouter = router({
         // retry and a per-scene re-voice all use the one that voiced the rest of it.
         ttsVendor: input.ttsVendor,
         minimaxVoiceId: channelConfig.minimaxVoiceId ?? undefined,
+        // Dropped with a supplied narration (nothing is voiced), and "auto" is stored as unset
+        // so an untouched picker leaves the row exactly as it was before the picker existed.
+        ttsReadMode:
+          input.manualNarrationUrl || input.ttsReadMode === "auto"
+            ? undefined
+            : input.ttsReadMode,
         // Only honoured alongside a supplied narration: pinning a plan the operator never saw
         // would just freeze one non-deterministic draw for no benefit, and skip the call the
         // pipeline makes with the same inputs anyway.

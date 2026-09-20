@@ -6,6 +6,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
 import { extractSpokenScript, stripCtaMarkerLines } from "@shared/ctaMarkers";
 import type { LongformInputParams } from "@shared/types";
+import type { VoiceReadMode } from "@shared/voiceRead";
+import { LongformVoiceRead } from "@/components/LongformVoiceRead";
 import {
   Check,
   ChevronDown,
@@ -54,6 +56,8 @@ export function LongformNarrationUpload({
   voice,
   vendor,
   onVendorChange,
+  readMode,
+  onReadModeChange,
   disabled,
   /** Rescue mode (a failed job): the caller owns the "start it" action, so no runbook step 5. */
   compact,
@@ -75,6 +79,9 @@ export function LongformNarrationUpload({
   /** Which vendor voices this film. Undefined ⇒ the channel's default (69Labs). */
   vendor?: "sixtynine_labs" | "minimax";
   onVendorChange?: (v: "sixtynine_labs" | "minimax" | undefined) => void;
+  /** How the script is sent to the vendor. Both absent ⇒ no picker (rescue mode). */
+  readMode?: VoiceReadMode;
+  onReadModeChange?: (mode: VoiceReadMode) => void;
   disabled?: boolean;
   compact?: boolean;
 }) {
@@ -550,6 +557,14 @@ export function LongformNarrationUpload({
           }}
         />
       </div>
+      {/* Only where the tool does the voicing — a supplied master is not voiced at all. */}
+      {!on && readMode && onReadModeChange && (
+        <LongformVoiceRead
+          value={readMode}
+          onChange={onReadModeChange}
+          disabled={disabled}
+        />
+      )}
       {on && panel}
     </div>
   );

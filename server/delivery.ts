@@ -283,6 +283,30 @@ export function deliveryRuns(
 }
 
 /**
+ * `deliveryRuns` without the merging: EVERY paragraph is its own run, at its own pace. This is
+ * the operator's "By paragraph" voice read (`shared/voiceRead.ts`) — asked for by name, since it
+ * trades the continuous read `deliveryRuns` protects for a restart at every paragraph. No plan
+ * (mock mode, a failed call) ⇒ every paragraph at the channel's one speed with no beats.
+ */
+export function paragraphRuns(
+  script: string,
+  plan: DeliveryPlan | null | undefined
+): DeliveryRun[] {
+  const runs = scriptParagraphs(script).map((text, i): DeliveryRun => {
+    const p = plan?.paragraphs[i];
+    return {
+      text,
+      pace: p?.pace ?? "natural",
+      pauseAfterMs: p?.pauseAfterMs ?? 0,
+      paragraphIndices: [i + 1],
+    };
+  });
+  // No beat after the last run: the film ends where the narration does.
+  if (runs.length) runs[runs.length - 1].pauseAfterMs = 0;
+  return runs;
+}
+
+/**
  * Join voiced runs with a beat of ROOM TONE (not digital silence) after each one where asked.
  * Digital silence is what the pause cap (`capDeadAirPauses`, -60 dB) strips and what a
  * listener hears as the audio dropping out; a -56 dBFS noise floor is a breath. The runs'

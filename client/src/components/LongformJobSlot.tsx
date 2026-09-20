@@ -50,6 +50,10 @@ import {
   hostGuideFraction,
   resolveHostBudget,
 } from "@shared/hostMinutes";
+import {
+  DEFAULT_VOICE_READ_MODE,
+  type VoiceReadMode,
+} from "@shared/voiceRead";
 import { LEGACY_PACING } from "@shared/pacing";
 import { LongformScenePreview } from "@/components/LongformScenePreview";
 import { SceneStripThumb } from "@/components/SceneStripThumb";
@@ -351,6 +355,10 @@ export default function LongformJobSlot({
   const [ttsVendor, setTtsVendor] = useState<
     "sixtynine_labs" | "minimax" | undefined
   >(undefined);
+  // How the script is sent to the TTS vendor — auto is the pre-feature behaviour.
+  const [ttsReadMode, setTtsReadMode] = useState<VoiceReadMode>(
+    DEFAULT_VOICE_READ_MODE
+  );
   // Minutes of talking head — the host budget, and with it the video's biggest cost.
   const [hostMinutes, setHostMinutes] = useState<number>(DEFAULT_HOST_MINUTES);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -1615,6 +1623,7 @@ export default function LongformJobSlot({
       // pinning a plan the operator never saw would just freeze one arbitrary draw.
       deliveryPlan: manualNarrationUrl ? manualDeliveryPlan : undefined,
       ttsVendor,
+      ttsReadMode,
       hostMinutes,
       hostMinutesOverride: askHostOverride ? hostOverride : undefined,
     });
@@ -1730,6 +1739,8 @@ export default function LongformJobSlot({
                 onDeliveryPlanChange={setManualDeliveryPlan}
                 vendor={ttsVendor}
                 onVendorChange={setTtsVendor}
+                readMode={ttsReadMode}
+                onReadModeChange={setTtsReadMode}
                 voice={channelDefaults}
                 disabled={generateMutation.isPending || isProcessing}
               />

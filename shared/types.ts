@@ -933,6 +933,13 @@ export interface LongformInputParams {
    * resolves against neither MiniMax nor the other. Only read when `ttsVendor` is "minimax".
    */
   minimaxVoiceId?: string;
+  /**
+   * How the master narration is cut up before it is sent to the TTS vendor — the form's "Voice
+   * read" pick (`shared/voiceRead.ts`). Pinned like `ttsVendor` so a resume voices the film the
+   * way it was asked for. Unset ⇒ "auto", i.e. exactly the pre-feature behaviour. Ignored with a
+   * `manualNarrationUrl`: a supplied master is not voiced at all.
+   */
+  ttsReadMode?: import("./voiceRead").VoiceReadMode;
   /** User-supplied video title (optional). Names the downloaded MP4; persisted so it survives refresh/cross-device. */
   title?: string;
   /**

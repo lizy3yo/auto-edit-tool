@@ -23,6 +23,7 @@ import {
   planDelivery,
   deliverySpeedFor,
   deliveryRuns,
+  paragraphRuns,
   planChangesTheRead,
   applyDeliveryToScenes,
   concatWithPauses,
@@ -156,6 +157,30 @@ describe("deliveryRuns", () => {
     expect(planChangesTheRead(plan(["natural", "slow"]))).toBe(true);
     expect(planChangesTheRead(plan(["natural"], [300]))).toBe(true);
     expect(planChangesTheRead(null)).toBe(false);
+  });
+});
+
+describe("paragraphRuns", () => {
+  it("keeps every paragraph its own run even where the pace repeats", () => {
+    const runs = paragraphRuns(
+      SCRIPT,
+      plan(["natural", "natural", "slow"], [0, 300, 600])
+    );
+    expect(runs.map(r => r.paragraphIndices)).toEqual([[1], [2], [3]]);
+    expect(runs.map(r => r.pace)).toEqual(["natural", "natural", "slow"]);
+    // Each beat stays with its own paragraph; the last run never carries one.
+    expect(runs.map(r => r.pauseAfterMs)).toEqual([0, 300, 0]);
+    expect(runs[1].text).toBe(
+      "They come from four small habits nobody bothers to teach you, and we're building all four today."
+    );
+  });
+
+  it("no plan ⇒ every paragraph at the channel's one speed, no beats", () => {
+    const runs = paragraphRuns(SCRIPT, null);
+    expect(runs).toHaveLength(3);
+    expect(runs.every(r => r.pace === "natural" && r.pauseAfterMs === 0)).toBe(
+      true
+    );
   });
 });
 

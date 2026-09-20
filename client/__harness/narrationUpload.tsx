@@ -9,6 +9,10 @@ import {
   LongformNarrationUpload,
   type DeliveryPlan,
 } from "@/components/LongformNarrationUpload";
+import {
+  DEFAULT_VOICE_READ_MODE,
+  type VoiceReadMode,
+} from "@shared/voiceRead";
 
 /**
  * Harness for "I'll supply the narration" (the manual-VO hatch on the generate form).
@@ -180,6 +184,9 @@ function Harness() {
   const [vendor, setVendor] = useState<
     "sixtynine_labs" | "minimax" | undefined
   >(undefined);
+  const [readMode, setReadMode] = useState<VoiceReadMode>(
+    DEFAULT_VOICE_READ_MODE
+  );
   const [mm, setMm] = useState<"both" | "noKey" | "noVoice">("both");
   state.mmStatus = {
     keySet: mm !== "noKey",
@@ -219,7 +226,8 @@ function Harness() {
             </div>
             <p className="text-muted-foreground">
               Accepted URL: <code>{value ?? "(none)"}</code> · vendor:{" "}
-              <code>{vendor ?? "(default)"}</code>
+              <code>{vendor ?? "(default)"}</code> · read:{" "}
+              <code>{readMode}</code>
             </p>
             <div className="flex flex-wrap gap-3">
               {(["both", "noKey", "noVoice"] as const).map(m => (
@@ -264,6 +272,8 @@ function Harness() {
             onDeliveryPlanChange={setPlan}
             vendor={vendor}
             onVendorChange={setVendor}
+            readMode={readMode}
+            onReadModeChange={setReadMode}
             voice={{
               voiceName: "Roger (clone)",
               voiceId: "abc123",
