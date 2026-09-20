@@ -122,7 +122,7 @@ describe("durability", () => {
 });
 
 describe("coverage guard", () => {
-  // AIReiter shipped as a drop-in replacement for the metered APIMART lane and went
+  // AIReiter (a since-removed gateway) shipped as a drop-in replacement for the metered APIMART lane and went
   // unmetered for a release: b-roll and stills on that lane reported as free. Nothing in
   // the type system catches that, so this does. It is a lint, deliberately: if a provider
   // adapter submits a generation request, it must record the spend.

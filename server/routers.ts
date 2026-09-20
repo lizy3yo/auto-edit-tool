@@ -155,14 +155,6 @@ import { getJobCostBreakdown } from "./costMeter";
 import { getMonthlyCostReport } from "./costRollup";
 import { ApimartAdapter } from "./providers/apimart";
 import { HeygenLipsyncAdapter } from "./providers/heygen-lipsync";
-// AIREITER BOLT-ON (temporary) — delete with the router block below.
-import {
-  AireiterAdapter,
-  aireiterKey,
-  aireiterKeyMasked,
-  aireiterLaneEnabled,
-  setAireiterKey,
-} from "./providers/aireiter";
 import { ENV } from "./_core/env";
 import type {
   LongformInputParams,
@@ -1378,40 +1370,6 @@ const longformVideoRouter = router({
       await setHeygenSlotKey(input.slotIndex, input.apiKey);
       return { success: true };
     }),
-
-  // ─── AIREITER BOLT-ON (temporary — delete this block to remove) ─────────
-  /**
-   * Admin: the AIReiter key, its live credit balance, and which lanes it is serving.
-   * One key for all 5 tabs, unlike APIMART/HeyGen — AIReiter is a single account with one
-   * shared credit pool, so per-tab slots would buy nothing.
-   */
-  getAireiter: adminProcedure.query(async () => {
-    const masked = await aireiterKeyMasked();
-    const lanes = {
-      broll: await aireiterLaneEnabled("broll"),
-      stills: await aireiterLaneEnabled("stills"),
-    };
-    return {
-      masked,
-      lanes,
-      // Env fallback in play (key set via AIREITER_API_KEY rather than this field).
-      usingEnvKey: !masked && !!(await aireiterKey()),
-    };
-  }),
-
-  /** Admin: live credit balance for the AIReiter key. Null = unset key or failed check. */
-  getAireiterBalance: adminProcedure.query(async () => ({
-    credits: await (await AireiterAdapter.resolve()).getBalance(),
-  })),
-
-  /** Admin: set (or clear, with an empty string) the AIReiter key. */
-  setAireiterKey: adminProcedure
-    .input(z.object({ apiKey: z.string().max(400) }))
-    .mutation(async ({ input }) => {
-      await setAireiterKey(input.apiKey);
-      return { success: true };
-    }),
-  // ─── END AIREITER BOLT-ON ───────────────────────────────────────────────
 
   /**
    * Check that an uploaded narration is a read of THIS script, before a job is created from it.

@@ -128,8 +128,9 @@ export const RATES = {
   sixtynineVideoPerSecond: rate("COST_69LABS_VIDEO_PER_SEC", 0.05),
 
   /**
-   * AIReiter — the bolt-on gateway `AIREITER_LANES` routes b-roll and/or stills to. It serves
-   * the *same two models* as the APIMART lane it replaces (`grok_imagine_1_5`, `gpt_image_2`),
+   * AIReiter — a REMOVED gateway that briefly took over b-roll and/or stills. Kept so the jobs it
+   * rendered still price in the Cost dialog instead of reading "rate not set". It served
+   * the *same two models* as the APIMART lane it replaced (`grok_imagine_1_5`, `gpt_image_2`),
    * so these default to the APIMART rates rather than to zero.
    *
    * That is a deliberate placeholder, not a measurement: AIReiter sells prepaid credit
