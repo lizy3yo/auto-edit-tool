@@ -318,6 +318,7 @@ function BalanceBadge({
   keySet,
   value,
   error,
+  outOfCredits,
   loading,
   format,
   lowThreshold,
@@ -327,6 +328,8 @@ function BalanceBadge({
   value: number | null;
   /** Why the check failed, when the server said. An empty account is a VALUE of 0, never this. */
   error?: string;
+  /** The provider refused the read because the quota is spent — the key itself is fine. */
+  outOfCredits?: boolean;
   loading: boolean;
   format: (value: number) => string;
   lowThreshold: number;
@@ -340,7 +343,9 @@ function BalanceBadge({
         className="max-w-[24rem] shrink-0 truncate text-xs text-destructive"
         title={error}
       >
-        balance check failed{error ? ` — ${error}` : ""}
+        {outOfCredits
+          ? "out of credits"
+          : `balance check failed${error ? ` — ${error}` : ""}`}
       </span>
     );
   return (
@@ -356,12 +361,20 @@ function BalanceBadge({
 
 /** An APIMART balance result (a reading, a failure with its reason, or nothing) as badge props. */
 const apimartBadge = (
-  balance: { remainBalance: number } | { error: string } | null | undefined
-): { value: number | null; error?: string } =>
+  balance:
+    | { remainBalance: number }
+    | { error: string; outOfCredits?: boolean }
+    | null
+    | undefined
+): { value: number | null; error?: string; outOfCredits?: boolean } =>
   !balance
     ? { value: null }
     : "error" in balance
-      ? { value: null, error: balance.error }
+      ? {
+          value: null,
+          error: balance.error,
+          outOfCredits: balance.outOfCredits,
+        }
       : { value: balance.remainBalance };
 
 /** One label / masked key field / Save-Clear button / badge row. */

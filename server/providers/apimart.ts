@@ -167,9 +167,9 @@ export class ApimartAdapter implements ProviderAdapter {
    * `GET /v1/user/balance` endpoint. (Per-key `/v1/balance` reports
    * unlimited_quota when the key has no quota cap — true for all our keys —
    * while the account balance is the number that actually runs out.) A failure
-   * comes back as `{ error }` naming WHY — an empty account is a successful
-   * read of 0, so "the check failed" never means "out of credits", and the
-   * admin panel has to be able to say which of the two it is looking at.
+   * comes back as `{ error }` naming WHY, with `outOfCredits` set when the
+   * reason is a spent quota — the admin panel has to be able to tell a key it
+   * cannot read from an account that has simply run dry.
    */
   async getBalance(): Promise<
     | {
@@ -178,7 +178,7 @@ export class ApimartAdapter implements ProviderAdapter {
         usedBalance: number;
         usedCredits: number;
       }
-    | { error: string }
+    | { error: string; outOfCredits?: boolean }
   > {
     try {
       const res = await fetch(
@@ -186,9 +186,12 @@ export class ApimartAdapter implements ProviderAdapter {
         withDispatcher({ headers: this.headers() })
       );
       const text = await res.text();
+      // 402 is APIMART refusing the balance read ITSELF once the quota is spent — it never
+      // answers with a balance of 0 — so that status is "out of credits", not a failed check.
       if (!res.ok)
         return {
           error: `APIMART HTTP ${res.status}: ${summarizeHttpBody(text)}`,
+          outOfCredits: res.status === 402,
         };
       let data: any;
       try {
