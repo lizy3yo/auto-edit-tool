@@ -1279,19 +1279,36 @@ const longformVideoRouter = router({
     return { slots, editMasked };
   }),
 
-  /** Admin: live balance per stored APIMART key (free endpoint). Null balance = unset key OR failed check. */
+  /**
+   * Admin: live balance per stored APIMART key (free endpoint). Null = unset key; `{ error }` =
+   * the check failed and says why. A row that HAS a masked tail but yields no key is a stored
+   * key this server cannot decrypt (saved under a different JWT_SECRET) — reported as such,
+   * since it reads exactly like a dead key while the render lane silently skips APIMART.
+   */
   getApimartBalances: adminProcedure.query(async () => {
-    const balanceFor = async (key: string | null) =>
-      key ? new ApimartAdapter(key).getBalance() : null;
+    const balanceFor = async ([key, masked]: [string | null, string | null]) =>
+      key
+        ? new ApimartAdapter(key).getBalance()
+        : masked
+          ? {
+              error:
+                "stored key cannot be decrypted on this server (JWT_SECRET differs from when it was saved) — re-enter the key",
+            }
+          : null;
     const [slots, edit] = await Promise.all([
       Promise.all(
         Array.from({ length: LONGFORM_SLOT_COUNT }, (_, slotIndex) =>
-          getApimartSlotKey(slotIndex)
+          Promise.all([
+            getApimartSlotKey(slotIndex),
+            getApimartSlotMasked(slotIndex),
+          ])
             .then(balanceFor)
             .then(balance => ({ slotIndex, balance }))
         )
       ),
-      getApimartEditKey().then(balanceFor),
+      Promise.all([getApimartEditKey(), getApimartEditMasked()]).then(
+        balanceFor
+      ),
     ]);
     return { slots, edit };
   }),

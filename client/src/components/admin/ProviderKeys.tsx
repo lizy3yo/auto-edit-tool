@@ -317,6 +317,7 @@ export function HostLipsyncToggle() {
 function BalanceBadge({
   keySet,
   value,
+  error,
   loading,
   format,
   lowThreshold,
@@ -324,6 +325,8 @@ function BalanceBadge({
   keySet: boolean;
   /** `null` ⇒ the check failed (or the key is unset). */
   value: number | null;
+  /** Why the check failed, when the server said. An empty account is a VALUE of 0, never this. */
+  error?: string;
   loading: boolean;
   format: (value: number) => string;
   lowThreshold: number;
@@ -333,8 +336,11 @@ function BalanceBadge({
     return <Loader2 className="h-3 w-3 shrink-0 animate-spin opacity-50" />;
   if (value == null)
     return (
-      <span className="shrink-0 text-xs text-destructive">
-        balance check failed
+      <span
+        className="max-w-[24rem] shrink-0 truncate text-xs text-destructive"
+        title={error}
+      >
+        balance check failed{error ? ` — ${error}` : ""}
       </span>
     );
   return (
@@ -347,6 +353,16 @@ function BalanceBadge({
     </span>
   );
 }
+
+/** An APIMART balance result (a reading, a failure with its reason, or nothing) as badge props. */
+const apimartBadge = (
+  balance: { remainBalance: number } | { error: string } | null | undefined
+): { value: number | null; error?: string } =>
+  !balance
+    ? { value: null }
+    : "error" in balance
+      ? { value: null, error: balance.error }
+      : { value: balance.remainBalance };
 
 /** One label / masked key field / Save-Clear button / badge row. */
 function KeyRow({
@@ -496,10 +512,10 @@ export function ProviderKeys() {
                 badge={
                   <BalanceBadge
                     keySet={!!masked}
-                    value={
+                    {...apimartBadge(
                       balances?.slots.find(s => s.slotIndex === slotIndex)
-                        ?.balance?.remainBalance ?? null
-                    }
+                        ?.balance
+                    )}
                     loading={balancesLoading}
                     format={v => `$${v.toFixed(2)} left`}
                     lowThreshold={5}
@@ -518,7 +534,7 @@ export function ProviderKeys() {
               badge={
                 <BalanceBadge
                   keySet={!!data?.editMasked}
-                  value={balances?.edit?.remainBalance ?? null}
+                  {...apimartBadge(balances?.edit)}
                   loading={balancesLoading}
                   format={v => `$${v.toFixed(2)} left`}
                   lowThreshold={5}

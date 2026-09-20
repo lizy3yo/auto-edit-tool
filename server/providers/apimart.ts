@@ -166,32 +166,52 @@ export class ApimartAdapter implements ProviderAdapter {
    * Remaining/used credits for this key's ACCOUNT via the free
    * `GET /v1/user/balance` endpoint. (Per-key `/v1/balance` reports
    * unlimited_quota when the key has no quota cap — true for all our keys —
-   * while the account balance is the number that actually runs out.) Null on
-   * any failure, which doubles as a key/gateway health signal for the admin
-   * panel.
+   * while the account balance is the number that actually runs out.) A failure
+   * comes back as `{ error }` naming WHY — an empty account is a successful
+   * read of 0, so "the check failed" never means "out of credits", and the
+   * admin panel has to be able to say which of the two it is looking at.
    */
-  async getBalance(): Promise<{
-    remainBalance: number;
-    remainCredits: number;
-    usedBalance: number;
-    usedCredits: number;
-  } | null> {
+  async getBalance(): Promise<
+    | {
+        remainBalance: number;
+        remainCredits: number;
+        usedBalance: number;
+        usedCredits: number;
+      }
+    | { error: string }
+  > {
     try {
       const res = await fetch(
         `${BASE_URL}/v1/user/balance`,
         withDispatcher({ headers: this.headers() })
       );
-      if (!res.ok) return null;
-      const data: any = await res.json();
-      if (!data?.success) return null;
+      const text = await res.text();
+      if (!res.ok)
+        return {
+          error: `APIMART HTTP ${res.status}: ${summarizeHttpBody(text)}`,
+        };
+      let data: any;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        return {
+          error: `APIMART returned non-JSON: ${summarizeHttpBody(text)}`,
+        };
+      }
+      if (!data?.success || typeof data.remain_balance !== "number")
+        return {
+          error: `APIMART unexpected response: ${summarizeHttpBody(text)}`,
+        };
       return {
         remainBalance: data.remain_balance,
         remainCredits: data.remain_credits,
         usedBalance: data.used_balance,
         usedCredits: data.used_credits,
       };
-    } catch {
-      return null;
+    } catch (err) {
+      return {
+        error: `could not reach APIMART: ${err instanceof Error ? err.message : String(err)}`,
+      };
     }
   }
 
