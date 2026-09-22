@@ -595,7 +595,16 @@ Express · tRPC · Drizzle · MySQL.
   scene to the master's level (master measured once per URL, `masterSpeechLevelDb`). A steady
   read comes back byte-identical (`LEVEL_MIN_SPREAD_DB`). The render log prints the spread
   before/after. Uploads (`normalizeNarrationAudio`) are NOT levelled — a human read's dynamics
-  are the operator's
+  are the operator's. FILMS RENDERED BEFORE the leveller get the one-time "Even out voice"
+  button on the job card (`levelJobNarration`, route `levelNarration`): it levels the stored
+  master, uploads it under a NEW url (so the `filmaudio-overlay` cache key misses and the
+  film's track is rebuilt), re-cuts every scene's slice from it and re-stitches — no provider
+  is touched, because the leveller never moves anything in time and the alignment, host clips
+  and b-roll stay valid. A job with no master (voicing failed, repaired beat by beat) has each
+  scene file matched to the film's median instead (`runMatchGainsDb`). The result lands on
+  `inputParams.narrationLevelled` (surfaced by `pollJob`) so the button greys out and the card
+  says what it measured; a steady read records that and changes no bytes. It does not fix a
+  provider artifact (a buzzy or robotic generation) — that needs a fresh read
 - `server/ttsMinimax.ts` — the SECOND voice lane, and the third narration option beside the
   channel voice and a supplied file. Deliberately NOT an automatic failover: the vendor is an
   operator's choice made before anything is voiced and pinned to `inputParams.ttsVendor`, so a

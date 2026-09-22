@@ -965,6 +965,21 @@ export interface LongformInputParams {
    */
   manualNarrationUrl?: string;
   /**
+   * Set once "Even out voice" has run on this job (`levelJobNarration`): films rendered before
+   * the narration leveller existed carry the provider's volume drift, and this is the one-time
+   * repair that levels the stored master, re-cuts the slices and re-stitches. Recorded so the
+   * button greys out afterwards and the card can say what it did. A job voiced after the
+   * leveller shipped never needs it — its master was levelled before it was persisted.
+   */
+  narrationLevelled?: {
+    at: string;
+    /** p5..p95 spread of the voice, dB, before and after. Equal ⇒ nothing needed changing. */
+    spreadBeforeDb: number;
+    spreadAfterDb: number;
+    /** "master" levelled the master and re-cut the slices; "scenes" matched per-scene audio. */
+    mode: "master" | "scenes";
+  };
+  /**
    * Which TTS vendor voices this film. Chosen by the operator BEFORE anything is voiced and
    * pinned here, never decided at runtime.
    *

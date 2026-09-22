@@ -547,6 +547,35 @@ export async function levelNarrationAudio(
   }
 }
 
+/** `levelNarrationAudio` for a stored narration (our own R2 object): download, level, return. */
+export async function levelNarrationUrl(
+  url: string
+): Promise<{ buffer: Buffer; plan: LevelPlan }> {
+  const dir = join(tmpdir(), `narration-level-${randomUUID()}`);
+  mkdirSync(dir, { recursive: true });
+  try {
+    const local = await downloadToTemp(url, dir, "in.mp3");
+    return await levelNarrationAudio(readFileSync(local));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** `matchNarrationLevel` for a stored clip: download, match to `targetDb`, return. */
+export async function matchNarrationUrlToLevel(
+  url: string,
+  targetDb: number
+): Promise<{ buffer: Buffer; levelDb: number; gainDb: number }> {
+  const dir = join(tmpdir(), `narration-match-${randomUUID()}`);
+  mkdirSync(dir, { recursive: true });
+  try {
+    const local = await downloadToTemp(url, dir, "in.mp3");
+    return await matchNarrationLevel(readFileSync(local), targetDb);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 /** One line for the render log. */
 export function describeLevelPlan(plan: LevelPlan): string {
   if (!plan.needed)

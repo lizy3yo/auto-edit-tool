@@ -103,6 +103,7 @@ import {
   BookOpen,
   History,
   Merge,
+  AudioLines,
 } from "lucide-react";
 
 export type SlotStatus = "idle" | "processing" | "completed" | "failed";
@@ -839,6 +840,16 @@ export default function LongformJobSlot({
       },
       onError: err => toast.error(err.message),
     });
+
+  const levelNarrationMutation = trpc.longformVideo.levelNarration.useMutation({
+    onSuccess: () => {
+      toast.success(
+        "Evening out the voice — the narration is levelled, its slices re-cut and the film re-stitched. Nothing re-renders."
+      );
+      if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
+    },
+    onError: err => toast.error(err.message),
+  });
 
   const retryFailedScenesMutation =
     trpc.longformVideo.retryFailedScenes.useMutation({
@@ -2332,6 +2343,34 @@ export default function LongformJobSlot({
                       <RefreshCw className="mr-2 h-4 w-4" />
                     )}
                     Reassemble
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (!jobId) return;
+                      armNotifications();
+                      levelNarrationMutation.mutate({ jobId });
+                    }}
+                    disabled={
+                      levelNarrationMutation.isPending ||
+                      !!job.narrationLevelled
+                    }
+                    title={
+                      job.narrationLevelled
+                        ? `Voice already evened out on ${new Date(job.narrationLevelled.at).toLocaleDateString()}: ` +
+                          `${job.narrationLevelled.spreadBeforeDb} → ${job.narrationLevelled.spreadAfterDb} dB swing`
+                        : "Even out the narration's volume across the film (a voice that drifts quiet then jumps back), re-cut its slices and re-stitch — nothing re-renders, free."
+                    }
+                  >
+                    {levelNarrationMutation.isPending ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <AudioLines className="mr-2 h-4 w-4" />
+                    )}
+                    {job.narrationLevelled
+                      ? "Voice evened out"
+                      : "Even out voice"}
                   </Button>
                   <Button
                     variant="outline"

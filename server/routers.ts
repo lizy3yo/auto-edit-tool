@@ -90,6 +90,7 @@ import {
   retrofitBookCover as retrofitLongformBookCover,
   setSceneSplit as setLongformSceneSplit,
   retryJobAssembly,
+  levelJobNarration,
   sceneFloorSec,
   revertJobTiming,
   rippleTrimScene,
@@ -2123,6 +2124,11 @@ const longformVideoRouter = router({
         visualStyleBible:
           (job.inputParams as { visualStyleBible?: string } | null)
             ?.visualStyleBible ?? null,
+        // Whether "Even out voice" has run (and what it measured) — greys the button out and
+        // lets the card say so. Null on a job it has never touched.
+        narrationLevelled:
+          (job.inputParams as LongformInputParams | null)?.narrationLevelled ??
+          null,
       };
     }),
 
@@ -2992,6 +2998,49 @@ const longformVideoRouter = router({
       }
       retryJobAssembly(input.jobId, true).catch(err => {
         console.error(`[Longform ${input.jobId}] reassembleFinal error:`, err);
+      });
+      return { ok: true };
+    }),
+
+  /**
+   * "Even out voice" — level the stored narration of a film rendered before the narration
+   * leveller existed, re-cut its slices and re-stitch (`levelJobNarration`). Spends nothing.
+   * One-shot per job: `inputParams.narrationLevelled` records the result and the button greys
+   * out; a film voiced after the leveller shipped was levelled before its master was persisted
+   * and gains nothing from a second pass. Fire-and-forget like the other re-stitch routes.
+   */
+  levelNarration: approvedProcedure
+    .input(z.object({ jobId: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      const job = await getLongformVideoJobById(input.jobId);
+      if (
+        !job ||
+        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
+      ) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
+      }
+      if (job.status === "processing") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Job is still processing — wait for it to settle first",
+        });
+      }
+      const params = (job.inputParams ?? {}) as LongformInputParams;
+      if (params.narrationLevelled) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "This film's voice has already been evened out",
+        });
+      }
+      const scenes = (job.storyboard as StoryboardScene[]) || [];
+      if (!job.masterAudioUrl && !scenes.some(s => !!s.audioUrl)) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "This job has no narration to level yet",
+        });
+      }
+      levelJobNarration(input.jobId).catch(err => {
+        console.error(`[Longform ${input.jobId}] levelNarration error:`, err);
       });
       return { ok: true };
     }),
