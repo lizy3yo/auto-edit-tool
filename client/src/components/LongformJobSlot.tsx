@@ -566,6 +566,40 @@ export default function LongformJobSlot({
     toBrollMutation.mutate({ jobId, sceneIndex });
   };
 
+  // "Make host" (admins only): a b-roll scene becomes a HeyGen host beat, full-frame or split.
+  // Confirmed first with a cost estimate — it is a paid render the film did not have.
+  const [toHostScene, setToHostScene] = useState<number | null>(null);
+  const toHostMutation = trpc.longformVideo.convertSceneToHost.useMutation({
+    onSuccess: (d, vars) => {
+      if (d.accepted === "ignored") {
+        unqueueScene(vars.sceneIndex);
+        toast.info(
+          `Scene ${vars.sceneIndex} is already rendering — wait for it, then try again`
+        );
+      } else {
+        toast.success(
+          `Scene ${vars.sceneIndex} is becoming a ${vars.split ? "split-screen" : "full-screen"} host shot — rendering...`
+        );
+        setExpandedScene(cur => (cur === vars.sceneIndex ? null : cur));
+      }
+      if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
+    },
+    onError: (err, vars) => {
+      toast.error(err.message);
+      unqueueScene(vars.sceneIndex);
+    },
+  });
+  const makeHost = (sceneIndex: number, split: boolean) => {
+    if (!jobId) return;
+    armNotifications();
+    queuePhase.current.set(sceneIndex, "queued");
+    queuedAt.current.set(sceneIndex, Date.now());
+    setQueuedScenes(prev =>
+      prev.includes(sceneIndex) ? prev : [...prev, sceneIndex]
+    );
+    toHostMutation.mutate({ jobId, sceneIndex, split });
+  };
+
   // Split editor: per-scene selection of "use another scene's footage as the right panel".
   const [splitSource, setSplitSource] = useState<
     Record<number, number | undefined>
@@ -3509,6 +3543,26 @@ export default function LongformJobSlot({
                                   Make b-roll
                                 </Button>
                               )}
+                              {isAdmin &&
+                                !scene.hostPresent &&
+                                !scene.qrHero &&
+                                !scene.coverHero &&
+                                !scene.assetImageUrl && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 text-xs"
+                                    disabled={isSceneQueued || !scene.audioUrl}
+                                    title="Put the host on this beat — a HeyGen lip-sync render, full screen or split screen (admins only)"
+                                    onClick={e => {
+                                      e.stopPropagation();
+                                      setToHostScene(scene.index);
+                                    }}
+                                  >
+                                    <User className="mr-1.5 h-3 w-3" />
+                                    Make host
+                                  </Button>
+                                )}
                             </div>
                           ))}
                       </div>
@@ -3548,6 +3602,69 @@ export default function LongformJobSlot({
               }}
             >
               Make b-roll
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Make host (admins only) */}
+      <AlertDialog
+        open={toHostScene != null}
+        onOpenChange={open => {
+          if (!open) setToHostScene(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Make scene {toHostScene} a host shot?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {(() => {
+                const sc = scenes.find(x => x.index === toHostScene);
+                const sec =
+                  sc?.narrationStartSec != null && sc?.narrationEndSec != null
+                    ? sc.narrationEndSec - sc.narrationStartSec
+                    : (sc?.audioDuration ?? 0);
+                const rate = pacingInfo?.hostRatePerSec;
+                return (
+                  <>
+                    The host says this line on camera, lip-synced by HeyGen. The
+                    voice and timing don't change.{" "}
+                    {sec > 0 && (
+                      <>
+                        That is about {sec.toFixed(1)} s of HeyGen
+                        {rate ? `, roughly $${(sec * rate).toFixed(2)}` : ""}
+                        .{" "}
+                      </>
+                    )}
+                    Full screen shows only the host. Split screen puts the host
+                    on the left and this scene's picture on the right. "Make
+                    b-roll" turns it back.
+                  </>
+                );
+              })()}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (toHostScene != null) makeHost(toHostScene, true);
+                setToHostScene(null);
+              }}
+            >
+              <Columns2 className="mr-2 h-4 w-4" />
+              Split screen
+            </AlertDialogAction>
+            <AlertDialogAction
+              onClick={() => {
+                if (toHostScene != null) makeHost(toHostScene, false);
+                setToHostScene(null);
+              }}
+            >
+              <User className="mr-2 h-4 w-4" />
+              Full screen
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

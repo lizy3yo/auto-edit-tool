@@ -299,6 +299,51 @@ describe("scene edit session", () => {
     ).toBe(true);
   });
 
+  it("make-host converts the b-roll scene BEFORE its task runs, full screen and split", async () => {
+    for (const split of [false, true]) {
+      const jobId = ++nextJob;
+      const scenes = storyboard(3) as any[];
+      Object.assign(scenes[0], { hostPresent: true, hostShot: 0 });
+      Object.assign(scenes[1], {
+        audioUrl: "https://x/2-vo.mp3",
+        renderTaskIds: ["grok-task"],
+        narrationStartSec: 4,
+        narrationEndSec: 9,
+      });
+      getJobSpy.mockResolvedValue({
+        id: jobId,
+        inputParams: {
+          faceImageUrl: "https://x/face.jpg",
+          faceImageUrl2: "https://x/face-2.jpg",
+        },
+        storyboard: scenes,
+      });
+      let seen: any;
+      const runOne = async (_ctx: any, req: SceneEditRequest) => {
+        const scene = scenes.find(s => s.index === req.sceneIndex)!;
+        seen = { ...scene };
+        scene.clipUrls = ["https://x/2-host.mp4"];
+        scene.clipUrl = "https://x/2-host.mp4";
+        scene.sceneStatus = "completed";
+      };
+      expect(
+        enqueueSceneEdit(
+          jobId,
+          { kind: "tohost", sceneIndex: 2, split },
+          { runOne }
+        )
+      ).toBe("queued");
+      await sceneEditsSettled(jobId);
+
+      expect(seen.hostPresent).toBe(true);
+      expect(!!seen.splitVisual).toBe(split);
+      expect(seen.renderTaskIds).toBeUndefined();
+      expect(seen.sceneStatus).toBe("processing");
+      expect(scenes[1].narrationStartSec).toBe(4);
+      expect(scenes[1].narrationEndSec).toBe(9);
+    }
+  });
+
   it("a new click after the session closed starts a fresh session (nothing lost between them)", async () => {
     const jobId = ++nextJob;
     const scenes = storyboard(1);

@@ -3213,6 +3213,116 @@ export function convertHostSceneToBroll(s: StoryboardScene): boolean {
 }
 
 /**
+ * Why "Make host" cannot run on this scene, or null when it can. Pure.
+ *
+ * Refused: a scene that is already a host beat; the QR-hero and cover-reveal beats (their whole
+ * frame is the QR card or the book, so a host there hides the call to action); an asset beat
+ * (it exists to show that image); and a scene with no narration slice, which the lip-sync lane
+ * has nothing to animate from.
+ */
+export function hostConversionRefusal(s: StoryboardScene): string | null {
+  if (s.hostPresent) return `Scene ${s.index} is already a host shot`;
+  if (s.qrHero)
+    return `Scene ${s.index} is the big QR beat — a host there would hide the code`;
+  if (s.coverHero)
+    return `Scene ${s.index} is the book-cover reveal — a host there would hide the cover`;
+  if (s.assetImageUrl)
+    return `Scene ${s.index} shows an uploaded image — make it a host and the image is lost`;
+  if (!s.audioUrl)
+    return `Scene ${s.index} has no narration audio yet — nothing for the host to say`;
+  return null;
+}
+
+/**
+ * The photo angle a scene turned into a host beat should take (`hostShot`). Pure.
+ *
+ * A split renders from the PRIMARY photo, as every split does (`assignHostShots`). A full-frame
+ * beat avoids the angle of the nearest host beat on either side — two host shots in a row on
+ * the same photo is the jump cut the rotation exists to prevent — and among the angles left
+ * takes the one the film shows least, so a converted beat evens the spread instead of piling
+ * onto the primary. With one photo there is only angle 0.
+ */
+export function pickHostShotFor(
+  scenes: StoryboardScene[],
+  sceneIndex: number,
+  angleCount: number,
+  split: boolean
+): number {
+  const angles = Math.max(1, Math.floor(angleCount));
+  if (split || angles === 1) return 0;
+  const order = [...scenes].sort((a, b) => a.index - b.index);
+  const at = order.findIndex(s => s.index === sceneIndex);
+  const nearest = (step: 1 | -1): StoryboardScene | undefined => {
+    for (let i = at + step; i >= 0 && i < order.length; i += step)
+      if (order[i].hostPresent && order[i].index !== sceneIndex)
+        return order[i];
+    return undefined;
+  };
+  const prev = nearest(-1);
+  const next = nearest(1);
+  const shotOf = (s?: StoryboardScene) =>
+    s ? (s.splitVisual ? 0 : (s.hostShot ?? 0)) : undefined;
+  const avoidBoth = new Set([shotOf(prev), shotOf(next)]);
+  const avoidPrev = new Set([shotOf(prev)]);
+  const all = Array.from({ length: angles }, (_, i) => i);
+  const candidates =
+    all.filter(a => !avoidBoth.has(a)).length > 0
+      ? all.filter(a => !avoidBoth.has(a))
+      : all.filter(a => !avoidPrev.has(a));
+  if (candidates.length === 0) return 0;
+  const used = new Map<number, number>();
+  for (const s of order)
+    if (s.hostPresent && s.index !== sceneIndex) {
+      const shot = shotOf(s) as number;
+      used.set(shot, (used.get(shot) ?? 0) + 1);
+    }
+  return candidates.reduce((best, a) =>
+    (used.get(a) ?? 0) < (used.get(best) ?? 0) ? a : best
+  );
+}
+
+/**
+ * The OPERATOR's promotion ("Make host" on a b-roll card, admins only): one b-roll scene becomes
+ * a host beat rendered by the lip-sync lane, full-frame or as a split screen. The same mutation
+ * the pipeline's own promotions use (`promoteCutawayToHost` — which keeps the cutaway it was on
+ * `brollVisual`, so "Make b-roll" can go back), plus the b-roll render state cleared so the next
+ * render SUBMITS a host job instead of resuming the old cutaway. A split takes the old cutaway
+ * as its right panel. Narration is untouched — the scene keeps its master slice, so the film
+ * stays on the overlay path. Returns false (and changes nothing) when `hostConversionRefusal`
+ * refuses. Mutates in place.
+ */
+export function convertBrollSceneToHost(
+  scenes: StoryboardScene[],
+  s: StoryboardScene,
+  split: boolean,
+  angleCount: number
+): boolean {
+  if (hostConversionRefusal(s)) return false;
+  const cutaway = s.visualPrompt;
+  promoteCutawayToHost(s);
+  s.hostOpener = undefined;
+  s.lipsynced = false;
+  s.hostClipUrls = undefined;
+  s.splitLayout = undefined;
+  s.splitMotion = undefined;
+  s.splitVisualSeed = undefined;
+  s.splitRightUrl = undefined;
+  s.splitAutoFocusX = undefined;
+  s.splitFocusSource = undefined;
+  if (split) s.splitVisual = s.brollVisual ?? cutaway;
+  s.hostShot = pickHostShotFor(scenes, s.index, angleCount, split);
+  s.visualPromptSeed = undefined;
+  s.clipUrl = undefined;
+  s.clipUrls = [];
+  s.renderTaskIds = undefined;
+  s.renderProvider = undefined;
+  s.renderModelIndex = undefined;
+  s.renderAttempts = undefined;
+  s.infraRetries = undefined;
+  return true;
+}
+
+/**
  * Whether a host beat the lip-sync lane has given up on becomes a b-roll still on its own.
  * On by default: a film that used to end "failed, 1 scene has no clip" — or sit under a
  * "Failed" badge collecting retry clicks, 18 of them on one production scene whose slice
@@ -13421,6 +13531,12 @@ export type SceneEditRequest =
    * same lane). A render edit; the narration slice is untouched (`convertHostSceneToBroll`).
    */
   | { kind: "tobroll"; sceneIndex: number }
+  /**
+   * "Make host" (admins only): turn a b-roll scene into a host beat rendered by the lip-sync
+   * lane, full-frame or as a split screen (`convertBrollSceneToHost`). A render edit; the
+   * narration slice is untouched.
+   */
+  | { kind: "tohost"; sceneIndex: number; split: boolean }
   /** Cut-room edit: trim / move a cut / hold (see `sceneTiming.ts`). Metadata only, no render. */
   | { kind: "timing"; sceneIndex: number; edit: SceneTimingEdit }
   /** Cut-room split of one scene into two at an offset into its slice. Metadata only. */
@@ -13875,6 +13991,13 @@ function prepareSceneEdit(ctx: SceneEditContext, req: SceneEditRequest): void {
   // Converted HERE, not in the task body: `sceneEditLane` reads the scene's register to pick its
   // lane, and a scene still marked host would queue behind the lip-sync lane it is leaving.
   if (req.kind === "tobroll") convertHostSceneToBroll(scene);
+  if (req.kind === "tohost")
+    convertBrollSceneToHost(
+      ctx.scenes,
+      scene,
+      req.split,
+      hostFaces(ctx.params).length
+    );
   scene.sceneStatus = "processing";
   scene.error = undefined;
 }
@@ -13887,6 +14010,14 @@ function sceneEditLane(
 ): { sem: Semaphore; deadlineMs: number } {
   if (isTimingKind(req) || (req.kind === "split" && req.edit.mode !== "prompt"))
     return { sem: ctx.lanes.light, deadlineMs: SCENE_EDIT_LIGHT_DEADLINE_MS };
+  if (req.kind === "tohost")
+    return {
+      sem: ctx.lanes.host,
+      deadlineMs: Math.max(
+        SCENE_DEADLINE_HOST_MS,
+        SCENE_DEADLINE_HOST_RUNPOD_MS
+      ),
+    };
   if (req.kind === "split" || isSplitScene(scene)) {
     // Right panel only: a square still (image lane) or, when the scene carries one, a moving
     // b-roll panel (video lane). The host clip is reused, never re-synced.
@@ -13956,6 +14087,7 @@ async function runSceneEdit(
           // the ordinary cutaway regenerate: enhance against the subject, scrub names, render.
           if (req.kind === "tobroll")
             await runRegenEdit(ctx, s, { kind: "regen", sceneIndex: s.index });
+          else if (req.kind === "tohost") await runToHostEdit(ctx, s);
           else if (req.kind === "regen") await runRegenEdit(ctx, s, req);
           else await runSplitEdit(ctx, s, req.edit);
           s.regenerated = true;
@@ -14536,6 +14668,57 @@ export async function convertSceneToBroll(
   if (accept === "ignored")
     console.warn(
       `[Longform ${jobId}] Scene ${sceneIndex} is rendering — make-b-roll request ignored`
+    );
+  return accept;
+}
+
+/**
+ * A "Make host" request's body: the full host render — lip-sync from the scene's own slice,
+ * then the split composite when the scene carries a `splitVisual` (`composeHostScene` inside
+ * `renderSceneClipInPlace`). A split's right panel is the old cutaway, so it is scrubbed of host
+ * names like every panel, and the host itself is never passed through the b-roll enhancer.
+ */
+async function runToHostEdit(
+  ctx: SceneEditContext,
+  scene: StoryboardScene
+): Promise<void> {
+  const { jobId, scenes, params } = ctx;
+  if (!scene.hostPresent)
+    throw new Error(
+      `Scene ${scene.index} could not be made a host shot — ${hostConversionRefusal(scene) ?? "refused"}`
+    );
+  if (scene.splitVisual) {
+    const aliases = await hostNameAliases(params.channelKey);
+    scene.splitVisual = stripHostNames(scene.splitVisual, aliases);
+  }
+  const lane = await ctx.renderLane();
+  await renderSceneClipInPlace(
+    jobId,
+    scene,
+    scenes,
+    params,
+    lane.adapter,
+    lane.ttsType,
+    lane.ttsKey,
+    lane.lipsync,
+    lane.instruction
+  );
+}
+
+/**
+ * "Make host" (admins only): convert one B-ROLL scene into a host beat — full-frame or split —
+ * and render it on the lip-sync lane. Queued on the edit session like "Make b-roll", reporting
+ * the same `queued` / `superseded` / `ignored`.
+ */
+export async function convertSceneToHost(
+  jobId: number,
+  sceneIndex: number,
+  split: boolean
+): Promise<EditAccept> {
+  const accept = enqueueSceneEdit(jobId, { kind: "tohost", sceneIndex, split });
+  if (accept === "ignored")
+    console.warn(
+      `[Longform ${jobId}] Scene ${sceneIndex} is rendering — make-host request ignored`
     );
   return accept;
 }

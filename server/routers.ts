@@ -80,6 +80,9 @@ import {
   regenerateScene as regenerateLongformScene,
   regenerateScenes as regenerateLongformScenes,
   convertSceneToBroll as convertLongformSceneToBroll,
+  convertSceneToHost as convertLongformSceneToHost,
+  hostConversionRefusal,
+  hostFaces,
   getSceneEditState,
   setSceneTiming as setLongformSceneTiming,
   splitSceneInTwo as splitLongformScene,
@@ -2349,6 +2352,52 @@ const longformVideoRouter = router({
       const accepted = await convertLongformSceneToBroll(
         input.jobId,
         input.sceneIndex
+      );
+      return { ok: true, accepted };
+    }),
+
+  /**
+   * "Make host": turn one b-roll scene into a host beat rendered by the lip-sync lane — full-frame
+   * or split screen. ADMINS ONLY: it is a paid HeyGen render the operator chooses to add, where
+   * every other scene edit re-renders something the film already had. The card confirms with an
+   * estimate first; this refuses the beats a host would ruin (`hostConversionRefusal`).
+   */
+  convertSceneToHost: adminProcedure
+    .input(
+      z.object({
+        jobId: z.number(),
+        sceneIndex: z.number().int().min(1),
+        split: z.boolean(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const job = await getLongformVideoJobById(input.jobId);
+      if (!job) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
+      }
+      const scene = (
+        Array.isArray(job.storyboard)
+          ? (job.storyboard as StoryboardScene[])
+          : []
+      ).find(s => s && s.index === input.sceneIndex);
+      if (!scene)
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `Scene ${input.sceneIndex} not found`,
+        });
+      const refusal = hostConversionRefusal(scene);
+      if (refusal)
+        throw new TRPCError({ code: "BAD_REQUEST", message: refusal });
+      const params = (job.inputParams ?? {}) as LongformInputParams;
+      if (!params.faceImageUrl || hostFaces(params).length === 0)
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "This film has no host photo to render a host shot from",
+        });
+      const accepted = await convertLongformSceneToHost(
+        input.jobId,
+        input.sceneIndex,
+        input.split
       );
       return { ok: true, accepted };
     }),

@@ -87,6 +87,9 @@ import {
   enhanceBrollPrompts,
   demoteAllHostsToBroll,
   convertHostSceneToBroll,
+  convertBrollSceneToHost,
+  hostConversionRefusal,
+  pickHostShotFor,
   forceAllBrollMotion,
   HOST_SCREEN_FRACTION,
   talkingHeadClipCount,
@@ -1064,6 +1067,104 @@ describe("rebalanceHostScreenTime", () => {
     const before = { ...cutaway };
     expect(convertHostSceneToBroll(cutaway)).toBe(false);
     expect(cutaway).toEqual(before);
+  });
+
+  describe("Make host (b-roll -> host)", () => {
+    const sc = (
+      index: number,
+      extra: Partial<StoryboardScene> = {}
+    ): StoryboardScene =>
+      ({
+        index,
+        narration: `s${index}`,
+        visualPrompt: `cutaway ${index}`,
+        hostPresent: false,
+        audioUrl: `https://r2/scene-${index}-vo.mp3`,
+        narrationStartSec: index * 5,
+        narrationEndSec: index * 5 + 5,
+        clipUrl: `https://r2/clip-${index}.mp4`,
+        clipUrls: [`https://r2/clip-${index}.mp4`],
+        ...extra,
+      }) as StoryboardScene;
+    const host = (index: number, hostShot: number, extra = {}) =>
+      sc(index, { hostPresent: true, hostShot, ...extra });
+
+    it("refuses beats a host would ruin, and scenes with nothing to say", () => {
+      expect(hostConversionRefusal(sc(1))).toBeNull();
+      expect(hostConversionRefusal(host(1, 0))).toMatch(/already a host/);
+      expect(hostConversionRefusal(sc(1, { qrHero: true }))).toMatch(/QR/);
+      expect(hostConversionRefusal(sc(1, { coverHero: true }))).toMatch(
+        /cover/
+      );
+      expect(
+        hostConversionRefusal(sc(1, { assetImageUrl: "https://r2/a.png" }))
+      ).toMatch(/uploaded image/);
+      expect(hostConversionRefusal(sc(1, { audioUrl: undefined }))).toMatch(
+        /no narration/
+      );
+    });
+
+    it("full screen: becomes a host beat, clears the b-roll render, keeps the voice and the cutaway", () => {
+      const scenes = [
+        host(1, 0),
+        sc(2, { renderTaskIds: ["grok-1"], stillImage: true }),
+        host(3, 1),
+      ];
+      expect(convertBrollSceneToHost(scenes, scenes[1], false, 3)).toBe(true);
+      const s = scenes[1];
+      expect(s.hostPresent).toBe(true);
+      expect(s.stillImage).toBe(false);
+      expect(s.splitVisual).toBeUndefined();
+      // Neighbours are on angles 0 and 1, so it takes the third photo.
+      expect(s.hostShot).toBe(2);
+      // The next render must SUBMIT a host job, not resume the old cutaway.
+      expect(s.renderTaskIds).toBeUndefined();
+      expect(s.clipUrls).toEqual([]);
+      // "Make b-roll" can go back to the cutaway it was.
+      expect(s.brollVisual).toBe("cutaway 2");
+      // The voice is untouched — the film stays on the master-overlay path.
+      expect(s.narrationStartSec).toBe(10);
+      expect(s.narrationEndSec).toBe(15);
+      expect(s.audioUrl).toBe("https://r2/scene-2-vo.mp3");
+      // And back again: the round trip lands on the original cutaway.
+      expect(convertHostSceneToBroll(s)).toBe(true);
+      expect(s.visualPrompt).toBe("cutaway 2");
+    });
+
+    it("split screen: host on the primary photo, the old cutaway as the right panel", () => {
+      const scenes = [host(1, 1), sc(2)];
+      expect(convertBrollSceneToHost(scenes, scenes[1], true, 3)).toBe(true);
+      expect(scenes[1].hostPresent).toBe(true);
+      expect(scenes[1].splitVisual).toBe("cutaway 2");
+      expect(scenes[1].hostShot).toBe(0);
+    });
+
+    it("changes nothing on a refused scene", () => {
+      const scenes = [sc(1, { qrHero: true })];
+      const before = { ...scenes[0] };
+      expect(convertBrollSceneToHost(scenes, scenes[0], false, 2)).toBe(false);
+      expect(scenes[0]).toEqual(before);
+    });
+
+    it("picks an angle away from both neighbours, balancing the least-used, and falls back sanely", () => {
+      // One photo: always the primary.
+      expect(pickHostShotFor([host(1, 0), sc(2)], 2, 1, false)).toBe(0);
+      // Two photos, neighbour on 0: take 1.
+      expect(pickHostShotFor([host(1, 0), sc(2)], 2, 2, false)).toBe(1);
+      // Two photos, neighbours on 0 and 1: both taken, so avoid the previous one only.
+      expect(
+        pickHostShotFor([host(1, 0), sc(2), host(3, 1)], 2, 2, false)
+      ).toBe(1);
+      // Four photos, neighbours 0 and 1, angle 3 used twice elsewhere and 2 never: take 2.
+      const film = [host(1, 3), host(2, 3), host(3, 0), sc(4), host(5, 1)];
+      expect(pickHostShotFor(film, 4, 4, false)).toBe(2);
+      // A split neighbour counts as the primary.
+      expect(
+        pickHostShotFor([host(1, 2, { splitVisual: "x" }), sc(2)], 2, 3, false)
+      ).toBe(1);
+      // No host anywhere else: the primary.
+      expect(pickHostShotFor([sc(1), sc(2)], 1, 3, false)).toBe(0);
+    });
   });
 
   it("forceAllBrollMotion puts every cutaway on the video lane", () => {
