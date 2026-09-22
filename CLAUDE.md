@@ -571,6 +571,31 @@ Express · tRPC · Drizzle · MySQL.
   the moved stretch's outer edges are clamped onto those stored neighbours so the film still
   tiles to the millisecond and stays on the master-overlay path. Audited against 70 real jobs:
   one flag, and it was a second genuine case (461 words in 1.4 s)
+- `server/narrationLevel.ts` — the voice at ONE level across a film. 69Labs (ElevenLabs
+  underneath) chops a long script into chunks it generates separately (`splitType: "smart"`),
+  and the delivery plan voices it as runs joined in `concatWithPauses`; each generation lands
+  at its own energy and a long one trails off. A hosted 16-min film (2026-09-22) swung 14 dB
+  while speaking — a slow slide, then a jump back up wherever a new generation began — and
+  nothing downstream evened it out (the per-channel multiplier is one fixed gain, the pause cap
+  only trims silence, assembly measures loudness once to set the music bed). ffmpeg's stock
+  levellers were tried on that film and rejected: `dynaudnorm` is peak-driven and TTS peaks are
+  already uniform (11 → 9.5 dB), `speechnorm` did nothing or lifted the whole file 9 dB. The
+  curve is MEASURED instead (`planLevelGains`, pure): voice-band level per 250 ms frame, gated
+  to the frames within 20 dB of the loud ones, per 2 s bin, gain to the film's OWN median
+  (overall loudness untouched, every channel keeps its level), smoothed ~10 s so a word never
+  moves it, clamped -6..+10 dB, capped per bin under -1.5 dBFS. Result on the same film: 11 →
+  2.8 dB spread, second-to-second wobble unchanged. Applied as a 100 Hz float gain ENVELOPE
+  multiplied in (`amultiply`); the envelope leg MUST pin `osf=fltp` or negotiation feeds the
+  resampler 16-bit and clips every gain above 1.0 to exactly 1.0, and `amultiply` ends at its
+  SHORTER input so the envelope is padded past the audio. Wired in three places, each
+  best-effort (a failure keeps the audio as voiced): `levelMasterNarration` on all three
+  master paths BEFORE the master is persisted, so whisperx, the slices and both lip-sync lanes
+  inherit it; `runMatchGainsDb` in `concatWithPauses` matches each delivery run to the runs'
+  median at the join; `matchSceneToMasterLevel` in `buildSceneNarration` brings a re-voiced
+  scene to the master's level (master measured once per URL, `masterSpeechLevelDb`). A steady
+  read comes back byte-identical (`LEVEL_MIN_SPREAD_DB`). The render log prints the spread
+  before/after. Uploads (`normalizeNarrationAudio`) are NOT levelled — a human read's dynamics
+  are the operator's
 - `server/ttsMinimax.ts` — the SECOND voice lane, and the third narration option beside the
   channel voice and a supplied file. Deliberately NOT an automatic failover: the vendor is an
   operator's choice made before anything is voiced and pinned to `inputParams.ttsVendor`, so a

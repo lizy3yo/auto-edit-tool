@@ -108,6 +108,12 @@ import {
   planChangesTheRead,
   concatWithPauses,
 } from "./delivery";
+import {
+  levelNarrationAudio,
+  describeLevelPlan,
+  measureSpeechLevelOfUrl,
+  matchNarrationLevel,
+} from "./narrationLevel";
 import { recordUsage, withCostMeter, flushJobUsage } from "./costMeter";
 // AIREITER BOLT-ON (temporary) — delete with the block in `apimartAdapterForJob`.
 import { aireiterAdapter, aireiterLaneEnabled } from "./providers/aireiter";
@@ -9916,7 +9922,11 @@ export async function buildSceneNarration(
   }
   const { buffer, durationSec } = await concatAudio(audioUrls);
   const key = `longform/${jobId}/scene-${scene.index}-vo-${nanoid(6)}.mp3`;
-  const { url } = await storagePut(key, buffer, "audio/mpeg");
+  const { url } = await storagePut(
+    key,
+    await matchSceneToMasterLevel(jobId, scene.index, buffer),
+    "audio/mpeg"
+  );
   return { url, durationSec };
 }
 
@@ -9976,9 +9986,12 @@ async function voiceMasterNarration(
           )
         );
       }
-      const buffer = await concatWithPauses(
-        runUrls,
-        runs.map(r => r.pauseAfterMs)
+      const buffer = await levelMasterNarration(
+        jobId,
+        await concatWithPauses(
+          runUrls,
+          runs.map(r => r.pauseAfterMs)
+        )
       );
       const key = `longform/${jobId}/master-vo-${nanoid(6)}.mp3`;
       const { url } = await storagePut(key, buffer, "audio/mpeg");
@@ -10045,7 +10058,7 @@ async function voiceMasterNarration(
     const key = `longform/${jobId}/master-vo-${nanoid(6)}.mp3`;
     const { url } = await storagePut(
       key,
-      await capMasterPauses(jobId, buffer),
+      await levelMasterNarration(jobId, await capMasterPauses(jobId, buffer)),
       "audio/mpeg"
     );
     return { url };
@@ -10066,10 +10079,86 @@ async function voiceMasterNarration(
   const key = `longform/${jobId}/master-vo-${nanoid(6)}.mp3`;
   const { url } = await storagePut(
     key,
-    await capMasterPauses(jobId, buf),
+    await levelMasterNarration(jobId, await capMasterPauses(jobId, buf)),
     "audio/mpeg"
   );
   return { url };
+}
+
+/**
+ * Even out the voice across the master before it is persisted — i.e. before whisperx, the
+ * per-scene slices and both lip-sync lanes read it, so every consumer inherits one level and
+ * nothing downstream needs to know (`server/narrationLevel.ts` has the measurement and the
+ * why). A steady read comes back byte-identical; a failure keeps the audio as voiced, since a
+ * level fix is never worth losing a 20-minute render over.
+ */
+async function levelMasterNarration(
+  jobId: number,
+  buf: Buffer
+): Promise<Buffer> {
+  try {
+    const { buffer, plan } = await levelNarrationAudio(buf);
+    console.log(`[Longform ${jobId}] ${describeLevelPlan(plan)}`);
+    return buffer;
+  } catch (e: any) {
+    console.warn(
+      `[Longform ${jobId}] narration levelling failed (${e?.message}); ` +
+        `keeping the master as voiced`
+    );
+    return buf;
+  }
+}
+
+/** Speech level of a master by URL, remembered so 200 re-voiced scenes measure it once. */
+const _masterLevelDb = new Map<string, Promise<number>>();
+const MASTER_LEVEL_CACHE_MAX = 32;
+async function masterSpeechLevelDb(masterUrl: string): Promise<number> {
+  let p = _masterLevelDb.get(masterUrl);
+  if (!p) {
+    p = measureSpeechLevelOfUrl(masterUrl);
+    if (_masterLevelDb.size >= MASTER_LEVEL_CACHE_MAX) {
+      const oldest = _masterLevelDb.keys().next().value;
+      if (oldest !== undefined) _masterLevelDb.delete(oldest);
+    }
+    _masterLevelDb.set(masterUrl, p);
+    // A failed measurement must not be remembered as the answer for the rest of the process.
+    p.catch(() => _masterLevelDb.delete(masterUrl));
+  }
+  return p;
+}
+
+/**
+ * Bring a freshly voiced scene to the master's level. The scene is its own TTS generation and
+ * lands at its own energy, and unlike a missing slice a loud or quiet beat still assembles and
+ * ships — a re-voiced scene 5 dB under its neighbours is the same complaint as an uneven master,
+ * one beat at a time. Best-effort: no master, no measurement or no ffmpeg ⇒ the clip as voiced.
+ */
+async function matchSceneToMasterLevel(
+  jobId: number,
+  sceneIndex: number,
+  buffer: Buffer
+): Promise<Buffer> {
+  try {
+    const job = await getLongformVideoJobById(jobId);
+    const masterUrl = job?.masterAudioUrl;
+    if (!masterUrl) return buffer;
+    const target = await masterSpeechLevelDb(masterUrl);
+    const matched = await matchNarrationLevel(buffer, target);
+    if (matched.gainDb !== 0) {
+      console.log(
+        `[Longform ${jobId}] scene ${sceneIndex} re-voice matched to the master: ` +
+          `${matched.levelDb.toFixed(1)} → ${target.toFixed(1)} dBFS ` +
+          `(${matched.gainDb >= 0 ? "+" : ""}${matched.gainDb} dB)`
+      );
+    }
+    return matched.buffer;
+  } catch (e: any) {
+    console.warn(
+      `[Longform ${jobId}] scene ${sceneIndex}: level match to the master skipped ` +
+        `(${e?.message}); keeping the clip as voiced`
+    );
+    return buffer;
+  }
 }
 
 /**

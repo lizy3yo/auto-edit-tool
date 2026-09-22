@@ -29,6 +29,7 @@ import { mkdirSync, rmSync, existsSync, readFileSync } from "fs";
 import { randomUUID } from "crypto";
 import { invokeClaude } from "./claude";
 import { runFfmpeg, downloadToTemp } from "./videoAssembly";
+import { matchGainDb, measureSpeechLevelDb } from "./narrationLevel";
 import type { StoryboardScene } from "../shared/types";
 
 export type DeliveryPace = "slow" | "measured" | "natural" | "brisk";
@@ -292,6 +293,25 @@ export function deliveryRuns(
 // -52..-58 dBFS a normally trained clone's own pauses occupy, and above the -60 dB floor the
 // pause cap treats as dead air (0.0018 measured -72 dBFS and would have been stripped).
 export const ROOM_TONE_AMPLITUDE = 0.008;
+/**
+ * Each run is its own TTS generation and comes back at its own energy (measured 3-6 dB steps
+ * between runs on a hosted film — see `narrationLevel.ts`). The runs are matched to their
+ * MEDIAN before the join, so the seam is level and the master's overall loudness is unchanged.
+ * Pure: run levels in, one gain per run out; a run that could not be measured gets 0.
+ */
+export function runMatchGainsDb(levelsDb: (number | undefined)[]): number[] {
+  const known = levelsDb.filter(
+    (v): v is number => v != null && Number.isFinite(v)
+  );
+  if (known.length < 2) return levelsDb.map(() => 0);
+  const s = [...known].sort((a, b) => a - b);
+  const mid = s.length >> 1;
+  const median = s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+  return levelsDb.map(v =>
+    v != null && Number.isFinite(v) ? matchGainDb(v, median) : 0
+  );
+}
+
 export async function concatWithPauses(
   urls: string[],
   pausesAfterMs: number[]
@@ -300,15 +320,36 @@ export async function concatWithPauses(
   const dir = path.join(os.tmpdir(), `delivery-${randomUUID()}`);
   mkdirSync(dir, { recursive: true });
   try {
+    const paths: string[] = [];
+    for (let i = 0; i < urls.length; i++) {
+      paths.push(await downloadToTemp(urls[i], dir, `run-${i}.mp3`));
+    }
+    // Best-effort: a run that will not measure is joined at the level it arrived.
+    const levels = await Promise.all(
+      paths.map(p => measureSpeechLevelDb(p).catch(() => undefined))
+    );
+    const gains = runMatchGainsDb(levels);
+    if (gains.some(g => g !== 0)) {
+      console.log(
+        `[delivery] run levels matched: ` +
+          gains
+            .map((g, i) =>
+              levels[i] == null
+                ? `run ${i + 1} unmeasured`
+                : `run ${i + 1} ${levels[i]!.toFixed(1)} dB ${g >= 0 ? "+" : ""}${g} dB`
+            )
+            .join(", ")
+      );
+    }
     const ins: string[] = [];
     const legs: string[] = [];
     const order: string[] = [];
     let n = 0;
     for (let i = 0; i < urls.length; i++) {
-      const p = await downloadToTemp(urls[i], dir, `run-${i}.mp3`);
-      ins.push("-i", p);
+      ins.push("-i", paths[i]);
+      const gain = gains[i] !== 0 ? `,volume=${gains[i]}dB` : "";
       legs.push(
-        `[${n}:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[r${i}]`
+        `[${n}:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo${gain}[r${i}]`
       );
       order.push(`[r${i}]`);
       n++;

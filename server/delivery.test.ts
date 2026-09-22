@@ -16,6 +16,25 @@ vi.mock("./videoAssembly", () => ({
     return p;
   },
 }));
+// The run levels are set per test by file name (`run-0.mp3` → index 0); a run with no entry
+// "fails to measure", which is the path a bad download takes in production.
+const { runLevels } = vi.hoisted(() => ({
+  runLevels: {} as Record<number, number>,
+}));
+vi.mock("./narrationLevel", async () => {
+  const actual =
+    await vi.importActual<typeof import("./narrationLevel")>(
+      "./narrationLevel"
+    );
+  return {
+    ...actual,
+    measureSpeechLevelDb: async (p: string) => {
+      const i = Number(/run-(\d+)\.mp3$/.exec(p)?.[1]);
+      if (!(i in runLevels)) throw new Error("unmeasurable");
+      return runLevels[i];
+    },
+  };
+});
 
 import {
   scriptParagraphs,
@@ -26,6 +45,7 @@ import {
   planChangesTheRead,
   applyDeliveryToScenes,
   concatWithPauses,
+  runMatchGainsDb,
   type DeliveryPlan,
 } from "./delivery";
 
@@ -52,6 +72,7 @@ const plan = (
 beforeEach(() => {
   mockInvoke.mockReset();
   ffmpegCalls.length = 0;
+  for (const k of Object.keys(runLevels)) delete runLevels[Number(k)];
 });
 
 describe("parseDeliveryPlan", () => {
@@ -225,6 +246,39 @@ describe("concatWithPauses", () => {
     expect(graph).toContain("atrim=end=0.300");
     expect(graph).toContain("[r0][p0][r1][r2]concat=n=4");
     expect(graph).not.toContain("anullsrc");
+    // Nothing measured ⇒ nothing gained: the runs are joined as they arrived.
+    expect(graph).not.toContain("volume=");
     expect(scriptParagraphs(SCRIPT)).toHaveLength(3);
+  });
+
+  it("matches each run to the median level before the join, skipping ones it cannot measure", async () => {
+    // Run 1 sits 4 dB under the median, run 3 sits 3 dB over; run 2 is the median itself, and
+    // run 4 never measured — the shape of a delivery-run master with one quiet generation.
+    Object.assign(runLevels, { 0: -30, 1: -26, 2: -23 });
+    await concatWithPauses(["u1", "u2", "u3", "u4"], [0, 0, 0, 0]);
+    const args = ffmpegCalls[0];
+    const graph = args[args.indexOf("-filter_complex") + 1];
+    expect(graph).toContain(
+      "[0:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,volume=4dB[r0]"
+    );
+    expect(graph).toContain("channel_layouts=stereo[r1]");
+    expect(graph).toContain("channel_layouts=stereo,volume=-3dB[r2]");
+    expect(graph).toContain("channel_layouts=stereo[r3]");
+    expect(graph).toContain("[r0][r1][r2][r3]concat=n=4");
+  });
+});
+
+describe("runMatchGainsDb", () => {
+  it("pulls every measured run to the median and leaves the unmeasured at 0", () => {
+    expect(runMatchGainsDb([-30, -26, -23, undefined])).toEqual([4, 0, -3, 0]);
+  });
+  it("needs two measured runs before it trusts a median", () => {
+    expect(runMatchGainsDb([-30])).toEqual([0]);
+    expect(runMatchGainsDb([-30, undefined, NaN])).toEqual([0, 0, 0]);
+  });
+  it("ignores a difference inside the deadband and a difference too large to be a real take", () => {
+    // 0.3 dB is not worth a gain; 12 dB is a wrong file, not a quiet read.
+    expect(runMatchGainsDb([-26.3, -26, -26])).toEqual([0, 0, 0]);
+    expect(runMatchGainsDb([-38, -26, -26])).toEqual([0, 0, 0]);
   });
 });
