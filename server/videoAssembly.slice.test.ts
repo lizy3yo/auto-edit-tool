@@ -114,6 +114,43 @@ describe("sliceAudioSegmentsBestEffort", () => {
   });
 });
 
+describe("parallel cutting", () => {
+  it("keeps every cut in its own slot and reports each one done", async () => {
+    // Now cut eight at a time: lengths 0.2 s .. 2.8 s make every buffer's size distinct, so a
+    // cut landing in the wrong slot would show as a size out of order.
+    serveMaster();
+    const segs = Array.from({ length: 14 }, (_, i) => ({
+      startSec: 0,
+      lenSec: 0.2 * (i + 1),
+    }));
+    const progress: number[] = [];
+    const cuts = await sliceAudioSegmentsBestEffort(
+      "https://example.test/master.mp3",
+      segs,
+      undefined,
+      done => progress.push(done)
+    );
+    const sizes = cuts.map(c => c?.length ?? 0);
+    for (let i = 1; i < sizes.length; i++)
+      expect(sizes[i]).toBeGreaterThan(sizes[i - 1]);
+    expect(progress.sort((a, b) => a - b)).toEqual(
+      Array.from({ length: 14 }, (_, i) => i + 1)
+    );
+  });
+
+  it("a strict cut still rejects when one of many parallel segments is bad", async () => {
+    serveMaster();
+    const segs = Array.from({ length: 12 }, () => ({
+      startSec: 0,
+      lenSec: 0.5,
+    }));
+    segs[5] = BAD;
+    await expect(
+      sliceAudioSegments("https://example.test/master.mp3", segs)
+    ).rejects.toThrow();
+  });
+});
+
 describe("sliceAudioSegments (strict)", () => {
   it("still fails the whole call on a bad segment", async () => {
     serveMaster();

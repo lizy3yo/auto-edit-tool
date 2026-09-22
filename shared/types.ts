@@ -976,8 +976,14 @@ export interface LongformInputParams {
     /** p5..p95 spread of the voice, dB, before and after. Equal ⇒ nothing needed changing. */
     spreadBeforeDb: number;
     spreadAfterDb: number;
-    /** "master" levelled the master and re-cut the slices; "scenes" matched per-scene audio. */
+    /** "master" levelled the master; "scenes" matched per-scene audio (a job with no master). */
     mode: "master" | "scenes";
+    /**
+     * False from the moment the voice is evened out until the next final is written, which is
+     * what the card's "Assemble to apply" notice reads. Absent on records written when the pass
+     * still assembled by itself — those are already in their final.
+     */
+    applied?: boolean;
   };
   /**
    * Which TTS vendor voices this film. Chosen by the operator BEFORE anything is voiced and

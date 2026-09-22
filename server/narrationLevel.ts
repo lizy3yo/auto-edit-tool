@@ -515,16 +515,20 @@ export function matchGainDb(level: number, target: number): number {
  * Throws on any ffmpeg failure — callers decide that the un-levelled audio ships.
  */
 export async function levelNarrationAudio(
-  audio: Buffer
+  audio: Buffer,
+  /** Told when each half starts, for a progress bar. */
+  onStep?: (step: "measure" | "apply") => void
 ): Promise<{ buffer: Buffer; plan: LevelPlan }> {
   const dir = join(tmpdir(), `narration-level-${randomUUID()}`);
   mkdirSync(dir, { recursive: true });
   try {
     const inPath = join(dir, "in.mp3");
     writeFileSync(inPath, audio);
+    onStep?.("measure");
     const frames = await measureLevelFrames(inPath);
     const plan = planLevelGains(frames);
     if (!plan.needed) return { buffer: audio, plan };
+    onStep?.("apply");
     const durationSec = frames[frames.length - 1].tSec + LEVEL_FRAME_SEC;
     const env = envelopeSamples(plan, durationSec);
     const envPath = join(dir, "env.f32");
@@ -549,13 +553,14 @@ export async function levelNarrationAudio(
 
 /** `levelNarrationAudio` for a stored narration (our own R2 object): download, level, return. */
 export async function levelNarrationUrl(
-  url: string
+  url: string,
+  onStep?: (step: "measure" | "apply") => void
 ): Promise<{ buffer: Buffer; plan: LevelPlan }> {
   const dir = join(tmpdir(), `narration-level-${randomUUID()}`);
   mkdirSync(dir, { recursive: true });
   try {
     const local = await downloadToTemp(url, dir, "in.mp3");
-    return await levelNarrationAudio(readFileSync(local));
+    return await levelNarrationAudio(readFileSync(local), onStep);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -596,15 +596,28 @@ Express · tRPC · Drizzle · MySQL.
   read comes back byte-identical (`LEVEL_MIN_SPREAD_DB`). The render log prints the spread
   before/after. Uploads (`normalizeNarrationAudio`) are NOT levelled — a human read's dynamics
   are the operator's. FILMS RENDERED BEFORE the leveller get the one-time "Even out voice"
-  button on the job card (`levelJobNarration`, route `levelNarration`): it levels the stored
-  master, uploads it under a NEW url (so the `filmaudio-overlay` cache key misses and the
-  film's track is rebuilt), re-cuts every scene's slice from it and re-stitches — no provider
-  is touched, because the leveller never moves anything in time and the alignment, host clips
-  and b-roll stay valid. A job with no master (voicing failed, repaired beat by beat) has each
-  scene file matched to the film's median instead (`runMatchGainsDb`). The result lands on
-  `inputParams.narrationLevelled` (surfaced by `pollJob`) so the button greys out and the card
-  says what it measured; a steady read records that and changes no bytes. It does not fix a
-  provider artifact (a buzzy or robotic generation) — that needs a fresh read
+  button on the job card (`levelJobNarration`, route `levelNarration`). It is LEVEL-ONLY and
+  takes seconds: it levels the stored master and uploads it under a NEW url, and does not
+  assemble — the live cut preview plays the master, so the operator hears it at once, and
+  `narrationLevelled.applied === false` drives an "assemble to apply" notice until the next
+  final is written (`assembleAndFinalizeCore` flips it). It used to re-stitch as its last step,
+  which on a film with no final yet made a seconds-long fix look like a twenty-minute one (that
+  was the film's first assembly) with nothing on the card while it ran. On a film on the master
+  track (`masterOverlayEligible`) the scene SLICES ARE DELIBERATELY LEFT ALONE: each scene's
+  video file embeds its slice and the `mux` cache key names the slice URL, so re-cutting them
+  forced every scene to re-encode on the next Reassemble for audio the film never plays; only
+  the `filmaudio-overlay` key (which names the master) misses. Measured on a 10-scene job:
+  levelling 4.3 s, then Reassemble 8.8 s with 10/10 scenes reused. Off the master track the
+  slices are re-cut (the film plays them); a job with no master has each scene file matched to
+  the film's median (`runMatchGainsDb`). No provider is touched. The job flips to `processing`
+  for the pass and is put back to its prior status and stage. It does not fix a provider
+  artifact (a buzzy or robotic generation) — that needs a fresh read. PROGRESS for this pass and
+  for every assembly is `shared/jobPhase.ts`: a label and a weighted percentage (scene encodes
+  own 3-85% of assembly, cache hits count instantly) written as `progress.phase` through
+  `setJobPhase`, which throttles to one write per 1.5 s and chains writes per job so a late one
+  never lands after the clear. `assemblePerSceneFilm` reports through its `onProgress` option.
+  Narration slices are now cut eight at a time (`SLICE_CONCURRENCY`): 224 slices of a 16-min
+  master went 24 s → 5 s; strict callers still throw the first error, after every worker stops
 - `server/ttsMinimax.ts` — the SECOND voice lane, and the third narration option beside the
   channel voice and a supplied file. Deliberately NOT an automatic failover: the vendor is an
   operator's choice made before anything is voiced and pinned to `inputParams.ttsVendor`, so a

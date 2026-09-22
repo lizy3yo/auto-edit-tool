@@ -109,6 +109,7 @@ import {
   concatWithPauses,
   runMatchGainsDb,
 } from "./delivery";
+import { assemblyPhase, levelPhase, type JobPhase } from "../shared/jobPhase";
 import {
   levelNarrationAudio,
   levelNarrationUrl,
@@ -364,9 +365,71 @@ export function appendJobWarning(jobId: number, message: string): void {
 export function jobProgress(
   jobId: number,
   counts: { scenesTotal: number; scenesDone: number }
-): { scenesTotal: number; scenesDone: number; warnings?: string[] } {
+): {
+  scenesTotal: number;
+  scenesDone: number;
+  warnings?: string[];
+  phase?: JobPhase;
+} {
+  _lastCounts.set(jobId, counts);
   const warnings = _jobWarnings.get(jobId);
-  return warnings?.length ? { ...counts, warnings } : counts;
+  const phase = _jobPhase.get(jobId);
+  return {
+    ...counts,
+    ...(warnings?.length ? { warnings } : {}),
+    ...(phase ? { phase } : {}),
+  };
+}
+
+// The step-by-step progress of a pass that is not the clip stage — "Even out voice" and the film
+// assembly (`shared/jobPhase.ts`). Rides in the same `progress` blob as `phase`, written through
+// `jobProgress` so warnings and counts survive. Writes are throttled (a 224-scene assembly
+// reports every scene) and chained per job, so a late write can never land after the clear.
+const _jobPhase = new Map<number, JobPhase>();
+const _lastCounts = new Map<
+  number,
+  { scenesTotal: number; scenesDone: number }
+>();
+const _phaseWrites = new Map<
+  number,
+  { last: number; timer?: ReturnType<typeof setTimeout>; chain: Promise<void> }
+>();
+const PHASE_WRITE_MS = 1500;
+
+export function setJobPhase(jobId: number, phase: JobPhase | null): void {
+  if (phase) _jobPhase.set(jobId, phase);
+  else _jobPhase.delete(jobId);
+  let st = _phaseWrites.get(jobId);
+  if (!st) {
+    st = { last: 0, chain: Promise.resolve() };
+    _phaseWrites.set(jobId, st);
+  }
+  const state = st;
+  const write = (): void => {
+    state.last = Date.now();
+    state.timer = undefined;
+    state.chain = state.chain
+      .then(() =>
+        updateLongformVideoJob(jobId, {
+          progress: jobProgress(
+            jobId,
+            _lastCounts.get(jobId) ?? { scenesTotal: 0, scenesDone: 0 }
+          ),
+        })
+      )
+      .catch(() => {
+        /* progress is advisory — never fail a pass over it */
+      });
+  };
+  if (!phase) {
+    if (state.timer) clearTimeout(state.timer);
+    write();
+    return;
+  }
+  if (state.timer) return; // a trailing write is already due and reads the latest phase
+  const wait = PHASE_WRITE_MS - (Date.now() - state.last);
+  if (wait <= 0) write();
+  else state.timer = setTimeout(write, wait);
 }
 
 // ─── Pure helpers (unit-tested) ────────────────────────────────────
@@ -12368,7 +12431,21 @@ export function describeUnassemblableScenes(
   return `Not assembling a partial video. ${parts.join(" ")}`;
 }
 
+/** Every assembly reports its steps to the card (`shared/jobPhase.ts`) and always clears them. */
 async function assembleAndFinalize(
+  jobId: number,
+  scenes: StoryboardScene[],
+  params: LongformInputParams
+): Promise<void> {
+  setJobPhase(jobId, assemblyPhase({ step: "prepare" }));
+  try {
+    await assembleAndFinalizeCore(jobId, scenes, params);
+  } finally {
+    setJobPhase(jobId, null);
+  }
+}
+
+async function assembleAndFinalizeCore(
   jobId: number,
   scenes: StoryboardScene[],
   params: LongformInputParams
@@ -12521,6 +12598,7 @@ async function assembleAndFinalize(
     masterAudioUrl,
     nameCard,
     musicBedUrls,
+    onProgress: p => setJobPhase(jobId, assemblyPhase(p)),
   });
   console.log(
     `[Longform ${jobId}] assembly rendered in ${sinceStart()}s | ${Math.round(buffer.length / 1e6)}MB | uploading`
@@ -12543,6 +12621,7 @@ async function assembleAndFinalize(
   }
 
   const key = `longform/${jobId}/final-${nanoid(8)}.mp4`;
+  setJobPhase(jobId, assemblyPhase({ step: "upload" }));
   const uploadStart = Date.now();
   const { url } = await storagePut(key, buffer, "video/mp4");
   console.log(
@@ -12555,6 +12634,9 @@ async function assembleAndFinalize(
   // write is unchanged.
   const hadTimingEdits = scenes.some(s => s.timingEdited);
   if (hadTimingEdits) for (const s of scenes) delete s.timingEdited;
+  // A voice evened out since the last cut is in this one now — clear "Assemble to apply".
+  const levelApplied = params.narrationLevelled?.applied === false;
+  if (levelApplied) params.narrationLevelled!.applied = true;
   await updateLongformVideoJob(jobId, {
     status: "completed",
     stage: "done",
@@ -12562,6 +12644,7 @@ async function assembleAndFinalize(
     finalFileKey: key,
     completedAt: new Date(),
     ...(hadTimingEdits || qrWindowChanged ? { storyboard: scenes } : {}),
+    ...(levelApplied ? { inputParams: params } : {}),
   });
 }
 
@@ -12757,17 +12840,28 @@ export async function retryJobAssembly(
 }
 
 /**
- * "Even out voice" — the one-time repair for a film rendered BEFORE the narration leveller
- * existed (`server/narrationLevel.ts`). Such a film carries the provider's volume drift in its
- * stored master, and nothing about fixing it needs a provider: the leveller never moves anything
- * in time, so the alignment, the host clips and the b-roll all stay valid. The pass levels the
- * master, uploads it as the new master (a new URL, so every assembly-cache key that names it
- * misses and the film's audio track is rebuilt), re-cuts every scene's slice from it so the
- * per-scene fallback and the cut-room preview agree with the film, and re-stitches. A job with
- * no master — one whose voicing failed and was repaired beat by beat — has each scene's own
- * file matched to the film's median instead. `inputParams.narrationLevelled` records the
- * result so the button greys out; a read that was already steady records that too and leaves
- * every byte alone. Runs under the job lock like any other whole-storyboard pass.
+ * "Even out voice" — levels the narration of a film rendered BEFORE the narration leveller
+ * existed (`server/narrationLevel.ts`). It is deliberately LEVEL-ONLY: it does not assemble.
+ * Nothing about the fix needs a provider — the leveller never moves anything in time, so the
+ * alignment, host clips and b-roll stay valid — and the operator hears the result at once in the
+ * live cut preview, which plays the job's master. The card then says "Assemble / Reassemble to
+ * apply" (`narrationLevelled.applied === false`) until the next final is written.
+ *
+ * It used to re-stitch as its last step, which made a one-minute fix look like a twenty-minute
+ * one on a film with no final yet (that time was the film's first assembly, not the levelling),
+ * with nothing on the card while it ran.
+ *
+ * On a film that uses the master track (`masterOverlayEligible` — almost all of them) ONLY the
+ * master is replaced. The scene slices are left as they are, on purpose: each scene's video
+ * file embeds its slice and the assembly cache keys on the slice URL, so re-cutting 224 slices
+ * forced 224 scene re-encodes on the next Reassemble for audio the film never plays (its track
+ * is the master). They remain only the fallback if a run's master overlay fails, and the
+ * waveform a host re-render is synced to, where volume does not move the mouth. A film OFF the
+ * master track plays those slices, so there they are re-cut (eight at a time); a job with no
+ * master at all has each scene file matched to the film's median.
+ *
+ * Progress is reported step by step (`levelPhase`). The job is flipped to `processing` for the
+ * pass and put back to the status and stage it had, since nothing about the film's state moved.
  */
 export async function levelJobNarration(jobId: number): Promise<void> {
   await withJobLock(jobId, async () => {
@@ -12775,142 +12869,162 @@ export async function levelJobNarration(jobId: number): Promise<void> {
     if (!job) throw new Error("Job not found");
     const params = job.inputParams as LongformInputParams;
     const scenes = (job.storyboard as StoryboardScene[]) || [];
+    const prior = { status: job.status, stage: job.stage };
     const at = new Date().toISOString();
+    const phase = (p: Parameters<typeof levelPhase>[0]) =>
+      setJobPhase(jobId, levelPhase(p));
 
-    let changed = false;
-    let record: NonNullable<LongformInputParams["narrationLevelled"]>;
-
-    if (job.masterAudioUrl) {
-      const { buffer, plan } = await levelNarrationUrl(job.masterAudioUrl);
-      console.log(
-        `[Longform ${jobId}] even out voice: ${describeLevelPlan(plan)}`
-      );
-      record = {
-        at,
-        spreadBeforeDb: plan.spreadBeforeDb,
-        spreadAfterDb: plan.needed ? plan.spreadAfterDb : plan.spreadBeforeDb,
-        mode: "master",
-      };
-      if (plan.needed) {
-        const key = `longform/${jobId}/master-vo-${nanoid(6)}.mp3`;
-        const { url } = await storagePut(key, buffer, "audio/mpeg");
-        // Re-cut every slice from the levelled master. Best-effort per scene: a cut that fails
-        // keeps its old (un-levelled) slice, which only the per-scene fallback path would play.
-        const sliced = scenes.filter(hasMasterRange);
-        const cuts = await sliceAudioSegmentsBestEffort(
-          url,
-          sliced.map(s => ({
-            startSec: s.narrationStartSec as number,
-            lenSec: Math.max(
-              0.1,
-              (s.narrationEndSec as number) - (s.narrationStartSec as number)
-            ),
-          })),
-          (i, err: any) =>
-            console.error(
-              `[Longform ${jobId}] even out voice: scene ${sliced[i].index} slice not re-cut: ${err?.message ?? err}`
-            )
-        );
-        let recut = 0;
-        await Promise.all(
-          sliced.map(async (s, i) => {
-            const cut = cuts[i];
-            if (!cut) return;
-            try {
-              const k = `longform/${jobId}/scene-${s.index}-vo-${nanoid(6)}.mp3`;
-              s.audioUrl = (await storagePut(k, cut, "audio/mpeg")).url;
-              recut++;
-            } catch (err: any) {
-              console.error(
-                `[Longform ${jobId}] even out voice: scene ${s.index} slice not uploaded: ${err?.message ?? err}`
-              );
-            }
-          })
-        );
-        console.log(
-          `[Longform ${jobId}] even out voice: new master ${url}; ${recut}/${sliced.length} slices re-cut`
-        );
-        await updateLongformVideoJob(jobId, {
-          masterAudioUrl: url,
-          storyboard: scenes,
-        });
-        changed = true;
-      }
-    } else {
-      // No master: each scene carries its own voice file. Match them to the film's median.
-      const voiced = scenes.filter(s => !!s.audioUrl);
-      if (voiced.length === 0)
-        throw new Error("This job has no narration to level");
-      const levels = await Promise.all(
-        voiced.map(s =>
-          measureSpeechLevelOfUrl(s.audioUrl as string).catch(() => undefined)
-        )
-      );
-      const known = levels.filter((v): v is number => v != null);
-      const spread = (v: number[]) =>
-        v.length ? Math.round((Math.max(...v) - Math.min(...v)) * 10) / 10 : 0;
-      const gains = runMatchGainsDb(levels);
-      const median = known.length
-        ? [...known].sort((a, b) => a - b)[known.length >> 1]
-        : 0;
-      let matched = 0;
-      for (let i = 0; i < voiced.length; i++) {
-        if (gains[i] === 0) continue;
-        const s = voiced[i];
-        try {
-          const r = await matchNarrationUrlToLevel(
-            s.audioUrl as string,
-            median
-          );
-          if (r.gainDb === 0) continue;
-          const k = `longform/${jobId}/scene-${s.index}-vo-${nanoid(6)}.mp3`;
-          s.audioUrl = (await storagePut(k, r.buffer, "audio/mpeg")).url;
-          matched++;
-        } catch (err: any) {
-          console.error(
-            `[Longform ${jobId}] even out voice: scene ${s.index} not matched: ${err?.message ?? err}`
-          );
-        }
-      }
-      const after = levels.map((v, i) => (v == null ? v : v + gains[i]));
-      record = {
-        at,
-        spreadBeforeDb: spread(known),
-        spreadAfterDb: spread(after.filter((v): v is number => v != null)),
-        mode: "scenes",
-      };
-      console.log(
-        `[Longform ${jobId}] even out voice: ${matched}/${voiced.length} scene files matched to ` +
-          `${median.toFixed(1)} dBFS (spread ${record.spreadBeforeDb} → ${record.spreadAfterDb} dB)`
-      );
-      if (matched > 0) {
-        await updateLongformVideoJob(jobId, { storyboard: scenes });
-        changed = true;
-      }
-    }
-
-    params.narrationLevelled = record;
-    await updateLongformVideoJob(jobId, { inputParams: params });
-    // Already steady AND a final exists: nothing to re-stitch, the final stands. With no final
-    // yet (the card offered "Even out voice & assemble") the stitch is the point — build it.
-    if (!changed && job.finalVideoUrl) return;
-
-    // Re-stitch with the new audio. Same tail as `retryJobAssembly`, inlined because we already
-    // hold the lock (withJobLock is not re-entrant).
     await updateLongformVideoJob(jobId, {
       status: "processing",
-      stage: "assembly",
       errorMessage: null,
     });
+    phase({ step: "download" });
+
+    let record: NonNullable<LongformInputParams["narrationLevelled"]>;
+    let storyboardChanged = false;
     try {
-      await assembleAndFinalize(jobId, scenes, params);
-    } catch (err: any) {
+      if (job.masterAudioUrl) {
+        const { buffer, plan } = await levelNarrationUrl(
+          job.masterAudioUrl,
+          step => phase({ step })
+        );
+        console.log(
+          `[Longform ${jobId}] even out voice: ${describeLevelPlan(plan)}`
+        );
+        record = {
+          at,
+          spreadBeforeDb: plan.spreadBeforeDb,
+          spreadAfterDb: plan.needed ? plan.spreadAfterDb : plan.spreadBeforeDb,
+          mode: "master",
+          applied: !plan.needed,
+        };
+        if (plan.needed) {
+          phase({ step: "save" });
+          const key = `longform/${jobId}/master-vo-${nanoid(6)}.mp3`;
+          const { url } = await storagePut(key, buffer, "audio/mpeg");
+          const sorted = [...scenes].sort((a, b) => a.index - b.index);
+          if (!masterOverlayEligible(sorted, url)) {
+            const sliced = scenes.filter(hasMasterRange);
+            phase({ step: "slices", done: 0, total: sliced.length });
+            const cuts = await sliceAudioSegmentsBestEffort(
+              url,
+              sliced.map(s => ({
+                startSec: s.narrationStartSec as number,
+                lenSec: Math.max(
+                  0.1,
+                  (s.narrationEndSec as number) -
+                    (s.narrationStartSec as number)
+                ),
+              })),
+              (i, err: any) =>
+                console.error(
+                  `[Longform ${jobId}] even out voice: scene ${sliced[i].index} slice not re-cut: ${err?.message ?? err}`
+                ),
+              (done, total) => phase({ step: "slices", done, total })
+            );
+            await Promise.all(
+              sliced.map(async (s, i) => {
+                const cut = cuts[i];
+                if (!cut) return;
+                try {
+                  const k = `longform/${jobId}/scene-${s.index}-vo-${nanoid(6)}.mp3`;
+                  s.audioUrl = (await storagePut(k, cut, "audio/mpeg")).url;
+                  storyboardChanged = true;
+                } catch (err: any) {
+                  console.error(
+                    `[Longform ${jobId}] even out voice: scene ${s.index} slice not uploaded: ${err?.message ?? err}`
+                  );
+                }
+              })
+            );
+          }
+          console.log(
+            `[Longform ${jobId}] even out voice: new master ${url}` +
+              (storyboardChanged
+                ? "; slices re-cut (film is off the master track)"
+                : "; slices kept (the film plays the master)")
+          );
+          await updateLongformVideoJob(jobId, {
+            masterAudioUrl: url,
+            ...(storyboardChanged ? { storyboard: scenes } : {}),
+          });
+        }
+      } else {
+        // No master: each scene carries its own voice file. Match them to the film's median.
+        const voiced = scenes.filter(s => !!s.audioUrl);
+        if (voiced.length === 0)
+          throw new Error("This job has no narration to level");
+        phase({ step: "measure" });
+        const levels = await Promise.all(
+          voiced.map(s =>
+            measureSpeechLevelOfUrl(s.audioUrl as string).catch(() => undefined)
+          )
+        );
+        const known = levels.filter((v): v is number => v != null);
+        const spread = (v: number[]) =>
+          v.length
+            ? Math.round((Math.max(...v) - Math.min(...v)) * 10) / 10
+            : 0;
+        const gains = runMatchGainsDb(levels);
+        const median = known.length
+          ? [...known].sort((a, b) => a - b)[known.length >> 1]
+          : 0;
+        const todo = voiced.filter((_, i) => gains[i] !== 0);
+        let matched = 0;
+        let seen = 0;
+        phase({ step: "slices", done: 0, total: todo.length });
+        for (const s of todo) {
+          try {
+            const r = await matchNarrationUrlToLevel(
+              s.audioUrl as string,
+              median
+            );
+            if (r.gainDb !== 0) {
+              const k = `longform/${jobId}/scene-${s.index}-vo-${nanoid(6)}.mp3`;
+              s.audioUrl = (await storagePut(k, r.buffer, "audio/mpeg")).url;
+              matched++;
+            }
+          } catch (err: any) {
+            console.error(
+              `[Longform ${jobId}] even out voice: scene ${s.index} not matched: ${err?.message ?? err}`
+            );
+          }
+          phase({ step: "slices", done: ++seen, total: todo.length });
+        }
+        const after = levels.map((v, i) => (v == null ? v : v + gains[i]));
+        record = {
+          at,
+          spreadBeforeDb: spread(known),
+          spreadAfterDb: spread(after.filter((v): v is number => v != null)),
+          mode: "scenes",
+          applied: matched === 0,
+        };
+        console.log(
+          `[Longform ${jobId}] even out voice: ${matched}/${voiced.length} scene files matched to ` +
+            `${median.toFixed(1)} dBFS (spread ${record.spreadBeforeDb} → ${record.spreadAfterDb} dB)`
+        );
+        if (matched > 0) {
+          storyboardChanged = true;
+          await updateLongformVideoJob(jobId, { storyboard: scenes });
+        }
+      }
+      params.narrationLevelled = record;
       await updateLongformVideoJob(jobId, {
-        status: "failed",
-        errorMessage: err.message || "Assembly failed",
-        completedAt: new Date(),
+        inputParams: params,
+        status: prior.status,
+        stage: prior.stage,
+      });
+    } catch (err: any) {
+      // Nothing was replaced unless its write above landed, so the film is still whole: put
+      // the job back as it was and say what went wrong.
+      await updateLongformVideoJob(jobId, {
+        status: prior.status,
+        stage: prior.stage,
+        errorMessage: `Even out voice failed: ${err?.message ?? err}`,
       }).catch(onFailedStatusWriteError(jobId));
       throw err;
+    } finally {
+      setJobPhase(jobId, null);
     }
   });
 }

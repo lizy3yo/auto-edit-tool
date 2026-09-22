@@ -844,7 +844,7 @@ export default function LongformJobSlot({
   const levelNarrationMutation = trpc.longformVideo.levelNarration.useMutation({
     onSuccess: () => {
       toast.success(
-        "Evening out the voice — the narration is levelled, its slices re-cut and the film re-stitched. Nothing re-renders."
+        "Evening out the voice. Preview it when it finishes, then assemble to apply it to the film."
       );
       if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
     },
@@ -1424,8 +1424,16 @@ export default function LongformJobSlot({
   };
 
   const progress = job?.progress as
-    | { scenesTotal: number; scenesDone: number; warnings?: string[] }
+    | {
+        scenesTotal: number;
+        scenesDone: number;
+        warnings?: string[];
+        /** A step-by-step pass (assembly, "Even out voice") — `shared/jobPhase.ts`. */
+        phase?: { label: string; pct: number };
+      }
     | undefined;
+  // Only meaningful while the job is actually working; a stale one never shows on a settled card.
+  const phase = job?.status === "processing" ? progress?.phase : undefined;
 
   // Scenes the film cannot be assembled from — the holes a "Retry failed scenes" pass would
   // fill. A scene needs BOTH a clip and the narration that plays under it (the server answers
@@ -1925,14 +1933,23 @@ export default function LongformJobSlot({
                 ) : (
                   <div>
                     <p className="text-sm font-medium">
-                      {STAGE_LABELS[job.stage] || job.stage}
+                      {/* "Even out voice" runs on a job that is otherwise done. */}
+                      {phase && job.stage === "done"
+                        ? "Evening out voice"
+                        : STAGE_LABELS[job.stage] || job.stage}
                     </p>
-                    {progress &&
+                    {phase ? (
+                      <p className="text-xs text-muted-foreground">
+                        {phase.label} · {phase.pct}%
+                      </p>
+                    ) : (
+                      progress &&
                       (job.stage === "voiceover" || job.stage === "clips") && (
                         <p className="text-xs text-muted-foreground">
                           {progress.scenesDone}/{progress.scenesTotal} scenes
                         </p>
-                      )}
+                      )
+                    )}
                   </div>
                 )}
               </div>
@@ -1995,17 +2012,20 @@ export default function LongformJobSlot({
             )}
             {progress &&
               !isEditing &&
-              (job.stage === "voiceover" || job.stage === "clips") && (
+              (phase || job.stage === "voiceover" || job.stage === "clips") && (
                 <div className="h-2 w-full rounded-full bg-secondary overflow-hidden">
                   <div
                     className="h-full bg-primary transition-all"
                     style={{
                       width: `${
-                        progress.scenesTotal > 0
-                          ? Math.round(
-                              (progress.scenesDone / progress.scenesTotal) * 100
-                            )
-                          : 0
+                        phase
+                          ? phase.pct
+                          : progress.scenesTotal > 0
+                            ? Math.round(
+                                (progress.scenesDone / progress.scenesTotal) *
+                                  100
+                              )
+                            : 0
                       }%`,
                     }}
                   />
@@ -2206,8 +2226,6 @@ export default function LongformJobSlot({
                     )}
                     Assemble final video
                   </Button>
-                  {/* The pass ends by stitching the film, so here it levels AND builds the
-                      final in one go — no need to assemble first. */}
                   {!!job.masterAudioUrl && (
                     <Button
                       variant="outline"
@@ -2226,7 +2244,7 @@ export default function LongformJobSlot({
                         job.narrationLevelled
                           ? `Voice already evened out on ${new Date(job.narrationLevelled.at).toLocaleDateString()}: ` +
                             `${job.narrationLevelled.spreadBeforeDb} → ${job.narrationLevelled.spreadAfterDb} dB swing`
-                          : "Even out the narration's volume across the film, then build the final video — nothing re-renders, free."
+                          : "Even out the narration's volume across the film. Preview it here, then assemble — nothing re-renders, free."
                       }
                     >
                       {levelNarrationMutation.isPending ? (
@@ -2236,12 +2254,24 @@ export default function LongformJobSlot({
                       )}
                       {job.narrationLevelled
                         ? "Voice evened out"
-                        : "Even out voice & assemble"}
+                        : "Even out voice"}
                     </Button>
                   )}
                 </div>
               )}
 
+            {job.status === "completed" &&
+              job.narrationLevelled?.applied === false && (
+                <p className="flex items-center gap-2 rounded border border-primary/40 bg-primary/5 px-3 py-2 text-xs">
+                  <AudioLines className="h-3.5 w-3.5 shrink-0" />
+                  Voice evened out ({
+                    job.narrationLevelled.spreadBeforeDb
+                  } → {job.narrationLevelled.spreadAfterDb} dB swing). The
+                  preview already plays it —{" "}
+                  {job.finalVideoUrl ? "Reassemble" : "assemble"} to put it in
+                  the final video.
+                </p>
+              )}
             {job.status === "completed" &&
               job.finalVideoUrl &&
               scenes.some(sc => sc.timingEdited) && (
@@ -2393,7 +2423,7 @@ export default function LongformJobSlot({
                       job.narrationLevelled
                         ? `Voice already evened out on ${new Date(job.narrationLevelled.at).toLocaleDateString()}: ` +
                           `${job.narrationLevelled.spreadBeforeDb} → ${job.narrationLevelled.spreadAfterDb} dB swing`
-                        : "Even out the narration's volume across the film (a voice that drifts quiet then jumps back), re-cut its slices and re-stitch — nothing re-renders, free."
+                        : "Even out the narration's volume across the film (a voice that drifts quiet then jumps back). Preview it, then Reassemble — nothing re-renders, free."
                     }
                   >
                     {levelNarrationMutation.isPending ? (

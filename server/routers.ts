@@ -91,6 +91,7 @@ import {
   setSceneSplit as setLongformSceneSplit,
   retryJobAssembly,
   levelJobNarration,
+  isJobRendering,
   sceneFloorSec,
   revertJobTiming,
   rippleTrimScene,
@@ -3004,7 +3005,8 @@ const longformVideoRouter = router({
 
   /**
    * "Even out voice" — level the stored narration of a film rendered before the narration
-   * leveller existed, re-cut its slices and re-stitch (`levelJobNarration`). Spends nothing.
+   * leveller existed (`levelJobNarration`). Level-only: the operator previews it and assembles
+   * separately. Spends nothing.
    * One-shot per job: `inputParams.narrationLevelled` records the result and the button greys
    * out; a film voiced after the leveller shipped was levelled before its master was persisted
    * and gains nothing from a second pass. Fire-and-forget like the other re-stitch routes.
@@ -3030,6 +3032,13 @@ const longformVideoRouter = router({
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "This film's voice has already been evened out",
+        });
+      }
+      if (isJobRendering(input.jobId)) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            "Another pass is running on this job — try again when it settles",
         });
       }
       const scenes = (job.storyboard as StoryboardScene[]) || [];

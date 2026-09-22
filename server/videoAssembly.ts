@@ -46,6 +46,7 @@ import {
   sweep as sweepAssemblyCache,
 } from "./assemblyCache";
 import type { SplitLayout, VideoAspectRatio } from "../shared/types";
+import type { AssemblyStep } from "../shared/jobPhase";
 // The film timeline's arithmetic moved to `shared/` so the browser's live cut preview runs the
 // SAME code this does rather than a second implementation that can drift — see
 // shared/filmTimeline.ts. Re-exported because both planners have always been part of this
@@ -2571,10 +2572,14 @@ export async function sliceAudioSegments(
 export async function sliceAudioSegmentsBestEffort(
   audioUrl: string,
   segments: { startSec: number; lenSec: number }[],
-  onError?: (index: number, err: unknown) => void
+  onError?: (index: number, err: unknown) => void,
+  onCut?: (done: number, total: number) => void
 ): Promise<(Buffer | null)[]> {
-  return cutAudioSegments(audioUrl, segments, onError ?? (() => {}));
+  return cutAudioSegments(audioUrl, segments, onError ?? (() => {}), onCut);
 }
+
+/** Narration slices cut in parallel (see `cutAudioSegments`). */
+const SLICE_CONCURRENCY = 8;
 
 /**
  * Shared body of the two slicers above. With no `onError` a segment failure propagates
@@ -2583,29 +2588,52 @@ export async function sliceAudioSegmentsBestEffort(
 async function cutAudioSegments(
   audioUrl: string,
   segments: { startSec: number; lenSec: number }[],
-  onError?: (index: number, err: unknown) => void
+  onError?: (index: number, err: unknown) => void,
+  onCut?: (done: number, total: number) => void
 ): Promise<(Buffer | null)[]> {
   return withTempDir("slice", async workDir => {
     const inPath = await downloadToTemp(audioUrl, workDir, "master.mp3");
-    const out: (Buffer | null)[] = [];
-    for (let i = 0; i < segments.length; i++) {
-      const outPath = path.join(workDir, `seg-${i}.mp3`);
-      try {
-        await runFfmpeg(
-          buildAudioSegmentArgs({
-            inputPath: inPath,
-            outputPath: outPath,
-            startSec: segments[i].startSec,
-            lenSec: segments[i].lenSec,
-          })
-        );
-        out.push(readFileSync(outPath));
-      } catch (err) {
-        if (!onError) throw err;
-        onError(i, err);
-        out.push(null);
+    const out: (Buffer | null)[] = new Array(segments.length).fill(null);
+    // Cut SLICE_CONCURRENCY at a time (every call still waits on FFMPEG_SLOTS). One at a time,
+    // 224 slices of a 16-min master took 24 s; eight at a time, 5 s.
+    let cursor = 0;
+    let done = 0;
+    let firstError: unknown = null;
+    const worker = async (): Promise<void> => {
+      while (cursor < segments.length && firstError === null) {
+        const i = cursor++;
+        const outPath = path.join(workDir, `seg-${i}.mp3`);
+        try {
+          await runFfmpeg(
+            buildAudioSegmentArgs({
+              inputPath: inPath,
+              outputPath: outPath,
+              startSec: segments[i].startSec,
+              lenSec: segments[i].lenSec,
+            })
+          );
+          out[i] = readFileSync(outPath);
+        } catch (err) {
+          // Strict callers stop claiming new work; the others finish before we throw, so the
+          // temp dir is never removed under a running ffmpeg.
+          if (!onError) firstError ??= err;
+          else onError(i, err);
+        }
+        done++;
+        try {
+          onCut?.(done, segments.length);
+        } catch {
+          /* progress only */
+        }
       }
-    }
+    };
+    await Promise.all(
+      Array.from(
+        { length: Math.min(SLICE_CONCURRENCY, segments.length) },
+        worker
+      )
+    );
+    if (firstError !== null) throw firstError;
     return out;
   });
 }
@@ -2897,6 +2925,12 @@ export async function assemblePerSceneFilm(opts: {
    * `StoryboardScene.index`. Non-fatal: if the PNG can't be staged, the film renders without it.
    */
   nameCard?: { png: Buffer; sceneIndices: number[] };
+  /**
+   * Called as the assembly advances (scenes encoded, then each whole-film step) so the job card
+   * can show a real percentage (`shared/jobPhase.ts`). A throw here is swallowed — progress
+   * reporting never fails a film.
+   */
+  onProgress?: (p: AssemblyStep) => void;
 }): Promise<{
   buffer: Buffer;
   usedScenes: number;
@@ -2906,6 +2940,13 @@ export async function assemblePerSceneFilm(opts: {
 }> {
   const { scenes, aspectRatio } = opts;
   const { width, height } = dimensionsFor(aspectRatio);
+  const report = (p: AssemblyStep): void => {
+    try {
+      opts.onProgress?.(p);
+    } catch {
+      /* progress reporting never fails a film */
+    }
+  };
 
   // Master-overlay mode: every scene knows its slice of the master timeline and the master
   // track is available — frame-lock each scene's video to that timeline and lay the untouched
@@ -3342,6 +3383,8 @@ export async function assemblePerSceneFilm(opts: {
       return { encodedSec: await getMediaDuration(sceneOut) };
     };
 
+    let scenesDone = 0;
+    report({ step: "scenes", done: 0, total: scenes.length });
     const processScene = async (s: number): Promise<void> => {
       try {
         await retryTransient(() => attemptScene(s), {
@@ -3356,6 +3399,8 @@ export async function assemblePerSceneFilm(opts: {
         console.error(`[Assembly] scene ${s} failed: ${msg}`);
         skipped.push({ index: s, reason: msg });
       }
+      scenesDone++;
+      report({ step: "scenes", done: scenesDone, total: scenes.length });
     };
 
     // Bounded worker pool: `cursor++` is race-free (single-threaded JS; the increment runs
@@ -3413,6 +3458,7 @@ export async function assemblePerSceneFilm(opts: {
         .join("\n") + "\n"
     );
     const videoPath = path.join(workDir, "film-video.mp4");
+    report({ step: "join" });
     await runFfmpeg(
       buildConcatCopyArgs({
         listPath,
@@ -3429,6 +3475,7 @@ export async function assemblePerSceneFilm(opts: {
     // overlay actually succeeded: a build that throws leaves nothing behind (`getOrBuild`
     // publishes on success only), so a transient master-download failure degrades to the concat
     // path for that run without poisoning the cache for the next one.
+    report({ step: "audio" });
     let overlayAudio: { path: string; key: string } | null = null;
     const lastSliceEnd = overlaySlices?.length
       ? overlaySlices[overlaySlices.length - 1].sliceEndSec
@@ -3552,6 +3599,7 @@ export async function assemblePerSceneFilm(opts: {
     // costs this run its music and the next run retries.
     let mixedPath = audioPath;
     if (opts.musicBedUrls?.length) {
+      report({ step: "music" });
       try {
         const mixKey = cacheKey("filmmix", {
           audioKey,
@@ -3635,6 +3683,7 @@ export async function assemblePerSceneFilm(opts: {
     }
 
     const finalPath = path.join(workDir, "final.mp4");
+    report({ step: "final" });
     await runFfmpeg(
       buildFilmRemuxArgs({
         videoPath,
