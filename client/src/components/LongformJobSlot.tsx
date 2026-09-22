@@ -69,6 +69,12 @@ import { sanitizeError, isCreditError } from "@/lib/errorSanitizer";
 import { triggerCreditErrorPopup } from "@/components/CreditErrorPopup";
 import type { SplitLayout, StoryboardScene } from "@shared/types";
 import {
+  MAX_HOST_REGENERATIONS,
+  canOverrideHostRegenLimit,
+  hostRegenLockedLabel,
+  hostRegenerationLocked,
+} from "@shared/hostRegenLimit";
+import {
   scanCtaBlocks,
   previewBookAssignments,
   ctaLabelMatches,
@@ -420,7 +426,12 @@ export default function LongformJobSlot({
   // switch back first — and the player it seeks does not exist until that render lands. Park the
   // target here and let the effect below fire it once the player has remounted.
   const pendingSeekRef = useRef<number | null>(null);
-  const isAdmin = useAuth().user?.role === "admin";
+  const role = useAuth().user?.role;
+  const isAdmin = role === "admin";
+  // Who may regenerate a host beat past its limit (after a confirm that names the cost).
+  const canOverrideRegen = !!role && canOverrideHostRegenLimit(role);
+  // Host beat awaiting the override confirm (its scene index), or null.
+  const [overrideScene, setOverrideScene] = useState<number | null>(null);
 
   // Masked APIMART keys (admin-only). B-roll VIDEO renders on this tab's APIMART key; with no key
   // set the tab falls back to 69 Labs video, so warn the admin.
@@ -487,6 +498,14 @@ export default function LongformJobSlot({
         if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
         toast.info(
           `Scene ${vars.sceneIndex} is already rendering — wait for it, then regenerate again`
+        );
+        return;
+      }
+      if (d.accepted === "locked") {
+        unqueueScene(vars.sceneIndex);
+        if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
+        toast.info(
+          `Scene ${vars.sceneIndex} has used its ${MAX_HOST_REGENERATIONS} host regenerations — use "Make b-roll", or ask a manager`
         );
         return;
       }
@@ -759,11 +778,18 @@ export default function LongformJobSlot({
       const ignored = vars.sceneIndices.filter(
         i => d.accepted?.[i] === "ignored"
       );
-      for (const i of ignored) unqueueScene(i);
-      const taken = vars.sceneIndices.length - ignored.length;
+      const locked = vars.sceneIndices.filter(
+        i => d.accepted?.[i] === "locked"
+      );
+      for (const i of ignored.concat(locked)) unqueueScene(i);
+      const taken = vars.sceneIndices.length - ignored.length - locked.length;
       if (ignored.length)
         toast.info(
           `Scene${ignored.length > 1 ? "s" : ""} ${ignored.join(", ")} already rendering — skipped`
+        );
+      if (locked.length)
+        toast.info(
+          `Scene${locked.length > 1 ? "s" : ""} ${locked.join(", ")} at the host regenerate limit — skipped`
         );
       if (taken > 0)
         toast.success(
@@ -1354,10 +1380,21 @@ export default function LongformJobSlot({
   // Single-click per-scene regenerate — shared by the collapsed one-click button
   // and the expanded editor's button. Queues optimistically so the spinner and
   // polling start on the click itself (the mutation is fire-and-forget).
-  const regenerateSingle = (scene: StoryboardScene) => {
+  const regenerateSingle = (scene: StoryboardScene, force = false) => {
     if (!jobId) return;
     const prompt = (promptEdits[scene.index] ?? ownedPrompt(scene)).trim();
     if (!prompt) return;
+    // A host beat past its regenerate limit: a manager confirms the cost first, an editor is
+    // told to use "Make b-roll" instead. The server refuses the same way, so this is the
+    // courtesy, not the gate.
+    if (hostRegenerationLocked(scene) && !force) {
+      if (canOverrideRegen) setOverrideScene(scene.index);
+      else
+        toast.info(
+          `Scene ${scene.index} has used its ${MAX_HOST_REGENERATIONS} host regenerations — use "Make b-roll", or ask a manager`
+        );
+      return;
+    }
     armNotifications();
     queuePhase.current.set(scene.index, "queued");
     queuedAt.current.set(scene.index, Date.now());
@@ -1371,6 +1408,7 @@ export default function LongformJobSlot({
         ? { customSplitVisual: prompt }
         : { customVisualPrompt: prompt }),
       verbatim: isEdited(scene.index) || undefined,
+      force: force || undefined,
     });
   };
 
@@ -2749,7 +2787,18 @@ export default function LongformJobSlot({
                                 )
                                 .join("\n")}
                             >
-                              Rendered {scene.submits!.length}× — paid each time
+                              {hostRegenerationLocked(scene)
+                                ? hostRegenLockedLabel(scene)
+                                : `Rendered ${scene.submits!.length}× — paid each time`}
+                            </Badge>
+                          )}
+                          {scene.autoBroll && (
+                            <Badge
+                              variant="outline"
+                              className="text-[10px] py-0 text-warning border-warning/40"
+                              title={`${scene.autoBroll.reason}\n${scene.autoBroll.at.slice(0, 16).replace("T", " ")}`}
+                            >
+                              Auto b-roll — host lane failed
                             </Badge>
                           )}
                           {scene.clipShortSec != null &&
@@ -3270,10 +3319,17 @@ export default function LongformJobSlot({
                                   className="h-7 text-xs"
                                   disabled={
                                     isSceneQueued ||
+                                    (hostRegenerationLocked(scene) &&
+                                      !canOverrideRegen) ||
                                     !(
                                       promptEdits[scene.index] ??
                                       ownedPrompt(scene)
                                     ).trim()
+                                  }
+                                  title={
+                                    hostRegenerationLocked(scene)
+                                      ? hostRegenLockedLabel(scene)
+                                      : undefined
                                   }
                                   onClick={() => regenerateSingle(scene)}
                                 >
@@ -3300,7 +3356,16 @@ export default function LongformJobSlot({
                                 variant="ghost"
                                 size="sm"
                                 className="h-7 text-xs"
-                                disabled={isSceneQueued}
+                                disabled={
+                                  isSceneQueued ||
+                                  (hostRegenerationLocked(scene) &&
+                                    !canOverrideRegen)
+                                }
+                                title={
+                                  hostRegenerationLocked(scene)
+                                    ? hostRegenLockedLabel(scene)
+                                    : undefined
+                                }
                                 onClick={e => {
                                   e.stopPropagation();
                                   regenerateSingle(scene);
@@ -3381,6 +3446,50 @@ export default function LongformJobSlot({
               }}
             >
               Make b-roll
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Host regenerate limit override (admin / manager only) */}
+      <AlertDialog
+        open={overrideScene != null}
+        onOpenChange={open => {
+          if (!open) setOverrideScene(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Regenerate scene {overrideScene} again?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {(() => {
+                const s = scenes.find(x => x.index === overrideScene);
+                const renders = s?.submits?.length ?? 0;
+                const sec = s?.audioDuration ?? 0;
+                const rate = pacingInfo?.hostRatePerSec;
+                const cost =
+                  rate && sec > 0 ? ` (~$${(sec * rate).toFixed(2)})` : "";
+                return (
+                  `This host beat has already been rendered ${renders} times and used its ` +
+                  `${MAX_HOST_REGENERATIONS} regenerations. One more is a full lip-sync ` +
+                  `render of ${sec.toFixed(1)}s${cost}, billed whether or not it is kept. ` +
+                  `If the beat still won't come right, "Make b-roll" costs one image and no lip-sync.`
+                );
+              })()}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const s = scenes.find(x => x.index === overrideScene);
+                if (s) regenerateSingle(s, true);
+                setOverrideScene(null);
+              }}
+            >
+              Regenerate anyway
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

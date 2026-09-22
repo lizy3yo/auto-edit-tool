@@ -32,8 +32,12 @@ export interface SceneKeyed {
   sceneIndex: number;
 }
 
-/** What became of an enqueue — surfaced to the router and the client. */
-export type EditAccept = "queued" | "superseded" | "ignored";
+/**
+ * What became of an enqueue — surfaced to the router and the client. `locked` is the router's
+ * answer, not the queue's: a host beat past its regenerate limit (`shared/hostRegenLimit.ts`)
+ * is refused before anything is enqueued.
+ */
+export type EditAccept = "queued" | "superseded" | "ignored" | "locked";
 
 /** Snapshot for the UI: which scenes wait and which are rendering. */
 export interface EditQueueState {

@@ -171,12 +171,17 @@ import type {
   LongformCtaBook,
   StoryboardScene,
 } from "../shared/types";
+import type { EditAccept } from "./sceneEditQueue";
 import {
   DEFAULT_LONGFORM_PACING,
   MAX_JOB_ASSETS,
   resolveLongformPacing,
 } from "../shared/pacing";
 import { HOST_MINUTES_OPTIONS } from "../shared/hostMinutes";
+import {
+  canOverrideHostRegenLimit,
+  hostRegenerationLocked,
+} from "../shared/hostRegenLimit";
 import { RATES } from "./pricing";
 import { getChannelLayer } from "./composer";
 import { isMockMode, setMockMode } from "./mockMode";
@@ -2255,6 +2260,9 @@ const longformVideoRouter = router({
         customSplitVisual: z.string().optional(),
         // Operator edited the prompt — render it exactly as typed (skip re-enhance).
         verbatim: z.boolean().optional(),
+        // Regenerate a host beat past its limit anyway. Honoured only for roles
+        // `canOverrideHostRegenLimit` allows; an editor sending it still gets `locked`.
+        force: z.boolean().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -2270,6 +2278,19 @@ const longformVideoRouter = router({
           code: "NOT_FOUND",
           message: `Scene ${input.sceneIndex} not found`,
         });
+      // The host regenerate limit: a lip-synced beat is a full HeyGen render every time, so
+      // past MAX_HOST_REGENERATIONS the button locks. Refused HERE, before anything is
+      // enqueued, so a locked beat never reaches the lane.
+      const target = (job.storyboard as StoryboardScene[]).find(
+        s => s.index === input.sceneIndex
+      );
+      if (
+        target &&
+        hostRegenerationLocked(target) &&
+        !(input.force && canOverrideHostRegenLimit(ctx.user.role))
+      ) {
+        return { ok: true, accepted: "locked" as const };
+      }
       // Queues on the job's edit session and returns at once; the render runs in the
       // background, concurrently with any other queued scene. `accepted` tells the client
       // whether it was queued, replaced an unstarted request, or was ignored because that
@@ -2342,6 +2363,8 @@ const longformVideoRouter = router({
           .optional(),
         // Scenes whose prompt the operator edited — render exactly as typed (skip re-enhance).
         verbatimIndices: z.array(z.number().int().min(1)).optional(),
+        // Regenerate locked host beats anyway (roles `canOverrideHostRegenLimit` allows).
+        force: z.boolean().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -2358,12 +2381,27 @@ const longformVideoRouter = router({
           code: "NOT_FOUND",
           message: "None of the selected scenes exist on this job",
         });
-      const accepted = await regenerateLongformScenes(
-        input.jobId,
-        known,
-        input.prompts,
-        input.verbatimIndices
-      );
+      // Host beats past their regenerate limit are skipped (reported `locked`), never
+      // silently re-rendered inside a batch — the same rule as the single-scene route.
+      const override =
+        !!input.force && canOverrideHostRegenLimit(ctx.user.role);
+      const board = job.storyboard as StoryboardScene[];
+      const locked = override
+        ? []
+        : known.filter(i => {
+            const s = board.find(x => x.index === i);
+            return !!s && hostRegenerationLocked(s);
+          });
+      const open = known.filter(i => !locked.includes(i));
+      const accepted: Record<number, EditAccept> = open.length
+        ? await regenerateLongformScenes(
+            input.jobId,
+            open,
+            input.prompts,
+            input.verbatimIndices
+          )
+        : {};
+      for (const i of locked) accepted[i] = "locked";
       return { ok: true, accepted };
     }),
 

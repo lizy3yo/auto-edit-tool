@@ -784,6 +784,14 @@ export interface StoryboardScene {
    */
   clipShortSec?: number;
   /**
+   * Set when the pipeline turned this HOST beat into a b-roll still on its own because the
+   * lip-sync lane gave up on it (`autoBrollHostScene`): the provider's last word and when.
+   * The scene is an ordinary cutaway from then on — `hostPresent` false, `stillImage` true —
+   * and this is the only trace that it was ever a host beat, for the card's "Auto b-roll"
+   * badge and the job warning. Never set by the operator's own "Make b-roll".
+   */
+  autoBroll?: { reason: string; at: string };
+  /**
    * What this stretch of the video should physically show, and how it differs from the stretches
    * around it — the scene's slice of the whole-video arc (`deriveVisualDirection`). Claude writes
    * these as consecutive scene RANGES (a scene is only ~4s; a beat covers ~45–60s) and

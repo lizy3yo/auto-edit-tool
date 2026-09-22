@@ -3147,6 +3147,107 @@ export function convertHostSceneToBroll(s: StoryboardScene): boolean {
 }
 
 /**
+ * Whether a host beat the lip-sync lane has given up on becomes a b-roll still on its own.
+ * On by default: a film that used to end "failed, 1 scene has no clip" — or sit under a
+ * "Failed" badge collecting retry clicks, 18 of them on one production scene whose slice
+ * audio HeyGen rejected outright — instead completes with the cutaway the operator was going
+ * to click for anyway. `HOST_FAIL_TO_BROLL=0` keeps the old behaviour.
+ */
+export const hostFailToBrollEnabled = (): boolean =>
+  process.env.HOST_FAIL_TO_BROLL !== "0";
+
+/**
+ * The pure half of the automatic demotion: the same mutation as the operator's "Make b-roll"
+ * (`convertHostSceneToBroll`), plus the trace that the pipeline did it and why. The still is
+ * rendered by the caller (`fallbackSceneToStill`), so this can be tested without ffmpeg.
+ * Returns false and changes nothing on a scene that is not a host beat, or when the switch
+ * is off.
+ */
+export function planAutoBroll(
+  scene: StoryboardScene,
+  reason: string,
+  enabled = hostFailToBrollEnabled()
+): boolean {
+  if (!enabled || !scene.hostPresent) return false;
+  const renders = scene.submits?.length ?? 0;
+  if (!convertHostSceneToBroll(scene)) return false;
+  scene.autoBroll = {
+    reason: `${renders ? `host render failed after ${renders} attempt${renders === 1 ? "" : "s"}: ` : ""}${reason}`,
+    at: new Date().toISOString(),
+  };
+  scene.error = undefined;
+  return true;
+}
+
+/**
+ * Render a scene as a Ken Burns still from its own `visualPrompt` and settle it as completed —
+ * the one fallback both the first render pass and the retry pass reach for when the motion
+ * lane fails a cutaway, and now when the lip-sync lane fails a host beat (after `planAutoBroll`
+ * has made it a cutaway). Throws if even the still cannot be made; the caller marks the scene
+ * failed with the ORIGINAL error, since that is the one worth reading.
+ */
+async function fallbackSceneToStill(
+  jobId: number,
+  scene: StoryboardScene,
+  params: LongformInputParams
+): Promise<void> {
+  const apimartKey =
+    params.apimartSlot != null
+      ? await getApimartSlotKey(params.apimartSlot)
+      : null;
+  scene.clipUrls = await generateSceneStillClip(
+    jobId,
+    scene,
+    undefined,
+    scene.showsBook ? params.bookCoverImageUrl : undefined,
+    params.videoSubject,
+    false,
+    apimartKey
+  );
+  syncSceneClipFields(scene);
+  scene.stillImage = true;
+  scene.sceneStatus = "completed";
+  scene.error = undefined;
+  scene.renderTaskIds = undefined;
+  scene.renderModelIndex = undefined;
+  scene.renderAttempts = undefined;
+  scene.infraRetries = undefined;
+}
+
+/**
+ * A host beat the lip-sync lane has given up on: make it b-roll and render the still, with a
+ * job warning naming the scene and the provider's last word. Returns false (scene untouched,
+ * caller fails it as before) when the switch is off or the still itself cannot be rendered.
+ */
+async function autoBrollHostScene(
+  jobId: number,
+  scene: StoryboardScene,
+  params: LongformInputParams,
+  reason: string
+): Promise<boolean> {
+  const snapshot = { ...scene };
+  if (!planAutoBroll(scene, reason)) return false;
+  try {
+    await fallbackSceneToStill(jobId, scene, params);
+  } catch (stillErr: any) {
+    // Put the host beat back exactly as it was so the operator sees a failed HOST scene with
+    // the lip-sync error, not a failed cutaway with a different one.
+    for (const k of Object.keys(scene) as (keyof StoryboardScene)[])
+      delete (scene as any)[k];
+    Object.assign(scene, snapshot);
+    console.error(
+      `[Longform ${jobId}] scene ${scene.index} auto b-roll still failed: ${stillErr?.message ?? stillErr}`
+    );
+    return false;
+  }
+  appendJobWarning(
+    jobId,
+    `Scene ${scene.index}: the host lane could not render this beat (${reason}) — made it b-roll automatically. Regenerate renders a different still; returning the host needs a fresh host render.`
+  );
+  return true;
+}
+
+/**
  * Demote every host scene to a person-free b-roll cutaway and re-gate any flagless motion clips
  * to the still lane. Returns how many host scenes were converted. Mutates in place.
  */
@@ -9769,27 +9870,7 @@ async function renderSceneClip(
           console.warn(
             `[Longform ${jobId}] scene ${scene.index} b-roll video failed (${e.message}) — falling back to Ken Burns still animation`
           );
-          const apimartKey =
-            params.apimartSlot != null
-              ? await getApimartSlotKey(params.apimartSlot)
-              : null;
-          scene.clipUrls = await generateSceneStillClip(
-            jobId,
-            scene,
-            undefined,
-            scene.showsBook ? params.bookCoverImageUrl : undefined,
-            params.videoSubject,
-            false,
-            apimartKey
-          );
-          syncSceneClipFields(scene);
-          scene.stillImage = true;
-          scene.sceneStatus = "completed";
-          scene.error = undefined;
-          scene.renderTaskIds = undefined;
-          scene.renderModelIndex = undefined;
-          scene.renderAttempts = undefined;
-          scene.infraRetries = undefined;
+          await fallbackSceneToStill(jobId, scene, params);
           return;
         } catch (stillErr: any) {
           console.error(
@@ -9797,6 +9878,13 @@ async function renderSceneClip(
             stillErr
           );
         }
+      } else if (await autoBrollHostScene(jobId, scene, params, e.message)) {
+        // The lip-sync lane gave up (bounded retries spent, or a terminal verdict): the beat is
+        // a cutaway now, rendered and completed — not a "Failed" card waiting for a click.
+        console.warn(
+          `[Longform ${jobId}] scene ${scene.index} host render failed (${e.message}) — made b-roll automatically`
+        );
+        return;
       }
       scene.sceneStatus = "failed";
       scene.error = `Clip: ${e.message}`;
@@ -12915,23 +13003,18 @@ async function renderSceneClipInPlace(
       console.warn(
         `[Longform ${jobId}] scene ${scene.index} b-roll video retry failed (${err.message}) — falling back to Ken Burns still animation`
       );
-      const apimartKey =
-        params.apimartSlot != null
-          ? await getApimartSlotKey(params.apimartSlot)
-          : null;
-      scene.clipUrls = await generateSceneStillClip(
-        jobId,
-        scene,
-        undefined,
-        scene.showsBook ? params.bookCoverImageUrl : undefined,
-        params.videoSubject,
-        false,
-        apimartKey
-      );
-      scene.stillImage = true;
-    } else {
-      throw err;
+      await fallbackSceneToStill(jobId, scene, params);
+      return;
     }
+    // A host beat the lane gave up on: the same automatic demotion the first pass makes, so a
+    // "Retry failed scenes" click ends with a cutaway instead of the same failed host card.
+    if (await autoBrollHostScene(jobId, scene, params, err.message)) {
+      console.warn(
+        `[Longform ${jobId}] scene ${scene.index} host retry failed (${err.message}) — made b-roll automatically`
+      );
+      return;
+    }
+    throw err;
   }
   syncSceneClipFields(scene);
   scene.sceneStatus = "completed";

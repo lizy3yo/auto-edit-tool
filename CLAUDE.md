@@ -775,7 +775,22 @@ Always 16:9. Fire-and-forget; progress persisted to the job row and polled by th
   retry / merge) — the per-scene ledger behind the card's "Rendered N× — paid each time"
   badge; `scene.nextSubmitReason` is how a resubmit path names the next entry. The cost
   dialog's lip-sync seconds are submits × narration, so on a job predating the ledger the only
-  way to tell re-renders from budget is the render log's "host budget" line.
+  way to tell re-renders from budget is the render log's "host budget" line. The ledger also
+  drives the HOST REGENERATE LIMIT (`shared/hostRegenLimit.ts`, `MAX_HOST_REGENERATIONS` 2):
+  a full-frame host beat locks its Regenerate button after two operator regenerations (three
+  paid renders) — only `regenerate` entries count, never the automatic retries, and a split is
+  exempt because its regenerate re-renders the b-roll panel only. The router refuses with
+  `accepted: "locked"` before anything is enqueued (a batch skips locked beats and reports
+  them); an admin or manager may send `force` and gets a confirm naming the render's cost,
+  an editor's `force` is ignored. "Make b-roll" stays open on a locked beat. And a host beat
+  the lane GIVES UP on (bounded retries spent, or a terminal verdict such as HeyGen's "Invalid
+  audio stream") is made b-roll AUTOMATICALLY (`autoBrollHostScene`, on both the first pass and
+  the retry pass; `planAutoBroll` is the pure half): the same demotion as "Make b-roll", a
+  still rendered by the shared `fallbackSceneToStill`, `scene.autoBroll {reason, at}` for the
+  card's "Auto b-roll — host lane failed" badge, and a job warning. If even the still fails the
+  scene is put back as a failed HOST beat with the lip-sync error. `HOST_FAIL_TO_BROLL=0`
+  restores the old "Failed, click to fix" card — which on one production scene collected 18
+  retry submits of a slice HeyGen could never accept.
 - **Provider gate**: generation needs an _active_ `provider_configs` row. "No active
   provider configured" ⇒ re-run `scripts/seed.mjs` or set active in Admin.
 - **FFmpeg needs drawtext** or text overlays silently disable. The startup log names the
