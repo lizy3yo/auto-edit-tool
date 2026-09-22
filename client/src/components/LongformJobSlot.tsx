@@ -2734,6 +2734,34 @@ export default function LongformJobSlot({
                               Rendering — retry to resume
                             </Badge>
                           )}
+                          {(scene.submits?.length ?? 0) > 1 && (
+                            <Badge
+                              variant="outline"
+                              className="text-[10px] py-0 text-warning border-warning/40"
+                              title={(scene.submits ?? [])
+                                .map(
+                                  (s, i) =>
+                                    `${i + 1}. ${s.reason} · ${s.provider}` +
+                                    (s.sec != null
+                                      ? ` · ${s.sec.toFixed(1)}s`
+                                      : "") +
+                                    ` · ${s.at.slice(0, 16).replace("T", " ")}`
+                                )
+                                .join("\n")}
+                            >
+                              Rendered {scene.submits!.length}× — paid each time
+                            </Badge>
+                          )}
+                          {scene.clipShortSec != null &&
+                            scene.clipShortSec > 0 && (
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] py-0 text-warning border-warning/40"
+                                title="The provider's clip ends before the narration does. The last frame is held for the difference; regenerate the scene if the freeze shows."
+                              >
+                                Clip short by {scene.clipShortSec.toFixed(1)}s
+                              </Badge>
+                            )}
                           {isSceneQueued && (
                             <Badge
                               variant="outline"

@@ -205,6 +205,24 @@ export interface SplitLayout {
   brollFocusX?: number;
 }
 
+/**
+ * Why a scene's clip was submitted to a paid provider. `first` is the render every scene
+ * makes; everything else is a second payment for the same beat, and the ledger names which.
+ */
+export type SceneSubmitReason =
+  "first" | "resume" | "transient" | "infra" | "regenerate" | "retry" | "merge";
+
+/** One paid clip submit — an entry in `StoryboardScene.submits`. */
+export interface SceneSubmit {
+  /** Lane that took the submit: `heygen`, `runpod`, `sixtynine_labs`. */
+  provider: string;
+  /** ISO timestamp of the accepted submit. */
+  at: string;
+  reason: SceneSubmitReason;
+  /** Seconds of output asked for — the narration length on a host beat. */
+  sec?: number;
+}
+
 /** A single storyboard scene = one beat (its own verbatim script slice) + clip(s) */
 export interface StoryboardScene {
   index: number;
@@ -741,6 +759,30 @@ export interface StoryboardScene {
    * Persisted in the storyboard JSON blob (no migration).
    */
   infraRetries?: number;
+  /**
+   * Every paid clip submit this scene has ever made, oldest first — the per-scene ledger
+   * behind "rendered 3×" on the card and the re-render count in the cost dialog. Appended by
+   * `runChunkTasks` the moment a provider accepts a submit (the same trigger the cost meter
+   * bills on), never cleared: a regenerate adds an entry, it does not start over. A scene with
+   * more than one entry was paid for more than once, and `reason` says why each time.
+   * Persisted in the storyboard JSON blob (no migration).
+   */
+  submits?: SceneSubmit[];
+  /**
+   * Why the NEXT submit of this scene is happening. Set by whichever path clears
+   * `renderTaskIds` (a transient failure, an infra failure, a regenerate, a retry) and
+   * consumed by `runChunkTasks` when it writes the ledger entry. Absent ⇒ "first" for a scene
+   * with no ledger, "resume" otherwise.
+   */
+  nextSubmitReason?: SceneSubmitReason;
+  /**
+   * How many seconds SHORTER than its narration the stored clip is. A finished render is never
+   * thrown away for being short — assembly holds its last frame for the difference, exactly as
+   * it does for every scene whose slice outruns its footage — so this records the shortfall
+   * for the card and the job warning instead of paying for another render. Unset when the
+   * clip covers its narration.
+   */
+  clipShortSec?: number;
   /**
    * What this stretch of the video should physically show, and how it differs from the stretches
    * around it — the scene's slice of the whole-video arc (`deriveVisualDirection`). Claude writes

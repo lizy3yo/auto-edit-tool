@@ -31,6 +31,8 @@ import {
   withTransientRetry,
   runChunkTasks,
   MAX_INFRA_RESUBMITS,
+  MAX_TRANSIENT_RESUBMITS_HOST,
+  speechEndWithinSlice,
   stillRetryDelayMs,
   PendingRenderError,
   splitScriptForNarration,
@@ -7166,33 +7168,60 @@ describe("generateSceneClips routing (HeyGen lip-sync vs grok-imagine-video)", (
     expect(await photoFor(1, undefined)).toBe(params.faceImageUrl);
   });
 
-  it("rejects a truncated lip-sync clip: throws PendingRenderError and clears renderTaskIds so it re-renders fresh", async () => {
-    const { lane: lipsync } = await heygenLane();
+  it("KEEPS a short lip-sync clip: stores it, records the shortfall, and never pays for a second render", async () => {
+    const { lane: lipsync, submitLipsync } = await heygenLane();
     const putSpy = vi.spyOn(storage, "storagePut").mockResolvedValue({
       key: "k",
       url: "https://cdn.example.com/clip.mp4",
     });
-    // Provider returned a clip far shorter than the 2.5s narration — the truncation that the
-    // last-frame clone-pad would otherwise mask as a frozen host.
+    // Provider returned a clip a second shorter than the 2.5s narration. This used to be thrown
+    // away and resubmitted with no cap — a finished, billed render re-paid for on every retry
+    // pass. Assembly's last-frame hold covers the gap; the operator decides about a redo.
     vi.spyOn(videoAssembly, "probeBufferDurationSec").mockResolvedValue(1.5);
-    // Real narration is the full 2.5s, so 1.5s is a genuine short render.
     vi.spyOn(videoAssembly, "probeUrlDurationSec").mockResolvedValue(2.5);
     const scene: StoryboardScene = { ...hostScene };
-    await expect(
-      generateSceneClips(
-        null as any,
-        0,
-        scene,
-        params,
-        lipsync,
-        "instruction",
-        async () => {}
-      )
-    ).rejects.toThrow(/truncated/i);
-    // renderTaskIds cleared so the resume path re-submits fresh (no stuck poll of a short clip),
-    // and the truncated clip is never uploaded.
+    const urls = await generateSceneClips(
+      null as any,
+      0,
+      scene,
+      params,
+      lipsync,
+      "instruction",
+      async () => {}
+    );
+    expect(urls).toEqual(["https://cdn.example.com/clip.mp4"]);
+    expect(putSpy).toHaveBeenCalledOnce();
+    expect(submitLipsync).toHaveBeenCalledOnce();
+    expect(scene.clipShortSec).toBeCloseTo(1.0, 2);
     expect(scene.renderTaskIds).toBeUndefined();
-    expect(putSpy).not.toHaveBeenCalled();
+    // The ledger shows exactly one payment, for the first render.
+    expect(scene.submits?.map(s => s.reason)).toEqual(["first"]);
+    expect(scene.submits?.[0].provider).toBe("heygen");
+  });
+
+  it("keeps a clip whose length cannot be read: a failed probe is 'unknown', never 'short'", async () => {
+    const { lane: lipsync, submitLipsync } = await heygenLane();
+    vi.spyOn(storage, "storagePut").mockResolvedValue({
+      key: "k",
+      url: "https://cdn.example.com/clip.mp4",
+    });
+    // probeBufferDurationSec answers 0 on ANY failure — the old guard read that as a
+    // truncated clip and re-rendered a perfectly good one.
+    vi.spyOn(videoAssembly, "probeBufferDurationSec").mockResolvedValue(0);
+    vi.spyOn(videoAssembly, "probeUrlDurationSec").mockResolvedValue(2.5);
+    const scene: StoryboardScene = { ...hostScene };
+    const urls = await generateSceneClips(
+      null as any,
+      0,
+      scene,
+      params,
+      lipsync,
+      "instruction",
+      async () => {}
+    );
+    expect(urls).toEqual(["https://cdn.example.com/clip.mp4"]);
+    expect(submitLipsync).toHaveBeenCalledOnce();
+    expect(scene.clipShortSec).toBeUndefined();
   });
 
   it("accepts a floored short host scene: clip matches the real (sub-floor) narration, not audioDuration", async () => {
@@ -9324,6 +9353,139 @@ describe("runChunkTasks failure routing", () => {
     );
     expect(s.infraRetries).toBeUndefined();
     expect(s.renderTaskIds).toBeUndefined();
+  });
+
+  it("writes the ledger on every accepted submit, with the reason each resubmit was made for", async () => {
+    const s = scene();
+    const poll = async () => ({
+      success: false,
+      taskId: "task-1",
+      infraFailure: true,
+      error: "CUDA OOM",
+    });
+    const run = () =>
+      runChunkTasks(
+        7,
+        s,
+        "heygen",
+        1,
+        submit,
+        poll,
+        persist,
+        SIXTYNINE_VIDEO_SLOTS,
+        () => 6.2
+      ).catch(e => e);
+    await run();
+    await run();
+    // Two payments, and the second one says why it happened.
+    expect(s.submits?.map(x => x.reason)).toEqual(["first", "infra"]);
+    expect(s.submits?.every(x => x.provider === "heygen")).toBe(true);
+    expect(s.submits?.[0].sec).toBe(6.2);
+    // The second failure has already named the THIRD submit's reason; the ledger above proves
+    // the first one was consumed by the second submit rather than inherited as "first".
+    expect(s.nextSubmitReason).toBe("infra");
+  });
+
+  it("treats an EMPTY clip as broken: the one short clip that goes back, through the bounded infra path", async () => {
+    const s = scene();
+    const poll = async () => ({
+      success: true,
+      taskId: "task-1",
+      fileData: Buffer.alloc(0),
+      mimeType: "video/mp4",
+    });
+    const err = await runChunkTasks(
+      7,
+      s,
+      "heygen",
+      1,
+      submit,
+      poll,
+      persist,
+      SIXTYNINE_VIDEO_SLOTS,
+      () => 6
+    ).catch(e => e);
+    expect(err).toBeInstanceOf(PendingRenderError);
+    expect(err.message).toContain("empty clip");
+    expect(s.infraRetries).toBe(1); // counted, so it stops at MAX_INFRA_RESUBMITS
+    expect(s.nextSubmitReason).toBe("infra");
+  });
+
+  it("caps transient resubmits on a HOST lane — a billed lane must not resubmit for as long as the job lives", async () => {
+    const s = scene();
+    const poll = async () => ({
+      success: false,
+      taskId: "task-1",
+      error: "HeyGen render timed out, please try again",
+    });
+    const run = () =>
+      runChunkTasks(
+        7,
+        s,
+        "heygen",
+        1,
+        submit,
+        poll,
+        persist,
+        SIXTYNINE_VIDEO_SLOTS
+      ).catch(e => e);
+    for (let i = 1; i <= MAX_TRANSIENT_RESUBMITS_HOST; i++) {
+      const err = await run();
+      expect(err).toBeInstanceOf(PendingRenderError);
+      expect(s.nextSubmitReason).toBe("transient");
+    }
+    const err = await run();
+    expect(err).not.toBeInstanceOf(PendingRenderError);
+    expect(err.message).toContain("not resubmitting again");
+  });
+
+  it("leaves b-roll transient stalls unbounded — a grok stall is not billed, and the resume loop is its recovery", async () => {
+    const s = { ...scene(), hostPresent: false };
+    const poll = async () => ({
+      success: false,
+      taskId: "task-1",
+      error: "grok took too long, please try again",
+    });
+    for (let i = 1; i <= MAX_TRANSIENT_RESUBMITS_HOST + 2; i++) {
+      const err = await runChunkTasks(
+        7,
+        s,
+        "sixtynine_labs",
+        1,
+        submit,
+        poll,
+        persist,
+        SIXTYNINE_VIDEO_SLOTS
+      ).catch(e => e);
+      expect(err).toBeInstanceOf(PendingRenderError);
+    }
+  });
+});
+
+describe("speechEndWithinSlice", () => {
+  const range = { startSec: 100, endSec: 106 };
+  it("takes the trailing pause off the expected length, plus a settle for the mouth", () => {
+    // Slice 100–106, the voice stops at 105.4 and room tone runs to the cut.
+    const silences = [
+      { start: 102.0, end: 102.3 },
+      { start: 105.4, end: 106.0 },
+    ];
+    expect(speechEndWithinSlice(6, range, silences)).toBeCloseTo(5.65, 3);
+  });
+  it("is the whole slice when the slice ends mid-speech, or with nothing to go on", () => {
+    expect(speechEndWithinSlice(6, range, [{ start: 102.0, end: 102.3 }])).toBe(
+      6
+    );
+    expect(speechEndWithinSlice(6, range, undefined)).toBe(6);
+    expect(speechEndWithinSlice(6, null, [{ start: 105, end: 106 }])).toBe(6);
+  });
+  it("never asks for less than the slice's own length allows, nor under half a second", () => {
+    // A pause covering almost the whole slice: the floor holds.
+    expect(speechEndWithinSlice(0.6, range, [{ start: 100.1, end: 106 }])).toBe(
+      0.5
+    );
+    // A pause that starts before the slice is the previous scene's, not this one's tail.
+    expect(speechEndWithinSlice(6, range, [{ start: 99, end: 106.5 }])).toBe(6);
   });
 });
 

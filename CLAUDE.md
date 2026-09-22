@@ -735,6 +735,22 @@ Always 16:9. Fire-and-forget; progress persisted to the job row and polled by th
   its audio but lost only the measured length — voicing there paid for a second reading of a
   correct slice and cleared the scene's master range, dropping the whole film off the
   master-overlay path to recover a number in the file's own header.
+- **A finished clip is never thrown away.** `runChunkTasks` used to discard a host clip that
+  probed shorter than its narration and resubmit it — with no cap, and with a FAILED probe
+  reading as 0 and therefore as "short" — so a billed HeyGen render was re-paid on every retry
+  pass: production jobs on a 3-min host pick metered 463–634 s of HeyGen (2.5–3.5×) with three
+  minutes of host on screen. The guard now KEEPS the clip (assembly holds its last frame, the
+  shortfall is `scene.clipShortSec`, the job warns), a probe of 0 is "unknown", and only an
+  EMPTY clip goes back, through the bounded infra path. Transient resubmits on the host lanes
+  are capped too (`MAX_TRANSIENT_RESUBMITS_HOST`); b-roll stalls stay unbounded because a grok
+  stall is not billed. The expected length is the last SPOKEN word plus 0.25 s
+  (`speechEndWithinSlice`, off `job.masterSilences`), not the slice end, so a beat ending on a
+  pause is not "short" by that pause. Every accepted submit is written to `scene.submits`
+  (`{provider, at, reason, sec}`; reasons first / resume / transient / infra / regenerate /
+  retry / merge) — the per-scene ledger behind the card's "Rendered N× — paid each time"
+  badge; `scene.nextSubmitReason` is how a resubmit path names the next entry. The cost
+  dialog's lip-sync seconds are submits × narration, so on a job predating the ledger the only
+  way to tell re-renders from budget is the render log's "host budget" line.
 - **Provider gate**: generation needs an _active_ `provider_configs` row. "No active
   provider configured" ⇒ re-run `scripts/seed.mjs` or set active in Admin.
 - **FFmpeg needs drawtext** or text overlays silently disable. The startup log names the

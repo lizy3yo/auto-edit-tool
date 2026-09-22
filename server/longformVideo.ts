@@ -228,6 +228,7 @@ import type {
   ProviderType,
   GenerationResult,
   SplitLayout,
+  SceneSubmitReason,
 } from "../shared/types";
 import {
   extractSpokenScript,
@@ -8194,6 +8195,62 @@ export class PendingRenderError extends Error {
  * render for a failure that has already repeated itself.
  */
 export const MAX_INFRA_RESUBMITS = 2;
+/**
+ * Bound on TRANSIENT resubmits for the host (lip-sync) lanes, counted on `renderAttempts`.
+ * B-roll keeps its unbounded resume (a grok stall is not billed); a host lane bills per
+ * finished second, and the same wrong beat resubmitted for as long as the job lives is
+ * exactly the leak this guards against.
+ */
+export const MAX_TRANSIENT_RESUBMITS_HOST = 2;
+const isHostLane = (p: "runpod" | "heygen" | "sixtynine_labs"): boolean =>
+  p === "heygen" || p === "runpod";
+
+/**
+ * How long a host clip must be to cover its narration: the slice, less any pause the slice
+ * ends on. Slices are snapped onto real pauses (`SNAP_TOLERANCE_SEC` 0.75 s), so a beat that
+ * ends in one carries up to that much room tone after its last word — and a lane that stops
+ * the picture when the voice stops delivers a clip that is "short" by exactly that pause on
+ * every such beat. `tail` is the settle the mouth needs after the last word. Pure; exported
+ * for tests. No range or no silences ⇒ the whole slice.
+ */
+export function speechEndWithinSlice(
+  sliceSec: number,
+  range: { startSec: number; endSec: number } | null,
+  silences: Silence[] | undefined,
+  tail = 0.25
+): number {
+  if (!(sliceSec > 0) || !range || !silences?.length) return sliceSec;
+  const { startSec, endSec } = range;
+  const trailing = silences.find(
+    s => s.end >= endSec - 0.05 && s.start > startSec && s.start < endSec
+  );
+  if (!trailing) return sliceSec;
+  const spoken = trailing.start - startSec + tail;
+  return Math.min(sliceSec, Math.max(0.5, spoken));
+}
+
+/** `speechEndWithinSlice` for a live scene: reads the job's pauses, best-effort. */
+async function expectedHostClipSec(
+  jobId: number,
+  scene: StoryboardScene,
+  sliceSec: number
+): Promise<number> {
+  if (!hasMasterRange(scene)) return sliceSec;
+  try {
+    const job = await getLongformVideoJobById(jobId);
+    const silences = (job?.masterSilences as Silence[] | null) ?? undefined;
+    return speechEndWithinSlice(
+      sliceSec,
+      {
+        startSec: scene.narrationStartSec as number,
+        endSec: scene.narrationEndSec as number,
+      },
+      silences
+    );
+  } catch {
+    return sliceSec;
+  }
+}
 
 /** Retry `fn` when it throws a transient PendingRenderError (provider timeout / self-fail /
  * "job failed to complete"). Non-transient errors and the final attempt propagate unchanged. */
@@ -8264,6 +8321,12 @@ export async function runChunkTasks(
   }
   const taskIds = scene.renderTaskIds;
 
+  // Why this pass is submitting, for the ledger. Read once so every chunk of one pass records
+  // the same reason, and cleared now so a later pass cannot inherit it.
+  const submitReason: SceneSubmitReason =
+    scene.nextSubmitReason ?? (scene.submits?.length ? "resume" : "first");
+  scene.nextSubmitReason = undefined;
+
   // Each chunk is an independent acquire → submit (if not already submitted) → persist →
   // poll → release unit. They all kick off here but queue on `slots.acquire()`, so at most
   // `cap` are ever in-flight. Wall time is the slowest single chunk, not the sum.
@@ -8284,6 +8347,14 @@ export async function runChunkTasks(
               else await sleep(15_000);
             }
             taskIds[i] = taskId;
+            // The ledger entry rides the same event the cost meter bills on: an ACCEPTED
+            // submit. A second entry on a scene is a second payment, whatever the reason.
+            (scene.submits ??= []).push({
+              provider,
+              at: new Date().toISOString(),
+              reason: submitReason,
+              sec: expectedDurationSec?.(i) ?? scene.audioDuration,
+            });
             await persist(); // persist id BEFORE the long poll — resume-safe per chunk
           }
           return await poll(taskIds[i]);
@@ -8303,6 +8374,18 @@ export async function runChunkTasks(
     throw new PendingRenderError(
       `${pending} clip(s) still rendering on the provider`
     );
+  }
+  // A "completed" render with no bytes behind it is the one short clip that IS broken — there
+  // is nothing to keep. Route it through the bounded infra path below (resubmitted at most
+  // MAX_INFRA_RESUBMITS times) rather than the duration guard, which now keeps what it gets.
+  for (const r of polls) {
+    if (r.success && !(r.fileData as Buffer | undefined)?.length) {
+      r.success = false;
+      r.infraFailure = true;
+      // Worded to stay clear of `isTransientVideoError`'s keywords ("provider" is one), so
+      // this reaches the bounded infra branch and not the unbounded transient one.
+      r.error = r.error || "empty clip returned (0 bytes)";
+    }
   }
   const failed = polls.find(r => !r.success);
   if (failed) {
@@ -8336,6 +8419,20 @@ export async function runChunkTasks(
       // transient failure (no cross-model fallback), so this no longer gates a chain advance.
       scene.renderAttempts = (scene.renderAttempts ?? 0) + 1;
       scene.renderTaskIds = undefined;
+      // A HOST lane is billed per finished second, and a "transient" verdict there can sit on a
+      // render the provider finishes and bills anyway — so unlike a b-roll stall it is not free
+      // to resubmit for as long as the job lives. Same bound as the infra path.
+      if (
+        isHostLane(provider) &&
+        scene.renderAttempts > MAX_TRANSIENT_RESUBMITS_HOST
+      ) {
+        scene.renderAttempts = undefined;
+        await persist();
+        throw new Error(
+          `${provider} failed ${MAX_TRANSIENT_RESUBMITS_HOST + 1} renders in a row (${failed.error || "transient failure"}) — not resubmitting again`
+        );
+      }
+      scene.nextSubmitReason = "transient";
       await persist();
       throw new PendingRenderError(
         `transient render failure (${failed.error}) — will retry`
@@ -8358,6 +8455,7 @@ export async function runChunkTasks(
         );
       }
       scene.infraRetries = retries;
+      scene.nextSubmitReason = "infra";
       await persist();
       throw new PendingRenderError(
         `${provider} render failure (${failed.error || "provider infra failure"}) — will retry on ${provider} (${retries}/${MAX_INFRA_RESUBMITS})`
@@ -8402,22 +8500,36 @@ export async function runChunkTasks(
     }
   }
 
-  // Duration guard: a provider can return a clip materially SHORTER than the audio it was given
-  // (a partial/truncated render under load). Assembly's last-frame clone-pad
-  // (`tpad`) would silently mask that as a frozen face, so detect it here and retry the whole
-  // scene fresh on the resume path instead. Allow a 10% (min 0.5s) shortfall for encode rounding.
+  // Duration guard: a provider can return a clip SHORTER than the audio it was given. This used
+  // to throw the clip away and resubmit — with no cap, and with a failed probe reading as 0 and
+  // therefore as "short" — so a finished, billed HeyGen render was re-paid for as many times as
+  // the job kept retrying: production jobs metered 2.5× their host budget with three minutes
+  // of host on screen. A finished clip is now NEVER discarded. Assembly holds its last frame
+  // for the missing part (`tpad`, the same thing it does for every scene whose slice outruns
+  // its footage), the shortfall is recorded on the scene for the card, and the job carries a
+  // warning naming it, so the operator decides whether a redo is worth paying for. Only an
+  // EMPTY clip goes back, through the bounded infra path above. A probe that answers 0 on a
+  // non-empty file is "unknown", not "short". Allow a 10% (min 0.5s) shortfall for rounding.
+  scene.clipShortSec = undefined;
   if (expectedDurationSec) {
     for (let i = 0; i < polls.length; i++) {
       const want = expectedDurationSec(i);
       if (!want || want <= 0) continue;
       const got = await probeBufferDurationSec(polls[i].fileData as Buffer);
+      if (!(got > 0)) {
+        console.warn(
+          `[Longform ${jobId}] scene ${scene.index} chunk ${i}: could not read the clip's length — keeping it unchecked`
+        );
+        continue;
+      }
       const tooShort = got < want - Math.max(0.5, want * 0.1);
       if (tooShort) {
-        scene.renderTaskIds = undefined;
-        await persist();
-        throw new PendingRenderError(
-          `scene ${scene.index} chunk ${i} clip truncated ` +
-            `(${got.toFixed(2)}s < expected ${want.toFixed(2)}s) — will retry`
+        const short = Math.round((want - got) * 100) / 100;
+        scene.clipShortSec = Math.max(scene.clipShortSec ?? 0, short);
+        appendJobWarning(
+          jobId,
+          `Scene ${scene.index}: ${provider} clip is ${short.toFixed(2)}s shorter than its narration ` +
+            `(${got.toFixed(2)}s of ${want.toFixed(2)}s) — kept, last frame held; regenerate it if the freeze shows`
         );
       }
     }
@@ -8708,9 +8820,17 @@ async function generateSceneLipsyncClips(
   const realNarrationSec = scene.audioUrl
     ? await probeUrlDurationSec(scene.audioUrl)
     : 0;
-  const chunkDurations: number[] = [
-    realNarrationSec || (scene.audioDuration ?? 0),
-  ];
+  // The guard judges the clip against the last SPOKEN word, not the end of the slice: a slice
+  // ends on a pause (snapped there, up to 0.75 s of room tone), and a lane that stops the
+  // picture when the voice stops would read "short" on every beat that ends in one. The
+  // pauses are on the job (`masterSilences`, kept at voicing), so the trailing one inside this
+  // scene's range is taken off. Best-effort — no silences, no range ⇒ the whole slice.
+  const expectedSec = await expectedHostClipSec(
+    jobId,
+    scene,
+    realNarrationSec || (scene.audioDuration ?? 0)
+  );
+  const chunkDurations: number[] = [expectedSec];
   let chunkUrls: string[] = [];
   if (!scene.renderTaskIds?.length) {
     const audioUrl = scene.audioUrl;
@@ -12634,7 +12754,9 @@ async function renderSceneClipInPlace(
   ttsType: string,
   ttsKey: string,
   lipsync: LipsyncLane | null,
-  instruction: string
+  instruction: string,
+  /** Why this render is being paid for, as the scene's ledger will record it. */
+  reason: SceneSubmitReason = "regenerate"
 ): Promise<void> {
   scene.sceneStatus = "processing";
   scene.error = undefined;
@@ -12669,7 +12791,7 @@ async function renderSceneClipInPlace(
   if (overlong) console.warn(`[Longform ${jobId}] ${overlong}`);
   try {
     scene.clipUrls = await withTransientRetry(
-      () => {
+      attempt => {
         // Fresh resubmit each attempt — discard any in-flight taskIds from the prior try
         // and restart the clip chain at element 0.
         scene.renderTaskIds = undefined;
@@ -12679,6 +12801,8 @@ async function renderSceneClipInPlace(
         scene.infraRetries = undefined;
         scene.sceneStatus = "processing";
         scene.error = undefined;
+        // The first attempt is the operator's ask; a later one is this loop retrying it.
+        scene.nextSubmitReason = attempt === 1 ? reason : "transient";
         return generateSceneClips(
           adapter,
           jobId,
@@ -13890,7 +14014,8 @@ async function runMergeEdit(
     lane.ttsType,
     lane.ttsKey,
     lane.lipsync,
-    lane.instruction
+    lane.instruction,
+    "merge"
   );
 }
 
@@ -15219,7 +15344,8 @@ async function retryFailedScenesLocked(jobId: number): Promise<void> {
             ttsType,
             ttsKey,
             lipsync,
-            instruction
+            instruction,
+            "retry"
           );
         } catch (e: any) {
           scene.sceneStatus = "failed";
