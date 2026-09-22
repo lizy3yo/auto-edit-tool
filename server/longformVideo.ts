@@ -12891,7 +12891,9 @@ export async function levelJobNarration(jobId: number): Promise<void> {
 
     params.narrationLevelled = record;
     await updateLongformVideoJob(jobId, { inputParams: params });
-    if (!changed) return; // already steady: nothing to re-stitch, the final stands
+    // Already steady AND a final exists: nothing to re-stitch, the final stands. With no final
+    // yet (the card offered "Even out voice & assemble") the stitch is the point — build it.
+    if (!changed && job.finalVideoUrl) return;
 
     // Re-stitch with the new audio. Same tail as `retryJobAssembly`, inlined because we already
     // hold the lock (withJobLock is not re-entrant).
