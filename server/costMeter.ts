@@ -25,6 +25,8 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { priceLine, type PricedLine, type UsageLine } from "./pricing";
+import { summarizeHostSpend, type HostSpendSummary } from "../shared/hostSpend";
+import type { LongformInputParams, StoryboardScene } from "../shared/types";
 
 /**
  * `./db` is imported lazily, not at module scope.
@@ -171,6 +173,13 @@ function mergeLines(base: UsageLine[], additions: UsageLine[]): UsageLine[] {
   return Array.from(merged.values());
 }
 
+/** Paid HeyGen seconds in a stored `costUsage` array — what the host spend limit counts. */
+export function heygenSecondsIn(usage: UsageLine[] | null | undefined): number {
+  return (usage ?? [])
+    .filter(l => l?.lane === "lipsync" && l.provider === "heygen")
+    .reduce((n, l) => n + Math.max(0, l.quantity ?? 0), 0);
+}
+
 // ---------------------------------------------------------------------------
 // Reading the breakdown
 // ---------------------------------------------------------------------------
@@ -210,6 +219,8 @@ export interface CostBreakdown {
    */
   hasUnpricedLines: boolean;
   sections: CostSection[];
+  /** The video's host spend limit and what is using it (`shared/hostSpend.ts`); null if none. */
+  hostSpend: HostSpendSummary | null;
 }
 
 /** Lane → how it renders. Shared with `server/costRollup.ts` so the two reports agree. */
@@ -316,5 +327,12 @@ export async function getJobCostBreakdown(
     inProgress: job?.status === "processing",
     hasUnpricedLines: priced.some(l => !l.rateKnown),
     sections,
+    hostSpend: summarizeHostSpend(
+      (job?.inputParams as LongformInputParams | null) ?? null,
+      Array.isArray(job?.storyboard)
+        ? (job!.storyboard as StoryboardScene[])
+        : [],
+      heygenSecondsIn(stored)
+    ),
   };
 }

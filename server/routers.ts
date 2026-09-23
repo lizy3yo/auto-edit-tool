@@ -186,7 +186,12 @@ import { HOST_MINUTES_OPTIONS } from "../shared/hostMinutes";
 import {
   canOverrideHostRegenLimit,
   hostRegenerationLocked,
+  isLimitedHostScene,
 } from "../shared/hostRegenLimit";
+import { hostSpendRefusal } from "./hostSpend";
+import { summarizeHostSpend } from "../shared/hostSpend";
+import { heygenSecondsIn } from "./costMeter";
+import type { UsageLine } from "./pricing";
 import { RATES } from "./pricing";
 import { getChannelLayer } from "./composer";
 import { isMockMode, setMockMode } from "./mockMode";
@@ -2133,6 +2138,12 @@ const longformVideoRouter = router({
         narrationLevelled:
           (job.inputParams as LongformInputParams | null)?.narrationLevelled ??
           null,
+        // The video's host spend limit and what is using it — null on a job with no limit.
+        hostSpend: summarizeHostSpend(
+          previewParams,
+          Array.isArray(rawScenes) ? rawScenes : [],
+          heygenSecondsIn(job.costUsage as UsageLine[] | null)
+        ),
       };
     }),
 
@@ -2301,6 +2312,18 @@ const longformVideoRouter = router({
       ) {
         return { ok: true, accepted: "locked" as const };
       }
+      // The video's host spend limit (`shared/hostSpend.ts`): a regenerate of a full-frame host
+      // beat is a paid lip-sync render, refused past the limit unless a manager confirmed it.
+      if (target && isLimitedHostScene(target)) {
+        const refused = await hostSpendRefusal(
+          input.jobId,
+          job.inputParams as LongformInputParams | null,
+          target,
+          !!input.force && canOverrideHostRegenLimit(ctx.user.role)
+        );
+        if (refused)
+          return { ok: true, accepted: "overLimit" as const, ...refused };
+      }
       // Queues on the job's edit session and returns at once; the render runs in the
       // background, concurrently with any other queued scene. `accepted` tells the client
       // whether it was queued, replaced an unstarted request, or was ignored because that
@@ -2368,6 +2391,8 @@ const longformVideoRouter = router({
         jobId: z.number(),
         sceneIndex: z.number().int().min(1),
         split: z.boolean(),
+        // Render it past the video's host spend limit (the card confirmed the cost).
+        force: z.boolean().optional(),
       })
     )
     .mutation(async ({ input }) => {
@@ -2394,6 +2419,14 @@ const longformVideoRouter = router({
           code: "BAD_REQUEST",
           message: "This film has no host photo to render a host shot from",
         });
+      const refused = await hostSpendRefusal(
+        input.jobId,
+        params,
+        scene,
+        !!input.force
+      );
+      if (refused)
+        return { ok: true, accepted: "overLimit" as const, ...refused };
       const accepted = await convertLongformSceneToHost(
         input.jobId,
         input.sceneIndex,
@@ -2448,7 +2481,23 @@ const longformVideoRouter = router({
             const s = board.find(x => x.index === i);
             return !!s && hostRegenerationLocked(s);
           });
-      const open = known.filter(i => !locked.includes(i));
+      // Full-frame host beats past the video's host spend limit are skipped the same way.
+      const overLimit: number[] = [];
+      for (const i of known) {
+        if (locked.includes(i)) continue;
+        const s = board.find(x => x.index === i);
+        if (!s || !isLimitedHostScene(s)) continue;
+        const refused = await hostSpendRefusal(
+          input.jobId,
+          job.inputParams as LongformInputParams | null,
+          s,
+          override
+        );
+        if (refused) overLimit.push(i);
+      }
+      const open = known.filter(
+        i => !locked.includes(i) && !overLimit.includes(i)
+      );
       const accepted: Record<number, EditAccept> = open.length
         ? await regenerateLongformScenes(
             input.jobId,
@@ -2458,6 +2507,7 @@ const longformVideoRouter = router({
           )
         : {};
       for (const i of locked) accepted[i] = "locked";
+      for (const i of overLimit) accepted[i] = "overLimit";
       return { ok: true, accepted };
     }),
 

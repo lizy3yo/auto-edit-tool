@@ -74,7 +74,9 @@ import {
   canOverrideHostRegenLimit,
   hostRegenLockedLabel,
   hostRegenerationLocked,
+  isLimitedHostScene,
 } from "@shared/hostRegenLimit";
+import { HOST_SPEND_EPSILON_SEC } from "@shared/hostSpend";
 import {
   scanCtaBlocks,
   previewBookAssignments,
@@ -436,6 +438,20 @@ export default function LongformJobSlot({
   const canOverrideRegen = !!role && canOverrideHostRegenLimit(role);
   // Host beat awaiting the override confirm (its scene index), or null.
   const [overrideScene, setOverrideScene] = useState<number | null>(null);
+  // A host render past the video's host spend limit (admin / manager confirm).
+  const [limitScene, setLimitScene] = useState<number | null>(null);
+  const limitToast = (
+    sceneIndex: number,
+    spentSec?: number,
+    limitSec?: number
+  ) =>
+    toast.info(
+      `Scene ${sceneIndex}: this video's host limit is used` +
+        (spentSec != null && limitSec != null
+          ? ` (${formatMinSec(spentSec)} of ${formatMinSec(limitSec)})`
+          : "") +
+        ` — use "Make b-roll", or ask a manager`
+    );
 
   // Masked APIMART keys (admin-only). B-roll VIDEO renders on this tab's APIMART key; with no key
   // set the tab falls back to 69 Labs video, so warn the admin.
@@ -513,6 +529,16 @@ export default function LongformJobSlot({
         );
         return;
       }
+      if (d.accepted === "overLimit") {
+        unqueueScene(vars.sceneIndex);
+        if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
+        limitToast(
+          vars.sceneIndex,
+          "spentSec" in d ? d.spentSec : undefined,
+          "limitSec" in d ? d.limitSec : undefined
+        );
+        return;
+      }
       toast.success(
         d.accepted === "superseded"
           ? "Updated the queued regenerate with your latest prompt"
@@ -574,7 +600,14 @@ export default function LongformJobSlot({
   const [toHostScene, setToHostScene] = useState<number | null>(null);
   const toHostMutation = trpc.longformVideo.convertSceneToHost.useMutation({
     onSuccess: (d, vars) => {
-      if (d.accepted === "ignored") {
+      if (d.accepted === "overLimit") {
+        unqueueScene(vars.sceneIndex);
+        limitToast(
+          vars.sceneIndex,
+          "spentSec" in d ? d.spentSec : undefined,
+          "limitSec" in d ? d.limitSec : undefined
+        );
+      } else if (d.accepted === "ignored") {
         unqueueScene(vars.sceneIndex);
         toast.info(
           `Scene ${vars.sceneIndex} is already rendering — wait for it, then try again`
@@ -592,7 +625,7 @@ export default function LongformJobSlot({
       unqueueScene(vars.sceneIndex);
     },
   });
-  const makeHost = (sceneIndex: number, split: boolean) => {
+  const makeHost = (sceneIndex: number, split: boolean, force = false) => {
     if (!jobId) return;
     armNotifications();
     queuePhase.current.set(sceneIndex, "queued");
@@ -600,7 +633,12 @@ export default function LongformJobSlot({
     setQueuedScenes(prev =>
       prev.includes(sceneIndex) ? prev : [...prev, sceneIndex]
     );
-    toHostMutation.mutate({ jobId, sceneIndex, split });
+    toHostMutation.mutate({
+      jobId,
+      sceneIndex,
+      split,
+      force: force || undefined,
+    });
   };
 
   // Split editor: per-scene selection of "use another scene's footage as the right panel".
@@ -819,8 +857,19 @@ export default function LongformJobSlot({
       const locked = vars.sceneIndices.filter(
         i => d.accepted?.[i] === "locked"
       );
-      for (const i of ignored.concat(locked)) unqueueScene(i);
-      const taken = vars.sceneIndices.length - ignored.length - locked.length;
+      const overLimit = vars.sceneIndices.filter(
+        i => d.accepted?.[i] === "overLimit"
+      );
+      for (const i of ignored.concat(locked, overLimit)) unqueueScene(i);
+      const taken =
+        vars.sceneIndices.length -
+        ignored.length -
+        locked.length -
+        overLimit.length;
+      if (overLimit.length)
+        toast.info(
+          `Scene${overLimit.length > 1 ? "s" : ""} ${overLimit.join(", ")} skipped — this video's host limit is used`
+        );
       if (ignored.length)
         toast.info(
           `Scene${ignored.length > 1 ? "s" : ""} ${ignored.join(", ")} already rendering — skipped`
@@ -1030,6 +1079,14 @@ export default function LongformJobSlot({
   }, [pollError, onJobIdChange]);
 
   const job = jobId !== null && jobId !== dismissedJobId ? rawJob : null;
+  // The video's host spend limit (`shared/hostSpend.ts`) — null on a job without one.
+  const hostSpend = job?.hostSpend ?? null;
+  /** Would one more host render of this scene go past the limit? The server decides; this asks first. */
+  const overHostLimit = (scene: StoryboardScene, anyHost = false) =>
+    !!hostSpend &&
+    (anyHost || isLimitedHostScene(scene)) &&
+    hostSpend.spentSec + (scene.audioDuration ?? 0) >
+      hostSpend.limitSec + HOST_SPEND_EPSILON_SEC;
 
   const isProcessing = job?.status === "processing";
   // The job's live scene-edit queue, from the server (which scenes wait / render right now).
@@ -1118,6 +1175,11 @@ export default function LongformJobSlot({
     () => (job?.storyboard as StoryboardScene[] | null) ?? [],
     [job?.storyboard]
   );
+  // "Make host" was confirmed in a dialog that named the host limit, so it goes past it.
+  const toHostPastLimit = (sceneIndex: number) => {
+    const sc = scenes.find(x => x.index === sceneIndex);
+    return !!sc && overHostLimit(sc, true);
+  };
   // Derived from server data so the "Regenerated" badge survives a refresh.
   const regeneratedScenes = useMemo(
     () => scenes.filter(s => s.regenerated).map(s => s.index),
@@ -1441,6 +1503,12 @@ export default function LongformJobSlot({
         toast.info(
           `Scene ${scene.index} has used its ${MAX_HOST_REGENERATIONS} host regenerations — use "Make b-roll", or ask a manager`
         );
+      return;
+    }
+    // Past the video's host spend limit: same shape — a manager confirms, an editor is told.
+    if (overHostLimit(scene) && !force) {
+      if (canOverrideRegen) setLimitScene(scene.index);
+      else limitToast(scene.index, hostSpend?.spentSec, hostSpend?.limitSec);
       return;
     }
     armNotifications();
@@ -2937,7 +3005,9 @@ export default function LongformJobSlot({
                               className="text-[10px] py-0 text-warning border-warning/40"
                               title={`${scene.autoBroll.reason}\n${scene.autoBroll.at.slice(0, 16).replace("T", " ")}`}
                             >
-                              Auto b-roll — host lane failed
+                              {scene.autoBroll.limit
+                                ? "Auto b-roll — host limit"
+                                : "Auto b-roll — host lane failed"}
                             </Badge>
                           )}
                           {scene.clipShortSec != null &&
@@ -3647,6 +3717,16 @@ export default function LongformJobSlot({
                     Full screen shows only the host. Split screen puts the host
                     on the left and this scene's picture on the right. "Make
                     b-roll" turns it back.
+                    {sc && hostSpend && overHostLimit(sc, true) && (
+                      <>
+                        {" "}
+                        <strong>
+                          This goes past the video's host limit (
+                          {formatMinSec(hostSpend.spentSec)} of{" "}
+                          {formatMinSec(hostSpend.limitSec)} used).
+                        </strong>
+                      </>
+                    )}
                   </>
                 );
               })()}
@@ -3656,7 +3736,8 @@ export default function LongformJobSlot({
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
-                if (toHostScene != null) makeHost(toHostScene, true);
+                if (toHostScene != null)
+                  makeHost(toHostScene, true, toHostPastLimit(toHostScene));
                 setToHostScene(null);
               }}
             >
@@ -3665,12 +3746,56 @@ export default function LongformJobSlot({
             </AlertDialogAction>
             <AlertDialogAction
               onClick={() => {
-                if (toHostScene != null) makeHost(toHostScene, false);
+                if (toHostScene != null)
+                  makeHost(toHostScene, false, toHostPastLimit(toHostScene));
                 setToHostScene(null);
               }}
             >
               <User className="mr-2 h-4 w-4" />
               Full screen
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Host spend limit override (admin / manager only) */}
+      <AlertDialog
+        open={limitScene != null}
+        onOpenChange={open => {
+          if (!open) setLimitScene(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Go past this video's host limit?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {(() => {
+                const s = scenes.find(x => x.index === limitScene);
+                const sec = s?.audioDuration ?? 0;
+                const rate = pacingInfo?.hostRatePerSec;
+                const cost =
+                  rate && sec > 0 ? ` (~$${(sec * rate).toFixed(2)})` : "";
+                return (
+                  `This video has used ${formatMinSec(hostSpend?.spentSec ?? 0)} of its ` +
+                  `${formatMinSec(hostSpend?.limitSec ?? 0)} host limit. Regenerating scene ` +
+                  `${limitScene} is another ${sec.toFixed(1)}s of lip-sync${cost}, billed whether ` +
+                  `or not it is kept. "Make b-roll" costs one image and no lip-sync.`
+                );
+              })()}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const s = scenes.find(x => x.index === limitScene);
+                if (s) regenerateSingle(s, true);
+                setLimitScene(null);
+              }}
+            >
+              Regenerate anyway
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

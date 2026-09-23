@@ -118,7 +118,17 @@ import {
   matchNarrationLevel,
   matchNarrationUrlToLevel,
 } from "./narrationLevel";
-import { recordUsage, withCostMeter, flushJobUsage } from "./costMeter";
+import {
+  recordUsage,
+  withCostMeter,
+  flushJobUsage,
+  currentCostJobId,
+} from "./costMeter";
+import {
+  HostSpendLimitError,
+  isHostSpendLimitError,
+  reserveHostSpend,
+} from "./hostSpend";
 // AIREITER BOLT-ON (temporary) — delete with the block in `apimartAdapterForJob`.
 import { aireiterAdapter, aireiterLaneEnabled } from "./providers/aireiter";
 import { Semaphore } from "./providers/semaphore";
@@ -175,6 +185,8 @@ type LipsyncLane = {
      * group render carries several beats plus the run-up). Sizes the camera plate.
      */
     audioDurationSec?: number;
+    /** Why this render is being paid for (the ledger's reason) — read by the spend gate. */
+    reason?: SceneSubmitReason;
   }): Promise<VideoSubmitResult>;
   poll(taskId: string, timeoutMs?: number): Promise<GenerationResult>;
   /**
@@ -3342,15 +3354,19 @@ export const hostFailToBrollEnabled = (): boolean =>
 export function planAutoBroll(
   scene: StoryboardScene,
   reason: string,
-  enabled = hostFailToBrollEnabled()
+  enabled = hostFailToBrollEnabled(),
+  /** The video's host spend limit refused it — not a lane failure, and always demoted. */
+  limit = false
 ): boolean {
-  if (!enabled || !scene.hostPresent) return false;
+  if ((!enabled && !limit) || !scene.hostPresent) return false;
   const renders = scene.submits?.length ?? 0;
   if (!convertHostSceneToBroll(scene)) return false;
-  scene.autoBroll = {
-    reason: `${renders ? `host render failed after ${renders} attempt${renders === 1 ? "" : "s"}: ` : ""}${reason}`,
-    at: new Date().toISOString(),
-  };
+  scene.autoBroll = limit
+    ? { reason, at: new Date().toISOString(), limit: true }
+    : {
+        reason: `${renders ? `host render failed after ${renders} attempt${renders === 1 ? "" : "s"}: ` : ""}${reason}`,
+        at: new Date().toISOString(),
+      };
   scene.error = undefined;
   return true;
 }
@@ -3399,10 +3415,11 @@ async function autoBrollHostScene(
   jobId: number,
   scene: StoryboardScene,
   params: LongformInputParams,
-  reason: string
+  reason: string,
+  limit = false
 ): Promise<boolean> {
   const snapshot = { ...scene };
-  if (!planAutoBroll(scene, reason)) return false;
+  if (!planAutoBroll(scene, reason, undefined, limit)) return false;
   try {
     await fallbackSceneToStill(jobId, scene, params);
   } catch (stillErr: any) {
@@ -3418,7 +3435,9 @@ async function autoBrollHostScene(
   }
   appendJobWarning(
     jobId,
-    `Scene ${scene.index}: the host lane could not render this beat (${reason}) — made it b-roll automatically. Regenerate renders a different still; returning the host needs a fresh host render.`
+    limit
+      ? `Scene ${scene.index}: made b-roll — ${reason}. The start, CTAs and end keep the host; check-ins give way.`
+      : `Scene ${scene.index}: the host lane could not render this beat (${reason}) — made it b-roll automatically. Regenerate renders a different still; returning the host needs a fresh host render.`
   );
   return true;
 }
@@ -4091,17 +4110,54 @@ export async function resolveLipsyncAdapter(
   // rendered output and the scene's narration IS that length, so this wrapper sits on the one
   // path every host render takes. An accepted submit is billed even if the render is later
   // discarded (a truncation re-pay, a resume that re-submits), so success is the trigger.
+  //
+  // The SPEND LIMIT sits on the same seam (`server/hostSpend.ts`): every paid host second passes
+  // here, so this is the one place a video's total can be held to its budget. A refusal throws
+  // `HostSpendLimitError`, which nothing resubmits — the caller makes the beat b-roll (a check-in)
+  // or keeps the clip it had (an operator regenerate).
   return {
     ...lane,
     submit: async args => {
-      const result = await lane.submit(args);
+      const jobId = currentCostJobId();
+      const needSec = Math.max(0, args.scene.audioDuration ?? 0);
+      const gate =
+        jobId == null
+          ? null
+          : await reserveHostSpend({
+              jobId,
+              params,
+              scene: args.scene,
+              needSec,
+              reason: args.reason,
+            });
+      if (gate && !gate.decision.ok) {
+        const d = gate.decision;
+        console.warn(
+          `[Longform ${jobId}] scene ${args.scene.index}: host limit refused a ${args.reason ?? "first"} ` +
+            `render (${Math.round(d.spentSec)}s spent + ${Math.round(d.needSec)}s > ${Math.round(d.limitSec)}s)`
+        );
+        throw new HostSpendLimitError(d.spentSec, d.limitSec);
+      }
+      if (gate?.decision.ok && gate.decision.why === "protected")
+        console.warn(
+          `[Longform ${jobId}] scene ${args.scene.index}: protected host beat rendered past the ` +
+            `host limit (start/CTA/end are never cut)`
+        );
+      let result: VideoSubmitResult;
+      try {
+        result = await lane.submit(args);
+      } catch (e) {
+        gate?.release(false);
+        throw e;
+      }
+      gate?.release(!!result.taskId);
       if (result.taskId) {
         recordUsage({
           lane: "lipsync",
           provider: lane.provider,
           model: "heygen-avatar-iv",
           calls: 1,
-          quantity: Math.max(0, args.scene.audioDuration ?? 0),
+          quantity: needSec,
         });
       }
       return result;
@@ -8577,7 +8633,7 @@ export async function runChunkTasks(
   scene: StoryboardScene,
   provider: "runpod" | "heygen" | "sixtynine_labs",
   chunkCount: number,
-  submit: (i: number) => Promise<VideoSubmitResult>,
+  submit: (i: number, reason: SceneSubmitReason) => Promise<VideoSubmitResult>,
   poll: (taskId: string) => Promise<GenerationResult>,
   persist: () => Promise<void>,
   // Global per-provider active-job semaphore: a slot is held for one chunk's whole
@@ -8610,6 +8666,10 @@ export async function runChunkTasks(
     scene.nextSubmitReason ?? (scene.submits?.length ? "resume" : "first");
   scene.nextSubmitReason = undefined;
 
+  // The spend gate's refusal (`server/hostSpend.ts`), kept as itself: the catch below turns
+  // every other throw into a failed poll, and this one must reach the caller by its class.
+  let limitErr: HostSpendLimitError | undefined;
+
   // Each chunk is an independent acquire → submit (if not already submitted) → persist →
   // poll → release unit. They all kick off here but queue on `slots.acquire()`, so at most
   // `cap` are ever in-flight. Wall time is the slowest single chunk, not the sum.
@@ -8623,7 +8683,7 @@ export async function runChunkTasks(
               throw new Error("scene abandoned — not submitting");
             let taskId = "";
             for (let attempt = 0; attempt < 2 && !taskId; attempt++) {
-              const sub = await submit(i);
+              const sub = await submit(i, submitReason);
               if (sub.taskId) taskId = sub.taskId;
               else if (attempt === 1)
                 throw new Error(sub.error || "clip submit failed");
@@ -8644,12 +8704,18 @@ export async function runChunkTasks(
         } finally {
           slots.release();
         }
-      })().catch((e: any): GenerationResult => ({
-        success: false,
-        error: e?.message || "poll failed",
-      }))
+      })().catch((e: any): GenerationResult => {
+        if (isHostSpendLimitError(e)) limitErr = e;
+        return { success: false, error: e?.message || "poll failed" };
+      })
     )
   );
+  if (limitErr) {
+    // Nothing was submitted for the refused chunk, so there is nothing to resume or re-pay.
+    scene.renderTaskIds = undefined;
+    await persist();
+    throw limitErr;
+  }
 
   const pending = polls.filter(r => r.pending).length;
   if (pending > 0) {
@@ -9159,12 +9225,13 @@ async function generateSceneLipsyncClips(
     scene,
     lipsync.provider,
     chunkCount,
-    i =>
+    (i, reason) =>
       lipsync.submit({
         scene,
         imageUrl: faceImageUrl,
         audioUrl: chunkUrls[i],
         useAlt: useAltPhoto,
+        reason,
       }),
     id => lipsync.poll(id, pollTimeoutMs),
     persist,
@@ -9259,13 +9326,14 @@ async function renderHostGroup(opts: {
       leader,
       "runpod",
       1,
-      () =>
+      (_i, reason) =>
         lipsync.submit({
           scene: leader,
           imageUrl: faceImageUrl,
           audioUrl: chunkUrls[0],
           useAlt: useAltPhoto,
           audioDurationSec: leader.lipsyncGroup?.totalSec,
+          reason,
         }),
       id => lipsync.poll(id, pollTimeoutMs),
       persist,
@@ -9912,6 +9980,45 @@ async function withSceneDeadline(
   }
 }
 
+/** Host scenes with the protected ones (`scene.hostProtected`) first, each group in scene order. Pure. */
+export function protectedHostFirst(host: StoryboardScene[]): StoryboardScene[] {
+  return [
+    ...host.filter(s => s.hostProtected),
+    ...host.filter(s => !s.hostProtected),
+  ];
+}
+
+/**
+ * Stamp `hostProtected` on every host beat the budget never removes (`hostAnchorKind`: the start,
+ * a CTA, the end) and clear it everywhere else. Run once the storyboard's host beats are final,
+ * just before clips render. Mutates in place; returns how many are protected.
+ */
+export function markProtectedHostBeats(
+  scenes: StoryboardScene[],
+  sectionSec: number
+): number {
+  const sections = hostSectionsOf(scenes, sectionSec);
+  let n = 0;
+  scenes.forEach((s, i) => {
+    s.hostProtected = hostAnchorKind(scenes, i, sections) ? true : undefined;
+    if (s.hostProtected) n++;
+  });
+  return n;
+}
+
+/**
+ * `markProtectedHostBeats` for a job whose clip stage predates the stamp — so a resume or a
+ * retry on an older film still renders its start/CTA/end first and never has the spend limit
+ * refuse them. A no-op once any scene carries the stamp.
+ */
+export function backfillProtectedHostBeats(
+  scenes: StoryboardScene[],
+  params: LongformInputParams
+): void {
+  if (scenes.some(s => s.hostProtected)) return;
+  markProtectedHostBeats(scenes, hostSectionSecForJob(params, scenes));
+}
+
 /** Partition scenes into three render lanes and run them concurrently, each at its own cap. */
 export async function dispatchScenesByProvider(
   scenes: StoryboardScene[],
@@ -9920,7 +10027,13 @@ export async function dispatchScenesByProvider(
   processOne: (scene: StoryboardScene) => Promise<void>,
   jobId?: number
 ): Promise<void> {
-  const hostAll = scenes.filter(s => isHostLipsyncScene(s, lipsync, params));
+  // The start, the CTAs and the end go to the host lane FIRST (stable, so each group keeps scene
+  // order): they are never cut, so under the spend limit their retries must come out of the
+  // budget before the middle check-ins spend it — the check-ins, last in line, are what becomes
+  // b-roll when it runs out. It also brings the film's most important host shots back first.
+  const hostAll = protectedHostFirst(
+    scenes.filter(s => isHostLipsyncScene(s, lipsync, params))
+  );
   const broll = scenes.filter(s => !isHostLipsyncScene(s, lipsync, params));
   // RunPod host beats render in GROUPS (`server/lipsyncBatch.ts`): the dispatcher runs each
   // group's leader once, and the leader cuts and completes its members. Members are never
@@ -10054,7 +10167,15 @@ async function renderSceneClip(
             stillErr
           );
         }
-      } else if (await autoBrollHostScene(jobId, scene, params, e.message)) {
+      } else if (
+        await autoBrollHostScene(
+          jobId,
+          scene,
+          params,
+          e.message,
+          isHostSpendLimitError(e)
+        )
+      ) {
         // The lip-sync lane gave up (bounded retries spent, or a terminal verdict): the beat is
         // a cutaway now, rendered and completed — not a "Failed" card waiting for a click.
         console.warn(
@@ -11963,8 +12084,23 @@ async function runUnifiedPipeline(
     );
   }
 
+  // The spend limit (`shared/hostSpend.ts`): the budget the plan spent is the most the host lane
+  // may bill, and the beats the plan never cuts render first and are never refused.
+  const protectedHosts = markProtectedHostBeats(scenes, hostSectionSec);
+  if (hostBudget) {
+    params.hostBudgetSec = Math.round(hostBudget.budgetSec * 100) / 100;
+    console.log(
+      `[Longform ${jobId}] host limit ${formatMinSec(params.hostBudgetSec)} — ` +
+        `${protectedHosts} protected beat(s) (start/CTA/end) render first`
+    );
+  }
+
   await assertNotCancelled(jobId);
-  await updateLongformVideoJob(jobId, { stage: "clips", storyboard: scenes });
+  await updateLongformVideoJob(jobId, {
+    stage: "clips",
+    storyboard: scenes,
+    ...(hostBudget ? { inputParams: params } : {}),
+  });
 
   // ── Stage 3: clips — host shots lip-synced to their narration, b-roll text-to-video ──
   // Host lip-sync needs a face photo + a HeyGen key; without either, host shots fall back
@@ -12852,6 +12988,7 @@ async function resumePendingRendersLocked(jobId: number): Promise<boolean> {
   const persist = async () => {
     schedulePersist(jobId, { storyboard: scenes });
   };
+  backfillProtectedHostBeats(scenes, params);
 
   await resumeRenderingScenes(
     jobId,
@@ -13319,8 +13456,20 @@ async function renderSceneClipInPlace(
   lipsync: LipsyncLane | null,
   instruction: string,
   /** Why this render is being paid for, as the scene's ledger will record it. */
-  reason: SceneSubmitReason = "regenerate"
+  reason: SceneSubmitReason = "regenerate",
+  /**
+   * False when the clip it has now is not a host shot ("Make host" on a b-roll card): keeping it
+   * under a host beat would be wrong, so a limit refusal demotes it back to b-roll instead.
+   */
+  keepPriorOnLimit = true
 ): Promise<void> {
+  // What this beat shows now — put back if the host spend limit refuses the new render, so a
+  // refused regenerate leaves the film as it was instead of turning a good host shot to b-roll.
+  const before = {
+    clipUrls: scene.clipUrls,
+    clipUrl: scene.clipUrl,
+    hostClipUrls: scene.hostClipUrls,
+  };
   scene.sceneStatus = "processing";
   scene.error = undefined;
   // Force a FRESH render — discard any persisted in-flight taskIds so we re-submit rather
@@ -13392,9 +13541,31 @@ async function renderSceneClipInPlace(
       await fallbackSceneToStill(jobId, scene, params);
       return;
     }
+    if (
+      isHostSpendLimitError(err) &&
+      keepPriorOnLimit &&
+      (before.clipUrls?.length || before.clipUrl)
+    ) {
+      Object.assign(scene, before);
+      scene.sceneStatus = "completed";
+      scene.error = undefined;
+      appendJobWarning(
+        jobId,
+        `Scene ${scene.index}: not re-rendered — ${err.message}. Kept the shot it had.`
+      );
+      return;
+    }
     // A host beat the lane gave up on: the same automatic demotion the first pass makes, so a
     // "Retry failed scenes" click ends with a cutaway instead of the same failed host card.
-    if (await autoBrollHostScene(jobId, scene, params, err.message)) {
+    if (
+      await autoBrollHostScene(
+        jobId,
+        scene,
+        params,
+        err.message,
+        isHostSpendLimitError(err)
+      )
+    ) {
       console.warn(
         `[Longform ${jobId}] scene ${scene.index} host retry failed (${err.message}) — made b-roll automatically`
       );
@@ -14701,7 +14872,9 @@ async function runToHostEdit(
     lane.ttsType,
     lane.ttsKey,
     lane.lipsync,
-    lane.instruction
+    lane.instruction,
+    "regenerate",
+    false
   );
 }
 
@@ -15956,6 +16129,7 @@ async function retryFailedScenesLocked(jobId: number): Promise<void> {
     // scene in the batch. The comment below has always said "still lacks a clip"; now the
     // filter does too.
     const renderable = missing.filter(s => s.audioUrl && !sceneHasClip(s));
+    backfillProtectedHostBeats(scenes, params);
     // Re-render the missing scenes across all three provider lanes concurrently (was a
     // sequential for-loop that submitted only one scene's chunks at a time and blocked ~25min
     // on its polls before touching the next scene), mirroring resumeRenderingScenes. Host

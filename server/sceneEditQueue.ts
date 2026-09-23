@@ -35,9 +35,11 @@ export interface SceneKeyed {
 /**
  * What became of an enqueue — surfaced to the router and the client. `locked` is the router's
  * answer, not the queue's: a host beat past its regenerate limit (`shared/hostRegenLimit.ts`)
- * is refused before anything is enqueued.
+ * is refused before anything is enqueued. `overLimit` is the same kind of answer for the video's
+ * host spend limit (`shared/hostSpend.ts`).
  */
-export type EditAccept = "queued" | "superseded" | "ignored" | "locked";
+export type EditAccept =
+  "queued" | "superseded" | "ignored" | "locked" | "overLimit";
 
 /** Snapshot for the UI: which scenes wait and which are rendering. */
 export interface EditQueueState {

@@ -816,6 +816,24 @@ Always 16:9. Fire-and-forget; progress persisted to the job row and polled by th
   scene is put back as a failed HOST beat with the lip-sync error. `HOST_FAIL_TO_BROLL=0`
   restores the old "Failed, click to fix" card — which on one production scene collected 18
   retry submits of a slice HeyGen could never accept.
+- **A video's host lip-sync spend is capped at the minutes picked** (`shared/hostSpend.ts` +
+  `server/hostSpend.ts`, 2026-09-23). The plan (`planHostMinutes`/`capHostMinutes`) only decides
+  which beats are host; every other limit is PER BEAT (3 paid renders each), so ~36 beats could
+  bill ~108 renders — a 3-min pick metered 98 calls / 566 s / $33.96 and tripped nothing. The
+  limit is `inputParams.hostBudgetSec` (the budget the plan spent, written at the clip stage;
+  older jobs fall back to `hostMinutes × 60`), so the form's "max ~$10.80" is a promise. It is
+  enforced on the one seam every paid HeyGen submit crosses, the metering wrapper in
+  `resolveLipsyncAdapter`: a per-job running total seeded once from `costUsage` and reserved
+  SYNCHRONOUSLY, so eight concurrent submits cannot all read "under". The start, CTAs and end
+  (`scene.hostProtected`, stamped by `markProtectedHostBeats` from `hostAnchorKind`) are sent to
+  HeyGen FIRST (`protectedHostFirst` in the dispatcher) and never refused on an automatic pass —
+  their retries come out of the same budget, and the middle check-ins, last in line, are what the
+  limit refuses: `HostSpendLimitError` → `autoBrollHostScene(…, limit)` → "Auto b-roll — host
+  limit". An operator's paid click (full-frame Regenerate, batch, "Make host") is refused in the
+  router as `accepted: "overLimit"` on every beat; admin/manager `force` grants ONE render
+  (`grantHostSpendOverride`). A refused regenerate keeps the clip the scene had. The Cost dialog
+  prints spent/limit and the ledger by reason. `HOST_SPEND_LIMIT=0` turns it off. RunPod is not
+  gated (billed by GPU time, retired since 2026-09-10).
 - **Provider gate**: generation needs an _active_ `provider_configs` row. "No active
   provider configured" ⇒ re-run `scripts/seed.mjs` or set active in Admin.
 - **FFmpeg needs drawtext** or text overlays silently disable. The startup log names the

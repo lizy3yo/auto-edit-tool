@@ -67,8 +67,8 @@ export function LongformHostMinutes({
         {ratePerSec != null && (
           <>
             {" "}
-            · ~{money(value * 60 * ratePerSec)} of lip-sync · each extra minute
-            ≈ {money(60 * ratePerSec)}
+            · max ~{money(value * 60 * ratePerSec)} of lip-sync · each extra
+            minute ≈ {money(60 * ratePerSec)}
           </>
         )}
       </p>
@@ -77,6 +77,12 @@ export function LongformHostMinutes({
         between the host and b-roll, and the host is on camera in every call to
         action. The rest of the time is spread as short check-ins, about one a
         minute. The time that frees up goes to still images.
+      </p>
+      <p className="text-xs text-muted-foreground">
+        That time is also the video's lip-sync limit: retries come out of it,
+        not on top of it. The start, calls to action and end render first and
+        always keep the host; if the limit runs out, the last check-ins become
+        still images instead.
       </p>
 
       {!hasHostPhoto && (

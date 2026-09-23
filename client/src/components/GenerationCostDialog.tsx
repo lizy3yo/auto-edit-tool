@@ -9,6 +9,48 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, Receipt } from "lucide-react";
+import { formatMinSec } from "@shared/hostMinutes";
+import { hostSpendReasonLabel, type HostSpendSummary } from "@shared/hostSpend";
+import type { SceneSubmitReason } from "@shared/types";
+
+/**
+ * The host spend limit under the lip-sync section: what the video may spend, what it has, and
+ * which kind of render used it — so "why is this high" has an answer on the screen.
+ */
+function HostSpendLines({ spend }: { spend: HostSpendSummary }) {
+  const reasons = (
+    Object.entries(spend.byReason) as [SceneSubmitReason, number][]
+  )
+    .filter(([, sec]) => sec > 0.5)
+    .sort((a, b) => b[1] - a[1]);
+  const over = spend.spentSec > spend.limitSec + 1;
+  return (
+    <div className="mt-3 space-y-1 rounded-md border border-border bg-secondary/40 px-3 py-2 text-xs tabular-nums">
+      <p className={over ? "text-chart-3" : "text-foreground"}>
+        Host limit: {formatMinSec(spend.spentSec)} of{" "}
+        {formatMinSec(spend.limitSec)} used
+        {over &&
+          ` — ${(spend.spentSec / spend.limitSec).toFixed(1)}× (rendered before the limit, or overridden)`}
+        {!over && spend.reached && " — limit reached"}
+      </p>
+      {reasons.length > 0 && (
+        <p className="text-muted-foreground">
+          {reasons
+            .map(
+              ([r, sec]) => `${hostSpendReasonLabel(r)} ${formatMinSec(sec)}`
+            )
+            .join(" · ")}
+        </p>
+      )}
+      {spend.madeBroll > 0 && (
+        <p className="text-muted-foreground">
+          {spend.madeBroll} check-in{spend.madeBroll === 1 ? "" : "s"} made
+          b-roll to stay under the limit
+        </p>
+      )}
+    </div>
+  );
+}
 
 /**
  * Priced spend breakdown for one render.
@@ -171,6 +213,9 @@ export function GenerationCostDialog({
                     </li>
                   ))}
                 </ul>
+                {section.key === "lipsync" && data.hostSpend && (
+                  <HostSpendLines spend={data.hostSpend} />
+                )}
               </section>
             ))}
 

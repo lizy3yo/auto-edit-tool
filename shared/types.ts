@@ -790,7 +790,18 @@ export interface StoryboardScene {
    * and this is the only trace that it was ever a host beat, for the card's "Auto b-roll"
    * badge and the job warning. Never set by the operator's own "Make b-roll".
    */
-  autoBroll?: { reason: string; at: string };
+  autoBroll?: {
+    reason: string;
+    at: string;
+    /** True when the video's host spend limit (`shared/hostSpend.ts`) did it, not a failure. */
+    limit?: boolean;
+  };
+  /**
+   * The start, a CTA or the end — a host beat the budget never removes (`hostAnchorKind`),
+   * stamped when the clip stage starts. Rendered FIRST, and never refused by the spend limit on
+   * an automatic pass (`shared/hostSpend.ts`); only operator clicks are.
+   */
+  hostProtected?: boolean;
   /**
    * What this stretch of the video should physically show, and how it differs from the stretches
    * around it — the scene's slice of the whole-video arc (`deriveVisualDirection`). Claude writes
@@ -1078,6 +1089,13 @@ export interface LongformInputParams {
    * job carries a warning saying so.
    */
   hostMinutesOverride?: boolean;
+  /**
+   * The host budget the plan actually spent (`resolveHostBudget` against the MEASURED film —
+   * the pick, or the guide when that is smaller), written when the clip stage starts. It is the
+   * job's SPEND LIMIT (`shared/hostSpend.ts`): paid lip-sync seconds never pass it on their own.
+   * Absent on older jobs ⇒ `hostMinutes × 60`.
+   */
+  hostBudgetSec?: number;
   /**
    * Operator-supplied images shown verbatim inside the CTA pitch window (`placeAssetBeats`).
    * Empty/absent ⇒ no asset beats and the film is unchanged.
