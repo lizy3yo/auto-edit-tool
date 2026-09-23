@@ -44,34 +44,60 @@ export function SceneStripThumb({
   // Three gates: `loading` attaches the src (starts the fetch once a slot frees up), `painted`
   // reveals the element once a real frame is on it, `failed` swaps in a retry affordance — a
   // tile is never a black rectangle pretending to be footage, nor a spinner that never ends.
+  // `painted` and `failed` are mutually exclusive per attempt (see `settle`), so a tile always
+  // shows exactly one of: the frame, a spinner, or Retry.
   const [loading, setLoading] = useState(false);
   const [painted, setPainted] = useState(false);
   const [failed, setFailed] = useState(false);
   /** Bumped by the retry button to re-run the effect and mount a fresh element. */
   const [attempt, setAttempt] = useState(0);
   const releaseRef = useRef<(() => void) | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * Set once this attempt has an outcome (frame painted, or failed). Everything after that is
+   * ignored: the timeout used to keep running past a successful paint and flip the tile to
+   * `failed` 15 s later, which unmounted the video while `painted` hid the retry button — an
+   * empty tile. A late `error` from the element (buffering beyond the first frame) did the same.
+   */
+  const settledRef = useRef(false);
 
   useEffect(() => {
     setLoading(false);
     setPainted(false);
     setFailed(false);
-    const release = gate.acquire(() => setLoading(true));
-    releaseRef.current = release;
-    // A tile that never reports back must not hold its slot — but it also must not sit on a
-    // spinner forever, so the timeout surfaces the failure as well as freeing the queue.
-    const timer = setTimeout(() => {
-      release();
-      setFailed(true);
-    }, THUMB_SLOT_TIMEOUT_MS);
+    settledRef.current = false;
+    releaseRef.current = gate.acquire(() => {
+      setLoading(true);
+      // A tile that never reports back must not hold its slot — but it also must not sit on a
+      // spinner forever, so the timeout surfaces the failure as well as freeing the queue. It
+      // starts when the slot is granted, not at mount: it bounds the LOAD, and a tile far down
+      // a long strip can legitimately wait longer than that for its turn.
+      timerRef.current = setTimeout(fail, THUMB_SLOT_TIMEOUT_MS);
+    });
     return () => {
-      clearTimeout(timer);
-      release();
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = null;
+      releaseRef.current?.();
     };
   }, [clipUrl, attempt]);
 
+  /** End this attempt: stop the timeout and hand the slot to the next tile. Idempotent. */
+  const settle = () => {
+    if (settledRef.current) return false;
+    settledRef.current = true;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = null;
+    releaseRef.current?.();
+    return true;
+  };
   // Hand the slot on as soon as this tile has its frame — the fetch that matters is done, even
   // though the element keeps whatever it buffered.
-  const done = () => releaseRef.current?.();
+  function paint() {
+    if (settle()) setPainted(true);
+  }
+  function fail() {
+    if (settle()) setFailed(true);
+  }
 
   return (
     <div className={className}>
@@ -93,18 +119,11 @@ export function SceneStripThumb({
             } catch {
               // Not seekable: show it as-is rather than spinning forever on a frame that
               // will never be decoded.
-              setPainted(true);
-              done();
+              paint();
             }
           }}
-          onSeeked={() => {
-            setPainted(true);
-            done();
-          }}
-          onError={() => {
-            setFailed(true);
-            done();
-          }}
+          onSeeked={paint}
+          onError={fail}
         />
       )}
       {!painted &&
