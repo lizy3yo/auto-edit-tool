@@ -1,5 +1,19 @@
 import { Router } from "express";
-import { Readable } from "stream";
+import { Readable, pipeline } from "stream";
+
+/**
+ * How long storage gets to ANSWER (connect + response headers). Deliberately not a limit on the
+ * transfer: this used to be `AbortSignal.timeout(30_000)` on the fetch, and a fetch's signal also
+ * governs reading its BODY — so every download that took longer than 30 s to reach the browser
+ * was cut off mid-file. With no Content-Length forwarded the browser could not tell, and saved
+ * the stump as a finished file: a 19:43 film arrived as 362 MB of 451 MB and played to 15:25, a
+ * 16:20 one as 316 MB of 341 MB and played to 15:02. Read per request so tests can shorten it.
+ */
+const connectTimeoutMs = () =>
+  Number(process.env.DOWNLOAD_CONNECT_TIMEOUT_MS) || 30_000;
+/** A transfer that delivers NOTHING for this long is stuck, not slow — abort it visibly. */
+const idleTimeoutMs = () =>
+  Number(process.env.DOWNLOAD_IDLE_TIMEOUT_MS) || 60_000;
 
 function buildAllowedPrefixes(): string[] {
   const prefixes: string[] = [];
@@ -85,13 +99,23 @@ downloadRouter.get("/", async (req, res) => {
     return;
   }
 
+  // Connect + headers only; cleared the moment the response arrives (see `connectTimeoutMs`).
+  const abort = new AbortController();
+  const connectTimer = setTimeout(
+    () => abort.abort(new Error("storage did not answer in time")),
+    connectTimeoutMs()
+  );
   try {
-    const upstream = await fetch(decoded, {
-      // A 3xx must not walk us off the allowlisted host, and a hung upstream must
-      // not pin the socket open forever.
-      redirect: "manual",
-      signal: AbortSignal.timeout(30_000),
-    });
+    let upstream: Response;
+    try {
+      upstream = await fetch(decoded, {
+        // A 3xx must not walk us off the allowlisted host.
+        redirect: "manual",
+        signal: abort.signal,
+      });
+    } finally {
+      clearTimeout(connectTimer);
+    }
     if (!upstream.ok) {
       res
         .status(upstream.status)
@@ -102,6 +126,10 @@ downloadRouter.get("/", async (req, res) => {
     const contentType =
       upstream.headers.get("content-type") || "application/octet-stream";
     res.setHeader("Content-Type", contentType);
+    // The real size, so a transfer that breaks is marked FAILED by the browser instead of
+    // being saved as a short file that looks complete.
+    const length = upstream.headers.get("content-length");
+    if (length && /^\d+$/.test(length)) res.setHeader("Content-Length", length);
 
     const type = typeof req.query.type === "string" ? req.query.type : "";
     const ext = extFromContentType(contentType, type);
@@ -112,15 +140,43 @@ downloadRouter.get("/", async (req, res) => {
       : `download-${type || "file"}-${Date.now()}.${ext}`;
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
 
-    if (upstream.body) {
-      Readable.fromWeb(
-        upstream.body as Parameters<typeof Readable.fromWeb>[0]
-      ).pipe(res);
-    } else {
+    if (!upstream.body) {
       const buffer = await upstream.arrayBuffer();
       res.send(Buffer.from(buffer));
+      return;
     }
+    const body = Readable.fromWeb(
+      upstream.body as Parameters<typeof Readable.fromWeb>[0]
+    );
+    // Idle watchdog: re-armed by every chunk, so a slow transfer runs as long as it keeps
+    // moving, and only a stalled one is stopped.
+    let idle: ReturnType<typeof setTimeout> | undefined;
+    const arm = () => {
+      if (idle) clearTimeout(idle);
+      idle = setTimeout(
+        () => body.destroy(new Error("storage stopped sending")),
+        idleTimeoutMs()
+      );
+    };
+    arm();
+    body.on("data", arm);
+    // The browser went away (cancelled, closed the tab): stop pulling from storage.
+    res.on("close", () => {
+      if (idle) clearTimeout(idle);
+      if (!res.writableFinished) abort.abort();
+    });
+    // `pipeline`, not `pipe`: on a mid-transfer failure it destroys the response, so the
+    // connection breaks short of Content-Length and the browser reports the download failed.
+    pipeline(body, res, err => {
+      if (idle) clearTimeout(idle);
+      if (err && !res.writableFinished)
+        console.warn(
+          `[download] transfer of ${filename} broke after ${res.socket?.bytesWritten ?? "?"} bytes: ${err.message}`
+        );
+    });
   } catch {
-    res.status(500).json({ error: "Download proxy failed" });
+    if (!res.headersSent)
+      res.status(500).json({ error: "Download proxy failed" });
+    else res.destroy();
   }
 });
