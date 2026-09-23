@@ -53,6 +53,7 @@ import {
 import { LEGACY_PACING } from "@shared/pacing";
 import { LongformScenePreview } from "@/components/LongformScenePreview";
 import { SceneStripThumb } from "@/components/SceneStripThumb";
+import { releaseOnUnmount, useMediaActive } from "@/lib/mediaLifecycle";
 import { SplitPositionEditor } from "@/components/SplitPositionEditor";
 import { SceneTimingEditor } from "@/components/SceneTimingEditor";
 import {
@@ -333,6 +334,8 @@ export default function LongformJobSlot({
   onStatusChange,
 }: LongformJobSlotProps) {
   const [script, setScript] = useState(defaultScript);
+  /** False while this tab is hidden — its players then hold no video (lib/mediaLifecycle.ts). */
+  const mediaActive = useMediaActive();
   // Open while a tab is still being filled in, folded once it holds a render (see the
   // hydration effect). Never auto-collapses while you are typing — only adopting a job does it.
   const [scriptCollapsed, setScriptCollapsed] = useState(false);
@@ -3282,7 +3285,8 @@ export default function LongformJobSlot({
                                     screen
                                   </Label>
                                   {/* The two halves ARE two separate videos — show them that way. */}
-                                  {isSplitScene(scene) &&
+                                  {mediaActive &&
+                                    isSplitScene(scene) &&
                                     scene.hostClipUrls?.[0] &&
                                     scene.splitRightUrl && (
                                       <div className="grid grid-cols-2 gap-2">
@@ -3291,6 +3295,7 @@ export default function LongformJobSlot({
                                             Host (reused, never re-rendered)
                                           </p>
                                           <video
+                                            ref={releaseOnUnmount}
                                             src={scene.hostClipUrls[0]}
                                             controls
                                             muted
@@ -3304,6 +3309,7 @@ export default function LongformJobSlot({
                                             Right panel (swappable)
                                           </p>
                                           <video
+                                            ref={releaseOnUnmount}
                                             src={scene.splitRightUrl}
                                             controls
                                             muted

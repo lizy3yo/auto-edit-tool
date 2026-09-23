@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2, CloudOff } from "lucide-react";
 import { createLoadGate } from "@/components/loadGate";
+import { captureFrame, releaseOnUnmount } from "@/lib/mediaLifecycle";
 
 /**
  * One scene's thumbnail in the storyboard filmstrip.
@@ -21,7 +22,14 @@ import { createLoadGate } from "@/components/loadGate";
  * decode (and lands past the opening keyframe, which is often a black flash on encoded video).
  * Same trick as `LongformScenePreview`'s poster frame, minus the controls and audio sync a
  * thumbnail doesn't need.
+ *
+ * Once that frame is decoded it is copied onto a canvas and the `<video>` is removed and
+ * released. A player kept alive to show one still holds a hardware decoder and GPU memory for
+ * as long as the tile exists; across a strip, five job tabs and the library that exhausted the
+ * GPU and blacked out the tab. The strip now holds at most the gate's few loading players.
  */
+/** Canvas width for the captured still — 2x the tile, so it stays crisp on a HiDPI screen. */
+const THUMB_STILL_W = 256;
 
 /** Tiles fetching at once. Well under the ~6-per-host cap, so the detail player keeps a lane. */
 const gate = createLoadGate(3);
@@ -49,6 +57,9 @@ export function SceneStripThumb({
   const [loading, setLoading] = useState(false);
   const [painted, setPainted] = useState(false);
   const [failed, setFailed] = useState(false);
+  /** The frame is on the canvas and the player is gone. */
+  const [captured, setCaptured] = useState(false);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   /** Bumped by the retry button to re-run the effect and mount a fresh element. */
   const [attempt, setAttempt] = useState(0);
   const releaseRef = useRef<(() => void) | null>(null);
@@ -65,6 +76,7 @@ export function SceneStripThumb({
     setLoading(false);
     setPainted(false);
     setFailed(false);
+    setCaptured(false);
     settledRef.current = false;
     releaseRef.current = gate.acquire(() => {
       setLoading(true);
@@ -92,8 +104,16 @@ export function SceneStripThumb({
   };
   // Hand the slot on as soon as this tile has its frame — the fetch that matters is done, even
   // though the element keeps whatever it buffered.
-  function paint() {
-    if (settle()) setPainted(true);
+  function paint(video?: HTMLVideoElement) {
+    if (!settle()) return;
+    setPainted(true);
+    // Keep the frame, drop the player. If the copy fails the video simply stays, as before.
+    if (
+      video &&
+      canvasRef.current &&
+      captureFrame(video, canvasRef.current, THUMB_STILL_W)
+    )
+      setCaptured(true);
   }
   function fail() {
     if (settle()) setFailed(true);
@@ -101,8 +121,14 @@ export function SceneStripThumb({
 
   return (
     <div className={className}>
-      {loading && !failed && (
+      <canvas
+        ref={canvasRef}
+        aria-hidden
+        className={`w-full h-full object-cover bg-black ${captured ? "" : "hidden"}`}
+      />
+      {loading && !failed && !captured && (
         <video
+          ref={releaseOnUnmount}
           // Remount on retry: React would otherwise reuse this exact DOM node, and a media
           // element that has already errored on a src does not re-fetch when merely re-rendered.
           key={attempt}
@@ -122,7 +148,7 @@ export function SceneStripThumb({
               paint();
             }
           }}
-          onSeeked={paint}
+          onSeeked={e => paint(e.currentTarget)}
           onError={fail}
         />
       )}

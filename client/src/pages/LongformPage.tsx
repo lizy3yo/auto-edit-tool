@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { trpc } from "@/lib/trpc";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import LongformJobSlot, { type SlotStatus } from "@/components/LongformJobSlot";
+import { MediaActiveContext } from "@/lib/mediaLifecycle";
 import { VideoLibraryPanel } from "@/components/VideoLibraryPanel";
 import { PageHeader } from "@/components/PageHeader";
 import { Alert } from "@/components/ui/alert";
@@ -417,28 +418,32 @@ export default function FaceLockVideo() {
               className="mt-6"
             >
               <div className={activeTab === String(i) ? "" : "hidden"}>
-                <LongformJobSlot
-                  slotIndex={i}
-                  storageKey={slotKey(i)}
-                  initialJobId={resumeIds?.[i] ?? null}
-                  initialTitle={draftTitles[i] ?? ""}
-                  onTitleChange={title => {
-                    setDraftTitles(prev =>
-                      prev.map((v, j) => (j === i ? title : v))
-                    );
-                    persistSlot(i, { draftTitle: title });
-                  }}
-                  onJobIdChange={jobId => {
-                    setResumeIds(prev =>
-                      prev ? prev.map((v, j) => (j === i ? jobId : v)) : prev
-                    );
-                    persistSlot(i, { jobId });
-                  }}
-                  defaultScript={i === 0 ? DEFAULT_SCRIPT : ""}
-                  channels={allChannels ?? []}
-                  providerDisplayName={providerStatus?.displayName}
-                  onStatusChange={handleStatusChange}
-                />
+                {/* Mounted, but its players hold no video while hidden: five tabs of live
+                    decoders exhausted the GPU and blacked the page out (lib/mediaLifecycle.ts). */}
+                <MediaActiveContext.Provider value={activeTab === String(i)}>
+                  <LongformJobSlot
+                    slotIndex={i}
+                    storageKey={slotKey(i)}
+                    initialJobId={resumeIds?.[i] ?? null}
+                    initialTitle={draftTitles[i] ?? ""}
+                    onTitleChange={title => {
+                      setDraftTitles(prev =>
+                        prev.map((v, j) => (j === i ? title : v))
+                      );
+                      persistSlot(i, { draftTitle: title });
+                    }}
+                    onJobIdChange={jobId => {
+                      setResumeIds(prev =>
+                        prev ? prev.map((v, j) => (j === i ? jobId : v)) : prev
+                      );
+                      persistSlot(i, { jobId });
+                    }}
+                    defaultScript={i === 0 ? DEFAULT_SCRIPT : ""}
+                    channels={allChannels ?? []}
+                    providerDisplayName={providerStatus?.displayName}
+                    onStatusChange={handleStatusChange}
+                  />
+                </MediaActiveContext.Provider>
               </div>
             </TabsContent>
           ))}

@@ -32,6 +32,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useManagedMedia, useMediaActive } from "@/lib/mediaLifecycle";
 import {
   Check,
   Loader2,
@@ -245,6 +246,9 @@ function useFrameGrabber(src: string) {
     cache.current.clear();
     queue.current = [];
     busy.current = false;
+    // A new source (including the same clip re-attached when its tab is shown again) starts
+    // with an empty cache — tell the consumers so they request their frames again.
+    setVersion(n => n + 1);
     return () => {
       v.removeAttribute("src");
       v.load();
@@ -557,6 +561,9 @@ export function SceneTimingEditor(props: {
   const rootRef = useRef<HTMLDivElement>(null);
   const stripRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  // Released on unmount and while its tab is hidden — see `lib/mediaLifecycle.ts`.
+  const viewer = useManagedMedia(props.clipUrl, videoRef);
+  const mediaActive = useMediaActive();
   const audioRef = useRef<HTMLAudioElement>(null);
   const filmRef = useRef<HTMLCanvasElement>(null);
   const voiceRef = useRef<HTMLCanvasElement>(null);
@@ -674,6 +681,12 @@ export function SceneTimingEditor(props: {
     audioRef.current?.pause();
     setPlaying(false);
   }, []);
+
+  // A hidden tab drops the viewer's source, so stop the transport with it rather than leave a
+  // clock running against an element that has nothing to play.
+  useEffect(() => {
+    if (!mediaActive) pause();
+  }, [mediaActive, pause]);
 
   /** Play from the current playhead to the end of the slice, voice in step with the picture. */
   const play = useCallback(() => {
@@ -826,9 +839,15 @@ export function SceneTimingEditor(props: {
 
   // Filmstrip: frames of the footage that PLAY in this slice, one per THUMB_W px of track —
   // and the neighbours' frames in their slabs, so the cut reads against what's on either side.
-  const grabber = useFrameGrabber(props.clipUrl);
-  const prevGrabber = useFrameGrabber(props.prevClipUrl ?? "");
-  const nextGrabber = useFrameGrabber(props.nextClipUrl ?? "");
+  // No source while the tab is hidden: each grabber's hidden <video> is released and the frames
+  // are grabbed again on return.
+  const grabber = useFrameGrabber(mediaActive ? props.clipUrl : "");
+  const prevGrabber = useFrameGrabber(
+    mediaActive ? (props.prevClipUrl ?? "") : ""
+  );
+  const nextGrabber = useFrameGrabber(
+    mediaActive ? (props.nextClipUrl ?? "") : ""
+  );
   const slotSec = THUMB_W / pxPerSec;
   const prevClipIn = props.prevClipInSec ?? 0;
   const nextClipIn = props.nextClipInSec ?? 0;
@@ -1366,8 +1385,8 @@ export function SceneTimingEditor(props: {
       {/* Viewer — the scene as it will ship: picture at the playhead, voice under it. */}
       <div className="relative overflow-hidden rounded bg-black">
         <video
-          ref={videoRef}
-          src={props.clipUrl}
+          ref={viewer.ref}
+          src={viewer.src}
           muted
           playsInline
           preload="metadata"

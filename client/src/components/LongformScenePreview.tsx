@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
+import { useManagedMedia } from "@/lib/mediaLifecycle";
 
 /**
  * A storyboard scene clip, played with its narration.
@@ -75,6 +76,8 @@ export function LongformScenePreview({
   durationSec?: number;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  // Released on unmount and while its tab is hidden — see `lib/mediaLifecycle.ts`.
+  const video = useManagedMedia(clipUrl, videoRef);
   const audioRef = useRef<HTMLAudioElement>(null);
   const endSec =
     durationSec !== undefined && Number.isFinite(durationSec)
@@ -183,8 +186,8 @@ export function LongformScenePreview({
   return (
     <div className="relative">
       <video
-        ref={videoRef}
-        src={clipUrl}
+        ref={video.ref}
+        src={video.src}
         controls
         preload="metadata"
         onClick={e => e.stopPropagation()}

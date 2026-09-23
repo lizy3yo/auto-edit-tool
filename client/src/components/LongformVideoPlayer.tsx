@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useManagedMedia } from "@/lib/mediaLifecycle";
 
 // ponytail: YouTube-style hover preview is a hidden <video> seeked to the hover
 // time — no sprite sheet / server work. Slight seek latency on hover is the
@@ -28,6 +29,9 @@ export function LongformVideoPlayer({
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const previewRef = useRef<HTMLVideoElement>(null);
+  // Both released on unmount (the hover preview mounts per hover) and while the tab is hidden.
+  const main = useManagedMedia(src, videoRef);
+  const preview = useManagedMedia(src, previewRef);
   const barRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const hoverRef = useRef(false); // pointer over this player, ref not state
@@ -136,8 +140,8 @@ export function LongformVideoPlayer({
       onMouseLeave={() => (hoverRef.current = false)}
     >
       <video
-        ref={videoRef}
-        src={src}
+        ref={main.ref}
+        src={main.src}
         controls
         className="w-full rounded-lg bg-black max-h-[480px]"
         onLoadedMetadata={e => setDuration(e.currentTarget.duration)}
@@ -166,8 +170,8 @@ export function LongformVideoPlayer({
             style={{ left: previewLeft, width: PREVIEW_W }}
           >
             <video
-              ref={previewRef}
-              src={src}
+              ref={preview.ref}
+              src={preview.src}
               muted
               preload="metadata"
               className="block w-full"

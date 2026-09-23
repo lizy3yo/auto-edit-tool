@@ -8,6 +8,7 @@ import {
   sceneHoldPlan,
 } from "@shared/filmTimeline";
 import type { StoryboardScene } from "@shared/types";
+import { releaseMedia, useMediaActive } from "@/lib/mediaLifecycle";
 
 /**
  * The whole film, previewed in the browser with NO assembly.
@@ -390,6 +391,8 @@ export function LongformCutPreview({
   const [t, setT] = useState(0);
 
   const totalSec = totalFilmSec(beats);
+  /** False while this preview's job tab is hidden — it then holds no sources at all. */
+  const mediaActive = useMediaActive();
 
   // Everything the animation loop reads lives behind a ref. The loop must survive a re-render
   // untouched: an effect that re-subscribed on `beats` (or on anything derived from it) would
@@ -541,7 +544,7 @@ export function LongformCutPreview({
     .join("|");
   useEffect(() => {
     const bs = beatsRef.current;
-    if (!bs.length) return;
+    if (!bs.length || !mediaActive) return;
     stage(vidA.current, 0, bs[0].startSec);
     if (bs[1]) stage(vidB.current, 1, bs[1].startSec);
     // The narration too: on a per-scene film the first beat's track has to be attached before
@@ -550,7 +553,7 @@ export function LongformCutPreview({
     stageAudio(audA.current, 0, bs[0].startSec);
     if (bs[1] && bs[1].audioUrl !== bs[0].audioUrl)
       stageAudio(audB.current, 1, bs[1].startSec);
-  }, [beatsSig, stage, stageAudio]);
+  }, [beatsSig, stage, stageAudio, mediaActive]);
 
   const stop = useCallback(() => {
     audA.current?.pause();
@@ -562,6 +565,34 @@ export function LongformCutPreview({
   }, []);
   const stopRef = useRef(stop);
   stopRef.current = stop;
+
+  /**
+   * Hand all four players' decoders back while the tab is hidden and when the preview goes away
+   * (see `lib/mediaLifecycle.ts`). Sources here are assigned imperatively, so the `data-*` marks
+   * `stage`/`stageAudio` compare against are cleared too — otherwise they would believe the
+   * clip is still loaded and skip re-attaching it. Coming back restages at the same film time.
+   */
+  const releaseAll = useCallback(() => {
+    for (const el of [vidA.current, vidB.current, audA.current, audB.current]) {
+      if (!el) continue;
+      releaseMedia(el);
+      el.removeAttribute("data-clip");
+      el.removeAttribute("data-track");
+      el.removeAttribute("data-seek");
+    }
+  }, []);
+  const wasActive = useRef(mediaActive);
+  useEffect(() => {
+    if (!mediaActive) {
+      stop();
+      releaseAll();
+    } else if (!wasActive.current && beatsRef.current.length) {
+      seekTo(filmT.current);
+    }
+    wasActive.current = mediaActive;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mediaActive]);
+  useEffect(() => releaseAll, [releaseAll]);
   const totalSecRef = useRef(totalSec);
   totalSecRef.current = totalSec;
   const holdingRef = useRef(false);

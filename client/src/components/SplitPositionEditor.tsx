@@ -21,6 +21,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ArrowLeftRight, Check, Loader2, RotateCcw } from "lucide-react";
 import type { SplitLayout } from "@shared/types";
+import { useManagedMedia } from "@/lib/mediaLifecycle";
 
 /** Canvas aspect — longform is always 16:9. */
 const CANVAS_AR = 16 / 9;
@@ -87,6 +88,10 @@ export function SplitPositionEditor(props: {
   const [srcAR, setSrcAR] = useState<{ host?: number; broll?: number }>({});
   const containerRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState | null>(null);
+  // Two looping players: released on unmount and while their tab is hidden — see
+  // `lib/mediaLifecycle.ts`.
+  const hostVideo = useManagedMedia<HTMLVideoElement>(props.hostUrl);
+  const brollVideo = useManagedMedia<HTMLVideoElement>(props.rightUrl);
 
   // Re-seed from the scene whenever the persisted layout changes (apply round-trip). Keyed by
   // VALUE, not object identity — polling recreates the object every few seconds, and resetting
@@ -201,7 +206,8 @@ export function SplitPositionEditor(props: {
         onPointerCancel={endDrag}
       >
         <video
-          src={isHost ? props.hostUrl : props.rightUrl}
+          ref={isHost ? hostVideo.ref : brollVideo.ref}
+          src={isHost ? hostVideo.src : brollVideo.src}
           autoPlay
           muted
           loop
