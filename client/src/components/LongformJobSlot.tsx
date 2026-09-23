@@ -1245,11 +1245,17 @@ export default function LongformJobSlot({
    * Laid out with `planMasterOverlayScenes` — the renderer's own function — rather than by
    * summing narration lengths, because a scene freezes past its words wherever there's a hold
    * (the sub-floor pad, a CTA release tail, an operator's hold) and every later scene sits that
-   * much further in. Keyed by `scene.index`; a scene with no narration range yet (pre-voicing)
+   * much further in. Keyed by `scene.index`; a scene with no narration yet (pre-voicing)
    * simply isn't in the map and shows its number alone.
+   *
+   * Same two narration shapes as `planCutBeats`: a job voiced SCENE BY SCENE (its master voicing
+   * failed and "Retry failed scenes" re-voiced it beat by beat, clearing each master range) has
+   * no ranges at all, so its scenes are laid end to end on their own voice lengths — the
+   * timeline assembly's concat path builds. Requiring a master range left every tile on such a
+   * job with no timecode.
    */
   const sceneTimecodes = useMemo(() => {
-    const usable = scenes
+    const sliced = scenes
       .filter(
         s =>
           Number.isFinite(s.narrationStartSec as number) &&
@@ -1257,6 +1263,18 @@ export default function LongformJobSlot({
           (s.narrationEndSec as number) > (s.narrationStartSec as number)
       )
       .sort((a, b) => a.index - b.index);
+    let usable = sliced;
+    if (!(job?.masterAudioUrl && sliced.length)) {
+      let cum = 0;
+      usable = scenes
+        .filter(s => !!s.audioUrl && (s.audioDuration ?? 0) > 0)
+        .sort((a, b) => a.index - b.index)
+        .map(s => {
+          const start = cum;
+          cum += s.audioDuration as number;
+          return { ...s, narrationStartSec: start, narrationEndSec: cum };
+        });
+    }
     const out = new Map<number, string>();
     if (!usable.length) return out;
     // Mirrors assembleAndFinalize: a cover-reveal beat ends with its narration, everything else
@@ -1281,7 +1299,7 @@ export default function LongformJobSlot({
       at += plan.scenes[i].frames / FPS;
     });
     return out;
-  }, [scenes]);
+  }, [job?.masterAudioUrl, scenes]);
 
   /**
    * Scenes carrying a pristine cut to go back to. Empty for a job whose timing has never been
