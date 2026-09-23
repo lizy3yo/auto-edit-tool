@@ -555,7 +555,10 @@ Express · tRPC · Drizzle · MySQL.
   five stray minutes drags the mean until every healthy scene reads as starved) and re-splits a
   bad stretch by word count — but only when the stretch's audio FITS its words (0.6–1.6×), never
   across a CTA-pinned boundary, and it runs inside `assignSceneRanges`, i.e. BEFORE the merge
-  passes read a duration. Proportional cuts land a median ~2.6 s off the words, so they are the
+  passes read a duration. It runs a SECOND time on the boundaries as persisted — after the
+  pause-snap, and on the no-transcript path too (`unsnapImplausible` + `finalPlausibilityGate`) —
+  because that is what the banner audits: the first run judged pre-snap cuts, and a snap could
+  still starve a short scene, so a fresh film left voicing flaggable. Proportional cuts land a median ~2.6 s off the words, so they are the
   last resort: the voicing stage first calls `healTranscriptHoles`, which re-transcribes JUST the
   damaged stretch and splices the words in (`mergePatchedWords`), and only a stretch still
   unheard keeps the word-count cuts, with a job warning naming the time range. A stretch that

@@ -236,7 +236,9 @@ export function assignSceneRanges(
   // word-aligned path each snap is clamped to the boundary's snap window (`plan.gaps` — the
   // neighbor words' spans), so a mid-sentence breath can never pull a whole word into an
   // adjacent scene.
+  const tokenCounts = sceneTokens.map(t => t.length);
   if (silences && silences.length > 0) {
+    const aligned = boundaries;
     boundaries = snapBoundariesToSilence(
       boundaries,
       silences,
@@ -244,6 +246,24 @@ export function assignSceneRanges(
       shortSilences ?? []
     );
     rescueSilentQrTails(scenes, boundaries, silences);
+    boundaries = unsnapImplausible(aligned, boundaries, tokenCounts);
+  }
+  // The gate above judged the boundaries BEFORE the snap, and only on the word-aligned path —
+  // but what gets persisted, and what `auditStoryboardTimeline` later judges to raise the
+  // "Repair timeline" banner, is the boundaries AFTER it. Judge those, with the same function,
+  // on every path (a failed transcription's word-count split is snapped too), so a new film
+  // leaves voicing in a state that banner can never flag: fixed here by word count, or reported
+  // `unrepairable`, which stops the job before a clip is paid for.
+  const final = finalPlausibilityGate(
+    boundaries,
+    tokenCounts,
+    plan.pinned,
+    report?.unrepairable ?? []
+  );
+  boundaries = final.boundaries;
+  if (report) {
+    report.repaired.push(...final.repaired);
+    report.unrepairable.push(...final.unrepairable);
   }
 
   const ranges: SceneRange[] = [];
@@ -672,6 +692,108 @@ export function repairImplausibleRuns(
     }
     i = Math.max(flaggedEnd, b) + 1;
   }
+  return { boundaries: out, repaired, unrepairable };
+}
+
+/** Per-scene slice lengths of a tiling. */
+const sliceLengths = (boundaries: number[], n: number) =>
+  Array.from({ length: n }, (_, i) => boundaries[i + 1] - boundaries[i]);
+
+/** Each contiguous stretch of implausible scenes (see `implausibleScenes`) as a run. Pure. */
+function implausibleRuns(
+  boundaries: number[],
+  tokenCounts: number[]
+): SceneRun[] {
+  const n = tokenCounts.length;
+  const flags = implausibleScenes(tokenCounts, sliceLengths(boundaries, n));
+  const runs: SceneRun[] = [];
+  for (let i = 0; i < n; i++) {
+    if (!flags[i]) continue;
+    let j = i;
+    while (j + 1 < n && flags[j + 1]) j++;
+    runs.push({
+      fromScene: i,
+      toScene: j,
+      startSec: boundaries[i],
+      endSec: boundaries[j + 1],
+    });
+    i = j;
+  }
+  return runs;
+}
+
+const runsOverlap = (a: SceneRun, b: SceneRun) =>
+  a.fromScene <= b.toScene && b.fromScene <= a.toScene;
+
+/**
+ * Undo the pause-snap on any cut that made a scene implausible. The snap moves a cut up to
+ * `SNAP_TOLERANCE_SEC` onto a pause, and on a word-count stretch (no word spans to clamp it) or
+ * a short scene two such moves can eat most of the slice — which the banner then reads as a
+ * broken timeline. Only scenes the snap itself broke are touched (flagged after, not before),
+ * and their cuts go back to where the alignment put them. Stays monotonic: a neighbour cut that
+ * the revert would cross goes back too (`aligned` is itself monotonic, so this converges).
+ * Pure — unit-tested.
+ */
+export function unsnapImplausible(
+  aligned: number[],
+  snapped: number[],
+  tokenCounts: number[]
+): number[] {
+  const n = tokenCounts.length;
+  const out = snapped.slice();
+  const after = implausibleScenes(tokenCounts, sliceLengths(out, n));
+  if (!after.some(Boolean)) return out;
+  const before = implausibleScenes(tokenCounts, sliceLengths(aligned, n));
+  for (let i = 0; i < n; i++) {
+    if (!after[i] || before[i]) continue;
+    if (i > 0) out[i] = aligned[i];
+    if (i + 1 < n) out[i + 1] = aligned[i + 1];
+  }
+  for (let dirty = true; dirty;) {
+    dirty = false;
+    for (let s = 1; s <= n; s++) {
+      if (out[s] >= out[s - 1]) continue;
+      if (out[s] !== aligned[s]) out[s] = aligned[s];
+      else out[s - 1] = aligned[s - 1];
+      dirty = true;
+    }
+  }
+  return out;
+}
+
+/** Passes of the final gate — a re-split shifts the film's median pace, rarely enough to matter. */
+const FINAL_GATE_PASSES = 3;
+
+/**
+ * The last plausibility gate, on the boundaries that will actually be persisted: whatever
+ * `auditStoryboardTimeline` would flag on the finished film is re-split by word count here
+ * (`repairImplausibleRuns`), and anything that still cannot be made plausible comes back as
+ * `unrepairable` — which the voicing stage turns into a stop before any clip is paid for. So a
+ * freshly voiced film either passes that audit or never renders. `known` holds runs already
+ * reported unrepairable by the earlier gate, so the same stretch is not reported twice.
+ * Pure — unit-tested.
+ */
+export function finalPlausibilityGate(
+  boundaries: number[],
+  tokenCounts: number[],
+  pinned: number[] = [],
+  known: SceneRun[] = []
+): { boundaries: number[]; repaired: SceneRun[]; unrepairable: SceneRun[] } {
+  let out = boundaries;
+  const repaired: SceneRun[] = [];
+  const unrepairable: SceneRun[] = [];
+  const isNew = (r: SceneRun) =>
+    !known.some(k => runsOverlap(k, r)) &&
+    !unrepairable.some(u => runsOverlap(u, r));
+  for (let pass = 0; pass < FINAL_GATE_PASSES; pass++) {
+    const fix = repairImplausibleRuns(out, tokenCounts, pinned);
+    out = fix.boundaries;
+    repaired.push(...fix.repaired);
+    unrepairable.push(...fix.unrepairable.filter(isNew));
+    if (!fix.repaired.length) break;
+  }
+  // Belt and braces: nothing implausible leaves this function unreported.
+  unrepairable.push(...implausibleRuns(out, tokenCounts).filter(isNew));
   return { boundaries: out, repaired, unrepairable };
 }
 

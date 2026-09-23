@@ -1,11 +1,14 @@
 import { describe, it, expect } from "vitest";
 import {
   assignSceneRanges,
+  finalPlausibilityGate,
   implausibleScenes,
   newAlignmentReport,
   repairImplausibleRuns,
   tokenizeNarration,
+  unsnapImplausible,
 } from "./narrationAlignment";
+import { auditStoryboardTimeline } from "./alignmentHeal";
 import type { WhisperWord } from "./_core/voiceTranscription";
 import type { StoryboardScene } from "../shared/types";
 
@@ -731,3 +734,98 @@ describe("assignSceneRanges — CTA anchor on a phrase the script says twice", (
     expect(ranges[35].endSec).toBeCloseTo((36 * 10) / 3, 1);
   });
 });
+
+describe("unsnapImplausible", () => {
+  // 20 scenes, 10 tokens / 3 s each (0.3 s per token), except scene 5: 6 tokens, 1.8 s.
+  const tokens = new Array(20).fill(10);
+  tokens[5] = 6;
+  const aligned: number[] = [0];
+  for (let i = 0; i < 20; i++) aligned.push(aligned[i] + tokens[i] * 0.3);
+
+  it("puts back only the cuts whose snap broke a scene, and keeps every other snap", () => {
+    const snapped = aligned.slice();
+    snapped[5] += 0.74; // both of scene 5's cuts pulled in by nearly the full tolerance
+    snapped[6] -= 0.74; // → 0.32 s left for 6 tokens of speech
+    snapped[10] += 0.3; // an ordinary, harmless snap elsewhere
+    expect(implausibleScenes(tokens, lengths(snapped))[5]).toBe(true);
+    const out = unsnapImplausible(aligned, snapped, tokens);
+    expect(out[5]).toBe(aligned[5]);
+    expect(out[6]).toBe(aligned[6]);
+    expect(out[10]).toBe(snapped[10]);
+    expect(implausibleScenes(tokens, lengths(out)).some(Boolean)).toBe(false);
+  });
+
+  it("stays monotonic when a neighbour's snap sits inside the restored range", () => {
+    const snapped = aligned.slice();
+    snapped[5] += 0.74;
+    snapped[6] -= 0.74;
+    snapped[7] = aligned[6] - 0.2; // between the snapped and the restored cut
+    const out = unsnapImplausible(aligned, snapped, tokens);
+    for (let s = 1; s < out.length; s++)
+      expect(out[s]).toBeGreaterThanOrEqual(out[s - 1]);
+    expect(out[7]).toBe(aligned[7]);
+  });
+
+  it("returns the snapped cuts untouched when nothing is implausible", () => {
+    const snapped = aligned.slice();
+    snapped[10] += 0.3;
+    expect(unsnapImplausible(aligned, snapped, tokens)).toEqual(snapped);
+  });
+});
+
+describe("finalPlausibilityGate", () => {
+  it("re-splits what is still implausible and reports nothing", () => {
+    const b: number[] = [];
+    for (let i = 0; i <= 20; i++) b.push(i * 3);
+    for (let i = 10; i <= 14; i++) b[i] = 27;
+    const gate = finalPlausibilityGate(b, new Array(20).fill(10));
+    expect(gate.unrepairable).toHaveLength(0);
+    expect(gate.repaired).toHaveLength(1);
+    expect(
+      implausibleScenes(new Array(20).fill(10), lengths(gate.boundaries)).some(
+        Boolean
+      )
+    ).toBe(false);
+  });
+
+  it("reports a stretch it cannot fix, once — not again if the earlier gate already did", () => {
+    const b: number[] = [0];
+    for (let i = 1; i <= 20; i++) b.push(b[i - 1] + (i === 11 ? 300 : 3));
+    const tokens = new Array(20).fill(10);
+    const gate = finalPlausibilityGate(b, tokens);
+    expect(gate.unrepairable).toHaveLength(1);
+    const again = finalPlausibilityGate(b, tokens, [], gate.unrepairable);
+    expect(again.unrepairable).toHaveLength(0);
+  });
+});
+
+describe("assignSceneRanges — the snap cannot leave a film the banner would flag", () => {
+  it("undoes a pause-snap that starved a short scene (failed-transcription path)", () => {
+    const words10 = new Array(10).fill("word").join(" ");
+    const scenes = Array.from({ length: 20 }, (_, i) =>
+      scene(i === 5 ? new Array(6).fill("word").join(" ") : words10, i + 1)
+    );
+    // Word-count split: 3 s per 10-word scene, scene 5 = 15.0 → 16.8.
+    const dur = (19 * 10 + 6) * 0.3;
+    const silences = [
+      { start: 15.7, end: 15.85 }, // pulls cut 5 in by 0.74
+      { start: 16.0, end: 16.1 }, // pulls cut 6 in by 0.74
+      { start: 29.1, end: 29.3 }, // an ordinary snap for cut 10
+    ];
+    const report = newAlignmentReport();
+    const ranges = assignSceneRanges(scenes, null, dur, silences, [], report);
+    ranges.forEach((r, i) => {
+      scenes[i].narrationStartSec = r.startSec;
+      scenes[i].narrationEndSec = r.endSec;
+    });
+    expect(auditStoryboardTimeline(scenes)).toEqual([]);
+    expect(report.unrepairable).toEqual([]);
+    expect(ranges[5].startSec).toBeCloseTo(15, 5);
+    expect(ranges[5].endSec).toBeCloseTo(16.8, 5);
+    expect(ranges[10].startSec).toBeCloseTo(29.14, 5); // other snaps kept
+  });
+});
+
+function lengths(b: number[]) {
+  return b.slice(1).map((x, i) => x - b[i]);
+}
