@@ -10,39 +10,75 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Loader2, Receipt } from "lucide-react";
 import { formatMinSec } from "@shared/hostMinutes";
-import { hostSpendReasonLabel, type HostSpendSummary } from "@shared/hostSpend";
-import type { SceneSubmitReason } from "@shared/types";
+import type { HostRenderGroup, HostSpendSummary } from "@shared/hostSpend";
 
 /**
- * The host spend limit under the lip-sync section: what the video may spend, what it has, and
- * which kind of render used it — so "why is this high" has an answer on the screen.
+ * Under the lip-sync section: the video's host limit (when it has one), then every paid host
+ * render grouped by what caused it — the pipeline on its own, or a person's click, with their
+ * name — so "why is this high, and who did it" has an answer on the screen.
  */
-function HostSpendLines({ spend }: { spend: HostSpendSummary }) {
-  const reasons = (
-    Object.entries(spend.byReason) as [SceneSubmitReason, number][]
-  )
-    .filter(([, sec]) => sec > 0.5)
-    .sort((a, b) => b[1] - a[1]);
-  const over = spend.spentSec > spend.limitSec + 1;
+export function HostRenderLines({
+  spend,
+  groups,
+}: {
+  spend: HostSpendSummary | null;
+  groups: HostRenderGroup[];
+}) {
+  const over = !!spend && spend.spentSec > spend.limitSec + 1;
   return (
-    <div className="mt-3 space-y-1 rounded-md border border-border bg-secondary/40 px-3 py-2 text-xs tabular-nums">
-      <p className={over ? "text-chart-3" : "text-foreground"}>
-        Host limit: {formatMinSec(spend.spentSec)} of{" "}
-        {formatMinSec(spend.limitSec)} used
-        {over &&
-          ` — ${(spend.spentSec / spend.limitSec).toFixed(1)}× (rendered before the limit, or overridden)`}
-        {!over && spend.reached && " — limit reached"}
-      </p>
-      {reasons.length > 0 && (
-        <p className="text-muted-foreground">
-          {reasons
-            .map(
-              ([r, sec]) => `${hostSpendReasonLabel(r)} ${formatMinSec(sec)}`
-            )
-            .join(" · ")}
+    <div className="mt-3 space-y-2 rounded-md border border-border bg-secondary/40 px-3 py-2 text-xs tabular-nums">
+      {spend && (
+        <p className={over ? "text-chart-3" : "text-foreground"}>
+          Host limit: {formatMinSec(spend.spentSec)} of{" "}
+          {formatMinSec(spend.limitSec)} used
+          {over &&
+            ` — over by ${formatMinSec(spend.spentSec - spend.limitSec)}` +
+              (spend.spentSec / spend.limitSec >= 1.1
+                ? ` (${(spend.spentSec / spend.limitSec).toFixed(1)}×)`
+                : "")}
+          {!over && spend.reached && " — limit reached"}
         </p>
       )}
-      {spend.madeBroll > 0 && (
+      {groups.length > 0 && (
+        <ul className="space-y-1">
+          {groups.map(g => (
+            <li
+              key={g.kind}
+              title={`Scene${g.scenes.length === 1 ? "" : "s"} ${g.scenes.join(", ")}`}
+            >
+              <div className="flex items-baseline justify-between gap-3">
+                <span
+                  className={
+                    g.kind === "pastLimit"
+                      ? "text-chart-3"
+                      : g.kind === "first"
+                        ? "text-foreground"
+                        : "text-muted-foreground"
+                  }
+                >
+                  {g.label}
+                </span>
+                <span className="shrink-0 text-muted-foreground">
+                  {g.renders} render{g.renders === 1 ? "" : "s"} ·{" "}
+                  {formatMinSec(g.sec)}
+                </span>
+              </div>
+              {g.by.length > 0 && (
+                <p className="pl-3 text-muted-foreground">
+                  {g.by
+                    .map(b =>
+                      g.by.length > 1 || b.renders > 1
+                        ? `${b.name} ×${b.renders}`
+                        : b.name
+                    )
+                    .join(" · ")}
+                </p>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {spend && spend.madeBroll > 0 && (
         <p className="text-muted-foreground">
           {spend.madeBroll} check-in{spend.madeBroll === 1 ? "" : "s"} made
           b-roll to stay under the limit
@@ -213,9 +249,13 @@ export function GenerationCostDialog({
                     </li>
                   ))}
                 </ul>
-                {section.key === "lipsync" && data.hostSpend && (
-                  <HostSpendLines spend={data.hostSpend} />
-                )}
+                {section.key === "lipsync" &&
+                  (data.hostSpend || data.hostRenders.length > 0) && (
+                    <HostRenderLines
+                      spend={data.hostSpend}
+                      groups={data.hostRenders}
+                    />
+                  )}
               </section>
             ))}
 

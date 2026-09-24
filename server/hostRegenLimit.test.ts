@@ -23,7 +23,7 @@ const host = (submits: SceneSubmit[]): StoryboardScene => ({
 });
 
 describe("host regenerate limit", () => {
-  it("counts only operator regenerations — automatic retries do not eat the operator's two", () => {
+  it("counts only operator regenerations — automatic retries do not eat the operator's one", () => {
     const s = host([
       submit("first"),
       submit("transient"),
@@ -35,17 +35,13 @@ describe("host regenerate limit", () => {
     expect(hostRegenerationLocked(s)).toBe(false);
   });
 
-  it("locks after MAX_HOST_REGENERATIONS regenerations, not before", () => {
+  it("locks after MAX_HOST_REGENERATIONS (one) regenerate, not before", () => {
+    expect(MAX_HOST_REGENERATIONS).toBe(1);
+    const none = host([submit("first")]);
+    expect(hostRegenerationLocked(none)).toBe(false);
     const one = host([submit("first"), submit("regenerate")]);
-    expect(hostRegenerationLocked(one)).toBe(false);
-    const two = host([
-      submit("first"),
-      ...Array.from({ length: MAX_HOST_REGENERATIONS }, () =>
-        submit("regenerate")
-      ),
-    ]);
-    expect(hostRegenerationsUsed(two)).toBe(MAX_HOST_REGENERATIONS);
-    expect(hostRegenerationLocked(two)).toBe(true);
+    expect(hostRegenerationsUsed(one)).toBe(1);
+    expect(hostRegenerationLocked(one)).toBe(true);
   });
 
   it("never locks a b-roll scene or a split — neither regenerate touches the lip-sync lane", () => {

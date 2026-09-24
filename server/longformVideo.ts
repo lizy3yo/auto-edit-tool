@@ -129,6 +129,28 @@ import {
   isHostSpendLimitError,
   reserveHostSpend,
 } from "./hostSpend";
+import {
+  HostAccountError,
+  HostRenderCapError,
+  hostAccountFailure,
+  hostLanePause,
+  isHostAccountError,
+  isHostRenderCapError,
+  pauseHostLane,
+  resumeHostLane,
+} from "./hostLaneFailure";
+import {
+  decideHostRender,
+  hostAutoRenderCap,
+  hostAutoRendersUsed,
+  isLimitedHostScene,
+} from "../shared/hostRegenLimit";
+import {
+  applyTake,
+  currentTake,
+  recordRegeneratedTake,
+  selectHostTake,
+} from "../shared/hostTakes";
 // AIREITER BOLT-ON (temporary) — delete with the block in `apimartAdapterForJob`.
 import { aireiterAdapter, aireiterLaneEnabled } from "./providers/aireiter";
 import { Semaphore } from "./providers/semaphore";
@@ -251,6 +273,7 @@ import type {
   GenerationResult,
   SplitLayout,
   SceneSubmitReason,
+  SubmitActor,
 } from "../shared/types";
 import {
   extractSpokenScript,
@@ -3249,6 +3272,11 @@ export function convertHostSceneToBroll(s: StoryboardScene): boolean {
   s.renderModelIndex = undefined;
   s.renderAttempts = undefined;
   s.infraRetries = undefined;
+  // Host-only state: a cutaway has no host takes to choose between and nothing to wait for.
+  s.hostTakes = undefined;
+  s.activeTake = undefined;
+  s.hostNeeded = undefined;
+  s.hostWaiting = undefined;
   return true;
 }
 
@@ -9008,10 +9036,19 @@ export async function runChunkTasks(
   const submitReason: SceneSubmitReason =
     scene.nextSubmitReason ?? (scene.submits?.length ? "resume" : "first");
   scene.nextSubmitReason = undefined;
+  // Who clicked for it, and whether an admin/manager confirmed it past the beat's limit.
+  const submitBy = scene.nextSubmitBy;
+  scene.nextSubmitBy = undefined;
+  const submitOverride = !!scene.nextSubmitOverride;
+  scene.nextSubmitOverride = undefined;
 
   // The spend gate's refusal (`server/hostSpend.ts`), kept as itself: the catch below turns
   // every other throw into a failed poll, and this one must reach the caller by its class.
   let limitErr: HostSpendLimitError | undefined;
+  // Same for the per-beat render cap and an account-level HeyGen failure
+  // (`server/hostLaneFailure.ts`): each means "do not resubmit", and the caller decides what
+  // the beat becomes from which one it was.
+  let hostStop: HostAccountError | HostRenderCapError | undefined;
 
   // Each chunk is an independent acquire → submit (if not already submitted) → persist →
   // poll → release unit. They all kick off here but queue on `slots.acquire()`, so at most
@@ -9024,23 +9061,57 @@ export async function runChunkTasks(
           if (!taskIds[i]) {
             if (abandonedScenes.has(scene))
               throw new Error("scene abandoned — not submitting");
+            if (isHostLane(provider)) {
+              // The job's HeyGen account already failed: nothing this beat could do would
+              // change that, so do not call HeyGen at all.
+              const pause = hostLanePause(jobId);
+              if (pause) throw pause;
+              // The per-beat allowance (`shared/hostRegenLimit.ts`): the first render plus one
+              // automatic retry (two on the start/CTAs/end), and one operator regenerate.
+              const gate = decideHostRender(
+                scene,
+                submitReason,
+                submitOverride
+              );
+              if (!gate.ok)
+                throw new HostRenderCapError(gate.why, gate.used, gate.cap);
+              if (gate.pastLimit) scene.submitPastLimit = true;
+            }
             let taskId = "";
             for (let attempt = 0; attempt < 2 && !taskId; attempt++) {
               const sub = await submit(i, submitReason);
               if (sub.taskId) taskId = sub.taskId;
-              else if (attempt === 1)
-                throw new Error(sub.error || "clip submit failed");
-              else await sleep(15_000);
+              else {
+                const account = isHostLane(provider)
+                  ? hostAccountFailure(sub.error)
+                  : null;
+                if (account) {
+                  const err = new HostAccountError(
+                    account,
+                    sub.error ?? account
+                  );
+                  pauseHostLane(jobId, err);
+                  throw err;
+                }
+                if (attempt === 1)
+                  throw new Error(sub.error || "clip submit failed");
+                await sleep(15_000);
+              }
             }
             taskIds[i] = taskId;
             // The ledger entry rides the same event the cost meter bills on: an ACCEPTED
             // submit. A second entry on a scene is a second payment, whatever the reason.
+            const pastLimit = !!scene.submitPastLimit;
+            scene.submitPastLimit = undefined;
             (scene.submits ??= []).push({
               provider,
               at: new Date().toISOString(),
               reason: submitReason,
               sec: expectedDurationSec?.(i) ?? scene.audioDuration,
+              ...(submitBy ? { by: submitBy } : {}),
+              ...(pastLimit ? { pastLimit: true } : {}),
             });
+            scene.hostWaiting = undefined;
             await persist(); // persist id BEFORE the long poll — resume-safe per chunk
           }
           return await poll(taskIds[i]);
@@ -9049,15 +9120,18 @@ export async function runChunkTasks(
         }
       })().catch((e: any): GenerationResult => {
         if (isHostSpendLimitError(e)) limitErr = e;
+        if (isHostAccountError(e) || isHostRenderCapError(e)) hostStop = e;
         return { success: false, error: e?.message || "poll failed" };
       })
     )
   );
-  if (limitErr) {
+  if (limitErr || hostStop) {
     // Nothing was submitted for the refused chunk, so there is nothing to resume or re-pay.
+    // The spend-gate refusal wins the tie: the caller has its own handling for it.
     scene.renderTaskIds = undefined;
+    scene.submitPastLimit = undefined;
     await persist();
-    throw limitErr;
+    throw limitErr ?? hostStop;
   }
 
   const pending = polls.filter(r => r.pending).length;
@@ -9086,6 +9160,18 @@ export async function runChunkTasks(
     if (abandonedScenes.has(scene)) {
       scene.renderTaskIds = undefined;
       throw new Error(failed.error || "scene abandoned");
+    }
+    // HeyGen accepted the render and then failed it for an ACCOUNT reason (credits ran out
+    // mid-queue): not this beat's fault, so it is not resubmitted — the job's host lane pauses.
+    const account = isHostLane(provider)
+      ? hostAccountFailure(failed.error)
+      : null;
+    if (account) {
+      scene.renderTaskIds = undefined;
+      const err = new HostAccountError(account, failed.error ?? account);
+      pauseHostLane(jobId, err);
+      await persist();
+      throw err;
     }
     // A DETERMINISTIC failure first: the provider has said this exact render cannot complete
     // (RunPod stopped it at the execution cap), so resubmitting the same body would fail the
@@ -9986,7 +10072,10 @@ export async function generateSceneClips(
     params.faceImageUrl &&
     scene.audioUrl
   ) {
-    throw new Error(
+    // An ACCOUNT problem, not the beat's: every host beat of the tab fails the same way, so it
+    // pauses the host lane instead of spending retries or making the host b-roll.
+    throw new HostAccountError(
+      "no HeyGen key is set for this tab",
       `Scene ${scene.index} is a host shot that requires lip-sync, but no lip-sync ` +
         `adapter is configured (set HEYGEN_API_KEY or a per-tab HeyGen key in Admin). ` +
         `Refusing to fall back to non-lip-synced 69labs video.`
@@ -10546,28 +10635,38 @@ async function renderSceneClip(
   pollTimeoutMs?: number
 ): Promise<void> {
   scene.sceneStatus = "processing";
-  try {
-    scene.clipUrls = await generateSceneClips(
-      adapter,
-      jobId,
-      scene,
-      params,
-      lipsync,
-      instruction,
-      persist,
-      pollTimeoutMs
-    );
-    syncSceneClipFields(scene);
-    scene.sceneStatus = "completed";
-  } catch (e: any) {
-    if (e instanceof PendingRenderError) {
-      // Render still running provider-side — keep the taskIds, mark resumable (not failed).
-      scene.sceneStatus = "rendering";
-      scene.error = undefined;
-      console.warn(
-        `[Longform ${jobId}] scene ${scene.index} ${e.message} — will resume`
+  // A HOST beat that fails for a reason of its own gets its automatic retry HERE, straight away
+  // (`shared/hostRegenLimit.ts`: one, two on the start/CTAs/end) instead of settling on the
+  // first failure. The render gate in `runChunkTasks` holds the count, so this loop can never
+  // pay past it; the pass bound only stops a failure that happens before any submit (no audio,
+  // a photo that will not load) from spinning.
+  for (let pass = 0; ; pass++) {
+    try {
+      scene.clipUrls = await generateSceneClips(
+        adapter,
+        jobId,
+        scene,
+        params,
+        lipsync,
+        instruction,
+        persist,
+        pollTimeoutMs
       );
-    } else {
+      syncSceneClipFields(scene);
+      scene.sceneStatus = "completed";
+      scene.hostNeeded = undefined;
+      scene.hostWaiting = undefined;
+      return;
+    } catch (e: any) {
+      if (e instanceof PendingRenderError) {
+        // Render still running provider-side — keep the taskIds, mark resumable (not failed).
+        scene.sceneStatus = "rendering";
+        scene.error = undefined;
+        console.warn(
+          `[Longform ${jobId}] scene ${scene.index} ${e.message} — will resume`
+        );
+        return;
+      }
       // If a b-roll cutaway fails to render as motion video, gracefully fall back to high-res
       // Ken Burns still animation (industry standard: avoid failing the full video over one b-roll clip).
       if (!scene.hostPresent) {
@@ -10583,30 +10682,103 @@ async function renderSceneClip(
             stillErr
           );
         }
-      } else if (
-        await autoBrollHostScene(
-          jobId,
-          scene,
-          params,
-          e.message,
-          isHostSpendLimitError(e)
-        )
-      ) {
-        // The lip-sync lane gave up (bounded retries spent, or a terminal verdict): the beat is
-        // a cutaway now, rendered and completed — not a "Failed" card waiting for a click.
-        console.warn(
-          `[Longform ${jobId}] scene ${scene.index} host render failed (${e.message}) — made b-roll automatically`
-        );
+        scene.sceneStatus = "failed";
+        scene.error = `Clip: ${e.message}`;
+        scene.renderTaskIds = undefined;
+        scene.renderModelIndex = undefined;
+        scene.renderAttempts = undefined;
+        scene.infraRetries = undefined;
         return;
       }
-      scene.sceneStatus = "failed";
-      scene.error = `Clip: ${e.message}`;
-      scene.renderTaskIds = undefined;
-      scene.renderModelIndex = undefined;
-      scene.renderAttempts = undefined;
-      scene.infraRetries = undefined;
+      if (pass < 3 && hostMayRetryNow(scene, e)) {
+        console.warn(
+          `[Longform ${jobId}] scene ${scene.index} host render failed (${e.message}) — ` +
+            `automatic retry ${hostAutoRendersUsed(scene)}/${hostAutoRenderCap(scene) - 1}`
+        );
+        scene.renderTaskIds = undefined;
+        scene.nextSubmitReason = "infra";
+        continue;
+      }
+      await settleFailedHostScene(jobId, scene, params, e);
+      return;
     }
   }
+}
+
+/**
+ * Whether a host beat that just failed should be rendered again on the spot: the failure was
+ * the beat's own (not the account, not a limit), it has an automatic render left, and nobody
+ * has given up on it. Anything else is settled by `settleFailedHostScene`.
+ */
+function hostMayRetryNow(scene: StoryboardScene, e: unknown): boolean {
+  if (
+    isHostAccountError(e) ||
+    isHostRenderCapError(e) ||
+    isHostSpendLimitError(e) ||
+    abandonedScenes.has(scene)
+  )
+    return false;
+  return hostAutoRendersUsed(scene) < hostAutoRenderCap(scene);
+}
+
+/**
+ * What a host beat becomes once the lip-sync lane is done with it and it has no new clip:
+ *  - the HeyGen ACCOUNT failed ⇒ it waits (`hostWaiting`), keeps every retry, stays host;
+ *  - it is the start, a CTA or the end ⇒ "Host needed" (`hostNeeded`): never made b-roll behind
+ *    anyone's back — the film will not assemble until a person Regenerates it or makes it b-roll;
+ *  - a check-in ⇒ made b-roll automatically (`autoBrollHostScene`), as before;
+ *  - else (b-roll switched off, or even the still failed) ⇒ a failed host card.
+ */
+async function settleFailedHostScene(
+  jobId: number,
+  scene: StoryboardScene,
+  params: LongformInputParams,
+  e: any
+): Promise<void> {
+  const msg: string = e?.message ?? String(e);
+  const at = new Date().toISOString();
+  scene.renderTaskIds = undefined;
+  scene.renderModelIndex = undefined;
+  scene.renderAttempts = undefined;
+  scene.infraRetries = undefined;
+  scene.nextSubmitReason = undefined;
+  scene.nextSubmitBy = undefined;
+  scene.nextSubmitOverride = undefined;
+  scene.submitPastLimit = undefined;
+  if (isHostAccountError(e)) {
+    scene.hostWaiting = { reason: e.reason, at };
+    scene.sceneStatus = "failed";
+    scene.error = `Waiting for HeyGen — ${e.reason}`;
+    console.warn(
+      `[Longform ${jobId}] scene ${scene.index} waiting for HeyGen: ${e.raw}`
+    );
+    return;
+  }
+  const limit = isHostSpendLimitError(e);
+  if (scene.hostProtected && !limit) {
+    scene.hostNeeded = { reason: msg, at };
+    scene.sceneStatus = "failed";
+    scene.error = `Host needed — ${msg}`;
+    appendJobWarning(
+      jobId,
+      `Scene ${scene.index}: the host could not be rendered (${msg}). It is the start, a CTA or ` +
+        `the end, so it was not made b-roll — Regenerate it or make it b-roll yourself.`
+    );
+    console.warn(
+      `[Longform ${jobId}] scene ${scene.index} host needed after ${hostAutoRendersUsed(scene)} render(s): ${msg}`
+    );
+    return;
+  }
+  if (await autoBrollHostScene(jobId, scene, params, msg, limit)) {
+    // The lip-sync lane gave up (its retry spent, or a terminal verdict): the beat is a
+    // cutaway now, rendered and completed — not a "Failed" card waiting for a click.
+    console.warn(
+      `[Longform ${jobId}] scene ${scene.index} host render failed (${msg}) — made b-roll automatically`
+    );
+    return;
+  }
+  scene.sceneStatus = "failed";
+  scene.error = `Clip: ${msg}`;
 }
 
 /**
@@ -12773,6 +12945,8 @@ export async function createLongformJob(
  * records them on the job row.
  */
 export async function runLongformPipeline(jobId: number): Promise<void> {
+  // A fresh run starts with the host lane open (a pause from an earlier run is stale).
+  resumeHostLane(jobId);
   try {
     const job = await getLongformVideoJobById(jobId);
     if (!job) throw new Error("Job not found");
@@ -13145,17 +13319,44 @@ export function describeUnassemblableScenes(
 ): string | null {
   const noClip: StoryboardScene[] = [];
   const noNarration: StoryboardScene[] = [];
+  // Host beats that are not failures of their own, each with its own way forward.
+  const waiting: StoryboardScene[] = [];
+  const needed: StoryboardScene[] = [];
   for (const s of scenes) {
-    if (!sceneHasClip(s)) noClip.push(s);
-    else if (!s.audioUrl) noNarration.push(s);
+    if (!sceneHasClip(s)) {
+      if (s.hostWaiting) waiting.push(s);
+      else if (s.hostNeeded) needed.push(s);
+      else noClip.push(s);
+    } else if (!s.audioUrl) noNarration.push(s);
   }
-  if (noClip.length === 0 && noNarration.length === 0) return null;
+  if (
+    noClip.length === 0 &&
+    noNarration.length === 0 &&
+    waiting.length === 0 &&
+    needed.length === 0
+  )
+    return null;
   const list = (group: StoryboardScene[]) =>
     group
       .map(s => `scene ${s.index}${s.error ? ` (${s.error})` : ""}`)
       .join(", ");
+  const indices = (group: StoryboardScene[]) =>
+    group.map(s => s.index).join(", ");
 
   const parts: string[] = [];
+  if (waiting.length > 0) {
+    parts.push(
+      `Waiting for HeyGen — ${waiting[0].hostWaiting!.reason}. ${waiting.length} host ` +
+        `scene(s) paused (${indices(waiting)}); none of their retries were used. Fix the ` +
+        `account, then Retry failed scenes`
+    );
+  }
+  if (needed.length > 0) {
+    parts.push(
+      `Host needed on scene(s) ${indices(needed)} — the start, a CTA or the end could not be ` +
+        `rendered with the host. Regenerate each one or make it b-roll, then Retry assembly`
+    );
+  }
   if (noClip.length > 0) {
     parts.push(
       `${noClip.length} scene(s) have no clip — re-render them with "Retry failed scenes", ` +
@@ -13984,13 +14185,24 @@ async function renderSceneClipInPlace(
    */
   keepPriorOnLimit = true
 ): Promise<void> {
-  // What this beat shows now — put back if the host spend limit refuses the new render, so a
-  // refused regenerate leaves the film as it was instead of turning a good host shot to b-roll.
-  const before = {
-    clipUrls: scene.clipUrls,
-    clipUrl: scene.clipUrl,
-    hostClipUrls: scene.hostClipUrls,
-  };
+  // What this beat shows now. On an operator regenerate it is TAKE 1: put back if the new
+  // render does not come through (so a failed or refused regenerate leaves the film as it was
+  // instead of turning a good host shot to b-roll), and kept beside the new take if it does
+  // (`shared/hostTakes.ts`), so the operator can choose between them.
+  const lastHostSubmit = [...(scene.submits ?? [])]
+    .reverse()
+    .find(s => s.provider === "heygen" || s.provider === "runpod");
+  const beforeTake =
+    scene.hostPresent && keepPriorOnLimit
+      ? currentTake(
+          scene,
+          scene.hostTakes?.length ? "regenerate" : "original",
+          undefined,
+          lastHostSubmit?.at
+        )
+      : null;
+  // Who clicked — `runChunkTasks` consumes `nextSubmitBy` into the ledger; the take keeps it too.
+  const clickedBy = scene.nextSubmitBy;
   scene.sceneStatus = "processing";
   scene.error = undefined;
   // Force a FRESH render — discard any persisted in-flight taskIds so we re-submit rather
@@ -14022,20 +14234,28 @@ async function renderSceneClipInPlace(
   // so the drift is visible instead of silently padded.
   const overlong = describeOverlongScenes([scene], pacingFor(params));
   if (overlong) console.warn(`[Longform ${jobId}] ${overlong}`);
+  // ONE click is ONE paid host render. The retry loop below still re-POLLS a host render that
+  // is running past the poll ceiling (paid for, worth collecting), but it never resubmits one
+  // that failed: that is what used to turn one click into three HeyGen renders.
+  let lastErr: Error | undefined;
   try {
     scene.clipUrls = await withTransientRetry(
       attempt => {
-        // Fresh resubmit each attempt — discard any in-flight taskIds from the prior try
-        // and restart the clip chain at element 0.
-        scene.renderTaskIds = undefined;
-        scene.renderProvider = undefined;
-        scene.renderModelIndex = undefined;
-        scene.renderAttempts = undefined;
-        scene.infraRetries = undefined;
+        if (attempt > 1 && scene.hostPresent && !scene.renderTaskIds?.length)
+          throw new Error(lastErr?.message ?? "host render failed");
+        if (attempt === 1 || !scene.hostPresent) {
+          // Fresh resubmit — discard any in-flight taskIds from the prior try and restart the
+          // clip chain at element 0.
+          scene.renderTaskIds = undefined;
+          scene.renderProvider = undefined;
+          scene.renderModelIndex = undefined;
+          scene.renderAttempts = undefined;
+          scene.infraRetries = undefined;
+          // The first attempt is the operator's ask; a later one is this loop retrying it.
+          scene.nextSubmitReason = attempt === 1 ? reason : "transient";
+        }
         scene.sceneStatus = "processing";
         scene.error = undefined;
-        // The first attempt is the operator's ask; a later one is this loop retrying it.
-        scene.nextSubmitReason = attempt === 1 ? reason : "transient";
         return generateSceneClips(
           adapter,
           jobId,
@@ -14047,11 +14267,13 @@ async function renderSceneClipInPlace(
         );
       },
       {
-        onRetry: (attempt, err) =>
+        onRetry: (attempt, err) => {
+          lastErr = err;
           console.warn(
             `[Longform ${jobId}] scene ${scene.index} transient render failure ` +
               `(attempt ${attempt}) — retrying: ${err.message}`
-          ),
+          );
+        },
       }
     );
   } catch (err: any) {
@@ -14062,12 +14284,15 @@ async function renderSceneClipInPlace(
       await fallbackSceneToStill(jobId, scene, params);
       return;
     }
-    if (
-      isHostSpendLimitError(err) &&
-      keepPriorOnLimit &&
-      (before.clipUrls?.length || before.clipUrl)
-    ) {
-      Object.assign(scene, before);
+    scene.nextSubmitBy = undefined;
+    scene.nextSubmitOverride = undefined;
+    // An operator regenerate of a beat that already had a picture: whatever went wrong — the
+    // render failed, the beat's regenerate was used, the video's host limit, the account — the
+    // film keeps the shot it had. (A merge is not this: its old clip covers a shorter slice.)
+    if (beforeTake && reason === "regenerate") {
+      applyTake(scene, beforeTake);
+      scene.renderTaskIds = undefined;
+      scene.nextSubmitReason = undefined;
       scene.sceneStatus = "completed";
       scene.error = undefined;
       appendJobWarning(
@@ -14076,26 +14301,29 @@ async function renderSceneClipInPlace(
       );
       return;
     }
-    // A host beat the lane gave up on: the same automatic demotion the first pass makes, so a
-    // "Retry failed scenes" click ends with a cutaway instead of the same failed host card.
-    if (
-      await autoBrollHostScene(
-        jobId,
-        scene,
-        params,
-        err.message,
-        isHostSpendLimitError(err)
-      )
-    ) {
-      console.warn(
-        `[Longform ${jobId}] scene ${scene.index} host retry failed (${err.message}) — made b-roll automatically`
-      );
+    // Still rendering on the provider when the wait ran out — paid for, so collect it on the
+    // next resume instead of settling the beat.
+    // (Re-read through a cast: TS narrowed these fields to the values assigned above, but the
+    // render wrote to them since.)
+    const inFlight = scene.renderTaskIds as string[] | undefined;
+    if (err instanceof PendingRenderError && inFlight?.length) {
+      scene.sceneStatus = "rendering";
+      scene.error = undefined;
       return;
     }
-    throw err;
+    // The same settle the first pass makes: a check-in becomes b-roll, the start/CTAs/end are
+    // flagged "Host needed", an account failure waits.
+    await settleFailedHostScene(jobId, scene, params, err);
+    if ((scene.sceneStatus as StoryboardScene["sceneStatus"]) === "failed")
+      throw new Error(scene.error ?? err.message);
+    return;
   }
   syncSceneClipFields(scene);
   scene.sceneStatus = "completed";
+  scene.hostNeeded = undefined;
+  scene.hostWaiting = undefined;
+  if (reason === "regenerate" && isLimitedHostScene(scene))
+    recordRegeneratedTake(scene, beforeTake, clickedBy);
 }
 
 /**
@@ -14199,7 +14427,7 @@ async function regenerateSplitRight(
 // to live INSIDE one lock pass, over one live `scenes` document — exactly what the session is.
 
 /** One operator edit, keyed by scene. */
-export type SceneEditRequest =
+export type SceneEditRequest = (
   | {
       kind: "regen";
       sceneIndex: number;
@@ -14287,10 +14515,22 @@ export type SceneEditRequest =
    * two cards return with their own footage and nothing re-renders. Renumbers, so it takes the
    * same "nothing else rendering" guard the merge does.
    */
-  | { kind: "unmerge"; sceneIndex: number };
+  | { kind: "unmerge"; sceneIndex: number }
+  /**
+   * Switch a regenerated host beat between its takes (`shared/hostTakes.ts`) — the old and the
+   * new render. Metadata only and instant: both clips are already on R2.
+   */
+  | { kind: "take"; sceneIndex: number; take: number }
+) & {
+  /** Who clicked — recorded on the ledger entry of the render this pays for. */
+  by?: SubmitActor;
+  /** An admin/manager confirmed a render past this beat's regenerate limit. */
+  force?: boolean;
+};
 
 /** Requests that change how a scene ASSEMBLES without rendering anything. */
 const isTimingKind = (req: SceneEditRequest): boolean =>
+  req.kind === "take" ||
   req.kind === "timing" ||
   req.kind === "cut" ||
   req.kind === "uncut" ||
@@ -14675,7 +14915,9 @@ function prepareSceneEdit(ctx: SceneEditContext, req: SceneEditRequest): void {
     // fields renderSceneClipInPlace overwrites. Split targets keep theirs: the existing
     // composite is the only source the host panel can be recovered from on a pre-`hostClipUrls`
     // scene, and regenerateSplitRight overwrites clipUrls itself when the new composite is up.
-    if (req.clearClip && !splitOnly) {
+    // A full-frame HOST beat keeps its clip too: it is take 1 of the regenerate
+    // (`shared/hostTakes.ts`), and what the film falls back to if the new render fails.
+    if (req.clearClip && !splitOnly && !isLimitedHostScene(scene)) {
       scene.clipUrl = undefined;
       scene.clipUrls = [];
     }
@@ -14770,11 +15012,21 @@ async function runSceneEdit(
         } else if (req.kind === "ripple") {
           await runRippleEdit(ctx, s, req.newSec, req.edge);
         } else if (req.kind === "merge") {
+          s.nextSubmitBy = req.by;
+          resumeHostLane(jobId);
           await runMergeEdit(ctx, s);
           s.regenerated = true;
         } else if (req.kind === "unmerge") {
           runUnmergeEdit(ctx, s);
+        } else if (req.kind === "take") {
+          runTakeEdit(ctx, s, req.take);
         } else {
+          // A person clicked for this render: name them on the ledger, carry a manager's
+          // confirm to the render gate, and lift a host-lane pause — the click is how the
+          // operator says the HeyGen account is fixed.
+          s.nextSubmitBy = req.by;
+          s.nextSubmitOverride = req.force || undefined;
+          resumeHostLane(jobId);
           // A converted scene IS a b-roll scene by now (`prepareSceneEdit`), so its render is
           // the ordinary cutaway regenerate: enhance against the subject, scrub names, render.
           if (req.kind === "tobroll")
@@ -14801,6 +15053,9 @@ async function runSceneEdit(
           `[Longform ${jobId}] scene ${s.index} edit failed: ${s.error}`
         );
       } finally {
+        // Never let a click's name ride along to a later, automatic render of this scene.
+        s.nextSubmitBy = undefined;
+        s.nextSubmitOverride = undefined;
         settled = true;
       }
     };
@@ -14818,6 +15073,25 @@ async function runSceneEdit(
   } finally {
     sem.release();
   }
+}
+
+/**
+ * A take switch: put the chosen take's picture on the scene. Refused (not failed) when the scene
+ * has no such take — the clip is untouched either way.
+ */
+function runTakeEdit(
+  ctx: SceneEditContext,
+  scene: StoryboardScene,
+  take: number
+): void {
+  const r = selectHostTake(scene, take);
+  if (!r.ok) throw new Error(r.reason);
+  if (!r.changed) return;
+  // The finished film still has the other take in it until it is re-stitched.
+  scene.timingEdited = true;
+  console.log(
+    `[Longform ${ctx.jobId}] scene ${scene.index} switched to take ${take + 1}`
+  );
 }
 
 /**
@@ -15124,9 +15398,22 @@ export async function rippleTrimScene(
 
 export async function mergeSceneWithNext(
   jobId: number,
-  sceneIndex: number
+  sceneIndex: number,
+  by?: SubmitActor
 ): Promise<EditAccept> {
-  return enqueueSceneEdit(jobId, { kind: "merge", sceneIndex });
+  return enqueueSceneEdit(jobId, { kind: "merge", sceneIndex, by });
+}
+
+/**
+ * Switch a regenerated host beat to one of its takes (`shared/hostTakes.ts`). Instant metadata
+ * on the edit session — nothing renders or bills; the film needs a Reassemble to pick it up.
+ */
+export async function selectSceneTake(
+  jobId: number,
+  sceneIndex: number,
+  take: number
+): Promise<EditAccept> {
+  return enqueueSceneEdit(jobId, { kind: "take", sceneIndex, take });
 }
 
 export async function unmergeScene(
@@ -15331,7 +15618,9 @@ export async function regenerateScene(
   sceneIndex: number,
   customVisualPrompt?: string,
   verbatim?: boolean,
-  customSplitVisual?: string
+  customSplitVisual?: string,
+  /** Who clicked, and whether an admin/manager confirmed it past the beat's regenerate limit. */
+  click?: { by?: SubmitActor; force?: boolean }
 ): Promise<EditAccept> {
   const accept = enqueueSceneEdit(jobId, {
     kind: "regen",
@@ -15339,6 +15628,8 @@ export async function regenerateScene(
     customVisualPrompt,
     customSplitVisual,
     verbatim,
+    by: click?.by,
+    force: click?.force,
   });
   if (accept === "ignored")
     console.warn(
@@ -15354,9 +15645,10 @@ export async function regenerateScene(
  */
 export async function convertSceneToBroll(
   jobId: number,
-  sceneIndex: number
+  sceneIndex: number,
+  by?: SubmitActor
 ): Promise<EditAccept> {
-  const accept = enqueueSceneEdit(jobId, { kind: "tobroll", sceneIndex });
+  const accept = enqueueSceneEdit(jobId, { kind: "tobroll", sceneIndex, by });
   if (accept === "ignored")
     console.warn(
       `[Longform ${jobId}] Scene ${sceneIndex} is rendering — make-b-roll request ignored`
@@ -15407,9 +15699,18 @@ async function runToHostEdit(
 export async function convertSceneToHost(
   jobId: number,
   sceneIndex: number,
-  split: boolean
+  split: boolean,
+  by?: SubmitActor
 ): Promise<EditAccept> {
-  const accept = enqueueSceneEdit(jobId, { kind: "tohost", sceneIndex, split });
+  // "Make host" is admin-only (router), so it is always a confirmed render: it never counts
+  // against a beat's regenerate limit being in the way.
+  const accept = enqueueSceneEdit(jobId, {
+    kind: "tohost",
+    sceneIndex,
+    split,
+    by,
+    force: true,
+  });
   if (accept === "ignored")
     console.warn(
       `[Longform ${jobId}] Scene ${sceneIndex} is rendering — make-host request ignored`
@@ -15440,7 +15741,9 @@ export async function regenerateScenes(
     visualPrompt?: string;
     splitVisual?: string;
   }>,
-  verbatimIndices?: number[]
+  verbatimIndices?: number[],
+  /** Who clicked, and whether an admin/manager confirmed renders past a beat's limit. */
+  click?: { by?: SubmitActor; force?: boolean }
 ): Promise<Record<number, EditAccept>> {
   const overrides = new Map((promptOverrides ?? []).map(p => [p.index, p]));
   const verbatim = new Set(verbatimIndices ?? []);
@@ -15454,6 +15757,8 @@ export async function regenerateScenes(
       customSplitVisual: o?.splitVisual,
       verbatim: verbatim.has(sceneIndex),
       clearClip: true,
+      by: click?.by,
+      force: click?.force,
     });
   }
   const ignored = Object.entries(out)
@@ -16476,7 +16781,11 @@ export async function repairJobTimeline(
   });
 }
 
-export async function retryFailedScenes(jobId: number): Promise<void> {
+export async function retryFailedScenes(
+  jobId: number,
+  /** The person who clicked, named on the ledger of every host render this pays for. */
+  by?: SubmitActor
+): Promise<void> {
   // A running pass no longer DROPS the click. `withJobLock` queues rather than rejects, so a
   // retry asked for mid-render simply starts when the render releases the lock — the operator
   // can act on the first failed scene they see instead of watching ~280 others finish first.
@@ -16489,21 +16798,27 @@ export async function retryFailedScenes(jobId: number): Promise<void> {
       await withJobLock(jobId, () => {
         // We own the lock now: no longer merely queued, so the button stops saying so.
         queuedRetries.delete(jobId);
-        return retryFailedScenesLocked(jobId);
+        return retryFailedScenesLocked(jobId, by);
       });
     } finally {
       queuedRetries.delete(jobId); // also on a throw before the body ran
     }
     return;
   }
-  return withJobLock(jobId, () => retryFailedScenesLocked(jobId));
+  return withJobLock(jobId, () => retryFailedScenesLocked(jobId, by));
 }
 
 /** Core of retryFailedScenes — assumes the caller holds the job lock (withJobLock). */
-async function retryFailedScenesLocked(jobId: number): Promise<void> {
+async function retryFailedScenesLocked(
+  jobId: number,
+  by?: SubmitActor
+): Promise<void> {
   const job = await getLongformVideoJobById(jobId);
   if (!job) throw new Error("Job not found");
   const params = job.inputParams as LongformInputParams;
+  // A retry is how the operator says the HeyGen account is fixed: lift the pause so the beats
+  // waiting on it render again (their retries were never spent — HeyGen accepted nothing).
+  resumeHostLane(jobId);
 
   await updateLongformVideoJob(jobId, {
     status: "processing",
@@ -16649,7 +16964,16 @@ async function retryFailedScenesLocked(jobId: number): Promise<void> {
     // a fresh, billed render of a clip that was already sitting on the row, for every such
     // scene in the batch. The comment below has always said "still lacks a clip"; now the
     // filter does too.
-    const renderable = missing.filter(s => s.audioUrl && !sceneHasClip(s));
+    // A "Host needed" beat (the start, a CTA or the end, out of automatic retries) is NOT
+    // retried: another automatic render is exactly the spending the limit stops. It waits for
+    // a person's Regenerate or "Make b-roll".
+    const renderable = missing.filter(
+      s => s.audioUrl && !sceneHasClip(s) && !s.hostNeeded
+    );
+    for (const s of renderable) {
+      if (s.hostPresent) s.nextSubmitBy = by;
+      s.hostWaiting = undefined;
+    }
     backfillProtectedHostBeats(scenes, params);
     // Re-render the missing scenes across all three provider lanes concurrently (was a
     // sequential for-loop that submitted only one scene's chunks at a time and blocked ~25min

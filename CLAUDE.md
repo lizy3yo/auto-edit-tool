@@ -894,25 +894,46 @@ Always 16:9. Fire-and-forget; progress persisted to the job row and polled by th
   retry / merge) — the per-scene ledger behind the card's "Rendered N× — paid each time"
   badge; `scene.nextSubmitReason` is how a resubmit path names the next entry. The cost
   dialog's lip-sync seconds are submits × narration, so on a job predating the ledger the only
-  way to tell re-renders from budget is the render log's "host budget" line. The ledger also
-  drives the HOST REGENERATE LIMIT (`shared/hostRegenLimit.ts`, `MAX_HOST_REGENERATIONS` 2):
-  a full-frame host beat locks its Regenerate button after two operator regenerations (three
-  paid renders) — only `regenerate` entries count, never the automatic retries, and a split is
-  exempt because its regenerate re-renders the b-roll panel only. The router refuses with
-  `accepted: "locked"` before anything is enqueued (a batch skips locked beats and reports
-  them); an admin or manager may send `force` and gets a confirm naming the render's cost,
-  an editor's `force` is ignored. "Make b-roll" stays open on a locked beat. And a host beat
-  the lane GIVES UP on (bounded retries spent, or a terminal verdict such as HeyGen's "Invalid
-  audio stream") is made b-roll AUTOMATICALLY (`autoBrollHostScene`, on both the first pass and
-  the retry pass; `planAutoBroll` is the pure half): the same demotion as "Make b-roll", a
-  still rendered by the shared `fallbackSceneToStill`, `scene.autoBroll {reason, at}` for the
-  card's "Auto b-roll — host lane failed" badge, and a job warning. If even the still fails the
-  scene is put back as a failed HOST beat with the lip-sync error. `HOST_FAIL_TO_BROLL=0`
-  restores the old "Failed, click to fix" card — which on one production scene collected 18
-  retry submits of a slice HeyGen could never accept.
+  way to tell re-renders from budget is the render log's "host budget" line.
+- **Each host beat may be paid for a fixed number of times in its LIFE** (`shared/hostRegenLimit.ts`,
+  2026-09-25). A 3-min pick metered 11:44 of host (3.9×), almost all "Retry failed scenes" clicks:
+  one click could pay three times (`withTransientRetry` resubmitted a failed host render) and
+  nothing counted clicks across a beat's life. Now, counted off the ledger (host lanes only, so
+  films made before follow it too) and enforced by `decideHostRender` at the one seam every paid
+  submit crosses (`runChunkTasks`, before the spend gate): AUTOMATIC renders (first / resume /
+  transient / infra / retry click) are the first plus ONE retry (`HOST_AUTO_RETRIES`), TWO on the
+  start/CTAs/end (`HOST_AUTO_RETRIES_PROTECTED`, `scene.hostProtected` — which covers the "I'm
+  Hank" intro and the whole intro/outro sections); OPERATOR regenerates are ONE
+  (`MAX_HOST_REGENERATIONS`). The first pass takes its retry on the spot (`renderSceneClip` loop,
+  `hostMayRetryNow`); a regenerate or retry CLICK is one render — its retry loop still re-polls a
+  render running past the poll ceiling but never resubmits a failed one. Past the allowance
+  (`HostRenderCapError`, nothing submitted) `settleFailedHostScene` decides: a check-in is made
+  b-roll AUTOMATICALLY (`autoBrollHostScene`/`planAutoBroll`, "Auto b-roll — host lane failed"
+  badge, job warning; `HOST_FAIL_TO_BROLL=0` keeps a failed card), a PROTECTED beat is flagged
+  `scene.hostNeeded` ("Host needed", red) and never demoted behind anyone's back — the assembly
+  gate names it and "Retry failed scenes" skips it, so a person Regenerates or makes it b-roll.
+  A HeyGen ACCOUNT failure (`server/hostLaneFailure.ts`: 401/403 key, 402/credits/quota,
+  suspended, 429 or 5xx/network after the adapter's own retries, no key for the tab) is not the
+  beat's: `HostAccountError` PAUSES the job's host lane (in-memory, `pauseHostLane`), every other
+  host submit fails fast without calling HeyGen, beats are left clip-less with
+  `scene.hostWaiting` ("Waiting for HeyGen"), none of their allowance is spent (HeyGen accepted
+  nothing), and the job stops at the assembly gate naming the account. It never switches account
+  on its own; "Retry failed scenes" or any render click lifts the pause (`resumeHostLane`). The
+  router still refuses a used regenerate as `accepted: "locked"` before enqueueing; an editor's
+  card then shows "Make b-roll" IN PLACE of Regenerate (also when the video's host minutes are
+  used), while an admin or manager keeps Regenerate behind a cost confirm — that render is
+  ledgered `pastLimit`. A regenerate never throws away the shot it replaces: HOST TAKES
+  (`shared/hostTakes.ts`) keep the old take beside the new one (`scene.hostTakes`/`activeTake`,
+  the new one active), the card's `HostTakePicker` switches between them for free (`take` edit,
+  instant metadata, marks `timingEdited` so "Reassemble to apply" shows), and a regenerate that
+  fails or is refused puts the old take back. Every click is NAMED on the ledger
+  (`SceneSubmit.by`, from `req.by`/`scene.nextSubmitBy`), and the Cost dialog's host lines
+  (`hostRenderBreakdown`) split first renders / automatic retries / regenerates / retry clicks /
+  past-the-limit with who clicked each ("before tracking" for older entries). Harness:
+  `client/__harness/host-takes.html`
 - **A video's host lip-sync spend is capped at the minutes picked** (`shared/hostSpend.ts` +
   `server/hostSpend.ts`, 2026-09-23). The plan (`planHostMinutes`/`capHostMinutes`) only decides
-  which beats are host; every other limit is PER BEAT (3 paid renders each), so ~36 beats could
+  which beats are host; every other limit is PER BEAT (3 paid renders each then; 2-3 now), so ~36 beats could
   bill ~108 renders — a 3-min pick metered 98 calls / 566 s / $33.96 and tripped nothing. The
   limit is `inputParams.hostBudgetSec` (the budget the plan spent, written at the clip stage;
   older jobs fall back to `hostMinutes × 60`), so the form's "max ~$10.80" is a promise. It is
@@ -926,7 +947,7 @@ Always 16:9. Fire-and-forget; progress persisted to the job row and polled by th
   limit". An operator's paid click (full-frame Regenerate, batch, "Make host") is refused in the
   router as `accepted: "overLimit"` on every beat; admin/manager `force` grants ONE render
   (`grantHostSpendOverride`). A refused regenerate keeps the clip the scene had. The Cost dialog
-  prints spent/limit and the ledger by reason. `HOST_SPEND_LIMIT=0` turns it off. RunPod is not
+  prints spent/limit and who paid for what (see the per-beat entry). `HOST_SPEND_LIMIT=0` turns it off. RunPod is not
   gated (billed by GPU time, retired since 2026-09-10).
 - **Provider gate**: generation needs an _active_ `provider_configs` row. "No active
   provider configured" ⇒ re-run `scripts/seed.mjs` or set active in Admin.

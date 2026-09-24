@@ -9823,7 +9823,9 @@ describe("runChunkTasks failure routing", () => {
   });
 
   it("resubmits an infra failure MAX_INFRA_RESUBMITS times, then gives up with the provider's last word", async () => {
-    const s = scene();
+    // A protected beat (start/CTA/end): its two automatic retries line up with the infra bound.
+    // A check-in stops a render earlier, at its one retry (`server/hostRenderRules.test.ts`).
+    const s = { ...scene(), hostProtected: true };
     const poll = async () => ({
       success: false,
       taskId: "task-1",
@@ -9914,7 +9916,8 @@ describe("runChunkTasks failure routing", () => {
   });
 
   it("caps transient resubmits on a HOST lane — a billed lane must not resubmit for as long as the job lives", async () => {
-    const s = scene();
+    // Protected, so the per-beat allowance (two retries) is not what stops it first.
+    const s = { ...scene(), hostProtected: true };
     const poll = async () => ({
       success: false,
       taskId: "task-1",

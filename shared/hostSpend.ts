@@ -2,7 +2,7 @@
  * The host SPEND LIMIT — the per-video ceiling on paid lip-sync seconds.
  *
  * `planHostMinutes` / `capHostMinutes` decide which beats are host BEFORE anything renders, and
- * the per-beat limits (`MAX_TRANSIENT_RESUBMITS_HOST`, `MAX_HOST_REGENERATIONS`) bound each beat
+ * the per-beat allowance (`shared/hostRegenLimit.ts`: one retry, one regenerate) bounds each beat
  * on its own. Nothing bounded the VIDEO: ~36 host beats × three paid renders each is ~108 renders
  * allowed, and a 3-minute pick metered 98 calls / 566 s / $33.96 without tripping any of them.
  *
@@ -113,6 +113,110 @@ export function summarizeHostSpend(
     madeBroll: (scenes ?? []).filter(s => s?.autoBroll?.limit).length,
     reached: spentSec >= limitSec - HOST_SPEND_EPSILON_SEC,
   };
+}
+
+/** One line of the Cost dialog's host-render breakdown. */
+export interface HostRenderGroup {
+  kind: "first" | "auto" | "regenerate" | "retry" | "merge" | "pastLimit";
+  label: string;
+  /** Paid renders on this line. */
+  renders: number;
+  sec: number;
+  /** Scenes these renders were for (current indices). */
+  scenes: number[];
+  /**
+   * Who clicked, most first — only on the click lines. `name` "before tracking" collects
+   * renders recorded before clicks carried a name.
+   */
+  by: Array<{ name: string; renders: number }>;
+}
+
+const GROUP_LABEL: Record<HostRenderGroup["kind"], string> = {
+  first: "First renders",
+  auto: "Automatic retries",
+  regenerate: "Regenerates",
+  retry: "Retry failed scenes",
+  merge: "Merges",
+  pastLimit: "Past the limit (override)",
+};
+
+const GROUP_ORDER: HostRenderGroup["kind"][] = [
+  "first",
+  "auto",
+  "regenerate",
+  "retry",
+  "merge",
+  "pastLimit",
+];
+
+/** Label for renders whose ledger entry predates recording who clicked. */
+export const UNNAMED_CLICKER = "before tracking";
+
+/**
+ * Every paid host render of the video, grouped the way the operator asks about them: what the
+ * pipeline did on its own, and what PEOPLE paid for — with names. A render past a limit is
+ * counted on its own line only (not also under Regenerates), so the lines add up to the total.
+ */
+export function hostRenderBreakdown(
+  scenes: StoryboardScene[]
+): HostRenderGroup[] {
+  const groups = new Map<HostRenderGroup["kind"], HostRenderGroup>();
+  const byName = new Map<HostRenderGroup["kind"], Map<string, number>>();
+  for (const s of scenes ?? []) {
+    for (const sub of s?.submits ?? []) {
+      if (sub.provider !== "heygen" && sub.provider !== "runpod") continue;
+      const kind: HostRenderGroup["kind"] = sub.pastLimit
+        ? "pastLimit"
+        : sub.reason === "first"
+          ? "first"
+          : sub.reason === "regenerate"
+            ? "regenerate"
+            : sub.reason === "retry"
+              ? "retry"
+              : sub.reason === "merge"
+                ? "merge"
+                : "auto";
+      let g = groups.get(kind);
+      if (!g) {
+        g = {
+          kind,
+          label: GROUP_LABEL[kind],
+          renders: 0,
+          sec: 0,
+          scenes: [],
+          by: [],
+        };
+        groups.set(kind, g);
+      }
+      g.renders++;
+      g.sec += Math.max(0, sub.sec ?? 0);
+      if (!g.scenes.includes(s.index)) g.scenes.push(s.index);
+      if (kind !== "first" && kind !== "auto") {
+        const names = byName.get(kind) ?? new Map<string, number>();
+        const name = sub.by?.name ?? UNNAMED_CLICKER;
+        names.set(name, (names.get(name) ?? 0) + 1);
+        byName.set(kind, names);
+      }
+    }
+  }
+  const out: HostRenderGroup[] = [];
+  for (const kind of GROUP_ORDER) {
+    const g = groups.get(kind);
+    if (!g) continue;
+    g.scenes.sort((a, b) => a - b);
+    g.by = Array.from(byName.get(kind) ?? [])
+      .map(([name, renders]) => ({ name, renders }))
+      // Most renders first; the unnamed bucket (renders from before names were kept) last.
+      .sort(
+        (a, b) =>
+          Number(a.name === UNNAMED_CLICKER) -
+            Number(b.name === UNNAMED_CLICKER) ||
+          b.renders - a.renders ||
+          a.name.localeCompare(b.name)
+      );
+    out.push(g);
+  }
+  return out;
 }
 
 const REASON_LABEL: Record<SceneSubmitReason, string> = {

@@ -100,6 +100,7 @@ import {
   rippleTrimScene,
   mergeSceneWithNext,
   unmergeScene,
+  selectSceneTake as selectLongformSceneTake,
   revertSceneTimingEdits as revertLongformSceneTiming,
   retryFailedScenes as retryLongformFailedScenes,
   repairJobTimeline,
@@ -2482,7 +2483,11 @@ const longformVideoRouter = router({
         input.sceneIndex,
         input.customVisualPrompt,
         input.verbatim,
-        input.customSplitVisual
+        input.customSplitVisual,
+        {
+          by: clickerOf(ctx.user),
+          force: !!input.force && canOverrideHostRegenLimit(ctx.user.role),
+        }
       );
       return { ok: true, accepted };
     }),
@@ -2523,7 +2528,8 @@ const longformVideoRouter = router({
         });
       const accepted = await convertLongformSceneToBroll(
         input.jobId,
-        input.sceneIndex
+        input.sceneIndex,
+        clickerOf(ctx.user)
       );
       return { ok: true, accepted };
     }),
@@ -2544,7 +2550,7 @@ const longformVideoRouter = router({
         force: z.boolean().optional(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const job = await getLongformVideoJobById(input.jobId);
       if (!job) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
@@ -2579,7 +2585,8 @@ const longformVideoRouter = router({
       const accepted = await convertLongformSceneToHost(
         input.jobId,
         input.sceneIndex,
-        input.split
+        input.split,
+        clickerOf(ctx.user)
       );
       return { ok: true, accepted };
     }),
@@ -2652,7 +2659,8 @@ const longformVideoRouter = router({
             input.jobId,
             open,
             input.prompts,
-            input.verbatimIndices
+            input.verbatimIndices,
+            { by: clickerOf(ctx.user), force: override }
           )
         : {};
       for (const i of locked) accepted[i] = "locked";
@@ -3011,7 +3019,54 @@ const longformVideoRouter = router({
           message:
             "Can't merge while scenes are rendering or queued — wait for them to finish",
         });
-      const accepted = await mergeSceneWithNext(input.jobId, input.sceneIndex);
+      const accepted = await mergeSceneWithNext(
+        input.jobId,
+        input.sceneIndex,
+        clickerOf(ctx.user)
+      );
+      return { ok: true, accepted };
+    }),
+
+  /**
+   * Switch a regenerated host beat between its takes — the old and the new render
+   * (`shared/hostTakes.ts`). Free: both clips are already on R2; nothing renders or bills. The
+   * cut preview plays the chosen take at once; the finished film needs a Reassemble.
+   */
+  selectSceneTake: approvedProcedure
+    .input(
+      z.object({
+        jobId: z.number(),
+        sceneIndex: z.number().int().min(1),
+        take: z.number().int().min(0),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const job = await getLongformVideoJobById(input.jobId);
+      if (
+        !job ||
+        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
+      ) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
+      }
+      const scene = ((job.storyboard ?? []) as StoryboardScene[]).find(
+        s => s && s.index === input.sceneIndex
+      );
+      if (!scene)
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `Scene ${input.sceneIndex} not found`,
+        });
+      const takes = scene.hostTakes ?? [];
+      if (input.take >= takes.length)
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Scene ${input.sceneIndex} has no take ${input.take + 1}`,
+        });
+      const accepted = await selectLongformSceneTake(
+        input.jobId,
+        input.sceneIndex,
+        input.take
+      );
       return { ok: true, accepted };
     }),
 
@@ -3344,7 +3399,7 @@ const longformVideoRouter = router({
           message: "No failed scenes to retry",
         });
       }
-      retryLongformFailedScenes(input.jobId).catch(err => {
+      retryLongformFailedScenes(input.jobId, clickerOf(ctx.user)).catch(err => {
         console.error(
           `[Longform ${input.jobId}] retryFailedScenes error:`,
           err
@@ -3469,6 +3524,14 @@ const longformVideoRouter = router({
 });
 
 /** Whether a job's storyboard carries a scene with this index. */
+/** The person behind a paid click, as the scene ledger names them (`SceneSubmit.by`). */
+function clickerOf(user: { id: number; name?: string | null; email?: string }) {
+  return {
+    id: user.id,
+    name: user.name?.trim() || user.email || `user ${user.id}`,
+  };
+}
+
 function hasScene(storyboard: unknown, sceneIndex: number): boolean {
   return (
     Array.isArray(storyboard) &&

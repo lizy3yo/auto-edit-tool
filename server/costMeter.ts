@@ -25,7 +25,12 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { priceLine, type PricedLine, type UsageLine } from "./pricing";
-import { summarizeHostSpend, type HostSpendSummary } from "../shared/hostSpend";
+import {
+  hostRenderBreakdown,
+  summarizeHostSpend,
+  type HostRenderGroup,
+  type HostSpendSummary,
+} from "../shared/hostSpend";
 import type { LongformInputParams, StoryboardScene } from "../shared/types";
 
 /**
@@ -221,6 +226,11 @@ export interface CostBreakdown {
   sections: CostSection[];
   /** The video's host spend limit and what is using it (`shared/hostSpend.ts`); null if none. */
   hostSpend: HostSpendSummary | null;
+  /**
+   * Every paid host render grouped by what caused it — the pipeline on its own, or a person's
+   * click, with names (`hostRenderBreakdown`). Empty when the video made none.
+   */
+  hostRenders: HostRenderGroup[];
 }
 
 /** Lane → how it renders. Shared with `server/costRollup.ts` so the two reports agree. */
@@ -333,6 +343,11 @@ export async function getJobCostBreakdown(
         ? (job!.storyboard as StoryboardScene[])
         : [],
       heygenSecondsIn(stored)
+    ),
+    hostRenders: hostRenderBreakdown(
+      Array.isArray(job?.storyboard)
+        ? (job!.storyboard as StoryboardScene[])
+        : []
     ),
   };
 }

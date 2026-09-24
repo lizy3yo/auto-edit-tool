@@ -212,6 +212,12 @@ export interface SplitLayout {
 export type SceneSubmitReason =
   "first" | "resume" | "transient" | "infra" | "regenerate" | "retry" | "merge";
 
+/** The person whose click paid for a render — kept on the ledger so the Cost dialog can name them. */
+export interface SubmitActor {
+  id: number;
+  name: string;
+}
+
 /** One paid clip submit — an entry in `StoryboardScene.submits`. */
 export interface SceneSubmit {
   /** Lane that took the submit: `heygen`, `runpod`, `sixtynine_labs`. */
@@ -221,6 +227,35 @@ export interface SceneSubmit {
   reason: SceneSubmitReason;
   /** Seconds of output asked for — the narration length on a host beat. */
   sec?: number;
+  /**
+   * Who clicked for it (Regenerate, Retry failed scenes, Make host, merge). Absent on the
+   * pipeline's own renders, and on every entry written before clicks were recorded.
+   */
+  by?: SubmitActor;
+  /**
+   * An admin/manager confirmed this render PAST a limit — the beat's regenerate limit or the
+   * video's host spend limit (`shared/hostRegenLimit.ts`, `shared/hostSpend.ts`).
+   */
+  pastLimit?: boolean;
+}
+
+/**
+ * One version of a host beat's picture. A host Regenerate keeps the take it replaces, so the
+ * operator can compare the two and put the old one back for free (`shared/hostTakes.ts`).
+ */
+export interface HostTake {
+  clipUrls: string[];
+  clipUrl?: string;
+  /** Full-frame host take behind a split composite (see `StoryboardScene.hostClipUrls`). */
+  hostClipUrls?: string[];
+  lipsyncImageUrl?: string;
+  clipShortSec?: number;
+  splitAutoFocusX?: number;
+  /** When this take was rendered (the original's is when it was first kept). */
+  at: string;
+  /** How it came to exist: the render the beat had before any regenerate, or a regenerate. */
+  source: "original" | "regenerate";
+  by?: SubmitActor;
 }
 
 /** A single storyboard scene = one beat (its own verbatim script slice) + clip(s) */
@@ -782,6 +817,37 @@ export interface StoryboardScene {
    * with no ledger, "resume" otherwise.
    */
   nextSubmitReason?: SceneSubmitReason;
+  /** Who clicked for the NEXT submit — consumed with `nextSubmitReason` into `SceneSubmit.by`. */
+  nextSubmitBy?: SubmitActor;
+  /**
+   * An admin/manager confirmed the NEXT render of this beat past its regenerate limit. Read by
+   * the render gate (`decideHostRender`) and consumed by the next ledger entry.
+   */
+  nextSubmitOverride?: boolean;
+  /**
+   * Set by the spend gate when it let the NEXT submit through on an override
+   * (`reserveHostSpend` → "override"); consumed into `SceneSubmit.pastLimit`.
+   */
+  submitPastLimit?: boolean;
+  /**
+   * Every version of this host beat's picture, oldest first, once it has been regenerated at
+   * least once (`shared/hostTakes.ts`). `activeTake` is the one the film uses; switching is an
+   * instant metadata edit, never a render.
+   */
+  hostTakes?: HostTake[];
+  activeTake?: number;
+  /**
+   * A START, CTA or END host beat (`hostProtected`) the lip-sync lane gave up on after its
+   * automatic retries. Unlike a check-in it is NOT made b-roll behind anyone's back: the film
+   * will not assemble until a person Regenerates it or makes it b-roll.
+   */
+  hostNeeded?: { reason: string; at: string };
+  /**
+   * The HeyGen ACCOUNT failed while this beat was being rendered (credits, key, HeyGen down) —
+   * nothing to do with the beat itself, so it keeps every retry and is not made b-roll. Cleared
+   * on the next render attempt ("Retry failed scenes" once the account is fixed).
+   */
+  hostWaiting?: { reason: string; at: string };
   /**
    * How many seconds SHORTER than its narration the stored clip is. A finished render is never
    * thrown away for being short — assembly holds its last frame for the difference, exactly as

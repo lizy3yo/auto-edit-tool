@@ -70,13 +70,14 @@ import { sanitizeError, isCreditError } from "@/lib/errorSanitizer";
 import { triggerCreditErrorPopup } from "@/components/CreditErrorPopup";
 import type { SplitLayout, StoryboardScene } from "@shared/types";
 import {
-  MAX_HOST_REGENERATIONS,
   canOverrideHostRegenLimit,
   hostRegenLockedLabel,
   hostRegenerationLocked,
   isLimitedHostScene,
 } from "@shared/hostRegenLimit";
 import { HOST_SPEND_EPSILON_SEC } from "@shared/hostSpend";
+import { activeTakeIndex } from "@shared/hostTakes";
+import { HostTakePicker } from "@/components/HostTakePicker";
 import {
   scanCtaBlocks,
   previewBookAssignments,
@@ -525,7 +526,7 @@ export default function LongformJobSlot({
         unqueueScene(vars.sceneIndex);
         if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
         toast.info(
-          `Scene ${vars.sceneIndex} has used its ${MAX_HOST_REGENERATIONS} host regenerations — use "Make b-roll", or ask a manager`
+          `Scene ${vars.sceneIndex} has used its host regenerate — use "Make b-roll", or ask a manager`
         );
         return;
       }
@@ -593,6 +594,27 @@ export default function LongformJobSlot({
       prev.includes(sceneIndex) ? prev : [...prev, sceneIndex]
     );
     toBrollMutation.mutate({ jobId, sceneIndex });
+  };
+
+  // Host TAKES: switch a regenerated host beat between its old and new render. Free — both are
+  // already rendered — so no confirm; the cut preview shows it at once.
+  const selectTakeMutation = trpc.longformVideo.selectSceneTake.useMutation({
+    onSuccess: (d, vars) => {
+      if (d.accepted === "ignored")
+        toast.info(
+          `Scene ${vars.sceneIndex} is rendering — switch takes when it finishes`
+        );
+      else
+        toast.success(
+          `Scene ${vars.sceneIndex}: using take ${vars.take + 1} — Reassemble to put it in the film`
+        );
+      if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
+    },
+    onError: err => toast.error(err.message),
+  });
+  const selectTake = (sceneIndex: number, take: number) => {
+    if (!jobId) return;
+    selectTakeMutation.mutate({ jobId, sceneIndex, take });
   };
 
   // "Make host" (admins only): a b-roll scene becomes a HeyGen host beat, full-frame or split.
@@ -1087,6 +1109,14 @@ export default function LongformJobSlot({
     (anyHost || isLimitedHostScene(scene)) &&
     hostSpend.spentSec + (scene.audioDuration ?? 0) >
       hostSpend.limitSec + HOST_SPEND_EPSILON_SEC;
+  /**
+   * An editor has no Regenerate left on this host beat — its one regenerate is used, or the
+   * video's host minutes are — so the card offers "Make b-roll" in its place. Admins and
+   * managers keep Regenerate, behind a confirm that names the cost.
+   */
+  const hostRegenBlocked = (scene: StoryboardScene) =>
+    !canOverrideRegen &&
+    (hostRegenerationLocked(scene) || overHostLimit(scene));
 
   const isProcessing = job?.status === "processing";
   // The job's live scene-edit queue, from the server (which scenes wait / render right now).
@@ -1519,7 +1549,7 @@ export default function LongformJobSlot({
       if (canOverrideRegen) setOverrideScene(scene.index);
       else
         toast.info(
-          `Scene ${scene.index} has used its ${MAX_HOST_REGENERATIONS} host regenerations — use "Make b-roll", or ask a manager`
+          `Scene ${scene.index} has used its host regenerate — use "Make b-roll", or ask a manager`
         );
       return;
     }
@@ -3028,6 +3058,35 @@ export default function LongformJobSlot({
                                 : "Auto b-roll — host lane failed"}
                             </Badge>
                           )}
+                          {scene.hostNeeded && (
+                            <Badge
+                              variant="destructive"
+                              className="text-[10px] py-0"
+                              title={`${scene.hostNeeded.reason}\nThe start, a CTA or the end: its automatic retries are used, so it was not made b-roll behind your back. Regenerate it or make it b-roll — the film will not assemble until you do.`}
+                            >
+                              Host needed
+                            </Badge>
+                          )}
+                          {scene.hostWaiting && (
+                            <Badge
+                              variant="outline"
+                              className="text-[10px] py-0 text-warning border-warning/40"
+                              title={`The HeyGen account failed (${scene.hostWaiting.reason}), not this scene. None of its retries were used. Fix the account, then "Retry failed scenes".`}
+                            >
+                              Waiting for HeyGen
+                            </Badge>
+                          )}
+                          {scene.hostPresent &&
+                            (scene.hostTakes?.length ?? 0) > 1 && (
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] py-0 text-info border-info/40"
+                                title="This host beat was regenerated — open it to compare the takes and pick one"
+                              >
+                                Take {(activeTakeIndex(scene) ?? 0) + 1} of{" "}
+                                {scene.hostTakes!.length}
+                              </Badge>
+                            )}
                           {scene.clipShortSec != null &&
                             scene.clipShortSec > 0 && (
                               <Badge
@@ -3105,6 +3164,18 @@ export default function LongformJobSlot({
                                       : undefined
                                   }
                                   className="w-full rounded bg-black max-h-[120px]"
+                                />
+                              )}
+                              {scene.hostPresent && (
+                                <HostTakePicker
+                                  scene={scene}
+                                  disabled={
+                                    isSceneQueued ||
+                                    selectTakeMutation.isPending
+                                  }
+                                  onSelect={take =>
+                                    selectTake(scene.index, take)
+                                  }
                                 />
                               )}
                               <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">
@@ -3544,32 +3615,48 @@ export default function LongformJobSlot({
                                 </div>
                               )}
                               <div className="flex gap-2">
-                                <Button
-                                  size="sm"
-                                  className="h-7 text-xs"
-                                  disabled={
-                                    isSceneQueued ||
-                                    (hostRegenerationLocked(scene) &&
-                                      !canOverrideRegen) ||
-                                    !(
-                                      promptEdits[scene.index] ??
-                                      ownedPrompt(scene)
-                                    ).trim()
-                                  }
-                                  title={
-                                    hostRegenerationLocked(scene)
-                                      ? hostRegenLockedLabel(scene)
-                                      : undefined
-                                  }
-                                  onClick={() => regenerateSingle(scene)}
-                                >
-                                  {isSceneQueued ? (
-                                    <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
-                                  ) : (
-                                    <RefreshCw className="mr-1.5 h-3 w-3" />
-                                  )}
-                                  Regenerate
-                                </Button>
+                                {hostRegenBlocked(scene) ? (
+                                  // Out of host renders: the editor's way forward is b-roll.
+                                  <Button
+                                    size="sm"
+                                    className="h-7 text-xs"
+                                    disabled={isSceneQueued}
+                                    title={
+                                      hostRegenerationLocked(scene)
+                                        ? `${hostRegenLockedLabel(scene)} — make it b-roll, or ask a manager`
+                                        : "This video's host minutes are used — make it b-roll, or ask a manager"
+                                    }
+                                    onClick={() => setToBrollScene(scene.index)}
+                                  >
+                                    <Trees className="mr-1.5 h-3 w-3" />
+                                    Make b-roll
+                                  </Button>
+                                ) : (
+                                  <Button
+                                    size="sm"
+                                    className="h-7 text-xs"
+                                    disabled={
+                                      isSceneQueued ||
+                                      !(
+                                        promptEdits[scene.index] ??
+                                        ownedPrompt(scene)
+                                      ).trim()
+                                    }
+                                    title={
+                                      hostRegenerationLocked(scene)
+                                        ? hostRegenLockedLabel(scene)
+                                        : undefined
+                                    }
+                                    onClick={() => regenerateSingle(scene)}
+                                  >
+                                    {isSceneQueued ? (
+                                      <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+                                    ) : (
+                                      <RefreshCw className="mr-1.5 h-3 w-3" />
+                                    )}
+                                    Regenerate
+                                  </Button>
+                                )}
                                 <Button
                                   variant="ghost"
                                   size="sm"
@@ -3582,32 +3669,32 @@ export default function LongformJobSlot({
                             </div>
                           ) : (
                             <div className="flex gap-1">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 text-xs"
-                                disabled={
-                                  isSceneQueued ||
-                                  (hostRegenerationLocked(scene) &&
-                                    !canOverrideRegen)
-                                }
-                                title={
-                                  hostRegenerationLocked(scene)
-                                    ? hostRegenLockedLabel(scene)
-                                    : undefined
-                                }
-                                onClick={e => {
-                                  e.stopPropagation();
-                                  regenerateSingle(scene);
-                                }}
-                              >
-                                {isSceneQueued ? (
-                                  <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
-                                ) : (
-                                  <RefreshCw className="mr-1.5 h-3 w-3" />
-                                )}
-                                Regenerate
-                              </Button>
+                              {/* Out of host renders (editor): no Regenerate — "Make b-roll"
+                                  below is the way forward. */}
+                              {!hostRegenBlocked(scene) && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 text-xs"
+                                  disabled={isSceneQueued}
+                                  title={
+                                    hostRegenerationLocked(scene)
+                                      ? hostRegenLockedLabel(scene)
+                                      : undefined
+                                  }
+                                  onClick={e => {
+                                    e.stopPropagation();
+                                    regenerateSingle(scene);
+                                  }}
+                                >
+                                  {isSceneQueued ? (
+                                    <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+                                  ) : (
+                                    <RefreshCw className="mr-1.5 h-3 w-3" />
+                                  )}
+                                  Regenerate
+                                </Button>
+                              )}
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -3840,8 +3927,8 @@ export default function LongformJobSlot({
                 const cost =
                   rate && sec > 0 ? ` (~$${(sec * rate).toFixed(2)})` : "";
                 return (
-                  `This host beat has already been rendered ${renders} times and used its ` +
-                  `${MAX_HOST_REGENERATIONS} regenerations. One more is a full lip-sync ` +
+                  `This host beat has already been rendered ${renders} time${renders === 1 ? "" : "s"} ` +
+                  `and used its one regenerate. One more is a full lip-sync ` +
                   `render of ${sec.toFixed(1)}s${cost}, billed whether or not it is kept. ` +
                   `If the beat still won't come right, "Make b-roll" costs one image and no lip-sync.`
                 );

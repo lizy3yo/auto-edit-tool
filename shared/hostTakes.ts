@@ -1,0 +1,137 @@
+/**
+ * Host TAKES — the old and the new version of a regenerated host beat.
+ *
+ * A host regenerate is a full paid lip-sync render and one of them is all an editor gets
+ * (`shared/hostRegenLimit.ts`), so it must never be a gamble that throws away the shot it
+ * replaces. The take a beat had is kept beside the new one, the new one plays by default, and
+ * the operator can put the old one back — or forward again — for free: switching is a metadata
+ * write, the clips themselves are never deleted from R2, and the cut preview plays whichever
+ * `clipUrls` the scene points at.
+ *
+ * Pure and shared: the render path records takes, the edit session swaps them, the card lists
+ * them, and the tests pin the rules.
+ */
+import type { HostTake, StoryboardScene, SubmitActor } from "./types";
+
+/** The picture fields a take owns — everything that describes the clip on screen. */
+const TAKE_FIELDS = [
+  "clipUrls",
+  "clipUrl",
+  "hostClipUrls",
+  "lipsyncImageUrl",
+  "clipShortSec",
+  "splitAutoFocusX",
+] as const;
+
+/** The scene's current picture as a take, or null when it has no clip to keep. */
+export function currentTake(
+  scene: StoryboardScene,
+  source: HostTake["source"],
+  by?: SubmitActor,
+  at = new Date().toISOString()
+): HostTake | null {
+  const clipUrls = scene.clipUrls?.length
+    ? [...scene.clipUrls]
+    : scene.clipUrl
+      ? [scene.clipUrl]
+      : [];
+  if (!clipUrls.length) return null;
+  const take: HostTake = { clipUrls, at, source };
+  if (scene.clipUrl) take.clipUrl = scene.clipUrl;
+  if (scene.hostClipUrls?.length) take.hostClipUrls = [...scene.hostClipUrls];
+  if (scene.lipsyncImageUrl) take.lipsyncImageUrl = scene.lipsyncImageUrl;
+  if (scene.clipShortSec != null) take.clipShortSec = scene.clipShortSec;
+  if (scene.splitAutoFocusX != null)
+    take.splitAutoFocusX = scene.splitAutoFocusX;
+  if (by) take.by = by;
+  return take;
+}
+
+/** Put a take's picture on the scene (every take field, absent ones cleared). */
+export function applyTake(scene: StoryboardScene, take: HostTake): void {
+  for (const k of TAKE_FIELDS) (scene as any)[k] = undefined;
+  scene.clipUrls = [...take.clipUrls];
+  scene.clipUrl = take.clipUrl ?? take.clipUrls[0];
+  if (take.hostClipUrls?.length) scene.hostClipUrls = [...take.hostClipUrls];
+  if (take.lipsyncImageUrl) scene.lipsyncImageUrl = take.lipsyncImageUrl;
+  if (take.clipShortSec != null) scene.clipShortSec = take.clipShortSec;
+  if (take.splitAutoFocusX != null)
+    scene.splitAutoFocusX = take.splitAutoFocusX;
+}
+
+const sameClip = (a: HostTake, b: HostTake) =>
+  a.clipUrls.join("|") === b.clipUrls.join("|");
+
+/**
+ * After a host regenerate lands: keep `before` (the take the beat had when the regenerate
+ * started) and add the scene's new picture as the next take, which becomes the active one.
+ * `before` null ⇒ the beat had no clip, so there is nothing to compare and no take list is
+ * started. Idempotent on the same clip.
+ */
+export function recordRegeneratedTake(
+  scene: StoryboardScene,
+  before: HostTake | null,
+  by?: SubmitActor
+): void {
+  const fresh = currentTake(scene, "regenerate", by);
+  if (!fresh) return;
+  const takes = scene.hostTakes?.length
+    ? [...scene.hostTakes]
+    : before
+      ? [before]
+      : [];
+  if (!takes.length) return;
+  if (before && !takes.some(t => sameClip(t, before))) takes.push(before);
+  const existing = takes.findIndex(t => sameClip(t, fresh));
+  if (existing >= 0) {
+    scene.hostTakes = takes;
+    scene.activeTake = existing;
+    return;
+  }
+  takes.push(fresh);
+  scene.hostTakes = takes;
+  scene.activeTake = takes.length - 1;
+}
+
+/** Index of the take the scene is showing, or null when it has no take list. */
+export function activeTakeIndex(scene: StoryboardScene): number | null {
+  const takes = scene.hostTakes;
+  if (!takes?.length) return null;
+  const i = scene.activeTake ?? takes.length - 1;
+  return i >= 0 && i < takes.length ? i : takes.length - 1;
+}
+
+/**
+ * Switch the scene to take `index`. Returns an error message instead of throwing so the edit
+ * session can surface it; a no-op switch (already showing it) is ok.
+ */
+export function selectHostTake(
+  scene: StoryboardScene,
+  index: number
+): { ok: true; changed: boolean } | { ok: false; reason: string } {
+  const takes = scene.hostTakes;
+  if (!takes?.length)
+    return { ok: false, reason: "This scene has only one take" };
+  if (!Number.isInteger(index) || index < 0 || index >= takes.length)
+    return { ok: false, reason: `Take ${index + 1} does not exist` };
+  if (!scene.hostPresent)
+    return {
+      ok: false,
+      reason: "This scene is b-roll now — its host takes no longer apply",
+    };
+  if (activeTakeIndex(scene) === index) return { ok: true, changed: false };
+  applyTake(scene, takes[index]);
+  scene.activeTake = index;
+  return { ok: true, changed: true };
+}
+
+/** "Take 1 (original)", "Take 2 (regenerated by Hank)". */
+export function hostTakeLabel(take: HostTake, index: number): string {
+  const what =
+    take.source === "original"
+      ? "original"
+      : take.by
+        ? `regenerated by ${take.by.name}`
+        : "regenerated";
+  return `Take ${index + 1} (${what})`;
+}

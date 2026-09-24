@@ -30,3 +30,8 @@ that steps voicing → rendering → done on successive polls, so the grid, the 
 delete can be exercised without a database or a HeyGen credit. A fake EventSource
 stands in for the live account stream: the "a film is rendering on" toggles push to it, so the
 available-only picker and the all-busy warning can be watched updating in real time.
+
+`host-takes.html` → `hostTakes.tsx` mounts the host take picker (old vs new render of a regenerated
+host beat — "Use this take" runs the same `selectHostTake` the edit session does) and the Cost
+dialog's host lip-sync lines (first renders / automatic retries / regenerates / retry clicks / past
+the limit, with who clicked) against a synthetic board.

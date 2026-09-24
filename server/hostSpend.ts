@@ -110,7 +110,11 @@ export async function reserveHostSpend(args: {
     override: overrides.has(key),
   });
   if (!decision.ok) return { decision, release: noop };
-  if (decision.why === "override") overrides.delete(key);
+  if (decision.why === "override") {
+    overrides.delete(key);
+    // For the ledger: this render went past the video's limit on a manager's confirm.
+    scene.submitPastLimit = true;
+  }
   total.sec += needSec;
   let released = false;
   return {
