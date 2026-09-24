@@ -23,3 +23,10 @@ these minutes" note (3 min → 2 angles, 7 → 4).
 stubbed `channelHostPhoto` router (list / setSelected / setPrimary) backed by in-page state, so
 ticking, the last-ticked guard, "make primary" and the angle guide can be exercised; "Remount"
 clears the query cache to prove the ticks come back from the channel, not the component.
+
+`heygen-test.html` → `heygenTest.tsx` mounts the HeyGen test page's panel against a stubbed `heygenTest`
+router (plus channel list, host photos and upload), backed by in-page state. Generate adds a batch
+that steps voicing → rendering → done on successive polls, so the grid, the poll stopping and
+delete can be exercised without a database or a HeyGen credit. A fake EventSource
+stands in for the live account stream: the "a film is rendering on" toggles push to it, so the
+available-only picker and the all-busy warning can be watched updating in real time.

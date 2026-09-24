@@ -278,11 +278,14 @@ export class HeygenLipsyncAdapter {
     }
 
     // The avatar group reports "completed" slightly BEFORE the talking photo itself is
-    // renderable — video create then 400s with "missing image dimensions" for a short
-    // window (verified live: the same request succeeds on retry). Give that specific
-    // error its own patient retry budget instead of burning the generic attempts.
+    // renderable — video create is then refused for a short window (verified live: the same
+    // request succeeds on retry). HeyGen has worded that refusal two ways: 400 "missing image
+    // dimensions", and since 2026-09 409 `resource_not_ready` ("This avatar is still
+    // processing"), which used to fall through to a hard failure — every scene or test on a
+    // freshly registered photo failed at once. Give it its own patient retry budget instead of
+    // burning the generic attempts; 5 min covers several new photos registered together.
     let notReadyRetries = 0;
-    const MAX_NOT_READY_RETRIES = 12; // × 15s = 3 min
+    const MAX_NOT_READY_RETRIES = 20; // × 15s = 5 min
     const callbackUrl = heygenCallbackUrl();
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
@@ -311,11 +314,12 @@ export class HeygenLipsyncAdapter {
 
         if (!response.ok) {
           const errText = await response.text();
-          if (
-            response.status === 400 &&
-            /missing image dimensions/i.test(errText) &&
-            notReadyRetries < MAX_NOT_READY_RETRIES
-          ) {
+          const avatarNotReady =
+            (response.status === 400 &&
+              /missing image dimensions/i.test(errText)) ||
+            (response.status === 409 &&
+              /resource_not_ready|still processing/i.test(errText));
+          if (avatarNotReady && notReadyRetries < MAX_NOT_READY_RETRIES) {
             notReadyRetries++;
             attempt--; // doesn't count against the generic retry budget
             console.log(

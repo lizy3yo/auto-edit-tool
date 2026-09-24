@@ -745,6 +745,47 @@ Express · tRPC · Drizzle · MySQL.
   it re-renders CLIPS, and a job dead at voicing has none.
   UI: `client/src/components/LongformNarrationUpload.tsx` (`compact` = rescue mode, no toggle),
   harness `client/__harness/narration-upload.html`
+- `server/heygenTest.ts` + `shared/heygenTest.ts` — the HeyGen TEST BENCH (its own nav entry
+  "HeyGen test" beside Channels, `/heygen-test`, admins and operations managers only —
+  `canManageChannels` in the nav, `managerProcedure` on the router): which host
+  PHOTO makes the best talking head, before a film pays for it. One script (≤84 words) is voiced
+  ONCE in a channel's own voice (`resolveTTSVendor` + `generateSceneVoiceover`, the film's
+  settings), cut to 30 s (the hard cost cap), and every photo in the run (≤4) is lip-synced from
+  that same file with the production call (`submitLipsync`, Avatar IV, expressiveness "low"), so
+  the photo is the only variable. Rows live in `heygen_tests` (migration 0011), one per photo,
+  grouped by `batchId`; HeyGen's `video_id` is persisted on accept and `resumeHeygenTests` (run on
+  every `heygenTest.list`) polls an orphan instead of resubmitting — a row cut off before HeyGen
+  accepted it is failed, never re-spent. Shares the account's `heygenSlotsFor` semaphore with the
+  pipeline. The account picker lists only FREE TAB accounts (never the shared `HEYGEN_API_KEY`) (`planHeygenAvailability`: a processing
+  film holds its tab's account, or the shared key when that tab has none; an unfinished test
+  holds its own), each badged Available, with an amber warning when none are; `startHeygenTest`
+  re-checks on click. It is LIVE: `server/heygenAccountStream.ts` is a Server-Sent Events route
+  (`/api/heygen-test/accounts/stream`, same gate as the page) that pushes the list whenever
+  `server/heygenAccountEvents.ts` fires — from the db helpers, on any job or test STATUS write —
+  coalesced 250 ms and computed once for every open page, plus a 25 s heartbeat recompute that
+  keeps Railway's proxy from closing the stream and catches a key added in Admin. The page polls
+  the tRPC query only while the stream is reconnecting. A new place that changes a job's status
+  outside `updateLongformVideoJob` must call `notifyHeygenAccountsChanged` or the picker lags to
+  the heartbeat.
+  Each running clip shows a PROGRESS BAR from `heygenTestProgress` (shared/heygenTest.ts):
+  HeyGen reports a stage, never a percentage, so it is an estimate from `phaseStartedAt`
+  (migration 0012, stamped at voicing → preparing the photo → HeyGen accepted) against each
+  stage's typical length — voicing 0-15%, preparing 15-30%, rendering 30-100% at ~6.5 s per
+  second of video — never backwards, never 100 before done, "taking longer than usual" past the
+  typical time. RETRY (`retryHeygenTests`, per clip or "Retry all failed") resubmits failed clips
+  on the batch's existing audio, or re-voices the whole batch when voicing was what failed; it is
+  an operator click, so it may spend, and it re-checks the account is free (ignoring the batch's
+  own clips).
+  A failed clip shows `friendlyHeygenTestError(raw)` — plain language plus what to do — with the
+  raw error kept on the row and shown on hover; a new failure mode needs a rule there or it
+  reads as the generic "Something went wrong".
+  Runs carry an optional, renamable `runName` (migration 0013). The results list is PAGED BY RUN
+  (5 per page, numbered `pageList` buttons) and filtered on the server (`listHeygenTestPage`:
+  search over name + script, channel, run by; the channel and run-by options list only channels
+  and people that have runs) — it only ever sorts `batchId`/`max(id)`, never a text column (the sort-buffer trap above).
+  Spend is priced per clip on the card (audio seconds × `COST_HEYGEN_PER_SEC`) and is NOT
+  in the Spend tab, which totals per-job `costUsage`. Refused in mock mode. UI
+  `client/src/pages/HeygenTestPage.tsx` + `client/src/components/HeygenTest.tsx`, harness `client/__harness/heygen-test.html`
 - `server/costMeter.ts` + `server/pricing.ts` — per-video spend. Every billable adapter calls
   `recordUsage`; an `AsyncLocalStorage` set inside `withJobLock` attributes it, so the six
   spending entry points (pipeline, resume, retry-assembly, retry-failed, regen scene/scenes)

@@ -1,5 +1,17 @@
-import { asc, eq, desc, and, gte, inArray, lt, or, sql } from "drizzle-orm";
+import {
+  asc,
+  eq,
+  desc,
+  and,
+  gte,
+  inArray,
+  lt,
+  or,
+  sql,
+  type SQL,
+} from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
+import { notifyHeygenAccountsChanged } from "./heygenAccountEvents";
 import { createPool } from "mysql2";
 import {
   providerConfigs,
@@ -10,6 +22,7 @@ import {
   books,
   channelAssets,
   channelHostPhotos,
+  heygenTests,
   longformSales,
   users,
 } from "../drizzle/schema";
@@ -23,6 +36,8 @@ import type {
   InsertChannelAsset,
   ChannelHostPhoto,
   InsertChannelHostPhoto,
+  HeygenTest,
+  InsertHeygenTest,
   InsertLongformSale,
   User,
   InsertUser,
@@ -255,6 +270,7 @@ export async function createLongformVideoJob(
   const db = await getDb();
   if (!db) return null;
   const result = await db.insert(longformVideoJobs).values(job);
+  notifyHeygenAccountsChanged();
   return result[0].insertId;
 }
 
@@ -289,6 +305,8 @@ export async function updateLongformVideoJob(
       throw err;
     }
   }
+  // A film starting or settling frees or takes its tab's HeyGen account (HeyGen test page).
+  if (updates.status !== undefined) notifyHeygenAccountsChanged();
 }
 
 export async function getLongformVideoJobById(id: number) {
@@ -627,6 +645,7 @@ export async function deleteLongformVideoJob(
     .set({ jobId: null, draftTitle: null })
     .where(eq(longformSlots.jobId, id));
   await db.delete(longformVideoJobs).where(eq(longformVideoJobs.id, id));
+  notifyHeygenAccountsChanged();
 }
 
 /**
@@ -700,7 +719,32 @@ export async function markStaleLongformJobsFailed(
         lt(longformVideoJobs.updatedAt, cutoff)
       )
     );
-  return (result as any)?.[0]?.affectedRows ?? 0;
+  const affected = (result as any)?.[0]?.affectedRows ?? 0;
+  if (affected > 0) notifyHeygenAccountsChanged();
+  return affected;
+}
+
+/**
+ * The tab slot of every film still processing — each one is rendering its host on that tab's
+ * HeyGen account (`heygen_key_slot_N`), or on the shared key when the slot has none. Reads the
+ * one JSON field rather than the whole `inputParams` (a full script) or the storyboard.
+ * `null` = a job with no slot (a script, an old client), which renders on the shared key.
+ */
+export async function getProcessingLongformSlots(): Promise<(number | null)[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db
+    .select({
+      slot: sql<
+        string | number | null
+      >`json_unquote(json_extract(${longformVideoJobs.inputParams}, '$.apimartSlot'))`,
+    })
+    .from(longformVideoJobs)
+    .where(eq(longformVideoJobs.status, "processing"));
+  return rows.map(r => {
+    const n = r.slot == null || r.slot === "null" ? NaN : Number(r.slot);
+    return Number.isInteger(n) ? n : null;
+  });
 }
 
 // ─── Channel Config Helpers ───
@@ -968,6 +1012,156 @@ export async function setPrimaryChannelHostPhoto(
       .set({ sortOrder: i })
       .where(eq(channelHostPhotos.id, ordered[i].id));
   }
+}
+
+// ─── HeyGen test bench ───
+// The "HeyGen test" page. One row per photo, grouped by `batchId`; see `server/heygenTest.ts`.
+
+export async function createHeygenTests(
+  rows: InsertHeygenTest[]
+): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  await db.insert(heygenTests).values(rows);
+  notifyHeygenAccountsChanged();
+}
+
+export async function updateHeygenTest(
+  id: number,
+  data: Partial<InsertHeygenTest>
+): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(heygenTests).set(data).where(eq(heygenTests.id, id));
+  if (data.status !== undefined) notifyHeygenAccountsChanged();
+}
+
+export async function updateHeygenTestBatch(
+  batchId: string,
+  data: Partial<InsertHeygenTest>
+): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db
+    .update(heygenTests)
+    .set(data)
+    .where(eq(heygenTests.batchId, batchId));
+  if (data.status !== undefined) notifyHeygenAccountsChanged();
+}
+
+export async function getHeygenTestBatch(
+  batchId: string
+): Promise<HeygenTest[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select()
+    .from(heygenTests)
+    .where(eq(heygenTests.batchId, batchId))
+    .orderBy(asc(heygenTests.id));
+}
+
+export type HeygenTestFilters = {
+  /** Matches the run name or the script text. */
+  search?: string;
+  channelKey?: string;
+  userId?: number;
+};
+
+/**
+ * One page of test RUNS (batches), newest first, with the total number of runs matching the
+ * filters. Shared between admins and managers — the bench is one team's notebook. Filtering and
+ * paging happen here, by batch, so a page is always whole runs and older runs are never hidden.
+ * Only `batchId` and `max(id)` are sorted, never a text column (see MYSQL_SORT_BUFFER_SIZE).
+ */
+export async function listHeygenTestPage(
+  filters: HeygenTestFilters,
+  page: number,
+  pageSize: number
+): Promise<{ rows: HeygenTest[]; totalRuns: number }> {
+  const db = await getDb();
+  if (!db) return { rows: [], totalRuns: 0 };
+
+  const where: (SQL | undefined)[] = [];
+  const search = filters.search?.trim();
+  if (search) {
+    const like = `%${search.replace(/[\\%_]/g, c => `\\${c}`)}%`;
+    where.push(
+      or(
+        sql`${heygenTests.runName} like ${like}`,
+        sql`${heygenTests.script} like ${like}`
+      )
+    );
+  }
+  if (filters.channelKey)
+    where.push(eq(heygenTests.channelKey, filters.channelKey));
+  if (filters.userId != null)
+    where.push(eq(heygenTests.userId, filters.userId));
+  const lastId = sql<number>`max(${heygenTests.id})`;
+  const grouped = () =>
+    db
+      .select({ batchId: heygenTests.batchId, lastId })
+      .from(heygenTests)
+      .where(where.length ? and(...where) : undefined)
+      .groupBy(heygenTests.batchId);
+
+  const [{ n }] = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(grouped().as("runs"));
+  const batches = await grouped()
+    .orderBy(desc(lastId))
+    .limit(pageSize)
+    .offset((Math.max(1, page) - 1) * pageSize);
+  if (!batches.length) return { rows: [], totalRuns: Number(n) };
+
+  const rows = await db
+    .select()
+    .from(heygenTests)
+    .where(
+      inArray(
+        heygenTests.batchId,
+        batches.map(b => b.batchId)
+      )
+    )
+    .orderBy(desc(heygenTests.id));
+  return { rows, totalRuns: Number(n) };
+}
+
+/** Channels that have at least one test run — the "Channel" filter's options. */
+export async function listHeygenTestChannelKeys(): Promise<string[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db
+    .selectDistinct({ channelKey: heygenTests.channelKey })
+    .from(heygenTests);
+  return rows.map(r => r.channelKey);
+}
+
+/** Who has run tests — the "Run by" filter's options. */
+export async function listHeygenTestUserIds(): Promise<number[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db
+    .selectDistinct({ userId: heygenTests.userId })
+    .from(heygenTests);
+  return rows.map(r => r.userId);
+}
+
+/** Rows still voicing or rendering — the candidates a restart may have orphaned. */
+export async function getUnfinishedHeygenTests(): Promise<HeygenTest[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select()
+    .from(heygenTests)
+    .where(inArray(heygenTests.status, ["voicing", "rendering"]));
+}
+
+export async function deleteHeygenTestBatch(batchId: string): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(heygenTests).where(eq(heygenTests.batchId, batchId));
+  notifyHeygenAccountsChanged();
 }
 
 // ─── Sales ───

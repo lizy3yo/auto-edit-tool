@@ -28,6 +28,7 @@ import { narrationUploadRouter } from "../narrationUpload";
 import { serveStatic, setupVite } from "./vite";
 import { startTimeoutChecker } from "../generationTimeout";
 import { registerHeygenWebhook } from "../heygenWebhook";
+import { registerHeygenAccountStream } from "../heygenAccountStream";
 import { registerSalesWebhook } from "../salesWebhook";
 import { downloadRouter } from "../download";
 
@@ -77,6 +78,8 @@ async function startServer() {
   registerAdminAuthRoutes(app);
   // HeyGen render-completion callback (wakes host-scene poll loops).
   registerHeygenWebhook(app);
+  // Live free-account list for the HeyGen test page (Server-Sent Events).
+  registerHeygenAccountStream(app);
   // Webstore sales callback — records a paid order against the video whose link brought it.
   registerSalesWebhook(app);
   // Download proxy (bypasses CORS for R2/CDN URLs)

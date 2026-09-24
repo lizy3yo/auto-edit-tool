@@ -78,6 +78,27 @@
       "when": 1789443896870,
       "tag": "0010_lucky_cargill",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "5",
+      "when": 1790264719241,
+      "tag": "0011_tricky_jack_power",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "5",
+      "when": 1790267334541,
+      "tag": "0012_dazzling_mentallo",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "5",
+      "when": 1790268983270,
+      "tag": "0013_nice_chimera",
+      "breakpoints": true
     }
   ]
 }

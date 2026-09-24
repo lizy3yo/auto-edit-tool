@@ -357,6 +357,45 @@ export type ChannelHostPhoto = typeof channelHostPhotos.$inferSelect;
 export type InsertChannelHostPhoto = typeof channelHostPhotos.$inferInsert;
 
 /**
+ * HeyGen test bench runs (the "HeyGen test" page) — one row per PHOTO, grouped by `batchId` (one
+ * Generate click). Every row in a batch shares the one voiced `audioUrl`, so the photo is the
+ * only variable. `videoId` is written the moment HeyGen accepts the render, so a restart polls
+ * the render it already paid for instead of submitting again (`server/heygenTest.ts`).
+ */
+export const heygenTests = mysqlTable("heygen_tests", {
+  id: int("id").autoincrement().primaryKey(),
+  batchId: varchar("batchId", { length: 32 }).notNull(),
+  userId: int("userId").notNull(),
+  channelKey: varchar("channelKey", { length: 64 }).notNull(),
+  ttsVendor: varchar("ttsVendor", { length: 16 }).notNull(),
+  /** 0-4 = a tab's HeyGen account; null = the shared HEYGEN_API_KEY. */
+  heygenSlot: int("heygenSlot"),
+  imageUrl: varchar("imageUrl", { length: 512 }).notNull(),
+  script: text("script").notNull(),
+  /** Optional operator label for the whole run (same on every row of the batch); renamable. */
+  runName: varchar("runName", { length: 120 }),
+  /** The voiced read, already cut to the 30 s cap. Same URL on every row of the batch. */
+  audioUrl: varchar("audioUrl", { length: 512 }),
+  audioMs: int("audioMs"),
+  videoId: varchar("videoId", { length: 128 }),
+  videoUrl: varchar("videoUrl", { length: 512 }),
+  status: mysqlEnum("status", ["voicing", "rendering", "done", "failed"])
+    .default("voicing")
+    .notNull(),
+  error: text("error"),
+  /**
+   * When the row entered its current phase (voicing → preparing the photo → rendering). The
+   * page's progress bar estimates from it — HeyGen reports a stage, never a percentage.
+   */
+  phaseStartedAt: timestamp("phaseStartedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type HeygenTest = typeof heygenTests.$inferSelect;
+export type InsertHeygenTest = typeof heygenTests.$inferInsert;
+
+/**
  * Sales reported by the webstore, one row per paid line item.
  *
  * Written ONLY by `POST /api/sales` (see `server/salesWebhook.ts`), which the store calls after a

@@ -213,6 +213,25 @@ import { parseVolumeMultiplier } from "./ttsUnified";
 import { encrypt, decrypt, maskApiKey } from "./encryption";
 import { storagePut } from "./storage";
 import { nanoid } from "nanoid";
+import {
+  HeygenTestInputError,
+  heygenTestCostUsd,
+  getHeygenAccountAvailability,
+  renameHeygenRun,
+  resumeHeygenTests,
+  retryHeygenTests,
+  startHeygenTest,
+} from "./heygenTest";
+import {
+  deleteHeygenTestBatch,
+  listHeygenTestPage,
+  listHeygenTestChannelKeys,
+  listHeygenTestUserIds,
+} from "./db";
+import {
+  HEYGEN_TEST_MAX_NAME,
+  HEYGEN_TEST_RUNS_PER_PAGE,
+} from "../shared/heygenTest";
 
 /** Decrypt a stored provider API key. */
 async function getProviderApiKey(provider: any): Promise<string> {
@@ -950,6 +969,128 @@ const channelAssetRouter = router({
  * for whoever is generating; writing the library stays with managers, like every other piece
  * of channel configuration.
  */
+// ─── HeyGen test bench (the "HeyGen test" page, /heygen-test) ───
+// Admins and operations managers only: every run is a paid HeyGen render. `server/heygenTest.ts`.
+const heygenTestRouter = router({
+  /**
+   * The HeyGen accounts free right now, as labels — the keys never leave the server. The page
+   * also holds a live stream of the same answer (`server/heygenAccountStream.ts`); this is its
+   * first paint and its fallback while the stream is reconnecting.
+   */
+  accounts: managerProcedure.query(() => getHeygenAccountAvailability()),
+
+  /**
+   * One page of runs (5 per page), newest first, filtered, each row priced — plus the total so
+   * the page can number itself. Also resumes anything a restart orphaned.
+   */
+  list: managerProcedure
+    .input(
+      z.object({
+        page: z.number().int().min(1).default(1),
+        search: z.string().max(200).optional(),
+        channelKey: z.string().max(64).optional(),
+        userId: z.number().int().optional(),
+      })
+    )
+    .query(async ({ input }) => {
+      await resumeHeygenTests().catch(err =>
+        console.warn(`[HeyGen test] resume failed: ${err?.message}`)
+      );
+      const { page, ...filters } = input;
+      const [{ rows, totalRuns }, users] = await Promise.all([
+        listHeygenTestPage(filters, page, HEYGEN_TEST_RUNS_PER_PAGE),
+        listUsers(),
+      ]);
+      const byId = new Map(users.map(u => [u.id, u]));
+      return {
+        rows: rows.map(r => ({
+          ...r,
+          userName: byId.get(r.userId)?.name ?? null,
+          userRole: byId.get(r.userId)?.role ?? null,
+          costUsd: heygenTestCostUsd(r),
+        })),
+        totalRuns,
+        page,
+        pageCount: Math.max(1, Math.ceil(totalRuns / HEYGEN_TEST_RUNS_PER_PAGE)),
+      };
+    }),
+
+  /** Channels with at least one test run — the "Channel" filter lists only these. */
+  channels: managerProcedure.query(() => listHeygenTestChannelKeys()),
+
+  /** The people who have run tests — the "Run by" filter's options. */
+  runners: managerProcedure.query(async () => {
+    const [ids, users] = await Promise.all([
+      listHeygenTestUserIds(),
+      listUsers(),
+    ]);
+    const names = new Map(users.map(u => [u.id, u.name]));
+    return ids
+      .map(id => ({ id, name: names.get(id) ?? `User ${id}` }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }),
+
+  /** Name, rename or clear a run's name. */
+  rename: managerProcedure
+    .input(
+      z.object({
+        batchId: z.string().min(1).max(32),
+        name: z.string().max(HEYGEN_TEST_MAX_NAME),
+      })
+    )
+    .mutation(async ({ input }) => {
+      await renameHeygenRun(input.batchId, input.name);
+      return { ok: true };
+    }),
+
+  start: managerProcedure
+    .input(
+      z.object({
+        channelKey: z.string().min(1),
+        ttsVendor: z.enum(["sixtynine_labs", "minimax"]),
+        account: z.union([z.number().int().min(0), z.literal("shared")]),
+        script: z.string().max(5_000),
+        imageUrls: z.array(z.string().url().max(512)).max(10),
+        name: z.string().max(HEYGEN_TEST_MAX_NAME).optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        return await startHeygenTest({ ...input, userId: ctx.user.id });
+      } catch (err) {
+        if (err instanceof HeygenTestInputError)
+          throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
+        throw err;
+      }
+    }),
+
+  /** Runs a batch's failed clips again: the `ids` given, or every failed one in the batch. */
+  retry: managerProcedure
+    .input(
+      z.object({
+        batchId: z.string().min(1).max(32),
+        ids: z.array(z.number().int()).max(10).optional(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      try {
+        return await retryHeygenTests(input.batchId, input.ids);
+      } catch (err) {
+        if (err instanceof HeygenTestInputError)
+          throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
+        throw err;
+      }
+    }),
+
+  /** Removes the run's rows. A render still in flight on HeyGen finishes there and is dropped. */
+  deleteBatch: managerProcedure
+    .input(z.object({ batchId: z.string().min(1).max(32) }))
+    .mutation(async ({ input }) => {
+      await deleteHeygenTestBatch(input.batchId);
+      return { ok: true };
+    }),
+});
+
 const channelHostPhotoRouter = router({
   /** Ordered, primary first. `activeOnly` for the generate picker; Admin sees removed ones too. */
   list: approvedProcedure
@@ -3617,6 +3758,7 @@ export const appRouter = router({
   book: bookRouter,
   channelAsset: channelAssetRouter,
   channelHostPhoto: channelHostPhotoRouter,
+  heygenTest: heygenTestRouter,
 });
 
 export type AppRouter = typeof appRouter;

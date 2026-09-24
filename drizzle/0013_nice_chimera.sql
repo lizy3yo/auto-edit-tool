@@ -1,0 +1,1 @@
+ALTER TABLE `heygen_tests` ADD `runName` varchar(120);

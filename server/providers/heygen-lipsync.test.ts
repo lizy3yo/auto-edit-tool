@@ -146,6 +146,46 @@ describe("HeygenLipsyncAdapter.submitLipsync", () => {
     expect(videoAttempts).toBe(2);
   });
 
+  it("retries video creation while HeyGen answers 409 resource_not_ready", async () => {
+    let videoAttempts = 0;
+    installFetchMock({
+      video: () =>
+        ++videoAttempts <= 2
+          ? jsonRes(409, {
+              error: {
+                code: "resource_not_ready",
+                message:
+                  "This avatar is still processing. Wait for avatar creation to complete, then try again.",
+              },
+            })
+          : jsonRes(200, { data: { video_id: "vid-3" } }),
+    });
+    const adapter = new HeygenLipsyncAdapter("key");
+    const res = await adapter.submitLipsync({
+      imageUrl: freshImageUrl(),
+      audioUrl: "https://x/a.mp3",
+    });
+    expect(res).toEqual({ taskId: "vid-3" });
+    expect(videoAttempts).toBe(3);
+  });
+
+  it("does not retry an unrelated 409", async () => {
+    let videoAttempts = 0;
+    installFetchMock({
+      video: () => {
+        videoAttempts++;
+        return jsonRes(409, { error: { code: "conflict", message: "nope" } });
+      },
+    });
+    const adapter = new HeygenLipsyncAdapter("key");
+    const res = await adapter.submitLipsync({
+      imageUrl: freshImageUrl(),
+      audioUrl: "https://x/a.mp3",
+    });
+    expect(res.error).toMatch(/HeyGen API error \(409\)/);
+    expect(videoAttempts).toBe(1);
+  });
+
   it("returns an error (not a throw) when video creation fails hard", async () => {
     installFetchMock({
       video: () => jsonRes(400, { error: "bad audio" }),

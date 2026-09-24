@@ -4502,7 +4502,7 @@ function sceneTTSResumeSlot(
   };
 }
 
-async function generateSceneVoiceover(
+export async function generateSceneVoiceover(
   providerType: string,
   apiKey: string,
   text: string,
