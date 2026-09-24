@@ -630,6 +630,25 @@ export async function deleteLongformVideoJob(
 }
 
 /**
+ * Every longform job still marked `processing`. Read at boot, where each one was cut off by the
+ * restart (single process) — see `server/restartResume.ts`.
+ */
+export async function getProcessingLongformJobs() {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select({
+      id: longformVideoJobs.id,
+      stage: longformVideoJobs.stage,
+      updatedAt: longformVideoJobs.updatedAt,
+      inputParams: longformVideoJobs.inputParams,
+      storyboard: longformVideoJobs.storyboard,
+    })
+    .from(longformVideoJobs)
+    .where(eq(longformVideoJobs.status, "processing"));
+}
+
+/**
  * IDs of stale (processing + inactive past the cutoff) longform jobs whose storyboard has a
  * scene with persisted in-flight render task IDs. These are resumable — the provider render
  * likely finished after the pipeline process died — so the watchdog tries to resume them

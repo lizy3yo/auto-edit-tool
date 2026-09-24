@@ -378,10 +378,12 @@ Express · tRPC · Drizzle · MySQL.
   `capHostMinutes`, and the sections spend the SAME budget — check-ins only run between them. The
   plan, after voicing and before any clip is paid for: the hook,
   every CTA/scan-window host beat and the outro are ANCHORS (never removed), with a reserve for
-  the beat `ensureHostInCta` will flip later; the rest of the budget becomes check-ins at evenly
+  every pitch beat `hostTheCtaPitch` will flip later (`ctaPitchBeats`, minus the beats the
+  operator's assets take) — so the CTA's host time comes OUT of the check-ins, not on top of the
+  budget; the rest of the budget becomes check-ins at evenly
   spaced targets ~60 s apart in each stretch between anchors — nearest existing host beat in the
   window, else a ≤10 s cutaway promoted (`promoteCutawayToHost`, shared with
-  `shapePitchQrStretches`) — widening the spacing until the budget covers every target and
+  `hostTheCtaPitch`) — widening the spacing until the budget covers every target and
   visiting targets middle-out so a short budget still spreads; leftover budget keeps more of the
   storyboard's own host beats; every other host beat goes to the still lane. Splits and alt
   angles are host renders and count toward it. HOST ANGLES (`assignHostShots`) rotate EVENLY
@@ -430,6 +432,50 @@ Express · tRPC · Drizzle · MySQL.
   (`scene.splitFocusSource` "centre"), never a silent centre. The result persists as
   `scene.splitAutoFocusX` and is reused by every recomposite; manual `splitLayout.hostFocusX`
   overrides it
+- **CTA layout** (`markCtaQrBlock`, `hostTheCtaPitch`, `qrPlacementFor`, `ctaAssemblyScene` in
+  longformVideo) — the operator's structure since 2026-09-23, and the QR moves exactly ONCE in it:
+  HOST (small QR bottom-right) → BOOK COVER when the title is spoken (small QR) → HOST (small QR)
+  → from the line telling the viewer to SCAN (`CTA_QR_TRIGGER`, else the first `SCAN_INTENT`
+  sentence of a marked block) to ===END CTA===: the big centred QR over a person-free, on-topic
+  b-roll still (a host beat in the window gives the frame up, its picture seeded from its own
+  `brollVisual`; a plain dark backdrop was tried the same day and the operator preferred b-roll).
+  No split screens inside a CTA, and no b-roll in the pitch before the scan line (`enforceHostSplitMix` skips and clears CTA beats,
+  and sizes the split share from content host beats only). No frozen pause after it either: the
+  3s silent `QR_TAIL_HOLD_SEC` tail and `extendQrHeroWindow`'s top-up read as the film "stopping"
+  after every CTA and are retired — the scan window is the block's own narration, and the voicing
+  stage WARNS when it is under `QR_SCAN_WINDOW_WARN_SEC` (8s) so the script gets another line.
+  This replaces the 2026-09-10 rule (big card on every b-roll beat, in split panels, corner over a
+  host; `shapePitchQrStretches`, `qrBigDuringHold` — both deleted), under which the card jumped
+  seven times in one pitch. FILMS RENDERED BEFORE get it on Reassemble: `ctaAssemblyScene` runs the
+  scan window to the block's end — a window beat that is a HOST take borrows the nearest
+  person-free window beat's picture, so the card never sits on a face — and plays a split pitch beat's own full-frame
+  host take (`hostClipUrls` — not a back-filled `host-…` panel crop, which would zoom the face);
+  only turning the old pitch's b-roll into host needs a fresh render. Pitch hosting and the
+  no-split rule apply to MARKED blocks only (`inMarkedCta`): an unmarked script's `cta` flags
+  come from `markCtaScenes`, which also fires on any spoken price
+- **Host takes speak whole sentences** (`completeHostSentences`, `endsSentence`/`startsSentence`
+  in longformVideo, 2026-09-24). The script is cut into clause-sized pieces for the b-roll lane
+  (≤8 s, ≤5 s in the fast open) and host beats came from those same pieces, so job 110 had 22 of
+  31 host takes starting or ending mid-sentence — the cold open stopped on "…box-store lumber,",
+  flashed 0.37 s of b-roll, and came back mid-thought. After voicing (the free re-slice stage, just
+  before the final `assignSceneRanges`) each host beat absorbs the rest of its own sentence both
+  ways, keeping the host's register (the opener's when it is one side), up to
+  `HOST_SENTENCE_MAX_SEC` (15 s — a longer sentence cuts at a clause, the ordinary L-cut); never
+  across a scan-window/cover/asset beat or a CTA-block edge, never folding the two cold-open
+  angles. `planHostMinutes` and `shapeHostSections` only PROMOTE a cutaway that is itself whole
+  sentences. And `coalesceShortScenes` folds a FLASH (`FLASH_SHOT_SEC`, 1.5 s) past the ceiling
+  into a neighbour — the freeze-pad that used to hold an orphan to its floor is retired, so an
+  orphan otherwise blinks past. On job 110's storyboard: mid-sentence host takes 22 → 8, flashes
+  1 → 0, opener one 10.6 s take. A rendered film needs its host scenes re-rendered to pick it up
+- **B-roll prompts** — the style bible is a HOME BASE plus the places the script travels to, not
+  "the ONE physical world" (that put a whole Japanese-woodworking film in one garage, a Japanese
+  home drawn as a poster on its wall); the storyboard's WORLD block, the enhancer's direction
+  line and `amateurSettingClause` all send a line about where a thing is used/sold/comes from
+  THERE. `CLEAN_FRAME_RULE` (subject fills the frame, tidy background, no brands; openwork shown
+  backed or on a calm backdrop) replaced "natural everyday clutter". `NO_READABLE_TEXT` /
+  `NO_NARRATION_TEXT_RULE` replaced `ENGLISH_TEXT_ONLY`, which ALLOWED in-scene text and got the
+  narration written onto chalkboards ("$93/hour"); `scanStillDefects` has a third verdict,
+  `writing`, that re-rolls a still with readable text in it
 - `server/sceneEditQueue.ts` + `enqueueSceneEdit`/`runSceneEditSession` (longformVideo) — operator
   edits on a rendered job (regenerate scene, batch regenerate, split edits) are queued per job and
   run by ONE edit session inside a single `withJobLock` pass: one live storyboard document, tasks
@@ -453,8 +499,8 @@ Express · tRPC · Drizzle · MySQL.
   default (`operatorSetLength` — the narration range differs from `timingOriginal`'s): those
   defaults exist to stop the PIPELINE emitting a flash beat or an unscannable QR, not to overrule
   a length a person chose. All four consumers map a scene through the one `sceneHoldPlan` helper
-  so they cannot disagree. Consequence worth knowing: re-timing a `qrTail` beat drops its 3s QR
-  linger — set "Hold after line" explicitly to keep one. RIPPLE TRIM (`planRippleTrim`/`applyRippleTrim`) is the one edit that changes the
+  so they cannot disagree. The CTA release beat's automatic 3s QR linger is RETIRED (see the CTA
+  entry) — only an explicit "Hold after line" freezes a scene. RIPPLE TRIM (`planRippleTrim`/`applyRippleTrim`) is the one edit that changes the
   film's LENGTH: it ends a scene earlier and DELETES the narration between there and where it
   ended, instead of handing those words to the next scene. The hole it leaves between one
   scene's end and the next one's start IS the instruction — `masterOverlayEligible` allows gaps
@@ -479,8 +525,8 @@ Express · tRPC · Drizzle · MySQL.
   range (`boundaryLimits`); the bounds used to come from the NEIGHBOUR's far edge, so an 11–17
   scene could be dragged out to 5.5–23. Time given up goes to the neighbour on that side, so
   lengthening a scene means shortening its neighbour from that neighbour's editor. Split a scene in two (same
-  footage continues; renumbers), hold the last frame (`scene.tailHoldSec` — the CTA release beat's
-  hard-wired `QR_TAIL_HOLD_SEC = 3` is its default; 0 removes the pause) or hold the FIRST frame
+  footage continues; renumbers), hold the last frame (`scene.tailHoldSec` — no default any more;
+  `QR_TAIL_HOLD_SEC` is 0) or hold the FIRST frame
   (`scene.headHoldSec` — `tailHoldSec`'s mirror, at the front; only the film's actual first scene
   qualifies, since every other scene's start is a shared boundary with a neighbour instead). A
   head hold prepends silence to the master-overlay audio at that scene's own `sliceStartSec`
@@ -743,7 +789,14 @@ Always 16:9. Fire-and-forget; progress persisted to the job row and polled by th
 - **Single process only.** In-memory semaphores, per-job heartbeats, poll loops and the
   HeyGen webhook wake-up all assume it. No serverless, no horizontal scaling — one
   instance with restart-on-crash. The 1-min watchdog (`server/generationTimeout.ts`)
-  resumes orphaned renders (provider results stay downloadable ~24 h).
+  resumes orphaned renders (provider results stay downloadable ~24 h). At BOOT every job still
+  `processing` was cut off by the restart (a deploy, a crash, or `tsx watch` reloading on a
+  saved file), so `server/restartResume.ts` continues each one ONCE (`inputParams.autoResumedAt`)
+  through the path the operator's buttons use — pipeline from the top reusing the checkpointed
+  master (`inputParams.voicedMasterUrl`, written the moment the master is voiced), "Retry failed
+  scenes" for the clip stage, "Retry assembly" after it. A second cut-off, a job idle past 24 h,
+  or a clip-stage job whose scenes lack narration (continuing would buy a voiceover per scene)
+  is failed with a message instead — it never spends on TTS unattended.
 - **`ADMIN_EMAIL` / `ADMIN_PASSWORD` are a bootstrap, not the login.** They create the first
   admin when `users` is empty and are ignored forever after — in particular they never
   overwrite a password changed in Admin → Users, so a stale value in the deploy's environment

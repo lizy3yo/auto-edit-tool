@@ -56,10 +56,10 @@ const MIN_SLICE_SEC = 0.5;
  */
 const FRAME_SEC = 1 / 30;
 const MAX_TAIL_HOLD_SEC = 10;
-/** The CTA release beat's flat default hold when neither the operator nor the pipeline set one
- *  (server QR_TAIL_HOLD_SEC). A block whose narration was too short to be scannable carries a
- *  bigger computed default on `qrHoldSec` — see `qrHoldDefault`. */
-const DEFAULT_QR_TAIL_HOLD_SEC = 3;
+/** The CTA release beat's default hold (server QR_TAIL_HOLD_SEC). Retired to 0 on 2026-09-23 —
+ *  the automatic pause read as the film stopping after every CTA; only an operator's own hold
+ *  freezes a scene now, and a legacy `qrHoldSec` is ignored the same way `sceneHoldPlan` does. */
+const DEFAULT_QR_TAIL_HOLD_SEC = 0;
 /** Mirrors server/sceneTiming.ts MAX_HEAD_HOLD_SEC. */
 const MAX_HEAD_HOLD_SEC = 10;
 /** How far picture and voice may drift during playback before the voice is snapped back. */
@@ -495,9 +495,8 @@ export function SceneTimingEditor(props: {
         (props.startSec - props.prevStartSec) -
         persistedClipIn
     ) < 0.05;
-  // Mirrors sceneHoldPlan: tailHoldSec ?? qrHoldSec ?? QR_TAIL_HOLD_SEC.
-  const qrHoldDefault = props.qrHoldSec ?? DEFAULT_QR_TAIL_HOLD_SEC;
-  const defaultHold = props.qrTail ? qrHoldDefault : 0;
+  // Mirrors sceneHoldPlan: only the operator's own tailHoldSec holds a scene.
+  const defaultHold = DEFAULT_QR_TAIL_HOLD_SEC;
   const persistedHold = props.tailHoldSec ?? defaultHold;
   const persistedHeadHold = props.headHoldSec ?? 0;
 
@@ -1760,11 +1759,6 @@ export function SceneTimingEditor(props: {
             className="h-7 w-16 text-xs"
           />
           s
-          {props.qrTail && (
-            <span className="text-[10px]">
-              (CTA release beat — default {qrHoldDefault}s; 0 removes the pause)
-            </span>
-          )}
         </label>
         <div className="ml-auto flex items-center gap-2">
           <Button

@@ -1,0 +1,1889 @@
+{
+ "jobId": 117,
+ "channel": "quilting_with_granny_ruth",
+ "title": "I Made 10 Scrap Quilt Projects — Here's What Actually Sold",
+ "status": "completed",
+ "rehearsal": true,
+ "finalVideoUrl": "https://pub-fd5853f50f47422f827867dae374bcf2.r2.dev/longform/117/final-Phr_lMu0.mp4",
+ "verdicts": {
+  "1": true,
+  "2": false,
+  "3": false,
+  "4": false,
+  "5": true,
+  "6": false,
+  "7": true
+ },
+ "stats": {
+  "scenes": 199,
+  "hostTakes": 21,
+  "hostSec": 177,
+  "ctaPatterns": [
+   "block 0: HBHHHQQQQQ",
+   "block 1: HHHHHHH"
+  ],
+  "introductions": 1,
+  "midSentenceHostTakes": 0,
+  "picturesJudged": 182
+ },
+ "findings": [
+  {
+   "rule": 2,
+   "detail": "block 1 (HHHHHHH): does not END on the big QR"
+  },
+  {
+   "rule": 2,
+   "detail": "block 1 (HHHHHHH): no book cover"
+  },
+  {
+   "rule": 3,
+   "scene": 15,
+   "detail": "split-panel: wrong place — Quilt shown at home, not in church"
+  },
+  {
+   "rule": 3,
+   "scene": 22,
+   "detail": "b-roll: wrong place — Quilt shown on bedroom bed, not porch"
+  },
+  {
+   "rule": 3,
+   "scene": 39,
+   "detail": "b-roll: wrong place — setting is home workspace, not a store aisle"
+  },
+  {
+   "rule": 3,
+   "scene": 44,
+   "detail": "b-roll: wrong place — Bed frame shown, not crib as narration states"
+  },
+  {
+   "rule": 3,
+   "scene": 86,
+   "detail": "b-roll: wrong place — Setting is home/craft room, not a booth"
+  },
+  {
+   "rule": 3,
+   "scene": 187,
+   "detail": "b-roll: wrong place — Fabric display indoors, not a market booth"
+  },
+  {
+   "rule": 4,
+   "scene": 4,
+   "detail": "b-roll: cluttered — Hero subject lost among scattered fabric and supplies"
+  },
+  {
+   "rule": 4,
+   "scene": 17,
+   "detail": "b-roll: cluttered — Fabric scraps distract from notepad; notepad not visible"
+  },
+  {
+   "rule": 4,
+   "scene": 20,
+   "detail": "b-roll: cluttered — Busy background distracts from fabric cost calculation"
+  },
+  {
+   "rule": 4,
+   "scene": 27,
+   "detail": "b-roll: cluttered — Hero subject lost among chaotic pile of fabric scraps"
+  },
+  {
+   "rule": 4,
+   "scene": 38,
+   "detail": "b-roll: cluttered — Fabric scraps dominate, hero shears barely visible"
+  },
+  {
+   "rule": 4,
+   "scene": 45,
+   "detail": "b-roll: cluttered — Hero subject lost among busy craft supplies"
+  },
+  {
+   "rule": 4,
+   "scene": 51,
+   "detail": "qr-background: cluttered — Fabric scraps unrelated to phone or QR code narration"
+  },
+  {
+   "rule": 4,
+   "scene": 64,
+   "detail": "b-roll: cluttered — Hero subject crowded among many similar fabric scraps"
+  },
+  {
+   "rule": 4,
+   "scene": 78,
+   "detail": "b-roll: cluttered — Scene shows sewing supplies, not purse contents"
+  },
+  {
+   "rule": 4,
+   "scene": 84,
+   "detail": "b-roll: cluttered — busy background clutters the hero subject"
+  },
+  {
+   "rule": 4,
+   "scene": 85,
+   "detail": "b-roll: cluttered — Hero pouches lost among many competing items"
+  },
+  {
+   "rule": 4,
+   "scene": 87,
+   "detail": "b-roll: cluttered — Many similar pouches crowd the frame, unclear which is the subject"
+  },
+  {
+   "rule": 4,
+   "scene": 91,
+   "detail": "split-panel: cluttered — Busy fabric scraps overwhelm the subject"
+  },
+  {
+   "rule": 4,
+   "scene": 95,
+   "detail": "b-roll: cluttered — Hero quilt lost among clutter on busy table"
+  },
+  {
+   "rule": 4,
+   "scene": 102,
+   "detail": "b-roll: cluttered — Hero subject lost among scattered materials and supplies"
+  },
+  {
+   "rule": 4,
+   "scene": 103,
+   "detail": "b-roll: cluttered — Multiple quilts crowded together, unclear hero subject"
+  },
+  {
+   "rule": 4,
+   "scene": 107,
+   "detail": "b-roll: cluttered — Fabric scraps overwhelming, hero subject lost in clutter"
+  },
+  {
+   "rule": 4,
+   "scene": 109,
+   "detail": "b-roll: cluttered — busy background distracts from sewing action"
+  },
+  {
+   "rule": 4,
+   "scene": 117,
+   "detail": "b-roll: cluttered — Fabric scraps too busy to see hero subject"
+  },
+  {
+   "rule": 4,
+   "scene": 120,
+   "detail": "b-roll: cluttered — Hero subjects small and lost among busy background clutter"
+  },
+  {
+   "rule": 4,
+   "scene": 121,
+   "detail": "b-roll: cluttered — Fabric scraps overwhelm the container, making it cluttered"
+  },
+  {
+   "rule": 4,
+   "scene": 122,
+   "detail": "b-roll: cluttered — Hero subject crowded by busy workspace clutter"
+  },
+  {
+   "rule": 4,
+   "scene": 136,
+   "detail": "b-roll: cluttered — Hero subject lost in cluttered craft room workspace"
+  },
+  {
+   "rule": 4,
+   "scene": 137,
+   "detail": "b-roll: cluttered — Hero subject lost among many competing handmade items"
+  },
+  {
+   "rule": 4,
+   "scene": 140,
+   "detail": "b-roll: cluttered — Hero subject surrounded by busy craft materials"
+  },
+  {
+   "rule": 4,
+   "scene": 147,
+   "detail": "b-roll: cluttered — Hero subject lost among many similar quilted items"
+  },
+  {
+   "rule": 4,
+   "scene": 153,
+   "detail": "b-roll: cluttered — Multiple fabrics shown, unclear which is the subject throw"
+  },
+  {
+   "rule": 4,
+   "scene": 157,
+   "detail": "b-roll: cluttered — busy background clutters the quilting hero subject"
+  },
+  {
+   "rule": 4,
+   "scene": 163,
+   "detail": "b-roll: cluttered — Hero subject crowded among scattered craft supplies"
+  },
+  {
+   "rule": 4,
+   "scene": 170,
+   "detail": "b-roll: cluttered — Fabric scraps scattered messily, hard to see main subject"
+  },
+  {
+   "rule": 4,
+   "scene": 176,
+   "detail": "b-roll: cluttered — Hero subject lost among busy patchwork patterns"
+  },
+  {
+   "rule": 4,
+   "scene": 178,
+   "detail": "b-roll: cluttered — Hero quilts lost among crowded display of multiple items"
+  },
+  {
+   "rule": 4,
+   "scene": 182,
+   "detail": "b-roll: cluttered — Hero subject lost among busy craft supplies"
+  },
+  {
+   "rule": 4,
+   "scene": 187,
+   "detail": "b-roll: cluttered — Fabric display indoors, not a market booth"
+  },
+  {
+   "rule": 5,
+   "scene": 21,
+   "detail": "b-roll: readable text — "
+  },
+  {
+   "rule": 6,
+   "scene": 4,
+   "detail": "introduction not on camera: \"So we're counting all of them down, worst to best, with what each one \""
+  }
+ ],
+ "judged": [
+  {
+   "scene": 2,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 3,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 4,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "n/a",
+   "what": "Hero subject lost among scattered fabric and supplies"
+  },
+  {
+   "scene": 5,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 6,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 7,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 8,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 9,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 10,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 11,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 12,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 13,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 14,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 15,
+   "kind": "split-panel",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "wrong",
+   "what": "Quilt shown at home, not in church"
+  },
+  {
+   "scene": 16,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 17,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "n/a",
+   "what": "Fabric scraps distract from notepad; notepad not visible"
+  },
+  {
+   "scene": 18,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 19,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 20,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "n/a",
+   "what": "Busy background distracts from fabric cost calculation"
+  },
+  {
+   "scene": 21,
+   "kind": "b-roll",
+   "text": true,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 22,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "wrong",
+   "what": "Quilt shown on bedroom bed, not porch"
+  },
+  {
+   "scene": 23,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 24,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 25,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 26,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 27,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "n/a",
+   "what": "Hero subject lost among chaotic pile of fabric scraps"
+  },
+  {
+   "scene": 28,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 29,
+   "kind": "split-panel",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 30,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 31,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 32,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 33,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 34,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 35,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 36,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 37,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 38,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "n/a",
+   "what": "Fabric scraps dominate, hero shears barely visible"
+  },
+  {
+   "scene": 39,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "wrong",
+   "what": "setting is home workspace, not a store aisle"
+  },
+  {
+   "scene": 40,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 41,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 42,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 43,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 44,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "wrong",
+   "what": "Bed frame shown, not crib as narration states"
+  },
+  {
+   "scene": 45,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "n/a",
+   "what": "Hero subject lost among busy craft supplies"
+  },
+  {
+   "scene": 51,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "n/a",
+   "what": "Fabric scraps unrelated to phone or QR code narration"
+  },
+  {
+   "scene": 52,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 53,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 54,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 55,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 56,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 57,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 58,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 59,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 60,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 61,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 62,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 63,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 64,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "n/a",
+   "what": "Hero subject crowded among many similar fabric scraps"
+  },
+  {
+   "scene": 65,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 66,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 67,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 68,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 69,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 70,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 71,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 72,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 73,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 74,
+   "kind": "split-panel",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 75,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 76,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 77,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 78,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "n/a",
+   "what": "Scene shows sewing supplies, not purse contents"
+  },
+  {
+   "scene": 79,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 80,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 81,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 82,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 83,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 84,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "n/a",
+   "what": "busy background clutters the hero subject"
+  },
+  {
+   "scene": 85,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "n/a",
+   "what": "Hero pouches lost among many competing items"
+  },
+  {
+   "scene": 86,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "wrong",
+   "what": "Setting is home/craft room, not a booth"
+  },
+  {
+   "scene": 87,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "ok",
+   "what": "Many similar pouches crowd the frame, unclear which is the subject"
+  },
+  {
+   "scene": 88,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 89,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 90,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 91,
+   "kind": "split-panel",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "n/a",
+   "what": "Busy fabric scraps overwhelm the subject"
+  },
+  {
+   "scene": 92,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 93,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 94,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 95,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "n/a",
+   "what": "Hero quilt lost among clutter on busy table"
+  },
+  {
+   "scene": 96,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 97,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 98,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 99,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 100,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 101,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 102,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "n/a",
+   "what": "Hero subject lost among scattered materials and supplies"
+  },
+  {
+   "scene": 103,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "n/a",
+   "what": "Multiple quilts crowded together, unclear hero subject"
+  },
+  {
+   "scene": 104,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 105,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 106,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 107,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "n/a",
+   "what": "Fabric scraps overwhelming, hero subject lost in clutter"
+  },
+  {
+   "scene": 108,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 109,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "n/a",
+   "what": "busy background distracts from sewing action"
+  },
+  {
+   "scene": 110,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 111,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 112,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 113,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 115,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 116,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 117,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "n/a",
+   "what": "Fabric scraps too busy to see hero subject"
+  },
+  {
+   "scene": 118,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 119,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 120,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "ok",
+   "what": "Hero subjects small and lost among busy background clutter"
+  },
+  {
+   "scene": 121,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "ok",
+   "what": "Fabric scraps overwhelm the container, making it cluttered"
+  },
+  {
+   "scene": 122,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "n/a",
+   "what": "Hero subject crowded by busy workspace clutter"
+  },
+  {
+   "scene": 123,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 124,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 125,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 126,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 127,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 128,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 129,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 130,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 131,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 132,
+   "kind": "split-panel",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 133,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 134,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 135,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 136,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "n/a",
+   "what": "Hero subject lost in cluttered craft room workspace"
+  },
+  {
+   "scene": 137,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "n/a",
+   "what": "Hero subject lost among many competing handmade items"
+  },
+  {
+   "scene": 138,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 139,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 140,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "n/a",
+   "what": "Hero subject surrounded by busy craft materials"
+  },
+  {
+   "scene": 141,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 142,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 143,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 144,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 145,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 146,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 147,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "n/a",
+   "what": "Hero subject lost among many similar quilted items"
+  },
+  {
+   "scene": 148,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 149,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 151,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 152,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 153,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "n/a",
+   "what": "Multiple fabrics shown, unclear which is the subject throw"
+  },
+  {
+   "scene": 154,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 155,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 156,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 157,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "n/a",
+   "what": "busy background clutters the quilting hero subject"
+  },
+  {
+   "scene": 158,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 159,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 160,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 161,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 162,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 163,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "ok",
+   "what": "Hero subject crowded among scattered craft supplies"
+  },
+  {
+   "scene": 164,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 165,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 166,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 167,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 168,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 169,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 170,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "n/a",
+   "what": "Fabric scraps scattered messily, hard to see main subject"
+  },
+  {
+   "scene": 171,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 172,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 173,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 174,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 176,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "n/a",
+   "what": "Hero subject lost among busy patchwork patterns"
+  },
+  {
+   "scene": 177,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 178,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "n/a",
+   "what": "Hero quilts lost among crowded display of multiple items"
+  },
+  {
+   "scene": 179,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 180,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 181,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 182,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "n/a",
+   "what": "Hero subject lost among busy craft supplies"
+  },
+  {
+   "scene": 183,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 184,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 185,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 186,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 187,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "wrong",
+   "what": "Fabric display indoors, not a market booth"
+  },
+  {
+   "scene": 188,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 189,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 190,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 198,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  }
+ ]
+}

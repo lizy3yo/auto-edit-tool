@@ -1,0 +1,1710 @@
+{
+ "jobId": 113,
+ "channel": "hank_hardwood",
+ "title": "Stress: Hank #1 (rehearsal)",
+ "status": "completed",
+ "rehearsal": true,
+ "finalVideoUrl": "https://pub-fd5853f50f47422f827867dae374bcf2.r2.dev/longform/113/final-vAvYh6-W.mp4",
+ "verdicts": {
+  "1": true,
+  "2": true,
+  "3": false,
+  "4": true,
+  "5": false,
+  "6": true,
+  "7": false
+ },
+ "stats": {
+  "scenes": 189,
+  "hostTakes": 18,
+  "hostSec": 171,
+  "ctaPatterns": [
+   "block 0: HBHQQQQQ",
+   "block 1: HBHQQQQQ"
+  ],
+  "introductions": 1,
+  "midSentenceHostTakes": 1,
+  "picturesJudged": 178
+ },
+ "findings": [
+  {
+   "rule": 3,
+   "scene": 7,
+   "detail": "b-roll: wrong place — Frame shows kumiko panel, not actual Japanese sliding door"
+  },
+  {
+   "rule": 3,
+   "scene": 73,
+   "detail": "b-roll: wrong place — Setting is home/workshop, not market table"
+  },
+  {
+   "rule": 3,
+   "scene": 112,
+   "detail": "b-roll: wrong place — Setting is outdoor market/fair, not a shop"
+  },
+  {
+   "rule": 3,
+   "scene": 140,
+   "detail": "b-roll: wrong place — Shown in home workshop, not a garden aisle"
+  },
+  {
+   "rule": 4,
+   "scene": 3,
+   "detail": "b-roll: cluttered — Wooden boxes and trays shown, narration mentions 'handed over' - unclear connection"
+  },
+  {
+   "rule": 4,
+   "scene": 17,
+   "detail": "b-roll: cluttered — Hero subject lost among scattered wood scraps and tools"
+  },
+  {
+   "rule": 4,
+   "scene": 40,
+   "detail": "b-roll: cluttered — Hero subject lost among crowded decorative items"
+  },
+  {
+   "rule": 4,
+   "scene": 61,
+   "detail": "b-roll: cluttered — Hero subject crowded among many potted plants"
+  },
+  {
+   "rule": 4,
+   "scene": 187,
+   "detail": "qr-background: cluttered — Multiple wood projects crowd the frame"
+  },
+  {
+   "rule": 5,
+   "scene": 65,
+   "detail": "b-roll: readable text — "
+  },
+  {
+   "rule": 5,
+   "scene": 72,
+   "detail": "b-roll: readable text — "
+  },
+  {
+   "rule": 5,
+   "scene": 74,
+   "detail": "b-roll: readable text — Name 'Hank' on tray contradicts 'somebody's name' claim"
+  },
+  {
+   "rule": 5,
+   "scene": 75,
+   "detail": "b-roll: readable text — "
+  },
+  {
+   "rule": 5,
+   "scene": 130,
+   "detail": "b-roll: readable text — "
+  },
+  {
+   "rule": 7,
+   "scene": 167,
+   "detail": "host take ends mid-sentence: \"Now, charred wood isn't fireproof, whatever you've read online, so a l\""
+  }
+ ],
+ "judged": [
+  {
+   "scene": 2,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 3,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "n/a",
+   "what": "Wooden boxes and trays shown, narration mentions 'handed over' - unclear connection"
+  },
+  {
+   "scene": 5,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 6,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 7,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "wrong",
+   "what": "Frame shows kumiko panel, not actual Japanese sliding door"
+  },
+  {
+   "scene": 8,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 9,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 10,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 11,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 12,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 13,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 14,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 15,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 16,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 17,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "n/a",
+   "what": "Hero subject lost among scattered wood scraps and tools"
+  },
+  {
+   "scene": 18,
+   "kind": "split-panel",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 19,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 20,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 21,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 22,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 23,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 24,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 25,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 26,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 27,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 28,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 29,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 30,
+   "kind": "split-panel",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 31,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 32,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 33,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 34,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 35,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 36,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 37,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 38,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 39,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 40,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "n/a",
+   "what": "Hero subject lost among crowded decorative items"
+  },
+  {
+   "scene": 44,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": "Narration names QR code on screen, none visible"
+  },
+  {
+   "scene": 45,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 46,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 47,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 48,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 49,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 50,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 51,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 52,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 53,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 54,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 55,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 56,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 57,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 58,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 59,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 60,
+   "kind": "split-panel",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 61,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "n/a",
+   "what": "Hero subject crowded among many potted plants"
+  },
+  {
+   "scene": 62,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 63,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 64,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 65,
+   "kind": "b-roll",
+   "text": true,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 66,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 67,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 68,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 69,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 70,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 71,
+   "kind": "split-panel",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 72,
+   "kind": "b-roll",
+   "text": true,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 73,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "wrong",
+   "what": "Setting is home/workshop, not market table"
+  },
+  {
+   "scene": 74,
+   "kind": "b-roll",
+   "text": true,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": "Name 'Hank' on tray contradicts 'somebody's name' claim"
+  },
+  {
+   "scene": 75,
+   "kind": "b-roll",
+   "text": true,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 76,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 77,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 78,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 79,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 80,
+   "kind": "split-panel",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 81,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 82,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 83,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 84,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 85,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 86,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 87,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 88,
+   "kind": "split-panel",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 89,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 90,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 91,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 92,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 93,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 94,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 95,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 96,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 97,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 98,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 99,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 100,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 101,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 102,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 103,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 104,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 105,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 106,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 107,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 108,
+   "kind": "split-panel",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 109,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 110,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 111,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 112,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "wrong",
+   "what": "Setting is outdoor market/fair, not a shop"
+  },
+  {
+   "scene": 113,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 114,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 115,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 116,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 117,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": "Narration mentions sake set tray, frame shows planter mold"
+  },
+  {
+   "scene": 118,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 119,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 120,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 121,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 122,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 123,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 125,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 126,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 127,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 128,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 129,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 130,
+   "kind": "b-roll",
+   "text": true,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 131,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 132,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 133,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 134,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 135,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 136,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 137,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 138,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 139,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 140,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "wrong",
+   "what": "Shown in home workshop, not a garden aisle"
+  },
+  {
+   "scene": 141,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 142,
+   "kind": "split-panel",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 143,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 144,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 145,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 146,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 147,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 148,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 149,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 150,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 151,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 152,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 154,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 155,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 156,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 157,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 158,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 159,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 160,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 161,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 162,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 163,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 164,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 165,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 166,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 167,
+   "kind": "split-panel",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 168,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 169,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 170,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 171,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 172,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 173,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 174,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 175,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 176,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 177,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 178,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 179,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 180,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 184,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": "Narration mentions QR code, frame shows only wood"
+  },
+  {
+   "scene": 185,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 186,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 187,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "n/a",
+   "what": "Multiple wood projects crowd the frame"
+  },
+  {
+   "scene": 188,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  }
+ ]
+}

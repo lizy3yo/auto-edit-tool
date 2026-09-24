@@ -103,19 +103,30 @@ describe("buildVideoTimeline", () => {
     });
   });
 
-  it("HOLDS a qrTail beat past its narration, matching assembly", () => {
-    // The whole reason timestamps are derived from the assembly planner rather than by summing
-    // narration: the silent QR tail is real screen time, and ignoring it drifts every later
+  it("ends a qrTail beat with its narration — the automatic QR pause is retired", () => {
+    // It used to freeze 3s with silence under it; the film read as stopping after every CTA.
+    const t = buildVideoTimeline([
+      scene(1),
+      scene(2, { qrHero: true, qrTail: true, qrHoldSec: 9 }),
+      scene(3, { narrationStartSec: 8, narrationEndSec: 12 }),
+    ]);
+    expect(t[1].endSec).toBeCloseTo(8, 1);
+    expect(t[2].startSec).toBeCloseTo(8, 1);
+  });
+
+  it("HOLDS an operator's own tail past the narration, matching assembly", () => {
+    // The reason timestamps are derived from the assembly planner rather than by summing
+    // narration: a held tail is real screen time, and ignoring it drifts every later
     // timestamp early.
     const withTail = buildVideoTimeline([
       scene(1),
-      scene(2, { qrHero: true, qrTail: true }),
+      scene(2, { qrHero: true, qrTail: true, tailHoldSec: 3 }),
       scene(3, { narrationStartSec: 8, narrationEndSec: 12 }),
     ]);
     const spoken = withTail[1].endSec - withTail[1].startSec;
-    expect(spoken).toBeGreaterThan(4 + QR_TAIL_HOLD_SEC - 0.2);
+    expect(spoken).toBeGreaterThan(4 + 3 - 0.2);
     // …and the NEXT shot starts after the tail, not before it.
-    expect(withTail[2].startSec).toBeGreaterThan(4 + QR_TAIL_HOLD_SEC - 0.2);
+    expect(withTail[2].startSec).toBeGreaterThan(4 + 3 - 0.2);
   });
 
   it("falls back to held durations when the job is off the master timeline", () => {
@@ -292,7 +303,7 @@ describe("cross-module constants", () => {
       (await import("./longformVideo")) as any;
     // The pipeline does not export it, so assert against the documented constant instead: a
     // change there without a change here would shift every timestamp after a QR block.
-    expect(QR_TAIL_HOLD_SEC).toBe(3);
+    expect(QR_TAIL_HOLD_SEC).toBe(0); // retired 2026-09-23 — no automatic CTA pause
     if (pipelineValue !== undefined)
       expect(QR_TAIL_HOLD_SEC).toBe(pipelineValue);
   });

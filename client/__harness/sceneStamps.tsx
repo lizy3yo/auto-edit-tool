@@ -1,6 +1,5 @@
 import "@/index.css";
 import { createRoot } from "react-dom/client";
-import { QR_TAIL_HOLD_SEC } from "@/components/LongformCutPreview";
 import { FPS, planMasterOverlayScenes } from "@shared/filmTimeline";
 import type { StoryboardScene } from "@shared/types";
 
@@ -83,7 +82,7 @@ function stamps(scenes: StoryboardScene[]) {
       sliceStartSec: s.narrationStartSec as number,
       sliceEndSec: s.narrationEndSec as number,
       holdSec: s.coverHero ? undefined : s.audioDuration,
-      tailHoldSec: s.tailHoldSec ?? (s.qrTail ? QR_TAIL_HOLD_SEC : undefined),
+      tailHoldSec: s.tailHoldSec,
       headHoldSec: s.headHoldSec,
     })),
   });

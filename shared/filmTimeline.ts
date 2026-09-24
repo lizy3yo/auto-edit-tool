@@ -32,11 +32,14 @@ export const FPS = 30;
 export const MAX_SCENE_FLOOR_SEC = 4;
 
 /**
- * The CTA QR-block release beat's default frozen tail — the QR stays up this long after the
- * release line so a viewer can still scan it. `longformVideo.ts` owns the value; mirrored here
- * because `shared/` cannot import from `server/`, and `videoTimeline.test.ts` keeps them equal.
+ * The CTA QR-block release beat's default frozen tail. RETIRED (2026-09-23): it was 3s of frozen
+ * picture with silence spliced under it, and on review the film simply "stops for three seconds"
+ * after every CTA — dead air, twice per film. The scan window is now the block's own NARRATION
+ * (the big card holds from the scan line to ===END CTA===, see `markCtaQrBlock`), so nothing
+ * freezes. Kept at 0 rather than deleted so an operator's explicit "Hold after line" is still the
+ * only way to get a pause. `longformVideo.ts` mirrors it; `videoTimeline.test.ts` keeps them equal.
  */
-export const QR_TAIL_HOLD_SEC = 3;
+export const QR_TAIL_HOLD_SEC = 0;
 
 /**
  * Whether the operator has set this scene's LENGTH by hand — its narration range differs from
@@ -98,9 +101,6 @@ export function sceneHoldPlan(
   tailHoldSec?: number;
   headHoldSec?: number;
 } {
-  // A cover reveal ends with its narration and was always exempt; an operator-set length is
-  // exempt for the reason above. Both mean: this scene is exactly as long as its slice.
-  const exempt = !!scene.coverHero || operatorSetLength(scene);
   return {
     // The automatic freeze-pad is retired: no scene is held past its narration slice, so a beat
     // voiced shorter than its floor cuts when its words end instead of freezing with silence
@@ -109,15 +109,11 @@ export function sceneHoldPlan(
     // so the callers' spreads keep compiling, but nothing emits them any more.
     holdSec: undefined,
     minHoldSec: undefined,
-    // An explicit hold is the operator's own number and always wins — including 0, which is how
-    // they remove the CTA pause. The DEFAULT only applies to a beat they have not re-timed, and
-    // is `qrHoldSec` when the pipeline computed one for this block (a QR window whose narration
-    // was too short to be scannable) or the flat constant otherwise.
-    tailHoldSec:
-      scene.tailHoldSec ??
-      (!exempt && scene.qrTail
-        ? (scene.qrHoldSec ?? QR_TAIL_HOLD_SEC)
-        : undefined),
+    // Only the operator's own "Hold after line" freezes a scene. The CTA release beat's automatic
+    // pause (`qrTail` → `qrHoldSec` / `QR_TAIL_HOLD_SEC`) is retired: a film voiced under it still
+    // carries `qrHoldSec` on its storyboard, and ignoring it here is what makes a Reassemble drop
+    // the dead air without touching the storyboard.
+    tailHoldSec: scene.tailHoldSec,
     headHoldSec: scene.headHoldSec,
   };
 }

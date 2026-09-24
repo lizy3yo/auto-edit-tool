@@ -309,6 +309,13 @@ export interface StoryboardScene {
    */
   hostOpener?: true;
   /**
+   * The line where the host introduces themself ("I'm Hank Hardwood", "my name is…") —
+   * `markHostIntroductions`. Always the host, full frame, speaking the whole sentence: a
+   * self-introduction over b-roll reads as a stranger's voice. Protected like the cold open —
+   * an anchor in the host budget, never demoted by a balancer, never split.
+   */
+  hostIntro?: true;
+  /**
    * This beat sits inside the FAST-OPEN window (`LongformPacing.fastOpen`): the first `zoneSec`
    * of narration, where cuts land faster to match the script's opening pace. Set once at
    * segmentation (`markFastOpenScenes`) and read by `capFor`/`floorFor`/`measuredSizeFor`, so
@@ -976,6 +983,15 @@ export interface LongformInputParams {
    */
   manualNarrationUrl?: string;
   /**
+   * The master narration this job already voiced, checkpointed the moment it is uploaded — so a
+   * pipeline restarted after a server restart (`server/restartResume.ts`) reuses it instead of
+   * paying for the whole read again. Unlike `manualNarrationUrl` it changes nothing else: the
+   * voice IS the channel's, so per-scene re-voicing stays allowed.
+   */
+  voicedMasterUrl?: string;
+  /** When the server picked this job up after a restart — the ONE automatic resume a job gets. */
+  autoResumedAt?: string;
+  /**
    * Set once "Even out voice" has run on this job (`levelJobNarration`): films rendered before
    * the narration leveller existed carry the provider's volume drift, and this is the one-time
    * repair that levels the stored master, re-cuts the slices and re-stitches. Recorded so the
@@ -1055,6 +1071,16 @@ export interface LongformInputParams {
    * Used by `scripts/broll-only-longform.ts` and diagnostics that exercise the b-roll lane alone.
    */
   brollOnly?: boolean;
+  /**
+   * REHEARSAL (admin-only, `generate`'s `rehearsal`): the whole pipeline runs — voice,
+   * storyboard, every planner, every b-roll still, split panels, cover and assets, assembly — but
+   * the two PAID video lanes are stood in for: a host beat is a slow zoom on its own host photo
+   * instead of a HeyGen render, and a moving cutaway is its still instead of a grok clip. The film
+   * that comes out has every cut, register, QR placement and hold of the real one, for the price
+   * of the stills, so a rule change can be checked across many scripts before a real render.
+   * See `rehearseSceneClips`.
+   */
+  rehearsal?: boolean;
   /**
    * Test mode: every b-roll cutaway renders as a VIDEO clip (never the still/image lane).
    * Skips `enforceStillMotionRatio` and allows adjacent motion scenes. Pair with `brollOnly`

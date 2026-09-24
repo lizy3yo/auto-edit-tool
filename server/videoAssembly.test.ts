@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  isTransientSceneError,
   dimensionsFor,
   buildSilentSceneArgs,
   HOST_UPSCALE_SHARPEN,
@@ -153,7 +154,9 @@ describe("buildSilentSceneArgs (continuous-narration assembly)", () => {
     expect(filterOf(plain)).not.toContain("lanczos");
 
     const f = filterOf(sharp);
-    expect(f).toContain("scale=1920:1080:force_original_aspect_ratio=increase:flags=lanczos");
+    expect(f).toContain(
+      "scale=1920:1080:force_original_aspect_ratio=increase:flags=lanczos"
+    );
     expect(f).toContain(HOST_UPSCALE_SHARPEN);
     // Sharpen at the OUTPUT size: after the crop, before the fps/sar normalisation.
     expect(f.indexOf("crop=1920:1080")).toBeLessThan(f.indexOf("unsharp"));
@@ -1167,15 +1170,15 @@ describe("planMasterOverlayScenes (master-timeline frame plan)", () => {
       expect(plan.inserts).toEqual([]);
     });
 
-    it("keeps the tail default — but never a floor pad — on a beat the operator has NOT re-timed", () => {
+    it("adds no tail and no floor pad to a beat the operator has NOT re-timed", () => {
       const { timingOriginal, ...untouched } = cut;
       expect(operatorSetLength(untouched)).toBe(false);
-      // The automatic freeze-pad is retired: even an untouched sub-floor beat runs exactly its
-      // slice length. Only the explicit holds (here the CTA tail default) survive.
-      expect(sceneHoldPlan(untouched, 3)).toEqual({
+      // Both automatic freezes are retired: the floor pad, and the CTA release beat's QR pause
+      // (a legacy `qrHoldSec` on the storyboard is ignored too). Only an explicit hold survives.
+      expect(sceneHoldPlan({ ...untouched, qrHoldSec: 8 }, 3)).toEqual({
         holdSec: undefined,
         minHoldSec: undefined,
-        tailHoldSec: 3,
+        tailHoldSec: undefined,
         headHoldSec: undefined,
       });
     });
@@ -1198,7 +1201,9 @@ describe("planMasterOverlayScenes (master-timeline frame plan)", () => {
         },
       };
       expect(operatorSetLength(slipped)).toBe(false);
-      expect(sceneHoldPlan(slipped, 3).tailHoldSec).toBe(3);
+      expect(sceneHoldPlan({ ...slipped, tailHoldSec: 2 }, 3).tailHoldSec).toBe(
+        2
+      );
     });
 
     it("a cover reveal still ends with its narration", () => {
@@ -2040,5 +2045,23 @@ describe("planScenePieces (per-piece footage timing, pure)", () => {
     expect(plan[1].startSec).toBe(2); // continuous default
     expect(plan[2].startSec).toBe(20); // overridden
     expect(plan[3].startSec).toBe(8); // continuous default (own override absent)
+  });
+});
+
+describe("isTransientSceneError — what a whole scene attempt may retry", () => {
+  it("retries a download that timed out or a dropped connection (job 116)", () => {
+    expect(
+      isTransientSceneError("The operation was aborted due to timeout")
+    ).toBe(true);
+    expect(isTransientSceneError("fetch failed (ECONNRESET)")).toBe(true);
+    expect(isTransientSceneError("HTTP 503 from R2")).toBe(true);
+    expect(isTransientSceneError("spawn ffmpeg EAGAIN")).toBe(true);
+  });
+  it("does not retry a missing file or bad data", () => {
+    expect(isTransientSceneError("HTTP 404 Not Found")).toBe(false);
+    expect(isTransientSceneError("no clips")).toBe(false);
+    expect(
+      isTransientSceneError("Invalid data found when processing input")
+    ).toBe(false);
   });
 });

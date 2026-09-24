@@ -4,8 +4,8 @@
  * Whole-video visual direction for long-form B-ROLL, derived once per job.
  *
  * Reads the channel's personality profile (the same one that drives script generation) plus the
- * full narration script, and asks Claude for two things: a STYLE BIBLE describing the one
- * physical world the video lives in, and BEATS — the script's arc split into consecutive scene
+ * full narration script, and asks Claude for two things: a STYLE BIBLE naming the video's home
+ * base and the places it travels to, and BEATS — the script's arc split into consecutive scene
  * ranges. `enhanceBrollPrompts` then carries both into every cutaway's rewrite, so ~200 shots
  * read as one video from THIS channel instead of 200 unrelated ones.
  *
@@ -18,7 +18,7 @@
  * both — and note nothing inspects renders any more, so a drifting bible now shows up only in
  * review.
  *
- * TWO PASSES. `deriveStyleBible` runs BEFORE storyboarding (persona + raw script → the one world)
+ * TWO PASSES. `deriveStyleBible` runs BEFORE storyboarding (persona + raw script → the world)
  * so the same world seeds every scene instead of only re-converging them at the enhancer;
  * `deriveVisualDirection` runs after the balancers for the per-scene beats, and re-emits the
  * pinned bible so the two agree. Both are ADVISORY: neither throws and both return null on any
@@ -77,15 +77,26 @@ const DIRECTION_INTRO =
   "video, and produce direction that makes every b-roll cutaway in it feel like one coherent " +
   "piece of work from THIS channel — not 200 unrelated stock shots.\n\n";
 
+/**
+ * The bible names a HOME BASE, not the only place. It used to name "the ONE physical world this
+ * whole video lives in", and the storyboard and the enhancer both obeyed it literally: a film about
+ * Japanese woodworking put every cutaway in the maker's garage, and "the lattice you see in
+ * Japanese sliding doors" came out as a photo pinned to the garage wall (2026-09-23 review). The
+ * home base settles where the MAKING happens; a line about where a thing is used, sold or comes
+ * from is shown there instead, so the video travels the way its script does.
+ */
 const STYLE_BIBLE_SECTION =
-  "STYLE BIBLE — one short paragraph, UNDER 80 WORDS, naming the ONE physical world this " +
-  "whole video lives in:\n" +
-  '- The concrete place, specifically ("a cramped Zone 6b suburban backyard", "a chest ' +
-  'freezer in an unfinished basement") — a real location a viewer could stand in, not a mood ' +
-  "or a quality of space.\n" +
+  "STYLE BIBLE — one short paragraph, UNDER 80 WORDS, naming the video's HOME BASE and the " +
+  "places it travels to:\n" +
+  '- The home base, specifically ("a one-car garage workshop in a cold climate", "a cramped ' +
+  'Zone 6b suburban backyard") — the real place where the work in this video is DONE. It is ' +
+  "where the making, fixing and process shots happen — NOT the only place the video shows.\n" +
+  "- The real places the script TRAVELS to, named concretely — where the finished things are " +
+  'used, sold, or come from ("a traditional Japanese home with paper shoji doors", "a weekend ' +
+  'craft-fair table", "a customer\'s living room"). A line about one of those places is shown ' +
+  "THERE, never as a picture or poster of it inside the home base.\n" +
   "- The season and time of year, when the script implies one.\n" +
-  "- Two or three recurring physical props or materials that genuinely belong in that place " +
-  "and that the script keeps returning to.\n" +
+  "- Two or three recurring physical props or materials the script keeps returning to.\n" +
   "- The tone of the work being shown (unhurried, methodical, salvaging, making-do).\n\n";
 
 const BEATS_SECTION =
@@ -125,7 +136,8 @@ const DIRECTION_BANS =
 const DIRECTION_TIE_BREAKER =
   "Your direction is a TIE-BREAKER, never an addition. Each shot is written from its own " +
   "narration line, and that line wins. Your job is only to settle what the narration leaves " +
-  "open — which backyard, which season, which of the props already in this world. Never name " +
+  "open — which place, which season, which of the props already in this world. When a line " +
+  "names or implies a place other than the home base, the shot goes to THAT place. Never name " +
   "something so specific that a shot would have to introduce an object its own narration " +
   "does not state.\n\n";
 

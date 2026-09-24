@@ -161,6 +161,23 @@ export function isTransientFfmpegError(message: string): boolean {
 }
 
 /**
+ * Whether a whole SCENE attempt failed on something worth another try: the ffmpeg host-load blips
+ * above, or a network hiccup fetching the scene's clip/audio — the download is idempotent, so a
+ * retry is free. A download that timed out under load used to drop the scene outright, and the
+ * truncation guard then refused the film: a four-film parallel run (job 116, 2026-09-24) lost 86
+ * minutes of rendering to "The operation was aborted due to timeout" on one clip. A missing file
+ * (404) or bad data is still not retried. Pure — unit-tested.
+ */
+export function isTransientSceneError(message: string): boolean {
+  return (
+    isTransientFfmpegError(message) ||
+    /aborted due to timeout|timed? ?out|fetch failed|ECONNRESET|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|socket hang up|other side closed|UND_ERR|\b50[234]\b/i.test(
+      message
+    )
+  );
+}
+
+/**
  * Seconds trimmed off the front of an image-to-video clip before muxing.
  * veo-video (like grok before it) leaks the reference photo into the opening
  * frame(s) and morphs into the real scene over ~1–1.5s; dropping the first
@@ -3391,6 +3408,7 @@ export async function assemblePerSceneFilm(opts: {
           attempts: SCENE_ENCODE_ATTEMPTS,
           label: `scene ${s}`,
           tag: "[Assembly]",
+          isRetryable: isTransientSceneError,
         });
       } catch (err: any) {
         // A skipped scene drops out of the film rather than failing it — the whole

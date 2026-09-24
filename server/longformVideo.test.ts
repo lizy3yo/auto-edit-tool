@@ -56,11 +56,10 @@ import {
   CORNER_QR_SCENES_BEFORE_COVER,
   qrOverlayUrlFor,
   qrPlacementFor,
-  qrBigDuringHold,
+  ctaAssemblyScene,
   lengthenPitchShots,
-  shapePitchQrStretches,
   nameCardSceneIndices,
-  ensureHostInCta,
+  hostTheCtaPitch,
   markCoverReveal,
   markCtaQrBlock,
   parseCtaMarkers,
@@ -70,11 +69,19 @@ import {
   mentionsTitle,
   titleMatcher,
   coalesceShortScenes,
+  completeHostSentences,
+  scrubLegibleWriting,
+  coverBeatFor,
+  markHostIntroductions,
+  introducesHost,
+  endsSentence,
+  startsSentence,
+  measuredSizeFor,
   WORD_SIZE,
   FLOOR_WORDS,
   applySceneHoldFloor,
   extendQrHeroWindow,
-  QR_HERO_MIN_WINDOW_SEC,
+  QR_SCAN_WINDOW_WARN_SEC,
   CTA_SPLIT_PANEL_DIRECTIVE,
   SCENE_MIN_HOLD_SEC,
   HOST_MIN_HOLD_SEC,
@@ -135,6 +142,7 @@ import {
   NO_PEOPLE_SUFFIX,
   SPLIT_PANEL_PERSON_FREE_DIRECTIVE,
   NO_OVERLAY_TEXT_SUFFIX,
+  NO_READABLE_TEXT,
   extractSpokenScript,
   DEFAULT_LONGFORM_INSTRUCTION,
   generateSceneClips,
@@ -174,6 +182,7 @@ import { ApimartAdapter } from "./providers/apimart";
 import * as storage from "./storage";
 import * as db from "./db";
 import type { LongformInputParams, StoryboardScene } from "../shared/types";
+import { DEFAULT_LONGFORM_PACING } from "../shared/pacing";
 import { stripHostNames } from "../shared/constants";
 
 // Storyboard + b-roll enhance now run on Gemini (invokeGemini); the tier-3 policy-safe rewrite
@@ -1577,11 +1586,38 @@ describe("enforceHostSplitMix", () => {
     if (split2 !== undefined) expect(split2).toBe("host talks 2");
   });
 
-  it("force-splits an interior CTA host scene like any other (QR rides on the cta flag)", () => {
-    // Only one interior host scene, and it's a CTA — it must be eligible for a split now.
-    const scenes = [host(0), host(1, { cta: true }), host(2)];
+  it("never splits a CTA beat — the pitch is host full screen — and clears one Claude wrote", () => {
+    const scenes = [
+      host(0),
+      host(1, { cta: true, ctaIndex: 0 }),
+      host(2, {
+        cta: true,
+        ctaIndex: 0,
+        splitVisual: "a feeder",
+        splitMotion: true,
+      }),
+      host(3),
+      host(4),
+    ];
     enforceHostSplitMix(scenes);
-    expect(scenes[1].splitVisual).toBe("cutaway 1");
+    expect(scenes[1].splitVisual).toBeUndefined();
+    expect(scenes[2].splitVisual).toBeUndefined();
+    expect(scenes[2].splitMotion).toBeUndefined();
+  });
+
+  it("sizes the split share from the content host beats only, so a long pitch does not crowd them", () => {
+    // One interior content host beat and a long all-host pitch: counting the pitch would push the
+    // whole film's quota onto the lone content beat.
+    const scenes = [
+      host(0),
+      host(1),
+      ...Array.from({ length: 6 }, (_, k) =>
+        host(2 + k, { cta: true, ctaIndex: 0 })
+      ),
+      host(8),
+    ];
+    const r = enforceHostSplitMix(scenes);
+    expect(r.hostSeconds).toBe(3 * 10);
   });
 
   it("never force-splits the open/close bookends", () => {
@@ -3245,47 +3281,19 @@ describe("qrOverlayUrlFor", () => {
 });
 
 describe("qrPlacementFor", () => {
-  const split = {
-    qrHero: true,
-    hostPresent: true,
-    splitVisual: "a cedar bird feeder on the bench",
-    hostClipUrls: ["https://r2/host.mp4"],
-    clipUrls: ["https://r2/composite.mp4"],
-  };
-
-  it("draws the big card dead-centre on a person-free QR-block beat", () => {
+  it("draws the big card dead-centre in the scan window", () => {
     expect(qrPlacementFor({ qrHero: true })).toBe("center");
   });
 
-  it("draws the big card in the b-roll panel of a QR-block split", () => {
-    expect(qrPlacementFor(split)).toBe("panel");
-    // rendered before hostClipUrls existed — nothing to compare, taken at its word
-    expect(qrPlacementFor({ ...split, hostClipUrls: undefined })).toBe("panel");
-  });
-
-  it("keeps the corner card on a split whose composite failed back to the bare host", () => {
-    expect(
-      qrPlacementFor({ ...split, clipUrls: ["https://r2/host.mp4"] })
-    ).toBe("corner");
-  });
-
-  it("keeps the corner card over a full-frame host", () => {
-    expect(qrPlacementFor({ qrHero: true, hostPresent: true })).toBe("corner");
-    expect(qrPlacementFor({ qrCorner: true, hostPresent: true })).toBe(
-      "corner"
-    );
-  });
-
-  it("sizes the scan window by the same rule — big on b-roll, big in a split's panel", () => {
-    expect(qrPlacementFor({ qrCorner: true })).toBe("center");
-    expect(
-      qrPlacementFor({ ...split, qrHero: undefined, qrCorner: true })
-    ).toBe("panel");
+  it("keeps the small corner card everywhere before the scan line — the QR moves once", () => {
+    // The pitch: host, b-roll on a channel with no host, a split rendered under the old rule.
+    expect(qrPlacementFor({ qrCorner: true })).toBe("corner");
+    // Under the 2026-09-10 rule this was "center" on b-roll and "panel" in a split — the card
+    // jumped with every cut.
   });
 
   it("keeps the card small on the book — the cover reveal and an uploaded asset", () => {
     expect(qrPlacementFor({ qrHero: true, coverHero: true })).toBe("corner");
-    expect(qrPlacementFor({ ...split, coverHero: true })).toBe("corner");
     // the cover-reveal beat carries a QR with neither qrHero nor qrCorner set
     expect(qrPlacementFor({ coverHero: true })).toBe("corner");
     expect(
@@ -3301,38 +3309,138 @@ describe("qrPlacementFor", () => {
   });
 });
 
-describe("qrBigDuringHold", () => {
-  it("switches a full-frame host's corner card to big for the wait", () => {
-    expect(qrBigDuringHold({ qrHero: true, hostPresent: true })).toBe(true);
-    expect(qrBigDuringHold({ qrCorner: true, hostPresent: true })).toBe(true);
-    // a split whose composite failed back to the bare host is a full-frame host too
-    expect(
-      qrBigDuringHold({
-        qrHero: true,
-        hostPresent: true,
-        splitVisual: "a feeder",
-        hostClipUrls: ["https://r2/host.mp4"],
-        clipUrls: ["https://r2/host.mp4"],
-      })
-    ).toBe(true);
+describe("ctaAssemblyScene (old films re-assembled under the current CTA)", () => {
+  const beat = (
+    index: number,
+    extra: Partial<StoryboardScene> = {}
+  ): StoryboardScene =>
+    ({
+      index,
+      narration: `line ${index}`,
+      visualPrompt: `b-roll ${index}`,
+      clipUrls: [`https://r2/longform/9/clip-${index}-0-abcdef.mp4`],
+      ...extra,
+    }) as StoryboardScene;
+
+  it("runs the scan window to the end of its marked block", () => {
+    // An old film: the window stopped on "I'll wait right here" (scene 3); scene 4 closed the block.
+    const scenes = [
+      beat(1),
+      beat(2, { cta: true, ctaIndex: 0, qrCorner: true, hostPresent: true }),
+      beat(3, { cta: true, ctaIndex: 0, qrHero: true, qrTail: true }),
+      beat(4, { cta: true, ctaIndex: 0, qrCorner: true, hostPresent: true }),
+      beat(5),
+    ];
+    const v = scenes.map((_, i) => ctaAssemblyScene(scenes, i));
+    expect(v[2].qrHero).toBe(true);
+    expect(v[3]).toMatchObject({ qrHero: true, hostPresent: false });
+    expect(v[3].qrCorner).toBeUndefined();
+    expect(qrPlacementFor(v[3])).toBe("center");
+    // Scene 4 was a host take — the big card never sits on a face, so it borrows the b-roll of
+    // the window beat before it and the picture holds steady behind the code.
+    expect(v[3].clipUrls).toEqual(scenes[2].clipUrls);
+    // The pitch before the window and the content after the block are untouched.
+    expect(v[1]).toBe(scenes[1]);
+    expect(v[4]).toBe(scenes[4]);
+    // Never mutates the storyboard.
+    expect(scenes[3].qrHero).toBeUndefined();
   });
 
-  it("leaves cards that are already big, the book, and QR-less scenes alone", () => {
-    expect(qrBigDuringHold({ qrHero: true })).toBe(false); // b-roll: already big
-    expect(
-      qrBigDuringHold({
+  it("keeps a host take and its corner card when the window has no b-roll to borrow", () => {
+    const scenes = [
+      beat(1, { cta: true, ctaIndex: 0, qrHero: true, hostPresent: true }),
+    ];
+    const v = ctaAssemblyScene(scenes, 0);
+    expect(v.hostPresent).toBe(true);
+    expect(v.clipUrls).toEqual(scenes[0].clipUrls);
+    expect(qrPlacementFor(v)).toBe("corner");
+  });
+
+  it("drops the host take's own trims when it borrows a picture", () => {
+    const scenes = [
+      beat(1, { cta: true, ctaIndex: 0, qrHero: true }),
+      beat(2, {
+        cta: true,
+        ctaIndex: 0,
         qrHero: true,
         hostPresent: true,
-        splitVisual: "a feeder",
-        hostClipUrls: ["https://r2/host.mp4"],
-        clipUrls: ["https://r2/composite.mp4"],
-      })
-    ).toBe(false); // split: already big in its panel
-    expect(qrBigDuringHold({ coverHero: true })).toBe(false);
-    expect(
-      qrBigDuringHold({ qrCorner: true, assetImageUrl: "https://r2/book.png" })
-    ).toBe(false);
-    expect(qrBigDuringHold({ hostPresent: true })).toBe(false); // no QR at all
+        clipInSec: 1.5,
+        cutPoints: [2],
+      }),
+    ];
+    const v = ctaAssemblyScene(scenes, 1);
+    expect(v.clipUrls).toEqual(scenes[0].clipUrls);
+    expect(v.clipInSec).toBeUndefined();
+    expect(v.cutPoints).toBeUndefined();
+  });
+
+  it("does not reach into the NEXT block", () => {
+    const scenes = [
+      beat(1, { cta: true, ctaIndex: 0, qrHero: true }),
+      beat(2, { cta: true, ctaIndex: 1, qrCorner: true }),
+    ];
+    expect(ctaAssemblyScene(scenes, 1)).toBe(scenes[1]);
+  });
+
+  it("plays a split pitch beat's own full-frame host take — no split screens in a CTA", () => {
+    const scenes = [
+      beat(1, {
+        cta: true,
+        ctaIndex: 0,
+        qrCorner: true,
+        hostPresent: true,
+        splitVisual: "a lattice panel",
+        clipUrls: ["https://r2/longform/9/composite-1.mp4"],
+        hostClipUrls: ["https://r2/longform/9/clip-1-0-abcdef.mp4"],
+      }),
+    ];
+    const v = ctaAssemblyScene(scenes, 0);
+    expect(v.splitVisual).toBeUndefined();
+    expect(v.clipUrls).toEqual(["https://r2/longform/9/clip-1-0-abcdef.mp4"]);
+    expect(qrPlacementFor(v)).toBe("corner");
+  });
+
+  it("keeps the composite when all it has is a back-filled panel crop", () => {
+    // `extractHostPanel` crops the narrow host panel — scaled to 16:9 it would zoom the face.
+    const scenes = [
+      beat(1, {
+        cta: true,
+        ctaIndex: 0,
+        qrCorner: true,
+        hostPresent: true,
+        splitVisual: "a lattice panel",
+        clipUrls: ["https://r2/longform/9/composite-1.mp4"],
+        hostClipUrls: ["https://r2/longform/9/host-1-0-a1B2c3.mp4"],
+      }),
+    ];
+    expect(ctaAssemblyScene(scenes, 0)).toBe(scenes[0]);
+  });
+
+  it("leaves the cover reveal, assets and non-CTA beats alone", () => {
+    const scenes = [
+      beat(1, { cta: true, ctaIndex: 0, qrHero: true }),
+      beat(2, { cta: true, ctaIndex: 0, coverHero: true }),
+      beat(3, { cta: true, ctaIndex: 0, assetImageUrl: "https://r2/a.png" }),
+      beat(4, { hostPresent: true, splitVisual: "x", hostClipUrls: ["h"] }),
+    ];
+    for (const i of [1, 2, 3])
+      expect(ctaAssemblyScene(scenes, i)).toBe(scenes[i]);
+  });
+
+  it("ensures an avatar pitch beat in a marked CTA gets qrCorner for the small bottom-right card", () => {
+    const scenes = [
+      beat(1, { cta: true, ctaIndex: 0, hostPresent: true }), // qrCorner unset
+      beat(2, { cta: true, ctaIndex: 0, coverHero: true }),
+      beat(3, { cta: true, ctaIndex: 0, hostPresent: true }), // qrCorner unset
+      beat(4, { cta: true, ctaIndex: 0, qrHero: true }),
+    ];
+    const s1 = ctaAssemblyScene(scenes, 0);
+    expect(s1.qrCorner).toBe(true);
+    expect(qrPlacementFor(s1)).toBe("corner");
+
+    const s3 = ctaAssemblyScene(scenes, 2);
+    expect(s3.qrCorner).toBe(true);
+    expect(qrPlacementFor(s3)).toBe("corner");
   });
 });
 
@@ -3416,167 +3524,6 @@ describe("lengthenPitchShots", () => {
   });
 });
 
-describe("shapePitchQrStretches", () => {
-  /**
-   * H host moment · B b-roll · S split · C cover · A asset — all one pitch, seconds each.
-   * Every scene is `cta`; the scan-window beats carry `qrCorner` like a marked script's do.
-   */
-  const pitch = (spec: [string, number][]): StoryboardScene[] => {
-    let at = 0;
-    return spec.map(([kind, sec], i) => {
-      const start = at;
-      at += sec;
-      return {
-        index: i + 1,
-        narration: `beat ${i + 1}`,
-        scriptText: `Beat ${i + 1}.`,
-        visualPrompt: kind === "H" || kind === "S" ? "host" : `shot ${i + 1}`,
-        brollVisual:
-          kind === "H" || kind === "S" ? `cutaway ${i + 1}` : undefined,
-        narrationStartSec: start,
-        narrationEndSec: at,
-        cta: true,
-        ctaIndex: 0,
-        qrCorner: kind === "C" ? undefined : true,
-        hostPresent: kind === "H" || kind === "S" || undefined,
-        stillImage: kind === "B" || kind === "C" || kind === "A" || undefined,
-        splitVisual: kind === "S" ? `panel ${i + 1}` : undefined,
-        coverHero: kind === "C" || undefined,
-        assetImageUrl: kind === "A" ? "https://r2/book.png" : undefined,
-      };
-    });
-  };
-  const kinds = (scenes: StoryboardScene[]) =>
-    scenes
-      .map(s =>
-        s.coverHero
-          ? "C"
-          : s.assetImageUrl
-            ? "A"
-            : s.hostPresent
-              ? s.splitVisual
-                ? "S"
-                : "H"
-              : "B"
-      )
-      .join("");
-  const opts = { canPromote: true, hostsMayTouch: false };
-
-  it("lengthens a flashing big-QR stretch by absorbing the host moment beside it", () => {
-    // B4 is a 4s flash; absorbing the 4s host joins it to B3 beyond: 11s, in band.
-    const scenes = pitch([
-      ["H", 5],
-      ["B", 4],
-      ["H", 4],
-      ["B", 3],
-      ["H", 5],
-    ]);
-    const r = shapePitchQrStretches(scenes, opts);
-    expect(kinds(scenes)).toBe("HBBBH");
-    expect(r.demoted).toEqual([3]);
-    // demoted onto its own clean cutaway, ready for the CTA rewrite + guard
-    expect(scenes[2].visualPrompt).toBe("cutaway 3");
-    expect(scenes[2].stillImage).toBe(true);
-  });
-
-  it("never removes the pitch's last host moment", () => {
-    const scenes = pitch([
-      ["H", 5],
-      ["B", 3],
-      ["B", 3],
-    ]);
-    expect(shapePitchQrStretches(scenes, opts).demoted).toEqual([]);
-    expect(kinds(scenes)).toBe("HBB");
-  });
-
-  it("works around the cover and the book images without touching them", () => {
-    const scenes = pitch([
-      ["H", 5],
-      ["B", 6],
-      ["C", 5],
-      ["A", 4],
-      ["B", 6],
-      ["H", 6],
-    ]);
-    shapePitchQrStretches(scenes, opts);
-    expect(scenes[2].coverHero).toBe(true);
-    expect(scenes[3].assetImageUrl).toBe("https://r2/book.png");
-    expect(kinds(scenes).slice(2, 4)).toBe("CA");
-  });
-
-  it("breaks a stretch past 15s with a host moment, where both halves still hold 10s", () => {
-    const scenes = pitch([
-      ["H", 5],
-      ["B", 6],
-      ["B", 6],
-      ["B", 6],
-      ["B", 6],
-      ["B", 6],
-      ["H", 5],
-    ]);
-    const r = shapePitchQrStretches(scenes, opts);
-    expect(kinds(scenes)).toBe("HBBHBBH"); // 12s big · host · 12s big
-    expect(r.promoted).toEqual([4]);
-    expect(scenes[3].visualPrompt).not.toBe("shot 4"); // a talking-head prompt now
-    expect(scenes[3].brollVisual).toBe("shot 4"); // its clean cutaway kept
-    expect(scenes[3].stillImage).toBe(false);
-  });
-
-  it("breaks it with a split first — already lip-synced, so it costs nothing", () => {
-    const scenes = pitch([
-      ["H", 5],
-      ["B", 6],
-      ["B", 6],
-      ["S", 6],
-      ["B", 6],
-      ["B", 6],
-      ["H", 5],
-    ]);
-    shapePitchQrStretches(scenes, opts);
-    expect(kinds(scenes)).toBe("HBBHBBH");
-    expect(scenes[3].splitVisual).toBeUndefined();
-    expect(scenes[3].visualPrompt).toBe("host"); // same render, full frame
-  });
-
-  it("lets a long stretch run when no break keeps both halves at 10s", () => {
-    const scenes = pitch([
-      ["H", 5],
-      ["B", 6],
-      ["B", 6],
-      ["B", 6],
-      ["H", 5],
-    ]);
-    expect(shapePitchQrStretches(scenes, opts).promoted).toEqual([]);
-    expect(kinds(scenes)).toBe("HBBBH");
-  });
-
-  it("adds no host moment without a face photo or in a b-roll-only run", () => {
-    const scenes = pitch([
-      ["H", 5],
-      ["B", 6],
-      ["B", 6],
-      ["B", 6],
-      ["B", 6],
-      ["B", 6],
-      ["H", 5],
-    ]);
-    shapePitchQrStretches(scenes, { ...opts, canPromote: false });
-    expect(kinds(scenes)).toBe("HBBBBBH");
-  });
-
-  it("leaves beats that carry no QR alone", () => {
-    const scenes = pitch([
-      ["H", 5],
-      ["B", 4],
-      ["H", 4],
-      ["B", 3],
-      ["H", 5],
-    ]).map(s => ({ ...s, qrCorner: undefined }));
-    shapePitchQrStretches(scenes, opts);
-    expect(kinds(scenes)).toBe("HBHBH");
-  });
-});
-
 describe("guardPitchVisuals", () => {
   const sc = (
     index: number,
@@ -3591,53 +3538,33 @@ describe("guardPitchVisuals", () => {
     "a tablet propped on a kitchen table showing the video's description page";
   const SUBJECT = "cedar bird feeder build";
 
-  it("repairs the QR block's host beat that ensureHostInCta demoted onto its raw brollVisual", () => {
-    // The pitch as it stands AFTER enhanceBrollPrompts: the host beat saying "I'll wait right
-    // here" kept its host (toQr), so it was never enhanced; the b-roll after the block gets
-    // flipped to host, and this beat yields to a still.
+  it("repairs a pitch still whose raw prompt no enhancer pass ever saw", () => {
+    // A pitch beat demoted onto its raw storyboard `brollVisual` after the enhancer ran (the
+    // host budget's last word, `capHostMinutes`, can do that) still carries the literal prompt.
     const scenes = [
       sc(1, { hostPresent: true, visualPrompt: "host" }),
       sc(2, { cta: true, coverHero: true, stillImage: true, visualPrompt: "" }),
       sc(3, {
         cta: true,
-        qrHero: true,
+        qrCorner: true,
         stillImage: true,
-        visualPrompt: "a cedar feeder on a fence post",
+        visualPrompt: TABLET,
       }),
       sc(4, {
         cta: true,
         qrHero: true,
-        qrTail: true,
-        hostPresent: true,
-        visualPrompt: "host",
-        brollVisual: TABLET,
+        stillImage: true,
+        visualPrompt: "a cedar feeder on a fence post",
       }),
       sc(5, {
-        cta: true,
-        stillImage: true,
-        visualPrompt: "sanded cedar boards on a bench",
-      }),
-      sc(6, {
-        cta: true,
-        stillImage: true,
-        visualPrompt: "a feeder hanging in a yard",
-      }),
-      sc(7, {
         stillImage: true,
         visualPrompt: "seed spilling from a cedar tray",
       }),
-      sc(8, { hostPresent: true, visualPrompt: "host" }),
     ];
-    ensureHostInCta(scenes);
-    const beat = scenes[3];
-    // the leak: a person-free QR-hero still carrying the literal prompt
-    expect(beat.hostPresent).toBe(false);
-    expect(beat.visualPrompt).toBe(TABLET);
-
-    expect(guardPitchVisuals(scenes, SUBJECT)).toEqual([4]);
-    expect(ctaVisualIsLiteral(beat.visualPrompt)).toBe(false);
+    expect(guardPitchVisuals(scenes, SUBJECT)).toEqual([3]);
+    expect(ctaVisualIsLiteral(scenes[2].visualPrompt)).toBe(false);
     // on the video's topic: the nearest clean non-CTA shot
-    expect(beat.visualPrompt).toBe("seed spilling from a cedar tray");
+    expect(scenes[2].visualPrompt).toBe("seed spilling from a cedar tray");
   });
 
   it("uses the video's subject when the film has no clean shot to borrow", () => {
@@ -3645,7 +3572,7 @@ describe("guardPitchVisuals", () => {
       sc(1, { hostPresent: true }),
       sc(2, {
         cta: true,
-        qrHero: true,
+        qrCorner: true,
         stillImage: true,
         visualPrompt: TABLET,
       }),
@@ -3759,7 +3686,7 @@ describe("nameCardSceneIndices", () => {
   });
 });
 
-describe("ensureHostInCta", () => {
+describe("hostTheCtaPitch", () => {
   const mk = (
     i: number,
     extra: Partial<StoryboardScene> = {}
@@ -3772,112 +3699,127 @@ describe("ensureHostInCta", () => {
     ...extra,
   });
 
-  it("flips the first non-hero cta scene to host and leaves the rest b-roll", () => {
+  it("lays the CTA out host → book → host → big QR", () => {
     const scenes = [
-      mk(1, { cta: true, qrHero: true, stillImage: true }),
-      mk(2, { cta: true, stillImage: true, splitVisual: "a book" }),
-      mk(3, { cta: true }),
+      mk(1, { cta: true, ctaIndex: 0, stillImage: true }),
+      mk(2, { cta: true, ctaIndex: 0, coverHero: true, stillImage: true }),
+      mk(3, { cta: true, ctaIndex: 0, stillImage: true, splitVisual: "x" }),
+      mk(4, { cta: true, ctaIndex: 0, qrHero: true, stillImage: true }),
+      mk(5, {
+        cta: true,
+        ctaIndex: 0,
+        qrHero: true,
+        qrTail: true,
+        stillImage: true,
+      }),
     ];
-    ensureHostInCta(scenes);
-    // The qrHero stays b-roll; the first eligible cta scene flips, the rest stay b-roll.
-    expect(scenes[0].hostPresent).toBe(false);
-    expect(scenes[1].hostPresent).toBe(true);
-    expect(scenes[1].stillImage).toBe(false);
-    expect(scenes[1].splitVisual).toBeUndefined();
-    expect(scenes[2].hostPresent).toBe(false);
-  });
-
-  it("flips exactly 1 in a long run and leaves the rest b-roll", () => {
-    const scenes = [
-      mk(1, { cta: true, qrHero: true }),
-      mk(2, { cta: true }),
-      mk(3, { cta: true }),
-      mk(4, { cta: true }),
-      mk(5, { cta: true }),
-    ];
-    ensureHostInCta(scenes);
-    expect(scenes.filter(s => s.hostPresent)).toHaveLength(1);
-    expect(scenes[1].hostPresent).toBe(true); // first eligible
-    expect(scenes[2].hostPresent).toBe(false);
+    expect(hostTheCtaPitch(scenes, { canHost: true })).toEqual([1, 3]);
+    expect(scenes.map(s => (s.hostPresent ? "H" : "-")).join("")).toBe("H-H--");
+    expect(scenes[0].stillImage).toBe(false);
+    expect(scenes[0].brollVisual).toBe("b-roll of a lawn"); // somewhere to go back to
+    expect(scenes[0].qrCorner).toBe(true);
+    expect(qrPlacementFor(scenes[0])).toBe("corner");
+    expect(scenes[2].splitVisual).toBeUndefined();
+    expect(scenes[2].qrCorner).toBe(true);
+    expect(qrPlacementFor(scenes[2])).toBe("corner");
+    expect(scenes[1].coverHero).toBe(true);
+    expect(qrPlacementFor(scenes[1])).toBe("corner");
     expect(scenes[3].hostPresent).toBe(false);
-    expect(scenes[4].hostPresent).toBe(false);
+    expect(qrPlacementFor(scenes[3])).toBe("center");
   });
 
-  it("is a no-op when the run already has a host (quota already met)", () => {
+  it("never splits a CTA — an existing pitch host goes full frame", () => {
     const scenes = [
-      mk(1, { cta: true, qrHero: true }),
-      mk(2, { cta: true, hostPresent: true }),
-      mk(3, { cta: true }),
-      mk(4, { cta: true }),
-      mk(5, { cta: true }),
+      mk(1, {
+        cta: true,
+        ctaIndex: 0,
+        hostPresent: true,
+        splitVisual: "a feeder",
+      }),
+      mk(2, { cta: true, ctaIndex: 0, qrHero: true }),
     ];
-    ensureHostInCta(scenes);
-    // 1 already host meets the quota → nothing else flips.
-    expect(scenes.filter(s => s.hostPresent)).toHaveLength(1);
-    expect(scenes[1].hostPresent).toBe(true);
-    expect(scenes[2].hostPresent).toBe(false);
+    hostTheCtaPitch(scenes, { canHost: true });
+    expect(scenes[0].hostPresent).toBe(true);
+    expect(scenes[0].splitVisual).toBeUndefined();
   });
 
-  it("guarantees one host beat in EACH cta run", () => {
+  it("leaves an operator's asset as the picture it is", () => {
     const scenes = [
-      mk(1, { cta: true, qrHero: true }), // run A
-      mk(2, { cta: true }),
-      mk(3, { cta: true }),
-      mk(4, { cta: true }),
-      mk(5), // gap
-      mk(6, { cta: true, qrHero: true }), // run B
-      mk(7, { cta: true }),
-      mk(8, { cta: true }),
-      mk(9, { cta: true }),
+      mk(1, {
+        cta: true,
+        ctaIndex: 0,
+        assetImageUrl: "https://r2/a.png",
+        stillImage: true,
+      }),
+      mk(2, { cta: true, ctaIndex: 0, stillImage: true }),
     ];
-    ensureHostInCta(scenes);
-    // 1 per run, qrHero excluded from both.
-    expect(scenes.slice(0, 4).filter(s => s.hostPresent)).toHaveLength(1);
-    expect(scenes.slice(5).filter(s => s.hostPresent)).toHaveLength(1);
-    expect(scenes.some(s => s.qrHero && s.hostPresent)).toBe(false);
-  });
-
-  it("is a no-op when the only cta scene is the qrHero beat", () => {
-    const scenes = [mk(1, { cta: true, qrHero: true }), mk(2)];
-    ensureHostInCta(scenes);
-    expect(scenes.every(s => !s.hostPresent || s.qrHero)).toBe(true);
+    expect(hostTheCtaPitch(scenes, { canHost: true })).toEqual([2]);
     expect(scenes[0].hostPresent).toBe(false);
+  });
+
+  it("hosts every block's pitch, not just the first", () => {
+    const scenes = [
+      mk(1, { cta: true, ctaIndex: 0 }),
+      mk(2, { cta: true, ctaIndex: 0, qrHero: true }),
+      mk(3),
+      mk(4, { cta: true, ctaIndex: 1 }),
+      mk(5, { cta: true, ctaIndex: 1, qrHero: true }),
+    ];
+    expect(hostTheCtaPitch(scenes, { canHost: true })).toEqual([1, 4]);
+  });
+
+  it("without a host photo keeps the pitch's pictures but still drops its splits", () => {
+    const scenes = [
+      mk(1, { cta: true, ctaIndex: 0, stillImage: true }),
+      mk(2, { cta: true, ctaIndex: 0, hostPresent: true, splitVisual: "x" }),
+    ];
+    expect(hostTheCtaPitch(scenes, { canHost: false })).toEqual([]);
+    expect(scenes[0].hostPresent).toBe(false);
+    expect(scenes[1].splitVisual).toBeUndefined();
+  });
+
+  it("leaves an UNMARKED script's cta beats alone — a spoken price is not a pitch", () => {
+    // markCtaScenes flags "$93 an hour" as cta; without ===START CTA=== there is no ctaIndex.
+    const scenes = [
+      mk(1, { cta: true, stillImage: true }),
+      mk(2, { cta: true, hostPresent: true, splitVisual: "x" }),
+    ];
+    expect(hostTheCtaPitch(scenes, { canHost: true })).toEqual([]);
+    expect(scenes[0].hostPresent).toBe(false);
+    expect(scenes[1].splitVisual).toBe("x");
   });
 
   const hasHostPair = (scenes: StoryboardScene[]) =>
     scenes.some((s, i) => i > 0 && s.hostPresent && scenes[i - 1].hostPresent);
 
-  it("demotes a boundary content host so the flipped CTA host has no host neighbor", () => {
-    // enforceVisualAdjacency already ran (no host pairs); flipping the CTA scene to host would
-    // otherwise re-create a host↔host pair with the content host beside it.
+  it("demotes a content host at the block's edge so the CTA does not open on a host-to-host cut", () => {
     const scenes = [
       mk(1, { hostPresent: true, brollVisual: "opener" }), // opening bookend
-      mk(2, { stillImage: true }), // separator
+      mk(2, { stillImage: true }),
       mk(3, { hostPresent: true, brollVisual: "close-up soil" }), // content host at the CTA edge
-      mk(4, { cta: true, stillImage: true }), // hostless CTA run
-      mk(5, { cta: true, stillImage: true }),
-      mk(6, { hostPresent: true, brollVisual: "closer" }), // closing bookend
+      mk(4, { cta: true, ctaIndex: 0, stillImage: true }),
+      mk(5, { cta: true, ctaIndex: 0, stillImage: true }),
+      mk(6, { cta: true, ctaIndex: 0, qrHero: true }),
+      mk(7, { hostPresent: true, brollVisual: "closer" }), // closing bookend
     ];
-    ensureHostInCta(scenes);
-    expect(scenes[3].hostPresent).toBe(true); // CTA run got its host (first eligible flips)
-    expect(scenes[2].hostPresent).toBe(false); // boundary content host yields
-    expect(scenes[2].stillImage).toBe(true);
-    expect(scenes[2].visualPrompt).toBe("close-up soil"); // still sourced from its brollVisual
-    expect(hasHostPair(scenes)).toBe(false);
+    hostTheCtaPitch(scenes, { canHost: true });
+    expect(scenes[3].hostPresent).toBe(true);
+    expect(scenes[4].hostPresent).toBe(true); // the pitch itself is one host run
+    expect(scenes[2].hostPresent).toBe(false);
+    expect(scenes[2].visualPrompt).toBe("close-up soil");
+    expect(hasHostPair([scenes[1], scenes[2], scenes[3]])).toBe(false);
   });
 
-  it("leaves the pair when the only host neighbor is the closing bookend (ceiling)", () => {
+  it("leaves the pair when the only host neighbour is the closing bookend (ceiling)", () => {
     const scenes = [
       mk(1, { hostPresent: true, brollVisual: "opener" }),
       mk(2, { stillImage: true }),
-      mk(3, { cta: true, stillImage: true }), // single-scene CTA run before the closer
+      mk(3, { cta: true, ctaIndex: 0, stillImage: true }),
       mk(4, { hostPresent: true, brollVisual: "closer" }), // closing bookend — never demoted
     ];
-    ensureHostInCta(scenes);
-    expect(scenes[2].hostPresent).toBe(true); // CTA still gets its host
-    expect(scenes[3].hostPresent).toBe(true); // closing bookend preserved
-    // Documented ceiling: this one host pair is left rather than demote the protected bookend.
-    expect(hasHostPair(scenes)).toBe(true);
+    hostTheCtaPitch(scenes, { canHost: true });
+    expect(scenes[2].hostPresent).toBe(true);
+    expect(scenes[3].hostPresent).toBe(true);
   });
 });
 
@@ -4159,27 +4101,76 @@ describe("markCtaQrBlock", () => {
     [2, 3, 4, 8, 9, 10].forEach(i => {
       expect(out[i].qrHero).toBe(true);
       expect(out[i].cta).toBe(true);
-      // twoBlockScenes() defaults every beat to hostPresent:true — a host beat inside the
-      // window keeps the host on screen (small corner QR at assembly) instead of being
-      // blanked to a filler still. See the dedicated tests below for both cases.
-      expect(out[i].hostPresent).toBe(true);
-      expect(out[i].stillImage).toBeFalsy();
+      // twoBlockScenes() defaults every beat to hostPresent:true — the scan window is the card
+      // alone on a plain backdrop, so even a host beat inside it gives the frame up.
+      expect(out[i].hostPresent).toBe(false);
+      expect(out[i].stillImage).toBe(true);
     });
-    // Only the release beat of each block carries the +3s tail flag.
+    // Only the release beat of each block carries the tail flag.
     expect(out.filter(s => s.qrTail)).toHaveLength(2);
     expect(out[4].qrTail).toBe(true);
     expect(out[10].qrTail).toBe(true);
     expect(out[2].qrTail).toBeFalsy(); // interior QR beat, no tail
   });
 
-  it("keeps the host on screen instead of blanking it, when a host beat falls inside the QR window", () => {
+  it("gives a host beat inside the window up to the card — the QR moves once, then holds", () => {
     const out = markCtaQrBlock(twoBlockScenes(), withBoth); // every beat defaults hostPresent:true
     [2, 3, 4, 8, 9, 10].forEach(i => {
       expect(out[i].qrHero).toBe(true);
-      expect(out[i].hostPresent).toBe(true);
-      expect(out[i].stillImage).toBeFalsy();
+      expect(out[i].hostPresent).toBe(false);
+      expect(out[i].stillImage).toBe(true); // an on-topic b-roll still under the card
+      expect(out[i].qrCorner).toBeUndefined();
       expect(out[i].splitVisual).toBeUndefined();
+      expect(qrPlacementFor(out[i])).toBe("center");
     });
+  });
+
+  it("starts a host beat's b-roll from its own cutaway, never the talking-head prompt", () => {
+    const scenes = twoBlockScenes();
+    scenes[3].visualPrompt = "a seated host talking to camera";
+    scenes[3].brollVisual = "a finished lattice panel leaning on a bench";
+    const out = markCtaQrBlock(scenes, withBoth);
+    expect(out[3].visualPrompt).toBe(
+      "a finished lattice panel leaning on a bench"
+    );
+  });
+
+  it("ctaScoped: the card holds from the scan line to ===END CTA===, not just to the release", () => {
+    const scenes = twoBlockScenes();
+    [6, 7, 8, 9, 10, 11].forEach(i => (scenes[i].cta = true));
+    const out = markCtaQrBlock(scenes, withBoth, true);
+    // Block 2 ends with a line AFTER "I'll wait right here" — it is part of the window now.
+    expect(out.filter(s => s.qrHero).map(s => s.index)).toEqual([
+      9, 10, 11, 12,
+    ]);
+    expect(out.filter(s => s.qrTail).map(s => s.index)).toEqual([12]);
+  });
+
+  it("ctaScoped fallback: starts the card on the sentence that says to scan", () => {
+    const scenes = [
+      mk(1, "Welcome to the show today."),
+      mk(2, "This little book is called The Old Ways.", { cta: true }),
+      mk(3, "It pays for itself. Scan the code on your screen right now.", {
+        cta: true,
+      }),
+      mk(4, "It takes you straight to the page.", { cta: true }),
+      mk(5, "Alright, neighbor. Saturday morning."),
+    ];
+    const out = markCtaQrBlock(scenes, withBoth, true);
+    const card = out.filter(s => s.qrHero);
+    expect(card[0].scriptText).toBe("Scan the code on your screen right now.");
+    expect(card.map(s => s.scriptText)).toEqual([
+      "Scan the code on your screen right now.",
+      "It takes you straight to the page.",
+    ]);
+    // The sentence before it stays in the pitch; the post-CTA narration is untouched.
+    expect(
+      out.find(s => s.scriptText === "It pays for itself.")?.qrHero
+    ).toBeFalsy();
+    expect(out[out.length - 1].qrHero).toBeFalsy();
+    expect(out.filter(s => s.coverHero).map(s => s.scriptText)).toEqual([
+      "This little book is called The Old Ways.",
+    ]);
   });
 
   it("blanks a beat with no host or cover to carry the big-QR card, same as before", () => {
@@ -4639,15 +4630,36 @@ describe("coalesceShortScenes", () => {
   it("floors a sub-floor scene in place rather than merging past the ceiling", () => {
     const scenes = [
       mk(1, { audioDuration: 9.5 }),
-      mk(2, { audioDuration: 1, audioUrl: "a2" }),
+      mk(2, { audioDuration: 2, audioUrl: "a2" }),
       mk(3, { audioDuration: 9.5 }),
     ];
     const out = coalesceShortScenes(scenes);
-    // Either fold would breach LONG_SCENE_MAX_SEC and undo the split that ran first,
-    // so the short beat stays and holds its floor (freeze + silent pad in assembly).
+    // Either fold would breach LONG_SCENE_MAX_SEC and undo the split that ran first, so the short
+    // (but not flash-short) beat stays and holds its floor.
     expect(out).toHaveLength(3);
     expect(out[1].audioDuration).toBe(SCENE_MIN_HOLD_SEC);
     expect(out[1].audioUrl).toBe("a2"); // kept — held, not re-voiced
+  });
+
+  it("folds a FLASH past the ceiling: a slightly long shot beats a blink", () => {
+    // Job 110: a two-word piece ("the one") at 0.37s between the cold open and a 5.7s host take,
+    // with the 5s fast-open ceiling on both sides. Nothing freeze-pads it any more.
+    const scenes = [
+      mk(1, { audioDuration: 4.56, hostPresent: true, hostOpener: true }),
+      mk(2, { audioDuration: 0.37, fastOpen: true }),
+      mk(3, { audioDuration: 5.66, hostPresent: true, fastOpen: true }),
+    ];
+    const out = coalesceShortScenes(
+      scenes,
+      measuredSizeFor({
+        ...DEFAULT_LONGFORM_PACING,
+        fastOpen: { enabled: true, zoneSec: 45, maxShotSec: 5, minShotSec: 2 },
+      })
+    );
+    expect(out).toHaveLength(2);
+    // Into the shorter neighbour, the cold open, which keeps its register.
+    expect(out[0].hostOpener).toBe(true);
+    expect(out[0].scriptText).toBe("text 1 text 2");
   });
 
   it("still folds a sub-floor scene when the merge fits under the ceiling", () => {
@@ -4963,6 +4975,358 @@ describe("coalesceShortScenes", () => {
   });
 });
 
+describe("completeHostSentences", () => {
+  const sc = (
+    index: number,
+    scriptText: string,
+    extra: Partial<StoryboardScene> = {}
+  ): StoryboardScene => ({
+    index,
+    scriptText,
+    narration: scriptText,
+    visualPrompt: `vp ${index}`,
+    audioDuration: 3,
+    ...extra,
+  });
+
+  it("stretches a host take to finish its sentence, both ways, keeping the host", () => {
+    const out = completeHostSentences([
+      sc(1, "First thing."),
+      sc(2, "But the one I was proudest of,"),
+      sc(3, "a lattice panel that ate my Saturday,", { hostPresent: true }),
+      sc(4, "finished dead last."),
+      sc(5, "Next up."),
+    ]);
+    expect(out.map(s => s.scriptText)).toEqual([
+      "First thing.",
+      "But the one I was proudest of, a lattice panel that ate my Saturday, finished dead last.",
+      "Next up.",
+    ]);
+    expect(out[1].hostPresent).toBe(true);
+    expect(out[1].visualPrompt).toBe("vp 3");
+    expect(out[1].audioDuration).toBeUndefined(); // re-sliced from the master
+    expect(out.map(s => s.index)).toEqual([1, 2, 3]);
+  });
+
+  it("keeps the cold open's register when it finishes the opening line", () => {
+    // Job 110: the opener stopped at "…box-store lumber," and came back 0.37s later mid-thought.
+    const out = completeHostSentences([
+      sc(1, "Out of 10 projects you can build from cheap lumber,", {
+        hostPresent: true,
+        hostOpener: true,
+      }),
+      sc(2, "the one", { audioDuration: 0.37 }),
+      sc(3, "that paid me best came out of a coffee can.", {
+        hostPresent: true,
+        splitVisual: "a coffee can",
+      }),
+      sc(4, "Here is why."),
+    ]);
+    expect(out).toHaveLength(2);
+    expect(out[0]).toMatchObject({ hostOpener: true, hostPresent: true });
+    expect(out[0].splitVisual).toBeUndefined(); // full-frame opener
+    expect(out[0].scriptText).toBe(
+      "Out of 10 projects you can build from cheap lumber, the one that paid me best came out of a coffee can."
+    );
+  });
+
+  it("stops at the ceiling — a sentence longer than that cuts at a clause (L-cut)", () => {
+    const out = completeHostSentences([
+      sc(1, "A long thought begins,", { hostPresent: true, audioDuration: 6 }),
+      sc(2, "and it keeps going,", { audioDuration: 6 }),
+      sc(3, "and going.", { audioDuration: 6 }),
+    ]);
+    expect(out.map(s => s.scriptText)).toEqual([
+      "A long thought begins, and it keeps going,",
+      "and going.",
+    ]);
+  });
+
+  it("never crosses a scan window, a cover, an asset or a CTA edge", () => {
+    const out = completeHostSentences([
+      sc(1, "Grab it now,", { hostPresent: true }),
+      sc(2, "scan the code.", { cta: true, ctaIndex: 0, qrHero: true }),
+      sc(3, "Pitch line,", { cta: true, ctaIndex: 0, hostPresent: true }),
+      sc(4, "the book.", { cta: true, ctaIndex: 0, coverHero: true }),
+      sc(5, "Back to it,", { hostPresent: true }),
+      sc(6, "and on we go.", { cta: true, ctaIndex: 1 }),
+    ]);
+    expect(out).toHaveLength(6);
+  });
+
+  it("never folds the two locked cold-open angles into one", () => {
+    const out = completeHostSentences([
+      sc(1, "Out of ten projects,", { hostPresent: true, hostOpener: true }),
+      sc(2, "one paid best.", {
+        hostPresent: true,
+        hostOpener: true,
+        hostShot: 1,
+      }),
+    ]);
+    expect(out).toHaveLength(2);
+  });
+
+  it("leaves b-roll, and host takes that are already whole sentences, alone", () => {
+    const scenes = [
+      sc(1, "Hello there.", { hostPresent: true }),
+      sc(2, "A cutaway,"),
+      sc(3, "still going."),
+    ];
+    const out = completeHostSentences(scenes);
+    expect(out).toHaveLength(3);
+    expect(out[0]).toBe(scenes[0]);
+  });
+});
+
+describe("endsSentence / startsSentence", () => {
+  it("reads terminal punctuation through closing quotes and brackets", () => {
+    expect(endsSentence("It worked.")).toBe(true);
+    expect(endsSentence('He said "wait here."')).toBe(true);
+    expect(endsSentence("Really?)")).toBe(true);
+    expect(endsSentence("box-store lumber,")).toBe(false);
+    expect(endsSentence("the one")).toBe(false);
+    expect(endsSentence(undefined)).toBe(false);
+  });
+
+  it("counts the first scene and anything after a finished sentence as a sentence start", () => {
+    const list = [
+      { index: 1, narration: "One.", visualPrompt: "" },
+      { index: 2, narration: "two,", visualPrompt: "" },
+      { index: 3, narration: "three.", visualPrompt: "" },
+    ] as StoryboardScene[];
+    expect(startsSentence(list, 0)).toBe(true);
+    expect(startsSentence(list, 1)).toBe(true);
+    expect(startsSentence(list, 2)).toBe(false);
+  });
+});
+
+describe("introducesHost / markHostIntroductions", () => {
+  it("recognises the host introducing themself, with or without the honorific", () => {
+    expect(
+      introducesHost(
+        "I'm Hank Hardwood, and this one's for anybody standing in a garage with a saw,",
+        "Hank Hardwood"
+      )
+    ).toBe(true);
+    expect(
+      introducesHost("Hank here, back in the shop.", "Hank Hardwood")
+    ).toBe(true);
+    expect(introducesHost("I'm Granny Mae.", "Granny Mae")).toBe(true);
+    expect(
+      introducesHost("I am Mae, and this is my table.", "Granny Mae")
+    ).toBe(true);
+    expect(introducesHost("My name is Ruth Miller.", undefined)).toBe(true);
+  });
+
+  it("does not fire on a possessive, a stranger, or an unrelated line", () => {
+    expect(introducesHost("It's Hank's favourite saw.", "Hank Hardwood")).toBe(
+      false
+    );
+    expect(introducesHost("I'm going to cut it now.", "Hank Hardwood")).toBe(
+      false
+    );
+    expect(introducesHost("My granny taught me this.", "Granny Mae")).toBe(
+      false
+    );
+    expect(introducesHost("I'm Hank.", undefined)).toBe(false);
+  });
+
+  it("puts the introduction on camera, full frame, and flags it protected", () => {
+    const scenes: StoryboardScene[] = [
+      {
+        index: 1,
+        narration: "n",
+        scriptText: "Open.",
+        visualPrompt: "",
+        hostPresent: true,
+        hostOpener: true,
+      },
+      {
+        index: 2,
+        narration: "n",
+        scriptText: "I'm Hank Hardwood, and this is for you.",
+        visualPrompt: "a workbench",
+        stillImage: true,
+      },
+      {
+        index: 3,
+        narration: "n",
+        scriptText: "Hank here again.",
+        visualPrompt: "",
+        hostPresent: true,
+        splitVisual: "a saw",
+      },
+    ];
+    expect(markHostIntroductions(scenes, "Hank Hardwood", true)).toEqual([2]);
+    expect(scenes[1]).toMatchObject({
+      hostPresent: true,
+      hostIntro: true,
+      stillImage: false,
+    });
+    expect(scenes[1].brollVisual).toBe("a workbench");
+    expect(scenes[2].hostIntro).toBe(true);
+    expect(scenes[2].splitVisual).toBeUndefined();
+  });
+
+  it("does nothing without a host photo", () => {
+    const scenes: StoryboardScene[] = [
+      {
+        index: 1,
+        narration: "n",
+        scriptText: "I'm Hank Hardwood.",
+        visualPrompt: "",
+      },
+    ];
+    expect(markHostIntroductions(scenes, "Hank Hardwood", false)).toEqual([]);
+    expect(scenes[0].hostPresent).toBeUndefined();
+  });
+
+  it("is never demoted by the adjacency pass or the host budget", () => {
+    const sc = (i: number, extra: Partial<StoryboardScene> = {}) =>
+      ({
+        index: i,
+        narration: `line ${i}.`,
+        scriptText: `line ${i}.`,
+        visualPrompt: "v",
+        audioDuration: 6,
+        ...extra,
+      }) as StoryboardScene;
+    const scenes = [
+      sc(1, { hostPresent: true, hostOpener: true }),
+      sc(2, { hostPresent: true, hostIntro: true, brollVisual: "b" }),
+      sc(3),
+      sc(4, { hostPresent: true }),
+    ];
+    enforceVisualAdjacency(scenes, { hasAltHost: false });
+    expect(scenes[1].hostPresent).toBe(true);
+    planHostMinutes(scenes, 6, { canPromote: true });
+    expect(scenes[1].hostPresent).toBe(true);
+  });
+});
+
+describe("coverBeatFor — the block's own book", () => {
+  const beat = (index: number, scriptText: string): StoryboardScene => ({
+    index,
+    scriptText,
+    narration: scriptText,
+    visualPrompt: "",
+    cta: true,
+    ctaIndex: 0,
+  });
+  const params = {
+    ...baseParams,
+    ctaBooks: [
+      {
+        ctaIndex: 0,
+        bookId: 0,
+        title: "100 Ways to Make Your First $1,000 with Woodworking",
+      },
+    ],
+  } as LongformInputParams;
+
+  it("finds the title line through the block's book when the channel has no title (job 110)", () => {
+    const scenes = [
+      beat(1, "Quick stop while we're down here."),
+      beat(
+        2,
+        "The projects that sell are in my digital book, A Hundred Ways to Make Your First Thousand Dollars with Woodworking."
+      ),
+      beat(3, "That's a hundred of them."),
+      beat(4, "Flip to one that sells."),
+      { ...beat(5, "Point your phone's camera at the code."), qrHero: true },
+    ];
+    expect(coverBeatFor(scenes, 4, params)?.index).toBe(2);
+  });
+
+  it("puts the cover mid-pitch when the title is never said, so the host speaks after it", () => {
+    const scenes = [
+      beat(1, "One."),
+      beat(2, "Two."),
+      beat(3, "Three."),
+      { ...beat(4, "Scan it."), qrHero: true },
+    ];
+    expect(coverBeatFor(scenes, 3, params)?.index).toBe(2);
+  });
+});
+
+describe("round-2 stress fixes", () => {
+  const sc = (
+    index: number,
+    scriptText: string,
+    extra: Partial<StoryboardScene> = {}
+  ): StoryboardScene => ({
+    index,
+    scriptText,
+    narration: scriptText,
+    visualPrompt: `vp ${index}`,
+    ...extra,
+  });
+
+  it("finds an introduction the word-count chunker cut inside the name (jobs 115-117)", () => {
+    const scenes = [
+      sc(1, "So we're counting all of them down. I'm Granny", {
+        stillImage: true,
+      }),
+      sc(2, "Mae, and this one's for anybody at a kitchen table,", {
+        stillImage: true,
+      }),
+      sc(3, "with a hook and a skein of yarn."),
+    ];
+    expect(markHostIntroductions(scenes, "Granny Mae", true)).toEqual([1, 2]);
+    expect(scenes[0].hostIntro && scenes[1].hostIntro).toBe(true);
+    expect(scenes[2].hostPresent).toBeUndefined();
+    // …and the whole-sentence step joins the pieces into one protected take.
+    const out = completeHostSentences(
+      scenes.map(s => ({ ...s, audioDuration: 3 }))
+    );
+    expect(out.filter(s => s.hostIntro)).toHaveLength(1);
+  });
+
+  it("gives a free-worded CTA its scan window when another block uses the trigger (jobs 115/116)", () => {
+    const withBook = {
+      ...baseParams,
+      ctaBooks: [
+        {
+          ctaIndex: 0,
+          bookId: 0,
+          title: "Plain Sewing",
+          coverImageUrl: "https://r2/cover.png",
+          qrImageUrl: "https://r2/qr.png",
+        },
+        {
+          ctaIndex: 1,
+          bookId: 0,
+          title: "Plain Sewing",
+          coverImageUrl: "https://r2/cover.png",
+          qrImageUrl: "https://r2/qr.png",
+        },
+      ],
+    } as LongformInputParams;
+    const cta = (i: number, text: string, idx: number) =>
+      sc(i, text, { cta: true, ctaIndex: idx, hostPresent: true });
+    const scenes = [
+      sc(1, "Intro line."),
+      cta(2, "My book, Plain Sewing, has it all.", 0),
+      cta(3, "Now go ahead and grab your phone, open up your camera.", 0),
+      cta(4, "I'll wait right here.", 0),
+      sc(5, "Back to work."),
+      cta(6, "My book, Plain Sewing, has fifty projects.", 1),
+      cta(7, "It keeps you busy all winter.", 1),
+      cta(8, "Look to the code on your screen and hold your camera steady.", 1),
+      cta(9, "Subscribe and tell me which you'd sew first.", 1),
+    ];
+    const out = markCtaQrBlock(scenes, withBook, true);
+    const block1 = out.filter(s => s.ctaIndex === 1);
+    expect(block1.filter(s => s.qrHero).map(s => s.scriptText)).toEqual([
+      "Look to the code on your screen and hold your camera steady.",
+      "Subscribe and tell me which you'd sew first.",
+    ]);
+    expect(block1.some(s => s.coverHero)).toBe(true);
+    // Block 0 keeps exactly the trigger window it had.
+    expect(out.filter(s => s.ctaIndex === 0 && s.qrHero)).toHaveLength(2);
+  });
+});
+
 describe("applySceneHoldFloor", () => {
   const mk = (extra: Partial<StoryboardScene> = {}): StoryboardScene => ({
     index: 1,
@@ -5044,118 +5408,62 @@ describe("extendQrHeroWindow", () => {
   };
 
   /** A block whose spoken part totals `sec`, as one trigger beat + one release beat. */
-  const block = (sec: number): StoryboardScene[] => [
-    sc({ index: 1, qrHero: true, cta: true, startSec: 0, endSec: sec / 2 }),
+  const block = (sec: number, first = 1, at = 0): StoryboardScene[] => [
     sc({
-      index: 2,
+      index: first,
+      qrHero: true,
+      cta: true,
+      startSec: at,
+      endSec: at + sec / 2,
+    }),
+    sc({
+      index: first + 1,
       qrHero: true,
       qrTail: true,
       cta: true,
-      startSec: sec / 2,
-      endSec: sec,
+      startSec: at + sec / 2,
+      endSec: at + sec,
     }),
   ];
 
-  it("tops the tail up so the whole card window reaches the minimum", () => {
-    const scenes = block(2); // 2s spoken — the flat 3s tail leaves a 5s window
-    extendQrHeroWindow(scenes);
-    expect(scenes[1].qrHoldSec).toBe(QR_HERO_MIN_WINDOW_SEC - 2);
-    // The window it produces IS the minimum.
-    expect(2 + scenes[1].qrHoldSec!).toBe(QR_HERO_MIN_WINDOW_SEC);
-  });
-
-  it("follows the script: spoken time + a ~6s wait, held to 10–15s", () => {
-    // spoken → wait (undefined = the flat 3s default) → card on screen
-    const rows: [number, number | undefined, number][] = [
-      [2, 8, 10], // a bare trigger + release: the floor, so the wait runs longer
-      [4, 6, 10],
-      [6, 6, 12],
-      [9, 6, 15],
-      [12, undefined, 15], // only 3s left under the ceiling: the flat default covers it
-      [14, undefined, 17], // talking past the ceiling: no extra freeze at all
-    ];
-    for (const [spoken, wait, onScreen] of rows) {
-      const scenes = block(spoken);
-      extendQrHeroWindow(scenes);
-      expect(scenes[1].qrHoldSec).toBe(wait);
-      expect(spoken + sceneHoldPlan(scenes[1]).tailHoldSec!).toBe(onScreen);
-    }
-  });
-
-  it("never goes under the flat 3s tail", () => {
-    // 12s spoken reaches the 15s ceiling with 3s — never a shorter wait than before.
-    const scenes = block(12);
-    extendQrHeroWindow(scenes);
-    expect(sceneHoldPlan(scenes[1]).tailHoldSec).toBe(3);
-  });
-
-  it("measures the WHOLE block, not just the tail beat", () => {
-    const scenes = [
-      sc({ index: 1, qrHero: true, startSec: 0, endSec: 0.5 }),
-      sc({ index: 2, qrHero: true, startSec: 0.5, endSec: 1 }),
-      sc({ index: 3, qrHero: true, qrTail: true, startSec: 1, endSec: 1.5 }),
-    ];
-    extendQrHeroWindow(scenes);
-    // 1.5s across three beats, not the 0.5s of the tail beat alone.
-    expect(scenes[2].qrHoldSec).toBe(QR_HERO_MIN_WINDOW_SEC - 1.5);
-  });
-
-  it("handles each block of a two-block pitch on its own", () => {
-    const scenes = [
-      ...block(2),
-      sc({ index: 3, startSec: 2, endSec: 9 }), // body beat between the two pitches
-      sc({ index: 4, qrHero: true, startSec: 9, endSec: 14 }),
-      sc({ index: 5, qrHero: true, qrTail: true, startSec: 14, endSec: 25 }),
-    ];
-    extendQrHeroWindow(scenes);
-    expect(scenes[1].qrHoldSec).toBe(QR_HERO_MIN_WINDOW_SEC - 2); // short block
-    expect(scenes[4].qrHoldSec).toBeUndefined(); // 16s block, already past the ceiling
-  });
-
-  it("is idempotent, and drops a stale top-up when the block is re-voiced longer", () => {
+  it("never adds a frozen pause — and clears one a film was voiced with", () => {
     const scenes = block(2);
-    extendQrHeroWindow(scenes);
-    const first = scenes[1].qrHoldSec;
-    extendQrHeroWindow(scenes);
-    expect(scenes[1].qrHoldSec).toBe(first);
-
-    // Re-voiced longer (a slower read, or an operator's re-time): the top-up must go.
-    scenes[0].narrationEndSec = 8;
-    scenes[1].narrationStartSec = 8;
-    scenes[1].narrationEndSec = 16;
-    extendQrHeroWindow(scenes);
-    expect(scenes[1].qrHoldSec).toBeUndefined();
-  });
-
-  it("falls back to audioDuration when a block has no persisted slices", () => {
-    const scenes = [
-      sc({ index: 1, qrHero: true, audioDuration: 1 }),
-      sc({ index: 2, qrHero: true, qrTail: true, audioDuration: 1 }),
-    ];
-    extendQrHeroWindow(scenes);
-    expect(scenes[1].qrHoldSec).toBe(QR_HERO_MIN_WINDOW_SEC - 2);
-  });
-
-  it("does nothing to a block with no qrTail beat (an older storyboard's flags)", () => {
-    const scenes = [
-      sc({ index: 1, qrHero: true, startSec: 0, endSec: 1 }),
-      sc({ index: 2, qrHero: true, startSec: 1, endSec: 2 }),
-    ];
+    scenes[1].qrHoldSec = 8; // the old top-up
     extendQrHeroWindow(scenes);
     expect(scenes.every(s => s.qrHoldSec === undefined)).toBe(true);
   });
 
-  it("sceneHoldPlan uses it as a DEFAULT — the operator's own hold still wins", () => {
-    const scenes = block(2);
-    extendQrHeroWindow(scenes);
-    expect(sceneHoldPlan(scenes[1]).tailHoldSec).toBe(
-      QR_HERO_MIN_WINDOW_SEC - 2
-    );
-    // Including 0, which is how the operator removes the pause entirely.
-    expect(sceneHoldPlan({ ...scenes[1], tailHoldSec: 0 }).tailHoldSec).toBe(0);
-    expect(sceneHoldPlan({ ...scenes[1], tailHoldSec: 1.5 }).tailHoldSec).toBe(
-      1.5
-    );
+  it("flags a scan window too short to scan, measured over the WHOLE block", () => {
+    expect(extendQrHeroWindow(block(4))).toEqual([
+      { firstIndex: 1, spokenSec: 4 },
+    ]);
+    expect(extendQrHeroWindow(block(QR_SCAN_WINDOW_WARN_SEC))).toEqual([]);
+    expect(extendQrHeroWindow(block(12))).toEqual([]);
+  });
+
+  it("judges each block of a two-block film on its own", () => {
+    const scenes = [
+      ...block(3, 1, 0),
+      sc({ index: 3, startSec: 3, endSec: 40 }),
+      ...block(10, 4, 40),
+    ];
+    expect(extendQrHeroWindow(scenes).map(b => b.firstIndex)).toEqual([1]);
+  });
+
+  it("falls back to audioDuration when a block has no persisted slices", () => {
+    const scenes = [
+      sc({ index: 1, qrHero: true, audioDuration: 2 }),
+      sc({ index: 2, qrHero: true, qrTail: true, audioDuration: 2 }),
+    ];
+    expect(extendQrHeroWindow(scenes)).toEqual([
+      { firstIndex: 1, spokenSec: 4 },
+    ]);
+  });
+
+  it("sceneHoldPlan freezes nothing on the release beat unless the operator asks", () => {
+    const [, tail] = block(2);
+    expect(sceneHoldPlan(tail, 3).tailHoldSec).toBeUndefined();
+    expect(sceneHoldPlan({ ...tail, tailHoldSec: 2 }, 3).tailHoldSec).toBe(2);
   });
 });
 
@@ -6033,7 +6341,104 @@ describe("no inert lane: clips only where something actually moves", () => {
     const look = amateurIphoneLook("pouring hydrogen peroxide on your lawn");
     expect(look).not.toContain("real products in use");
     expect(look).toContain("the frame contains only what this shot describes");
-    expect(AMATEUR_IPHONE_LOOK).toContain("real products in use");
+    expect(AMATEUR_IPHONE_LOOK).not.toContain("real products in use");
+  });
+
+  it("asks for a tidy background, not clutter, and sets the shot where it says", () => {
+    // 2026-09-23: "natural everyday clutter" filled the frame with branded shop-vacs and bins, and
+    // "the setting where <subject> really happens" put a Japanese home inside the garage.
+    for (const look of [
+      AMATEUR_IPHONE_LOOK,
+      amateurIphoneLook("Japanese woodworking projects"),
+    ]) {
+      expect(look).not.toContain("everyday clutter");
+      expect(look).toContain("the hero subject fills most of the frame");
+      expect(look).toContain("no branded products, logos, or unrelated");
+      expect(look).toContain("the real, unstaged place this shot is about");
+    }
+    expect(amateurIphoneLook("Japanese woodworking projects")).toContain(
+      "wherever the shot says when it names somewhere else"
+    );
+  });
+
+  it("bans readable text in the frame, not just stamped-on captions", () => {
+    const look = amateurIphoneLook("Japanese woodworking projects");
+    expect(look).toContain(NO_READABLE_TEXT);
+    expect(look).toContain("no chalkboards");
+    expect(look).not.toContain("plain English in the Latin alphabet");
+  });
+});
+
+describe("scrubLegibleWriting — nothing the image model would spell out", () => {
+  it("turns names, dates and lettering into a decorative motif (job 113's trays)", () => {
+    const out = scrubLegibleWriting(
+      "A pine tea tray with one end piece showing a family surname burnt into the pale wood surface with crisp, dark lettering"
+    );
+    expect(out).not.toMatch(/surname|lettering/i);
+    expect(out).toContain("a small decorative motif burnt");
+    expect(
+      scrubLegibleWriting(
+        "a pale pine sake tray with two names burnt into the end grain in dark, crisp characters"
+      )
+    ).toBe(
+      "a pale pine sake tray with a small decorative motif burnt into the end grain"
+    );
+    expect(scrubLegibleWriting("a wedding date carved into the lid")).toBe(
+      "a small decorative motif carved into the lid"
+    );
+  });
+
+  it("replaces the surfaces and tally marks the model writes counts on (jobs 113/114)", () => {
+    const out = scrubLegibleWriting(
+      "A weathered garage wall in flat indoor daylight, chalk tally marks in a loose cluster beside a chalkboard"
+    );
+    expect(out).not.toMatch(/tally|chalk/i);
+    expect(scrubLegibleWriting("a jar with a price tag on it")).toBe(
+      "a jar with a plain wooden surface on it"
+    );
+    // Job 115: "a worn calendar page … its margin filled with pencil tally marks".
+    expect(
+      scrubLegibleWriting("A worn calendar page lying flat on a kitchen table")
+    ).not.toMatch(/calendar/i);
+  });
+
+  it("drops quoted text, which the model renders verbatim", () => {
+    expect(
+      scrubLegibleWriting('a hand-painted sign reading "Fresh Eggs" on a post')
+    ).not.toContain("Fresh Eggs");
+  });
+
+  it("leaves ordinary prompts untouched", () => {
+    const p =
+      "A finished charred cedar planter box centered on a craft-fair vendor table, its blackened surface smooth";
+    expect(scrubLegibleWriting(p)).toBe(p);
+  });
+
+  it("runs on every prompt through softenVisualPrompt", () => {
+    expect(softenVisualPrompt("a tray with neat lettering on the rail")).toBe(
+      "a tray with a small decorative motif on the rail"
+    );
+  });
+});
+
+describe("isOperatorLabelTitle — a render label is not the video's topic", () => {
+  it("treats test labels, settings and bare names as labels", () => {
+    expect(normalizeVideoSubject("Hank Test (Errors Fixed)")).toBe("");
+    expect(normalizeVideoSubject("Granny 720p 0.35")).toBe("");
+    expect(normalizeVideoSubject("Stress: Hank #1")).toBe("");
+    expect(normalizeVideoSubject("Hank (Lates LTX)")).toBe("");
+    expect(normalizeVideoSubject("Granny Mae")).toBe("");
+  });
+
+  it("keeps a real title, even one that says 'test'", () => {
+    expect(
+      normalizeVideoSubject(
+        "I Tried 10 Japanese Woodworking Projects — the Profit Shocked Me"
+      )
+    ).not.toBe("");
+    expect(normalizeVideoSubject("I Put 5 Wood Glues to the Test")).not.toBe(
+      ""
+    );
   });
 });
 
@@ -8518,17 +8923,13 @@ describe("splitOverlongScenes", () => {
     expect(out).toHaveLength(2);
   });
 
-  it("leaves room for the frozen QR tail on a qrTail beat", () => {
-    // On-screen time is narration + QR_TAIL_HOLD_SEC (added in assembly), so the spoken part
-    // must clear the ceiling by that much. 8s is in band for any other scene.
+  it("holds a qrTail beat to the ordinary ceiling — it no longer freezes a tail", () => {
+    // The release beat used to carry a 3s frozen QR tail in assembly, so its spoken part had to
+    // clear the ceiling by that much. The tail is retired; 8s is in band like any other scene.
     const text = `${filler(6)} beat one. ${filler(6)} beat two.`;
     expect(
-      splitOverlongScenes([scene(text, { audioDuration: 8 })])
-    ).toHaveLength(1);
-    expect(
       splitOverlongScenes([scene(text, { audioDuration: 8, qrTail: true })])
-        .length
-    ).toBeGreaterThan(1);
+    ).toHaveLength(1);
   });
 
   it("never mints children under the scene floor", () => {

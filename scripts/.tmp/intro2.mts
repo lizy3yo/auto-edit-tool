@@ -1,0 +1,10 @@
+import "dotenv/config";
+import { getLongformVideoJobById } from "../../server/db";
+import { markHostIntroductions, introducesHost } from "../../server/longformVideo";
+const j = await getLongformVideoJobById(116);
+const sb = (j!.storyboard as any[]).map(s => ({ ...s }));
+const p = j!.inputParams as any;
+console.log("face", !!p.faceImageUrl, "brollOnly", p.brollOnly, "host", p.hostName);
+console.log("matches:", sb.filter(s => introducesHost(s.scriptText ?? s.narration, p.hostName)).map(s => s.index));
+console.log("flip:", markHostIntroductions(sb, p.hostName, !!p.faceImageUrl && !p.brollOnly));
+process.exit(0);

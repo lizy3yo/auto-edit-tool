@@ -479,7 +479,7 @@ export const SCENE_MIN_SEC = 3;
  *
  * Was 10; lowered to 8 so cuts land faster. Applies to BOTH registers — `capFor` is
  * register-agnostic; host and b-roll differ only in their FLOOR (`HOST_MIN_HOLD_SEC` vs
- * `SCENE_MIN_HOLD_SEC`). A `qrTail` beat's spoken part gets `8 - QR_TAIL_HOLD_SEC` = 5s.
+ * `SCENE_MIN_HOLD_SEC`).
  */
 export const LONG_SCENE_MAX_SEC = 8;
 
@@ -1957,7 +1957,10 @@ export function rebalanceHostScreenTime(
   // index, not position within a quarter, so Q1's first scene is protected but Q2's is not.
   const lastIndex = scenes.length - 1;
   const protectedScene = (s: StoryboardScene) =>
-    s === scenes[0] || s === scenes[lastIndex] || !!s.hostOpener;
+    s === scenes[0] ||
+    s === scenes[lastIndex] ||
+    !!s.hostOpener ||
+    !!s.hostIntro;
 
   let demoted = 0;
   quarters.forEach((quarter, q) => {
@@ -2077,6 +2080,7 @@ function hostSectionsOf(
 
 /** A beat the section pass must not change: the pitch, its QR window, the cover, an asset. */
 const fixedForHostSection = (s: StoryboardScene): boolean =>
+  !!s.hostIntro ||
   s.cta === true ||
   !!s.qrHero ||
   !!s.qrCorner ||
@@ -2122,6 +2126,10 @@ export function shapeHostSections(
     return (
       opts.canPromote &&
       !s.hostPresent &&
+      // A host take speaks whole sentences (`completeHostSentences`); a clause-sized cutaway
+      // promoted here would start or stop the host mid-thought.
+      startsSentence(scenes, i) &&
+      endsSentence(s.scriptText ?? s.narration) &&
       sec[i] >= HOST_MIN_HOLD_SEC &&
       sec[i] <= HOST_CHECKIN_PROMOTE_MAX_SEC &&
       !fixedHostAt(i - 1) &&
@@ -2167,7 +2175,7 @@ export function shapeHostSections(
  * Host beats the budget must never remove: the hook (scene 1 / the locked cold open, and every
  * host beat of the intro section), the outro (the closing bookend, and every host beat of the
  * outro section) and the pitch (a CTA beat or a QR scan-window beat — the pitch has its own host
- * rhythm, `ensureHostInCta` + `shapePitchQrStretches`, and most of the sales are there).
+ * layout, `hostTheCtaPitch`, and most of the sales are there).
  */
 function hostAnchorKind(
   scenes: StoryboardScene[],
@@ -2176,7 +2184,7 @@ function hostAnchorKind(
 ): "hook" | "cta" | "outro" | null {
   const s = scenes[i];
   if (!s.hostPresent) return null;
-  if (i === 0 || s.hostOpener) return "hook";
+  if (i === 0 || s.hostOpener || s.hostIntro) return "hook";
   if (s.cta === true || s.qrCorner) return "cta";
   if (sections[i] === "intro") return "hook";
   if (sections[i] === "outro" || i === scenes.length - 1) return "outro";
@@ -2191,7 +2199,7 @@ export interface HostMinutesPlan {
   hookSec: number;
   /** CTA host beats already in the storyboard. */
   ctaSec: number;
-  /** Seconds held back for the beats `ensureHostInCta` will flip to host later. */
+  /** Seconds held back for the pitch beats `hostTheCtaPitch` will flip to host later. */
   ctaReserveSec: number;
   outroSec: number;
   checkIns: number;
@@ -2216,7 +2224,7 @@ export interface HostMinutesPlan {
  * before any clip is paid for, in place of `rebalanceHostScreenTime`.
  *
  *  1. ANCHORS stay host: hook, CTA/pitch host beats, outro — plus a reserve for the beats
- *     `ensureHostInCta` will flip later (the same walk, read-only), so the check-ins don't spend
+ *     `hostTheCtaPitch` will flip later (`ctaPitchBeats`, read-only), so the check-ins don't spend
  *     seconds the pitch is about to take.
  *  2. CHECK-INS: each stretch of film between anchors (the hook's end, each CTA run, the outro)
  *     gets evenly spaced targets ~`cadence` apart. Each target keeps the nearest existing host
@@ -2237,6 +2245,8 @@ export function planHostMinutes(
     canPromote: boolean;
     /** Intro/outro section length (`hostSectionSecFor`); 0 or absent ⇒ single-shot bookends. */
     sectionSec?: number;
+    /** Uploaded assets the pitch will show — those beats stay pictures, so are not reserved. */
+    assetCount?: number;
   }
 ): HostMinutesPlan {
   const n = scenes.length;
@@ -2256,7 +2266,7 @@ export function planHostMinutes(
   const shaped = shapeHostSections(scenes, sectionSec, opts);
   const sections = hostSectionsOf(scenes, sectionSec);
 
-  // 1. Anchors, and the CTA reserve (mirrors `ensureHostInCta`'s walk without mutating).
+  // 1. Anchors, and the CTA reserve (the pitch `hostTheCtaPitch` will host, read-only).
   const kept = new Set<number>();
   let hookSec = 0;
   let ctaSec = 0;
@@ -2281,19 +2291,20 @@ export function planHostMinutes(
     let j = i;
     while (j < n && scenes[j].cta === true) j++;
     covered.push([start[i], start[j - 1] + sec[j - 1]]);
-    let hosts = 0;
-    for (let k = i; k < j; k++) {
-      const s = scenes[k];
-      if (!s.qrHero && !s.coverHero && s.hostPresent) hosts++;
-    }
-    for (let k = i; k < j && hosts < CTA_HOST_SCENES; k++) {
-      const s = scenes[k];
-      if (s.qrHero || s.coverHero || s.hostPresent) continue;
+    i = j;
+  }
+  // The whole pitch goes to the host later (`hostTheCtaPitch`), so its cutaways are reserved now
+  // and the check-ins spend only what is left — the CTA's host time comes out of the check-ins,
+  // not on top of the budget. Minus the beats the operator's assets will take (`placeAssetBeats`
+  // picks them the same way, first), which stay pictures.
+  if (opts.canPromote) {
+    const pitch = ctaPitchBeats(scenes).filter(i => !scenes[i].hostPresent);
+    const assets = new Set(spreadOrder(pitch).slice(0, opts.assetCount ?? 0));
+    for (const k of pitch) {
+      if (assets.has(k)) continue;
       reserved.add(k);
       ctaReserveSec += sec[k];
-      hosts++;
     }
-    i = j;
   }
   let hookEnd = 0;
   let outroStart = total;
@@ -2335,6 +2346,10 @@ export function planHostMinutes(
       !s.coverHero &&
       !s.assetImageUrl &&
       !reserved.has(i) &&
+      // Whole sentences only — a check-in that starts or stops mid-thought reads as the host
+      // being cut off (`completeHostSentences` holds the storyboard's own host beats to this).
+      startsSentence(scenes, i) &&
+      endsSentence(s.scriptText ?? s.narration) &&
       sec[i] >= HOST_MIN_HOLD_SEC &&
       sec[i] <= HOST_CHECKIN_PROMOTE_MAX_SEC
     );
@@ -2477,8 +2492,8 @@ export function planHostMinutes(
 }
 
 /**
- * The final word on the host budget, after `ensureHostInCta` and `shapePitchQrStretches` — both
- * can add host beats the plan could only estimate. While the film is over budget, demote the most
+ * The final word on the host budget, after `hostTheCtaPitch` — it adds host beats the plan could
+ * only estimate. While the film is over budget, demote the most
  * REDUNDANT non-anchor host beat (the one nearest another host beat, so the check-in cadence
  * suffers least). Anchors are never touched: if they alone exceed the budget the result says so
  * rather than cutting the hook, a pitch or the outro. Mutates in place; pure otherwise.
@@ -2726,7 +2741,15 @@ export function enforceHostSplitMix(
   motionSeconds: number;
 } {
   const dur = (s: StoryboardScene) => s.audioDuration ?? 0;
-  const host = scenes.filter(s => s.hostPresent);
+  // A CTA never splits (the operator's layout: host → book → host → big QR, `hostTheCtaPitch`), so
+  // its host beats neither count toward the share nor may be picked for it — counting them would
+  // push the whole film's split quota onto the content host beats around it.
+  for (const s of scenes) {
+    if (!inMarkedCta(s)) continue;
+    s.splitVisual = undefined;
+    s.splitMotion = undefined;
+  }
+  const host = scenes.filter(s => s.hostPresent && !inMarkedCta(s));
   const hostSeconds = host.reduce((sum, s) => sum + dur(s), 0);
   if (hostSeconds <= 0) {
     return {
@@ -2741,15 +2764,20 @@ export function enforceHostSplitMix(
   // renders split-free. (Off used to strip every split here; the operator asked for the
   // opposite — the classic look is the guaranteed minimum, the dial only raises it.)
   const lastIndex = scenes.length - 1;
-  // Scenes that may be FORCED to/from a split: interior host scenes (CTA included — the QR
-  // overlay is independent of the split, so a CTA host beat can be split like any other).
-  // The locked cold open is excluded — it is always clean full-frame host.
+  // Scenes that may be FORCED to/from a split: interior, non-CTA host scenes. The locked cold
+  // open is excluded — it is always clean full-frame host — and so is every CTA beat (above).
   const eligible = (s: StoryboardScene, i: number) =>
-    s.hostPresent && i !== 0 && i !== lastIndex && !s.hostOpener;
+    s.hostPresent &&
+    !inMarkedCta(s) &&
+    i !== 0 &&
+    i !== lastIndex &&
+    !s.hostOpener &&
+    !s.hostIntro;
 
   // Belt-and-braces: `eligible` only gates FORCED flips, so a split Claude authored on a cold-open
   // scene would otherwise survive (and be counted against the target). Clear it here too.
-  for (const s of host) if (s.hostOpener) s.splitVisual = undefined;
+  for (const s of host)
+    if (s.hostOpener || s.hostIntro) s.splitVisual = undefined;
 
   const target = splitFractionFor(pacing) * hostSeconds;
   let acc = host.reduce((sum, s) => sum + (s.splitVisual ? dur(s) : 0), 0);
@@ -2922,7 +2950,7 @@ export function enforceVisualAdjacency(
   // CTA scenes are NOT protected — a demoted CTA scene keeps `cta:true`, so its QR card still
   // rides along on the still cutaway.
   const canDemote = (i: number) =>
-    i !== 0 && i !== lastIndex && !scenes[i].hostOpener;
+    i !== 0 && i !== lastIndex && !scenes[i].hostOpener && !scenes[i].hostIntro;
 
   let hostBroken = 0;
   let motionBroken = 0;
@@ -3161,7 +3189,7 @@ export function hostBrollFallback(s: StoryboardScene): string {
 /**
  * Convert a host (or motion) scene into a still cutaway — a person-free frame with a gentle Ken
  * Burns move added in code, sourced from `hostBrollFallback` (its `brollVisual` when present, else a
- * synthesized person-free prompt). Shared by `enforceVisualAdjacency` and `ensureHostInCta` so
+ * synthesized person-free prompt). Shared by `enforceVisualAdjacency` and `hostTheCtaPitch` so
  * "demote to a still" is the same mutation everywhere. Mutates in place.
  */
 function demoteHostToStill(s: StoryboardScene): void {
@@ -3175,7 +3203,7 @@ function demoteHostToStill(s: StoryboardScene): void {
 
 /**
  * The inverse of `demoteHostToStill`: turn a cutaway into a full-frame talking-head beat. Shared
- * by `shapePitchQrStretches` and `planHostMinutes` so "promote to host" is one mutation too.
+ * by `hostTheCtaPitch` and `planHostMinutes` so "promote to host" is one mutation too.
  * Mutates in place.
  */
 function promoteCutawayToHost(s: StoryboardScene): void {
@@ -3518,7 +3546,30 @@ export function normalizeVideoSubject(title: string): string {
     .replace(/\s{2,}/g, " ")
     .replace(/^[\s,.;:—-]+|[\s,.;:—-]+$/g, "")
     .trim();
-  return truncateWords(s, 8) || (title ?? "").trim();
+  const out = truncateWords(s, 8) || (title ?? "").trim();
+  return isOperatorLabelTitle(title ?? "", out) ? "" : out;
+}
+
+/**
+ * True when a "title" is an operator's label for the render, not the video's topic — "Hank Test
+ * (Errors Fixed)", "Granny 720p 0.35", "Stress: Hank #1". The subject is interpolated into EVERY
+ * b-roll prompt, so a label became the setting of every picture ("where Hank Test is done") and
+ * was even written onto one (a tray reading "Stress: Hank #1", job 113). A label, a bare name
+ * (under three words — a topic is a phrase), or a test marker falls back to the subject read from
+ * the SCRIPT (`deriveVideoSubject`). Pure — unit-tested.
+ */
+export function isOperatorLabelTitle(raw: string, normalized: string): boolean {
+  const words = normalized.split(/\s+/).filter(Boolean).length;
+  if (words < 3) return true;
+  if (
+    /#\d|\b\d{3,4}p\b|\b0\.\d+\b|\b(ltx|longcat|heygen|runpod|infinitetalk)\b/i.test(
+      raw
+    )
+  )
+    return true;
+  return (
+    /\b(test|testing|stress|rehearsal|draft|demo)\b/i.test(raw) && words <= 5
+  );
 }
 
 /**
@@ -3871,6 +3922,8 @@ export function buildUnifiedStoryboardPrompt(opts: {
     `anonymous adult roughly 50–70. Frame any pest or cleanup task as gentle, ordinary care: ` +
     `describe results and care (treated, cleared, wiped away, tidied), not violence — avoid ` +
     `"kill", "poison", "exterminate", "dead", "infestation", and similar harsh wording.\n` +
+    `- ${NO_NARRATION_TEXT_RULE}\n` +
+    `- ${CLEAN_FRAME_RULE}\n` +
     `- B-ROLL VARIETY: across the whole video, no two b-roll shots should repeat the same ` +
     `subject AND framing. Vary the hero element (product, action, result, condition) and vary ` +
     `the SHOT ANGLE. For every non-host b-roll scene (including stillImage scenes) you MUST ` +
@@ -3953,14 +4006,20 @@ export function buildUnifiedStoryboardPrompt(opts: {
       `is about something else, and never add an object the narration doesn't mention.\n\n`
     : "";
 
-  // The one shared world, so every b-roll scene seeds in the same place and the location does not
-  // drift between scenes. Disambiguation-only, exactly like subjectBlock — not a checklist.
+  // The video's home base and the places it travels to, so a making/process shot lands in the SAME
+  // workshop every time while a line about a Japanese home, a craft fair or a customer's room is
+  // shown THERE. It used to read "every cutaway shares ONE physical place", which put a whole
+  // Japanese-woodworking film in one garage (2026-09-23). Disambiguation-only — not a checklist.
   const worldBlock = styleBible
-    ? `WORLD (every b-roll cutaway in this video shares ONE physical place — for CONSISTENCY, ` +
-      `not a checklist): ${styleBible}\n` +
-      `When a chunk's b-roll leaves the setting open, place it in THIS world so the location does ` +
-      `not drift between scenes; do NOT add an object the narration doesn't mention, and let a ` +
-      `chunk whose narration clearly happens elsewhere go where it says.\n\n`
+    ? `WORLD (the video's home base and the places it travels to — for CONSISTENCY, not a ` +
+      `checklist): ${styleBible}\n` +
+      `A making, fixing or process chunk whose setting is open goes in the HOME BASE, so the ` +
+      `workshop does not drift between scenes. A chunk that names or implies somewhere else — ` +
+      `where a thing is used, sold, or comes from (a Japanese home with sliding doors, a market ` +
+      `stall, a customer's living room, outdoors), or compares the subject to where it is found ` +
+      `("the kind of lattice you see in Japanese sliding doors") — is shown IN that place, never as a picture, ` +
+      `poster, or sample of it inside the home base. No single location may take more than about ` +
+      `half of the b-roll. Do NOT add an object the narration doesn't mention.\n\n`
     : "";
 
   // What earlier batches already chose — the only way the whole-video VARIETY rule can bind
@@ -4587,22 +4646,53 @@ export const TALKING_HEAD_BACKGROUND =
   "every shot.";
 
 /**
- * Appended wherever a longform b-roll prompt is submitted to the image/video model.
- * The models hallucinate garbled foreign-script text on labels/packaging even when we
- * ask for unbranded products; this forces any text that does render to be English/Latin.
+ * Appended wherever a longform b-roll prompt is submitted to the image/video model. It used to
+ * ALLOW real-world text in English ("labels, signage, products"), and the models took the
+ * invitation: chalkboards reading "$465 / 5 = $93/hour" under the line that said it, price tags,
+ * a "Handcrafted" sign, slogan mugs, "Japanese Joinery" posters (2026-09-23 review). Words and
+ * numbers in a generated frame either repeat what the narrator is saying — which reads cheap —
+ * or come out garbled, and a real brand name is a trademark in the shot. So: no readable text at
+ * all, and containers are plain. `scanStillDefects` re-rolls a still that renders some anyway.
  */
-export const ENGLISH_TEXT_ONLY =
-  "Any text, lettering, labels, or branding visible on packaging, containers, " +
-  "signage, or products is plain English in the Latin alphabet only — never a " +
-  "foreign language, non-Latin script, or invented gibberish characters.";
+export const NO_READABLE_TEXT =
+  "No readable text anywhere in the frame: no words, letters, numbers, prices, or handwriting " +
+  "on any surface — no chalkboards, whiteboards, signs, posters, price tags, labels, notes, " +
+  "screens, or printed packaging. Containers, cans, bottles, and tools are plain and unbranded.";
+
+/**
+ * The storyboard's rule for the same failure one step earlier: the narration must never be
+ * WRITTEN into a picture. Shared by the storyboard prompt and the still enhancers.
+ */
+export const NO_NARRATION_TEXT_RULE =
+  "NO WRITTEN WORDS OR NUMBERS IN THE PICTURE: never put what the narration says into the image " +
+  "as writing — no chalkboard, whiteboard, sign, poster, price tag, label, note, receipt, " +
+  "screen, or handwriting showing a word, figure, price, or sum, and no tally marks or sketches " +
+  "on a board or wall to show counting or sales. When a line states a number " +
+  '("$93 an hour", "it cost me $465"), show the physical thing the number is about — the ' +
+  "finished pieces, the materials laid out, the work in progress — never the number written " +
+  "down. When the line is ABOUT writing (a name burned into a tray, a monogram stitched on a " +
+  "quilt, a sign being painted), show the craft without a single readable letter: the tool at " +
+  "work on a curving stroke, or a small decorative pattern — never a name, word or date.";
+
+/**
+ * Composition rule for every generated b-roll frame. The setting clause used to ask for "natural
+ * everyday clutter", and the model filled the frame edges with branded shop-vacs, tool chests and
+ * bins while the subject sat small in the middle — an openwork lattice then showed that clutter
+ * straight through its gaps (0:50-0:58 of the film that prompted this).
+ */
+export const CLEAN_FRAME_RULE =
+  "CLEAN, READABLE FRAME: the hero subject fills most of the frame; the background is tidy, " +
+  "calm, and secondary, with no branded products, logos, or unrelated clutter competing with " +
+  "it. An openwork object (a lattice, screen, grille, or frame) is shown backed by its paper or " +
+  "panel, or against a plain, calm backdrop — never with a busy background showing through the " +
+  "gaps.";
 
 /**
  * Overlay-text guard appended to every generation prompt (b-roll via
  * `AMATEUR_IPHONE_LOOK`, host talking-head, and split-screen). Bans text STAMPED OVER the
- * frame — captions, watermarks, logos, titles — while `ENGLISH_TEXT_ONLY` continues to
- * allow incidental real-world text (product labels, packaging) that the amateur look
- * wants. Host lip-sync takes no prompt at all (Avatar IV animates the still directly),
- * so there is nothing to guard there.
+ * frame — captions, watermarks, logos, titles. `NO_READABLE_TEXT` rides beside it on b-roll and
+ * bans the in-scene kind too. Host lip-sync takes no prompt at all (Avatar IV animates the still
+ * directly), so there is nothing to guard there.
  */
 export const NO_OVERLAY_TEXT_SUFFIX =
   "No overlaid or superimposed text of any kind: no captions, subtitles, titles, " +
@@ -4616,24 +4706,29 @@ export const NO_OVERLAY_TEXT_SUFFIX =
  */
 /**
  * The setting/background clause — the ONLY subject-dependent part of the look. It no longer
- * pins b-roll to a house/home interior: with a subject the setting is wherever the video's
- * topic really happens (so backgrounds track the title/script), and with no subject it is
- * just a real, unstaged everyday setting with no fixed location. The quality guardrails (no
- * staged sets / clean product photography / blank backgrounds) are kept in both. Ends at
+ * pins b-roll to a house/home interior or to where the video's topic "really happens": the place
+ * is the one the SHOT is about, and the subject only settles it for a shot about the work itself.
+ * The quality guardrails (no staged sets / clean product photography / blank backgrounds) stay,
+ * and "natural everyday clutter" is gone in favour of a tidy, secondary background. Ends at
  * "no blank backgrounds." so it joins cleanly with `AMATEUR_LOOK_TAIL`.
  */
 function amateurSettingClause(subject?: string): string {
   const s = subject?.trim();
-  return s
-    ? // ponytail: "real products in use" + the subject staged the video's hero product into
-      // shots that never mentioned it (job 200: a peroxide bottle on bare-lawn cutaways).
-      // The frame-contents rail replaces it; drop it only if backgrounds go bare again.
-      `shot handheld by an amateur in the real, unstaged setting where ${s} really ` +
-        `happens, with natural everyday clutter; the frame contains only what this shot ` +
-        `describes; no staged sets, no clean product photography, no blank backgrounds.`
-    : "shot handheld by an amateur in a real, unstaged everyday setting with natural " +
-        "everyday clutter and real products in use; no staged sets, no clean product " +
-        "photography, no blank backgrounds.";
+  // The place is the one THIS SHOT is about. It used to be "the setting where <subject> really
+  // happens", which on a making video is always the workshop — so a line about a Japanese home
+  // was drawn in the garage too. The subject now only settles the place of a shot about the work.
+  // ("real products in use" + the subject once staged the hero product into shots that never
+  // mentioned it — job 200 — which is why the frame-contents rail stays.)
+  const place = s
+    ? `in the real, unstaged place this shot is about — where ${s} is done when the shot is ` +
+      `about the work itself, and wherever the shot says when it names somewhere else`
+    : "in the real, unstaged place this shot is about";
+  return (
+    `shot handheld by an amateur ${place}; the hero subject fills most of the frame and the ` +
+    `background is tidy, calm, and secondary, with no branded products, logos, or unrelated ` +
+    `clutter; the frame contains only what this shot describes; no staged sets, no clean ` +
+    `product photography, no blank backgrounds.`
+  );
 }
 
 /**
@@ -4759,7 +4854,7 @@ function amateurLookTail(cameraClause: string): string {
     ", and it never sweeps, glides, or cranes through the scene. " +
     NO_OVERLAY_TEXT_SUFFIX +
     " " +
-    ENGLISH_TEXT_ONLY
+    NO_READABLE_TEXT
   );
 }
 
@@ -4968,6 +5063,14 @@ export const STILL_BROLL_ENHANCER_SYSTEM =
   "quality, depth-of-field, or production look; those are appended in code.\n" +
   "- Compose for older (50–70) viewers: ONE clear hero subject, uncluttered and easy " +
   "to read at a glance, in a warm, familiar everyday setting.\n" +
+  `- ${CLEAN_FRAME_RULE}\n` +
+  `- ${NO_NARRATION_TEXT_RULE}\n` +
+  "- PLACE: set the shot where the narration puts it. When the line is about where a thing is " +
+  "used, sold, or comes from (a Japanese home with sliding doors, a market stall, a customer's " +
+  'living room, outdoors) — or compares the subject to where it is FOUND ("the kind of ' +
+  'lattice you see in Japanese sliding doors" → the lattice set into real sliding doors in a ' +
+  "Japanese room) — show THAT real place, never a picture, poster, or loose sample of it " +
+  "propped up in a workshop.\n" +
   "- SCRIPT ALIGNMENT: depict only what the current narration states or clearly implies — " +
   "no unrelated objects, no future events, no decorative extras. Prefer literal over " +
   "artistic. Bare hands appear only when the narration implies a manual action, and are " +
@@ -5032,6 +5135,8 @@ const CTA_BROLL_ENHANCER_SYSTEM =
   "unless the narration is specifically about that motion — show the concrete subject instead.\n" +
   "- ONE clear hero subject — a product, tool, material, surface, or setting from the " +
   "video's topic — uncluttered and easy to read at a glance.\n" +
+  `- ${CLEAN_FRAME_RULE}\n` +
+  `- ${NO_NARRATION_TEXT_RULE}\n` +
   "- A single concrete composed subject as a frame (the clip barely moves; any motion is " +
   "added in code).\n" +
   "- NO people: no face, head, body, or figure of any kind. Bare hands at the task are the " +
@@ -5553,7 +5658,53 @@ export function softenVisualPrompt(text: string): string {
     (s, [re, rep]) => s.replace(re, rep),
     stripPromptArtifacts(text)
   );
-  return stripAtmosphericWisps(softened);
+  return scrubLegibleWriting(stripAtmosphericWisps(softened));
+}
+
+/**
+ * Phrases that make the image model WRITE — rewritten to a decorative motif before any prompt
+ * reaches it. The rules ask for no readable text (`NO_READABLE_TEXT`), but a line ABOUT writing
+ * ("burn somebody's name into it") gets a prompt that asks for "a family surname burnt into the
+ * end piece with crisp, dark lettering", and gpt-image-2 obeys the positive clause over the ban:
+ * job 113 shipped trays reading "HANK", "Hank Alex" and the job's own title. A quoted string is
+ * dropped for the same reason — the model renders it verbatim. Pure — unit-tested.
+ */
+const LEGIBLE_WRITING: [RegExp, string][] = [
+  [
+    /\b(?:(?:a|the|one|two|their|his|her|a couple's|a family|somebody's|someone's)\s+)?(?:family\s+)?(?:sur)?names?(?:\s+(?:or|and)\s+(?:a\s+)?(?:wedding\s+)?dates?)?\s+(burnt|burned|engraved|carved|stitched|embroidered|painted|written|stamped|lettered|printed)\b/gi,
+    "a small decorative motif $1",
+  ],
+  [
+    /\b(?:a\s+|the\s+)?(?:wedding\s+)?dates?\s+(burnt|burned|engraved|carved|stitched|embroidered|painted|written|stamped|lettered|printed)\b/gi,
+    "a small decorative motif $1",
+  ],
+  [
+    /\b(?:(?:crisp|dark|bold|neat|clean|shallow|hand-?written|hand-?lettered|burnt|burned|carved|engraved|painted|stitched|printed)[\s,]+)*(?:lettering|letters|inscriptions?|monograms?|initials|handwriting|wording|calligraphy)\b/gi,
+    "a small decorative motif",
+  ],
+  [/\bin\s+(?:(?:dark|crisp|bold|neat|clean)[\s,]+)+characters\b/gi, ""],
+  [/["“][^"”]{1,40}["”]/g, ""],
+  // Surfaces that exist to be written on, and the counting marks the model puts there to show
+  // "I sold every one" — chalk tally marks on a garage wall and a chalkboard of incense-stick
+  // sketches both shipped (jobs 113/114).
+  [/\b(?:chalk\s+|white\s+)?tally(?:\s+marks?)?\b/gi, "finished pieces"],
+  [
+    /\b(?:chalk\s*boards?|black\s*boards?|white\s*boards?|dry-erase boards?|price tags?|price cards?|price lists?|placards?|sign\s*boards?|calendar(?: pages?)?|ledgers?|receipts?|order forms?|notebook pages?|spreadsheets?)\b/gi,
+    "plain wooden surface",
+  ],
+];
+
+export function scrubLegibleWriting(text: string): string {
+  const out = LEGIBLE_WRITING.reduce(
+    (s, [re, rep]) => s.replace(re, rep),
+    text
+  );
+  // Untouched prompts stay byte-identical; only a rewritten one is tidied.
+  if (out === text) return text;
+  return out
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+([,.])/g, "$1")
+    .trim();
 }
 
 /**
@@ -5724,9 +5875,13 @@ export function talkingHeadVisualPrompt(
  *  pitch contiguous without merging two separate CTA blocks that sit far apart. */
 const CTA_MAX_BRIDGE_GAP = 2;
 
-/** Host talking-head beats `ensureHostInCta` guarantees per CTA run — one on-camera beat, so the
- *  host is present without clustering back-to-back talking-head shots (the rest stays b-roll). */
-const CTA_HOST_SCENES = 1;
+/**
+ * A line telling the viewer to scan — where the big QR card takes over when a marked CTA block
+ * does not carry the verbatim `CTA_QR_TRIGGER`. Matched per sentence, so the card starts on the
+ * sentence that says it rather than on a scene that merely ends with it.
+ */
+const SCAN_INTENT =
+  /\bscan\b|\bgrab (?:your|a) phone\b|\bpoint (?:your (?:phone|camera)|it) at\b|\bpoint your (?:phone|camera)\b|\bphone['’]?s camera\b|\byour camera\b|\bcode on (?:your|the) screen\b|\bqr\b/i;
 
 /**
  * The fixed CTA block that appears verbatim (mid-roll + close) in every channel's script. The big
@@ -5737,28 +5892,17 @@ const CTA_HOST_SCENES = 1;
 // CTA_QR_TRIGGER / CTA_QR_RELEASE moved to shared/ctaMarkers.ts (imported above) so the
 // client's per-book CTA template emits the exact lines this file anchors the QR block to.
 
-/** Silent frozen-frame tail (seconds) the QR holds after the RELEASE line — the host just said
- *  "I'll wait right here" — added to the held scene length in assembly (mux tpad/apad). */
-const QR_TAIL_HOLD_SEC = 3;
+/** Silent frozen-frame tail the QR used to hold after the RELEASE line. Retired to 0 (2026-09-23):
+ *  the film "stopped for three seconds" after every CTA. Mirrors shared/filmTimeline.ts. */
+const QR_TAIL_HOLD_SEC = 0;
 
 /**
- * How long the "grab your phone" block keeps the QR on screen, counting the whole `qrHero` block:
- * its beats' narration plus the frozen wait after the release line. Most of the sales happen
- * here, and a viewer has to notice the code, pick a phone up, open a camera and hold it steady —
- * the trigger line alone is under two seconds of speech.
- *
- * The window FOLLOWS THE SCRIPT between the two bounds: it is the block's own spoken time plus
- * `QR_HERO_WAIT_SEC` of waiting, clamped to [MIN, MAX]. So a block that talks longer earns a
- * longer window without a longer freeze, a two-second block is still held to the minimum, and
- * the freeze is a steady ~6s instead of whatever a flat number happens to leave. The operator
- * asked for "10 - 15 depending on the script so that it isn't that frozen" (2026-09-10); the
- * old flat 6s minimum ended the block before most viewers had a phone out. `extendQrHeroWindow`
- * applies it; a block already talking past MAX just keeps the flat `QR_TAIL_HOLD_SEC`.
+ * The big card's scan window is the block's own narration now — scan line through ===END CTA===,
+ * with no frozen top-up — so a block that says "scan it" and ends a second later is gone before a
+ * viewer has a phone out. Under this much speech the voicing stage warns (`extendQrHeroWindow`);
+ * the fix is another line in the script, not a freeze.
  */
-export const QR_HERO_MIN_WINDOW_SEC = 10;
-export const QR_HERO_MAX_WINDOW_SEC = 15;
-/** The wait the block aims to leave after the release line, inside the window above. */
-export const QR_HERO_WAIT_SEC = 6;
+export const QR_SCAN_WINDOW_WARN_SEC = 8;
 
 /** Patterns that flag a scene's verbatim narration as call-to-action content. */
 const CTA_SIGNAL_PATTERNS: RegExp[] = [
@@ -5955,7 +6099,7 @@ export function sanitizeCtaCutaway(
  * is an invented, unscannable second code or a stranger's video page.
  *
  * `enhanceBrollPrompts` sanitizes a CTA beat as it rewrites it, but that only protects the
- * prompts that exist when it runs. `ensureHostInCta` runs AFTER it and can demote a host beat
+ * prompts that exist when it runs. `hostTheCtaPitch` runs AFTER it and can demote a host beat
  * onto a still from its raw storyboard `brollVisual` — including the QR block's own host beat,
  * which then carries the big centred card over whatever that text described. And an un-marked
  * script's scan window puts `qrCorner` on beats the `cta` flag never reached, so the enhancer's
@@ -6001,7 +6145,7 @@ export function guardPitchVisuals(
  * Deterministic CTA safety net, run right after `parseStoryboard`. Flags scenes whose
  * narration is a call-to-action — by Claude's own "cta" flag OR by content signal (a URL,
  * "qr code", "in the description", a price) — by setting `cta=true`. That flag drives CTA
- * *visual* handling (generic cutaways, empty host hands, the `ensureHostInCta` host guarantee)
+ * *visual* handling (generic cutaways, empty host hands, the `hostTheCtaPitch` host layout)
  * and the fallback cover-reveal placement; it does NOT drive the QR overlay (that keys off
  * `qrHero`/`qrCorner`) and does NOT force the host. CTA scenes keep whatever register the
  * pipeline assigned, so a pitch alternates host/still/motion like the rest of the video. Short
@@ -6134,7 +6278,7 @@ export const QR_SCENES_BEFORE_COVER = 2;
  * generous scan window) and then lands on the cover. Runs AFTER `markCoverReveal` (which sets
  * `coverHero`). Converts each preceding scene into a big-QR beat: sets `qrHero` (routes to the
  * centered overlay in assembly, and exempts the scene from the over-long split / short-scene merge /
- * on-screen floor / `ensureHostInCta` host quota); also sets `cta` for CTA visual handling (the
+ * on-screen floor / `hostTheCtaPitch` pitch layout); also sets `cta` for CTA visual handling (the
  * QR overlay itself keys off `qrHero` in the `qrOverlayUrl` assembly gate). Flips
  * each to a person-free still so the centered QR doesn't cover a face, but KEEPS its own verbatim
  * script narration (no text added or changed). Walks back up to `QR_SCENES_BEFORE_COVER` scenes
@@ -6192,7 +6336,7 @@ export function markCornerQrBeforeCover(
   params: LongformInputParams,
   ctaScoped = false
 ): StoryboardScene[] {
-  if (!params.qrImageUrl) return scenes;
+  if (!params.qrImageUrl && !params.ctaBooks?.length) return scenes;
   if (ctaScoped) {
     for (const s of scenes) {
       if (s.cta && !s.qrHero && !s.coverHero) s.qrCorner = true;
@@ -6206,6 +6350,11 @@ export function markCornerQrBeforeCover(
       if (!prev || prev.qrHero || prev.coverHero) break;
       prev.qrCorner = true;
     }
+    for (let k = i + 1; k < scenes.length; k++) {
+      const next = scenes[k];
+      if (!next || next.qrHero || next.coverHero || !next.cta) break;
+      next.qrCorner = true;
+    }
   }
   return scenes;
 }
@@ -6215,8 +6364,9 @@ export function markCornerQrBeforeCover(
  * shots) onto beats inside the CTA pitch window, one asset per beat, so the pitch shows the REAL
  * artwork instead of a generated approximation of it.
  *
- * Candidates are CTA beats that are already person-free cutaways: converting a HOST beat would
- * undo `ensureHostInCta`'s guarantee that the pitch keeps a face, and the two hero beats
+ * Candidates are CTA beats that are still person-free cutaways — `hostTheCtaPitch` puts the host
+ * on every pitch beat left after this pass, so an asset is the one picture a pitch shows. The two
+ * hero beats
  * (`qrHero`'s big scan card, `coverHero`'s cover reveal) are the pitch's other deliberate
  * full-frame moments. Chosen in `spreadOrder`, so five assets land across the pitch rather than in
  * a block at its head.
@@ -6226,9 +6376,10 @@ export function markCornerQrBeforeCover(
  * flags are cleared (a fixed image has no movement to continue) and the corner QR is switched on,
  * so the viewer can scan while the render is on screen — which is the whole point of the beat.
  *
- * MUST run after the balancers and `ensureHostInCta`: every one of those rewrites registers, and
- * this pass is deliberately the last word on the beats it claims (`shapePitchQrStretches`, which
- * runs after it, treats an asset beat as fixed; `assignHostShots` only touches host beats). Returns
+ * MUST run after the balancers (every one of them rewrites registers) and BEFORE
+ * `hostTheCtaPitch`, which would otherwise have taken these beats for the host; this pass is the
+ * last word on the beats it claims (`hostTheCtaPitch` skips an asset beat; `assignHostShots` only
+ * touches host beats). `planHostMinutes` predicts the same picks (`assetCount`). Returns
  * how many assets were placed (fewer than supplied when the pitch has too few beats). Mutates in
  * place; pure otherwise — unit-tested.
  */
@@ -6282,7 +6433,7 @@ export function placeAssetBeats(
 export function qrOverlayUrlFor(
   scene: Pick<
     StoryboardScene,
-    "qrHero" | "qrCorner" | "coverHero" | "ctaIndex"
+    "qrHero" | "qrCorner" | "coverHero" | "ctaIndex" | "cta"
   >,
   qrImageUrl: string | undefined,
   /**
@@ -6292,74 +6443,152 @@ export function qrOverlayUrlFor(
    */
   ctaBooks?: LongformCtaBook[]
 ): string | undefined {
-  if (!scene.qrHero && !scene.qrCorner && !scene.coverHero) return undefined;
+  const isCtaPitch = scene.cta && scene.ctaIndex != null && !scene.qrHero;
+  if (!scene.qrHero && !scene.qrCorner && !scene.coverHero && !isCtaPitch) return undefined;
   return bookForScene(scene, ctaBooks)?.qrImageUrl ?? qrImageUrl ?? undefined;
 }
 
 /**
  * How big, and where, the QR card draws on a scene that carries one (`qrOverlayUrlFor`). The
- * card's size follows who owns the frame, and the rule is the same across the whole pitch — the
- * "grab your phone" block (`qrHero`) and the scan window around it (`qrCorner`) alike:
+ * operator's rule (2026-09-23): the card moves exactly ONCE per CTA —
  *
- * - `"center"` — the big card, dead-centre: b-roll, nothing else in frame.
- * - `"panel"` — the SAME big card, centred in the b-roll half of a SPLIT. The host is still
- *   talking on the other half, but that panel is person-free, so the card goes BESIDE the host
- *   instead of shrinking to the corner of a product shot.
- * - `"corner"` — the small bottom-right card: a full-frame host (the big card never draws over a
- *   face), and the BOOK — the cover reveal and an operator's uploaded asset (a book render), which
- *   are the thing those beats exist to show.
+ * - `"center"` — the big card, dead-centre, over on-topic b-roll: the scan window (`qrHero`), from
+ *   the line telling the viewer to scan to the end of the block.
+ * - `"corner"` — the small bottom-right card: everything before that — the host pitching, the
+ *   book cover, an uploaded asset, and any b-roll a channel with no host shows instead.
  *
- * Operator's rule, 2026-09-10: "it should be big every time in the b-roll … only small when it
- * has a host", and "in the book of course the QR code is small".
- *
- * "Split" means the clip really IS the composite. A scene whose composite failed keeps its
- * `splitVisual` but ships the bare host render (`composeHostScene`'s fallback), so its clip is
- * its own `hostClipUrls[0]` — a panel card there would land over a full-frame host. A scene
- * rendered before `hostClipUrls` existed has nothing to compare and is taken at its word.
- * Pure — unit-tested.
+ * This replaces the 2026-09-10 rule ("big every time in the b-roll … small when it has a host"),
+ * under which the card sized itself to whoever owned each frame and jumped position with every
+ * cut — seven moves in one pitch on the film that prompted the change. `"panel"` (the big card
+ * inside a split's b-roll half) is no longer produced: a CTA has no split screens, and a film
+ * rendered with one is re-assembled on its full-frame host clip (`ctaHostClipUrls`). Pure —
+ * unit-tested.
  */
 export function qrPlacementFor(
-  scene: Pick<
-    StoryboardScene,
-    | "qrHero"
-    | "qrCorner"
-    | "coverHero"
-    | "assetImageUrl"
-    | "hostPresent"
-    | "splitVisual"
-    | "clipUrls"
-    | "clipUrl"
-    | "hostClipUrls"
-  >
+  scene: Pick<StoryboardScene, "qrHero" | "coverHero" | "assetImageUrl">
 ): "corner" | "center" | "panel" {
-  if (!scene.qrHero && !scene.qrCorner) return "corner";
-  if (scene.coverHero || scene.assetImageUrl) return "corner";
-  if (!scene.hostPresent) return "center";
-  const clip = scene.clipUrls?.[0] ?? scene.clipUrl;
-  const composited =
-    !!scene.splitVisual && !!clip && clip !== scene.hostClipUrls?.[0];
-  return composited ? "panel" : "corner";
+  if (scene.qrHero && !scene.coverHero && !scene.assetImageUrl) return "center";
+  return "corner";
 }
 
 /**
- * Whether this scene's QR card should switch from the small corner to the big centred card for
- * its frozen tail hold. The card is small on a full-frame host because the host is TALKING; once
- * the words end and the picture freezes into the wait (the "I'll wait right here" beat's
- * `qrHoldSec`, or an operator's own "Hold after line"), nobody is — so by the same rule that
- * sizes every other beat, the card goes big for the wait. The book (cover reveal, uploaded asset)
- * keeps its small card throughout: there the card is small because of what is shown, not who is
- * speaking. Assembly only acts on it when the scene actually has a tail hold. Pure — unit-tested.
+ * A back-filled host take (`extractHostPanel` → `host-<scene>-<i>-<id>.mp4`) is the split's narrow
+ * host PANEL cropped out of the composite, not the full-frame render — scaled to 16:9 it would be a
+ * heavy zoom on the face. Fresh renders are stored as `clip-…` and are full frame.
  */
-export function qrBigDuringHold(
-  scene: Parameters<typeof qrPlacementFor>[0]
-): boolean {
-  return (
-    !!(scene.qrHero || scene.qrCorner) &&
-    !!scene.hostPresent &&
-    !scene.coverHero &&
-    !scene.assetImageUrl &&
-    qrPlacementFor(scene) === "corner"
-  );
+const BACKFILLED_HOST_PANEL = /\/host-\d+-\d+-[\w-]{6}\.mp4(?:\?|$)/;
+
+/**
+ * The CTA as assembly draws it — the current rule applied to a scene rendered under the OLD one,
+ * so a Reassemble brings a finished film into line with no new render. Returns the scene itself
+ * when nothing changes, else a shallow copy (the storyboard is never mutated):
+ *
+ * - the scan window runs to the END of its marked block: a beat after the block's first `qrHero`
+ *   beat in the same `ctaIndex` run (the old window stopped on "I'll wait right here") carries the
+ *   big card too;
+ * - the big card sits on b-roll, never on a face. A window beat whose clip is a HOST take (the old
+ *   rule kept the host inside the window, and the beats after the release line were often host)
+ *   borrows the picture of the nearest person-free window beat of the same block — so the b-roll
+ *   behind the card holds steady while the host keeps talking. With nothing to borrow it keeps its
+ *   host take and the small corner card, as before;
+ * - no split screens in a CTA: a split pitch beat plays its own full-frame host take
+ *   (`hostClipUrls`), unless all it has is a back-filled panel crop.
+ *
+ * `scenes` is the whole storyboard in index order. Pure — unit-tested.
+ */
+export function ctaAssemblyScene(
+  scenes: StoryboardScene[],
+  i: number
+): StoryboardScene {
+  const s = scenes[i];
+  if (s.cta !== true || s.coverHero || s.assetImageUrl) return s;
+  const sameBlock = (k: number) =>
+    scenes[k]?.cta === true &&
+    (s.ctaIndex != null
+      ? scenes[k].ctaIndex === s.ctaIndex
+      : !!scenes[k].qrHero); // legacy: the qrHero run itself
+  let card = !!s.qrHero;
+  if (!card && s.ctaIndex != null) {
+    for (let k = i - 1; k >= 0 && sameBlock(k); k--) {
+      if (scenes[k].qrHero && !scenes[k].coverHero) {
+        card = true;
+        break;
+      }
+    }
+  }
+  if (card) {
+    const view: StoryboardScene = {
+      ...s,
+      qrHero: true,
+      qrCorner: undefined,
+      splitVisual: undefined,
+    };
+    if (!s.hostPresent) return view;
+    // A host take under the big card would put the code over his face — borrow b-roll instead.
+    const donorOk = (k: number) => {
+      const d = scenes[k];
+      return (
+        !!d.qrHero &&
+        !d.hostPresent &&
+        !d.coverHero &&
+        !d.assetImageUrl &&
+        !!(d.clipUrls?.length || d.clipUrl)
+      );
+    };
+    let donor = -1;
+    for (let k = i - 1; donor < 0 && k >= 0 && sameBlock(k); k--)
+      if (donorOk(k)) donor = k;
+    for (let k = i + 1; donor < 0 && k < scenes.length && sameBlock(k); k++)
+      if (donorOk(k)) donor = k;
+    if (donor < 0) {
+      // Nothing person-free to put under it: keep the host and the small corner card.
+      return {
+        ...s,
+        qrHero: undefined,
+        qrCorner: true,
+        splitVisual: undefined,
+      };
+    }
+    const d = scenes[donor];
+    const clips = d.clipUrls?.length ? [...d.clipUrls] : [d.clipUrl as string];
+    return {
+      ...view,
+      hostPresent: false,
+      lipsynced: false,
+      clipUrls: clips,
+      clipUrl: clips[0],
+      // Trims and cut markers were set on the host take — they mean nothing on the borrowed clip.
+      clipInSec: undefined,
+      cutPoints: undefined,
+      pieceClipIns: undefined,
+    };
+  }
+  const host = s.hostClipUrls;
+  const isPitchBeat =
+    inMarkedCta(s) && !card && !s.coverHero && !s.assetImageUrl;
+  if (
+    s.ctaIndex != null &&
+    s.hostPresent &&
+    s.splitVisual &&
+    host?.length &&
+    host[0] !== (s.clipUrls?.[0] ?? s.clipUrl) &&
+    !host.some(u => BACKFILLED_HOST_PANEL.test(u))
+  ) {
+    return {
+      ...s,
+      qrCorner: true,
+      splitVisual: undefined,
+      clipUrls: [...host],
+      clipUrl: host[0],
+    };
+  }
+  if (isPitchBeat && !s.qrCorner) {
+    return {
+      ...s,
+      qrCorner: true,
+    };
+  }
+  return s;
 }
 
 /**
@@ -6513,10 +6742,10 @@ export function markCoverReveal(
 
 /**
  * The beat that carries the cover reveal for a QR block starting at `qrStart`: the FIRST scene in
- * the contiguous pitch run before it that NAMES the book (`titleMatcher`), so the cover lands as
- * the host speaks the title instead of over an unrelated later line. Falls back to the beat right
- * before the block — the original placement — when the pitch never names the book or no title
- * resolved, so no script regresses. Skips beats already claimed by a QR/cover block and stops the
+ * the contiguous pitch run before it that NAMES the block's book (`titleMatcher` on its
+ * `ctaBooks` title, else the channel's), so the cover lands as the host speaks the title instead
+ * of over an unrelated later line. A pitch that never names it gets the cover in its MIDDLE, so
+ * the host still speaks on both sides of the book. Skips beats already claimed by a QR/cover block and stops the
  * walk-back at a previous block, so a mid-roll and a close don't cross-claim. Pure — unit-tested.
  */
 export function coverBeatFor(
@@ -6526,19 +6755,30 @@ export function coverBeatFor(
 ): StoryboardScene | undefined {
   if (qrStart < 1) return undefined; // block opens the video — nothing precedes it
   const fallback = scenes[qrStart - 1];
-  const namesBook = titleMatcher(params.bookTitle);
+  // THIS block's book first: a book uploaded for the video lives on `ctaBooks`, and the channel
+  // title is empty then — matching on it alone never found the title line, so the cover always
+  // fell back to the beat before the scan line and the host never came back after the book
+  // (job 110, both CTAs).
+  const title =
+    bookForScene(scenes[qrStart], params.ctaBooks)?.title ?? params.bookTitle;
+  const namesBook = titleMatcher(title);
   let start = qrStart - 1;
   while (start > 0) {
     const prev = scenes[start - 1];
     if (!prev.cta || prev.qrHero || prev.coverHero) break;
     start--;
   }
+  const pitch: number[] = [];
   for (let k = start; k < qrStart; k++) {
     const s = scenes[k];
     if (s.qrHero || s.coverHero) continue;
     if (namesBook(s.scriptText ?? s.narration ?? "")) return s;
+    pitch.push(k);
   }
-  return fallback;
+  // Never named: the middle of the pitch, so the host speaks on both sides of the book (host →
+  // book → host → big QR) instead of the book sitting on the line before the scan.
+  if (pitch.length === 0) return fallback;
+  return scenes[pitch[Math.floor((pitch.length - 1) / 2)]];
 }
 
 /**
@@ -6612,33 +6852,85 @@ function joinSplitAnchor(
 }
 
 /**
- * Anchor the big centered QR + book-cover reveal to the fixed CTA block (`CTA_QR_TRIGGER` …
- * `CTA_QR_RELEASE`), which appears verbatim in every channel's script (twice: mid-roll + close).
- * For EACH occurrence: the scenes from the trigger line through the release line become big-QR
- * beats (`qrHero` — person-free stills with the centered overlay across the whole window), the
- * release beat is flagged `qrTail` so it holds a silent frozen `QR_TAIL_HOLD_SEC` tail in assembly,
- * and the first beat of the pitch that NAMES the book becomes the full-frame cover reveal
- * (`coverHero` — see `coverBeatFor`; falls back to the beat right before the trigger). The
- * trigger scene is split so the QR starts EXACTLY on "Now go ahead…" when greedy segmentation had
- * packed a preceding sentence into its chunk; likewise the release scene is split off any trailing
- * text. A `joinSplitAnchor` pre-pass first re-stitches any trigger/release phrase segmentation broke
- * across a scene boundary, so a mid-roll block whose "…grab your phone" landed in the next chunk
- * still anchors. No-op without a channel QR (`qrImageUrl`); when the block is absent entirely, falls
- * back to the legacy title-mention placement (`markCoverReveal` → `markQrBeforeCover`) so no script
- * regresses. Idempotent (the `!qrHero` scan skips already-marked blocks). Mutates in place
+ * Anchor the big QR card + book-cover reveal inside each CTA block. The operator's structure
+ * (2026-09-23), and the QR moves exactly ONCE in it:
+ *
+ *   host (small QR bottom-right) → book cover when the title is spoken (small QR) → host (small
+ *   QR) → from the line telling the viewer to SCAN: the big centred QR over on-topic b-roll, held
+ *   to the end of the block.
+ *
+ * The scan window starts on `CTA_QR_TRIGGER` ("Now go ahead and grab your phone"), split so the
+ * card lands exactly on it. With explicit ===START/END CTA=== markers (`ctaScoped`) it runs to the
+ * block's last beat; without them (legacy fuzzy `cta` flags) it ends on `CTA_QR_RELEASE` as before.
+ * Every beat in the window becomes a card beat (`toQrCard`) — no host, no split: a person-free
+ * on-topic still under the big card (operator, 2026-09-23 — a plain backdrop was tried and
+ * dropped). The last beat is flagged `qrTail` (it no longer
+ * freezes — `QR_TAIL_HOLD_SEC` is retired — but narration alignment anchors on it). The first
+ * pitch beat that NAMES the book becomes the cover reveal (`coverBeatFor`). A marked block without
+ * the trigger line starts the card on its first SCAN sentence (`SCAN_INTENT`), else on its last
+ * ~`QR_GUIDANCE_WORDS` (`markQrFromCtaTails`). A `joinSplitAnchor` pre-pass re-stitches a trigger or
+ * release phrase segmentation broke across a scene boundary. No-op without a channel QR or a book;
+ * a script with no block at all keeps the legacy title-mention placement (`markCoverReveal` →
+ * `markQrBeforeCover`). Idempotent (the `!qrHero` scan skips marked blocks). Mutates in place
  * (splicing the splits) and returns it. Pure — unit-tested.
  */
 /** Words of QR guidance at the tail of a CTA block (script OS STEP 8.5 fixes it at ~90). */
 const QR_GUIDANCE_WORDS = 90;
 
 /**
+ * Make a beat part of the big-QR scan window: the big card over a person-free still, nothing else in
+ * frame. A cover reveal keeps its register (its card is small because the book is the point) — the
+ * callers skip it. Pure.
+ */
+function toQrCard(s: StoryboardScene): void {
+  // A host beat gives the frame up to b-roll: start its picture from its own cutaway, never from
+  // the talking-head prompt (the CTA enhancer rewrites it on-topic, `guardPitchVisuals` checks it).
+  if (s.hostPresent) s.visualPrompt = hostBrollFallback(s);
+  s.qrHero = true;
+  s.cta = true; // the overlay only draws on cta scenes (assembly gate)
+  s.qrCorner = undefined;
+  s.hostPresent = false;
+  s.stillImage = true;
+  s.splitVisual = undefined;
+  s.splitMotion = undefined;
+  s.humanPresent = undefined;
+  s.objectMotion = undefined;
+}
+
+/** Flag [start, end] as the scan window, then place the block's cover reveal before it. */
+function markScanWindow(
+  scenes: StoryboardScene[],
+  start: number,
+  end: number,
+  params: LongformInputParams
+): void {
+  for (let k = start; k <= end; k++) {
+    if (!scenes[k].coverHero) toQrCard(scenes[k]);
+  }
+  scenes[end].qrTail = true;
+  // Cover reveal on the beat that NAMES the book (falling back to the beat right before the
+  // window when the pitch never names it). Needs a configured cover image.
+  const cover = coverBeatFor(scenes, start, params);
+  if (
+    cover &&
+    coverImageForScene(cover, params) &&
+    !cover.qrHero &&
+    !cover.coverHero
+  ) {
+    cover.coverHero = true;
+    cover.stillImage = true;
+    cover.hostPresent = false;
+    cover.splitVisual = undefined;
+  }
+}
+
+/**
  * QR placement for marked scripts whose CTA blocks don't carry the verbatim `CTA_QR_TRIGGER`
- * line — e.g. a script OS that rotates the QR wording instead of freezing it. The guidance is
- * always the TAIL of the block, so take the last ~QR_GUIDANCE_WORDS of each contiguous `cta` run
- * and reveal the cover on the beat before it. Only reachable with explicit markers, so the
- * anchored v5 path is untouched.
- * ponytail: word-count tail, not a parse of the guidance itself. If the estimate ever drifts,
- * add a `===START QR===` sub-marker to the script contract and split on that instead.
+ * line — e.g. a script OS that rotates the QR wording instead of freezing it. The card starts on
+ * the block's first sentence telling the viewer to scan (`SCAN_INTENT`, split out of its scene so
+ * the card lands on that sentence) and holds to the block's end. A block that never says it
+ * falls back to its last ~QR_GUIDANCE_WORDS. Only reachable with explicit markers, so the
+ * anchored path is untouched.
  */
 function markQrFromCtaTails(
   scenes: StoryboardScene[],
@@ -6646,50 +6938,57 @@ function markQrFromCtaTails(
 ): StoryboardScene[] {
   const words = (s: StoryboardScene) =>
     (s.scriptText ?? s.narration ?? "").split(/\s+/).filter(Boolean).length;
+  const textOf = (s: StoryboardScene) => s.scriptText ?? s.narration ?? "";
 
   for (let end = scenes.length - 1; end >= 0; end--) {
     if (!scenes[end].cta) continue;
-
-    // Walk back inside this run while the guidance block's word budget still fits, so a long
-    // sell beat adjacent to short guidance beats stays out of the window.
-    let start = end;
-    let n = words(scenes[end]);
-    while (
-      start > 0 &&
-      scenes[start - 1].cta &&
-      n + words(scenes[start - 1]) <= QR_GUIDANCE_WORDS
-    ) {
-      start--;
-      n += words(scenes[start]);
+    let head = end;
+    while (head > 0 && scenes[head - 1].cta) head--;
+    // A block that already has its scan window (the trigger path marked it) is left alone.
+    if (scenes.slice(head, end + 1).some(s => s.qrHero)) {
+      end = head;
+      continue;
     }
 
-    for (let k = start; k <= end; k++) {
-      const s = scenes[k];
-      s.qrHero = true;
-      // Same rule as markCtaQrBlock's toQr: a beat already showing the host or the cover keeps
-      // its visual (small corner QR at assembly) instead of being blanked for the big card.
-      if (s.hostPresent || s.coverHero) continue;
-      s.stillImage = true;
-      s.hostPresent = false;
-      s.splitVisual = undefined;
-    }
-    scenes[end].qrTail = true;
-
-    const cover = coverBeatFor(scenes, start, params);
-    if (
-      cover &&
-      coverImageForScene(cover, params) &&
-      !cover.qrHero &&
-      !cover.coverHero
-    ) {
-      cover.coverHero = true;
-      cover.stillImage = true;
-      cover.hostPresent = false;
-      cover.splitVisual = undefined;
+    // 1. The first sentence that tells the viewer to scan (never on the cover beat).
+    let start = -1;
+    for (let k = head; k <= end; k++) {
+      if (scenes[k].coverHero || scenes[k].qrHero) continue;
+      const text = textOf(scenes[k]);
+      const m = text.match(SCAN_INTENT);
+      if (!m || m.index === undefined) continue;
+      // Back up to the start of that sentence; split it out when the scene opens with others.
+      const before = text.slice(0, m.index);
+      const cut = Math.max(
+        before.lastIndexOf(". "),
+        before.lastIndexOf("! "),
+        before.lastIndexOf("? ")
+      );
+      if (cut >= 0 && before.slice(0, cut + 1).trim()) {
+        const [h, t] = splitSceneAtOffset(scenes[k], cut + 2);
+        scenes.splice(k, 1, h, t);
+        start = k + 1;
+        end++;
+      } else start = k;
+      break;
     }
 
-    // Skip past the head of this run so the next iteration lands on the previous block.
-    while (end > 0 && scenes[end - 1].cta) end--;
+    // 2. No scan line: the last ~QR_GUIDANCE_WORDS of the block, as before. Walk back while the
+    // word budget still fits, so a long sell beat adjacent to short guidance beats stays out.
+    if (start < 0) {
+      start = end;
+      let n = words(scenes[end]);
+      while (
+        start > head &&
+        n + words(scenes[start - 1]) <= QR_GUIDANCE_WORDS
+      ) {
+        start--;
+        n += words(scenes[start]);
+      }
+    }
+
+    markScanWindow(scenes, start, end, params);
+    end = head; // the loop's end-- lands on the scene before this block
   }
 
   scenes.forEach((s, i) => (s.index = i + 1));
@@ -6700,7 +6999,8 @@ export function markCtaQrBlock(
   scenes: StoryboardScene[],
   params: LongformInputParams,
   /** True when explicit ===START/END CTA=== spans set the `cta` flags (`markCtaFromSpans`):
-   *  the trigger then only anchors INSIDE a marked block, never on a stray sound-alike line. */
+   *  the trigger then only anchors INSIDE a marked block, never on a stray sound-alike line,
+   *  and the scan window runs to the block's end. */
   ctaScoped = false
 ): StoryboardScene[] {
   // A channel QR OR any assigned book is enough to justify the block — a book brings its own
@@ -6715,29 +7015,18 @@ export function markCtaQrBlock(
   const textOf = (s: StoryboardScene) => s.scriptText ?? s.narration ?? "";
   const inScope = (s: StoryboardScene) => !ctaScoped || s.cta === true;
 
-  // No block in this script → keep the legacy placement so nothing regresses.
+  // No trigger line in this script → a marked script looks for a scan line per block; an
+  // unmarked one keeps the legacy placement so nothing regresses.
   if (!scenes.some(s => inScope(s) && triggerRe.test(textOf(s)))) {
     if (ctaScoped && scenes.some(s => s.cta)) {
       console.warn(
         `[longform] marked CTA block(s) lack the "${CTA_QR_TRIGGER}" line — ` +
-          `placing the QR on the tail of each marked block`
+          `starting the big QR on each block's scan line`
       );
       return markQrFromCtaTails(scenes, params);
     }
     return markQrBeforeCover(markCoverReveal(scenes, params), params);
   }
-
-  const toQr = (s: StoryboardScene) => {
-    s.qrHero = true;
-    s.cta = true; // the centered overlay only draws on cta scenes (assembly gate)
-    // A beat that's already host or cover keeps its visual — only genuine filler gets blanked
-    // to carry the big centered card. `qrPlacement` (assembly) reads hostPresent/coverHero to
-    // fall back to the small corner card on these instead of drawing over a face or the cover.
-    if (s.hostPresent || s.coverHero) return;
-    s.stillImage = true;
-    s.hostPresent = false;
-    s.splitVisual = undefined;
-  };
 
   // One occurrence per pass; re-scan from scratch so the splices' index shifts don't matter, and
   // the `!qrHero` guard skips a block already marked (so a second call is a no-op).
@@ -6757,39 +7046,36 @@ export function markCtaQrBlock(
       bs = ti + 1;
     }
 
-    // Release line closes the block; split off any trailing text so the block ends exactly on it.
     let be = -1;
-    for (let k = bs; k < scenes.length; k++) {
-      const rm = textOf(scenes[k]).match(releaseRe);
-      if (!rm) continue;
-      const end = rm.index! + rm[0].length;
-      if (textOf(scenes[k]).slice(end).trim()) {
-        const [head, tail] = splitSceneAtOffset(scenes[k], end);
-        scenes.splice(k, 1, head, tail);
+    if (ctaScoped) {
+      // A marked block: the card holds from the scan line to ===END CTA===.
+      be = bs;
+      while (be + 1 < scenes.length && scenes[be + 1].cta === true) be++;
+    } else {
+      // Legacy: the release line closes the block; split off any trailing text so the block
+      // ends exactly on it.
+      for (let k = bs; k < scenes.length; k++) {
+        const rm = textOf(scenes[k]).match(releaseRe);
+        if (!rm) continue;
+        const end = rm.index! + rm[0].length;
+        if (textOf(scenes[k]).slice(end).trim()) {
+          const [head, tail] = splitSceneAtOffset(scenes[k], end);
+          scenes.splice(k, 1, head, tail);
+        }
+        be = k;
+        break;
       }
-      be = k;
-      break;
     }
     if (be < 0) break; // trigger with no release (degenerate) — leave the rest as-is.
 
-    for (let k = bs; k <= be; k++) toQr(scenes[k]);
-    scenes[be].qrTail = true;
-
-    // Cover reveal on the beat that NAMES the book (falling back to the beat right before the
-    // trigger when the pitch never names it). Needs a configured cover image.
-    const cover = coverBeatFor(scenes, bs, params);
-    if (
-      cover &&
-      coverImageForScene(cover, params) &&
-      !cover.qrHero &&
-      !cover.coverHero
-    ) {
-      cover.coverHero = true;
-      cover.stillImage = true;
-      cover.hostPresent = false;
-      cover.splitVisual = undefined;
-    }
+    markScanWindow(scenes, bs, be, params);
   }
+
+  // A script can say the fixed trigger in one block and word its scan line freely in another
+  // (Hannah Yoder's and Granny Mae's close, jobs 115/116): the loop above only marks blocks that
+  // carry the trigger, so the other kept no book cover and no big QR at all. Give every marked
+  // block still without a scan window the free-worded treatment.
+  if (ctaScoped) return markQrFromCtaTails(scenes, params);
 
   scenes.forEach((s, i) => (s.index = i + 1));
   return scenes;
@@ -6836,250 +7122,84 @@ export function buildLipsyncPrompt(
 }
 
 /**
- * Guarantee the host appears on camera during EACH CTA run. Walk every contiguous CTA span and
- * flip non-hero (`!qrHero`) scenes to talking-head shots until `CTA_HOST_SCENES` are host,
- * counting any already-host scene toward the quota. Runs LAST — after the
- * host-screen-time/split/ratio/adjacency balancers and `enhanceBrollPrompts` — so nothing
- * downstream can demote them back to b-roll before clip generation. Flipped scenes keep their
- * already-voiced narration and `cta` flag (so the empty-hands clause and bottom-right QR still
- * apply). Mutates in place and returns it. Pure — unit-tested.
+ * A beat inside a MARKED CTA block (===START/END CTA===, `markCtaFromSpans` sets `ctaIndex`). Only
+ * those get the CTA layout: an unmarked script's `cta` flags come from `markCtaScenes`, which also
+ * fires on any spoken price ("$93 an hour"), so hosting or un-splitting on them would turn content
+ * beats into paid host shots. Pure.
  */
-export function ensureHostInCta(scenes: StoryboardScene[]): StoryboardScene[] {
-  // ponytail: flips up to CTA_HOST_SCENES per run; short CTA blocks get fewer, no synthetic scenes
-  let i = 0;
-  while (i < scenes.length) {
-    if (scenes[i].cta !== true) {
-      i++;
-      continue;
-    }
-    // [i, j) is one contiguous CTA run.
-    let j = i;
-    while (j < scenes.length && scenes[j].cta === true) j++;
-    const run = scenes.slice(i, j).filter(s => !s.qrHero && !s.coverHero);
-    let hosts = run.filter(s => s.hostPresent).length;
-    for (const s of run) {
-      if (hosts >= CTA_HOST_SCENES) break;
-      if (s.hostPresent) continue;
-      s.hostPresent = true;
-      s.stillImage = false;
-      s.splitVisual = undefined;
-      s.visualPrompt = talkingHeadVisualPrompt(
-        DEFAULT_HOST_DESCRIPTOR,
-        s.index
-      );
-      hosts++;
-      // Keep the "no host after host" guarantee: enforceVisualAdjacency already ran and won't
-      // re-check, so flipping this CTA beat to host may leave it adjacent to a content host
-      // outside the run. The CTA host is the one we must keep, so a host NEIGHBOR yields to a
-      // still instead. ponytail: leaves the pair if the only host neighbor is a bookend
-      // (index 0 / last) or lacks a brollVisual — the same ceiling enforceVisualAdjacency
-      // accepts for unbreakable pairs.
-      const idx = scenes.indexOf(s);
-      const lastIdx = scenes.length - 1;
-      for (const nIdx of [idx - 1, idx + 1]) {
-        const n = scenes[nIdx];
-        if (n?.hostPresent && nIdx !== 0 && nIdx !== lastIdx && n.brollVisual) {
-          demoteHostToStill(n);
-        }
-      }
-    }
-    i = j;
-  }
-  return scenes;
+export function inMarkedCta(
+  s: Pick<StoryboardScene, "cta" | "ctaIndex">
+): boolean {
+  return s.cta === true && s.ctaIndex != null;
 }
 
-/** How long a big-QR stretch of the pitch should hold — see `shapePitchQrStretches`. */
-export const PITCH_QR_STRETCH_MIN_SEC = 10;
-export const PITCH_QR_STRETCH_MAX_SEC = 15;
+/**
+ * The pitch beats of every marked CTA block — what the host says to camera before the scan line:
+ * each beat that is not the scan window (`qrHero`), the book cover (`coverHero`) or an operator's
+ * uploaded asset. `hostTheCtaPitch` puts the host on all of them, and `planHostMinutes` reserves
+ * their seconds up front, so both read the one list. Indices into `scenes`. Pure.
+ */
+export function ctaPitchBeats(scenes: StoryboardScene[]): number[] {
+  return scenes.flatMap((s, i) =>
+    inMarkedCta(s) && !s.qrHero && !s.coverHero && !s.assetImageUrl ? [i] : []
+  );
+}
 
 /**
- * Arrange the pitch so the big QR card holds long enough to scan: host moment (small corner
- * card) → 10–15s of big card on b-roll/split → host moment → … The card's size follows the
- * register (`qrPlacementFor`), so the pitch's REGISTERS decide how long it stays big — and the
- * balancers above know nothing about QR cards, so a pitch used to flash the big card for 3–7s
- * between host shots, gone before a viewer had a phone out (operator, 2026-09-10: "most of the
- * sales are in there … it should be big every time in the b-roll").
+ * Lay out every MARKED CTA (`inMarkedCta`) the way the operator specified (2026-09-23): HOST →
+ * BOOK → HOST → big QR.
+ * Every pitch beat (`ctaPitchBeats`) becomes the host full screen with the small QR bottom-right;
+ * the book cover and the scan window (`markCtaQrBlock`) keep theirs. There are no split screens and
+ * no b-roll inside a CTA — the card sat on b-roll and in split panels before, and jumped position
+ * with every cut.
  *
- * Works on the scan window's beats (`qrCorner`), between the fixed points it may not change —
- * the "grab your phone" block (`qrHero`, timed by `extendQrHeroWindow`), the cover reveal, an
- * operator's asset, the cold open. A "stretch" is a run of consecutive big-card beats: b-roll,
- * or a split (card in its b-roll panel). A "host moment" is a full-frame host.
+ * `canHost` false (no host photo, or a b-roll-only film) leaves the pitch's cutaways as they are —
+ * they still carry the small corner card, so the QR still moves only once. Splits are cleared
+ * either way. A host beat just OUTSIDE a block (the content beat before it, or after the scan
+ * window) yields to a still, so the CTA does not start or end on a host-to-host cut — unless it is
+ * a bookend or has no cutaway to fall back to, the same ceiling `enforceVisualAdjacency` accepts.
+ * Consecutive pitch beats alternate photo angles in `assignHostShots`, which runs after this.
  *
- * 1. A stretch under MIN absorbs the adjacent host moment that brings it closest to 10–15s
- *    (demoted to a still — `demoteHostToStill`; the join can also swallow the stretch beyond).
- *    Never the cold open, and never the pitch's LAST host moment: `ensureHostInCta`'s guarantee
- *    that the pitch keeps a face still holds.
- * 2. A stretch over MAX gets a host moment near its middle when `canPromote` (a face photo, not
- *    b-roll-only): a split first — it is already lip-synced, so it becomes full-frame for free —
- *    else a b-roll beat long enough for the host floor (`HOST_MIN_HOLD_SEC`), which costs one
- *    lip-sync render. Only where BOTH halves still reach MIN (a long card beats a flash), and
- *    only away from another host shot unless `hostsMayTouch` (a second host photo alternates
- *    angles, as `enforceVisualAdjacency` allows).
- *
- * Returns the scene indices it demoted and promoted; the caller rewrites the demoted beats'
- * prompts (the CTA lane + `guardPitchVisuals`) since their b-roll text was never checked.
- * Runs after `ensureHostInCta` and `placeAssetBeats`: an asset lands on pitch b-roll with the
- * SMALL card, so it has to be in place before the stretches are measured around it. Mutates in
- * place; pure otherwise — unit-tested.
+ * Runs AFTER `placeAssetBeats` (an asset takes a pitch b-roll beat, which this pass must then leave
+ * alone) and after the balancers, so nothing demotes the pitch before render; `capHostMinutes`
+ * then trims check-ins, never the pitch, to keep the film on its host budget. Returns the scene
+ * indices it turned into host beats. Mutates in place; pure otherwise — unit-tested.
  */
-export function shapePitchQrStretches(
+export function hostTheCtaPitch(
   scenes: StoryboardScene[],
-  opts: { canPromote: boolean; hostsMayTouch: boolean }
-): { demoted: number[]; promoted: number[] } {
-  const demoted: number[] = [];
-  const promoted: number[] = [];
-  const secOf = (s: StoryboardScene) => {
-    const slice = (s.narrationEndSec ?? 0) - (s.narrationStartSec ?? 0);
-    return slice > 0 ? slice : (s.audioDuration ?? 0);
-  };
-  const shapeable = (s: StoryboardScene | undefined): s is StoryboardScene =>
-    !!s &&
-    !!s.qrCorner &&
-    !s.qrHero &&
-    !s.coverHero &&
-    !s.assetImageUrl &&
-    !s.hostOpener;
-  const bigCard = (s: StoryboardScene) => !s.hostPresent || !!s.splitVisual;
-  const hostMoment = (s: StoryboardScene) => !!s.hostPresent && !s.splitVisual;
-
-  // Which contiguous CTA run each scene sits in — the unit `ensureHostInCta` guarantees a face for.
-  const runOf: number[] = [];
-  scenes.forEach((s, i) => {
-    runOf[i] =
-      s.cta !== true
-        ? -1
-        : i > 0 && scenes[i - 1].cta === true
-          ? runOf[i - 1]
-          : i;
-  });
-  const hostMomentsIn = (run: number) =>
-    scenes.filter(
-      (s, i) => runOf[i] === run && !s.qrHero && !s.coverHero && hostMoment(s)
-    ).length;
-  const demotable = (i: number) => {
+  opts: { canHost: boolean }
+): number[] {
+  const flipped: number[] = [];
+  const pitch = ctaPitchBeats(scenes);
+  for (const i of pitch) {
     const s = scenes[i];
-    return (
-      shapeable(s) &&
-      hostMoment(s) &&
-      (runOf[i] < 0 || hostMomentsIn(runOf[i]) > 1)
-    );
-  };
-
-  // Segments: maximal runs of shapeable beats, bounded by the fixed points above.
-  const segments: number[][] = [];
-  scenes.forEach((s, i) => {
-    if (!shapeable(s)) return;
-    const last = segments[segments.length - 1];
-    if (last && last[last.length - 1] === i - 1) last.push(i);
-    else segments.push([i]);
-  });
-
-  /** Maximal big-card runs inside one segment, as scene-index ranges with their length. */
-  const stretchesOf = (seg: number[]) => {
-    const out: { from: number; to: number; sec: number }[] = [];
-    for (const i of seg) {
-      if (!bigCard(scenes[i])) continue;
-      const cur = out[out.length - 1];
-      if (cur && cur.to === i - 1) {
-        cur.to = i;
-        cur.sec += secOf(scenes[i]);
-      } else out.push({ from: i, to: i, sec: secOf(scenes[i]) });
-    }
-    return out;
-  };
-  const inSeg = (seg: number[], i: number) => seg.includes(i);
-
-  for (const seg of segments) {
-    // 1. Pull every short stretch up to MIN by absorbing an adjacent host moment.
-    const stuck = new Set<number>();
-    for (;;) {
-      const short = stretchesOf(seg).find(
-        r => r.sec < PITCH_QR_STRETCH_MIN_SEC && !stuck.has(r.from)
-      );
-      if (!short) break;
-      const all = stretchesOf(seg);
-      const options = [short.from - 1, short.to + 1]
-        .filter(h => inSeg(seg, h) && demotable(h))
-        .map(h => {
-          // Absorbing the host also joins the stretch on its far side, if one touches it.
-          const beyond = all.find(r => r.from === h + 1 || r.to === h - 1);
-          return {
-            h,
-            total: short.sec + secOf(scenes[h]) + (beyond?.sec ?? 0),
-          };
-        });
-      if (options.length === 0) {
-        stuck.add(short.from);
-        continue;
+    s.splitVisual = undefined;
+    s.splitMotion = undefined;
+    s.qrCorner = true;
+    if (s.hostPresent || !opts.canHost) continue;
+    promoteCutawayToHost(s);
+    flipped.push(s.index);
+  }
+  if (!opts.canHost) return flipped;
+  const inPitch = new Set(pitch);
+  const lastIdx = scenes.length - 1;
+  for (const i of pitch) {
+    for (const nIdx of [i - 1, i + 1]) {
+      const n = scenes[nIdx];
+      if (
+        n?.hostPresent &&
+        !inPitch.has(nIdx) &&
+        nIdx !== 0 &&
+        nIdx !== lastIdx &&
+        !n.hostOpener &&
+        !n.hostIntro &&
+        n.brollVisual
+      ) {
+        demoteHostToStill(n);
       }
-      const inBand = (t: number) =>
-        t >= PITCH_QR_STRETCH_MIN_SEC && t <= PITCH_QR_STRETCH_MAX_SEC;
-      options.sort((a, b) => {
-        const band = Number(inBand(b.total)) - Number(inBand(a.total));
-        if (band) return band;
-        const reach =
-          Number(b.total >= PITCH_QR_STRETCH_MIN_SEC) -
-          Number(a.total >= PITCH_QR_STRETCH_MIN_SEC);
-        if (reach) return reach;
-        return a.total >= PITCH_QR_STRETCH_MIN_SEC
-          ? a.total - b.total // both over: the smaller overshoot
-          : b.total - a.total; // both under: the bigger gain
-      });
-      const h = scenes[options[0].h];
-      demoteHostToStill(h);
-      demoted.push(h.index);
-    }
-
-    // 2. Break every over-long stretch with a host moment where both halves still reach MIN.
-    if (!opts.canPromote) continue;
-    const unbreakable = new Set<number>();
-    for (;;) {
-      const long = stretchesOf(seg).find(
-        r => r.sec > PITCH_QR_STRETCH_MAX_SEC && !unbreakable.has(r.from)
-      );
-      if (!long) break;
-      const target = (PITCH_QR_STRETCH_MIN_SEC + PITCH_QR_STRETCH_MAX_SEC) / 2;
-      let before = 0;
-      const candidates: { i: number; left: number; free: boolean }[] = [];
-      for (let i = long.from; i <= long.to; i++) {
-        const s = scenes[i];
-        const sec = secOf(s);
-        const left = before;
-        const right = long.sec - before - sec;
-        before += sec;
-        const touchesHost = [scenes[i - 1], scenes[i + 1]].some(
-          n => !!n?.hostPresent
-        );
-        if (
-          left >= PITCH_QR_STRETCH_MIN_SEC &&
-          right >= PITCH_QR_STRETCH_MIN_SEC &&
-          sec >= HOST_MIN_HOLD_SEC &&
-          (opts.hostsMayTouch || !touchesHost)
-        ) {
-          candidates.push({ i, left, free: !!s.hostPresent });
-        }
-      }
-      if (candidates.length === 0) {
-        unbreakable.add(long.from); // no clean break — a long card beats a flash
-        continue;
-      }
-      candidates.sort(
-        (a, b) =>
-          Number(b.free) - Number(a.free) ||
-          Math.abs(a.left - target) - Math.abs(b.left - target)
-      );
-      const s = scenes[candidates[0].i];
-      if (s.hostPresent) {
-        // A split: already lip-synced — dropping the panel makes it full-frame at no cost.
-        s.splitVisual = undefined;
-        s.splitMotion = undefined;
-      } else {
-        promoteCutawayToHost(s);
-      }
-      promoted.push(s.index);
     }
   }
-  return { demoted, promoted };
+  return flipped;
 }
 
 /**
@@ -7139,7 +7259,7 @@ export function buildClipChain(
       `Thin hard visible vertical separator line between both halves. ` +
       `No morphing, no warping, no flickering textures on either side. ` +
       `${NO_OVERLAY_TEXT_SUFFIX} ` +
-      ENGLISH_TEXT_ONLY;
+      NO_READABLE_TEXT;
     return [
       {
         ...base,
@@ -7593,12 +7713,13 @@ export async function generateValidatedStill(
         );
         continue; // fresh seed
       }
-      if (defects.overlay) {
-        lastError = "Still image has overlaid text";
+      if (defects.overlay || defects.writing) {
+        const kind = defects.overlay ? "overlaid text" : "readable writing";
+        lastError = `Still image has ${kind}`;
         textyFallback ??= { buffer, mimeType: r.mimeType };
         console.warn(
-          `[Longform] scene ${scene.index} still has overlay text ` +
-            `(attempt ${attempt}/${attempts}) → regenerating`
+          `[Longform] scene ${scene.index} still has ${kind} ` +
+            `(${defects.what}, attempt ${attempt}/${attempts}) → regenerating`
         );
         continue; // fresh seed — the prompt already bans it, so a re-roll is the fix
       }
@@ -7800,9 +7921,9 @@ export function clipsNeededFor(
 }
 
 /**
- * On-screen CEILING for one scene. `LONG_SCENE_MAX_SEC` for every scene, less the silent frozen
- * tail a `qrTail` beat carries into assembly (`tailHoldSec` → `QR_TAIL_HOLD_SEC`) — that tail is
- * added ON TOP of the narration there, so the spoken part must leave room for it.
+ * On-screen CEILING for one scene. `LONG_SCENE_MAX_SEC` for every scene, less the frozen tail a
+ * `qrTail` beat carries into assembly (`QR_TAIL_HOLD_SEC`, retired to 0 — kept so reinstating a
+ * default tail would still leave room for it).
  */
 const capFor = (
   s: StoryboardScene,
@@ -8017,6 +8138,12 @@ type SizeMetric = {
    */
   fastMin?: number;
   fastMax?: number;
+  /**
+   * Under this a scene is a FLASH — too short to read as a shot at all — and it folds into a
+   * neighbour even past the ceiling, since a slightly long shot beats a blink. Absent ⇒ no flash
+   * rule (the old orphan path).
+   */
+  flash?: number;
   onOrphan?: (s: StoryboardScene) => void;
 };
 /**
@@ -8034,6 +8161,14 @@ const minFor = (metric: SizeMetric, s: StoryboardScene): number =>
 const maxFor = (metric: SizeMetric, s: StoryboardScene): number =>
   s.fastOpen && metric.fastMax != null ? metric.fastMax : metric.max;
 
+/**
+ * The shortest a shot may be on screen. The freeze-pad that used to hold a short orphan scene to
+ * its floor is retired, so an orphan now plays exactly its slice — on the film that prompted this,
+ * a two-word piece ("the one") the fast-open ceiling would not let merge flashed for 0.37s between
+ * two host takes. Editors treat anything under ~1.5s as a flash frame.
+ */
+export const FLASH_SHOT_SEC = 1.5;
+
 /** Post-TTS metric (measured seconds), banded by the job's pacing config. */
 export const measuredSizeFor = (
   pacing: LongformPacing = LEGACY_PACING
@@ -8044,6 +8179,7 @@ export const measuredSizeFor = (
   max: LONG_SCENE_MAX_SEC,
   fastMin: pacing.fastOpen.enabled ? pacing.fastOpen.minShotSec : undefined,
   fastMax: pacing.fastOpen.enabled ? pacing.fastOpen.maxShotSec : undefined,
+  flash: FLASH_SHOT_SEC,
   onOrphan: s => {
     s.audioDuration = floorFor(s, pacing);
   },
@@ -8066,6 +8202,7 @@ export const wordSizeFor = (
   fastMax: pacing.fastOpen.enabled
     ? Math.round(pacing.fastOpen.maxShotSec * wps)
     : undefined,
+  flash: Math.max(1, Math.round(FLASH_SHOT_SEC * wps)),
 });
 export const WORD_SIZE: SizeMetric = wordSizeFor(WORDS_PER_SEC);
 
@@ -8208,7 +8345,7 @@ function mergeScenePair(
 /**
  * The shortest a pitch shot should run. The pitch used to cut every 3–5s like the rest of the
  * film, so a big QR card on b-roll was gone again before a viewer had a phone out; with the
- * shots at 5–8s a big-QR stretch (`shapePitchQrStretches`) is two pictures, not four flashes.
+ * shots at 5–8s a pitch is a few steady host takes, not a stutter of cuts.
  */
 export const PITCH_MIN_SHOT_SEC = 5;
 
@@ -8286,6 +8423,207 @@ export function lengthenPitchShots(
   }
   list.forEach((s, i) => (s.index = i + 1));
   return list;
+}
+
+/** Honorifics a host name carries that a host does not introduce themself by ("Granny Mae" → "Mae"). */
+const NAME_HONORIFIC =
+  /^(granny|grandma|grandpa|gramma|nana|aunt|auntie|uncle|mr|mrs|ms|miss|dr|pastor|farmer|chef|mama|papa)\.?$/i;
+
+/** The regexes that find the host introducing themself, built once per host name. */
+function introPatterns(hostName: string | undefined): RegExp[] {
+  const out: RegExp[] = [/\b[Mm]y name(?:['’]s| is)\s+[A-Z][\w'’-]*/g];
+  const name = hostName?.trim();
+  if (!name) return out;
+  const core = name.split(/\s+/).filter(p => !NAME_HONORIFIC.test(p));
+  const variants = new Set<string>([name]);
+  if (core.length) {
+    variants.add(core.join(" "));
+    variants.add(core[0]);
+  }
+  for (const v of Array.from(variants)) {
+    const esc = v
+      .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+      .replace(/\s+/g, "\\s+");
+    const notPossessive = "(?![\\w'’])";
+    out.push(
+      new RegExp(
+        `\\b(?:I['’]m|I am|this is|it['’]s|call me)\\s+${esc}${notPossessive}`,
+        "gi"
+      ),
+      new RegExp(`\\b${esc}\\s+here\\b`, "gi")
+    );
+  }
+  return out;
+}
+
+/** Character spans [start, end) of every self-introduction in `text`. Pure. */
+export function introSpans(
+  text: string,
+  hostName: string | undefined
+): [number, number][] {
+  const spans: [number, number][] = [];
+  for (const re of introPatterns(hostName)) {
+    re.lastIndex = 0;
+    for (const m of Array.from(text.matchAll(re)))
+      spans.push([m.index!, m.index! + m[0].length]);
+  }
+  return spans;
+}
+
+/**
+ * True when a line is the host introducing themself: "I'm Hank Hardwood", "I am Granny Mae",
+ * "Hank here", "this is Ruth", "my name is…". Built from the channel's `hostName` (with and
+ * without an honorific, and the first name alone) so it works for every channel without a
+ * per-channel list. A possessive ("it's Hank's saw") is not an introduction. Pure — unit-tested.
+ */
+export function introducesHost(
+  text: string | undefined,
+  hostName: string | undefined
+): boolean {
+  return introSpans(text ?? "", hostName).length > 0;
+}
+
+/**
+ * Put the host on camera wherever they introduce themself — a constant of the format, like the
+ * cold open, the CTAs and the close: job 110 said "I'm Hank Hardwood, and this one's for anybody
+ * standing in a garage with a saw," over a picture of a workbench. Every scene the introduction
+ * TOUCHES becomes a full-frame host beat flagged `hostIntro`, which every balancer after this
+ * treats as protected (`hostAnchorKind` "hook", `enforceVisualAdjacency`,
+ * `rebalanceHostScreenTime`, `shapeHostSections`, `enforceHostSplitMix`, `hostTheCtaPitch`), so the
+ * host budget pays for it out of the check-ins; `completeHostSentences`, run after this, joins the
+ * pieces into one take of the whole sentence.
+ *
+ * Searched across the WHOLE running text, not scene by scene: the script is cut into chunks by
+ * word count before voicing, and a cut can land inside the name — "…I'm Granny" | "Mae, and this
+ * one's for…" — where neither piece is an introduction on its own (Granny Mae, Hannah Yoder and
+ * Granny Ruth all shipped their introduction over b-roll that way, jobs 115-117). Never on a
+ * scan-window, cover or asset beat. `canHost` false (no host photo, b-roll only) flags nothing.
+ * Returns the scene indices it put on camera. Mutates in place; pure otherwise — unit-tested.
+ */
+export function markHostIntroductions(
+  scenes: StoryboardScene[],
+  hostName: string | undefined,
+  canHost: boolean
+): number[] {
+  const flipped: number[] = [];
+  if (!canHost) return flipped;
+  const at: { start: number; end: number }[] = [];
+  let full = "";
+  for (const s of scenes) {
+    if (full) full += " ";
+    const start = full.length;
+    full += s.scriptText ?? s.narration ?? "";
+    at.push({ start, end: full.length });
+  }
+  for (const [a, b] of introSpans(full, hostName)) {
+    scenes.forEach((s, i) => {
+      if (at[i].end <= a || at[i].start >= b) return;
+      if (s.qrHero || s.coverHero || s.assetImageUrl) return;
+      s.hostIntro = true;
+      if (!s.hostPresent) {
+        promoteCutawayToHost(s);
+        flipped.push(s.index);
+      }
+      s.splitVisual = undefined;
+      s.splitMotion = undefined;
+    });
+  }
+  return flipped;
+}
+
+/**
+ * The longest one host take may run while it is being stretched to finish its sentence. A HeyGen
+ * render has no clip-length cap the way a grok b-roll clip does (`LONG_SCENE_MAX_SEC` exists for
+ * THAT lane), so the host's ceiling is about the viewer, not the provider: past ~15s of one face
+ * the shot needs a cutaway anyway, and a sentence that long gets one at a clause break — the
+ * voice carrying on over the b-roll, the ordinary L-cut.
+ */
+export const HOST_SENTENCE_MAX_SEC = 15;
+
+/** True when a scene's verbatim text finishes a sentence (terminal punctuation, then any quote or
+ *  bracket). Pure. */
+export function endsSentence(text: string | undefined): boolean {
+  return /[.!?…]["'”’)\]]*$/.test((text ?? "").trim());
+}
+
+/** True when scene `i` begins a sentence — the film's first scene, or its predecessor ended one. */
+export function startsSentence(scenes: StoryboardScene[], i: number): boolean {
+  return (
+    i <= 0 || endsSentence(scenes[i - 1].scriptText ?? scenes[i - 1].narration)
+  );
+}
+
+/**
+ * Make every host take speak whole sentences. The script is cut into clause-sized pieces for the
+ * b-roll lane (≤8s, ≤5s inside the fast open) and host beats were picked from those same pieces,
+ * so on the film that prompted this 22 of 31 host takes started or ended mid-sentence: the host
+ * opened "Out of 10 Japanese woodworking projects you can build from cheap box-store lumber," and
+ * was cut away before the point, came back 0.37s later mid-thought, and did it again all film.
+ * Industry rule for A-roll: the person on camera finishes the thought — cutting AWAY mid-sentence
+ * while the voice carries on is an L-cut, but a take that stops at a comma reads as the speaker
+ * being cut off.
+ *
+ * Each host beat absorbs the neighbouring pieces of its own sentence — backwards to where the
+ * sentence starts, forwards to where it ends — keeping the HOST's register (the cold open's when
+ * the opener is one side), up to `HOST_SENTENCE_MAX_SEC`. Never across a scan-window, cover or
+ * asset beat, never across a CTA-block edge, and never folding the two locked cold-open angles
+ * into one. Runs after voicing and BEFORE the final `assignSceneRanges`, like the other reshaping
+ * passes, so it costs nothing: the merged text is re-sliced from the same master. Only merges.
+ * Renumbers. Pure — unit-tested.
+ */
+export function completeHostSentences(
+  scenes: StoryboardScene[],
+  metric: SizeMetric = MEASURED_SIZE,
+  maxSec: number = HOST_SENTENCE_MAX_SEC
+): StoryboardScene[] {
+  const textOf = (s: StoryboardScene) => s.scriptText ?? s.narration ?? "";
+  const fixed = (s: StoryboardScene) =>
+    !!s.qrHero || !!s.coverHero || !!s.assetImageUrl;
+  const sameBlock = (a: StoryboardScene, b: StoryboardScene) =>
+    (a.cta === true) === (b.cta === true) && a.ctaIndex === b.ctaIndex;
+  const bothOpeners = (a: StoryboardScene, b: StoryboardScene) =>
+    !!a.hostOpener && !!b.hostOpener;
+  const size = new Map<StoryboardScene, number>();
+  const sz = (s: StoryboardScene) => size.get(s) ?? metric.sizeOf(s);
+
+  const out: StoryboardScene[] = [];
+  for (let i = 0; i < scenes.length; i++) {
+    const s = scenes[i];
+    if (!s.hostPresent || fixed(s)) {
+      out.push(s);
+      continue;
+    }
+    let cur = s;
+    let curSize = sz(s);
+    // Back to the start of the sentence.
+    while (out.length) {
+      const prev = out[out.length - 1];
+      if (endsSentence(textOf(prev))) break;
+      if (fixed(prev) || !sameBlock(prev, cur) || bothOpeners(prev, cur)) break;
+      if (curSize + sz(prev) > maxSec) break;
+      const keep = prev.hostOpener && prev.hostPresent ? prev : cur;
+      const intro = prev.hostIntro || cur.hostIntro;
+      cur = mergeScenePair(prev, cur, keep);
+      if (intro) cur.hostIntro = true;
+      curSize += sz(prev);
+      out.pop();
+    }
+    // On to its end.
+    while (i + 1 < scenes.length && !endsSentence(textOf(cur))) {
+      const next = scenes[i + 1];
+      if (fixed(next) || !sameBlock(cur, next) || bothOpeners(cur, next)) break;
+      if (curSize + sz(next) > maxSec) break;
+      const intro = cur.hostIntro || next.hostIntro;
+      cur = mergeScenePair(cur, next, cur);
+      if (intro) cur.hostIntro = true;
+      curSize += sz(next);
+      i++;
+    }
+    if (cur !== s) size.set(cur, curSize);
+    out.push(cur);
+  }
+  out.forEach((s, i) => (s.index = i + 1));
+  return out;
 }
 
 /**
@@ -8369,6 +8707,29 @@ export function coalesceShortScenes(
       // Couldn't merge under the ceiling, so the BOUNDARY moved instead: the scene took whole
       // clauses off a neighbor and now genuinely speaks its floor. Free — same master read.
       out.push(s);
+    } else if (metric.flash != null && dur < metric.flash) {
+      // A FLASH: nothing freeze-pads it any more, so it would blink past. Fold it into the shorter
+      // non-hero neighbour past the ceiling — a cold-open take included, keeping the opener's
+      // register — since a slightly long shot beats a blink. Only a scene between two heroes (or
+      // alone) is left, as before.
+      const loose = (n: StoryboardScene | undefined): n is StoryboardScene =>
+        !!n && !isHeroBeat(n);
+      const p = loose(prev) ? prev : undefined;
+      const n = loose(next) ? next : undefined;
+      const intoNext = !!n && (!p || metric.sizeOf(n) < metric.sizeOf(p));
+      const nb = intoNext ? n : p;
+      if (!nb) {
+        metric.onOrphan?.(s);
+        out.push(s);
+      } else {
+        const keep = nb.hostOpener ? nb : s.hostPresent === true ? s : nb;
+        if (intoNext) {
+          out.push(merge(s, nb, keep));
+          i++;
+        } else {
+          out[out.length - 1] = merge(nb, s, keep);
+        }
+      }
     } else {
       // Both neighbors are hero beats, unsplittable, or too short to spare a clause (or the
       // scene is alone) — measured metric floors the hold (freeze + silent pad in mux).
@@ -8406,60 +8767,42 @@ export function applySceneHoldFloor(
 }
 
 /**
- * Give each big-QR block its scan window (`QR_HERO_MIN_WINDOW_SEC`..`QR_HERO_MAX_WINDOW_SEC`,
- * spoken time + `QR_HERO_WAIT_SEC`), recorded as `qrHoldSec` on the block's `qrTail` beat. Also
- * run by `assembleAndFinalize`, so a film voiced under an older window picks up the current one
- * on its next Reassemble. The `qrHero` block is the one register with NO
- * on-screen floor — `applySceneHoldFloor` returns early on it, deliberately, so the card is
- * never freeze-padded mid-block — which left the scan window equal to however long the trigger
- * line happened to take to say. "Now go ahead and grab your phone" is ~1.7s; with the flat 3s
- * tail that is under 5s from the code appearing to the cut, most of it spent while the viewer is
- * still reaching for a phone.
+ * Audit each big-QR block's scan window and clear any legacy frozen pause. The window used to be
+ * topped up to `QR_HERO_MIN_WINDOW_SEC` with a silent frozen tail (`qrHoldSec` on the block's
+ * `qrTail` beat); on review that read as the film STOPPING for three seconds after every CTA, so
+ * the top-up is retired (2026-09-23) and the window is the block's own narration — from the scan
+ * line to ===END CTA=== (`markCtaQrBlock`). Nothing here lengthens a film any more.
  *
- * The window is the WHOLE contiguous `qrHero` run — the code is on screen across all of it, big
- * on the filler beats and small bottom-right on any beat that kept the host (`toQr`), so the
- * scan window is the run, not one beat of it. Measured from the persisted narration slices so it
- * reflects what was actually voiced; the top-up lands entirely on the last beat's frozen tail,
- * which is the only place that can
- * grow without moving the master narration. Never shortens: a block already at or over the
- * minimum keeps the flat default and is byte-identical to before this pass existed. Idempotent
- * (it recomputes from the slices, not from its own last answer), and it writes `qrHoldSec`, not
- * `tailHoldSec`, so an operator's own hold still wins. Mutates in place. Pure — unit-tested.
+ * What it does instead: deletes a stale `qrHoldSec` (a film voiced under the old rule still carries
+ * one — `sceneHoldPlan` ignores it too, this just keeps the storyboard honest) and returns every
+ * block whose SPOKEN window is under `QR_SCAN_WINDOW_WARN_SEC`, so the voicing stage can warn that
+ * the script needs another line after the scan instruction. Measured from the persisted narration
+ * slices. Idempotent. Mutates in place. Pure — unit-tested.
  */
 export function extendQrHeroWindow(
   scenes: StoryboardScene[],
-  window: { minSec: number; maxSec: number; waitSec: number } = {
-    minSec: QR_HERO_MIN_WINDOW_SEC,
-    maxSec: QR_HERO_MAX_WINDOW_SEC,
-    waitSec: QR_HERO_WAIT_SEC,
-  }
-): void {
+  warnBelowSec: number = QR_SCAN_WINDOW_WARN_SEC
+): { firstIndex: number; spokenSec: number }[] {
   const spokenSec = (s: StoryboardScene) => {
     const slice = (s.narrationEndSec ?? 0) - (s.narrationStartSec ?? 0);
     return slice > 0 ? slice : (s.audioDuration ?? 0);
   };
+  const short: { firstIndex: number; spokenSec: number }[] = [];
+  for (const s of scenes) delete s.qrHoldSec;
   for (let i = 0; i < scenes.length; i++) {
     if (!scenes[i].qrHero) continue;
     let end = i;
     while (end + 1 < scenes.length && scenes[end + 1].qrHero) end++;
-    // The block's tail beat. `markCtaQrBlock` flags the last one; a storyboard whose flags were
-    // written by an older build (or a block the release line never closed) has none, and there
-    // is then no beat whose tail may grow — leave it exactly as it is.
-    const tail = scenes.slice(i, end + 1).find(s => s.qrTail);
-    if (tail) {
-      let spoken = 0;
-      for (let k = i; k <= end; k++) spoken += spokenSec(scenes[k]);
-      const target = Math.min(
-        window.maxSec,
-        Math.max(window.minSec, spoken + window.waitSec)
-      );
-      const needed = target - spoken;
-      if (needed > QR_TAIL_HOLD_SEC)
-        tail.qrHoldSec = Math.round(needed * 100) / 100;
-      else delete tail.qrHoldSec; // back under the minimum's reach — flat default again
-    }
+    let spoken = 0;
+    for (let k = i; k <= end; k++) spoken += spokenSec(scenes[k]);
+    if (spoken > 0 && spoken < warnBelowSec)
+      short.push({
+        firstIndex: scenes[i].index,
+        spokenSec: Math.round(spoken * 10) / 10,
+      });
     i = end;
   }
+  return short;
 }
 
 /**
@@ -9405,6 +9748,72 @@ async function renderHostGroup(opts: {
 }
 
 /**
+ * The clip for one scene in a REHEARSAL (`LongformInputParams.rehearsal`): everything the real
+ * render makes except the two paid video lanes. A host beat is a slow zoom on the host photo it
+ * would have been synced from (its angle's photo), then goes through `composeHostScene` exactly
+ * like a HeyGen clip would — so a split still gets its generated panel and composite. A moving
+ * cutaway renders as its still. The cover and uploaded assets are the literal images, as ever.
+ * Nothing here calls HeyGen, RunPod, 69Labs video or APIMART video.
+ */
+async function rehearseSceneClips(
+  jobId: number,
+  scene: StoryboardScene,
+  params: LongformInputParams,
+  instruction: string,
+  persist: () => Promise<void>
+): Promise<string[]> {
+  const apimartKey =
+    params.apimartSlot != null
+      ? await getApimartSlotKey(params.apimartSlot)
+      : null;
+  scene.lipsynced = false;
+  if (scene.assetImageUrl || scene.coverHero) {
+    const literal =
+      scene.assetImageUrl ?? coverImageForScene(scene, params) ?? undefined;
+    if (literal)
+      return generateSceneStillClip(
+        jobId,
+        scene,
+        literal,
+        undefined,
+        params.videoSubject,
+        false,
+        apimartKey
+      );
+  }
+  if (scene.hostPresent) {
+    const photo = hostFaces(params)[scene.hostShot ?? 0] ?? params.faceImageUrl;
+    if (!photo)
+      throw new Error(`Scene ${scene.index} is a host beat with no host photo`);
+    const slice =
+      (scene.narrationEndSec ?? 0) - (scene.narrationStartSec ?? 0) ||
+      scene.audioDuration ||
+      5;
+    const mp4 = await renderKenBurnsClip(photo, {
+      durationSec: Math.ceil(slice) + 1,
+      aspectRatio: TALKING_HEAD_ASPECT_RATIO,
+      index: scene.index,
+    });
+    const { url } = await storagePut(
+      `longform/${jobId}/clip-${scene.index}-0-${nanoid(6)}.mp4`,
+      mp4,
+      "video/mp4"
+    );
+    scene.splitMotion = undefined; // the panel renders as a still — no paid video lane
+    return composeHostScene(jobId, scene, [url], params, instruction, persist);
+  }
+  return generateSceneStillClip(
+    jobId,
+    scene,
+    undefined,
+    scene.showsBook ? params.bookCoverImageUrl : undefined,
+    params.videoSubject,
+    false,
+    apimartKey
+  );
+}
+
+/**
  * Finish a host render: remember the bare host clip, then composite the split-screen right
  * panel when the scene has one (falling back to the full-frame host on any failure).
  */
@@ -9507,6 +9916,9 @@ export async function generateSceneClips(
   // false). Runs before every generation lane; the mutation is persisted back, self-healing the
   // stored storyboard. The end-of-video literal cover reveal (`coverHero`) is independent.
   scene.showsBook = false;
+
+  if (params.rehearsal)
+    return rehearseSceneClips(jobId, scene, params, instruction, persist);
 
   // Images (keyframes/stills) always render on OpenAI's official gpt-image-2. B-roll MOTION clips
   // render on APIMART grok-imagine ONLY. Resolved once per scene from `params.apimartSlot` so a
@@ -10038,8 +10450,12 @@ export async function dispatchScenesByProvider(
   // RunPod host beats render in GROUPS (`server/lipsyncBatch.ts`): the dispatcher runs each
   // group's leader once, and the leader cuts and completes its members. Members are never
   // dispatched on their own while their leader is in the batch.
+  // A rehearsal renders no lip-sync at all (`rehearseSceneClips`), so every host beat is its own
+  // dispatch — a grouped member would wait on a leader that never cuts it a clip.
   const grouped =
-    lipsync?.provider === "runpod" && ENV.runpodLipsyncBatch > 1
+    lipsync?.provider === "runpod" &&
+    ENV.runpodLipsyncBatch > 1 &&
+    !params.rehearsal
       ? assignLipsyncGroups(hostAll, {
           maxScenes: ENV.runpodLipsyncBatch,
           maxSec: ENV.runpodLipsyncBatchMaxSec,
@@ -10316,6 +10732,12 @@ export async function buildSceneNarration(
 }
 
 /**
+ * Delivery runs voiced at once by `voiceMasterNarration`. Matches 69Labs' submit burst
+ * (`SIXTYNINE_TTS_SUBMIT_BURST`, 3); the TTS adapter's own limiter still paces the submits.
+ */
+const MASTER_TTS_CONCURRENCY = 3;
+
+/**
  * Voice the ENTIRE spoken script as ONE continuous master narration and return its URL. A single
  * 69Labs request (`text` accepts up to 500k chars) gives one uninterrupted read — consistent
  * prosody with no per-scene restarts. If that one-shot fails for any non-moderation reason (e.g. a
@@ -10349,15 +10771,35 @@ async function voiceMasterNarration(
     );
     return { url: params.manualNarrationUrl };
   }
+  // Already voiced by an earlier run of this job that a server restart cut off
+  // (`server/restartResume.ts`): the same script and the pinned delivery plan, so the same read.
+  if (params.voicedMasterUrl) {
+    console.log(
+      `[Longform ${jobId}] reusing the master narration voiced before the restart — skipping TTS`
+    );
+    return { url: params.voicedMasterUrl };
+  }
   const speed = params.ttsSpeed;
   let providerUrl: string;
   if (planChangesTheRead(params.deliveryPlan)) {
     try {
       const runs = deliveryRuns(spokenScript, params.deliveryPlan!);
-      const runUrls: string[] = [];
-      for (const run of runs) {
-        runUrls.push(
-          await generateSceneVoiceover(
+      // Voiced MASTER_TTS_CONCURRENCY at a time, in script order — one after another, a
+      // 21-minute script's 45-odd runs took over half an hour — and reported on the job card,
+      // which otherwise sat on "0/276 scenes" the whole time (scenes are sliced after this).
+      const runUrls: string[] = new Array(runs.length);
+      let next = 0;
+      let done = 0;
+      const report = () =>
+        setJobPhase(jobId, {
+          label: `Recording narration ${done}/${runs.length}`,
+          pct: Math.round((done / runs.length) * 100),
+        });
+      const worker = async () => {
+        while (next < runs.length) {
+          const k = next++;
+          const run = runs[k];
+          runUrls[k] = await generateSceneVoiceover(
             providerType,
             apiKey,
             run.text,
@@ -10368,8 +10810,21 @@ async function voiceMasterNarration(
             TTS_STABILITY,
             TTS_STYLE,
             TTS_SIMILARITY
+          );
+          done++;
+          report();
+        }
+      };
+      report();
+      try {
+        await Promise.all(
+          Array.from(
+            { length: Math.min(MASTER_TTS_CONCURRENCY, runs.length) },
+            worker
           )
         );
+      } finally {
+        setJobPhase(jobId, null);
       }
       const buffer = await levelMasterNarration(
         jobId,
@@ -10915,7 +11370,7 @@ export async function buildUnifiedScenes(
  * surface an advisory warning.
  *
  * Also carries the whole-video direction (`deriveVisualDirection`) into every rewrite:
- * `params.visualStyleBible` — the one world all cutaways share — and `scene.visualBeat` — this
+ * `params.visualStyleBible` — the home base and the places the video travels to — and `scene.visualBeat` — this
  * stretch's slice of the arc. Both are DISAMBIGUATION-ONLY hints, phrased like `subjectLine`,
  * because the enhancer's own SCRIPT ALIGNMENT rule forbids introducing anything the narration
  * doesn't state. CTA cutaways get the bible but never a beat. With neither set (a pre-feature
@@ -10990,10 +11445,13 @@ export async function enhanceBrollPrompts(
   // Empty when no bible was derived ⇒ the user message is byte-identical to pre-feature.
   const bible = params.visualStyleBible?.trim();
   const directionLine = bible
-    ? `Channel visual direction (every cutaway in this video shares ONE world — for ` +
+    ? `Channel visual direction (the video's home base and the places it travels to — for ` +
       `DISAMBIGUATION only): ${bible}. Use it only to settle a detail the narration leaves ` +
-      `open (which place, which season, which of these materials); do NOT introduce any object ` +
-      `the narration doesn't state, and do NOT treat it as a list of things to show.\n`
+      `open (which place, which season, which of these materials). If the narration or original ` +
+      `prompt names or implies a place other than the home base (where a thing is used, sold, ` +
+      `or comes from), set the shot IN that place — never as a picture, poster, or sample of it ` +
+      `inside the workshop; do NOT introduce any object the narration doesn't state, and do NOT ` +
+      `treat this as a list of things to show.\n`
     : "";
 
   // The scene's slice of the video's arc. Cutaways and splitVisual get it; CTA cutaways never do
@@ -11438,6 +11896,12 @@ async function runUnifiedPipeline(
     spokenScript,
     params
   );
+  // Checkpoint it now, not at the end of voicing: transcription and alignment take minutes, and a
+  // restart in them used to lose a whole paid read.
+  if (!params.manualNarrationUrl && params.voicedMasterUrl !== master.url) {
+    params.voicedMasterUrl = master.url;
+    await updateLongformVideoJob(jobId, { inputParams: params });
+  }
   await assertNotCancelled(jobId);
   // Transcribe a mono-16k copy (keeps Whisper under its 25MB cap on long videos) for word
   // timings; any transcription failure falls back to a proportional (by-word-count) split.
@@ -11580,6 +12044,30 @@ async function runUnifiedPipeline(
     );
   }
 
+  // Host takes speak WHOLE sentences: each host beat absorbs the rest of its own sentence from its
+  // neighbours (`completeHostSentences`). Re-measured first — the merges above cleared the lengths
+  // of the scenes they joined — and free like them: the same master re-sliced.
+  assignSceneRanges(scenes, words, masterDurationSec);
+  // The host introducing themself is always on camera, like the open, the CTAs and the close.
+  const introHosts = markHostIntroductions(
+    scenes,
+    params.hostName,
+    !!params.faceImageUrl && !params.brollOnly
+  );
+  if (introHosts.length) {
+    console.log(
+      `[Longform ${jobId}] host introduction on camera: scene(s) ${introHosts.join(", ")}`
+    );
+  }
+  const beforeHostSentences = scenes.length;
+  scenes = completeHostSentences(scenes, measuredSizeFor(pacing));
+  if (scenes.length !== beforeHostSentences) {
+    console.log(
+      `[Longform ${jobId}] host sentences: merged ${beforeHostSentences} → ${scenes.length} scenes ` +
+        `(host takes finish their sentence, ≤${HOST_SENTENCE_MAX_SEC}s)`
+    );
+  }
+
   // Final ranges after all reshaping has settled, then physically cut the master into per-scene
   // tracks and upload each (downstream stages consume scene.audioUrl exactly as before). Cuts are
   // snapped onto real pauses (never mid-word), so each slice is clean for lip-sync too.
@@ -11640,10 +12128,16 @@ async function runUnifiedPipeline(
   // coverHero beats are skipped (they play their own narration with no pad). Same helper guards
   // the regenerate/retry path so no scene escapes.
   for (const s of scenes) applySceneHoldFloor(s, pacing);
-  // The one register that pass skips gets its own minimum here: the big QR must stay up long
-  // enough to actually be scanned, and the block's narration alone does not guarantee that.
+  // The big QR's scan window is the block's own narration (no frozen top-up any more), so a block
+  // that ends right after "scan it" is flagged here — the fix is another line in the script.
   // Runs after the slices are persisted above — it measures the window from them.
-  extendQrHeroWindow(scenes);
+  for (const b of extendQrHeroWindow(scenes)) {
+    appendJobWarning(
+      jobId,
+      `Scene ${b.firstIndex}: the big QR is only on screen for ${b.spokenSec}s of narration — ` +
+        `add a line after the scan instruction (before ===END CTA===) so viewers have time to scan.`
+    );
+  }
   // Post-condition on the whole band-enforcement sequence, checked against the FINAL durations
   // (silence snapping above rewrites them by up to SNAP_TOLERANCE_SEC). A survivor here is a
   // clause-less over-long sentence — it renders one clip with a frozen tail rather than failing,
@@ -11710,8 +12204,9 @@ async function runUnifiedPipeline(
   const hostSectionSec = hostSectionSecForJob(params, scenes);
   if (hostBudget) {
     const plan = planHostMinutes(scenes, hostBudget.budgetSec, {
-      canPromote: !!params.faceImageUrl,
+      canPromote: !!params.faceImageUrl && !params.brollOnly,
       sectionSec: hostSectionSec,
+      assetCount: params.assets?.length ?? 0,
     });
     console.log(
       `[Longform ${jobId}] host budget ${formatMinSec(hostBudget.budgetSec)} ` +
@@ -11960,18 +12455,14 @@ async function runUnifiedPipeline(
       s.splitVisual = stripHostNames(s.splitVisual, hostAliases);
   }
 
-  // Guarantee the host appears on camera at least once across the CTA — run LAST, after the
-  // balancers and prompt scrub, so nothing demotes it before clip generation. Its talking-head
-  // prompt uses the generic descriptor (no host name), so it needs no further scrub.
+  // Operator assets take their beats first — after every balancer, so nothing downstream converts
+  // one back, and BEFORE the pitch goes to the host, which needs the pitch's cutaways to still be
+  // there to hand them out. No-op without uploads. (Their prompts were enhanced above and are now
+  // unused: at most one wasted Flash call per asset. ponytail: skip them in `enhanceBrollPrompts`
+  // if asset counts ever grow.)
   const hostBeforeCta = new Set(
     scenes.filter(s => s.hostPresent).map(s => s.index)
   );
-  ensureHostInCta(scenes);
-  // Operator assets take their beats next — after every balancer, so nothing downstream converts
-  // one back (`shapePitchQrStretches` treats them as fixed). No-op without uploads. (Their prompts
-  // were enhanced above and are now unused: at most one wasted Flash call per asset, against a
-  // pass order that would otherwise have to be re-reasoned. ponytail: skip them in
-  // `enhanceBrollPrompts` if asset counts ever grow.)
   const placedAssets = placeAssetBeats(scenes, params.assets, {
     captions: pacing.captions.enabled,
     qrImageUrl: params.qrImageUrl,
@@ -11992,22 +12483,21 @@ async function runUnifiedPipeline(
       );
     }
   }
-  // Arrange the pitch so the big QR card holds 10–15s at a time between host moments. Last
-  // register change before render: it has to see the assets (small card) where they landed.
-  const shaped = shapePitchQrStretches(scenes, {
-    canPromote: !!params.faceImageUrl && !params.brollOnly,
-    hostsMayTouch: hostFaces(params).length > 1,
+  // The CTA layout: host → book → host → big QR. Every pitch beat goes to the host full screen
+  // (small QR bottom-right), no splits, no b-roll. Run LAST among the register passes so nothing
+  // demotes the pitch before clip generation; its talking-head prompt uses the generic descriptor
+  // (no host name), so it needs no further scrub.
+  const pitchHosts = hostTheCtaPitch(scenes, {
+    canHost: !!params.faceImageUrl && !params.brollOnly,
   });
-  if (shaped.demoted.length || shaped.promoted.length) {
+  if (pitchHosts.length) {
     console.log(
-      `[Longform ${jobId}] pitch QR stretches: ${shaped.demoted.length} host moment(s) → b-roll ` +
-        `[${shaped.demoted.join(", ")}], ${shaped.promoted.length} → host ` +
-        `[${shaped.promoted.join(", ")}] (target ${PITCH_QR_STRETCH_MIN_SEC}–` +
-        `${PITCH_QR_STRETCH_MAX_SEC}s of big QR)`
+      `[Longform ${jobId}] CTA pitch: ${pitchHosts.length} beat(s) → host ` +
+        `[${pitchHosts.join(", ")}]`
     );
   }
   // The host budget's last word: the CTA passes above add host beats the plan only estimated.
-  // Anything this demotes was host before `ensureHostInCta`, so `demotedLate` below re-enhances it.
+  // Anything this demotes was host before the pitch pass, so `demotedLate` below re-enhances it.
   if (hostBudget) {
     const capped = capHostMinutes(scenes, hostBudget.budgetSec, hostSectionSec);
     if (capped.demoted.length) {
@@ -12017,9 +12507,11 @@ async function runUnifiedPipeline(
       );
     }
     if (capped.overBudget) {
-      console.warn(
-        `[Longform ${jobId}] host ${formatMinSec(capped.hostSec)} is over the ` +
-          `${formatMinSec(hostBudget.budgetSec)} budget on hook/CTA/outro beats alone — left as is`
+      appendJobWarning(
+        jobId,
+        `Host is ${formatMinSec(capped.hostSec)}, over the ${formatMinSec(hostBudget.budgetSec)} ` +
+          `budget on the intro, CTAs and outro alone — no check-ins left to cut. Pick more host ` +
+          `minutes, or shorten the CTA pitch, to bring it back under.`
       );
     }
   }
@@ -12306,8 +12798,14 @@ export async function runLongformPipeline(jobId: number): Promise<void> {
       : await resolveTTSVendor(params);
     const { providerType: ttsType, apiKey: ttsKey } = tts;
 
-    // Single unified path: verbatim continuous narration + AI host/b-roll storyboard.
-    await runUnifiedPipeline(jobId, params, adapter, ttsType, ttsKey);
+    // Single unified path: verbatim continuous narration + AI host/b-roll storyboard. Heartbeat
+    // the WHOLE run — voicing and storyboarding happen before any job lock opens.
+    const stopBeat = startJobHeartbeat(jobId);
+    try {
+      await runUnifiedPipeline(jobId, params, adapter, ttsType, ttsKey);
+    } finally {
+      stopBeat();
+    }
   } catch (err: any) {
     // Cancellation: the row was already set to failed/"Cancelled by user" by
     // cancelLongformJob — don't clobber it or log as an error.
@@ -12757,44 +13255,50 @@ async function assembleAndFinalizeCore(
     })
   );
 
-  const ready = readyScenes.map((s, i) => ({
-    captionPng: captionPngs.get(i),
-    clipUrls: s.clipUrls?.length ? s.clipUrls : [s.clipUrl as string],
-    trimLeadSec: clipTrimFor(s, params.faceImageUrl),
-    // InfiniteTalk renders 720p onto a 1080p canvas: lanczos + mild sharpen on the way up.
-    // `renderProvider` is what the lip-sync lane recorded at render time, so a HeyGen-rendered
-    // host (native 1080p) and every b-roll clip stay untouched.
-    sharpenHost: !!s.hostPresent && s.renderProvider === "runpod",
-    audioUrl: s.audioUrl as string,
-    // Every hold input — the on-screen floor, the CTA release tail, an operator's own hold —
-    // comes from one shared helper, so assembly, the chapter map and the
-    // browser's live preview cannot disagree about how long a scene is on screen. The floor is
-    // derived here when the storyboard predates `minHoldSec`: `floorFor` needs the channel's
-    // pacing, which only the server has.
-    ...(({ holdSec, ...hold }) => ({ audioDurationSec: holdSec, ...hold }))(
-      sceneHoldPlan(s, s.minHoldSec ?? floorFor(s, pacingFor(params)))
-    ),
-    // The QR draws ONLY on anchored beats — the big-QR "grab your phone" block (qrHero), the
-    // small pre-cover scan window (qrCorner), and the cover-reveal beat (coverHero) — never on
-    // ordinary cta/price scenes, so a spoken dollar amount can't surface it.
-    qrOverlayUrl: qrOverlayUrlFor(s, params.qrImageUrl, params.ctaBooks),
-    // Big centered card on b-roll, big card in the b-roll panel of a split, small corner over a
-    // full-frame host or the book — see `qrPlacementFor`. The split's own geometry rides along
-    // so the card follows a moved seam or a host swapped to the right.
-    qrPlacement: qrPlacementFor(s),
-    splitLayout: s.splitLayout,
-    // A host beat's card is small because someone is TALKING; in its frozen wait nobody is, so
-    // the card goes big for the wait — see `qrBigDuringHold`.
-    qrBigDuringHold: qrBigDuringHold(s),
-    // Operator trim — which part of the rendered clip the scene shows.
-    clipInSec: s.clipInSec,
-    // Operator cut markers and their per-piece footage overrides (CapCut-style split).
-    cutPoints: s.cutPoints,
-    pieceClipIns: s.pieceClipIns,
-    // The scene's slice of the master timeline (overlay mode only).
-    sliceStartSec: masterAudioUrl ? s.narrationStartSec : undefined,
-    sliceEndSec: masterAudioUrl ? s.narrationEndSec : undefined,
-  }));
+  // The CTA as the current rule draws it, on films rendered under an older one: the big card runs
+  // to the block's end on b-roll (a host take in the window borrows its neighbour's picture), and
+  // a split pitch beat plays its full-frame host take (`ctaAssemblyScene`).
+  const ctaView = new Map(
+    sorted.map((s, i) => [s.index, ctaAssemblyScene(sorted, i)])
+  );
+
+  const ready = readyScenes.map((scene, i) => {
+    const s = ctaView.get(scene.index) ?? scene;
+    return {
+      captionPng: captionPngs.get(i),
+      clipUrls: s.clipUrls?.length ? s.clipUrls : [s.clipUrl as string],
+      trimLeadSec: clipTrimFor(s, params.faceImageUrl),
+      // InfiniteTalk renders 720p onto a 1080p canvas: lanczos + mild sharpen on the way up.
+      // `renderProvider` is what the lip-sync lane recorded at render time, so a HeyGen-rendered
+      // host (native 1080p) and every b-roll clip stay untouched.
+      sharpenHost: !!s.hostPresent && s.renderProvider === "runpod",
+      audioUrl: s.audioUrl as string,
+      // Every hold input — the on-screen floor, the CTA release tail, an operator's own hold —
+      // comes from one shared helper, so assembly, the chapter map and the
+      // browser's live preview cannot disagree about how long a scene is on screen. The floor is
+      // derived here when the storyboard predates `minHoldSec`: `floorFor` needs the channel's
+      // pacing, which only the server has.
+      ...(({ holdSec, ...hold }) => ({ audioDurationSec: holdSec, ...hold }))(
+        sceneHoldPlan(s, s.minHoldSec ?? floorFor(s, pacingFor(params)))
+      ),
+      // The QR draws ONLY on anchored beats — the scan window (qrHero), the pitch around it
+      // (qrCorner), and the cover-reveal beat (coverHero) — never on ordinary cta/price scenes, so a
+      // spoken dollar amount can't surface it.
+      qrOverlayUrl: qrOverlayUrlFor(s, params.qrImageUrl, params.ctaBooks),
+      // Big and centred in the scan window, small bottom-right everywhere else — see
+      // `qrPlacementFor`. The card moves once per CTA.
+      qrPlacement: qrPlacementFor(s),
+      splitLayout: s.splitLayout,
+      // Operator trim — which part of the rendered clip the scene shows.
+      clipInSec: s.clipInSec,
+      // Operator cut markers and their per-piece footage overrides (CapCut-style split).
+      cutPoints: s.cutPoints,
+      pieceClipIns: s.pieceClipIns,
+      // The scene's slice of the master timeline (overlay mode only).
+      sliceStartSec: masterAudioUrl ? s.narrationStartSec : undefined,
+      sliceEndSec: masterAudioUrl ? s.narrationEndSec : undefined,
+    };
+  });
 
   // Host lower third ("Riley Danvers" / "Gardener" / "Fresno, CA"), held continuously across the
   // locked cold open. Entirely non-fatal: a render failure — or no host identity on the channel,
@@ -13291,6 +13795,28 @@ export function isJobRegenerating(jobId: number): boolean {
   return Array.from(activeRegenerations).some(k => k.startsWith(prefix));
 }
 
+/**
+ * Touch the job's `updatedAt` every 60s until the returned stop function is called, so the
+ * watchdog's 30-minute stale sweep (`markStaleLongformJobsFailed`) only reaps a job whose process
+ * is actually gone. MUST set `updatedAt` explicitly — MySQL fires ON UPDATE CURRENT_TIMESTAMP only
+ * when a column value changes, so re-writing an unchanged status heartbeats nothing.
+ *
+ * Used by `withJobLock` (clips, assembly, resume, retry, regen) AND around the whole of
+ * `runLongformPipeline`: the voicing and storyboard stages run before the lock opens and used to
+ * send no heartbeat at all, so a long script whose master took over 30 minutes to voice (the
+ * 21-minute Hank script voiced as 53 delivery runs, 2026-09-24) was reaped mid-voicing with
+ * "Job timed out after 30 minutes of inactivity" while the TTS calls were still landing.
+ */
+function startJobHeartbeat(jobId: number): () => void {
+  const beat = setInterval(() => {
+    void updateLongformVideoJob(jobId, { updatedAt: new Date() }).catch(
+      () => {}
+    );
+  }, 60_000);
+  if (typeof beat.unref === "function") beat.unref();
+  return () => clearInterval(beat);
+}
+
 // A job's storyboard is one JSON blob, and every pass (pipeline clip stage, watchdog
 // retryJobAssembly, tRPC resume/retry, AND scene regen) loads its own in-memory `scenes`
 // snapshot and writes the WHOLE array back. Run two passes for one job at once and their writes
@@ -13324,16 +13850,11 @@ export function withJobLock<T>(
   // regen scenes) means every one is metered by construction — including any added later —
   // and no adapter needs to know a job exists. See `server/costMeter.ts`.
   const guarded = async () => {
-    const beat = setInterval(() => {
-      void updateLongformVideoJob(jobId, { updatedAt: new Date() }).catch(
-        () => {}
-      );
-    }, 60_000);
-    if (typeof beat.unref === "function") beat.unref();
+    const stopBeat = startJobHeartbeat(jobId);
     try {
       return await withCostMeter(jobId, fn);
     } finally {
-      clearInterval(beat);
+      stopBeat();
       // Land the pass's spend on the row now, so a crash before the next debounce tick
       // doesn't lose it and the breakdown is correct the moment the job goes idle.
       void flushJobUsage(jobId).catch(() => {});

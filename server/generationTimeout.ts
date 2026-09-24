@@ -8,6 +8,7 @@ import {
   isJobRegenerating,
   isJobRendering,
 } from "./longformVideo";
+import { resumeJobsAfterRestart } from "./restartResume";
 
 const CHECK_INTERVAL_MS = 1 * 60 * 1000; // every 1 minute
 
@@ -24,8 +25,13 @@ export function startTimeoutChecker() {
     "[Timeout] Starting longform watchdog (every 1 min, jobs stale after 30 min)"
   );
 
-  // Run once immediately on startup
-  cleanupStaleLongformJobs().catch(console.error);
+  // Run once immediately on startup — after picking up the renders the restart cut off, which
+  // resets their stale clock so this first sweep does not fail a job about to be continued.
+  resumeJobsAfterRestart()
+    .catch(err =>
+      console.error("[Restart] resuming interrupted renders failed:", err)
+    )
+    .finally(() => cleanupStaleLongformJobs().catch(console.error));
 
   intervalHandle = setInterval(() => {
     cleanupStaleLongformJobs().catch(console.error);

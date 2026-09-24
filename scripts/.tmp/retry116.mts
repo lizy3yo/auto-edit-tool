@@ -1,0 +1,13 @@
+import "dotenv/config";
+import { ensureFontConfig } from "../../server/fontConfig";
+import { resolveFFmpegPath } from "../../server/ffmpegPath";
+import { retryJobAssembly } from "../../server/longformVideo";
+import { getLongformVideoJobById } from "../../server/db";
+import { auditJob, summarize } from "../stress/audit.mts";
+ensureFontConfig();
+await resolveFFmpegPath();
+await retryJobAssembly(116);
+const j = await getLongformVideoJobById(116);
+console.log("status", j?.status, j?.errorMessage ?? "");
+if (j?.status === "completed") console.log(summarize(await auditJob(116)));
+process.exit(0);

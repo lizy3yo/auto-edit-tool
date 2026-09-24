@@ -1,14 +1,11 @@
 /**
  * server/overlayTextScan.ts
  *
- * Pre-render DEFECT gate for long-form b-roll stills: ONE vision call, two narrow verdicts.
+ * Pre-render DEFECT gate for long-form b-roll stills: ONE vision call, three narrow verdicts.
  *
  * 1. OVERLAY TEXT — every b-roll prompt already bans stamped-on text (`NO_OVERLAY_TEXT_SUFFIX`)
  *    and gpt-image-2 stamps captions/titles/watermarks anyway. The judgement is narrow on
- *    purpose, and it is why this is a vision call and not OCR: the pipeline DELIBERATELY allows
- *    incidental real-world text (`ENGLISH_TEXT_ONLY` wants readable product labels, packaging,
- *    signage) while banning text STAMPED OVER the frame. Those two live one clause apart in the
- *    same prompt tail, so telling them apart IS the job. OCR fires on every jar label.
+ *    purpose: text STAMPED OVER the frame, told apart from writing IN the scene (question 3).
  *
  * 2. BROKEN GEOMETRY — the still lane's other stochastic failure: objects floating unsupported,
  *    surfaces whose edges disagree with each other, structures merging into one another, rigid
@@ -18,6 +15,11 @@
  *    Deliberately MACRO-scale only: at scan resolution fine detail (garbled lettering, warped
  *    hands) is gone, so the brief asks about structure a thumbnail still shows, and the judge is
  *    told to pass anything it isn't sure about.
+ *
+ * 3. READABLE WRITING in the scene — chalkboard sums, price tags, signs, big labels. The b-roll
+ *    prompts used to ALLOW real-world text and the model wrote the narration onto chalkboards
+ *    ("$93/hour" under the line that said it). They now ban it (`NO_READABLE_TEXT`); this catches
+ *    the renders that ignore that. Tiny or unreadable marks pass.
  *
  * `generateValidatedStill` is the single choke point for every b-roll pixel (the still lane's
  * Ken Burns source, the split right panel, AND the motion lane's grok keyframe), so a defective
@@ -63,7 +65,7 @@ const DEFECT_SCAN_HEIGHT = 432;
 /** The judge's brief. A module constant so it reads as one block. */
 const STILL_DEFECT_SYSTEM =
   "You are a quality-control reviewer for AI-generated b-roll photography. You are shown ONE " +
-  "still frame. Answer two independent questions.\n\n" +
+  "still frame. Answer three independent questions.\n\n" +
   "QUESTION 1 — overlay: is any text STAMPED OVER this frame, as if it were added afterwards " +
   "in a video editor?\n" +
   "Answer true ONLY for text that is not physically part of the photographed scene:\n" +
@@ -72,8 +74,8 @@ const STILL_DEFECT_SYSTEM =
   "- watermarks, channel logos, corner bugs, or signatures\n" +
   "- timestamps, counters, or camera-UI text burned into the frame\n" +
   "- callout labels, arrows, or meme-style text\n" +
-  "Answer false for text that is REAL and physically in the scene — it belongs there and is " +
-  "wanted: printing on product labels, packaging, jars, bottles, bags, boxes, or seed packets; " +
+  "Answer false for text that is REAL and physically in the scene — that is question 3's, not " +
+  "this one's: printing on product labels, packaging, jars, bottles, bags, boxes, or seed packets; " +
   "signage, posters, or notices that exist in the location; words on a book cover, a screen, a " +
   "tag, or handwriting on paper.\n" +
   "The test is WHERE the text sits, not what it says. Text lying on a surface in the scene — " +
@@ -98,13 +100,25 @@ const STILL_DEFECT_SYSTEM =
   "staging, and any small detail you cannot clearly resolve at this size. This is AI-generated " +
   "photography — mild strangeness is normal and ships; only unmistakable physical impossibility " +
   "fails. When unsure, answer false.\n\n" +
-  'Return ONLY this JSON, no prose: {"overlay":true|false,"broken":true|false,"what":"..."}\n' +
+  "QUESTION 3 — writing: is there READABLE writing physically IN the scene that a viewer would " +
+  "read at a glance?\n" +
+  "Answer true for words, numbers, prices, or sums a viewer can make out: writing on a " +
+  "chalkboard or whiteboard, a sign, a poster, a price tag, a note or receipt, a screen, a " +
+  "slogan on a mug or shirt, or a brand name or label printed large on a can, bottle, box, or " +
+  "tool — and tally marks, sums or sketches drawn on a chalkboard, whiteboard or wall. Answer " +
+  "false for tiny, blurred, or unreadable marks, a ruler's or tape's scale " +
+  "markings, and a frame with no writing. Question 1's stamped-over text is NOT counted here. " +
+  "When unsure, answer false.\n\n" +
+  'Return ONLY this JSON, no prose: {"overlay":true|false,"broken":true|false,"writing":true|false,"what":"..."}\n' +
   'what: 3-8 words naming the worst defect and where it sits (e.g. "white caption bar across ' +
   'the bottom", "cutting board floating above the table"); "" when both are false.';
 
 export interface StillDefectVerdict {
   overlay: boolean;
   broken: boolean;
+  /** Readable writing IN the scene (a chalkboard sum, a price tag, a big label). Every b-roll
+   *  prompt bans it (`NO_READABLE_TEXT`); a true verdict re-rolls the still like `overlay`. */
+  writing: boolean;
   what: string;
 }
 
@@ -120,15 +134,20 @@ export function parseStillDefectVerdict(
   stopReason?: string
 ): StillDefectVerdict {
   const parsed = safeParseJSON<any>(raw, stopReason);
-  if (!parsed.success) return { overlay: false, broken: false, what: "" };
+  if (!parsed.success)
+    return { overlay: false, broken: false, writing: false, what: "" };
   const overlay = parsed.data?.overlay === true;
   const broken = parsed.data?.broken === true;
+  const writing = parsed.data?.writing === true;
   const what = parsed.data?.what;
   return {
     overlay,
     broken,
+    writing,
     what:
-      (overlay || broken) && typeof what === "string" ? what.slice(0, 80) : "",
+      (overlay || broken || writing) && typeof what === "string"
+        ? what.slice(0, 80)
+        : "",
   };
 }
 
@@ -170,15 +189,16 @@ export async function scanStillDefects(
     const result = await invokeClaude({
       systemPrompt: STILL_DEFECT_SYSTEM,
       userMessage:
-        "Is any text stamped over this frame, and does it contain obviously impossible structure?",
+        "Is any text stamped over this frame, does it contain obviously impossible structure, " +
+        "and is there readable writing in the scene?",
       imageInput: image,
-      maxTokens: 128,
+      maxTokens: 160,
       model: STILL_DEFECT_MODEL,
     });
     const verdict = parseStillDefectVerdict(result.text, result.stopReason);
-    if (verdict.overlay || verdict.broken)
+    if (verdict.overlay || verdict.broken || verdict.writing)
       console.log(
-        `[StillDefects] ${verdict.overlay ? "stamped text" : "broken geometry"} detected: ${verdict.what}`
+        `[StillDefects] ${verdict.overlay ? "stamped text" : verdict.broken ? "broken geometry" : "readable writing"} detected: ${verdict.what}`
       );
     return verdict;
   } catch (err: any) {
@@ -187,7 +207,7 @@ export async function scanStillDefects(
     console.warn(
       `[StillDefects] check failed: ${err.message} — passing the still`
     );
-    return { overlay: false, broken: false, what: "" };
+    return { overlay: false, broken: false, writing: false, what: "" };
   }
 }
 

@@ -1,0 +1,1397 @@
+{
+ "jobId": 116,
+ "channel": "hannah_yoder",
+ "title": "10 Plain Sewing Projects From Cloth You Already Own, Ranked by Profit",
+ "status": "completed",
+ "rehearsal": true,
+ "finalVideoUrl": "https://pub-fd5853f50f47422f827867dae374bcf2.r2.dev/longform/116/final-kQRHGBkp.mp4",
+ "verdicts": {
+  "1": true,
+  "2": false,
+  "3": false,
+  "4": true,
+  "5": false,
+  "6": false,
+  "7": true
+ },
+ "stats": {
+  "scenes": 154,
+  "hostTakes": 19,
+  "hostSec": 180,
+  "ctaPatterns": [
+   "block 0: HBHHHQQQQ",
+   "block 1: HHHHH"
+  ],
+  "introductions": 1,
+  "midSentenceHostTakes": 0,
+  "picturesJudged": 139
+ },
+ "findings": [
+  {
+   "rule": 2,
+   "detail": "block 1 (HHHHH): does not END on the big QR"
+  },
+  {
+   "rule": 2,
+   "detail": "block 1 (HHHHH): no book cover"
+  },
+  {
+   "rule": 3,
+   "scene": 4,
+   "detail": "b-roll: wrong place — Setting is rural field, not a market stand"
+  },
+  {
+   "rule": 3,
+   "scene": 14,
+   "detail": "b-roll: wrong place — Quilt shown outdoors by roadside, not at a market stand"
+  },
+  {
+   "rule": 3,
+   "scene": 31,
+   "detail": "b-roll: wrong place — Frame shows outdoor porch/patio, not kitchen doorway"
+  },
+  {
+   "rule": 3,
+   "scene": 32,
+   "detail": "b-roll: wrong place — Rug shown, not a wash sink area"
+  },
+  {
+   "rule": 3,
+   "scene": 33,
+   "detail": "b-roll: wrong place — Rug shown indoors at home, not at market"
+  },
+  {
+   "rule": 3,
+   "scene": 50,
+   "detail": "b-roll: wrong place — Setting is home table, not market stand"
+  },
+  {
+   "rule": 3,
+   "scene": 66,
+   "detail": "b-roll: wrong place — Setting is a farm field, not a market"
+  },
+  {
+   "rule": 3,
+   "scene": 103,
+   "detail": "b-roll: wrong place — Towels shown at home, not at market"
+  },
+  {
+   "rule": 3,
+   "scene": 131,
+   "detail": "b-roll: wrong place — Setting is a workshop/home, not a market"
+  },
+  {
+   "rule": 4,
+   "scene": 20,
+   "detail": "b-roll: cluttered — Multiple small items crowd the table display"
+  },
+  {
+   "rule": 4,
+   "scene": 42,
+   "detail": "qr-background: cluttered — Narration describes video UI, not the sewing supplies shown"
+  },
+  {
+   "rule": 4,
+   "scene": 61,
+   "detail": "b-roll: cluttered — Hero pot holders lost among clutter of blankets and materials"
+  },
+  {
+   "rule": 4,
+   "scene": 63,
+   "detail": "b-roll: cluttered — busy kitchen background distracts from product focus"
+  },
+  {
+   "rule": 4,
+   "scene": 86,
+   "detail": "b-roll: cluttered — sewing machine and workspace clutter distract from apron"
+  },
+  {
+   "rule": 4,
+   "scene": 101,
+   "detail": "b-roll: cluttered — Hero subject lost among many similar cluttered items"
+  },
+  {
+   "rule": 4,
+   "scene": 114,
+   "detail": "b-roll: cluttered — Basket contents are jumbled and unclear at glance"
+  },
+  {
+   "rule": 4,
+   "scene": 146,
+   "detail": "b-roll: cluttered — Hero subject (basket/fabrics) small and lost among busy background objects"
+  },
+  {
+   "rule": 5,
+   "scene": 10,
+   "detail": "b-roll: readable text — "
+  },
+  {
+   "rule": 5,
+   "scene": 11,
+   "detail": "b-roll: readable text — "
+  },
+  {
+   "rule": 5,
+   "scene": 15,
+   "detail": "b-roll: readable text — "
+  },
+  {
+   "rule": 6,
+   "scene": 3,
+   "detail": "introduction not on camera: \"So we're counting all of them down, worst to best, with what each one \""
+  }
+ ],
+ "judged": [
+  {
+   "scene": 2,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 3,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 4,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "wrong",
+   "what": "Setting is rural field, not a market stand"
+  },
+  {
+   "scene": 5,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 6,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 7,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 8,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 9,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 10,
+   "kind": "b-roll",
+   "text": true,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 11,
+   "kind": "b-roll",
+   "text": true,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 12,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 13,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 14,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "wrong",
+   "what": "Quilt shown outdoors by roadside, not at a market stand"
+  },
+  {
+   "scene": 15,
+   "kind": "b-roll",
+   "text": true,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 16,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 17,
+   "kind": "split-panel",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 18,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 19,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 20,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "n/a",
+   "what": "Multiple small items crowd the table display"
+  },
+  {
+   "scene": 21,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 22,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 23,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 24,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 25,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 26,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 27,
+   "kind": "split-panel",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 28,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 29,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 30,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 31,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "wrong",
+   "what": "Frame shows outdoor porch/patio, not kitchen doorway"
+  },
+  {
+   "scene": 32,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "wrong",
+   "what": "Rug shown, not a wash sink area"
+  },
+  {
+   "scene": 33,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "wrong",
+   "what": "Rug shown indoors at home, not at market"
+  },
+  {
+   "scene": 34,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 35,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 41,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 42,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "n/a",
+   "what": "Narration describes video UI, not the sewing supplies shown"
+  },
+  {
+   "scene": 43,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 44,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 45,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 46,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 47,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 48,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 49,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 50,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "wrong",
+   "what": "Setting is home table, not market stand"
+  },
+  {
+   "scene": 51,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 52,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 53,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 54,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 55,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 56,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 57,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 58,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 59,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 60,
+   "kind": "split-panel",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 61,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "n/a",
+   "what": "Hero pot holders lost among clutter of blankets and materials"
+  },
+  {
+   "scene": 62,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 63,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "n/a",
+   "what": "busy kitchen background distracts from product focus"
+  },
+  {
+   "scene": 64,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 65,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 66,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "wrong",
+   "what": "Setting is a farm field, not a market"
+  },
+  {
+   "scene": 67,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 68,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 69,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 70,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 71,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 72,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 73,
+   "kind": "split-panel",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 74,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 75,
+   "kind": "split-panel",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 76,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 77,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 78,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 79,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 80,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 81,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 82,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 83,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 84,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 85,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 86,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "ok",
+   "what": "sewing machine and workspace clutter distract from apron"
+  },
+  {
+   "scene": 87,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 88,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 89,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 90,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 91,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 92,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 93,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 94,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 95,
+   "kind": "split-panel",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 96,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 97,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 98,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 99,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 100,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 101,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "n/a",
+   "what": "Hero subject lost among many similar cluttered items"
+  },
+  {
+   "scene": 102,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 103,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "wrong",
+   "what": "Towels shown at home, not at market"
+  },
+  {
+   "scene": 104,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 105,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 106,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 107,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 108,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 109,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 110,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 111,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 112,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 114,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "n/a",
+   "what": "Basket contents are jumbled and unclear at glance"
+  },
+  {
+   "scene": 115,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 116,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 117,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 118,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 119,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 121,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 122,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 123,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 124,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 125,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 126,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 127,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 128,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 129,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 130,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 131,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "wrong",
+   "what": "Setting is a workshop/home, not a market"
+  },
+  {
+   "scene": 133,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 134,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 135,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 136,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 137,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 138,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 139,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 140,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 141,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 142,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 143,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 144,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 145,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 146,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": true,
+   "place": "n/a",
+   "what": "Hero subject (basket/fabrics) small and lost among busy background objects"
+  },
+  {
+   "scene": 147,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "ok",
+   "what": ""
+  },
+  {
+   "scene": 153,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  }
+ ]
+}

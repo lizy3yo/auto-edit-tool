@@ -27,8 +27,23 @@ describe("parseStillDefectVerdict", () => {
     ).toEqual({
       overlay: false,
       broken: true,
+      writing: false,
       what: "board floating above the table",
     });
+  });
+
+  it("parses the readable-writing bit, and keeps its what", () => {
+    expect(
+      parseStillDefectVerdict(
+        '{"overlay":false,"broken":false,"writing":true,"what":"chalkboard reading $93/hour"}'
+      )
+    ).toEqual({
+      overlay: false,
+      broken: false,
+      writing: true,
+      what: "chalkboard reading $93/hour",
+    });
+    expect(parseStillDefectVerdict('{"writing":"yes"}').writing).toBe(false);
   });
 
   it("a verdict missing one bit still counts for the other", () => {
@@ -36,11 +51,13 @@ describe("parseStillDefectVerdict", () => {
     expect(parseStillDefectVerdict('{"overlay":true}')).toEqual({
       overlay: true,
       broken: false,
+      writing: false,
       what: "",
     });
     expect(parseStillDefectVerdict('{"broken":true}')).toEqual({
       overlay: false,
       broken: true,
+      writing: false,
       what: "",
     });
   });
@@ -172,6 +189,7 @@ describe("scanStillDefects", () => {
     expect(await scanStillDefects(await imageOf(1280, 720))).toEqual({
       overlay: false,
       broken: true,
+      writing: false,
       what: "shelf merging into the wall",
     });
   });
@@ -182,6 +200,7 @@ describe("scanStillDefects", () => {
     expect(await scanStillDefects(await imageOf(1280, 720))).toEqual({
       overlay: false,
       broken: false,
+      writing: false,
       what: "",
     });
   });

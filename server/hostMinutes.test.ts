@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   planHostMinutes,
   capHostMinutes,
-  ensureHostInCta,
+  hostTheCtaPitch,
   hostBudgetForJob,
   hostSectionSecForJob,
   shapeHostSections,
@@ -23,7 +23,7 @@ function film(
 ): StoryboardScene[] {
   return Array.from({ length: count }, (_, i) => ({
     index: i,
-    narration: `line ${i}`,
+    narration: `line ${i}.`, // a whole sentence: host takes may only be whole sentences
     visualPrompt: host(i) ? "host talks" : `b-roll ${i}`,
     hostPresent: host(i),
     audioDuration: SCENE_SEC,
@@ -81,7 +81,7 @@ describe("shapeHostSections", () => {
     const scenes = film(
       40,
       i => i === 0 || i >= 38,
-      i => (i === 38 ? { cta: true } : {})
+      i => (i === 38 ? { cta: true, ctaIndex: 0 } : {})
     );
     shapeHostSections(scenes, 20, { canPromote: true });
     expect(scenes[38].hostPresent).toBe(true);
@@ -119,7 +119,7 @@ describe("planHostMinutes with intro/outro sections", () => {
     film(
       200,
       i => i % 2 === 0 || i === 199,
-      i => (i >= 100 && i < 110 ? { cta: true } : {})
+      i => (i >= 100 && i < 110 ? { cta: true, ctaIndex: 0 } : {})
     );
 
   it("keeps every section host beat, counts it as hook/outro, and stays in budget", () => {
@@ -163,7 +163,7 @@ describe("planHostMinutes", () => {
     film(
       200,
       i => i % 2 === 0 || i === 199,
-      i => (i >= 100 && i < 110 ? { cta: true } : {})
+      i => (i >= 100 && i < 110 ? { cta: true, ctaIndex: 0 } : {})
     );
 
   it("keeps hook, CTA and outro, and lands at/under the budget", () => {
@@ -172,9 +172,12 @@ describe("planHostMinutes", () => {
     expect(scenes[0].hostPresent).toBe(true); // hook
     expect(scenes[100].hostPresent).toBe(true); // CTA host beat
     expect(scenes[199].hostPresent).toBe(true); // outro
-    expect(hostSec(scenes)).toBeLessThanOrEqual(180);
+    // The pitch's five cutaways go to the host later — their time is held back now.
+    expect(plan.ctaReserveSec).toBe(5 * SCENE_SEC);
+    const planned = hostSec(scenes) + plan.ctaReserveSec;
+    expect(planned).toBeLessThanOrEqual(180);
     // It spends the budget rather than stopping at the minimum.
-    expect(hostSec(scenes)).toBeGreaterThan(180 - 2 * SCENE_SEC);
+    expect(planned).toBeGreaterThan(180 - 2 * SCENE_SEC);
     expect(plan.anchorsOverBudget).toBe(false);
     expect(plan.cadenceSec).toBe(60);
   });
@@ -199,21 +202,22 @@ describe("planHostMinutes", () => {
   });
 
   it("widens the spacing evenly when the budget cannot cover one a minute", () => {
-    // 30-minute film, 1 minute of host: 7 check-ins' worth after the anchors.
+    // 30-minute film, 1 minute of host: 6 check-ins' worth after the anchors (hook, a two-beat
+    // pitch — one host, one reserved — and the outro).
     const scenes = film(
       300,
       i => i % 2 === 0 || i === 299,
-      i => (i >= 150 && i < 160 ? { cta: true } : {})
+      i => (i >= 150 && i < 152 ? { cta: true, ctaIndex: 0 } : {})
     );
     const plan = planHostMinutes(scenes, 60, { canPromote: true });
     expect(plan.cadenceSec).toBeGreaterThan(60);
     expect(hostSec(scenes)).toBeLessThanOrEqual(60);
     // Both halves of the film get check-ins — the budget is not spent up front.
     const interior = hostStarts(scenes).filter(
-      t => t > SCENE_SEC && t < 299 * SCENE_SEC && (t < 900 || t >= 960)
+      t => t > SCENE_SEC && t < 299 * SCENE_SEC && (t < 900 || t >= 912)
     );
     expect(interior.some(t => t < 900)).toBe(true);
-    expect(interior.some(t => t >= 960)).toBe(true);
+    expect(interior.some(t => t >= 912)).toBe(true);
   });
 
   it("promotes a cutaway where no host beat sits near a target, keeping its b-roll to go back to", () => {
@@ -251,24 +255,65 @@ describe("planHostMinutes", () => {
     expect(scenes[199].hostPresent).toBe(true);
   });
 
-  it("reserves the beat ensureHostInCta will add, so the pitch does not bust the budget", () => {
-    // A CTA block with NO host beat: ensureHostInCta flips one later.
+  it("reserves every pitch beat hostTheCtaPitch will host, so check-ins pay for the pitch", () => {
+    // A CTA block with NO host beat: hostTheCtaPitch puts the host on all nine later.
     const scenes = film(
       200,
       i => i % 2 === 0 || i === 199,
-      i => (i >= 101 && i < 110 && i % 2 === 1 ? { cta: true } : {})
+      i =>
+        i >= 101 && i < 110 && i % 2 === 1 ? { cta: true, ctaIndex: 0 } : {}
     );
     // Make the CTA run contiguous and host-free.
     for (let i = 101; i < 110; i++) {
       scenes[i].cta = true;
+      scenes[i].ctaIndex = 0;
       scenes[i].hostPresent = false;
     }
     const plan = planHostMinutes(scenes, 180, { canPromote: true });
-    expect(plan.ctaReserveSec).toBe(SCENE_SEC);
-    ensureHostInCta(scenes);
+    expect(plan.ctaReserveSec).toBe(9 * SCENE_SEC);
+    hostTheCtaPitch(scenes, { canHost: true });
+    for (let i = 101; i < 110; i++) expect(scenes[i].hostPresent).toBe(true);
     const capped = capHostMinutes(scenes, 180);
     expect(capped.overBudget).toBe(false);
     expect(hostSec(scenes)).toBeLessThanOrEqual(180);
+  });
+
+  it("leaves the beats the operator's assets will take out of the reserve", () => {
+    const scenes = film(200, i => i % 2 === 0 || i === 199);
+    for (let i = 101; i < 110; i++) {
+      scenes[i].cta = true;
+      scenes[i].ctaIndex = 0;
+      scenes[i].hostPresent = false;
+    }
+    const plan = planHostMinutes(scenes, 180, {
+      canPromote: true,
+      assetCount: 2,
+    });
+    expect(plan.ctaReserveSec).toBe(7 * SCENE_SEC);
+  });
+
+  it("reserves nothing without a host photo — the pitch stays pictures", () => {
+    const scenes = film(200, i => i % 2 === 0 || i === 199);
+    for (let i = 101; i < 110; i++) {
+      scenes[i].cta = true;
+      scenes[i].ctaIndex = 0;
+      scenes[i].hostPresent = false;
+    }
+    const plan = planHostMinutes(scenes, 180, { canPromote: false });
+    expect(plan.ctaReserveSec).toBe(0);
+  });
+});
+
+describe("whole-sentence host takes", () => {
+  it("never promotes a cutaway that starts or stops mid-sentence", () => {
+    // Only the bookends are host; every cutaway is a clause of a longer sentence.
+    const scenes = film(
+      40,
+      i => i === 0 || i === 39,
+      i => (i === 0 || i === 39 ? {} : { narration: `clause ${i},` })
+    );
+    const plan = planHostMinutes(scenes, 60, { canPromote: true });
+    expect(plan.promoted).toEqual([]);
   });
 });
 
@@ -295,7 +340,7 @@ describe("capHostMinutes", () => {
     const scenes = film(
       20,
       i => [0, 10, 19].includes(i),
-      i => (i === 10 ? { cta: true } : {})
+      i => (i === 10 ? { cta: true, ctaIndex: 0 } : {})
     );
     const r = capHostMinutes(scenes, SCENE_SEC);
     expect(r.demoted).toEqual([]);

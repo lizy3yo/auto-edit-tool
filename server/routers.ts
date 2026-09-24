@@ -1712,6 +1712,12 @@ const longformVideoRouter = router({
           .optional(),
         /** The operator's answer to the over-the-guide warning; absent ⇒ never asked. */
         hostMinutesOverride: z.boolean().optional(),
+        /**
+         * Admin-only REHEARSAL: every stage runs except the paid video lanes (host lip-sync and
+         * moving b-roll), which are stood in for by stills — see `LongformInputParams.rehearsal`.
+         * Ignored for any other role.
+         */
+        rehearsal: z.boolean().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -2023,6 +2029,8 @@ const longformVideoRouter = router({
         hostMinutes: input.hostMinutes,
         hostMinutesOverride:
           input.hostMinutes != null ? input.hostMinutesOverride : undefined,
+        rehearsal:
+          input.rehearsal && ctx.user.role === "admin" ? true : undefined,
       };
 
       const jobId = await createLongformJob(

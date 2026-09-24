@@ -78,14 +78,14 @@ export function formatTimecode(sec: number): string {
  * overlay). Mirrors `assemblePerSceneFilm`'s own `durationSec`: the held length plus any tail.
  */
 const fallbackDurationSec = (s: StoryboardScene): number =>
-  Math.max(0, s.audioDuration ?? 0) + (s.qrTail ? QR_TAIL_HOLD_SEC : 0);
+  Math.max(0, s.audioDuration ?? 0) + (s.tailHoldSec ?? 0);
 
 /**
  * `QR_TAIL_HOLD_SEC` lives in longformVideo.ts, which imports this file's sibling — importing it
  * here would close a cycle. It is a fixed constant, so it is mirrored with a test asserting the
  * two stay equal.
  */
-export const QR_TAIL_HOLD_SEC = 3;
+export const QR_TAIL_HOLD_SEC = 0;
 
 /**
  * Build the timeline for a finished (or partly finished) render.
