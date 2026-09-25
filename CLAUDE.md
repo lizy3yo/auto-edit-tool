@@ -453,6 +453,26 @@ Express · tRPC · Drizzle · MySQL.
   only turning the old pitch's b-roll into host needs a fresh render. Pitch hosting and the
   no-split rule apply to MARKED blocks only (`inMarkedCta`): an unmarked script's `cta` flags
   come from `markCtaScenes`, which also fires on any spoken price
+- **Stress rehearsals** (`scripts/stress/`, 2026-09-24): `run.mts` renders a script N times through
+  the real `generate` route as the bootstrap admin into Video tab `--slot`, then `audit.mts`
+  checks the seven operator rules (no CTA pause, CTA order, right place, clean pictures, no text,
+  self-intro on camera, whole-sentence host takes) from the storyboard, the film and a Sonnet
+  judge on one frame per picture. `generate`'s admin-only `rehearsal` flag
+  (`LongformInputParams.rehearsal`, `rehearseSceneClips`) runs everything except the two paid
+  video lanes — a host beat is a slow zoom on its photo, a moving cutaway its still — so a whole
+  21-minute film costs the stills. Run them with `ASSEMBLY_CACHE=0` and at most two assembling at
+  once: four parallel assemblies filled the disk. `tailor.mts` wrote the channel scripts,
+  `books.mts` the two test books (per-video, never saved to the channel). Other fixes the runs
+  forced: the master is voiced three delivery runs at a time with "Recording narration n/N" on
+  the card (`MASTER_TTS_CONCURRENCY`); a scene attempt that failed on a network timeout is retried
+  (`isTransientSceneError`) instead of dropping the scene and refusing the film; an operator
+  label used as a title ("Hank Test", "720p 0.35", "#1") is not the video's subject
+  (`isOperatorLabelTitle`) — it was written onto a picture; `scrubLegibleWriting` (inside
+  `softenVisualPrompt`, so every lane) rewrites lettering, names burned in, initials, quoted
+  text, chalkboards, tally marks, calendars and price tags before a prompt reaches the model; a
+  marked CTA block without the fixed trigger gets its scan window even when another block has one
+  (`markQrFromCtaTails` after the trigger loop); the self-introduction is found across the WHOLE
+  running text, since the word-count chunker can cut inside the name ("…I'm Granny" | "Mae, and…")
 - **Host takes speak whole sentences** (`completeHostSentences`, `endsSentence`/`startsSentence`
   in longformVideo, 2026-09-24). The script is cut into clause-sized pieces for the b-roll lane
   (≤8 s, ≤5 s in the fast open) and host beats came from those same pieces, so job 110 had 22 of
@@ -837,7 +857,13 @@ Always 16:9. Fire-and-forget; progress persisted to the job row and polled by th
   master (`inputParams.voicedMasterUrl`, written the moment the master is voiced), "Retry failed
   scenes" for the clip stage, "Retry assembly" after it. A second cut-off, a job idle past 24 h,
   or a clip-stage job whose scenes lack narration (continuing would buy a voiceover per scene)
-  is failed with a message instead — it never spends on TTS unattended.
+  is failed with a message instead — it never spends on TTS unattended. Boot first waits
+  `LIVE_CHECK_MS` (90 s) and leaves alone any job whose row moved meanwhile
+  (`stillRunningElsewhere`): every running job heartbeats `updatedAt` once a minute
+  (`startJobHeartbeat`), for the WHOLE pipeline — voicing and storyboarding included, which used
+  to send nothing, so a long master that took 30+ min to voice was reaped mid-TTS as "timed out
+  after 30 minutes of inactivity". Without the live check, a `tsx watch` reload resumed a job
+  another process was still running and the job ran twice.
 - **`ADMIN_EMAIL` / `ADMIN_PASSWORD` are a bootstrap, not the login.** They create the first
   admin when `users` is empty and are ignored forever after — in particular they never
   overwrite a password changed in Admin → Users, so a stale value in the deploy's environment

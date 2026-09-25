@@ -193,3 +193,237 @@ job 120 (hannah_yoder) — completed, rehearsal
 
 ### quilting_with_granny_ruth run 1 — job 121: FAILED after 113 min
     spawn ENAMETOOLONG
+
+### hank_hardwood run 1 — 76 min
+```
+job 127 (hank_hardwood) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  FAIL  3. right place (5 findings)
+  PASS  4. clean pictures (2 findings)
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. whole sentences
+  stats: {"scenes":202,"hostTakes":21,"hostSec":174,"ctaPatterns":["block 0: HBHQQQQQ","block 1: HBHHQQQQQ"],"introductions":1,"midSentenceHostTakes":0,"picturesJudged":188}
+   - [3] scene 18 b-roll: wrong place — no chalk tally visible on wall
+   - [3] scene 25 split-panel: wrong place — shown at market table, not on wall
+   - [3] scene 107 b-roll: wrong place — shown in garage/workshop, not driveway
+   - [3] scene 128 b-roll: wrong place — shown in driveway, not a shop
+   - [3] scene 155 b-roll: wrong place — shown at workbench, not store aisle
+   - [4] scene 30 b-roll: cluttered — other wooden items crowd around lantern
+   - [4] scene 187 b-roll: cluttered — many competing wood items crowd background
+```
+
+### granny_mae run 1 — 79 min
+```
+job 128 (granny_mae) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  FAIL  3. right place (5 findings)
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. whole sentences
+  stats: {"scenes":192,"hostTakes":23,"hostSec":177,"ctaPatterns":["block 0: HBHHHQQQQ","block 1: HHBHHHQQQQQQ"],"introductions":1,"midSentenceHostTakes":0,"picturesJudged":175}
+   - [3] scene 65 b-roll: wrong place — shown on steps/patio, not a parking lot
+   - [3] scene 95 b-roll: wrong place — shown at home table, not the church
+   - [3] scene 111 b-roll: wrong place — shown at home, not a shop
+   - [3] scene 131 b-roll: wrong place — shown on home dining table, not a market table
+   - [3] scene 152 b-roll: wrong place — shown in sewing room, not porch
+```
+
+### hannah_yoder run 1 — 74 min
+```
+job 129 (hannah_yoder) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place (3 findings)
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. whole sentences
+  stats: {"scenes":171,"hostTakes":23,"hostSec":179,"ctaPatterns":["block 0: HBHHHQQQQ","block 1: HHBBHHQQQQQ"],"introductions":1,"midSentenceHostTakes":0,"picturesJudged":154}
+   - [3] scene 72 b-roll: wrong place — Shown on a home table, not a market
+   - [3] scene 76 b-roll: wrong place — shown at home, not the market
+   - [3] scene 133 b-roll: wrong place — shown at home, not a hospital
+```
+
+### quilting_with_granny_ruth run 1 — 95 min
+```
+job 130 (quilting_with_granny_ruth) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place (6 findings)
+  PASS  4. clean pictures
+  PASS  5. no text (1 finding)
+  PASS  6. intro on camera
+  PASS  7. whole sentences
+  stats: {"scenes":201,"hostTakes":22,"hostSec":178,"ctaPatterns":["block 0: HBHHHHQQQQQ","block 1: HHBHHQQQQQQ"],"introductions":1,"midSentenceHostTakes":0,"picturesJudged":184}
+   - [3] scene 11 b-roll: wrong place — porch shown instead of a show
+   - [3] scene 16 b-roll: wrong place — shows sewing room, not a church
+   - [3] scene 39 b-roll: wrong place — shown on home table, not store aisle
+   - [3] scene 158 b-roll: wrong place — shown in bedroom, not living room
+   - [3] scene 186 b-roll: wrong place — shown on table, not a booth
+   - [3] scene 188 b-roll: wrong place — shown indoors, not on a porch
+   - [5] scene 99 b-roll: readable text — small readable text on book spines
+```
+
+### granny_mae run 1 — 74 min
+```
+job 132 (granny_mae) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place (6 findings)
+  PASS  4. clean pictures
+  FAIL  5. no text (2 findings)
+  PASS  6. intro on camera
+  PASS  7. whole sentences
+  stats: {"scenes":183,"hostTakes":21,"hostSec":179,"ctaPatterns":["block 0: HBHHHQQQQ","block 1: HBHQQQQQQ"],"introductions":1,"midSentenceHostTakes":0,"picturesJudged":168}
+   - [3] scene 9 b-roll: wrong place — shown at table, not a parlor
+   - [3] scene 54 b-roll: wrong place — shown in kitchen, not a market
+   - [3] scene 67 b-roll: wrong place — street scene, not a parking lot
+   - [3] scene 88 b-roll: wrong place — shown in a nursery/home, not a hospital
+   - [3] scene 92 b-roll: wrong place — shown in kitchen, not the church
+   - [3] scene 108 b-roll: wrong place — shown in kitchen, not a shop
+   - [5] scene 9 b-roll: readable text — shown at table, not a parlor
+   - [5] scene 82 b-roll: readable text — monogram letter M counts as visible text
+```
+
+### hank_hardwood run 1 — 75 min
+```
+job 131 (hank_hardwood) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place (4 findings)
+  PASS  4. clean pictures (1 finding)
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. whole sentences
+  stats: {"scenes":178,"hostTakes":23,"hostSec":172,"ctaPatterns":["block 0: HBHHQQQQQ","block 1: HBHHQQQQQ"],"introductions":1,"midSentenceHostTakes":0,"picturesJudged":164}
+   - [3] scene 13 b-roll: wrong place — no chalk tally visible on any wall
+   - [3] scene 111 b-roll: wrong place — shown in driveway, not a shop
+   - [3] scene 113 b-roll: wrong place — shown in workshop, not on a porch
+   - [3] scene 114 split-panel: wrong place — shown on driveway, not a patio
+   - [4] scene 36 b-roll: cluttered — many small wooden items crowd the shelf
+```
+
+### hank_hardwood run 1 — 62 min
+```
+job 133 (hank_hardwood) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place (2 findings)
+  PASS  4. clean pictures
+  PASS  5. no text (1 finding)
+  PASS  6. intro on camera
+  PASS  7. whole sentences
+  stats: {"scenes":195,"hostTakes":23,"hostSec":179,"ctaPatterns":["block 0: HBHHQQQQQ","block 1: HBHHQQQQQ"],"introductions":1,"midSentenceHostTakes":0,"picturesJudged":179}
+   - [3] scene 88 b-roll: wrong place — shown in workshop, not town setting
+   - [3] scene 125 b-roll: wrong place — shown on driveway, not in a shop
+   - [5] scene 116 b-roll: readable text — small gauge text unreadable
+```
+
+### hannah_yoder run 1 — 55 min
+```
+job 134 (hannah_yoder) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place (3 findings)
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. whole sentences
+  stats: {"scenes":160,"hostTakes":21,"hostSec":179,"ctaPatterns":["block 0: HBBHHQQQQ","block 1: HBHHHQQQQQ"],"introductions":1,"midSentenceHostTakes":0,"picturesJudged":144}
+   - [3] scene 87 split-panel: wrong place — Apron on table, not at wash line
+   - [3] scene 106 b-roll: wrong place — shown on home shelf, not a market
+   - [3] scene 126 b-roll: wrong place — shown in a home, not a hospital
+```
+
+### granny_mae run 1 — 75 min
+```
+job 135 (granny_mae) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place (5 findings)
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. whole sentences
+  stats: {"scenes":176,"hostTakes":18,"hostSec":179,"ctaPatterns":["block 0: HBHHHQQQQQ","block 1: HBHQQQQQQ"],"introductions":1,"midSentenceHostTakes":0,"picturesJudged":162}
+   - [3] scene 30 b-roll: wrong place — kitchen table shown, not a closet
+   - [3] scene 39 b-roll: wrong place — shown on table at home, not a shower
+   - [3] scene 55 b-roll: wrong place — shown at kitchen table, not farm stand
+   - [3] scene 62 b-roll: wrong place — shown in kitchen, not parking lot
+   - [3] scene 86 b-roll: wrong place — Shown at home kitchen, not the church
+```
+
+### quilting_with_granny_ruth run 1 — 83 min
+```
+job 136 (quilting_with_granny_ruth) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place (7 findings)
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. whole sentences
+  stats: {"scenes":204,"hostTakes":22,"hostSec":180,"ctaPatterns":["block 0: HBHHHHQQQQQ","block 1: HHBHQQQQQQ"],"introductions":1,"midSentenceHostTakes":0,"picturesJudged":189}
+   - [3] scene 10 b-roll: wrong place — shown at home, not a show
+   - [3] scene 15 b-roll: wrong place — quilting at home table, not a church
+   - [3] scene 20 b-roll: wrong place — shown in bedroom, not at a show
+   - [3] scene 23 b-roll: wrong place — quilt is shown indoors, not on a porch
+   - [3] scene 41 b-roll: wrong place — shown on sewing table, not a store aisle
+   - [3] scene 190 b-roll: wrong place — shown at home table, not a booth
+   - [3] scene 192 b-roll: wrong place — scene is a workshop table, not a porch
+```
+
+### hannah_yoder run 1 — 55 min
+```
+job 137 (hannah_yoder) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place (5 findings)
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. whole sentences
+  stats: {"scenes":174,"hostTakes":22,"hostSec":178,"ctaPatterns":["block 0: HBHHHQQQQ","block 1: HBHHHQQQQQ"],"introductions":1,"midSentenceHostTakes":0,"picturesJudged":158}
+   - [3] scene 14 b-roll: wrong place — shown on table, not at market stand
+   - [3] scene 18 b-roll: wrong place — shown in bedroom, not a nursery
+   - [3] scene 33 b-roll: wrong place — appears to be a garden/patio, not a market
+   - [3] scene 94 b-roll: wrong place — shown sewing indoors, not at wash line
+   - [3] scene 115 b-roll: wrong place — shown on dining table, not kitchen
+```
+
+### granny_mae run 1 — 71 min
+```
+job 138 (granny_mae) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place (4 findings)
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. whole sentences
+  stats: {"scenes":198,"hostTakes":19,"hostSec":176,"ctaPatterns":["block 0: HBHHHQQQQ","block 1: HHBHQQQQQQ"],"introductions":1,"midSentenceHostTakes":0,"picturesJudged":184}
+   - [3] scene 9 b-roll: wrong place — Shown on table, not parlor couch
+   - [3] scene 39 b-roll: wrong place — nursery crib scene, not a baby shower
+   - [3] scene 81 b-roll: wrong place — shown at table, not sink
+   - [3] scene 115 b-roll: wrong place — Shown on home table, not a shop
+```
+
+### quilting_with_granny_ruth run 1 — 64 min
+```
+job 139 (quilting_with_granny_ruth) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place (3 findings)
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. whole sentences
+  stats: {"scenes":205,"hostTakes":22,"hostSec":179,"ctaPatterns":["block 0: HBHHHHQQQQQ","block 1: HHBHHHQQQQQ"],"introductions":1,"midSentenceHostTakes":0,"picturesJudged":184}
+   - [3] scene 42 b-roll: wrong place — shown at home table, not a store aisle
+   - [3] scene 93 b-roll: wrong place — shown in a sewing room, not a booth
+   - [3] scene 192 b-roll: wrong place — Shown indoors at sewing table, not a porch
+```

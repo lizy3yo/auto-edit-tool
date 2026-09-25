@@ -1,10 +1,10 @@
 {
- "jobId": 120,
- "channel": "hannah_yoder",
- "title": "10 Plain Sewing Projects From Cloth You Already Own, Ranked by Profit",
+ "jobId": 128,
+ "channel": "granny_mae",
+ "title": "I Tried 10 Crochet Projects From Cheap Yarn — Here's What Actually Paid",
  "status": "completed",
  "rehearsal": true,
- "finalVideoUrl": "https://pub-fd5853f50f47422f827867dae374bcf2.r2.dev/longform/120/final-Tv0a7JLz.mp4",
+ "finalVideoUrl": "https://pub-fd5853f50f47422f827867dae374bcf2.r2.dev/longform/128/final-fhmUQ1L6.mp4",
  "verdicts": {
   "1": true,
   "2": true,
@@ -15,37 +15,42 @@
   "7": true
  },
  "stats": {
-  "scenes": 156,
-  "hostTakes": 21,
-  "hostSec": 179,
+  "scenes": 192,
+  "hostTakes": 23,
+  "hostSec": 177,
   "ctaPatterns": [
    "block 0: HBHHHQQQQ",
-   "block 1: HBHQQQQQ"
+   "block 1: HHBHHHQQQQQQ"
   ],
   "introductions": 1,
   "midSentenceHostTakes": 0,
-  "picturesJudged": 143
+  "picturesJudged": 175
  },
  "findings": [
   {
    "rule": 3,
-   "scene": 13,
-   "detail": "split-panel: wrong place — shown at home table, not a market stand"
+   "scene": 65,
+   "detail": "b-roll: wrong place — shown on steps/patio, not a parking lot"
   },
   {
    "rule": 3,
-   "scene": 29,
-   "detail": "b-roll: wrong place — shown at outdoor market stall, not kitchen"
+   "scene": 95,
+   "detail": "b-roll: wrong place — shown at home table, not the church"
   },
   {
    "rule": 3,
-   "scene": 30,
-   "detail": "b-roll: wrong place — outdoor market table shown, not a wash sink"
+   "scene": 111,
+   "detail": "b-roll: wrong place — shown at home, not a shop"
   },
   {
    "rule": 3,
-   "scene": 124,
-   "detail": "b-roll: wrong place — shown in bedroom, not hospital"
+   "scene": 131,
+   "detail": "b-roll: wrong place — shown on home dining table, not a market table"
+  },
+  {
+   "rule": 3,
+   "scene": 152,
+   "detail": "b-roll: wrong place — shown in sewing room, not porch"
   }
  ],
  "judged": [
@@ -59,7 +64,7 @@
    "what": ""
   },
   {
-   "scene": 3,
+   "scene": 4,
    "kind": "b-roll",
    "text": false,
    "brands": false,
@@ -78,7 +83,7 @@
   },
   {
    "scene": 6,
-   "kind": "split-panel",
+   "kind": "b-roll",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -141,12 +146,12 @@
   },
   {
    "scene": 13,
-   "kind": "split-panel",
+   "kind": "b-roll",
    "text": false,
    "brands": false,
    "cluttered": false,
-   "place": "wrong",
-   "what": "shown at home table, not a market stand"
+   "place": "n/a",
+   "what": ""
   },
   {
    "scene": 14,
@@ -159,7 +164,7 @@
   },
   {
    "scene": 15,
-   "kind": "b-roll",
+   "kind": "split-panel",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -231,7 +236,7 @@
   },
   {
    "scene": 23,
-   "kind": "split-panel",
+   "kind": "b-roll",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -240,7 +245,7 @@
   },
   {
    "scene": 24,
-   "kind": "b-roll",
+   "kind": "split-panel",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -285,12 +290,12 @@
   },
   {
    "scene": 29,
-   "kind": "b-roll",
+   "kind": "split-panel",
    "text": false,
    "brands": false,
    "cluttered": false,
-   "place": "wrong",
-   "what": "shown at outdoor market stall, not kitchen"
+   "place": "n/a",
+   "what": ""
   },
   {
    "scene": 30,
@@ -298,8 +303,8 @@
    "text": false,
    "brands": false,
    "cluttered": false,
-   "place": "wrong",
-   "what": "outdoor market table shown, not a wash sink"
+   "place": "n/a",
+   "what": ""
   },
   {
    "scene": 31,
@@ -338,8 +343,53 @@
    "what": ""
   },
   {
+   "scene": 35,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 36,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 37,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 38,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 39,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
    "scene": 40,
-   "kind": "qr-background",
+   "kind": "b-roll",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -348,51 +398,6 @@
   },
   {
    "scene": 41,
-   "kind": "qr-background",
-   "text": false,
-   "brands": false,
-   "cluttered": false,
-   "place": "n/a",
-   "what": ""
-  },
-  {
-   "scene": 42,
-   "kind": "qr-background",
-   "text": false,
-   "brands": false,
-   "cluttered": false,
-   "place": "n/a",
-   "what": ""
-  },
-  {
-   "scene": 43,
-   "kind": "qr-background",
-   "text": false,
-   "brands": false,
-   "cluttered": false,
-   "place": "n/a",
-   "what": ""
-  },
-  {
-   "scene": 44,
-   "kind": "b-roll",
-   "text": false,
-   "brands": false,
-   "cluttered": false,
-   "place": "n/a",
-   "what": ""
-  },
-  {
-   "scene": 45,
-   "kind": "b-roll",
-   "text": false,
-   "brands": false,
-   "cluttered": false,
-   "place": "n/a",
-   "what": ""
-  },
-  {
-   "scene": 46,
    "kind": "b-roll",
    "text": false,
    "brands": false,
@@ -402,7 +407,7 @@
   },
   {
    "scene": 47,
-   "kind": "b-roll",
+   "kind": "qr-background",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -411,7 +416,7 @@
   },
   {
    "scene": 48,
-   "kind": "b-roll",
+   "kind": "qr-background",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -420,7 +425,7 @@
   },
   {
    "scene": 49,
-   "kind": "b-roll",
+   "kind": "qr-background",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -429,7 +434,7 @@
   },
   {
    "scene": 50,
-   "kind": "b-roll",
+   "kind": "qr-background",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -447,7 +452,7 @@
   },
   {
    "scene": 52,
-   "kind": "split-panel",
+   "kind": "b-roll",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -555,7 +560,7 @@
   },
   {
    "scene": 64,
-   "kind": "split-panel",
+   "kind": "b-roll",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -568,8 +573,8 @@
    "text": false,
    "brands": false,
    "cluttered": false,
-   "place": "n/a",
-   "what": ""
+   "place": "wrong",
+   "what": "shown on steps/patio, not a parking lot"
   },
   {
    "scene": 66,
@@ -618,7 +623,7 @@
   },
   {
    "scene": 71,
-   "kind": "b-roll",
+   "kind": "split-panel",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -663,7 +668,7 @@
   },
   {
    "scene": 76,
-   "kind": "split-panel",
+   "kind": "b-roll",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -762,7 +767,7 @@
   },
   {
    "scene": 87,
-   "kind": "split-panel",
+   "kind": "b-roll",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -780,7 +785,7 @@
   },
   {
    "scene": 89,
-   "kind": "b-roll",
+   "kind": "split-panel",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -834,6 +839,15 @@
   },
   {
    "scene": 95,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "wrong",
+   "what": "shown at home table, not the church"
+  },
+  {
+   "scene": 96,
    "kind": "b-roll",
    "text": false,
    "brands": false,
@@ -942,7 +956,7 @@
   },
   {
    "scene": 108,
-   "kind": "b-roll",
+   "kind": "split-panel",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -960,7 +974,7 @@
   },
   {
    "scene": 110,
-   "kind": "split-panel",
+   "kind": "b-roll",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -973,8 +987,8 @@
    "text": false,
    "brands": false,
    "cluttered": false,
-   "place": "n/a",
-   "what": ""
+   "place": "wrong",
+   "what": "shown at home, not a shop"
   },
   {
    "scene": 112,
@@ -1014,7 +1028,7 @@
   },
   {
    "scene": 116,
-   "kind": "b-roll",
+   "kind": "split-panel",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -1023,7 +1037,7 @@
   },
   {
    "scene": 117,
-   "kind": "split-panel",
+   "kind": "b-roll",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -1090,20 +1104,11 @@
    "text": false,
    "brands": false,
    "cluttered": false,
-   "place": "wrong",
-   "what": "shown in bedroom, not hospital"
-  },
-  {
-   "scene": 125,
-   "kind": "b-roll",
-   "text": false,
-   "brands": false,
-   "cluttered": false,
    "place": "n/a",
    "what": ""
   },
   {
-   "scene": 126,
+   "scene": 125,
    "kind": "b-roll",
    "text": false,
    "brands": false,
@@ -1122,7 +1127,7 @@
   },
   {
    "scene": 128,
-   "kind": "split-panel",
+   "kind": "b-roll",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -1153,8 +1158,8 @@
    "text": false,
    "brands": false,
    "cluttered": false,
-   "place": "n/a",
-   "what": ""
+   "place": "wrong",
+   "what": "shown on home dining table, not a market table"
   },
   {
    "scene": 132,
@@ -1184,7 +1189,7 @@
    "what": ""
   },
   {
-   "scene": 135,
+   "scene": 136,
    "kind": "b-roll",
    "text": false,
    "brands": false,
@@ -1193,7 +1198,7 @@
    "what": ""
   },
   {
-   "scene": 136,
+   "scene": 137,
    "kind": "b-roll",
    "text": false,
    "brands": false,
@@ -1230,7 +1235,7 @@
   },
   {
    "scene": 141,
-   "kind": "b-roll",
+   "kind": "split-panel",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -1248,7 +1253,7 @@
   },
   {
    "scene": 143,
-   "kind": "b-roll",
+   "kind": "split-panel",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -1283,17 +1288,44 @@
    "what": ""
   },
   {
-   "scene": 150,
-   "kind": "qr-background",
+   "scene": 147,
+   "kind": "b-roll",
    "text": false,
    "brands": false,
    "cluttered": false,
    "place": "n/a",
-   "what": "no screen or code visible"
+   "what": ""
+  },
+  {
+   "scene": 148,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 149,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 150,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
   },
   {
    "scene": 151,
-   "kind": "qr-background",
+   "kind": "b-roll",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -1302,16 +1334,16 @@
   },
   {
    "scene": 152,
-   "kind": "qr-background",
+   "kind": "b-roll",
    "text": false,
    "brands": false,
    "cluttered": false,
-   "place": "n/a",
-   "what": ""
+   "place": "wrong",
+   "what": "shown in sewing room, not porch"
   },
   {
    "scene": 153,
-   "kind": "qr-background",
+   "kind": "b-roll",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -1320,7 +1352,7 @@
   },
   {
    "scene": 154,
-   "kind": "qr-background",
+   "kind": "b-roll",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -1329,6 +1361,267 @@
   },
   {
    "scene": 155,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 156,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 157,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 158,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 159,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 160,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 162,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 163,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 164,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 165,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 166,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 167,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 168,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 169,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 170,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 171,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 172,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 173,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 174,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 175,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 176,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 177,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 178,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 185,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 186,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 187,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 188,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 189,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 190,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 191,
    "kind": "b-roll",
    "text": false,
    "brands": false,

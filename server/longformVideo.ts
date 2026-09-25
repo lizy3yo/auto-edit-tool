@@ -3952,6 +3952,7 @@ export function buildUnifiedStoryboardPrompt(opts: {
     `"kill", "poison", "exterminate", "dead", "infestation", and similar harsh wording.\n` +
     `- ${NO_NARRATION_TEXT_RULE}\n` +
     `- ${CLEAN_FRAME_RULE}\n` +
+    `- ${FIGURE_OF_SPEECH_RULE}\n` +
     `- B-ROLL VARIETY: across the whole video, no two b-roll shots should repeat the same ` +
     `subject AND framing. Vary the hero element (product, action, result, condition) and vary ` +
     `the SHOT ANGLE. For every non-host b-roll scene (including stillImage scenes) you MUST ` +
@@ -4703,6 +4704,20 @@ export const NO_NARRATION_TEXT_RULE =
   "work on a curving stroke, or a small decorative pattern — never a name, word or date.";
 
 /**
+ * Figures of speech are not shots. "yarn that costs more than a good roast" put a raw beef roast
+ * on the kitchen table beside the yarn (job 138), because the rewrite rules ask for a literal
+ * reading of the line. The line is about the expensive yarn; the roast is only a yardstick. A
+ * line that says where the subject is FOUND or USED is different — `PLACE` still sends that shot
+ * there.
+ */
+export const FIGURE_OF_SPEECH_RULE =
+  "FIGURES OF SPEECH ARE NOT SHOTS: when a line compares the subject to something else to say " +
+  'how much it costs, how big or hard it is, or what it is like ("yarn that costs more than a ' +
+  'good roast", "puckers like a flag", "made it sound like heart surgery"), show the SUBJECT ' +
+  "itself, never the thing it is compared to. (A line saying where the subject is found or used " +
+  "is a place, not a comparison — set the shot there.)";
+
+/**
  * Composition rule for every generated b-roll frame. The setting clause used to ask for "natural
  * everyday clutter", and the model filled the frame edges with branded shop-vacs, tool chests and
  * bins while the subject sat small in the middle — an openwork lattice then showed that clutter
@@ -5092,6 +5107,7 @@ export const STILL_BROLL_ENHANCER_SYSTEM =
   "- Compose for older (50–70) viewers: ONE clear hero subject, uncluttered and easy " +
   "to read at a glance, in a warm, familiar everyday setting.\n" +
   `- ${CLEAN_FRAME_RULE}\n` +
+  `- ${FIGURE_OF_SPEECH_RULE}\n` +
   `- ${NO_NARRATION_TEXT_RULE}\n` +
   "- PLACE: set the shot where the narration puts it. When the line is about where a thing is " +
   "used, sold, or comes from (a Japanese home with sliding doors, a market stall, a customer's " +
@@ -5164,6 +5180,7 @@ const CTA_BROLL_ENHANCER_SYSTEM =
   "- ONE clear hero subject — a product, tool, material, surface, or setting from the " +
   "video's topic — uncluttered and easy to read at a glance.\n" +
   `- ${CLEAN_FRAME_RULE}\n` +
+  `- ${FIGURE_OF_SPEECH_RULE}\n` +
   `- ${NO_NARRATION_TEXT_RULE}\n` +
   "- A single concrete composed subject as a frame (the clip barely moves; any motion is " +
   "added in code).\n" +
@@ -5707,10 +5724,19 @@ const LEGIBLE_WRITING: [RegExp, string][] = [
     "a small decorative motif $1",
   ],
   [
-    /\b(?:(?:crisp|dark|bold|neat|clean|shallow|hand-?written|hand-?lettered|burnt|burned|carved|engraved|painted|stitched|printed)[\s,]+)*(?:lettering|letters|inscriptions?|monograms?|initials|handwriting|wording|calligraphy)\b/gi,
+    /\b(?:(?:crisp|dark|bold|neat|clean|shallow|hand-?written|hand-?lettered|burnt|burned|carved|engraved|painted|stitched|printed|single|decorative|contrasting|embroidered)[\s,]+)*(?:lettering|letters?|inscriptions?|monograms?|initials|handwriting|wording|calligraphy)\b/gi,
     "a small decorative motif",
   ],
   [/\bin\s+(?:(?:dark|crisp|bold|neat|clean)[\s,]+)+characters\b/gi, ""],
+  // "stitched somebody's initial into it" → a big "M" on a market bag (job 119).
+  // …and "one with a simple embroidered initial in the corner" (job 132). The noun wherever it
+  // appears — not the adjective ("initial cut", "initial cost").
+  [
+    /\binitials?\b(?!\s+(?:stage|step|phase|cut|pass|layer|coat|round|row|idea|price|cost|attempt|batch|test|sketch))/gi,
+    "decorative motif",
+  ],
+  [/\bpersonali[sz]ation\b/gi, "decoration"],
+  [/\bpersonali[sz]ed\b/gi, "decorated"],
   [/["“][^"”]{1,40}["”]/g, ""],
   // Surfaces that exist to be written on, and the counting marks the model puts there to show
   // "I sold every one" — chalk tally marks on a garage wall and a chalkboard of incense-stick
@@ -6472,7 +6498,8 @@ export function qrOverlayUrlFor(
   ctaBooks?: LongformCtaBook[]
 ): string | undefined {
   const isCtaPitch = scene.cta && scene.ctaIndex != null && !scene.qrHero;
-  if (!scene.qrHero && !scene.qrCorner && !scene.coverHero && !isCtaPitch) return undefined;
+  if (!scene.qrHero && !scene.qrCorner && !scene.coverHero && !isCtaPitch)
+    return undefined;
   return bookForScene(scene, ctaBooks)?.qrImageUrl ?? qrImageUrl ?? undefined;
 }
 

@@ -1,51 +1,46 @@
 {
- "jobId": 120,
+ "jobId": 129,
  "channel": "hannah_yoder",
  "title": "10 Plain Sewing Projects From Cloth You Already Own, Ranked by Profit",
  "status": "completed",
  "rehearsal": true,
- "finalVideoUrl": "https://pub-fd5853f50f47422f827867dae374bcf2.r2.dev/longform/120/final-Tv0a7JLz.mp4",
+ "finalVideoUrl": "https://pub-fd5853f50f47422f827867dae374bcf2.r2.dev/longform/129/final-Zd6OwU0e.mp4",
  "verdicts": {
   "1": true,
   "2": true,
-  "3": false,
+  "3": true,
   "4": true,
   "5": true,
   "6": true,
   "7": true
  },
  "stats": {
-  "scenes": 156,
-  "hostTakes": 21,
+  "scenes": 171,
+  "hostTakes": 23,
   "hostSec": 179,
   "ctaPatterns": [
    "block 0: HBHHHQQQQ",
-   "block 1: HBHQQQQQ"
+   "block 1: HHBBHHQQQQQ"
   ],
   "introductions": 1,
   "midSentenceHostTakes": 0,
-  "picturesJudged": 143
+  "picturesJudged": 154
  },
  "findings": [
   {
    "rule": 3,
-   "scene": 13,
-   "detail": "split-panel: wrong place — shown at home table, not a market stand"
+   "scene": 72,
+   "detail": "b-roll: wrong place — Shown on a home table, not a market"
   },
   {
    "rule": 3,
-   "scene": 29,
-   "detail": "b-roll: wrong place — shown at outdoor market stall, not kitchen"
+   "scene": 76,
+   "detail": "b-roll: wrong place — shown at home, not the market"
   },
   {
    "rule": 3,
-   "scene": 30,
-   "detail": "b-roll: wrong place — outdoor market table shown, not a wash sink"
-  },
-  {
-   "rule": 3,
-   "scene": 124,
-   "detail": "b-roll: wrong place — shown in bedroom, not hospital"
+   "scene": 133,
+   "detail": "b-roll: wrong place — shown at home, not a hospital"
   }
  ],
  "judged": [
@@ -78,7 +73,7 @@
   },
   {
    "scene": 6,
-   "kind": "split-panel",
+   "kind": "b-roll",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -141,16 +136,16 @@
   },
   {
    "scene": 13,
-   "kind": "split-panel",
+   "kind": "b-roll",
    "text": false,
    "brands": false,
    "cluttered": false,
-   "place": "wrong",
-   "what": "shown at home table, not a market stand"
+   "place": "n/a",
+   "what": ""
   },
   {
    "scene": 14,
-   "kind": "b-roll",
+   "kind": "split-panel",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -231,7 +226,7 @@
   },
   {
    "scene": 23,
-   "kind": "split-panel",
+   "kind": "b-roll",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -249,7 +244,7 @@
   },
   {
    "scene": 25,
-   "kind": "b-roll",
+   "kind": "split-panel",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -285,12 +280,12 @@
   },
   {
    "scene": 29,
-   "kind": "b-roll",
+   "kind": "split-panel",
    "text": false,
    "brands": false,
    "cluttered": false,
-   "place": "wrong",
-   "what": "shown at outdoor market stall, not kitchen"
+   "place": "n/a",
+   "what": ""
   },
   {
    "scene": 30,
@@ -298,8 +293,8 @@
    "text": false,
    "brands": false,
    "cluttered": false,
-   "place": "wrong",
-   "what": "outdoor market table shown, not a wash sink"
+   "place": "n/a",
+   "what": ""
   },
   {
    "scene": 31,
@@ -338,8 +333,8 @@
    "what": ""
   },
   {
-   "scene": 40,
-   "kind": "qr-background",
+   "scene": 35,
+   "kind": "b-roll",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -353,7 +348,7 @@
    "brands": false,
    "cluttered": false,
    "place": "n/a",
-   "what": ""
+   "what": "No phone, camera, or code visible in scene"
   },
   {
    "scene": 42,
@@ -375,7 +370,7 @@
   },
   {
    "scene": 44,
-   "kind": "b-roll",
+   "kind": "qr-background",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -447,7 +442,7 @@
   },
   {
    "scene": 52,
-   "kind": "split-panel",
+   "kind": "b-roll",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -483,7 +478,7 @@
   },
   {
    "scene": 56,
-   "kind": "b-roll",
+   "kind": "split-panel",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -555,7 +550,7 @@
   },
   {
    "scene": 64,
-   "kind": "split-panel",
+   "kind": "b-roll",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -608,15 +603,6 @@
    "what": ""
   },
   {
-   "scene": 70,
-   "kind": "b-roll",
-   "text": false,
-   "brands": false,
-   "cluttered": false,
-   "place": "n/a",
-   "what": ""
-  },
-  {
    "scene": 71,
    "kind": "b-roll",
    "text": false,
@@ -631,8 +617,8 @@
    "text": false,
    "brands": false,
    "cluttered": false,
-   "place": "n/a",
-   "what": ""
+   "place": "wrong",
+   "what": "Shown on a home table, not a market"
   },
   {
    "scene": 73,
@@ -663,12 +649,12 @@
   },
   {
    "scene": 76,
-   "kind": "split-panel",
+   "kind": "b-roll",
    "text": false,
    "brands": false,
    "cluttered": false,
-   "place": "n/a",
-   "what": ""
+   "place": "wrong",
+   "what": "shown at home, not the market"
   },
   {
    "scene": 77,
@@ -717,7 +703,7 @@
   },
   {
    "scene": 82,
-   "kind": "b-roll",
+   "kind": "split-panel",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -762,7 +748,7 @@
   },
   {
    "scene": 87,
-   "kind": "split-panel",
+   "kind": "b-roll",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -816,7 +802,7 @@
   },
   {
    "scene": 93,
-   "kind": "b-roll",
+   "kind": "split-panel",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -834,6 +820,15 @@
   },
   {
    "scene": 95,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 96,
    "kind": "b-roll",
    "text": false,
    "brands": false,
@@ -951,7 +946,7 @@
   },
   {
    "scene": 109,
-   "kind": "b-roll",
+   "kind": "split-panel",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -960,7 +955,7 @@
   },
   {
    "scene": 110,
-   "kind": "split-panel",
+   "kind": "b-roll",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -1023,7 +1018,7 @@
   },
   {
    "scene": 117,
-   "kind": "split-panel",
+   "kind": "b-roll",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -1041,7 +1036,7 @@
   },
   {
    "scene": 119,
-   "kind": "b-roll",
+   "kind": "split-panel",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -1090,20 +1085,11 @@
    "text": false,
    "brands": false,
    "cluttered": false,
-   "place": "wrong",
-   "what": "shown in bedroom, not hospital"
-  },
-  {
-   "scene": 125,
-   "kind": "b-roll",
-   "text": false,
-   "brands": false,
-   "cluttered": false,
    "place": "n/a",
    "what": ""
   },
   {
-   "scene": 126,
+   "scene": 125,
    "kind": "b-roll",
    "text": false,
    "brands": false,
@@ -1122,7 +1108,7 @@
   },
   {
    "scene": 128,
-   "kind": "split-panel",
+   "kind": "b-roll",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -1171,8 +1157,8 @@
    "text": false,
    "brands": false,
    "cluttered": false,
-   "place": "n/a",
-   "what": ""
+   "place": "wrong",
+   "what": "shown at home, not a hospital"
   },
   {
    "scene": 134,
@@ -1202,6 +1188,15 @@
    "what": ""
   },
   {
+   "scene": 137,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
    "scene": 138,
    "kind": "b-roll",
    "text": false,
@@ -1212,7 +1207,7 @@
   },
   {
    "scene": 139,
-   "kind": "b-roll",
+   "kind": "split-panel",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -1283,17 +1278,35 @@
    "what": ""
   },
   {
-   "scene": 150,
-   "kind": "qr-background",
+   "scene": 147,
+   "kind": "b-roll",
    "text": false,
    "brands": false,
    "cluttered": false,
    "place": "n/a",
-   "what": "no screen or code visible"
+   "what": ""
+  },
+  {
+   "scene": 149,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 150,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
   },
   {
    "scene": 151,
-   "kind": "qr-background",
+   "kind": "b-roll",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -1302,7 +1315,7 @@
   },
   {
    "scene": 152,
-   "kind": "qr-background",
+   "kind": "b-roll",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -1311,7 +1324,7 @@
   },
   {
    "scene": 153,
-   "kind": "qr-background",
+   "kind": "b-roll",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -1320,7 +1333,7 @@
   },
   {
    "scene": 154,
-   "kind": "qr-background",
+   "kind": "b-roll",
    "text": false,
    "brands": false,
    "cluttered": false,
@@ -1329,6 +1342,87 @@
   },
   {
    "scene": 155,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 156,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 157,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 158,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 165,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": "no screen or code visible"
+  },
+  {
+   "scene": 166,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 167,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 168,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 169,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "what": ""
+  },
+  {
+   "scene": 170,
    "kind": "b-roll",
    "text": false,
    "brands": false,

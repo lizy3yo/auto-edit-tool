@@ -183,6 +183,8 @@ const fmt = (sec: number) =>
 
 const JUDGE_SYSTEM =
   "You review ONE b-roll frame from a YouTube video against the narration line it plays under. " +
+  "Judge ONLY what is visible in the image — the narration is context for the place question, " +
+  "never evidence that text or a price is on screen. " +
   "Answer four independent questions and return ONLY this JSON: " +
   '{"text":true|false,"brands":true|false,"cluttered":true|false,"named_place":"...","place":"ok"|"wrong"|"n/a","what":"..."}\n' +
   "named_place: copy the PLACE the narration line names, word for word (e.g. \"Japanese sliding " +
@@ -222,11 +224,20 @@ async function judge(buf: Buffer, narration: string): Promise<Omit<Judged, "scen
       systemPrompt: JUDGE_SYSTEM,
       userMessage: `Narration line: "${narration}"\nJSON:`,
       imageInput: { base64: buf.toString("base64"), mediaType: "image/png" },
-      maxTokens: 160,
+      // Room for Sonnet's own reasoning ahead of the JSON — at 160 the answer was cut off, and a
+      // truncated reply parsed as "text: true" with no reason (8 of 9 text flags in round 3).
+      maxTokens: 2000,
       model: JUDGE_MODEL,
     });
     const p = safeParseJSON<any>(r.text, r.stopReason);
     if (!p.success) return null;
+    // A flag must name what it saw; a verdict with no reason is a truncated or guessed answer.
+    if (typeof p.data.what !== "string" || !p.data.what.trim()) {
+      p.data.text = false;
+      p.data.brands = false;
+      p.data.cluttered = false;
+      p.data.place = "n/a";
+    }
     return {
       text: p.data.text === true,
       brands: p.data.brands === true,
@@ -290,7 +301,9 @@ export function verdicts(findings: Finding[], judged: Judged[] | null) {
   return {
     1: count(1) === 0,
     2: count(2) === 0,
-    3: judged ? rate(3, placed) <= 0.1 : null,
+    // Judged against ALL pictures: the judge names a place only when it sees one missed, so a
+    // rate over "placed" pictures is always 100%.
+    3: judged ? rate(3, n) <= 0.05 : null,
     4: judged ? rate(4, n) <= 0.1 : null,
     // No text at all: every hit is reviewed by hand; one is allowed for a judge false positive.
     5: judged ? count(5) <= 1 : null,

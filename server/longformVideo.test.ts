@@ -70,6 +70,7 @@ import {
   titleMatcher,
   coalesceShortScenes,
   completeHostSentences,
+  FIGURE_OF_SPEECH_RULE,
   scrubLegibleWriting,
   coverBeatFor,
   markHostIntroductions,
@@ -6396,6 +6397,23 @@ describe("scrubLegibleWriting — nothing the image model would spell out", () =
     expect(scrubLegibleWriting("a jar with a price tag on it")).toBe(
       "a jar with a plain wooden surface on it"
     );
+    // Job 119: a big "M" on a market bag.
+    expect(
+      scrubLegibleWriting(
+        "a market bag, a single decorative letter worked into one corner"
+      )
+    ).not.toMatch(/letter/i);
+    expect(
+      scrubLegibleWriting("a pillowcase with somebody's initial stitched on")
+    ).not.toMatch(/initial/i);
+    // Job 132: "one with a simple embroidered initial in the corner … the personalized cloth".
+    const mono = scrubLegibleWriting(
+      "three dishcloths, one with a simple embroidered initial in the corner, the personalized cloth angled forward"
+    );
+    expect(mono).not.toMatch(/initial|personali/i);
+    expect(scrubLegibleWriting("the initial cut across the board")).toBe(
+      "the initial cut across the board"
+    );
     // Job 115: "a worn calendar page … its margin filled with pencil tally marks".
     expect(
       scrubLegibleWriting("A worn calendar page lying flat on a kitchen table")
@@ -6417,6 +6435,20 @@ describe("scrubLegibleWriting — nothing the image model would spell out", () =
   it("runs on every prompt through softenVisualPrompt", () => {
     expect(softenVisualPrompt("a tray with neat lettering on the rail")).toBe(
       "a tray with a small decorative motif on the rail"
+    );
+  });
+});
+
+describe("FIGURE_OF_SPEECH_RULE", () => {
+  it("reaches the storyboard and both picture rewriters (job 138's roast beside the yarn)", () => {
+    expect(STILL_BROLL_ENHANCER_SYSTEM).toContain(FIGURE_OF_SPEECH_RULE);
+    const { systemPrompt, userMessage } = buildUnifiedStoryboardPrompt({
+      chunks: [{ start: 0, end: 5 }],
+      spokenScript: "Hello",
+      faceAvailable: true,
+    });
+    expect(systemPrompt + userMessage).toContain(
+      "FIGURES OF SPEECH ARE NOT SHOTS"
     );
   });
 });
