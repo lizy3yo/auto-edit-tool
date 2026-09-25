@@ -12,7 +12,7 @@ import { toast } from "sonner";
  * chooses here is what every operator sees on every device, and a reload shows the same ticks.
  * They used to be local component state that reset to "everything" on every mount, which read
  * as the choice not being kept. A click writes straight through `channelHostPhoto.setSelected`
- * and the tiles follow the server's answer; while a write is in flight the tiles are disabled so
+ * ; while a write is in flight the tiles are disabled so
  * two quick clicks cannot race. `onChange` still hands the parent the ticked ids to ride on the
  * generate call, so the film and the picker agree even if the last write has not landed.
  *
@@ -127,11 +127,10 @@ export function LongformHostPhotoPicker({
           return (
             <div
               key={p.id}
-              className={`relative w-20 shrink-0 overflow-hidden rounded-md border text-left transition ${
-                on
-                  ? "border-primary ring-1 ring-primary"
-                  : "border-border opacity-50 hover:opacity-80"
-              } ${locked ? "opacity-60" : ""}`}
+              className={`relative w-20 shrink-0 overflow-hidden rounded-md border text-left transition ${on
+                ? "border-primary ring-1 ring-primary"
+                : "border-border opacity-50 hover:opacity-80"
+                } ${locked ? "opacity-60" : ""}`}
             >
               <button
                 type="button"
