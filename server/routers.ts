@@ -126,7 +126,9 @@ import {
   parseCtaMarkers,
   extractSpokenScript,
   wpsForVoice,
+  retryNarration,
 } from "./longformVideo";
+import { diedBeforeNarration } from "./ttsRecovery";
 import { verifyNarrationRead } from "./narrationIngest";
 import { testMinimaxConnection } from "./ttsMinimax";
 import { planDelivery, scriptParagraphs } from "./delivery";
@@ -2260,6 +2262,11 @@ const longformVideoRouter = router({
         masterAudioUrl: job.masterAudioUrl ?? null,
         finalVideoUrl: job.finalVideoUrl,
         errorMessage: job.errorMessage,
+        // Set while the job waits out a voice-provider outage (`server/ttsRecovery.ts`).
+        ttsWait: previewParams.ttsWait ?? null,
+        // Failed before it was ever voiced — drives the "Try voicing again" button.
+        canRetryNarration:
+          job.stage === "voiceover" && diedBeforeNarration(job),
         channelKey:
           (job.inputParams as { channelKey?: string } | null)?.channelKey ??
           null,
@@ -3372,6 +3379,13 @@ const longformVideoRouter = router({
       ) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
       }
+      // A render that never got its narration: record it ONCE, from the top. Voicing every
+      // scene as its own request (what this button did here) sent 229 submits into the same
+      // outage that killed the narration, and gave a choppy read even when it worked.
+      if (diedBeforeNarration(job)) {
+        await retryNarration(input.jobId);
+        return { ok: true, queued: false, already: false, revoicing: true };
+      }
       // A running pass no longer refuses the click. `retryFailedScenes` parks ONE retry behind
       // the job lock (which queues, never drops), so the operator can ask for the holdouts the
       // moment a scene fails instead of waiting out ~280 siblings — and because the parked pass
@@ -3405,7 +3419,29 @@ const longformVideoRouter = router({
           err
         );
       });
-      return { ok: true, queued, already: false };
+      return { ok: true, queued, already: false, revoicing: false };
+    }),
+
+  /**
+   * "Try voicing again" (`retryNarration`): a job waiting for the voice provider checks right
+   * now; a job that failed before it was ever voiced runs again from the top with the same
+   * script and settings. Refused for anything that already has its narration.
+   */
+  retryNarration: approvedProcedure
+    .input(z.object({ jobId: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      const job = await getLongformVideoJobById(input.jobId);
+      if (
+        !job ||
+        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
+      ) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
+      }
+      try {
+        return { result: await retryNarration(input.jobId) };
+      } catch (err: any) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
+      }
     }),
 
   /**

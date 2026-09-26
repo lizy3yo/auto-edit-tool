@@ -6,6 +6,7 @@ vi.mock("./db", () => ({
   updateLongformVideoJob: vi.fn(),
 }));
 vi.mock("./longformVideo", () => ({
+  resumeTtsWait: vi.fn(),
   retryFailedScenes: vi.fn(),
   retryJobAssembly: vi.fn(),
   runLongformPipeline: vi.fn(),
@@ -43,6 +44,37 @@ describe("planRestartResume", () => {
       planRestartResume(job({ stage: "voiceover", storyboard: [scene()] }), NOW)
         .kind
     ).toBe("pipeline");
+  });
+
+  it("picks a wait for the voice provider back up, even after a resume was spent", () => {
+    const ttsWait = {
+      since: new Date(NOW - 10 * 60_000).toISOString(),
+      revoices: 0,
+      lastError: "TTS failed",
+      vendor: "69Labs",
+    };
+    for (const stage of ["voiceover", "storyboard"]) {
+      expect(
+        planRestartResume(
+          job({
+            stage,
+            inputParams: { ttsWait, autoResumedAt: "2026-09-23T13:00:00Z" },
+          }),
+          NOW
+        ).kind
+      ).toBe("waitForTts");
+    }
+    // A board with clips is never restarted from the top, waiting or not.
+    expect(
+      planRestartResume(
+        job({
+          stage: "voiceover",
+          inputParams: { ttsWait },
+          storyboard: [scene({ clipUrls: ["c.mp4"] })],
+        }),
+        NOW
+      ).kind
+    ).toBe("giveUp");
   });
 
   it("never restarts from the top a board that already carries clips", () => {

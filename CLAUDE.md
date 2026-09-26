@@ -86,7 +86,8 @@ Gemini, OpenAI, R2, RunPod. Missing ones fail loudly at the first stage that nee
 | `SIXTYNINE_VIDEO_SUBMIT_RATE`   | 5/min (API cap)   | `IMAGE_PRIMARY_TIMEOUT_MS`                 | 480s                         |
 | `SIXTYNINE_TTS_SUBMIT_RATE`     | 20/min            | `SIXTYNINE_TTS_SUBMIT_BURST`               | 3                            |
 | `SIXTYNINE_TTS_409_COOLDOWN_MS` | 45s               | `SIXTYNINE_TTS_5XX_BASE_DELAY_MS`          | 5s                           |
-| `SIXTYNINE_TTS_JAM_TTL_MS`      | 60s               | —                                          | —                            |
+| `SIXTYNINE_TTS_JAM_TTL_MS`      | 60s               | `TTS_WAIT_CHECK_MS`                        | 5 min                        |
+| `TTS_WAIT_MAX_MS`               | 2 h               | `TTS_WAIT_MAX_REVOICES`                    | 2                            |
 | `IMAGE_PRIMARY_RETRIES`         | 1                 | `IMAGE_RETRY_TIMEOUT_MS`                   | 240s                         |
 | `IMAGE_RETRY_TOTAL_BUDGET_MS`   | 600s              | `MYSQL_SORT_BUFFER_SIZE`                   | 8 MB                         |
 | `AUTO_MIGRATE`                  | on (`0` skips)    | `ASSEMBLY_CACHE`                           | on (`0` skips)               |
@@ -870,6 +871,29 @@ Always 16:9. Fire-and-forget; progress persisted to the job row and polled by th
   cannot silently reset it. The seed is pinned at **`id = 1`** because every pre-accounts job,
   slot and library row carries `userId = 1`; seeding anywhere else orphans all of it. With no
   admin row and no env vars, nobody can sign in and boot says so loudly.
+- **A narration outage is waited out, not failed** (`server/ttsRecovery.ts`, 2026-09-26). A hosted
+  job's master narration failed, then "Retry failed scenes" voiced all 229 scenes one by one and
+  69Labs failed every one ("TTS generation failed" — 69Labs' task said FAILED with no reason). Now
+  the pipeline tags a master failure (`NarrationFailedError`) and `classifyNarrationFailure`
+  sorts it: the voice gone, no credits, a rejected key or a blocked text FAIL at once with what
+  to fix; anything else WAITS — the job stays `processing` on voiceover, the card says "Waiting
+  for 69Labs", and every `TTS_WAIT_CHECK_MS` one short line is voiced in the film's own voice
+  (`probeNarrationVoice`). When it comes back the render is run again from the top with the same
+  inputs (storyboard repeats, cheap) — at most `TTS_WAIT_MAX_REVOICES` times, and never past
+  `TTS_WAIT_MAX_MS` from `inputParams.ttsWait.since`, which is persisted so a restart neither
+  loses the wait (`restartResume` → `resumeTtsWait`, without spending the one auto-resume) nor
+  extends it. It never switches vendor. "Try voicing again" (`retryNarration`) checks now on a
+  waiting job and re-runs a job that failed before it was voiced; "Retry failed scenes" on such
+  a job (`diedBeforeNarration`: no master, nothing voiced or rendered) does the same instead of
+  its per-scene fan-out. A heartbeat keeps the waiting row fresh for the stale-job sweep.
+  A BROKEN VOICE looks exactly like an outage, so the first check runs at once and a failed
+  check tries the same line in up to two OTHER channels' voices (`probeNarrationVoice`; there is
+  no stock voice to compare with — 69Labs refuses ElevenLabs' premade ones): film voice failing
+  while another works `VOICE_STUCK_CHECKS` (2) checks in a row ⇒ fail with "pick a different
+  voice", ~5 min instead of 2 h. Werner's voice (`IsC5x9dr2Ii3Qcxbkusu`, 2026-09-26) is the
+  case: its tasks sit PENDING in a queue, never start, and FAIL ~4 min later with only
+  `userMessage` "This job failed to complete" (now read by `pollTTSTask69Labs`), unbilled,
+  while every other channel's voice answers in under a minute.
 - **A 69Labs TTS task is never abandoned.** `generateSceneVoiceover` persists the provider's
   task id on `scene.ttsTaskIds` (the TTS mirror of `renderTaskIds`) the moment it is created,
   and clears it once the audio is collected or the job reports `failed`. Before that the id

@@ -961,14 +961,36 @@ export default function LongformJobSlot({
 
   const retryFailedScenesMutation =
     trpc.longformVideo.retryFailedScenes.useMutation({
-      onSuccess: () => {
-        toast.success("Retrying failed scenes...");
+      onSuccess: data => {
+        // A render that never got its narration is re-run from the top instead of voicing
+        // every scene separately (see the route).
+        toast.success(
+          data.revoicing
+            ? "This render has no narration yet — recording it again from the top..."
+            : "Retrying failed scenes..."
+        );
+        watchJob();
         // Refetch so status flips failed → processing: hides the button and
         // resumes polling, so it can't be spammed.
         if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
       },
       onError: err => toast.error(err.message),
     });
+
+  const retryNarrationMutation = trpc.longformVideo.retryNarration.useMutation(
+    {
+      onSuccess: data => {
+        toast.success(
+          data.result === "checking"
+            ? "Checking the voice provider now..."
+            : "Recording the narration again — same script and settings."
+        );
+        watchJob();
+        if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
+      },
+      onError: err => toast.error(err.message),
+    }
+  );
 
   const repairTimelineMutation = trpc.longformVideo.repairTimeline.useMutation({
     onSuccess: () => {
@@ -1647,8 +1669,13 @@ export default function LongformJobSlot({
   // pass releases it, so an operator who sees a scene fail at 151/282 no longer has to sit
   // and wait for the other 131 before asking for it back.
   const retryCount = retryRunning ? failedSceneCount : unassemblableCount;
+  // A render that never got its narration offers "Try voicing again" instead — retrying its
+  // scenes one by one is exactly what it must not do.
   const canRetryFailed =
-    retryCount > 0 && (job?.status === "failed" || retryRunning);
+    retryCount > 0 &&
+    !job?.canRetryNarration &&
+    !job?.ttsWait &&
+    (job?.status === "failed" || retryRunning);
 
   const retryFailedScenesButton = canRetryFailed ? (
     <Button
@@ -2244,6 +2271,60 @@ export default function LongformJobSlot({
                     : "Repair timeline"}
                 </Button>
               </div>
+            )}
+
+            {/* The voice provider failed the narration and the job is waiting it out
+                (`server/ttsRecovery.ts`): it checks on its own and carries on by itself. */}
+            {job.status === "processing" && job.ttsWait && (
+              <div className="space-y-2 rounded-md border border-warning/40 bg-warning/5 p-3">
+                <p className="text-xs font-medium">
+                  {job.ttsWait.vendor} couldn&apos;t record the narration, so
+                  this render is waiting for it to work again.
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  It checks on its own every few minutes and carries on by
+                  itself as soon as {job.ttsWait.vendor} answers — nothing to
+                  paste or fill in again. If it still isn&apos;t working after
+                  about 2 hours, the render stops and says so. Nothing has been
+                  paid for clips.
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Last error: {sanitizeError(job.ttsWait.lastError)}
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    if (jobId) retryNarrationMutation.mutate({ jobId });
+                  }}
+                  disabled={retryNarrationMutation.isPending}
+                >
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  Check now
+                </Button>
+              </div>
+            )}
+
+            {/* Failed before it was ever voiced: run it again with the same script and
+                settings — no pasting. */}
+            {job.status === "failed" && job.canRetryNarration && (
+              <Button
+                size="sm"
+                onClick={() => {
+                  if (!jobId) return;
+                  armNotifications();
+                  retryNarrationMutation.mutate({ jobId });
+                }}
+                disabled={retryNarrationMutation.isPending}
+              >
+                {retryNarrationMutation.isPending ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                )}
+                Try voicing again
+              </Button>
             )}
 
             {/* The film never got a voice. "Retry failed scenes" cannot help — it re-renders

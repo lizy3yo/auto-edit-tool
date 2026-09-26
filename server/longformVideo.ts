@@ -43,8 +43,20 @@ import {
 } from "./ttsUnified";
 import { storagePut } from "./storage";
 import {
+  classifyNarrationFailure,
+  diedBeforeNarration,
+  NarrationFailedError,
+  planNarrationFailure,
+  runTtsWait,
+  TTS_PROBE_TEXT,
+  ttsVendorLabel,
+  wakeTtsWaiter,
+  type ProbeResult,
+} from "./ttsRecovery";
+import {
   getActiveProvider,
   getChannelConfig,
+  getAllChannelConfigs,
   getProviderByType,
   hostNameAliases,
 } from "./db";
@@ -274,6 +286,7 @@ import type {
   SplitLayout,
   SceneSubmitReason,
   SubmitActor,
+  TtsWaitState,
 } from "../shared/types";
 import {
   extractSpokenScript,
@@ -12088,17 +12101,36 @@ async function runUnifiedPipeline(
   // from Whisper word timings and slice the master into per-scene tracks — so every downstream
   // stage still sees a per-scene audioUrl + audioDuration and is otherwise untouched.
   await assertNotCancelled(jobId);
-  const master = await voiceMasterNarration(
-    jobId,
-    ttsType,
-    ttsKey,
-    spokenScript,
-    params
-  );
+  let master: Awaited<ReturnType<typeof voiceMasterNarration>>;
+  try {
+    master = await voiceMasterNarration(
+      jobId,
+      ttsType,
+      ttsKey,
+      spokenScript,
+      params
+    );
+  } catch (e) {
+    // Tagged so `runLongformPipeline` can wait the provider out instead of failing the job
+    // (`server/ttsRecovery.ts`).
+    throw new NarrationFailedError(e, ttsVendorLabel(ttsType));
+  }
+  // Voiced after an outage: the wait is over.
+  const waited = params.ttsWait;
+  if (waited) {
+    delete params.ttsWait;
+    appendJobWarning(
+      jobId,
+      `${waited.vendor} failed to record the narration at first — it was recorded ` +
+        `automatically once ${waited.vendor} was working again`
+    );
+  }
   // Checkpoint it now, not at the end of voicing: transcription and alignment take minutes, and a
   // restart in them used to lose a whole paid read.
-  if (!params.manualNarrationUrl && params.voicedMasterUrl !== master.url) {
-    params.voicedMasterUrl = master.url;
+  const checkpoint =
+    !params.manualNarrationUrl && params.voicedMasterUrl !== master.url;
+  if (checkpoint) params.voicedMasterUrl = master.url;
+  if (checkpoint || waited) {
     await updateLongformVideoJob(jobId, { inputParams: params });
   }
   await assertNotCancelled(jobId);
@@ -13047,13 +13079,277 @@ export async function runLongformPipeline(jobId: number): Promise<void> {
       }
     }
 
+    let message: string = err.message || "Unknown error";
+    // The voice provider failed the narration: wait it out and carry on by itself when that is
+    // worth doing (`server/ttsRecovery.ts`); otherwise fail with what to fix.
+    if (err instanceof NarrationFailedError) {
+      const next = await waitOutNarrationFailure(jobId, err);
+      if (next === null) return;
+      message = next;
+    }
+
     console.error(`[Longform ${jobId}] pipeline failed:`, err);
     await updateLongformVideoJob(jobId, {
       status: "failed",
-      errorMessage: err.message || "Unknown error",
+      errorMessage: message,
       completedAt: new Date(),
     }).catch(onFailedStatusWriteError(jobId));
   }
+}
+
+// ─── Waiting out a voice-provider outage (`server/ttsRecovery.ts`) ──────────────
+
+/** How long one health check may take before it counts as "still down". */
+const TTS_PROBE_TIMEOUT_MS = 3 * 60_000;
+
+/**
+ * Decide what a failed master narration means for the job. Returns null when the job is now
+ * WAITING (or was cancelled meanwhile — its row is left as the cancel wrote it), else the
+ * message to fail it with.
+ */
+async function waitOutNarrationFailure(
+  jobId: number,
+  err: NarrationFailedError
+): Promise<string | null> {
+  const cause = (err as { cause?: unknown }).cause ?? err;
+  try {
+    const job = await getLongformVideoJobById(jobId);
+    if (!job || job.status !== "processing") return null;
+    if (await isMockMode()) return err.message;
+    const params = job.inputParams as LongformInputParams;
+    const plan = planNarrationFailure({
+      prior: params.ttsWait,
+      cause,
+      vendor: err.vendor,
+      now: Date.now(),
+    });
+    if (plan.action === "fail") {
+      if (params.ttsWait) {
+        const { ttsWait: _done, ...rest } = params;
+        await updateLongformVideoJob(jobId, { inputParams: rest });
+      }
+      return plan.message;
+    }
+    console.warn(
+      `[Longform ${jobId}] ${err.message} — waiting for ${err.vendor} to come back ` +
+        `(automatic re-voicings so far: ${plan.wait.revoices})`
+    );
+    await updateLongformVideoJob(jobId, {
+      inputParams: { ...params, ttsWait: plan.wait },
+      stage: "voiceover",
+      errorMessage: null,
+    });
+    startTtsWait(jobId, plan.wait);
+    return null;
+  } catch (e) {
+    console.error(
+      `[Longform ${jobId}] could not start waiting for the voice provider:`,
+      describeError(e)
+    );
+    return err.message;
+  }
+}
+
+/** Voice the test line in one voice. Never throws. */
+async function voiceCheck(
+  providerType: string,
+  apiKey: string,
+  voiceId: string,
+  params: LongformInputParams
+): Promise<ProbeResult> {
+  try {
+    const taskId = await createUnifiedTTSTask(providerType, apiKey, {
+      text: TTS_PROBE_TEXT,
+      voiceId,
+      modelId: params.ttsModel,
+      speed: params.ttsSpeed,
+    });
+    const start = Date.now();
+    while (Date.now() - start < TTS_PROBE_TIMEOUT_MS) {
+      const r = await pollUnifiedTTSTask(providerType, apiKey, taskId);
+      if (r.status === "completed") return { ok: true };
+      if (r.status === "failed" || r.status === "censored") {
+        return {
+          ok: false,
+          error: r.error || "TTS failed",
+          name: r.status === "censored" ? "CensoredTTSError" : undefined,
+        };
+      }
+      await sleep(4000);
+    }
+    return {
+      ok: false,
+      error: `a test line in voice ${voiceId} was still not done after ${Math.round(TTS_PROBE_TIMEOUT_MS / 60_000)} min`,
+    };
+  } catch (e: any) {
+    return { ok: false, error: describeError(e), name: e?.name };
+  }
+}
+
+/**
+ * Voice one short line in the film's own voice, on its own vendor — the cheapest question that
+ * answers "would the narration work now?". When it fails, the same line is tried in up to two
+ * OTHER channels' voices on the same account: if one of those works, the provider is up and
+ * the film's voice is what is broken (`othersWork`), which waiting will never fix. There is no
+ * stock voice to compare against — 69Labs refuses ElevenLabs' premade ones — so the channels'
+ * own voices, which are known to be on this account, are the reference.
+ */
+async function probeNarrationVoice(jobId: number): Promise<ProbeResult> {
+  try {
+    const job = await getLongformVideoJobById(jobId);
+    if (!job) return { ok: false, error: "Job not found" };
+    const params = job.inputParams as LongformInputParams;
+    const { providerType, apiKey } = await resolveTTSVendor(params);
+    const voiceId = voiceIdForVendor(params);
+    const own = await voiceCheck(providerType, apiKey, voiceId, params);
+    if (own.ok) return own;
+    // Only a failure that could be an outage is worth comparing (a refused voice or key has
+    // already said what it is).
+    if (classifyNarrationFailure({ name: own.name, message: own.error }).kind !== "wait") {
+      return own;
+    }
+    const others = Array.from(
+      new Set(
+        (await getAllChannelConfigs())
+          .map(c =>
+            providerType === "minimax" ? c.minimaxVoiceId : c.voiceId
+          )
+          .filter((v): v is string => !!v && v !== voiceId)
+      )
+    ).slice(0, 2);
+    for (const other of others) {
+      if ((await voiceCheck(providerType, apiKey, other, params)).ok) {
+        console.warn(
+          `[Longform ${jobId}] voice check: ${voiceId} failed while ${other} worked — ` +
+            `the provider is up, this voice is not`
+        );
+        return {
+          ...own,
+          error: `${own.error} — another channel's voice worked at the same time (voice ${voiceId})`,
+          othersWork: true,
+        };
+      }
+    }
+    return { ...own, othersWork: false };
+  } catch (e: any) {
+    return { ok: false, error: describeError(e), name: e?.name };
+  }
+}
+
+async function patchTtsWait(
+  jobId: number,
+  wait: TtsWaitState | undefined,
+  fields: Partial<Parameters<typeof updateLongformVideoJob>[1]> = {}
+): Promise<void> {
+  const job = await getLongformVideoJobById(jobId);
+  if (!job) return;
+  const { ttsWait: _old, ...rest } = job.inputParams as LongformInputParams;
+  await updateLongformVideoJob(jobId, {
+    ...fields,
+    inputParams: wait ? { ...rest, ttsWait: wait } : rest,
+  });
+}
+
+/** Start the wait loop for a job already marked waiting. Never throws. */
+function startTtsWait(jobId: number, wait: TtsWaitState): void {
+  // The row must keep moving, or the stale-job sweep fails a job that is only waiting.
+  const stopBeat = startJobHeartbeat(jobId);
+  void runTtsWait(jobId, wait, {
+    now: () => Date.now(),
+    sleep: ms => sleep(ms).then(() => {}),
+    stillWaiting: async () => {
+      const job = await getLongformVideoJobById(jobId);
+      return (
+        job?.status === "processing" &&
+        (job.inputParams as LongformInputParams)?.ttsWait?.since === wait.since
+      );
+    },
+    probe: () => probeNarrationVoice(jobId),
+    report: (label, pct) => setJobPhase(jobId, { label, pct }),
+    save: w => patchTtsWait(jobId, w),
+    revoice: async w => {
+      stopBeat();
+      setJobPhase(jobId, null);
+      console.log(
+        `[Longform ${jobId}] ${w.vendor} answered the voice check — recording the narration ` +
+          `again (automatic re-voicing ${w.revoices})`
+      );
+      await patchTtsWait(jobId, w, { stage: "storyboard" });
+      await runLongformPipeline(jobId);
+    },
+    fail: async message => {
+      setJobPhase(jobId, null);
+      console.warn(`[Longform ${jobId}] ${message}`);
+      await patchTtsWait(jobId, undefined, {
+        status: "failed",
+        errorMessage: message,
+        completedAt: new Date(),
+      });
+    },
+  })
+    .catch(e =>
+      console.error(
+        `[Longform ${jobId}] waiting for the voice provider failed:`,
+        describeError(e)
+      )
+    )
+    .finally(stopBeat);
+}
+
+/**
+ * Pick a waiting job back up after a server restart (`server/restartResume.ts`). The 2-hour
+ * limit counts from the persisted `ttsWait.since`, so a restart does not extend it.
+ */
+export async function resumeTtsWait(jobId: number): Promise<void> {
+  const job = await getLongformVideoJobById(jobId);
+  const wait = (job?.inputParams as LongformInputParams | undefined)?.ttsWait;
+  if (!job || !wait) return;
+  await updateLongformVideoJob(jobId, {
+    status: "processing",
+    stage: "voiceover",
+    errorMessage: null,
+  });
+  startTtsWait(jobId, wait);
+}
+
+/**
+ * "Try voicing again". On a job waiting for the provider it checks right now instead of at the
+ * next interval; on a job that failed before it was ever voiced it runs the render again from
+ * the top with the same script and settings (and a fresh 2-hour wait if the provider is still
+ * down). Anything else is refused: a job with a narration may have clips paid for.
+ */
+export async function retryNarration(
+  jobId: number
+): Promise<"checking" | "started"> {
+  const job = await getLongformVideoJobById(jobId);
+  if (!job) throw new Error("Job not found");
+  const params = job.inputParams as LongformInputParams;
+  if (job.status === "processing") {
+    if (!params.ttsWait) throw new Error("This render is still running.");
+    if (!wakeTtsWaiter(jobId)) {
+      startTtsWait(jobId, params.ttsWait);
+      wakeTtsWaiter(jobId);
+    }
+    return "checking";
+  }
+  if (!diedBeforeNarration(job)) {
+    throw new Error(
+      'This render already has its narration — use "Retry failed scenes" instead.'
+    );
+  }
+  const { ttsWait: _old, ...rest } = params;
+  await updateLongformVideoJob(jobId, {
+    inputParams: rest,
+    status: "processing",
+    stage: "storyboard",
+    storyboard: [],
+    errorMessage: null,
+  });
+  console.log(
+    `[Longform ${jobId}] narration retry — running the render again from the top`
+  );
+  void runLongformPipeline(jobId);
+  return "started";
 }
 
 /**

@@ -15,6 +15,8 @@
  *   - clips → "Retry failed scenes": collects renders still in flight by their saved task ids,
  *     renders only scenes with no clip, then assembles
  *   - assembly / done → "Retry assembly" (local ffmpeg — free; settles an already-finished film)
+ *   - waiting for the voice provider (`inputParams.ttsWait`) → the wait again, which does not
+ *     spend the one automatic resume (`server/ttsRecovery.ts`)
  *
  * ONE automatic resume per job (`inputParams.autoResumedAt`): a job cut off a second time is
  * failed with a message saying so, so a server that keeps crashing cannot loop a render.
@@ -26,6 +28,7 @@
 import type { LongformInputParams, StoryboardScene } from "@shared/types";
 import { getProcessingLongformJobs, updateLongformVideoJob } from "./db";
 import {
+  resumeTtsWait,
   retryFailedScenes,
   retryJobAssembly,
   runLongformPipeline,
@@ -38,6 +41,7 @@ export type RestartAction =
   | { kind: "pipeline" }
   | { kind: "retryScenes" }
   | { kind: "assemble" }
+  | { kind: "waitForTts" }
   | { kind: "giveUp"; message: string };
 
 /** The fields `planRestartResume` reads — a job row satisfies it. */
@@ -59,6 +63,18 @@ export function planRestartResume(
   const scenes = Array.isArray(job.storyboard)
     ? (job.storyboard as StoryboardScene[])
     : [];
+
+  // Waiting for the voice provider (`server/ttsRecovery.ts`): pick the wait back up. Checked
+  // before the one-resume rule, because a wait spends nothing by itself — it re-voices only once
+  // a voice check passes, its re-voicings are capped, and its 2-hour limit counts from when it
+  // began, so a deploy during a wait neither loses the job nor extends the wait.
+  if (
+    params.ttsWait &&
+    (job.stage === "voiceover" || job.stage === "storyboard") &&
+    !scenes.some(hasClip)
+  ) {
+    return { kind: "waitForTts" };
+  }
 
   if (params.autoResumedAt) {
     return {
@@ -168,6 +184,18 @@ export async function resumeJobsAfterRestart(
       }).catch(err =>
         console.error(
           `[Restart] longform ${job.id} could not be failed:`,
+          err?.message
+        )
+      );
+      continue;
+    }
+    if (action.kind === "waitForTts") {
+      console.log(
+        `[Restart] longform ${job.id} was waiting for the voice provider — waiting again`
+      );
+      resumeTtsWait(job.id).catch(err =>
+        console.error(
+          `[Restart] longform ${job.id} could not resume its wait:`,
           err?.message
         )
       );

@@ -934,6 +934,18 @@ export interface LongformAsset {
   caption?: string;
 }
 
+/** A job waiting out a voice-provider outage — see `LongformInputParams.ttsWait`. */
+export interface TtsWaitState {
+  /** ISO time the wait began. */
+  since: string;
+  /** Automatic re-voicings started so far (each one is a whole paid read). */
+  revoices: number;
+  /** The last failure, for the card and the final message. */
+  lastError: string;
+  /** "69Labs" or "MiniMax" — the vendor the film is pinned to. */
+  vendor: string;
+}
+
 /** Persisted input parameters for a long-form video job */
 export interface LongformInputParams {
   /** The script the video is narrated from (voiced verbatim as one continuous track) */
@@ -1057,6 +1069,13 @@ export interface LongformInputParams {
   voicedMasterUrl?: string;
   /** When the server picked this job up after a restart — the ONE automatic resume a job gets. */
   autoResumedAt?: string;
+  /**
+   * Set while the voice provider is down and this job is waiting it out (`server/ttsRecovery.ts`)
+   * instead of failing at voicing: when the wait began (the 2-hour limit counts from here, so it
+   * survives a restart), how many automatic re-voicings it has started, and the last error seen.
+   * Cleared the moment a master is voiced.
+   */
+  ttsWait?: TtsWaitState;
   /**
    * Set once "Even out voice" has run on this job (`levelJobNarration`): films rendered before
    * the narration leveller existed carry the provider's volume drift, and this is the one-time

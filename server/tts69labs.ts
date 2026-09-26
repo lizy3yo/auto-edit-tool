@@ -568,10 +568,34 @@ export async function pollTTSTask69Labs(
   }
 
   if (data.status === "FAILED") {
+    // `userMessage` is where 69Labs actually puts it ("This job failed to complete. Please try
+    // again.") — seen 2026-09-26 on a voice whose jobs queue, never start, and fail ~4 min later.
+    const reason = [
+      data.userMessage,
+      data.error,
+      data.message,
+      data.errorMessage,
+      data.reason,
+    ]
+      .map(v =>
+        typeof v === "string" ? v : v ? summarizeHttpBody(v, 200) : ""
+      )
+      .find(Boolean);
+    if (!reason) {
+      // Logged raw: 69Labs has been seen failing every task with no reason at all, and the
+      // body is the only place a field we don't read yet could be hiding it.
+      console.warn(
+        `[69Labs TTS] task ${taskId} FAILED with no reason — raw status: ` +
+          summarizeHttpBody(data, 500)
+      );
+    }
     return {
       taskId,
       status: "failed",
-      error: data.error || data.message || "TTS generation failed",
+      error:
+        reason ||
+        "69Labs marked the voice-over as failed without giving a reason (usually a " +
+          "69Labs-side outage, or a problem with the voice on that account)",
     };
   }
 
