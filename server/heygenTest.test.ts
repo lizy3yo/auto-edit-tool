@@ -9,6 +9,10 @@ import {
   heygenTestInputError,
   heygenTestProgress,
   pageList,
+  accountToSlot,
+  slotToAccount,
+  HEYGEN_TEST_ACCOUNT_SLOT,
+  type HeygenTestAccount,
 } from "../shared/heygenTest";
 import { heygenTestCostUsd, planHeygenAvailability } from "./heygenTest";
 import { RATES } from "./pricing";
@@ -107,6 +111,41 @@ describe("planHeygenAvailability", () => {
 
   it("is empty when every account is busy", () => {
     expect(free([0, 1, 4, null])).toEqual([]);
+  });
+
+  describe("the test account", () => {
+    const withTest = [
+      { account: "test" as const, label: "Test account" },
+      ...configured,
+    ];
+    const freeT = (films: (number | null)[], tests: HeygenTestAccount[] = []) =>
+      planHeygenAvailability(withTest, keyed, films, tests).map(a => a.account);
+
+    it("is listed first, ahead of the tab accounts it backs up", () => {
+      expect(freeT([])).toEqual(["test", 0, 1, 4, "shared"]);
+    });
+
+    it("stays free while every film account is busy — no film renders on it", () => {
+      expect(freeT([0, 1, 4, null, 2])).toEqual(["test"]);
+    });
+
+    it("holds one test run at a time", () => {
+      expect(freeT([], ["test"])).toEqual([0, 1, 4, "shared"]);
+    });
+  });
+});
+
+describe("heygen_tests.heygenSlot <-> account", () => {
+  it("round-trips every account kind", () => {
+    for (const a of [0, 4, "shared", "test"] as HeygenTestAccount[])
+      expect(slotToAccount(accountToSlot(a))).toBe(a);
+  });
+
+  it("keeps the stored values rows already have", () => {
+    expect(accountToSlot("shared")).toBeNull();
+    expect(accountToSlot(3)).toBe(3);
+    expect(accountToSlot("test")).toBe(HEYGEN_TEST_ACCOUNT_SLOT);
+    expect(HEYGEN_TEST_ACCOUNT_SLOT).toBeLessThan(0);
   });
 });
 

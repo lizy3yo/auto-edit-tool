@@ -69,8 +69,31 @@ export function heygenTestInputError(input: {
   return null;
 }
 
-/** A tab's HeyGen account (`heygen_key_slot_N`) or the shared `HEYGEN_API_KEY`. */
-export type HeygenTestAccount = number | "shared";
+/**
+ * A tab's HeyGen account (`heygen_key_slot_N`), the shared `HEYGEN_API_KEY`, or the test-only
+ * account (`heygen_key_test`, which no film ever uses).
+ */
+export type HeygenTestAccount = number | "shared" | "test";
+
+/**
+ * `heygen_tests.heygenSlot` value for the test account. The column predates it: 0-4 are tabs and
+ * null is the shared key, so the test account takes a value no tab can have.
+ */
+export const HEYGEN_TEST_ACCOUNT_SLOT = -1;
+
+/** The account as stored on a `heygen_tests` row. */
+export function accountToSlot(account: HeygenTestAccount): number | null {
+  if (account === "shared") return null;
+  if (account === "test") return HEYGEN_TEST_ACCOUNT_SLOT;
+  return account;
+}
+
+/** A `heygen_tests` row's account. */
+export function slotToAccount(slot: number | null): HeygenTestAccount {
+  if (slot == null) return "shared";
+  if (slot === HEYGEN_TEST_ACCOUNT_SLOT) return "test";
+  return slot;
+}
 
 /**
  * Progress for one clip, as the page's bar shows it. HeyGen reports a STAGE, never a percentage,

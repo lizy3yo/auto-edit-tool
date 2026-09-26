@@ -57,6 +57,7 @@ Read through the single `ENV` object in `server/_core/env.ts`, except `R2_*`, wh
 | MiniMax (TTS)     | `provider_configs` row + `customConfig.groupId` (`saveMinimaxProvider`)                      | `https://api.minimax.io/v1` |
 | APIMART ×5 + edit | `app_settings` → `apimart_key_slot_0..4`, `apimart_key_edit` (`server/longformVideo.ts:452`) | `https://api.apimart.ai`    |
 | HeyGen ×5         | `app_settings` → `heygen_key_slot_0..4` (`server/longformVideo.ts:461`)                      | `https://api.heygen.com/v3` |
+| HeyGen test       | `app_settings` → `heygen_key_test` — HeyGen test page only, never a film                      | `https://api.heygen.com/v3` |
 
 `LONGFORM_SLOT_COUNT = 5` — one key slot per UI tab, so 5 accounts render 5× wider than
 one shared key. Crypto lives in `server/encryption.ts`:
@@ -879,7 +880,10 @@ Express · tRPC · Drizzle · MySQL.
   grouped by `batchId`; HeyGen's `video_id` is persisted on accept and `resumeHeygenTests` (run on
   every `heygenTest.list`) polls an orphan instead of resubmitting — a row cut off before HeyGen
   accepted it is failed, never re-spent. Shares the account's `heygenSlotsFor` semaphore with the
-  pipeline. The account picker lists only FREE TAB accounts (never the shared `HEYGEN_API_KEY`) (`planHeygenAvailability`: a processing
+  pipeline. The account picker lists the TEST account first (`heygen_key_test`, Admin → Provider
+  Keys → HeyGen "Test" row; no film ever uses it, stored on a row as `heygenSlot = -1` via
+  `accountToSlot`/`slotToAccount`, one run at a time), then the FREE TAB accounts as a backup
+  (never the shared `HEYGEN_API_KEY`) (`planHeygenAvailability`: a processing
   film holds its tab's account, or the shared key when that tab has none; an unfinished test
   holds its own), each badged Available, with an amber warning when none are; `startHeygenTest`
   re-checks on click. It is LIVE: `server/heygenAccountStream.ts` is a Server-Sent Events route

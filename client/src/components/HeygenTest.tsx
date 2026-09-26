@@ -349,7 +349,9 @@ export function HeygenTest() {
                   channelKey,
                   ttsVendor: effectiveVendor,
                   account:
-                    accountValue === "shared" ? "shared" : Number(accountValue),
+                    accountValue === "shared" || accountValue === "test"
+                      ? accountValue
+                      : Number(accountValue),
                   script,
                   imageUrls,
                   name: runName.trim() || undefined,

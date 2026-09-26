@@ -825,6 +825,18 @@ export const setHeygenSlotKey = (slot: number, apiKey: string): Promise<void> =>
   setStoredKey(heygenSlotSettingKey(slot), apiKey);
 
 /**
+ * The HeyGen TEST account: used only by the HeyGen test page (`server/heygenTest.ts`), never by a
+ * film, so trying photos never spends a tab's credits or queues behind a live render.
+ */
+const HEYGEN_TEST_SETTING_KEY = "heygen_key_test";
+export const getHeygenTestKey = (): Promise<string | null> =>
+  getStoredKey(HEYGEN_TEST_SETTING_KEY);
+export const getHeygenTestMasked = (): Promise<string | null> =>
+  getStoredMasked(HEYGEN_TEST_SETTING_KEY);
+export const setHeygenTestKey = (apiKey: string): Promise<void> =>
+  setStoredKey(HEYGEN_TEST_SETTING_KEY, apiKey);
+
+/**
  * The APIMART video adapter for a job's tab, or null when the tab has no key. APIMART is the
  * ONLY b-roll VIDEO provider (no toggle, no fallback — `generateSceneClips` throws on null).
  * Resolved from `params.apimartSlot` at render time so a key rotation and job resumes both pick

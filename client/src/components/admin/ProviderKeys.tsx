@@ -440,6 +440,7 @@ export function ProviderKeys() {
   const [drafts, setDrafts] = useState<Record<number, string>>({});
   const [editDraft, setEditDraft] = useState("");
   const [heygenDrafts, setHeygenDrafts] = useState<Record<number, string>>({});
+  const [heygenTestDraft, setHeygenTestDraft] = useState("");
   // AIREITER BOLT-ON (temporary) — delete with the section below.
   const { data: aireiter, isLoading: aireiterLoading } =
     trpc.longformVideo.getAireiter.useQuery();
@@ -478,6 +479,17 @@ export function ProviderKeys() {
     },
     onError: err => toast.error(err.message ?? "Failed to save."),
   });
+
+  const saveHeygenTestMutation =
+    trpc.longformVideo.setHeygenTestKey.useMutation({
+      onSuccess: () => {
+        toast.success("HeyGen test key saved.");
+        setHeygenTestDraft("");
+        utils.longformVideo.getHeygenKeys.invalidate();
+        utils.longformVideo.getHeygenQuotas.invalidate();
+      },
+      onError: err => toast.error(err.message ?? "Failed to save."),
+    });
 
   // AIREITER BOLT-ON (temporary) — delete with the section below.
   const saveAireiterMutation = trpc.longformVideo.setAireiterKey.useMutation({
@@ -692,6 +704,33 @@ export function ProviderKeys() {
           <code className="text-[11px]">HEYGEN_API_KEY</code>; with that unset
           too, host scenes fail loudly.
         </p>
+        {!heygenLoading && (
+          <div className="space-y-2 border-t border-border pt-3">
+            <KeyRow
+              label="Test"
+              masked={heygen?.test ?? null}
+              placeholder="Not set — the HeyGen test page uses the tab accounts"
+              draft={heygenTestDraft}
+              onDraftChange={setHeygenTestDraft}
+              onSave={apiKey => saveHeygenTestMutation.mutate({ apiKey })}
+              saving={saveHeygenTestMutation.isPending}
+              badge={
+                <BalanceBadge
+                  keySet={!!heygen?.test}
+                  value={quotas?.test ?? null}
+                  loading={quotasLoading}
+                  format={v => `${Math.round(v)} credits left`}
+                  lowThreshold={20}
+                />
+              }
+            />
+            <p className="text-xs text-muted-foreground">
+              Used only by the HeyGen test page — films never touch it, so
+              trying photos never spends a tab&apos;s credits. The test page
+              picks it first; the tab accounts stay there as a backup.
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

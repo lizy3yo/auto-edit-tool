@@ -277,6 +277,7 @@ function handle(path: string, input: any): unknown {
 
 /** Accounts with a key, and which of them a film is "rendering" on (toggled below). */
 const ACCOUNTS = [
+  { account: "test", label: "Test account" },
   { account: 0, label: "Tab 1 account" },
   { account: 1, label: "Tab 2 account" },
   { account: 4, label: "Tab 5 account" },

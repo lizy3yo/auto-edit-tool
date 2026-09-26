@@ -121,6 +121,9 @@ import {
   getHeygenSlotKey,
   getHeygenSlotMasked,
   setHeygenSlotKey,
+  getHeygenTestKey,
+  getHeygenTestMasked,
+  setHeygenTestKey,
   assembleScenePromptPreview,
   syncSceneClipFields,
   parseCtaMarkers,
@@ -225,6 +228,7 @@ import {
   retryHeygenTests,
   startHeygenTest,
 } from "./heygenTest";
+import { notifyHeygenAccountsChanged } from "./heygenAccountEvents";
 import {
   deleteHeygenTestBatch,
   listHeygenTestPage,
@@ -1014,7 +1018,10 @@ const heygenTestRouter = router({
         })),
         totalRuns,
         page,
-        pageCount: Math.max(1, Math.ceil(totalRuns / HEYGEN_TEST_RUNS_PER_PAGE)),
+        pageCount: Math.max(
+          1,
+          Math.ceil(totalRuns / HEYGEN_TEST_RUNS_PER_PAGE)
+        ),
       };
     }),
 
@@ -1051,7 +1058,11 @@ const heygenTestRouter = router({
       z.object({
         channelKey: z.string().min(1),
         ttsVendor: z.enum(["sixtynine_labs", "minimax"]),
-        account: z.union([z.number().int().min(0), z.literal("shared")]),
+        account: z.union([
+          z.number().int().min(0),
+          z.literal("shared"),
+          z.literal("test"),
+        ]),
         script: z.string().max(5_000),
         imageUrls: z.array(z.string().url().max(512)).max(10),
         name: z.string().max(HEYGEN_TEST_MAX_NAME).optional(),
@@ -1499,14 +1510,17 @@ const longformVideoRouter = router({
       return { success: true };
     }),
 
-  /** Admin: read the masked per-tab HeyGen keys (slots 0–4), null where unset. */
+  /** Admin: read the masked per-tab HeyGen keys (slots 0–4) and the test key, null where unset. */
   getHeygenKeys: adminProcedure.query(async () => {
-    const slots = await Promise.all(
-      Array.from({ length: LONGFORM_SLOT_COUNT }, (_, slotIndex) =>
-        getHeygenSlotMasked(slotIndex).then(masked => ({ slotIndex, masked }))
-      )
-    );
-    return { slots };
+    const [slots, test] = await Promise.all([
+      Promise.all(
+        Array.from({ length: LONGFORM_SLOT_COUNT }, (_, slotIndex) =>
+          getHeygenSlotMasked(slotIndex).then(masked => ({ slotIndex, masked }))
+        )
+      ),
+      getHeygenTestMasked(),
+    ]);
+    return { slots, test };
   }),
 
   /** Admin: remaining credits per stored HeyGen key. Null = unset key OR failed check. */
@@ -1520,7 +1534,11 @@ const longformVideoRouter = router({
           .then(quota => ({ slotIndex, quota }))
       )
     );
-    return { slots };
+    const testKey = await getHeygenTestKey();
+    const test = testKey
+      ? await new HeygenLipsyncAdapter(testKey).getRemainingQuota()
+      : null;
+    return { slots, test };
   }),
 
   /** Admin: set (or clear, with an empty string) a tab's HeyGen key. */
@@ -1537,6 +1555,15 @@ const longformVideoRouter = router({
     )
     .mutation(async ({ input }) => {
       await setHeygenSlotKey(input.slotIndex, input.apiKey);
+      return { success: true };
+    }),
+
+  /** Admin: set (or clear, with an empty string) the HeyGen test page's own key. */
+  setHeygenTestKey: adminProcedure
+    .input(z.object({ apiKey: z.string().max(400) }))
+    .mutation(async ({ input }) => {
+      await setHeygenTestKey(input.apiKey);
+      notifyHeygenAccountsChanged();
       return { success: true };
     }),
 
