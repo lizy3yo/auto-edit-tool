@@ -204,3 +204,96 @@ export function describeRuns(runs: SceneRun[]): string {
     .map(r => `${clockTime(r.startSec)}–${clockTime(r.endSec)}`)
     .join(", ");
 }
+
+/** Longest stretch sent to whisperx in one piece when the whole narration would not go. */
+export const TRANSCRIPT_PIECE_SEC = 480;
+/** Audio shared by neighbouring pieces, so a word on a join is heard whole by one of them. */
+export const TRANSCRIPT_PIECE_OVERLAP_SEC = 30;
+/** Pieces transcribed at once. */
+const PIECE_CONCURRENCY = 3;
+
+/**
+ * Cut `durationSec` into pieces of at most `pieceSec`, each overlapping the next by `overlapSec`.
+ * Every piece OWNS the middle of each overlap on its side (`ownFrom`..`ownTo`), so the owned
+ * ranges tile the narration exactly once and a word is kept from exactly one piece — the one that
+ * heard it furthest from its edge. Pure — unit-tested.
+ */
+export function planTranscriptPieces(
+  durationSec: number,
+  pieceSec = TRANSCRIPT_PIECE_SEC,
+  overlapSec = TRANSCRIPT_PIECE_OVERLAP_SEC
+): { fromSec: number; toSec: number; ownFrom: number; ownTo: number }[] {
+  if (durationSec <= pieceSec)
+    return [{ fromSec: 0, toSec: durationSec, ownFrom: 0, ownTo: durationSec }];
+  const step = pieceSec - overlapSec;
+  const count = Math.ceil((durationSec - overlapSec) / step);
+  const out: { fromSec: number; toSec: number; ownFrom: number; ownTo: number }[] = [];
+  for (let k = 0; k < count; k++) {
+    const fromSec = k * step;
+    const toSec = Math.min(durationSec, fromSec + pieceSec);
+    out.push({
+      fromSec,
+      toSec,
+      ownFrom: k === 0 ? 0 : fromSec + overlapSec / 2,
+      ownTo: k === count - 1 ? durationSec : toSec - overlapSec / 2,
+    });
+  }
+  return out;
+}
+
+/**
+ * Transcribe a narration too long for one whisperx call in overlapping pieces and stitch the word
+ * timings back onto the narration's own clock. Granny Ruth's 25.7-minute master failed twice with
+ * "CUDA failed with error out of memory" — deterministic for its length — and a film without word
+ * timings is cut by word count, the shot list skipped. Each piece gets one retry. A piece that
+ * still fails leaves a HOLE, which `healTranscriptHoles` and the plausibility gate already handle;
+ * only when no piece at all comes back is it an error. Never throws.
+ */
+export async function transcribeInPieces(opts: {
+  monoAudio: Buffer;
+  durationSec: number;
+  log?: (msg: string) => void;
+  /** Injected in tests. */
+  transcribe?: typeof transcribeWordsFromBuffer;
+  slice?: typeof sliceMonoAudioBuffer;
+}): Promise<{ words: WhisperWord[]; duration: number } | { error: string }> {
+  const transcribe = opts.transcribe ?? transcribeWordsFromBuffer;
+  const slice = opts.slice ?? sliceMonoAudioBuffer;
+  const pieces = planTranscriptPieces(opts.durationSec);
+  const heard: (WhisperWord[] | null)[] = new Array(pieces.length).fill(null);
+  let next = 0;
+  const worker = async () => {
+    while (next < pieces.length) {
+      const k = next++;
+      const p = pieces[k];
+      const label = `${p.fromSec.toFixed(0)}s–${p.toSec.toFixed(0)}s`;
+      for (let attempt = 1; attempt <= 2 && !heard[k]; attempt++) {
+        try {
+          const audio = await slice(opts.monoAudio, p.fromSec, p.toSec - p.fromSec);
+          const out = await transcribe(audio);
+          if ("error" in out) {
+            opts.log?.(`piece ${label} failed (${out.error})${attempt === 1 ? " — retrying" : ""}`);
+            continue;
+          }
+          heard[k] = out.words
+            .map(w => ({ word: w.word, start: w.start + p.fromSec, end: w.end + p.fromSec }))
+            .filter(w => mid(w) >= p.ownFrom && mid(w) < p.ownTo + (k === pieces.length - 1 ? 1e-6 : 0));
+        } catch (e: any) {
+          opts.log?.(`piece ${label} threw (${e?.message ?? e})`);
+        }
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: PIECE_CONCURRENCY }, worker));
+  const got = heard.filter((w): w is WhisperWord[] => !!w);
+  if (got.length === 0) return { error: "every transcription piece failed" };
+  const missing = pieces.filter((_, k) => !heard[k]);
+  opts.log?.(
+    `transcribed in ${pieces.length} piece(s)` +
+      (missing.length
+        ? ` — ${missing.length} still failed (${missing.map(p => `${p.fromSec.toFixed(0)}s–${p.toSec.toFixed(0)}s`).join(", ")}), left for the hole repair`
+        : "")
+  );
+  const words = got.flat().sort((a, b) => a.start - b.start);
+  return { words, duration: opts.durationSec };
+}

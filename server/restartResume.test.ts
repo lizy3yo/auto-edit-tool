@@ -183,9 +183,11 @@ describe("resumeJobsAfterRestart — a job another process is still running", ()
   it("resumes a job whose row did not move — nothing is running it", async () => {
     vi.mocked(runLongformPipeline).mockResolvedValue(undefined);
     vi.mocked(updateLongformVideoJob).mockResolvedValue(undefined as any);
+    // Recent: a job idle past 24 h is failed, not resumed, so a fixed date rots into a failure.
+    const recent = new Date(Date.now() - 60_000).toISOString();
     vi.mocked(getProcessingLongformJobs)
-      .mockResolvedValueOnce([row("2026-09-24T07:00:00Z")] as any)
-      .mockResolvedValueOnce([row("2026-09-24T07:00:00Z")] as any);
+      .mockResolvedValueOnce([row(recent)] as any)
+      .mockResolvedValueOnce([row(recent)] as any);
     await resumeJobsAfterRestart(0);
     expect(runLongformPipeline).toHaveBeenCalledWith(112);
   });

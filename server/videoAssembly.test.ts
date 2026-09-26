@@ -21,6 +21,8 @@ import {
   splitPanelWidths,
   resolveSplitLayout,
   buildKenBurnsArgs,
+  judgeBlankFrames,
+  kenBurnsMaxZoom,
   parseSilenceLog,
   isTransientFfmpegError,
   planMusicSchedule,
@@ -826,7 +828,7 @@ describe("buildKenBurnsArgs (still → pan/zoom clip)", () => {
 
   it("zooms IN on even scenes and OUT on odd scenes", () => {
     const evenF = args[args.indexOf("-filter_complex") + 1];
-    expect(evenF).toContain("(1+0.0800*on/180)"); // starts at 1, grows over 180 frames
+    expect(evenF).toContain("(1+0.1400*on/180)"); // starts at 1, grows over 180 frames
     const odd = buildKenBurnsArgs({
       imagePath: "/tmp/s.png",
       outputPath: "/tmp/o.mp4",
@@ -836,7 +838,7 @@ describe("buildKenBurnsArgs (still → pan/zoom clip)", () => {
       index: 1,
     });
     const oddF = odd[odd.indexOf("-filter_complex") + 1];
-    expect(oddF).toContain("(1.0800-0.0800*on/180)"); // starts at maxZoom, shrinks
+    expect(oddF).toContain("(1.1400-0.1400*on/180)"); // starts at maxZoom, shrinks
   });
 
   it("is a pure centered zoom — the source rect stays axis-aligned (no skew, no pan)", () => {
@@ -848,10 +850,10 @@ describe("buildKenBurnsArgs (still → pan/zoom clip)", () => {
     expect(c.x1).toBe(c.x3); // right edge
     expect(c.y0).toBe(c.y1); // top edge
     expect(c.y2).toBe(c.y3); // bottom edge
-    const half = "W/(2*(1+0.0800*on/180))";
+    const half = "W/(2*(1+0.1400*on/180))";
     expect(c.x0).toBe(`W/2-${half}`);
     expect(c.x1).toBe(`W/2+${half}`);
-    expect(c.y0).toBe("H/2-H/(2*(1+0.0800*on/180))");
+    expect(c.y0).toBe("H/2-H/(2*(1+0.1400*on/180))");
   });
 });
 
@@ -2063,5 +2065,36 @@ describe("isTransientSceneError — what a whole scene attempt may retry", () =>
     expect(
       isTransientSceneError("Invalid data found when processing input")
     ).toBe(false);
+  });
+});
+
+describe("judgeBlankFrames", () => {
+  const frame = (fill: (i: number) => number) => {
+    const f = new Uint8Array(64 * 36);
+    for (let i = 0; i < f.length; i++) f[i] = fill(i);
+    return f;
+  };
+  const black = () => frame(() => 3);
+  const grey = () => frame(() => 128);
+  const face = () => frame(i => 40 + ((i * 37) % 160)); // texture: a real shot
+
+  it("calls a clip black when (nearly) every frame is dark or one flat colour", () => {
+    expect(judgeBlankFrames(Array.from({ length: 10 }, black)).blank).toBe(true);
+    expect(judgeBlankFrames(Array.from({ length: 10 }, grey)).blank).toBe(true);
+  });
+
+  it("passes a real shot, and one that only fades through black", () => {
+    expect(judgeBlankFrames(Array.from({ length: 10 }, face)).blank).toBe(false);
+    const fade = [black(), black(), ...Array.from({ length: 8 }, face)];
+    expect(judgeBlankFrames(fade).blank).toBe(false);
+    expect(judgeBlankFrames([]).blank).toBe(false);
+  });
+});
+
+describe("kenBurnsMaxZoom", () => {
+  it("moves a long still more and a quick list shot less", () => {
+    expect(kenBurnsMaxZoom(5)).toBeCloseTo(1.14);
+    expect(kenBurnsMaxZoom(1)).toBeCloseTo(1.028);
+    expect(kenBurnsMaxZoom(20)).toBeCloseTo(1.14);
   });
 });

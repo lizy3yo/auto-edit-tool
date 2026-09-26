@@ -533,11 +533,8 @@ export default function LongformJobSlot({
       if (d.accepted === "overLimit") {
         unqueueScene(vars.sceneIndex);
         if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
-        limitToast(
-          vars.sceneIndex,
-          "spentSec" in d ? d.spentSec : undefined,
-          "limitSec" in d ? d.limitSec : undefined
-        );
+        // The server's count said no where the card's did not — show the same warning box.
+        setLimitScene(vars.sceneIndex);
         return;
       }
       toast.success(
@@ -1129,8 +1126,10 @@ export default function LongformJobSlot({
   const overHostLimit = (scene: StoryboardScene, anyHost = false) =>
     !!hostSpend &&
     (anyHost || isLimitedHostScene(scene)) &&
-    hostSpend.spentSec + (scene.audioDuration ?? 0) >
-      hostSpend.limitSec + HOST_SPEND_EPSILON_SEC;
+    // Used up already, or this render would take it over — either way, ask first.
+    (hostSpend.reached ||
+      hostSpend.spentSec + (scene.audioDuration ?? 0) >
+        hostSpend.limitSec + HOST_SPEND_EPSILON_SEC);
   /**
    * An editor has no Regenerate left on this host beat — its one regenerate is used, or the
    * video's host minutes are — so the card offers "Make b-roll" in its place. Admins and
@@ -1141,6 +1140,10 @@ export default function LongformJobSlot({
     (hostRegenerationLocked(scene) || overHostLimit(scene));
 
   const isProcessing = job?.status === "processing";
+  // The storyboard before the narration exists is a rough cut the shot list will redo.
+  const isDraftStoryboard =
+    isProcessing &&
+    (job?.stage === "storyboard" || job?.stage === "voiceover");
   // The job's live scene-edit queue, from the server (which scenes wait / render right now).
   // Both "the pipeline is rendering" and "the operator is editing scenes" read status
   // "processing" on the job row; this is what tells them apart. The local optimistic queue is
@@ -1575,10 +1578,10 @@ export default function LongformJobSlot({
         );
       return;
     }
-    // Past the video's host spend limit: same shape — a manager confirms, an editor is told.
+    // Past the video's host minutes: a warning box first, for everyone — a manager may go past
+    // it, an editor is offered "Make b-roll" instead.
     if (overHostLimit(scene) && !force) {
-      if (canOverrideRegen) setLimitScene(scene.index);
-      else limitToast(scene.index, hostSpend?.spentSec, hostSpend?.limitSec);
+      setLimitScene(scene.index);
       return;
     }
     armNotifications();
@@ -2700,10 +2703,23 @@ export default function LongformJobSlot({
         </Card>
       )}
 
+      {/* Before the narration is recorded the scenes are the storyboard's rough word-count chunks;
+          the shot list re-cuts them on the words afterwards. Shown, the rough cut read as the
+          final one (a host line that will hand over to pictures, still showing as all host) —
+          so it stays hidden until the real cut exists. */}
+      {scenes.length > 0 && isDraftStoryboard && (
+        <Card>
+          <CardContent className="py-6 text-sm text-muted-foreground">
+            Planning the shots — the storyboard appears here once the narration is recorded
+            and the pictures are cut on its words.
+          </CardContent>
+        </Card>
+      )}
+
       {/* Storyboard review — stays visible after assembly so scenes can still be
           regenerated; a regen is render-only, clears finalVideoUrl, and surfaces the
           manual "Assemble final video" button above */}
-      {scenes.length > 0 && (
+      {scenes.length > 0 && !isDraftStoryboard && (
         // Anchor for "Open" from the library: the generator form above is tall, so landing
         // at the top of the page looked like nothing had happened. The page scrolls here.
         <div className="space-y-3" id={`storyboard-${slotIndex}`}>
@@ -2711,9 +2727,22 @@ export default function LongformJobSlot({
               sticky too — offset by its height so the two stack instead. */}
           <div className="sticky top-[var(--app-header-h)] z-20 -mx-4 space-y-3 border-b border-border bg-background px-4 py-3">
             <div className="flex items-center justify-between gap-3">
-              <h2 className="text-lg font-medium">
-                Storyboard ({scenes.length} scenes)
-              </h2>
+              <div className="flex items-baseline gap-3">
+                <h2 className="text-lg font-medium">
+                  Storyboard ({scenes.length} scenes)
+                </h2>
+                {/* Where the video stands on its host minutes — the regenerate warning's numbers,
+                    shown before anyone clicks. */}
+                {hostSpend && (
+                  <span
+                    className={`text-xs ${hostSpend.reached ? "font-medium text-destructive" : "text-muted-foreground"}`}
+                  >
+                    Host minutes: {formatMinSec(hostSpend.spentSec)} of{" "}
+                    {formatMinSec(hostSpend.limitSec)}
+                    {hostSpend.reached ? " — used" : ""}
+                  </span>
+                )}
+              </div>
               <div className="flex items-center gap-2">
                 <div className="relative">
                   <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -3944,7 +3973,8 @@ export default function LongformJobSlot({
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Host spend limit override (admin / manager only) */}
+      {/* Host minutes used: warn before any host regenerate. A manager may go past it; an
+          editor is offered "Make b-roll" instead. */}
       <AlertDialog
         open={limitScene != null}
         onOpenChange={open => {
@@ -3954,7 +3984,9 @@ export default function LongformJobSlot({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Go past this video's host limit?
+              {canOverrideRegen
+                ? "Go past this video's host minutes?"
+                : "This video's host minutes are used"}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {(() => {
@@ -3965,9 +3997,12 @@ export default function LongformJobSlot({
                   rate && sec > 0 ? ` (~$${(sec * rate).toFixed(2)})` : "";
                 return (
                   `This video has used ${formatMinSec(hostSpend?.spentSec ?? 0)} of its ` +
-                  `${formatMinSec(hostSpend?.limitSec ?? 0)} host limit. Regenerating scene ` +
-                  `${limitScene} is another ${sec.toFixed(1)}s of lip-sync${cost}, billed whether ` +
-                  `or not it is kept. "Make b-roll" costs one image and no lip-sync.`
+                  `${formatMinSec(hostSpend?.limitSec ?? 0)} host minutes. ` +
+                  (canOverrideRegen
+                    ? `Regenerating scene ${limitScene} is another ${sec.toFixed(1)}s of ` +
+                      `lip-sync${cost}, billed whether or not it is kept. `
+                    : `Scene ${limitScene} cannot be regenerated as a host shot. `) +
+                  `"Make b-roll" costs one image and no lip-sync.`
                 );
               })()}
             </AlertDialogDescription>
@@ -3976,13 +4011,23 @@ export default function LongformJobSlot({
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
-                const s = scenes.find(x => x.index === limitScene);
-                if (s) regenerateSingle(s, true);
+                if (limitScene != null) makeBroll(limitScene);
                 setLimitScene(null);
               }}
             >
-              Regenerate anyway
+              Make b-roll
             </AlertDialogAction>
+            {canOverrideRegen && (
+              <AlertDialogAction
+                onClick={() => {
+                  const s = scenes.find(x => x.index === limitScene);
+                  if (s) regenerateSingle(s, true);
+                  setLimitScene(null);
+                }}
+              >
+                Regenerate anyway
+              </AlertDialogAction>
+            )}
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

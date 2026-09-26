@@ -216,8 +216,17 @@ export function dimensionsFor(aspectRatio: VideoAspectRatio): {
     : { width: 1920, height: 1080 };
 }
 
-/** Maximum zoom factor for the still-image (Ken Burns) pan/zoom. Kept subtle. */
-export const KEN_BURNS_MAX_ZOOM = 1.08;
+/**
+ * Still-image (Ken Burns) zoom. It used to be a fixed 8% whatever the shot's length, which read as
+ * "just images" on a long still and lurched on a short one. Now the zoom travels at a steady
+ * `KEN_BURNS_RATE_PER_SEC` — a 5 s still moves 14%, a 1 s list shot under 3% — capped at
+ * `KEN_BURNS_MAX_SPAN` so a long hold never swims.
+ */
+export const KEN_BURNS_RATE_PER_SEC = 0.028;
+export const KEN_BURNS_MAX_SPAN = 0.14;
+/** The zoom factor a still of `durationSec` ends (or starts) at. */
+export const kenBurnsMaxZoom = (durationSec: number): number =>
+  1 + Math.min(KEN_BURNS_MAX_SPAN, KEN_BURNS_RATE_PER_SEC * Math.max(0.5, durationSec));
 /**
  * Build FFmpeg args that animate ONE still image into a silent video clip of `durationSec`
  * with a subtle pan/zoom (Ken Burns). The still is cover-cropped to the target aspect, then a
@@ -256,8 +265,8 @@ export function buildKenBurnsArgs(opts: {
 }): string[] {
   const { imagePath, outputPath, width, height } = opts;
   const fps = opts.fps ?? FPS;
-  const maxZoom = opts.maxZoom ?? KEN_BURNS_MAX_ZOOM;
   const dur = Math.max(0.5, opts.durationSec);
+  const maxZoom = opts.maxZoom ?? kenBurnsMaxZoom(dur);
   const frames = Math.max(1, Math.round(dur * fps));
   const span = (maxZoom - 1).toFixed(4);
   // Even scenes zoom IN, odd scenes zoom OUT.
@@ -2748,6 +2757,73 @@ export async function probeBufferDurationSec(
     });
   } catch {
     return 0;
+  }
+}
+
+/** A frame this dark on average (0-255 luma) is black. */
+const BLANK_DARK_LUMA = 16;
+/** A frame this flat (luma standard deviation) is a solid colour, whatever its brightness. */
+const BLANK_FLAT_STD = 4;
+/** Share of sampled frames that must be black or flat for the clip to count as blank. */
+const BLANK_FRAME_SHARE = 0.85;
+
+/**
+ * Is a clip BLANK — black, or one solid colour — across (nearly) all of its sampled frames? Takes
+ * grayscale frames as raw luma bytes. A real shot has texture (a face, a workbench), so its luma
+ * spread is far above `BLANK_FLAT_STD` even in a dark scene. Pure — unit-tested.
+ */
+export function judgeBlankFrames(frames: Uint8Array[]): {
+  blank: boolean;
+  blankShare: number;
+} {
+  if (frames.length === 0) return { blank: false, blankShare: 0 };
+  let blankFrames = 0;
+  for (const f of frames) {
+    if (!f.length) continue;
+    let sum = 0;
+    for (let k = 0; k < f.length; k++) sum += f[k];
+    const mean = sum / f.length;
+    let sq = 0;
+    for (let k = 0; k < f.length; k++) sq += (f[k] - mean) * (f[k] - mean);
+    const std = Math.sqrt(sq / f.length);
+    if (mean < BLANK_DARK_LUMA || std < BLANK_FLAT_STD) blankFrames++;
+  }
+  const blankShare = blankFrames / frames.length;
+  return { blank: blankShare >= BLANK_FRAME_SHARE, blankShare };
+}
+
+/**
+ * Sample a clip twice a second at 64x36 grayscale and judge it with `judgeBlankFrames`. A clip
+ * that will not decode answers "not blank" — the length probe and the renderer own that failure,
+ * and a QC check must never throw away a clip it could not read.
+ */
+export async function isBlankClip(buffer: Buffer): Promise<boolean> {
+  if (!buffer?.length) return false;
+  try {
+    return await withTempDir("blank", async workDir => {
+      const input = path.join(workDir, "clip.mp4");
+      const raw = path.join(workDir, "frames.raw");
+      writeFileSync(input, buffer);
+      await runFfmpeg([
+        "-y",
+        "-i",
+        input,
+        "-an",
+        "-vf",
+        "fps=2,scale=64:36,format=gray",
+        "-f",
+        "rawvideo",
+        raw,
+      ]);
+      const bytes = readFileSync(raw);
+      const size = 64 * 36;
+      const frames: Uint8Array[] = [];
+      for (let o = 0; o + size <= bytes.length; o += size)
+        frames.push(bytes.subarray(o, o + size));
+      return judgeBlankFrames(frames).blank;
+    });
+  } catch {
+    return false;
   }
 }
 

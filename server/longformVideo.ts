@@ -24,6 +24,19 @@ import { nanoid } from "nanoid";
 import sharp from "sharp";
 import { invokeClaude } from "./claude";
 import { invokeGemini } from "./gemini";
+import {
+  applyShotPlan,
+  deriveContinuitySheet,
+  HOST_HANDOFF_MIN_SEC,
+  LIST_SHOT_MIN_SEC,
+  planShotList,
+  settleShots,
+  SHOT_MIN_SEC,
+  foldSnappedFlashes,
+  MOVES_ON_ITS_OWN,
+  HOST_PART_MAX_SEC,
+  wordsAfterName,
+} from "./shotList";
 import { safeParseJSON, stripMarkdownFences } from "./jsonRepair";
 import { scanStillDefects } from "./overlayTextScan";
 import {
@@ -41,7 +54,7 @@ import {
   VoiceNotFoundError,
   DuplicateTTSError,
 } from "./ttsUnified";
-import { storagePut } from "./storage";
+import { presignOwnBucketUrl, storagePut } from "./storage";
 import {
   classifyNarrationFailure,
   diedBeforeNarration,
@@ -120,7 +133,11 @@ import {
   planChangesTheRead,
   concatWithPauses,
   runMatchGainsDb,
+  scriptParagraphs,
 } from "./delivery";
+import { fetchAudioBuffer, repairSkippedNarration } from "./narrationSkips";
+import { enforcePlanRules } from "./planGate";
+import { scanClipGlitch } from "./clipGlitchScan";
 import { assemblyPhase, levelPhase, type JobPhase } from "../shared/jobPhase";
 import {
   levelNarrationAudio,
@@ -247,6 +264,7 @@ import {
   extractHostPanel,
   extractBrollPanel,
   renderKenBurnsClip,
+  isBlankClip,
   dimensionsFor,
   probeBufferDurationSec,
   probeUrlDurationSec,
@@ -254,6 +272,7 @@ import {
   sliceAudioSegments,
   sliceAudioSegmentsBestEffort,
   detectSilencesFromBuffer,
+  runFfmpeg,
   HOST_INTRO_TRIM_SEC,
   type SilenceInterval,
 } from "./videoAssembly";
@@ -271,6 +290,8 @@ import {
   describeIssue,
   describeRuns,
   healTranscriptHoles,
+  transcribeInPieces,
+  TRANSCRIPT_PIECE_SEC,
 } from "./alignmentHeal";
 import {
   transcribeWordsFromBuffer,
@@ -2047,6 +2068,56 @@ export const HOST_CHECKIN_CADENCE_SEC = 60;
  */
 const HOST_CHECKIN_CADENCES = [60, 75, 90, 120, 150, 180, 240];
 /**
+ * The opening minutes decide whether a viewer stays, and a minute of pictures there reads as the
+ * host having left: inside this window the check-ins run at HALF the cadence (every ~30 s at the
+ * default 60). Hank's film went 80 s faceless from 0:35.
+ */
+export const HOST_EARLY_ZONE_SEC = 180;
+/** Check-in spacing at film time `t` for a base cadence. */
+export const checkInCadenceAt = (t: number, cadence: number): number =>
+  t < HOST_EARLY_ZONE_SEC ? cadence / 2 : cadence;
+/**
+ * Shortest host check-in cut from a shot-list piece. The host no longer has to finish the
+ * sentence — a piece ends where the shot list hands over to a picture, at a natural break — so a
+ * glimpse of the host saying the start of a line is a check-in, and the same budget buys more
+ * of them.
+ */
+export const HOST_CHECKIN_MIN_SEC = 2.5;
+/** How much nearer a target a storyboard host spot counts as (`hostCandidate`) — a tie-break only. */
+export const HOST_CANDIDATE_BONUS_SEC = 10;
+/** An opening line longer than this is not left whole on camera — it hands over to pictures. */
+export const HOOK_MAX_WHOLE_SEC = 8;
+
+/**
+ * May cutaway `i` become a host check-in? It must start a sentence, and end one — or end where the
+ * shot list hands over to a picture (a natural break it chose) — and be long enough to read as a
+ * shot but short enough to stay a glimpse.
+ */
+function checkInShaped(
+  scenes: StoryboardScene[],
+  i: number,
+  sec: number
+): boolean {
+  const s = scenes[i];
+  const prev = scenes[i - 1];
+  // The host may come IN at a clean break inside a sentence too — after a comma, semicolon, colon
+  // or dash that the shot list cut on — not only at a sentence start: the voice never stops, only
+  // the picture changes, so a pause between words is a smooth cut either way. A list item never.
+  const cleanStart =
+    startsSentence(scenes, i) ||
+    (!!s.wordCut &&
+      !s.listCut &&
+      !!prev?.wordCut &&
+      !prev.listCut &&
+      /[,;:—–-]["'”’)\]]*$/.test((prev.scriptText ?? "").trim()));
+  return (
+    cleanStart &&
+    (endsSentence(s.scriptText ?? s.narration) || (!!s.wordCut && !s.listCut)) &&
+    sec >= (s.wordCut ? HOST_CHECKIN_MIN_SEC : HOST_MIN_HOLD_SEC) &&
+    sec <= HOST_CHECKIN_PROMOTE_MAX_SEC
+  );
+}
+/**
  * Longest cutaway `planHostMinutes` will turn into a host check-in when no host beat sits near a
  * target. A check-in is a glimpse of the host, not a monologue; anything longer eats the budget
  * two check-ins could have used.
@@ -2162,12 +2233,8 @@ export function shapeHostSections(
     return (
       opts.canPromote &&
       !s.hostPresent &&
-      // A host take speaks whole sentences (`completeHostSentences`); a clause-sized cutaway
-      // promoted here would start or stop the host mid-thought.
-      startsSentence(scenes, i) &&
-      endsSentence(s.scriptText ?? s.narration) &&
-      sec[i] >= HOST_MIN_HOLD_SEC &&
-      sec[i] <= HOST_CHECKIN_PROMOTE_MAX_SEC &&
+      // Starts a sentence and ends at a natural break (`checkInShaped`), never mid-thought.
+      checkInShaped(scenes, i, sec[i]) &&
       !fixedHostAt(i - 1) &&
       !fixedHostAt(i + 1)
     );
@@ -2382,12 +2449,9 @@ export function planHostMinutes(
       !s.coverHero &&
       !s.assetImageUrl &&
       !reserved.has(i) &&
-      // Whole sentences only — a check-in that starts or stops mid-thought reads as the host
-      // being cut off (`completeHostSentences` holds the storyboard's own host beats to this).
-      startsSentence(scenes, i) &&
-      endsSentence(s.scriptText ?? s.narration) &&
-      sec[i] >= HOST_MIN_HOLD_SEC &&
-      sec[i] <= HOST_CHECKIN_PROMOTE_MAX_SEC
+      // Starts a sentence and ends at a natural break — a check-in that starts or stops
+      // mid-thought reads as the host being cut off.
+      checkInShaped(scenes, i, sec[i])
     );
   };
 
@@ -2403,16 +2467,37 @@ export function planHostMinutes(
   // 2. Check-ins at the tightest cadence the budget can cover.
   const plan = (cadence: number) => {
     // Every gap's evenly spaced targets, each with the window it may pick from.
-    const targets: { t: number; lo: number; hi: number }[] = [];
+    const targets: { t: number; lo: number; hi: number; g0: number; g1: number }[] = [];
     for (const [g0, g1] of gaps) {
-      const len = g1 - g0;
-      const count = Math.max(0, Math.round(len / cadence) - 1);
-      for (let k = 1; k <= count; k++) {
-        const t = g0 + (k * len) / (count + 1);
+      // Count from when the host was LAST ON SCREEN, not from where the covered stretch ends: a CTA
+      // is "covered" to its last word, but it closes on ~20 s of the big QR over b-roll, so starting
+      // the walk a full cadence after it left Granny Mae 82 s without the host (6:34–7:56).
+      let lastHostEnd = g0;
+      for (let i = 0; i < n; i++) {
+        const end = start[i] + sec[i];
+        if (end > g0 + 0.5) break;
+        if (isKept(i) || scenes[i].hostPresent) lastHostEnd = end;
+      }
+      const firstAt = Math.max(
+        g0 + Math.min(10, (g1 - g0) / 4),
+        lastHostEnd + checkInCadenceAt(g0, cadence)
+      );
+      // Walk the stretch at the local cadence — half of it in the opening minutes
+      // (`checkInCadenceAt`). The stretch's own end is an anchor, so the walk stops a quarter step
+      // short of it: at half a step, an 85 s stretch between two CTAs got no check-in at all
+      // (Hannah, 12:34–13:59) because 60 + 30 > 85.
+      for (
+        let t = firstAt;
+        t <= g1 - checkInCadenceAt(t, cadence) / 4;
+        t += checkInCadenceAt(t, cadence)
+      ) {
+        const w = checkInCadenceAt(t, cadence);
         targets.push({
           t,
-          lo: Math.max(g0, t - cadence / 2),
-          hi: Math.min(g1, t + cadence / 2),
+          lo: Math.max(g0, t - w / 2),
+          hi: Math.min(g1, t + w / 2),
+          g0,
+          g1,
         });
       }
     }
@@ -2421,7 +2506,7 @@ export function planHostMinutes(
     let budgetMisses = 0;
     // Middle-out, not front-to-back: when even the widest cadence cannot cover every target, the
     // check-ins that do fit stay spread across the film instead of all landing in its first half.
-    for (const { t, lo, hi } of spreadOrder(targets)) {
+    const pickIn = (t: number, lo: number, hi: number) => {
       let pick = -1;
       let pickScore = Infinity;
       let blockedByBudget = false;
@@ -2436,12 +2521,35 @@ export function planHostMinutes(
           continue;
         }
         // An existing host beat was the storyboard's own choice — prefer it anywhere in the
-        // window over promoting a cutaway, then prefer whichever sits nearest the target.
-        const score = (existing ? 0 : 1e6) + Math.abs(m - t);
+        // window over promoting a cutaway, then prefer whichever sits nearest the target, and a
+        // glimpse (≤6 s) over a longer take so the same budget reaches more targets.
+        // A spot the storyboard wrote for the host is a TIE-BREAK (worth ~10 s of distance), not a
+        // tier: as a tier it outranked distance, so each target grabbed a storyboard spot at the far
+        // edge of its window — Granny Ruth's film aimed at 21:01, took 21:29, then took 21:36 for
+        // the next target, and went 107 s without the host between two glimpses 7 s apart.
+        const score =
+          (existing ? 0 : 1e6) +
+          Math.abs(m - t) +
+          Math.max(0, sec[i] - 6) * 4 -
+          (scenes[i].hostCandidate ? HOST_CANDIDATE_BONUS_SEC : 0);
         if (score < pickScore) {
           pick = i;
           pickScore = score;
         }
+      }
+      return { pick, blockedByBudget };
+    };
+    for (const { t, lo, hi, g0, g1 } of spreadOrder(targets)) {
+      let { pick, blockedByBudget } = pickIn(t, lo, hi);
+      // Nothing clean inside the window: look half a window further each side before giving the
+      // turn up — a skipped target leaves the host away for two cadences (86 s on Mae's film).
+      if (pick < 0 && !blockedByBudget) {
+        const w = hi - lo;
+        ({ pick, blockedByBudget } = pickIn(
+          t,
+          Math.max(g0, lo - w / 2),
+          Math.min(g1, hi + w / 2)
+        ));
       }
       if (pick < 0) {
         if (blockedByBudget) budgetMisses++;
@@ -2465,14 +2573,20 @@ export function planHostMinutes(
   const chosen = best?.chosen ?? new Set<number>();
   let remaining = best?.remaining ?? budgetSec - anchorSec;
 
-  // 3. Top-ups: more of the storyboard's own host beats, spread across the film, while they fit.
+  // 3. Top-ups: more of the storyboard's own host beats, spread across the film, while they fit —
+  // and, where the shot list turned those beats into pictures (`hostCandidate`), the glimpse at
+  // the start of one. Without that second pool a shot-list film left a quarter of the budget
+  // unspent (Hank: 2:12 of 3:00), the host appearing less often than the minutes paid for.
   const topUp = new Set<number>();
   if (!anchorsOverBudget) {
     const pool = scenes
       .map((_, i) => i)
       .filter(i => existingCandidate(i) && !chosen.has(i));
-    for (const i of spreadOrder(pool)) {
-      if (remaining < HOST_MIN_HOLD_SEC) break;
+    const glimpses = scenes
+      .map((_, i) => i)
+      .filter(i => !!scenes[i].hostCandidate && !chosen.has(i) && promotable(i));
+    for (const i of [...spreadOrder(pool), ...spreadOrder(glimpses)]) {
+      if (remaining < HOST_CHECKIN_MIN_SEC) break;
       if (sec[i] > remaining + 1e-6) continue;
       if (besideKept(i, chosen) || besideKept(i, topUp)) continue;
       topUp.add(i);
@@ -2497,6 +2611,10 @@ export function planHostMinutes(
     }
     if (topUp.has(i)) {
       topUpSec += sec[i];
+      if (!s.hostPresent) {
+        promoteCutawayToHost(s);
+        promoted.push(s.index);
+      }
       continue;
     }
     if (s.hostPresent && !isKept(i)) {
@@ -2852,8 +2970,15 @@ export function enforceHostSplitMix(
   let motionSeconds = 0;
   if (pacing.splitScreen.motion.enabled && acc > 0) {
     const motionTarget = pacing.splitScreen.motion.share * acc;
+    // Only a panel of something that moves by itself: the right half is person-free, and an
+    // ordinary object animated there slides around on its own (Hank's kumiko strips).
     for (const s of spreadOrder(
-      scenes.filter(s => s.hostPresent && s.splitVisual)
+      scenes.filter(
+        s =>
+          s.hostPresent &&
+          s.splitVisual &&
+          MOVES_ON_ITS_OWN.test(String(s.splitVisual))
+      )
     )) {
       if (motionSeconds >= motionTarget) break;
       if (
@@ -3228,7 +3353,7 @@ export function hostBrollFallback(s: StoryboardScene): string {
  * synthesized person-free prompt). Shared by `enforceVisualAdjacency` and `hostTheCtaPitch` so
  * "demote to a still" is the same mutation everywhere. Mutates in place.
  */
-function demoteHostToStill(s: StoryboardScene): void {
+export function demoteHostToStill(s: StoryboardScene): void {
   const seed = hostBrollFallback(s);
   s.hostPresent = false;
   s.stillImage = true;
@@ -3242,7 +3367,7 @@ function demoteHostToStill(s: StoryboardScene): void {
  * by `hostTheCtaPitch` and `planHostMinutes` so "promote to host" is one mutation too.
  * Mutates in place.
  */
-function promoteCutawayToHost(s: StoryboardScene): void {
+export function promoteCutawayToHost(s: StoryboardScene): void {
   // Keep the clean cutaway it was, so a later demotion has an on-topic still to go back to.
   s.brollVisual ??= s.visualPrompt;
   s.hostPresent = true;
@@ -3251,7 +3376,11 @@ function promoteCutawayToHost(s: StoryboardScene): void {
   s.objectMotion = undefined;
   s.splitVisual = undefined;
   s.visualPrompt = talkingHeadVisualPrompt(DEFAULT_HOST_DESCRIPTOR, s.index);
-  s.minHoldSec = Math.max(s.minHoldSec ?? 0, HOST_MIN_HOLD_SEC);
+  // A shot-list piece is exactly as long as its words; the ordinary host floor would freeze it.
+  s.minHoldSec = Math.max(
+    s.minHoldSec ?? 0,
+    s.wordCut ? HOST_HANDOFF_MIN_SEC : HOST_MIN_HOLD_SEC
+  );
 }
 
 /**
@@ -5122,6 +5251,11 @@ export const STILL_BROLL_ENHANCER_SYSTEM =
   `- ${CLEAN_FRAME_RULE}\n` +
   `- ${FIGURE_OF_SPEECH_RULE}\n` +
   `- ${NO_NARRATION_TEXT_RULE}\n` +
+  "- SAY IT, SHOW IT: when a MUST SHOW line is given, the frame's hero subject is exactly that " +
+  "thing, named plainly first in your prompt and framed CLOSE — centred, filling most of the " +
+  "frame, the first thing the eye lands on, with the place only a simple background — never a " +
+  "different object, a wider scene it gets lost in, or a symbol of it. Anything on the PROPS LIST looks exactly as listed. Continue from " +
+  "the previous shots: the same objects, the story further along, a different framing.\n" +
   "- PLACE: set the shot where the narration puts it. When the line is about where a thing is " +
   "used, sold, or comes from (a Japanese home with sliding doors, a market stall, a customer's " +
   'living room, outdoors) — or compares the subject to where it is FOUND ("the kind of ' +
@@ -5298,6 +5432,22 @@ export const HUMAN_MOTION_DIRECTIVE =
   "pressing or adjusting what they work on), never entering from off-screen and never paused " +
   "on a finished result. Keep everything else at rest — no face, head, or body, and no broad " +
   "arm movement. The hands hold realistic anatomy with no extra fingers.";
+
+/**
+ * HERO FRAMING for a shot the shot list cut for one named thing (`scene.showSubject`). It replaces
+ * the rotating camera-angle phrase on those shots: "a saw" came back as a saw hung high on a
+ * pegboard over an empty workbench — the right object, but small, with the bench taking the frame,
+ * because the angle said "wide … taking in the whole scene" and the description said where the saw
+ * hangs. When the narrator names a thing, that thing is what the eye lands on. The background
+ * stays sharp (no blur asked for) — just simple and secondary.
+ */
+export function heroFramingClause(subject: string): string {
+  return (
+    `, a close shot where ${subject.trim()} is the centre of attention — centred, sharp and filling ` +
+    `most of the frame, the first thing the eye lands on; the background is clear but simple and ` +
+    `secondary, nothing in it competes`
+  );
+}
 
 /**
  * Maps a scene's `shotAngle` value (assigned by the storyboard model) to a short
@@ -5871,8 +6021,9 @@ export function buildStillPrompt(
    */
   square = false
 ): string {
-  const angleSuffix =
-    scene.shotAngle && SHOT_ANGLE_SUFFIX[scene.shotAngle]
+  const angleSuffix = scene.showSubject
+    ? heroFramingClause(scene.showSubject)
+    : scene.shotAngle && SHOT_ANGLE_SUFFIX[scene.shotAngle]
       ? `, ${SHOT_ANGLE_SUFFIX[scene.shotAngle]}`
       : "";
   const personSuffix =
@@ -7213,6 +7364,71 @@ export function ctaPitchBeats(scenes: StoryboardScene[]): number[] {
   );
 }
 
+/** Longest one continuous host take `joinBackToBackHostTakes` will make. */
+export const HOST_JOIN_MAX_SEC = 30;
+
+/**
+ * One continuous take where host beats sit back to back. Each host beat is its own HeyGen render,
+ * and every render starts from the same still pose — so two in a row on the same photo JUMP at
+ * the join, the head snapping back to where it started. The CTA pitch does this every time (host
+ * → book → host, host, host). Joined, the beats are one render of the same seconds: same cost,
+ * no jump. Only full-frame host beats that tile the narration, never across a CTA edge, a QR,
+ * cover or asset beat, and never the two-angle cold open (that cut is deliberate), up to
+ * `HOST_JOIN_MAX_SEC`. The joined beat needs its narration re-cut from the master (its
+ * `audioUrl` is cleared). Renumbers. Pure — unit-tested.
+ */
+export function joinBackToBackHostTakes(
+  scenes: StoryboardScene[],
+  maxSec = HOST_JOIN_MAX_SEC
+): { scenes: StoryboardScene[]; joins: number } {
+  const joinable = (s: StoryboardScene) =>
+    !!s.hostPresent &&
+    !s.splitVisual &&
+    !s.qrHero &&
+    !s.coverHero &&
+    !s.assetImageUrl &&
+    s.narrationStartSec != null &&
+    s.narrationEndSec != null;
+  const out: StoryboardScene[] = [];
+  let joins = 0;
+  for (const s of scenes) {
+    const prev = out[out.length - 1];
+    if (
+      prev &&
+      joinable(prev) &&
+      joinable(s) &&
+      !(prev.hostOpener && s.hostOpener) &&
+      (prev.cta === true) === (s.cta === true) &&
+      (prev.ctaIndex ?? -1) === (s.ctaIndex ?? -1) &&
+      Math.abs((prev.narrationEndSec as number) - (s.narrationStartSec as number)) < 0.05 &&
+      (s.narrationEndSec as number) - (prev.narrationStartSec as number) <= maxSec
+    ) {
+      const text = `${(prev.scriptText ?? "").trim()} ${(s.scriptText ?? "").trim()}`.trim();
+      out[out.length - 1] = {
+        ...prev,
+        scriptText: text,
+        narration: firstWords(text, 8),
+        narrationEndSec: s.narrationEndSec,
+        audioDuration: (s.narrationEndSec as number) - (prev.narrationStartSec as number),
+        audioUrl: undefined,
+        cta: prev.cta || s.cta || undefined,
+        qrCorner: prev.qrCorner || s.qrCorner || undefined,
+        hostIntro: prev.hostIntro || s.hostIntro || undefined,
+        minHoldSec: Math.max(prev.minHoldSec ?? 0, s.minHoldSec ?? 0) || undefined,
+        clipUrls: undefined,
+        clipUrl: undefined,
+        renderTaskIds: undefined,
+        sceneStatus: "pending",
+      };
+      joins++;
+      continue;
+    }
+    out.push(s);
+  }
+  out.forEach((s, k) => (s.index = k + 1));
+  return { scenes: out, joins };
+}
+
 /**
  * Lay out every MARKED CTA (`inMarkedCta`) the way the operator specified (2026-09-23): HOST →
  * BOOK → HOST → big QR.
@@ -7354,9 +7570,11 @@ export function buildClipChain(
   // Shot-angle phrase appended to non-host prompts so camera variety is enforced in code
   // rather than relying on Claude's implicit framing choices.
   const angleSuffix =
-    !scene.hostPresent && scene.shotAngle && SHOT_ANGLE_SUFFIX[scene.shotAngle]
-      ? `, ${SHOT_ANGLE_SUFFIX[scene.shotAngle]}`
-      : "";
+    !scene.hostPresent && scene.showSubject
+      ? heroFramingClause(scene.showSubject)
+      : !scene.hostPresent && scene.shotAngle && SHOT_ANGLE_SUFFIX[scene.shotAngle]
+        ? `, ${SHOT_ANGLE_SUFFIX[scene.shotAngle]}`
+        : "";
   // Non-host b-roll is image-to-video on grok: the gpt-image-2 keyframe fixes what the shot
   // looks like, and this prompt drives it. It is the full softened description + the fixed
   // amateur-iPhone look, whose camera clause holds the frame
@@ -7673,6 +7891,11 @@ export async function generateValidatedStill(
   // if every attempt is defective, a texty-but-physically-sound frame ships before a broken one.
   let textyFallback: { buffer: Buffer; mimeType?: string } | undefined;
   let brokenFallback: { buffer: Buffer; mimeType?: string } | undefined;
+  let offSubjectFallback: { buffer: Buffer; mimeType?: string } | undefined;
+  // One re-roll for a frame that drew the wrong thing — a second miss usually means the model
+  // cannot draw it, and each re-roll is another image.
+  let offSubjectRerolls = 0;
+  let cleanRerolls = 0;
   // A content-policy block can't be cleared by resubmitting the same prompt — escalate the
   // ladder instead: aggressively-softened variant, then a Claude policy-safe rewrite, then a
   // subject-anchored generic, then the guaranteed-generic visual. Escalations don't burn the
@@ -7771,7 +7994,11 @@ export async function generateValidatedStill(
     // Skipped when a reference image is attached — that caller (the book cover) asked for text,
     // and the real cover art trips the geometry judge on stylised artwork.
     if (!referenceImageUrl) {
-      const defects = await scanStillDefects(buffer);
+      const defects = await scanStillDefects(
+        buffer,
+        scene.showSubject,
+        scene.cta ? undefined : scene.scriptText ?? scene.narration
+      );
       if (defects.broken) {
         lastError = `Still image has broken geometry (${defects.what})`;
         brokenFallback ??= { buffer, mimeType: r.mimeType };
@@ -7791,6 +8018,31 @@ export async function generateValidatedStill(
         );
         continue; // fresh seed — the prompt already bans it, so a re-roll is the fix
       }
+      // SAY IT, SHOW IT: the line names a thing and the frame drew something else. The prompt
+      // already leads with it, so a fresh seed is the fix; the frame is kept as the fallback.
+      if (defects.missing && offSubjectRerolls < 1) {
+        offSubjectRerolls++;
+        lastError = `Still image does not show ${scene.showSubject}`;
+        offSubjectFallback ??= { buffer, mimeType: r.mimeType };
+        console.warn(
+          `[Longform] scene ${scene.index} still does not show "${scene.showSubject}" ` +
+            `(${defects.what}, attempt ${attempt}/${attempts}) → regenerating`
+        );
+        continue;
+      }
+      // A brand, a subject lost in clutter, or the wrong place for the line (rules 3 and 4): one
+      // fresh seed, the frame kept as the fallback — the same bargain as an off-subject frame.
+      if ((defects.messy || defects.wrongPlace) && cleanRerolls < 1) {
+        cleanRerolls++;
+        const kind = defects.messy ? "a brand or clutter" : "the wrong place for its line";
+        lastError = `Still image has ${kind}`;
+        offSubjectFallback ??= { buffer, mimeType: r.mimeType };
+        console.warn(
+          `[Longform] scene ${scene.index} still has ${kind} ` +
+            `(${defects.what}, attempt ${attempt}/${attempts}) → regenerating`
+        );
+        continue;
+      }
     }
     if (attempt > 1)
       console.log(
@@ -7807,6 +8059,14 @@ export async function generateValidatedStill(
   // packet labeled X") or un-renderable structure. No suffix fixes that — a second negation
   // clause just stacks, which NO_BOOK_SUFFIX already warns doesn't work. Log the visual so the
   // fix lands in the storyboard prompt instead.
+  // Off-subject ships first: it is a clean frame of the wrong thing, where the others are defects.
+  if (offSubjectFallback) {
+    console.warn(
+      `[Longform] scene ${scene.index} still never showed "${scene.showSubject}" after ` +
+        `${attempts} attempts → shipping the closest frame`
+    );
+    return offSubjectFallback;
+  }
   if (textyFallback) {
     console.warn(
       `[Longform] scene ${scene.index} still has overlay text after ${attempts} ` +
@@ -8012,7 +8272,15 @@ const floorFor = (
   s: StoryboardScene,
   pacing: LongformPacing = LEGACY_PACING
 ): number =>
-  s.hostPresent
+  // Cut on the words by the shot list: the beat is exactly as long as its words, and holding it to
+  // the ordinary floor would freeze the picture and splice silence into the sentence.
+  s.wordCut
+    ? s.hostPresent
+      ? HOST_HANDOFF_MIN_SEC
+      : s.listCut
+        ? LIST_SHOT_MIN_SEC
+        : SHOT_MIN_SEC
+    : s.hostPresent
     ? HOST_MIN_HOLD_SEC
     : s.fastOpen && pacing.fastOpen.enabled
       ? pacing.fastOpen.minShotSec
@@ -8619,6 +8887,267 @@ export function startsSentence(scenes: StoryboardScene[], i: number): boolean {
   return (
     i <= 0 || endsSentence(scenes[i - 1].scriptText ?? scenes[i - 1].narration)
   );
+}
+
+/**
+ * Where the sentence that introduces the host begins inside `text` ("I'm Granny Mae", "my name is
+ * Hank"), or 0 when it is the first sentence or there is none. Pure.
+ */
+export function introSentenceStart(text: string, hostName?: string): number {
+  const first = hostName?.trim().split(/\s+/)[0];
+  const escaped = first?.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const intro = escaped
+    ? new RegExp(`\\b(?:I['’]m|I am|my name(?:'s| is)|this is)\\s+${escaped}`, "i")
+    : /\b(?:I['’]m|I am|my name(?:'s| is))\b/i;
+  const at = text.search(intro);
+  if (at <= 0) return 0;
+  let start = 0;
+  const ends = /[.!?…]["'”’)\]]*\s+/g;
+  let m: RegExpExecArray | null;
+  while ((m = ends.exec(text)) && m.index < at) start = m.index + m[0].length;
+  return start;
+}
+
+/**
+ * A host take that starts partway through a sentence hands those leading words to the picture
+ * before it, so the host comes in on a sentence. The storyboard's chunk for Granny Mae's
+ * self-introduction began "how long it took, and what folks actually handed over for it. I'm
+ * Granny Mae…" — the host appeared mid-thought, then introduced herself. Only when the beat before
+ * is an ordinary picture of the same CTA state, and at least three words stay with the host.
+ * Mutates in place; returns the scene indices it trimmed. Pure otherwise — unit-tested.
+ */
+export function moveHostLeadIns(
+  scenes: StoryboardScene[],
+  hostName?: string
+): number[] {
+  const moved: number[] = [];
+  for (let i = 1; i < scenes.length; i++) {
+    const s = scenes[i];
+    const prev = scenes[i - 1];
+    if (!s.hostPresent || s.hostOpener) continue;
+    // The self-introduction comes in ON the sentence that says the name: Granny Mae's intro take
+    // opened with the whole sentence before it ("So we're counting all of them down … handed over
+    // for it. I'm Granny Mae…") and ran 11 s. Otherwise only a mid-sentence start is moved.
+    const introAt = s.hostIntro ? introSentenceStart(s.scriptText ?? "", hostName) : 0;
+    if (introAt <= 0 && startsSentence(scenes, i)) continue;
+    if (
+      prev.hostPresent ||
+      prev.qrHero ||
+      prev.coverHero ||
+      prev.assetImageUrl ||
+      (prev.cta === true) !== (s.cta === true)
+    )
+      continue;
+    const text = (s.scriptText ?? "").trim();
+    let cut: number;
+    if (introAt > 0) cut = introAt;
+    else {
+      const end = text.match(/[.!?…]["'”’)\]]*\s+/);
+      if (!end || end.index == null) continue;
+      cut = end.index + end[0].length;
+    }
+    const head = text.slice(0, cut).trim();
+    const rest = text.slice(cut).trim();
+    if (rest.split(/\s+/).length < 3) continue;
+    prev.scriptText = `${(prev.scriptText ?? "").trim()} ${head}`.trim();
+    prev.narration = firstWords(prev.scriptText, 8);
+    s.scriptText = rest;
+    s.narration = firstWords(rest, 8);
+    for (const x of [prev, s]) {
+      x.audioUrl = undefined;
+      x.audioDuration = undefined;
+    }
+    moved.push(s.index);
+  }
+  return moved;
+}
+
+/**
+ * The shot-list pass of the voicing stage (see `server/shotList.ts`): write the props list if the
+ * job has none, ask for the shot list, cut the beats on its words, then measure and settle the
+ * pieces against the word timeline until nothing is too short or too long. Any failure keeps the
+ * storyboard as it was — a film with the old cuts beats a film that fails here.
+ */
+async function cutShotsOnWords(
+  scenes: StoryboardScene[],
+  ctx: {
+    jobId: number;
+    params: LongformInputParams;
+    spokenScript: string;
+    words: WhisperWord[];
+    masterDurationSec: number;
+  }
+): Promise<StoryboardScene[]> {
+  const { jobId, params, words, masterDurationSec } = ctx;
+  const log = (m: string) => console.log(`[Longform ${jobId}] ${m}`);
+  try {
+    if (params.continuitySheet == null) {
+      params.continuitySheet = (
+        await deriveContinuitySheet(ctx.spokenScript, {
+          subject: params.videoSubject,
+          styleBible: params.visualStyleBible,
+        })
+      ).replace(/\b(?:cluttered|messy|jumbled|crowded)\b/gi, "tidy");
+      log(
+        params.continuitySheet
+          ? `props list: ${params.continuitySheet.split("\n").length} recurring thing(s)`
+          : `props list: none (call failed) — shots are written without it`
+      );
+    }
+    // The storyboard's own host beats (not the hook, the self-introduction, a CTA or the closing
+    // shot) go to the shot list as PICTURES. Left as host, a beat the host plan later demotes
+    // became one picture for its whole length — 13 s on Hank's film, ~50 per film. As pictures they
+    // are cut on the words like everything else, and the host plan brings the host back for a
+    // glimpse at the start of one (`hostCandidate`), handing over at a natural break. Only on a
+    // host-minutes film: the percentage balancer only demotes, so it could not bring them back.
+    if (
+      params.hostMinutes != null &&
+      !!params.faceImageUrl &&
+      !params.brollOnly
+    ) {
+      let handed = 0;
+      scenes.forEach((s, i) => {
+        if (
+          !s.hostPresent ||
+          s.hostOpener ||
+          s.hostIntro ||
+          s.cta === true ||
+          s.qrCorner ||
+          s.qrHero ||
+          s.coverHero ||
+          s.assetImageUrl ||
+          s.splitVisual ||
+          i === scenes.length - 1
+        )
+          return;
+        demoteHostToStill(s);
+        s.hostCandidate = true;
+        handed++;
+      });
+      if (handed) log(`shot list: ${handed} storyboard host beat(s) handed to the pictures, host plan picks the glimpses`);
+    }
+    const leadIns = moveHostLeadIns(scenes, params.hostName);
+    if (leadIns.length)
+      log(`host lead-ins: ${leadIns.length} host take(s) now start on a sentence [${leadIns.join(", ")}]`);
+    const plans = await planShotList(scenes, {
+      sheet: params.continuitySheet || undefined,
+      hostName: params.hostName,
+      subject: params.videoSubject,
+      log,
+    });
+    if (plans.length === 0) return scenes;
+    // applyShotPlan renumbers the objects it passes through, originals included — put the
+    // storyboard's own numbers back before cutting again, since the plans are keyed on them.
+    const ownIndex = new Map(scenes.map(s => [s, s.index]));
+    const cut = () => {
+      scenes.forEach(s => (s.index = ownIndex.get(s)!));
+      const applied = applyShotPlan(scenes, plans, { hostName: params.hostName });
+      let out = applied.scenes;
+      for (let pass = 0; pass < 4; pass++) {
+        assignSceneRanges(out, words, masterDurationSec);
+        const settled = settleShots(out, applied.originals, s => s.audioDuration ?? 0);
+        out = settled.scenes;
+        if (!settled.changed) break;
+      }
+      return out;
+    };
+    let next = cut();
+    // The HOOK starts on the host and hands over; a long one still whole AFTER cutting stays on
+    // camera for its whole line (Granny Mae: 15 s, the thing the operator had already asked to
+    // change). Judged on the RESULT, not the plan: job 170's plan did name a hand-off and the cut
+    // still came out whole, so a check on the plan never asked again. Ask for just those beats with
+    // the hand-off required, up to twice — any channel, any script.
+    // Also judged on the result: a host who DOES hand over but talks past `HOST_PART_MAX_SEC` first
+    // (Hank's practice opening, 6.8 s past two things worth showing) — the plan handed over before
+    // the last named thing instead of the first. Measured on the voice; the self-introduction
+    // counts only what comes after the name.
+    const tooLong = (): Set<number> => {
+      const ids = new Set<number>();
+      for (const s of scenes) {
+        if (
+          next.includes(s) &&
+          s.hostPresent &&
+          (s.hostOpener || s.hostIntro) &&
+          (s.audioDuration ?? 0) > HOOK_MAX_WHOLE_SEC
+        )
+          ids.add(ownIndex.get(s)!);
+      }
+      next.forEach((s, i) => {
+        const after = next[i + 1];
+        if (
+          !s.hostPresent ||
+          !s.wordCut ||
+          s.shotGroup == null ||
+          !after ||
+          after.hostPresent ||
+          after.shotGroup !== s.shotGroup ||
+          (s.audioDuration ?? 0) <= HOST_PART_MAX_SEC
+        )
+          return;
+        if (s.hostIntro && wordsAfterName(s.scriptText ?? "", params.hostName) <= 6) return;
+        ids.add(s.shotGroup);
+      });
+      return ids;
+    };
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const ids = tooLong();
+      if (!ids.size) break;
+      scenes.forEach(s => (s.index = ownIndex.get(s)!));
+      const again = await planShotList(scenes, {
+        sheet: params.continuitySheet || undefined,
+        hostName: params.hostName,
+        subject: params.videoSubject,
+        log,
+        only: ids,
+        mustHandOff: ids,
+      });
+      for (const p of again) {
+        if (!p.hostUntil) continue;
+        const k = plans.findIndex(q => q.scene === p.scene);
+        if (k >= 0) plans[k] = p;
+        else plans.push(p);
+      }
+      next = cut();
+      const left = tooLong();
+      const still = Array.from(ids).filter(id => left.has(id)).length;
+      log(
+        `host hand-off: asked again for ${ids.size} line(s) where the host talked too long before ` +
+          `the first picture (try ${attempt}), ${ids.size - still} now hand over in time`
+      );
+    }
+    // The MUST SHOW line is what the still checker holds a picture to, so it must never ask for
+    // writing ("chalk hour-tally marks on the garage wall" came back once) — the same scrub every
+    // prompt gets on its way to the image model.
+    // …nor for a mess: "a cluttered garage workbench" came back from the props list and the shot
+    // list both, and a MUST SHOW line outranks the clean-frame rule the enhancer carries.
+    const tidy = (t: string) =>
+      scrubLegibleWriting(t)
+        .replace(/\b(?:cluttered|messy|jumbled|crowded|busy)\b/gi, "tidy")
+        .replace(/\b(?:clutter|mess)\b/gi, "a few tools");
+    for (const s of next) {
+      if (!s.showSubject) continue;
+      s.showSubject = tidy(s.showSubject);
+      if (s.visualPrompt) s.visualPrompt = tidy(s.visualPrompt);
+    }
+    const handOffs = next.filter(
+      (s, i) => s.hostPresent && s.wordCut && next[i + 1]?.shotGroup === s.shotGroup
+    ).length;
+    log(
+      `shot list: ${scenes.length} → ${next.length} scenes — ${next.filter(s => s.listCut).length} ` +
+        `list cut(s), ${handOffs} host hand-off(s), ${next.filter(s => s.wordCut && !s.hostPresent && !s.stillImage).length} moving shot(s)`
+    );
+    return next;
+  } catch (e: any) {
+    console.warn(
+      `[Longform ${jobId}] shot list failed (${e?.message ?? e}) — keeping the storyboard's cuts`
+    );
+    appendJobWarning(
+      jobId,
+      `The shot list could not be made, so pictures keep the storyboard's timing instead of ` +
+        `cutting on the words`
+    );
+    return scenes;
+  }
 }
 
 /**
@@ -9353,6 +9882,25 @@ export async function runChunkTasks(
     }
   }
 
+  // A clip with no picture is not a clip. HeyGen has returned a render that is black from end to
+  // end (a hosted film shipped one on a host beat, and nothing looked) — accepted, it plays as a
+  // black hole in the film. It goes back as a failed render, so the lane's own rules decide what
+  // happens next: another render while the beat's allowance and the video's host minutes last, a
+  // check-in made b-roll after that, and the start / intro / CTAs / end flagged "Host needed".
+  // Host lanes only: their failures are bounded by the per-beat allowance, where a b-roll stall is
+  // resubmitted without limit and a black b-roll clip would loop.
+  const hostLane = isHostLane(provider);
+  for (let i = 0; hostLane && i < polls.length; i++) {
+    if (await isBlankClip(Buffer.from(polls[i].fileData as Buffer))) {
+      scene.blankClips = (scene.blankClips ?? 0) + 1;
+      appendJobWarning(
+        jobId,
+        `Scene ${scene.index}: ${provider} returned a black clip — not used`
+      );
+      throw new Error(`${provider} returned a black clip`);
+    }
+  }
+
   const urls: string[] = [];
   for (let i = 0; i < polls.length; i++) {
     const r = polls[i];
@@ -9549,6 +10097,14 @@ async function renderSplitRightMotionClip(
   ]);
   const url = urls[0];
   if (!url) throw new Error("Split-screen right clip produced no output");
+  // The caller falls back to the still panel on any throw — which never moves wrong.
+  // A moving panel is only ever a thing that moves by itself (`enforceHostSplitMix`).
+  const g = await scanClipGlitch(
+    url,
+    scene.splitVisual ? String(scene.splitVisual) : undefined,
+    true
+  );
+  if (g.glitch) throw new Error(`Split-screen right clip moves wrong (${g.what})`);
   return url;
 }
 
@@ -10693,6 +11249,41 @@ async function renderSceneClip(
         pollTimeoutMs
       );
       syncSceneClipFields(scene);
+      // A moving cutaway that moves something the way nothing moves in real life (wood sliding
+      // on its own, a melting hand): render it once more, and a second glitch makes it the still,
+      // which never moves wrong.
+      if (
+        !scene.hostPresent &&
+        !scene.stillImage &&
+        !params.rehearsal &&
+        scene.clipUrls?.[0]
+      ) {
+        const about = scene.showSubject ?? scene.visualPrompt;
+        const g = await scanClipGlitch(
+          scene.clipUrls[0],
+          about,
+          // Fire, water, smoke: change is the point, with or without hands (a torch charring a
+          // board "grew" the burn on job 175 and was flagged).
+          !!scene.objectMotion || MOVES_ON_ITS_OWN.test(about ?? "")
+        );
+        if (g.glitch) {
+          scene.motionGlitches = (scene.motionGlitches ?? 0) + 1;
+          scene.clipUrls = undefined;
+          scene.clipUrl = undefined;
+          scene.renderTaskIds = undefined;
+          if (scene.motionGlitches < 2) {
+            console.warn(
+              `[Longform ${jobId}] scene ${scene.index} clip moves wrong (${g.what}) — rendering it again`
+            );
+            continue;
+          }
+          console.warn(
+            `[Longform ${jobId}] scene ${scene.index} clip moved wrong twice (${g.what}) — using the still`
+          );
+          await fallbackSceneToStill(jobId, scene, params);
+          return;
+        }
+      }
       scene.sceneStatus = "completed";
       scene.hostNeeded = undefined;
       scene.hostWaiting = undefined;
@@ -11674,6 +12265,32 @@ export async function enhanceBrollPrompts(
     return beat ? `This stretch of the video shows: ${beat}\n` : "";
   };
 
+  // MEMORY between shots: the props list (how every recurring thing looks) and the three cutaways
+  // just before this one, so the same panel is the same panel in every shot and the story moves
+  // on instead of starting over. Each scene used to be rewritten alone, seeing only its own line.
+  const sheet = params.continuitySheet?.trim();
+  const propsLine = sheet
+    ? `Props list (how recurring things look — draw anything on it exactly like this):\n${sheet}\n`
+    : "";
+  const previousShotsFor = (i: number): string => {
+    const prev: string[] = [];
+    for (let k = i - 1; k >= 0 && prev.length < 3; k--) {
+      const p = scenes[k];
+      if (p.hostPresent || p.cta) continue;
+      const pic = truncateWords(p.visualPromptSeed ?? p.visualPrompt ?? "", 18);
+      if (pic)
+        prev.unshift(`"${truncateWords(p.scriptText ?? "", 10)}" → ${pic}`);
+    }
+    return prev.length
+      ? `Shots just before this one (continue from them; do not repeat their framing):\n${prev.join("\n")}\n`
+      : "";
+  };
+  // SAY IT, SHOW IT: the shot list names the thing this picture exists to show.
+  const mustShowFor = (scene: StoryboardScene): string =>
+    scene.showSubject
+      ? `MUST SHOW (the hero of the frame, literally this): ${scene.showSubject}\n`
+      : "";
+
   // Rewrite FROM the seed, never from the last rewrite. `scene.visualPrompt` is this function's
   // own ≤60-word output after the first pass, so reading it back made every regen a
   // re-compression of a compression and concrete script detail bled away a little each time.
@@ -11716,7 +12333,10 @@ export async function enhanceBrollPrompts(
         channelLine +
         subjectLine +
         directionLine +
+        propsLine +
         beatLineFor(scene) +
+        previousShotsFor(i) +
+        mustShowFor(scene) +
         `Type: ${scene.stillImage ? "still" : scene.objectMotion && !scene.humanPresent ? "motion-object" : scene.humanPresent ? "motion-human" : "still"}\n` +
         `Scene narration: "${scene.scriptText ?? scene.narration}"\n` +
         `Original prompt: ${seedOf(scene)}\n\n` +
@@ -12136,7 +12756,7 @@ async function runUnifiedPipeline(
   await assertNotCancelled(jobId);
   // Transcribe a mono-16k copy (keeps Whisper under its 25MB cap on long videos) for word
   // timings; any transcription failure falls back to a proportional (by-word-count) split.
-  const monoAudio = await extractMonoAudio(master.url);
+  let monoAudio = await extractMonoAudio(master.url);
   // Word timings (for scene assignment) and real pauses (to snap cuts into silence) are both
   // read off the same mono copy, in parallel. The 0.04s scan is the snap's fallback tier: real
   // inter-word gaps can be as short as ~85ms, invisible to the 0.12s pause scan.
@@ -12162,6 +12782,24 @@ async function runUnifiedPipeline(
     );
     transcript = await transcribeWordsFromBuffer(monoAudio);
   }
+  // Still nothing: a long narration can be too big for the whisperx worker's GPU in one call (Granny
+  // Ruth's 25.7 min failed twice with "CUDA … out of memory"). Ask again in overlapping ~8-minute
+  // pieces and stitch the timings — without them the film is cut by word count and the shot list
+  // is skipped. A narration that transcribes whole never reaches this.
+  if ("error" in transcript && !mock) {
+    const fullSec = await probeUrlDurationSec(master.url, "mp3");
+    if (fullSec > TRANSCRIPT_PIECE_SEC) {
+      console.warn(
+        `[Longform ${jobId}] transcribing the ${formatMinSec(fullSec)} narration in pieces instead`
+      );
+      const pieced = await transcribeInPieces({
+        monoAudio,
+        durationSec: fullSec,
+        log: m => console.log(`[Longform ${jobId}] ${m}`),
+      });
+      if (!("error" in pieced)) transcript = pieced;
+    }
+  }
   let words: WhisperWord[] | null = null;
   let masterDurationSec: number;
   if ("error" in transcript) {
@@ -12177,6 +12815,70 @@ async function runUnifiedPipeline(
       `[Longform ${jobId}] master voiced ${masterDurationSec.toFixed(1)}s, ` +
         `${words.length} word timings across ${scenes.length} scenes`
     );
+  }
+  // The voice must say every word. 69Labs sometimes drops text from a generation (Hank, job 162:
+  // "…and a stack." then straight on to the next sentence, twice in one film), and nothing below
+  // can tell — it cuts the pictures by word count over words nobody said. Re-read just those
+  // paragraphs, splice them in, and stop HERE if the voice keeps skipping: nothing is paid for yet.
+  if (words && !mock && !params.manualNarrationUrl) {
+    const repaired = await repairSkippedNarration(
+      {
+        paragraphs: scriptParagraphs(spokenScript),
+        words,
+        durationSec: masterDurationSec,
+        master: await fetchAudioBuffer(master.url),
+      },
+      {
+        voice: async (text, para) =>
+          fetchAudioBuffer(
+            await generateSceneVoiceover(
+              ttsType,
+              ttsKey,
+              text,
+              voiceIdForVendor(params),
+              params.ttsModel,
+              deliverySpeedFor(params.ttsSpeed, params.deliveryPlan?.paragraphs[para]?.pace),
+              params.ttsVolume,
+              TTS_STABILITY,
+              TTS_STYLE,
+              TTS_SIMILARITY
+            )
+          ),
+        transcribe: async audio => {
+          const t = await transcribeWordsFromBuffer(audio);
+          return "error" in t ? null : t;
+        },
+        matchLevel: async take => {
+          try {
+            const target = await masterSpeechLevelDb(master.url);
+            return (await matchNarrationLevel(take, target)).buffer;
+          } catch {
+            return take;
+          }
+        },
+        durationOf: audio => probeBufferDurationSec(audio, "mp3"),
+        runFfmpeg,
+        log: m => console.log(`[Longform ${jobId}] ${m}`),
+      }
+    );
+    if (repaired) {
+      const key = `longform/${jobId}/master-vo-${nanoid(6)}.mp3`;
+      const { url } = await storagePut(key, repaired.master, "audio/mpeg");
+      master = { url };
+      params.voicedMasterUrl = url;
+      await updateLongformVideoJob(jobId, { inputParams: params });
+      words = repaired.words;
+      masterDurationSec = repaired.durationSec;
+      monoAudio = await extractMonoAudio(url);
+      [silences, shortSilences] = await Promise.all([
+        detectSilencesFromBuffer(monoAudio),
+        detectSilencesFromBuffer(monoAudio, 0.04),
+      ]);
+      console.log(
+        `[Longform ${jobId}] voice re-read ${repaired.fixed.length} paragraph(s) it had skipped words in ` +
+          `[${repaired.fixed.map(p => p + 1).join(", ")}] — master now ${masterDurationSec.toFixed(1)}s`
+      );
+    }
   }
   // Give every scene its slice of the master (sets scene.audioDuration; split/merge passes read it).
   // The report names any stretch the aligner's plausibility gate had to re-split by word count —
@@ -12299,11 +13001,26 @@ async function runUnifiedPipeline(
     );
   }
 
+  // THE SHOT LIST: cut the pictures on the words (`server/shotList.ts`). Every word's time is
+  // known now, so a shot starts on the word that names it, a spoken list gets one quick shot per
+  // item, no picture lingers past `MAX_PICTURE_SEC`, and a host line that goes on to name things
+  // hands over to them at a natural break. Free like the passes above — the same master re-sliced —
+  // except for the shot-list calls themselves. Skipped without a word timeline (cuts need it).
+  if (words && words.length > 0) {
+    scenes = await cutShotsOnWords(scenes, {
+      jobId,
+      params,
+      spokenScript,
+      words,
+      masterDurationSec,
+    });
+  }
+
   // Final ranges after all reshaping has settled, then physically cut the master into per-scene
   // tracks and upload each (downstream stages consume scene.audioUrl exactly as before). Cuts are
   // snapped onto real pauses (never mid-word), so each slice is clean for lip-sync too.
   const finalAlign = newAlignmentReport();
-  const sceneRanges = assignSceneRanges(
+  let sceneRanges = assignSceneRanges(
     scenes,
     words,
     masterDurationSec,
@@ -12311,6 +13028,24 @@ async function runUnifiedPipeline(
     shortSilences,
     finalAlign
   );
+  // The snap onto real pauses can still squeeze a shot under its floor (a list item to 0.14 s once,
+  // a picture to 0.99 s); fold any such piece into its neighbour and cut once more — the same
+  // master, so free.
+  // A fold re-measures, and the re-snap can squeeze the joined shot's neighbour in turn — a few passes.
+  for (let pass = 0; pass < 3; pass++) {
+    const folded = foldSnappedFlashes(scenes, s => s.audioDuration ?? 0);
+    if (!folded.changed) break;
+    scenes = folded.scenes;
+    sceneRanges = assignSceneRanges(
+      scenes,
+      words,
+      masterDurationSec,
+      silences,
+      shortSilences,
+      newAlignmentReport()
+    );
+    console.log(`[Longform ${jobId}] folded shots the pause-snap squeezed under their floor`);
+  }
   // The last gate before money is spent. A stretch the aligner could not make sense of even by
   // word count means the narration and the script disagree there (minutes of audio for a line of
   // text, or the reverse) — every clip rendered over it would be the wrong length. Job 94 shipped
@@ -12463,6 +13198,16 @@ async function runUnifiedPipeline(
         `Host capped at ${formatMinSec(hostBudget.budgetSec)} instead of ` +
           `${params.hostMinutes}:00 — the film ran shorter than the script estimate, which puts ` +
           `${params.hostMinutes} min over the ${Math.round(hostFractionFor(pacing) * 100)}% guide`
+      );
+    }
+    // The spacing asked for is every ~30 s in the opening minutes and ~60 s after; a budget that
+    // cannot cover that widened the spacing — say so, with the fix.
+    if (plan.cadenceSec != null && plan.cadenceSec > HOST_CHECKIN_CADENCE_SEC) {
+      appendJobWarning(
+        jobId,
+        `${params.hostMinutes} min of host could only bring the host back about every ` +
+          `${plan.cadenceSec}s (every ${plan.cadenceSec / 2}s in the first 3 minutes) — pick more ` +
+          `host minutes for the ~30 s / ~60 s rhythm`
       );
     }
     if (plan.anchorsOverBudget) {
@@ -12775,6 +13520,74 @@ async function runUnifiedPipeline(
         `for on-topic b-roll on scene(s) ${guarded.join(", ")}`
     );
   }
+  // One continuous take where host beats now sit back to back (the CTA pitch after the book):
+  // separate renders jump at every join. Same seconds, same cost; the joined beats' narration is
+  // re-cut from the master here, before anything is rendered.
+  const joined = joinBackToBackHostTakes(scenes);
+  if (joined.joins > 0) {
+    scenes = joined.scenes;
+    console.log(
+      `[Longform ${jobId}] host takes: joined ${joined.joins} back-to-back pair(s) into continuous takes`
+    );
+  }
+  // The plan's last word before anything is paid for: every plan rule the rehearsal audit checks
+  // (`server/planGate.ts` — the audit imports the same `checkPlan`) is checked HERE and fixed —
+  // a flash shot joins its neighbour, a lingering picture splits on a pause, a stretch without
+  // the host gets a clean check-in (paid for by a spare one elsewhere when the host minutes are
+  // spent), too little real video turns the longest stills into moving shots. Whatever cannot be
+  // fixed is named on the job; the film still renders.
+  const hostsBeforeGate = new Set(scenes.filter(s => s.hostPresent));
+  const gate = enforcePlanRules(scenes, params, {
+    budgetSec: hostBudget?.budgetSec,
+    sectionSec: hostSectionSec,
+    silences,
+  });
+  scenes = gate.scenes;
+  if (gate.fixes.length) {
+    console.log(
+      `[Longform ${jobId}] plan check fixed ${gate.fixes.length}: ${gate.fixes.join("; ")}`
+    );
+  }
+  for (const f of gate.unresolved) {
+    appendJobWarning(jobId, `Plan check ${f.rule} could not be fixed: ${f.detail}`);
+  }
+  // A host beat the gate sent to the pictures gets the same rewrite every other cutaway got.
+  const gateDemoted = scenes
+    .filter(s => hostsBeforeGate.has(s) && !s.hostPresent)
+    .map(s => s.index);
+  if (gateDemoted.length) {
+    const reEnhance = await enhanceBrollPrompts(scenes, params, gateDemoted);
+    if (reEnhance.failedScenes.length) appendJobWarning(jobId, enhanceWarningFor(reEnhance));
+    for (const s of scenes) {
+      if (gateDemoted.includes(s.index))
+        s.visualPrompt = stripHostNames(s.visualPrompt, hostAliases);
+    }
+  }
+  // Joined takes and gate fixes changed some scenes' narration ranges — re-cut those slices from
+  // the master here, before anything is rendered.
+  const fresh = scenes.filter(s => !s.audioUrl && hasMasterRange(s));
+  if (fresh.length) {
+    const masterUrl = (await getLongformVideoJobById(jobId))?.masterAudioUrl;
+    if (masterUrl) {
+      const cuts = await sliceAudioSegments(
+        masterUrl,
+        fresh.map(s => ({
+          startSec: s.narrationStartSec as number,
+          lenSec: Math.max(
+            0.1,
+            (s.narrationEndSec as number) - (s.narrationStartSec as number)
+          ),
+        }))
+      );
+      await Promise.all(
+        fresh.map(async (s, k) => {
+          const key = `longform/${jobId}/scene-${s.index}-vo-${nanoid(6)}.mp3`;
+          s.audioUrl = (await storagePut(key, cuts[k], "audio/mpeg")).url;
+        })
+      );
+    }
+  }
+
   // The passes above created and removed host beats after the adjacency pass assigned angles —
   // re-derive so any surviving pair still reads main → alt. Pure and O(n); the last register
   // mutation before the storyboard persists and clips render.
@@ -13713,6 +14526,57 @@ async function assembleAndFinalize(
   }
 }
 
+/**
+ * Check every host clip not yet checked for a picture (`isBlankClip`); a black one is taken off
+ * its scene, which is marked failed. Persists what it learned — the checked URLs too, so a
+ * Reassemble does not download every host clip again. Returns the scenes it refused.
+ */
+async function refuseBlankHostClips(
+  jobId: number,
+  scenes: StoryboardScene[]
+): Promise<number[]> {
+  const todo = scenes.filter(
+    s => s.hostPresent && s.clipUrl && s.clipCheckedUrl !== s.clipUrl
+  );
+  if (todo.length === 0) return [];
+  const refused: number[] = [];
+  let next = 0;
+  const worker = async () => {
+    while (next < todo.length) {
+      const s = todo[next++];
+      const url = s.clipUrl as string;
+      try {
+        const resp = await fetch(await presignOwnBucketUrl(url), {
+          signal: AbortSignal.timeout(120_000),
+        });
+        if (!resp.ok) continue; // unreadable here — assembly's own download reports it
+        if (await isBlankClip(Buffer.from(await resp.arrayBuffer()))) {
+          s.blankClips = (s.blankClips ?? 0) + 1;
+          s.clipUrl = undefined;
+          s.clipUrls = undefined;
+          s.clipCheckedUrl = undefined;
+          s.sceneStatus = "failed";
+          s.error = "Clip: the host clip came back black";
+          refused.push(s.index);
+        } else {
+          s.clipCheckedUrl = url;
+        }
+      } catch {
+        /* best-effort: an unreachable clip is assembly's to report */
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: 4 }, worker));
+  await updateLongformVideoJob(jobId, { storyboard: scenes });
+  if (refused.length)
+    appendJobWarning(
+      jobId,
+      `Scene${refused.length > 1 ? "s" : ""} ${refused.join(", ")}: the host clip was black — ` +
+        `taken out of the film`
+    );
+  return refused.sort((a, b) => a - b);
+}
+
 async function assembleAndFinalizeCore(
   jobId: number,
   scenes: StoryboardScene[],
@@ -13722,6 +14586,20 @@ async function assembleAndFinalizeCore(
 
   // Repair the one failure mode that is recoverable for free, before judging completeness.
   await restoreMissingNarrationSlices(jobId, scenes, job?.masterAudioUrl);
+
+  // A host clip with no picture never reaches the film. Renders are checked as they arrive now;
+  // this catches the ones that arrived before that check existed (a hosted film carried a black
+  // HeyGen take on a host beat). The scene goes back to "failed", and "Retry failed scenes" then
+  // follows the host lane's own rules — another render while the allowance and the host minutes
+  // last, b-roll or "Host needed" after that.
+  const blanked = await refuseBlankHostClips(jobId, scenes);
+  if (blanked.length > 0) {
+    throw new Error(
+      `Scene${blanked.length > 1 ? "s" : ""} ${blanked.join(", ")}: the host clip is black — ` +
+        `use "Retry failed scenes" to render ${blanked.length > 1 ? "them" : "it"} again ` +
+        `(or it is made b-roll if the video's host minutes are used)`
+    );
+  }
 
   // Completeness gate: every scene must have BOTH a clip and its narration, or its words
   // would be silently dropped from the final cut (desyncing the video from the script).

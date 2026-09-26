@@ -269,3 +269,22 @@ describe("buildBookCtaTemplate (per-book Copy CTA skeleton)", () => {
     expect(empty).toBe(1);
   });
 });
+
+describe("Windows line endings", () => {
+  it("finds the CTA markers in a script saved with CRLF endings", () => {
+    const script = [
+      "Number nine is the tray.",
+      "",
+      "===START CTA(Nothing New for a Year)===",
+      "My book, Nothing New for a Year, has it all. Now go ahead and grab your phone.",
+      "===END CTA===",
+      "",
+      "Number eight is the lantern.",
+    ].join("\r\n");
+    const r = parseCtaMarkers(extractSpokenScript(script));
+    expect(r.spans).toHaveLength(1);
+    expect(r.spans[0].label).toBe("Nothing New for a Year");
+    expect(r.script).not.toContain("===");
+    expect(r.script).not.toContain("\r");
+  });
+});

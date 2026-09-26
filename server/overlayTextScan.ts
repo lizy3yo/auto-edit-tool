@@ -95,6 +95,10 @@ const STILL_DEFECT_SYSTEM =
   "- a rigid object that is bent, melted, or warped as if made of wax\n" +
   "- structure that cannot exist: stairs to nowhere, a handle attached to nothing, a shadow " +
   "or reflection that contradicts the object casting it\n" +
+  "- a tool doing something no real tool can: a blade passing through a clamp, a hand or a " +
+  "solid object; a saw or knife said to be cutting that sits on top of the material or cuts " +
+  "where it does not touch; a needle through a finger; scissors cutting where the blades do not " +
+  "meet; a tool held in a way no hand could hold it; a hand with too many or too few fingers\n" +
   "Answer false for everything else: unusual but possible products or craftsmanship, odd " +
   "compositions, shallow depth of field, soft focus, plain or boring frames, imperfect " +
   "staging, and any small detail you cannot clearly resolve at this size. This is AI-generated " +
@@ -119,8 +123,29 @@ export interface StillDefectVerdict {
   /** Readable writing IN the scene (a chalkboard sum, a price tag, a big label). Every b-roll
    *  prompt bans it (`NO_READABLE_TEXT`); a true verdict re-rolls the still like `overlay`. */
   writing: boolean;
+  /**
+   * The frame does not show the thing its line names (`scene.showSubject`) — "a stack of
+   * sandpaper" drawn as a sanding block, or not there at all. Only asked when the caller passes
+   * what the frame must show; re-rolls the still like `writing`.
+   */
+  missing: boolean;
+  /** A legible brand name or logo, or a subject lost in busy unrelated clutter (rule 4). */
+  messy: boolean;
+  /** The line names a place (a market, a fair, a church hall) and the frame is clearly somewhere
+   *  else (rule 3). Only asked when the caller passes the line. */
+  wrongPlace: boolean;
   what: string;
 }
+
+const CLEAN_VERDICT: StillDefectVerdict = {
+  overlay: false,
+  broken: false,
+  writing: false,
+  missing: false,
+  messy: false,
+  wrongPlace: false,
+  what: "",
+};
 
 /**
  * Parse the verdict. Anything off-shape reads as "no defect" — a re-roll costs an image and
@@ -134,18 +159,24 @@ export function parseStillDefectVerdict(
   stopReason?: string
 ): StillDefectVerdict {
   const parsed = safeParseJSON<any>(raw, stopReason);
-  if (!parsed.success)
-    return { overlay: false, broken: false, writing: false, what: "" };
+  if (!parsed.success) return { ...CLEAN_VERDICT };
   const overlay = parsed.data?.overlay === true;
   const broken = parsed.data?.broken === true;
   const writing = parsed.data?.writing === true;
+  const missing = parsed.data?.missing === true;
+  const messy = parsed.data?.messy === true;
+  const wrongPlace = parsed.data?.wrong_place === true;
   const what = parsed.data?.what;
   return {
     overlay,
     broken,
     writing,
+    missing,
+    messy,
+    wrongPlace,
     what:
-      (overlay || broken || writing) && typeof what === "string"
+      (overlay || broken || writing || missing || messy || wrongPlace) &&
+      typeof what === "string"
         ? what.slice(0, 80)
         : "",
   };
@@ -171,8 +202,57 @@ export function parseOverlayVerdict(
  * the media_type below cannot drift from what is actually sent. That drift was a real bug —
  * declaring jpeg over gpt-image-2's png 400s, which fails open and ships the defect SILENTLY.
  */
+/** QUESTION 4, asked only when the caller knows what the frame must show. */
+export function missingQuestion(expect: string): string {
+  return (
+    "\n\nQUESTION 4 — missing: this frame plays while the narrator names: " +
+    `"${expect.replace(/"/g, "'")}". Is that thing clearly NOT the centre of attention — a ` +
+    "different object in its place, absent altogether, or there but small, pushed to an edge, or " +
+    "outweighed by something else that takes most of the frame? Answer false when it is the main " +
+    "thing the eye lands on, even from an unusual angle. When unsure, answer false."
+  );
+}
+
+/** QUESTION 5, always asked: the clean-frame rule every b-roll prompt carries (`CLEAN_FRAME_RULE`). */
+export const MESSY_QUESTION =
+  "\n\nQUESTION 5 — messy: is a real brand name or logo legible anywhere (even small, on a tool " +
+  "or product), OR is the main subject small, crowded or lost among busy unrelated objects so a " +
+  "viewer cannot tell what the shot is about at a glance? A heap or stack of the very material the " +
+  "shot is about (fabric scraps, yarn, lumber offcuts) IS the subject, not clutter. When unsure, " +
+  "answer false.";
+
+/** QUESTION 6, asked only with the narration line: the frame is set where the line says. */
+export function placeQuestion(line: string): string {
+  return (
+    "\n\nQUESTION 6 — wrong_place: this frame plays under the narration line: " +
+    `"${line.replace(/"/g, "'").slice(0, 400)}". ONLY about the SETTING, never which object is ` +
+    "shown. If the line names a specific kind of PLACE where something is used, sold or comes " +
+    "from — a home or a room in one, a market stall or fair, a church or hall, a store, a porch " +
+    "or patio, a garden or field, a hospital, a particular country's buildings — is the frame " +
+    "clearly somewhere else, or showing that place only as a picture or poster on a wall? A " +
+    "workshop, garage, shed, sewing room, kitchen table or work bench all count as the same home " +
+    "base and never make it wrong. If the line names no such place, or you are unsure, answer false."
+  );
+}
+
+/** The JSON shape, listing every question asked. */
+export function verdictShape(expect?: string, line?: string): string {
+  return (
+    '\n\nReturn ONLY this JSON, no prose: {"overlay":true|false,"broken":true|false,' +
+    '"writing":true|false' +
+    (expect ? ',"missing":true|false' : "") +
+    ',"messy":true|false' +
+    (line ? ',"wrong_place":true|false' : "") +
+    ',"what":"..."}'
+  );
+}
+
 export async function scanStillDefects(
-  buffer: Buffer
+  buffer: Buffer,
+  /** What the frame must show (`scene.showSubject`) — adds the `missing` question. */
+  expect?: string,
+  /** The narration line the frame plays under — adds the `wrong_place` question. */
+  line?: string
 ): Promise<StillDefectVerdict> {
   try {
     const small = await sharp(buffer)
@@ -187,18 +267,34 @@ export async function scanStillDefects(
       mediaType: "image/png",
     };
     const result = await invokeClaude({
-      systemPrompt: STILL_DEFECT_SYSTEM,
+      systemPrompt:
+        STILL_DEFECT_SYSTEM +
+        (expect ? missingQuestion(expect) : "") +
+        MESSY_QUESTION +
+        (line ? placeQuestion(line) : "") +
+        verdictShape(expect, line),
       userMessage:
         "Is any text stamped over this frame, does it contain obviously impossible structure, " +
-        "and is there readable writing in the scene?",
+        "is there readable writing in the scene, and is it messy or branded?" +
+        (expect ? ` Does it show "${expect.replace(/"/g, "'")}"?` : "") +
+        (line ? " Is it set where the line says?" : ""),
       imageInput: image,
-      maxTokens: 160,
+      maxTokens: 250,
       model: STILL_DEFECT_MODEL,
     });
     const verdict = parseStillDefectVerdict(result.text, result.stopReason);
-    if (verdict.overlay || verdict.broken || verdict.writing)
+    if (!expect) verdict.missing = false;
+    if (!line) verdict.wrongPlace = false;
+    if (
+      verdict.overlay ||
+      verdict.broken ||
+      verdict.writing ||
+      verdict.missing ||
+      verdict.messy ||
+      verdict.wrongPlace
+    )
       console.log(
-        `[StillDefects] ${verdict.overlay ? "stamped text" : verdict.broken ? "broken geometry" : "readable writing"} detected: ${verdict.what}`
+        `[StillDefects] ${verdict.overlay ? "stamped text" : verdict.broken ? "broken geometry" : verdict.writing ? "readable writing" : verdict.missing ? "named thing missing" : verdict.messy ? "brand or clutter" : "wrong place"} detected: ${verdict.what}`
       );
     return verdict;
   } catch (err: any) {
@@ -207,7 +303,7 @@ export async function scanStillDefects(
     console.warn(
       `[StillDefects] check failed: ${err.message} — passing the still`
     );
-    return { overlay: false, broken: false, writing: false, what: "" };
+    return { ...CLEAN_VERDICT };
   }
 }
 

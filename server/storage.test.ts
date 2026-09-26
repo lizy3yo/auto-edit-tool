@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { presignOwnBucketUrl, rehostToR2 } from "./storage";
+import { isTransientR2Error, presignOwnBucketUrl, rehostToR2 } from "./storage";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -58,4 +58,17 @@ test("presignOwnBucketUrl rewrites our own public URLs onto the S3 endpoint", as
   expect(u.host).toBe("longform.acct123.r2.cloudflarestorage.com");
   expect(u.pathname).toBe("/jobs/1/seg-0.mp3");
   expect(u.searchParams.get("X-Amz-Signature")).toBeTruthy();
+});
+
+test("retries an upload whose socket never connected, not one the bucket refused", () => {
+  const timeout = Object.assign(
+    new Error(
+      "@smithy/node-http-handler - the request socket did not establish a connection with the server within the configured timeout of 10000 ms."
+    ),
+    { name: "TimeoutError" }
+  );
+  expect(isTransientR2Error(timeout)).toBe(true);
+  expect(isTransientR2Error({ message: "read ECONNRESET" })).toBe(true);
+  expect(isTransientR2Error({ $metadata: { httpStatusCode: 503 } })).toBe(true);
+  expect(isTransientR2Error({ name: "AccessDenied", $metadata: { httpStatusCode: 403 } })).toBe(false);
 });

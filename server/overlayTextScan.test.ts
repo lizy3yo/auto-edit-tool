@@ -28,6 +28,9 @@ describe("parseStillDefectVerdict", () => {
       overlay: false,
       broken: true,
       writing: false,
+      missing: false,
+      messy: false,
+      wrongPlace: false,
       what: "board floating above the table",
     });
   });
@@ -41,6 +44,9 @@ describe("parseStillDefectVerdict", () => {
       overlay: false,
       broken: false,
       writing: true,
+      missing: false,
+      messy: false,
+      wrongPlace: false,
       what: "chalkboard reading $93/hour",
     });
     expect(parseStillDefectVerdict('{"writing":"yes"}').writing).toBe(false);
@@ -52,12 +58,18 @@ describe("parseStillDefectVerdict", () => {
       overlay: true,
       broken: false,
       writing: false,
+      missing: false,
+      messy: false,
+      wrongPlace: false,
       what: "",
     });
     expect(parseStillDefectVerdict('{"broken":true}')).toEqual({
       overlay: false,
       broken: true,
       writing: false,
+      missing: false,
+      messy: false,
+      wrongPlace: false,
       what: "",
     });
   });
@@ -181,6 +193,21 @@ describe("hasOverlayText", () => {
 });
 
 describe("scanStillDefects", () => {
+  it("asks whether the frame shows the named thing only when told what that is", async () => {
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue({
+      text: '{"overlay":false,"broken":false,"writing":false,"missing":true,"what":"a sanding block, not a stack"}',
+    } as any);
+    const asked = await scanStillDefects(await imageOf(1280, 720), "a stack of sandpaper");
+    expect(asked.missing).toBe(true);
+    expect(mockInvoke.mock.calls[0][0].systemPrompt).toContain("a stack of sandpaper");
+    // Without a subject the question is never asked, and a stray "missing" is ignored.
+    mockInvoke.mockClear();
+    const plain = await scanStillDefects(await imageOf(1280, 720));
+    expect(plain.missing).toBe(false);
+    expect(mockInvoke.mock.calls[0][0].systemPrompt).not.toContain("QUESTION 4");
+  });
+
   it("reports broken geometry when the judge finds it", async () => {
     mockInvoke.mockReset();
     mockInvoke.mockResolvedValue({
@@ -190,6 +217,9 @@ describe("scanStillDefects", () => {
       overlay: false,
       broken: true,
       writing: false,
+      missing: false,
+      messy: false,
+      wrongPlace: false,
       what: "shelf merging into the wall",
     });
   });
@@ -201,7 +231,30 @@ describe("scanStillDefects", () => {
       overlay: false,
       broken: false,
       writing: false,
+      missing: false,
+      messy: false,
+      wrongPlace: false,
       what: "",
     });
+  });
+});
+
+describe("still checks for rules 3 and 4", () => {
+  it("reads the brand/clutter and wrong-place bits", async () => {
+    const { parseStillDefectVerdict } = await import("./overlayTextScan");
+    const v = parseStillDefectVerdict(
+      '{"overlay":false,"broken":false,"writing":false,"messy":true,"wrong_place":true,"what":"logo on the drill"}'
+    );
+    expect(v.messy).toBe(true);
+    expect(v.wrongPlace).toBe(true);
+    expect(v.what).toBe("logo on the drill");
+  });
+
+  it("asks the place question only with a line, and lists every key it asks", async () => {
+    const { verdictShape, placeQuestion } = await import("./overlayTextScan");
+    expect(verdictShape()).not.toContain("wrong_place");
+    expect(verdictShape("a saw", "sold at the market")).toContain('"wrong_place"');
+    expect(verdictShape("a saw")).toContain('"missing"');
+    expect(placeQuestion("sold at the fair")).toContain("sold at the fair");
   });
 });

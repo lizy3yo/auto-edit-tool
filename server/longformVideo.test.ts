@@ -70,6 +70,10 @@ import {
   titleMatcher,
   coalesceShortScenes,
   completeHostSentences,
+  joinBackToBackHostTakes,
+  moveHostLeadIns,
+  introSentenceStart,
+  checkInCadenceAt,
   FIGURE_OF_SPEECH_RULE,
   scrubLegibleWriting,
   coverBeatFor,
@@ -10193,5 +10197,157 @@ describe("pinned-camera prompt pair", () => {
     expect(buildLipsyncPrompt(scene, true, "pinned")).toContain(
       LIPSYNC_ALT_ANGLE_SUFFIX
     );
+  });
+});
+
+describe("joinBackToBackHostTakes", () => {
+  const host = (index: number, start: number, end: number, extra: Partial<StoryboardScene> = {}) =>
+    ({
+      index,
+      scriptText: `line ${index}.`,
+      narration: `line ${index}.`,
+      visualPrompt: "host",
+      hostPresent: true,
+      narrationStartSec: start,
+      narrationEndSec: end,
+      audioUrl: `a${index}.mp3`,
+      ...extra,
+    }) as StoryboardScene;
+  const cover = (index: number, start: number, end: number) =>
+    ({ ...host(index, start, end), hostPresent: false, coverHero: true, cta: true, ctaIndex: 0 }) as StoryboardScene;
+
+  it("makes the host after the book one continuous take (host → book → host, host, host)", () => {
+    const cta = { cta: true, ctaIndex: 0 } as const;
+    const { scenes, joins } = joinBackToBackHostTakes([
+      host(1, 0, 6, cta),
+      cover(2, 6, 10),
+      host(3, 10, 14, cta),
+      host(4, 14, 19, { ...cta, qrCorner: true }),
+      host(5, 19, 25, cta),
+    ]);
+    expect(joins).toBe(2);
+    expect(scenes.map(s => s.index)).toEqual([1, 2, 3]);
+    const joined = scenes[2];
+    expect(joined.scriptText).toBe("line 3. line 4. line 5.");
+    expect([joined.narrationStartSec, joined.narrationEndSec]).toEqual([10, 25]);
+    expect(joined.audioUrl).toBeUndefined(); // re-cut from the master
+    expect(joined.qrCorner).toBe(true);
+  });
+
+  it("never joins across a CTA edge, the two-angle open, or past the ceiling", () => {
+    const edge = joinBackToBackHostTakes([
+      host(1, 0, 5),
+      host(2, 5, 10, { cta: true, ctaIndex: 0 }),
+    ]);
+    expect(edge.joins).toBe(0);
+    const open = joinBackToBackHostTakes([
+      host(1, 0, 5, { hostOpener: true }),
+      host(2, 5, 10, { hostOpener: true }),
+    ]);
+    expect(open.joins).toBe(0);
+    const long = joinBackToBackHostTakes([host(1, 0, 20), host(2, 20, 40)]);
+    expect(long.joins).toBe(0);
+    const gap = joinBackToBackHostTakes([host(1, 0, 5), host(2, 5.5, 9)]);
+    expect(gap.joins).toBe(0);
+  });
+});
+
+describe("shot-list pieces keep their own length on screen", () => {
+  it("holds a list cut to its words, not the ordinary 3 s floor", () => {
+    const s = {
+      index: 1,
+      scriptText: "a saw,",
+      audioDuration: 0.7,
+      wordCut: true,
+      listCut: true,
+    } as StoryboardScene;
+    applySceneHoldFloor(s);
+    expect(s.audioDuration).toBeCloseTo(0.7);
+    expect(s.minHoldSec).toBeLessThanOrEqual(0.7);
+    const hostPart = { index: 2, hostPresent: true, wordCut: true, audioDuration: 2.4 } as StoryboardScene;
+    applySceneHoldFloor(hostPart);
+    expect(hostPart.audioDuration).toBeCloseTo(2.4);
+  });
+
+  it("checks in twice as often in the first three minutes", () => {
+    expect(checkInCadenceAt(30, 60)).toBe(30);
+    expect(checkInCadenceAt(179, 60)).toBe(30);
+    expect(checkInCadenceAt(180, 60)).toBe(60);
+  });
+});
+
+describe("moveHostLeadIns", () => {
+  it("hands a host take's mid-sentence lead-in to the picture before it", () => {
+    const scenes = [
+      { index: 1, scriptText: "So we're counting them down, with what each one cost me,", visualPrompt: "p" },
+      {
+        index: 2,
+        scriptText: "how long it took, and what folks handed over for it. I'm Granny Mae, and this one's for you.",
+        hostPresent: true,
+        hostIntro: true,
+        visualPrompt: "h",
+      },
+    ] as StoryboardScene[];
+    expect(moveHostLeadIns(scenes)).toEqual([2]);
+    expect(scenes[0].scriptText).toBe(
+      "So we're counting them down, with what each one cost me, how long it took, and what folks handed over for it."
+    );
+    expect(scenes[1].scriptText).toBe("I'm Granny Mae, and this one's for you.");
+  });
+
+  it("leaves a host take that starts a sentence, or follows another host take", () => {
+    const ok = [
+      { index: 1, scriptText: "It sold.", visualPrompt: "p" },
+      { index: 2, scriptText: "I'm Hank, and here we go.", hostPresent: true, visualPrompt: "h" },
+    ] as StoryboardScene[];
+    expect(moveHostLeadIns(ok)).toEqual([]);
+    const afterHost = [
+      { index: 1, scriptText: "So we're counting,", hostPresent: true, visualPrompt: "h" },
+      { index: 2, scriptText: "how long it took. I'm Hank, and here we go.", hostPresent: true, visualPrompt: "h" },
+    ] as StoryboardScene[];
+    expect(moveHostLeadIns(afterHost)).toEqual([]);
+  });
+});
+
+describe("hero framing", () => {
+  it("frames a named thing close and centred instead of the rotating camera angle", () => {
+    const named = {
+      index: 1,
+      visualPrompt: "a Japanese pull saw against a plain workshop wall",
+      showSubject: "a Japanese pull saw",
+      shotAngle: "wide",
+      stillImage: true,
+    } as StoryboardScene;
+    const p = buildStillPrompt(named);
+    expect(p).toContain("a Japanese pull saw is the centre of attention");
+    expect(p).not.toContain("taking in the whole scene");
+    // No blur asked for: the background stays sharp, just simple.
+    expect(p).not.toMatch(/blur|bokeh|shallow depth/i);
+    const plain = { ...named, showSubject: undefined } as StoryboardScene;
+    expect(buildStillPrompt(plain)).toContain("taking in the whole scene");
+  });
+});
+
+describe("the self-introduction starts on the name", () => {
+  it("hands the sentences before the introduction to the picture before it", () => {
+    const scenes = [
+      { index: 1, scriptText: "finished dead last at about a dollar-fifty an hour.", visualPrompt: "p" },
+      {
+        index: 2,
+        scriptText:
+          "So we're counting all of them down, worst to best, with what each one cost me. I'm Granny Mae, and this one's for you.",
+        hostPresent: true,
+        hostIntro: true,
+        visualPrompt: "h",
+      },
+    ] as StoryboardScene[];
+    expect(introSentenceStart(scenes[1].scriptText!, "Granny Mae")).toBeGreaterThan(0);
+    expect(moveHostLeadIns(scenes, "Granny Mae")).toEqual([2]);
+    expect(scenes[1].scriptText).toBe("I'm Granny Mae, and this one's for you.");
+    expect(scenes[0].scriptText).toContain("So we're counting all of them down");
+  });
+
+  it("leaves an introduction that already opens its take", () => {
+    expect(introSentenceStart("I'm Hank Hardwood, and here we go.", "Hank Hardwood")).toBe(0);
   });
 });

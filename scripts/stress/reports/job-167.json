@@ -1,0 +1,51 @@
+{
+ "jobId": 167,
+ "channel": "hannah_yoder",
+ "title": "10 Plain Sewing Projects From Cloth You Already Own, Ranked by Profit",
+ "status": "completed",
+ "rehearsal": false,
+ "finalVideoUrl": "https://pub-fd5853f50f47422f827867dae374bcf2.r2.dev/longform/167/final-z2rdPCZ5.mp4",
+ "verdicts": {
+  "1": true,
+  "2": true,
+  "3": null,
+  "4": null,
+  "5": null,
+  "6": true,
+  "7": false,
+  "8": true,
+  "9": true,
+  "10": null,
+  "11": false,
+  "12": true
+ },
+ "stats": {
+  "scenes": 366,
+  "hostTakes": 39,
+  "hostSec": 179,
+  "ctaPatterns": [
+   "block 0: HBHQQQQ",
+   "block 1: HBHQQQQQ"
+  ],
+  "introductions": 1,
+  "midSentenceHostTakes": 0,
+  "listCuts": 36,
+  "handOffs": 35,
+  "longestFacelessEarlySec": 33,
+  "longestFacelessLateSec": 64,
+  "longestPictureSec": 5.3,
+  "motionSharePct": 28,
+  "picturesJudged": 0
+ },
+ "findings": [
+  {
+   "rule": 7,
+   "scene": 49,
+   "detail": "flash shot 0.99s"
+  },
+  {
+   "rule": 11,
+   "detail": "only 28% of cutaway time is moving"
+  }
+ ]
+}

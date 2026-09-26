@@ -74,6 +74,38 @@ const publicBase = (): string | undefined => {
   return raw ? raw.replace(/\/+$/, "") : undefined;
 };
 
+/**
+ * Uploads in flight at once, across the whole process. The shot list cuts a film into 450+
+ * narration slices and they were uploaded in one `Promise.all` — 474 sockets opened together, and
+ * the ones that could not connect inside `R2_CONNECTION_TIMEOUT_MS` failed the job at voicing
+ * (job 149). Every caller goes through `storagePut`, so the cap lives here, not at each call site.
+ */
+const R2_PUT_CONCURRENCY = Number(process.env.R2_PUT_CONCURRENCY ?? 16);
+/** Tries per upload when the failure is the network, not the request. */
+const R2_PUT_ATTEMPTS = 4;
+let uploadsInFlight = 0;
+const uploadQueue: (() => void)[] = [];
+async function withUploadSlot<T>(fn: () => Promise<T>): Promise<T> {
+  if (uploadsInFlight >= R2_PUT_CONCURRENCY)
+    await new Promise<void>(r => uploadQueue.push(r));
+  uploadsInFlight++;
+  try {
+    return await fn();
+  } finally {
+    uploadsInFlight--;
+    uploadQueue.shift()?.();
+  }
+}
+/** A connect/socket timeout, reset or 5xx — worth another try; a 4xx is not. Pure. */
+export function isTransientR2Error(err: any): boolean {
+  const status = err?.$metadata?.httpStatusCode;
+  if (typeof status === "number" && status >= 500) return true;
+  const text = `${err?.name ?? ""} ${err?.code ?? ""} ${err?.message ?? ""}`;
+  return /TimeoutError|did not establish a connection|timed? ?out|ECONNRESET|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|EPIPE|socket hang up|NetworkingError/i.test(
+    text
+  );
+}
+
 export async function storagePut(
   relKey: string,
   data: Buffer | Uint8Array | string,
@@ -82,14 +114,24 @@ export async function storagePut(
   const key = normalizeKey(relKey);
   const s3 = getS3Client();
 
-  await s3.send(
-    new PutObjectCommand({
-      Bucket: getBucket(),
-      Key: key,
-      Body: data as Buffer,
-      ContentType: contentType,
-    })
-  );
+  await withUploadSlot(async () => {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await s3.send(
+          new PutObjectCommand({
+            Bucket: getBucket(),
+            Key: key,
+            Body: data as Buffer,
+            ContentType: contentType,
+          })
+        );
+        return;
+      } catch (err: any) {
+        if (attempt >= R2_PUT_ATTEMPTS || !isTransientR2Error(err)) throw err;
+        await new Promise(r => setTimeout(r, 1000 * 2 ** (attempt - 1)));
+      }
+    }
+  });
 
   const publicUrl = publicBase();
   const url = publicUrl ? `${publicUrl}/${key}` : `r2://${getBucket()}/${key}`;

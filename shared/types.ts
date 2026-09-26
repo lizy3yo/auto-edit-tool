@@ -351,6 +351,37 @@ export interface StoryboardScene {
    */
   hostIntro?: true;
   /**
+   * Cut on the WORDS by the shot list (`server/shotList.ts`): this beat starts at the exact word
+   * where its picture is named, so its length is the length of those words. Its on-screen floor is
+   * the shot list's own (`SHOT_MIN_SEC`, or `HOST_HANDOFF_MIN_SEC` on the host part of a hand-off)
+   * rather than `SCENE_MIN_HOLD_SEC` — holding a one-second list shot to three would freeze the
+   * picture and splice silence into the middle of a sentence.
+   */
+  wordCut?: true;
+  /** Renders of this beat that came back BLACK (or one solid colour) and were refused. */
+  blankClips?: number;
+  /** Moving clips of this beat refused for impossible motion (`scanClipGlitch`); the second makes
+   *  the beat a still. */
+  motionGlitches?: number;
+  /** The clip URL last checked for a picture at assembly — so a Reassemble does not re-check it. */
+  clipCheckedUrl?: string;
+  /** One item of a spoken list ("a saw, a drill, …") — a quick cut, allowed down to `LIST_SHOT_MIN_SEC`. */
+  listCut?: true;
+  /**
+   * A beat the storyboard wrote for the HOST, handed to the shot list as pictures so it is cut on
+   * the words like every other stretch (`cutShotsOnWords`); the host plan then prefers the first
+   * piece of it for a check-in, so the host still comes in where the storyboard wanted — for a
+   * glimpse, handing over to the pictures at a natural break.
+   */
+  hostCandidate?: true;
+  /**
+   * The thing this picture must show, in the shot list's words ("a stack of sandpaper"). The still
+   * checker re-rolls a picture that does not show it (`scanStillDefects`' `missing` verdict).
+   */
+  showSubject?: string;
+  /** Scenes cut from one storyboard beat share its index here — the shot list's own bookkeeping. */
+  shotGroup?: number;
+  /**
    * This beat sits inside the FAST-OPEN window (`LongformPacing.fastOpen`): the first `zoneSec`
    * of narration, where cuts land faster to match the script's opening pace. Set once at
    * segmentation (`markFastOpenScenes`) and read by `capFor`/`floorFor`/`measuredSizeFor`, so
@@ -1141,6 +1172,13 @@ export interface LongformInputParams {
    * derive that failed open) ⇒ every prompt is byte-identical to the pre-feature pipeline.
    */
   visualStyleBible?: string;
+  /**
+   * The PROPS LIST: every recurring thing in the script and how it looks ("the lattice panel: light
+   * pine, one foot square"), written once by `deriveContinuitySheet` and handed to every shot and
+   * picture writer so the same object looks the same in every shot. Snapshotted so a resume
+   * draws the same props.
+   */
+  continuitySheet?: string;
   /**
    * Which long-form tab (slot 0–4) launched this job. Selects BOTH per-tab provider keys: the
    * APIMART key for b-roll VIDEO generation (unset or a slot with no key ⇒ the 69Labs video path)

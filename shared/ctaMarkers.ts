@@ -53,6 +53,10 @@ function isPreambleParagraph(p: string): boolean {
  */
 export function extractSpokenScript(raw: string): string {
   if (!raw || !raw.trim()) return "";
+  // Windows line endings: every marker line then ends in "\r", `CTA_START_LINE` never matches, and
+  // the film ships with no CTA at all and "===START CTA(…)===" read aloud as script (stress job 150,
+  // a script saved on Windows). A pasted or uploaded script can carry them just the same.
+  raw = raw.replace(/\r\n?/g, "\n");
   const start = raw.match(SCRIPT_START_MARKER);
   if (start && start.index !== undefined) {
     let after = raw.slice(start.index + start[0].length);

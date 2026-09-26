@@ -6,6 +6,8 @@ import {
   healTranscriptHoles,
   mergePatchedWords,
   patchSpans,
+ planTranscriptPieces,
+  transcribeInPieces,
 } from "./alignmentHeal";
 import type { WhisperWord } from "./_core/voiceTranscription";
 import type { StoryboardScene } from "../shared/types";
@@ -156,5 +158,70 @@ describe("clockTime", () => {
     expect(clockTime(563.2)).toBe("9:23");
     expect(clockTime(59.6)).toBe("1:00");
     expect(clockTime(-3)).toBe("0:00");
+  });
+});
+
+describe("transcribing a long narration in pieces", () => {
+  it("covers the narration exactly once, each join shared by two overlapping pieces", () => {
+    const pieces = planTranscriptPieces(1540.9);
+    expect(pieces.length).toBe(4);
+    expect(pieces[0].fromSec).toBe(0);
+    expect(pieces[pieces.length - 1].toSec).toBeCloseTo(1540.9);
+    for (let k = 1; k < pieces.length; k++) {
+      expect(pieces[k].fromSec).toBeLessThan(pieces[k - 1].toSec); // overlap
+      expect(pieces[k].ownFrom).toBeCloseTo(pieces[k - 1].ownTo); // owned ranges tile
+    }
+    expect(planTranscriptPieces(300)).toEqual([{ fromSec: 0, toSec: 300, ownFrom: 0, ownTo: 300 }]);
+  });
+
+  it("stitches the pieces onto the narration's clock, keeping each word once", async () => {
+    // A fake narration: one word every second for 1000 s.
+    const truth = (from: number, len: number) =>
+      Array.from({ length: Math.floor(len) }, (_, i) => ({
+        word: `w${Math.round(from) + i}`,
+        start: i + 0.1,
+        end: i + 0.6,
+      }));
+    const r = await transcribeInPieces({
+      monoAudio: Buffer.alloc(1),
+      durationSec: 1000,
+      slice: async (_a: Buffer, from: number, len: number) =>
+        Buffer.from(JSON.stringify([from, len])),
+      transcribe: (async (b: Buffer) => {
+        const [from, len] = JSON.parse(b.toString());
+        return { words: truth(from, len), duration: len };
+      }) as any,
+    });
+    expect("error" in r).toBe(false);
+    const words = (r as any).words as { word: string; start: number }[];
+    expect(words.length).toBe(1000);
+    expect(new Set(words.map(w => w.word)).size).toBe(1000);
+    expect(words[500].word).toBe("w500");
+    expect(words[500].start).toBeCloseTo(500.1);
+  });
+
+  it("leaves a hole for the repair when one piece keeps failing, and errors only when all do", async () => {
+    let calls = 0;
+    const r = await transcribeInPieces({
+      monoAudio: Buffer.alloc(1),
+      durationSec: 1000,
+      slice: async (_a: Buffer, from: number, len: number) =>
+        Buffer.from(JSON.stringify([from, len])),
+      transcribe: (async (b: Buffer) => {
+        calls++;
+        const [from, len] = JSON.parse(b.toString());
+        if (from === 0) return { error: "CUDA failed with error out of memory", code: "TRANSCRIPTION_FAILED" };
+        return { words: [{ word: "x", start: 1, end: 1.5 }], duration: len };
+      }) as any,
+    });
+    expect("error" in r).toBe(false);
+    expect(calls).toBeGreaterThan(planTranscriptPieces(1000).length); // the failing piece was retried
+    const none = await transcribeInPieces({
+      monoAudio: Buffer.alloc(1),
+      durationSec: 1000,
+      slice: async () => Buffer.alloc(1),
+      transcribe: (async () => ({ error: "down", code: "SERVICE_ERROR" })) as any,
+    });
+    expect("error" in none).toBe(true);
   });
 });

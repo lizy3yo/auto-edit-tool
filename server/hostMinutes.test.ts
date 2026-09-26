@@ -179,16 +179,33 @@ describe("planHostMinutes", () => {
     // It spends the budget rather than stopping at the minimum.
     expect(planned).toBeGreaterThan(180 - 2 * SCENE_SEC);
     expect(plan.anchorsOverBudget).toBe(false);
-    expect(plan.cadenceSec).toBe(60);
+    // Twice as many targets in the opening three minutes: 6 s beats at 3 min of host cover them
+    // one step wider than 60.
+    expect(plan.cadenceSec).toBe(75);
   });
 
-  it("puts the host on screen about once a minute", () => {
+  it("brings the host back twice as often in the first three minutes", () => {
     const scenes = twentyMin();
-    planHostMinutes(scenes, 180, { canPromote: true });
+    const plan = planHostMinutes(scenes, 180, { canPromote: true });
+    const cadence = plan.cadenceSec!;
     const starts = hostStarts(scenes);
     for (let k = 1; k < starts.length; k++) {
-      // The CTA block is its own host rhythm; elsewhere no gap may run past ~90s.
-      expect(starts[k] - starts[k - 1]).toBeLessThanOrEqual(90);
+      const gap = starts[k] - starts[k - 1];
+      // Early: about every half-cadence; later: about every cadence (a target's window is ±half).
+      if (starts[k - 1] < 180) expect(gap).toBeLessThanOrEqual(cadence * 0.75 + SCENE_SEC);
+      else expect(gap).toBeLessThanOrEqual(cadence * 1.5 + SCENE_SEC);
+    }
+  });
+
+  it("keeps the ~30 s / ~60 s rhythm when the budget covers it", () => {
+    const scenes = twentyMin();
+    const plan = planHostMinutes(scenes, 240, { canPromote: true });
+    expect(plan.cadenceSec).toBe(60);
+    const starts = hostStarts(scenes);
+    for (let k = 1; k < starts.length; k++) {
+      const gap = starts[k] - starts[k - 1];
+      if (starts[k - 1] < 180) expect(gap).toBeLessThanOrEqual(45 + SCENE_SEC);
+      else expect(gap).toBeLessThanOrEqual(90 + SCENE_SEC);
     }
   });
 

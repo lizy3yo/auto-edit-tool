@@ -456,13 +456,15 @@ Express · tRPC · Drizzle · MySQL.
   come from `markCtaScenes`, which also fires on any spoken price
 - **Stress rehearsals** (`scripts/stress/`, 2026-09-24): `run.mts` renders a script N times through
   the real `generate` route as the bootstrap admin into Video tab `--slot`, then `audit.mts`
-  checks the seven operator rules (no CTA pause, CTA order, right place, clean pictures, no text,
-  self-intro on camera, whole-sentence host takes) from the storyboard, the film and a Sonnet
-  judge on one frame per picture. `generate`'s admin-only `rehearsal` flag
+  checks the operator's rules (no CTA pause, CTA order, right place, clean pictures, no text,
+  self-intro on camera, clean host switches, and since 2026-09-25 host often — ≤40 s faceless in
+  the first 3 min, ≤75 s after — pictures ≤6.5 s, the picture shows what is said, ≥30% of cutaway
+  time moving) from the storyboard, the film and a Sonnet judge on one frame per picture. CTA
+  books come from the channel (the scripts name them in `===START CTA(title)===`). `generate`'s admin-only `rehearsal` flag
   (`LongformInputParams.rehearsal`, `rehearseSceneClips`) runs everything except the two paid
   video lanes — a host beat is a slow zoom on its photo, a moving cutaway its still — so a whole
   21-minute film costs the stills. Run them with `ASSEMBLY_CACHE=0` and at most two assembling at
-  once: four parallel assemblies filled the disk. `tailor.mts` wrote the channel scripts,
+  once: four parallel assemblies filled the disk. `resume.mts --job N` continues an interrupted job instead of re-rendering it (pipeline from the saved master at voicing/storyboard, else "Retry failed scenes") and audits it; `audit.mts` gives its film scan 25 min and reports SCAN FAILED rather than hanging. Three failures only a full-length film showed: WhisperX runs out of GPU memory past ~25 min of narration, so a failed transcript is retried in 8-min pieces with 30 s overlap (`transcribeInPieces`, `server/alignmentHeal.ts`); a CRLF script hid every CTA marker (`extractSpokenScript` normalises line endings); and ~470 concurrent R2 uploads timed out, so `storagePut` caps them (`R2_PUT_CONCURRENCY`, 16) and retries a transient failure. `tailor.mts` wrote the channel scripts,
   `books.mts` the two test books (per-video, never saved to the channel). Other fixes the runs
   forced: the master is voiced three delivery runs at a time with "Recording narration n/N" on
   the card (`MASTER_TTS_CONCURRENCY`); a scene attempt that failed on a network timeout is retried
@@ -487,7 +489,107 @@ Express · tRPC · Drizzle · MySQL.
   sentences. And `coalesceShortScenes` folds a FLASH (`FLASH_SHOT_SEC`, 1.5 s) past the ceiling
   into a neighbour — the freeze-pad that used to hold an orphan to its floor is retired, so an
   orphan otherwise blinks past. On job 110's storyboard: mid-sentence host takes 22 → 8, flashes
-  1 → 0, opener one 10.6 s take. A rendered film needs its host scenes re-rendered to pick it up
+  1 → 0, opener one 10.6 s take. A rendered film needs its host scenes re-rendered to pick it up.
+  Since 2026-09-25 a host take may END mid-sentence on purpose — the shot list's hand-off below —
+  but only where the shot list chose the break (right before a named thing, a comma, an "and");
+  it still STARTS on a sentence
+- **The shot list** (`server/shotList.ts`, `cutShotsOnWords` in longformVideo, 2026-09-25). The
+  storyboard writes one picture per fixed word-count chunk, so a picture changed every 2–13 s
+  whatever was said: Hank's "a saw, a drill, and a stack of sandpaper" played under an 11 s host
+  take, "a wall full of fancy saws" sat on one still for 10 s, the film went 80 s without the host
+  at 0:35, and 147 of 172 cutaways were stills. After voicing — every word's time known, before
+  the final `assignSceneRanges` — one Sonnet call per 24 beats (`SHOT_LIST_MODEL`) returns, per
+  beat, the words each shot STARTS on and what it must show, literally ("SAY IT, SHOW IT"); a
+  spoken list gets one quick shot per item (`listCut`); a HOST beat that goes on to name things
+  hands over to them at a natural break (`hostUntil`; on the self-introduction only after the
+  name is said). `applyShotPlan` anchors those words in the beat's verbatim text (a `from` that
+  is not there is dropped, so pieces always tile the text), `settleShots` measures against the
+  word timeline and folds anything under `SHOT_MIN_SEC`/`LIST_SHOT_MIN_SEC`, gives the line back
+  to the host when its part is under `HOST_HANDOFF_MIN_SEC`, splits a picture over
+  `MAX_PICTURE_SEC` at a clause break, and makes a moving shot under `MOTION_MIN_SEC` a still.
+  Pieces carry `wordCut` (their floor is their own, so a 0.7 s list shot is not frozen to 3 s),
+  `showSubject` (the MUST SHOW line the enhancer leads with, and the still checker's fourth
+  question: `scanStillDefects(buffer, expect)` → `missing`, one re-roll) and `shotGroup`. Motion is
+  the shot list's call ("hands" when the words are about doing something) — the only way a
+  cutaway becomes video, since `parseStoryboard` allows clips only on `humanPresent`/`objectMotion`.
+  Never touches the CTA, cover, assets, splits or the cold open. Any failure keeps the storyboard's
+  cuts with a job warning. The PROPS LIST (`deriveContinuitySheet` →
+  `inputParams.continuitySheet`) and the three previous shots ride into every enhancer call, which
+  used to rewrite each scene alone. Host check-ins: the planner walks at HALF the cadence in the
+  first `HOST_EARLY_ZONE_SEC` (180 s — every ~30 s, ~60 s after), may promote a shot-list piece that
+  starts a sentence (≥ `HOST_CHECKIN_MIN_SEC`, prefers ≤ 6 s), and warns when the budget widened
+  the rhythm. Still-image zoom now travels at a steady rate (`kenBurnsMaxZoom`: 14% on a 5 s still,
+  3% on a 1 s list shot) instead of a fixed 8%
+  GUARDS the real renders forced (2026-09-26), all judged on the MEASURED cut, never the plan: a
+  host part the voice timing leaves under its floor hands over ONE PICTURE LATER instead of
+  keeping the whole line (`settleShots`); the host says ≥ `HOST_HANDOFF_MIN_WORDS` (5) first, and a
+  hyphenated word is one token, so a cut never lands inside "nine-patch"; the introduction's host
+  take starts on the sentence holding the name (`moveHostLeadIns`/`introSentenceStart`); a HOOK
+  still whole and over `HOOK_MAX_WHOLE_SEC` (8 s) after cutting is re-planned with the hand-off
+  required, up to twice — the old check read the PLAN, which on Mae's job 170 named a hand-off the
+  cut then undid, so a 15 s hook shipped; pieces are settled with a `SNAP_MARGIN_SEC` and, after
+  the final pause-snap, `foldSnappedFlashes` folds any shot under its own floor (list 0.4 s, else
+  1.2 s) into a neighbour. A host who hands over at the FIRST thing worth showing, not a later one
+  (rule 7 of `SHOT_LIST_SYSTEM`): Hank's practice opening talked 6.8 s past "Japanese woodworking
+  projects" and "cheap box-store lumber" to hand over before "a coffee can". The result is measured
+  too: a hook or intro still whole past `HOOK_MAX_WHOLE_SEC`, or any hand-off whose host part runs
+  past `HOST_PART_MAX_SEC` (5 s; the hand-off's minimum is 2 s for every host part including the
+  hook — the operator's call: 2 s floor, 5 s ceiling, the script's first named thing deciding where
+  in between; a 3 s hook floor against a 3.5 s ceiling left Mae's slow opening no room and it took
+  a whole picture back, 5.4 s. A part under the floor now BORROWS only the words it needs from the
+  next shot, which keeps its picture; the intro counts only the words after the name, `wordsAfterName`),
+  is re-planned with the hand-off at the first named thing, up to twice. The host planner walks each stretch from the last host END (not the
+  anchor), and a shot-list `hostCandidate` is a tie-break bonus, not a scoring tier — as a tier it
+  left a 104 s faceless gap
+- **Every film passes the checks BEFORE it is paid for** (2026-09-26). The rehearsal audit's rules
+  used to be checked only after a film was finished, so a live render shipped whatever they would
+  have found. Now: (a) THE VOICE SAYS EVERY WORD (`server/narrationSkips.ts`, voicing stage, right
+  after the master is transcribed): 69Labs sometimes DROPS text from a generation — Hank's job 162
+  read "…and a stack." and went on to the next sentence, twice in one film, and the plausibility
+  gate mistook it for a transcript hole. `findSkippedWords` tells them apart by the clock (a skip is
+  script words with no TIME for them; a hole is time with no words; a price whisper writes as
+  "$1.30" leaves a token or two and is neither), `repairSkippedNarration` re-voices just that
+  paragraph at its delivery pace, checks the new take, and splices it over the old read with every
+  pause kept; a paragraph that skips twice FAILS the job at voicing (`SkippedNarrationError`) before
+  anything else is paid for. Manual narration and mock mode are exempt. (b) THE PLAN
+  (`server/planGate.ts`, clip stage, after `joinBackToBackHostTakes`, before `assignHostShots`):
+  `checkPlan` is the audit's rules 1/2/6/7/8/9/11 — the audit imports it, so the two cannot
+  disagree — and `enforcePlanRules` fixes what fails one change at a time, re-checking after each:
+  a flash shot joins its neighbour, a picture over 6.5 s splits on a pause (`job.masterSilences`),
+  a stretch without the host gets the clean candidate that best halves it (whole sentences, or in
+  at a comma / out at a shot-list hand-off, never beside another host take), and past the host
+  minutes a spare check-in whose removal leaves its own stretch under 92% of the limit goes back to
+  a picture — works for any pick, 3-7 min; too little real video turns the longest stills into
+  moving shots — and when no still shows hands (Ruth's job 178 had none), a still of a THING
+  becomes "hands gently working with" it (`NOT_A_THING` keeps places and wide scenes still); the
+  host minutes are enforced at the end too (joins and CTA passes can add seconds), and a spare may
+  also be a crowded intro/outro SECTION beat (`SECTION_SPARE_GAP`, Ruth's host at 0, 5 and 13 s
+  while 2:19 went 49 s without her) but never the start, intro, a CTA, the end or a beat with
+  `submits` (its render is paid for); a picture merged into a host keeps its `wordCut`, so a
+  joined intro still reads as a hand-off. A CTA split screen or pitch picture is fixed. What cannot be fixed is a job warning,
+  never a stopped film; beats the gate moved are re-sliced from the master and demoted hosts
+  re-enhanced. (c) THE PICTURES (`scanStillDefects(buffer, expect, line)`): the one vision call now
+  also asks `messy` (a legible brand or logo, or the subject lost in clutter — rule 4) and, given the
+  line, `wrong_place` (rule 3); each gets one re-roll, like `missing`. The audit adds rule 12 (voice
+  says every word) and never overwrites a full report with a partial (`--no-*`) run. (d) NOTHING
+  MOVES ON ITS OWN: the video model animates whatever it is handed, and an ordinary object set
+  moving slides around by itself (Hank's kumiko strips crept across a split panel). Only hands at
+  work (`SHOWS_HANDS`) or a thing that moves by itself in real life (`MOVES_ON_ITS_OWN`: fire,
+  water, smoke, steam, a running machine…) may move — enforced by `safeMotion` on every shot-list
+  piece, by `settleMotion` in the gate, by the real-video top-up, and by `enforceHostSplitMix`
+  (a split's right half is person-free, so it moves only for a self-moving thing). The still
+  checker's `broken` question names impossible tools (a blade through a clamp, a saw that is not
+  touching what it cuts, a needle through a finger). (e) THE CLIPS (`server/clipGlitchScan.ts`):
+  every moving cutaway is judged as SPOT THE DIFFERENCE on its first and last frame, 640 wide and
+  stacked (Sonnet, `CLIP_GLITCH_MODEL`): the model lists what changed and whether hands are in it,
+  and the verdict is decided in code (`parseClipGlitchVerdict`) — any change in a shot with no hands
+  that is not a self-moving thing, a morph, or something moving untouched. "Does anything move
+  wrong?" on a 2x2 sheet passed the kumiko clip with Haiku AND Sonnet; the list named the strips at
+  once. On 15 of Hank's clips it flagged the kumiko panel and one chisel shaving. With hands in the
+  shot only a MORPH counts: the first real render (job 175) flagged "hands repositioned lower on the
+  paper" and "chisel angle shifted" as untouched motion and swapped good hands clips for stills. A glitch renders
+  the beat again once; a second makes it the still (`scene.motionGlitches`); a moving split panel
+  that glitches falls back to its still panel. Skipped in rehearsals
 - **B-roll prompts** — the style bible is a HOME BASE plus the places the script travels to, not
   "the ONE physical world" (that put a whole Japanese-woodworking film in one garage, a Japanese
   home drawn as a poster on its wall); the storyboard's WORLD block, the enhancer's direction
@@ -998,7 +1100,26 @@ Always 16:9. Fire-and-forget; progress persisted to the job row and polled by th
   router as `accepted: "overLimit"` on every beat; admin/manager `force` grants ONE render
   (`grantHostSpendOverride`). A refused regenerate keeps the clip the scene had. The Cost dialog
   prints spent/limit and who paid for what (see the per-beat entry). `HOST_SPEND_LIMIT=0` turns it off. RunPod is not
-  gated (billed by GPU time, retired since 2026-09-10).
+  gated (billed by GPU time, retired since 2026-09-10). The storyboard header shows "Host minutes:
+  X of Y", and a host Regenerate once they are USED (`hostSpend.reached`, not only when this one
+  render would cross) opens a warning box for every role — "Regenerate anyway" for admin/manager,
+  "Make b-roll" for all; a server `overLimit` answer opens the same box instead of a toast.
+- **A black clip is refused** (`isBlankClip`/`judgeBlankFrames` in videoAssembly, 2026-09-25). A
+  hosted film carried a HeyGen take that was black end to end on a host beat, and nothing looked.
+  Every host-lane clip is sampled twice a second at 64×36 before it is stored; ≥85% frames dark
+  (mean luma < 16) or flat (σ < 4) ⇒ `scene.blankClips++`, a job warning, and the render THROWS —
+  so the lane's own rules decide: another render within the beat's allowance and the host minutes,
+  then a check-in is made b-roll and the start/intro/CTAs/end are flagged "Host needed".
+  Assembly re-checks host clips not yet checked (`refuseBlankHostClips`, remembered on
+  `scene.clipCheckedUrl`) and stops the film naming them, for "Retry failed scenes" to follow the
+  same rules. B-roll lanes are not checked at render (a black b-roll clip would loop their
+  unbounded stall retries).
+- **Back-to-back host beats are one take** (`joinBackToBackHostTakes`, clip stage, 2026-09-25).
+  Every HeyGen render starts from the same still pose, so two host beats in a row on one photo
+  jump at the join — the CTA pitch after the book did it every time. Full-frame host beats that
+  tile the narration join into one render (same seconds, same cost) up to `HOST_JOIN_MAX_SEC`
+  (30 s), never across a CTA edge, QR/cover/asset beat or the two-angle cold open; the joined
+  narration is re-cut from the master before anything renders.
 - **Provider gate**: generation needs an _active_ `provider_configs` row. "No active
   provider configured" ⇒ re-run `scripts/seed.mjs` or set active in Admin.
 - **FFmpeg needs drawtext** or text overlays silently disable. The startup log names the

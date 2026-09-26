@@ -404,12 +404,28 @@ describe("split-screen dial", () => {
         motion: { enabled: true, share: 0.5 },
       },
     });
-    const scenes = hosts();
+    // Panels of things that move by themselves; an ordinary object animated in a person-free
+    // panel slides around on its own, so those never move (next test).
+    const scenes = Array.from({ length: 20 }, (_, i) =>
+      host(i + 1, { brollVisual: `steam rising from a kettle ${i}` })
+    );
     const r = enforceHostSplitMix(scenes, p);
     expect(r.motionSeconds / r.splitSeconds).toBeCloseTo(0.5, 1);
     // Every moving panel is on a scene that actually HAS a right panel.
     for (const s of scenes)
       if (s.splitMotion) expect(s.splitVisual).toBeTruthy();
+  });
+
+  it("never moves a panel of an ordinary object", () => {
+    const scenes = hosts(); // "beside N" — nothing that moves by itself
+    const r = enforceHostSplitMix(
+      scenes,
+      withPacing({
+        splitScreen: { enabled: true, hostShare: 20 / 35, motion: { enabled: true, share: 0.5 } },
+      })
+    );
+    expect(r.motionSeconds).toBe(0);
+    expect(scenes.every(s => !s.splitMotion)).toBe(true);
   });
 
   it("assigns no moving panel when right-panel video is switched off", () => {

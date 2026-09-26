@@ -14,8 +14,17 @@
  * 4. Clean pictures               — subject readable at a glance, no brands, no clutter.
  * 5. No text in pictures          — no readable words/numbers anywhere in a generated frame.
  * 6. Self-introduction on camera  — "I'm <host>" is always the host, full frame.
- * 7. No mid-sentence host cuts    — a host take starts and ends on a sentence unless the 15s
- *                                    ceiling or a fixed neighbour forced the cut; no flash shots.
+ * 7. Clean host switches         — a host take starts on a sentence and ends on one, or hands
+ *                                    over to a picture the shot list cut at a natural break; no
+ *                                    flash shots (a list item may be a quick cut).
+ * 8. Host often                   — no stretch without the host longer than ~40 s in the first
+ *                                    3 minutes, ~75 s after (targets 30 / 60).
+ * 9. Pictures don't linger        — a b-roll picture outside the CTA runs <= 6.5 s.
+ * 10. Say it, show it             — the picture shows the thing its line names (judged).
+ * 11. Real video                  — >= 30% of cutaway time is a moving shot (flagged motion).
+ * 12. The voice says every word   — the master is transcribed and every script paragraph found in
+ *                                    it; words with no time for them were skipped by the TTS
+ *                                    (`findSkippedWords`, the same check the pipeline repairs with).
  *
  * Rules 3-5 are judged by Claude Haiku on one frame per generated picture (a still's clip is a
  * slow zoom on that picture), rules 1/2/6/7 from the storyboard, rule 1 also from the film.
@@ -26,19 +35,17 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import ffmpegPath from "ffmpeg-static";
 import { getLongformVideoJobById } from "../../server/db";
-import {
-  introducesHost,
-  endsSentence,
-  startsSentence,
-  qrPlacementFor,
-  HOST_SENTENCE_MAX_SEC,
-  FLASH_SHOT_SEC,
-  inMarkedCta,
-} from "../../server/longformVideo";
-import { sceneHoldPlan } from "../../shared/filmTimeline";
 import { invokeClaude } from "../../server/claude";
 import { safeParseJSON } from "../../server/jsonRepair";
 import type { StoryboardScene, LongformInputParams } from "../../shared/types";
+import { checkPlan, fmt, textOf, type PlanFinding } from "../../server/planGate";
+import { parseCtaMarkers } from "../../server/longformVideo";
+import { extractSpokenScript } from "../../shared/ctaMarkers";
+import { scriptParagraphs } from "../../server/delivery";
+import { extractMonoAudio, probeUrlDurationSec } from "../../server/videoAssembly";
+import { transcribeInPieces } from "../../server/alignmentHeal";
+import { transcribeWordsFromBuffer } from "../../server/_core/voiceTranscription";
+import { findSkippedWords } from "../../server/narrationSkips";
 
 /** Sonnet, not Haiku: Haiku confused "wrong object" with "wrong place" on half its place flags
  *  (bonsai on stands "not at a show", a market table "not a store"). Offline, so latency is fine. */
@@ -47,110 +54,8 @@ const JUDGE_MODEL = "claude-sonnet-5";
 const SILENCE_MAX_SEC = 2.0;
 const FREEZE_MAX_SEC = 2.0;
 
-type Finding = { rule: number; scene?: number; detail: string };
-
-const len = (s: StoryboardScene) =>
-  Math.max(0, (s.narrationEndSec ?? 0) - (s.narrationStartSec ?? 0)) ||
-  s.audioDuration ||
-  0;
-const textOf = (s: StoryboardScene) => s.scriptText ?? s.narration ?? "";
-const fixed = (s: StoryboardScene | undefined) =>
-  !!s && (!!s.qrHero || !!s.coverHero || !!s.assetImageUrl);
-
-/** Rule 2: one token per beat of a marked CTA block. */
-function ctaToken(s: StoryboardScene): string {
-  if (s.qrHero) return "Q";
-  if (s.coverHero) return "B";
-  if (s.assetImageUrl) return "A";
-  if (s.hostPresent && s.splitVisual) return "S";
-  if (s.hostPresent) return "H";
-  return "P";
-}
-
-export function auditPlan(
-  scenes: StoryboardScene[],
-  params: LongformInputParams
-): { findings: Finding[]; stats: Record<string, unknown> } {
-  const findings: Finding[] = [];
-  const canHost = !!params.faceImageUrl && !params.brollOnly;
-
-  // 1. No automatic hold anywhere.
-  for (const s of scenes) {
-    const hold = sceneHoldPlan(s).tailHoldSec ?? 0;
-    if (hold > 0 && s.tailHoldSec == null)
-      findings.push({ rule: 1, scene: s.index, detail: `automatic ${hold}s hold` });
-  }
-
-  // 2. CTA order, per marked block.
-  const blocks = new Map<number, StoryboardScene[]>();
-  for (const s of scenes)
-    if (inMarkedCta(s)) blocks.set(s.ctaIndex!, [...(blocks.get(s.ctaIndex!) ?? []), s]);
-  const ctaPatterns: string[] = [];
-  blocks.forEach((run, idx) => {
-    const tokens = run.map(ctaToken).join("");
-    ctaPatterns.push(`block ${idx}: ${tokens}`);
-    const where = `block ${idx} (${tokens})`;
-    if (!/Q+$/.test(tokens)) findings.push({ rule: 2, detail: `${where}: does not END on the big QR` });
-    if (/Q[^Q]/.test(tokens)) findings.push({ rule: 2, detail: `${where}: big QR is not one run to the end` });
-    if (!tokens.includes("B")) findings.push({ rule: 2, detail: `${where}: no book cover` });
-    const afterBook = tokens.slice(tokens.indexOf("B") + 1).replace(/Q+$/, "");
-    if (tokens.includes("B") && canHost && !/H/.test(afterBook))
-      findings.push({ rule: 2, detail: `${where}: host does not come back after the book` });
-    if (tokens.includes("S")) findings.push({ rule: 2, detail: `${where}: split screen in the CTA` });
-    if (canHost && tokens.includes("P")) findings.push({ rule: 2, detail: `${where}: b-roll in the pitch` });
-    const places = run.map(s => qrPlacementFor(s));
-    const moves = places.filter((p, i) => i > 0 && p !== places[i - 1]).length;
-    if (moves > 1) findings.push({ rule: 2, detail: `${where}: QR moves ${moves} times` });
-  });
-  if (blocks.size === 0) findings.push({ rule: 2, detail: "no marked CTA block in the film" });
-
-  // 6. Self-introduction on camera.
-  let intros = 0;
-  for (const s of scenes) {
-    if (!introducesHost(textOf(s), params.hostName)) continue;
-    intros++;
-    if (canHost && (!s.hostPresent || s.splitVisual))
-      findings.push({ rule: 6, scene: s.index, detail: `introduction not on camera: "${textOf(s).slice(0, 70)}"` });
-  }
-
-  // 7. Whole-sentence host takes, no flash shots.
-  let midTakes = 0;
-  scenes.forEach((s, i) => {
-    if (len(s) > 0 && len(s) < FLASH_SHOT_SEC)
-      findings.push({ rule: 7, scene: s.index, detail: `flash shot ${len(s).toFixed(2)}s` });
-    if (!s.hostPresent || fixed(s)) return;
-    const prev = scenes[i - 1];
-    const next = scenes[i + 1];
-    const capped = (n: StoryboardScene | undefined) =>
-      // Same ceiling the pipeline stretched to; final alignment moves lengths a little.
-      !!n && len(s) + len(n) > HOST_SENTENCE_MAX_SEC - 0.5;
-    const edge = (n: StoryboardScene | undefined) =>
-      !n || fixed(n) || n.hostPresent || (n.cta === true) !== (s.cta === true) || n.ctaIndex !== s.ctaIndex;
-    const badStart = !startsSentence(scenes, i) && !edge(prev) && !capped(prev);
-    const badEnd = !endsSentence(textOf(s)) && !edge(next) && !capped(next);
-    if (badStart || badEnd) {
-      midTakes++;
-      findings.push({
-        rule: 7,
-        scene: s.index,
-        detail: `host take ${badStart ? "starts" : "ends"} mid-sentence: "${textOf(s).slice(0, 70)}"`,
-      });
-    }
-  });
-
-  const host = scenes.filter(s => s.hostPresent);
-  return {
-    findings,
-    stats: {
-      scenes: scenes.length,
-      hostTakes: host.length,
-      hostSec: Math.round(host.reduce((a, s) => a + len(s), 0)),
-      ctaPatterns,
-      introductions: intros,
-      midSentenceHostTakes: midTakes,
-    },
-  };
-}
+type Finding = PlanFinding;
+export const auditPlan = checkPlan;
 
 // ── rule 1 in the film ────────────────────────────────────────────────────────────────────────
 
@@ -159,15 +64,22 @@ function detect(url: string, filter: string, stream: "a" | "v"): string {
   if (stream === "v") args.push("-an", "-vf", filter);
   else args.push("-af", filter);
   args.push("-f", "null", "-");
-  return spawnSync(ffmpegPath as unknown as string, args, {
+  // A stalled download of the film hung one audit for over an hour — cap the scan. A film scan
+  // that runs out of time reports as a finding, never as a silent pass.
+  const r = spawnSync(ffmpegPath as unknown as string, args, {
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
-  }).stderr;
+    timeout: 25 * 60_000,
+  });
+  if (r.error || r.signal) return `SCAN FAILED: ${r.error?.message ?? r.signal}`;
+  return r.stderr;
 }
 
 export function auditFilm(url: string): Finding[] {
   const findings: Finding[] = [];
   const sil = detect(url, `silencedetect=noise=-45dB:d=${SILENCE_MAX_SEC}`, "a");
+  if (sil.startsWith("SCAN FAILED"))
+    findings.push({ rule: 1, detail: `film silence scan did not finish (${sil}) — rerun it` });
   for (const m of sil.matchAll(/silence_end: ([\d.]+) \| silence_duration: ([\d.]+)/g))
     findings.push({ rule: 1, detail: `${m[2]}s of silence ending at ${fmt(+m[1])}` });
   const frz = detect(url, `scale=320:-2,freezedetect=n=0.002:d=${FREEZE_MAX_SEC}`, "v");
@@ -176,8 +88,6 @@ export function auditFilm(url: string): Finding[] {
   return findings;
 }
 
-const fmt = (sec: number) =>
-  `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, "0")}`;
 
 // ── rules 3-5 on the pictures ─────────────────────────────────────────────────────────────────
 
@@ -185,8 +95,12 @@ const JUDGE_SYSTEM =
   "You review ONE b-roll frame from a YouTube video against the narration line it plays under. " +
   "Judge ONLY what is visible in the image — the narration is context for the place question, " +
   "never evidence that text or a price is on screen. " +
-  "Answer four independent questions and return ONLY this JSON: " +
-  '{"text":true|false,"brands":true|false,"cluttered":true|false,"named_place":"...","place":"ok"|"wrong"|"n/a","what":"..."}\n' +
+  "Answer five independent questions and return ONLY this JSON: " +
+  '{"text":true|false,"brands":true|false,"cluttered":true|false,"named_place":"...","place":"ok"|"wrong"|"n/a","shows":true|false|"n/a","what":"..."}\n' +
+  "shows: when a MUST SHOW thing is given, is that thing the CENTRE OF ATTENTION — the main thing " +
+  "the eye lands on (even from an unusual angle)? false when it is a different thing, absent, or " +
+  "small / at an edge / outweighed by something else that takes most of the frame; otherwise " +
+  'true. "n/a" when no MUST SHOW is given.\n' +
   "named_place: copy the PLACE the narration line names, word for word (e.g. \"Japanese sliding " +
   'doors" → "a Japanese home", "the market table" → "a market", "my porch" → "a porch"), or ' +
   '"none". Objects, materials, prices, techniques and actions are NOT places.\n' +
@@ -216,13 +130,13 @@ async function frameOf(url: string, atSec = 1): Promise<Buffer | null> {
   return r.status === 0 && r.stdout?.length ? (r.stdout as Buffer) : null;
 }
 
-type Judged = { scene: number; kind: string; text: boolean; brands: boolean; cluttered: boolean; place: string; what: string };
+type Judged = { scene: number; kind: string; text: boolean; brands: boolean; cluttered: boolean; place: string; shows: boolean | null; what: string };
 
-async function judge(buf: Buffer, narration: string): Promise<Omit<Judged, "scene" | "kind"> | null> {
+async function judge(buf: Buffer, narration: string, mustShow?: string): Promise<Omit<Judged, "scene" | "kind"> | null> {
   try {
     const r = await invokeClaude({
       systemPrompt: JUDGE_SYSTEM,
-      userMessage: `Narration line: "${narration}"\nJSON:`,
+      userMessage: `Narration line: "${narration}"\n` + (mustShow ? `MUST SHOW: "${mustShow}"\n` : "") + "JSON:",
       imageInput: { base64: buf.toString("base64"), mediaType: "image/png" },
       // Room for Sonnet's own reasoning ahead of the JSON — at 160 the answer was cut off, and a
       // truncated reply parsed as "text: true" with no reason (8 of 9 text flags in round 3).
@@ -250,6 +164,7 @@ async function judge(buf: Buffer, narration: string): Promise<Omit<Judged, "scen
         typeof p.data.place === "string"
           ? p.data.place
           : "n/a",
+      shows: mustShow ? p.data.shows !== false : null,
       what: typeof p.data.what === "string" ? p.data.what : "",
     };
   } catch {
@@ -273,7 +188,7 @@ export async function auditImages(scenes: StoryboardScene[]): Promise<{ findings
       const j = jobs[next++];
       const buf = await frameOf(j.url);
       if (!buf) continue;
-      const v = await judge(buf, textOf(j.scene));
+      const v = await judge(buf, textOf(j.scene), j.scene.showSubject);
       // A CTA picture deliberately ignores its line (a sales pitch) — no place to be right about.
       if (v && j.scene.cta) v.place = "n/a";
       if (v) judged.push({ scene: j.scene.index, kind: j.kind, ...v });
@@ -286,14 +201,32 @@ export async function auditImages(scenes: StoryboardScene[]): Promise<{ findings
     if (j.place === "wrong") findings.push({ rule: 3, scene: j.scene, detail: `${j.kind}: wrong place — ${j.what}` });
     if (j.cluttered || j.brands) findings.push({ rule: 4, scene: j.scene, detail: `${j.kind}: ${j.brands ? "brand visible" : "cluttered"} — ${j.what}` });
     if (j.text) findings.push({ rule: 5, scene: j.scene, detail: `${j.kind}: readable text — ${j.what}` });
+    if (j.shows === false) findings.push({ rule: 10, scene: j.scene, detail: `${j.kind}: does not show what is said — ${j.what}` });
   }
   return { findings, judged };
+}
+
+// ── rule 12: the voice says every word ────────────────────────────────────────────────────────
+
+export async function auditVoice(masterUrl: string, params: LongformInputParams): Promise<Finding[]> {
+  if (params.manualNarrationUrl) return [];
+  const paragraphs = scriptParagraphs(parseCtaMarkers(extractSpokenScript(params.script)).script);
+  const mono = await extractMonoAudio(masterUrl);
+  let t: Awaited<ReturnType<typeof transcribeInPieces>> = await transcribeWordsFromBuffer(mono);
+  if ("error" in t) {
+    t = await transcribeInPieces({ monoAudio: mono, durationSec: await probeUrlDurationSec(masterUrl, "mp3") });
+  }
+  if ("error" in t) return [{ rule: 12, detail: `could not transcribe the narration (${t.error})` }];
+  return findSkippedWords(paragraphs, t.words, t.duration).map(s => ({
+    rule: 12,
+    detail: `voice skipped ${s.missing.split(" ").length} word(s) at ${s.atSec.toFixed(0)}s (paragraph ${s.paragraphs.map(p => p + 1).join(", ")}): "${s.missing.slice(0, 80)}"`,
+  }));
 }
 
 // ── pass/fail ─────────────────────────────────────────────────────────────────────────────────
 
 /** Rules 3-5 are judged on AI pictures, so they pass on a rate, the others on zero findings. */
-export function verdicts(findings: Finding[], judged: Judged[] | null) {
+export function verdicts(findings: Finding[], judged: Judged[] | null, voiceChecked = true) {
   const n = judged?.length ?? 0;
   const count = (r: number) => findings.filter(f => f.rule === r).length;
   const placed = judged?.filter(j => j.place !== "n/a").length ?? 0;
@@ -309,10 +242,19 @@ export function verdicts(findings: Finding[], judged: Judged[] | null) {
     5: judged ? count(5) <= 1 : null,
     6: count(6) === 0,
     7: count(7) === 0,
+    8: count(8) === 0,
+    // A clause-less long sentence can still run long; a few are allowed.
+    9: count(9) <= 3,
+    10: judged ? rate(10, judged.filter(j => j.shows !== null).length) <= 0.1 : null,
+    11: count(11) === 0,
+    12: voiceChecked ? count(12) === 0 : null,
   } as Record<number, boolean | null>;
 }
 
-export async function auditJob(jobId: number, opts: { images?: boolean; video?: boolean } = {}) {
+export async function auditJob(
+  jobId: number,
+  opts: { images?: boolean; video?: boolean; voice?: boolean } = {}
+) {
   const job = await getLongformVideoJobById(jobId);
   if (!job) throw new Error(`job ${jobId} not found`);
   const scenes = (typeof job.storyboard === "string" ? JSON.parse(job.storyboard) : job.storyboard) as StoryboardScene[];
@@ -320,10 +262,13 @@ export async function auditJob(jobId: number, opts: { images?: boolean; video?: 
   const plan = auditPlan(scenes, params);
   const film = opts.video !== false && job.finalVideoUrl ? auditFilm(job.finalVideoUrl) : [];
   const images = opts.images !== false ? await auditImages(scenes) : null;
-  const findings = [...plan.findings, ...film, ...(images?.findings ?? [])].sort(
+  const voice =
+    opts.voice !== false && job.masterAudioUrl ? await auditVoice(job.masterAudioUrl, params) : [];
+  const findings = [...plan.findings, ...film, ...voice, ...(images?.findings ?? [])].sort(
     (a, b) => a.rule - b.rule || (a.scene ?? 0) - (b.scene ?? 0)
   );
-  const v = verdicts(findings, images?.judged ?? null);
+  const voiceChecked = opts.voice !== false && !!job.masterAudioUrl;
+  const v = verdicts(findings, images?.judged ?? null, voiceChecked);
   const report = {
     jobId,
     channel: params.channelKey,
@@ -337,15 +282,20 @@ export async function auditJob(jobId: number, opts: { images?: boolean; video?: 
   };
   const dir = path.join("scripts", "stress", "reports");
   mkdirSync(dir, { recursive: true });
-  writeFileSync(path.join(dir, `job-${jobId}.json`), JSON.stringify({ ...report, judged: images?.judged }, null, 1));
+  // A partial run (no pictures / film / voice) never overwrites the full report.
+  const partial = opts.images === false || opts.video === false || opts.voice === false;
+  writeFileSync(
+    path.join(dir, `job-${jobId}${partial ? ".partial" : ""}.json`),
+    JSON.stringify({ ...report, judged: images?.judged }, null, 1)
+  );
   return report;
 }
 
-const RULES = ["", "no pause after CTA", "CTA order", "right place", "clean pictures", "no text", "intro on camera", "whole sentences"];
+const RULES = ["", "no pause after CTA", "CTA order", "right place", "clean pictures", "no text", "intro on camera", "clean host switches", "host often", "pictures don't linger", "say it, show it", "real video", "voice says every word"];
 
 export function summarize(r: Awaited<ReturnType<typeof auditJob>>): string {
   const lines = [`job ${r.jobId} (${r.channel}) — ${r.status}${r.rehearsal ? ", rehearsal" : ""}`];
-  for (let k = 1; k <= 7; k++) {
+  for (let k = 1; k < RULES.length; k++) {
     const v = r.verdicts[k];
     const n = r.findings.filter(f => f.rule === k).length;
     lines.push(`  ${v === null ? "–" : v ? "PASS" : "FAIL"}  ${k}. ${RULES[k]}${n ? ` (${n} finding${n > 1 ? "s" : ""})` : ""}`);
@@ -360,6 +310,7 @@ if (process.argv[1]?.endsWith("audit.mts")) {
   const r = await auditJob(id, {
     images: !process.argv.includes("--no-images"),
     video: !process.argv.includes("--no-video"),
+    voice: !process.argv.includes("--no-voice"),
   });
   console.log(summarize(r));
   process.exit(0);
