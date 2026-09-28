@@ -5243,7 +5243,8 @@ export const EDIT_VIDEO_BROLL_ENHANCER_SYSTEM =
   "- Do NOT describe the camera, lens, or shot type — those are added separately.\n" +
   "- Compose for older (50–70) viewers: ONE clear hero subject — and the hero is the " +
   "TOPIC of the shot itself (the product, tool, material, task, or setting), uncluttered " +
-  "and easy to read at a glance, in a warm, familiar everyday setting.\n" +
+  "and easy to read at a glance, in a warm, familiar everyday setting. Name ONE thing: never " +
+  "\"X or Y\" — the picture model draws one thing.\n" +
   "- FIRST-PERSON POV FOR TASKS: when the narration states or clearly implies a physical " +
   "task (sprinkling, pouring, holding, planting, spreading, pruning), frame it as the " +
   "filmer's own point of view — bare hands and forearms entering " +
@@ -5368,7 +5369,8 @@ const CTA_BROLL_ENHANCER_SYSTEM =
   "- NO invented atmospheric haze: no wisps, plumes, trails, or steam rising off a surface " +
   "unless the narration is specifically about that motion — show the concrete subject instead.\n" +
   "- ONE clear hero subject — a product, tool, material, surface, or setting from the " +
-  "video's topic — uncluttered and easy to read at a glance.\n" +
+  "video's topic — uncluttered and easy to read at a glance. Name ONE thing: never \"X or Y\" " +
+  "(\"a coaster or small ornament\") — the picture model draws one thing.\n" +
   `- ${CLEAN_FRAME_RULE}\n` +
   `- ${FIGURE_OF_SPEECH_RULE}\n` +
   `- ${NO_NARRATION_TEXT_RULE}\n` +
@@ -7246,6 +7248,9 @@ function markScanWindow(
   }
 }
 
+/** The longest one picture may stay behind the big QR card (the card is the subject there). */
+export const SCAN_WINDOW_PICTURE_MAX_SEC = 40;
+
 /**
  * The scan window is ONE topic ("scan the code"), so it is ONE picture under the big card. It was
  * one picture per line: Hannah's 3-min test (job 228, 1:30-1:41) changed the picture behind the
@@ -7273,7 +7278,11 @@ export function joinScanWindow(
     const a = out[i - 1];
     const b = out[i];
     if (!kind(a) || kind(a) !== kind(b) || a.ctaIndex !== b.ctaIndex) continue;
-    if (len[i - 1] + len[i] > maxAt(a)) continue;
+    // Under the big QR the CARD is the subject, so the scan window is one picture however long
+    // it runs (up to `SCAN_WINDOW_PICTURE_MAX_SEC`): split at the quarter's limit, Dale's job 248
+    // showed two near-identical "coaster on the workbench" stills in a row behind the card.
+    const limit = kind(a) === "card" ? Math.max(maxAt(a), SCAN_WINDOW_PICTURE_MAX_SEC) : maxAt(a);
+    if (len[i - 1] + len[i] > limit) continue;
     const text = `${(a.scriptText ?? "").trim()} ${(b.scriptText ?? "").trim()}`.trim();
     const joined: StoryboardScene = {
       ...a,

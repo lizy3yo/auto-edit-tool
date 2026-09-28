@@ -489,7 +489,11 @@ Express · tRPC · Drizzle · MySQL.
   for 0.8 s; consecutive card beats of one block now join into the first one's picture on the final
   lengths (qrTail carried, within the picture limit), never the cover or another block. The BOOK COVER is one shot the same way: Ruth's 3-min test (job 233)
   had the cover line split in two, both halves still the cover, so it played twice with a jump —
-  consecutive cover beats of one block join too (never into the card)
+  consecutive cover beats of one block join too (never into the card). The scan window is not split at the quarter's limit
+  (`SCAN_WINDOW_PICTURE_MAX_SEC`, 40 s — the card is the subject): Dale's job 248 showed two
+  near-identical stills behind it. A list's last item also runs on into a NEARLY identical next
+  picture (`nearlySameSubject`: ≥85% of the shorter description's words, or "same view"), and both
+  picture writers are told to name ONE thing, never "X or Y"
 - **Stress rehearsals** (`scripts/stress/`, 2026-09-24): `run.mts` renders a script N times through
   the real `generate` route as the bootstrap admin into Video tab `--slot`, then `audit.mts`
   checks the operator's rules (no CTA pause, CTA order, right place, clean pictures, no text,

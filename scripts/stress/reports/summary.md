@@ -2390,3 +2390,87 @@ job 245 (diane_de_chambray) — completed
    - [13] scene 2 b-roll: not a phone-photo look — softly staged bathroom shelf styling
    - [13] scene 12 b-roll: not a phone-photo look — staged, polished product-style bathroom shot
 ```
+
+### granny_mae run 1 — 18 min
+```
+job 247 (granny_mae) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo
+  PASS  14. no cut inside a word
+  stats: {"scenes":32,"hostTakes":10,"hostSec":64,"ctaPatterns":["block 0: HBHQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":5,"handOffs":6,"longestFacelessEarlySec":28,"longestFacelessLateSec":17,"longestPictureSec":15,"motionSharePct":21,"picturesJudged":23}
+```
+
+### hank_hardwood run 1 — 22 min
+```
+job 246 (hank_hardwood) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures (1 finding)
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo (1 finding)
+  PASS  14. no cut inside a word
+  stats: {"scenes":30,"hostTakes":10,"hostSec":63,"ctaPatterns":["block 0: HBHQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":6,"handOffs":7,"longestFacelessEarlySec":29,"longestFacelessLateSec":0,"longestPictureSec":15.7,"motionSharePct":23,"picturesJudged":21}
+   - [4] scene 17 b-roll: brand visible — clean staged workshop lighting/composition
+   - [13] scene 17 b-roll: not a phone-photo look — clean staged workshop lighting/composition
+```
+
+### frederick_barnes run 1 — 18 min
+```
+job 249 (frederick_barnes) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (1 finding)
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo
+  PASS  14. no cut inside a word
+  stats: {"scenes":36,"hostTakes":10,"hostSec":58,"ctaPatterns":["block 0: HBHQ"],"introductions":2,"midSentenceHostTakes":0,"listCuts":3,"handOffs":6,"longestFacelessEarlySec":29,"longestFacelessLateSec":10,"longestPictureSec":10.4,"motionSharePct":16,"picturesJudged":28}
+   - [10] scene 7 split-panel: does not show what is said — host not visible, only pot on stove
+```
+
+### dale_oakfield run 1 — 21 min
+```
+job 248 (dale_oakfield) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (1 finding)
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo
+  PASS  14. no cut inside a word
+  stats: {"scenes":41,"hostTakes":12,"hostSec":76,"ctaPatterns":["block 0: HBHQQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":12,"handOffs":8,"longestFacelessEarlySec":32,"longestFacelessLateSec":15,"longestPictureSec":13.9,"motionSharePct":22,"picturesJudged":30}
+   - [10] scene 10 split-panel: does not show what is said — no hands sorting, just static wood pieces
+```

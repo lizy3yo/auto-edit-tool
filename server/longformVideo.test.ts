@@ -10504,13 +10504,9 @@ describe("joinScanWindow — one picture under the big QR", () => {
     const cover = window();
     cover[2].coverHero = true;
     expect(joinScanWindow(cover, s => s.audioDuration ?? 0, () => 15).scenes).toHaveLength(5);
+    // The quarter's limit does not split the scan window (the card is the subject there).
     const tight = joinScanWindow(window(), s => s.audioDuration ?? 0, () => 9);
-    expect(tight.scenes.map(s => s.scriptText)).toEqual([
-      "It's the year we went without.",
-      "Now go ahead and grab your phone.",
-      "Or look just below this video. I'll wait right here.",
-      "Now the winner.",
-    ]);
+    expect(tight.scenes).toHaveLength(3);
   });
 });
 
@@ -10588,5 +10584,14 @@ describe("titleMatcher — a word the title repeats counts once (Diane, job 245)
     );
     expect(m("None of this is secret. It is ordinary French habit that nobody bothers to write down, so I did.")).toBe(false);
     expect(m("A digital book of mine, called The French Way.")).toBe(true);
+  });
+});
+
+describe("joinScanWindow — the QR part is one picture however long (Dale, job 248)", () => {
+  it("does not split the scan window at the quarter's limit", () => {
+    const card = (i: number, sec: number) =>
+      ({ index: i, scriptText: `line ${i}`, qrHero: true, cta: true, ctaIndex: 0, audioDuration: sec }) as StoryboardScene;
+    const r = joinScanWindow([card(1, 7.2), card(2, 9.2)], s => s.audioDuration ?? 0, () => 15);
+    expect(r.scenes).toHaveLength(1);
   });
 });

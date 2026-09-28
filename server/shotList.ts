@@ -1100,6 +1100,23 @@ export function pullListLeadIns(
  * `foldSnappedFlashes`. Pure — unit-tested.
  */
 /** Two shot descriptions of the same thing (case, punctuation and spacing aside). Pure. */
+/**
+ * Two descriptions of nearly the same picture: nearly every meaningful word of the shorter one is
+ * in the longer one (≥ 85%, 4+ words), or it says outright "same view/shot/picture". Pure.
+ */
+export const nearlySameSubject = (a: string, b: string): boolean => {
+  if (/\bsame (?:view|shot|picture|angle|frame)\b/i.test(b)) return true;
+  const stop = new Set(["a", "an", "the", "of", "in", "on", "at", "with", "and", "its", "it", "to", "by", "same", "view"]);
+  const words = (t: string) =>
+    new Set(t.toLowerCase().replace(/[^a-z0-9]+/g, " ").split(" ").filter(w => w && !stop.has(w)));
+  const [x, y] = [words(a), words(b)];
+  const [small, big] = x.size <= y.size ? [x, y] : [y, x];
+  if (small.size < 4) return false;
+  let hit = 0;
+  small.forEach(w => big.has(w) && hit++);
+  return hit / small.size >= 0.85;
+};
+
 export const sameSubject = (a: string, b: string): boolean => {
   const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   return !!norm(a) && norm(a) === norm(b);
@@ -1135,13 +1152,17 @@ export function joinSameContext(
     // A list's last item and a line right after it that shows the SAME thing are one picture —
     // the list keeps its pace, the picture just stays (Dale's 3-min test, job 230: "furniture on
     // Marketplace" then the identical driveway picture again, 1.8 s + 3.9 s).
+    // NEARLY the same wording counts too: Dale's job 248 had "The honey-stained bookcase standing
+    // alone in the concrete driveway" then "The honey-stained bookcase standing alone in the
+    // driveway, same view" — one word apart, so the exact test missed it.
     const listRunsOn =
       !!a.listCut &&
       !b.listCut &&
       joinable({ ...a, listCut: undefined }) &&
       joinable(b) &&
       !!a.showSubject &&
-      sameSubject(a.showSubject, b.showSubject ?? "");
+      (sameSubject(a.showSubject, b.showSubject ?? "") ||
+        nearlySameSubject(a.showSubject, b.showSubject ?? ""));
     if (!listRunsOn && (!same || !joinable(a) || !joinable(b))) continue;
     const limit = movingPicture(a) ? Math.min(maxAt(a), MOVING_PICTURE_MAX_SEC) : maxAt(a);
     if (len[i - 1] + len[i] > limit) {

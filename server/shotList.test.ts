@@ -952,3 +952,28 @@ describe("angles of one topic never repeat or stack (Scarlett, job 244)", () => 
     expect(views.every(v => (v!.match(/close-up/g) ?? []).length <= 1)).toBe(true);
   });
 });
+
+describe("a list's last picture runs on into a NEARLY identical one (Dale, job 248)", () => {
+  it("joins 'the bookcase … in the concrete driveway' and '… in the driveway, same view'", async () => {
+    const { nearlySameSubject } = await import("./shotList");
+    expect(
+      nearlySameSubject(
+        "The honey-stained bookcase standing alone in the concrete driveway",
+        "The honey-stained bookcase standing alone in the driveway, same view"
+      )
+    ).toBe(true);
+    expect(nearlySameSubject("a round wooden coaster on the bench", "a stack of coasters in a basket")).toBe(false);
+    const item = (i: number, show: string, sec: number, list = true) =>
+      scene(i, `line ${i}`, { wordCut: true, showSubject: show, audioDuration: sec, listCut: list || undefined });
+    const r = joinSameContext(
+      [
+        item(1, "The pale maple engraved board displayed flat on the workbench", 1.8),
+        item(2, "The honey-stained bookcase standing alone in the concrete driveway", 1.8),
+        item(3, "The honey-stained bookcase standing alone in the driveway, same view", 3.9, false),
+      ],
+      s => s.audioDuration ?? 0,
+      () => 10
+    );
+    expect(r.scenes).toHaveLength(2);
+  });
+});
