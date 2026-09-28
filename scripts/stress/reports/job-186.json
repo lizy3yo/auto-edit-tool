@@ -1,0 +1,553 @@
+{
+ "jobId": 186,
+ "channel": "hank_hardwood",
+ "title": "10 Japanese Woodworking Projects From Cheap Lumber, Ranked by What They Paid",
+ "status": "completed",
+ "rehearsal": true,
+ "finalVideoUrl": "https://pub-fd5853f50f47422f827867dae374bcf2.r2.dev/longform/186/final-v190OnAM.mp4",
+ "verdicts": {
+  "1": true,
+  "2": true,
+  "3": true,
+  "4": true,
+  "5": true,
+  "6": true,
+  "7": true,
+  "8": true,
+  "9": true,
+  "10": true,
+  "11": true,
+  "12": true
+ },
+ "stats": {
+  "scenes": 56,
+  "hostTakes": 11,
+  "hostSec": 60,
+  "ctaPatterns": [
+   "block 0: HBHQQQ"
+  ],
+  "introductions": 1,
+  "midSentenceHostTakes": 0,
+  "listCuts": 6,
+  "handOffs": 8,
+  "longestFacelessEarlySec": 31,
+  "longestFacelessLateSec": 0,
+  "longestPictureSec": 4,
+  "motionSharePct": 35,
+  "picturesJudged": 50
+ },
+ "findings": [
+  {
+   "rule": 10,
+   "scene": 19,
+   "detail": "split-panel: does not show what is said — no hands visible assembling the panel"
+  },
+  {
+   "rule": 10,
+   "scene": 49,
+   "detail": "split-panel: does not show what is said — no hands visible finishing the piece"
+  }
+ ],
+ "judged": [
+  {
+   "scene": 2,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 3,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 5,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 6,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 7,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 8,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 9,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 10,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 11,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 12,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 13,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 14,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 15,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 16,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 17,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 18,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 19,
+   "kind": "split-panel",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": false,
+   "what": "no hands visible assembling the panel"
+  },
+  {
+   "scene": 20,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 21,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 22,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 26,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": null,
+   "what": "no QR code or screen visible"
+  },
+  {
+   "scene": 27,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": null,
+   "what": ""
+  },
+  {
+   "scene": 28,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": null,
+   "what": ""
+  },
+  {
+   "scene": 29,
+   "kind": "split-panel",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 30,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 31,
+   "kind": "split-panel",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 32,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 33,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 34,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 35,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 36,
+   "kind": "split-panel",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 37,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 38,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 39,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 40,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 41,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 42,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 43,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 44,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 45,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 46,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 47,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 48,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 49,
+   "kind": "split-panel",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": false,
+   "what": "no hands visible finishing the piece"
+  },
+  {
+   "scene": 50,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 51,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 52,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 53,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 54,
+   "kind": "split-panel",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 55,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  }
+ ]
+}

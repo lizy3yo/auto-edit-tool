@@ -165,6 +165,9 @@ import {
   sanitizeSplitLayout,
   hostShotCounts,
   planHostMinutes,
+  joinScanWindow,
+  voiceRunWithRetries,
+  isOperatorLabelTitle,
 } from "./longformVideo";
 import { ENV } from "./_core/env";
 import { getBookNameTokens } from "./ctaDetector";
@@ -4595,6 +4598,39 @@ describe("coalesceShortScenes", () => {
     expect(out[0].audioDuration).toBeUndefined();
   });
 
+  it("never folds a sentence's tail across a marked CTA edge", () => {
+    // Hannah's job 193: the marker split "…a dollar | and thirty cents an hour. | Let me stop
+    // here…", and the 5-word tail folded forward into the (shorter) CTA host take.
+    const scenes = [
+      mk(1, { audioDuration: 7.5, scriptText: "it paid me about a dollar" }),
+      mk(2, { audioDuration: 1.8, scriptText: "and thirty cents an hour." }),
+      mk(3, {
+        audioDuration: 4,
+        scriptText: "Let me stop here a minute.",
+        hostPresent: true,
+        cta: true,
+        ctaIndex: 0,
+      }),
+    ];
+    const out = coalesceShortScenes(scenes);
+    const pitch = out.find(s => s.cta)!;
+    expect(pitch.scriptText).toBe("Let me stop here a minute.");
+    expect(out.filter(s => !s.cta).map(s => s.scriptText).join(" ")).toBe(
+      "it paid me about a dollar and thirty cents an hour."
+    );
+  });
+
+  it("still folds across an unmarked (heuristic) CTA flag", () => {
+    const scenes = [
+      mk(1, { audioDuration: 7.5 }),
+      mk(2, { audioDuration: 1.8 }),
+      mk(3, { audioDuration: 4, hostPresent: true, cta: true }),
+    ];
+    const out = coalesceShortScenes(scenes);
+    expect(out).toHaveLength(2);
+    expect(out[1].scriptText).toBe("text 2 text 3");
+  });
+
   it("prefers the shorter neighbor", () => {
     const scenes = [
       mk(1, { audioDuration: 5 }),
@@ -5133,7 +5169,10 @@ describe("introducesHost / markHostIntroductions", () => {
     expect(introducesHost("My granny taught me this.", "Granny Mae")).toBe(
       false
     );
-    expect(introducesHost("I'm Hank.", undefined)).toBe(false);
+    // With no host name at all, an "I'm <Name>" in the opening IS the introduction (the no-name
+    // backstop — Diane's channel, job 217, had no name and her intro played over a picture).
+    expect(introducesHost("I'm Hank.", undefined)).toBe(true);
+    expect(introducesHost("I'm going to cut it now.", undefined)).toBe(false);
   });
 
   it("puts the introduction on camera, full frame, and flags it protected", () => {
@@ -6345,20 +6384,26 @@ describe("no inert lane: clips only where something actually moves", () => {
     // cutaways. The no-subject constant is unchanged (nothing to stage without a subject).
     const look = amateurIphoneLook("pouring hydrogen peroxide on your lawn");
     expect(look).not.toContain("real products in use");
-    expect(look).toContain("the frame contains only what this shot describes");
+    expect(look).toContain("nothing the shot does not describe stands out");
     expect(AMATEUR_IPHONE_LOOK).not.toContain("real products in use");
   });
 
-  it("asks for a tidy background, not clutter, and sets the shot where it says", () => {
+  it("asks for a person's own phone photo, not clutter, and sets the shot where it says", () => {
     // 2026-09-23: "natural everyday clutter" filled the frame with branded shop-vacs and bins, and
     // "the setting where <subject> really happens" put a Japanese home inside the garage.
+    // 2026-09-27: a person's snapshot, not a catalogue shot — casual framing, the room's own light,
+    // a used place whose props change from shot to shot; still no brands.
     for (const look of [
       AMATEUR_IPHONE_LOOK,
       amateurIphoneLook("Japanese woodworking projects"),
     ]) {
       expect(look).not.toContain("everyday clutter");
-      expect(look).toContain("the hero subject fills most of the frame");
-      expect(look).toContain("no branded products, logos, or unrelated");
+      expect(look).toContain("an ordinary, unremarkable photo someone took on their phone");
+      expect(look).toContain("a little off-centre");
+      // v2: plain dull light and nothing decorative — the lamp/golden-glow look read as AI.
+      expect(look).toContain("no glowing lamps, candles or fire unless the shot names them");
+      expect(look).toContain("no decorative props");
+      expect(look).toContain("no branded products or logos");
       expect(look).toContain("the real, unstaged place this shot is about");
     }
     expect(amateurIphoneLook("Japanese woodworking projects")).toContain(
@@ -10250,6 +10295,18 @@ describe("joinBackToBackHostTakes", () => {
     const gap = joinBackToBackHostTakes([host(1, 0, 5), host(2, 5.5, 9)]);
     expect(gap.joins).toBe(0);
   });
+
+  it("keeps the shot-list hand-off of the take it ends on (the intro handing over after the name)", () => {
+    // Mae's job 180: the hook joined onto "I'm Granny Mae," and dropped its `wordCut`, so the
+    // plan gate read the designed hand-off after the name as a take ending mid-sentence.
+    const { scenes, joins } = joinBackToBackHostTakes([
+      host(1, 0, 8),
+      host(2, 8, 10, { scriptText: "I'm Granny Mae,", wordCut: true, hostIntro: true }),
+    ]);
+    expect(joins).toBe(1);
+    expect(scenes[0].wordCut).toBe(true);
+    expect(scenes[0].hostIntro).toBe(true);
+  });
 });
 
 describe("shot-list pieces keep their own length on screen", () => {
@@ -10310,7 +10367,7 @@ describe("moveHostLeadIns", () => {
 });
 
 describe("hero framing", () => {
-  it("frames a named thing close and centred instead of the rotating camera angle", () => {
+  it("frames a named thing close, casually rather than dead centre, instead of the rotating camera angle", () => {
     const named = {
       index: 1,
       visualPrompt: "a Japanese pull saw against a plain workshop wall",
@@ -10349,5 +10406,187 @@ describe("the self-introduction starts on the name", () => {
 
   it("leaves an introduction that already opens its take", () => {
     expect(introSentenceStart("I'm Hank Hardwood, and here we go.", "Hank Hardwood")).toBe(0);
+  });
+});
+
+describe("the self-introduction with no host name on the channel", () => {
+  // Diane De Chambray, job 217: the channel had no host name, so "I'm Diane" played over a picture.
+  it("uses the channel's display name when the host name is blank", async () => {
+    const { resolveHostName } = await import("./db");
+    expect(resolveHostName({ hostName: null, displayName: "Diane De Chambray" })).toBe("Diane De Chambray");
+    expect(resolveHostName({ hostName: " Granny Ruth ", displayName: "Quilting With Granny Ruth" })).toBe("Granny Ruth");
+    expect(resolveHostName({ hostName: "", displayName: "" })).toBeUndefined();
+    expect(introducesHost("I'm Diane, and this channel is for women over sixty.", "Diane De Chambray")).toBe(true);
+  });
+
+  it("with no name at all, takes the first 'I'm <Name>' in the opening — never a non-name or a late line", () => {
+    const opening = "Here's something that makes no sense. I'm Not sure you'll agree. I'm Diane, and this channel is for you.";
+    expect(introducesHost(opening, undefined)).toBe(true);
+    const spans = (introducesHost as any) && opening.indexOf("I'm Diane");
+    expect(spans).toBeGreaterThan(0);
+    const late = `${"A long stretch of script with no introduction in it at all. ".repeat(40)}I'm Sure this line is late.`;
+    expect(introducesHost(late, undefined)).toBe(false);
+    expect(introducesHost("I'm Not a name, I'm Sorry.", undefined)).toBe(false);
+  });
+});
+
+describe("handListsToPictures", () => {
+  const beat = (index: number, text: string, extra: Partial<StoryboardScene> = {}): StoryboardScene =>
+    ({ index, scriptText: text, narration: text, visualPrompt: "host", hostPresent: true, ...extra }) as StoryboardScene;
+  it("turns a host line that is just a list into pictures, even in the cold open (Lance, job 218)", async () => {
+    const { handListsToPictures } = await import("./longformVideo");
+    const scenes = [
+      beat(1, "Somewhere in your house there's probably a kit.", { hostOpener: true }),
+      beat(2, "A bin in the hall closet, a bag in the garage, maybe a box under the bed.", { hostOpener: true, hostProtected: true }),
+      beat(3, "I'm Lance Kavanaugh, and this is for anybody who has a kit.", { hostIntro: true }),
+      beat(4, "Subscribe, and I'll see you next time."),
+    ];
+    expect(handListsToPictures(scenes, "Lance Kavanaugh")).toEqual([2]);
+    expect(scenes[0].hostPresent).toBe(true); // the first line stays on the host
+    expect(scenes[1].hostPresent).toBe(false);
+    expect(scenes[1].hostOpener).toBeUndefined();
+    expect(scenes[2].hostPresent).toBe(true); // the self-introduction stays
+  });
+  it("never moves the first line, the intro, a CTA, the goodbye, or a list after a picture", async () => {
+    const { handListsToPictures } = await import("./longformVideo");
+    const list = "a saw, a drill, and a stack of sandpaper.";
+    const scenes = [
+      beat(1, list),
+      beat(2, "I'm Hank, " + list),
+      beat(3, list, { cta: true }),
+      beat(4, "Plain words here.", { hostPresent: false }),
+      beat(5, list),
+      beat(6, list),
+    ];
+    expect(handListsToPictures(scenes, "Hank Hardwood")).toEqual([]);
+  });
+});
+
+describe("joinScanWindow — one picture under the big QR", () => {
+  // Hannah's 3-min test (job 228, 1:30-1:41): three pictures in 10 s, the last 0.8 s.
+  const card = (i: number, text: string, sec: number, extra: Partial<StoryboardScene> = {}) =>
+    ({
+      index: i,
+      scriptText: text,
+      qrHero: true,
+      cta: true,
+      ctaIndex: 0,
+      stillImage: true,
+      visualPrompt: `picture ${i}`,
+      audioDuration: sec,
+      ...extra,
+    }) as StoryboardScene;
+  const window = () => [
+    { index: 1, scriptText: "It's the year we went without.", hostPresent: true, cta: true, ctaIndex: 0, audioDuration: 10 } as StoryboardScene,
+    card(2, "Now go ahead and grab your phone.", 5.7),
+    card(3, "Or look just below this video.", 3.6),
+    card(4, "I'll wait right here.", 0.8, { qrTail: true }),
+    { index: 5, scriptText: "Now the winner.", hostPresent: true, audioDuration: 8 } as StoryboardScene,
+  ];
+
+  it("shows the whole scan window as ONE picture, keeping the release line's anchor", () => {
+    const r = joinScanWindow(window(), s => s.audioDuration ?? 0, () => 15);
+    expect(r.changed).toBe(true);
+    expect(r.scenes).toHaveLength(3);
+    expect(r.scenes[1].visualPrompt).toBe("picture 2");
+    expect(r.scenes[1].scriptText).toBe(
+      "Now go ahead and grab your phone. Or look just below this video. I'll wait right here."
+    );
+    expect(r.scenes[1].qrTail).toBe(true);
+    expect(r.scenes[1].qrHero).toBe(true);
+    expect(r.scenes.map(s => s.index)).toEqual([1, 2, 3]);
+  });
+
+  it("never joins the cover, another CTA block, or past the picture limit", () => {
+    const two = window();
+    two[3].ctaIndex = 1;
+    expect(joinScanWindow(two, s => s.audioDuration ?? 0, () => 15).scenes).toHaveLength(4);
+    const cover = window();
+    cover[2].coverHero = true;
+    expect(joinScanWindow(cover, s => s.audioDuration ?? 0, () => 15).scenes).toHaveLength(5);
+    const tight = joinScanWindow(window(), s => s.audioDuration ?? 0, () => 9);
+    expect(tight.scenes.map(s => s.scriptText)).toEqual([
+      "It's the year we went without.",
+      "Now go ahead and grab your phone.",
+      "Or look just below this video. I'll wait right here.",
+      "Now the winner.",
+    ]);
+  });
+});
+
+describe("voiceRunWithRetries — one flaky narration run is voiced again, not the whole read", () => {
+  it("tries a failed run again and keeps going", async () => {
+    let calls = 0;
+    const url = await voiceRunWithRetries(
+      async () => {
+        if (++calls < 3) throw new Error("This job failed to complete. Please try again.");
+        return "run.mp3";
+      },
+      { waits: [0, 0] }
+    );
+    expect([url, calls]).toEqual(["run.mp3", 3]);
+  });
+  it("gives up after its tries, and at once on a final error", async () => {
+    let calls = 0;
+    await expect(
+      voiceRunWithRetries(async () => {
+        calls++;
+        throw new Error("down");
+      }, { waits: [0, 0] })
+    ).rejects.toThrow("down");
+    expect(calls).toBe(3);
+    calls = 0;
+    await expect(
+      voiceRunWithRetries(
+        async () => {
+          calls++;
+          throw new Error("voice not found");
+        },
+        { waits: [0, 0], final: () => true }
+      )
+    ).rejects.toThrow("voice not found");
+    expect(calls).toBe(1);
+  });
+});
+
+describe("joinScanWindow — the book cover is one shot too", () => {
+  it("joins a cover line split in two into one cover (Ruth, job 233)", () => {
+    const beat = (i: number, text: string, extra: Partial<StoryboardScene>) =>
+      ({ index: i, scriptText: text, cta: true, ctaIndex: 0, audioDuration: 5, ...extra }) as StoryboardScene;
+    const scenes = [
+      beat(1, "Quick stop.", { hostPresent: true }),
+      beat(2, "Everything I've learned is gathered up in my book,", { coverHero: true, stillImage: true }),
+      beat(3, "101 Lessons From Grandma's Sewing Chair.", { coverHero: true, stillImage: true }),
+      beat(4, "That's a hundred and one of them.", { hostPresent: true }),
+    ];
+    const r = joinScanWindow(scenes, s => s.audioDuration ?? 0, () => 15);
+    expect(r.scenes).toHaveLength(3);
+    expect(r.scenes[1].coverHero).toBe(true);
+    expect(r.scenes[1].scriptText).toBe(
+      "Everything I've learned is gathered up in my book, 101 Lessons From Grandma's Sewing Chair."
+    );
+    // A cover never joins the scan window's card.
+    const mixed = [scenes[1], { ...scenes[2], coverHero: undefined, qrHero: true } as StoryboardScene];
+    expect(joinScanWindow(mixed, s => s.audioDuration ?? 0, () => 15).scenes).toHaveLength(2);
+  });
+});
+
+describe("isOperatorLabelTitle — a run label is not the video's subject", () => {
+  it("catches '3min', 'v3', 'take 2' style labels (Ruth, job 239)", () => {
+    const t = (raw: string) => isOperatorLabelTitle(raw, raw.toLowerCase());
+    expect(t("Ruth 3min v3")).toBe(true);
+    expect(t("Scarlett 3min one-topic-one-shot")).toBe(true);
+    expect(t("Norbert take 2")).toBe(true);
+    expect(t("Ten Scrap Quilting Projects That Actually Sell")).toBe(false);
+  });
+});
+
+describe("titleMatcher — a word the title repeats counts once (Diane, job 245)", () => {
+  it("does not take 'ordinary French habit' for naming 'The French Way: … The French Use …'", () => {
+    const m = titleMatcher(
+      "The French Way: 101 Style Hair and Makeup Secrets The French Use To Look 20 Years Younger"
+    );
+    expect(m("None of this is secret. It is ordinary French habit that nobody bothers to write down, so I did.")).toBe(false);
+    expect(m("A digital book of mine, called The French Way.")).toBe(true);
   });
 });

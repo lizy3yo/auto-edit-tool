@@ -1,0 +1,263 @@
+{
+ "jobId": 243,
+ "channel": "norbert_daniels",
+ "title": "Norbert 3min v5",
+ "status": "completed",
+ "rehearsal": false,
+ "finalVideoUrl": "https://pub-fd5853f50f47422f827867dae374bcf2.r2.dev/longform/243/final-TG81VwZk.mp4",
+ "verdicts": {
+  "1": true,
+  "2": false,
+  "3": true,
+  "4": true,
+  "5": true,
+  "6": true,
+  "7": true,
+  "8": true,
+  "9": true,
+  "10": true,
+  "11": true,
+  "12": true,
+  "13": true,
+  "14": true
+ },
+ "stats": {
+  "scenes": 27,
+  "hostTakes": 10,
+  "hostSec": 55,
+  "ctaPatterns": [
+   "block 0: HBQQQ"
+  ],
+  "introductions": 2,
+  "midSentenceHostTakes": 0,
+  "listCuts": 2,
+  "handOffs": 7,
+  "longestFacelessEarlySec": 39,
+  "longestFacelessLateSec": 0,
+  "longestPictureSec": 14.3,
+  "motionSharePct": 11,
+  "picturesJudged": 19
+ },
+ "findings": [
+  {
+   "rule": 2,
+   "detail": "block 0 (HBQQQ): host does not come back after the book"
+  },
+  {
+   "rule": 10,
+   "scene": 10,
+   "detail": "b-roll: does not show what is said — close-up, not shown from further back with whole place"
+  }
+ ],
+ "judged": [
+  {
+   "scene": 2,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 3,
+   "kind": "split-panel",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 4,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 5,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 7,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 8,
+   "kind": "split-panel",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 9,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 10,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": false,
+   "what": "close-up, not shown from further back with whole place"
+  },
+  {
+   "scene": 11,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 12,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 15,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": null,
+   "what": ""
+  },
+  {
+   "scene": 16,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": null,
+   "what": "Image shows door strike plate, unrelated to phone/QR narration"
+  },
+  {
+   "scene": 17,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": null,
+   "what": ""
+  },
+  {
+   "scene": 19,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 20,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 21,
+   "kind": "split-panel",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 22,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 24,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 25,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  }
+ ]
+}

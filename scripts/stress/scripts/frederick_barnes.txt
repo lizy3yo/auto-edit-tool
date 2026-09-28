@@ -1,0 +1,109 @@
+There's a smoke alarm on your hallway ceiling right now, and there's a decent chance it's the wrong one for the room it's sitting in. It isn't broken. It isn't dead. Push the button tonight and it'll shriek at you like it's ready for anything. It just happens to be slow at the one kind of fire that likes to start while the house is asleep.
+
+I'm Frederick Barnes, and this one's for whoever in the house is responsible for everybody else in it. Tonight we're going shopping. By the end of this you'll know the five things printed on the box that decide when an alarm actually goes off, which kind is already hanging over your head, and which ones I'd be taking down this week.
+
+Start with why that wall of white boxes at the hardware store is so confusing, because it isn't an accident. Fires don't all behave the same way, and the two kinds pull an alarm in opposite directions.
+
+One is the fast one. Grease catches on the stove, a candle tips into a curtain, and there's open flame in seconds. Plenty of heat, not much smoke at the start. That fire announces itself, and honestly, if you're standing there awake, you don't need a machine to tell you about it.
+
+The other one is the slow one, and that's the one worth building your whole house around. A cord under a rug getting pinched a little tighter every year. A cigarette down in the cushions of the couch. A space heater quietly cooking the side of a mattress at 2 in the morning. Nothing catches. It smolders. It puts out thick, cool, greasy smoke for a long stretch before there's a single flame in the room, and all of that smoke is already moving down the hallway while everyone in the house is asleep with the lights off.
+
+Now, one thing has changed about that, and it's the part people underestimate. The furniture in your grandmother's living room was wood, cotton, and horsehair. What's in yours is foam and plastic and glue. Once that stuff does catch, a bedroom goes from smoking to fully involved in about 3 minutes. People still plan around the old number without knowing it. They think they've got time to find shoes and get down the stairs and look for the cat.
+
+So the alarm's real job was never the flame. Anybody awake catches the flame. Its job is catching the slow part, the smoke that's building while nobody's there to smell it. Every single thing in the rest of this video comes back to that one sentence.
+
+Which brings us to the first thing on the label, and it's the one that decides the most.
+
+Smoke alarms come in two types, and the box will tell you which one you're holding if you know the word to look for. The first is ionization. Inside there's a tiny sealed chamber with a little bit of radioactive material in it, something called americium, and it keeps a small electrical current running through the air inside that chamber. When the invisible particles from a flaming fire drift in, they break that current, and the horn goes off. It's quick on open flame. It's the older technology, and it's what's in most of the cheap multipacks.
+
+The second is photoelectric. There's a small light beam inside pointed away from a sensor. Clean air, the beam passes by and nothing happens. But that thick smoke off a smoldering cord is made of big, greasy particles, and when they drift into that chamber they scatter the light sideways into the sensor. That's what trips it.
+
+Line those two up against the two fires I just described, and the whole argument sorts itself out. On the fast flaming fire, ionization is usually a little quicker, and by "a little" I mean the room already has flame in it either way. On the slow smoldering fire, the one filling the hallway at 3 in the morning, photoelectric sees it substantially earlier. Not a few seconds earlier. Earlier in a way that decides whether anybody wakes up on their own.
+
+I'm not going to pretend there's some official survey of every firehouse in America. There isn't. What there is, is a position the fire service has stated out loud for years, and a very consistent answer when you ask people who do this work what's on their own bedroom ceilings. Photoelectric, or dual sensor, which is both technologies in one housing.
+
+So here's your first job, and it takes about 90 seconds. Get a stepladder, take one alarm off the ceiling, turn it over, and read the label. If it says photoelectric, you're in good shape. If it carries a notice about radioactive material, that's the ionization type, and I'd plan on replacing it. If it says both, that's dual sensor, and that's fine too. Do the hallway one first. That's the one covering the bedrooms.
+
+And there's a second reason this choice matters that has nothing to do with smoke at all. It's the reason perfectly good alarms end up face down in a kitchen drawer with the battery pulled out. I'll get to it, because it's the whole reason the fifth thing on this label exists.
+
+===START CTA(Prevent The Burning)===
+None of this started with me. It's the answer marshals and inspectors have been giving for years, and I collected it into one book instead of leaving it scattered across a hundred pamphlets nobody reads. It's called Prevent The Burning, it's a digital download, and it's 101 numbered lessons across 12 chapters. Every lesson opens on a photo of the actual hazard and ends the same four ways. The warning signs, the fix, when to call an electrician, and what it prevents. Chapter 9 is tonight's chapter. Detectors, where they go, ionization against photoelectric, and when to retire one. There's a code on your screen. Lift your phone, point it like you're taking a picture of the screen, and wait for the bar to slide in along the top. Tap that bar and the book opens. The first line under the video goes to the same place. It'll still be sitting down there when this video is over, so there's no reason to move right now. Second thing on the label.
+===END CTA===
+
+Power. This is where most houses lose the whole argument, because the best sensor in the world does nothing sitting in a drawer.
+
+The old design takes a 9-volt battery. That battery dies roughly once a year, and it never dies at a civilized hour. It starts chirping at 4 in the morning, somebody stands on the bed, yanks it out, and swears they'll pick up a new one at the store. Two weeks go by. Then a year. That alarm is now a plastic disc glued to the ceiling doing absolutely nothing, and the people underneath it still feel protected because they can see it up there.
+
+What you want instead is a sealed 10-year unit. The lithium battery is built into the housing and there's no door to open. No chirp at 4 in the morning, nothing to borrow for the TV remote, nothing to pull. It runs for 10 years and then the entire alarm gets thrown out, sensor and all, which is exactly what should happen anyway.
+
+If your house is wired for alarms, with a cable running into the back of the unit, you replace hardwired with hardwired and you make sure it takes a backup battery for when the power goes out. If the plug on the new unit doesn't match the connector hanging out of your ceiling, don't start cutting into it. Leave that one for a licensed electrician. It's a short job for somebody who does it every week, and it's behind the drywall, which is where your half of this stops.
+
+Third thing on the label, and in a two-story house this is the biggest single upgrade you can make.
+
+Interconnection. It means when one alarm goes off, every alarm in the house goes off with it.
+
+Think about how a house is actually laid out at night. The fire starts in the basement, near the furnace or the dryer or a power strip behind the workbench. The basement alarm does its job perfectly. It screams into an empty basement, through a closed door, up a staircase, down a hallway, through another closed bedroom door, to somebody who's been asleep for four hours. That's a long way for a sound to travel. Plenty of people sleep straight through it, and the alarm was never defective for one second.
+
+Interconnected, that basement alarm sets off the one six feet from your pillow. You're not listening for a faraway noise, you're being detonated awake by one in your own room.
+
+Hardwired houses usually have a third wire already run for this, and an electrician can confirm it in one visit. If your house isn't wired, you're not shut out. There are wireless interconnect models, battery units that talk to each other over radio, and you buy them as a set and pair them out of the box. Whole house, no wiring, no holes.
+
+Fourth thing, and this is the one I promised you back at the start.
+
+Your kitchen. An alarm that cries wolf gets murdered. Somebody burns toast, the hallway alarm goes off for the ninth time this month, and one night a person on a chair with a broom handle solves the problem permanently. I know exactly why people do it. That noise is unbearable, and the sixth false alarm feels like an insult.
+
+So you buy around it. Newer alarms are tested against cooking smoke and they're noticeably better at telling a skillet from a fire, and any unit worth having has a hush button, so a false alarm is one press instead of a broom. And you put distance in the plan. Keep alarms at least 10 feet from the stove. If your floor plan won't allow 10 feet, get as far as you can and make sure that unit has the hush.
+
+The point isn't dodging inconvenience. The alarm that protects you is the one nobody ever has a reason to disable.
+
+Fifth thing on the label, and this is the one almost nobody thinks to shop for.
+
+The sound. The standard alarm tone is high and sharp, and it turns out that high, sharp tone is the one children are most likely to sleep straight through. Same for a lot of older adults, and for anyone with hearing loss in the high range. You get the ugly surprise during a drill, when the alarm is howling in the hallway and the 7-year-old hasn't moved.
+
+There are low frequency alarms built for exactly this. Deeper tone, and it wakes people the standard beep does not. There are voice models too, that say the word "fire" and tell you where, and kids respond to a voice far better than a beep. If there's a child's bedroom in your house, or a grandparent's, that's where that unit goes. Everywhere else, the standard tone is fine.
+
+That's the label. Photoelectric or dual sensor, sealed 10 year power, interconnected, hush button and distance from the stove, and the right sound for the room. Now let's deal with what's already up there, because half of you have a bigger problem than shopping.
+
+Turn one over and look for the date. Every alarm has a manufacture date stamped or printed on the back, usually near the model number.
+
+Smoke alarms expire. The sensor chamber degrades, it gets contaminated with dust and cooking film and whatever's in the air of a lived-in house, and it gets less sensitive year after year without ever telling you. At 10 years the unit is finished. The test button still works. The horn still works. The part that detects the fire is the part that quit, and that's the part with no button.
+
+Two things people get wrong here. The 10 years runs from the manufacture date, not from the day you installed it, so an alarm that sat in a warehouse and then a closet for two years is already two years into its life the day it goes up. And if you turn one over and find no date at all, you've answered your own question. It's old enough.
+
+So while you're up there with the ladder, write the year on the front edge of the new one in marker. Future you, or whoever buys this house, gets a straight answer without a ladder.
+
+Next, how many, and where they go. This is the part that gets treated like decorating, and it isn't.
+
+One inside every bedroom. Not the hallway outside the bedroom, inside it, because bedroom doors get closed and a closed door blocks sound. One in the hallway or landing outside each sleeping area. One on every level of the house, including the basement, and the basement one belongs on the ceiling near the bottom of the stairs, because that's the path the smoke takes up into the rest of the house.
+
+Middle of the ceiling is best, since smoke pools at the highest point first. If you're mounting on a wall, the top of the alarm goes 4 to 12 inches down from the ceiling. Keep them out of the bathroom steam path, away from supply vents that'll blow smoke past them, and off to the side of a ceiling fan rather than right beside it.
+
+While you're counting, count the carbon monoxide alarms too. Different gas, different sensor, different job. Carbon monoxide comes off anything that burns fuel, so a furnace, a gas water heater, a gas range, a fireplace, or a car running in an attached garage. You can't see it or smell it, which is the entire reason the device exists. You want one near the sleeping areas and one on the level with the fuel burning appliances. Combination smoke and carbon monoxide units are a sensible way to do it, and the thing to know is that the carbon monoxide sensor has its own shorter lifespan, often around 7 years, so check both dates on a combo unit rather than assuming they retire together.
+
+Now, what not to buy, because a few things on that shelf will waste your money.
+
+The bargain multipack of ionization-only alarms is the classic one. It's cheap for a reason, and you now know the reason. Anything with no date and no model number on the back, put it down. And be careful with smart alarms. Getting a notification on your phone while you're at work is a genuinely useful thing, especially if you've got an older parent living alone. It is not a replacement for coverage. A phone buzzing in another county doesn't wake the person in the bedroom. Buy the coverage first and the smartphone feature second.
+
+One more, and this one lives in a lot of garages. If there's a working alarm sitting on a shelf because it annoyed somebody, that's not a spare. That's the alarm that was supposed to be protecting a room.
+
+Testing. The monthly button press is worth doing, and it's worth understanding what it actually proves. That button tests the horn and the power. It does not test the sensor. It tells you the thing can still make noise, which is not the same as telling you it can still see smoke.
+
+What keeps the sensor honest is keeping it clean. Dust is the single biggest cause of both nuisance alarms and lazy sensors, so twice a year take the vacuum with the brush attachment and run it gently around the outside vents of every alarm in the house. Spring and fall, same weekend you're doing the furnace filter, and you're done in 10 minutes. If you want to genuinely test the sensor, canned smoke detector test spray does it properly. Don't hold a lit candle or a match up to the ceiling to test the fire alarm. I shouldn't have to say it, but people do it every year.
+
+Two more, and neither one costs anything.
+
+Close the bedroom doors at night. A closed hollow interior door is a serious piece of fire protection. It slows the smoke, it holds the temperature down on your side, and it buys minutes in the room where you're standing while you get the window open. People who deal with fires for a living close their kids' doors at night, and they're not doing it for the privacy. If the door being shut means you won't hear the baby, that's exactly what the interconnected alarm was solving three sections ago.
+
+And plan the exits. The alarm buys you time. The plan is how you spend it. Two ways out of every bedroom, which almost always means the door and the window, so go open each bedroom window right now and make sure it isn't painted shut and there's nothing stacked in front of it. Pick a spot outside where everybody meets, the mailbox or a specific neighbor's driveway, so nobody goes back inside looking for someone who's already out. Then walk it once with the kids while everyone's awake and in a good mood. Once. It's the difference between knowing the plan and having done the plan.
+
+If tonight's budget only covers part of this, here's the order I'd spend it in. Bedrooms first, the rooms with sleeping people. Then the hallway outside them. Then the other levels, basement included. Photoelectric or dual sensor, sealed 10 year power, and interconnect the sleeping floor before anything else in the house.
+
+That's tonight's list, and most of it is free. Take one alarm down and read the back. Count what you've got against what you need. Vacuum the vents. Open the bedroom windows and check they still move. Close the doors on your way to bed. The shopping can happen Saturday.
+
+===START CTA(Prevent The Burning)===
+You can't rewire the house tonight and you don't need to. What you can do is fix what's hanging over the people who are asleep, and nobody else is coming to do that one for you. If you want the rest of the house handled the same way, my digital book is called Prevent The Burning. Detectors are one chapter out of 12, and the other 11 are the cords, the outlets, the panel, the garage, and the wiring somebody else chose before you moved in, 101 lessons, each one ending in the same four answers. There's the code on your screen again. Phone up, point it at the screen, tap the bar that appears, and it opens. The first line under the video is the same thing. And if you want the rest of the house checked this way, subscribe to Frederick Barnes, then go turn one alarm over and put the year you find in the comments. That number surprises people more than anything else I've mentioned tonight.
+===END CTA===
+
+There's a lot of house left, and it's all checkable.
+
+That's the job. I'm Frederick Barnes, and I'll see you next shift.

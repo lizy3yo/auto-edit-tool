@@ -237,15 +237,15 @@ describe("applyDeliveryToScenes", () => {
 });
 
 describe("concatWithPauses", () => {
-  it("splices room tone, not silence, after the runs that ask for it", async () => {
+  it("splices silence (never room tone — heard as a buzz) after the runs that ask for it", async () => {
     await concatWithPauses(["u1", "u2", "u3"], [300, 0, 600]);
     const args = ffmpegCalls[0];
     const graph = args[args.indexOf("-filter_complex") + 1];
     // Three runs, one pause (after run 1; run 2 asked for none; the last run's is meaningless).
-    expect(graph.match(/anoisesrc/g)).toHaveLength(1);
+    expect(graph.match(/anullsrc/g)).toHaveLength(1);
+    expect(graph).not.toContain("anoisesrc");
     expect(graph).toContain("atrim=end=0.300");
     expect(graph).toContain("[r0][p0][r1][r2]concat=n=4");
-    expect(graph).not.toContain("anullsrc");
     // Nothing measured ⇒ nothing gained: the runs are joined as they arrived.
     expect(graph).not.toContain("volume=");
     expect(scriptParagraphs(SCRIPT)).toHaveLength(3);

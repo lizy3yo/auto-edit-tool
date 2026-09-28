@@ -19,12 +19,20 @@
  *                                    flash shots (a list item may be a quick cut).
  * 8. Host often                   — no stretch without the host longer than ~40 s in the first
  *                                    3 minutes, ~75 s after (targets 30 / 60).
- * 9. Pictures don't linger        — a b-roll picture outside the CTA runs <= 6.5 s.
+ * 9. Pictures don't linger        — a b-roll picture outside the CTA runs no longer than its
+ *                                    quarter of the film allows: 7 / 10 / 12 / 14 s
+ *                                    (`pictureMaxSecAt`, 2026-09-28; it was a flat 6.5 s).
  * 10. Say it, show it             — the picture shows the thing its line names (judged).
- * 11. Real video                  — >= 30% of cutaway time is a moving shot (flagged motion).
+ * 11. Real video                  — 10-25% of cutaway time is a moving shot (flagged motion):
+ *                                    more stills, fewer clips (2026-09-28; it demanded >= 30%).
  * 12. The voice says every word   — the master is transcribed and every script paragraph found in
  *                                    it; words with no time for them were skipped by the TTS
  *                                    (`findSkippedWords`, the same check the pipeline repairs with).
+ * 13. Looks like a phone photo    — the picture reads as an ordinary phone photo, not a styled,
+ *                                    staged or AI-rendered image (judged; 2026-09-28).
+ * 14. No cut inside a word        — every cut falls between two words: a cut the transcript puts
+ *                                    well inside a word (> 60 ms from both edges) and that is not
+ *                                    in a real pause (≥ 120 ms) is flagged (2026-09-28).
  *
  * Rules 3-5 are judged by Claude Haiku on one frame per generated picture (a still's clip is a
  * slow zoom on that picture), rules 1/2/6/7 from the storyboard, rule 1 also from the film.
@@ -42,7 +50,7 @@ import { checkPlan, fmt, textOf, type PlanFinding } from "../../server/planGate"
 import { parseCtaMarkers } from "../../server/longformVideo";
 import { extractSpokenScript } from "../../shared/ctaMarkers";
 import { scriptParagraphs } from "../../server/delivery";
-import { extractMonoAudio, probeUrlDurationSec } from "../../server/videoAssembly";
+import { detectSilencesFromBuffer, extractMonoAudio, probeUrlDurationSec } from "../../server/videoAssembly";
 import { transcribeInPieces } from "../../server/alignmentHeal";
 import { transcribeWordsFromBuffer } from "../../server/_core/voiceTranscription";
 import { findSkippedWords } from "../../server/narrationSkips";
@@ -53,6 +61,8 @@ const JUDGE_MODEL = "claude-sonnet-5";
 /** The retired CTA freeze was 3.5s of silence; natural delivery pauses run up to ~1.2s. */
 const SILENCE_MAX_SEC = 2.0;
 const FREEZE_MAX_SEC = 2.0;
+/** A frozen picture is a pause when the voice stops for this long in one stretch under it. */
+const FROZEN_PAUSE_SEC = 1.5;
 
 type Finding = PlanFinding;
 export const auditPlan = checkPlan;
@@ -82,9 +92,24 @@ export function auditFilm(url: string): Finding[] {
     findings.push({ rule: 1, detail: `film silence scan did not finish (${sil}) — rerun it` });
   for (const m of sil.matchAll(/silence_end: ([\d.]+) \| silence_duration: ([\d.]+)/g))
     findings.push({ rule: 1, detail: `${m[2]}s of silence ending at ${fmt(+m[1])}` });
+  // A frozen picture is a PAUSE only when the voice stops with it. Since 2026-09-28 a still may be
+  // deliberately static (no zoom) while the narration carries on — the first practice runs read
+  // every one of those as "a frozen picture after the CTA".
+  const quiet = detect(url, "silencedetect=noise=-45dB:d=0.4", "a");
+  const silent: [number, number][] = [];
+  for (const m of quiet.matchAll(/silence_start: ([\d.]+)[\s\S]*?silence_end: ([\d.]+)/g))
+    silent.push([+m[1], +m[2]]);
   const frz = detect(url, `scale=320:-2,freezedetect=n=0.002:d=${FREEZE_MAX_SEC}`, "v");
-  for (const m of frz.matchAll(/freeze_start: ([\d.]+)[\s\S]*?freeze_duration: ([\d.]+)/g))
-    findings.push({ rule: 1, detail: `${m[2]}s frozen picture from ${fmt(+m[1])}` });
+  for (const m of frz.matchAll(/freeze_start: ([\d.]+)[\s\S]*?freeze_duration: ([\d.]+)/g)) {
+    const [from, dur] = [+m[1], +m[2]];
+    // One continuous stop, not the sum of the gaps between sentences a still plays under.
+    const overlap = silent.reduce(
+      (a, [s, e]) => Math.max(a, Math.min(e, from + dur) - Math.max(s, from)),
+      0
+    );
+    if (overlap >= FROZEN_PAUSE_SEC)
+      findings.push({ rule: 1, detail: `${dur}s frozen picture with a ${overlap.toFixed(1)}s stop in the voice from ${fmt(from)}` });
+  }
   return findings;
 }
 
@@ -96,7 +121,7 @@ const JUDGE_SYSTEM =
   "Judge ONLY what is visible in the image — the narration is context for the place question, " +
   "never evidence that text or a price is on screen. " +
   "Answer five independent questions and return ONLY this JSON: " +
-  '{"text":true|false,"brands":true|false,"cluttered":true|false,"named_place":"...","place":"ok"|"wrong"|"n/a","shows":true|false|"n/a","what":"..."}\n' +
+  '{"text":true|false,"brands":true|false,"cluttered":true|false,"staged":true|false,"named_place":"...","place":"ok"|"wrong"|"n/a","shows":true|false|"n/a","what":"..."}\n' +
   "shows: when a MUST SHOW thing is given, is that thing the CENTRE OF ATTENTION — the main thing " +
   "the eye lands on (even from an unusual angle)? false when it is a different thing, absent, or " +
   "small / at an edge / outweighed by something else that takes most of the frame; otherwise " +
@@ -111,7 +136,8 @@ const JUDGE_SYSTEM =
   "cluttered: is the hero subject small, crowded or lost among busy unrelated objects, or does a " +
   "busy background show through it, so a viewer cannot tell what the shot is about at a glance? " +
   "A heap or stack of the very material the line is about (fabric scraps, yarn, lumber offcuts) " +
-  "IS the subject, not clutter — judge only what competes with it.\n" +
+  "IS the subject, not clutter, and a real, used room with a few everyday things at the edges is " +
+  "fine — judge only what competes with it.\n" +
   "place: ONLY about the SETTING, never about which object is shown. If the narration names a " +
   "specific kind of PLACE where something is used, sold or comes from — a home or a room in one, " +
   "a market stall or fair, a church or hall, a store, a porch or patio, a garden or field, a " +
@@ -119,6 +145,11 @@ const JUDGE_SYSTEM =
   '("ok"), or clearly somewhere else, or showing it as a picture/poster on a wall ("wrong")? A ' +
   "workshop, garage, shed, sewing room, kitchen table or work bench all count as the SAME home " +
   'base and never make it wrong. If the line names no such place, or you are unsure, "n/a".\n' +
+  "staged: would a viewer take this for a styled, staged or AI-rendered image rather than an " +
+  "ordinary photo someone took on their phone — a glowing lamp or golden glow lighting it, moody " +
+  "light with dark corners, props neatly arranged around the subject, glossy hyper-detailed " +
+  "textures, a perfectly composed product close-up? The HOST seen from behind doing the work is " +
+  "expected, not a problem. When unsure, false.\n" +
   'what: 3-10 words naming the worst problem, or "" when there is none.';
 
 async function frameOf(url: string, atSec = 1): Promise<Buffer | null> {
@@ -130,7 +161,7 @@ async function frameOf(url: string, atSec = 1): Promise<Buffer | null> {
   return r.status === 0 && r.stdout?.length ? (r.stdout as Buffer) : null;
 }
 
-type Judged = { scene: number; kind: string; text: boolean; brands: boolean; cluttered: boolean; place: string; shows: boolean | null; what: string };
+type Judged = { scene: number; kind: string; text: boolean; brands: boolean; cluttered: boolean; staged: boolean; place: string; shows: boolean | null; what: string };
 
 async function judge(buf: Buffer, narration: string, mustShow?: string): Promise<Omit<Judged, "scene" | "kind"> | null> {
   try {
@@ -150,12 +181,14 @@ async function judge(buf: Buffer, narration: string, mustShow?: string): Promise
       p.data.text = false;
       p.data.brands = false;
       p.data.cluttered = false;
+      p.data.staged = false;
       p.data.place = "n/a";
     }
     return {
       text: p.data.text === true,
       brands: p.data.brands === true,
       cluttered: p.data.cluttered === true,
+      staged: p.data.staged === true,
       // Judged only where the judge could NAME the place the line gives — objects and actions
       // are not places, and a judge that cannot say which place was meant has nothing to judge.
       place:
@@ -202,13 +235,53 @@ export async function auditImages(scenes: StoryboardScene[]): Promise<{ findings
     if (j.cluttered || j.brands) findings.push({ rule: 4, scene: j.scene, detail: `${j.kind}: ${j.brands ? "brand visible" : "cluttered"} — ${j.what}` });
     if (j.text) findings.push({ rule: 5, scene: j.scene, detail: `${j.kind}: readable text — ${j.what}` });
     if (j.shows === false) findings.push({ rule: 10, scene: j.scene, detail: `${j.kind}: does not show what is said — ${j.what}` });
+    // The picture under the big QR is mostly hidden by the card, and its line ("grab your phone,
+    // point it at the code") confused the judge into reading "phone" as the subject.
+    if (j.staged && j.kind !== "qr-background") findings.push({ rule: 13, scene: j.scene, detail: `${j.kind}: not a phone-photo look — ${j.what}` });
   }
   return { findings, judged };
 }
 
 // ── rule 12: the voice says every word ────────────────────────────────────────────────────────
 
-export async function auditVoice(masterUrl: string, params: LongformInputParams): Promise<Finding[]> {
+/** How far inside a transcribed word a cut must be to count, and the pause that excuses it. */
+const INSIDE_WORD_SEC = 0.06;
+const REAL_PAUSE_SEC = 0.12;
+
+/**
+ * Rule 14: cuts that land inside a spoken word. Transcript word edges run late through pauses, so
+ * a cut is only flagged when it is well inside a word AND not in a real pause — the pause is what
+ * the ear hears as the gap between words, whatever the transcript claims. Pure — the words and
+ * pauses come from the caller.
+ */
+export function cutsInsideWords(
+  scenes: StoryboardScene[],
+  words: { word: string; start: number; end: number }[],
+  pauses: { start: number; end: number }[]
+): Finding[] {
+  const out: Finding[] = [];
+  for (let i = 1; i < scenes.length; i++) {
+    const at = scenes[i].narrationStartSec;
+    // A ripple trim leaves a hole between scenes — that is a cut in the voice, not a picture cut.
+    if (at == null || Math.abs((scenes[i - 1].narrationEndSec ?? at) - at) > 0.01) continue;
+    const w = words.find(x => at > x.start + INSIDE_WORD_SEC && at < x.end - INSIDE_WORD_SEC);
+    if (!w) continue;
+    const inPause = pauses.some(p => p.end - p.start >= REAL_PAUSE_SEC && at >= p.start - 0.02 && at <= p.end + 0.02);
+    if (inPause) continue;
+    out.push({
+      rule: 14,
+      scene: scenes[i].index,
+      detail: `cut at ${at.toFixed(2)}s inside "${w.word}" (${w.start.toFixed(2)}-${w.end.toFixed(2)})`,
+    });
+  }
+  return out;
+}
+
+export async function auditVoice(
+  masterUrl: string,
+  params: LongformInputParams,
+  scenes: StoryboardScene[] = []
+): Promise<Finding[]> {
   if (params.manualNarrationUrl) return [];
   const paragraphs = scriptParagraphs(parseCtaMarkers(extractSpokenScript(params.script)).script);
   const mono = await extractMonoAudio(masterUrl);
@@ -217,10 +290,11 @@ export async function auditVoice(masterUrl: string, params: LongformInputParams)
     t = await transcribeInPieces({ monoAudio: mono, durationSec: await probeUrlDurationSec(masterUrl, "mp3") });
   }
   if ("error" in t) return [{ rule: 12, detail: `could not transcribe the narration (${t.error})` }];
-  return findSkippedWords(paragraphs, t.words, t.duration).map(s => ({
+  const inside = cutsInsideWords(scenes, t.words, await detectSilencesFromBuffer(mono));
+  return inside.concat(findSkippedWords(paragraphs, t.words, t.duration).map(s => ({
     rule: 12,
     detail: `voice skipped ${s.missing.split(" ").length} word(s) at ${s.atSec.toFixed(0)}s (paragraph ${s.paragraphs.map(p => p + 1).join(", ")}): "${s.missing.slice(0, 80)}"`,
-  }));
+  })));
 }
 
 // ── pass/fail ─────────────────────────────────────────────────────────────────────────────────
@@ -248,6 +322,9 @@ export function verdicts(findings: Finding[], judged: Judged[] | null, voiceChec
     10: judged ? rate(10, judged.filter(j => j.shows !== null).length) <= 0.1 : null,
     11: count(11) === 0,
     12: voiceChecked ? count(12) === 0 : null,
+    // A few borderline frames are allowed: the judge is strict and the look is a matter of degree.
+    13: judged ? rate(13, n) <= 0.1 : null,
+    14: voiceChecked ? count(14) === 0 : null,
   } as Record<number, boolean | null>;
 }
 
@@ -263,7 +340,7 @@ export async function auditJob(
   const film = opts.video !== false && job.finalVideoUrl ? auditFilm(job.finalVideoUrl) : [];
   const images = opts.images !== false ? await auditImages(scenes) : null;
   const voice =
-    opts.voice !== false && job.masterAudioUrl ? await auditVoice(job.masterAudioUrl, params) : [];
+    opts.voice !== false && job.masterAudioUrl ? await auditVoice(job.masterAudioUrl, params, scenes) : [];
   const findings = [...plan.findings, ...film, ...voice, ...(images?.findings ?? [])].sort(
     (a, b) => a.rule - b.rule || (a.scene ?? 0) - (b.scene ?? 0)
   );
@@ -291,7 +368,7 @@ export async function auditJob(
   return report;
 }
 
-const RULES = ["", "no pause after CTA", "CTA order", "right place", "clean pictures", "no text", "intro on camera", "clean host switches", "host often", "pictures don't linger", "say it, show it", "real video", "voice says every word"];
+const RULES = ["", "no pause after CTA", "CTA order", "right place", "clean pictures", "no text", "intro on camera", "clean host switches", "host often", "pictures don't linger", "say it, show it", "real video", "voice says every word", "looks like a phone photo", "no cut inside a word"];
 
 export function summarize(r: Awaited<ReturnType<typeof auditJob>>): string {
   const lines = [`job ${r.jobId} (${r.channel}) — ${r.status}${r.rehearsal ? ", rehearsal" : ""}`];

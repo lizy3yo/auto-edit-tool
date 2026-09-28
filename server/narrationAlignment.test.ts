@@ -212,6 +212,35 @@ describe("assignSceneRanges", () => {
     expect(ranges[0].endSec).toBeCloseTo(1.31, 5); // inside the real pause (end − 40ms)
   });
 
+  it("never cuts on a short gap inside a word (a consonant's closure)", () => {
+    // Ruth, job 197: "blocks," had a 40ms silent closure before its "s"; the short-gap scan took
+    // it and the picture changed while she was still saying the word. Only where the words meet
+    // may a gap that short take the cut — else the cut stays on the next word's onset.
+    const scenes = [
+      scene("a bunch of blocks,", 1),
+      scene("a churn dash here.", 2),
+    ];
+    const words = [
+      w("a", 0.0, 0.1),
+      w("bunch", 0.1, 0.4),
+      w("of", 0.4, 0.5),
+      w("blocks,", 0.52, 0.98),
+      w("a", 1.0, 1.02),
+      w("churn", 1.18, 1.5),
+      w("dash", 1.52, 1.86),
+      w("here", 1.88, 2.2),
+    ];
+    const inside = [{ start: 0.84, end: 0.88 }]; // closure inside "blocks,"
+    const far = [{ start: 0.0, end: 0.05 }]; // a real pause nowhere near the cut
+    const ranges = assignSceneRanges(scenes, words, 2.4, far, inside);
+    expectTiles(ranges, 2.4);
+    expect(ranges[0].endSec).toBeCloseTo(1.0, 5); // "a" onset, not 0.86
+
+    // The same short gap where the words really meet still takes the cut.
+    const between = assignSceneRanges(scenes, words, 2.4, far, [{ start: 0.96, end: 1.0 }]);
+    expect(between[0].endSec).toBeCloseTo(0.98, 5);
+  });
+
   it("falls back to the short-gap scan only when no real pause qualifies", () => {
     const scenes = [
       scene("Hello there friends.", 1),

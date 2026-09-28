@@ -30,7 +30,7 @@ describe("parseStillDefectVerdict", () => {
       writing: false,
       missing: false,
       messy: false,
-      wrongPlace: false,
+      wrongPlace: false, staged: false,
       what: "board floating above the table",
     });
   });
@@ -46,7 +46,7 @@ describe("parseStillDefectVerdict", () => {
       writing: true,
       missing: false,
       messy: false,
-      wrongPlace: false,
+      wrongPlace: false, staged: false,
       what: "chalkboard reading $93/hour",
     });
     expect(parseStillDefectVerdict('{"writing":"yes"}').writing).toBe(false);
@@ -60,7 +60,7 @@ describe("parseStillDefectVerdict", () => {
       writing: false,
       missing: false,
       messy: false,
-      wrongPlace: false,
+      wrongPlace: false, staged: false,
       what: "",
     });
     expect(parseStillDefectVerdict('{"broken":true}')).toEqual({
@@ -69,7 +69,7 @@ describe("parseStillDefectVerdict", () => {
       writing: false,
       missing: false,
       messy: false,
-      wrongPlace: false,
+      wrongPlace: false, staged: false,
       what: "",
     });
   });
@@ -219,7 +219,7 @@ describe("scanStillDefects", () => {
       writing: false,
       missing: false,
       messy: false,
-      wrongPlace: false,
+      wrongPlace: false, staged: false,
       what: "shelf merging into the wall",
     });
   });
@@ -233,7 +233,7 @@ describe("scanStillDefects", () => {
       writing: false,
       missing: false,
       messy: false,
-      wrongPlace: false,
+      wrongPlace: false, staged: false,
       what: "",
     });
   });

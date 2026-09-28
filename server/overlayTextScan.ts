@@ -97,7 +97,10 @@ const STILL_DEFECT_SYSTEM =
   "or reflection that contradicts the object casting it\n" +
   "- a tool doing something no real tool can: a blade passing through a clamp, a hand or a " +
   "solid object; a saw or knife said to be cutting that sits on top of the material or cuts " +
-  "where it does not touch; a needle through a finger; scissors cutting where the blades do not " +
+  "where it does not touch; a drill bit or screw said to be going in that is not in the material; " +
+  "a hand tool (a drill, saw, iron, hair dryer) posed as if in use — held up or pressed to the " +
+  "work — with no hand holding it; " +
+  "a needle through a finger; scissors cutting where the blades do not " +
   "meet; a tool held in a way no hand could hold it; a hand with too many or too few fingers\n" +
   "Answer false for everything else: unusual but possible products or craftsmanship, odd " +
   "compositions, shallow depth of field, soft focus, plain or boring frames, imperfect " +
@@ -134,6 +137,10 @@ export interface StillDefectVerdict {
   /** The line names a place (a market, a fair, a church hall) and the frame is clearly somewhere
    *  else (rule 3). Only asked when the caller passes the line. */
   wrongPlace: boolean;
+  /** Reads as a styled, staged or AI-rendered image rather than an ordinary phone photo (the
+   *  operator's 2026-09-28 call: "the b-rolls still don't look like someone shot them on an iPhone").
+   *  Re-rolls once, like `messy`. */
+  staged: boolean;
   what: string;
 }
 
@@ -144,6 +151,7 @@ const CLEAN_VERDICT: StillDefectVerdict = {
   missing: false,
   messy: false,
   wrongPlace: false,
+  staged: false,
   what: "",
 };
 
@@ -166,6 +174,7 @@ export function parseStillDefectVerdict(
   const missing = parsed.data?.missing === true;
   const messy = parsed.data?.messy === true;
   const wrongPlace = parsed.data?.wrong_place === true;
+  const staged = parsed.data?.staged === true;
   const what = parsed.data?.what;
   return {
     overlay,
@@ -174,8 +183,9 @@ export function parseStillDefectVerdict(
     missing,
     messy,
     wrongPlace,
+    staged,
     what:
-      (overlay || broken || writing || missing || messy || wrongPlace) &&
+      (overlay || broken || writing || missing || messy || wrongPlace || staged) &&
       typeof what === "string"
         ? what.slice(0, 80)
         : "",
@@ -208,7 +218,10 @@ export function missingQuestion(expect: string): string {
     "\n\nQUESTION 4 — missing: this frame plays while the narrator names: " +
     `"${expect.replace(/"/g, "'")}". Is that thing clearly NOT the centre of attention — a ` +
     "different object in its place, absent altogether, or there but small, pushed to an edge, or " +
-    "outweighed by something else that takes most of the frame? Answer false when it is the main " +
+    "outweighed by something else that takes most of the frame? When it names a SPECIFIC kind, " +
+    "pattern or design (a nine-patch block, a granny square, kumiko lattice, a dovetail joint), " +
+    "that exact kind must be recognisable — a generic version (a plain checkered or random " +
+    "patchwork quilt for a nine-patch) counts as missing. Answer false when it is the main " +
     "thing the eye lands on, even from an unusual angle. When unsure, answer false."
   );
 }
@@ -218,8 +231,18 @@ export const MESSY_QUESTION =
   "\n\nQUESTION 5 — messy: is a real brand name or logo legible anywhere (even small, on a tool " +
   "or product), OR is the main subject small, crowded or lost among busy unrelated objects so a " +
   "viewer cannot tell what the shot is about at a glance? A heap or stack of the very material the " +
-  "shot is about (fabric scraps, yarn, lumber offcuts) IS the subject, not clutter. When unsure, " +
-  "answer false.";
+  "shot is about (fabric scraps, yarn, lumber offcuts) IS the subject, not clutter, and a real, " +
+  "used room with a few everyday things at the edges is fine — the shots are meant to look like " +
+  "a person's own phone photos. When unsure, answer false.";
+
+/** QUESTION 7, always asked: an ordinary phone photo, not a styled or AI-looking render. */
+export const STAGED_QUESTION =
+  "\n\nQUESTION 7 — staged: would a viewer take this for a styled, staged or AI-rendered image " +
+  "rather than an ordinary photo someone took on their phone? Say true for: a glowing lamp, " +
+  "candle or golden glow lighting the scene, dramatic or moody light with dark corners, props " +
+  "neatly arranged around the subject like a catalogue shot, glossy hyper-detailed textures, or " +
+  "a perfectly composed product close-up. Plain daylight, an ordinary used room and casual " +
+  "framing are false. When unsure, answer false.";
 
 /** QUESTION 6, asked only with the narration line: the frame is set where the line says. */
 export function placeQuestion(line: string): string {
@@ -243,6 +266,7 @@ export function verdictShape(expect?: string, line?: string): string {
     (expect ? ',"missing":true|false' : "") +
     ',"messy":true|false' +
     (line ? ',"wrong_place":true|false' : "") +
+    ',"staged":true|false' +
     ',"what":"..."}'
   );
 }
@@ -272,12 +296,14 @@ export async function scanStillDefects(
         (expect ? missingQuestion(expect) : "") +
         MESSY_QUESTION +
         (line ? placeQuestion(line) : "") +
+        STAGED_QUESTION +
         verdictShape(expect, line),
       userMessage:
         "Is any text stamped over this frame, does it contain obviously impossible structure, " +
         "is there readable writing in the scene, and is it messy or branded?" +
         (expect ? ` Does it show "${expect.replace(/"/g, "'")}"?` : "") +
-        (line ? " Is it set where the line says?" : ""),
+        (line ? " Is it set where the line says?" : "") +
+        " Does it look like an ordinary phone photo?",
       imageInput: image,
       maxTokens: 250,
       model: STILL_DEFECT_MODEL,
@@ -291,10 +317,11 @@ export async function scanStillDefects(
       verdict.writing ||
       verdict.missing ||
       verdict.messy ||
-      verdict.wrongPlace
+      verdict.wrongPlace ||
+      verdict.staged
     )
       console.log(
-        `[StillDefects] ${verdict.overlay ? "stamped text" : verdict.broken ? "broken geometry" : verdict.writing ? "readable writing" : verdict.missing ? "named thing missing" : verdict.messy ? "brand or clutter" : "wrong place"} detected: ${verdict.what}`
+        `[StillDefects] ${verdict.overlay ? "stamped text" : verdict.broken ? "broken geometry" : verdict.writing ? "readable writing" : verdict.missing ? "named thing missing" : verdict.messy ? "brand or clutter" : verdict.wrongPlace ? "wrong place" : "staged look"} detected: ${verdict.what}`
       );
     return verdict;
   } catch (err: any) {

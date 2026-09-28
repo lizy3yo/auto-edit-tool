@@ -1,0 +1,363 @@
+{
+ "jobId": 190,
+ "channel": "hannah_yoder",
+ "title": "10 Plain Sewing Projects From Cloth Already in the House, Ranked by What They Paid",
+ "status": "completed",
+ "rehearsal": true,
+ "finalVideoUrl": "https://pub-fd5853f50f47422f827867dae374bcf2.r2.dev/longform/190/final-4U5WpSZt.mp4",
+ "verdicts": {
+  "1": false,
+  "2": true,
+  "3": true,
+  "4": true,
+  "5": true,
+  "6": true,
+  "7": true,
+  "8": true,
+  "9": true,
+  "10": true,
+  "11": true,
+  "12": true,
+  "13": true
+ },
+ "stats": {
+  "scenes": 36,
+  "hostTakes": 10,
+  "hostSec": 58,
+  "ctaPatterns": [
+   "block 0: HBHQQQ"
+  ],
+  "introductions": 1,
+  "midSentenceHostTakes": 0,
+  "listCuts": 5,
+  "handOffs": 7,
+  "longestFacelessEarlySec": 28,
+  "longestFacelessLateSec": 0,
+  "longestPictureSec": 12.9,
+  "motionSharePct": 18,
+  "picturesJudged": 27
+ },
+ "findings": [
+  {
+   "rule": 1,
+   "detail": "4.8s frozen picture with 1.0s of silence from 0:17"
+  },
+  {
+   "rule": 1,
+   "detail": "5.46667s frozen picture with 1.6s of silence from 0:30"
+  },
+  {
+   "rule": 1,
+   "detail": "3.46667s frozen picture with 1.3s of silence from 2:49"
+  },
+  {
+   "rule": 10,
+   "scene": 15,
+   "detail": "b-roll: does not show what is said — no lit oil lamp visible in frame"
+  },
+  {
+   "rule": 10,
+   "scene": 24,
+   "detail": "split-panel: does not show what is said — shows sacks and barrel, not hands sewing"
+  }
+ ],
+ "judged": [
+  {
+   "scene": 2,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 3,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 4,
+   "kind": "split-panel",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 5,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 8,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 9,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 10,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 11,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 12,
+   "kind": "split-panel",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 13,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 14,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 15,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": false,
+   "what": "no lit oil lamp visible in frame"
+  },
+  {
+   "scene": 19,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": true,
+   "place": "n/a",
+   "shows": null,
+   "what": "glowing staged light on subject, no code visible"
+  },
+  {
+   "scene": 20,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": true,
+   "place": "n/a",
+   "shows": null,
+   "what": "moody staged lighting with soft glow"
+  },
+  {
+   "scene": 21,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": true,
+   "place": "n/a",
+   "shows": null,
+   "what": "staged, overly tidy setup"
+  },
+  {
+   "scene": 22,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 23,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 24,
+   "kind": "split-panel",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": false,
+   "what": "shows sacks and barrel, not hands sewing"
+  },
+  {
+   "scene": 25,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 26,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 27,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 28,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 30,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 31,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 32,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 33,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 35,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  }
+ ]
+}

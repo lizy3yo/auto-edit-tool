@@ -1,0 +1,351 @@
+{
+ "jobId": 198,
+ "channel": "hannah_yoder",
+ "title": "Practice: Hannah words",
+ "status": "completed",
+ "rehearsal": true,
+ "finalVideoUrl": "https://pub-fd5853f50f47422f827867dae374bcf2.r2.dev/longform/198/final-c9czo1mn.mp4",
+ "verdicts": {
+  "1": true,
+  "2": true,
+  "3": true,
+  "4": true,
+  "5": true,
+  "6": true,
+  "7": true,
+  "8": true,
+  "9": true,
+  "10": true,
+  "11": true,
+  "12": true,
+  "13": true,
+  "14": false
+ },
+ "stats": {
+  "scenes": 34,
+  "hostTakes": 9,
+  "hostSec": 56,
+  "ctaPatterns": [
+   "block 0: HBHQQQ"
+  ],
+  "introductions": 1,
+  "midSentenceHostTakes": 0,
+  "listCuts": 5,
+  "handOffs": 6,
+  "longestFacelessEarlySec": 33,
+  "longestFacelessLateSec": 0,
+  "longestPictureSec": 12.3,
+  "motionSharePct": 17,
+  "picturesJudged": 26
+ },
+ "findings": [
+  {
+   "rule": 10,
+   "scene": 25,
+   "detail": "split-panel: does not show what is said — no hands stitching visible, bags finished and posed"
+  },
+  {
+   "rule": 13,
+   "scene": 10,
+   "detail": "b-roll: not a phone-photo look — warm staged lighting, glossy composed look"
+  },
+  {
+   "rule": 13,
+   "scene": 14,
+   "detail": "b-roll: not a phone-photo look — neatly arranged, staged product-style composition"
+  },
+  {
+   "rule": 14,
+   "scene": 6,
+   "detail": "cut at 25.06s inside \"with\" (24.97-25.13)"
+  }
+ ],
+ "judged": [
+  {
+   "scene": 2,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 3,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 4,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 7,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 8,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 9,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 10,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": true,
+   "place": "n/a",
+   "shows": true,
+   "what": "warm staged lighting, glossy composed look"
+  },
+  {
+   "scene": 11,
+   "kind": "split-panel",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 12,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 13,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 14,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": true,
+   "place": "n/a",
+   "shows": true,
+   "what": "neatly arranged, staged product-style composition"
+  },
+  {
+   "scene": 15,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 16,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 20,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": null,
+   "what": ""
+  },
+  {
+   "scene": 21,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": null,
+   "what": ""
+  },
+  {
+   "scene": 22,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": null,
+   "what": ""
+  },
+  {
+   "scene": 23,
+   "kind": "split-panel",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 24,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 25,
+   "kind": "split-panel",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": false,
+   "what": "no hands stitching visible, bags finished and posed"
+  },
+  {
+   "scene": 26,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 27,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 28,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 29,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 30,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 31,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 33,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  }
+ ]
+}

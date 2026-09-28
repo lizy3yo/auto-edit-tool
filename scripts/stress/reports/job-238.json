@@ -1,0 +1,247 @@
+{
+ "jobId": 238,
+ "channel": "norbert_daniels",
+ "title": "Norbert 3min v3",
+ "status": "completed",
+ "rehearsal": false,
+ "finalVideoUrl": "https://pub-fd5853f50f47422f827867dae374bcf2.r2.dev/longform/238/final-TaoSefuO.mp4",
+ "verdicts": {
+  "1": true,
+  "2": false,
+  "3": true,
+  "4": true,
+  "5": true,
+  "6": true,
+  "7": true,
+  "8": true,
+  "9": true,
+  "10": true,
+  "11": true,
+  "12": true,
+  "13": true,
+  "14": true
+ },
+ "stats": {
+  "scenes": 28,
+  "hostTakes": 11,
+  "hostSec": 55,
+  "ctaPatterns": [
+   "block 0: HBQQ"
+  ],
+  "introductions": 2,
+  "midSentenceHostTakes": 0,
+  "listCuts": 0,
+  "handOffs": 8,
+  "longestFacelessEarlySec": 31,
+  "longestFacelessLateSec": 4,
+  "longestPictureSec": 11.5,
+  "motionSharePct": 10,
+  "picturesJudged": 18
+ },
+ "findings": [
+  {
+   "rule": 2,
+   "detail": "block 0 (HBQQ): host does not come back after the book"
+  }
+ ],
+ "judged": [
+  {
+   "scene": 2,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 3,
+   "kind": "split-panel",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 4,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 6,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 7,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 8,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 9,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 11,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 12,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 15,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": null,
+   "what": ""
+  },
+  {
+   "scene": 16,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": null,
+   "what": ""
+  },
+  {
+   "scene": 18,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 20,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 21,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 23,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 24,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 26,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 27,
+   "kind": "split-panel",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  }
+ ]
+}

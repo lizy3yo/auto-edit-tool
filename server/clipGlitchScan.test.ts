@@ -31,3 +31,30 @@ describe("hands in the shot", () => {
     expect(parseClipGlitchVerdict(raw).glitch).toBe(false);
   });
 });
+
+describe("a thing that disappears is a glitch even with hands in the shot", () => {
+  it("fails Ruth's shrinking quilt (job 233, 1:00-1:03)", () => {
+    const raw = JSON.stringify({
+      changes: ["hands shifted on the quilt", "quilt fabric repositioned"],
+      cover: ["left: quilt hangs over the table front / right: table front bare, quilt smaller"],
+      hands_visible: true,
+      untouched_moved: false,
+      morph: false,
+      vanished: true,
+    });
+    expect(parseClipGlitchVerdict(raw)).toEqual({
+      glitch: true,
+      what: "something disappears or changes size",
+    });
+  });
+  it("still passes hands simply working", () => {
+    const raw = JSON.stringify({
+      changes: ["hands shifted slightly"],
+      hands_visible: true,
+      untouched_moved: false,
+      morph: false,
+      vanished: false,
+    });
+    expect(parseClipGlitchVerdict(raw).glitch).toBe(false);
+  });
+});

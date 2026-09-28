@@ -349,6 +349,17 @@ export const channelHostPhotos = mysqlTable("channel_host_photos", {
    * channel's last ticked photo cannot be unticked (`channelHostPhoto.setSelected`).
    */
   isSelected: boolean("isSelected").default(true).notNull(),
+  /**
+   * The PHONE-LOOK version of `imageUrl` (2026-09-28): the same host in the same room, remade as a
+   * frame of a video they recorded on a propped-up phone (`server/hostPhoneLook.ts`). It is what
+   * videos and the HeyGen test use by default — `hostPhotoUrl` in shared/hostPhotoLook.ts is the
+   * one rule. Null until made (made once, in the background, when the photo is first listed).
+   */
+  phoneImageUrl: varchar("phoneImageUrl", { length: 512 }),
+  /** The operator switched this photo back to the ORIGINAL — videos use `imageUrl` as uploaded. */
+  useOriginal: boolean("useOriginal").default(false).notNull(),
+  /** Why the phone look could not be made — the photo then renders as the original. */
+  phoneLookError: varchar("phoneLookError", { length: 255 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });

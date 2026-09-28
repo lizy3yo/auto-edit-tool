@@ -1,0 +1,345 @@
+{
+ "jobId": 205,
+ "channel": "granny_mae",
+ "title": "Mae HeyGen 3min",
+ "status": "completed",
+ "rehearsal": false,
+ "finalVideoUrl": "https://pub-fd5853f50f47422f827867dae374bcf2.r2.dev/longform/205/final-xNoKaWan.mp4",
+ "verdicts": {
+  "1": true,
+  "2": true,
+  "3": true,
+  "4": true,
+  "5": true,
+  "6": true,
+  "7": true,
+  "8": false,
+  "9": true,
+  "10": true,
+  "11": true,
+  "12": true,
+  "13": true,
+  "14": true
+ },
+ "stats": {
+  "scenes": 33,
+  "hostTakes": 9,
+  "hostSec": 67,
+  "ctaPatterns": [
+   "block 0: HBHQQQ"
+  ],
+  "introductions": 1,
+  "midSentenceHostTakes": 0,
+  "listCuts": 3,
+  "handOffs": 6,
+  "longestFacelessEarlySec": 43,
+  "longestFacelessLateSec": 17,
+  "longestPictureSec": 12,
+  "motionSharePct": 16,
+  "picturesJudged": 25
+ },
+ "findings": [
+  {
+   "rule": 5,
+   "scene": 19,
+   "detail": "qr-background: readable text — measuring tape markings unreadable but no on-screen link text"
+  },
+  {
+   "rule": 8,
+   "scene": 29,
+   "detail": "43s without the host before 2:48 (early)"
+  },
+  {
+   "rule": 10,
+   "scene": 3,
+   "detail": "split-panel: does not show what is said — host absent, afghan draped on empty chair"
+  },
+  {
+   "rule": 10,
+   "scene": 30,
+   "detail": "b-roll: does not show what is said — basket still holds coasters, not a close-up"
+  },
+  {
+   "rule": 13,
+   "scene": 26,
+   "detail": "b-roll: not a phone-photo look — warm staged lighting, glossy styled look"
+  }
+ ],
+ "judged": [
+  {
+   "scene": 2,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 3,
+   "kind": "split-panel",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": false,
+   "what": "host absent, afghan draped on empty chair"
+  },
+  {
+   "scene": 4,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 8,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 9,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 10,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 11,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 12,
+   "kind": "split-panel",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 13,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 14,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 18,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": null,
+   "what": ""
+  },
+  {
+   "scene": 19,
+   "kind": "qr-background",
+   "text": true,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": null,
+   "what": "measuring tape markings unreadable but no on-screen link text"
+  },
+  {
+   "scene": 20,
+   "kind": "qr-background",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": null,
+   "what": ""
+  },
+  {
+   "scene": 21,
+   "kind": "split-panel",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 22,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 23,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 24,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 25,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 26,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": true,
+   "place": "n/a",
+   "shows": true,
+   "what": "warm staged lighting, glossy styled look"
+  },
+  {
+   "scene": 27,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 28,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 29,
+   "kind": "split-panel",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 30,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": false,
+   "what": "basket still holds coasters, not a close-up"
+  },
+  {
+   "scene": 31,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  },
+  {
+   "scene": 32,
+   "kind": "b-roll",
+   "text": false,
+   "brands": false,
+   "cluttered": false,
+   "staged": false,
+   "place": "n/a",
+   "shows": true,
+   "what": ""
+  }
+ ]
+}

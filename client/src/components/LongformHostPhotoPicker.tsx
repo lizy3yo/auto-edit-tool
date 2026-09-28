@@ -1,9 +1,12 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { Label } from "@/components/ui/label";
 import { hostAngleGuideWarning } from "@shared/hostMinutes";
 import { Check, Loader2, Star } from "lucide-react";
 import { toast } from "sonner";
+import { hostPhotoLookState, hostPhotoUrl } from "@shared/hostPhotoLook";
+import { HostPhotoTile } from "./HostPhotoTile";
+import { HostPhotoPreview } from "./HostPhotoPreview";
 
 /**
  * Which of the channel's host photos its videos are shot from.
@@ -26,6 +29,11 @@ import { toast } from "sonner";
  * for the chosen host minutes (`hostAngleGuideWarning`) an extra camera turns up so rarely it
  * reads as a random cut. The picker warns there and the job records the same line; nothing is
  * unticked, since an operator may want the variety on purpose.
+ *
+ * Each tile shows the picture the video will actually use: the photo's PHONE LOOK by default
+ * (shared/hostPhotoLook.ts, the operator's 2026-09-28 call), with a switch back to the original.
+ * The switch is saved on the channel like a tick. While a phone look is still being made the
+ * list refreshes itself, so the tile changes the moment it lands.
  */
 export function LongformHostPhotoPicker({
   channelKey,
@@ -46,7 +54,12 @@ export function LongformHostPhotoPicker({
   const listInput = { channelKey, activeOnly: true } as const;
   const { data: photos, isLoading } = trpc.channelHostPhoto.list.useQuery(
     listInput,
-    { enabled: !!channelKey }
+    {
+      enabled: !!channelKey,
+      // A phone look being made lands in the background — look again until none is left.
+      refetchInterval: q =>
+        (q.state.data ?? []).some(p => hostPhotoLookState(p) === "making") ? 5_000 : false,
+    }
   );
 
   const setSelected = trpc.channelHostPhoto.setSelected.useMutation({
@@ -59,8 +72,15 @@ export function LongformHostPhotoPicker({
     onSuccess: () => utils.channelHostPhoto.list.invalidate(),
     onError: err => toast.error(err.message),
   });
+  const setLook = trpc.channelHostPhoto.setLook.useMutation({
+    onSuccess: rows => utils.channelHostPhoto.list.setData(listInput, rows),
+    onError: err => toast.error(err.message),
+  });
 
   const rows = photos ?? [];
+  // The photo open in the big preview — read from the live list so a switch inside it shows.
+  const [previewId, setPreviewId] = useState<number | null>(null);
+  const previewRow = rows.find(p => p.id === previewId) ?? null;
   // A channel with nothing ticked can only be one whose rows predate the tick column; the
   // server renders every photo there (`selectedHostPhotos`), and so does this view.
   const anyTicked = rows.some(p => p.isSelected);
@@ -94,7 +114,7 @@ export function LongformHostPhotoPicker({
       </p>
     );
 
-  const busy = setSelected.isPending || setPrimary.isPending;
+  const busy = setSelected.isPending || setPrimary.isPending || setLook.isPending;
   const locked = disabled || busy;
 
   const toggle = (id: number) => {
@@ -117,6 +137,9 @@ export function LongformHostPhotoPicker({
         is the primary — it opens the film and carries the split-screen scenes.
         The rest take turns with it, so every ticked photo is seen about as
         often. Ticks and the primary are saved to the channel, for everyone.
+        Each photo is used in its phone look — the same person and room, made
+        to look like a video recorded on a phone. Switch one to Original to use
+        it as uploaded.
       </p>
       <div className="flex flex-wrap gap-2">
         {rows.map((p, i) => {
@@ -125,61 +148,72 @@ export function LongformHostPhotoPicker({
           // library's first only while that one is ticked — label what will actually render.
           const isPrimary = chosen[0]?.id === p.id;
           return (
-            <div
+            <HostPhotoTile
               key={p.id}
-              className={`relative w-20 shrink-0 overflow-hidden rounded-md border text-left transition ${on
-                ? "border-primary ring-1 ring-primary"
-                : "border-border opacity-50 hover:opacity-80"
-                } ${locked ? "opacity-60" : ""}`}
-            >
-              <button
-                type="button"
-                disabled={locked}
-                onClick={() => toggle(p.id)}
-                aria-pressed={on}
-                aria-label={`${on ? "Untick" : "Tick"} ${isPrimary ? "primary" : `angle ${i + 1}`}`}
-                className="block w-full disabled:cursor-default"
-              >
-                <img
-                  src={p.imageUrl}
-                  alt=""
-                  className="h-20 w-20 object-cover"
-                />
-                {on && (
-                  <span className="absolute right-1 top-1 rounded-full bg-primary p-0.5 text-primary-foreground">
+              imageUrl={hostPhotoUrl(p)}
+              active={on}
+              disabled={locked}
+              onPictureClick={() => toggle(p.id)}
+              pressed={on}
+              pictureLabel={`${on ? "Untick" : "Tick"} ${isPrimary ? "primary" : `angle ${i + 1}`}`}
+              corner={
+                on && (
+                  <span className="block rounded-full bg-primary p-0.5 text-primary-foreground">
                     <Check className="h-3 w-3" />
                   </span>
-                )}
-              </button>
-              {isPrimary ? (
-                <span className="flex items-center gap-0.5 px-1.5 py-1 text-[10px] font-medium text-foreground">
-                  <Star className="h-2.5 w-2.5 fill-current" />
-                  Primary
-                </span>
-              ) : (
-                <div className="flex items-center justify-between px-1.5 py-1 text-[10px] text-muted-foreground">
-                  <span className="truncate">Angle {i + 1}</span>
-                  {/* Reorders the channel's library — the same "Make primary" Admin has — and
-                      ticks the photo, since a primary that is not used makes no sense. */}
-                  <button
-                    type="button"
-                    disabled={locked}
-                    title="Make this the primary angle"
-                    aria-label={`Make angle ${i + 1} the primary`}
-                    onClick={() => {
-                      if (locked) return;
-                      setPrimary.mutate({ channelKey, id: p.id });
-                    }}
-                    className="rounded p-0.5 hover:bg-secondary hover:text-foreground disabled:cursor-default disabled:hover:bg-transparent"
-                  >
-                    <Star className="h-3 w-3" />
-                  </button>
-                </div>
-              )}
-            </div>
+                )
+              }
+              onPreview={() => setPreviewId(p.id)}
+              label={
+                isPrimary ? (
+                  <span className="flex items-center gap-0.5 font-medium text-foreground">
+                    <Star className="h-2.5 w-2.5 fill-current" />
+                    Primary
+                  </span>
+                ) : (
+                  <div className="flex items-center justify-between text-muted-foreground">
+                    <span className="truncate">Angle {i + 1}</span>
+                    {/* Reorders the channel's library — the same "Make primary" Admin has — and
+                        ticks the photo, since a primary that is not used makes no sense. */}
+                    <button
+                      type="button"
+                      disabled={locked}
+                      title="Make this the primary angle"
+                      aria-label={`Make angle ${i + 1} the primary`}
+                      onClick={() => {
+                        if (locked) return;
+                        setPrimary.mutate({ channelKey, id: p.id });
+                      }}
+                      className="rounded p-0.5 hover:bg-secondary hover:text-foreground disabled:cursor-default disabled:hover:bg-transparent"
+                    >
+                      <Star className="h-3 w-3" />
+                    </button>
+                  </div>
+                )
+              }
+              lookState={hostPhotoLookState(p)}
+              onLookChange={useOriginal => setLook.mutate({ channelKey, id: p.id, useOriginal })}
+            />
           );
         })}
       </div>
+      <HostPhotoPreview
+        photo={
+          previewRow
+            ? {
+                original: previewRow.imageUrl,
+                phone: previewRow.phoneImageUrl,
+                state: hostPhotoLookState(previewRow),
+              }
+            : null
+        }
+        title={previewRow && chosen[0]?.id === previewRow.id ? "Primary host photo" : "Host photo"}
+        onOpenChange={open => !open && setPreviewId(null)}
+        disabled={locked}
+        onChange={useOriginal =>
+          previewRow && setLook.mutate({ channelKey, id: previewRow.id, useOriginal })
+        }
+      />
       {/* Host plates are generated per look PER ANGLE, so the image cost of ticking another
           photo is visible here rather than discovered on the invoice. */}
       <p className="text-[11px] text-muted-foreground">
@@ -190,7 +224,7 @@ export function LongformHostPhotoPicker({
         ) : chosen.length === 1 ? (
           "1 angle — every host scene uses it, with no angle changes."
         ) : (
-          `${chosen.length} angles — the host shots rotate through them; no two in a row repeat one.`
+          `${chosen.length} angles — the host shots rotate through them, so the video switches between these backgrounds. For one consistent look, tick one.`
         )}
       </p>
       {hostMinutes != null && (

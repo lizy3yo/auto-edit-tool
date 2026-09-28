@@ -765,6 +765,17 @@ export async function getChannelConfig(channelKey: string) {
  * Feeds `stripHostNames` (shared/constants.ts) before clips are submitted to 69labs,
  * which rejects prompts naming a "well-known person". Unknown channel → [] (no-op).
  */
+/**
+ * The name a channel's host goes by: its `hostName`, else its display name. Diane De Chambray's
+ * channel had no `hostName`, so "I'm Diane" was never recognised as her self-introduction and
+ * played over a picture (job 217) — every rule keyed to the host's name has to have one. Pure.
+ */
+export function resolveHostName(
+  c: { hostName?: string | null; displayName?: string | null } | null | undefined
+): string | undefined {
+  return c?.hostName?.trim() || c?.displayName?.trim() || undefined;
+}
+
 export async function hostNameAliases(channelKey: string): Promise<string[]> {
   const c = await getChannelConfig(channelKey);
   if (!c) return [];

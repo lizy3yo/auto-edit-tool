@@ -1,0 +1,41 @@
+{
+ "jobId": 191,
+ "channel": "hank_hardwood",
+ "title": "10 Japanese Woodworking Projects From Cheap Lumber, Ranked by What They Paid",
+ "status": "completed",
+ "rehearsal": true,
+ "finalVideoUrl": "https://pub-fd5853f50f47422f827867dae374bcf2.r2.dev/longform/191/final-x75TLla_.mp4",
+ "verdicts": {
+  "1": true,
+  "2": true,
+  "3": null,
+  "4": null,
+  "5": null,
+  "6": true,
+  "7": true,
+  "8": true,
+  "9": true,
+  "10": null,
+  "11": true,
+  "12": true,
+  "13": null
+ },
+ "stats": {
+  "scenes": 33,
+  "hostTakes": 9,
+  "hostSec": 62,
+  "ctaPatterns": [
+   "block 0: HBHQQQ"
+  ],
+  "introductions": 1,
+  "midSentenceHostTakes": 0,
+  "listCuts": 3,
+  "handOffs": 5,
+  "longestFacelessEarlySec": 36,
+  "longestFacelessLateSec": 0,
+  "longestPictureSec": 13.2,
+  "motionSharePct": 23,
+  "picturesJudged": 0
+ },
+ "findings": []
+}

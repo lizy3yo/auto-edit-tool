@@ -15,7 +15,6 @@
  * runners do the actual IO. Modeled on the FFmpeg usage in server/dubbing.ts.
  */
 
-import { spawn } from "child_process";
 import { existsSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "fs";
 import { randomUUID } from "crypto";
 import path from "path";
@@ -32,7 +31,8 @@ import {
   type FaceSource,
 } from "./faceAlign";
 import sharp from "sharp";
-import { getFFmpegPath } from "./ffmpegPath";
+import { audioInput, spawnFfmpeg, retryUnstarted } from "./ffmpegSpawn";
+export { audioInput };
 import { Semaphore } from "./providers/semaphore";
 import { presignOwnBucketUrl } from "./storage";
 import { describeError } from "./_core/errorDetail";
@@ -153,9 +153,15 @@ const ASSEMBLY_CONCURRENCY = 3;
  * saturated. `EAGAIN` covers the spawn-level failure ("spawn /usr/bin/ffmpeg EAGAIN") where the
  * host was so starved it couldn't even fork ffmpeg — the exact cause that dropped scenes wholesale
  * on 170+-scene jobs. Data errors (download 404, "no clips") don't match. Pure — unit-tested.
+ *
+ * Windows says the same thing differently, and those words were missing, so an overloaded
+ * machine FAILED a film instead of waiting (Pearl, job 220, 2026-09-28): `spawn UNKNOWN` when
+ * the process cannot even be created, exit 3221225794 (0xC0000142, a child that could not
+ * initialise), "Cannot allocate memory", and ENOMEM / EMFILE / ENFILE (out of memory, out of
+ * file handles).
  */
 export function isTransientFfmpegError(message: string): boolean {
-  return /Resource temporarily unavailable|opening encoder|Failed to configure output pad|EAGAIN/i.test(
+  return /Resource temporarily unavailable|opening encoder|Failed to configure output pad|EAGAIN|spawn UNKNOWN|Cannot allocate memory|ENOMEM|EMFILE|ENFILE|3221225794|0xC0000142/i.test(
     message
   );
 }
@@ -222,11 +228,55 @@ export function dimensionsFor(aspectRatio: VideoAspectRatio): {
  * `KEN_BURNS_RATE_PER_SEC` — a 5 s still moves 14%, a 1 s list shot under 3% — capped at
  * `KEN_BURNS_MAX_SPAN` so a long hold never swims.
  */
+/**
+ * The PHONE FINISH (2026-09-27): what a 2016 phone does to a picture, so generated footage stops
+ * reading as "AI". The models render crisp, glossy, perfectly graded frames whatever the prompt
+ * says; a real phone gives small-lens softness, its own oversharpened edges, milky shadows,
+ * highlights that clip early, a white balance that is a little warm, lens shading and sensor
+ * noise. No motion is added — the operator rejected a handheld wobble. Drawn in `buildSceneMuxArgs`
+ * BEFORE the QR, name card and caption, so those stay crisp and scannable. `host` is lighter:
+ * softening a lip-synced mouth the way b-roll is softened makes the speech harder to read.
+ * Never on a book cover or an operator's asset image (the caller leaves `look` unset).
+ */
+export type PhoneLook = "broll" | "host";
+export function phoneLookFilter(look: PhoneLook): string {
+  const host = look === "host";
+  // v2 (2026-09-28): the first finish added a WARM tint and a vignette, which fed the orange glow
+  // and dark corners that made Hannah's b-roll read as AI. Now neutral-to-slightly-cool like a
+  // phone's auto white balance, fine detail softened (b-roll through 960 wide), flatter contrast,
+  // no vignette. The host stays lighter — a lip-synced mouth must read.
+  return [
+    host ? "scale=1280:720:flags=bilinear" : "scale=960:540:flags=bilinear",
+    "scale=1920:1080:flags=bicubic",
+    host ? "unsharp=3:3:0.9:3:3:0" : "unsharp=3:3:0.7:3:3:0",
+    host
+      ? "curves=all='0/0.04 0.5/0.51 0.9/0.94 1/0.98'"
+      : "curves=all='0/0.06 0.5/0.52 0.9/0.93 1/0.97'",
+    host ? "eq=saturation=0.88:contrast=0.96" : "eq=saturation=0.8:contrast=0.93",
+    host ? "hue=s=0.95" : "hue=s=0.92",
+    host
+      ? "colorbalance=rm=-0.01:bm=0.015"
+      : "colorbalance=rm=-0.02:bm=0.03:rh=-0.02:bh=0.02",
+    // Grain is the one part that costs bits: random noise does not compress. Luma-only at 5-6 keeps
+    // a 1080p scene at ~4 Mbps (plain: ~2.8); the first cut (14 + chroma) made a 3-min film 545 MB
+    // at 24 Mbps, which would put a 20-min film near 3.6 GB.
+    host ? "noise=c0s=5:c0f=t+u" : "noise=c0s=6:c0f=t+u",
+  ].join(",");
+}
+
 export const KEN_BURNS_RATE_PER_SEC = 0.028;
 export const KEN_BURNS_MAX_SPAN = 0.14;
 /** The zoom factor a still of `durationSec` ends (or starts) at. */
 export const kenBurnsMaxZoom = (durationSec: number): number =>
   1 + Math.min(KEN_BURNS_MAX_SPAN, KEN_BURNS_RATE_PER_SEC * Math.max(0.5, durationSec));
+/**
+ * A still picture on screen this long or longer slowly zooms; a shorter one stays completely
+ * still (the operator, 2026-09-28: "if the scene is long, zoom is okay; if not, it can be still").
+ * It replaced the shot list choosing still pictures itself, which it did for most of them, so the
+ * b-roll barely moved.
+ */
+export const STILL_ZOOM_MIN_SEC = 3;
+export const stillZooms = (durationSec: number): boolean => durationSec >= STILL_ZOOM_MIN_SEC;
 /**
  * Build FFmpeg args that animate ONE still image into a silent video clip of `durationSec`
  * with a subtle pan/zoom (Ken Burns). The still is cover-cropped to the target aspect, then a
@@ -620,7 +670,7 @@ export function buildAudioConcatFilterArgs(opts: {
   outputPath: string;
 }): string[] {
   const n = opts.inputPaths.length;
-  const ins = opts.inputPaths.flatMap(p => ["-i", p]);
+  const ins = opts.inputPaths.flatMap(p => audioInput(p));
   const pre = opts.inputPaths
     .map(
       (_, i) =>
@@ -656,6 +706,36 @@ export function buildAudioConcatFilterArgs(opts: {
  * so the rebuilt audio stays frame-aligned to the copied video, which matters for lip-synced host
  * scenes. Pure — no IO.
  */
+/** Most scenes one audio join takes at once — see `concatFilmAudioInBatches`. */
+export const FILM_AUDIO_BATCH = 50;
+
+/**
+ * The per-scene audio joined into one film track, `FILM_AUDIO_BATCH` scenes per ffmpeg call and
+ * the batches then joined. One call with every scene as an `-i` put 184 temp paths on one command
+ * line — past Windows' 32,767-character limit — so Mae's job 219 died with "spawn ENAMETOOLONG"
+ * the one time a scene failed and assembly fell back to this path. Each batch is padded and
+ * trimmed exactly as before (`buildFilmAudioConcatArgs`), so the join is sample-identical. Pure
+ * wrapper around ffmpeg.
+ */
+export async function concatFilmAudioInBatches(
+  segments: { path: string; durationSec: number }[],
+  outputPath: string,
+  workDir: string
+): Promise<void> {
+  if (segments.length <= FILM_AUDIO_BATCH) {
+    await runFfmpeg(buildFilmAudioConcatArgs({ segments, outputPath }));
+    return;
+  }
+  const parts: { path: string; durationSec: number }[] = [];
+  for (let b = 0; b < segments.length; b += FILM_AUDIO_BATCH) {
+    const batch = segments.slice(b, b + FILM_AUDIO_BATCH);
+    const partPath = path.join(workDir, `filmaudio-part-${parts.length}.m4a`);
+    await runFfmpeg(buildFilmAudioConcatArgs({ segments: batch, outputPath: partPath }));
+    parts.push({ path: partPath, durationSec: batch.reduce((a, s) => a + s.durationSec, 0) });
+  }
+  await concatFilmAudioInBatches(parts, outputPath, workDir);
+}
+
 export function buildFilmAudioConcatArgs(opts: {
   segments: { path: string; durationSec: number }[];
   outputPath: string;
@@ -1006,6 +1086,15 @@ export function planMasterOverlayParts(opts: {
  * sub-audible fade — which matters most on a ripple seam, where two moments that were never
  * adjacent are being butted together. Pure — no IO.
  */
+/**
+ * What fills a held pause under the master (a reading wait, an operator's hold): clean silence.
+ * Brown-noise "room tone" at -56 dBFS was tried on 2026-09-27 and the operator heard it as a buzz
+ * between the words; the master spans either side are already faded in and out
+ * (`OVERLAY_SEAM_FADE_SEC`), so silence joins without a click. Named in the `filmaudio-overlay`
+ * cache key so a change here re-mixes films instead of reusing old audio.
+ */
+export const HOLD_GAP_SOURCE = "anullsrc=r=48000:cl=stereo";
+
 export function buildMasterOverlayAudioArgs(opts: {
   masterPath: string;
   /** Ascending, strictly inside (0, masterDuration) — except a single lead hold at exactly 0. */
@@ -1063,7 +1152,7 @@ export function buildMasterOverlayAudioArgs(opts: {
     if (part.kind === "silence") {
       const label = `g${g++}`;
       chains.push(
-        `anullsrc=r=48000:cl=stereo,${FMT},atrim=end=${(part.durSec as number).toFixed(3)}[${label}]`
+        `${HOLD_GAP_SOURCE},${FMT},atrim=end=${(part.durSec as number).toFixed(3)}[${label}]`
       );
       labels.push(`[${label}]`);
       return;
@@ -1244,9 +1333,12 @@ export function buildSceneMuxArgs(opts: {
    * fades is a caption someone misses.
    */
   caption?: { imagePath: string };
+  /** The phone finish (`phoneLookFilter`), drawn under every overlay. Unset ⇒ untouched. */
+  look?: PhoneLook;
 }): string[] {
   const fps = opts.fps ?? FPS;
   const dur = opts.durationSec.toFixed(3);
+  const lookChain = opts.look ? `,${phoneLookFilter(opts.look)}` : "";
 
   // Name-card timing: when is it fully on? Drop it entirely if that hold is too brief to read —
   // a flash is worse than no card.
@@ -1376,10 +1468,10 @@ export function buildSceneMuxArgs(opts: {
       : "";
   let filter: string;
   if (overlays.length === 0) {
-    filter = `[0:v]${head}tpad=${headPad}stop_mode=clone:stop_duration=${dur}[v]`;
+    filter = `[0:v]${head}tpad=${headPad}stop_mode=clone:stop_duration=${dur}${lookChain}[v]`;
   } else {
     const parts = [
-      `[0:v]${head}tpad=${headPad}stop_mode=clone:stop_duration=${dur}[base]`,
+      `[0:v]${head}tpad=${headPad}stop_mode=clone:stop_duration=${dur}${lookChain}[base]`,
     ];
     let cur = "base";
     overlays.forEach((o, i) => {
@@ -1397,8 +1489,7 @@ export function buildSceneMuxArgs(opts: {
     "-y",
     "-i",
     opts.videoPath,
-    "-i",
-    opts.audioPath,
+    ...audioInput(opts.audioPath),
     ...inputs,
     "-filter_complex",
     filter,
@@ -1708,14 +1799,13 @@ export function buildBrollPanelArgs(opts: {
  * SIGKILLed after `FFMPEG_MAX_MS` so a wedged process can't hold its slot (or its caller) forever.
  */
 export async function runFfmpeg(args: string[]): Promise<void> {
-  const ffmpegPath = getFFmpegPath();
   await FFMPEG_SLOTS.acquire();
   try {
-    return await new Promise<void>((resolve, reject) => {
+    return await retryUnstarted(() => new Promise<void>((resolve, reject) => {
       // ponytail: -hide_banner -loglevel error drops the banner/swscaler-warning
       // noise that was burying the real libx264 error under stderr.slice(); with it,
       // stderr is short and contains only the actual failure reason, so report it whole.
-      const proc = spawn(ffmpegPath, [
+      const proc = spawnFfmpeg([
         "-hide_banner",
         "-loglevel",
         "error",
@@ -1741,7 +1831,7 @@ export async function runFfmpeg(args: string[]): Promise<void> {
         clearTimeout(killTimer);
         reject(new Error(`FFmpeg process error: ${err.message}`));
       });
-    });
+    }));
   } finally {
     FFMPEG_SLOTS.release();
   }
@@ -1830,8 +1920,8 @@ async function runFfmpegCapture(
   args: string[],
   label: string
 ): Promise<string> {
-  return new Promise<string>((resolve, reject) => {
-    const proc = spawn(getFFmpegPath(), args);
+  return retryUnstarted(() => new Promise<string>((resolve, reject) => {
+    const proc = spawnFfmpeg(args);
     let out = "";
     const killTimer = setTimeout(() => {
       proc.kill("SIGKILL");
@@ -1848,7 +1938,7 @@ async function runFfmpegCapture(
       clearTimeout(killTimer);
       reject(new Error(`FFmpeg process error: ${err.message}`));
     });
-  });
+  }));
 }
 
 /**
@@ -2440,6 +2530,8 @@ export async function renderKenBurnsClip(
      * that union (used project-wide) for one call site.
      */
     dims?: { width: number; height: number };
+    /** A still that stays completely still: no zoom at all (the shot list's `static`). */
+    still?: boolean;
   }
 ): Promise<Buffer> {
   const { width, height } = opts.dims ?? dimensionsFor(opts.aspectRatio);
@@ -2456,6 +2548,7 @@ export async function renderKenBurnsClip(
         index: opts.index,
         fps: opts.fps,
         cover: opts.cover,
+        ...(opts.still ? { maxZoom: 1 } : {}),
       }),
       "kenburns"
     );
@@ -3000,6 +3093,8 @@ export async function assemblePerSceneFilm(opts: {
      * canvas — never for HeyGen (native 1080p) or b-roll.
      */
     sharpenHost?: boolean;
+    /** The phone finish for this scene (`phoneLookFilter`); unset ⇒ drawn as rendered. */
+    look?: PhoneLook;
   }[];
   aspectRatio: VideoAspectRatio;
   /** R2 URL of the continuous master narration — enables master-overlay mode (see above). */
@@ -3304,6 +3399,9 @@ export async function assemblePerSceneFilm(opts: {
             : undefined,
         nameCard: ncKey,
         caption: captionHashes.get(s),
+        // The filter string itself, so retuning the finish re-encodes; absent when unset, so every
+        // scene without a look keeps its cache entry.
+        ...(scene.look ? { look: phoneLookFilter(scene.look) } : {}),
         crf: CRF_DELIVERY,
         preset: PRESET_DELIVERY,
       });
@@ -3464,6 +3562,7 @@ export async function assemblePerSceneFilm(opts: {
           caption: captionPaths.has(s)
             ? { imagePath: captionPaths.get(s) as string }
             : undefined,
+          look: scene.look,
         })
       );
       // Lock the rebuilt film audio to the scene's ACTUAL encoded length, not the nominal
@@ -3587,6 +3686,7 @@ export async function assemblePerSceneFilm(opts: {
       const overlayKey = cacheKey("filmaudio-overlay", {
         masterAudioUrl: opts.masterAudioUrl,
         inserts: activePlan.inserts,
+        gapFill: HOLD_GAP_SOURCE,
         drops,
         totalSec: activePlan.totalSec,
         lastSliceEnd,
@@ -3673,9 +3773,7 @@ export async function assemblePerSceneFilm(opts: {
         ext: "m4a",
         fallbackDir: workDir,
         build: async out => {
-          await runFfmpeg(
-            buildFilmAudioConcatArgs({ segments, outputPath: out })
-          );
+          await concatFilmAudioInBatches(segments, out, workDir);
           return undefined;
         },
       });

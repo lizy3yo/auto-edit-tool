@@ -382,6 +382,35 @@ export interface StoryboardScene {
   /** Scenes cut from one storyboard beat share its index here — the shot list's own bookkeeping. */
   shotGroup?: number;
   /**
+   * The shot list's call that this picture shows the SAME thing as the picture before it — the
+   * context did not change, so `joinSameContext` plays the two as one picture (up to the film's
+   * `pictureMaxSecAt` for where it sits). 2026-09-28, the operator: "if the context doesn't change,
+   * we don't need to change the image".
+   */
+  sameShot?: true;
+  /**
+   * The shot list judged that a tool cuts into, goes through or joins the material here (drilling,
+   * sawing, a screw going in, stapling, welding, piercing, carving…) — ALWAYS a photo, since the
+   * video model fakes the contact (Norbert's job 236 drilled air). Judged by the model so any craft
+   * and any wording is caught; `contactToolWork`'s word list stays as the backup.
+   */
+  toolContact?: true;
+  /**
+   * No longer set — a still's zoom is decided by its length (`stillZooms`). Kept so a film made
+   * while the shot list chose it still reads: it was rendered completely still.
+   */
+  staticShot?: true;
+  /** The still image this picture's zoom clip was cut from, so the zoom can be re-cut later. */
+  stillSourceUrl?: string;
+  /**
+   * B-roll that shows someone doing the work shows THE HOST (2026-09-28, the operator: "if we have
+   * b-roll image doing something it should be our character"), from behind or the side, face never
+   * shown: `brollHostLook` is the channel's `hostLook` for the prompt and `brollHostRef` the host
+   * photo passed as the image reference. Set by `markHostBroll`; never on a split's picture half.
+   */
+  brollHostLook?: string;
+  brollHostRef?: string;
+  /**
    * This beat sits inside the FAST-OPEN window (`LongformPacing.fastOpen`): the first `zoneSec`
    * of narration, where cuts land faster to match the script's opening pace. Set once at
    * segmentation (`markFastOpenScenes`) and read by `capFor`/`floorFor`/`measuredSizeFor`, so
@@ -1016,6 +1045,14 @@ export interface LongformInputParams {
    * One entry ⇒ every host scene uses it, no angle changes, and the cold open is a single scene.
    */
   faceImageUrls?: string[];
+  /**
+   * How the host looks, read ONCE off their own photo (`deriveHostLook`): build, hair, clothes and
+   * colours, never age guesses or a name — "a woman with auburn hair under a sheer white head
+   * covering, a plain blue dress and a black apron". The one description every channel's b-roll
+   * uses when it shows the host doing the work (from behind or the side, face never shown), so a
+   * new channel needs no setup. Also replaces the old hard-coded "early-60s man" host wording.
+   */
+  hostLook?: string;
   /**
    * How many of the operator's SELECTED host photos failed to rehost when the job was created
    * and were left out of `faceImageUrls`. The pipeline turns it into a job warning at start,

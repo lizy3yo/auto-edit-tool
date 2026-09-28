@@ -182,10 +182,10 @@ describe("buildGroupTrack", () => {
     ]);
     expect(r.leadSec).toBe(2);
     expect(r.totalSec).toBeCloseTo(2 + 5.02 + 0.5 + 4.01, 5);
-    // The gap is room tone, not silence, and both tracks are stored.
+    // The gap is silence (room tone was heard as a buzz), and both tracks are stored.
     const graphs = ffmpegCalls.map(a => a[a.indexOf("-filter_complex") + 1]);
     expect(
-      graphs.some(g => g.includes("anoisesrc") && g.includes("atrim=end=0.500"))
+      graphs.some(g => g.includes("anullsrc") && g.includes("atrim=end=0.500"))
     ).toBe(true);
     expect(puts.some(k => /group-3-lipsync-vo-/.test(k))).toBe(true);
     expect(puts.some(k => /group-3-lipsync-narration-/.test(k))).toBe(true);

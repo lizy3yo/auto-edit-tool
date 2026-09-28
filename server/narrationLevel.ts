@@ -32,12 +32,11 @@
  * a failure as "keep the audio as rendered" — a steadier read is never worth losing a film over.
  */
 
-import { spawn } from "child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { randomUUID } from "crypto";
-import { getFFmpegPath } from "./ffmpegPath";
+import { spawnFfmpeg, retryUnstarted } from "./ffmpegSpawn";
 import { downloadToTemp } from "./videoAssembly";
 
 /** Analysis frame: short enough to gate out a pause, long enough to hold a syllable. */
@@ -386,8 +385,8 @@ export function buildLevelApplyArgs(opts: {
 
 /** Run ffmpeg, capturing stdout; stderr is folded into the error on a non-zero exit. */
 function runFfmpeg(args: string[], label: string): Promise<string> {
-  return new Promise<string>((resolve, reject) => {
-    const proc = spawn(getFFmpegPath(), args);
+  return retryUnstarted(() => new Promise<string>((resolve, reject) => {
+    const proc = spawnFfmpeg(args);
     let out = "";
     let err = "";
     const killTimer = setTimeout(() => {
@@ -410,7 +409,7 @@ function runFfmpeg(args: string[], label: string): Promise<string> {
       clearTimeout(killTimer);
       reject(new Error(`${label}: ${e.message}`));
     });
-  });
+  }));
 }
 
 /** Per-frame levels of an audio file on disk. */

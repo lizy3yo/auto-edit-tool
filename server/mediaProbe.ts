@@ -1,6 +1,7 @@
 import { existsSync } from "fs";
 import { spawn } from "child_process";
 import { getFFmpegPath } from "./ffmpegPath";
+import { isMp3File, retryUnstarted, spawnFfmpeg } from "./ffmpegSpawn";
 
 /** Hard ceiling on one duration probe of a local file. Env-overridable. */
 const PROBE_MAX_MS = Number(process.env.PROBE_MAX_MS ?? 60_000);
@@ -14,7 +15,8 @@ export async function getMediaDuration(filePath: string): Promise<number> {
   // If ffprobe doesn't exist alongside ffmpeg-static, use ffmpeg to probe
   const probeBin = existsSync(ffprobePath) ? ffprobePath : "ffprobe";
 
-  return new Promise((resolve, reject) => {
+  // A busy machine that could not START ffmpeg/ffprobe is waited out, not failed (ffmpegSpawn.ts).
+  return retryUnstarted(() => new Promise<number>((resolve, reject) => {
     // `spawn` has no timeout, and a longform assembly calls this ~2× per scene (~500 times
     // on a 250-scene film) — one wedged probe parks the whole job with no DB write, which
     // is how a live job outlives the inactivity watchdog. Reading a local file's header
@@ -37,9 +39,7 @@ export async function getMediaDuration(filePath: string): Promise<number> {
     // is unavailable (ffmpeg-static ships ffmpeg only, no ffprobe) — covers both
     // a non-zero ffprobe exit and a spawn ENOENT (no ffprobe on PATH).
     const probeWithFfmpeg = () => {
-      const ffProc = spawn(getFFmpegPath(), ["-i", filePath], {
-        stdio: ["pipe", "pipe", "pipe"],
-      });
+      const ffProc = spawnFfmpeg(["-i", filePath]);
       live = ffProc;
       let ffErr = "";
       ffProc.on("error", err => fail(err));
@@ -67,6 +67,8 @@ export async function getMediaDuration(filePath: string): Promise<number> {
       "format=duration",
       "-of",
       "default=noprint_wrappers=1:nokey=1",
+      // A tiny mp3 is mostly its ID3 tag and gets guessed as video — name it (see ffmpegSpawn.ts).
+      ...(isMp3File(filePath) ? ["-f", "mp3"] : []),
       filePath,
     ]);
     live = proc;
@@ -86,5 +88,5 @@ export async function getMediaDuration(filePath: string): Promise<number> {
         else ok(dur);
       }
     });
-  });
+  }));
 }

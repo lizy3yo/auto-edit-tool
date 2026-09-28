@@ -24,8 +24,8 @@ import { safeParseJSON } from "./jsonRepair";
 const CLIP_GLITCH_MODEL = () => process.env.CLIP_GLITCH_MODEL || "claude-sonnet-5";
 
 export const CLIP_GLITCH_SYSTEM =
-  "You compare two frames of ONE short AI-generated video clip: the FIRST frame on top, the LAST " +
-  "frame below. The camera may have zoomed or panned, so ignore framing: compare where each " +
+  "You compare two frames of ONE short AI-generated video clip: the FIRST frame on the LEFT, the " +
+  "LAST frame on the RIGHT. The camera may have zoomed or panned, so ignore framing: compare where each " +
   "object sits and which way it points RELATIVE TO THE SURFACE AND THE OBJECTS AROUND IT.\n" +
   "changes: every object that moved, turned, appeared, disappeared, multiplied or changed shape " +
   "or size between the two frames (short phrases; [] when nothing did).\n" +
@@ -35,8 +35,14 @@ export const CLIP_GLITCH_SYSTEM =
   "morph: did anything melt, bend, stretch, change size or shape, merge into something else, or " +
   "grow or lose fingers? Hands moving, a tool changing angle in a hand, or work progressing " +
   "(a cut deepening, paper peeling where the hand pulls it) is NOT a morph.\n" +
-  'Return ONLY this JSON, no prose: {"changes":["..."],"hands_visible":true|false,' +
-  '"untouched_moved":true|false,"morph":true|false}';
+  "cover: for each LARGE item (a quilt, cloth, sheet of fabric, board, rug, piece of work) say " +
+  "where its edges are and what surface shows around it, LEFT frame then RIGHT frame — look at " +
+  "the front edge of the table in both.\n" +
+  "vanished: is an item GONE, clearly SMALLER or clearly BIGGER on the right than on the left, " +
+  "or did something appear from nowhere — with no hand plainly lifting it away, bringing it in, " +
+  "cutting or folding it? Only sliding or turning a little is NOT vanished.\n" +
+  'Return ONLY this JSON, no prose: {"changes":["..."],"cover":["..."],"hands_visible":true|false,' +
+  '"untouched_moved":true|false,"morph":true|false,"vanished":true|false}';
 
 export type ClipGlitchVerdict = { glitch: boolean; what: string };
 
@@ -57,6 +63,12 @@ export function parseClipGlitchVerdict(
     : [];
   const morph = d.morph === true;
   const hands = d.hands_visible === true;
+  // Something that disappears, appears or changes size with no hand doing it is a glitch EVEN
+  // with hands in the shot: Granny Ruth's 3-min test (job 233, 1:00-1:03) — the quilt draped over
+  // the table front shrank away to bare table while her hands sewed, and "hands repositioned" let
+  // it through. Asked on the frames SIDE BY SIDE: stacked, Sonnet called the same pair "slight
+  // shifts" at 640 and at 1024 px; side by side it named it, and passed five good hands clips.
+  const vanished = d.vanished === true;
   // With hands in the shot, things moving is the point — "hands repositioned lower on the paper"
   // and "chisel angle shifted" were flagged as untouched motion on Hank's real render (job 175),
   // four re-renders of good clips in the first minutes. Only a morph counts there.
@@ -66,14 +78,19 @@ export function parseClipGlitchVerdict(
   const unexplained = !selfMoving && d.hands_visible === false && changes.length > 0;
   // A self-moving shot (fire spreading a burn, water pouring) changes shape by nature: only an
   // untouched move of something ELSE would count, and the model cannot tell us which — pass it.
-  const glitch = selfMoving ? false : morph || untouched || unexplained;
+  const glitch = selfMoving ? false : morph || untouched || unexplained || vanished;
   return {
     glitch,
-    what: glitch ? (changes[0] ?? (morph ? "shape changes" : "something moves on its own")).slice(0, 80) : "",
+    what: glitch
+      ? (vanished && !morph
+          ? "something disappears or changes size"
+          : (changes[0] ?? (morph ? "shape changes" : "something moves on its own"))
+        ).slice(0, 80)
+      : "",
   };
 }
 
-/** The first and last frame of `clipUrl`, 640 wide, stacked, as a png. */
+/** The first and last frame of `clipUrl`, 768 wide each, SIDE BY SIDE, as a png. */
 async function firstAndLast(clipUrl: string): Promise<Buffer> {
   const dir = join(tmpdir(), `glitch-${randomUUID()}`);
   mkdirSync(dir, { recursive: true });
@@ -94,7 +111,7 @@ async function firstAndLast(clipUrl: string): Promise<Buffer> {
         "-map",
         "0:v:0",
         "-vf",
-        "scale=640:-2",
+        "scale=768:-2",
         "-frames:v",
         "1",
         f,
@@ -109,7 +126,7 @@ async function firstAndLast(clipUrl: string): Promise<Buffer> {
       "-i",
       frames[1],
       "-filter_complex",
-      "[0:v][1:v]vstack=inputs=2",
+      "[0:v][1:v]hstack=inputs=2",
       "-frames:v",
       "1",
       out,
@@ -134,7 +151,7 @@ export async function scanClipGlitch(
     const result = await invokeClaude({
       systemPrompt: CLIP_GLITCH_SYSTEM,
       userMessage:
-        "First frame on top, last frame below." +
+        "First frame on the left, last frame on the right." +
         (about ? ` The clip should show: ${about.replace(/"/g, "'").slice(0, 200)}.` : "") +
         " What changed?",
       imageInput: { base64: pair.toString("base64"), mediaType: "image/png" },

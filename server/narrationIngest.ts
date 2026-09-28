@@ -19,12 +19,11 @@
  *    cheapest possible place to catch it.
  */
 
-import { spawn } from "child_process";
 import { tmpdir } from "os";
 import { join } from "path";
 import { writeFile, readFile, unlink } from "fs/promises";
 import { nanoid } from "nanoid";
-import { getFFmpegPath } from "./ffmpegPath";
+import { spawnFfmpeg, retryUnstarted } from "./ffmpegSpawn";
 import { getMediaDuration } from "./mediaProbe";
 import { capDeadAirPauses } from "./ttsUnified";
 import { transcribeWordsFromBuffer } from "./_core/voiceTranscription";
@@ -44,8 +43,8 @@ async function ffmpegToBuffer(
   const outPath = `${base}-out.mp3`;
   try {
     await writeFile(inPath, input);
-    await new Promise<void>((resolve, reject) => {
-      const proc = spawn(getFFmpegPath(), args(inPath, outPath));
+    await retryUnstarted(() => new Promise<void>((resolve, reject) => {
+      const proc = spawnFfmpeg(args(inPath, outPath));
       const killTimer = setTimeout(() => {
         proc.kill("SIGKILL");
         reject(new Error(`ffmpeg ${label} timed out`));
@@ -68,7 +67,7 @@ async function ffmpegToBuffer(
             )
           );
       });
-    });
+    }));
     return Buffer.from(await readFile(outPath));
   } finally {
     await unlink(inPath).catch(() => {});

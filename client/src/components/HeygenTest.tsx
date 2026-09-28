@@ -53,6 +53,9 @@ import {
   heygenTestProgress,
 } from "@shared/heygenTest";
 import { ROLE_LABEL } from "@shared/roles";
+import { hostPhotoUrl, testPhotoState, testPhotoUrl, type TestPhoto } from "@shared/hostPhotoLook";
+import { HostPhotoTile } from "./HostPhotoTile";
+import { HostPhotoPreview } from "./HostPhotoPreview";
 
 /**
  * HeyGen test bench (`/heygen-test`) — which host photo makes the best talking head, before a film pays for it.
@@ -84,7 +87,16 @@ export function HeygenTest() {
   const [vendor, setVendor] = useState<Vendor>("sixtynine_labs");
   const [account, setAccount] = useState<string>("");
   const [script, setScript] = useState("");
-  const [imageUrls, setImageUrls] = useState<string[]>([]);
+  // Each photo in the run: its original, its phone-look version (the DEFAULT, as in every video —
+  // shared/hostPhotoLook.ts), and the operator's switch back to the original.
+  const [photos, setPhotos] = useState<TestPhoto[]>([]);
+  const imageUrls = photos.map(testPhotoUrl);
+  const makingLook = photos.some(p => !p.useOriginal && !p.phone && !p.failed);
+  // The run photo open in the big preview (by its original URL) — read from the live list.
+  const [previewOf, setPreviewOf] = useState<string | null>(null);
+  const previewPhoto = photos.find(p => p.original === previewOf) ?? null;
+  const setPhotoLook = (original: string, useOriginal: boolean) =>
+    setPhotos(prev => prev.map(x => (x.original === original ? { ...x, useOriginal } : x)));
   const [runName, setRunName] = useState("");
   // Results page, lifted here so a new run can bring the list back to page 1 where it lands.
   const [page, setPage] = useState(1);
@@ -113,15 +125,30 @@ export function HeygenTest() {
     { enabled: !!channelKey }
   );
 
+  const phoneLook = trpc.heygenTest.phoneLook.useMutation();
   const upload = trpc.styleReference.upload.useMutation({
-    onSuccess: ({ url }) => addImage(url),
+    onSuccess: ({ url }) => {
+      if (!addPhoto({ original: url, useOriginal: false, source: "upload" })) return;
+      // An upload is not in a library, so its phone look is made here (cached per photo).
+      phoneLook.mutate(
+        { imageUrl: url },
+        {
+          onSuccess: ({ url: phone }) =>
+            setPhotos(prev => prev.map(p => (p.original === url ? { ...p, phone } : p))),
+          onError: err =>
+            setPhotos(prev =>
+              prev.map(p => (p.original === url ? { ...p, failed: err.message } : p))
+            ),
+        }
+      );
+    },
     onError: err => toast.error(err.message),
   });
 
   const start = trpc.heygenTest.start.useMutation({
     onSuccess: () => {
       toast.success("Test started — voicing, then rendering on HeyGen.");
-      setImageUrls([]);
+      setPhotos([]);
       setRunName("");
       setPage(1);
       utils.heygenTest.list.invalidate();
@@ -131,12 +158,12 @@ export function HeygenTest() {
     onError: err => toast.error(err.message),
   });
 
-  function addImage(url: string) {
-    setImageUrls(prev =>
-      prev.includes(url) || prev.length >= HEYGEN_TEST_MAX_IMAGES
-        ? prev
-        : [...prev, url]
-    );
+  /** Add a photo to the run; false when it is already in it or the run is full. */
+  function addPhoto(p: TestPhoto): boolean {
+    if (photos.some(x => x.original === p.original) || photos.length >= HEYGEN_TEST_MAX_IMAGES)
+      return false;
+    setPhotos(prev => [...prev, p]);
+    return true;
   }
 
   const words = countScriptWords(script);
@@ -147,7 +174,9 @@ export function HeygenTest() {
     ? allBusy
       ? "Waiting for a HeyGen account to free up."
       : "No HeyGen account has a key — add one in Provider keys."
-    : inputError;
+    : makingLook
+      ? "Making the phone look… (or switch that photo to Original)"
+      : inputError;
 
   return (
     <div className="space-y-4">
@@ -230,25 +259,43 @@ export function HeygenTest() {
             <Label className="text-xs">
               Photos ({imageUrls.length}/{HEYGEN_TEST_MAX_IMAGES})
             </Label>
+            <p className="text-[11px] text-muted-foreground">
+              Every photo is tested in its phone look by default — the same as the videos. Switch
+              one to Original to test it as uploaded.
+            </p>
             <div className="flex flex-wrap gap-2">
-              {imageUrls.map(url => (
-                <div key={url} className="relative">
-                  <img
-                    src={url}
-                    alt=""
-                    className="h-24 w-24 rounded border border-border object-cover"
-                  />
-                  <button
-                    type="button"
-                    aria-label="Remove photo"
-                    className="absolute -right-1.5 -top-1.5 rounded-full border border-border bg-background p-0.5"
-                    onClick={() =>
-                      setImageUrls(prev => prev.filter(u => u !== url))
-                    }
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                </div>
+              {photos.map((p, i) => (
+                // The same tile as the generate form's picker (HostPhotoTile): the picture opens
+                // the big preview here, since a test has nothing to tick; the corner removes it.
+                <HostPhotoTile
+                  key={p.original}
+                  imageUrl={testPhotoUrl(p)}
+                  pictureLabel={`Photo ${i + 1} — see it big`}
+                  onPreview={() => setPreviewOf(p.original)}
+                  corner={
+                    <button
+                      type="button"
+                      aria-label={`Remove photo ${i + 1} from the test`}
+                      title="Remove from this test"
+                      className="block rounded-full border border-border bg-background p-0.5 hover:bg-secondary"
+                      onClick={() =>
+                        setPhotos(prev => prev.filter(x => x.original !== p.original))
+                      }
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  }
+                  label={
+                    <span className="flex items-center justify-between gap-1">
+                      <span className="font-medium text-foreground">Photo {i + 1}</span>
+                      <span className="truncate text-muted-foreground">
+                        {p.source === "channel" ? "Channel" : "Upload"}
+                      </span>
+                    </span>
+                  }
+                  lookState={testPhotoState(p)}
+                  onLookChange={useOriginal => setPhotoLook(p.original, useOriginal)}
+                />
               ))}
               {imageUrls.length < HEYGEN_TEST_MAX_IMAGES && (
                 <label className="flex h-24 w-24 cursor-pointer flex-col items-center justify-center gap-1 rounded border border-dashed border-border text-[11px] text-muted-foreground hover:bg-muted">
@@ -287,20 +334,29 @@ export function HeygenTest() {
                 </p>
                 <div className="flex flex-wrap gap-1.5">
                   {libraryPhotos.map(p => {
-                    const picked = imageUrls.includes(p.imageUrl);
+                    const picked = photos.some(x => x.original === p.imageUrl);
                     return (
                       <button
                         key={p.id}
                         type="button"
                         disabled={
-                          picked || imageUrls.length >= HEYGEN_TEST_MAX_IMAGES
+                          picked || photos.length >= HEYGEN_TEST_MAX_IMAGES
                         }
-                        onClick={() => addImage(p.imageUrl)}
+                        onClick={() =>
+                          addPhoto({
+                            original: p.imageUrl,
+                            phone: p.phoneImageUrl ?? undefined,
+                            failed: p.phoneLookError ?? undefined,
+                            // The photo's own switch on the channel is where the test starts.
+                            useOriginal: p.useOriginal,
+                            source: "channel",
+                          })
+                        }
                         className="rounded border border-border disabled:opacity-40"
                         title={picked ? "Already in the run" : "Add to the run"}
                       >
                         <img
-                          src={p.imageUrl}
+                          src={hostPhotoUrl(p)}
                           alt=""
                           className="h-12 w-12 rounded object-cover"
                         />
@@ -311,6 +367,23 @@ export function HeygenTest() {
               </div>
             )}
           </div>
+
+          <HostPhotoPreview
+            photo={
+              previewPhoto
+                ? {
+                    original: previewPhoto.original,
+                    phone: previewPhoto.phone,
+                    state: testPhotoState(previewPhoto),
+                  }
+                : null
+            }
+            title="Photo in this test"
+            onOpenChange={open => !open && setPreviewOf(null)}
+            onChange={useOriginal =>
+              previewPhoto && setPhotoLook(previewPhoto.original, useOriginal)
+            }
+          />
 
           <div className="space-y-1.5">
             <Label className="text-xs" htmlFor="heygen-run-name">

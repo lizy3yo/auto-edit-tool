@@ -1,0 +1,41 @@
+{
+ "jobId": 190,
+ "channel": "hannah_yoder",
+ "title": "10 Plain Sewing Projects From Cloth Already in the House, Ranked by What They Paid",
+ "status": "completed",
+ "rehearsal": true,
+ "finalVideoUrl": "https://pub-fd5853f50f47422f827867dae374bcf2.r2.dev/longform/190/final-4U5WpSZt.mp4",
+ "verdicts": {
+  "1": true,
+  "2": true,
+  "3": null,
+  "4": null,
+  "5": null,
+  "6": true,
+  "7": true,
+  "8": true,
+  "9": true,
+  "10": null,
+  "11": true,
+  "12": true,
+  "13": null
+ },
+ "stats": {
+  "scenes": 36,
+  "hostTakes": 10,
+  "hostSec": 58,
+  "ctaPatterns": [
+   "block 0: HBHQQQ"
+  ],
+  "introductions": 1,
+  "midSentenceHostTakes": 0,
+  "listCuts": 5,
+  "handOffs": 7,
+  "longestFacelessEarlySec": 28,
+  "longestFacelessLateSec": 0,
+  "longestPictureSec": 12.9,
+  "motionSharePct": 18,
+  "picturesJudged": 0
+ },
+ "findings": []
+}

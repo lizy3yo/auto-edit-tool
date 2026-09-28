@@ -284,15 +284,12 @@ export function deliveryRuns(
 }
 
 /**
- * Join voiced runs with a beat of ROOM TONE (not digital silence) after each one where asked.
- * Digital silence is what the pause cap (`capDeadAirPauses`, -60 dB) strips and what a
- * listener hears as the audio dropping out; a -56 dBFS noise floor is a breath. The runs'
- * own TTS-baked edge silence is kept, as everywhere else in the pipeline.
+ * Join voiced runs with a beat of SILENCE after each one where asked. It used to be -56 dBFS pink
+ * "room tone" (so the pause cap, `capDeadAirPauses` at -60 dB, would leave it alone), but on
+ * 2026-09-27 the operator heard room tone as a buzz between words and asked for it gone
+ * everywhere. Consequence: the cap now trims a 600 ms beat to `PAUSE_CAP_SEC` (0.45 s); a 300 ms
+ * beat is untouched. The runs' own TTS-baked edge silence is kept, as everywhere else.
  */
-// Measured with astats: pink noise at this amplitude sits at ≈ -56 dBFS RMS — inside the
-// -52..-58 dBFS a normally trained clone's own pauses occupy, and above the -60 dB floor the
-// pause cap treats as dead air (0.0018 measured -72 dBFS and would have been stripped).
-export const ROOM_TONE_AMPLITUDE = 0.008;
 /**
  * Each run is its own TTS generation and comes back at its own energy (measured 3-6 dB steps
  * between runs on a hosted film — see `narrationLevel.ts`). The runs are matched to their
@@ -356,7 +353,7 @@ export async function concatWithPauses(
       const pause = pausesAfterMs[i] ?? 0;
       if (pause > 0 && i < urls.length - 1) {
         legs.push(
-          `anoisesrc=r=48000:a=${ROOM_TONE_AMPLITUDE}:c=pink:s=${i + 1},` +
+          `anullsrc=r=48000:cl=stereo,` +
             `atrim=end=${(pause / 1000).toFixed(3)},` +
             `aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[p${i}]`
         );

@@ -242,7 +242,7 @@ Express · tRPC · Drizzle · MySQL.
   rendered in GROUPS (`server/lipsyncBatch.ts`, `RUNPOD_LIPSYNC_BATCH`, default 2): a solo beat
   pays for ~40% frames nobody sees (the run-up and the padding out to the last 81-frame
   window), so consecutive host scenes sharing a photo/plate are packed into one call — run-up,
-  beat, 500 ms room-tone gap, beat — rendered once and cut back at offsets measured from the
+  beat, 500 ms silent gap, beat — rendered once and cut back at offsets measured from the
   real slice lengths. The group's LEADER carries the task id and cut list (`scene.lipsyncGroup`),
   members are marked `rendering` and never dispatched alone while their leader is in the batch;
   a member whose leader is gone renders solo (paid again, never lost). The compiler is wired
@@ -259,10 +259,13 @@ Express · tRPC · Drizzle · MySQL.
   finished second beside the three verdicts for exactly that comparison. DELIVERY is
   script-based (`server/delivery.ts`): before the master is voiced, one Claude call reads the
   script paragraph by paragraph and returns a pace (slow/measured/natural/brisk → ±15% on the
-  channel's speed dial), a pause to leave after it (0/300/600 ms of -56 dBFS room tone, not
-  digital silence — the pause cap strips that and the ear hears a dropout) and a 3-5 word mood.
+  channel's speed dial), a pause to leave after it (0/300/600 ms of SILENCE — it was -56 dBFS room tone until
+  2026-09-27, when the operator heard room tone as a buzz and had it removed everywhere; the pause
+  cap now trims a 600 ms beat to 0.45 s) and a 3-5 word mood.
   When the plan changes the read, the master is voiced as RUNS of same-pace paragraphs joined
-  with those beats instead of one request (`voiceMasterNarration`), the scene re-voice
+  with those beats instead of one request (`voiceMasterNarration`; a run that fails is voiced again
+  on its own after 20 s / 60 s, keeping the runs that landed — `voiceRunWithRetries` — instead of
+  throwing the paced read away for the flat one-shot read, which Ruth's 3-min test, job 233, hit), the scene re-voice
   follows its paragraph's pace (`scene.deliveryPace`), and the mood is appended to the RunPod
   lip-sync prompt (`scene.deliveryCue`), as is a 3-6 word BODY cue (`scene.gestureCue`: "small
   nod on the number", "leans in slightly", "holds still") — the fixed direction can only ask for
@@ -414,6 +417,31 @@ Express · tRPC · Drizzle · MySQL.
   (which add host beats late) and demotes the most redundant check-in, never an anchor. The
   storyboard prompt is unchanged: it still writes host at the ramp's shares, which is what gives
   the planner candidates near every target. Harness: `client/__harness/host-minutes.html`
+- **Host photos are used in their PHONE LOOK by default** (`server/hostPhoneLook.ts`,
+  `shared/hostPhotoLook.ts`, 2026-09-28, the operator: "everything should be phone look as a default,
+  same as in the test, but the user can still go back to the original"). A studio-lit host photo
+  stays "AI" under any filter because HeyGen keeps the photo's look, so each library photo
+  (`channel_host_photos`, migration 0014) carries a `phoneImageUrl`: the same person in the same
+  room remade by gpt-image-2 (APIMART, the original as the reference) as a frame of a video they
+  recorded on a propped-up phone — chest-up, plain daylight, hands down (a raised hand would freeze
+  in a HeyGen take). The recipe (`phoneLookPrompt`) is word for word the one that made the four
+  photos the operator chose, with the SETTING read off the photo by one Sonnet call
+  (`describeHostSetting`); a version that only said "the same room" came back as the original. A
+  result with no detectable face is refused (`phoneLookError`). `hostPhotoUrl` is the one rule —
+  phone look unless `useOriginal` or none made yet — used by the generate route, the picker, Admin
+  and the HeyGen test. Made once per photo in the background when the photo is first listed
+  (`ensurePhoneLooks` in `channelHostPhoto.list`); a generate waits up to `PHONE_LOOK_WAIT_MS`
+  (150 s) and otherwise renders the original. Every tile has a Phone / Original switch
+  (`channelHostPhoto.setLook`, any role, like ticking — `HostPhotoLookSwitch.tsx`); Admin shows
+  both versions side by side with "Make phone look again" (`remakePhoneLook`, managers). The
+  HeyGen test renders the phone look too (uploads through `heygenTest.phoneLook`, cached per
+  source photo in app_settings) and its clips now go through `steadyHostClip` like a film's, so the
+  test shows what a video will. A photo opens BIG (`HostPhotoPreview.tsx`): the original and the
+  phone look side by side, the one in use outlined, the same switch under them — click a thumbnail
+  in Admin or the HeyGen test, or the magnifier on a picker tile (the tile itself ticks). The picker
+  and the HeyGen test draw the SAME tile (`HostPhotoTile.tsx`: magnifier, corner badge — a tick or
+  a remove button — label row, switch), so the two pages cannot drift apart. Harnesses:
+  `host-photos.html`, `heygen-test.html`
 - `server/hostPlate.ts` — **provider-independent**. The lip-sync model animates the image it
   is handed and never changes the setting, so `HOST_PLATES=1` generates a 16:9 plate of the host
   IN each beat's setting (host photo as identity reference) and syncs from that instead of the
@@ -454,7 +482,14 @@ Express · tRPC · Drizzle · MySQL.
   host take (`hostClipUrls` — not a back-filled `host-…` panel crop, which would zoom the face);
   only turning the old pitch's b-roll into host needs a fresh render. Pitch hosting and the
   no-split rule apply to MARKED blocks only (`inMarkedCta`): an unmarked script's `cta` flags
-  come from `markCtaScenes`, which also fires on any spoken price
+  come from `markCtaScenes`, which also fires on any spoken price. `titleMatcher` counts each title word ONCE: Diane's "The French Way: … Secrets
+  The French Use …" counted "french" twice, so "ordinary French habit" named the book and the
+  cover went on the wrong line (job 245: book → host → QR). The scan window is ONE picture (`joinScanWindow`, 2026-09-28): it was one per line, so
+  Hannah's 3-min test (job 228) changed the picture under the card three times in 10 s, the last
+  for 0.8 s; consecutive card beats of one block now join into the first one's picture on the final
+  lengths (qrTail carried, within the picture limit), never the cover or another block. The BOOK COVER is one shot the same way: Ruth's 3-min test (job 233)
+  had the cover line split in two, both halves still the cover, so it played twice with a jump —
+  consecutive cover beats of one block join too (never into the card)
 - **Stress rehearsals** (`scripts/stress/`, 2026-09-24): `run.mts` renders a script N times through
   the real `generate` route as the bootstrap admin into Video tab `--slot`, then `audit.mts`
   checks the operator's rules (no CTA pause, CTA order, right place, clean pictures, no text,
@@ -530,7 +565,15 @@ Express · tRPC · Drizzle · MySQL.
   required, up to twice — the old check read the PLAN, which on Mae's job 170 named a hand-off the
   cut then undid, so a 15 s hook shipped; pieces are settled with a `SNAP_MARGIN_SEC` and, after
   the final pause-snap, `foldSnappedFlashes` folds any shot under its own floor (list 0.4 s, else
-  1.2 s) into a neighbour. A host who hands over at the FIRST thing worth showing, not a later one
+  1.2 s) into a neighbour. A spoken list keeps ONE PICTURE PER ITEM at the pace it is spoken
+  ("a saw," then "a drill,") — on 2026-09-27 a reading wait after short lines and a slight pause
+  after each list item were built (fixed 2 / 1.5 / 1 s on-screen times, then a 0.35 s beat, drawn
+  as a tail hold since the automatic freeze-pad is retired) and dropped at the operator's call;
+  joining two items into one shot of both was rejected too. The HOOK (everything before
+  `hostIntro`, else the first 20 s) keeps its pace but shows fewer pictures: `joinHookPictures` joins adjacent
+  non-list shot-list pictures into their shorter neighbour until each runs `HOOK_PICTURE_MIN_SEC` (2.2 s),
+  never across a host take and never past `MAX_PICTURE_SEC` — Mae's and Hannah's first 10 s went
+  through five pictures. Host takes are never held. A host who hands over at the FIRST thing worth showing, not a later one
   (rule 7 of `SHOT_LIST_SYSTEM`): Hank's practice opening talked 6.8 s past "Japanese woodworking
   projects" and "cheap box-store lumber" to hand over before "a coffee can". The result is measured
   too: a hook or intro still whole past `HOOK_MAX_WHOLE_SEC`, or any hand-off whose host part runs
@@ -542,6 +585,157 @@ Express · tRPC · Drizzle · MySQL.
   is re-planned with the hand-off at the first named thing, up to twice. The host planner walks each stretch from the last host END (not the
   anchor), and a shot-list `hostCandidate` is a tie-break bonus, not a scoring tier — as a tier it
   left a 104 s faceless gap
+- **Pictures follow the context; the host in b-roll; the phone look v2** (2026-09-28, the
+  operator's notes on Hannah's film: too many images and clips, a new picture should come only
+  when the context changes, 5-8 s is fine, lists still one picture per item, fewer videos than
+  stills, static shots, b-roll of someone doing something should be OUR character, everything
+  adaptable to every channel and script, and "the b-rolls still look AI"). (a) The shot list
+  (`SHOT_LIST_SYSTEM`) now CHANGES THE PICTURE ONLY WHEN THE CONTEXT CHANGES — "a stack of feed
+  sacks my husband set aside for the burn barrel" is one shot — and marks a beat's first shot
+  `same` when it continues the picture before (`scene.sameShot`, joined across beats by
+  `joinSameContext` on the final lengths). (b) The longest a picture stays grows through the film
+  by quarter, `pictureMaxSecAt`: 7 / 10 / 12 / 14 s (`PICTURE_MAX_BY_QUARTER`, replacing a flat
+  5.5 s split and the gate's 6.5 s); `settleShots`, `splitLingering` and plan-gate rule 9 all use
+  it (`pictureLimitFor` adds up measured lengths for the start). (c) Video share 10-25% (was ≥ 30%):
+  `MOTION_SHARE_MIN`/`_MAX`, target 15%; `removeMotion` turns the shortest clips back to stills
+  (never below the floor, never a paid clip). A still may be `static` (`scene.staticShot` → no zoom,
+  `renderKenBurnsClip({ still })`; 8 s+ always drifts). (d) THE HOST IN B-ROLL: `deriveHostLook`
+  (`server/hostLook.ts`) reads one line of the host's look off their own photo once per video
+  (`inputParams.hostLook`), `markHostBroll` marks every picture of someone doing the work
+  (`brollHostLook`/`brollHostRef`, never a split's picture half), and `buildStillPrompt` /
+  the clip prompt use `hostBrollClause` + `NO_OTHER_FIGURES_SUFFIX` with the host photo as the
+  image reference — seen from behind or the side, the face NEVER shown (a drawn face would not
+  match the HeyGen host; the operator chose this). ONE BODY, TWO ARMS (`ONE_BODY_CLAUSE`, in `hostBrollClause`; `NO_FIGURES_SUFFIX` for
+  hands-only shots, 2026-09-29): over-the-shoulder hands shots are where the picture model adds an
+  arm — Norbert's 3-min test (job 232, 2:19) had a third sleeve ending at the drill's battery, and
+  neither Haiku nor Sonnet could see it at 768 px or full size, even told to trace every sleeve, so
+  it is PREVENTED in the prompt, not checked after. NO MIRRORS in a host picture (2026-09-29): a mirror must show the face we never
+  show, so the model fakes it — Scarlett's 3-min test (job 234) got a reflection of her BACK (0:19)
+  and one sliced off at the chin (1:14). `markHostBroll` strips mirror phrases (`withoutMirrors`)
+  and `NO_OTHER_FIGURES_SUFFIX` bans any mirror/glass the host could be reflected in. B-ROLL VIDEOS
+  ARE STEADIED like host takes (`steadyHostClip` on every provider clip in `runChunkTasks`): the
+  model ignores "locked tripod" — Scarlett's opening clip drifted 1.9% in 8 s, 0.2% after.
+  A TOOL BITING INTO MATERIAL IS A PHOTO (`contactToolWork` in shotList.ts, via `safeMotion`,
+  `settleMotion` and `addMotion`): drilling, sawing, driving a screw, hammering, chiselling,
+  cutting, carving — the ACTION, not a tool merely held. The video model cannot fake the contact:
+  Norbert's 3-min test (job 236, 2:19) drilled 10 s with the bit never going in. Gentle hand work
+  (sewing, crochet, sanding, oiling) still moves. `TOOL_CONTACT_CLAUSE` (host and hands-only
+  prompts) asks for the tool really in its material, and the still checker's `broken` names a
+  drill bit or screw that is not in it. The SHOT LIST judges it too (rule 9b, `contact` → `scene.toolContact`), so any craft
+  and any wording is caught, not just the word list: live on 2026-09-29 it marked punching leather,
+  stapling, welding, boring and engraving as contact and left knitting and sanding as video. A topic
+  holding a contact shot is a photo in every view (`applyContextGroups`), and the gate never makes
+  one moving (`settleMotion`, `addMotion`). The word list stays as the backup. A HELD THING HAS A HOLDER: `SHOWS_PERSON` counts "held near/up/against…", so
+  such a picture gets the host's hands (Norbert's job 238 asked for a drill "held near the doorframe",
+  read it as person-free, and got it floating), and `NO_FIGURES_SUFFIX` says a tool with no hand on
+  it rests on a surface. The still checker misses a floating tool (tested), so it is prevented.
+  The SHOT LIST judges "held" too (rule 9c → `humanPresent` on the piece, still or moving), so any
+  wording works: live, it marked "raise the drill to the frame", "aim the dryer at the roots",
+  "hold your phone up" and "scissors right over the chalk line" as held, and a drill on its shelf
+  or a dryer on its hook as not. A HANDS VIDEO SHOWS HANDS: `safeMotion` and `settleMotion` make a "hands" shot whose
+  description has no hands or person a still (Ruth's job 239 had a moving coffee tin, 11.5 s). And a
+  RUN LABEL is not the subject: `isOperatorLabelTitle` now catches "3min", "v3", "take 2" (job 239
+  wrote "(as used for Ruth 3min v3)" into picture descriptions via the list lead-in). Host descriptions use the same look; the stock
+  "a man in his early 60s" (`DEFAULT_HOST_DESCRIPTOR`, `DEFAULT_LONGFORM_INSTRUCTION`, the POV
+  angle's "older man's weathered hands") is gone — it described Hannah and Mae as a man. (e) THE
+  PHONE LOOK v2: `amateurSettingClause` asks for plain, slightly dull daylight, no glowing lamps /
+  candles / golden glow / dark corners, nothing arranged, no decorative props unless named, shot
+  from a step back; the still enhancer writes plain snapshot captions (no texture, light or mood
+  words); `phoneLookFilter` is neutral-to-cool with softer detail, flatter contrast and no vignette
+  (the warm tint fed the orange glow). A still checker question, `staged` (`STAGED_QUESTION`),
+  re-rolls a styled/AI-looking picture once; the audit gained rule 13, "looks like a phone photo".
+  Two follow-ups the same day (Hannah's 0:02-0:10 and 0:10): ONE topic may run 50% past its
+  quarter's limit (`SAME_TOPIC_SLACK`, 50%: 10.5 / 15 / 18 / 21 s) before it splits — an 8.1 s
+  feed-sack shot had been split into two near-identical photos — and a split's later parts are
+  clearly different VIEWS (close detail / much further back / other side) named in their own
+  `showSubject`; `joinSameContext` also joins two neighbours whose subject is the same
+  (`sameSubject`) even when the planner did not mark `same`. And NAME IT EXACTLY (shot-list rule
+  12): a specific kind — nine-patch, granny square, kumiko — keeps its name plus a plain
+  description of how it looks, the enhancer keeps both word for word (and adds no lamp/lamplight
+  the line does not name — the props list had put an oil lamp in most of Hannah's shots), and the
+  still checker's `missing` question counts a generic version (a checkered quilt for a nine-patch)
+  as missing. The audit's rule 1 counts a frozen picture only with a ≥ 1.5 s stop in the voice
+  under it (`FROZEN_PAUSE_SEC`) — static stills made every one read as a pause.
+  SAME TOPIC, SAME PICTURE (`markSameContext`, shotList.ts, same day, the operator: "if the context
+  is still the same no need to change the shots"). The shot list plans 12 beats at a time and
+  `joinSameContext` only joined a `same` mark or an IDENTICAL description, so Mae's scarf section
+  (job 219, 12:00-13:40) was 12 pictures of one scarf, "scarf on a chair" twice in a row. Now, on
+  the final lengths and before the join, ONE Sonnet call per film reads every picture in order
+  (runs of pictures only — `contextRuns` never crosses a host take, list item, CTA, cover, asset
+  or split) and groups consecutive lines about the same thing; `parseContextGroups` keeps only
+  consecutive, same-run, non-overlapping groups, and `applyContextGroups` gives the group's first
+  picture ONE description covering all its lines (one still moment, never "or") and marks the rest
+  `sameShot`. A person in any member stays in the picture (the host from behind — the joined
+  picture keeps `humanPresent`, and "the host's hands" is added if the description dropped them).
+  Past the quarter's limit the topic gets a new picture that is a different VIEW (`OTHER_VIEWS`:
+  close-up → further back → other side, rotating along the chain), never a near-copy. `withView` REPLACES an angle already on
+  the text and the rotation reads the picture before's own angle (`viewIndexOf`) across passes —
+  Scarlett's job 244 had "a close-up" twice in a row, stacked twice in one description. The
+  host is recognised by "Host …", "wearing", "collarbone", "neck", "wrist" too (`SHOWS_PERSON`), so
+  such a picture gets the host look, the one-body rule and loses its mirror. On job 219's
+  storyboard: 160 → 133 pictures, the scarf section 12 → 7. Any failure (mock, no transcript, the
+  call) changes nothing.
+  ONE TOPIC, ONE SHOT — a video OR a photo, never both (the operator, same day): the whole group
+  takes one kind, a VIDEO when any line in it was a moving shot (hands at work, or a thing that
+  moves by itself — still through `safeMotion`), else a PHOTO; every member carries the kind and
+  the topic description, so a topic past its limit continues as the same kind from another view.
+  A video joins only up to `MOVING_PICTURE_MAX_SEC` (15 s, the video model's cap) — past it the
+  picture would freeze. The plan gate still holds videos to 10-25% of cutaway time. The same cap holds on
+  EVERY path (`capMovingLength`, the last step of `enforcePlanRules`, and `addMotion` only picks
+  stills ≤ 15 s): Hank's 3-min test (job 227) shipped an 18 s "video" the motion top-up had made
+  from the LONGEST still. A view is added with `withView`, which drops a trailing full stop first.
+  The video-share passes (`addMotion`/`removeMotion`) turn a whole TOPIC (`topicOf`: the picture and
+  the `sameShot` views it continued into) video or photo together — Dale's 3-min test (job 230) had
+  "coasters at the market" as a video, then its close-up a photo. A list's last item runs on into an
+  identical picture right after it (the same subject twice, 1.8 s + 3.9 s, in job 230), and a shot
+  description never says "or" (the generator draws one thing).
+  KEPT ON PURPOSE (the operator, 2026-09-28, after the 3-min tests showed 1-2 videos per film):
+  the 10-25% video share stays, so a "hands at work" topic past it is a PHOTO of the hands. The
+  alternative, a video for every topic where something is done, was ~$0.70 more per 3-min film and
+  ~$7 per 20-min at the list rates, plus glitch re-renders. Do not raise the share without asking.
+- **A sentence finishes, a word is never cut** (2026-09-28, the operator: "it should adapt to
+  everything and not only these videos"). Three rules, none per-channel. (a) Nothing folds across a
+  MARKED CTA edge: `coalesceShortScenes` used to fold a sub-floor scene into either neighbour, and
+  the marker had split "…a dollar | and thirty cents an hour. | Let me stop here…" — the 5-word tail
+  went into the CTA's host take (Hannah 0:59). Unmarked scripts fold as before. (b) A host take
+  starts only where a sentence starts: coming in after a comma was allowed in `checkInShaped`,
+  plan-gate rule 7 and `cleanHostCandidate`, and read as the host cutting in (Mae 2:12 "…well now,
+  | why not…"); rule 7's excuse is now the length of the sentence's OWN lead (`sentenceLeadSec`), not
+  the whole picture before. A take that still starts mid-sentence takes its sentence back off the
+  pictures before it, or starts at its next sentence (`finishSentenceBeforeHost`, cut on the
+  LONGEST nearby pause — the sentence break). The book cover starting on the title and the host
+  handing over to a picture mid-sentence are the operator's own design and stay. (c) No cut inside
+  a word: a SHORT gap (40-120 ms, the second snap tier) is also what a "k"/"t"/"p" closure inside a
+  word looks like — Ruth's "blocks," was cut before its "s" — so it may take a cut only within
+  `SHORT_GAP_SLACK_SEC` (30 ms) of where the transcript says the words meet (`meets`); a real pause keeps
+  the wide window. Audit rule 14 (`cutsInsideWords`) flags a cut well inside a transcribed word
+  and not in a real pause — on the four 2026-09-28 films it found exactly that one.
+  The plan gate's own cuts (a glimpse, a sentence given back, a lingering picture split) had no
+  word timings — only pauses and a word-share guess — so on a voice with breath noise between
+  words one landed inside "apiece" (Mae, job 209). The gate now gets the voicing transcript
+  (`PlanGateOptions.words`) and `gapBeforeWord` puts each cut in the real gap between two words,
+  on a pause inside that gap when there is one; without a transcript it falls back to the guess.
+  With the comma entry gone, a stretch without the host could no longer be filled when the host
+  minutes were nearly spent (real HeyGen jobs 205/206: 43 s and 42 s, the one whole-sentence spot
+  longer than the budget left), so the gate's last resort is a GLIMPSE (`hostGlimpse`): the host
+  says the opening clause of a sentence — which may start inside a picture — and hands over to the
+  picture at its comma, within the budget and `HOST_PART_MAX_SEC`.
+- **The host's name always exists; a spoken list is always shown** (2026-09-28). Every rule keyed to
+  the host's name (the self-introduction on camera, the intro hand-off, the lower third) read
+  `channel_configs.hostName` only, and Diane De Chambray's channel had none, so "I'm Diane" played
+  over a picture (job 217). `resolveHostName` (server/db.ts) is the one source — `hostName`, else the
+  display name — used by the generate route, the delivery planner and a resume; with no name at all,
+  `introSpans` treats the first "I'm <Name>" in the script's opening as the introduction (`NOT_A_NAME`
+  keeps "I'm Not sure" out). And a host line that is JUST a spoken list (`spokenListItems`: one
+  sentence, 3+ short pieces each naming a thing) goes to the pictures (`handListsToPictures`, before
+  the shot list), so it gets one picture per item — even on the second cold-open angle, which the
+  shot list otherwise left on the host (Lance's "a bin…, a bag…, maybe a box…", job 218). The first
+  line, the intro, the CTAs and the goodbye never move, and a list only moves right after a host line.
+  And a list whose FIRST item fell at the end of the line before (a beat boundary inside the list)
+  gets it back (`pullListLeadIns`, after the shot list, 2026-09-29): Granny Mae's "…at a kitchen
+  table with a hook, | a skein of yarn, and a stack of stitch books" (job 231) kept "a hook" on the
+  host. A line ending on a short item (`trailingListItem`: a/an/the/some/… + ≤5 words + comma, ≥5
+  words left before it) right before a list shot hands over there instead, on any channel.
 - **Every film passes the checks BEFORE it is paid for** (2026-09-26). The rehearsal audit's rules
   used to be checked only after a film was finished, so a live render shipped whatever they would
   have found. Now: (a) THE VOICE SAYS EVERY WORD (`server/narrationSkips.ts`, voicing stage, right
@@ -567,7 +761,10 @@ Express · tRPC · Drizzle · MySQL.
   also be a crowded intro/outro SECTION beat (`SECTION_SPARE_GAP`, Ruth's host at 0, 5 and 13 s
   while 2:19 went 49 s without her) but never the start, intro, a CTA, the end or a beat with
   `submits` (its render is paid for); a picture merged into a host keeps its `wordCut`, so a
-  joined intro still reads as a hand-off. A CTA split screen or pitch picture is fixed. What cannot be fixed is a job warning,
+  joined intro still reads as a hand-off. A BLINK — a run of pictures between two host takes shorter than
+  `PICTURE_RUN_MIN_SEC` (2 s, the host part's own floor) — is rule 7 too: the host before keeps
+  those words, and the two takes become one when they fit `HOST_JOIN_MAX_SEC` (Norbert's 3-min
+  test, job 232: host → 0.6 s "the drill" → 1.3 s "or the handyman" → host, in the goodbye). A CTA split screen or pitch picture is fixed. What cannot be fixed is a job warning,
   never a stopped film; beats the gate moved are re-sliced from the master and demoted hosts
   re-enhanced. (c) THE PICTURES (`scanStillDefects(buffer, expect, line)`): the one vision call now
   also asks `messy` (a legible brand or logo, or the subject lost in clutter — rule 4) and, given the
@@ -588,7 +785,11 @@ Express · tRPC · Drizzle · MySQL.
   wrong?" on a 2x2 sheet passed the kumiko clip with Haiku AND Sonnet; the list named the strips at
   once. On 15 of Hank's clips it flagged the kumiko panel and one chisel shaving. With hands in the
   shot only a MORPH counts: the first real render (job 175) flagged "hands repositioned lower on the
-  paper" and "chisel angle shifted" as untouched motion and swapped good hands clips for stills. A glitch renders
+  paper" and "chisel angle shifted" as untouched motion and swapped good hands clips for stills. But a thing that DISAPPEARS, appears or clearly changes size with no hand doing
+  it (`vanished`) fails even with hands in the shot, and the pair is laid SIDE BY SIDE (768 each):
+  Granny Ruth's 3-min test (job 233, 1:00) had the quilt over the table front shrink away to bare
+  table while she sewed; stacked, Sonnet called that pair "slight shifts" at 640 and 1024 px, side
+  by side it named it and still passed five good hands clips (2026-09-29). A glitch renders
   the beat again once; a second makes it the still (`scene.motionGlitches`); a moving split panel
   that glitches falls back to its still panel. Skipped in rehearsals
 - **B-roll prompts** — the style bible is a HOME BASE plus the places the script travels to, not
@@ -600,6 +801,42 @@ Express · tRPC · Drizzle · MySQL.
   `NO_NARRATION_TEXT_RULE` replaced `ENGLISH_TEXT_ONLY`, which ALLOWED in-scene text and got the
   narration written onto chalkboards ("$93/hour"); `scanStillDefects` has a third verdict,
   `writing`, that re-rolls a still with readable text in it
+- **The iPhone look** (2026-09-27, the operator's call: "realistic like a person took it, not AI").
+  Two halves, because a filter alone did not fix it — measured on job 175's stills, the AI tell was
+  the COMPOSITION (dead centre, level, flattering light, a styled bench), not the texture.
+  (a) PROMPT: `amateurSettingClause` asks for "a quick, ordinary photo someone took themselves on an
+  old iPhone" — framed from where a person stands, a little off-centre and tilted, the room's own
+  uneven light, a real used place whose edge props CHANGE shot to shot (the first test put the same
+  mug and tape measure in every frame), deep focus. `heroFramingClause` and the enhancer's MUST SHOW
+  rule dropped "centred"; `CLEAN_FRAME_RULE` and the `messy` questions (still checker + audit) now
+  allow a lived-in room and still catch brands and a lost subject. (b) FINISH: `phoneLookFilter` in
+  videoAssembly — small-lens softness, phone oversharpening, milky shadows, early-clipping
+  highlights, a slightly warm white balance, lens shading, sensor noise — drawn in
+  `buildSceneMuxArgs` UNDER the QR/name card/caption so they stay crisp. `phoneLookFor` picks it:
+  `broll` on cutaways, the lighter `host` on host takes and splits (heavy softening makes a
+  lip-synced mouth hard to read), none on a book cover or an operator's asset. NO MOTION is added —
+  a handheld wobble was tried and rejected. It is in the `mux` cache key (as the filter string), so
+  finished films get it on Reassemble; `PHONE_LOOK=0` turns it off. The HOST needs the same fix at
+  the source: HeyGen keeps the photo's look, and a portrait-lit, blurred-background photo stays
+  "AI" under any filter — a host photo should read as a frame of a phone propped on the bench.
+  HeyGen then added a slow "breathing" camera on some of those photos (Ruth's job 182: the room
+  zoomed in and out 0.6-1.2% on all 12 host clips; her old photo 0.3%, Hank's and Mae's 0), which
+  nothing in the request switches off and vid.stab's tripod mode does not correct (slide and
+  rotation only). `server/hostSteady.ts` tracks the room on the frame's outer band against frame 0
+  (zoom about the centre + slide) and resamples each frame back with `perspective`, zoomed in just
+  enough to hide edges; it runs in `runChunkTasks` right after the black-clip check, before the
+  clip is stored, so full-frame takes and splits built from them are both steady. A still camera is
+  left byte-identical (one decode, ~1 s); `HOST_STEADY=0` turns it off. Films rendered before get
+  it through `steadyJobHostClips(jobId)` + Reassemble (recomposites splits from `hostClipUrls`). v2 (2026-09-28, Ruth's job 206 "the room moves when she moves"): the
+  fixed outer band tracked HER as well as the room — her phone photo is framed wide, the shawl
+  reaches 79% across — so the room is now found from the clip (`roomMask`: what still differs from
+  frame 0 after a first correction is the host), corrected every 2 frames and re-measured for a
+  second pass (threshold 0.12%, a photo HeyGen leaves alone measures 0.03%). What that leaves is
+  JITTER — HeyGen redraws the room slightly differently every frame, ±0.1% — so a clip that needed
+  steadying also has its ROOM FROZEN (`freezeRoom`/`hostArea`): outside where the host moves
+  (thin flickering edges shaved off first, then a 12 px margin, a 10 px feather) every pixel is the
+  clip's first frame. Ruth's takes: 0.2-0.4% → 0.00%. `HOST_FREEZE_ROOM=0` keeps the camera fix
+  only. Practice runs show the host as a still photo (no slow zoom) so they look like the real take
 - `server/sceneEditQueue.ts` + `enqueueSceneEdit`/`runSceneEditSession` (longformVideo) — operator
   edits on a rendered job (regenerate scene, batch regenerate, split edits) are queued per job and
   run by ONE edit session inside a single `withJobLock` pass: one live storyboard document, tasks
@@ -744,6 +981,13 @@ Express · tRPC · Drizzle · MySQL.
   the moved stretch's outer edges are clamped onto those stored neighbours so the film still
   tiles to the millisecond and stays on the master-overlay path. Audited against 70 real jobs:
   one flag, and it was a second genuine case (461 words in 1.4 s)
+- **No room tone, no hiss** (2026-09-27). The operator heard the -56 dBFS room tone as a BUZZ, so
+  every spliced pause is now clean silence (delivery run joins, lip-sync batch gaps, assembly holds
+  — `HOLD_GAP_SOURCE`). That exposed the 69Labs voices' own ~-62 dB hiss in their pauses, which now
+  sat right beside dead silence and read as the same buzz; `denoiseMasterHiss` (`afftdn=nf=-50`)
+  cleans it out of the master on all three save paths, before the pause cap and the leveller, so
+  whisperx, the slices and both lip-sync lanes inherit it (3-min master: 13 → 1 hiss-next-to-silence
+  stretches, speech level -27.1 → -27.4 dB, same length). `NARRATION_DENOISE=0` turns it off.
 - `server/narrationLevel.ts` — the voice at ONE level across a film. 69Labs (ElevenLabs
   underneath) chops a long script into chunks it generates separately (`splitType: "smart"`),
   and the delivery plan voices it as runs joined in `concatWithPauses`; each generation lands
@@ -1128,6 +1372,21 @@ Always 16:9. Fire-and-forget; progress persisted to the job row and polled by th
   provider configured" ⇒ re-run `scripts/seed.mjs` or set active in Admin.
 - **FFmpeg needs drawtext** or text overlays silently disable. The startup log names the
   binary it picked (`server/ffmpegPath.ts`); bundled `ffmpeg-static` has drawtext.
+- **A tiny voice slice is read as VIDEO unless told** (2026-09-28). ffmpeg guesses an input's
+  format from its first bytes; a sub-second mp3 is mostly its ID3 tag (69Labs' AIGC label), and
+  the guess came back raw VVC — `-map 1:a` then matched nothing and Mae's job 219 lost its
+  storyboard scene 7 at assembly on every attempt. **Every ffmpeg call goes through
+  `server/ffmpegSpawn.ts`** (`spawnFfmpeg` / `execFfmpeg`), which names each mp3 input
+  (`withInputFormats`, sniffing ID3 / MPEG sync) and waits out a machine too busy to START ffmpeg
+  (`retryUnstarted`: `spawn UNKNOWN`/EAGAIN/ENOMEM, Windows exit 3221225794, 2/5/10/20 s) —
+  Diane's job 222 died slicing narration and Pearl's 220 in assembly on exactly those, at steps
+  with no retry of their own. `isTransientFfmpegError` knows the Windows words too. A TRIPWIRE in
+  `ffmpegSpawn.test.ts` fails if any other server file imports `child_process` (only
+  `ffmpegPath.ts` and the ffprobe in `mediaProbe.ts`, which does both itself, may). And every start WAITS
+  FOR MEMORY (`waitForFreeMemory`, < `FFMPEG_MIN_FREE_MB` 1024 free ⇒ wait, ≤3 min, jittered): each
+  process caps its own ffmpeg count but nothing watched the machine — three 3-min films at once
+  left 0.9 of 13.9 GB free and x264 failed "malloc of size … failed" (now also a never-started
+  retry). Off under vitest.
 - **`*.r2.dev` is blocked on a lot of managed networks** (DNS NXDOMAIN _and_ TCP to its
   anycast IPs), while `<bucket>.<account>.r2.cloudflarestorage.com` stays reachable. The
   symptom is lopsided: every upload succeeds and every read back dies with

@@ -35,6 +35,9 @@ type Gap = readonly [number, number] | null;
 type BoundaryPlan = {
   boundaries: number[];
   gaps: Gap[];
+  /** Where the transcript says the two words meet: `[prevWord.end, nextWord.start]`. Only a real
+   * pause may use the wider `gaps` window — see `SHORT_GAP_SLACK_SEC`. */
+  meets?: Gap[];
   /** Boundary indexes pinned by a CTA anchor — found verbatim, so never moved by a repair. */
   pinned: number[];
 };
@@ -62,6 +65,17 @@ const QR_TAIL_RESCUE_WINDOW_SEC = 4;
 /** Keep the cut at least this far inside a silence — same clean-lead convention as assembly's
  * `sanitizeInsertBoundaries`, so the next word keeps ≥40ms of true silence before it. */
 const SNAP_CUT_MARGIN_SEC = 0.04;
+/**
+ * How far from where the transcript says two words meet a SHORT gap (40-120 ms, the second snap
+ * tier) may still take a cut. A short gap is either the space between two words or the silent
+ * closure INSIDE one before a "k"/"t"/"p" — the two look the same to silencedetect, so only its
+ * place tells them apart. Ruth's "blocks," was cut on the closure before its "s" (49.12 s, the
+ * words meeting at 49.24-49.26) and the picture changed while she was still saying it. A real
+ * pause (≥120 ms) is never a closure and keeps the wide window: Whisper edges run late, and "book,"
+ * was transcribed ending 0.3 s after the pause that really ends it. 0.08 s let a gap before the
+ * "th" of Hannah's "with" take a cut (the words met at 25.13-25.19, the gap sat at 25.04-25.09).
+ */
+const SHORT_GAP_SLACK_SEC = 0.03;
 
 /** Lowercased alphanumeric word tokens (digits kept so "2024" is one token; edge apostrophes dropped). */
 export function tokenizeNarration(text: string): string[] {
@@ -223,8 +237,10 @@ export function assignSceneRanges(
     for (const run of fix.repaired) {
       // Walk indexes inside a repaired stretch are garbage — snap tolerance-only, as the
       // anchor-spread path does.
-      for (let k = run.fromScene + 1; k <= run.toScene; k++)
+      for (let k = run.fromScene + 1; k <= run.toScene; k++) {
         plan.gaps[k] = null;
+        if (plan.meets) plan.meets[k] = null;
+      }
     }
     if (report) {
       report.repaired.push(...fix.repaired);
@@ -243,7 +259,8 @@ export function assignSceneRanges(
       boundaries,
       silences,
       plan.gaps,
-      shortSilences ?? []
+      shortSilences ?? [],
+      plan.meets ?? []
     );
     rescueSilentQrTails(scenes, boundaries, silences);
     boundaries = unsnapImplausible(aligned, boundaries, tokenCounts);
@@ -466,6 +483,7 @@ function alignBoundaries(
 
   const boundaries: number[] = new Array(n + 1);
   const gaps: Gap[] = new Array(n + 1).fill(null);
+  const meets: Gap[] = new Array(n + 1).fill(null);
   boundaries[0] = 0;
   boundaries[n] = masterDurationSec;
   for (let s = 1; s < n; s++) {
@@ -500,6 +518,7 @@ function alignBoundaries(
     const nextEnd =
       nextStartIdx < words.length ? words[nextStartIdx].end : nextStart;
     gaps[s] = aw !== undefined ? [prevEnd, nextStart] : [prevStart, nextEnd];
+    meets[s] = [prevEnd, nextStart];
   }
   // Anchor authority: predecessors that overshot a pinned boundary are pulled back and spread
   // evenly over the stretch before it — residual drift can neither squeeze the CTA block nor
@@ -514,13 +533,14 @@ function alignBoundaries(
       boundaries[k] =
         boundaries[j] + ((boundaries[b] - boundaries[j]) * (k - j)) / (b - j);
       gaps[k] = null; // walk indexes here are drift garbage — snap tolerance-only
+      meets[k] = null;
     }
   }
   // Guarantee non-decreasing even if a degenerate scene produced an inverted midpoint.
   for (let s = 1; s <= n; s++) {
     if (boundaries[s] < boundaries[s - 1]) boundaries[s] = boundaries[s - 1];
   }
-  return { boundaries, gaps, pinned: anchorIdxs };
+  return { boundaries, gaps, meets, pinned: anchorIdxs };
 }
 
 /** A contiguous stretch of scenes (positions in the scene array, inclusive) and its audio span. */
@@ -903,14 +923,17 @@ function cutPointInSilence(boundary: number, sil: SilenceInterval): number {
  * sloppy Whisper word edge is usable, but a mid-sentence breath before a genuinely separate word
  * can't drag that word into the adjacent scene; a boundary with no gap (proportional path) keeps
  * tolerance-only snapping. Boundaries with no qualifying silence in `silences` get a second
- * chance against `shortSilences` (a finer scan that sees sub-120ms inter-word gaps). Keeps
+ * chance against `shortSilences` (a finer scan that sees sub-120ms inter-word gaps) — only within
+ * `SHORT_GAP_SLACK_SEC` of where the words meet (`meets[s]`), since a gap that short may be a
+ * consonant's closure inside a word. Keeps
  * `boundaries` monotonic and tiling `[0, dur]`. Pure — unit-tested.
  */
 function snapBoundariesToSilence(
   boundaries: number[],
   silences: SilenceInterval[],
   gaps: Gap[] = [],
-  shortSilences: SilenceInterval[] = []
+  shortSilences: SilenceInterval[] = [],
+  meets: Gap[] = []
 ): number[] {
   const n = boundaries.length - 1; // scene count
   const pick: { cut: number; interval: number; dist: number }[] = new Array(
@@ -921,12 +944,16 @@ function snapBoundariesToSilence(
 
   // Tier 1: real pauses; tier 2 (only for boundaries tier 1 left unsnapped): short-gap scan.
   for (const tier of [silences, shortSilences]) {
+    const short = tier === shortSilences && tier !== silences;
     for (let s = 1; s < n; s++) {
       if (pick[s].interval >= 0) continue;
       const gap = gaps[s] ?? null;
+      const meet = short ? meets[s] ?? null : null;
       for (let c = 0; c < tier.length; c++) {
         const cut = cutPointInSilence(boundaries[s], tier[c]);
         if (gap && (cut <= gap[0] || cut >= gap[1])) continue;
+        if (meet && (cut < meet[0] - SHORT_GAP_SLACK_SEC || cut > meet[1] + SHORT_GAP_SLACK_SEC))
+          continue;
         const d = Math.abs(cut - boundaries[s]);
         if (d <= SNAP_TOLERANCE_SEC && d < pick[s].dist) {
           pick[s] = { cut, interval: c, dist: d };

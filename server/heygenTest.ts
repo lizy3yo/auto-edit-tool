@@ -55,6 +55,7 @@ import { parseVolumeMultiplier } from "./ttsUnified";
 import { downloadToTemp, runFfmpeg } from "./videoAssembly";
 import { getMediaDuration } from "./mediaProbe";
 import { storagePut } from "./storage";
+import { steadyHostClip } from "./hostSteady";
 import { isMockMode } from "./mockMode";
 import { RATES } from "./pricing";
 import {
@@ -350,9 +351,15 @@ async function renderRow(row: HeygenTest): Promise<void> {
       if (!result.success)
         throw new Error(result.error || "HeyGen render failed");
       if (!result.fileData?.length) throw new Error("HeyGen returned no video");
+      // The test shows what a VIDEO will show: the same steadier and room freeze a film's host
+      // takes get (`runChunkTasks`), so a photo HeyGen "breathes" on is judged as it will play.
+      const clip = await steadyHostClip(
+        Buffer.from(result.fileData),
+        `HeyGen test ${row.batchId} photo ${row.id}`
+      );
       const { url: videoUrl } = await storagePut(
         `heygen-tests/${row.batchId}/${row.id}.mp4`,
-        result.fileData,
+        clip,
         "video/mp4"
       );
       await updateHeygenTest(row.id, {

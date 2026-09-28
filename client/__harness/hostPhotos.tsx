@@ -30,14 +30,17 @@ const swatch = (hue: number, label: string) =>
       `</svg>`
   );
 
+// Every look state: A and B have their phone look (B switched to the original), C's is still
+// being made and lands ~6 s after load, D's failed.
 const state = {
   rows: [
-    { id: 11, sortOrder: 0, isSelected: true, imageUrl: swatch(30, "A") },
-    { id: 12, sortOrder: 1, isSelected: true, imageUrl: swatch(120, "B") },
-    { id: 13, sortOrder: 2, isSelected: true, imageUrl: swatch(210, "C") },
-    { id: 14, sortOrder: 3, isSelected: true, imageUrl: swatch(300, "D") },
+    { id: 11, sortOrder: 0, isSelected: true, imageUrl: swatch(30, "A orig"), phoneImageUrl: swatch(40, "A phone") as string | null, useOriginal: false, phoneLookError: null as string | null },
+    { id: 12, sortOrder: 1, isSelected: true, imageUrl: swatch(120, "B orig"), phoneImageUrl: swatch(130, "B phone") as string | null, useOriginal: true, phoneLookError: null as string | null },
+    { id: 13, sortOrder: 2, isSelected: true, imageUrl: swatch(210, "C orig"), phoneImageUrl: null as string | null, useOriginal: false, phoneLookError: null as string | null },
+    { id: 14, sortOrder: 3, isSelected: true, imageUrl: swatch(300, "D orig"), phoneImageUrl: null as string | null, useOriginal: false, phoneLookError: "no face in the phone-look result" as string | null },
   ],
 };
+setTimeout(() => (state.rows[2].phoneImageUrl = swatch(220, "C phone")), 6000);
 const list = () =>
   [...state.rows]
     .sort((a, b) => a.sortOrder - b.sortOrder)
@@ -99,6 +102,12 @@ window.fetch = (async (input: any, init?: RequestInit) => {
     ordered.forEach((r, i) => (r.sortOrder = i));
     ordered[0].isSelected = true;
     return reply({ success: true });
+  }
+  if (path.includes("channelHostPhoto.setLook")) {
+    const row = state.rows.find(r => r.id === input0.id)!;
+    row.useOriginal = input0.useOriginal;
+    if (!input0.useOriginal) row.phoneLookError = null;
+    return reply(list());
   }
   if (path.includes("channelHostPhoto.list")) return reply(list());
   return reply(null);

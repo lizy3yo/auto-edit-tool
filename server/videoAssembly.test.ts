@@ -6,6 +6,7 @@ import {
   HOST_UPSCALE_SHARPEN,
   buildOverlayMuxArgs,
   buildSceneMuxArgs,
+  phoneLookFilter,
   buildConcatCopyArgs,
   buildAudioConcatFilterArgs,
   buildFilmAudioConcatArgs,
@@ -2096,5 +2097,65 @@ describe("kenBurnsMaxZoom", () => {
     expect(kenBurnsMaxZoom(5)).toBeCloseTo(1.14);
     expect(kenBurnsMaxZoom(1)).toBeCloseTo(1.028);
     expect(kenBurnsMaxZoom(20)).toBeCloseTo(1.14);
+  });
+});
+
+describe("phone finish", () => {
+  it("draws the finish under every overlay, lighter on the host, and nothing when unset", () => {
+    const base = {
+      videoPath: "v.mp4",
+      audioPath: "a.mp3",
+      outputPath: "o.mp4",
+      durationSec: 4,
+      qrOverlay: { imagePath: "qr.png", height: 1080 },
+    };
+    const graph = (look?: "broll" | "host") => {
+      const a = buildSceneMuxArgs({ ...base, look });
+      return a[a.indexOf("-filter_complex") + 1];
+    };
+    expect(graph()).not.toContain("noise=");
+    const broll = graph("broll");
+    // On the picture, before the QR card is composited over it — the card stays crisp.
+    expect(broll.indexOf(phoneLookFilter("broll"))).toBeLessThan(broll.indexOf("overlay="));
+    expect(broll).toContain("[base]");
+    expect(graph("host")).toContain(phoneLookFilter("host"));
+    // The host keeps more detail (the mouth has to read) and less grain.
+    expect(phoneLookFilter("host")).toContain("scale=1280:720");
+    expect(phoneLookFilter("broll")).toContain("scale=960:540");
+    // Neutral-to-cool, never warm: the warm tint fed the orange "AI" glow.
+    expect(phoneLookFilter("broll")).not.toMatch(/colorbalance=rm=0.0[1-9]/);
+    expect(phoneLookFilter("broll")).not.toContain("vignette");
+    // No motion is added: no crop/perspective/rotate expressions.
+    expect(phoneLookFilter("broll")).not.toMatch(/perspective|rotate|crop|zoompan/);
+  });
+});
+
+describe("which still pictures zoom", () => {
+  it("zooms a picture on screen 3 s or longer, keeps a shorter one completely still", async () => {
+    const { stillZooms, STILL_ZOOM_MIN_SEC } = await import("./videoAssembly");
+    expect(STILL_ZOOM_MIN_SEC).toBe(3);
+    expect(stillZooms(2.9)).toBe(false);
+    expect(stillZooms(3)).toBe(true);
+    expect(stillZooms(9)).toBe(true);
+  });
+});
+
+describe("audioInput", () => {
+  it("names the format of an mp3 so ffmpeg never guesses a tiny one is video", async () => {
+    const { audioInput } = await import("./videoAssembly");
+    const { mkdtempSync, writeFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const dir = mkdtempSync(join(tmpdir(), "audio-input-"));
+    const id3 = join(dir, "tagged.mp3");
+    writeFileSync(id3, Buffer.concat([Buffer.from("ID3"), Buffer.alloc(64)]));
+    const bare = join(dir, "bare.mp3");
+    writeFileSync(bare, Buffer.from([0xff, 0xfb, 0x90, 0x00]));
+    const wav = join(dir, "voice.wav");
+    writeFileSync(wav, Buffer.from("RIFF0000WAVE"));
+    expect(audioInput(id3)).toEqual(["-f", "mp3", "-i", id3]);
+    expect(audioInput(bare)).toEqual(["-f", "mp3", "-i", bare]);
+    expect(audioInput(wav)).toEqual(["-i", wav]);
+    expect(audioInput(join(dir, "missing.mp3"))).toEqual(["-i", join(dir, "missing.mp3")]);
   });
 });

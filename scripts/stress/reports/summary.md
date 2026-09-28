@@ -1105,3 +1105,1288 @@ job 178 (quilting_with_granny_ruth) — completed
    - [3] scene 382 b-roll: wrong place — shown on porch rocker, not a den
    - [10] scene 47 split-panel: does not show what is said — no hands measuring, just ruler beside block
 ```
+
+### hank_hardwood run 1 — 20 min
+```
+job 179 (hank_hardwood) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (2 findings)
+  PASS  11. real video
+  PASS  12. voice says every word
+  stats: {"scenes":56,"hostTakes":11,"hostSec":62,"ctaPatterns":["block 0: HBHQQQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":10,"handOffs":8,"longestFacelessEarlySec":30,"longestFacelessLateSec":0,"longestPictureSec":4.3,"motionSharePct":34,"picturesJudged":46}
+   - [10] scene 41 split-panel: does not show what is said — no hands visible, just finished holder
+   - [10] scene 49 split-panel: does not show what is said — no hands visible, only the holder
+```
+
+### hannah_yoder run 1 — 19 min
+```
+job 181 (hannah_yoder) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (1 finding)
+  PASS  11. real video
+  PASS  12. voice says every word
+  stats: {"scenes":55,"hostTakes":12,"hostSec":55,"ctaPatterns":["block 0: HBHQQQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":6,"handOffs":9,"longestFacelessEarlySec":34,"longestFacelessLateSec":0,"longestPictureSec":4.7,"motionSharePct":35,"picturesJudged":47}
+   - [10] scene 23 split-panel: does not show what is said — no hands visible at the machine
+```
+
+### granny_mae run 1 — 25 min
+```
+job 180 (granny_mae) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place (2 findings)
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  FAIL  7. clean host switches (1 finding)
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it
+  PASS  11. real video
+  PASS  12. voice says every word
+  stats: {"scenes":61,"hostTakes":11,"hostSec":59,"ctaPatterns":["block 0: HBHQQQ"],"introductions":1,"midSentenceHostTakes":1,"listCuts":4,"handOffs":7,"longestFacelessEarlySec":28,"longestFacelessLateSec":8,"longestPictureSec":5,"motionSharePct":35,"picturesJudged":53}
+   - [3] scene 12 b-roll: wrong place — looks like a home display, not a bazaar
+   - [3] scene 32 split-panel: wrong place — set on a home table, not a bazaar
+   - [7] scene 7 host take ends mid-sentence: "But the one I was proudest of, a lacy afghan that ate up most of two w"
+```
+
+### quilting_with_granny_ruth run 1 — 26 min
+```
+job 182 (quilting_with_granny_ruth) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (1 finding)
+  PASS  11. real video
+  PASS  12. voice says every word
+  stats: {"scenes":58,"hostTakes":12,"hostSec":63,"ctaPatterns":["block 0: HBBHQQQQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":8,"handOffs":8,"longestFacelessEarlySec":33,"longestFacelessLateSec":3,"longestPictureSec":5.3,"motionSharePct":31,"picturesJudged":50}
+   - [10] scene 54 split-panel: does not show what is said — finished bowl shown, no hands stitching
+```
+
+### resume job 182 — 5 min
+```
+job 182 (quilting_with_granny_ruth) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (1 finding)
+  PASS  11. real video
+  PASS  12. voice says every word
+  stats: {"scenes":58,"hostTakes":12,"hostSec":63,"ctaPatterns":["block 0: HBBHQQQQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":8,"handOffs":8,"longestFacelessEarlySec":33,"longestFacelessLateSec":3,"longestPictureSec":5.3,"motionSharePct":31,"picturesJudged":50}
+   - [10] scene 54 split-panel: does not show what is said — finished bowl shown, no hands coiling or stitching
+```
+
+### hank_hardwood run 1 — 17 min
+```
+job 183 (hank_hardwood) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (1 finding)
+  PASS  11. real video
+  PASS  12. voice says every word
+  stats: {"scenes":55,"hostTakes":11,"hostSec":60,"ctaPatterns":["block 0: HBHQQQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":7,"handOffs":8,"longestFacelessEarlySec":30,"longestFacelessLateSec":0,"longestPictureSec":5.4,"motionSharePct":37,"picturesJudged":46}
+   - [10] scene 47 split-panel: does not show what is said — no hands shown finishing the piece
+```
+
+### hank_hardwood run 1 — 18 min
+```
+job 184 (hank_hardwood) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (2 findings)
+  PASS  11. real video
+  PASS  12. voice says every word
+  stats: {"scenes":54,"hostTakes":11,"hostSec":61,"ctaPatterns":["block 0: HBHQQQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":7,"handOffs":8,"longestFacelessEarlySec":31,"longestFacelessLateSec":0,"longestPictureSec":5,"motionSharePct":35,"picturesJudged":45}
+   - [10] scene 15 split-panel: does not show what is said — no hands visible assembling panel
+   - [10] scene 37 split-panel: does not show what is said — no hands visible in frame
+```
+
+### hank_hardwood run 1 — 18 min
+```
+job 185 (hank_hardwood) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (1 finding)
+  PASS  11. real video
+  PASS  12. voice says every word
+  stats: {"scenes":56,"hostTakes":12,"hostSec":59,"ctaPatterns":["block 0: HBHQQQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":8,"handOffs":8,"longestFacelessEarlySec":30,"longestFacelessLateSec":0,"longestPictureSec":4.7,"motionSharePct":34,"picturesJudged":46}
+   - [10] scene 21 split-panel: does not show what is said — no hands visible, only finished notched strips
+```
+
+### hank_hardwood run 1 — 17 min
+```
+job 186 (hank_hardwood) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (2 findings)
+  PASS  11. real video
+  PASS  12. voice says every word
+  stats: {"scenes":56,"hostTakes":11,"hostSec":60,"ctaPatterns":["block 0: HBHQQQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":6,"handOffs":8,"longestFacelessEarlySec":31,"longestFacelessLateSec":0,"longestPictureSec":4,"motionSharePct":35,"picturesJudged":50}
+   - [10] scene 19 split-panel: does not show what is said — no hands visible assembling the panel
+   - [10] scene 49 split-panel: does not show what is said — no hands visible finishing the piece
+```
+
+### hank_hardwood run 1 — 17 min
+```
+job 187 (hank_hardwood) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (2 findings)
+  PASS  11. real video
+  PASS  12. voice says every word
+  stats: {"scenes":59,"hostTakes":11,"hostSec":61,"ctaPatterns":["block 0: HBHQQQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":7,"handOffs":8,"longestFacelessEarlySec":27,"longestFacelessLateSec":0,"longestPictureSec":4.5,"motionSharePct":35,"picturesJudged":48}
+   - [10] scene 11 split-panel: does not show what is said — no hands visible fitting the strips
+   - [10] scene 51 split-panel: does not show what is said — no hands visible, just finished holders
+```
+
+### hank_hardwood run 1 — 18 min
+```
+job 188 (hank_hardwood) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place (1 finding)
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (2 findings)
+  PASS  11. real video
+  PASS  12. voice says every word
+  stats: {"scenes":58,"hostTakes":10,"hostSec":51,"ctaPatterns":["block 0: HBHQQQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":8,"handOffs":7,"longestFacelessEarlySec":32,"longestFacelessLateSec":0,"longestPictureSec":5.4,"motionSharePct":36,"picturesJudged":52}
+   - [3] scene 22 b-roll: wrong place — Workshop table, not a market
+   - [10] scene 21 split-panel: does not show what is said — no hands visible, work already done
+   - [10] scene 50 split-panel: does not show what is said — table has items, not empty
+```
+
+### hank_hardwood run 1 — 16 min
+```
+job 189 (hank_hardwood) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (3 findings)
+  PASS  11. real video
+  PASS  12. voice says every word
+  stats: {"scenes":56,"hostTakes":12,"hostSec":58,"ctaPatterns":["block 0: HBHQQQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":8,"handOffs":9,"longestFacelessEarlySec":23,"longestFacelessLateSec":0,"longestPictureSec":4.3,"motionSharePct":34,"picturesJudged":47}
+   - [10] scene 13 split-panel: does not show what is said — finished lattice shown, no hands fitting strips
+   - [10] scene 42 split-panel: does not show what is said — no hands visible working the block
+   - [10] scene 49 split-panel: does not show what is said — no hands visible finishing the piece
+```
+
+### hannah_yoder run 1 — 15 min
+```
+job 190 (hannah_yoder) — completed, rehearsal
+  FAIL  1. no pause after CTA (8 findings)
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (2 findings)
+  PASS  11. real video
+  PASS  12. voice says every word
+  FAIL  13. looks like a phone photo (3 findings)
+  stats: {"scenes":36,"hostTakes":10,"hostSec":58,"ctaPatterns":["block 0: HBHQQQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":5,"handOffs":7,"longestFacelessEarlySec":28,"longestFacelessLateSec":0,"longestPictureSec":12.9,"motionSharePct":18,"picturesJudged":27}
+   - [1] 4.8s frozen picture from 0:17
+   - [1] 2.4s frozen picture from 0:27
+   - [1] 5.46667s frozen picture from 0:30
+   - [1] 4.83333s frozen picture from 0:48
+   - [1] 7.5s frozen picture from 1:39
+   - [1] 2.23333s frozen picture from 2:25
+   - [1] 4.06667s frozen picture from 2:27
+   - [1] 3.46667s frozen picture from 2:49
+   - [10] scene 15 b-roll: does not show what is said — no lamp visible, natural daylight scene
+   - [10] scene 24 split-panel: does not show what is said — stacked sacks outdoors, no hands or sewing shown
+   - [13] scene 19 qr-background: not a phone-photo look — Shows quilting, not phone or code
+   - [13] scene 20 qr-background: not a phone-photo look — moody staged lighting with sunset glow
+   - [13] scene 21 qr-background: not a phone-photo look — staged, styled scene with soft lighting
+```
+
+### hank_hardwood run 1 — 15 min
+```
+job 191 (hank_hardwood) — completed, rehearsal
+  FAIL  1. no pause after CTA (8 findings)
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo
+  stats: {"scenes":33,"hostTakes":9,"hostSec":62,"ctaPatterns":["block 0: HBHQQQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":3,"handOffs":5,"longestFacelessEarlySec":36,"longestFacelessLateSec":0,"longestPictureSec":13.2,"motionSharePct":23,"picturesJudged":26}
+   - [1] 6.53333s frozen picture from 0:02
+   - [1] 2.03333s frozen picture from 0:26
+   - [1] 5.6s frozen picture from 0:36
+   - [1] 5.26667s frozen picture from 0:57
+   - [1] 4.96667s frozen picture from 2:05
+   - [1] 3.86667s frozen picture from 2:10
+   - [1] 5.03333s frozen picture from 2:14
+   - [1] 3s frozen picture from 2:35
+```
+
+### hannah_yoder run 1 — 13 min
+```
+job 192 (hannah_yoder) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo
+  stats: {"scenes":34,"hostTakes":10,"hostSec":62,"ctaPatterns":["block 0: HBHQQQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":5,"handOffs":7,"longestFacelessEarlySec":22,"longestFacelessLateSec":0,"longestPictureSec":12.3,"motionSharePct":18,"picturesJudged":26}
+```
+
+### hannah_yoder run 1 — 14 min
+```
+job 193 (hannah_yoder) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  FAIL  10. say it, show it (3 findings)
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo (2 findings)
+  stats: {"scenes":32,"hostTakes":9,"hostSec":55,"ctaPatterns":["block 0: HBHQQQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":3,"handOffs":6,"longestFacelessEarlySec":27,"longestFacelessLateSec":0,"longestPictureSec":16,"motionSharePct":11,"picturesJudged":24}
+   - [10] scene 9 split-panel: does not show what is said — quilt lies on table, not held in hand
+   - [10] scene 12 split-panel: does not show what is said — no lamp visible in frame
+   - [10] scene 21 split-panel: does not show what is said — no hands visible, bag just under machine
+   - [13] scene 22 b-roll: not a phone-photo look — warm staged lighting, neatly arranged scene
+   - [13] scene 23 b-roll: not a phone-photo look — warm staged lighting, slightly styled composition
+```
+
+### hannah_yoder run 1 — 17 min
+```
+job 194 (hannah_yoder) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo
+  stats: {"scenes":34,"hostTakes":9,"hostSec":57,"ctaPatterns":["block 0: HBHQQQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":6,"handOffs":6,"longestFacelessEarlySec":28,"longestFacelessLateSec":0,"longestPictureSec":11,"motionSharePct":18,"picturesJudged":24}
+```
+
+### granny_mae run 1 — 22 min
+```
+job 196 (granny_mae) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo (2 findings)
+  stats: {"scenes":32,"hostTakes":9,"hostSec":62,"ctaPatterns":["block 0: HBHQQQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":1,"handOffs":6,"longestFacelessEarlySec":27,"longestFacelessLateSec":0,"longestPictureSec":13.7,"motionSharePct":11,"picturesJudged":26}
+   - [13] scene 24 b-roll: not a phone-photo look — soft, glowing staged lighting
+   - [13] scene 27 b-roll: not a phone-photo look — neatly staged display with soft studio-like lighting
+```
+
+### hank_hardwood run 1 — 23 min
+```
+job 195 (hank_hardwood) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo
+  stats: {"scenes":32,"hostTakes":9,"hostSec":60,"ctaPatterns":["block 0: HBHQQQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":6,"handOffs":6,"longestFacelessEarlySec":39,"longestFacelessLateSec":0,"longestPictureSec":12.8,"motionSharePct":23,"picturesJudged":23}
+```
+
+### quilting_with_granny_ruth run 1 — 22 min
+```
+job 197 (quilting_with_granny_ruth) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo
+  stats: {"scenes":40,"hostTakes":10,"hostSec":57,"ctaPatterns":["block 0: HBBHQQQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":7,"handOffs":6,"longestFacelessEarlySec":28,"longestFacelessLateSec":7,"longestPictureSec":11.9,"motionSharePct":19,"picturesJudged":32}
+```
+
+### granny_mae run 1 — 19 min
+```
+job 200 (granny_mae) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place (1 finding)
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (1 finding)
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo (1 finding)
+  PASS  14. no cut inside a word
+  stats: {"scenes":33,"hostTakes":11,"hostSec":64,"ctaPatterns":["block 0: HBHQQQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":3,"handOffs":8,"longestFacelessEarlySec":25,"longestFacelessLateSec":10,"longestPictureSec":12.6,"motionSharePct":17,"picturesJudged":25}
+   - [3] scene 9 b-roll: wrong place — kitchen table, not a bazaar
+   - [10] scene 10 split-panel: does not show what is said — afghan is on a rocking chair, not couch
+   - [13] scene 28 b-roll: not a phone-photo look — soft glowing staged lighting
+```
+
+### hannah_yoder run 1 — 20 min
+```
+job 198 (hannah_yoder) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (1 finding)
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo (2 findings)
+  FAIL  14. no cut inside a word (1 finding)
+  stats: {"scenes":34,"hostTakes":9,"hostSec":56,"ctaPatterns":["block 0: HBHQQQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":5,"handOffs":6,"longestFacelessEarlySec":33,"longestFacelessLateSec":0,"longestPictureSec":12.3,"motionSharePct":17,"picturesJudged":26}
+   - [10] scene 25 split-panel: does not show what is said — no hands stitching visible, bags finished and posed
+   - [13] scene 10 b-roll: not a phone-photo look — warm staged lighting, glossy composed look
+   - [13] scene 14 b-roll: not a phone-photo look — neatly arranged, staged product-style composition
+   - [14] scene 6 cut at 25.06s inside "with" (24.97-25.13)
+```
+
+### hank_hardwood run 1 — 22 min
+```
+job 199 (hank_hardwood) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (1 finding)
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo
+  PASS  14. no cut inside a word
+  stats: {"scenes":29,"hostTakes":8,"hostSec":58,"ctaPatterns":["block 0: HBHQQQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":3,"handOffs":5,"longestFacelessEarlySec":29,"longestFacelessLateSec":0,"longestPictureSec":17.5,"motionSharePct":19,"picturesJudged":21}
+   - [10] scene 10 split-panel: does not show what is said — hands not visible, only chisel and wood
+```
+
+### quilting_with_granny_ruth run 1 — 23 min
+```
+job 201 (quilting_with_granny_ruth) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo
+  PASS  14. no cut inside a word
+  stats: {"scenes":36,"hostTakes":9,"hostSec":65,"ctaPatterns":["block 0: HBBHQQQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":7,"handOffs":5,"longestFacelessEarlySec":37,"longestFacelessLateSec":26,"longestPictureSec":12.7,"motionSharePct":11,"picturesJudged":29}
+```
+
+### hannah_yoder run 1 — 15 min
+```
+job 202 (hannah_yoder) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo (1 finding)
+  PASS  14. no cut inside a word
+  stats: {"scenes":31,"hostTakes":9,"hostSec":48,"ctaPatterns":["block 0: HBHQQQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":7,"handOffs":6,"longestFacelessEarlySec":39,"longestFacelessLateSec":0,"longestPictureSec":17,"motionSharePct":19,"picturesJudged":21}
+   - [13] scene 7 b-roll: not a phone-photo look — styled vintage scene with staged lighting
+```
+
+### granny_mae run 1 — 21 min
+```
+job 205 (granny_mae) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text (1 finding)
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  FAIL  8. host often (1 finding)
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (2 findings)
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo (1 finding)
+  PASS  14. no cut inside a word
+  stats: {"scenes":33,"hostTakes":9,"hostSec":67,"ctaPatterns":["block 0: HBHQQQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":3,"handOffs":6,"longestFacelessEarlySec":43,"longestFacelessLateSec":17,"longestPictureSec":12,"motionSharePct":16,"picturesJudged":25}
+   - [5] scene 19 qr-background: readable text — measuring tape markings unreadable but no on-screen link text
+   - [8] scene 29 43s without the host before 2:48 (early)
+   - [10] scene 3 split-panel: does not show what is said — host absent, afghan draped on empty chair
+   - [10] scene 30 b-roll: does not show what is said — basket still holds coasters, not a close-up
+   - [13] scene 26 b-roll: not a phone-photo look — warm staged lighting, glossy styled look
+```
+
+### hannah_yoder run 1 — 22 min
+```
+job 203 (hannah_yoder) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it
+  PASS  11. real video
+  PASS  12. voice says every word
+  FAIL  13. looks like a phone photo (3 findings)
+  PASS  14. no cut inside a word
+  stats: {"scenes":31,"hostTakes":9,"hostSec":56,"ctaPatterns":["block 0: HBHQQQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":5,"handOffs":6,"longestFacelessEarlySec":23,"longestFacelessLateSec":0,"longestPictureSec":15.4,"motionSharePct":21,"picturesJudged":23}
+   - [13] scene 12 b-roll: not a phone-photo look — neatly styled staged basket display
+   - [13] scene 22 b-roll: not a phone-photo look — lighting looks slightly staged/styled
+   - [13] scene 28 b-roll: not a phone-photo look — staged vintage styling, warm curated look
+```
+
+### quilting_with_granny_ruth run 1 — 23 min
+```
+job 206 (quilting_with_granny_ruth) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  FAIL  8. host often (1 finding)
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo (1 finding)
+  PASS  14. no cut inside a word
+  stats: {"scenes":36,"hostTakes":9,"hostSec":61,"ctaPatterns":["block 0: HBBHQQQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":8,"handOffs":5,"longestFacelessEarlySec":42,"longestFacelessLateSec":6,"longestPictureSec":12,"motionSharePct":17,"picturesJudged":28}
+   - [8] scene 31 42s without the host before 2:42 (early)
+   - [13] scene 27 b-roll: not a phone-photo look — neatly styled scene, staged lighting
+```
+
+### hank_hardwood run 1 — 24 min
+```
+job 204 (hank_hardwood) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (1 finding)
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo (1 finding)
+  PASS  14. no cut inside a word
+  stats: {"scenes":30,"hostTakes":9,"hostSec":61,"ctaPatterns":["block 0: HBBHQQQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":3,"handOffs":6,"longestFacelessEarlySec":33,"longestFacelessLateSec":0,"longestPictureSec":12.2,"motionSharePct":18,"picturesJudged":21}
+   - [10] scene 22 split-panel: does not show what is said — no hands visible guiding the saw
+   - [13] scene 21 b-roll: not a phone-photo look — overly staged, glossy workshop lighting
+```
+
+### quilting_with_granny_ruth run 1 — 20 min
+```
+job 210 (quilting_with_granny_ruth) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (1 finding)
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo
+  PASS  14. no cut inside a word
+  stats: {"scenes":37,"hostTakes":10,"hostSec":57,"ctaPatterns":["block 0: HBBHQQQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":6,"handOffs":7,"longestFacelessEarlySec":26,"longestFacelessLateSec":18,"longestPictureSec":17.5,"motionSharePct":19,"picturesJudged":29}
+   - [10] scene 35 b-roll: does not show what is said — no empty spots visible, table fully stocked
+```
+
+### hank_hardwood run 1 — 21 min
+```
+job 208 (hank_hardwood) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (2 findings)
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo
+  PASS  14. no cut inside a word
+  stats: {"scenes":32,"hostTakes":9,"hostSec":62,"ctaPatterns":["block 0: HBHQQQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":3,"handOffs":6,"longestFacelessEarlySec":29,"longestFacelessLateSec":0,"longestPictureSec":14.1,"motionSharePct":14,"picturesJudged":24}
+   - [10] scene 10 split-panel: does not show what is said — notch shown but no hands cutting
+   - [10] scene 20 split-panel: does not show what is said — no hands visible, only saw and block
+```
+
+### hannah_yoder run 1 — 21 min
+```
+job 207 (hannah_yoder) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place (1 finding)
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo (2 findings)
+  PASS  14. no cut inside a word
+  stats: {"scenes":29,"hostTakes":8,"hostSec":59,"ctaPatterns":["block 0: HBHQQQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":5,"handOffs":5,"longestFacelessEarlySec":29,"longestFacelessLateSec":0,"longestPictureSec":17.8,"motionSharePct":14,"picturesJudged":22}
+   - [3] scene 7 b-roll: wrong place — Staged, cozy lighting scene, not a market
+   - [13] scene 7 b-roll: not a phone-photo look — Staged, cozy lighting scene, not a market
+   - [13] scene 26 b-roll: not a phone-photo look — moody staged lighting with props arranged
+```
+
+### granny_mae run 1 — 20 min
+```
+job 209 (granny_mae) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (1 finding)
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo (1 finding)
+  FAIL  14. no cut inside a word (1 finding)
+  stats: {"scenes":36,"hostTakes":12,"hostSec":66,"ctaPatterns":["block 0: HBHQQQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":3,"handOffs":9,"longestFacelessEarlySec":30,"longestFacelessLateSec":5,"longestPictureSec":13.8,"motionSharePct":19,"picturesJudged":27}
+   - [10] scene 4 split-panel: does not show what is said — host not shown, chair empty with finished afghan draped
+   - [13] scene 22 split-panel: not a phone-photo look — neatly styled, glossy staged look
+   - [14] scene 32 cut at 162.02s inside "apiece" (161.96-162.34)
+```
+
+### hank_hardwood run 1 — job 212: FAILED after 3 min
+    
+
+### granny_mae run 1 — job 213: FAILED after 2 min
+    
+
+### quilting_with_granny_ruth run 1 — job 214: FAILED after 2 min
+    
+
+### hannah_yoder run 1 — job 211: FAILED after 3 min
+    
+
+### lance_kavanaugh run 1 — job 218: FAILED after 19 min
+    Cancelled by user
+
+### diane_de_chambray run 1 — job 222: FAILED after 10 min
+    spawn UNKNOWN
+
+### hannah_yoder run 1 — job 215: FAILED after 95 min
+    spawn ENAMETOOLONG
+
+### pearl_parker run 1 — 31 min
+```
+job 220 (pearl_parker) — completed
+  PASS  1. no pause after CTA
+  FAIL  2. CTA order (1 finding)
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo (1 finding)
+  PASS  14. no cut inside a word
+  stats: {"scenes":40,"hostTakes":10,"hostSec":65,"ctaPatterns":["block 0: BQQQQQQ"],"introductions":2,"midSentenceHostTakes":0,"listCuts":5,"handOffs":6,"longestFacelessEarlySec":28,"longestFacelessLateSec":0,"longestPictureSec":14.9,"motionSharePct":13,"picturesJudged":31}
+   - [2] block 0 (BQQQQQQ): host does not come back after the book
+   - [13] scene 38 b-roll: not a phone-photo look — staged, polished kitchen styling
+```
+
+### dale_oakfield run 1 — 31 min
+```
+job 221 (dale_oakfield) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place (1 finding)
+  PASS  4. clean pictures (1 finding)
+  PASS  5. no text (1 finding)
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo (2 findings)
+  PASS  14. no cut inside a word
+  stats: {"scenes":49,"hostTakes":12,"hostSec":75,"ctaPatterns":["block 0: HBHQQQQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":16,"handOffs":9,"longestFacelessEarlySec":21,"longestFacelessLateSec":38,"longestPictureSec":16,"motionSharePct":16,"picturesJudged":35}
+   - [3] scene 47 b-roll: wrong place — driveway shown, not a marketplace listing
+   - [4] scene 47 b-roll: brand visible — driveway shown, not a marketplace listing
+   - [5] scene 47 b-roll: readable text — driveway shown, not a marketplace listing
+   - [13] scene 4 b-roll: not a phone-photo look — staged product-catalog mockup on phone screen
+   - [13] scene 6 b-roll: not a phone-photo look — neatly staged product shot, glossy lighting
+```
+
+### scarlett_sterling run 1 — 32 min
+```
+job 223 (scarlett_sterling) — completed
+  PASS  1. no pause after CTA
+  FAIL  2. CTA order (1 finding)
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (1 finding)
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo (1 finding)
+  PASS  14. no cut inside a word
+  stats: {"scenes":35,"hostTakes":10,"hostSec":56,"ctaPatterns":["block 0: HBQQQQQQQ"],"introductions":2,"midSentenceHostTakes":0,"listCuts":0,"handOffs":7,"longestFacelessEarlySec":37,"longestFacelessLateSec":18,"longestPictureSec":17,"motionSharePct":12,"picturesJudged":28}
+   - [2] block 0 (HBQQQQQQQ): host does not come back after the book
+   - [10] scene 15 b-roll: does not show what is said — necklace tiny, hands tying scarf dominate focus
+   - [13] scene 9 split-panel: not a phone-photo look — neatly staged, mirror reflection, styled presentation
+```
+
+### frederick_barnes run 1 — 31 min
+```
+job 224 (frederick_barnes) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (1 finding)
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo (2 findings)
+  PASS  14. no cut inside a word
+  stats: {"scenes":36,"hostTakes":10,"hostSec":56,"ctaPatterns":["block 0: HBHQQQQ"],"introductions":2,"midSentenceHostTakes":0,"listCuts":0,"handOffs":6,"longestFacelessEarlySec":37,"longestFacelessLateSec":12,"longestPictureSec":10.7,"motionSharePct":22,"picturesJudged":28}
+   - [10] scene 31 split-panel: does not show what is said — no hand visible turning the alarm
+   - [13] scene 6 b-roll: not a phone-photo look — staged, overly clean, dramatic flame composition
+   - [13] scene 11 b-roll: not a phone-photo look — staged, overly dramatic fire rendering
+```
+
+### hank_hardwood run 1 — 138 min
+```
+job 216 (hank_hardwood) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place (1 finding)
+  PASS  4. clean pictures (1 finding)
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (6 findings)
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo (8 findings)
+  PASS  14. no cut inside a word
+  stats: {"scenes":226,"hostTakes":30,"hostSec":178,"ctaPatterns":["block 0: HBHQQQQQ","block 1: HBHQQQQQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":27,"handOffs":25,"longestFacelessEarlySec":34,"longestFacelessLateSec":66,"longestPictureSec":20.9,"motionSharePct":21,"picturesJudged":202}
+   - [3] scene 42 split-panel: wrong place — lattice box not glowing, workshop not house
+   - [4] scene 203 b-roll: cluttered — busy tool-filled workshop background competes for attention
+   - [10] scene 18 split-panel: does not show what is said — no hands visible guiding jig
+   - [10] scene 42 split-panel: does not show what is said — lattice box not glowing, workshop not house
+   - [10] scene 124 split-panel: does not show what is said — no neighbor person visible in the driveway
+   - [10] scene 134 b-roll: does not show what is said — gloves and glasses lie unworn, no host visible
+   - [10] scene 135 b-roll: does not show what is said — shows box in hands, not host's smoke position
+   - [10] scene 141 b-roll: does not show what is said — mask sits unworn on table, not worn
+   - [13] scene 34 b-roll: not a phone-photo look — lamp has staged golden glow lighting
+   - [13] scene 35 b-roll: not a phone-photo look — minimalist staged lighting gives styled look
+   - [13] scene 60 split-panel: not a phone-photo look — warm staged glow, styled bedroom scene
+   - [13] scene 61 b-roll: not a phone-photo look — glow looks warm/staged but acceptable
+   - [13] scene 62 b-roll: not a phone-photo look — glowing lamp lighting, styled staged look
+   - [13] scene 63 b-roll: not a phone-photo look — glowing lamp staged lighting gives styled look
+   - [13] scene 150 b-roll: not a phone-photo look — slightly staged, glossy styled arrangement
+   - [13] scene 216 b-roll: not a phone-photo look — clean staged interior shot
+```
+
+### norbert_daniels run 1 — 22 min
+```
+job 225 (norbert_daniels) — completed
+  PASS  1. no pause after CTA
+  FAIL  2. CTA order (1 finding)
+  PASS  3. right place
+  PASS  4. clean pictures (1 finding)
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (2 findings)
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo
+  PASS  14. no cut inside a word
+  stats: {"scenes":48,"hostTakes":11,"hostSec":48,"ctaPatterns":["block 0: HBQQQQQQ"],"introductions":2,"midSentenceHostTakes":0,"listCuts":4,"handOffs":8,"longestFacelessEarlySec":33,"longestFacelessLateSec":3,"longestPictureSec":11.5,"motionSharePct":15,"picturesJudged":39}
+   - [2] block 0 (HBQQQQQQ): host does not come back after the book
+   - [4] scene 26 qr-background: cluttered — shows hardware bins, unrelated to narration
+   - [10] scene 3 split-panel: does not show what is said — car is parked, not driving away
+   - [10] scene 39 split-panel: does not show what is said — extreme close-up, not shown from a step back
+```
+
+### granny_mae run 1 — job 219: FAILED after 127 min
+    spawn ENAMETOOLONG
+
+### resume job 226 — 83 min
+```
+job 226 (quilting_with_granny_ruth) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  FAIL  8. host often (10 findings)
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (4 findings)
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo (4 findings)
+  PASS  14. no cut inside a word
+  stats: {"scenes":230,"hostTakes":24,"hostSec":180,"ctaPatterns":["block 0: HBBHQQQQQ","block 1: HBBHQQQQQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":33,"handOffs":18,"longestFacelessEarlySec":48,"longestFacelessLateSec":116,"longestPictureSec":18.8,"motionSharePct":22,"picturesJudged":188}
+   - [8] scene 19 48s without the host before 1:27 (early)
+   - [8] scene 39 40s without the host before 2:56 (early)
+   - [8] scene 92 85s without the host before 9:01
+   - [8] scene 110 108s without the host before 10:53
+   - [8] scene 133 94s without the host before 13:34
+   - [8] scene 148 88s without the host before 15:10
+   - [8] scene 171 79s without the host before 17:56
+   - [8] scene 184 85s without the host before 19:26
+   - [8] scene 195 111s without the host before 21:23
+   - [8] scene 208 116s without the host before 23:26
+   - [10] scene 106 b-roll: does not show what is said — no visible name being stitched, just plain lining
+   - [10] scene 116 b-roll: does not show what is said — pouch shows embroidered flower, not a name or tag
+   - [10] scene 147 b-roll: does not show what is said — holding potholder alone, not handing to buyer
+   - [10] scene 229 b-roll: does not show what is said — lamp missing from must-show scene
+   - [13] scene 21 b-roll: not a phone-photo look — warm styled lighting gives staged look
+   - [13] scene 71 b-roll: not a phone-photo look — softly staged, styled nursery scene
+   - [13] scene 96 b-roll: not a phone-photo look — overly tidy, styled sewing room setup
+   - [13] scene 214 b-roll: not a phone-photo look — staged, softly styled home-decor look
+```
+
+### hannah_yoder run 1 — 26 min
+```
+job 228 (hannah_yoder) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  FAIL  7. clean host switches (1 finding)
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (2 findings)
+  PASS  11. real video
+  PASS  12. voice says every word
+  FAIL  13. looks like a phone photo (3 findings)
+  PASS  14. no cut inside a word
+  stats: {"scenes":32,"hostTakes":9,"hostSec":62,"ctaPatterns":["block 0: HBHQQQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":10,"handOffs":6,"longestFacelessEarlySec":23,"longestFacelessLateSec":0,"longestPictureSec":19.3,"motionSharePct":12,"picturesJudged":23}
+   - [7] scene 20 flash shot 0.84s
+   - [10] scene 21 split-panel: does not show what is said — finished bag shown, no hands stitching visible
+   - [10] scene 23 split-panel: does not show what is said — no hands stitching visible in frame
+   - [13] scene 4 b-roll: not a phone-photo look — styled scene with warm staged lighting
+   - [13] scene 7 b-roll: not a phone-photo look — staged styling with soft, arranged lighting
+   - [13] scene 23 split-panel: not a phone-photo look — no hands stitching visible in frame
+```
+
+### hank_hardwood run 1 — 41 min
+```
+job 227 (hank_hardwood) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (1 finding)
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo
+  PASS  14. no cut inside a word
+  stats: {"scenes":28,"hostTakes":7,"hostSec":57,"ctaPatterns":["block 0: HBHQQQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":8,"handOffs":4,"longestFacelessEarlySec":38,"longestFacelessLateSec":0,"longestPictureSec":18,"motionSharePct":18,"picturesJudged":18}
+   - [10] scene 24 split-panel: does not show what is said — no host visible watching the incense burn
+```
+
+### frederick_barnes run 1 — 24 min
+```
+job 229 (frederick_barnes) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo (2 findings)
+  PASS  14. no cut inside a word
+  stats: {"scenes":36,"hostTakes":10,"hostSec":57,"ctaPatterns":["block 0: HBHQQQQ"],"introductions":2,"midSentenceHostTakes":0,"listCuts":3,"handOffs":6,"longestFacelessEarlySec":29,"longestFacelessLateSec":12,"longestPictureSec":13.8,"motionSharePct":12,"picturesJudged":27}
+   - [13] scene 4 b-roll: not a phone-photo look — staged, polished product shot lighting
+   - [13] scene 6 split-panel: not a phone-photo look — glossy staged-looking flame and clean surfaces
+```
+
+### dale_oakfield run 1 — 21 min
+```
+job 230 (dale_oakfield) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (2 findings)
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo
+  PASS  14. no cut inside a word
+  stats: {"scenes":39,"hostTakes":10,"hostSec":62,"ctaPatterns":["block 0: HBHQQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":12,"handOffs":6,"longestFacelessEarlySec":35,"longestFacelessLateSec":13,"longestPictureSec":16.8,"motionSharePct":17,"picturesJudged":28}
+   - [10] scene 20 b-roll: does not show what is said — cutting board not engraved or personalized
+   - [10] scene 32 split-panel: does not show what is said — bookcase static, no host visible
+```
+
+### granny_mae run 1 — 19 min
+```
+job 231 (granny_mae) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  FAIL  10. say it, show it (3 findings)
+  PASS  11. real video
+  PASS  12. voice says every word
+  FAIL  13. looks like a phone photo (3 findings)
+  PASS  14. no cut inside a word
+  stats: {"scenes":24,"hostTakes":8,"hostSec":64,"ctaPatterns":["block 0: HBHQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":2,"handOffs":4,"longestFacelessEarlySec":39,"longestFacelessLateSec":0,"longestPictureSec":15.8,"motionSharePct":17,"picturesJudged":18}
+   - [10] scene 9 split-panel: does not show what is said — no host, rocking chair, or lamp shown
+   - [10] scene 11 b-roll: does not show what is said — daylight scene, no lamp or night setting
+   - [10] scene 20 split-panel: does not show what is said — no hands actively crocheting shown
+   - [13] scene 8 b-roll: not a phone-photo look — warm staged lighting gives styled look
+   - [13] scene 12 b-roll: not a phone-photo look — warm staged lighting gives an idealized look
+   - [13] scene 22 b-roll: not a phone-photo look — staged, styled market display look
+```
+
+### norbert_daniels run 1 — 22 min
+```
+job 232 (norbert_daniels) — completed
+  PASS  1. no pause after CTA
+  FAIL  2. CTA order (1 finding)
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo
+  PASS  14. no cut inside a word
+  stats: {"scenes":33,"hostTakes":11,"hostSec":59,"ctaPatterns":["block 0: HBQQ"],"introductions":2,"midSentenceHostTakes":0,"listCuts":2,"handOffs":9,"longestFacelessEarlySec":31,"longestFacelessLateSec":4,"longestPictureSec":11.2,"motionSharePct":22,"picturesJudged":23}
+   - [2] block 0 (HBQQ): host does not come back after the book
+```
+
+### scarlett_sterling run 1 — 22 min
+```
+job 234 (scarlett_sterling) — completed
+  PASS  1. no pause after CTA
+  FAIL  2. CTA order (1 finding)
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  FAIL  10. say it, show it (5 findings)
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo
+  PASS  14. no cut inside a word
+  stats: {"scenes":32,"hostTakes":10,"hostSec":59,"ctaPatterns":["block 0: HBQQQ"],"introductions":2,"midSentenceHostTakes":0,"listCuts":4,"handOffs":7,"longestFacelessEarlySec":33,"longestFacelessLateSec":2,"longestPictureSec":14.5,"motionSharePct":20,"picturesJudged":22}
+   - [2] block 0 (HBQQQ): host does not come back after the book
+   - [10] scene 2 b-roll: does not show what is said — host holds sweater up, not wearing it, no necklace visible
+   - [10] scene 3 split-panel: does not show what is said — necklace on display bust, no host shown
+   - [10] scene 4 b-roll: does not show what is said — pendant is tiny and distant, not a close view
+   - [10] scene 8 b-roll: does not show what is said — necklace shown whole, not close-up detail
+   - [10] scene 28 b-roll: does not show what is said — sweater on hanger, no host wearing it
+```
+
+### quilting_with_granny_ruth run 1 — 44 min
+```
+job 233 (quilting_with_granny_ruth) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  FAIL  7. clean host switches (1 finding)
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo
+  PASS  14. no cut inside a word
+  stats: {"scenes":32,"hostTakes":9,"hostSec":61,"ctaPatterns":["block 0: HBBHQ"],"introductions":1,"midSentenceHostTakes":1,"listCuts":7,"handOffs":5,"longestFacelessEarlySec":24,"longestFacelessLateSec":0,"longestPictureSec":16.4,"motionSharePct":17,"picturesJudged":23}
+   - [7] scene 3 host take ends mid-sentence: "But the one I loved the most, a big sampler quilt that swallowed up th"
+```
+
+### diane_de_chambray run 1 — 26 min
+```
+job 235 (diane_de_chambray) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text (1 finding)
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (2 findings)
+  PASS  11. real video
+  PASS  12. voice says every word
+  FAIL  13. looks like a phone photo (3 findings)
+  PASS  14. no cut inside a word
+  stats: {"scenes":36,"hostTakes":10,"hostSec":65,"ctaPatterns":["block 0: BHQQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":7,"handOffs":6,"longestFacelessEarlySec":34,"longestFacelessLateSec":17,"longestPictureSec":11.7,"motionSharePct":16,"picturesJudged":27}
+   - [5] scene 8 split-panel: readable text — no woman shown, just product box
+   - [10] scene 2 b-roll: does not show what is said — hair shown is blonde, not dark as specified
+   - [10] scene 8 split-panel: does not show what is said — no woman shown, just product box
+   - [13] scene 18 b-roll: not a phone-photo look — staged glossy bathroom with styled product bottles
+   - [13] scene 25 b-roll: not a phone-photo look — staged, glossy styled bathroom shot
+   - [13] scene 35 b-roll: not a phone-photo look — styled bathroom with staged product arrangement
+```
+
+### granny_mae run 1 — 25 min
+```
+job 237 (granny_mae) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  FAIL  3. right place (1 finding)
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (1 finding)
+  PASS  11. real video
+  PASS  12. voice says every word
+  FAIL  13. looks like a phone photo (2 findings)
+  PASS  14. no cut inside a word
+  stats: {"scenes":25,"hostTakes":8,"hostSec":61,"ctaPatterns":["block 0: HBHQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":3,"handOffs":5,"longestFacelessEarlySec":35,"longestFacelessLateSec":0,"longestPictureSec":16.4,"motionSharePct":18,"picturesJudged":18}
+   - [3] scene 2 b-roll: wrong place — staged cozy scene, not the craft store setting
+   - [10] scene 21 split-panel: does not show what is said — no hands sorting through coasters visible
+   - [13] scene 2 b-roll: not a phone-photo look — staged cozy scene, not the craft store setting
+   - [13] scene 7 b-roll: not a phone-photo look — staged glossy styled composition
+```
+
+### norbert_daniels run 1 — 26 min
+```
+job 236 (norbert_daniels) — completed
+  PASS  1. no pause after CTA
+  FAIL  2. CTA order (1 finding)
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo
+  PASS  14. no cut inside a word
+  stats: {"scenes":31,"hostTakes":10,"hostSec":48,"ctaPatterns":["block 0: HBQQQ"],"introductions":2,"midSentenceHostTakes":0,"listCuts":2,"handOffs":8,"longestFacelessEarlySec":33,"longestFacelessLateSec":8,"longestPictureSec":17.7,"motionSharePct":17,"picturesJudged":23}
+   - [2] block 0 (HBQQQ): host does not come back after the book
+```
+
+### quilting_with_granny_ruth run 1 — 27 min
+```
+job 239 (quilting_with_granny_ruth) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo
+  PASS  14. no cut inside a word
+  stats: {"scenes":32,"hostTakes":9,"hostSec":65,"ctaPatterns":["block 0: HBHQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":9,"handOffs":5,"longestFacelessEarlySec":32,"longestFacelessLateSec":22,"longestPictureSec":13.8,"motionSharePct":10,"picturesJudged":25}
+```
+
+### norbert_daniels run 1 — 28 min
+```
+job 238 (norbert_daniels) — completed
+  PASS  1. no pause after CTA
+  FAIL  2. CTA order (1 finding)
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo
+  PASS  14. no cut inside a word
+  stats: {"scenes":28,"hostTakes":11,"hostSec":55,"ctaPatterns":["block 0: HBQQ"],"introductions":2,"midSentenceHostTakes":0,"listCuts":0,"handOffs":8,"longestFacelessEarlySec":31,"longestFacelessLateSec":4,"longestPictureSec":11.5,"motionSharePct":10,"picturesJudged":18}
+   - [2] block 0 (HBQQ): host does not come back after the book
+```
+
+### norbert_daniels run 1 — 22 min
+```
+job 243 (norbert_daniels) — completed
+  PASS  1. no pause after CTA
+  FAIL  2. CTA order (1 finding)
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (1 finding)
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo
+  PASS  14. no cut inside a word
+  stats: {"scenes":27,"hostTakes":10,"hostSec":55,"ctaPatterns":["block 0: HBQQQ"],"introductions":2,"midSentenceHostTakes":0,"listCuts":2,"handOffs":7,"longestFacelessEarlySec":39,"longestFacelessLateSec":0,"longestPictureSec":14.3,"motionSharePct":11,"picturesJudged":19}
+   - [2] block 0 (HBQQQ): host does not come back after the book
+   - [10] scene 10 b-roll: does not show what is said — close-up, not shown from further back with whole place
+```
+
+### scarlett_sterling run 1 — 27 min
+```
+job 244 (scarlett_sterling) — completed
+  PASS  1. no pause after CTA
+  FAIL  2. CTA order (1 finding)
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo
+  PASS  14. no cut inside a word
+  stats: {"scenes":27,"hostTakes":9,"hostSec":47,"ctaPatterns":["block 0: HBQQQ"],"introductions":2,"midSentenceHostTakes":0,"listCuts":0,"handOffs":6,"longestFacelessEarlySec":36,"longestFacelessLateSec":13,"longestPictureSec":16,"motionSharePct":10,"picturesJudged":19}
+   - [2] block 0 (HBQQQ): host does not come back after the book
+```
+
+### diane_de_chambray run 1 — 29 min
+```
+job 245 (diane_de_chambray) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo (2 findings)
+  PASS  14. no cut inside a word
+  stats: {"scenes":37,"hostTakes":10,"hostSec":59,"ctaPatterns":["block 0: BHQQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":7,"handOffs":7,"longestFacelessEarlySec":28,"longestFacelessLateSec":23,"longestPictureSec":13.5,"motionSharePct":15,"picturesJudged":28}
+   - [13] scene 2 b-roll: not a phone-photo look — softly staged bathroom shelf styling
+   - [13] scene 12 b-roll: not a phone-photo look — staged, polished product-style bathroom shot
+```

@@ -24,10 +24,9 @@
  */
 import path from "path";
 import os from "os";
-import { spawn } from "child_process";
 import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from "fs";
 import { randomUUID } from "crypto";
-import { getFFmpegPath } from "./ffmpegPath";
+import { spawnFfmpeg, retryUnstarted } from "./ffmpegSpawn";
 import { runFfmpeg } from "./videoAssembly";
 
 export const WINDOW_FRAMES = 81;
@@ -70,8 +69,8 @@ export function predictSeamFrames(opts: {
  * previous frame, 0-1). Index 0 is the first frame and is always 0.
  */
 export async function frameJumps(videoPath: string): Promise<number[]> {
-  return new Promise((resolve, reject) => {
-    const p = spawn(getFFmpegPath(), [
+  return retryUnstarted(() => new Promise((resolve, reject) => {
+    const p = spawnFfmpeg([
       "-hide_banner",
       "-loglevel",
       "info",
@@ -97,7 +96,7 @@ export async function frameJumps(videoPath: string): Promise<number[]> {
       if (!vals.length) return reject(new Error("no frames measured"));
       resolve(vals);
     });
-  });
+  }));
 }
 
 /** The predicted seams whose jump stands out from the frames around them. */

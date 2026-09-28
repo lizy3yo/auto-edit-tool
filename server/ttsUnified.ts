@@ -14,11 +14,10 @@ import { createTTSTaskMinimax, pollTTSTaskMinimax } from "./ttsMinimax";
 export { VoiceNotFoundError, DuplicateTTSError } from "./tts69labs";
 import { storagePut } from "./storage";
 import { nanoid } from "nanoid";
-import { spawn } from "child_process";
 import { tmpdir } from "os";
 import { join } from "path";
 import { writeFile, readFile, unlink } from "fs/promises";
-import { getFFmpegPath } from "./ffmpegPath";
+import { spawnFfmpeg, retryUnstarted } from "./ffmpegSpawn";
 
 /** Thrown when the TTS provider reports exhausted credits. */
 export class TTSCreditError extends Error {
@@ -57,8 +56,8 @@ async function runMp3Filter(
   const outPath = `${base}-out.mp3`;
   try {
     await writeFile(inPath, audioBuffer);
-    await new Promise<void>((resolve, reject) => {
-      const proc = spawn(getFFmpegPath(), [
+    await retryUnstarted(() => new Promise<void>((resolve, reject) => {
+      const proc = spawnFfmpeg([
         "-hide_banner",
         "-loglevel",
         "error",
@@ -93,7 +92,7 @@ async function runMp3Filter(
       proc.on("error", err =>
         reject(new Error(`FFmpeg process error: ${err.message}`))
       );
-    });
+    }));
     return Buffer.from(await readFile(outPath));
   } finally {
     await unlink(inPath).catch(() => {});
@@ -143,8 +142,8 @@ async function longestDeadAir(audioBuffer: Buffer): Promise<number> {
   const inPath = join(tmpdir(), `ttssil-${nanoid(8)}.mp3`);
   try {
     await writeFile(inPath, audioBuffer);
-    const stderr = await new Promise<string>((resolve, reject) => {
-      const proc = spawn(getFFmpegPath(), [
+    const stderr = await retryUnstarted(() => new Promise<string>((resolve, reject) => {
+      const proc = spawnFfmpeg([
         "-hide_banner",
         "-nostats",
         "-i",
@@ -167,7 +166,7 @@ async function longestDeadAir(audioBuffer: Buffer): Promise<number> {
       proc.on("error", err =>
         reject(new Error(`FFmpeg process error: ${err.message}`))
       );
-    });
+    }));
     const durs = (stderr.match(/silence_duration: [\d.]+/g) ?? []).map(m =>
       parseFloat(m.slice("silence_duration: ".length))
     );

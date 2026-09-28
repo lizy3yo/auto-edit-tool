@@ -21,6 +21,9 @@
  */
 
 import { nanoid } from "nanoid";
+import * as nodeFs from "node:fs";
+import nodeOs from "node:os";
+import nodePath from "node:path";
 import sharp from "sharp";
 import { invokeClaude } from "./claude";
 import { invokeGemini } from "./gemini";
@@ -29,6 +32,11 @@ import {
   deriveContinuitySheet,
   HOST_HANDOFF_MIN_SEC,
   LIST_SHOT_MIN_SEC,
+  joinHookPictures,
+  joinSameContext,
+  markSameContext,
+  pullListLeadIns,
+  pictureMaxSecAt,
   planShotList,
   settleShots,
   SHOT_MIN_SEC,
@@ -36,6 +44,7 @@ import {
   MOVES_ON_ITS_OWN,
   HOST_PART_MAX_SEC,
   wordsAfterName,
+  spokenListItems,
 } from "./shotList";
 import { safeParseJSON, stripMarkdownFences } from "./jsonRepair";
 import { scanStillDefects } from "./overlayTextScan";
@@ -72,6 +81,7 @@ import {
   getAllChannelConfigs,
   getProviderByType,
   hostNameAliases,
+  resolveHostName,
 } from "./db";
 import {
   createLongformVideoJob,
@@ -256,14 +266,18 @@ type LipsyncLane = {
 };
 import { ENV } from "./_core/env";
 import { pickMusicBeds } from "./musicBeds";
+import { steadyHostClip } from "./hostSteady";
+import { deriveHostLook, markHostBroll } from "./hostLook";
 import {
   assemblePerSceneFilm,
+  type PhoneLook,
   planMusicSchedule,
   concatAudio,
   compositeSplitScreenClip,
   extractHostPanel,
   extractBrollPanel,
   renderKenBurnsClip,
+  stillZooms,
   isBlankClip,
   dimensionsFor,
   probeBufferDurationSec,
@@ -1166,7 +1180,7 @@ export const LONGFORM_INSTRUCTION_KEY = "longform_instruction_prompt";
  * The spoken audio is always the user's verbatim script (see `extractSpokenScript`).
  * Admins can edit the live value at Admin → Longform.
  */
-export const DEFAULT_LONGFORM_INSTRUCTION = `HOST IDENTITY (locked): the same on-camera host in every host shot — an early-60s man, weathered friendly face, real skin texture, short gray hair, wearing a plain, faded casual polo shirt with a worn, at-home look. Keep him visually identical across all host scenes. Absolutely no CGI, no "AI" look, no face changes, no morphing, no doubles.
+export const DEFAULT_LONGFORM_INSTRUCTION = `HOST IDENTITY (locked): the same on-camera host in every host shot — the channel's own host, exactly as they appear in their host photo (face, hair, clothes), with real skin texture and a worn, at-home look. Keep them visually identical across all host scenes. Absolutely no CGI, no "AI" look, no face changes, no morphing, no doubles.
 
 LOOK: the seated host is real and unpolished — medium-quality consumer-camera footage, natural indoor light, calm and conversational in a cozy home study. No on-screen captions, text overlays, logos, motion graphics, drone shots, or fast cuts.
 
@@ -2111,19 +2125,11 @@ function checkInShaped(
   sec: number
 ): boolean {
   const s = scenes[i];
-  const prev = scenes[i - 1];
-  // The host may come IN at a clean break inside a sentence too — after a comma, semicolon, colon
-  // or dash that the shot list cut on — not only at a sentence start: the voice never stops, only
-  // the picture changes, so a pause between words is a smooth cut either way. A list item never.
-  const cleanStart =
-    startsSentence(scenes, i) ||
-    (!!s.wordCut &&
-      !s.listCut &&
-      !!prev?.wordCut &&
-      !prev.listCut &&
-      /[,;:—–-]["'”’)\]]*$/.test((prev.scriptText ?? "").trim()));
+  // The host comes IN only where a sentence starts. Coming in after a comma was allowed until
+  // 2026-09-28 ("the voice never stops, only the picture changes") — the operator saw it as the
+  // host cutting in before the sentence was finished (Mae 2:12 "…well now, | why not…").
   return (
-    cleanStart &&
+    startsSentence(scenes, i) &&
     (endsSentence(s.scriptText ?? s.narration) || (!!s.wordCut && !s.listCut)) &&
     sec >= (s.wordCut ? HOST_CHECKIN_MIN_SEC : HOST_MIN_HOLD_SEC) &&
     sec <= HOST_CHECKIN_PROMOTE_MAX_SEC
@@ -3749,6 +3755,10 @@ export function isOperatorLabelTitle(raw: string, normalized: string): boolean {
     )
   )
     return true;
+  // A run label, not a subject: "Ruth 3min v3" was taken for the video's subject and written into
+  // picture descriptions ("a bunch of different blocks (as used for Ruth 3min v3)", job 239).
+  if (/\b\d+\s?min\b|\bv\d+\b|\btake \d+\b|\brun \d+\b|\ball fixes\b|\bone-topic/i.test(raw) && words <= 6)
+    return true;
   return (
     /\b(test|testing|stress|rehearsal|draft|demo)\b/i.test(raw) && words <= 5
   );
@@ -4115,7 +4125,7 @@ export function buildUnifiedStoryboardPrompt(opts: {
     `  "wide" — full-scene: the whole setting, a before/after view, the space the beat is about\n` +
     `  "overhead" — looking straight down from just above: a laid-out arrangement, a treated area, items in a tray\n` +
     `  "low" — near ground looking across: the base of the subject, a low surface line, the ground plane\n` +
-    `  "pov" — first-person handheld POV: camera at the doer's chest looking down at the product and work surface as if the viewer is doing it — a bottle held over the target, weathered bare hands at work with no face or body in shot. Use on roughly 1 in 3 application beats (pour, spray, spread, mix, wipe, place).\n` +
+    `  "pov" — first-person handheld POV: camera at the doer's chest looking down at the product and work surface as if the viewer is doing it — a bottle held over the target, bare hands at work with no face or body in shot. Use on roughly 1 in 3 application beats (pour, spray, spread, mix, wipe, place).\n` +
     `DISTRIBUTION RULE: no more than 2 consecutive b-roll scenes may share the same shotAngle ` +
     `value. Spread all 5 angles across the video. ` +
     `Match the angle to the subject: product container → "mid"; whole-scene result → "wide"; ` +
@@ -4139,7 +4149,7 @@ export function buildUnifiedStoryboardPrompt(opts: {
     `- VISUAL PROMPT COMPLETENESS: every visualPrompt must be a fully self-contained ` +
     `shot description — the model sees only that one prompt with no memory of others. ` +
     `Host scenes embed: (a) a compact physical description matching the script's host ` +
-    `(e.g. "early 60s man, weathered face, short gray hair"), (b) the exact outfit from ` +
+    `(the host exactly as in their host photo — never guess an age or a gender), (b) the exact outfit from ` +
     `the script, (c) camera cues ("medium-quality iPhone footage, fixed camera, natural ` +
     `indoor light, static medium shot from the chest up"), (d) the seated talking action ` +
     `plus a small gesture. B-roll scenes embed ONLY the specific environment/subject and ` +
@@ -4878,9 +4888,9 @@ export const FIGURE_OF_SPEECH_RULE =
  * straight through its gaps (0:50-0:58 of the film that prompted this).
  */
 export const CLEAN_FRAME_RULE =
-  "CLEAN, READABLE FRAME: the hero subject fills most of the frame; the background is tidy, " +
-  "calm, and secondary, with no branded products, logos, or unrelated clutter competing with " +
-  "it. An openwork object (a lattice, screen, grille, or frame) is shown backed by its paper or " +
+  "READABLE FRAME: the hero subject is clearly the main thing and takes up much of the frame; " +
+  "the background is a real, used place kept secondary — a few everyday things at the edges are " +
+  "fine, but no branded products or logos and nothing competing with the subject. An openwork object (a lattice, screen, grille, or frame) is shown backed by its paper or " +
   "panel, or against a plain, calm backdrop — never with a busy background showing through the " +
   "gaps.";
 
@@ -4920,11 +4930,25 @@ function amateurSettingClause(subject?: string): string {
     ? `in the real, unstaged place this shot is about — where ${s} is done when the shot is ` +
       `about the work itself, and wherever the shot says when it names somewhere else`
     : "in the real, unstaged place this shot is about";
+  // A PERSON'S SNAPSHOT, not a product shot (2026-09-27). Asked for "amateur" footage, the models
+  // still composed catalogue photos — dead centre, level, flattering light, a styled set — and that
+  // composition, more than any texture, is what read as AI. Saying WHO took it and HOW (a quick
+  // phone photo from where they stood) is what moves the framing, the light and the room. The
+  // subject stays the clear main thing; only the staging goes.
+  // v2 (2026-09-28): the first version still read as AI on Hannah's film — a glowing oil lamp and
+  // a golden glow in most shots, props arranged round every subject, hyper-crisp textures, always
+  // a close "hero" shot. Plain dull daylight, nothing decorative unless named, a step back.
   return (
-    `shot handheld by an amateur ${place}; the hero subject fills most of the frame and the ` +
-    `background is tidy, calm, and secondary, with no branded products, logos, or unrelated ` +
-    `clutter; the frame contains only what this shot describes; no staged sets, no clean ` +
-    `product photography, no blank backgrounds.`
+    `an ordinary, unremarkable photo someone took on their phone ${place}, from a step or two ` +
+    `back at standing height — not a product photo, not a styled or cozy scene. Plain light only: ` +
+    `daylight from a window or an ordinary ceiling light, a little flat and dull, with the phone's ` +
+    `automatic white balance slightly cool; no glowing lamps, candles or fire unless the shot ` +
+    `names them, no golden glow, no dramatic side light, no dark moody corners, no vignette. ` +
+    `Nothing arranged for the camera: things lie where they were left, and no decorative props ` +
+    `(lamps, candles, flowers, jars, pincushions, cups or mugs) are added unless the shot names ` +
+    `them; the subject is clearly the main thing, a little off-centre, the framing a little ` +
+    `crooked and casual. The place is real and used, with worn surfaces; nothing the shot does ` +
+    `not describe stands out; no branded products or logos, no blank backgrounds.`
   );
 }
 
@@ -5043,7 +5067,9 @@ function amateurLookTail(cameraClause: string): string {
   return (
     " Natural available light only. " +
     cameraClause +
-    " Low production quality, authentic found-footage look. Muted, true-to-life colors " +
+    " Low production quality, authentic found-footage look. Deep focus like a phone camera, " +
+    "everything from the front of the frame to the back in focus; slightly soft detail and a " +
+    "little noise in the shadows; not symmetrical, not styled, not perfect. Muted, true-to-life colors " +
     "with a neutral white balance — slightly desaturated like real phone footage, no " +
     "color grading, no vivid, punchy, or oversaturated colors. " +
     "The camera stays at natural human height — eye level or below — never an aerial, " +
@@ -5220,7 +5246,7 @@ export const EDIT_VIDEO_BROLL_ENHANCER_SYSTEM =
   "and easy to read at a glance, in a warm, familiar everyday setting.\n" +
   "- FIRST-PERSON POV FOR TASKS: when the narration states or clearly implies a physical " +
   "task (sprinkling, pouring, holding, planting, spreading, pruning), frame it as the " +
-  "filmer's own point of view — weathered bare hands and forearms entering " +
+  "filmer's own point of view — bare hands and forearms entering " +
   "the frame from the bottom or side, doing the task while they film with the other hand; " +
   "a sleeve cuff or the bucket they are working from may edge into frame. NEVER show a " +
   "face, head, hair, shoulders, torso, or legs, and never a second person. When the " +
@@ -5249,23 +5275,28 @@ export const STILL_BROLL_ENHANCER_SYSTEM =
   "still-image prompt and make it natural and realistic and compositionally strong for " +
   "an AI image generator.\n\n" +
   "Rewrite the prompt to:\n" +
-  "- Add one concrete sensory or tactile detail OF THE NARRATED SUBJECT (texture, colour, " +
-  "material up close); do not add new objects.\n" +
-  "- Add a natural lighting or colour-mood cue using soft, neutral light (soft overcast, " +
-  "even indoor daylight, flat diffused shade, etc. — avoid warm golden-hour light). Keep " +
-  "the color muted and natural, never vivid or saturated — but do NOT name a camera, lens, " +
-  "shot type, or depth-of-field; the look is appended in code.\n" +
-  "- Add one compositional note about the narrated subject (tight foreground subject, " +
-  "objects at an angle, etc.) — but do NOT describe camera, lens, shot type, lighting " +
-  "quality, depth-of-field, or production look; those are appended in code.\n" +
-  "- Compose for older (50–70) viewers: ONE clear hero subject, uncluttered and easy " +
-  "to read at a glance, in a warm, familiar everyday setting.\n" +
+  // 2026-09-28: the texture, lighting and composition notes this used to ask for ("one sensory
+  // or tactile detail", "a lighting cue", "a compositional note") are what made every still a
+  // styled close-up with crisp textures and a warm glow. The prompt now reads like the caption of
+  // an ordinary phone snapshot; the look (plain light, a step back) is appended in code.
+  "- Write it PLAINLY, like the caption of an ordinary phone snapshot: the thing, where it is, " +
+  "and what is happening to it. No texture, light, colour-mood or style words, no 'rustic', " +
+  "'cozy', 'warm' or 'glowing'; do not name a camera, lens, shot type or depth-of-field — the " +
+  "look is appended in code. Do not add objects the narration does not mention — never a lamp, " +
+  "lantern, candle or 'lamplight' unless the narration names one (the props list is how things " +
+  "LOOK, not a list of things to add).\n" +
+  "- KEEP THE EXACT KIND: when the prompt names a specific kind, pattern or design (a nine-patch " +
+  "quilt, a granny square, kumiko) keep that name AND its plain description of how it looks, " +
+  "word for word — the picture generator may not know the term.\n" +
+  "- Compose for older (50–70) viewers: ONE clear subject, easy to read at a glance, in an " +
+  "ordinary everyday setting — not always close up; often seen from a step or two back.\n" +
   `- ${CLEAN_FRAME_RULE}\n` +
   `- ${FIGURE_OF_SPEECH_RULE}\n` +
   `- ${NO_NARRATION_TEXT_RULE}\n` +
   "- SAY IT, SHOW IT: when a MUST SHOW line is given, the frame's hero subject is exactly that " +
-  "thing, named plainly first in your prompt and framed CLOSE — centred, filling most of the " +
-  "frame, the first thing the eye lands on, with the place only a simple background — never a " +
+  "thing, named plainly first in your prompt and framed CLOSE — taking up much of the frame, the " +
+  "first thing the eye lands on, though casually framed like a real phone photo rather than dead " +
+  "centre, with the place only a background — never a " +
   "different object, a wider scene it gets lost in, or a symbol of it. Anything on the PROPS LIST looks exactly as listed. Continue from " +
   "the previous shots: the same objects, the story further along, a different framing.\n" +
   "- PLACE: set the shot where the narration puts it. When the line is about where a thing is " +
@@ -5291,7 +5322,7 @@ export const STILL_BROLL_ENHANCER_SYSTEM =
   "silhouette, or reflection of anyone, and nobody in the background. If the original " +
   "prompt or the narration names or implies a person (a man, a gardener, a homeowner, " +
   "someone watching or inspecting), rewrite them out: keep the object, tool, task, or " +
-  'result they interact with, or reduce them to "a pair of weathered bare hands" at the ' +
+  'result they interact with, or reduce them to "a pair of bare hands" (never an age or a gender) at the ' +
   "work, framed so nothing above the forearms is in shot. Never write any person's proper " +
   "name — even if the original prompt or narration names someone.\n" +
   '- Remove generic AI-image clichés ("photorealistic", "8k", "ultra-realistic", ' +
@@ -5455,9 +5486,9 @@ export const HUMAN_MOTION_DIRECTIVE =
  */
 export function heroFramingClause(subject: string): string {
   return (
-    `, a close shot where ${subject.trim()} is the centre of attention — centred, sharp and filling ` +
-    `most of the frame, the first thing the eye lands on; the background is clear but simple and ` +
-    `secondary, nothing in it competes`
+    `, a close shot where ${subject.trim()} is the centre of attention — close, sharp and taking ` +
+    `up much of the frame, the first thing the eye lands on, though framed casually rather than ` +
+    `dead centre; the background is real but secondary, nothing in it competes`
   );
 }
 
@@ -5472,7 +5503,7 @@ const SHOT_ANGLE_SUFFIX: Record<string, string> = {
   overhead:
     "phone held above the subject looking straight down at it, from arm's length",
   low: "low angle near ground level",
-  pov: "handheld first-person POV — camera at chest height looking down at an older man's weathered hands and the work surface as if the viewer is doing the task themselves",
+  pov: "handheld first-person POV — camera at chest height looking down at the hands and the work surface as if the viewer is doing the task themselves",
 };
 
 /**
@@ -5480,9 +5511,19 @@ const SHOT_ANGLE_SUFFIX: Record<string, string> = {
  * needs a human action on screen. B-roll never shows a person: only bare hands and forearms
  * enter the frame at the task, never a face, head, or body, and never the channel host.
  */
+/**
+ * A tool in a picture is really WORKING on its material. Norbert's 3-min test (job 236, 2:19)
+ * showed a drill whose bit never went into the wood; the still is the video's first frame, so it
+ * starts right here. (Such shots are also kept as photos — `contactToolWork` in shotList.ts.)
+ */
+export const TOOL_CONTACT_CLAUSE =
+  "Any tool in the shot is really working on its material: a drill bit or screw sunk into the " +
+  "wood, a saw blade down in its cut, a chisel edge in the wood, scissor or cutter blades closing " +
+  "on the cloth, a needle through the fabric — never held in the air beside the work.";
+
 export const ANON_PERSON_SUFFIX =
   "The only part of a human visible anywhere in this shot is a pair of bare hands (and at " +
-  "most the forearms) at the task — ordinary, weathered, unadorned adult hands. The hands " +
+  "most the forearms) at the task — ordinary, unadorned adult hands. The hands " +
   "are already in frame and on the task from the very first frame of the shot — mid-task " +
   "from the start, never entering from off-screen, reaching in later, or appearing partway " +
   "through. " +
@@ -5492,7 +5533,8 @@ export const ANON_PERSON_SUFFIX =
   "named, specific, famous, or recurring individual. They work quietly and do not gesture at " +
   "or address the camera — the narration is voiced over the top. No on-screen text or " +
   "captions. Keep the script's subject/product/result the hero of the shot, with the hands " +
-  "incidental to the action.";
+  "incidental to the action. " +
+  TOOL_CONTACT_CLAUSE;
 
 /**
  * Appended to CTA / QR host scenes only. The QR card is composited over the frame in
@@ -5535,11 +5577,47 @@ export const NO_PEOPLE_SUFFIX =
  * hands-on b-roll shot is often the only literal way to depict a narrated manual action. What is
  * banned is a *person* — any face, head, or body, whole or partial.
  */
+/**
+ * The host at work in their own b-roll (`scene.brollHostLook`): seen from behind or the side, the
+ * face never shown — the picture model draws a face a little differently every time, and a b-roll
+ * face that does not match the talking host would read as someone else. Pure.
+ */
+export function hostBrollClause(look: string): string {
+  return (
+    `The only person in this shot is the host — ${look.trim().replace(/\.$/, "")} — exactly as in ` +
+    `the reference photo, doing the task: seen from behind or from the side, over the shoulder, ` +
+    `hands at the work, the face turned away or out of frame so it is never shown. Nobody else ` +
+    `is in the frame, in the background or in a reflection. ${ONE_BODY_CLAUSE}`
+  );
+}
+/**
+ * One body, two arms. Over-the-shoulder shots of hands at work are where the picture model adds
+ * an arm: Norbert's 3-min test (job 232, 2:19) had a hand on the drill, a hand on the strike
+ * plate and a THIRD sleeve ending at the drill's battery — and neither Haiku nor Sonnet could
+ * see it, at 768 px or full size, even asked to trace every sleeve (2026-09-29). A checker that
+ * cannot see it cannot catch it, so the prompt prevents it: every host-at-work picture and clip
+ * asks for the one pair of arms, each followed from its own shoulder to its hand.
+ */
+export const ONE_BODY_CLAUSE =
+  "The host has exactly two arms and two hands, both their own: each arm runs unbroken from its " +
+  "own shoulder to its hand, no extra arm, sleeve or hand anywhere in the frame. When the task " +
+  "takes two hands, both of the host's hands are on it; when it takes one, the other rests " +
+  "plainly in view or out of frame. " +
+  TOOL_CONTACT_CLAUSE;
+/** `NO_FIGURES_SUFFIX` for a shot that shows the host from behind: nobody ELSE, never a face. */
+export const NO_OTHER_FIGURES_SUFFIX =
+  "Apart from the host seen from behind, no person is visible: no second person, no one in the " +
+  "background, no reflection of anyone, and no face anywhere in the frame. No mirror, window " +
+  "glass or other shiny surface anywhere the host could be reflected in it.";
+
 export const NO_FIGURES_SUFFIX =
   "No person is visible in this shot: no face, head, hair, shoulders, torso, or legs, no " +
   "whole or partial human figure, no silhouette, no reflection of a person, and no people in " +
   "the background. Bare hands and forearms working at the task are the ONLY human parts that " +
-  "may appear, and only where the action needs them.";
+  "may appear, and only where the action needs them — one person's pair at most, each hand on " +
+  "its own forearm, never a third hand or arm. Nothing is held up by itself: a tool or object " +
+  "with no hand on it rests on a surface or hangs from a hook — never hovering in the air or " +
+  "pressed against the work on its own.";
 
 /**
  * Self-contained lip-sync directive — the ENTIRE InfiniteTalk host prompt (see
@@ -6038,8 +6116,15 @@ export function buildStillPrompt(
     : scene.shotAngle && SHOT_ANGLE_SUFFIX[scene.shotAngle]
       ? `, ${SHOT_ANGLE_SUFFIX[scene.shotAngle]}`
       : "";
+  // The host at work (from behind) when the pipeline marked it, else anonymous hands.
   const personSuffix =
-    !aggressive && scene.humanPresent ? ` ${ANON_PERSON_SUFFIX}` : "";
+    !aggressive && scene.humanPresent
+      ? ` ${scene.brollHostLook ? hostBrollClause(scene.brollHostLook) : ANON_PERSON_SUFFIX}`
+      : "";
+  const noFigures =
+    !aggressive && scene.humanPresent && scene.brollHostLook
+      ? NO_OTHER_FIGURES_SUFFIX
+      : NO_FIGURES_SUFFIX;
   const visual = visualOverride
     ? softenVisualPrompt(visualOverride)
     : aggressive
@@ -6054,7 +6139,7 @@ export function buildStillPrompt(
   // aggressive content-policy retry alongside the hands clause: the moving element is the likely
   // block, so the retry falls back to the settled base clause.
   const motion = !aggressive && scene.objectMotion ? "objectStill" : "settle";
-  return `${visual}${angleSuffix}${personSuffix} ${amateurIphoneLook(subject, motion)} ${framing} ${NO_FIGURES_SUFFIX} ${NO_BOOK_SUFFIX}`;
+  return `${visual}${angleSuffix}${personSuffix} ${amateurIphoneLook(subject, motion)} ${framing} ${noFigures} ${NO_BOOK_SUFFIX}`;
 }
 
 /**
@@ -6063,21 +6148,24 @@ export function buildStillPrompt(
  */
 export const TALKING_HEAD_ASPECT_RATIO = "16:9" as const;
 
-/** Default host description used when extraction from the script fails. */
+/**
+ * Host description used when nothing better is known. It used to be "a man in his early 60s…",
+ * which is how every channel's host scenes — Hannah's and Granny Mae's included — came to be
+ * described as a man. Neutral now; `hostLook` (read off the host's own photo) replaces it.
+ */
 const DEFAULT_HOST_DESCRIPTOR =
-  "a man in his early 60s, weathered friendly face, short gray hair, wearing a " +
-  "plain, faded casual polo shirt";
+  "the channel's host, exactly as in their host photo";
 
 /**
- * Restrained, near-motionless seated poses for the talking host. The on-screen host is
- * elderly, so we keep him still — these rotate only subtle, low-motion descriptors (no
- * gestures or leaning) so independent clips vary slightly without injecting body movement.
+ * Restrained, near-motionless seated poses for the talking host — these rotate only subtle,
+ * low-motion descriptors (no gestures or leaning) so independent clips vary slightly without
+ * injecting body movement.
  */
 const TALKING_HEAD_GESTURES = [
   "sitting still and composed",
-  "hands resting quietly in his lap",
+  "hands resting quietly in their lap",
   "calm and steady, barely moving",
-  "still and relaxed as he speaks",
+  "still and relaxed while speaking",
   "a quiet, settled posture",
 ];
 
@@ -6890,7 +6978,10 @@ function tokenTest(token: string): (hay: string) => boolean {
 export function titleMatcher(
   bookTitle: string | undefined
 ): (text: string) => boolean {
-  const full = bookTitle ? getBookNameTokens(bookTitle) : [];
+  // Each word once: a title that repeats one ("The French Way: … Secrets The French Use …") counted
+  // "french" twice, so "ordinary French habit" alone passed as naming the book and the cover went
+  // on the wrong line (Diane's 3-min test, job 245: book → host → QR instead of host → book → host).
+  const full = bookTitle ? Array.from(new Set(getBookNameTokens(bookTitle))) : [];
   if (!full.length) return () => false;
   const mainSet = new Set(getBookNameTokens(bookTitle!.split(":")[0]));
   const tests = full.map(t => ({ main: mainSet.has(t), fn: tokenTest(t) }));
@@ -7153,6 +7244,57 @@ function markScanWindow(
     cover.hostPresent = false;
     cover.splitVisual = undefined;
   }
+}
+
+/**
+ * The scan window is ONE topic ("scan the code"), so it is ONE picture under the big card. It was
+ * one picture per line: Hannah's 3-min test (job 228, 1:30-1:41) changed the picture behind the
+ * card three times in 10 s, the last for 0.8 s on "I'll wait right here." Consecutive card beats of
+ * the same CTA block (never the cover) join into the first one's picture — the release line's
+ * `qrTail` carried onto the joined beat, since narration alignment anchors the window's end on it —
+ * up to `maxAt` for where the picture starts; past it the next beat starts a new picture. Run on
+ * the final lengths, in the same loop as the other joins. Pure — unit-tested.
+ */
+export function joinScanWindow(
+  scenes: StoryboardScene[],
+  sec: (s: StoryboardScene) => number,
+  maxAt: (s: StoryboardScene) => number
+): { scenes: StoryboardScene[]; changed: boolean } {
+  const out = [...scenes];
+  const len = out.map(sec);
+  // The two CTA pictures that are one topic each: the scan window's card, and the book cover —
+  // Ruth's 3-min test (job 233) had the cover line split in two ("…gathered up in my book," |
+  // "101 Lessons From Grandma's Sewing Chair."), both halves still the cover, so the same cover
+  // played twice with a jump between.
+  const kind = (s: StoryboardScene | undefined) =>
+    !s || s.hostPresent || s.assetImageUrl ? null : s.coverHero ? "cover" : s.qrHero ? "card" : null;
+  let changed = false;
+  for (let i = 1; i < out.length; i++) {
+    const a = out[i - 1];
+    const b = out[i];
+    if (!kind(a) || kind(a) !== kind(b) || a.ctaIndex !== b.ctaIndex) continue;
+    if (len[i - 1] + len[i] > maxAt(a)) continue;
+    const text = `${(a.scriptText ?? "").trim()} ${(b.scriptText ?? "").trim()}`.trim();
+    const joined: StoryboardScene = {
+      ...a,
+      scriptText: text,
+      narration: text.split(/\s+/).slice(0, 8).join(" "),
+      qrTail: a.qrTail || b.qrTail || undefined,
+      audioUrl: undefined,
+      audioDuration: undefined,
+      narrationStartSec: undefined,
+      narrationEndSec: undefined,
+      clipUrl: undefined,
+      clipUrls: undefined,
+      sceneStatus: "pending",
+    };
+    out.splice(i - 1, 2, joined);
+    len.splice(i - 1, 2, len[i - 1] + len[i]);
+    changed = true;
+    i--; // the joined picture may take the next line too
+  }
+  out.forEach((s, k) => (s.index = k + 1));
+  return { scenes: out, changed };
 }
 
 /**
@@ -7426,6 +7568,10 @@ export function joinBackToBackHostTakes(
         cta: prev.cta || s.cta || undefined,
         qrCorner: prev.qrCorner || s.qrCorner || undefined,
         hostIntro: prev.hostIntro || s.hostIntro || undefined,
+        // The joined take ends where `s` ended, so a shot-list hand-off there is still a hand-off
+        // (Mae's job 180: the hook joined onto "I'm Granny Mae," lost it, and the plan gate read
+        // the designed hand-off after the name as a take ending mid-sentence).
+        wordCut: prev.wordCut || s.wordCut || undefined,
         minHoldSec: Math.max(prev.minHoldSec ?? 0, s.minHoldSec ?? 0) || undefined,
         clipUrls: undefined,
         clipUrl: undefined,
@@ -7578,7 +7724,13 @@ export function buildClipChain(
   // hands at the task and nothing else of a human (ANON_PERSON_SUFFIX); the channel host photo
   // is never referenced on b-roll, and `NO_FIGURES_SUFFIX` below keeps every cutaway face-free.
   const peopleSuffix =
-    !scene.hostPresent && scene.humanPresent ? ` ${ANON_PERSON_SUFFIX}` : "";
+    !scene.hostPresent && scene.humanPresent
+      ? ` ${scene.brollHostLook ? hostBrollClause(scene.brollHostLook) : ANON_PERSON_SUFFIX}`
+      : "";
+  const clipNoFigures =
+    !scene.hostPresent && scene.humanPresent && scene.brollHostLook
+      ? NO_OTHER_FIGURES_SUFFIX
+      : NO_FIGURES_SUFFIX;
   // Shot-angle phrase appended to non-host prompts so camera variety is enforced in code
   // rather than relying on Claude's implicit framing choices.
   const angleSuffix =
@@ -7603,7 +7755,7 @@ export function buildClipChain(
     ? `${scene.visualPrompt} ${TALKING_HEAD_BACKGROUND}${
         scene.cta ? ` ${CTA_EMPTY_HANDS_SUFFIX}` : ""
       } ${NO_OVERLAY_TEXT_SUFFIX}`
-    : `${softenVisualPrompt(scene.visualPrompt)}${angleSuffix}${peopleSuffix} ${amateurIphoneLook(params.videoSubject, brollLookMotion(scene))} ${NO_FIGURES_SUFFIX} ${NO_BOOK_SUFFIX}`;
+    : `${softenVisualPrompt(scene.visualPrompt)}${angleSuffix}${peopleSuffix} ${amateurIphoneLook(params.videoSubject, brollLookMotion(scene))} ${clipNoFigures} ${NO_BOOK_SUFFIX}`;
 
   // `humanPresent` b-roll carries no ref image HERE — the hands are described by the prompt
   // (ANON_PERSON_SUFFIX + PERSON_MOTION_CAMERA_CLAUSE) and the only image it ever gets is the
@@ -7959,7 +8111,15 @@ export async function generateValidatedStill(
   for (let attempt = 1; attempt <= attempts; attempt++) {
     let r: GenerationResult | undefined;
     try {
-      r = await genImage({ prompt, referenceImageUrl, square });
+      // A picture of the host at work (`markHostBroll`) is drawn from the host's own photo, so it
+      // is their clothes and build; the defect checks below still run (they are skipped only for
+      // a caller's own reference — the book cover).
+      r = await genImage({
+        prompt,
+        referenceImageUrl:
+          referenceImageUrl ?? (scene.humanPresent ? scene.brollHostRef : undefined),
+        square,
+      });
     } catch (e: any) {
       lastError = e?.message || "Still image generation error";
       if (isContentPolicyError(lastError)) {
@@ -8044,9 +8204,13 @@ export async function generateValidatedStill(
       }
       // A brand, a subject lost in clutter, or the wrong place for the line (rules 3 and 4): one
       // fresh seed, the frame kept as the fallback — the same bargain as an off-subject frame.
-      if ((defects.messy || defects.wrongPlace) && cleanRerolls < 1) {
+      if ((defects.messy || defects.wrongPlace || defects.staged) && cleanRerolls < 1) {
         cleanRerolls++;
-        const kind = defects.messy ? "a brand or clutter" : "the wrong place for its line";
+        const kind = defects.messy
+          ? "a brand or clutter"
+          : defects.wrongPlace
+            ? "the wrong place for its line"
+            : "a staged, not-a-phone-photo look";
         lastError = `Still image has ${kind}`;
         offSubjectFallback ??= { buffer, mimeType: r.mimeType };
         console.warn(
@@ -8159,8 +8323,14 @@ export async function generateSceneStillClip(
     index: scene.index,
     // The cover sits on a blurred, darkened copy of itself over a solid dark backdrop.
     cover: Boolean(coverImageUrl),
+    // Its LENGTH decides: a picture on screen 3 s or longer slowly zooms, a shorter one stays
+    // completely still (`stillZooms`, the operator's call). The cover keeps its own look.
+    still: !coverImageUrl && !stillZooms(scene.audioDuration ?? 0),
     dims: square ? { width: side, height: side } : undefined,
   });
+  // Kept so the zoom can be re-cut from the original later (`rezoomJobStills`) instead of
+  // from a frame of this clip.
+  scene.stillSourceUrl = imageUrl;
   const clipKey = `longform/${jobId}/still-${scene.index}-${nanoid(6)}.mp4`;
   const { url } = await storagePut(clipKey, buf, "video/mp4");
   return [url];
@@ -8285,7 +8455,7 @@ const floorFor = (
   pacing: LongformPacing = LEGACY_PACING
 ): number =>
   // Cut on the words by the shot list: the beat is exactly as long as its words, and holding it to
-  // the ordinary floor would freeze the picture and splice silence into the sentence.
+  // the ordinary floor would freeze the picture and splice silence into the sentence. The one
   s.wordCut
     ? s.hostPresent
       ? HOST_HANDOFF_MIN_SEC
@@ -8804,12 +8974,31 @@ function introPatterns(hostName: string | undefined): RegExp[] {
   return out;
 }
 
+/**
+ * Words that follow "I'm" at the start of a sentence without being a name ("I'm Not sure…"), so
+ * the no-name backstop below never mistakes them for one.
+ */
+const NOT_A_NAME =
+  /^(not|so|sure|sorry|going|glad|here|back|telling|talking|just|also|still|really|always|never|about|afraid|done|getting|looking|trying|the|a|an|in|on|at|from|with|over|sixty|seventy|eighty|one|two|three|four|five)$/i;
+
 /** Character spans [start, end) of every self-introduction in `text`. Pure. */
 export function introSpans(
   text: string,
   hostName: string | undefined
 ): [number, number][] {
   const spans: [number, number][] = [];
+  // No name to look for (a channel with neither a host name nor a display name): the FIRST
+  // "I'm <Name>" / "I am <Name>" near the start of the script is the introduction — hosts
+  // introduce themselves in the opening, so nothing later can be mistaken for one.
+  if (!hostName?.trim()) {
+    const opening = Math.max(700, Math.floor(text.length * 0.2));
+    for (const m of Array.from(text.matchAll(/\b(?:I['’]m|I am)\s+([A-Z][\w'’-]+)/g))) {
+      if (m.index! > opening) break;
+      if (NOT_A_NAME.test(m[1])) continue;
+      spans.push([m.index!, m.index! + m[0].length]);
+      break;
+    }
+  }
   for (const re of introPatterns(hostName)) {
     re.lastIndex = 0;
     for (const m of Array.from(text.matchAll(re)))
@@ -8975,11 +9164,68 @@ export function moveHostLeadIns(
 }
 
 /**
+ * The longest each picture may stay (`pictureMaxSecAt`), from where it starts in the film — the
+ * scenes' measured lengths added up in order (the ranges carry only a length at this stage).
+ */
+function pictureLimitFor(
+  scenes: StoryboardScene[],
+  filmSec: number
+): (s: StoryboardScene) => number {
+  const starts = new Map<StoryboardScene, number>();
+  let t = 0;
+  for (const s of scenes) {
+    starts.set(s, t);
+    t += s.audioDuration ?? 0;
+  }
+  return s => pictureMaxSecAt(starts.get(s) ?? 0, filmSec);
+}
+
+/**
  * The shot-list pass of the voicing stage (see `server/shotList.ts`): write the props list if the
  * job has none, ask for the shot list, cut the beats on its words, then measure and settle the
  * pieces against the word timeline until nothing is too short or too long. Any failure keeps the
  * storyboard as it was — a film with the old cuts beats a film that fails here.
  */
+/**
+ * A host line that is JUST a spoken list of things (`spokenListItems`) goes to the pictures, so
+ * the shot list gives it one quick picture per item — even in the cold open, which the shot list
+ * otherwise leaves on the host. Lance's job 218 opened "Somewhere in your house there's probably
+ * a kit." then "A bin in the hall closet, a bag in the garage, maybe a box under the bed." on the
+ * second opener angle: three things named, none shown. The host keeps the film's first line, the
+ * self-introduction, the CTAs and the goodbye, and a list only moves when the line before it is
+ * the host (the viewer has just seen them). Returns the scene numbers it moved. Mutates in place;
+ * pure otherwise — unit-tested.
+ */
+export function handListsToPictures(
+  scenes: StoryboardScene[],
+  hostName: string | undefined
+): number[] {
+  const moved: number[] = [];
+  scenes.forEach((s, i) => {
+    if (
+      i === 0 ||
+      i === scenes.length - 1 ||
+      !s.hostPresent ||
+      !scenes[i - 1].hostPresent ||
+      s.hostIntro ||
+      introducesHost(s.scriptText, hostName) ||
+      s.cta === true ||
+      s.qrCorner ||
+      s.qrHero ||
+      s.coverHero ||
+      s.assetImageUrl ||
+      s.splitVisual ||
+      !spokenListItems(s.scriptText)
+    )
+      return;
+    demoteHostToStill(s);
+    s.hostOpener = undefined;
+    s.hostProtected = undefined;
+    moved.push(s.index);
+  });
+  return moved;
+}
+
 async function cutShotsOnWords(
   scenes: StoryboardScene[],
   ctx: {
@@ -8993,6 +9239,12 @@ async function cutShotsOnWords(
   const { jobId, params, words, masterDurationSec } = ctx;
   const log = (m: string) => console.log(`[Longform ${jobId}] ${m}`);
   try {
+    // How the host looks, read once off their own photo — the host in b-roll (from behind) and in
+    // every host description, for any channel with no setup.
+    if (params.hostLook == null && hostFaces(params)[0] && !params.brollOnly) {
+      params.hostLook = await deriveHostLook(hostFaces(params)[0]);
+      log(params.hostLook ? `host look: ${params.hostLook}` : "host look: unread — b-roll keeps anonymous hands");
+    }
     if (params.continuitySheet == null) {
       params.continuitySheet = (
         await deriveContinuitySheet(ctx.spokenScript, {
@@ -9038,12 +9290,16 @@ async function cutShotsOnWords(
       });
       if (handed) log(`shot list: ${handed} storyboard host beat(s) handed to the pictures, host plan picks the glimpses`);
     }
+    const listed = handListsToPictures(scenes, params.hostName);
+    if (listed.length)
+      log(`spoken lists: host line(s) ${listed.join(", ")} are just a list — one picture per item instead`);
     const leadIns = moveHostLeadIns(scenes, params.hostName);
     if (leadIns.length)
       log(`host lead-ins: ${leadIns.length} host take(s) now start on a sentence [${leadIns.join(", ")}]`);
     const plans = await planShotList(scenes, {
       sheet: params.continuitySheet || undefined,
       hostName: params.hostName,
+      hostLook: params.hostLook,
       subject: params.videoSubject,
       log,
     });
@@ -9057,7 +9313,12 @@ async function cutShotsOnWords(
       let out = applied.scenes;
       for (let pass = 0; pass < 4; pass++) {
         assignSceneRanges(out, words, masterDurationSec);
-        const settled = settleShots(out, applied.originals, s => s.audioDuration ?? 0);
+        const settled = settleShots(
+          out,
+          applied.originals,
+          s => s.audioDuration ?? 0,
+          pictureLimitFor(out, masterDurationSec)
+        );
         out = settled.scenes;
         if (!settled.changed) break;
       }
@@ -9108,6 +9369,7 @@ async function cutShotsOnWords(
       const again = await planShotList(scenes, {
         sheet: params.continuitySheet || undefined,
         hostName: params.hostName,
+        hostLook: params.hostLook,
         subject: params.videoSubject,
         log,
         only: ids,
@@ -9136,6 +9398,14 @@ async function cutShotsOnWords(
       scrubLegibleWriting(t)
         .replace(/\b(?:cluttered|messy|jumbled|crowded|busy)\b/gi, "tidy")
         .replace(/\b(?:clutter|mess)\b/gi, "a few tools");
+    // A list that began at the end of the line before (a beat boundary fell inside it) gets its
+    // first item back as a picture of its own.
+    const leadItems = pullListLeadIns(next, params.videoSubject);
+    if (leadItems.moved > 0) {
+      next = leadItems.scenes;
+      assignSceneRanges(next, words, masterDurationSec);
+      log(`list lead-ins: ${leadItems.moved} list item(s) at the end of a line moved into their list`);
+    }
     for (const s of next) {
       if (!s.showSubject) continue;
       s.showSubject = tidy(s.showSubject);
@@ -9284,8 +9554,15 @@ export function coalesceShortScenes(
       out.push(s);
       continue;
     }
-    const prev = out[out.length - 1];
-    const next = scenes[i + 1];
+    // A MARKED CTA edge (===START/END CTA===, `ctaIndex` from `markCtaFromSpans`) is the script's
+    // own cut and nothing is folded, borrowed or flash-merged across it: the marker had split
+    // "…a dollar | and thirty cents an hour. | Let me stop here…" and the 5-word tail folded
+    // into the CTA's host take, so Hannah's film cut to the pitch before the sentence ended.
+    // Heuristic CTA flags carry no `ctaIndex`, so an unmarked script folds exactly as before.
+    const sameSide = (n: StoryboardScene | undefined) =>
+      n && n.ctaIndex === s.ctaIndex ? n : undefined;
+    const prev = sameSide(out[out.length - 1]);
+    const next = sameSide(scenes[i + 1]);
     // A sub-floor scene folds into any non-hero neighbor that still fits under the ceiling. CTA-ness
     // is NOT required to match — a short beat must never survive on that technicality — so the QR
     // may extend over one short beat (merge() ORs the cta flag), the one bounded cost we accept.
@@ -9912,6 +10189,20 @@ export async function runChunkTasks(
       throw new Error(`${provider} returned a black clip`);
     }
   }
+  // HeyGen can add a slow "breathing" camera to the whole frame; hold the room still before the
+  // clip is stored, so the full-frame take and any split built from it both play steady
+  // (`server/hostSteady.ts`; a still camera is left untouched, a failure keeps the clip).
+  // B-ROLL VIDEOS TOO (2026-09-29): every clip prompt asks for a locked tripod, and the video model
+  // still drifts — Scarlett's 3-min test (job 234) opened on a clip whose room slid and zoomed
+  // 1.9% in 8 s, which the operator saw as "the background moving too much". The same steadier
+  // took it to 0.2% with the room held still and the hands and host still moving; good hands clips
+  // had 0.3-2.1% drift of their own, all corrected. Every provider clip goes through it.
+  for (let i = 0; i < polls.length; i++) {
+    polls[i].fileData = await steadyHostClip(
+      Buffer.from(polls[i].fileData as Buffer),
+      `job ${jobId} scene ${scene.index}`
+    );
+  }
 
   const urls: string[] = [];
   for (let i = 0; i < polls.length; i++) {
@@ -9934,6 +10225,18 @@ export async function runChunkTasks(
   scene.lipsyncLeadSec = undefined; // trimmed and stored — nothing left to cut on a resume
   scene.lipsyncNarrationUrl = undefined;
   return urls;
+}
+
+/**
+ * Which phone finish a scene gets at assembly (`phoneLookFilter`): the lighter one on anything
+ * with the host in it (a full-frame take or a split), the full one on b-roll, none on a book
+ * cover or an operator's asset image — those are real pictures the operator chose. `PHONE_LOOK=0`
+ * turns it off.
+ */
+export function phoneLookFor(scene: StoryboardScene): PhoneLook | undefined {
+  if (process.env.PHONE_LOOK === "0") return undefined;
+  if (scene.coverHero || scene.assetImageUrl) return undefined;
+  return scene.hostPresent || isSplitScene(scene) ? "host" : "broll";
 }
 
 /**
@@ -9978,6 +10281,136 @@ function buildSplitRightScene(scene: StoryboardScene): StoryboardScene {
  *   crop with the face at the panel's edge. When nothing at all is found the crop is centred
  *   AND the job carries a warning naming the scene, so it is caught before the film is watched.
  */
+/**
+ * Holds the camera still on a FINISHED job's host clips (`steadyHostClip`) — the repair for films
+ * rendered before the render-time pass existed. A full-frame take is replaced by its steady copy; a
+ * split is recomposited from its steadied host take (`hostClipUrls`) beside the same right panel.
+ * Clips whose camera never moved are left byte-identical and keep their URLs. No provider is
+ * called. Returns the scenes changed; the caller reassembles.
+ */
+/**
+ * Re-cut every b-roll still of a FINISHED film by the length rule (`stillZooms`: 3 s or longer
+ * zooms, shorter stays still), for films made while the shot list chose still pictures itself —
+ * it chose them for most, and the b-roll barely moved. Only pictures whose clip disagrees with the
+ * rule are re-cut, from the original image when the scene kept it (`stillSourceUrl`), else from
+ * the un-zoomed frame of its own clip (any frame of a still clip; the first frame of a zoom-in,
+ * the last of a zoom-out — `renderKenBurnsClip` zooms in on even scene numbers). Free: no image
+ * is generated. Covers, operator assets and split panels are left alone. Returns the scene
+ * numbers it re-cut; the caller reassembles. Best-effort per scene.
+ */
+export async function rezoomJobStills(jobId: number): Promise<number[]> {
+  const changed: number[] = [];
+  await withJobLock(jobId, async () => {
+    const job = await getLongformVideoJobById(jobId);
+    if (!job) throw new Error("Job not found");
+    const scenes = (job.storyboard ?? []) as StoryboardScene[];
+    const dir = nodeFs.mkdtempSync(nodePath.join(nodeOs.tmpdir(), "rezoom-"));
+    try {
+      for (const s of scenes) {
+        const clip = s.clipUrls?.[0] ?? s.clipUrl;
+        if (s.hostPresent || !s.stillImage || s.coverHero || s.assetImageUrl || s.splitVisual || !clip)
+          continue;
+        const sec = s.audioDuration ?? (s.narrationEndSec ?? 0) - (s.narrationStartSec ?? 0);
+        const wasStill = !!s.staticShot && sec < 8;
+        const wantStill = !stillZooms(sec);
+        if (wasStill === wantStill) continue;
+        try {
+          let source = s.stillSourceUrl;
+          if (!source) {
+            const inPath = nodePath.join(dir, `clip-${s.index}.mp4`);
+            const resp = await fetch(await presignOwnBucketUrl(clip), { signal: AbortSignal.timeout(120_000) });
+            if (!resp.ok) throw new Error(`download ${resp.status}`);
+            nodeFs.writeFileSync(inPath, Buffer.from(await resp.arrayBuffer()));
+            const framePath = nodePath.join(dir, `frame-${s.index}.png`);
+            const lastFrame = !wasStill && s.index % 2 === 1; // a zoom-out starts zoomed in
+            await runFfmpeg([
+              "-y",
+              ...(lastFrame ? ["-sseof", "-0.1"] : []),
+              "-i", inPath,
+              "-frames:v", "1",
+              framePath,
+            ]);
+            source = (
+              await storagePut(
+                `longform/${jobId}/still-src-${s.index}-${nanoid(6)}.png`,
+                nodeFs.readFileSync(framePath),
+                "image/png"
+              )
+            ).url;
+          }
+          const buf = await renderKenBurnsClip(source, {
+            durationSec: sec,
+            aspectRatio: TALKING_HEAD_ASPECT_RATIO,
+            index: s.index,
+            still: wantStill,
+          });
+          const { url } = await storagePut(
+            `longform/${jobId}/still-${s.index}-rezoom-${nanoid(6)}.mp4`,
+            buf,
+            "video/mp4"
+          );
+          s.clipUrls = [url];
+          s.clipUrl = url;
+          s.stillSourceUrl = source;
+          s.staticShot = wantStill ? true : undefined;
+          s.clipCheckedUrl = undefined;
+          changed.push(s.index);
+        } catch (err: any) {
+          console.warn(`[Longform ${jobId}] scene ${s.index}: zoom not re-cut — ${err?.message ?? err}`);
+        }
+      }
+      if (changed.length) await updateLongformVideoJob(jobId, { storyboard: scenes });
+    } finally {
+      nodeFs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  return changed;
+}
+
+export async function steadyJobHostClips(jobId: number): Promise<number[]> {
+  const changed: number[] = [];
+  await withJobLock(jobId, async () => {
+    const job = await getLongformVideoJobById(jobId);
+    if (!job) throw new Error("Job not found");
+    const params = job.inputParams as LongformInputParams;
+    const scenes = (job.storyboard ?? []) as StoryboardScene[];
+    const steadyUrl = async (url: string, s: StoryboardScene, n: number) => {
+      const resp = await fetch(await presignOwnBucketUrl(url), { signal: AbortSignal.timeout(120_000) });
+      if (!resp.ok) throw new Error(`download ${resp.status}`);
+      const before = Buffer.from(await resp.arrayBuffer());
+      const after = await steadyHostClip(before, `job ${jobId} scene ${s.index}`);
+      if (after === before) return url;
+      const key = `longform/${jobId}/clip-${s.index}-${n}-steady-${nanoid(6)}.mp4`;
+      return (await storagePut(key, after, "video/mp4")).url;
+    };
+    for (const s of scenes) {
+      if (!s.hostPresent || !(s.clipUrls?.length || s.clipUrl)) continue;
+      try {
+        if (s.splitRightUrl && s.hostClipUrls?.length) {
+          const host = await Promise.all(s.hostClipUrls.map((u, n) => steadyUrl(u, s, n)));
+          if (host.every((u, n) => u === s.hostClipUrls![n])) continue;
+          s.hostClipUrls = host;
+          const composited = await compositeSceneSplit(jobId, s, host, s.splitRightUrl, s.splitLayout, params);
+          s.clipUrls = composited;
+          s.clipUrl = composited[0];
+        } else {
+          const urls = s.clipUrls?.length ? s.clipUrls : [s.clipUrl as string];
+          const steady = await Promise.all(urls.map((u, n) => steadyUrl(u, s, n)));
+          if (steady.every((u, n) => u === urls[n])) continue;
+          s.clipUrls = steady;
+          s.clipUrl = steady[0];
+        }
+        s.clipCheckedUrl = undefined;
+        changed.push(s.index);
+      } catch (err: any) {
+        console.warn(`[Longform ${jobId}] scene ${s.index}: steadying skipped — ${err?.message ?? err}`);
+      }
+    }
+    if (changed.length) await updateLongformVideoJob(jobId, { storyboard: scenes });
+  });
+  return changed;
+}
+
 async function compositeSceneSplit(
   jobId: number,
   scene: StoryboardScene,
@@ -10483,10 +10916,13 @@ async function rehearseSceneClips(
       (scene.narrationEndSec ?? 0) - (scene.narrationStartSec ?? 0) ||
       scene.audioDuration ||
       5;
+    // A STILL photo, not a slow zoom: the practice host stands in for a HeyGen take, whose room
+    // never moves — a zooming stand-in read as "the host's background zooms" (2026-09-28).
     const mp4 = await renderKenBurnsClip(photo, {
       durationSec: Math.ceil(slice) + 1,
       aspectRatio: TALKING_HEAD_ASPECT_RATIO,
       index: scene.index,
+      still: true,
     });
     const { url } = await storagePut(
       `longform/${jobId}/clip-${scene.index}-0-${nanoid(6)}.mp4`,
@@ -11551,6 +11987,33 @@ export async function buildSceneNarration(
  * (`SIXTYNINE_TTS_SUBMIT_BURST`, 3); the TTS adapter's own limiter still paces the submits.
  */
 const MASTER_TTS_CONCURRENCY = 3;
+/** Waits before a failed delivery run is voiced again on its own (each try is 2 attempts inside). */
+const DELIVERY_RUN_RETRY_WAITS_MS = [20_000, 60_000];
+
+/**
+ * Voice one delivery run, and when it fails, wait and voice it again — up to `waits.length` more
+ * times. A censored text or a missing voice is final at once (another try cannot fix it). Used so
+ * one flaky run no longer throws the whole paced read away. Unit-tested.
+ */
+export async function voiceRunWithRetries<T>(
+  voice: () => Promise<T>,
+  opts: {
+    waits?: readonly number[];
+    final?: (err: unknown) => boolean;
+    onRetry?: (err: unknown, waitMs: number) => void;
+  } = {}
+): Promise<T> {
+  const waits = opts.waits ?? DELIVERY_RUN_RETRY_WAITS_MS;
+  for (let round = 0; ; round++) {
+    try {
+      return await voice();
+    } catch (err) {
+      if (opts.final?.(err) || round >= waits.length) throw err;
+      opts.onRetry?.(err, waits[round]);
+      await new Promise(r => setTimeout(r, waits[round]));
+    }
+  }
+}
 
 /**
  * Voice the ENTIRE spoken script as ONE continuous master narration and return its URL. A single
@@ -11614,17 +12077,35 @@ async function voiceMasterNarration(
         while (next < runs.length) {
           const k = next++;
           const run = runs[k];
-          runUrls[k] = await generateSceneVoiceover(
-            providerType,
-            apiKey,
-            run.text,
-            params.voiceId,
-            params.ttsModel,
-            deliverySpeedFor(speed, run.pace),
-            params.ttsVolume,
-            TTS_STABILITY,
-            TTS_STYLE,
-            TTS_SIMILARITY
+          // A run that fails is voiced AGAIN on its own, after a wait, keeping every run that
+          // already landed. One failed run used to throw the whole delivery plan away for the
+          // flat one-shot read (Ruth's 3-min test, job 233: 69Labs failed a few runs with "This job
+          // failed to complete" while the rest came back fine) — losing the paced read and paying
+          // for the whole script again. Only a run that keeps failing falls through to that.
+          runUrls[k] = await voiceRunWithRetries(
+            () =>
+              generateSceneVoiceover(
+                providerType,
+                apiKey,
+                run.text,
+                params.voiceId,
+                params.ttsModel,
+                deliverySpeedFor(speed, run.pace),
+                params.ttsVolume,
+                TTS_STABILITY,
+                TTS_STYLE,
+                TTS_SIMILARITY
+              ),
+            {
+              final: err =>
+                err instanceof CensoredTTSError || err instanceof VoiceNotFoundError,
+              onRetry: (err, waitMs) =>
+                console.warn(
+                  `[Longform ${jobId}] delivery run ${k + 1}/${runs.length} failed ` +
+                    `(${(err as Error)?.message}) — voicing it again in ${waitMs / 1000}s, ` +
+                    `keeping the runs that landed`
+                ),
+            }
           );
           done++;
           report();
@@ -11643,9 +12124,12 @@ async function voiceMasterNarration(
       }
       const buffer = await levelMasterNarration(
         jobId,
-        await concatWithPauses(
-          runUrls,
-          runs.map(r => r.pauseAfterMs)
+        await denoiseMasterHiss(
+          jobId,
+          await concatWithPauses(
+            runUrls,
+            runs.map(r => r.pauseAfterMs)
+          )
         )
       );
       const key = `longform/${jobId}/master-vo-${nanoid(6)}.mp3`;
@@ -11713,7 +12197,10 @@ async function voiceMasterNarration(
     const key = `longform/${jobId}/master-vo-${nanoid(6)}.mp3`;
     const { url } = await storagePut(
       key,
-      await levelMasterNarration(jobId, await capMasterPauses(jobId, buffer)),
+      await levelMasterNarration(
+        jobId,
+        await capMasterPauses(jobId, await denoiseMasterHiss(jobId, buffer))
+      ),
       "audio/mpeg"
     );
     return { url };
@@ -11734,7 +12221,10 @@ async function voiceMasterNarration(
   const key = `longform/${jobId}/master-vo-${nanoid(6)}.mp3`;
   const { url } = await storagePut(
     key,
-    await levelMasterNarration(jobId, await capMasterPauses(jobId, buf)),
+    await levelMasterNarration(
+      jobId,
+      await capMasterPauses(jobId, await denoiseMasterHiss(jobId, buf))
+    ),
     "audio/mpeg"
   );
   return { url };
@@ -11822,6 +12312,32 @@ async function matchSceneToMasterLevel(
  * nothing downstream needs to know. A pacing tidy-up must never fail a 20-minute render, so a
  * broken ffmpeg pass falls through with the original audio.
  */
+/**
+ * Clean the voice's own faint hiss out of the master (2026-09-27). The 69Labs voices carry a steady
+ * ~-62 dB noise floor in their pauses; unnoticed while every pause was room tone, it reads as a
+ * BUZZ once the pauses around it are clean silence (the operator heard it). An FFT denoiser tuned
+ * to that floor (`afftdn`, noise floor -50 dB, white) took a 3-min master from 13 noise-next-to-
+ * silence stretches to 1 with the speech level unchanged (-27.1 → -27.4 dB) and the length exact.
+ * A gate was tried and made it worse (21). Best-effort; `NARRATION_DENOISE=0` turns it off.
+ */
+export const NARRATION_DENOISE_FILTER = "afftdn=nf=-50:nt=w";
+async function denoiseMasterHiss(jobId: number, buf: Buffer): Promise<Buffer> {
+  if (process.env.NARRATION_DENOISE === "0") return buf;
+  const dir = nodeFs.mkdtempSync(nodePath.join(nodeOs.tmpdir(), "denoise-"));
+  try {
+    const src = nodePath.join(dir, "in.mp3");
+    const out = nodePath.join(dir, "out.mp3");
+    nodeFs.writeFileSync(src, buf);
+    await runFfmpeg(["-y", "-i", src, "-af", NARRATION_DENOISE_FILTER, "-c:a", "libmp3lame", "-b:a", "192k", "-ar", "48000", "-ac", "2", out]);
+    return nodeFs.readFileSync(out);
+  } catch (e: any) {
+    console.warn(`[Longform ${jobId}] narration hiss clean-up failed (${e?.message}); keeping it as voiced`);
+    return buf;
+  } finally {
+    nodeFs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 async function capMasterPauses(jobId: number, buf: Buffer): Promise<Buffer> {
   try {
     return await capDeadAirPauses(buf);
@@ -13040,14 +13556,43 @@ async function runUnifiedPipeline(
     shortSilences,
     finalAlign
   );
+  // SAME TOPIC, SAME PICTURE: one call marks runs of lines about one thing
+  // (`markSameContext`, server/shotList.ts); the join below makes each run one picture within the
+  // quarter's limit. Only shot-list pictures join, so it runs only where the shot list did.
+  if (words && words.length > 0 && !(await isMockMode())) {
+    const before = scenes.length;
+    const marked = await markSameContext(scenes, {
+      sec: s => s.audioDuration ?? 0,
+      subject: params.videoSubject,
+    });
+    if (marked > 0) {
+      console.log(
+        `[Longform ${jobId}] same topic: ${marked} of ${before} picture(s) continue the picture before (joined within each quarter's limit)`
+      );
+    }
+  }
   // The snap onto real pauses can still squeeze a shot under its floor (a list item to 0.14 s once,
   // a picture to 0.99 s); fold any such piece into its neighbour and cut once more — the same
   // master, so free.
   // A fold re-measures, and the re-snap can squeeze the joined shot's neighbour in turn — a few passes.
   for (let pass = 0; pass < 3; pass++) {
     const folded = foldSnappedFlashes(scenes, s => s.audioDuration ?? 0);
-    if (!folded.changed) break;
-    scenes = folded.scenes;
+    // The hook's pictures are joined to a readable length here too, on the same final lengths.
+    const hook = joinHookPictures(folded.scenes, s => s.audioDuration ?? 0);
+    // Pictures the shot list marked as the same context play as one, within the quarter's limit.
+    const same = joinSameContext(
+      hook.scenes,
+      s => s.audioDuration ?? 0,
+      pictureLimitFor(hook.scenes, masterDurationSec)
+    );
+    // The scan window under the big QR is one topic too: one picture, not one per line.
+    const scan = joinScanWindow(
+      same.scenes,
+      s => s.audioDuration ?? 0,
+      pictureLimitFor(same.scenes, masterDurationSec)
+    );
+    if (!folded.changed && !hook.changed && !same.changed && !scan.changed) break;
+    scenes = scan.scenes;
     sceneRanges = assignSceneRanges(
       scenes,
       words,
@@ -13553,6 +14098,8 @@ async function runUnifiedPipeline(
     budgetSec: hostBudget?.budgetSec,
     sectionSec: hostSectionSec,
     silences,
+    // Every word's time, so a cut the gate makes lands between two words (Mae's "a- | piece").
+    words: words ?? undefined,
   });
   scenes = gate.scenes;
   if (gate.fixes.length) {
@@ -13599,6 +14146,15 @@ async function runUnifiedPipeline(
       );
     }
   }
+
+  // Pictures that show someone doing the work show the HOST (from behind, face never shown), and
+  // host descriptions come from the host's own look instead of a stock one — on the final cut.
+  const hostBroll = markHostBroll(scenes, params, hostFaces(params)[0]);
+  if (params.hostLook) {
+    for (const s of scenes)
+      if (s.hostPresent && !s.splitVisual) s.visualPrompt = talkingHeadVisualPrompt(params.hostLook, s.index);
+  }
+  if (hostBroll) console.log(`[Longform ${jobId}] host in b-roll: ${hostBroll} picture(s) show the host at work`);
 
   // The passes above created and removed host beats after the adjacency pass assigned angles —
   // re-derive so any surviving pair still reads main → alt. Pure and O(n); the last register
@@ -14686,6 +15242,7 @@ async function assembleAndFinalizeCore(
       // `renderProvider` is what the lip-sync lane recorded at render time, so a HeyGen-rendered
       // host (native 1080p) and every b-roll clip stay untouched.
       sharpenHost: !!s.hostPresent && s.renderProvider === "runpod",
+      look: phoneLookFor(s),
       audioUrl: s.audioUrl as string,
       // Every hold input — the on-screen floor, the CTA release tail, an operator's own hold —
       // comes from one shared helper, so assembly, the chapter map and the
@@ -14955,7 +15512,7 @@ export async function retryJobAssembly(
         () => null
       );
       if (channel) {
-        params.hostName = channel.hostName ?? undefined;
+        params.hostName = resolveHostName(channel);
         params.hostTitle = channel.hostTitle ?? undefined;
         params.hostLocation = channel.hostLocation ?? undefined;
         await updateLongformVideoJob(jobId, { inputParams: params });

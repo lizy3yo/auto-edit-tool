@@ -34,7 +34,6 @@ import {
 } from "./videoAssembly";
 import { storagePut } from "./storage";
 import { prependSilence } from "./lipsyncLead";
-import { ROOM_TONE_AMPLITUDE } from "./delivery";
 
 /** Room-tone beat between two grouped scenes: enough for the mouth to close and settle. */
 export const GROUP_GAP_MS = 500;
@@ -271,7 +270,7 @@ async function joinWithGaps(parts: Buffer[], gapMs: number): Promise<Buffer> {
       order.push(`[r${i}]`);
       if (gapMs > 0 && i < parts.length - 1) {
         legs.push(
-          `anoisesrc=r=48000:a=${ROOM_TONE_AMPLITUDE}:c=pink:s=${i + 1},` +
+          `anullsrc=r=48000:cl=stereo,` +
             `atrim=end=${(gapMs / 1000).toFixed(3)},` +
             `aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[g${i}]`
         );

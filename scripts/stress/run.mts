@@ -39,6 +39,8 @@ const title = arg("title") ?? `Stress: ${channelKey}`;
 const hostMinutes = Number(arg("host-minutes") ?? 3);
 /** Which Video tab (0-4) runs the job — each tab has its own APIMART / HeyGen keys. */
 const slot = Number(arg("slot") ?? 0);
+// --host-photo-ids 11,12 — shoot from these library photos instead of the channel's saved ticks.
+const hostPhotoIds = arg("host-photo-ids")?.split(",").map(Number).filter(Number.isFinite);
 const booksFile = arg("books");
 const ctaBooks = booksFile ? JSON.parse(readFileSync(booksFile, "utf8")) : undefined;
 const script = readFileSync(scriptFile, "utf8");
@@ -75,6 +77,7 @@ for (let k = 1; k <= runs; k++) {
     ctaBooks,
     hostMinutes,
     rehearsal,
+    ...(hostPhotoIds?.length ? { hostPhotoIds } : {}),
   });
   await setLongformSlot(1, slot, { jobId });
   console.log(`[stress] ${channelKey} run ${k}/${runs}: job ${jobId} started`);
