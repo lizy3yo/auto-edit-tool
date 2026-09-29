@@ -294,6 +294,58 @@ const FREEZE_FEATHER = 10;
 const FREEZE_MAX_HOST = 0.7;
 
 /**
+ * The host as a SOLID shape (1) from where it moved (1). Motion only shows at the EDGES of a plain
+ * surface: a navy tee or a black blazer looks the same frame to frame even while the body under it
+ * moves, so only its outline read as "host" and the chest between the arms was frozen to frame 0
+ * while the collar, shoulders and arms around it moved (a HeyGen host clip, 2026-09-30: 68% of the
+ * shirt frozen). Two fills, both general:
+ *  1. each row is host from its leftmost to its rightmost moving pixel — a person is solid between
+ *     their own edges;
+ *  2. any still pocket the room cannot reach from the TOP, LEFT or RIGHT edge is host — a seated
+ *     host runs off the BOTTOM of the frame, so a pocket open only downwards is inside the body.
+ * A little room between an arm and the body may be kept live; the camera correction still holds it.
+ * Pure — unit-tested.
+ */
+export function solidHost(moving: Uint8Array, w = AW, h = AH): Uint8Array {
+  const out = new Uint8Array(moving);
+  for (let y = 0; y < h; y++) {
+    let lo = -1;
+    let hi = -1;
+    for (let x = 0; x < w; x++) {
+      if (!moving[y * w + x]) continue;
+      if (lo < 0) lo = x;
+      hi = x;
+    }
+    if (lo >= 0) out.fill(1, y * w + lo, y * w + hi + 1);
+  }
+  // Room reachable from the top, left or right edge through non-host pixels; the rest is host.
+  const room = new Uint8Array(w * h);
+  const stack: number[] = [];
+  const seed = (i: number) => {
+    if (!out[i] && !room[i]) {
+      room[i] = 1;
+      stack.push(i);
+    }
+  };
+  for (let x = 0; x < w; x++) seed(x);
+  for (let y = 0; y < h; y++) {
+    seed(y * w);
+    seed(y * w + w - 1);
+  }
+  while (stack.length) {
+    const i = stack.pop()!;
+    const x = i % w;
+    const y = (i - x) / w;
+    if (x > 0) seed(i - 1);
+    if (x < w - 1) seed(i + 1);
+    if (y > 0) seed(i - w);
+    if (y < h - 1) seed(i + w);
+  }
+  for (let i = 0; i < w * h; i++) if (!room[i]) out[i] = 1;
+  return out;
+}
+
+/**
  * Where the host moves over the whole clip (1), with `FREEZE_MARGIN` around it: a pixel that
  * differs from frame 0 by `HOST_LEVEL` in at least `HOST_SHARE` of the sampled frames (so
  * compression noise on a busy shelf does not count, and a hand that only passes once still does
@@ -341,7 +393,8 @@ export function hostArea(frames: Uint8Array[]): Uint8Array | null {
   // An erosion removes anything thinner than 2 × SHAVE; the host's body survives it.
   const SHAVE = 2;
   const shaved = invert(grow(grow(invert(host), true, SHAVE), false, SHAVE));
-  const area = grow(grow(shaved, true, FREEZE_MARGIN + SHAVE), false, FREEZE_MARGIN + SHAVE);
+  // The whole body, not just its moving outline (see `solidHost`).
+  const area = grow(grow(solidHost(shaved), true, FREEZE_MARGIN + SHAVE), false, FREEZE_MARGIN + SHAVE);
   const share = area.reduce((a, v) => a + v, 0) / (AW * AH);
   return share > FREEZE_MAX_HOST ? null : area;
 }
@@ -382,7 +435,16 @@ async function freezeRoom(dir: string, src: string): Promise<string> {
  * The clip with its camera held still and its room frozen, or the same buffer when the camera
  * already was still (or anything failed). `label` names the scene in the log.
  */
-export async function steadyHostClip(clip: Buffer, label = "host clip"): Promise<Buffer> {
+export async function steadyHostClip(
+  clip: Buffer,
+  label = "host clip",
+  /**
+   * Also freeze the room around the host (default). B-roll passes false: the camera is still
+   * corrected, but a handled cloth or board is not a "room" — a plain one partly frozen would
+   * tear the same way the plain shirt did.
+   */
+  opts: { freezeRoom?: boolean } = {}
+): Promise<Buffer> {
   if (process.env.HOST_STEADY === "0") return clip;
   const dir = await mkdtemp(path.join(tmpdir(), "host-steady-"));
   try {
@@ -408,7 +470,10 @@ export async function steadyHostClip(clip: Buffer, label = "host clip"): Promise
       src = out;
       poses = await measureCameraPath(src);
     }
-    const frozen = process.env.HOST_FREEZE_ROOM === "0" ? src : await freezeRoom(dir, src);
+    const frozen =
+      process.env.HOST_FREEZE_ROOM === "0" || opts.freezeRoom === false
+        ? src
+        : await freezeRoom(dir, src);
     console.log(
       `[HostSteady] ${label}: camera zoom ${(before * 100).toFixed(2)}% → ${(range(poses) * 100).toFixed(2)}% ` +
         `(${pass} pass${pass > 1 ? "es" : ""})${frozen !== src ? ", room frozen" : ""}`

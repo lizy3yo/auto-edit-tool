@@ -840,7 +840,15 @@ Express · tRPC · Drizzle · MySQL.
   steadying also has its ROOM FROZEN (`freezeRoom`/`hostArea`): outside where the host moves
   (thin flickering edges shaved off first, then a 12 px margin, a 10 px feather) every pixel is the
   clip's first frame. Ruth's takes: 0.2-0.4% → 0.00%. `HOST_FREEZE_ROOM=0` keeps the camera fix
-  only. Practice runs show the host as a still photo (no slow zoom) so they look like the real take
+  only. THE HOST IS A SOLID SHAPE (`solidHost`, 2026-09-30): motion only shows at the EDGES of a
+  plain surface, so a navy tee's chest read as "room" and was frozen while the collar, shoulders
+  and arms moved around it — on the operator's clip 88% of the shirt froze. Each row is now host
+  between its leftmost and rightmost moving pixel, and any still pocket the room cannot reach from
+  the top/left/right edge (a seated host runs off the bottom) is host too: the same clip went 12% →
+  100% of the shirt covered, room corners still 100% frozen. Only HOST takes freeze
+  (`steadyHostClip(…, { freezeRoom })`); b-roll gets the camera fix only. The provider's untouched
+  host clip is kept (`scene.rawClipUrls`) and `steadyJobHostClips` starts from it, so a steadier fix
+  re-applies to a finished film for free. Practice runs show the host as a still photo (no slow zoom) so they look like the real take
 - `server/sceneEditQueue.ts` + `enqueueSceneEdit`/`runSceneEditSession` (longformVideo) — operator
   edits on a rendered job (regenerate scene, batch regenerate, split edits) are queued per job and
   run by ONE edit session inside a single `withJobLock` pass: one live storyboard document, tasks

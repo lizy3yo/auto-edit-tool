@@ -396,6 +396,13 @@ export interface StoryboardScene {
    */
   toolContact?: true;
   /**
+   * The host lane's clips exactly as the provider returned them, before `steadyHostClip` — so a
+   * later fix to the steadier can be re-applied to a finished film without paying for the render
+   * again (a plain shirt frozen by the room mask, 2026-09-30, could not be undone because only the
+   * steadied clip was kept). Parallel to `clipUrls` at render time.
+   */
+  rawClipUrls?: string[];
+  /**
    * No longer set — a still's zoom is decided by its length (`stillZooms`). Kept so a film made
    * while the shot list chose it still reads: it was rendered completely still.
    */

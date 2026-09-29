@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { hostArea, knotExpr, needsSteadying, steadyFilter, trackPose, type CameraPose } from "./hostSteady";
+import { hostArea, solidHost, knotExpr, needsSteadying, steadyFilter, trackPose, type CameraPose } from "./hostSteady";
 
 const still = (n: number): CameraPose[] => Array.from({ length: n }, () => ({ s: 1, dx: 0, dy: 0 }));
 
@@ -87,5 +87,42 @@ describe("freezing the room", () => {
   it("does not freeze around a host who fills the frame", () => {
     const frames = Array.from({ length: 10 }, (_, k) => new Uint8Array(W * H).map((_, i) => (i + k * 3) % 2 ? 200 : 40));
     expect(hostArea(frames)).toBeNull();
+  });
+});
+
+describe("the host is a solid shape — a plain shirt is never frozen (2026-09-30)", () => {
+  const W = 480, H = 270;
+  // A seated host in a plain dark tee: only the OUTLINE changes frame to frame (shoulders, arms,
+  // collar); the flat middle of the shirt reads the same in every frame, like the real clip where
+  // 68% of the shirt was frozen while the arms moved around it.
+  const frames = Array.from({ length: 30 }, (_, k) => {
+    const f = new Uint8Array(W * H).fill(120); // the room
+    for (let y = 90; y < H; y++)
+      for (let x = 130; x < 350; x++) {
+        const edge = x < 142 || x >= 338 || y < 102;
+        f[y * W + x] = edge ? ((x + y + k * 5) % 2 ? 200 : 30) : 40; // moving outline, still chest
+      }
+    return f;
+  });
+
+  it("keeps the whole body live, the chest included", () => {
+    const area = hostArea(frames)!;
+    expect(area).not.toBeNull();
+    expect(area[200 * W + 240]).toBe(1); // the middle of the chest
+    expect(area[150 * W + 300]).toBe(1);
+    expect(area[20 * W + 40]).toBe(0); // the room is still frozen
+    expect(area[200 * W + 440]).toBe(0);
+  });
+
+  it("fills a still pocket that is open only at the bottom, never the room around the body", () => {
+    const w = 10, h = 6;
+    // An outline shaped like shoulders and arms: the middle columns are still, open at the bottom.
+    const m = new Uint8Array(w * h);
+    for (let y = 1; y < h; y++) { m[y * w + 2] = 1; m[y * w + 7] = 1; }
+    for (let x = 2; x <= 7; x++) m[1 * w + x] = 1;
+    const solid = solidHost(m, w, h);
+    expect(solid[4 * w + 4]).toBe(1); // inside the body
+    expect(solid[4 * w + 0]).toBe(0); // the room beside it
+    expect(solid[0 * w + 4]).toBe(0); // the room above it
   });
 });

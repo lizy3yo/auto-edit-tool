@@ -7777,7 +7777,11 @@ describe("generateSceneClips routing (HeyGen lip-sync vs grok-imagine-video)", (
       async () => {}
     );
     expect(urls).toEqual(["https://cdn.example.com/clip.mp4"]);
-    expect(putSpy).toHaveBeenCalledOnce();
+    // Two uploads, one render: the provider's untouched clip (kept so a steadier fix can be
+    // re-applied for free) and the stored clip.
+    expect(putSpy).toHaveBeenCalledTimes(2);
+    expect(putSpy.mock.calls.map(c => String(c[0])).filter(k => k.includes("clip-raw-"))).toHaveLength(1);
+    expect(scene.rawClipUrls).toHaveLength(1);
     expect(submitLipsync).toHaveBeenCalledOnce();
     expect(scene.clipShortSec).toBeCloseTo(1.0, 2);
     expect(scene.renderTaskIds).toBeUndefined();

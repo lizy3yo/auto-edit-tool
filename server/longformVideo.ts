@@ -10206,10 +10206,29 @@ export async function runChunkTasks(
   // 1.9% in 8 s, which the operator saw as "the background moving too much". The same steadier
   // took it to 0.2% with the room held still and the hands and host still moving; good hands clips
   // had 0.3-2.1% drift of their own, all corrected. Every provider clip goes through it.
+  // Host takes: keep the provider's untouched clip first, so any later steadier fix can be
+  // re-applied for free (`steadyJobHostClips` prefers it), then steady AND freeze the room. B-roll:
+  // steady the camera only — a handled plain cloth or board frozen as "room" tears like the plain
+  // shirt did (2026-09-30).
+  if (hostLane) {
+    const raws: string[] = [];
+    for (let i = 0; i < polls.length; i++) {
+      try {
+        const key = `longform/${jobId}/clip-raw-${scene.index}-${i}-${nanoid(6)}.mp4`;
+        const { url } = await storagePut(key, Buffer.from(polls[i].fileData as Buffer), "video/mp4");
+        raws.push(url);
+      } catch {
+        raws.length = 0; // best-effort: a missing original only costs the free re-apply
+        break;
+      }
+    }
+    scene.rawClipUrls = raws.length === polls.length ? raws : undefined;
+  }
   for (let i = 0; i < polls.length; i++) {
     polls[i].fileData = await steadyHostClip(
       Buffer.from(polls[i].fileData as Buffer),
-      `job ${jobId} scene ${scene.index}`
+      `job ${jobId} scene ${scene.index}`,
+      { freezeRoom: hostLane }
     );
   }
 
@@ -10395,8 +10414,12 @@ export async function steadyJobHostClips(jobId: number): Promise<number[]> {
     for (const s of scenes) {
       if (!s.hostPresent || !(s.clipUrls?.length || s.clipUrl)) continue;
       try {
+        // Start from the provider's untouched clip when it was kept (`rawClipUrls`): re-applying a
+        // steadier fix to an already-steadied clip cannot undo what the old pass froze.
+        const raw = s.rawClipUrls;
         if (s.splitRightUrl && s.hostClipUrls?.length) {
-          const host = await Promise.all(s.hostClipUrls.map((u, n) => steadyUrl(u, s, n)));
+          const src = raw?.length === s.hostClipUrls.length ? raw : s.hostClipUrls;
+          const host = await Promise.all(src.map((u, n) => steadyUrl(u, s, n)));
           if (host.every((u, n) => u === s.hostClipUrls![n])) continue;
           s.hostClipUrls = host;
           const composited = await compositeSceneSplit(jobId, s, host, s.splitRightUrl, s.splitLayout, params);
@@ -10404,7 +10427,8 @@ export async function steadyJobHostClips(jobId: number): Promise<number[]> {
           s.clipUrl = composited[0];
         } else {
           const urls = s.clipUrls?.length ? s.clipUrls : [s.clipUrl as string];
-          const steady = await Promise.all(urls.map((u, n) => steadyUrl(u, s, n)));
+          const src = raw?.length === urls.length ? raw : urls;
+          const steady = await Promise.all(src.map((u, n) => steadyUrl(u, s, n)));
           if (steady.every((u, n) => u === urls[n])) continue;
           s.clipUrls = steady;
           s.clipUrl = steady[0];
