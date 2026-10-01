@@ -20,7 +20,7 @@ import type { KeyThing, StoryboardScene } from "@shared/types";
 import { invokeClaude } from "./claude";
 import { safeParseJSON } from "./jsonRepair";
 import { SHOWS_PERSON } from "./hostLook";
-import { matchKeyThing, settleVideoKind } from "./shotList";
+import { blurredPrint, matchKeyThing, settleVideoKind } from "./shotList";
 
 const NAMED_LOOK_MODEL = () => process.env.NAMED_LOOK_MODEL || "claude-opus-5-5";
 
@@ -40,10 +40,16 @@ not know the names of specific kinds of things. You read the pictures, one per l
 1. NAMED KINDS. Find every specific NAMED KIND a picture is about — a named variety whose look a
 picture maker could not draw from its name alone, or would draw wrong: a quilt block or pattern, a
 stitch, a knot, a weave, a joint, a braid or haircut, a breed, a plant variety, a dish, a style of
-furniture or building. Not everyday things (a saw, a bowl, a chair) and never a brand. For each,
-write its LOOK exactly enough to draw it without knowing the name: the shapes, how many of each, how
-they are arranged, which parts are light and which dark, its size. Correct any planned description
-that gets it wrong. Leave out a kind when you are not sure how it looks — never invent.
+furniture or building. Not everyday things (a saw, a bowl, a chair). For each, write its LOOK
+exactly enough to draw it without knowing the name: the shapes, how many of each, how they are
+arranged, which parts are light and which dark, its size. Correct any planned description that gets
+it wrong. Leave out a kind when you are not sure how it looks — never invent.
+
+A REAL, RECOGNISABLE thing the LINE names — an app, a website, a store, a market or fair, a product
+line — is a named kind too, even when the planned picture calls it something generic ("a buy-and-sell
+app"): its LOOK is how it really looks — its real colours, layout and style (for an app: the screen
+on a phone, its real colour bars, how its items are laid out). Its logo and any words in it are
+small, soft and unreadable: write that into the look.
 
 2. A PART OF A KEY THING. When a picture's line is about ONE PART or detail of a key thing (one block
 on the quilt, a knob on the stove, one joint of the frame), name that key thing as part_of: the
@@ -54,7 +60,8 @@ picture — what fills the frame, close up when it is a part — using the exact
 
 A picture of someone DOING something (hands sewing, stitching, cutting, cooking) keeps the person and
 what they are doing: never turn it into a close-up of a part, never give it part_of — only name the
-kind it shows, and keep the hands in its "show".
+kind it shows, and keep the hands in its "show". A picture marked "list item" is one item of a spoken
+list: it is its own thing, never part_of anything.
 
 Answer with JSON only:
 {"kinds":[{"name":"…","look":"…"}],"pictures":[{"id":<number>,"kind":"<a kind's name or omit>","part_of":"<a key thing or omit>","show":"…"}]}
@@ -112,7 +119,9 @@ export function applyNamedLooks(
     // A picture of someone at work keeps the person: it is never made a close-up of a part, and a
     // rewrite that drops the person is not used (only the exact look is kept).
     const atWork = !!s.humanPresent || SHOWS_PERSON.test(s.showSubject ?? s.visualPrompt ?? "");
-    const part = p.partOf && !atWork ? matchKeyThing(p.partOf, things ?? []) : null;
+    // A list item is its own thing, never one part of a group — Dale's job 290 drew "house signs,"
+    // from the "engraved boards," picture before it as a "part" of one pile, and got the same board.
+    const part = p.partOf && !atWork && !s.listCut ? matchKeyThing(p.partOf, things ?? []) : null;
     if (atWork && p.show && !SHOWS_PERSON.test(p.show)) p.show = undefined;
     if (!kind && !part) continue;
     s.namedLook = kind ? `${kind.name}: ${kind.look}` : undefined;
@@ -126,6 +135,8 @@ export function applyNamedLooks(
       s.visualPromptSeed = undefined;
       s.brollVisual = undefined;
       s.humanPresent = SHOWS_PERSON.test(p.show) ? true : undefined;
+      // Writing the line does not say is shown soft and unreadable, like every other rewrite.
+      s.blurPrint = !s.pictureText && blurredPrint(p.show) ? true : undefined;
       // Judged again on the new description (`judgeSelfMoving`), like any rewritten picture.
       s.selfMoving = undefined;
       settleVideoKind(s);
@@ -160,7 +171,7 @@ export async function describeNamedLooks(
     const lines = ids.map(i => {
       const s = scenes[i];
       const said = (s.scriptText ?? "").trim().replace(/\s+/g, " ");
-      return `#${i}: said "${said}" | shows: ${s.showSubject ?? s.visualPrompt ?? ""}`;
+      return `#${i}${s.listCut ? " (list item)" : ""}: said "${said}" | shows: ${s.showSubject ?? s.visualPrompt ?? ""}`;
     });
     try {
       const answer = parseNamedLooks(

@@ -3160,3 +3160,49 @@ job 283 (dale_oakfield) — completed, rehearsal
 
 ### lance_kavanaugh run 1 — job 286: FAILED after 25 min
     Narration failed: 69Labs is working, but not with this channel's voice — a test line in it failed twice while another channel's voice worked straight away. Pick a different voice in Admin → Channels (or ask 69Labs support about this voice ID), then start the video again. (69Labs said: 69Labs TTS is unavailable (503) after 5 attempts — Service temporarily unavailable. Try again shortly. (VOICE_LOOKUP_FAILED). The provider's server is down; retry the job in a few minutes. — another channel's voice worked at the same time (voice 13fd1586-60d9-42de-b649-066f9bb114f3))
+
+### dale_oakfield run 1 — 34 min
+```
+job 288 (dale_oakfield) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place (1 finding)
+  PASS  4. clean pictures (1 finding)
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  FAIL  10. say it, show it (5 findings)
+  FAIL  11. real video (1 finding)
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo (3 findings)
+  PASS  14. no cut inside a word
+  stats: {"scenes":44,"hostTakes":11,"hostSec":67,"ctaPatterns":["block 0: HBHQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":8,"handOffs":6,"longestFacelessEarlySec":34,"longestFacelessLateSec":14,"longestPictureSec":11.9,"motionSharePct":0,"picturesJudged":34}
+   - [3] scene 42 split-panel: wrong place — garage setting, not market setting
+   - [4] scene 42 split-panel: cluttered — garage setting, not market setting
+   - [10] scene 13 b-roll: does not show what is said — board shown has no visible engraving
+   - [10] scene 17 split-panel: does not show what is said — scene is daytime, not a dark night garage
+   - [10] scene 18 b-roll: does not show what is said — board is striped, not engraved
+   - [10] scene 19 b-roll: does not show what is said — phone is tiny, not the focal point
+   - [10] scene 39 b-roll: does not show what is said — phone shown instead of laptop listing page
+   - [11] only 0% of cutaway time is moving
+   - [13] scene 17 split-panel: not a phone-photo look — scene is daytime, not a dark night garage
+   - [13] scene 19 b-roll: not a phone-photo look — phone is tiny, not the focal point
+   - [13] scene 42 split-panel: not a phone-photo look — garage setting, not market setting
+```
+
+### dale_oakfield run 1 — job 289: FAILED after 23 min
+    Cancelled by user
+
+### dale_oakfield run 1 — job 290: FAILED after 36 min
+    Cancelled by user
+
+### quilting_with_granny_ruth run 1 — job 287: FAILED after 137 min
+    Narration failed: 69Labs still wasn't working after waiting 121 min. Nothing has been paid for clips. Press "Try voicing again" once it's back, or upload your own narration. (Last error: 69Labs TTS is unavailable (503) after 5 attempts — Service temporarily unavailable. Try again shortly. (VOICE_LOOKUP_FAILED). The provider's server is down; retry the job in a few minutes.)
+
+### dale_oakfield run 1 — job 291: FAILED after 34 min
+    Cancelled by user
+
+### dale_oakfield run 1 — job 292: FAILED after 15 min
+    Cancelled by user

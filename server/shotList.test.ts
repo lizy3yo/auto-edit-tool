@@ -1258,3 +1258,95 @@ describe("printing the line talks about is shown blurred, not hidden (2026-10-01
   });
 });
 
+
+describe("a short line is one picture, not two quick ones (Dale's job 288)", () => {
+  const pic = (index: number, scriptText: string, showSubject: string, over: Partial<StoryboardScene> = {}) =>
+    ({ index, scriptText, showSubject, visualPrompt: showSubject, wordCut: true, ...over }) as StoryboardScene;
+  const secOf = (m: Map<string, number>) => (s: StoryboardScene) => m.get(s.scriptText ?? "") ?? 0;
+
+  it("joins 'Sell your furniture | on Facebook Marketplace.' into one picture of the whole line", async () => {
+    const { joinShortSplits } = await import("./shotList");
+    const scenes = [
+      pic(1, "Number five. Sell your furniture", "the walnut bookcase in the driveway"),
+      pic(2, "on Facebook Marketplace.", "a phone showing a buy-and-sell app"),
+      pic(3, "Shipping a bookcase eats the profit.", "the bookcase in the driveway"),
+    ];
+    const r = joinShortSplits(scenes, secOf(new Map([
+      ["Number five. Sell your furniture", 2.1],
+      ["on Facebook Marketplace.", 1.9],
+      ["Shipping a bookcase eats the profit.", 4.4],
+    ])));
+    expect(r.changed).toBe(true);
+    expect(r.scenes.map(s => s.scriptText)).toEqual([
+      "Number five. Sell your furniture on Facebook Marketplace.",
+      "Shipping a bookcase eats the profit.",
+    ]);
+    expect(r.scenes[0].joinedLine).toBe(true);
+  });
+
+  it("never joins list items, two sentences, or parts that are both long enough", async () => {
+    const { joinShortSplits } = await import("./shotList");
+    const sec = () => 1;
+    const list = [pic(1, "a saw,", "a saw", { listCut: true }), pic(2, "a drill,", "a drill", { listCut: true })];
+    expect(joinShortSplits(list, sec).changed).toBe(false);
+    const twoSentences = [pic(1, "It sold.", "a quilt"), pic(2, "Then I made another.", "a new quilt")];
+    expect(joinShortSplits(twoSentences, sec).changed).toBe(false);
+    const long = [pic(1, "Kumiko is a craft used", "a kumiko panel"), pic(2, "in Japanese sliding doors.", "a sliding door")];
+    expect(joinShortSplits(long, () => 4).changed).toBe(false);
+  });
+
+  it("the line check never splits a line into parts under 3 seconds", async () => {
+    const { applyPictureSplits } = await import("./shotList");
+    const s = pic(1, "Number five. Sell your furniture on Facebook Marketplace today.", "the bookcase");
+    const fixes = [{ id: 0, split: [{ from: "on Facebook Marketplace", show: "a phone app" }] }];
+    expect(applyPictureSplits([s], fixes, undefined, () => 4).split).toBe(0);
+    expect(applyPictureSplits([s], fixes, undefined, () => 9).split).toBe(1);
+    expect(applyPictureSplits([{ ...s, joinedLine: true }], fixes, undefined, () => 9).split).toBe(0);
+  });
+});
+
+describe("one idea, one picture — decided by the words (the operator, 2026-10-02)", () => {
+  const pic = (index: number, scriptText: string, showSubject: string, over: Partial<StoryboardScene> = {}) =>
+    ({ index, scriptText, showSubject, visualPrompt: showSubject, wordCut: true, audioDuration: 4, ...over }) as StoryboardScene;
+
+  it("reads a join from the line check", async () => {
+    const { parsePictureFixes } = await import("./shotList");
+    const scenes = [pic(1, "Sell your furniture", "a bookcase"), pic(2, "on Facebook Marketplace.", "a phone")];
+    const fixes = parsePictureFixes(
+      '{"pictures":[{"id":0,"about":"x","shows_it":true},{"id":"#1","about":"selling furniture on an app","shows_it":true,"join":true,"show":"the bookcase as a listing on a phone buy-and-sell app"}]}',
+      scenes
+    );
+    expect(fixes).toEqual([{ id: 1, join: true, show: "the bookcase as a listing on a phone buy-and-sell app" }]);
+  });
+
+  it("makes one picture of one idea, showing what the check wrote for the whole line", async () => {
+    const { applyPictureJoins } = await import("./shotList");
+    const scenes = [
+      pic(1, "Number five. Sell your furniture", "the bookcase in the driveway"),
+      pic(2, "on Facebook Marketplace.", "a phone with an app"),
+      pic(3, "Shipping a bookcase eats the profit.", "a bookcase by a truck"),
+    ];
+    const r = applyPictureJoins(
+      scenes,
+      [{ id: 1, join: true, show: "the bookcase as a listing on a phone's buy-and-sell app" }],
+      undefined,
+      s => s.audioDuration ?? 0,
+      () => 12
+    );
+    expect(r.joined).toBe(1);
+    expect(r.scenes.map(s => [s.scriptText, s.showSubject, !!s.joinedLine])).toEqual([
+      ["Number five. Sell your furniture on Facebook Marketplace.", "the bookcase as a listing on a phone's buy-and-sell app", true],
+      ["Shipping a bookcase eats the profit.", "a bookcase by a truck", false],
+    ]);
+    expect(r.remap.get(2)).toBe(1);
+  });
+
+  it("never joins across a sentence end, a list item, or past the picture's limit", async () => {
+    const { applyPictureJoins } = await import("./shotList");
+    const sec = (s: StoryboardScene) => s.audioDuration ?? 0;
+    const join = [{ id: 1, join: true, show: "x" }];
+    expect(applyPictureJoins([pic(1, "It sold.", "a"), pic(2, "Then another.", "b")], join, undefined, sec).joined).toBe(0);
+    expect(applyPictureJoins([pic(1, "a saw,", "a", { listCut: true }), pic(2, "a drill,", "b", { listCut: true })], join, undefined, sec).joined).toBe(0);
+    expect(applyPictureJoins([pic(1, "Sell your furniture", "a"), pic(2, "on the app.", "b")], join, undefined, sec, () => 6).joined).toBe(0);
+  });
+});

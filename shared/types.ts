@@ -469,6 +469,11 @@ export interface StoryboardScene {
    * part from the thing's memory, never the whole thing again (`server/namedLooks.ts`).
    */
   partOf?: string;
+  /**
+   * Two short pictures of ONE line joined into one (`joinShortSplits`): the line check writes it to
+   * show what the whole line is about, the things it names together, and never splits it again.
+   */
+  joinedLine?: boolean;
   /** The still image this picture's zoom clip was cut from, so the zoom can be re-cut later. */
   stillSourceUrl?: string;
   /**
@@ -1291,6 +1296,11 @@ export interface LongformInputParams {
    * thing looks the same in every picture of it. Snapshotted with the props list.
    */
   keyThings?: KeyThing[];
+  /**
+   * The spoken lists found in the whole script (`server/spokenLists.ts`), kept for the voicing
+   * stage's last pass, which applies them again on the final lengths.
+   */
+  spokenLists?: { sentence: number; items: string[] }[];
   /**
    * Which long-form tab (slot 0–4) launched this job. Selects BOTH per-tab provider keys: the
    * APIMART key for b-roll VIDEO generation (unset or a slot with no key ⇒ the 69Labs video path)

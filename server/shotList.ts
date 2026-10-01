@@ -327,7 +327,7 @@ export const safeMotion = (
  * tag, a stamp — which is then SHOWN, blurred and unreadable, unless its line says the words. Pure.
  */
 export function blurredPrint(show: string | undefined): boolean {
-  return /\b(labels?|printed|printing|print|dates?|tags?|lettering|writing|stamp(?:ed)?|markings?|specs|specifications)\b/i.test(
+  return /\b(labels?|printed|printing|print|dates?|tags?|lettering|writing|stamp(?:ed)?|markings?|specs|specifications|engrav(?:ed|ing)|monogram(?:med)?|inscri(?:bed|ption)|initials)\b/i.test(
     show ?? ""
   );
 }
@@ -973,7 +973,10 @@ const SHOT_LIST_SYSTEM =
   "1c. SHOW WHAT IT IS ABOUT, THEN WHAT IS NEW. A line that names or explains a key thing shows " +
   "THAT thing first — the main thing whenever the line is about it. When the same line goes on to " +
   "name something new you can see (\"… the kind you'd find in an old farmhouse kitchen\"), a new " +
-  "shot starts on those words and shows it.\n" +
+  "shot starts on those words and shows it — but only when each part is a good few seconds long. " +
+  "A SHORT line stays ONE shot: when it names a thing and where or how it is used, sold or kept " +
+  "(\"sell your quilts at the county fair\", \"list it on a buy-and-sell app\"), the one shot shows " +
+  "them together — the thing in that place, or as a listing on a phone.\n" +
   "2. CHANGE THE PICTURE ONLY WHEN THE CONTEXT CHANGES. A new shot starts only where the words move " +
   "on to a DIFFERENT thing, place or action. While the words stay on the same thing — even across " +
   'several sentences — it is ONE shot: "a pile of old crates the neighbour set out by the curb" ' +
@@ -1343,7 +1346,19 @@ the box of scraps beside it.
 A line that compares to something ELSE you can see — "the kind you see in …", "like the ones at …",
 "the kind you'd find in …" — ALWAYS gets that other thing as its own picture: SPLIT the line there.
 Give the exact first 2-5 words where the new picture starts, copied from the line, and what it shows.
-Split only when both parts are at least 4 words.
+Split only when both parts are at least 4 words. Never split a picture marked "joined".
+
+ONE IDEA, ONE PICTURE. A picture marked "same sentence" continues a sentence the picture before it
+started. When the two parts are ONE idea about one thing — the thing and where, how or what it is
+used, sold or kept ("Sell your furniture | on Facebook Marketplace", "I hang them in the hallway, |
+next to the mirror") — set join: true and write show: the ONE picture for the whole sentence. Keep
+them apart only when the second part moves on to a genuinely different thing worth its own picture.
+
+A picture marked "joined", or one you join, shows the WHOLE line in ONE picture — what the line is
+really pointing at: the new thing it names when that is its point (a comparison: "it's the same wood
+they make baseball bats from" = the baseball bats), the main thing when the line is about it, or the
+things together when they belong together (the bookcase as a listing on a phone's buy-and-sell app).
+For a "joined" picture shows_it is false unless it already shows that.
 
 For each WRONG picture write the picture that fits: plain words, what is literally in the frame, one
 moment, one place, like a snapshot caption. When the line is about a key thing, name it exactly as
@@ -1357,12 +1372,21 @@ no faces, never "or".
 
 Answer with JSON only, one entry for EVERY picture:
 {"pictures":[{"id":7,"about":"...","shows_it":true},
-{"id":8,"about":"...","shows_it":false,"show":"...","thing":null,"split":[{"from":"exact words","show":"...","thing":null}]}]}
-show and thing only when shows_it is false; split only when a new picture must start.`;
+{"id":8,"about":"...","shows_it":false,"show":"...","thing":null,"split":[{"from":"exact words","show":"...","thing":null}]},
+{"id":9,"about":"...","shows_it":false,"join":true,"show":"...","thing":null}]}
+show and thing only when shows_it is false or join is true; split only when a new picture must start;
+join only on a picture marked "same sentence".`;
 
 /** A new picture starting inside a line, at `from` (its first words, verbatim). */
 export type PictureSplit = { from: string; show: string; thing?: string };
-export type PictureFix = { id: number; show?: string; thing?: string; split?: PictureSplit[] };
+export type PictureFix = {
+  id: number;
+  show?: string;
+  thing?: string;
+  split?: PictureSplit[];
+  /** This picture and the one before it are ONE idea of one sentence: make them one picture. */
+  join?: boolean;
+};
 
 /** The pictures the fit check reads and may fix — drawn cutaways, never the CTA, cover or assets. */
 const fitCandidate = (s: StoryboardScene) =>
@@ -1387,13 +1411,15 @@ export function parsePictureFixes(text: string, scenes: StoryboardScene[]): Pict
     const id = pictureId(f?.id);
     if (id == null || !scenes[id] || !fitCandidate(scenes[id])) continue;
     if (out.some(x => x.id === id)) continue;
-    const show = f?.shows_it === false ? clean(f?.show) : "";
+    const join = f?.join === true;
+    const show = f?.shows_it === false || join ? clean(f?.show) : "";
     const split: PictureSplit[] = (Array.isArray(f?.split) ? f.split : [])
       .map((x: any) => ({ from: clean(x?.from), show: clean(x?.show), thing: clean(x?.thing) || undefined }))
       .filter((x: PictureSplit) => x.from && x.show);
-    if (!show && !split.length) continue;
+    if (!show && !split.length && !join) continue;
     out.push({
       id,
+      ...(join ? { join } : {}),
       ...(show ? { show } : {}),
       ...(show && typeof f?.thing === "string" && f.thing ? { thing: f.thing } : {}),
       ...(split.length ? { split } : {}),
@@ -1438,6 +1464,69 @@ export function applyPictureFixes(
   return n;
 }
 
+/** A line that ends a sentence (so the next picture starts a new one). */
+const endsSentence = (t: string | undefined) => /[.!?]["')\]]?\s*$/.test((t ?? "").trim());
+
+/**
+ * ONE IDEA, ONE PICTURE (2026-10-02, the operator: whether two pictures of one sentence become one
+ * "should still be based on the script — if they have the same context or object"). The line check
+ * marks a picture `join` when it and the picture before are one idea of one sentence ("Sell your
+ * furniture | on Facebook Marketplace"); they become one picture (`joinedLine`), showing what the
+ * check wrote for the whole line. Never a list item, never across a sentence end, never past the
+ * picture's limit (`maxAt`). Returns the new film, how many joined, and where each old picture went
+ * (`remap`, for the splits that follow). Pure apart from the fixes' own rewrite of the joined picture.
+ */
+export function applyPictureJoins(
+  scenes: StoryboardScene[],
+  fixes: PictureFix[],
+  things: KeyThing[] | undefined,
+  sec: (s: StoryboardScene) => number,
+  maxAt: (s: StoryboardScene) => number = () => MAX_PICTURE_SEC
+): { scenes: StoryboardScene[]; joined: number; remap: Map<number, number> } {
+  const joins = new Map(fixes.filter(f => f.join).map(f => [f.id, f]));
+  const out: StoryboardScene[] = [];
+  const lens: number[] = [];
+  const remap = new Map<number, number>();
+  let joined = 0;
+  scenes.forEach((s, id) => {
+    const f = joins.get(id);
+    const k = out.length - 1;
+    const prev = out[k];
+    const ok =
+      !!f &&
+      !!prev &&
+      remap.get(id - 1) === k &&
+      fitCandidate(prev) &&
+      fitCandidate(s) &&
+      !prev.listCut &&
+      !s.listCut &&
+      !endsSentence(prev.scriptText) &&
+      lens[k] + sec(s) <= maxAt(prev);
+    if (!ok) {
+      remap.set(id, out.length);
+      out.push(s);
+      lens.push(sec(s));
+      return;
+    }
+    const merged = {
+      ...prev,
+      ...FRESH,
+      scriptText: `${(prev.scriptText ?? "").trim()} ${(s.scriptText ?? "").trim()}`.trim(),
+      narration: firstWords(`${prev.scriptText ?? ""} ${s.scriptText ?? ""}`, 8),
+      joinedLine: true,
+      wordCut: prev.wordCut || s.wordCut,
+      humanPresent: prev.humanPresent || s.humanPresent || undefined,
+    } as StoryboardScene;
+    if (f!.show) applyPictureFixes([merged], [{ id: 0, show: f!.show, thing: f!.thing }], things);
+    out[k] = merged;
+    lens[k] += sec(s);
+    remap.set(id, k);
+    joined++;
+  });
+  out.forEach((s, i) => (s.index = i + 1));
+  return { scenes: out, joined, remap };
+}
+
 /**
  * Split pictures where the check says a line names something NEW partway through: the words from
  * `from` on become their own picture showing it (`show`), the part before keeps its picture. A split
@@ -1447,7 +1536,9 @@ export function applyPictureFixes(
 export function applyPictureSplits(
   scenes: StoryboardScene[],
   fixes: PictureFix[],
-  things: KeyThing[] | undefined
+  things: KeyThing[] | undefined,
+  /** A picture's length, when known — no part may run under `SPLIT_PART_MIN_SEC`. */
+  sec?: (s: StoryboardScene) => number
 ): { scenes: StoryboardScene[]; split: number } {
   const byId = new Map(fixes.filter(f => f.split?.length).map(f => [f.id, f.split!]));
   if (!byId.size) return { scenes, split: 0 };
@@ -1470,7 +1561,14 @@ export function applyPictureSplits(
       cursor = at;
     }
     const bounds = [0, ...starts.map(x => x.at), spans.length];
-    if (starts.length === 0 || bounds.some((b, k) => k > 0 && b - bounds[k - 1] < 4)) {
+    // Each part must run long enough to be its own picture (`SPLIT_PART_MIN_SEC`), judged by its
+    // share of the words when the picture's length is known.
+    const total = sec?.(s) ?? 0;
+    const tooShort = (b: number, k: number) =>
+      k > 0 &&
+      (b - bounds[k - 1] < 4 ||
+        (total > 0 && ((b - bounds[k - 1]) / spans.length) * total < SPLIT_PART_MIN_SEC));
+    if (starts.length === 0 || s.joinedLine || bounds.some(tooShort)) {
       out.push(s);
       return;
     }
@@ -1524,8 +1622,14 @@ export function applyPictureSplits(
  */
 export async function fitPicturesToLines(
   scenes: StoryboardScene[],
-  opts: { sheet?: string; keyThings?: KeyThing[]; subject?: string } = {}
-): Promise<{ scenes: StoryboardScene[]; fixed: number; split: number }> {
+  opts: {
+    sheet?: string;
+    keyThings?: KeyThing[];
+    subject?: string;
+    /** The longest a picture may stay where it sits (`pictureMaxSecAt`) — a join never passes it. */
+    maxAt?: (s: StoryboardScene) => number;
+  } = {}
+): Promise<{ scenes: StoryboardScene[]; fixed: number; split: number; joined: number }> {
   const BATCH = 80;
   const fixes: PictureFix[] = [];
   // The main thing's first picture is named to the check: it is shown in use when it naturally is.
@@ -1543,13 +1647,17 @@ export async function fitPicturesToLines(
     for (let i = Math.max(0, from - 4); i < Math.min(scenes.length, from + BATCH); i++) {
       const s = scenes[i];
       const said = (s.scriptText ?? "").trim().replace(/\s+/g, " ");
+      const prev = scenes[i - 1];
+      const sameSentence =
+        !!prev && fitCandidate(prev) && !prev.listCut && !s.listCut && !endsSentence(prev.scriptText);
+      const secs = s.audioDuration ? ` (${s.audioDuration.toFixed(1)} s)` : "";
       if (s.hostPresent || !fitCandidate(s) || i < from) {
         lines.push(`HOST/OTHER: "${said}"`);
         continue;
       }
       any = true;
       lines.push(
-        `#${i} PICTURE${s.sameShot ? " (continues)" : ""}${i === firstMain ? " (FIRST of the MAIN thing)" : ""}: said "${said}" | shows: ${s.showSubject ?? s.visualPrompt ?? ""}`
+        `#${i} PICTURE${secs}${s.sameShot ? " (continues)" : ""}${s.joinedLine ? " (joined)" : ""}${sameSentence ? " (same sentence)" : ""}${i === firstMain ? " (FIRST of the MAIN thing)" : ""}: said "${said}" | shows: ${s.showSubject ?? s.visualPrompt ?? ""}`
       );
     }
     if (!any) continue;
@@ -1572,8 +1680,12 @@ export async function fitPicturesToLines(
   }
   // Rewrites first (by position, before anything moves), then the splits.
   const fixed = applyPictureFixes(scenes, fixes, opts.keyThings);
-  const cut = applyPictureSplits(scenes, fixes, opts.keyThings);
-  return { scenes: cut.scenes, fixed, split: cut.split };
+  const merged = applyPictureJoins(scenes, fixes, opts.keyThings, s => s.audioDuration ?? 0, opts.maxAt);
+  const moved = fixes
+    .filter(f => f.split?.length && merged.remap.has(f.id))
+    .map(f => ({ ...f, id: merged.remap.get(f.id)! }));
+  const cut = applyPictureSplits(merged.scenes, moved, opts.keyThings, s => s.audioDuration ?? 0);
+  return { scenes: cut.scenes, fixed, split: cut.split, joined: merged.joined };
 }
 
 // ─── Does something in each picture move by itself? ─────────────────────────────────────
@@ -1826,6 +1938,68 @@ export function joinSameContext(
     if (views.has(a)) views.set(joined, views.get(a)!);
     changed = true;
     i--; // the joined picture may continue into the next one too
+  }
+  out.forEach((s, k) => (s.index = k + 1));
+  return { scenes: out, changed };
+}
+
+/**
+ * The shortest a picture cut out of one line may run (2026-10-02, the operator on Dale's job 288:
+ * "Number five. Sell your furniture | on Facebook Marketplace." came out as 2.1 s of the bookcase and
+ * 1.9 s of a phone — "rather than splitting it, it is best to just make it one b-roll").
+ */
+export const SPLIT_PART_MIN_SEC = 3;
+
+/**
+ * Two pictures that split ONE sentence, either of them under `SPLIT_PART_MIN_SEC`, become one picture
+ * (`joinedLine`) — the line check then writes it to show what the whole line is about, the things it
+ * names together. Never a list item (each item keeps its own picture however short), the host, a
+ * CTA, cover, asset, QR or split beat, and never past the picture's limit (`maxAt`). Run on the final
+ * lengths. Pure — returns a new list.
+ */
+export function joinShortSplits(
+  scenes: StoryboardScene[],
+  sec: (s: StoryboardScene) => number,
+  maxAt: (s: StoryboardScene) => number = () => MAX_PICTURE_SEC
+): { scenes: StoryboardScene[]; changed: boolean } {
+  const out = [...scenes];
+  const len = out.map(sec);
+  const joinable = (s: StoryboardScene | undefined) =>
+    !!s &&
+    !s.hostPresent &&
+    !s.listCut &&
+    !s.splitVisual &&
+    !s.coverHero &&
+    !s.assetImageUrl &&
+    !s.cta &&
+    !s.qrHero;
+  const endsSentence = (t: string | undefined) => /[.!?]["')\]]?\s*$/.test((t ?? "").trim());
+  let changed = false;
+  for (let i = 1; i < out.length; i++) {
+    const a = out[i - 1];
+    const b = out[i];
+    if (!joinable(a) || !joinable(b) || endsSentence(a.scriptText)) continue;
+    if (Math.min(len[i - 1], len[i]) >= SPLIT_PART_MIN_SEC) continue;
+    const limit =
+      movingPicture(a) || movingPicture(b) ? Math.min(maxAt(a), MOVING_PICTURE_MAX_SEC) : maxAt(a);
+    if (len[i - 1] + len[i] > limit) continue;
+    // The longer part's picture until the line check writes the joined one.
+    const keep = len[i] > len[i - 1] ? b : a;
+    const joined = {
+      ...keep,
+      ...FRESH,
+      scriptText: `${(a.scriptText ?? "").trim()} ${(b.scriptText ?? "").trim()}`.trim(),
+      narration: firstWords(`${a.scriptText ?? ""} ${b.scriptText ?? ""}`, 8),
+      joinedLine: true,
+      sameShot: a.sameShot,
+      wordCut: a.wordCut || b.wordCut,
+      hostCandidate: a.hostCandidate,
+      humanPresent: a.humanPresent || b.humanPresent || undefined,
+    } as StoryboardScene;
+    out.splice(i - 1, 2, joined);
+    len.splice(i - 1, 2, len[i - 1] + len[i]);
+    changed = true;
+    i--;
   }
   out.forEach((s, k) => (s.index = k + 1));
   return { scenes: out, changed };

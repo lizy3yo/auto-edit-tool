@@ -50,7 +50,8 @@ export function memorySourcesFor(
   if (!s.keyThing || !drawn(s)) return [];
   const i = scenes.indexOf(s);
   if (i <= 0) return [];
-  const before = scenes.slice(0, i).filter(source);
+  // A list item is never drawn from another item's picture: each item is its own thing.
+  const before = scenes.slice(0, i).filter(x => source(x) && !(s.listCut && x.listCut));
   const out: StoryboardScene[] = [];
   const add = (x: StoryboardScene | undefined) => {
     if (x && !out.includes(x) && out.length < MAX_MEMORY_REFS) out.push(x);

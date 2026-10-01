@@ -108,3 +108,49 @@ describe("named things are drawn exactly (Granny Ruth's job 281)", () => {
     expect(JSON.stringify(scenes)).toBe(before);
   });
 });
+
+describe("list items stay their own things; real names look real (Dale's job 290)", () => {
+  const PILE: KeyThing[] = [{ name: "personalized wood pile", look: "engraved boards, signs and boxes", main: false }];
+
+  it("never makes a list item a part of a group, and keeps unspoken writing blurred", () => {
+    const scenes = [
+      pic(1, "Engraved boards,", "an engraved board", { listCut: true }),
+      pic(2, "house signs,", "a house sign", { listCut: true }),
+    ];
+    applyNamedLooks(
+      scenes,
+      [0, 1],
+      { kinds: [], pictures: [{ id: 1, partOf: "personalized wood pile", show: "a small house sign with carved lettering" }] },
+      PILE
+    );
+    expect(scenes[1].partOf).toBeUndefined();
+    expect(scenes[1].keyThing).toBeUndefined();
+    const named = [pic(1, "Engraved boards,", "a board")];
+    applyNamedLooks(
+      named,
+      [0],
+      { kinds: [{ name: "engraved board", look: "a light wooden board with a name engraved across its middle" }], pictures: [{ id: 0, kind: "engraved board", show: "a light board with a name engraved into it" }] },
+      undefined
+    );
+    expect(named[0].blurPrint).toBe(true);
+  });
+
+  it("never draws a list item from the picture of the item before it", async () => {
+    const { memorySourcesFor } = await import("./pictureMemory");
+    const scenes = [
+      pic(1, "Engraved boards,", "a board", { listCut: true, keyThing: "personalized wood pile" }),
+      pic(2, "house signs,", "a sign", { listCut: true, keyThing: "personalized wood pile" }),
+    ];
+    expect(memorySourcesFor(scenes, scenes[1])).toEqual([]);
+  });
+
+  it("draws a real app the line names the way it really looks, logo and words soft", async () => {
+    const { REAL_APP_SCREEN_CLAUSE, APP_SCREEN_CLAUSE } = await import("./longformVideo");
+    expect(REAL_APP_SCREEN_CLAUSE).toMatch(/really looks/);
+    expect(REAL_APP_SCREEN_CLAUSE).toMatch(/soft and\s+unreadable/);
+    expect(APP_SCREEN_CLAUSE).toMatch(/no logo/);
+    const { NAMED_LOOKS_SYSTEM } = await import("./namedLooks");
+    expect(NAMED_LOOKS_SYSTEM).toMatch(/REAL, RECOGNISABLE thing the LINE names/);
+    expect(NAMED_LOOKS_SYSTEM).toMatch(/never part_of anything/);
+  });
+});

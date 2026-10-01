@@ -7,6 +7,7 @@ import {
   repairImplausibleRuns,
   tokenizeNarration,
   unsnapImplausible,
+  keepOwnWords,
 } from "./narrationAlignment";
 import { auditStoryboardTimeline } from "./alignmentHeal";
 import type { WhisperWord } from "./_core/voiceTranscription";
@@ -858,3 +859,22 @@ describe("assignSceneRanges — the snap cannot leave a film the banner would fl
 function lengths(b: number[]) {
   return b.slice(1).map((x, i) => x - b[i]);
 }
+
+describe("keepOwnWords — a pause-snap never takes a piece's own words away (Dale's job 291)", () => {
+  // "…I'm ranking | Etsy, | craft fairs": "ranking" ends 10.0, "Etsy" 10.05–10.45, "craft" 10.80.
+  const aligned = [0, 10.02, 10.6, 12];
+  const meets: ([number, number] | null)[] = [null, [10.0, 10.05], [10.45, 10.8], null];
+  it("puts the cuts back when the snap left a one-word list picture with none of its word", () => {
+    // The cut before "Etsy" snapped onto the pause after it: the "Etsy," slice is 10.5–10.6.
+    const snapped = [0, 10.5, 10.6, 12];
+    expect(keepOwnWords(aligned, snapped, meets)).toEqual(aligned);
+  });
+  it("keeps a snap that only trims a word edge", () => {
+    const snapped = [0, 10.03, 10.62, 12];
+    expect(keepOwnWords(aligned, snapped, meets)).toEqual(snapped);
+  });
+  it("does nothing without word timings", () => {
+    const snapped = [0, 10.5, 10.6, 12];
+    expect(keepOwnWords(aligned, snapped, [null, null, null, null])).toEqual(snapped);
+  });
+});

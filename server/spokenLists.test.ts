@@ -209,3 +209,39 @@ describe("the film is cut to fit its lists", () => {
     ]);
   });
 });
+
+describe("the opening line hands its list over too (Dale's job 292)", () => {
+  it("cuts a list that starts in the film's first host line", () => {
+    const scenes = [
+      host(1, "The place you tried to sell it just wasn't built for that piece. Today I'm ranking Etsy,", { hostOpener: true }),
+      scene(2, "craft fairs,", { listCut: true }),
+      scene(3, "and Facebook Marketplace", { listCut: true }),
+      scene(4, "by what each one actually does well."),
+      host(5, "Bye."),
+    ];
+    const r = applySpokenLists(scenes, shapeLists(scenes));
+    expect(rows(r.scenes).slice(0, 4)).toEqual([
+      ["The place you tried to sell it just wasn't built for that piece. Today I'm ranking", true, false],
+      ["Etsy,", false, true],
+      ["craft fairs,", false, true],
+      ["and Facebook Marketplace", false, true],
+    ]);
+  });
+  it("puts an item back when a later step folded it into the picture before", () => {
+    const scenes = [
+      host(1, "Hi there.", { hostOpener: true }),
+      scene(2, "The place just wasn't built for it. Today I'm ranking Etsy,"),
+      scene(3, "craft fairs,", { listCut: true }),
+      scene(4, "and Facebook Marketplace", { listCut: true }),
+      scene(5, "by what each one does well."),
+      host(6, "Bye."),
+    ];
+    const r = applySpokenLists(scenes, shapeLists(scenes));
+    expect(r.scenes.map(s => s.scriptText).slice(1, 5)).toEqual([
+      "The place just wasn't built for it. Today I'm ranking",
+      "Etsy,",
+      "craft fairs,",
+      "and Facebook Marketplace",
+    ]);
+  });
+});

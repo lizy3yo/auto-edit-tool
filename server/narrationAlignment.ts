@@ -262,6 +262,9 @@ export function assignSceneRanges(
       shortSilences ?? [],
       plan.meets ?? []
     );
+    // A snap never takes a piece's own words away — judged on the snap alone, before the QR
+    // rescue below moves a cut on purpose.
+    boundaries = keepOwnWords(aligned, boundaries, plan.meets ?? []);
     rescueSilentQrTails(scenes, boundaries, silences);
     boundaries = unsnapImplausible(aligned, boundaries, tokenCounts);
   }
@@ -770,6 +773,49 @@ export function unsnapImplausible(
     if (i + 1 < n) out[i + 1] = aligned[i + 1];
   }
   for (let dirty = true; dirty;) {
+    dirty = false;
+    for (let s = 1; s <= n; s++) {
+      if (out[s] >= out[s - 1]) continue;
+      if (out[s] !== aligned[s]) out[s] = aligned[s];
+      else out[s - 1] = aligned[s - 1];
+      dirty = true;
+    }
+  }
+  return out;
+}
+
+/**
+ * The least of a piece's own spoken words its slice must still hold after the pause-snap.
+ */
+export const OWN_WORDS_MIN_SHARE = 0.6;
+
+/**
+ * A pause-snap never takes a piece's own words away (2026-10-02, Dale's job 291: "…Today I'm
+ * ranking | Etsy, | craft fairs, | and Facebook Marketplace" — the cut before "Etsy" snapped onto
+ * the pause AFTER the word, the one-word list picture shrank to nothing, and the flash fold put
+ * "Etsy" back inside the picture before; the list cut had been made, a later step undid it). A
+ * snap may move a cut anywhere inside its neighbour words' spans, which is right for a sloppy word
+ * edge and wrong for a piece that IS one short word. Any piece whose snapped slice holds less than
+ * `OWN_WORDS_MIN_SHARE` of its own words' time (`meets`: where its first word starts and its last
+ * word ends) gets both cuts back where the alignment put them. Stays monotonic. Pure — unit-tested.
+ */
+export function keepOwnWords(
+  aligned: number[],
+  snapped: number[],
+  meets: readonly (readonly [number, number] | null)[]
+): number[] {
+  const n = aligned.length - 1;
+  const out = snapped.slice();
+  for (let i = 0; i < n; i++) {
+    const first = i > 0 ? meets[i]?.[1] : undefined;
+    const last = i + 1 < n ? meets[i + 1]?.[0] : undefined;
+    if (first == null || last == null || last <= first) continue;
+    const held = Math.min(out[i + 1], last) - Math.max(out[i], first);
+    if (held >= (last - first) * OWN_WORDS_MIN_SHARE) continue;
+    out[i] = aligned[i];
+    out[i + 1] = aligned[i + 1];
+  }
+  for (let dirty = true; dirty; ) {
     dirty = false;
     for (let s = 1; s <= n; s++) {
       if (out[s] >= out[s - 1]) continue;

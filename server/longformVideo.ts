@@ -34,6 +34,7 @@ import {
   LIST_SHOT_MIN_SEC,
   joinHookPictures,
   joinSameContext,
+  joinShortSplits,
   markSameContext,
   pictureMaxSecAt,
   planShotList,
@@ -6188,7 +6189,8 @@ export function buildStillPrompt(
   // A camera move's first frame is the thing at rest: the CAMERA moves, the thing does not.
   const motion = !aggressive && scene.objectMotion ? "objectStill" : "settle";
   const memory = memoryClause(scene);
-  const app = APP_SCREEN.test(visual) ? ` ${APP_SCREEN_CLAUSE}` : "";
+  // A real app the line names (`namedLook`) is drawn as it really looks; otherwise a plain one.
+  const app = APP_SCREEN.test(visual) ? ` ${scene.namedLook ? REAL_APP_SCREEN_CLAUSE : APP_SCREEN_CLAUSE}` : "";
   return withAllowedText(
     `${visual}${namedLookClause(scene)}${angleSuffix}${personSuffix}${memory}${app} ${amateurIphoneLook(subject, motion)} ${framing} ${noFigures} ${NO_BOOK_SUFFIX}`,
     scene.pictureText,
@@ -6236,6 +6238,10 @@ const APP_SCREEN =
  * The phone screen of an app shot (2026-09-30, the operator: "facebook marketplace in an app" — no
  * logo, no brand): a plain buy-and-sell app, a grid of item photos, nothing readable.
  */
+export const REAL_APP_SCREEN_CLAUSE =
+  "The phone's screen shows that app exactly as it really looks, as the EXACT LOOK describes — its " +
+  "real colours and layout — with its logo and every word, name and price small, soft and " +
+  "unreadable.";
 export const APP_SCREEN_CLAUSE =
   "The phone's screen shows a simple buy-and-sell app: a grid of small photos of items for sale " +
   "on plain soft-coloured panels — no logo, no brand, no app name, and no readable words, letters, " +
@@ -8383,11 +8389,11 @@ export async function generateValidatedStill(
       // one is drawn again from the memory once, then from words alone (the film never stops).
       // SAMENESS BEATS THE ANGLE: one redraw from memory, then the memory-drawn picture is kept — a
       // fallback drawn from words gave Frederick's job 259 a different heater and mattress.
-      // A close-up of one part (`partOf`) is not compared with its whole-thing memory: the check
-      // above already holds it to the part (and its exact look).
-      if (scene.keyThing && !scene.partOf && scene.memoryRefUrls?.length && sameThingMisses < 1) {
+      // A close-up of one part (`partOf`) is held only to not COPYING its memory: it is a different
+      // view of the whole by design (the check above holds it to the part and its exact look).
+      if (scene.keyThing && scene.memoryRefUrls?.length && sameThingMisses < 1) {
         const same = await scanSameThing(scene.memoryRefUrls[0], buffer, scene.keyThing);
-        if (!same.same || same.copy) {
+        if ((!same.same && !scene.partOf) || same.copy) {
           sameThingMisses++;
           lastError = same.same
             ? `Still image copies its memory picture's framing`
@@ -9618,6 +9624,8 @@ async function cutShotsOnWords(
     // Ruth's job 281 split "the one | that paid me best" in two and kept "a straight-stitch
     // machine" on camera because lists were judged one storyboard piece at a time.
     const spoken = await spokenListsP;
+    // Kept for the voicing stage's last pass, which applies them again on the final lengths.
+    params.spokenLists = spoken.lists;
     const listCuts = applySpokenLists(next, spoken.lists, {
       hostName: params.hostName,
       main: params.keyThings?.find(k => k.main)?.name,
@@ -13866,13 +13874,21 @@ async function runUnifiedPipeline(
       s => s.audioDuration ?? 0,
       pictureLimitFor(hook.scenes, masterDurationSec)
     );
-    // The scan window under the big QR is one topic too: one picture, not one per line.
-    const scan = joinScanWindow(
+    // One short line cut into two quick pictures plays as ONE picture of the whole line
+    // (`joinShortSplits` — Dale's job 288: "Sell your furniture | on Facebook Marketplace", 2.1 s +
+    // 1.9 s); the line check below writes it to show both things together.
+    const short = joinShortSplits(
       same.scenes,
       s => s.audioDuration ?? 0,
       pictureLimitFor(same.scenes, masterDurationSec)
     );
-    if (!folded.changed && !hook.changed && !same.changed && !scan.changed) break;
+    // The scan window under the big QR is one topic too: one picture, not one per line.
+    const scan = joinScanWindow(
+      short.scenes,
+      s => s.audioDuration ?? 0,
+      pictureLimitFor(same.scenes, masterDurationSec)
+    );
+    if (!folded.changed && !hook.changed && !same.changed && !short.changed && !scan.changed) break;
     scenes = scan.scenes;
     sceneRanges = assignSceneRanges(
       scenes,
@@ -13884,6 +13900,28 @@ async function runUnifiedPipeline(
     );
     console.log(`[Longform ${jobId}] folded shots the pause-snap squeezed under their floor`);
   }
+  // The spoken lists, once more on the final lengths: any step since the shot list that undid an
+  // item's picture (a trimmed host take, a join, a fold) is put right — Dale's job 292 left "Etsy,"
+  // inside the picture before "craft fairs, and Facebook Marketplace".
+  if (params.spokenLists?.length) {
+    const again = applySpokenLists(scenes, params.spokenLists, {
+      hostName: params.hostName,
+      main: params.keyThings?.find(k => k.main)?.name,
+    });
+    const cutOf = (list: StoryboardScene[]) => list.map(x => x.scriptText ?? "").join("");
+    if (cutOf(again.scenes) !== cutOf(scenes)) {
+      scenes = again.scenes;
+      sceneRanges = assignSceneRanges(
+        scenes,
+        words,
+        masterDurationSec,
+        silences,
+        shortSilences,
+        newAlignmentReport()
+      );
+      console.log(`[Longform ${jobId}] spoken lists: put back one picture per item after the folds`);
+    }
+  }
   // SAY IT, SHOW IT, checked: every picture read beside its line, line by line, and any that shows
   // something the line is not about rewritten (`fitPicturesToLines` — Frederick's job 259 put the
   // smoke alarm on "Fires don't all behave the same way"); a line that names something new partway
@@ -13893,10 +13931,12 @@ async function runUnifiedPipeline(
       sheet: params.continuitySheet,
       keyThings: params.keyThings,
       subject: params.videoSubject,
+      maxAt: pictureLimitFor(scenes, masterDurationSec),
     });
+    if (fit.joined > 0) console.log(`[Longform ${jobId}] ${fit.joined} picture(s) joined with the one before: one idea, one picture`);
     if (fit.fixed > 0)
       console.log(`[Longform ${jobId}] ${fit.fixed} picture(s) rewritten to show what their line is about`);
-    if (fit.split > 0) {
+    if (fit.split > 0 || fit.joined > 0) {
       scenes = fit.scenes;
       sceneRanges = assignSceneRanges(
         scenes,

@@ -106,6 +106,25 @@ function trailingThing(clause: string): string | null {
   return item !== clause.trim() && namesAThing(item, 6) ? item : null;
 }
 
+/** Words that start the clause a list's last item can run into. */
+const CLAUSE_START = new Set([
+  "by", "for", "to", "in", "on", "at", "with", "from", "that", "which", "who", "because", "when",
+  "so", "while", "if", "where", "until", "since",
+]);
+
+/**
+ * "and Facebook Marketplace by what each one does well" → "and Facebook Marketplace": an "and/or"
+ * piece whose first few words name a thing and then run into a clause. Null otherwise. Pure.
+ */
+function lastItemBeforeClause(piece: string): string | null {
+  if (!/^(?:and|or)\s/i.test(piece.trim())) return null;
+  const words = piece.trim().split(/\s+/);
+  const stop = words.findIndex((w, k) => k > 1 && CLAUSE_START.has(w.toLowerCase()));
+  if (stop < 2 || stop > 6) return null;
+  const item = words.slice(0, stop).join(" ");
+  return namesAThing(item) ? item : null;
+}
+
 /** A clause's last word, when a list of bare names follows it ("You need flour, | sugar, and butter"). */
 function trailingBareThing(clause: string): string | null {
   const w = /(?:^|\s)([A-Za-z][A-Za-z'-]*)$/.exec(clause.trim())?.[1];
@@ -148,6 +167,10 @@ export function listsByShape(sentence: string): string[][] {
       source = run[firstDet - 1];
       run = run.slice(firstDet);
     }
+    // The last item may run straight on into the rest of the sentence with no comma ("…, and
+    // Facebook Marketplace by what each one does well"): its name is the words before the clause.
+    const tail = run.length && j < pieces.length ? lastItemBeforeClause(pieces[j]) : null;
+    if (tail) run.push(tail);
     const bare = run.every(t => !DETERMINER.test(stripJoiners(t)));
     const lead =
       source && run.length >= 2
@@ -346,8 +369,8 @@ function listPicture(base: StoryboardScene, text: string, show: string): Storybo
  * Re-cut the film so every item of every list is exactly one picture (see the file comment). A list
  * is left as it is when it touches a CTA, cover, asset, QR or split beat, continues into a host line,
  * or starts in a host line that would keep fewer than `HOST_HANDOFF_MIN_WORDS` words (or lose the
- * host's name on the introduction), or that speaks on after it. The film's first and last beats
- * never hand a list over. A non-host piece holding no list item loses any list mark. Returns the new
+ * host's name on the introduction), or that speaks on after it. The film's last beat never hands a
+ * list over. A non-host piece holding no list item loses any list mark. Returns the new
  * film and what changed; the caller re-times it (`assignSceneRanges`). Pure.
  */
 export function applySpokenLists(
@@ -423,7 +446,9 @@ export function applySpokenLists(
     }
     const host = scenes[r.first];
     if (!host.hostPresent) return true;
-    if (r.first === 0 || r.first === scenes.length - 1) return false;
+    // The goodbye keeps its list; the opening line hands over like any other (Dale's job 292 kept
+    // "Today I'm ranking Etsy," on the opener, and a later trim left "Etsy" inside a picture).
+    if (r.first === scenes.length - 1) return false;
     const kept = tokenSpans((host.scriptText ?? "").slice(0, G[r.starts[0]].start)).map(t => t.tok);
     if (kept.length < HOST_HANDOFF_MIN_WORDS) return false;
     if (host.hostIntro && nameToks.length && !kept.some((_, j) => nameToks.every((w, q) => kept[j + q] === w)))
