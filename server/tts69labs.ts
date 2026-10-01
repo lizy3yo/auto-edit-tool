@@ -363,6 +363,19 @@ export async function createTTSTask69Labs(
   if (jam) _duplicateJams.delete(apiKey);
 
   let useCloneLane = _cloneRoutes.has(badKey);
+  // Pick the clone lane UP FRONT for a voice the account's clone list holds, instead of inferring
+  // it from /tts/generate's error: since ~2026-10-01 that endpoint answers a clone id with 503
+  // VOICE_LOOKUP_FAILED, not the 400 "not found" the reroute below waits for, so every clone
+  // render retried the wrong endpoint, read it as an outage and waited two hours — while
+  // /voice-clones/generate accepted the same voice at once. Only UUID-shaped ids (the clone
+  // space's shape) cost the list lookup, which is cached.
+  if (!useCloneLane && voiceSpaceByShape(params.voiceId) === "clone") {
+    const cloneIds = await fetchVoiceCloneIds(apiKey);
+    if (cloneIds?.has(params.voiceId)) {
+      _cloneRoutes.add(badKey);
+      useCloneLane = true;
+    }
+  }
   let body: Record<string, any>;
   let response: Response;
   for (let attempt = 1; ; attempt++) {
@@ -429,6 +442,21 @@ export async function createTTSTask69Labs(
         `69Labs TTS task creation rate-limited (429) after ${attempt} attempts — ` +
           `the account's request rate is exhausted; retry later.`
       );
+    }
+    // /tts/generate's "voice lookup failed" for a voice it does not hold is the clone case in a
+    // new costume (see the up-front check above): if the account's clone list has the voice, switch
+    // lanes instead of waiting out an "outage" that is not one.
+    if (!useCloneLane && response.status >= 500 && /VOICE_LOOKUP_FAILED/.test(errText)) {
+      const cloneIds = await fetchVoiceCloneIds(apiKey);
+      if (cloneIds?.has(params.voiceId)) {
+        console.log(
+          `[69Labs TTS] Voice ${params.voiceId} is an account voice clone — ` +
+            `routing via /voice-clones/generate`
+        );
+        _cloneRoutes.add(badKey);
+        useCloneLane = true;
+        continue;
+      }
     }
     // 5xx (including Cloudflare's 52x "origin down" pages) is the provider, not this request:
     // back off and resubmit the same body. Only after the budget is spent does it become an error.

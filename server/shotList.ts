@@ -723,6 +723,19 @@ export function markListPieces(scenes: StoryboardScene[]): number {
   return n;
 }
 
+/**
+ * A piece another may be merged INTO: never a list item (unless the piece merged is itself a list
+ * item squeezed to a blink), whose own picture the join would lose
+ * (Dale's job 293: a 1 s "Today I'm ranking" folded into "Etsy," and Etsy's picture was gone).
+ * Every step that folds a too-short piece into a neighbour asks this — the shot list's settle, the
+ * pause-snap fold and the plan gate. Pure.
+ */
+export const mergeable = (
+  n: StoryboardScene | undefined,
+  /** The piece being merged: a list item squeezed to a blink may still join its neighbour item. */
+  from?: StoryboardScene
+): boolean => !!n && (!n.listCut || !!from?.listCut);
+
 /** Join two adjacent pieces of one beat; the longer one's picture wins. */
 function joinPieces(
   a: StoryboardScene,
@@ -901,8 +914,9 @@ export function settleShots(
         // (List items keep their exact floor — a real "a saw," is ~0.5 s and must stay its own shot.)
         const floor = s.listCut ? LIST_SHOT_MIN_SEC : SHOT_MIN_SEC + SNAP_MARGIN_SEC;
         if (len(s) >= floor || run.length === 1) continue;
-        const prev = k > 0 && !run[k - 1].hostPresent ? k - 1 : -1;
-        const next = k + 1 < run.length ? k + 1 : -1;
+        // Never INTO a list item: the joined piece would lose the item's own picture (`mergeable`).
+        const prev = k > 0 && !run[k - 1].hostPresent && mergeable(run[k - 1], s) ? k - 1 : -1;
+        const next = k + 1 < run.length && mergeable(run[k + 1], s) ? k + 1 : -1;
         const into = prev >= 0 ? prev : next;
         if (into < 0) continue;
         const [a, b] = into < k ? [run[into], s] : [s, run[into]];
@@ -2269,12 +2283,20 @@ export function foldSnappedFlashes(
     if (!s.wordCut || s.hostPresent || sec(s) <= 0 || sec(s) >= snappedFloor(s)) continue;
     const prev = out[i - 1];
     const next = out[i + 1];
-    const into =
-      prev && !prev.hostPresent && prev.shotGroup === s.shotGroup
-        ? i - 1
-        : next && !next.hostPresent && next.shotGroup === s.shotGroup
-          ? i + 1
-          : -1;
+    // Never INTO a list item (`mergeable`); the beat's own neighbour first, then the picture before
+    // or after it from another beat — Dale's job 293 folded "Today I'm ranking" into "Etsy," and
+    // the joined piece lost Etsy's own picture.
+    const fits = (n: StoryboardScene | undefined, sameBeat: boolean) =>
+      !!n && !n.hostPresent && mergeable(n, s) && (!sameBeat || n.shotGroup === s.shotGroup);
+    const into = fits(prev, true)
+      ? i - 1
+      : fits(next, true)
+        ? i + 1
+        : fits(prev, false)
+          ? i - 1
+          : fits(next, false)
+            ? i + 1
+            : -1;
     if (into < 0) continue;
     const [a, b] = into < i ? [out[into], s] : [s, out[into]];
     out.splice(Math.min(i, into), 2, joinPieces(a, b, sec(a), sec(b)));

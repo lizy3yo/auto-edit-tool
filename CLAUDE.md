@@ -857,7 +857,12 @@ Express · tRPC · Drizzle · MySQL.
   its list over too (only the goodbye keeps it), and the found lists (`inputParams.spokenLists`) are
   applied once more on the final lengths right before the line check, so any later step that undid
   an item is put right. The shape rules also take a last item that runs into a clause ("…and
-  Facebook Marketplace by what each one does well").
+  Facebook Marketplace by what each one does well"). And NOTHING IS MERGED INTO A LIST ITEM
+  (`mergeable`, asked by `settleShots`, `foldSnappedFlashes` and the plan gate's flash join): the
+  list cut leaves a short lead-in ("Today I'm ranking", ~1 s) and every one of those folds used to
+  pick the item beside it, so the joined piece lost the item's picture (Dale's job 293) — a short
+  piece now goes to the neighbour that is not a list item; only a list item squeezed to a blink
+  may still join the item next to it.
 - **A sentence finishes, a word is never cut** (2026-09-28, the operator: "it should adapt to
   everything and not only these videos"). Three rules, none per-channel. (a) Nothing folds across a
   MARKED CTA edge: `coalesceShortScenes` used to fold a sub-floor scene into either neighbour, and
@@ -1438,6 +1443,14 @@ Always 16:9. Fire-and-forget; progress persisted to the job row and polled by th
   2026-10-01 the clone lane answered 503 VOICE_LOOKUP_FAILED for over an hour while library voices
   worked, and Pearl's, Scarlett's and Lance's practice films (jobs 284-286) were failed as "pick a
   different voice" because the comparison voice was a library one.
+  THAT "OUTAGE" WAS OUR ROUTING (found 2026-10-02): `/tts/generate` started answering an account
+  clone's id with 503 VOICE_LOOKUP_FAILED instead of the 400 "not found" the clone reroute waited
+  for, so every clone voice stayed on the wrong endpoint while `/voice-clones/generate` (what the
+  69Labs website uses) accepted it at once. `createTTSTask69Labs` now picks the clone lane UP
+  FRONT for a UUID-shaped id the account's clone list holds (`fetchVoiceCloneIds`, cached), and a
+  VOICE_LOOKUP_FAILED on the standard lane re-checks the list and switches lanes. All 9 clone
+  channels voiced at once after it. Before blaming 69Labs for a clone failure, POST the same voice
+  to `/voice-clones/generate` directly.
 - **A 69Labs TTS task is never abandoned.** `generateSceneVoiceover` persists the provider's
   task id on `scene.ttsTaskIds` (the TTS mirror of `renderTaskIds`) the moment it is created,
   and clears it once the audio is collected or the job reports `failed`. Before that the id

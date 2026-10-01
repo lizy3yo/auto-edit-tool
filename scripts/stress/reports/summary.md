@@ -3206,3 +3206,25 @@ job 288 (dale_oakfield) — completed, rehearsal
 
 ### dale_oakfield run 1 — job 292: FAILED after 15 min
     Cancelled by user
+
+### dale_oakfield run 1 — 28 min
+```
+job 293 (dale_oakfield) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (1 finding)
+  FAIL  11. real video (1 finding)
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo
+  PASS  14. no cut inside a word
+  stats: {"scenes":39,"hostTakes":10,"hostSec":60,"ctaPatterns":["block 0: HBHQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":11,"handOffs":6,"longestFacelessEarlySec":38,"longestFacelessLateSec":30,"longestPictureSec":17.6,"motionSharePct":0,"picturesJudged":31}
+   - [10] scene 36 b-roll: does not show what is said — phone is secondary, cutting board dominates frame
+   - [11] only 0% of cutaway time is moving
+```

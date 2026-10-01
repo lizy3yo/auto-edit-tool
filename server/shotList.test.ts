@@ -1350,3 +1350,30 @@ describe("one idea, one picture — decided by the words (the operator, 2026-10-
     expect(applyPictureJoins([pic(1, "Sell your furniture", "a"), pic(2, "on the app.", "b")], join, undefined, sec, () => 6).joined).toBe(0);
   });
 });
+
+describe("a short piece is never merged into a list item (Dale's job 293)", () => {
+  const p = (index: number, scriptText: string, over: Partial<StoryboardScene> = {}) =>
+    ({ index, scriptText, showSubject: `picture ${index}`, wordCut: true, ...over }) as StoryboardScene;
+  it("folds 'Today I'm ranking' into the picture before, not into 'Etsy,'", async () => {
+    const { foldSnappedFlashes } = await import("./shotList");
+    const scenes = [
+      p(1, "The place you tried to sell it just wasn't built for that piece.", { shotGroup: 2 }),
+      p(2, "Today I'm ranking", { shotGroup: 4 }),
+      p(3, "Etsy,", { shotGroup: 4, listCut: true }),
+      p(4, "craft fairs,", { shotGroup: 4, listCut: true }),
+    ];
+    const secs = new Map([[scenes[0], 4], [scenes[1], 1.0], [scenes[2], 0.33], [scenes[3], 0.8]]);
+    const r = foldSnappedFlashes(scenes, s => secs.get(s) ?? 5);
+    expect(r.scenes.map(s => [s.scriptText, !!s.listCut])).toEqual([
+      ["The place you tried to sell it just wasn't built for that piece. Today I'm ranking", false],
+      ["Etsy,", true],
+      ["craft fairs,", true],
+    ]);
+  });
+  it("leaves a flash alone when its only neighbours are list items", async () => {
+    const { foldSnappedFlashes } = await import("./shotList");
+    const scenes = [p(1, "a saw,", { listCut: true }), p(2, "and", {}), p(3, "a drill,", { listCut: true })];
+    const r = foldSnappedFlashes(scenes, s => (s.listCut ? 0.6 : 0.3));
+    expect(r.changed).toBe(false);
+  });
+});

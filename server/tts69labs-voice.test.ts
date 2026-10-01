@@ -211,3 +211,46 @@ describe("69Labs voice spaces", () => {
     }
   });
 });
+
+describe("a cloned voice goes straight to the clone lane (2026-10-02)", () => {
+  const CLONE = "726112ec-3f4a-450b-8a05-53d4f116d873";
+  const lookupDown = () =>
+    new Response(JSON.stringify({ error: "Service temporarily unavailable. Try again shortly.", code: "VOICE_LOOKUP_FAILED" }), { status: 503 });
+  const cloneList = () => new Response(JSON.stringify({ voiceClones: [{ id: CLONE, name: "Hank" }] }), { status: 200 });
+  const accepted = () => new Response(JSON.stringify({ id: "task-1", status: "PENDING" }), { status: 201 });
+
+  it("never asks /tts/generate for a voice the clone list holds", async () => {
+    const { createTTSTask69Labs } = await import("./tts69labs");
+    const originalFetch = globalThis.fetch;
+    const urls: string[] = [];
+    globalThis.fetch = vi.fn(async (url: any) => {
+      urls.push(String(url));
+      if (String(url).endsWith("/voice-clones")) return cloneList();
+      if (String(url).endsWith("/voice-clones/generate")) return accepted();
+      return lookupDown();
+    }) as any;
+    try {
+      expect(await createTTSTask69Labs("k-clone-1", { text: "hi", voiceId: CLONE })).toBe("task-1");
+      expect(urls.some(u => u.endsWith("/tts/generate"))).toBe(false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("switches lanes on VOICE_LOOKUP_FAILED when the clone list was unavailable up front", async () => {
+    const { createTTSTask69Labs } = await import("./tts69labs");
+    const originalFetch = globalThis.fetch;
+    let listCalls = 0;
+    globalThis.fetch = vi.fn(async (url: any) => {
+      const u = String(url);
+      if (u.endsWith("/voice-clones")) return ++listCalls === 1 ? new Response("down", { status: 503 }) : cloneList();
+      if (u.endsWith("/voice-clones/generate")) return accepted();
+      return lookupDown();
+    }) as any;
+    try {
+      expect(await createTTSTask69Labs("k-clone-2", { text: "hi", voiceId: CLONE })).toBe("task-1");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});

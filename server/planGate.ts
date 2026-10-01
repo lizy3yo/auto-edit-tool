@@ -46,6 +46,7 @@ import {
   splitPicture,
   settleVideoKind,
   videoKind,
+  mergeable,
 } from "./shotList";
 
 export type PlanFinding = { rule: number; scene?: number; detail: string };
@@ -1119,10 +1120,11 @@ export function enforcePlanRules(
           `(${/only/.test(f.detail) ? "too short" : "cut mid-sentence"})`;
       } else if (s.hostPresent && /flash shot|host take only/.test(f.detail)) {
         // A protected host too short to read keeps the picture beside it.
+        // Never a list item's picture (`mergeable`): the item would lose it.
         const into =
-          plainPicture(next) && sameRegister(s, next)
+          plainPicture(next) && mergeable(next, s) && sameRegister(s, next)
             ? i + 1
-            : plainPicture(prev) && sameRegister(s, prev)
+            : plainPicture(prev) && mergeable(prev, s) && sameRegister(s, prev)
               ? i - 1
               : -1;
         if (into >= 0) {
@@ -1132,8 +1134,9 @@ export function enforcePlanRules(
       } else if (!s.hostPresent && /flash shot/.test(f.detail)) {
         const group = (n: StoryboardScene | undefined) =>
           !!n && n.shotGroup != null && n.shotGroup === s.shotGroup;
+        // Never INTO a list item (`mergeable`): the joined shot would lose the item's own picture.
         const ok = (n: StoryboardScene | undefined) =>
-          !!n && sameRegister(s, n) && (n.hostPresent === true || plainPicture(n));
+          !!n && mergeable(n, s) && sameRegister(s, n) && (n.hostPresent === true || plainPicture(n));
         const into =
           plainPicture(prev) && group(prev) && ok(prev)
             ? i - 1
