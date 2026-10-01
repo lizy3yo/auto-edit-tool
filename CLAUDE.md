@@ -841,6 +841,23 @@ Express · tRPC · Drizzle · MySQL.
   someone at work keeps the person and is never made a part close-up. The still checker holds a
   named-kind picture to its exact look (`exactLookQuestion`) on Sonnet at 1280 px
   (`EXACT_LOOK_MODEL`), one redraw like any `missing`. Any failure changes nothing.
+  Follow-ups the same day (Dale's practice films, jobs 288-293): (c) ONE IDEA, ONE PICTURE: two
+  pictures splitting one sentence become one (`joinedLine`) when the line check (Opus) marks them
+  one idea (`join` → `applyPictureJoins`: "Sell your furniture | on Facebook Marketplace") or either
+  part runs under `SPLIT_PART_MIN_SEC` (3 s, `joinShortSplits` in the fold loop); the check then
+  writes ONE picture for the whole line — what it really points at (a comparison's new thing, the
+  main thing, or both together). Its own splits never leave a part under 3 s. Lists are exempt.
+  (d) REAL THINGS LOOK REAL: a real app, website, store or market the LINE names is a named kind —
+  its real colours and layout (`REAL_APP_SCREEN_CLAUSE`), logo and words soft and unreadable (the
+  operator's option A). (e) A list item is its own thing: never `partOf` a group, never drawn from
+  the item before it (`memorySourcesFor`), a part close-up is still held to not COPYING its memory,
+  and writing a rewrite names but the line does not say is blurred (`blurredPrint` now covers
+  engraved/monogram/initials). (f) LISTS STAY CUT: the pause-snap may no longer take a piece's own
+  words away (`keepOwnWords` — "…ranking | Etsy, |" snapped over the word), the opening line hands
+  its list over too (only the goodbye keeps it), and the found lists (`inputParams.spokenLists`) are
+  applied once more on the final lengths right before the line check, so any later step that undid
+  an item is put right. The shape rules also take a last item that runs into a clause ("…and
+  Facebook Marketplace by what each one does well").
 - **A sentence finishes, a word is never cut** (2026-09-28, the operator: "it should adapt to
   everything and not only these videos"). Three rules, none per-channel. (a) Nothing folds across a
   MARKED CTA edge: `coalesceShortScenes` used to fold a sub-floor scene into either neighbour, and
