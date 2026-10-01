@@ -106,25 +106,23 @@ describe("enforcePlanRules", () => {
     expect(r.scenes.filter(s => s.hostPresent)).toHaveLength(2);
   });
 
-  it("turns the longest stills into moving shots until ~15% of the cutaways move", () => {
+  it("turns stills of something moving by itself into videos until ~15% of the cutaways move — the main thing's first", () => {
     const rows: [("H" | "P" | "M"), number, string][] = [["H", 5, sentence(0)]];
     for (let k = 1; k <= 8; k++) rows.push(["P", k === 3 ? 5 : 3, sentence(k)]);
     rows.push(["H", 5, sentence(9)]);
     const scenes = film(rows);
-    // Hands at work can move for real; the plain objects stay still.
+    // Only something moving by itself may move (2026-09-30): hands and plain things stay photos.
     for (const s of scenes) if (s.index % 2 === 0) s.showSubject = `hands working on thing ${s.index}`;
-    scenes[3].showSubject = "hands sanding a board";
-    const r = enforcePlanRules(scenes, params);
-    expect(r.unresolved.filter(f => f.rule === 11)).toEqual([]);
-    expect(r.scenes.filter(s => !s.hostPresent && !s.stillImage).every(s => /hands/.test(s.showSubject ?? ""))).toBe(true);
-    const pics = r.scenes.filter(s => !s.hostPresent);
-    const moving = pics.filter(s => !s.stillImage).reduce((a, s) => a + len(s), 0);
-    const share = moving / pics.reduce((a, s) => a + len(s), 0);
-    // More stills than video now (2026-09-28): between the floor and the ceiling.
-    expect(share).toBeGreaterThanOrEqual(0.1);
-    expect(share).toBeLessThanOrEqual(0.25);
-    // The longest still went first.
-    expect(r.scenes[3].stillImage).toBe(false);
+    for (const s of scenes) if (s.index % 2 === 1 && !s.hostPresent) s.showSubject = `the farmhouse porch, view ${s.index}`;
+    scenes[3].showSubject = "fire burning in the wood stove";
+    scenes[5].showSubject = "smoke curling up from the lit incense in its holder";
+    scenes[5].keyThing = "incense holder";
+    // Judged (`judgeSelfMoving`): only the fire and the smoke move by themselves.
+    scenes.forEach(s => (s.selfMoving = s === scenes[3] || s === scenes[5]));
+    const r = enforcePlanRules(scenes, { ...params, keyThings: [{ name: "incense holder", look: "", main: true }] });
+    const moved = r.scenes.filter(s => !s.hostPresent && !s.stillImage);
+    expect(moved.map(s => s.showSubject)).toEqual(["smoke curling up from the lit incense in its holder"]);
+    expect(moved.every(s => s.objectMotion === true && !s.cameraMove)).toBe(true);
   });
 
   it("puts the self-introduction on camera", () => {
@@ -140,7 +138,7 @@ describe("enforcePlanRules", () => {
 });
 
 describe("nothing moves on its own", () => {
-  it("makes a moving shot of an ordinary object a still, keeps fire and hands moving", () => {
+  it("makes a moving shot of an ordinary object or of hands a photo, keeps fire moving", () => {
     const scenes = film([
       ["H", 5, sentence(1)],
       ["M", 3, sentence(2)],
@@ -148,9 +146,12 @@ describe("nothing moves on its own", () => {
       ["M", 3, sentence(4)],
       ["H", 5, sentence(5)],
     ]);
-    scenes[1].showSubject = "scattered kumiko strips on the workbench";
+    scenes[1].showSubject = "scattered wooden strips on the workbench";
     scenes[2].showSubject = "a propane torch flame moving across a cedar board";
     scenes[3].showSubject = "hands sanding the edge of a pine board";
+    scenes[1].selfMoving = false;
+    scenes[2].selfMoving = true;
+    scenes[3].selfMoving = false;
     // Enough stills around them that two moving shots stay within the video share.
     const more = film([["P", 20, sentence(9)]])[0];
     more.index = 6;
@@ -158,8 +159,9 @@ describe("nothing moves on its own", () => {
     const r = enforcePlanRules(scenes, params);
     expect(r.scenes[1].stillImage).toBe(true);
     expect(r.scenes[2].stillImage).toBe(false);
-    expect(r.scenes[3].stillImage).toBe(false);
-    expect(r.scenes[3].humanPresent).toBe(true);
+    expect(r.scenes[2].objectMotion).toBe(true);
+    // Hands never move in a video any more (2026-09-30): a photo of the host at work.
+    expect(r.scenes[3].stillImage).toBe(true);
   });
 
   it("turns the shortest clips back into stills when the film has too much video", () => {
@@ -194,17 +196,17 @@ describe("nothing moves on its own", () => {
 });
 
 describe("Ruth's job 178", () => {
-  it("turns stills of THINGS into hands shots when no still has hands, never a place", () => {
+  it("never invents hands or a camera move to make a video — a film with nothing moving by itself stays photos", () => {
     const rows: [("H" | "P" | "M"), number, string][] = [["H", 5, sentence(0)]];
     for (let k = 1; k <= 8; k++) rows.push(["P", 4, sentence(k)]);
     rows.push(["H", 5, sentence(9)]);
     const scenes = film(rows);
     scenes.forEach((s, k) => (s.showSubject = k === 2 ? "a craft booth table at the market" : `a spool of thread ${k}`));
     const r = enforcePlanRules(scenes, params);
-    expect(r.unresolved.filter(f => f.rule === 11)).toEqual([]);
-    const moving = r.scenes.filter(s => !s.hostPresent && !s.stillImage);
-    expect(moving.every(s => s.humanPresent && /^hands gently working with/.test(s.showSubject ?? ""))).toBe(true);
-    expect(r.scenes[2].stillImage).toBe(true); // the market booth stays a still
+    expect(r.scenes.filter(s => !s.hostPresent && !s.stillImage)).toEqual([]);
+    expect(r.scenes.some(s => /hands gently working/.test(s.showSubject ?? ""))).toBe(false);
+    // The shortfall is said, not faked.
+    expect(r.unresolved.some(f => f.rule === 11 && /only/.test(f.detail))).toBe(true);
   });
 
   it("gives back a crowded opening beat, never a paid one, to stay within the host minutes", () => {
@@ -463,8 +465,8 @@ describe("the plan respects the shot list's contact judgment", () => {
   });
 });
 
-describe("a hands video shows hands", () => {
-  it("makes a moving shot with no hands or person in it a photo (Ruth, job 239)", async () => {
+describe("no video has hands in it (2026-09-30)", () => {
+  it("makes every moving shot with hands or a person in it a photo — the hands stay in the photo", async () => {
     const { settleMotion } = await import("./planGate");
     const tin = {
       index: 1,
@@ -482,6 +484,27 @@ describe("a hands video shows hands", () => {
     } as StoryboardScene;
     settleMotion([tin, sewing]);
     expect(tin.stillImage).toBe(true);
-    expect(sewing.stillImage).toBe(false);
+    expect(sewing.stillImage).toBe(true);
+    expect(sewing.humanPresent).toBe(true);
+  });
+});
+
+describe("rule 15: a video only of a big thing", () => {
+  it("finds a video of something small and makes it a photo; a paid clip is left alone", () => {
+    const scenes = film([
+      ["H", 5, sentence(1)],
+      ["M", 4, sentence(2)],
+      ["M", 4, sentence(3)],
+      ["P", 30, sentence(4)],
+      ["H", 5, sentence(5)],
+    ]);
+    scenes[1].showSubject = "a jar of buttons on the shelf";
+    scenes[2].showSubject = "a jar of buttons, second view";
+    scenes[1].selfMoving = false;
+    scenes[2].selfMoving = false;
+    scenes[2].submits = [{ provider: "sixtynine_labs", at: "x", reason: "first", sec: 4 }] as any;
+    const r = enforcePlanRules(scenes, params);
+    expect(r.scenes[1].stillImage).toBe(true);
+    expect(r.scenes[2].stillImage).toBe(false);
   });
 });

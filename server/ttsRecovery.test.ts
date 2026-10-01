@@ -3,6 +3,7 @@ import type { TtsWaitState } from "@shared/types";
 import {
   classifyNarrationFailure,
   diedBeforeNarration,
+  isProviderOutage,
   NarrationFailedError,
   planNarrationFailure,
   runTtsWait,
@@ -278,6 +279,22 @@ describe("runTtsWait", () => {
     expect(calls.revoiced).toHaveLength(1);
   });
 
+  it("never blames the voice for a provider outage, even when another voice works", async () => {
+    // 2026-10-01: 69Labs' clone lane answered 503 VOICE_LOOKUP_FAILED for every account clone
+    // while library voices worked; three practice films were failed as "pick a different voice".
+    const lookupDown: ProbeResult = {
+      ok: false,
+      error:
+        "69Labs TTS is unavailable (503) after 5 attempts — Service temporarily unavailable. " +
+        "Try again shortly. (VOICE_LOOKUP_FAILED).",
+      othersWork: true,
+    };
+    const { deps, calls } = fakeDeps([lookupDown, lookupDown, lookupDown, { ok: true }]);
+    await runTtsWait(11, wait(), deps);
+    expect(calls.failed).toEqual([]);
+    expect(calls.revoiced).toHaveLength(1);
+  });
+
   it("does nothing more once the job was cancelled", async () => {
     const { deps, calls } = fakeDeps([{ ok: true }], {
       stillWaiting: async () => false,
@@ -337,5 +354,18 @@ describe("runTtsWait", () => {
     wakeTtsWaiter(8);
     await run;
     expect(a.calls.revoiced).toHaveLength(1);
+  });
+});
+
+describe("isProviderOutage", () => {
+  it("reads the provider being down", () => {
+    expect(isProviderOutage("69Labs TTS is unavailable (503) after 5 attempts — x")).toBe(true);
+    expect(isProviderOutage("Service temporarily unavailable. (VOICE_LOOKUP_FAILED)")).toBe(true);
+    expect(isProviderOutage("502 Bad Gateway")).toBe(true);
+  });
+  it("does not read a voice-side failure as an outage", () => {
+    expect(isProviderOutage("This job failed to complete. Please try again.")).toBe(false);
+    expect(isProviderOutage("TTS failed")).toBe(false);
+    expect(isProviderOutage(undefined)).toBe(false);
   });
 });

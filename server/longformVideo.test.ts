@@ -5811,7 +5811,7 @@ describe("buildUnifiedStoryboardPrompt", () => {
     // "aim for N% video / X stills per video beat" quota pushed the planner to inflate
     // `objectMotion` on beats that don't move, which is the failure this whole change removes.
     expect(systemPrompt).toContain(
-      'a cutaway may be "stillImage":false ONLY if it also sets "objectMotion":true or "humanPresent":true'
+      'a cutaway may be "stillImage":false ONLY if it also sets "objectMotion":true — and NEVER with hands'
     );
     expect(systemPrompt).toContain("that is a CEILING, not a quota to fill");
     expect(systemPrompt).not.toMatch(/stills? for every 1 video beat/);
@@ -6123,7 +6123,10 @@ describe("buildClipRequest host vs b-roll branching", () => {
     );
     expect(req.prompt).toContain(ANON_PERSON_SUFFIX);
     expect(req.prompt).toContain(NO_FIGURES_SUFFIX);
-    expect(req.prompt).toContain(AMATEUR_IPHONE_LOOK_PERSON);
+    // Hands never move in a video (2026-09-30): an old hands scene gets the locked base look — and
+    // the dispatcher makes it a photo before any clip is paid for (`settleVideoKind`).
+    expect(req.prompt).toContain(AMATEUR_IPHONE_LOOK);
+    expect(req.prompt).not.toContain(PERSON_MOTION_CAMERA_CLAUSE);
     expect(req.prompt).not.toContain(TALKING_HEAD_BACKGROUND);
   });
 
@@ -6334,17 +6337,18 @@ describe("no inert lane: clips only where something actually moves", () => {
     expect(objectPrompt).toContain(CAMERA_LOCK_CLAUSE);
     expect(objectPrompt).not.toContain(PERSON_MOTION_CAMERA_CLAUSE);
     expect(objectPrompt).not.toContain(OBJECT_MOTION_CAMERA_CLAUSE);
+    // Hands never move in a video any more: the old person lane settles on the locked base clause.
     const humanPrompt = buildClipRequest(humanScene, baseParams).prompt;
-    expect(humanPrompt).toContain(PERSON_MOTION_CAMERA_CLAUSE);
-    expect(humanPrompt).not.toContain(CAMERA_LOCK_CLAUSE);
+    expect(humanPrompt).toContain(CAMERA_LOCK_CLAUSE);
+    expect(humanPrompt).not.toContain(PERSON_MOTION_CAMERA_CLAUSE);
     const motionPrompt = buildClipRequest(motionScene, baseParams).prompt;
     expect(motionPrompt).toContain(OBJECT_MOTION_CAMERA_CLAUSE);
     expect(motionPrompt).not.toContain(PERSON_MOTION_CAMERA_CLAUSE);
-    // Precedence: hands carry the higher morph risk and the person clause already grants
-    // one task motion, so humanPresent wins outright.
+    // Hands no longer win: the moving thing's own clause, and the dispatcher makes a scene with a
+    // person in it a photo before any clip is paid for.
     const bothPrompt = buildClipRequest(bothScene, baseParams).prompt;
-    expect(bothPrompt).toContain(PERSON_MOTION_CAMERA_CLAUSE);
-    expect(bothPrompt).not.toContain(OBJECT_MOTION_CAMERA_CLAUSE);
+    expect(bothPrompt).toContain(OBJECT_MOTION_CAMERA_CLAUSE);
+    expect(bothPrompt).not.toContain(PERSON_MOTION_CAMERA_CLAUSE);
     const hostPrompt = buildClipRequest(hostScene, baseParams).prompt;
     expect(hostPrompt).not.toContain(CAMERA_LOCK_CLAUSE);
     expect(hostPrompt).not.toContain(PERSON_MOTION_CAMERA_CLAUSE);
@@ -6660,7 +6664,7 @@ describe("OBJECT_MOTION_CAMERA_CLAUSE (objectMotion b-roll clip variant)", () =>
       /no steam, smoke, or vapour rising/i
     );
     expect(OBJECT_MOTION_CAMERA_CLAUSE).toMatch(
-      /already in motion when the shot opens/i
+      /already in motion by itself when the shot opens/i
     );
     expect(OBJECT_MOTION_CAMERA_CLAUSE).toMatch(
       /keeps doing exactly that for the whole shot/i
@@ -6671,20 +6675,20 @@ describe("OBJECT_MOTION_CAMERA_CLAUSE (objectMotion b-roll clip variant)", () =>
     // The camera cannot move at all in this lane, so the whole anti-morph budget goes on the
     // motion itself — same place, same path, same rate.
     expect(OBJECT_MOTION_CAMERA_CLAUSE).toContain("locked tripod frame");
-    expect(OBJECT_MOTION_CAMERA_CLAUSE).toMatch(/The ONE thing in frame/);
-    expect(OBJECT_MOTION_CAMERA_CLAUSE).toMatch(
-      /same place, along the same path, and at the same rate/i
-    );
-    expect(OBJECT_MOTION_CAMERA_CLAUSE).toMatch(
-      /does not speed up, surge, spread, grow, or travel beyond/i
-    );
+    expect(OBJECT_MOTION_CAMERA_CLAUSE).toMatch(/The ONE thing in frame that is already in motion by itself/);
+    expect(OBJECT_MOTION_CAMERA_CLAUSE).toMatch(/along its own natural path, at the rate it starts/i);
+    expect(OBJECT_MOTION_CAMERA_CLAUSE).toMatch(/does not\s+surge, spread or grow/i);
+    // A car moves by itself too, on its own road; a door never does — a person opens it.
+    expect(OBJECT_MOTION_CAMERA_CLAUSE).toMatch(/a vehicle keeps to its road/);
+    expect(OBJECT_MOTION_CAMERA_CLAUSE).not.toMatch(/door/);
+    expect(OBJECT_MOTION_CAMERA_CLAUSE).toMatch(/No people and no hands/);
     expect(OBJECT_MOTION_CAMERA_CLAUSE).toMatch(/never changes into anything/i);
     // Everything that is NOT the subject stays put.
     expect(OBJECT_MOTION_CAMERA_CLAUSE).toMatch(
       /nothing else tips, rolls, slides, sways, or acts on its own/i
     );
     expect(OBJECT_MOTION_CAMERA_CLAUSE).toMatch(
-      /nothing enters or leaves the frame/i
+      /nothing else enters or leaves the frame/i
     );
   });
 
@@ -6851,9 +6855,9 @@ describe("buildClipChain (b-roll chain; grok-only, no cross-model fallback, no f
       // A fixed camera-lock clause reaches every clip via the amateur-iPhone look — that is
       // what keeps the b-roll near-still. A humanPresent scene takes the person-motion variant
       // (one small task motion, not frozen); the person-free aggressive retry drops to the base one.
-      expect(chain[0].prompt).toContain(PERSON_MOTION_CAMERA_CLAUSE);
-      expect(chain[0].prompt).toContain(AMATEUR_IPHONE_LOOK_PERSON);
-      expect(chain[0].prompt).not.toContain(CAMERA_LOCK_CLAUSE);
+      // Hands never move in a video (2026-09-30): the locked base clause, never the person one.
+      expect(chain[0].prompt).toContain(CAMERA_LOCK_CLAUSE);
+      expect(chain[0].prompt).not.toContain(PERSON_MOTION_CAMERA_CLAUSE);
       expect(chain[0].prompt).toContain(NO_BOOK_SUFFIX);
       expect(chain[0].prompt).toContain("worn wooden workbench");
       expect(chain[0].prompt).toContain(ANON_PERSON_SUFFIX);
@@ -9694,7 +9698,7 @@ describe("clip lane invariant: no motion flag ⇒ no video clip", () => {
       { index: 1, visualPrompt: "a can on a step", hostPresent: false },
       {
         index: 2,
-        visualPrompt: "water running from the can",
+        visualPrompt: "water running down the creek behind the house",
         hostPresent: false,
         objectMotion: true,
       },
@@ -9715,9 +9719,9 @@ describe("clip lane invariant: no motion flag ⇒ no video clip", () => {
     // Nothing moves ⇒ still, even though the planner left stillImage false. A grok clip of a
     // settled frame is the expensive lane rendering what the cheap one renders better.
     expect(flagless.stillImage).toBe(true);
-    // A motion flag earns the clip lane — object movement alone is enough, no person needed.
+    // A thing moving by itself earns the clip lane; hands never do (2026-09-30) — a photo.
     expect(motion.stillImage).toBe(false);
-    expect(hands.stillImage).toBe(false);
+    expect(hands.stillImage).toBe(true);
     // The gate only ever forces stills ON; an explicit still stays a still.
     expect(both.stillImage).toBe(true);
   });
@@ -10597,5 +10601,89 @@ describe("joinScanWindow — the QR part is one picture however long (Dale, job 
       ({ index: i, scriptText: `line ${i}`, qrHero: true, cta: true, ctaIndex: 0, audioDuration: sec }) as StoryboardScene;
     const r = joinScanWindow([card(1, 7.2), card(2, 9.2)], s => s.audioDuration ?? 0, () => 15);
     expect(r.scenes).toHaveLength(1);
+  });
+});
+
+describe("picture rules (2026-09-30): memory, the app screen, no brands", async () => {
+  const { buildStillPrompt, memoryClause, scrubLegibleWriting, APP_SCREEN_CLAUSE } = await import(
+    "./longformVideo"
+  );
+  it("tells the picture maker the reference is the SAME thing from another spot", () => {
+    const scene = {
+      index: 7,
+      narration: "n",
+      visualPrompt: "the wood stove from the other side of the room",
+      keyThing: "wood stove",
+      memoryRefUrls: ["https://r2/stove-1.png"],
+    } as StoryboardScene;
+    expect(memoryClause(scene)).toMatch(/The first reference image shows this exact wood stove/);
+    expect(memoryClause(scene)).toMatch(/never copy the reference's framing/);
+    expect(buildStillPrompt(scene)).toContain(memoryClause(scene));
+    // With the host in the shot, the last reference is named as the host.
+    const withHost = { ...scene, humanPresent: true, brollHostRef: "https://r2/host.jpg" };
+    expect(memoryClause(withHost)).toMatch(/last reference image is the host/);
+    // No memory, no clause.
+    expect(memoryClause({ ...scene, memoryRefUrls: undefined })).toBe("");
+  });
+
+  it("draws a buy-and-sell app with no brand — any marketplace, any wording", () => {
+    const show = scrubLegibleWriting("a phone showing Facebook Marketplace listings of dressers");
+    expect(show).not.toMatch(/facebook/i);
+    expect(show).toMatch(/a buy-and-sell app/);
+    expect(scrubLegibleWriting("her Etsy shop on the laptop")).toMatch(/a buy-and-sell app shop/);
+    const prompt = buildStillPrompt({ index: 1, narration: "n", visualPrompt: show } as StoryboardScene);
+    expect(prompt).toContain(APP_SCREEN_CLAUSE);
+    expect(APP_SCREEN_CLAUSE).toMatch(/no logo, no brand, no app name/);
+    // A picture with no app in it gets no screen clause.
+    expect(buildStillPrompt({ index: 1, narration: "n", visualPrompt: "a wood stove" } as StoryboardScene)).not.toContain(APP_SCREEN_CLAUSE);
+  });
+});
+
+describe("memory names every key thing in the picture", async () => {
+  const { memoryClause } = await import("./longformVideo");
+  it("asks for the same heater AND the same mattress", () => {
+    const clause = memoryClause({
+      index: 9,
+      narration: "n",
+      visualPrompt: "the heater by the mattress",
+      keyThing: "bedroom mattress",
+      otherKeyThings: ["space heater"],
+      memoryRefUrls: ["https://r2/m.png", "https://r2/h.png"],
+    } as StoryboardScene);
+    expect(clause).toMatch(/this exact bedroom mattress and space heater/);
+  });
+});
+
+describe("hands outside equipment, and writing only when said (2026-10-01)", async () => {
+  const { buildStillPrompt, withAllowedText, NO_READABLE_TEXT, ONE_BODY_CLAUSE, ANON_PERSON_SUFFIX, HANDS_OUTSIDE_CLAUSE } =
+    await import("./longformVideo");
+  it("keeps every hand outside a vise, clamp, machine or tool — host at work or bare hands", () => {
+    expect(HANDS_OUTSIDE_CLAUSE).toMatch(/OUTSIDE any vise, clamp, machine or tool body/);
+    expect(ONE_BODY_CLAUSE).toContain(HANDS_OUTSIDE_CLAUSE);
+    expect(ANON_PERSON_SUFFIX).toContain(HANDS_OUTSIDE_CLAUSE);
+  });
+  it("swaps the no-writing rule for the exact words the line says, and nothing else", () => {
+    const plain = buildStillPrompt({ index: 1, narration: "n", visualPrompt: "the alarm box on the shelf" } as StoryboardScene);
+    expect(plain).toContain(NO_READABLE_TEXT);
+    const said = buildStillPrompt({
+      index: 1,
+      narration: "n",
+      visualPrompt: "the alarm box on the shelf",
+      pictureText: "PHOTOELECTRIC",
+    } as StoryboardScene);
+    expect(said).not.toContain(NO_READABLE_TEXT);
+    expect(said).toMatch(/ONLY readable writing anywhere in the frame is exactly "PHOTOELECTRIC"/);
+    expect(withAllowedText("x", undefined)).toBe("x");
+  });
+});
+
+describe("blurred print swaps the no-writing rule for unreadable printing", async () => {
+  const { withAllowedText, NO_READABLE_TEXT, BLURRED_PRINT_CLAUSE } = await import("./longformVideo");
+  it("shows the printing, unreadable — and never when exact words are allowed", () => {
+    const p = `a box. ${NO_READABLE_TEXT}`;
+    expect(withAllowedText(p, undefined, true)).toContain(BLURRED_PRINT_CLAUSE);
+    expect(withAllowedText(p, undefined, true)).not.toContain(NO_READABLE_TEXT);
+    expect(withAllowedText(p, undefined, false)).toBe(p);
+    expect(withAllowedText(p, "HANDMADE", true)).toMatch(/exactly "HANDMADE"/);
   });
 });

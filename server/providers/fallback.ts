@@ -45,6 +45,8 @@ import { aireiterLaneEnabled } from "./aireiter";
 export async function generateStillWithFallback(input: {
   prompt: string;
   referenceImageUrl?: string;
+  /** Several reference images — when set, used instead of `referenceImageUrl`. */
+  referenceImageUrls?: string[];
   square?: boolean;
   apimartKey?: string | null;
 }): Promise<GenerationResult> {
@@ -70,9 +72,11 @@ export async function generateStillWithFallback(input: {
         model: "gpt-image-2", // APIMART hardcodes this internally; required by ImageGenerationParams
         aspectRatio: input.square ? "1:1" : "16:9",
         count: 1,
-        ...(input.referenceImageUrl
-          ? { imageUrls: [input.referenceImageUrl] }
-          : {}),
+        ...(input.referenceImageUrls?.length
+          ? { imageUrls: input.referenceImageUrls }
+          : input.referenceImageUrl
+            ? { imageUrls: [input.referenceImageUrl] }
+            : {}),
       });
       if (r?.success) return r;
       primaryError = r?.error ?? "APIMART returned no image";

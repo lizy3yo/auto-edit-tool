@@ -12,7 +12,8 @@
  *                                       shots.
  *  8. Host often                      — ≤40 s without the host in the first 3 min, ≤75 s after.
  *  9. Pictures don't linger           — a picture outside the CTA runs ≤6.5 s.
- * 11. Real video                      — ≥30% of cutaway time moves.
+ * 11. Real video                      — 10-25% of cutaway time moves.
+ * 15. A video only of what moves by itself (`judgeSelfMoving`) — never hands, never a person moving it.
  * (Rules 3-5 and 10 are judged on the pictures as they are made; 12 on the voice at voicing.)
  */
 import type { StoryboardScene, LongformInputParams } from "../shared/types";
@@ -40,11 +41,11 @@ import {
   pictureMaxSecAt,
   MOTION_MIN_SEC,
   MOVING_PICTURE_MAX_SEC,
-  MOVES_ON_ITS_OWN,
-  SHOWS_HANDS,
   contactToolWork,
   SHOT_MIN_SEC,
   splitPicture,
+  settleVideoKind,
+  videoKind,
 } from "./shotList";
 
 export type PlanFinding = { rule: number; scene?: number; detail: string };
@@ -232,6 +233,19 @@ export function checkPlan(
   if (motionShare > MOTION_SHARE_MAX)
     findings.push({ rule: 11, detail: `too much video: ${(motionShare * 100).toFixed(0)}% of cutaway time is moving` });
 
+  // 15. A video only of what moves by itself, never hands or a person (`videoKind`). A clip already
+  // paid for is not counted — it is kept.
+  for (const s of pictures) {
+    if (s.stillImage || s.submits?.length) continue;
+    const kind = videoKind(subjectOf(s), "object", {
+      person: !!s.humanPresent,
+      contact: !!s.toolContact,
+      selfMoving: s.selfMoving,
+    });
+    if (kind === "none" || s.cameraMove)
+      findings.push({ rule: 15, scene: s.index, detail: `video with nothing moving by itself, or with hands: "${subjectOf(s).slice(0, 60)}"` });
+  }
+
   const host = scenes.filter(s => s.hostPresent);
   return {
     findings,
@@ -279,7 +293,8 @@ export type PlanGateResult = {
 };
 
 /** Rules fixed first: the structure before the rhythm, the rhythm before the video share. */
-const RULE_ORDER = [1, 2, 6, 7, 9, 8, 11];
+const RULE_ORDER = [1, 2, 6, 7, 9, 8, 15, 11];
+
 /**
  * The shortest run of pictures between two host takes. Shorter, the host leaves and comes straight
  * back — a blink, not a cutaway (Norbert's 3-min test, job 232: host → 0.6 s "the drill" → 1.3 s
@@ -601,8 +616,8 @@ function splitLingering(
     p.audioUrl = undefined;
     if (!p.stillImage && p.audioDuration < MOTION_MIN_SEC) {
       p.stillImage = true;
-      p.humanPresent = undefined;
       p.objectMotion = undefined;
+      p.cameraMove = undefined;
     }
     prev = p.narrationEndSec;
   });
@@ -859,8 +874,14 @@ function hostGlimpse(
   return `host brought in for a glimpse at ${fmt(t[best.k] + (best.tFrom - start))}`;
 }
 
-/** Turn the longest still pictures into moving shots until the share is met. */
-function addMotion(scenes: StoryboardScene[]): number {
+/**
+ * Turn still pictures into moving shots until the share is met — only pictures whose own words
+ * describe something moving by itself (`videoKind`: smoke, fire, steam, water, a car, a door), the
+ * MAIN thing's first (2026-09-30, the operator: its moment is the one to make a video), then the
+ * longest. Never hands, a person, or a camera move — the old top-up that wrote "hands gently
+ * working with" a thing onto a still is gone ("never do the videos with fingers").
+ */
+function addMotion(scenes: StoryboardScene[], main?: string): number {
   const pics = scenes.filter(
     s => !s.hostPresent && !s.cta && !fixed(s) && !s.qrHero
   );
@@ -868,63 +889,34 @@ function addMotion(scenes: StoryboardScene[]): number {
   if (cut <= 0) return 0;
   let moving = pics.filter(s => !s.stillImage).reduce((a, s) => a + len(s), 0);
   let flipped = 0;
-  // Only a shot that CAN move for real: hands at work, or a thing that moves by itself. An
-  // ordinary object set moving slides around on its own, which is worse than a still.
+  // Only a picture JUDGED to move by itself (`judgeSelfMoving`) — never one merely not judged.
+  const kindOf = (s: StoryboardScene) =>
+    s.selfMoving === true
+      ? videoKind(subjectOf(s), "object", { person: !!s.humanPresent, contact: !!s.toolContact })
+      : "none";
+  const isMain = (s: StoryboardScene) => (main && s.keyThing === main ? 0 : 1);
   const stills = pics
     .filter(
       s =>
         s.stillImage &&
         plainPicture(s) &&
+        !s.listCut &&
         len(s) >= MOTION_MIN_SEC &&
         len(s) <= MOVING_PICTURE_MAX_SEC &&
-        !s.toolContact &&
-          !contactToolWork(subjectOf(s)) &&
-        (SHOWS_HANDS.test(subjectOf(s)) || MOVES_ON_ITS_OWN.test(subjectOf(s)))
+        kindOf(s) !== "none"
     )
-    .sort((a, b) => len(b) - len(a));
+    .sort((a, b) => isMain(a) - isMain(b) || len(b) - len(a));
   for (const s of stills) {
     if (moving / cut >= MOTION_SHARE_TARGET) break;
     if (!s.stillImage) continue; // already turned with its topic
-    const hands = SHOWS_HANDS.test(subjectOf(s));
-    // The whole topic moves together (one topic, one kind) — each view that a video can carry.
-    const topic = topicOf(scenes, s).filter(
-      t => t.stillImage && !t.submits?.length && len(t) <= MOVING_PICTURE_MAX_SEC
-    );
+    // The whole topic moves together (one topic, one kind) — only when every view of it may.
+    const topic = topicOf(scenes, s).filter(t => t.stillImage && !t.submits?.length);
+    if (topic.some(t => len(t) > MOVING_PICTURE_MAX_SEC || kindOf(t) === "none")) continue;
     for (const t of topic) {
       t.stillImage = false;
-      t.humanPresent = hands ? true : undefined;
-      t.objectMotion = hands ? undefined : true;
+      t.objectMotion = true;
+      t.cameraMove = undefined;
       moving += len(t);
-      flipped++;
-    }
-  }
-  // Still short (Ruth's plan had NO still with hands in it): a still of a THING becomes hands
-  // working with that thing — real movement with a hand on it, the thing still the centre. Never
-  // a place or a wide scene, where hands would be a guess.
-  if (moving / cut < MOTION_SHARE_TARGET) {
-    const things = pics
-      .filter(
-        s =>
-          s.stillImage &&
-          plainPicture(s) &&
-          !s.listCut &&
-          len(s) >= MOTION_MIN_SEC &&
-          len(s) <= MOVING_PICTURE_MAX_SEC &&
-          !s.toolContact &&
-          !contactToolWork(subjectOf(s)) &&
-          !NOT_A_THING.test(subjectOf(s))
-      )
-      .sort((a, b) => len(b) - len(a));
-    for (const s of things) {
-      if (moving / cut >= MOTION_SHARE_TARGET) break;
-      const subject = subjectOf(s);
-      s.showSubject = `hands gently working with ${subject}`;
-      s.visualPrompt = `Hands gently working with the subject, which stays the centre of the frame: ${s.visualPrompt ?? subject}`;
-      s.visualPromptSeed = undefined;
-      s.stillImage = false;
-      s.humanPresent = true;
-      s.objectMotion = undefined;
-      moving += len(s);
       flipped++;
     }
   }
@@ -935,15 +927,19 @@ function addMotion(scenes: StoryboardScene[]): number {
  * Turn moving shots back into stills — the shortest first, the ones whose movement matters least —
  * until the share is back to `MOTION_SHARE_TARGET`. A clip already paid for (`submits`) is kept.
  */
-function removeMotion(scenes: StoryboardScene[]): number {
+function removeMotion(scenes: StoryboardScene[], main?: string): number {
   const pics = scenes.filter(s => !s.hostPresent && !s.cta && !fixed(s) && !s.qrHero);
   const cut = pics.reduce((a, s) => a + len(s), 0);
   if (cut <= 0) return 0;
   let moving = pics.filter(s => !s.stillImage).reduce((a, s) => a + len(s), 0);
   let flipped = 0;
+  // The main thing's videos go last (its moment is the one worth a video), its FIRST one last of all;
+  // else the shortest first.
+  const firstMain = main ? scenes.find(s => s.keyThing === main && !s.hostPresent) : undefined;
+  const isMain = (s: StoryboardScene) => (s === firstMain ? 2 : main && s.keyThing === main ? 1 : 0);
   const clips = pics
     .filter(s => !s.stillImage && plainPicture(s) && !s.submits?.length)
-    .sort((a, b) => len(a) - len(b));
+    .sort((a, b) => isMain(a) - isMain(b) || len(a) - len(b));
   for (const s of clips) {
     if (moving / cut <= MOTION_SHARE_TARGET) break;
     if (s.stillImage) continue; // already turned with its topic
@@ -957,6 +953,7 @@ function removeMotion(scenes: StoryboardScene[]): number {
     for (const t of topic) {
       t.stillImage = true;
       t.objectMotion = undefined;
+      t.cameraMove = undefined;
       // A person stays in the picture (the host at work); only the movement goes.
     }
     moving -= sec;
@@ -991,64 +988,34 @@ export function capMovingLength(scenes: StoryboardScene[]): number {
     if (len(s) <= MOVING_PICTURE_MAX_SEC) continue;
     s.stillImage = true;
     s.objectMotion = undefined;
+    s.cameraMove = undefined;
     n++;
   }
   return n;
 }
 
-/** Subjects that are a place or a wide scene, not a thing a hand could work with. */
-const NOT_A_THING =
-  /\b(booth|stall|market|fair|store|shop|aisle|porch|patio|garden|field|yard|room|kitchen|house|home|church|hall|hospital|street|town|wall|shelf|shelves|display|crowd|people|wide|landscape|window)\b/i;
-
 const subjectOf = (s: StoryboardScene) => s.showSubject ?? s.visualPrompt ?? "";
 
 /**
- * Nothing moves on its own: a moving cutaway of an ordinary object becomes a hands shot when
- * hands are in it, else a still; a split screen's right half (never hands — it is person-free)
- * moves only when it shows a thing that moves by itself. Returns how many shots it changed.
+ * Every moving shot follows the video rule (`videoKind`): a moving cutaway with hands, a person, a
+ * tool biting in or a small or intricate subject becomes a photo (a person in it stays, as the host
+ * at work); one of a big thing gets its kind — moving by itself, or the camera moving. A split
+ * screen's right half (person-free) moves only when it shows a thing that moves by itself. A clip
+ * already paid for is left alone. Returns how many shots it changed.
  */
 export function settleMotion(scenes: StoryboardScene[]): number {
   let changed = 0;
   for (const s of scenes) {
     if (s.hostPresent) {
-      if (s.splitMotion && !MOVES_ON_ITS_OWN.test(String(s.splitVisual ?? ""))) {
+      if (s.splitMotion && s.splitSelfMoving !== true) {
         s.splitMotion = undefined;
         changed++;
       }
       continue;
     }
-    // A tool biting into material is a photo, however it became moving (`contactToolWork`).
-    if (
-      !s.stillImage &&
-      !s.submits?.length &&
-      (s.toolContact || contactToolWork(subjectOf(s)))
-    ) {
-      s.stillImage = true;
-      s.objectMotion = undefined;
-      changed++;
-      continue;
-    }
-    // A hands video must show hands or a person (Ruth's job 239: a moving coffee tin).
-    if (
-      !s.stillImage &&
-      !s.objectMotion &&
-      !s.submits?.length &&
-      !SHOWS_HANDS.test(subjectOf(s)) &&
-      !SHOWS_PERSON.test(subjectOf(s))
-    ) {
-      s.stillImage = true;
-      changed++;
-      continue;
-    }
-    if (s.stillImage || !s.objectMotion || MOVES_ON_ITS_OWN.test(subjectOf(s))) continue;
-    if (SHOWS_HANDS.test(subjectOf(s))) {
-      s.objectMotion = undefined;
-      s.humanPresent = true;
-    } else {
-      s.stillImage = true;
-      s.objectMotion = undefined;
-    }
-    changed++;
+    if (s.submits?.length) continue;
+    if (!s.stillImage && !s.toolContact && contactToolWork(subjectOf(s))) s.toolContact = true;
+    if (settleVideoKind(s)) changed++;
   }
   return changed;
 }
@@ -1071,9 +1038,10 @@ export function enforcePlanRules(
   const given = new Set<string>();
   const renumber = () => scenes.forEach((s, k) => (s.index = k + 1));
   const canHost = canHostFor(params);
+  const mainThing = params.keyThings?.find(k => k.main)?.name;
   const calmed = settleMotion(scenes);
   if (calmed) {
-    fixes.push(`${calmed} shot(s) that would have moved on their own made still or hands`);
+    fixes.push(`${calmed} moving shot(s) held to the video rule (only what moves by itself, never hands)`);
   }
   for (let round = 0; round < 200; round++) {
     const open = checkPlan(scenes, params)
@@ -1193,11 +1161,13 @@ export function enforcePlanRules(
       }
     } else if (f.rule === 8 && i >= 0) {
       did = fillHostGap(scenes, i, opts);
+    } else if (f.rule === 15 && s) {
+      if (settleVideoKind(s)) did = `video at scene ${s.index} made a photo (nothing moves by itself, or hands)`;
     } else if (f.rule === 11 && /too much video/.test(f.detail)) {
-      const n = removeMotion(scenes);
+      const n = removeMotion(scenes, mainThing);
       if (n) did = `${n} moving shot(s) made still pictures — fewer video clips`;
     } else if (f.rule === 11) {
-      const n = addMotion(scenes);
+      const n = addMotion(scenes, mainThing);
       if (n) did = `${n} still picture(s) made moving shots for the real-video share`;
     }
 

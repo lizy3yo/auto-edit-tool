@@ -35,19 +35,23 @@ import {
   joinHookPictures,
   joinSameContext,
   markSameContext,
-  pullListLeadIns,
   pictureMaxSecAt,
   planShotList,
   settleShots,
   SHOT_MIN_SEC,
   foldSnappedFlashes,
-  MOVES_ON_ITS_OWN,
   HOST_PART_MAX_SEC,
   wordsAfterName,
   spokenListItems,
+  parseKeyThings,
+  settleVideoKind,
+  videoKind,
+  fitPicturesToLines,
+  judgeSelfMoving,
 } from "./shotList";
+import { attachMemory, memoryPicturesFor, memoryView, pictureSettled } from "./pictureMemory";
 import { safeParseJSON, stripMarkdownFences } from "./jsonRepair";
-import { scanStillDefects } from "./overlayTextScan";
+import { scanSameThing, scanStillDefects } from "./overlayTextScan";
 import {
   deriveStyleBible,
   deriveVisualDirection,
@@ -64,9 +68,13 @@ import {
   DuplicateTTSError,
 } from "./ttsUnified";
 import { presignOwnBucketUrl, storagePut } from "./storage";
+import { voiceSpace69Labs } from "./tts69labs";
+import { applySpokenLists, findSpokenLists } from "./spokenLists";
+import { describeNamedLooks, namedLookClause } from "./namedLooks";
 import {
   classifyNarrationFailure,
   diedBeforeNarration,
+  isProviderOutage,
   NarrationFailedError,
   planNarrationFailure,
   runTtsWait,
@@ -1904,7 +1912,14 @@ export function parseStoryboard(
     // locks the camera and lets it move. Not gated on `stillImage`: `buildStillPrompt` serves
     // both the still lane and the b-roll keyframe, and a frame of water mid-stream beats a
     // settled puddle in either.
-    const objectMotion = !hostPresent && Boolean(s?.objectMotion);
+    // Moving only for a big thing that moves by itself (`videoKind`, 2026-09-30): never hands or
+    // a person, never anything small. Kept on a still too — the photo then catches the flame or
+    // the water mid-motion (`STILL_OBJECT_MOTION_CLAUSE`).
+    const objectMotion =
+      !hostPresent &&
+      Boolean(s?.objectMotion) &&
+      !humanPresent &&
+      videoKind(visualPrompt, "object") !== "none";
     // Image lane: a still + pan/zoom. Only valid on a non-host cutaway.
     //
     // Backstop for the planner rule in `buildUnifiedStoryboardPrompt`: a cutaway with NEITHER
@@ -1913,9 +1928,7 @@ export function parseStoryboard(
     // 10.4% of runtime before this gate. Establishes the invariant the clip lanes rely on:
     //   !hostPresent && !stillImage  ⟹  humanPresent || objectMotion
     // Declared after both flags on purpose — reading them above this line is a TDZ error.
-    const stillImage =
-      !hostPresent &&
-      (Boolean(s?.stillImage) || !(humanPresent || objectMotion));
+    const stillImage = !hostPresent && (Boolean(s?.stillImage) || !objectMotion);
     // CTA scene (Claude-marked). markCtaScenes later flags the full pitch span `cta:true`
     // (bridging short gaps) to drive the QR overlay; it no longer touches the register.
     const cta = Boolean(s?.cta);
@@ -2980,34 +2993,7 @@ export function enforceHostSplitMix(
     }
   }
 
-  // Right-panel register, over the FINAL split set: `share` of split runtime moves, the rest
-  // stay Ken Burns stills. Same converge-in-spreadOrder shape as the split assignment itself, so
-  // moving panels are spread across the film rather than clustered. Cleared first — a re-run
-  // (regenerate, resume) must not accumulate motion onto scenes that already have it.
-  for (const s of host) s.splitMotion = undefined;
-  let motionSeconds = 0;
-  if (pacing.splitScreen.motion.enabled && acc > 0) {
-    const motionTarget = pacing.splitScreen.motion.share * acc;
-    // Only a panel of something that moves by itself: the right half is person-free, and an
-    // ordinary object animated there slides around on its own (Hank's kumiko strips).
-    for (const s of spreadOrder(
-      scenes.filter(
-        s =>
-          s.hostPresent &&
-          s.splitVisual &&
-          MOVES_ON_ITS_OWN.test(String(s.splitVisual))
-      )
-    )) {
-      if (motionSeconds >= motionTarget) break;
-      if (
-        Math.abs(motionSeconds + dur(s) - motionTarget) <
-        Math.abs(motionSeconds - motionTarget)
-      ) {
-        s.splitMotion = true;
-        motionSeconds += dur(s);
-      }
-    }
-  }
+  const motionSeconds = assignSplitMotion(scenes, pacing);
 
   return {
     hostSeconds,
@@ -3015,6 +3001,36 @@ export function enforceHostSplitMix(
     aloneSeconds: hostSeconds - acc,
     motionSeconds,
   };
+}
+
+/**
+ * Pick which split panels MOVE: `share` of split runtime, spread through the film, and only a panel
+ * judged to show something moving by itself (`splitSelfMoving`, `judgeSelfMoving`) — the right half
+ * is person-free, and an ordinary thing animated there slides around on its own. Cleared first, so a
+ * re-run never accumulates motion. Called again once the panels have been judged. Returns the moving
+ * seconds. Pure apart from mutating `scenes`.
+ */
+export function assignSplitMotion(
+  scenes: StoryboardScene[],
+  pacing: LongformPacing = LEGACY_PACING
+): number {
+  const dur = (s: StoryboardScene) => s.audioDuration ?? 0;
+  const host = scenes.filter(s => s.hostPresent && !inMarkedCta(s));
+  for (const s of host) s.splitMotion = undefined;
+  const acc = host.filter(s => s.splitVisual).reduce((sum, s) => sum + dur(s), 0);
+  let motionSeconds = 0;
+  if (!pacing.splitScreen.motion.enabled || acc <= 0) return 0;
+  const motionTarget = pacing.splitScreen.motion.share * acc;
+  for (const s of spreadOrder(
+    scenes.filter(s => s.hostPresent && s.splitVisual && s.splitSelfMoving === true)
+  )) {
+    if (motionSeconds >= motionTarget) break;
+    if (Math.abs(motionSeconds + dur(s) - motionTarget) < Math.abs(motionSeconds - motionTarget)) {
+      s.splitMotion = true;
+      motionSeconds += dur(s);
+    }
+  }
+  return motionSeconds;
 }
 
 /**
@@ -3935,8 +3951,8 @@ export function buildUnifiedStoryboardPrompt(opts: {
       `read as static have real motion one step away: soil being crumbled rather than a mound of ` +
       `soil, steam rising off a mug rather than a mug, a saw part-way through the cut rather than ` +
       `a cut board, wind through a row rather than a row. Pick the moment the action is HAPPENING ` +
-      `and flag it honestly ("objectMotion" for the thing moving itself, "humanPresent" for hands ` +
-      `doing it). This does NOT relax the rule above: a beat that truly has nothing moving stays ` +
+      `and flag it honestly ("objectMotion" for a BIG thing moving itself; hands doing it are a ` +
+      `photo, never a video). This does NOT relax the rule above: a beat that truly has nothing moving stays ` +
       `"stillImage":true with both flags false, and a false flag is worse than a still.\n`
     : "";
   const openers = opts.openerHostScenes ?? 0;
@@ -4024,7 +4040,8 @@ export function buildUnifiedStoryboardPrompt(opts: {
     `- CUTAWAY LANE — STILLS BY DEFAULT, VIDEO ONLY WHERE SOMETHING MOVES: a non-host cutaway ` +
     `is either a STILL image with a gentle camera move (set "stillImage":true) or a ` +
     `VIDEO clip ("stillImage":false). THE RULE IS ABSOLUTE: a cutaway may be ` +
-    `"stillImage":false ONLY if it also sets "objectMotion":true or "humanPresent":true. ` +
+    `"stillImage":false ONLY if it also sets "objectMotion":true — and NEVER with hands, a person ` +
+    `or anything small or intricate in it: those are always photos. ` +
     `A beat with neither — a finished result, a landscape, a laid-out arrangement, a tool on a ` +
     `bench, anything that just sits there — is ALWAYS "stillImage":true. A video clip of nothing ` +
     `moving looks worse than the still and costs far more, so there is no reason to ask for one. ` +
@@ -4040,9 +4057,11 @@ export function buildUnifiedStoryboardPrompt(opts: {
     `("humanPresent":true — hands and forearms ONLY, framed so nothing above them is in ` +
     `shot) roughly once every 3–4 scenes, on beats about a manual action. Keep the rest ` +
     `free of any human part.\n` +
-    `- OBJECT MOTION (cutaways only): set "objectMotion":true on a cutaway whose subject MOVES ` +
-    `BY ITSELF while the shot runs — running or falling water, flames on kindling, liquid ` +
-    `pouring from a spout, a rolling boil, foliage moving in wind. On those scenes ONLY, write ` +
+    `- OBJECT MOTION (cutaways only): set "objectMotion":true on a cutaway whose BIG subject MOVES ` +
+    `BY ITSELF while the shot runs — fire in a stove or fireplace, running or falling water, ` +
+    `liquid pouring, smoke rising, trees moving in wind, a car driving by — never something a ` +
+    `person has to move. ` +
+    `Never anything small or intricate. On those scenes ONLY, write ` +
     `the visualPrompt as the motion IN PROGRESS, connected to its source (water streaming from ` +
     `the spout onto the bed, flames working along the kindling) instead of the settled frame. ` +
     `Leave "objectMotion":false ` +
@@ -5024,16 +5043,21 @@ export const PERSON_MOTION_CAMERA_CLAUSE =
 export const OBJECT_MOTION_CAMERA_CLAUSE =
   "The shot is a locked tripod frame, the camera fixed and " +
   "unmoving from the first frame to the last — braced or resting on a steady surface. " +
-  "The ONE thing in frame that is already in motion when the shot opens — the running " +
-  "water, the burning flame, the rising smoke, the pouring liquid, whatever the frame " +
-  "shows underway — simply keeps doing exactly that for the whole shot, at an ordinary " +
-  "real-time pace, in the same place, along the same path, and at the same rate it starts " +
-  "at. It does not speed up, surge, spread, grow, or travel beyond where the first frame " +
-  "already shows it, and it never changes into anything else. Everything else in frame is " +
-  "an inanimate object at rest and stays exactly where and as the first frame shows it, " +
-  "holding its exact position, solid shape, weight, and identity — nothing else tips, " +
-  "rolls, slides, sways, or acts on its own, and nothing enters or leaves the frame. The " +
-  "background and the surroundings stay exactly as the frame already shows them.";
+  "The ONE thing in frame that is already in motion by itself when the shot opens — the fire " +
+  "burning, the water running, the smoke rising, the liquid pouring, the car driving along its " +
+  "road, whatever the frame shows underway — simply keeps doing exactly " +
+  "that for the whole shot, at an ordinary real-time pace, along its own natural path, at the " +
+  "rate it starts at. A flame, smoke or water stays where the first frame shows it and does not " +
+  "surge, spread or grow; a vehicle keeps to its road. It never " +
+  "changes into anything else. Everything else in frame is an inanimate object at rest and stays " +
+  "exactly where and as the first frame shows it, holding its exact position, solid shape, " +
+  "weight, and identity — nothing else tips, rolls, slides, sways, or acts on its own, and " +
+  "nothing else enters or leaves the frame. The background and the surroundings stay exactly as " +
+  "the frame already shows them. No people and no hands anywhere in the shot.";
+
+/* A camera-move lane (the camera slowly closer to / back from a thing) was built and removed on
+ * 2026-09-30 at the operator's call ("no more b-roll zoom and zoom in"): a video is only ever
+ * something that moves by itself (`OBJECT_MOTION_CAMERA_CLAUSE`). */
 
 /**
  * STILL/KEYFRAME sibling of `OBJECT_MOTION_CAMERA_CLAUSE`. b-roll is image-to-video: the
@@ -5087,6 +5111,7 @@ const AMATEUR_LOOK_TAIL_OBJECT = amateurLookTail(OBJECT_MOTION_CAMERA_CLAUSE);
 const AMATEUR_LOOK_TAIL_OBJECT_STILL = amateurLookTail(
   STILL_OBJECT_MOTION_CLAUSE
 );
+
 
 export const AMATEUR_IPHONE_LOOK = amateurSettingClause() + AMATEUR_LOOK_TAIL;
 export const AMATEUR_IPHONE_LOOK_PERSON =
@@ -5145,8 +5170,8 @@ export function amateurIphoneLook(
  * clause is the safe register — it is what stills already use.
  */
 function brollLookMotion(scene: StoryboardScene): LookMotion {
-  if (scene.humanPresent) return "person";
   if (scene.objectMotion) return "object";
+  // Hands never move in a video any more (`videoKind`); an old hands scene settles.
   return "settle";
 }
 
@@ -5523,12 +5548,24 @@ export const TOOL_CONTACT_CLAUSE =
   "wood, a saw blade down in its cut, a chisel edge in the wood, scissor or cutter blades closing " +
   "on the cloth, a needle through the fabric — never held in the air beside the work.";
 
+/**
+ * Hands stay OUTSIDE equipment (2026-10-01, Hank's job 261 at 1:53: his hand drawn inside the bench
+ * vise's jaws while he drilled). Any tool or machine, any channel — a vise, a clamp, a sewing
+ * machine, a mixer, an engine.
+ */
+export const HANDS_OUTSIDE_CLAUSE =
+  "Hands, fingers and arms always stay OUTSIDE any vise, clamp, machine or tool body — they hold " +
+  "the work or the tool from outside and never pass into, through or behind it; a piece held in a " +
+  "vise or clamp is gripped by its jaws alone.";
+
 export const ANON_PERSON_SUFFIX =
   "The only part of a human visible anywhere in this shot is a pair of bare hands (and at " +
   "most the forearms) at the task — ordinary, unadorned adult hands. The hands " +
   "are already in frame and on the task from the very first frame of the shot — mid-task " +
   "from the start, never entering from off-screen, reaching in later, or appearing partway " +
   "through. " +
+  HANDS_OUTSIDE_CLAUSE +
+  " " +
   "NO face, NO head, NO hair, NO shoulders, NO torso, NO legs, and no full or partial figure " +
   "of a person is visible or reflected anywhere in the frame; the camera is framed close and " +
   "low enough that everything above the forearms is outside the shot. The hands belong to no " +
@@ -5605,6 +5642,8 @@ export const ONE_BODY_CLAUSE =
   "own shoulder to its hand, no extra arm, sleeve or hand anywhere in the frame. When the task " +
   "takes two hands, both of the host's hands are on it; when it takes one, the other rests " +
   "plainly in view or out of frame. " +
+  HANDS_OUTSIDE_CLAUSE +
+  " " +
   TOOL_CONTACT_CLAUSE;
 /** `NO_FIGURES_SUFFIX` for a shot that shows the host from behind: nobody ELSE, never a face. */
 export const NO_OTHER_FIGURES_SUFFIX =
@@ -5990,6 +6029,12 @@ const LEGIBLE_WRITING: [RegExp, string][] = [
     /\binitials?\b(?!\s+(?:stage|step|phase|cut|pass|layer|coat|round|row|idea|price|cost|attempt|batch|test|sketch))/gi,
     "decorative motif",
   ],
+  // A brand is never drawn (the operator, 2026-09-30: a marketplace-looking app, no Facebook logo).
+  [
+    /\b(?:facebook|fb)\s+marketplace\b|\b(?:craigslist|ebay|etsy|offerup|mercari|poshmark|kijiji|gumtree)\b/gi,
+    "a buy-and-sell app",
+  ],
+  [/\b(?:facebook|instagram|youtube|tiktok|pinterest|twitter|whatsapp)\b/gi, "a social app"],
   [/\bpersonali[sz]ation\b/gi, "decoration"],
   [/\bpersonali[sz]ed\b/gi, "decorated"],
   [/["“][^"”]{1,40}["”]/g, ""],
@@ -6140,8 +6185,100 @@ export function buildStillPrompt(
   // so a settled puddle here would force grok to invent the running water. Dropped on the
   // aggressive content-policy retry alongside the hands clause: the moving element is the likely
   // block, so the retry falls back to the settled base clause.
+  // A camera move's first frame is the thing at rest: the CAMERA moves, the thing does not.
   const motion = !aggressive && scene.objectMotion ? "objectStill" : "settle";
-  return `${visual}${angleSuffix}${personSuffix} ${amateurIphoneLook(subject, motion)} ${framing} ${noFigures} ${NO_BOOK_SUFFIX}`;
+  const memory = memoryClause(scene);
+  const app = APP_SCREEN.test(visual) ? ` ${APP_SCREEN_CLAUSE}` : "";
+  return withAllowedText(
+    `${visual}${namedLookClause(scene)}${angleSuffix}${personSuffix}${memory}${app} ${amateurIphoneLook(subject, motion)} ${framing} ${noFigures} ${NO_BOOK_SUFFIX}`,
+    scene.pictureText,
+    scene.blurPrint
+  );
+}
+
+/**
+ * Printing a line talks about without saying it (`scene.blurPrint`): shown, but blurred past
+ * reading — never a made-up word, and never hidden away.
+ */
+export const BLURRED_PRINT_CLAUSE =
+  "Any printing on it — a label, a date, the words on a box — is visible but soft and out of " +
+  "focus, the way a phone blurs small print: no word, letter or number anywhere in the frame can " +
+  "be read.";
+
+/**
+ * A picture whose line says the words printed on a thing (`scene.pictureText`) shows exactly those,
+ * and nothing else readable: the look's no-writing rule is swapped for it. Unchanged otherwise.
+ */
+export function withAllowedText(
+  prompt: string,
+  text: string | undefined,
+  blurPrint?: boolean
+): string {
+  if (!text) {
+    if (!blurPrint) return prompt;
+    return prompt.includes(NO_READABLE_TEXT)
+      ? prompt.split(NO_READABLE_TEXT).join(BLURRED_PRINT_CLAUSE)
+      : `${prompt} ${BLURRED_PRINT_CLAUSE}`;
+  }
+  const allowed =
+    `The ONLY readable writing anywhere in the frame is exactly "${text}", printed clearly on the ` +
+    `thing it belongs to and spelled exactly like that — no other words, letters, numbers, prices ` +
+    `or labels readable on any surface.`;
+  return prompt.includes(NO_READABLE_TEXT)
+    ? prompt.split(NO_READABLE_TEXT).join(allowed)
+    : `${prompt} ${allowed}`;
+}
+
+/** A picture about an app or selling online (after `scrubLegibleWriting` has taken the brand off). */
+const APP_SCREEN =
+  /\b(?:apps?|buy-and-sell|online (?:craft )?(?:shop|store)|website|phone screen|listings?)\b/i;
+/**
+ * The phone screen of an app shot (2026-09-30, the operator: "facebook marketplace in an app" — no
+ * logo, no brand): a plain buy-and-sell app, a grid of item photos, nothing readable.
+ */
+export const APP_SCREEN_CLAUSE =
+  "The phone's screen shows a simple buy-and-sell app: a grid of small photos of items for sale " +
+  "on plain soft-coloured panels — no logo, no brand, no app name, and no readable words, letters, " +
+  "numbers or prices anywhere on the screen.";
+
+/**
+ * PICTURE MEMORY: a picture of a key thing drawn from the earlier pictures of it
+ * (`server/pictureMemory.ts`) is told what those reference images are — the SAME thing, seen from
+ * another spot — and, when the host is in the shot, that the last reference is the host.
+ */
+export function memoryClause(scene: StoryboardScene): string {
+  const n = scene.memoryRefUrls?.length ?? 0;
+  if (!n || !scene.keyThing) return "";
+  // Every key thing in the picture is drawn from its own earlier picture (the heater AND the mattress).
+  const all = [scene.keyThing, ...(scene.otherKeyThings ?? [])];
+  const thing = all.length > 1 ? `${all.slice(0, -1).join(", ")} and ${all[all.length - 1]}` : all[0];
+  const which = n === 1 ? "The first reference image shows" : `The first ${n} reference images show`;
+  const host =
+    scene.humanPresent && scene.brollHostRef
+      ? " The last reference image is the host, only for how they look."
+      : "";
+  // The exact new camera position (`memoryViewFor`): told only "a different spot", the picture
+  // maker copied the reference's framing — Frederick's job 257 showed one framing four times.
+  const view = scene.memoryView
+    ? ` Camera position for THIS picture: ${scene.memoryView} — clearly different from the reference's.`
+    : "";
+  // A picture about ONE PART of the thing (`partOf`): the references are the whole thing, the
+  // picture is that part up close — Granny Ruth's job 281 drew "a churn dash here" and "a bear paw
+  // there" as two more copies of the whole folded quilt.
+  if (scene.partOf)
+    return (
+      ` ${which} the whole ${scene.partOf}. This picture is a CLOSE-UP of just the part of it the ` +
+      `words are about, filling the frame — never the whole ${scene.partOf} again. Keep the same ` +
+      `fabrics, colours, materials and wear as the reference.` +
+      host
+    );
+  return (
+    ` ${which} this exact ${thing}. Draw the SAME ${thing} — identical shape, size, colours, ` +
+    `materials and wear, in the same place — from a different camera position than the reference; ` +
+    `never copy the reference's framing.${view} If the words say it is further along (being made, ` +
+    `finished, changed), show the same piece at that later stage.` +
+    host
+  );
 }
 
 /**
@@ -8038,6 +8175,7 @@ export async function generateValidatedStill(
   genImage?: (i: {
     prompt: string;
     referenceImageUrl?: string;
+    referenceImageUrls?: string[];
     square?: boolean;
   }) => Promise<GenerationResult>,
   /** The whole-video subject — re-grounds the policy-safe rewrite + generic fallback on a block. */
@@ -8069,6 +8207,9 @@ export async function generateValidatedStill(
   // cannot draw it, and each re-roll is another image.
   let offSubjectRerolls = 0;
   let cleanRerolls = 0;
+  // A picture of a key thing that came back a DIFFERENT one: one re-roll from its memory, then
+  // it is drawn from words alone (`sameThingMisses`).
+  let sameThingMisses = 0;
   // A content-policy block can't be cleared by resubmitting the same prompt — escalate the
   // ladder instead: aggressively-softened variant, then a Claude policy-safe rewrite, then a
   // subject-anchored generic, then the guaranteed-generic visual. Escalations don't burn the
@@ -8123,10 +8264,18 @@ export async function generateValidatedStill(
       // A picture of the host at work (`markHostBroll`) is drawn from the host's own photo, so it
       // is their clothes and build; the defect checks below still run (they are skipped only for
       // a caller's own reference — the book cover).
+      // The caller's own reference (the book cover) stands alone. Otherwise a key thing's memory
+      // pictures come first (`memoryClause` names them by position), then the host photo.
+      const refs = referenceImageUrl
+        ? [referenceImageUrl]
+        : [
+            ...(scene.memoryRefUrls ?? []),
+            ...(scene.humanPresent && scene.brollHostRef ? [scene.brollHostRef] : []),
+          ];
       r = await genImage({
         prompt,
-        referenceImageUrl:
-          referenceImageUrl ?? (scene.humanPresent ? scene.brollHostRef : undefined),
+        referenceImageUrl: refs[0],
+        ...(refs.length > 1 ? { referenceImageUrls: refs } : {}),
         square,
       });
     } catch (e: any) {
@@ -8178,7 +8327,9 @@ export async function generateValidatedStill(
       const defects = await scanStillDefects(
         buffer,
         scene.showSubject,
-        scene.cta ? undefined : scene.scriptText ?? scene.narration
+        scene.cta ? undefined : scene.scriptText ?? scene.narration,
+        scene.pictureText,
+        scene.namedLook
       );
       if (defects.broken) {
         lastError = `Still image has broken geometry (${defects.what})`;
@@ -8227,6 +8378,27 @@ export async function generateValidatedStill(
             `(${defects.what}, attempt ${attempt}/${attempts}) → regenerating`
         );
         continue;
+      }
+      // PICTURE MEMORY: the same key thing as its memory picture, from another spot. A different
+      // one is drawn again from the memory once, then from words alone (the film never stops).
+      // SAMENESS BEATS THE ANGLE: one redraw from memory, then the memory-drawn picture is kept — a
+      // fallback drawn from words gave Frederick's job 259 a different heater and mattress.
+      // A close-up of one part (`partOf`) is not compared with its whole-thing memory: the check
+      // above already holds it to the part (and its exact look).
+      if (scene.keyThing && !scene.partOf && scene.memoryRefUrls?.length && sameThingMisses < 1) {
+        const same = await scanSameThing(scene.memoryRefUrls[0], buffer, scene.keyThing);
+        if (!same.same || same.copy) {
+          sameThingMisses++;
+          lastError = same.same
+            ? `Still image copies its memory picture's framing`
+            : `Still image shows a different ${scene.keyThing}`;
+          offSubjectFallback ??= { buffer, mimeType: r.mimeType };
+          console.warn(
+            `[Longform] scene ${scene.index} ${same.same ? "copies its memory picture of" : "shows a different"} ${scene.keyThing} (${same.what}) → ` +
+              "drawing it again from its memory"
+          );
+          continue;
+        }
       }
     }
     if (attempt > 1)
@@ -8303,6 +8475,13 @@ export async function generateSceneStillClip(
     // Stills render on OpenAI's official gpt-image-2, 16:9 (1:1 for a split-screen panel).
     // Validate + retry: a corrupt buffer would crash the Ken Burns ffmpeg and a lone image
     // failure would kill the scene with no resume, so we regenerate instead of failing.
+    // A key thing seen before is drawn from its earlier pictures (`server/pictureMemory.ts`). A
+    // split's panel (square) gets its memory from the caller, off the host scene.
+    if (!square) {
+      const memory = await memoryPicturesFor(scene);
+      scene.memoryRefUrls = memory.length ? memory : undefined;
+      scene.memoryView = memory.length ? memoryView(scene) : undefined;
+    }
     const { buffer, mimeType } = await generateValidatedStill(
       scene,
       4,
@@ -8319,6 +8498,8 @@ export async function generateSceneStillClip(
       buffer,
       mimeType || "image/jpeg"
     ));
+    scene.pictureUrl = imageUrl;
+    if (!square) pictureSettled(scene);
   }
   // ONE continuous Ken Burns clip for the whole narration: a single zoom (in/out by scene
   // index parity) stretched across the full duration. Long scenes read slow and gentle,
@@ -8404,6 +8585,12 @@ export async function generateBrollKeyframe(
 ): Promise<string> {
   // Keyframe stills render on OpenAI's official gpt-image-2, 16:9.
   // Same validate + retry as the still lane (my earlier 10s motion cap tripled these calls).
+  // A key thing seen before is drawn from its earlier pictures (`server/pictureMemory.ts`).
+  if (clipIdx === 0 && !scene.memoryRefUrls?.length) {
+    const memory = await memoryPicturesFor(scene);
+    scene.memoryRefUrls = memory.length ? memory : undefined;
+    scene.memoryView = memory.length ? memoryView(scene) : undefined;
+  }
   const { buffer: src, mimeType } = await generateValidatedStill(
     scene,
     4,
@@ -8419,6 +8606,10 @@ export async function generateBrollKeyframe(
   const ext = mime.includes("png") ? "png" : "jpg";
   const key = `longform/${jobId}/broll-kf-${scene.index}-${clipIdx}-${nanoid(6)}.${ext}`;
   const { url } = await storagePut(key, buf, mime);
+  if (clipIdx === 0) {
+    scene.pictureUrl = url;
+    pictureSettled(scene);
+  }
   return url;
 }
 
@@ -9267,6 +9458,15 @@ async function cutShotsOnWords(
           : `props list: none (call failed) — shots are written without it`
       );
     }
+    // The KEY THINGS the pictures remember, the MAIN one opening the film (`parseKeyThings`).
+    if (params.keyThings == null && params.continuitySheet) {
+      params.keyThings = parseKeyThings(params.continuitySheet);
+      const main = params.keyThings.find(k => k.main);
+      log(
+        `key things: ${params.keyThings.length}` +
+          (main ? ` — the video is about ${main.name}` : " — no main thing named")
+      );
+    }
     // The storyboard's own host beats (not the hook, the self-introduction, a CTA or the closing
     // shot) go to the shot list as PICTURES. Left as host, a beat the host plan later demotes
     // became one picture for its whole length — 13 s on Hank's film, ~50 per film. As pictures they
@@ -9305,6 +9505,11 @@ async function cutShotsOnWords(
     const leadIns = moveHostLeadIns(scenes, params.hostName);
     if (leadIns.length)
       log(`host lead-ins: ${leadIns.length} host take(s) now start on a sentence [${leadIns.join(", ")}]`);
+    // The lists are read off the whole script while the shot list is planned (`server/spokenLists.ts`).
+    const spokenListsP = findSpokenLists(
+      scenes.map(s => (s.scriptText ?? "").trim()).join(" "),
+      { log }
+    );
     const plans = await planShotList(scenes, {
       sheet: params.continuitySheet || undefined,
       hostName: params.hostName,
@@ -9407,14 +9612,25 @@ async function cutShotsOnWords(
       scrubLegibleWriting(t)
         .replace(/\b(?:cluttered|messy|jumbled|crowded|busy)\b/gi, "tidy")
         .replace(/\b(?:clutter|mess)\b/gi, "a few tools");
-    // A list that began at the end of the line before (a beat boundary fell inside it) gets its
-    // first item back as a picture of its own.
-    const leadItems = pullListLeadIns(next, params.videoSubject);
-    if (leadItems.moved > 0) {
-      next = leadItems.scenes;
+    // SPOKEN LISTS, found in whole sentences before the cut (`server/spokenLists.ts`): every item is
+    // exactly one picture wherever the storyboard cut, a list starting in a host line hands over at
+    // its first item, and a piece that is not an item of any list loses its list mark — Granny
+    // Ruth's job 281 split "the one | that paid me best" in two and kept "a straight-stitch
+    // machine" on camera because lists were judged one storyboard piece at a time.
+    const spoken = await spokenListsP;
+    const listCuts = applySpokenLists(next, spoken.lists, {
+      hostName: params.hostName,
+      main: params.keyThings?.find(k => k.main)?.name,
+    });
+    if (listCuts.applied || listCuts.cleared) {
+      next = listCuts.scenes;
       assignSceneRanges(next, words, masterDurationSec);
-      log(`list lead-ins: ${leadItems.moved} list item(s) at the end of a line moved into their list`);
     }
+    log(
+      `spoken lists: ${spoken.lists.length} found${spoken.fromModel ? "" : " (by sentence shape)"}, ` +
+        `${listCuts.applied} cut to one picture per item, ${listCuts.handed} handed over from the host, ` +
+        `${listCuts.cleared} piece(s) that were not list items unmarked`
+    );
     for (const s of next) {
       if (!s.showSubject) continue;
       s.showSubject = tidy(s.showSubject);
@@ -10491,6 +10707,25 @@ async function compositeSceneSplit(
 }
 
 /**
+ * A split's panel of a KEY THING is drawn from that thing's earlier pictures, like any picture of it
+ * (Hank's job 258: "that's the whole build" showed a square holder unlike the one just built). The
+ * memory is looked up on the HOST scene — the panel's own scene object is a copy.
+ */
+async function withSplitMemory(
+  host: StoryboardScene,
+  right: StoryboardScene
+): Promise<StoryboardScene> {
+  if (!host.keyThing) return right;
+  const memory = await memoryPicturesFor(host);
+  return {
+    ...right,
+    keyThing: host.keyThing,
+    memoryRefUrls: memory.length ? memory : undefined,
+    memoryView: memory.length ? memoryView(host) : undefined,
+  };
+}
+
+/**
  * Render the split-screen RIGHT panel: a gpt-image-2 still from `splitVisual`, Ken Burns'd to
  * the scene length — same still lane as every other still in the video, so the right panel
  * never hallucinates b-roll motion. Square, because the panel is a full-height 1:1 slot (see
@@ -10503,10 +10738,11 @@ async function renderSplitRightClip(
   params: LongformInputParams,
   apimartKey?: string | null
 ): Promise<string> {
+  const right = await withSplitMemory(scene, buildSplitRightScene(scene));
   const [rightUrl] = await Promise.race([
     generateSceneStillClip(
       jobId,
-      buildSplitRightScene(scene),
+      right,
       undefined,
       undefined,
       params.videoSubject,
@@ -10546,7 +10782,7 @@ async function renderSplitRightMotionClip(
   // so it submits fresh and can never be confused with the HOST scene's own in-flight render —
   // they share an `index`, and the host lane owns that scene's resume state.
   const right: StoryboardScene = {
-    ...buildSplitRightScene(scene),
+    ...(await withSplitMemory(scene, buildSplitRightScene(scene))),
     clipUrls: undefined,
     clipUrl: undefined,
     hostClipUrls: undefined,
@@ -11684,11 +11920,16 @@ export async function dispatchScenesByProvider(
             cancelAbandonedHostRender
           )
       ),
+      // Whatever becomes of a picture, anything drawn from it may go on (`pictureSettled`).
       mapPool(motion, Math.max(1, ENV.sixtynineVideoConcurrency), s =>
-        withSceneDeadline(s, SCENE_DEADLINE_MOTION_MS, processOne)
+        withSceneDeadline(s, SCENE_DEADLINE_MOTION_MS, processOne).finally(() =>
+          pictureSettled(s)
+        )
       ),
       mapPool(stills, Math.max(1, ENV.sixtynineImageConcurrency), s =>
-        withSceneDeadline(s, SCENE_DEADLINE_STILL_MS, processOne)
+        withSceneDeadline(s, SCENE_DEADLINE_STILL_MS, processOne).finally(() =>
+          pictureSettled(s)
+        )
       ),
     ]);
   } finally {
@@ -11712,6 +11953,12 @@ async function renderSceneClip(
   pollTimeoutMs?: number
 ): Promise<void> {
   scene.sceneStatus = "processing";
+  // The video rule, held at the last step before a clip is paid for — whatever path made this
+  // scene moving (`videoKind`: big things only, never hands, nothing small).
+  if (!scene.hostPresent && !scene.stillImage && settleVideoKind(scene) && scene.stillImage)
+    console.log(
+      `[Longform ${jobId}] scene ${scene.index}: video of something small or with hands — made a photo`
+    );
   // A HOST beat that fails for a reason of its own gets its automatic retry HERE, straight away
   // (`shared/hostRegenLimit.ts`: one, two on the start/CTAs/end) instead of settling on the
   // first failure. The render gate in `runChunkTasks` holds the count, so this loop can never
@@ -11743,9 +11990,9 @@ async function renderSceneClip(
         const g = await scanClipGlitch(
           scene.clipUrls[0],
           about,
-          // Fire, water, smoke: change is the point, with or without hands (a torch charring a
-          // board "grew" the burn on job 175 and was flagged).
-          !!scene.objectMotion || MOVES_ON_ITS_OWN.test(about ?? "")
+          // Something moving by itself: change is the point (a torch charring a board "grew" the
+          // burn on job 175 and was flagged).
+          scene.selfMoving ?? !!scene.objectMotion
         );
         if (g.glitch) {
           scene.motionGlitches = (scene.motionGlitches ?? 0) + 1;
@@ -11930,6 +12177,7 @@ async function resumeRenderingScenes(
 
   // Re-poll the remaining renders across both provider lanes concurrently (was a sequential
   // for-loop), so a backlog of slow host (HeyGen) resumes no longer blocks b-roll resumes.
+  attachMemory(scenes, toResume, params.keyThings);
   await dispatchScenesByProvider(
     toResume,
     lipsync,
@@ -13636,6 +13884,43 @@ async function runUnifiedPipeline(
     );
     console.log(`[Longform ${jobId}] folded shots the pause-snap squeezed under their floor`);
   }
+  // SAY IT, SHOW IT, checked: every picture read beside its line, line by line, and any that shows
+  // something the line is not about rewritten (`fitPicturesToLines` — Frederick's job 259 put the
+  // smoke alarm on "Fires don't all behave the same way"); a line that names something new partway
+  // through is split there, and the film's ranges are re-cut on the same words.
+  if (words && words.length > 0 && !(await isMockMode())) {
+    const fit = await fitPicturesToLines(scenes, {
+      sheet: params.continuitySheet,
+      keyThings: params.keyThings,
+      subject: params.videoSubject,
+    });
+    if (fit.fixed > 0)
+      console.log(`[Longform ${jobId}] ${fit.fixed} picture(s) rewritten to show what their line is about`);
+    if (fit.split > 0) {
+      scenes = fit.scenes;
+      sceneRanges = assignSceneRanges(
+        scenes,
+        words,
+        masterDurationSec,
+        silences,
+        shortSilences,
+        newAlignmentReport()
+      );
+      console.log(`[Longform ${jobId}] ${fit.split} new picture(s) where a line names something new`);
+    }
+    // NAMED THINGS, DRAWN EXACTLY (`server/namedLooks.ts`): every specific named kind a picture
+    // shows gets its exact look, and a picture about one part of a key thing is a close-up of that
+    // part — Granny Ruth's job 281 drew three named quilt blocks as copies of the whole quilt.
+    const named = await describeNamedLooks(scenes, {
+      keyThings: params.keyThings,
+      subject: params.videoSubject,
+    });
+    if (named.pictures > 0)
+      console.log(
+        `[Longform ${jobId}] named things: ${named.kinds} kind(s) given their exact look, ` +
+          `${named.pictures} picture(s) updated, ${named.parts} close-up(s) of one part`
+      );
+  }
   // The last gate before money is spent. A stretch the aligner could not make sense of even by
   // word count means the narration and the script disagree there (minutes of audio for a line of
   // text, or the reverse) — every clip rendered over it would be the wrong length. Job 94 shipped
@@ -14126,6 +14411,16 @@ async function runUnifiedPipeline(
   // the host gets a clean check-in (paid for by a spare one elsewhere when the host minutes are
   // spent), too little real video turns the longest stills into moving shots. Whatever cannot be
   // fixed is named on the job; the film still renders.
+  // Does something in each picture and split panel move by itself? Judged on each one's own words
+  // (`judgeSelfMoving`), not from a word list — then the split panels that move are picked again.
+  if (!(await isMockMode())) {
+    const judged = await judgeSelfMoving(scenes);
+    const splitMoving = assignSplitMotion(scenes, pacing);
+    console.log(
+      `[Longform ${jobId}] moves by itself: ${judged.moving} of ${judged.judged} picture(s)` +
+        (splitMoving > 0 ? `; ${splitMoving.toFixed(0)} s of moving split panels` : "")
+    );
+  }
   const hostsBeforeGate = new Set(scenes.filter(s => s.hostPresent));
   const gate = enforcePlanRules(scenes, params, {
     budgetSec: hostBudget?.budgetSec,
@@ -14272,6 +14567,7 @@ async function runUnifiedPipeline(
     // Two provider lanes run concurrently: host (HeyGen) at heygenConcurrency, b-roll (69Labs)
     // at sixtynineVideoConcurrency. Feeds both providers to capacity instead of one shared pool
     // where host scenes blocking on HeyGen starve idle 69Labs capacity.
+    attachMemory(scenes, scenes, params.keyThings);
     await dispatchScenesByProvider(
       scenes,
       lipsync,
@@ -14622,7 +14918,14 @@ async function probeNarrationVoice(jobId: number): Promise<ProbeResult> {
     if (classifyNarrationFailure({ name: own.name, message: own.error }).kind !== "wait") {
       return own;
     }
-    const others = Array.from(
+    // The provider says it is down: nothing to learn from another voice, and nothing to spend.
+    if (isProviderOutage(own.error)) return { ...own, othersWork: false };
+    // Compare only voices of the SAME space: 69Labs' clone lane and library lane fail
+    // independently, so a library voice working says nothing about a clone (2026-10-01).
+    const spaceOf = (id: string) =>
+      providerType === "sixtynine_labs" ? voiceSpace69Labs(apiKey, id) : Promise.resolve("library");
+    const ownSpace = await spaceOf(voiceId);
+    const candidates = Array.from(
       new Set(
         (await getAllChannelConfigs())
           .map(c =>
@@ -14630,16 +14933,21 @@ async function probeNarrationVoice(jobId: number): Promise<ProbeResult> {
           )
           .filter((v): v is string => !!v && v !== voiceId)
       )
-    ).slice(0, 2);
+    );
+    const others: string[] = [];
+    for (const v of candidates) {
+      if (others.length >= 2) break;
+      if ((await spaceOf(v)) === ownSpace) others.push(v);
+    }
     for (const other of others) {
       if ((await voiceCheck(providerType, apiKey, other, params)).ok) {
         console.warn(
-          `[Longform ${jobId}] voice check: ${voiceId} failed while ${other} worked — ` +
-            `the provider is up, this voice is not`
+          `[Longform ${jobId}] voice check: ${voiceId} failed while ${other} (same kind of voice) ` +
+            `worked — the provider is up, this voice is not`
         );
         return {
           ...own,
-          error: `${own.error} — another channel's voice worked at the same time (voice ${voiceId})`,
+          error: `${own.error} — another channel's voice of the same kind worked at the same time (voice ${other})`,
           othersWork: true,
         };
       }
@@ -15988,6 +16296,8 @@ async function renderSceneClipInPlace(
    */
   keepPriorOnLimit = true
 ): Promise<void> {
+  // A regenerated picture of a key thing is still drawn from its earlier pictures.
+  attachMemory(scenes, [scene], params.keyThings);
   // What this beat shows now. On an operator regenerate it is TAKE 1: put back if the new
   // render does not come through (so a failed or refused regenerate leaves the film as it was
   // instead of turning a good host shot to b-roll), and kept beside the new take if it does
@@ -18782,6 +19092,7 @@ async function retryFailedScenesLocked(
     // sequential for-loop that submitted only one scene's chunks at a time and blocked ~25min
     // on its polls before touching the next scene), mirroring resumeRenderingScenes. Host
     // scenes now fan out up to ENV.heygenConcurrency instead of one-at-a-time.
+    attachMemory(scenes, renderable, params.keyThings);
     await dispatchScenesByProvider(
       renderable,
       lipsync,

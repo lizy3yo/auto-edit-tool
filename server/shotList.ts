@@ -19,7 +19,7 @@
  * Not touched: the CTA (its host → book → host → big QR layout is fixed), the cover, operator
  * assets, split screens and the cold open (the hook stays on camera).
  */
-import type { StoryboardScene } from "@shared/types";
+import type { KeyThing, StoryboardScene } from "@shared/types";
 import { invokeClaude } from "./claude";
 import { safeParseJSON } from "./jsonRepair";
 import { SHOWS_PERSON } from "./hostLook";
@@ -32,9 +32,11 @@ export const SHOT_MIN_SEC = 1.2;
  * the operator asked for undone. 0.4 s is ten frames: a quick cut, still readable as a thing.
  * (2026-09-27: a slight pause after each item, and a reading wait after short lines, were built
  * and tried the same day, then dropped at the operator's call — each item keeps its own picture at
- * the pace it is spoken.)
+ * the pace it is spoken.) Since 2026-09-30
+ * the floor is 0.25 s — a blink, six frames: Hank's "a saw, a drill," (0.9 s for both) was joined
+ * into one picture at 0.4, which the operator had already rejected. Each item keeps its picture.
  */
-export const LIST_SHOT_MIN_SEC = 0.4;
+export const LIST_SHOT_MIN_SEC = 0.25;
 /**
  * In the hook (everything before the host introduces themself) a picture is joined with its
  * neighbour until it runs at least this long — Mae's and Hannah's first 10 s went through five
@@ -84,8 +86,21 @@ const SHOT_BATCH = 12;
 const SHOT_CONCURRENCY = 4;
 const SHOT_MAX_TOKENS = 32000;
 const SHOT_LIST_MODEL = () => process.env.SHOT_LIST_MODEL || "claude-sonnet-5";
+/**
+ * The line check (`fitPicturesToLines`) runs on Opus: on the same Frederick storyboard Sonnet found
+ * "the kind of fire that starts while the house is asleep" 1 time in 3, Opus 3 in 3 (2026-10-01). One
+ * call per ~80 lines, the film's last word on what each picture shows before money is spent.
+ */
+const FIT_MODEL = () => process.env.FIT_MODEL || "claude-opus-5-5";
 
-export type ShotMotion = "hands" | "object" | "none";
+/**
+ * What a moving shot is (2026-09-30, the operator): "object" — something in the moment the words
+ * describe moves BY ITSELF (smoke rising off a lit incense stick, fire, steam, water, a car driving
+ * by, a door opening), everything else in the frame holding still; "none" — a photo with the slow
+ * zoom. Never hands ("never do the videos with fingers"), and no camera moves ("no more b-roll
+ * zoom and zoom in" — the camera-move kind was built and removed the same day).
+ */
+export type ShotMotion = "object" | "none";
 
 export interface PlannedShot {
   /** The first 1–4 words of the shot, verbatim from the beat's text. */
@@ -93,12 +108,16 @@ export interface PlannedShot {
   /** What the picture shows — literal, concrete. */
   show: string;
   motion?: ShotMotion;
+  /** The KEY THING (props list name) this shot shows, when it shows one — its pictures share a look. */
+  thing?: string;
+  /** The exact words or number the picture must show printed, when the line itself says them. */
+  text?: string;
+  /** "blurred": the line talks about printing on the thing without saying it — shown unreadable. */
+  print?: "blurred";
   /** One item of a spoken list. */
   list?: boolean;
   /** Shows the same thing as the shot before it — the context did not change. */
   same?: boolean;
-  /** A still that stays completely still (no slow zoom). */
-  still?: boolean;
   /** A tool cuts into, goes through or joins the material in this shot — always a photo. */
   contact?: boolean;
   /** Someone has to be holding or using the thing in this shot — the host's hands are in it. */
@@ -243,22 +262,13 @@ const ANGLES: NonNullable<StoryboardScene["shotAngle"]>[] = [
   "low",
 ];
 
-/**
- * Things that move BY THEMSELVES in real life — the only objects a video may set moving with no
- * hand on them. Anything else, animated, slides and shuffles on its own (Hank's kumiko strips
- * crept across the bench in a split panel), which no viewer believes.
- */
-export const MOVES_ON_ITS_OWN =
-  /\b(flames?|fire|burning|torch|candles?|smoke|smoking|steam|steaming|water|pour(?:s|ing|ed)?|drip(?:s|ping)?|boil(?:s|ing)?|simmer(?:s|ing)?|splash\w*|rain|wind|breeze|sparks?|ash|embers?|flicker\w*|spinning|spins|lathe|fan|flowing|bubbl\w*|running (?:sewing )?machine|machine needle)\b/i;
-/** The shot shows hands (or fingers) — the other thing that may move in a video. */
-export const SHOWS_HANDS = /\b(hands?|fingers?|thumbs?)\b/i;
-
+/** The shot shows hands (or fingers) — never allowed to move in a video. */
+export const SHOWS_HANDS = /\b(hands?|fingers?|thumbs?|palms?|wrists?)\b/i;
 /**
  * Work where a tool must BITE into the material — drilling, sawing, driving a screw, hammering,
  * chiselling, cutting, carving. The video model cannot fake that contact: Norbert's 3-min test
  * (job 236, 2:19) drilled for 10 s with the bit never going in and splintering appearing somewhere
- * else. Gentle hand work (sewing, crocheting, sanding, wiping, folding) comes out fine and stays
- * allowed. Such a shot is a PHOTO, never a video. "Cutting board" is a thing, not the work.
+ * else. Such a shot is a PHOTO, never a video. "Cutting board" is a thing, not the work.
  */
 const CONTACT_TOOL_WORK =
   /\b(drill(?:ing|ed)|drills? (?:a |the |into |through )|saw(?:ing|ed)|saws? (?:into|through)|hammer(?:ing|ed)|hammers? (?:a |the |in )|screw(?:ing|ed)|driv(?:e|es|ing) (?:a |the |in )?(?:screws?|nails?)|nail(?:ing|ed)|chisel(?:ing|ed|ling|led)|chisels? (?:into|out)|cut(?:ting|s (?:into|through))|slic(?:es|ed|ing)|chop(?:s|ped|ping)|carv(?:es|ed|ing)|whittl(?:es|ed|ing)|grind(?:s|ing)|planing)\b/i;
@@ -267,25 +277,99 @@ export const contactToolWork = (show: string): boolean =>
   CONTACT_TOOL_WORK.test(show.replace(/\bcutting (?:boards?|mats?|tables?)\b/gi, "board"));
 
 /**
- * What may move in a shot of `show`: hands doing the work, or a thing that moves by itself —
- * never an ordinary object on its own. An "object" shot of something that does not move by
- * itself becomes a hands shot when hands are in it, else a still.
+ * What kind of VIDEO a shot of `show` may be — the one rule every path that makes a moving shot
+ * goes through (the shot list, the context groups, the storyboard parser, the plan gate's top-up
+ * and fixes, and the dispatcher right before a clip is paid for). A video is only ever of something
+ * in the moment that MOVES BY ITSELF, with no person moving it — judged per picture on its own
+ * description (`judgeSelfMoving`, `selfMoving`), not from a list of words: a list let "a sliding
+ * door" and "a smoke alarm" through, and anything a person has to move (a door, a drawer, a tool)
+ * never counts. Before that judgement a planner's request stands provisionally. Never hands, a
+ * person, or a tool biting in. There is no camera-move kind (2026-09-30, the operator: "no more
+ * b-roll zoom and zoom in"): an old "camera" request is read as "object". Pure.
  */
-export function safeMotion(
+export function videoKind(
   show: string,
-  wanted: "hands" | "object" | "none" | undefined
-): "hands" | "object" | "none" {
-  // A tool biting into material is a photo: the video model drills air (see `contactToolWork`).
-  if (wanted && wanted !== "none" && contactToolWork(show)) return "none";
-  // A "hands" shot must SHOW hands or a person: Ruth's job 239 got a moving clip of "the dented
-  // coffee tin … next to a wastebasket" because the planner said "hands" and nothing checked.
-  if (wanted === "hands" && !SHOWS_HANDS.test(show) && !SHOWS_PERSON.test(show)) return "none";
-  if (wanted === "object")
-    return MOVES_ON_ITS_OWN.test(show) ? "object" : SHOWS_HANDS.test(show) ? "hands" : "none";
-  return wanted ?? "none";
+  wanted: "camera" | "object" | "hands" | "none" | undefined,
+  opts: { person?: boolean; contact?: boolean; selfMoving?: boolean } = {}
+): ShotMotion {
+  if (!wanted || wanted === "none" || wanted === "hands") return "none";
+  if (
+    opts.person ||
+    opts.contact ||
+    contactToolWork(show) ||
+    SHOWS_HANDS.test(show) ||
+    SHOWS_PERSON.test(show)
+  )
+    return "none";
+  return opts.selfMoving === false ? "none" : "object";
 }
 
-const firstWords = (text: string, n: number) =>
+/**
+ * The THING a shot description shows — the words before where it is or what it is doing ("the wood
+ * stove" in "the wood stove in the corner of the living room"). Pure.
+ */
+export function shownThing(show: string): string {
+  const m =
+    /\s(?:on|in|at|beside|by|next to|near|under|against|inside|with|from|sitting|resting|standing|lying|leaning|hanging|set|placed|propped|atop|across|behind|between)\b|[,;—–(]/i.exec(
+      show
+    );
+  return (m ? show.slice(0, m.index) : show).trim();
+}
+
+/** The earlier name of `videoKind`. */
+export const safeMotion = (
+  show: string,
+  wanted: "camera" | "object" | "hands" | "none" | undefined
+): ShotMotion => videoKind(show, wanted);
+
+/**
+ * A picture description that is about printing on a thing — a label, a date, the words on a box, a
+ * tag, a stamp — which is then SHOWN, blurred and unreadable, unless its line says the words. Pure.
+ */
+export function blurredPrint(show: string | undefined): boolean {
+  return /\b(labels?|printed|printing|print|dates?|tags?|lettering|writing|stamp(?:ed)?|markings?|specs|specifications)\b/i.test(
+    show ?? ""
+  );
+}
+
+/**
+ * The writing a picture may show: `text` exactly as the planner gave it, kept only when every one of
+ * its words is in the spoken `line` — so nothing the script does not say can ever be printed in a
+ * picture ("look for the date" with no date said leaves no date to print). Undefined otherwise. Pure.
+ */
+export function saidText(text: string | undefined, line: string): string | undefined {
+  const t = (text ?? "").trim().replace(/^["'“”]+|["'“”]+$/g, "").slice(0, 60);
+  const want = tokenSpans(t).map(x => x.tok);
+  if (!want.length || want.length > 6) return undefined;
+  const have = new Set(tokenSpans(line).map(x => x.tok));
+  return want.every(w => have.has(w)) ? t : undefined;
+}
+
+/**
+ * Hold one cutaway to the video rule: a moving shot that may not move becomes a photo (a person in
+ * it stays in the photo — the host at work, from behind), one that may gets its kind. Returns
+ * whether anything changed. The caller decides whether a clip already paid for is left alone.
+ */
+export function settleVideoKind(s: StoryboardScene): boolean {
+  if (s.hostPresent || s.stillImage) return false;
+  const kind = videoKind(s.showSubject ?? s.visualPrompt ?? "", "object", {
+    person: !!s.humanPresent,
+    contact: !!s.toolContact,
+    selfMoving: s.selfMoving,
+  });
+  if (kind === "none") {
+    s.stillImage = true;
+    s.objectMotion = undefined;
+    s.cameraMove = undefined;
+    return true;
+  }
+  if (s.objectMotion === true && !s.cameraMove) return false;
+  s.objectMotion = true;
+  s.cameraMove = undefined;
+  return true;
+}
+
+export const firstWords = (text: string, n: number) =>
   text.trim().split(/\s+/).slice(0, n).join(" ");
 
 /** Everything a fresh piece of a beat must NOT inherit: its audio and any render of the parent. */
@@ -318,7 +402,7 @@ export const OTHER_VIEWS = [
   ", seen from the other side",
 ] as const;
 
-const FRESH = {
+export const FRESH = {
   sceneStatus: "pending",
   audioUrl: undefined,
   audioDuration: undefined,
@@ -348,11 +432,14 @@ function hostPiece(
 function picturePiece(
   parent: StoryboardScene,
   text: string,
-  shot: Pick<PlannedShot, "show" | "motion" | "list" | "same" | "still" | "contact" | "held">,
+  shot: Pick<PlannedShot, "show" | "motion" | "list" | "same" | "contact" | "held" | "thing" | "text" | "print">,
   k: number
 ): StoryboardScene {
-  // A tool going into the material is a photo, whatever the motion asked for (see `toolContact`).
-  const motion = shot.contact ? "none" : safeMotion(shot.show, shot.motion);
+  // A video only of a big thing (`videoKind`): never hands, a held thing, or a tool going in.
+  const motion = videoKind(shot.show, shot.motion, {
+    person: !!shot.held,
+    contact: !!shot.contact,
+  });
   const moving = motion !== "none";
   return {
     ...parent,
@@ -368,8 +455,15 @@ function picturePiece(
     // Someone holding or using the thing — moving or still — has hands in the picture, so a tool
     // is never drawn held up by nobody (Norbert's job 238: a drill "held near the doorframe"
     // floated). A person in a still is the host from behind (`markHostBroll`).
-    humanPresent: motion === "hands" || shot.held ? true : undefined,
-    objectMotion: motion === "object" ? true : undefined,
+    // Hands in the photo, or someone holding the thing: the host at work (`markHostBroll`).
+    humanPresent: shot.held || SHOWS_PERSON.test(shot.show) ? true : undefined,
+    objectMotion: moving ? true : undefined,
+    cameraMove: undefined,
+    keyThing: shot.thing || undefined,
+    // Writing only when this piece's own words say it, exactly (`saidText`); printing it only talks
+    // about is shown blurred (`blurredPrint`).
+    pictureText: saidText(shot.text, text),
+    blurPrint: !saidText(shot.text, text) && (shot.print === "blurred" || blurredPrint(shot.show)) ? true : undefined,
     toolContact: shot.contact || contactToolWork(shot.show) ? true : undefined,
     visualPrompt: shot.show,
     visualPromptSeed: undefined,
@@ -377,7 +471,7 @@ function picturePiece(
     showSubject: shot.show,
     listCut: shot.list ? true : undefined,
     sameShot: shot.same && !shot.list ? true : undefined,
-    // Whether a still zooms is decided by its LENGTH at render (`stillZooms`), not by the planner.
+    // Every still zooms slowly (the operator, 2026-09-30: "no static images").
     staticShot: undefined,
     // Only the piece that starts the beat can be where the host comes in.
     hostCandidate: k === 0 ? parent.hostCandidate : undefined,
@@ -500,8 +594,133 @@ export function applyShotPlan(
       );
     });
   }
-  out.forEach((s, i) => (s.index = i + 1));
-  return { scenes: out, originals };
+  // A spoken list is recognised from its words, not only from the planner's `list` mark: Hank's job
+  // 268 had "and a stack of sandpaper," marked and "a saw," not, and the unmarked item folded away.
+  // A picture the planner gave two items ("a saw, a drill,") becomes one picture per item.
+  const listed = splitListPieces(out);
+  markListPieces(listed);
+  listed.forEach((s, i) => (s.index = i + 1));
+  return { scenes: listed, originals };
+}
+
+/**
+ * A picture whose words are two or more list items ("a saw, a drill,") becomes one picture per item,
+ * each showing its own item in the place the planner's picture was ("… on the workbench"). Only a
+ * non-host picture whose every comma piece reads as a list item. Pure — returns a new list.
+ */
+export function splitListPieces(scenes: StoryboardScene[]): StoryboardScene[] {
+  const out: StoryboardScene[] = [];
+  for (const s of scenes) {
+    const text = (s.scriptText ?? "").trim();
+    const items = text.match(/[^,;]+[,;]?/g)?.map(x => x.trim()).filter(Boolean) ?? [];
+    if (s.hostPresent || items.length < 2 || !items.every(anyListItem)) {
+      out.push(s);
+      continue;
+    }
+    const where = /\b(?:on|in|at|beside|by|near) the [^,]+$/i.exec(s.showSubject ?? "")?.[0];
+    items.forEach((item, k) => {
+      const bare = item.replace(/^(?:and|or|plus|maybe|then|also)\s+/i, "").replace(/[,.;]$/, "");
+      const show = `${bare}${where ? ` ${where}` : ""}`;
+      out.push({
+        ...s,
+        ...FRESH,
+        scriptText: item,
+        narration: item,
+        showSubject: show,
+        visualPrompt: show,
+        visualPromptSeed: undefined,
+        stillImage: true,
+        objectMotion: undefined,
+        humanPresent: undefined,
+        keyThing: undefined,
+        otherKeyThings: undefined,
+        pictureText: undefined,
+        sameShot: undefined,
+        listCut: true,
+        hostCandidate: k === 0 ? s.hostCandidate : undefined,
+      } as StoryboardScene);
+    });
+  }
+  return out;
+}
+
+/** A subject or a verb — the words that make a piece a clause rather than a named thing. */
+export const LIST_ITEM_CLAUSE =
+  /\b(i|you|he|she|we|they|it|is|are|was|were|be|been|being|has|have|had|do|does|did|will|would|can|could|should|won|lost|sold|made|went|took|got|said|loved|liked|paid|cost|costs|sells|makes|takes)\b/i;
+
+/**
+ * A piece whose words are one item of a spoken list: a few words naming a thing — "a saw,", "a
+ * drill,", "and a stack of sandpaper,", "two spools of thread." — any channel, any list. Pure.
+ */
+export function looksLikeListItem(text: string | undefined): boolean {
+  const t = (text ?? "").trim();
+  if (!t || t.split(/\s+/).length > 7) return false;
+  // A clause is not an item: "the cheapest fabric won," and "the one I loved most" say something
+  // about a thing — a list item only names one.
+  if (LIST_ITEM_CLAUSE.test(t)) return false;
+  return /^(?:(?:and|or|plus|maybe|then|also)\s+)?(?:a|an|the|some|one|two|three|four|five|six|seven|eight|nine|ten|a few|a couple of|your|my|his|her|their|our|this|that|these|those|old|new)\b[^.;:!?]*[,.;]?$/i.test(
+    t
+  );
+}
+
+/** Words that open a short aside, never a named thing ("Honestly," "Right," "Next,"). */
+export const NOT_A_LIST_ITEM = new Set([
+  "so", "then", "now", "well", "right", "okay", "ok", "honestly", "first", "next", "finally",
+  "also", "yes", "no", "sure", "still", "anyway", "again", "here", "there", "today", "tonight",
+  "after", "before", "because", "but", "if", "when", "while", "once", "until", "every", "each",
+  // A piece that opens on these says where, how much or which — it does not name a new thing
+  // ("all on one wall", "just for fun", "on the bench").
+  "all", "just", "only", "even", "not", "most", "more", "less", "on", "in", "at", "for", "with",
+  "from", "by", "to", "into", "onto", "over", "under", "about", "around", "like", "as", "of",
+]);
+
+/**
+ * A list item with no article — "flour,", "sugar,", "and butter." — a bare name of one to four
+ * words: no subject or verb (`LIST_ITEM_CLAUSE`), no "-ly" word, not an aside ("Honestly,"). Only
+ * ever counted inside a run of two or more (`markListPieces`), never alone. Pure.
+ */
+export function looksLikeBareListItem(text: string | undefined): boolean {
+  const t = (text ?? "").trim();
+  if (!t || LIST_ITEM_CLAUSE.test(t)) return false;
+  const core = t.replace(/^(?:and|or|plus)\s+/i, "");
+  const words = core.split(/\s+/);
+  if (words.length > 4) return false;
+  if (!/^[a-z0-9][a-z0-9' -]*[,.;]?$/i.test(core)) return false;
+  if (words.some(w => /ly[,.;]?$/i.test(w))) return false;
+  return !NOT_A_LIST_ITEM.has(words[0].replace(/[^a-z]/gi, "").toLowerCase());
+}
+
+/** Either shape of list item. */
+const anyListItem = (t: string | undefined) => looksLikeListItem(t) || looksLikeBareListItem(t);
+
+/**
+ * Mark every run of two or more consecutive pictures of one beat that each read as a list item
+ * (`looksLikeListItem`), or one such picture beside a piece the planner already marked, as
+ * `listCut` — so no fold, join or flash rule ever merges one item into another, whatever the
+ * planner remembered to mark. Returns how many it newly marked. Pure apart from mutating `scenes`.
+ */
+export function markListPieces(scenes: StoryboardScene[]): number {
+  let n = 0;
+  const item = (s: StoryboardScene | undefined) =>
+    !!s && !s.hostPresent && (s.listCut === true || anyListItem(s.scriptText));
+  for (let i = 0; i < scenes.length; ) {
+    if (!item(scenes[i])) {
+      i++;
+      continue;
+    }
+    let j = i;
+    while (j + 1 < scenes.length && item(scenes[j + 1]) && scenes[j + 1].shotGroup === scenes[i].shotGroup) j++;
+    const run = scenes.slice(i, j + 1);
+    if (run.length >= 2 || run.some(s => s.listCut))
+      for (const s of run)
+        if (!s.listCut) {
+          s.listCut = true;
+          s.sameShot = undefined;
+          n++;
+        }
+    i = j + 1;
+  }
+  return n;
 }
 
 /** Join two adjacent pieces of one beat; the longer one's picture wins. */
@@ -512,22 +731,15 @@ function joinPieces(
   secB: number
 ): StoryboardScene {
   const keep = secB > secA ? b : a;
-  // Two list items too quick to cut apart become ONE shot of both ("a saw and a drill"), not a
-  // picture of whichever was longer — the words still name both.
-  const both =
-    a.listCut && b.listCut && a.showSubject && b.showSubject
-      ? `${a.showSubject}, together with ${b.showSubject}`
-      : undefined;
+  // The longer one's picture, never a picture of both ("a saw, together with a drill" — joining two
+  // list items into one shot was rejected on 2026-09-27 and came back through here on Hank's job
+  // 258). List items are no longer folded at all unless one is a blink (`LIST_SHOT_MIN_SEC`).
   return {
     ...keep,
     ...FRESH,
-    ...(both
-      ? { showSubject: both, visualPrompt: both, visualPromptSeed: undefined }
-      : {}),
     scriptText: `${(a.scriptText ?? "").trim()} ${(b.scriptText ?? "").trim()}`.trim(),
     narration: firstWords(`${a.scriptText ?? ""} ${b.scriptText ?? ""}`, 8),
-    // Two list items joined are still a quick list shot; a list item folded into a longer shot is not.
-    listCut: both ? true : undefined,
+    listCut: undefined,
     hostCandidate: a.hostCandidate,
   } as StoryboardScene;
 }
@@ -717,8 +929,8 @@ export function settleShots(
       }
       if (!s.hostPresent && !s.stillImage && d > 0 && d < MOTION_MIN_SEC) {
         s.stillImage = true;
-        s.humanPresent = undefined;
         s.objectMotion = undefined;
+        s.cameraMove = undefined;
       }
       out.push(s);
     }
@@ -736,13 +948,36 @@ const SHOT_LIST_SYSTEM =
   "The examples below come from different kinds of videos; apply the rules to whatever THIS " +
   "script is about.\n" +
   "1. SAY IT, SHOW IT. Each shot shows exactly the concrete thing or action its words are about, " +
-  'literally: "a stack of sandpaper" is a stack of sandpaper; "I pinned the squares into rows" is ' +
-  "quilt squares pinned in rows. Use the PROPS LIST for how a recurring thing looks, so it looks the " +
+  'literally: "a basket of apples" is a basket of apples; "I lined the jars up on the shelf" is ' +
+  "jars lined up on a shelf. Show the SUBJECT of the line, not its last noun: a place or surface the " +
+  "line names (a market table, a shelf, a porch, a counter) is WHERE the subject is shown, never the " +
+  "picture by itself or empty — \"will anyone pay for these at a craft fair?\" is the pieces laid out " +
+  "on a craft-fair table. When a line refers to the work by a quality (\"that clean look\", \"this " +
+  "style\", \"the good ones\"), show the work that has it. Use the PROPS LIST for how a recurring thing looks, so it looks the " +
   "same every time, and keep the story moving (what was being made is further along now).\n" +
+  "1b. KEY THINGS. Every props-list line after the first is a KEY THING; the one marked MAIN is what " +
+  "the whole video is about. Whenever a line is about a key thing — even when it only says \"it\", " +
+  "\"this one\", \"the winner\" or \"the one that sold best\" — the shot shows THAT thing (when a " +
+  "line only refers to the MAIN thing, the MAIN thing), with what else the line names beside it, " +
+  "and sets thing to its name exactly as the props list writes it (without MAIN). But a key thing " +
+  "appears ONLY when the line is about it: a line about something else shows that, never the main " +
+  "thing out of habit (a line about the weather shows the weather). A later shot of a key thing " +
+  "shows the SAME thing from another " +
+  "spot — closer on one part, further back with the room around it, the other side, from above or " +
+  "low down — the view the words point at, never the same view as the shot of it just before. A " +
+  "before / during / after of one piece is the SAME piece each time, further along.\n" +
+  "1d. DON'T REPEAT. When a line's subject is already on screen from the picture before (the line " +
+  "says \"it\", \"this\", \"that one\") and the line names something NEW you can see — a thing, or a " +
+  "kind of event or situation (\"the storms that roll in at night\") — the shot shows the new thing " +
+  "(\"It also works on a cast-iron pan\" after a picture of a spatula = the cast-iron pan).\n" +
+  "1c. SHOW WHAT IT IS ABOUT, THEN WHAT IS NEW. A line that names or explains a key thing shows " +
+  "THAT thing first — the main thing whenever the line is about it. When the same line goes on to " +
+  "name something new you can see (\"… the kind you'd find in an old farmhouse kitchen\"), a new " +
+  "shot starts on those words and shows it.\n" +
   "2. CHANGE THE PICTURE ONLY WHEN THE CONTEXT CHANGES. A new shot starts only where the words move " +
   "on to a DIFFERENT thing, place or action. While the words stay on the same thing — even across " +
-  'several sentences — it is ONE shot: "a stack of feed sacks my husband set aside for the burn ' +
-  'barrel" is one shot of the sacks by the barrel, not the sacks and then the barrel. Fewer, ' +
+  'several sentences — it is ONE shot: "a pile of old crates the neighbour set out by the curb" ' +
+  "is one shot of the crates by the curb, not the crates and then the curb. Fewer, " +
   "longer shots are better than many quick ones; a shot may run 10 seconds or more when nothing " +
   'new is named. The ONE exception is a spoken list: one quick shot per item ("a needle, a spool ' +
   'of thread, and a pair of shears" = three shots, list: true).\n' +
@@ -751,10 +986,20 @@ const SHOT_LIST_SYSTEM =
   "starting a new one. Use it whenever the context has not changed.\n" +
   "4. A COMPARISON IS NOT A SHOT. When a line compares the subject to something else to say how " +
   'much it costs or what it is like ("yarn that costs more than a good roast"), show the subject.\n' +
-  "5. NO WRITING. Never a shot of words, numbers, prices, signs, labels, notes, screens, tally " +
+  "5. NO WRITING. Never a shot of words, numbers, prices, signs, labels, notes, tally " +
   "marks, chalkboards, calendars or clocks — show the thing the number is about (\"six dollars " +
   'for those coasters" = the coasters; "how long it took" = the work in progress; "the tally I ' +
   'keep" = the finished pieces).\n' +
+  "5c. WRITING ONLY WHEN SAID. A picture may show readable writing ONLY when the line itself says " +
+  "the exact words or number printed on a thing (\"the tag says HANDMADE\" = the tag with HANDMADE " +
+  "on it): set text to exactly those words, spelled as spoken. Never invent any: when a line talks " +
+  "about printing on a thing without saying it (\"check the date on it\", \"three things printed on " +
+  "the box\"), show the thing WITH its printing and set print: \"blurred\" — the print is there, soft " +
+  "and out of focus, unreadable.\n" +
+  "5b. APPS. When the words name an app, a website or selling online, the shot is a phone lying on " +
+  "a table (or in the host's hands) with its screen showing a simple buy-and-sell app — a grid of " +
+  "small photos of items. Never a brand or app name in show: any named app or site is written as " +
+  "what it is (\"a buy-and-sell app\", \"an online shop\").\n" +
   "6. PEOPLE. The only person who may ever appear is THE HOST (described below, when given), and " +
   "only DOING the work — seen from behind or from the side, over the shoulder, hands at the task, " +
   "face turned away or out of frame. Never a face, never anyone else. With no host given, only " +
@@ -766,23 +1011,29 @@ const SHOT_LIST_SYSTEM =
   "line goes on to NAME concrete things worth showing, hand over to pictures at the FIRST such " +
   "thing — not a later one: the host never talks past a thing worth showing — at a natural break " +
   'right before it, or at a comma or "and", by setting hostUntil to the last 1-4 ' +
-  "words the host says on camera, copied exactly, then list the shots for the rest (\"Out of 10 " +
-  'Japanese woodworking projects | you can build from | cheap box-store lumber," — not on to "the ' +
-  'coffee can" three phrases later). If the line ' +
+  "words the host says on camera, copied exactly, then list the shots for the rest (\"Of all the " +
+  'things I made for the market, | the one that sold first | was a plain wooden bowl," — not on to ' +
+  'a thing named three phrases later). If the line ' +
   "names nothing to show, hostUntil is null and shots is []. On a HOOK beat (the video's opening " +
   "line) the host says at least the first 6 words on camera, then hands over the same way — to ONE " +
   "picture for the rest of that thought, not a run of quick ones. On an " +
   "INTRO beat the host must say " +
   "their own name on camera first — and once they have, a line that goes on to name things MUST " +
-  "hand over (\"I'm Rose Miller, and this is for anybody sitting at a kitchen table with | a " +
-  'hook, | a skein of yarn, | and a free evening").\n' +
-  "8. motion — MOST SHOTS ARE STILL PICTURES (\"none\"). SHOW IT HAPPENING: when the words are " +
-  "about making, using or fixing something, the picture shows the host (or hands) doing it — but " +
-  'as a still unless the physical doing is the point of the line right now. Use "hands" (moving ' +
-  'hands at gentle work — stitching, crocheting, sanding, oiling) sparingly, and "object" only for a thing ' +
-  "that moves by itself (a flame, pouring water, a running machine). About one shot in six moves, " +
-  "never more than one in four.\n" +
-  "9. static: always false — whether a still zooms is decided later by how long it is on screen.\n" +
+  "hand over (\"I'm Pat, and this is for anybody with | a garden bed, | a bag of seed, | and a free " +
+  'Saturday").\n' +
+  "8. motion — MOST SHOTS ARE PHOTOS (\"none\"); every photo gets a slow zoom. SHOW IT HAPPENING in " +
+  "a photo: when the words are about making, using or fixing something, the photo shows the host's " +
+  "hands doing it. A shot is a VIDEO (\"object\") when, in the moment the words describe, something " +
+  "MOVES BY ITSELF, with no person moving it — a flame, smoke, steam, running or falling water, " +
+  "rain, leaves in the wind, traffic going by. What moves is that; everything else in the frame " +
+  "holds still. Anything a person has to move (a door, a drawer, a tool, a page) is a photo. Show " +
+  "it happening in show (\"a candle burning on the table, its flame flickering\"). NEVER a video with " +
+  "hands, fingers or a person in it, and never a camera move. When the line is about the MAIN thing " +
+  "and something with it can move by itself, that shot is the one to make a video — and the FIRST " +
+  "time the MAIN thing appears, if it is something naturally used with smoke, steam, a flame or " +
+  "water, show it in use — lit, steaming, burning, running. A thing with nothing that moves by " +
+  "itself stays a photo. About one shot " +
+  "in six moves, never more than one in four.\n" +
   "9b. contact: true when the shot shows a tool CUTTING INTO, GOING THROUGH or JOINING the " +
   "material — in ANY craft or wording: drilling, sawing, a screw or nail going in, stapling, " +
   "punching holes, welding or soldering, piercing, engraving, carving, chiselling, cutting cloth " +
@@ -792,23 +1043,24 @@ const SHOT_LIST_SYSTEM =
   "9c. held: true when someone must be HOLDING or USING the thing in this shot for it to make " +
   "sense — in any wording: a drill raised to the frame, a hair dryer aimed at the curls, scissors " +
   "poised over the cloth, a phone held up to the screen, a cup lifted to drink. The picture then " +
-  "shows the host's hands on it. False when the thing simply lies, stands or hangs there.\n" +
+  "shows the host's hands on it, and it is a photo. False when the thing simply lies, stands or " +
+  "hangs there.\n" +
   "10. from: the first 1-4 words of the shot, copied EXACTLY from the beat, in order. The first " +
   "shot of a non-host beat starts at the beat's first word.\n" +
   "11. show: 8-20 plain words saying what is in the frame, the way a person would caption their " +
   "own phone snapshot: the thing, where it is, and how far away the photo was taken from — vary " +
   "it, often a step or two back, sometimes closer; never a close-up of every thing. The place is " +
   "the one the line names, else the props list's home setting. No light, mood, texture or style " +
-  "words, and no decorative extras the words do not mention (\"the feed sacks piled beside the " +
-  'rusty burn barrel behind the house"). ONE picture: never "or" ("an engraved board or a ' +
+  "words, and no decorative extras the words do not mention (\"the old crates stacked by the " +
+  'curb in front of the house"). ONE picture: never "or" ("an engraved board or a ' +
   'keepsake box" — pick one), never two places.\n' +
-  "12. NAME IT EXACTLY. When the words name a SPECIFIC kind, pattern or design — a nine-patch " +
-  "quilt, a granny square, kumiko, a dovetail joint, a French seam — keep that exact name in show " +
+  "12. NAME IT EXACTLY. When the words name a SPECIFIC kind, pattern or design — a herringbone " +
+  "path, a dovetail joint, a French seam — keep that exact name in show " +
   "and add, in plain words, what it LOOKS like, because the picture generator may not know the " +
-  'term: "a nine-patch crib quilt — blocks each made of nine small squares, three by three, light ' +
-  'and dark alternating", never just "a patchwork quilt".\n\n' +
+  'term: "a herringbone brick path — bricks laid in a zigzag of short rows", never just "a brick ' +
+  'path".\n\n' +
   "Return ONLY JSON: " +
-  '{"beats":[{"beat":N,"hostUntil":null|"...","shots":[{"from":"...","show":"...","motion":"none","list":false,"same":false,"static":false,"contact":false,"held":false}]}]}';
+  '{"beats":[{"beat":N,"hostUntil":null|"...","shots":[{"from":"...","show":"...","motion":"none","thing":null,"text":null,"print":null,"list":false,"same":false,"contact":false,"held":false}]}]}';
 
 /**
  * Ask for the shot list, `SHOT_BATCH` beats per call, `SHOT_CONCURRENCY` calls at once. Each call
@@ -831,6 +1083,7 @@ export async function planShotList(
     mustHandOff?: Set<number>;
   } = {}
 ): Promise<ShotPlan[]> {
+  const keyThings = parseKeyThings(opts.sheet);
   const eligible = scenes.filter(
     (s, i) =>
       shotListEligible(s, scenes[i + 1]) && (!opts.only || opts.only.has(s.index))
@@ -883,10 +1136,14 @@ export async function planShotList(
         .map((x: any) => ({
           from: x.from,
           show: x.show.trim(),
-          motion: ["hands", "object", "none"].includes(x.motion) ? x.motion : "none",
+          // An old "camera" answer is read as "object" and held to the rule like any other.
+          motion: x.motion === "object" || x.motion === "camera" ? "object" : "none",
+          thing:
+            typeof x.thing === "string" ? matchKeyThing(x.thing, keyThings)?.name : undefined,
+          text: typeof x.text === "string" ? x.text : undefined,
+          print: x.print === "blurred" ? "blurred" : undefined,
           list: x.list === true,
           same: x.same === true,
-          still: x.static === true,
           contact: x.contact === true,
           held: x.held === true,
         }));
@@ -939,7 +1196,8 @@ const CONTINUITY_SYSTEM =
   "it the same way in every shot. One line each: `name: look` (material, colour, size, finish, " +
   "where it usually sits) — always tidy: never describe anything as cluttered, messy or crowded. " +
   "The first line is the HOME setting (the workshop, kitchen, sewing room) " +
-  "the video returns to. 6-14 lines. Plain words, no brands, no people. NOTHING WITH MARKS ON IT: " +
+  "the video returns to. The SECOND line is the MAIN thing — the one physical thing the whole video " +
+  "is about (what is made, used, sold or shown most) — written `MAIN name: look`. 6-14 lines. Plain words, no brands, no people. NOTHING WITH MARKS ON IT: " +
   "never list a chalk tally, a chalkboard, a sign, a price tag, a label, a calendar, a notebook, a " +
   "ledger or anything written or counted on — the pictures carry no writing, so such a prop would " +
   "put writing in every shot that shows it. Output ONLY the list.";
@@ -974,6 +1232,446 @@ export async function deriveContinuitySheet(
     }
   }
   return "";
+}
+
+/**
+ * The KEY THINGS of a props list (`deriveContinuitySheet`): every line after the first (the home
+ * setting), `name: look`, the one written `MAIN name: look` being what the whole video is about.
+ * An older list with no MAIN line has no main thing. Pure — unit-tested.
+ */
+export function parseKeyThings(sheet: string | undefined): KeyThing[] {
+  const out: KeyThing[] = [];
+  const lines = (sheet ?? "").split("\n").map(l => l.trim()).filter(l => l.includes(":"));
+  for (const line of lines.slice(1)) {
+    const at = line.indexOf(":");
+    let name = line.slice(0, at).trim();
+    const look = line.slice(at + 1).trim();
+    const main = /^MAIN\b/i.test(name);
+    name = name.replace(/^MAIN\b[\s:-]*/i, "").trim();
+    if (!name || out.some(t => keyName(t.name) === keyName(name))) continue;
+    out.push({ name, look, ...(main && !out.some(t => t.main) ? { main: true as const } : {}) });
+  }
+  return out;
+}
+
+const keyName = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+/**
+ * The key thing a planner's `thing` names: the same name (case and punctuation aside), else the one
+ * whose name contains it or is contained in it — the longest such. Null when none. Pure.
+ */
+export function matchKeyThing(name: string, things: KeyThing[]): KeyThing | null {
+  const n = keyName(name.replace(/^MAIN\b/i, ""));
+  if (!n) return null;
+  const exact = things.find(t => keyName(t.name) === n);
+  if (exact) return exact;
+  const near = things
+    .filter(t => {
+      const k = keyName(t.name);
+      return k.length >= 3 && (n.includes(k) || k.includes(n));
+    })
+    .sort((a, b) => b.name.length - a.name.length);
+  return near[0] ?? null;
+}
+
+/**
+ * The key thing a picture description names: every meaningful word of a key thing's name appears
+ * in `text` — the longest such name wins. Null when none. For the pictures the shot list did not
+ * tag (a split screen's panel, the QR background, a storyboard picture). Pure.
+ */
+export function keyThingIn(text: string | undefined, things: KeyThing[] | undefined): KeyThing | null {
+  return keyThingsIn(text, things)[0] ?? null;
+}
+
+/**
+ * Every key thing a picture description names, the longest names first; a name whose words all sit
+ * inside a longer match ("alarm" inside "smoke alarm") is dropped. Pure.
+ */
+export function keyThingsIn(text: string | undefined, things: KeyThing[] | undefined): KeyThing[] {
+  const have = new Set(keyName(text ?? "").split(" "));
+  const hits = (things ?? [])
+    .filter(t => {
+      const ws = keyName(t.name).split(" ").filter(w => w.length > 2);
+      return ws.length > 0 && ws.every(w => have.has(w) || have.has(`${w}s`));
+    })
+    .sort((a, b) => b.name.length - a.name.length);
+  const words = (t: KeyThing) => keyName(t.name).split(" ");
+  return hits.filter(
+    (t, k) => !hits.slice(0, k).some(longer => words(t).every(w => words(longer).includes(w)))
+  );
+}
+
+// ─── Does each picture show what its line is about? ─────────────────────────────────────
+
+export const FIT_SYSTEM = `You check a video's pictures against what is said under them. Between the host's
+on-camera lines the viewer sees one picture at a time. You get every line in film order: HOST lines
+for context, and PICTURE lines with what the picture shows.
+
+A picture is WRONG when its main subject is not what its line talks about: the line is about the
+weather and the picture is the video's main thing; the line names a new place and the picture is
+the workbench. It is also WRONG when the line is about a key thing it only refers to ("the one that
+sold best came out of that old crate") and the picture shows something else the line names instead
+— the picture is then the key thing, with the other thing beside it. And it is WRONG when the picture
+shows only a PLACE or SURFACE the line names while the line is about something there: "will anyone
+pay for these at a craft fair?" over an empty table — the picture is the pieces laid out on it. When
+the line refers to the work by a quality ("that clean look", "this style"), the picture is the work
+that has it. But a picture of something NEW the line names — a line comparing the thing to something
+else you can see ("the kind you'd find in an old farmhouse kitchen" = that kitchen) — is RIGHT: never
+change it back to the key thing. And it is WRONG when the picture repeats what the picture before
+already shows while its line names something new you can see: after a picture of a spatula, "It
+also works on a cast-iron pan" is the cast-iron pan, not the spatula again. Something new you can see
+is not only an object: a kind of event or situation the line describes counts too — "it only
+struggles with the storms that roll in at night" after a picture of a roof is that night storm. If a
+picture would look like the one right before it and its line says anything new you can see, it is
+WRONG.
+A picture marked "FIRST of the MAIN thing" must show the main thing IN USE when it is naturally used
+with smoke, steam, a flame or water (lit, steaming, burning, running) — otherwise it is WRONG. A picture is RIGHT when it shows the thing the line is
+about — even when the line only says "it", "this one" or "the one that…" (use the KEY THINGS and the
+lines around it to know what that is) — or shows the thing being done, or (marked "continues") keeps
+showing the topic of the line before it.
+
+Go through EVERY picture, one at a time, never skipping: first write what its line is about — its
+subject, not its last noun; for a line that only refers to a key thing, name the key thing — then
+whether the picture shows that, where the line puts it. Only then decide.
+
+"The one that…", "the winner", "the one I was proudest of" is one of the THINGS the video counts or
+compares (a project, a product, a choice) — work out which from the whole script, usually named in
+a later line. What it "came out of", was "made from" or "started as" is its material, never its
+subject: "the one that sold best came out of a box of scraps" is about that winning thing, shown with
+the box of scraps beside it.
+
+A line that compares to something ELSE you can see — "the kind you see in …", "like the ones at …",
+"the kind you'd find in …" — ALWAYS gets that other thing as its own picture: SPLIT the line there.
+Give the exact first 2-5 words where the new picture starts, copied from the line, and what it shows.
+Split only when both parts are at least 4 words.
+
+For each WRONG picture write the picture that fits: plain words, what is literally in the frame, one
+moment, one place, like a snapshot caption. When the line is about a key thing, name it exactly as
+the KEY THINGS list writes it and set thing to that name. When something in that moment moves by
+itself with no person moving it (a flame, smoke, steam, water), say it is happening. When the
+picture is the MAIN thing and it is something naturally in use with smoke, steam, a flame or water,
+show it in use — lit, steaming, burning, running — because that is the moment worth a video. The
+FIRST picture of the MAIN thing that
+shows it idle when it is naturally in use that way is WRONG too: rewrite it in use. No writing, no logos,
+no faces, never "or".
+
+Answer with JSON only, one entry for EVERY picture:
+{"pictures":[{"id":7,"about":"...","shows_it":true},
+{"id":8,"about":"...","shows_it":false,"show":"...","thing":null,"split":[{"from":"exact words","show":"...","thing":null}]}]}
+show and thing only when shows_it is false; split only when a new picture must start.`;
+
+/** A new picture starting inside a line, at `from` (its first words, verbatim). */
+export type PictureSplit = { from: string; show: string; thing?: string };
+export type PictureFix = { id: number; show?: string; thing?: string; split?: PictureSplit[] };
+
+/** The pictures the fit check reads and may fix — drawn cutaways, never the CTA, cover or assets. */
+const fitCandidate = (s: StoryboardScene) =>
+  !s.hostPresent && !s.cta && !s.qrHero && !s.coverHero && !s.assetImageUrl && !s.showsBook && !s.splitVisual;
+
+/**
+ * The model's fixes, kept only for candidate pictures: a rewrite where it said the picture does not
+ * show what its line is about, and any split. Reads the per-picture answer (`pictures`) and the older
+ * list of fixes (`fix`). Pure.
+ */
+export function parsePictureFixes(text: string, scenes: StoryboardScene[]): PictureFix[] {
+  const parsed = safeParseJSON<any>(text);
+  const data = parsed.success ? parsed.data : undefined;
+  const entries: any[] = Array.isArray(data?.pictures)
+    ? data.pictures
+    : Array.isArray(data?.fix)
+      ? data.fix.map((f: any) => ({ ...f, shows_it: false }))
+      : [];
+  const out: PictureFix[] = [];
+  const clean = (v: unknown) => (typeof v === "string" ? v.trim().slice(0, 400) : "");
+  for (const f of entries) {
+    const id = pictureId(f?.id);
+    if (id == null || !scenes[id] || !fitCandidate(scenes[id])) continue;
+    if (out.some(x => x.id === id)) continue;
+    const show = f?.shows_it === false ? clean(f?.show) : "";
+    const split: PictureSplit[] = (Array.isArray(f?.split) ? f.split : [])
+      .map((x: any) => ({ from: clean(x?.from), show: clean(x?.show), thing: clean(x?.thing) || undefined }))
+      .filter((x: PictureSplit) => x.from && x.show);
+    if (!show && !split.length) continue;
+    out.push({
+      id,
+      ...(show ? { show } : {}),
+      ...(show && typeof f?.thing === "string" && f.thing ? { thing: f.thing } : {}),
+      ...(split.length ? { split } : {}),
+    });
+  }
+  return out;
+}
+
+/**
+ * Put each fix on its picture: the new description, its key thing (the planner's name matched to
+ * the list, else the ones the description names), a person only if one is in it, and the video rule
+ * applied again. Returns how many pictures changed. Pure apart from mutating `scenes`.
+ */
+export function applyPictureFixes(
+  scenes: StoryboardScene[],
+  fixes: PictureFix[],
+  things: KeyThing[] | undefined
+): number {
+  let n = 0;
+  for (const f of fixes) {
+    const s = scenes[f.id];
+    if (!s || !f.show) continue;
+    const named = keyThingsIn(f.show, things);
+    const primary = (f.thing ? matchKeyThing(f.thing, things ?? []) : null) ?? named[0] ?? null;
+    s.showSubject = f.show;
+    s.visualPrompt = f.show;
+    s.visualPromptSeed = undefined;
+    s.brollVisual = undefined;
+    s.keyThing = primary?.name;
+    const others = named.map(t => t.name).filter(name => name !== primary?.name);
+    s.otherKeyThings = others.length ? others : undefined;
+    s.humanPresent = SHOWS_PERSON.test(f.show) ? true : undefined;
+    s.sameShot = undefined;
+    s.toolContact = contactToolWork(f.show) ? true : undefined;
+    s.blurPrint = !s.pictureText && blurredPrint(f.show) ? true : undefined;
+    // Judged again on the new description (`judgeSelfMoving`); the plan gate then makes the ones
+    // that move videos within the share, the main thing's first (`addMotion`).
+    s.selfMoving = undefined;
+    settleVideoKind(s);
+    n++;
+  }
+  return n;
+}
+
+/**
+ * Split pictures where the check says a line names something NEW partway through: the words from
+ * `from` on become their own picture showing it (`show`), the part before keeps its picture. A split
+ * whose words are not in the line, or that would leave either part under 4 words, is skipped. The
+ * new pieces have no timing yet — the caller re-cuts the film's ranges. Pure — returns a new list.
+ */
+export function applyPictureSplits(
+  scenes: StoryboardScene[],
+  fixes: PictureFix[],
+  things: KeyThing[] | undefined
+): { scenes: StoryboardScene[]; split: number } {
+  const byId = new Map(fixes.filter(f => f.split?.length).map(f => [f.id, f.split!]));
+  if (!byId.size) return { scenes, split: 0 };
+  const out: StoryboardScene[] = [];
+  let split = 0;
+  scenes.forEach((s, id) => {
+    const cuts = byId.get(id);
+    const text = s.scriptText ?? "";
+    const spans = tokenSpans(text);
+    if (!cuts || !fitCandidate(s)) {
+      out.push(s);
+      return;
+    }
+    const starts: { at: number; cut: PictureSplit }[] = [];
+    let cursor = 0;
+    for (const cut of cuts) {
+      const at = findPhraseAt(spans, cut.from, cursor + 1);
+      if (at < 0) continue;
+      starts.push({ at, cut });
+      cursor = at;
+    }
+    const bounds = [0, ...starts.map(x => x.at), spans.length];
+    if (starts.length === 0 || bounds.some((b, k) => k > 0 && b - bounds[k - 1] < 4)) {
+      out.push(s);
+      return;
+    }
+    bounds.slice(0, -1).forEach((b, k) => {
+      const from = spans[b].start;
+      const to = k + 1 < bounds.length - 1 ? spans[bounds[k + 1]].start : text.length;
+      const slice = text.slice(from, to).trim();
+      if (k === 0) {
+        out.push({ ...s, ...FRESH, scriptText: slice, narration: firstWords(slice, 8) } as StoryboardScene);
+        return;
+      }
+      const cut = starts[k - 1].cut;
+      const named = keyThingsIn(cut.show, things);
+      const primary = (cut.thing ? matchKeyThing(cut.thing, things ?? []) : null) ?? named[0] ?? null;
+      const others = named.map(t => t.name).filter(n => n !== primary?.name);
+      out.push({
+        ...s,
+        ...FRESH,
+        scriptText: slice,
+        narration: firstWords(slice, 8),
+        showSubject: cut.show,
+        visualPrompt: cut.show,
+        visualPromptSeed: undefined,
+        brollVisual: undefined,
+        keyThing: primary?.name,
+        otherKeyThings: others.length ? others : undefined,
+        humanPresent: SHOWS_PERSON.test(cut.show) ? true : undefined,
+        stillImage: true,
+        objectMotion: undefined,
+        selfMoving: undefined,
+        toolContact: contactToolWork(cut.show) ? true : undefined,
+        pictureText: undefined,
+        sameShot: undefined,
+        listCut: undefined,
+        hostCandidate: undefined,
+        wordCut: true,
+      } as StoryboardScene);
+      split++;
+    });
+  });
+  out.forEach((s, k) => (s.index = k + 1));
+  return { scenes: out, split };
+}
+
+/**
+ * SAY IT, SHOW IT, checked (2026-09-30, the operator on Frederick's job 259: "Fires don't all behave
+ * the same way" showed the smoke alarm). Nothing checked a picture against its LINE — the picture
+ * checker only asks whether the frame shows its own description. One call per ~80 lines reads every
+ * line beside its planned picture, before anything is paid for, and rewrites the pictures that do
+ * not show what their line is about. Returns how many it fixed; any failure changes nothing.
+ */
+export async function fitPicturesToLines(
+  scenes: StoryboardScene[],
+  opts: { sheet?: string; keyThings?: KeyThing[]; subject?: string } = {}
+): Promise<{ scenes: StoryboardScene[]; fixed: number; split: number }> {
+  const BATCH = 80;
+  const fixes: PictureFix[] = [];
+  // The main thing's first picture is named to the check: it is shown in use when it naturally is.
+  const main = opts.keyThings?.find(k => k.main)?.name;
+  const firstMain = main
+    ? scenes.findIndex(
+        s =>
+          fitCandidate(s) &&
+          (s.keyThing === main || keyThingsIn(s.showSubject ?? s.visualPrompt, opts.keyThings).some(k => k.name === main))
+      )
+    : -1;
+  for (let from = 0; from < scenes.length; from += BATCH) {
+    const lines: string[] = [];
+    let any = false;
+    for (let i = Math.max(0, from - 4); i < Math.min(scenes.length, from + BATCH); i++) {
+      const s = scenes[i];
+      const said = (s.scriptText ?? "").trim().replace(/\s+/g, " ");
+      if (s.hostPresent || !fitCandidate(s) || i < from) {
+        lines.push(`HOST/OTHER: "${said}"`);
+        continue;
+      }
+      any = true;
+      lines.push(
+        `#${i} PICTURE${s.sameShot ? " (continues)" : ""}${i === firstMain ? " (FIRST of the MAIN thing)" : ""}: said "${said}" | shows: ${s.showSubject ?? s.visualPrompt ?? ""}`
+      );
+    }
+    if (!any) continue;
+    try {
+      const r = await invokeClaude({
+        systemPrompt: FIT_SYSTEM,
+        userMessage:
+          (opts.subject ? `VIDEO SUBJECT: ${opts.subject}\n` : "") +
+          (opts.keyThings?.length
+            ? `KEY THINGS: ${opts.keyThings.map(k => `${k.main ? "MAIN " : ""}${k.name}: ${k.look}`).join(" | ")}\n`
+            : "") +
+          `\n${lines.join("\n")}\n\nJSON:`,
+        maxTokens: 24000,
+        model: FIT_MODEL(),
+      });
+      fixes.push(...parsePictureFixes(r.text, scenes));
+    } catch {
+      /* a failed check changes nothing */
+    }
+  }
+  // Rewrites first (by position, before anything moves), then the splits.
+  const fixed = applyPictureFixes(scenes, fixes, opts.keyThings);
+  const cut = applyPictureSplits(scenes, fixes, opts.keyThings);
+  return { scenes: cut.scenes, fixed, split: cut.split };
+}
+
+// ─── Does something in each picture move by itself? ─────────────────────────────────────
+
+const SELF_MOVING_SYSTEM = `You read the pictures planned for a video, one per line, and decide for
+each whether something in it MOVES BY ITSELF in the moment it shows — movement a camera would catch
+over a few seconds with no person causing it: a flame, smoke, steam, flowing or falling water, rain
+or snow falling, leaves or grass in the wind, traffic going past.
+
+Say NO when a person would have to move it (a door, a gate, a drawer, a lid, a tool, a pot being
+stirred, a page turned), when something that can move is shown still (a parked car, a closed tap, an
+unlit stove, a calm pond, a device that only detects or displays), and when nothing moves at all.
+When unsure, NO.
+
+Answer with JSON only: {"moving":[the ids that move by themselves]}`;
+
+/** What the judgement reads: every drawn cutaway, and each split screen's right panel. */
+function selfMovingCandidates(scenes: StoryboardScene[]): { id: number; text: string; split: boolean }[] {
+  const out: { id: number; text: string; split: boolean }[] = [];
+  scenes.forEach((s, id) => {
+    if (s.hostPresent) {
+      if (s.splitVisual) out.push({ id, text: s.splitVisual, split: true });
+      return;
+    }
+    if (s.coverHero || s.assetImageUrl || s.qrHero) return;
+    const text = s.showSubject ?? s.visualPrompt;
+    if (text) out.push({ id, text, split: false });
+  });
+  return out;
+}
+
+/** Put the answer on the pictures that were asked about (the others keep theirs). Pure. */
+export function applySelfMoving(scenes: StoryboardScene[], asked: number[], moving: number[]): void {
+  const yes = new Set(moving);
+  for (const id of asked) {
+    const s = scenes[id];
+    if (!s) continue;
+    if (s.hostPresent) s.splitSelfMoving = yes.has(id);
+    else s.selfMoving = yes.has(id);
+  }
+}
+
+/** The ids the model says move, kept only when they were asked about. Pure. */
+export function parseSelfMoving(text: string, asked: number[]): number[] {
+  const parsed = safeParseJSON<any>(text);
+  const raw: unknown[] = parsed.success && Array.isArray(parsed.data?.moving) ? parsed.data.moving : [];
+  const ok = new Set(asked);
+  return raw.map(pictureId).filter((n): n is number => n != null && ok.has(n));
+}
+
+/**
+ * A picture number as a model writes it back: 12, "12" or "#12" (the lines it read are written
+ * "#12:" and it copies that about half the time — every "#" id used to be dropped, so a whole
+ * film's moving shots vanished on Hank's and Frederick's jobs 265/266). Null otherwise. Pure.
+ */
+export function pictureId(v: unknown): number | null {
+  if (typeof v === "number") return Number.isInteger(v) ? v : null;
+  if (typeof v === "string") {
+    const m = /^\s*#?\s*(\d+)\s*$/.exec(v);
+    return m ? Number(m[1]) : null;
+  }
+  return null;
+}
+
+/**
+ * Judge, for every picture and split panel, whether something in it moves by itself (2026-10-01,
+ * the operator: "a door needs hand so it should not move … i much prefer not [specific]"). It
+ * replaced a fixed word list. One call per ~150 pictures; a batch that fails leaves its pictures
+ * unjudged — the plan gate then turns none of them into a video and keeps a split panel still.
+ * Returns how many were judged and how many move.
+ */
+export async function judgeSelfMoving(
+  scenes: StoryboardScene[]
+): Promise<{ judged: number; moving: number }> {
+  const all = selfMovingCandidates(scenes);
+  let judged = 0;
+  let moving = 0;
+  for (let from = 0; from < all.length; from += 150) {
+    const batch = all.slice(from, from + 150);
+    const asked = batch.map(c => c.id);
+    try {
+      const r = await invokeClaude({
+        systemPrompt: SELF_MOVING_SYSTEM,
+        userMessage: batch
+          .map(c => `#${c.id}: ${c.text.replace(/\s+/g, " ").slice(0, 300)}`)
+          .join("\n") + "\n\nJSON:",
+        maxTokens: 8000,
+        model: SHOT_LIST_MODEL(),
+      });
+      const yes = parseSelfMoving(r.text, asked);
+      applySelfMoving(scenes, asked, yes);
+      judged += asked.length;
+      moving += yes.length;
+    } catch {
+      /* unjudged: nothing in this batch becomes a video */
+    }
+  }
+  return { judged, moving };
 }
 
 /**
@@ -1019,76 +1717,6 @@ export function joinHookPictures(
   }
   out.forEach((s, k) => (s.index = k + 1));
   return { scenes: out, changed };
-}
-
-/**
- * The last clause of a line when it is a short list item — "…at a kitchen table with a hook," →
- * keep "…at a kitchen table with", item "a hook,". Null when the line does not end on one. Pure.
- */
-export function trailingListItem(text: string): { keep: string; item: string } | null {
-  const m = /^(.*\S)\s+((?:a|an|the|some|one|two|three|your|my|our|his|her)\s+[^,.;:!?]{1,40}),\s*$/i.exec(
-    text.trim()
-  );
-  if (!m) return null;
-  if (m[2].split(/\s+/).length > 5) return null;
-  if (m[1].split(/\s+/).length < HOST_HANDOFF_MIN_WORDS) return null;
-  return { keep: m[1], item: `${m[2]},` };
-}
-
-/**
- * A spoken list's FIRST item left at the end of the line before it goes to the list. The storyboard
- * cuts the script into beats by length, so a list can start in one beat and go on in the next: Granny
- * Mae's "…for anybody sitting at a kitchen table with a hook, | a skein of yarn, and a stack of
- * stitch books" (3-min test, job 231) kept "a hook" on the host while the other two items each got a
- * picture — the shot list only ever sees one beat's words. When a line ends on a short item and the
- * very next shot is a list item, the item becomes a list shot of its own; the line before hands
- * over right there (`wordCut`). Never a CTA, cover, asset, split or list line. Returns the new list
- * and how many moved. Pure — unit-tested.
- */
-export function pullListLeadIns(
-  scenes: StoryboardScene[],
-  subject?: string
-): { scenes: StoryboardScene[]; moved: number } {
-  const out = [...scenes];
-  let moved = 0;
-  for (let i = 0; i + 1 < out.length; i++) {
-    const s = out[i];
-    const list = out[i + 1];
-    if (!list.listCut || s.listCut || s.cta || s.qrHero || s.coverHero || s.assetImageUrl) continue;
-    if (s.splitVisual) continue;
-    const cut = trailingListItem(s.scriptText ?? "");
-    if (!cut) continue;
-    const bare = cut.item.replace(/,$/, "");
-    const where = /\b(?:on|in|at|beside|by) the [^,]+$/i.exec(list.showSubject ?? "")?.[0];
-    const show = `${bare}${subject ? ` (as used for ${subject})` : ""}${where ? ` ${where}` : ""}`;
-    const piece: StoryboardScene = {
-      ...list,
-      ...FRESH,
-      scriptText: cut.item,
-      narration: cut.item,
-      showSubject: show,
-      visualPrompt: show,
-      visualPromptSeed: undefined,
-      stillImage: true,
-      humanPresent: undefined,
-      objectMotion: undefined,
-      sameShot: undefined,
-      listCut: true,
-      wordCut: true,
-    };
-    s.scriptText = cut.keep;
-    s.narration = firstWords(cut.keep, 8);
-    s.audioUrl = undefined;
-    s.audioDuration = undefined;
-    // The line before now hands over to the list mid-sentence, on purpose.
-    s.wordCut = true;
-    s.shotGroup ??= list.shotGroup;
-    out.splice(i + 1, 0, piece);
-    moved++;
-    i++;
-  }
-  out.forEach((s, k) => (s.index = k + 1));
-  return { scenes: out, moved };
 }
 
 /**
@@ -1226,15 +1854,20 @@ ONE picture, even when each line mentions a different detail of it (what it is, 
 it sells, what it earns). A new context starts only when the talk moves to a different thing.
 
 Keep lines separate when they are about different things (worn bedsheets, then a spool of thread),
-and when a line is a clear new point about something else. Never group across a "----" line.
+and when a line is a clear new point about something else. A line that names something you can SEE
+that the group's picture would not show (a different place, a different object) is NOT in the group —
+it keeps its own picture. Never group across a "----" line.
+
+The group's picture must fit the FIRST line of the group above all: it is what plays when the
+picture appears.
 
 For each group of 2 or more consecutive pictures that share a context, write ONE picture that fits
 every line in it: plain words, what is literally in the frame, like a snapshot caption. It is ONE
 still moment from ONE spot: the main thing being done or shown, plus at most one other thing in the
-background. Never "or", never a sequence of actions ("crocheting, then tying fringe"), never two
+background. Never "or", never a sequence of actions ("painting, then hanging it"), never two
 places. If any
 picture in the group shows hands or the host doing something, the new picture MUST show the host's
-hands doing that work (a person is never dropped). Keep exact names of kinds (nine-patch, kumiko).
+hands doing that work (a person is never dropped). Keep exact names of kinds (a herringbone path, a dovetail joint).
 
 Answer with JSON only:
 {"groups":[{"ids":[12,13,14],"show":"..."}]}
@@ -1283,7 +1916,12 @@ export type ContextGroup = { ids: number[]; show: string };
  * The model's groups, kept only when they are real: 2+ consecutive ids inside ONE run, not
  * overlapping another group, with a picture description. Anything else is dropped. Pure.
  */
-export function parseContextGroups(text: string, runs: number[][]): ContextGroup[] {
+export function parseContextGroups(
+  text: string,
+  runs: number[][],
+  /** Each candidate picture's own description, by scene position — see `namesSomethingElse`. */
+  showOf?: (i: number) => string | undefined
+): ContextGroup[] {
   const parsed = safeParseJSON<any>(text);
   const raw: unknown[] =
     parsed.success && Array.isArray(parsed.data?.groups) ? parsed.data.groups : [];
@@ -1292,7 +1930,9 @@ export function parseContextGroups(text: string, runs: number[][]): ContextGroup
   const used = new Set<number>();
   const out: ContextGroup[] = [];
   for (const g of raw as { ids?: unknown; show?: unknown }[]) {
-    const ids = Array.isArray(g?.ids) ? g.ids.map(Number).filter(Number.isInteger) : [];
+    const ids = Array.isArray(g?.ids)
+      ? g.ids.map(pictureId).filter((n): n is number => n != null)
+      : [];
     const show = typeof g?.show === "string" ? g.show.trim().slice(0, 400) : "";
     if (ids.length < 2 || !show) continue;
     const run = runOf.get(ids[0]);
@@ -1304,10 +1944,37 @@ export function parseContextGroups(text: string, runs: number[][]): ContextGroup
         (k === 0 || id === ids[k - 1] + 1)
     );
     if (!ok) continue;
-    ids.forEach(id => used.add(id));
-    out.push({ ids, show });
+    // A picture that names something the group's picture does not show keeps its own picture: the
+    // group is cut there, and each side of the cut that is still 2+ pictures stays a group
+    // (Hank's job 258: "…the lattice you see in Japanese sliding doors" was swallowed by a group of
+    // notch-cutting shots).
+    const runsOf: number[][] = [[]];
+    for (const id of ids) {
+      if (showOf && namesSomethingElse(showOf(id), show)) runsOf.push([]);
+      else runsOf[runsOf.length - 1].push(id);
+    }
+    for (const part of runsOf) {
+      if (part.length < 2) continue;
+      part.forEach(id => used.add(id));
+      out.push({ ids: part, show });
+    }
   }
   return out;
+}
+
+/**
+ * Whether a picture's own description names a THING the group's picture does not show: most of the
+ * meaningful words of what it shows (`shownThing`) are missing from the group's description. Pure.
+ */
+export function namesSomethingElse(own: string | undefined, group: string): boolean {
+  const stop = new Set(["a", "an", "the", "of", "and", "with", "its", "it", "her", "his", "their", "some", "one", "two", "three"]);
+  const words = (t: string) =>
+    t.toLowerCase().replace(/[^a-z0-9]+/g, " ").split(" ").filter(w => w.length > 2 && !stop.has(w));
+  const thing = words(shownThing(own ?? ""));
+  if (thing.length === 0) return false;
+  const inGroup = new Set(words(group));
+  const missing = thing.filter(w => !inGroup.has(w) && !inGroup.has(w.replace(/s$/, ""))).length;
+  return missing / thing.length > 0.5;
 }
 
 /**
@@ -1333,18 +2000,23 @@ export function applyContextGroups(scenes: StoryboardScene[], groups: ContextGro
     // thing that moves by itself may move). Every member carries it, so a topic that runs past
     // its limit continues as the same kind, from another view.
     const doing = members.filter(movingPicture);
-    // A topic with a tool going into the material in it is a photo, every view of it.
+    // A topic with a tool going into the material in it is a photo, every view of it — and so is
+    // one with a person in it: a video never shows hands (`videoKind`).
     const contact = members.some(s => s.toolContact);
     const motion =
-      doing.length === 0 || contact
-        ? "none"
-        : safeMotion(show, doing.some(s => s.humanPresent) ? "hands" : "object");
+      doing.length === 0 ? "none" : videoKind(show, "object", { person, contact });
+    // The key thing most of the group shows is the group's.
+    const counts = new Map<string, number>();
+    for (const s of members) if (s.keyThing) counts.set(s.keyThing, (counts.get(s.keyThing) ?? 0) + 1);
+    const thing = Array.from(counts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0];
     members.forEach((s, k) => {
       s.showSubject = show;
       s.visualPrompt = show;
       s.stillImage = motion === "none";
-      s.humanPresent = motion === "hands" || person ? true : undefined;
-      s.objectMotion = motion === "object" ? true : undefined;
+      s.humanPresent = person ? true : undefined;
+      s.objectMotion = motion !== "none" ? true : undefined;
+      s.cameraMove = undefined;
+      s.keyThing = thing;
       s.toolContact = contact ? true : undefined;
       if (k > 0) {
         s.sameShot = true;
@@ -1385,7 +2057,10 @@ export async function markSameContext(
         maxTokens: 16000,
         model: SHOT_LIST_MODEL(),
       });
-      return applyContextGroups(scenes, parseContextGroups(r.text, runs));
+      return applyContextGroups(
+        scenes,
+        parseContextGroups(r.text, runs, i => scenes[i]?.showSubject ?? scenes[i]?.visualPrompt)
+      );
     } catch {
       /* try once more */
     }

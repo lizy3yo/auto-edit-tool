@@ -6,8 +6,6 @@ import {
   joinHookPictures,
   joinSameContext,
   applyContextGroups,
-  pullListLeadIns,
-  trailingListItem,
   withView,
   MOVING_PICTURE_MAX_SEC,
   contextRuns,
@@ -20,6 +18,7 @@ import {
   HOST_HANDOFF_MIN_SEC,
   MAX_PICTURE_SEC,
   settleShots,
+  settleVideoKind,
   shotListEligible,
   tokenSpans,
 } from "./shotList";
@@ -87,8 +86,10 @@ describe("applyShotPlan", () => {
     expect(scenes[0].hostIntro).toBe(true);
     expect(scenes.slice(1).every(s => !s.hostPresent && s.listCut && s.wordCut)).toBe(true);
     expect(scenes[1].showSubject).toBe("a hand saw");
-    // A drill does not move by itself: asked to be an "object" shot, it stays a still rather than
-    // sliding around the bench on its own. A thing that just sits there is a still too.
+    // A drill does not move by itself: the planner's "object" stands only until the picture is
+    // judged (`judgeSelfMoving`) — judged still, it becomes a photo rather than sliding around.
+    scenes[2].selfMoving = false;
+    settleVideoKind(scenes[2]);
     expect(scenes[2].stillImage).toBe(true);
     expect(scenes[2].objectMotion).toBeUndefined();
     expect(scenes[3].stillImage).toBe(true);
@@ -126,7 +127,9 @@ describe("applyShotPlan", () => {
       "Folks will tell you Japanese woodworking takes a master's hands",
       "and a wall full of fancy saws.",
     ]);
+    // Hands are the host at work — in a PHOTO: no video ever shows hands (2026-09-30).
     expect(scenes[0].humanPresent).toBe(true);
+    expect(scenes[0].stillImage).toBe(true);
   });
 
   it("drops a shot whose words are not in the beat, keeping the text whole", () => {
@@ -198,8 +201,9 @@ describe("settleShots", () => {
     expect(settled.changed).toBe(true);
     expect(settled.scenes.length).toBeLessThan(4);
     expect(settled.scenes.map(s => s.scriptText).join(" ")).toBe(HANK);
-    // A folded pair is one shot of BOTH things, not a picture of whichever ran longer.
-    expect(settled.scenes[1].showSubject).toContain("together with");
+    // Only a blink folds, and it takes its neighbour's picture — never one shot of both (the
+    // operator rejected "a saw, together with a drill").
+    expect(settled.scenes.every(s => !/together with/.test(s.showSubject ?? ""))).toBe(true);
   });
 
   it("gives the whole line back to the host when the host part is too short", () => {
@@ -268,24 +272,26 @@ describe("settleShots", () => {
   });
 
   it("turns a moving shot too short for a video render into a still", () => {
-    const b = scene(5, "I sanded it smooth, then oiled every edge until it glowed in the light.");
+    const b = scene(5, "Smoke from the chimney, then the fire burning low behind the stove's glass all evening long.");
     const applied = applyShotPlan(
       [b],
       [
         {
           scene: 5,
           shots: [
-            { from: "I sanded", show: "hands sanding", motion: "hands" },
-            { from: "then oiled", show: "hands oiling an edge", motion: "hands" },
+            { from: "Smoke from", show: "smoke rising from the chimney", motion: "object" },
+            { from: "then the", show: "the fire burning low behind the stove's glass door", motion: "object" },
           ],
         },
       ]
     );
+    expect(applied.scenes[0].objectMotion).toBe(true);
     const settled = settleShots(applied.scenes, applied.originals, byWords(2.5));
     const first = settled.scenes[0]; // 4 words = 1.6 s — a shot, but too short for a video render
     expect(first.stillImage).toBe(true);
-    expect(first.humanPresent).toBeUndefined();
+    expect(first.objectMotion).toBeUndefined();
     expect(settled.scenes[1].stillImage).toBe(false);
+    expect(settled.scenes[1].objectMotion).toBe(true);
   });
 });
 
@@ -457,7 +463,7 @@ describe("pictures long enough to see (2026-09-27)", () => {
     // The operator: each thing on screen as it is named, held to 1 s by a short pause after the
     // word — never joined into one shot of both. Only a blink the snap squeezed (< 0.25 s) joins.
     // A list item keeps its own picture at the pace it is spoken; only a blink joins.
-    expect(LIST_SHOT_MIN_SEC).toBe(0.4);
+    expect(LIST_SHOT_MIN_SEC).toBe(0.25);
     const pieces = [
       scene(1, "a saw,", { wordCut: true, listCut: true, shotGroup: 5, audioDuration: 0.54, showSubject: "a saw" }),
       scene(2, "a drill,", { wordCut: true, listCut: true, shotGroup: 5, audioDuration: 0.42, showSubject: "a drill" }),
@@ -692,6 +698,8 @@ describe("one topic, one shot — a video or a photo", () => {
       audioDuration: sec,
       stillImage: moving ? false : true,
       humanPresent: moving === "hands" ? true : undefined,
+      objectMotion: moving && moving !== "hands" ? true : undefined,
+      cameraMove: moving === "camera" ? true : undefined,
     });
   const dishcloth = () => [
     scene(0, "Number three. The crochet dishcloth.", { hostPresent: true, audioDuration: 3 }),
@@ -710,24 +718,26 @@ describe("one topic, one shot — a video or a photo", () => {
   const kind = (s: StoryboardScene) =>
     s.hostPresent ? "host" : !s.stillImage && (s.humanPresent || s.objectMotion) ? "video" : "photo";
 
-  it("shows each topic as ONE shot: a video where something is done, else a photo", () => {
+  it("shows each topic as ONE shot — and hands at work are a PHOTO, never a video", () => {
     const scenes = dishcloth();
     applyContextGroups(scenes, groups);
     const r = joinSameContext(scenes, s => s.audioDuration ?? 0, () => 10.5);
     expect(r.scenes.map(s => `${kind(s)}: ${s.showSubject ?? "(host)"}`)).toEqual([
       "host: (host)",
       "photo: a cotton dishcloth beside a ball of cotton yarn",
-      "video: hands crocheting a waffle-stitch dishcloth",
+      "photo: hands crocheting a waffle-stitch dishcloth",
       "photo: three dishcloths tied with ribbon and soap on a market table",
     ]);
+    // The hands stay in the photo (the host at work).
+    expect(r.scenes[2].humanPresent).toBe(true);
   });
 
-  it("never lets a video run past what the video model can render", () => {
+  it("a topic with a big moving thing is ONE video, and never runs past what the model renders", () => {
     const long = [
-      pic(1, "I work mine in a waffle stitch.", "hands crocheting", 9, "hands"),
-      pic(2, "Row after row, while the kettle heats.", "hands crocheting", 9, "hands"),
+      pic(1, "The stove keeps the whole house warm.", "fire burning in the wood stove", 9, "object"),
+      pic(2, "All winter long, day and night.", "fire burning in the wood stove", 9, "object"),
     ];
-    applyContextGroups(long, [{ ids: [0, 1], show: "hands crocheting a dishcloth" }]);
+    applyContextGroups(long, [{ ids: [0, 1], show: "fire burning behind the wood stove's glass door" }]);
     // The quarter would allow 21 s; a video stops at 15 and the topic continues from another view.
     const r = joinSameContext(long, s => s.audioDuration ?? 0, () => 21);
     expect(MOVING_PICTURE_MAX_SEC).toBe(15);
@@ -746,7 +756,10 @@ describe("one topic, one shot — a video or a photo", () => {
         objectMotion: true,
       }),
     ];
+    // Judged: nothing in a quilt on a bed moves by itself.
+    scenes.forEach(s => (s.selfMoving = false));
     applyContextGroups(scenes, [{ ids: [0, 1], show: "a quilt laid out on a bed" }]);
+    scenes.forEach(s => settleVideoKind(s));
     expect(scenes.map(kind)).toEqual(["photo", "photo"]);
   });
 });
@@ -782,64 +795,6 @@ describe("a list's last item runs on into the same picture", () => {
   });
 });
 
-describe("a list's first item left on the line before goes to the list", () => {
-  const host = (i: number, text: string) =>
-    scene(i, text, { hostPresent: true, hostIntro: true, audioDuration: 13 });
-  const item = (i: number, text: string, show: string) =>
-    scene(i, text, { listCut: true, wordCut: true, showSubject: show, audioDuration: 1.5, shotGroup: 5 });
-
-  it("Granny Mae (job 231): 'with a hook,' becomes the list's first picture", () => {
-    const scenes = [
-      host(4, "I'm Granny Mae, and this one's for anybody sitting at a kitchen table with a hook,"),
-      item(5, "a skein of yarn,", "a worsted-weight cream yarn skein resting on the kitchen table"),
-      item(6, "and a stack of stitch books,", "a small stack of stitch books on the kitchen table"),
-    ];
-    const r = pullListLeadIns(scenes, "crochet projects");
-    expect(r.moved).toBe(1);
-    expect(r.scenes.map(s => s.scriptText)).toEqual([
-      "I'm Granny Mae, and this one's for anybody sitting at a kitchen table with",
-      "a hook,",
-      "a skein of yarn,",
-      "and a stack of stitch books,",
-    ]);
-    expect(r.scenes[0].hostPresent).toBe(true);
-    expect(r.scenes[0].wordCut).toBe(true);
-    expect(r.scenes[1].listCut).toBe(true);
-    expect(r.scenes[1].hostPresent).toBeFalsy();
-    expect(r.scenes[1].showSubject).toBe("a hook (as used for crochet projects) on the kitchen table");
-  });
-
-  it("works on any channel's wording, and leaves a list that is already whole alone", () => {
-    // Hank's list was all in one beat: nothing to move.
-    const hank = [
-      host(1, "I'm Hank Hardwood, and this one's for anybody standing in a garage with"),
-      item(2, "a saw,", "a handsaw on the workbench"),
-    ];
-    expect(pullListLeadIns(hank).moved).toBe(0);
-    // Any host, any list, any item: a woodworker, a locksmith, a jeweller.
-    expect(trailingListItem("You'll want to start the job at the front door with a stepladder,")).toEqual({
-      keep: "You'll want to start the job at the front door with",
-      item: "a stepladder,",
-    });
-    expect(trailingListItem("Before you pick one, lay them all out on the dresser: the pearls,")?.item).toBe(
-      "the pearls,"
-    );
-    // A line that does not END on a short item stays whole.
-    expect(trailingListItem("That's the whole build, and it takes twelve minutes.")).toBeNull();
-    expect(trailingListItem("with a big old bag of every leftover scrap of yarn I ever kept,")).toBeNull();
-    // Never leaves the host fewer than five words.
-    expect(trailingListItem("Grab a hook,")).toBeNull();
-  });
-
-  it("never takes from a CTA, cover or split line", () => {
-    const cta = [
-      { ...host(1, "The book is on my table with a bookmark,"), cta: true } as StoryboardScene,
-      item(2, "a pen,", "a pen"),
-    ];
-    expect(pullListLeadIns(cta).moved).toBe(0);
-  });
-});
-
 describe("a tool biting into material is a photo, never a video", () => {
   it("keeps drilling, sawing, screwing, cutting and carving still — on any channel", async () => {
     const { safeMotion, contactToolWork } = await import("./shotList");
@@ -849,14 +804,12 @@ describe("a tool biting into material is a photo, never a video", () => {
     expect(safeMotion("hands driving a screw into the strike plate", "hands")).toBe("none");
     expect(safeMotion("hands cutting fabric squares with a rotary cutter", "hands")).toBe("none");
     expect(safeMotion("hands carving a spoon from green wood", "hands")).toBe("none");
-    // Gentle hand work still moves.
-    expect(safeMotion("hands crocheting a granny square", "hands")).toBe("hands");
-    expect(safeMotion("hands sanding the edge of a board", "hands")).toBe("hands");
-    expect(safeMotion("hands oiling a walnut cutting board", "hands")).toBe("hands");
-    expect(safeMotion("hands stitching a quilt block", "hands")).toBe("hands");
+    // Since 2026-09-30 no hand work moves at all — hands are always a photo.
+    expect(safeMotion("hands crocheting a granny square", "hands")).toBe("none");
+    expect(safeMotion("hands sanding the edge of a board", "hands")).toBe("none");
     expect(contactToolWork("a cutting board on the counter")).toBe(false);
     // Holding a tool, or a tool lying there, is not the work.
-    expect(safeMotion("weathered hands holding a chisel", "hands")).toBe("hands");
+    expect(contactToolWork("weathered hands holding a chisel")).toBe(false);
     expect(contactToolWork("a cordless drill resting on the bench")).toBe(false);
     expect(contactToolWork("hands pressing a ruler on the green cutting mat")).toBe(false);
   });
@@ -880,7 +833,8 @@ describe("the shot list's own contact judgment makes a photo — any craft, any 
     );
     expect(scenes[0].stillImage).toBe(true);
     expect(scenes[0].toolContact).toBe(true);
-    expect(scenes[1].stillImage).toBe(false);
+    // Stitching is gentle, but it is hands: a photo too (2026-09-30).
+    expect(scenes[1].stillImage).toBe(true);
     expect(scenes[1].toolContact).toBeUndefined();
   });
 
@@ -918,12 +872,64 @@ describe("the shot list's own held judgment puts hands on the thing — any word
   });
 });
 
-describe("the planner cannot ask for moving hands on a picture with no hands", () => {
-  it("a 'hands' shot with no hands or person in it is a still", async () => {
-    const { safeMotion } = await import("./shotList");
-    expect(safeMotion("the dented coffee tin packed tight with squares", "hands")).toBe("none");
-    expect(safeMotion("hands sewing fabric scraps into a strip", "hands")).toBe("hands");
-    expect(safeMotion("the host threading the machine", "hands")).toBe("hands");
+describe("a video is only ever of something that moves by itself — never hands (2026-09-30)", () => {
+  it("never moves hands or a person, and has no camera moves", async () => {
+    const { videoKind } = await import("./shotList");
+    expect(videoKind("the dented coffee tin packed tight with squares", "hands")).toBe("none");
+    expect(videoKind("hands sewing fabric scraps into a strip", "object")).toBe("none");
+    expect(videoKind("the host threading the machine", "object")).toBe("none");
+    // No camera-move kind, and a thing JUDGED not to move by itself is a photo, whatever was asked.
+    expect(videoKind("the wood stove in the corner of the living room", "camera", { selfMoving: false })).toBe("none");
+    expect(videoKind("a cordless drill on the workbench", "object", { selfMoving: false })).toBe("none");
+  });
+  it("moves whatever moves by itself in the moment the words describe — small things may sit still in it", async () => {
+    const { videoKind } = await import("./shotList");
+    // Hank's opening (the operator, 2026-09-30): the incense holder smoking beside the can of scraps.
+    expect(
+      videoKind("the charred cedar incense holder with a lit stick, smoke curling up, the coffee can of scraps beside it", "object")
+    ).toBe("object");
+    expect(videoKind("steam rising off the kettle on the stove", "object")).toBe("object");
+    expect(videoKind("a pickup truck driving past the farmhouse", "object")).toBe("object");
+    expect(videoKind("the sliding glass door opening onto the deck", "object")).toBe("object");
+    expect(videoKind("fire burning in the wood stove", "camera")).toBe("object");
+  });
+});
+
+describe("a line naming something new keeps its own picture (Hank's job 258)", () => {
+  it("cuts a context group at a picture of something the group's picture does not show", async () => {
+    const { parseContextGroups, namesSomethingElse } = await import("./shotList");
+    const group = "hands cutting a notch halfway through a pine strip, the kumiko lattice panel nearby";
+    expect(namesSomethingElse("a Japanese sliding door with a kumiko lattice", group)).toBe(true);
+    expect(namesSomethingElse("the kumiko lattice panel on the bench", group)).toBe(false);
+    const shows = [
+      "the kumiko lattice panel on the bench",
+      "a Japanese sliding door with a kumiko lattice",
+      "hands cutting a notch in a pine strip",
+      "the kumiko lattice panel, seen closer",
+    ];
+    const groups = parseContextGroups(
+      JSON.stringify({ groups: [{ ids: [0, 1, 2, 3], show: group }] }),
+      [[0, 1, 2, 3]],
+      i => shows[i]
+    );
+    // The sliding door keeps its own picture; the pictures after it still share one.
+    expect(groups).toEqual([{ ids: [2, 3], show: group }]);
+  });
+});
+
+describe("the key thing a picture names", () => {
+  it("finds it in a split screen's or the QR background's own words", async () => {
+    const { keyThingIn } = await import("./shotList");
+    const things = [
+      { name: "charred cedar incense holder", look: "black charred cedar block", main: true as const },
+      { name: "kumiko lattice panel", look: "a foot-square pine grid" },
+      { name: "coffee can", look: "a dented coffee can of burnt scraps" },
+    ];
+    expect(keyThingIn("A finished charred cedar incense holder sitting upright on a wooden workbench", things)?.name).toBe(
+      "charred cedar incense holder"
+    );
+    expect(keyThingIn("A kumiko lattice panel leaning against the bench", things)?.name).toBe("kumiko lattice panel");
+    expect(keyThingIn("a market table in the sun", things)).toBeNull();
   });
 });
 
@@ -977,3 +983,278 @@ describe("a list's last picture runs on into a NEARLY identical one (Dale, job 2
     expect(r.scenes).toHaveLength(2);
   });
 });
+
+describe("what moves by itself is judged per picture, not from a word list (2026-10-01)", () => {
+  it("reads the judgement and puts it on pictures and split panels — only on those asked about", async () => {
+    const { parseSelfMoving, applySelfMoving } = await import("./shotList");
+    const scenes = [
+      scene(1, "a", { showSubject: "a sliding door standing closed" }),
+      scene(2, "b", { showSubject: "smoke rising from a smoldering mattress" }),
+      scene(3, "c", { hostPresent: true, splitVisual: "a candle burning on the table" }),
+      scene(4, "d", { showSubject: "a parked car", selfMoving: true }),
+    ];
+    const asked = [0, 1, 2];
+    const moving = parseSelfMoving('{"moving":[1,2,3,9]}', asked);
+    expect(moving).toEqual([1, 2]); // 3 and 9 were not asked about
+    applySelfMoving(scenes, asked, moving);
+    expect(scenes.map(s => s.selfMoving)).toEqual([false, true, undefined, true]);
+    expect(scenes[2].splitSelfMoving).toBe(true);
+  });
+  it("a door or anything a person moves is never a video once judged", async () => {
+    const { videoKind } = await import("./shotList");
+    expect(videoKind("the sliding glass door opening onto the deck", "object", { selfMoving: false })).toBe("none");
+    expect(videoKind("smoke rising from a smoldering mattress", "object", { selfMoving: true })).toBe("object");
+  });
+});
+
+describe("every picture shows what its line is about (Frederick's job 259)", () => {
+  it("keeps only real fixes and puts the new picture, its key things and the video rule on it", async () => {
+    const { parsePictureFixes, applyPictureFixes } = await import("./shotList");
+    const scenes = [
+      scene(1, "Fires don't all behave the same way.", {
+        showSubject: "the smoke alarm on the hallway ceiling",
+        keyThing: "smoke alarm",
+        stillImage: false,
+        objectMotion: true,
+      }),
+      scene(2, "I'm Frederick Barnes.", { hostPresent: true }),
+    ];
+    const fixes = parsePictureFixes(
+      JSON.stringify({
+        fix: [
+          { id: 0, show: "a grease flame flaring on a stovetop beside a smoldering ember glow", thing: null },
+          { id: 1, show: "the host", thing: null }, // a host take is never rewritten
+          { id: 9, show: "nothing there" },
+        ],
+      }),
+      scenes
+    );
+    expect(fixes.map(f => f.id)).toEqual([0]);
+    const things = [{ name: "smoke alarm", look: "round white", main: true as const }];
+    expect(applyPictureFixes(scenes, fixes, things)).toBe(1);
+    expect(scenes[0].showSubject).toMatch(/grease flame/);
+    expect(scenes[0].keyThing).toBeUndefined(); // the alarm is no longer in it
+    expect(scenes[0].objectMotion).toBe(true); // a flame moves by itself
+  });
+});
+
+describe("writing only when the script says it, and exact (2026-10-01)", () => {
+  it("keeps the planner's text only when every word of it is spoken in the line", async () => {
+    const { saidText } = await import("./shotList");
+    expect(saidText("PHOTOELECTRIC", "Look for the word photoelectric on the box.")).toBe("PHOTOELECTRIC");
+    expect(saidText("MFG 2016", "And while you're up there, turn one over and look for the date.")).toBeUndefined();
+    expect(saidText("10 YEAR", "Smoke alarms expire. At 10 years the unit is finished.")).toBeUndefined(); // "year" ≠ "years"
+    expect(saidText("10 years", "At 10 years the unit is finished.")).toBe("10 years");
+    expect(saidText(undefined, "anything")).toBeUndefined();
+  });
+  it("puts it on the piece only when that piece's own words say it", () => {
+    const b = scene(3, "The box says photoelectric right on the front. Then look for the date.");
+    const { scenes } = applyShotPlan(
+      [b],
+      [
+        {
+          scene: 3,
+          shots: [
+            { from: "The box", show: "the alarm box on the shelf", text: "PHOTOELECTRIC" },
+            { from: "Then look", show: "the alarm turned over", text: "2016" },
+          ],
+        },
+      ]
+    );
+    expect(scenes[0].pictureText).toBe("PHOTOELECTRIC");
+    expect(scenes[1].pictureText).toBeUndefined(); // no date is said — none is printed
+  });
+});
+
+describe("picture numbers read back from a model (jobs 265/266: every '#' id was dropped)", () => {
+  it("reads 12, '12' and '#12' alike, and nothing else", async () => {
+    const { pictureId, parseSelfMoving, parseContextGroups } = await import("./shotList");
+    expect([12, "12", "#12", " # 12 "].map(pictureId)).toEqual([12, 12, 12, 12]);
+    expect(["twelve", "12a", 1.5, null].map(pictureId)).toEqual([null, null, null, null]);
+    expect(parseSelfMoving('{"moving":["#1","#18"]}', [1, 18, 3])).toEqual([1, 18]);
+    expect(parseContextGroups('{"groups":[{"ids":["#0","#1"],"show":"x"}]}', [[0, 1]])).toEqual([{ ids: [0, 1], show: "x" }]);
+  });
+});
+
+describe("a spoken list is recognised from its words, whatever the planner marked (Hank's job 268)", () => {
+  it("marks every item of a list as a list item, so no fold or flash rule can merge them", () => {
+    const b = scene(4, "a saw, a drill, and a stack of sandpaper, wondering if that look is worth anything.");
+    const { scenes } = applyShotPlan(
+      [b],
+      [
+        {
+          scene: 4,
+          shots: [
+            // The planner forgot `list` on the first two items.
+            { from: "a saw", show: "a hand saw on the workbench" },
+            { from: "a drill", show: "a drill on the workbench" },
+            { from: "and a stack", show: "a stack of sandpaper", list: true },
+            { from: "wondering if", show: "a market table" },
+          ],
+        },
+      ]
+    );
+    expect(scenes.map(s => [s.scriptText, !!s.listCut])).toEqual([
+      ["a saw,", true],
+      ["a drill,", true],
+      ["and a stack of sandpaper,", true],
+      ["wondering if that look is worth anything.", false],
+    ]);
+    // Settled at a quick pace, each item keeps its own picture.
+    const settled = settleShots(scenes, new Map([[4, b]]), s => (s.listCut ? 0.5 : 3));
+    expect(settled.scenes.filter(s => s.listCut).map(s => s.scriptText)).toEqual([
+      "a saw,",
+      "a drill,",
+      "and a stack of sandpaper,",
+    ]);
+  });
+  it("splits a picture the planner gave two items into one picture per item", () => {
+    const b = scene(4, "a saw, a drill, and a stack of sandpaper.");
+    const { scenes } = applyShotPlan(
+      [b],
+      [{ scene: 4, shots: [{ from: "a saw", show: "a drill on the workbench" }, { from: "and a stack", show: "sandpaper", list: true }] }]
+    );
+    expect(scenes.map(s => s.scriptText)).toEqual(["a saw,", "a drill,", "and a stack of sandpaper."]);
+    expect(scenes[0].showSubject).toBe("a saw on the workbench");
+    expect(scenes[1].showSubject).toBe("a drill on the workbench");
+    expect(scenes.every(s => s.listCut)).toBe(true);
+  });
+  it("never takes an ordinary short line for a list", async () => {
+    const { looksLikeListItem } = await import("./shotList");
+    expect(looksLikeListItem("Start with the one that lost.")).toBe(false);
+    expect(looksLikeListItem("wondering if that clean look is worth anything on a market table.")).toBe(false);
+  });
+});
+
+describe("a clause is never taken for a list item", () => {
+  it("reads 'the cheapest fabric won,' and 'the one I loved most' as clauses", async () => {
+    const { looksLikeListItem } = await import("./shotList");
+    expect(looksLikeListItem("the cheapest fabric won,")).toBe(false);
+    expect(looksLikeListItem("and the fancy one I loved most")).toBe(false);
+    expect(looksLikeListItem("a rusted hand saw,")).toBe(true);
+  });
+});
+
+describe("a list without articles is recognised too — any channel", () => {
+  it("keeps 'flour, sugar, and butter' as one picture per item, never an aside", async () => {
+    const { looksLikeBareListItem, splitListPieces } = await import("./shotList");
+    for (const t of ["flour,", "and butter.", "hammers,", "and chisels,", "2 eggs,"]) expect(looksLikeBareListItem(t)).toBe(true);
+    for (const t of ["Honestly,", "slowly,", "Next,", "every weekend,", "I did,"]) expect(looksLikeBareListItem(t)).toBe(false);
+    const split = splitListPieces([scene(1, "flour, sugar, and butter.", { showSubject: "baking things on the counter" })]);
+    expect(split.map(s => [s.scriptText, s.showSubject, s.listCut])).toEqual([
+      ["flour,", "flour on the counter", true],
+      ["sugar,", "sugar on the counter", true],
+      ["and butter.", "butter on the counter", true],
+    ]);
+  });
+  it("marks a run of bare items the planner left unmarked", () => {
+    const b = scene(2, "hammers, saws, and chisels, all on one wall.");
+    const { scenes } = applyShotPlan(
+      [b],
+      [
+        {
+          scene: 2,
+          shots: [
+            { from: "hammers", show: "hammers on the wall" },
+            { from: "saws", show: "saws on the wall" },
+            { from: "and chisels", show: "chisels on the wall" },
+            { from: "all on", show: "the tool wall" },
+          ],
+        },
+      ]
+    );
+    expect(scenes.map(s => !!s.listCut)).toEqual([true, true, true, false]);
+  });
+});
+
+describe("a picture shows what its line is about, in the place it names (Hank's job 269: an empty market table)", () => {
+  it("tells the line check a place alone is wrong, and a new thing the line names is right", async () => {
+    const { FIT_SYSTEM } = await import("./shotList");
+    expect(FIT_SYSTEM).toMatch(/shows only a PLACE or SURFACE the line names/);
+    expect(FIT_SYSTEM).toMatch(/the picture is the work\s+that has it/);
+    expect(FIT_SYSTEM).toMatch(/something NEW the line names[\s\S]*is RIGHT/);
+    // No channel's own examples in it.
+    expect(FIT_SYSTEM).not.toMatch(/kumiko|incense|smoke alarm|market table\b(?! for)/i);
+  });
+});
+
+describe("the line check goes picture by picture, and can split a line (Hank's job 271)", () => {
+  it("reads the per-picture answer: rewrites only what does not fit, and keeps each split", async () => {
+    const { parsePictureFixes } = await import("./shotList");
+    const scenes = [
+      scene(1, "the one that paid me best came out of a coffee can of burnt scraps.", { showSubject: "a coffee can" }),
+      scene(2, "Kumiko is fitting strips together, the kind of lattice you see in old sliding doors.", { showSubject: "a lattice panel" }),
+      scene(3, "I'm Hank.", { hostPresent: true }),
+    ];
+    const fixes = parsePictureFixes(
+      JSON.stringify({
+        pictures: [
+          { id: 0, about: "the winning project", shows_it: false, show: "the winning piece beside the can", thing: null },
+          { id: 1, about: "kumiko", shows_it: true, split: [{ from: "the kind of lattice", show: "an old sliding door with a lattice" }] },
+          { id: 2, about: "host", shows_it: false, show: "x" }, // a host take is never rewritten
+        ],
+      }),
+      scenes
+    );
+    expect(fixes).toEqual([
+      { id: 0, show: "the winning piece beside the can" },
+      { id: 1, split: [{ from: "the kind of lattice", show: "an old sliding door with a lattice", thing: undefined }] },
+    ]);
+  });
+  it("splits the line where the new thing starts; the part before keeps its picture", async () => {
+    const { applyPictureSplits } = await import("./shotList");
+    const scenes = [
+      scene(1, "Kumiko is fitting strips together, the kind of lattice you see in old sliding doors.", {
+        showSubject: "a lattice panel",
+        wordCut: true,
+        shotGroup: 4,
+      }),
+    ];
+    const r = applyPictureSplits(
+      scenes,
+      [{ id: 0, split: [{ from: "the kind of lattice", show: "an old sliding door with a lattice" }] }],
+      []
+    );
+    expect(r.split).toBe(1);
+    expect(r.scenes.map(s => [s.scriptText, s.showSubject])).toEqual([
+      ["Kumiko is fitting strips together,", "a lattice panel"],
+      ["the kind of lattice you see in old sliding doors.", "an old sliding door with a lattice"],
+    ]);
+    // A split whose words are not in the line, or that leaves a part under 4 words, is skipped.
+    expect(applyPictureSplits(scenes, [{ id: 0, split: [{ from: "not in it", show: "x" }] }], []).split).toBe(0);
+    expect(applyPictureSplits(scenes, [{ id: 0, split: [{ from: "old sliding doors", show: "x" }] }], []).split).toBe(0);
+  });
+});
+
+describe("printing the line talks about is shown blurred, not hidden (2026-10-01)", () => {
+  it("reads a description about printing as blurred print — unless the line says the words", async () => {
+    const { blurredPrint } = await import("./shotList");
+    expect(blurredPrint("the alarm box with the three things printed on it")).toBe(true);
+    expect(blurredPrint("the jar turned to show its date")).toBe(true);
+    expect(blurredPrint("a wood stove in the corner")).toBe(false);
+    const b = scene(5, "By the end of this you'll know three things printed on the box. The tag says handmade.");
+    const { scenes } = applyShotPlan(
+      [b],
+      [
+        {
+          scene: 5,
+          shots: [
+            { from: "By the", show: "the alarm box with its printed label", print: "blurred" },
+            { from: "The tag", show: "the tag on the quilt", text: "HANDMADE" },
+          ],
+        },
+      ]
+    );
+    expect(scenes[0].blurPrint).toBe(true);
+    expect(scenes[0].pictureText).toBeUndefined();
+    expect(scenes[1].pictureText).toBe("HANDMADE");
+    expect(scenes[1].blurPrint).toBeUndefined();
+  });
+  it("the line check is told not to repeat the picture before, and to show the main thing in use first", async () => {
+    const { FIT_SYSTEM } = await import("./shotList");
+    expect(FIT_SYSTEM).toMatch(/repeats what the picture before\s+already shows/);
+    expect(FIT_SYSTEM).toMatch(/a kind of event or situation/);
+    expect(FIT_SYSTEM).toMatch(/FIRST of the MAIN thing/);
+  });
+});
+

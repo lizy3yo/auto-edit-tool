@@ -232,6 +232,31 @@ async function fetchVoiceCloneIds(apiKey: string): Promise<Set<string> | null> {
   }
 }
 
+/** 69Labs account clone ids are UUIDs; library (ElevenLabs-space) ids are 20-character tokens. */
+const UUID_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Which of the two voice spaces an id lives in, by its shape alone. Pure. */
+export function voiceSpaceByShape(voiceId: string): "clone" | "library" {
+  return UUID_ID.test(voiceId.trim()) ? "clone" : "library";
+}
+
+/**
+ * Which 69Labs voice space a voice lives in. The two spaces go through different endpoints
+ * (`/voice-clones/generate` vs `/tts/generate`) and fail independently — on 2026-10-01 every
+ * clone answered 503 VOICE_LOOKUP_FAILED for over an hour while library voices worked — so a
+ * health comparison is only meaningful between two voices of the same space. Asks the account's
+ * clone list (cached); falls back to the id's shape when that lookup is unavailable.
+ */
+export async function voiceSpace69Labs(
+  apiKey: string,
+  voiceId: string
+): Promise<"clone" | "library"> {
+  if (_cloneRoutes.has(`${apiKey}:${voiceId}`)) return "clone";
+  const ids = await fetchVoiceCloneIds(apiKey);
+  if (ids?.has(voiceId)) return "clone";
+  return ids && ids.size ? "library" : voiceSpaceByShape(voiceId);
+}
+
 export interface TTSParams {
   text: string;
   voiceId: string;

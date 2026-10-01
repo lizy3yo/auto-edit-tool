@@ -2580,3 +2580,583 @@ job 256 (granny_mae) — completed
   stats: {"scenes":28,"hostTakes":10,"hostSec":68,"ctaPatterns":["block 0: HBHQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":5,"handOffs":7,"longestFacelessEarlySec":26,"longestFacelessLateSec":0,"longestPictureSec":15.5,"motionSharePct":11,"picturesJudged":19}
    - [10] scene 12 split-panel: does not show what is said — close-up hands, not seated in rocking chair, not wide shot
 ```
+
+### quilting_with_granny_ruth run 1 — 40 min
+```
+job 255 (quilting_with_granny_ruth) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place (1 finding)
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo
+  PASS  14. no cut inside a word
+  stats: {"scenes":33,"hostTakes":9,"hostSec":66,"ctaPatterns":["block 0: HBHQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":9,"handOffs":5,"longestFacelessEarlySec":30,"longestFacelessLateSec":0,"longestPictureSec":12.7,"motionSharePct":16,"picturesJudged":26}
+   - [3] scene 29 b-roll: wrong place — indoor setting, not an outdoor market table
+```
+
+### frederick_barnes run 1 — 31 min
+```
+job 257 (frederick_barnes) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (1 finding)
+  FAIL  11. real video (1 finding)
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo
+  PASS  14. no cut inside a word
+  stats: {"scenes":25,"hostTakes":9,"hostSec":56,"ctaPatterns":["block 0: HBHQ"],"introductions":2,"midSentenceHostTakes":0,"listCuts":0,"handOffs":5,"longestFacelessEarlySec":29,"longestFacelessLateSec":11,"longestPictureSec":14.8,"motionSharePct":0,"picturesJudged":17}
+   - [10] scene 22 b-roll: does not show what is said — shows installing alarm, not turning it to check date
+   - [11] only 0% of cutaway time is moving
+```
+
+### hank_hardwood run 1 — 37 min
+```
+job 258 (hank_hardwood) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (1 finding)
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo
+  PASS  14. no cut inside a word
+  stats: {"scenes":29,"hostTakes":8,"hostSec":58,"ctaPatterns":["block 0: HBHQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":6,"handOffs":5,"longestFacelessEarlySec":37,"longestFacelessLateSec":0,"longestPictureSec":17.3,"motionSharePct":12,"picturesJudged":21}
+   - [10] scene 16 b-roll: does not show what is said — sawing shown, not drilling angled hole
+```
+
+### frederick_barnes run 1 — 30 min
+```
+job 259 (frederick_barnes) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo (1 finding)
+  PASS  14. no cut inside a word
+  stats: {"scenes":33,"hostTakes":9,"hostSec":51,"ctaPatterns":["block 0: HBHQ"],"introductions":2,"midSentenceHostTakes":0,"listCuts":3,"handOffs":5,"longestFacelessEarlySec":34,"longestFacelessLateSec":9,"longestPictureSec":12.2,"motionSharePct":14,"picturesJudged":26}
+   - [13] scene 8 b-roll: not a phone-photo look — dramatic staged fire lighting, not candid
+```
+
+### hank_hardwood run 1 — 36 min
+```
+job 260 (hank_hardwood) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (2 findings)
+  FAIL  11. real video (1 finding)
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo
+  PASS  14. no cut inside a word
+  stats: {"scenes":30,"hostTakes":9,"hostSec":61,"ctaPatterns":["block 0: HBHQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":3,"handOffs":6,"longestFacelessEarlySec":38,"longestFacelessLateSec":0,"longestPictureSec":13.9,"motionSharePct":3,"picturesJudged":22}
+   - [10] scene 12 split-panel: does not show what is said — no hands or cutting action visible
+   - [10] scene 29 b-roll: does not show what is said — no brushing action shown, just static pieces
+   - [11] only 3% of cutaway time is moving
+```
+
+### hank_hardwood run 1 — 29 min
+```
+job 261 (hank_hardwood) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures (1 finding)
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it
+  FAIL  11. real video (1 finding)
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo (1 finding)
+  PASS  14. no cut inside a word
+  stats: {"scenes":29,"hostTakes":8,"hostSec":58,"ctaPatterns":["block 0: HBHQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":7,"handOffs":5,"longestFacelessEarlySec":38,"longestFacelessLateSec":0,"longestPictureSec":15.5,"motionSharePct":6,"picturesJudged":20}
+   - [4] scene 23 b-roll: cluttered — other wooden items crowd the table
+   - [11] only 6% of cutaway time is moving
+   - [13] scene 18 b-roll: not a phone-photo look — neatly arranged, moody styled composition
+```
+
+### frederick_barnes run 1 — 32 min
+```
+job 262 (frederick_barnes) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (2 findings)
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo (1 finding)
+  PASS  14. no cut inside a word
+  stats: {"scenes":32,"hostTakes":11,"hostSec":64,"ctaPatterns":["block 0: HBHQ"],"introductions":2,"midSentenceHostTakes":0,"listCuts":0,"handOffs":7,"longestFacelessEarlySec":28,"longestFacelessLateSec":11,"longestPictureSec":15,"motionSharePct":20,"picturesJudged":24}
+   - [10] scene 24 split-panel: does not show what is said — no hand pulling battery visible
+   - [10] scene 27 split-panel: does not show what is said — alarm mounted on ceiling, not held or turned
+   - [13] scene 16 b-roll: not a phone-photo look — artificial-looking staged smoke curl composition
+```
+
+### hank_hardwood run 1 — 30 min
+```
+job 264 (hank_hardwood) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (2 findings)
+  FAIL  11. real video (1 finding)
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo
+  PASS  14. no cut inside a word
+  stats: {"scenes":30,"hostTakes":9,"hostSec":61,"ctaPatterns":["block 0: HBHQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":6,"handOffs":6,"longestFacelessEarlySec":39,"longestFacelessLateSec":0,"longestPictureSec":13.1,"motionSharePct":8,"picturesJudged":22}
+   - [10] scene 8 split-panel: does not show what is said — no hands fitting strips are visible
+   - [10] scene 25 split-panel: does not show what is said — table is full, not sparse with empty spaces
+   - [11] only 8% of cutaway time is moving
+```
+
+### frederick_barnes run 1 — 32 min
+```
+job 263 (frederick_barnes) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  FAIL  10. say it, show it (4 findings)
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo (2 findings)
+  PASS  14. no cut inside a word
+  stats: {"scenes":37,"hostTakes":10,"hostSec":50,"ctaPatterns":["block 0: HBHQ"],"introductions":2,"midSentenceHostTakes":0,"listCuts":3,"handOffs":6,"longestFacelessEarlySec":34,"longestFacelessLateSec":10,"longestPictureSec":10.5,"motionSharePct":11,"picturesJudged":29}
+   - [10] scene 11 b-roll: does not show what is said — wide room shot, not a close-up detail
+   - [10] scene 16 b-roll: does not show what is said — no smoke visible, room not dark
+   - [10] scene 33 split-panel: does not show what is said — Smoke alarm shown on ceiling, no host or ladder
+   - [10] scene 35 split-panel: does not show what is said — no hand shown closing the door
+   - [13] scene 11 b-roll: not a phone-photo look — wide room shot, not a close-up detail
+   - [13] scene 35 split-panel: not a phone-photo look — no hand shown closing the door
+```
+
+### hank_hardwood run 1 — job 266: FAILED after 9 min
+    Cancelled by user
+
+### frederick_barnes run 1 — job 265: FAILED after 9 min
+    Cancelled by user
+
+### frederick_barnes run 1 — 44 min
+```
+job 267 (frederick_barnes) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  FAIL  10. say it, show it (4 findings)
+  FAIL  11. real video (1 finding)
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo (1 finding)
+  PASS  14. no cut inside a word
+  stats: {"scenes":33,"hostTakes":10,"hostSec":62,"ctaPatterns":["block 0: HBHQ"],"introductions":2,"midSentenceHostTakes":0,"listCuts":0,"handOffs":6,"longestFacelessEarlySec":29,"longestFacelessLateSec":19,"longestPictureSec":18.9,"motionSharePct":9,"picturesJudged":26}
+   - [10] scene 21 b-roll: does not show what is said — label not visible; shows back of alarm mounting
+   - [10] scene 25 split-panel: does not show what is said — alarm mounted on ceiling, not held in hand
+   - [10] scene 29 b-roll: does not show what is said — showing front install, not back date check
+   - [10] scene 31 split-panel: does not show what is said — front of alarm shown, not back plate date
+   - [11] only 9% of cutaway time is moving
+   - [13] scene 11 b-roll: not a phone-photo look — staged, overly clean rendered fire scene
+```
+
+### hank_hardwood run 1 — 52 min
+```
+job 268 (hank_hardwood) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (2 findings)
+  FAIL  11. real video (1 finding)
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo (1 finding)
+  PASS  14. no cut inside a word
+  stats: {"scenes":32,"hostTakes":9,"hostSec":62,"ctaPatterns":["block 0: HBHQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":4,"handOffs":6,"longestFacelessEarlySec":28,"longestFacelessLateSec":0,"longestPictureSec":11.5,"motionSharePct":7,"picturesJudged":25}
+   - [10] scene 19 split-panel: does not show what is said — no hands or sawing shown, just smoking block
+   - [10] scene 27 b-roll: does not show what is said — table is full, not sparse leftovers
+   - [11] only 7% of cutaway time is moving
+   - [13] scene 19 split-panel: not a phone-photo look — no hands or sawing shown, just smoking block
+```
+
+### hank_hardwood run 1 — 26 min
+```
+job 269 (hank_hardwood) — completed
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (2 findings)
+  FAIL  11. real video (1 finding)
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo (2 findings)
+  PASS  14. no cut inside a word
+  stats: {"scenes":35,"hostTakes":10,"hostSec":60,"ctaPatterns":["block 0: HBHQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":8,"handOffs":7,"longestFacelessEarlySec":24,"longestFacelessLateSec":0,"longestPictureSec":14.7,"motionSharePct":0,"picturesJudged":26}
+   - [10] scene 13 split-panel: does not show what is said — no hands or cutting action visible
+   - [10] scene 29 split-panel: does not show what is said — tray slots are full, none empty
+   - [11] only 0% of cutaway time is moving
+   - [13] scene 19 split-panel: not a phone-photo look — glowing staged lighting, overly polished look
+   - [13] scene 29 split-panel: not a phone-photo look — tray slots are full, none empty
+```
+
+### hank_hardwood run 1 — job 271: FAILED after 14 min
+    Cancelled by user
+
+### frederick_barnes run 1 — job 270: FAILED after 30 min
+    10 scene(s) have no clip — not assembling a partial video: scene 1 (Waiting for HeyGen — the HeyGen account is out of credits), scene 3 (Waiting for HeyGen — the HeyGen account is out of credits), scene 5 (Waiting for HeyGen — the HeyGen account is out of credits), scene 8 (Waiting for HeyGen — the HeyGen account is out of credits), scene 16 (Waiting for HeyGen — the HeyGen account is out of credits), scene 18 (Waiting for HeyGen — the HeyGen account is out of credits), scene 20 (Waiting for HeyGen — the HeyGen account is out of credits), scene 24 (Waiting for HeyGen — the HeyGen account is out of credits), scene 30 (Waiting for HeyGen — the HeyGen account is out of credits), scene 32 (Waiting for HeyGen — the HeyGen account is out of credits)
+
+### hank_hardwood run 1 — job 272: FAILED after 14 min
+    Cancelled by user
+
+### hank_hardwood run 1 — 36 min
+```
+job 273 (hank_hardwood) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (2 findings)
+  FAIL  11. real video (1 finding)
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo (1 finding)
+  PASS  14. no cut inside a word
+  stats: {"scenes":34,"hostTakes":10,"hostSec":61,"ctaPatterns":["block 0: HBHQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":6,"handOffs":7,"longestFacelessEarlySec":28,"longestFacelessLateSec":0,"longestPictureSec":9.8,"motionSharePct":5,"picturesJudged":25}
+   - [10] scene 9 split-panel: does not show what is said — no hands visible fitting the strips
+   - [10] scene 13 split-panel: does not show what is said — no hands visible cutting notch
+   - [11] only 5% of cutaway time is moving
+   - [13] scene 13 split-panel: not a phone-photo look — no hands visible cutting notch
+```
+
+### frederick_barnes run 1 — 45 min
+```
+job 274 (frederick_barnes) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place (1 finding)
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  FAIL  10. say it, show it (5 findings)
+  PASS  11. real video
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo (2 findings)
+  PASS  14. no cut inside a word
+  stats: {"scenes":41,"hostTakes":8,"hostSec":42,"ctaPatterns":["block 0: HBHQ"],"introductions":2,"midSentenceHostTakes":0,"listCuts":2,"handOffs":4,"longestFacelessEarlySec":38,"longestFacelessLateSec":10,"longestPictureSec":10.4,"motionSharePct":17,"picturesJudged":33}
+   - [3] scene 33 b-roll: wrong place — alarm is off to the side, not over mattress
+   - [10] scene 16 b-roll: does not show what is said — boxes are background, disassembled alarm is focus
+   - [10] scene 17 b-roll: does not show what is said — no smoke visible drifting beneath alarm
+   - [10] scene 32 b-roll: does not show what is said — only one smoke alarm visible, not two
+   - [10] scene 33 b-roll: does not show what is said — alarm is off to the side, not over mattress
+   - [10] scene 40 b-roll: does not show what is said — alarm not shown flipped, still on ceiling
+   - [13] scene 33 b-roll: not a phone-photo look — alarm is off to the side, not over mattress
+   - [13] scene 39 split-panel: not a phone-photo look — glowing light around door edges looks staged
+```
+
+### frederick_barnes run 1 — 27 min
+```
+job 276 (frederick_barnes) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  FAIL  10. say it, show it (3 findings)
+  PASS  11. real video
+  PASS  12. voice says every word
+  FAIL  13. looks like a phone photo (3 findings)
+  PASS  14. no cut inside a word
+  stats: {"scenes":34,"hostTakes":9,"hostSec":44,"ctaPatterns":["block 0: HBHQ"],"introductions":2,"midSentenceHostTakes":0,"listCuts":2,"handOffs":5,"longestFacelessEarlySec":39,"longestFacelessLateSec":11,"longestPictureSec":16.6,"motionSharePct":10,"picturesJudged":27}
+   - [10] scene 19 b-roll: does not show what is said — label not shown, alarm being installed on ceiling
+   - [10] scene 31 b-roll: does not show what is said — front of alarm shown, not back with date
+   - [10] scene 32 split-panel: does not show what is said — no hand visible closing the door
+   - [13] scene 13 split-panel: not a phone-photo look — staged dramatic fire with glowing AI-like render
+   - [13] scene 20 b-roll: not a phone-photo look — glowing staged smoke effect looks artificial
+   - [13] scene 32 split-panel: not a phone-photo look — no hand visible closing the door
+```
+
+### hank_hardwood run 1 — 30 min
+```
+job 275 (hank_hardwood) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (1 finding)
+  FAIL  11. real video (1 finding)
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo
+  PASS  14. no cut inside a word
+  stats: {"scenes":27,"hostTakes":9,"hostSec":59,"ctaPatterns":["block 0: HBHQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":4,"handOffs":5,"longestFacelessEarlySec":28,"longestFacelessLateSec":0,"longestPictureSec":17.7,"motionSharePct":6,"picturesJudged":20}
+   - [10] scene 9 split-panel: does not show what is said — finished lattice shown, no hands working
+   - [11] only 6% of cutaway time is moving
+```
+
+### hank_hardwood run 1 — 26 min
+```
+job 277 (hank_hardwood) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (1 finding)
+  FAIL  11. real video (1 finding)
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo
+  PASS  14. no cut inside a word
+  stats: {"scenes":31,"hostTakes":9,"hostSec":62,"ctaPatterns":["block 0: HBHQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":3,"handOffs":6,"longestFacelessEarlySec":35,"longestFacelessLateSec":0,"longestPictureSec":13.1,"motionSharePct":9,"picturesJudged":22}
+   - [10] scene 12 split-panel: does not show what is said — no hands visible cutting the notch
+   - [11] only 9% of cutaway time is moving
+```
+
+### granny_mae run 1 — 31 min
+```
+job 279 (granny_mae) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (1 finding)
+  FAIL  11. real video (1 finding)
+  PASS  12. voice says every word
+  FAIL  13. looks like a phone photo (3 findings)
+  PASS  14. no cut inside a word
+  stats: {"scenes":31,"hostTakes":9,"hostSec":49,"ctaPatterns":["block 0: HBHQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":5,"handOffs":6,"longestFacelessEarlySec":35,"longestFacelessLateSec":39,"longestPictureSec":18.6,"motionSharePct":0,"picturesJudged":21}
+   - [10] scene 10 split-panel: does not show what is said — no hands shown crocheting
+   - [11] only 0% of cutaway time is moving
+   - [13] scene 7 b-roll: not a phone-photo look — scene looks staged and overly polished
+   - [13] scene 9 b-roll: not a phone-photo look — staged, overly neat styled market display
+   - [13] scene 10 split-panel: not a phone-photo look — no hands shown crocheting
+```
+
+### frederick_barnes run 1 — 39 min
+```
+job 278 (frederick_barnes) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place (1 finding)
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  FAIL  10. say it, show it (3 findings)
+  PASS  11. real video
+  PASS  12. voice says every word
+  FAIL  13. looks like a phone photo (5 findings)
+  PASS  14. no cut inside a word
+  stats: {"scenes":36,"hostTakes":10,"hostSec":47,"ctaPatterns":["block 0: HBHQ"],"introductions":2,"midSentenceHostTakes":0,"listCuts":3,"handOffs":6,"longestFacelessEarlySec":29,"longestFacelessLateSec":10,"longestPictureSec":10.2,"motionSharePct":14,"picturesJudged":28}
+   - [3] scene 29 b-roll: wrong place — shown in bedroom, not basement
+   - [10] scene 7 split-panel: does not show what is said — No person visible watching the flames
+   - [10] scene 14 b-roll: does not show what is said — only one box shown, not a multipack
+   - [10] scene 27 b-roll: does not show what is said — alarm shows open battery door, not sealed
+   - [13] scene 7 split-panel: not a phone-photo look — No person visible watching the flames
+   - [13] scene 10 b-roll: not a phone-photo look — staged glowing dramatic lighting composition
+   - [13] scene 19 b-roll: not a phone-photo look — artificial staged smoke adds styled look
+   - [13] scene 26 b-roll: not a phone-photo look — staged smoke effect looks artificial
+   - [13] scene 28 split-panel: not a phone-photo look — overly staged, smoke looks artificial
+```
+
+### norbert_daniels run 1 — 28 min
+```
+job 280 (norbert_daniels) — completed, rehearsal
+  PASS  1. no pause after CTA
+  FAIL  2. CTA order (1 finding)
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it
+  FAIL  11. real video (1 finding)
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo
+  PASS  14. no cut inside a word
+  stats: {"scenes":31,"hostTakes":12,"hostSec":68,"ctaPatterns":["block 0: HBQ"],"introductions":2,"midSentenceHostTakes":0,"listCuts":0,"handOffs":10,"longestFacelessEarlySec":34,"longestFacelessLateSec":4,"longestPictureSec":10.3,"motionSharePct":0,"picturesJudged":23}
+   - [2] block 0 (HBQ): host does not come back after the book
+   - [11] only 0% of cutaway time is moving
+```
+
+### quilting_with_granny_ruth run 1 — 37 min
+```
+job 281 (quilting_with_granny_ruth) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  FAIL  10. say it, show it (4 findings)
+  FAIL  11. real video (1 finding)
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo (2 findings)
+  PASS  14. no cut inside a word
+  stats: {"scenes":35,"hostTakes":10,"hostSec":59,"ctaPatterns":["block 0: HBHQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":9,"handOffs":7,"longestFacelessEarlySec":31,"longestFacelessLateSec":14,"longestPictureSec":15.6,"motionSharePct":0,"picturesJudged":25}
+   - [10] scene 10 split-panel: does not show what is said — no hands sewing visible
+   - [10] scene 13 b-roll: does not show what is said — bear paw block not identifiable on quilt
+   - [10] scene 14 b-roll: does not show what is said — no flying geese row visible on quilt
+   - [10] scene 25 b-roll: does not show what is said — no wastebasket visible beside tin
+   - [11] only 0% of cutaway time is moving
+   - [13] scene 5 b-roll: not a phone-photo look — staged, polished tabletop styling
+   - [13] scene 13 b-roll: not a phone-photo look — bear paw block not identifiable on quilt
+```
+
+### diane_de_chambray run 1 — 43 min
+```
+job 282 (diane_de_chambray) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  FAIL  10. say it, show it (6 findings)
+  FAIL  11. real video (1 finding)
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo (2 findings)
+  PASS  14. no cut inside a word
+  stats: {"scenes":42,"hostTakes":11,"hostSec":68,"ctaPatterns":["block 0: BHQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":11,"handOffs":8,"longestFacelessEarlySec":27,"longestFacelessLateSec":26,"longestPictureSec":18.2,"motionSharePct":6,"picturesJudged":32}
+   - [10] scene 6 b-roll: does not show what is said — tools are background, not a close-up
+   - [10] scene 7 b-roll: does not show what is said — hair looks wet/natural, not visibly dyed dark brown
+   - [10] scene 13 b-roll: does not show what is said — back of head shown, not front view
+   - [10] scene 30 b-roll: does not show what is said — hair obscured by hands, not clearly glossy or catching light
+   - [10] scene 32 b-roll: does not show what is said — box is open, not closed as specified
+   - [10] scene 35 b-roll: does not show what is said — hair shows highlights, not flat one-tone
+   - [11] only 6% of cutaway time is moving
+   - [13] scene 32 b-roll: not a phone-photo look — box is open, not closed as specified
+   - [13] scene 38 b-roll: not a phone-photo look — staged, overly styled bathroom scene
+```
+
+### dale_oakfield run 1 — 30 min
+```
+job 283 (dale_oakfield) — completed, rehearsal
+  PASS  1. no pause after CTA
+  PASS  2. CTA order
+  PASS  3. right place
+  PASS  4. clean pictures
+  PASS  5. no text
+  PASS  6. intro on camera
+  PASS  7. clean host switches
+  PASS  8. host often
+  PASS  9. pictures don't linger
+  PASS  10. say it, show it (3 findings)
+  FAIL  11. real video (1 finding)
+  PASS  12. voice says every word
+  PASS  13. looks like a phone photo
+  PASS  14. no cut inside a word
+  stats: {"scenes":46,"hostTakes":11,"hostSec":67,"ctaPatterns":["block 0: HBHQ"],"introductions":1,"midSentenceHostTakes":0,"listCuts":14,"handOffs":7,"longestFacelessEarlySec":26,"longestFacelessLateSec":43,"longestPictureSec":13.9,"motionSharePct":0,"picturesJudged":35}
+   - [10] scene 11 split-panel: does not show what is said — no hands shown, pieces static not being sorted
+   - [10] scene 34 b-roll: does not show what is said — ornaments small and secondary to cutting boards
+   - [10] scene 45 b-roll: does not show what is said — phone screen app grid not visible
+   - [11] only 0% of cutaway time is moving
+```
+
+### pearl_parker run 1 — job 284: FAILED after 25 min
+    Narration failed: 69Labs is working, but not with this channel's voice — a test line in it failed twice while another channel's voice worked straight away. Pick a different voice in Admin → Channels (or ask 69Labs support about this voice ID), then start the video again. (69Labs said: 69Labs TTS is unavailable (503) after 5 attempts — Service temporarily unavailable. Try again shortly. (VOICE_LOOKUP_FAILED). The provider's server is down; retry the job in a few minutes. — another channel's voice worked at the same time (voice 2cb5d8a7-6e8d-4213-b613-8e1f395905df))
+
+### scarlett_sterling run 1 — job 285: FAILED after 29 min
+    Narration failed: 69Labs is working, but not with this channel's voice — a test line in it failed twice while another channel's voice worked straight away. Pick a different voice in Admin → Channels (or ask 69Labs support about this voice ID), then start the video again. (69Labs said: 69Labs TTS is unavailable (503) after 5 attempts — Service temporarily unavailable. Try again shortly. (VOICE_LOOKUP_FAILED). The provider's server is down; retry the job in a few minutes. — another channel's voice worked at the same time (voice da2716ca-8bb7-443f-952a-c276a03d0acf))
+
+### lance_kavanaugh run 1 — job 286: FAILED after 25 min
+    Narration failed: 69Labs is working, but not with this channel's voice — a test line in it failed twice while another channel's voice worked straight away. Pick a different voice in Admin → Channels (or ask 69Labs support about this voice ID), then start the video again. (69Labs said: 69Labs TTS is unavailable (503) after 5 attempts — Service temporarily unavailable. Try again shortly. (VOICE_LOOKUP_FAILED). The provider's server is down; retry the job in a few minutes. — another channel's voice worked at the same time (voice 13fd1586-60d9-42de-b649-066f9bb114f3))

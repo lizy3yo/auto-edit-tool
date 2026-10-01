@@ -530,6 +530,8 @@ export const aireiterAdapter = (): Promise<AireiterAdapter> =>
 export async function aireiterStill(input: {
   prompt: string;
   referenceImageUrl?: string;
+  /** Several reference images (a key thing's memory pictures, then the host photo). */
+  referenceImageUrls?: string[];
   square?: boolean;
 }): Promise<GenerationResult> {
   const [r] = await (
@@ -539,7 +541,9 @@ export async function aireiterStill(input: {
     model: "gpt-image-2",
     aspectRatio: input.square ? "1:1" : "16:9",
     count: 1,
-    ...(input.referenceImageUrl
+    ...(input.referenceImageUrls?.length
+      ? { imageUrls: input.referenceImageUrls }
+      : input.referenceImageUrl
       ? { imageUrls: [input.referenceImageUrl] }
       : {}),
   });

@@ -259,6 +259,13 @@ export interface HostTake {
 }
 
 /** A single storyboard scene = one beat (its own verbatim script slice) + clip(s) */
+/** One key thing of a video: its name, how it looks, and whether the video is about it. */
+export interface KeyThing {
+  name: string;
+  look: string;
+  main?: true;
+}
+
 export interface StoryboardScene {
   index: number;
   /** Short display label for this beat (derived = first words of `scriptText`) */
@@ -403,10 +410,65 @@ export interface StoryboardScene {
    */
   rawClipUrls?: string[];
   /**
-   * No longer set — a still's zoom is decided by its length (`stillZooms`). Kept so a film made
-   * while the shot list chose it still reads: it was rendered completely still.
+   * No longer set — every still zooms slowly (2026-09-30, the operator: "no static images").
+   * Kept so a film made while stills could stand still reads: it was rendered completely still.
    */
   staticShot?: true;
+  /**
+   * No longer set — a camera-move video (the camera slowly closer to or back from a thing) existed
+   * for one day, 2026-09-30, and was removed at the operator's call ("no more b-roll zoom and zoom
+   * in"). Anything still carrying it is made a photo or an ordinary moving shot (`settleVideoKind`).
+   */
+  cameraMove?: true;
+  /**
+   * The KEY THING this picture shows (a name from `inputParams.keyThings`), when it shows one. Every
+   * later picture of the same key thing is drawn from the earlier ones (`memoryRefUrls`), so the
+   * same heater is the same heater from another angle (2026-09-30, the operator).
+   */
+  keyThing?: string;
+  /**
+   * The OTHER key things this picture shows beside `keyThing` (the space heater beside the mattress)
+   * — each is drawn from its own first picture too (Frederick's job 259: the heater changed between
+   * two shots linked only by the mattress).
+   */
+  otherKeyThings?: string[];
+  /**
+   * Whether something in this picture MOVES BY ITSELF, as judged on its own description
+   * (`judgeSelfMoving`, 2026-10-01 — it replaced a fixed word list that let "a sliding door" and
+   * "a smoke alarm" count as moving). Only `true` may be a video; unset means not judged yet.
+   */
+  selfMoving?: boolean;
+  /** The same judgement for a split screen's right panel (`splitVisual`). */
+  splitSelfMoving?: boolean;
+  /** The picture this cutaway was drawn as (the still, or the video's first frame). */
+  pictureUrl?: string;
+  /**
+   * The ONLY readable writing this picture may show, exactly as spoken in its line ("PHOTOELECTRIC"
+   * on the box) — set by the shot list and kept only when every word of it is in the line
+   * (`saidText`). Unset: no readable writing at all (2026-10-01, the operator: "add it but only when
+   * the script says it and it should be accurate").
+   */
+  pictureText?: string;
+  /**
+   * The line talks about writing on a thing (a label, a box, a date) without saying the words: the
+   * printing is SHOWN, soft and out of focus, unreadable (2026-10-01, the operator: "show the 3
+   * things, the date, but we can make it blurry").
+   */
+  blurPrint?: true;
+  /** The earlier pictures of the same key thing this one was drawn from (set at render). */
+  memoryRefUrls?: string[];
+  /** The camera position a memory picture is drawn from — never its memory's own (set at render). */
+  memoryView?: string;
+  /**
+   * The exact look of the specific named kind this picture shows ("churn dash block: a 3×3 block…"),
+   * written by `describeNamedLooks` so the picture maker can draw what it cannot know by name.
+   */
+  namedLook?: string;
+  /**
+   * The key thing this picture shows ONE PART of (a block on the quilt): drawn as a close-up of that
+   * part from the thing's memory, never the whole thing again (`server/namedLooks.ts`).
+   */
+  partOf?: string;
   /** The still image this picture's zoom clip was cut from, so the zoom can be re-cut later. */
   stillSourceUrl?: string;
   /**
@@ -1223,6 +1285,12 @@ export interface LongformInputParams {
    * draws the same props.
    */
   continuitySheet?: string;
+  /**
+   * The KEY THINGS read off the props list (`parseKeyThings`): what the video shows again and
+   * again, the MAIN one being what it is about — the film's first picture shows it, and each key
+   * thing looks the same in every picture of it. Snapshotted with the props list.
+   */
+  keyThings?: KeyThing[];
   /**
    * Which long-form tab (slot 0–4) launched this job. Selects BOTH per-tab provider keys: the
    * APIMART key for b-roll VIDEO generation (unset or a slot with no key ⇒ the 69Labs video path)

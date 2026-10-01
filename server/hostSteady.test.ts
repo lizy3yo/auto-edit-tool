@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { hostArea, solidHost, knotExpr, needsSteadying, steadyFilter, trackPose, type CameraPose } from "./hostSteady";
+import { bodyPieces, hostArea, personMatte, solidHost, knotExpr, needsSteadying, steadyFilter, trackPose, type CameraPose } from "./hostSteady";
 
 const still = (n: number): CameraPose[] => Array.from({ length: n }, () => ({ s: 1, dx: 0, dy: 0 }));
 
@@ -124,5 +124,90 @@ describe("the host is a solid shape — a plain shirt is never frozen (2026-09-3
     expect(solid[4 * w + 4]).toBe(1); // inside the body
     expect(solid[4 * w + 0]).toBe(0); // the room beside it
     expect(solid[0 * w + 4]).toBe(0); // the room above it
+  });
+
+  it("never fills across the room between flickering specks at the far left and right (job 255)", () => {
+    // The same host, plus HeyGen's redraw flicker: small specks on a plant at the far left and a
+    // shelf at the far right, on the host's own rows. Filled edge to edge, the "host" was the whole
+    // frame and the room was not frozen at all.
+    const flicker = frames.map((f, k) => {
+      const g = new Uint8Array(f);
+      // 9 × 12 px each, like the real ones (the shave removes anything thinner than 4 px).
+      for (let y = 120; y < 132; y++)
+        for (let x = 0; x < 480; x++)
+          if ((x >= 10 && x < 19) || (x >= 455 && x < 464)) g[y * W + x] = k % 2 ? 220 : 20;
+      return g;
+    });
+    const area = hostArea(flicker)!;
+    expect(area).not.toBeNull();
+    expect(area[200 * W + 240]).toBe(1); // the chest stays live
+    expect(area[126 * W + 80]).toBe(0); // the room between speck and body stays frozen
+    expect(area[126 * W + 400]).toBe(0);
+    expect(area[20 * W + 240]).toBe(0);
+  });
+
+  it("the body can be several pieces (head and arms of a plain shirt); a speck is not body", () => {
+    const w = 100, h = 20;
+    const m = new Uint8Array(w * h);
+    for (let y = 0; y < 10; y++) for (let x = 40; x < 60; x++) m[y * w + x] = 1; // head: 200
+    for (let y = 12; y < h; y++) for (let x = 20; x < 26; x++) m[y * w + x] = 1; // arm: 48
+    m[5 * w + 2] = 1; // a speck of room flicker
+    const body = bodyPieces(m, w, h);
+    expect(body[5 * w + 50]).toBe(1);
+    expect(body[15 * w + 22]).toBe(1);
+    expect(body[5 * w + 2]).toBe(0);
+  });
+});
+
+describe("the room is still up to the host's edge in every frame (2026-09-30)", () => {
+  // A host (a 20 px wide block) who sways right by 30 px and back, inside a band that holds every
+  // place she goes — and a patterned quilt beside her that HeyGen redraws a little every frame.
+  const w = 160, h = 60;
+  const at = (k: number) => 40 + Math.round(30 * Math.sin((k / 9) * Math.PI));
+  const persons = Array.from({ length: 10 }, (_, k) => {
+    const m = new Uint8Array(w * h);
+    for (let y = 10; y < h; y++) for (let x = at(k); x < at(k) + 20; x++) m[y * w + x] = 1;
+    return m;
+  });
+  const frames = persons.map((p, k) => {
+    const f = new Uint8Array(w * h).fill(100);
+    for (let i = 0; i < w * h; i++) {
+      if (p[i]) f[i] = 200;
+      else if (i % w > 100 && i % w < 120) f[i] = 100 + ((i + k) % 3) * 3; // quilt redraw: ±6
+    }
+    return f;
+  });
+  const band = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 20; x < 130; x++) band[y * w + x] = 1;
+
+  it("keeps the host live and freezes the band where she is not", () => {
+    const m = personMatte(band, persons, frames, w, h, w, h)!;
+    expect(m).not.toBeNull();
+    const k = 4; // she is at her right-most
+    expect(m.live[k][30 * w + at(k) + 10]).toBe(1); // her middle
+    expect(m.live[k][30 * w + 110]).toBe(0); // the quilt beside her, inside the band
+    expect(m.live[0][30 * w + 110]).toBe(0);
+    expect(m.live[k][30 * w + 150]).toBe(0); // the room outside the band
+  });
+
+  it("takes the room she sat on in frame 0 from another frame, and never paints her in", () => {
+    const m = personMatte(band, persons, frames, w, h, w, h)!;
+    expect(m.fillFrame).not.toBe(0);
+    expect(m.fillFrom[30 * w + 45]).toBe(1); // her frame-0 spot, clear in the fill frame
+    expect(m.fillFrom[30 * w + 110]).toBe(0);
+  });
+
+  it("keeps the person live even outside the band (a plain apron barely moves)", () => {
+    const narrow = new Uint8Array(w * h);
+    for (let y = 0; y < 50; y++) for (let x = 20; x < 130; x++) narrow[y * w + x] = 1; // her lap hem (y 50+) is outside
+    const m = personMatte(narrow, persons, frames, w, h, w, h)!;
+    expect(m).not.toBeNull();
+    expect(m.live[4][55 * w + at(4) + 10]).toBe(1); // her lap, below the band
+  });
+
+  it("is not trusted when the cut-out puts the person outside the band (the model missed her)", () => {
+    const elsewhere = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) for (let x = 140; x < w; x++) elsewhere[y * w + x] = 1;
+    expect(personMatte(elsewhere, persons, frames, w, h, w, h)).toBeNull();
   });
 });

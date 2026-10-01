@@ -49,6 +49,13 @@ describe("withInputFormats", () => {
     const args = ["-f", "lavfi", "-i", "anullsrc", ...audioInput(tagged)];
     expect(withInputFormats(args)).toEqual(args);
   });
+  it("never overrides a format named further back among the input's own options (a raw mask of 255s)", () => {
+    const mask = file("room.gray", Buffer.alloc(64, 0xff));
+    const args = ["-i", mp4, "-f", "rawvideo", "-pix_fmt", "gray", "-s", "480x270", "-r", "25", "-i", mask];
+    expect(withInputFormats(args)).toEqual(args);
+    // ...but the NEXT input is judged on its own.
+    expect(withInputFormats([...args, "-i", tagged])).toEqual([...args, "-f", "mp3", "-i", tagged]);
+  });
 });
 
 describe("ffmpeg that never started", () => {

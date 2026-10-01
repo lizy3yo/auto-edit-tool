@@ -186,3 +186,28 @@ describe("69Labs TTS voice-not-found handling", () => {
     }
   }, 10_000);
 });
+
+describe("69Labs voice spaces", () => {
+  it("tells an account clone from a library voice by its id", async () => {
+    const { voiceSpaceByShape } = await import("./tts69labs");
+    expect(voiceSpaceByShape("2cb5d8a7-6e8d-4213-b613-8e1f395905df")).toBe("clone");
+    expect(voiceSpaceByShape("pqHfZKP75CvOlQylNhV4")).toBe("library");
+  });
+
+  it("asks the account's clone list first, and falls back to the id when it is down", async () => {
+    const { voiceSpace69Labs } = await import("./tts69labs");
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => new Response("down", { status: 503 })) as any;
+    try {
+      expect(await voiceSpace69Labs("k-space-1", "pqHfZKP75CvOlQylNhV4")).toBe("library");
+      expect(await voiceSpace69Labs("k-space-1", "13fd1586-60d9-42de-b649-066f9bb114f3")).toBe("clone");
+      globalThis.fetch = vi.fn(
+        async () => new Response(JSON.stringify({ voiceClones: [{ id: "abcClone" }] }), { status: 200 })
+      ) as any;
+      expect(await voiceSpace69Labs("k-space-2", "abcClone")).toBe("clone");
+      expect(await voiceSpace69Labs("k-space-2", "13fd1586-60d9-42de-b649-066f9bb114f3")).toBe("library");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});

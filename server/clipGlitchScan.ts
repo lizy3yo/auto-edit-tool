@@ -7,8 +7,10 @@
  * Asked as SPOT THE DIFFERENCE on the first and last frame, large and stacked: "does anything move
  * wrong?" over a small sheet of frames passed the kumiko clip with both Haiku and Sonnet, while
  * "list what moved" named the strips at once. The verdict is then decided HERE from the list,
- * not left to the model's own yes/no: a change with no hand in the shot is a glitch unless the
- * shot is of something that moves by itself (fire, water, smoke).
+ * not left to the model's own yes/no: a change is a glitch unless the shot is of something that
+ * moves by itself (fire, water, smoke, traffic). Since 2026-09-30 a video never has hands in
+ * it (`videoKind`), so hands appearing in a clip are a glitch too — and in a shot of something that
+ * moves by itself, anything ELSE moving (the incense holder sliding while its smoke rises) is.
  *
  * Fails open (no glitch) on any error: a check must never cost a render.
  */
@@ -31,10 +33,11 @@ export const CLIP_GLITCH_SYSTEM =
   "or size between the two frames (short phrases; [] when nothing did).\n" +
   "hands_visible: are hands in either frame?\n" +
   "untouched_moved: did anything in `changes` move without a hand touching it — other than " +
-  "things that move by themselves in real life (fire, water, smoke, steam, a running machine)?\n" +
+  "things that move by themselves in real life (fire, water, smoke, steam, traffic)?\n" +
   "morph: did anything melt, bend, stretch, change size or shape, merge into something else, or " +
   "grow or lose fingers? Hands moving, a tool changing angle in a hand, or work progressing " +
   "(a cut deepening, paper peeling where the hand pulls it) is NOT a morph.\n" +
+  "hands_visible counts any hand, finger or arm, even partly in frame.\n" +
   "cover: for each LARGE item (a quilt, cloth, sheet of fabric, board, rug, piece of work) say " +
   "where its edges are and what surface shows around it, LEFT frame then RIGHT frame — look at " +
   "the front edge of the table in both.\n" +
@@ -78,7 +81,18 @@ export function parseClipGlitchVerdict(
   const unexplained = !selfMoving && d.hands_visible === false && changes.length > 0;
   // A self-moving shot (fire spreading a burn, water pouring) changes shape by nature: only an
   // untouched move of something ELSE would count, and the model cannot tell us which — pass it.
-  const glitch = selfMoving ? false : morph || untouched || unexplained || vanished;
+  // No video may show hands any more (2026-09-30, the operator: "never do the videos with
+  // fingers"): a hand that turns up in a clip is a glitch, whatever the clip is of.
+  if (hands)
+    return { glitch: true, what: "hands appear in the video" };
+  // A shot of something that moves by itself changes by nature (a burn spreading, smoke drifting):
+  // only something ELSE moving on its own counts — the model's `untouched_moved` already leaves the
+  // smoke, fire and water out.
+  if (selfMoving) {
+    const glitch = d.untouched_moved === true && changes.length > 0;
+    return { glitch, what: glitch ? (changes[0] ?? "something moves on its own").slice(0, 80) : "" };
+  }
+  const glitch = morph || untouched || unexplained || vanished;
   return {
     glitch,
     what: glitch
@@ -153,6 +167,7 @@ export async function scanClipGlitch(
       userMessage:
         "First frame on the left, last frame on the right." +
         (about ? ` The clip should show: ${about.replace(/"/g, "'").slice(0, 200)}.` : "") +
+
         " What changed?",
       imageInput: { base64: pair.toString("base64"), mediaType: "image/png" },
       maxTokens: 500,

@@ -102,6 +102,8 @@ const STILL_DEFECT_SYSTEM =
   "work — with no hand holding it; " +
   "a needle through a finger; scissors cutting where the blades do not " +
   "meet; a tool held in a way no hand could hold it; a hand with too many or too few fingers\n" +
+  "- a hand, finger or arm inside, through, behind or merged into a vise, clamp, machine or tool " +
+  "body (a hand in a vise's jaws)\n" +
   "Answer false for everything else: unusual but possible products or craftsmanship, odd " +
   "compositions, shallow depth of field, soft focus, plain or boring frames, imperfect " +
   "staging, and any small detail you cannot clearly resolve at this size. This is AI-generated " +
@@ -112,7 +114,8 @@ const STILL_DEFECT_SYSTEM =
   "Answer true for words, numbers, prices, or sums a viewer can make out: writing on a " +
   "chalkboard or whiteboard, a sign, a poster, a price tag, a note or receipt, a screen, a " +
   "slogan on a mug or shirt, or a brand name or label printed large on a can, bottle, box, or " +
-  "tool — and tally marks, sums or sketches drawn on a chalkboard, whiteboard or wall. Answer " +
+  "tool, or a date, model number or printed label on a product that a viewer can read — and " +
+  "tally marks, sums or sketches drawn on a chalkboard, whiteboard or wall. Answer " +
   "false for tiny, blurred, or unreadable marks, a ruler's or tape's scale " +
   "markings, and a frame with no writing. Question 1's stamped-over text is NOT counted here. " +
   "When unsure, answer false.\n\n" +
@@ -219,10 +222,27 @@ export function missingQuestion(expect: string): string {
     `"${expect.replace(/"/g, "'")}". Is that thing clearly NOT the centre of attention — a ` +
     "different object in its place, absent altogether, or there but small, pushed to an edge, or " +
     "outweighed by something else that takes most of the frame? When it names a SPECIFIC kind, " +
-    "pattern or design (a nine-patch block, a granny square, kumiko lattice, a dovetail joint), " +
+    "pattern or design (a herringbone path, a dovetail joint, a French seam), " +
     "that exact kind must be recognisable — a generic version (a plain checkered or random " +
-    "patchwork quilt for a nine-patch) counts as missing. Answer false when it is the main " +
+    "brick path for a herringbone one) counts as missing. Answer false when it is the main " +
     "thing the eye lands on, even from an unusual angle. When unsure, answer false."
+  );
+}
+
+/** The stronger checker a picture with an exact look is judged by (`scanStillDefects`' `exactLook`). */
+const EXACT_LOOK_MODEL = () => process.env.EXACT_LOOK_MODEL || "claude-sonnet-5-5";
+
+/**
+ * QUESTION 4 sharpened for a picture of a NAMED KIND (`scene.namedLook`): the thing must be drawn
+ * the way its exact look describes — shapes, counts, arrangement — not a generic or different one.
+ */
+export function exactLookQuestion(look: string): string {
+  return (
+    "\n\nQUESTION 4, SHARPER FOR THIS PICTURE — missing: the frame must show this named kind exactly: " +
+    `"${look.replace(/"/g, "'").slice(0, 600)}". Answer true if it is not clearly there as the main ` +
+    "thing, OR if what is drawn does not match that look (other shapes, another arrangement, a " +
+    "generic or different pattern), OR if the frame mostly shows something bigger it belongs to " +
+    "instead of the thing itself up close. Answer false only when it clearly matches."
   );
 }
 
@@ -271,16 +291,41 @@ export function verdictShape(expect?: string, line?: string): string {
   );
 }
 
+/**
+ * QUESTION 3 changed for a picture ALLOWED one piece of writing (`scene.pictureText`, spoken in its
+ * line): the writing verdict is then "anything else readable, or the allowed words missing or not
+ * spelled exactly" — so a picture shows the script's words, accurately, or is drawn again.
+ */
+export function allowedTextQuestion(text: string): string {
+  return (
+    "\n\nQUESTION 3 CHANGED FOR THIS PICTURE — writing: this picture is ALLOWED exactly one piece of " +
+    `readable writing: "${text.replace(/"/g, "'")}". Answer true if ANY other writing a viewer can ` +
+    `read appears, OR if "${text.replace(/"/g, "'")}" is missing or not spelled exactly like that. ` +
+    "Answer false only when it is there, spelled exactly, and nothing else is readable. Judge " +
+    "spelling here."
+  );
+}
+
 export async function scanStillDefects(
   buffer: Buffer,
   /** What the frame must show (`scene.showSubject`) — adds the `missing` question. */
   expect?: string,
   /** The narration line the frame plays under — adds the `wrong_place` question. */
-  line?: string
+  line?: string,
+  /** The only writing the picture may show (`scene.pictureText`) — judged for exact spelling. */
+  allowedText?: string,
+  /**
+   * The exact look of the named kind the picture shows (`scene.namedLook`): the `missing` question
+   * holds the frame to it, judged on the larger frame by a stronger model — the quick checker
+   * passed three quilt pictures that showed none of the blocks they named (Ruth's job 281).
+   */
+  exactLook?: string
 ): Promise<StillDefectVerdict> {
   try {
+    // Spelling and a named pattern need the larger frame.
+    const [w, h] = allowedText || exactLook ? [1280, 720] : [DEFECT_SCAN_WIDTH, DEFECT_SCAN_HEIGHT];
     const small = await sharp(buffer)
-      .resize(DEFECT_SCAN_WIDTH, DEFECT_SCAN_HEIGHT, {
+      .resize(w, h, {
         fit: "inside",
         withoutEnlargement: true,
       })
@@ -294,9 +339,11 @@ export async function scanStillDefects(
       systemPrompt:
         STILL_DEFECT_SYSTEM +
         (expect ? missingQuestion(expect) : "") +
+        (expect && exactLook ? exactLookQuestion(exactLook) : "") +
         MESSY_QUESTION +
         (line ? placeQuestion(line) : "") +
         STAGED_QUESTION +
+        (allowedText ? allowedTextQuestion(allowedText) : "") +
         verdictShape(expect, line),
       userMessage:
         "Is any text stamped over this frame, does it contain obviously impossible structure, " +
@@ -306,7 +353,7 @@ export async function scanStillDefects(
         " Does it look like an ordinary phone photo?",
       imageInput: image,
       maxTokens: 250,
-      model: STILL_DEFECT_MODEL,
+      model: exactLook ? EXACT_LOOK_MODEL() : STILL_DEFECT_MODEL,
     });
     const verdict = parseStillDefectVerdict(result.text, result.stopReason);
     if (!expect) verdict.missing = false;
@@ -337,4 +384,89 @@ export async function scanStillDefects(
 /** True when the still has text stamped over it. Fails open (false) on any error. */
 export async function hasOverlayText(buffer: Buffer): Promise<boolean> {
   return (await scanStillDefects(buffer)).overlay;
+}
+
+// ─── The same thing, from another angle (picture memory) ─────────────────────────────
+
+/**
+ * Sonnet: telling one heater from a similar heater at another angle is a fine judgement, and it
+ * runs only on pictures of a key thing that already has a memory — a handful per film.
+ */
+const SAME_THING_MODEL = () => process.env.SAME_THING_MODEL || "claude-sonnet-5";
+
+export const SAME_THING_SYSTEM =
+  "You compare two photos. LEFT: an earlier photo of a thing. RIGHT: a new photo that must show " +
+  "the SAME thing — the very same object, not just the same kind — usually from another spot, " +
+  "closer, further back or at a later stage of being made. A different camera position, distance, " +
+  "crop or light is fine, and so is the piece being further along. What is NOT fine: a different " +
+  "shape, colour, material, size or design, or a different object of the same kind.\n" +
+  "copy: true when the RIGHT photo is taken from nearly the same spot, distance and framing as the " +
+  "LEFT — a near-copy of it rather than a new view.\n" +
+  'Return ONLY JSON: {"same":true|false,"copy":true|false,"what":"<what differs, a few words, or empty>"}';
+
+/** Decide from the model's answer; anything unreadable passes (a check never costs a render). Pure. */
+export function parseSameThingVerdict(
+  raw: string,
+  stopReason?: string
+): { same: boolean; copy: boolean; what: string } {
+  const m = /\{[\s\S]*\}/.exec(raw ?? "");
+  if (!m || stopReason === "max_tokens") return { same: true, copy: false, what: "" };
+  try {
+    const d = JSON.parse(m[0]);
+    const same = d?.same !== false;
+    const copy = same && d?.copy === true;
+    return {
+      same,
+      copy,
+      what: !same ? String(d?.what ?? "a different one").slice(0, 80) : copy ? "the same framing" : "",
+    };
+  } catch {
+    return { same: true, copy: false, what: "" };
+  }
+}
+
+/**
+ * Is the `thing` in the new picture the same one as in its memory picture (`memoryUrl`)? The two are
+ * laid SIDE BY SIDE, memory on the left. Never throws: a dead check passes the picture.
+ */
+export async function scanSameThing(
+  memoryUrl: string,
+  buffer: Buffer,
+  thing: string
+): Promise<{ same: boolean; copy: boolean; what: string }> {
+  try {
+    const { presignOwnBucketUrl } = await import("./storage");
+    const res = await fetch(await presignOwnBucketUrl(memoryUrl), {
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (!res.ok) throw new Error(`memory picture ${res.status}`);
+    const side = (b: Buffer) =>
+      sharp(b).resize(640, 360, { fit: "cover" }).png().toBuffer();
+    const [left, right] = await Promise.all([
+      side(Buffer.from(await res.arrayBuffer())),
+      side(buffer),
+    ]);
+    const pair = await sharp({
+      create: { width: 1280, height: 360, channels: 3, background: "#000" },
+    })
+      .composite([
+        { input: left, left: 0, top: 0 },
+        { input: right, left: 640, top: 0 },
+      ])
+      .png()
+      .toBuffer();
+    const result = await invokeClaude({
+      systemPrompt: SAME_THING_SYSTEM,
+      userMessage: `The thing: ${thing.replace(/"/g, "'").slice(0, 120)}. Is it the same one on the right, and is the right a new view of it or a near-copy?`,
+      imageInput: { base64: pair.toString("base64"), mediaType: "image/png" },
+      maxTokens: 200,
+      model: SAME_THING_MODEL(),
+    });
+    const v = parseSameThingVerdict(result.text, result.stopReason);
+    if (!v.same || v.copy) console.log(`[SameThing] ${thing}: ${v.what}`);
+    return v;
+  } catch (err: any) {
+    console.warn(`[SameThing] check failed: ${err?.message ?? err} — passing the picture`);
+    return { same: true, copy: false, what: "" };
+  }
 }

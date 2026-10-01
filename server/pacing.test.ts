@@ -407,7 +407,8 @@ describe("split-screen dial", () => {
     // Panels of things that move by themselves; an ordinary object animated in a person-free
     // panel slides around on its own, so those never move (next test).
     const scenes = Array.from({ length: 20 }, (_, i) =>
-      host(i + 1, { brollVisual: `steam rising from a kettle ${i}` })
+      // Judged to move by themselves (`judgeSelfMoving`) — only those panels may move.
+      host(i + 1, { brollVisual: `steam rising from a kettle ${i}`, splitSelfMoving: true })
     );
     const r = enforceHostSplitMix(scenes, p);
     expect(r.motionSeconds / r.splitSeconds).toBeCloseTo(0.5, 1);

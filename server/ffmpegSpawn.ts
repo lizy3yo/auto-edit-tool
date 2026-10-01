@@ -53,11 +53,18 @@ export function audioInput(filePath: string): string[] {
  */
 export function withInputFormats(args: readonly string[]): string[] {
   const out: string[] = [];
+  // Whether THIS input already names its format anywhere among its own options (everything
+  // since the previous input), e.g. `-f rawvideo -pix_fmt gray -s 480x270 -r 25 -i masks.gray`
+  // — a raw mask of 255s starts 0xFF 0xFF, which the sniff reads as an MPEG sync (2026-09-30).
+  let named = false;
   for (let k = 0; k < args.length; k++) {
     const a = args[k];
-    const named = out.length >= 2 && out[out.length - 2] === "-f";
-    if (a === "-i" && k + 1 < args.length && !named && isMp3File(args[k + 1])) {
-      out.push("-f", "mp3");
+    if (a === "-f") named = true;
+    if (a === "-i" && k + 1 < args.length) {
+      if (!named && isMp3File(args[k + 1])) out.push("-f", "mp3");
+      named = false;
+      out.push(a, args[++k]);
+      continue;
     }
     out.push(a);
   }

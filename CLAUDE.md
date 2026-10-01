@@ -697,6 +697,150 @@ Express · tRPC · Drizzle · MySQL.
   the 10-25% video share stays, so a "hands at work" topic past it is a PHOTO of the hands. The
   alternative, a video for every topic where something is done, was ~$0.70 more per 3-min film and
   ~$7 per 20-min at the list rates, plus glitch re-renders. Do not raise the share without asking.
+- **A video only of what moves by itself; every photo zooms; key things remembered** (2026-09-30,
+  the operator's notes on the Frederick/Hank 3-min tests, jobs 257/258). (a) NO HANDS IN ANY VIDEO
+  ("never do the videos with fingers"), and NO CAMERA MOVES ("no more b-roll zoom and zoom in" — a
+  push-in/pull-back lane was built and removed the same day; the room steadier had also been
+  "correcting" its move away). A video is only ever something that MOVES BY ITSELF in the moment the
+  words describe (`videoKind` in shotList.ts — the ONE rule the shot list, the context groups,
+  `parseStoryboard`, the plan gate's `settleMotion`/`addMotion`/rule 15 and `renderSceneClip` right
+  before a clip is paid for all go through; `MOVES_ON_ITS_OWN`: a lit incense stick's smoke, fire,
+  steam, water, weather, a vehicle driving, a door or gate opening). What moves is that smoke, fire or
+  car; anything else in the frame, small or not, holds still — Hank's charred incense holder smoking
+  beside the can of scraps is the operator's example. Hands, a person or a tool biting in is always a
+  PHOTO (the hands stay in it, as the host at work). The planner is told to make the MAIN thing's
+  moment the video when something with it moves, and the gate's top-up and cut-back keep the main
+  thing's video first (`addMotion`/`removeMotion`, `main`). The "hands gently working with…" top-up is
+  gone. The glitch check fails any clip with hands in it, and in a self-moving shot anything ELSE
+  moving on its own. The 10-25% share is unchanged: a film with little that moves by itself lands
+  under 10% and says so (rule 11) rather than faking a video. (b) EVERY PHOTO ZOOMS ("no static
+  images"): `STILL_ZOOM_MIN_SEC` 0; the zoom's own rate keeps a 0.5 s list shot at ~1.4%. (c) KEY
+  THINGS: the props list's second line is `MAIN name: look` — what the video is about — and every
+  later line a key thing (`parseKeyThings` → `inputParams.keyThings`). The shot list sets `thing` on a
+  shot about one (even "it keeps the whole house warm" = the stove's fire) → `scene.keyThing`; a line
+  that names or explains a key thing shows it FIRST and cuts to anything new it names (rule 1c:
+  "Kumiko is…" = the panel, "…Japanese sliding doors" = a sliding door). This follows the SCRIPT, not
+  the film's position — a forced "opening shows the main thing" rule was built and removed the same
+  day. (d) PICTURE MEMORY (`server/pictureMemory.ts`): a later picture of a key thing is drawn FROM
+  its first picture and the latest one before it (`memoryRefUrls`, sent as reference images before
+  the host photo), at an exact new camera position (`memoryViewFor`/`MEMORY_VIEWS`, rotating, never
+  its memory's own — told only "a different spot" the picture maker copied the framing, four identical
+  alarms on Frederick's job 257). Split-screen panels and the QR background are drawn from memory
+  too (`tagKeyThings` finds the key thing in their own words, `withSplitMemory`) — Hank's "that's the
+  whole build" split showed a square holder unlike the one built; a split is never a SOURCE, its
+  panel is drawn long after the b-roll. A picture waits for a memory still being made in the same
+  pass (≤8 min, earlier scenes only, so nothing waits on itself); `scanSameThing` compares the two
+  side by side — a different object OR a near-copy (`copy`) is re-rolled once, then drawn from
+  words. (e) APPS: a line about an app or selling online is a phone showing a plain buy-and-sell app
+  (`APP_SCREEN_CLAUSE`: item photos, no logo, nothing readable); `scrubLegibleWriting` turns Facebook
+  Marketplace / Etsy / eBay… into "a buy-and-sell app" everywhere, so no brand is ever drawn.
+  (f) LIST ITEMS ARE NEVER JOINED: `joinPieces` keeps one picture, never "X, together with Y" (Hank's
+  "a saw, a drill," at 0.9 s came back as one picture — rejected on 2026-09-27), and
+  `LIST_SHOT_MIN_SEC` is 0.25 s, a blink. The list lead-in hint names the thing being made (the
+  list's key thing, else the main one), never the video's title. (g) A LINE NAMING SOMETHING NEW
+  KEEPS ITS OWN PICTURE: `parseContextGroups` cuts a same-topic group at a picture whose own thing
+  the group's picture does not show (`namesSomethingElse`), and the group picture must fit its first
+  line. (h) EVERY PICTURE IS CHECKED AGAINST ITS LINE (`fitPicturesToLines`, run on the final
+  lengths right before the plan gate, one call per ~80 lines): nothing used to compare a picture
+  with what is SAID under it — the still checker only asks whether the frame shows its own
+  description — so Frederick's job 259 put the smoke alarm on "Fires don't all behave the same
+  way". Pictures that do not show what their line is about are rewritten (`applyPictureFixes`: key
+  things re-read, photo or video by what the new picture shows), including a line that only refers
+  to the MAIN thing ("the one that paid me best came out of a coffee can of burnt scraps" = the
+  incense holder, lit and smoking, the can beside it — the operator's example). The planner is told
+  a key thing appears ONLY when the line is about it. (i) EVERY KEY THING IN A PICTURE IS
+  REMEMBERED (`otherKeyThings`, `keyThingsIn`): a picture linked by the mattress drew the heater
+  beside it fresh, and it changed between two shots. (j) SAMENESS BEATS THE ANGLE: a memory picture
+  that differs or copies the framing is redrawn ONCE and then kept — the old fallback drew it from
+  words and gave a different heater. (k) A THING THAT CAN MOVE IS NOT MOVING: a door, gate or water
+  counts only when the words say it moves, and a word used as a name never does ("smoke alarm",
+  "fire extinguisher", "rain boots", "water bottle") — Hank's job 260 made a video of a sliding door
+  standing there. (l) HANDS STAY OUTSIDE EQUIPMENT (`HANDS_OUTSIDE_CLAUSE`, in `ONE_BODY_CLAUSE` and
+  `ANON_PERSON_SUFFIX`; the still checker's `broken` names a hand inside a vise, clamp, machine or
+  tool) — Hank's job 261 at 1:53 drew his hand in the bench vise's jaws. (m) WRITING ONLY WHEN THE
+  SCRIPT SAYS IT, EXACTLY (2026-10-01, the operator on Frederick's made-up date labels): the shot
+  list may set `text` only to words its line says; `saidText` drops it unless every word is in the
+  piece's own line → `scene.pictureText`; `withAllowedText` swaps the look's `NO_READABLE_TEXT` for
+  "the ONLY readable writing is exactly …"; the checker's `allowedTextQuestion` fails anything else
+  readable or a misspelling (judged at 1280 px), and with no allowed text it now counts dates, model
+  numbers and labels on products too. (n) THE MAIN THING IN USE: the first time it appears, a main
+  thing naturally used with smoke, steam, a flame or water (an incense holder lit, a kettle, a
+  stove) is shown in use — planner rule 8 and the line-fit check both say so; a thing with nothing
+  moving by itself stays a photo. (o) WHAT MOVES BY ITSELF IS JUDGED, NOT LISTED (2026-10-01, the operator: "a door
+  needs hand so it should not move … i much prefer not [specific]"): the `MOVES_ON_ITS_OWN` word list
+  is gone — it let "a sliding door" and "a smoke alarm" through. `judgeSelfMoving` (one call per ~150
+  pictures, right before the plan gate, after the splits exist) reads each picture's and split
+  panel's own words and sets `selfMoving` / `splitSelfMoving`: movement a camera would catch with no
+  person causing it; anything a person has to move (a door, a drawer, a tool) is NO. `videoKind`
+  honours it (a planner's request stands only until judged), `addMotion` turns only JUDGED pictures
+  into videos, `assignSplitMotion` (pulled out of `enforceHostSplitMix`, run again after judging)
+  moves only judged panels, and an unjudged batch makes no videos. The planner and checker prompts no
+  longer carry any channel's examples (incense holder, kumiko, smoke alarm, feed sacks…) — neutral
+  ones where an example is needed. Picture numbers a model writes back are read by `pictureId` (12, "12" or "#12" —
+  it copies the "#12:" it was shown about half the time, and every "#" id used to be dropped, so
+  jobs 265/266 judged 0 pictures moving); the fit check and the same-topic groups read ids the same way. (p) A SPOKEN LIST IS RECOGNISED FROM ITS WORDS (`markListPieces`/`looksLikeListItem`,
+  run at the end of `applyShotPlan`): list protection used to rest on the planner marking EVERY item
+  `list`, and Hank's job 268 had "and a stack of sandpaper," marked and "a saw," not — the unmarked
+  half-second item folded into "a drill,". Two or more consecutive pictures of one beat that each only
+  NAME a thing (a few words, article-led, no subject or verb — `LIST_ITEM_CLAUSE` keeps "the cheapest
+  fabric won," out) are all `listCut`, and a picture the planner gave several items ("a saw, a
+  drill,") becomes one picture per item (`splitListPieces`). A list with no articles counts too (`looksLikeBareListItem`: "flour, sugar, and
+  butter", "hammers, saws, and chisels" — one to four words, no subject or verb, no "-ly" word, never
+  opening on an aside or a where/how-much word from `NOT_A_LIST_ITEM`: "Honestly,", "all on one wall"),
+  and only inside a run of two or more. (q) THE SUBJECT, NOT THE PLACE (shot-list rule 1 and `FIT_SYSTEM`): a place or
+  surface a line names is where its subject is shown, never the picture alone — Hank's job 269 showed
+  an empty market table under "is that clean Japanese look really worth anything on a market table".
+  A line naming the work by a quality ("that clean look") shows the work; a picture of something NEW
+  the line names (a comparison to something you can see) is right and is never changed back. (r) THE LINE CHECK GOES PICTURE BY PICTURE, AND CAN SPLIT (2026-10-01, Hank's job
+  271: the planner follows the rules one run and not the next, and the check passed both misses). It
+  now answers for EVERY picture — what the line is about, then whether the picture shows it
+  (`pictures[]`, `about`, `shows_it`) — which caught what a list of only the wrong ones skipped: "the
+  one that paid me best came out of a coffee can" read as about the can (it names what the thing was
+  made FROM; "the one that…" is one of the things the video counts). A line comparing to something
+  else you can see ("the kind you see in …") is SPLIT at those words (`applyPictureSplits`, both parts
+  ≥ 4 words), and the film's ranges are re-cut on the same words. 3 of 3 runs on job 271 fixed both. The check runs on OPUS (`FIT_MODEL`): on Frederick's practice storyboard (job 274)
+  Sonnet showed "the one kind of fire that likes to start while the house is asleep" as the alarm
+  again 2 times in 3, Opus showed the night fire 3 in 3. (s) DON'T REPEAT (shot-list rule 1d,
+  `FIT_SYSTEM`): a line whose subject is already on screen ("It just happens to be slow at …") and
+  that names something NEW you can see — a thing, or a kind of event or situation — shows the new
+  thing. (t) BLURRED PRINT (`blurPrint`, `blurredPrint`, `BLURRED_PRINT_CLAUSE`; the operator: "show the
+  3 things, the date, but make it blurry"): printing a line talks about without saying the words is
+  SHOWN, soft and unreadable, instead of hidden; exact words the line says are still printed exactly.
+  (u) THE MAIN THING'S FIRST PICTURE IN USE: the line check is told which picture is the "FIRST of
+  the MAIN thing" and makes it in use when it naturally is; `removeMotion` gives that video up last. (v) A HOST LINE THAT ENDS IN A LIST HANDS OVER TO IT (now part of `applySpokenLists`, below;
+  it was `handOffHostLists`): Hank's job 275 stretched the introduction to finish its sentence ("…standing in a
+  garage with a saw, a drill, and a stack of sandpaper,") and the planner, asked twice, kept the list
+  on camera. The host keeps the words before the first item (≥ 5, the name kept on an introduction)
+  and each item becomes a `listCut` picture. (The plan gate's picture-blink rule is unchanged: a run
+  under 2 s BETWEEN two host takes still goes back to the host, as agreed for Norbert's job 232.)
+- **Spoken lists are found in the whole script; named things are drawn exactly** (2026-10-01, the
+  operator on Granny Ruth's practice film, job 281). (a) LISTS (`server/spokenLists.ts`): whether a
+  piece was a list item used to be judged one storyboard piece at a time, and where a piece starts is
+  wherever the storyboard cut — so "the one | that paid me best" read as two items (one bowl, two
+  pictures) and "…a kitchen table with a straight-stitch machine, | a rotary cutter, and | a mountain
+  of scraps" crossed a beat cut and kept the machine on the host. Now one Opus call (`LIST_MODEL`)
+  reads the numbered SENTENCES while the shot list is planned and writes every list's items word for
+  word; `validateSpokenList` keeps a list only when every item is there, in order, ≤12 words, ≤3
+  words apart, joined like a list (two items need a comma; "the potholders and the coasters were
+  done" is not one); a failed call falls back to the same rules by sentence shape (`listsByShape`:
+  "X, Y, and Z", a first item at the end of a clause, bare names like "flour, sugar, and butter").
+  `applySpokenLists` (after the shot list's cut, in place of `handOffHostLists`/`pullListLeadIns`,
+  which are gone) re-cuts the film so every item is exactly one picture wherever the storyboard cut,
+  keeps a planner picture that already showed the item, hands a host line over at the first item (≥5
+  words kept, the name on the introduction, never when the host speaks on in a new sentence), sends
+  the words after the last item to the next picture, and unmarks every non-host piece that is not an
+  item of any list, so the folds join it. Never a CTA, cover, asset, QR or split beat.
+  (b) NAMED THINGS (`server/namedLooks.ts`): the shot list described "a churn dash" as a pinwheel,
+  picture memory drew "a churn dash here, a bear paw there" as two more copies of the whole folded
+  sampler quilt, and the quick checker could not tell a block from a block. `describeNamedLooks`
+  (one Opus call per ≤150 pictures, `NAMED_LOOK_MODEL`, right after the line check) writes every
+  specific named kind's exact look — shapes, counts, arrangement, light and dark — onto the pictures
+  showing it (`scene.namedLook`, `namedLookClause` in `buildStillPrompt`), and marks a picture about
+  ONE PART of a key thing (`scene.partOf`): it is drawn from the thing's memory as a close-up of that
+  part (`PART_VIEW`, `memoryClause`), never compared with the whole by `scanSameThing`. A picture of
+  someone at work keeps the person and is never made a part close-up. The still checker holds a
+  named-kind picture to its exact look (`exactLookQuestion`) on Sonnet at 1280 px
+  (`EXACT_LOOK_MODEL`), one redraw like any `missing`. Any failure changes nothing.
 - **A sentence finishes, a word is never cut** (2026-09-28, the operator: "it should adapt to
   everything and not only these videos"). Three rules, none per-channel. (a) Nothing folds across a
   MARKED CTA edge: `coalesceShortScenes` used to fold a sub-floor scene into either neighbour, and
@@ -736,10 +880,9 @@ Express · tRPC · Drizzle · MySQL.
   shot list otherwise left on the host (Lance's "a bin…, a bag…, maybe a box…", job 218). The first
   line, the intro, the CTAs and the goodbye never move, and a list only moves right after a host line.
   And a list whose FIRST item fell at the end of the line before (a beat boundary inside the list)
-  gets it back (`pullListLeadIns`, after the shot list, 2026-09-29): Granny Mae's "…at a kitchen
-  table with a hook, | a skein of yarn, and a stack of stitch books" (job 231) kept "a hook" on the
-  host. A line ending on a short item (`trailingListItem`: a/an/the/some/… + ≤5 words + comma, ≥5
-  words left before it) right before a list shot hands over there instead, on any channel.
+  gets it back — Granny Mae's "…at a kitchen table with a hook, | a skein of yarn, and a stack of
+  stitch books" (job 231) kept "a hook" on the host; since 2026-10-01 this is `applySpokenLists`,
+  which finds lists in whole sentences (see the spoken-lists entry).
 - **Every film passes the checks BEFORE it is paid for** (2026-09-26). The rehearsal audit's rules
   used to be checked only after a film was finished, so a live render shipped whatever they would
   have found. Now: (a) THE VOICE SAYS EVERY WORD (`server/narrationSkips.ts`, voicing stage, right
@@ -845,7 +988,22 @@ Express · tRPC · Drizzle · MySQL.
   and arms moved around it — on the operator's clip 88% of the shirt froze. Each row is now host
   between its leftmost and rightmost moving pixel, and any still pocket the room cannot reach from
   the top/left/right edge (a seated host runs off the bottom) is host too: the same clip went 12% →
-  100% of the shirt covered, room corners still 100% frozen. Only HOST takes freeze
+  100% of the shirt covered, room corners still 100% frozen. Only what moves WITHIN THE BODY'S WIDTH is filled
+  (`bodyPieces`: a piece holding ≥5% of the movement is body; flicker specks past its edges are
+  room), and a fill that still swallows the frame falls back to the outline instead of skipping the
+  freeze. THE ROOM IS STILL UP TO THE HOST'S EDGE IN EVERY FRAME (`personMatte`/`server/personMask.ts`,
+  2026-09-30): the band had to hold everywhere the host ever goes, so whatever she was NOT covering
+  inside it showed as rendered — HeyGen drags a patterned thing beside a host along as she sways
+  (Ruth's quilt at her shoulder, job 255, read as the cloth sliding against the still room). Google's
+  MediaPipe selfie segmenter (landscape 256×144, Apache-2.0, `server/assets/selfie-landscape.onnx`,
+  run offline by `onnxruntime-web`'s WASM backend — `onnxruntime-node` crashes pnpm at 300 MB) cuts
+  the person out of every frame (~8 ms a frame with decode); a pixel is live where she is (+6 px,
+  ±1 frame) — band or not, which also un-froze a plain apron hem and a far shoulder that barely
+  move — or where, inside the band, it clearly moves now (`MOVE_LEVEL`, a hand the model missed).
+  Her frame-0 spot is filled from the frame she overlaps it least, never painted with her. Uncovered
+  quilt on job 255: frame-to-frame change 0.51 → 0.02. A cut-out that disagrees with the band
+  (`PERSON_IN_BAND`) or any failure falls back to the band freeze; the log says which ran ("room
+  frozen up to the host's edge"). Only HOST takes freeze
   (`steadyHostClip(…, { freezeRoom })`); b-roll gets the camera fix only. The provider's untouched
   host clip is kept (`scene.rawClipUrls`) and `steadyJobHostClips` starts from it, so a steadier fix
   re-applies to a finished film for free. Practice runs show the host as a still photo (no slow zoom) so they look like the real take
@@ -1256,6 +1414,13 @@ Always 16:9. Fire-and-forget; progress persisted to the job row and polled by th
   case: its tasks sit PENDING in a queue, never start, and FAIL ~4 min later with only
   `userMessage` "This job failed to complete" (now read by `pollTTSTask69Labs`), unbilled,
   while every other channel's voice answers in under a minute.
+  The comparison is only between voices of the SAME KIND (`voiceSpace69Labs`: an account clone or a
+  library voice — they go through different 69Labs endpoints and fail independently), and a
+  provider outage (`isProviderOutage`: a 5xx after the adapter's retries, VOICE_LOOKUP_FAILED,
+  "temporarily unavailable") never counts towards a stuck voice and skips the comparison: on
+  2026-10-01 the clone lane answered 503 VOICE_LOOKUP_FAILED for over an hour while library voices
+  worked, and Pearl's, Scarlett's and Lance's practice films (jobs 284-286) were failed as "pick a
+  different voice" because the comparison voice was a library one.
 - **A 69Labs TTS task is never abandoned.** `generateSceneVoiceover` persists the provider's
   task id on `scene.ttsTaskIds` (the TTS mirror of `renderTaskIds`) the moment it is created,
   and clears it once the audio is collected or the job reports `failed`. Before that the id
@@ -1389,7 +1554,8 @@ Always 16:9. Fire-and-forget; progress persisted to the job row and polled by th
   the guess came back raw VVC — `-map 1:a` then matched nothing and Mae's job 219 lost its
   storyboard scene 7 at assembly on every attempt. **Every ffmpeg call goes through
   `server/ffmpegSpawn.ts`** (`spawnFfmpeg` / `execFfmpeg`), which names each mp3 input
-  (`withInputFormats`, sniffing ID3 / MPEG sync) and waits out a machine too busy to START ffmpeg
+  (`withInputFormats`, sniffing ID3 / MPEG sync — never when the input already names its format
+  anywhere among its own options: a raw mask of 255s reads as an MPEG sync) and waits out a machine too busy to START ffmpeg
   (`retryUnstarted`: `spawn UNKNOWN`/EAGAIN/ENOMEM, Windows exit 3221225794, 2/5/10/20 s) —
   Diane's job 222 died slicing narration and Pearl's 220 in assembly on exactly those, at steps
   with no retry of their own. `isTransientFfmpegError` knows the Windows words too. A TRIPWIRE in

@@ -2131,12 +2131,11 @@ describe("phone finish", () => {
 });
 
 describe("which still pictures zoom", () => {
-  it("zooms a picture on screen 3 s or longer, keeps a shorter one completely still", async () => {
-    const { stillZooms, STILL_ZOOM_MIN_SEC } = await import("./videoAssembly");
-    expect(STILL_ZOOM_MIN_SEC).toBe(3);
-    expect(stillZooms(2.9)).toBe(false);
-    expect(stillZooms(3)).toBe(true);
-    expect(stillZooms(9)).toBe(true);
+  it("zooms EVERY picture — no static images (2026-09-30), a short one only a little", async () => {
+    const { stillZooms, kenBurnsMaxZoom } = await import("./videoAssembly");
+    for (const sec of [0.4, 1, 2.9, 3, 9]) expect(stillZooms(sec)).toBe(true);
+    expect(kenBurnsMaxZoom(0.4)).toBeLessThan(1.02);
+    expect(kenBurnsMaxZoom(9)).toBeGreaterThan(1.1);
   });
 });
 

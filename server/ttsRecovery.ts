@@ -116,6 +116,20 @@ export function classifyNarrationFailure(err: unknown): FailureVerdict {
   return { kind: "wait" };
 }
 
+/**
+ * The provider itself is down — a 5xx after the adapter's own retries, or a lookup service it
+ * says is unavailable. Such an error says nothing about the voice, so it never counts towards
+ * "this voice is stuck", whatever another voice did at the same moment: on 2026-10-01 69Labs'
+ * clone lane answered 503 VOICE_LOOKUP_FAILED for every account clone while library voices
+ * worked, and three practice films (Pearl, Scarlett, Lance) were failed as "pick a different
+ * voice". Pure.
+ */
+export function isProviderOutage(message: string | undefined): boolean {
+  return /\bunavailable \(5\d\d\)|\b5\d\d on task creation|VOICE_LOOKUP_FAILED|temporarily unavailable|service unavailable|bad gateway|gateway time-?out/i.test(
+    message ?? ""
+  );
+}
+
 const STOP_ADVICE: Record<StopReason, (vendor: string) => string> = {
   voice: v =>
     `the channel's voice isn't available on ${v} (it may have been deleted, or belong to ` +
@@ -362,7 +376,8 @@ export async function runTtsWait(
       // The provider is up and only this voice fails — waiting will not fix that (Werner's
       // voice, 2026-09-26: queued, never started, failed ~4 min later, while every other
       // channel's voice answered in under a minute).
-      stuck = r.othersWork ? stuck + 1 : 0;
+      // An outage on the provider's side is never the voice's fault (`isProviderOutage`).
+      stuck = r.othersWork && !isProviderOutage(r.error) ? stuck + 1 : 0;
       if (stuck >= VOICE_STUCK_CHECKS) {
         await deps.fail(stopMessage(wait.vendor, "voiceStuck", r.error));
         return;

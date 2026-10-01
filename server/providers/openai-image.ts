@@ -127,6 +127,8 @@ async function acquireImageToken(): Promise<void> {
 export async function generateOpenAIStill(input: {
   prompt: string;
   referenceImageUrl?: string;
+  /** Several reference images — when set, used instead of `referenceImageUrl`. */
+  referenceImageUrls?: string[];
   /** Render 1:1 instead of 16:9 — the split-screen right panel. */
   square?: boolean;
 }): Promise<GenerationResult> {
@@ -142,13 +144,13 @@ export async function generateOpenAIStill(input: {
   const size = input.square ? OPENAI_IMAGE_SIZE_SQUARE : OPENAI_IMAGE_SIZE;
   try {
     await acquireImageToken(); // pace to the account's gpt-image-2 images-per-min cap
-    const res = input.referenceImageUrl
-      ? await editWithReference(
-          apiKey,
-          input.prompt,
-          input.referenceImageUrl,
-          size
-        )
+    const refs = input.referenceImageUrls?.length
+      ? input.referenceImageUrls
+      : input.referenceImageUrl
+        ? [input.referenceImageUrl]
+        : [];
+    const res = refs.length
+      ? await editWithReference(apiKey, input.prompt, refs, size)
       : await generateFromText(apiKey, input.prompt, size);
 
     if (!res.ok) {
@@ -219,28 +221,27 @@ function generateFromText(
 async function editWithReference(
   apiKey: string,
   prompt: string,
-  referenceImageUrl: string,
+  referenceImageUrls: string[],
   size: string
 ): Promise<Response> {
-  const imgRes = await fetch(referenceImageUrl, { signal: callSignal() });
-  if (!imgRes.ok)
-    throw new Error(
-      `reference image fetch ${imgRes.status} for ${referenceImageUrl}`
-    );
-  const bytes = Buffer.from(await imgRes.arrayBuffer());
-  const contentType = imgRes.headers.get("content-type") || "image/png";
-
   const form = new FormData();
   form.append("model", OPENAI_IMAGE_MODEL);
   form.append("prompt", prompt);
   form.append("size", size);
   form.append("quality", OPENAI_IMAGE_QUALITY);
   form.append("n", "1");
-  form.append(
-    "image",
-    new Blob([bytes], { type: contentType }),
-    "reference.png"
-  );
+  // One reference goes as `image`; several as `image[]` (a key thing's memory pictures, then the
+  // host photo), in order — the prompt names them by position.
+  const field = referenceImageUrls.length > 1 ? "image[]" : "image";
+  for (let k = 0; k < referenceImageUrls.length; k++) {
+    const url = referenceImageUrls[k];
+    const imgRes = await fetch(url, { signal: callSignal() });
+    if (!imgRes.ok)
+      throw new Error(`reference image fetch ${imgRes.status} for ${url}`);
+    const bytes = Buffer.from(await imgRes.arrayBuffer());
+    const contentType = imgRes.headers.get("content-type") || "image/png";
+    form.append(field, new Blob([bytes], { type: contentType }), `reference-${k}.png`);
+  }
 
   return fetch("https://api.openai.com/v1/images/edits", {
     method: "POST",

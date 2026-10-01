@@ -270,12 +270,11 @@ export const KEN_BURNS_MAX_SPAN = 0.14;
 export const kenBurnsMaxZoom = (durationSec: number): number =>
   1 + Math.min(KEN_BURNS_MAX_SPAN, KEN_BURNS_RATE_PER_SEC * Math.max(0.5, durationSec));
 /**
- * A still picture on screen this long or longer slowly zooms; a shorter one stays completely
- * still (the operator, 2026-09-28: "if the scene is long, zoom is okay; if not, it can be still").
- * It replaced the shot list choosing still pictures itself, which it did for most of them, so the
- * b-roll barely moved.
+ * EVERY still picture slowly zooms (2026-09-30, the operator: "no static images — every image has a
+ * slight zoom"). It used to stand completely still under 3 s; the zoom's own rate
+ * (`kenBurnsMaxZoom`) already keeps a short one calm — 1.4% on a 0.5 s list shot.
  */
-export const STILL_ZOOM_MIN_SEC = 3;
+export const STILL_ZOOM_MIN_SEC = 0;
 export const stillZooms = (durationSec: number): boolean => durationSec >= STILL_ZOOM_MIN_SEC;
 /**
  * Build FFmpeg args that animate ONE still image into a silent video clip of `durationSec`

@@ -31,6 +31,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFfmpeg } from "./ffmpegSpawn";
+import { personMasks, PH, PW } from "./personMask";
 
 
 /** Analysis size: enough detail to track a shelf edge, small enough to scan every frame. */
@@ -304,25 +305,50 @@ const FREEZE_MAX_HOST = 0.7;
  *  2. any still pocket the room cannot reach from the TOP, LEFT or RIGHT edge is host — a seated
  *     host runs off the BOTTOM of the frame, so a pocket open only downwards is inside the body.
  * A little room between an arm and the body may be kept live; the camera correction still holds it.
+ * Only the BODY is filled (`bodyPieces`, and what moves within its width): HeyGen redraws the room
+ * a little every frame, so a plant edge or a shelf corner at the far left and right of the frame
+ * still reads as moving, and a row filled from one such speck to the other covered the whole room
+ * (Ruth's job 255, measured before the camera correction: the "host" filled the frame and the
+ * freeze would have been skipped). The specks stay live as they are; they are never filled across.
  * Pure — unit-tested.
  */
 export function solidHost(moving: Uint8Array, w = AW, h = AH): Uint8Array {
+  // Everything moving within the body's WIDTH: a plain shirt's weak outline often joins up only
+  // through small bits beside the big pieces (a black tee's far shoulder, 2026-09-30), and those
+  // must still count. What lies past the body's left and right edges is the room.
+  const pieces = bodyPieces(moving, w, h);
+  let x0 = w;
+  let x1 = -1;
+  for (let i = 0; i < w * h; i++) {
+    if (!pieces[i]) continue;
+    const x = i % w;
+    if (x < x0) x0 = x;
+    if (x > x1) x1 = x;
+  }
+  const body = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    const x = i % w;
+    if (moving[i] && x >= x0 && x <= x1) body[i] = 1;
+  }
   const out = new Uint8Array(moving);
   for (let y = 0; y < h; y++) {
     let lo = -1;
     let hi = -1;
     for (let x = 0; x < w; x++) {
-      if (!moving[y * w + x]) continue;
+      if (!body[y * w + x]) continue;
       if (lo < 0) lo = x;
       hi = x;
     }
-    if (lo >= 0) out.fill(1, y * w + lo, y * w + hi + 1);
+    if (lo >= 0) {
+      out.fill(1, y * w + lo, y * w + hi + 1);
+      body.fill(1, y * w + lo, y * w + hi + 1);
+    }
   }
-  // Room reachable from the top, left or right edge through non-host pixels; the rest is host.
+  // Room reachable from the top, left or right edge through non-body pixels; the rest is host.
   const room = new Uint8Array(w * h);
   const stack: number[] = [];
   const seed = (i: number) => {
-    if (!out[i] && !room[i]) {
+    if (!body[i] && !room[i]) {
       room[i] = 1;
       stack.push(i);
     }
@@ -342,6 +368,72 @@ export function solidHost(moving: Uint8Array, w = AW, h = AH): Uint8Array {
     if (y < h - 1) seed(i + w);
   }
   for (let i = 0; i < w * h; i++) if (!room[i]) out[i] = 1;
+  return out;
+}
+
+/** A moving piece is part of the body when it holds at least this share of all the movement. */
+const BODY_PIECE_SHARE = 0.05;
+
+/**
+ * The pieces of `moving` that are the PERSON: every connected piece holding `BODY_PIECE_SHARE` of
+ * the movement, and always the largest. The body need not be one piece — a plain shirt moves only
+ * at its edges, so the head and each arm can come out separate (a HeyGen host clip: 76% / 13% / 8%)
+ * — while HeyGen's redraw flicker on the room is many small specks (≤ 2.4% each on every host clip
+ * measured, 2026-09-30). Pure.
+ */
+export function bodyPieces(moving: Uint8Array, w = AW, h = AH): Uint8Array {
+  const label = new Int32Array(w * h);
+  const sizes: number[] = [0];
+  const stack: number[] = [];
+  let total = 0;
+  for (let s = 0; s < w * h; s++) {
+    if (!moving[s] || label[s]) continue;
+    const id = sizes.length;
+    let size = 0;
+    label[s] = id;
+    stack.push(s);
+    while (stack.length) {
+      const i = stack.pop()!;
+      size++;
+      const x = i % w;
+      const visit = (j: number) => {
+        if (moving[j] && !label[j]) {
+          label[j] = id;
+          stack.push(j);
+        }
+      };
+      if (x > 0) visit(i - 1);
+      if (x < w - 1) visit(i + 1);
+      if (i >= w) visit(i - w);
+      if (i < w * (h - 1)) visit(i + w);
+    }
+    sizes.push(size);
+    total += size;
+  }
+  const largest = Math.max(...sizes);
+  const keep = sizes.map(sz => sz > 0 && (sz === largest || sz >= total * BODY_PIECE_SHARE));
+  const out = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) if (keep[label[i]]) out[i] = 1;
+  return out;
+}
+
+/** Grow a mask by `r` along rows (`horizontal`) or columns — half of a box dilation. Pure. */
+function grow(src: Uint8Array, horizontal: boolean, r: number, w = AW, h = AH): Uint8Array {
+  const out = new Uint8Array(w * h);
+  const [outer, inner] = horizontal ? [h, w] : [w, h];
+  const at = (o: number, i: number) => (horizontal ? o * w + i : i * w + o);
+  for (let o = 0; o < outer; o++) {
+    let last = -1e9;
+    for (let i = 0; i < inner; i++) {
+      if (src[at(o, i)]) last = i;
+      if (i - last <= r) out[at(o, i)] = 1;
+    }
+    last = 1e9;
+    for (let i = inner - 1; i >= 0; i--) {
+      if (src[at(o, i)]) last = i;
+      if (last - i <= r) out[at(o, i)] = 1;
+    }
+  }
   return out;
 }
 
@@ -368,25 +460,6 @@ export function hostArea(frames: Uint8Array[]): Uint8Array | null {
   }
   const host = new Uint8Array(AW * AH);
   for (let i = 0; i < AW * AH; i++) host[i] = hits[i] >= sampled * HOST_SHARE || big[i] ? 1 : 0;
-  // Grow by `r`, rows then columns (a box dilation).
-  const grow = (src: Uint8Array, horizontal: boolean, r: number) => {
-    const out = new Uint8Array(AW * AH);
-    const [outer, inner] = horizontal ? [AH, AW] : [AW, AH];
-    const at = (o: number, i: number) => (horizontal ? o * AW + i : i * AW + o);
-    for (let o = 0; o < outer; o++) {
-      let last = -1e9;
-      for (let i = 0; i < inner; i++) {
-        if (src[at(o, i)]) last = i;
-        if (i - last <= r) out[at(o, i)] = 1;
-      }
-      last = 1e9;
-      for (let i = inner - 1; i >= 0; i--) {
-        if (src[at(o, i)]) last = i;
-        if (last - i <= r) out[at(o, i)] = 1;
-      }
-    }
-    return out;
-  };
   const invert = (m: Uint8Array) => m.map(v => 1 - v);
   // Shave first: the room's thin edges (a shelf line, the window frame) flicker by a pixel under
   // HeyGen's redraw and read as "moving" — grown by the margin they covered Ruth's whole room.
@@ -394,9 +467,188 @@ export function hostArea(frames: Uint8Array[]): Uint8Array | null {
   const SHAVE = 2;
   const shaved = invert(grow(grow(invert(host), true, SHAVE), false, SHAVE));
   // The whole body, not just its moving outline (see `solidHost`).
-  const area = grow(grow(solidHost(shaved), true, FREEZE_MARGIN + SHAVE), false, FREEZE_MARGIN + SHAVE);
-  const share = area.reduce((a, v) => a + v, 0) / (AW * AH);
-  return share > FREEZE_MAX_HOST ? null : area;
+  const margin = (m: Uint8Array) => grow(grow(m, true, FREEZE_MARGIN + SHAVE), false, FREEZE_MARGIN + SHAVE);
+  const shareOf = (m: Uint8Array) => m.reduce((a, v) => a + v, 0) / (AW * AH);
+  const area = margin(solidHost(shaved));
+  if (shareOf(area) <= FREEZE_MAX_HOST) return area;
+  // The fill swallowed the room (a host leaning on something that flickers): freeze around the
+  // moving outline rather than not at all.
+  const outline = margin(shaved);
+  return shareOf(outline) > FREEZE_MAX_HOST ? null : outline;
+}
+
+/** Outputs frozen up to the person's edge — only so the log can say which freeze ran. */
+const frozenAroundPerson = new Set<string>();
+
+/** Room kept live around the person's cut-out in each frame (analysis px): hair, a hand's blur. */
+const PERSON_MARGIN = 6;
+/** The cut-out is trusted only when this share of the person, in most frames, sits in the band. */
+const PERSON_IN_BAND = 0.75;
+
+export type PersonMatte = {
+  /** Per frame, what stays live (1) — always inside `hostArea`. */
+  live: Uint8Array[];
+  /** The frame whose room fills where the host sat in frame 0 (her spot is not room there). */
+  fillFrame: number;
+  /** Where the room is taken from `fillFrame` instead of frame 0. */
+  fillFrom: Uint8Array;
+};
+
+/**
+ * The room frozen right up to the host's edge in EVERY frame, not just outside the band she ever
+ * moves through. The band (`hostArea`) must hold everywhere she goes, so whatever she is NOT
+ * covering inside it used to show as rendered — and HeyGen drags a patterned thing next to a host
+ * along with her as she sways (Ruth's quilt beside her shoulder, job 255, 2026-09-30), which read
+ * as the cloth sliding against the still room around it. Now a pixel is live where the person
+ * cut-out (`personMasks`, dilated `PERSON_MARGIN`, and ±1 frame) is — band or not — or where, inside
+ * the band, it is clearly moving in that frame (`MOVE_LEVEL`); the rest of the band is room. Frame 0
+ * is the room plate except where she sat in frame 0 — that is her, not room — which is taken from
+ * the frame she overlaps least with it; what she covers in both stays live throughout, so no
+ * ghost of her is ever painted in. Null when the cut-out does not agree with the band (the model
+ * missed her), and the caller freezes around the band as before. Pure — unit-tested.
+ */
+export function personMatte(
+  area: Uint8Array,
+  persons: Uint8Array[],
+  frames: Uint8Array[],
+  pw = PW,
+  ph = PH,
+  w = AW,
+  h = AH
+): PersonMatte | null {
+  const n = persons.length;
+  if (!n) return null;
+  let trusted = 0;
+  const grown = persons.map(p => {
+    const up = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) {
+      const sy = Math.min(ph - 1, Math.floor((y * ph) / h));
+      for (let x = 0; x < w; x++) up[y * w + x] = p[sy * pw + Math.min(pw - 1, Math.floor((x * pw) / w))];
+    }
+    let total = 0;
+    let inBand = 0;
+    for (let i = 0; i < w * h; i++) {
+      if (!up[i]) continue;
+      total++;
+      inBand += area[i];
+    }
+    if (total >= w * h * 0.03 && inBand >= total * PERSON_IN_BAND) trusted++;
+    return grow(grow(up, true, PERSON_MARGIN, w, h), false, PERSON_MARGIN, w, h);
+  });
+  if (trusted < n * 0.9) return null;
+  // The frame that overlaps her frame-0 spot least fills it.
+  let fillFrame = 0;
+  let best = Infinity;
+  for (let k = 1; k < n; k++) {
+    let o = 0;
+    for (let i = 0; i < w * h; i++) if (area[i] && grown[0][i] && grown[k][i]) o++;
+    if (o < best) {
+      best = o;
+      fillFrame = k;
+    }
+  }
+  const always = new Uint8Array(w * h);
+  const fillFrom = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    if (!grown[0][i]) continue;
+    if (grown[fillFrame][i]) always[i] = 1;
+    else fillFrom[i] = 1;
+  }
+  const f0 = frames[0];
+  const live = grown.map((g, k) => {
+    const prev = grown[Math.max(0, k - 1)];
+    const next = grown[Math.min(n - 1, k + 1)];
+    // Clearly moving right now, inside the band: a hand the cut-out missed stays live too.
+    const diff = new Float32Array(w * h);
+    const fk = frames[Math.min(k, frames.length - 1)];
+    for (let i = 0; i < w * h; i++) diff[i] = area[i] ? Math.abs(fk[i] - f0[i]) : 0;
+    const moving = boxMean(diff, MOVE_RADIUS, w, h);
+    const m = new Uint8Array(w * h);
+    // The person is live wherever the cut-out finds them, band or not: a plain apron or a far
+    // shoulder barely moves, sits outside the band, and used to be frozen with the room.
+    for (let i = 0; i < w * h; i++)
+      if (g[i] || prev[i] || next[i] || always[i] || (area[i] && moving[i] >= MOVE_LEVEL)) m[i] = 1;
+    return m;
+  });
+  return { live, fillFrame, fillFrom };
+}
+
+/** Inside the band, a patch this far from frame 0 (mean grey levels) is moving now: the host's
+ *  face and shawl measure 24-38, HeyGen's redraw of a patterned quilt 5-7 (Ruth, job 255). */
+const MOVE_LEVEL = 15;
+const MOVE_RADIUS = 3;
+
+/** Mean over a (2r+1)² box, edges clamped. Pure. */
+function boxMean(src: Float32Array, r: number, w: number, h: number): Float32Array {
+  const a = new Float32Array(w * h);
+  const b = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) {
+    let sum = 0;
+    let lo = 0;
+    let hi = -1;
+    for (let x = 0; x < w; x++) {
+      while (hi < Math.min(w - 1, x + r)) sum += src[y * w + ++hi];
+      while (lo < x - r) sum -= src[y * w + lo++];
+      a[y * w + x] = sum / (hi - lo + 1);
+    }
+  }
+  for (let x = 0; x < w; x++) {
+    let sum = 0;
+    let lo = 0;
+    let hi = -1;
+    for (let y = 0; y < h; y++) {
+      while (hi < Math.min(h - 1, y + r)) sum += a[++hi * w + x];
+      while (lo < y - r) sum -= a[lo++ * w + x];
+      b[y * w + x] = sum / (hi - lo + 1);
+    }
+  }
+  return b;
+}
+
+/** The clip's frame rate, read off ffmpeg's stream line ("25 fps"). */
+async function frameRate(src: string): Promise<string> {
+  const { stderr } = await execFfmpeg(["-hide_banner", "-i", src, "-frames:v", "1", "-f", "null", "-"]);
+  const m = String(stderr).match(/(\d+(?:\.\d+)?) fps/);
+  if (!m) throw new Error("no frame rate");
+  return m[1];
+}
+
+/** `freezeRoom` with a per-frame matte (`personMatte`): the room is still up to the host's edge. */
+async function freezeAroundPerson(dir: string, src: string, matte: PersonMatte): Promise<string> {
+  const pgm = (m: Uint8Array) => Buffer.concat([Buffer.from(`P5\n${AW} ${AH}\n255\n`), Buffer.from(m.map(v => (v ? 255 : 0)))]);
+  // The room plate: frame 0, with her frame-0 spot filled from `fillFrame`.
+  const first = path.join(dir, "plate-0.png");
+  const other = path.join(dir, "plate-fill.png");
+  const fillMask = path.join(dir, "plate-fill.pgm");
+  const plate = path.join(dir, "plate.png");
+  await execFfmpeg(["-hide_banner", "-loglevel", "error", "-y", "-i", src, "-frames:v", "1", first]);
+  await execFfmpeg(["-hide_banner", "-loglevel", "error", "-y", "-i", src, "-vf",
+    `select='eq(n,${matte.fillFrame})'`, "-frames:v", "1", other]);
+  await writeFile(fillMask, pgm(matte.fillFrom));
+  await execFfmpeg(["-hide_banner", "-loglevel", "error", "-y", "-i", first, "-i", other, "-i", fillMask,
+    "-filter_complex",
+    `[2:v]scale=1920:1080,format=gray,gblur=sigma=${FREEZE_FEATHER / 2}[m];` +
+      `[1:v]scale=1920:1080,format=rgba[f];[f][m]alphamerge[fill];` +
+      `[0:v]scale=1920:1080[b];[b][fill]overlay=format=auto[p]`,
+    "-map", "[p]", "-frames:v", "1", plate]);
+  // The ROOM mask per frame (255 = room), as raw grey frames at the clip's own rate.
+  const masks = path.join(dir, "room.gray");
+  await writeFile(masks, Buffer.concat(matte.live.map(m => Buffer.from(m.map(v => (v ? 0 : 255))))));
+  const fps = await frameRate(src);
+  const out = path.join(dir, "frozen.mp4");
+  const graph =
+    `[2:v]scale=1920:1080,format=gray,gblur=sigma=${FREEZE_FEATHER / 2}[m];` +
+    `[1:v]scale=1920:1080,format=rgba[r];[r][m]alphamerge[room];` +
+    `[0:v]scale=1920:1080,setsar=1[v0];[v0][room]overlay=shortest=1:format=auto,format=yuv420p[v]`;
+  await execFfmpeg(
+    ["-hide_banner", "-loglevel", "error", "-y", "-i", src, "-loop", "1", "-i", plate,
+      "-f", "rawvideo", "-pix_fmt", "gray", "-s", `${AW}x${AH}`, "-r", fps, "-i", masks,
+      "-filter_complex", graph, "-map", "[v]", "-map", "0:a?",
+      "-c:v", "libx264", "-preset", "fast", "-crf", "16", "-c:a", "copy",
+      "-movflags", "+faststart", out],
+    { maxBuffer: 1 << 26 }
+  );
+  return out;
 }
 
 /**
@@ -409,6 +661,17 @@ async function freezeRoom(dir: string, src: string): Promise<string> {
   if (frames.length < 2) return src;
   const area = hostArea(frames);
   if (!area) return src;
+  const persons = await personMasks(src);
+  const matte = persons && persons.length === frames.length ? personMatte(area, persons, frames) : null;
+  if (matte) {
+    try {
+      const out = await freezeAroundPerson(dir, src, matte);
+      frozenAroundPerson.add(out);
+      return out;
+    } catch (err: any) {
+      console.warn(`[HostSteady] per-frame freeze failed, freezing around the band — ${err?.message ?? err}`);
+    }
+  }
   // The ROOM mask (255 = room) as a greyscale image; ffmpeg scales and softens it.
   const room = Buffer.alloc(AW * AH);
   for (let i = 0; i < AW * AH; i++) room[i] = area[i] ? 0 : 255;
@@ -476,7 +739,8 @@ export async function steadyHostClip(
         : await freezeRoom(dir, src);
     console.log(
       `[HostSteady] ${label}: camera zoom ${(before * 100).toFixed(2)}% → ${(range(poses) * 100).toFixed(2)}% ` +
-        `(${pass} pass${pass > 1 ? "es" : ""})${frozen !== src ? ", room frozen" : ""}`
+        `(${pass} pass${pass > 1 ? "es" : ""})` +
+        (frozen === src ? "" : frozenAroundPerson.delete(frozen) ? ", room frozen up to the host's edge" : ", room frozen")
     );
     return await readFile(frozen);
   } catch (err: any) {
