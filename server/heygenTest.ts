@@ -50,7 +50,9 @@ import {
   TTS_STABILITY,
   TTS_STYLE,
   voiceIdForVendor,
+  voiceTextFor,
 } from "./longformVideo";
+import { stripVoiceDirections } from "../shared/voiceDirections";
 import { parseVolumeMultiplier } from "./ttsUnified";
 import { downloadToTemp, runFfmpeg } from "./videoAssembly";
 import { getMediaDuration } from "./mediaProbe";
@@ -270,12 +272,23 @@ async function voiceTestScript(
     minimaxVoiceId: channel.minimaxVoiceId ?? undefined,
   } as LongformInputParams;
   const { providerType, apiKey } = await resolveTTSVendor(params);
+  const model = channel.ttsModel || "eleven_multilingual_v2";
+  // `[laughs]`-style directions reach the voice only when it acts them out (v4 on an
+  // ElevenLabs voice); any other voice would say them, so it gets the script without them.
+  const { text } = await voiceTextFor({
+    clean: stripVoiceDirections(row.script),
+    directed: row.script,
+    providerType,
+    apiKey,
+    voiceId: voiceIdForVendor(params),
+    model,
+  });
   const voicedUrl = await generateSceneVoiceover(
     providerType,
     apiKey,
-    row.script,
+    text,
     voiceIdForVendor(params),
-    channel.ttsModel || "eleven_multilingual_v2",
+    model,
     Number.isFinite(speed) && speed >= 0.7 && speed <= 1.2 ? speed : undefined,
     parseVolumeMultiplier(channel.ttsVolume),
     TTS_STABILITY,

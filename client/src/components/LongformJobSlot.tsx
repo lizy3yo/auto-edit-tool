@@ -86,6 +86,12 @@ import {
   CTA_TEMPLATE_PLACEHOLDER,
 } from "@shared/ctaMarkers";
 import {
+  directionsBlockedBy,
+  stripVoiceDirections,
+  voiceDirectionsIn,
+  voiceSpaceByShape,
+} from "@shared/voiceDirections";
+import {
   ScanFace,
   Loader2,
   Download,
@@ -1712,9 +1718,23 @@ export default function LongformJobSlot({
     !isProcessing;
 
   const wordCount = useMemo(
-    () => script.trim().split(/\s+/).filter(Boolean).length,
+    () => stripVoiceDirections(script).trim().split(/\s+/).filter(Boolean).length,
     [script]
   );
+  // `[laughs]`-style directions: acted out only on an ElevenLabs voice on eleven_v4 — the same
+  // rule the server applies when it voices the master, said here before the click.
+  const directionCount = useMemo(
+    () => voiceDirectionsIn(script).length,
+    [script]
+  );
+  const directionsBlocked =
+    directionCount > 0 && channelDefaults?.voiceId
+      ? directionsBlockedBy({
+          vendor: ttsVendor === "minimax" ? "minimax" : "69labs",
+          model: channelDefaults.ttsModel,
+          voiceSpace: voiceSpaceByShape(channelDefaults.voiceId),
+        })
+      : null;
 
   // CTA preview for the generate confirmation: the same marker scan and book→block title
   // match the server runs at submit, so the dialog can say — before the click — whether the
@@ -1965,6 +1985,21 @@ export default function LongformJobSlot({
                   No voice configured for this channel — set one under Channels.
                 </p>
               )}
+              {directionCount > 0 &&
+                channelDefaults.voiceId &&
+                !manualNarrationUrl && (
+                  <p
+                    className={
+                      directionsBlocked
+                        ? "text-warning"
+                        : "text-muted-foreground"
+                    }
+                  >
+                    {directionsBlocked
+                      ? `This script has ${directionCount} voice direction${directionCount === 1 ? "" : "s"} like [laughs], but ${directionsBlocked}, so they will be left out.`
+                      : `The voice will act out this script's ${directionCount} direction${directionCount === 1 ? "" : "s"} like [laughs].`}
+                  </p>
+                )}
               <ChannelVoiceTuning
                 key={channelKey}
                 channelKey={channelKey}

@@ -6,8 +6,9 @@
  * word-offset spans on these regexes), and the client previews the same scan in the generate
  * confirmation dialog — so what the dialog promises is exactly what the router will accept.
  *
- * Everything here is pure string work. No imports, so it bundles into the client for free.
+ * Everything here is pure string work, so it bundles into the client for free.
  */
+import { attachLoneDirections, stripVoiceDirections } from "./voiceDirections";
 
 // Tolerant spoken-script markers: case-insensitive, any run of "=", optional spaces.
 const SCRIPT_START_MARKER = /^[ \t]*={2,}[ \t]*SCRIPT[ \t]*={2,}[ \t]*$/im;
@@ -118,7 +119,7 @@ export function scanCtaBlocks(rawScript: string): {
       if (open == null)
         errors.push("===END CTA=== without a preceding ===START CTA===");
       else {
-        const text = open.join("\n").trim();
+        const text = stripVoiceDirections(open.join("\n")).trim();
         if (text) blocks.push({ text, label: openLabel });
         else empty++;
         open = null;
@@ -152,15 +153,33 @@ const normTitle = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]/g, " ");
  * server-side because it also computes word offsets and span labels, which no client needs.
  *
  * Kept honest by a test asserting the two agree; a divergence would tell an operator to read
- * "equals equals equals CTA" into the master narration.
+ * "equals equals equals CTA" into the master narration. Voice directions (`[laughs]`) are
+ * removed too, as `parseCtaMarkers` removes them: a person reading aloud, or a TTS box that is
+ * not ElevenLabs v4, would say them.
  */
 export function stripCtaMarkerLines(spoken: string): string {
+  return stripVoiceDirections(withoutCtaMarkerLines(spoken));
+}
+
+function withoutCtaMarkerLines(spoken: string): string {
   return spoken
     .split("\n")
     .filter(line => !CTA_START_LINE.test(line) && !CTA_END_LINE.test(line))
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+/**
+ * The script as the VOICE reads it when it can act directions out: the spoken portion, marker
+ * lines removed, `[directions]` kept, a direction on a line of its own joined to a neighbour so
+ * it splits into exactly the paragraphs `parseCtaMarkers(...).script` does (the delivery plan
+ * indexes one into the other). Every other reader takes the clean copy instead.
+ */
+export function directedSpokenScript(rawScript: string): string {
+  return attachLoneDirections(
+    withoutCtaMarkerLines(extractSpokenScript(rawScript))
+  ).trim();
 }
 
 export function ctaTitleMatches(title: string, text: string): boolean {

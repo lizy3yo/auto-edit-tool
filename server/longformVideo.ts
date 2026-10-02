@@ -350,11 +350,17 @@ import type {
 } from "../shared/types";
 import {
   extractSpokenScript,
+  directedSpokenScript,
   CTA_START_LINE,
   CTA_END_LINE,
   CTA_QR_TRIGGER,
   CTA_QR_RELEASE,
 } from "../shared/ctaMarkers";
+import {
+  directionsBlockedBy,
+  stripVoiceDirections,
+  voiceDirectionsIn,
+} from "../shared/voiceDirections";
 import {
   type LongformPacing,
   LEGACY_PACING,
@@ -1237,12 +1243,16 @@ export interface CtaSpan {
  * an unclosed `START`, a nested `START`) — non-empty errors mean the script is malformed and
  * the caller should reject it. Empty blocks (adjacent markers) are dropped. A script with no
  * markers returns unchanged with `spans: []`. Pure — unit-tested.
+ *
+ * Voice directions (`[laughs]`) are removed FIRST, so the script and the word offsets every
+ * caller gets are the clean copy — only the voice sees directions (`directedSpokenScript`).
  */
 export function parseCtaMarkers(spoken: string): {
   script: string;
   spans: CtaSpan[];
   errors: string[];
 } {
+  spoken = stripVoiceDirections(spoken);
   const kept: string[] = [];
   const spans: CtaSpan[] = [];
   const errors: string[] = [];
@@ -4353,6 +4363,47 @@ export function voiceIdForVendor(params: LongformInputParams): string {
   return params.ttsVendor === "minimax"
     ? (params.minimaxVoiceId ?? "")
     : params.voiceId;
+}
+
+/**
+ * The text a voice is handed: the DIRECTED copy (`[laughs]`, `[sighs]` kept) when this voice
+ * acts directions out — an ElevenLabs voice on eleven_v3/v4 — else the CLEAN copy, because every
+ * other model, and a 69Labs clone (MiniMax underneath, whatever model is asked for), reads a
+ * direction ALOUD. `blockedBy` names why a script's directions were left out, for a job warning.
+ * The directed copy is used only when it splits into exactly the clean copy's paragraphs: the
+ * delivery plan voices one paragraph-indexed run at a time. See shared/voiceDirections.ts.
+ */
+export async function voiceTextFor(opts: {
+  clean: string;
+  directed: string;
+  providerType: string;
+  apiKey: string;
+  voiceId: string;
+  model: string | null | undefined;
+}): Promise<{ text: string; directions: number; blockedBy: string | null }> {
+  const directions = voiceDirectionsIn(opts.directed).length;
+  if (!directions) return { text: opts.clean, directions, blockedBy: null };
+  const vendor = opts.providerType === "minimax" ? "minimax" : "69labs";
+  const voiceSpace =
+    vendor === "69labs"
+      ? await voiceSpace69Labs(opts.apiKey, opts.voiceId).catch(
+          () => "library" as const
+        )
+      : "library";
+  let blockedBy = directionsBlockedBy({
+    vendor,
+    model: opts.model,
+    voiceSpace,
+  });
+  if (
+    !blockedBy &&
+    scriptParagraphs(stripVoiceDirections(opts.directed)).join("\n") !==
+      scriptParagraphs(opts.clean).join("\n")
+  )
+    blockedBy = "they could not be lined up with the script's paragraphs";
+  return blockedBy
+    ? { text: opts.clean, directions, blockedBy }
+    : { text: opts.directed, directions, blockedBy: null };
 }
 
 /**
@@ -12594,10 +12645,32 @@ async function voiceMasterNarration(
     return { url: params.voicedMasterUrl };
   }
   const speed = params.ttsSpeed;
+  // `spokenScript` is the CLEAN copy every other stage reads; the voice gets the directed copy
+  // (`[laughs]` kept) only when it can act directions out — otherwise it would say them.
+  const voice = await voiceTextFor({
+    clean: spokenScript,
+    directed: directedSpokenScript(params.script),
+    providerType,
+    apiKey,
+    voiceId: voiceIdForVendor(params),
+    model: params.ttsModel,
+  });
+  if (voice.blockedBy) {
+    appendJobWarning(
+      jobId,
+      `The script has ${voice.directions} voice direction(s) like [laughs] or [sighs], but ` +
+        `${voice.blockedBy} — they were left out of the narration`
+    );
+  } else if (voice.directions) {
+    console.log(
+      `[Longform ${jobId}] narration acts out ${voice.directions} voice direction(s) on ${params.ttsModel}`
+    );
+  }
+  const voiceScript = voice.text;
   let providerUrl: string;
   if (planChangesTheRead(params.deliveryPlan)) {
     try {
-      const runs = deliveryRuns(spokenScript, params.deliveryPlan!);
+      const runs = deliveryRuns(voiceScript, params.deliveryPlan!);
       // Voiced MASTER_TTS_CONCURRENCY at a time, in script order — one after another, a
       // 21-minute script's 45-odd runs took over half an hour — and reported on the job card,
       // which otherwise sat on "0/276 scenes" the whole time (scenes are sliced after this).
@@ -12693,7 +12766,7 @@ async function voiceMasterNarration(
     providerUrl = await generateSceneVoiceover(
       providerType,
       apiKey,
-      spokenScript,
+      voiceScript,
       voiceIdForVendor(params),
       params.ttsModel,
       speed,
@@ -12711,7 +12784,7 @@ async function voiceMasterNarration(
       `[Longform ${jobId}] master one-shot TTS failed (${e?.message}); ` +
         `falling back to chunked master narration`
     );
-    const segments = splitScriptForNarration(spokenScript);
+    const segments = splitScriptForNarration(voiceScript);
     const audioUrls: string[] = [];
     for (const seg of segments) {
       audioUrls.push(

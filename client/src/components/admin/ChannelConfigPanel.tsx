@@ -202,6 +202,20 @@ const EDIT_FIELDS: FieldSpec<EditForm>[] = [
   { field: "defaultWordCount", label: "Word Count" },
 ];
 
+/** The voice models a channel can pick, in both the edit and the create form. v4 acts out
+    `[laughs]`-style script directions, on ElevenLabs voices only (not 69Labs clones). */
+const TTS_MODELS = [
+  { value: "eleven_multilingual_v2", label: "Multilingual v2" },
+  { value: "eleven_v4", label: "Eleven v4 (acts out [laughs] etc.)" },
+  { value: "eleven_turbo_v2_5", label: "Turbo v2.5" },
+  { value: "eleven_monolingual_v1", label: "Monolingual v1" },
+];
+const ttsModelItems = TTS_MODELS.map(m => (
+  <SelectItem key={m.value} value={m.value}>
+    {m.label}
+  </SelectItem>
+));
+
 export function ChannelConfigPanel() {
   const utils = trpc.useUtils();
   const {
@@ -563,15 +577,7 @@ export function ChannelConfigPanel() {
                 <SelectTrigger className="mt-1 text-xs h-8">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="eleven_multilingual_v2">
-                    Multilingual v2
-                  </SelectItem>
-                  <SelectItem value="eleven_turbo_v2_5">Turbo v2.5</SelectItem>
-                  <SelectItem value="eleven_monolingual_v1">
-                    Monolingual v1
-                  </SelectItem>
-                </SelectContent>
+                <SelectContent>{ttsModelItems}</SelectContent>
               </Select>
             </div>
             <div>
@@ -1040,17 +1046,7 @@ export function ChannelConfigPanel() {
                       <SelectTrigger className="mt-1 text-xs h-8">
                         <SelectValue />
                       </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="eleven_multilingual_v2">
-                          Multilingual v2
-                        </SelectItem>
-                        <SelectItem value="eleven_turbo_v2_5">
-                          Turbo v2.5
-                        </SelectItem>
-                        <SelectItem value="eleven_monolingual_v1">
-                          Monolingual v1
-                        </SelectItem>
-                      </SelectContent>
+                      <SelectContent>{ttsModelItems}</SelectContent>
                     </Select>
                   </div>
                   <div>

@@ -6,6 +6,7 @@
 
 import { recordUsage } from "./costMeter";
 import { summarizeHttpBody } from "./_core/errorDetail";
+import { voiceSpaceByShape } from "../shared/voiceDirections";
 
 const BASE_URL = "https://69labs.vip/api/v1";
 
@@ -233,12 +234,9 @@ async function fetchVoiceCloneIds(apiKey: string): Promise<Set<string> | null> {
 }
 
 /** 69Labs account clone ids are UUIDs; library (ElevenLabs-space) ids are 20-character tokens. */
-const UUID_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-/** Which of the two voice spaces an id lives in, by its shape alone. Pure. */
-export function voiceSpaceByShape(voiceId: string): "clone" | "library" {
-  return UUID_ID.test(voiceId.trim()) ? "clone" : "library";
-}
+// Which of the two voice spaces an id lives in, by its shape alone. In shared/ so the generate
+// form can say before the click whether a script's `[laughs]` directions will be acted out.
+export { voiceSpaceByShape };
 
 /**
  * Which 69Labs voice space a voice lives in. The two spaces go through different endpoints

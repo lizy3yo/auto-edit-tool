@@ -7,6 +7,7 @@
  * click, the server because the client is not the lock.
  */
 import { ESTIMATE_WORDS_PER_SEC } from "./hostMinutes";
+import { stripVoiceDirections } from "./voiceDirections";
 
 /** The voiced audio is cut to this before HeyGen sees it: the hard cap on one clip's cost. */
 export const HEYGEN_TEST_MAX_SEC = 30;
@@ -40,7 +41,8 @@ export function pageList(current: number, total: number): (number | "…")[] {
 
 /** Words as the pipeline counts them for pacing: whitespace-separated tokens. */
 export function countScriptWords(script: string): number {
-  const t = script.trim();
+  // A `[laughs]` direction is acted, not spoken: it costs no words of the budget.
+  const t = stripVoiceDirections(script).trim();
   return t ? t.split(/\s+/).length : 0;
 }
 

@@ -1318,6 +1318,24 @@ Express · tRPC · Drizzle · MySQL.
   never lands after the clear. `assemblePerSceneFilm` reports through its `onProgress` option.
   Narration slices are now cut eight at a time (`SLICE_CONCURRENCY`): 224 slices of a 16-min
   master went 24 s → 5 s; strict callers still throw the first error, after every worker stops
+- **Voice directions** (`shared/voiceDirections.ts`, 2026-10-03) — a script may carry `[laughs]`,
+  `[sighs]`, `[whispers]`, `[warmly]`… where the host should do them. ElevenLabs v3/v4 act a
+  bracketed direction out; every older model, and MiniMax (which is what a 69Labs account CLONE
+  runs on, whatever model is asked for), reads it ALOUD. So a script has two copies: the CLEAN one
+  — `parseCtaMarkers` and its browser twin `stripCtaMarkerLines` remove directions first, so the
+  storyboard, alignment, the skip check (a direction would read as a skipped word and stop the
+  film), scene text, captions and shot list never see one — and the DIRECTED one
+  (`directedSpokenScript`), handed to the voice by `voiceTextFor` only when `directionsBlockedBy`
+  says the voice can act them (69Labs vendor, ElevenLabs library voice, `eleven_v3`/`eleven_v4`
+  model). Otherwise the clean copy is voiced and the job warns. The two copies MUST split into the
+  same paragraphs — the delivery plan voices paragraph-indexed runs — so a direction on a line of
+  its own is joined to a neighbour (`attachLoneDirections`) and `voiceTextFor` falls back to clean
+  if they ever differ. A re-voiced scene (regenerate/retry/skip repair) is voiced from clean scene
+  text, so it loses its direction. Only Roger, Amos, Diane and Dale are ElevenLabs voices; the
+  other 9 channels are 69Labs clones and v4 refuses them (tested on Hank, 2026-10-02:
+  `/voice-clones/generate` "Unsupported voice model"). v4 is 1.5x 69Labs credits; `pricing.ts`
+  does not price it differently yet. The generate form says before the click whether a script's
+  directions will be acted or left out; Admin → Channels offers `eleven_v4` as a TTS model
 - `server/ttsMinimax.ts` — the SECOND voice lane, and the third narration option beside the
   channel voice and a supplied file. Deliberately NOT an automatic failover: the vendor is an
   operator's choice made before anything is voiced and pinned to `inputParams.ttsVendor`, so a
