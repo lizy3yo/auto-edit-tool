@@ -224,7 +224,7 @@ describe("scanStillDefects", () => {
     });
   });
 
-  it("fails open all-false when the vision call throws", async () => {
+  it("asks the other checker, then reports UNCHECKED (never a pass) when both calls throw", async () => {
     mockInvoke.mockReset();
     mockInvoke.mockRejectedValue(new Error("529 overloaded"));
     expect(await scanStillDefects(await imageOf(1280, 720))).toEqual({
@@ -234,8 +234,21 @@ describe("scanStillDefects", () => {
       missing: false,
       messy: false,
       wrongPlace: false, staged: false,
+      unchecked: true,
       what: "",
     });
+    expect(mockInvoke).toHaveBeenCalledTimes(2);
+    expect(mockInvoke.mock.calls[0][0].model).not.toBe(mockInvoke.mock.calls[1][0].model);
+  });
+
+  it("a failed first call answered by the other checker is a normal verdict", async () => {
+    mockInvoke.mockReset();
+    mockInvoke
+      .mockRejectedValueOnce(new Error("Claude returned no text content"))
+      .mockResolvedValueOnce({ text: '{"overlay":false,"broken":false,"writing":true,"what":"label"}' });
+    const v = await scanStillDefects(await imageOf(1280, 720));
+    expect(v.writing).toBe(true);
+    expect(v.unchecked).toBeUndefined();
   });
 });
 

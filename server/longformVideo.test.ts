@@ -133,6 +133,7 @@ import {
   heroPhrase,
   deriveVideoSubject,
   ensureVideoSubject,
+  BODY_ON_PERSON_CLAUSE,
   ANON_PERSON_SUFFIX,
   NO_FIGURES_SUFFIX,
   CUTAWAY_PERSON_FREE_DIRECTIVE,
@@ -7063,7 +7064,7 @@ describe("buildStillPrompt (script-only + one fixed look tail)", () => {
     } as StoryboardScene;
     const prompt = buildStillPrompt(scene);
     expect(prompt).toBe(
-      `a homeowner inspects the finished bed ${ANON_PERSON_SUFFIX} ${AMATEUR_IPHONE_LOOK} Wide 16:9 horizontal landscape framing. ${NO_FIGURES_SUFFIX} ${NO_BOOK_SUFFIX}`
+      `a homeowner inspects the finished bed ${ANON_PERSON_SUFFIX} ${BODY_ON_PERSON_CLAUSE} ${AMATEUR_IPHONE_LOOK} Wide 16:9 horizontal landscape framing. ${NO_FIGURES_SUFFIX} ${NO_BOOK_SUFFIX}`
     );
     expect(prompt).toContain(ANON_PERSON_SUFFIX);
     expect(prompt.endsWith(NO_BOOK_SUFFIX)).toBe(true);

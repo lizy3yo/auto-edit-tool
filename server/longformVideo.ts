@@ -50,7 +50,16 @@ import {
   fitPicturesToLines,
   judgeSelfMoving,
 } from "./shotList";
-import { attachMemory, memoryPicturesFor, memoryView, pictureSettled } from "./pictureMemory";
+import {
+  attachMemory,
+  BACKGROUND_VIEW,
+  BLUR_PRINT_VIEW,
+  memoryPicturesFor,
+  memoryView,
+  pictureSettled,
+  SCREEN_ITEM_VIEW,
+  SET_ITEM_VIEW,
+} from "./pictureMemory";
 import { safeParseJSON, stripMarkdownFences } from "./jsonRepair";
 import { scanSameThing, scanStillDefects } from "./overlayTextScan";
 import {
@@ -71,7 +80,7 @@ import {
 import { presignOwnBucketUrl, storagePut } from "./storage";
 import { voiceSpace69Labs } from "./tts69labs";
 import { applySpokenLists, findSpokenLists } from "./spokenLists";
-import { describeNamedLooks, namedLookClause } from "./namedLooks";
+import { collectShownFacts, describeNamedLooks, namedLookClause } from "./namedLooks";
 import {
   classifyNarrationFailure,
   diedBeforeNarration,
@@ -276,7 +285,14 @@ type LipsyncLane = {
 import { ENV } from "./_core/env";
 import { pickMusicBeds } from "./musicBeds";
 import { steadyHostClip } from "./hostSteady";
-import { deriveHostLook, markHostBroll } from "./hostLook";
+import {
+  BODY_PART_WORDS,
+  deriveHostLook,
+  looksCutOff,
+  markHostBroll,
+  REAL_HOLDER,
+  onTheBody,
+} from "./hostLook";
 import {
   assemblePerSceneFilm,
   type PhoneLook,
@@ -5540,6 +5556,20 @@ const SHOT_ANGLE_SUFFIX: Record<string, string> = {
  * enter the frame at the task, never a face, head, or body, and never the channel host.
  */
 /**
+ * Every tool in its REAL working position, and the hands safe from it (2026-10-02, the operator on
+ * Hank's job 332: the host sawing a small block lying flat on the bench, his other hand right beside
+ * the blade — "unrealistic … it will damage his fingers"). Any tool, any channel.
+ */
+export const TOOL_POSITION_CLAUSE =
+  "Every tool is held and placed the way a person who really uses it does: by its handle, in its " +
+  "normal grip, at its normal working angle, from the side a real user stands. The work is set up " +
+  "so the tool's path is clear of the table and of every hand: a piece being sawn overhangs the " +
+  "bench edge, sits in a vise or against a bench hook; a piece being drilled is clamped, with a " +
+  "scrap block under it; cloth is cut on a cutting mat, food on a cutting board. The holding hand " +
+  "stays well back and to the side of the blade, bit or edge — never in front of it, in its path, " +
+  "or right beside the cut — and a blade never cuts into the table under the work.";
+
+/**
  * A tool in a picture is really WORKING on its material. Norbert's 3-min test (job 236, 2:19)
  * showed a drill whose bit never went into the wood; the still is the video's first frame, so it
  * starts right here. (Such shots are also kept as photos — `contactToolWork` in shotList.ts.)
@@ -5547,7 +5577,8 @@ const SHOT_ANGLE_SUFFIX: Record<string, string> = {
 export const TOOL_CONTACT_CLAUSE =
   "Any tool in the shot is really working on its material: a drill bit or screw sunk into the " +
   "wood, a saw blade down in its cut, a chisel edge in the wood, scissor or cutter blades closing " +
-  "on the cloth, a needle through the fabric — never held in the air beside the work.";
+  "on the cloth, a needle through the fabric — never held in the air beside the work. " +
+  TOOL_POSITION_CLAUSE;
 
 /**
  * Hands stay OUTSIDE equipment (2026-10-01, Hank's job 261 at 1:53: his hand drawn inside the bench
@@ -5622,6 +5653,45 @@ export const NO_PEOPLE_SUFFIX =
  * face never shown — the picture model draws a face a little differently every time, and a b-roll
  * face that does not match the talking host would read as someone else. Pure.
  */
+/**
+ * Every human part in a picture belongs to a whole person (Diane's job 309: hair lying on a counter,
+ * hair hanging from nothing).
+ */
+export const BODY_ON_PERSON_CLAUSE =
+  "Any hair, scalp, skin, face or hand in the picture is the person's own, on their head and body — " +
+  "never looking cut off: no hair shaped like a head with no head inside it, no hand, foot or face " +
+  "on its own. A few loose strands that really fall (in a brush, on a comb) are fine.";
+
+/** Things worn on the FRONT of the head or body: a picture from behind would put them on the back. */
+const WORN_FRONT =
+  /\b(?:head ?lamps?|headlights?|reading glasses|glasses|spectacles|goggles|sunglasses|necklaces?|pendants?|aprons?|face masks?|masks?|respirators?|(?:wrist ?)?watch(?:es)?|badges?|bibs?|visors?|ties?|brooch(?:es)?)\b/i;
+
+/**
+ * The person clause for a picture of someone (the host from behind/side, or anonymous hands), plus
+ * the two rules every such picture keeps: body parts stay on the body, and a thing worn on the
+ * FRONT is seen where it really sits — Lance's job 311 drew the headlamp on the back of his head,
+ * because the host is shown from behind. Empty for a picture of no one. Pure.
+ */
+export function personClauseFor(scene: StoryboardScene, visual: string): string {
+  if (!scene.humanPresent) return "";
+  const who = scene.brollHostLook ? hostBrollClause(scene.brollHostLook) : ANON_PERSON_SUFFIX;
+  const worn = WORN_FRONT.exec(visual)?.[0];
+  // Hands on the person's OWN hair, scalp or face (Diane's job 313: a head twisted round, a third
+  // arm): a side or three-quarter view of a natural pose, never "from behind" with both arms up.
+  const ownHead =
+    /\b(?:hair|scalp|face|forehead|cheeks?|neck)\b/i.test(visual) &&
+    /\b(?:brush|comb|pin|twist|style|apply|appl(?:ies|ying)|work(?:s|ing)?|smooth|part|wash|rins|dry|spread|massag|tuck|clip)/i.test(visual);
+  const selfCare = ownHead
+    ? " Seen from the side, the head and shoulders turned the same way, the arms raised naturally " +
+      "from their own shoulders to the hair or face — one hand at it when one is enough."
+    : "";
+  const wornClause = worn
+    ? ` The ${worn.toLowerCase()} is worn where it really sits, on the FRONT of the head or body; ` +
+      `the person is seen from the side so it shows there — never on the back of the head or body.`
+    : "";
+  return ` ${who} ${BODY_ON_PERSON_CLAUSE}${selfCare}${wornClause}`;
+}
+
 export function hostBrollClause(look: string): string {
   return (
     `The only person in this shot is the host — ${look.trim().replace(/\.$/, "")} — exactly as in ` +
@@ -5640,7 +5710,9 @@ export function hostBrollClause(look: string): string {
  */
 export const ONE_BODY_CLAUSE =
   "The host has exactly two arms and two hands, both their own: each arm runs unbroken from its " +
-  "own shoulder to its hand, no extra arm, sleeve or hand anywhere in the frame. When the task " +
+  "own shoulder to its hand, no extra arm, sleeve or hand anywhere in the frame. The pose is one a " +
+  "real body makes: the head faces the same way as the shoulders or turns only a little, never " +
+  "twisted round. When the task " +
   "takes two hands, both of the host's hands are on it; when it takes one, the other rests " +
   "plainly in view or out of frame. " +
   HANDS_OUTSIDE_CLAUSE +
@@ -6039,6 +6111,10 @@ const LEGIBLE_WRITING: [RegExp, string][] = [
   [/\bpersonali[sz]ation\b/gi, "decoration"],
   [/\bpersonali[sz]ed\b/gi, "decorated"],
   [/["“][^"”]{1,40}["”]/g, ""],
+  // …and single-quoted words ("a small orange 'Etsy' wordmark" — the real-look description named
+  // the brand, and the picture maker wrote it). Only a quote opening after a space, never an
+  // apostrophe inside a word.
+  [/(^|\s)['‘][^'’\s][^'’]{0,38}['’](?=[\s,.;:]|$)/g, "$1"],
   // Surfaces that exist to be written on, and the counting marks the model puts there to show
   // "I sold every one" — chalk tally marks on a garage wall and a chalkboard of incense-stick
   // sketches both shipped (jobs 113/114).
@@ -6165,10 +6241,7 @@ export function buildStillPrompt(
       ? `, ${SHOT_ANGLE_SUFFIX[scene.shotAngle]}`
       : "";
   // The host at work (from behind) when the pipeline marked it, else anonymous hands.
-  const personSuffix =
-    !aggressive && scene.humanPresent
-      ? ` ${scene.brollHostLook ? hostBrollClause(scene.brollHostLook) : ANON_PERSON_SUFFIX}`
-      : "";
+  const personSuffix = !aggressive ? personClauseFor(scene, scene.showSubject ?? scene.visualPrompt ?? "") : "";
   const noFigures =
     !aggressive && scene.humanPresent && scene.brollHostLook
       ? NO_OTHER_FIGURES_SUFFIX
@@ -6190,9 +6263,9 @@ export function buildStillPrompt(
   const motion = !aggressive && scene.objectMotion ? "objectStill" : "settle";
   const memory = memoryClause(scene);
   // A real app the line names (`namedLook`) is drawn as it really looks; otherwise a plain one.
-  const app = APP_SCREEN.test(visual) ? ` ${scene.namedLook ? REAL_APP_SCREEN_CLAUSE : APP_SCREEN_CLAUSE}` : "";
+  const app = APP_SCREEN.test(visual) ? ` ${appScreenClause(scene)}` : "";
   return withAllowedText(
-    `${visual}${namedLookClause(scene)}${angleSuffix}${personSuffix}${memory}${app} ${amateurIphoneLook(subject, motion)} ${framing} ${noFigures} ${NO_BOOK_SUFFIX}`,
+    `${visual}${scrubLegibleWriting(namedLookClause(scene))}${angleSuffix}${personSuffix}${memory}${app} ${amateurIphoneLook(subject, motion)} ${framing} ${noFigures} ${NO_BOOK_SUFFIX}`,
     scene.pictureText,
     scene.blurPrint
   );
@@ -6205,7 +6278,18 @@ export function buildStillPrompt(
 export const BLURRED_PRINT_CLAUSE =
   "Any printing on it — a label, a date, the words on a box — is visible but soft and out of " +
   "focus, the way a phone blurs small print: no word, letter or number anywhere in the frame can " +
-  "be read.";
+  "be read. Frame it from about an arm's length away, never a close-up of the printing: the thing " +
+  "it is on is clearly the subject, and the print is a small soft patch on it.";
+
+/**
+ * The next try after a blurred-print picture still came back with readable writing: further back.
+ */
+export const STEP_BACK_CLAUSE =
+  "Step further back than before: the whole thing smaller in the frame, in its place, with no " +
+  "printing on it large enough to make out.";
+
+/** Close-up wording, which a picture maker answers with sharp, readable print. */
+const CLOSE_UP_WORDS = /\b(?:extreme\s+)?close[- ]?ups?\b|\bmacro\b/gi;
 
 /**
  * A picture whose line says the words printed on a thing (`scene.pictureText`) shows exactly those,
@@ -6218,9 +6302,10 @@ export function withAllowedText(
 ): string {
   if (!text) {
     if (!blurPrint) return prompt;
-    return prompt.includes(NO_READABLE_TEXT)
-      ? prompt.split(NO_READABLE_TEXT).join(BLURRED_PRINT_CLAUSE)
-      : `${prompt} ${BLURRED_PRINT_CLAUSE}`;
+    const framed = prompt.replace(CLOSE_UP_WORDS, "arm's-length view");
+    return framed.includes(NO_READABLE_TEXT)
+      ? framed.split(NO_READABLE_TEXT).join(BLURRED_PRINT_CLAUSE)
+      : `${framed} ${BLURRED_PRINT_CLAUSE}`;
   }
   const allowed =
     `The ONLY readable writing anywhere in the frame is exactly "${text}", printed clearly on the ` +
@@ -6241,11 +6326,39 @@ const APP_SCREEN =
 export const REAL_APP_SCREEN_CLAUSE =
   "The phone's screen shows that app exactly as it really looks, as the EXACT LOOK describes — its " +
   "real colours and layout — with its logo and every word, name and price small, soft and " +
-  "unreadable.";
+  "unreadable. " +
+  "The device is an ordinary real phone, tablet or laptop, held in a hand or lying on a surface — " +
+  "never built from, framed by or set inside any other object; things for sale appear only as " +
+  "small photos on its screen.";
+/**
+ * The screen clause for an app picture: the real app's look when the line names one, else a plain
+ * one; one item's listing page when the picture is about one item; and the words the line SAYS
+ * (`scene.pictureText` — a price, a name) readable and exact, where the clauses alone would blur
+ * them (Dale's job 306 showed a said price as a grey bar).
+ */
+export function appScreenClause(scene: StoryboardScene): string {
+  const base = scene.namedLook ? REAL_APP_SCREEN_CLAUSE : APP_SCREEN_CLAUSE;
+  const one = ONE_LISTING.test(scene.showSubject ?? scene.visualPrompt ?? "")
+    ? " It is ONE item's own listing page: one large photo of that item, not a grid of other things."
+    : "";
+  if (!scene.pictureText) return `${base}${one}`;
+  const said = scene.pictureText.replace(/"/g, "'");
+  return (
+    base
+      .replace(/its logo and every word, name and price small, soft and\s+unreadable/, `"${said}" readable and spelled exactly, and its logo and every other word soft and unreadable`)
+      .replace(/no readable words, letters,\s+numbers or prices anywhere on the screen/, `nothing readable on the screen except "${said}", spelled exactly`) + one
+  );
+}
+
+/** A picture about ONE item's listing ("a listing of the bookcase", "her listing"). */
+const ONE_LISTING = /\b(?:a|the|one|its|her|his|your|my)\s+(?:single\s+)?listing\b(?!s)|\blisting (?:page )?(?:of|for)\s+(?:a|the|one)\b/i;
+
 export const APP_SCREEN_CLAUSE =
   "The phone's screen shows a simple buy-and-sell app: a grid of small photos of items for sale " +
   "on plain soft-coloured panels — no logo, no brand, no app name, and no readable words, letters, " +
-  "numbers or prices anywhere on the screen.";
+  "numbers or prices anywhere on the screen. The device is an ordinary real phone, tablet or " +
+  "laptop, held in a hand or lying on a surface — never built from, framed by or set inside any " +
+  "other object; things for sale appear only as small photos on its screen.";
 
 /**
  * PICTURE MEMORY: a picture of a key thing drawn from the earlier pictures of it
@@ -6254,6 +6367,21 @@ export const APP_SCREEN_CLAUSE =
  */
 export function memoryClause(scene: StoryboardScene): string {
   const n = scene.memoryRefUrls?.length ?? 0;
+  // A phone or laptop screen showing a key thing (`SCREEN_ITEM_VIEW`): the thing is only the photo
+  // inside the listing, never the device — Dale's job 295 framed a tablet with the cutting board.
+  if (n && scene.memoryView === SCREEN_ITEM_VIEW)
+    return (
+      " The reference image shows the item for sale. Show it ONLY as the photo inside the listing on " +
+      "the screen — the very same item, same shape and colours. The phone, tablet or laptop is an " +
+      "ordinary real device, never made from, framed by or set inside the item."
+    );
+  // A list item drawn from its list's group picture (`listSetFor`): the same item, picked out.
+  if (n && scene.memoryView === SET_ITEM_VIEW)
+    return (
+      " The reference image shows this item together with the others it was listed with. Draw ONLY " +
+      "this one item, close up and filling the frame — the very same one as in the reference: " +
+      "identical shape, colours, materials and wear."
+    );
   if (!n || !scene.keyThing) return "";
   // Every key thing in the picture is drawn from its own earlier picture (the heater AND the mattress).
   const all = [scene.keyThing, ...(scene.otherKeyThings ?? [])];
@@ -6271,6 +6399,23 @@ export function memoryClause(scene: StoryboardScene): string {
   // A picture about ONE PART of the thing (`partOf`): the references are the whole thing, the
   // picture is that part up close — Granny Ruth's job 281 drew "a churn dash here" and "a bear paw
   // there" as two more copies of the whole folded quilt.
+  // A remembered thing BESIDE what the picture is about (`BACKGROUND_VIEW`): the same thing, small
+  // and in its place — Frederick's job 335 drew the alarm filling the frame over the night fire.
+  if (scene.memoryView === BACKGROUND_VIEW)
+    return (
+      ` ${which} this exact ${thing}. It is NOT what this picture is about: draw the SAME ${thing} — ` +
+      `identical shape, colours, materials and wear — small, where the words put it, never close up ` +
+      `and never the centre of the picture. What the words name first fills the frame.` +
+      host
+    );
+  // A part that carries printing nobody says (`BLUR_PRINT_VIEW`): the part is the subject, from an
+  // arm's length, so the print stays a soft patch.
+  if (scene.partOf && scene.memoryView === BLUR_PRINT_VIEW)
+    return (
+      ` ${which} the whole ${scene.partOf}. This picture shows just the part of it the words are ` +
+      `about, ${BLUR_PRINT_VIEW}. Keep the same colours, materials and wear as the reference.` +
+      host
+    );
   if (scene.partOf)
     return (
       ` ${which} the whole ${scene.partOf}. This picture is a CLOSE-UP of just the part of it the ` +
@@ -6344,7 +6489,10 @@ const CTA_MAX_BRIDGE_GAP = 2;
  * sentence that says it rather than on a scene that merely ends with it.
  */
 const SCAN_INTENT =
-  /\bscan\b|\bgrab (?:your|a) phone\b|\bpoint (?:your (?:phone|camera)|it) at\b|\bpoint your (?:phone|camera)\b|\bphone['’]?s camera\b|\byour camera\b|\bcode on (?:your|the) screen\b|\bqr\b/i;
+  /\bscan\b|\bgrab (?:your|a) phone\b|\bpoint (?:your (?:phone|camera)|it) at\b|\bpoint your (?:phone|camera)\b|\bphone['’]?s camera\b|\byour camera\b|\bcode on (?:your|the) screen\b|\bqr\b|\b(?:the |a )?link (?:is )?(?:in|below|under|down in) (?:the |this )?(?:description|video|comments?)\b|\b(?:use|tap|click|hit|follow) (?:the|that|my) link\b|\bpinned comment\b|\bto get (?:it|a copy|your copy|the book)\b|\b(?:grab|get|order|pick up) (?:your|a) copy\b/i;
+// "To get it, use the link in the description below this video." is the same instruction as
+// "scan the code" (Pearl's job 310 said only that, the window fell back to the block's last ~90
+// words, and the QR swallowed the book's title and the host's part: book → QR, no host between).
 
 /**
  * The fixed CTA block that appears verbatim (mid-roll + close) in every channel's script. The big
@@ -7343,6 +7491,8 @@ function joinSplitAnchor(
  */
 /** Words of QR guidance at the tail of a CTA block (script OS STEP 8.5 fixes it at ~90). */
 const QR_GUIDANCE_WORDS = 90;
+/** With no "how to get it" line at all, the card takes only the block's last line or two. */
+const QR_FALLBACK_WORDS = 30;
 
 /**
  * Make a beat part of the big-QR scan window: the big card over a person-free still, nothing else in
@@ -7498,18 +7648,45 @@ function markQrFromCtaTails(
       break;
     }
 
-    // 2. No scan line: the last ~QR_GUIDANCE_WORDS of the block, as before. Walk back while the
-    // word budget still fits, so a long sell beat adjacent to short guidance beats stays out.
+    // 2. No scan line: the block's last line or two only (`QR_FALLBACK_WORDS`), never a line that
+    // names the book — the window used to take the last ~90 words and ate the whole pitch.
+    const namesBook = titleMatcher(
+      bookForScene(scenes[end], params.ctaBooks)?.title ?? params.bookTitle
+    );
     if (start < 0) {
       start = end;
       let n = words(scenes[end]);
       while (
         start > head &&
-        n + words(scenes[start - 1]) <= QR_GUIDANCE_WORDS
+        n + words(scenes[start - 1]) <= QR_FALLBACK_WORDS &&
+        !namesBook(textOf(scenes[start - 1]))
       ) {
         start--;
         n += words(scenes[start]);
       }
+    }
+
+    // 3. Host → book → host → QR: when the line naming the book shares its beat with the pitch
+    // after it, the beat is split right after the title's sentence, so the host comes back between
+    // the cover and the card (Pearl's job 310 went book → QR).
+    for (let k = start - 1; k >= head; k--) {
+      const text = textOf(scenes[k]);
+      if (!namesBook(text) || scenes[k].qrHero || scenes[k].coverHero) continue;
+      const m = /[.!?]["')\]]?\s+/g;
+      let cut = -1;
+      for (let hit = m.exec(text); hit; hit = m.exec(text)) {
+        if (namesBook(text.slice(0, hit.index + 1))) {
+          cut = hit.index + hit[0].length;
+          break;
+        }
+      }
+      if (cut > 0 && text.slice(cut).trim()) {
+        const [h, t] = splitSceneAtOffset(scenes[k], cut);
+        scenes.splice(k, 1, h, t);
+        start++;
+        end++;
+      }
+      break;
     }
 
     markScanWindow(scenes, start, end, params);
@@ -7875,10 +8052,9 @@ export function buildClipChain(
   // script-only + the one fixed amateur-iPhone look tail. A `humanPresent` cutaway shows bare
   // hands at the task and nothing else of a human (ANON_PERSON_SUFFIX); the channel host photo
   // is never referenced on b-roll, and `NO_FIGURES_SUFFIX` below keeps every cutaway face-free.
-  const peopleSuffix =
-    !scene.hostPresent && scene.humanPresent
-      ? ` ${scene.brollHostLook ? hostBrollClause(scene.brollHostLook) : ANON_PERSON_SUFFIX}`
-      : "";
+  const peopleSuffix = !scene.hostPresent
+    ? personClauseFor(scene, scene.showSubject ?? scene.visualPrompt ?? "")
+    : "";
   const clipNoFigures =
     !scene.hostPresent && scene.humanPresent && scene.brollHostLook
       ? NO_OTHER_FIGURES_SUFFIX
@@ -8216,6 +8392,10 @@ export async function generateValidatedStill(
   // A picture of a key thing that came back a DIFFERENT one: one re-roll from its memory, then
   // it is drawn from words alone (`sameThingMisses`).
   let sameThingMisses = 0;
+  // A check that could not run is never a pass: one more picture and check (`unchecked`).
+  let uncheckedRerolls = 0;
+  // A blurred-print picture that came back readable is drawn from further back once.
+  let steppedBack = false;
   // A content-policy block can't be cleared by resubmitting the same prompt — escalate the
   // ladder instead: aggressively-softened variant, then a Claude policy-safe rewrite, then a
   // subject-anchored generic, then the guaranteed-generic visual. Escalations don't burn the
@@ -8335,7 +8515,12 @@ export async function generateValidatedStill(
         scene.showSubject,
         scene.cta ? undefined : scene.scriptText ?? scene.narration,
         scene.pictureText,
-        scene.namedLook
+        scene.namedLook,
+        // The key things this picture is about (a screen shows them only as small photos): each
+        // must really be in it — Dale's job 306 drew a box where the bookcase was asked for.
+        scene.memoryView === SCREEN_ITEM_VIEW
+          ? undefined
+          : [scene.keyThing, ...(scene.otherKeyThings ?? [])].filter((t): t is string => !!t)
       );
       if (defects.broken) {
         lastError = `Still image has broken geometry (${defects.what})`;
@@ -8345,6 +8530,19 @@ export async function generateValidatedStill(
             `(${defects.what}, attempt ${attempt}/${attempts}) → regenerating`
         );
         continue; // fresh seed
+      }
+      if (defects.unchecked && uncheckedRerolls < 1) {
+        uncheckedRerolls++;
+        lastError = "Still image could not be checked";
+        offSubjectFallback ??= { buffer, mimeType: r.mimeType };
+        console.warn(
+          `[Longform] scene ${scene.index} still could not be checked (attempt ${attempt}/${attempts}) → drawing again`
+        );
+        continue;
+      }
+      if (defects.writing && !defects.overlay && scene.blurPrint && !scene.pictureText && !steppedBack) {
+        steppedBack = true;
+        prompt = `${prompt} ${STEP_BACK_CLAUSE}`;
       }
       if (defects.overlay || defects.writing) {
         const kind = defects.overlay ? "overlaid text" : "readable writing";
@@ -8391,7 +8589,17 @@ export async function generateValidatedStill(
       // fallback drawn from words gave Frederick's job 259 a different heater and mattress.
       // A close-up of one part (`partOf`) is held only to not COPYING its memory: it is a different
       // view of the whole by design (the check above holds it to the part and its exact look).
-      if (scene.keyThing && scene.memoryRefUrls?.length && sameThingMisses < 1) {
+      // A screen shows its item as a small photo: comparing it with the item's own picture tells
+      // nothing (the device check above holds it).
+      if (
+        scene.keyThing &&
+        scene.memoryRefUrls?.length &&
+        sameThingMisses < 1 &&
+        scene.memoryView !== SCREEN_ITEM_VIEW &&
+        // A remembered thing kept small beside the subject is not compared side by side: it is
+        // meant to look small and placed, not to fill a frame like its memory.
+        scene.memoryView !== BACKGROUND_VIEW
+      ) {
         const same = await scanSameThing(scene.memoryRefUrls[0], buffer, scene.keyThing);
         if ((!same.same && !scene.partOf) || same.copy) {
           sameThingMisses++;
@@ -9637,7 +9845,8 @@ async function cutShotsOnWords(
     log(
       `spoken lists: ${spoken.lists.length} found${spoken.fromModel ? "" : " (by sentence shape)"}, ` +
         `${listCuts.applied} cut to one picture per item, ${listCuts.handed} handed over from the host, ` +
-        `${listCuts.cleared} piece(s) that were not list items unmarked`
+        `${listCuts.cleared} piece(s) that were not list items unmarked` +
+        (listCuts.skipped.length ? ` — left as they were: ${listCuts.skipped.join("; ")}` : "")
     );
     for (const s of next) {
       if (!s.showSubject) continue;
@@ -10509,12 +10718,50 @@ export function isSplitScene(scene: StoryboardScene): boolean {
  * can't drift apart.
  */
 function buildSplitRightScene(scene: StoryboardScene): StoryboardScene {
+  // A panel about a body part (hair, nails, skin) shows it ON the host — a person-free panel can
+  // only draw it loose (Diane's job 315: hair lying on a towel beside her own talking head).
+  const body = BODY_PART_WORDS.test(scene.splitVisual ?? "") && !REAL_HOLDER.test(scene.splitVisual ?? "");
+  if (body)
+    return {
+      ...scene,
+      hostPresent: false,
+      splitVisual: undefined,
+      humanPresent: true,
+      visualPrompt: `${onTheBody(scene.splitVisual ?? "")} A close view of just that part, on the person, the face not shown.`,
+    };
   return {
     ...scene,
     hostPresent: false,
     splitVisual: undefined,
     visualPrompt: `${scene.splitVisual} ${NO_PEOPLE_SUFFIX}`,
   };
+}
+
+/**
+ * Every drawn picture and split panel whose description asks for a body part off the body is put
+ * back on the person (`onTheBody`), and a picture becomes the host's (`humanPresent`). Returns how
+ * many changed. Mutates `scenes`.
+ */
+export function keepBodyPartsOnBody(scenes: StoryboardScene[]): number {
+  let n = 0;
+  for (const s of scenes) {
+    if (s.coverHero || s.assetImageUrl) continue;
+    if (s.hostPresent) {
+      if (s.splitVisual && looksCutOff(s.splitVisual)) {
+        s.splitVisual = onTheBody(s.splitVisual);
+        n++;
+      }
+      continue;
+    }
+    const text = s.showSubject ?? s.visualPrompt ?? "";
+    if (!looksCutOff(text)) continue;
+    s.showSubject = onTheBody(text);
+    s.visualPrompt = onTheBody(s.visualPrompt ?? text);
+    s.visualPromptSeed = undefined;
+    s.humanPresent = true;
+    n++;
+  }
+  return n;
 }
 
 /**
@@ -13908,6 +14155,8 @@ async function runUnifiedPipeline(
       hostName: params.hostName,
       main: params.keyThings?.find(k => k.main)?.name,
     });
+    if (again.skipped.length)
+      console.log(`[Longform ${jobId}] spoken lists (final check): left as they were — ${again.skipped.join("; ")}`);
     const cutOf = (list: StoryboardScene[]) => list.map(x => x.scriptText ?? "").join("");
     if (cutOf(again.scenes) !== cutOf(scenes)) {
       scenes = again.scenes;
@@ -13951,10 +14200,21 @@ async function runUnifiedPipeline(
     // NAMED THINGS, DRAWN EXACTLY (`server/namedLooks.ts`): every specific named kind a picture
     // shows gets its exact look, and a picture about one part of a key thing is a close-up of that
     // part — Granny Ruth's job 281 drew three named quilt blocks as copies of the whole quilt.
+    // What the script says is SHOWN on things (a label's words, a dial's setting) — read once, so a
+    // picture that points at that part shows exactly that.
+    const facts = await collectShownFacts(spokenScript);
+    if (facts.length)
+      console.log(`[Longform ${jobId}] shown on things: ${facts.map(f => `${f.thing} (${f.words.join(", ")})`).join("; ")}`);
     const named = await describeNamedLooks(scenes, {
       keyThings: params.keyThings,
       subject: params.videoSubject,
+      script: spokenScript,
+      facts,
     });
+    // A BODY PART IS ALWAYS ON THE BODY: the last word on every description, after every writer.
+    const onBody = keepBodyPartsOnBody(scenes);
+    if (onBody > 0)
+      console.log(`[Longform ${jobId}] body parts: ${onBody} picture(s) asked for a loose body part — put back on the person`);
     if (named.pictures > 0)
       console.log(
         `[Longform ${jobId}] named things: ${named.kinds} kind(s) given their exact look, ` +

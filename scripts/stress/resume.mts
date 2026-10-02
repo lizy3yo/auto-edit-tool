@@ -48,6 +48,11 @@ if (before?.stage === "voiceover" || before?.stage === "storyboard") {
   await updateLongformVideoJob(jobId, { status: "processing", errorMessage: null } as any);
   console.log(`[stress] job ${jobId}: continuing from the recorded narration`);
   runLongformPipeline(jobId).catch(e => console.error(`[stress] job ${jobId} pipeline error:`, e));
+} else if (before?.stage === "assembly") {
+  // Every clip exists and only the stitch failed (a network blip while downloading clips): press
+  // "Retry assembly" — free, nothing is rendered again.
+  await caller.longformVideo.retryAssembly({ jobId });
+  console.log(`[stress] job ${jobId}: retrying assembly`);
 } else {
   await caller.longformVideo.retryFailedScenes({ jobId });
   console.log(`[stress] job ${jobId}: retrying failed scenes`);

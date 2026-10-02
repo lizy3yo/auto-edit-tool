@@ -112,7 +112,7 @@ describe("named things are drawn exactly (Granny Ruth's job 281)", () => {
 describe("list items stay their own things; real names look real (Dale's job 290)", () => {
   const PILE: KeyThing[] = [{ name: "personalized wood pile", look: "engraved boards, signs and boxes", main: false }];
 
-  it("never makes a list item a part of a group, and keeps unspoken writing blurred", () => {
+  it("lets a list item be a part, and keeps unspoken writing blurred", () => {
     const scenes = [
       pic(1, "Engraved boards,", "an engraved board", { listCut: true }),
       pic(2, "house signs,", "a house sign", { listCut: true }),
@@ -123,8 +123,9 @@ describe("list items stay their own things; real names look real (Dale's job 290
       { kinds: [], pictures: [{ id: 1, partOf: "personalized wood pile", show: "a small house sign with carved lettering" }] },
       PILE
     );
-    expect(scenes[1].partOf).toBeUndefined();
-    expect(scenes[1].keyThing).toBeUndefined();
+    // A list item may be a part (Ruth's blocks); separate things are kept apart by memory instead
+    // (operatorCases.test.ts).
+    expect(scenes[1].partOf).toBe("personalized wood pile");
     const named = [pic(1, "Engraved boards,", "a board")];
     applyNamedLooks(
       named,
@@ -151,6 +152,6 @@ describe("list items stay their own things; real names look real (Dale's job 290
     expect(APP_SCREEN_CLAUSE).toMatch(/no logo/);
     const { NAMED_LOOKS_SYSTEM } = await import("./namedLooks");
     expect(NAMED_LOOKS_SYSTEM).toMatch(/REAL, RECOGNISABLE thing the LINE names/);
-    expect(NAMED_LOOKS_SYSTEM).toMatch(/never part_of anything/);
+    expect(NAMED_LOOKS_SYSTEM).toMatch(/physical PART of that one thing/);
   });
 });

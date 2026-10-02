@@ -724,6 +724,12 @@ export function markListPieces(scenes: StoryboardScene[]): number {
 }
 
 /**
+ * A picture of a phone, tablet or laptop SCREEN (an app, a website, a listing). Pure.
+ */
+export const SHOWS_SCREEN =
+  /\b(?:apps?|buy-and-sell|website|web\s?page|shop page|listings?|online (?:craft )?(?:shop|store)|(?:phone|tablet|laptop|computer)\s+screen|screen of (?:a|the|her|his) (?:phone|tablet|laptop))\b/i;
+
+/**
  * A piece another may be merged INTO: never a list item (unless the piece merged is itself a list
  * item squeezed to a blink), whose own picture the join would lose
  * (Dale's job 293: a 1 s "Today I'm ranking" folded into "Etsy," and Etsy's picture was gone).
@@ -1007,6 +1013,8 @@ const SHOT_LIST_SYSTEM =
   "marks, chalkboards, calendars or clocks — show the thing the number is about (\"six dollars " +
   'for those coasters" = the coasters; "how long it took" = the work in progress; "the tally I ' +
   'keep" = the finished pieces).\n' +
+  "5d. A BODY PART NEVER LOOKS CUT OFF: hair, a hand, a foot or a face is shown on the person, or on what really holds it — a wig on a mannequin head or wig stand, a practice hand, extensions in their packet. A few loose strands that really fall (in a brush, on a comb or towel, in a drain) are fine. Never hair still shaped like a head or a hairstyle with no head inside it, and never a hand, foot or face on its own. To show a colour or texture, show it on the person's own head or hands.\n" +
+  "5e. SHOW EXACTLY WHAT THE LINE POINTS AT: when a line points at a specific thing, or a specific part, side or detail of a thing (the box it comes in, its label, the battery door on the back, the dial, the date on the bottom, the hem), the picture is a close-up of exactly that — never the video's main thing somewhere else, never a plain version without it. What the script says that part shows (the words printed on it, a number, a setting) is shown exactly as the script says it.\n" +
   "5c. WRITING ONLY WHEN SAID. A picture may show readable writing ONLY when the line itself says " +
   "the exact words or number printed on a thing (\"the tag says HANDMADE\" = the tag with HANDMADE " +
   "on it): set text to exactly those words, spelled as spoken. Never invent any: when a line talks " +
@@ -1341,11 +1349,16 @@ is not only an object: a kind of event or situation the line describes counts to
 struggles with the storms that roll in at night" after a picture of a roof is that night storm. If a
 picture would look like the one right before it and its line says anything new you can see, it is
 WRONG.
+It is WRONG when it does not show what the line points at. SHOW EXACTLY WHAT THE LINE POINTS AT: when a line points at a specific thing, or a specific part, side or detail of a thing (the box it comes in, its label, the battery door on the back, the dial, the date on the bottom, the hem), the picture is a close-up of exactly that — never the video's main thing somewhere else, never a plain version without it. What the script says that part shows (the words printed on it, a number, a setting) is shown exactly as the script says it.
+It is WRONG when a body part looks cut off. A BODY PART NEVER LOOKS CUT OFF: hair, a hand, a foot or a face is shown on the person, or on what really holds it — a wig on a mannequin head or wig stand, a practice hand, extensions in their packet. A few loose strands that really fall (in a brush, on a comb or towel, in a drain) are fine. Never hair still shaped like a head or a hairstyle with no head inside it, and never a hand, foot or face on its own. To show a colour or texture, show it on the person's own head or hands.
 A picture marked "FIRST of the MAIN thing" must show the main thing IN USE when it is naturally used
 with smoke, steam, a flame or water (lit, steaming, burning, running) — otherwise it is WRONG. A picture is RIGHT when it shows the thing the line is
 about — even when the line only says "it", "this one" or "the one that…" (use the KEY THINGS and the
 lines around it to know what that is) — or shows the thing being done, or (marked "continues") keeps
-showing the topic of the line before it.
+showing the topic of the line before it ONLY when its line names nothing new you can see. A
+"continues" picture whose line brings up a new thing, or a new kind of event or situation ("the one
+kind of fire that likes to start while the house is asleep"), is WRONG: it gets its own picture of
+that new thing.
 
 Go through EVERY picture, one at a time, never skipping: first write what its line is about — its
 subject, not its last noun; for a line that only refers to a key thing, name the key thing — then
@@ -1403,8 +1416,9 @@ export type PictureFix = {
 };
 
 /** The pictures the fit check reads and may fix — drawn cutaways, never the CTA, cover or assets. */
+// A list's group picture (`listSet`) is right by construction — the line check never rewrites it.
 const fitCandidate = (s: StoryboardScene) =>
-  !s.hostPresent && !s.cta && !s.qrHero && !s.coverHero && !s.assetImageUrl && !s.showsBook && !s.splitVisual;
+  !s.hostPresent && !s.cta && !s.qrHero && !s.coverHero && !s.assetImageUrl && !s.showsBook && !s.splitVisual && !s.listSet;
 
 /**
  * The model's fixes, kept only for candidate pictures: a rewrite where it said the picture does not
@@ -2037,14 +2051,20 @@ on-camera moments the viewer sees one PICTURE at a time while the narrator talks
 pictures in film order: what is said under each, how long it runs, and what it currently shows.
 
 Mark where the CONTEXT changes. The context is the one thing being talked about — an object, a
-project, an activity, a place. Consecutive lines about the same thing are ONE context and should be
-ONE picture, even when each line mentions a different detail of it (what it is, how it is made, why
-it sells, what it earns). A new context starts only when the talk moves to a different thing.
+project, an activity, a place. Consecutive lines are ONE picture only when one still photo can
+honestly show every line at the same moment: what the thing is, what it looks like, why it sells,
+what it earns. A new context starts when the talk moves to a different thing. A story that moves on
+— one moment, then the next ("the box sat by the door for a week… then I thought, why not paint
+it") — is different moments: each keeps its own picture, even when they are about the same thing.
+A picture of someone DOING something (cutting, painting, sewing) belongs only to the lines that say
+it is being done.
 
 Keep lines separate when they are about different things (worn bedsheets, then a spool of thread),
 and when a line is a clear new point about something else. A line that names something you can SEE
-that the group's picture would not show (a different place, a different object) is NOT in the group —
-it keeps its own picture. Never group across a "----" line.
+that the group's picture would not show (a different place, a different object, or a new kind of
+event or situation — "the fire that starts while the house is asleep", "the storms that roll in at
+night") is NOT in the group — it keeps its own picture, even in the middle of a topic. Never group
+across a "----" line.
 
 The group's picture must fit the FIRST line of the group above all: it is what plays when the
 picture appears.
@@ -2053,9 +2073,8 @@ For each group of 2 or more consecutive pictures that share a context, write ONE
 every line in it: plain words, what is literally in the frame, like a snapshot caption. It is ONE
 still moment from ONE spot: the main thing being done or shown, plus at most one other thing in the
 background. Never "or", never a sequence of actions ("painting, then hanging it"), never two
-places. If any
-picture in the group shows hands or the host doing something, the new picture MUST show the host's
-hands doing that work (a person is never dropped). Keep exact names of kinds (a herringbone path, a dovetail joint).
+places. If every
+picture in the group shows the host doing the work, the new picture shows that work too. Keep exact names of kinds (a herringbone path, a dovetail joint).
 
 Answer with JSON only:
 {"groups":[{"ids":[12,13,14],"show":"..."}]}
@@ -2083,6 +2102,10 @@ const contextCandidate = (s: StoryboardScene | undefined) =>
   !s.qrHero &&
   !s.showsBook;
 
+/** Whether a picture shows someone at work (the host, their hands) rather than a thing on its own. */
+export const atWork = (s: StoryboardScene | undefined) =>
+  !!s && (!!s.humanPresent || SHOWS_PERSON.test(s.showSubject ?? s.visualPrompt ?? ""));
+
 /** The runs of consecutive candidate pictures (2+), as scene indexes. Pure. */
 export function contextRuns(scenes: StoryboardScene[]): number[][] {
   const runs: number[][] = [];
@@ -2108,7 +2131,9 @@ export function parseContextGroups(
   text: string,
   runs: number[][],
   /** Each candidate picture's own description, by scene position — see `namesSomethingElse`. */
-  showOf?: (i: number) => string | undefined
+  showOf?: (i: number) => string | undefined,
+  /** Whether a candidate picture shows someone at work, by scene position — see below. */
+  atWorkOf?: (i: number) => boolean
 ): ContextGroup[] {
   const parsed = safeParseJSON<any>(text);
   const raw: unknown[] =
@@ -2136,13 +2161,22 @@ export function parseContextGroups(
     // group is cut there, and each side of the cut that is still 2+ pictures stays a group
     // (Hank's job 258: "…the lattice you see in Japanese sliding doors" was swallowed by a group of
     // notch-cutting shots).
+    // And a picture of someone DOING something never shares a picture with a thing on its own: the
+    // group is cut where the two meet (Hank's job 332: "Now the winner. Charred cedar incense
+    // holders… the can by the trash bin… why not drill a hole in one" became ONE 17 s picture of the
+    // drilling, because the last line's hands had to stay in the group's picture).
     const runsOf: number[][] = [[]];
-    for (const id of ids) {
+    ids.forEach((id, k) => {
+      const turns = !!atWorkOf && k > 0 && atWorkOf(id) !== atWorkOf(ids[k - 1]);
       if (showOf && namesSomethingElse(showOf(id), show)) runsOf.push([]);
+      else if (turns) runsOf.push([id]);
       else runsOf[runsOf.length - 1].push(id);
-    }
+    });
     for (const part of runsOf) {
       if (part.length < 2) continue;
+      // Pictures of a thing on its own never take a group picture of someone at work: that is a
+      // later line's moment, and each keeps its own picture instead.
+      if (atWorkOf && !part.some(atWorkOf) && SHOWS_PERSON.test(show)) continue;
       part.forEach(id => used.add(id));
       out.push({ ids: part, show });
     }
@@ -2247,7 +2281,12 @@ export async function markSameContext(
       });
       return applyContextGroups(
         scenes,
-        parseContextGroups(r.text, runs, i => scenes[i]?.showSubject ?? scenes[i]?.visualPrompt)
+        parseContextGroups(
+          r.text,
+          runs,
+          i => scenes[i]?.showSubject ?? scenes[i]?.visualPrompt,
+          i => atWork(scenes[i])
+        )
       );
     } catch {
       /* try once more */

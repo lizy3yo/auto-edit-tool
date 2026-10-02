@@ -375,6 +375,12 @@ export interface StoryboardScene {
   /** One item of a spoken list ("a saw, a drill, …") — a quick cut, allowed down to `LIST_SHOT_MIN_SEC`. */
   listCut?: true;
   /**
+   * The picture leading into a spoken list when the host could not say the bridge words: the place
+   * the line names with ALL the list's items in it together. The items after it are drawn from it
+   * (`listSetFor` in pictureMemory), so each close-up is the same thing as in the group.
+   */
+  listSet?: true;
+  /**
    * A beat the storyboard wrote for the HOST, handed to the shot list as pictures so it is cut on
    * the words like every other stretch (`cutShotsOnWords`); the host plan then prefers the first
    * piece of it for a check-in, so the host still comes in where the storyboard wanted — for a

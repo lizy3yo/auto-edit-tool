@@ -88,13 +88,62 @@ export function withoutMirrors(text: string): string {
 
 /** Words in a shot description that mean a person is in it, doing something. */
 export const SHOWS_PERSON =
-  /\b(hands?|fingers?|fingertips?|host|she|he|her|his|herself|himself|someone|a person|a woman|a man|wearing|worn by|collarbone|neck|wrists?|earlobes?|held (?:up|out|near|against|over|to|above|beside|in front)|hold(?:s|ing) (?:up|out)|in use)\b/i;
+  /\b(hands?|fingers?|fingertips?|host|she|he|her|his|herself|himself|someone|a person|a woman|a man|wearing|worn by|collarbone|neck|wrists?|earlobes?|held (?:up|out|near|against|over|to|above|beside|in front)|hold(?:s|ing) (?:up|out)|in use|scalp|skin|nails|fingernails|forehead|cheeks?|eyelashes|eyebrows?|hairline|strands?|hair(?!\s*(?:dryer|brush|clip|tie|spray|band|pin|comb|product|net|cut(?:ting)? scissors)))\b/i;
+// A BODY PART is always on a person (2026-10-02, Diane's job 309: "dry hair at the bare sink counter"
+// drew a head of hair lying on the counter, and "a brush spreading gloss through silver hair" drew
+// hair hanging from nothing — read as person-free, those pictures got NO_FIGURES_SUFFIX, which bans
+// hair, so the picture maker drew the hair loose). Hair, a scalp, skin, nails or a face now make the
+// picture the host's, from behind or the side. A hair dryer, brush or clip is a thing, not hair.
 // "Host wearing a long chain" and "a necklace resting at the collarbone" are the host too:
 // Scarlett's job 244 knew only "the host", so those pictures got no host look, no one-body rule
 // and kept their mirror. ("neck" is whole-word only, so a crewneck or a neckline is not a person.)
 // "held near the doorframe" needs a holder: Norbert's 3-min test (job 238, 0:32) asked for a
 // "cordless drill … held near the doorframe", read it as person-free, and got a drill floating
 // against the frame with no hand on it.
+
+/** Words naming a part of the body (not a thing used on it — a hair dryer is a thing). */
+export const BODY_PART_WORDS =
+  /\b(?:scalp|skin|nails|fingernails|forehead|cheeks?|eyelashes|eyebrows?|hairline|strands?|hair(?!\s*(?:dryer|brush|clip|tie|spray|band|pin|comb|product|net)))\b/i;
+
+/** A description asking for a body part OFF the body: "a lock of hair laid across a towel". */
+export const DETACHED_BODY_PART =
+  /\b(?:locks?|strands?|swatch(?:es)?|hanks?|tress(?:es)?|clumps?|sections?|pieces?|tufts?)\s+of\s+(?:[a-z-]+\s+){0,2}hair\b|\b(?:hair|nails?|fingernails?)\b[^.;]{0,60}?\b(?:lying|laid|lies|spread|draped|resting|rests|placed|arranged)\s+(?:flat\s+)?(?:on|across|over|out on)\b/i;
+
+/** What really holds a loose body part: a wig stand, a mannequin head, a practice hand, a packet. */
+export const REAL_HOLDER =
+  /\b(?:wigs?|mannequin|wig stand|wig head|practice (?:hand|head)|training head|extensions?|swatch (?:ring|book|card)|packet|package|packaging)\b/i;
+/** A few strands that really fall loose: in a brush, on a comb, in a drain, on a towel or a floor. */
+const FALLEN_STRANDS =
+  /\b(?:a few|some|stray|loose|fallen|shed)?\s*(?:strands?|hairs)\b[^.;]{0,40}\b(?:in|on|caught in|stuck in|around)\s+(?:a|an|the|her|his|their)?\s*(?:[a-z-]+\s+){0,2}(?:brush|hairbrush|comb|drain|sink|towel|pillow|floor|shower)/i;
+
+/**
+ * Whether a description asks for a body part that would look CUT OFF: a loose lock or hair lying on a
+ * surface, with neither a real holder (wig stand, mannequin head, practice hand, packet) nor the few
+ * fallen strands that really happen (the operator, 2026-10-02: "strands of hair can be not in the
+ * mannequin … just don't generate hair that looks like it has no head"). Pure.
+ */
+export function looksCutOff(text: string): boolean {
+  if (!DETACHED_BODY_PART.test(text)) return false;
+  return !REAL_HOLDER.test(text) && !FALLEN_STRANDS.test(text);
+}
+
+/**
+ * Put a loose body part back on the body (2026-10-02, the operator on Diane's job 315: "any part of
+ * the body should stay on the body" — "a lock of hair dyed one flat dark brown … laid across a white
+ * towel" and "hair with gray roots … lying on a white towel" came back as hair with no head). The
+ * lock/strand words and the "lying on the towel" placement are taken out and the hair is put on the
+ * person's own head. Unchanged when nothing asks for a loose body part. Pure.
+ */
+export function onTheBody(text: string): string {
+  if (!looksCutOff(text)) return text;
+  const out = text
+    .replace(/\b(?:a|an|the|one|some)?\s*(?:locks?|strands?|swatch(?:es)?|hanks?|tress(?:es)?|clumps?|sections?|pieces?|tufts?)\s+of\s+/gi, " ")
+    .replace(/,?\s*\b(?:lying|laid|lies|spread|draped|resting|rests|placed|arranged)\s+(?:flat\s+)?(?:on|across|over|out on)\s+(?:a|an|the|her|his|their)\s+[^,.;]+/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim()
+    .replace(/[.,;]?\s*$/, "");
+  return `${out}, on the person's own head and body — never loose or lying on a surface.`;
+}
 
 /**
  * Mark the pictures that show someone doing the work as the HOST (see the file comment). Pictures
@@ -127,6 +176,11 @@ export function markHostBroll(
       if (s.visualPrompt) s.visualPrompt = withoutMirrors(s.visualPrompt);
       s.brollHostRef = hostPhotoUrl;
       n++;
+    } else if (on && s.hostPresent && s.splitVisual && BODY_PART_WORDS.test(s.splitVisual) && !REAL_HOLDER.test(s.splitVisual)) {
+      // A split panel about a body part (hair, nails, skin) shows it on the host: it gets the host's
+      // look for the panel (`buildSplitRightScene`); the take on the left is untouched.
+      s.brollHostLook = look;
+      s.brollHostRef = hostPhotoUrl;
     } else {
       s.brollHostLook = undefined;
       s.brollHostRef = undefined;

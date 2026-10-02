@@ -163,8 +163,14 @@ describe("the film is cut to fit its lists", () => {
   });
 
   it("leaves the host the list when the host would keep too little, lose the name, or speak on", () => {
-    const short = [host(1, "Hi.", { hostOpener: true }), host(2, "A saw, a drill, and some sandpaper,"), scene(3, "x."), host(4, "Bye.")];
-    expect(applySpokenLists(short, shapeLists(short)).applied).toBe(0);
+    // A host line that is ONLY the list goes to the pictures (Lance's job 311); a host line that
+    // keeps a few words before it does not hand over.
+    const only = [host(1, "Hi.", { hostOpener: true }), host(2, "A saw, a drill, and some sandpaper,"), scene(3, "x."), host(4, "Bye.")];
+    expect(applySpokenLists(only, shapeLists(only)).applied).toBe(1);
+    // A few words before the list lead the first item ("Get a saw,"), never a blink of host.
+    const short = [host(1, "Hi.", { hostOpener: true }), host(2, "Get a saw, a drill, and some sandpaper,"), scene(3, "x."), host(4, "Bye.")];
+    const r = applySpokenLists(short, shapeLists(short));
+    expect(r.scenes.map(s => s.scriptText)).toContain("Get a saw,");
     const noName = [
       host(1, "Hi.", { hostOpener: true }),
       host(2, "I'm Hank, and you'll need a saw, a drill, and some sandpaper,", { hostIntro: true }),
@@ -179,7 +185,9 @@ describe("the film is cut to fit its lists", () => {
       scene(3, "x."),
       host(4, "Bye."),
     ];
-    expect(applySpokenLists(speaksOn, shapeLists(speaksOn)).applied).toBe(0);
+    // A host who speaks on after the list comes back for the rest (Lance's job 314).
+    const on = applySpokenLists(speaksOn, shapeLists(speaksOn));
+    expect(on.scenes.map(s => [s.scriptText, !!s.hostPresent])).toContainEqual(["That is all I ever carry around.", true]);
   });
 
   it("never re-cuts a CTA, cover or split beat", () => {
@@ -243,5 +251,18 @@ describe("the opening line hands its list over too (Dale's job 292)", () => {
       "craft fairs,",
       "and Facebook Marketplace",
     ]);
+  });
+});
+
+describe("a list left alone says why", () => {
+  it("names the reason instead of failing", () => {
+    const scenes = [
+      host(1, "Hi there.", { hostOpener: true }),
+      host(2, "The book comes with a pattern, a needle, and a skein of yarn.", { cta: true }),
+      host(3, "Bye."),
+    ];
+    const r = applySpokenLists(scenes, shapeLists(scenes));
+    expect(r.applied).toBe(0);
+    expect(r.skipped.join(" ")).toMatch(/CTA/);
   });
 });

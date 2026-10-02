@@ -868,7 +868,8 @@ describe("the shot list's own held judgment puts hands on the thing — any word
     );
     expect(scenes[0].humanPresent).toBe(true);
     expect(scenes[0].stillImage).toBe(true);
-    expect(scenes[1].humanPresent).toBeUndefined();
+    // Hair is always on a person (Diane's job 309): "the ends of the hair" is the host's hair.
+    expect(scenes[1].humanPresent).toBe(true);
   });
 });
 

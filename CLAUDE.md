@@ -865,12 +865,95 @@ Express · tRPC · Drizzle · MySQL.
   its list over too (only the goodbye keeps it), and the found lists (`inputParams.spokenLists`) are
   applied once more on the final lengths right before the line check, so any later step that undid
   an item is put right. The shape rules also take a last item that runs into a clause ("…and
-  Facebook Marketplace by what each one does well"). And NOTHING IS MERGED INTO A LIST ITEM
+  Facebook Marketplace by what each one does well").
+  (g) STEPS ARE A LIST TOO (2026-10-02, Hank's job 326: "Square up the scrap with a couple of saw
+  cuts, give it a quick brush, drill the hole…, oil it, and put a felt dot on the bottom" played as
+  one split and one photo, because the list finder was told "actions one after another" are not a
+  list and the shape rules only knew things). The finder now returns `kind: "steps"` for a sequence
+  someone DOES (never a story of what happened); `stepsByShape` is its backup (3+ comma pieces, the
+  last after "and"/"then", each a short instruction on its plain verb — no subject, determiner,
+  aside, -ed/-ing form, number, or "money WAS tight"). Each step is its own picture of the host's
+  hands doing it, while making the main thing (`humanPresent`, a photo — hands never move). The
+  CTA's "point your phone…, tap the link" steps are left alone like every CTA beat.
+  (h) A STORY IS DIFFERENT MOMENTS; A TOOL IN ITS REAL POSITION (2026-10-02, Hank's job 332 at
+  1:34: "Now the winner. Charred cedar incense holders… the can by the trash bin… why not drill a
+  hole in one" was ONE 17 s picture of the drilling — the same-topic step's rule "if any picture
+  shows hands, the group picture MUST" carried the last line's hands onto the first). `CONTEXT_SYSTEM`
+  now joins lines only when one still photo shows every line at the same moment, keeps each moment
+  of a story apart, and gives a picture of someone doing something only to the lines that say it;
+  `parseContextGroups` cuts a group where pictures turn between someone at work and a thing on its
+  own (`atWork`), and a things-only part never takes an at-work group picture. Same film, the saw
+  step: a small block flat on the bench, the other hand beside the blade. `TOOL_POSITION_CLAUSE`
+  (inside `TOOL_CONTACT_CLAUSE`, so every hands/host-at-work prompt) asks for the real grip, angle
+  and set-up (overhanging the bench, a vise or bench hook, clamped with a scrap block under, a mat,
+  a board) and hands well back from the blade, bit or edge; the still checker's `broken` names a
+  tool held or angled wrongly, a path into the table or a hand, and fingers by a blade.
+  (i) WHAT THE LINE IS ABOUT STAYS THE SUBJECT; UNREAD PRINT FROM ARM'S LENGTH; A FAILED CHECK IS
+  NOT A PASS (2026-10-02, Frederick's job 335). The night-fire picture at 0:07 drew the alarm filling
+  the frame: it was the picture's key thing only because the description named it last ("…, a smoke
+  alarm on the ceiling above"), and memory's camera rotation gave it "a close view". `isSubject`
+  (pictureMemory.ts) compares how fully the description's LEAD (up to the first comma / with / beside
+  / above …) and its rest name the key thing; named more fully in the rest ⇒ `BACKGROUND_VIEW`: drawn
+  from memory (same thing), small, in place, never close up, and not compared side by side. A `partOf`
+  picture is always about its part. The label at 1:05 asked for a close-up with blurred print and was
+  refused for readable writing four times, then shipped: a close-up of print is drawn sharp, so a
+  `blurPrint` picture is framed from arm's length (`BLUR_PRINT_VIEW`, close-up words swapped in
+  `withAllowedText`) and, if writing is still readable, once more further back (`STEP_BACK_CLAUSE`).
+  Print the script SAYS keeps its close-up. And the checker that refused the night fire failed on the
+  redraw ("Claude returned no text"), and a failed check passed: `scanStillDefects` now asks the other
+  model, then returns `unchecked`, and the still loop draws once more before shipping. And NOTHING IS MERGED INTO A LIST ITEM
   (`mergeable`, asked by `settleShots`, `foldSnappedFlashes` and the plan gate's flash join): the
   list cut leaves a short lead-in ("Today I'm ranking", ~1 s) and every one of those folds used to
   pick the item beside it, so the joined piece lost the item's picture (Dale's job 293) — a short
   piece now goes to the neighbour that is not a list item; only a list item squeezed to a blink
-  may still join the item next to it.
+  may still join the item next to it. (g) PARTS VS SEPARATE THINGS, ONE PLACE: a list item MAY be a
+  `partOf` its key thing again ("a churn dash here" on the quilt) — refusing that for Dale's board/
+  sign drew Ruth's "a bear paw there" as the whole quilt (job 298); separate list items are kept
+  apart by memory instead (never drawn from another item). A memory picture's framing is decided in
+  ONE place from the picture itself (`shotFraming`: a part, or words asking for a close view ⇒
+  `PART_VIEW`), so the rotating camera can never say "further back" to a close-up. A SCREEN picture
+  (`SHOWS_SCREEN`) never gets, and never is, an object memory — Dale's job 295 built the tablet out
+  of the cutting board; the device is a plain real one, the checker's `broken` question names a
+  device built into another object, and quoted/brand words are scrubbed out of a real look before
+  the prompt. `server/operatorCases.test.ts` holds every case the operator found, side by side, so
+  a fix for one cannot quietly undo another. (h) THE BRIDGE INTO A LIST IS A GROUP PICTURE: the
+  words leading from a host take into a list ("…I'm Granny Ruth, | and this one's for anybody
+  sitting at a kitchen table with | a straight-stitch machine, …") drew an empty kitchen table (job
+  302). `applySpokenLists` now makes that bridge (a short clause right after a host take, and/or
+  the list head's own lead-in, ≥3 words) ONE `listSet` picture: the place the bridge names with
+  every item of the list in it together (`setPicture`/`placeOf`), never rewritten by the line
+  check; each item after it is drawn FROM that picture (`listSetFor`, `SET_ITEM_VIEW`) so the
+  close-up is the same machine. The host never says the bridge: that was tried (job 304) and its
+  ~3 s took the time of a later check-in, leaving 48 s without the host — host minutes are planned
+  after this step, so a bridge cannot know whether the host has any to spare. (i) Dale's job 306:
+  a SCREEN gets its key thing's memory again, used ONLY as the photo inside the listing
+  (`SCREEN_ITEM_VIEW`, its own `memoryClause`; never compared with `scanSameThing`; a screen is still
+  never a memory source) — with none, "the bookcase listing" showed four random items; a picture
+  about ONE listing shows that item's own page (`appScreenClause`/`ONE_LISTING`); a price or name
+  the line SAYS (`pictureText`) is readable and exact on a screen too, where the screen clauses used
+  to blur it into a grey bar; and every key thing a picture is about is checked by the stronger
+  checker (`requiredThingsQuestion` in `scanStillDefects`, Sonnet) — a box drawn where the bookcase
+  was asked for counts as missing and is redrawn. (j) Diane's job 309 / Lance's job 311 / Pearl's
+  job 310: a BODY PART is always on a person — hair, scalp, skin, nails or a face make a picture
+  the host's (`SHOWS_PERSON`; a hair dryer/brush/clip stays a thing), every person picture carries
+  `BODY_ON_PERSON_CLAUSE`, and a thing worn on the FRONT (headlamp, glasses, apron…) is seen from the
+  side where it really sits (`personClauseFor`) — the host-from-behind rule had put Lance's headlamp
+  on the back of his head; the checker's `broken` question names both. A host line that is ONLY a
+  list (after a host line, never the first line or the introduction) goes to one picture per item
+  inside `applySpokenLists`. The CTA keeps host → book → host → QR in ANY wording: `SCAN_INTENT` also
+  reads "use the link in the description", "link below", "pinned comment", "to get it…"; with no such
+  line the card takes only the block's last ~30 words (`QR_FALLBACK_WORDS`, never a line naming the
+  book — it used to take ~90 and swallowed Pearl's whole pitch), and a beat holding the title and
+  more pitch is split right after the title's sentence so the host comes back before the card.
+  (k) SHOW EXACTLY WHAT THE LINE POINTS AT (Frederick's job 329: "three things printed on the box"
+  drew the alarm on the ceiling, "First thing on the label" a stack of PLAIN boxes): the planner,
+  the line check and the named-things step all carry the rule — a line pointing at a specific thing
+  or part (the box, its label, a dial, the back, the date) gets a close-up of exactly that. One Opus
+  call reads what the SCRIPT says is on things (`collectShownFacts`: what a label/box/dial covers,
+  written the way a label prints it, only the script's own words — `scriptWords` checks every word
+  by stem); the named-things step gives a picture of that part those words as `pictureText`
+  (readable and exact, everything else blurred). So a label shows "Photoelectric, Sealed 10-Year
+  Battery, Interconnected" at the line that promises the three things, before each is explained.
 - **A sentence finishes, a word is never cut** (2026-09-28, the operator: "it should adapt to
   everything and not only these videos"). Three rules, none per-channel. (a) Nothing folds across a
   MARKED CTA edge: `coalesceShortScenes` used to fold a sub-floor scene into either neighbour, and

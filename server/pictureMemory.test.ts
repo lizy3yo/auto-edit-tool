@@ -174,3 +174,25 @@ describe("the checker judges allowed writing for exact spelling", () => {
     expect(q).toMatch(/missing or not spelled exactly/);
   });
 });
+
+describe("a screen picture never gets an object memory (Dale's job 295)", () => {
+  it("gives a screen its item's memory for the screen only, and never uses a screen as a memory", async () => {
+    const { memorySourcesFor } = await import("./pictureMemory");
+    const board = { index: 1, scriptText: "x", showSubject: "the walnut and maple cutting board on the bench", keyThing: "cutting board" } as any;
+    const screen = { index: 2, scriptText: "y", showSubject: "a laptop screen showing the shop page with the cutting board listed", keyThing: "cutting board" } as any;
+    const again = { index: 3, scriptText: "z", showSubject: "the cutting board leaning on the wall", keyThing: "cutting board" } as any;
+    const scenes = [board, screen, again];
+    // The screen gets the board's memory for what is ON it; it is never a memory for anything else.
+    expect(memorySourcesFor(scenes, screen)).toEqual([board]);
+    expect(memorySourcesFor(scenes, again)).toEqual([board]);
+  });
+});
+
+describe("brand words never reach the picture prompt", () => {
+  it("takes quoted and brand words out of a real-look description", async () => {
+    const { scrubLegibleWriting } = await import("./longformVideo");
+    const out = scrubLegibleWriting("A white page with a small orange 'Etsy' wordmark, it's tidy.");
+    expect(out).not.toMatch(/Etsy/);
+    expect(out).toMatch(/it's tidy/);
+  });
+});

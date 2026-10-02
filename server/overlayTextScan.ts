@@ -63,7 +63,7 @@ const DEFECT_SCAN_WIDTH = 768;
 const DEFECT_SCAN_HEIGHT = 432;
 
 /** The judge's brief. A module constant so it reads as one block. */
-const STILL_DEFECT_SYSTEM =
+export const STILL_DEFECT_SYSTEM =
   "You are a quality-control reviewer for AI-generated b-roll photography. You are shown ONE " +
   "still frame. Answer three independent questions.\n\n" +
   "QUESTION 1 — overlay: is any text STAMPED OVER this frame, as if it were added afterwards " +
@@ -104,6 +104,19 @@ const STILL_DEFECT_SYSTEM =
   "meet; a tool held in a way no hand could hold it; a hand with too many or too few fingers\n" +
   "- a hand, finger or arm inside, through, behind or merged into a vise, clamp, machine or tool " +
   "body (a hand in a vise's jaws)\n" +
+  "- a tool held or angled in a way no real user holds it, or whose path runs into the table, the " +
+  "bench or a hand; fingers in front of or right beside a blade, saw, bit or cutting edge\n" +
+  "- a phone, tablet or laptop built into, framed by or made of another object (a tablet whose " +
+  "frame is a cutting board, a screen set inside a quilt or a shelf)\n" +
+  "- a body part that looks CUT OFF: hair still shaped like a head or hairstyle with no head " +
+  "inside it, or a hand, foot or face on its own, lying on a surface, floating or hanging from " +
+  "nothing (a few loose strands in a brush, comb or drain are fine; so is a wig on a mannequin " +
+  "head or stand)\n" +
+  "- something worn on the wrong side of the body (a headlamp or glasses on the back of the " +
+  "head, an apron tied on the back)\n" +
+  "- a head turned further round than a neck can turn, or facing a different way from the " +
+  "shoulders; more than two arms or hands on one person\n" +
+  "- a mirror that does not reflect what is in front of it\n" +
   "Answer false for everything else: unusual but possible products or craftsmanship, odd " +
   "compositions, shallow depth of field, soft focus, plain or boring frames, imperfect " +
   "staging, and any small detail you cannot clearly resolve at this size. This is AI-generated " +
@@ -144,6 +157,12 @@ export interface StillDefectVerdict {
    *  operator's 2026-09-28 call: "the b-rolls still don't look like someone shot them on an iPhone").
    *  Re-rolls once, like `messy`. */
   staged: boolean;
+  /**
+   * The check could not run, on either model (2026-10-02, Frederick's job 335: the checker that
+   * had just refused the night-fire picture failed on the redraw, and a failed check passed it).
+   * The caller draws once more rather than counting this as a pass.
+   */
+  unchecked?: boolean;
   what: string;
 }
 
@@ -246,6 +265,20 @@ export function exactLookQuestion(look: string): string {
   );
 }
 
+/**
+ * QUESTION 4 widened for a picture about KEY THINGS: every one of them must really be there, and a
+ * different object drawn in one's place counts as missing.
+ */
+export function requiredThingsQuestion(things: string[]): string {
+  const list = things.map(t => `"${t.replace(/"/g, "'")}"`).join(", ");
+  return (
+    "\n\nQUESTION 4, ALSO FOR THIS PICTURE — missing: each of these must be clearly in the frame: " +
+    `${list}. Answer true if any of them is absent, or if a different object stands where it should ` +
+    "be (a small box where a bookcase was asked for, a bowl where a quilt was), or if it is so small " +
+    "or hidden that a viewer would not notice it."
+  );
+}
+
 /** QUESTION 5, always asked: the clean-frame rule every b-roll prompt carries (`CLEAN_FRAME_RULE`). */
 export const MESSY_QUESTION =
   "\n\nQUESTION 5 — messy: is a real brand name or logo legible anywhere (even small, on a tool " +
@@ -319,9 +352,15 @@ export async function scanStillDefects(
    * holds the frame to it, judged on the larger frame by a stronger model — the quick checker
    * passed three quilt pictures that showed none of the blocks they named (Ruth's job 281).
    */
-  exactLook?: string
+  exactLook?: string,
+  /**
+   * The key things the picture is about: each must really be there, not swapped for something
+   * else (a box drawn where a bookcase was asked for). Judged by the stronger checker.
+   */
+  required?: string[]
 ): Promise<StillDefectVerdict> {
   try {
+    const mustShow = expect && required?.length ? required : undefined;
     // Spelling and a named pattern need the larger frame.
     const [w, h] = allowedText || exactLook ? [1280, 720] : [DEFECT_SCAN_WIDTH, DEFECT_SCAN_HEIGHT];
     const small = await sharp(buffer)
@@ -335,11 +374,12 @@ export async function scanStillDefects(
       base64: small.toString("base64"),
       mediaType: "image/png",
     };
-    const result = await invokeClaude({
+    const ask = (model: string) => invokeClaude({
       systemPrompt:
         STILL_DEFECT_SYSTEM +
         (expect ? missingQuestion(expect) : "") +
         (expect && exactLook ? exactLookQuestion(exactLook) : "") +
+        (mustShow ? requiredThingsQuestion(mustShow) : "") +
         MESSY_QUESTION +
         (line ? placeQuestion(line) : "") +
         STAGED_QUESTION +
@@ -353,8 +393,18 @@ export async function scanStillDefects(
         " Does it look like an ordinary phone photo?",
       imageInput: image,
       maxTokens: 250,
-      model: exactLook ? EXACT_LOOK_MODEL() : STILL_DEFECT_MODEL,
+      model,
     });
+    // A failed call is asked once more on the other checker before it counts as unchecked.
+    const first = exactLook || mustShow ? EXACT_LOOK_MODEL() : STILL_DEFECT_MODEL;
+    const second = first === STILL_DEFECT_MODEL ? EXACT_LOOK_MODEL() : STILL_DEFECT_MODEL;
+    let result: Awaited<ReturnType<typeof invokeClaude>>;
+    try {
+      result = await ask(first);
+    } catch (err: any) {
+      console.warn(`[StillDefects] check failed on ${first}: ${err.message} — asking ${second}`);
+      result = await ask(second);
+    }
     const verdict = parseStillDefectVerdict(result.text, result.stopReason);
     if (!expect) verdict.missing = false;
     if (!line) verdict.wrongPlace = false;
@@ -375,9 +425,9 @@ export async function scanStillDefects(
     // Fail open — a QC check must never cost a render. Nothing catches it downstream, so this
     // warn is the only trace; a defective still ships.
     console.warn(
-      `[StillDefects] check failed: ${err.message} — passing the still`
+      `[StillDefects] check failed: ${err.message} — the still is unchecked`
     );
-    return { ...CLEAN_VERDICT };
+    return { ...CLEAN_VERDICT, unchecked: true };
   }
 }
 
