@@ -38,41 +38,97 @@ export interface TokenRate {
   input: number;
   /** USD per 1M output tokens. */
   output: number;
+  /** USD per 1M cache-READ tokens — per model (Opus 5.5 reads at 0.05x, Fable 5.1 at 0.025x). */
+  cacheRead: number;
+  /** USD per 1M 5-minute cache-write tokens. */
+  cacheWrite5m: number;
+  /** USD per 1M 1-hour cache-write tokens. */
+  cacheWrite1h: number;
 }
 
 /**
- * Anthropic list pricing, USD per million tokens. Keys are matched by longest prefix, so a
- * dated model id (`claude-haiku-4-5-20251001`) resolves against its family entry.
+ * The FALLBACK only. Live prices come from Anthropic's own price page
+ * (`server/claudePrices.ts`, read at boot and daily) and win over this table; it is here so a
+ * server that has never reached that page still prices correctly. Copied from that page on
+ * 2026-10-02.
  */
-const CLAUDE_RATES: Record<string, TokenRate> = {
-  "claude-fable-5": { input: 10, output: 50 },
-  "claude-mythos-5": { input: 10, output: 50 },
-  "claude-opus-5": { input: 5, output: 25 },
-  "claude-opus-4-8": { input: 5, output: 25 },
-  "claude-opus-4-7": { input: 5, output: 25 },
-  "claude-opus-4-6": { input: 5, output: 25 },
-  "claude-opus-4-5": { input: 5, output: 25 },
-  "claude-sonnet-5": { input: 3, output: 15 },
-  "claude-sonnet-4-6": { input: 3, output: 15 },
-  "claude-sonnet-4-5": { input: 3, output: 15 },
-  "claude-haiku-4-5": { input: 1, output: 5 },
+const BUILT_IN_CLAUDE_RATES: Record<string, TokenRate> = {
+  "claude-fable-5-1": claudeRate(10, 50, 0.25),
+  "claude-mythos-5-1": claudeRate(10, 50, 0.25),
+  "claude-fable-5": claudeRate(10, 50, 1),
+  "claude-mythos-5": claudeRate(10, 50, 1),
+  "claude-opus-5-5": claudeRate(4, 20, 0.2),
+  "claude-opus-5": claudeRate(5, 25, 0.5),
+  "claude-opus-4-8": claudeRate(5, 25, 0.5),
+  "claude-opus-4-7": claudeRate(5, 25, 0.5),
+  "claude-opus-4-6": claudeRate(5, 25, 0.5),
+  "claude-opus-4-5": claudeRate(5, 25, 0.5),
+  "claude-sonnet-5-5": claudeRate(2, 10, 0.2),
+  "claude-sonnet-5": claudeRate(2, 10, 0.2),
+  "claude-sonnet-4-6": claudeRate(3, 15, 0.3),
+  "claude-sonnet-4-5": claudeRate(3, 15, 0.3),
+  "claude-haiku-4-5": claudeRate(1, 5, 0.1),
 };
 
-/** Cache reads bill at ~0.1x the input rate; 5-minute cache writes at ~1.25x. */
-const CACHE_READ_MULTIPLIER = 0.1;
-const CACHE_WRITE_MULTIPLIER = 1.25;
+/** Cache writes are 1.25x (5 min) and 2x (1 h) of input on every current model. */
+function claudeRate(input: number, output: number, cacheRead: number): TokenRate {
+  return {
+    input,
+    output,
+    cacheRead,
+    cacheWrite5m: input * 1.25,
+    cacheWrite1h: input * 2,
+  };
+}
 
-/** Longest-prefix lookup so dated ids (`...-20251001`) hit their family rate. */
+let liveClaudeRates: Record<string, TokenRate> = {};
+/** Anthropic's US-only inference surcharge (`inference_geo: "us"`); 1.1x when last read. */
+let usOnlyMultiplier = 1.1;
+
+/** Called by `server/claudePrices.ts` with the table it read off Anthropic's price page. */
+export function setLiveClaudeRates(
+  rates: Record<string, TokenRate>,
+  usOnly: number | null
+): void {
+  liveClaudeRates = { ...rates };
+  if (usOnly) usOnlyMultiplier = usOnly;
+}
+
+/**
+ * Exact id, or the id plus a `-YYYYMMDD` snapshot date — never a neighbouring model. The
+ * prefix lookup this replaced priced `claude-sonnet-5-5` as `claude-sonnet-5` and
+ * `claude-opus-5-5` as `claude-opus-5`; an unknown id now reports "rate not set" (and makes
+ * `server/claude.ts` re-read Anthropic's page) instead of borrowing a price.
+ */
 export function claudeRateFor(model: string): TokenRate | null {
-  let best: TokenRate | null = null;
-  let bestLen = 0;
-  for (const [prefix, r] of Object.entries(CLAUDE_RATES)) {
-    if (model.startsWith(prefix) && prefix.length > bestLen) {
-      best = r;
-      bestLen = prefix.length;
-    }
-  }
-  return best;
+  const base = model.replace(/-\d{8}$/, "");
+  return liveClaudeRates[base] ?? BUILT_IN_CLAUDE_RATES[base] ?? null;
+}
+
+export interface ClaudeTokens {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  cacheWrite1hTokens: number;
+}
+
+/** Dollars for one call's tokens at today's prices, or null when the model has no price. */
+export function claudeCallUsd(
+  model: string,
+  t: ClaudeTokens,
+  inferenceGeo?: string | null
+): number | null {
+  const r = claudeRateFor(model);
+  if (!r) return null;
+  const usd =
+    (t.inputTokens * r.input +
+      t.outputTokens * r.output +
+      t.cacheReadTokens * r.cacheRead +
+      t.cacheWriteTokens * r.cacheWrite5m +
+      t.cacheWrite1hTokens * r.cacheWrite1h) /
+    1_000_000;
+  return inferenceGeo === "us" ? usd * usOnlyMultiplier : usd;
 }
 
 // ---------------------------------------------------------------------------
@@ -191,7 +247,16 @@ export interface UsageLine {
   inputTokens?: number;
   outputTokens?: number;
   cacheReadTokens?: number;
+  /** 5-minute-TTL cache writes (1.25x input). */
   cacheWriteTokens?: number;
+  /** 1-hour-TTL cache writes (2x input), kept apart because they price differently. */
+  cacheWrite1hTokens?: number;
+  /**
+   * LLM only: dollars fixed when each call was metered, at that day's prices, and how many of
+   * `calls` carry one. When every call does, this IS the line's cost.
+   */
+  usd?: number;
+  pricedCalls?: number;
 }
 
 /** A priced line, ready to render. */
@@ -256,20 +321,22 @@ export function priceLine(line: UsageLine): PricedLine {
 
   switch (line.lane) {
     case "llm": {
-      const r = claudeRateFor(line.model);
+      // Dollars fixed at call time (each call priced the moment it was metered, at that day's
+      // prices) are the exact figure — a later price change must not rewrite an old video.
+      // Lines from before that, or holding a call that had no price yet, are priced from
+      // their tokens at today's rates.
+      if (line.usd != null && line.pricedCalls === line.calls)
+        return priced(line.usd, { exact: true });
+      const usd = claudeCallUsd(line.model, {
+        inputTokens: line.inputTokens ?? 0,
+        outputTokens: line.outputTokens ?? 0,
+        cacheReadTokens: line.cacheReadTokens ?? 0,
+        cacheWriteTokens: line.cacheWriteTokens ?? 0,
+        cacheWrite1hTokens: line.cacheWrite1hTokens ?? 0,
+      });
       // An unrecognised model means a rate we cannot vouch for — say so rather than
       // inventing one or borrowing another model's.
-      if (!r) return priced(0, { rateKnown: false });
-      const inTok = line.inputTokens ?? 0;
-      const outTok = line.outputTokens ?? 0;
-      const cacheRead = line.cacheReadTokens ?? 0;
-      const cacheWrite = line.cacheWriteTokens ?? 0;
-      const usd =
-        (inTok * r.input +
-          outTok * r.output +
-          cacheRead * r.input * CACHE_READ_MULTIPLIER +
-          cacheWrite * r.input * CACHE_WRITE_MULTIPLIER) /
-        1_000_000;
+      if (usd == null) return priced(0, { rateKnown: false });
       return priced(usd, { exact: true });
     }
 

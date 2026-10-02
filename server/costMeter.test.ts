@@ -71,6 +71,35 @@ describe("job attribution", () => {
     expect(stored[0].inputTokens).toBe(2_000_000);
   });
 
+  it("says so when spend lands outside any video, once per model per window", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      claudeCall("claude-opus-5-5-warn-test", 10, 10);
+      claudeCall("claude-opus-5-5-warn-test", 10, 10);
+      claudeCall("claude-sonnet-5-warn-test", 10, 10);
+      const lines = warn.mock.calls.map(c => String(c[0]));
+      expect(lines.filter(l => l.includes("claude-opus-5-5-warn-test"))).toHaveLength(1);
+      expect(lines.filter(l => l.includes("claude-sonnet-5-warn-test"))).toHaveLength(1);
+      expect(lines[0]).toMatch(/outside any video/);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("a nested meter for the same job still lands every call on that job", async () => {
+    // The pipeline run meters from its first call and the clip-stage lock opens its own meter
+    // inside it — the nesting must neither lose nor double anything.
+    rows.set(9, { id: 9, status: "processing" });
+    await withCostMeter(9, async () => {
+      claudeCall("claude-opus-5-5", 1000, 0);
+      await withCostMeter(9, async () => {
+        claudeCall("claude-opus-5-5", 1000, 0);
+      });
+    });
+    await flushJobUsage(9);
+    expect(rows.get(9).costUsage[0].calls).toBe(2);
+  });
+
   it("keeps distinct models on separate lines", async () => {
     rows.set(8, { id: 8, status: "processing" });
 
@@ -122,6 +151,34 @@ describe("durability", () => {
 });
 
 describe("coverage guard", () => {
+  // The storyboard, shot list and every Opus check run BEFORE the clip stage's job lock. With
+  // the meter opened only by the lock they were off every video's cost — 2026-10-02 metered
+  // $4.49 of a $39.43 Claude day, no Opus at all. The run itself must open the meter, and the
+  // pre-lock work must only be reachable through it.
+  it("the pipeline run is metered from its first call, not from the clip stage", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const src = readFileSync(join(import.meta.dirname, "longformVideo.ts"), "utf8");
+    const body = (name: string) => {
+      const start = src.search(new RegExp(`async function ${name}\\(`));
+      expect(start, `${name} not found`).toBeGreaterThan(-1);
+      return src.slice(start, src.indexOf("\n}\n", start));
+    };
+
+    expect(body("runLongformPipeline")).toMatch(
+      /withCostMeter\(jobId, \(\) => runLongformPipelineMetered\(jobId\)\)/
+    );
+    // The metered core and the unified pipeline are reached ONLY through the metered wrapper.
+    expect(src.match(/runLongformPipelineMetered\(/g)).toHaveLength(2); // decl + wrapper
+    expect(src.match(/runUnifiedPipeline\(/g)).toHaveLength(2); // decl + metered core
+    expect(body("runLongformPipelineMetered")).toMatch(/runUnifiedPipeline\(/);
+    // The 69Labs wait (resumed at boot with no pipeline around it) makes real TTS calls.
+    for (const call of src.match(/^.*\brunTtsWait\(jobId.*$/gm) ?? []) {
+      expect(call).toMatch(/withCostMeter\(jobId/);
+    }
+  });
+
+
   // AIReiter shipped as a drop-in replacement for the metered APIMART lane and went
   // unmetered for a release: b-roll and stills on that lane reported as free. Nothing in
   // the type system catches that, so this does. It is a lint, deliberately: if a provider

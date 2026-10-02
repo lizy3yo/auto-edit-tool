@@ -14753,7 +14753,25 @@ export async function createLongformJob(
  * Run the full pipeline for a job. Fire-and-forget; catches its own errors and
  * records them on the job row.
  */
+/**
+ * Every pipeline run is billed to its job from the FIRST call, not from the clip stage: voicing,
+ * the delivery plan, the storyboard (Opus 4.8), the shot list, spoken lists, the line check and
+ * named looks (Opus 5.5), the self-moving judge and the host look all run before `withJobLock`
+ * opens. Metering only inside the lock left all of that off the video's cost — on 2026-10-02 the
+ * meter showed $4.49 of a $39.43 Claude day, and no Opus at all. The lock's own `withCostMeter`
+ * nests inside this one with the same id, so nothing is counted twice. Every entry point
+ * (generate, resume after a restart, "Try voicing again", supplied narration, the 69Labs wait's
+ * re-voice) comes through here.
+ */
 export async function runLongformPipeline(jobId: number): Promise<void> {
+  try {
+    await withCostMeter(jobId, () => runLongformPipelineMetered(jobId));
+  } finally {
+    void flushJobUsage(jobId).catch(() => {});
+  }
+}
+
+async function runLongformPipelineMetered(jobId: number): Promise<void> {
   // A fresh run starts with the host lane open (a pause from an earlier run is stale).
   resumeHostLane(jobId);
   try {
@@ -15016,7 +15034,9 @@ async function patchTtsWait(
 function startTtsWait(jobId: number, wait: TtsWaitState): void {
   // The row must keep moving, or the stale-job sweep fails a job that is only waiting.
   const stopBeat = startJobHeartbeat(jobId);
-  void runTtsWait(jobId, wait, {
+  // Billed to the job: the voice checks are real TTS calls, and a wait resumed after a restart
+  // starts here with no pipeline around it.
+  void withCostMeter(jobId, () => runTtsWait(jobId, wait, {
     now: () => Date.now(),
     sleep: ms => sleep(ms).then(() => {}),
     stillWaiting: async () => {
@@ -15048,7 +15068,7 @@ function startTtsWait(jobId: number, wait: TtsWaitState): void {
         completedAt: new Date(),
       });
     },
-  })
+  }))
     .catch(e =>
       console.error(
         `[Longform ${jobId}] waiting for the voice provider failed:`,
@@ -16200,7 +16220,9 @@ export function withJobLock<T>(
   // in which provider calls should be charged to it. Wrapping here rather than at each of the
   // six spending entry points (pipeline, resume, retry-assembly, retry-failed, regen scene,
   // regen scenes) means every one is metered by construction — including any added later —
-  // and no adapter needs to know a job exists. See `server/costMeter.ts`.
+  // and no adapter needs to know a job exists. See `server/costMeter.ts`. The pipeline's
+  // stages BEFORE its lock (voicing, storyboard, shot list, the Opus checks) are metered by
+  // `runLongformPipeline` itself; this nests inside it with the same id.
   const guarded = async () => {
     const stopBeat = startJobHeartbeat(jobId);
     try {

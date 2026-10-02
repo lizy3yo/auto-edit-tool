@@ -20,6 +20,7 @@ import { createServer } from "http";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { ensureRootAdmin, registerAdminAuthRoutes } from "../adminAuth";
+import { startClaudePriceRefresh } from "../claudePrices";
 import { runMigrations } from "../migrate";
 import { checkSchema } from "../schemaCheck";
 import { appRouter } from "../routers";
@@ -74,6 +75,10 @@ async function startServer() {
   // Awaited: without an admin row nobody can sign in, so this has to settle before the login
   // route starts answering.
   await ensureRootAdmin();
+  // Claude's prices, read off Anthropic's own price page now and daily (never typed in), so a
+  // video's Claude cost is what Anthropic charges for it. Not awaited: the saved copy applies
+  // first, and an unreachable page only keeps the last good prices.
+  void startClaudePriceRefresh();
   // Email/password auth against the users table (admin · operations manager · editor)
   registerAdminAuthRoutes(app);
   // HeyGen render-completion callback (wakes host-scene poll loops).

@@ -24,27 +24,67 @@ const line = (
 });
 
 describe("claudeRateFor", () => {
-  it("resolves a dated model id against its family rate", () => {
-    // The authoring lane pins `claude-haiku-4-5-20251001`; an exact-match lookup would
-    // miss it and silently price the busiest LLM lane at $0.
-    expect(claudeRateFor("claude-haiku-4-5-20251001")).toEqual({
+  it("resolves a dated model id against its own rate", () => {
+    // The authoring lane pins `claude-haiku-4-5-20251001`; without the date allowance it
+    // would price the busiest LLM lane at $0.
+    expect(claudeRateFor("claude-haiku-4-5-20251001")).toMatchObject({
       input: 1,
       output: 5,
+      cacheRead: 0.1,
     });
   });
 
-  it("prefers the longest matching prefix", () => {
-    // "claude-opus-4-8" and "claude-opus-5" must not collide, and a shorter prefix must
-    // never win over a more specific one.
-    expect(claudeRateFor("claude-opus-4-8")).toEqual({ input: 5, output: 25 });
-    expect(claudeRateFor("claude-sonnet-4-6")).toEqual({
-      input: 3,
-      output: 15,
+  it("never prices a model at a neighbour's rate", () => {
+    // The prefix lookup this replaced priced claude-opus-5-5 as claude-opus-5 ($5/$25 against
+    // $4/$20) and claude-sonnet-5-5 at the old Sonnet rate — every video's Claude cost read
+    // high and looked right (2026-10-02).
+    expect(claudeRateFor("claude-opus-5-5")).toMatchObject({
+      input: 4,
+      output: 20,
+      cacheRead: 0.2,
     });
+    expect(claudeRateFor("claude-opus-5")).toMatchObject({
+      input: 5,
+      output: 25,
+      cacheRead: 0.5,
+    });
+    expect(claudeRateFor("claude-sonnet-5-5")?.input).toBe(2);
+    // A model nobody has priced yet reports "rate not set", never its family's old price.
+    expect(claudeRateFor("claude-sonnet-5-7")).toBeNull();
+    expect(claudeRateFor("claude-opus-5-5-fast")).toBeNull();
   });
 
   it("returns null for an unknown model rather than guessing", () => {
     expect(claudeRateFor("some-future-model")).toBeNull();
+  });
+
+  it("has a rate for every Claude model the server calls", async () => {
+    // A model added to a pipeline step without a row in CLAUDE_RATES would report its spend
+    // as "rate not set" on every video. Any quoted claude-… id in server code must price.
+    const { readFileSync, readdirSync, statSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const ids = new Set<string>();
+    const walk = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        const path = join(dir, name);
+        if (statSync(path).isDirectory()) {
+          if (name !== "node_modules" && name !== "assets") walk(path);
+        } else if (
+          name.endsWith(".ts") &&
+          !name.endsWith(".test.ts") &&
+          name !== "pricing.ts"
+        ) {
+          const src = readFileSync(path, "utf8");
+          for (const m of src.matchAll(/["'`](claude-[a-z0-9.-]+)["'`]/g))
+            ids.add(m[1]);
+        }
+      }
+    };
+    walk(import.meta.dirname);
+    walk(join(import.meta.dirname, "..", "shared"));
+    expect(ids.size).toBeGreaterThan(3);
+    const unpriced = [...ids].filter(id => !claudeRateFor(id));
+    expect(unpriced, `no rate in CLAUDE_RATES for: ${unpriced.join(", ")}`).toEqual([]);
   });
 });
 
@@ -63,7 +103,7 @@ describe("priceLine — LLM", () => {
     expect(r.exact).toBe(true);
   });
 
-  it("discounts cache reads to 0.1x input and charges writes at 1.25x", () => {
+  it("prices cache reads at the model's own rate, writes at 1.25x (5 min) or 2x (1 h)", () => {
     // Folding cache tokens into input_tokens would overcharge a cached prompt tenfold —
     // this is the single easiest way to make the whole figure wrong.
     const r = priceLine(
@@ -75,6 +115,42 @@ describe("priceLine — LLM", () => {
       })
     );
     expect(r.usd).toBeCloseTo(0.1 + 1.25, 6);
+  });
+
+  it("reads Opus 5.5's cache at 0.05x of input, not the old flat 0.1x", () => {
+    const r = priceLine(
+      line({
+        lane: "llm",
+        model: "claude-opus-5-5",
+        inputTokens: 1_000_000,
+        outputTokens: 1_000_000,
+        cacheReadTokens: 1_000_000,
+        cacheWriteTokens: 1_000_000,
+        cacheWrite1hTokens: 1_000_000,
+      })
+    );
+    // $4 in + $20 out + $0.20 read + $5 (5-min write) + $8 (1-hour write)
+    expect(r.usd).toBeCloseTo(4 + 20 + 0.2 + 5 + 8, 6);
+  });
+
+  it("uses the dollars fixed at call time, so a later price change never rewrites a video", () => {
+    const r = priceLine(
+      line({
+        lane: "llm",
+        model: "claude-opus-5-5",
+        calls: 3,
+        inputTokens: 1_000_000,
+        usd: 1.234,
+        pricedCalls: 3,
+      })
+    );
+    expect(r.usd).toBe(1.234);
+    // One call without a fixed price (a model nobody had priced yet): the whole line is
+    // priced from its tokens at today's rates instead of a partial sum.
+    const partial = priceLine(
+      line({ lane: "llm", model: "claude-opus-5-5", calls: 3, inputTokens: 1_000_000, usd: 1, pricedCalls: 2 })
+    );
+    expect(partial.usd).toBeCloseTo(4, 6);
   });
 
   it("flags an unknown model as unpriced rather than inventing a rate", () => {

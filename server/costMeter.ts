@@ -10,7 +10,9 @@
  * (`server/providers/*`) know nothing about jobs by design. Threading a `jobId` through every
  * call site would touch most of the file for no benefit to the pipeline itself. Instead the six
  * money-spending entry points run inside `withCostMeter(jobId, ...)`, and every adapter records
- * into whatever job is ambient. This is safe here precisely because of the constraint already
+ * into whatever job is ambient. That means the WHOLE pipeline run (`runLongformPipeline`, from
+ * the first call after Generate) plus every job-lock pass — not just the lock, which opens at
+ * the clip stage and missed every Claude step before it. This is safe here precisely because of the constraint already
  * written into CLAUDE.md: **one long-lived process**, same as the in-memory semaphores and poll
  * loops. A call that somehow escapes the context records nothing rather than mis-attributing.
  *
@@ -66,6 +68,29 @@ export function withCostMeter<T>(
   return jobContext.run(jobId, fn);
 }
 
+/**
+ * Spend made outside any job is dropped (it must not land on an arbitrary job), but never
+ * SILENTLY. Until 2026-10-02 the meter only opened at the clip stage, so the storyboard, the
+ * shot list and every Opus step before it — ~89% of a day's Claude bill — vanished without a
+ * trace. Some spend legitimately has no job (a host photo's phone look, the delivery direction
+ * the upload panel shows, scripts), so this is a log line, not an error: once per lane +
+ * vendor + model every 10 minutes, so a burst of stills checks does not flood the log.
+ */
+const UNMETERED_WARN_EVERY_MS = 10 * 60_000;
+const unmeteredWarnedAt = new Map<string, number>();
+
+function warnUnmetered(line: UsageLine): void {
+  const key = lineKey(line);
+  const now = Date.now();
+  const last = unmeteredWarnedAt.get(key);
+  if (last != null && now - last < UNMETERED_WARN_EVERY_MS) return;
+  unmeteredWarnedAt.set(key, now);
+  console.warn(
+    `[Cost] ${line.provider} ${line.model} (${line.lane}) spent outside any video — not on a ` +
+      `video's cost. If this ran for a video, its entry point is missing withCostMeter.`
+  );
+}
+
 /** The job currently being billed, or null outside any metered entry point. */
 export const currentCostJobId = (): number | null =>
   jobContext.getStore() ?? null;
@@ -81,25 +106,17 @@ export const currentCostJobId = (): number | null =>
 export function recordUsage(line: UsageLine): void {
   try {
     const jobId = jobContext.getStore();
-    if (jobId == null) return;
+    if (jobId == null) {
+      warnUnmetered(line);
+      return;
+    }
 
     let lines = pending.get(jobId);
     if (!lines) pending.set(jobId, (lines = new Map()));
 
     const key = lineKey(line);
     const prev = lines.get(key);
-    if (!prev) {
-      lines.set(key, { ...line });
-    } else {
-      prev.calls += line.calls;
-      prev.quantity += line.quantity;
-      prev.inputTokens = (prev.inputTokens ?? 0) + (line.inputTokens ?? 0);
-      prev.outputTokens = (prev.outputTokens ?? 0) + (line.outputTokens ?? 0);
-      prev.cacheReadTokens =
-        (prev.cacheReadTokens ?? 0) + (line.cacheReadTokens ?? 0);
-      prev.cacheWriteTokens =
-        (prev.cacheWriteTokens ?? 0) + (line.cacheWriteTokens ?? 0);
-    }
+    lines.set(key, prev ? sumLines(prev, line) : { ...line });
 
     scheduleFlush(jobId);
   } catch (err: any) {
@@ -165,6 +182,18 @@ function sumLines(a: UsageLine, b: UsageLine): UsageLine {
     outputTokens: (a.outputTokens ?? 0) + (b.outputTokens ?? 0),
     cacheReadTokens: (a.cacheReadTokens ?? 0) + (b.cacheReadTokens ?? 0),
     cacheWriteTokens: (a.cacheWriteTokens ?? 0) + (b.cacheWriteTokens ?? 0),
+    ...(a.cacheWrite1hTokens || b.cacheWrite1hTokens
+      ? {
+          cacheWrite1hTokens:
+            (a.cacheWrite1hTokens ?? 0) + (b.cacheWrite1hTokens ?? 0),
+        }
+      : {}),
+    ...(a.usd != null || b.usd != null
+      ? {
+          usd: (a.usd ?? 0) + (b.usd ?? 0),
+          pricedCalls: (a.pricedCalls ?? 0) + (b.pricedCalls ?? 0),
+        }
+      : {}),
   };
 }
 
@@ -256,7 +285,8 @@ function detailFor(line: PricedLine): string {
       const inTok =
         (line.inputTokens ?? 0) +
         (line.cacheReadTokens ?? 0) +
-        (line.cacheWriteTokens ?? 0);
+        (line.cacheWriteTokens ?? 0) +
+        (line.cacheWrite1hTokens ?? 0);
       return `${calls} · ${nf.format(inTok)} in / ${nf.format(line.outputTokens ?? 0)} out tokens`;
     }
     case "tts":

@@ -1,6 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { ENV } from "./_core/env";
 import { recordUsage } from "./costMeter";
+import { claudeCallUsd } from "./pricing";
+import { refreshForUnknownModel } from "./claudePrices";
 
 /**
  * Bill one completed Anthropic call to the ambient job (`server/costMeter.ts`).
@@ -11,18 +13,60 @@ import { recordUsage } from "./costMeter";
  * by an order of magnitude. Thinking tokens need no special handling: Anthropic already
  * counts them in `output_tokens`.
  */
-function meterClaudeCall(model: string, usage: Anthropic.Usage): void {
+export async function meterClaudeCall(
+  model: string,
+  usage: Anthropic.Usage
+): Promise<void> {
+  // Cache writes price by TTL (5 min 1.25x, 1 h 2x). The breakdown is on `cache_creation`;
+  // without it every write is the 5-minute kind, which is all this file asks for.
+  const total = usage.cache_creation_input_tokens ?? 0;
+  const write1h = usage.cache_creation?.ephemeral_1h_input_tokens ?? 0;
+  const tokens = {
+    inputTokens: usage.input_tokens,
+    outputTokens: usage.output_tokens,
+    cacheReadTokens: usage.cache_read_input_tokens ?? 0,
+    cacheWriteTokens: Math.max(0, total - write1h),
+    cacheWrite1hTokens: write1h,
+  };
+  // The call's dollars are fixed NOW, at today's prices (read off Anthropic's own price page —
+  // `server/claudePrices.ts`), so a later price change never rewrites what this video cost. A
+  // model with no price yet is usually one Anthropic just shipped: re-read the page first.
+  let usd = claudeCallUsd(model, tokens, usage.inference_geo);
+  if (usd == null) {
+    await refreshForUnknownModel(model);
+    usd = claudeCallUsd(model, tokens, usage.inference_geo);
+  }
   recordUsage({
     lane: "llm",
     provider: "anthropic",
     model,
     calls: 1,
     quantity: 0,
-    inputTokens: usage.input_tokens,
-    outputTokens: usage.output_tokens,
-    cacheReadTokens: usage.cache_read_input_tokens ?? 0,
-    cacheWriteTokens: usage.cache_creation_input_tokens ?? 0,
+    inputTokens: tokens.inputTokens,
+    outputTokens: tokens.outputTokens,
+    cacheReadTokens: tokens.cacheReadTokens,
+    cacheWriteTokens: tokens.cacheWriteTokens,
+    ...(write1h ? { cacheWrite1hTokens: write1h } : {}),
+    ...(usd != null ? { usd, pricedCalls: 1 } : {}),
   });
+}
+
+/**
+ * Bill a request the moment Anthropic ANSWERS it — not after we decide to use the answer.
+ * Anthropic charges for every completed request, including the two this file used to walk
+ * away from: a reply that arrives after our own per-call timeout (the request keeps running
+ * and is billed in full), and a reply with no text block (a refusal, or thinking that used up
+ * `max_tokens`), which threw before it was ever counted. Registered inside the caller's
+ * context, so a late answer still lands on the right video.
+ */
+function meterWhenAnswered(
+  model: string,
+  request: Promise<Anthropic.Message>
+): void {
+  request.then(
+    r => meterClaudeCall(model, r.usage).catch(() => {}),
+    () => {} // a failed request is not billed; the caller handles the error
+  );
 }
 
 let client: Anthropic | null = null;
@@ -285,6 +329,8 @@ async function callClaudeWithRetries(opts: {
         });
       }
 
+      meterWhenAnswered(resolvedModel, apiPromise);
+
       // Apply per-call timeout if specified
       let response: Anthropic.Message;
       if (perCallTimeoutMs) {
@@ -318,8 +364,6 @@ async function callClaudeWithRetries(opts: {
           `[Claude] Adaptive thinking used — thinking tokens will appear in usage`
         );
       }
-
-      meterClaudeCall(resolvedModel, response.usage);
 
       return {
         text: textBlock.text,
@@ -380,7 +424,7 @@ export async function invokeClaudeMultiTurn(params: {
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const response = await anthropic.messages.create({
+      const request = anthropic.messages.create({
         model: "claude-opus-4-8",
         max_tokens: maxTokens + 10000,
         temperature: 1, // Required for thinking mode
@@ -390,6 +434,8 @@ export async function invokeClaudeMultiTurn(params: {
         system: systemPrompt,
         messages: messages.map(m => ({ role: m.role, content: m.content })),
       });
+      meterWhenAnswered("claude-opus-4-8", request);
+      const response = await request;
 
       const textBlock = response.content.find(block => block.type === "text");
       if (!textBlock || textBlock.type !== "text") {
@@ -401,8 +447,6 @@ export async function invokeClaudeMultiTurn(params: {
           `[Claude Multi-Turn] Request succeeded after ${attempt} retry(ies)`
         );
       }
-
-      meterClaudeCall("claude-opus-4-8", response.usage);
 
       return {
         text: textBlock.text,

@@ -116,7 +116,15 @@ migration in `server/migrate.ts`.
 
 ## Cost rates (`server/pricing.ts`)
 
-Quantities are metered from real calls; **only Anthropic's rates are exact**. Every other rate
+Quantities are metered from real calls; **only Anthropic's rates are exact**. Claude's prices are
+never typed in: `server/claudePrices.ts` reads Anthropic's own price page
+(`platform.claude.com/docs/en/about-claude/pricing.md`, by column header) at boot and daily, keeps
+the last good table in `app_settings.claude_prices`, re-reads at once for a model it has no price
+for, and keeps the old table if the page fails to parse. Each Claude call's dollars are fixed WHEN
+IT IS METERED (`UsageLine.usd`, US-only ×1.1 included), so a later price change never rewrites an
+old video; `BUILT_IN_CLAUDE_RATES` in `pricing.ts` is only the fallback. A whole pipeline run is
+metered from Generate (`runLongformPipeline` → `withCostMeter`), and a call is counted the moment
+Anthropic answers — including replies past our own timeout and replies with no text, both billed. Every other rate
 is a list-price estimate because HeyGen/69Labs/APIMART bill per-plan credit bundles — check one
 invoice, then pin the real number via the env var below (or edit the file).
 
