@@ -78,14 +78,10 @@ type Vendor = "sixtynine_labs" | "minimax";
 export function HeygenTest() {
   const utils = trpc.useUtils();
   const { data: channels } = trpc.channelConfig.list.useQuery();
-  const accountsLive = useLiveHeygenAccounts();
-  const { data: accountInfo } = trpc.heygenTest.accounts.useQuery(undefined, {
-    // The live stream keeps this current; poll only while it is reconnecting.
-    refetchInterval: accountsLive ? false : 30_000,
-  });
+  const pick = useHeygenAccountPick();
+  const { allBusy, rate } = pick;
   const [channelKey, setChannelKey] = useState("");
   const [vendor, setVendor] = useState<Vendor>("sixtynine_labs");
-  const [account, setAccount] = useState<string>("");
   const [script, setScript] = useState("");
   // Each photo in the run: its original, its phone-look version (the DEFAULT, as in every video —
   // shared/hostPhotoLook.ts), and the operator's switch back to the original.
@@ -103,15 +99,6 @@ export function HeygenTest() {
 
   const channel = channels?.find(c => c.channelKey === channelKey);
   const voiced = (channels ?? []).filter(c => c.voiceId || c.minimaxVoiceId);
-  // Only FREE accounts are listed. A pick that just became busy falls back to the first free one.
-  const accounts = accountInfo?.available ?? [];
-  const allBusy =
-    !!accountInfo && accountInfo.configured > 0 && !accounts.length;
-  const accountValue = accounts.some(a => String(a.account) === account)
-    ? account
-    : accounts[0]
-      ? String(accounts[0].account)
-      : "";
   // A channel with only one vendor's voice gets that vendor; the chooser shows only with both.
   const effectiveVendor: Vendor =
     channel && !channel.voiceId && channel.minimaxVoiceId
@@ -168,12 +155,9 @@ export function HeygenTest() {
 
   const words = countScriptWords(script);
   const estSec = estimateTestSeconds(script);
-  const rate = accountInfo?.ratePerSec ?? 0;
   const inputError = heygenTestInputError({ script, imageUrls });
-  const blocker = !accountValue
-    ? allBusy
-      ? "Waiting for a HeyGen account to free up."
-      : "No HeyGen account has a key — add one in Provider keys."
+  const blocker = pick.blocker
+    ? pick.blocker
     : makingLook
       ? "Making the phone look… (or switch that photo to Original)"
       : inputError;
@@ -217,38 +201,7 @@ export function HeygenTest() {
                 </select>
               </div>
             )}
-            <div className="space-y-1.5">
-              <Label className="text-xs">HeyGen account</Label>
-              <Select
-                value={accountValue}
-                onValueChange={setAccount}
-                disabled={accounts.length === 0}
-              >
-                <SelectTrigger className="h-9 w-full">
-                  <SelectValue
-                    placeholder={
-                      allBusy ? "No account free right now" : "No keys set"
-                    }
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  {accounts.map(a => (
-                    <SelectItem
-                      key={String(a.account)}
-                      value={String(a.account)}
-                    >
-                      <span>{a.label}</span>
-                      <Badge
-                        variant="outline"
-                        className="border-success/30 bg-success/10 text-success"
-                      >
-                        Available
-                      </Badge>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            <HeygenAccountSelect pick={pick} />
           </div>
 
           {allBusy && (
@@ -421,10 +374,7 @@ export function HeygenTest() {
                 start.mutate({
                   channelKey,
                   ttsVendor: effectiveVendor,
-                  account:
-                    accountValue === "shared" || accountValue === "test"
-                      ? accountValue
-                      : Number(accountValue),
+                  account: pick.account,
                   script,
                   imageUrls,
                   name: runName.trim() || undefined,
@@ -477,6 +427,83 @@ function useLiveHeygenAccounts(): boolean {
     return () => es.close();
   }, [utils]);
   return live;
+}
+
+/**
+ * The HeyGen account a run will render on, shared by the test bench and the Upsell VSL page. Only
+ * FREE accounts are listed, live; a pick that just became busy falls back to the first free one.
+ */
+export function useHeygenAccountPick() {
+  const accountsLive = useLiveHeygenAccounts();
+  const { data: accountInfo } = trpc.heygenTest.accounts.useQuery(undefined, {
+    // The live stream keeps this current; poll only while it is reconnecting.
+    refetchInterval: accountsLive ? false : 30_000,
+  });
+  const [picked, setAccount] = useState<string>("");
+  const accounts = accountInfo?.available ?? [];
+  const allBusy =
+    !!accountInfo && accountInfo.configured > 0 && !accounts.length;
+  const accountValue = accounts.some(a => String(a.account) === picked)
+    ? picked
+    : accounts[0]
+      ? String(accounts[0].account)
+      : "";
+  return {
+    accounts,
+    allBusy,
+    accountValue,
+    setAccount,
+    /** The pick as the `start` routes take it. */
+    account:
+      accountValue === "shared" || accountValue === "test"
+        ? (accountValue as "shared" | "test")
+        : Number(accountValue),
+    rate: accountInfo?.ratePerSec ?? 0,
+    /** Why nothing can render right now, or null. */
+    blocker: accountValue
+      ? null
+      : allBusy
+        ? "Waiting for a HeyGen account to free up."
+        : "No HeyGen account has a key — add one in Provider keys.",
+  };
+}
+
+export function HeygenAccountSelect({
+  pick,
+}: {
+  pick: ReturnType<typeof useHeygenAccountPick>;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-xs">HeyGen account</Label>
+      <Select
+        value={pick.accountValue}
+        onValueChange={pick.setAccount}
+        disabled={pick.accounts.length === 0}
+      >
+        <SelectTrigger className="h-9 w-full">
+          <SelectValue
+            placeholder={
+              pick.allBusy ? "No account free right now" : "No keys set"
+            }
+          />
+        </SelectTrigger>
+        <SelectContent>
+          {pick.accounts.map(a => (
+            <SelectItem key={String(a.account)} value={String(a.account)}>
+              <span>{a.label}</span>
+              <Badge
+                variant="outline"
+                className="border-success/30 bg-success/10 text-success"
+              >
+                Available
+              </Badge>
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -760,14 +787,6 @@ function HeygenTestResults({
               </div>
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 {batch.map(r => {
-                  const progress = heygenTestProgress(
-                    {
-                      ...r,
-                      phaseStartedAt: r.phaseStartedAt ?? r.updatedAt,
-                    },
-                    now,
-                    estimateTestSeconds(r.script)
-                  );
                   return (
                     <div
                       key={r.id}
@@ -788,74 +807,14 @@ function HeygenTestResults({
                           className="aspect-video w-full rounded bg-muted object-contain"
                         />
                       )}
-                      {progress ? (
-                        <div className="space-y-1.5">
-                          <div className="flex items-baseline justify-between gap-2 text-xs">
-                            <span className="font-medium">
-                              {progress.label}
-                            </span>
-                            <span className="tabular-nums text-muted-foreground">
-                              {progress.percent}%
-                            </span>
-                          </div>
-                          <Progress
-                            value={progress.percent}
-                            className="h-1.5"
-                            aria-label={`${progress.label}: ${progress.percent}%`}
-                          />
-                          <p className="text-[11px] text-muted-foreground">
-                            {progress.overdue
-                              ? "Taking longer than usual…"
-                              : `About ${formatEta(progress.etaSec)} left`}
-                          </p>
-                        </div>
-                      ) : (
-                        <div className="flex items-center justify-between gap-2">
-                          <Badge
-                            variant={
-                              r.status === "failed"
-                                ? "destructive"
-                                : r.status === "done"
-                                  ? "default"
-                                  : "secondary"
-                            }
-                          >
-                            {STATUS_LABEL[r.status] ?? r.status}
-                          </Badge>
-                          {r.status === "failed" ? (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-7 px-2 text-xs"
-                              disabled={retry.isPending}
-                              onClick={() =>
-                                retry.mutate({
-                                  batchId: r.batchId,
-                                  ids: [r.id],
-                                })
-                              }
-                            >
-                              <RotateCcw className="mr-1 h-3 w-3" />
-                              Retry
-                            </Button>
-                          ) : (
-                            r.costUsd > 0 && (
-                              <span className="text-[11px] text-muted-foreground">
-                                ${r.costUsd.toFixed(2)}
-                              </span>
-                            )
-                          )}
-                        </div>
-                      )}
-                      {r.error && (
-                        // Plain language on the card; the technical original on hover.
-                        <p
-                          className="break-words text-[11px] text-destructive"
-                          title={r.error}
-                        >
-                          {friendlyHeygenTestError(r.error)}
-                        </p>
-                      )}
+                      <HeygenClipStatus
+                        row={r}
+                        now={now}
+                        retrying={retry.isPending}
+                        onRetry={() =>
+                          retry.mutate({ batchId: r.batchId, ids: [r.id] })
+                        }
+                      />
                     </div>
                   );
                 })}
@@ -979,8 +938,101 @@ function HeygenTestResults({
   );
 }
 
+/**
+ * Under one clip: its progress bar while it runs, else its status with Retry (failed) or its
+ * cost (done), and a failure in plain language with the technical original on hover.
+ */
+export function HeygenClipStatus({
+  row: r,
+  now,
+  retrying,
+  onRetry,
+}: {
+  row: {
+    status: string;
+    videoId: string | null;
+    audioMs: number | null;
+    phaseStartedAt: Date | string | null;
+    updatedAt: Date | string;
+    script: string;
+    error: string | null;
+    costUsd: number;
+  };
+  now: number;
+  retrying: boolean;
+  onRetry: () => void;
+}) {
+  const progress = heygenTestProgress(
+    { ...r, phaseStartedAt: r.phaseStartedAt ?? r.updatedAt },
+    now,
+    estimateTestSeconds(r.script)
+  );
+  return (
+    <>
+      {progress ? (
+        <div className="space-y-1.5">
+          <div className="flex items-baseline justify-between gap-2 text-xs">
+            <span className="font-medium">{progress.label}</span>
+            <span className="tabular-nums text-muted-foreground">
+              {progress.percent}%
+            </span>
+          </div>
+          <Progress
+            value={progress.percent}
+            className="h-1.5"
+            aria-label={`${progress.label}: ${progress.percent}%`}
+          />
+          <p className="text-[11px] text-muted-foreground">
+            {progress.overdue
+              ? "Taking longer than usual…"
+              : `About ${formatEta(progress.etaSec)} left`}
+          </p>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between gap-2">
+          <Badge
+            variant={
+              r.status === "failed"
+                ? "destructive"
+                : r.status === "done"
+                  ? "default"
+                  : "secondary"
+            }
+          >
+            {STATUS_LABEL[r.status] ?? r.status}
+          </Badge>
+          {r.status === "failed" ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              disabled={retrying}
+              onClick={onRetry}
+            >
+              <RotateCcw className="mr-1 h-3 w-3" />
+              Retry
+            </Button>
+          ) : (
+            r.costUsd > 0 && (
+              <span className="text-[11px] text-muted-foreground">
+                ${r.costUsd.toFixed(2)}
+              </span>
+            )
+          )}
+        </div>
+      )}
+      {r.error && (
+        // Plain language on the card; the technical original on hover.
+        <p className="break-words text-[11px] text-destructive" title={r.error}>
+          {friendlyHeygenTestError(r.error)}
+        </p>
+      )}
+    </>
+  );
+}
+
 /** `Date.now()`, re-read every second while `active` — drives the progress bars between polls. */
-function useNow(active: boolean): number {
+export function useNow(active: boolean): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!active) return;
@@ -992,7 +1044,7 @@ function useNow(active: boolean): number {
 }
 
 /** "Sep 25, 2026 at 12:22 AM" — in the viewer's own timezone. */
-function formatRunDate(at: Date | string): string {
+export function formatRunDate(at: Date | string): string {
   const d = new Date(at);
   return `${d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })} at ${d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`;
 }
@@ -1007,7 +1059,7 @@ function formatEta(sec: number): string {
  * A run's name, renamable in place. Unnamed runs offer "Add a name"; Enter saves, Escape cancels,
  * and saving a blank name clears it.
  */
-function RunName({
+export function RunName({
   name,
   saving,
   onSave,

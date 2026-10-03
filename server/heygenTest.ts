@@ -16,6 +16,11 @@
  * is accepted, and `resumeHeygenTests` (run on every list read) polls an orphaned row's render
  * rather than submitting it again. A row cut off BEFORE HeyGen accepted it has nothing to poll
  * and is failed with a message saying so — the bench never re-spends unattended.
+ *
+ * The UPSELL VSL page (`shared/vsl.ts`) runs on this same engine: a row with `kind = "vsl"` is one
+ * clip for a channel's upsell page, carrying the book it thanks the buyer for. Only what a VSL
+ * adds is branched on `kind` (one photo, the book, where the files are kept); voicing, the 30 s
+ * cap, the render, resume, retry and the account rules are the one code path.
  */
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -28,6 +33,7 @@ import {
   slotToAccount,
   type HeygenTestAccount,
 } from "../shared/heygenTest";
+import { vslInputError, type HeygenTestKind } from "../shared/vsl";
 import type { LongformInputParams } from "../shared/types";
 import type { HeygenTest } from "../drizzle/schema";
 import {
@@ -174,8 +180,18 @@ export async function startHeygenTest(input: {
   imageUrls: string[];
   /** Optional label for the run; blank = none. */
   name?: string;
+  /** Which page started it; a VSL also names the book and renders exactly one photo. */
+  kind?: HeygenTestKind;
+  bookTitle?: string;
 }): Promise<{ batchId: string }> {
-  const bad = heygenTestInputError(input);
+  const kind = input.kind ?? "test";
+  const bad =
+    heygenTestInputError(input) ??
+    (kind === "vsl"
+      ? input.imageUrls.length > 1
+        ? "A VSL is one clip — pick one photo."
+        : vslInputError({ script: input.script, bookTitle: input.bookTitle ?? "" })
+      : null);
   if (bad) throw new HeygenTestInputError(bad);
   if (await isMockMode())
     throw new HeygenTestInputError(
@@ -216,6 +232,8 @@ export async function startHeygenTest(input: {
         imageUrl,
         script: input.script.trim(),
         runName: input.name?.trim() || null,
+        kind,
+        bookTitle: kind === "vsl" ? input.bookTitle!.trim() : null,
         status: "voicing" as const,
         phaseStartedAt: new Date(),
       }))
@@ -256,6 +274,18 @@ async function runBatch(rows: HeygenTest[]): Promise<void> {
   await Promise.all(
     rows.map(r => renderRow({ ...r, audioUrl, audioMs, status: "rendering" }))
   );
+}
+
+/**
+ * Where a run's files live on R2. A VSL is kept under its channel — it is that channel's asset,
+ * and a channel's clips can be listed straight off the bucket.
+ */
+export function heygenTestStorageDir(
+  row: Pick<HeygenTest, "kind" | "channelKey" | "batchId">
+): string {
+  return row.kind === "vsl"
+    ? `vsl/${row.channelKey}/${row.batchId}`
+    : `heygen-tests/${row.batchId}`;
 }
 
 /** Voice the script in the channel's voice, cut it to the cap, and host it on R2. */
@@ -322,7 +352,7 @@ async function voiceTestScript(
     const sec = await getMediaDuration(out);
     if (!(sec > 0)) throw new Error("the voiced audio came back empty");
     const { url } = await storagePut(
-      `heygen-tests/${row.batchId}/voice.mp3`,
+      `${heygenTestStorageDir(row)}/voice.mp3`,
       await readFile(out),
       "audio/mpeg"
     );
@@ -371,7 +401,7 @@ async function renderRow(row: HeygenTest): Promise<void> {
         `HeyGen test ${row.batchId} photo ${row.id}`
       );
       const { url: videoUrl } = await storagePut(
-        `heygen-tests/${row.batchId}/${row.id}.mp4`,
+        `${heygenTestStorageDir(row)}/${row.id}.mp4`,
         clip,
         "video/mp4"
       );

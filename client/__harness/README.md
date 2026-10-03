@@ -31,6 +31,13 @@ delete can be exercised without a database or a HeyGen credit. A fake EventSourc
 stands in for the live account stream: the "a film is rendering on" toggles push to it, so the
 available-only picker and the all-busy warning can be watched updating in real time.
 
+`vsl.html` → `vsl.tsx` mounts the Upsell VSL page's panel against a stubbed `vsl` router plus the
+`heygenTest` routes it shares (accounts, retry, rename, deleteBatch), the channel list, books and
+host photos. Hank has books and saved clips (one in use, one failed); Granny Mae has neither, so
+the per-channel list, the typed book title with the channel's books as suggestions, the
+one-in-use toggle and a photo upload ("Just for this VSL" / "Keep on channel", saved unticked) can
+be exercised without a HeyGen credit.
+
 `host-takes.html` → `hostTakes.tsx` mounts the host take picker (old vs new render of a regenerated
 host beat — "Use this take" runs the same `selectHostTake` the edit session does) and the Cost
 dialog's host lip-sync lines (first renders / automatic retries / regenerates / retry clicks / past

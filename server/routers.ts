@@ -236,6 +236,7 @@ import {
 import { notifyHeygenAccountsChanged } from "./heygenAccountEvents";
 import {
   deleteHeygenTestBatch,
+  pickVslBatch,
   listHeygenTestPage,
   listHeygenTestChannelKeys,
   listHeygenTestUserIds,
@@ -244,6 +245,7 @@ import {
   HEYGEN_TEST_MAX_NAME,
   HEYGEN_TEST_RUNS_PER_PAGE,
 } from "../shared/heygenTest";
+import { VSL_MAX_BOOK_TITLE } from "../shared/vsl";
 
 /** Decrypt a stored provider API key. */
 async function getProviderApiKey(provider: any): Promise<string> {
@@ -1128,6 +1130,93 @@ const heygenTestRouter = router({
     }),
 });
 
+// ─── Upsell VSL (the "Upsell VSL" page, /vsl) ───
+// A channel's host thanking a buyer on the upsell page (`shared/vsl.ts`). Runs on the HeyGen
+// test's engine as `kind = "vsl"`, so accounts, retry, rename and delete are the `heygenTest`
+// routes; only what a VSL adds is here. Same gate: every clip is a paid HeyGen render.
+const vslRouter = router({
+  /** One page of a channel's VSLs (all channels when none is given), newest first, priced. */
+  list: managerProcedure
+    .input(
+      z.object({
+        page: z.number().int().min(1).default(1),
+        channelKey: z.string().max(64).optional(),
+        search: z.string().max(200).optional(),
+      })
+    )
+    .query(async ({ input }) => {
+      await resumeHeygenTests().catch(err =>
+        console.warn(`[VSL] resume failed: ${err?.message}`)
+      );
+      const { page, ...filters } = input;
+      const [{ rows, totalRuns }, users] = await Promise.all([
+        listHeygenTestPage(
+          { ...filters, kind: "vsl" },
+          page,
+          HEYGEN_TEST_RUNS_PER_PAGE
+        ),
+        listUsers(),
+      ]);
+      const byId = new Map(users.map(u => [u.id, u]));
+      return {
+        rows: rows.map(r => ({
+          ...r,
+          userName: byId.get(r.userId)?.name ?? null,
+          userRole: byId.get(r.userId)?.role ?? null,
+          costUsd: heygenTestCostUsd(r),
+        })),
+        totalRuns,
+        page,
+        pageCount: Math.max(
+          1,
+          Math.ceil(totalRuns / HEYGEN_TEST_RUNS_PER_PAGE)
+        ),
+      };
+    }),
+
+  start: managerProcedure
+    .input(
+      z.object({
+        channelKey: z.string().min(1),
+        ttsVendor: z.enum(["sixtynine_labs", "minimax"]),
+        account: z.union([
+          z.number().int().min(0),
+          z.literal("shared"),
+          z.literal("test"),
+        ]),
+        /** The script as the host says it — the book's title already in it. */
+        script: z.string().max(5_000),
+        imageUrl: z.string().url().max(512),
+        bookTitle: z.string().max(VSL_MAX_BOOK_TITLE),
+        name: z.string().max(HEYGEN_TEST_MAX_NAME).optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { imageUrl, ...rest } = input;
+      try {
+        return await startHeygenTest({
+          ...rest,
+          imageUrls: [imageUrl],
+          kind: "vsl",
+          userId: ctx.user.id,
+        });
+      } catch (err) {
+        if (err instanceof HeygenTestInputError)
+          throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
+        throw err;
+      }
+    }),
+
+  /** Use this clip on the upsell page (one per channel and book), or stop using it. */
+  pick: managerProcedure
+    .input(z.object({ batchId: z.string().min(1).max(32) }))
+    .mutation(async ({ input }) => {
+      if (!(await pickVslBatch(input.batchId)))
+        throw new TRPCError({ code: "NOT_FOUND", message: "That VSL no longer exists." });
+      return { ok: true };
+    }),
+});
+
 /** How long a starting video waits for a photo's phone look before using the original. */
 const PHONE_LOOK_WAIT_MS = 150_000;
 
@@ -1191,6 +1280,12 @@ const channelHostPhotoRouter = router({
         id: z.number().optional(),
         channelKey: z.string().min(1),
         imageUrl: z.string().url().max(512),
+        /**
+         * New photos only: false saves it UNTICKED for the channel's videos (Admin's "Not used").
+         * The Upsell VSL page's "Keep on channel" sends it, so a photo kept for a VSL never
+         * becomes a camera angle in the next film behind anyone's back.
+         */
+        isSelected: z.boolean().optional(),
       })
     )
     .mutation(async ({ input }) => {
@@ -1213,6 +1308,11 @@ const channelHostPhotoRouter = router({
         ...data,
         sortOrder: existing.length,
         isActive: true,
+        // A channel's only photo stays ticked whatever was asked: videos need one angle, and
+        // the last ticked photo can never be unticked (`canDeselectHostPhoto`).
+        isSelected:
+          input.isSelected !== false ||
+          !existing.some(p => p.isActive && p.isSelected),
       });
       return { id };
     }),
@@ -4057,6 +4157,7 @@ export const appRouter = router({
   channelAsset: channelAssetRouter,
   channelHostPhoto: channelHostPhotoRouter,
   heygenTest: heygenTestRouter,
+  vsl: vslRouter,
 });
 
 export type AppRouter = typeof appRouter;

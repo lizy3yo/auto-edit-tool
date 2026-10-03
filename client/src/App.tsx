@@ -9,6 +9,7 @@ import LibraryPage from "./pages/LibraryPage";
 import ChannelsPage from "./pages/ChannelsPage";
 import AdminPage from "./pages/AdminPage";
 import HeygenTestPage from "./pages/HeygenTestPage";
+import VslPage from "./pages/VslPage";
 import { useAuth } from "./_core/hooks/useAuth";
 import { LoginScreen } from "./components/LoginScreen";
 import { CreditErrorPopup } from "./components/CreditErrorPopup";
@@ -25,6 +26,7 @@ import {
   Settings,
   Tv,
   Video,
+  Megaphone,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -57,6 +59,12 @@ const NAV = [
     href: "/heygen-test",
     label: "HeyGen test",
     icon: Video,
+    needs: "channels",
+  },
+  {
+    href: "/vsl",
+    label: "Upsell VSL",
+    icon: Megaphone,
     needs: "channels",
   },
   { href: "/admin", label: "Admin", icon: Settings, needs: "admin" },
@@ -346,6 +354,9 @@ function Router() {
         </Route>
         <Route path="/heygen-test">
           {canManageChannels ? <HeygenTestPage /> : <NotAuthorized />}
+        </Route>
+        <Route path="/vsl">
+          {canManageChannels ? <VslPage /> : <NotAuthorized />}
         </Route>
         <Route path="/admin">
           {canOpenAdmin ? <AdminPage /> : <NotAuthorized />}

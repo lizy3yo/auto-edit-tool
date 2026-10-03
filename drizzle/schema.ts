@@ -399,6 +399,16 @@ export const heygenTests = mysqlTable("heygen_tests", {
    * page's progress bar estimates from it — HeyGen reports a stage, never a percentage.
    */
   phaseStartedAt: timestamp("phaseStartedAt"),
+  /**
+   * Which page the row belongs to: "test" (the HeyGen test bench) or "vsl" (an upsell-page clip,
+   * `shared/vsl.ts`). Both run on the one engine in `server/heygenTest.ts`; each page lists only
+   * its own kind, while the account picker and the restart resume read every kind.
+   */
+  kind: varchar("kind", { length: 8 }).default("test").notNull(),
+  /** VSL only: the book the buyer just purchased, as the host says it. */
+  bookTitle: varchar("bookTitle", { length: 255 }),
+  /** VSL only: the clip chosen for the upsell page — at most one per channel and book. */
+  isPicked: boolean("isPicked").default(false).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });

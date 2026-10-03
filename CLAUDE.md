@@ -1458,6 +1458,33 @@ Express · tRPC · Drizzle · MySQL.
   Spend is priced per clip on the card (audio seconds × `COST_HEYGEN_PER_SEC`) and is NOT
   in the Spend tab, which totals per-job `costUsage`. Refused in mock mode. UI
   `client/src/pages/HeygenTestPage.tsx` + `client/src/components/HeygenTest.tsx`, harness `client/__harness/heygen-test.html`
+- **Upsell VSL** (`shared/vsl.ts`, `/vsl`, nav entry "Upsell VSL" beside "HeyGen test", same
+  gate, 2026-10-03) — the host's ≤30 s clip for the top of the upsell page, right after a
+  purchase: thanks for the book, then the bundle offer. It is NOT a second engine: a VSL is a
+  `heygen_tests` row with `kind = "vsl"` (migration 0015, plus `bookTitle` and `isPicked`), run by
+  `startHeygenTest` — voicing, the 30 s cut, the production lip-sync call, the steadier, resume,
+  retry, progress and the account rules are the test bench's one code path, and the page reuses
+  its pieces (`useHeygenAccountPick`/`HeygenAccountSelect`, `HeygenClipStatus`, `RunName`, exported
+  from `HeygenTest.tsx`) and its `accounts` / `retry` / `rename` / `deleteBatch` routes. What a VSL
+  adds: it is KEPT PER CHANNEL (the page is one channel's voice, photos, books and clips;
+  `vsl.list` filters `kind` + `channelKey`, the test page lists only `kind = "test"`, while the
+  account picker and `resumeHeygenTests` read every kind), files live under
+  `vsl/<channelKey>/<batchId>/` (`heygenTestStorageDir`), exactly one photo (the channel's primary
+  by default, in the look the channel is switched to), and the book the buyer bought — stored as
+  the TITLE the host says, not an id, because CTA books are often uploaded per video and are not
+  in `books`: the form is ONE dropdown (`BookPicker`): the channel's books with their covers, a search box,
+  and a `Use "…"` row for a typed title, which is used for that VSL only and never added to `books`. The
+  script is a template: `{book}` is filled with the title (`vslInputError` refuses a script still
+  holding it — the host would read it aloud); there is NO tip (a `{tip}` slot was built and
+  removed the same day, the operator's call); a channel's next VSL starts from its last one's
+  wording (`vslTemplateFrom`). A NEW PHOTO can be uploaded on the page and it asks first: "Just for
+  this VSL" (component state, phone look via `heygenTest.phoneLook`, never saved) or "Keep on
+  channel" (`channelHostPhoto.save` with `isSelected: false` — in the library for the next VSL but
+  UNTICKED, so it never becomes a camera angle in the channel's videos behind anyone's back; a
+  channel's only photo is saved ticked regardless). Generate waits for a photo's phone look. "Use this
+  one" (`vsl.pick` → `planVslPick`, pure) keeps ONE clip in use per channel and book and is a
+  toggle; it is a label for people — nothing reads it yet, the upsell page is given the clip by
+  Download MP4 / Copy link. Not in the Spend tab, like tests. Harness: `client/__harness/vsl.html`
 - `server/costMeter.ts` + `server/pricing.ts` — per-video spend. Every billable adapter calls
   `recordUsage`; an `AsyncLocalStorage` set inside `withJobLock` attributes it, so the six
   spending entry points (pipeline, resume, retry-assembly, retry-failed, regen scene/scenes)

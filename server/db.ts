@@ -12,6 +12,7 @@ import {
 } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { notifyHeygenAccountsChanged } from "./heygenAccountEvents";
+import { planVslPick, type HeygenTestKind } from "../shared/vsl";
 import { createPool } from "mysql2";
 import {
   providerConfigs,
@@ -1073,7 +1074,9 @@ export async function getHeygenTestBatch(
 }
 
 export type HeygenTestFilters = {
-  /** Matches the run name or the script text. */
+  /** Which page's rows: the test bench's (the default) or the upsell VSLs'. */
+  kind?: HeygenTestKind;
+  /** Matches the run name, the script text or (a VSL's) book title. */
   search?: string;
   channelKey?: string;
   userId?: number;
@@ -1093,14 +1096,17 @@ export async function listHeygenTestPage(
   const db = await getDb();
   if (!db) return { rows: [], totalRuns: 0 };
 
-  const where: (SQL | undefined)[] = [];
+  const where: (SQL | undefined)[] = [
+    eq(heygenTests.kind, filters.kind ?? "test"),
+  ];
   const search = filters.search?.trim();
   if (search) {
     const like = `%${search.replace(/[\\%_]/g, c => `\\${c}`)}%`;
     where.push(
       or(
         sql`${heygenTests.runName} like ${like}`,
-        sql`${heygenTests.script} like ${like}`
+        sql`${heygenTests.script} like ${like}`,
+        sql`${heygenTests.bookTitle} like ${like}`
       )
     );
   }
@@ -1113,7 +1119,7 @@ export async function listHeygenTestPage(
     db
       .select({ batchId: heygenTests.batchId, lastId })
       .from(heygenTests)
-      .where(where.length ? and(...where) : undefined)
+      .where(and(...where))
       .groupBy(heygenTests.batchId);
 
   const [{ n }] = await db
@@ -1144,7 +1150,8 @@ export async function listHeygenTestChannelKeys(): Promise<string[]> {
   if (!db) return [];
   const rows = await db
     .selectDistinct({ channelKey: heygenTests.channelKey })
-    .from(heygenTests);
+    .from(heygenTests)
+    .where(eq(heygenTests.kind, "test"));
   return rows.map(r => r.channelKey);
 }
 
@@ -1154,7 +1161,8 @@ export async function listHeygenTestUserIds(): Promise<number[]> {
   if (!db) return [];
   const rows = await db
     .selectDistinct({ userId: heygenTests.userId })
-    .from(heygenTests);
+    .from(heygenTests)
+    .where(eq(heygenTests.kind, "test"));
   return rows.map(r => r.userId);
 }
 
@@ -1173,6 +1181,48 @@ export async function deleteHeygenTestBatch(batchId: string): Promise<void> {
   if (!db) return;
   await db.delete(heygenTests).where(eq(heygenTests.batchId, batchId));
   notifyHeygenAccountsChanged();
+}
+
+/**
+ * Make a run the clip the upsell page uses, or stop using it — `planVslPick` decides which rows
+ * change (one clip per channel and book). Only `kind = "vsl"` rows are read or written. False
+ * when the run is not a VSL.
+ */
+export async function pickVslBatch(batchId: string): Promise<boolean> {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const [target] = await db
+    .select({ channelKey: heygenTests.channelKey })
+    .from(heygenTests)
+    .where(and(eq(heygenTests.batchId, batchId), eq(heygenTests.kind, "vsl")))
+    .limit(1);
+  if (!target) return false;
+  const rows = await db
+    .select({
+      batchId: heygenTests.batchId,
+      channelKey: heygenTests.channelKey,
+      bookTitle: heygenTests.bookTitle,
+      isPicked: heygenTests.isPicked,
+    })
+    .from(heygenTests)
+    .where(
+      and(
+        eq(heygenTests.kind, "vsl"),
+        eq(heygenTests.channelKey, target.channelKey)
+      )
+    );
+  const { pick, unpick } = planVslPick(rows, batchId);
+  if (unpick.length)
+    await db
+      .update(heygenTests)
+      .set({ isPicked: false })
+      .where(inArray(heygenTests.batchId, unpick));
+  if (pick.length)
+    await db
+      .update(heygenTests)
+      .set({ isPicked: true })
+      .where(inArray(heygenTests.batchId, pick));
+  return true;
 }
 
 // ─── Sales ───
