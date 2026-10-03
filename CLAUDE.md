@@ -1668,6 +1668,22 @@ Always 16:9. Fire-and-forget; progress persisted to the job row and polled by th
   X of Y", and a host Regenerate once they are USED (`hostSpend.reached`, not only when this one
   render would cross) opens a warning box for every role — "Regenerate anyway" for admin/manager,
   "Make b-roll" for all; a server `overLimit` answer opens the same box instead of a toast.
+- **A host photo HeyGen refuses stops at the first refusal** (`shared/hostRedo.ts`,
+  `hostPhotoRefusal` in `server/hostLaneFailure.ts`, 2026-10-03). HeyGen's content check refused a
+  phone-look photo (`400 avatar_not_usable`) and it was treated as each beat's own failure: every
+  host beat spent its retries on a photo that could never pass, ~25 check-ins were made b-roll
+  (paid pictures, thrown away later), the start/CTAs/end were left "Host needed", and the card
+  carried 30 warnings for one cause. Now it takes the account-failure road (`HostAccountError`
+  with `photoUrl`): one call, nothing on the ledger, no b-roll, `scene.hostWaiting.photo` ("Photo
+  refused"), ONE job warning per photo, and only beats on THAT photo wait (`hostLanePause(jobId,
+  scene.lipsyncImageUrl)`) — another angle keeps rendering. The film never changes photo by itself
+  (the operator's call). "Redo host clips" (`redoHostClips`, route of the same name, any role that
+  may retry, behind a cost confirm from `pollJob.hostRedo`) is the way forward: it re-reads the
+  channel's photos as they are NOW (`channelHostPhotoUrls`, shared with generate — the film's own
+  snapshot is the refused photo, so "Retry failed scenes" alone would resend it), takes back the
+  waiting and "Host needed" beats and the check-ins already made b-roll for this reason
+  (`prepareHostRedo`, full-frame), and runs the ordinary retry pass. Only refusals of the photo
+  are taken — never a beat the host limit, another failure or a person made b-roll.
 - **A black clip is refused** (`isBlankClip`/`judgeBlankFrames` in videoAssembly, 2026-09-25). A
   hosted film carried a HeyGen take that was black end to end on a host beat, and nothing looked.
   Every host-lane clip is sampled twice a second at 64×36 before it is stored; ≥85% frames dark

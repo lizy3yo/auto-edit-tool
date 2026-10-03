@@ -15,15 +15,31 @@
  * CAP refusals (`HostRenderCapError`) — the beat has used the renders it is allowed. Thrown by
  * the render gate before anything is submitted.
  */
+import { isHostPhotoRefusal } from "../shared/hostRedo";
 
-/** The job's HeyGen account failed; the reason is operator copy, `raw` the provider's words. */
+/**
+ * The job's HeyGen account failed; the reason is operator copy, `raw` the provider's words.
+ *
+ * `photoUrl` set ⇒ it is not the account at all but the HOST PHOTO HeyGen refuses to animate
+ * (`hostPhotoRefusal`). Same class because it is the same kind of failure — every beat on that
+ * photo fails the same way, no retry can change it, and the beat is not at fault — so it takes
+ * the same road: no retries spent, no b-roll made, the beat waits. It pauses only the beats on
+ * THAT photo; another angle HeyGen accepts keeps rendering.
+ */
 export class HostAccountError extends Error {
   constructor(
     readonly reason: string,
-    readonly raw: string
+    readonly raw: string,
+    readonly photoUrl?: string
   ) {
-    super(`HeyGen account problem — ${reason}`);
+    super(
+      photoUrl ? `HeyGen ${reason}` : `HeyGen account problem — ${reason}`
+    );
     this.name = "HostAccountError";
+  }
+  /** True when HeyGen refused the photo, not the account. */
+  get photo(): boolean {
+    return !!this.photoUrl;
   }
 }
 
@@ -84,20 +100,58 @@ export function hostAccountFailure(raw: string | undefined): string | null {
   return null;
 }
 
+/** Operator copy for a photo HeyGen will not animate. */
+export const HOST_PHOTO_REFUSED = "refused the host photo (its content check)";
+
+/**
+ * Whether HeyGen refused the PHOTO itself — its content moderation will not animate this image,
+ * so every beat on it fails the same way however often it is asked. A film (2026-10-03) whose
+ * phone-look photo was refused spent every host beat's retries on it, turned 25 check-ins into
+ * pictures it then had to throw away, and wrote 30 warnings for one cause. Deliberately narrow:
+ * "no face detected" and the like stay the render's own failure. Pure; exported for tests.
+ */
+export const hostPhotoRefusal = (raw: string | undefined): boolean =>
+  isHostPhotoRefusal(raw);
+
 /** Jobs whose host lane is paused on an account failure, with the reason. In-memory by design. */
 const paused = new Map<number, HostAccountError>();
+/** Per job, the photos HeyGen refused — only beats on one of these wait. In-memory too. */
+const refusedPhotos = new Map<number, Map<string, HostAccountError>>();
 
-/** Record the pause (first failure wins — it is the one the operator needs to read). */
-export function pauseHostLane(jobId: number, err: HostAccountError): void {
-  if (!paused.has(jobId)) paused.set(jobId, err);
+/**
+ * Record the pause (first failure wins — it is the one the operator needs to read). Returns
+ * whether this is NEWS: the first refusal of this photo, so the caller warns once per photo and
+ * not once per beat.
+ */
+export function pauseHostLane(jobId: number, err: HostAccountError): boolean {
+  if (err.photoUrl) {
+    const byPhoto = refusedPhotos.get(jobId) ?? new Map();
+    refusedPhotos.set(jobId, byPhoto);
+    if (byPhoto.has(err.photoUrl)) return false;
+    byPhoto.set(err.photoUrl, err);
+    return true;
+  }
+  if (paused.has(jobId)) return false;
+  paused.set(jobId, err);
+  return true;
 }
 
-/** The pause in force for this job, if any. */
-export function hostLanePause(jobId: number): HostAccountError | undefined {
-  return paused.get(jobId);
+/**
+ * The pause in force for this job, if any: the account's, else — for a beat rendering from
+ * `photoUrl` — that photo's refusal.
+ */
+export function hostLanePause(
+  jobId: number,
+  photoUrl?: string
+): HostAccountError | undefined {
+  return (
+    paused.get(jobId) ??
+    (photoUrl ? refusedPhotos.get(jobId)?.get(photoUrl) : undefined)
+  );
 }
 
 /** Lift the pause — a person clicked to render again, so they believe the account is fixed. */
 export function resumeHostLane(jobId: number): void {
   paused.delete(jobId);
+  refusedPhotos.delete(jobId);
 }

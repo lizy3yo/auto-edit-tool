@@ -987,7 +987,15 @@ export interface StoryboardScene {
    * nothing to do with the beat itself, so it keeps every retry and is not made b-roll. Cleared
    * on the next render attempt ("Retry failed scenes" once the account is fixed).
    */
-  hostWaiting?: { reason: string; at: string };
+  hostWaiting?: {
+    reason: string;
+    at: string;
+    /**
+     * HeyGen refused the host PHOTO (content check), not the account: a person changes the
+     * photo, then "Redo host clips" (`shared/hostRedo.ts`).
+     */
+    photo?: boolean;
+  };
   /**
    * How many seconds SHORTER than its narration the stored clip is. A finished render is never
    * thrown away for being short — assembly holds its last frame for the difference, exactly as

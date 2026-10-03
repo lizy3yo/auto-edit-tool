@@ -980,6 +980,20 @@ export default function LongformJobSlot({
       onError: err => toast.error(err.message),
     });
 
+  // "Redo host clips" (`shared/hostRedo.ts`): the host beats HeyGen refused for the photo,
+  // rendered again from the channel's photos as they are now. Always behind a cost confirm.
+  const [redoHostOpen, setRedoHostOpen] = useState(false);
+  const redoHostClipsMutation = trpc.longformVideo.redoHostClips.useMutation({
+    onSuccess: data => {
+      toast.success(
+        `Redoing ${data.scenes} host clip${data.scenes === 1 ? "" : "s"} with the channel's current photo...`
+      );
+      watchJob();
+      if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
+    },
+    onError: err => toast.error(err.message),
+  });
+
   const retryNarrationMutation = trpc.longformVideo.retryNarration.useMutation(
     {
       onSuccess: data => {
@@ -1706,6 +1720,23 @@ export default function LongformJobSlot({
     </Button>
   ) : null;
 
+  // Host beats HeyGen refused because of the photo. Offered only on a settled job: the redo
+  // swaps the film's photos, which must not happen under a running pass.
+  const hostRedo = job?.hostRedo;
+  const redoHostClipsButton =
+    hostRedo && hostRedo.scenes.length > 0 && job?.status !== "processing" ? (
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => setRedoHostOpen(true)}
+        disabled={redoHostClipsMutation.isPending}
+        title="HeyGen refused the host photo on these scenes. Change the photo on the channel first, then redo them."
+      >
+        <RefreshCw className="mr-2 h-4 w-4" />
+        Redo host clips ({hostRedo.scenes.length})
+      </Button>
+    ) : null;
+
   // The displayed job id is kept in localStorage so a finished job stays on
   // screen across refreshes — it's only replaced when a new job is generated,
   // or cleared on delete/cancel. (Don't clear it on completion.)
@@ -2413,6 +2444,7 @@ export default function LongformJobSlot({
             )}
 
             {retryFailedScenesButton}
+            {redoHostClipsButton}
 
             {/* Available whenever the job isn't actively rendering and has SOME clips to work
                 with — not tied to "completed", so it also covers a failed/cancelled-mid-assembly
@@ -3216,9 +3248,15 @@ export default function LongformJobSlot({
                             <Badge
                               variant="outline"
                               className="text-[10px] py-0 text-warning border-warning/40"
-                              title={`The HeyGen account failed (${scene.hostWaiting.reason}), not this scene. None of its retries were used. Fix the account, then "Retry failed scenes".`}
+                              title={
+                                scene.hostWaiting.photo
+                                  ? `HeyGen refused the host photo (its content check), not this scene. Nothing was charged and none of its retries were used. Change the photo on the channel, then "Redo host clips".`
+                                  : `The HeyGen account failed (${scene.hostWaiting.reason}), not this scene. None of its retries were used. Fix the account, then "Retry failed scenes".`
+                              }
                             >
-                              Waiting for HeyGen
+                              {scene.hostWaiting.photo
+                                ? "Photo refused"
+                                : "Waiting for HeyGen"}
                             </Badge>
                           )}
                           {scene.hostPresent &&
@@ -3899,6 +3937,43 @@ export default function LongformJobSlot({
           </div>
         </div>
       )}
+
+      {/* Redo host clips */}
+      <AlertDialog open={redoHostOpen} onOpenChange={setRedoHostOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Redo {hostRedo?.scenes.length ?? 0} host clip
+              {hostRedo?.scenes.length === 1 ? "" : "s"}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              HeyGen refused the host photo on these scenes. They render again
+              with the photo this channel has set right now, about{" "}
+              {formatMinSec(hostRedo?.sec ?? 0)} of host, roughly $
+              {(hostRedo?.usd ?? 0).toFixed(2)} at list price.
+              {hostRedo?.fromBroll
+                ? ` ${hostRedo.fromBroll} of them were turned into pictures and become host scenes again.`
+                : ""}{" "}
+              If the photo has not changed, HeyGen will most likely refuse it
+              again. That costs nothing, and the film stops at the first
+              refusal.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setRedoHostOpen(false);
+                if (!jobId) return;
+                armNotifications();
+                redoHostClipsMutation.mutate({ jobId });
+              }}
+            >
+              Redo host clips
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Make b-roll */}
       <AlertDialog

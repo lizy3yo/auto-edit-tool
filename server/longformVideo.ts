@@ -186,11 +186,14 @@ import {
   isHostSpendLimitError,
   reserveHostSpend,
 } from "./hostSpend";
+import { hostRedoKind, isHostPhotoRefusal } from "../shared/hostRedo";
 import {
+  HOST_PHOTO_REFUSED,
   HostAccountError,
   HostRenderCapError,
   hostAccountFailure,
   hostLanePause,
+  hostPhotoRefusal,
   isHostAccountError,
   isHostRenderCapError,
   pauseHostLane,
@@ -467,6 +470,12 @@ const _jobWarnings = new Map<number, string[]>();
 
 export function clearJobWarnings(jobId: number): void {
   _jobWarnings.delete(jobId);
+}
+
+/** Drop the warnings a later pass has made untrue (the redo of host clips a photo refused). */
+function dropJobWarnings(jobId: number, gone: (message: string) => boolean) {
+  const list = _jobWarnings.get(jobId);
+  if (list) _jobWarnings.set(jobId, list.filter(m => !gone(m)));
 }
 
 export function appendJobWarning(jobId: number, message: string): void {
@@ -10415,7 +10424,7 @@ export async function runChunkTasks(
             if (isHostLane(provider)) {
               // The job's HeyGen account already failed: nothing this beat could do would
               // change that, so do not call HeyGen at all.
-              const pause = hostLanePause(jobId);
+              const pause = hostLanePause(jobId, scene.lipsyncImageUrl);
               if (pause) throw pause;
               // The per-beat allowance (`shared/hostRegenLimit.ts`): the first render plus one
               // automatic retry (two on the start/CTAs/end), and one operator regenerate.
@@ -10442,6 +10451,18 @@ export async function runChunkTasks(
                     sub.error ?? account
                   );
                   pauseHostLane(jobId, err);
+                  throw err;
+                }
+                // HeyGen will not animate this PHOTO: asking again changes nothing, so the
+                // beats on it wait for a person instead of spending retries or going b-roll.
+                if (isHostLane(provider) && hostPhotoRefusal(sub.error)) {
+                  const err = new HostAccountError(
+                    HOST_PHOTO_REFUSED,
+                    sub.error ?? HOST_PHOTO_REFUSED,
+                    scene.lipsyncImageUrl ?? "unknown"
+                  );
+                  if (pauseHostLane(jobId, err))
+                    appendJobWarning(jobId, hostPhotoRefusedWarning(scene));
                   throw err;
                 }
                 if (attempt === 1)
@@ -10521,6 +10542,19 @@ export async function runChunkTasks(
       scene.renderTaskIds = undefined;
       const err = new HostAccountError(account, failed.error ?? account);
       pauseHostLane(jobId, err);
+      await persist();
+      throw err;
+    }
+    // Accepted, then refused for the PHOTO (moderation can run after the submit): same road.
+    if (isHostLane(provider) && hostPhotoRefusal(failed.error)) {
+      scene.renderTaskIds = undefined;
+      const err = new HostAccountError(
+        HOST_PHOTO_REFUSED,
+        failed.error ?? HOST_PHOTO_REFUSED,
+        scene.lipsyncImageUrl ?? "unknown"
+      );
+      if (pauseHostLane(jobId, err))
+        appendJobWarning(jobId, hostPhotoRefusedWarning(scene));
       await persist();
       throw err;
     }
@@ -12411,9 +12445,13 @@ async function settleFailedHostScene(
   scene.nextSubmitOverride = undefined;
   scene.submitPastLimit = undefined;
   if (isHostAccountError(e)) {
-    scene.hostWaiting = { reason: e.reason, at };
+    scene.hostWaiting = e.photo
+      ? { reason: e.reason, at, photo: true }
+      : { reason: e.reason, at };
     scene.sceneStatus = "failed";
-    scene.error = `Waiting for HeyGen — ${e.reason}`;
+    scene.error = e.photo
+      ? `HeyGen ${e.reason}`
+      : `Waiting for HeyGen — ${e.reason}`;
     console.warn(
       `[Longform ${jobId}] scene ${scene.index} waiting for HeyGen: ${e.raw}`
     );
@@ -15782,6 +15820,17 @@ export function describeUnassemblableScenes(
     group.map(s => s.index).join(", ");
 
   const parts: string[] = [];
+  // HeyGen refused the PHOTO: its own line, because the way forward is the photo, not the
+  // account — and one line for the film, not one warning per beat.
+  const refused = waiting.filter(s => s.hostWaiting!.photo);
+  if (refused.length > 0) {
+    waiting.splice(0, waiting.length, ...waiting.filter(s => !s.hostWaiting!.photo));
+    parts.push(
+      `HeyGen refused the host photo (its content check). ${refused.length} host scene(s) ` +
+        `are waiting (${indices(refused)}); nothing was charged, no retries were used and ` +
+        `none were made b-roll. Change the photo, then Redo host clips`
+    );
+  }
   if (waiting.length > 0) {
     parts.push(
       `Waiting for HeyGen — ${waiting[0].hostWaiting!.reason}. ${waiting.length} host ` +
@@ -19600,4 +19649,84 @@ async function retryFailedScenesLocked(
     }).catch(onFailedStatusWriteError(jobId));
     throw err;
   }
+}
+
+/** The one job warning a refused host photo gets (per photo, not per beat). */
+function hostPhotoRefusedWarning(scene: StoryboardScene): string {
+  return (
+    `HeyGen refused the host photo (its content check) — first on scene ${scene.index}` +
+    `${scene.hostShot ? `, angle ${scene.hostShot + 1}` : ""}. The host beats on it are ` +
+    `waiting: nothing was charged, no retries were used and none were made b-roll. Change ` +
+    `the photo, then Redo host clips.`
+  );
+}
+
+/**
+ * The pure half of "Redo host clips" (`shared/hostRedo.ts`): every beat HeyGen refused for the
+ * PHOTO is a clip-less host beat again, ready for the retry pass — the waiting and "Host needed"
+ * ones as they are, the check-ins that were made b-roll turned back (full-frame; the picture
+ * they were is kept on `brollVisual`, so "Make b-roll" still goes back). Returns the indices it
+ * took. Mutates in place; exported for tests.
+ */
+export function prepareHostRedo(
+  scenes: StoryboardScene[],
+  angleCount: number
+): number[] {
+  const taken: number[] = [];
+  for (const s of scenes) {
+    const kind = hostRedoKind(s);
+    if (!kind) continue;
+    if (kind === "broll" && !convertBrollSceneToHost(scenes, s, false, angleCount))
+      continue;
+    s.autoBroll = undefined;
+    s.hostNeeded = undefined;
+    s.hostWaiting = undefined;
+    // The refused photo: the next render reads the film's photos as they are now.
+    s.lipsyncImageUrl = undefined;
+    s.renderTaskIds = undefined;
+    s.sceneStatus = "pending";
+    s.error = undefined;
+    taken.push(s.index);
+  }
+  return taken;
+}
+
+/**
+ * "Redo host clips": render again every host beat HeyGen refused because of the host photo, from
+ * the photos the CHANNEL has now (`faces`, resolved by the router the way generate does — the
+ * film's own snapshot is the refused photo). One pass under the job lock: swap the film's
+ * photos, take the beats back (`prepareHostRedo`), then the ordinary retry pass renders them —
+ * same lanes, limits and ledger as "Retry failed scenes". HeyGen accepted nothing for a refusal,
+ * so no beat's allowance and none of the host minutes were spent on it. A photo refused again
+ * pauses again at the first beat. Returns how many beats it took.
+ */
+export async function redoHostClips(
+  jobId: number,
+  faces: string[],
+  by?: SubmitActor
+): Promise<number> {
+  return withJobLock(jobId, async () => {
+    const job = await getLongformVideoJobById(jobId);
+    if (!job) throw new Error("Job not found");
+    const params = job.inputParams as LongformInputParams;
+    const scenes = (job.storyboard as StoryboardScene[]) || [];
+    if (faces.length) {
+      params.faceImageUrls = faces;
+      params.faceImageUrl = faces[0];
+      params.faceImageUrl2 = faces[1];
+    }
+    const taken = prepareHostRedo(scenes, hostFaces(params).length);
+    if (!taken.length) return 0;
+    dropJobWarnings(jobId, isHostPhotoRefusal);
+    console.log(
+      `[Longform ${jobId}] redo host clips: ${taken.length} beat(s) (${taken.join(", ")}) ` +
+        `from ${hostFaces(params).length} photo(s) as the channel has them now`
+    );
+    await updateLongformVideoJob(jobId, {
+      inputParams: params,
+      storyboard: scenes,
+    });
+    await retryFailedScenesLocked(jobId, by);
+    return taken.length;
+  });
 }

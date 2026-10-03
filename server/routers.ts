@@ -104,6 +104,7 @@ import {
   selectSceneTake as selectLongformSceneTake,
   revertSceneTimingEdits as revertLongformSceneTiming,
   retryFailedScenes as retryLongformFailedScenes,
+  redoHostClips as redoLongformHostClips,
   repairJobTimeline,
   isRetryQueued,
   sceneIsAssemblable,
@@ -197,6 +198,7 @@ import {
 } from "../shared/hostRegenLimit";
 import { hostSpendRefusal } from "./hostSpend";
 import { summarizeHostSpend } from "../shared/hostSpend";
+import { planHostRedo } from "../shared/hostRedo";
 import { heygenSecondsIn } from "./costMeter";
 import type { UsageLine } from "./pricing";
 import { RATES } from "./pricing";
@@ -1129,6 +1131,36 @@ const heygenTestRouter = router({
 /** How long a starting video waits for a photo's phone look before using the original. */
 const PHONE_LOOK_WAIT_MS = 150_000;
 
+/**
+ * The photos a channel shoots its host from RIGHT NOW, primary first: the library narrowed to
+ * the ticked angles (`hostPhotoIds` from the form, else the channel's saved ticks), each in the
+ * look it is switched to. Each photo renders from its PHONE LOOK unless switched to the original
+ * (shared/hostPhotoLook.ts); one whose phone look is still being made gets a short wait, then
+ * the original — a render is never held up by it. Empty when the channel has no library.
+ * Shared by generate and "Redo host clips", so the two cannot read the channel differently.
+ */
+async function channelHostPhotoUrls(
+  channelKey: string,
+  hostPhotoIds?: number[]
+): Promise<string[]> {
+  const libraryPhotos = await getChannelHostPhotos(channelKey, true);
+  const wanted = selectedHostPhotos(libraryPhotos, hostPhotoIds);
+  const looked = await Promise.all(
+    wanted.map(async p => {
+      if (p.useOriginal || p.phoneImageUrl || p.phoneLookError) return p;
+      const phone = await phoneLookWithin(p, PHONE_LOOK_WAIT_MS);
+      if (!phone)
+        console.warn(
+          `[longform] host photo ${p.id}: phone look not ready — rendering the original`
+        );
+      return { ...p, phoneImageUrl: phone };
+    })
+  );
+  return looked
+    .map(p => hostPhotoUrl(p))
+    .filter((u): u is string => !!u);
+}
+
 const channelHostPhotoRouter = router({
   /** Ordered, primary first. `activeOnly` for the generate picker; Admin sees removed ones too. */
   list: approvedProcedure
@@ -2052,26 +2084,14 @@ const longformVideoRouter = router({
       // form sends the ids it shows as ticked; with none (an older client, a script) the
       // channel's SAVED ticks apply, which is the same choice every operator sees in the picker.
       // See `selectedHostPhotos` for the fallbacks (unknown ids cost an angle, not the render).
-      const libraryPhotos = await getChannelHostPhotos(input.channelKey, true);
-      const wanted = selectedHostPhotos(libraryPhotos, input.hostPhotoIds);
-      // Each photo renders from its PHONE LOOK unless switched to the original
-      // (shared/hostPhotoLook.ts). One whose phone look is still being made gets a short wait,
-      // then the original — a render is never held up by it.
-      const looked = await Promise.all(
-        wanted.map(async p => {
-          if (p.useOriginal || p.phoneImageUrl || p.phoneLookError) return p;
-          const phone = await phoneLookWithin(p, PHONE_LOOK_WAIT_MS);
-          if (!phone)
-            console.warn(
-              `[longform] host photo ${p.id}: phone look not ready — rendering the original`
-            );
-          return { ...p, phoneImageUrl: phone };
-        })
+      const libraryUrls = await channelHostPhotoUrls(
+        input.channelKey,
+        input.hostPhotoIds
       );
       // Legacy fallback: a channel whose library is somehow empty (created before migration
       // 0008 and never edited since) still renders from its original columns.
-      const selectedUrls = looked.length
-        ? looked.map(p => hostPhotoUrl(p))
+      const selectedUrls = libraryUrls.length
+        ? libraryUrls
         : [channelConfig.hostPhotoUrl, channelConfig.hostPhotoUrl2].filter(
             (u): u is string => !!u
           );
@@ -2419,6 +2439,12 @@ const longformVideoRouter = router({
           Array.isArray(rawScenes) ? rawScenes : [],
           heygenSecondsIn(job.costUsage as UsageLine[] | null)
         ),
+        // Host beats HeyGen refused for the PHOTO, which "Redo host clips" renders again
+        // (`shared/hostRedo.ts`) — with the list-price cost the confirm shows.
+        hostRedo: (() => {
+          const plan = planHostRedo(Array.isArray(rawScenes) ? rawScenes : []);
+          return { ...plan, usd: plan.sec * RATES.heygenPerSecond };
+        })(),
       };
     }),
 
@@ -3538,6 +3564,61 @@ const longformVideoRouter = router({
         );
       });
       return { ok: true, queued, already: false, revoicing: false };
+    }),
+
+  /**
+   * "Redo host clips" (`shared/hostRedo.ts`): render again every host beat HeyGen refused
+   * because of the host photo, from the photos the channel has NOW. Open to whoever may retry
+   * the job — it is the retry pass with the film's photos refreshed first, inside the same
+   * per-beat allowance and host minutes. Never runs on its own: a person clicks it after
+   * changing the photo.
+   */
+  redoHostClips: approvedProcedure
+    .input(z.object({ jobId: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      const job = await getLongformVideoJobById(input.jobId);
+      if (
+        !job ||
+        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
+      ) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
+      }
+      if (job.status === "processing") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "This video is still working — redo the host clips when it stops",
+        });
+      }
+      const plan = planHostRedo(job.storyboard as StoryboardScene[] | null);
+      if (!plan.scenes.length) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "No host clips were refused for the photo on this video",
+        });
+      }
+      const params = job.inputParams as LongformInputParams;
+      // The channel's photos as they are set now, rehosted like generate does. The primary is
+      // required; a further angle that fails to rehost drops out. A channel with no library
+      // keeps the film's own photos.
+      const urls = await channelHostPhotoUrls(params.channelKey);
+      const faces: string[] = [];
+      if (urls[0]) faces.push(await rehostToR2(urls[0], "face"));
+      for (const u of urls.slice(1)) {
+        const hosted = await rehostToR2(u, "face").catch(err => {
+          console.warn(
+            `[longform] host photo rehost failed, rendering without it: ${u}`,
+            err
+          );
+          return undefined;
+        });
+        if (hosted) faces.push(hosted);
+      }
+      redoLongformHostClips(input.jobId, faces, clickerOf(ctx.user)).catch(
+        err => {
+          console.error(`[Longform ${input.jobId}] redoHostClips error:`, err);
+        }
+      );
+      return { ok: true, scenes: plan.scenes.length };
     }),
 
   /**
