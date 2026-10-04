@@ -15,7 +15,8 @@ import { refreshForUnknownModel } from "./claudePrices";
  */
 export async function meterClaudeCall(
   model: string,
-  usage: Anthropic.Usage
+  usage: Anthropic.Usage,
+  step?: string
 ): Promise<void> {
   // Cache writes price by TTL (5 min 1.25x, 1 h 2x). The breakdown is on `cache_creation`;
   // without it every write is the 5-minute kind, which is all this file asks for.
@@ -40,6 +41,7 @@ export async function meterClaudeCall(
     lane: "llm",
     provider: "anthropic",
     model,
+    ...(step ? { step } : {}),
     calls: 1,
     quantity: 0,
     inputTokens: tokens.inputTokens,
@@ -61,10 +63,11 @@ export async function meterClaudeCall(
  */
 function meterWhenAnswered(
   model: string,
-  request: Promise<Anthropic.Message>
+  request: Promise<Anthropic.Message>,
+  step?: string
 ): void {
   request.then(
-    r => meterClaudeCall(model, r.usage).catch(() => {}),
+    r => meterClaudeCall(model, r.usage, step).catch(() => {}),
     () => {} // a failed request is not billed; the caller handles the error
   );
 }
@@ -91,6 +94,15 @@ export interface ClaudeImage {
 
 export interface ClaudeParams {
   systemPrompt?: string;
+  /**
+   * The part of the system prompt that CHANGES from call to call, sent right after
+   * `systemPrompt` and outside the cache. Anthropic only reuses a cached prompt that matches
+   * byte for byte, so a fixed rulebook with per-call questions glued on was re-written to the
+   * cache (1.25x) on every call and almost never read back (0.1x): on Oct 2 that was ~65% of the
+   * careful picture checker's bill. Claude reads exactly the same text either way.
+   * `CLAUDE_SPLIT_SYSTEM_CACHE=0` sends the two as one block again.
+   */
+  systemSuffix?: string;
   userMessage: string;
   maxTokens?: number;
   /** Override the model. Defaults to claude-opus-4-7. Use a lighter model (sonnet/haiku) for simple tasks. */
@@ -109,6 +121,39 @@ export interface ClaudeParams {
    * case; the multi-image form lets a caller show Claude several frames in one call.
    */
   imageInput?: ClaudeImage | ClaudeImage[];
+  /**
+   * Which pipeline step this call belongs to ("Shot list", "Picture check (careful)"), kept on
+   * the cost line so the Cost dialog shows spend per step, not only per model.
+   */
+  step?: string;
+  /**
+   * "off" switches thinking off where the model has a way to (`thinkingOffParam`). Sonnet 5 and
+   * 5.5 run adaptive thinking when the param is omitted, billed as output — wasted on a yes/no
+   * check, and under a small `maxTokens` it can use the whole budget and leave no text: 14 of 61
+   * careful picture checks came back empty on job 338 and were paid for again on the quick
+   * checker. Ignored on Opus 5.5 (cannot be switched off — use `effort`) and Haiku 4.5 (never
+   * thinks unasked).
+   */
+  thinking?: "off";
+  /** How hard the model works (`output_config.effort`); omitted = the model's own default. */
+  effort?: "low" | "medium" | "high";
+}
+
+/**
+ * What switches thinking off on this model, if anything: Sonnet 5 takes `disabled`; Sonnet 5.5
+ * answers 400 to that and takes `between_tools` (no thinking outside tool use — we send no tools).
+ */
+export function thinkingOffParam(
+  model: string
+): { type: "disabled" } | { type: "between_tools" } | undefined {
+  if (/^claude-sonnet-5-5/.test(model)) return { type: "between_tools" };
+  if (/^claude-sonnet-5(?!-\d)/.test(model)) return { type: "disabled" };
+  return undefined;
+}
+
+/** Models that take `output_config.effort`. Haiku 4.5 answers 400 to it. */
+export function takesEffort(model: string): boolean {
+  return /^claude-(sonnet-5|opus-5|opus-4-[78])/.test(model);
 }
 
 export interface ClaudeResult {
@@ -196,23 +241,32 @@ export async function invokeClaude(
 ): Promise<ClaudeResult> {
   const {
     systemPrompt,
+    systemSuffix,
     userMessage,
     maxTokens = 1024,
     extendedThinking = false,
     imageInput,
     model,
+    step,
+    thinking,
+    effort,
   } = params;
 
   const anthropic = getClient();
 
-  // Build system prompt with prompt caching when provided.
+  // Build system prompt with prompt caching when provided: the fixed part cached, the part that
+  // changes per call after it, uncached.
+  const split = process.env.CLAUDE_SPLIT_SYSTEM_CACHE !== "0";
   const systemParam = systemPrompt
     ? [
         {
           type: "text" as const,
-          text: systemPrompt,
+          text: split ? systemPrompt : systemPrompt + (systemSuffix ?? ""),
           cache_control: { type: "ephemeral" as const },
         },
+        ...(split && systemSuffix
+          ? [{ type: "text" as const, text: systemSuffix }]
+          : []),
       ]
     : undefined;
 
@@ -229,6 +283,7 @@ export async function invokeClaude(
         perCallTimeoutMs: THINKING_CALL_TIMEOUT_MS,
         imageInput,
         model,
+        step,
       });
       return result;
     } catch (thinkingError: any) {
@@ -260,6 +315,9 @@ export async function invokeClaude(
     maxTokens,
     useThinking: false,
     model,
+    step,
+    thinkingOff: thinking === "off",
+    effort,
   });
 }
 
@@ -272,6 +330,9 @@ async function callClaudeWithRetries(opts: {
   perCallTimeoutMs?: number;
   imageInput?: ClaudeParams["imageInput"];
   model?: string;
+  step?: string;
+  thinkingOff?: boolean;
+  effort?: ClaudeParams["effort"];
 }): Promise<ClaudeResult> {
   const {
     anthropic,
@@ -282,6 +343,9 @@ async function callClaudeWithRetries(opts: {
     perCallTimeoutMs,
     imageInput,
     model,
+    step,
+    thinkingOff,
+    effort,
   } = opts;
   const resolvedModel = model ?? "claude-opus-4-8";
 
@@ -324,12 +388,19 @@ async function callClaudeWithRetries(opts: {
         apiPromise = anthropic.messages.create({
           model: resolvedModel,
           max_tokens: maxTokens,
+          // `between_tools` is not in this SDK version's types; the API takes it.
+          ...(thinkingOff && thinkingOffParam(resolvedModel)
+            ? { thinking: thinkingOffParam(resolvedModel) as any }
+            : {}),
+          ...(effort && takesEffort(resolvedModel)
+            ? { output_config: { effort } }
+            : {}),
           ...(systemParam ? { system: systemParam } : {}),
           messages: [{ role: "user", content: userContent }],
         });
       }
 
-      meterWhenAnswered(resolvedModel, apiPromise);
+      meterWhenAnswered(resolvedModel, apiPromise, step);
 
       // Apply per-call timeout if specified
       let response: Anthropic.Message;

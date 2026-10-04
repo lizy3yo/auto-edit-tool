@@ -20,7 +20,7 @@ import type { KeyThing, StoryboardScene } from "@shared/types";
 import { invokeClaude } from "./claude";
 import { safeParseJSON } from "./jsonRepair";
 import { SHOWS_PERSON } from "./hostLook";
-import { blurredPrint, matchKeyThing, settleVideoKind } from "./shotList";
+import { blurredPrint, matchKeyThing, planningEffort, settleVideoKind } from "./shotList";
 
 const NAMED_LOOK_MODEL = () => process.env.NAMED_LOOK_MODEL || "claude-opus-5-5";
 
@@ -83,7 +83,7 @@ export function parseShownFacts(text: string, script: string): ShownFact[] {
 export async function collectShownFacts(
   script: string,
   ask: (system: string, user: string) => Promise<string> = async (system, user) =>
-    (await invokeClaude({ systemPrompt: system, userMessage: user, maxTokens: 4000, model: NAMED_LOOK_MODEL() })).text
+    (await invokeClaude({ systemPrompt: system, userMessage: user, maxTokens: 4000, model: NAMED_LOOK_MODEL(), effort: planningEffort("NAMED_LOOK_EFFORT"), step: "Named things" })).text
 ): Promise<ShownFact[]> {
   try {
     return parseShownFacts(await ask(SHOWN_FACTS_SYSTEM, `${script.slice(0, 60000)}\n\nJSON:`), script);
@@ -108,7 +108,8 @@ A REAL, RECOGNISABLE thing the LINE names — an app, a website, a store, a mark
 line — is a named kind too, even when the planned picture calls it something generic ("a buy-and-sell
 app"): its LOOK is how it really looks — its real colours, layout and style (for an app: the screen
 on a phone, its real colour bars, how its items are laid out). Its logo and any words in it are
-small, soft and unreadable: write that into the look.
+small, soft and unreadable: write that into the look. Say where its words sit as "soft grey bars",
+never as a title, a name or a price — a look that asks for "a bold price line" gets a readable price.
 
 A BODY PART NEVER LOOKS CUT OFF: hair, a hand, a foot or a face is shown on the person, or on what really holds it — a wig on a mannequin head or wig stand, a practice hand, extensions in their packet. A few loose strands that really fall (in a brush, on a comb or towel, in a drain) are fine. Never hair still shaped like a head or a hairstyle with no head inside it, and never a hand, foot or face on its own. To show a colour or texture, show it on the person's own head or hands.
 
@@ -242,7 +243,7 @@ export async function describeNamedLooks(
   const ask =
     opts.ask ??
     (async (system: string, user: string) =>
-      (await invokeClaude({ systemPrompt: system, userMessage: user, maxTokens: 16000, model: NAMED_LOOK_MODEL() })).text);
+      (await invokeClaude({ systemPrompt: system, userMessage: user, maxTokens: 16000, model: NAMED_LOOK_MODEL(), effort: planningEffort("NAMED_LOOK_EFFORT"), step: "Named things" })).text);
   const all = namedLookCandidates(scenes);
   const BATCH = 150;
   let kinds = 0;
@@ -279,9 +280,23 @@ export async function describeNamedLooks(
 /** The image-prompt line that carries a picture's exact look. Empty when it has none. */
 export function namedLookClause(scene: StoryboardScene): string {
   return scene.namedLook
-    ? ` EXACT LOOK — ${scene.namedLook}. Draw it exactly like this, whatever any other words say about its pattern or shape.`
+    ? ` EXACT LOOK — ${scene.namedLook}. Draw it exactly like this, whatever any other words say about its pattern or shape.${SUBJECT_OVER_LOOK}`
     : "";
 }
+
+/**
+ * SPECIFIC BEATS GENERAL. A named kind has ONE look, written once for all its pictures — the app's
+ * front page, the plain board — and a picture is often about a particular page, part or state of
+ * it: Dale's job 344 asked for a shop's SETTINGS page under a look that said "a grid of product
+ * cards", and for an ENGRAVED board under a look of the plain one. Told both, the picture maker
+ * drew the general one and the checker failed it for the particular one, three times running. The
+ * look settles how the kind looks; what this picture shows OF it is the picture's own.
+ */
+export const SUBJECT_OVER_LOOK =
+  " That look settles how this kind of thing looks in general — its pattern, shapes, colours and " +
+  "style. WHAT this picture shows of it is as the picture's own words say: when they name a " +
+  "particular part, page or screen of it, a stage of the work, or something done or added to it, " +
+  "show exactly that, in this look's colours and style.";
 
 /** The camera position of a picture about one part of a remembered thing (`partOf`). */
 export const PART_VIEW =

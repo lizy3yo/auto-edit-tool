@@ -187,6 +187,8 @@ export function parseDeliveryPlan(
 /**
  * Ask Claude for the plan. Null on any failure — the caller voices and directs as before.
  */
+const DELIVERY_MODEL = () => process.env.DELIVERY_MODEL || "claude-sonnet-5";
+
 export async function planDelivery(
   script: string,
   ctx: { hostName?: string; persona?: string; log?: (m: string) => void } = {}
@@ -198,6 +200,11 @@ export async function planDelivery(
       systemPrompt: DELIVERY_SYSTEM_PROMPT,
       userMessage: deliveryUserPrompt(paragraphs, ctx),
       maxTokens: Math.min(8000, 200 + paragraphs.length * 60),
+      // Sonnet with thinking off: pace, pause and mood per paragraph is not an Opus job, and the
+      // token budget above is sized for the answer alone. `DELIVERY_MODEL` switches it back.
+      model: DELIVERY_MODEL(),
+      thinking: "off",
+      step: "Host delivery plan",
     });
     const plan = parseDeliveryPlan(r.text, paragraphs.length);
     if (!plan) {

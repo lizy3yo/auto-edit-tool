@@ -61,6 +61,7 @@ import {
   SET_ITEM_VIEW,
 } from "./pictureMemory";
 import { safeParseJSON, stripMarkdownFences } from "./jsonRepair";
+import { checkFlags, recordPictureCheck } from "./pictureCheckLog";
 import { scanSameThing, scanStillDefects } from "./overlayTextScan";
 import {
   deriveStyleBible,
@@ -3858,6 +3859,7 @@ export async function deriveVideoSubject(
       // before the topic is ever stated.
       userMessage: `Script:\n"""${spokenScript.slice(0, 6000)}"""\n\nSubject:`,
       maxTokens: 32,
+      step: "Video subject",
     });
     return r.text.trim().replace(/^["']+|["']+$/g, "");
   } catch {
@@ -5753,7 +5755,11 @@ const WORN_FRONT =
  */
 export function personClauseFor(scene: StoryboardScene, visual: string): string {
   if (!scene.humanPresent) return "";
-  const who = scene.brollHostLook ? hostBrollClause(scene.brollHostLook) : ANON_PERSON_SUFFIX;
+  const who = scene.otherPerson
+    ? otherPersonClause(scene.otherPerson)
+    : scene.brollHostLook
+      ? hostBrollClause(scene.brollHostLook)
+      : ANON_PERSON_SUFFIX;
   const worn = WORN_FRONT.exec(visual)?.[0];
   // Hands on the person's OWN hair, scalp or face (Diane's job 313: a head twisted round, a third
   // arm): a side or three-quarter view of a natural pose, never "from behind" with both arms up.
@@ -5770,6 +5776,30 @@ export function personClauseFor(scene: StoryboardScene, visual: string): string 
     : "";
   return ` ${who} ${BODY_ON_PERSON_CLAUSE}${selfCare}${wornClause}`;
 }
+
+/**
+ * SOMEONE ELSE in the picture (`scene.otherPerson`): the line is about a person who is not the
+ * host, so that person is drawn — the way the host is, from behind or the side, the face never
+ * shown, one body — and told apart from the host in so many words, with no host photo attached.
+ */
+export function otherPersonClause(who: string): string {
+  const body = ONE_BODY_CLAUSE.replace(/The host has/g, "This person has").replace(
+    /the host's/g,
+    "their"
+  );
+  return (
+    `The only person in this shot is ${who.trim().replace(/\.$/, "")} — NOT the video's host, a ` +
+    `different, ordinary person of that description: seen from behind or from the side, over ` +
+    `the shoulder, the face turned away or out of frame so it is never shown. Nobody else is in ` +
+    `the frame, in the background or in a reflection. ${body}`
+  );
+}
+
+/** `NO_OTHER_FIGURES_SUFFIX` for a picture of someone else: that one person, nobody more. */
+export const ONE_OTHER_PERSON_SUFFIX =
+  "Apart from that one person seen from behind or from the side, no person is visible: no second " +
+  "person, no one in the background, no reflection of anyone, and no face anywhere in the frame. " +
+  "No mirror, window glass or other shiny surface anywhere they could be reflected in it.";
 
 export function hostBrollClause(look: string): string {
   return (
@@ -6280,6 +6310,7 @@ export async function rewritePolicySafeVisual(
         `\nPolicy-safe rewrite:`,
       maxTokens: 100,
       model: "claude-sonnet-4-6",
+      step: "Refused prompt rewrite",
     });
     return result.text.trim() || null;
   } catch (err) {
@@ -6322,9 +6353,11 @@ export function buildStillPrompt(
   // The host at work (from behind) when the pipeline marked it, else anonymous hands.
   const personSuffix = !aggressive ? personClauseFor(scene, scene.showSubject ?? scene.visualPrompt ?? "") : "";
   const noFigures =
-    !aggressive && scene.humanPresent && scene.brollHostLook
-      ? NO_OTHER_FIGURES_SUFFIX
-      : NO_FIGURES_SUFFIX;
+    !aggressive && scene.humanPresent && scene.otherPerson
+      ? ONE_OTHER_PERSON_SUFFIX
+      : !aggressive && scene.humanPresent && scene.brollHostLook
+        ? NO_OTHER_FIGURES_SUFFIX
+        : NO_FIGURES_SUFFIX;
   const visual = visualOverride
     ? softenVisualPrompt(visualOverride)
     : aggressive
@@ -6343,11 +6376,32 @@ export function buildStillPrompt(
   const memory = memoryClause(scene);
   // A real app the line names (`namedLook`) is drawn as it really looks; otherwise a plain one.
   const app = APP_SCREEN.test(visual) ? ` ${appScreenClause(scene)}` : "";
+  const lead = !aggressive && !visualOverride ? subjectLead(scene.showSubject, visual) : "";
   return withAllowedText(
-    `${visual}${scrubLegibleWriting(namedLookClause(scene))}${angleSuffix}${personSuffix}${memory}${app} ${amateurIphoneLook(subject, motion)} ${framing} ${noFigures} ${NO_BOOK_SUFFIX}`,
+    `${lead}${visual}${scrubLegibleWriting(namedLookClause(scene))}${angleSuffix}${personSuffix}${memory}${app} ${amateurIphoneLook(subject, motion)} ${framing} ${noFigures} ${NO_BOOK_SUFFIX}`,
     scene.pictureText,
     scene.blurPrint
   );
+}
+
+/**
+ * WHAT THE LINE NEEDS COMES FIRST. A picture is described twice: `showSubject` (the shot list and
+ * the line check — what must be on screen, and what the picture CHECK holds the frame to) and
+ * `visualPrompt` (the prompt writer's rewrite of it). When the rewrite drops something — Dale's job
+ * 344: "a board with a name engraved into its surface" became "a board leaning against a garage
+ * wall", "a computer screen" became "a phone screen" — the picture maker never hears what the
+ * checker then fails it for. So the subject leads the prompt, in its own words, whenever the
+ * rewrite does not already say all of it. Pure.
+ */
+export function subjectLead(showSubject: string | undefined, visual: string): string {
+  const subject = softenVisualPrompt(showSubject?.trim() ?? "");
+  if (!subject) return "";
+  const words = (t: string) =>
+    new Set(t.toLowerCase().match(/[a-z0-9]{4,}/g) ?? []);
+  const said = words(visual);
+  const needed = Array.from(words(subject));
+  if (needed.length && needed.every(w => said.has(w))) return "";
+  return `THE PICTURE MUST SHOW: ${subject.replace(/[.\s]+$/, "")}. `;
 }
 
 /**
@@ -6357,7 +6411,8 @@ export function buildStillPrompt(
 export const BLURRED_PRINT_CLAUSE =
   "Any printing on it — a label, a date, the words on a box — is visible but soft and out of " +
   "focus, the way a phone blurs small print: no word, letter or number anywhere in the frame can " +
-  "be read. Frame it from about an arm's length away, never a close-up of the printing: the thing " +
+  "be read. An engraved or carved name or design is there too, as shallow carved lines too soft " +
+  "to read — never left off, never real letters. Frame it from about an arm's length away, never a close-up of the printing: the thing " +
   "it is on is clearly the subject, and the print is a small soft patch on it.";
 
 /**
@@ -6420,7 +6475,7 @@ export function appScreenClause(scene: StoryboardScene): string {
   const one = ONE_LISTING.test(scene.showSubject ?? scene.visualPrompt ?? "")
     ? " It is ONE item's own listing page: one large photo of that item, not a grid of other things."
     : "";
-  if (!scene.pictureText) return `${base}${one}`;
+  if (!scene.pictureText) return `${base}${one}${SCREEN_TEXT_AS_BARS}`;
   const said = scene.pictureText.replace(/"/g, "'");
   return (
     base
@@ -6428,6 +6483,16 @@ export function appScreenClause(scene: StoryboardScene): string {
       .replace(/no readable words, letters,\s+numbers or prices anywhere on the screen/, `nothing readable on the screen except "${said}", spelled exactly`) + one
   );
 }
+
+/**
+ * How a screen's words are drawn when the line says none of them. "Small, soft and unreadable"
+ * still got readable prices (Dale's jobs 340-344: a listing's price failed the picture check four
+ * times running) — asked for a WORD, the picture maker writes one. Asked for the shape of text, it
+ * draws the shape.
+ */
+export const SCREEN_TEXT_AS_BARS =
+  " Every word, number and price on the screen is drawn as a short soft grey bar or a blurred " +
+  "smudge — the shape of a line of text, never actual letters or digits.";
 
 /** A picture about ONE item's listing ("a listing of the bookcase", "her listing"). */
 const ONE_LISTING = /\b(?:a|the|one|its|her|his|your|my)\s+(?:single\s+)?listing\b(?!s)|\blisting (?:page )?(?:of|for)\s+(?:a|the|one)\b/i;
@@ -6506,7 +6571,9 @@ export function memoryClause(scene: StoryboardScene): string {
     ` ${which} this exact ${thing}. Draw the SAME ${thing} — identical shape, size, colours, ` +
     `materials and wear, in the same place — from a different camera position than the reference; ` +
     `never copy the reference's framing.${view} If the words say it is further along (being made, ` +
-    `finished, changed), show the same piece at that later stage.` +
+    `finished, changed) or that something has been done or added to it (carved, engraved, ` +
+    `painted, fitted with a part), show the same piece WITH that — the reference is how it ` +
+    `looked before.` +
     host
   );
 }
@@ -8471,6 +8538,9 @@ export async function generateValidatedStill(
   let sameThingMisses = 0;
   // A check that could not run is never a pass: one more picture and check (`unchecked`).
   let uncheckedRerolls = 0;
+  // What the check named on the picture before this one (`checkFlags`), to spot a redraw that
+  // changed nothing.
+  let lastFaults = "";
   // A blurred-print picture that came back readable is drawn from further back once.
   let steppedBack = false;
   // A content-policy block can't be cleared by resubmitting the same prompt — escalate the
@@ -8597,8 +8667,34 @@ export async function generateValidatedStill(
         // must really be in it — Dale's job 306 drew a box where the bookcase was asked for.
         scene.memoryView === SCREEN_ITEM_VIEW
           ? undefined
-          : [scene.keyThing, ...(scene.otherKeyThings ?? [])].filter((t): t is string => !!t)
+          : [scene.keyThing, ...(scene.otherKeyThings ?? [])].filter((t): t is string => !!t),
+        scene.blurPrint
       );
+      recordPictureCheck(
+        scene,
+        visualOverride ?? (square ? scene.splitVisual : undefined) ?? scene.visualPrompt ?? "",
+        square,
+        defects
+      );
+      // THE SAME FAULTS TWICE IN A ROW: the redraw came back exactly as wrong as the picture it
+      // replaced, so another one from the same prompt is a third picture and a third check for
+      // the same result (job 343: a phone screen drawn four times, "writing, brand, staged" each
+      // time). Keep this one. A redraw that changes what is wrong still gets its next try — two of
+      // that film's screens came right on the third and fourth. `REDRAW_SAME_FAULTS=1` restores
+      // the old run to the last attempt.
+      const faults = checkFlags(defects).join("+");
+      if (
+        faults &&
+        faults === lastFaults &&
+        !defects.unchecked &&
+        process.env.REDRAW_SAME_FAULTS !== "1"
+      ) {
+        console.warn(
+          `[Longform] scene ${scene.index} still came back with the same faults (${faults}) → keeping it`
+        );
+        return { buffer, mimeType: r.mimeType };
+      }
+      lastFaults = faults;
       if (defects.broken) {
         lastError = `Still image has broken geometry (${defects.what})`;
         brokenFallback ??= { buffer, mimeType: r.mimeType };
@@ -10819,22 +10915,33 @@ export function isSplitScene(scene: StoryboardScene): boolean {
  * if that rewrite failed open). Shared by the render path and the regenerate path so the two
  * can't drift apart.
  */
-function buildSplitRightScene(scene: StoryboardScene): StoryboardScene {
+export function buildSplitRightScene(scene: StoryboardScene): StoryboardScene {
+  // The panel is drawn from a COPY of its scene: share the check record, or what the picture
+  // check says about the panel is written to the copy and lost (`recordPictureCheck`).
+  scene.pictureChecks ??= [];
   // A panel about a body part (hair, nails, skin) shows it ON the host — a person-free panel can
   // only draw it loose (Diane's job 315: hair lying on a towel beside her own talking head).
   const body = BODY_PART_WORDS.test(scene.splitVisual ?? "") && !REAL_HOLDER.test(scene.splitVisual ?? "");
-  if (body)
+  // THE PANEL IS ITS OWN PICTURE: it is drawn from, and checked against, what the PANEL shows.
+  // It used to inherit the host beat's `showSubject` — "hands sorting finished pieces into three
+  // piles" (Dale's job 344) — beside a panel that may never show a person: the picture maker was
+  // asked for hands and for no people at once, and the check failed every panel for the hands.
+  if (body) {
+    const onBody = onTheBody(scene.splitVisual ?? "");
     return {
       ...scene,
       hostPresent: false,
       splitVisual: undefined,
       humanPresent: true,
-      visualPrompt: `${onTheBody(scene.splitVisual ?? "")} A close view of just that part, on the person, the face not shown.`,
+      showSubject: onBody,
+      visualPrompt: `${onBody} A close view of just that part, on the person, the face not shown.`,
     };
+  }
   return {
     ...scene,
     hostPresent: false,
     splitVisual: undefined,
+    showSubject: scene.splitVisual,
     visualPrompt: `${scene.splitVisual} ${NO_PEOPLE_SUFFIX}`,
   };
 }
@@ -13178,6 +13285,7 @@ async function storyboardBatch(args: {
         systemPrompt,
         userMessage,
         maxTokens: STORYBOARD_BATCH_MAX_TOKENS,
+        step: "Storyboard",
       });
       // On truncation, salvage the completed scenes (clearing stopReason so the rebuilt JSON
       // actually parses); the cut-off tail default-fills to host inside parseStoryboard.
@@ -13538,6 +13646,7 @@ export async function enhanceBrollPrompts(
         // off in `invokeGemini`, so this costs nothing extra — it just stops a model that
         // overruns its word cap from being discarded as a truncated rewrite.
         maxTokens: 600,
+        step: "Picture prompts",
       });
       // A max_tokens rewrite is cut mid-sentence — keep the original rather than adopt it.
       if (result.stopReason === "max_tokens")
@@ -13581,8 +13690,80 @@ export async function enhanceBrollPrompts(
     return failure;
   };
 
+  // SEVERAL SHOTS PER CALL (`BROLL_ENHANCE_BATCH`, 8; 1 = one per call): the rulebook, persona, subject,
+  // direction and props list are identical for every shot of a video and were sent once PER
+  // SHOT — ~2,600 tokens to get a 60-word prompt back, and the quick model's rulebooks are too
+  // short to cache. A group sends them once. Each shot keeps its own lines and is rewritten on
+  // its own; a shot the answer leaves out (or an unreadable answer) takes the one-shot path
+  // below, so a failed group costs a retry, never a prompt. CTA cutaways stay one per call.
+  const groupSize = Math.max(1, Math.floor(Number(process.env.BROLL_ENHANCE_BATCH ?? 8) || 1));
+  const enhanceGroup = async (group: typeof cutaways): Promise<typeof cutaways> => {
+    const blocks = group.map(({ scene, i }, k) =>
+      `=== SHOT ${k + 1} ===\n` +
+      (scene.objectMotion && !scene.humanPresent ? `${OBJECT_MOTION_DIRECTIVE}\n` : "") +
+      (scene.humanPresent && !scene.stillImage ? `${HUMAN_MOTION_DIRECTIVE}\n` : "") +
+      beatLineFor(scene) +
+      previousShotsFor(i) +
+      mustShowFor(scene) +
+      `Type: ${scene.stillImage ? "still" : scene.objectMotion && !scene.humanPresent ? "motion-object" : scene.humanPresent ? "motion-human" : "still"}\n` +
+      `Scene narration: "${scene.scriptText ?? scene.narration}"\n` +
+      `Original prompt: ${seedOf(scene)}`
+    );
+    try {
+      const result = await invokeGemini({
+        systemPrompt: STILL_BROLL_ENHANCER_SYSTEM,
+        userMessage:
+          `${CUTAWAY_PERSON_FREE_DIRECTIVE}\n` +
+          channelLine +
+          subjectLine +
+          directionLine +
+          propsLine +
+          `\nBelow are ${group.length} separate shots of this one video. Rewrite EACH on its own, ` +
+          `exactly as if it were the only one, from its own lines only.\n\n` +
+          blocks.join("\n\n") +
+          `\n\nReturn ONLY JSON, one entry per shot, in order: ` +
+          `[{"shot":1,"prompt":"<the enhanced prompt for shot 1>"}, ...]`,
+        maxTokens: 300 * group.length + 200,
+        step: "Picture prompts",
+      });
+      const parsed = safeParseJSON<any>(result.text, result.stopReason);
+      const entries: any[] = parsed.success && Array.isArray(parsed.data) ? parsed.data : [];
+      const left: typeof cutaways = [];
+      group.forEach((item, k) => {
+        const entry = entries.find(e => Number(e?.shot) === k + 1);
+        const enhanced = stripPromptArtifacts(
+          typeof entry?.prompt === "string" ? entry.prompt : ""
+        );
+        if (!enhanced) return void left.push(item);
+        item.scene.visualPrompt = brollDepictsBook(enhanced)
+          ? genericCtaBrollFor(scenes, item.i, subject)
+          : enhanced;
+      });
+      return left;
+    } catch (err) {
+      console.warn(
+        `[enhanceBrollPrompts] a group of ${group.length} failed, rewriting them one by one:`,
+        err
+      );
+      return group;
+    }
+  };
+  let single = cutaways;
+  if (groupSize > 1) {
+    const groupable = cutaways.filter(({ scene }) => scene.cta !== true);
+    single = cutaways.filter(({ scene }) => scene.cta === true);
+    for (const { scene } of groupable) seedOf(scene);
+    const groups: (typeof cutaways)[] = [];
+    for (let g = 0; g < groupable.length; g += groupSize)
+      groups.push(groupable.slice(g, g + groupSize));
+    await mapPool(groups, BROLL_ENHANCE_CONCURRENCY, async group => {
+      // A group of one saves nothing — it takes the one-shot path, wording unchanged.
+      single = single.concat(group.length > 1 ? await enhanceGroup(group) : group);
+    });
+  }
+
   const retryCutaways: typeof cutaways = [];
-  await mapPool(cutaways, BROLL_ENHANCE_CONCURRENCY, async item => {
+  await mapPool(single, BROLL_ENHANCE_CONCURRENCY, async item => {
     if (await enhanceCutaway(item)) retryCutaways.push(item);
   });
   // ponytail: one sequential sweep, no backoff — a failure here is a 429/5xx burst inside a
@@ -13640,6 +13821,7 @@ export async function enhanceBrollPrompts(
             `Original prompt: ${splitSeedOf(scene)}\n\n` +
             `Enhanced prompt:`,
         maxTokens: 600,
+        step: "Picture prompts",
       });
       if (result.stopReason === "max_tokens")
         throw new Error("rewrite truncated (max_tokens)");

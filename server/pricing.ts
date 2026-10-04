@@ -236,6 +236,8 @@ export interface UsageLine {
   provider: string;
   /** Model id as submitted, e.g. `claude-haiku-4-5-20251001`. */
   model: string;
+  /** LLM only: the pipeline step the calls belong to ("Shot list"). Absent on older lines. */
+  step?: string;
   /** Billed API calls that produced this line. */
   calls: number;
   /**

@@ -300,3 +300,32 @@ describe("getJobCostBreakdown", () => {
     expect(b.totalUsd).toBeCloseTo(5, 6);
   });
 });
+
+describe("cost per step", () => {
+  it("keeps one line per step of the same model, and names the step in the breakdown", async () => {
+    rows.set(21, { id: 21, status: "completed" });
+    await withCostMeter(21, async () => {
+      for (const step of ["Shot list", "Shot list", "Clip glitch check"])
+        recordUsage({
+          lane: "llm",
+          provider: "anthropic",
+          model: "claude-sonnet-5",
+          step,
+          calls: 1,
+          quantity: 0,
+          inputTokens: 1000,
+          outputTokens: 100,
+        });
+    });
+    await flushJobUsage(21);
+
+    const stored = rows.get(21).costUsage;
+    expect(stored).toHaveLength(2);
+    expect(stored.find((l: any) => l.step === "Shot list").calls).toBe(2);
+
+    const b = await getJobCostBreakdown(21);
+    const labels = b.sections[0].lines.map(l => l.label);
+    expect(labels).toContain("Shot list · claude-sonnet-5");
+    expect(labels).toContain("Clip glitch check · claude-sonnet-5");
+  });
+});

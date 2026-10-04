@@ -44,6 +44,7 @@ export async function deriveHostLook(photoUrl: string): Promise<string> {
       imageInput: { base64: small.toString("base64"), mediaType: "image/png" },
       maxTokens: 4000,
       model: HOST_LOOK_MODEL(),
+      step: "Host look",
     });
     return cleanHostLook(r.text);
   } catch (err: any) {
@@ -169,7 +170,16 @@ export function markHostBroll(
       !s.showsBook;
     const person =
       !!s.humanPresent || SHOWS_PERSON.test(s.showSubject ?? s.visualPrompt ?? "");
-    if (on && eligible && person) {
+    if (eligible && s.otherPerson) {
+      // A line about SOMEONE ELSE (a customer, a neighbour): that person is drawn, from behind,
+      // without the host's look or photo — Dale's "a buyer three states away, hunting for a board
+      // with her parents' name on it" came back as Dale himself at his bench, run after run.
+      s.humanPresent = true;
+      s.brollHostLook = undefined;
+      s.brollHostRef = undefined;
+      if (s.showSubject) s.showSubject = withoutMirrors(s.showSubject);
+      if (s.visualPrompt) s.visualPrompt = withoutMirrors(s.visualPrompt);
+    } else if (on && eligible && person) {
       s.humanPresent = true;
       s.brollHostLook = look;
       if (s.showSubject) s.showSubject = withoutMirrors(s.showSubject);

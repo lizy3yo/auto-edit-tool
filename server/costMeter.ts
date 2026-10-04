@@ -54,8 +54,9 @@ const flushTimers = new Map<number, NodeJS.Timeout>();
 
 const FLUSH_DEBOUNCE_MS = 3_000;
 
-/** Lines merge when they describe the same lane + vendor + model. */
-const lineKey = (l: UsageLine) => `${l.lane}::${l.provider}::${l.model}`;
+/** Lines merge when they describe the same lane + vendor + model (+ step, for Claude). */
+const lineKey = (l: UsageLine) =>
+  `${l.lane}::${l.provider}::${l.model}${l.step ? `::${l.step}` : ""}`;
 
 /**
  * Run `fn` with `jobId` as the ambient billing context. Every `recordUsage` call made anywhere
@@ -352,7 +353,7 @@ export async function getJobCostBreakdown(
       lines: lines
         .sort((a, b) => b.usd - a.usd)
         .map(l => ({
-          label: l.model,
+          label: l.step ? `${l.step} · ${l.model}` : l.model,
           detail: detailFor(l),
           usd: l.usd,
           rateKnown: l.rateKnown,

@@ -330,6 +330,7 @@ export async function deriveStyleBible(
         systemPrompt: STYLE_BIBLE_SYSTEM,
         userMessage,
         maxTokens: 500, // one ≤80-word field — well clear of the truncation cliff
+        step: "Visual direction",
       });
       const parsed = parseVisualDirection(result.text, result.stopReason);
       if (parsed?.styleBible) {
@@ -379,6 +380,7 @@ export async function deriveVisualDirection(
         systemPrompt: VISUAL_DIRECTION_SYSTEM,
         userMessage,
         maxTokens: 5000, // 25 ranges × ≤25 words + a ≤90-word bible + JSON overhead, with margin
+        step: "Visual direction",
       });
       const direction = parseVisualDirection(result.text, result.stopReason);
       if (direction) {

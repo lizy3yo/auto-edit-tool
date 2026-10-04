@@ -98,6 +98,7 @@ export async function describeHostSetting(photoUrl: string): Promise<HostSetting
       imageInput: { base64: small.toString("base64"), mediaType: "image/png" },
       maxTokens: 2000,
       model: process.env.HOST_LOOK_MODEL || "claude-sonnet-5",
+      step: "Phone look",
     });
     return parseHostSetting(r.text);
   } catch (err: any) {

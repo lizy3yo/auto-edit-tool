@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import {
   Dialog,
@@ -108,6 +108,12 @@ const usd = (n: number) =>
       // precision that a long tail of cheap calls is still legible.
       `$${n.toFixed(4)}`;
 
+/**
+ * Lines a section shows before "View more". Claude is listed per step since 2026-10-04 — sixteen
+ * lines on a short film — and the costly ones sort first, so the fold hides only the cents.
+ */
+const LINES_SHOWN = 5;
+
 export function GenerationCostDialog({
   jobId,
   open,
@@ -127,6 +133,9 @@ export function GenerationCostDialog({
           query.state.data?.inProgress ? 15_000 : false,
       }
     );
+
+  /** Sections the viewer unfolded with "View more", by section key. */
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
 
   const hasSpend = useMemo(
     () => (data?.sections.length ?? 0) > 0,
@@ -208,6 +217,9 @@ export function GenerationCostDialog({
                         ({section.count})
                       </span>
                     )}
+                    <span className="ml-2 font-semibold normal-case tracking-normal tabular-nums text-foreground">
+                      {usd(section.subtotalUsd)}
+                    </span>
                   </h3>
                   <Badge
                     variant="outline"
@@ -222,7 +234,10 @@ export function GenerationCostDialog({
                 </header>
 
                 <ul className="space-y-2.5">
-                  {section.lines.map(line => (
+                  {(openSections[section.key]
+                    ? section.lines
+                    : section.lines.slice(0, LINES_SHOWN)
+                  ).map(line => (
                     <li
                       key={line.label}
                       className="flex items-start justify-between gap-4"
@@ -249,6 +264,22 @@ export function GenerationCostDialog({
                     </li>
                   ))}
                 </ul>
+                {section.lines.length > LINES_SHOWN && (
+                  <button
+                    type="button"
+                    className="mt-2.5 text-xs font-medium text-primary hover:underline"
+                    onClick={() =>
+                      setOpenSections(o => ({
+                        ...o,
+                        [section.key]: !o[section.key],
+                      }))
+                    }
+                  >
+                    {openSections[section.key]
+                      ? "View less"
+                      : `View more (${section.lines.length - LINES_SHOWN})`}
+                  </button>
+                )}
                 {section.key === "lipsync" &&
                   (data.hostSpend || data.hostRenders.length > 0) && (
                     <HostRenderLines

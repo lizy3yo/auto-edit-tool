@@ -148,6 +148,79 @@ Anthropic answers — including replies past our own timeout and replies with no
 is a list-price estimate because HeyGen/69Labs/APIMART bill per-plan credit bundles — check one
 invoice, then pin the real number via the env var below (or edit the file).
 
+CLAUDE COST PER STEP (2026-10-04): every `invokeClaude` call carries a `step` ("Shot list",
+"Picture check (careful)", "Picture prompts"…), kept on the cost line (`UsageLine.step`, part of
+the merge key), so the Cost dialog shows a line per step and model — before, only per model, and
+which rule cost what was a guess. A new call site without a `step` still meters, under its bare
+model name. Three levers went in with it, each with a switch back: the picture checker's rulebook
+is cached apart from its per-picture questions (`systemSuffix`; `CLAUDE_SPLIT_SYSTEM_CACHE=0`) —
+glued together every check re-wrote the cache, ~$0.0087 a careful check on the live site against
+~$0.0053 with the split (job 337); `thinking: "off"` on the two yes/no checks on Sonnet 5 (same
+object, clip glitch), which thinks when the param is omitted and bills it as output (sent only
+where the model accepts it, `canDisableThinking` — Sonnet 5.5 and Opus 5.5 answer 400); and
+cheaper models on three easy steps: what may be a video → Haiku (`SELF_MOVING_MODEL`), the
+delivery plan → Sonnet 5 with thinking off (`DELIVERY_MODEL`), spoken lists → Sonnet 5.5
+(`LIST_MODEL`). Haiku's rulebooks never cache: its minimum is 4,096 tokens and they are ~1,700.
+THE SECOND ROUND (2026-10-05), measured on one 3-minute Dale practice script run seven times (jobs
+338-344; $1.28 of Claude before): (a) THE CAREFUL PICTURE CHECK ALWAYS ANSWERS — Sonnet 5.5
+thinks unless told not to and thinking counts against `maxTokens`, so 14 of 61 checks used the
+whole 250 on thinking, wrote no verdict, were paid for and redone on the quick checker (the
+picture that needed the careful check got the quick one). It now runs with thinking off
+(`thinking: "off"` → `between_tools` on Sonnet 5.5, `thinkingOffParam`; `CAREFUL_CHECK_THINKING=1`
+gives it back with room to finish): 0 empty answers in six runs. The two questions asked of every
+picture (messy, staged) ride in the cached part. (b) PLANNING THINKS LESS (`planningEffort`,
+`output_config.effort` low unless `SHOT_LIST_EFFORT` / `CONTEXT_EFFORT` / `PROPS_EFFORT` /
+`FIT_EFFORT` / `NAMED_LOOK_EFFORT` says `medium`, `high` or `default`): the shot list $0.34 →
+$0.09, same-topic groups $0.09 → $0.02. (c) PICTURE PROMPTS ARE WRITTEN EIGHT TO A CALL
+(`BROLL_ENHANCE_BATCH`, 1 = one each): the rulebook and the video's own lines go once per group,
+$0.12 → $0.05; a shot the answer leaves out takes the one-shot path. With all of it on: $0.71-0.72
+(-44%), the audit no worse. NOT SETTLED: host seconds (50-77) and pictures drawn (61-86) swing
+between runs of the SAME setup by more than any lever moved them, so one run per setup proves
+nothing about either — compare averages of three. (d) WHICH PICTURES FAIL
+(`server/pictureCheckLog.ts`, `scene.pictureChecks`, `scripts/stress/checks.mts --jobs N`): every
+check is recorded with its kind of picture. Job 343: 25 of 37 pictures passed first time; phone
+screens (2 of 5) and named kinds (1 of 4) took 23 of the 61 checks; 8 of the 12 that failed never
+passed. A redraw that comes back with EXACTLY the faults of the picture before it is kept
+(`REDRAW_SAME_FAULTS=1` restores the run to the last attempt) — a different fault still gets its
+next try, since two screens came right on tries 3 and 4. The causes seen, not yet fixed at the
+source: a screen about ONE listing held to its app's grid layout by the exact-look check, a
+"personalized" board that needs carving the no-writing rule forbids, and a step picture asked for
+hands that came back without them.
+ONE PICTURE, ONE INSTRUCTION (2026-10-05, job 344's failed pictures): those three were one cause.
+A picture is described by up to four steps — `showSubject` (what the line needs, and what the
+CHECK holds the frame to), `visualPrompt` (the prompt writer's rewrite), `namedLook` (one general
+look per named kind) and the memory picture — and they disagreed: three said "a plain board", one
+said "engraved". Which wins, for any channel: (1) what the line needs LEADS the prompt whenever
+the rewrite dropped any of it (`subjectLead`, "THE PICTURE MUST SHOW: …"); (2) specific beats
+general — the named look settles pattern, colours and style, the picture's own words settle which
+part, page, stage or addition is shown (`SUBJECT_OVER_LOOK`, and the same sentence in
+`exactLookQuestion`, or the check fails a settings page for not being the app's front grid); (3) a
+remembered thing is the same piece WITH what this picture does or adds to it (`memoryClause`); (4)
+a split panel is drawn from and checked against its OWN description (`buildSplitRightScene` sets
+`showSubject` to the panel's — it inherited the host beat's "hands sorting…" beside a no-people
+rule); (5) an engraving is soft print — shallow carved lines too soft to read
+(`BLURRED_PRINT_CLAUSE`), and the check counts that as shown (`SOFT_PRINT_QUESTION`, `blurPrint`
+passed to `scanStillDefects`); (6) words on a screen are drawn as soft grey bars
+(`SCREEN_TEXT_AS_BARS`, and the named-things rulebook no longer lets an app's look ask for "a
+price line") — a price the line SAYS stays readable. Cases in `operatorCases.test.ts`.
+"STAGED" IS THE LIGHT AND THE FINISH, NEVER THE CONTENT (`STAGED_RULE`, one wording shared by the
+picture check and the audit's rule 13): after the six rules "staged" was the main cause of redraws
+(27 times on Dale's job 345) and the pictures were stacks of finished pieces in plain daylight,
+under lines about pieces being stacked and sorted; 7 of 9 came back "staged" again. A first fix
+that said "stacks and piles are fine" was refused by the operator as a rule about one channel. The
+rule now judges only light and finish (a glowing lamp, golden glow, dramatic light, an advert
+finish) and never what is in the picture or how it is arranged — that comes from the script and
+is held by the other questions. It names no object.
+SOMEONE ELSE IS DRAWN AS SOMEONE ELSE (2026-10-05, the operator chose this over leaving people
+out): the only person b-roll could show was the host, so a line about a customer — Dale's "a buyer
+three states away, hunting for a board with her parents' last name on it" — came back as Dale at
+his bench, run after run ("shows a man, not a woman"). Shot-list rule 6a: when a line is about
+ANOTHER person doing something (never the host, never "you" — the viewer's work is the host's),
+the shot names them in `other` (`otherPersonOf` → `scene.otherPerson`). `markHostBroll` gives that
+picture no host look and no host photo; `personClauseFor` draws them with `otherPersonClause` —
+from behind or the side, the face never shown, one body, "NOT the video's host" — under
+`ONE_OTHER_PERSON_SUFFIX`. Always a photo. A line-check rewrite with no person in it clears it.
+
 | Var                          | Default     | Var                               | Default  |
 | ---------------------------- | ----------- | --------------------------------- | -------- |
 | `COST_APIMART_IMAGE`         | $0.02/image | `COST_OPENAI_IMAGE`               | $0.003   |

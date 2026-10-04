@@ -172,6 +172,8 @@ export async function scanClipGlitch(
       imageInput: { base64: pair.toString("base64"), mediaType: "image/png" },
       maxTokens: 500,
       model: CLIP_GLITCH_MODEL(),
+      thinking: "off",
+      step: "Clip glitch check",
     });
     const v = parseClipGlitchVerdict(result.text, selfMoving, result.stopReason);
     if (v.glitch) console.log(`[ClipGlitch] ${v.what}`);

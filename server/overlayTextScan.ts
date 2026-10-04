@@ -261,9 +261,25 @@ export function exactLookQuestion(look: string): string {
     `"${look.replace(/"/g, "'").slice(0, 600)}". Answer true if it is not clearly there as the main ` +
     "thing, OR if what is drawn does not match that look (other shapes, another arrangement, a " +
     "generic or different pattern), OR if the frame mostly shows something bigger it belongs to " +
-    "instead of the thing itself up close. Answer false only when it clearly matches."
+    "instead of the thing itself up close. Answer false only when it clearly matches. That look " +
+    "is how the kind looks IN GENERAL: when the narrator's words above name a particular part, " +
+    "page or screen of it, a stage of the work, or something done or added to it, the frame must " +
+    "show THAT, in this look's colours and style — never answer true only because the frame is " +
+    "not the general view the look describes."
   );
 }
+
+/**
+ * QUESTION 4 for a picture whose printing is shown soft on purpose (`scene.blurPrint`): the label,
+ * date or engraving the line talks about is drawn too soft to read, and that IS it being shown —
+ * Dale's job 344 failed an engraved board twice for "no visible engraving" the no-writing rule had
+ * told the picture maker to keep unreadable.
+ */
+export const SOFT_PRINT_QUESTION =
+  "\n\nQUESTION 4 NOTE — printing, a label, a date or an engraving on the named thing is drawn " +
+  "SOFT on purpose in this picture: a blurred patch of print, or shallow carved lines too soft " +
+  "to read, counts as that printing or engraving being shown. Never answer missing because its " +
+  "words cannot be read. Answer missing only when there is no sign of it at all.";
 
 /**
  * QUESTION 4 widened for a picture about KEY THINGS: every one of them must really be there, and a
@@ -288,14 +304,29 @@ export const MESSY_QUESTION =
   "used room with a few everyday things at the edges is fine — the shots are meant to look like " +
   "a person's own phone photos. When unsure, answer false.";
 
+/**
+ * What "staged" means, for the picture check AND the practice-film audit (one wording, so the two
+ * cannot disagree): HOW the photo was taken — its light and its finish — never WHAT is in it.
+ *
+ * It used to count "props neatly arranged around the subject" and "a perfectly composed product
+ * close-up" too, and on Dale's job 345 that was named 27 times: stacks of boards and coasters on a
+ * workbench in plain daylight, under lines about pieces being stacked and sorted. What is in a
+ * picture and how it is laid out comes from the script and is held by the other questions
+ * (missing, wrong place); judged here as well, a tidy subject failed for being what the line asked
+ * for — a quilt folded, tools laid out, hair styled would all do the same on their channels. And
+ * the redraw did not change it: 7 of the 9 pictures came back "staged" again.
+ */
+export const STAGED_RULE =
+  "would a viewer take this for a styled or AI-rendered image rather than an ordinary photo " +
+  "someone took on their phone, judging ONLY its light and its finish? Say true for: a glowing " +
+  "lamp, candle or golden glow lighting the scene, dramatic or moody light with dark corners, or " +
+  "a glossy, polished advertising finish. NEVER say true because of what is in the picture or " +
+  "how it is arranged: things that are neat, sorted, stacked, lined up, laid out or displayed " +
+  "are what the script asked for, and close framing on the subject is asked for too. Plain " +
+  "daylight, an ordinary used room and casual framing are false. When unsure, answer false.";
+
 /** QUESTION 7, always asked: an ordinary phone photo, not a styled or AI-looking render. */
-export const STAGED_QUESTION =
-  "\n\nQUESTION 7 — staged: would a viewer take this for a styled, staged or AI-rendered image " +
-  "rather than an ordinary photo someone took on their phone? Say true for: a glowing lamp, " +
-  "candle or golden glow lighting the scene, dramatic or moody light with dark corners, props " +
-  "neatly arranged around the subject like a catalogue shot, glossy hyper-detailed textures, or " +
-  "a perfectly composed product close-up. Plain daylight, an ordinary used room and casual " +
-  "framing are false. When unsure, answer false.";
+export const STAGED_QUESTION = `\n\nQUESTION 7 — staged: ${STAGED_RULE}`;
 
 /** QUESTION 6, asked only with the narration line: the frame is set where the line says. */
 export function placeQuestion(line: string): string {
@@ -357,7 +388,9 @@ export async function scanStillDefects(
    * The key things the picture is about: each must really be there, not swapped for something
    * else (a box drawn where a bookcase was asked for). Judged by the stronger checker.
    */
-  required?: string[]
+  required?: string[],
+  /** The picture's printing is shown soft on purpose (`scene.blurPrint`) — `SOFT_PRINT_QUESTION`. */
+  softPrint?: boolean
 ): Promise<StillDefectVerdict> {
   try {
     const mustShow = expect && required?.length ? required : undefined;
@@ -374,15 +407,18 @@ export async function scanStillDefects(
       base64: small.toString("base64"),
       mediaType: "image/png",
     };
+    const carefulThinks = process.env.CAREFUL_CHECK_THINKING === "1";
     const ask = (model: string) => invokeClaude({
-      systemPrompt:
-        STILL_DEFECT_SYSTEM +
+      // The rulebook is the same on every check and is cached; the questions about THIS picture
+      // follow it uncached, in the same order — glued together, every check re-paid the cache.
+      // The two questions asked of EVERY picture ride in the cached part with the rulebook.
+      systemPrompt: STILL_DEFECT_SYSTEM + MESSY_QUESTION + STAGED_QUESTION,
+      systemSuffix:
         (expect ? missingQuestion(expect) : "") +
         (expect && exactLook ? exactLookQuestion(exactLook) : "") +
         (mustShow ? requiredThingsQuestion(mustShow) : "") +
-        MESSY_QUESTION +
+        (expect && softPrint ? SOFT_PRINT_QUESTION : "") +
         (line ? placeQuestion(line) : "") +
-        STAGED_QUESTION +
         (allowedText ? allowedTextQuestion(allowedText) : "") +
         verdictShape(expect, line),
       userMessage:
@@ -392,8 +428,15 @@ export async function scanStillDefects(
         (line ? " Is it set where the line says?" : "") +
         " Does it look like an ordinary phone photo?",
       imageInput: image,
-      maxTokens: 250,
+      // The verdict is ~40 tokens. The careful model THINKS unless told not to, and thinking
+      // counts against this cap: on job 338 it used the whole 250 on 14 of 61 checks and wrote no
+      // verdict, so the check was paid for and then redone on the quick model — the picture that
+      // needed the careful check got the quick one. `CAREFUL_CHECK_THINKING=1` gives it its
+      // thinking back, with room to finish.
+      maxTokens: carefulThinks && model !== STILL_DEFECT_MODEL ? 1500 : 250,
       model,
+      ...(carefulThinks ? {} : { thinking: "off" as const }),
+      step: model === STILL_DEFECT_MODEL ? "Picture check (quick)" : "Picture check (careful)",
     });
     // A failed call is asked once more on the other checker before it counts as unchecked.
     const first = exactLook || mustShow ? EXACT_LOOK_MODEL() : STILL_DEFECT_MODEL;
@@ -511,6 +554,8 @@ export async function scanSameThing(
       imageInput: { base64: pair.toString("base64"), mediaType: "image/png" },
       maxTokens: 200,
       model: SAME_THING_MODEL(),
+      thinking: "off",
+      step: "Same-object check",
     });
     const v = parseSameThingVerdict(result.text, result.stopReason);
     if (!v.same || v.copy) console.log(`[SameThing] ${thing}: ${v.what}`);

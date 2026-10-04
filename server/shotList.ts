@@ -80,6 +80,20 @@ export const MOTION_MIN_SEC = 2;
  * the whole reply budget and returned no text at all (job 140's opening batch) — 12 with a wide
  * budget, and a batch that still fails is retried as two halves.
  */
+/**
+ * How hard a planning step thinks. LOW unless its own setting says otherwise (`medium`, `high`,
+ * or `default` for the model's own level): most of a planning call's cost is what the model
+ * writes back, thinking included — the shot list wrote 30k tokens for a 3-minute film at the
+ * model's default (job 338) and 5k at low (jobs 339, 340), $0.34 → $0.09, with the audit no worse
+ * on either run. Settings: `SHOT_LIST_EFFORT`, `CONTEXT_EFFORT`, `PROPS_EFFORT`, `FIT_EFFORT`,
+ * `NAMED_LOOK_EFFORT`.
+ */
+export function planningEffort(name: string): "low" | "medium" | "high" | undefined {
+  const v = process.env[name];
+  if (v === "default") return undefined;
+  return v === "medium" || v === "high" ? v : "low";
+}
+
 const SHOT_BATCH = 12;
 /** Batches in flight at once: continuity comes from the props list and the storyboard's own
  *  preceding pictures, not from the previous batch's answer, so they need not wait on each other. */
@@ -122,6 +136,22 @@ export interface PlannedShot {
   contact?: boolean;
   /** Someone has to be holding or using the thing in this shot — the host's hands are in it. */
   held?: boolean;
+  /** The person shown when the line is about someone other than the host (`otherPersonOf`). */
+  other?: string;
+}
+
+/**
+ * Who a planner's `other` names, or undefined: a few plain words for a person who is NOT the host.
+ * The host and the viewer ("you") are never "someone else" — their pictures stay the host's — and
+ * an answer too long to be a description is dropped. Pure.
+ */
+export function otherPersonOf(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const who = raw.replace(/["“”]/g, "").replace(/\s+/g, " ").trim().replace(/[.,;:]+$/, "");
+  if (!who || who.split(" ").length > 8) return undefined;
+  if (/\b(?:the )?(?:host|narrator|presenter|viewer)\b|^(?:you|me|i|null|none|no one|nobody)$/i.test(who))
+    return undefined;
+  return who;
 }
 
 export interface ShotPlan {
@@ -432,12 +462,12 @@ function hostPiece(
 function picturePiece(
   parent: StoryboardScene,
   text: string,
-  shot: Pick<PlannedShot, "show" | "motion" | "list" | "same" | "contact" | "held" | "thing" | "text" | "print">,
+  shot: Pick<PlannedShot, "show" | "motion" | "list" | "same" | "contact" | "held" | "other" | "thing" | "text" | "print">,
   k: number
 ): StoryboardScene {
   // A video only of a big thing (`videoKind`): never hands, a held thing, or a tool going in.
   const motion = videoKind(shot.show, shot.motion, {
-    person: !!shot.held,
+    person: !!shot.held || !!shot.other,
     contact: !!shot.contact,
   });
   const moving = motion !== "none";
@@ -456,7 +486,9 @@ function picturePiece(
     // is never drawn held up by nobody (Norbert's job 238: a drill "held near the doorframe"
     // floated). A person in a still is the host from behind (`markHostBroll`).
     // Hands in the photo, or someone holding the thing: the host at work (`markHostBroll`).
-    humanPresent: shot.held || SHOWS_PERSON.test(shot.show) ? true : undefined,
+    humanPresent: shot.held || shot.other || SHOWS_PERSON.test(shot.show) ? true : undefined,
+    // A line about someone else shows THAT person, never the host in their place (`markHostBroll`).
+    otherPerson: shot.other || undefined,
     objectMotion: moving ? true : undefined,
     cameraMove: undefined,
     keyThing: shot.thing || undefined,
@@ -1027,8 +1059,14 @@ const SHOT_LIST_SYSTEM =
   "what it is (\"a buy-and-sell app\", \"an online shop\").\n" +
   "6. PEOPLE. The only person who may ever appear is THE HOST (described below, when given), and " +
   "only DOING the work — seen from behind or from the side, over the shoulder, hands at the task, " +
-  "face turned away or out of frame. Never a face, never anyone else. With no host given, only " +
-  "bare hands at the work.\n" +
+  "face turned away or out of frame. Never a face. With no host given, only bare hands at the " +
+  "work.\n" +
+  "6a. SOMEONE ELSE. When a line is about ANOTHER person doing something — a customer, a buyer, " +
+  "a neighbour, a relative, a stranger; never the host, and never \"you\" (the viewer's work is " +
+  "shown as the host's) — the picture may show THAT person, the same way: from behind or from " +
+  "the side, the face never shown. Write them into show, and set other to who they are in 2-6 " +
+  "plain words from the line (\"a woman customer\", \"an older neighbour\"). One person only. " +
+  "other is null in every other shot.\n" +
   "6b. SAFETY. A line that warns about a danger shows the SAFE way — the guard in place, a push " +
   "stick, hands well back, the iron set down on its heel, the extinguisher by the bench — never " +
   "the danger itself (no fingers near a blade or a needle, no open flame on the work, nobody hurt).\n" +
@@ -1085,7 +1123,7 @@ const SHOT_LIST_SYSTEM =
   'term: "a herringbone brick path — bricks laid in a zigzag of short rows", never just "a brick ' +
   'path".\n\n' +
   "Return ONLY JSON: " +
-  '{"beats":[{"beat":N,"hostUntil":null|"...","shots":[{"from":"...","show":"...","motion":"none","thing":null,"text":null,"print":null,"list":false,"same":false,"contact":false,"held":false}]}]}';
+  '{"beats":[{"beat":N,"hostUntil":null|"...","shots":[{"from":"...","show":"...","motion":"none","thing":null,"text":null,"print":null,"list":false,"same":false,"contact":false,"held":false,"other":null}]}]}';
 
 /**
  * Ask for the shot list, `SHOT_BATCH` beats per call, `SHOT_CONCURRENCY` calls at once. Each call
@@ -1139,7 +1177,7 @@ export async function planShotList(
     const userMessage =
       (opts.subject ? `VIDEO SUBJECT: ${opts.subject}\n` : "") +
       (opts.hostLook
-        ? `THE HOST (the only person b-roll may show, from behind or the side): ${opts.hostLook}\n`
+        ? `THE HOST (shown from behind or the side whenever a picture is of someone doing the work): ${opts.hostLook}\n`
         : "") +
       (opts.sheet ? `PROPS LIST:\n${opts.sheet}\n` : "") +
       (prior.length ? `SHOTS JUST BEFORE THIS BATCH: ${prior.join(" | ")}\n` : "") +
@@ -1149,6 +1187,8 @@ export async function planShotList(
       userMessage,
       maxTokens: SHOT_MAX_TOKENS,
       model: SHOT_LIST_MODEL(),
+      effort: planningEffort("SHOT_LIST_EFFORT"),
+      step: "Shot list",
     });
     const parsed = safeParseJSON<any>(r.text, r.stopReason);
     if (!parsed.success) throw new Error("unparseable shot list");
@@ -1171,6 +1211,7 @@ export async function planShotList(
           same: x.same === true,
           contact: x.contact === true,
           held: x.held === true,
+          other: otherPersonOf(x.other),
         }));
       out.push({
         scene,
@@ -1244,6 +1285,8 @@ export async function deriveContinuitySheet(
           `\nScript:\n${script.slice(0, 60000)}\n\nPROPS LIST:`,
         maxTokens: 16000,
         model: SHOT_LIST_MODEL(),
+        effort: planningEffort("PROPS_EFFORT"),
+        step: "Props list",
       });
       const sheet = r.text
         .split("\n")
@@ -1480,6 +1523,8 @@ export function applyPictureFixes(
     const others = named.map(t => t.name).filter(name => name !== primary?.name);
     s.otherKeyThings = others.length ? others : undefined;
     s.humanPresent = SHOWS_PERSON.test(f.show) ? true : undefined;
+    // A rewrite with no person in it has nobody to be "someone else".
+    if (!s.humanPresent) s.otherPerson = undefined;
     s.sameShot = undefined;
     s.toolContact = contactToolWork(f.show) ? true : undefined;
     s.blurPrint = !s.pictureText && blurredPrint(f.show) ? true : undefined;
@@ -1700,6 +1745,8 @@ export async function fitPicturesToLines(
           `\n${lines.join("\n")}\n\nJSON:`,
         maxTokens: 24000,
         model: FIT_MODEL(),
+        effort: planningEffort("FIT_EFFORT"),
+        step: "Line check",
       });
       fixes.push(...parsePictureFixes(r.text, scenes));
     } catch {
@@ -1717,6 +1764,10 @@ export async function fitPicturesToLines(
 }
 
 // ─── Does something in each picture move by itself? ─────────────────────────────────────
+
+/** A yes/no per picture from its own words — the quick model's job. `SELF_MOVING_MODEL` overrides. */
+const SELF_MOVING_MODEL = () =>
+  process.env.SELF_MOVING_MODEL || "claude-haiku-4-5-20251001";
 
 const SELF_MOVING_SYSTEM = `You read the pictures planned for a video, one per line, and decide for
 each whether something in it MOVES BY ITSELF in the moment it shows — movement a camera would catch
@@ -1801,7 +1852,8 @@ export async function judgeSelfMoving(
           .map(c => `#${c.id}: ${c.text.replace(/\s+/g, " ").slice(0, 300)}`)
           .join("\n") + "\n\nJSON:",
         maxTokens: 8000,
-        model: SHOT_LIST_MODEL(),
+        model: SELF_MOVING_MODEL(),
+        step: "What may be a video",
       });
       const yes = parseSelfMoving(r.text, asked);
       applySelfMoving(scenes, asked, yes);
@@ -2278,6 +2330,8 @@ export async function markSameContext(
           `Pictures:\n${lines.join("\n")}`,
         maxTokens: 16000,
         model: SHOT_LIST_MODEL(),
+        effort: planningEffort("CONTEXT_EFFORT"),
+        step: "Same-topic groups",
       });
       return applyContextGroups(
         scenes,

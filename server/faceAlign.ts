@@ -274,6 +274,7 @@ async function haikuFaceCenterX(buffer: Buffer): Promise<number | null> {
     imageInput: image,
     maxTokens: 64,
     model: FACE_ALIGN_MODEL,
+    step: "Face finding",
   });
   return parseFaceCenter(result.text, result.stopReason);
 }

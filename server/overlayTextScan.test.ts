@@ -16,6 +16,7 @@ import {
   parseOverlayVerdict,
   parseStillDefectVerdict,
   scanStillDefects,
+  STILL_DEFECT_SYSTEM,
 } from "./overlayTextScan";
 
 describe("parseStillDefectVerdict", () => {
@@ -200,12 +201,16 @@ describe("scanStillDefects", () => {
     } as any);
     const asked = await scanStillDefects(await imageOf(1280, 720), "a stack of sandpaper");
     expect(asked.missing).toBe(true);
-    expect(mockInvoke.mock.calls[0][0].systemPrompt).toContain("a stack of sandpaper");
+    // The per-picture questions ride AFTER the cached rulebook, never inside it — glued on, every
+    // check re-wrote the cache instead of reading it.
+    expect(mockInvoke.mock.calls[0][0].systemSuffix).toContain("a stack of sandpaper");
+    expect(mockInvoke.mock.calls[0][0].systemPrompt.startsWith(STILL_DEFECT_SYSTEM)).toBe(true);
+    expect(mockInvoke.mock.calls[0][0].systemPrompt).not.toContain("a stack of sandpaper");
     // Without a subject the question is never asked, and a stray "missing" is ignored.
     mockInvoke.mockClear();
     const plain = await scanStillDefects(await imageOf(1280, 720));
     expect(plain.missing).toBe(false);
-    expect(mockInvoke.mock.calls[0][0].systemPrompt).not.toContain("QUESTION 4");
+    expect(mockInvoke.mock.calls[0][0].systemSuffix).not.toContain("QUESTION 4");
   });
 
   it("reports broken geometry when the judge finds it", async () => {

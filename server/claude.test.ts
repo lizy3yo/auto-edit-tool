@@ -132,3 +132,53 @@ describe("Claude calls are billed when Anthropic answers", () => {
     expect(recordUsage.mock.calls[0][0].usd).toBeUndefined();
   });
 });
+
+/**
+ * Sonnet 5 thinks when `thinking` is omitted, and thinking is billed as output. A yes/no check
+ * asks for it off; a model that cannot switch it off must not be sent the field (it 400s).
+ */
+describe("thinking off and the step label", () => {
+  it("switches thinking off the way each model accepts, and leaves the rest alone", async () => {
+    create.mockResolvedValue(reply([{ type: "text", text: "ok" }]));
+    await invokeClaude({ userMessage: "x", model: "claude-sonnet-5", thinking: "off" });
+    expect(create.mock.calls[0][0].thinking).toEqual({ type: "disabled" });
+    create.mockClear();
+    // Sonnet 5.5 answers 400 to `disabled`; `between_tools` is its off switch.
+    await invokeClaude({ userMessage: "x", model: "claude-sonnet-5-5", thinking: "off" });
+    expect(create.mock.calls[0][0].thinking).toEqual({ type: "between_tools" });
+
+    for (const model of [
+      "claude-opus-5-5",
+      "claude-haiku-4-5-20251001",
+    ]) {
+      create.mockClear();
+      await invokeClaude({ userMessage: "x", model, thinking: "off" });
+      expect(create.mock.calls[0][0].thinking).toBeUndefined();
+    }
+  });
+
+  it("leaves thinking alone when the caller did not ask", async () => {
+    create.mockResolvedValue(reply([{ type: "text", text: "ok" }]));
+    await invokeClaude({ userMessage: "x", model: "claude-sonnet-5" });
+    expect(create.mock.calls[0][0].thinking).toBeUndefined();
+  });
+
+  it("sends effort only to a model that takes it", async () => {
+    create.mockResolvedValue(reply([{ type: "text", text: "ok" }]));
+    await invokeClaude({ userMessage: "x", model: "claude-opus-5-5", effort: "low" });
+    expect(create.mock.calls[0][0].output_config).toEqual({ effort: "low" });
+    create.mockClear();
+    await invokeClaude({ userMessage: "x", model: "claude-haiku-4-5-20251001", effort: "low" });
+    expect(create.mock.calls[0][0].output_config).toBeUndefined();
+    create.mockClear();
+    await invokeClaude({ userMessage: "x", model: "claude-opus-5-5" });
+    expect(create.mock.calls[0][0].output_config).toBeUndefined();
+  });
+
+  it("puts the step on the cost line", async () => {
+    create.mockResolvedValue(reply([{ type: "text", text: "ok" }]));
+    await invokeClaude({ userMessage: "x", model: "claude-sonnet-5", step: "Shot list" });
+    await vi.waitFor(() => expect(recordUsage).toHaveBeenCalled());
+    expect(recordUsage.mock.calls[0][0].step).toBe("Shot list");
+  });
+});

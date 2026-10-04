@@ -45,6 +45,7 @@ import ffmpegPath from "ffmpeg-static";
 import { getLongformVideoJobById } from "../../server/db";
 import { invokeClaude } from "../../server/claude";
 import { safeParseJSON } from "../../server/jsonRepair";
+import { STAGED_RULE } from "../../server/overlayTextScan";
 import type { StoryboardScene, LongformInputParams } from "../../shared/types";
 import { checkPlan, fmt, textOf, type PlanFinding } from "../../server/planGate";
 import { parseCtaMarkers } from "../../server/longformVideo";
@@ -145,11 +146,7 @@ const JUDGE_SYSTEM =
   '("ok"), or clearly somewhere else, or showing it as a picture/poster on a wall ("wrong")? A ' +
   "workshop, garage, shed, sewing room, kitchen table or work bench all count as the SAME home " +
   'base and never make it wrong. If the line names no such place, or you are unsure, "n/a".\n' +
-  "staged: would a viewer take this for a styled, staged or AI-rendered image rather than an " +
-  "ordinary photo someone took on their phone — a glowing lamp or golden glow lighting it, moody " +
-  "light with dark corners, props neatly arranged around the subject, glossy hyper-detailed " +
-  "textures, a perfectly composed product close-up? The HOST seen from behind doing the work is " +
-  "expected, not a problem. When unsure, false.\n" +
+  `staged: ${STAGED_RULE} The HOST seen from behind doing the work is expected, not a problem.\n` +
   'what: 3-10 words naming the worst problem, or "" when there is none.';
 
 async function frameOf(url: string, atSec = 1): Promise<Buffer | null> {

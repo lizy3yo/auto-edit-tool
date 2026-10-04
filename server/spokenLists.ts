@@ -44,7 +44,7 @@ export interface SpokenList {
   kind?: "things" | "steps";
 }
 
-const LIST_MODEL = () => process.env.LIST_MODEL || "claude-opus-5-5";
+const LIST_MODEL = () => process.env.LIST_MODEL || "claude-sonnet-5-5";
 
 /** The most words one item may have — a thing and its own describing words, never a clause. */
 export const LIST_ITEM_MAX_WORDS = 12;
@@ -343,7 +343,7 @@ export async function findSpokenLists(
   const ask =
     opts.ask ??
     (async (system: string, user: string) =>
-      (await invokeClaude({ systemPrompt: system, userMessage: user, maxTokens: 8000, model: LIST_MODEL() })).text);
+      (await invokeClaude({ systemPrompt: system, userMessage: user, maxTokens: 8000, model: LIST_MODEL(), step: "Spoken lists" })).text);
   const lists: SpokenList[] = [];
   let fromModel = true;
   for (let from = 0; from < sentences.length; from += BATCH) {

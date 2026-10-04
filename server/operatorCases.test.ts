@@ -16,21 +16,51 @@ import {
   SCREEN_ITEM_VIEW,
   shotFraming,
 } from "./pictureMemory";
-import { applyNamedLooks, parseShownFacts, PART_VIEW, scriptWords } from "./namedLooks";
+import {
+  applyNamedLooks,
+  namedLookClause,
+  parseShownFacts,
+  PART_VIEW,
+  scriptWords,
+  SUBJECT_OVER_LOOK,
+} from "./namedLooks";
 import { applySpokenLists, findSpokenLists, spokenListsByShape, splitSentences } from "./spokenLists";
-import { atWork, foldSnappedFlashes, joinShortSplits, parseContextGroups } from "./shotList";
+import {
+  applyShotPlan,
+  atWork,
+  foldSnappedFlashes,
+  joinShortSplits,
+  otherPersonOf,
+  parseContextGroups,
+} from "./shotList";
 import { keepOwnWords } from "./narrationAlignment";
 import {
   ANON_PERSON_SUFFIX,
   appScreenClause,
+  BLURRED_PRINT_CLAUSE,
+  buildSplitRightScene,
+  buildStillPrompt,
   keepBodyPartsOnBody,
+  memoryClause,
+  NO_FIGURES_SUFFIX,
+  ONE_OTHER_PERSON_SUFFIX,
+  otherPersonClause,
+  SCREEN_TEXT_AS_BARS,
+  subjectLead,
   markCtaQrBlock,
   ONE_BODY_CLAUSE,
   personClauseFor,
   TOOL_POSITION_CLAUSE,
   withAllowedText,
 } from "./longformVideo";
-import { requiredThingsQuestion, STILL_DEFECT_SYSTEM } from "./overlayTextScan";
+import {
+  exactLookQuestion,
+  requiredThingsQuestion,
+  SOFT_PRINT_QUESTION,
+  STAGED_QUESTION,
+  STAGED_RULE,
+  STILL_DEFECT_SYSTEM,
+} from "./overlayTextScan";
 import { DETACHED_BODY_PART, looksCutOff, markHostBroll, onTheBody, SHOWS_PERSON } from "./hostLook";
 
 const pic = (index: number, scriptText: string, showSubject: string, over: Partial<StoryboardScene> = {}) =>
@@ -570,5 +600,182 @@ describe("Frederick's job 335: what the line is about stays the subject; unread 
       { keyThing: alarm, partOf: alarm, pictureText: "Photoelectric, Sealed 10-Year, Interconnected" });
     expect(memoryViewFor([first, box], box)).toBe(PART_VIEW);
     expect(withAllowedText("Close-up of the box.", box.pictureText)).toMatch(/Close-up/);
+  });
+});
+
+/**
+ * ONE PICTURE, ONE INSTRUCTION (2026-10-05). A picture is described by up to four steps — what the
+ * line needs, the prompt writer's rewrite, the named kind's general look, the memory picture — and
+ * on Dale's job 344 they disagreed: three said "a plain board", one said "engraved"; the app's look
+ * said "a grid of product cards" under a line about its settings page; a split panel that may show
+ * no person was checked for hands. The picture maker drew the general version and the check failed
+ * it for the particular one. These are the rules for which description wins — none names a channel.
+ */
+describe("one picture, one instruction (Dale's job 344)", () => {
+  const engraved = pic(
+    16,
+    "Engraved boards,",
+    "a rectangular board of maple and walnut strips with a name engraved into its surface",
+    {
+      visualPrompt:
+        "Rectangular board with alternating pale maple and dark walnut strips, leaning against a garage wall.",
+      blurPrint: true,
+    }
+  );
+
+  it("what the line needs leads the prompt when the rewrite dropped part of it", () => {
+    const lead = subjectLead(engraved.showSubject, engraved.visualPrompt);
+    expect(lead).toMatch(/^THE PICTURE MUST SHOW: /);
+    expect(lead).toContain("engraved");
+    expect(buildStillPrompt(engraved).startsWith(lead)).toBe(true);
+    // A rewrite that already says all of it is left alone — no doubled sentence.
+    expect(subjectLead("a walnut board on a bench", "A walnut board lying on a bench.")).toBe("");
+    expect(subjectLead(undefined, "anything")).toBe("");
+  });
+
+  it("an engraving is soft print: drawn as unreadable carved lines, and the check accepts that", () => {
+    expect(BLURRED_PRINT_CLAUSE).toMatch(/engraved or carved/i);
+    expect(buildStillPrompt(engraved)).toContain("shallow carved lines");
+    expect(SOFT_PRINT_QUESTION).toMatch(/engraving/);
+    expect(SOFT_PRINT_QUESTION).toMatch(/Never answer missing because its words cannot be read/);
+  });
+
+  it("a named kind's general look gives way to what this picture shows of it", () => {
+    const settings = pic(
+      30,
+      "you can opt out in your shop settings.",
+      "a phone showing the shop settings screen, a white page with toggle rows",
+      { namedLook: "the shop app: a grid of product listing cards under a search bar" }
+    );
+    const clause = namedLookClause(settings);
+    expect(clause).toContain(SUBJECT_OVER_LOOK);
+    expect(clause).toMatch(/particular part, page or screen/);
+    // The checker is told the same thing, or it fails the settings page for not being the grid.
+    expect(exactLookQuestion(settings.namedLook!)).toMatch(/never answer true only because the frame is not the general view/);
+  });
+
+  it("a remembered thing is the same piece WITH what this picture adds to it", () => {
+    const withMemory = { ...engraved, keyThing: "the board", memoryRefUrls: ["https://x/1.png"] } as StoryboardScene;
+    expect(memoryClause(withMemory)).toMatch(/done or added to it/);
+    expect(memoryClause(withMemory)).toMatch(/the reference is how it looked before/);
+  });
+
+  it("a split panel is drawn from, and checked against, its own description", () => {
+    const beat = host(10, "Number one. Sort your finished pieces by size.", {
+      showSubject: "hands sorting finished pieces into three piles",
+      splitVisual: "Three piles of finished wooden pieces on a workbench.",
+    });
+    const panel = buildSplitRightScene(beat);
+    expect(panel.showSubject).toBe(beat.splitVisual);
+    expect(buildStillPrompt(panel, false, undefined, undefined, true)).not.toMatch(/hands sorting/);
+    // The host beat itself is untouched.
+    expect(beat.showSubject).toBe("hands sorting finished pieces into three piles");
+  });
+
+  it("words on a screen are drawn as soft bars — unless the line says them", () => {
+    const listing = pic(40, "furniture on the app.", "a phone showing a listing of a bookcase", {
+      visualPrompt: "A phone on a workbench showing an app listing of a bookcase.",
+    });
+    expect(appScreenClause(listing)).toContain(SCREEN_TEXT_AS_BARS);
+    expect(SCREEN_TEXT_AS_BARS).toMatch(/never actual letters or digits/);
+    // A price the line SAYS stays readable (Dale's job 306 showed a said price as a grey bar).
+    expect(appScreenClause({ ...listing, pictureText: "$240" } as StoryboardScene)).not.toContain(
+      SCREEN_TEXT_AS_BARS
+    );
+  });
+});
+
+/**
+ * "STAGED" IS THE LIGHT AND THE FINISH, NEVER THE CONTENT (2026-10-05, the operator: a rule about
+ * Dale's stacks "only does that for Dale"). What is in a picture comes from the script; a subject
+ * that is tidy because the line is about it being sorted, folded, laid out or displayed is the
+ * right picture on any channel. The rule names no object and no channel.
+ */
+describe("staged judges how the photo was taken, not what is in it (Dale's job 345)", () => {
+  it("keeps the fake-light and advert-finish cases", () => {
+    expect(STAGED_RULE).toMatch(/glowing lamp, candle or golden glow/);
+    expect(STAGED_RULE).toMatch(/dramatic or moody light/);
+    expect(STAGED_RULE).toMatch(/advertising finish/);
+  });
+
+  it("never fails a picture for its content or arrangement, and names no channel's things", () => {
+    expect(STAGED_RULE).toMatch(/NEVER say true because of what is in the picture or how it is arranged/);
+    expect(STAGED_RULE).not.toMatch(/props neatly arranged around the subject/);
+    expect(STAGED_RULE).not.toMatch(/board|coaster|quilt|workbench|workshop/i);
+    expect(STAGED_QUESTION).toContain(STAGED_RULE);
+  });
+});
+
+/**
+ * SOMEONE ELSE IS DRAWN AS SOMEONE ELSE (2026-10-05, the operator chose this over leaving people
+ * out). The only person b-roll could show was the host, so a line about a customer — Dale's "a
+ * buyer three states away, hunting for a board with her parents' last name on it" — came back as
+ * Dale at his own bench, run after run, and the audit said "shows a man, not a woman". The shot
+ * list now names the other person in the line's words; they are drawn from behind, face never
+ * shown, without the host's look or photo. Any channel, any kind of person.
+ */
+describe("a line about someone else shows that person, not the host", () => {
+  const buyer = pic(
+    22,
+    "a buyer three states away, hunting for a board with her parents' last name on it,",
+    "a woman seen from behind on a sofa at night, scrolling a shopping app on her phone",
+    { otherPerson: "a woman customer", humanPresent: true }
+  );
+
+  it("takes the person from the planner, and never the host or the viewer", () => {
+    expect(otherPersonOf(" a woman customer. ")).toBe("a woman customer");
+    expect(otherPersonOf("an older neighbour")).toBe("an older neighbour");
+    for (const no of ["the host", "host", "you", "the viewer", "null", "", null, undefined, 3])
+      expect(otherPersonOf(no)).toBeUndefined();
+    // A sentence is not a description.
+    expect(otherPersonOf("a woman who lives three states away and wants a board with a name")).toBeUndefined();
+  });
+
+  it("the planned shot carries the person onto its picture, as a photo with a person in it", () => {
+    const beat = pic(5, "A buyer three states away can find yours while you sleep.", "x");
+    const { scenes } = applyShotPlan(
+      [beat],
+      [
+        {
+          scene: 5,
+          hostUntil: null,
+          shots: [
+            {
+              from: "A buyer three",
+              show: "a woman seen from behind scrolling a shopping app on her phone",
+              motion: "object",
+              other: "a woman customer",
+            },
+          ],
+        },
+      ]
+    );
+    expect(scenes[0].otherPerson).toBe("a woman customer");
+    expect(scenes[0].humanPresent).toBe(true);
+    expect(scenes[0].stillImage).toBe(true);
+  });
+
+  it("is never given the host's look or photo", () => {
+    const scenes = [{ ...buyer }, pic(23, "Sand it smooth.", "hands sanding a board", { humanPresent: true })];
+    markHostBroll(scenes, { hostLook: "a man with short white hair in a plaid shirt" }, "https://x/host.png");
+    expect(scenes[0].brollHostLook).toBeUndefined();
+    expect(scenes[0].brollHostRef).toBeUndefined();
+    expect(scenes[0].humanPresent).toBe(true);
+    // The host stays the host wherever the work is the video's own.
+    expect(scenes[1].brollHostLook).toMatch(/plaid shirt/);
+    expect(scenes[1].brollHostRef).toBe("https://x/host.png");
+  });
+
+  it("is drawn from behind, face never shown, one body — and told apart from the host", () => {
+    const prompt = buildStillPrompt(buyer);
+    expect(prompt).toContain(otherPersonClause("a woman customer"));
+    expect(prompt).toMatch(/NOT the video's host/);
+    expect(prompt).toMatch(/face turned away or out of frame so it is never shown/);
+    expect(prompt).toMatch(/This person has exactly two arms/);
+    expect(prompt).toContain(ONE_OTHER_PERSON_SUFFIX);
+    expect(prompt).not.toContain(NO_FIGURES_SUFFIX);
+    expect(prompt).not.toMatch(/The only person in this shot is the host/);
+    // The person stays in the words that lead the prompt.
+    expect(prompt).toMatch(/^(THE PICTURE MUST SHOW: )?a woman seen from behind/);
   });
 });

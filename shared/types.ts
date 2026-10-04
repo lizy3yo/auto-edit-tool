@@ -370,6 +370,9 @@ export interface StoryboardScene {
   /** Moving clips of this beat refused for impossible motion (`scanClipGlitch`); the second makes
    *  the beat a still. */
   motionGlitches?: number;
+  /** Every check of a picture drawn for this beat — its kind and what the check named
+   *  (`server/pictureCheckLog.ts`), so a film shows which kinds come out right the first time. */
+  pictureChecks?: { kind: string; panel?: boolean; flags: string[] }[];
   /** The clip URL last checked for a picture at assembly — so a Reassemble does not re-check it. */
   clipCheckedUrl?: string;
   /** One item of a spoken list ("a saw, a drill, …") — a quick cut, allowed down to `LIST_SHOT_MIN_SEC`. */
@@ -490,6 +493,13 @@ export interface StoryboardScene {
    */
   brollHostLook?: string;
   brollHostRef?: string;
+  /**
+   * The person this picture shows when the line is about SOMEONE ELSE than the host — a customer,
+   * a neighbour ("a woman customer"), in the line's own words. Drawn from behind or the side, face
+   * never shown, WITHOUT the host's photo or look (`otherPersonClause`); the host is never put in
+   * their place. Set by the shot list (`other`).
+   */
+  otherPerson?: string;
   /**
    * This beat sits inside the FAST-OPEN window (`LongformPacing.fastOpen`): the first `zoneSec`
    * of narration, where cuts land faster to match the script's opening pace. Set once at

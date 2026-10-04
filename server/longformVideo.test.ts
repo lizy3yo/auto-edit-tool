@@ -9263,7 +9263,7 @@ describe("generateValidatedStill", () => {
     expect(genImage).toHaveBeenCalledTimes(2);
   });
 
-  it("ships the still when text survives the whole attempt budget (fails open)", async () => {
+  it("ships the still when the same fault comes straight back (fails open, no third picture)", async () => {
     const texty = await pngOf("#111");
     mockScanStillDefects.mockResolvedValue(defect({ overlay: true }));
     const genImage = vi.fn().mockResolvedValue({
@@ -9271,10 +9271,11 @@ describe("generateValidatedStill", () => {
       fileData: texty,
     });
     // Resolves rather than throwing: one caption must not fail a scene the completeness gate
-    // would then stop the whole job on.
+    // would then stop the whole job on. And the redraw that came back with exactly the same
+    // fault is kept — a third picture from the same prompt bought nothing on job 343.
     const out = await generateValidatedStill(scene, 3, undefined, genImage);
     expect(out.buffer.equals(texty)).toBe(true);
-    expect(genImage).toHaveBeenCalledTimes(3);
+    expect(genImage).toHaveBeenCalledTimes(2);
     mockScanStillDefects.mockResolvedValue(defect()); // restore the default for later tests
   });
 
