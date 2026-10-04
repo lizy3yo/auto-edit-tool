@@ -13,7 +13,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Loader2, KeyRound, FlaskConical, Mic } from "lucide-react";
+import { Loader2, KeyRound, FlaskConical, Mic, Plus } from "lucide-react";
 import { toast } from "sonner";
 
 /**
@@ -165,7 +165,7 @@ export function HostLipsyncToggle() {
           <div className="text-xs text-muted-foreground">
             {onRunpod
               ? "Your own GPU: 720p, billed by GPU second. HeyGen keys below are kept but unused."
-              : "1080p, per-tab accounts, billed per second of finished video."}
+              : "1080p, pooled accounts, billed per second of finished video."}
             {!ready && blockedReason ? (
               <>
                 {" "}
@@ -306,11 +306,11 @@ export function HostLipsyncToggle() {
 }
 
 /**
- * Admin: per-tab provider keys for long-form video. Each of the 5 video tabs (slots 0–4)
- * renders its b-roll on its own APIMART account and lip-syncs its host on its own HeyGen
- * account; APIMART also has a dedicated key for the Edit Images/Videos pages. Keys are stored
- * encrypted; only the masked tail is ever returned. Leaving a field empty and saving clears
- * that slot.
+ * Admin: the provider ACCOUNTS for long-form video (`shared/accountPool.ts`). APIMART renders
+ * b-roll clips and HeyGen lip-syncs the host; each is a list of accounts, and every new video
+ * takes the least busy one — keys no longer belong to a tab. APIMART also has a dedicated key
+ * for the Edit Images/Videos pages. Keys are stored encrypted; only the masked tail is ever
+ * returned. Leaving a field empty and saving removes that account.
  */
 
 /** Live balance/quota readout for a stored key; doubles as a health check. */
@@ -399,7 +399,7 @@ function KeyRow({
 }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="w-20 shrink-0 text-sm text-muted-foreground">
+      <span className="w-24 shrink-0 text-sm text-muted-foreground">
         {label}
       </span>
       <Input
@@ -422,6 +422,49 @@ function KeyRow({
   );
 }
 
+/** "2 videos rendering" beside an account that is in use right now. */
+function RenderingBadge({ count }: { count: number }) {
+  if (!count) return null;
+  return (
+    <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">
+      {count} video{count === 1 ? "" : "s"} rendering
+    </span>
+  );
+}
+
+/**
+ * Which account rows to draw: every account that has a key, plus `extra` blank ones the admin
+ * asked for with "Add account" (the lowest free numbers) — one blank row when there are none at
+ * all, so an empty list still has somewhere to type.
+ */
+export function visibleAccounts<
+  T extends { slotIndex: number; masked: string | null },
+>(accounts: T[], extra: number): T[] {
+  const withKey = accounts.filter(a => a.masked);
+  const blank = accounts
+    .filter(a => !a.masked)
+    .slice(0, Math.max(extra, withKey.length ? 0 : 1));
+  return [...withKey, ...blank].sort((a, b) => a.slotIndex - b.slotIndex);
+}
+
+function AddAccountButton({
+  shown,
+  total,
+  onAdd,
+}: {
+  shown: number;
+  total: number;
+  onAdd: () => void;
+}) {
+  if (shown >= total) return null;
+  return (
+    <Button variant="outline" size="sm" className="gap-1.5" onClick={onAdd}>
+      <Plus className="h-3.5 w-3.5" />
+      Add account
+    </Button>
+  );
+}
+
 export function ProviderKeys() {
   const utils = trpc.useUtils();
 
@@ -441,6 +484,11 @@ export function ProviderKeys() {
   const [editDraft, setEditDraft] = useState("");
   const [heygenDrafts, setHeygenDrafts] = useState<Record<number, string>>({});
   const [heygenTestDraft, setHeygenTestDraft] = useState("");
+  // Blank rows opened with "Add account". Saving a key into one makes it a real account.
+  const [apimartExtra, setApimartExtra] = useState(0);
+  const [heygenExtra, setHeygenExtra] = useState(0);
+  const apimartRows = visibleAccounts(data?.slots ?? [], apimartExtra);
+  const heygenRows = visibleAccounts(heygen?.slots ?? [], heygenExtra);
   // AIREITER BOLT-ON (temporary) — delete with the section below.
   const { data: aireiter, isLoading: aireiterLoading } =
     trpc.longformVideo.getAireiter.useQuery();
@@ -452,7 +500,10 @@ export function ProviderKeys() {
 
   const saveMutation = trpc.longformVideo.setApimartKey.useMutation({
     onSuccess: (_res, vars) => {
-      toast.success(`APIMART key for Video ${vars.slotIndex + 1} saved.`);
+      toast.success(
+        `APIMART Account ${vars.slotIndex + 1} ${vars.apiKey ? "saved" : "removed"}.`
+      );
+      setApimartExtra(0);
       setDrafts(d => ({ ...d, [vars.slotIndex]: "" }));
       utils.longformVideo.getApimartKeys.invalidate();
       utils.longformVideo.getApimartBalances.invalidate();
@@ -472,7 +523,10 @@ export function ProviderKeys() {
 
   const saveHeygenMutation = trpc.longformVideo.setHeygenKey.useMutation({
     onSuccess: (_res, vars) => {
-      toast.success(`HeyGen key for Video ${vars.slotIndex + 1} saved.`);
+      toast.success(
+        `HeyGen Account ${vars.slotIndex + 1} ${vars.apiKey ? "saved" : "removed"}.`
+      );
+      setHeygenExtra(0);
       setHeygenDrafts(d => ({ ...d, [vars.slotIndex]: "" }));
       utils.longformVideo.getHeygenKeys.invalidate();
       utils.longformVideo.getHeygenQuotas.invalidate();
@@ -514,7 +568,7 @@ export function ProviderKeys() {
       <div className="space-y-3">
         <Label className="flex items-center gap-2 text-sm font-medium">
           <KeyRound className="h-4 w-4" />
-          APIMART keys — b-roll (per tab)
+          APIMART accounts — b-roll
         </Label>
         {isLoading ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -522,12 +576,12 @@ export function ProviderKeys() {
           </div>
         ) : (
           <>
-            {data?.slots.map(({ slotIndex, masked }) => (
+            {apimartRows.map(({ slotIndex, masked, rendering }) => (
               <KeyRow
                 key={slotIndex}
-                label={`Video ${slotIndex + 1}`}
+                label={`Account ${slotIndex + 1}`}
                 masked={masked}
-                placeholder="Not set — uses 69Labs"
+                placeholder="Paste an APIMART key"
                 draft={drafts[slotIndex] ?? ""}
                 onDraftChange={value =>
                   setDrafts(d => ({ ...d, [slotIndex]: value }))
@@ -535,19 +589,27 @@ export function ProviderKeys() {
                 onSave={apiKey => saveMutation.mutate({ slotIndex, apiKey })}
                 saving={saveMutation.isPending}
                 badge={
-                  <BalanceBadge
-                    keySet={!!masked}
-                    {...apimartBadge(
-                      balances?.slots.find(s => s.slotIndex === slotIndex)
-                        ?.balance
-                    )}
-                    loading={balancesLoading}
-                    format={v => `$${v.toFixed(2)} left`}
-                    lowThreshold={5}
-                  />
+                  <>
+                    <BalanceBadge
+                      keySet={!!masked}
+                      {...apimartBadge(
+                        balances?.slots.find(s => s.slotIndex === slotIndex)
+                          ?.balance
+                      )}
+                      loading={balancesLoading}
+                      format={v => `$${v.toFixed(2)} left`}
+                      lowThreshold={5}
+                    />
+                    <RenderingBadge count={rendering} />
+                  </>
                 }
               />
             ))}
+            <AddAccountButton
+              shown={apimartRows.length}
+              total={data?.slots.length ?? 0}
+              onAdd={() => setApimartExtra(n => n + 1)}
+            />
             <KeyRow
               label="Edit pages"
               masked={data?.editMasked ?? null}
@@ -569,9 +631,11 @@ export function ProviderKeys() {
           </>
         )}
         <p className="text-xs text-muted-foreground">
-          Each long-form tab renders b-roll on its own APIMART account. Blank ⇒
-          that tab uses 69Labs. The Edit Images/Videos pages are APIMART-only on
-          their own key; blank ⇒ those pages can&apos;t generate.
+          Every new video renders its b-roll on whichever account is least
+          busy, and stays on it until it is done — more accounts means less
+          waiting when several people render at once. Save a row empty to remove
+          that account. The Edit Images/Videos pages are APIMART-only on their
+          own key; blank ⇒ those pages can&apos;t generate.
         </p>
         {aireiter?.lanes.broll && (
           <p className="text-xs text-warning">
@@ -585,7 +649,7 @@ export function ProviderKeys() {
       <div className="space-y-3">
         <Label className="flex items-center gap-2 text-sm font-medium">
           <KeyRound className="h-4 w-4" />
-          AIReiter key — b-roll + stills (all tabs)
+          AIReiter key — b-roll + stills (every video)
         </Label>
         {aireiterLoading ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -616,7 +680,7 @@ export function ProviderKeys() {
           />
         )}
         <p className="text-xs text-muted-foreground">
-          One key for all 5 tabs — AIReiter is a single account with one shared
+          One key for every video — AIReiter is a single account with one shared
           credit pool. Which lanes it takes over is set by{" "}
           <code className="text-[11px]">AIREITER_LANES</code> in{" "}
           <code className="text-[11px]">.env</code> (
@@ -656,7 +720,7 @@ export function ProviderKeys() {
       >
         <Label className="flex items-center gap-2 text-sm font-medium">
           <KeyRound className="h-4 w-4" />
-          HeyGen keys — host lip-sync (per tab)
+          HeyGen accounts — host lip-sync
           {lipsyncOnRunpod ? (
             <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] font-normal text-muted-foreground">
               not in use — host lip-sync is on InfiniteTalk
@@ -668,12 +732,12 @@ export function ProviderKeys() {
             <Loader2 className="h-4 w-4 animate-spin" /> Loading…
           </div>
         ) : (
-          heygen?.slots.map(({ slotIndex, masked }) => (
+          heygenRows.map(({ slotIndex, masked, rendering }) => (
             <KeyRow
               key={slotIndex}
-              label={`Video ${slotIndex + 1}`}
+              label={`Account ${slotIndex + 1}`}
               masked={masked}
-              placeholder="Not set — uses shared HEYGEN_API_KEY"
+              placeholder="Paste a HeyGen key"
               draft={heygenDrafts[slotIndex] ?? ""}
               onDraftChange={value =>
                 setHeygenDrafts(d => ({ ...d, [slotIndex]: value }))
@@ -683,33 +747,43 @@ export function ProviderKeys() {
               }
               saving={saveHeygenMutation.isPending}
               badge={
-                <BalanceBadge
-                  keySet={!!masked}
-                  value={
-                    quotas?.slots.find(s => s.slotIndex === slotIndex)?.quota ??
-                    null
-                  }
-                  loading={quotasLoading}
-                  format={v => `${Math.round(v)} credits left`}
-                  lowThreshold={20}
-                />
+                <>
+                  <BalanceBadge
+                    keySet={!!masked}
+                    value={
+                      quotas?.slots.find(s => s.slotIndex === slotIndex)
+                        ?.quota ?? null
+                    }
+                    loading={quotasLoading}
+                    format={v => `${Math.round(v)} credits left`}
+                    lowThreshold={20}
+                  />
+                  <RenderingBadge count={rendering} />
+                </>
               }
             />
           ))
         )}
+        {!heygenLoading && (
+          <AddAccountButton
+            shown={heygenRows.length}
+            total={heygen?.slots.length ?? 0}
+            onAdd={() => setHeygenExtra(n => n + 1)}
+          />
+        )}
         <p className="text-xs text-muted-foreground">
-          Each long-form tab lip-syncs its host on its own HeyGen account —
-          HeyGen caps concurrent renders per account, so 5 accounts render 5×
-          wider. Blank ⇒ that tab uses the shared{" "}
-          <code className="text-[11px]">HEYGEN_API_KEY</code>; with that unset
-          too, host scenes fail loudly.
+          Every new video lip-syncs its host on whichever account is least
+          busy. HeyGen caps concurrent renders per account, so each account
+          added renders that much wider. With no account here, videos use the
+          shared <code className="text-[11px]">HEYGEN_API_KEY</code>; with that
+          unset too, host scenes fail loudly.
         </p>
         {!heygenLoading && (
           <div className="space-y-2 border-t border-border pt-3">
             <KeyRow
               label="Test"
               masked={heygen?.test ?? null}
-              placeholder="Not set — the HeyGen test page uses the tab accounts"
+              placeholder="Not set — the HeyGen test page uses the accounts above"
               draft={heygenTestDraft}
               onDraftChange={setHeygenTestDraft}
               onSave={apiKey => saveHeygenTestMutation.mutate({ apiKey })}
@@ -726,8 +800,8 @@ export function ProviderKeys() {
             />
             <p className="text-xs text-muted-foreground">
               Used only by the HeyGen test page — films never touch it, so
-              trying photos never spends a tab&apos;s credits. The test page
-              picks it first; the tab accounts stay there as a backup.
+              trying photos never spends a film account&apos;s credits. The test
+              page picks it first; the accounts above stay there as a backup.
             </p>
           </div>
         )}

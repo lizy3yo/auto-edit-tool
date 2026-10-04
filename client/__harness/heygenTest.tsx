@@ -7,6 +7,12 @@ import superjson from "superjson";
 import { Toaster } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { HeygenTest } from "@/components/HeygenTest";
+import {
+  accountToSlot,
+  pickHeygenTestAccount,
+  slotToAccount,
+  type HeygenTestAccount,
+} from "@shared/heygenTest";
 
 /**
  * Harness for the HeyGen test page, against stubbed `channelConfig.list`, `channelHostPhoto.list`,
@@ -191,7 +197,7 @@ function handle(path: string, input: any): unknown {
   if (path === "styleReference.upload")
     return { url: swatch(Math.floor(Math.random() * 360), "Up orig") };
   if (path === "heygenTest.phoneLook") return { url: swatch(90, "Up phone") };
-  if (path === "heygenTest.accounts") return availability();
+  if (path === "heygenTest.status") return { ready: keys.set, ratePerSec: RATE };
   if (path === "heygenTest.list") {
     // Same contract as the server: filter by run, page by run (5), newest run first.
     const q = (input?.search ?? "").toLowerCase();
@@ -233,11 +239,13 @@ function handle(path: string, input: any): unknown {
   if (path === "heygenTest.start") {
     const batchId = `b${nextId}`;
     const created = new Date().toISOString();
+    const account = pickAccount();
     for (const imageUrl of input.imageUrls)
       state.rows.unshift(
         base({
           id: nextId++,
           batchId,
+          heygenSlot: account == null ? null : accountToSlot(account),
           imageUrl,
           script: input.script,
           runName: input.name ?? null,
@@ -276,51 +284,33 @@ function handle(path: string, input: any): unknown {
   throw new Error(`unstubbed ${path}`);
 }
 
-/** Accounts with a key, and which of them a film is "rendering" on (toggled below). */
+/**
+ * Accounts with a key, and which of them a film is "rendering" on (toggled below). Nobody picks
+ * an account on the page: `heygenTest.start` runs the server's own rule here
+ * (`pickHeygenTestAccount`) over these plus the clips still running, so each new clip's card
+ * shows where it would really go — the Test account first, then the least busy.
+ */
 const ACCOUNTS = [
   { account: "test", label: "Test account" },
-  { account: 0, label: "Tab 1 account" },
-  { account: 1, label: "Tab 2 account" },
-  { account: 4, label: "Tab 5 account" },
+  { account: 0, label: "Account 1" },
+  { account: 1, label: "Account 2" },
+  { account: 4, label: "Account 5" },
 ] as const;
 const busy = new Set<number | string>([1]);
-const availability = () => ({
-  available: ACCOUNTS.filter(a => !busy.has(a.account)),
-  configured: ACCOUNTS.length,
-  ratePerSec: RATE,
-});
-
-/**
- * Stand-in for the server's live stream: the toggles below push into it exactly as a film
- * starting or finishing would, so the picker's real-time update can be watched.
- */
-const streams = new Set<FakeEventSource>();
-class FakeEventSource {
-  onopen: (() => void) | null = null;
-  onerror: (() => void) | null = null;
-  private listeners: ((e: MessageEvent) => void)[] = [];
-  constructor(_url: string) {
-    streams.add(this);
-    setTimeout(() => {
-      this.onopen?.();
-      this.push();
-    }, 50);
-  }
-  addEventListener(_type: string, fn: (e: MessageEvent) => void) {
-    this.listeners.push(fn);
-  }
-  push() {
-    const e = new MessageEvent("accounts", {
-      data: JSON.stringify(availability()),
-    });
-    this.listeners.forEach(fn => fn(e));
-  }
-  close() {
-    streams.delete(this);
-  }
-}
-(window as any).EventSource = FakeEventSource;
-const pushAll = () => streams.forEach(s => s.push());
+/** Untick to see the one blocker left: no HeyGen key at all. */
+const keys = { set: true };
+const pickAccount = () =>
+  pickHeygenTestAccount({
+    testKey: keys.set,
+    pool: keys.set ? [0, 1, 4] : [],
+    sharedKey: false,
+    busy: [
+      ...([...busy] as HeygenTestAccount[]),
+      ...state.rows
+        .filter(r => r.status === "voicing" || r.status === "rendering")
+        .map(r => slotToAccount(r.heygenSlot)),
+    ],
+  });
 
 const realFetch = window.fetch.bind(window);
 window.fetch = (async (req: any, init?: RequestInit) => {
@@ -344,7 +334,7 @@ window.fetch = (async (req: any, init?: RequestInit) => {
   });
 }) as typeof window.fetch;
 
-function FilmToggles() {
+function FilmToggles({ onKeys }: { onKeys: () => void }) {
   const [, force] = useState(0);
   return (
     <div className="mb-4 flex flex-wrap items-center gap-2 rounded-md border border-dashed p-3 text-xs text-muted-foreground">
@@ -358,12 +348,23 @@ function FilmToggles() {
               if (e.target.checked) busy.add(a.account);
               else busy.delete(a.account);
               force(n => n + 1);
-              pushAll();
             }}
           />
           {a.label}
         </label>
       ))}
+      <label className="ml-4 flex items-center gap-1">
+        <input
+          type="checkbox"
+          checked={keys.set}
+          onChange={e => {
+            keys.set = e.target.checked;
+            force(n => n + 1);
+            onKeys();
+          }}
+        />
+        HeyGen keys are set
+      </label>
     </div>
   );
 }
@@ -378,7 +379,9 @@ function Harness() {
   return (
     <trpc.Provider client={client} queryClient={queryClient}>
       <QueryClientProvider client={queryClient}>
-        <FilmToggles />
+        <FilmToggles
+          onKeys={() => void queryClient.invalidateQueries()}
+        />
         <HeygenTest />
         <Toaster />
       </QueryClientProvider>

@@ -1325,6 +1325,14 @@ export interface LongformInputParams {
    */
   apimartSlot?: number;
   /**
+   * The provider accounts this video renders on (`shared/accountPool.ts`), picked at Generate —
+   * the least busy account of each — and kept for the video's whole life: a resume, retry or
+   * regenerate must reach the account that holds its task ids. Absent on a job made before the
+   * pool, which falls back to `apimartSlot`.
+   */
+  apimartAccount?: number;
+  heygenAccount?: number;
+  /**
    * When true, every host scene is demoted to a b-roll cutaway immediately after storyboarding,
    * before TTS and the host balancers run — the finished video has no talking-head shots.
    * Used by `scripts/broll-only-longform.ts` and diagnostics that exercise the b-roll lane alone.

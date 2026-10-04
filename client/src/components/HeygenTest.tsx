@@ -7,7 +7,6 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Alert } from "@/components/ui/alert";
 import { Progress } from "@/components/ui/progress";
 import {
   AlertDialog,
@@ -19,13 +18,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Check,
   ChevronLeft,
@@ -48,8 +40,10 @@ import {
   friendlyHeygenTestError,
   HEYGEN_TEST_MAX_NAME,
   HEYGEN_TEST_RUNS_PER_PAGE,
+  heygenAccountLabel,
   heygenTestInputError,
   pageList,
+  slotToAccount,
   heygenTestProgress,
 } from "@shared/heygenTest";
 import { ROLE_LABEL } from "@shared/roles";
@@ -78,8 +72,8 @@ type Vendor = "sixtynine_labs" | "minimax";
 export function HeygenTest() {
   const utils = trpc.useUtils();
   const { data: channels } = trpc.channelConfig.list.useQuery();
-  const pick = useHeygenAccountPick();
-  const { allBusy, rate } = pick;
+  const heygen = useHeygenTestStatus();
+  const { rate } = heygen;
   const [channelKey, setChannelKey] = useState("");
   const [vendor, setVendor] = useState<Vendor>("sixtynine_labs");
   const [script, setScript] = useState("");
@@ -156,8 +150,8 @@ export function HeygenTest() {
   const words = countScriptWords(script);
   const estSec = estimateTestSeconds(script);
   const inputError = heygenTestInputError({ script, imageUrls });
-  const blocker = pick.blocker
-    ? pick.blocker
+  const blocker = heygen.blocker
+    ? heygen.blocker
     : makingLook
       ? "Making the phone look… (or switch that photo to Original)"
       : inputError;
@@ -201,12 +195,7 @@ export function HeygenTest() {
                 </select>
               </div>
             )}
-            <HeygenAccountSelect pick={pick} />
           </div>
-
-          {allBusy && (
-            <Alert tone="warning" title="All HeyGen accounts are in use" />
-          )}
 
           <div className="space-y-1.5">
             <Label className="text-xs">
@@ -374,7 +363,6 @@ export function HeygenTest() {
                 start.mutate({
                   channelKey,
                   ttsVendor: effectiveVendor,
-                  account: pick.account,
                   script,
                   imageUrls,
                   name: runName.trim() || undefined,
@@ -401,109 +389,21 @@ export function HeygenTest() {
 }
 
 /**
- * Subscribes to the server's live account stream (`/api/heygen-test/accounts/stream`) and writes
- * each push straight into the `heygenTest.accounts` query cache, so the picker changes the moment
- * a film starts or finishes. Returns whether the stream is connected; while it is not, the query
- * polls instead. EventSource reconnects on its own after a drop.
+ * What both pages need before a run, shared by the test bench and the Upsell VSL page: the rate
+ * their cost estimate uses, and the one thing that still blocks a run — no HeyGen key at all.
+ * There is no account to choose: the server gives each run the least busy one, and a busy
+ * account is waited on, not refused (`pickHeygenTestAccount`).
  */
-function useLiveHeygenAccounts(): boolean {
-  const utils = trpc.useUtils();
-  const [live, setLive] = useState(false);
-  useEffect(() => {
-    if (typeof EventSource === "undefined") return;
-    const es = new EventSource("/api/heygen-test/accounts/stream");
-    es.onopen = () => setLive(true);
-    es.onerror = () => setLive(false);
-    es.addEventListener("accounts", e => {
-      try {
-        utils.heygenTest.accounts.setData(
-          undefined,
-          JSON.parse((e as MessageEvent).data)
-        );
-      } catch {
-        // A malformed push is ignored; the next one (or the fallback poll) corrects it.
-      }
-    });
-    return () => es.close();
-  }, [utils]);
-  return live;
-}
-
-/**
- * The HeyGen account a run will render on, shared by the test bench and the Upsell VSL page. Only
- * FREE accounts are listed, live; a pick that just became busy falls back to the first free one.
- */
-export function useHeygenAccountPick() {
-  const accountsLive = useLiveHeygenAccounts();
-  const { data: accountInfo } = trpc.heygenTest.accounts.useQuery(undefined, {
-    // The live stream keeps this current; poll only while it is reconnecting.
-    refetchInterval: accountsLive ? false : 30_000,
-  });
-  const [picked, setAccount] = useState<string>("");
-  const accounts = accountInfo?.available ?? [];
-  const allBusy =
-    !!accountInfo && accountInfo.configured > 0 && !accounts.length;
-  const accountValue = accounts.some(a => String(a.account) === picked)
-    ? picked
-    : accounts[0]
-      ? String(accounts[0].account)
-      : "";
+export function useHeygenTestStatus() {
+  const { data } = trpc.heygenTest.status.useQuery();
   return {
-    accounts,
-    allBusy,
-    accountValue,
-    setAccount,
-    /** The pick as the `start` routes take it. */
-    account:
-      accountValue === "shared" || accountValue === "test"
-        ? (accountValue as "shared" | "test")
-        : Number(accountValue),
-    rate: accountInfo?.ratePerSec ?? 0,
+    rate: data?.ratePerSec ?? 0,
     /** Why nothing can render right now, or null. */
-    blocker: accountValue
-      ? null
-      : allBusy
-        ? "Waiting for a HeyGen account to free up."
-        : "No HeyGen account has a key — add one in Provider keys.",
+    blocker:
+      data && !data.ready
+        ? "No HeyGen key is set — add one in Admin → Provider keys."
+        : null,
   };
-}
-
-export function HeygenAccountSelect({
-  pick,
-}: {
-  pick: ReturnType<typeof useHeygenAccountPick>;
-}) {
-  return (
-    <div className="space-y-1.5">
-      <Label className="text-xs">HeyGen account</Label>
-      <Select
-        value={pick.accountValue}
-        onValueChange={pick.setAccount}
-        disabled={pick.accounts.length === 0}
-      >
-        <SelectTrigger className="h-9 w-full">
-          <SelectValue
-            placeholder={
-              pick.allBusy ? "No account free right now" : "No keys set"
-            }
-          />
-        </SelectTrigger>
-        <SelectContent>
-          {pick.accounts.map(a => (
-            <SelectItem key={String(a.account)} value={String(a.account)}>
-              <span>{a.label}</span>
-              <Badge
-                variant="outline"
-                className="border-success/30 bg-success/10 text-success"
-              >
-                Available
-              </Badge>
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
-  );
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -957,6 +857,8 @@ export function HeygenClipStatus({
     script: string;
     error: string | null;
     costUsd: number;
+    /** The account the server gave this run (`heygen_tests.heygenSlot`). */
+    heygenSlot?: number | null;
   };
   now: number;
   retrying: boolean;
@@ -1020,6 +922,12 @@ export function HeygenClipStatus({
             )
           )}
         </div>
+      )}
+      {r.heygenSlot !== undefined && (
+        // Nobody picks the account any more, so the card is where it is recorded.
+        <p className="text-[11px] text-muted-foreground">
+          HeyGen · {heygenAccountLabel(slotToAccount(r.heygenSlot))}
+        </p>
       )}
       {r.error && (
         // Plain language on the card; the technical original on hover.

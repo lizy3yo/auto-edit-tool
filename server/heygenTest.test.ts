@@ -10,11 +10,13 @@ import {
   heygenTestProgress,
   pageList,
   accountToSlot,
+  heygenAccountLabel,
+  pickHeygenTestAccount,
   slotToAccount,
   HEYGEN_TEST_ACCOUNT_SLOT,
   type HeygenTestAccount,
 } from "../shared/heygenTest";
-import { heygenTestCostUsd, planHeygenAvailability } from "./heygenTest";
+import { heygenTestCostUsd } from "./heygenTest";
 import { RATES } from "./pricing";
 
 const words = (n: number) => Array.from({ length: n }, () => "word").join(" ");
@@ -81,57 +83,67 @@ describe("heygenTestCostUsd", () => {
   });
 });
 
-describe("planHeygenAvailability", () => {
-  const configured = [
-    { account: 0 as const, label: "Tab 1 account" },
-    { account: 1 as const, label: "Tab 2 account" },
-    { account: 4 as const, label: "Tab 5 account" },
-    { account: "shared" as const, label: "Shared account (HEYGEN_API_KEY)" },
-  ];
-  const keyed = new Set([0, 1, 4]);
-  const free = (films: (number | null)[], tests: (number | "shared")[] = []) =>
-    planHeygenAvailability(configured, keyed, films, tests).map(a => a.account);
-
-  it("lists every configured account when nothing is running", () => {
-    expect(free([])).toEqual([0, 1, 4, "shared"]);
-  });
-
-  it("hides the account a processing film renders on", () => {
-    expect(free([0, 4])).toEqual([1, "shared"]);
-  });
-
-  it("a film on a keyless tab, or with no tab, holds the shared account", () => {
-    expect(free([2])).toEqual([0, 1, 4]);
-    expect(free([null])).toEqual([0, 1, 4]);
-  });
-
-  it("a running HeyGen test holds its account", () => {
-    expect(free([], [1, "shared"])).toEqual([0, 4]);
-  });
-
-  it("is empty when every account is busy", () => {
-    expect(free([0, 1, 4, null])).toEqual([]);
-  });
-
-  describe("the test account", () => {
-    const withTest = [
-      { account: "test" as const, label: "Test account" },
-      ...configured,
-    ];
-    const freeT = (films: (number | null)[], tests: HeygenTestAccount[] = []) =>
-      planHeygenAvailability(withTest, keyed, films, tests).map(a => a.account);
-
-    it("is listed first, ahead of the tab accounts it backs up", () => {
-      expect(freeT([])).toEqual(["test", 0, 1, 4, "shared"]);
+describe("pickHeygenTestAccount — the account a test or VSL run is given", () => {
+  const pick = (
+    busy: HeygenTestAccount[],
+    o: { testKey?: boolean; pool?: number[]; sharedKey?: boolean } = {}
+  ) =>
+    pickHeygenTestAccount({
+      testKey: o.testKey ?? true,
+      pool: o.pool ?? [0, 1, 4],
+      sharedKey: o.sharedKey ?? false,
+      busy,
     });
 
-    it("stays free while every film account is busy — no film renders on it", () => {
-      expect(freeT([0, 1, 4, null, 2])).toEqual(["test"]);
-    });
+  it("takes the test account first — no film renders on it, so no video is slowed", () => {
+    expect(pick([])).toBe("test");
+    // Every film account idle changes nothing: a tie goes to the test account.
+    expect(pick([0, 0, 1])).toBe("test");
+  });
 
-    it("holds one test run at a time", () => {
-      expect(freeT([], ["test"])).toEqual([0, 1, 4, "shared"]);
-    });
+  it("goes to the least busy account once the test account is in use", () => {
+    expect(pick(["test"])).toBe(0);
+    expect(pick(["test", 0, 1])).toBe(4);
+    expect(pick(["test", "test", 0, 0, 1, 4])).toBe(1);
+  });
+
+  it("takes the lowest number on a tie", () => {
+    expect(pick(["test", 0, 1, 4])).toBe("test");
+    expect(pick(["test", "test", 0, 1, 4])).toBe(0);
+  });
+
+  it("is never refused because every account is busy — the run waits its turn", () => {
+    const account = pick(["test", "test", 0, 0, 1, 1, 4, 4]);
+    expect(account).not.toBeNull();
+    expect(account).toBe("test");
+  });
+
+  it("counts films and test clips against the same number", () => {
+    // Two films on Account 1, two test clips on Account 2: both are equally busy.
+    expect(pick(["test", 0, 0, 1, 1], { pool: [0, 1] })).toBe("test");
+    expect(pick(["test", "test", 0, 0, 1], { pool: [0, 1] })).toBe(1);
+  });
+
+  it("uses the pool when there is no test account", () => {
+    expect(pick([0], { testKey: false })).toBe(1);
+  });
+
+  it("falls back to the shared key only when no account has one", () => {
+    expect(pick([], { testKey: false, pool: [], sharedKey: true })).toBe(
+      "shared"
+    );
+    expect(pick([], { testKey: false, pool: [0], sharedKey: true })).toBe(0);
+  });
+
+  it("returns nothing when there is no HeyGen key at all", () => {
+    expect(pick([], { testKey: false, pool: [], sharedKey: false })).toBeNull();
+  });
+
+  it("names the account a clip's card shows", () => {
+    expect(heygenAccountLabel("test")).toBe("Test account");
+    expect(heygenAccountLabel(0)).toBe("Account 1");
+    expect(heygenAccountLabel(6)).toBe("Account 7");
+    expect(heygenAccountLabel("shared")).toBe("Shared account");
   });
 });
 

@@ -78,7 +78,7 @@ export function hostAccountFailure(raw: string | undefined): string | null {
   const msg = raw ?? "";
   if (!msg) return null;
   if (/no lip-sync adapter is configured|key has been removed/i.test(msg))
-    return "no HeyGen key is set for this tab";
+    return "no HeyGen key is set for this video's account";
   if (/\((401|403)\)|unauthori[sz]ed|invalid api key|forbidden/i.test(msg))
     return "the HeyGen key was rejected";
   if (

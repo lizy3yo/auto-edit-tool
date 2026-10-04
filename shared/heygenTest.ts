@@ -72,14 +72,14 @@ export function heygenTestInputError(input: {
 }
 
 /**
- * A tab's HeyGen account (`heygen_key_slot_N`), the shared `HEYGEN_API_KEY`, or the test-only
+ * A pool account (`heygen_key_slot_N`), the shared `HEYGEN_API_KEY`, or the test-only
  * account (`heygen_key_test`, which no film ever uses).
  */
 export type HeygenTestAccount = number | "shared" | "test";
 
 /**
- * `heygen_tests.heygenSlot` value for the test account. The column predates it: 0-4 are tabs and
- * null is the shared key, so the test account takes a value no tab can have.
+ * `heygen_tests.heygenSlot` value for the test account. The column predates it: 0 and up are
+ * pool accounts and null is the shared key, so the test account takes a value neither can have.
  */
 export const HEYGEN_TEST_ACCOUNT_SLOT = -1;
 
@@ -95,6 +95,43 @@ export function slotToAccount(slot: number | null): HeygenTestAccount {
   if (slot == null) return "shared";
   if (slot === HEYGEN_TEST_ACCOUNT_SLOT) return "test";
   return slot;
+}
+
+/**
+ * The account a new test or VSL run renders on. Nobody picks one by hand: the run takes the
+ * least busy account, the same rule a video's account is picked by (`shared/accountPool.ts`).
+ *
+ * The TEST account is first in line — no film ever renders on it, so a test there slows no
+ * video down — then the pool's accounts, lowest number first; a tie goes to whichever comes
+ * first in that order. `busy` is one entry per render in flight on an account: every processing
+ * film's host account and every unfinished test clip's. A busy account is never refused — the
+ * run waits its turn on that account's concurrency limit. The shared `HEYGEN_API_KEY` is the
+ * fallback only when no account has a key; null means there is no HeyGen key at all.
+ */
+export function pickHeygenTestAccount(o: {
+  testKey: boolean;
+  pool: number[];
+  sharedKey: boolean;
+  busy: HeygenTestAccount[];
+}): HeygenTestAccount | null {
+  const candidates: HeygenTestAccount[] = [
+    ...(o.testKey ? (["test"] as const) : []),
+    ...[...o.pool].sort((a, b) => a - b),
+  ];
+  const load = (a: HeygenTestAccount) => o.busy.filter(b => b === a).length;
+  let best: HeygenTestAccount | null = null;
+  for (const a of candidates)
+    if (best == null || load(a) < load(best)) best = a;
+  return best ?? (o.sharedKey ? "shared" : null);
+}
+
+/** How a clip's card names the account it ran on. */
+export function heygenAccountLabel(account: HeygenTestAccount): string {
+  return account === "test"
+    ? "Test account"
+    : account === "shared"
+      ? "Shared account"
+      : `Account ${account + 1}`;
 }
 
 /**

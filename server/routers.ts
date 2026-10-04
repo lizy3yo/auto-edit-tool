@@ -13,6 +13,26 @@ import {
 } from "./_core/trpc";
 import { ROLES, ROLE_LABEL, canSeeAllJobs, type Role } from "../shared/roles";
 import {
+  PROVIDER_ACCOUNT_MAX,
+  apimartAccountOf,
+  heygenAccountOf,
+} from "../shared/accountPool";
+import { accountLoad, assignJobAccounts } from "./accountPool";
+import { assertJobAccess } from "./jobAccess";
+import {
+  getTakeover,
+  releaseTakeover,
+  releaseTakeoverHeldBy,
+  takeOverJob,
+  takeoverView,
+} from "./jobTakeover";
+import { mayTakeOver } from "../shared/jobTakeover";
+import {
+  ACTIVITY_RECENT_MS,
+  activityAttention,
+  sortActivity,
+} from "../shared/activity";
+import {
   countActiveAdmins,
   countJobsByUser,
   createUser,
@@ -49,6 +69,8 @@ import {
   getAppSetting,
   setAppSetting,
   getLongformVideoJobById,
+  getLongformVideoJobOwner,
+  getActivityRows,
   getActiveLongformVideoJobs,
   getLongformVideoJobHistory,
   getAllLongformVideoJobHistory,
@@ -227,13 +249,12 @@ import { nanoid } from "nanoid";
 import {
   HeygenTestInputError,
   heygenTestCostUsd,
-  getHeygenAccountAvailability,
+  getHeygenTestStatus,
   renameHeygenRun,
   resumeHeygenTests,
   retryHeygenTests,
   startHeygenTest,
 } from "./heygenTest";
-import { notifyHeygenAccountsChanged } from "./heygenAccountEvents";
 import {
   deleteHeygenTestBatch,
   pickVslBatch,
@@ -987,11 +1008,11 @@ const channelAssetRouter = router({
 // Admins and operations managers only: every run is a paid HeyGen render. `server/heygenTest.ts`.
 const heygenTestRouter = router({
   /**
-   * The HeyGen accounts free right now, as labels — the keys never leave the server. The page
-   * also holds a live stream of the same answer (`server/heygenAccountStream.ts`); this is its
-   * first paint and its fallback while the stream is reconnecting.
+   * Whether a run can start at all (any HeyGen key exists) and the rate the cost estimate uses.
+   * There is no account to choose: the server gives each run the least busy one
+   * (`assignHeygenTestAccount`).
    */
-  accounts: managerProcedure.query(() => getHeygenAccountAvailability()),
+  status: managerProcedure.query(() => getHeygenTestStatus()),
 
   /**
    * One page of runs (5 per page), newest first, filtered, each row priced — plus the total so
@@ -1083,11 +1104,6 @@ const heygenTestRouter = router({
       z.object({
         channelKey: z.string().min(1),
         ttsVendor: z.enum(["sixtynine_labs", "minimax"]),
-        account: z.union([
-          z.number().int().min(0),
-          z.literal("shared"),
-          z.literal("test"),
-        ]),
         script: z.string().max(5_000),
         imageUrls: z.array(z.string().url().max(512)).max(10),
         name: z.string().max(HEYGEN_TEST_MAX_NAME).optional(),
@@ -1179,11 +1195,6 @@ const vslRouter = router({
       z.object({
         channelKey: z.string().min(1),
         ttsVendor: z.enum(["sixtynine_labs", "minimax"]),
-        account: z.union([
-          z.number().int().min(0),
-          z.literal("shared"),
-          z.literal("test"),
-        ]),
         /** The script as the host says it — the book's title already in it. */
         script: z.string().max(5_000),
         imageUrl: z.string().url().max(512),
@@ -1430,7 +1441,11 @@ const longformVideoRouter = router({
    */
   getCostBreakdown: approvedProcedure
     .input(z.object({ jobId: z.number() }))
-    .query(async ({ input }) => getJobCostBreakdown(input.jobId)),
+    .query(async ({ ctx, input }) => {
+      const owner = await getLongformVideoJobOwner(input.jobId);
+      if (owner) await assertJobAccess(owner, ctx.user, "read");
+      return getJobCostBreakdown(input.jobId);
+    }),
 
   /**
    * Monthly provider spend across every render — total, per channel, and per generation, in USD
@@ -1477,9 +1492,7 @@ const longformVideoRouter = router({
       const job = await getLongformVideoJobById(input.jobId);
       if (!job)
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
-      if (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role)) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Not your job" });
-      }
+      await assertJobAccess(job, ctx.user, "read");
       const params = (job.inputParams ?? {}) as LongformInputParams;
       const scenes = (job.storyboard ?? []) as StoryboardScene[];
       const timeline = buildVideoTimeline(scenes);
@@ -1521,9 +1534,7 @@ const longformVideoRouter = router({
       const job = await getLongformVideoJobById(input.jobId);
       if (!job)
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
-      if (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role)) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Not your job" });
-      }
+      await assertJobAccess(job, ctx.user, "write");
       const trimmed = input.youtubeUrl.trim();
       if (trimmed && !/^https?:\/\/\S+$/i.test(trimmed)) {
         throw new TRPCError({
@@ -1544,9 +1555,7 @@ const longformVideoRouter = router({
       const job = await getLongformVideoJobById(input.jobId);
       if (!job)
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
-      if (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role)) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Not your job" });
-      }
+      await assertJobAccess(job, ctx.user, "read");
       const byProduct = await getSalesByProductForJob(input.jobId);
       return {
         byProduct,
@@ -1646,9 +1655,11 @@ const longformVideoRouter = router({
     }),
 
   getApimartKeys: adminProcedure.query(async () => {
-    const [slots, editMasked] = await Promise.all([
+    // One row per ACCOUNT (`shared/accountPool.ts`) — `slotIndex` is the account's number, kept
+    // from when it was a tab's. `rendering` is how many videos are on it right now.
+    const [slots, editMasked, load] = await Promise.all([
       Promise.all(
-        Array.from({ length: LONGFORM_SLOT_COUNT }, (_, slotIndex) =>
+        Array.from({ length: PROVIDER_ACCOUNT_MAX }, (_, slotIndex) =>
           getApimartSlotMasked(slotIndex).then(masked => ({
             slotIndex,
             masked,
@@ -1656,8 +1667,15 @@ const longformVideoRouter = router({
         )
       ),
       getApimartEditMasked(),
+      accountLoad(),
     ]);
-    return { slots, editMasked };
+    return {
+      slots: slots.map(a => ({
+        ...a,
+        rendering: load.apimart.get(a.slotIndex) ?? 0,
+      })),
+      editMasked,
+    };
   }),
 
   /**
@@ -1678,7 +1696,7 @@ const longformVideoRouter = router({
           : null;
     const [slots, edit] = await Promise.all([
       Promise.all(
-        Array.from({ length: LONGFORM_SLOT_COUNT }, (_, slotIndex) =>
+        Array.from({ length: PROVIDER_ACCOUNT_MAX }, (_, slotIndex) =>
           Promise.all([
             getApimartSlotKey(slotIndex),
             getApimartSlotMasked(slotIndex),
@@ -1694,7 +1712,7 @@ const longformVideoRouter = router({
     return { slots, edit };
   }),
 
-  /** Admin: set (or clear, with an empty string) a tab's APIMART key. */
+  /** Admin: set (or clear, with an empty string — which removes the account) an APIMART key. */
   setApimartKey: adminProcedure
     .input(
       z.object({
@@ -1702,7 +1720,7 @@ const longformVideoRouter = router({
           .number()
           .int()
           .min(0)
-          .max(LONGFORM_SLOT_COUNT - 1),
+          .max(PROVIDER_ACCOUNT_MAX - 1),
         apiKey: z.string().max(400),
       })
     )
@@ -1719,23 +1737,30 @@ const longformVideoRouter = router({
       return { success: true };
     }),
 
-  /** Admin: read the masked per-tab HeyGen keys (slots 0–4) and the test key, null where unset. */
+  /** Admin: the masked HeyGen key of every account and the test key, null where unset. */
   getHeygenKeys: adminProcedure.query(async () => {
-    const [slots, test] = await Promise.all([
+    const [slots, test, load] = await Promise.all([
       Promise.all(
-        Array.from({ length: LONGFORM_SLOT_COUNT }, (_, slotIndex) =>
+        Array.from({ length: PROVIDER_ACCOUNT_MAX }, (_, slotIndex) =>
           getHeygenSlotMasked(slotIndex).then(masked => ({ slotIndex, masked }))
         )
       ),
       getHeygenTestMasked(),
+      accountLoad(),
     ]);
-    return { slots, test };
+    return {
+      slots: slots.map(a => ({
+        ...a,
+        rendering: load.heygen.get(a.slotIndex) ?? 0,
+      })),
+      test,
+    };
   }),
 
   /** Admin: remaining credits per stored HeyGen key. Null = unset key OR failed check. */
   getHeygenQuotas: adminProcedure.query(async () => {
     const slots = await Promise.all(
-      Array.from({ length: LONGFORM_SLOT_COUNT }, (_, slotIndex) =>
+      Array.from({ length: PROVIDER_ACCOUNT_MAX }, (_, slotIndex) =>
         getHeygenSlotKey(slotIndex)
           .then(key =>
             key ? new HeygenLipsyncAdapter(key).getRemainingQuota() : null
@@ -1750,7 +1775,7 @@ const longformVideoRouter = router({
     return { slots, test };
   }),
 
-  /** Admin: set (or clear, with an empty string) a tab's HeyGen key. */
+  /** Admin: set (or clear, with an empty string — which removes the account) a HeyGen key. */
   setHeygenKey: adminProcedure
     .input(
       z.object({
@@ -1758,7 +1783,7 @@ const longformVideoRouter = router({
           .number()
           .int()
           .min(0)
-          .max(LONGFORM_SLOT_COUNT - 1),
+          .max(PROVIDER_ACCOUNT_MAX - 1),
         apiKey: z.string().max(400),
       })
     )
@@ -1772,7 +1797,6 @@ const longformVideoRouter = router({
     .input(z.object({ apiKey: z.string().max(400) }))
     .mutation(async ({ input }) => {
       await setHeygenTestKey(input.apiKey);
-      notifyHeygenAccountsChanged();
       return { success: true };
     }),
 
@@ -1942,9 +1966,7 @@ const longformVideoRouter = router({
       const job = await getLongformVideoJobById(input.jobId);
       if (!job)
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
-      if (!canSeeAllJobs(ctx.user.role) && job.userId !== ctx.user.id) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Not your render." });
-      }
+      await assertJobAccess(job, ctx.user, "write");
       if (job.status === "processing") {
         throw new TRPCError({
           code: "BAD_REQUEST",
@@ -1996,7 +2018,7 @@ const longformVideoRouter = router({
         script: z.string().min(1).max(50000),
         channelKey: z.string().min(1),
         title: z.string().max(255).optional(),
-        /** Which long-form tab (slot 0–4) launched this — picks the per-tab APIMART video key. */
+        /** Which of the user's tabs launched this. No longer picks a key — see `assignJobAccounts`. */
         slotIndex: z
           .number()
           .int()
@@ -2398,7 +2420,6 @@ const longformVideoRouter = router({
         bookCoverImageUrl,
         bookTitle,
         title: input.title?.trim() || undefined,
-        apimartSlot: input.slotIndex,
         // Uploaded images shown verbatim in the CTA pitch. Rehosted like every other reference so
         // the render only ever fetches our own CDN; an asset that can't be rehosted is DROPPED
         // rather than failing the job — the film is still correct without it, and the pipeline
@@ -2415,10 +2436,13 @@ const longformVideoRouter = router({
           input.rehearsal && ctx.user.role === "admin" ? true : undefined,
       };
 
-      const jobId = await createLongformJob(
-        ctx.user.id,
-        ctx.user.name || "Unknown",
-        params
+      // The least busy APIMART and HeyGen account, kept for the video's whole life. Picked and
+      // written under one lock, so two clicks landing together cannot take the same one.
+      const jobId = await assignJobAccounts(accounts =>
+        createLongformJob(ctx.user.id, ctx.user.name || "Unknown", {
+          ...params,
+          ...accounts,
+        })
       );
       if (!jobId) {
         throw new TRPCError({
@@ -2447,9 +2471,10 @@ const longformVideoRouter = router({
       if (!job) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
       }
-      if (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role)) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Not authorized" });
-      }
+      await assertJobAccess(job, ctx.user, "read");
+      // Someone fixing this video (`shared/jobTakeover.ts`): the owner's card pauses its buttons,
+      // and the holder's open page is what keeps the takeover from timing out.
+      const takeover = await getTakeover(job.id, job.status);
       // Attach the exact assembled provider prompts per scene (read-only preview) so the UI
       // can show what actually ships to grok-imagine-video / gpt-image-2 before a regen spends
       // credits. Pure string assembly, guarded per scene inside the helper.
@@ -2476,6 +2501,7 @@ const longformVideoRouter = router({
         status: job.status,
         stage: job.stage,
         progress: job.progress,
+        takeover: takeoverView(takeover, ctx.user.id),
         storyboard,
         // The job's live scene-edit queue (which scenes wait / render right now). Lets every
         // tab — and a reloaded one — show per-scene state, and lets the client tell "the
@@ -2585,8 +2611,36 @@ const longformVideoRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const { slotIndex, ...patch } = input;
+      // Clearing a taken-over video out of your tab is walking away from it: hand it back.
+      // Judged on THIS tab's own before and after — not "every held video missing from my
+      // tabs", which a write to another tab landing first would mistake for walking away.
+      const before =
+        patch.jobId !== undefined && canSeeAllJobs(ctx.user.role)
+          ? (await getLongformSlots(ctx.user.id)).find(
+              r => r.slotIndex === slotIndex
+            )?.jobId
+          : null;
       await setLongformSlot(ctx.user.id, slotIndex, patch);
+      if (before != null && before !== patch.jobId)
+        await releaseTakeoverHeldBy(before, ctx.user.id);
       return { success: true };
+    }),
+
+  /**
+   * Whether someone is fixing this video. A finished or failed video is not polled, so its
+   * owner's card asks this small question instead — otherwise "Being fixed by…" would only
+   * appear after a reload.
+   */
+  takeoverState: approvedProcedure
+    .input(z.object({ jobId: z.number() }))
+    .query(async ({ ctx, input }) => {
+      const owner = await getLongformVideoJobOwner(input.jobId);
+      if (!owner) return null;
+      await assertJobAccess(owner, ctx.user, "read");
+      return takeoverView(
+        await getTakeover(owner.id, owner.status),
+        ctx.user.id
+      );
     }),
 
   /**
@@ -2692,9 +2746,7 @@ const longformVideoRouter = router({
       if (!job) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
       }
-      if (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role)) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Not authorized" });
-      }
+      await assertJobAccess(job, ctx.user, "write");
       if (!hasScene(job.storyboard, input.sceneIndex))
         throw new TRPCError({
           code: "NOT_FOUND",
@@ -2759,9 +2811,7 @@ const longformVideoRouter = router({
       if (!job) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
       }
-      if (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role)) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Not authorized" });
-      }
+      await assertJobAccess(job, ctx.user, "write");
       const scene = (
         Array.isArray(job.storyboard)
           ? (job.storyboard as StoryboardScene[])
@@ -2806,6 +2856,7 @@ const longformVideoRouter = router({
       if (!job) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
       }
+      await assertJobAccess(job, ctx.user, "write");
       const scene = (
         Array.isArray(job.storyboard)
           ? (job.storyboard as StoryboardScene[])
@@ -2868,9 +2919,7 @@ const longformVideoRouter = router({
       if (!job) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
       }
-      if (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role)) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Not authorized" });
-      }
+      await assertJobAccess(job, ctx.user, "write");
       const known = input.sceneIndices.filter(i => hasScene(job.storyboard, i));
       if (!known.length)
         throw new TRPCError({
@@ -2928,12 +2977,9 @@ const longformVideoRouter = router({
     .input(z.object({ jobId: z.number() }))
     .mutation(async ({ ctx, input }) => {
       const job = await getLongformVideoJobById(input.jobId);
-      if (
-        !job ||
-        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
-      ) {
+      if (!job)
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
-      }
+      await assertJobAccess(job, ctx.user, "write");
       if (job.status === "processing") {
         throw new TRPCError({
           code: "BAD_REQUEST",
@@ -2960,12 +3006,9 @@ const longformVideoRouter = router({
     .input(z.object({ jobId: z.number() }))
     .mutation(async ({ ctx, input }) => {
       const job = await getLongformVideoJobById(input.jobId);
-      if (
-        !job ||
-        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
-      ) {
+      if (!job)
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
-      }
+      await assertJobAccess(job, ctx.user, "write");
       if (job.status === "processing") {
         throw new TRPCError({
           code: "BAD_REQUEST",
@@ -3013,12 +3056,9 @@ const longformVideoRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const job = await getLongformVideoJobById(input.jobId);
-      if (
-        !job ||
-        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
-      ) {
+      if (!job)
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
-      }
+      await assertJobAccess(job, ctx.user, "write");
       const { jobId, ...edit } = input;
       const scenes = (job.storyboard ?? []) as StoryboardScene[];
       const v = validateTimingEdit(scenes, edit);
@@ -3042,12 +3082,9 @@ const longformVideoRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const job = await getLongformVideoJobById(input.jobId);
-      if (
-        !job ||
-        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
-      ) {
+      if (!job)
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
-      }
+      await assertJobAccess(job, ctx.user, "write");
       const scenes = (job.storyboard ?? []) as StoryboardScene[];
       const v = validateAddCut(scenes, input.sceneIndex, input.atOffsetSec);
       if (!v.ok)
@@ -3082,12 +3119,9 @@ const longformVideoRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const job = await getLongformVideoJobById(input.jobId);
-      if (
-        !job ||
-        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
-      ) {
+      if (!job)
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
-      }
+      await assertJobAccess(job, ctx.user, "write");
       const scenes = (job.storyboard ?? []) as StoryboardScene[];
       const scene = scenes.find(sc => sc.index === input.sceneIndex);
       if (!scene || cutPoints(scene).length === 0)
@@ -3125,12 +3159,9 @@ const longformVideoRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const job = await getLongformVideoJobById(input.jobId);
-      if (
-        !job ||
-        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
-      ) {
+      if (!job)
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
-      }
+      await assertJobAccess(job, ctx.user, "write");
       const scenes = (job.storyboard ?? []) as StoryboardScene[];
       const v = validateMoveCut(
         scenes,
@@ -3166,12 +3197,9 @@ const longformVideoRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const job = await getLongformVideoJobById(input.jobId);
-      if (
-        !job ||
-        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
-      ) {
+      if (!job)
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
-      }
+      await assertJobAccess(job, ctx.user, "write");
       const scenes = (job.storyboard ?? []) as StoryboardScene[];
       const v = validateSetPieceClipIn(
         scenes,
@@ -3207,12 +3235,9 @@ const longformVideoRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const job = await getLongformVideoJobById(input.jobId);
-      if (
-        !job ||
-        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
-      ) {
+      if (!job)
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
-      }
+      await assertJobAccess(job, ctx.user, "write");
       const scenes = (job.storyboard ?? []) as StoryboardScene[];
       const plan = planRippleTrim(
         scenes,
@@ -3248,12 +3273,9 @@ const longformVideoRouter = router({
     .input(z.object({ jobId: z.number(), sceneIndex: z.number().int().min(1) }))
     .mutation(async ({ ctx, input }) => {
       const job = await getLongformVideoJobById(input.jobId);
-      if (
-        !job ||
-        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
-      ) {
+      if (!job)
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
-      }
+      await assertJobAccess(job, ctx.user, "write");
       if (!job.masterAudioUrl)
         throw new TRPCError({
           code: "BAD_REQUEST",
@@ -3293,12 +3315,9 @@ const longformVideoRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const job = await getLongformVideoJobById(input.jobId);
-      if (
-        !job ||
-        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
-      ) {
+      if (!job)
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
-      }
+      await assertJobAccess(job, ctx.user, "write");
       const scene = ((job.storyboard ?? []) as StoryboardScene[]).find(
         s => s && s.index === input.sceneIndex
       );
@@ -3331,12 +3350,9 @@ const longformVideoRouter = router({
     .input(z.object({ jobId: z.number(), sceneIndex: z.number().int().min(1) }))
     .mutation(async ({ ctx, input }) => {
       const job = await getLongformVideoJobById(input.jobId);
-      if (
-        !job ||
-        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
-      ) {
+      if (!job)
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
-      }
+      await assertJobAccess(job, ctx.user, "write");
       const scenes = (job.storyboard ?? []) as StoryboardScene[];
       const v = validateUnmerge(scenes, input.sceneIndex);
       if (!v.ok)
@@ -3362,12 +3378,9 @@ const longformVideoRouter = router({
     .input(z.object({ jobId: z.number(), sceneIndex: z.number().int().min(1) }))
     .mutation(async ({ ctx, input }) => {
       const job = await getLongformVideoJobById(input.jobId);
-      if (
-        !job ||
-        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
-      ) {
+      if (!job)
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
-      }
+      await assertJobAccess(job, ctx.user, "write");
       const scenes = (job.storyboard ?? []) as StoryboardScene[];
       const scene = scenes.find(s => s.index === input.sceneIndex);
       if (!scene)
@@ -3396,12 +3409,9 @@ const longformVideoRouter = router({
     .input(z.object({ jobId: z.number() }))
     .mutation(async ({ ctx, input }) => {
       const job = await getLongformVideoJobById(input.jobId);
-      if (
-        !job ||
-        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
-      ) {
+      if (!job)
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
-      }
+      await assertJobAccess(job, ctx.user, "write");
       try {
         return {
           ok: true,
@@ -3438,12 +3448,9 @@ const longformVideoRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const job = await getLongformVideoJobById(input.jobId);
-      if (
-        !job ||
-        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
-      ) {
+      if (!job)
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
-      }
+      await assertJobAccess(job, ctx.user, "write");
       if (input.mode === "scene" && input.sourceIndex == null) {
         throw new TRPCError({
           code: "BAD_REQUEST",
@@ -3486,12 +3493,9 @@ const longformVideoRouter = router({
     .input(z.object({ jobId: z.number() }))
     .mutation(async ({ ctx, input }) => {
       const job = await getLongformVideoJobById(input.jobId);
-      if (
-        !job ||
-        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
-      ) {
+      if (!job)
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
-      }
+      await assertJobAccess(job, ctx.user, "write");
       if (job.stage !== "assembly") {
         throw new TRPCError({
           code: "BAD_REQUEST",
@@ -3516,12 +3520,9 @@ const longformVideoRouter = router({
     .input(z.object({ jobId: z.number() }))
     .mutation(async ({ ctx, input }) => {
       const job = await getLongformVideoJobById(input.jobId);
-      if (
-        !job ||
-        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
-      ) {
+      if (!job)
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
-      }
+      await assertJobAccess(job, ctx.user, "write");
       retryJobAssembly(input.jobId).catch(err => {
         console.error(`[Longform ${input.jobId}] assembleFinal error:`, err);
       });
@@ -3539,12 +3540,9 @@ const longformVideoRouter = router({
     .input(z.object({ jobId: z.number() }))
     .mutation(async ({ ctx, input }) => {
       const job = await getLongformVideoJobById(input.jobId);
-      if (
-        !job ||
-        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
-      ) {
+      if (!job)
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
-      }
+      await assertJobAccess(job, ctx.user, "write");
       if (job.status === "processing") {
         throw new TRPCError({
           code: "BAD_REQUEST",
@@ -3569,12 +3567,9 @@ const longformVideoRouter = router({
     .input(z.object({ jobId: z.number() }))
     .mutation(async ({ ctx, input }) => {
       const job = await getLongformVideoJobById(input.jobId);
-      if (
-        !job ||
-        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
-      ) {
+      if (!job)
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
-      }
+      await assertJobAccess(job, ctx.user, "write");
       if (job.status === "processing") {
         throw new TRPCError({
           code: "BAD_REQUEST",
@@ -3617,12 +3612,9 @@ const longformVideoRouter = router({
     .input(z.object({ jobId: z.number() }))
     .mutation(async ({ ctx, input }) => {
       const job = await getLongformVideoJobById(input.jobId);
-      if (
-        !job ||
-        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
-      ) {
+      if (!job)
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
-      }
+      await assertJobAccess(job, ctx.user, "write");
       // A render that never got its narration: record it ONCE, from the top. Voicing every
       // scene as its own request (what this button did here) sent 229 submits into the same
       // outage that killed the narration, and gave a choppy read even when it worked.
@@ -3677,12 +3669,9 @@ const longformVideoRouter = router({
     .input(z.object({ jobId: z.number() }))
     .mutation(async ({ ctx, input }) => {
       const job = await getLongformVideoJobById(input.jobId);
-      if (
-        !job ||
-        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
-      ) {
+      if (!job)
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
-      }
+      await assertJobAccess(job, ctx.user, "write");
       if (job.status === "processing") {
         throw new TRPCError({
           code: "BAD_REQUEST",
@@ -3730,12 +3719,9 @@ const longformVideoRouter = router({
     .input(z.object({ jobId: z.number() }))
     .mutation(async ({ ctx, input }) => {
       const job = await getLongformVideoJobById(input.jobId);
-      if (
-        !job ||
-        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
-      ) {
+      if (!job)
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
-      }
+      await assertJobAccess(job, ctx.user, "write");
       try {
         return { result: await retryNarration(input.jobId) };
       } catch (err: any) {
@@ -3752,12 +3738,9 @@ const longformVideoRouter = router({
     .input(z.object({ jobId: z.number() }))
     .mutation(async ({ ctx, input }) => {
       const job = await getLongformVideoJobById(input.jobId);
-      if (
-        !job ||
-        (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role))
-      ) {
+      if (!job)
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
-      }
+      await assertJobAccess(job, ctx.user, "write");
       if (job.status === "processing") {
         throw new TRPCError({
           code: "BAD_REQUEST",
@@ -3791,9 +3774,7 @@ const longformVideoRouter = router({
       if (!job) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
       }
-      if (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role)) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Not authorized" });
-      }
+      await assertJobAccess(job, ctx.user, "write");
       await updateLongformVideoJob(input.jobId, {
         inputParams: {
           ...(job.inputParams as Record<string, unknown> | null),
@@ -3818,9 +3799,7 @@ const longformVideoRouter = router({
       if (!job) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
       }
-      if (job.userId !== ctx.user.id && !canSeeAllJobs(ctx.user.role)) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Not authorized" });
-      }
+      await assertJobAccess(job, ctx.user, "write");
       await updateLongformVideoJob(input.jobId, {
         inputParams: {
           ...(job.inputParams as Record<string, unknown> | null),
@@ -3834,6 +3813,8 @@ const longformVideoRouter = router({
   cancelJob: approvedProcedure
     .input(z.object({ jobId: z.number() }))
     .mutation(async ({ ctx, input }) => {
+      const owner = await getLongformVideoJobOwner(input.jobId);
+      if (owner) await assertJobAccess(owner, ctx.user, "write");
       await cancelLongformJob(input.jobId, ctx.user.id, {
         allowAny: canSeeAllJobs(ctx.user.role),
       });
@@ -3849,11 +3830,14 @@ const longformVideoRouter = router({
       // Read-only and authorization-neutral — `deleteLongformVideoJob` still owns the
       // ownership check below and throws before anything is removed.
       const job = await getLongformVideoJobById(input.jobId);
-      if (job && (canSeeAllJobs(ctx.user.role) || job.userId === ctx.user.id))
+      if (job) {
+        await assertJobAccess(job, ctx.user, "write");
         await cancelJobProviderRenders(job, "deleted by user");
+      }
       await deleteLongformVideoJob(input.jobId, ctx.user.id, {
         allowAny: canSeeAllJobs(ctx.user.role),
       });
+      await releaseTakeover(input.jobId);
       return { ok: true };
     }),
 });
@@ -3926,6 +3910,111 @@ async function assertNotLastAdmin(
  * appear in any response: `listUsers` selects around the column rather than deleting it
  * afterwards, so a field added later cannot leak by being forgotten.
  */
+/**
+ * The Activity page: every account's videos, live, for the oversight tiers — and taking one over
+ * to fix it (`shared/jobTakeover.ts`). `managerProcedure`, the same gate as the nav entry.
+ */
+const activityRouter = router({
+  list: managerProcedure.query(async ({ ctx }) => {
+    const rows = await getActivityRows(
+      new Date(Date.now() - ACTIVITY_RECENT_MS)
+    );
+    const items = await Promise.all(
+      rows.map(async r => {
+        const num = (v: string | null) => {
+          const n = v == null || v === "null" ? NaN : Number(v);
+          return Number.isInteger(n) ? n : null;
+        };
+        const accounts = {
+          apimartAccount: num(r.apimartAccount),
+          heygenAccount: num(r.heygenAccount),
+          apimartSlot: num(r.apimartSlot),
+        };
+        const progress = (r.progress ?? {}) as {
+          scenesTotal?: number;
+          scenesDone?: number;
+          warnings?: string[];
+          phase?: { label?: string; pct?: number } | null;
+        };
+        const item = {
+          id: r.id,
+          userId: r.userId,
+          userName: r.userName ?? "Unknown",
+          mine: r.userId === ctx.user.id,
+          status: r.status,
+          stage: r.stage,
+          title: r.title && r.title !== "null" ? r.title : null,
+          channelKey:
+            r.channelKey && r.channelKey !== "null" ? r.channelKey : null,
+          scenesTotal: progress.scenesTotal ?? null,
+          scenesDone: progress.scenesDone ?? null,
+          phase: progress.phase ?? null,
+          warnings: progress.warnings?.length ?? 0,
+          errorMessage: r.errorMessage,
+          createdAt: r.createdAt,
+          updatedAt: r.updatedAt,
+          apimartAccount: apimartAccountOf(accounts),
+          heygenAccount: heygenAccountOf(accounts),
+          takeover: takeoverView(
+            await getTakeover(r.id, r.status),
+            ctx.user.id
+          ),
+        };
+        return {
+          ...item,
+          attention: activityAttention({
+            status: r.status,
+            errorMessage: r.errorMessage,
+            waitingForVoice: !!r.ttsWaitSince && r.ttsWaitSince !== "null",
+            hostNeeded: !!r.hostNeeded,
+            hostWaiting: !!r.hostWaiting,
+          }),
+        };
+      })
+    );
+    return {
+      items: sortActivity(items),
+      attention: items.filter(i => i.attention).length,
+    };
+  }),
+
+  /** Take a video over: its owner's buttons pause until it is handed back. */
+  takeOver: managerProcedure
+    .input(z.object({ jobId: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      const owner = await getLongformVideoJobOwner(input.jobId);
+      if (!owner)
+        throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
+      if (!mayTakeOver(owner, ctx.user))
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "This is your own video — just open it.",
+        });
+      const held = await getTakeover(owner.id, owner.status);
+      if (held && held.userId !== ctx.user.id)
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: `${held.userName} is already fixing this video.`,
+        });
+      await takeOverJob(owner.id, clickerOf(ctx.user));
+      return { ok: true };
+    }),
+
+  /** Hand a video back. The holder, or an admin breaking a takeover someone left behind. */
+  handBack: managerProcedure
+    .input(z.object({ jobId: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      const held = await getTakeover(input.jobId);
+      if (held && held.userId !== ctx.user.id && ctx.user.role !== "admin")
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: `Only ${held.userName} or an admin can hand this back.`,
+        });
+      await releaseTakeover(input.jobId);
+      return { ok: true };
+    }),
+});
+
 const userRouter = router({
   /** Every account, with how many renders each one owns (shown before a delete). */
   list: adminProcedure.query(async () => {
@@ -4158,6 +4247,7 @@ export const appRouter = router({
   channelHostPhoto: channelHostPhotoRouter,
   heygenTest: heygenTestRouter,
   vsl: vslRouter,
+  activity: activityRouter,
 });
 
 export type AppRouter = typeof appRouter;

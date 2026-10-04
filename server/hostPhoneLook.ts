@@ -27,7 +27,8 @@ import {
   setAppSetting,
   updateChannelHostPhoto,
 } from "./db";
-import { getApimartEditKey, getApimartSlotKey, LONGFORM_SLOT_COUNT } from "./longformVideo";
+import { getApimartEditKey, getApimartSlotKey } from "./longformVideo";
+import { PROVIDER_ACCOUNT_MAX } from "../shared/accountPool";
 import type { ChannelHostPhoto } from "../drizzle/schema";
 
 /** Where the host sits and what is around them — read off the photo (`describeHostSetting`). */
@@ -125,11 +126,11 @@ export function parseHostSetting(raw: string): HostSetting {
   };
 }
 
-/** The APIMART key for a job-less image: the Edit key, else the first tab that has one. */
+/** The APIMART key for a job-less image: the Edit key, else the first account that has one. */
 async function apimartKey(): Promise<string> {
   const edit = await getApimartEditKey();
   if (edit) return edit;
-  for (let slot = 0; slot < LONGFORM_SLOT_COUNT; slot++) {
+  for (let slot = 0; slot < PROVIDER_ACCOUNT_MAX; slot++) {
     const key = await getApimartSlotKey(slot);
     if (key) return key;
   }

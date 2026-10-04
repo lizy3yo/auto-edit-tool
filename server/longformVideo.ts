@@ -245,6 +245,11 @@ import {
   type RippleEdge,
 } from "./sceneTiming";
 import { sceneHoldPlan } from "../shared/filmTimeline";
+import {
+  apimartAccountOf,
+  heygenAccountOf,
+  type JobAccounts,
+} from "../shared/accountPool";
 
 /**
  * The host lip-sync lane, resolved once per pipeline pass. HeyGen Avatar IV is the only
@@ -798,25 +803,25 @@ export const HOST_SCREEN_FRACTION = 0.35;
  */
 export const USE_IMAGE_LANE = true;
 /**
- * Number of long-form video tabs (slots 0–4). Each tab holds its own per-provider API keys —
- * APIMART for b-roll clips, HeyGen for host lip-sync — stored encrypted in `app_settings`
- * (no schema migration) as JSON `{ last4, enc }`.
+ * Number of long-form video tabs per user (slots 0–4). Tabs no longer pick a provider key — see
+ * the account pool below.
  */
 export const LONGFORM_SLOT_COUNT = 5;
 /**
- * Per-tab APIMART keys. Each tab renders b-roll grok-imagine CLIPS on its own APIMART account
- * (stills/keyframes always render on OpenAI's official gpt-image-2 — see
- * generateSceneStillClip/generateBrollKeyframe). A blank/unset slot ⇒ that tab falls back to the
- * 69Labs video path.
+ * APIMART accounts (b-roll grok-imagine CLIPS; stills/keyframes always render on OpenAI's
+ * official gpt-image-2). One row per account, `apimart_key_slot_N` for account N+1, up to
+ * `PROVIDER_ACCOUNT_MAX` — the name is kept from when N was a tab number, so the keys entered
+ * then are accounts 1–5. Stored encrypted in `app_settings` as JSON `{ last4, enc }`. A video is
+ * given the least busy account at Generate (`server/accountPool.ts`).
  */
 const apimartSlotSettingKey = (slot: number): string =>
   `apimart_key_slot_${slot}`;
 /** The Edit Images / Edit Videos pages render on their own APIMART key. */
 const APIMART_EDIT_SETTING_KEY = "apimart_key_edit";
 /**
- * Per-tab HeyGen keys. Each tab lip-syncs its host on its own HeyGen account — HeyGen caps
- * concurrent renders per ACCOUNT, so 5 accounts render 5× wider than one shared key. A
- * blank/unset slot ⇒ that tab falls back to the shared `HEYGEN_API_KEY` env var.
+ * HeyGen accounts (host lip-sync), pooled the same way. HeyGen caps concurrent renders per
+ * ACCOUNT, so N accounts render N× wider than one shared key. A video with no account (none has
+ * a key) falls back to the shared `HEYGEN_API_KEY` env var.
  */
 const heygenSlotSettingKey = (slot: number): string =>
   `heygen_key_slot_${slot}`;
@@ -879,6 +884,26 @@ export const setHeygenSlotKey = (slot: number, apiKey: string): Promise<void> =>
   setStoredKey(heygenSlotSettingKey(slot), apiKey);
 
 /**
+ * The key of the account a job renders on (`shared/accountPool.ts`): the account picked for it
+ * at Generate, or — a job made before the pool — its tab number. These two are the ONLY readers
+ * of a job's provider key; `accountPool.test.ts` fails if another lookup appears. Read at render
+ * time, so a key replaced in Admin is picked up by a resume.
+ */
+export async function apimartKeyForJob(
+  params: JobAccounts
+): Promise<string | null> {
+  const account = apimartAccountOf(params);
+  return account == null ? null : getApimartSlotKey(account);
+}
+/** Null ⇒ the caller falls back to the shared `HEYGEN_API_KEY`. */
+export async function heygenKeyForJob(
+  params: JobAccounts
+): Promise<string | null> {
+  const account = heygenAccountOf(params);
+  return account == null ? null : getHeygenSlotKey(account);
+}
+
+/**
  * The HeyGen TEST account: used only by the HeyGen test page (`server/heygenTest.ts`), never by a
  * film, so trying photos never spends a tab's credits or queues behind a live render.
  */
@@ -893,7 +918,7 @@ export const setHeygenTestKey = (apiKey: string): Promise<void> =>
 /**
  * The APIMART video adapter for a job's tab, or null when the tab has no key. APIMART is the
  * ONLY b-roll VIDEO provider (no toggle, no fallback — `generateSceneClips` throws on null).
- * Resolved from `params.apimartSlot` at render time so a key rotation and job resumes both pick
+ * Resolved from the job's account (`apimartKeyForJob`) at render time so a key rotation and job resumes both pick
  * up the current key.
  */
 /**
@@ -920,8 +945,7 @@ async function apimartAdapterForJob(
   // different gateway. Off unless AIREITER_LANES names `broll`; see providers/aireiter.ts.
   if (await aireiterLaneEnabled("broll")) return aireiterAdapter();
   // ─── END AIREITER BOLT-ON ────────────────────────────────────────────────
-  if (params.apimartSlot == null) return null;
-  const key = await getApimartSlotKey(params.apimartSlot);
+  const key = await apimartKeyForJob(params);
   return key ? new ApimartAdapter(key) : null; // no key ⇒ b-roll fails loud
 }
 
@@ -3652,9 +3676,7 @@ async function fallbackSceneToStill(
   params: LongformInputParams
 ): Promise<void> {
   const apimartKey =
-    params.apimartSlot != null
-      ? await getApimartSlotKey(params.apimartSlot)
-      : null;
+    await apimartKeyForJob(params);
   scene.clipUrls = await generateSceneStillClip(
     jobId,
     scene,
@@ -4656,14 +4678,11 @@ async function resolveLipsyncLane(
     };
   }
 
-  // Per-tab HeyGen account, shared HEYGEN_API_KEY as the fallback. Read at render time so a key
+  // The job's HeyGen account, shared HEYGEN_API_KEY as the fallback. Read at render time so a key
   // rotation AND a job resume both pick up the current key — same contract as
-  // `apimartAdapterForJob`. The `!= null` guard keeps the settings read off the path for a job
-  // with no slot (and slot 0 is valid, so this cannot become a truthiness check).
+  // `apimartAdapterForJob`.
   const key =
-    (params.apimartSlot != null
-      ? await getHeygenSlotKey(params.apimartSlot)
-      : null) ?? ENV.heygenApiKey;
+    (await heygenKeyForJob(params)) ?? ENV.heygenApiKey;
   if (!key) return null;
   const heygen = new HeygenLipsyncAdapter(key);
   return {
@@ -4674,8 +4693,8 @@ async function resolveLipsyncLane(
     submit: ({ imageUrl, audioUrl }) =>
       heygen.submitLipsync({ imageUrl, audioUrl }),
     poll: (id, ms) => heygen.pollVideo(id, ms ?? HEYGEN_LIPSYNC_TIMEOUT_MS),
-    // Per-ACCOUNT, not global: the 5 tabs each get their own 8 slots; tabs sharing a key
-    // (e.g. all falling back to HEYGEN_API_KEY) correctly share one semaphore.
+    // Per-ACCOUNT, not global: each account gets its own 8 slots; videos sharing a key
+    // (the same account, or all falling back to HEYGEN_API_KEY) correctly share one semaphore.
     slots: heygenSlotsFor(key),
     concurrency: ENV.heygenConcurrency,
     sceneDeadlineMs: SCENE_DEADLINE_HOST_MS,
@@ -8313,9 +8332,7 @@ async function generateSceneClip(
   let keyframe: string | undefined;
   if (!scene.hostPresent && !chain[0].imageUrls && !brollKeyframeDisabled()) {
     const apimartKey =
-      params.apimartSlot != null
-        ? await getApimartSlotKey(params.apimartSlot)
-        : null;
+      await apimartKeyForJob(params);
     keyframe = await Promise.race([
       generateBrollKeyframe(
         jobId,
@@ -11210,9 +11227,7 @@ async function generateSceneLipsyncClips(
     scene,
     hostPhotoUrl,
     apimartKey:
-      params.apimartSlot != null
-        ? await getApimartSlotKey(params.apimartSlot)
-        : null,
+      await apimartKeyForJob(params),
   });
   // What the split compositor reads the face off — see `lipsyncImageUrl` on StoryboardScene.
   scene.lipsyncImageUrl = faceImageUrl;
@@ -11499,9 +11514,7 @@ async function rehearseSceneClips(
   persist: () => Promise<void>
 ): Promise<string[]> {
   const apimartKey =
-    params.apimartSlot != null
-      ? await getApimartSlotKey(params.apimartSlot)
-      : null;
+    await apimartKeyForJob(params);
   scene.lipsynced = false;
   if (scene.assetImageUrl || scene.coverHero) {
     const literal =
@@ -11584,9 +11597,7 @@ async function composeHostScene(
   if (scene.splitVisual) {
     try {
       const apimartKey =
-        params.apimartSlot != null
-          ? await getApimartSlotKey(params.apimartSlot)
-          : null;
+        await apimartKeyForJob(params);
       // A MOVING right panel when the pacing config assigned one and a video adapter is available;
       // the Ken Burns still otherwise. The motion attempt degrades to the still on ANY failure —
       // the host half is already rendered and paid for, so a slow or refused panel must not cost
@@ -11660,20 +11671,22 @@ export async function generateSceneClips(
     return rehearseSceneClips(jobId, scene, params, instruction, persist);
 
   // Images (keyframes/stills) always render on OpenAI's official gpt-image-2. B-roll MOTION clips
-  // render on APIMART grok-imagine ONLY. Resolved once per scene from `params.apimartSlot` so a
+  // render on APIMART grok-imagine ONLY. Resolved once per scene from the job's account so a
   // key rotation is picked up on resume.
   const apimart = await apimartAdapterForJob(params);
   const apimartKey =
-    params.apimartSlot != null
-      ? await getApimartSlotKey(params.apimartSlot)
-      : null;
+    await apimartKeyForJob(params);
 
   // No silent provider swap for b-roll: a missing APIMART key fails the scene loud instead of
   // rendering it on 69Labs, whose grok build has different duration/quality behaviour.
   if (!scene.hostPresent && !apimart && !allow69Labs) {
     throw new Error(
       `Scene ${scene.index} is b-roll, which renders on APIMART only, but no APIMART key is ` +
-        `configured for slot ${params.apimartSlot ?? "(unset)"}. Set the tab's APIMART key.`
+        `configured for this video's account (${
+          apimartAccountOf(params) == null
+            ? "none picked"
+            : `Account ${apimartAccountOf(params)! + 1}`
+        }). Add one in Admin → Provider Keys.`
     );
   }
 
@@ -11728,7 +11741,7 @@ export async function generateSceneClips(
     // An ACCOUNT problem, not the beat's: every host beat of the tab fails the same way, so it
     // pauses the host lane instead of spending retries or making the host b-roll.
     throw new HostAccountError(
-      "no HeyGen key is set for this tab",
+      "no HeyGen key is set for this video's account",
       `Scene ${scene.index} is a host shot that requires lip-sync, but no lip-sync ` +
         `adapter is configured (set HEYGEN_API_KEY or a per-tab HeyGen key in Admin). ` +
         `Refusing to fall back to non-lip-synced 69labs video.`
@@ -15045,9 +15058,7 @@ async function runUnifiedPipeline(
         );
         try {
           const apimartKey =
-            params.apimartSlot != null
-              ? await getApimartSlotKey(params.apimartSlot)
-              : null;
+            await apimartKeyForJob(params);
           scene.clipUrls = await generateSceneStillClip(
             jobId,
             scene,
@@ -16937,9 +16948,7 @@ async function regenerateSplitRight(
   }
 
   const apimartKey =
-    params.apimartSlot != null
-      ? await getApimartSlotKey(params.apimartSlot)
-      : null;
+    await apimartKeyForJob(params);
   // Same register the render path chose for this scene. Unlike the render path there is NO
   // silent degrade to a still: the operator asked for this panel, so a failed motion render must
   // surface as a failed scene rather than quietly swapping the register they picked.
@@ -19580,9 +19589,7 @@ async function retryFailedScenesLocked(
         );
         try {
           const apimartKey =
-            params.apimartSlot != null
-              ? await getApimartSlotKey(params.apimartSlot)
-              : null;
+            await apimartKeyForJob(params);
           scene.clipUrls = await generateSceneStillClip(
             jobId,
             scene,

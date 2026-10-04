@@ -10,12 +10,15 @@ import ChannelsPage from "./pages/ChannelsPage";
 import AdminPage from "./pages/AdminPage";
 import HeygenTestPage from "./pages/HeygenTestPage";
 import VslPage from "./pages/VslPage";
+import ActivityPage from "./pages/ActivityPage";
+import { trpc } from "@/lib/trpc";
 import { useAuth } from "./_core/hooks/useAuth";
 import { LoginScreen } from "./components/LoginScreen";
 import { CreditErrorPopup } from "./components/CreditErrorPopup";
 import { ChangePasswordDialog } from "./components/ChangePasswordDialog";
 import { ROLE_LABEL, type Role } from "@shared/roles";
 import {
+  Activity,
   Film,
   KeyRound,
   LibraryBig,
@@ -67,6 +70,12 @@ const NAV = [
     icon: Megaphone,
     needs: "channels",
   },
+  {
+    href: "/activity",
+    label: "Activity",
+    icon: Activity,
+    needs: "channels",
+  },
   { href: "/admin", label: "Admin", icon: Settings, needs: "admin" },
 ] as const;
 
@@ -84,6 +93,33 @@ function useVisibleNav(): readonly NavItem[] {
   );
 }
 
+/**
+ * How many of everyone's videos need a person right now — the count on the Activity nav entry.
+ * Asked only for accounts that can open the page (`managerProcedure` refuses the rest).
+ */
+function useAttentionCount(): number {
+  const { canManageChannels } = useAuth();
+  const { data } = trpc.activity.list.useQuery(undefined, {
+    enabled: canManageChannels,
+    refetchInterval: 30_000,
+    select: d => d.attention,
+  });
+  return data ?? 0;
+}
+
+/** The bell: a small red count beside "Activity". Nothing at zero. */
+function AttentionBadge({ href, count }: { href: string; count: number }) {
+  if (href !== "/activity" || count <= 0) return null;
+  return (
+    <span
+      aria-label={`${count} video${count === 1 ? "" : "s"} need attention`}
+      className="flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold leading-none text-white"
+    >
+      {count > 99 ? "99+" : count}
+    </span>
+  );
+}
+
 /** `/` must match exactly — every path starts with it. */
 const isActive = (location: string, href: string) =>
   href === "/" ? location === "/" : location.startsWith(href);
@@ -91,9 +127,11 @@ const isActive = (location: string, href: string) =>
 function DesktopNav({
   location,
   items,
+  attention,
 }: {
   location: string;
   items: readonly NavItem[];
+  attention: number;
 }) {
   return (
     <nav
@@ -118,6 +156,7 @@ function DesktopNav({
           >
             <Icon className="h-4 w-4" />
             {label}
+            <AttentionBadge href={href} count={attention} />
           </Link>
         );
       })}
@@ -133,9 +172,11 @@ function DesktopNav({
 function MobileNav({
   location,
   items,
+  attention,
 }: {
   location: string;
   items: readonly NavItem[];
+  attention: number;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -170,6 +211,7 @@ function MobileNav({
               >
                 <Icon className="h-4 w-4 shrink-0" />
                 {label}
+                <AttentionBadge href={href} count={attention} />
               </Link>
             );
           })}
@@ -261,6 +303,7 @@ function AccountMenu() {
 function Layout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
   const navItems = useVisibleNav();
+  const attention = useAttentionCount();
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -281,8 +324,16 @@ function Layout({ children }: { children: React.ReactNode }) {
             <span className="hidden text-sm sm:inline">Longform Studio</span>
           </Link>
 
-          <MobileNav location={location} items={navItems} />
-          <DesktopNav location={location} items={navItems} />
+          <MobileNav
+            location={location}
+            items={navItems}
+            attention={attention}
+          />
+          <DesktopNav
+            location={location}
+            items={navItems}
+            attention={attention}
+          />
 
           <div className="ml-auto flex shrink-0 items-center gap-2">
             <AccountMenu />
@@ -357,6 +408,9 @@ function Router() {
         </Route>
         <Route path="/vsl">
           {canManageChannels ? <VslPage /> : <NotAuthorized />}
+        </Route>
+        <Route path="/activity">
+          {canManageChannels ? <ActivityPage /> : <NotAuthorized />}
         </Route>
         <Route path="/admin">
           {canOpenAdmin ? <AdminPage /> : <NotAuthorized />}

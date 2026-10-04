@@ -67,10 +67,9 @@ import { HostPhotoTile } from "./HostPhotoTile";
 import { HostPhotoPreview } from "./HostPhotoPreview";
 import {
   formatRunDate,
-  HeygenAccountSelect,
   HeygenClipStatus,
   RunName,
-  useHeygenAccountPick,
+  useHeygenTestStatus,
   useNow,
 } from "./HeygenTest";
 
@@ -112,7 +111,7 @@ const remembered = () => {
 export function UpsellVsl() {
   const utils = trpc.useUtils();
   const { data: channels } = trpc.channelConfig.list.useQuery();
-  const pick = useHeygenAccountPick();
+  const heygen = useHeygenTestStatus();
   const [channelKey, setChannelKeyState] = useState(remembered);
   const [vendor, setVendor] = useState<Vendor>("sixtynine_labs");
   const [bookInput, setBookInput] = useState("");
@@ -246,7 +245,7 @@ export function UpsellVsl() {
   const estSec = estimateTestSeconds(script);
   const blocker = !channel
     ? "Pick a channel."
-    : (pick.blocker ??
+    : (heygen.blocker ??
       (photos && !imageUrl
         ? "This channel has no host photo — upload one."
         : makingLook
@@ -306,12 +305,7 @@ export function UpsellVsl() {
                 </select>
               </div>
             )}
-            <HeygenAccountSelect pick={pick} />
           </div>
-
-          {pick.allBusy && (
-            <Alert tone="warning" title="All HeyGen accounts are in use" />
-          )}
 
           {channel && (
             <>
@@ -475,7 +469,6 @@ export function UpsellVsl() {
                 start.mutate({
                   channelKey,
                   ttsVendor: effectiveVendor,
-                  account: pick.account,
                   script,
                   imageUrl,
                   bookTitle,
@@ -488,7 +481,7 @@ export function UpsellVsl() {
             </Button>
             <span className="text-xs text-muted-foreground">
               {blocker ??
-                `About $${(Math.max(estSec, 1) * pick.rate).toFixed(2)} on HeyGen (~${Math.round(estSec)} s)`}
+                `About $${(Math.max(estSec, 1) * heygen.rate).toFixed(2)} on HeyGen (~${Math.round(estSec)} s)`}
             </span>
           </div>
         </CardContent>

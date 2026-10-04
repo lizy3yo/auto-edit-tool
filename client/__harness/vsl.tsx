@@ -11,7 +11,7 @@ import { fillVslScript, planVslPick, VSL_DEFAULT_TEMPLATE } from "@shared/vsl";
 
 /**
  * Harness for the Upsell VSL page, against stubbed `channelConfig.list`, `book.list`,
- * `channelHostPhoto.list`, the `vsl` router and the `heygenTest` routes it shares (accounts,
+ * `channelHostPhoto.list`, the `vsl` router and the `heygenTest` routes it shares (status,
  * retry, rename, deleteBatch), backed by in-page state. Generate adds a clip that walks
  * voicing → rendering → done on successive polls. Two channels: Hank has books and saved clips
  * (one in use, one failed), Granny Mae has neither — so the per-channel list, the book picker's
@@ -182,15 +182,7 @@ function handle(path: string, input: any): unknown {
     });
     return { id };
   }
-  if (path === "heygenTest.accounts")
-    return {
-      available: [
-        { account: "test", label: "Test account" },
-        { account: 0, label: "Tab 1 account" },
-      ],
-      configured: 2,
-      ratePerSec: RATE,
-    };
+  if (path === "heygenTest.status") return { ready: true, ratePerSec: RATE };
   if (path === "vsl.list") {
     const all = state.rows
       .filter(r => !input?.channelKey || r.channelKey === input.channelKey)
@@ -269,8 +261,6 @@ window.fetch = (async (req: any, init?: RequestInit) => {
   });
 }) as typeof window.fetch;
 (window as any).__kept = state.kept;
-// No live account stream here: the picker falls back to its poll.
-(window as any).EventSource = undefined;
 
 function Harness() {
   const [queryClient] = useState(() => new QueryClient());

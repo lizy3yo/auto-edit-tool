@@ -460,14 +460,14 @@ export default function LongformJobSlot({
         ` — use "Make b-roll", or ask a manager`
     );
 
-  // Masked APIMART keys (admin-only). B-roll VIDEO renders on this tab's APIMART key; with no key
-  // set the tab falls back to 69 Labs video, so warn the admin.
+  // Masked APIMART keys (admin-only). B-roll VIDEO renders on the least busy APIMART account
+  // (`shared/accountPool.ts`); with no account at all it cannot render, so warn the admin.
   const { data: apimartKeys } = trpc.longformVideo.getApimartKeys.useQuery(
     undefined,
     { enabled: isAdmin }
   );
   const apimartKeyMissing =
-    isAdmin && !apimartKeys?.slots.find(s => s.slotIndex === slotIndex)?.masked;
+    isAdmin && !!apimartKeys && !apimartKeys.slots.some(s => s.masked);
 
   // Adopt a parent-provided id (resume reconciliation) if we don't have one yet.
   useEffect(() => {
@@ -1088,6 +1088,29 @@ export default function LongformJobSlot({
     );
   };
 
+  // Someone fixing this video (`shared/jobTakeover.ts`). Asked separately from the poll below
+  // because a finished or failed video is not polled — and a failed one is exactly what gets
+  // taken over — so its owner would otherwise only see "Being fixed by…" after a reload.
+  const { data: takeover } = trpc.longformVideo.takeoverState.useQuery(
+    { jobId: jobId ?? 0 },
+    {
+      enabled: jobId !== null && jobId !== dismissedJobId,
+      retry: false,
+      refetchInterval: 10_000,
+      refetchIntervalInBackground: true,
+    }
+  );
+  /** Somebody else holds it: this card's buttons are paused (the server refuses them too). */
+  const pausedByTakeover = !!takeover && !takeover.mine;
+  const handBack = trpc.activity.handBack.useMutation({
+    onSuccess: () => {
+      toast.success("Handed back");
+      void utils.longformVideo.takeoverState.invalidate();
+      void utils.activity.list.invalidate();
+    },
+    onError: err => toast.error(err.message ?? "Could not hand back"),
+  });
+
   const {
     data: rawJob,
     dataUpdatedAt,
@@ -1120,7 +1143,10 @@ export default function LongformJobSlot({
           q.state.data?.sceneEdits?.editing ||
           queuedScenes.length > 0
           ? 3000
-          : Date.now() < jobWatchUntil
+          : pausedByTakeover
+            ? // Whatever the person fixing it starts has to show up here without a click.
+              5000
+            : Date.now() < jobWatchUntil
             ? 1000
             : false;
       },
@@ -1974,12 +2000,12 @@ export default function LongformJobSlot({
             {wordCount.toLocaleString()} word{wordCount === 1 ? "" : "s"}
             {wordCount > 0 && ` · roughly ${estimatedMinutes} of narration`}
           </p>
-          {/* B-roll VIDEO renders on this tab's APIMART key (stills always use OpenAI gpt-image-2).
+          {/* B-roll VIDEO renders on an APIMART account (stills always use OpenAI gpt-image-2).
               Key status is admin-only (getApimartKeys is adminProcedure), so the warning is too. */}
           {apimartKeyMissing && (
             <Alert tone="warning" className="text-xs">
-              No APIMART key for this tab — set it in Admin → Longform. B-roll
-              video will use 69 Labs.
+              No APIMART account has a key — add one in Admin → Provider
+              keys, or b-roll video cannot render.
             </Alert>
           )}
         </Step>
@@ -2144,6 +2170,43 @@ export default function LongformJobSlot({
         </div>
       </Card>
 
+      {job && takeover && (
+        <Alert
+          tone={takeover.mine ? "info" : "warning"}
+          title={
+            takeover.mine
+              ? "You have taken this video over"
+              : `Being fixed by ${takeover.byName}`
+          }
+        >
+          {takeover.mine ? (
+            <div className="flex flex-wrap items-center gap-3">
+              <span>
+                Its owner&apos;s buttons are paused until you hand it back. It
+                also goes back by itself when the video finishes, or 30 minutes
+                after you close it.
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={handBack.isPending}
+                onClick={() => jobId != null && handBack.mutate({ jobId })}
+              >
+                Hand back
+              </Button>
+            </div>
+          ) : (
+            "Your buttons are paused so the two of you don't change it at the same time. You can still watch it here — it comes back to you when they are done."
+          )}
+        </Alert>
+      )}
+
+      {/* `disabled` on a fieldset disables every button, input and select inside it — the whole
+          card and storyboard pause with one switch, and nothing new added below can be missed. */}
+      <fieldset
+        disabled={pausedByTakeover}
+        className="m-0 min-w-0 space-y-6 border-0 p-0"
+      >
       {/* Progress / result */}
       {job && (
         <Card className="bg-card border-primary/20">
@@ -3937,6 +4000,8 @@ export default function LongformJobSlot({
           </div>
         </div>
       )}
+
+      </fieldset>
 
       {/* Redo host clips */}
       <AlertDialog open={redoHostOpen} onOpenChange={setRedoHostOpen}>

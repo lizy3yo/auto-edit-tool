@@ -335,7 +335,7 @@ export default function FaceLockVideo() {
         <PageHeader
           icon={Film}
           title="Long-form video"
-          description={`Generate ${MAX_SLOTS} videos in parallel — each tab is its own job with its own script, channel and b-roll model, and each spends credits on its own.`}
+          description={`Generate ${MAX_SLOTS} videos in parallel — each tab is its own job with its own script and channel, and each spends credits on its own.`}
           actions={
             balance && (
               <div className="flex items-center gap-2 rounded-lg border border-border bg-muted px-3 py-1.5 text-sm">

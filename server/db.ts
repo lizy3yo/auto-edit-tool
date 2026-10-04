@@ -11,7 +11,6 @@ import {
   type SQL,
 } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { notifyHeygenAccountsChanged } from "./heygenAccountEvents";
 import { planVslPick, type HeygenTestKind } from "../shared/vsl";
 import { createPool } from "mysql2";
 import {
@@ -27,6 +26,7 @@ import {
   longformSales,
   users,
 } from "../drizzle/schema";
+import { apimartAccountOf, heygenAccountOf } from "../shared/accountPool";
 import type {
   InsertProviderConfig,
   InsertChannelConfig,
@@ -271,7 +271,6 @@ export async function createLongformVideoJob(
   const db = await getDb();
   if (!db) return null;
   const result = await db.insert(longformVideoJobs).values(job);
-  notifyHeygenAccountsChanged();
   return result[0].insertId;
 }
 
@@ -306,8 +305,6 @@ export async function updateLongformVideoJob(
       throw err;
     }
   }
-  // A film starting or settling frees or takes its tab's HeyGen account (HeyGen test page).
-  if (updates.status !== undefined) notifyHeygenAccountsChanged();
 }
 
 export async function getLongformVideoJobById(id: number) {
@@ -646,7 +643,6 @@ export async function deleteLongformVideoJob(
     .set({ jobId: null, draftTitle: null })
     .where(eq(longformSlots.jobId, id));
   await db.delete(longformVideoJobs).where(eq(longformVideoJobs.id, id));
-  notifyHeygenAccountsChanged();
 }
 
 /**
@@ -720,32 +716,132 @@ export async function markStaleLongformJobsFailed(
         lt(longformVideoJobs.updatedAt, cutoff)
       )
     );
-  const affected = (result as any)?.[0]?.affectedRows ?? 0;
-  if (affected > 0) notifyHeygenAccountsChanged();
-  return affected;
+  return (result as any)?.[0]?.affectedRows ?? 0;
 }
 
 /**
- * The tab slot of every film still processing — each one is rendering its host on that tab's
- * HeyGen account (`heygen_key_slot_N`), or on the shared key when the slot has none. Reads the
- * one JSON field rather than the whole `inputParams` (a full script) or the storyboard.
- * `null` = a job with no slot (a script, an old client), which renders on the shared key.
+ * The provider accounts of every film still processing (`shared/accountPool.ts`) — what the
+ * pool counts to find the least busy account, and what the HeyGen test page reads to know which
+ * accounts are free. Reads three JSON fields rather than the whole `inputParams` (a full script)
+ * or the storyboard, and has no ORDER BY (the sort-buffer trap at the top of this file).
+ * `null` = no account: an old job with no tab, or one made when no account had a key.
  */
-export async function getProcessingLongformSlots(): Promise<(number | null)[]> {
+export async function getProcessingJobAccounts(): Promise<
+  { apimart: number | null; heygen: number | null }[]
+> {
   const db = await getDb();
   if (!db) return [];
+  const field = (name: string) =>
+    sql<
+      string | number | null
+    >`json_unquote(json_extract(${longformVideoJobs.inputParams}, ${"$." + name}))`;
   const rows = await db
     .select({
-      slot: sql<
-        string | number | null
-      >`json_unquote(json_extract(${longformVideoJobs.inputParams}, '$.apimartSlot'))`,
+      apimartAccount: field("apimartAccount"),
+      heygenAccount: field("heygenAccount"),
+      apimartSlot: field("apimartSlot"),
     })
     .from(longformVideoJobs)
     .where(eq(longformVideoJobs.status, "processing"));
-  return rows.map(r => {
-    const n = r.slot == null || r.slot === "null" ? NaN : Number(r.slot);
+  const num = (v: string | number | null) => {
+    const n = v == null || v === "null" ? NaN : Number(v);
     return Number.isInteger(n) ? n : null;
+  };
+  return rows.map(r => {
+    const params = {
+      apimartAccount: num(r.apimartAccount),
+      heygenAccount: num(r.heygenAccount),
+      apimartSlot: num(r.apimartSlot),
+    };
+    return {
+      apimart: apimartAccountOf(params),
+      heygen: heygenAccountOf(params),
+    };
   });
+}
+
+/**
+ * Who owns a job and whether it is running — the two facts a permission check needs
+ * (`server/jobAccess.ts`), without loading the script or the storyboard.
+ */
+export async function getLongformVideoJobOwner(id: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db
+    .select({
+      id: longformVideoJobs.id,
+      userId: longformVideoJobs.userId,
+      status: longformVideoJobs.status,
+    })
+    .from(longformVideoJobs)
+    .where(eq(longformVideoJobs.id, id))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+/**
+ * Every account's videos for the Activity page: all that are running, plus the `recentLimit`
+ * most recently settled since `since`.
+ *
+ * Two steps on purpose. The ids are found first, sorting only `updatedAt`; the details are then
+ * read `WHERE id IN (…)` with NO ORDER BY, because they carry `json_unquote(json_extract())`
+ * columns, which are typed LONGTEXT and overflow MySQL 9.4's sort buffer when sorted (the trap at
+ * the top of this file). The script and the storyboard are never selected: the host flags are
+ * answered inside MySQL by `json_contains_path`, which matters on a page that refreshes every
+ * few seconds for every running video.
+ */
+export async function getActivityRows(since: Date, recentLimit = 40) {
+  const db = await getDb();
+  if (!db) return [];
+  const [running, recent] = await Promise.all([
+    db
+      .select({ id: longformVideoJobs.id })
+      .from(longformVideoJobs)
+      .where(eq(longformVideoJobs.status, "processing")),
+    db
+      .select({ id: longformVideoJobs.id })
+      .from(longformVideoJobs)
+      .where(
+        and(
+          inArray(longformVideoJobs.status, ["completed", "failed"]),
+          gte(longformVideoJobs.updatedAt, since)
+        )
+      )
+      .orderBy(desc(longformVideoJobs.updatedAt))
+      .limit(recentLimit),
+  ]);
+  const ids = [...running, ...recent].map(r => r.id);
+  if (!ids.length) return [];
+  const param = (name: string) =>
+    sql<
+      string | null
+    >`json_unquote(json_extract(${longformVideoJobs.inputParams}, ${"$." + name}))`;
+  const sceneFlag = (name: string) =>
+    sql<
+      number | null
+    >`json_contains_path(${longformVideoJobs.storyboard}, 'one', ${"$[*]." + name})`;
+  return db
+    .select({
+      id: longformVideoJobs.id,
+      userId: longformVideoJobs.userId,
+      userName: longformVideoJobs.userName,
+      status: longformVideoJobs.status,
+      stage: longformVideoJobs.stage,
+      progress: longformVideoJobs.progress,
+      errorMessage: longformVideoJobs.errorMessage,
+      createdAt: longformVideoJobs.createdAt,
+      updatedAt: longformVideoJobs.updatedAt,
+      title: param("title"),
+      channelKey: param("channelKey"),
+      apimartAccount: param("apimartAccount"),
+      heygenAccount: param("heygenAccount"),
+      apimartSlot: param("apimartSlot"),
+      ttsWaitSince: param("ttsWait.since"),
+      hostNeeded: sceneFlag("hostNeeded"),
+      hostWaiting: sceneFlag("hostWaiting"),
+    })
+    .from(longformVideoJobs)
+    .where(inArray(longformVideoJobs.id, ids));
 }
 
 // ─── Channel Config Helpers ───
@@ -1035,7 +1131,6 @@ export async function createHeygenTests(
   const db = await getDb();
   if (!db) throw new Error("Database unavailable");
   await db.insert(heygenTests).values(rows);
-  notifyHeygenAccountsChanged();
 }
 
 export async function updateHeygenTest(
@@ -1045,7 +1140,6 @@ export async function updateHeygenTest(
   const db = await getDb();
   if (!db) return;
   await db.update(heygenTests).set(data).where(eq(heygenTests.id, id));
-  if (data.status !== undefined) notifyHeygenAccountsChanged();
 }
 
 export async function updateHeygenTestBatch(
@@ -1058,7 +1152,6 @@ export async function updateHeygenTestBatch(
     .update(heygenTests)
     .set(data)
     .where(eq(heygenTests.batchId, batchId));
-  if (data.status !== undefined) notifyHeygenAccountsChanged();
 }
 
 export async function getHeygenTestBatch(
@@ -1180,7 +1273,6 @@ export async function deleteHeygenTestBatch(batchId: string): Promise<void> {
   const db = await getDb();
   if (!db) return;
   await db.delete(heygenTests).where(eq(heygenTests.batchId, batchId));
-  notifyHeygenAccountsChanged();
 }
 
 /**

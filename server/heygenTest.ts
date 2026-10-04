@@ -28,6 +28,7 @@ import path from "node:path";
 import { nanoid } from "nanoid";
 import {
   accountToSlot,
+  heygenAccountLabel,
   HEYGEN_TEST_MAX_SEC,
   heygenTestInputError,
   slotToAccount,
@@ -40,17 +41,17 @@ import {
   createHeygenTests,
   getChannelConfig,
   getHeygenTestBatch,
-  getProcessingLongformSlots,
   getUnfinishedHeygenTests,
   updateHeygenTest,
   updateHeygenTestBatch,
 } from "./db";
 import { ENV } from "./_core/env";
+import { assignHeygenTestAccount, configuredAccounts } from "./accountPool";
 import {
   generateSceneVoiceover,
   getHeygenSlotKey,
   getHeygenTestKey,
-  LONGFORM_SLOT_COUNT,
+  getHeygenTestMasked,
   resolveTTSVendor,
   TTS_SIMILARITY,
   TTS_STABILITY,
@@ -74,68 +75,21 @@ import {
 
 export type TtsVendor = "sixtynine_labs" | "minimax";
 
-/** A HeyGen account the form can offer, labelled. Keys never leave the server. */
-export type HeygenTestAccountOption = {
-  account: HeygenTestAccount;
-  label: string;
-};
-
-/** What the account picker shows: the free accounts, out of how many have a key at all. */
-export type HeygenAccountAvailability = {
-  available: HeygenTestAccountOption[];
-  configured: number;
+/**
+ * What the two pages need to know before a run: whether any HeyGen key exists at all (the one
+ * thing that still blocks a run — a busy account never does, the run waits its turn), and the
+ * rate their cost estimate uses. Keys never leave the server.
+ */
+export async function getHeygenTestStatus(): Promise<{
+  ready: boolean;
   ratePerSec: number;
-};
-
-/**
- * Pure: which configured accounts are free. A film renders its host on its tab's account, or on
- * the shared key when that tab has none (or it has no tab) — never on the test account; a HeyGen
- * test holds the account it was started on until it settles.
- */
-export function planHeygenAvailability(
-  configured: HeygenTestAccountOption[],
-  keyedSlots: ReadonlySet<number>,
-  processingFilmSlots: (number | null)[],
-  unfinishedTestAccounts: HeygenTestAccount[]
-): HeygenTestAccountOption[] {
-  const busy = new Set<HeygenTestAccount>(unfinishedTestAccounts);
-  for (const slot of processingFilmSlots)
-    busy.add(slot != null && keyedSlots.has(slot) ? slot : "shared");
-  return configured.filter(a => !busy.has(a.account));
-}
-
-/**
- * The accounts free right now — what the picker lists and what `startHeygenTest` re-checks. The
- * test account comes first (the picker's default), the TAB accounts after it as a backup. The
- * shared `HEYGEN_API_KEY` is deliberately not offered.
- */
-export async function getHeygenAccountAvailability(
-  opts: { ignoreBatchId?: string } = {}
-): Promise<HeygenAccountAvailability> {
-  const configured: HeygenTestAccountOption[] = [];
-  if (await getHeygenTestKey())
-    configured.push({ account: "test", label: "Test account" });
-  const keyedSlots = new Set<number>();
-  for (let slot = 0; slot < LONGFORM_SLOT_COUNT; slot++) {
-    if (await getHeygenSlotKey(slot)) {
-      keyedSlots.add(slot);
-      configured.push({ account: slot, label: `Tab ${slot + 1} account` });
-    }
-  }
-  const [filmSlots, tests] = await Promise.all([
-    getProcessingLongformSlots(),
-    getUnfinishedHeygenTests(),
+}> {
+  const [pool, test] = await Promise.all([
+    configuredAccounts("heygen"),
+    getHeygenTestMasked(),
   ]);
   return {
-    available: planHeygenAvailability(
-      configured,
-      keyedSlots,
-      filmSlots,
-      tests
-        .filter(t => t.batchId !== opts.ignoreBatchId)
-        .map(t => slotToAccount(t.heygenSlot))
-    ),
-    configured: configured.length,
+    ready: pool.length > 0 || !!test || !!ENV.heygenApiKey,
     ratePerSec: RATES.heygenPerSecond,
   };
 }
@@ -175,7 +129,6 @@ export async function startHeygenTest(input: {
   userId: number;
   channelKey: string;
   ttsVendor: TtsVendor;
-  account: HeygenTestAccount;
   script: string;
   imageUrls: string[];
   /** Optional label for the run; blank = none. */
@@ -197,19 +150,6 @@ export async function startHeygenTest(input: {
     throw new HeygenTestInputError(
       "Mock mode is on — the HeyGen test needs a real render. Turn mock mode off first."
     );
-  if (!(await heygenKeyFor(input.account)))
-    throw new HeygenTestInputError(
-      "That HeyGen account has no key — pick another, or add one in Admin → Provider keys."
-    );
-  // The picker only offers free accounts, but a film can take one between its last update and
-  // this click — refuse rather than queue a test behind a live film's host renders.
-  const { available } = await getHeygenAccountAvailability();
-  if (!available.some(a => a.account === input.account))
-    throw new HeygenTestInputError(
-      input.account === "test"
-        ? "The test account is busy with another test run — pick another account, or wait for it to finish."
-        : "That HeyGen account just became busy with a film — pick another one, or wait for it to finish."
-    );
   const channel = await getChannelConfig(input.channelKey);
   if (!channel) throw new HeygenTestInputError("Unknown channel.");
   const voiceId =
@@ -222,22 +162,32 @@ export async function startHeygenTest(input: {
   const batchId = nanoid(16);
   activeBatches.add(batchId);
   try {
-    await createHeygenTests(
-      input.imageUrls.map(imageUrl => ({
-        batchId,
-        userId: input.userId,
-        channelKey: input.channelKey,
-        ttsVendor: input.ttsVendor,
-        heygenSlot: accountToSlot(input.account),
-        imageUrl,
-        script: input.script.trim(),
-        runName: input.name?.trim() || null,
-        kind,
-        bookTitle: kind === "vsl" ? input.bookTitle!.trim() : null,
-        status: "voicing" as const,
-        phaseStartedAt: new Date(),
-      }))
-    );
+    // The account is the server's pick, never the operator's (`assignHeygenTestAccount`): the
+    // least busy one, written with the rows under one lock, and kept for the run's whole life —
+    // a retry or a resume must reach the account that holds its HeyGen video id. A busy account
+    // is not refused; the clips wait on its semaphore in `runClip`.
+    await assignHeygenTestAccount(async account => {
+      if (account == null)
+        throw new HeygenTestInputError(
+          "No HeyGen key is set — add one in Admin → Provider keys."
+        );
+      await createHeygenTests(
+        input.imageUrls.map(imageUrl => ({
+          batchId,
+          userId: input.userId,
+          channelKey: input.channelKey,
+          ttsVendor: input.ttsVendor,
+          heygenSlot: accountToSlot(account),
+          imageUrl,
+          script: input.script.trim(),
+          runName: input.name?.trim() || null,
+          kind,
+          bookTitle: kind === "vsl" ? input.bookTitle!.trim() : null,
+          status: "voicing" as const,
+          phaseStartedAt: new Date(),
+        }))
+      );
+    });
   } catch (err) {
     activeBatches.delete(batchId);
     throw err;
@@ -438,8 +388,8 @@ export async function renameHeygenRun(
  * Voicing is the batch's shared step: if it never produced audio, the failed rows are voiced
  * again together (one read for all of them, as on the first run). Otherwise each row goes
  * straight back to HeyGen on the batch's existing audio, so the retried clip is directly
- * comparable with its siblings. Runs on the account the batch was started on, re-checked for a
- * film that took it in the meantime (the batch's own unfinished clips do not count as busy).
+ * comparable with its siblings. Runs on the account the batch was started on — never another,
+ * and never refused because that account is busy: the clips wait their turn on it.
  */
 export async function retryHeygenTests(
   batchId: string,
@@ -460,14 +410,9 @@ export async function retryHeygenTests(
     );
 
   const account = slotToAccount(targets[0].heygenSlot);
-  const { available } = await getHeygenAccountAvailability({
-    ignoreBatchId: batchId,
-  });
-  if (!available.some(a => a.account === account))
+  if (!(await heygenKeyFor(account)))
     throw new HeygenTestInputError(
-      account === "test"
-        ? "The test account is busy with another test run — retry when it finishes."
-        : `${account === "shared" ? "That HeyGen account" : `The Tab ${account + 1} account`} is busy with a film right now — retry when it finishes.`
+      `${heygenAccountLabel(account)} no longer has a key — add it back in Admin → Provider keys, or start a new run.`
     );
 
   const reset = {

@@ -45,7 +45,7 @@ Read through the single `ENV` object in `server/_core/env.ts`, except `R2_*`, wh
 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` | `server/storage.ts` (S3 API)                                                                           | every upload fails                        |
 | `R2_PUBLIC_URL`                                                          | `server/storage.ts:83`, `server/musicBeds.ts:101`                                                      | narration-only films (warns, no crash)    |
 | `RUN_POD_KEY` + `RUNPOD_WHISPERX_ENDPOINT`                               | `server/_core/voiceTranscription.ts` → `kodxana/whisperx-worker_v2` serverless                         | no word-level narration alignment         |
-| `HEYGEN_API_KEY`                                                         | `server/longformVideo.ts:2506` — **fallback only**, used when a tab's slot key is blank                | host lip-sync fails for slot-less tabs    |
+| `HEYGEN_API_KEY`                                                         | `server/longformVideo.ts` (`resolveLipsyncAdapter`) — **fallback only**, used when no HeyGen account has a key | host lip-sync fails with no account       |
 | `RUNPOD_INFINITETALK_ENDPOINT` + `LIPSYNC_PROVIDER=runpod`               | `server/providers/runpod-lipsync.ts` — **optional**, moves host lip-sync off HeyGen                    | host lane stays on HeyGen (the default)   |
 | `PUBLIC_BASE_URL`                                                        | `server/providers/heygen-lipsync.ts:78` (webhook callback URL)                                         | blank ⇒ pure polling; slower, still works |
 
@@ -55,12 +55,32 @@ Read through the single `ENV` object in `server/_core/env.ts`, except `R2_*`, wh
 | ----------------- | -------------------------------------------------------------------------------------------- | --------------------------- |
 | 69Labs            | `provider_configs.apiKeyEncrypted` (`server/db.ts`)                                          | `https://69labs.vip/api/v1` |
 | MiniMax (TTS)     | `provider_configs` row + `customConfig.groupId` (`saveMinimaxProvider`)                      | `https://api.minimax.io/v1` |
-| APIMART ×5 + edit | `app_settings` → `apimart_key_slot_0..4`, `apimart_key_edit` (`server/longformVideo.ts:452`) | `https://api.apimart.ai`    |
-| HeyGen ×5         | `app_settings` → `heygen_key_slot_0..4` (`server/longformVideo.ts:461`)                      | `https://api.heygen.com/v3` |
+| APIMART ×N + edit | `app_settings` → `apimart_key_slot_0..19`, `apimart_key_edit` (`server/longformVideo.ts`)    | `https://api.apimart.ai`    |
+| HeyGen ×N         | `app_settings` → `heygen_key_slot_0..19` (`server/longformVideo.ts`)                         | `https://api.heygen.com/v3` |
 | HeyGen test       | `app_settings` → `heygen_key_test` — HeyGen test page only, never a film                      | `https://api.heygen.com/v3` |
 
-`LONGFORM_SLOT_COUNT = 5` — one key slot per UI tab, so 5 accounts render 5× wider than
-one shared key. Crypto lives in `server/encryption.ts`:
+APIMART and HeyGen keys are an ACCOUNT POOL (`shared/accountPool.ts`, 2026-10-04), not one key
+per tab. They used to belong to tab numbers (`apimart_key_slot_N` = "tab N+1's key") and every
+user has their own five tabs, so everyone's tab 1 rendered on the same account while account 5
+sat idle, and a sixth could not be added. The rows are unchanged — account N+1 is still
+`…_key_slot_N`, up to `PROVIDER_ACCOUNT_MAX` (20), so the five keys entered before are accounts
+1–5 with nothing to re-enter — but a video is now given the LEAST BUSY account of each provider
+at Generate (`assignJobAccounts` in `server/accountPool.ts`: fewest processing videos, lowest
+number on a tie, picked and written under one in-process lock so two clicks landing together
+cannot take the same one) and keeps it for life (`inputParams.apimartAccount` /
+`heygenAccount`): a resume, retry or regenerate must reach the account holding its task ids, and
+it never changes account by itself. `apimartKeyForJob` / `heygenKeyForJob` (longformVideo) are
+the ONLY readers of a job's key — a tripwire in `accountPool.test.ts` fails on any other — and a
+job made before the pool falls back to its tab number (`apimartSlot`). No account with a key ⇒
+b-roll fails loud and the host uses the shared `HEYGEN_API_KEY`, as a keyless tab used to.
+"Configured" is read off the stored row's masked tail, never a decrypt (a key derivation each).
+Admin → Provider Keys lists accounts with "Add account", the balance and how many videos are
+rendering on each; saving a row empty removes it. `LONGFORM_SLOT_COUNT = 5` is now only the
+tabs per user. Only these two providers are pooled — 69Labs, OpenAI, Anthropic, Gemini, RunPod
+and R2 are one shared key each, and OpenAI stills (50/min) and 69Labs TTS (20/min) are the next
+ceilings when many videos run together. Harness: `client/__harness/activity.html`.
+
+Crypto lives in `server/encryption.ts`:
 `scryptSync(JWT_SECRET, "longform-studio", 32)`, stored as `iv:tag:ciphertext` inside
 JSON `{ last4, enc }`. The salt is load-bearing — changing it orphans every key already
 in the DB.
@@ -180,7 +200,7 @@ Express · tRPC · Drizzle · MySQL.
 - `server/providers/` — one adapter per vendor; `base.ts` is the interface,
   `fallback.ts` the image chain (primary → Gemini). The host lip-sync lane has TWO adapters,
   picked in `resolveLipsyncLane` and handed to callers that know neither: `heygen-lipsync.ts`
-  (Avatar IV, 1080p, per-tab account keys, billed per second of output) and
+  (Avatar IV, 1080p, pooled account keys, billed per second of output) and
   `runpod-lipsync.ts` (self-hosted InfiniteTalk, ≤720p, one shared endpoint, billed per GPU
   second — so it meters itself from RunPod's `executionTime` instead of being wrapped by the
   per-output-second meter in `resolveLipsyncAdapter`). HeyGen is the default; RunPod requires
@@ -1425,20 +1445,26 @@ Express · tRPC · Drizzle · MySQL.
   grouped by `batchId`; HeyGen's `video_id` is persisted on accept and `resumeHeygenTests` (run on
   every `heygenTest.list`) polls an orphan instead of resubmitting — a row cut off before HeyGen
   accepted it is failed, never re-spent. Shares the account's `heygenSlotsFor` semaphore with the
-  pipeline. The account picker lists the TEST account first (`heygen_key_test`, Admin → Provider
-  Keys → HeyGen "Test" row; no film ever uses it, stored on a row as `heygenSlot = -1` via
-  `accountToSlot`/`slotToAccount`, one run at a time), then the FREE TAB accounts as a backup
-  (never the shared `HEYGEN_API_KEY`) (`planHeygenAvailability`: a processing
-  film holds its tab's account, or the shared key when that tab has none; an unfinished test
-  holds its own), each badged Available, with an amber warning when none are; `startHeygenTest`
-  re-checks on click. It is LIVE: `server/heygenAccountStream.ts` is a Server-Sent Events route
-  (`/api/heygen-test/accounts/stream`, same gate as the page) that pushes the list whenever
-  `server/heygenAccountEvents.ts` fires — from the db helpers, on any job or test STATUS write —
-  coalesced 250 ms and computed once for every open page, plus a 25 s heartbeat recompute that
-  keeps Railway's proxy from closing the stream and catches a key added in Admin. The page polls
-  the tRPC query only while the stream is reconnecting. A new place that changes a job's status
-  outside `updateLongformVideoJob` must call `notifyHeygenAccountsChanged` or the picker lags to
-  the heartbeat.
+  pipeline. NOBODY PICKS THE ACCOUNT (2026-10-04): the page had a
+  dropdown of the accounts with no film on them, which stopped working the day videos began
+  spreading over every account (the pool, above) — "All HeyGen accounts are in use" would have
+  been the normal state. A run is now GIVEN its account by the server
+  (`assignHeygenTestAccount` in `server/accountPool.ts` → `pickHeygenTestAccount`, pure): the
+  TEST account first (`heygen_key_test`, Admin → Provider Keys → HeyGen "Test" row; no film ever
+  renders on it, so a test there slows no video; stored on a row as `heygenSlot = -1` via
+  `accountToSlot`/`slotToAccount`), then the least busy pool account, lowest number on a tie;
+  the shared `HEYGEN_API_KEY` only when no account has a key. Films and test clips count against
+  ONE load number per account, and a video's own pick counts running test clips too. A busy
+  account is never refused — the clips wait their turn on its semaphore — so the only thing
+  that blocks a run is "No HeyGen key is set" (`heygenTest.status`, which also carries the rate
+  the cost estimate uses). The pick and the row write happen under the same in-process lock as a
+  video's, and the account is kept for the run's life: a retry or a resume must reach the
+  account holding its HeyGen video id. Each clip's card says which account it is on
+  (`heygenAccountLabel`). The start routes take no `account` input — a tripwire in
+  `accountPool.test.ts` fails if one comes back. Retired with the dropdown: the
+  `heygenTest.accounts` route, `planHeygenAvailability`, and the live account stream
+  (`heygenAccountStream.ts`, `heygenAccountEvents.ts` and the `notifyHeygenAccountsChanged` calls
+  in the db helpers), which existed only to keep that dropdown current.
   Each running clip shows a PROGRESS BAR from `heygenTestProgress` (shared/heygenTest.ts):
   HeyGen reports a stage, never a percentage, so it is an estimate from `phaseStartedAt`
   (migration 0012, stamped at voicing → preparing the photo → HeyGen accepted) against each
@@ -1446,8 +1472,8 @@ Express · tRPC · Drizzle · MySQL.
   second of video — never backwards, never 100 before done, "taking longer than usual" past the
   typical time. RETRY (`retryHeygenTests`, per clip or "Retry all failed") resubmits failed clips
   on the batch's existing audio, or re-voices the whole batch when voicing was what failed; it is
-  an operator click, so it may spend, and it re-checks the account is free (ignoring the batch's
-  own clips).
+  an operator click, so it may spend; it runs on the batch's own account and waits its turn there
+  (refused only if that account's key has since been removed).
   A failed clip shows `friendlyHeygenTestError(raw)` — plain language plus what to do — with the
   raw error kept on the row and shown on hover; a new failure mode needs a rule there or it
   reads as the generic "Something went wrong".
@@ -1464,11 +1490,11 @@ Express · tRPC · Drizzle · MySQL.
   `heygen_tests` row with `kind = "vsl"` (migration 0015, plus `bookTitle` and `isPicked`), run by
   `startHeygenTest` — voicing, the 30 s cut, the production lip-sync call, the steadier, resume,
   retry, progress and the account rules are the test bench's one code path, and the page reuses
-  its pieces (`useHeygenAccountPick`/`HeygenAccountSelect`, `HeygenClipStatus`, `RunName`, exported
-  from `HeygenTest.tsx`) and its `accounts` / `retry` / `rename` / `deleteBatch` routes. What a VSL
+  its pieces (`useHeygenTestStatus`, `HeygenClipStatus`, `RunName`, exported
+  from `HeygenTest.tsx`) and its `status` / `retry` / `rename` / `deleteBatch` routes. What a VSL
   adds: it is KEPT PER CHANNEL (the page is one channel's voice, photos, books and clips;
   `vsl.list` filters `kind` + `channelKey`, the test page lists only `kind = "test"`, while the
-  account picker and `resumeHeygenTests` read every kind), files live under
+  account pick and `resumeHeygenTests` read every kind), files live under
   `vsl/<channelKey>/<batchId>/` (`heygenTestStorageDir`), exactly one photo (the channel's primary
   by default, in the look the channel is switched to), and the book the buyer bought — stored as
   the TITLE the host says, not an id, because CTA books are often uploaded per video and are not
@@ -1501,6 +1527,36 @@ Express · tRPC · Drizzle · MySQL.
   `ensureRootAdmin`. Sessions carry only a `uid` — `sdk.authenticateRequest` reloads the row on
   every request (2 s memo), so a role change or a disable takes effect immediately. Managed in
   Admin → Users (`client/src/components/admin/UserManagement.tsx`)
+- **Activity and taking a video over** (`shared/activity.ts`, `shared/jobTakeover.ts`,
+  `server/jobTakeover.ts`, `server/jobAccess.ts`, `/activity`, 2026-10-04) — the oversight
+  tiers' live view of everyone's videos, in the top nav beside "Upsell VSL" (`managerProcedure`
+  on the `activity` router). `activity.list` returns every processing job plus the 40 most
+  recently settled in the last 24 h (`getActivityRows`: ids first, details `WHERE id IN` with no
+  ORDER BY — the sort-buffer trap — and never the script or storyboard; the host flags are
+  answered inside MySQL by `json_contains_path`). NEEDS ATTENTION (`activityAttention`) is a
+  failure in that window that is not the maker's own cancel, or a running video waiting on the
+  voice (`ttsWait`), on HeyGen (`hostWaiting`) or on a "Host needed" beat; the count is the red
+  badge on the nav entry, and the 24 h window is what keeps old failures from lighting it
+  forever. TAKE OVER opens the video in the taker's own tab (the Library's `/?open=<id>` path:
+  a free tab, else the one in view) and PAUSES everyone else on it — the owner and other admins
+  alike, since two people clicking Retry pay twice. The pause is enforced by
+  `assertJobAccess(job, user, "read" | "write")`, the ONE permission check: it replaced ~35
+  inline copies in `routers.ts` and closed two routes that had none ("Make host", a paid HeyGen
+  render, and the cost breakdown were open to any signed-in user on any video); a tripwire in
+  `jobAccess.test.ts` fails if a route with a `jobId` input skips it or an inline ownership
+  test comes back. The owner's card shows "Being fixed by …" and wraps the job card and
+  storyboard in ONE `<fieldset disabled>`, so every button inside pauses and nothing added later
+  can be missed; it learns of a takeover from `longformVideo.takeoverState`, polled apart from
+  `pollJob` because a finished or failed video is not polled and a failed one is exactly what
+  gets taken over. It is HANDED BACK by the button, when the tab holding it is cleared, when the
+  video is deleted, when a video it re-ran finishes (`sawProcessing` then `completed`), or 30
+  minutes after its holder last had it open (`TAKEOVER_IDLE_MS` — the holder's polls and clicks
+  are what refresh it, so a long re-render being watched does not release halfway); an admin can
+  break a takeover someone else left. State lives in memory, written through to
+  `app_settings.job_takeovers` — deliberately NOT on the job row, whose `updatedAt` is the
+  heartbeat the stale-job sweep and the restart resume read, so a takeover kept alive by an open
+  page would make a dead render look alive. Paid clicks during a takeover are already named on
+  the ledger (`SceneSubmit.by`). Harness: `client/__harness/activity.html`
 - `drizzle/schema.ts` — `users`, `provider_configs`, `longform_video_jobs`,
   `channel_configs`, `channel_layers`, `app_settings` (+ `books`, `channel_assets`,
   `longform_slots`, `longform_sales`)
@@ -1656,7 +1712,7 @@ Always 16:9. Fire-and-forget; progress persisted to the job row and polled by th
   `scene.hostNeeded` ("Host needed", red) and never demoted behind anyone's back — the assembly
   gate names it and "Retry failed scenes" skips it, so a person Regenerates or makes it b-roll.
   A HeyGen ACCOUNT failure (`server/hostLaneFailure.ts`: 401/403 key, 402/credits/quota,
-  suspended, 429 or 5xx/network after the adapter's own retries, no key for the tab) is not the
+  suspended, 429 or 5xx/network after the adapter's own retries, no key for the video's account) is not the
   beat's: `HostAccountError` PAUSES the job's host lane (in-memory, `pauseHostLane`), every other
   host submit fails fast without calling HeyGen, beats are left clip-less with
   `scene.hostWaiting` ("Waiting for HeyGen"), none of their allowance is spent (HeyGen accepted
