@@ -5,6 +5,7 @@ import {
   MAX_HOST_REGENERATIONS,
   decideHostRender,
   hostAutoRendersUsed,
+  hostMergeLocked,
 } from "../shared/hostRegenLimit";
 import {
   activeTakeIndex,
@@ -118,9 +119,35 @@ describe("host render allowance", () => {
     expect(decideHostRender(split, "regenerate").ok).toBe(true);
   });
 
-  it("a merge renders a new, longer beat — it is not a re-roll", () => {
-    const s = host([sub("first"), sub("infra"), sub("regenerate")]);
-    expect(decideHostRender(s, "merge").ok).toBe(true);
+  it("a merge renders a new, longer beat — free while neither beat has used its regenerate", () => {
+    const s = host([sub("first"), sub("infra")], {
+      mergeOriginal: { a: host([sub("first")]), b: host([sub("first")]) },
+    });
+    expect(decideHostRender(s, "merge")).toEqual({ ok: true, pastLimit: false });
+  });
+
+  it("a merge is never the way around a used regenerate — either beat locks it", () => {
+    const used = [sub("first"), sub("regenerate")];
+    const first = host(used);
+    const second = host([sub("first")], {
+      mergeOriginal: { a: host([sub("first")]), b: host(used) },
+    });
+    expect(hostMergeLocked(host(used), host([sub("first")]))).toBe(true);
+    expect(hostMergeLocked(host([sub("first")]), host(used))).toBe(true);
+    expect(hostMergeLocked(host([sub("first")]), host([sub("first")]))).toBe(
+      false
+    );
+    for (const s of [first, second]) {
+      expect(decideHostRender(s, "merge")).toMatchObject({
+        ok: false,
+        why: "regenerate",
+      });
+      // An admin/manager's confirm lets it through, marked on the ledger.
+      expect(decideHostRender(s, "merge", true)).toEqual({
+        ok: true,
+        pastLimit: true,
+      });
+    }
   });
 });
 

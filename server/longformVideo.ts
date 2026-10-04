@@ -212,8 +212,6 @@ import {
   recordRegeneratedTake,
   selectHostTake,
 } from "../shared/hostTakes";
-// AIREITER BOLT-ON (temporary) — delete with the block in `apimartAdapterForJob`.
-import { aireiterAdapter, aireiterLaneEnabled } from "./providers/aireiter";
 import { Semaphore } from "./providers/semaphore";
 import {
   SceneEditQueue,
@@ -941,11 +939,6 @@ async function apimartAdapterForJob(
   // Mock mode: b-roll renders locally, so a tab with no APIMART key (or an invalid one) still
   // produces a full film. Checked before the slot guard — mock must not depend on config.
   if (await isMockMode()) return new MockProviderAdapter() as any;
-  // ─── AIREITER BOLT-ON (temporary — delete this block to remove) ──────────
-  // Spends prepaid AIReiter credits on b-roll instead of APIMART. Same grok-imagine model,
-  // different gateway. Off unless AIREITER_LANES names `broll`; see providers/aireiter.ts.
-  if (await aireiterLaneEnabled("broll")) return aireiterAdapter();
-  // ─── END AIREITER BOLT-ON ────────────────────────────────────────────────
   const key = await apimartKeyForJob(params);
   return key ? new ApimartAdapter(key) : null; // no key ⇒ b-roll fails loud
 }
@@ -8374,8 +8367,7 @@ export function clipTrimFor(
 
 async function generateSceneClip(
   adapter: ReturnType<typeof createProviderAdapter>,
-  // Widened from `ApimartAdapter` for the AIReiter bolt-on; only the ProviderAdapter surface
-  // (submitVideo/pollVideo/generateVideo) is ever used here, so this is the honest type either way.
+  // Only the ProviderAdapter surface (submitVideo/pollVideo/generateVideo) is used here.
   apimart: ProviderAdapter | null,
   jobId: number,
   scene: StoryboardScene,
@@ -17761,6 +17753,7 @@ async function runSceneEdit(
           await runRippleEdit(ctx, s, req.newSec, req.edge);
         } else if (req.kind === "merge") {
           s.nextSubmitBy = req.by;
+          s.nextSubmitOverride = req.force || undefined;
           resumeHostLane(jobId);
           await runMergeEdit(ctx, s);
           s.regenerated = true;
@@ -18147,9 +18140,11 @@ export async function rippleTrimScene(
 export async function mergeSceneWithNext(
   jobId: number,
   sceneIndex: number,
-  by?: SubmitActor
+  by?: SubmitActor,
+  /** An admin/manager confirmed merging host beats past a limit. */
+  force?: boolean
 ): Promise<EditAccept> {
-  return enqueueSceneEdit(jobId, { kind: "merge", sceneIndex, by });
+  return enqueueSceneEdit(jobId, { kind: "merge", sceneIndex, by, force });
 }
 
 /**

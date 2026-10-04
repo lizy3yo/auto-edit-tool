@@ -489,14 +489,6 @@ export function ProviderKeys() {
   const [heygenExtra, setHeygenExtra] = useState(0);
   const apimartRows = visibleAccounts(data?.slots ?? [], apimartExtra);
   const heygenRows = visibleAccounts(heygen?.slots ?? [], heygenExtra);
-  // AIREITER BOLT-ON (temporary) — delete with the section below.
-  const { data: aireiter, isLoading: aireiterLoading } =
-    trpc.longformVideo.getAireiter.useQuery();
-  const { data: aireiterBal, isLoading: aireiterBalLoading } =
-    trpc.longformVideo.getAireiterBalance.useQuery(undefined, {
-      refetchOnWindowFocus: false,
-    });
-  const [aireiterDraft, setAireiterDraft] = useState("");
 
   const saveMutation = trpc.longformVideo.setApimartKey.useMutation({
     onSuccess: (_res, vars) => {
@@ -544,17 +536,6 @@ export function ProviderKeys() {
       },
       onError: err => toast.error(err.message ?? "Failed to save."),
     });
-
-  // AIREITER BOLT-ON (temporary) — delete with the section below.
-  const saveAireiterMutation = trpc.longformVideo.setAireiterKey.useMutation({
-    onSuccess: () => {
-      toast.success("AIReiter key saved.");
-      setAireiterDraft("");
-      utils.longformVideo.getAireiter.invalidate();
-      utils.longformVideo.getAireiterBalance.invalidate();
-    },
-    onError: err => toast.error(err.message ?? "Failed to save."),
-  });
 
   // Drives the muted state on the HeyGen key rows below — they stay editable, they are just
   // no longer the live configuration while InfiniteTalk is the host provider.
@@ -637,75 +618,7 @@ export function ProviderKeys() {
           that account. The Edit Images/Videos pages are APIMART-only on their
           own key; blank ⇒ those pages can&apos;t generate.
         </p>
-        {aireiter?.lanes.broll && (
-          <p className="text-xs text-warning">
-            Overridden — b-roll is currently rendering on AIReiter (below), so
-            these APIMART keys are not being billed.
-          </p>
-        )}
       </div>
-
-      {/* ─── AIREITER BOLT-ON (temporary) — delete this whole section ─── */}
-      <div className="space-y-3">
-        <Label className="flex items-center gap-2 text-sm font-medium">
-          <KeyRound className="h-4 w-4" />
-          AIReiter key — b-roll + stills (every video)
-        </Label>
-        {aireiterLoading ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading…
-          </div>
-        ) : (
-          <KeyRow
-            label="AIReiter"
-            masked={aireiter?.masked ?? null}
-            placeholder={
-              aireiter?.usingEnvKey
-                ? "Using AIREITER_API_KEY from .env"
-                : "Not set — b-roll/stills stay on APIMART/OpenAI"
-            }
-            draft={aireiterDraft}
-            onDraftChange={setAireiterDraft}
-            onSave={apiKey => saveAireiterMutation.mutate({ apiKey })}
-            saving={saveAireiterMutation.isPending}
-            badge={
-              <BalanceBadge
-                keySet={!!aireiter?.masked || !!aireiter?.usingEnvKey}
-                value={aireiterBal?.credits ?? null}
-                loading={aireiterBalLoading}
-                format={v => `${Math.round(v)} credits left`}
-                lowThreshold={200}
-              />
-            }
-          />
-        )}
-        <p className="text-xs text-muted-foreground">
-          One key for every video — AIReiter is a single account with one shared
-          credit pool. Which lanes it takes over is set by{" "}
-          <code className="text-[11px]">AIREITER_LANES</code> in{" "}
-          <code className="text-[11px]">.env</code> (
-          <code className="text-[11px]">broll</code>,{" "}
-          <code className="text-[11px]">stills</code>, or{" "}
-          <code className="text-[11px]">all</code>); a key entered here wins
-          over <code className="text-[11px]">AIREITER_API_KEY</code>. AIReiter
-          has no lip-sync and no TTS, so host scenes and narration are never
-          affected.
-        </p>
-        <p className="text-xs">
-          {aireiter?.lanes.broll || aireiter?.lanes.stills ? (
-            <span className="text-success">
-              Active on: {aireiter.lanes.broll ? "b-roll" : ""}
-              {aireiter.lanes.broll && aireiter.lanes.stills ? " + " : ""}
-              {aireiter.lanes.stills ? "stills/keyframes" : ""}
-            </span>
-          ) : (
-            <span className="text-muted-foreground">
-              Inactive — set AIREITER_LANES to route work here.
-            </span>
-          )}
-        </p>
-      </div>
-      {/* ─── END AIREITER BOLT-ON ─── */}
 
       {/*
         Dimmed, not disabled, while host lip-sync runs on InfiniteTalk: the keys are still

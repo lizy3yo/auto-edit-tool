@@ -100,6 +100,20 @@ describe("decideHostSpend", () => {
     });
   });
 
+  it("treats a merge as an operator's click too — never excused as a protected beat", () => {
+    const over = {
+      ...base,
+      spentSec: 180,
+      protectedBeat: true,
+      reason: "merge" as const,
+    };
+    expect(decideHostSpend(over).ok).toBe(false);
+    expect(decideHostSpend({ ...over, override: true })).toEqual({
+      ok: true,
+      why: "override",
+    });
+  });
+
   it("does nothing on a job with no limit", () => {
     expect(
       decideHostSpend({ ...base, spentSec: 9999, limitSec: null }).ok

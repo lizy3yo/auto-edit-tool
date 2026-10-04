@@ -71,6 +71,7 @@ import { triggerCreditErrorPopup } from "@/components/CreditErrorPopup";
 import type { SplitLayout, StoryboardScene } from "@shared/types";
 import {
   canOverrideHostRegenLimit,
+  hostMergeLocked,
   hostRegenLockedLabel,
   hostRegenerationLocked,
   isLimitedHostScene,
@@ -447,6 +448,10 @@ export default function LongformJobSlot({
   const [overrideScene, setOverrideScene] = useState<number | null>(null);
   // A host render past the video's host spend limit (admin / manager confirm).
   const [limitScene, setLimitScene] = useState<number | null>(null);
+  // A merge of host beats past a limit, awaiting the admin / manager confirm (first scene's index).
+  const [mergeConfirmScene, setMergeConfirmScene] = useState<number | null>(
+    null
+  );
   const limitToast = (
     sceneIndex: number,
     spentSec?: number,
@@ -802,6 +807,23 @@ export default function LongformJobSlot({
       if (d.accepted === "ignored") {
         toast.info(
           `Scene ${vars.sceneIndex} is rendering — merge it once it finishes`
+        );
+        return;
+      }
+      // The server's refusal of a host merge past a limit (the card asks first; this is the gate).
+      if (d.accepted === "locked") {
+        toast.info(
+          `Scenes ${vars.sceneIndex} and ${vars.sceneIndex + 1} can't be merged — a host regenerate is already used. Ask a manager`
+        );
+        return;
+      }
+      if (d.accepted === "overLimit") {
+        toast.info(
+          `Scenes ${vars.sceneIndex} and ${vars.sceneIndex + 1} can't be merged — this video's host limit is used` +
+            ("spentSec" in d && "limitSec" in d
+              ? ` (${formatMinSec(d.spentSec)} of ${formatMinSec(d.limitSec)})`
+              : "") +
+            `. Ask a manager`
         );
         return;
       }
@@ -1606,6 +1628,40 @@ export default function LongformJobSlot({
     return edit.trim() !== (scene ? ownedPrompt(scene) : "").trim();
   };
 
+  /** Seconds of host a merge of this scene with the next would render. */
+  const mergedHostSec = (scene: StoryboardScene, next: StoryboardScene) =>
+    Math.max(0, (next.narrationEndSec ?? 0) - (scene.narrationStartSec ?? 0));
+  /** Would merging these two host beats go past a limit (a used regenerate, or the host minutes)? */
+  const mergePastLimit = (scene: StoryboardScene, next: StoryboardScene) =>
+    isLimitedHostScene(scene) &&
+    (hostMergeLocked(scene, next) ||
+      overHostLimit({ ...scene, audioDuration: mergedHostSec(scene, next) }));
+  // Merge with the next scene. Two host beats merge into one new paid host render, so it follows
+  // Regenerate's rule past a limit: a manager confirms the cost first, an editor is told to ask
+  // one. The server refuses the same way, so this is the courtesy, not the gate.
+  const mergeWithNext = (
+    scene: StoryboardScene,
+    next: StoryboardScene,
+    force = false
+  ) => {
+    if (!jobId) return;
+    if (mergePastLimit(scene, next) && !force) {
+      if (canOverrideRegen) setMergeConfirmScene(scene.index);
+      else
+        toast.info(
+          hostMergeLocked(scene, next)
+            ? `Scenes ${scene.index} and ${next.index} can't be merged — a host regenerate is already used. Ask a manager`
+            : `Scenes ${scene.index} and ${next.index} can't be merged — this video's host minutes are used. Ask a manager`
+        );
+      return;
+    }
+    mergeScenesMutation.mutate({
+      jobId,
+      sceneIndex: scene.index,
+      force: force || undefined,
+    });
+  };
+
   // Single-click per-scene regenerate — shared by the collapsed one-click button
   // and the expanded editor's button. Queues optimistically so the spinner and
   // polling start on the click itself (the mutation is fire-and-forget).
@@ -2057,14 +2113,16 @@ export default function LongformJobSlot({
                       : `The voice will act out this script's ${directionCount} direction${directionCount === 1 ? "" : "s"} like [laughs].`}
                   </p>
                 )}
+              {/* These two are siblings and both remount per channel, so each key carries its own
+                  prefix: two siblings sharing one key make React duplicate one and drop the other. */}
               <ChannelVoiceTuning
-                key={channelKey}
+                key={`voice-${channelKey}`}
                 channelKey={channelKey}
                 ttsSpeed={channelDefaults.ttsSpeed}
                 ttsVolume={channelDefaults.ttsVolume}
               />
               <LongformHostPhotoPicker
-                key={channelKey}
+                key={`photos-${channelKey}`}
                 channelKey={channelKey}
                 value={hostPhotoIds}
                 onChange={setHostPhotoIds}
@@ -3596,13 +3654,7 @@ export default function LongformJobSlot({
                                       isSceneQueued
                                     }
                                     title="Glue this scene and the next into one scene and re-render them as a single continuous clip — removes the cut between them. Costs one clip render."
-                                    onClick={() => {
-                                      if (!jobId) return;
-                                      mergeScenesMutation.mutate({
-                                        jobId,
-                                        sceneIndex: scene.index,
-                                      });
-                                    }}
+                                    onClick={() => mergeWithNext(scene, next)}
                                   >
                                     <Merge className="mr-1.5 h-3.5 w-3.5" />
                                     Merge with scene #{next.index} — one
@@ -4246,6 +4298,56 @@ export default function LongformJobSlot({
               }}
             >
               Regenerate anyway
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Host merge past a limit (admin / manager only) */}
+      <AlertDialog
+        open={mergeConfirmScene != null}
+        onOpenChange={open => {
+          if (!open) setMergeConfirmScene(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Merge scenes {mergeConfirmScene} and {(mergeConfirmScene ?? 0) + 1}{" "}
+              anyway?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {(() => {
+                const at = scenes.findIndex(x => x.index === mergeConfirmScene);
+                const s = scenes[at];
+                const next = scenes[at + 1];
+                if (!s || !next) return null;
+                const sec = mergedHostSec(s, next);
+                const rate = pacingInfo?.hostRatePerSec;
+                const cost =
+                  rate && sec > 0 ? ` (~$${(sec * rate).toFixed(2)})` : "";
+                return (
+                  (hostMergeLocked(s, next)
+                    ? `One of these host beats has already used its one regenerate. `
+                    : `This video has used ${formatMinSec(hostSpend?.spentSec ?? 0)} of its ` +
+                      `${formatMinSec(hostSpend?.limitSec ?? 0)} host minutes. `) +
+                  `Merging renders the host again as one clip: a full lip-sync ` +
+                  `render of ${sec.toFixed(1)}s${cost}, billed whether or not it is kept.`
+                );
+              })()}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const at = scenes.findIndex(x => x.index === mergeConfirmScene);
+                if (scenes[at] && scenes[at + 1])
+                  mergeWithNext(scenes[at], scenes[at + 1], true);
+                setMergeConfirmScene(null);
+              }}
+            >
+              Merge anyway
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

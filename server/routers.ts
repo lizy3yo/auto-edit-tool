@@ -192,14 +192,6 @@ import { getJobCostBreakdown } from "./costMeter";
 import { getMonthlyCostReport } from "./costRollup";
 import { ApimartAdapter } from "./providers/apimart";
 import { HeygenLipsyncAdapter } from "./providers/heygen-lipsync";
-// AIREITER BOLT-ON (temporary) — delete with the router block below.
-import {
-  AireiterAdapter,
-  aireiterKey,
-  aireiterKeyMasked,
-  aireiterLaneEnabled,
-  setAireiterKey,
-} from "./providers/aireiter";
 import { ENV } from "./_core/env";
 import type {
   LongformInputParams,
@@ -215,6 +207,7 @@ import {
 import { HOST_MINUTES_OPTIONS } from "../shared/hostMinutes";
 import {
   canOverrideHostRegenLimit,
+  hostMergeLocked,
   hostRegenerationLocked,
   isLimitedHostScene,
 } from "../shared/hostRegenLimit";
@@ -1800,40 +1793,6 @@ const longformVideoRouter = router({
       return { success: true };
     }),
 
-  // ─── AIREITER BOLT-ON (temporary — delete this block to remove) ─────────
-  /**
-   * Admin: the AIReiter key, its live credit balance, and which lanes it is serving.
-   * One key for all 5 tabs, unlike APIMART/HeyGen — AIReiter is a single account with one
-   * shared credit pool, so per-tab slots would buy nothing.
-   */
-  getAireiter: adminProcedure.query(async () => {
-    const masked = await aireiterKeyMasked();
-    const lanes = {
-      broll: await aireiterLaneEnabled("broll"),
-      stills: await aireiterLaneEnabled("stills"),
-    };
-    return {
-      masked,
-      lanes,
-      // Env fallback in play (key set via AIREITER_API_KEY rather than this field).
-      usingEnvKey: !masked && !!(await aireiterKey()),
-    };
-  }),
-
-  /** Admin: live credit balance for the AIReiter key. Null = unset key or failed check. */
-  getAireiterBalance: adminProcedure.query(async () => ({
-    credits: await (await AireiterAdapter.resolve()).getBalance(),
-  })),
-
-  /** Admin: set (or clear, with an empty string) the AIReiter key. */
-  setAireiterKey: adminProcedure
-    .input(z.object({ apiKey: z.string().max(400) }))
-    .mutation(async ({ input }) => {
-      await setAireiterKey(input.apiKey);
-      return { success: true };
-    }),
-  // ─── END AIREITER BOLT-ON ───────────────────────────────────────────────
-
   /**
    * Check that an uploaded narration is a read of THIS script, before a job is created from it.
    *
@@ -3268,9 +3227,21 @@ const longformVideoRouter = router({
    * clip generation); the merged narration is sliced from the existing master, never re-voiced.
    * Refused while anything else renders: the merge renumbers every later scene, and a queued
    * request keyed by an old index would land on the wrong card.
+   *
+   * Merging two host beats is a paid lip-sync render a person clicked for, so it follows
+   * Regenerate's limits: refused as `locked` when either beat has used its regenerate and as
+   * `overLimit` past the video's host minutes, unless an admin or manager confirmed it.
    */
   mergeScenes: approvedProcedure
-    .input(z.object({ jobId: z.number(), sceneIndex: z.number().int().min(1) }))
+    .input(
+      z.object({
+        jobId: z.number(),
+        sceneIndex: z.number().int().min(1),
+        // Merge host beats past a limit anyway. Honoured only for roles
+        // `canOverrideHostRegenLimit` allows; an editor sending it is still refused.
+        force: z.boolean().optional(),
+      })
+    )
     .mutation(async ({ ctx, input }) => {
       const job = await getLongformVideoJobById(input.jobId);
       if (!job)
@@ -3292,10 +3263,34 @@ const longformVideoRouter = router({
           message:
             "Can't merge while scenes are rendering or queued — wait for them to finish",
         });
+      const at = scenes.findIndex(s => s.index === input.sceneIndex);
+      const first = scenes[at];
+      const next = scenes[at + 1];
+      const override =
+        !!input.force && canOverrideHostRegenLimit(ctx.user.role);
+      if (isLimitedHostScene(first)) {
+        if (hostMergeLocked(first, next) && !override)
+          return { ok: true, accepted: "locked" as const };
+        // The merged clip is billed over both beats' narration, not the first one's.
+        const refused = await hostSpendRefusal(
+          input.jobId,
+          job.inputParams as LongformInputParams | null,
+          {
+            ...first,
+            audioDuration:
+              (next.narrationEndSec as number) -
+              (first.narrationStartSec as number),
+          },
+          override
+        );
+        if (refused)
+          return { ok: true, accepted: "overLimit" as const, ...refused };
+      }
       const accepted = await mergeSceneWithNext(
         input.jobId,
         input.sceneIndex,
-        clickerOf(ctx.user)
+        clickerOf(ctx.user),
+        override
       );
       return { ok: true, accepted };
     }),

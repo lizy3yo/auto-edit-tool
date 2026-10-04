@@ -159,9 +159,6 @@ function handle(path: string, input: any): unknown {
     else keys.delete(input.slotIndex);
     return { success: true };
   }
-  if (path === "longformVideo.getAireiter")
-    return { masked: null, usingEnvKey: false, lanes: { broll: false, stills: false } };
-  if (path === "longformVideo.getAireiterBalance") return null;
   throw new Error(`unstubbed ${path}`);
 }
 

@@ -10,8 +10,8 @@
  * less), so the generate form's "~$10.80 of lip-sync" is a promise and not an estimate. The start,
  * the CTAs and the end (`scene.hostProtected`) render FIRST and are never refused by an automatic
  * pass — their retries come out of the same budget, and the middle check-ins, rendered last,
- * are the ones that become b-roll when it runs out. An operator's paid click (Regenerate, "Make
- * host") is refused past the limit on every beat; an admin or manager may override it once.
+ * are the ones that become b-roll when it runs out. An operator's paid click (Regenerate, Merge,
+ * "Make host") is refused past the limit on every beat; an admin or manager may override it once.
  *
  * Pure and shared, so the gate, the router, the poll and the Cost dialog answer from one rule.
  */
@@ -42,9 +42,12 @@ export function hostSpendLimitSec(
   return null;
 }
 
-/** Submits an operator clicked for. Everything else is the pipeline finishing its own plan. */
+/**
+ * Submits an operator clicked for (Regenerate, Merge). Everything else is the pipeline
+ * finishing its own plan.
+ */
 export const isOperatorSubmit = (reason: SceneSubmitReason | undefined) =>
-  reason === "regenerate";
+  reason === "regenerate" || reason === "merge";
 
 export type HostSpendDecision =
   | { ok: true; why: "within" | "protected" | "override" | "unlimited" }

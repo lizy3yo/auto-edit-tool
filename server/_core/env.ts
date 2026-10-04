@@ -300,20 +300,4 @@ export const ENV = {
    */
   hostPlateLooks: Number(process.env.HOST_PLATE_LOOKS ?? 4),
 
-  // ─── AIREITER BOLT-ON (temporary; see server/providers/aireiter.ts) ──────
-  /** AIReiter gateway key. Blank ⇒ the bolt-on is inert regardless of lanes. */
-  aireiterApiKey: process.env.AIREITER_API_KEY ?? "",
-  /**
-   * Which lanes AIReiter takes over: comma-separated `broll`, `stills`, or `all`.
-   * Unset/empty (the default) ⇒ b-roll stays on APIMART and stills on OpenAI.
-   * Host lip-sync and TTS are NEVER affected — AIReiter sells neither.
-   */
-  aireiterLanes: process.env.AIREITER_LANES ?? "",
-  /** Grok Imagine on AIReiter tops out here: `480p` (cheapest) or `720p`. */
-  aireiterVideoResolution: process.env.AIREITER_VIDEO_RESOLUTION ?? "720p",
-  /** gpt_image_2 resolution tier: `1K`, `2K`, or `4K`. */
-  aireiterImageResolution: process.env.AIREITER_IMAGE_RESOLUTION ?? "2K",
-  /** Shared in-flight cap — a spend governor; every slot is a billed generation. */
-  aireiterConcurrency: Number(process.env.AIREITER_CONCURRENCY ?? 4),
-  // ─── END AIREITER BOLT-ON ───────────────────────────────────────────────
 };

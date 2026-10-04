@@ -81,6 +81,21 @@ export function hostRegenerationLocked(scene: StoryboardScene): boolean {
   );
 }
 
+/**
+ * True when merging these two host beats would re-render a beat that has spent its
+ * regenerations. A merge is one new paid host render over both beats, clicked for by a person,
+ * so at the limit it needs the same override Regenerate does — otherwise Merge is the way
+ * around the limit.
+ */
+export function hostMergeLocked(
+  scene: StoryboardScene,
+  next: StoryboardScene | undefined
+): boolean {
+  return (
+    hostRegenerationLocked(scene) || (!!next && hostRegenerationLocked(next))
+  );
+}
+
 export type HostRenderDecision =
   | { ok: true; pastLimit: boolean }
   | { ok: false; why: "retries" | "regenerate"; used: number; cap: number };
@@ -103,7 +118,24 @@ export function decideHostRender(
       ? { ok: true, pastLimit: false }
       : { ok: false, why: "retries", used, cap };
   }
-  // A merge renders a NEW clip over a new, longer slice — a different beat, never a re-roll.
+  // A merge renders a NEW clip over a new, longer slice. It is free of the limit while both
+  // beats are, and needs the override once either has spent its regenerate (the absorbed beat's
+  // ledger lives on the merge snapshot by the time this is asked).
+  if (reason === "merge") {
+    const absorbed = scene.mergeOriginal?.b;
+    if (!hostMergeLocked(scene, absorbed)) return { ok: true, pastLimit: false };
+    return override
+      ? { ok: true, pastLimit: true }
+      : {
+          ok: false,
+          why: "regenerate",
+          used: Math.max(
+            hostRegenerationsUsed(scene),
+            absorbed ? hostRegenerationsUsed(absorbed) : 0
+          ),
+          cap: MAX_HOST_REGENERATIONS,
+        };
+  }
   if (reason !== "regenerate") return { ok: true, pastLimit: false };
   const used = hostRegenerationsUsed(scene);
   if (!isLimitedHostScene(scene) || used < MAX_HOST_REGENERATIONS)
