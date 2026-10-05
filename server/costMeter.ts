@@ -73,7 +73,7 @@ export function withCostMeter<T>(
  * Spend made outside any job is dropped (it must not land on an arbitrary job), but never
  * SILENTLY. Until 2026-10-02 the meter only opened at the clip stage, so the storyboard, the
  * shot list and every Opus step before it — ~89% of a day's Claude bill — vanished without a
- * trace. Some spend legitimately has no job (a host photo's phone look, the delivery direction
+ * trace. Some spend legitimately has no job (the delivery direction
  * the upload panel shows, scripts), so this is a log line, not an error: once per lane +
  * vendor + model every 10 minutes, so a burst of stills checks does not flood the log.
  */

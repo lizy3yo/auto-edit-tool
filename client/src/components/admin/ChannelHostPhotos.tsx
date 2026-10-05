@@ -4,8 +4,6 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { ImageIcon, Loader2, Star, Trash2, User } from "lucide-react";
 import { toast } from "sonner";
-import { hostPhotoLookState, hostPhotoUrl } from "@shared/hostPhotoLook";
-import { PhotoLookSwitch } from "../HostPhotoLookSwitch";
 import { HostPhotoPreview } from "../HostPhotoPreview";
 import {
   AlertDialog,
@@ -54,9 +52,6 @@ export function ChannelHostPhotos({ channelKey }: { channelKey: string }) {
   const listInput = { channelKey, activeOnly: true } as const;
   const { data: photos, isLoading } = trpc.channelHostPhoto.list.useQuery(listInput, {
     enabled: !!channelKey,
-    // A phone look being made lands in the background — look again until none is left.
-    refetchInterval: q =>
-      (q.state.data ?? []).some(p => hostPhotoLookState(p) === "making") ? 5_000 : false,
   });
 
   const invalidate = () => utils.channelHostPhoto.list.invalidate();
@@ -94,20 +89,9 @@ export function ChannelHostPhotos({ channelKey }: { channelKey: string }) {
     onError: err => toast.error(err.message),
   });
 
-  const setLook = trpc.channelHostPhoto.setLook.useMutation({
-    onSuccess: rows => utils.channelHostPhoto.list.setData(listInput, rows),
-    onError: err => toast.error(err.message),
-  });
-  const remake = trpc.channelHostPhoto.remakePhoneLook.useMutation({
-    onSuccess: rows => {
-      toast.success("Making a new phone look — it appears here in a minute.");
-      utils.channelHostPhoto.list.setData(listInput, rows);
-    },
-    onError: err => toast.error(err.message),
-  });
 
   const rows = photos ?? [];
-  // The photo open in the big preview — read from the live list so a switch inside it shows.
+  // The photo open in the big preview.
   const [previewId, setPreviewId] = useState<number | null>(null);
   const previewRow = rows.find(p => p.id === previewId) ?? null;
 
@@ -148,37 +132,19 @@ export function ChannelHostPhotos({ channelKey }: { channelKey: string }) {
           {rows.map((p, i) => (
             <div key={p.id} className="rounded-md border border-border p-3">
               <div className="flex flex-wrap items-start gap-3">
-                {/* Both versions side by side: what was uploaded, and the phone look videos use
-                    by default (shared/hostPhotoLook.ts). The one in use is outlined. */}
-                <div className="flex shrink-0 gap-2">
-                  {[
-                    { label: "Original", url: p.imageUrl, used: hostPhotoUrl(p) === p.imageUrl },
-                    { label: "Phone look", url: p.phoneImageUrl, used: hostPhotoUrl(p) === p.phoneImageUrl },
-                  ].map(v => (
-                    <div key={v.label} className="w-24 space-y-0.5 text-center">
-                      {v.url ? (
-                        <button
-                          type="button"
-                          onClick={() => setPreviewId(p.id)}
-                          title="Click to see it big"
-                          aria-label={`Preview the ${v.label.toLowerCase()}`}
-                          className="block cursor-zoom-in"
-                        >
-                          <img
-                            src={v.url}
-                            alt=""
-                            className={`h-16 w-24 rounded border object-cover ${v.used ? "border-primary ring-1 ring-primary" : "border-border opacity-60"}`}
-                          />
-                        </button>
-                      ) : (
-                        <div className="flex h-16 w-24 items-center justify-center rounded border border-dashed border-border text-[10px] text-muted-foreground">
-                          {hostPhotoLookState(p) === "making" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "—"}
-                        </div>
-                      )}
-                      <span className="text-[10px] text-muted-foreground">{v.label}</span>
-                    </div>
-                  ))}
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setPreviewId(p.id)}
+                  title="Click to see it big"
+                  aria-label={i === 0 ? "Preview the primary photo" : `Preview angle ${i + 1}`}
+                  className="block shrink-0 cursor-zoom-in"
+                >
+                  <img
+                    src={p.imageUrl}
+                    alt=""
+                    className="h-16 w-24 rounded border border-border object-cover"
+                  />
+                </button>
                 <div className="min-w-0 flex-1 space-y-1">
                   {i === 0 ? (
                     <span className="inline-flex items-center gap-1 rounded bg-secondary px-1.5 py-0.5 text-xs font-medium">
@@ -196,28 +162,6 @@ export function ChannelHostPhotos({ channelKey }: { channelKey: string }) {
                     <span className="block text-[11px] italic text-muted-foreground">
                       Not used — unticked on the long-form page
                     </span>
-                  )}
-                  <div className="max-w-[12rem]">
-                    <PhotoLookSwitch
-                      state={hostPhotoLookState(p)}
-                      disabled={setLook.isPending}
-                      onChange={useOriginal => setLook.mutate({ channelKey, id: p.id, useOriginal })}
-                    />
-                  </div>
-                  {p.phoneLookError && (
-                    <span className="block text-[10px] text-destructive" title={p.phoneLookError}>
-                      Phone look could not be made — the original is used.
-                    </span>
-                  )}
-                  {(p.phoneImageUrl || p.phoneLookError) && (
-                    <button
-                      type="button"
-                      disabled={remake.isPending}
-                      onClick={() => remake.mutate({ channelKey, id: p.id })}
-                      className="text-[11px] text-primary underline-offset-2 hover:underline disabled:opacity-50"
-                    >
-                      Make phone look again
-                    </button>
                   )}
                 </div>
                 <div className="flex shrink-0 gap-1">
@@ -262,21 +206,9 @@ export function ChannelHostPhotos({ channelKey }: { channelKey: string }) {
       )}
 
       <HostPhotoPreview
-        photo={
-          previewRow
-            ? {
-                original: previewRow.imageUrl,
-                phone: previewRow.phoneImageUrl,
-                state: hostPhotoLookState(previewRow),
-              }
-            : null
-        }
+        imageUrl={previewRow?.imageUrl ?? null}
         title={previewId === rows[0]?.id ? "Primary host photo" : "Host photo"}
         onOpenChange={open => !open && setPreviewId(null)}
-        disabled={setLook.isPending}
-        onChange={useOriginal =>
-          previewRow && setLook.mutate({ channelKey, id: previewRow.id, useOriginal })
-        }
       />
 
       {/* Add — the upload lands in a draft so the angle can be named before it is written,

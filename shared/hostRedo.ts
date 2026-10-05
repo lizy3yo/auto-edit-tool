@@ -4,7 +4,7 @@
  * (`isHostPhotoPrepFailure`).
  *
  * A refused photo fails every beat on it the same way, so nothing the film does on its own can
- * fix it: a person changes the photo (another one, or "Make phone look again"), then asks for the
+ * fix it: a person changes the photo (uploads another one), then asks for the
  * clips. The film snapshots its photos when it is generated, so an ordinary retry would send the
  * refused one again — the redo re-reads the channel's photos as they are set NOW first.
  *

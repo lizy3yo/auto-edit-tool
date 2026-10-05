@@ -518,30 +518,23 @@ Express · tRPC · Drizzle · MySQL.
   (which add host beats late) and demotes the most redundant check-in, never an anchor. The
   storyboard prompt is unchanged: it still writes host at the ramp's shares, which is what gives
   the planner candidates near every target. Harness: `client/__harness/host-minutes.html`
-- **Host photos are used in their PHONE LOOK by default** (`server/hostPhoneLook.ts`,
-  `shared/hostPhotoLook.ts`, 2026-09-28, the operator: "everything should be phone look as a default,
-  same as in the test, but the user can still go back to the original"). A studio-lit host photo
-  stays "AI" under any filter because HeyGen keeps the photo's look, so each library photo
-  (`channel_host_photos`, migration 0014) carries a `phoneImageUrl`: the same person in the same
-  room remade by gpt-image-2 (APIMART, the original as the reference) as a frame of a video they
-  recorded on a propped-up phone — chest-up, plain daylight, hands down (a raised hand would freeze
-  in a HeyGen take). The recipe (`phoneLookPrompt`) is word for word the one that made the four
-  photos the operator chose, with the SETTING read off the photo by one Sonnet call
-  (`describeHostSetting`); a version that only said "the same room" came back as the original. A
-  result with no detectable face is refused (`phoneLookError`). `hostPhotoUrl` is the one rule —
-  phone look unless `useOriginal` or none made yet — used by the generate route, the picker, Admin
-  and the HeyGen test. Made once per photo in the background when the photo is first listed
-  (`ensurePhoneLooks` in `channelHostPhoto.list`); a generate waits up to `PHONE_LOOK_WAIT_MS`
-  (150 s) and otherwise renders the original. Every tile has a Phone / Original switch
-  (`channelHostPhoto.setLook`, any role, like ticking — `HostPhotoLookSwitch.tsx`); Admin shows
-  both versions side by side with "Make phone look again" (`remakePhoneLook`, managers). The
-  HeyGen test renders the phone look too (uploads through `heygenTest.phoneLook`, cached per
-  source photo in app_settings) and its clips now go through `steadyHostClip` like a film's, so the
-  test shows what a video will. A photo opens BIG (`HostPhotoPreview.tsx`): the original and the
-  phone look side by side, the one in use outlined, the same switch under them — click a thumbnail
-  in Admin or the HeyGen test, or the magnifier on a picker tile (the tile itself ticks). The picker
-  and the HeyGen test draw the SAME tile (`HostPhotoTile.tsx`: magnifier, corner badge — a tick or
-  a remove button — label row, switch), so the two pages cannot drift apart. Harnesses:
+- **Host photos are used AS UPLOADED** (2026-10-05, the operator: "we can remove the phone
+  itself to all in this system"). From 2026-09-28 each library photo carried a "phone look" — the
+  same person and room remade by gpt-image-2 as a frame of a phone video — used by default, with
+  a Phone / Original switch on every tile. It is REMOVED everywhere: the picker, Admin, the HeyGen
+  test and the Upsell VSL show and use `imageUrl`, `channelHostPhotoUrls` returns the uploaded
+  photos with no wait, and nothing makes a copy (one paid image and one Sonnet call per photo
+  less). Gone: `server/hostPhoneLook.ts`, `shared/hostPhotoLook.ts`, `HostPhotoLookSwitch.tsx`,
+  the routes `channelHostPhoto.setLook` / `remakePhoneLook` and `heygenTest.phoneLook`. KEPT ON
+  PURPOSE: the columns `channel_host_photos.phoneImageUrl` / `useOriginal` / `phoneLookError`
+  (migration 0014) and the copies already made — unread, so nothing is lost; drop them in a
+  later migration. Do not confuse it with the FILM's phone finish (`phoneLookFilter`,
+  `amateurSettingClause`, `PHONE_LOOK=0`), which is a different feature and is unchanged. A
+  photo opens BIG (`HostPhotoPreview.tsx`) from a thumbnail in Admin or the HeyGen test, or the
+  magnifier on a picker tile (the tile itself ticks). The picker, the HeyGen test and the VSL
+  draw the SAME tile (`HostPhotoTile.tsx`: magnifier, corner badge — a tick or a remove button —
+  label row), so the pages cannot drift apart. The HeyGen test's clips go through
+  `steadyHostClip` like a film's, so the test shows what a video will. Harnesses:
   `host-photos.html`, `heygen-test.html`
 - `server/hostPlate.ts` — **provider-independent**. The lip-sync model animates the image it
   is handed and never changes the setting, so `HOST_PLATES=1` generates a 16:9 plate of the host
@@ -1569,7 +1562,7 @@ Express · tRPC · Drizzle · MySQL.
   `vsl.list` filters `kind` + `channelKey`, the test page lists only `kind = "test"`, while the
   account pick and `resumeHeygenTests` read every kind), files live under
   `vsl/<channelKey>/<batchId>/` (`heygenTestStorageDir`), exactly one photo (the channel's primary
-  by default, in the look the channel is switched to), and the book the buyer bought — stored as
+  by default, as uploaded), and the book the buyer bought — stored as
   the TITLE the host says, not an id, because CTA books are often uploaded per video and are not
   in `books`: the form is ONE dropdown (`BookPicker`): the channel's books with their covers, a search box,
   and a `Use "…"` row for a typed title, which is used for that VSL only and never added to `books`. The
@@ -1577,10 +1570,10 @@ Express · tRPC · Drizzle · MySQL.
   holding it — the host would read it aloud); there is NO tip (a `{tip}` slot was built and
   removed the same day, the operator's call); a channel's next VSL starts from its last one's
   wording (`vslTemplateFrom`). A NEW PHOTO can be uploaded on the page and it asks first: "Just for
-  this VSL" (component state, phone look via `heygenTest.phoneLook`, never saved) or "Keep on
+  this VSL" (component state, never saved) or "Keep on
   channel" (`channelHostPhoto.save` with `isSelected: false` — in the library for the next VSL but
   UNTICKED, so it never becomes a camera angle in the channel's videos behind anyone's back; a
-  channel's only photo is saved ticked regardless). Generate waits for a photo's phone look. "Use this
+  channel's only photo is saved ticked regardless). "Use this
   one" (`vsl.pick` → `planVslPick`, pure) keeps ONE clip in use per channel and book and is a
   toggle; it is a label for people — nothing reads it yet, the upsell page is given the clip by
   Download MP4 / Copy link. Not in the Spend tab, like tests. Harness: `client/__harness/vsl.html`

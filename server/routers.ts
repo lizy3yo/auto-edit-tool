@@ -230,8 +230,6 @@ import {
   runpodLipsyncReadiness,
 } from "./lipsyncProvider";
 import { selectedHostPhotos, canDeselectHostPhoto } from "./hostPhotoSelection";
-import { ensurePhoneLook, ensurePhoneLooks, phoneLookWithin, phoneLookForUrl } from "./hostPhoneLook";
-import { hostPhotoUrl } from "@shared/hostPhotoLook";
 import { extractBookName } from "./ctaDetector";
 import { createProviderAdapter } from "./providers";
 import { rehostToR2 } from "./storage";
@@ -1075,24 +1073,6 @@ const heygenTestRouter = router({
       return { ok: true };
     }),
 
-  /**
-   * The phone-look version of an UPLOADED test photo — the default the test renders from, the
-   * same as a channel's photos (shared/hostPhotoLook.ts). Cached per source photo; the page shows
-   * both and the operator can switch the photo back to its original.
-   */
-  phoneLook: managerProcedure
-    .input(z.object({ imageUrl: z.string().url().max(512) }))
-    .mutation(async ({ input }) => {
-      try {
-        return { url: await phoneLookForUrl(input.imageUrl) };
-      } catch (err: any) {
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: `Could not make the phone look (${String(err?.message ?? err).slice(0, 160)}) — the original will be used.`,
-        });
-      }
-    }),
-
   start: managerProcedure
     .input(
       z.object({
@@ -1222,15 +1202,10 @@ const vslRouter = router({
     }),
 });
 
-/** How long a starting video waits for a photo's phone look before using the original. */
-const PHONE_LOOK_WAIT_MS = 150_000;
-
 /**
  * The photos a channel shoots its host from RIGHT NOW, primary first: the library narrowed to
- * the ticked angles (`hostPhotoIds` from the form, else the channel's saved ticks), each in the
- * look it is switched to. Each photo renders from its PHONE LOOK unless switched to the original
- * (shared/hostPhotoLook.ts); one whose phone look is still being made gets a short wait, then
- * the original — a render is never held up by it. Empty when the channel has no library.
+ * the ticked angles (`hostPhotoIds` from the form, else the channel's saved ticks), each as
+ * uploaded. Empty when the channel has no library.
  * Shared by generate and "Redo host clips", so the two cannot read the channel differently.
  */
 async function channelHostPhotoUrls(
@@ -1239,20 +1214,7 @@ async function channelHostPhotoUrls(
 ): Promise<string[]> {
   const libraryPhotos = await getChannelHostPhotos(channelKey, true);
   const wanted = selectedHostPhotos(libraryPhotos, hostPhotoIds);
-  const looked = await Promise.all(
-    wanted.map(async p => {
-      if (p.useOriginal || p.phoneImageUrl || p.phoneLookError) return p;
-      const phone = await phoneLookWithin(p, PHONE_LOOK_WAIT_MS);
-      if (!phone)
-        console.warn(
-          `[longform] host photo ${p.id}: phone look not ready — rendering the original`
-        );
-      return { ...p, phoneImageUrl: phone };
-    })
-  );
-  return looked
-    .map(p => hostPhotoUrl(p))
-    .filter((u): u is string => !!u);
+  return wanted.map(p => p.imageUrl).filter((u): u is string => !!u);
 }
 
 const channelHostPhotoRouter = router({
@@ -1265,12 +1227,7 @@ const channelHostPhotoRouter = router({
       })
     )
     .query(async ({ input }) => {
-      const rows = await getChannelHostPhotos(input.channelKey, input.activeOnly);
-      // Every photo renders from its PHONE LOOK by default (shared/hostPhotoLook.ts); one still
-      // missing is made now, in the background — the tile says "Making phone look…" until the
-      // next poll picks it up.
-      ensurePhoneLooks(rows);
-      return rows;
+      return getChannelHostPhotos(input.channelKey, input.activeOnly);
     }),
 
   /**
@@ -1299,13 +1256,7 @@ const channelHostPhotoRouter = router({
       // a worse second copy of the thumbnail and friction on every upload.
       const data = { channelKey: input.channelKey, imageUrl: input.imageUrl };
       if (input.id) {
-        // A new picture needs its own phone look — the old one showed a different photo.
-        const before = (await getChannelHostPhotos(input.channelKey, false)).find(p => p.id === input.id);
-        const changed = before && before.imageUrl !== input.imageUrl;
-        await updateChannelHostPhoto(input.id, {
-          ...data,
-          ...(changed ? { phoneImageUrl: null, phoneLookError: null } : {}),
-        });
+        await updateChannelHostPhoto(input.id, data);
         return { id: input.id };
       }
       const existing = await getChannelHostPhotos(input.channelKey, false);
@@ -1320,48 +1271,6 @@ const channelHostPhotoRouter = router({
           !existing.some(p => p.isActive && p.isSelected),
       });
       return { id };
-    }),
-
-  /**
-   * Phone look or the original for one photo — the switch on every tile. Open to every signed-in
-   * role, like ticking: which look a channel shoots in is the same kind of choice. Switching back
-   * to the phone look after it FAILED tries to make it again. Returns the channel's list.
-   */
-  setLook: approvedProcedure
-    .input(
-      z.object({
-        channelKey: z.string().min(1),
-        id: z.number(),
-        useOriginal: z.boolean(),
-      })
-    )
-    .mutation(async ({ input }) => {
-      const library = await getChannelHostPhotos(input.channelKey, false);
-      const row = library.find(p => p.id === input.id);
-      if (!row) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "That host photo is no longer on the channel." });
-      }
-      await updateChannelHostPhoto(input.id, {
-        useOriginal: input.useOriginal,
-        ...(!input.useOriginal ? { phoneLookError: null } : {}),
-      });
-      if (!input.useOriginal && !row.phoneImageUrl) {
-        void ensurePhoneLook({ ...row, useOriginal: false, phoneLookError: null });
-      }
-      return getChannelHostPhotos(input.channelKey, true);
-    }),
-
-  /** Throw the phone look away and make a new one (a manager did not like the first). */
-  remakePhoneLook: managerProcedure
-    .input(z.object({ channelKey: z.string().min(1), id: z.number() }))
-    .mutation(async ({ input }) => {
-      const row = (await getChannelHostPhotos(input.channelKey, false)).find(p => p.id === input.id);
-      if (!row) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "That host photo is no longer on the channel." });
-      }
-      await updateChannelHostPhoto(input.id, { phoneImageUrl: null, phoneLookError: null, useOriginal: false });
-      void ensurePhoneLook({ ...row, phoneImageUrl: null, phoneLookError: null, useOriginal: false });
-      return getChannelHostPhotos(input.channelKey, true);
     }),
 
   /** Soft-delete — finished videos keep the angle they snapshotted at render time. */

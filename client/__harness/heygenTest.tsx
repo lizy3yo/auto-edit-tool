@@ -190,13 +190,12 @@ function handle(path: string, input: any): unknown {
     ];
   if (path === "channelHostPhoto.list")
     return [
-      { id: 11, imageUrl: swatch(30, "A orig"), phoneImageUrl: swatch(40, "A phone"), useOriginal: false, phoneLookError: null },
-      { id: 12, imageUrl: swatch(210, "C orig"), phoneImageUrl: swatch(220, "C phone"), useOriginal: true, phoneLookError: null },
-      { id: 13, imageUrl: swatch(300, "D orig"), phoneImageUrl: null, useOriginal: false, phoneLookError: "no face" },
+      { id: 11, imageUrl: swatch(30, "A") },
+      { id: 12, imageUrl: swatch(210, "C") },
+      { id: 13, imageUrl: swatch(300, "D") },
     ];
   if (path === "styleReference.upload")
-    return { url: swatch(Math.floor(Math.random() * 360), "Up orig") };
-  if (path === "heygenTest.phoneLook") return { url: swatch(90, "Up phone") };
+    return { url: swatch(Math.floor(Math.random() * 360), "Upload") };
   if (path === "heygenTest.status") return { ready: keys.set, ratePerSec: RATE };
   if (path === "heygenTest.list") {
     // Same contract as the server: filter by run, page by run (5), newest run first.
