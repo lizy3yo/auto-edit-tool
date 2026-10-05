@@ -6,6 +6,7 @@ import {
   waitForHeygenVideo,
 } from "./heygen-lipsync";
 import { ENV } from "../_core/env";
+import { HOST_PHOTO_PREP_FAILED } from "../../shared/hostRedo";
 
 // Instant sleeps so retry/poll backoffs don't slow the suite.
 vi.mock("./base", async importOriginal => {
@@ -24,7 +25,18 @@ function jsonRes(status: number, body: unknown) {
   };
 }
 
-type FetchCall = { url: string; method: string; body: any };
+type FetchCall = {
+  url: string;
+  method: string;
+  body: any;
+  headers: Record<string, string>;
+};
+
+/** A real JPEG header, so the adapter uploads the photo instead of registering by URL. */
+const JPEG = new Uint8Array([
+  0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46, 0, 1, 1, 0,
+]);
+const photoRes = () => ({ ...jsonRes(200, {}), arrayBuffer: async () => JPEG.buffer });
 
 /**
  * Route fetches by URL. Records every call (url, method, parsed body) for assertions.
@@ -33,6 +45,14 @@ type FetchCall = { url: string; method: string; body: any };
 function installFetchMock(routes: {
   video?: (call: FetchCall) => any;
   status?: (call: FetchCall) => any;
+  /** POST /avatars — the photo registration. */
+  avatars?: (call: FetchCall) => any;
+  /** GET /avatars/{group} — is the avatar ready. */
+  group?: (call: FetchCall) => any;
+  /** POST /assets — the photo upload. Unset ⇒ `{}`, so the adapter registers by URL. */
+  assets?: (call: FetchCall) => any;
+  /** The host photo download (any URL on cdn.example.com ending .png). */
+  photo?: (call: FetchCall) => any;
 }) {
   const calls: FetchCall[] = [];
   vi.stubGlobal(
@@ -41,10 +61,16 @@ function installFetchMock(routes: {
       const call: FetchCall = {
         url,
         method: init?.method ?? "GET",
-        body: init?.body ? JSON.parse(init.body as string) : undefined,
+        body:
+          typeof init?.body === "string" ? JSON.parse(init.body) : init?.body,
+        headers: (init?.headers ?? {}) as Record<string, string>,
       };
       calls.push(call);
+      if (url.endsWith("/assets") && call.method === "POST")
+        return routes.assets ? routes.assets(call) : jsonRes(200, {});
+      if (routes.photo && /host-\d+\.png$/.test(url)) return routes.photo(call);
       if (url.endsWith("/avatars") && call.method === "POST") {
+        if (routes.avatars) return routes.avatars(call);
         return jsonRes(200, {
           data: {
             avatar_item: { id: "avatar-1" },
@@ -53,6 +79,7 @@ function installFetchMock(routes: {
         });
       }
       if (url.includes("/avatars/") && call.method === "GET") {
+        if (routes.group) return routes.group(call);
         return jsonRes(200, { data: { status: "completed" } });
       }
       if (url.endsWith("/videos") && call.method === "POST") {
@@ -197,6 +224,152 @@ describe("HeygenLipsyncAdapter.submitLipsync", () => {
     });
     expect(res.taskId).toBeUndefined();
     expect(res.error).toMatch(/HeyGen API error \(400\)/);
+  });
+});
+
+// The film of 2026-10-05: HeyGen answered a photo registration with 404 `asset_not_found` for
+// the copy of the photo it had just made. Nothing retried it, and one failed call failed every
+// host beat sharing it.
+describe("photo registration survives HeyGen's own hiccups", () => {
+  const registered = () =>
+    jsonRes(200, {
+      data: { avatar_item: { id: "avatar-9" }, avatar_group: { id: "g" } },
+    });
+  const assetNotFound = () =>
+    jsonRes(404, {
+      error: {
+        code: "asset_not_found",
+        message: "Asset cf4766654b8e4e239753cb3ee97e29d1 not found",
+      },
+    });
+  const submit = () =>
+    new HeygenLipsyncAdapter("key").submitLipsync({
+      imageUrl: freshImageUrl(),
+      audioUrl: "https://x/a.mp3",
+    });
+  const registrations = (calls: FetchCall[]) =>
+    calls.filter(c => c.url.endsWith("/avatars") && c.method === "POST");
+
+  it("asks again when HeyGen says its copy of the photo is not found yet", async () => {
+    let n = 0;
+    const calls = installFetchMock({
+      avatars: () => (++n <= 2 ? assetNotFound() : registered()),
+    });
+    expect(await submit()).toEqual({ taskId: "vid-1" });
+    expect(registrations(calls)).toHaveLength(3);
+  });
+
+  it("asks again on a 409 while an earlier registration is still in flight", async () => {
+    let n = 0;
+    installFetchMock({
+      avatars: () =>
+        ++n === 1
+          ? jsonRes(409, {
+              error: {
+                code: "conflict",
+                message:
+                  "Photo avatar creation conflicted with an existing operation.",
+              },
+            })
+          : registered(),
+    });
+    expect(await submit()).toEqual({ taskId: "vid-1" });
+    expect(n).toBe(2);
+  });
+
+  it("gives up after its waits, in words the render lane reads as 'not this beat'", async () => {
+    const calls = installFetchMock({ avatars: assetNotFound });
+    const res = await submit();
+    expect(res.taskId).toBeUndefined();
+    expect(res.error).toContain(HOST_PHOTO_PREP_FAILED);
+    expect(res.error).toContain("(404)");
+    expect(registrations(calls)).toHaveLength(9); // the first try + 8 waits
+  });
+
+  it("does not ask again when HeyGen turns the photo itself down", async () => {
+    const calls = installFetchMock({
+      avatars: () => jsonRes(400, { error: { message: "no face detected" } }),
+    });
+    const res = await submit();
+    expect(res.error).toMatch(/HeyGen avatar registration failed \(400\)/);
+    expect(res.error).not.toContain(HOST_PHOTO_PREP_FAILED);
+    expect(registrations(calls)).toHaveLength(1);
+  });
+
+  it("stops waiting when HeyGen says the avatar failed", async () => {
+    installFetchMock({
+      group: () => jsonRes(200, { data: { status: "failed" } }),
+    });
+    const res = await submit();
+    expect(res.error).toMatch(/avatar registration failed \(training\)/);
+  });
+
+  it("uploads the photo itself and registers from that asset, reused on a retry", async () => {
+    let n = 0;
+    const calls = installFetchMock({
+      photo: photoRes,
+      assets: () => jsonRes(200, { data: { asset_id: "asset-1" } }),
+      avatars: () => (++n === 1 ? assetNotFound() : registered()),
+    });
+    expect(await submit()).toEqual({ taskId: "vid-1" });
+    expect(calls.filter(c => c.url.endsWith("/assets"))).toHaveLength(1);
+    const regs = registrations(calls);
+    expect(regs).toHaveLength(2);
+    for (const r of regs)
+      expect(r.body.file).toEqual({ type: "asset_id", asset_id: "asset-1" });
+    // A definite refusal is retried as a NEW request: a reused key would replay the refusal.
+    expect(regs[0].headers["Idempotency-Key"]).toBeTruthy();
+    expect(regs[1].headers["Idempotency-Key"]).not.toBe(
+      regs[0].headers["Idempotency-Key"]
+    );
+  });
+
+  it("keeps the idempotency key across a 5xx, which may have landed", async () => {
+    let n = 0;
+    const calls = installFetchMock({
+      avatars: () => (++n === 1 ? jsonRes(503, {}) : registered()),
+    });
+    await submit();
+    const [a, b] = registrations(calls);
+    expect(b.headers["Idempotency-Key"]).toBe(a.headers["Idempotency-Key"]);
+  });
+
+  it("registers by URL when the upload is not accepted", async () => {
+    const calls = installFetchMock({
+      photo: photoRes,
+      assets: () => jsonRes(400, { error: { message: "unsupported" } }),
+    });
+    expect(await submit()).toEqual({ taskId: "vid-1" });
+    expect(registrations(calls)[0].body.file.type).toBe("url");
+  });
+
+  it("registers the photo again, once, when its avatar is gone on HeyGen", async () => {
+    let videos = 0;
+    const calls = installFetchMock({
+      video: () =>
+        ++videos === 1
+          ? jsonRes(404, {
+              error: {
+                code: "avatar_not_found",
+                message: "Avatar not found: 1cfea30d62c743468e0f4ca0b5e3236d",
+              },
+            })
+          : jsonRes(200, { data: { video_id: "vid-7" } }),
+    });
+    expect(await submit()).toEqual({ taskId: "vid-7" });
+    expect(registrations(calls)).toHaveLength(2);
+  });
+
+  it("does not loop when the avatar is gone a second time", async () => {
+    const calls = installFetchMock({
+      video: () =>
+        jsonRes(404, {
+          error: { code: "avatar_not_found", message: "Avatar not found: x" },
+        }),
+    });
+    const res = await submit();
+    expect(res.error).toContain(HOST_PHOTO_PREP_FAILED);
+    expect(registrations(calls)).toHaveLength(2);
   });
 });
 

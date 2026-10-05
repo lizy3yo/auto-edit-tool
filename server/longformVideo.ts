@@ -187,13 +187,19 @@ import {
   isHostSpendLimitError,
   reserveHostSpend,
 } from "./hostSpend";
-import { hostRedoKind, isHostPhotoRefusal } from "../shared/hostRedo";
 import {
+  hostRedoKind,
+  isHostPhotoPrepFailure,
+  isHostPhotoRefusal,
+} from "../shared/hostRedo";
+import {
+  HOST_PHOTO_NOT_READY,
   HOST_PHOTO_REFUSED,
   HostAccountError,
   HostRenderCapError,
   hostAccountFailure,
   hostLanePause,
+  hostPhotoPrepFailure,
   hostPhotoRefusal,
   isHostAccountError,
   isHostRenderCapError,
@@ -10570,6 +10576,19 @@ export async function runChunkTasks(
                     appendJobWarning(jobId, hostPhotoRefusedWarning(scene));
                   throw err;
                 }
+                // HeyGen could not get the photo READY, after the adapter's own retries: its
+                // trouble, not this beat's — the beats on the photo wait, same road.
+                if (isHostLane(provider) && hostPhotoPrepFailure(sub.error)) {
+                  const err = new HostAccountError(
+                    HOST_PHOTO_NOT_READY,
+                    sub.error ?? HOST_PHOTO_NOT_READY,
+                    scene.lipsyncImageUrl ?? "unknown",
+                    true
+                  );
+                  if (pauseHostLane(jobId, err))
+                    appendJobWarning(jobId, hostPhotoPrepWarning(scene));
+                  throw err;
+                }
                 if (attempt === 1)
                   throw new Error(sub.error || "clip submit failed");
                 await sleep(15_000);
@@ -12558,7 +12577,7 @@ async function settleFailedHostScene(
   scene.submitPastLimit = undefined;
   if (isHostAccountError(e)) {
     scene.hostWaiting = e.photo
-      ? { reason: e.reason, at, photo: true }
+      ? { reason: e.reason, at, photo: true, ...(e.prep ? { prep: true } : {}) }
       : { reason: e.reason, at };
     scene.sceneStatus = "failed";
     scene.error = e.photo
@@ -16007,9 +16026,20 @@ export function describeUnassemblableScenes(
   const parts: string[] = [];
   // HeyGen refused the PHOTO: its own line, because the way forward is the photo, not the
   // account — and one line for the film, not one warning per beat.
-  const refused = waiting.filter(s => s.hostWaiting!.photo);
+  const refused = waiting.filter(
+    s => s.hostWaiting!.photo && !s.hostWaiting!.prep
+  );
+  // HeyGen could not get the photo READY: nothing to change, only to ask again.
+  const notReady = waiting.filter(s => s.hostWaiting!.prep);
+  waiting.splice(0, waiting.length, ...waiting.filter(s => !s.hostWaiting!.photo));
+  if (notReady.length > 0) {
+    parts.push(
+      `HeyGen could not prepare the host photo. ${notReady.length} host scene(s) are ` +
+        `waiting (${indices(notReady)}); nothing was charged, no retries were used and ` +
+        `none were made b-roll. The photo is fine — Redo host clips to try again`
+    );
+  }
   if (refused.length > 0) {
-    waiting.splice(0, waiting.length, ...waiting.filter(s => !s.hostWaiting!.photo));
     parts.push(
       `HeyGen refused the host photo (its content check). ${refused.length} host scene(s) ` +
         `are waiting (${indices(refused)}); nothing was charged, no retries were used and ` +
@@ -19845,6 +19875,16 @@ function hostPhotoRefusedWarning(scene: StoryboardScene): string {
   );
 }
 
+/** The one job warning a photo HeyGen could not get ready gets (per photo, not per beat). */
+function hostPhotoPrepWarning(scene: StoryboardScene): string {
+  return (
+    `HeyGen could not prepare the host photo — first on scene ${scene.index}` +
+    `${scene.hostShot ? `, angle ${scene.hostShot + 1}` : ""}. The host beats on it are ` +
+    `waiting: nothing was charged, no retries were used and none were made b-roll. The ` +
+    `photo is fine — Redo host clips to try again.`
+  );
+}
+
 /**
  * The pure half of "Redo host clips" (`shared/hostRedo.ts`): every beat HeyGen refused for the
  * PHOTO is a clip-less host beat again, ready for the retry pass — the waiting and "Host needed"
@@ -19901,7 +19941,10 @@ export async function redoHostClips(
     }
     const taken = prepareHostRedo(scenes, hostFaces(params).length);
     if (!taken.length) return 0;
-    dropJobWarnings(jobId, isHostPhotoRefusal);
+    dropJobWarnings(
+      jobId,
+      m => isHostPhotoRefusal(m) || isHostPhotoPrepFailure(m)
+    );
     console.log(
       `[Longform ${jobId}] redo host clips: ${taken.length} beat(s) (${taken.join(", ")}) ` +
         `from ${hostFaces(params).length} photo(s) as the channel has them now`

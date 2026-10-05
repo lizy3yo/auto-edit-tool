@@ -1005,6 +1005,11 @@ export interface StoryboardScene {
      * photo, then "Redo host clips" (`shared/hostRedo.ts`).
      */
     photo?: boolean;
+    /**
+     * With `photo`: HeyGen did not refuse the photo, it could not get it READY (its own
+     * hiccup, `isHostPhotoPrepFailure`) — nothing to change, "Redo host clips" tries again.
+     */
+    prep?: boolean;
   };
   /**
    * How many seconds SHORTER than its narration the stored clip is. A finished render is never

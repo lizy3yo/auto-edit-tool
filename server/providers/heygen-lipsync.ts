@@ -1,10 +1,12 @@
-import { createHash } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import type { GenerationResult } from "../../shared/types";
 import type { VideoSubmitResult } from "./base";
 import { sleep } from "./base";
 import { Semaphore } from "./semaphore";
 import { ENV } from "../_core/env";
 import { summarizeHttpBody } from "../_core/errorDetail";
+import { presignOwnBucketUrl } from "../storage";
+import { HOST_PHOTO_PREP_FAILED } from "../../shared/hostRedo";
 
 const HEYGEN_API_BASE = "https://api.heygen.com/v3";
 
@@ -182,6 +184,26 @@ function retryDelay(attempt: number): number {
 const avatarIdByPhotoUrl = new Map<string, Promise<string>>();
 
 /**
+ * Waits between tries of a photo registration HeyGen answered "not yet" to — ~105 s in all,
+ * which covers its own settling time many times over without holding a film for long.
+ */
+const REGISTER_BACKOFF_MS = [
+  2_000, 4_000, 8_000, 15_000, 15_000, 20_000, 20_000, 20_000,
+];
+
+/** `POST /v3/assets` takes png and jpeg images, up to 32 MB. */
+const MAX_ASSET_BYTES = 32 * 1024 * 1024;
+
+/** The image type HeyGen's asset upload accepts, read off the bytes; null for anything else. */
+function sniffAssetImageMime(bytes: Buffer): "image/png" | "image/jpeg" | null {
+  if (bytes.length < 12) return null;
+  if (bytes.readUInt32BE(0) === 0x89504e47) return "image/png";
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff)
+    return "image/jpeg";
+  return null;
+}
+
+/**
  * HeyGen v3 adapter for host lip-sync (Avatar IV) — the ONLY host lip-sync provider.
  * Flow: register photo avatar (cached) → POST /videos with our own TTS audio_url
  * (HeyGen voices are never used) → poll GET /videos/{id} until completed/failed.
@@ -200,49 +222,169 @@ export class HeygenLipsyncAdapter {
     return { "x-api-key": this.apiKey, "Content-Type": "application/json" };
   }
 
-  /** Register `imageUrl` as a photo avatar and wait until it is ready to render. */
+  /**
+   * Hand HeyGen the photo's BYTES (`POST /v3/assets`) and return its asset id, or null to register
+   * by URL instead. Registering by URL makes HeyGen fetch the photo and file it as an asset inside
+   * the same call that then reads that asset back — and it answered 404 `asset_not_found` for an
+   * asset it had made a moment before (2026-10-05), with a new asset on every try, so a retry
+   * raced the same way. Uploaded first, the asset exists before the avatar is asked for, and a
+   * retry of the avatar reuses it. Never throws: anything that goes wrong here (a type HeyGen
+   * does not take, a refused upload) falls back to the URL registration, retried all the same.
+   */
+  private async uploadPhotoAsset(imageUrl: string): Promise<string | null> {
+    let bytes: Buffer;
+    let mime: string | null;
+    try {
+      const src = await fetch(await presignOwnBucketUrl(imageUrl), {
+        signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
+      });
+      if (!src.ok) return null;
+      bytes = Buffer.from(await src.arrayBuffer());
+      mime = sniffAssetImageMime(bytes);
+    } catch {
+      return null;
+    }
+    if (!mime || bytes.length > MAX_ASSET_BYTES) return null;
+    // One key for every try of this upload: a retry whose first request did land gets the
+    // same asset back instead of a second copy.
+    const idempotencyKey = randomUUID();
+    let status = 0;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const form = new FormData();
+        form.append(
+          "file",
+          new Blob([new Uint8Array(bytes)], { type: mime }),
+          `host.${mime === "image/png" ? "png" : "jpg"}`
+        );
+        const res = await fetch(`${HEYGEN_API_BASE}/assets`, {
+          method: "POST",
+          headers: {
+            "x-api-key": this.apiKey,
+            "Idempotency-Key": idempotencyKey,
+          },
+          body: form,
+          signal: callSignal(),
+        });
+        status = res.status;
+        const body = (await res.json().catch(() => ({}))) as {
+          data?: { asset_id?: string };
+        };
+        if (res.ok && body.data?.asset_id) return body.data.asset_id;
+        if (status !== 429 && status < 500) break; // a definite refusal — use the URL
+      } catch {
+        status = 0; // network / timeout — worth another try
+      }
+      if (attempt < MAX_RETRIES) await sleep(retryDelay(attempt));
+    }
+    console.warn(
+      `[HeyGen] photo upload not accepted (${status || "network"}) — registering by URL`
+    );
+    return null;
+  }
+
+  /**
+   * Register `imageUrl` as a photo avatar and wait until it is ready to render.
+   *
+   * RETRIED, because registration is free and one call stands behind every host beat on the
+   * photo: the beats share this promise, so a single unretried hiccup failed eight of them at
+   * once. What HeyGen documents as "try again shortly" (`asset_not_found` while its copy
+   * settles, a 409 while an earlier create is still in flight, 429, 5xx) and a dropped
+   * connection wait out `REGISTER_BACKOFF_MS`; anything else (a photo with no face) is a
+   * definite answer and fails at once. A failure that outlasts the waits is worded
+   * `HOST_PHOTO_PREP_FAILED`, which the render lane reads as "not this beat's fault".
+   */
   private async registerAvatar(imageUrl: string): Promise<string> {
     const name = `host-${createHash("sha1").update(imageUrl).digest("hex").slice(0, 10)}`;
-    const res = await fetch(`${HEYGEN_API_BASE}/avatars`, {
-      method: "POST",
-      headers: this.jsonHeaders(),
-      body: JSON.stringify({
-        type: "photo",
-        name,
-        file: { type: "url", url: imageUrl },
-      }),
-      signal: callSignal(),
-    });
-    const body = (await res.json().catch(() => ({}))) as {
-      data?: { avatar_item?: { id?: string }; avatar_group?: { id?: string } };
-    };
-    const avatarId = body.data?.avatar_item?.id;
-    if (!res.ok || !avatarId) {
-      throw new Error(
-        `HeyGen avatar registration failed (${res.status}): ${JSON.stringify(body).substring(0, 300)}`
+    const assetId = await this.uploadPhotoAsset(imageUrl);
+    const file = assetId
+      ? { type: "asset_id", asset_id: assetId }
+      : { type: "url", url: imageUrl };
+    // Idempotency-Key (HeyGen replays the first answer to a repeated key for 24 h): kept across
+    // a retry whose request may have landed (5xx, dropped connection), so it cannot create a
+    // second avatar — and CHANGED after a definite refusal, or the retry would be handed that
+    // same refusal back.
+    let idempotencyKey = randomUUID();
+    for (let attempt = 0; ; attempt++) {
+      const last = attempt >= REGISTER_BACKOFF_MS.length;
+      let status = 0;
+      let retryAfter: string | null = null;
+      let body: {
+        data?: {
+          avatar_item?: { id?: string };
+          avatar_group?: { id?: string };
+        };
+        error?: { code?: string };
+      } = {};
+      let detail: string;
+      try {
+        const res = await fetch(`${HEYGEN_API_BASE}/avatars`, {
+          method: "POST",
+          headers: {
+            ...this.jsonHeaders(),
+            "Idempotency-Key": idempotencyKey,
+          },
+          body: JSON.stringify({ type: "photo", name, file }),
+          signal: callSignal(),
+        });
+        status = res.status;
+        retryAfter = res.headers.get("Retry-After");
+        body = (await res.json().catch(() => ({}))) as typeof body;
+        detail = `(${status}): ${JSON.stringify(body).substring(0, 300)}`;
+      } catch (err: any) {
+        detail = `(network): ${err?.message || "request failed"}`;
+      }
+      const avatarId = body.data?.avatar_item?.id;
+      if (status >= 200 && status < 300 && avatarId) {
+        const groupId = body.data?.avatar_group?.id;
+        if (groupId) await this.waitForAvatarReady(groupId);
+        else await sleep(60_000); // no group id in response — flat wait, observed ready well within 1 min
+        console.log(`[HeyGen] Photo avatar registered: ${avatarId} (${name})`);
+        return avatarId;
+      }
+      const code = body.error?.code ?? "";
+      const retryable =
+        status === 0 ||
+        status === 429 ||
+        status >= 500 ||
+        status === 409 ||
+        (status === 404 && code === "asset_not_found");
+      if (!retryable)
+        throw new Error(`HeyGen avatar registration failed ${detail}`);
+      if (last) throw new Error(`${HOST_PHOTO_PREP_FAILED} ${detail}`);
+      if (status !== 0 && status < 500) idempotencyKey = randomUUID();
+      const waitMs =
+        status === 429 && retryAfter
+          ? Math.min(parseInt(retryAfter, 10) * 1000, 60_000) ||
+            REGISTER_BACKOFF_MS[attempt]
+          : REGISTER_BACKOFF_MS[attempt] + Math.floor(Math.random() * 1000);
+      console.log(
+        `[HeyGen] avatar registration ${status || "network error"}${code ? ` ${code}` : ""}, retrying in ${Math.round(waitMs / 1000)}s (${attempt + 1}/${REGISTER_BACKOFF_MS.length})...`
       );
+      await sleep(waitMs);
     }
-    const groupId = body.data?.avatar_group?.id;
-    if (groupId) await this.waitForAvatarReady(groupId);
-    else await sleep(60_000); // no group id in response — flat wait, observed ready well within 1 min
-    console.log(`[HeyGen] Photo avatar registered: ${avatarId} (${name})`);
-    return avatarId;
   }
 
   private async waitForAvatarReady(
     groupId: string,
     maxWaitMs = 180_000
   ): Promise<void> {
+    type GroupBody = { data?: { status?: string } };
     const deadline = Date.now() + maxWaitMs;
     while (Date.now() < deadline) {
-      const res = await fetch(`${HEYGEN_API_BASE}/avatars/${groupId}`, {
+      // A dropped connection or an error answer here says nothing about the avatar: ask again.
+      const body = await fetch(`${HEYGEN_API_BASE}/avatars/${groupId}`, {
         headers: this.jsonHeaders(),
         signal: callSignal(),
-      });
-      const body = (await res.json().catch(() => ({}))) as {
-        data?: { status?: string };
-      };
-      if (body.data?.status === "completed") return;
+      })
+        .then(res => res.json() as Promise<GroupBody>)
+        .catch((): GroupBody => ({}));
+      if (body?.data?.status === "completed") return;
+      // HeyGen's own verdict on the photo — waiting out the clock would only delay it.
+      if (body?.data?.status === "failed")
+        throw new Error(
+          `HeyGen avatar registration failed (training): ${JSON.stringify(body).substring(0, 300)}`
+        );
       await sleep(5_000);
     }
     throw new Error(
@@ -250,16 +392,32 @@ export class HeygenLipsyncAdapter {
     );
   }
 
+  private avatarCacheKey(imageUrl: string): string {
+    return `${this.keyFp}:${imageUrl}`;
+  }
+
   private ensureAvatar(imageUrl: string): Promise<string> {
-    const cacheKey = `${this.keyFp}:${imageUrl}`;
+    const cacheKey = this.avatarCacheKey(imageUrl);
     let pending = avatarIdByPhotoUrl.get(cacheKey);
     if (!pending) {
-      pending = this.registerAvatar(imageUrl);
-      avatarIdByPhotoUrl.set(cacheKey, pending);
-      // Drop a failed registration so the next chunk retries instead of caching the error.
-      pending.catch(() => avatarIdByPhotoUrl.delete(cacheKey));
+      const fresh = this.registerAvatar(imageUrl);
+      pending = fresh;
+      avatarIdByPhotoUrl.set(cacheKey, fresh);
+      // Drop a failed registration so the next chunk retries instead of caching the error —
+      // unless a newer registration has already taken its place.
+      fresh.catch(() => this.forgetAvatar(imageUrl, fresh));
     }
     return pending;
+  }
+
+  /**
+   * Drop `registration` from the cache — only if it is still the one cached. Eight beats told
+   * "avatar not found" at once must share ONE new registration, not each throw away the last.
+   */
+  private forgetAvatar(imageUrl: string, registration: Promise<string>): void {
+    const cacheKey = this.avatarCacheKey(imageUrl);
+    if (avatarIdByPhotoUrl.get(cacheKey) === registration)
+      avatarIdByPhotoUrl.delete(cacheKey);
   }
 
   /**
@@ -270,12 +428,17 @@ export class HeygenLipsyncAdapter {
    * Returns the HeyGen `video_id` as `taskId` for resume-safe polling.
    */
   async submitLipsync(params: LipsyncParams): Promise<VideoSubmitResult> {
+    let registration = this.ensureAvatar(params.imageUrl);
     let avatarId: string;
     try {
-      avatarId = await this.ensureAvatar(params.imageUrl);
+      avatarId = await registration;
     } catch (err: any) {
       return { error: err.message || "HeyGen avatar registration failed" };
     }
+    // A cached avatar id HeyGen no longer knows (deleted in its app, or never finished on its
+    // side) would fail every later beat on the photo for as long as the process lives. Register
+    // it again ONCE and carry on; a second "not found" is reported as the photo not being ready.
+    let reRegistered = false;
 
     // The avatar group reports "completed" slightly BEFORE the talking photo itself is
     // renderable — video create is then refused for a short window (verified live: the same
@@ -326,6 +489,30 @@ export class HeygenLipsyncAdapter {
               `[HeyGen] Avatar ${avatarId} not renderable yet, retrying in 15s (${notReadyRetries}/${MAX_NOT_READY_RETRIES})...`
             );
             await sleep(15_000);
+            continue;
+          }
+          if (
+            response.status === 404 &&
+            /avatar_not_found|avatar not found/i.test(errText)
+          ) {
+            if (reRegistered)
+              return {
+                error: `${HOST_PHOTO_PREP_FAILED} (404): ${summarizeHttpBody(errText, 300)}`,
+              };
+            reRegistered = true;
+            console.log(
+              `[HeyGen] Avatar ${avatarId} is gone on HeyGen — registering the photo again`
+            );
+            this.forgetAvatar(params.imageUrl, registration);
+            registration = this.ensureAvatar(params.imageUrl);
+            try {
+              avatarId = await registration;
+            } catch (err: any) {
+              return {
+                error: err.message || "HeyGen avatar registration failed",
+              };
+            }
+            attempt--; // a fresh avatar, not a retry of the same request
             continue;
           }
           const retriable = response.status === 429 || response.status >= 500;

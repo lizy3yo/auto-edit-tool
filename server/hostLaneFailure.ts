@@ -15,7 +15,11 @@
  * CAP refusals (`HostRenderCapError`) — the beat has used the renders it is allowed. Thrown by
  * the render gate before anything is submitted.
  */
-import { isHostPhotoRefusal } from "../shared/hostRedo";
+import {
+  HOST_PHOTO_PREP_FAILED,
+  isHostPhotoPrepFailure,
+  isHostPhotoRefusal,
+} from "../shared/hostRedo";
 
 /**
  * The job's HeyGen account failed; the reason is operator copy, `raw` the provider's words.
@@ -25,12 +29,16 @@ import { isHostPhotoRefusal } from "../shared/hostRedo";
  * photo fails the same way, no retry can change it, and the beat is not at fault — so it takes
  * the same road: no retries spent, no b-roll made, the beat waits. It pauses only the beats on
  * THAT photo; another angle HeyGen accepts keeps rendering.
+ *
+ * `prep` ⇒ HeyGen did not refuse the photo, it could not get it READY (`hostPhotoPrepFailure`):
+ * the same road, with copy that says to try again instead of to change the photo.
  */
 export class HostAccountError extends Error {
   constructor(
     readonly reason: string,
     readonly raw: string,
-    readonly photoUrl?: string
+    readonly photoUrl?: string,
+    readonly prep = false
   ) {
     super(
       photoUrl ? `HeyGen ${reason}` : `HeyGen account problem — ${reason}`
@@ -92,7 +100,7 @@ export function hostAccountFailure(raw: string | undefined): string | null {
   if (/\(429\)|rate limit|too many requests/i.test(msg))
     return "HeyGen is refusing requests (rate limit)";
   if (
-    /HeyGen API error \(5\d\d\)|submit failed after retries|fetch failed|ECONNRESET|ETIMEDOUT|ENOTFOUND|socket hang up/i.test(
+    /HeyGen (?:API error|could not prepare the host photo) \(5\d\d\)|submit failed after retries|fetch failed|ECONNRESET|ETIMEDOUT|ENOTFOUND|socket hang up/i.test(
       msg
     )
   )
@@ -112,6 +120,24 @@ export const HOST_PHOTO_REFUSED = "refused the host photo (its content check)";
  */
 export const hostPhotoRefusal = (raw: string | undefined): boolean =>
   isHostPhotoRefusal(raw);
+
+/** Operator copy for a photo HeyGen could not get ready (the sentence continues "HeyGen …"). */
+export const HOST_PHOTO_NOT_READY = HOST_PHOTO_PREP_FAILED.replace(
+  /^HeyGen /,
+  ""
+);
+
+/**
+ * Whether HeyGen failed to get the photo READY after the adapter's own retries — its copy of the
+ * photo "not found", a registration conflict, an avatar that vanished. A film (2026-10-05) hit
+ * this on its one photo: every registration failed up to eight beats at once, 13 start/CTA/end
+ * beats were left "Host needed", ~20 check-ins were made b-roll and the card carried 33
+ * warnings — for a free call that was never retried. Checked AFTER `hostAccountFailure`, so a
+ * registration that died on the key, the credits or a HeyGen outage is still the account's.
+ * Pure; exported for tests.
+ */
+export const hostPhotoPrepFailure = (raw: string | undefined): boolean =>
+  isHostPhotoPrepFailure(raw);
 
 /** Jobs whose host lane is paused on an account failure, with the reason. In-memory by design. */
 const paused = new Map<number, HostAccountError>();

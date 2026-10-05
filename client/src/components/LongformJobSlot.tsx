@@ -67,6 +67,7 @@ import {
   sceneHoldPlan,
 } from "@shared/filmTimeline";
 import { sanitizeError, isCreditError } from "@/lib/errorSanitizer";
+import { JobWarnings } from "@/components/JobWarnings";
 import { triggerCreditErrorPopup } from "@/components/CreditErrorPopup";
 import type { SplitLayout, StoryboardScene } from "@shared/types";
 import {
@@ -1812,7 +1813,11 @@ export default function LongformJobSlot({
         size="sm"
         onClick={() => setRedoHostOpen(true)}
         disabled={redoHostClipsMutation.isPending}
-        title="HeyGen refused the host photo on these scenes. Change the photo on the channel first, then redo them."
+        title={
+          hostRedo.refused > 0
+            ? "HeyGen refused the host photo on these scenes. Change the photo on the channel first, then redo them."
+            : "HeyGen could not prepare the host photo on these scenes. The photo is fine: redo them to try again."
+        }
       >
         <RefreshCw className="mr-2 h-4 w-4" />
         Redo host clips ({hostRedo.scenes.length})
@@ -2409,13 +2414,7 @@ export default function LongformJobSlot({
             )}
 
             {progress?.warnings && progress.warnings.length > 0 && (
-              <ul className="space-y-0.5">
-                {progress.warnings.map((w, i) => (
-                  <li key={i} className="text-xs text-warning">
-                    ⚠ {w}
-                  </li>
-                ))}
-              </ul>
+              <JobWarnings warnings={progress.warnings} />
             )}
 
             {/* A stretch of scenes whose narration slices don't fit their words — the aligner
@@ -3370,12 +3369,16 @@ export default function LongformJobSlot({
                               variant="outline"
                               className="text-[10px] py-0 text-warning border-warning/40"
                               title={
-                                scene.hostWaiting.photo
+                                scene.hostWaiting.prep
+                                  ? `HeyGen could not prepare the host photo, not this scene. Nothing was charged and none of its retries were used. The photo is fine — "Redo host clips" tries again.`
+                                  : scene.hostWaiting.photo
                                   ? `HeyGen refused the host photo (its content check), not this scene. Nothing was charged and none of its retries were used. Change the photo on the channel, then "Redo host clips".`
                                   : `The HeyGen account failed (${scene.hostWaiting.reason}), not this scene. None of its retries were used. Fix the account, then "Retry failed scenes".`
                               }
                             >
-                              {scene.hostWaiting.photo
+                              {scene.hostWaiting.prep
+                                ? "Photo not ready"
+                                : scene.hostWaiting.photo
                                 ? "Photo refused"
                                 : "Waiting for HeyGen"}
                             </Badge>
@@ -4064,16 +4067,19 @@ export default function LongformJobSlot({
               {hostRedo?.scenes.length === 1 ? "" : "s"}?
             </AlertDialogTitle>
             <AlertDialogDescription>
-              HeyGen refused the host photo on these scenes. They render again
-              with the photo this channel has set right now, about{" "}
+              {hostRedo?.refused
+                ? "HeyGen refused the host photo on these scenes."
+                : "HeyGen could not prepare the host photo on these scenes."}{" "}
+              They render again with the photo this channel has set right now,
+              about{" "}
               {formatMinSec(hostRedo?.sec ?? 0)} of host, roughly $
               {(hostRedo?.usd ?? 0).toFixed(2)} at list price.
               {hostRedo?.fromBroll
                 ? ` ${hostRedo.fromBroll} of them were turned into pictures and become host scenes again.`
                 : ""}{" "}
-              If the photo has not changed, HeyGen will most likely refuse it
-              again. That costs nothing, and the film stops at the first
-              refusal.
+              {hostRedo?.refused
+                ? "If the photo has not changed, HeyGen will most likely refuse it again. That costs nothing, and the film stops at the first refusal."
+                : "The photo is fine and does not need changing. If HeyGen still cannot prepare it, that costs nothing and the scenes wait again."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

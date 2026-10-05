@@ -1840,6 +1840,38 @@ Always 16:9. Fire-and-forget; progress persisted to the job row and polled by th
   waiting and "Host needed" beats and the check-ins already made b-roll for this reason
   (`prepareHostRedo`, full-frame), and runs the ordinary retry pass. Only refusals of the photo
   are taken — never a beat the host limit, another failure or a person made b-roll.
+- **A host photo HeyGen cannot get READY is retried, then waited out** (`registerAvatar` in
+  `server/providers/heygen-lipsync.ts`, `isHostPhotoPrepFailure` in `shared/hostRedo.ts`,
+  2026-10-05). A 226-scene film on ONE photo came back with 13 start/CTA/end beats "Host needed",
+  ~20 check-ins made b-roll and 33 warnings: HeyGen answered the free photo registration
+  (`POST /v3/avatars` by URL) with `404 asset_not_found` for the copy of the photo it had just
+  made — which its docs call "retry after a brief delay" — and nothing retried it. The beats on
+  a photo share one registration promise, so each failed call failed up to eight of them at once
+  (11 distinct asset ids on the card = 11 failed registrations), and the failure was then read
+  as each beat's own. Now: the photo's BYTES are uploaded first (`POST /v3/assets`, png/jpeg;
+  anything else, or a refused upload, registers by URL as before) and the avatar is made from
+  that `asset_id`, so a retry reuses the asset instead of racing a new one; `asset_not_found`,
+  409, 429, 5xx and a dropped connection wait out `REGISTER_BACKOFF_MS` (~105 s); a 400 (no
+  face) or a `failed` avatar group is a definite answer and fails at once. The `Idempotency-Key`
+  is KEPT across a 5xx/network retry (the request may have landed) and CHANGED after a definite
+  refusal (a reused key replays the refusal). `avatar_not_found` at video create drops the
+  cached id and registers once more (`forgetAvatar` — only if that registration is still the
+  cached one, so eight beats share ONE new registration). A registration that outlasts all of it
+  is worded `HOST_PHOTO_PREP_FAILED` and takes the refused-photo road with its own copy
+  (`HostAccountError(…, photoUrl, prep)`, `hostWaiting.prep`, "Photo not ready"): one call, no
+  ledger entry, no b-roll, one warning per photo, other angles keep rendering — and the way
+  forward says the photo is fine, try again. It is checked AFTER `hostAccountFailure`, so a
+  registration that died on the key, the credits or a 5xx is still the account's. "Redo host
+  clips" takes these beats back too, including what films recorded BEFORE this (the old
+  "avatar registration failed (404/409)" and `avatar_not_found` words), and its confirm says
+  "refused" only when `planHostRedo().refused > 0`. NOT live-verified: the `/v3/assets` shape is
+  from HeyGen's docs and mocks — one run on the HeyGen test page confirms it.
+- **The job card's warnings are grouped** (`shared/jobWarnings.ts`,
+  `client/src/components/JobWarnings.tsx`, 2026-10-05): one row per cause listing its scenes,
+  the row standing for the most warnings first, the provider's raw error behind "Details", three
+  rows until "Show all N warnings". It only re-arranges `progress.warnings` — the server still
+  writes one line per event and nothing is dropped. Harness:
+  `client/__harness/job-warnings.html`
 - **A black clip is refused** (`isBlankClip`/`judgeBlankFrames` in videoAssembly, 2026-09-25). A
   hosted film carried a HeyGen take that was black end to end on a host beat, and nothing looked.
   Every host-lane clip is sampled twice a second at 64×36 before it is stored; ≥85% frames dark
