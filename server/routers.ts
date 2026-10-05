@@ -213,6 +213,7 @@ import {
 } from "../shared/hostRegenLimit";
 import { hostSpendRefusal } from "./hostSpend";
 import { summarizeHostSpend } from "../shared/hostSpend";
+import { jobPickFacts } from "../shared/jobPicks";
 import { planHostRedo } from "../shared/hostRedo";
 import { heygenSecondsIn } from "./costMeter";
 import type { UsageLine } from "./pricing";
@@ -2518,6 +2519,9 @@ const longformVideoRouter = router({
         narrationLevelled:
           (job.inputParams as LongformInputParams | null)?.narrationLevelled ??
           null,
+        // What the video was MADE WITH (`shared/jobPicks.ts`): the picks as they were at
+        // Generate, since the form above the card only shows the picks for the next video.
+        picks: jobPickFacts(previewParams, job),
         // The video's host spend limit and what is using it — null on a job with no limit.
         hostSpend: summarizeHostSpend(
           previewParams,

@@ -100,6 +100,11 @@ export interface HostSpendSummary {
   /** Host beats the limit turned into b-roll. */
   madeBroll: number;
   reached: boolean;
+  /**
+   * Minutes of talking head picked at Generate (`shared/jobPicks.ts`) — the limit is this or
+   * less. Absent on a video made before the pick was saved.
+   */
+  pickedMinutes?: number;
 }
 
 export function summarizeHostSpend(
@@ -115,6 +120,9 @@ export function summarizeHostSpend(
     byReason: hostSpendByReason(scenes),
     madeBroll: (scenes ?? []).filter(s => s?.autoBroll?.limit).length,
     reached: spentSec >= limitSec - HOST_SPEND_EPSILON_SEC,
+    ...(params?.hostMinutes != null
+      ? { pickedMinutes: params.hostMinutes }
+      : {}),
   };
 }
 

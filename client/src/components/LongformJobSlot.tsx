@@ -68,6 +68,7 @@ import {
 } from "@shared/filmTimeline";
 import { sanitizeError, isCreditError } from "@/lib/errorSanitizer";
 import { JobWarnings } from "@/components/JobWarnings";
+import { JobPicks } from "@/components/JobPicks";
 import { triggerCreditErrorPopup } from "@/components/CreditErrorPopup";
 import type { SplitLayout, StoryboardScene } from "@shared/types";
 import {
@@ -2406,6 +2407,15 @@ export default function LongformJobSlot({
                   />
                 </div>
               )}
+
+            {job.picks && (
+              <JobPicks
+                facts={job.picks}
+                channelName={
+                  channels.find(c => c.key === job.picks.channelKey)?.name
+                }
+              />
+            )}
 
             {job.status === "failed" && (
               <p className="text-xs text-destructive">

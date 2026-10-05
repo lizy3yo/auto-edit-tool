@@ -31,6 +31,8 @@ export function HostRenderLines({
         <p className={over ? "text-chart-3" : "text-foreground"}>
           Host limit: {formatMinSec(spend.spentSec)} of{" "}
           {formatMinSec(spend.limitSec)} used
+          {spend.pickedMinutes != null &&
+            ` · ${spend.pickedMinutes} min picked`}
           {over &&
             ` — over by ${formatMinSec(spend.spentSec - spend.limitSec)}` +
               (spend.spentSec / spend.limitSec >= 1.1

@@ -45,3 +45,6 @@ the limit, with who clicked) against a synthetic board.
 
 `job-warnings.html` → `jobWarnings.tsx` mounts the job card's warnings box on the card of 2026-10-05 (25
 warnings, one HeyGen cause): the grouped rows, "Details" and "Show all" can be exercised without a job.
+
+`job-picks.html` → `jobPicks.tsx` mounts the job card's "Made with" block on three videos (a 7-minute
+pick, one with every option used, one made before the picks were saved).

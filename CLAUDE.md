@@ -1872,6 +1872,19 @@ Always 16:9. Fire-and-forget; progress persisted to the job row and polled by th
   rows until "Show all N warnings". It only re-arranges `progress.warnings` — the server still
   writes one line per event and nothing is dropped. Harness:
   `client/__harness/job-warnings.html`
+- **Every video shows what it was MADE WITH** (`shared/jobPicks.ts`,
+  `client/src/components/JobPicks.tsx`, 2026-10-05). The generate form only ever shows the picks
+  for the NEXT video (it returns to its defaults on every load), so a card whose Cost screen
+  read "Host limit: 2:55 of 7:00 used" sat under a form showing "3 min" and the form looked
+  like the answer — the video had been generated with 7. The limit is the pick or LESS
+  (`resolveHostBudget`), never more, so a 7:00 limit always means 7 was picked. `jobPickFacts`
+  reduces the job's snapshot to what is worth showing (never the script's text, a URL or a voice
+  id — it rides every `pollJob`), `summarizeJobPicks` words it in the form's order: channel,
+  voice (channel / MiniMax / own file), talking head (pick, the limit it became, and why when
+  lower), host photos, call to action, title, script length, who made it and when, practice
+  run. The Cost dialog's host line says "· N min picked" (`HostSpendSummary.pickedMinutes`). A
+  setting a video predates reads "Not recorded". It only SHOWS: who may pick what is unchanged
+  (an editor can still pick 7). Harness: `client/__harness/job-picks.html`
 - **A black clip is refused** (`isBlankClip`/`judgeBlankFrames` in videoAssembly, 2026-09-25). A
   hosted film carried a HeyGen take that was black end to end on a host beat, and nothing looked.
   Every host-lane clip is sampled twice a second at 64×36 before it is stored; ≥85% frames dark
