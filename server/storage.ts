@@ -1,5 +1,6 @@
 import {
   GetObjectCommand,
+  HeadObjectCommand,
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
@@ -106,10 +107,18 @@ export function isTransientR2Error(err: any): boolean {
   );
 }
 
+/**
+ * Cache-Control for an object whose key is a hash of what it was made from (a thumbnail, a
+ * light copy of a film): it can never change, so a browser keeps it without asking again.
+ * NOT a default — most keys here are not content-addressed, and nothing has audited them.
+ */
+export const IMMUTABLE_CACHE = "public, max-age=31536000, immutable";
+
 export async function storagePut(
   relKey: string,
   data: Buffer | Uint8Array | string,
-  contentType = "application/octet-stream"
+  contentType = "application/octet-stream",
+  cacheControl?: string
 ): Promise<{ key: string; url: string }> {
   const key = normalizeKey(relKey);
   const s3 = getS3Client();
@@ -123,6 +132,7 @@ export async function storagePut(
             Key: key,
             Body: data as Buffer,
             ContentType: contentType,
+            ...(cacheControl ? { CacheControl: cacheControl } : {}),
           })
         );
         return;
@@ -158,6 +168,42 @@ export async function rehostToR2(url: string, prefix: string): Promise<string> {
     ct
   );
   return r2;
+}
+
+/** The public URL an object at `relKey` has (what `storagePut` returns), or null with no base. */
+export function storagePublicUrl(relKey: string): string | null {
+  const base = publicBase();
+  return base ? `${base}/${normalizeKey(relKey)}` : null;
+}
+
+const isMissing = (err: any) =>
+  err?.$metadata?.httpStatusCode === 404 ||
+  /NoSuchKey|NotFound/i.test(`${err?.name ?? ""} ${err?.Code ?? ""}`);
+
+/** Whether an object exists. A missing one is `false`; any other failure throws. */
+export async function storageExists(relKey: string): Promise<boolean> {
+  try {
+    await getS3Client().send(
+      new HeadObjectCommand({ Bucket: getBucket(), Key: normalizeKey(relKey) })
+    );
+    return true;
+  } catch (err) {
+    if (isMissing(err)) return false;
+    throw err;
+  }
+}
+
+/** An object's bytes, or null when there is none. For small objects only — it is buffered. */
+export async function storageRead(relKey: string): Promise<Buffer | null> {
+  try {
+    const res = await getS3Client().send(
+      new GetObjectCommand({ Bucket: getBucket(), Key: normalizeKey(relKey) })
+    );
+    return res.Body ? Buffer.from(await res.Body.transformToByteArray()) : null;
+  } catch (err) {
+    if (isMissing(err)) return null;
+    throw err;
+  }
 }
 
 export async function storageGet(

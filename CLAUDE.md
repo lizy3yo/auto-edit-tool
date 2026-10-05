@@ -1623,6 +1623,61 @@ Express · tRPC · Drizzle · MySQL.
   heartbeat the stale-job sweep and the restart resume read, so a takeover kept alive by an open
   page would make a dead render look alive. Paid clicks during a takeover are already named on
   the ledger (`SceneSubmit.by`). Harness: `client/__harness/activity.html`
+- **The page works on a weak connection** (2026-10-05). Rendering was never the browser's job,
+  but the PAGE needed fast wifi: nothing was compressed, a rendering video re-sent its whole
+  storyboard every 3 s, every thumbnail opened the real 1080p clip, and an upload was one
+  request. Five seams, each with its own test:
+  (a) SEND LESS (`server/httpDelivery.ts`): gzip/brotli on pages, scripts and API answers —
+  never `/api/download`, `/api/narration-upload` or `/api/thumb` (the download proxy's
+  Content-Length is what makes a broken transfer FAIL, and compression drops it); hashed
+  `/assets/*` are `immutable` for a year, everything else `no-cache` so a deploy shows at once.
+  Pages other than the generator are `lazy()` and the libraries are a `vendor` chunk; a tab left
+  open across a deploy reloads once on `vite:preloadError`. First load ~870 KB → ~245 KB.
+  (b) THE POLL SENDS NOTHING WHEN NOTHING CHANGED (`server/pollRevision.ts`,
+  `client/src/hooks/useJobPoll.ts`): `pollJob` takes `have`, the fingerprint of the answer the
+  page holds, and replies `{ unchanged: true }` when it still matches — hashed from the answer
+  itself, because `updatedAt` is the heartbeat and half the answer is not on the row. The hook
+  uses pollJob's own query key, so every `utils.longformVideo.pollJob.invalidate()` still
+  reaches it, and returns the last SERVER answer (never the cache's) on "unchanged". Read a
+  video's poll through `useJobPoll`, not `trpc.longformVideo.pollJob.useQuery`.
+  (c) THE CONNECTION IS MEASURED (`client/src/lib/connection.ts`, `shared/weakNetwork.ts`):
+  the time to first byte of the QUICK requests only (`QUICK`: one database read each — a
+  mutation that calls a provider says nothing about the link, and is never timed or cut off),
+  middle of the last three. Slow ⇒ polls stretch 2×, very slow 3.5×, never past 10 s; a quick
+  request unanswered after 30 s is abandoned so the next poll is not stuck behind it; a line
+  under the header says the videos keep rendering (`ConnectionBanner.tsx`).
+  (d) SMALL PICTURES (`server/thumbs.ts`, `/api/thumb?url=&w=&t=`, signed in, our bucket only
+  via `isTrustedUrl` — it fetches the URL server-side): a WebP of a stored picture or of one
+  frame of a clip, made once (two at a time, through `execFfmpeg`), kept in R2 under
+  `thumbs/<hash of url|width|second>` and by the browser for good. Made on request, so it
+  covers every film already rendered. `SceneStripThumb`, `VideoPoster` and `Thumb.tsx` (host
+  photo tiles, book covers, assets) ask for it FIRST and fall back to what they did before on
+  any failure — so it can only make a page lighter. Anything opened big is the original. A
+  thumbnail NEVER waits for memory (`ThumbBusyError`): every ffmpeg start waits up to 3 min for
+  1 GB free, and on a dev machine with 455 MB free every tile of a 187-scene storyboard sat on
+  its spinner behind that wait — under the floor it steps aside at once, and past
+  `THUMB_DEADLINE_MS` (5 s) the tile is answered "none" while the build carries on and is kept.
+  (e) THE LIGHT FILM (`server/lightVideo.ts`): a 480p copy (~600 kbps, about a sixth of the
+  size) of a FINISHED film only (`final-*.mp4` — never scene clips, 200 encodes a film), made
+  after the job is saved and never awaited, one at a time on two threads, at
+  `previews/<hash of the final's URL>` — so nothing is written to the job row, a Reassemble
+  gets a new one, and an older film gets its copy the first time it is opened
+  (`longformVideo.lightVideo`). The player's switch (`pickVideoSource`): Auto = light on the
+  page, the film in full screen; Data saver; Full quality. Download is always the film.
+  `LIGHT_VIDEO=0` turns it off. `IMMUTABLE_CACHE` on `storagePut` is OPT-IN for these
+  content-addressed keys only — the other ~45 call sites have not been audited for overwrites.
+  (f) UPLOADS CARRY ON (`shared/uploadParts.ts`, `client/src/lib/resumableUpload.ts`): a
+  narration goes up in 1 MB pieces to `PUT /api/narration-upload/:id/part/:n`, each retried on
+  its own, then `POST …/complete` joins them and runs the SAME normalise-and-store tail as the
+  single request (kept). The id is remembered per file for the tab, so choosing the same file
+  again asks which pieces the server holds and sends the rest; a repeated `complete` gets the
+  first answer. Pieces live in the OS temp folder per account, cleared after a day. Image
+  uploads are still base64 through tRPC.
+  (g) A PAID CLICK ASKED TWICE RUNS ONCE (`server/requestOnce.ts`, `client/src/lib/requestId.ts`):
+  Generate, the HeyGen test and the VSL send a `requestId`, and send the SAME one again only
+  when the last try was never answered and asks for the same thing — so a lost answer followed
+  by a second click is one video. In memory (single process); a failed run is forgotten.
+  Nothing paid is retried automatically. A tripwire names the three routes.
 - `drizzle/schema.ts` — `users`, `provider_configs`, `longform_video_jobs`,
   `channel_configs`, `channel_layers`, `app_settings` (+ `books`, `channel_assets`,
   `longform_slots`, `longform_sales`)

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Thumb } from "@/components/Thumb";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -111,7 +112,7 @@ export function ChannelAssets({ channelKey }: { channelKey: string }) {
               key={a.id}
               className="flex items-center gap-3 rounded-md border border-border p-2"
             >
-              <img
+              <Thumb
                 src={a.imageUrl}
                 alt=""
                 className="h-14 w-14 shrink-0 rounded border border-border bg-white object-contain"

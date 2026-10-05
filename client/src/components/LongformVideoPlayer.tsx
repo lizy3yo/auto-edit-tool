@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useManagedMedia } from "@/lib/mediaLifecycle";
+import { trpc } from "@/lib/trpc";
+import { pickVideoSource, type VideoQuality } from "@shared/weakNetwork";
 
 // ponytail: YouTube-style hover preview is a hidden <video> seeked to the hover
 // time — no sprite sheet / server work. Slight seek latency on hover is the
@@ -13,6 +15,16 @@ function formatTime(s: number): string {
 }
 
 const PREVIEW_W = 160;
+
+const QUALITY_KEY = "player-quality";
+function storedQuality(): VideoQuality {
+  try {
+    const v = localStorage.getItem(QUALITY_KEY);
+    return v === "light" || v === "full" ? v : "auto";
+  } catch {
+    return "auto";
+  }
+}
 
 export function LongformVideoPlayer({
   src,
@@ -29,9 +41,76 @@ export function LongformVideoPlayer({
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const previewRef = useRef<HTMLVideoElement>(null);
+
+  // THE LIGHT COPY (`server/lightVideo.ts`): a 480p file about a sixth of the film's size, so
+  // the player on the page works on a weak connection. Full screen plays the film itself, and
+  // Download always is the film. With no light copy this player behaves exactly as before.
+  const [mode, setMode] = useState<VideoQuality>(storedQuality);
+  const [fullscreen, setFullscreen] = useState(false);
+  const lightQuery = trpc.longformVideo.lightVideo.useQuery(
+    { url: src },
+    {
+      staleTime: Infinity,
+      retry: false,
+      refetchInterval: q => (q.state.data?.pending ? 15_000 : false),
+    }
+  );
+  const lightReady = lightQuery.data?.url ?? null;
+  /** The light copy this player has taken up — never swapped in under a film that is playing. */
+  const [light, setLight] = useState<string | null>(null);
+  useEffect(() => setLight(null), [src]);
+  useEffect(() => {
+    const v = videoRef.current;
+    if (lightReady && (!v || (v.paused && v.currentTime < 0.5)))
+      setLight(lightReady);
+  }, [lightReady]);
+  const activeSrc = pickVideoSource({ mode, fullscreen, full: src, light });
+
+  /**
+   * Where the film was when the file under it changed, to carry on from there. Read during
+   * render, while the element still holds the OLD file: by the time an effect runs the new
+   * `src` is on it and its time is already back at zero.
+   */
+  const resumeRef = useRef<{ t: number; playing: boolean } | null>(null);
+  const shownRef = useRef({ film: src, file: activeSrc });
+  if (shownRef.current.file !== activeSrc) {
+    const v = videoRef.current;
+    resumeRef.current =
+      v && shownRef.current.film === src
+        ? { t: v.currentTime, playing: !v.paused }
+        : null; // a different film starts from the top
+    shownRef.current = { film: src, file: activeSrc };
+  }
+  /** A switch is happening anyway, so a light copy that arrived mid-film can be taken up. */
+  const takeUpLight = () => {
+    if (lightReady) setLight(lightReady);
+  };
+  useEffect(() => {
+    const onChange = () => {
+      const el = document.fullscreenElement;
+      takeUpLight();
+      setFullscreen(!!el && !!containerRef.current?.contains(el));
+    };
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+    // `takeUpLight` reads the latest `lightReady`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lightReady]);
+  const chooseQuality = (next: VideoQuality) => {
+    takeUpLight();
+    setMode(next);
+    try {
+      localStorage.setItem(QUALITY_KEY, next);
+    } catch {
+      // Private mode: the choice lasts for this page only.
+    }
+  };
+
   // Both released on unmount (the hover preview mounts per hover) and while the tab is hidden.
-  const main = useManagedMedia(src, videoRef);
-  const preview = useManagedMedia(src, previewRef);
+  const main = useManagedMedia(activeSrc, videoRef);
+  // The scrubbing preview is a thumbnail: the light copy is plenty, and a second connection to
+  // the full film was the heaviest thing on the page.
+  const preview = useManagedMedia(light ?? src, previewRef);
   const barRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const hoverRef = useRef(false); // pointer over this player, ref not state
@@ -144,7 +223,15 @@ export function LongformVideoPlayer({
         src={main.src}
         controls
         className="w-full rounded-lg bg-black max-h-[480px]"
-        onLoadedMetadata={e => setDuration(e.currentTarget.duration)}
+        onLoadedMetadata={e => {
+          const v = e.currentTarget;
+          setDuration(v.duration);
+          const resume = resumeRef.current;
+          resumeRef.current = null;
+          if (!resume) return;
+          v.currentTime = Math.min(resume.t, v.duration || resume.t);
+          if (resume.playing) v.play().catch(() => {});
+        }}
         onTimeUpdate={e => setCurrent(e.currentTarget.currentTime)}
       />
 
@@ -182,6 +269,30 @@ export function LongformVideoPlayer({
           </div>
         )}
       </div>
+
+      {(lightReady || lightQuery.data?.pending) && (
+        <div className="flex flex-wrap items-center justify-end gap-2 text-xs text-muted-foreground">
+          <span>
+            {!lightReady
+              ? "Preparing a light version for slow connections…"
+              : activeSrc === src
+                ? "Playing full quality"
+                : "Playing the light version — full screen and Download are full quality"}
+          </span>
+          <label className="flex items-center gap-1.5">
+            Quality
+            <select
+              value={mode}
+              onChange={e => chooseQuality(e.target.value as VideoQuality)}
+              className="h-7 rounded-md border border-border bg-background px-2 text-xs text-foreground"
+            >
+              <option value="auto">Auto</option>
+              <option value="light">Data saver</option>
+              <option value="full">Full quality</option>
+            </select>
+          </label>
+        </div>
+      )}
     </div>
   );
 }

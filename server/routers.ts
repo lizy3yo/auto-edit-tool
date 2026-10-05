@@ -215,6 +215,9 @@ import { hostSpendRefusal } from "./hostSpend";
 import { summarizeHostSpend } from "../shared/hostSpend";
 import { jobPickFacts } from "../shared/jobPicks";
 import { planHostRedo } from "../shared/hostRedo";
+import { answerPoll } from "./pollRevision";
+import { lightVideoFor } from "./lightVideo";
+import { once } from "./requestOnce";
 import { heygenSecondsIn } from "./costMeter";
 import type { UsageLine } from "./pricing";
 import { RATES } from "./pricing";
@@ -1081,17 +1084,21 @@ const heygenTestRouter = router({
         script: z.string().max(5_000),
         imageUrls: z.array(z.string().url().max(512)).max(10),
         name: z.string().max(HEYGEN_TEST_MAX_NAME).optional(),
+        /** One id per click, sent again when the answer was lost (`server/requestOnce.ts`). */
+        requestId: z.string().max(64).optional(),
       })
     )
-    .mutation(async ({ ctx, input }) => {
-      try {
-        return await startHeygenTest({ ...input, userId: ctx.user.id });
-      } catch (err) {
-        if (err instanceof HeygenTestInputError)
-          throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
-        throw err;
-      }
-    }),
+    .mutation(({ ctx, input: { requestId, ...input } }) =>
+      once("heygenTest.start", ctx.user.id, requestId, async () => {
+        try {
+          return await startHeygenTest({ ...input, userId: ctx.user.id });
+        } catch (err) {
+          if (err instanceof HeygenTestInputError)
+            throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
+          throw err;
+        }
+      })
+    ),
 
   /** Runs a batch's failed clips again: the `ids` given, or every failed one in the batch. */
   retry: managerProcedure
@@ -1174,30 +1181,36 @@ const vslRouter = router({
         imageUrl: z.string().url().max(512),
         bookTitle: z.string().max(VSL_MAX_BOOK_TITLE),
         name: z.string().max(HEYGEN_TEST_MAX_NAME).optional(),
+        /** One id per click, sent again when the answer was lost (`server/requestOnce.ts`). */
+        requestId: z.string().max(64).optional(),
       })
     )
-    .mutation(async ({ ctx, input }) => {
-      const { imageUrl, ...rest } = input;
-      try {
-        return await startHeygenTest({
-          ...rest,
-          imageUrls: [imageUrl],
-          kind: "vsl",
-          userId: ctx.user.id,
-        });
-      } catch (err) {
-        if (err instanceof HeygenTestInputError)
-          throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
-        throw err;
-      }
-    }),
+    .mutation(({ ctx, input: { requestId, imageUrl, ...rest } }) =>
+      once("vsl.start", ctx.user.id, requestId, async () => {
+        try {
+          return await startHeygenTest({
+            ...rest,
+            imageUrls: [imageUrl],
+            kind: "vsl",
+            userId: ctx.user.id,
+          });
+        } catch (err) {
+          if (err instanceof HeygenTestInputError)
+            throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
+          throw err;
+        }
+      })
+    ),
 
   /** Use this clip on the upsell page (one per channel and book), or stop using it. */
   pick: managerProcedure
     .input(z.object({ batchId: z.string().min(1).max(32) }))
     .mutation(async ({ input }) => {
       if (!(await pickVslBatch(input.batchId)))
-        throw new TRPCError({ code: "NOT_FOUND", message: "That VSL no longer exists." });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "That VSL no longer exists.",
+        });
       return { ok: true };
     }),
 });
@@ -1886,6 +1899,8 @@ const longformVideoRouter = router({
       z.object({
         script: z.string().min(1).max(50000),
         channelKey: z.string().min(1),
+        /** One id per click, sent again when the answer was lost (`server/requestOnce.ts`). */
+        requestId: z.string().max(64).optional(),
         title: z.string().max(255).optional(),
         /** Which of the user's tabs launched this. No longer picks a key — see `assignJobAccounts`. */
         slotIndex: z
@@ -1991,7 +2006,8 @@ const longformVideoRouter = router({
         rehearsal: z.boolean().optional(),
       })
     )
-    .mutation(async ({ ctx, input }) => {
+    .mutation(({ ctx, input }) =>
+      once("generate", ctx.user.id, input.requestId, async () => {
       const provider = await getActiveProvider();
       if (!provider) {
         throw new TRPCError({
@@ -2325,11 +2341,20 @@ const longformVideoRouter = router({
       });
 
       return { jobId };
-    }),
+    })),
 
   /** Poll a job's progress. */
+  /**
+   * The light (480p) copy of a finished film for the player on the page, started if there is
+   * none yet (`server/lightVideo.ts`). Never an error: "none" means play the film itself.
+   */
+  lightVideo: approvedProcedure
+    .input(z.object({ url: z.string().max(2048) }))
+    .query(({ input }) => lightVideoFor(input.url)),
+
   pollJob: approvedProcedure
-    .input(z.object({ jobId: z.number() }))
+    // `have`: the fingerprint of the answer the page already holds (`server/pollRevision.ts`).
+    .input(z.object({ jobId: z.number(), have: z.string().max(64).optional() }))
     .query(async ({ ctx, input }) => {
       // Sampled BEFORE the row read so the two can only disagree in the harmless direction:
       // a session that settles between them reads "editing + (processing|completed)", never
@@ -2366,7 +2391,7 @@ const longformVideoRouter = router({
             })
           )
         : rawScenes;
-      return {
+      const answer = {
         status: job.status,
         stage: job.stage,
         progress: job.progress,
@@ -2444,6 +2469,8 @@ const longformVideoRouter = router({
           return { ...plan, usd: plan.sec * RATES.heygenPerSecond };
         })(),
       };
+      // Nothing new since the page last asked ⇒ a few bytes instead of the whole storyboard.
+      return answerPoll(answer, input.have);
     }),
 
   /** Current user's active (processing) jobs — for auto-resume on reload. */
@@ -3583,7 +3610,8 @@ const longformVideoRouter = router({
       if (job.status === "processing") {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: "This video is still working — redo the host clips when it stops",
+          message:
+            "This video is still working — redo the host clips when it stops",
         });
       }
       const plan = planHostRedo(job.storyboard as StoryboardScene[] | null);

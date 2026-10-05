@@ -4,6 +4,7 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
+import { uploadNarrationInParts } from "@/lib/resumableUpload";
 import { extractSpokenScript, stripCtaMarkerLines } from "@shared/ctaMarkers";
 import type { LongformInputParams } from "@shared/types";
 import {
@@ -80,6 +81,8 @@ export function LongformNarrationUpload({
 }) {
   const [on, setOn] = useState(!!compact);
   const [busy, setBusy] = useState<null | "uploading" | "checking">(null);
+  /** How much of the file is up, 0–1 — it goes in pieces, so this is real, not a spinner. */
+  const [uploaded, setUploaded] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [copied, setCopied] = useState<null | "script" | "settings">(null);
@@ -177,17 +180,12 @@ export function LongformNarrationUpload({
     onChange(undefined);
     try {
       // Raw bytes, not base64 through tRPC: a 20-minute narration is ~29 MB, and encoding it
-      // would push a JSON body past the server's 50 MB cap for no benefit.
+      // would push a JSON body past the server's 50 MB cap for no benefit. Sent in small
+      // pieces (`lib/resumableUpload.ts`), so a connection that drops costs one piece, and
+      // choosing the same file again carries on from where it stopped.
+      setUploaded(0);
       setBusy("uploading");
-      const resp = await fetch("/api/narration-upload", {
-        method: "POST",
-        headers: { "Content-Type": file.type || "audio/mpeg" },
-        body: file,
-        credentials: "include",
-      });
-      const body = await resp.json().catch(() => ({}) as any);
-      if (!resp.ok)
-        throw new Error(body?.error || `Upload failed (${resp.status})`);
+      const body = await uploadNarrationInParts(file, setUploaded);
 
       setBusy("checking");
       const verdict = await verify.mutateAsync({
@@ -427,7 +425,7 @@ export function LongformNarrationUpload({
             <Upload className="mr-2 h-4 w-4" />
           )}
           {busy === "uploading"
-            ? "Uploading…"
+            ? `Uploading… ${Math.round(uploaded * 100)}%`
             : busy === "checking"
               ? "Checking the read against the script…"
               : "Choose audio file"}

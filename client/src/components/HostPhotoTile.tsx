@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Thumb } from "@/components/Thumb";
 import { ZoomIn } from "lucide-react";
 
 /**
@@ -50,7 +51,7 @@ export function HostPhotoTile({
         aria-label={pictureLabel}
         className={`block w-full disabled:cursor-default ${onPictureClick ? "" : "cursor-zoom-in"}`}
       >
-        <img src={imageUrl} alt="" className="h-20 w-24 object-cover" />
+        <Thumb src={imageUrl} alt="" className="h-20 w-24 object-cover" />
       </button>
       {corner && <div className="absolute right-1 top-1">{corner}</div>}
       <button

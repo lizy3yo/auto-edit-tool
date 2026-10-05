@@ -5,9 +5,25 @@ import { httpBatchLink, TRPCClientError } from "@trpc/client";
 import { createRoot } from "react-dom/client";
 import superjson from "superjson";
 import App from "./App";
+import { measuredFetch } from "@/lib/connection";
 import "./index.css";
 
 const queryClient = new QueryClient();
+
+// A page's code is fetched when the page is opened, and a deploy replaces those files. A tab
+// left open across a deploy then asks for a file that is gone: reload once to pick up the new
+// build (once per tab session, so a genuinely unreachable server cannot loop).
+window.addEventListener("vite:preloadError", event => {
+  const KEY = "reloaded-for-new-build";
+  try {
+    if (sessionStorage.getItem(KEY)) return;
+    sessionStorage.setItem(KEY, "1");
+  } catch {
+    return;
+  }
+  event.preventDefault();
+  window.location.reload();
+});
 
 const redirectToLoginIfUnauthorized = (error: unknown) => {
   if (!(error instanceof TRPCClientError)) return;
@@ -53,7 +69,7 @@ const trpcClient = trpc.createClient({
       methodOverride: "POST",
       maxURLLength: 12000,
       fetch(input, init) {
-        return globalThis.fetch(input, {
+        return measuredFetch(input, {
           ...(init ?? {}),
           credentials: "include",
         });

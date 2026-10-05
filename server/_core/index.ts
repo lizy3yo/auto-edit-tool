@@ -31,6 +31,8 @@ import { startTimeoutChecker } from "../generationTimeout";
 import { registerHeygenWebhook } from "../heygenWebhook";
 import { registerSalesWebhook } from "../salesWebhook";
 import { downloadRouter } from "../download";
+import { compressResponses } from "../httpDelivery";
+import { thumbRouter } from "../thumbs";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -61,6 +63,8 @@ async function startServer() {
   const server = createServer({ maxHeaderSize: 64 * 1024 }, app);
   // Trust proxy headers so req.protocol and cookies work correctly behind HTTPS proxy
   app.set("trust proxy", 1);
+  // gzip/brotli for pages, scripts and API answers; media and downloads pass through untouched.
+  app.use(compressResponses());
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   // Bring the database up to `drizzle/schema.ts` BEFORE serving. Nothing else in the deploy
@@ -86,6 +90,8 @@ async function startServer() {
   registerSalesWebhook(app);
   // Download proxy (bypasses CORS for R2/CDN URLs)
   app.use("/api/download", downloadRouter);
+  // Small pictures of stored files, made once and kept (thumbnails for a weak connection).
+  app.use("/api/thumb", thumbRouter);
   // Operator-supplied master narration — raw audio upload, streamed rather than base64'd
   // through the JSON body (a 20-minute narration is ~29 MB, ~39 MB encoded, against the 50 MB
   // cap above). `express.json` dispatches on content-type, so an audio/* body reaches this

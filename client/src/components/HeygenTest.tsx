@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
+import { useRequestId } from "@/lib/requestId";
 import { keepPreviousData } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -114,8 +115,10 @@ export function HeygenTest() {
     onError: err => toast.error(err.message),
   });
 
+  const startRequest = useRequestId();
   const start = trpc.heygenTest.start.useMutation({
     onSuccess: () => {
+      startRequest.settled();
       toast.success("Test started — voicing, then rendering on HeyGen.");
       setPhotos([]);
       setRunName("");
@@ -124,7 +127,10 @@ export function HeygenTest() {
       utils.heygenTest.runners.invalidate();
       utils.heygenTest.channels.invalidate();
     },
-    onError: err => toast.error(err.message),
+    onError: err => {
+      startRequest.settled(err);
+      toast.error(err.message);
+    },
   });
 
   /** Add a photo to the run; false when it is already in it or the run is full. */
@@ -323,13 +329,19 @@ export function HeygenTest() {
             <Button
               disabled={!channelKey || !!blocker || start.isPending}
               onClick={() =>
-                start.mutate({
-                  channelKey,
-                  ttsVendor: effectiveVendor,
-                  script,
-                  imageUrls,
-                  name: runName.trim() || undefined,
-                })
+                {
+                  const request = {
+                    channelKey,
+                    ttsVendor: effectiveVendor,
+                    script,
+                    imageUrls,
+                    name: runName.trim() || undefined,
+                  };
+                  start.mutate({
+                    ...request,
+                    requestId: startRequest.idFor(request),
+                  });
+                }
               }
             >
               {start.isPending && (

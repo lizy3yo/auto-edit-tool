@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Loader2, CloudOff } from "lucide-react";
 import { createLoadGate } from "@/components/loadGate";
 import { captureFrame, releaseOnUnmount } from "@/lib/mediaLifecycle";
+import { thumbSrc } from "@/lib/thumb";
 
 /**
  * One scene's thumbnail in the storyboard filmstrip.
@@ -27,6 +28,11 @@ import { captureFrame, releaseOnUnmount } from "@/lib/mediaLifecycle";
  * released. A player kept alive to show one still holds a hardware decoder and GPU memory for
  * as long as the tile exists; across a strip, five job tabs and the library that exhausted the
  * GPU and blacked out the tab. The strip now holds at most the gate's few loading players.
+ *
+ * THE CLIP IS THE FALLBACK NOW. A tile first asks the server for a small picture of that frame
+ * (`server/thumbs.ts`, a few KB, kept by the browser for good) and only opens the clip itself
+ * when there is none — on a weak connection a strip of real clips was most of the page's
+ * weight. Both go through the same gate, so the player still keeps its lane.
  */
 /** Canvas width for the captured still — 2x the tile, so it stays crisp on a HiDPI screen. */
 const THUMB_STILL_W = 256;
@@ -59,6 +65,8 @@ export function SceneStripThumb({
   const [failed, setFailed] = useState(false);
   /** The frame is on the canvas and the player is gone. */
   const [captured, setCaptured] = useState(false);
+  /** The server had no small picture for this frame — load the clip, as before. */
+  const [noPicture, setNoPicture] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   /** Bumped by the retry button to re-run the effect and mount a fresh element. */
   const [attempt, setAttempt] = useState(0);
@@ -77,6 +85,7 @@ export function SceneStripThumb({
     setPainted(false);
     setFailed(false);
     setCaptured(false);
+    setNoPicture(false);
     settledRef.current = false;
     releaseRef.current = gate.acquire(() => {
       setLoading(true);
@@ -126,7 +135,20 @@ export function SceneStripThumb({
         aria-hidden
         className={`w-full h-full object-cover bg-black ${captured ? "" : "hidden"}`}
       />
-      {loading && !failed && !captured && (
+      {loading && !noPicture && !failed && (
+        <img
+          key={attempt}
+          src={thumbSrc(clipUrl, 320, startSec + 0.05)}
+          alt=""
+          decoding="async"
+          className={`w-full h-full object-cover bg-black transition-opacity ${
+            painted ? "opacity-100" : "opacity-0"
+          }`}
+          onLoad={() => paint()}
+          onError={() => setNoPicture(true)}
+        />
+      )}
+      {loading && noPicture && !failed && !captured && (
         <video
           ref={releaseOnUnmount}
           // Remount on retry: React would otherwise reuse this exact DOM node, and a media

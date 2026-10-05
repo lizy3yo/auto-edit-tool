@@ -79,6 +79,7 @@ import {
   DuplicateTTSError,
 } from "./ttsUnified";
 import { presignOwnBucketUrl, storagePut } from "./storage";
+import { lightVideoFor } from "./lightVideo";
 import { voiceSpace69Labs } from "./tts69labs";
 import { applySpokenLists, findSpokenLists } from "./spokenLists";
 import { collectShownFacts, describeNamedLooks, namedLookClause } from "./namedLooks";
@@ -16365,6 +16366,10 @@ async function assembleAndFinalizeCore(
     ...(hadTimingEdits || qrWindowChanged ? { storyboard: scenes } : {}),
     ...(levelApplied ? { inputParams: params } : {}),
   });
+  // The light copy the page's player uses on a weak connection (`server/lightVideo.ts`). Started
+  // only now that the film is finished and saved, and never awaited: it cannot delay or fail
+  // a film. A practice run gets its copy the first time someone opens it instead.
+  if (!params.rehearsal) void lightVideoFor(url);
 }
 
 /**

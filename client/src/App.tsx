@@ -5,17 +5,12 @@ import { Route, Switch, Link, useLocation } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import LongformPage from "./pages/LongformPage";
-import LibraryPage from "./pages/LibraryPage";
-import ChannelsPage from "./pages/ChannelsPage";
-import AdminPage from "./pages/AdminPage";
-import HeygenTestPage from "./pages/HeygenTestPage";
-import VslPage from "./pages/VslPage";
-import ActivityPage from "./pages/ActivityPage";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "./_core/hooks/useAuth";
 import { LoginScreen } from "./components/LoginScreen";
 import { CreditErrorPopup } from "./components/CreditErrorPopup";
 import { ChangePasswordDialog } from "./components/ChangePasswordDialog";
+import { ConnectionBanner } from "./components/ConnectionBanner";
 import { ROLE_LABEL, type Role } from "@shared/roles";
 import {
   Activity,
@@ -37,7 +32,24 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
+
+// Every page but the first is fetched when it is opened, so signing in on a slow connection
+// downloads the generator and not Admin, the test bench, the VSL page and the rest with it.
+const LibraryPage = lazy(() => import("./pages/LibraryPage"));
+const ChannelsPage = lazy(() => import("./pages/ChannelsPage"));
+const AdminPage = lazy(() => import("./pages/AdminPage"));
+const HeygenTestPage = lazy(() => import("./pages/HeygenTestPage"));
+const VslPage = lazy(() => import("./pages/VslPage"));
+const ActivityPage = lazy(() => import("./pages/ActivityPage"));
+
+function PageLoading() {
+  return (
+    <div className="flex justify-center py-20">
+      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+    </div>
+  );
+}
 
 /**
  * The nav, declared once. It used to be four near-identical `<Link>` blocks with
@@ -340,6 +352,7 @@ function Layout({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       </header>
+      <ConnectionBanner />
 
       <main id="main" className="mx-auto max-w-[1400px] px-4 py-6">
         {children}
@@ -395,28 +408,30 @@ function Router() {
 
   return (
     <Layout>
-      <Switch>
-        <Route path="/">
-          <LongformPage />
-        </Route>
-        <Route path="/library" component={LibraryPage} />
-        <Route path="/channels">
-          {canManageChannels ? <ChannelsPage /> : <NotAuthorized />}
-        </Route>
-        <Route path="/heygen-test">
-          {canManageChannels ? <HeygenTestPage /> : <NotAuthorized />}
-        </Route>
-        <Route path="/vsl">
-          {canManageChannels ? <VslPage /> : <NotAuthorized />}
-        </Route>
-        <Route path="/activity">
-          {canManageChannels ? <ActivityPage /> : <NotAuthorized />}
-        </Route>
-        <Route path="/admin">
-          {canOpenAdmin ? <AdminPage /> : <NotAuthorized />}
-        </Route>
-        <Route component={NotFound} />
-      </Switch>
+      <Suspense fallback={<PageLoading />}>
+        <Switch>
+          <Route path="/">
+            <LongformPage />
+          </Route>
+          <Route path="/library" component={LibraryPage} />
+          <Route path="/channels">
+            {canManageChannels ? <ChannelsPage /> : <NotAuthorized />}
+          </Route>
+          <Route path="/heygen-test">
+            {canManageChannels ? <HeygenTestPage /> : <NotAuthorized />}
+          </Route>
+          <Route path="/vsl">
+            {canManageChannels ? <VslPage /> : <NotAuthorized />}
+          </Route>
+          <Route path="/activity">
+            {canManageChannels ? <ActivityPage /> : <NotAuthorized />}
+          </Route>
+          <Route path="/admin">
+            {canOpenAdmin ? <AdminPage /> : <NotAuthorized />}
+          </Route>
+          <Route component={NotFound} />
+        </Switch>
+      </Suspense>
     </Layout>
   );
 }

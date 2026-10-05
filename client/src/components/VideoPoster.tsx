@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { Loader2, Film } from "lucide-react";
 import { captureFrame, releaseOnUnmount } from "@/lib/mediaLifecycle";
+import { thumbSrc } from "@/lib/thumb";
 
 /** Canvas width for the captured still — enough for the library's largest card on HiDPI. */
 const POSTER_STILL_W = 640;
@@ -20,6 +21,9 @@ const POSTER_STILL_W = 640;
  * Once the first frame is decoded it is copied onto a canvas and the `<video>` is removed and
  * released: a player kept alive to show one still holds a hardware decoder and GPU memory, and
  * enough of them on one page black the tab out (see `lib/mediaLifecycle.ts`).
+ *
+ * That is the FALLBACK now: the card first asks the server for a small picture of that first
+ * frame (`server/thumbs.ts`), which exists for old renders too because it is made on request.
  */
 export function VideoPoster({
   posterUrl,
@@ -37,6 +41,8 @@ export function VideoPoster({
   /** The source the canvas currently holds a frame of — a new source shows its video again. */
   const [capturedSrc, setCapturedSrc] = useState<string | null>(null);
   const captured = !!src && capturedSrc === src;
+  /** The source the server had no small picture for — that one loads the video, as before. */
+  const [noPictureSrc, setNoPictureSrc] = useState<string | null>(null);
 
   if (!src) {
     return (
@@ -49,6 +55,19 @@ export function VideoPoster({
           <Film className="h-5 w-5 text-muted-foreground/50" />
         )}
       </div>
+    );
+  }
+
+  if (noPictureSrc !== src) {
+    return (
+      <img
+        src={thumbSrc(src, 640, 0.05)}
+        alt=""
+        loading="lazy"
+        decoding="async"
+        className={`bg-secondary/60 object-cover ${className}`}
+        onError={() => setNoPictureSrc(src)}
+      />
     );
   }
 

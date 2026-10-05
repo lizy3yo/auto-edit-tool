@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Thumb } from "@/components/Thumb";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -139,7 +140,7 @@ export function ChannelHostPhotos({ channelKey }: { channelKey: string }) {
                   aria-label={i === 0 ? "Preview the primary photo" : `Preview angle ${i + 1}`}
                   className="block shrink-0 cursor-zoom-in"
                 >
-                  <img
+                  <Thumb
                     src={p.imageUrl}
                     alt=""
                     className="h-16 w-24 rounded border border-border object-cover"

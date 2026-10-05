@@ -17,6 +17,14 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        // The libraries change far less often than the app, so they get their own long-cached
+        // file: a deploy that only touches app code re-downloads the app chunk and not React.
+        manualChunks: id =>
+          id.includes("node_modules") ? "vendor" : undefined,
+      },
+    },
   },
   server: {
     host: true,

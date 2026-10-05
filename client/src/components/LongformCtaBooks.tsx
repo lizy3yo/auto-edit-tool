@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Thumb } from "@/components/Thumb";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -256,7 +257,7 @@ export function LongformCtaBooks({
                 className="flex items-center gap-3 rounded-md border border-border bg-secondary/30 p-2.5"
               >
                 {b.coverImageUrl ? (
-                  <img
+                  <Thumb
                     src={b.coverImageUrl}
                     alt=""
                     className="h-14 w-10 shrink-0 rounded border border-border object-cover"
@@ -309,7 +310,7 @@ export function LongformCtaBooks({
                 {/* Cover */}
                 {b.coverImageUrl ? (
                   <div className="relative shrink-0">
-                    <img
+                    <Thumb
                       src={b.coverImageUrl}
                       alt=""
                       className="h-20 rounded border border-border object-cover"
@@ -493,7 +494,7 @@ export function LongformCtaBooks({
                         }`}
                       >
                         {b.coverImageUrl ? (
-                          <img
+                          <Thumb
                             src={b.coverImageUrl}
                             alt=""
                             className="h-12 w-9 shrink-0 rounded border border-border object-cover"

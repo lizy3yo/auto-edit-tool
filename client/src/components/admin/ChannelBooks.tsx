@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Thumb } from "@/components/Thumb";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -94,7 +95,7 @@ function BookPreview({
   return (
     <div className="flex min-w-0 flex-1 items-start gap-3">
       {coverImageUrl ? (
-        <img
+        <Thumb
           src={coverImageUrl}
           alt=""
           className="h-16 w-12 shrink-0 rounded border border-border object-cover"

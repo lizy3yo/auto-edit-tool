@@ -1,5 +1,7 @@
 import { useState, useEffect, useId, useMemo, useRef } from "react";
 import { trpc } from "@/lib/trpc";
+import { useJobPoll } from "@/hooks/useJobPoll";
+import { useRequestId } from "@/lib/requestId";
 import { LongformHostPhotoPicker } from "@/components/LongformHostPhotoPicker";
 import {
   LongformNarrationUpload,
@@ -494,14 +496,17 @@ export default function LongformJobSlot({
 
   const utils = trpc.useUtils();
 
+  const generateRequest = useRequestId();
   const generateMutation = trpc.longformVideo.generate.useMutation({
     onSuccess: ({ jobId: id }) => {
+      generateRequest.settled();
       setDismissedJobId(null);
       setJobId(id);
       onJobIdChange?.(id);
       toast.success(`Video ${slotIndex + 1} started`);
     },
     onError: err => {
+      generateRequest.settled(err);
       if (isCreditError(err.message)) triggerCreditErrorPopup();
       else toast.error(err.message);
     },
@@ -1139,43 +1144,39 @@ export default function LongformJobSlot({
     data: rawJob,
     dataUpdatedAt,
     error: pollError,
-  } = trpc.longformVideo.pollJob.useQuery(
-    { jobId: jobId ?? 0 },
-    {
-      enabled: jobId !== null && jobId !== dismissedJobId,
-      retry: (failureCount, error) => {
-        if (
-          error?.data?.code === "NOT_FOUND" ||
-          error?.message?.includes("Job not found")
-        ) {
-          return false;
-        }
-        return failureCount < 3;
-      },
-      refetchIntervalInBackground: true, // keep polling while the tab is hidden
-      // Poll while running or while scenes are queued for regeneration; stop
-      // once finished (refresh restores it via the persisted id, but a done
-      // job with nothing queued shouldn't be re-fetched every 3s).
-      refetchInterval: q => {
-        if (
-          q.state.error?.data?.code === "NOT_FOUND" ||
-          q.state.error?.message?.includes("Job not found")
-        ) {
-          return false;
-        }
-        return q.state.data?.status === "processing" ||
-          q.state.data?.sceneEdits?.editing ||
-          queuedScenes.length > 0
-          ? 3000
-          : pausedByTakeover
-            ? // Whatever the person fixing it starts has to show up here without a click.
-              5000
-            : Date.now() < jobWatchUntil
-            ? 1000
-            : false;
-      },
-    }
-  );
+  } = useJobPoll(jobId, {
+    enabled: jobId !== null && jobId !== dismissedJobId,
+    retry: (failureCount, error) => {
+      if (
+        error?.data?.code === "NOT_FOUND" ||
+        error?.message?.includes("Job not found")
+      ) {
+        return false;
+      }
+      return failureCount < 3;
+    },
+    // Poll while running or while scenes are queued for regeneration; stop
+    // once finished (refresh restores it via the persisted id, but a done
+    // job with nothing queued shouldn't be re-fetched every 3s).
+    refetchInterval: q => {
+      if (
+        q.state.error?.data?.code === "NOT_FOUND" ||
+        q.state.error?.message?.includes("Job not found")
+      ) {
+        return false;
+      }
+      return q.state.data?.status === "processing" ||
+        q.state.data?.sceneEdits?.editing ||
+        queuedScenes.length > 0
+        ? 3000
+        : pausedByTakeover
+          ? // Whatever the person fixing it starts has to show up here without a click.
+            5000
+          : Date.now() < jobWatchUntil
+          ? 1000
+          : false;
+    },
+  });
 
   // If the server confirms this job does not exist, release the slot immediately
   useEffect(() => {
@@ -1999,7 +2000,7 @@ export default function LongformJobSlot({
         shopUrl: b.shopUrl?.trim() || undefined,
         saveToChannel: b.saveToChannel || undefined,
       }));
-    generateMutation.mutate({
+    const request = {
       script: script.trim(),
       channelKey,
       title: downloadTitle.trim() || undefined,
@@ -2016,6 +2017,11 @@ export default function LongformJobSlot({
       ttsVendor,
       hostMinutes,
       hostMinutesOverride: askHostOverride ? hostOverride : undefined,
+    };
+    // Clicked again after an answer that never arrived: the same id, so it is one video.
+    generateMutation.mutate({
+      ...request,
+      requestId: generateRequest.idFor(request),
     });
   };
 
