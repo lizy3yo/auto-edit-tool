@@ -2531,9 +2531,13 @@ export default function LongformJobSlot({
                         {/* "Even out voice" runs on a job that is otherwise done. */}
                         {phase && job.stage === "done"
                           ? (phase.title ?? "Evening out voice")
-                          : STAGE_LABELS[job.stage] || job.stage}
+                          : job.status === "failed" && job.stage === "assembly"
+                            ? // Nothing is stitching: the build stopped. The stage's own
+                              // label read as a video still at work under a red cross.
+                              "Final video not built"
+                            : STAGE_LABELS[job.stage] || job.stage}
                       </p>
-                      {phase ? (
+                      {phase && job.status !== "failed" ? (
                         <p className="text-xs text-muted-foreground">
                           {phase.label} · {phase.pct}%
                         </p>
@@ -2862,6 +2866,26 @@ export default function LongformJobSlot({
                   Retry Assembly
                 </Button>
               )}
+
+              {/* The build of the final video failed or was stopped, but every scene it needs is
+                rendered — so the cut can still be watched. Without this the card showed a red
+                cross and one button, as if the video itself were gone. */}
+              {job.status === "failed" &&
+                job.stage === "assembly" &&
+                cutPreviewReady && (
+                  <div className="space-y-2">
+                    <p className="text-xs text-muted-foreground">
+                      The scenes are all here. Preview them below, then press
+                      Retry Assembly to build the final video.
+                    </p>
+                    <LongformCutPreview
+                      scenes={scenes}
+                      masterAudioUrl={job.masterAudioUrl}
+                    />
+                    {/* The host fix works on the scenes, so it does not need a built film. */}
+                    {cleanHostClipsButton}
+                  </div>
+                )}
 
               {job.status === "completed" &&
                 !job.finalVideoUrl &&

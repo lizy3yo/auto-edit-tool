@@ -16338,11 +16338,31 @@ async function assembleAndFinalize(
   scenes: StoryboardScene[],
   params: LongformInputParams
 ): Promise<void> {
+  // An assembly nobody has marked as a pass yet is a video's FIRST: the pipeline's own last
+  // stage, or the one "Retry failed scenes" runs once the holes are filled. Every scene is
+  // rendered by now, so there IS something to go back to — the scenes, ready to assemble — and a
+  // Cancel here lands on that (preview, "Assemble final video", "Clean host clips") instead of
+  // a failed video with one button. A rebuild marks itself first and is put back to its own
+  // prior state (`retryJobAssembly`).
+  const first = !_revertiblePasses.has(jobId);
+  if (first)
+    beginRevertiblePass(jobId, {
+      status: "completed",
+      stage: "done",
+      errorMessage: null,
+    });
   setJobPhase(jobId, assemblyPhase({ step: "prepare" }));
   try {
     await assembleAndFinalizeCore(jobId, scenes, params);
+  } catch (err) {
+    if (first && passStopped(jobId)) {
+      await restoreBeforePass(jobId).catch(onFailedStatusWriteError(jobId));
+      return;
+    }
+    throw err;
   } finally {
     setJobPhase(jobId, null);
+    if (first) endRevertiblePass(jobId);
   }
 }
 
