@@ -3713,9 +3713,14 @@ const longformVideoRouter = router({
       // just cleaned, and a scene that did not change is reused from the assembly cache. A video
       // with no film yet is left for the operator's own "Assemble final video".
       const hadFilm = !!job.finalVideoUrl;
-      steadyLongformJobHostClips(input.jobId, { announce: true })
+      // Cancelled partway: the clips already cleaned are kept, and no rebuild follows.
+      let stopped = false;
+      steadyLongformJobHostClips(input.jobId, {
+        announce: true,
+        onStopped: () => (stopped = true),
+      })
         .then(changed =>
-          hadFilm && changed.length
+          hadFilm && changed.length && !stopped
             ? retryJobAssembly(input.jobId, true)
             : undefined
         )
@@ -3932,16 +3937,21 @@ const longformVideoRouter = router({
       return { ok: true };
     }),
 
-  /** Cancel a running job (marks failed; background pipeline drains naturally). */
+  /**
+   * Cancel a running job. A NEW video still being made is marked failed and its tab freed (the
+   * background pipeline drains naturally). A video that already has its scenes and is only
+   * being rebuilt or cleaned is put back as it was instead — `restored: true`, and it stays on
+   * its tab (`stopRevertiblePass`).
+   */
   cancelJob: approvedProcedure
     .input(z.object({ jobId: z.number() }))
     .mutation(async ({ ctx, input }) => {
       const owner = await getLongformVideoJobOwner(input.jobId);
       if (owner) await assertJobAccess(owner, ctx.user, "write");
-      await cancelLongformJob(input.jobId, ctx.user.id, {
+      const outcome = await cancelLongformJob(input.jobId, ctx.user.id, {
         allowAny: canSeeAllJobs(ctx.user.role),
       });
-      return { ok: true };
+      return { ok: true, restored: outcome === "restored" };
     }),
 
   /** Delete a job. */

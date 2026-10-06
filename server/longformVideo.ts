@@ -332,6 +332,7 @@ import {
 } from "./hostLook";
 import {
   assemblePerSceneFilm,
+  AssemblyStoppedError,
   type PhoneLook,
   planMusicSchedule,
   concatAudio,
@@ -553,7 +554,82 @@ const _phaseWrites = new Map<
 >();
 const PHASE_WRITE_MS = 1500;
 
+// ─── A pass on a finished video, which Cancel puts back ───────────────────────────────────────
+//
+// Cancel was built for one case: a NEW video still being made. It marks the row failed and
+// frees the tab, because there is nothing to go back to. But a video whose scenes are all
+// rendered — it has a preview — can be worked on again (a rebuild, "Clean host clips", "Even
+// out voice"), and cancelling THAT took the same road: a finished video was marked failed, taken
+// off its tab and left on a card still reading "Stitching final video", while the rebuild it was
+// supposed to stop ran on in the background and wrote its film anyway.
+//
+// A pass on such a video now notes the state the row was in before it started. Cancel finds the
+// note, puts the row back as it was and tells the pass to stop; the pass checks between scenes
+// and never writes a film after it. No note ⇒ the old cancel, unchanged.
+
+type PassPrior = {
+  status: "processing" | "completed" | "failed";
+  stage: string;
+  errorMessage: string | null;
+};
+const _revertiblePasses = new Map<number, PassPrior>();
+const _stoppedPasses = new Set<number>();
+
+/** Note the row's state before a pass on a video that already has every scene rendered. */
+export function beginRevertiblePass(
+  jobId: number,
+  job: { status: string; stage: string; errorMessage?: string | null }
+): void {
+  _stoppedPasses.delete(jobId);
+  _revertiblePasses.set(jobId, {
+    // A pass never starts on a row that is itself mid-pass, but if one ever did, "processing"
+    // is not a state to put a video back to.
+    status: job.status === "failed" ? "failed" : "completed",
+    stage: job.status === "processing" ? "done" : job.stage,
+    errorMessage: job.errorMessage ?? null,
+  });
+}
+
+/** The pass is over, however it ended. */
+export function endRevertiblePass(jobId: number): void {
+  _revertiblePasses.delete(jobId);
+  _stoppedPasses.delete(jobId);
+}
+
+/** True once the operator has cancelled the pass this job is in — it should stop and write nothing. */
+export const passStopped = (jobId: number): boolean =>
+  _stoppedPasses.has(jobId);
+
+/** Put the row back as it was before the pass. Safe to call twice. */
+async function restoreBeforePass(jobId: number): Promise<void> {
+  const prior = _revertiblePasses.get(jobId);
+  if (!prior) return;
+  setJobPhase(jobId, null);
+  await updateLongformVideoJob(jobId, {
+    status: prior.status,
+    stage: prior.stage as any,
+    errorMessage: prior.errorMessage,
+  });
+}
+
+/**
+ * Cancel the pass a finished video is in: the row goes back to what it was and the pass is told
+ * to stop. False when the job is in no such pass, and the caller cancels the old way.
+ */
+export async function stopRevertiblePass(jobId: number): Promise<boolean> {
+  if (!_revertiblePasses.has(jobId)) return false;
+  _stoppedPasses.add(jobId);
+  await restoreBeforePass(jobId);
+  console.log(
+    `[Longform ${jobId}] pass cancelled by user — the video is put back as it was`
+  );
+  return true;
+}
+
 export function setJobPhase(jobId: number, phase: JobPhase | null): void {
+  // A cancelled pass still reports for a moment before it reaches its next check; none of that
+  // may put a progress line back on a card that has just been returned to normal.
+  if (phase && _stoppedPasses.has(jobId)) return;
   if (phase) _jobPhase.set(jobId, phase);
   else _jobPhase.delete(jobId);
   let st = _phaseWrites.get(jobId);
@@ -11117,7 +11193,11 @@ export async function steadyJobHostClips(
    * step-by-step count while the pass runs and is put back as it was, and each scene that
    * changed is marked for the next assemble.
    */
-  opts: { announce?: boolean } = {}
+  opts: {
+    announce?: boolean;
+    /** Told when the operator cancelled the pass partway — nothing should follow it. */
+    onStopped?: () => void;
+  } = {}
 ): Promise<number[]> {
   const changed: number[] = [];
   await withJobLock(jobId, async () => {
@@ -11140,6 +11220,8 @@ export async function steadyJobHostClips(
           : 100,
       });
     if (opts.announce) {
+      // A Cancel during this pass puts the video back as it is now (`stopRevertiblePass`).
+      beginRevertiblePass(jobId, job);
       await updateLongformVideoJob(jobId, {
         status: "processing",
         errorMessage: null,
@@ -11188,6 +11270,11 @@ export async function steadyJobHostClips(
     };
     for (const s of scenes) {
       if (!s.hostPresent || !(s.clipUrls?.length || s.clipUrl)) continue;
+      // Cancelled: no more clips are taken up. The ones already cleaned are kept.
+      if (opts.announce && passStopped(jobId)) {
+        opts.onStopped?.();
+        break;
+      }
       try {
         // Start from the provider's untouched clip when it was kept (`rawClipUrls`): re-applying a
         // steadier fix to an already-steadied clip cannot undo what the old pass froze.
@@ -11253,6 +11340,7 @@ export async function steadyJobHostClips(
           stage: prior.stage,
           ...(changed.length ? { storyboard: scenes } : {}),
         }).catch(onFailedStatusWriteError(jobId));
+        endRevertiblePass(jobId);
       }
     }
     if (changed.length && !opts.announce)
@@ -16484,10 +16572,13 @@ async function assembleAndFinalizeCore(
     nameCard,
     musicBedUrls,
     onProgress: p => setJobPhase(jobId, assemblyPhase(p)),
+    shouldStop: () => passStopped(jobId),
   });
   console.log(
     `[Longform ${jobId}] assembly rendered in ${sinceStart()}s | ${Math.round(buffer.length / 1e6)}MB | uploading`
   );
+  // Cancelled while the last step ran: no film is uploaded or written to the row.
+  if (passStopped(jobId)) throw new AssemblyStoppedError();
 
   if (skipped.length > 0) {
     const indices = skipped.map(d => d.index).join(", ");
@@ -16521,6 +16612,8 @@ async function assembleAndFinalizeCore(
   if (hadTimingEdits) for (const s of scenes) delete s.timingEdited;
   // A voice evened out since the last cut is in this one now — clear "Assemble to apply".
   const levelApplied = params.narrationLevelled?.applied === false;
+  // Cancelled during the upload: the row keeps the film it had.
+  if (passStopped(jobId)) throw new AssemblyStoppedError();
   if (levelApplied) params.narrationLevelled!.applied = true;
   await updateLongformVideoJob(jobId, {
     status: "completed",
@@ -16564,18 +16657,21 @@ export async function cancelLongformJob(
   jobId: number,
   userId: number,
   opts: { allowAny?: boolean } = {}
-): Promise<void> {
+): Promise<"cancelled" | "restored"> {
   const job = await getLongformVideoJobById(jobId);
   // If the job row doesn't exist anymore, clear any slots pointing to it and return cleanly.
   if (!job) {
     await clearLongformSlotsByJobId(jobId);
-    return;
+    return "cancelled";
   }
   // `allowAny` is the oversight tier (admin / operations manager), which sees every render in the
   // library and so must be able to stop one. Editors stay pinned to their own.
   if (!opts.allowAny && job.userId !== userId) {
     throw new Error("Not authorized");
   }
+  // A pass on a video that already has its scenes (a rebuild, a clean): stop the pass and put
+  // the video back as it was. It stays on its tab and is never marked failed.
+  if (await stopRevertiblePass(jobId)) return "restored";
   // Stop the GPU before the bookkeeping: marking the row failed only stops the pipeline
   // starting more work, it does not stop what is already running and billing.
   await cancelJobProviderRenders(job, "cancelled by user");
@@ -16585,6 +16681,7 @@ export async function cancelLongformJob(
     errorMessage: "Cancelled by user",
     completedAt: new Date(),
   });
+  return "cancelled";
 }
 
 /**
@@ -16705,6 +16802,11 @@ export async function retryJobAssembly(
       return;
     }
 
+    // Every scene already rendered ⇒ the video has a preview to go back to, so a Cancel during
+    // this rebuild returns it to how it is now (`stopRevertiblePass`) instead of failing it.
+    const revertible = describeIncompleteScenes(scenes0) === null;
+    if (revertible) beginRevertiblePass(jobId, job);
+
     await updateLongformVideoJob(jobId, {
       status: "processing",
       stage: "clips",
@@ -16716,15 +16818,24 @@ export async function retryJobAssembly(
       await resumePendingRendersLocked(jobId); // we already hold the lock
       const fresh = await getLongformVideoJobById(jobId);
       const scenes = (fresh?.storyboard as StoryboardScene[]) || [];
+      if (passStopped(jobId)) throw new AssemblyStoppedError();
       await updateLongformVideoJob(jobId, { stage: "assembly" });
       await assembleAndFinalize(jobId, scenes, params);
     } catch (err: any) {
+      // Cancelled: not a failure. The row was put back when Cancel was pressed; put back again
+      // here, because this pass may have written its stage since.
+      if (passStopped(jobId)) {
+        await restoreBeforePass(jobId).catch(onFailedStatusWriteError(jobId));
+        return;
+      }
       await updateLongformVideoJob(jobId, {
         status: "failed",
         errorMessage: err.message || "Assembly failed",
         completedAt: new Date(),
       }).catch(onFailedStatusWriteError(jobId));
       throw err;
+    } finally {
+      if (revertible) endRevertiblePass(jobId);
     }
   });
 }

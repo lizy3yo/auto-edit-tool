@@ -3022,6 +3022,14 @@ export async function assembleContinuousFilm(opts: {
   });
 }
 
+/** An assembly the operator cancelled (`assemblePerSceneFilm`'s `shouldStop`). Not a failure. */
+export class AssemblyStoppedError extends Error {
+  constructor() {
+    super("Assembly stopped");
+    this.name = "AssemblyStoppedError";
+  }
+}
+
 /**
  * Assemble a talking-head video SCENE BY SCENE. For each scene: normalize its clip(s) to
  * uniform silent video, concatenate them, then lay the scene's OWN narration over that
@@ -3118,6 +3126,12 @@ export async function assemblePerSceneFilm(opts: {
    * reporting never fails a film.
    */
   onProgress?: (p: AssemblyStep) => void;
+  /**
+   * Asked before each scene is taken up and before each whole-film step: true stops the assembly
+   * with `AssemblyStoppedError` (the operator cancelled). A scene already encoding finishes
+   * first — killing ffmpeg mid-write would leave a half file in the cache's way.
+   */
+  shouldStop?: () => boolean;
 }): Promise<{
   buffer: Buffer;
   usedScenes: number;
@@ -3128,6 +3142,10 @@ export async function assemblePerSceneFilm(opts: {
   const { scenes, aspectRatio } = opts;
   const { width, height } = dimensionsFor(aspectRatio);
   const report = (p: AssemblyStep): void => {
+    // Every whole-film step reports before it starts, so this is also where a cancel is seen
+    // between them (the per-scene loop checks for itself and returns rather than throws).
+    if (p.step !== "scenes" && opts.shouldStop?.())
+      throw new AssemblyStoppedError();
     try {
       opts.onProgress?.(p);
     } catch {
@@ -3600,6 +3618,9 @@ export async function assemblePerSceneFilm(opts: {
     let cursor = 0;
     const worker = async (): Promise<void> => {
       while (cursor < scenes.length) {
+        // Cancelled: take up no more scenes. Checked here, not inside a scene, so every worker
+        // winds down on a finished file.
+        if (opts.shouldStop?.()) return;
         await processScene(cursor++);
       }
     };
@@ -3613,6 +3634,7 @@ export async function assemblePerSceneFilm(opts: {
         worker
       )
     );
+    if (opts.shouldStop?.()) throw new AssemblyStoppedError();
 
     const sceneFiles = sceneOuts.filter(
       (f): f is { path: string; durationSec: number } => f !== null

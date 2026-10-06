@@ -1184,7 +1184,14 @@ export default function LongformJobSlot({
     });
 
   const cancelMutation = trpc.longformVideo.cancelJob.useMutation({
-    onSuccess: () => {
+    onSuccess: d => {
+      // A rebuild or a clean of a video that already had its scenes: it was put back as it
+      // was, so it stays on this tab with its title — only a new video's cancel frees the tab.
+      if (d.restored) {
+        toast.success("Stopped. The video is as it was.");
+        if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
+        return;
+      }
       setDownloadTitle("");
       onTitleChange?.("");
       setJobId(null);
