@@ -3708,10 +3708,21 @@ const longformVideoRouter = router({
           code: "BAD_REQUEST",
           message: "This video has no host clips to clean",
         });
-      steadyLongformJobHostClips(input.jobId, { announce: true }).catch(err => {
-        console.error(`[Longform ${input.jobId}] cleanHostClips error:`, err);
-      });
-      return { ok: true };
+      // A video that already had its film gets it rebuilt straight after: one click, and the
+      // film shows the cleaned clips. Nothing is rendered by a provider — the clips are the ones
+      // just cleaned, and a scene that did not change is reused from the assembly cache. A video
+      // with no film yet is left for the operator's own "Assemble final video".
+      const hadFilm = !!job.finalVideoUrl;
+      steadyLongformJobHostClips(input.jobId, { announce: true })
+        .then(changed =>
+          hadFilm && changed.length
+            ? retryJobAssembly(input.jobId, true)
+            : undefined
+        )
+        .catch(err => {
+          console.error(`[Longform ${input.jobId}] cleanHostClips error:`, err);
+        });
+      return { ok: true, rebuilds: hadFilm };
     }),
 
   /**

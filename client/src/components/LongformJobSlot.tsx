@@ -1086,9 +1086,11 @@ export default function LongformJobSlot({
   // "Clean host clips": take a provider's corner mark out of the host clips this video already
   // has. Nothing renders again, so there is no confirm; the film needs an assemble afterwards.
   const cleanHostClipsMutation = trpc.longformVideo.cleanHostClips.useMutation({
-    onSuccess: () => {
+    onSuccess: d => {
       toast.success(
-        "Cleaning the host clips. Assemble the video when it finishes to apply it."
+        d.rebuilds
+          ? "Cleaning the host clips. The video is rebuilt with them when it finishes."
+          : "Cleaning the host clips. Assemble the video when it finishes to apply it."
       );
       if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
     },

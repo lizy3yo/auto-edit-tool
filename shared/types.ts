@@ -1029,6 +1029,11 @@ export interface StoryboardScene {
   voiceTakes?: VoiceTake[];
   activeVoiceTake?: number;
   /**
+   * How far "Clean host clips" zoomed this host clip in (`server/hostFraming.ts`) — 1.4 full
+   * frame, 1.2 in a split screen. Kept so a later click does not zoom a zoomed clip again.
+   */
+  hostCleanZoom?: number;
+  /**
    * A cutaway's pictures once it has been regenerated: the original and each regenerate, with
    * `activePictureTake` the one showing (`shared/pictureTakes.ts`). Host beats use `hostTakes`.
    */

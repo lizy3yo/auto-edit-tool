@@ -102,9 +102,12 @@ import {
   getProviderByType,
   hostNameAliases,
   resolveHostName,
-  getChannelHostPhotos,
 } from "./db";
-import { matchPhotoFraming } from "./hostFraming";
+import {
+  hostCleanZoom,
+  hostCleanZoomSplit,
+  zoomHostClip,
+} from "./hostFraming";
 import {
   createLongformVideoJob,
   updateLongformVideoJob,
@@ -11143,37 +11146,35 @@ export async function steadyJobHostClips(
       });
       report();
     }
-    try {
-    // "Clean host clips" also frames each clip like the photo it was made from
+    // "Clean host clips" also zooms a wide host clip in to a close framing
     // (`server/hostFraming.ts`): a video made while the host was lip-synced from a wider redraw
-    // of each photo. Matched against the channel's photos AS UPLOADED — the video's own snapshot
-    // is the redraw. No photo, or none that matches, changes nothing.
-    const photos: Buffer[] = [];
-    if (opts.announce && params.channelKey) {
-      const library = await getChannelHostPhotos(params.channelKey, true).catch(
-        () => []
-      );
-      for (const p of library) {
-        if (!p.imageUrl) continue;
-        try {
-          const r = await fetch(await presignOwnBucketUrl(p.imageUrl), {
-            signal: AbortSignal.timeout(60_000),
-          });
-          if (r.ok) photos.push(Buffer.from(await r.arrayBuffer()));
-        } catch {
-          /* a photo that cannot be read is simply not matched against */
-        }
-      }
-    }
+    // of each photo. A clip whose host is already close is left alone.
+    const framing = { framed: 0, already: 0, failed: 0 };
+    const unframed = new Set<number>();
+    try {
     const steadyUrl = async (url: string, s: StoryboardScene, n: number) => {
       const resp = await fetch(await presignOwnBucketUrl(url), { signal: AbortSignal.timeout(120_000) });
       if (!resp.ok) throw new Error(`download ${resp.status}`);
       const before = Buffer.from(await resp.arrayBuffer());
-      const framed = await matchPhotoFraming(
-        before,
-        photos,
-        `job ${jobId} scene ${s.index}`
-      );
+      // A clip already zoomed by an earlier click is not zoomed again. The pass normally starts
+      // from the provider's untouched clip, which is zoomed afresh; only a clip with no such
+      // original would be zoomed on top of its own zoom, and a split's gentle zoom leaves the
+      // face too small for the "already close" guard to catch that.
+      const zoom = isSplitScene(s) ? hostCleanZoomSplit() : hostCleanZoom();
+      const zoomedBefore = !!s.hostCleanZoom && !s.rawClipUrls?.includes(url);
+      const framed =
+        opts.announce && !zoomedBefore
+          ? await zoomHostClip(
+              before,
+              `job ${jobId} scene ${s.index}`,
+              outcome => {
+                framing[outcome]++;
+                if (outcome === "failed") unframed.add(s.index);
+                if (outcome === "framed") s.hostCleanZoom = zoom;
+              },
+              zoom
+            )
+          : before;
       // A reframed host is a new framing: a split's measured face position is stale.
       if (framed !== before) {
         s.splitAutoFocusX = undefined;
@@ -11199,6 +11200,12 @@ export async function steadyJobHostClips(
           const composited = await compositeSceneSplit(jobId, s, host, s.splitRightUrl, s.splitLayout, params);
           s.clipUrls = composited;
           s.clipUrl = composited[0];
+        } else if (isSplitScene(s)) {
+          // A split screen stored only as its finished composite (no separate host take or
+          // panel): the picture is host AND panel side by side, so cleaning or zooming it as if
+          // it were a host clip would cut into both halves. Left as it is, and said.
+          if (opts.announce) unframed.add(s.index);
+          continue;
         } else {
           const urls = s.clipUrls?.length ? s.clipUrls : [s.clipUrl as string];
           const src = raw?.length === urls.length ? raw : urls;
@@ -11222,6 +11229,24 @@ export async function steadyJobHostClips(
     }
     } finally {
       if (opts.announce) {
+        console.log(
+          `[Longform ${jobId}] clean host clips: ${framing.framed} zoomed, ` +
+            `${framing.already} already close, ${framing.failed} could not be zoomed`
+        );
+        // Said on the card, not only in the log: a clip left wide looks exactly like the pass
+        // having done nothing.
+        if (unframed.size)
+          appendJobWarning(
+            jobId,
+            `Clean host clips could not zoom ${unframed.size} host clip${unframed.size === 1 ? "" : "s"} ` +
+              `(scene${unframed.size === 1 ? "" : "s"} ${Array.from(unframed).sort((a, b) => a - b).join(", ")}). Try it again.`
+          );
+        else if (framing.framed === 0 && framing.already > 0)
+          appendJobWarning(
+            jobId,
+            `Clean host clips did not zoom the host: in all ${framing.already} host clip${framing.already === 1 ? "" : "s"} ` +
+              `the host is already framed close.`
+          );
         setJobPhase(jobId, null);
         await updateLongformVideoJob(jobId, {
           status: prior.status,
