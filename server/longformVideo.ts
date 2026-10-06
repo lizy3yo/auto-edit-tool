@@ -217,8 +217,26 @@ import {
   applyTake,
   currentTake,
   recordRegeneratedTake,
+  refreshActiveTake,
   selectHostTake,
 } from "../shared/hostTakes";
+import {
+  currentPicture,
+  recordRegeneratedPicture,
+  selectPictureTake,
+} from "../shared/pictureTakes";
+import type { PictureTake } from "../shared/types";
+import {
+  currentVoice,
+  recordRedoneVoice,
+  selectVoiceTake,
+  voiceRedoRefusal,
+} from "../shared/voiceTakes";
+import {
+  bodyRangeInRead,
+  contextReadText,
+  voiceContextFor,
+} from "./voiceRedo";
 import { Semaphore } from "./providers/semaphore";
 import {
   SceneEditQueue,
@@ -11684,6 +11702,9 @@ async function rehearseSceneClips(
   );
 }
 
+/** Split scenes whose host half is being rendered again over the SAME right panel. */
+const keepSplitPanel = new WeakSet<StoryboardScene>();
+
 /**
  * Finish a host render: remember the bare host clip, then composite the split-screen right
  * panel when the scene has one (falling back to the full-frame host on any failure).
@@ -11712,6 +11733,26 @@ async function composeHostScene(
   // A fresh host render is a fresh framing — the auto focus measured on the old one is stale.
   scene.splitAutoFocusX = undefined;
   scene.splitFocusSource = undefined;
+
+  // "Redo voice" on a split screen: only the host half is new, so the panel it already has is
+  // composited back on rather than drawn (and paid for) again.
+  if (scene.splitVisual && scene.splitRightUrl && keepSplitPanel.has(scene)) {
+    try {
+      return await compositeSceneSplit(
+        jobId,
+        scene,
+        urls,
+        scene.splitRightUrl,
+        scene.splitLayout,
+        params
+      );
+    } catch (e: any) {
+      console.warn(
+        `[Longform ${jobId}] scene ${scene.index} could not reuse its split panel ` +
+          `(${e.message}) — drawing it again`
+      );
+    }
+  }
 
   if (scene.splitVisual) {
     try {
@@ -12697,7 +12738,9 @@ export async function buildSceneNarration(
    * Optional only because a caller without the scenes array cannot write one — such a call
    * simply keeps the old, orphan-prone behaviour within its own attempts.
    */
-  persist?: () => void
+  persist?: () => void,
+  /** "Redo voice": the take being replaced, whose level the new one is matched to. */
+  replacesUrl?: string
 ): Promise<{ url: string; durationSec: number }> {
   const text = fixClauseOnset(
     (scene.scriptText ?? scene.narration ?? "").trim()
@@ -12733,7 +12776,7 @@ export async function buildSceneNarration(
   const key = `longform/${jobId}/scene-${scene.index}-vo-${nanoid(6)}.mp3`;
   const { url } = await storagePut(
     key,
-    await matchSceneToMasterLevel(jobId, scene.index, buffer),
+    await matchSceneToMasterLevel(jobId, scene.index, buffer, replacesUrl),
     "audio/mpeg"
   );
   return { url, durationSec };
@@ -13060,17 +13103,32 @@ async function masterSpeechLevelDb(masterUrl: string): Promise<number> {
 async function matchSceneToMasterLevel(
   jobId: number,
   sceneIndex: number,
-  buffer: Buffer
+  buffer: Buffer,
+  /**
+   * "Redo voice": the take this one REPLACES. It says the same words and already sat at the
+   * right level between its neighbours, so it is the target — the film's overall level is not:
+   * a film is not equally loud throughout, and a redone scene matched to the average came out
+   * louder than the scene after it. Its own level cannot be measured ⇒ the master, as before.
+   */
+  replacesUrl?: string
 ): Promise<Buffer> {
   try {
-    const job = await getLongformVideoJobById(jobId);
-    const masterUrl = job?.masterAudioUrl;
-    if (!masterUrl) return buffer;
-    const target = await masterSpeechLevelDb(masterUrl);
-    const matched = await matchNarrationLevel(buffer, target);
+    const like = replacesUrl
+      ? await measureSpeechLevelOfUrl(replacesUrl).catch(() => NaN)
+      : NaN;
+    const sameWords = Number.isFinite(like);
+    let target = like;
+    if (!sameWords) {
+      const job = await getLongformVideoJobById(jobId);
+      const masterUrl = job?.masterAudioUrl;
+      if (!masterUrl) return buffer;
+      target = await masterSpeechLevelDb(masterUrl);
+    }
+    const matched = await matchNarrationLevel(buffer, target, { sameWords });
     if (matched.gainDb !== 0) {
       console.log(
-        `[Longform ${jobId}] scene ${sceneIndex} re-voice matched to the master: ` +
+        `[Longform ${jobId}] scene ${sceneIndex} re-voice matched to ` +
+          `${sameWords ? "the take it replaces" : "the master"}: ` +
           `${matched.levelDb.toFixed(1)} → ${target.toFixed(1)} dBFS ` +
           `(${matched.gainDb >= 0 ? "+" : ""}${matched.gainDb} dB)`
       );
@@ -16958,7 +17016,13 @@ async function renderSceneClipInPlace(
    * False when the clip it has now is not a host shot ("Make host" on a b-roll card): keeping it
    * under a host beat would be wrong, so a limit refusal demotes it back to b-roll instead.
    */
-  keepPriorOnLimit = true
+  keepPriorOnLimit = true,
+  /**
+   * "Redo voice" on a host beat: puts the new voice on the scene, in place of the ordinary
+   * voice-only-if-missing step. Run AFTER the take the beat has now is noted (with the voice it
+   * was lip-synced to), so a render that does not come through puts both back together.
+   */
+  revoice?: () => Promise<void>
 ): Promise<void> {
   // A regenerated picture of a key thing is still drawn from its earlier pictures.
   attachMemory(scenes, [scene], params.keyThings);
@@ -16998,7 +17062,9 @@ async function renderSceneClipInPlace(
   // card showed "Failed" and the error from the previous attempt, indistinguishable from a scene
   // nobody was working on. An operator watching a long retry has nothing else to go on.
   persist();
-  await ensureSceneNarration(jobId, scene, params, ttsType, ttsKey, persist);
+  if (revoice) await revoice();
+  else
+    await ensureSceneNarration(jobId, scene, params, ttsType, ttsKey, persist);
   // Re-voicing here yields the raw narration length; hold it to the floor like the main pipeline
   // so a regenerated/retried short scene freezes to SCENE_MIN_HOLD_SEC instead of cutting short.
   applySceneHoldFloor(scene, pacingFor(params));
@@ -17182,6 +17248,8 @@ async function regenerateSplitRight(
     params
   );
   syncSceneClipFields(scene);
+  // A beat with takes (its voice was redone): the one it is showing now has this new panel.
+  refreshActiveTake(scene);
   scene.sceneStatus = "completed";
 }
 
@@ -17296,6 +17364,17 @@ export type SceneEditRequest = (
    * new render. Metadata only and instant: both clips are already on R2.
    */
   | { kind: "take"; sceneIndex: number; take: number }
+  /**
+   * "Redo voice": a fresh read of this scene's words, made in the flow of the lines around it
+   * (`server/voiceRedo.ts`), with the voice it replaces kept as a take. A cutaway keeps its
+   * picture; a HOST beat is lip-synced again to the new voice — a paid render, so the router
+   * allows it to admins and managers only (`voiceRedoRefusal`).
+   */
+  | { kind: "revoice"; sceneIndex: number }
+  /** Switch a redone scene between its voice takes (`shared/voiceTakes.ts`). Metadata only. */
+  | { kind: "voicetake"; sceneIndex: number; take: number }
+  /** Switch a regenerated cutaway between its pictures (`shared/pictureTakes.ts`). Metadata only. */
+  | { kind: "picturetake"; sceneIndex: number; take: number }
 ) & {
   /** Who clicked — recorded on the ledger entry of the render this pays for. */
   by?: SubmitActor;
@@ -17306,6 +17385,8 @@ export type SceneEditRequest = (
 /** Requests that change how a scene ASSEMBLES without rendering anything. */
 const isTimingKind = (req: SceneEditRequest): boolean =>
   req.kind === "take" ||
+  req.kind === "voicetake" ||
+  req.kind === "picturetake" ||
   req.kind === "timing" ||
   req.kind === "cut" ||
   req.kind === "uncut" ||
@@ -17650,6 +17731,9 @@ async function runSceneEditSession(
   });
 }
 
+/** A cutaway's picture as it was when its regenerate was taken up — see `prepareSceneEdit`. */
+const pictureBeforeRegen = new WeakMap<StoryboardScene, PictureTake>();
+
 /**
  * Synchronous part of a request: land the operator's prompt on the scene and mark it in
  * flight. Runs before the persist that announces the batch, so it must not await.
@@ -17660,8 +17744,21 @@ function prepareSceneEdit(ctx: SceneEditContext, req: SceneEditRequest): void {
   // A cut-room edit changes no clip: the scene stays whatever it was (a failed scene stays
   // failed, a completed one completed) — only its timing fields move.
   if (isTimingKind(req)) return;
+  // A voice redo leaves the picture alone, and on a host beat the render marks the scene itself
+  // once the new voice exists — so the scene keeps its status until then.
+  if (req.kind === "revoice") return;
   if (req.kind === "regen") {
     const splitOnly = isSplitScene(scene);
+    // The picture a cutaway has NOW, noted before the typed prompt lands or a batch clears the
+    // clip — it becomes the take the new picture is kept beside (`shared/pictureTakes.ts`).
+    if (!scene.hostPresent) {
+      const before = currentPicture(
+        scene,
+        scene.pictureTakes?.length ? "regenerate" : "original"
+      );
+      if (before) pictureBeforeRegen.set(scene, before);
+      else pictureBeforeRegen.delete(scene);
+    }
     // A split scene regenerates its RIGHT panel only — its editable prompt is `splitVisual`.
     // On a host scene visualPrompt reaches no model (lip-sync has its own prompt), so it is
     // effectively verbatim metadata either way.
@@ -17719,6 +17816,19 @@ function sceneEditLane(
 ): { sem: Semaphore; deadlineMs: number } {
   if (isTimingKind(req) || (req.kind === "split" && req.edit.mode !== "prompt"))
     return { sem: ctx.lanes.light, deadlineMs: SCENE_EDIT_LIGHT_DEADLINE_MS };
+  // A cutaway's voice redo is a provider read and a cut — no render lane. A host beat's falls
+  // through to the host lane below: it is lip-synced again.
+  if (req.kind === "revoice" && !scene.hostPresent)
+    return { sem: ctx.lanes.light, deadlineMs: SCENE_EDIT_LIGHT_DEADLINE_MS };
+  // A split screen's voice redo renders its HOST half again — not the panel-only path below.
+  if (req.kind === "revoice")
+    return {
+      sem: ctx.lanes.host,
+      deadlineMs: Math.max(
+        SCENE_DEADLINE_HOST_MS,
+        SCENE_DEADLINE_HOST_RUNPOD_MS
+      ),
+    };
   if (req.kind === "tohost")
     return {
       sem: ctx.lanes.host,
@@ -17796,6 +17906,15 @@ async function runSceneEdit(
           runUnmergeEdit(ctx, s);
         } else if (req.kind === "take") {
           runTakeEdit(ctx, s, req.take);
+        } else if (req.kind === "voicetake") {
+          runVoiceTakeEdit(ctx, s, req.take);
+        } else if (req.kind === "picturetake") {
+          runPictureTakeEdit(ctx, s, req.take);
+        } else if (req.kind === "revoice") {
+          s.nextSubmitBy = req.by;
+          s.nextSubmitOverride = req.force || undefined;
+          if (s.hostPresent) resumeHostLane(jobId);
+          await runRevoiceEdit(ctx, s, req.by);
         } else {
           // A person clicked for this render: name them on the ledger, carry a manager's
           // confirm to the render gate, and lift a host-lane pause — the click is how the
@@ -17813,7 +17932,9 @@ async function runSceneEdit(
           s.regenerated = true;
         }
       } catch (e: any) {
-        if (isTimingKind(req)) {
+        // A voice redo that did not come through leaves the scene exactly as it was (its old
+        // voice and its picture), so like a refused cut-room edit it is not a failed scene.
+        if (isTimingKind(req) || req.kind === "revoice") {
           // Nothing was rendered and the clip is untouched — the scene is not "failed"; the
           // edit was refused. Surface the reason on the job row (settle message) and move on.
           const msg = describeError(e);
@@ -17871,6 +17992,277 @@ function runTakeEdit(
 }
 
 /**
+ * A voice-take switch on a cutaway: put the chosen voice on the scene. Refused (not failed) when
+ * the scene has no such take, or is a host beat — whose voice follows its host take.
+ */
+function runVoiceTakeEdit(
+  ctx: SceneEditContext,
+  scene: StoryboardScene,
+  take: number
+): void {
+  const r = selectVoiceTake(scene, take);
+  if (!r.ok) throw new Error(r.reason);
+  if (!r.changed) return;
+  // The take's own length decides how long the scene is held, and a redone take has no slice of
+  // the master for the cut room's snapshot to describe.
+  applySceneHoldFloor(scene, pacingFor(ctx.params));
+  forgetTimingSnapshot(scene);
+  // The finished film still has the other voice in it until it is re-stitched.
+  scene.timingEdited = true;
+  console.log(
+    `[Longform ${ctx.jobId}] scene ${scene.index} switched to voice take ${take + 1}`
+  );
+}
+
+/**
+ * A picture switch on a cutaway: put the chosen picture on the scene. Refused (not failed) when
+ * the scene has no such picture, or has become a host beat.
+ */
+function runPictureTakeEdit(
+  ctx: SceneEditContext,
+  scene: StoryboardScene,
+  take: number
+): void {
+  const r = selectPictureTake(scene, take);
+  if (!r.ok) throw new Error(r.reason);
+  if (!r.changed) return;
+  // The finished film still has the other picture in it until it is re-stitched.
+  scene.timingEdited = true;
+  console.log(
+    `[Longform ${ctx.jobId}] scene ${scene.index} switched to picture ${take + 1}`
+  );
+}
+
+/**
+ * The new voice for one scene: its words read between the line before and the line after
+ * (`server/voiceRedo.ts`), cut back to the scene's own words on real pauses and matched to the
+ * film's level. Same voice, model, speed and pace as the film (`buildSceneNarration`'s settings).
+ *
+ * Falls back to voicing the scene on its own whenever the scene's words cannot be placed in the
+ * context read with confidence — a scene at both ends of a one-scene film, mock mode, a
+ * transcription outage, a cut no real read of those words could have. A provider failure is not
+ * a reason to fall back: voicing the same words again alone would fail the same way.
+ */
+async function redoSceneVoiceAudio(
+  jobId: number,
+  scene: StoryboardScene,
+  scenes: StoryboardScene[],
+  params: LongformInputParams,
+  ttsType: string,
+  ttsKey: string,
+  persist: () => void
+): Promise<{ url: string; durationSec: number }> {
+  const context = voiceContextFor(scenes, scene);
+  const text = fixClauseOnset(contextReadText(context));
+  if (
+    (context.lead || context.tail) &&
+    !(await isMockMode()) &&
+    splitScriptForNarration(text).length === 1
+  ) {
+    const readUrl = await generateSceneVoiceover(
+      ttsType,
+      ttsKey,
+      text,
+      voiceIdForVendor(params),
+      params.ttsModel,
+      deliverySpeedFor(params.ttsSpeed, scene.deliveryPace),
+      params.ttsVolume,
+      TTS_STABILITY,
+      TTS_STYLE,
+      TTS_SIMILARITY,
+      sceneTTSResumeSlot(scene, 0, persist)
+    );
+    try {
+      const mono = await extractMonoAudio(readUrl);
+      const [transcript, silences, shortSilences] = await Promise.all([
+        transcribeWordsFromBuffer(mono),
+        detectSilencesFromBuffer(mono),
+        detectSilencesFromBuffer(mono, 0.04),
+      ]);
+      const range =
+        "error" in transcript
+          ? null
+          : bodyRangeInRead(
+              context,
+              transcript.words,
+              transcript.duration,
+              silences,
+              shortSilences
+            );
+      if (range) {
+        const lenSec = range.endSec - range.startSec;
+        const [cut] = await sliceAudioSegments(readUrl, [
+          { startSec: range.startSec, lenSec },
+        ]);
+        const key = `longform/${jobId}/scene-${scene.index}-vo-${nanoid(6)}.mp3`;
+        const { url } = await storagePut(
+          key,
+          await matchSceneToMasterLevel(
+            jobId,
+            scene.index,
+            cut,
+            scene.audioUrl
+          ),
+          "audio/mpeg"
+        );
+        console.log(
+          `[Longform ${jobId}] scene ${scene.index} voice redone in context — kept ` +
+            `${range.startSec.toFixed(2)}s–${range.endSec.toFixed(2)}s of the read`
+        );
+        return { url, durationSec: roundMs(lenSec) };
+      }
+      console.warn(
+        `[Longform ${jobId}] scene ${scene.index}: its words could not be placed in the ` +
+          `context read — voicing the scene on its own`
+      );
+    } catch (err) {
+      console.warn(
+        `[Longform ${jobId}] scene ${scene.index}: cutting the context read failed ` +
+          `(${describeError(err)}) — voicing the scene on its own`
+      );
+    }
+  }
+  return buildSceneNarration(
+    jobId,
+    ttsType,
+    ttsKey,
+    scene,
+    params,
+    persist,
+    scene.audioUrl
+  );
+}
+
+/**
+ * A "Redo voice" request's body.
+ *
+ * A CUTAWAY keeps its picture: the new voice replaces the old one, which is kept as a take.
+ * A HOST beat was lip-synced to the old voice, so it is rendered again to the new one through
+ * the ordinary regenerate (`renderSceneClipInPlace`) — the beat's regenerate limit, the video's
+ * host limit and the ledger all apply, and a render that does not come through puts the old
+ * take AND its voice back.
+ *
+ * Throws on any failure with the scene left exactly as it was; the session reports it without
+ * marking the scene failed.
+ */
+async function runRevoiceEdit(
+  ctx: SceneEditContext,
+  scene: StoryboardScene,
+  by?: SubmitActor
+): Promise<void> {
+  const { jobId, scenes, params } = ctx;
+  // The role half of the rule is the router's; these are the parts true for everyone.
+  const refusal = voiceRedoRefusal(
+    scene,
+    { suppliedNarration: !!params.manualNarrationUrl },
+    "admin"
+  );
+  if (refusal) throw new Error(refusal);
+  const before = currentVoice(scene, "original");
+  if (!before)
+    throw new Error(
+      `Scene ${scene.index} has no voice yet — use "Retry failed scenes" first`
+    );
+  const lane = await ctx.renderLane();
+  const persist = () => schedulePersist(jobId, { storyboard: scenes });
+  const putNewVoiceOn = async () => {
+    const fresh = await redoSceneVoiceAudio(
+      jobId,
+      scene,
+      scenes,
+      params,
+      lane.ttsType,
+      lane.ttsKey,
+      persist
+    );
+    scene.audioUrl = fresh.url;
+    scene.audioDuration = fresh.durationSec;
+    // A fresh read is not a slice of the master — see `ensureSceneNarration`.
+    scene.narrationStartSec = undefined;
+    scene.narrationEndSec = undefined;
+    forgetTimingSnapshot(scene);
+  };
+
+  if (!scene.hostPresent) {
+    await putNewVoiceOn();
+    applySceneHoldFloor(scene, pacingFor(params));
+    if (scene.qrHero) extendQrHeroWindow(scenes);
+    recordRedoneVoice(scene, before, by);
+    ctx.failures.delete(scene.index);
+    return;
+  }
+
+  const prior = {
+    status: scene.sceneStatus,
+    error: scene.error,
+    clips: (scene.clipUrls ?? []).join("|"),
+    hadVoiceTakes: !!scene.voiceTakes?.length,
+  };
+  // From here a host take notes the voice it was lip-synced to (`currentTake`), which is what
+  // lets the regenerate put the old shot and the old voice back together.
+  if (!prior.hadVoiceTakes) {
+    scene.voiceTakes = [before];
+    scene.activeVoiceTake = 0;
+  }
+  const forgetNewTakes = () => {
+    if (prior.hadVoiceTakes) return;
+    scene.voiceTakes = undefined;
+    scene.activeVoiceTake = undefined;
+  };
+  // A SPLIT screen: only its host half is rendered again; the panel it has is composited back
+  // on (`composeHostScene`). The render records takes for a full-frame beat only, so a split's
+  // old version is noted here and kept below.
+  const split = isSplitScene(scene);
+  const splitBefore = split
+    ? currentTake(scene, scene.hostTakes?.length ? "regenerate" : "original")
+    : null;
+  if (split) keepSplitPanel.add(scene);
+  try {
+    await renderSceneClipInPlace(
+      jobId,
+      scene,
+      scenes,
+      params,
+      lane.adapter,
+      lane.ttsType,
+      lane.ttsKey,
+      lane.lipsync,
+      lane.instruction,
+      "regenerate",
+      true,
+      putNewVoiceOn
+    );
+  } catch (err) {
+    // Nothing was rendered: the voice may or may not have been replaced before it failed.
+    if (scene.audioUrl !== before.audioUrl) {
+      scene.audioUrl = before.audioUrl;
+      scene.audioDuration = before.audioDuration;
+      scene.narrationStartSec = before.narrationStartSec;
+      scene.narrationEndSec = before.narrationEndSec;
+    }
+    scene.sceneStatus = prior.status;
+    scene.error = prior.error;
+    forgetNewTakes();
+    throw err;
+  } finally {
+    keepSplitPanel.delete(scene);
+  }
+  const rendering = scene.sceneStatus === "rendering";
+  const landed = (scene.clipUrls ?? []).join("|") !== prior.clips;
+  if (!landed && !rendering) {
+    // The regenerate kept the shot the beat had (and, with it, its voice) and warned why.
+    forgetNewTakes();
+    throw new Error(
+      "the host clip was not rendered again, so the scene kept the voice it had"
+    );
+  }
+  recordRedoneVoice(scene, before, by);
+  if (split && landed) recordRegeneratedTake(scene, splitBefore, by);
+  scene.regenerated = true;
+  ctx.failures.delete(scene.index);
+}
+
+/**
  * After a task settles (any way): fold a failed scene into the settle message and persist the
  * live storyboard. Runs in the session loop, not in the task body, so it is shared by every
  * task runner — including the test seam.
@@ -17884,6 +18276,10 @@ function recordSceneEditOutcome(
   if (isTimingKind(req)) {
     // Metadata only: no clip changed (so the existing cut is NOT invalidated — the operator
     // re-stitches when ready, see `timingEdited`), and any refusal was already recorded.
+  } else if (req.kind === "revoice") {
+    // A redo that failed recorded why and left the scene as it was; one that landed changed
+    // what the film says, so the finished cut is stale.
+    if (scene && !ctx.failures.has(scene.index)) ctx.changed = true;
   } else if (scene?.sceneStatus === "failed") {
     ctx.failures.set(
       scene.index,
@@ -18274,6 +18670,8 @@ async function runRegenEdit(
     return;
   }
   const lane = await ctx.renderLane();
+  const pictureBefore = pictureBeforeRegen.get(scene) ?? null;
+  pictureBeforeRegen.delete(scene);
   await renderSceneClipInPlace(
     jobId,
     scene,
@@ -18285,6 +18683,10 @@ async function runRegenEdit(
     lane.lipsync,
     lane.instruction
   );
+  // A cutaway keeps the picture it had beside the new one. (A host beat's takes are recorded by
+  // the render itself; a beat just made b-roll had a host clip, which is not a cutaway picture.)
+  if (!scene.hostPresent && pictureBefore && scene.sceneStatus === "completed")
+    recordRegeneratedPicture(scene, pictureBefore, req.by);
 }
 
 /**
@@ -18414,6 +18816,47 @@ export async function regenerateScene(
       `[Longform ${jobId}] Scene ${sceneIndex} is rendering — regenerate request ignored`
     );
   return accept;
+}
+
+/**
+ * "Redo voice" on one scene. Queued on the edit session like a regenerate; reports the same
+ * `queued` / `superseded` / `ignored`. `force` is an admin's or manager's confirm of the host
+ * render a host beat needs.
+ */
+export async function redoSceneVoice(
+  jobId: number,
+  sceneIndex: number,
+  click?: { by?: SubmitActor; force?: boolean }
+): Promise<EditAccept> {
+  const accept = enqueueSceneEdit(jobId, {
+    kind: "revoice",
+    sceneIndex,
+    by: click?.by,
+    force: click?.force,
+  });
+  if (accept === "ignored")
+    console.warn(
+      `[Longform ${jobId}] Scene ${sceneIndex} is rendering — redo-voice request ignored`
+    );
+  return accept;
+}
+
+/** Switch a regenerated cutaway to another of its pictures — instant, nothing is drawn. */
+export async function selectScenePictureTake(
+  jobId: number,
+  sceneIndex: number,
+  take: number
+): Promise<EditAccept> {
+  return enqueueSceneEdit(jobId, { kind: "picturetake", sceneIndex, take });
+}
+
+/** Switch a redone cutaway to another of its voice takes — instant, nothing is voiced. */
+export async function selectSceneVoiceTake(
+  jobId: number,
+  sceneIndex: number,
+  take: number
+): Promise<EditAccept> {
+  return enqueueSceneEdit(jobId, { kind: "voicetake", sceneIndex, take });
 }
 
 /**

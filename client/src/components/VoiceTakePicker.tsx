@@ -2,18 +2,16 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Check } from "lucide-react";
-import { activeTakeIndex, hostTakeLabel } from "@shared/hostTakes";
+import { activeVoiceTakeIndex, voiceTakeLabel } from "@shared/voiceTakes";
 import type { StoryboardScene } from "@shared/types";
-import { LongformScenePreview } from "./LongformScenePreview";
 
 /**
- * The old and the new version of a regenerated host beat, side by side (`shared/hostTakes.ts`).
- * A host regenerate is one paid render per beat, so it never throws away the shot it replaced:
- * the operator plays both against the line and keeps either. Switching is free — the clips are
- * already rendered — and shows in the cut preview at once; the finished film picks it up on the
- * next Reassemble.
+ * The old and the new voice of a scene after "Redo voice" (`shared/voiceTakes.ts`). A redo is a
+ * fresh provider read and can come back worse than the one it replaces, so the operator plays
+ * both and keeps either. Switching is free — both files already exist — and the finished film
+ * picks it up on the next Reassemble. Cutaways only: a host scene's voice follows its host take.
  */
-export function HostTakePicker({
+export function VoiceTakePicker({
   scene,
   disabled,
   onSelect,
@@ -22,40 +20,28 @@ export function HostTakePicker({
   disabled?: boolean;
   onSelect: (take: number) => void;
 }) {
-  const takes = scene.hostTakes ?? [];
-  if (takes.length < 2) return null;
-  const active = activeTakeIndex(scene);
-  const durationSec =
-    scene.narrationStartSec != null && scene.narrationEndSec != null
-      ? scene.narrationEndSec - scene.narrationStartSec
-      : undefined;
+  const takes = scene.voiceTakes ?? [];
+  if (scene.hostPresent || takes.length < 2) return null;
+  const active = activeVoiceTakeIndex(scene);
   return (
     <div className="space-y-1.5">
       <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">
-        Takes — pick the one the film uses
+        Voice takes — pick the one the film uses
       </Label>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+      <div className="space-y-2">
         {takes.map((take, i) => {
           const inUse = i === active;
           return (
             <div
-              key={`${i}-${take.clipUrls[0]}`}
+              key={`${i}-${take.audioUrl}`}
               className={
                 "space-y-1.5 rounded-md border p-2 " +
                 (inUse ? "border-primary/60 bg-primary/5" : "border-border")
               }
             >
-              <LongformScenePreview
-                clipUrl={take.clipUrl ?? take.clipUrls[0]}
-                // A beat whose voice was redone: each take plays the voice it was lip-synced to.
-                audioUrl={take.voice?.audioUrl ?? scene.audioUrl}
-                startSec={scene.clipInSec}
-                durationSec={durationSec}
-                className="w-full rounded bg-black max-h-[110px]"
-              />
               <div className="flex items-center justify-between gap-2">
                 <span className="text-xs text-muted-foreground">
-                  {hostTakeLabel(take, i)}
+                  {voiceTakeLabel(take, i)}
                 </span>
                 {inUse ? (
                   <Badge
@@ -72,16 +58,22 @@ export function HostTakePicker({
                     disabled={disabled}
                     onClick={() => onSelect(i)}
                   >
-                    Use this take
+                    Use this voice
                   </Button>
                 )}
               </div>
+              <audio
+                controls
+                preload="none"
+                src={take.audioUrl}
+                className="h-8 w-full"
+              />
             </div>
           );
         })}
       </div>
       <p className="text-[11px] text-muted-foreground">
-        Switching is free. Reassemble to put the chosen take in the finished
+        Switching is free. Reassemble to put the chosen voice in the finished
         film.
       </p>
     </div>

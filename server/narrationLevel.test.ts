@@ -5,6 +5,8 @@ import {
   parseLevelFrames,
   speechLevelDb,
   matchGainDb,
+  sameWordsGainDb,
+  LEVEL_SAME_WORDS_MAX_DB,
   buildLevelApplyArgs,
   buildLevelMeasureArgs,
   buildMatchGainArgs,
@@ -197,6 +199,26 @@ describe("parseLevelFrames + speechLevelDb", () => {
     // Energy mean of -24 and -30 is -26.0, not the -27 a dB mean would give.
     expect(speechLevelDb(frames)).toBeCloseTo(-26.0, 1);
     expect(speechLevelDb([])).toBeNaN();
+  });
+});
+
+describe("sameWordsGainDb — a redone take against the take it replaces", () => {
+  it("corrects a take that came back far louder, where the general matcher gives up", () => {
+    // A provider take 11 dB hotter than the scene it replaces: past the general sanity limit, so
+    // it used to be left as it was — and played well above the scene after it.
+    expect(matchGainDb(-15, -26)).toBe(0);
+    expect(sameWordsGainDb(-15, -26)).toBe(-11);
+  });
+
+  it("holds an extreme distance at the limit rather than dropping the correction", () => {
+    expect(sameWordsGainDb(-5, -30)).toBe(-LEVEL_SAME_WORDS_MAX_DB);
+    expect(sameWordsGainDb(-50, -26)).toBe(LEVEL_SAME_WORDS_MAX_DB);
+  });
+
+  it("leaves a take already at the right level alone, and an unmeasurable one too", () => {
+    expect(sameWordsGainDb(-26.3, -26)).toBe(0);
+    expect(sameWordsGainDb(NaN, -26)).toBe(0);
+    expect(sameWordsGainDb(-26, NaN)).toBe(0);
   });
 });
 

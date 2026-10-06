@@ -138,7 +138,17 @@ export function planCutBeats(
    * number, on per-scene tracks every scene starts at the head of its own file.
    */
   let usable: { scene: StoryboardScene; track: string; trackAtSec: number }[];
-  if (masterAudioUrl && sliced.length) {
+  const isSliced = (s: StoryboardScene) => sliced.includes(s);
+  // A scene with a clip and a voice of its own that is NOT a slice of the master: its voice was
+  // redone ("Redo voice", or a repair). One such scene takes the whole film off the master track
+  // at assembly (`masterOverlayEligible`), so the preview follows — laid out on the master it
+  // had no place on the timeline and was dropped, and the film previewed without the very scene
+  // that had just been changed.
+  const offMaster = scenes.some(
+    s =>
+      hasClip(s) && !isSliced(s) && !!s.audioUrl && (s.audioDuration ?? 0) > 0
+  );
+  if (masterAudioUrl && sliced.length && !offMaster) {
     usable = sliced.map(scene => ({
       scene,
       track: masterAudioUrl,
@@ -148,13 +158,19 @@ export function planCutBeats(
     // Per-scene tracks: synthesise the ranges by laying the slices end to end — the same order
     // and the same lengths assembly's concat path produces — so everything below this point is
     // the one code path, unaware of which shape it was handed.
+    // A scene still on its slice of the master plays that slice's own file, which is exactly as
+    // long as its range; a redone one plays its own take.
+    const lengthOf = (s: StoryboardScene) =>
+      masterAudioUrl && isSliced(s)
+        ? (s.narrationEndSec as number) - (s.narrationStartSec as number)
+        : (s.audioDuration ?? 0);
     let at = 0;
     usable = scenes
-      .filter(s => hasClip(s) && !!s.audioUrl && (s.audioDuration ?? 0) > 0)
+      .filter(s => hasClip(s) && !!s.audioUrl && lengthOf(s) > 0)
       .sort((a, b) => a.index - b.index)
       .map(s => {
         const start = at;
-        at += s.audioDuration as number;
+        at += lengthOf(s);
         return {
           scene: { ...s, narrationStartSec: start, narrationEndSec: at },
           track: s.audioUrl as string,
@@ -659,6 +675,20 @@ export function LongformCutPreview({
         if (!a.paused) a.pause();
         if (!holdingRef.current) setHoldingState(true);
         now += dt; // only a hold runs on the wall clock
+      } else if (
+        a.ended ||
+        (Number.isFinite(a.duration) && a.currentTime >= a.duration - 0.03)
+      ) {
+        // The track ran out before the beat did. A scene's own voice file is never exactly as
+        // long as the plan says — an mp3 is cut on whole frames, and the browser's reading of
+        // its length differs again — so on a film played scene by scene most beats end a few
+        // hundredths early. The narration is the clock, so with nothing left to play the clock
+        // stopped just short of the cut and the film sat on that scene; worse, calling `play()`
+        // on an ended element restarts it, so the scene's line looped. Run the last stretch on
+        // the wall clock instead, up to the cut, where the next beat's track takes over.
+        if (holdingRef.current) setHoldingState(false);
+        const ceil = beat.tailHoldSec > 0 ? bodyEnd : beat.endSec;
+        now = Math.min(now + dt, ceil);
       } else {
         if (holdingRef.current) setHoldingState(false);
         if (a.paused) a.play().catch(() => undefined);
@@ -808,6 +838,9 @@ export function LongformCutPreview({
       standby
         .play()
         .then(() => {
+          // Slow to load, and the cut has already handed the narration to it: it is the live
+          // track now, and pausing and rewinding it here would restart the scene's line.
+          if (standby === liveAudio()) return;
           standby.pause();
           applyParkedSeek(standby);
         })

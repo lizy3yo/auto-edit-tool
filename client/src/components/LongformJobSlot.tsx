@@ -87,8 +87,9 @@ import {
   isLimitedHostScene,
 } from "@shared/hostRegenLimit";
 import { HOST_SPEND_EPSILON_SEC } from "@shared/hostSpend";
-import { activeTakeIndex } from "@shared/hostTakes";
-import { HostTakePicker } from "@/components/HostTakePicker";
+import { SceneVersionsDialog } from "@/components/SceneVersionsDialog";
+import { sceneVersionCount } from "@shared/pictureTakes";
+import { voiceRedoRefusal } from "@shared/voiceTakes";
 import {
   scanCtaBlocks,
   previewBookAssignments,
@@ -110,6 +111,7 @@ import {
   XCircle,
   X,
   RefreshCw,
+  Mic,
   Film,
   Image as ImageIcon,
   Images,
@@ -643,6 +645,83 @@ export default function LongformJobSlot({
     if (!jobId) return;
     selectTakeMutation.mutate({ jobId, sceneIndex, take });
   };
+
+  // "Redo voice": a fresh read of one scene's words (`shared/voiceTakes.ts`). Confirmed first —
+  // the new take can sit a little apart from the scenes around it, and on a host scene it also
+  // pays for a new host render.
+  const [redoVoiceScene, setRedoVoiceScene] = useState<number | null>(null);
+  const redoVoiceMutation = trpc.longformVideo.redoSceneVoice.useMutation({
+    onSuccess: (d, vars) => {
+      if (d.accepted === "overLimit") {
+        unqueueScene(vars.sceneIndex);
+        limitToast(
+          vars.sceneIndex,
+          "spentSec" in d ? d.spentSec : undefined,
+          "limitSec" in d ? d.limitSec : undefined
+        );
+      } else if (d.accepted === "locked") {
+        unqueueScene(vars.sceneIndex);
+        toast.info(
+          `Scene ${vars.sceneIndex} has used its host regenerate, so its voice can't be redone`
+        );
+      } else if (d.accepted === "ignored") {
+        unqueueScene(vars.sceneIndex);
+        toast.info(
+          `Scene ${vars.sceneIndex} is already rendering — wait for it, then try again`
+        );
+      } else {
+        toast.success(`Scene ${vars.sceneIndex}: recording a new voice take...`);
+      }
+      if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
+    },
+    onError: (err, vars) => {
+      toast.error(err.message);
+      unqueueScene(vars.sceneIndex);
+    },
+  });
+  const redoVoice = (sceneIndex: number, host: boolean) => {
+    if (!jobId) return;
+    armNotifications();
+    queuePhase.current.set(sceneIndex, "queued");
+    queuedAt.current.set(sceneIndex, Date.now());
+    setQueuedScenes(prev =>
+      prev.includes(sceneIndex) ? prev : [...prev, sceneIndex]
+    );
+    // The warning box named the host render's cost, which is the confirm `force` stands for.
+    redoVoiceMutation.mutate({ jobId, sceneIndex, force: host || undefined });
+  };
+  // Versions: every take a scene has, in one box opened from its card (its scene index).
+  const [versionsScene, setVersionsScene] = useState<number | null>(null);
+  const selectPictureTakeMutation =
+    trpc.longformVideo.selectScenePictureTake.useMutation({
+      onSuccess: (d, vars) => {
+        if (d.accepted === "ignored")
+          toast.info(
+            `Scene ${vars.sceneIndex} is rendering — switch pictures when it finishes`
+          );
+        else
+          toast.success(
+            `Scene ${vars.sceneIndex}: using picture ${vars.take + 1} — Reassemble to put it in the film`
+          );
+        if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
+      },
+      onError: err => toast.error(err.message),
+    });
+  const selectVoiceTakeMutation =
+    trpc.longformVideo.selectSceneVoiceTake.useMutation({
+      onSuccess: (d, vars) => {
+        if (d.accepted === "ignored")
+          toast.info(
+            `Scene ${vars.sceneIndex} is rendering — switch voices when it finishes`
+          );
+        else
+          toast.success(
+            `Scene ${vars.sceneIndex}: using voice ${vars.take + 1} — Reassemble to put it in the film`
+          );
+        if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
+      },
+      onError: err => toast.error(err.message),
+    });
 
   // "Make host" (admins only): a b-roll scene becomes a HeyGen host beat, full-frame or split.
   // Confirmed first with a cost estimate — it is a paid render the film did not have.
@@ -3508,17 +3587,6 @@ export default function LongformJobSlot({
                                     : "Waiting for HeyGen"}
                               </Badge>
                             )}
-                            {scene.hostPresent &&
-                              (scene.hostTakes?.length ?? 0) > 1 && (
-                                <Badge
-                                  variant="outline"
-                                  className="text-[10px] py-0 text-info border-info/40"
-                                  title="This host beat was regenerated — open it to compare the takes and pick one"
-                                >
-                                  Take {(activeTakeIndex(scene) ?? 0) + 1} of{" "}
-                                  {scene.hostTakes!.length}
-                                </Badge>
-                              )}
                             {scene.clipShortSec != null &&
                               scene.clipShortSec > 0 && (
                                 <Badge
@@ -3596,18 +3664,6 @@ export default function LongformJobSlot({
                                         : undefined
                                     }
                                     className="w-full rounded bg-black max-h-[120px]"
-                                  />
-                                )}
-                                {scene.hostPresent && (
-                                  <HostTakePicker
-                                    scene={scene}
-                                    disabled={
-                                      isSceneQueued ||
-                                      selectTakeMutation.isPending
-                                    }
-                                    onSelect={take =>
-                                      selectTake(scene.index, take)
-                                    }
                                   />
                                 )}
                                 <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">
@@ -4145,6 +4201,49 @@ export default function LongformJobSlot({
                                   <Pencil className="mr-1.5 h-3 w-3" />
                                   Edit
                                 </Button>
+                                {/* Hidden, not disabled, where it is not allowed: a host
+                                  scene for an editor, a split screen, a supplied narration. */}
+                                {!!role &&
+                                  !!scene.audioUrl &&
+                                  !voiceRedoRefusal(
+                                    scene,
+                                    {
+                                      suppliedNarration:
+                                        job?.picks?.voice === "file",
+                                    },
+                                    role
+                                  ) && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-7 text-xs"
+                                      disabled={isSceneQueued}
+                                      title="Record this scene's voice again"
+                                      onClick={e => {
+                                        e.stopPropagation();
+                                        setRedoVoiceScene(scene.index);
+                                      }}
+                                    >
+                                      <Mic className="mr-1.5 h-3 w-3" />
+                                      Redo voice
+                                    </Button>
+                                  )}
+                                {/* Only when there is something to switch between. */}
+                                {sceneVersionCount(scene) > 0 && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 text-xs"
+                                    title="Compare this scene's versions and pick the one the film uses"
+                                    onClick={e => {
+                                      e.stopPropagation();
+                                      setVersionsScene(scene.index);
+                                    }}
+                                  >
+                                    <History className="mr-1.5 h-3 w-3" />
+                                    Versions · {sceneVersionCount(scene)}
+                                  </Button>
+                                )}
                                 {scene.hostPresent && (
                                   <Button
                                     variant="ghost"
@@ -4231,6 +4330,97 @@ export default function LongformJobSlot({
               Redo host clips
             </AlertDialogAction>
           </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Versions — the live scene, so "In use" follows a switch as soon as the poll lands. */}
+      <SceneVersionsDialog
+        scene={
+          versionsScene == null
+            ? null
+            : (scenes.find(s => s.index === versionsScene) ?? null)
+        }
+        disabled={
+          (versionsScene != null && queuedScenes.includes(versionsScene)) ||
+          selectTakeMutation.isPending ||
+          selectVoiceTakeMutation.isPending ||
+          selectPictureTakeMutation.isPending
+        }
+        onOpenChange={open => {
+          if (!open) setVersionsScene(null);
+        }}
+        onSelectHostTake={take =>
+          versionsScene != null && selectTake(versionsScene, take)
+        }
+        onSelectPicture={take =>
+          jobId != null &&
+          versionsScene != null &&
+          selectPictureTakeMutation.mutate({
+            jobId,
+            sceneIndex: versionsScene,
+            take,
+          })
+        }
+        onSelectVoice={take =>
+          jobId != null &&
+          versionsScene != null &&
+          selectVoiceTakeMutation.mutate({
+            jobId,
+            sceneIndex: versionsScene,
+            take,
+          })
+        }
+      />
+
+      {/* Redo voice */}
+      <AlertDialog
+        open={redoVoiceScene != null}
+        onOpenChange={open => {
+          if (!open) setRedoVoiceScene(null);
+        }}
+      >
+        <AlertDialogContent>
+          {(() => {
+            const target = scenes.find(s => s.index === redoVoiceScene);
+            const host = !!target?.hostPresent;
+            const sec = target?.audioDuration ?? 0;
+            const rate = pacingInfo?.hostRatePerSec;
+            return (
+              <>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>
+                    Redo the voice of scene {redoVoiceScene}?
+                  </AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This records a new voice take for this scene. It is read
+                    together with the lines around it so the tone follows them,
+                    but it can still sound slightly different, and its length
+                    may change a little. The voice it has now is kept, so you
+                    can switch back.
+                    {host
+                      ? ` This is a host scene, so the host clip is also rendered again on HeyGen${
+                          rate != null && sec > 0
+                            ? ` (about $${(sec * rate).toFixed(2)})`
+                            : ""
+                        } and counts toward this video's host minutes.`
+                      : " The picture is not changed."}
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={() => {
+                      if (redoVoiceScene != null)
+                        redoVoice(redoVoiceScene, host);
+                      setRedoVoiceScene(null);
+                    }}
+                  >
+                    Redo voice
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </>
+            );
+          })()}
         </AlertDialogContent>
       </AlertDialog>
 

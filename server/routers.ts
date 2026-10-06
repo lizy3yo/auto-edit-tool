@@ -124,6 +124,9 @@ import {
   mergeSceneWithNext,
   unmergeScene,
   selectSceneTake as selectLongformSceneTake,
+  redoSceneVoice as redoLongformSceneVoice,
+  selectSceneVoiceTake as selectLongformSceneVoiceTake,
+  selectScenePictureTake as selectLongformScenePictureTake,
   revertSceneTimingEdits as revertLongformSceneTiming,
   retryFailedScenes as retryLongformFailedScenes,
   redoHostClips as redoLongformHostClips,
@@ -212,6 +215,7 @@ import {
   isLimitedHostScene,
 } from "../shared/hostRegenLimit";
 import { hostSpendRefusal } from "./hostSpend";
+import { voiceRedoRefusal } from "../shared/voiceTakes";
 import { summarizeHostSpend } from "../shared/hostSpend";
 import { jobPickFacts } from "../shared/jobPicks";
 import { planHostRedo } from "../shared/hostRedo";
@@ -3231,6 +3235,147 @@ const longformVideoRouter = router({
         input.sceneIndex,
         clickerOf(ctx.user),
         override
+      );
+      return { ok: true, accepted };
+    }),
+
+  /**
+   * "Redo voice" on one scene: a fresh read of its words, made in the flow of the lines around
+   * it, with the voice it replaces kept as a take (`shared/voiceTakes.ts`). A cutaway keeps its
+   * picture. A HOST scene is admins and operations managers only (`voiceRedoRefusal`): its mouth
+   * follows its voice, so it is lip-synced again — a paid render under the same regenerate and
+   * host-spend limits as "Regenerate", which the card's warning names before it is confirmed.
+   */
+  redoSceneVoice: approvedProcedure
+    .input(
+      z.object({
+        jobId: z.number(),
+        sceneIndex: z.number().int().min(1),
+        // A host scene's render past its limits, confirmed in the warning box. Honoured only
+        // for the roles `canOverrideHostRegenLimit` allows.
+        force: z.boolean().optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const job = await getLongformVideoJobById(input.jobId);
+      if (!job)
+        throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
+      await assertJobAccess(job, ctx.user, "write");
+      const scene = ((job.storyboard ?? []) as StoryboardScene[]).find(
+        s => s && s.index === input.sceneIndex
+      );
+      if (!scene)
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `Scene ${input.sceneIndex} not found`,
+        });
+      const params = (job.inputParams ?? {}) as LongformInputParams;
+      const refusal = voiceRedoRefusal(
+        scene,
+        { suppliedNarration: !!params.manualNarrationUrl },
+        ctx.user.role
+      );
+      if (refusal) throw new TRPCError({ code: "FORBIDDEN", message: refusal });
+      if (!scene.audioUrl)
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Scene ${input.sceneIndex} has no voice yet — use "Retry failed scenes" first`,
+        });
+      const force = !!input.force && canOverrideHostRegenLimit(ctx.user.role);
+      // A full-frame beat has its regenerate limit; any host render — a split screen's host
+      // half too — is held to the video's host spend limit.
+      if (isLimitedHostScene(scene) && hostRegenerationLocked(scene) && !force)
+        return { ok: true, accepted: "locked" as const };
+      if (scene.hostPresent) {
+        const refused = await hostSpendRefusal(
+          input.jobId,
+          params,
+          scene,
+          force
+        );
+        if (refused)
+          return { ok: true, accepted: "overLimit" as const, ...refused };
+      }
+      const accepted = await redoLongformSceneVoice(
+        input.jobId,
+        input.sceneIndex,
+        { by: clickerOf(ctx.user), force }
+      );
+      return { ok: true, accepted };
+    }),
+
+  /**
+   * Switch a regenerated cutaway between its pictures (`shared/pictureTakes.ts`). Free: both
+   * clips are already on R2; nothing is drawn or billed.
+   */
+  selectScenePictureTake: approvedProcedure
+    .input(
+      z.object({
+        jobId: z.number(),
+        sceneIndex: z.number().int().min(1),
+        take: z.number().int().min(0),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const job = await getLongformVideoJobById(input.jobId);
+      if (!job)
+        throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
+      await assertJobAccess(job, ctx.user, "write");
+      const scene = ((job.storyboard ?? []) as StoryboardScene[]).find(
+        s => s && s.index === input.sceneIndex
+      );
+      if (!scene)
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `Scene ${input.sceneIndex} not found`,
+        });
+      if (input.take >= (scene.pictureTakes ?? []).length)
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Scene ${input.sceneIndex} has no picture ${input.take + 1}`,
+        });
+      const accepted = await selectLongformScenePictureTake(
+        input.jobId,
+        input.sceneIndex,
+        input.take
+      );
+      return { ok: true, accepted };
+    }),
+
+  /**
+   * Switch a redone cutaway between its voice takes (`shared/voiceTakes.ts`). Free: both files
+   * are already on R2. A host scene's voice switches with its host take instead.
+   */
+  selectSceneVoiceTake: approvedProcedure
+    .input(
+      z.object({
+        jobId: z.number(),
+        sceneIndex: z.number().int().min(1),
+        take: z.number().int().min(0),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const job = await getLongformVideoJobById(input.jobId);
+      if (!job)
+        throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
+      await assertJobAccess(job, ctx.user, "write");
+      const scene = ((job.storyboard ?? []) as StoryboardScene[]).find(
+        s => s && s.index === input.sceneIndex
+      );
+      if (!scene)
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `Scene ${input.sceneIndex} not found`,
+        });
+      if (input.take >= (scene.voiceTakes ?? []).length)
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Scene ${input.sceneIndex} has no voice take ${input.take + 1}`,
+        });
+      const accepted = await selectLongformSceneVoiceTake(
+        input.jobId,
+        input.sceneIndex,
+        input.take
       );
       return { ok: true, accepted };
     }),

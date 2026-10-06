@@ -475,7 +475,12 @@ export function buildMatchGainArgs(opts: {
  */
 export async function matchNarrationLevel(
   audio: Buffer,
-  targetDb: number
+  targetDb: number,
+  /**
+   * `sameWords`: the target is another take of these very words (`sameWordsGainDb`), so a
+   * large distance is real and is corrected rather than distrusted.
+   */
+  opts: { sameWords?: boolean } = {}
 ): Promise<{ buffer: Buffer; levelDb: number; gainDb: number }> {
   const dir = join(tmpdir(), `narration-match-${randomUUID()}`);
   mkdirSync(dir, { recursive: true });
@@ -483,7 +488,9 @@ export async function matchNarrationLevel(
     const inPath = join(dir, "in.mp3");
     writeFileSync(inPath, audio);
     const levelDb = await measureSpeechLevelDb(inPath);
-    const gainDb = matchGainDb(levelDb, targetDb);
+    const gainDb = opts.sameWords
+      ? sameWordsGainDb(levelDb, targetDb)
+      : matchGainDb(levelDb, targetDb);
     if (gainDb === 0) return { buffer: audio, levelDb, gainDb };
     const outPath = join(dir, "out.mp3");
     await runFfmpeg(
@@ -506,6 +513,28 @@ export function matchGainDb(level: number, target: number): number {
   if (Math.abs(g) < LEVEL_MATCH_DEADBAND_DB) return 0;
   if (Math.abs(g) > LEVEL_MATCH_MAX_DB) return 0;
   return Math.round(g * 10) / 10;
+}
+
+/** The most a redone take is moved to meet the take it replaces. */
+export const LEVEL_SAME_WORDS_MAX_DB = 14;
+
+/**
+ * The gain that brings a NEW take of some words to the level of the take it replaces. Unlike
+ * `matchGainDb` the two clips say the same thing, so a distance past the usual sanity limit is
+ * not a wrong file — it is a provider take that came back far louder or quieter than the film,
+ * which is exactly the one that most needs correcting. That limit left such a take untouched,
+ * and a redone scene played well above the scene after it. Past `LEVEL_SAME_WORDS_MAX_DB` the
+ * gain is held there rather than dropped. Pure.
+ */
+export function sameWordsGainDb(level: number, target: number): number {
+  if (!Number.isFinite(level) || !Number.isFinite(target)) return 0;
+  const g = target - level;
+  if (Math.abs(g) < LEVEL_MATCH_DEADBAND_DB) return 0;
+  const held = Math.max(
+    -LEVEL_SAME_WORDS_MAX_DB,
+    Math.min(LEVEL_SAME_WORDS_MAX_DB, g)
+  );
+  return Math.round(held * 10) / 10;
 }
 
 /**

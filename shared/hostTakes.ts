@@ -12,6 +12,7 @@
  * them, and the tests pin the rules.
  */
 import type { HostTake, StoryboardScene, SubmitActor } from "./types";
+import { applyVoice, currentVoice } from "./voiceTakes";
 
 /** The picture fields a take owns — everything that describes the clip on screen. */
 const TAKE_FIELDS = [
@@ -44,6 +45,12 @@ export function currentTake(
   if (scene.splitAutoFocusX != null)
     take.splitAutoFocusX = scene.splitAutoFocusX;
   if (by) take.by = by;
+  // Only once the beat's voice has been redone: until then every take shares one voice, and
+  // recording it would only repeat the scene's own fields on each of them.
+  if (scene.voiceTakes?.length) {
+    const voice = currentVoice(scene, "original", undefined, at);
+    if (voice) take.voice = voice;
+  }
   return take;
 }
 
@@ -57,6 +64,8 @@ export function applyTake(scene: StoryboardScene, take: HostTake): void {
   if (take.clipShortSec != null) scene.clipShortSec = take.clipShortSec;
   if (take.splitAutoFocusX != null)
     scene.splitAutoFocusX = take.splitAutoFocusX;
+  // The mouth was animated to this voice, so the two switch together.
+  if (take.voice) applyVoice(scene, take.voice);
 }
 
 const sameClip = (a: HostTake, b: HostTake) =>
@@ -91,6 +100,22 @@ export function recordRegeneratedTake(
   takes.push(fresh);
   scene.hostTakes = takes;
   scene.activeTake = takes.length - 1;
+}
+
+/**
+ * The beat's picture changed WITHOUT a new host render (a split screen's right panel was
+ * redrawn): bring the take it is showing up to date, so switching away and back returns to what
+ * the scene shows now rather than to the composite before the panel changed.
+ */
+export function refreshActiveTake(scene: StoryboardScene): void {
+  const i = activeTakeIndex(scene);
+  if (i == null || !scene.hostTakes) return;
+  const old = scene.hostTakes[i];
+  const fresh = currentTake(scene, old.source, old.by, old.at);
+  if (!fresh) return;
+  const takes = [...scene.hostTakes];
+  takes[i] = fresh;
+  scene.hostTakes = takes;
 }
 
 /** Index of the take the scene is showing, or null when it has no take list. */

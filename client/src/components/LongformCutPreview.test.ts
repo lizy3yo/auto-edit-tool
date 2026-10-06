@@ -316,6 +316,35 @@ describe("planCutBeats", () => {
       expect(beats.map(b => b.audioUrl)).toEqual([MASTER, MASTER, MASTER]);
       expect(beats.map(b => b.audioStartSec)).toEqual([0, 4, 8]);
     });
+
+    it("keeps a scene whose voice was redone, playing every scene from its own file", () => {
+      // "Redo voice" on scene 1 of a master job: its take is its own file, with no slice of the
+      // master. Laid out on the master it had no place and vanished from the preview — the film
+      // opened on scene 2. Assembly plays such a job scene by scene, and so does the preview.
+      const board = perScene().map((s, i) => ({
+        ...s,
+        narrationStartSec: i * 4,
+        narrationEndSec: (i + 1) * 4,
+      }));
+      board[0] = {
+        ...board[0],
+        audioUrl: "redone.mp3",
+        audioDuration: 4.6,
+        narrationStartSec: undefined,
+        narrationEndSec: undefined,
+      };
+      const beats = planOnMaster(board);
+      expect(beats.map(b => b.index)).toEqual([1, 2, 3]);
+      expect(beats.map(b => b.audioUrl)).toEqual([
+        "redone.mp3",
+        "scene1.mp3",
+        "scene2.mp3",
+      ]);
+      expect(beats.map(b => b.audioStartSec)).toEqual([0, 0, 0]);
+      // The redone take is 0.6 s longer, so everything after it moves back by that.
+      expect(beats.map(b => b.startSec)).toEqual([0, 4.6, 8.6]);
+      expect(totalFilmSec(beats)).toBeCloseTo(12.6, 5);
+    });
   });
 });
 

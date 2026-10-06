@@ -256,6 +256,41 @@ export interface HostTake {
   /** How it came to exist: the render the beat had before any regenerate, or a regenerate. */
   source: "original" | "regenerate";
   by?: SubmitActor;
+  /**
+   * The voice this take was lip-synced to, kept only on a beat whose voice has been redone
+   * (`shared/voiceTakes.ts`) — the mouth follows the audio, so a take and its voice switch together.
+   */
+  voice?: VoiceTake;
+}
+
+/**
+ * One version of a CUTAWAY's picture (a still or a b-roll clip). A Regenerate keeps the picture
+ * it replaces, so the operator can put the old one back for free (`shared/pictureTakes.ts`).
+ */
+export interface PictureTake {
+  clipUrls: string[];
+  clipUrl?: string;
+  clipShortSec?: number;
+  /** The description this picture was drawn from, so the card reads true after a switch. */
+  visualPrompt?: string;
+  at: string;
+  source: "original" | "regenerate";
+  by?: SubmitActor;
+}
+
+/**
+ * One version of a scene's VOICE. "Redo voice" keeps the take it replaces, so the operator can
+ * put the old one back for free (`shared/voiceTakes.ts`).
+ */
+export interface VoiceTake {
+  audioUrl: string;
+  audioDuration?: number;
+  /** The slice of the master narration this take is — absent on a redone (fresh) take. */
+  narrationStartSec?: number;
+  narrationEndSec?: number;
+  at: string;
+  source: "original" | "redo";
+  by?: SubmitActor;
 }
 
 /** A single storyboard scene = one beat (its own verbatim script slice) + clip(s) */
@@ -986,6 +1021,19 @@ export interface StoryboardScene {
    */
   hostTakes?: HostTake[];
   activeTake?: number;
+  /**
+   * The scene's voice takes once "Redo voice" has run on it: the original and each redo, with
+   * `activeVoiceTake` the one playing (`shared/voiceTakes.ts`). On a host beat the voice follows
+   * the host take instead (`HostTake.voice`).
+   */
+  voiceTakes?: VoiceTake[];
+  activeVoiceTake?: number;
+  /**
+   * A cutaway's pictures once it has been regenerated: the original and each regenerate, with
+   * `activePictureTake` the one showing (`shared/pictureTakes.ts`). Host beats use `hostTakes`.
+   */
+  pictureTakes?: PictureTake[];
+  activePictureTake?: number;
   /**
    * A START, CTA or END host beat (`hostProtected`) the lip-sync lane gave up on after its
    * automatic retries. Unlike a check-in it is NOT made b-roll behind anyone's back: the film
