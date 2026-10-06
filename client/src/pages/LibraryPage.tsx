@@ -178,7 +178,7 @@ export default function LibraryPage() {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All channels ({total})</SelectItem>
+            <SelectItem value="all">All channels ({usedChannels.length})</SelectItem>
             {usedChannels.map(c => (
               <SelectItem key={c.key} value={c.key}>
                 {c.name}
