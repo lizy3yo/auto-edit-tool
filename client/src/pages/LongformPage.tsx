@@ -4,9 +4,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import LongformJobSlot, { type SlotStatus } from "@/components/LongformJobSlot";
 import { MediaActiveContext } from "@/lib/mediaLifecycle";
 import { VideoLibraryPanel } from "@/components/VideoLibraryPanel";
-import { PageHeader } from "@/components/PageHeader";
 import { Alert } from "@/components/ui/alert";
-import { Loader2, CheckCircle2, XCircle, Coins, Film } from "lucide-react";
+import { Loader2, CheckCircle2, XCircle } from "lucide-react";
 
 const MAX_SLOTS = 5;
 const STORAGE_KEY_BASE = "longform_job_id";
@@ -110,11 +109,6 @@ export default function FaceLockVideo() {
   const [slotNonce, setSlotNonce] = useState<number[]>(() =>
     Array.from({ length: MAX_SLOTS }, () => 0)
   );
-  // Per-tab "ready, go look" flag: set when a non-active tab's job reaches a
-  // terminal state, cleared when that tab is opened. Drives the subtle pulse.
-  const [needsAttention, setNeedsAttention] = useState<boolean[]>(() =>
-    Array.from({ length: MAX_SLOTS }, () => false)
-  );
   // Read inside handleStatusChange (a stable useCallback) without going stale.
   const activeTabRef = useRef(activeTab);
   useEffect(() => {
@@ -134,9 +128,6 @@ export default function FaceLockVideo() {
   );
 
   const { data: providerStatus } = trpc.provider.getStatus.useQuery();
-  const { data: balance } = trpc.provider.getBalance.useQuery(undefined, {
-    refetchInterval: 60000,
-  });
   const { data: allChannels } = trpc.channelConfig.listAllChannels.useQuery();
 
   // Auto-resume in-flight jobs: claim any active job no tab already holds into the next
@@ -168,14 +159,6 @@ export default function FaceLockVideo() {
     (slotIndex: number, status: SlotStatus) => {
       setSlotStatuses(prev => {
         if (prev[slotIndex] === status) return prev;
-        // Flag a subtle pulse when a job on a tab we're NOT viewing just
-        // reached a terminal state (completed or failed).
-        const terminal = status === "completed" || status === "failed";
-        if (terminal && slotIndex !== Number(activeTabRef.current)) {
-          setNeedsAttention(a =>
-            a[slotIndex] ? a : a.map((v, i) => (i === slotIndex ? true : v))
-          );
-        }
         const next = prev.map((s, i) => (i === slotIndex ? status : s));
         slotStatusesRef.current = next;
         return next;
@@ -183,14 +166,6 @@ export default function FaceLockVideo() {
     },
     []
   );
-
-  // Opening a tab stops its pulse.
-  useEffect(() => {
-    const idx = Number(activeTab);
-    setNeedsAttention(prev =>
-      prev[idx] ? prev.map((v, i) => (i === idx ? false : v)) : prev
-    );
-  }, [activeTab]);
 
   // Load a past job into a slot: prefer the first idle slot so a running job
   // isn't replaced; fall back to the active tab when all slots are busy.
@@ -332,23 +307,8 @@ export default function FaceLockVideo() {
         activeJobIds={resumeIds ?? []}
       />
       <div className="min-w-0 flex-1 space-y-6">
-        <PageHeader
-          icon={Film}
-          title="Long-form video"
-          actions={
-            balance && (
-              <div className="flex items-center gap-2 rounded-lg border border-border bg-muted px-3 py-1.5 text-sm">
-                <Coins className="h-4 w-4 shrink-0 text-primary" />
-                <span className="tabular-nums">
-                  {providerStatus?.providerType === "sixtynine_labs" &&
-                  (balance as any).dailyVideos
-                    ? `${(balance as any).dailyVideos.remaining}/${(balance as any).dailyVideos.limit} daily · ${(balance as any).monthlyVideos.remaining}/${(balance as any).monthlyVideos.limit} monthly`
-                    : `${balance.availableQuota} / ${balance.totalQuota} credits`}
-                </span>
-              </div>
-            )
-          }
-        />
+        {/* No visible title: the nav already says which page this is. */}
+        <h1 className="sr-only">Long-form video</h1>
 
         {slotsUnavailable && (
           <Alert tone="warning" title="Workspace sync is unavailable">
@@ -384,15 +344,13 @@ export default function FaceLockVideo() {
         <Tabs value={activeTab} onValueChange={setActiveTab} className="gap-0">
           {/* Scrolls rather than wraps: five tabs carrying titles overflow a phone,
               and a wrapped second row used to push the whole form down the page. */}
-          {/* `py-1`, not `pb-1`: `overflow-x-auto` clips vertically too, and the
-              "job finished" pulse is a 3px ring drawn outside the trigger. */}
           <div className="-mx-4 overflow-x-auto px-4 py-1">
             <TabsList className="h-auto">
               {Array.from({ length: MAX_SLOTS }, (_, i) => (
                 <TabsTrigger
                   key={i}
                   value={String(i)}
-                  className={`gap-1.5 px-3 py-1.5 ${needsAttention[i] ? "tab-pulse" : ""}`}
+                  className="gap-1.5 px-3 py-1.5"
                   title={draftTitles[i]?.trim() || `Tab ${i + 1}`}
                 >
                   {statusIcon(slotStatuses[i])}

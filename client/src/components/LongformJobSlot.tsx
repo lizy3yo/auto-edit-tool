@@ -2038,7 +2038,7 @@ export default function LongformJobSlot({
       : !script.trim()
         ? "Paste a script to get started."
         : !channelKey
-          ? "Pick a channel — it supplies the voice and host."
+          ? "Select a channel."
           : !channelDefaults?.voiceId
             ? "That channel has no voice configured. Set one under Channels."
             : !downloadTitle.trim()
@@ -2141,7 +2141,6 @@ export default function LongformJobSlot({
           <Step
             n={1}
             title="Script"
-            hint="Spoken words only, voiced verbatim. Directing notes here would be read aloud — the host look, b-roll style and 16:9 framing come from the saved Longform instruction, and the host photo and face model from the channel."
             collapsed={scriptCollapsed}
             onToggle={() => setScriptCollapsed(c => !c)}
             summary={

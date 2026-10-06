@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { Link } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
@@ -23,45 +23,10 @@ import {
 } from "@/components/DeleteVideoDialog";
 
 /**
- * Rows fetched — a ceiling, not the number shown.
- *
- * How many rows the panel shows is decided by the WINDOW (`useFitCount`), so this only has to
- * be more than the tallest realistic display can fit: a 2160px monitor leaves the list about
- * 1960px, or 32 rows. Fetching a fixed ceiling and slicing it keeps the query key constant, so
- * dragging the window edge re-slices rows already in hand instead of firing a request per pixel.
- * These rows are light — no script, no storyboard — so the slack costs little.
+ * How many videos the panel lists: the ten most recent. The panel is as tall as those rows and
+ * no taller, so it never ends in an empty stretch; a window too short for ten scrolls the list.
  */
-const PANEL_FETCH = 36;
-
-/** One row: an `h-11` poster inside `p-2`. Used to work out how many fit. */
-const ROW_H = 60;
-
-/**
- * How many rows fit the panel right now.
- *
- * Measured rather than capped at a number: the panel is `100vh` minus the header, so the answer
- * is a browser-window height, not a device class, and a tall monitor should use the room it has.
- * A `ResizeObserver` keeps it right through a resize. The floor of 3 is there because below it
- * the panel stops being a list at all — at that size the footer link is the way through.
- */
-function useFitCount(max: number) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [fit, setFit] = useState(max);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const measure = () => {
-      // `p-2` on the list, top and bottom.
-      const usable = el.clientHeight - 16;
-      setFit(Math.max(3, Math.min(max, Math.floor(usable / ROW_H))));
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [max]);
-  return { ref, fit };
-}
+const PANEL_ROWS = 10;
 
 /**
  * Persistent list of the latest renders, alongside the generator.
@@ -76,12 +41,10 @@ function useFitCount(max: number) {
  * tab is the secondary action, on the pencil button that appears on hover; it used to be the
  * only one, which made a click feel like nothing had happened.
  *
- * It shows the MOST RECENT few and nothing else: an account with dozens of renders turned this
- * into a second scroll column beside a page that already scrolls, and the older rows were never
- * what anyone came here for — the Library page is. How many is decided by the WINDOW, not by a
- * fixed number: it shows exactly as many as fit (`useFitCount`), so a laptop gets a short list
- * and a tall monitor fills its column, and neither one scrolls. The footer keeps the true total,
- * from `libraryCounts`, so "View all 19" still means nineteen.
+ * It shows the MOST RECENT ten and nothing else (`PANEL_ROWS`): an account with dozens of
+ * renders turned this into a second scroll column beside a page that already scrolls, and the
+ * older rows were never what anyone came here for — the Library page is. The footer keeps the
+ * true total, from `libraryCounts`, so "View all 19" still means nineteen.
  */
 export function VideoLibraryPanel({
   onOpen,
@@ -97,9 +60,7 @@ export function VideoLibraryPanel({
   activeJobIds: (number | null)[];
 }) {
   const { data: page, isLoading } = trpc.longformVideo.library.useQuery(
-    // A fixed limit, so resizing the window never changes the query key and never refetches —
-    // the fitted count slices this page instead.
-    { limit: PANEL_FETCH },
+    { limit: PANEL_ROWS },
     {
       // Cheap query (no script, no storyboard), and it carries live "Generating…" rows,
       // so keep it fresh while a render runs.
@@ -113,8 +74,7 @@ export function VideoLibraryPanel({
     }
   );
 
-  const { ref: listRef, fit } = useFitCount(PANEL_FETCH);
-  const jobs = page?.items.slice(0, fit);
+  const jobs = page?.items.slice(0, PANEL_ROWS);
   const total = counts?.total;
 
   const [playing, setPlaying] = useState<PlayableJob | null>(null);
@@ -126,7 +86,7 @@ export function VideoLibraryPanel({
     // (script box, storyboard grid) into something unusable. The Library nav item is the
     // way in at those sizes. `sticky` keeps it in view while the long generator page
     // scrolls, instead of scrolling away with it.
-    <aside className="sticky top-[calc(var(--app-header-h)+1.5rem)] hidden h-[calc(100vh-var(--app-header-h)-3rem)] w-64 shrink-0 flex-col overflow-hidden rounded-lg border border-border bg-card lg:flex xl:w-72">
+    <aside className="sticky top-[calc(var(--app-header-h)+1.5rem)] hidden max-h-[calc(100vh-var(--app-header-h)-3rem)] w-64 shrink-0 flex-col overflow-hidden rounded-lg border border-border bg-card lg:flex xl:w-72">
       <header className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
         <div className="flex items-center gap-2">
           <h2 className="text-sm font-semibold">Your Library</h2>
@@ -147,12 +107,8 @@ export function VideoLibraryPanel({
         </Button>
       </header>
 
-      {/* Not a ScrollArea any more: the list is cut to what fits, so there is nothing to
-          scroll — and a scroller here competed with the page's own scrollbar. */}
-      {/* `min-h-0` is what makes the measurement mean anything: a flex item's min-height is
-          `auto`, so without it this box grows to its content and always reports room for every
-          row it already renders — the fitted count could then never come down. */}
-      <div ref={listRef} className="min-h-0 flex-1 overflow-hidden">
+      {/* `min-h-0` lets the list shrink and scroll inside a window too short for all ten. */}
+      <div className="min-h-0 flex-1 overflow-y-auto">
         {isLoading ? (
           <div className="flex items-center justify-center py-10 text-sm text-muted-foreground">
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
