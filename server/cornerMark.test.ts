@@ -4,7 +4,11 @@ import {
   BOX_MIN,
   CORNER_H,
   CORNER_W,
+  STAR_SURE,
+  isSparkle,
   USUAL_MARK,
+  bestStar,
+  boxAround,
   delogoFilter,
   markBox,
   parseCornerMarkVerdict,
@@ -40,6 +44,73 @@ describe("reading the corner check's answer", () => {
     expect(v.mark).toBe(true);
     expect(v.cx).toBeUndefined();
     expect(v.cy).toBeUndefined();
+  });
+});
+
+describe("finding the sparkle by its shape", () => {
+  const SIZE = 160;
+  /** A dim, gently uneven background — a bench in shadow. */
+  const scene = () => {
+    const g = new Float32Array(SIZE * SIZE);
+    for (let y = 0; y < SIZE; y++)
+      for (let x = 0; x < SIZE; x++)
+        g[y * SIZE + x] = 40 + 10 * Math.sin(x / 9) + 8 * Math.cos(y / 7);
+    return g;
+  };
+  /** A pale, partly see-through four-pointed star of radius `r` centred at (cx, cy). */
+  const stamp = (g: Float32Array, cx: number, cy: number, r: number) => {
+    for (let y = 0; y < SIZE; y++)
+      for (let x = 0; x < SIZE; x++) {
+        const dx = Math.abs(x - cx) / r;
+        const dy = Math.abs(y - cy) / r;
+        if (Math.sqrt(dx) + Math.sqrt(dy) <= 1) g[y * SIZE + x] += 45;
+      }
+    return g;
+  };
+
+  it("finds a pale star and says exactly where it is", () => {
+    const b = bestStar(stamp(scene(), 96, 70, 22), SIZE, SIZE);
+    expect(b.score).toBeGreaterThanOrEqual(STAR_SURE);
+    expect(isSparkle(b)).toBe(true);
+    expect(Math.abs(b.x - 96)).toBeLessThanOrEqual(2);
+    expect(Math.abs(b.y - 70)).toBeLessThanOrEqual(2);
+    expect(b.r).toBeGreaterThanOrEqual(20);
+    expect(b.r).toBeLessThanOrEqual(24);
+  });
+
+  it("does not call a softly uneven scene a sparkle", () => {
+    // Its bumps are soft blobs: they match the star's plump rival as well as the star.
+    expect(isSparkle(bestStar(scene(), SIZE, SIZE))).toBe(false);
+  });
+
+  it("does not call a bright square, a round light or a soft glow a sparkle", () => {
+    const square = scene();
+    for (let y = 50; y < 94; y++)
+      for (let x = 70; x < 114; x++) square[y * SIZE + x] += 45;
+    expect(isSparkle(bestStar(square, SIZE, SIZE))).toBe(false);
+    const disc = scene();
+    for (let y = 0; y < SIZE; y++)
+      for (let x = 0; x < SIZE; x++)
+        if ((x - 92) ** 2 + (y - 72) ** 2 <= 22 * 22) disc[y * SIZE + x] += 45;
+    expect(isSparkle(bestStar(disc, SIZE, SIZE))).toBe(false);
+    const glow = scene();
+    for (let y = 0; y < SIZE; y++)
+      for (let x = 0; x < SIZE; x++)
+        glow[y * SIZE + x] +=
+          60 * Math.exp(-((x - 92) ** 2 + (y - 72) ** 2) / (2 * 14 * 14));
+    expect(isSparkle(bestStar(glow, SIZE, SIZE))).toBe(false);
+  });
+
+  it("skips a flat image instead of dividing noise into a perfect match", () => {
+    expect(bestStar(new Float32Array(SIZE * SIZE).fill(30), SIZE, SIZE).score).toBe(-1);
+  });
+
+  it("cuts a measured mark's patch close, so what sits beside it is not dragged in", () => {
+    const at = { cx: 0.933, cy: 0.874, w: 0.05 };
+    const close = boxAround(W, H, at, false, 1.25);
+    const loose = boxAround(W, H, at);
+    expect(close.w).toBeLessThan(loose.w);
+    expect(close.y + close.h).toBeLessThan(H * 0.94);
   });
 });
 
