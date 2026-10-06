@@ -27,8 +27,13 @@ import { execFfmpeg } from "./ffmpegSpawn";
 import { safeParseJSON } from "./jsonRepair";
 import { isMockMode } from "./mockMode";
 
-/** Haiku: a yes/no on one small image, on the path of every provider clip. */
-const CORNER_MARK_MODEL = "claude-haiku-4-5-20251001";
+/**
+ * The careful checker (2026-10-07, the operator's call after the quick one let marks through):
+ * a faint, see-through mark over a busy background is a fine judgement, and it is asked only for
+ * the clips the shape search could not settle. `CORNER_MARK_MODEL` overrides it.
+ */
+const CORNER_MARK_MODEL = () =>
+  process.env.CORNER_MARK_MODEL || "claude-sonnet-5-5";
 
 /** The part of the frame that is looked at: its right 28% and bottom 32%. */
 export const CORNER_W = 0.28;
@@ -45,21 +50,28 @@ const BOX_PAD = 1.7;
 export const USUAL_MARK = { cx: 0.933, cy: 0.874, w: 0.045 };
 
 export const CORNER_MARK_SYSTEM =
-  "You are shown the BOTTOM-RIGHT CORNER of one frame of a video, enlarged. Decide whether a " +
-  "logo or watermark has been STAMPED OVER the picture there: a small four-pointed sparkle or " +
-  "star, a small icon or badge, or a short brand word, sitting flat on top of the image near " +
-  "the corner, usually white or pale and partly see-through, ignoring the scene's own light, " +
-  "focus and perspective.\n" +
-  "It is NOT a mark when it is part of the photographed scene: a real object, a light or its " +
-  "glint, a window, a pattern on cloth, a tool, printing on a real label, or a real sign.\n" +
-  "When unsure, answer false.\n" +
-  'Return ONLY this JSON, no prose: {"mark":true|false,"cx":0-100,"cy":0-100,"size":0-100,"what":"..."}\n' +
-  "cx, cy: the centre of the mark, as a percent of THIS image from its left and top edges. " +
-  "size: the mark's width as a percent of this image's width. what: 2-6 words naming it; \"\" " +
-  "when there is none.";
+  "You are shown the BOTTOM-RIGHT CORNER of a video clip twice, enlarged. IMAGE 1 is that corner " +
+  "on the clip's FIRST frame. IMAGE 2 is the same corner on the clip's LAST frame. The camera " +
+  "does not move, so the two show the same place.\n" +
+  "Decide whether a logo or watermark has been STAMPED OVER the picture: a small four-pointed " +
+  "sparkle or star, a small icon or badge, or a short brand word, sitting flat on top of the " +
+  "image near the corner, usually white, grey or pale and partly see-through, ignoring the " +
+  "scene's own light, focus and perspective. It is often FAINT. Such a mark frequently appears " +
+  "only at the end of a clip: look carefully for a pale symbol in IMAGE 2 that is not in IMAGE " +
+  "1 at the same spot — that difference is the strongest sign of one.\n" +
+  "It is NOT a mark when it is part of the photographed scene and sits there in both images: a " +
+  "real object, a light or its glint, a window, a pattern on cloth, a tool, printing on a real " +
+  "label, or a real sign.\n" +
+  'Return ONLY this JSON, no prose: {"mark":true|false,"on_first":true|false,"cx":0-100,"cy":0-100,"size":0-100,"what":"..."}\n' +
+  "mark: true when a stamped mark is in IMAGE 2 (or in both). on_first: true when it is also in " +
+  "IMAGE 1. cx, cy: the centre of the mark in IMAGE 2, as a percent of that image from its left " +
+  "and top edges. size: the mark's width as a percent of that image's width. what: 2-6 words " +
+  'naming it; "" when there is none.';
 
 export interface CornerMarkVerdict {
   mark: boolean;
+  /** The mark is on the clip's first frame too — it is there throughout, not only at the end. */
+  onFirst?: boolean;
   /** Centre and width of the mark inside the corner image, 0..1 — absent when not given. */
   cx?: number;
   cy?: number;
@@ -86,6 +98,7 @@ export function parseCornerMarkVerdict(
   const what = parsed.data.what;
   return {
     mark: true,
+    onFirst: parsed.data.on_first === true,
     cx: share(parsed.data.cx),
     cy: share(parsed.data.cy),
     size: share(parsed.data.size),
@@ -174,10 +187,13 @@ export function boxAround(
 const STAR_FRAME_W = 960;
 /** Star radii tried, in px at `STAR_FRAME_W` — a mark 3.3% to 6.3% of the frame wide. */
 const STAR_RADII = [16, 18, 20, 22, 24, 27, 30];
-/** At or above this the shape IS the sparkle (it scores ~0.80; a clean workshop frame ~0.47). */
-export const STAR_SURE = 0.66;
+/**
+ * At or above this the shape IS the sparkle. Measured with the background taken out
+ * (`liftedOffBackground`): marked frames read 0.86, a clean workshop frame 0.69 at another spot.
+ */
+export const STAR_SURE = 0.78;
 /** At or above this the shape's position is trusted over the vision check's. */
-export const STAR_LIKELY = 0.5;
+export const STAR_LIKELY = 0.6;
 /**
  * A mark found by its shape is measured exactly, so its patch is cut close: the star's own width
  * and a quarter more. The wider cut a rough position needs reached far enough to drag whatever
@@ -293,12 +309,117 @@ export function bestStar(
 /** How much better than its plump rival a spot must match the star to be the sparkle. */
 export const STAR_OVER_RIVAL = 0.05;
 
-/** True when a `bestStar` result is the sparkle beyond doubt. Pure. */
-export const isSparkle = (m: { score: number; rival: number }): boolean =>
-  m.score >= STAR_SURE && m.score - m.rival >= STAR_OVER_RIVAL;
+/**
+ * The match that is enough when the star sits exactly where the mark always sits — a frame
+ * where it is still fading in reads ~0.71. Anything star-like at that exact spot is the mark; a
+ * clean frame's best match (~0.69) is elsewhere in the corner.
+ */
+export const STAR_AT_USUAL_SPOT = 0.62;
+/** How far from the usual spot still counts as it, as a share of the frame. */
+export const USUAL_SPOT_REACH = 0.02;
+
+/**
+ * True when a star match is the sparkle beyond doubt: a strong match anywhere in the corner, or
+ * a fair one at the mark's usual spot (`cx`, `cy`: its centre as shares of the frame, when
+ * known) — and in both cases clearly more star than blob. Pure.
+ */
+export const isSparkle = (m: {
+  score: number;
+  rival: number;
+  cx?: number;
+  cy?: number;
+}): boolean => {
+  if (m.score - m.rival < STAR_OVER_RIVAL) return false;
+  if (m.score >= STAR_SURE) return true;
+  return (
+    m.cx != null &&
+    m.cy != null &&
+    Math.abs(m.cx - USUAL_MARK.cx) <= USUAL_SPOT_REACH &&
+    Math.abs(m.cy - USUAL_MARK.cy) <= USUAL_SPOT_REACH &&
+    m.score >= STAR_AT_USUAL_SPOT
+  );
+};
+
+/**
+ * How well ONE spot matches the star: the `bestStar` measure at a known centre and radius, for
+ * following a mark already found through the frames around it. Null on a flat patch. Pure.
+ */
+export function starScoreAt(
+  gray: ArrayLike<number>,
+  width: number,
+  height: number,
+  cx: number,
+  cy: number,
+  r: number
+): number | null {
+  const { t, n, norm } = starTemplate(r);
+  const x = Math.round(cx - (n - 1) / 2);
+  const y = Math.round(cy - (n - 1) / 2);
+  if (x < 0 || y < 0 || x + n > width || y + n > height) return null;
+  let sum = 0;
+  let sum2 = 0;
+  let dot = 0;
+  for (let j = 0; j < n; j++) {
+    const row = (y + j) * width + x;
+    const tr = j * n;
+    for (let i = 0; i < n; i++) {
+      const v = gray[row + i];
+      sum += v;
+      sum2 += v * v;
+      dot += v * t[tr + i];
+    }
+  }
+  const N = n * n;
+  const spread = sum2 - (sum * sum) / N;
+  return spread < N * 4 ? null : dot / (Math.sqrt(spread) * norm);
+}
+
+/** The corner's size at the width it is searched at. */
+const cornerSize = (frameW: number, frameH: number) => {
+  const H = Math.round((STAR_FRAME_W * frameH) / frameW);
+  return {
+    cw: Math.round(STAR_FRAME_W * CORNER_W),
+    ch: Math.round(H * CORNER_H),
+  };
+};
+
+/** The background's scale: wider than the sparkle's thin points, so they do not survive it. */
+const BACKGROUND_MEDIAN = 31;
+
+/**
+ * What is LIGHTER than its surroundings in a grey corner image: each pixel minus the median of
+ * the pixels around it, never below zero. The sparkle is see-through, so over a block of wood or
+ * a bench edge the picture behind it dominated the match (0.55 on the first real clip, with a
+ * clean frame at 0.46 — too close to tell apart). A wide median keeps the wood and the edges and
+ * loses the thin-pointed star, so the difference is the star on a flat field: the same clip
+ * reads 0.86, its faintest marked frame 0.71.
+ */
+async function liftedOffBackground(
+  gray: Buffer,
+  width: number,
+  height: number
+): Promise<Float32Array> {
+  const { data, info } = await sharp(gray, {
+    raw: { width, height, channels: 1 },
+  })
+    .median(BACKGROUND_MEDIAN)
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  // sharp hands a one-channel image back as three unless told otherwise, so the stride is read
+  // off what actually came back: indexed as one channel, every pixel past the first third was
+  // compared with the wrong one and the background was not removed at all.
+  const step = info.channels;
+  const out = new Float32Array(width * height);
+  for (let i = 0; i < out.length; i++)
+    out[i] = Math.max(0, gray[i] - data[i * step]);
+  return out;
+}
+
+/** A star found in a frame's corner, with where it sits inside the corner image (for a scan). */
+type FoundStar = StarMatch & { at: { x: number; y: number; r: number } };
 
 /** Search a frame's bottom-right corner for the sparkle. */
-async function findStar(png: Buffer): Promise<StarMatch> {
+async function findStar(png: Buffer): Promise<FoundStar> {
   const { data, info } = await sharp(png)
     .resize({ width: STAR_FRAME_W })
     .greyscale()
@@ -310,33 +431,46 @@ async function findStar(png: Buffer): Promise<StarMatch> {
   const ch = Math.round(H * CORNER_H);
   const x0 = W - cw;
   const y0 = H - ch;
-  const gray = new Float32Array(cw * ch);
+  const corner = Buffer.alloc(cw * ch);
   for (let y = 0; y < ch; y++)
     for (let x = 0; x < cw; x++)
-      gray[y * cw + x] = data[(y0 + y) * W * info.channels + (x0 + x) * info.channels];
-  const b = bestStar(gray, cw, ch);
+      corner[y * cw + x] =
+        data[(y0 + y) * W * info.channels + (x0 + x) * info.channels];
+  const b = bestStar(await liftedOffBackground(corner, cw, ch), cw, ch);
   return {
     score: b.score,
     rival: b.rival,
     cx: (x0 + b.x) / W,
     cy: (y0 + b.y) / H,
     w: (2 * b.r) / W,
+    at: { x: b.x, y: b.y, r: b.r },
   };
 }
 
-/** The `-vf` value that rebuilds `box` from the pixels around it. Pure. */
-export const delogoFilter = (box: MarkBox): string =>
-  `delogo=x=${box.x}:y=${box.y}:w=${box.w}:h=${box.h}`;
+/**
+ * The `-vf` value that rebuilds `box` from the pixels around it — from `fromSec` on when the mark
+ * only comes in partway through the clip, so the frames before it are left exactly as rendered.
+ * Pure.
+ */
+export const delogoFilter = (box: MarkBox, fromSec = 0): string =>
+  `delogo=x=${box.x}:y=${box.y}:w=${box.w}:h=${box.h}` +
+  (fromSec > 0 ? `:enable='gte(t,${fromSec.toFixed(3)})'` : "");
 
-/** One frame of the clip as a png, plus its size. */
-async function firstFrame(
+type Frame = { png: Buffer; width: number; height: number };
+
+/** The clip's first or last frame as a png, plus its size. */
+async function frameOf(
   dir: string,
   clip: string,
-  name: string
-): Promise<{ png: Buffer; width: number; height: number }> {
+  name: string,
+  which: "first" | "last"
+): Promise<Frame> {
   const file = path.join(dir, name);
   await execFfmpeg(
-    ["-hide_banner", "-loglevel", "error", "-y", "-i", clip, "-frames:v", "1", file],
+    which === "first"
+      ? ["-hide_banner", "-loglevel", "error", "-y", "-i", clip, "-frames:v", "1", file]
+      : // Every frame of the last second overwrites the one before: what is left is the last.
+        ["-hide_banner", "-loglevel", "error", "-y", "-sseof", "-1", "-i", clip, "-update", "1", file],
     { maxBuffer: 1 << 26 }
   );
   const png = await readFile(file);
@@ -345,38 +479,132 @@ async function firstFrame(
   return { png, width: meta.width, height: meta.height };
 }
 
-/** Ask whether a mark is stamped in the frame's bottom-right corner. Throws when it cannot ask. */
-async function lookForMark(frame: {
-  png: Buffer;
-  width: number;
-  height: number;
-}): Promise<CornerMarkVerdict> {
-  const w = Math.round(frame.width * CORNER_W);
-  const h = Math.round(frame.height * CORNER_H);
-  const corner = await sharp(frame.png)
-    .extract({ left: frame.width - w, top: frame.height - h, width: w, height: h })
-    .resize({ width: LOOK_WIDTH })
-    .png()
-    .toBuffer();
+/**
+ * Ask whether a mark is stamped in the clip's bottom-right corner, showing the careful checker
+ * the corner on the FIRST frame and on the LAST: a mark that comes in at the end is plain as the
+ * difference between the two, where a faint one looked at alone is easy to pass. Throws when it
+ * cannot ask.
+ */
+async function lookForMark(
+  first: Frame,
+  last: Frame
+): Promise<CornerMarkVerdict> {
+  const corner = async (frame: Frame) => {
+    const w = Math.round(frame.width * CORNER_W);
+    const h = Math.round(frame.height * CORNER_H);
+    const png = await sharp(frame.png)
+      .extract({ left: frame.width - w, top: frame.height - h, width: w, height: h })
+      .resize({ width: LOOK_WIDTH })
+      .png()
+      .toBuffer();
+    return { base64: png.toString("base64"), mediaType: "image/png" as const };
+  };
   const result = await invokeClaude({
     systemPrompt: CORNER_MARK_SYSTEM,
-    userMessage: "Is a logo or watermark stamped over this corner?",
-    imageInput: { base64: corner.toString("base64"), mediaType: "image/png" },
-    maxTokens: 120,
-    model: CORNER_MARK_MODEL,
+    userMessage:
+      "IMAGE 1 is the corner on the first frame, IMAGE 2 on the last. Is a logo or watermark stamped over it?",
+    imageInput: [await corner(first), await corner(last)],
+    maxTokens: 200,
+    model: CORNER_MARK_MODEL(),
+    thinking: "off",
     step: "Corner mark check",
   });
   return parseCornerMarkVerdict(result.text, result.stopReason);
 }
 
-/** Re-encode `src` with `box` rebuilt — the encode settings the steadier writes with. */
+/** How far back from the end the mark is followed. A longer run is treated as the whole clip. */
+const TAIL_SEC = 4;
+/** At or above this a frame still shows the mark at the spot it was found (it fades in). */
+export const STAR_PRESENT = 0.45;
+/** The patch starts this long before the first frame the mark shows in — its faintest frames. */
+const START_LEAD_SEC = 0.3;
+
+/**
+ * When the mark starts, given how well each frame of the clip's tail matched it. `scores` are
+ * the tail's frames in order, the last one the clip's last frame. 0 ⇒ the whole clip: the mark
+ * is there from the first frame looked at (and the tail did not reach the clip's start), or the
+ * frames could not be read. Pure.
+ */
+export function markStartSec(
+  scores: (number | null)[],
+  fps: number,
+  durationSec: number
+): number {
+  if (!scores.length || !(fps > 0) || !(durationSec > 0)) return 0;
+  const first = scores.findIndex(s => s != null && s >= STAR_PRESENT);
+  if (first < 0) return 0;
+  const tailStart = durationSec - scores.length / fps;
+  // There from the tail's first frame, and the tail began after the clip did: it started
+  // earlier than was looked at, so nothing is assumed about where.
+  if (first === 0 && tailStart > 0.2) return 0;
+  return Math.max(0, tailStart + first / fps - START_LEAD_SEC);
+}
+
+/** The clip's length and frame rate, read off ffmpeg's banner. */
+async function probe(
+  src: string
+): Promise<{ durationSec: number; fps: number }> {
+  const { stderr } = await execFfmpeg(["-hide_banner", "-i", src, "-frames:v", "1", "-f", "null", "-"]);
+  const text = String(stderr);
+  const d = text.match(/Duration: (\d+):(\d+):(\d+(?:\.\d+)?)/);
+  const f = text.match(/(\d+(?:\.\d+)?) fps/);
+  if (!d || !f) throw new Error("no duration or frame rate");
+  return {
+    durationSec: Number(d[1]) * 3600 + Number(d[2]) * 60 + Number(d[3]),
+    fps: Number(f[1]),
+  };
+}
+
+/**
+ * When a mark found on the clip's LAST frame comes in. The mark that turned up is not on the
+ * clip from the start — it fades in over its final few frames — so the patch is rebuilt only
+ * from there: the rest of the clip keeps every pixel it was rendered with. 0 (the whole clip) on
+ * any failure to read the tail, which costs sharpness in one small patch, never a missed mark.
+ */
+async function whenMarkStarts(
+  src: string,
+  frame: Frame,
+  star: FoundStar
+): Promise<number> {
+  try {
+    const { durationSec, fps } = await probe(src);
+    const { cw, ch } = cornerSize(frame.width, frame.height);
+    const { stdout } = await execFfmpeg(
+      ["-hide_banner", "-loglevel", "error", "-sseof", `-${TAIL_SEC}`, "-i", src, "-vf",
+        `crop=iw*${CORNER_W}:ih*${CORNER_H}:iw*${1 - CORNER_W}:ih*${1 - CORNER_H},` +
+          `scale=${cw}:${ch},format=gray`,
+        "-f", "rawvideo", "-"],
+      { encoding: "buffer", maxBuffer: 1 << 28 }
+    );
+    const bytes = stdout as unknown as Buffer;
+    const size = cw * ch;
+    const scores: (number | null)[] = [];
+    for (let off = 0; off + size <= bytes.length; off += size)
+      scores.push(
+        starScoreAt(
+          await liftedOffBackground(bytes.subarray(off, off + size), cw, ch),
+          cw,
+          ch,
+          star.at.x,
+          star.at.y,
+          star.at.r
+        )
+      );
+    return markStartSec(scores, fps, durationSec);
+  } catch {
+    return 0;
+  }
+}
+
+/** Re-encode `src` with `box` rebuilt from `fromSec` on — the steadier's own encode settings. */
 async function rebuildPatch(
   src: string,
   out: string,
-  box: MarkBox
+  box: MarkBox,
+  fromSec = 0
 ): Promise<void> {
   await execFfmpeg(
-    ["-hide_banner", "-loglevel", "error", "-y", "-i", src, "-vf", delogoFilter(box),
+    ["-hide_banner", "-loglevel", "error", "-y", "-i", src, "-vf", delogoFilter(box, fromSec),
       "-c:v", "libx264", "-preset", "fast", "-crf", "16", "-pix_fmt", "yuv420p",
       "-c:a", "copy", "-movflags", "+faststart", out],
     { maxBuffer: 1 << 26 }
@@ -386,6 +614,11 @@ async function rebuildPatch(
 /**
  * The clip with a stamped corner mark removed, or the SAME buffer when it has none (or the check
  * or the removal could not run). `label` names the clip in the log.
+ *
+ * The clip is judged on its LAST frame as well as its first. The first version looked at the
+ * first frame only and removed nothing from the first real video: on the provider's clips the
+ * sparkle is not there at the start — it fades in over the final few frames. That is also why it
+ * showed so plainly in a film: a clip a little shorter than its line holds its LAST frame.
  */
 export async function removeCornerMark(
   clip: Buffer,
@@ -398,42 +631,64 @@ export async function removeCornerMark(
   try {
     const src = path.join(dir, "in.mp4");
     await writeFile(src, clip);
-    const frame = await firstFrame(dir, src, "before.png");
-    // The sparkle is found by its shape first: sure enough, and the vision check is not asked.
-    const star = await findStar(frame.png);
-    const sure = isSparkle(star);
+    const last = await frameOf(dir, src, "last.png", "last");
+    const first = await frameOf(dir, src, "first.png", "first");
+    // The sparkle is found by its shape: sure enough, and the vision check is not asked.
+    const atEnd = await findStar(last.png);
+    const atStart = await findStar(first.png);
+    const star = isSparkle(atStart) && !isSparkle(atEnd) ? atStart : atEnd;    const sure = isSparkle(star);
+    // Not settled by the shape: the careful checker compares the first frame with the last.
     const seen: CornerMarkVerdict = sure
-      ? { mark: true, what: "a sparkle mark" }
-      : await lookForMark(frame);
+      ? { mark: true, onFirst: isSparkle(atStart), what: "a sparkle mark" }
+      : await lookForMark(first, last);
     if (!seen.mark) return clip;
-    // WHERE: the shape's own position whenever the shape is there at all — measured, where the
-    // vision check's is an estimate off an enlarged corner.
-    const byShape = star.score >= STAR_LIKELY;
+    // WHERE: the shape's own position when the shape is what was found, or sits where the
+    // checker saw the mark — measured, where the checker's is an estimate off an enlarged corner.
+    const seenAt =
+      seen.cx != null && seen.cy != null
+        ? {
+            cx: 1 - CORNER_W + seen.cx * CORNER_W,
+            cy: 1 - CORNER_H + seen.cy * CORNER_H,
+          }
+        : null;
+    const byShape =
+      sure ||
+      (star.score >= STAR_LIKELY &&
+        (!seenAt ||
+          (Math.abs(star.cx - seenAt.cx) <= 0.05 &&
+            Math.abs(star.cy - seenAt.cy) <= 0.05)));
     const boxFor = (widen: boolean) =>
       byShape
-        ? boxAround(frame.width, frame.height, star, widen, STAR_PAD)
-        : markBox(frame.width, frame.height, seen, widen);
+        ? boxAround(last.width, last.height, star, widen, STAR_PAD)
+        : markBox(last.width, last.height, seen, widen);
+    // WHEN: the whole clip when it is on the first frame too — some clips carry it throughout.
+    // Otherwise from where it comes in, followed back through the tail by its shape; a mark
+    // whose shape cannot be followed is rebuilt over the whole clip, since guessing where it
+    // starts risks leaving it in.
+    const fromSec =
+      seen.onFirst || !byShape ? 0 : await whenMarkStarts(src, last, star);
 
     const out = path.join(dir, "out.mp4");
-    await rebuildPatch(src, out, boxFor(false));
+    await rebuildPatch(src, out, boxFor(false), fromSec);
     let cleaned = out;
     // Looked at again: a patch cut beside the mark leaves it in the film with a smudge next to
-    // it. A mark found by its shape is re-measured; one only the vision check saw is re-asked.
-    const afterFrame = await firstFrame(dir, out, "after.png");
-    const still = byShape
-      ? isSparkle(await findStar(afterFrame.png))
-      : await lookForMark(afterFrame).then(
+    // it. The sparkle is re-measured; a mark only the checker saw is shown to it again.
+    const after = await frameOf(dir, out, "after.png", "last");
+    const still = sure
+      ? isSparkle(await findStar(after.png))
+      : await lookForMark(first, after).then(
           v => v.mark,
           () => false
         );
     if (still) {
       const wide = path.join(dir, "wide.mp4");
-      await rebuildPatch(src, wide, boxFor(true));
+      await rebuildPatch(src, wide, boxFor(true), 0);
       cleaned = wide;
     }
     console.log(
       `[CornerMark] ${label}: removed ${seen.what || "a corner mark"} ` +
-        `(${byShape ? `found by shape, match ${star.score.toFixed(2)} against ${star.rival.toFixed(2)} for a blob` : "found by the vision check"}` +
+        `(${sure ? `found by shape, match ${star.score.toFixed(2)} against ${star.rival.toFixed(2)} for a blob` : `found by the careful checker${byShape ? ", placed by shape" : ""}`}` +
+        `, ${fromSec > 0 ? `from ${fromSec.toFixed(2)}s` : "whole clip"}` +
         `${still ? ", second wider pass" : ""})`
     );
     return await readFile(cleaned);

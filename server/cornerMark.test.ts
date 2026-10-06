@@ -11,7 +11,9 @@ import {
   boxAround,
   delogoFilter,
   markBox,
+  markStartSec,
   parseCornerMarkVerdict,
+  starScoreAt,
 } from "./cornerMark";
 
 const W = 1920;
@@ -25,11 +27,21 @@ describe("reading the corner check's answer", () => {
       )
     ).toEqual({
       mark: true,
+      onFirst: false,
       cx: 0.76,
       cy: 0.6,
       size: 0.13,
       what: "white four-point sparkle",
     });
+  });
+
+  it("notes a mark that is on the first frame too — it is there for the whole clip", () => {
+    expect(
+      parseCornerMarkVerdict('{"mark":true,"on_first":true,"what":"logo"}').onFirst
+    ).toBe(true);
+    expect(
+      parseCornerMarkVerdict('{"mark":true,"on_first":false,"what":"logo"}').onFirst
+    ).toBe(false);
   });
 
   it("reads anything else as no mark — a clean clip is never patched on a bad answer", () => {
@@ -111,6 +123,83 @@ describe("finding the sparkle by its shape", () => {
     const loose = boxAround(W, H, at);
     expect(close.w).toBeLessThan(loose.w);
     expect(close.y + close.h).toBeLessThan(H * 0.94);
+  });
+});
+
+describe("a see-through mark over a busy background", () => {
+  // The first real clip's faintest marked frame, still fading in: 0.71, under the sure mark.
+  const faint = { score: 0.71, rival: 0.31 };
+
+  it("is the mark when it sits exactly where the mark always sits", () => {
+    expect(isSparkle({ ...faint, cx: 0.932, cy: 0.869 })).toBe(true);
+  });
+
+  it("is not the mark anywhere else in the corner — a clean frame's best match is elsewhere", () => {
+    // What a clean frame of that same clip reads: 0.69, a little below and left of the spot.
+    expect(isSparkle({ score: 0.69, rival: 0.51, cx: 0.922, cy: 0.909 })).toBe(false);
+    expect(isSparkle({ ...faint, cx: 0.878, cy: 0.928 })).toBe(false);
+    expect(isSparkle(faint)).toBe(false);
+  });
+
+  it("is not the mark when it is more blob than star, even at the usual spot", () => {
+    expect(isSparkle({ score: 0.7, rival: 0.72, cx: 0.932, cy: 0.869 })).toBe(false);
+  });
+
+  it("is the mark anywhere in the corner when the match is strong", () => {
+    // The real clip's last frame, and a clip carrying the mark throughout: 0.86 against 0.40.
+    expect(isSparkle({ score: 0.86, rival: 0.4, cx: 0.8, cy: 0.75 })).toBe(true);
+  });
+});
+
+describe("a mark that only comes in at the end of the clip", () => {
+  const fps = 25;
+  // A 2.93 s clip, as the provider sent it: 73 frames, the sparkle fading in over the last three.
+  const tail = [...Array(70).fill(0.1), 0.2, 0.4, 0.55];
+
+  it("is rebuilt from just before it appears, not over the whole clip", () => {
+    const from = markStartSec(tail, fps, 2.93);
+    // First shown on frame 71 (2.85 s); the patch starts a little earlier for its faintest frames.
+    expect(from).toBeGreaterThan(2.4);
+    expect(from).toBeLessThan(2.85);
+  });
+
+  it("treats a flat frame as not showing it", () => {
+    expect(markStartSec([null, null, 0.6], fps, 0.12)).toBe(0);
+    expect(markStartSec([...Array(50).fill(null), 0.6], fps, 2.04)).toBeGreaterThan(1.6);
+  });
+
+  it("is the whole clip when it was there before the stretch that was looked at", () => {
+    // The last 4 s of a 30 s clip, the mark on every frame of it.
+    expect(markStartSec(Array(100).fill(0.7), fps, 30)).toBe(0);
+  });
+
+  it("is the whole clip when nothing can be told", () => {
+    expect(markStartSec([], fps, 3)).toBe(0);
+    expect(markStartSec([0.1, 0.1], fps, 3)).toBe(0);
+    expect(markStartSec([0.6], 0, 3)).toBe(0);
+  });
+
+  it("writes a filter that only runs from that moment", () => {
+    const box = { x: 1730, y: 884, w: 120, h: 120 };
+    expect(delogoFilter(box, 2.55)).toBe(
+      "delogo=x=1730:y=884:w=120:h=120:enable='gte(t,2.550)'"
+    );
+    expect(delogoFilter(box, 0)).toBe("delogo=x=1730:y=884:w=120:h=120");
+  });
+
+  it("measures one known spot, for following the mark back through the frames", () => {
+    const SIZE = 120;
+    const g = new Float32Array(SIZE * SIZE).fill(40);
+    for (let y = 0; y < SIZE; y++)
+      for (let x = 0; x < SIZE; x++) {
+        g[y * SIZE + x] += 6 * Math.sin(x / 5);
+        const dx = Math.abs(x - 60) / 20;
+        const dy = Math.abs(y - 60) / 20;
+        if (Math.sqrt(dx) + Math.sqrt(dy) <= 1) g[y * SIZE + x] += 50;
+      }
+    expect(starScoreAt(g, SIZE, SIZE, 60, 60, 20)).toBeGreaterThan(0.8);
+    // Off the image: nothing to measure.
+    expect(starScoreAt(g, SIZE, SIZE, 5, 5, 20)).toBeNull();
   });
 });
 
