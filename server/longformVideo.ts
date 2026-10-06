@@ -11105,13 +11105,43 @@ export async function rezoomJobStills(jobId: number): Promise<number[]> {
   return changed;
 }
 
-export async function steadyJobHostClips(jobId: number): Promise<number[]> {
+export async function steadyJobHostClips(
+  jobId: number,
+  /**
+   * `announce`: an operator's click ("Clean host clips"). The job reads as working with a
+   * step-by-step count while the pass runs and is put back as it was, and each scene that
+   * changed is marked for the next assemble.
+   */
+  opts: { announce?: boolean } = {}
+): Promise<number[]> {
   const changed: number[] = [];
   await withJobLock(jobId, async () => {
     const job = await getLongformVideoJobById(jobId);
     if (!job) throw new Error("Job not found");
     const params = job.inputParams as LongformInputParams;
     const scenes = (job.storyboard ?? []) as StoryboardScene[];
+    const prior = { status: job.status, stage: job.stage };
+    const hostScenes = scenes.filter(
+      s => s.hostPresent && (s.clipUrls?.length || s.clipUrl)
+    );
+    let done = 0;
+    const report = () =>
+      opts.announce &&
+      setJobPhase(jobId, {
+        title: "Cleaning host clips",
+        label: `Host clips ${done}/${hostScenes.length}`,
+        pct: hostScenes.length
+          ? Math.round((done / hostScenes.length) * 100)
+          : 100,
+      });
+    if (opts.announce) {
+      await updateLongformVideoJob(jobId, {
+        status: "processing",
+        errorMessage: null,
+      });
+      report();
+    }
+    try {
     const steadyUrl = async (url: string, s: StoryboardScene, n: number) => {
       const resp = await fetch(await presignOwnBucketUrl(url), { signal: AbortSignal.timeout(120_000) });
       if (!resp.ok) throw new Error(`download ${resp.status}`);
@@ -11144,12 +11174,30 @@ export async function steadyJobHostClips(jobId: number): Promise<number[]> {
           s.clipUrl = steady[0];
         }
         s.clipCheckedUrl = undefined;
+        // A beat with takes: the one it is showing is this cleaned clip now.
+        refreshActiveTake(s);
+        // The finished film still has the old clip in it until it is re-stitched.
+        if (opts.announce) s.timingEdited = true;
         changed.push(s.index);
       } catch (err: any) {
         console.warn(`[Longform ${jobId}] scene ${s.index}: steadying skipped — ${err?.message ?? err}`);
+      } finally {
+        done++;
+        report();
       }
     }
-    if (changed.length) await updateLongformVideoJob(jobId, { storyboard: scenes });
+    } finally {
+      if (opts.announce) {
+        setJobPhase(jobId, null);
+        await updateLongformVideoJob(jobId, {
+          status: prior.status,
+          stage: prior.stage,
+          ...(changed.length ? { storyboard: scenes } : {}),
+        }).catch(onFailedStatusWriteError(jobId));
+      }
+    }
+    if (changed.length && !opts.announce)
+      await updateLongformVideoJob(jobId, { storyboard: scenes });
   });
   return changed;
 }

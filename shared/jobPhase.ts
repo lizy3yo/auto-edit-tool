@@ -11,6 +11,8 @@
  */
 
 export interface JobPhase {
+  /** The pass itself, for the card's heading on a finished job ("Cleaning host clips"). */
+  title?: string;
   /** What is happening now, e.g. "Encoding scenes 120/224". */
   label: string;
   /** 0-100, whole number. */

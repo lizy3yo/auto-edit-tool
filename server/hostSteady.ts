@@ -30,6 +30,7 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { removeCornerMark } from "./cornerMark";
 import { execFfmpeg } from "./ffmpegSpawn";
 import { personMasks, PH, PW } from "./personMask";
 
@@ -708,6 +709,10 @@ export async function steadyHostClip(
    */
   opts: { freezeRoom?: boolean } = {}
 ): Promise<Buffer> {
+  // A provider's stamped corner mark goes first (`server/cornerMark.ts`): this is the one seam
+  // every provider clip crosses, and a patch rebuilt before the room is frozen is frozen with it.
+  // A clip with no mark comes back as the same buffer, so nothing below changes for it.
+  clip = await removeCornerMark(clip, label);
   if (process.env.HOST_STEADY === "0") return clip;
   const dir = await mkdtemp(path.join(tmpdir(), "host-steady-"));
   try {

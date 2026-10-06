@@ -112,6 +112,7 @@ import {
   X,
   RefreshCw,
   Mic,
+  Eraser,
   Film,
   Image as ImageIcon,
   Images,
@@ -1082,6 +1083,18 @@ export default function LongformJobSlot({
     onError: err => toast.error(err.message),
   });
 
+  // "Clean host clips": take a provider's corner mark out of the host clips this video already
+  // has. Nothing renders again, so there is no confirm; the film needs an assemble afterwards.
+  const cleanHostClipsMutation = trpc.longformVideo.cleanHostClips.useMutation({
+    onSuccess: () => {
+      toast.success(
+        "Cleaning the host clips. Assemble the video when it finishes to apply it."
+      );
+      if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
+    },
+    onError: err => toast.error(err.message),
+  });
+
   const retryFailedScenesMutation =
     trpc.longformVideo.retryFailedScenes.useMutation({
       onSuccess: data => {
@@ -1819,7 +1832,7 @@ export default function LongformJobSlot({
         scenesDone: number;
         warnings?: string[];
         /** A step-by-step pass (assembly, "Even out voice") — `shared/jobPhase.ts`. */
-        phase?: { label: string; pct: number };
+        phase?: { title?: string; label: string; pct: number };
       }
     | undefined;
   // Only meaningful while the job is actually working; a stale one never shows on a settled card.
@@ -2167,6 +2180,28 @@ export default function LongformJobSlot({
     });
   };
 
+  // Shown beside "Even out voice", in both places that button lives, on a video with host clips.
+  const cleanHostClipsButton =
+    job && scenes.some(s => s.hostPresent && (s.clipUrls?.length || s.clipUrl)) ? (
+      <Button
+        variant="outline"
+        onClick={() => {
+          if (!jobId) return;
+          armNotifications();
+          cleanHostClipsMutation.mutate({ jobId });
+        }}
+        disabled={cleanHostClipsMutation.isPending}
+        title="Remove a corner mark the provider stamped on this video's host clips. Nothing renders again; assemble afterwards to apply it."
+      >
+        {cleanHostClipsMutation.isPending ? (
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+        ) : (
+          <Eraser className="mr-2 h-4 w-4" />
+        )}
+        Clean host clips
+      </Button>
+    ) : null;
+
   return (
     <div className="space-y-6">
       {/* Deliberately NOT `overflow-hidden`, which would otherwise be the obvious
@@ -2486,7 +2521,7 @@ export default function LongformJobSlot({
                       <p className="text-sm font-medium">
                         {/* "Even out voice" runs on a job that is otherwise done. */}
                         {phase && job.stage === "done"
-                          ? "Evening out voice"
+                          ? (phase.title ?? "Evening out voice")
                           : STAGE_LABELS[job.stage] || job.stage}
                       </p>
                       {phase ? (
@@ -2883,6 +2918,7 @@ export default function LongformJobSlot({
                           : "Even out voice"}
                       </Button>
                     )}
+                    {cleanHostClipsButton}
                   </div>
                 )}
 
@@ -3061,6 +3097,7 @@ export default function LongformJobSlot({
                         ? "Voice evened out"
                         : "Even out voice"}
                     </Button>
+                    {cleanHostClipsButton}
                     <Button
                       variant="outline"
                       size="sm"

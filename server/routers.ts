@@ -127,6 +127,7 @@ import {
   redoSceneVoice as redoLongformSceneVoice,
   selectSceneVoiceTake as selectLongformSceneVoiceTake,
   selectScenePictureTake as selectLongformScenePictureTake,
+  steadyJobHostClips as steadyLongformJobHostClips,
   revertSceneTimingEdits as revertLongformSceneTiming,
   retryFailedScenes as retryLongformFailedScenes,
   redoHostClips as redoLongformHostClips,
@@ -3679,6 +3680,36 @@ const longformVideoRouter = router({
       }
       levelJobNarration(input.jobId).catch(err => {
         console.error(`[Longform ${input.jobId}] levelNarration error:`, err);
+      });
+      return { ok: true };
+    }),
+
+  /**
+   * "Clean host clips" — take a provider's stamped corner mark out of the host clips of a video
+   * rendered before clips were cleaned as they arrive (`server/cornerMark.ts`). Works on the
+   * clips already stored, so nothing is rendered again; the operator assembles afterwards. Costs
+   * one quick check per host clip and no provider render. Fire-and-forget like "Even out voice".
+   */
+  cleanHostClips: approvedProcedure
+    .input(z.object({ jobId: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      const job = await getLongformVideoJobById(input.jobId);
+      if (!job)
+        throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
+      await assertJobAccess(job, ctx.user, "write");
+      if (job.status === "processing" || isJobRendering(input.jobId))
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "This video is still working — try again when it settles",
+        });
+      const scenes = (job.storyboard as StoryboardScene[]) || [];
+      if (!scenes.some(s => s.hostPresent && (s.clipUrls?.length || s.clipUrl)))
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "This video has no host clips to clean",
+        });
+      steadyLongformJobHostClips(input.jobId, { announce: true }).catch(err => {
+        console.error(`[Longform ${input.jobId}] cleanHostClips error:`, err);
       });
       return { ok: true };
     }),
