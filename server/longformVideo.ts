@@ -102,7 +102,9 @@ import {
   getProviderByType,
   hostNameAliases,
   resolveHostName,
+  getChannelHostPhotos,
 } from "./db";
+import { matchPhotoFraming } from "./hostFraming";
 import {
   createLongformVideoJob,
   updateLongformVideoJob,
@@ -11142,11 +11144,43 @@ export async function steadyJobHostClips(
       report();
     }
     try {
+    // "Clean host clips" also frames each clip like the photo it was made from
+    // (`server/hostFraming.ts`): a video made while the host was lip-synced from a wider redraw
+    // of each photo. Matched against the channel's photos AS UPLOADED — the video's own snapshot
+    // is the redraw. No photo, or none that matches, changes nothing.
+    const photos: Buffer[] = [];
+    if (opts.announce && params.channelKey) {
+      const library = await getChannelHostPhotos(params.channelKey, true).catch(
+        () => []
+      );
+      for (const p of library) {
+        if (!p.imageUrl) continue;
+        try {
+          const r = await fetch(await presignOwnBucketUrl(p.imageUrl), {
+            signal: AbortSignal.timeout(60_000),
+          });
+          if (r.ok) photos.push(Buffer.from(await r.arrayBuffer()));
+        } catch {
+          /* a photo that cannot be read is simply not matched against */
+        }
+      }
+    }
     const steadyUrl = async (url: string, s: StoryboardScene, n: number) => {
       const resp = await fetch(await presignOwnBucketUrl(url), { signal: AbortSignal.timeout(120_000) });
       if (!resp.ok) throw new Error(`download ${resp.status}`);
       const before = Buffer.from(await resp.arrayBuffer());
-      const after = await steadyHostClip(before, `job ${jobId} scene ${s.index}`);
+      const framed = await matchPhotoFraming(
+        before,
+        photos,
+        `job ${jobId} scene ${s.index}`
+      );
+      // A reframed host is a new framing: a split's measured face position is stale.
+      if (framed !== before) {
+        s.splitAutoFocusX = undefined;
+        s.splitFocusSource = undefined;
+      }
+      const steadied = await steadyHostClip(framed, `job ${jobId} scene ${s.index}`);
+      const after = steadied;
       if (after === before) return url;
       const key = `longform/${jobId}/clip-${s.index}-${n}-steady-${nanoid(6)}.mp4`;
       return (await storagePut(key, after, "video/mp4")).url;
