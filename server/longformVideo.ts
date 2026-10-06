@@ -103,6 +103,7 @@ import {
   hostNameAliases,
   resolveHostName,
 } from "./db";
+import { removeCornerMark } from "./cornerMark";
 import {
   hostCleanZoom,
   hostCleanZoomSplit,
@@ -11244,10 +11245,17 @@ export async function steadyJobHostClips(
       // face too small for the "already close" guard to catch that.
       const zoom = isSplitScene(s) ? hostCleanZoomSplit() : hostCleanZoom();
       const zoomedBefore = !!s.hostCleanZoom && !s.rawClipUrls?.includes(url);
+      // The stamped mark comes out BEFORE the zoom. A gentle zoom keeps the mark's corner in the
+      // picture and pushes the mark right up against the frame's edge, where it can no longer
+      // be recognised or rebuilt cleanly; found first, it sits where it always sits.
+      const unmarked =
+        opts.announce && !zoomedBefore
+          ? await removeCornerMark(before, `job ${jobId} scene ${s.index}`)
+          : before;
       const framed =
         opts.announce && !zoomedBefore
           ? await zoomHostClip(
-              before,
+              unmarked,
               `job ${jobId} scene ${s.index}`,
               outcome => {
                 framing[outcome]++;

@@ -7,11 +7,14 @@
  * stamped corner mark came from. Photos are used as uploaded now, so new videos have neither —
  * but the older ones keep the clips they were rendered with.
  *
- * The repair is a plain zoom, the same for every clip: `HOST_CLEAN_ZOOM` (1.4×), centred, from
+ * The repair is a plain zoom, the same for every clip: `HOST_CLEAN_ZOOM` (1.2×), centred, from
  * the top of the frame. Measured on a real clip the host was 71% of the size in the uploaded
- * photo, so 1.4× brings the face back to the photo's size; the lower-right of the wide frame,
- * mark included, is simply out of the picture. One fixed crop means every host scene of a film
- * is framed alike — a crop worked out clip by clip moved the room a little from scene to scene.
+ * photo, so 1.4× would bring the face back to the photo's size — it was built that way first,
+ * and the operator found it too tight, then 1.1× too little: 1.2× is the call. A zoom this
+ * gentle leaves the wide frame's lower-right corner at or just inside the picture's edge, so a
+ * stamped mark is not reliably cut off by it; the pass takes the mark out first
+ * (`removeCornerMark`). One fixed crop means every host scene of a film is framed alike — a
+ * crop worked out clip by clip moved the room a little from scene to scene.
  *
  * A first version matched each clip to the channel's photos to decide the zoom. On the hosted
  * app it changed nothing and could not say why, and the operator asked for the zoom itself.
@@ -34,12 +37,12 @@ const zoomSetting = (name: string, fallback: number): number => {
 };
 
 /** How far a wide host clip is zoomed in. `HOST_CLEAN_ZOOM` overrides it, held to 1..2. */
-export const hostCleanZoom = (): number => zoomSetting("HOST_CLEAN_ZOOM", 1.4);
+export const hostCleanZoom = (): number => zoomSetting("HOST_CLEAN_ZOOM", 1.2);
 
 /**
- * How far the host of a SPLIT SCREEN is zoomed in (`HOST_CLEAN_ZOOM_SPLIT`). Gentler, at the
- * operator's call: the host's half of a split is narrow, so the full 1.4× left the face filling
- * most of it.
+ * How far the host of a SPLIT SCREEN is zoomed in (`HOST_CLEAN_ZOOM_SPLIT`). Its own setting
+ * because the host's half of a split is narrow, so a zoom reads stronger there; the same 1.2×
+ * as a full frame unless set otherwise.
  */
 export const hostCleanZoomSplit = (): number =>
   zoomSetting("HOST_CLEAN_ZOOM_SPLIT", 1.2);

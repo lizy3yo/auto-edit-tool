@@ -86,27 +86,35 @@ describe("how far it zooms", () => {
     else process.env.HOST_CLEAN_ZOOM = saved;
   });
 
-  it("is 1.4× unless set otherwise", () => {
+  it("is 1.2× unless set otherwise — 1.4× was too tight and 1.1× too little", () => {
     delete process.env.HOST_CLEAN_ZOOM;
-    expect(hostCleanZoom()).toBe(1.4);
+    expect(hostCleanZoom()).toBe(1.2);
   });
 
-  it("is gentler for a split screen, whose host half is narrow", () => {
+  it("is the same for a split screen, which has its own setting", () => {
     delete process.env.HOST_CLEAN_ZOOM_SPLIT;
     expect(hostCleanZoomSplit()).toBe(1.2);
-    expect(hostCleanZoomSplit()).toBeLessThan(hostCleanZoom());
-    // 1.2× still ends above the stamped mark: centred at 87.4% of the height, ~35 px tall
-    // each way at 1080p, so its top edge is just below where the kept picture stops.
-    const c = zoomCrop(FW, FH, hostCleanZoomSplit())!;
-    expect(c.y + c.h).toBeLessThanOrEqual(0.874 * FH - 35);
+    process.env.HOST_CLEAN_ZOOM_SPLIT = "1.05";
+    expect(hostCleanZoomSplit()).toBe(1.05);
+    delete process.env.HOST_CLEAN_ZOOM_SPLIT;
+  });
+
+  it("does not reliably cut the stamped mark's corner off, so the mark is erased first", () => {
+    // The mark sits ~87% down, ~35 px tall each way at 1080p. A gentler zoom keeps it in the
+    // picture outright; the 1.2× default clears its top edge by only a few pixels. Neither is a
+    // margin to rely on, which is why the clean pass removes the mark before it zooms.
+    const gentle = zoomCrop(FW, FH, 1.1)!;
+    expect(gentle.y + gentle.h).toBeGreaterThan(0.874 * FH);
+    const chosen = zoomCrop(FW, FH, hostCleanZoom())!;
+    expect(0.874 * FH - 35 - (chosen.y + chosen.h)).toBeLessThan(20);
   });
 
   it("takes a sensible setting and ignores a senseless one", () => {
     process.env.HOST_CLEAN_ZOOM = "1.25";
     expect(hostCleanZoom()).toBe(1.25);
     process.env.HOST_CLEAN_ZOOM = "9";
-    expect(hostCleanZoom()).toBe(1.4);
+    expect(hostCleanZoom()).toBe(1.2);
     process.env.HOST_CLEAN_ZOOM = "wide";
-    expect(hostCleanZoom()).toBe(1.4);
+    expect(hostCleanZoom()).toBe(1.2);
   });
 });
