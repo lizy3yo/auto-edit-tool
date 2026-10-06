@@ -83,12 +83,6 @@ function MinimaxCard() {
           <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
         ) : (
           <>
-            <p className="text-xs text-muted-foreground">
-              A second voice lane, offered on the generate form when 69Labs
-              can&rsquo;t deliver. Never used unless a render is set to it — and
-              each channel needs its own MiniMax voice id under Channels, since
-              a 69Labs voice will not resolve here.
-            </p>
             <div className="space-y-1.5">
               <Label className="text-xs">
                 API key{" "}
@@ -340,11 +334,6 @@ export default function AdminPage() {
       <PageHeader
         icon={Settings}
         title="Admin"
-        description={
-          canManageKeys
-            ? "Provider keys, accounts, provider spend and the directing instruction. Per-channel settings live under Channels."
-            : "The directing instruction and pacing — set once, rarely touched. Per-channel settings live under Channels."
-        }
       />
       <Tabs
         defaultValue={canManageKeys ? "keys" : "instruction"}

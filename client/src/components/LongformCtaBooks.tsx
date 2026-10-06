@@ -12,7 +12,6 @@ import {
 } from "@/components/ui/popover";
 import {
   BookOpen,
-  AlertTriangle,
   Check,
   ChevronDown,
   ClipboardCopy,
@@ -25,11 +24,12 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { buildBookCtaTemplate } from "@shared/ctaMarkers";
+import { StepIssue } from "@/components/StepIssues";
 
 const ACCEPTED = ["image/jpeg", "image/png", "image/webp"];
 const MAX_BYTES = 10 * 1024 * 1024;
 /** Placement is by title match against the CTA blocks, so at most one book per block is useful. */
-const MAX_BOOKS = 8;
+export const MAX_BOOKS = 8;
 
 /**
  * One book this video pitches. There is no per-block assignment — the operator NAMES the book in
@@ -219,23 +219,16 @@ export function LongformCtaBooks({
           </span>
         )}
       </Label>
-      <p className="text-xs text-muted-foreground">
-        Upload each book you pitch and give it the title you use in the script.
-        The cover is revealed on the CTA line that names it — so name it in the
-        script and it lands there. A book with a shop link also gets a QR and a
-        tracking link.
-      </p>
 
       {/* No marked block: the books still upload, but nothing places them yet. Say it here —
           the server refuses a generate that attaches a book to an unmarked script. */}
       {blocks.length === 0 &&
         (value.length > 0 ? (
-          <p className="flex items-start gap-1.5 text-xs text-warning">
-            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <StepIssue>
             The script has no CTA block yet — wrap the pitch in ===START CTA===
             / ===END CTA=== lines (Copy CTA gives you the exact text). Until it
             does, this book has nowhere to land and generating is refused.
-          </p>
+          </StepIssue>
         ) : (
           <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
             <BookOpen className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -432,11 +425,9 @@ export function LongformCtaBooks({
                     </div>
                   </div>
                   {b.title.trim() && !b.shopUrl?.trim() && (
-                    <p className="flex items-start gap-1.5 text-[11px] text-warning">
-                      <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
-                      No shop link — this book shows its cover but carries no QR
-                      or tracking.
-                    </p>
+                    <StepIssue>
+                      {`“${b.title.trim()}” has no shop link — it shows its cover but carries no QR or tracking.`}
+                    </StepIssue>
                   )}
                 </div>
               </div>
@@ -529,15 +520,6 @@ export function LongformCtaBooks({
           )}
         </div>
       )}
-
-      <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
-        <BookOpen className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-        Each book&apos;s cover is revealed on the CTA line that names it, with
-        its own QR. Channel books join in automatically whenever a block calls
-        them by name — no adding needed. A block that calls no book at all uses
-        the channel&apos;s cover and QR. After the render you&apos;ll get a
-        tracking link per book for the YouTube description.
-      </p>
     </div>
   );
 }

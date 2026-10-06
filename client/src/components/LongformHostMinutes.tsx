@@ -1,9 +1,9 @@
 import {
   HOST_MINUTES_OPTIONS,
   formatMinSec,
-  hostSectionSecFor,
   type HostBudget,
 } from "@shared/hostMinutes";
+import { StepIssue } from "@/components/StepIssues";
 
 /**
  * "Minutes of talking head" — the per-video host budget on the generate form.
@@ -72,18 +72,6 @@ export function LongformHostMinutes({
           </>
         )}
       </p>
-      <p className="text-xs text-muted-foreground">
-        The first and last {hostSectionSecFor(value)} seconds cut back and forth
-        between the host and b-roll, and the host is on camera in every call to
-        action. The rest of the time is spread as short check-ins, about one a
-        minute. The time that frees up goes to still images.
-      </p>
-      <p className="text-xs text-muted-foreground">
-        That time is also the video's lip-sync limit: retries come out of it,
-        not on top of it. The start, calls to action and end render first and
-        always keep the host; if the limit runs out, the last check-ins become
-        still images instead.
-      </p>
 
       {!hasHostPhoto && (
         <p className="text-xs text-muted-foreground">
@@ -92,12 +80,9 @@ export function LongformHostMinutes({
         </p>
       )}
       {hasHostPhoto && filmSec > 0 && estimate.overGuide && (
-        <p className="text-xs text-warning">
-          On this ~{formatMinSec(filmSec)} script the guide is{" "}
-          {formatMinSec(estimate.guideSec)} of host (
-          {Math.round((estimate.guideSec / filmSec) * 100)}%). You'll be asked
-          to confirm {value} min when you generate.
-        </p>
+        <StepIssue>
+          {`On this ~${formatMinSec(filmSec)} script the guide is ${formatMinSec(estimate.guideSec)} of host (${Math.round((estimate.guideSec / filmSec) * 100)}%). You'll be asked to confirm ${value} min when you generate.`}
+        </StepIssue>
       )}
     </div>
   );

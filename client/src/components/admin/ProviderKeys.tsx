@@ -56,11 +56,6 @@ function MockModeToggle() {
                 ? "ON — no credits spent"
                 : "OFF — live providers"}
           </div>
-          <div className="text-xs text-muted-foreground">
-            Replaces voiceover, stills, b-roll video and host lip-sync with
-            local placeholders. Assembly, R2 and music beds stay real, so you
-            still get a playable MP4.
-          </div>
         </div>
         <Button
           variant={enabled ? "destructive" : "default"}
@@ -165,7 +160,7 @@ export function HostLipsyncToggle() {
           <div className="text-xs text-muted-foreground">
             {onRunpod
               ? "Your own GPU: 720p, billed by GPU second. HeyGen keys below are kept but unused."
-              : "1080p, pooled accounts, billed per second of finished video."}
+              : null}
             {!ready && blockedReason ? (
               <>
                 {" "}
@@ -611,13 +606,6 @@ export function ProviderKeys() {
             />
           </>
         )}
-        <p className="text-xs text-muted-foreground">
-          Every new video renders its b-roll on whichever account is least
-          busy, and stays on it until it is done — more accounts means less
-          waiting when several people render at once. Save a row empty to remove
-          that account. The Edit Images/Videos pages are APIMART-only on their
-          own key; blank ⇒ those pages can&apos;t generate.
-        </p>
       </div>
 
       {/*
@@ -684,13 +672,6 @@ export function ProviderKeys() {
             onAdd={() => setHeygenExtra(n => n + 1)}
           />
         )}
-        <p className="text-xs text-muted-foreground">
-          Every new video lip-syncs its host on whichever account is least
-          busy. HeyGen caps concurrent renders per account, so each account
-          added renders that much wider. With no account here, videos use the
-          shared <code className="text-[11px]">HEYGEN_API_KEY</code>; with that
-          unset too, host scenes fail loudly.
-        </p>
         {!heygenLoading && (
           <div className="space-y-2 border-t border-border pt-3">
             <KeyRow
@@ -711,11 +692,6 @@ export function ProviderKeys() {
                 />
               }
             />
-            <p className="text-xs text-muted-foreground">
-              Used only by the HeyGen test page — films never touch it, so
-              trying photos never spends a film account&apos;s credits. The test
-              page picks it first; the accounts above stay there as a backup.
-            </p>
           </div>
         )}
       </div>

@@ -6,6 +6,7 @@ import { Check, Loader2, Star } from "lucide-react";
 import { toast } from "sonner";
 import { HostPhotoTile } from "./HostPhotoTile";
 import { HostPhotoPreview } from "./HostPhotoPreview";
+import { StepIssue } from "./StepIssues";
 
 /**
  * Which of the channel's host photos its videos are shot from.
@@ -95,10 +96,10 @@ export function LongformHostPhotoPicker({
 
   if (!rows.length)
     return (
-      <p className="text-[11px] font-medium text-destructive">
+      <StepIssue tone="error">
         This channel has no host photos — add one under Channels, or host scenes
         cannot be rendered.
-      </p>
+      </StepIssue>
     );
 
   const busy = setSelected.isPending || setPrimary.isPending;
@@ -119,12 +120,6 @@ export function LongformHostPhotoPicker({
   return (
     <div className="space-y-2">
       <Label className="text-xs">Host photos</Label>
-      <p className="text-[11px] text-muted-foreground">
-        Which camera angles this channel&apos;s videos are shot from. The first
-        is the primary — it opens the film and carries the split-screen scenes.
-        The rest take turns with it, so every ticked photo is seen about as
-        often. Ticks and the primary are saved to the channel, for everyone.
-      </p>
       <div className="flex flex-wrap gap-2">
         {rows.map((p, i) => {
           const on = chosenIds.includes(p.id);

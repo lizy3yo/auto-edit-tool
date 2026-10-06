@@ -150,7 +150,7 @@ export default function LibraryPage() {
       <PageHeader
         icon={LibraryBig}
         title="Your library"
-        description={`${total} video${total === 1 ? "" : "s"} — open one to keep working, or start a new render.`}
+        description={`${total} video${total === 1 ? "" : "s"}`}
         actions={
           <Button onClick={() => navigate("/")} className="gap-1.5">
             <Plus className="h-4 w-4" />

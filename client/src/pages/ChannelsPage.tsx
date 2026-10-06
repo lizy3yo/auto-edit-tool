@@ -21,7 +21,6 @@ export default function ChannelsPage() {
       <PageHeader
         icon={Tv}
         title="Channels"
-        description="Host photos, voice, persona and CTA assets. A render reads these on every generate, so this is the page you'll come back to most."
       />
       <ChannelConfigPanel />
     </div>

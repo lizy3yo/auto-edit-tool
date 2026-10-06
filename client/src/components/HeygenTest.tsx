@@ -191,9 +191,6 @@ export function HeygenTest() {
             <Label className="text-xs">
               Photos ({imageUrls.length}/{HEYGEN_TEST_MAX_IMAGES})
             </Label>
-            <p className="text-[11px] text-muted-foreground">
-              Every photo is tested as uploaded, the same as the videos.
-            </p>
             <div className="flex flex-wrap gap-2">
               {photos.map((p, i) => (
                 // The same tile as the generate form's picker (HostPhotoTile): the picture opens

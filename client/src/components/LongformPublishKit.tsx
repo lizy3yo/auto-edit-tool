@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   Copy,
   Check,
+  ChevronRight,
   Loader2,
   ListVideo,
   Link2,
@@ -82,6 +83,68 @@ function CopyButton({
 }
 
 /**
+ * One fold-away row of the publish kit: a title, a one-line summary of what is inside, and the
+ * row's main action (copy) reachable without opening it. Closed until asked for — open, the
+ * three of them ran well past a screen.
+ */
+function KitSection({
+  icon: Icon,
+  title,
+  summary,
+  action,
+  children,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  title: string;
+  summary: string;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const bodyId = useId();
+  return (
+    <section className="border-t border-border first:border-t-0">
+      <div className="flex items-center gap-2 px-3 py-2.5">
+        <button
+          type="button"
+          onClick={() => setOpen(v => !v)}
+          aria-expanded={open}
+          aria-controls={bodyId}
+          className="group flex min-w-0 flex-1 items-center gap-3 text-left"
+        >
+          <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-medium">{title}</span>
+            <span className="block truncate text-xs text-muted-foreground">
+              {summary}
+            </span>
+          </span>
+        </button>
+        {action}
+        <button
+          type="button"
+          onClick={() => setOpen(v => !v)}
+          aria-label={open ? `Hide ${title}` : `Show ${title}`}
+          className="shrink-0 rounded p-1 text-muted-foreground hover:text-foreground"
+        >
+          <ChevronRight
+            aria-hidden
+            className={`h-4 w-4 transition-transform ${open ? "rotate-90" : ""}`}
+          />
+        </button>
+      </div>
+      {open && (
+        <div id={bodyId} className="space-y-2 px-3 pb-3 sm:pl-10">
+          {children}
+        </div>
+      )}
+    </section>
+  );
+}
+
+const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
+
+/**
  * Colour per shot kind, so the map is scannable without reading every row.
  *
  * Light-mode weights: a `50` fill under `700` text, rather than the `500/15` fill
@@ -139,15 +202,48 @@ export function LongformPublishKit({
   const rows = showAll ? data.timeline : data.summary;
   const labels = data.labels as Record<string, string>;
 
+  // The kit lists a book once per call to action; a book pitched twice is one row here.
+  const books: ((typeof data.books)[number] & { uses: number })[] = [];
+  for (const b of data.books) {
+    const same = books.find(
+      x => x.title === b.title && x.trackingUrl === b.trackingUrl
+    );
+    if (same) same.uses += 1;
+    else books.push({ ...b, uses: 1 });
+  }
+  const bookStatus = books.some(b => !b.trackingUrl)
+    ? "a book has no shop link"
+    : books.some(b => b.qrVerified === false)
+      ? "check the QR before publishing"
+      : books.every(b => b.qrVerified === true)
+        ? "QR verified"
+        : "";
+  const onlyLink = books.length === 1 ? books[0].trackingUrl : undefined;
+  const descriptionLines = (data.description ?? "").split("\n");
+  const linkCount = descriptionLines.filter(l => /^https?:\/\//.test(l.trim()))
+    .length;
+  const chapterCount = descriptionLines.filter(l => /^\d+:\d{2}\s/.test(l))
+    .length;
+  const hasKit =
+    books.length > 0 || !!data.description || data.timeline.length > 0;
+
   return (
     <div className="space-y-5">
+      {hasKit && (
+      <div className="rounded-md border border-border">
       {/* ── Tracking links + QR ───────────────────────────────── */}
-      {data.books.length > 0 && (
-        <div className="space-y-2">
-          <Label className="flex items-center gap-2 text-sm font-medium">
-            <Link2 className="h-4 w-4" /> Tracking links
-          </Label>
-          {data.books.map(b => (
+      {books.length > 0 && (
+        <KitSection
+          icon={Link2}
+          title="Tracking links"
+          summary={[plural(books.length, "book"), bookStatus]
+            .filter(Boolean)
+            .join(" · ")}
+          action={
+            onlyLink ? <CopyButton text={onlyLink} label="Copy link" /> : null
+          }
+        >
+          {books.map(b => (
             <div
               key={`${b.ctaIndex}-${b.bookId}`}
               className="flex items-start gap-3 rounded-md border border-border bg-secondary/30 p-3"
@@ -182,6 +278,11 @@ export function LongformPublishKit({
                         <CheckCircle2 className="h-3 w-3" /> QR verified
                       </p>
                     )}
+                    {b.uses > 1 && (
+                      <p className="text-[11px] text-muted-foreground">
+                        Used in {b.uses} calls to action
+                      </p>
+                    )}
                   </>
                 ) : (
                   <p className="flex items-center gap-1.5 text-[11px] text-warning">
@@ -191,42 +292,51 @@ export function LongformPublishKit({
                   </p>
                 )}
               </div>
-              {b.trackingUrl && (
+              {b.trackingUrl && !onlyLink && (
                 <CopyButton text={b.trackingUrl} label="Link" />
               )}
             </div>
           ))}
-        </div>
+        </KitSection>
       )}
 
       {/* ── Description ───────────────────────────────────────── */}
       {data.description && (
-        <div className="space-y-2">
-          <div className="flex items-center justify-between gap-2">
-            <Label className="flex items-center gap-2 text-sm font-medium">
-              <Youtube className="h-4 w-4" /> Description
-            </Label>
+        <KitSection
+          icon={Youtube}
+          title="Description"
+          summary={
+            [
+              linkCount > 0 && plural(linkCount, "link"),
+              chapterCount > 0 && plural(chapterCount, "chapter"),
+            ]
+              .filter(Boolean)
+              .join(" · ") || "For the YouTube description"
+          }
+          action={
             <CopyButton text={data.description} label="Copy description" />
-          </div>
+          }
+        >
           <Textarea
             readOnly
             value={data.description}
             className="min-h-[120px] resize-y font-mono text-xs"
           />
-          <p className="text-xs text-muted-foreground">
-            Paste this into the video's YouTube description. The links carry
-            this video's tag — that's what makes its sales countable.
-          </p>
-        </div>
+        </KitSection>
       )}
 
       {/* ── Timestamp map ─────────────────────────────────────── */}
       {data.timeline.length > 0 && (
-        <div className="space-y-2">
-          <div className="flex items-center justify-between gap-2">
-            <Label className="flex items-center gap-2 text-sm font-medium">
-              <ListVideo className="h-4 w-4" /> Where everything is
-            </Label>
+        <KitSection
+          icon={ListVideo}
+          title="Scene map"
+          summary={
+            onSeek
+              ? `${plural(data.timeline.length, "scene")} · click a row to jump there`
+              : plural(data.timeline.length, "scene")
+          }
+        >
+          <div className="flex justify-end">
             <Button
               variant="ghost"
               size="sm"
@@ -275,12 +385,9 @@ export function LongformPublishKit({
               </button>
             ))}
           </div>
-          {onSeek && (
-            <p className="text-xs text-muted-foreground">
-              Click a row to jump the player there.
-            </p>
-          )}
-        </div>
+        </KitSection>
+      )}
+      </div>
       )}
 
       {/* ── YouTube link back ─────────────────────────────────── */}

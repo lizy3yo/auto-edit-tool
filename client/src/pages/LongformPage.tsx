@@ -335,7 +335,6 @@ export default function FaceLockVideo() {
         <PageHeader
           icon={Film}
           title="Long-form video"
-          description={`Generate ${MAX_SLOTS} videos in parallel — each tab is its own job with its own script and channel, and each spends credits on its own.`}
           actions={
             balance && (
               <div className="flex items-center gap-2 rounded-lg border border-border bg-muted px-3 py-1.5 text-sm">
@@ -394,15 +393,12 @@ export default function FaceLockVideo() {
                   key={i}
                   value={String(i)}
                   className={`gap-1.5 px-3 py-1.5 ${needsAttention[i] ? "tab-pulse" : ""}`}
-                  title={draftTitles[i] || `Video ${i + 1}`}
+                  title={draftTitles[i]?.trim() || `Tab ${i + 1}`}
                 >
                   {statusIcon(slotStatuses[i])}
-                  {/* Five tabs all reading "Video N" gave no way to tell which job
-                      was which; the draft title is what the operator actually
-                      recognises, so it wins the label when there is one. */}
-                  <span className="max-w-36 truncate">
-                    {draftTitles[i]?.trim() || `Video ${i + 1}`}
-                  </span>
+                  {/* A fixed label, so the row never changes width; the video's
+                      title is the tooltip. */}
+                  <span>Tab {i + 1}</span>
                 </TabsTrigger>
               ))}
             </TabsList>

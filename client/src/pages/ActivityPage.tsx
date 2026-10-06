@@ -284,7 +284,6 @@ export default function ActivityPage() {
       <PageHeader
         icon={Activity}
         title="Activity"
-        description="Every video being made right now, by everyone. Take one over to fix it — its owner's buttons pause until you hand it back."
         actions={
           people.length > 1 && (
             <Select value={person} onValueChange={setPerson}>

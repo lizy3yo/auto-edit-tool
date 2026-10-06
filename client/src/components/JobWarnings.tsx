@@ -1,4 +1,13 @@
 import { useId, useState } from "react";
+import { AlertTriangle } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import {
   groupJobWarnings,
   warningScenesLabel,
@@ -47,6 +56,52 @@ function WarningRow({ group }: { group: JobWarningGroup }) {
         </>
       )}
     </li>
+  );
+}
+
+/**
+ * The job card's issues behind one counted button: the reason a video failed and its warnings,
+ * opened in a dialog so they take no room on the card. Red when the video failed, amber for
+ * warnings alone; nothing at all when there is neither.
+ */
+export function JobIssuesButton({
+  error,
+  warnings,
+}: {
+  /** Why the video failed, when it did. */
+  error?: string;
+  warnings: string[];
+}) {
+  const count = (error ? 1 : 0) + groupJobWarnings(warnings).length;
+  if (count === 0) return null;
+  const label = `${count} issue${count === 1 ? "" : "s"}`;
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-label={label}
+          className={`tabular-nums ${error ? "text-destructive hover:text-destructive" : "text-warning hover:text-warning"}`}
+        >
+          <AlertTriangle className="mr-1.5 h-4 w-4" />
+          {count}
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{label}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          {error && (
+            <p className="whitespace-pre-line text-sm text-destructive">
+              {error}
+            </p>
+          )}
+          <JobWarnings warnings={warnings} />
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

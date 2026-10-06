@@ -277,7 +277,7 @@ export function LongformVideoPlayer({
               ? "Preparing a light version for slow connections…"
               : activeSrc === src
                 ? "Playing full quality"
-                : "Playing the light version — full screen and Download are full quality"}
+                : null}
           </span>
           <label className="flex items-center gap-1.5">
             Quality

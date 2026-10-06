@@ -13,7 +13,6 @@ export default function VslPage() {
       <PageHeader
         icon={Megaphone}
         title="Upsell VSL"
-        description="The host thanks the buyer and offers the bundle — a clip of up to 30 seconds for the top of the upsell page."
       />
       <UpsellVsl />
     </div>

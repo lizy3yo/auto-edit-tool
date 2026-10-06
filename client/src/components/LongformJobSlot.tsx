@@ -41,6 +41,7 @@ import { GenerationCostDialog } from "./GenerationCostDialog";
 import { ChannelVoiceTuning } from "@/components/ChannelVoiceTuning";
 import {
   LongformCtaBooks,
+  MAX_BOOKS,
   type CtaBookAssignment,
 } from "@/components/LongformCtaBooks";
 import { LongformPublishKit } from "@/components/LongformPublishKit";
@@ -69,8 +70,13 @@ import {
   sceneHoldPlan,
 } from "@shared/filmTimeline";
 import { sanitizeError, isCreditError } from "@/lib/errorSanitizer";
-import { JobWarnings } from "@/components/JobWarnings";
-import { JobPicks } from "@/components/JobPicks";
+import { JobIssuesButton } from "@/components/JobWarnings";
+import {
+  IssuesButton,
+  StepIssue,
+  StepIssuesProvider,
+  useStepIssues,
+} from "@/components/StepIssues";
 import { triggerCreditErrorPopup } from "@/components/CreditErrorPopup";
 import type { SplitLayout, StoryboardScene } from "@shared/types";
 import {
@@ -112,6 +118,7 @@ import {
   Search,
   Pencil,
   ChevronRight,
+  SlidersHorizontal,
   Receipt,
   Columns2,
   Scissors,
@@ -158,6 +165,7 @@ function Step({
   children: React.ReactNode;
 }) {
   const bodyId = useId();
+  const { issues, registry } = useStepIssues();
   const collapsible = collapsed !== undefined;
   const isOpen = !collapsed;
 
@@ -184,24 +192,30 @@ function Step({
         // A real <button> rather than a clickable div: this needs to be tabbable and to
         // toggle on Space/Enter, and `aria-expanded` is what tells a screen reader the
         // script is hidden rather than missing.
-        <button
-          type="button"
-          onClick={onToggle}
-          aria-expanded={isOpen}
-          aria-controls={bodyId}
-          className="group flex w-full items-center gap-2.5 text-left"
-        >
-          {heading}
-          <span className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground transition-colors group-hover:text-foreground">
-            {isOpen ? "Hide" : "Show"}
-            <ChevronRight
-              aria-hidden
-              className={`h-3.5 w-3.5 transition-transform ${isOpen ? "rotate-90" : ""}`}
-            />
-          </span>
-        </button>
+        <div className="flex items-center gap-2.5">
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-expanded={isOpen}
+            aria-controls={bodyId}
+            className="group flex min-w-0 flex-1 items-center gap-2.5 text-left"
+          >
+            {heading}
+            <span className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground transition-colors group-hover:text-foreground">
+              {isOpen ? "Hide" : "Show"}
+              <ChevronRight
+                aria-hidden
+                className={`h-3.5 w-3.5 transition-transform ${isOpen ? "rotate-90" : ""}`}
+              />
+            </span>
+          </button>
+          <IssuesButton issues={issues} />
+        </div>
       ) : (
-        <div className="flex items-baseline gap-2.5">{heading}</div>
+        <div className="flex items-center gap-2.5">
+          {heading}
+          <IssuesButton issues={issues} />
+        </div>
       )}
 
       {/* Unmounted rather than hidden while collapsed: the script box is the tallest thing
@@ -209,7 +223,8 @@ function Step({
           there is nothing to preserve by keeping it mounted. */}
       {isOpen ? (
         <div id={bodyId} className="mt-3 space-y-2 sm:pl-[30px]">
-          {children}
+          {/* Warnings raised anywhere in the step are listed on its heading, not in its body. */}
+          <StepIssuesProvider value={registry}>{children}</StepIssuesProvider>
           {hint && (
             <p className="text-xs leading-relaxed text-muted-foreground">
               {hint}
@@ -240,20 +255,13 @@ function ChannelAssetsNote({ channelKey }: { channelKey: string }) {
     { enabled: !!channelKey }
   );
   const count = data?.length ?? 0;
+  // Assets are optional, so a channel without any has nothing to report here.
+  if (count === 0) return null;
   return (
     <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
       <Images className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-      {count > 0 ? (
-        <>
-          {count} channel asset{count === 1 ? "" : "s"} will show in this
-          video&apos;s call-to-action. Manage them under Channels.
-        </>
-      ) : (
-        <>
-          No channel assets set. Add product shots or extra renders under
-          Channels and every video on this channel will show them.
-        </>
-      )}
+      {count} channel asset{count === 1 ? "" : "s"} will show in this
+      video&apos;s call-to-action. Manage them under Channels.
     </p>
   );
 }
@@ -353,6 +361,10 @@ export default function LongformJobSlot({
   // Open while a tab is still being filled in, folded once it holds a render (see the
   // hydration effect). Never auto-collapses while you are typing — only adopting a job does it.
   const [scriptCollapsed, setScriptCollapsed] = useState(false);
+  // The whole setup form folds into one bar once the tab holds a video, so the video is what
+  // the page opens on. Folded again for each new video; the operator's toggle wins in between.
+  const [setupCollapsed, setSetupCollapsed] = useState(false);
+  const setupBodyId = useId();
   const [channelKey, setChannelKey] = useState<string>("");
   // Which of the channel's host photos this video may use. Empty = every active one, which is
   // also how the server reads an omitted list, so an untouched form behaves as it always did.
@@ -1023,20 +1035,18 @@ export default function LongformJobSlot({
     onError: err => toast.error(err.message),
   });
 
-  const retryNarrationMutation = trpc.longformVideo.retryNarration.useMutation(
-    {
-      onSuccess: data => {
-        toast.success(
-          data.result === "checking"
-            ? "Checking the voice provider now..."
-            : "Recording the narration again — same script and settings."
-        );
-        watchJob();
-        if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
-      },
-      onError: err => toast.error(err.message),
-    }
-  );
+  const retryNarrationMutation = trpc.longformVideo.retryNarration.useMutation({
+    onSuccess: data => {
+      toast.success(
+        data.result === "checking"
+          ? "Checking the voice provider now..."
+          : "Recording the narration again — same script and settings."
+      );
+      watchJob();
+      if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
+    },
+    onError: err => toast.error(err.message),
+  });
 
   const repairTimelineMutation = trpc.longformVideo.repairTimeline.useMutation({
     onSuccess: () => {
@@ -1173,8 +1183,8 @@ export default function LongformJobSlot({
           ? // Whatever the person fixing it starts has to show up here without a click.
             5000
           : Date.now() < jobWatchUntil
-          ? 1000
-          : false;
+            ? 1000
+            : false;
     },
   });
 
@@ -1211,10 +1221,13 @@ export default function LongformJobSlot({
     (hostRegenerationLocked(scene) || overHostLimit(scene));
 
   const isProcessing = job?.status === "processing";
+  useEffect(() => {
+    setSetupCollapsed(jobId !== null);
+  }, [jobId]);
+  const setupFolded = !!job && setupCollapsed;
   // The storyboard before the narration exists is a rough cut the shot list will redo.
   const isDraftStoryboard =
-    isProcessing &&
-    (job?.stage === "storyboard" || job?.stage === "voiceover");
+    isProcessing && (job?.stage === "storyboard" || job?.stage === "voiceover");
   // The job's live scene-edit queue, from the server (which scenes wait / render right now).
   // Both "the pipeline is rendering" and "the operator is editing scenes" read status
   // "processing" on the job row; this is what tells them apart. The local optimistic queue is
@@ -1286,6 +1299,20 @@ export default function LongformJobSlot({
     setCtaBooks(books);
   }, [jobId, job?.ctaBooks]);
 
+  // And the picks the form does not get from the job any other way, so Video setup shows what
+  // THIS video was made with instead of the form's defaults. A video made before a pick was
+  // saved leaves that control as it is.
+  const hydratedPicksFor = useRef<number | null>(null);
+  useEffect(() => {
+    if (jobId === null || !job?.picks) return;
+    if (hydratedPicksFor.current === jobId) return;
+    hydratedPicksFor.current = jobId;
+    if (job.picks.hostMinutes != null) setHostMinutes(job.picks.hostMinutes);
+    setTtsVendor(job.picks.voice === "minimax" ? "minimax" : undefined);
+    const title = job.picks.title;
+    if (title) setDownloadTitle(prev => (prev.trim() ? prev : title));
+  }, [jobId, job?.picks]);
+
   // A cleared tab is a fresh start: hydrate again for the next job, and open the box back up
   // because an empty collapsed script step is a dead end — there would be nothing to click
   // toward and no way to see that a script is what's missing.
@@ -1293,6 +1320,7 @@ export default function LongformJobSlot({
     if (jobId === null) {
       hydratedScriptFor.current = null;
       hydratedBooksFor.current = null;
+      hydratedPicksFor.current = null;
       setScriptCollapsed(false);
     }
   }, [jobId]);
@@ -1834,11 +1862,13 @@ export default function LongformJobSlot({
     script.trim().length > 0 &&
     !!channelKey &&
     !!channelDefaults?.voiceId &&
+    downloadTitle.trim().length > 0 &&
     !generateMutation.isPending &&
     !isProcessing;
 
   const wordCount = useMemo(
-    () => stripVoiceDirections(script).trim().split(/\s+/).filter(Boolean).length,
+    () =>
+      stripVoiceDirections(script).trim().split(/\s+/).filter(Boolean).length,
     [script]
   );
   // `[laughs]`-style directions: acted out only on an ElevenLabs voice on eleven_v4 — the same
@@ -1872,6 +1902,37 @@ export default function LongformJobSlot({
     { channelKey, activeOnly: true },
     { enabled: !!channelKey }
   );
+
+  // Picking a channel puts its saved books in the list, as "Add from channel" would. Once per
+  // channel, so a book the operator removes stays removed; a tab holding a video keeps the
+  // books that video was made with, and seeds again once it is cleared.
+  const seededBooksFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (jobId !== null) {
+      seededBooksFor.current = null;
+      return;
+    }
+    if (!channelKey || !dialogChannelBooks) return;
+    if (seededBooksFor.current === channelKey) return;
+    seededBooksFor.current = channelKey;
+    setCtaBooks(prev => {
+      // Another channel's books leave with it; rows typed or uploaded here stay.
+      const kept = prev.filter(b => !b.fromChannel);
+      const has = (title: string) =>
+        kept.some(
+          b => b.title.trim().toLowerCase() === title.trim().toLowerCase()
+        );
+      const added = dialogChannelBooks
+        .filter(b => !has(b.title))
+        .map(b => ({
+          title: b.title,
+          coverImageUrl: b.coverImageUrl ?? undefined,
+          shopUrl: b.shopUrl ?? undefined,
+          fromChannel: true,
+        }));
+      return [...kept, ...added].slice(0, MAX_BOOKS);
+    });
+  }, [jobId, channelKey, dialogChannelBooks]);
 
   // A finished film can have a book configured but no cover-reveal beat anywhere in the
   // storyboard — the storyboard-time marking pass couldn't place one (or the channel's book was
@@ -1980,7 +2041,9 @@ export default function LongformJobSlot({
           ? "Pick a channel — it supplies the voice and host."
           : !channelDefaults?.voiceId
             ? "That channel has no voice configured. Set one under Channels."
-            : null;
+            : !downloadTitle.trim()
+              ? "Enter a video title."
+              : null;
 
   /**
    * `hostOverride` is the operator's answer to the over-the-guide warning — true "use my minutes
@@ -2033,210 +2096,238 @@ export default function LongformJobSlot({
           that container instead of the viewport — the generate button below would
           silently stop sticking. The footer rounds its own bottom corners instead. */}
       <Card className="gap-0 py-0">
-        <Step
-          n={1}
-          title="Script"
-          hint="Spoken words only, voiced verbatim. Directing notes here would be read aloud — the host look, b-roll style and 16:9 framing come from the saved Longform instruction, and the host photo and face model from the channel."
-          collapsed={scriptCollapsed}
-          onToggle={() => setScriptCollapsed(c => !c)}
-          summary={
-            // Enough to recognise WHICH script is folded up in this tab without opening it —
-            // five tabs of "112 words" would say nothing about which is which.
-            <div className="space-y-1">
-              <p className="line-clamp-2 text-xs leading-relaxed text-muted-foreground">
-                {script.trim() || "No script yet."}
-              </p>
-              {wordCount > 0 && (
-                <p className="text-xs tabular-nums text-muted-foreground">
-                  {wordCount.toLocaleString()} words · roughly{" "}
-                  {estimatedMinutes} of narration
-                </p>
-              )}
-            </div>
-          }
+        {job && (
+          <button
+            type="button"
+            onClick={() => setSetupCollapsed(c => !c)}
+            aria-expanded={!setupFolded}
+            aria-controls={setupBodyId}
+            className="group flex w-full items-center gap-3 px-5 py-3.5 text-left sm:px-6"
+          >
+            <SlidersHorizontal
+              aria-hidden
+              className="h-4 w-4 shrink-0 text-muted-foreground"
+            />
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-medium">Video setup</span>
+              <span className="block truncate text-xs text-muted-foreground">
+                {[
+                  channels.find(ch => ch.key === channelKey)?.name,
+                  job.picks?.hostMinutes != null && `${hostMinutes} min host`,
+                  wordCount > 0 && `${wordCount.toLocaleString()} words`,
+                  ctaBooks.length > 0 &&
+                    `${ctaBooks.length} book${ctaBooks.length === 1 ? "" : "s"}`,
+                  downloadTitle.trim(),
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </span>
+            </span>
+            <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground transition-colors group-hover:text-foreground">
+              {setupFolded ? "Show" : "Hide"}
+              <ChevronRight
+                aria-hidden
+                className={`h-3.5 w-3.5 transition-transform ${setupFolded ? "" : "rotate-90"}`}
+              />
+            </span>
+          </button>
+        )}
+        {/* Hidden, not unmounted, while folded: the steps hold unsaved picks (narration upload,
+            voice sliders) that a remount would drop. */}
+        <div
+          id={setupBodyId}
+          className={`${job ? "border-t border-border" : ""} ${setupFolded ? "hidden" : ""}`}
         >
-          <Textarea
-            id={`lf-script-${slotIndex}`}
-            value={script}
-            onChange={e => setScript(e.target.value)}
-            placeholder="Paste the spoken script…"
-            className="min-h-[200px] resize-y text-sm leading-relaxed"
-          />
-          {/* Live, because script length is what decides runtime and spend, and
-              that used to be invisible until the voiceover stage reported back. */}
-          <p className="text-xs tabular-nums text-muted-foreground">
-            {wordCount.toLocaleString()} word{wordCount === 1 ? "" : "s"}
-            {wordCount > 0 && ` · roughly ${estimatedMinutes} of narration`}
-          </p>
-          {/* B-roll VIDEO renders on an APIMART account (stills always use OpenAI gpt-image-2).
-              Key status is admin-only (getApimartKeys is adminProcedure), so the warning is too. */}
-          {apimartKeyMissing && (
-            <Alert tone="warning" className="text-xs">
-              No APIMART account has a key — add one in Admin → Provider
-              keys, or b-roll video cannot render.
-            </Alert>
-          )}
-        </Step>
-
-        <Step
-          n={2}
-          title="Channel"
-          hint="The voiceover uses this channel's saved voice."
-        >
-          <Select value={channelKey} onValueChange={setChannelKey}>
-            <SelectTrigger className="w-full sm:max-w-sm">
-              <SelectValue placeholder="Select a channel…" />
-            </SelectTrigger>
-            <SelectContent>
-              {channels.map(ch => (
-                <SelectItem key={ch.key} value={ch.key}>
-                  {ch.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          {channelKey && channelDefaults && (
-            <div className="space-y-2 rounded-md border border-border bg-muted/50 p-3 text-xs">
-              {channelDefaults.voiceId ? (
-                <p>
-                  <span className="font-medium">Voice: </span>
-                  <span className="text-muted-foreground">
-                    {channelDefaults.voiceName ?? channelDefaults.voiceId}
-                  </span>
+          <Step
+            n={1}
+            title="Script"
+            hint="Spoken words only, voiced verbatim. Directing notes here would be read aloud — the host look, b-roll style and 16:9 framing come from the saved Longform instruction, and the host photo and face model from the channel."
+            collapsed={scriptCollapsed}
+            onToggle={() => setScriptCollapsed(c => !c)}
+            summary={
+              // Enough to recognise WHICH script is folded up in this tab without opening it —
+              // five tabs of "112 words" would say nothing about which is which.
+              <div className="space-y-1">
+                <p className="line-clamp-2 text-xs leading-relaxed text-muted-foreground">
+                  {script.trim() || "No script yet."}
                 </p>
-              ) : (
-                <p className="font-medium text-destructive">
-                  No voice configured for this channel — set one under Channels.
-                </p>
-              )}
-              {directionCount > 0 &&
-                channelDefaults.voiceId &&
-                !manualNarrationUrl && (
-                  <p
-                    className={
-                      directionsBlocked
-                        ? "text-warning"
-                        : "text-muted-foreground"
-                    }
-                  >
-                    {directionsBlocked
-                      ? `This script has ${directionCount} voice direction${directionCount === 1 ? "" : "s"} like [laughs], but ${directionsBlocked}, so they will be left out.`
-                      : `The voice will act out this script's ${directionCount} direction${directionCount === 1 ? "" : "s"} like [laughs].`}
+                {wordCount > 0 && (
+                  <p className="text-xs tabular-nums text-muted-foreground">
+                    {wordCount.toLocaleString()} words · roughly{" "}
+                    {estimatedMinutes} of narration
                   </p>
                 )}
-              {/* These two are siblings and both remount per channel, so each key carries its own
+              </div>
+            }
+          >
+            <Textarea
+              id={`lf-script-${slotIndex}`}
+              value={script}
+              onChange={e => setScript(e.target.value)}
+              placeholder="Paste the spoken script…"
+              className="min-h-[200px] resize-y text-sm leading-relaxed"
+            />
+            {/* Live, because script length is what decides runtime and spend, and
+              that used to be invisible until the voiceover stage reported back. */}
+            <p className="text-xs tabular-nums text-muted-foreground">
+              {wordCount.toLocaleString()} word{wordCount === 1 ? "" : "s"}
+              {wordCount > 0 && ` · roughly ${estimatedMinutes} of narration`}
+            </p>
+            {/* B-roll VIDEO renders on an APIMART account (stills always use OpenAI gpt-image-2).
+              Key status is admin-only (getApimartKeys is adminProcedure), so the warning is too. */}
+            {apimartKeyMissing && (
+              <StepIssue>
+                No APIMART account has a key — add one in Admin → Provider keys,
+                or b-roll video cannot render.
+              </StepIssue>
+            )}
+          </Step>
+
+          <Step n={2} title="Channel">
+            <Select value={channelKey} onValueChange={setChannelKey}>
+              <SelectTrigger className="w-full sm:max-w-sm">
+                <SelectValue placeholder="Select a channel…" />
+              </SelectTrigger>
+              <SelectContent>
+                {channels.map(ch => (
+                  <SelectItem key={ch.key} value={ch.key}>
+                    {ch.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {channelKey && channelDefaults && (
+              <div className="space-y-2 rounded-md border border-border bg-muted/50 p-3 text-xs">
+                {channelDefaults.voiceId ? (
+                  <p>
+                    <span className="font-medium">Voice: </span>
+                    <span className="text-muted-foreground">
+                      {channelDefaults.voiceName ?? channelDefaults.voiceId}
+                    </span>
+                  </p>
+                ) : (
+                  <StepIssue tone="error">
+                    No voice configured for this channel — set one under
+                    Channels.
+                  </StepIssue>
+                )}
+                {directionCount > 0 &&
+                  channelDefaults.voiceId &&
+                  !manualNarrationUrl &&
+                  (directionsBlocked ? (
+                    <StepIssue>
+                      {`This script has ${directionCount} voice direction${directionCount === 1 ? "" : "s"} like [laughs], but ${directionsBlocked}, so they will be left out.`}
+                    </StepIssue>
+                  ) : (
+                    <p className="text-muted-foreground">
+                      {`The voice will act out this script's ${directionCount} direction${directionCount === 1 ? "" : "s"} like [laughs].`}
+                    </p>
+                  ))}
+                {/* These two are siblings and both remount per channel, so each key carries its own
                   prefix: two siblings sharing one key make React duplicate one and drop the other. */}
-              <ChannelVoiceTuning
-                key={`voice-${channelKey}`}
-                channelKey={channelKey}
-                ttsSpeed={channelDefaults.ttsSpeed}
-                ttsVolume={channelDefaults.ttsVolume}
-              />
-              <LongformHostPhotoPicker
-                key={`photos-${channelKey}`}
-                channelKey={channelKey}
-                value={hostPhotoIds}
-                onChange={setHostPhotoIds}
-                hostMinutes={hostMinutes}
-                disabled={generateMutation.isPending || isProcessing}
-              />
-              {/* Escape hatch for a TTS vendor that is down. Sits under the voice because it
+                <ChannelVoiceTuning
+                  key={`voice-${channelKey}`}
+                  channelKey={channelKey}
+                  ttsSpeed={channelDefaults.ttsSpeed}
+                  ttsVolume={channelDefaults.ttsVolume}
+                />
+                <LongformHostPhotoPicker
+                  key={`photos-${channelKey}`}
+                  channelKey={channelKey}
+                  value={hostPhotoIds}
+                  onChange={setHostPhotoIds}
+                  hostMinutes={hostMinutes}
+                  disabled={generateMutation.isPending || isProcessing}
+                />
+                {/* Escape hatch for a TTS vendor that is down. Sits under the voice because it
                   REPLACES it: with a supplied narration the channel's voice is not used. */}
-              <LongformNarrationUpload
-                script={script}
-                channelKey={channelKey}
-                value={manualNarrationUrl}
-                onChange={setManualNarrationUrl}
-                deliveryPlan={manualDeliveryPlan}
-                onDeliveryPlanChange={setManualDeliveryPlan}
-                vendor={ttsVendor}
-                onVendorChange={setTtsVendor}
-                voice={channelDefaults}
-                disabled={generateMutation.isPending || isProcessing}
-              />
-            </div>
-          )}
-        </Step>
+                <LongformNarrationUpload
+                  script={script}
+                  channelKey={channelKey}
+                  value={manualNarrationUrl}
+                  onChange={setManualNarrationUrl}
+                  deliveryPlan={manualDeliveryPlan}
+                  onDeliveryPlanChange={setManualDeliveryPlan}
+                  vendor={ttsVendor}
+                  onVendorChange={setTtsVendor}
+                  voice={channelDefaults}
+                  disabled={generateMutation.isPending || isProcessing}
+                />
+              </div>
+            )}
+          </Step>
 
-        <Step
-          n={3}
-          title="Talking head"
-          hint="Minutes of host on camera. Lip-sync is billed by the second, so this sets the video's biggest cost."
-        >
-          <LongformHostMinutes
-            value={hostMinutes}
-            onChange={setHostMinutes}
-            estimate={hostEstimate}
-            filmSec={wordCount > 0 ? estimatedFilmSec : 0}
-            ratePerSec={pacingInfo?.hostRatePerSec}
-            hasHostPhoto={!channelKey || !!channelDefaults?.hostPhotoUrl}
-            disabled={generateMutation.isPending || isProcessing}
-          />
-        </Step>
+          <Step n={3} title="Talking head">
+            <LongformHostMinutes
+              value={hostMinutes}
+              onChange={setHostMinutes}
+              estimate={hostEstimate}
+              filmSec={wordCount > 0 ? estimatedFilmSec : 0}
+              ratePerSec={pacingInfo?.hostRatePerSec}
+              hasHostPhoto={!channelKey || !!channelDefaults?.hostPhotoUrl}
+              disabled={generateMutation.isPending || isProcessing}
+            />
+          </Step>
 
-        <Step n={4} title="Call to action" optional>
-          {/* Which book each CTA block pitches — one video can sell more than one. */}
-          <LongformCtaBooks
-            script={script}
-            channelKey={channelKey}
-            value={ctaBooks}
-            onChange={setCtaBooks}
-            disabled={generateMutation.isPending || isProcessing}
-          />
+          <Step n={4} title="Call to action" optional>
+            {/* Which book each CTA block pitches — one video can sell more than one. */}
+            <LongformCtaBooks
+              script={script}
+              channelKey={channelKey}
+              value={ctaBooks}
+              onChange={setCtaBooks}
+              disabled={generateMutation.isPending || isProcessing}
+            />
 
-          {/* Assets are no longer uploaded per video — they live on the channel and every
+            {/* Assets are no longer uploaded per video — they live on the channel and every
               video uses all of them. This is a read-only pointer to where they are set. */}
-          {channelKey && <ChannelAssetsNote channelKey={channelKey} />}
-        </Step>
+            {channelKey && <ChannelAssetsNote channelKey={channelKey} />}
+          </Step>
 
-        <Step
-          n={5}
-          title="Video title"
-          optional
-          hint="Names the tab, the library entry and the downloaded MP4."
-        >
-          <Input
-            value={downloadTitle}
-            onChange={e => setDownloadTitle(e.target.value)}
-            placeholder="Untitled video"
-            className="w-full sm:max-w-sm"
-          />
-        </Step>
+          <Step n={5} title="Video title">
+            <Input
+              value={downloadTitle}
+              onChange={e => setDownloadTitle(e.target.value)}
+              placeholder="Enter a video title"
+              className="w-full sm:max-w-sm"
+            />
+          </Step>
 
-        {/* Sticky rather than in flow: the form above runs well past a screen, so
+          {/* Sticky rather than in flow: the form above runs well past a screen, so
             the button that acts on it used to be off-screen from the moment you
             started typing — you wrote the script, then scrolled back down to find
             the control you had just scrolled past. */}
-        <div className="sticky bottom-0 z-10 rounded-b-xl border-t border-border bg-card/95 px-5 py-4 backdrop-blur-sm sm:px-6">
-          <Button
-            onClick={() => setShowConfirm(true)}
-            disabled={!canGenerate}
-            className="h-11 w-full text-base font-medium"
-            size="lg"
-          >
-            {generateMutation.isPending ? (
-              <>
-                <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                Submitting…
-              </>
-            ) : isProcessing ? (
-              <>
-                <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                Generating…
-              </>
-            ) : (
-              <>
-                <ScanFace className="mr-2 h-5 w-5" />
-                Generate video {slotIndex + 1}
-              </>
-            )}
-          </Button>
-          {/* A disabled button with no reason is the same as a broken one. */}
-          <p className="mt-2 text-center text-xs text-muted-foreground">
-            {blockedReason ??
-              "Voiced word-for-word into a 16:9 film. Length — and cost — follow your script."}
-          </p>
+          <div className="sticky bottom-0 z-10 rounded-b-xl border-t border-border bg-card/95 px-5 py-4 backdrop-blur-sm sm:px-6">
+            <Button
+              onClick={() => setShowConfirm(true)}
+              disabled={!canGenerate}
+              className="h-11 w-full text-base font-medium"
+              size="lg"
+            >
+              {generateMutation.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                  Submitting…
+                </>
+              ) : isProcessing ? (
+                <>
+                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                  Generating…
+                </>
+              ) : (
+                <>
+                  <ScanFace className="mr-2 h-5 w-5" />
+                  Generate video {slotIndex + 1}
+                </>
+              )}
+            </Button>
+            {/* A disabled button with no reason is the same as a broken one. */}
+            <p className="mt-2 text-center text-xs text-muted-foreground">
+              {blockedReason ??
+                "Voiced word-for-word into a 16:9 film. Length — and cost — follow your script."}
+            </p>
+          </div>
         </div>
       </Card>
 
@@ -2277,396 +2368,593 @@ export default function LongformJobSlot({
         disabled={pausedByTakeover}
         className="m-0 min-w-0 space-y-6 border-0 p-0"
       >
-      {/* Progress / result */}
-      {job && (
-        <Card className="bg-card border-primary/20">
-          <CardContent className="p-6 space-y-4">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex min-w-0 flex-1 items-center gap-3">
-                {isProcessing ? (
-                  <Loader2 className="h-5 w-5 shrink-0 animate-spin text-primary" />
-                ) : job.status === "completed" ? (
-                  <CheckCircle2 className="h-5 w-5 shrink-0 text-success" />
-                ) : (
-                  <XCircle className="h-5 w-5 shrink-0 text-destructive" />
-                )}
-                {job.status === "completed" || isEditing ? (
-                  <div className="flex min-w-0 flex-1 items-center gap-2">
-                    <Select value={channelKey} onValueChange={setChannelKey}>
-                      <SelectTrigger className="h-9 w-40 border-border">
-                        <SelectValue placeholder="Channel" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {channels.map(ch => (
-                          <SelectItem key={ch.key} value={ch.key}>
-                            {ch.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <span
-                      className={`min-w-0 flex-1 truncate text-sm ${
-                        job.title ? "font-medium" : "text-muted-foreground"
-                      }`}
-                    >
-                      {job.title || "Video title (optional)"}
-                    </span>
-                  </div>
-                ) : (
-                  <div>
-                    <p className="text-sm font-medium">
-                      {/* "Even out voice" runs on a job that is otherwise done. */}
-                      {phase && job.stage === "done"
-                        ? "Evening out voice"
-                        : STAGE_LABELS[job.stage] || job.stage}
-                    </p>
-                    {phase ? (
-                      <p className="text-xs text-muted-foreground">
-                        {phase.label} · {phase.pct}%
+        {/* Progress / result */}
+        {job && (
+          <Card className="bg-card border-primary/20">
+            <CardContent className="p-6 space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex min-w-0 flex-1 items-center gap-3">
+                  {isProcessing ? (
+                    <Loader2 className="h-5 w-5 shrink-0 animate-spin text-primary" />
+                  ) : job.status === "completed" ? (
+                    <CheckCircle2 className="h-5 w-5 shrink-0 text-success" />
+                  ) : (
+                    <XCircle className="h-5 w-5 shrink-0 text-destructive" />
+                  )}
+                  {job.status === "completed" || isEditing ? (
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
+                      <Select value={channelKey} onValueChange={setChannelKey}>
+                        <SelectTrigger className="h-9 w-40 border-border">
+                          <SelectValue placeholder="Channel" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {channels.map(ch => (
+                            <SelectItem key={ch.key} value={ch.key}>
+                              {ch.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <span
+                        className={`min-w-0 flex-1 truncate text-sm ${
+                          job.title ? "font-medium" : "text-muted-foreground"
+                        }`}
+                      >
+                        {job.title || "Video title (optional)"}
+                      </span>
+                    </div>
+                  ) : (
+                    <div>
+                      <p className="text-sm font-medium">
+                        {/* "Even out voice" runs on a job that is otherwise done. */}
+                        {phase && job.stage === "done"
+                          ? "Evening out voice"
+                          : STAGE_LABELS[job.stage] || job.stage}
                       </p>
-                    ) : (
-                      progress &&
-                      (job.stage === "voiceover" || job.stage === "clips") && (
+                      {phase ? (
                         <p className="text-xs text-muted-foreground">
-                          {progress.scenesDone}/{progress.scenesTotal} scenes
+                          {phase.label} · {phase.pct}%
                         </p>
-                      )
-                    )}
+                      ) : (
+                        progress &&
+                        (job.stage === "voiceover" ||
+                          job.stage === "clips") && (
+                          <p className="text-xs text-muted-foreground">
+                            {progress.scenesDone}/{progress.scenesTotal} scenes
+                          </p>
+                        )
+                      )}
+                    </div>
+                  )}
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <JobIssuesButton
+                    error={
+                      job.status === "failed"
+                        ? sanitizeError(job.errorMessage || "Generation failed")
+                        : undefined
+                    }
+                    warnings={progress?.warnings ?? []}
+                  />
+                  {/* Available during the render too, not just after — the total updates as the
+                  job spends, which is when it is most worth watching. */}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowCost(true)}
+                    className="text-muted-foreground hover:text-primary"
+                    title="What this video cost to generate"
+                  >
+                    <Receipt className="mr-2 h-4 w-4" />
+                    Cost
+                  </Button>
+                  {isPipelineRunning ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => jobId && cancelMutation.mutate({ jobId })}
+                      disabled={cancelMutation.isPending}
+                      className="text-muted-foreground hover:text-destructive"
+                    >
+                      <X className="mr-2 h-4 w-4" />
+                      Cancel
+                    </Button>
+                  ) : (
+                    // "Clear Output" under a bin icon read as "throw this render away", so the
+                    // one control that frees a tab was the last one anybody would risk clicking.
+                    // It has never deleted anything: it nulls this slot's job id, and the render
+                    // stays in the library. The label says that now, and the icon is an X —
+                    // detach — rather than a bin.
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setShowClearConfirm(true)}
+                      className="text-muted-foreground hover:text-foreground"
+                      title="Free this tab — the video stays in your library"
+                    >
+                      <X className="mr-2 h-4 w-4" />
+                      Remove from tab
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              {isEditing && (
+                <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Editing scenes — {sceneEdits.active.length} rendering ·{" "}
+                  {sceneEdits.queued.length +
+                    queuedScenes.filter(
+                      i =>
+                        !sceneEdits.active.includes(i) &&
+                        !sceneEdits.queued.includes(i)
+                    ).length}{" "}
+                  queued. Other scenes stay editable.
+                </p>
+              )}
+              {progress &&
+                !isEditing &&
+                (phase ||
+                  job.stage === "voiceover" ||
+                  job.stage === "clips") && (
+                  <div className="h-2 w-full rounded-full bg-secondary overflow-hidden">
+                    <div
+                      className="h-full bg-primary transition-all"
+                      style={{
+                        width: `${
+                          phase
+                            ? phase.pct
+                            : progress.scenesTotal > 0
+                              ? Math.round(
+                                  (progress.scenesDone / progress.scenesTotal) *
+                                    100
+                                )
+                              : 0
+                        }%`,
+                      }}
+                    />
                   </div>
                 )}
-              </div>
-              <div className="flex shrink-0 items-center gap-1">
-                {/* Available during the render too, not just after — the total updates as the
-                  job spends, which is when it is most worth watching. */}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setShowCost(true)}
-                  className="text-muted-foreground hover:text-primary"
-                  title="What this video cost to generate"
-                >
-                  <Receipt className="mr-2 h-4 w-4" />
-                  Cost
-                </Button>
-                {isPipelineRunning ? (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => jobId && cancelMutation.mutate({ jobId })}
-                    disabled={cancelMutation.isPending}
-                    className="text-muted-foreground hover:text-destructive"
-                  >
-                    <X className="mr-2 h-4 w-4" />
-                    Cancel
-                  </Button>
-                ) : (
-                  // "Clear Output" under a bin icon read as "throw this render away", so the
-                  // one control that frees a tab was the last one anybody would risk clicking.
-                  // It has never deleted anything: it nulls this slot's job id, and the render
-                  // stays in the library. The label says that now, and the icon is an X —
-                  // detach — rather than a bin.
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setShowClearConfirm(true)}
-                    className="text-muted-foreground hover:text-foreground"
-                    title="Free this tab — the video stays in your library"
-                  >
-                    <X className="mr-2 h-4 w-4" />
-                    Remove from tab
-                  </Button>
-                )}
-              </div>
-            </div>
 
-            {isEditing && (
-              <p className="flex items-center gap-2 text-xs text-muted-foreground">
-                <Loader2 className="h-3 w-3 animate-spin" />
-                Editing scenes — {sceneEdits.active.length} rendering ·{" "}
-                {sceneEdits.queued.length +
-                  queuedScenes.filter(
-                    i =>
-                      !sceneEdits.active.includes(i) &&
-                      !sceneEdits.queued.includes(i)
-                  ).length}{" "}
-                queued. Other scenes stay editable.
-              </p>
-            )}
-            {progress &&
-              !isEditing &&
-              (phase || job.stage === "voiceover" || job.stage === "clips") && (
-                <div className="h-2 w-full rounded-full bg-secondary overflow-hidden">
-                  <div
-                    className="h-full bg-primary transition-all"
-                    style={{
-                      width: `${
-                        phase
-                          ? phase.pct
-                          : progress.scenesTotal > 0
-                            ? Math.round(
-                                (progress.scenesDone / progress.scenesTotal) *
-                                  100
-                              )
-                            : 0
-                      }%`,
-                    }}
-                  />
-                </div>
+              {job.picks && (job.picks.madeBy || job.picks.madeAt) && (
+                <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                  <span>
+                    {[
+                      job.picks.madeBy && `Created by ${job.picks.madeBy}`,
+                      job.picks.madeAt &&
+                        new Date(job.picks.madeAt).toLocaleString(undefined, {
+                          year: "numeric",
+                          month: "short",
+                          day: "numeric",
+                          hour: "numeric",
+                          minute: "2-digit",
+                        }),
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </span>
+                  {job.picks.rehearsal && (
+                    <span className="rounded bg-secondary px-1.5 py-0.5 text-[11px] font-medium">
+                      Practice run
+                    </span>
+                  )}
+                </p>
               )}
 
-            {job.picks && (
-              <JobPicks
-                facts={job.picks}
-                channelName={
-                  channels.find(c => c.key === job.picks.channelKey)?.name
-                }
-              />
-            )}
-
-            {job.status === "failed" && (
-              <p className="text-xs text-destructive">
-                {sanitizeError(job.errorMessage || "Generation failed")}
-              </p>
-            )}
-
-            {progress?.warnings && progress.warnings.length > 0 && (
-              <JobWarnings warnings={progress.warnings} />
-            )}
-
-            {/* A stretch of scenes whose narration slices don't fit their words — the aligner
+              {/* A stretch of scenes whose narration slices don't fit their words — the aligner
                 mis-timed them when the film was voiced. Nothing else on the job can fix this:
                 every scene has a clip, so nothing reads as failed, and Regenerate re-renders
                 the same broken slice. Says so, and offers the one action that works. */}
-            {timelineIssues.length > 0 && (
-              <div className="space-y-2 rounded-md border border-warning/40 bg-warning/5 p-3">
-                <p className="text-xs font-medium">
-                  The timeline is broken at{" "}
-                  {timelineIssues
-                    .map(
-                      i =>
-                        `${i.fromIndex === i.toIndex ? `scene ${i.fromIndex}` : `scenes ${i.fromIndex}–${i.toIndex}`} (${clock(i.startSec)}–${clock(i.endSec)})`
-                    )
-                    .join(", ")}
-                  .
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Those scenes were given the wrong share of the narration, so
-                  the picture freezes or flashes past while the voice carries
-                  on. Regenerating them won&apos;t help — it renders the same
-                  wrong length. Repair re-times them from the same narration and
-                  re-renders only the scenes that change; everything that was
-                  already right is kept.
-                </p>
-                {job.errorMessage?.startsWith("Timeline repair:") && (
-                  <p className="text-xs text-destructive">
-                    {sanitizeError(job.errorMessage)}
+              {timelineIssues.length > 0 && (
+                <div className="space-y-2 rounded-md border border-warning/40 bg-warning/5 p-3">
+                  <p className="text-xs font-medium">
+                    The timeline is broken at{" "}
+                    {timelineIssues
+                      .map(
+                        i =>
+                          `${i.fromIndex === i.toIndex ? `scene ${i.fromIndex}` : `scenes ${i.fromIndex}–${i.toIndex}`} (${clock(i.startSec)}–${clock(i.endSec)})`
+                      )
+                      .join(", ")}
+                    .
                   </p>
-                )}
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    if (jobId) repairTimelineMutation.mutate({ jobId });
-                  }}
-                  disabled={repairTimelineMutation.isPending}
-                >
-                  {repairTimelineMutation.isPending
-                    ? "Starting…"
-                    : "Repair timeline"}
-                </Button>
-              </div>
-            )}
+                  <p className="text-xs text-muted-foreground">
+                    Those scenes were given the wrong share of the narration, so
+                    the picture freezes or flashes past while the voice carries
+                    on. Regenerating them won&apos;t help — it renders the same
+                    wrong length. Repair re-times them from the same narration
+                    and re-renders only the scenes that change; everything that
+                    was already right is kept.
+                  </p>
+                  {job.errorMessage?.startsWith("Timeline repair:") && (
+                    <p className="text-xs text-destructive">
+                      {sanitizeError(job.errorMessage)}
+                    </p>
+                  )}
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      if (jobId) repairTimelineMutation.mutate({ jobId });
+                    }}
+                    disabled={repairTimelineMutation.isPending}
+                  >
+                    {repairTimelineMutation.isPending
+                      ? "Starting…"
+                      : "Repair timeline"}
+                  </Button>
+                </div>
+              )}
 
-            {/* The voice provider failed the narration and the job is waiting it out
+              {/* The voice provider failed the narration and the job is waiting it out
                 (`server/ttsRecovery.ts`): it checks on its own and carries on by itself. */}
-            {job.status === "processing" && job.ttsWait && (
-              <div className="space-y-2 rounded-md border border-warning/40 bg-warning/5 p-3">
-                <p className="text-xs font-medium">
-                  {job.ttsWait.vendor} couldn&apos;t record the narration, so
-                  this render is waiting for it to work again.
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  It checks on its own every few minutes and carries on by
-                  itself as soon as {job.ttsWait.vendor} answers — nothing to
-                  paste or fill in again. If it still isn&apos;t working after
-                  about 2 hours, the render stops and says so. Nothing has been
-                  paid for clips.
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Last error: {sanitizeError(job.ttsWait.lastError)}
-                </p>
+              {job.status === "processing" && job.ttsWait && (
+                <div className="space-y-2 rounded-md border border-warning/40 bg-warning/5 p-3">
+                  <p className="text-xs font-medium">
+                    {job.ttsWait.vendor} couldn&apos;t record the narration, so
+                    this render is waiting for it to work again.
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    It checks on its own every few minutes and carries on by
+                    itself as soon as {job.ttsWait.vendor} answers — nothing to
+                    paste or fill in again. If it still isn&apos;t working after
+                    about 2 hours, the render stops and says so. Nothing has
+                    been paid for clips.
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Last error: {sanitizeError(job.ttsWait.lastError)}
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      if (jobId) retryNarrationMutation.mutate({ jobId });
+                    }}
+                    disabled={retryNarrationMutation.isPending}
+                  >
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                    Check now
+                  </Button>
+                </div>
+              )}
+
+              {/* Failed before it was ever voiced: run it again with the same script and
+                settings — no pasting. */}
+              {job.status === "failed" && job.canRetryNarration && (
                 <Button
-                  type="button"
                   size="sm"
-                  variant="outline"
                   onClick={() => {
-                    if (jobId) retryNarrationMutation.mutate({ jobId });
+                    if (!jobId) return;
+                    armNotifications();
+                    retryNarrationMutation.mutate({ jobId });
                   }}
                   disabled={retryNarrationMutation.isPending}
                 >
-                  <RefreshCw className="mr-2 h-4 w-4" />
-                  Check now
+                  {retryNarrationMutation.isPending ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                  )}
+                  Try voicing again
                 </Button>
-              </div>
-            )}
+              )}
 
-            {/* Failed before it was ever voiced: run it again with the same script and
-                settings — no pasting. */}
-            {job.status === "failed" && job.canRetryNarration && (
-              <Button
-                size="sm"
-                onClick={() => {
-                  if (!jobId) return;
-                  armNotifications();
-                  retryNarrationMutation.mutate({ jobId });
-                }}
-                disabled={retryNarrationMutation.isPending}
-              >
-                {retryNarrationMutation.isPending ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <RefreshCw className="mr-2 h-4 w-4" />
-                )}
-                Try voicing again
-              </Button>
-            )}
-
-            {/* The film never got a voice. "Retry failed scenes" cannot help — it re-renders
+              {/* The film never got a voice. "Retry failed scenes" cannot help — it re-renders
                 CLIPS, and a job that died at voicing has none — so without this the only
                 recovery was to re-create the job by hand. Gated on the ABSENCE of a master:
                 once one exists, clips may already be paid for and restarting would re-render
                 them (the server enforces the same rule). */}
-            {canSupplyNarration && (
-              <div className="space-y-2 rounded-md border border-warning/40 bg-warning/5 p-3">
-                <p className="text-xs font-medium">
-                  This render has no narration — the voice provider never
-                  delivered one.
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Supply the voiceover yourself and it will carry on from here:
-                  storyboard, b-roll, host lip-sync and assembly all run as
-                  normal. Nothing has been billed for clips yet.
-                </p>
-                <LongformNarrationUpload
-                  compact
-                  script={job?.script ?? ""}
-                  channelKey={job?.channelKey ?? ""}
-                  value={rescueNarrationUrl}
-                  onChange={setRescueNarrationUrl}
-                  voice={channelDefaults ?? undefined}
-                  disabled={supplyNarrationMutation.isPending}
-                />
-                <Button
-                  size="sm"
-                  disabled={
-                    !rescueNarrationUrl || supplyNarrationMutation.isPending
-                  }
-                  onClick={() => {
-                    if (!jobId || !rescueNarrationUrl) return;
-                    armNotifications();
-                    supplyNarrationMutation.mutate({
-                      jobId,
-                      url: rescueNarrationUrl,
-                    });
-                  }}
-                >
-                  {supplyNarrationMutation.isPending ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : null}
-                  Continue this render
-                </Button>
-              </div>
-            )}
+              {canSupplyNarration && (
+                <div className="space-y-2 rounded-md border border-warning/40 bg-warning/5 p-3">
+                  <p className="text-xs font-medium">
+                    This render has no narration — the voice provider never
+                    delivered one.
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Supply the voiceover yourself and it will carry on from
+                    here: storyboard, b-roll, host lip-sync and assembly all run
+                    as normal. Nothing has been billed for clips yet.
+                  </p>
+                  <LongformNarrationUpload
+                    compact
+                    script={job?.script ?? ""}
+                    channelKey={job?.channelKey ?? ""}
+                    value={rescueNarrationUrl}
+                    onChange={setRescueNarrationUrl}
+                    voice={channelDefaults ?? undefined}
+                    disabled={supplyNarrationMutation.isPending}
+                  />
+                  <Button
+                    size="sm"
+                    disabled={
+                      !rescueNarrationUrl || supplyNarrationMutation.isPending
+                    }
+                    onClick={() => {
+                      if (!jobId || !rescueNarrationUrl) return;
+                      armNotifications();
+                      supplyNarrationMutation.mutate({
+                        jobId,
+                        url: rescueNarrationUrl,
+                      });
+                    }}
+                  >
+                    {supplyNarrationMutation.isPending ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : null}
+                    Continue this render
+                  </Button>
+                </div>
+              )}
 
-            {retryFailedScenesButton}
-            {redoHostClipsButton}
+              {retryFailedScenesButton}
+              {redoHostClipsButton}
 
-            {/* Available whenever the job isn't actively rendering and has SOME clips to work
+              {/* Available whenever the job isn't actively rendering and has SOME clips to work
                 with — not tied to "completed", so it also covers a failed/cancelled-mid-assembly
                 job like this one. The server's own retrofit guard (job.status !== "processing")
                 is the real safety net; this just decides when to show the control at all. */}
-            {job.status !== "processing" &&
-              scenes.some(s => s.clipUrls?.length || s.clipUrl) && (
-                <>
-                  {bookCoverStatusNote && (
+              {job.status !== "processing" &&
+                scenes.some(s => s.clipUrls?.length || s.clipUrl) && (
+                  <>
+                    {bookCoverStatusNote && (
+                      <p className="text-xs text-muted-foreground">
+                        {bookCoverStatusNote}
+                      </p>
+                    )}
+                    {needsBookCoverRetrofit && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          if (!jobId) return;
+                          armNotifications();
+                          retrofitBookCoverMutation.mutate({ jobId });
+                        }}
+                        disabled={retrofitBookCoverMutation.isPending}
+                        title="This film has a book but no cover reveal. Add it — free, only the cover beat renders."
+                      >
+                        {retrofitBookCoverMutation.isPending ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <BookOpen className="mr-2 h-4 w-4" />
+                        )}
+                        Add book cover
+                      </Button>
+                    )}
+                  </>
+                )}
+
+              {job.stage === "assembly" && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    if (!jobId) return;
+                    armNotifications();
+                    retryAssemblyMutation.mutate({ jobId });
+                  }}
+                  disabled={retryAssemblyMutation.isPending}
+                >
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  Retry Assembly
+                </Button>
+              )}
+
+              {job.status === "completed" &&
+                !job.finalVideoUrl &&
+                scenes.some(s => s.clipUrls?.length || s.clipUrl) && (
+                  <div className="space-y-2">
                     <p className="text-xs text-muted-foreground">
-                      {bookCoverStatusNote}
+                      Scenes re-rendered. Preview them below, then rebuild the
+                      final cut.
                     </p>
-                  )}
-                  {needsBookCoverRetrofit && (
+                    {/* No final exists yet, so the preview IS the only way to see the cut — show
+                      it inline rather than behind a toggle. */}
+                    {cutPreviewReady && (
+                      <LongformCutPreview
+                        scenes={scenes}
+                        masterAudioUrl={job.masterAudioUrl}
+                      />
+                    )}
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => {
                         if (!jobId) return;
                         armNotifications();
-                        retrofitBookCoverMutation.mutate({ jobId });
+                        assembleFinalMutation.mutate({ jobId });
                       }}
-                      disabled={retrofitBookCoverMutation.isPending}
-                      title="This film has a book but no cover reveal. Add it — free, only the cover beat renders."
+                      disabled={assembleFinalMutation.isPending}
                     >
-                      {retrofitBookCoverMutation.isPending ? (
+                      {assembleFinalMutation.isPending ? (
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                       ) : (
-                        <BookOpen className="mr-2 h-4 w-4" />
+                        <RefreshCw className="mr-2 h-4 w-4" />
                       )}
-                      Add book cover
+                      Assemble final video
+                    </Button>
+                    {!!job.masterAudioUrl && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          if (!jobId) return;
+                          armNotifications();
+                          levelNarrationMutation.mutate({ jobId });
+                        }}
+                        disabled={
+                          levelNarrationMutation.isPending ||
+                          assembleFinalMutation.isPending ||
+                          !!job.narrationLevelled
+                        }
+                        title={
+                          job.narrationLevelled
+                            ? `Voice already evened out on ${new Date(job.narrationLevelled.at).toLocaleDateString()}: ` +
+                              `${job.narrationLevelled.spreadBeforeDb} → ${job.narrationLevelled.spreadAfterDb} dB swing`
+                            : "Even out the narration's volume across the film. Preview it here, then assemble — nothing re-renders, free."
+                        }
+                      >
+                        {levelNarrationMutation.isPending ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <AudioLines className="mr-2 h-4 w-4" />
+                        )}
+                        {job.narrationLevelled
+                          ? "Voice evened out"
+                          : "Even out voice"}
+                      </Button>
+                    )}
+                  </div>
+                )}
+
+              {job.status === "completed" &&
+                job.narrationLevelled?.applied === false && (
+                  <p className="flex items-center gap-2 rounded border border-primary/40 bg-primary/5 px-3 py-2 text-xs">
+                    <AudioLines className="h-3.5 w-3.5 shrink-0" />
+                    Voice evened out ({
+                      job.narrationLevelled.spreadBeforeDb
+                    } → {job.narrationLevelled.spreadAfterDb} dB swing). The
+                    preview already plays it —{" "}
+                    {job.finalVideoUrl ? "Reassemble" : "assemble"} to put it in
+                    the final video.
+                  </p>
+                )}
+              {job.status === "completed" &&
+                job.finalVideoUrl &&
+                scenes.some(sc => sc.timingEdited) && (
+                  <p className="flex items-center gap-2 rounded border border-warning/40 bg-warning/10 px-3 py-2 text-xs">
+                    <Scissors className="h-3.5 w-3.5 shrink-0" />
+                    Timing edits pending on{" "}
+                    {scenes.filter(sc => sc.timingEdited).length} scene(s) — the
+                    rendered film is the previous cut. Switch to{" "}
+                    <b>Live preview</b> to see them now, or <b>Reassemble</b> to
+                    bake them in (ffmpeg only, no credits).
+                  </p>
+                )}
+              {job.status === "completed" && revertableScenes.length > 0 && (
+                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <span>
+                    {revertableScenes.length} scene(s) have timing edits.
+                  </span>
+                  {confirmRevertAll ? (
+                    <>
+                      <span className="text-foreground">
+                        Put every one back to its original cut? This cannot be
+                        undone.
+                      </span>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        className="h-7 text-xs"
+                        disabled={revertJobTimingMutation.isPending}
+                        onClick={() => {
+                          if (!jobId) return;
+                          revertJobTimingMutation.mutate({ jobId });
+                        }}
+                      >
+                        {revertJobTimingMutation.isPending ? (
+                          <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+                        ) : (
+                          <History className="mr-1.5 h-3 w-3" />
+                        )}
+                        Revert all
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 text-xs"
+                        onClick={() => setConfirmRevertAll(false)}
+                      >
+                        Cancel
+                      </Button>
+                    </>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 text-xs"
+                      onClick={() => setConfirmRevertAll(true)}
+                      title="Put every scene back to the cut it had before its first timing edit. Metadata only — Reassemble afterwards to apply it to the film."
+                    >
+                      <History className="mr-1.5 h-3 w-3" />
+                      Revert all timing
                     </Button>
                   )}
-                </>
+                </div>
               )}
-
-            {job.stage === "assembly" && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  if (!jobId) return;
-                  armNotifications();
-                  retryAssemblyMutation.mutate({ jobId });
-                }}
-                disabled={retryAssemblyMutation.isPending}
-              >
-                <RefreshCw className="mr-2 h-4 w-4" />
-                Retry Assembly
-              </Button>
-            )}
-
-            {job.status === "completed" &&
-              !job.finalVideoUrl &&
-              scenes.some(s => s.clipUrls?.length || s.clipUrl) && (
-                <div className="space-y-2">
-                  <p className="text-xs text-muted-foreground">
-                    Scenes re-rendered. Preview them below, then rebuild the
-                    final cut.
-                  </p>
-                  {/* No final exists yet, so the preview IS the only way to see the cut — show
-                      it inline rather than behind a toggle. */}
+              {job.status === "completed" && job.finalVideoUrl && (
+                <div className="space-y-3">
+                  {/* One player slot, two sources. The switcher sits directly above the picture so
+                    the two cuts occupy the same place on screen and can be compared by clicking
+                    between them — a second player below the film would read as a second film. */}
                   {cutPreviewReady && (
+                    <CutPreviewSwitch
+                      live={showCutPreview}
+                      onChange={setShowCutPreview}
+                    />
+                  )}
+                  {cutPreviewReady && showCutPreview ? (
                     <LongformCutPreview
                       scenes={scenes}
                       masterAudioUrl={job.masterAudioUrl}
                     />
+                  ) : (
+                    <LongformVideoPlayer
+                      src={job.finalVideoUrl}
+                      seekRef={playerSeekRef}
+                    />
                   )}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      if (!jobId) return;
-                      armNotifications();
-                      assembleFinalMutation.mutate({ jobId });
-                    }}
-                    disabled={assembleFinalMutation.isPending}
-                  >
-                    {assembleFinalMutation.isPending ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <RefreshCw className="mr-2 h-4 w-4" />
+                  <div className="flex justify-end gap-2">
+                    {needsSplitRetrofit && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          if (!jobId) return;
+                          armNotifications();
+                          // Show the click landing on THIS render, not on the next poll: the
+                          // route returns before the pass has flipped the job, so the button
+                          // holds itself until one confirms it (see `splitRetrofitStarting`).
+                          setSplitRetrofitStarting(true);
+                          watchJob();
+                          retrofitSplitsMutation.mutate({ jobId });
+                        }}
+                        disabled={
+                          retrofitSplitsMutation.isPending ||
+                          splitRetrofitStarting
+                        }
+                        title="This film rendered without split screens. Add them — the host clips are reused, only the right panels render."
+                      >
+                        {retrofitSplitsMutation.isPending ||
+                        splitRetrofitStarting ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Columns2 className="mr-2 h-4 w-4" />
+                        )}
+                        {splitRetrofitStarting
+                          ? "Starting…"
+                          : "Add split screens"}
+                      </Button>
                     )}
-                    Assemble final video
-                  </Button>
-                  {!!job.masterAudioUrl && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        if (!jobId) return;
+                        armNotifications();
+                        reassembleFinalMutation.mutate({ jobId });
+                      }}
+                      disabled={reassembleFinalMutation.isPending}
+                      title="Re-stitch the final video from the clips already rendered — no scenes regenerate, free."
+                    >
+                      {reassembleFinalMutation.isPending ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="mr-2 h-4 w-4" />
+                      )}
+                      Reassemble
+                    </Button>
                     <Button
                       variant="outline"
                       size="sm"
@@ -2677,14 +2965,13 @@ export default function LongformJobSlot({
                       }}
                       disabled={
                         levelNarrationMutation.isPending ||
-                        assembleFinalMutation.isPending ||
                         !!job.narrationLevelled
                       }
                       title={
                         job.narrationLevelled
                           ? `Voice already evened out on ${new Date(job.narrationLevelled.at).toLocaleDateString()}: ` +
                             `${job.narrationLevelled.spreadBeforeDb} → ${job.narrationLevelled.spreadAfterDb} dB swing`
-                          : "Even out the narration's volume across the film. Preview it here, then assemble — nothing re-renders, free."
+                          : "Even out the narration's volume across the film (a voice that drifts quiet then jumps back). Preview it, then Reassemble — nothing re-renders, free."
                       }
                     >
                       {levelNarrationMutation.isPending ? (
@@ -2696,1275 +2983,1147 @@ export default function LongformJobSlot({
                         ? "Voice evened out"
                         : "Even out voice"}
                     </Button>
-                  )}
-                </div>
-              )}
-
-            {job.status === "completed" &&
-              job.narrationLevelled?.applied === false && (
-                <p className="flex items-center gap-2 rounded border border-primary/40 bg-primary/5 px-3 py-2 text-xs">
-                  <AudioLines className="h-3.5 w-3.5 shrink-0" />
-                  Voice evened out ({
-                    job.narrationLevelled.spreadBeforeDb
-                  } → {job.narrationLevelled.spreadAfterDb} dB swing). The
-                  preview already plays it —{" "}
-                  {job.finalVideoUrl ? "Reassemble" : "assemble"} to put it in
-                  the final video.
-                </p>
-              )}
-            {job.status === "completed" &&
-              job.finalVideoUrl &&
-              scenes.some(sc => sc.timingEdited) && (
-                <p className="flex items-center gap-2 rounded border border-warning/40 bg-warning/10 px-3 py-2 text-xs">
-                  <Scissors className="h-3.5 w-3.5 shrink-0" />
-                  Timing edits pending on{" "}
-                  {scenes.filter(sc => sc.timingEdited).length} scene(s) — the
-                  rendered film is the previous cut. Switch to{" "}
-                  <b>Live preview</b> to see them now, or <b>Reassemble</b> to
-                  bake them in (ffmpeg only, no credits).
-                </p>
-              )}
-            {job.status === "completed" && revertableScenes.length > 0 && (
-              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                <span>
-                  {revertableScenes.length} scene(s) have timing edits.
-                </span>
-                {confirmRevertAll ? (
-                  <>
-                    <span className="text-foreground">
-                      Put every one back to its original cut? This cannot be
-                      undone.
-                    </span>
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      className="h-7 text-xs"
-                      disabled={revertJobTimingMutation.isPending}
-                      onClick={() => {
-                        if (!jobId) return;
-                        revertJobTimingMutation.mutate({ jobId });
-                      }}
-                    >
-                      {revertJobTimingMutation.isPending ? (
-                        <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
-                      ) : (
-                        <History className="mr-1.5 h-3 w-3" />
-                      )}
-                      Revert all
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 text-xs"
-                      onClick={() => setConfirmRevertAll(false)}
-                    >
-                      Cancel
-                    </Button>
-                  </>
-                ) : (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-7 text-xs"
-                    onClick={() => setConfirmRevertAll(true)}
-                    title="Put every scene back to the cut it had before its first timing edit. Metadata only — Reassemble afterwards to apply it to the film."
-                  >
-                    <History className="mr-1.5 h-3 w-3" />
-                    Revert all timing
-                  </Button>
-                )}
-              </div>
-            )}
-            {job.status === "completed" && job.finalVideoUrl && (
-              <div className="space-y-3">
-                {/* One player slot, two sources. The switcher sits directly above the picture so
-                    the two cuts occupy the same place on screen and can be compared by clicking
-                    between them — a second player below the film would read as a second film. */}
-                {cutPreviewReady && (
-                  <CutPreviewSwitch
-                    live={showCutPreview}
-                    onChange={setShowCutPreview}
-                  />
-                )}
-                {cutPreviewReady && showCutPreview ? (
-                  <LongformCutPreview
-                    scenes={scenes}
-                    masterAudioUrl={job.masterAudioUrl}
-                  />
-                ) : (
-                  <LongformVideoPlayer
-                    src={job.finalVideoUrl}
-                    seekRef={playerSeekRef}
-                  />
-                )}
-                <div className="flex justify-end gap-2">
-                  {needsSplitRetrofit && (
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => {
-                        if (!jobId) return;
-                        armNotifications();
-                        // Show the click landing on THIS render, not on the next poll: the
-                        // route returns before the pass has flipped the job, so the button
-                        // holds itself until one confirms it (see `splitRetrofitStarting`).
-                        setSplitRetrofitStarting(true);
-                        watchJob();
-                        retrofitSplitsMutation.mutate({ jobId });
-                      }}
-                      disabled={
-                        retrofitSplitsMutation.isPending ||
-                        splitRetrofitStarting
+                      onClick={() =>
+                        job.finalVideoUrl &&
+                        downloadFile(
+                          job.finalVideoUrl,
+                          "video",
+                          job.title || undefined
+                        )
                       }
-                      title="This film rendered without split screens. Add them — the host clips are reused, only the right panels render."
                     >
-                      {retrofitSplitsMutation.isPending ||
-                      splitRetrofitStarting ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : (
-                        <Columns2 className="mr-2 h-4 w-4" />
-                      )}
-                      {splitRetrofitStarting
-                        ? "Starting…"
-                        : "Add split screens"}
+                      <Download className="mr-2 h-4 w-4" />
+                      Download MP4
                     </Button>
-                  )}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      if (!jobId) return;
-                      armNotifications();
-                      reassembleFinalMutation.mutate({ jobId });
-                    }}
-                    disabled={reassembleFinalMutation.isPending}
-                    title="Re-stitch the final video from the clips already rendered — no scenes regenerate, free."
-                  >
-                    {reassembleFinalMutation.isPending ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <RefreshCw className="mr-2 h-4 w-4" />
-                    )}
-                    Reassemble
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      if (!jobId) return;
-                      armNotifications();
-                      levelNarrationMutation.mutate({ jobId });
-                    }}
-                    disabled={
-                      levelNarrationMutation.isPending ||
-                      !!job.narrationLevelled
-                    }
-                    title={
-                      job.narrationLevelled
-                        ? `Voice already evened out on ${new Date(job.narrationLevelled.at).toLocaleDateString()}: ` +
-                          `${job.narrationLevelled.spreadBeforeDb} → ${job.narrationLevelled.spreadAfterDb} dB swing`
-                        : "Even out the narration's volume across the film (a voice that drifts quiet then jumps back). Preview it, then Reassemble — nothing re-renders, free."
-                    }
-                  >
-                    {levelNarrationMutation.isPending ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <AudioLines className="mr-2 h-4 w-4" />
-                    )}
-                    {job.narrationLevelled
-                      ? "Voice evened out"
-                      : "Even out voice"}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() =>
-                      job.finalVideoUrl &&
-                      downloadFile(
-                        job.finalVideoUrl,
-                        "video",
-                        job.title || undefined
-                      )
-                    }
-                  >
-                    <Download className="mr-2 h-4 w-4" />
-                    Download MP4
-                  </Button>
-                </div>
-                {/* Links, QR, description, timestamp map — everything needed to publish. */}
-                {jobId != null && (
-                  <div className="border-t border-border pt-4">
-                    <LongformPublishKit
-                      jobId={jobId}
-                      onSeek={seekRenderedFilm}
-                    />
                   </div>
-                )}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
+                  {/* Links, QR, description, timestamp map — everything needed to publish. */}
+                  {jobId != null && (
+                    <div className="border-t border-border pt-4">
+                      <LongformPublishKit
+                        jobId={jobId}
+                        onSeek={seekRenderedFilm}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
-      {/* Before the narration is recorded the scenes are the storyboard's rough word-count chunks;
+        {/* Before the narration is recorded the scenes are the storyboard's rough word-count chunks;
           the shot list re-cuts them on the words afterwards. Shown, the rough cut read as the
           final one (a host line that will hand over to pictures, still showing as all host) —
           so it stays hidden until the real cut exists. */}
-      {scenes.length > 0 && isDraftStoryboard && (
-        <Card>
-          <CardContent className="py-6 text-sm text-muted-foreground">
-            Planning the shots — the storyboard appears here once the narration is recorded
-            and the pictures are cut on its words.
-          </CardContent>
-        </Card>
-      )}
+        {scenes.length > 0 && isDraftStoryboard && (
+          <Card>
+            <CardContent className="py-6 text-sm text-muted-foreground">
+              Planning the shots — the storyboard appears here once the
+              narration is recorded and the pictures are cut on its words.
+            </CardContent>
+          </Card>
+        )}
 
-      {/* Storyboard review — stays visible after assembly so scenes can still be
+        {/* Storyboard review — stays visible after assembly so scenes can still be
           regenerated; a regen is render-only, clears finalVideoUrl, and surfaces the
           manual "Assemble final video" button above */}
-      {scenes.length > 0 && !isDraftStoryboard && (
-        // Anchor for "Open" from the library: the generator form above is tall, so landing
-        // at the top of the page looked like nothing had happened. The page scrolls here.
-        <div className="space-y-3" id={`storyboard-${slotIndex}`}>
-          {/* `top-0` would park this underneath the app header, which is now
+        {scenes.length > 0 && !isDraftStoryboard && (
+          // Anchor for "Open" from the library: the generator form above is tall, so landing
+          // at the top of the page looked like nothing had happened. The page scrolls here.
+          <div className="space-y-3" id={`storyboard-${slotIndex}`}>
+            {/* `top-0` would park this underneath the app header, which is now
               sticky too — offset by its height so the two stack instead. */}
-          <div className="sticky top-[var(--app-header-h)] z-20 -mx-4 space-y-3 border-b border-border bg-background px-4 py-3">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-baseline gap-3">
-                <h2 className="text-lg font-medium">
-                  Storyboard ({scenes.length} scenes)
-                </h2>
-                {/* Where the video stands on its host minutes — the regenerate warning's numbers,
+            <div className="sticky top-[var(--app-header-h)] z-20 -mx-4 space-y-3 border-b border-border bg-background px-4 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-baseline gap-3">
+                  <h2 className="text-lg font-medium">
+                    Storyboard ({scenes.length} scenes)
+                  </h2>
+                  {/* Where the video stands on its host minutes — the regenerate warning's numbers,
                     shown before anyone clicks. */}
-                {hostSpend && (
-                  <span
-                    className={`text-xs ${hostSpend.reached ? "font-medium text-destructive" : "text-muted-foreground"}`}
-                  >
-                    Host minutes: {formatMinSec(hostSpend.spentSec)} of{" "}
-                    {formatMinSec(hostSpend.limitSec)}
-                    {hostSpend.reached ? " — used" : ""}
-                  </span>
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="relative">
-                  <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    value={sceneSearch}
-                    onChange={e => setSceneSearch(e.target.value)}
-                    placeholder="Search script..."
-                    className="h-7 w-40 pl-7 text-xs"
-                  />
+                  {hostSpend && (
+                    <span
+                      className={`text-xs ${hostSpend.reached ? "font-medium text-destructive" : "text-muted-foreground"}`}
+                    >
+                      Host minutes: {formatMinSec(hostSpend.spentSec)} of{" "}
+                      {formatMinSec(hostSpend.limitSec)}
+                      {hostSpend.reached ? " — used" : ""}
+                    </span>
+                  )}
                 </div>
-                {selectedScenes.length > 0 && (
-                  <>
-                    <Button
-                      size="sm"
-                      className="h-7 text-xs"
-                      disabled={batchRegenLoading || isPipelineRunning}
-                      onClick={() => {
-                        if (!jobId) return;
-                        armNotifications();
-                        const prompts = selectedScenes
-                          .map(i => {
-                            const scene = scenes.find(s => s.index === i);
-                            const prompt = (
-                              promptEdits[i] ??
-                              (scene ? ownedPrompt(scene) : "")
-                            ).trim();
-                            const split = !!scene && isSplitScene(scene);
-                            return {
-                              index: i,
-                              visualPrompt: split ? undefined : prompt,
-                              splitVisual: split ? prompt : undefined,
-                            };
-                          })
-                          .filter(p => p.visualPrompt || p.splitVisual);
-                        const verbatim = selectedScenes.filter(isEdited);
-                        // Queue optimistically so spinners + polling start on
-                        // this click, not a round-trip later (onError rolls back).
-                        for (const i of selectedScenes)
-                          if (!queuedScenes.includes(i)) {
-                            queuePhase.current.set(i, "queued");
-                            queuedAt.current.set(i, Date.now());
-                          }
-                        setQueuedScenes(prev =>
-                          prev.concat(
-                            selectedScenes.filter(i => !prev.includes(i))
-                          )
-                        );
-                        regenBatchMutation.mutate({
-                          jobId,
-                          sceneIndices: selectedScenes,
-                          prompts: prompts.length ? prompts : undefined,
-                          verbatimIndices: verbatim.length
-                            ? verbatim
-                            : undefined,
-                        });
-                      }}
-                    >
-                      {batchRegenLoading ? (
-                        <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
-                      ) : (
-                        <RefreshCw className="mr-1.5 h-3 w-3" />
-                      )}
-                      Regenerate {selectedScenes.length} selected
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 text-xs"
-                      onClick={() => setSelectedScenes([])}
-                    >
-                      Clear
-                    </Button>
-                  </>
-                )}
-              </div>
-            </div>
-            {/* Whole-video style direction — the one world every b-roll cutaway shares.
-                Derived once at render start from the channel persona + full script; editing it
-                and regenerating scenes re-runs them against the new world. Per-scene fixes go
-                through each scene's own prompt box (which regenerates verbatim). */}
-            <details className="group">
-              <summary className="cursor-pointer list-none text-xs text-muted-foreground hover:text-foreground">
-                <span className="inline-flex items-center gap-1">
-                  <ChevronRight className="h-3 w-3 transition-transform group-open:rotate-90" />
-                  Visual style direction
-                </span>
-              </summary>
-              <div className="mt-2 space-y-2">
-                {!job?.visualStyleBible && bibleEdit === null ? (
-                  <p className="text-xs text-muted-foreground">
-                    No style direction derived for this job.
-                  </p>
-                ) : (
-                  <>
-                    <Textarea
-                      value={bibleEdit ?? job?.visualStyleBible ?? ""}
-                      onChange={e => setBibleEdit(e.target.value)}
-                      rows={3}
-                      className="text-xs"
-                      placeholder="The place, season, and recurring materials every cutaway shares. Content only — no camera, lighting, or colour."
+                <div className="flex items-center gap-2">
+                  <div className="relative">
+                    <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      value={sceneSearch}
+                      onChange={e => setSceneSearch(e.target.value)}
+                      placeholder="Search script..."
+                      className="h-7 w-40 pl-7 text-xs"
                     />
-                    <div className="flex items-center gap-2">
+                  </div>
+                  {selectedScenes.length > 0 && (
+                    <>
                       <Button
                         size="sm"
-                        variant="outline"
                         className="h-7 text-xs"
-                        disabled={
-                          bibleEdit === null ||
-                          isProcessing ||
-                          styleBibleMutation.isPending
-                        }
+                        disabled={batchRegenLoading || isPipelineRunning}
                         onClick={() => {
-                          if (!jobId || bibleEdit === null) return;
-                          styleBibleMutation.mutate({
+                          if (!jobId) return;
+                          armNotifications();
+                          const prompts = selectedScenes
+                            .map(i => {
+                              const scene = scenes.find(s => s.index === i);
+                              const prompt = (
+                                promptEdits[i] ??
+                                (scene ? ownedPrompt(scene) : "")
+                              ).trim();
+                              const split = !!scene && isSplitScene(scene);
+                              return {
+                                index: i,
+                                visualPrompt: split ? undefined : prompt,
+                                splitVisual: split ? prompt : undefined,
+                              };
+                            })
+                            .filter(p => p.visualPrompt || p.splitVisual);
+                          const verbatim = selectedScenes.filter(isEdited);
+                          // Queue optimistically so spinners + polling start on
+                          // this click, not a round-trip later (onError rolls back).
+                          for (const i of selectedScenes)
+                            if (!queuedScenes.includes(i)) {
+                              queuePhase.current.set(i, "queued");
+                              queuedAt.current.set(i, Date.now());
+                            }
+                          setQueuedScenes(prev =>
+                            prev.concat(
+                              selectedScenes.filter(i => !prev.includes(i))
+                            )
+                          );
+                          regenBatchMutation.mutate({
                             jobId,
-                            styleBible: bibleEdit,
+                            sceneIndices: selectedScenes,
+                            prompts: prompts.length ? prompts : undefined,
+                            verbatimIndices: verbatim.length
+                              ? verbatim
+                              : undefined,
                           });
                         }}
                       >
-                        {styleBibleMutation.isPending && (
+                        {batchRegenLoading ? (
                           <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
-                        )}
-                        Save
-                      </Button>
-                      {bibleEdit !== null && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 text-xs"
-                          onClick={() => setBibleEdit(null)}
-                        >
-                          Cancel
-                        </Button>
-                      )}
-                      <span className="text-xs text-muted-foreground">
-                        Applies on the next scene regenerate.
-                      </span>
-                    </div>
-                  </>
-                )}
-              </div>
-            </details>
-            {(minuteGroups.length > 1 || regenScenes.length > 0) && (
-              <div className="flex flex-wrap gap-1.5">
-                {minuteGroups.map((g, i) => (
-                  <Button
-                    key={i}
-                    size="sm"
-                    variant={selectedGroup === i ? "default" : "outline"}
-                    className="h-7 text-xs font-mono"
-                    onClick={() => setSelectedGroup(i)}
-                  >
-                    {g.label}
-                  </Button>
-                ))}
-                {regenScenes.length > 0 && (
-                  <Button
-                    size="sm"
-                    variant={selectedGroup === -1 ? "default" : "outline"}
-                    className="h-7 text-xs"
-                    onClick={() => setSelectedGroup(-1)}
-                  >
-                    Regenerate ({regenScenes.length})
-                  </Button>
-                )}
-              </div>
-            )}
-          </div>
-          <div className="flex gap-2 overflow-x-auto pb-2">
-            {displayScenes.map(scene => {
-              const isSceneRendering = sceneEdits.active.includes(scene.index);
-              // A pass claims a scene by writing sceneStatus "processing" to the row before it
-              // starts the work (`renderSceneClipInPlace`, and the retry pass's re-voice
-              // fan-out). Folded in with the edit queue's own claim because the operator's
-              // question is the same either way — is anything happening to this scene — and
-              // until now the answer for a scene a retry was actively re-voicing was the
-              // "Failed" badge plus the error from its previous attempt.
-              const isScenePassWorking = scene.sceneStatus === "processing";
-              const isSceneQueued =
-                queuedScenes.includes(scene.index) ||
-                isSceneRendering ||
-                isScenePassWorking ||
-                sceneEdits.queued.includes(scene.index);
-              const isTileSelected = selectedScenes.includes(scene.index);
-              return (
-                <div
-                  key={scene.index}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => setActiveSceneIndexState(scene.index)}
-                  onKeyDown={e => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      setActiveSceneIndexState(scene.index);
-                    }
-                  }}
-                  className={`shrink-0 w-32 rounded-md border overflow-hidden cursor-pointer transition-colors ${
-                    scene.index === activeSceneIndex
-                      ? "border-primary ring-2 ring-primary"
-                      : "border-border hover:border-primary/50"
-                  }`}
-                >
-                  <div className="relative aspect-video bg-secondary/40">
-                    {isSceneQueued ? (
-                      <div className="flex items-center justify-center h-full text-muted-foreground">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      </div>
-                    ) : scene.clipUrl ? (
-                      <SceneStripThumb
-                        clipUrl={scene.clipUrl}
-                        startSec={scene.clipInSec}
-                        className="absolute inset-0"
-                      />
-                    ) : (
-                      <div className="flex items-center justify-center h-full text-muted-foreground">
-                        {scene.sceneStatus === "failed" ? (
-                          <XCircle className="h-4 w-4 text-destructive" />
                         ) : (
-                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <RefreshCw className="mr-1.5 h-3 w-3" />
                         )}
-                      </div>
-                    )}
-                    <span className="absolute top-1 left-1 rounded bg-black/60 px-1 text-[10px] font-mono text-white">
-                      #{scene.index}
-                      {sceneTimecodes.has(scene.index) && (
-                        <span className="text-white/70">
-                          {" · "}
-                          {sceneTimecodes.get(scene.index)}
-                        </span>
-                      )}
-                    </span>
-                    <Checkbox
-                      checked={isTileSelected}
-                      onCheckedChange={() =>
-                        setSelectedScenes(prev =>
-                          prev.includes(scene.index)
-                            ? prev.filter(i => i !== scene.index)
-                            : [...prev, scene.index]
-                        )
-                      }
-                      onClick={e => e.stopPropagation()}
-                      aria-label={`Select scene ${scene.index}`}
-                      className="absolute top-1 right-1 bg-background/80"
-                    />
-                    {isSceneQueued ? (
-                      <span className="absolute bottom-1 right-1 rounded-full bg-info p-0.5">
-                        <Loader2 className="h-3 w-3 text-white animate-spin" />
-                      </span>
-                    ) : scene.sceneStatus === "failed" ? (
-                      <span className="absolute bottom-1 right-1 rounded-full bg-destructive p-0.5">
-                        <XCircle className="h-3 w-3 text-white" />
-                      </span>
-                    ) : (
-                      regeneratedScenes.includes(scene.index) &&
-                      scene.sceneStatus === "completed" && (
-                        <span className="absolute bottom-1 right-1 rounded-full bg-success p-0.5">
-                          <CheckCircle2 className="h-3 w-3 text-white" />
-                        </span>
-                      )
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1 px-1.5 py-1 bg-card">
-                    {scene.hostPresent ? (
-                      <User className="h-3 w-3 shrink-0 text-muted-foreground" />
-                    ) : (
-                      <Trees className="h-3 w-3 shrink-0 text-muted-foreground" />
-                    )}
-                    <span className="truncate text-[10.5px] text-foreground">
-                      {scene.scriptText ?? scene.narration ?? "—"}
-                    </span>
-                  </div>
+                        Regenerate {selectedScenes.length} selected
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={() => setSelectedScenes([])}
+                      >
+                        Clear
+                      </Button>
+                    </>
+                  )}
                 </div>
-              );
-            })}
-          </div>
-          <div className="grid gap-3">
-            {displayScenes
-              .filter(scene => scene.index === activeSceneIndex)
-              .map(scene => {
+              </div>
+              {/* Whole-video style direction — the one world every b-roll cutaway shares.
+                Derived once at render start from the channel persona + full script; editing it
+                and regenerating scenes re-runs them against the new world. Per-scene fixes go
+                through each scene's own prompt box (which regenerates verbatim). */}
+              <details className="group">
+                <summary className="cursor-pointer list-none text-xs text-muted-foreground hover:text-foreground">
+                  <span className="inline-flex items-center gap-1">
+                    <ChevronRight className="h-3 w-3 transition-transform group-open:rotate-90" />
+                    Visual style direction
+                  </span>
+                </summary>
+                <div className="mt-2 space-y-2">
+                  {!job?.visualStyleBible && bibleEdit === null ? (
+                    <p className="text-xs text-muted-foreground">
+                      No style direction derived for this job.
+                    </p>
+                  ) : (
+                    <>
+                      <Textarea
+                        value={bibleEdit ?? job?.visualStyleBible ?? ""}
+                        onChange={e => setBibleEdit(e.target.value)}
+                        rows={3}
+                        className="text-xs"
+                        placeholder="The place, season, and recurring materials every cutaway shares. Content only — no camera, lighting, or colour."
+                      />
+                      <div className="flex items-center gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-xs"
+                          disabled={
+                            bibleEdit === null ||
+                            isProcessing ||
+                            styleBibleMutation.isPending
+                          }
+                          onClick={() => {
+                            if (!jobId || bibleEdit === null) return;
+                            styleBibleMutation.mutate({
+                              jobId,
+                              styleBible: bibleEdit,
+                            });
+                          }}
+                        >
+                          {styleBibleMutation.isPending && (
+                            <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+                          )}
+                          Save
+                        </Button>
+                        {bibleEdit !== null && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs"
+                            onClick={() => setBibleEdit(null)}
+                          >
+                            Cancel
+                          </Button>
+                        )}
+                        <span className="text-xs text-muted-foreground">
+                          Applies on the next scene regenerate.
+                        </span>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </details>
+              {(minuteGroups.length > 1 || regenScenes.length > 0) && (
+                <div className="flex flex-wrap gap-1.5">
+                  {minuteGroups.map((g, i) => (
+                    <Button
+                      key={i}
+                      size="sm"
+                      variant={selectedGroup === i ? "default" : "outline"}
+                      className="h-7 text-xs font-mono"
+                      onClick={() => setSelectedGroup(i)}
+                    >
+                      {g.label}
+                    </Button>
+                  ))}
+                  {regenScenes.length > 0 && (
+                    <Button
+                      size="sm"
+                      variant={selectedGroup === -1 ? "default" : "outline"}
+                      className="h-7 text-xs"
+                      onClick={() => setSelectedGroup(-1)}
+                    >
+                      Regenerate ({regenScenes.length})
+                    </Button>
+                  )}
+                </div>
+              )}
+            </div>
+            <div className="flex gap-2 overflow-x-auto pb-2">
+              {displayScenes.map(scene => {
                 const isSceneRendering = sceneEdits.active.includes(
                   scene.index
                 );
-                // See the tile above — a pass's own claim counts as work in progress here too.
+                // A pass claims a scene by writing sceneStatus "processing" to the row before it
+                // starts the work (`renderSceneClipInPlace`, and the retry pass's re-voice
+                // fan-out). Folded in with the edit queue's own claim because the operator's
+                // question is the same either way — is anything happening to this scene — and
+                // until now the answer for a scene a retry was actively re-voicing was the
+                // "Failed" badge plus the error from its previous attempt.
                 const isScenePassWorking = scene.sceneStatus === "processing";
                 const isSceneQueued =
                   queuedScenes.includes(scene.index) ||
                   isSceneRendering ||
                   isScenePassWorking ||
                   sceneEdits.queued.includes(scene.index);
-                const isSelected = selectedScenes.includes(scene.index);
+                const isTileSelected = selectedScenes.includes(scene.index);
                 return (
-                  <Card
+                  <div
                     key={scene.index}
-                    className={`bg-card transition-colors ${
-                      isSelected
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setActiveSceneIndexState(scene.index)}
+                    onKeyDown={e => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setActiveSceneIndexState(scene.index);
+                      }
+                    }}
+                    className={`shrink-0 w-32 rounded-md border overflow-hidden cursor-pointer transition-colors ${
+                      scene.index === activeSceneIndex
                         ? "border-primary ring-2 ring-primary"
-                        : "border-border"
+                        : "border-border hover:border-primary/50"
                     }`}
                   >
-                    <CardContent className="p-4 flex gap-4">
-                      <div className="w-44 shrink-0">
-                        {isSceneQueued ? (
-                          <div className="flex items-center justify-center h-24 rounded bg-secondary/40 text-muted-foreground">
-                            <Loader2 className="h-5 w-5 animate-spin" />
-                          </div>
-                        ) : scene.clipUrl ? (
-                          <LongformScenePreview
-                            clipUrl={scene.clipUrl}
-                            audioUrl={scene.audioUrl}
-                            startSec={scene.clipInSec}
-                            durationSec={
-                              scene.narrationStartSec != null &&
-                              scene.narrationEndSec != null
-                                ? scene.narrationEndSec -
-                                  scene.narrationStartSec
-                                : undefined
-                            }
-                            className="w-full rounded bg-black"
-                          />
-                        ) : (
-                          <div className="flex items-center justify-center h-24 rounded bg-secondary/40 text-muted-foreground">
-                            {scene.sceneStatus === "failed" ? (
-                              <XCircle className="h-5 w-5 text-destructive" />
-                            ) : (
-                              <Loader2 className="h-5 w-5 animate-spin" />
-                            )}
-                          </div>
-                        )}
-                      </div>
-                      <div className="flex-1 min-w-0 space-y-1.5">
-                        <div className="flex items-center gap-2">
-                          <Checkbox
-                            checked={isSelected}
-                            onCheckedChange={() =>
-                              setSelectedScenes(prev =>
-                                prev.includes(scene.index)
-                                  ? prev.filter(i => i !== scene.index)
-                                  : [...prev, scene.index]
-                              )
-                            }
-                            aria-label={`Select scene ${scene.index}`}
-                          />
-                          <span className="text-xs font-mono text-muted-foreground">
-                            #{scene.index}
-                            {sceneTimecodes.has(scene.index) && (
-                              <> · {sceneTimecodes.get(scene.index)}</>
-                            )}
+                    <div className="relative aspect-video bg-secondary/40">
+                      {isSceneQueued ? (
+                        <div className="flex items-center justify-center h-full text-muted-foreground">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        </div>
+                      ) : scene.clipUrl ? (
+                        <SceneStripThumb
+                          clipUrl={scene.clipUrl}
+                          startSec={scene.clipInSec}
+                          className="absolute inset-0"
+                        />
+                      ) : (
+                        <div className="flex items-center justify-center h-full text-muted-foreground">
+                          {scene.sceneStatus === "failed" ? (
+                            <XCircle className="h-4 w-4 text-destructive" />
+                          ) : (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          )}
+                        </div>
+                      )}
+                      <span className="absolute top-1 left-1 rounded bg-black/60 px-1 text-[10px] font-mono text-white">
+                        #{scene.index}
+                        {sceneTimecodes.has(scene.index) && (
+                          <span className="text-white/70">
+                            {" · "}
+                            {sceneTimecodes.get(scene.index)}
                           </span>
-                          <Badge
-                            variant="outline"
-                            className="text-[10px] gap-1 py-0"
-                          >
-                            {scene.hostPresent ? (
-                              <>
-                                <User className="h-3 w-3" /> Host
-                              </>
-                            ) : (
-                              <>
-                                <Trees className="h-3 w-3" /> B-roll
-                              </>
-                            )}
-                          </Badge>
-                          {!scene.hostPresent && (
+                        )}
+                      </span>
+                      <Checkbox
+                        checked={isTileSelected}
+                        onCheckedChange={() =>
+                          setSelectedScenes(prev =>
+                            prev.includes(scene.index)
+                              ? prev.filter(i => i !== scene.index)
+                              : [...prev, scene.index]
+                          )
+                        }
+                        onClick={e => e.stopPropagation()}
+                        aria-label={`Select scene ${scene.index}`}
+                        className="absolute top-1 right-1 bg-background/80"
+                      />
+                      {isSceneQueued ? (
+                        <span className="absolute bottom-1 right-1 rounded-full bg-info p-0.5">
+                          <Loader2 className="h-3 w-3 text-white animate-spin" />
+                        </span>
+                      ) : scene.sceneStatus === "failed" ? (
+                        <span className="absolute bottom-1 right-1 rounded-full bg-destructive p-0.5">
+                          <XCircle className="h-3 w-3 text-white" />
+                        </span>
+                      ) : (
+                        regeneratedScenes.includes(scene.index) &&
+                        scene.sceneStatus === "completed" && (
+                          <span className="absolute bottom-1 right-1 rounded-full bg-success p-0.5">
+                            <CheckCircle2 className="h-3 w-3 text-white" />
+                          </span>
+                        )
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1 px-1.5 py-1 bg-card">
+                      {scene.hostPresent ? (
+                        <User className="h-3 w-3 shrink-0 text-muted-foreground" />
+                      ) : (
+                        <Trees className="h-3 w-3 shrink-0 text-muted-foreground" />
+                      )}
+                      <span className="truncate text-[10.5px] text-foreground">
+                        {scene.scriptText ?? scene.narration ?? "—"}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="grid gap-3">
+              {displayScenes
+                .filter(scene => scene.index === activeSceneIndex)
+                .map(scene => {
+                  const isSceneRendering = sceneEdits.active.includes(
+                    scene.index
+                  );
+                  // See the tile above — a pass's own claim counts as work in progress here too.
+                  const isScenePassWorking = scene.sceneStatus === "processing";
+                  const isSceneQueued =
+                    queuedScenes.includes(scene.index) ||
+                    isSceneRendering ||
+                    isScenePassWorking ||
+                    sceneEdits.queued.includes(scene.index);
+                  const isSelected = selectedScenes.includes(scene.index);
+                  return (
+                    <Card
+                      key={scene.index}
+                      className={`bg-card transition-colors ${
+                        isSelected
+                          ? "border-primary ring-2 ring-primary"
+                          : "border-border"
+                      }`}
+                    >
+                      <CardContent className="p-4 flex gap-4">
+                        <div className="w-44 shrink-0">
+                          {isSceneQueued ? (
+                            <div className="flex items-center justify-center h-24 rounded bg-secondary/40 text-muted-foreground">
+                              <Loader2 className="h-5 w-5 animate-spin" />
+                            </div>
+                          ) : scene.clipUrl ? (
+                            <LongformScenePreview
+                              clipUrl={scene.clipUrl}
+                              audioUrl={scene.audioUrl}
+                              startSec={scene.clipInSec}
+                              durationSec={
+                                scene.narrationStartSec != null &&
+                                scene.narrationEndSec != null
+                                  ? scene.narrationEndSec -
+                                    scene.narrationStartSec
+                                  : undefined
+                              }
+                              className="w-full rounded bg-black"
+                            />
+                          ) : (
+                            <div className="flex items-center justify-center h-24 rounded bg-secondary/40 text-muted-foreground">
+                              {scene.sceneStatus === "failed" ? (
+                                <XCircle className="h-5 w-5 text-destructive" />
+                              ) : (
+                                <Loader2 className="h-5 w-5 animate-spin" />
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0 space-y-1.5">
+                          <div className="flex items-center gap-2">
+                            <Checkbox
+                              checked={isSelected}
+                              onCheckedChange={() =>
+                                setSelectedScenes(prev =>
+                                  prev.includes(scene.index)
+                                    ? prev.filter(i => i !== scene.index)
+                                    : [...prev, scene.index]
+                                )
+                              }
+                              aria-label={`Select scene ${scene.index}`}
+                            />
+                            <span className="text-xs font-mono text-muted-foreground">
+                              #{scene.index}
+                              {sceneTimecodes.has(scene.index) && (
+                                <> · {sceneTimecodes.get(scene.index)}</>
+                              )}
+                            </span>
                             <Badge
                               variant="outline"
                               className="text-[10px] gap-1 py-0"
                             >
-                              {scene.stillImage ? (
+                              {scene.hostPresent ? (
                                 <>
-                                  <ImageIcon className="h-3 w-3" /> Still
+                                  <User className="h-3 w-3" /> Host
                                 </>
                               ) : (
                                 <>
-                                  <Film className="h-3 w-3" /> Video
+                                  <Trees className="h-3 w-3" /> B-roll
                                 </>
                               )}
                             </Badge>
-                          )}
-                          {scene.sceneStatus === "failed" && (
-                            <Badge
-                              variant="destructive"
-                              className="text-[10px] py-0"
-                            >
-                              Failed
-                            </Badge>
-                          )}
-                          {scene.sceneStatus === "rendering" && (
-                            <Badge
-                              variant="outline"
-                              className="text-[10px] py-0 text-warning border-warning/40"
-                            >
-                              Rendering — retry to resume
-                            </Badge>
-                          )}
-                          {(scene.submits?.length ?? 0) > 1 && (
-                            <Badge
-                              variant="outline"
-                              className="text-[10px] py-0 text-warning border-warning/40"
-                              title={(scene.submits ?? [])
-                                .map(
-                                  (s, i) =>
-                                    `${i + 1}. ${s.reason} · ${s.provider}` +
-                                    (s.sec != null
-                                      ? ` · ${s.sec.toFixed(1)}s`
-                                      : "") +
-                                    ` · ${s.at.slice(0, 16).replace("T", " ")}`
-                                )
-                                .join("\n")}
-                            >
-                              {hostRegenerationLocked(scene)
-                                ? hostRegenLockedLabel(scene)
-                                : `Rendered ${scene.submits!.length}× — paid each time`}
-                            </Badge>
-                          )}
-                          {scene.autoBroll && (
-                            <Badge
-                              variant="outline"
-                              className="text-[10px] py-0 text-warning border-warning/40"
-                              title={`${scene.autoBroll.reason}\n${scene.autoBroll.at.slice(0, 16).replace("T", " ")}`}
-                            >
-                              {scene.autoBroll.limit
-                                ? "Auto b-roll — host limit"
-                                : "Auto b-roll — host lane failed"}
-                            </Badge>
-                          )}
-                          {scene.hostNeeded && (
-                            <Badge
-                              variant="destructive"
-                              className="text-[10px] py-0"
-                              title={`${scene.hostNeeded.reason}\nThe start, a CTA or the end: its automatic retries are used, so it was not made b-roll behind your back. Regenerate it or make it b-roll — the film will not assemble until you do.`}
-                            >
-                              Host needed
-                            </Badge>
-                          )}
-                          {scene.hostWaiting && (
-                            <Badge
-                              variant="outline"
-                              className="text-[10px] py-0 text-warning border-warning/40"
-                              title={
-                                scene.hostWaiting.prep
-                                  ? `HeyGen could not prepare the host photo, not this scene. Nothing was charged and none of its retries were used. The photo is fine — "Redo host clips" tries again.`
-                                  : scene.hostWaiting.photo
-                                  ? `HeyGen refused the host photo (its content check), not this scene. Nothing was charged and none of its retries were used. Change the photo on the channel, then "Redo host clips".`
-                                  : `The HeyGen account failed (${scene.hostWaiting.reason}), not this scene. None of its retries were used. Fix the account, then "Retry failed scenes".`
-                              }
-                            >
-                              {scene.hostWaiting.prep
-                                ? "Photo not ready"
-                                : scene.hostWaiting.photo
-                                ? "Photo refused"
-                                : "Waiting for HeyGen"}
-                            </Badge>
-                          )}
-                          {scene.hostPresent &&
-                            (scene.hostTakes?.length ?? 0) > 1 && (
+                            {!scene.hostPresent && (
                               <Badge
                                 variant="outline"
-                                className="text-[10px] py-0 text-info border-info/40"
-                                title="This host beat was regenerated — open it to compare the takes and pick one"
+                                className="text-[10px] gap-1 py-0"
                               >
-                                Take {(activeTakeIndex(scene) ?? 0) + 1} of{" "}
-                                {scene.hostTakes!.length}
+                                {scene.stillImage ? (
+                                  <>
+                                    <ImageIcon className="h-3 w-3" /> Still
+                                  </>
+                                ) : (
+                                  <>
+                                    <Film className="h-3 w-3" /> Video
+                                  </>
+                                )}
                               </Badge>
                             )}
-                          {scene.clipShortSec != null &&
-                            scene.clipShortSec > 0 && (
+                            {scene.sceneStatus === "failed" && (
+                              <Badge
+                                variant="destructive"
+                                className="text-[10px] py-0"
+                              >
+                                Failed
+                              </Badge>
+                            )}
+                            {scene.sceneStatus === "rendering" && (
                               <Badge
                                 variant="outline"
                                 className="text-[10px] py-0 text-warning border-warning/40"
-                                title="The provider's clip ends before the narration does. The last frame is held for the difference; regenerate the scene if the freeze shows."
                               >
-                                Clip short by {scene.clipShortSec.toFixed(1)}s
+                                Rendering — retry to resume
                               </Badge>
                             )}
-                          {isSceneQueued && (
-                            <Badge
-                              variant="outline"
-                              className="text-[10px] py-0 gap-1 text-info border-info/40"
-                            >
-                              <Loader2 className="h-3 w-3 animate-spin" />
-                              {isSceneRendering
-                                ? "Rendering"
-                                : isScenePassWorking
-                                  ? "Working"
-                                  : "Queued"}
-                            </Badge>
-                          )}
-                          {regeneratedScenes.includes(scene.index) &&
-                            !isSceneQueued &&
-                            scene.sceneStatus === "completed" && (
+                            {(scene.submits?.length ?? 0) > 1 && (
                               <Badge
                                 variant="outline"
-                                className="text-[10px] py-0 gap-1 text-success border-success/40"
+                                className="text-[10px] py-0 text-warning border-warning/40"
+                                title={(scene.submits ?? [])
+                                  .map(
+                                    (s, i) =>
+                                      `${i + 1}. ${s.reason} · ${s.provider}` +
+                                      (s.sec != null
+                                        ? ` · ${s.sec.toFixed(1)}s`
+                                        : "") +
+                                      ` · ${s.at.slice(0, 16).replace("T", " ")}`
+                                  )
+                                  .join("\n")}
                               >
-                                <CheckCircle2 className="h-3 w-3" />
-                                Regenerated
+                                {hostRegenerationLocked(scene)
+                                  ? hostRegenLockedLabel(scene)
+                                  : `Rendered ${scene.submits!.length}× — paid each time`}
                               </Badge>
                             )}
-                        </div>
-                        <div className="space-y-0.5">
-                          <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">
-                            Spoken
-                          </Label>
-                          <p className="text-sm line-clamp-3">
-                            {scene.scriptText ?? scene.narration}
-                          </p>
-                        </div>
-                        <div className="space-y-0.5">
-                          <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">
-                            Visual
-                          </Label>
-                          <p className="text-xs text-muted-foreground line-clamp-2">
-                            {ownedPrompt(scene)}
-                          </p>
-                        </div>
-                        {scene.error && (
-                          <p className="text-xs text-destructive">
-                            {sanitizeError(scene.error)}
-                          </p>
-                        )}
-                        {!isPipelineRunning &&
-                          (expandedScene === scene.index ? (
-                            <div
-                              className="space-y-2 pt-1"
-                              onClick={e => e.stopPropagation()}
-                            >
-                              {scene.clipUrl && (
-                                // `muted` is gone with the silent clip: the point of the expanded
-                                // editor is judging a shot against its line, which needs the line.
-                                <LongformScenePreview
-                                  clipUrl={scene.clipUrl}
-                                  audioUrl={scene.audioUrl}
-                                  startSec={scene.clipInSec}
-                                  durationSec={
-                                    scene.narrationStartSec != null &&
-                                    scene.narrationEndSec != null
-                                      ? scene.narrationEndSec -
-                                        scene.narrationStartSec
-                                      : undefined
-                                  }
-                                  className="w-full rounded bg-black max-h-[120px]"
-                                />
+                            {scene.autoBroll && (
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] py-0 text-warning border-warning/40"
+                                title={`${scene.autoBroll.reason}\n${scene.autoBroll.at.slice(0, 16).replace("T", " ")}`}
+                              >
+                                {scene.autoBroll.limit
+                                  ? "Auto b-roll — host limit"
+                                  : "Auto b-roll — host lane failed"}
+                              </Badge>
+                            )}
+                            {scene.hostNeeded && (
+                              <Badge
+                                variant="destructive"
+                                className="text-[10px] py-0"
+                                title={`${scene.hostNeeded.reason}\nThe start, a CTA or the end: its automatic retries are used, so it was not made b-roll behind your back. Regenerate it or make it b-roll — the film will not assemble until you do.`}
+                              >
+                                Host needed
+                              </Badge>
+                            )}
+                            {scene.hostWaiting && (
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] py-0 text-warning border-warning/40"
+                                title={
+                                  scene.hostWaiting.prep
+                                    ? `HeyGen could not prepare the host photo, not this scene. Nothing was charged and none of its retries were used. The photo is fine — "Redo host clips" tries again.`
+                                    : scene.hostWaiting.photo
+                                      ? `HeyGen refused the host photo (its content check), not this scene. Nothing was charged and none of its retries were used. Change the photo on the channel, then "Redo host clips".`
+                                      : `The HeyGen account failed (${scene.hostWaiting.reason}), not this scene. None of its retries were used. Fix the account, then "Retry failed scenes".`
+                                }
+                              >
+                                {scene.hostWaiting.prep
+                                  ? "Photo not ready"
+                                  : scene.hostWaiting.photo
+                                    ? "Photo refused"
+                                    : "Waiting for HeyGen"}
+                              </Badge>
+                            )}
+                            {scene.hostPresent &&
+                              (scene.hostTakes?.length ?? 0) > 1 && (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[10px] py-0 text-info border-info/40"
+                                  title="This host beat was regenerated — open it to compare the takes and pick one"
+                                >
+                                  Take {(activeTakeIndex(scene) ?? 0) + 1} of{" "}
+                                  {scene.hostTakes!.length}
+                                </Badge>
                               )}
-                              {scene.hostPresent && (
-                                <HostTakePicker
-                                  scene={scene}
-                                  disabled={
-                                    isSceneQueued ||
-                                    selectTakeMutation.isPending
-                                  }
-                                  onSelect={take =>
-                                    selectTake(scene.index, take)
-                                  }
-                                />
+                            {scene.clipShortSec != null &&
+                              scene.clipShortSec > 0 && (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[10px] py-0 text-warning border-warning/40"
+                                  title="The provider's clip ends before the narration does. The last frame is held for the difference; regenerate the scene if the freeze shows."
+                                >
+                                  Clip short by {scene.clipShortSec.toFixed(1)}s
+                                </Badge>
                               )}
-                              <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">
-                                Spoken (voiced verbatim)
-                              </Label>
-                              <p className="text-xs text-muted-foreground italic">
-                                {scene.scriptText ?? scene.narration}
-                              </p>
-                              {scene.clipUrl &&
-                                scene.narrationStartSec != null &&
-                                scene.narrationEndSec != null &&
-                                (() => {
+                            {isSceneQueued && (
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] py-0 gap-1 text-info border-info/40"
+                              >
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                                {isSceneRendering
+                                  ? "Rendering"
+                                  : isScenePassWorking
+                                    ? "Working"
+                                    : "Queued"}
+                              </Badge>
+                            )}
+                            {regeneratedScenes.includes(scene.index) &&
+                              !isSceneQueued &&
+                              scene.sceneStatus === "completed" && (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[10px] py-0 gap-1 text-success border-success/40"
+                                >
+                                  <CheckCircle2 className="h-3 w-3" />
+                                  Regenerated
+                                </Badge>
+                              )}
+                          </div>
+                          <div className="space-y-0.5">
+                            <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">
+                              Spoken
+                            </Label>
+                            <p className="text-sm line-clamp-3">
+                              {scene.scriptText ?? scene.narration}
+                            </p>
+                          </div>
+                          <div className="space-y-0.5">
+                            <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">
+                              Visual
+                            </Label>
+                            <p className="text-xs text-muted-foreground line-clamp-2">
+                              {ownedPrompt(scene)}
+                            </p>
+                          </div>
+                          {scene.error && (
+                            <p className="text-xs text-destructive">
+                              {sanitizeError(scene.error)}
+                            </p>
+                          )}
+                          {!isPipelineRunning &&
+                            (expandedScene === scene.index ? (
+                              <div
+                                className="space-y-2 pt-1"
+                                onClick={e => e.stopPropagation()}
+                              >
+                                {scene.clipUrl && (
+                                  // `muted` is gone with the silent clip: the point of the expanded
+                                  // editor is judging a shot against its line, which needs the line.
+                                  <LongformScenePreview
+                                    clipUrl={scene.clipUrl}
+                                    audioUrl={scene.audioUrl}
+                                    startSec={scene.clipInSec}
+                                    durationSec={
+                                      scene.narrationStartSec != null &&
+                                      scene.narrationEndSec != null
+                                        ? scene.narrationEndSec -
+                                          scene.narrationStartSec
+                                        : undefined
+                                    }
+                                    className="w-full rounded bg-black max-h-[120px]"
+                                  />
+                                )}
+                                {scene.hostPresent && (
+                                  <HostTakePicker
+                                    scene={scene}
+                                    disabled={
+                                      isSceneQueued ||
+                                      selectTakeMutation.isPending
+                                    }
+                                    onSelect={take =>
+                                      selectTake(scene.index, take)
+                                    }
+                                  />
+                                )}
+                                <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">
+                                  Spoken (voiced verbatim)
+                                </Label>
+                                <p className="text-xs text-muted-foreground italic">
+                                  {scene.scriptText ?? scene.narration}
+                                </p>
+                                {scene.clipUrl &&
+                                  scene.narrationStartSec != null &&
+                                  scene.narrationEndSec != null &&
+                                  (() => {
+                                    const pos = scenes.findIndex(
+                                      sc => sc.index === scene.index
+                                    );
+                                    const prev =
+                                      pos > 0 ? scenes[pos - 1] : undefined;
+                                    const next =
+                                      pos >= 0 && pos < scenes.length - 1
+                                        ? scenes[pos + 1]
+                                        : undefined;
+                                    return (
+                                      <SceneTimingEditor
+                                        sceneIndex={scene.index}
+                                        clipUrl={scene.clipUrl}
+                                        startSec={scene.narrationStartSec}
+                                        endSec={scene.narrationEndSec}
+                                        clipInSec={scene.clipInSec}
+                                        tailHoldSec={scene.tailHoldSec}
+                                        headHoldSec={scene.headHoldSec}
+                                        qrTail={scene.qrTail}
+                                        qrHoldSec={scene.qrHoldSec}
+                                        prevStartSec={prev?.narrationStartSec}
+                                        nextEndSec={next?.narrationEndSec}
+                                        lipsync={
+                                          !!scene.hostPresent &&
+                                          !!scene.lipsynced
+                                        }
+                                        masterAudioUrl={job?.masterAudioUrl}
+                                        audioUrl={scene.audioUrl}
+                                        prevAudioUrl={prev?.audioUrl}
+                                        nextAudioUrl={next?.audioUrl}
+                                        prevClipUrl={prev?.clipUrl}
+                                        prevClipInSec={prev?.clipInSec}
+                                        nextClipUrl={next?.clipUrl}
+                                        nextClipInSec={next?.clipInSec}
+                                        prevIndex={prev?.index}
+                                        nextIndex={next?.index}
+                                        onSelectScene={i => setExpandedScene(i)}
+                                        pending={
+                                          timingMutation.isPending ||
+                                          splitSceneMutation.isPending ||
+                                          moveCutMutation.isPending ||
+                                          setPieceClipInMutation.isPending ||
+                                          revertSceneTimingMutation.isPending ||
+                                          rippleMutation.isPending ||
+                                          isSceneQueued
+                                        }
+                                        onApply={edit => {
+                                          if (!jobId) return;
+                                          timingMutation.mutate({
+                                            jobId,
+                                            sceneIndex: scene.index,
+                                            ...edit,
+                                          });
+                                        }}
+                                        onSplit={atOffsetSec => {
+                                          if (!jobId) return;
+                                          splitSceneMutation.mutate({
+                                            jobId,
+                                            sceneIndex: scene.index,
+                                            atOffsetSec,
+                                          });
+                                        }}
+                                        cutPoints={scene.cutPoints}
+                                        onRemoveCut={atOffsetSec => {
+                                          if (!jobId) return;
+                                          undoSplitMutation.mutate({
+                                            jobId,
+                                            sceneIndex: scene.index,
+                                            atOffsetSec,
+                                          });
+                                        }}
+                                        onMoveCut={(
+                                          fromOffsetSec,
+                                          toOffsetSec
+                                        ) => {
+                                          if (!jobId) return;
+                                          moveCutMutation.mutate({
+                                            jobId,
+                                            sceneIndex: scene.index,
+                                            fromOffsetSec,
+                                            toOffsetSec,
+                                          });
+                                        }}
+                                        pieceClipIns={scene.pieceClipIns}
+                                        onSetPieceClipIn={(
+                                          cutOffsetSec,
+                                          clipInSec
+                                        ) => {
+                                          if (!jobId) return;
+                                          setPieceClipInMutation.mutate({
+                                            jobId,
+                                            sceneIndex: scene.index,
+                                            cutOffsetSec,
+                                            clipInSec,
+                                          });
+                                        }}
+                                        onRipple={
+                                          job?.masterAudioUrl
+                                            ? (newSec, edge) => {
+                                                if (!jobId) return;
+                                                rippleMutation.mutate({
+                                                  jobId,
+                                                  sceneIndex: scene.index,
+                                                  newSec,
+                                                  edge,
+                                                });
+                                              }
+                                            : undefined
+                                        }
+                                        canRevert={!!scene.timingOriginal}
+                                        onRevert={() => {
+                                          if (!jobId) return;
+                                          revertSceneTimingMutation.mutate({
+                                            jobId,
+                                            sceneIndex: scene.index,
+                                          });
+                                        }}
+                                      />
+                                    );
+                                  })()}
+                                {/* Merge two neighbouring shots into ONE continuous clip — the fix
+                                  for a cut that chops the host mid-flow (e.g. the two-angle cold
+                                  open). Shown only where the server would accept it, so the
+                                  button never appears just to refuse. */}
+                                {(() => {
+                                  if (!job?.masterAudioUrl) return null;
                                   const pos = scenes.findIndex(
                                     sc => sc.index === scene.index
                                   );
-                                  const prev =
-                                    pos > 0 ? scenes[pos - 1] : undefined;
                                   const next =
                                     pos >= 0 && pos < scenes.length - 1
                                       ? scenes[pos + 1]
                                       : undefined;
+                                  const setPiece = (s: StoryboardScene) =>
+                                    s.qrHero ||
+                                    s.coverHero ||
+                                    !!s.assetImageUrl;
+                                  if (
+                                    !next ||
+                                    scene.narrationStartSec == null ||
+                                    scene.narrationEndSec == null ||
+                                    next.narrationStartSec == null ||
+                                    next.narrationEndSec == null ||
+                                    Math.abs(
+                                      next.narrationStartSec -
+                                        scene.narrationEndSec
+                                    ) > 0.05 ||
+                                    setPiece(scene) ||
+                                    setPiece(next) ||
+                                    isSplitScene(scene) ||
+                                    isSplitScene(next) ||
+                                    !!scene.hostPresent !== !!next.hostPresent
+                                  )
+                                    return null;
                                   return (
-                                    <SceneTimingEditor
-                                      sceneIndex={scene.index}
-                                      clipUrl={scene.clipUrl}
-                                      startSec={scene.narrationStartSec}
-                                      endSec={scene.narrationEndSec}
-                                      clipInSec={scene.clipInSec}
-                                      tailHoldSec={scene.tailHoldSec}
-                                      headHoldSec={scene.headHoldSec}
-                                      qrTail={scene.qrTail}
-                                      qrHoldSec={scene.qrHoldSec}
-                                      prevStartSec={prev?.narrationStartSec}
-                                      nextEndSec={next?.narrationEndSec}
-                                      lipsync={
-                                        !!scene.hostPresent && !!scene.lipsynced
-                                      }
-                                      masterAudioUrl={job?.masterAudioUrl}
-                                      audioUrl={scene.audioUrl}
-                                      prevAudioUrl={prev?.audioUrl}
-                                      nextAudioUrl={next?.audioUrl}
-                                      prevClipUrl={prev?.clipUrl}
-                                      prevClipInSec={prev?.clipInSec}
-                                      nextClipUrl={next?.clipUrl}
-                                      nextClipInSec={next?.clipInSec}
-                                      prevIndex={prev?.index}
-                                      nextIndex={next?.index}
-                                      onSelectScene={i => setExpandedScene(i)}
-                                      pending={
-                                        timingMutation.isPending ||
-                                        splitSceneMutation.isPending ||
-                                        moveCutMutation.isPending ||
-                                        setPieceClipInMutation.isPending ||
-                                        revertSceneTimingMutation.isPending ||
-                                        rippleMutation.isPending ||
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      className="w-full"
+                                      disabled={
+                                        mergeScenesMutation.isPending ||
                                         isSceneQueued
                                       }
-                                      onApply={edit => {
-                                        if (!jobId) return;
-                                        timingMutation.mutate({
-                                          jobId,
-                                          sceneIndex: scene.index,
-                                          ...edit,
-                                        });
-                                      }}
-                                      onSplit={atOffsetSec => {
-                                        if (!jobId) return;
-                                        splitSceneMutation.mutate({
-                                          jobId,
-                                          sceneIndex: scene.index,
-                                          atOffsetSec,
-                                        });
-                                      }}
-                                      cutPoints={scene.cutPoints}
-                                      onRemoveCut={atOffsetSec => {
-                                        if (!jobId) return;
-                                        undoSplitMutation.mutate({
-                                          jobId,
-                                          sceneIndex: scene.index,
-                                          atOffsetSec,
-                                        });
-                                      }}
-                                      onMoveCut={(
-                                        fromOffsetSec,
-                                        toOffsetSec
-                                      ) => {
-                                        if (!jobId) return;
-                                        moveCutMutation.mutate({
-                                          jobId,
-                                          sceneIndex: scene.index,
-                                          fromOffsetSec,
-                                          toOffsetSec,
-                                        });
-                                      }}
-                                      pieceClipIns={scene.pieceClipIns}
-                                      onSetPieceClipIn={(
-                                        cutOffsetSec,
-                                        clipInSec
-                                      ) => {
-                                        if (!jobId) return;
-                                        setPieceClipInMutation.mutate({
-                                          jobId,
-                                          sceneIndex: scene.index,
-                                          cutOffsetSec,
-                                          clipInSec,
-                                        });
-                                      }}
-                                      onRipple={
-                                        job?.masterAudioUrl
-                                          ? (newSec, edge) => {
-                                              if (!jobId) return;
-                                              rippleMutation.mutate({
-                                                jobId,
-                                                sceneIndex: scene.index,
-                                                newSec,
-                                                edge,
-                                              });
-                                            }
-                                          : undefined
-                                      }
-                                      canRevert={!!scene.timingOriginal}
-                                      onRevert={() => {
-                                        if (!jobId) return;
-                                        revertSceneTimingMutation.mutate({
-                                          jobId,
-                                          sceneIndex: scene.index,
-                                        });
-                                      }}
-                                    />
+                                      title="Glue this scene and the next into one scene and re-render them as a single continuous clip — removes the cut between them. Costs one clip render."
+                                      onClick={() => mergeWithNext(scene, next)}
+                                    >
+                                      <Merge className="mr-1.5 h-3.5 w-3.5" />
+                                      Merge with scene #{next.index} — one
+                                      continuous clip
+                                    </Button>
                                   );
                                 })()}
-                              {/* Merge two neighbouring shots into ONE continuous clip — the fix
-                                  for a cut that chops the host mid-flow (e.g. the two-angle cold
-                                  open). Shown only where the server would accept it, so the
-                                  button never appears just to refuse. */}
-                              {(() => {
-                                if (!job?.masterAudioUrl) return null;
-                                const pos = scenes.findIndex(
-                                  sc => sc.index === scene.index
-                                );
-                                const next =
-                                  pos >= 0 && pos < scenes.length - 1
-                                    ? scenes[pos + 1]
-                                    : undefined;
-                                const setPiece = (s: StoryboardScene) =>
-                                  s.qrHero || s.coverHero || !!s.assetImageUrl;
-                                if (
-                                  !next ||
-                                  scene.narrationStartSec == null ||
-                                  scene.narrationEndSec == null ||
-                                  next.narrationStartSec == null ||
-                                  next.narrationEndSec == null ||
-                                  Math.abs(
-                                    next.narrationStartSec -
-                                      scene.narrationEndSec
-                                  ) > 0.05 ||
-                                  setPiece(scene) ||
-                                  setPiece(next) ||
-                                  isSplitScene(scene) ||
-                                  isSplitScene(next) ||
-                                  !!scene.hostPresent !== !!next.hostPresent
-                                )
-                                  return null;
-                                return (
+                                {/* Undo a merge: the originals' clips and audio still exist, so
+                                  the two cards come back instantly — nothing re-renders. */}
+                                {scene.mergeOriginal && (
                                   <Button
                                     type="button"
                                     variant="outline"
                                     size="sm"
                                     className="w-full"
                                     disabled={
-                                      mergeScenesMutation.isPending ||
+                                      unmergeScenesMutation.isPending ||
                                       isSceneQueued
                                     }
-                                    title="Glue this scene and the next into one scene and re-render them as a single continuous clip — removes the cut between them. Costs one clip render."
-                                    onClick={() => mergeWithNext(scene, next)}
+                                    title="Put back the two scenes this one was merged from, with their original clips — free, nothing re-renders."
+                                    onClick={() => {
+                                      if (!jobId) return;
+                                      unmergeScenesMutation.mutate({
+                                        jobId,
+                                        sceneIndex: scene.index,
+                                      });
+                                    }}
                                   >
-                                    <Merge className="mr-1.5 h-3.5 w-3.5" />
-                                    Merge with scene #{next.index} — one
-                                    continuous clip
+                                    <History className="mr-1.5 h-3.5 w-3.5" />
+                                    Unmerge — restore the original two scenes
                                   </Button>
-                                );
-                              })()}
-                              {/* Undo a merge: the originals' clips and audio still exist, so
-                                  the two cards come back instantly — nothing re-renders. */}
-                              {scene.mergeOriginal && (
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  size="sm"
-                                  className="w-full"
-                                  disabled={
-                                    unmergeScenesMutation.isPending ||
-                                    isSceneQueued
+                                )}
+                                <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">
+                                  {isSplitScene(scene)
+                                    ? "Right panel (still) → gpt-image-2"
+                                    : `Visual Prompt → ${providerDisplayName || "Model"}`}
+                                </Label>
+                                {isSplitScene(scene) && (
+                                  <p className="text-[10px] text-muted-foreground">
+                                    Host video on the left is reused — only the
+                                    right still regenerates.
+                                  </p>
+                                )}
+                                <Textarea
+                                  value={
+                                    promptEdits[scene.index] ??
+                                    ownedPrompt(scene)
                                   }
-                                  title="Put back the two scenes this one was merged from, with their original clips — free, nothing re-renders."
-                                  onClick={() => {
-                                    if (!jobId) return;
-                                    unmergeScenesMutation.mutate({
-                                      jobId,
-                                      sceneIndex: scene.index,
-                                    });
-                                  }}
-                                >
-                                  <History className="mr-1.5 h-3.5 w-3.5" />
-                                  Unmerge — restore the original two scenes
-                                </Button>
-                              )}
-                              <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">
-                                {isSplitScene(scene)
-                                  ? "Right panel (still) → gpt-image-2"
-                                  : `Visual Prompt → ${providerDisplayName || "Model"}`}
-                              </Label>
-                              {isSplitScene(scene) && (
-                                <p className="text-[10px] text-muted-foreground">
-                                  Host video on the left is reused — only the
-                                  right still regenerates.
-                                </p>
-                              )}
-                              <Textarea
-                                value={
-                                  promptEdits[scene.index] ?? ownedPrompt(scene)
-                                }
-                                onChange={e =>
-                                  setPromptEdits(p => ({
-                                    ...p,
-                                    [scene.index]: e.target.value,
-                                  }))
-                                }
-                                className="text-xs min-h-[80px] border-border resize-y"
-                                placeholder="Describe the visual for this scene..."
-                              />
-                              {(scene.assembledClipPrompt ||
-                                scene.assembledStillPrompt) && (
-                                <details className="text-[11px] text-muted-foreground">
-                                  <summary className="cursor-pointer select-none uppercase tracking-wide text-[10px]">
-                                    Prompt sent to provider
-                                  </summary>
-                                  {scene.assembledStillPrompt && (
-                                    <div className="mt-1 break-words">
-                                      <span className="font-semibold">
-                                        Still → gpt-image-2:
-                                      </span>{" "}
-                                      {scene.assembledStillPrompt}
-                                    </div>
-                                  )}
-                                  {scene.assembledClipPrompt && (
-                                    <div className="mt-1 break-words">
-                                      <span className="font-semibold">
-                                        Clip → grok-imagine-video:
-                                      </span>{" "}
-                                      {scene.assembledClipPrompt}
-                                    </div>
-                                  )}
-                                </details>
-                              )}
-                              {scene.hostPresent && (
-                                <div className="rounded-md border border-border p-2.5 space-y-2">
-                                  <Label className="text-[10px] text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
-                                    <Columns2 className="h-3 w-3" /> Split
-                                    screen
-                                  </Label>
-                                  {/* The two halves ARE two separate videos — show them that way. */}
-                                  {mediaActive &&
-                                    isSplitScene(scene) &&
-                                    scene.hostClipUrls?.[0] &&
-                                    scene.splitRightUrl && (
-                                      <div className="grid grid-cols-2 gap-2">
-                                        <div>
-                                          <p className="text-[10px] text-muted-foreground mb-1">
-                                            Host (reused, never re-rendered)
-                                          </p>
-                                          <video
-                                            ref={releaseOnUnmount}
-                                            src={scene.hostClipUrls[0]}
-                                            controls
-                                            muted
-                                            preload="none"
-                                            className="w-full rounded bg-black max-h-[100px]"
-                                            onClick={e => e.stopPropagation()}
-                                          />
-                                        </div>
-                                        <div>
-                                          <p className="text-[10px] text-muted-foreground mb-1">
-                                            Right panel (swappable)
-                                          </p>
-                                          <video
-                                            ref={releaseOnUnmount}
-                                            src={scene.splitRightUrl}
-                                            controls
-                                            muted
-                                            preload="none"
-                                            className="w-full rounded bg-black max-h-[100px]"
-                                            onClick={e => e.stopPropagation()}
-                                          />
-                                        </div>
+                                  onChange={e =>
+                                    setPromptEdits(p => ({
+                                      ...p,
+                                      [scene.index]: e.target.value,
+                                    }))
+                                  }
+                                  className="text-xs min-h-[80px] border-border resize-y"
+                                  placeholder="Describe the visual for this scene..."
+                                />
+                                {(scene.assembledClipPrompt ||
+                                  scene.assembledStillPrompt) && (
+                                  <details className="text-[11px] text-muted-foreground">
+                                    <summary className="cursor-pointer select-none uppercase tracking-wide text-[10px]">
+                                      Prompt sent to provider
+                                    </summary>
+                                    {scene.assembledStillPrompt && (
+                                      <div className="mt-1 break-words">
+                                        <span className="font-semibold">
+                                          Still → gpt-image-2:
+                                        </span>{" "}
+                                        {scene.assembledStillPrompt}
                                       </div>
                                     )}
-                                  {isSplitScene(scene) &&
-                                    scene.hostClipUrls?.[0] &&
-                                    scene.splitRightUrl && (
-                                      <div className="space-y-1">
-                                        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">
-                                          Position (drag — applies with one free
-                                          ffmpeg recomposite)
-                                        </p>
-                                        <SplitPositionEditor
-                                          hostUrl={scene.hostClipUrls[0]}
-                                          rightUrl={scene.splitRightUrl}
-                                          layout={scene.splitLayout}
-                                          autoHostFocusX={scene.splitAutoFocusX}
-                                          pending={isSceneQueued}
-                                          onApply={layout =>
+                                    {scene.assembledClipPrompt && (
+                                      <div className="mt-1 break-words">
+                                        <span className="font-semibold">
+                                          Clip → grok-imagine-video:
+                                        </span>{" "}
+                                        {scene.assembledClipPrompt}
+                                      </div>
+                                    )}
+                                  </details>
+                                )}
+                                {scene.hostPresent && (
+                                  <div className="rounded-md border border-border p-2.5 space-y-2">
+                                    <Label className="text-[10px] text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+                                      <Columns2 className="h-3 w-3" /> Split
+                                      screen
+                                    </Label>
+                                    {/* The two halves ARE two separate videos — show them that way. */}
+                                    {mediaActive &&
+                                      isSplitScene(scene) &&
+                                      scene.hostClipUrls?.[0] &&
+                                      scene.splitRightUrl && (
+                                        <div className="grid grid-cols-2 gap-2">
+                                          <div>
+                                            <p className="text-[10px] text-muted-foreground mb-1">
+                                              Host (reused, never re-rendered)
+                                            </p>
+                                            <video
+                                              ref={releaseOnUnmount}
+                                              src={scene.hostClipUrls[0]}
+                                              controls
+                                              muted
+                                              preload="none"
+                                              className="w-full rounded bg-black max-h-[100px]"
+                                              onClick={e => e.stopPropagation()}
+                                            />
+                                          </div>
+                                          <div>
+                                            <p className="text-[10px] text-muted-foreground mb-1">
+                                              Right panel (swappable)
+                                            </p>
+                                            <video
+                                              ref={releaseOnUnmount}
+                                              src={scene.splitRightUrl}
+                                              controls
+                                              muted
+                                              preload="none"
+                                              className="w-full rounded bg-black max-h-[100px]"
+                                              onClick={e => e.stopPropagation()}
+                                            />
+                                          </div>
+                                        </div>
+                                      )}
+                                    {isSplitScene(scene) &&
+                                      scene.hostClipUrls?.[0] &&
+                                      scene.splitRightUrl && (
+                                        <div className="space-y-1">
+                                          <p className="text-[10px] text-muted-foreground uppercase tracking-wide">
+                                            Position (drag — applies with one
+                                            free ffmpeg recomposite)
+                                          </p>
+                                          <SplitPositionEditor
+                                            hostUrl={scene.hostClipUrls[0]}
+                                            rightUrl={scene.splitRightUrl}
+                                            layout={scene.splitLayout}
+                                            autoHostFocusX={
+                                              scene.splitAutoFocusX
+                                            }
+                                            pending={isSceneQueued}
+                                            onApply={layout =>
+                                              applySplitEdit(scene, {
+                                                mode: "layout",
+                                                layout,
+                                              })
+                                            }
+                                          />
+                                        </div>
+                                      )}
+                                    <p className="text-[10px] text-muted-foreground">
+                                      {isSplitScene(scene)
+                                        ? "Swap what shows beside the host, or go back to full-frame. The host video never re-renders."
+                                        : "Put a visual beside the host: render one from the prompt above, or reuse any scene's footage."}
+                                    </p>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      {isSplitScene(scene) && (
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          className="h-7 text-xs"
+                                          disabled={isSceneQueued}
+                                          onClick={() =>
                                             applySplitEdit(scene, {
-                                              mode: "layout",
-                                              layout,
+                                              mode: "off",
                                             })
                                           }
-                                        />
-                                      </div>
-                                    )}
-                                  <p className="text-[10px] text-muted-foreground">
-                                    {isSplitScene(scene)
-                                      ? "Swap what shows beside the host, or go back to full-frame. The host video never re-renders."
-                                      : "Put a visual beside the host: render one from the prompt above, or reuse any scene's footage."}
-                                  </p>
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    {isSplitScene(scene) && (
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        className="h-7 text-xs"
-                                        disabled={isSceneQueued}
-                                        onClick={() =>
-                                          applySplitEdit(scene, { mode: "off" })
+                                        >
+                                          Remove split
+                                        </Button>
+                                      )}
+                                      {!isSplitScene(scene) && (
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          className="h-7 text-xs"
+                                          disabled={isSceneQueued}
+                                          onClick={() =>
+                                            applySplitEdit(scene, {
+                                              mode: "prompt",
+                                              prompt:
+                                                promptEdits[
+                                                  scene.index
+                                                ]?.trim() || undefined,
+                                              verbatim:
+                                                isEdited(scene.index) ||
+                                                undefined,
+                                            })
+                                          }
+                                        >
+                                          <Columns2 className="mr-1.5 h-3 w-3" />
+                                          Make split screen
+                                        </Button>
+                                      )}
+                                      <Select
+                                        value={
+                                          splitSource[
+                                            scene.index
+                                          ]?.toString() ?? ""
+                                        }
+                                        onValueChange={v =>
+                                          setSplitSource(p => ({
+                                            ...p,
+                                            [scene.index]: v
+                                              ? Number(v)
+                                              : undefined,
+                                          }))
                                         }
                                       >
-                                        Remove split
-                                      </Button>
-                                    )}
-                                    {!isSplitScene(scene) && (
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        className="h-7 text-xs"
-                                        disabled={isSceneQueued}
-                                        onClick={() =>
-                                          applySplitEdit(scene, {
-                                            mode: "prompt",
-                                            prompt:
-                                              promptEdits[
-                                                scene.index
-                                              ]?.trim() || undefined,
-                                            verbatim:
-                                              isEdited(scene.index) ||
-                                              undefined,
-                                          })
-                                        }
-                                      >
-                                        <Columns2 className="mr-1.5 h-3 w-3" />
-                                        Make split screen
-                                      </Button>
-                                    )}
-                                    <Select
-                                      value={
-                                        splitSource[scene.index]?.toString() ??
-                                        ""
+                                        <SelectTrigger className="h-7 w-56 text-xs">
+                                          <SelectValue placeholder="Use another scene's footage…" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          {scenes
+                                            .filter(
+                                              s =>
+                                                s.index !== scene.index &&
+                                                (s.hostPresent
+                                                  ? !!s.splitRightUrl
+                                                  : !!(
+                                                      s.clipUrls?.length ||
+                                                      s.clipUrl
+                                                    ))
+                                            )
+                                            .map(s => (
+                                              <SelectItem
+                                                key={s.index}
+                                                value={s.index.toString()}
+                                                className="text-xs"
+                                              >
+                                                #{s.index}{" "}
+                                                {s.hostPresent
+                                                  ? "(panel)"
+                                                  : s.stillImage
+                                                    ? "(still)"
+                                                    : "(video)"}{" "}
+                                                —{" "}
+                                                {(
+                                                  (s.hostPresent
+                                                    ? s.splitVisual
+                                                    : s.visualPrompt) ?? ""
+                                                ).slice(0, 48)}
+                                              </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                      </Select>
+                                      {splitSource[scene.index] != null && (
+                                        <Button
+                                          size="sm"
+                                          className="h-7 text-xs"
+                                          disabled={isSceneQueued}
+                                          onClick={() =>
+                                            applySplitEdit(scene, {
+                                              mode: "scene",
+                                              sourceIndex:
+                                                splitSource[scene.index]!,
+                                            })
+                                          }
+                                        >
+                                          Show it beside the host
+                                        </Button>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+                                <div className="flex gap-2">
+                                  {hostRegenBlocked(scene) ? (
+                                    // Out of host renders: the editor's way forward is b-roll.
+                                    <Button
+                                      size="sm"
+                                      className="h-7 text-xs"
+                                      disabled={isSceneQueued}
+                                      title={
+                                        hostRegenerationLocked(scene)
+                                          ? `${hostRegenLockedLabel(scene)} — make it b-roll, or ask a manager`
+                                          : "This video's host minutes are used — make it b-roll, or ask a manager"
                                       }
-                                      onValueChange={v =>
-                                        setSplitSource(p => ({
-                                          ...p,
-                                          [scene.index]: v
-                                            ? Number(v)
-                                            : undefined,
-                                        }))
+                                      onClick={() =>
+                                        setToBrollScene(scene.index)
                                       }
                                     >
-                                      <SelectTrigger className="h-7 w-56 text-xs">
-                                        <SelectValue placeholder="Use another scene's footage…" />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        {scenes
-                                          .filter(
-                                            s =>
-                                              s.index !== scene.index &&
-                                              (s.hostPresent
-                                                ? !!s.splitRightUrl
-                                                : !!(
-                                                    s.clipUrls?.length ||
-                                                    s.clipUrl
-                                                  ))
-                                          )
-                                          .map(s => (
-                                            <SelectItem
-                                              key={s.index}
-                                              value={s.index.toString()}
-                                              className="text-xs"
-                                            >
-                                              #{s.index}{" "}
-                                              {s.hostPresent
-                                                ? "(panel)"
-                                                : s.stillImage
-                                                  ? "(still)"
-                                                  : "(video)"}{" "}
-                                              —{" "}
-                                              {(
-                                                (s.hostPresent
-                                                  ? s.splitVisual
-                                                  : s.visualPrompt) ?? ""
-                                              ).slice(0, 48)}
-                                            </SelectItem>
-                                          ))}
-                                      </SelectContent>
-                                    </Select>
-                                    {splitSource[scene.index] != null && (
-                                      <Button
-                                        size="sm"
-                                        className="h-7 text-xs"
-                                        disabled={isSceneQueued}
-                                        onClick={() =>
-                                          applySplitEdit(scene, {
-                                            mode: "scene",
-                                            sourceIndex:
-                                              splitSource[scene.index]!,
-                                          })
-                                        }
-                                      >
-                                        Show it beside the host
-                                      </Button>
-                                    )}
-                                  </div>
-                                </div>
-                              )}
-                              <div className="flex gap-2">
-                                {hostRegenBlocked(scene) ? (
-                                  // Out of host renders: the editor's way forward is b-roll.
+                                      <Trees className="mr-1.5 h-3 w-3" />
+                                      Make b-roll
+                                    </Button>
+                                  ) : (
+                                    <Button
+                                      size="sm"
+                                      className="h-7 text-xs"
+                                      disabled={
+                                        isSceneQueued ||
+                                        !(
+                                          promptEdits[scene.index] ??
+                                          ownedPrompt(scene)
+                                        ).trim()
+                                      }
+                                      title={
+                                        hostRegenerationLocked(scene)
+                                          ? hostRegenLockedLabel(scene)
+                                          : undefined
+                                      }
+                                      onClick={() => regenerateSingle(scene)}
+                                    >
+                                      {isSceneQueued ? (
+                                        <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+                                      ) : (
+                                        <RefreshCw className="mr-1.5 h-3 w-3" />
+                                      )}
+                                      Regenerate
+                                    </Button>
+                                  )}
                                   <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 text-xs"
+                                    onClick={() => setExpandedScene(null)}
+                                  >
+                                    Cancel
+                                  </Button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex gap-1">
+                                {/* Out of host renders (editor): no Regenerate — "Make b-roll"
+                                  below is the way forward. */}
+                                {!hostRegenBlocked(scene) && (
+                                  <Button
+                                    variant="ghost"
                                     size="sm"
                                     className="h-7 text-xs"
                                     disabled={isSceneQueued}
                                     title={
                                       hostRegenerationLocked(scene)
-                                        ? `${hostRegenLockedLabel(scene)} — make it b-roll, or ask a manager`
-                                        : "This video's host minutes are used — make it b-roll, or ask a manager"
-                                    }
-                                    onClick={() => setToBrollScene(scene.index)}
-                                  >
-                                    <Trees className="mr-1.5 h-3 w-3" />
-                                    Make b-roll
-                                  </Button>
-                                ) : (
-                                  <Button
-                                    size="sm"
-                                    className="h-7 text-xs"
-                                    disabled={
-                                      isSceneQueued ||
-                                      !(
-                                        promptEdits[scene.index] ??
-                                        ownedPrompt(scene)
-                                      ).trim()
-                                    }
-                                    title={
-                                      hostRegenerationLocked(scene)
                                         ? hostRegenLockedLabel(scene)
                                         : undefined
                                     }
-                                    onClick={() => regenerateSingle(scene)}
+                                    onClick={e => {
+                                      e.stopPropagation();
+                                      regenerateSingle(scene);
+                                    }}
                                   >
                                     {isSceneQueued ? (
                                       <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
@@ -3978,100 +4137,63 @@ export default function LongformJobSlot({
                                   variant="ghost"
                                   size="sm"
                                   className="h-7 text-xs"
-                                  onClick={() => setExpandedScene(null)}
-                                >
-                                  Cancel
-                                </Button>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="flex gap-1">
-                              {/* Out of host renders (editor): no Regenerate — "Make b-roll"
-                                  below is the way forward. */}
-                              {!hostRegenBlocked(scene) && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-7 text-xs"
                                   disabled={isSceneQueued}
-                                  title={
-                                    hostRegenerationLocked(scene)
-                                      ? hostRegenLockedLabel(scene)
-                                      : undefined
-                                  }
                                   onClick={e => {
                                     e.stopPropagation();
-                                    regenerateSingle(scene);
+                                    setExpandedScene(scene.index);
                                   }}
                                 >
-                                  {isSceneQueued ? (
-                                    <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
-                                  ) : (
-                                    <RefreshCw className="mr-1.5 h-3 w-3" />
-                                  )}
-                                  Regenerate
+                                  <Pencil className="mr-1.5 h-3 w-3" />
+                                  Edit
                                 </Button>
-                              )}
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 text-xs"
-                                disabled={isSceneQueued}
-                                onClick={e => {
-                                  e.stopPropagation();
-                                  setExpandedScene(scene.index);
-                                }}
-                              >
-                                <Pencil className="mr-1.5 h-3 w-3" />
-                                Edit
-                              </Button>
-                              {scene.hostPresent && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-7 text-xs"
-                                  disabled={isSceneQueued}
-                                  title="Replace the host on this beat with a b-roll still — skips lip-sync"
-                                  onClick={e => {
-                                    e.stopPropagation();
-                                    setToBrollScene(scene.index);
-                                  }}
-                                >
-                                  <Trees className="mr-1.5 h-3 w-3" />
-                                  Make b-roll
-                                </Button>
-                              )}
-                              {isAdmin &&
-                                !scene.hostPresent &&
-                                !scene.qrHero &&
-                                !scene.coverHero &&
-                                !scene.assetImageUrl && (
+                                {scene.hostPresent && (
                                   <Button
                                     variant="ghost"
                                     size="sm"
                                     className="h-7 text-xs"
-                                    disabled={isSceneQueued || !scene.audioUrl}
-                                    title="Put the host on this beat — a HeyGen lip-sync render, full screen or split screen (admins only)"
+                                    disabled={isSceneQueued}
+                                    title="Replace the host on this beat with a b-roll still — skips lip-sync"
                                     onClick={e => {
                                       e.stopPropagation();
-                                      setToHostScene(scene.index);
+                                      setToBrollScene(scene.index);
                                     }}
                                   >
-                                    <User className="mr-1.5 h-3 w-3" />
-                                    Make host
+                                    <Trees className="mr-1.5 h-3 w-3" />
+                                    Make b-roll
                                   </Button>
                                 )}
-                            </div>
-                          ))}
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })}
+                                {isAdmin &&
+                                  !scene.hostPresent &&
+                                  !scene.qrHero &&
+                                  !scene.coverHero &&
+                                  !scene.assetImageUrl && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-7 text-xs"
+                                      disabled={
+                                        isSceneQueued || !scene.audioUrl
+                                      }
+                                      title="Put the host on this beat — a HeyGen lip-sync render, full screen or split screen (admins only)"
+                                      onClick={e => {
+                                        e.stopPropagation();
+                                        setToHostScene(scene.index);
+                                      }}
+                                    >
+                                      <User className="mr-1.5 h-3 w-3" />
+                                      Make host
+                                    </Button>
+                                  )}
+                              </div>
+                            ))}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+            </div>
           </div>
-        </div>
-      )}
-
+        )}
       </fieldset>
 
       {/* Redo host clips */}
@@ -4087,8 +4209,7 @@ export default function LongformJobSlot({
                 ? "HeyGen refused the host photo on these scenes."
                 : "HeyGen could not prepare the host photo on these scenes."}{" "}
               They render again with the photo this channel has set right now,
-              about{" "}
-              {formatMinSec(hostRedo?.sec ?? 0)} of host, roughly $
+              about {formatMinSec(hostRedo?.sec ?? 0)} of host, roughly $
               {(hostRedo?.usd ?? 0).toFixed(2)} at list price.
               {hostRedo?.fromBroll
                 ? ` ${hostRedo.fromBroll} of them were turned into pictures and become host scenes again.`
@@ -4335,8 +4456,8 @@ export default function LongformJobSlot({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Merge scenes {mergeConfirmScene} and {(mergeConfirmScene ?? 0) + 1}{" "}
-              anyway?
+              Merge scenes {mergeConfirmScene} and{" "}
+              {(mergeConfirmScene ?? 0) + 1} anyway?
             </AlertDialogTitle>
             <AlertDialogDescription>
               {(() => {

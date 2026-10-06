@@ -7,6 +7,7 @@ import { trpc } from "@/lib/trpc";
 import { uploadNarrationInParts } from "@/lib/resumableUpload";
 import { extractSpokenScript, stripCtaMarkerLines } from "@shared/ctaMarkers";
 import type { LongformInputParams } from "@shared/types";
+import { StepIssue } from "@/components/StepIssues";
 import {
   Check,
   ChevronDown,
@@ -14,7 +15,6 @@ import {
   Copy,
   Loader2,
   Upload,
-  TriangleAlert,
   Wand2,
   X,
 } from "lucide-react";
@@ -436,12 +436,7 @@ export function LongformNarrationUpload({
         <p className="text-xs text-muted-foreground">{note}</p>
       )}
 
-      {error && (
-        <div className="flex gap-2 text-xs text-destructive">
-          <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          <p className="whitespace-pre-line">{error}</p>
-        </div>
-      )}
+      {error && <StepIssue tone="error">{error}</StepIssue>}
 
       <p className="text-xs text-muted-foreground">
         One file for the whole script, read start to finish — every
