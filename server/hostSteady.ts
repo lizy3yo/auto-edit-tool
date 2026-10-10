@@ -738,8 +738,11 @@ export async function steadyHostClip(
       src = out;
       poses = await measureCameraPath(src);
     }
+    // The room freeze is DISABLED (2026-10-10, the operator's call: host takes read as glitchy
+    // with it on). Nothing is removed — `freezeRoom`, `personMatte` and `hostArea` are all still
+    // here — and `HOST_FREEZE_ROOM=1` turns it back on. The camera correction above still runs.
     const frozen =
-      process.env.HOST_FREEZE_ROOM === "0" || opts.freezeRoom === false
+      process.env.HOST_FREEZE_ROOM !== "1" || opts.freezeRoom === false
         ? src
         : await freezeRoom(dir, src);
     console.log(
