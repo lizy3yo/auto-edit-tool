@@ -235,3 +235,9 @@
 html {
   scroll-padding-top: calc(var(--app-header-h) + 1rem);
 }
+
+/* A control paused for a view-only viewer (`useViewOnlyGuard`): it is `inert`, so it cannot be
+   clicked or focused, and it is dimmed so it reads as off rather than broken. */
+[data-view-paused] {
+  opacity: 0.45;
+}

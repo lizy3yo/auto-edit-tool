@@ -1623,8 +1623,12 @@ Express · tRPC · Drizzle · MySQL.
   CHANGES ONLY WHAT THEY CREATED (`mayEditOwned`, same day): they see what a manager sees and
   every write on something another account made is refused — a video (no regenerate, retry,
   reassemble, timing edit, cancel or take over: `jobAccessRefusal` answers `viewOnly` on a write,
-  so every route behind `assertJobAccess` is covered, and `pollJob.viewOnly` pauses the card
-  through the takeover's `<fieldset disabled>`), a channel and what it holds (settings, voice
+  so every route behind `assertJobAccess` is covered, and `pollJob.viewOnly` pauses the card —
+  NOT with the takeover's `<fieldset disabled>`, which froze the time-range tabs, the search box
+  and the player too and cannot switch anything inside it back on, but with `useViewOnlyGuard`
+  (`client/src/components/ViewOnlyGuard.tsx`): every control is made `inert` unless it is marked
+  `VIEW_OK` as one that only looks — paused by default, so a button added later is paused until
+  someone marks it; harness `client/__harness/view-only.html`), a channel and what it holds (settings, voice
   tuning, books, CTA assets, host photos, the ticked angles and the primary), a test or VSL run
   (rename, retry, "Use this one"), and the settings every video shares (the directing
   instruction and pacing, `sharedSettingsProcedure`). Who made a channel, book, asset or host

@@ -36,6 +36,7 @@ import { toast } from "sonner";
 import { downloadFile } from "@/lib/download";
 import { armNotifications, notifyJobDone } from "@/lib/notify";
 import { useAuth } from "@/_core/hooks/useAuth";
+import { useViewOnlyGuard, VIEW_OK } from "@/components/ViewOnlyGuard";
 import { LongformVideoPlayer } from "./LongformVideoPlayer";
 import { GenerationCostDialog } from "./GenerationCostDialog";
 import { ChannelVoiceTuning } from "@/components/ChannelVoiceTuning";
@@ -1305,6 +1306,9 @@ export default function LongformJobSlot({
   const job = jobId !== null && jobId !== dismissedJobId ? rawJob : null;
   /** A guest looking at a video someone else made: watch it, change nothing (`mayEditOwned`). */
   const viewOnly = !!job?.viewOnly;
+  // Pauses every control that changes the video and leaves the ones that only look at it
+  // (marked `VIEW_OK`) working.
+  const viewOnlyRef = useViewOnlyGuard<HTMLFieldSetElement>(viewOnly);
   // The video's host spend limit (`shared/hostSpend.ts`) — null on a job without one.
   const hostSpend = job?.hostSpend ?? null;
   /** Would one more host render of this scene go past the limit? The server decides; this asks first. */
@@ -2493,15 +2497,19 @@ export default function LongformJobSlot({
 
       {job && viewOnly && (
         <Alert tone="info" title="View only">
-          You did not make this video, so its buttons are paused. You can watch
-          it here. Your account can change only the videos it made.
+          You did not make this video, so you can look through it and watch
+          it, but not change it. Your account can change only the videos it
+          made.
         </Alert>
       )}
 
       {/* `disabled` on a fieldset disables every button, input and select inside it — the whole
-          card and storyboard pause with one switch, and nothing new added below can be missed. */}
+          card and storyboard pause with one switch, and nothing new added below can be missed.
+          View only is NOT that switch: it pauses what changes the video and keeps what only
+          looks at it (`useViewOnlyGuard`). */}
       <fieldset
-        disabled={pausedByTakeover || viewOnly}
+        ref={viewOnlyRef}
+        disabled={pausedByTakeover}
         className="m-0 min-w-0 space-y-6 border-0 p-0"
       >
         {/* Progress / result */}
@@ -2568,6 +2576,7 @@ export default function LongformJobSlot({
                   )}
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
+                  <span {...VIEW_OK} className="contents">
                   <JobIssuesButton
                     error={
                       job.status === "failed"
@@ -2576,9 +2585,11 @@ export default function LongformJobSlot({
                     }
                     warnings={progress?.warnings ?? []}
                   />
+                  </span>
                   {/* Available during the render too, not just after — the total updates as the
                   job spends, which is when it is most worth watching. */}
                   <Button
+                    {...VIEW_OK}
                     variant="ghost"
                     size="sm"
                     onClick={() => setShowCost(true)}
@@ -2606,6 +2617,7 @@ export default function LongformJobSlot({
                     // stays in the library. The label says that now, and the icon is an X —
                     // detach — rather than a bin.
                     <Button
+                      {...VIEW_OK}
                       variant="ghost"
                       size="sm"
                       onClick={() => setShowClearConfirm(true)}
@@ -2892,10 +2904,12 @@ export default function LongformJobSlot({
                       The scenes are all here. Preview them below, then press
                       Retry Assembly to build the final video.
                     </p>
-                    <LongformCutPreview
-                      scenes={scenes}
-                      masterAudioUrl={job.masterAudioUrl}
-                    />
+                    <div {...VIEW_OK}>
+                      <LongformCutPreview
+                        scenes={scenes}
+                        masterAudioUrl={job.masterAudioUrl}
+                      />
+                    </div>
                     {/* The host fix works on the scenes, so it does not need a built film. */}
                     {cleanHostClipsButton}
                   </div>
@@ -2912,10 +2926,12 @@ export default function LongformJobSlot({
                     {/* No final exists yet, so the preview IS the only way to see the cut — show
                       it inline rather than behind a toggle. */}
                     {cutPreviewReady && (
-                      <LongformCutPreview
-                        scenes={scenes}
-                        masterAudioUrl={job.masterAudioUrl}
-                      />
+                      <div {...VIEW_OK}>
+                        <LongformCutPreview
+                          scenes={scenes}
+                          masterAudioUrl={job.masterAudioUrl}
+                        />
+                      </div>
                     )}
                     <Button
                       variant="outline"
@@ -3046,6 +3062,7 @@ export default function LongformJobSlot({
               )}
               {job.status === "completed" && job.finalVideoUrl && (
                 <div className="space-y-3">
+                  <div className="space-y-3" {...VIEW_OK}>
                   {/* One player slot, two sources. The switcher sits directly above the picture so
                     the two cuts occupy the same place on screen and can be compared by clicking
                     between them — a second player below the film would read as a second film. */}
@@ -3066,6 +3083,7 @@ export default function LongformJobSlot({
                       seekRef={playerSeekRef}
                     />
                   )}
+                  </div>
                   <div className="flex justify-end gap-2">
                     {needsSplitRetrofit && (
                       <Button
@@ -3146,6 +3164,7 @@ export default function LongformJobSlot({
                     </Button>
                     {cleanHostClipsButton}
                     <Button
+                      {...VIEW_OK}
                       variant="outline"
                       size="sm"
                       onClick={() =>
@@ -3163,7 +3182,7 @@ export default function LongformJobSlot({
                   </div>
                   {/* Links, QR, description, timestamp map — everything needed to publish. */}
                   {jobId != null && (
-                    <div className="border-t border-border pt-4">
+                    <div className="border-t border-border pt-4" {...VIEW_OK}>
                       <LongformPublishKit
                         jobId={jobId}
                         onSeek={seekRenderedFilm}
@@ -3217,7 +3236,7 @@ export default function LongformJobSlot({
                   )}
                 </div>
                 <div className="flex items-center gap-2">
-                  <div className="relative">
+                  <div className="relative" {...VIEW_OK}>
                     <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                     <Input
                       value={sceneSearch}
@@ -3359,7 +3378,7 @@ export default function LongformJobSlot({
                 </div>
               </details>
               {(minuteGroups.length > 1 || regenScenes.length > 0) && (
-                <div className="flex flex-wrap gap-1.5">
+                <div className="flex flex-wrap gap-1.5" {...VIEW_OK}>
                   {minuteGroups.map((g, i) => (
                     <Button
                       key={i}

@@ -1,3 +1,4 @@
+import { VIEW_EDIT } from "@/components/ViewOnlyGuard";
 import { useEffect, useId, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
@@ -391,7 +392,8 @@ export function LongformPublishKit({
       )}
 
       {/* ── YouTube link back ─────────────────────────────────── */}
-      <div className="space-y-2">
+      {/* The one part of the kit that CHANGES the video, so a view-only viewer gets it paused. */}
+      <div className="space-y-2" {...VIEW_EDIT}>
         <Label className="flex items-center gap-2 text-sm font-medium">
           <Youtube className="h-4 w-4" /> Published at
         </Label>
