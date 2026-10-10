@@ -10,6 +10,7 @@
  * WRITE from anyone else is refused, the owner included.
  */
 import { TRPCError } from "@trpc/server";
+import { VIEW_ONLY_ERR_MSG } from "../shared/const";
 import { jobAccessRefusal, takenOverMessage } from "../shared/jobTakeover";
 import type { Account } from "../shared/roles";
 import { getTakeover, touchTakeover } from "./jobTakeover";
@@ -23,6 +24,8 @@ export async function assertJobAccess(
   const refusal = jobAccessRefusal(job, user, mode, takeover);
   if (refusal?.kind === "notYours")
     throw new TRPCError({ code: "FORBIDDEN", message: "Not your video" });
+  if (refusal?.kind === "viewOnly")
+    throw new TRPCError({ code: "FORBIDDEN", message: VIEW_ONLY_ERR_MSG });
   if (refusal?.kind === "takenOver")
     throw new TRPCError({
       code: "FORBIDDEN",

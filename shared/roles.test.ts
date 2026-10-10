@@ -6,6 +6,7 @@ import {
   ROLE_DESCRIPTION,
   ROLE_LABEL,
   canCleanHostClips,
+  canEditSharedSettings,
   canManageChannels,
   canManageKeys,
   canOpenAdmin,
@@ -13,6 +14,7 @@ import {
   canSeeAllJobs,
   hasManagerAccess,
   isRole,
+  mayEditOwned,
   type Account,
 } from "./roles";
 import { canOverrideHostRegenLimit } from "./hostRegenLimit";
@@ -35,6 +37,8 @@ describe("role capabilities", () => {
       admin: boolean;
       remove: boolean;
       pastHostLimit: boolean;
+      /** Changes what someone else created, and the settings every video shares. */
+      editsOthers: boolean;
     }
   > = {
     admin: {
@@ -45,6 +49,7 @@ describe("role capabilities", () => {
       admin: true,
       remove: true,
       pastHostLimit: true,
+      editsOthers: true,
     },
     manager: {
       account: { role: "manager" },
@@ -54,6 +59,7 @@ describe("role capabilities", () => {
       admin: true,
       remove: true,
       pastHostLimit: true,
+      editsOthers: true,
     },
     "guest, access on": {
       account: { role: "guest", managerAccess: true },
@@ -63,6 +69,7 @@ describe("role capabilities", () => {
       admin: true,
       remove: false,
       pastHostLimit: false,
+      editsOthers: false,
     },
     "guest, access off": {
       account: { role: "guest", managerAccess: false },
@@ -72,6 +79,7 @@ describe("role capabilities", () => {
       admin: false,
       remove: false,
       pastHostLimit: false,
+      editsOthers: false,
     },
     editor: {
       account: { role: "editor" },
@@ -81,6 +89,9 @@ describe("role capabilities", () => {
       admin: false,
       remove: true,
       pastHostLimit: false,
+      // Never refused by the ownership rule: the gate in front of each route is what stops an
+      // editor, who reaches no manager route at all.
+      editsOthers: true,
     },
   };
 
@@ -105,6 +116,20 @@ describe("role capabilities", () => {
     });
     it(`${name}: removes things`, () => {
       expect(canRemove(account.role)).toBe(want.remove);
+    });
+    it(`${name}: changes what someone else created`, () => {
+      const me = { id: 7, ...account };
+      expect(mayEditOwned(me, 8)).toBe(want.editsOthers);
+      // Nobody's (older than the created-by columns) counts as someone else's.
+      expect(mayEditOwned(me, null)).toBe(want.editsOthers);
+      expect(mayEditOwned(me, undefined)).toBe(want.editsOthers);
+      // What they created themselves is always theirs to change.
+      expect(mayEditOwned(me, 7)).toBe(true);
+    });
+    it(`${name}: changes the settings every video shares`, () => {
+      expect(canEditSharedSettings(account)).toBe(
+        want.editsOthers && want.channels
+      );
     });
     it(`${name}: renders a host beat past its limit`, () => {
       expect(canOverrideHostRegenLimit(account.role)).toBe(want.pastHostLimit);
@@ -168,7 +193,7 @@ describe("every remove route refuses a guest", () => {
   );
   const starts = [
     ...source.matchAll(
-      /^  ([a-zA-Z0-9_]+): (approved|manager|remover|admin|public|protected)Procedure/gm
+      /^  ([a-zA-Z0-9_]+): (approved|manager|remover|sharedSettings|admin|public|protected)Procedure/gm
     ),
   ];
   const routes = starts.map((m, i) => ({
@@ -210,9 +235,9 @@ describe("every remove route refuses a guest", () => {
       path.join(__dirname, "..", "server", "_core", "trpc.ts"),
       "utf8"
     );
-    const gate = trpc.slice(trpc.indexOf("export const removerProcedure"));
-    expect(gate.slice(0, gate.indexOf(");\n") + 1)).toContain(
-      "canRemove(account.role)"
-    );
+    const start = trpc.indexOf("export const removerProcedure");
+    expect(start).toBeGreaterThan(-1);
+    const end = trpc.indexOf("export const", start + 1);
+    expect(trpc.slice(start, end)).toContain("canRemove(account.role)");
   });
 });

@@ -2,8 +2,14 @@ import {
   CANNOT_REMOVE_ERR_MSG,
   NOT_ADMIN_ERR_MSG,
   UNAUTHED_ERR_MSG,
+  VIEW_ONLY_ERR_MSG,
 } from "@shared/const";
-import { canManageChannels, canRemove, type Account } from "@shared/roles";
+import {
+  canEditSharedSettings,
+  canManageChannels,
+  canRemove,
+  type Account,
+} from "@shared/roles";
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import type { TrpcContext } from "./context";
@@ -94,6 +100,14 @@ export const removerProcedure = t.procedure.use(
     account => canManageChannels(account) && canRemove(account.role),
     CANNOT_REMOVE_ERR_MSG
   )
+);
+
+/**
+ * `managerProcedure` for the settings every video shares (the directing instruction, the
+ * pacing). Nobody created them, so a guest — who changes only what they created — is refused.
+ */
+export const sharedSettingsProcedure = t.procedure.use(
+  requireRole(canEditSharedSettings, VIEW_ONLY_ERR_MSG)
 );
 
 /** Admin only: provider API keys, mock mode, and account management. */

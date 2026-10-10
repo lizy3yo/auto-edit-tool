@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useAuth } from "@/_core/hooks/useAuth";
+import { mayTakeOver } from "@shared/jobTakeover";
 
 type Item = RouterOutputs["activity"]["list"]["items"][number];
 
@@ -76,6 +77,9 @@ function Row({
 }) {
   const [, navigate] = useLocation();
   const utils = trpc.useUtils();
+  const { user } = useAuth();
+  // The server's own rule (`mayTakeOver`): never a guest, who changes only their own videos.
+  const canTakeOver = !!user && mayTakeOver({ userId: item.userId }, user);
   const open = () => navigate(`/?open=${item.id}`);
   const refresh = () => void utils.activity.list.invalidate();
 
@@ -178,7 +182,7 @@ function Row({
             <Button size="sm" variant="ghost" onClick={open}>
               View
             </Button>
-            {!heldByOther && (
+            {!heldByOther && canTakeOver && (
               <Button
                 size="sm"
                 disabled={takeOver.isPending}

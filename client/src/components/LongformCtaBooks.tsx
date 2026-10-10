@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Thumb } from "@/components/Thumb";
 import { trpc } from "@/lib/trpc";
+import { useCanEditChannel } from "@/hooks/useMayEdit";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -88,6 +89,9 @@ export function LongformCtaBooks({
 
   const upload = trpc.styleReference.upload.useMutation();
   const saveBook = trpc.book.save.useMutation();
+  // Saving a book to the channel changes the channel, so a guest is offered it only on a
+  // channel they created. The book still goes on this video either way.
+  const canEditChannel = useCanEditChannel(channelKey);
 
   // The channel's saved books (Admin → Channels), offered as one-click rows so a returning
   // book doesn't have to be re-typed and re-uploaded per video. Active only — a deactivated
@@ -368,16 +372,22 @@ export function LongformCtaBooks({
                     className="h-8 text-sm"
                   />
                   <div className="flex items-center justify-between gap-2">
-                    <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                      <Checkbox
-                        checked={b.saveToChannel ?? false}
-                        disabled={disabled}
-                        onCheckedChange={v =>
-                          setBook(i, { saveToChannel: v === true })
-                        }
-                      />
-                      Also save to this channel
-                    </label>
+                    {canEditChannel ? (
+                      <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                        <Checkbox
+                          checked={b.saveToChannel ?? false}
+                          disabled={disabled}
+                          onCheckedChange={v =>
+                            setBook(i, { saveToChannel: v === true })
+                          }
+                        />
+                        Also save to this channel
+                      </label>
+                    ) : (
+                      <span className="text-[11px] text-muted-foreground">
+                        Used on this video only
+                      </span>
+                    )}
                     <div className="flex items-center gap-1">
                       <Button
                         variant="ghost"
@@ -389,7 +399,7 @@ export function LongformCtaBooks({
                         <ClipboardCopy className="mr-1 h-3.5 w-3.5" />
                         Copy CTA
                       </Button>
-                      {savedKeys.has(keyFor(b)) ? (
+                      {!canEditChannel ? null : savedKeys.has(keyFor(b)) ? (
                         <span className="flex items-center gap-1 px-2 text-xs text-success">
                           <Check className="h-3.5 w-3.5" />
                           Saved

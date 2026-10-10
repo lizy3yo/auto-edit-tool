@@ -173,6 +173,11 @@ export const channelConfigs = mysqlTable("channel_configs", {
   id: int("id").autoincrement().primaryKey(),
   /** Channel key — the row's stable id, also the music-bed set prefix (server/musicBeds.ts) */
   channelKey: varchar("channelKey", { length: 64 }).notNull().unique(),
+  /**
+   * The account that created this row. Read only for a GUEST, who may change nothing they did
+   * not create (`mayEditOwned` in `shared/roles.ts`); null on rows that predate it — nobody's.
+   */
+  createdBy: int("createdBy"),
   /** ElevenLabs voice ID for TTS */
   voiceId: varchar("voiceId", { length: 128 }),
   /** ElevenLabs voice name (for display) */
@@ -257,6 +262,11 @@ export const books = mysqlTable("books", {
   id: int("id").autoincrement().primaryKey(),
   /** Owning channel — books are per-channel, never shared. */
   channelKey: varchar("channelKey", { length: 64 }).notNull(),
+  /**
+   * The account that created this row. Read only for a GUEST, who may change nothing they did
+   * not create (`mayEditOwned` in `shared/roles.ts`); null on rows that predate it — nobody's.
+   */
+  createdBy: int("createdBy"),
   /** Display title, and what `markCoverReveal` searches the CTA text for. */
   title: varchar("title", { length: 255 }).notNull(),
   /** Cover image (R2 URL) revealed full-frame in this book's CTA block. */
@@ -293,6 +303,11 @@ export const channelAssets = mysqlTable("channel_assets", {
   id: int("id").autoincrement().primaryKey(),
   /** Owning channel — assets are per-channel, never shared. */
   channelKey: varchar("channelKey", { length: 64 }).notNull(),
+  /**
+   * The account that created this row. Read only for a GUEST, who may change nothing they did
+   * not create (`mayEditOwned` in `shared/roles.ts`); null on rows that predate it — nobody's.
+   */
+  createdBy: int("createdBy"),
   /** The image (R2 URL) shown full-beat during the CTA. */
   imageUrl: varchar("imageUrl", { length: 512 }).notNull(),
   /** Optional caption burned bottom-centre when captions are enabled in Longform Pacing. */
@@ -328,6 +343,11 @@ export const channelHostPhotos = mysqlTable("channel_host_photos", {
   id: int("id").autoincrement().primaryKey(),
   /** Owning channel — host photos are per-channel, never shared. */
   channelKey: varchar("channelKey", { length: 64 }).notNull(),
+  /**
+   * The account that created this row. Read only for a GUEST, who may change nothing they did
+   * not create (`mayEditOwned` in `shared/roles.ts`); null on rows that predate it — nobody's.
+   */
+  createdBy: int("createdBy"),
   /** The photo (R2 URL) a host scene is lip-synced from. */
   imageUrl: varchar("imageUrl", { length: 512 }).notNull(),
   /**

@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
+import {
+  useCanEditChannel,
+  useMayEdit,
+  VIEW_ONLY_NOTE,
+} from "@/hooks/useMayEdit";
 import { useRequestId } from "@/lib/requestId";
 import { keepPreviousData } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -187,6 +192,8 @@ export function UpsellVsl() {
     onSuccess: ({ url }) => setPendingUpload(url),
     onError: err => toast.error(err.message),
   });
+  // Keeping a photo adds it to the channel, so a guest may only on a channel they created.
+  const canKeepOnChannel = useCanEditChannel(channelKey);
   const keep = trpc.channelHostPhoto.save.useMutation({
     onSuccess: async ({ id }) => {
       await utils.channelHostPhoto.list.invalidate({ channelKey });
@@ -470,7 +477,8 @@ export function UpsellVsl() {
               Just for this VSL
             </Button>
             <AlertDialogAction
-              disabled={keep.isPending}
+              disabled={keep.isPending || !canKeepOnChannel}
+              title={canKeepOnChannel ? undefined : VIEW_ONLY_NOTE}
               onClick={e => {
                 // Stay open until it is saved, so a failure is seen in context.
                 e.preventDefault();
@@ -695,6 +703,8 @@ function VslResults({
 }) {
   const utils = trpc.useUtils();
   const { canRemove } = useAuth();
+  // A guest may rename, retry and pick only the VSLs they made (`mayEditOwned`).
+  const mayEdit = useMayEdit();
   const { data, isLoading, isFetching } = trpc.vsl.list.useQuery(
     { channelKey, page },
     {
@@ -790,7 +800,11 @@ function VslResults({
                   row={r}
                   now={now}
                   retrying={retry.isPending}
-                  onRetry={() => retry.mutate({ batchId: r.batchId, ids: [r.id] })}
+                  onRetry={
+                    mayEdit(r.userId)
+                      ? () => retry.mutate({ batchId: r.batchId, ids: [r.id] })
+                      : undefined
+                  }
                 />
               </div>
               <div className="min-w-0 space-y-2">
@@ -809,6 +823,7 @@ function VslResults({
                     </div>
                     <RunName
                       name={r.runName}
+                      readOnly={!mayEdit(r.userId)}
                       saving={rename.isPending}
                       onSave={name => rename.mutate({ batchId: r.batchId, name })}
                     />
@@ -850,7 +865,8 @@ function VslResults({
                     <Button
                       size="sm"
                       variant={r.isPicked ? "outline" : "default"}
-                      disabled={usePick.isPending}
+                      disabled={usePick.isPending || !mayEdit(r.userId)}
+                      title={mayEdit(r.userId) ? undefined : VIEW_ONLY_NOTE}
                       onClick={() => usePick.mutate({ batchId: r.batchId })}
                     >
                       {r.isPicked ? "Stop using" : "Use this one"}

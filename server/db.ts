@@ -1022,6 +1022,19 @@ export async function createChannelAsset(
   return (res as any)?.insertId ?? null;
 }
 
+export async function getChannelAssetById(
+  id: number
+): Promise<ChannelAsset | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db
+    .select()
+    .from(channelAssets)
+    .where(eq(channelAssets.id, id))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
 export async function updateChannelAsset(
   id: number,
   data: Partial<InsertChannelAsset>
@@ -1071,6 +1084,19 @@ export async function createChannelHostPhoto(
   if (!db) return null;
   const [res] = await db.insert(channelHostPhotos).values(data);
   return (res as any)?.insertId ?? null;
+}
+
+export async function getChannelHostPhotoById(
+  id: number
+): Promise<ChannelHostPhoto | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db
+    .select()
+    .from(channelHostPhotos)
+    .where(eq(channelHostPhotos.id, id))
+    .limit(1);
+  return rows[0] ?? null;
 }
 
 export async function updateChannelHostPhoto(

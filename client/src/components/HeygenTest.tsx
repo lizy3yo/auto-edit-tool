@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
+import { useMayEdit } from "@/hooks/useMayEdit";
 import { useRequestId } from "@/lib/requestId";
 import { keepPreviousData } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -396,6 +397,8 @@ function HeygenTestResults({
   const utils = trpc.useUtils();
   const { data: channels } = trpc.channelConfig.list.useQuery();
   const { canRemove } = useAuth();
+  // A guest may rename and retry only the runs they started (`mayEditOwned`).
+  const mayEdit = useMayEdit();
   const { data: runners } = trpc.heygenTest.runners.useQuery();
   const { data: testedChannelKeys } = trpc.heygenTest.channels.useQuery();
   // Only channels that have test runs, by their display name.
@@ -599,6 +602,7 @@ function HeygenTestResults({
                 <div className="min-w-0 flex-1 space-y-1">
                   <RunName
                     name={first.runName}
+                    readOnly={!mayEdit(first.userId)}
                     saving={rename.isPending}
                     onSave={name =>
                       rename.mutate({ batchId: first.batchId, name })
@@ -628,7 +632,7 @@ function HeygenTestResults({
                     />
                   )}
                 </div>
-                {failedCount > 1 && (
+                {failedCount > 1 && mayEdit(first.userId) && (
                   <Button
                     variant="outline"
                     size="sm"
@@ -687,8 +691,14 @@ function HeygenTestResults({
                         row={r}
                         now={now}
                         retrying={retry.isPending}
-                        onRetry={() =>
-                          retry.mutate({ batchId: r.batchId, ids: [r.id] })
+                        onRetry={
+                          mayEdit(r.userId)
+                            ? () =>
+                                retry.mutate({
+                                  batchId: r.batchId,
+                                  ids: [r.id],
+                                })
+                            : undefined
                         }
                       />
                     </div>
@@ -838,7 +848,8 @@ export function HeygenClipStatus({
   };
   now: number;
   retrying: boolean;
-  onRetry: () => void;
+  /** Absent when the viewer may not retry this clip (a guest on someone else's run). */
+  onRetry?: () => void;
 }) {
   const progress = heygenTestProgress(
     { ...r, phaseStartedAt: r.phaseStartedAt ?? r.updatedAt },
@@ -880,16 +891,18 @@ export function HeygenClipStatus({
             {STATUS_LABEL[r.status] ?? r.status}
           </Badge>
           {r.status === "failed" ? (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 px-2 text-xs"
-              disabled={retrying}
-              onClick={onRetry}
-            >
-              <RotateCcw className="mr-1 h-3 w-3" />
-              Retry
-            </Button>
+            onRetry && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                disabled={retrying}
+                onClick={onRetry}
+              >
+                <RotateCcw className="mr-1 h-3 w-3" />
+                Retry
+              </Button>
+            )
           ) : (
             r.costUsd > 0 && (
               <span className="text-[11px] text-muted-foreground">
@@ -947,13 +960,21 @@ export function RunName({
   name,
   saving,
   onSave,
+  readOnly,
 }: {
   name: string | null;
   saving: boolean;
   onSave: (name: string) => void;
+  /** Show the name with no way to change it (a guest on someone else's run). */
+  readOnly?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
+
+  if (readOnly)
+    return name ? (
+      <p className="truncate text-sm font-semibold">{name}</p>
+    ) : null;
 
   if (editing)
     return (

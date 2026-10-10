@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { trpc } from "@/lib/trpc";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, KeyRound, Plug, Settings } from "lucide-react";
 import { useAuth } from "@/_core/hooks/useAuth";
+import { useCanEditSharedSettings, VIEW_ONLY_NOTE } from "@/hooks/useMayEdit";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/PageHeader";
 import { ProviderKeys } from "@/components/admin/ProviderKeys";
@@ -326,6 +327,24 @@ function SixtyNineLabsCard() {
  * procedures behind each tab are gated to match (`adminProcedure` vs `managerProcedure`), so
  * hiding is the courtesy and the server is the lock.
  */
+/**
+ * A setting every video shares (the directing instruction, the pacing). Nobody created it, so an
+ * account that changes only what it created — a guest — reads it with every control paused; the
+ * routes refuse them too (`sharedSettingsProcedure`).
+ */
+function SharedSetting({ children }: { children: ReactNode }) {
+  const canEdit = useCanEditSharedSettings();
+  if (canEdit) return <>{children}</>;
+  return (
+    <fieldset disabled className="m-0 min-w-0 space-y-3 border-0 p-0">
+      <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+        {VIEW_ONLY_NOTE}
+      </p>
+      {children}
+    </fieldset>
+  );
+}
+
 export default function AdminPage() {
   const { canManageKeys } = useAuth();
 
@@ -356,10 +375,14 @@ export default function AdminPage() {
           </TabsContent>
         )}
         <TabsContent value="instruction">
-          <LongformInstruction />
+          <SharedSetting>
+            <LongformInstruction />
+          </SharedSetting>
         </TabsContent>
         <TabsContent value="pacing">
-          <LongformPacing />
+          <SharedSetting>
+            <LongformPacing />
+          </SharedSetting>
         </TabsContent>
         {canManageKeys && (
           <TabsContent value="spend">

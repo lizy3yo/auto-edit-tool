@@ -72,7 +72,7 @@ const MANAGER_ACCESS_LABEL = "Operations manager access";
 /** What a guest's switch means in each position — the same words in the form and the table. */
 function managerAccessHint(on: boolean): string {
   return on
-    ? "On: channels, books, assets, HeyGen test, Upsell VSL, Activity and everyone's videos. Never deleting."
+    ? "On: sees channels, books, assets, HeyGen test, Upsell VSL, Activity and everyone's videos. Changes only what they created. Never deletes."
     : "Off: only their own videos. Every operations manager page is hidden.";
 }
 

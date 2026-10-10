@@ -11,6 +11,7 @@ import {
   publicProcedure,
   removerProcedure,
   router,
+  sharedSettingsProcedure,
 } from "./_core/trpc";
 import {
   ROLES,
@@ -18,6 +19,7 @@ import {
   canCleanHostClips,
   canRemove,
   canSeeAllJobs,
+  mayEditOwned,
   type Role,
 } from "../shared/roles";
 import {
@@ -27,6 +29,12 @@ import {
 } from "../shared/accountPool";
 import { accountLoad, assignJobAccounts } from "./accountPool";
 import { assertJobAccess } from "./jobAccess";
+import {
+  assertChannelEditable,
+  assertItemEditable,
+  assertRunEditable,
+  canEditChannel,
+} from "./ownership";
 import {
   getTakeover,
   releaseTakeover,
@@ -88,14 +96,17 @@ import {
   setLongformSlot,
   deleteLongformVideoJob,
   updateLongformVideoJob,
+  getBookById,
   getBooks,
   createBook,
   updateBook,
   deactivateBook,
+  getChannelAssetById,
   getChannelAssets,
   createChannelAsset,
   updateChannelAsset,
   deactivateChannelAsset,
+  getChannelHostPhotoById,
   getChannelHostPhotos,
   createChannelHostPhoto,
   updateChannelHostPhoto,
@@ -608,8 +619,9 @@ const channelConfigRouter = router({
         defaultWordCount: z.number().optional(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const { channelKey, ...data } = input;
+      await assertChannelEditable(ctx.user, channelKey);
       await upsertChannelConfig(channelKey, data);
       return { success: true };
     }),
@@ -625,8 +637,9 @@ const channelConfigRouter = router({
         ttsVolume: ttsVolumeInput,
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const { channelKey, ...data } = input;
+      await assertChannelEditable(ctx.user, channelKey);
       await upsertChannelConfig(channelKey, data);
       return { success: true };
     }),
@@ -663,7 +676,7 @@ const channelConfigRouter = router({
         defaultWordCount: z.number().optional(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const channelKey = input.displayName
         .toLowerCase()
         .replace(/[^a-z0-9\s]/g, "")
@@ -683,6 +696,7 @@ const channelConfigRouter = router({
         personaProfile,
         nicheSlug,
         ...rest,
+        createdBy: ctx.user.id,
       });
       // Seed the host photo LIST from what the create form collected. The form still asks for
       // one (and optionally two) photos up front, because a channel with no host photo cannot
@@ -697,6 +711,7 @@ const channelConfigRouter = router({
           imageUrl: seeds[i],
           sortOrder: i,
           isActive: true,
+          createdBy: ctx.user.id,
         });
       }
       return { channelKey };
@@ -723,6 +738,8 @@ const channelConfigRouter = router({
           key: c.channelKey,
           name: c.displayName!,
           niche: c.nicheSlug ?? "",
+          // Who created the channel — a guest may change only their own (`mayEditOwned`).
+          createdBy: c.createdBy,
         }))
     );
   }),
@@ -824,7 +841,12 @@ const bookRouter = router({
         shopUrl: z.string().max(512).nullish(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
+      await assertChannelEditable(ctx.user, input.channelKey);
+      if (input.id) {
+        const id = input.id;
+        await assertItemEditable(ctx.user, () => getBookById(id));
+      }
       const shopUrl = input.shopUrl?.trim() || null;
       if (shopUrl && !buildTrackingUrl(shopUrl, 1)) {
         throw new TRPCError({
@@ -846,7 +868,11 @@ const bookRouter = router({
         await updateBook(input.id, data);
         return { id: input.id };
       }
-      const id = await createBook({ ...data, isActive: true });
+      const id = await createBook({
+        ...data,
+        isActive: true,
+        createdBy: ctx.user.id,
+      });
       return { id };
     }),
 
@@ -982,7 +1008,12 @@ const channelAssetRouter = router({
         caption: z.string().max(200).nullish(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
+      await assertChannelEditable(ctx.user, input.channelKey);
+      if (input.id) {
+        const id = input.id;
+        await assertItemEditable(ctx.user, () => getChannelAssetById(id));
+      }
       const data = {
         channelKey: input.channelKey,
         imageUrl: input.imageUrl,
@@ -992,7 +1023,11 @@ const channelAssetRouter = router({
         await updateChannelAsset(input.id, data);
         return { id: input.id };
       }
-      const id = await createChannelAsset({ ...data, isActive: true });
+      const id = await createChannelAsset({
+        ...data,
+        isActive: true,
+        createdBy: ctx.user.id,
+      });
       return { id };
     }),
 
@@ -1084,7 +1119,8 @@ const heygenTestRouter = router({
         name: z.string().max(HEYGEN_TEST_MAX_NAME),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
+      await assertRunEditable(ctx.user, input.batchId);
       await renameHeygenRun(input.batchId, input.name);
       return { ok: true };
     }),
@@ -1121,7 +1157,8 @@ const heygenTestRouter = router({
         ids: z.array(z.number().int()).max(10).optional(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
+      await assertRunEditable(ctx.user, input.batchId);
       try {
         return await retryHeygenTests(input.batchId, input.ids);
       } catch (err) {
@@ -1218,7 +1255,8 @@ const vslRouter = router({
   /** Use this clip on the upsell page (one per channel and book), or stop using it. */
   pick: managerProcedure
     .input(z.object({ batchId: z.string().min(1).max(32) }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
+      await assertRunEditable(ctx.user, input.batchId);
       if (!(await pickVslBatch(input.batchId)))
         throw new TRPCError({
           code: "NOT_FOUND",
@@ -1276,7 +1314,12 @@ const channelHostPhotoRouter = router({
         isSelected: z.boolean().optional(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
+      await assertChannelEditable(ctx.user, input.channelKey);
+      if (input.id) {
+        const id = input.id;
+        await assertItemEditable(ctx.user, () => getChannelHostPhotoById(id));
+      }
       // No name: an angle is identified by its PICTURE, which every surface shows, and by its
       // POSITION, which is the half that carries meaning (0 is the primary). A name field was
       // a worse second copy of the thumbnail and friction on every upload.
@@ -1290,6 +1333,7 @@ const channelHostPhotoRouter = router({
         ...data,
         sortOrder: existing.length,
         isActive: true,
+        createdBy: ctx.user.id,
         // A channel's only photo stays ticked whatever was asked: videos need one angle, and
         // the last ticked photo can never be unticked (`canDeselectHostPhoto`).
         isSelected:
@@ -1314,7 +1358,8 @@ const channelHostPhotoRouter = router({
    */
   setPrimary: approvedProcedure
     .input(z.object({ channelKey: z.string().min(1), id: z.number() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
+      await assertChannelEditable(ctx.user, input.channelKey);
       await setPrimaryChannelHostPhoto(input.channelKey, input.id);
       // A primary that is not ticked would not render at all — the film's primary is the first
       // TICKED photo — so promoting one ticks it.
@@ -1335,7 +1380,8 @@ const channelHostPhotoRouter = router({
         selected: z.boolean(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
+      await assertChannelEditable(ctx.user, input.channelKey);
       const library = await getChannelHostPhotos(input.channelKey, true);
       const row = library.find(p => p.id === input.id);
       if (!row) {
@@ -1401,7 +1447,7 @@ const longformVideoRouter = router({
   }),
 
   /** Admin: save the directing instruction applied to every long-form session. */
-  setInstructionPrompt: managerProcedure
+  setInstructionPrompt: sharedSettingsProcedure
     .input(z.object({ content: z.string().min(1).max(20000) }))
     .mutation(async ({ input }) => {
       await setAppSetting(LONGFORM_INSTRUCTION_KEY, input.content);
@@ -1512,7 +1558,7 @@ const longformVideoRouter = router({
    * hand-crafted request cannot write a config the balancers would then have to defend against.
    * In-flight jobs are unaffected: each snapshots its own pacing at render start.
    */
-  setPacing: managerProcedure
+  setPacing: sharedSettingsProcedure
     .input(z.object({ pacing: z.unknown() }))
     .mutation(async ({ input }) => {
       const resolved = resolveLongformPacing(input.pacing);
@@ -2201,8 +2247,13 @@ const longformVideoRouter = router({
       }
 
       // "Also save to this channel" — persist a reusable channel book, de-duped by title so
-      // repeated renders don't pile up copies. Independent of placement below.
-      if (inputBooks.some(b => b.saveToChannel)) {
+      // repeated renders don't pile up copies. Independent of placement below. Adding a book
+      // changes the channel, so a guest on a channel they did not create keeps the book on this
+      // video only (the form does not offer them the tick).
+      if (
+        inputBooks.some(b => b.saveToChannel) &&
+        (await canEditChannel(ctx.user, input.channelKey))
+      ) {
         const existing = await getBooks(input.channelKey, false);
         const already = (t: string) =>
           existing.some(
@@ -2217,6 +2268,7 @@ const longformVideoRouter = router({
             coverImageUrl: b.coverImageUrl ?? null,
             shopUrl: shop ? stripTrackingParam(shop) : null,
             isActive: true,
+            createdBy: ctx.user.id,
           });
         }
       }
@@ -2469,6 +2521,9 @@ const longformVideoRouter = router({
         // What the video was MADE WITH (`shared/jobPicks.ts`): the picks as they were at
         // Generate, since the form above the card only shows the picks for the next video.
         picks: jobPickFacts(previewParams, job),
+        // A guest on a video someone else made: the card shows it and pauses every button
+        // (`mayEditOwned`; `assertJobAccess` refuses the writes too).
+        viewOnly: !mayEditOwned(ctx.user, job.userId),
         // The video's host spend limit and what is using it — null on a job with no limit.
         hostSpend: summarizeHostSpend(
           previewParams,

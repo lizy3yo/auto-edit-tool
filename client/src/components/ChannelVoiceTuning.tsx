@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
+import { useCanEditChannel, VIEW_ONLY_NOTE } from "@/hooks/useMayEdit";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { toast } from "sonner";
@@ -22,6 +23,8 @@ export function ChannelVoiceTuning({
   ttsVolume: string | null | undefined;
 }) {
   const utils = trpc.useUtils();
+  // Channel-wide settings: a guest changes them only on a channel they created.
+  const canEdit = useCanEditChannel(channelKey);
   const [speed, setSpeed] = useState(parseFloat(ttsSpeed ?? "1.0") || 1);
   const [volume, setVolume] = useState(parseFloat(ttsVolume ?? "1.0") || 1);
 
@@ -35,6 +38,7 @@ export function ChannelVoiceTuning({
 
   // Persist on release (onValueCommit) — skip if nothing changed.
   const commit = (s: number, v: number) => {
+    if (!canEdit) return;
     if (
       s === (parseFloat(ttsSpeed ?? "1.0") || 1) &&
       v === (parseFloat(ttsVolume ?? "1.0") || 1)
@@ -61,6 +65,7 @@ export function ChannelVoiceTuning({
           max={1.2}
           step={0.05}
           value={[speed]}
+          disabled={!canEdit}
           onValueChange={([s]) => setSpeed(s)}
           onValueCommit={([s]) => commit(s, volume)}
         />
@@ -77,10 +82,14 @@ export function ChannelVoiceTuning({
           max={2}
           step={0.05}
           value={[volume]}
+          disabled={!canEdit}
           onValueChange={([v]) => setVolume(v)}
           onValueCommit={([v]) => commit(speed, v)}
         />
       </div>
+      {!canEdit && (
+        <p className="text-[11px] text-muted-foreground">{VIEW_ONLY_NOTE}</p>
+      )}
     </div>
   );
 }

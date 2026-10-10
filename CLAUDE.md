@@ -1619,7 +1619,23 @@ Express · tRPC · Drizzle · MySQL.
   they can still make videos and pick a channel. The manager capabilities are therefore asked of
   an ACCOUNT (`{ role, managerAccess }`, `hasManagerAccess`), not a bare role. Every remove route
   is behind `removerProcedure` (or is admin only, or asks `canRemove` itself, as `deleteJob`
-  does); a tripwire in `roles.test.ts` fails if one is added behind another gate. Passwords are scrypt (`server/passwords.ts`, no native dep);
+  does); a tripwire in `roles.test.ts` fails if one is added behind another gate. A GUEST ALSO
+  CHANGES ONLY WHAT THEY CREATED (`mayEditOwned`, same day): they see what a manager sees and
+  every write on something another account made is refused — a video (no regenerate, retry,
+  reassemble, timing edit, cancel or take over: `jobAccessRefusal` answers `viewOnly` on a write,
+  so every route behind `assertJobAccess` is covered, and `pollJob.viewOnly` pauses the card
+  through the takeover's `<fieldset disabled>`), a channel and what it holds (settings, voice
+  tuning, books, CTA assets, host photos, the ticked angles and the primary), a test or VSL run
+  (rename, retry, "Use this one"), and the settings every video shares (the directing
+  instruction and pacing, `sharedSettingsProcedure`). Who made a channel, book, asset or host
+  photo is `createdBy` (migration 0017, null on older rows — nobody's, so view only for every
+  guest); videos and runs already had `userId`. `server/ownership.ts` is the ONE check for
+  everything that is not a video (`assertChannelEditable` / `assertItemEditable` /
+  `assertRunEditable`, no lookup for an account the rule does not bind), and a tripwire in
+  `ownership.test.ts` fails on a manager-gated change without one. Adding to a channel changes
+  it, so on a channel they did not create a guest's video uses the saved host photos (picker
+  paused) and its books stay on that video ("Also save to this channel" is not offered, and
+  `generate` skips the write). The screens ask `client/src/hooks/useMayEdit.ts`. Passwords are scrypt (`server/passwords.ts`, no native dep);
   `server/adminAuth.ts` holds the login route, the in-memory failed-attempt throttle and
   `ensureRootAdmin`. Sessions carry only a `uid` — `sdk.authenticateRequest` reloads the row on
   every request (2 s memo), so a role change or a disable takes effect immediately. Managed in

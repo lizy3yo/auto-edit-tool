@@ -1303,6 +1303,8 @@ export default function LongformJobSlot({
   }, [pollError, onJobIdChange]);
 
   const job = jobId !== null && jobId !== dismissedJobId ? rawJob : null;
+  /** A guest looking at a video someone else made: watch it, change nothing (`mayEditOwned`). */
+  const viewOnly = !!job?.viewOnly;
   // The video's host spend limit (`shared/hostSpend.ts`) — null on a job without one.
   const hostSpend = job?.hostSpend ?? null;
   /** Would one more host render of this scene go past the limit? The server decides; this asks first. */
@@ -2489,10 +2491,17 @@ export default function LongformJobSlot({
         </Alert>
       )}
 
+      {job && viewOnly && (
+        <Alert tone="info" title="View only">
+          You did not make this video, so its buttons are paused. You can watch
+          it here. Your account can change only the videos it made.
+        </Alert>
+      )}
+
       {/* `disabled` on a fieldset disables every button, input and select inside it — the whole
           card and storyboard pause with one switch, and nothing new added below can be missed. */}
       <fieldset
-        disabled={pausedByTakeover}
+        disabled={pausedByTakeover || viewOnly}
         className="m-0 min-w-0 space-y-6 border-0 p-0"
       >
         {/* Progress / result */}

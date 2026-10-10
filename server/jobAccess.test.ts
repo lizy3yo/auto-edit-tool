@@ -35,17 +35,28 @@ describe("who may touch a video", () => {
         expect(jobAccessRefusal(job, user, mode, null)).toBeNull();
   });
 
-  it("a guest follows their switch: on, like a manager; off, their own videos only", () => {
-    for (const mode of ["read", "write"] as const) {
-      expect(jobAccessRefusal(job, guestOn, mode, null)).toBeNull();
+  it("a guest may watch someone else's video and change nothing on it", () => {
+    expect(jobAccessRefusal(job, guestOn, "read", null)).toBeNull();
+    expect(jobAccessRefusal(job, guestOn, "write", null)).toEqual({
+      kind: "viewOnly",
+    });
+    // Switch off: not even a look.
+    for (const mode of ["read", "write"] as const)
       expect(jobAccessRefusal(job, guestOff, mode, null)).toEqual({
         kind: "notYours",
       });
-      expect(
-        jobAccessRefusal({ userId: guestOff.id }, guestOff, mode, null)
-      ).toBeNull();
-    }
-    expect(mayTakeOver(job, guestOn)).toBe(true);
+  });
+
+  it("a guest may read and change a video they made", () => {
+    for (const guest of [guestOn, guestOff])
+      for (const mode of ["read", "write"] as const)
+        expect(
+          jobAccessRefusal({ userId: guest.id }, guest, mode, null)
+        ).toBeNull();
+  });
+
+  it("a guest never takes a video over", () => {
+    expect(mayTakeOver(job, guestOn)).toBe(false);
     expect(mayTakeOver(job, guestOff)).toBe(false);
   });
 
@@ -205,7 +216,7 @@ describe("one permission check", () => {
     ]);
     const starts = [
       ...source.matchAll(
-        /^  ([a-zA-Z0-9_]+): (?:approved|manager|remover|admin|public|protected)Procedure/gm
+        /^  ([a-zA-Z0-9_]+): (?:approved|manager|remover|sharedSettings|admin|public|protected)Procedure/gm
       ),
     ];
     const unchecked = starts

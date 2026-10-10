@@ -5,7 +5,7 @@
  *
  * Pure rules, shared so the server's refusal and the card's paused state cannot disagree.
  */
-import { canSeeAllJobs, type Account } from "./roles";
+import { canSeeAllJobs, mayEditOwned, type Account } from "./roles";
 
 /** A takeover nobody has looked at for this long is released, so a forgotten one locks no one out. */
 export const TAKEOVER_IDLE_MS = 30 * 60 * 1000;
@@ -25,14 +25,17 @@ export type JobTakeoverView = { byName: string; mine: boolean; at: number };
 
 export type JobAccessRefusal =
   | { kind: "notYours" }
+  /** A guest on a video someone else made: they may watch it and change nothing. */
+  | { kind: "viewOnly" }
   | { kind: "takenOver"; byName: string };
 
 /**
  * Why `user` may not do this to the job, or null when they may.
  *
- * READ: the owner, and the oversight tiers (`canSeeAllJobs`). WRITE: the same people, except that
- * while the video is taken over only the person who took it may change it — the owner and other
- * admins are paused alike.
+ * READ: the owner, and the oversight tiers (`canSeeAllJobs`). WRITE: the same people — except a
+ * guest, who may change only a video they made (`mayEditOwned`) — and except that while the
+ * video is taken over only the person who took it may change it: the owner and other admins are
+ * paused alike.
  */
 export function jobAccessRefusal(
   job: { userId: number },
@@ -42,17 +45,24 @@ export function jobAccessRefusal(
 ): JobAccessRefusal | null {
   if (job.userId !== user.id && !canSeeAllJobs(user))
     return { kind: "notYours" };
+  if (mode === "write" && !mayEditOwned(user, job.userId))
+    return { kind: "viewOnly" };
   if (mode === "write" && takeover && takeover.userId !== user.id)
     return { kind: "takenOver", byName: takeover.userName };
   return null;
 }
 
-/** Who may take a video over: the oversight tiers, on a video that is not their own. */
+/**
+ * Who may take a video over: the oversight tiers, on a video that is not their own — never a
+ * guest, who may change no video but their own.
+ */
 export function mayTakeOver(
   job: { userId: number },
   user: { id: number } & Account
 ): boolean {
-  return canSeeAllJobs(user) && job.userId !== user.id;
+  return (
+    canSeeAllJobs(user) && job.userId !== user.id && user.role !== "guest"
+  );
 }
 
 /**

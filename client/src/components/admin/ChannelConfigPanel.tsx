@@ -38,6 +38,7 @@ import {
 } from "@/components/ui/select";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
+import { useMayEdit, VIEW_ONLY_NOTE } from "@/hooks/useMayEdit";
 import { toast } from "sonner";
 import {
   FileText,
@@ -219,6 +220,7 @@ const ttsModelItems = TTS_MODELS.map(m => (
 
 export function ChannelConfigPanel() {
   const { canRemove } = useAuth();
+  const mayEdit = useMayEdit();
   const utils = trpc.useUtils();
   const {
     data: allChannels,
@@ -750,6 +752,8 @@ export function ChannelConfigPanel() {
               {allChannels?.map(channel => {
                 const config = configMap[channel.key];
                 const isEditing = editingChannel === channel.key;
+                // A guest may open any channel and change only one they created.
+                const editable = mayEdit(channel.createdBy);
                 return (
                   <div
                     key={channel.key}
@@ -835,11 +839,29 @@ export function ChannelConfigPanel() {
                           }}
                         >
                           <Settings className="h-3.5 w-3.5" />
-                          {isEditing ? "Cancel" : "Edit"}
+                          {isEditing
+                            ? editable
+                              ? "Cancel"
+                              : "Close"
+                            : editable
+                              ? "Edit"
+                              : "View"}
                         </Button>
                       </div>
                     </div>
-                    {isEditing && editFormSection}
+                    {isEditing &&
+                      (editable ? (
+                        editFormSection
+                      ) : (
+                        // One switch pauses every field, list and button in the editor, the
+                        // books, assets and host photos included. The server refuses them too.
+                        <fieldset disabled className="m-0 min-w-0 border-0 p-0">
+                          <p className="mt-4 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                            {VIEW_ONLY_NOTE}
+                          </p>
+                          {editFormSection}
+                        </fieldset>
+                      ))}
                   </div>
                 );
               })}

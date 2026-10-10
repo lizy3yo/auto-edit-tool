@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { trpc } from "@/lib/trpc";
+import { useCanEditChannel } from "@/hooks/useMayEdit";
 import { Label } from "@/components/ui/label";
 import { hostAngleGuideWarning } from "@shared/hostMinutes";
 import { Check, Loader2, Star } from "lucide-react";
@@ -48,6 +49,9 @@ export function LongformHostPhotoPicker({
   disabled?: boolean;
 }) {
   const utils = trpc.useUtils();
+  // The ticks and the primary are the CHANNEL's saved choice, so a guest changes them only on a
+  // channel they created; on any other the video uses the photos already ticked.
+  const canEdit = useCanEditChannel(channelKey);
   const listInput = { channelKey, activeOnly: true } as const;
   const { data: photos, isLoading } = trpc.channelHostPhoto.list.useQuery(
     listInput,
@@ -103,7 +107,7 @@ export function LongformHostPhotoPicker({
     );
 
   const busy = setSelected.isPending || setPrimary.isPending;
-  const locked = disabled || busy;
+  const locked = disabled || busy || !canEdit;
 
   const toggle = (id: number) => {
     if (locked) return;
@@ -192,6 +196,13 @@ export function LongformHostPhotoPicker({
           `${chosen.length} angles — the host shots rotate through them, so the video switches between these backgrounds. For one consistent look, tick one.`
         )}
       </p>
+      {!canEdit && (
+        <p className="text-[11px] text-muted-foreground">
+          View only. These are the channel&apos;s saved photos, and your video
+          uses the ticked ones. Your account can change only a channel it
+          created.
+        </p>
+      )}
       {hostMinutes != null && (
         <HostAngleGuideNote minutes={hostMinutes} angles={chosen.length} />
       )}

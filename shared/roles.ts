@@ -31,7 +31,7 @@ export const ROLE_DESCRIPTION: Record<Role, string> = {
   manager:
     "Channels, books, CTA assets, directing instruction and pacing, plus every render. No API keys.",
   guest:
-    "An operations manager who can never delete anything or render past the host limit. Their access to the manager pages is switched on or off per account.",
+    "Sees what an operations manager sees, but can change only what they created and can never delete anything. Their access to the manager pages is switched on or off per account.",
   editor: "Long-form video and the library, limited to their own renders.",
 };
 
@@ -77,6 +77,30 @@ export function canSeeAllJobs(account: Account): boolean {
  */
 export function canRemove(role: Role): boolean {
   return role !== "guest";
+}
+
+/**
+ * Whether this account may CHANGE something `ownerId` created — a video, a channel, a book, a
+ * CTA asset, a host photo, a test or VSL run.
+ *
+ * A guest may look at everything a manager sees and change only what they made themselves; a
+ * row with no recorded maker (anything older than the `createdBy` columns) is nobody's, so it
+ * is view only for every guest. For every other role this answers yes and the route's own gate
+ * decides — which is why it is asked IN ADDITION to that gate, never instead of it.
+ */
+export function mayEditOwned(
+  account: { id: number } & Account,
+  ownerId: number | null | undefined
+): boolean {
+  return account.role !== "guest" || ownerId === account.id;
+}
+
+/**
+ * The settings every video shares — the directing instruction and the pacing. Nobody created
+ * them, so a guest reads them and never changes them.
+ */
+export function canEditSharedSettings(account: Account): boolean {
+  return hasManagerAccess(account) && account.role !== "guest";
 }
 
 /**
