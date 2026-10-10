@@ -86,6 +86,7 @@ import {
   hostRegenerationLocked,
   isLimitedHostScene,
 } from "@shared/hostRegenLimit";
+import { canCleanHostClips } from "@shared/roles";
 import { HOST_SPEND_EPSILON_SEC } from "@shared/hostSpend";
 import { SceneVersionsDialog } from "@/components/SceneVersionsDialog";
 import { sceneVersionCount } from "@shared/pictureTakes";
@@ -2190,8 +2191,12 @@ export default function LongformJobSlot({
   };
 
   // Shown beside "Even out voice", in both places that button lives, on a video with host clips.
+  // Admins only (`canCleanHostClips`) — the route refuses everyone else too.
   const cleanHostClipsButton =
-    job && scenes.some(s => s.hostPresent && (s.clipUrls?.length || s.clipUrl)) ? (
+    job &&
+    !!role &&
+    canCleanHostClips(role) &&
+    scenes.some(s => s.hostPresent && (s.clipUrls?.length || s.clipUrl)) ? (
       <Button
         variant="outline"
         onClick={() => {

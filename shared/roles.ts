@@ -50,6 +50,14 @@ export function canSeeAllJobs(role: Role): boolean {
   return role === "admin" || role === "manager";
 }
 
+/**
+ * "Clean host clips" on a video's card: it re-processes every host clip of a finished video and
+ * rebuilds the film, so it is an admin's tool. The button and the route both ask here.
+ */
+export function canCleanHostClips(role: Role): boolean {
+  return role === "admin";
+}
+
 /** Whether the Admin page is reachable at all (managers get it minus keys and accounts). */
 export function canOpenAdmin(role: Role): boolean {
   return role === "admin" || role === "manager";

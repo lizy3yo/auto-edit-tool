@@ -3,6 +3,7 @@ import {
   ROLES,
   ROLE_DESCRIPTION,
   ROLE_LABEL,
+  canCleanHostClips,
   canManageChannels,
   canManageKeys,
   canOpenAdmin,
@@ -54,6 +55,10 @@ describe("role capabilities", () => {
 
   it("only admins reach the keys", () => {
     expect(ROLES.filter(canManageKeys)).toEqual(["admin"]);
+  });
+
+  it("only admins clean host clips", () => {
+    expect(ROLES.filter(canCleanHostClips)).toEqual(["admin"]);
   });
 
   it("every role is labelled and described", () => {

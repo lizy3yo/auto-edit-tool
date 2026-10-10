@@ -206,4 +206,17 @@ describe("one permission check", () => {
       .map(r => r.name);
     expect(unchecked).toEqual([]);
   });
+
+  // "Clean host clips" is admin only (`canCleanHostClips`). The card hides the button from
+  // everyone else; the route must refuse them too, or it could still be called directly.
+  it("cleanHostClips refuses everyone but an admin", () => {
+    const start = source.indexOf("  cleanHostClips: ");
+    expect(start).toBeGreaterThan(-1);
+    // Everything in the route up to where the cleaning starts.
+    const work = source.indexOf("steadyLongformJobHostClips(", start);
+    expect(work).toBeGreaterThan(start);
+    expect(source.slice(start, work)).toContain(
+      "canCleanHostClips(ctx.user.role)"
+    );
+  });
 });

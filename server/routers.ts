@@ -11,7 +11,13 @@ import {
   publicProcedure,
   router,
 } from "./_core/trpc";
-import { ROLES, ROLE_LABEL, canSeeAllJobs, type Role } from "../shared/roles";
+import {
+  ROLES,
+  ROLE_LABEL,
+  canCleanHostClips,
+  canSeeAllJobs,
+  type Role,
+} from "../shared/roles";
 import {
   PROVIDER_ACCOUNT_MAX,
   apimartAccountOf,
@@ -3693,6 +3699,11 @@ const longformVideoRouter = router({
   cleanHostClips: approvedProcedure
     .input(z.object({ jobId: z.number() }))
     .mutation(async ({ ctx, input }) => {
+      if (!canCleanHostClips(ctx.user.role))
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Only an admin can clean host clips",
+        });
       const job = await getLongformVideoJobById(input.jobId);
       if (!job)
         throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
