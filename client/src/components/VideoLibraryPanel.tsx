@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "wouter";
 import { trpc } from "@/lib/trpc";
+import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { VideoPoster } from "@/components/VideoPoster";
 import {
@@ -59,6 +60,7 @@ export function VideoLibraryPanel({
   /** Job ids currently loaded in a slot — highlighted so you can see where you are. */
   activeJobIds: (number | null)[];
 }) {
+  const { canRemove } = useAuth();
   const { data: page, isLoading } = trpc.longformVideo.library.useQuery(
     { limit: PANEL_ROWS },
     {
@@ -161,18 +163,20 @@ export function VideoLibraryPanel({
                     type="button"
                     onClick={() => onOpen(job.id)}
                     title="Open the storyboard — inspect and regenerate scenes"
-                    className="absolute right-8 top-1/2 -translate-y-1/2 rounded p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                    className={`absolute ${canRemove ? "right-8" : "right-1.5"} top-1/2 -translate-y-1/2 rounded p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground`}
                   >
                     <Pencil className="h-3.5 w-3.5" />
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setDeleting(job)}
-                    title="Delete this video from your library"
-                    className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+                  {canRemove && (
+                    <button
+                      type="button"
+                      onClick={() => setDeleting(job)}
+                      title="Delete this video from your library"
+                      className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
                 </li>
               );
             })}

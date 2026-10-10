@@ -23,6 +23,8 @@ export type SessionUser = {
   name: string;
   email: string;
   role: Role;
+  /** A guest's "Operations manager access" switch — see `hasManagerAccess` in `shared/roles.ts`. */
+  managerAccess: boolean;
   status: AccountStatus;
 };
 
@@ -65,6 +67,7 @@ function toSessionUser(row: {
   email: string;
   name: string;
   role: Role;
+  managerAccess: boolean;
   status: AccountStatus;
 }): SessionUser {
   return {
@@ -73,6 +76,7 @@ function toSessionUser(row: {
     name: row.name,
     email: row.email,
     role: row.role,
+    managerAccess: row.managerAccess,
     status: row.status,
   };
 }

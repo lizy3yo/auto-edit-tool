@@ -1,4 +1,4 @@
-import { COOKIE_NAME } from "@shared/const";
+import { CANNOT_REMOVE_ERR_MSG, COOKIE_NAME } from "@shared/const";
 import { auditStoryboardTimeline } from "./alignmentHeal";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
@@ -9,12 +9,14 @@ import {
   managerProcedure,
   protectedProcedure,
   publicProcedure,
+  removerProcedure,
   router,
 } from "./_core/trpc";
 import {
   ROLES,
   ROLE_LABEL,
   canCleanHostClips,
+  canRemove,
   canSeeAllJobs,
   type Role,
 } from "../shared/roles";
@@ -700,7 +702,7 @@ const channelConfigRouter = router({
       return { channelKey };
     }),
 
-  delete: managerProcedure
+  delete: removerProcedure
     .input(z.object({ channelKey: z.string() }))
     .mutation(async ({ input }) => {
       await deleteChannelConfig(input.channelKey);
@@ -849,7 +851,7 @@ const bookRouter = router({
     }),
 
   /** Soft-delete — finished videos keep resolving the book they sold. */
-  deactivate: managerProcedure
+  deactivate: removerProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
       await deactivateBook(input.id);
@@ -995,7 +997,7 @@ const channelAssetRouter = router({
     }),
 
   /** Soft-delete — finished videos keep the asset they snapshotted at render time. */
-  deactivate: managerProcedure
+  deactivate: removerProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
       await deactivateChannelAsset(input.id);
@@ -1130,7 +1132,7 @@ const heygenTestRouter = router({
     }),
 
   /** Removes the run's rows. A render still in flight on HeyGen finishes there and is dropped. */
-  deleteBatch: managerProcedure
+  deleteBatch: removerProcedure
     .input(z.object({ batchId: z.string().min(1).max(32) }))
     .mutation(async ({ input }) => {
       await deleteHeygenTestBatch(input.batchId);
@@ -1298,7 +1300,7 @@ const channelHostPhotoRouter = router({
     }),
 
   /** Soft-delete — finished videos keep the angle they snapshotted at render time. */
-  deactivate: managerProcedure
+  deactivate: removerProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
       await deactivateChannelHostPhoto(input.id);
@@ -2525,7 +2527,7 @@ const longformVideoRouter = router({
       // Judged on THIS tab's own before and after — not "every held video missing from my
       // tabs", which a write to another tab landing first would mistake for walking away.
       const before =
-        patch.jobId !== undefined && canSeeAllJobs(ctx.user.role)
+        patch.jobId !== undefined && canSeeAllJobs(ctx.user)
           ? (await getLongformSlots(ctx.user.id)).find(
               r => r.slotIndex === slotIndex
             )?.jobId
@@ -2578,7 +2580,7 @@ const longformVideoRouter = router({
     .query(async ({ ctx, input }) => {
       const limit = input?.limit ?? 200;
       const rows = await getLongformLibrary(ctx.user.id, {
-        allUsers: canSeeAllJobs(ctx.user.role),
+        allUsers: canSeeAllJobs(ctx.user),
         limit,
         cursor: input?.cursor ?? undefined,
       });
@@ -2609,7 +2611,7 @@ const longformVideoRouter = router({
    */
   libraryCounts: approvedProcedure.query(async ({ ctx }) =>
     countLongformLibrary(ctx.user.id, {
-      allUsers: canSeeAllJobs(ctx.user.role),
+      allUsers: canSeeAllJobs(ctx.user),
     })
   ),
 
@@ -3503,7 +3505,7 @@ const longformVideoRouter = router({
         return {
           ok: true,
           ...(await revertJobTiming(input.jobId, ctx.user.id, {
-            allowAny: canSeeAllJobs(ctx.user.role),
+            allowAny: canSeeAllJobs(ctx.user),
           })),
         };
       } catch (err: any) {
@@ -3960,7 +3962,7 @@ const longformVideoRouter = router({
       const owner = await getLongformVideoJobOwner(input.jobId);
       if (owner) await assertJobAccess(owner, ctx.user, "write");
       const outcome = await cancelLongformJob(input.jobId, ctx.user.id, {
-        allowAny: canSeeAllJobs(ctx.user.role),
+        allowAny: canSeeAllJobs(ctx.user),
       });
       return { ok: true, restored: outcome === "restored" };
     }),
@@ -3973,13 +3975,19 @@ const longformVideoRouter = router({
       // render nobody is waiting for bills until it finishes or hits the execution cap.
       // Read-only and authorization-neutral — `deleteLongformVideoJob` still owns the
       // ownership check below and throws before anything is removed.
+      // A guest never removes a video, their own included (`canRemove`).
+      if (!canRemove(ctx.user.role))
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: CANNOT_REMOVE_ERR_MSG,
+        });
       const job = await getLongformVideoJobById(input.jobId);
       if (job) {
         await assertJobAccess(job, ctx.user, "write");
         await cancelJobProviderRenders(job, "deleted by user");
       }
       await deleteLongformVideoJob(input.jobId, ctx.user.id, {
-        allowAny: canSeeAllJobs(ctx.user.role),
+        allowAny: canSeeAllJobs(ctx.user),
       });
       await releaseTakeover(input.jobId);
       return { ok: true };
@@ -4205,6 +4213,8 @@ const userRouter = router({
         email: z.string().trim().email().max(255),
         password: passwordField,
         role: roleEnum,
+        /** A guest's "Operations manager access" switch; ignored on every other role. */
+        managerAccess: z.boolean().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -4222,6 +4232,7 @@ const userRouter = router({
         name: input.name,
         passwordHash: await hashPassword(input.password),
         role: input.role,
+        managerAccess: input.managerAccess ?? true,
         status: "active",
       });
       console.log(
@@ -4230,7 +4241,10 @@ const userRouter = router({
       return { id };
     }),
 
-  /** Rename, re-tier or switch an account off. Password changes go through `resetPassword`. */
+  /**
+   * Rename, re-tier, flip a guest's manager access or switch an account off. Password changes
+   * go through `resetPassword`.
+   */
   update: adminProcedure
     .input(
       z.object({
@@ -4238,6 +4252,7 @@ const userRouter = router({
         name: z.string().trim().min(1).max(128).optional(),
         email: z.string().trim().email().max(255).optional(),
         role: roleEnum.optional(),
+        managerAccess: z.boolean().optional(),
         status: z.enum(["active", "disabled"]).optional(),
       })
     )

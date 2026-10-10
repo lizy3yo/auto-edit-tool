@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Thumb } from "@/components/Thumb";
 import { trpc } from "@/lib/trpc";
+import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -328,6 +329,7 @@ function QrPreview({
 }
 
 export function ChannelBooks({ channelKey }: { channelKey: string }) {
+  const { canRemove } = useAuth();
   const utils = trpc.useUtils();
   const [draft, setDraft] = useState<Draft>(EMPTY);
   /** The row as it was when Edit was pressed, so Save can show what actually changed. */
@@ -464,22 +466,24 @@ export function ChannelBooks({ channelKey }: { channelKey: string }) {
                   >
                     Edit
                   </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 w-7 p-0"
-                    aria-label={`Remove ${b.title}`}
-                    onClick={() =>
-                      setPendingDelete({
-                        id: b.id,
-                        title: b.title,
-                        coverImageUrl: b.coverImageUrl ?? "",
-                        shopUrl: b.shopUrl ?? "",
-                      })
-                    }
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
+                  {canRemove && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 p-0"
+                      aria-label={`Remove ${b.title}`}
+                      onClick={() =>
+                        setPendingDelete({
+                          id: b.id,
+                          title: b.title,
+                          coverImageUrl: b.coverImageUrl ?? "",
+                          shopUrl: b.shopUrl ?? "",
+                        })
+                      }
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
                 </div>
               </div>
               {b.shopUrl && (

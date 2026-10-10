@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Thumb } from "@/components/Thumb";
 import { trpc } from "@/lib/trpc";
+import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -28,6 +29,7 @@ const ACCEPTED = ["image/jpeg", "image/png", "image/webp"];
 const MAX_BYTES = 10 * 1024 * 1024;
 
 export function ChannelAssets({ channelKey }: { channelKey: string }) {
+  const { canRemove } = useAuth();
   const utils = trpc.useUtils();
   const [caption, setCaption] = useState("");
 
@@ -135,15 +137,17 @@ export function ChannelAssets({ channelKey }: { channelKey: string }) {
                 }
                 className="h-8 text-sm"
               />
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 w-8 shrink-0 p-0"
-                aria-label="Remove asset"
-                onClick={() => remove.mutate({ id: a.id })}
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
+              {canRemove && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 w-8 shrink-0 p-0"
+                  aria-label="Remove asset"
+                  onClick={() => remove.mutate({ id: a.id })}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              )}
             </div>
           ))}
         </div>

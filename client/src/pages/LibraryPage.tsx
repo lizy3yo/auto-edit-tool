@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
+import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -60,6 +61,7 @@ const PAGE_SIZE = 12;
  * mean "none in the twelve you happen to have scrolled past".
  */
 export default function LibraryPage() {
+  const { canRemove } = useAuth();
   const [, navigate] = useLocation();
   const [search, setSearch] = useState("");
   const [playing, setPlaying] = useState<PlayableJob | null>(null);
@@ -315,15 +317,17 @@ export default function LibraryPage() {
                   >
                     <Receipt className="h-3.5 w-3.5" />
                   </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="shrink-0 gap-1.5 px-2.5 text-muted-foreground hover:border-destructive/40 hover:text-destructive"
-                    onClick={() => setDeleting(job)}
-                    title="Delete this video from your library"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
+                  {canRemove && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="shrink-0 gap-1.5 px-2.5 text-muted-foreground hover:border-destructive/40 hover:text-destructive"
+                      onClick={() => setDeleting(job)}
+                      title="Delete this video from your library"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
                 </div>
               </div>
             </article>

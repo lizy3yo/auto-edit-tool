@@ -1,0 +1,2 @@
+ALTER TABLE `users` MODIFY COLUMN `role` enum('admin','manager','guest','editor') NOT NULL DEFAULT 'editor';--> statement-breakpoint
+ALTER TABLE `users` ADD `managerAccess` boolean DEFAULT true NOT NULL;

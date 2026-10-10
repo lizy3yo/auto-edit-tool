@@ -1488,6 +1488,7 @@ const publicUserColumns = {
   email: users.email,
   name: users.name,
   role: users.role,
+  managerAccess: users.managerAccess,
   status: users.status,
   lastLoginAt: users.lastLoginAt,
   createdAt: users.createdAt,
@@ -1589,7 +1590,10 @@ export async function createUser(
 export async function updateUser(
   id: number,
   patch: Partial<
-    Pick<User, "name" | "email" | "role" | "status" | "passwordHash">
+    Pick<
+      User,
+      "name" | "email" | "role" | "managerAccess" | "status" | "passwordHash"
+    >
   >
 ): Promise<void> {
   const db = await getDb();

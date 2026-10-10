@@ -1604,13 +1604,22 @@ Express · tRPC · Drizzle · MySQL.
   spending entry points (pipeline, resume, retry-assembly, retry-failed, regen scene/scenes)
   are metered by construction and the adapters stay job-unaware. Totals persist to
   `longform_video_jobs.costUsage`; `getCostBreakdown` prices them for the Cost dialog
-- **Accounts & roles** — `shared/roles.ts` is the single definition of the three tiers, and
+- **Accounts & roles** — `shared/roles.ts` is the single definition of the four tiers, and
   BOTH the tRPC gates (`server/_core/trpc.ts`) and the nav (`client/src/App.tsx`) answer from
   it, so what the UI hides and what the server refuses cannot drift. `admin` = everything
   including provider keys and account management; `manager` (operations manager) = channels,
   books, CTA assets, directing instruction, pacing and oversight of every render, never the
   keys; `editor` = long-form video and the library, scoped to their OWN renders (own five tabs,
-  own history — `canSeeAllJobs`). Passwords are scrypt (`server/passwords.ts`, no native dep);
+  own history — `canSeeAllJobs`). `guest` (2026-10-10) = an operations manager who can NEVER
+  remove anything — a channel, a book, a CTA asset, a host photo, a test or VSL run, or a video,
+  their own included (`canRemove`) — and never renders a host beat past its limit
+  (`canOverrideHostRegenLimit` stays admin/manager). A guest carries one per-account switch,
+  `users.managerAccess` (migration 0016, "Operations manager access" in Admin → Users, default
+  on): off, every manager page and route is refused and they see only their own videos, though
+  they can still make videos and pick a channel. The manager capabilities are therefore asked of
+  an ACCOUNT (`{ role, managerAccess }`, `hasManagerAccess`), not a bare role. Every remove route
+  is behind `removerProcedure` (or is admin only, or asks `canRemove` itself, as `deleteJob`
+  does); a tripwire in `roles.test.ts` fails if one is added behind another gate. Passwords are scrypt (`server/passwords.ts`, no native dep);
   `server/adminAuth.ts` holds the login route, the in-memory failed-attempt throttle and
   `ensureRootAdmin`. Sessions carry only a `uid` — `sdk.authenticateRequest` reloads the row on
   every request (2 s memo), so a role change or a disable takes effect immediately. Managed in

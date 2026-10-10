@@ -5,7 +5,7 @@
  *
  * Pure rules, shared so the server's refusal and the card's paused state cannot disagree.
  */
-import { canSeeAllJobs, type Role } from "./roles";
+import { canSeeAllJobs, type Account } from "./roles";
 
 /** A takeover nobody has looked at for this long is released, so a forgotten one locks no one out. */
 export const TAKEOVER_IDLE_MS = 30 * 60 * 1000;
@@ -36,11 +36,11 @@ export type JobAccessRefusal =
  */
 export function jobAccessRefusal(
   job: { userId: number },
-  user: { id: number; role: Role },
+  user: { id: number } & Account,
   mode: "read" | "write",
   takeover: JobTakeover | null
 ): JobAccessRefusal | null {
-  if (job.userId !== user.id && !canSeeAllJobs(user.role))
+  if (job.userId !== user.id && !canSeeAllJobs(user))
     return { kind: "notYours" };
   if (mode === "write" && takeover && takeover.userId !== user.id)
     return { kind: "takenOver", byName: takeover.userName };
@@ -50,9 +50,9 @@ export function jobAccessRefusal(
 /** Who may take a video over: the oversight tiers, on a video that is not their own. */
 export function mayTakeOver(
   job: { userId: number },
-  user: { id: number; role: Role }
+  user: { id: number } & Account
 ): boolean {
-  return canSeeAllJobs(user.role) && job.userId !== user.id;
+  return canSeeAllJobs(user) && job.userId !== user.id;
 }
 
 /**

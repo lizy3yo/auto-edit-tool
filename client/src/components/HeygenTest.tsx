@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
+import { useAuth } from "@/_core/hooks/useAuth";
 import { useRequestId } from "@/lib/requestId";
 import { keepPreviousData } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -394,6 +395,7 @@ function HeygenTestResults({
 }) {
   const utils = trpc.useUtils();
   const { data: channels } = trpc.channelConfig.list.useQuery();
+  const { canRemove } = useAuth();
   const { data: runners } = trpc.heygenTest.runners.useQuery();
   const { data: testedChannelKeys } = trpc.heygenTest.channels.useQuery();
   // Only channels that have test runs, by their display name.
@@ -638,24 +640,26 @@ function HeygenTestResults({
                     Retry all failed ({failedCount})
                   </Button>
                 )}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="shrink-0"
-                  aria-label="Delete this test run"
-                  disabled={remove.isPending}
-                  onClick={() =>
-                    setPendingDelete({
-                      batchId: first.batchId,
-                      imageUrls: batch.map(r => r.imageUrl),
-                      running: batch.some(
-                        r => r.status === "voicing" || r.status === "rendering"
-                      ),
-                    })
-                  }
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
+                {canRemove && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="shrink-0"
+                    aria-label="Delete this test run"
+                    disabled={remove.isPending}
+                    onClick={() =>
+                      setPendingDelete({
+                        batchId: first.batchId,
+                        imageUrls: batch.map(r => r.imageUrl),
+                        running: batch.some(
+                          r => r.status === "voicing" || r.status === "rendering"
+                        ),
+                      })
+                    }
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                )}
               </div>
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 {batch.map(r => {

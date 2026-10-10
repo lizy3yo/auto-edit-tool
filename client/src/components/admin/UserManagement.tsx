@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -51,6 +52,8 @@ type UserRow = {
   name: string;
   email: string;
   role: Role;
+  /** A guest's "Operations manager access" switch; unused on every other role. */
+  managerAccess: boolean;
   status: "active" | "disabled";
   lastLoginAt: Date | null;
   createdAt: Date;
@@ -60,8 +63,18 @@ type UserRow = {
 const ROLE_BADGE: Record<Role, "default" | "secondary" | "outline"> = {
   admin: "default",
   manager: "secondary",
+  guest: "outline",
   editor: "outline",
 };
+
+const MANAGER_ACCESS_LABEL = "Operations manager access";
+
+/** What a guest's switch means in each position — the same words in the form and the table. */
+function managerAccessHint(on: boolean): string {
+  return on
+    ? "On: channels, books, assets, HeyGen test, Upsell VSL, Activity and everyone's videos. Never deleting."
+    : "Off: only their own videos. Every operations manager page is hidden.";
+}
 
 function formatDate(value: Date | null): string {
   if (!value) return "Never";
@@ -116,12 +129,14 @@ function AddUserDialog({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<Role>("editor");
+  const [managerAccess, setManagerAccess] = useState(true);
 
   const reset = () => {
     setName("");
     setEmail("");
     setPassword("");
     setRole("editor");
+    setManagerAccess(true);
   };
 
   const createMutation = trpc.user.create.useMutation({
@@ -162,7 +177,13 @@ function AddUserDialog({
           onSubmit={e => {
             e.preventDefault();
             if (!canSubmit) return;
-            createMutation.mutate({ name, email, password, role });
+            createMutation.mutate({
+              name,
+              email,
+              password,
+              role,
+              managerAccess: role === "guest" ? managerAccess : undefined,
+            });
           }}
         >
           <div className="space-y-2">
@@ -212,6 +233,24 @@ function AddUserDialog({
               {ROLE_DESCRIPTION[role]}
             </p>
           </div>
+
+          {role === "guest" && (
+            <div className="flex items-center justify-between gap-3 rounded-md border border-border p-3">
+              <div>
+                <Label htmlFor="new-user-manager-access">
+                  {MANAGER_ACCESS_LABEL}
+                </Label>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {managerAccessHint(managerAccess)}
+                </p>
+              </div>
+              <Switch
+                id="new-user-manager-access"
+                checked={managerAccess}
+                onCheckedChange={setManagerAccess}
+              />
+            </div>
+          )}
 
           <DialogFooter>
             <Button
@@ -314,8 +353,9 @@ function ResetPasswordDialog({
 /**
  * Accounts — create, re-tier, suspend and remove the people who use the studio.
  *
- * Admin-only, and deliberately blunt: the three tiers are a ladder (`shared/roles.ts`), so the
- * whole surface is a role picker, an on/off switch and a password reset. Every guard that
+ * Admin-only, and deliberately blunt: the tiers are a ladder (`shared/roles.ts`), so the whole
+ * surface is a role picker, a guest's manager-access switch, an on/off switch and a password
+ * reset. Every guard that
  * matters — last-admin, self-demotion, self-delete — lives on the server; the disabled controls
  * here just explain the refusal before it happens.
  */
@@ -387,7 +427,7 @@ export function UserManagement() {
       </CardHeader>
 
       <CardContent className="space-y-4">
-        <div className="grid gap-2 sm:grid-cols-3">
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
           {ROLES.map(role => (
             <div
               key={role}
@@ -456,6 +496,25 @@ export function UserManagement() {
                             }
                           />
                         </div>
+                        {user.role === "guest" && (
+                          <label
+                            className="mt-1.5 flex items-center gap-2 text-xs text-muted-foreground"
+                            title={managerAccessHint(user.managerAccess)}
+                          >
+                            <Switch
+                              checked={user.managerAccess}
+                              disabled={busy}
+                              aria-label={`${MANAGER_ACCESS_LABEL} for ${user.name}`}
+                              onCheckedChange={managerAccess =>
+                                updateMutation.mutate({
+                                  id: user.id,
+                                  managerAccess,
+                                })
+                              }
+                            />
+                            {MANAGER_ACCESS_LABEL}
+                          </label>
+                        )}
                       </td>
 
                       <td className="px-3 py-2.5">

@@ -19,6 +19,8 @@ const owner = { id: 7, role: "editor" as const };
 const otherEditor = { id: 8, role: "editor" as const };
 const manager = { id: 2, role: "manager" as const };
 const admin = { id: 1, role: "admin" as const };
+const guestOn = { id: 3, role: "guest" as const, managerAccess: true };
+const guestOff = { id: 4, role: "guest" as const, managerAccess: false };
 const heldByManager: JobTakeover = {
   userId: manager.id,
   userName: "Mara",
@@ -31,6 +33,20 @@ describe("who may touch a video", () => {
     for (const user of [owner, admin, manager])
       for (const mode of ["read", "write"] as const)
         expect(jobAccessRefusal(job, user, mode, null)).toBeNull();
+  });
+
+  it("a guest follows their switch: on, like a manager; off, their own videos only", () => {
+    for (const mode of ["read", "write"] as const) {
+      expect(jobAccessRefusal(job, guestOn, mode, null)).toBeNull();
+      expect(jobAccessRefusal(job, guestOff, mode, null)).toEqual({
+        kind: "notYours",
+      });
+      expect(
+        jobAccessRefusal({ userId: guestOff.id }, guestOff, mode, null)
+      ).toBeNull();
+    }
+    expect(mayTakeOver(job, guestOn)).toBe(true);
+    expect(mayTakeOver(job, guestOff)).toBe(false);
   });
 
   it("another editor may do neither", () => {
@@ -189,7 +205,7 @@ describe("one permission check", () => {
     ]);
     const starts = [
       ...source.matchAll(
-        /^  ([a-zA-Z0-9_]+): (?:approved|manager|admin|public|protected)Procedure/gm
+        /^  ([a-zA-Z0-9_]+): (?:approved|manager|remover|admin|public|protected)Procedure/gm
       ),
     ];
     const unchecked = starts

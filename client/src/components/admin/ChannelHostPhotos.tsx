@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Thumb } from "@/components/Thumb";
 import { trpc } from "@/lib/trpc";
+import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { ImageIcon, Loader2, Star, Trash2, User } from "lucide-react";
@@ -36,6 +37,7 @@ import {
 const ACCEPTED = ["image/jpeg", "image/png", "image/webp"];
 
 export function ChannelHostPhotos({ channelKey }: { channelKey: string }) {
+  const { canRemove } = useAuth();
   const utils = trpc.useUtils();
   const [draftUrl, setDraftUrl] = useState("");
   const [addConfirmOpen, setAddConfirmOpen] = useState(false);
@@ -182,23 +184,25 @@ export function ChannelHostPhotos({ channelKey }: { channelKey: string }) {
                       Make primary
                     </Button>
                   )}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 w-7 p-0"
-                    aria-label={
-                      i === 0 ? "Remove primary angle" : `Remove angle ${i + 1}`
-                    }
-                    onClick={() =>
-                      setPendingDelete({
-                        id: p.id,
-                        position: i + 1,
-                        imageUrl: p.imageUrl,
-                      })
-                    }
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
+                  {canRemove && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 p-0"
+                      aria-label={
+                        i === 0 ? "Remove primary angle" : `Remove angle ${i + 1}`
+                      }
+                      onClick={() =>
+                        setPendingDelete({
+                          id: p.id,
+                          position: i + 1,
+                          imageUrl: p.imageUrl,
+                        })
+                      }
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
                 </div>
               </div>
             </div>

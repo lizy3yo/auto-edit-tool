@@ -1,5 +1,9 @@
-import { NOT_ADMIN_ERR_MSG, UNAUTHED_ERR_MSG } from "@shared/const";
-import { canManageChannels, type Role } from "@shared/roles";
+import {
+  CANNOT_REMOVE_ERR_MSG,
+  NOT_ADMIN_ERR_MSG,
+  UNAUTHED_ERR_MSG,
+} from "@shared/const";
+import { canManageChannels, canRemove, type Account } from "@shared/roles";
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import type { TrpcContext } from "./context";
@@ -31,11 +35,11 @@ export const protectedProcedure = t.procedure.use(requireUser);
 /**
  * One gate, parameterised by the capability being asked for.
  *
- * The three exported procedures below are the ONLY way a router expresses permission, and each
+ * The exported procedures below are the ONLY way a router expresses permission, and each
  * answers from `shared/roles.ts` — the same predicates the client hides its nav with. A tier
  * added there cannot silently gain access here.
  */
-const requireRole = (allow: (role: Role) => boolean, message: string) =>
+const requireRole = (allow: (account: Account) => boolean, message: string) =>
   t.middleware(async opts => {
     const { ctx, next } = opts;
 
@@ -50,7 +54,7 @@ const requireRole = (allow: (role: Role) => boolean, message: string) =>
         message: "Your account has been disabled. Contact an admin.",
       });
     }
-    if (!allow(ctx.user.role)) {
+    if (!allow(ctx.user)) {
       throw new TRPCError({ code: "FORBIDDEN", message });
     }
 
@@ -72,14 +76,27 @@ export const approvedProcedure = t.procedure.use(
 );
 
 /**
- * Admin or operations manager: channels, books, CTA assets, the directing instruction, pacing,
- * and oversight of every render. Never provider API keys — those stay on `adminProcedure`.
+ * Admin or operations manager — and a guest whose switch is on: channels, books, CTA assets,
+ * the directing instruction, pacing, and oversight of every render. Never provider API keys —
+ * those stay on `adminProcedure`.
  */
 export const managerProcedure = t.procedure.use(
   requireRole(canManageChannels, NOT_ADMIN_ERR_MSG)
 );
 
+/**
+ * `managerProcedure` for a route that REMOVES something (a channel, a book, a CTA asset, a host
+ * photo, a test or VSL run). A guest reaches everything else a manager does and never these;
+ * a tripwire in `roles.test.ts` fails if a remove route is put behind another gate.
+ */
+export const removerProcedure = t.procedure.use(
+  requireRole(
+    account => canManageChannels(account) && canRemove(account.role),
+    CANNOT_REMOVE_ERR_MSG
+  )
+);
+
 /** Admin only: provider API keys, mock mode, and account management. */
 export const adminProcedure = t.procedure.use(
-  requireRole(role => role === "admin", NOT_ADMIN_ERR_MSG)
+  requireRole(account => account.role === "admin", NOT_ADMIN_ERR_MSG)
 );

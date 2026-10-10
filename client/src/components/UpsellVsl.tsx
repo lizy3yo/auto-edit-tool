@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
+import { useAuth } from "@/_core/hooks/useAuth";
 import { useRequestId } from "@/lib/requestId";
 import { keepPreviousData } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -693,6 +694,7 @@ function VslResults({
   onPageChange: (page: number) => void;
 }) {
   const utils = trpc.useUtils();
+  const { canRemove } = useAuth();
   const { data, isLoading, isFetching } = trpc.vsl.list.useQuery(
     { channelKey, page },
     {
@@ -811,22 +813,24 @@ function VslResults({
                       onSave={name => rename.mutate({ batchId: r.batchId, name })}
                     />
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="shrink-0"
-                    aria-label="Delete this VSL"
-                    disabled={remove.isPending}
-                    onClick={() =>
-                      setPendingDelete({
-                        batchId: r.batchId,
-                        running: busy,
-                        picked: r.isPicked,
-                      })
-                    }
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  {canRemove && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="shrink-0"
+                      aria-label="Delete this VSL"
+                      disabled={remove.isPending}
+                      onClick={() =>
+                        setPendingDelete({
+                          batchId: r.batchId,
+                          running: busy,
+                          picked: r.isPicked,
+                        })
+                      }
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  )}
                 </div>
                 <p className="text-xs text-muted-foreground">
                   Made by{" "}

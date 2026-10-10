@@ -37,6 +37,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { trpc } from "@/lib/trpc";
+import { useAuth } from "@/_core/hooks/useAuth";
 import { toast } from "sonner";
 import {
   FileText,
@@ -217,6 +218,7 @@ const ttsModelItems = TTS_MODELS.map(m => (
 ));
 
 export function ChannelConfigPanel() {
+  const { canRemove } = useAuth();
   const utils = trpc.useUtils();
   const {
     data: allChannels,
@@ -805,19 +807,21 @@ export function ChannelConfigPanel() {
                         </div>
                       </div>
                       <div className="ml-4 flex items-center gap-2 shrink-0">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() =>
-                            setDeleteChannel({
-                              key: channel.key,
-                              name: channel.name,
-                            })
-                          }
-                          className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
+                        {canRemove && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() =>
+                              setDeleteChannel({
+                                key: channel.key,
+                                name: channel.name,
+                              })
+                            }
+                            className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
                         <Button
                           variant="outline"
                           size="sm"

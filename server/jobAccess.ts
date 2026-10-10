@@ -11,12 +11,12 @@
  */
 import { TRPCError } from "@trpc/server";
 import { jobAccessRefusal, takenOverMessage } from "../shared/jobTakeover";
-import type { Role } from "../shared/roles";
+import type { Account } from "../shared/roles";
 import { getTakeover, touchTakeover } from "./jobTakeover";
 
 export async function assertJobAccess(
   job: { id: number; userId: number; status: string },
-  user: { id: number; role: Role },
+  user: { id: number } & Account,
   mode: "read" | "write"
 ): Promise<void> {
   const takeover = await getTakeover(job.id, job.status);

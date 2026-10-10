@@ -501,6 +501,8 @@ export type InsertAppSetting = typeof appSettings.$inferInsert;
  *               accounts.
  * - `manager` — the operations manager: channels, books, CTA assets, the directing instruction
  *               and pacing, plus oversight of every render. Never the keys.
+ * - `guest`   — an operations manager who can never remove anything or render past the host
+ *               limit, and only while `managerAccess` is on; off, their own renders only.
  * - `editor`  — long-form video and the library, scoped to their OWN renders (their own five
  *               tabs, their own history).
  *
@@ -515,9 +517,15 @@ export const users = mysqlTable("users", {
   name: varchar("name", { length: 128 }).notNull(),
   /** scrypt digest from `server/passwords.ts` (`scrypt$N$r$p$salt$hash`). Never leaves the server. */
   passwordHash: varchar("passwordHash", { length: 255 }).notNull(),
-  role: mysqlEnum("role", ["admin", "manager", "editor"])
+  role: mysqlEnum("role", ["admin", "manager", "guest", "editor"])
     .default("editor")
     .notNull(),
+  /**
+   * A GUEST's switch (Admin → Users, "Operations manager access"): on, they reach what an
+   * operations manager does; off, only their own videos. Read by `hasManagerAccess` in
+   * `shared/roles.ts` and ignored on every other role.
+   */
+  managerAccess: boolean("managerAccess").default(true).notNull(),
   status: mysqlEnum("status", ["active", "disabled"])
     .default("active")
     .notNull(),

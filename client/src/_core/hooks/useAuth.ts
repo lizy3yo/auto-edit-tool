@@ -3,6 +3,7 @@ import {
   canManageChannels,
   canManageKeys,
   canOpenAdmin,
+  canRemove,
   canSeeAllJobs,
   type Role,
 } from "@shared/roles";
@@ -52,6 +53,11 @@ export function useAuth(options?: UseAuthOptions) {
     // Null until `auth.me` resolves. Every capability below reads false while it is, so a
     // half-loaded page never flashes a tab the account is not entitled to.
     const role = (meQuery.data?.role ?? null) as Role | null;
+    // The role plus a guest's "Operations manager access" switch — what the manager
+    // capabilities are asked of (`Account` in `shared/roles.ts`).
+    const account = role
+      ? { role, managerAccess: meQuery.data?.managerAccess }
+      : null;
     return {
       user: meQuery.data ?? null,
       role,
@@ -62,9 +68,11 @@ export function useAuth(options?: UseAuthOptions) {
       // what the UI hides and what the server refuses cannot drift apart.
       isAdmin: role === "admin",
       canManageKeys: role ? canManageKeys(role) : false,
-      canManageChannels: role ? canManageChannels(role) : false,
-      canSeeAllJobs: role ? canSeeAllJobs(role) : false,
-      canOpenAdmin: role ? canOpenAdmin(role) : false,
+      canManageChannels: account ? canManageChannels(account) : false,
+      canSeeAllJobs: account ? canSeeAllJobs(account) : false,
+      canOpenAdmin: account ? canOpenAdmin(account) : false,
+      // False for a guest: every delete button asks here, and the server refuses them too.
+      canRemove: role ? canRemove(role) : false,
     };
   }, [
     meQuery.data,
