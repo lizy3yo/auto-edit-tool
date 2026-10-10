@@ -15,7 +15,14 @@
  * runners do the actual IO. Modeled on the FFmpeg usage in server/dubbing.ts.
  */
 
-import { existsSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  rmSync,
+} from "fs";
 import { randomUUID } from "crypto";
 import path from "path";
 import os from "os";
@@ -47,6 +54,15 @@ import {
 } from "./assemblyCache";
 import type { SplitLayout, VideoAspectRatio } from "../shared/types";
 import type { AssemblyStep } from "../shared/jobPhase";
+import {
+  buildFilmLoudnessArgs,
+  filmLoudnessTarget,
+  FILM_LIMITER_CEILING_DB,
+  FILM_MAX_LIMITING_DB,
+  parseLoudnessSummary,
+  planFilmLoudness,
+  type LoudnessReading,
+} from "./filmLoudness";
 // The film timeline's arithmetic moved to `shared/` so the browser's live cut preview runs the
 // SAME code this does rather than a second implementation that can drift — see
 // shared/filmTimeline.ts. Re-exported because both planners have always been part of this
@@ -1971,6 +1987,31 @@ async function measureLoudness(filePath: string): Promise<number> {
   return lufs;
 }
 
+/**
+ * Integrated loudness and true peak of a film's audio track (EBU R128), for the loudness step.
+ * `measureLoudness` above reads only the integrated figure, which is all the music bed needs;
+ * setting a film's level also needs the peak the lift would push past the ceiling.
+ */
+async function measureFilmLoudness(filePath: string): Promise<LoudnessReading> {
+  const stderr = await runFfmpegCapture(
+    [
+      "-hide_banner",
+      "-nostats",
+      "-i",
+      filePath,
+      "-map",
+      "0:a:0",
+      "-af",
+      "ebur128=peak=true",
+      "-f",
+      "null",
+      "-",
+    ],
+    "ebur128"
+  );
+  return parseLoudnessSummary(stderr);
+}
+
 /** Download a remote URL to a temp file and return the local path. Exported for tests. */
 export async function downloadToTemp(
   url: string,
@@ -3811,6 +3852,7 @@ export async function assemblePerSceneFilm(opts: {
     // scan and the full-length mix encode. A build that throws publishes nothing, so a dead CDN
     // costs this run its music and the next run retries.
     let mixedPath = audioPath;
+    let mixedKey = audioKey;
     if (opts.musicBedUrls?.length) {
       report({ step: "music" });
       try {
@@ -3888,9 +3930,71 @@ export async function assemblePerSceneFilm(opts: {
           },
         });
         mixedPath = mixed.path;
+        mixedKey = mixKey;
       } catch (err: any) {
         console.warn(
           `[Assembly] music bed failed (${err?.message}) — shipping narration-only audio`
+        );
+      }
+    }
+
+    // Loudness, on the finished track (voice and music together, so their balance stays): one
+    // gain to YouTube's level and a limiter under the peak ceiling — see `filmLoudness.ts`.
+    // Cached on the track's own key plus the numbers that decide the result, so a Reassemble
+    // after a one-scene edit redoes it and one with no audio change does not. Every failure
+    // ships the track as mixed, which is the film every job got before this step existed.
+    let masteredPath = mixedPath;
+    const loudnessTarget = filmLoudnessTarget();
+    if (loudnessTarget != null) {
+      report({ step: "loudness" });
+      try {
+        const mastered = await getOrBuild<{
+          before: LoudnessReading;
+          after: LoudnessReading;
+          gainDb: number;
+          limitingDb: number;
+          capped: boolean;
+        }>({
+          kind: "filmmaster",
+          key: cacheKey("filmmaster", {
+            mixedKey,
+            targetLufs: loudnessTarget,
+            ceilingDb: FILM_LIMITER_CEILING_DB,
+            maxLimitingDb: FILM_MAX_LIMITING_DB,
+          }),
+          ext: "m4a",
+          fallbackDir: workDir,
+          build: async out => {
+            const before = await measureFilmLoudness(mixedPath);
+            const plan = planFilmLoudness(before, loudnessTarget);
+            if (!plan.needed) {
+              copyFileSync(mixedPath, out);
+              return { before, after: before, ...plan };
+            }
+            await runFfmpeg(
+              buildFilmLoudnessArgs({
+                inputPath: mixedPath,
+                outputPath: out,
+                gainDb: plan.gainDb,
+              })
+            );
+            return { before, after: await measureFilmLoudness(out), ...plan };
+          },
+        });
+        masteredPath = mastered.path;
+        const m = mastered.meta;
+        if (m) {
+          console.log(
+            `[Assembly] loudness: ${m.before.integratedLufs.toFixed(1)} → ${m.after.integratedLufs.toFixed(1)} LUFS ` +
+              `(target ${loudnessTarget}), true peak ${m.before.truePeakDb.toFixed(1)} → ${m.after.truePeakDb.toFixed(1)} dBTP, ` +
+              `gain ${m.gainDb >= 0 ? "+" : ""}${m.gainDb.toFixed(1)} dB, limiting ${m.limitingDb.toFixed(1)} dB` +
+              (m.capped ? " — gain held back to protect the voice" : "") +
+              (mastered.hit ? " (reused)" : "")
+          );
+        }
+      } catch (err: any) {
+        console.warn(
+          `[Assembly] loudness step failed (${err?.message}) — shipping the track as mixed`
         );
       }
     }
@@ -3900,7 +4004,7 @@ export async function assemblePerSceneFilm(opts: {
     await runFfmpeg(
       buildFilmRemuxArgs({
         videoPath,
-        audioPath: mixedPath,
+        audioPath: masteredPath,
         outputPath: finalPath,
       })
     );

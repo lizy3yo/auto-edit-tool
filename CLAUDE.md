@@ -1404,6 +1404,28 @@ Express · tRPC · Drizzle · MySQL.
   never lands after the clear. `assemblePerSceneFilm` reports through its `onProgress` option.
   Narration slices are now cut eight at a time (`SLICE_CONCURRENCY`): 224 slices of a 16-min
   master went 24 s → 5 s; strict callers still throw the first error, after every worker stops
+- **Every film leaves at YouTube's loudness** (`server/filmLoudness.ts`, 2026-10-10). Nothing set
+  a film's loudness — the leveller above targets the film's OWN median, the bed is set relative to
+  the voice, and the last step stream-copied the result — so a film was as loud as its voice came
+  back: Ruth's job 255 measured -23.1 LUFS, Beau Carter's job 357 -34.0 (peak -16 dBTP), against
+  the -14 YouTube plays at, and YouTube turns a loud video down but never a quiet one up. The
+  per-channel Volume is a plain gain capped at 2.0 (+6 dB), no limiter, and could not close that.
+  Assembly's last audio step (after the music mix, before the remux; progress "Setting the
+  loudness") now measures the finished track (`ebur128=peak=true`), applies ONE gain to
+  `FILM_LOUDNESS_TARGET_LUFS` (-14) — voice and music together, balance untouched — and limits
+  at 4x the sample rate (`alimiter` is sample-peak) to `FILM_LIMITER_CEILING_DB` (-1.5, so the
+  AAC encode's overshoot still lands under -1 dBTP: at -1 the file measured -0.7). `loudnorm` is
+  NOT used for the lift: its linear mode refuses when the peaks would pass the ceiling and falls
+  back to dynamic, which pumps. Past `FILM_MAX_LIMITING_DB` (6) the gain is held back and the
+  film lands under target rather than squash the voice; a track within 0.5 LU is copied
+  untouched. Both films land at -14.3 LUFS / -1.1..-1.2 dBTP (the limiter costs ~0.3 LU; not
+  chased). Own cache kind `filmmaster`, keyed on the mixed track's key + the target and limits,
+  so a Reassemble reuses every scene and FILMS RENDERED BEFORE get it on Reassemble. Any failure
+  ships the track as mixed. `FILM_LOUDNESS=0` turns it off; `FILM_LOUDNESS_LUFS` (-24..-9) moves
+  the target. Consequences: the channel Volume field no longer changes a finished film's
+  loudness (every film ends at one level), and the live cut preview, which plays the raw master,
+  is quieter than the file. HeyGen test and VSL clips do not go through assembly and are not
+  touched. WHY Beau's voice (`eleven_v4`) comes back 11 dB under Ruth's is not known.
 - **Voice directions** (`shared/voiceDirections.ts`, 2026-10-03) — a script may carry `[laughs]`,
   `[sighs]`, `[whispers]`, `[warmly]`… where the host should do them. ElevenLabs v3/v4 act a
   bracketed direction out; every older model, and MiniMax (which is what a 69Labs account CLONE

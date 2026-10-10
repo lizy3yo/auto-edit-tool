@@ -25,6 +25,7 @@ export type AssemblyStep =
   | { step: "join" }
   | { step: "audio" }
   | { step: "music" }
+  | { step: "loudness" }
   | { step: "final" }
   | { step: "upload" };
 
@@ -42,7 +43,8 @@ export const ASSEMBLY_WEIGHTS: Record<AssemblyStep["step"], [number, number]> =
     scenes: [3, 85],
     join: [85, 88],
     audio: [88, 92],
-    music: [92, 95],
+    music: [92, 94],
+    loudness: [94, 95],
     final: [95, 97],
     upload: [97, 100],
   };
@@ -61,6 +63,7 @@ const ASSEMBLY_LABELS: Record<AssemblyStep["step"], string> = {
   join: "Joining scenes",
   audio: "Building the audio track",
   music: "Adding music",
+  loudness: "Setting the loudness",
   final: "Writing the final file",
   upload: "Uploading",
 };

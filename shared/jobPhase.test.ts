@@ -25,9 +25,19 @@ describe("assemblyPhase", () => {
   });
 
   it("runs the whole-film steps in order after the scenes, ending short of 100 until the upload", () => {
-    const order = ["join", "audio", "music", "final", "upload"] as const;
+    const order = [
+      "join",
+      "audio",
+      "music",
+      "loudness",
+      "final",
+      "upload",
+    ] as const;
     const pcts = order.map(step => assemblyPhase({ step }).pct);
-    expect(pcts).toEqual([85, 88, 92, 95, 97]);
+    expect(pcts).toEqual([85, 88, 92, 94, 95, 97]);
+    expect(assemblyPhase({ step: "loudness" }).label).toBe(
+      "Setting the loudness"
+    );
     expect(assemblyPhase({ step: "audio" }).label).toBe(
       "Building the audio track"
     );
