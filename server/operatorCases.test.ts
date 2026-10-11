@@ -28,6 +28,7 @@ import { applySpokenLists, findSpokenLists, spokenListsByShape, splitSentences }
 import {
   applyShotPlan,
   atWork,
+  CONTINUITY_SYSTEM,
   foldSnappedFlashes,
   joinShortSplits,
   otherPersonOf,
@@ -40,6 +41,8 @@ import {
   BLURRED_PRINT_CLAUSE,
   buildSplitRightScene,
   buildStillPrompt,
+  guardPitchVisuals,
+  hostBrollClause,
   keepBodyPartsOnBody,
   memoryClause,
   NO_FIGURES_SUFFIX,
@@ -61,7 +64,15 @@ import {
   STAGED_RULE,
   STILL_DEFECT_SYSTEM,
 } from "./overlayTextScan";
-import { DETACHED_BODY_PART, looksCutOff, markHostBroll, onTheBody, SHOWS_PERSON } from "./hostLook";
+import {
+  DETACHED_BODY_PART,
+  looksCutOff,
+  markHostBroll,
+  onTheBody,
+  SHOWS_PERSON,
+  withoutFaceAsks,
+  WORN_ON_BODY,
+} from "./hostLook";
 
 const pic = (index: number, scriptText: string, showSubject: string, over: Partial<StoryboardScene> = {}) =>
   ({ index, scriptText, showSubject, visualPrompt: showSubject, ...over }) as StoryboardScene;
@@ -777,5 +788,186 @@ describe("a line about someone else shows that person, not the host", () => {
     expect(prompt).not.toMatch(/The only person in this shot is the host/);
     // The person stays in the words that lead the prompt.
     expect(prompt).toMatch(/^(THE PICTURE MUST SHOW: )?a woman seen from behind/);
+  });
+});
+
+// 2026-10-11, practice runs of six channels (jobs 358-363). Every rule here names no channel.
+describe("a worn thing has its wearer", () => {
+  it("reads clothing, shoes and jewellery shown as worn or in use as a picture of a person", () => {
+    // Job 358: an empty sleeve in a grocery aisle, and empty shoes on a car park.
+    expect(
+      SHOWS_PERSON.test(
+        "Close-up of the sleeve and front of a heavy wool coat brushing past grocery shelves"
+      )
+    ).toBe(true);
+    expect(
+      SHOWS_PERSON.test(
+        "brown leather lace-up shoes with worn soles stepping on grey asphalt"
+      )
+    ).toBe(true);
+    // Job 362: a sweater holding a body's shape with nothing in its collar.
+    expect(
+      SHOWS_PERSON.test("dark beaded necklace sitting high on the chest")
+    ).toBe(true);
+    expect(
+      SHOWS_PERSON.test("chunky round beads worn over a plain sweater")
+    ).toBe(true);
+    expect(SHOWS_PERSON.test("a soft shadow under the chin")).toBe(true);
+  });
+
+  it("leaves a thing that hangs, lies or stands by itself person-free", () => {
+    for (const thing of [
+      "a wool coat hanging on a hook by the door",
+      "brown leather shoes with worn soles on a doormat",
+      "a navy sweater folded on the bed",
+      "a pearl necklace on a dress form",
+      "an old chest of drawers by the window",
+      "a tool chest resting on the bench",
+      "a dog walking across the wooden floor",
+    ])
+      expect(WORN_ON_BODY.test(thing), thing).toBe(false);
+  });
+
+  it("marks such a picture as the host's, and tells a person-free one where clothes belong", () => {
+    const scenes = [
+      pic(
+        1,
+        "The grocery store clings to your coat.",
+        "a coat sleeve brushing past grocery shelves"
+      ),
+    ];
+    markHostBroll(
+      scenes,
+      { hostLook: "a man in a denim shirt" },
+      "https://x/host.png"
+    );
+    expect(scenes[0].humanPresent).toBe(true);
+    expect(scenes[0].brollHostLook).toMatch(/denim shirt/);
+    expect(NO_FIGURES_SUFFIX).toMatch(
+      /never filled out, standing up, stepping or moving as if someone unseen were wearing them/
+    );
+  });
+});
+
+describe("the host's face is never drawn", () => {
+  it("takes the face out of a description of the host", () => {
+    // Job 362: this description drew a full face that was not the host's.
+    const asked =
+      "dark beaded necklace high on the chest of an older woman, shadows under her chin, face looking tired, photographed from the shoulders up";
+    const out = withoutFaceAsks(asked);
+    expect(out).not.toMatch(/face looking/);
+    expect(out).not.toMatch(/shoulders up/);
+    expect(out).toMatch(/framed from the chin down/);
+    expect(out).toMatch(/dark beaded necklace high on the chest/);
+    expect(withoutFaceAsks("hands sanding a board")).toBe(
+      "hands sanding a board"
+    );
+  });
+
+  it("is scrubbed when the picture is marked as the host's, and the prompt says so", () => {
+    const scenes = [
+      pic(
+        1,
+        "The face looks tired.",
+        "a necklace on her chest, face looking tired",
+        { humanPresent: true }
+      ),
+    ];
+    markHostBroll(
+      scenes,
+      { hostLook: "a woman with silver hair" },
+      "https://x/host.png"
+    );
+    expect(scenes[0].showSubject).not.toMatch(/face/);
+    expect(hostBrollClause("a woman with silver hair")).toMatch(
+      /even when the description speaks of the face/
+    );
+  });
+});
+
+describe("one body at the work, and the work on its bench", () => {
+  it("asks for both arms from the host's own side, and a workpiece that is a separate thing", () => {
+    // Job 361: the saw hand came in from the far edge of the frame, and the block passed through the bench.
+    expect(ONE_BODY_CLAUSE).toMatch(
+      /never one from the opposite edge of the frame/
+    );
+    expect(TOOL_POSITION_CLAUSE).toMatch(
+      /never sunk into, passing through or grown out of the table or bench/
+    );
+  });
+});
+
+describe("blurred print is never asked to be read", () => {
+  it("drops 'clearly showing' and the figure from a blurred-print prompt, and only there", () => {
+    // Job 359: a blurred-print picture described this way came back twice with a sharp, made-up label.
+    const asked =
+      "a white smoke alarm's back held steady, its printed label clearly showing the year 2009.";
+    const prompt = withAllowedText(asked, undefined, true);
+    expect(prompt).not.toMatch(/clearly showing/);
+    expect(prompt).not.toMatch(/2009/);
+    expect(prompt).toContain(BLURRED_PRINT_CLAUSE);
+    // Print the line SAYS stays exact, and a picture with no print rule is untouched.
+    expect(withAllowedText(asked, "2009")).toMatch(
+      /clearly showing the year 2009/
+    );
+    expect(withAllowedText(asked, undefined)).toBe(asked);
+  });
+});
+
+describe("a phone rests on something", () => {
+  it("is held in a hand or lies flat — never standing upright by itself", () => {
+    // Jobs 363 and 369: six pictures showed a phone standing upright on a table or a floor with nothing holding it.
+    expect(appScreenClause(pic(1, "Etsy,", "a phone showing an app"))).toMatch(
+      /lies flat on its back on a surface[^]*never stands upright by itself/
+    );
+    expect(
+      appScreenClause(
+        pic(2, "Etsy,", "a phone showing the app", {
+          namedLook: "an app: a white screen",
+        })
+      )
+    ).toMatch(/lies flat on its back on a surface[^]*never stands upright by itself/);
+  });
+});
+
+describe("a part belongs to one whole", () => {
+  it("has the props list describe the whole a listed part belongs to", () => {
+    // Job 366: the list held only "dog's nose", so the one picture of the whole dog drew another dog.
+    expect(CONTINUITY_SYSTEM).toMatch(/its look STARTS with the whole it belongs to/);
+    expect(CONTINUITY_SYSTEM).toMatch(/every picture of the whole shows the same one/);
+  });
+});
+
+describe("a remembered thing is one thing", () => {
+  it("is shown open, filled or in use as itself — never with a second copy fused on", () => {
+    // Job 368: "a scoop pouring pellets into the feeder", drawn from the feeder's memory, came back as
+    // the closed feeder with a second open drum standing in its tray to take the pour.
+    const pour = pic(7, "All of it, every time.", "a metal scoop pouring pellets into the round feeder", {
+      keyThing: "feeder",
+      memoryRefUrls: ["https://x/feeder.png"],
+    });
+    expect(memoryClause(pour)).toMatch(/never a second copy or a spare part of it beside, on or inside the first/);
+  });
+});
+
+describe("the picture behind the scan card", () => {
+  it("never leads with a description asking for a phone or a QR code", () => {
+    // Job 370: the prompt was clean, the description was not — the picture drew a phone, a made-up
+    // QR code and hands behind the real card.
+    const scan = pic(24, "Pick up your phone, point it at the code.", "A smartphone held in bare hands, its camera pointed at a square black-and-white QR code", {
+      cta: true,
+      qrHero: true,
+      humanPresent: true,
+      visualPrompt: "a dog resting on the entryway mat",
+    });
+    expect(guardPitchVisuals([scan])).toEqual([24]);
+    expect(scan.showSubject).toBeUndefined();
+    expect(scan.humanPresent).toBeUndefined();
+    expect(scan.visualPrompt).toBe("a dog resting on the entryway mat");
+    expect(buildStillPrompt(scan)).not.toMatch(/QR|smartphone/i);
+    // A clean description is left alone, and so is every picture outside a pitch.
+    const plain = pic(3, "He reads your shoes.", "a phone on the hall table");
+    expect(guardPitchVisuals([plain])).toEqual([]);
+    expect(plain.showSubject).toBe("a phone on the hall table");
   });
 });

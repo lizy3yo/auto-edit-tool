@@ -1106,8 +1106,11 @@ const SHOT_LIST_SYSTEM =
   "9c. held: true when someone must be HOLDING or USING the thing in this shot for it to make " +
   "sense — in any wording: a drill raised to the frame, a hair dryer aimed at the curls, scissors " +
   "poised over the cloth, a phone held up to the screen, a cup lifted to drink. The picture then " +
-  "shows the host's hands on it, and it is a photo. False when the thing simply lies, stands or " +
-  "hangs there.\n" +
+  "shows the host's hands on it, and it is a photo. True as well when the thing is being WORN or " +
+  "is on a body in this shot — clothing, shoes or jewellery shown on someone, moving the way a " +
+  "worn thing moves, or sitting where it sits on a body: say who is wearing it in show, because " +
+  "a worn thing with nobody in it is drawn as an empty shape. False when the thing simply lies, " +
+  "stands or hangs there, or sits on a hanger, a hook or a stand.\n" +
   "10. from: the first 1-4 words of the shot, copied EXACTLY from the beat, in order. The first " +
   "shot of a non-host beat starts at the beat's first word.\n" +
   "11. show: 8-20 plain words saying what is in the frame, the way a person would caption their " +
@@ -1255,7 +1258,7 @@ export async function planShotList(
   return results.flat();
 }
 
-const CONTINUITY_SYSTEM =
+export const CONTINUITY_SYSTEM =
   "You read a narration script for a faceless YouTube video and write its PROPS LIST: every " +
   "physical thing that is shown more than once — the things being made, the key tools and " +
   "materials, the recurring places — and exactly how each looks, so a picture generator draws " +
@@ -1263,7 +1266,12 @@ const CONTINUITY_SYSTEM =
   "where it usually sits) — always tidy: never describe anything as cluttered, messy or crowded. " +
   "The first line is the HOME setting (the workshop, kitchen, sewing room) " +
   "the video returns to. The SECOND line is the MAIN thing — the one physical thing the whole video " +
-  "is about (what is made, used, sold or shown most) — written `MAIN name: look`. 6-14 lines. Plain words, no brands, no people. NOTHING WITH MARKS ON IT: " +
+  "is about (what is made, used, sold or shown most) — written `MAIN name: look`. " +
+  "When a listed thing is a PART of something bigger that the pictures will also show — an " +
+  "animal's paw, a machine's dial, a garment's collar — its look STARTS with the whole it belongs " +
+  "to (what kind it is, its colour, size and markings) and then describes the part, so every " +
+  "picture of the whole shows the same one. " +
+  "6-14 lines. Plain words, no brands, no people. NOTHING WITH MARKS ON IT: " +
   "never list a chalk tally, a chalkboard, a sign, a price tag, a label, a calendar, a notebook, a " +
   "ledger or anything written or counted on — the pictures carry no writing, so such a prop would " +
   "put writing in every shot that shows it. Output ONLY the list.";

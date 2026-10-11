@@ -87,9 +87,25 @@ export function withoutMirrors(text: string): string {
     .trim();
 }
 
-/** Words in a shot description that mean a person is in it, doing something. */
-export const SHOWS_PERSON =
+/**
+ * Clothing, shoes or jewellery shown AS WORN or in use, with no word for the wearer (2026-10-11,
+ * practice jobs 358 and 362: "a coat sleeve brushing past grocery shelves" came back as a sleeve
+ * with no arm in it, "shoes stepping on asphalt" as empty shoes in a car park, "a necklace sitting
+ * high on the chest, worn over a plain sweater" as a sweater holding a body's shape with nothing in
+ * its collar). Read as person-free, such a picture got the no-people rule, so the picture maker
+ * drew the thing filled out by nobody. Worn or in use means someone is wearing it. A thing that
+ * hangs, lies folded or sits on a stand names no body and does not match ("a chest of drawers" is
+ * furniture, "worn soles" is wear).
+ */
+export const WORN_ON_BODY =
+  /\bworn (?:on|over|with|under|around|at|high|low|long|open|loose|together)\b|\b(?:sit(?:s|ting)?|rest(?:s|ing)?|l(?:ies|ying)|hang(?:s|ing)?|fall(?:s|ing)?|drap(?:ed|es|ing)) (?:(?:high|low|flat|straight|just|right|well|down) )*(?:on|at|against|across|over|below|above|around) (?:(?:the|her|his|their|a) )?(?:chest(?! of)|shoulders?|waist|hips?|lap|chin|jaw|throat|ankles?|body|bust)\b|\b(?:under|beneath|below) (?:the|her|his|their) chin\b|\b(?:shoes?|boots?|sneakers?|slippers?|sandals?|sleeves?|cuffs?|pant legs?|trouser legs?|coat|jacket)\b[^.,;]{0,50}\b(?:stepping|walking|striding|brushing (?:past|against)|reaching)\b/i;
+
+/** The person words themselves (the notes are under `SHOWS_PERSON`). */
+const PERSON_WORDS =
   /\b(hands?|fingers?|fingertips?|host|she|he|her|his|herself|himself|someone|a person|a woman|a man|wearing|worn by|collarbone|neck|wrists?|earlobes?|held (?:up|out|near|against|over|to|above|beside|in front)|hold(?:s|ing) (?:up|out)|in use|scalp|skin|nails|fingernails|forehead|cheeks?|eyelashes|eyebrows?|hairline|strands?|hair(?!\s*(?:dryer|brush|clip|tie|spray|band|pin|comb|product|net|cut(?:ting)? scissors)))\b/i;
+
+/** Words in a shot description that mean a person is in it, doing something. */
+export const SHOWS_PERSON = new RegExp(`${PERSON_WORDS.source}|${WORN_ON_BODY.source}`, "i");
 // A BODY PART is always on a person (2026-10-02, Diane's job 309: "dry hair at the bare sink counter"
 // drew a head of hair lying on the counter, and "a brush spreading gloss through silver hair" drew
 // hair hanging from nothing — read as person-free, those pictures got NO_FIGURES_SUFFIX, which bans
@@ -147,6 +163,29 @@ export function onTheBody(text: string): string {
 }
 
 /**
+ * A description of the HOST with what asks for the face taken out. A picture of the host never
+ * shows the face — a drawn one would not match the host on camera — but the description can ask
+ * for it anyway: practice job 362 asked for "shadows under her chin, face looking tired …
+ * photographed from the shoulders up" and got a full face that is not the host's. The expression
+ * goes, and a "from the shoulders up" framing stops at the chin. Pure — unit-tested.
+ */
+export function withoutFaceAsks(text: string): string {
+  return text
+    .replace(
+      /,?\s*(?:and\s+)?(?:(?:the|her|his|their|a)\s+)?face\s+(?:look(?:s|ing)?|appear(?:s|ing)?|seem(?:s|ing)?|show(?:s|ing)?)\s+[a-z-]+(?:\s+and\s+[a-z-]+)?/gi,
+      ""
+    )
+    .replace(
+      /,?\s*(?:photographed|framed|seen|shot|shown)\s+from\s+the\s+(?:shoulders|chest|neck|collarbones?)\s+up\b/gi,
+      ", framed from the chin down"
+    )
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+([,.])/g, "$1")
+    .replace(/,\s*,/g, ",")
+    .trim();
+}
+
+/**
  * Mark the pictures that show someone doing the work as the HOST (see the file comment). Pictures
  * that show no one are cleared, so a re-run never leaves a stale mark. With no host look, no host
  * photo, or a b-roll-only film, nothing is marked and the anonymous-hands lane is used as before.
@@ -182,8 +221,8 @@ export function markHostBroll(
     } else if (on && eligible && person) {
       s.humanPresent = true;
       s.brollHostLook = look;
-      if (s.showSubject) s.showSubject = withoutMirrors(s.showSubject);
-      if (s.visualPrompt) s.visualPrompt = withoutMirrors(s.visualPrompt);
+      if (s.showSubject) s.showSubject = withoutFaceAsks(withoutMirrors(s.showSubject));
+      if (s.visualPrompt) s.visualPrompt = withoutFaceAsks(withoutMirrors(s.visualPrompt));
       s.brollHostRef = hostPhotoUrl;
       n++;
     } else if (on && s.hostPresent && s.splitVisual && BODY_PART_WORDS.test(s.splitVisual) && !REAL_HOLDER.test(s.splitVisual)) {

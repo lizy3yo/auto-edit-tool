@@ -5748,7 +5748,9 @@ export const TOOL_POSITION_CLAUSE =
   "bench edge, sits in a vise or against a bench hook; a piece being drilled is clamped, with a " +
   "scrap block under it; cloth is cut on a cutting mat, food on a cutting board. The holding hand " +
   "stays well back and to the side of the blade, bit or edge — never in front of it, in its path, " +
-  "or right beside the cut — and a blade never cuts into the table under the work.";
+  "or right beside the cut — and a blade never cuts into the table under the work. The piece " +
+  "being worked sits ON its surface or in its holder as a separate solid thing — never sunk " +
+  "into, passing through or grown out of the table or bench.";
 
 /**
  * A tool in a picture is really WORKING on its material. Norbert's 3-min test (job 236, 2:19)
@@ -5905,7 +5907,8 @@ export function hostBrollClause(look: string): string {
   return (
     `The only person in this shot is the host — ${look.trim().replace(/\.$/, "")} — exactly as in ` +
     `the reference photo, doing the task: seen from behind or from the side, over the shoulder, ` +
-    `hands at the work, the face turned away or out of frame so it is never shown. Nobody else ` +
+    `hands at the work, the face turned away or out of frame so it is never shown — even when ` +
+    `the description speaks of the face, the frame stops at the chin or is taken from behind. Nobody else ` +
     `is in the frame, in the background or in a reflection. ${ONE_BODY_CLAUSE}`
   );
 }
@@ -5919,7 +5922,9 @@ export function hostBrollClause(look: string): string {
  */
 export const ONE_BODY_CLAUSE =
   "The host has exactly two arms and two hands, both their own: each arm runs unbroken from its " +
-  "own shoulder to its hand, no extra arm, sleeve or hand anywhere in the frame. The pose is one a " +
+  "own shoulder to its hand, no extra arm, sleeve or hand anywhere in the frame. Both arms come " +
+  "into the picture from where the host's body is — never one from the opposite edge of the " +
+  "frame. The pose is one a " +
   "real body makes: the head faces the same way as the shoulders or turns only a little, never " +
   "twisted round. When the task " +
   "takes two hands, both of the host's hands are on it; when it takes one, the other rests " +
@@ -5940,7 +5945,9 @@ export const NO_FIGURES_SUFFIX =
   "may appear, and only where the action needs them — one person's pair at most, each hand on " +
   "its own forearm, never a third hand or arm. Nothing is held up by itself: a tool or object " +
   "with no hand on it rests on a surface or hangs from a hook — never hovering in the air or " +
-  "pressed against the work on its own.";
+  "pressed against the work on its own. Clothing, shoes and jewellery with nobody in them hang " +
+  "on a hanger or hook, lie flat or folded, or sit on a dress form or stand — never filled out, " +
+  "standing up, stepping or moving as if someone unseen were wearing them.";
 
 /**
  * Self-contained lip-sync directive — the ENTIRE InfiniteTalk host prompt (see
@@ -6524,6 +6531,16 @@ export const STEP_BACK_CLAUSE =
 
 /** Close-up wording, which a picture maker answers with sharp, readable print. */
 const CLOSE_UP_WORDS = /\b(?:extreme\s+)?close[- ]?ups?\b|\bmacro\b/gi;
+/**
+ * A description that asks for print to be READ, and the figure it would show (practice job 359:
+ * a blurred-print picture described as "its printed label clearly showing the year 2009" came
+ * back twice with a sharp label, a made-up model number beside the year). The picture maker
+ * answers "clearly showing" with readable print whatever else the prompt says.
+ */
+const READABLE_PRINT_ASK =
+  /\b(?:clearly|plainly|sharply|legibly)\s+(?:showing|displaying|reading|printed with|marked with)\b/gi;
+const PRINTED_FIGURE =
+  /\b(?:(?:the|a)\s+)?(?:printed\s+)?(?:year|date)\s+(?:of\s+)?(?:19|20)\d{2}\b/gi;
 
 /**
  * A picture whose line says the words printed on a thing (`scene.pictureText`) shows exactly those,
@@ -6536,7 +6553,10 @@ export function withAllowedText(
 ): string {
   if (!text) {
     if (!blurPrint) return prompt;
-    const framed = prompt.replace(CLOSE_UP_WORDS, "arm's-length view");
+    const framed = prompt
+      .replace(CLOSE_UP_WORDS, "arm's-length view")
+      .replace(READABLE_PRINT_ASK, "with")
+      .replace(PRINTED_FIGURE, "a printed date");
     return framed.includes(NO_READABLE_TEXT)
       ? framed.split(NO_READABLE_TEXT).join(BLURRED_PRINT_CLAUSE)
       : `${framed} ${BLURRED_PRINT_CLAUSE}`;
@@ -6557,11 +6577,23 @@ const APP_SCREEN =
  * The phone screen of an app shot (2026-09-30, the operator: "facebook marketplace in an app" — no
  * logo, no brand): a plain buy-and-sell app, a grid of item photos, nothing readable.
  */
+/**
+ * How a device sits in the picture. Asked only for "a phone showing an app", the picture maker
+ * stands the phone upright on a table or floor with nothing holding it (practice jobs 363 and
+ * 369, six pictures) — and "never balanced on its edge" alone did not stop it, so the picture is
+ * told where the phone IS.
+ */
+export const DEVICE_RESTS =
+  "A phone or tablet is held in a person's hand, or lies flat on its back on a surface and is " +
+  "photographed looking down at it; a laptop sits open on its base. It never stands upright by " +
+  "itself, balanced on its own edge.";
 export const REAL_APP_SCREEN_CLAUSE =
   "The phone's screen shows that app exactly as it really looks, as the EXACT LOOK describes — its " +
   "real colours and layout — with its logo and every word, name and price small, soft and " +
   "unreadable. " +
-  "The device is an ordinary real phone, tablet or laptop, held in a hand or lying on a surface — " +
+  "The device is an ordinary real phone, tablet or laptop. " +
+  DEVICE_RESTS +
+  " It is " +
   "never built from, framed by or set inside any other object; things for sale appear only as " +
   "small photos on its screen.";
 /**
@@ -6601,7 +6633,9 @@ export const APP_SCREEN_CLAUSE =
   "The phone's screen shows a simple buy-and-sell app: a grid of small photos of items for sale " +
   "on plain soft-coloured panels — no logo, no brand, no app name, and no readable words, letters, " +
   "numbers or prices anywhere on the screen. The device is an ordinary real phone, tablet or " +
-  "laptop, held in a hand or lying on a surface — never built from, framed by or set inside any " +
+  "laptop. " +
+  DEVICE_RESTS +
+  " It is never built from, framed by or set inside any " +
   "other object; things for sale appear only as small photos on its screen.";
 
 /**
@@ -6673,7 +6707,9 @@ export function memoryClause(scene: StoryboardScene): string {
     `never copy the reference's framing.${view} If the words say it is further along (being made, ` +
     `finished, changed) or that something has been done or added to it (carved, engraved, ` +
     `painted, fitted with a part), show the same piece WITH that — the reference is how it ` +
-    `looked before.` +
+    `looked before. It is ONE thing: when the words open, fill, empty, tilt or use it, that same ` +
+    `one is shown that way — never a second copy or a spare part of it beside, on or inside the ` +
+    `first.` +
     host
   );
 }
@@ -6991,6 +7027,24 @@ export function guardPitchVisuals(
       !cleanPitchVisual(s.visualPrompt)
     ) {
       s.visualPrompt = genericCtaBrollFor(scenes, i, videoSubject);
+      touched = true;
+    }
+    // What the picture MUST show leads its prompt (`subjectLead`), so it is held to the same rule
+    // as the prompt itself: practice job 370's scan window had a clean prompt and a description
+    // asking for "a smartphone … pointed at a square black-and-white QR code", and the picture
+    // behind the real card showed a phone, a made-up QR code and hands. A literal one goes, with
+    // the person it asked for — the scan window is person-free.
+    if (
+      pitch &&
+      !s.hostPresent &&
+      !s.coverHero &&
+      !s.assetImageUrl &&
+      s.showSubject?.trim() &&
+      !cleanPitchVisual(s.showSubject)
+    ) {
+      s.showSubject = undefined;
+      s.pictureText = undefined;
+      if (s.qrHero) s.humanPresent = undefined;
       touched = true;
     }
     if (touched) changed.push(s.index);
