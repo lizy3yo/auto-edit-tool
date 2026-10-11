@@ -29,6 +29,32 @@ export interface LipsyncParams {
   imageUrl: string;
   /** Our own TTS narration (R2 URL). Passing audio bypasses HeyGen's voices entirely. */
   audioUrl: string;
+  /** How the host's body should move, in plain words (`hostMotionPrompt`); none when omitted. */
+  motionPrompt?: string;
+}
+
+/**
+ * How the host's body should move, sent to HeyGen as `motion_prompt`: the host stays where the
+ * PHOTO puts them — same spot, same size — and only talks. Left to itself Avatar IV moves a
+ * seated host toward and away from the camera through a take, which reads as a zoom on the
+ * avatar. Measured 2026-10-11 on the same line, photo and voice, one render each: host size
+ * change 6.8% → 0.4% and 3.5% → 1.5% on two hosts that zoomed, 0.8% → 0.9% on one that did not;
+ * the room still in all three; faces and mouths as lively as before. No channel or host is named.
+ */
+export const HOST_MOTION_SENTENCE =
+  "The person stays seated in the same spot, at the same distance from the camera, for the whole clip. " +
+  "No leaning toward or away from the camera, no moving closer, no camera movement and no zoom. " +
+  "Only small natural head movements and facial expressions while speaking.";
+
+/**
+ * The motion sentence for a host render: `HOST_MOTION_SENTENCE`, or `HEYGEN_MOTION_PROMPT` when
+ * set; `HEYGEN_MOTION_PROMPT=0` sends none — the request made before this existed. The field is
+ * top-level, like `expressiveness` (accepted live, 2026-10-11).
+ */
+export function hostMotionPrompt(): string | undefined {
+  const set = process.env.HEYGEN_MOTION_PROMPT?.trim();
+  if (set === "0") return undefined;
+  return set || HOST_MOTION_SENTENCE;
 }
 
 /**
@@ -450,6 +476,7 @@ export class HeygenLipsyncAdapter {
     let notReadyRetries = 0;
     const MAX_NOT_READY_RETRIES = 20; // × 15s = 5 min
     const callbackUrl = heygenCallbackUrl();
+    const motionPrompt = params.motionPrompt?.trim() || hostMotionPrompt();
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
@@ -468,6 +495,7 @@ export class HeygenLipsyncAdapter {
             resolution: "1080p",
             aspect_ratio: "16:9",
             title: "longform host clip",
+            ...(motionPrompt ? { motion_prompt: motionPrompt } : {}),
             // Per-request completion callback (no account-level webhook endpoint to register, so
             // nothing to provision per HeyGen key). Omitted entirely when unconfigured.
             ...(callbackUrl ? { callback_url: callbackUrl } : {}),

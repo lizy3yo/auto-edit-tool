@@ -1,9 +1,23 @@
-import { describe, it, expect } from "vitest";
-import { bodyPieces, hostArea, personMatte, solidHost, knotExpr, needsSteadying, steadyFilter, trackPose, type CameraPose } from "./hostSteady";
+import { describe, it, expect, vi } from "vitest";
+import { bodyPieces, cameraTravelPx, hostArea, steadyHostClip, personMatte, solidHost, knotExpr, needsSteadying, steadyFilter, trackPose, type CameraPose } from "./hostSteady";
 
 const still = (n: number): CameraPose[] => Array.from({ length: n }, () => ({ s: 1, dx: 0, dy: 0 }));
 
 describe("host steadying", () => {
+  it("measures a camera path as one number, so a correction that is not steadier is dropped", () => {
+    expect(cameraTravelPx(still(50))).toBe(0);
+    // Job 353: a take went in at 0.15% zoom and came out of the correction at 1.4% with a 7 px slide.
+    const rendered = still(100).map((p, i) => ({ ...p, s: 1 + 0.00075 * Math.sin(i / 8) }));
+    const corrected = still(100).map((p, i) => ({
+      ...p,
+      s: 1 - 0.007 * Math.abs(Math.sin(i / 5)),
+      dx: -1.8 * Math.abs(Math.sin(i / 5)),
+    }));
+    expect(cameraTravelPx(corrected)).toBeGreaterThan(cameraTravelPx(rendered));
+    // A slide counts as much as a zoom: 1 analysis pixel is 4 at 1920 wide.
+    expect(cameraTravelPx(still(10).map((p, i) => ({ ...p, dy: i === 5 ? 1 : 0 })))).toBeCloseTo(4);
+  });
+
   it("leaves a still camera alone and corrects a breathing one", () => {
     expect(needsSteadying(still(50))).toBe(false);
     // Ruth's job 182: ~1% zoom in and out every few seconds.
@@ -209,5 +223,16 @@ describe("the room is still up to the host's edge in every frame (2026-09-30)", 
     const elsewhere = new Uint8Array(w * h);
     for (let y = 0; y < h; y++) for (let x = 140; x < w; x++) elsewhere[y * w + x] = 1;
     expect(personMatte(elsewhere, persons, frames, w, h, w, h)).toBeNull();
+  });
+});
+
+describe("a host take is used as HeyGen made it", () => {
+  it("comes back untouched: no camera fix, no frozen room, no crop", async () => {
+    // 2026-10-11: freezing the room was where the shimmer, the frozen patches and the room
+    // jumping at a cut came from. The buffer is not even decoded.
+    vi.stubEnv("CORNER_MARK", "0");
+    const take = Buffer.from("not a video: a host take is never opened");
+    expect(await steadyHostClip(take, "host take")).toBe(take);
+    vi.unstubAllEnvs();
   });
 });

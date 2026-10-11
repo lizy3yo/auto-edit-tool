@@ -206,6 +206,22 @@ export function needsSteadying(poses: CameraPose[], width = 1920): boolean {
   );
 }
 
+/**
+ * How far a camera path moves the picture, in pixels at `width`: the zoom's travel at the frame's
+ * edge or the slide, whichever is larger. One number, so a corrected clip can be compared with the
+ * clip it came from. Pure.
+ */
+export function cameraTravelPx(poses: CameraPose[], width = 1920): number {
+  if (poses.length < 2) return 0;
+  const k = width / AW;
+  const range = (v: number[]) => Math.max(...v) - Math.min(...v);
+  return Math.max(
+    (range(poses.map(p => p.s)) * width) / 2,
+    range(poses.map(p => p.dx * k)),
+    range(poses.map(p => p.dy * k))
+  );
+}
+
 /** A piecewise-linear ffmpeg expression in the input frame number `in`, through `knots`. Pure. */
 export function knotExpr(knots: { at: number; v: number }[]): string {
   if (knots.length === 1) return knots[0].v.toFixed(5);
@@ -696,16 +712,29 @@ async function freezeRoom(dir: string, src: string): Promise<string> {
 }
 
 /**
- * The clip with its camera held still and its room frozen, or the same buffer when the camera
- * already was still (or anything failed). `label` names the scene in the log.
+ * A provider clip made ready for the film. `label` names the scene in the log.
+ *
+ * A HOST take is used AS HEYGEN MADE IT (2026-10-11, the operator: "the zoom is caused by HeyGen
+ * and the glitch is caused by the still room"). The camera fix and the room freeze below ran on
+ * 20 of 63 stored host takes while HeyGen's room had really moved in 5, and freezing the room is
+ * where four glitches came from: a shimmer at the host's edge, a patch of the host frozen with
+ * the room, things beside the host half frozen, and the room jumping at a cut because each take
+ * got its own crop and its own frozen room. The movement itself is now asked for at the source
+ * (`hostMotionPrompt` in heygen-lipsync.ts), so the host stays where the photo puts them and
+ * nothing here moves the picture. The freeze itself was switched off on 2026-10-10 (the operator:
+ * host takes read as glitchy with it on); since 2026-10-11 the camera fix is not applied to a host
+ * take either, because its per-take crop is what made the room jump at a cut. Nothing is removed —
+ * `freezeRoom`, `personMatte` and `hostArea` are all still here — and `HOST_FREEZE_ROOM=1`
+ * brings the camera fix and the freeze back together.
+ * B-roll (`freezeRoom: false`) keeps its camera fix, as before.
  */
 export async function steadyHostClip(
   clip: Buffer,
   label = "host clip",
   /**
-   * Also freeze the room around the host (default). B-roll passes false: the camera is still
-   * corrected, but a handled cloth or board is not a "room" — a plain one partly frozen would
-   * tear the same way the plain shirt did.
+   * False for B-ROLL: the camera is corrected and nothing is frozen (a handled cloth or board is
+   * not a "room" — a plain one partly frozen would tear the same way the plain shirt did).
+   * Otherwise the clip is a HOST take: left as rendered unless `HOST_FREEZE_ROOM=1`.
    */
   opts: { freezeRoom?: boolean } = {}
 ): Promise<Buffer> {
@@ -714,6 +743,7 @@ export async function steadyHostClip(
   // A clip with no mark comes back as the same buffer, so nothing below changes for it.
   clip = await removeCornerMark(clip, label);
   if (process.env.HOST_STEADY === "0") return clip;
+  if (opts.freezeRoom !== false && process.env.HOST_FREEZE_ROOM !== "1") return clip;
   const dir = await mkdtemp(path.join(tmpdir(), "host-steady-"));
   try {
     let src = path.join(dir, "in.mp4");
@@ -723,6 +753,14 @@ export async function steadyHostClip(
     if (!needsSteadying(poses)) return clip;
     const before = range(poses);
     let pass = 0;
+    // DO NO HARM: the steadiest version seen so far, starting with the clip as rendered. The
+    // tracker follows the room, and on a close host it can follow the host instead — the
+    // "correction" then moves the whole picture against the host's sway. A real HeyGen take
+    // (job 353, two host beats) went in at 0.15-0.30% zoom and came out at 1.3-1.5% with a 7 px
+    // wobble. A pass that does not leave the picture steadier is dropped, and so is the clip's
+    // room freeze: nothing is done to a clip this cannot improve.
+    const rendered = src;
+    let best = { src, poses, travel: cameraTravelPx(poses) };
     // Correct, measure the result, and correct again while the room still moves.
     while (pass < MAX_PASSES && needsSteadying(poses)) {
       pass++;
@@ -737,12 +775,21 @@ export async function steadyHostClip(
       );
       src = out;
       poses = await measureCameraPath(src);
+      const travel = cameraTravelPx(poses);
+      if (travel >= best.travel) break;
+      best = { src, poses, travel };
     }
-    // The room freeze is DISABLED (2026-10-10, the operator's call: host takes read as glitchy
-    // with it on). Nothing is removed — `freezeRoom`, `personMatte` and `hostArea` are all still
-    // here — and `HOST_FREEZE_ROOM=1` turns it back on. The camera correction above still runs.
+    if (best.src === rendered) {
+      console.log(
+        `[HostSteady] ${label}: kept as rendered — correcting it did not make it steadier ` +
+          `(camera zoom ${(before * 100).toFixed(2)}% → ${(range(poses) * 100).toFixed(2)}%)`
+      );
+      return clip;
+    }
+    src = best.src;
+    poses = best.poses;
     const frozen =
-      process.env.HOST_FREEZE_ROOM !== "1" || opts.freezeRoom === false
+      opts.freezeRoom === false
         ? src
         : await freezeRoom(dir, src);
     console.log(

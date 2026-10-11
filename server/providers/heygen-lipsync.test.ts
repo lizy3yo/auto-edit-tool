@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   HeygenLipsyncAdapter,
+  HOST_MOTION_SENTENCE,
   heygenSlotsFor,
   notifyHeygenVideo,
   waitForHeygenVideo,
@@ -132,6 +133,31 @@ describe("HeygenLipsyncAdapter.submitLipsync", () => {
     // audio_url drives lip-sync — never a HeyGen voice or script
     expect("voice_id" in videoCall.body).toBe(false);
     expect("script" in videoCall.body).toBe(false);
+    // The host is asked to stay where the photo puts them.
+    expect(videoCall.body.motion_prompt).toBe(HOST_MOTION_SENTENCE);
+    expect(HOST_MOTION_SENTENCE).toMatch(/same spot, at the same distance from the camera/);
+  });
+
+  it("takes another motion sentence when one is given or set, and none when switched off", async () => {
+    const calls = installFetchMock({});
+    const adapter = new HeygenLipsyncAdapter("key");
+    await adapter.submitLipsync({
+      imageUrl: freshImageUrl(),
+      audioUrl: "https://cdn.example.com/a.mp3",
+      motionPrompt: "stays seated at the same distance from the camera",
+    });
+    const body = () => calls.filter(c => c.url.endsWith("/videos") && c.method === "POST").at(-1)!.body;
+    expect(body().motion_prompt).toBe("stays seated at the same distance from the camera");
+
+    vi.stubEnv("HEYGEN_MOTION_PROMPT", "  holds still  ");
+    await adapter.submitLipsync({ imageUrl: freshImageUrl(), audioUrl: "https://cdn.example.com/b.mp3" });
+    expect(body().motion_prompt).toBe("holds still");
+
+    // Off: the request made before the sentence existed.
+    vi.stubEnv("HEYGEN_MOTION_PROMPT", "0");
+    await adapter.submitLipsync({ imageUrl: freshImageUrl(), audioUrl: "https://cdn.example.com/c.mp3" });
+    expect("motion_prompt" in body()).toBe(false);
+    vi.unstubAllEnvs();
   });
 
   it("dedupes concurrent submits for the same photo to one avatar registration", async () => {
