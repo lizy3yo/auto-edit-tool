@@ -370,15 +370,22 @@ export const channelHostPhotos = mysqlTable("channel_host_photos", {
    */
   isSelected: boolean("isSelected").default(true).notNull(),
   /**
-   * RETIRED 2026-10-05, kept on purpose. These three held a host photo's "phone look" — a remade
-   * copy of the photo and the switch between it and the original. The feature is removed: every
-   * video, HeyGen test and VSL uses `imageUrl` as uploaded, and nothing reads or writes these any
-   * more. The columns stay so the copies already made are not lost; drop them in a later
-   * migration once nobody wants them back.
+   * The PHONE-LOOK version of `imageUrl` (2026-09-28): the same host in the same room, remade as a
+   * frame of a video they recorded on a propped-up phone (`server/hostPhoneLook.ts`). It is what
+   * videos and the HeyGen test use by default — `hostPhotoUrl` in shared/hostPhotoLook.ts is the
+   * one rule. Null until made (made once, in the background, when the photo is first listed).
    */
   phoneImageUrl: varchar("phoneImageUrl", { length: 512 }),
+  /** The operator switched this photo back to the ORIGINAL — videos use `imageUrl` as uploaded. */
   useOriginal: boolean("useOriginal").default(false).notNull(),
+  /** Why the phone look could not be made — the photo then renders as the original. */
   phoneLookError: varchar("phoneLookError", { length: 255 }),
+  /**
+   * Which recipe made `phoneImageUrl` / recorded `phoneLookError` (`PHONE_LOOK_VERSION` in
+   * shared/hostPhotoLook.ts). 0 = the 2026-09-28 look, which moved the host in the frame: those
+   * copies stay on the row, are never rendered, and are remade by the current recipe.
+   */
+  phoneLookVersion: int("phoneLookVersion").default(0).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });

@@ -123,6 +123,7 @@ describe("every changing route asks who created it", () => {
       "create", // a new channel, stamped with its maker
       "start", // a new HeyGen test or VSL run, the caller's own
       "handBack", // releases a takeover, which a guest can never hold
+      "phoneLook", // a phone copy of a photo the caller just uploaded to a test — no row changes
     ]);
     const unchecked = routes
       .filter(

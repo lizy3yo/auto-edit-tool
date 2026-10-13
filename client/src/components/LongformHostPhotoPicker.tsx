@@ -5,6 +5,7 @@ import { Label } from "@/components/ui/label";
 import { hostAngleGuideWarning } from "@shared/hostMinutes";
 import { Check, Loader2, Star } from "lucide-react";
 import { toast } from "sonner";
+import { hostPhotoLookState, hostPhotoUrl, usablePhoneLook } from "@shared/hostPhotoLook";
 import { HostPhotoTile } from "./HostPhotoTile";
 import { HostPhotoPreview } from "./HostPhotoPreview";
 import { StepIssue } from "./StepIssues";
@@ -31,7 +32,10 @@ import { StepIssue } from "./StepIssues";
  * reads as a random cut. The picker warns there and the job records the same line; nothing is
  * unticked, since an operator may want the variety on purpose.
  *
- * Each tile shows the photo as uploaded, which is the picture the video uses.
+ * Each tile shows the picture the video will actually use: the photo's PHONE LOOK by default
+ * (shared/hostPhotoLook.ts, the operator's 2026-09-28 call), with a switch back to the original.
+ * The switch is saved on the channel like a tick. While a phone look is still being made the
+ * list refreshes itself, so the tile changes the moment it lands.
  */
 export function LongformHostPhotoPicker({
   channelKey,
@@ -55,7 +59,12 @@ export function LongformHostPhotoPicker({
   const listInput = { channelKey, activeOnly: true } as const;
   const { data: photos, isLoading } = trpc.channelHostPhoto.list.useQuery(
     listInput,
-    { enabled: !!channelKey }
+    {
+      enabled: !!channelKey,
+      // A phone look being made lands in the background — look again until none is left.
+      refetchInterval: q =>
+        (q.state.data ?? []).some(p => hostPhotoLookState(p) === "making") ? 5_000 : false,
+    }
   );
 
   const setSelected = trpc.channelHostPhoto.setSelected.useMutation({
@@ -68,9 +77,13 @@ export function LongformHostPhotoPicker({
     onSuccess: () => utils.channelHostPhoto.list.invalidate(),
     onError: err => toast.error(err.message),
   });
+  const setLook = trpc.channelHostPhoto.setLook.useMutation({
+    onSuccess: rows => utils.channelHostPhoto.list.setData(listInput, rows),
+    onError: err => toast.error(err.message),
+  });
 
   const rows = photos ?? [];
-  // The photo open in the big preview.
+  // The photo open in the big preview — read from the live list so a switch inside it shows.
   const [previewId, setPreviewId] = useState<number | null>(null);
   const previewRow = rows.find(p => p.id === previewId) ?? null;
   // A channel with nothing ticked can only be one whose rows predate the tick column; the
@@ -106,7 +119,7 @@ export function LongformHostPhotoPicker({
       </StepIssue>
     );
 
-  const busy = setSelected.isPending || setPrimary.isPending;
+  const busy = setSelected.isPending || setPrimary.isPending || setLook.isPending;
   const locked = disabled || busy || !canEdit;
 
   const toggle = (id: number) => {
@@ -124,6 +137,15 @@ export function LongformHostPhotoPicker({
   return (
     <div className="space-y-2">
       <Label className="text-xs">Host photos</Label>
+      <p className="text-[11px] text-muted-foreground">
+        Which camera angles this channel&apos;s videos are shot from. The first
+        is the primary — it opens the film and carries the split-screen scenes.
+        The rest take turns with it, so every ticked photo is seen about as
+        often. Ticks and the primary are saved to the channel, for everyone.
+        Each photo is used in its phone look — the same person and room, made
+        to look like a video recorded on a phone. Switch one to Original to use
+        it as uploaded.
+      </p>
       <div className="flex flex-wrap gap-2">
         {rows.map((p, i) => {
           const on = chosenIds.includes(p.id);
@@ -133,7 +155,7 @@ export function LongformHostPhotoPicker({
           return (
             <HostPhotoTile
               key={p.id}
-              imageUrl={p.imageUrl}
+              imageUrl={hostPhotoUrl(p)}
               active={on}
               disabled={locked}
               onPictureClick={() => toggle(p.id)}
@@ -174,14 +196,28 @@ export function LongformHostPhotoPicker({
                   </div>
                 )
               }
+              lookState={hostPhotoLookState(p)}
+              onLookChange={useOriginal => setLook.mutate({ channelKey, id: p.id, useOriginal })}
             />
           );
         })}
       </div>
       <HostPhotoPreview
-        imageUrl={previewRow?.imageUrl ?? null}
+        photo={
+          previewRow
+            ? {
+                original: previewRow.imageUrl,
+                phone: usablePhoneLook(previewRow),
+                state: hostPhotoLookState(previewRow),
+              }
+            : null
+        }
         title={previewRow && chosen[0]?.id === previewRow.id ? "Primary host photo" : "Host photo"}
         onOpenChange={open => !open && setPreviewId(null)}
+        disabled={locked}
+        onChange={useOriginal =>
+          previewRow && setLook.mutate({ channelKey, id: previewRow.id, useOriginal })
+        }
       />
       {/* Host plates are generated per look PER ANGLE, so the image cost of ticking another
           photo is visible here rather than discovered on the invoice. */}

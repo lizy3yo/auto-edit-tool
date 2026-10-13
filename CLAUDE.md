@@ -518,24 +518,59 @@ Express · tRPC · Drizzle · MySQL.
   (which add host beats late) and demotes the most redundant check-in, never an anchor. The
   storyboard prompt is unchanged: it still writes host at the ramp's shares, which is what gives
   the planner candidates near every target. Harness: `client/__harness/host-minutes.html`
-- **Host photos are used AS UPLOADED** (2026-10-05, the operator: "we can remove the phone
-  itself to all in this system"). From 2026-09-28 each library photo carried a "phone look" — the
-  same person and room remade by gpt-image-2 as a frame of a phone video — used by default, with
-  a Phone / Original switch on every tile. It is REMOVED everywhere: the picker, Admin, the HeyGen
-  test and the Upsell VSL show and use `imageUrl`, `channelHostPhotoUrls` returns the uploaded
-  photos with no wait, and nothing makes a copy (one paid image and one Sonnet call per photo
-  less). Gone: `server/hostPhoneLook.ts`, `shared/hostPhotoLook.ts`, `HostPhotoLookSwitch.tsx`,
-  the routes `channelHostPhoto.setLook` / `remakePhoneLook` and `heygenTest.phoneLook`. KEPT ON
-  PURPOSE: the columns `channel_host_photos.phoneImageUrl` / `useOriginal` / `phoneLookError`
-  (migration 0014) and the copies already made — unread, so nothing is lost; drop them in a
-  later migration. Do not confuse it with the FILM's phone finish (`phoneLookFilter`,
-  `amateurSettingClause`, `PHONE_LOOK=0`), which is a different feature and is unchanged. A
-  photo opens BIG (`HostPhotoPreview.tsx`) from a thumbnail in Admin or the HeyGen test, or the
-  magnifier on a picker tile (the tile itself ticks). The picker, the HeyGen test and the VSL
-  draw the SAME tile (`HostPhotoTile.tsx`: magnifier, corner badge — a tick or a remove button —
-  label row), so the pages cannot drift apart. The HeyGen test's clips go through
-  `steadyHostClip` like a film's, so the test shows what a video will. Harnesses:
-  `host-photos.html`, `heygen-test.html`
+- **Every host photo has a PHONE LOOK, locked to the photo's framing** (`server/hostPhoneLook.ts`,
+  `shared/hostPhotoLook.ts`, v2 2026-10-11). HeyGen keeps the look of the photo it animates, so a
+  studio-lit, retouched, blurred-background portrait stays "AI" under any finish. The review of the
+  competitors' hosts (Steve Cooper, Elias Yoder, Bertha Ramirez) measured what theirs have: flat
+  room light, weak colour (20-24 against our 30-38), soft phone-video detail (115-360 against
+  349-849), the room in focus, unretouched skin. Each library photo gets a copy with THAT and
+  nothing else changed — same person, age, make-up, clothes, room, position and size (the
+  operator's "in between" pick of three samples: real skin and dull light, not older, lipstick
+  kept). It is the DEFAULT everywhere (picker, every video, HeyGen test, VSL) with a Phone /
+  Original switch on every tile (`HostPhotoLookSwitch.tsx`, `channelHostPhoto.setLook`) and
+  "Make phone look again" in Admin (`remakePhoneLook`). HISTORY: v1 (2026-09-28) RE-SHOT the host
+  "from a propped-up phone, a little off-centre, with plenty of the room" — Frederick came back 4%
+  off and 13% smaller — and was removed on 2026-10-05; the switch, routes and screens are that
+  feature brought back, the recipe and the checks are new. Its copies are still on the rows and
+  are NEVER rendered: a copy counts only when `phoneLookVersion === PHONE_LOOK_VERSION` (migration
+  0018; bump it when the recipe changes the look), read through `usablePhoneLook` /
+  `phoneLookFailure` — never `phoneImageUrl` directly. NOTHING IS TAKEN ON TRUST
+  (`makePhoneLookPhoto`): the image model (gpt-image-2 through APIMART, the Edit key else the first
+  account's) follows "do not move or resize" to a few percent, so each draw is LINED UP — the two
+  pictures are laid over each other (`server/pictureRegister.ts`: the copy tried at every size
+  85-115% and every nearby position on small blurred greyscale frames, brightness and contrast
+  taken out, matched over the middle of the frame) and the copy scaled and shifted onto the
+  photo (`planFramingLock`; a copy that came back bigger leaves a strip filled by mirroring its
+  own edge, refused past `MAX_MIRRORED_EDGE` 6%) — RE-MEASURED (`framingFault`: 1% shift, 1.5%
+  size, and a match of at least `MIN_MATCH` 0.87 — good copies read 0.95-0.98, v1's re-shot ones
+  0.77, a draft that aged Scarlett 0.79, two different hosts 0.51). NOT A FACE DETECTOR: the
+  first build moved the copy's `pico.ts` face box onto the original's, and that box says where
+  a face is, not how big — 371 / 406 / 419 px on one photo by scan size alone — so Brenda's
+  matching copy read "22% bigger" and Dale (glasses, beard) had "no face"; two good copies
+  refused twice each. Then held to QUALITY (`qualityFault` on `measureLook`:
+  colour and detail at the competitors' ceiling or clearly under the photo's own original,
+  whichever is higher, since a navy tee or a striped top carries colour and detail of its own;
+  floors against a smear; and a photo whose room is blurred (its own reading under 15 —
+  Frederick 10, Scarlett 12, Brenda 7; NOT its share of the host's, which called Dale's barn wall
+  at 25 blurred beside a bearded face at 1146) must come back with it in focus — the first real
+  run returned Frederick's garage as soft as it went in and passed everything else). A draw that fails a check is drawn once more (`PHONE_LOOK_DRAWS` 2, a paid image each;
+  a provider or storage failure is not retried); then the photo keeps its original and the tile
+  says why. A failed remake leaves the copy it replaced on the row. Works on the photo's own
+  shape (`canvasFor`, `nearestShape`); under 480 px is refused. NOT MEASURED: whether the face
+  still looks like the host — a person sees both on the tile. HEYGEN ACCEPTS THEM: a 6-10 s test clip from the original and
+  from the v2 copy of Brenda, Dale, Frederick, Hank and Scarlett all rendered (2026-10-11; HeyGen
+  refused one v1 copy, `avatar_not_usable` — a refused copy takes the "Photo refused" road and
+  the fix is the switch). Made once per photo, in the background, when
+  first listed or saved, two at a time; a starting video waits up to 150 s for a missing one, then
+  renders the original. THE HEYGEN TEST PAGE can run BOTH looks of one photo ("Both looks" on the
+  tile, `testPhotoUrls`): two clips, same script and voice, each card labelled "Phone look" /
+  "Original photo" (`isPhoneLookUrl`, by the copy's storage key `host-photos/phone-`). Do not
+  confuse it with the FILM's phone finish (`phoneLookFilter`, `amateurSettingClause`,
+  `PHONE_LOOK=0`), a different feature, unchanged. A photo opens BIG (`HostPhotoPreview.tsx`,
+  original beside phone look) from a thumbnail in Admin or the HeyGen test, or the magnifier on a
+  picker tile (the tile itself ticks). The picker, the HeyGen test and the VSL draw the SAME tile
+  (`HostPhotoTile.tsx`), so the pages cannot drift apart. The HeyGen test's clips go through
+  `steadyHostClip` like a film's. Harnesses: `host-photos.html`, `heygen-test.html`
 - `server/hostPlate.ts` — **provider-independent**. The lip-sync model animates the image it
   is handed and never changes the setting, so `HOST_PLATES=1` generates a 16:9 plate of the host
   IN each beat's setting (host photo as identity reference) and syncs from that instead of the
@@ -1584,7 +1619,7 @@ Express · tRPC · Drizzle · MySQL.
   `vsl.list` filters `kind` + `channelKey`, the test page lists only `kind = "test"`, while the
   account pick and `resumeHeygenTests` read every kind), files live under
   `vsl/<channelKey>/<batchId>/` (`heygenTestStorageDir`), exactly one photo (the channel's primary
-  by default, as uploaded), and the book the buyer bought — stored as
+  by default, in the look its switch says), and the book the buyer bought — stored as
   the TITLE the host says, not an id, because CTA books are often uploaded per video and are not
   in `books`: the form is ONE dropdown (`BookPicker`): the channel's books with their covers, a search box,
   and a `Use "…"` row for a typed title, which is used for that VSL only and never added to `books`. The
