@@ -293,6 +293,22 @@ import {
   HEYGEN_TEST_RUNS_PER_PAGE,
 } from "../shared/heygenTest";
 import { VSL_MAX_BOOK_TITLE } from "../shared/vsl";
+import {
+  DubCtaInputError,
+  getDubLanguages,
+  listDubCta,
+  saveDubBook,
+  saveDubScript,
+  setDubLanguages,
+  startDubBrollRedraw,
+  startDubCtas,
+  writeDubScript,
+} from "./dubCta";
+import {
+  channelDubVoicesError,
+  cleanChannelDubVoices,
+  dubLanguagesError,
+} from "../shared/dubCta";
 
 /** Decrypt a stored provider API key. */
 async function getProviderApiKey(provider: any): Promise<string> {
@@ -618,6 +634,9 @@ const channelConfigRouter = router({
         // render is set to voice on MiniMax. Blank ⇒ no MiniMax option for this channel.
         minimaxVoiceId: z.string().optional(),
         minimaxVoiceName: z.string().optional(),
+        // The channel's own dub voice per language (`{ [code]: voiceId }`); a blank entry
+        // falls back to the language default. Omitted ⇒ left as stored.
+        dubVoices: z.record(z.string(), z.string().max(64)).optional(),
         ttsModel: z.string().optional(),
         ttsSpeed: ttsSpeedInput,
         ttsVolume: ttsVolumeInput,
@@ -627,9 +646,16 @@ const channelConfigRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const { channelKey, ...data } = input;
+      const { channelKey, dubVoices, ...rest } = input;
       await assertChannelEditable(ctx.user, channelKey);
-      await upsertChannelConfig(channelKey, data);
+      if (dubVoices) {
+        const error = channelDubVoicesError(dubVoices);
+        if (error) throw new TRPCError({ code: "BAD_REQUEST", message: error });
+      }
+      await upsertChannelConfig(channelKey, {
+        ...rest,
+        ...(dubVoices ? { dubVoices: cleanChannelDubVoices(dubVoices) } : {}),
+      });
       return { success: true };
     }),
 
@@ -1202,7 +1228,7 @@ const heygenTestRouter = router({
     }),
 });
 
-// ─── Upsell VSL (the "Upsell VSL" page, /vsl) ───
+// ─── Upsell VSL (the Add-ons page's "Upsell VSL" tab, /add-ons?tab=vsl) ───
 // A channel's host thanking a buyer on the upsell page (`shared/vsl.ts`). Runs on the HeyGen
 // test's engine as `kind = "vsl"`, so accounts, retry, rename and delete are the `heygenTest`
 // routes; only what a VSL adds is here. Same gate: every clip is a paid HeyGen render.
@@ -1291,6 +1317,147 @@ const vslRouter = router({
     }),
 });
 
+// ─── Dub CTAs (the Add-ons page's "Dub CTAs" tab, /add-ons?tab=dub) ───
+// A channel's faceless call to action in another language, mid-video and end-of-video, for the
+// dubbing team (`shared/dubCta.ts`, `server/dubCta.ts`). Each language has a default voice for
+// every channel (admin only), which a channel can override with its own (`channel_configs.
+// dubVoices`, Admin → Channels); the books and clips are per channel.
+const dubCtaRouter = router({
+  /** The languages and their voices. */
+  languages: managerProcedure.query(() => getDubLanguages()),
+
+  /** Replace the language list (names and voice ids). */
+  setLanguages: adminProcedure
+    .input(
+      z.object({
+        languages: z
+          .array(
+            z.object({
+              code: z.string().min(1).max(32),
+              name: z.string().min(1).max(64),
+              voiceId: z.string().max(64),
+            })
+          )
+          .max(50),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const list = input.languages.map(l => ({
+        code: l.code,
+        name: l.name.trim(),
+        voiceId: l.voiceId.trim(),
+      }));
+      const error = dubLanguagesError(list);
+      if (error) throw new TRPCError({ code: "BAD_REQUEST", message: error });
+      await setDubLanguages(list);
+      return { ok: true };
+    }),
+
+  /** A channel's books and clips, every language. */
+  list: managerProcedure
+    .input(z.object({ channelKey: z.string().min(1).max(64) }))
+    .query(({ input }) => listDubCta(input.channelKey)),
+
+  /** Save the channel's book for one language. */
+  saveBook: managerProcedure
+    .input(
+      z.object({
+        channelKey: z.string().min(1).max(64),
+        language: z.string().min(1).max(32),
+        title: z.string().trim().min(1).max(255),
+        coverImageUrl: z.string().url().max(512).nullable(),
+        shopUrl: z.string().max(512).nullable(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertChannelEditable(ctx.user, input.channelKey);
+      await saveDubBook({ ...input, userId: ctx.user.id });
+      return { ok: true };
+    }),
+
+  /** Claude writes (or writes again) one language's script for one position, and saves it. */
+  writeScript: managerProcedure
+    .input(
+      z.object({
+        channelKey: z.string().min(1).max(64),
+        language: z.string().min(1).max(32),
+        position: z.enum(["mid", "end"]),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertChannelEditable(ctx.user, input.channelKey);
+      try {
+        return await writeDubScript({ ...input, userId: ctx.user.id });
+      } catch (err) {
+        if (err instanceof DubCtaInputError)
+          throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
+        throw err;
+      }
+    }),
+
+  /** Save a person's edit of one language's script for one position. */
+  saveScript: managerProcedure
+    .input(
+      z.object({
+        channelKey: z.string().min(1).max(64),
+        language: z.string().min(1).max(32),
+        position: z.enum(["mid", "end"]),
+        text: z.string().max(2000),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertChannelEditable(ctx.user, input.channelKey);
+      try {
+        return await saveDubScript({ ...input, userId: ctx.user.id });
+      } catch (err) {
+        if (err instanceof DubCtaInputError)
+          throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
+        throw err;
+      }
+    }),
+
+  /**
+   * Draw a channel's shared b-roll for one position again (the three pictures every language's
+   * clip of that position uses). The clips already made keep the old pictures until made again.
+   */
+  redrawBroll: managerProcedure
+    .input(
+      z.object({
+        channelKey: z.string().min(1).max(64),
+        position: z.enum(["mid", "end"]),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertChannelEditable(ctx.user, input.channelKey);
+      try {
+        return await startDubBrollRedraw({ ...input, userId: ctx.user.id });
+      } catch (err) {
+        if (err instanceof DubCtaInputError)
+          throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
+        throw err;
+      }
+    }),
+
+  /** Make (or make again) the mid and end clips for each language picked. */
+  start: managerProcedure
+    .input(
+      z.object({
+        channelKey: z.string().min(1).max(64),
+        languages: z.array(z.string().min(1).max(32)).min(1).max(50),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertChannelEditable(ctx.user, input.channelKey);
+      try {
+        return await startDubCtas({ ...input, userId: ctx.user.id });
+      } catch (err) {
+        if (err instanceof DubCtaInputError)
+          throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
+        throw err;
+      }
+    }),
+});
+
 /** How long a starting video waits for a photo's phone look before using the original. */
 const PHONE_LOOK_WAIT_MS = 150_000;
 
@@ -1329,6 +1496,29 @@ async function channelHostPhotoUrls(
   return looked
     .map(p => hostPhotoUrl(p))
     .filter((u): u is string => !!u);
+}
+
+/**
+ * Make `useOriginal` the channel's DEFAULT host photo look and switch every photo on it to that
+ * look. Only photos whose look changes are written; switching to the phone look makes a copy for
+ * a photo that has none yet (in the background, like the per-photo switch). A photo already on
+ * the phone look whose copy failed is left alone, so this never pays for a redraw nobody asked
+ * for. Returns how many photos changed.
+ */
+async function applyChannelLook(channelKey: string, useOriginal: boolean): Promise<number> {
+  await upsertChannelConfig(channelKey, { hostPhotoUseOriginal: useOriginal });
+  const changed = (await getChannelHostPhotos(channelKey, true)).filter(
+    p => p.useOriginal !== useOriginal
+  );
+  for (const p of changed) {
+    await updateChannelHostPhoto(p.id, {
+      useOriginal,
+      ...(!useOriginal ? { phoneLookError: null } : {}),
+    });
+    const wanted = { ...p, useOriginal: false, phoneLookError: null };
+    if (!useOriginal && !usablePhoneLook(wanted)) void ensurePhoneLook(wanted);
+  }
+  return changed.length;
 }
 
 const channelHostPhotoRouter = router({
@@ -1392,11 +1582,14 @@ const channelHostPhotoRouter = router({
         return { id: input.id };
       }
       const existing = await getChannelHostPhotos(input.channelKey, false);
+      const channel = await getChannelConfig(input.channelKey);
       const id = await createChannelHostPhoto({
         ...data,
         sortOrder: existing.length,
         isActive: true,
         createdBy: ctx.user.id,
+        // A new photo starts on the channel's default look (Host Photos → "Default look").
+        useOriginal: !!channel?.hostPhotoUseOriginal,
         // A channel's only photo stays ticked whatever was asked: videos need one angle, and
         // the last ticked photo can never be unticked (`canDeselectHostPhoto`).
         isSelected:
@@ -1433,6 +1626,51 @@ const channelHostPhotoRouter = router({
       const wanted = { ...row, useOriginal: false, phoneLookError: null };
       if (!input.useOriginal && !usablePhoneLook(wanted)) void ensurePhoneLook(wanted);
       return getChannelHostPhotos(input.channelKey, true);
+    }),
+
+  /** The channel's default look — the "Default look" switch at the top of Host Photos. */
+  defaultLook: approvedProcedure
+    .input(z.object({ channelKey: z.string().min(1) }))
+    .query(async ({ input }) => {
+      const channel = await getChannelConfig(input.channelKey);
+      return { useOriginal: !!channel?.hostPhotoUseOriginal };
+    }),
+
+  /**
+   * Set this channel's default look and switch every photo on it to that look. Open to every
+   * signed-in role, like the per-photo switch. Returns the channel's list.
+   */
+  setChannelLook: approvedProcedure
+    .input(z.object({ channelKey: z.string().min(1), useOriginal: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      await assertChannelEditable(ctx.user, input.channelKey);
+      if (!(await getChannelConfig(input.channelKey))) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "That channel no longer exists." });
+      }
+      const changed = await applyChannelLook(input.channelKey, input.useOriginal);
+      return { changed, photos: await getChannelHostPhotos(input.channelKey, true) };
+    }),
+
+  /**
+   * The same for EVERY channel the caller may change; a guest's own channels only — the rest
+   * are skipped and counted, never refused as a whole.
+   */
+  setAllChannelsLook: managerProcedure
+    .input(z.object({ useOriginal: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      let channels = 0;
+      let skipped = 0;
+      let photos = 0;
+      for (const c of await getAllChannelConfigs()) {
+        if (!c.displayName) continue; // not a listed channel (listAllChannels skips it too)
+        if (!(await canEditChannel(ctx.user, c.channelKey))) {
+          skipped++;
+          continue;
+        }
+        photos += await applyChannelLook(c.channelKey, input.useOriginal);
+        channels++;
+      }
+      return { channels, skipped, photos };
     }),
 
   /** Throw the phone look away and make a new one (a manager did not like the first). */
@@ -4570,6 +4808,7 @@ export const appRouter = router({
   channelHostPhoto: channelHostPhotoRouter,
   heygenTest: heygenTestRouter,
   vsl: vslRouter,
+  dubCta: dubCtaRouter,
   activity: activityRouter,
 });
 

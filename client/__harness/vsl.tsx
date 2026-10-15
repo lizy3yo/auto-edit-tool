@@ -263,6 +263,25 @@ window.fetch = (async (req: any, init?: RequestInit) => {
 }) as typeof window.fetch;
 (window as any).__kept = state.kept;
 
+/** The channel picker the Add-ons page puts above its tabs, keyed the same way. */
+function HarnessChannel() {
+  const [channelKey, setChannelKey] = useState("hank");
+  return (
+    <div className="space-y-4 p-6">
+      <select
+        className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+        value={channelKey}
+        onChange={e => setChannelKey(e.target.value)}
+      >
+        <option value="hank">Hank&apos;s Workshop</option>
+        <option value="granny-mae">Granny Mae</option>
+        <option value="no-voice">No voice yet</option>
+      </select>
+      <UpsellVsl key={channelKey} channelKey={channelKey} />
+    </div>
+  );
+}
+
 function Harness() {
   const [queryClient] = useState(() => new QueryClient());
   const [client] = useState(() =>
@@ -273,7 +292,7 @@ function Harness() {
   return (
     <trpc.Provider client={client} queryClient={queryClient}>
       <QueryClientProvider client={queryClient}>
-        <UpsellVsl />
+        <HarnessChannel />
         <Toaster />
       </QueryClientProvider>
     </trpc.Provider>

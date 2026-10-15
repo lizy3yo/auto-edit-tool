@@ -1,0 +1,1 @@
+ALTER TABLE `channel_configs` ADD `hostPhotoUseOriginal` boolean DEFAULT false NOT NULL;

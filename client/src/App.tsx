@@ -1,7 +1,7 @@
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
-import { Route, Switch, Link, useLocation } from "wouter";
+import { Redirect, Route, Switch, Link, useLocation } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import LongformPage from "./pages/LongformPage";
@@ -24,7 +24,7 @@ import {
   Settings,
   Tv,
   Video,
-  Megaphone,
+  PackagePlus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -35,12 +35,12 @@ import {
 import { lazy, Suspense, useEffect, useState } from "react";
 
 // Every page but the first is fetched when it is opened, so signing in on a slow connection
-// downloads the generator and not Admin, the test bench, the VSL page and the rest with it.
+// downloads the generator and not Admin, the test bench, Add-ons and the rest with it.
 const LibraryPage = lazy(() => import("./pages/LibraryPage"));
 const ChannelsPage = lazy(() => import("./pages/ChannelsPage"));
 const AdminPage = lazy(() => import("./pages/AdminPage"));
 const HeygenTestPage = lazy(() => import("./pages/HeygenTestPage"));
-const VslPage = lazy(() => import("./pages/VslPage"));
+const AddOnsPage = lazy(() => import("./pages/AddOnsPage"));
 const ActivityPage = lazy(() => import("./pages/ActivityPage"));
 
 function PageLoading() {
@@ -77,9 +77,9 @@ const NAV = [
     needs: "channels",
   },
   {
-    href: "/vsl",
-    label: "Upsell VSL",
-    icon: Megaphone,
+    href: "/add-ons",
+    label: "Add-ons",
+    icon: PackagePlus,
     needs: "channels",
   },
   {
@@ -420,8 +420,15 @@ function Router() {
           <Route path="/heygen-test">
             {canManageChannels ? <HeygenTestPage /> : <NotAuthorized />}
           </Route>
+          <Route path="/add-ons">
+            {canManageChannels ? <AddOnsPage /> : <NotAuthorized />}
+          </Route>
+          {/* The two pages Add-ons replaced — old links open their tab. */}
           <Route path="/vsl">
-            {canManageChannels ? <VslPage /> : <NotAuthorized />}
+            <Redirect to="/add-ons?tab=vsl" replace />
+          </Route>
+          <Route path="/dub-ctas">
+            <Redirect to="/add-ons?tab=dub" replace />
           </Route>
           <Route path="/activity">
             {canManageChannels ? <ActivityPage /> : <NotAuthorized />}

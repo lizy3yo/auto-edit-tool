@@ -1607,8 +1607,14 @@ Express · tRPC · Drizzle · MySQL.
   Spend is priced per clip on the card (audio seconds × `COST_HEYGEN_PER_SEC`) and is NOT
   in the Spend tab, which totals per-job `costUsage`. Refused in mock mode. UI
   `client/src/pages/HeygenTestPage.tsx` + `client/src/components/HeygenTest.tsx`, harness `client/__harness/heygen-test.html`
-- **Upsell VSL** (`shared/vsl.ts`, `/vsl`, nav entry "Upsell VSL" beside "HeyGen test", same
-  gate, 2026-10-03) — the host's ≤30 s clip for the top of the upsell page, right after a
+- **Add-ons** (`client/src/pages/AddOnsPage.tsx`, `/add-ons`, nav entry beside "HeyGen test",
+  admins and operations managers, 2026-10-15) — the two clips that sell a channel's book outside
+  its videos, on ONE page: one channel picker on top, then the "Upsell VSL" and "Dub CTAs" tabs
+  (`?tab=vsl|dub`; `/vsl` and `/dub-ctas` redirect there). Only the PAGE is shared: each tab keeps
+  its own engine, table and router, below. Both tabs stay mounted (a half-typed script survives a
+  look at the other) and are keyed by channel, so a new channel starts each afresh. The VSL tab
+  says when the channel has no voice instead of hiding it from the picker.
+- **Upsell VSL** (`shared/vsl.ts`, the Add-ons page's first tab, same gate, 2026-10-03) — the host's ≤30 s clip for the top of the upsell page, right after a
   purchase: thanks for the book, then the bundle offer. It is NOT a second engine: a VSL is a
   `heygen_tests` row with `kind = "vsl"` (migration 0015, plus `bookTitle` and `isPicked`), run by
   `startHeygenTest` — voicing, the 30 s cut, the production lip-sync call, the steadier, resume,
@@ -1634,6 +1640,69 @@ Express · tRPC · Drizzle · MySQL.
   one" (`vsl.pick` → `planVslPick`, pure) keeps ONE clip in use per channel and book and is a
   toggle; it is a label for people — nothing reads it yet, the upsell page is given the clip by
   Download MP4 / Copy link. Not in the Spend tab, like tests. Harness: `client/__harness/vsl.html`
+- **Dub CTAs** (`shared/dubCta.ts`, `server/dubCta.ts`, the Add-ons page's second tab,
+  same gate, 2026-10-14) — for the dubbing team (Notion "Classic Channels" SOP: a dubbed video is
+  the English picture under a new voice, and the editor's one cut is replacing the CTA). A
+  FACELESS call to action per channel, language and position (mid-video / end of video), ONE row
+  each in `dub_cta_clips` (migration 0019) — making it again replaces it, and a failed remake
+  leaves the last good clip on the row. Each language's BOOK (its own title, cover and link —
+  each language sells its own edition) is `dub_cta_books`, one per channel and language, set on
+  the page. The VOICE is one per language for every channel (the SOP's narrators), in Admin →
+  Dub voices (`app_settings.dub_cta_languages`, admin only; languages can be added), voiced on
+  69Labs `eleven_v4`. German ("Leo Marin") had no id anywhere — it is empty until entered.
+  A CHANNEL CAN HAVE ITS OWN VOICE PER LANGUAGE (2026-10-15, `channel_configs.dubVoices`,
+  migration 0020, Admin → Channels → "Dub voices", `ChannelDubVoices.tsx`), so its dubs sound
+  like its host: `dubVoiceFor` takes the channel's id for the language, else the default; a
+  blank field is the default. Staged with the channel form and listed in its Save review; the
+  upsert route validates (`channelDubVoicesError`) and stores trimmed, blanks dropped
+  (`cleanChannelDubVoices`). The Dub CTAs card says which it uses. Roger's (picked 2026-10-15 by
+  ear from the library samples): German Goetz `ieOJeyXoXR1MBO5OFAti`, Spanish Harold
+  `69cPH0Ypmuc48Y3Ty25o`, French David `fEtpdogpDkBrq53KdupV`, Japanese Jun
+  `JOcmGzB8OFjY8MhjHHEf`. The SOP's Spanish default (`W71zT1VwIFFx3mMGH2uZ`, MarcoTrox) is a
+  native ITALIAN voice, verified for v4 in Italian only.
+  THE SCRIPT IS ON THE PAGE (2026-10-15, `dub_cta_scripts`, migration 0021): two boxes per
+  language card, mid-video and end of video, each ONE paragraph like the HeyGen test's script, with
+  `{book}` where the title goes (`DUB_BOOK_TOKEN`, filled per language). "Write with Claude"
+  (`dubCta.writeScript` → `writeDubScript`, Opus) writes it in the language with its English
+  meaning and SAVES it; a person may edit and "Save script" (`saveDubScript`, which re-translates
+  a changed text on Sonnet 5.5, `DUB_CTA_TRANSLATE_MODEL`). Make clips speaks the SAVED script word
+  for word; a language with none gets one written and saved first. One paragraph still gives the
+  four picture parts: `splitDubScript` cuts the TEMPLATE by sentence (so a title's own punctuation
+  never cuts) — before the `{book}` sentence = picture 1, that sentence = the cover, the middle =
+  picture 2, the last = the big QR; `dubScriptError` refuses no/two `{book}`, no sentence before
+  it, fewer than two after, or past `DUB_SCRIPT_MAX_SEC` (30; aim 15-25, Japanese counted in
+  characters). The pictures are described at Make clips from the lines (`describePictures`). A
+  clip whose words no longer match its saved script says so (`clipMatchesScript`). A ticked
+  language that is not ready (book, cover, link, voice) no longer greys out: Make clips opens a
+  warning box naming what each is missing, "Go to <language>" jumps to its card, and "Make the N
+  ready ones" makes the rest; the card carries the same warning as a badge.
+  A run (`makeDubCta`): the saved script split into four lines + three picture descriptions in
+  English → each line voiced (`voiceLine` shares an identical read
+  between mid and end — 69Labs refuses the second while the first runs, 45 s per wait) while
+  APIMART draws the pictures (no people, writing, phones or books) → QR from the link as given,
+  verified, with NO `?ref=` (the clip is reused across videos) → `renderDubCtaClip`
+  (videoAssembly): b-roll + BIG centred QR → book cover + small corner QR (title line) → b-roll +
+  big QR → b-roll + big QR to the end (`DUB_CTA_PARTS`; 2026-10-15, the operator: the film's CTA
+  opens on the host with a small corner QR, a faceless one has no host so the card is big from the
+  first word — only the cover keeps the small one so it is never hidden; the picture writer keeps
+  every picture's middle plain for the card), the film's mux, phone finish and -14 LUFS loudness, no music. What
+  the channel is about comes from its English BOOK TITLES — `nicheSlug`/`defaultNiche` say
+  "gardening" on most channels and turned Hank's first test into a garden pitch. Measured
+  (2026-10-14, Hank, Spanish): ~3.5 min per pair, 23 s each, -14.6 LUFS. A row still `working`
+  30 min after its last update reads as interrupted (`dubClipState`). Not in the Spend tab.
+  ONE B-ROLL FOR EVERY LANGUAGE (2026-10-15, the operator: "the same b-roll would be in
+  everything and the CTA is the only thing they change"; per POSITION was their pick over one set
+  for both): each run used to describe and draw its own three pictures from its own language's
+  lines, so Spanish and German showed different b-roll. A channel now has ONE set per position
+  (`dub_cta_broll`, migration 0023, `DubBrollSet`), drawn from the CHANNEL (never one language's
+  words, `describeBroll`; the other position's scenes named so the two differ) by the first Make
+  clips of that position or "Draw pictures" on the page's Shared b-roll card, and reused by every
+  language — only the voice and words, the book cover and the QR link change. One draw per channel
+  and position at a time (`_drawing`, every run of it waits on the same promise); drawing again
+  replaces the set and a failed draw keeps the old one. Each clip records the set it was built
+  from (`DubCtaScript.pictureUrls`), and a clip whose pictures differ (`clipUsesBroll`: made
+  before this, or before a redraw) says so until it is made again. Hank's Spanish pair from
+  2026-10-14 predates it.
 - `server/costMeter.ts` + `server/pricing.ts` — per-video spend. Every billable adapter calls
   `recordUsage`; an `AsyncLocalStorage` set inside `withJobLock` attributes it, so the six
   spending entry points (pipeline, resume, retry-assembly, retry-failed, regen scene/scenes)

@@ -314,7 +314,7 @@ async function applyFramingLock(copy: Buffer, lock: FramingLock, canvas: Canvas)
 }
 
 /** The APIMART key for a job-less image: the Edit key, else the first account that has one. */
-async function apimartKey(): Promise<string> {
+export async function apimartKey(): Promise<string> {
   const edit = await getApimartEditKey();
   if (edit) return edit;
   for (let slot = 0; slot < PROVIDER_ACCOUNT_MAX; slot++) {

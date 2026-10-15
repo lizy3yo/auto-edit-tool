@@ -96,24 +96,18 @@ import {
 
 const selectClass =
   "h-9 w-full rounded-md border border-input bg-background px-2 text-sm";
-const CHANNEL_MEMORY = "vsl-channel";
 const ACCEPTED = ["image/jpeg", "image/png", "image/webp"];
 
 type Vendor = "sixtynine_labs" | "minimax";
 
-const remembered = () => {
-  try {
-    return localStorage.getItem(CHANNEL_MEMORY) ?? "";
-  } catch {
-    return "";
-  }
-};
-
-export function UpsellVsl() {
+/**
+ * The Add-ons page's "Upsell VSL" tab. The channel is picked once at the top of that page, which
+ * remounts this per channel (`key`), so a new channel starts the form afresh.
+ */
+export function UpsellVsl({ channelKey }: { channelKey: string }) {
   const utils = trpc.useUtils();
   const { data: channels } = trpc.channelConfig.list.useQuery();
   const heygen = useHeygenTestStatus();
-  const [channelKey, setChannelKeyState] = useState(remembered);
   const [vendor, setVendor] = useState<Vendor>("sixtynine_labs");
   const [bookInput, setBookInput] = useState("");
   // The photo picked: a library photo's id, "upload" for the one uploaded for this VSL only, or
@@ -135,23 +129,9 @@ export function UpsellVsl() {
   const [name, setName] = useState("");
   const [page, setPage] = useState(1);
 
-  const voiced = (channels ?? []).filter(c => c.voiceId || c.minimaxVoiceId);
-  const channel = voiced.find(c => c.channelKey === channelKey);
-  const setChannelKey = (key: string) => {
-    setChannelKeyState(key);
-    setBookInput("");
-    setPhotoId(null);
-    setOneOff(null);
-    setLookFor({});
-    setPreviewOf(null);
-    setPendingUpload(null);
-    setPage(1);
-    try {
-      localStorage.setItem(CHANNEL_MEMORY, key);
-    } catch {
-      // Private mode: the channel is simply not remembered.
-    }
-  };
+  const picked = channels?.find(c => c.channelKey === channelKey);
+  // A VSL is voiced in the channel's own voice, so a channel with none cannot make one.
+  const channel = picked?.voiceId || picked?.minimaxVoiceId ? picked : undefined;
   // A channel with only one vendor's voice gets that vendor; the chooser shows only with both.
   const effectiveVendor: Vendor =
     channel && !channel.voiceId && channel.minimaxVoiceId
@@ -247,7 +227,9 @@ export function UpsellVsl() {
   const left = vslWordsLeft(script);
   const estSec = estimateTestSeconds(script);
   const blocker = !channel
-    ? "Pick a channel."
+    ? picked
+      ? `${picked.displayName ?? channelKey} has no voice yet — set one in Channels.`
+      : "Pick a channel."
     : (heygen.blocker ??
       (photos && !imageUrl
         ? "This channel has no host photo — upload one."
@@ -281,39 +263,19 @@ export function UpsellVsl() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-3">
-            <div className="space-y-1.5">
-              <Label className="text-xs" htmlFor="vsl-channel">
-                Channel
-              </Label>
+          {channel?.voiceId && channel?.minimaxVoiceId && (
+            <div className="max-w-xs space-y-1.5">
+              <Label className="text-xs">Voice provider</Label>
               <select
-                id="vsl-channel"
                 className={selectClass}
-                value={channel ? channelKey : ""}
-                onChange={e => setChannelKey(e.target.value)}
+                value={vendor}
+                onChange={e => setVendor(e.target.value as Vendor)}
               >
-                <option value="">Pick a channel…</option>
-                {voiced.map(c => (
-                  <option key={c.channelKey} value={c.channelKey}>
-                    {c.displayName ?? c.channelKey}
-                  </option>
-                ))}
+                <option value="sixtynine_labs">69Labs</option>
+                <option value="minimax">MiniMax</option>
               </select>
             </div>
-            {channel?.voiceId && channel?.minimaxVoiceId && (
-              <div className="space-y-1.5">
-                <Label className="text-xs">Voice provider</Label>
-                <select
-                  className={selectClass}
-                  value={vendor}
-                  onChange={e => setVendor(e.target.value as Vendor)}
-                >
-                  <option value="sixtynine_labs">69Labs</option>
-                  <option value="minimax">MiniMax</option>
-                </select>
-              </div>
-            )}
-          </div>
+          )}
 
           {channel && (
             <>

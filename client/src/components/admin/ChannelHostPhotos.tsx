@@ -39,7 +39,7 @@ import {
 const ACCEPTED = ["image/jpeg", "image/png", "image/webp"];
 
 export function ChannelHostPhotos({ channelKey }: { channelKey: string }) {
-  const { canRemove } = useAuth();
+  const { canRemove, canManageChannels } = useAuth();
   const utils = trpc.useUtils();
   const [draftUrl, setDraftUrl] = useState("");
   const [addConfirmOpen, setAddConfirmOpen] = useState(false);
@@ -101,6 +101,35 @@ export function ChannelHostPhotos({ channelKey }: { channelKey: string }) {
     onSuccess: rows => utils.channelHostPhoto.list.setData(listInput, rows),
     onError: err => toast.error(err.message),
   });
+  // The channel's DEFAULT look: switches every photo here and is what a new photo starts on.
+  const { data: defaultLook } = trpc.channelHostPhoto.defaultLook.useQuery(
+    { channelKey },
+    { enabled: !!channelKey }
+  );
+  const defaultOriginal = !!defaultLook?.useOriginal;
+  const lookName = (useOriginal: boolean) => (useOriginal ? "the original" : "the phone look");
+  const setChannelLook = trpc.channelHostPhoto.setChannelLook.useMutation({
+    onSuccess: ({ photos: next }, { useOriginal }) => {
+      utils.channelHostPhoto.list.setData(listInput, next);
+      utils.channelHostPhoto.defaultLook.setData({ channelKey }, { useOriginal });
+      toast.success(`This channel now uses ${lookName(useOriginal)} by default.`);
+    },
+    onError: err => toast.error(err.message),
+  });
+  const [allChannelsLook, setAllChannelsLookOpen] = useState(false);
+  const setAllChannelsLook = trpc.channelHostPhoto.setAllChannelsLook.useMutation({
+    onSuccess: ({ channels, skipped }, { useOriginal }) => {
+      setAllChannelsLookOpen(false);
+      utils.channelHostPhoto.list.invalidate();
+      utils.channelHostPhoto.defaultLook.invalidate();
+      toast.success(
+        `${channels} channel${channels === 1 ? "" : "s"} now use ${lookName(useOriginal)} by default.` +
+          (skipped ? ` ${skipped} you cannot change ${skipped === 1 ? "was" : "were"} left as they were.` : "")
+      );
+    },
+    onError: err => toast.error(err.message),
+  });
+
   const remake = trpc.channelHostPhoto.remakePhoneLook.useMutation({
     onSuccess: rows => {
       toast.success("Making a new phone look — it appears here in a minute.");
@@ -121,20 +150,39 @@ export function ChannelHostPhotos({ channelKey }: { channelKey: string }) {
           <User className="h-3.5 w-3.5" />
           Host Photos
         </Label>
-        <p className="mt-1 text-[11px] text-muted-foreground">
-          The camera angles this channel&apos;s videos can be shot from. The
-          first is the primary — split-screen scenes and the opening shot always
-          use it. Each video picks which of these it uses, so one film can run
-          on a single photo and the next on four. PNG/JPG, under 10 MB.
-        </p>
-        {/* Not a costume rail. The lip-sync lane is told a non-primary photo is the same host
-            shot off-axis, so a different outfit or room reads as a continuity error mid-film. */}
-        <p className="mt-1 text-[11px] italic text-muted-foreground">
-          Different angles of the same host in the same setting — a change of
-          outfit or room will read as a continuity error, not variety. Photos
-          save on their own; Save Configuration covers the channel fields, not
-          this list.
-        </p>
+      </div>
+
+      {/* Default look — the same Phone / Original switch every photo has, for the whole channel. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-border bg-secondary/20 px-3 py-2">
+        <span className="text-xs font-medium">Default look</span>
+        <div className="w-40 [&>div]:mt-0">
+          <PhotoLookSwitch
+            state={defaultOriginal ? "original" : "phone"}
+            disabled={!defaultLook || setChannelLook.isPending}
+            onChange={useOriginal => setChannelLook.mutate({ channelKey, useOriginal })}
+          />
+        </div>
+        <span className="min-w-0 flex-1 text-[11px] text-muted-foreground">
+          Switches every photo on this channel, and photos added later start on it. Each
+          photo can still be switched on its own below.
+          {(() => {
+            const own = rows.filter(p => p.useOriginal !== defaultOriginal).length;
+            return defaultLook && own > 0
+              ? ` ${own} photo${own === 1 ? " is" : "s are"} switched on ${own === 1 ? "its" : "their"} own.`
+              : "";
+          })()}
+        </span>
+        {canManageChannels && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 shrink-0 text-xs"
+            disabled={!defaultLook}
+            onClick={() => setAllChannelsLookOpen(true)}
+          >
+            Apply to all channels
+          </Button>
+        )}
       </div>
 
       {isLoading ? (
@@ -393,6 +441,44 @@ export function ChannelHostPhotos({ channelKey }: { channelKey: string }) {
                 <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
               ) : null}
               Add photo
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={allChannelsLook}
+        onOpenChange={open => {
+          if (!open && !setAllChannelsLook.isPending) setAllChannelsLookOpen(false);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Use {lookName(defaultOriginal)} on every channel?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Every channel&apos;s default look becomes{" "}
+              {defaultOriginal ? "Original" : "Phone"}, and every host photo on every channel
+              switches to it — including photos switched on their own. Photos added later start
+              on it. Videos already rendered are unaffected.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={setAllChannelsLook.isPending}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={e => {
+                e.preventDefault();
+                setAllChannelsLook.mutate({ useOriginal: defaultOriginal });
+              }}
+              disabled={setAllChannelsLook.isPending}
+            >
+              {setAllChannelsLook.isPending ? (
+                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+              ) : null}
+              Apply to all channels
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
