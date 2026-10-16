@@ -59,7 +59,11 @@ export function ChannelHostPhotos({ channelKey }: { channelKey: string }) {
     enabled: !!channelKey,
     // A phone look being made lands in the background — look again until none is left.
     refetchInterval: q =>
-      (q.state.data ?? []).some(p => hostPhotoLookState(p) === "making") ? 5_000 : false,
+      (q.state.data ?? []).some(
+        p => (p.isSelected && hostPhotoLookState(p) === "making") || (p.isActive && p.qualityScore == null)
+      )
+        ? 5_000
+        : false,
   });
 
   const invalidate = () => utils.channelHostPhoto.list.invalidate();
@@ -88,10 +92,20 @@ export function ChannelHostPhotos({ channelKey }: { channelKey: string }) {
     onError: err => toast.error(err.message),
   });
 
-  const setPrimary = trpc.channelHostPhoto.setPrimary.useMutation({
-    onSuccess: () => {
-      toast.success("Primary camera angle updated.");
+  // A channel uses ONE photo (server/hostPhotoChoice.ts): "Use this photo" picks it by hand.
+  const setPrimary = trpc.channelHostPhoto.setSelected.useMutation({
+    onSuccess: rows => {
+      toast.success("This photo is now used in the channel's videos.");
       setPendingPrimary(null);
+      utils.channelHostPhoto.list.setData(listInput, rows);
+      invalidate();
+    },
+    onError: err => toast.error(err.message),
+  });
+  const autoPick = trpc.channelHostPhoto.autoPick.useMutation({
+    onSuccess: rows => {
+      toast.success("The channel's photo is picked automatically again.");
+      utils.channelHostPhoto.list.setData(listInput, rows);
       invalidate();
     },
     onError: err => toast.error(err.message),
@@ -231,21 +245,44 @@ export function ChannelHostPhotos({ channelKey }: { channelKey: string }) {
                   ))}
                 </div>
                 <div className="min-w-0 flex-1 space-y-1">
-                  {i === 0 ? (
-                    <span className="inline-flex items-center gap-1 rounded bg-secondary px-1.5 py-0.5 text-xs font-medium">
-                      <Star className="h-3 w-3" />
-                      Primary
+                  {/* ONE photo per channel: the one in use, its score and what cost it points
+                      (server/hostPhotoScore.ts). The others stay here, unused. */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {p.isSelected ? (
+                      <span className="inline-flex items-center gap-1 rounded bg-secondary px-1.5 py-0.5 text-xs font-medium">
+                        <Star className="h-3 w-3" />
+                        {p.pickedByHand ? "In use (chosen by hand)" : "In use (best score)"}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">Not used</span>
+                    )}
+                    <span
+                      className={`text-xs font-medium ${
+                        p.qualityScore == null
+                          ? "text-muted-foreground"
+                          : p.qualityScore >= 85
+                            ? "text-emerald-600 dark:text-emerald-400"
+                            : p.qualityScore >= 70
+                              ? "text-amber-600 dark:text-amber-400"
+                              : "text-red-600 dark:text-red-400"
+                      }`}
+                    >
+                      {p.qualityScore == null ? "Scoring…" : `Score ${p.qualityScore}/100`}
                     </span>
-                  ) : (
-                    <span className="text-xs text-muted-foreground">
-                      Angle {i + 1}
-                    </span>
-                  )}
-                  {/* The tick lives on the generate form's picker and is saved to the channel;
-                      shown here so a manager can see which angles the editors switched off. */}
-                  {!p.isSelected && (
-                    <span className="block text-[11px] italic text-muted-foreground">
-                      Not used — unticked on the long-form page
+                    {p.isSelected && p.pickedByHand && (
+                      <button
+                        type="button"
+                        disabled={autoPick.isPending}
+                        onClick={() => autoPick.mutate({ channelKey })}
+                        className="text-[11px] text-primary underline-offset-2 hover:underline disabled:opacity-50"
+                      >
+                        Pick automatically
+                      </button>
+                    )}
+                  </div>
+                  {p.qualityNotes && (
+                    <span className="block text-[11px] text-muted-foreground">
+                      {p.qualityNotes.split("; ").join(" · ")}
                     </span>
                   )}
                   <div className="max-w-[12rem]">
@@ -272,7 +309,7 @@ export function ChannelHostPhotos({ channelKey }: { channelKey: string }) {
                   )}
                 </div>
                 <div className="flex shrink-0 gap-1">
-                  {i !== 0 && (
+                  {!p.isSelected && (
                     <Button
                       variant="outline"
                       size="sm"
@@ -285,7 +322,7 @@ export function ChannelHostPhotos({ channelKey }: { channelKey: string }) {
                         })
                       }
                     >
-                      Make primary
+                      Use this photo
                     </Button>
                   )}
                   {canRemove && (
@@ -492,10 +529,11 @@ export function ChannelHostPhotos({ channelKey }: { channelKey: string }) {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Make this the primary angle?</AlertDialogTitle>
+            <AlertDialogTitle>Use this photo for the channel?</AlertDialogTitle>
             <AlertDialogDescription>
-              Split-screen scenes and the opening shot of every future video on
-              this channel will use it. Videos already rendered are unaffected.
+              Every future video on this channel will use this one photo instead
+              of the one the system picked. Videos already rendered are
+              unaffected. You can hand the choice back with "Pick automatically".
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="flex items-center gap-3 rounded-md border border-border p-3">
@@ -507,7 +545,7 @@ export function ChannelHostPhotos({ channelKey }: { channelKey: string }) {
               />
             )}
             <span className="min-w-0 flex-1 truncate text-sm">
-              {pendingPrimary ? `Angle ${pendingPrimary.position}` : ""}
+              {pendingPrimary ? `Photo ${pendingPrimary.position}` : ""}
             </span>
           </div>
           <AlertDialogFooter>
@@ -518,14 +556,14 @@ export function ChannelHostPhotos({ channelKey }: { channelKey: string }) {
               onClick={e => {
                 e.preventDefault();
                 if (pendingPrimary)
-                  setPrimary.mutate({ channelKey, id: pendingPrimary.id });
+                  setPrimary.mutate({ channelKey, id: pendingPrimary.id, selected: true });
               }}
               disabled={setPrimary.isPending}
             >
               {setPrimary.isPending ? (
                 <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
               ) : null}
-              Make primary
+              Use this photo
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

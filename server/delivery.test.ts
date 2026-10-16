@@ -140,10 +140,12 @@ describe("deliverySpeedFor", () => {
   it("shades the channel's base speed by the pace and clamps", () => {
     expect(deliverySpeedFor(undefined, "natural")).toBeUndefined(); // untouched: the voice's own pace
     expect(deliverySpeedFor(0.8, "natural")).toBe(0.8);
-    expect(deliverySpeedFor(0.8, "slow")).toBe(0.68);
+    expect(deliverySpeedFor(0.9, "slow")).toBe(0.77);
     expect(deliverySpeedFor(undefined, "brisk")).toBe(1.08);
-    expect(deliverySpeedFor(1.2, "brisk")).toBe(1.3); // clamped
-    expect(deliverySpeedFor(0.7, "slow")).toBe(0.6); // clamped
+    // clamped to what 69Labs accepts — 0.8 × slow (0.68) was refused with 400
+    expect(deliverySpeedFor(0.8, "slow")).toBe(0.7);
+    expect(deliverySpeedFor(1.2, "brisk")).toBe(1.2);
+    expect(deliverySpeedFor(0.7, "slow")).toBe(0.7);
     expect(deliverySpeedFor(0.9, undefined)).toBe(0.9);
   });
 });

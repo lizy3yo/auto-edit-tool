@@ -256,8 +256,13 @@ import {
   setLipsyncCameraMode,
   runpodLipsyncReadiness,
 } from "./lipsyncProvider";
-import { selectedHostPhotos, canDeselectHostPhoto } from "./hostPhotoSelection";
-import { ensurePhoneLook, ensurePhoneLooks, phoneLookWithin, phoneLookForUrl } from "./hostPhoneLook";
+import { selectedHostPhotos } from "./hostPhotoSelection";
+import { ensurePhoneLook, phoneLookWithin, phoneLookForUrl } from "./hostPhoneLook";
+import {
+  pickChannelHostPhotoByHand,
+  syncChannelHostPhoto,
+  syncChannelHostPhotoWithin,
+} from "./hostPhotoChoice";
 import {
   hostPhotoUrl,
   phoneLookFailure,
@@ -1460,6 +1465,8 @@ const dubCtaRouter = router({
 
 /** How long a starting video waits for a photo's phone look before using the original. */
 const PHONE_LOOK_WAIT_MS = 150_000;
+/** How long a starting video waits for the channel's photos to be scored. */
+const PHOTO_CHOICE_WAIT_MS = 45_000;
 
 /**
  * The photos a channel shoots its host from RIGHT NOW, primary first: the library narrowed to
@@ -1473,6 +1480,9 @@ async function channelHostPhotoUrls(
   channelKey: string,
   hostPhotoIds?: number[]
 ): Promise<string[]> {
+  // the channel's one photo is settled first (scores any new upload), but a video never waits
+  // long for it — past the wait the saved tick stands
+  await syncChannelHostPhotoWithin(channelKey, PHOTO_CHOICE_WAIT_MS);
   const libraryPhotos = await getChannelHostPhotos(channelKey, true);
   const wanted = selectedHostPhotos(libraryPhotos, hostPhotoIds);
   const looked = await Promise.all(
@@ -1516,7 +1526,8 @@ async function applyChannelLook(channelKey: string, useOriginal: boolean): Promi
       ...(!useOriginal ? { phoneLookError: null } : {}),
     });
     const wanted = { ...p, useOriginal: false, phoneLookError: null };
-    if (!useOriginal && !usablePhoneLook(wanted)) void ensurePhoneLook(wanted);
+    // only the channel's ONE photo is rendered, so only it gets a copy (`hostPhotoChoice.ts`)
+    if (!useOriginal && p.isSelected && !usablePhoneLook(wanted)) void ensurePhoneLook(wanted);
   }
   return changed.length;
 }
@@ -1532,10 +1543,10 @@ const channelHostPhotoRouter = router({
     )
     .query(async ({ input }) => {
       const rows = await getChannelHostPhotos(input.channelKey, input.activeOnly);
-      // Every photo renders from its PHONE LOOK by default (shared/hostPhotoLook.ts); one still
-      // missing is made now, in the background — the tile says "Making phone look…" until the
-      // next poll picks it up.
-      ensurePhoneLooks(rows);
+      // ONE photo per channel (`server/hostPhotoChoice.ts`): photos not yet scored are scored in
+      // the background, the best keeps the tick, and only that photo gets its PHONE LOOK
+      // (shared/hostPhotoLook.ts) — the tile says "Making phone look…" until the next poll.
+      void syncChannelHostPhoto(input.channelKey);
       return rows;
     }),
 
@@ -1579,6 +1590,8 @@ const channelHostPhotoRouter = router({
             ? { phoneImageUrl: null, phoneLookError: null, phoneLookVersion: 0 }
             : {}),
         });
+        // a new picture is scored again (`needsScore`), and may change the channel's photo
+        if (changed) void syncChannelHostPhoto(input.channelKey);
         return { id: input.id };
       }
       const existing = await getChannelHostPhotos(input.channelKey, false);
@@ -1590,12 +1603,12 @@ const channelHostPhotoRouter = router({
         createdBy: ctx.user.id,
         // A new photo starts on the channel's default look (Host Photos → "Default look").
         useOriginal: !!channel?.hostPhotoUseOriginal,
-        // A channel's only photo stays ticked whatever was asked: videos need one angle, and
-        // the last ticked photo can never be unticked (`canDeselectHostPhoto`).
-        isSelected:
-          input.isSelected !== false ||
-          !existing.some(p => p.isActive && p.isSelected),
+        // A channel uses ONE photo (`server/hostPhotoChoice.ts`): a new photo starts unticked
+        // unless the channel has none, and the background sync below scores it and moves the
+        // tick to it only if it is the channel's best.
+        isSelected: !existing.some(p => p.isActive && p.isSelected),
       });
+      void syncChannelHostPhoto(input.channelKey);
       return { id };
     }),
 
@@ -1690,11 +1703,17 @@ const channelHostPhotoRouter = router({
       return getChannelHostPhotos(input.channelKey, true);
     }),
 
-  /** Soft-delete — finished videos keep the angle they snapshotted at render time. */
+  /** Soft-delete — finished videos keep the photo they snapshotted at render time. */
   deactivate: removerProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
+      const row = await getChannelHostPhotoById(input.id);
       await deactivateChannelHostPhoto(input.id);
+      // removing the channel's photo hands the tick to the next best
+      if (row) {
+        if (row.pickedByHand) await updateChannelHostPhoto(row.id, { pickedByHand: false });
+        void syncChannelHostPhoto(row.channelKey);
+      }
       return { success: true };
     }),
 
@@ -1715,9 +1734,23 @@ const channelHostPhotoRouter = router({
     }),
 
   /**
-   * Tick or untick one angle for the channel's videos — the picker's saved state, shared by every
-   * operator and device. The channel's last ticked photo cannot be unticked: a video with no host
-   * photo cannot render a host scene. Returns the resulting list so the client can reconcile.
+   * Hand the channel's photo choice back to the system: the best-scoring photo is used again.
+   * Returns the resulting list.
+   */
+  autoPick: approvedProcedure
+    .input(z.object({ channelKey: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      await assertChannelEditable(ctx.user, input.channelKey);
+      await pickChannelHostPhotoByHand(input.channelKey, null);
+      return getChannelHostPhotos(input.channelKey, true);
+    }),
+
+  /**
+   * Use one photo for the channel's videos — "Use this one" on a tile, shared by every operator
+   * and device. A channel uses exactly ONE photo, so choosing one moves the tick from the photo
+   * the channel had, and the choice is the operator's until "Pick automatically" (`autoPick`).
+   * Unticking the channel's photo is refused: there must always be one, so pick another instead.
+   * Returns the resulting list so the client can reconcile.
    */
   setSelected: approvedProcedure
     .input(
@@ -1737,16 +1770,15 @@ const channelHostPhotoRouter = router({
           message: "That host photo is no longer on the channel.",
         });
       }
-      if (!input.selected && !canDeselectHostPhoto(library, input.id)) {
+      if (!input.selected) {
+        if (!row.isSelected) return library; // already not the channel's photo — a no-op
         throw new TRPCError({
           code: "BAD_REQUEST",
           message:
-            "At least one host photo must stay ticked — a video needs one to render host scenes.",
+            "A channel always uses one host photo — choose another photo to switch to it.",
         });
       }
-      if (row.isSelected !== input.selected) {
-        await updateChannelHostPhoto(input.id, { isSelected: input.selected });
-      }
+      await pickChannelHostPhotoByHand(input.channelKey, input.id);
       return getChannelHostPhotos(input.channelKey, true);
     }),
 });

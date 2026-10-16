@@ -11,70 +11,59 @@ import { HostPhotoPreview } from "./HostPhotoPreview";
 import { StepIssue } from "./StepIssues";
 
 /**
- * Which of the channel's host photos its videos are shot from.
+ * The ONE host photo this channel's videos are shot from (2026-10-15, the operator: "reduce to 1
+ * photo per channel; the system should automatically pick the best image").
  *
- * The ticks are SAVED ON THE CHANNEL (`channel_host_photos.isSelected`), so what one operator
- * chooses here is what every operator sees on every device, and a reload shows the same ticks.
- * They used to be local component state that reset to "everything" on every mount, which read
- * as the choice not being kept. A click writes straight through `channelHostPhoto.setSelected`
- * ; while a write is in flight the tiles are disabled so
- * two quick clicks cannot race. `onChange` still hands the parent the ticked ids to ride on the
- * generate call, so the film and the picker agree even if the last write has not landed.
- *
- * The FIRST photo is the primary: the opening shot and the split-screen scenes are pinned to it.
- * Every other host beat takes the angles in turn (`assignHostShots`), so each photo ticked is
- * seen about as often as every other and no two host shots in a row repeat one. The star on a
- * non-primary tile makes it the primary — the same `setPrimary` Admin offers, reordering the
- * channel's library, so it too applies to every future video on the channel.
- *
- * Because the shots are shared out evenly, more angles means fewer shots each: past the guide
- * for the chosen host minutes (`hostAngleGuideWarning`) an extra camera turns up so rarely it
- * reads as a random cut. The picker warns there and the job records the same line; nothing is
- * unticked, since an operator may want the variety on purpose.
+ * The competitor review found every competitor keeps one host photo for the whole channel, while
+ * ours rotated several "angles" in a video and changed them between videos. So a channel now uses
+ * exactly one photo, chosen by the system (`server/hostPhotoChoice.ts`): every photo is scored for
+ * a talking head — one clear face, size, light, sharpness, real (not airbrushed) skin and clearly
+ * visible lips (`server/hostPhotoScore.ts`) — and the best is used. The score and what cost it
+ * points are on each tile. Clicking another photo picks it by hand (saved on the channel, for
+ * every operator and device) until "Pick automatically" hands the choice back. The other photos
+ * stay in the library, unused; only the chosen photo gets a phone-look copy.
  *
  * Each tile shows the picture the video will actually use: the photo's PHONE LOOK by default
- * (shared/hostPhotoLook.ts, the operator's 2026-09-28 call), with a switch back to the original.
- * The switch is saved on the channel like a tick. While a phone look is still being made the
- * list refreshes itself, so the tile changes the moment it lands.
+ * (shared/hostPhotoLook.ts), with a switch back to the original, saved on the channel. While a
+ * phone look is being made or a photo scored, the list refreshes itself.
  */
 export function LongformHostPhotoPicker({
   channelKey,
   value,
   onChange,
-  hostMinutes,
   disabled,
 }: {
   channelKey: string;
-  /** The ticked row ids as last reported by `onChange` — what the generate call sends. */
+  /** The chosen row id as last reported by `onChange` — what the generate call sends. */
   value: number[];
   onChange: (ids: number[]) => void;
-  /** The "Talking head" pick, in minutes — what the angle guide is measured against. */
+  /** Kept for callers; a single photo has no angle guide to measure. */
   hostMinutes?: number;
   disabled?: boolean;
 }) {
   const utils = trpc.useUtils();
-  // The ticks and the primary are the CHANNEL's saved choice, so a guest changes them only on a
-  // channel they created; on any other the video uses the photos already ticked.
+  // The choice is the CHANNEL's, so a guest changes it only on a channel they created; on any
+  // other the video uses the photo the channel already has.
   const canEdit = useCanEditChannel(channelKey);
   const listInput = { channelKey, activeOnly: true } as const;
-  const { data: photos, isLoading } = trpc.channelHostPhoto.list.useQuery(
-    listInput,
-    {
-      enabled: !!channelKey,
-      // A phone look being made lands in the background — look again until none is left.
-      refetchInterval: q =>
-        (q.state.data ?? []).some(p => hostPhotoLookState(p) === "making") ? 5_000 : false,
-    }
-  );
+  const { data: photos, isLoading } = trpc.channelHostPhoto.list.useQuery(listInput, {
+    enabled: !!channelKey,
+    // A phone look being made, or a photo being scored, lands in the background — look again.
+    refetchInterval: q =>
+      (q.state.data ?? []).some(
+        p => (p.isSelected && hostPhotoLookState(p) === "making") || p.qualityScore == null
+      )
+        ? 5_000
+        : false,
+  });
 
   const setSelected = trpc.channelHostPhoto.setSelected.useMutation({
-    // The server returns the channel's list after the write — take it as the truth rather than
-    // refetching, so the tile flips the moment the write lands.
+    // The server returns the channel's list after the write — take it as the truth.
     onSuccess: rows => utils.channelHostPhoto.list.setData(listInput, rows),
     onError: err => toast.error(err.message),
   });
-  const setPrimary = trpc.channelHostPhoto.setPrimary.useMutation({
-    onSuccess: () => utils.channelHostPhoto.list.invalidate(),
+  const autoPick = trpc.channelHostPhoto.autoPick.useMutation({
+    onSuccess: rows => utils.channelHostPhoto.list.setData(listInput, rows),
     onError: err => toast.error(err.message),
   });
   const setLook = trpc.channelHostPhoto.setLook.useMutation({
@@ -86,19 +75,17 @@ export function LongformHostPhotoPicker({
   // The photo open in the big preview — read from the live list so a switch inside it shows.
   const [previewId, setPreviewId] = useState<number | null>(null);
   const previewRow = rows.find(p => p.id === previewId) ?? null;
-  // A channel with nothing ticked can only be one whose rows predate the tick column; the
-  // server renders every photo there (`selectedHostPhotos`), and so does this view.
-  const anyTicked = rows.some(p => p.isSelected);
-  const chosen = rows.filter(p => !anyTicked || p.isSelected);
-  const chosenIds = chosen.map(p => p.id);
+  // The channel's one photo: the ticked one (the server keeps exactly one), else the best scored.
+  const chosen =
+    rows.find(p => p.isSelected) ??
+    [...rows].sort((a, b) => (b.qualityScore ?? -1) - (a.qualityScore ?? -1))[0];
+  const chosenIds = chosen ? [chosen.id] : [];
+  const byHand = !!chosen?.pickedByHand;
 
-  // Keep the parent's copy in step with the saved ticks — that copy rides on the generate call.
+  // Keep the parent's copy in step with the saved choice — that copy rides on the generate call.
   useEffect(() => {
     if (!rows.length) return;
-    if (
-      chosenIds.length !== value.length ||
-      chosenIds.some((id, i) => id !== value[i])
-    )
+    if (chosenIds.length !== value.length || chosenIds.some((id, i) => id !== value[i]))
       onChange(chosenIds);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chosenIds.join(",")]);
@@ -119,48 +106,36 @@ export function LongformHostPhotoPicker({
       </StepIssue>
     );
 
-  const busy = setSelected.isPending || setPrimary.isPending || setLook.isPending;
+  const busy = setSelected.isPending || setLook.isPending || autoPick.isPending;
   const locked = disabled || busy || !canEdit;
 
-  const toggle = (id: number) => {
-    if (locked) return;
-    const on = chosenIds.includes(id);
-    // A video with no host photo cannot render a host scene, so the last one can't be unticked.
-    // The server refuses it too; this just spares the round trip.
-    if (on && chosen.length === 1) {
-      toast.error("At least one host photo must stay ticked.");
-      return;
-    }
-    setSelected.mutate({ channelKey, id, selected: !on });
+  const choose = (id: number) => {
+    if (locked || id === chosen?.id) return;
+    setSelected.mutate({ channelKey, id, selected: true });
   };
 
   return (
     <div className="space-y-2">
-      <Label className="text-xs">Host photos</Label>
+      <Label className="text-xs">Host photo</Label>
       <p className="text-[11px] text-muted-foreground">
-        Which camera angles this channel&apos;s videos are shot from. The first
-        is the primary — it opens the film and carries the split-screen scenes.
-        The rest take turns with it, so every ticked photo is seen about as
-        often. Ticks and the primary are saved to the channel, for everyone.
-        Each photo is used in its phone look — the same person and room, made
-        to look like a video recorded on a phone. Switch one to Original to use
-        it as uploaded.
+        Every video on this channel uses one host photo, so the host looks the
+        same in every video. The system picks the best one — a clear face, good
+        light, real-looking skin and lips you can see — and you can click
+        another to use it instead. It is used in its phone look; switch to
+        Original to use it as uploaded.
       </p>
       <div className="flex flex-wrap gap-2">
-        {rows.map((p, i) => {
-          const on = chosenIds.includes(p.id);
-          // The film's primary is the first TICKED photo (`selectedHostPhotos`), which is the
-          // library's first only while that one is ticked — label what will actually render.
-          const isPrimary = chosen[0]?.id === p.id;
+        {rows.map(p => {
+          const on = p.id === chosen?.id;
           return (
             <HostPhotoTile
               key={p.id}
               imageUrl={hostPhotoUrl(p)}
               active={on}
               disabled={locked}
-              onPictureClick={() => toggle(p.id)}
+              onPictureClick={() => choose(p.id)}
               pressed={on}
-              pictureLabel={`${on ? "Untick" : "Tick"} ${isPrimary ? "primary" : `angle ${i + 1}`}`}
+              pictureLabel={on ? "The channel's host photo" : "Use this photo"}
               corner={
                 on && (
                   <span className="block rounded-full bg-primary p-0.5 text-primary-foreground">
@@ -169,33 +144,7 @@ export function LongformHostPhotoPicker({
                 )
               }
               onPreview={() => setPreviewId(p.id)}
-              label={
-                isPrimary ? (
-                  <span className="flex items-center gap-0.5 font-medium text-foreground">
-                    <Star className="h-2.5 w-2.5 fill-current" />
-                    Primary
-                  </span>
-                ) : (
-                  <div className="flex items-center justify-between text-muted-foreground">
-                    <span className="truncate">Angle {i + 1}</span>
-                    {/* Reorders the channel's library — the same "Make primary" Admin has — and
-                        ticks the photo, since a primary that is not used makes no sense. */}
-                    <button
-                      type="button"
-                      disabled={locked}
-                      title="Make this the primary angle"
-                      aria-label={`Make angle ${i + 1} the primary`}
-                      onClick={() => {
-                        if (locked) return;
-                        setPrimary.mutate({ channelKey, id: p.id });
-                      }}
-                      className="rounded p-0.5 hover:bg-secondary hover:text-foreground disabled:cursor-default disabled:hover:bg-transparent"
-                    >
-                      <Star className="h-3 w-3" />
-                    </button>
-                  </div>
-                )
-              }
+              label={<PhotoScoreLabel photo={p} inUse={on} byHand={on && byHand} />}
               lookState={hostPhotoLookState(p)}
               onLookChange={useOriginal => setLook.mutate({ channelKey, id: p.id, useOriginal })}
             />
@@ -212,35 +161,89 @@ export function LongformHostPhotoPicker({
               }
             : null
         }
-        title={previewRow && chosen[0]?.id === previewRow.id ? "Primary host photo" : "Host photo"}
+        title={previewRow && chosen?.id === previewRow.id ? "The channel's host photo" : "Host photo"}
         onOpenChange={open => !open && setPreviewId(null)}
         disabled={locked}
         onChange={useOriginal =>
           previewRow && setLook.mutate({ channelKey, id: previewRow.id, useOriginal })
         }
       />
-      {/* Host plates are generated per look PER ANGLE, so the image cost of ticking another
-          photo is visible here rather than discovered on the invoice. */}
       <p className="text-[11px] text-muted-foreground">
         {busy ? (
           <span className="inline-flex items-center gap-1">
             <Loader2 className="h-3 w-3 animate-spin" /> Saving to the channel…
           </span>
-        ) : chosen.length === 1 ? (
-          "1 angle — every host scene uses it, with no angle changes."
+        ) : byHand ? (
+          <>
+            Chosen by hand.{" "}
+            {canEdit && (
+              <button
+                type="button"
+                className="underline hover:text-foreground"
+                onClick={() => autoPick.mutate({ channelKey })}
+              >
+                Pick automatically
+              </button>
+            )}
+          </>
+        ) : rows.length > 1 ? (
+          "Picked automatically — the best-scoring photo. Click another photo to use it instead."
         ) : (
-          `${chosen.length} angles — the host shots rotate through them, so the video switches between these backgrounds. For one consistent look, tick one.`
+          "The channel's only photo."
         )}
       </p>
       {!canEdit && (
         <p className="text-[11px] text-muted-foreground">
-          View only. These are the channel&apos;s saved photos, and your video
-          uses the ticked ones. Your account can change only a channel it
-          created.
+          View only. This is the channel&apos;s saved photo, and your video uses
+          it. Your account can change only a channel it created.
         </p>
       )}
-      {hostMinutes != null && (
-        <HostAngleGuideNote minutes={hostMinutes} angles={chosen.length} />
+    </div>
+  );
+}
+
+/** A tile's caption: "In use" or "Use this one", the photo's score and what cost it points. */
+export function PhotoScoreLabel({
+  photo,
+  inUse,
+  byHand,
+}: {
+  photo: { qualityScore?: number | null; qualityNotes?: string | null };
+  inUse: boolean;
+  byHand?: boolean;
+}) {
+  const score = photo.qualityScore;
+  return (
+    <div className="space-y-0.5" title={photo.qualityNotes ?? undefined}>
+      <div className="flex items-center justify-between gap-1">
+        <span
+          className={
+            inUse
+              ? "flex items-center gap-0.5 font-medium text-foreground"
+              : "text-muted-foreground"
+          }
+        >
+          {inUse && <Star className="h-2.5 w-2.5 fill-current" />}
+          {inUse ? (byHand ? "In use (chosen)" : "In use") : "Use this one"}
+        </span>
+        <span
+          className={
+            score == null
+              ? "text-muted-foreground"
+              : score >= 85
+                ? "font-medium text-emerald-600 dark:text-emerald-400"
+                : score >= 70
+                  ? "font-medium text-amber-600 dark:text-amber-400"
+                  : "font-medium text-red-600 dark:text-red-400"
+          }
+        >
+          {score == null ? "Scoring…" : `${score}/100`}
+        </span>
+      </div>
+      {photo.qualityNotes && (
+        <div className="line-clamp-2 text-[10px] leading-tight text-muted-foreground">
+          {photo.qualityNotes.split("; ").slice(0, 2).join(" · ")}
+        </div>
       )}
     </div>
   );

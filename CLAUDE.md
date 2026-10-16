@@ -571,6 +571,119 @@ Express · tRPC · Drizzle · MySQL.
   picker tile (the tile itself ticks). The picker, the HeyGen test and the VSL draw the SAME tile
   (`HostPhotoTile.tsx`), so the pages cannot drift apart. The HeyGen test's clips go through
   `steadyHostClip` like a film's. Harnesses: `host-photos.html`, `heygen-test.html`
+- **ONE host photo per channel, the best one, picked by the system** (2026-10-15, the operator:
+  "reduce to 1 photo per channel; the system should automatically pick the best image"; the
+  competitor review: every competitor keeps one photo for the whole channel, five of our six
+  changed it between videos). `selectedHostPhotos` (`server/hostPhotoSelection.ts`) now returns ONE
+  photo, so `hostFaces(params)` has length 1 and every angle-rotation branch (`assignHostShots`, the
+  two-angle cold open, the angle guide) is a no-op for new videos; videos made before keep their
+  snapshot. The pick (`pickHostPhoto`): the operator's own (`pickedByHand`, "Use this photo"), else
+  the highest `qualityScore`, else library order. The score (`server/hostPhotoScore.ts`, migration
+  0024 `qualityScore`/`qualityNotes`/`qualityOf`/`pickedByHand`): MEASURED with pico + sharp — one
+  clear frontal face, its size and centring, light, eye-band sharpness, resolution — and JUDGED for
+  the two perceptual things no pixel statistic separated on the library (Brenda's freckled real skin
+  and Scarlett's airbrushed skin read alike on cheek detail, band-pass and cheek/eye ratios): SKIN
+  realism and LIP visibility, 1-5 each, one Sonnet call on a close face crop (`PHOTO_JUDGE_SYSTEM`;
+  on the whole photo shrunk the face is ~200 px and it rated Scarlett 4, on the crop 2). Scored once
+  per image on the ORIGINAL (`needsScore`), in the background (`server/hostPhotoChoice.ts`,
+  `syncChannelHostPhoto`: on list, save, remove and pick; a starting video waits ≤ 45 s), which also
+  keeps exactly one photo ticked and makes the PHONE LOOK for that photo only — the others are never
+  used, so no copy is paid for them. The picker and Admin show "In use" + score + what cost points;
+  "Pick automatically" (`autoPick`) hands a hand pick back. `scripts/score-host-photos.mts` scores a
+  whole library. A phone-look copy must now also pass a judged real-skin check
+  (`PHONE_LOOK_MIN_SKIN` 4, `skinFault`). NOTE: a photo kept from the VSL page ("Keep on channel")
+  is a candidate like any other — if it scores best, the channel's videos use it.
+- **A step on the host's own face shows HER face; every host picture is checked to be the host**
+  (2026-10-15, the review: Scarlett's concealer video showed "a different woman" seven times).
+  "concealer under the eyes", "lipstick on the lips" named no person (`SHOWS_PERSON` had no face or
+  make-up words), so they were drawn with no host photo and the face was a stranger's. `OWN_FACE`
+  (a possessive face part, "her lips", "under the eyes") makes a picture the host's; only `FACE_ROUTINE`
+  (a make-up or skin-care STEP: an action on a product, or a product on a face part — "her face lit
+  by the glow of a phone" is not one, Dale's job 372 test; "the face of the board" and "a tube of
+  concealer on the counter" are things) marks `scene.hostFaceShown`: drawn from the
+  host photo with `hostFaceClause` (the same face, age, skin, hair; three-quarter view, eyes on the
+  task) and `HOST_FACE_ONLY_SUFFIX` — the one exception to "the host's face is never drawn", which
+  every other host picture keeps. `deriveHostLook` now gives an age range and skin tone. EVERY host
+  picture is then laid beside the host photo (`scanSameHost`, Sonnet, fails open): a different person
+  is redrawn `HOST_IDENTITY_REDRAWS` (2) times, then drawn with nobody in it
+  (`PERSON_FREE_FALLBACK`) — a stranger's frame is never kept as a fallback. `HOST_IDENTITY_CHECK=0`
+  turns the check off. `scripts/host-picture-bench.mts` draws a channel's lines through the real code.
+- **No near-copies in a video; each screen picture somewhere else** (2026-10-15, the review: "Dale
+  repeats phone-screen pictures that look almost the same" — job 372, ~13 screens in 47 scenes).
+  Two causes: every app picture got the same fixed setting and framing, and nothing compared a
+  picture with the rest of the film. `assignScreenSetups` (`server/pictureVariety.ts`, after
+  `markHostBroll`) gives each screen picture the next of `SCREEN_SETUPS` (phone beside the real item,
+  laptop on a kitchen table, tablet by a window…; `HELD_SCREEN_SETUPS` in the host's hands), read by
+  `appScreenClause`. Every drawn still is fingerprinted (64-bit dHash) and compared with EVERY earlier
+  picture of the same video; candidates within `NEAR_COPY_BITS` (20) are confirmed side by side
+  (`scanNearCopy`, Sonnet) — the hash alone cannot decide (job 372: copies 16-18 bits, different
+  pictures of the same workshop from 19) — and a confirmed copy is drawn again, told to differ
+  (`DIFFERENT_PICTURE_CLAUSE`, up to `MAX_VARIETY_REDRAWS` 2; a screen moves to a setting that is
+  neither its own nor the copied picture's, `nextScreenSetup(…, avoid)`). Pictures are drawn several
+  at once and two drawn together cannot see each other, so a video's SCREENS, and its pictures of ONE
+  key thing, are drawn one at a time in their own lane (`withScreenTurn`, `varietyLane`); everything
+  else stays parallel. The held settings are different COMPOSITIONS (hand-and-screen close-up, over
+  the shoulder, at a market stall, at counter height) — four rooms of "man holding a phone" still
+  read as one picture. Job 372: 496 pairs, 9 looked at, 5 copies, every known one. In memory per
+  process (a restart forgets, fails open); `PICTURE_VARIETY=0` turns it off. Shot-list rule 5b: a screen ONLY when the line is about the app or selling online
+  itself — a line about the thing, the buyer or the money shows that — never two in a row.
+- **Base-photo tests** (`scripts/host-photo-bench.mts`): one ~10 s line voiced once in the channel's
+  voice, each candidate photo (original / phone look / a new base made by the phone-look recipe plus
+  an instruction, `makePhoneLookPhoto(url, extra)`, `from` to build on another variant) lip-synced on
+  HeyGen's TEST account (else pool account 1), then measured. THE LOWER MOUTH IS JUDGED AGAINST BERTHA
+  (the brief's benchmark): the six widest-open frames of the clip under six of a Bertha clip, in colour
+  (`compareLowerMouth`, three votes, the middle kept; pass = not "clearly worse" — Bertha against
+  another clip of herself reads "slightly worse"). Two pixel tooth-edge measures were built first and
+  both failed on beards (a white beard read as a flat lower row of teeth; the second scored Dale's
+  clean teeth below Hank's smear), and an absolute 1-5 grade called every HeyGen mouth "2". The skin
+  is judged on frames of the rendered clip (Brenda's real skin reads 5/4/5 after HeyGen). TWO TRAPS:
+  HeyGen returns the SAME video for the same photo and audio, so repeats must speak different lines
+  (`--lines-mode`); and repeats started together must share one photo (`photoFor` is memoised).
+  `scripts/remeasure-mouths.mts` re-judges every clip; `scripts/host-fix-report.mts` gathers it all.
+  Bertha's reference clips are the competitor review's (`bench/host-fix/bertha/`).
+- **The general rules the tests produced** (2026-10-16, the operator: "everything should be a general
+  rule, so a future channel is good and at its best"). (a) PHONE LOOK v3 (`PHONE_LOOK_VERSION` 3, now 4 — see (c),
+  every copy remade): real skin asked for in detail, and a LIP-SYNC-READY MOUTH
+  (`MOUTH_READY_CLAUSE`) added only when the photo's lips are judged under 4/5 (`mouthReadyExtra`):
+  moustache above the lip, beard short round the mouth, lips slightly parted, front teeth showing.
+  The base-photo tests found it per host (Frederick 3/3, Dale 3/3, Hank 3/3 Bertha-level where their
+  originals failed); v3 applied it to 9 of 15 channels on its own and left clear mouths alone. Only
+  the channel's chosen photo gets a copy (`applyChannelLook` too). (b) SENTENCE PAUSES
+  (`server/sentencePauses.ts`, in `levelMasterNarration`, so all three voiced-master paths and never a
+  supplied read): every sentence end gets ≥ 0.25 s of TRUE silence — a short gap gets silence inserted
+  up to `PAUSE_SEC` (0.3, the clone pause mark's length), a longer one has its middle quieted with
+  20 ms fades clear of both words. Dale's voice fills sentence gaps with breath (0.58 s by the
+  transcript, one silence by the meter), HeyGen moves the mouth on a breath, and his lip-sync failed
+  0/4; an ellipsis made v4 pause only when it chose to (2/4). Only sentence ends — quieting every
+  pause ("debreath") cost lip-sync and words. `SENTENCE_PAUSES=0` turns it off; `voice-bench.mts`
+  applies it by default (`sentencePauses: false` to compare). (c) A MOUTH AT REST (PHONE LOOK v4):
+  HeyGen returns to the photo's mouth whenever the voice stops, so a photo taken MID-WORD gives a
+  mouth that never closes between sentences (Dale's pauses showed teeth; HeyGen's own advice is a
+  neutral, closed mouth). The photo judge now also answers `open` (`HostPhotoJudgement.open`) — caught
+  mid-word, mouth CORNERS NOT RAISED — and such a copy gets ONE more small edit, `REST_MOUTH_PROMPT`
+  (lips together, no teeth, real skin kept), through the same framing lock, quality and skin checks,
+  then judged closed (`restMouthIfOpen`, `REST_MOUTH_DRAWS` 2). Asked INSIDE the recipe it did not
+  hold — the restyle reopened Dale's mouth every time. A SMILE IS LEFT ALONE: the first version also
+  rested smiles (Ruth, Hannah, Pearl), and with the same voice takes it gained nothing past noise
+  while Ruth's lower mouth got worse (2/3 → 0/3 Bertha-level) — her photo's own teeth were what HeyGen
+  animated, and with them hidden it invented fainter ones. Mid-word (Dale): mouth closing in pauses
+  0/3 → 3/3, lower mouth 2/3 → 3/3; Hank and Norbert (also mid-word) no worse on any check. Any
+  refusal keeps the copy. `PHONE_LOOK_UPGRADES_FROM` (3): a v3 copy gets ONLY the new step
+  (`upgradePhoneLook`), never a fresh draw, so its tested look is kept; a failure keeps it as it was.
+  NOISE: the same photo and the same voice take, rendered twice, came back as different HeyGen videos
+  that moved one check by one take in three (Frederick's mouth closing 2/3 → 1/3, the judge unanimous
+  on each clip) — judge a change on more than one round.
+  THE PIXEL LIP-SYNC RULER MISREADS WHITE BEARDS: `measure-mouth-sync.mts` reads Dale and Roger
+  +240 ms late with EVERY voice, while Dale's own voice on Frederick's face reads on time; a frame
+  strip of the two faces on the same voice track (`bench/host-fix/side-by-side/`) opens and closes
+  on the same frames. Judge a white-bearded host by eye, not by that number.
+  `measure-mouth-open.mts` looks for the face on the first three seconds, not frame 0 only (it missed
+  Ruth on two takes). A library can hold OTHER hosts' photos (the local Amos channel holds Ruth's and
+  Roger's; the auto-pick chose Ruth's as the best-scored) — nothing checks a photo is the channel's host.
+- **The combined test** (`scripts/combined-bench.mts`): the winning photo AND the winning voice per
+  persona, through the voice session's own `scripts/voice-bench.mts --heygen` (words, loudness, noise
+  in pauses, lip-sync against the voice) plus the lower mouth vs Bertha and the clip's skin, one pass
+  line per check, each failure named as the VOICE half or the PHOTO half.
 - `server/hostPlate.ts` — **provider-independent**. The lip-sync model animates the image it
   is handed and never changes the setting, so `HOST_PLATES=1` generates a 16:9 plate of the host
   IN each beat's setting (host photo as identity reference) and syncs from that instead of the
@@ -1461,6 +1574,29 @@ Express · tRPC · Drizzle · MySQL.
   loudness (every film ends at one level), and the live cut preview, which plays the raw master,
   is quieter than the file. HeyGen test and VSL clips do not go through assembly and are not
   touched. WHY Beau's voice (`eleven_v4`) comes back 11 dB under Ruth's is not known.
+- **Voice settings are judged on the MOUTH** (2026-10-16, `scripts/voice-bench.mts`): each take is
+  voiced through 69Labs like a film, lip-synced on HeyGen from the channel's photo, and scored by
+  `scripts/measure-mouth-sync.mts` — the ruler the competitor review scored Bertha Ramirez by (mouth
+  follows the voice at r 0.30, rests in pauses). 73 takes on Dale, Hank, Frederick and Scarlett, two
+  lines; `scripts/voice-bench-advise.mts` hands a round to Opus for the next. What changed, for every
+  channel: (a) ElevenLabs voices send style 0 / similarity 0.75 / speaker boost on (`TTS_STYLE`,
+  `TTS_SIMILARITY`, `TTS_SPEAKER_BOOST`; was 0.3 / 0.8 / none) — ElevenLabs' own advice and 69Labs'
+  defaults; Hank r 0.29 → 0.55 on 5 of 5 takes, Dale's mouth in pauses 0.89-0.99 → 0.77. Stability
+  0.65/0.75 was worse; stays 0.5. (b) Speed is clamped to 0.7-1.2 (`ELEVEN_SPEED_MIN/MAX` in the
+  adapter, `SPEED_MIN/MAX` in delivery): 69Labs REFUSES anything else with 400, and a "slow" paragraph
+  on a 0.8 channel asked for 0.68 — every Hank film's paced read was refused three times and re-voiced
+  flat. Hank's channel speed is now 0.9. (c) CLONE voices get a 0.3 s pause after every sentence in
+  the voiced text only (`withSentencePauses`, MiniMax's `<#0.3#>`, never read aloud): the clone lane
+  IGNORES speed (0.7 / 1.0 / 1.4 came back the same length — the Speed field does nothing on the 8
+  clone channels), and about half of Frederick's takes came back rushed, 0.2-0.3 s between sentences,
+  too short for HeyGen to close the mouth. With it: no rushed takes, mouth rests (Frederick 0.62 vs
+  0.75, Scarlett 0.47 vs 0.55-0.69). Ruled out: de-breathing the pauses (lowered sync in the photo
+  session's tests), speech-2.8-hd (Scarlett's sync failed), Dale on multilingual v2 (no better, and
+  69Labs failed 6 of 11). Bertha speaks at 3.44 words/s with 0.40 s between sentences — ours are in
+  range, nothing needs slowing. Dale's mouth is under a beard and measures weakly on every voice; his
+  photo is the bigger lever (host-photo session). 69Labs refuses an identical line in the same voice
+  while one is in flight and the adapter then ADOPTS that job — two "variants" become one take, so the
+  bench voices one channel at a time and two sessions should not bench the same line.
 - **Voice directions** (`shared/voiceDirections.ts`, 2026-10-03) — a script may carry `[laughs]`,
   `[sighs]`, `[whispers]`, `[warmly]`… where the host should do them. ElevenLabs v3/v4 act a
   bracketed direction out; every older model, and MiniMax (which is what a 69Labs account CLONE

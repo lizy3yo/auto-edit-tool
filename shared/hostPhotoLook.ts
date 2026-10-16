@@ -14,8 +14,21 @@
  * (`phoneLookVersion === PHONE_LOOK_VERSION`); an older one is remade and never rendered.
  */
 
-/** Bump when the recipe changes in a way that makes earlier copies the wrong look. */
-export const PHONE_LOOK_VERSION = 2;
+/**
+ * Bump when the recipe changes in a way that makes earlier copies the wrong look. 3 (2026-10-16):
+ * real skin asked for in detail, and a lip-sync-ready mouth for a photo whose lips are hard to see
+ * (`server/hostPhoneLook.ts`, `MOUTH_READY_CLAUSE`) — what the render tests of four hosts proved.
+ * 4 (2026-10-16): an open mouth (mid-word, a toothy grin) is rested closed as the last step.
+ */
+export const PHONE_LOOK_VERSION = 4;
+
+/**
+ * A copy this recipe can bring up to date WITHOUT drawing it again. 4 (2026-10-16) only adds the
+ * mouth-at-rest edit (`REST_MOUTH_PROMPT`) on top of 3, so a v3 copy — each one already through the
+ * framing lock, the quality and skin checks and the render tests — gets just that step, and keeps
+ * its look; a fresh draw would be a new roll of the dice. Null when the bump changes the look.
+ */
+export const PHONE_LOOK_UPGRADES_FROM: number | null = 3;
 
 /** The fields this module reads — the DB row satisfies it. */
 export interface HostPhotoLookLike {

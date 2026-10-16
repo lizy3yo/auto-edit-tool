@@ -3,7 +3,9 @@ import {
   hostPhotoLookState,
   hostPhotoUrl,
   isPhoneLookUrl,
+  PHONE_LOOK_UPGRADES_FROM,
   PHONE_LOOK_VERSION,
+  usablePhoneLook,
   testPhotoState,
   testPhotoUrl,
   testPhotoUrls,
@@ -71,5 +73,14 @@ describe("which picture a host photo renders from", () => {
   it("tells a phone-look copy from a photo as uploaded by where it is stored", () => {
     expect(isPhoneLookUrl("https://cdn.example/host-photos/phone-v2-abc.jpg")).toBe(true);
     expect(isPhoneLookUrl("https://cdn.example/style-references/1/JO5iVn.jpg")).toBe(false);
+  });
+});
+
+describe("v4 brings a v3 copy up to date instead of drawing it again", () => {
+  it("never renders the v3 copy as it was, and names v3 as the one it upgrades", () => {
+    expect(PHONE_LOOK_VERSION).toBe(4);
+    expect(PHONE_LOOK_UPGRADES_FROM).toBe(3);
+    expect(usablePhoneLook({ ...photo, phoneLookVersion: 3 })).toBeNull();
+    expect(usablePhoneLook(photo)).toBe("phone.png");
   });
 });

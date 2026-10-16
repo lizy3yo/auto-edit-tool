@@ -529,6 +529,17 @@ export interface StoryboardScene {
   brollHostLook?: string;
   brollHostRef?: string;
   /**
+   * The host's picture is a step on their OWN FACE (make-up, skin care — `FACE_ROUTINE`), so the
+   * face is shown: drawn from the host photo (`hostFaceClause`) and checked to be the same person
+   * (`scanSameHost`). Unset on every other host picture, which keeps the face out of frame.
+   */
+  hostFaceShown?: boolean;
+  /**
+   * Where the device sits in a SCREEN picture (an app, a listing): each screen of a film gets the
+   * next of several settings (`assignScreenSetups` in server/pictureVariety.ts), so no two look alike.
+   */
+  screenSetup?: string;
+  /**
    * The person this picture shows when the line is about SOMEONE ELSE than the host — a customer,
    * a neighbour ("a woman customer"), in the line's own words. Drawn from behind or the side, face
    * never shown, WITHOUT the host's photo or look (`otherPersonClause`); the host is never put in

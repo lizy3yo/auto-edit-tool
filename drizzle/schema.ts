@@ -399,6 +399,18 @@ export const channelHostPhotos = mysqlTable("channel_host_photos", {
    * copies stay on the row, are never rendered, and are remade by the current recipe.
    */
   phoneLookVersion: int("phoneLookVersion").default(0).notNull(),
+  /**
+   * How good the photo is for a talking head, 0-100 (`server/hostPhotoScore.ts`, 2026-10-15) —
+   * what picks the channel's ONE photo. Null until measured. Scored on the ORIGINAL, so every
+   * photo is compared alike (only the chosen photo gets a phone-look copy).
+   */
+  qualityScore: int("qualityScore"),
+  /** Why it lost points, in plain words ("; "-joined), shown on the tile. */
+  qualityNotes: varchar("qualityNotes", { length: 255 }),
+  /** The image URL that was scored — a new upload re-scores. */
+  qualityOf: varchar("qualityOf", { length: 512 }),
+  /** An operator chose this photo by hand: it is the channel's photo whatever the scores say. */
+  pickedByHand: boolean("pickedByHand").default(false).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });

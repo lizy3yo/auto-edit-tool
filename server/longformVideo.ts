@@ -62,7 +62,28 @@ import {
 } from "./pictureMemory";
 import { safeParseJSON, stripMarkdownFences } from "./jsonRepair";
 import { checkFlags, recordPictureCheck } from "./pictureCheckLog";
-import { scanSameThing, scanStillDefects } from "./overlayTextScan";
+import { scanNearCopy, scanSameHost, scanSameThing, scanStillDefects } from "./overlayTextScan";
+import { padSentenceEnds } from "./sentencePauses";
+import {
+  assignScreenSetups,
+  DIFFERENT_PICTURE_CLAUSE,
+  differentPictureClause,
+  nearCopyCandidates,
+  MAX_VARIETY_REDRAWS,
+  nextScreenSetup,
+  pictureHash,
+  pictureThumb,
+  rememberPicture,
+  varietyLane,
+  withScreenTurn,
+} from "./pictureVariety";
+
+/** Redraws a host picture gets when it shows someone else, before it is drawn with nobody in it. */
+export const HOST_IDENTITY_REDRAWS = 2;
+/** Added to a host picture redrawn with nobody in it: the line's things, never a stand-in person. */
+export const PERSON_FREE_FALLBACK =
+  "Show only the things this line is about, on a surface or in their place — no person, no " +
+  "hands, no face, no body part anywhere in the frame.";
 import {
   deriveStyleBible,
   deriveVisualDirection,
@@ -760,12 +781,20 @@ export const HOST_MIN_HOLD_SEC = 4;
 // near no-ops on that voice (±0.3s over a 72s read, identical transcripts) and are kept only
 // because the chosen variant was tested as a set.
 //
-// ponytail: three global constants, not per-channel config — voice and speed are the dials that
+// ponytail: global constants, not per-channel config — voice and speed are the dials that
 // actually vary by channel. Move these into `channel_configs` only if a channel needs its own
-// delivery. Re-run scripts/voice-settings-test.ts to re-tune.
+// delivery.
+//
+// 2026-10-16, judged on the MOUTH (scripts/voice-bench.mts — voice, HeyGen lip-sync, and the
+// mouth measure the competitor review scored Bertha Ramirez by; 73 takes, two lines): style 0.3
+// / similarity 0.8 / no speaker boost → style 0 / 0.75 / boost on, ElevenLabs' own recommended
+// values and 69Labs' defaults. Hank at 0.9: mouth follows the voice at r 0.55 on 5 of 5 takes
+// (0.29 before; Bertha 0.30). Dale: the mouth moves far less in pauses (0.77 against 0.89-0.99).
+// Raising stability to 0.65/0.75 was worse. Stability stays 0.5.
 export const TTS_STABILITY = 0.5; // 0–1, lower = more expressive phrasing/pauses
-export const TTS_STYLE = 0.3; // 0–1, mild style exaggeration
-export const TTS_SIMILARITY = 0.8; // 0–1, high = strong match to the source voice
+export const TTS_STYLE = 0; // 0–1, style exaggeration (ElevenLabs advises 0)
+export const TTS_SIMILARITY = 0.75; // 0–1, match to the source voice
+export const TTS_SPEAKER_BOOST = true; // ElevenLabs "Speaker boost" (69Labs `useSpeakerBoost`)
 
 /**
  * Stop ElevenLabs inventing a lead-in filler ("uhm"/breath) when a scene's TTS text starts
@@ -4958,6 +4987,7 @@ export async function generateSceneVoiceover(
           stability,
           style,
           similarity,
+          speakerBoost: TTS_SPEAKER_BOOST,
         });
         created = true;
         // Persist BEFORE the first poll — the entire point is that a timeout, a crash or a
@@ -5860,7 +5890,9 @@ export function personClauseFor(scene: StoryboardScene, visual: string): string 
   const who = scene.otherPerson
     ? otherPersonClause(scene.otherPerson)
     : scene.brollHostLook
-      ? hostBrollClause(scene.brollHostLook)
+      ? scene.hostFaceShown
+        ? hostFaceClause(scene.brollHostLook)
+        : hostBrollClause(scene.brollHostLook)
       : ANON_PERSON_SUFFIX;
   const worn = WORN_FRONT.exec(visual)?.[0];
   // Hands on the person's OWN hair, scalp or face (Diane's job 313: a head twisted round, a third
@@ -5902,6 +5934,32 @@ export const ONE_OTHER_PERSON_SUFFIX =
   "Apart from that one person seen from behind or from the side, no person is visible: no second " +
   "person, no one in the background, no reflection of anyone, and no face anywhere in the frame. " +
   "No mirror, window glass or other shiny surface anywhere they could be reflected in it.";
+
+/**
+ * The host doing a step on their OWN FACE (`scene.hostFaceShown`, 2026-10-15): the face is shown,
+ * because a make-up or skin-care step cannot be shown with it turned away, and it must be HERS —
+ * Scarlett's concealer video drew "a different woman" seven times. The host photo is attached as
+ * the reference and named as the face to keep; the picture is then compared with it
+ * (`scanSameHost`). Three-quarter view, eyes on the task, so it reads as a moment of the routine and
+ * not a second talking head.
+ */
+export function hostFaceClause(look: string): string {
+  return (
+    `The only person in this shot is the host — ${look.trim().replace(/\.$/, "")} — the SAME ` +
+    `person as in the reference photo: the same face and features, the same age, the same skin ` +
+    `and complexion, the same hair colour and hairstyle, not a younger, smoother or different ` +
+    `person. A close, natural photo of them doing this to their own face: three-quarter view, ` +
+    `head turned a little, eyes on what they are doing (never looking at the camera), one hand ` +
+    `at the face. Nobody else is in the frame, in the background or in a reflection. ` +
+    `${ONE_BODY_CLAUSE}`
+  );
+}
+
+/** `NO_OTHER_FIGURES_SUFFIX` for a picture of the host's own face: their face only, nobody else. */
+export const HOST_FACE_ONLY_SUFFIX =
+  "Apart from the host, no person is visible: no second person, no one in the background, no " +
+  "other face anywhere in the frame. No mirror, window glass or other shiny surface anywhere " +
+  "anyone could be reflected in it.";
 
 export function hostBrollClause(look: string): string {
   return (
@@ -6463,7 +6521,9 @@ export function buildStillPrompt(
     !aggressive && scene.humanPresent && scene.otherPerson
       ? ONE_OTHER_PERSON_SUFFIX
       : !aggressive && scene.humanPresent && scene.brollHostLook
-        ? NO_OTHER_FIGURES_SUFFIX
+        ? scene.hostFaceShown
+          ? HOST_FACE_ONLY_SUFFIX
+          : NO_OTHER_FIGURES_SUFFIX
         : NO_FIGURES_SUFFIX;
   const visual = visualOverride
     ? softenVisualPrompt(visualOverride)
@@ -6603,7 +6663,20 @@ export const REAL_APP_SCREEN_CLAUSE =
  * them (Dale's job 306 showed a said price as a grey bar).
  */
 export function appScreenClause(scene: StoryboardScene): string {
-  const base = scene.namedLook ? REAL_APP_SCREEN_CLAUSE : APP_SCREEN_CLAUSE;
+  // Each screen of a film sits somewhere else (`assignScreenSetups`, server/pictureVariety.ts):
+  // with one fixed setting every screen came back the same phone on the same bench (Dale, job 372).
+  const placed = (clause: string) =>
+    scene.screenSetup
+      ? clause
+          .replace("The phone's screen shows", "The device's screen shows")
+          .replace(
+            DEVICE_RESTS,
+            `${DEVICE_RESTS} WHERE IT IS in this picture — every screen picture of this video is ` +
+              `somewhere else, and this setting wins over any other place the description names: ` +
+              `${scene.screenSetup}.`
+          )
+      : clause;
+  const base = placed(scene.namedLook ? REAL_APP_SCREEN_CLAUSE : APP_SCREEN_CLAUSE);
   const one = ONE_LISTING.test(scene.showSubject ?? scene.visualPrompt ?? "")
     ? " It is ONE item's own listing page: one large photo of that item, not a grid of other things."
     : "";
@@ -8643,7 +8716,25 @@ export function stillRetryDelayMs(error: string, attempt: number): number {
   return base + Math.floor(Math.random() * 1_000);
 }
 
+/**
+ * `drawValidatedStill`, but a video's SCREEN pictures (`scene.screenSetup`) are drawn one at a time
+ * (`withScreenTurn`): pictures are drawn several at once, and two drawn together cannot see each
+ * other, so Dale's job 372 test kept three near-identical "holding a phone" screens that were all
+ * in flight at the same moment. Screens are where a film repeats itself; everything else stays
+ * parallel.
+ */
 export async function generateValidatedStill(
+  ...args: Parameters<typeof drawValidatedStill>
+): Promise<{ buffer: Buffer; mimeType?: string }> {
+  const [scene, , , , , , square] = args;
+  const job = currentCostJobId();
+  const lane = varietyLane(scene);
+  return lane && job != null && !square && process.env.PICTURE_VARIETY !== "0"
+    ? withScreenTurn(job, () => drawValidatedStill(...args), lane)
+    : drawValidatedStill(...args);
+}
+
+async function drawValidatedStill(
   scene: StoryboardScene,
   attempts = 6,
   /**
@@ -8691,6 +8782,14 @@ export async function generateValidatedStill(
   let sameThingMisses = 0;
   // A check that could not run is never a pass: one more picture and check (`unchecked`).
   let uncheckedRerolls = 0;
+  // THE HOST IS THE HOST: a picture of the host that shows someone else is drawn again
+  // (`HOST_IDENTITY_REDRAWS`), then drawn with nobody in it — a stranger never ships.
+  let hostMisses = 0;
+  let personFree = false;
+  // NO NEAR-COPIES IN A VIDEO (server/pictureVariety.ts): a picture that nearly copies another
+  // picture of the same video is drawn once more, told to differ.
+  let varietyRerolls = 0;
+  const varietyJob = currentCostJobId();
   // What the check named on the picture before this one (`checkFlags`), to spot a redraw that
   // changed nothing.
   let lastFaults = "";
@@ -8756,7 +8855,7 @@ export async function generateValidatedStill(
         ? [referenceImageUrl]
         : [
             ...(scene.memoryRefUrls ?? []),
-            ...(scene.humanPresent && scene.brollHostRef ? [scene.brollHostRef] : []),
+            ...(scene.humanPresent && scene.brollHostRef && !personFree ? [scene.brollHostRef] : []),
           ];
       r = await genImage({
         prompt,
@@ -8938,6 +9037,78 @@ export async function generateValidatedStill(
               "drawing it again from its memory"
           );
           continue;
+        }
+      }
+      // THE HOST IS THE HOST (2026-10-15, the review: Scarlett's routine pictures showed "a
+      // different woman"): a picture of the host is laid beside the host photo and must be the same
+      // person — hair, age, skin, build, and the face when it is shown. Drawn again on a miss; after
+      // `HOST_IDENTITY_REDRAWS` misses the picture is drawn with nobody in it, and a frame of a
+      // stranger is never kept as a fallback. `HOST_IDENTITY_CHECK=0` turns it off.
+      if (
+        scene.humanPresent &&
+        scene.brollHostRef &&
+        !scene.otherPerson &&
+        !personFree &&
+        process.env.HOST_IDENTITY_CHECK !== "0"
+      ) {
+        const who = await scanSameHost(scene.brollHostRef, buffer, !!scene.hostFaceShown);
+        if (!who.same) {
+          hostMisses++;
+          lastError = `Still image shows someone other than the host (${who.what})`;
+          if (hostMisses > HOST_IDENTITY_REDRAWS) {
+            personFree = true;
+            prompt = `${buildStillPrompt({ ...scene, humanPresent: false, brollHostLook: undefined, brollHostRef: undefined, hostFaceShown: undefined }, false, visualOverride, subject, square)} ${PERSON_FREE_FALLBACK}`;
+            offSubjectFallback = undefined;
+            textyFallback = undefined;
+            brokenFallback = undefined;
+          }
+          console.warn(
+            `[Longform] scene ${scene.index} shows someone other than the host (${who.what}) → ` +
+              (personFree ? "drawing it with nobody in it" : "drawing them again from the host photo")
+          );
+          continue;
+        }
+      }
+      // NO NEAR-COPIES IN A VIDEO: compared with EVERY picture of this video drawn so far, not only
+      // the one before (Dale's job 372: ~13 near-identical phone screens). One redraw, told to
+      // differ — a screen also moves to another setting; the first draw is kept as the fallback.
+      // A memory picture is held to its own memory by the check above, a split panel is square
+      // and composited, so both are left out. `PICTURE_VARIETY=0` turns it off.
+      if (varietyJob != null && !square && process.env.PICTURE_VARIETY !== "0") {
+        try {
+          const hash = await pictureHash(buffer);
+          const thumb = await pictureThumb(buffer);
+          let copies: number | null = null;
+          let copiedSetup: string | undefined;
+          if (varietyRerolls < MAX_VARIETY_REDRAWS)
+            for (const c of nearCopyCandidates(varietyJob, scene.index, hash)) {
+              const look = await scanNearCopy(c.thumb, thumb);
+              if (look.copy) {
+                copies = c.index;
+                copiedSetup = c.setup;
+                break;
+              }
+            }
+          if (copies != null) {
+            varietyRerolls++;
+            offSubjectFallback ??= { buffer, mimeType: r.mimeType };
+            if (scene.screenSetup) {
+              scene.screenSetup = nextScreenSetup(scene.screenSetup, !!scene.humanPresent, copiedSetup);
+              prompt = buildStillPrompt(scene, false, visualOverride, subject, square);
+            }
+            // a CONCRETE new camera view each redraw — "look different" alone came back as the same
+            // shelf of boxes four times (Frederick's practice job 376); the earlier redraw's clause goes
+            const cut = prompt.indexOf(DIFFERENT_PICTURE_CLAUSE);
+            prompt = `${cut >= 0 ? prompt.slice(0, cut).trimEnd() : prompt} ${differentPictureClause(varietyRerolls - 1)}`;
+            lastError = `Still image nearly copies scene ${copies}'s picture`;
+            console.warn(
+              `[Longform] scene ${scene.index} nearly copies scene ${copies}'s picture → drawing it again, different`
+            );
+            continue;
+          }
+          rememberPicture(varietyJob, scene.index, hash, thumb, scene.screenSetup);
+        } catch {
+          /* a fingerprint that cannot be taken never costs the picture */
         }
       }
     }
@@ -13318,8 +13489,13 @@ async function voiceMasterNarration(
  */
 async function levelMasterNarration(
   jobId: number,
-  buf: Buffer
+  voiced: Buffer
 ): Promise<Buffer> {
+  // Every sentence ends with a real pause before anything reads the master (whisperx, the slices,
+  // lip-sync): a voice that runs sentences together gives the host's mouth no reason to close
+  // (`server/sentencePauses.ts`). All three voiced-master paths come through here; a supplied
+  // human read does not.
+  const buf = await padSentenceEnds(voiced, msg => console.log(`[Longform ${jobId}] ${msg}`));
   try {
     const { buffer, plan } = await levelNarrationAudio(buf);
     console.log(`[Longform ${jobId}] ${describeLevelPlan(plan)}`);
@@ -15416,6 +15592,10 @@ async function runUnifiedPipeline(
       if (s.hostPresent && !s.splitVisual) s.visualPrompt = talkingHeadVisualPrompt(params.hostLook, s.index);
   }
   if (hostBroll) console.log(`[Longform ${jobId}] host in b-roll: ${hostBroll} picture(s) show the host at work`);
+  // Each screen picture (an app, a listing) sits somewhere else, in film order — after the host
+  // marks, so a screen in the host's hands gets a held setting.
+  const screens = assignScreenSetups(scenes);
+  if (screens) console.log(`[Longform ${jobId}] screen pictures: ${screens}, each in its own setting`);
 
   // The passes above created and removed host beats after the adjacency pass assigned angles —
   // re-derive so any surviving pair still reads main → alt. Pure and O(n); the last register

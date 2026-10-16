@@ -971,3 +971,47 @@ describe("the picture behind the scan card", () => {
     expect(plain.showSubject).toBe("a phone on the hall table");
   });
 });
+
+describe("the review's persona fixes (2026-10-15)", () => {
+  it("Scarlett: a make-up step on her own face is HER, drawn from her photo with the face shown", () => {
+    // Over 60 STOP Applying Concealer Like This — "a different woman" at 1:44, 1:53, 7:49…
+    for (const line of [
+      "concealer dabbed under the eyes with a fingertip",
+      "lipstick on the lips, a soft rose shade",
+      "her hand blending foundation along her jawline",
+    ]) {
+      const scenes = [pic(1, "Dab it, don't drag it.", line)];
+      markHostBroll(scenes, { hostLook: "a slim woman in her sixties with fair skin and a silver bob" }, "https://x/host.png");
+      expect(scenes[0].humanPresent).toBe(true);
+      expect(scenes[0].brollHostRef).toBe("https://x/host.png");
+      expect(scenes[0].hostFaceShown).toBe(true);
+      const prompt = buildStillPrompt(scenes[0]);
+      expect(prompt).toMatch(/the SAME person as in the reference photo/);
+      expect(prompt).not.toMatch(/never shown/);
+    }
+  });
+
+  it("Scarlett: anything that is not a step on the face keeps the face out, as before", () => {
+    const scenes = [pic(1, "Wear it high.", "a pearl strand at her collarbone over a navy sweater", { humanPresent: true })];
+    markHostBroll(scenes, { hostLook: "a woman with silver hair" }, "https://x/host.png");
+    expect(scenes[0].hostFaceShown).toBeUndefined();
+    expect(personClauseFor(scenes[0], scenes[0].showSubject!)).toMatch(/never shown/);
+  });
+
+  it("a product on its own, or the face of a board, is never a person", () => {
+    for (const thing of ["a tube of concealer on the bathroom counter", "the face of the board planed smooth", "a clock face on the wall"]) {
+      const scenes = [pic(1, "Here it is.", thing)];
+      markHostBroll(scenes, { hostLook: "a man with a grey beard" }, "https://x/host.png");
+      expect(scenes[0].humanPresent).toBeFalsy();
+    }
+  });
+});
+
+describe("only a make-up step shows the face (Dale's job 372 test, 2026-10-15)", () => {
+  it("'her face lit by the glow of a phone' is the host, face kept out", () => {
+    const scenes = [pic(1, "She scrolls at night.", "seen from the side, her face lit by the glow of a phone showing a buy-and-sell app")];
+    markHostBroll(scenes, { hostLook: "a man with a grey beard" }, "https://x/host.png");
+    expect(scenes[0].humanPresent).toBe(true);
+    expect(scenes[0].hostFaceShown).toBeUndefined();
+  });
+});

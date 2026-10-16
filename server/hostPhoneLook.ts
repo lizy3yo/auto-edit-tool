@@ -37,12 +37,14 @@ import { getApimartEditKey, getApimartSlotKey } from "./longformVideo";
 import { PROVIDER_ACCOUNT_MAX } from "../shared/accountPool";
 import {
   PHONE_LOOK_KEY_PREFIX,
+  PHONE_LOOK_UPGRADES_FROM,
   PHONE_LOOK_VERSION,
   phoneLookFailure,
   usablePhoneLook,
 } from "../shared/hostPhotoLook";
 import type { ImageAspectRatio } from "../shared/types";
 import type { ChannelHostPhoto } from "../drizzle/schema";
+import { judgeHostPhoto, measureHostPhoto } from "./hostPhotoScore";
 
 /**
  * The recipe — word for word the one behind the samples the operator chose on 2026-10-11. It names
@@ -61,8 +63,10 @@ export const PHONE_LOOK_PROMPT =
   "KEEP THE PERSON EXACTLY WHO THEY ARE: the same face and features, the SAME AGE — not older, not younger, no added " +
   "wrinkles — the same hair colour and hairstyle, the same make-up if they wear any (the same lipstick), the same " +
   "jewellery, clothes and pose. " +
-  "ONLY MAKE THE SKIN AND FINISH REAL instead of retouched: natural skin texture with slightly uneven tone and a little " +
-  "shine on the forehead and nose, no airbrushing, no glow, no beauty smoothing; a few stray hairs. The expression is " +
+  "ONLY MAKE THE SKIN AND FINISH REAL instead of retouched: the skin of a real person of their age as a phone camera " +
+  "sees it — clearly visible pores across the cheeks, nose and chin, fine lines, a few light marks or freckles, slightly " +
+  "uneven tone with a little natural redness, a little shine on the forehead and nose; no powder finish, no airbrushing, " +
+  "no glow, no beauty smoothing, no soft focus; a few stray hairs. Make-up, if any, stays light and real. The expression is " +
   "relaxed and natural — a soft, easy look at the phone, not a posed camera smile. " +
   "PICTURE QUALITY OF ORDINARY PHONE VIDEO, not a photograph: flat, dull indoor light from an ordinary ceiling light and a " +
   "window, with no flattering light on the face, no warm or golden tone; the face a little dim. Muted, slightly washed-out " +
@@ -71,6 +75,66 @@ export const PHONE_LOOK_PROMPT =
   "compression — eyes, eyebrows, hair and beard still clearly readable, but no razor-sharp micro detail and no sparkle. " +
   "The whole room is in focus, nothing blurred behind the person. " +
   "Not cinematic, not a portrait, not professional. No text, logos or watermarks.";
+
+/**
+ * A LIP-SYNC-READY MOUTH (2026-10-16), added to the recipe only for a photo whose lips are hard to
+ * see (`judgeHostPhoto` mouth < `MOUTH_READY_BELOW`): the lip-sync model has to invent lips and teeth
+ * a moustache or beard hides, and draws them as a smear. Measured on HeyGen renders of the same
+ * line, judged side by side against the brief's benchmark (Bertha): Frederick's lips-parted copy
+ * 3/3 Bertha-level, Dale's 3/3 where his original was "clearly worse", Hank's lips-clear copy 3/3
+ * where his original and plain phone look were 0/3. Hosts whose lips already show are not touched.
+ * Names no person — it applies to any channel.
+ */
+export const MOUTH_READY_CLAUSE =
+  "THE MOUTH, for a talking-head video: any moustache is trimmed short and neat so it sits ABOVE the upper lip and " +
+  "never covers it, and any beard is trimmed short directly below the lower lip and at the corners of the mouth, so " +
+  "the whole outline of both lips is clear. The lips are relaxed and slightly parted, the bottom edge of the upper " +
+  "front teeth and the top edge of the lower front teeth naturally visible, real teeth with small gaps between them. " +
+  "Even light on the mouth and chin, no shadow under the lower lip. Keep glasses, hair, clothes and everything else " +
+  "exactly as they are.";
+
+/**
+ * The same fix with the lips RESTING CLOSED (beard and moustache still clear of them). Under test
+ * (2026-10-16): a lip-sync model returns to the photo's pose whenever the voice stops, so a parted,
+ * teeth-showing rest reads as a mouth that never closes (Dale, Granny Ruth).
+ */
+export const MOUTH_READY_CLOSED_CLAUSE =
+  "THE MOUTH, for a talking-head video: any moustache is trimmed short and neat so it sits ABOVE the upper lip and " +
+  "never covers it, and any beard is trimmed short directly below the lower lip and at the corners of the mouth, so " +
+  "the whole outline of both lips is clear. The MOUTH IS CLOSED, at rest, NOT mid-word: the lips are pressed gently " +
+  "together along their whole length, NO teeth visible at all, the jaw relaxed, a calm neutral resting expression — " +
+  "even if the photo shows the person talking or smiling. The line between the lips and both lip edges are crisp and " +
+  "clearly visible. Even light on the mouth and chin, no shadow under the lower lip. " +
+  "Keep glasses, hair, clothes and everything else exactly as they are.";
+
+/**
+ * A MOUTH AT REST (2026-10-16): a lip-sync model returns to the photo's mouth whenever the voice
+ * stops, so a photo taken MID-WORD gives a host whose mouth never closes between sentences (Dale's
+ * pauses showed teeth). A smile is left alone: resting one hid the teeth HeyGen copies (Ruth's lower
+ * mouth got worse, nothing gained). HeyGen's own advice for a photo
+ * avatar is a neutral, closed mouth. Asking for it INSIDE the recipe did not hold — the restyle
+ * reopened Dale's mouth every time — so it is its own small edit of the finished copy, made only
+ * when the judge sees the copy's mouth open (`HostPhotoJudgement.open`), and the edited copy goes
+ * through the same framing lock and checks. Names no person — it applies to any channel.
+ */
+export const REST_MOUTH_PROMPT =
+  "Edit ONLY the mouth of this photo. Close the mouth: the lips rest gently together along their whole length, " +
+  "NO teeth visible, the jaw relaxed — a calm, neutral resting mouth; a soft closed-lip smile if the person was " +
+  "smiling. Any moustache stays above the upper lip and any beard clear of the lower lip, so both lips stay clearly " +
+  "visible with crisp edges. Change NOTHING else: the same person, face, eyes, glasses, hair, make-up, clothes, pose, " +
+  "room, light, colours, softness, framing and size. The skin stays exactly as real as it is — visible pores, fine " +
+  "lines, small marks and slightly uneven tone, with no smoothing, airbrushing or glow anywhere on the face.";
+
+/** Edits of an open mouth before the copy is kept as it was. Each is a paid image. */
+export const REST_MOUTH_DRAWS = 2;
+
+/** A photo whose lips are judged below this gets `MOUTH_READY_CLAUSE`. */
+export const MOUTH_READY_BELOW = 4;
+
+/** The extra instruction a photo needs from its judged lips (1-5, null = no verdict). Pure. */
+export function mouthReadyExtra(lips: number | null): string | undefined {
+  return lips != null && lips < MOUTH_READY_BELOW ? MOUTH_READY_CLAUSE : undefined;
+}
 
 // ─── Framing: the copy is lined up to the original ───────────────────────────────────────────
 
@@ -325,10 +389,16 @@ export async function apimartKey(): Promise<string> {
 }
 
 /** One draw of the recipe from the photo at `sourceUrl`, as the image model returned it. */
-async function drawPhoneLook(sourceUrl: string, shape: ImageAspectRatio): Promise<Buffer> {
+async function drawPhoneLook(
+  sourceUrl: string,
+  shape: ImageAspectRatio,
+  extra?: string,
+  /** A whole prompt in place of the recipe (the mouth-at-rest edit). */
+  prompt?: string
+): Promise<Buffer> {
   const adapter = new ApimartAdapter(await apimartKey());
   const [r] = await adapter.generateImage({
-    prompt: PHONE_LOOK_PROMPT,
+    prompt: prompt ?? (extra ? `${PHONE_LOOK_PROMPT} ${extra}` : PHONE_LOOK_PROMPT),
     model: "gpt-image-2",
     aspectRatio: shape,
     count: 1,
@@ -342,6 +412,19 @@ async function drawPhoneLook(sourceUrl: string, shape: ImageAspectRatio): Promis
 
 /** A draw that could not be used, and why — the next draw may still pass. */
 class RejectedDraw extends Error {}
+
+/**
+ * The lowest judged skin (1-5, `PHOTO_JUDGE_SYSTEM`) a phone-look copy may have: 4 = "real skin, a
+ * little smoothed". Scarlett's airbrushed original judged 2, her first copy 4, Brenda's 5.
+ */
+export const PHONE_LOOK_MIN_SKIN = 4;
+
+/** Why a copy's skin is refused, or null. A judge with no answer (null) passes. Pure. */
+export function skinFault(skin: number | null): string | null {
+  return skin != null && skin < PHONE_LOOK_MIN_SKIN
+    ? `the skin still looks retouched (${skin}/5) — it must look like real, unretouched skin`
+    : null;
+}
 
 /** How many times one photo is drawn before it keeps its original. Each draw is a paid image. */
 export const PHONE_LOOK_DRAWS = 2;
@@ -374,7 +457,90 @@ async function finishDraw(
   if (moved) throw new RejectedDraw(moved);
   const poor = qualityFault(await measureLook(locked), original.look);
   if (poor) throw new RejectedDraw(poor);
+  // REAL SKIN (2026-10-15): the recipe asks for unretouched skin, and the copy is what HeyGen
+  // animates — an airbrushed face on screen is the review's "Scarlett's skin is too smooth".
+  // Judged (`hostPhotoScore.ts`: no pixel statistic told real skin from airbrushed); a judge that
+  // cannot answer passes the copy, as every check here fails open on its own outage.
+  const skin = skinFault((await judgeHostPhoto(locked, await measureHostPhoto(locked))).skin);
+  if (skin) throw new RejectedDraw(skin);
   return sharp(locked).jpeg({ quality: 92, chromaSubsampling: "4:4:4" }).toBuffer();
+}
+
+/**
+ * Rest an open mouth on a finished copy (`REST_MOUTH_PROMPT`). Returns the copy unchanged when the
+ * judge does not see its mouth open, or when no edit came back closed and through the checks — the
+ * copy has already passed everything, so this step only ever improves it.
+ */
+async function restMouthIfOpen(
+  copy: Buffer,
+  original: { image: Buffer; look: LookMeasure },
+  canvas: Canvas,
+  shape: ImageAspectRatio
+): Promise<Buffer> {
+  if ((await judgeHostPhoto(copy, await measureHostPhoto(copy))).open !== true) return copy;
+  console.log(`[HostPhoneLook] the mouth is open in the copy — resting it closed`);
+  try {
+    // the image model reads its input from a public URL
+    const { url } = await storagePut(`host-photos/rest-src-${nanoid(10)}.jpg`, copy, "image/jpeg");
+    for (let draw = 1; draw <= REST_MOUTH_DRAWS; draw++) {
+      try {
+        const rested = await finishDraw(
+          await drawPhoneLook(url, shape, undefined, REST_MOUTH_PROMPT),
+          original,
+          canvas
+        );
+        if ((await judgeHostPhoto(rested, await measureHostPhoto(rested))).open === true)
+          throw new RejectedDraw("the mouth is still open");
+        return rested;
+      } catch (err: any) {
+        if (!(err instanceof RejectedDraw)) throw err;
+        console.warn(`[HostPhoneLook] mouth edit ${draw}/${REST_MOUTH_DRAWS} refused: ${err.message}`);
+      }
+    }
+  } catch (err: any) {
+    console.warn(`[HostPhoneLook] mouth edit failed: ${err?.message ?? err}`);
+  }
+  console.warn(`[HostPhoneLook] kept the copy with its mouth open`);
+  return copy;
+}
+
+/**
+ * The mouth-at-rest step alone, on a copy already made from `sourceUrl` — for the bench, which
+ * tests it on the current copies. Returns the stored rested copy's URL, or null when it kept the
+ * copy as it was.
+ */
+export async function restMouthOfCopy(copyUrl: string, sourceUrl: string): Promise<string | null> {
+  const read = async (u: string) =>
+    Buffer.from(await (await fetch(await presignOwnBucketUrl(u), { signal: AbortSignal.timeout(60_000) })).arrayBuffer());
+  const source = await read(sourceUrl);
+  const meta = await sharp(source).metadata();
+  const canvas = canvasFor(meta.width ?? 0, meta.height ?? 0);
+  const image = await sharp(source).resize(canvas.width, canvas.height).png().toBuffer();
+  const copy = await read(copyUrl);
+  const rested = await restMouthIfOpen(
+    copy,
+    { image, look: await measureLook(image) },
+    canvas,
+    nearestShape(meta.width ?? 0, meta.height ?? 0)
+  );
+  if (rested === copy) return null;
+  return (await storagePut(`${PHONE_LOOK_KEY_PREFIX}v${PHONE_LOOK_VERSION}-${nanoid(10)}.jpg`, rested, "image/jpeg")).url;
+}
+
+/**
+ * Bring a copy of the previous recipe up to date (`PHONE_LOOK_UPGRADES_FROM`): only the steps the
+ * new recipe added, so its tested look is kept. Any failure keeps the copy as it was — it passed
+ * every check of its own recipe, and losing it would send the host back to the original photo.
+ */
+async function upgradePhoneLook(copyUrl: string, sourceUrl: string): Promise<string> {
+  return withMakeSlot(async () => {
+    try {
+      return (await restMouthOfCopy(copyUrl, sourceUrl)) ?? copyUrl;
+    } catch (err: any) {
+      console.warn(`[HostPhoneLook] could not bring the copy up to date, kept it: ${err?.message ?? err}`);
+      return copyUrl;
+    }
+  });
 }
 
 /** Two at a time across the process: a channel's whole library is listed at once. */
@@ -395,7 +561,15 @@ async function withMakeSlot<T>(run: () => Promise<T>): Promise<T> {
  * Make the phone-look copy of the photo at `sourceUrl` and store it. Throws — with the reason in
  * words an operator can act on — when the photo cannot be used or no draw passed the checks.
  */
-export async function makePhoneLookPhoto(sourceUrl: string): Promise<string> {
+export async function makePhoneLookPhoto(
+  sourceUrl: string,
+  /**
+   * One more instruction on top of the recipe — a NEW BASE PHOTO for a host the plain phone look
+   * does not fix (2026-10-15: lips clear of a moustache for a smeared lower mouth, real skin for an
+   * airbrushed face). Same draw, framing lock and checks; videos never pass it.
+   */
+  extra?: string
+): Promise<string> {
   return withMakeSlot(async () => {
     const resp = await fetch(await presignOwnBucketUrl(sourceUrl), {
       signal: AbortSignal.timeout(60_000),
@@ -410,14 +584,19 @@ export async function makePhoneLookPhoto(sourceUrl: string): Promise<string> {
     const canvas = canvasFor(width, height);
     const image = await sharp(source).resize(canvas.width, canvas.height).png().toBuffer();
     const original = { image, look: await measureLook(image) };
+    // a photo whose lips are hard to see gets a lip-sync-ready mouth (`MOUTH_READY_CLAUSE`)
+    const mouth = mouthReadyExtra((await judgeHostPhoto(source, await measureHostPhoto(source))).mouth);
+    if (mouth) console.log(`[HostPhoneLook] lips hard to see — making the mouth lip-sync ready`);
+    extra = [extra, mouth].filter(Boolean).join(" ") || undefined;
 
     let why = "";
     for (let draw = 1; draw <= PHONE_LOOK_DRAWS; draw++) {
       try {
-        const copy = await finishDraw(
-          await drawPhoneLook(sourceUrl, nearestShape(width, height)),
+        const copy = await restMouthIfOpen(
+          await finishDraw(await drawPhoneLook(sourceUrl, nearestShape(width, height), extra), original, canvas),
           original,
-          canvas
+          canvas,
+          nearestShape(width, height)
         );
         const { url } = await storagePut(
           `${PHONE_LOOK_KEY_PREFIX}v${PHONE_LOOK_VERSION}-${nanoid(10)}.jpg`,
@@ -456,7 +635,14 @@ export function ensurePhoneLook(row: ChannelHostPhoto): Promise<string | null> {
   if (running) return running;
   const job = (async () => {
     try {
-      const url = await makePhoneLookPhoto(row.imageUrl);
+      const upgradable =
+        PHONE_LOOK_UPGRADES_FROM != null &&
+        row.phoneLookVersion === PHONE_LOOK_UPGRADES_FROM &&
+        !!row.phoneImageUrl &&
+        !row.phoneLookError;
+      const url = upgradable
+        ? await upgradePhoneLook(row.phoneImageUrl!, row.imageUrl)
+        : await makePhoneLookPhoto(row.imageUrl);
       await updateChannelHostPhoto(row.id, {
         phoneImageUrl: url,
         phoneLookError: null,
@@ -506,7 +692,9 @@ export async function phoneLookForUrl(sourceUrl: string): Promise<string> {
   const key = `phone_look_v${PHONE_LOOK_VERSION}:${hash}`;
   const cached = await getAppSetting(key);
   if (cached) return cached;
-  const url = await makePhoneLookPhoto(sourceUrl);
+  const older =
+    PHONE_LOOK_UPGRADES_FROM != null ? await getAppSetting(`phone_look_v${PHONE_LOOK_UPGRADES_FROM}:${hash}`) : null;
+  const url = older ? await upgradePhoneLook(older, sourceUrl) : await makePhoneLookPhoto(sourceUrl);
   await setAppSetting(key, url);
   return url;
 }

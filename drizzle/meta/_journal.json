@@ -169,6 +169,13 @@
       "when": 1792073261559,
       "tag": "0023_messy_smiling_tiger",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "5",
+      "when": 1792078264703,
+      "tag": "0024_outgoing_silvermane",
+      "breakpoints": true
     }
   ]
 }
