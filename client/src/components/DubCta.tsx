@@ -162,12 +162,6 @@ export function DubCta({ channelKey }: { channelKey: string }) {
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Make dub CTAs</CardTitle>
-          <p className="text-sm text-muted-foreground">
-            A ready call to action for dubbed videos, one for the middle of a
-            video and one for the end. Every language uses the channel&apos;s
-            same b-roll pictures (below); only the voice, the book cover and the
-            QR link change. Making a language again replaces its two clips.
-          </p>
         </CardHeader>
         <CardContent className="space-y-4">
           {channel && languages && (
@@ -907,11 +901,6 @@ function SharedBroll({
     <Card>
       <CardHeader>
         <CardTitle className="text-base">Shared b-roll</CardTitle>
-        <p className="text-sm text-muted-foreground">
-          The same pictures go under every language. Each clip is: picture 1 →
-          the language&apos;s book cover → picture 2 → picture 3 with the big
-          QR.
-        </p>
       </CardHeader>
       <CardContent className="grid gap-6 lg:grid-cols-2">
         {DUB_CTA_POSITIONS.map(position => {

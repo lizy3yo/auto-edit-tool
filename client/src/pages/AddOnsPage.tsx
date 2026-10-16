@@ -62,7 +62,6 @@ export default function AddOnsPage() {
       <PageHeader
         icon={PackagePlus}
         title="Add-ons"
-        description="The short clips that sell a channel's book: the host's upsell VSL and the dub CTAs."
       />
       <div className="max-w-sm space-y-1.5">
         <Label className="text-xs" htmlFor="add-ons-channel">
