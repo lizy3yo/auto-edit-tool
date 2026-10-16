@@ -1,0 +1,61 @@
+import { describe, expect, it } from "vitest";
+import { Hct, argbFromRgb } from "@material/material-color-utilities";
+import { MIN_CONTRAST, contrastOf, themeFromPixels, withAlpha } from "./palette";
+import { THEME } from "./theme";
+
+/** A synthetic "photo": a list of [r, g, b, share] blocks. */
+function photo(blocks: [number, number, number, number][]): number[] {
+  const out: number[] = [];
+  for (const [r, g, b, n] of blocks) for (let i = 0; i < n; i++) out.push(argbFromRgb(r, g, b));
+  return out;
+}
+const hueOf = (hex: string) => Hct.fromInt((0xff000000 | parseInt(hex.slice(1), 16)) >>> 0).hue;
+const meetsMinimums = (c: ReturnType<typeof contrastOf>) => {
+  expect(c.text).toBeGreaterThanOrEqual(MIN_CONTRAST.text);
+  expect(c.accent).toBeGreaterThanOrEqual(MIN_CONTRAST.accent);
+  expect(c.muted).toBeGreaterThanOrEqual(MIN_CONTRAST.muted);
+  expect(c.accentOnPlate).toBeGreaterThanOrEqual(MIN_CONTRAST.accentOnPlate);
+};
+
+describe("theme from the host photo", () => {
+  it("the default (Steve's navy and blue) meets every contrast minimum", () => {
+    meetsMinimums(contrastOf(THEME));
+  });
+
+  it("takes a navy shirt's hue, and every pair stays readable", () => {
+    const { theme, report } = themeFromPixels(photo([[30, 45, 90, 4000], [200, 160, 140, 3000], [180, 180, 175, 3000]]));
+    expect(report.source).not.toBe("default");
+    expect(Math.abs(hueOf(theme.accent) - hueOf("#1E2D5A"))).toBeLessThan(30);
+    meetsMinimums(report.contrast);
+  });
+
+  it("a shirt in many shades beats one big grey wall (Frederick's photo)", () => {
+    const { theme } = themeFromPixels(
+      photo([[140, 140, 131, 4500], [23, 40, 70, 500], [27, 44, 73, 450], [25, 39, 65, 400], [26, 42, 69, 400], [21, 37, 66, 350], [205, 160, 135, 2500], [120, 100, 80, 900]])
+    );
+    expect(Math.abs(hueOf(theme.accent) - hueOf("#172846"))).toBeLessThan(30);
+  });
+
+  it("never picks skin, even when the face fills most of the photo", () => {
+    const { theme } = themeFromPixels(photo([[205, 160, 135, 7000], [150, 110, 90, 1500], [40, 120, 70, 800]]));
+    expect(Math.abs(hueOf(theme.accent) - hueOf("#287846"))).toBeLessThan(30);
+  });
+
+  it("keeps the default when nothing in the photo can carry a colour", () => {
+    const { theme, report } = themeFromPixels(photo([[120, 120, 120, 5000], [200, 200, 198, 5000]]));
+    expect(report.source).toBe("default");
+    expect(theme).toEqual(THEME);
+  });
+
+  it("moves a red source off the warning red", () => {
+    const { theme, report } = themeFromPixels(photo([[200, 30, 35, 5000], [120, 120, 120, 5000]]));
+    expect(report.note).toContain("warning red");
+    const d = Math.abs(((hueOf(theme.accent) - hueOf(theme.danger) + 540) % 360) - 180);
+    expect(d).toBeGreaterThanOrEqual(25);
+    meetsMinimums(report.contrast);
+  });
+
+  it("withAlpha", () => {
+    expect(withAlpha("#44A3FF", 0.25)).toBe("rgba(68,163,255,0.25)");
+  });
+});

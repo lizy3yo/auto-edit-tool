@@ -1,0 +1,261 @@
+{
+  "job": 376,
+  "notes": "Frederick Barnes, 'smoke alarm' 3:19 practice film. Every word on a graphic is a word the narrator says; every time is found from those words. Nothing inside the CTA block (101.9-131.4 s). Cards sit on b-roll beats only, never over a paid host take; overlays may sit on either. A host caption never runs while the host name card is up (cold open), and sits below the chin.",
+  "cues": [
+    {
+      "id": "02-statement-slow",
+      "template": "Statement",
+      "start": "thick, greasy smoke",
+      "startPad": -0.25,
+      "end": "a single flame in the room",
+      "endPad": 0.4,
+      "props": {
+        "kicker": "The slow one",
+        "headline": {
+          "text": "Thick, greasy smoke before a single flame.",
+          "words": true
+        },
+        "emphasis": [
+          "smoke"
+        ]
+      }
+    },
+    {
+      "id": "03-number-3-minutes",
+      "template": "BigNumber",
+      "start": "from smoking to fully",
+      "startPad": -0.25,
+      "end": "about 3 minutes",
+      "endPad": -0.1,
+      "props": {
+        "kicker": "Today's foam furniture",
+        "value": 3,
+        "unit": "minutes",
+        "at": "@3 minutes",
+        "line": {
+          "text": "from smoking to fully involved",
+          "words": true
+        },
+        "countSec": 0.7
+      }
+    },
+    {
+      "id": "04a-host-caption",
+      "template": "HostCaption",
+      "start": "Its job is catching",
+      "startPad": -0.1,
+      "end": "the slow part",
+      "endPad": -0.1,
+      "props": {
+        "phrase": {
+          "text": "Its job is catching the slow part.",
+          "words": true
+        },
+        "emphasis": [
+          "slow"
+        ],
+        "exit": "cut"
+      }
+    },
+    {
+      "id": "04-chapter-1",
+      "template": "ChapterLabel",
+      "start": "First thing on the label",
+      "startPad": -0.05,
+      "end": "quick on open flame",
+      "endPad": -0.1,
+      "props": {
+        "kicker": "On the label · 1 of 3",
+        "number": 1,
+        "title": "The type"
+      }
+    },
+    {
+      "id": "05-versus-type",
+      "template": "Versus",
+      "start": "and it's what's in most of the cheap multipacks",
+      "startPad": 0,
+      "end": "substantially earlier",
+      "endPad": -0.1,
+      "props": {
+        "kicker": "First thing on the label",
+        "left": {
+          "icon": "1f525",
+          "title": "Ionization",
+          "sub": "Quick on open flame",
+          "at": 0
+        },
+        "right": {
+          "icon": "1f441",
+          "title": "Photoelectric",
+          "sub": "Sees the slow, smoldering fire",
+          "at": "@Photoelectric sees"
+        },
+        "winner": "right"
+      }
+    },
+    {
+      "id": "06-step-labels",
+      "template": "StepLabels",
+      "start": "get a stepladder",
+      "startPad": -0.1,
+      "end": "and read the label",
+      "endPad": 0.9,
+      "props": {
+        "steps": [
+          {
+            "text": "Get a stepladder",
+            "at": "@get a stepladder"
+          },
+          {
+            "text": "Take one alarm down",
+            "at": "@take one alarm down"
+          },
+          {
+            "text": "Read the label",
+            "at": "@read the label"
+          }
+        ]
+      }
+    },
+    {
+      "id": "07-icon-labels",
+      "template": "IconLabels",
+      "start": "Photoelectric, or dual sensor",
+      "startPad": -0.1,
+      "end": "is what you want",
+      "endPad": -0.1,
+      "props": {
+        "items": [
+          {
+            "icon": "2705",
+            "text": "Photoelectric",
+            "at": "@Photoelectric, or dual"
+          },
+          {
+            "icon": "2705",
+            "text": "Dual sensor",
+            "at": "@dual sensor"
+          }
+        ]
+      }
+    },
+    {
+      "id": "08-chapter-2",
+      "template": "ChapterLabel",
+      "start": "Second thing on the label",
+      "startPad": -0.05,
+      "durationSec": 4.4,
+      "props": {
+        "kicker": "On the label · 2 of 3",
+        "number": 2,
+        "title": "Power"
+      }
+    },
+    {
+      "id": "09-dim-caption",
+      "template": "DimCaption",
+      "start": "a plastic disc",
+      "startPad": -0.2,
+      "end": "doing absolutely nothing",
+      "endPad": -0.1,
+      "props": {
+        "phrase": {
+          "text": "A plastic disc doing absolutely nothing.",
+          "words": true
+        },
+        "emphasis": [
+          "nothing."
+        ]
+      }
+    },
+    {
+      "id": "10-chapter-3",
+      "template": "ChapterLabel",
+      "start": "Interconnection",
+      "startPad": -0.1,
+      "durationSec": 4.4,
+      "props": {
+        "kicker": "On the label · 3 of 3",
+        "number": 3,
+        "title": "Interconnection"
+      }
+    },
+    {
+      "id": "11-two-point",
+      "template": "TwoPoint",
+      "start": "The basement alarm",
+      "startPad": -0.05,
+      "end": "from your pillow",
+      "endPad": 0.8,
+      "props": {
+        "title": {
+          "text": "The basement alarm sets off the one six feet from your pillow.",
+          "words": true
+        },
+        "a": {
+          "label": "Basement",
+          "at": "@basement alarm"
+        },
+        "b": {
+          "label": "Your pillow",
+          "sub": "six feet away",
+          "at": "@your pillow"
+        }
+      }
+    },
+    {
+      "id": "12-number-10-years",
+      "template": "BigNumber",
+      "start": "At 10 years",
+      "startPad": -0.15,
+      "end": "the unit is finished",
+      "endPad": 0.6,
+      "props": {
+        "kicker": "Smoke alarms expire",
+        "value": 10,
+        "unit": "years",
+        "at": "@10 years",
+        "line": {
+          "text": "the unit is finished",
+          "words": true
+        }
+      }
+    },
+    {
+      "id": "13-warning",
+      "template": "WarningLabel",
+      "start": "If you find no date",
+      "startPad": -0.1,
+      "end": "it's old enough",
+      "endPad": 0.9,
+      "props": {
+        "text": {
+          "text": "No date at all? It's old enough.",
+          "words": true
+        },
+        "emphasis": [
+          "old"
+        ]
+      }
+    },
+    {
+      "id": "14-quote",
+      "template": "Quote",
+      "start": "Close the bedroom doors",
+      "startPad": -0.1,
+      "end": "doors at night",
+      "endPad": -0.12,
+      "props": {
+        "quote": {
+          "text": "Close the bedroom doors at night.",
+          "words": true
+        },
+        "author": "Frederick Barnes",
+        "emphasis": [
+          "doors"
+        ]
+      }
+    }
+  ]
+}

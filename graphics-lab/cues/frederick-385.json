@@ -1,0 +1,164 @@
+{
+ "job": 385,
+ "notes": "Written by scripts/plan.mts (claude-opus-5-5) on 2026-10-16: 9 graphics for a 3.5-min film (limits: 2 cards, 4 overlays). Every cue resolved against the word times and checked by scripts/rules.mts; 0 dropped after one repair round.",
+ "cues": [
+  {
+   "id": "01-dim-three-things",
+   "template": "DimCaption",
+   "start": "By the end of this",
+   "startPad": -0.15,
+   "end": "three things printed on the box",
+   "endPad": 0.3,
+   "props": {
+    "phrase": {
+     "text": "You'll know three things printed on the box",
+     "words": true
+    },
+    "emphasis": [
+     "three"
+    ]
+   }
+  },
+  {
+   "id": "02-bignumber-three-minutes",
+   "template": "BigNumber",
+   "start": "And once today's foam furniture",
+   "startPad": -0.15,
+   "end": "in about 3 minutes.",
+   "endPad": 0.3,
+   "props": {
+    "kicker": "Foam furniture",
+    "value": 3,
+    "unit": "minutes",
+    "at": "@3 minutes",
+    "countSec": 0.6,
+    "line": {
+     "text": "A bedroom goes from smoking to fully involved",
+     "words": true
+    }
+   }
+  },
+  {
+   "id": "03-chapter-type",
+   "template": "ChapterLabel",
+   "start": "First thing on the label.",
+   "startPad": -0.15,
+   "durationSec": 4.5,
+   "props": {
+    "kicker": "On the label · 1 of 3",
+    "number": 1,
+    "title": "The type"
+   }
+  },
+  {
+   "id": "04-steps-check-label",
+   "template": "StepCards",
+   "start": "get a stepladder,",
+   "startPad": -0.15,
+   "end": "and read the label.",
+   "endPad": 0.3,
+   "props": {
+    "kicker": "Check yours",
+    "steps": [
+     {
+      "text": "Get a stepladder",
+      "icon": "1fa9c",
+      "at": "@get a stepladder"
+     },
+     {
+      "text": "Take one alarm down",
+      "icon": "1f6a8",
+      "at": "@take one alarm down"
+     },
+     {
+      "text": "Read the label",
+      "icon": "1f50d",
+      "at": "@read the label"
+     }
+    ]
+   }
+  },
+  {
+   "id": "05-icons-what-you-want",
+   "template": "IconLabels",
+   "start": "Photoelectric, or dual sensor,",
+   "startPad": -0.15,
+   "end": "is what you want.",
+   "endPad": 0.3,
+   "props": {
+    "items": [
+     {
+      "icon": "1f4a8",
+      "text": "Photoelectric",
+      "say": "Photoelectric",
+      "at": "@Photoelectric"
+     },
+     {
+      "icon": "1f6a8",
+      "text": "Dual sensor",
+      "say": "or dual sensor",
+      "at": "@or dual sensor"
+     }
+    ]
+   }
+  },
+  {
+   "id": "06-chapter-power",
+   "template": "ChapterLabel",
+   "start": "Second thing on the label.",
+   "startPad": -0.15,
+   "durationSec": 4.5,
+   "props": {
+    "kicker": "On the label · 2 of 3",
+    "number": 2,
+    "title": "Power"
+   }
+  },
+  {
+   "id": "07-host-sealed-unit",
+   "template": "HostCaption",
+   "start": "What you want is a",
+   "startPad": -0.15,
+   "end": "sealed 10-year unit.",
+   "endPad": 0.3,
+   "props": {
+    "phrase": {
+     "text": "What you want is a sealed 10-year unit.",
+     "words": true
+    },
+    "emphasis": [
+     "10-year"
+    ]
+   }
+  },
+  {
+   "id": "08-chapter-interconnection",
+   "template": "ChapterLabel",
+   "start": "Third thing. Interconnection.",
+   "startPad": -0.15,
+   "durationSec": 4.5,
+   "props": {
+    "kicker": "On the label · 3 of 3",
+    "number": 3,
+    "title": "Interconnection"
+   }
+  },
+  {
+   "id": "09-dim-alarms-expire",
+   "template": "DimCaption",
+   "start": "Smoke alarms expire. At 10",
+   "startPad": -0.15,
+   "end": "the unit is finished.",
+   "endPad": 0.3,
+   "props": {
+    "phrase": {
+     "text": "Smoke alarms expire. At 10 years the unit is finished.",
+     "words": true
+    },
+    "emphasis": [
+     "expire."
+    ]
+   }
+  }
+ ]
+}

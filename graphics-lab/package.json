@@ -1,0 +1,37 @@
+{
+  "name": "graphics-lab",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Isolated prototype: Steve Cooper-style motion graphics (cards, labels, word-timed captions) rendered with Remotion. Not imported by the app.",
+  "type": "module",
+  "scripts": {
+    "studio": "remotion studio src/index.ts",
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "cues": "tsx scripts/build-cues.mts",
+    "render": "tsx scripts/render.mts",
+    "composite": "tsx scripts/composite.mts",
+    "sheet": "tsx scripts/sheet.mts",
+    "bench": "tsx scripts/bench.mts"
+  },
+  "dependencies": {
+    "@material/material-color-utilities": "0.3.0",
+    "@remotion/bundler": "4.0.531",
+    "@remotion/cli": "4.0.531",
+    "@remotion/fonts": "4.0.531",
+    "@remotion/install-whisper-cpp": "4.0.531",
+    "@remotion/renderer": "4.0.531",
+    "react": "19.2.1",
+    "react-dom": "19.2.1",
+    "remotion": "4.0.531"
+  },
+  "devDependencies": {
+    "@fontsource/inter": "5.2.8",
+    "@types/node": "24.7.0",
+    "@types/react": "19.2.1",
+    "sharp": "0.34.5",
+    "tsx": "4.19.1",
+    "typescript": "5.9.3",
+    "vitest": "2.1.4"
+  }
+}
