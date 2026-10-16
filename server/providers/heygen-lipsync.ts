@@ -40,11 +40,19 @@ export interface LipsyncParams {
  * avatar. Measured 2026-10-11 on the same line, photo and voice, one render each: host size
  * change 6.8% → 0.4% and 3.5% → 1.5% on two hosts that zoomed, 0.8% → 0.9% on one that did not;
  * the room still in all three; faces and mouths as lively as before. No channel or host is named.
+ *
+ * HOW the head moves (2026-10-16, against the competitor review's Steve Cooper and Bertha Ramirez,
+ * whose heads drift gently side to side and stay level: up-and-down travel 6-14% of face height,
+ * side-to-side 11-14%). Ours bobbed — Dale 17.6%, Brenda 28%. Asking for "nods" made it worse; a
+ * level head with a slow sideways drift took Dale to 11.9% with every lip-sync check still passing,
+ * and left the calm hosts as they were. What stays: same spot, same distance, no zoom.
  */
 export const HOST_MOTION_SENTENCE =
-  "The person stays seated in the same spot, at the same distance from the camera, for the whole clip. " +
-  "No leaning toward or away from the camera, no moving closer, no camera movement and no zoom. " +
-  "Only small natural head movements and facial expressions while speaking.";
+  "The person stays seated in the same spot, at the same distance from the camera, for the whole clip; " +
+  "no leaning toward or away from the camera, no camera movement and no zoom. " +
+  "The head stays level with the chin steady: no nodding, no dipping the head down and no bobbing up and down. " +
+  "The only movement is a slow, gentle drift and an occasional slight sideways tilt of the head and shoulders " +
+  "together, smooth and unhurried, like a calm person talking on a video call.";
 
 /**
  * The motion sentence for a host render: `HOST_MOTION_SENTENCE`, or `HEYGEN_MOTION_PROMPT` when
@@ -55,6 +63,15 @@ export function hostMotionPrompt(): string | undefined {
   const set = process.env.HEYGEN_MOTION_PROMPT?.trim();
   if (set === "0") return undefined;
   return set || HOST_MOTION_SENTENCE;
+}
+
+/**
+ * Avatar IV's `expressiveness` — the energy and range of the host's movement (HeyGen: low, medium
+ * or high). "low" unless `HEYGEN_EXPRESSIVENESS` names another level; anything else is ignored.
+ */
+export function hostExpressiveness(): "low" | "medium" | "high" {
+  const set = process.env.HEYGEN_EXPRESSIVENESS?.trim().toLowerCase();
+  return set === "medium" || set === "high" ? set : "low";
 }
 
 /**
@@ -490,7 +507,7 @@ export class HeygenLipsyncAdapter {
             // expressiveness is TOP-LEVEL, not an engine field — nesting it 400s with
             // "Extra inputs are not permitted" (the Avatar IV guide shows it nested; the
             // API reference and the live API disagree with the guide).
-            expressiveness: "low",
+            expressiveness: hostExpressiveness(),
             engine: { type: "avatar_iv" },
             resolution: "1080p",
             aspect_ratio: "16:9",

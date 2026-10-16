@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   HeygenLipsyncAdapter,
   HOST_MOTION_SENTENCE,
+  hostExpressiveness,
   heygenSlotsFor,
   notifyHeygenVideo,
   waitForHeygenVideo,
@@ -541,5 +542,18 @@ describe("per-account isolation", () => {
       audioUrl,
     });
     expect(registrations(calls)).toBe(0);
+  });
+});
+
+describe("hostExpressiveness", () => {
+  afterEach(() => {
+    delete process.env.HEYGEN_EXPRESSIVENESS;
+  });
+  it("is low unless a known level is set", () => {
+    expect(hostExpressiveness()).toBe("low");
+    process.env.HEYGEN_EXPRESSIVENESS = "Medium";
+    expect(hostExpressiveness()).toBe("medium");
+    process.env.HEYGEN_EXPRESSIVENESS = "wild";
+    expect(hostExpressiveness()).toBe("low");
   });
 });

@@ -680,6 +680,27 @@ Express · tRPC · Drizzle · MySQL.
   `measure-mouth-open.mts` looks for the face on the first three seconds, not frame 0 only (it missed
   Ruth on two takes). A library can hold OTHER hosts' photos (the local Amos channel holds Ruth's and
   Roger's; the auto-pick chose Ruth's as the best-scored) — nothing checks a photo is the channel's host.
+- **How the host's head moves** (2026-10-16, the operator: "the body movement isn't ideal and not
+  smooth unlike Bertha and Steve Cooper"). Host takes are shipped as HeyGen renders them (the steadier
+  leaves them alone), so movement is decided by two things we send and one we choose: the motion
+  sentence, `expressiveness`, and the PHOTO. `scripts/trace-host-head.mts` follows the head every frame
+  and prints side-to-side and up-down travel (% of face size), the slow share and JERK (how abruptly it
+  speeds up and stops), with a plot. The competitors (the review's clips, `voice-compare/body/`): Steve
+  side 14 / up-down 6 / jerk 44, Bertha 11 / 14 / 75 — a level head drifting gently sideways. Ours
+  BOBBED: Brenda up-down 28, Dale 18, Beau and Norbert 17. What was tried, 3 takes per host, the same
+  voice takes every time so only the setting changed: asking for "small nods" made the bobbing WORSE
+  (Brenda 28 → 31-33); `expressiveness` medium more so; "eyes on the camera" cost mouth closing on Dale
+  and Frederick; capping sentence pauses at 0.45 s changed no head (Brenda 29 either way; Scarlett lost
+  1.9 s of a 12 s line) and was not kept. What won: (a) `HOST_MOTION_SENTENCE` asks for a LEVEL head — no nodding, dipping or
+  bobbing — with a slow sideways drift and tilt of head and shoulders together: Dale 17.6 → 11.9, the
+  calm hosts unchanged, every lip-sync check as before. `HEYGEN_EXPRESSIVENESS` (`hostExpressiveness`,
+  default low) exists for testing only. (b) A CAP BRIM LOW OVER THE EYES makes HeyGen tip the head
+  back each time the host starts a sentence — the bobbing followed Brenda's PHOTO onto another voice
+  and stayed off Scarlett's photo with Brenda's voice. The same photo with the brim raised: Brenda 29 →
+  20, Beau 17.4 → 13.6 (Bertha 13.7). Brenda and Beau now use those as new base photos (picked by hand;
+  the old ones stay in the library). NOT automatic: Sonnet spots a cap every time but judged the brim's
+  HEIGHT backwards on all four photos, and the framing check refuses a moved brim (match 0.74 < 0.87)
+  — so for a new channel, a host photo with a cap needs the brim above the eyebrows.
 - **The combined test** (`scripts/combined-bench.mts`): the winning photo AND the winning voice per
   persona, through the voice session's own `scripts/voice-bench.mts --heygen` (words, loudness, noise
   in pauses, lip-sync against the voice) plus the lower mouth vs Bertha and the clip's skin, one pass
