@@ -2109,3 +2109,116 @@ describe("a typed redo prompt owns the picture (job 383 scenes 20, 33 and 40)", 
     expect(s.keyThing).toBe("coaster");
   });
 });
+
+describe("a picture that repeats the words before it gets its own view past the limit (job 399 scenes 20-21)", () => {
+  // Job 399 (a 202.5 s film): the planner wrote the identical shot for two storyboard beats of one
+  // sentence, unmarked. 11.7 s + 6.3 s at 1:36 is past the second quarter's 15 s, so they could not
+  // join — and with no view of its own the second went to the picture model with the same words and
+  // came back a tighter crop of the first: the same bag on screen for 18 s.
+  const BAG = "several closed small liquor bottles tucked inside an open carry-on bag on a seat";
+  const BAG_PROMPT = "Several unopened small liquor bottles tucked inside an open carry-on bag placed on an aircraft seat.";
+  const CLOSE = ", a close-up of one detail of it filling the frame";
+  const FILM_SEC = 202.47;
+  const film = () => [
+    scene(19, "One more thing about drinks, because it catches good people off guard.", {
+      wordCut: true,
+      hostPresent: true,
+      showSubject: "a small liquor bottle standing closed on the beverage cart tray",
+      splitVisual: "A small unopened liquor bottle standing on the galley beverage cart during flight service.",
+      keyThing: "small liquor bottle",
+      audioDuration: 4.1519,
+    }),
+    scene(
+      20,
+      "On a U. S. airline, the only alcohol you're allowed to drink is alcohol the airline serves you, so the little bottles tucked in your carry-on stay closed. That's in the federal aviation rules,",
+      { wordCut: true, showSubject: BAG, visualPrompt: BAG_PROMPT, keyThing: "small liquor bottle", audioDuration: 11.6667 }
+    ),
+    scene(21, "section one twenty-one point five seventy-five, and it doesn't care how good your intentions were.", {
+      wordCut: true,
+      showSubject: BAG,
+      visualPrompt: BAG_PROMPT,
+      keyThing: "small liquor bottle",
+      audioDuration: 6.332,
+    }),
+    scene(
+      22,
+      "That takes care of your thirst. Now for the rumble that shows up somewhere over the middle of the country.",
+      {
+        wordCut: true,
+        showSubject: "the pretzel basket sitting on the beverage cart in the cabin aisle",
+        keyThing: "pretzel basket",
+        audioDuration: 13.821,
+      }
+    ),
+  ];
+  const START: Record<number, number> = { 19: 92.12, 20: 96.27, 21: 107.94, 22: 114.27 };
+  const limit = (s: StoryboardScene) => pictureMaxSecAt(START[s.index] ?? 0, FILM_SEC);
+
+  it("gives the later picture the next view when the two cannot join", () => {
+    expect(limit(film()[1])).toBeCloseTo(15);
+    const r = joinSameContext(film(), s => s.audioDuration ?? 0, limit);
+    expect(r.changed).toBe(true);
+    expect(r.scenes).toHaveLength(4);
+    expect(r.scenes[1].showSubject).toBe(BAG); // the first keeps its look
+    expect(r.scenes[1].visualPrompt).toBe(BAG_PROMPT);
+    expect(r.scenes[2].showSubject).toBe(`${BAG}${CLOSE}`);
+    expect(r.scenes[2].visualPrompt).toBe(`${BAG_PROMPT.replace(/\.$/, "")}${CLOSE}`);
+    // The next topic and the split are left alone.
+    expect(r.scenes[3].showSubject).toBe("the pretzel basket sitting on the beverage cart in the cabin aisle");
+    expect(r.scenes[0].showSubject).toBe("a small liquor bottle standing closed on the beverage cart tray");
+  });
+
+  it("does nothing more on the pipeline's next pass", () => {
+    const r = joinSameContext(film(), s => s.audioDuration ?? 0, limit);
+    const again = joinSameContext(r.scenes, s => s.audioDuration ?? 0, limit);
+    expect(again.changed).toBe(false);
+    expect(again.scenes.map(s => s.showSubject)).toEqual(r.scenes.map(s => s.showSubject));
+  });
+
+  it("still plays the same pair as ONE picture when it fits the limit", () => {
+    // Later in a film the limit is 18 s: 11.7 + 6.3 fits, so the line keeps the first picture.
+    const r = joinSameContext(film(), s => s.audioDuration ?? 0, () => 18);
+    expect(r.scenes).toHaveLength(3);
+    expect(r.scenes[1].showSubject).toBe(BAG);
+    expect(r.scenes[1].scriptText).toContain("good your intentions were.");
+  });
+
+  it("a third repeat takes the view after the second's, never back to the first's", () => {
+    const three = [20, 21, 22].map(i =>
+      scene(i, `line ${i}`, { wordCut: true, showSubject: BAG, visualPrompt: BAG_PROMPT, audioDuration: 7 })
+    );
+    const r = joinSameContext(three, s => s.audioDuration ?? 0, () => 10.5);
+    expect(r.scenes.map(s => s.showSubject)).toEqual([
+      BAG,
+      `${BAG}${CLOSE}`,
+      `${BAG}, seen from much further back with the whole place around it`,
+    ]);
+  });
+
+  it("words that already repeat a view are moved to the next one", () => {
+    const both = [20, 21].map(i => scene(i, `line ${i}`, { wordCut: true, showSubject: `${BAG}${CLOSE}`, audioDuration: 9 }));
+    const r = joinSameContext(both, s => s.audioDuration ?? 0, () => 10.5);
+    expect(r.scenes[0].showSubject).toBe(`${BAG}${CLOSE}`);
+    expect(r.scenes[1].showSubject).toBe(`${BAG}, seen from much further back with the whole place around it`);
+  });
+
+  it("leaves alone a picture with its own words, its own view, or beside a split", () => {
+    // Different words past the limit: two pictures already.
+    const other = film();
+    other[2].showSubject = "a printed page of aviation rules beside a closed carry-on bag";
+    const r1 = joinSameContext(other, s => s.audioDuration ?? 0, limit);
+    expect(r1.changed).toBe(false);
+    expect(r1.scenes[2].showSubject).toBe("a printed page of aviation rules beside a closed carry-on bag");
+    // A view of its own already (a split topic's later part): not touched again.
+    const viewed = film();
+    viewed[2].showSubject = `${BAG}, seen from the other side`;
+    const r2 = joinSameContext(viewed, s => s.audioDuration ?? 0, limit);
+    expect(r2.scenes[2].showSubject).toBe(`${BAG}, seen from the other side`);
+    // The same words as a split host beat: the split is never joined and its panel is drawn from its
+    // own description, so the picture after it keeps its words.
+    const besideSplit = film();
+    besideSplit[1].showSubject = besideSplit[0].showSubject;
+    const r3 = joinSameContext(besideSplit, s => s.audioDuration ?? 0, limit);
+    expect(r3.scenes[1].showSubject).toBe("a small liquor bottle standing closed on the beverage cart tray");
+  });
+});

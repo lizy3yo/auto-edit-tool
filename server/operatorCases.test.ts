@@ -2034,3 +2034,37 @@ describe("a picture never ships a known fault in silence (the audit, 2026-10-18)
     expect(out).toContain("house sign");
   });
 });
+
+describe("one topic past its limit is never the same picture twice (job 399 scenes 20-21)", () => {
+  // The review of job 399: two shots planned with the identical description, unmarked, 11.7 s + 6.3 s
+  // past the second quarter's 15 s — the second came back a tighter crop of the first (18 s of one bag).
+  const BAG = "several closed small liquor bottles tucked inside an open carry-on bag on a seat";
+  const at = (index: number, scriptText: string, audioDuration: number, showSubject = BAG) =>
+    pic(index, scriptText, showSubject, { wordCut: true, audioDuration, keyThing: "small liquor bottle" });
+
+  it("399-21: the repeat gets a view of its own; the first keeps its look", async () => {
+    const { joinSameContext, OTHER_VIEWS } = await import("./shotList");
+    const r = joinSameContext(
+      [
+        at(20, "so the little bottles tucked in your carry-on stay closed. That's in the federal aviation rules,", 11.6667),
+        at(21, "section one twenty-one point five seventy-five, and it doesn't care how good your intentions were.", 6.332),
+      ],
+      s => s.audioDuration ?? 0,
+      () => 15
+    );
+    expect(r.scenes.map(s => s.showSubject)).toEqual([BAG, `${BAG}${OTHER_VIEWS[0]}`]);
+    expect(r.scenes[1].visualPrompt).toBe(`${BAG}${OTHER_VIEWS[0]}`);
+  });
+
+  it("within the limit the same words are still one picture, and different words are left alone", async () => {
+    const { joinSameContext } = await import("./shotList");
+    const fits = joinSameContext([at(20, "a", 11.6667), at(21, "b", 6.332)], s => s.audioDuration ?? 0, () => 18);
+    expect(fits.scenes).toHaveLength(1);
+    const apart = joinSameContext(
+      [at(20, "a", 11.6667), at(21, "b", 6.332, "the pretzel basket sitting on the beverage cart in the cabin aisle")],
+      s => s.audioDuration ?? 0,
+      () => 15
+    );
+    expect(apart.changed).toBe(false);
+  });
+});

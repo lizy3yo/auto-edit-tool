@@ -2433,9 +2433,10 @@ export function joinHookPictures(
  * Pictures the shot list marked `sameShot` (the context did not change) play as ONE picture with
  * the picture before them — across beats too, since the storyboard cut the script into beats by
  * length, not by topic — as long as the joined picture stays within `maxAt` for where it starts
- * (`pictureMaxSecAt`). The first picture's look is kept: it is the one being continued. Never a
- * host take, a list item, a CTA/cover/asset beat or a split. Run on the FINAL lengths beside
- * `foldSnappedFlashes`. Pure — unit-tested.
+ * (`pictureMaxSecAt`). The first picture's look is kept: it is the one being continued. Past the
+ * limit the later picture is a different VIEW of the topic (`OTHER_VIEWS`), whether it was marked
+ * `sameShot` or only repeats the words before it. Never a host take, a list item, a CTA/cover/asset
+ * beat or a split. Run on the FINAL lengths beside `foldSnappedFlashes`. Pure — unit-tested.
  */
 /** Two shot descriptions of the same thing (case, punctuation and spacing aside). Pure. */
 /**
@@ -2480,13 +2481,17 @@ export function joinSameContext(
   let changed = false;
   // How many views of one topic have been shown so far along a chain of same-topic pictures.
   const views = new Map<StoryboardScene, number>();
+  // The words a picture had before this pass gave it a view: a third picture repeating them is still
+  // the same topic as the second, and takes the NEXT view instead of going back to the first's.
+  const wordsBefore = new Map<StoryboardScene, string>();
+  // `b` says exactly what `a` says — as `a` reads now, or as it read before this pass changed it.
+  const repeats = (a: StoryboardScene, b: StoryboardScene) =>
+    !!b.showSubject && [a.showSubject, wordsBefore.get(a)].some(t => !!t && sameSubject(t, b.showSubject!));
   for (let i = 1; i < out.length; i++) {
     const a = out[i - 1];
     const b = out[i];
     // The planner repeating the SAME subject for the next shot is the same context too.
-    const same =
-      b.sameShot ||
-      (!!a.showSubject && sameSubject(a.showSubject, b.showSubject ?? ""));
+    const same = b.sameShot || repeats(a, b);
     // A list's last item and a line right after it that shows the SAME thing are one picture —
     // the list keeps its pace, the picture just stays (Dale's 3-min test, job 230: "furniture on
     // Marketplace" then the identical driveway picture again, 1.8 s + 3.9 s).
@@ -2510,12 +2515,21 @@ export function joinSameContext(
       // rotation keeps its place across passes (job 244 showed "a close-up" twice in a row).
       const view = (views.get(a) ?? viewIndexOf(a.showSubject)) + 1;
       views.set(b, view);
-      const seen = OTHER_VIEWS.some(v => (b.showSubject ?? "").endsWith(v));
-      if (b.sameShot && b.showSubject && !seen) {
+      const seen = viewIndexOf(b.showSubject) > 0;
+      // A picture that only REPEATS the words before it needs its view as much as one marked to
+      // continue it (job 399 scenes 20-21: two beats' shots planned with the identical description,
+      // 11.7 s + 6.3 s past the quarter's 15 s, unmarked — both went to the picture model with the
+      // same words and the second came back a tighter crop of the first, one picture for 18 s).
+      // Words the picture before shows too are a copy even when they already name a view.
+      if (b.showSubject && ((b.sameShot && !seen) || repeats(a, b))) {
         const v = OTHER_VIEWS[(view - 1) % OTHER_VIEWS.length];
-        b.showSubject = withView(b.showSubject, v);
-        if (b.visualPrompt && !b.visualPrompt.endsWith(v)) b.visualPrompt = withView(b.visualPrompt, v);
-        changed = true;
+        const next = withView(b.showSubject, v);
+        if (next !== b.showSubject) {
+          if (!wordsBefore.has(b)) wordsBefore.set(b, b.showSubject);
+          b.showSubject = next;
+          if (b.visualPrompt && !b.visualPrompt.endsWith(v)) b.visualPrompt = withView(b.visualPrompt, v);
+          changed = true;
+        }
       }
       continue;
     }
@@ -2534,6 +2548,7 @@ export function joinSameContext(
     len.splice(i - 1, 2, len[i - 1] + len[i]);
     // The joined picture is the same view as the one it continues, so the next view rotates on.
     if (views.has(a)) views.set(joined, views.get(a)!);
+    if (wordsBefore.has(a)) wordsBefore.set(joined, wordsBefore.get(a)!);
     changed = true;
     i--; // the joined picture may continue into the next one too
   }
