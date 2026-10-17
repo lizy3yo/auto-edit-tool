@@ -1,0 +1,1 @@
+ALTER TABLE `channel_configs` ADD `motionGraphics` boolean DEFAULT true NOT NULL;

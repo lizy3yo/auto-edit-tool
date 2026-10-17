@@ -62,6 +62,7 @@ import {
   vslWordsLeft,
 } from "@shared/vsl";
 import { ROLE_LABEL } from "@shared/roles";
+import { hostPhotoLookState, hostPhotoUrl, testPhotoState, testPhotoUrl, type TestPhoto, usablePhoneLook } from "@shared/hostPhotoLook";
 import { downloadFile } from "@/lib/download";
 import { HostPhotoTile } from "./HostPhotoTile";
 import { HostPhotoPreview } from "./HostPhotoPreview";
@@ -95,31 +96,28 @@ import {
 
 const selectClass =
   "h-9 w-full rounded-md border border-input bg-background px-2 text-sm";
-const CHANNEL_MEMORY = "vsl-channel";
 const ACCEPTED = ["image/jpeg", "image/png", "image/webp"];
 
 type Vendor = "sixtynine_labs" | "minimax";
 
-const remembered = () => {
-  try {
-    return localStorage.getItem(CHANNEL_MEMORY) ?? "";
-  } catch {
-    return "";
-  }
-};
-
-export function UpsellVsl() {
+/**
+ * The Add-ons page's "Upsell VSL" tab. The channel is picked once at the top of that page, which
+ * remounts this per channel (`key`), so a new channel starts the form afresh.
+ */
+export function UpsellVsl({ channelKey }: { channelKey: string }) {
   const utils = trpc.useUtils();
   const { data: channels } = trpc.channelConfig.list.useQuery();
   const heygen = useHeygenTestStatus();
-  const [channelKey, setChannelKeyState] = useState(remembered);
   const [vendor, setVendor] = useState<Vendor>("sixtynine_labs");
   const [bookInput, setBookInput] = useState("");
   // The photo picked: a library photo's id, "upload" for the one uploaded for this VSL only, or
   // null for the channel's primary.
   const [photoId, setPhotoId] = useState<number | "upload" | null>(null);
-  // A photo uploaded for THIS VSL only (its URL) — never saved to the channel.
-  const [oneOff, setOneOff] = useState<string | null>(null);
+  // A photo uploaded for THIS VSL only — never saved to the channel.
+  const [oneOff, setOneOff] = useState<TestPhoto | null>(null);
+  // Phone look or original, per library photo, for THIS VSL — over the channel's own setting,
+  // which is where each photo starts and which this never writes.
+  const [lookFor, setLookFor] = useState<Record<number, boolean>>({});
   // The photo open in the big preview.
   const [previewOf, setPreviewOf] = useState<number | "upload" | null>(null);
   // An upload waiting for its answer: keep on the channel, or just this VSL.
@@ -131,22 +129,9 @@ export function UpsellVsl() {
   const [name, setName] = useState("");
   const [page, setPage] = useState(1);
 
-  const voiced = (channels ?? []).filter(c => c.voiceId || c.minimaxVoiceId);
-  const channel = voiced.find(c => c.channelKey === channelKey);
-  const setChannelKey = (key: string) => {
-    setChannelKeyState(key);
-    setBookInput("");
-    setPhotoId(null);
-    setOneOff(null);
-    setPreviewOf(null);
-    setPendingUpload(null);
-    setPage(1);
-    try {
-      localStorage.setItem(CHANNEL_MEMORY, key);
-    } catch {
-      // Private mode: the channel is simply not remembered.
-    }
-  };
+  const picked = channels?.find(c => c.channelKey === channelKey);
+  // A VSL is voiced in the channel's own voice, so a channel with none cannot make one.
+  const channel = picked?.voiceId || picked?.minimaxVoiceId ? picked : undefined;
   // A channel with only one vendor's voice gets that vendor; the chooser shows only with both.
   const effectiveVendor: Vendor =
     channel && !channel.voiceId && channel.minimaxVoiceId
@@ -159,9 +144,14 @@ export function UpsellVsl() {
     { channelKey, activeOnly: true },
     { enabled: !!channel }
   );
-  const { data: photos } = trpc.channelHostPhoto.list.useQuery(
+  const { data: libraryPhotos } = trpc.channelHostPhoto.list.useQuery(
     { channelKey, activeOnly: true },
-    { enabled: !!channel }
+    {
+      enabled: !!channel,
+      // A photo just kept on the channel has its phone look made in the background.
+      refetchInterval: query =>
+        query.state.data?.some(p => hostPhotoLookState(p) === "making") ? 5_000 : false,
+    }
   );
   // The channel's newest clip — its wording is where the next one starts.
   const { data: latest } = trpc.vsl.list.useQuery(
@@ -178,16 +168,30 @@ export function UpsellVsl() {
   }, [channel, channelKey, latest, templateFor]);
 
   const bookTitle = bookInput.trim();
+  // The channel's photos, each in the look picked for this VSL (else the channel's own).
+  const photos = useMemo(
+    () => libraryPhotos?.map(p => ({ ...p, useOriginal: lookFor[p.id] ?? p.useOriginal })),
+    [libraryPhotos, lookFor]
+  );
   const previewLibrary =
     typeof previewOf === "number" ? photos?.find(p => p.id === previewOf) : undefined;
+  const setPreviewLook = (useOriginal: boolean) => {
+    if (previewOf === "upload") setOneOff(prev => prev && { ...prev, useOriginal });
+    else if (previewOf != null) setLookFor(prev => ({ ...prev, [previewOf]: useOriginal }));
+  };
   // The primary photo unless another is picked.
   const usingOneOff = photoId === "upload" && !!oneOff;
   const photo = usingOneOff
     ? undefined
     : (photos?.find(p => p.id === photoId) ?? photos?.[0]);
-  const imageUrl = usingOneOff ? oneOff : (photo?.imageUrl ?? "");
+  const imageUrl = usingOneOff ? testPhotoUrl(oneOff) : photo ? hostPhotoUrl(photo) : "";
+  // Every photo renders in its phone look by default, as in the videos; Generate waits for it.
+  const makingLook = usingOneOff
+    ? testPhotoState(oneOff) === "making"
+    : !!photo && hostPhotoLookState(photo) === "making";
   const script = fillVslScript(template, bookTitle);
 
+  const phoneLook = trpc.heygenTest.phoneLook.useMutation();
   const upload = trpc.styleReference.upload.useMutation({
     onSuccess: ({ url }) => setPendingUpload(url),
     onError: err => toast.error(err.message),
@@ -203,23 +207,36 @@ export function UpsellVsl() {
     },
     onError: err => toast.error(err.message),
   });
-  /** Use the upload for this VSL only. */
+  /** Use the upload for this VSL only; its phone look is made here (cached per photo). */
   const applyJustHere = (url: string) => {
-    setOneOff(url);
+    setOneOff({ original: url, useOriginal: false, source: "upload" });
     setPhotoId("upload");
     setPendingUpload(null);
+    phoneLook.mutate(
+      { imageUrl: url },
+      {
+        onSuccess: ({ url: phone }) =>
+          setOneOff(prev => (prev?.original === url ? { ...prev, phone } : prev)),
+        onError: err =>
+          setOneOff(prev => (prev?.original === url ? { ...prev, failed: err.message } : prev)),
+      }
+    );
   };
 
   const words = countScriptWords(script);
   const left = vslWordsLeft(script);
   const estSec = estimateTestSeconds(script);
   const blocker = !channel
-    ? "Pick a channel."
+    ? picked
+      ? `${picked.displayName ?? channelKey} has no voice yet — set one in Channels.`
+      : "Pick a channel."
     : (heygen.blocker ??
       (photos && !imageUrl
         ? "This channel has no host photo — upload one."
-        : (vslInputError({ script, bookTitle }) ??
-          heygenTestInputError({ script, imageUrls: imageUrl ? [imageUrl] : [] }))));
+        : makingLook
+          ? "Making the phone look…"
+          : (vslInputError({ script, bookTitle }) ??
+            heygenTestInputError({ script, imageUrls: imageUrl ? [imageUrl] : [] }))));
 
   const startRequest = useRequestId();
   const start = trpc.vsl.start.useMutation({
@@ -246,39 +263,19 @@ export function UpsellVsl() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-3">
-            <div className="space-y-1.5">
-              <Label className="text-xs" htmlFor="vsl-channel">
-                Channel
-              </Label>
+          {channel?.voiceId && channel?.minimaxVoiceId && (
+            <div className="max-w-xs space-y-1.5">
+              <Label className="text-xs">Voice provider</Label>
               <select
-                id="vsl-channel"
                 className={selectClass}
-                value={channel ? channelKey : ""}
-                onChange={e => setChannelKey(e.target.value)}
+                value={vendor}
+                onChange={e => setVendor(e.target.value as Vendor)}
               >
-                <option value="">Pick a channel…</option>
-                {voiced.map(c => (
-                  <option key={c.channelKey} value={c.channelKey}>
-                    {c.displayName ?? c.channelKey}
-                  </option>
-                ))}
+                <option value="sixtynine_labs">69Labs</option>
+                <option value="minimax">MiniMax</option>
               </select>
             </div>
-            {channel?.voiceId && channel?.minimaxVoiceId && (
-              <div className="space-y-1.5">
-                <Label className="text-xs">Voice provider</Label>
-                <select
-                  className={selectClass}
-                  value={vendor}
-                  onChange={e => setVendor(e.target.value as Vendor)}
-                >
-                  <option value="sixtynine_labs">69Labs</option>
-                  <option value="minimax">MiniMax</option>
-                </select>
-              </div>
-            )}
-          </div>
+          )}
 
           {channel && (
             <>
@@ -316,10 +313,10 @@ export function UpsellVsl() {
                     const name = `Host photo ${i + 1}${i === 0 ? " (primary)" : ""}`;
                     return (
                       // The same tile as the HeyGen test: the picture picks it for this VSL, the
-                      // magnifier opens it big.
+                      // magnifier opens it big, the switch is this VSL's look for it.
                       <HostPhotoTile
                         key={p.id}
-                        imageUrl={p.imageUrl}
+                        imageUrl={hostPhotoUrl(p)}
                         active={on}
                         pressed={on}
                         pictureLabel={name}
@@ -331,12 +328,16 @@ export function UpsellVsl() {
                             {i === 0 ? "★ Primary" : `Photo ${i + 1}`}
                           </span>
                         }
+                        lookState={hostPhotoLookState(p)}
+                        onLookChange={useOriginal =>
+                          setLookFor(prev => ({ ...prev, [p.id]: useOriginal }))
+                        }
                       />
                     );
                   })}
                   {oneOff && (
                     <HostPhotoTile
-                      imageUrl={oneOff}
+                      imageUrl={testPhotoUrl(oneOff)}
                       active={usingOneOff}
                       pressed={usingOneOff}
                       pictureLabel="The photo uploaded for this VSL only"
@@ -344,6 +345,10 @@ export function UpsellVsl() {
                       onPreview={() => setPreviewOf("upload")}
                       corner={usingOneOff ? <PickedMark /> : undefined}
                       label={<span className="font-medium text-foreground">This VSL only</span>}
+                      lookState={testPhotoState(oneOff)}
+                      onLookChange={useOriginal =>
+                        setOneOff(prev => prev && { ...prev, useOriginal })
+                      }
                     />
                   )}
                   <label className="flex min-h-20 w-24 cursor-pointer flex-col items-center justify-center gap-1 rounded-md border border-dashed border-border text-[11px] text-muted-foreground hover:bg-muted">
@@ -375,11 +380,24 @@ export function UpsellVsl() {
                   </label>
                 </div>
                 <HostPhotoPreview
-                  imageUrl={
-                    previewOf === "upload" ? oneOff : (previewLibrary?.imageUrl ?? null)
+                  photo={
+                    previewOf === "upload" && oneOff
+                      ? {
+                          original: oneOff.original,
+                          phone: oneOff.phone,
+                          state: testPhotoState(oneOff),
+                        }
+                      : previewLibrary
+                        ? {
+                            original: previewLibrary.imageUrl,
+                            phone: usablePhoneLook(previewLibrary),
+                            state: hostPhotoLookState(previewLibrary),
+                          }
+                        : null
                   }
                   title="Host photo for this VSL"
                   onOpenChange={open => !open && setPreviewOf(null)}
+                  onChange={setPreviewLook}
                 />
               </div>
 

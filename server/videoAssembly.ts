@@ -2596,6 +2596,77 @@ export async function renderKenBurnsClip(
   });
 }
 
+/**
+ * A faceless call-to-action clip (Dub CTAs, `shared/dubCta.ts`): each part is a slow-zoom still
+ * (or the book cover's look) under its own voice, with the QR card small in the corner or big in
+ * the middle, joined and set to the film loudness every finished film leaves at. The same mux,
+ * QR card, phone finish and loudness step as a film's scenes, so it matches what it is cut into.
+ */
+export async function renderDubCtaClip(opts: {
+  parts: {
+    imageUrl: string;
+    audioUrl: string;
+    durationSec: number;
+    picture: "broll" | "cover";
+    qr: "corner" | "center";
+  }[];
+  qrPng: Buffer;
+}): Promise<Buffer> {
+  const { height } = dimensionsFor("16:9");
+  return withTempDir("dubcta", async workDir => {
+    const qrPath = path.join(workDir, "qr.png");
+    writeFileSync(qrPath, opts.qrPng);
+    const scenePaths = await Promise.all(
+      opts.parts.map(async (part, i) => {
+        const [video, audioPath] = await Promise.all([
+          renderKenBurnsClip(part.imageUrl, {
+            durationSec: part.durationSec,
+            aspectRatio: "16:9",
+            index: i,
+            cover: part.picture === "cover",
+          }),
+          downloadToTemp(part.audioUrl, workDir, `voice-${i}.mp3`),
+        ]);
+        const videoPath = path.join(workDir, `still-${i}.mp4`);
+        writeFileSync(videoPath, video);
+        const outputPath = path.join(workDir, `part-${i}.mp4`);
+        await runFfmpegWithRetry(
+          buildSceneMuxArgs({
+            videoPath,
+            audioPath,
+            outputPath,
+            durationSec: part.durationSec,
+            qrOverlay: { imagePath: qrPath, height, placement: part.qr },
+            look: part.picture === "broll" ? "broll" : undefined,
+          }),
+          "dubcta-part"
+        );
+        return outputPath;
+      })
+    );
+    const listPath = path.join(workDir, "list.txt");
+    writeFileSync(listPath, scenePaths.map(concatListLine).join("\n"));
+    const joined = path.join(workDir, "joined.mp4");
+    await runFfmpegWithRetry(
+      buildConcatCopyArgs({ listPath, outputPath: joined }),
+      "dubcta-concat"
+    );
+    const plan = planFilmLoudness(await measureFilmLoudness(joined));
+    if (!plan.needed) return readFileSync(joined);
+    const audioPath = path.join(workDir, "level.m4a");
+    await runFfmpegWithRetry(
+      buildFilmLoudnessArgs({ inputPath: joined, outputPath: audioPath, gainDb: plan.gainDb }),
+      "dubcta-loudness"
+    );
+    const finalPath = path.join(workDir, "final.mp4");
+    await runFfmpegWithRetry(
+      buildFilmRemuxArgs({ videoPath: joined, audioPath, outputPath: finalPath }),
+      "dubcta-remux"
+    );
+    return readFileSync(finalPath);
+  });
+}
+
 /** Build FFmpeg args to extract one re-encoded MP3 segment `[start, start+len)`. */
 export function buildAudioSegmentArgs(opts: {
   inputPath: string;

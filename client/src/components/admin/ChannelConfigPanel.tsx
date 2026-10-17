@@ -4,6 +4,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ChannelBooks } from "@/components/admin/ChannelBooks";
 import { ChannelAssets } from "@/components/admin/ChannelAssets";
 import { ChannelHostPhotos } from "@/components/admin/ChannelHostPhotos";
+import { ChannelDubVoices } from "@/components/admin/ChannelDubVoices";
+import {
+  type ChannelDubVoices as DubVoices,
+  channelDubVoicesError,
+  parseChannelDubVoices,
+} from "@shared/dubCta";
 import {
   diffFields,
   fieldCountLabel,
@@ -47,9 +53,41 @@ import {
   Mic,
   Plus,
   Save,
+  Search,
   Settings,
   Trash2,
+  X,
 } from "lucide-react";
+
+/** Lower-case and strip accents, so "chambray" finds "Chambray" and "e" finds "é". */
+function foldForSearch(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase();
+}
+
+/** Every word typed must appear somewhere in the channel's name, key, voice, host or author. */
+function channelMatchesSearch(
+  channel: { key: string; name: string },
+  config: { voiceName?: string; hostName?: string; authorName?: string } | undefined,
+  query: string
+): boolean {
+  const terms = foldForSearch(query).split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return true;
+  const haystack = foldForSearch(
+    [
+      channel.name,
+      channel.key,
+      config?.voiceName,
+      config?.hostName,
+      config?.authorName,
+    ]
+      .filter(Boolean)
+      .join(" ")
+  );
+  return terms.every(term => haystack.includes(term));
+}
 
 function ImageUploadField({
   label,
@@ -184,6 +222,8 @@ type EditForm = {
   defaultAngle: string;
   defaultFormat: string;
   defaultWordCount: string;
+  /** Motion graphics on this channel's videos ("on" by default). */
+  motionGraphics: "on" | "off";
 };
 
 /** Field order and wording for the "review changes" step. Ordered as the form is,
@@ -202,6 +242,7 @@ const EDIT_FIELDS: FieldSpec<EditForm>[] = [
   { field: "defaultAngle", label: "Default Angle" },
   { field: "defaultFormat", label: "Default Format" },
   { field: "defaultWordCount", label: "Word Count" },
+  { field: "motionGraphics", label: "Motion graphics" },
 ];
 
 /** The voice models a channel can pick, in both the edit and the create form. v4 acts out
@@ -230,6 +271,7 @@ export function ChannelConfigPanel() {
     refetch,
   } = trpc.channelConfig.listAllChannels.useQuery();
   const { data: configs } = trpc.channelConfig.list.useQuery();
+  const { data: dubLanguages } = trpc.dubCta.languages.useQuery();
   const upsertMutation = trpc.channelConfig.upsert.useMutation({
     onSuccess: () => {
       utils.channelConfig.list.invalidate();
@@ -260,9 +302,12 @@ export function ChannelConfigPanel() {
         defaultAngle: createForm.defaultAngle,
         defaultFormat: createForm.defaultFormat,
         defaultWordCount: createForm.defaultWordCount,
+        motionGraphics: "on",
       };
       setEditForm(created);
       setOriginalForm(created);
+      setDubForm({});
+      setDubOriginal({});
       setEditingChannel(data.channelKey);
       setCreateForm({
         displayName: "",
@@ -297,6 +342,7 @@ export function ChannelConfigPanel() {
   });
 
   const [editingChannel, setEditingChannel] = useState<string | null>(null);
+  const [channelSearch, setChannelSearch] = useState("");
   const [editForm, setEditForm] = useState<EditForm>({
     authorName: "",
     hostName: "",
@@ -311,9 +357,14 @@ export function ChannelConfigPanel() {
     defaultAngle: "",
     defaultFormat: "",
     defaultWordCount: "",
+    motionGraphics: "on",
   });
   /** The form as it was loaded, so Save can show what actually changed. */
   const [originalForm, setOriginalForm] = useState<EditForm | null>(null);
+  // The channel's own dub voice per language. A map, so it is staged beside `editForm` rather
+  // than in it, and diffed per language into the same review step.
+  const [dubForm, setDubForm] = useState<DubVoices>({});
+  const [dubOriginal, setDubOriginal] = useState<DubVoices>({});
   const [saveConfirmOpen, setSaveConfirmOpen] = useState(false);
 
   const [createOpen, setCreateOpen] = useState(false);
@@ -359,14 +410,24 @@ export function ChannelConfigPanel() {
       defaultWordCount: config?.defaultWordCount
         ? String(config.defaultWordCount)
         : "",
+      motionGraphics: config?.motionGraphics === false ? "off" : "on",
     };
     setEditForm(loaded);
     setOriginalForm(loaded);
+    const voices = parseChannelDubVoices(config?.dubVoices);
+    setDubForm(voices);
+    setDubOriginal(voices);
     setEditingChannel(channelKey);
   };
 
+  const dubSpecs: FieldSpec<DubVoices>[] = (dubLanguages ?? []).map(l => ({
+    field: l.code,
+    label: `Dub voice · ${l.name}`,
+    describe: v => (v.trim() ? `"${v.trim()}"` : "language default"),
+  }));
+  const dubChanges = diffFields(dubOriginal, dubForm, dubSpecs);
   const pendingChanges = originalForm
-    ? diffFields(originalForm, editForm, EDIT_FIELDS)
+    ? [...diffFields(originalForm, editForm, EDIT_FIELDS), ...dubChanges]
     : [];
 
   // Save is a two-step: review what changed, then commit. A bare "are you sure?"
@@ -375,6 +436,11 @@ export function ChannelConfigPanel() {
     if (!editingChannel) return;
     if (originalForm && pendingChanges.length === 0) {
       toast.info("No changes to save");
+      return;
+    }
+    const dubError = channelDubVoicesError(dubForm);
+    if (dubError) {
+      toast.error(dubError);
       return;
     }
     setSaveConfirmOpen(true);
@@ -400,6 +466,8 @@ export function ChannelConfigPanel() {
       hostLocation: editForm.hostLocation.trim() || null,
       voiceId: editForm.voiceId || undefined,
       minimaxVoiceId: editForm.minimaxVoiceId || undefined,
+      // Sent only when a language changed, so saving another field never rewrites the map.
+      dubVoices: dubChanges.length ? dubForm : undefined,
       voiceName: editForm.voiceName || undefined,
       ttsModel: editForm.ttsModel || undefined,
       ttsSpeed: editForm.ttsSpeed || undefined,
@@ -409,6 +477,7 @@ export function ChannelConfigPanel() {
       defaultWordCount: editForm.defaultWordCount
         ? parseInt(editForm.defaultWordCount)
         : undefined,
+      motionGraphics: editForm.motionGraphics === "on",
     });
     setSaveConfirmOpen(false);
     setEditingChannel(null);
@@ -449,6 +518,14 @@ export function ChannelConfigPanel() {
   configs?.forEach((c: any) => {
     configMap[c.channelKey] = c;
   });
+  // The channel open in the editor stays listed whatever is typed, so a search never
+  // hides a form with unsaved changes.
+  const visibleChannels = (allChannels ?? []).filter(
+    channel =>
+      channel.key === editingChannel ||
+      channelMatchesSearch(channel, configMap[channel.key], channelSearch)
+  );
+  const searching = channelSearch.trim().length > 0;
 
   const editFormSection = (
     <div className="mt-4 border-t border-border pt-4 space-y-4">
@@ -674,9 +751,33 @@ export function ChannelConfigPanel() {
                 Set by each video's script
               </div>
             </div>
+            {/* Steve Cooper-style cards, labels and captions, added when a video is assembled. */}
+            <div>
+              <Label className="text-xs">Motion graphics</Label>
+              <Select
+                value={editForm.motionGraphics}
+                onValueChange={v =>
+                  setEditForm(f => ({ ...f, motionGraphics: v === "off" ? "off" : "on" }))
+                }
+              >
+                <SelectTrigger className="mt-1 text-xs h-8">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="on">On</SelectItem>
+                  <SelectItem value="off">Off</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         </div>
       </div>
+      {/* The channel's voice in each dubbing language — staged with the fields above. */}
+      <ChannelDubVoices
+        languages={dubLanguages ?? []}
+        value={dubForm}
+        onChange={setDubForm}
+      />
       {/* Books live here rather than in their own Admin tab: a book belongs to exactly one
           channel, so editing them anywhere else meant re-picking the channel you already had
           open. These rows write immediately, unlike the staged fields above. */}
@@ -749,7 +850,55 @@ export function ChannelConfigPanel() {
             </div>
           ) : (
             <div className="space-y-3">
-              {allChannels?.map(channel => {
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="relative w-full min-w-0 flex-1 sm:max-w-sm">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    type="search"
+                    value={channelSearch}
+                    onChange={e => setChannelSearch(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === "Escape") setChannelSearch("");
+                    }}
+                    placeholder="Search by channel, host, voice or author…"
+                    aria-label="Search channels"
+                    className="pl-9 pr-9 [&::-webkit-search-cancel-button]:hidden"
+                  />
+                  {searching && (
+                    <button
+                      type="button"
+                      onClick={() => setChannelSearch("")}
+                      aria-label="Clear search"
+                      className="absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+                <span
+                  className="text-xs text-muted-foreground"
+                  aria-live="polite"
+                >
+                  {searching
+                    ? `${visibleChannels.length} of ${allChannels?.length ?? 0} channels`
+                    : `${allChannels?.length ?? 0} channels`}
+                </span>
+              </div>
+              {searching && visibleChannels.length === 0 && (
+                <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border py-10 text-center">
+                  <p className="text-sm text-muted-foreground">
+                    No channels match “{channelSearch.trim()}”
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setChannelSearch("")}
+                  >
+                    Clear search
+                  </Button>
+                </div>
+              )}
+              {visibleChannels.map(channel => {
                 const config = configMap[channel.key];
                 const isEditing = editingChannel === channel.key;
                 // A guest may open any channel and change only one they created.

@@ -254,3 +254,59 @@ describe("a cloned voice goes straight to the clone lane (2026-10-02)", () => {
     }
   });
 });
+
+describe("voice settings judged on the mouth (2026-10-16)", () => {
+  it("adds a pause after every sentence for a clone voice, never inside one", async () => {
+    const { withSentencePauses } = await import("./tts69labs");
+    expect(withSentencePauses("Most folks quit. The first try? No. Will it be yours! Yes.")).toBe(
+      "Most folks quit. <#0.3#> The first try? <#0.3#> No. <#0.3#> Will it be yours! <#0.3#> Yes."
+    );
+    // a quote or bracket after the stop, and a paragraph break, keep their place
+    expect(withSentencePauses('He said "stop." Then\n\nwe left.')).toBe(
+      'He said "stop." <#0.3#> Then\n\nwe left.'
+    );
+    // abbreviations, decimals and the last sentence get nothing
+    expect(withSentencePauses("Ask Dr. Smith on St. Paul road, e.g. near 1.5 miles.")).toBe(
+      "Ask Dr. Smith on St. Paul road, e.g. near 1.5 miles."
+    );
+    expect(withSentencePauses("One. Two.", 0)).toBe("One. Two.");
+  });
+
+  it("sends a clone the paced text and an ElevenLabs voice the clean text, boost and a legal speed", async () => {
+    const { createTTSTask69Labs } = await import("./tts69labs");
+    const CLONE = "11111111-2222-3333-4444-555555555555";
+    const originalFetch = globalThis.fetch;
+    const bodies: Record<string, any> = {};
+    globalThis.fetch = vi.fn(async (url: any, opts: any) => {
+      const u = String(url);
+      if (u.endsWith("/voice-clones"))
+        return new Response(JSON.stringify({ voiceClones: [{ id: CLONE, name: "Clone" }] }), { status: 200 });
+      if (opts?.body) bodies[u.split("/api/v1/")[1]] = JSON.parse(opts.body);
+      return new Response(JSON.stringify({ id: "task-9" }), { status: 200 });
+    }) as any;
+    try {
+      await createTTSTask69Labs("k-settings-1", { text: "One line. Two lines.", voiceId: CLONE });
+      expect(bodies["voice-clones/generate"].text).toBe("One line. <#0.3#> Two lines.");
+
+      await createTTSTask69Labs("k-settings-1", {
+        text: "One line. Two lines.",
+        voiceId: "XK2D1dLhRyHHPpQiW5WK",
+        speed: 0.68, // 0.8 × a "slow" paragraph — 69Labs refuses it
+        stability: 0.5,
+        style: 0,
+        similarity: 0.75,
+        speakerBoost: true,
+      });
+      expect(bodies["tts/generate"].text).toBe("One line. Two lines.");
+      expect(bodies["tts/generate"].voiceSettings).toEqual({
+        speed: 0.7,
+        stability: 0.5,
+        style: 0,
+        similarityBoost: 0.75,
+        useSpeakerBoost: true,
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});

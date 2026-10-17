@@ -197,6 +197,8 @@ export interface UnifiedTTSParams {
   stability?: number;
   similarity?: number;
   style?: number;
+  speakerBoost?: boolean;
+  sentencePauseSec?: number;
   minimaxSettings?: {
     speed?: number;
     pitch?: number;

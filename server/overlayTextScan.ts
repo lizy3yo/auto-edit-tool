@@ -487,6 +487,134 @@ export async function hasOverlayText(buffer: Buffer): Promise<boolean> {
  */
 const SAME_THING_MODEL = () => process.env.SAME_THING_MODEL || "claude-sonnet-5";
 
+/**
+ * Would a viewer think the same picture was shown twice? (2026-10-15, the review: "Dale repeats
+ * phone-screen pictures that look almost the same".) Asked only of pairs a picture fingerprint
+ * flagged (`server/pictureVariety.ts`), since the fingerprint alone cannot tell a near-copy from
+ * another picture of the same workshop.
+ */
+export const NEAR_COPY_SYSTEM =
+  "You compare two pictures from the same video. copy: true when a viewer would think the same " +
+  "picture was shown twice — the same kind of subject in the same setting, from nearly the same " +
+  "spot, distance and framing (two near-identical phone screens on the same bench, the same pile " +
+  "of pieces from the same angle). copy: false when they are clearly different pictures — " +
+  "another subject, another place, or the same subject from a clearly different distance or side.\n" +
+  'Return ONLY JSON: {"copy":true|false,"what":"<what makes them look alike, a few words, or empty>"}';
+
+/** Decide from the model's answer; anything unreadable is "not a copy". Pure. */
+export function parseNearCopyVerdict(raw: string, stopReason?: string): { copy: boolean; what: string } {
+  const m = /\{[\s\S]*\}/.exec(raw ?? "");
+  if (!m || stopReason === "max_tokens") return { copy: false, what: "" };
+  try {
+    const d = JSON.parse(m[0]);
+    return d?.copy === true ? { copy: true, what: String(d?.what ?? "").slice(0, 80) } : { copy: false, what: "" };
+  } catch {
+    return { copy: false, what: "" };
+  }
+}
+
+/** Are `earlier` and `buffer` near-copies? Side by side. Never throws: a dead check says no. */
+export async function scanNearCopy(earlier: Buffer, buffer: Buffer): Promise<{ copy: boolean; what: string }> {
+  try {
+    const side = (b: Buffer) => sharp(b).resize(640, 360, { fit: "cover" }).png().toBuffer();
+    const [left, right] = await Promise.all([side(earlier), side(buffer)]);
+    const pair = await sharp({ create: { width: 1280, height: 360, channels: 3, background: "#000" } })
+      .composite([
+        { input: left, left: 0, top: 0 },
+        { input: right, left: 640, top: 0 },
+      ])
+      .png()
+      .toBuffer();
+    const result = await invokeClaude({
+      systemPrompt: NEAR_COPY_SYSTEM,
+      userMessage: "Are these two pictures near-copies of each other?",
+      imageInput: { base64: pair.toString("base64"), mediaType: "image/png" },
+      maxTokens: 200,
+      model: SAME_THING_MODEL(),
+      thinking: "off",
+      step: "Near-copy check",
+    });
+    return parseNearCopyVerdict(result.text, result.stopReason);
+  } catch (err: any) {
+    console.warn(`[NearCopy] check failed: ${err?.message ?? err} — keeping the picture`);
+    return { copy: false, what: "" };
+  }
+}
+
+/**
+ * Is the person in a picture the HOST? (2026-10-15, the review: Scarlett's routine pictures showed
+ * "a different woman".) The host photo LEFT, the picture RIGHT. Only what the picture shows is
+ * judged — a picture from behind is judged on hair, build and clothes, one of the face on the face.
+ */
+export const SAME_HOST_SYSTEM =
+  "You compare two photos. LEFT: the host of a video. RIGHT: a new picture that must show THAT " +
+  "SAME person, often from the side or behind, close on their hands, neck or face, doing " +
+  "something. Compare only what the RIGHT picture lets you see: hair colour, length and style; " +
+  "skin tone; age (an older person must not become a young one, nor a woman a man); build; and, " +
+  "when the face is shown, the face itself — its shape and features. Clothes may differ. " +
+  "same: false when the RIGHT clearly shows a DIFFERENT person — different hair colour or style, " +
+  "clearly younger or older, different skin tone, a different face, or more than one person. " +
+  "When too little of the person shows to tell (hands only), judge what shows (age and skin " +
+  "tone of the hands) and give the benefit of the doubt.\n" +
+  'Return ONLY JSON: {"same":true|false,"what":"<what differs, a few words, or empty>"}';
+
+/** Decide from the model's answer; anything unreadable passes (a check never costs a render). Pure. */
+export function parseSameHostVerdict(raw: string, stopReason?: string): { same: boolean; what: string } {
+  const m = /\{[\s\S]*\}/.exec(raw ?? "");
+  if (!m || stopReason === "max_tokens") return { same: true, what: "" };
+  try {
+    const d = JSON.parse(m[0]);
+    const same = d?.same !== false;
+    return { same, what: same ? "" : String(d?.what ?? "a different person").slice(0, 80) };
+  } catch {
+    return { same: true, what: "" };
+  }
+}
+
+/**
+ * Is the person in `buffer` the host in `hostPhotoUrl`? Side by side, the photo on the left.
+ * Never throws: a dead check passes the picture.
+ */
+export async function scanSameHost(
+  hostPhotoUrl: string,
+  buffer: Buffer,
+  faceShown: boolean
+): Promise<{ same: boolean; what: string }> {
+  try {
+    const { presignOwnBucketUrl } = await import("./storage");
+    const res = await fetch(await presignOwnBucketUrl(hostPhotoUrl), {
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (!res.ok) throw new Error(`host photo ${res.status}`);
+    const side = (b: Buffer) => sharp(b).resize(640, 480, { fit: "cover" }).png().toBuffer();
+    const [left, right] = await Promise.all([side(Buffer.from(await res.arrayBuffer())), side(buffer)]);
+    const pair = await sharp({ create: { width: 1280, height: 480, channels: 3, background: "#000" } })
+      .composite([
+        { input: left, left: 0, top: 0 },
+        { input: right, left: 640, top: 0 },
+      ])
+      .png()
+      .toBuffer();
+    const result = await invokeClaude({
+      systemPrompt: SAME_HOST_SYSTEM,
+      userMessage: faceShown
+        ? "The right picture shows the person's face. Is it the same person as on the left?"
+        : "Is the person in the right picture the same person as on the left, as far as it shows?",
+      imageInput: { base64: pair.toString("base64"), mediaType: "image/png" },
+      maxTokens: 200,
+      model: SAME_THING_MODEL(),
+      thinking: "off",
+      step: "Same-host check",
+    });
+    const v = parseSameHostVerdict(result.text, result.stopReason);
+    if (!v.same) console.log(`[SameHost] not the host: ${v.what}`);
+    return v;
+  } catch (err: any) {
+    console.warn(`[SameHost] check failed: ${err?.message ?? err} — passing the picture`);
+    return { same: true, what: "" };
+  }
+}
+
 export const SAME_THING_SYSTEM =
   "You compare two photos. LEFT: an earlier photo of a thing. RIGHT: a new photo that must show " +
   "the SAME thing — the very same object, not just the same kind — usually from another spot, " +

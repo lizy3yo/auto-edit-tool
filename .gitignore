@@ -15,3 +15,12 @@ scripts/channels.json
 
 # UI harness synthetic media (regenerate via client/__harness/README.md)
 client/__harness/media/
+
+# Local test media (previews, voice and zoom checks) — never pushed
+phone-look-preview/
+bench/
+voice-test-results/
+voice-compare/
+voice-samples/
+zoom-check/
+dub-preview/

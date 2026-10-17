@@ -1,0 +1,1 @@
+ALTER TABLE `channel_host_photos` ADD `phoneLookVersion` int DEFAULT 0 NOT NULL;

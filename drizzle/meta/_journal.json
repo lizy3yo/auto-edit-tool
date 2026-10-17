@@ -127,6 +127,62 @@
       "when": 1791619503842,
       "tag": "0017_useful_ronan",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "5",
+      "when": 1791725619191,
+      "tag": "0018_motionless_talkback",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "5",
+      "when": 1791972275442,
+      "tag": "0019_clean_purple_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "5",
+      "when": 1792061202011,
+      "tag": "0020_lively_maximus",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "5",
+      "when": 1792070085590,
+      "tag": "0021_abandoned_dagger",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "5",
+      "when": 1792070942241,
+      "tag": "0022_typical_yellowjacket",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "5",
+      "when": 1792073261559,
+      "tag": "0023_messy_smiling_tiger",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "5",
+      "when": 1792078264703,
+      "tag": "0024_outgoing_silvermane",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "5",
+      "when": 1792177472045,
+      "tag": "0025_careless_wraith",
+      "breakpoints": true
     }
   ]
 }

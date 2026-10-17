@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { ImageIcon, Loader2, Star, Trash2, User } from "lucide-react";
 import { toast } from "sonner";
+import { hostPhotoLookState, hostPhotoUrl, usablePhoneLook, phoneLookFailure } from "@shared/hostPhotoLook";
+import { PhotoLookSwitch } from "../HostPhotoLookSwitch";
 import { HostPhotoPreview } from "../HostPhotoPreview";
 import {
   AlertDialog,
@@ -37,7 +39,7 @@ import {
 const ACCEPTED = ["image/jpeg", "image/png", "image/webp"];
 
 export function ChannelHostPhotos({ channelKey }: { channelKey: string }) {
-  const { canRemove } = useAuth();
+  const { canRemove, canManageChannels } = useAuth();
   const utils = trpc.useUtils();
   const [draftUrl, setDraftUrl] = useState("");
   const [addConfirmOpen, setAddConfirmOpen] = useState(false);
@@ -55,6 +57,13 @@ export function ChannelHostPhotos({ channelKey }: { channelKey: string }) {
   const listInput = { channelKey, activeOnly: true } as const;
   const { data: photos, isLoading } = trpc.channelHostPhoto.list.useQuery(listInput, {
     enabled: !!channelKey,
+    // A phone look being made lands in the background — look again until none is left.
+    refetchInterval: q =>
+      (q.state.data ?? []).some(
+        p => (p.isSelected && hostPhotoLookState(p) === "making") || (p.isActive && p.qualityScore == null)
+      )
+        ? 5_000
+        : false,
   });
 
   const invalidate = () => utils.channelHostPhoto.list.invalidate();
@@ -83,18 +92,68 @@ export function ChannelHostPhotos({ channelKey }: { channelKey: string }) {
     onError: err => toast.error(err.message),
   });
 
-  const setPrimary = trpc.channelHostPhoto.setPrimary.useMutation({
-    onSuccess: () => {
-      toast.success("Primary camera angle updated.");
+  // A channel uses ONE photo (server/hostPhotoChoice.ts): "Use this photo" picks it by hand.
+  const setPrimary = trpc.channelHostPhoto.setSelected.useMutation({
+    onSuccess: rows => {
+      toast.success("This photo is now used in the channel's videos.");
       setPendingPrimary(null);
+      utils.channelHostPhoto.list.setData(listInput, rows);
+      invalidate();
+    },
+    onError: err => toast.error(err.message),
+  });
+  const autoPick = trpc.channelHostPhoto.autoPick.useMutation({
+    onSuccess: rows => {
+      toast.success("The channel's photo is picked automatically again.");
+      utils.channelHostPhoto.list.setData(listInput, rows);
       invalidate();
     },
     onError: err => toast.error(err.message),
   });
 
+  const setLook = trpc.channelHostPhoto.setLook.useMutation({
+    onSuccess: rows => utils.channelHostPhoto.list.setData(listInput, rows),
+    onError: err => toast.error(err.message),
+  });
+  // The channel's DEFAULT look: switches every photo here and is what a new photo starts on.
+  const { data: defaultLook } = trpc.channelHostPhoto.defaultLook.useQuery(
+    { channelKey },
+    { enabled: !!channelKey }
+  );
+  const defaultOriginal = !!defaultLook?.useOriginal;
+  const lookName = (useOriginal: boolean) => (useOriginal ? "the original" : "the phone look");
+  const setChannelLook = trpc.channelHostPhoto.setChannelLook.useMutation({
+    onSuccess: ({ photos: next }, { useOriginal }) => {
+      utils.channelHostPhoto.list.setData(listInput, next);
+      utils.channelHostPhoto.defaultLook.setData({ channelKey }, { useOriginal });
+      toast.success(`This channel now uses ${lookName(useOriginal)} by default.`);
+    },
+    onError: err => toast.error(err.message),
+  });
+  const [allChannelsLook, setAllChannelsLookOpen] = useState(false);
+  const setAllChannelsLook = trpc.channelHostPhoto.setAllChannelsLook.useMutation({
+    onSuccess: ({ channels, skipped }, { useOriginal }) => {
+      setAllChannelsLookOpen(false);
+      utils.channelHostPhoto.list.invalidate();
+      utils.channelHostPhoto.defaultLook.invalidate();
+      toast.success(
+        `${channels} channel${channels === 1 ? "" : "s"} now use ${lookName(useOriginal)} by default.` +
+          (skipped ? ` ${skipped} you cannot change ${skipped === 1 ? "was" : "were"} left as they were.` : "")
+      );
+    },
+    onError: err => toast.error(err.message),
+  });
+
+  const remake = trpc.channelHostPhoto.remakePhoneLook.useMutation({
+    onSuccess: rows => {
+      toast.success("Making a new phone look — it appears here in a minute.");
+      utils.channelHostPhoto.list.setData(listInput, rows);
+    },
+    onError: err => toast.error(err.message),
+  });
 
   const rows = photos ?? [];
-  // The photo open in the big preview.
+  // The photo open in the big preview — read from the live list so a switch inside it shows.
   const [previewId, setPreviewId] = useState<number | null>(null);
   const previewRow = rows.find(p => p.id === previewId) ?? null;
 
@@ -105,20 +164,39 @@ export function ChannelHostPhotos({ channelKey }: { channelKey: string }) {
           <User className="h-3.5 w-3.5" />
           Host Photos
         </Label>
-        <p className="mt-1 text-[11px] text-muted-foreground">
-          The camera angles this channel&apos;s videos can be shot from. The
-          first is the primary — split-screen scenes and the opening shot always
-          use it. Each video picks which of these it uses, so one film can run
-          on a single photo and the next on four. PNG/JPG, under 10 MB.
-        </p>
-        {/* Not a costume rail. The lip-sync lane is told a non-primary photo is the same host
-            shot off-axis, so a different outfit or room reads as a continuity error mid-film. */}
-        <p className="mt-1 text-[11px] italic text-muted-foreground">
-          Different angles of the same host in the same setting — a change of
-          outfit or room will read as a continuity error, not variety. Photos
-          save on their own; Save Configuration covers the channel fields, not
-          this list.
-        </p>
+      </div>
+
+      {/* Default look — the same Phone / Original switch every photo has, for the whole channel. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-border bg-secondary/20 px-3 py-2">
+        <span className="text-xs font-medium">Default look</span>
+        <div className="w-40 [&>div]:mt-0">
+          <PhotoLookSwitch
+            state={defaultOriginal ? "original" : "phone"}
+            disabled={!defaultLook || setChannelLook.isPending}
+            onChange={useOriginal => setChannelLook.mutate({ channelKey, useOriginal })}
+          />
+        </div>
+        <span className="min-w-0 flex-1 text-[11px] text-muted-foreground">
+          Switches every photo on this channel, and photos added later start on it. Each
+          photo can still be switched on its own below.
+          {(() => {
+            const own = rows.filter(p => p.useOriginal !== defaultOriginal).length;
+            return defaultLook && own > 0
+              ? ` ${own} photo${own === 1 ? " is" : "s are"} switched on ${own === 1 ? "its" : "their"} own.`
+              : "";
+          })()}
+        </span>
+        {canManageChannels && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 shrink-0 text-xs"
+            disabled={!defaultLook}
+            onClick={() => setAllChannelsLookOpen(true)}
+          >
+            Apply to all channels
+          </Button>
+        )}
       </div>
 
       {isLoading ? (
@@ -135,40 +213,103 @@ export function ChannelHostPhotos({ channelKey }: { channelKey: string }) {
           {rows.map((p, i) => (
             <div key={p.id} className="rounded-md border border-border p-3">
               <div className="flex flex-wrap items-start gap-3">
-                <button
-                  type="button"
-                  onClick={() => setPreviewId(p.id)}
-                  title="Click to see it big"
-                  aria-label={i === 0 ? "Preview the primary photo" : `Preview angle ${i + 1}`}
-                  className="block shrink-0 cursor-zoom-in"
-                >
-                  <Thumb
-                    src={p.imageUrl}
-                    alt=""
-                    className="h-16 w-24 rounded border border-border object-cover"
-                  />
-                </button>
+                {/* Both versions side by side: what was uploaded, and the phone look videos use
+                    by default (shared/hostPhotoLook.ts). The one in use is outlined. */}
+                <div className="flex shrink-0 gap-2">
+                  {[
+                    { label: "Original", url: p.imageUrl, used: hostPhotoUrl(p) === p.imageUrl },
+                    { label: "Phone look", url: usablePhoneLook(p), used: !!usablePhoneLook(p) && hostPhotoUrl(p) === usablePhoneLook(p) },
+                  ].map(v => (
+                    <div key={v.label} className="w-24 space-y-0.5 text-center">
+                      {v.url ? (
+                        <button
+                          type="button"
+                          onClick={() => setPreviewId(p.id)}
+                          title="Click to see it big"
+                          aria-label={`Preview the ${v.label.toLowerCase()}`}
+                          className="block cursor-zoom-in"
+                        >
+                          <img
+                            src={v.url}
+                            alt=""
+                            className={`h-16 w-24 rounded border object-cover ${v.used ? "border-primary ring-1 ring-primary" : "border-border opacity-60"}`}
+                          />
+                        </button>
+                      ) : (
+                        <div className="flex h-16 w-24 items-center justify-center rounded border border-dashed border-border text-[10px] text-muted-foreground">
+                          {hostPhotoLookState(p) === "making" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "—"}
+                        </div>
+                      )}
+                      <span className="text-[10px] text-muted-foreground">{v.label}</span>
+                    </div>
+                  ))}
+                </div>
                 <div className="min-w-0 flex-1 space-y-1">
-                  {i === 0 ? (
-                    <span className="inline-flex items-center gap-1 rounded bg-secondary px-1.5 py-0.5 text-xs font-medium">
-                      <Star className="h-3 w-3" />
-                      Primary
+                  {/* ONE photo per channel: the one in use, its score and what cost it points
+                      (server/hostPhotoScore.ts). The others stay here, unused. */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {p.isSelected ? (
+                      <span className="inline-flex items-center gap-1 rounded bg-secondary px-1.5 py-0.5 text-xs font-medium">
+                        <Star className="h-3 w-3" />
+                        {p.pickedByHand ? "In use (chosen by hand)" : "In use (best score)"}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">Not used</span>
+                    )}
+                    <span
+                      className={`text-xs font-medium ${
+                        p.qualityScore == null
+                          ? "text-muted-foreground"
+                          : p.qualityScore >= 85
+                            ? "text-emerald-600 dark:text-emerald-400"
+                            : p.qualityScore >= 70
+                              ? "text-amber-600 dark:text-amber-400"
+                              : "text-red-600 dark:text-red-400"
+                      }`}
+                    >
+                      {p.qualityScore == null ? "Scoring…" : `Score ${p.qualityScore}/100`}
                     </span>
-                  ) : (
-                    <span className="text-xs text-muted-foreground">
-                      Angle {i + 1}
+                    {p.isSelected && p.pickedByHand && (
+                      <button
+                        type="button"
+                        disabled={autoPick.isPending}
+                        onClick={() => autoPick.mutate({ channelKey })}
+                        className="text-[11px] text-primary underline-offset-2 hover:underline disabled:opacity-50"
+                      >
+                        Pick automatically
+                      </button>
+                    )}
+                  </div>
+                  {p.qualityNotes && (
+                    <span className="block text-[11px] text-muted-foreground">
+                      {p.qualityNotes.split("; ").join(" · ")}
                     </span>
                   )}
-                  {/* The tick lives on the generate form's picker and is saved to the channel;
-                      shown here so a manager can see which angles the editors switched off. */}
-                  {!p.isSelected && (
-                    <span className="block text-[11px] italic text-muted-foreground">
-                      Not used — unticked on the long-form page
+                  <div className="max-w-[12rem]">
+                    <PhotoLookSwitch
+                      state={hostPhotoLookState(p)}
+                      disabled={setLook.isPending}
+                      onChange={useOriginal => setLook.mutate({ channelKey, id: p.id, useOriginal })}
+                    />
+                  </div>
+                  {phoneLookFailure(p) && (
+                    <span className="block text-[10px] text-destructive" title={phoneLookFailure(p) ?? undefined}>
+                      Phone look could not be made — the original is used.
                     </span>
+                  )}
+                  {(usablePhoneLook(p) || phoneLookFailure(p)) && (
+                    <button
+                      type="button"
+                      disabled={remake.isPending}
+                      onClick={() => remake.mutate({ channelKey, id: p.id })}
+                      className="text-[11px] text-primary underline-offset-2 hover:underline disabled:opacity-50"
+                    >
+                      Make phone look again
+                    </button>
                   )}
                 </div>
                 <div className="flex shrink-0 gap-1">
-                  {i !== 0 && (
+                  {!p.isSelected && (
                     <Button
                       variant="outline"
                       size="sm"
@@ -181,7 +322,7 @@ export function ChannelHostPhotos({ channelKey }: { channelKey: string }) {
                         })
                       }
                     >
-                      Make primary
+                      Use this photo
                     </Button>
                   )}
                   {canRemove && (
@@ -211,9 +352,21 @@ export function ChannelHostPhotos({ channelKey }: { channelKey: string }) {
       )}
 
       <HostPhotoPreview
-        imageUrl={previewRow?.imageUrl ?? null}
+        photo={
+          previewRow
+            ? {
+                original: previewRow.imageUrl,
+                phone: usablePhoneLook(previewRow),
+                state: hostPhotoLookState(previewRow),
+              }
+            : null
+        }
         title={previewId === rows[0]?.id ? "Primary host photo" : "Host photo"}
         onOpenChange={open => !open && setPreviewId(null)}
+        disabled={setLook.isPending}
+        onChange={useOriginal =>
+          previewRow && setLook.mutate({ channelKey, id: previewRow.id, useOriginal })
+        }
       />
 
       {/* Add — the upload lands in a draft so the angle can be named before it is written,
@@ -331,6 +484,44 @@ export function ChannelHostPhotos({ channelKey }: { channelKey: string }) {
       </AlertDialog>
 
       <AlertDialog
+        open={allChannelsLook}
+        onOpenChange={open => {
+          if (!open && !setAllChannelsLook.isPending) setAllChannelsLookOpen(false);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Use {lookName(defaultOriginal)} on every channel?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Every channel&apos;s default look becomes{" "}
+              {defaultOriginal ? "Original" : "Phone"}, and every host photo on every channel
+              switches to it — including photos switched on their own. Photos added later start
+              on it. Videos already rendered are unaffected.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={setAllChannelsLook.isPending}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={e => {
+                e.preventDefault();
+                setAllChannelsLook.mutate({ useOriginal: defaultOriginal });
+              }}
+              disabled={setAllChannelsLook.isPending}
+            >
+              {setAllChannelsLook.isPending ? (
+                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+              ) : null}
+              Apply to all channels
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
         open={pendingPrimary !== null}
         onOpenChange={open => {
           if (!open && !setPrimary.isPending) setPendingPrimary(null);
@@ -338,10 +529,11 @@ export function ChannelHostPhotos({ channelKey }: { channelKey: string }) {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Make this the primary angle?</AlertDialogTitle>
+            <AlertDialogTitle>Use this photo for the channel?</AlertDialogTitle>
             <AlertDialogDescription>
-              Split-screen scenes and the opening shot of every future video on
-              this channel will use it. Videos already rendered are unaffected.
+              Every future video on this channel will use this one photo instead
+              of the one the system picked. Videos already rendered are
+              unaffected. You can hand the choice back with "Pick automatically".
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="flex items-center gap-3 rounded-md border border-border p-3">
@@ -353,7 +545,7 @@ export function ChannelHostPhotos({ channelKey }: { channelKey: string }) {
               />
             )}
             <span className="min-w-0 flex-1 truncate text-sm">
-              {pendingPrimary ? `Angle ${pendingPrimary.position}` : ""}
+              {pendingPrimary ? `Photo ${pendingPrimary.position}` : ""}
             </span>
           </div>
           <AlertDialogFooter>
@@ -364,14 +556,14 @@ export function ChannelHostPhotos({ channelKey }: { channelKey: string }) {
               onClick={e => {
                 e.preventDefault();
                 if (pendingPrimary)
-                  setPrimary.mutate({ channelKey, id: pendingPrimary.id });
+                  setPrimary.mutate({ channelKey, id: pendingPrimary.id, selected: true });
               }}
               disabled={setPrimary.isPending}
             >
               {setPrimary.isPending ? (
                 <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
               ) : null}
-              Make primary
+              Use this photo
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

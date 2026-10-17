@@ -113,8 +113,10 @@ describe("every changing route asks who created it", () => {
   const route = (name: string, containing: string) =>
     routes.find(r => r.name === name && r.body.includes(containing));
 
+  // `canEditChannel` is `assertChannelEditable` as a yes/no, for a route that skips the
+  // channels it may not change instead of refusing them all.
   const OWNERSHIP_CHECK =
-    /assert(?:ChannelEditable|ItemEditable|RunEditable|JobAccess)\(|mayTakeOver\(/;
+    /assert(?:ChannelEditable|ItemEditable|RunEditable|JobAccess)\(|mayTakeOver\(|canEditChannel\(ctx\.user/;
 
   it("each manager-gated change checks ownership, or only creates something new", () => {
     // Routes that make something new for the caller (or give back what the caller holds), so
@@ -123,6 +125,7 @@ describe("every changing route asks who created it", () => {
       "create", // a new channel, stamped with its maker
       "start", // a new HeyGen test or VSL run, the caller's own
       "handBack", // releases a takeover, which a guest can never hold
+      "phoneLook", // a phone copy of a photo the caller just uploaded to a test — no row changes
     ]);
     const unchecked = routes
       .filter(
@@ -137,7 +140,7 @@ describe("every changing route asks who created it", () => {
   });
 
   it("the channel writes open to every role check ownership too", () => {
-    for (const name of ["setVoiceTuning", "setPrimary", "setSelected"]) {
+    for (const name of ["setVoiceTuning", "setPrimary", "setSelected", "setChannelLook"]) {
       const r = routes.find(x => x.name === name);
       expect(r, name).toBeTruthy();
       expect(r!.body, name).toContain("assertChannelEditable(ctx.user");

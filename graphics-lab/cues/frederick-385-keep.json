@@ -1,0 +1,302 @@
+{
+ "job": 385,
+ "notes": "The 16 approved graphics for job 385: the full 15-graphic set plus \"You'll know three things printed on the box\" (from the earlier auto-planned version).",
+ "cues": [
+  {
+   "id": "01-statement-wrong-alarm",
+   "template": "Statement",
+   "start": "It isn't broken",
+   "startPad": -0.2,
+   "end": "while the house is asleep",
+   "endPad": 0.2,
+   "props": {
+    "kicker": "The wrong alarm",
+    "headline": {
+     "text": "It isn't broken. It isn't dead.",
+     "words": true
+    },
+    "emphasis": [
+     "dead."
+    ]
+   }
+  },
+  {
+   "id": "01-dim-three-things",
+   "template": "DimCaption",
+   "start": "By the end of this",
+   "startPad": -0.15,
+   "end": "three things printed on the box",
+   "endPad": 0.3,
+   "props": {
+    "phrase": {
+     "text": "You'll know three things printed on the box",
+     "words": true
+    },
+    "emphasis": [
+     "three"
+    ]
+   }
+  },
+  {
+   "id": "02-versus-fast-slow",
+   "template": "Versus",
+   "start": "The other one is the slow one",
+   "startPad": -0.15,
+   "end": "the side of a mattress",
+   "endPad": 0.3,
+   "props": {
+    "left": {
+     "icon": "1f525",
+     "title": "The fast one",
+     "sub": "Grease catches on the stove",
+     "at": 0
+    },
+    "right": {
+     "icon": "1f4a8",
+     "title": "The slow one",
+     "sub": "A cord under a rug",
+     "at": "@slow one",
+     "say": "a cord under a rug"
+    },
+    "winner": "right"
+   }
+  },
+  {
+   "id": "03-number-3-minutes",
+   "template": "BigNumber",
+   "start": "from smoking to fully",
+   "startPad": -0.25,
+   "end": "about three minutes",
+   "endPad": 0.5,
+   "props": {
+    "kicker": "Today's foam furniture",
+    "value": 3,
+    "unit": "minutes",
+    "at": "@three minutes",
+    "line": {
+     "text": "from smoking to fully involved",
+     "words": true
+    }
+   }
+  },
+  {
+   "id": "04-host-caption-slow-part",
+   "template": "HostCaption",
+   "start": "Its job is catching",
+   "startPad": -0.1,
+   "end": "the slow part",
+   "endPad": 0.3,
+   "props": {
+    "phrase": {
+     "text": "Its job is catching the slow part.",
+     "words": true
+    },
+    "emphasis": [
+     "slow"
+    ]
+   }
+  },
+  {
+   "id": "05-chapter-1",
+   "template": "ChapterLabel",
+   "start": "First thing on the label",
+   "startPad": 0,
+   "end": "quick on open flame",
+   "endPad": -0.25,
+   "props": {
+    "kicker": "On the label · 1 of 3",
+    "number": 1,
+    "title": "The type"
+   }
+  },
+  {
+   "id": "06-versus-type",
+   "template": "Versus",
+   "start": "and it's what's in most of the cheap",
+   "startPad": -0.1,
+   "end": "substantially earlier",
+   "endPad": 0.3,
+   "props": {
+    "kicker": "First thing on the label",
+    "left": {
+     "icon": "1f525",
+     "title": "Ionization",
+     "sub": "Quick on open flame",
+     "at": 0
+    },
+    "right": {
+     "icon": "1f441",
+     "title": "Photoelectric",
+     "sub": "Sees the slow, smoldering fire",
+     "at": "@Photoelectric sees",
+     "say": "Photoelectric sees the slow, smoldering fire substantially earlier"
+    },
+    "winner": "right"
+   }
+  },
+  {
+   "id": "07-step-labels",
+   "template": "StepLabels",
+   "start": "get a stepladder",
+   "startPad": -0.1,
+   "end": "and read the label",
+   "endPad": 0.4,
+   "props": {
+    "steps": [
+     {
+      "text": "Get a stepladder",
+      "at": "@get a stepladder"
+     },
+     {
+      "text": "Take one alarm down",
+      "at": "@take one alarm down"
+     },
+     {
+      "text": "Read the label",
+      "at": "@read the label"
+     }
+    ]
+   }
+  },
+  {
+   "id": "08-icon-labels",
+   "template": "IconLabels",
+   "start": "Photoelectric, or dual",
+   "startPad": -0.1,
+   "end": "is what you want",
+   "endPad": 0.1,
+   "props": {
+    "items": [
+     {
+      "icon": "2705",
+      "text": "Photoelectric",
+      "at": 0
+     },
+     {
+      "icon": "2705",
+      "text": "Dual sensor",
+      "at": "@dual sensor"
+     }
+    ]
+   }
+  },
+  {
+   "id": "09-chapter-2",
+   "template": "ChapterLabel",
+   "start": "Second thing on the label",
+   "startPad": 0,
+   "end": "label, power",
+   "endPad": 0.6,
+   "props": {
+    "kicker": "On the label · 2 of 3",
+    "number": 2,
+    "title": "Power"
+   }
+  },
+  {
+   "id": "10-dim-caption",
+   "template": "DimCaption",
+   "start": "a plastic disc",
+   "startPad": -0.2,
+   "end": "doing absolutely nothing",
+   "endPad": 0.4,
+   "props": {
+    "phrase": {
+     "text": "A plastic disc doing absolutely nothing.",
+     "words": true
+    },
+    "emphasis": [
+     "nothing."
+    ]
+   }
+  },
+  {
+   "id": "11-chapter-3",
+   "template": "ChapterLabel",
+   "start": "Third thing, interconnection",
+   "startPad": -0.1,
+   "durationSec": 4.5,
+   "props": {
+    "kicker": "On the label · 3 of 3",
+    "number": 3,
+    "title": "Interconnection"
+   }
+  },
+  {
+   "id": "12-two-point",
+   "template": "TwoPoint",
+   "start": "The basement alarm",
+   "startPad": -0.1,
+   "end": "from your pillow",
+   "endPad": 0.3,
+   "props": {
+    "title": {
+     "text": "The basement alarm sets off the one six feet from your pillow.",
+     "words": true
+    },
+    "a": {
+     "label": "Basement",
+     "at": "@basement alarm"
+    },
+    "b": {
+     "label": "Your pillow",
+     "sub": "six feet away",
+     "at": "@six feet"
+    }
+   }
+  },
+  {
+   "id": "13-number-10-years",
+   "template": "BigNumber",
+   "start": "At 10 years",
+   "startPad": -0.15,
+   "end": "the unit is finished",
+   "endPad": 0.5,
+   "props": {
+    "kicker": "Smoke alarms expire",
+    "value": 10,
+    "unit": "years",
+    "at": "@10 years",
+    "countSec": 0.6,
+    "line": {
+     "text": "the unit is finished",
+     "words": true
+    }
+   }
+  },
+  {
+   "id": "14-warning",
+   "template": "WarningLabel",
+   "start": "find no date",
+   "startPad": -0.3,
+   "end": "it's old enough",
+   "endPad": 0.6,
+   "props": {
+    "text": {
+     "text": "No date at all? It's old enough.",
+     "words": true
+    },
+    "emphasis": [
+     "old"
+    ]
+   }
+  },
+  {
+   "id": "15-host-caption",
+   "template": "HostCaption",
+   "start": "Close the bedroom doors",
+   "startPad": -0.1,
+   "end": "doors at night",
+   "endPad": 0.4,
+   "props": {
+    "phrase": {
+     "text": "Close the bedroom doors at night.",
+     "words": true
+    },
+    "emphasis": [
+     "doors"
+    ]
+   }
+  }
+ ]
+}

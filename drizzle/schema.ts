@@ -7,6 +7,7 @@ import {
   primaryKey,
   text,
   timestamp,
+  uniqueIndex,
   varchar,
 } from "drizzle-orm/mysql-core";
 
@@ -193,6 +194,21 @@ export const channelConfigs = mysqlTable("channel_configs", {
   minimaxVoiceId: varchar("minimaxVoiceId", { length: 128 }),
   /** MiniMax voice name, for display beside the id (mirrors `voiceName`). */
   minimaxVoiceName: varchar("minimaxVoiceName", { length: 255 }),
+  /**
+   * This channel's own dub voice per language (`{ [languageCode]: voiceId }`, 69Labs /
+   * ElevenLabs library ids), so its dubbed CTAs sound like its host. A language missing here
+   * uses that language's default from Admin → Dub voices (`shared/dubCta.ts` `dubVoiceFor`).
+   */
+  dubVoices: json("dubVoices").$type<Record<string, string>>(),
+  /**
+   * The channel's DEFAULT host photo look: false = the phone look (the app-wide default), true =
+   * the original as uploaded. Setting it switches every photo on the channel, and a photo added
+   * later starts on it; each photo's own switch (`channel_host_photos.useOriginal`) still decides.
+   */
+  hostPhotoUseOriginal: boolean("hostPhotoUseOriginal").default(false).notNull(),
+  /** Steve Cooper-style motion graphics (cards, labels, captions) on this channel's videos, added
+   * when a film is assembled (server/graphics). On by default; GRAPHICS=0 turns them off app-wide. */
+  motionGraphics: boolean("motionGraphics").default(true).notNull(),
   /** TTS speed multiplier (e.g., 0.90, 1.0, 1.10) */
   ttsSpeed: varchar("ttsSpeed", { length: 8 }),
   /** TTS volume multiplier applied as an ffmpeg gain (0.5–2, null/1.0 = neutral) */
@@ -370,15 +386,34 @@ export const channelHostPhotos = mysqlTable("channel_host_photos", {
    */
   isSelected: boolean("isSelected").default(true).notNull(),
   /**
-   * RETIRED 2026-10-05, kept on purpose. These three held a host photo's "phone look" — a remade
-   * copy of the photo and the switch between it and the original. The feature is removed: every
-   * video, HeyGen test and VSL uses `imageUrl` as uploaded, and nothing reads or writes these any
-   * more. The columns stay so the copies already made are not lost; drop them in a later
-   * migration once nobody wants them back.
+   * The PHONE-LOOK version of `imageUrl` (2026-09-28): the same host in the same room, remade as a
+   * frame of a video they recorded on a propped-up phone (`server/hostPhoneLook.ts`). It is what
+   * videos and the HeyGen test use by default — `hostPhotoUrl` in shared/hostPhotoLook.ts is the
+   * one rule. Null until made (made once, in the background, when the photo is first listed).
    */
   phoneImageUrl: varchar("phoneImageUrl", { length: 512 }),
+  /** The operator switched this photo back to the ORIGINAL — videos use `imageUrl` as uploaded. */
   useOriginal: boolean("useOriginal").default(false).notNull(),
+  /** Why the phone look could not be made — the photo then renders as the original. */
   phoneLookError: varchar("phoneLookError", { length: 255 }),
+  /**
+   * Which recipe made `phoneImageUrl` / recorded `phoneLookError` (`PHONE_LOOK_VERSION` in
+   * shared/hostPhotoLook.ts). 0 = the 2026-09-28 look, which moved the host in the frame: those
+   * copies stay on the row, are never rendered, and are remade by the current recipe.
+   */
+  phoneLookVersion: int("phoneLookVersion").default(0).notNull(),
+  /**
+   * How good the photo is for a talking head, 0-100 (`server/hostPhotoScore.ts`, 2026-10-15) —
+   * what picks the channel's ONE photo. Null until measured. Scored on the ORIGINAL, so every
+   * photo is compared alike (only the chosen photo gets a phone-look copy).
+   */
+  qualityScore: int("qualityScore"),
+  /** Why it lost points, in plain words ("; "-joined), shown on the tile. */
+  qualityNotes: varchar("qualityNotes", { length: 255 }),
+  /** The image URL that was scored — a new upload re-scores. */
+  qualityOf: varchar("qualityOf", { length: 512 }),
+  /** An operator chose this photo by hand: it is the channel's photo whatever the scores say. */
+  pickedByHand: boolean("pickedByHand").default(false).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
@@ -434,6 +469,127 @@ export const heygenTests = mysqlTable("heygen_tests", {
 
 export type HeygenTest = typeof heygenTests.$inferSelect;
 export type InsertHeygenTest = typeof heygenTests.$inferInsert;
+
+/**
+ * Dub CTAs (`shared/dubCta.ts`): the BOOK a channel pitches in one language — its own title,
+ * cover and link, since each language sells its own edition. One row per channel and language.
+ */
+export const dubCtaBooks = mysqlTable(
+  "dub_cta_books",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    channelKey: varchar("channelKey", { length: 64 }).notNull(),
+    /** `DubLanguage.code`. */
+    language: varchar("language", { length: 32 }).notNull(),
+    /** The title as the narrator says it, in that language. */
+    title: varchar("title", { length: 255 }).notNull(),
+    coverImageUrl: varchar("coverImageUrl", { length: 512 }),
+    /** Where that edition is sold — the QR encodes it as given. */
+    shopUrl: varchar("shopUrl", { length: 512 }),
+    createdBy: int("createdBy"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  t => [uniqueIndex("dub_cta_books_channel_language").on(t.channelKey, t.language)]
+);
+
+export type DubCtaBook = typeof dubCtaBooks.$inferSelect;
+
+/**
+ * Dub CTAs: the CLIP for one channel, language and position (mid / end). One row each — making
+ * it again replaces it. While a new one is made the last good `videoUrl` stays on the row, so a
+ * failed remake leaves the old clip in place.
+ */
+export const dubCtaClips = mysqlTable(
+  "dub_cta_clips",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    channelKey: varchar("channelKey", { length: 64 }).notNull(),
+    language: varchar("language", { length: 32 }).notNull(),
+    position: varchar("position", { length: 8 }).notNull(),
+    status: mysqlEnum("status", ["working", "done", "failed"]).default("working").notNull(),
+    /** What the run is doing now ("Writing the lines", "Voicing", …) — shown while working. */
+    phase: varchar("phase", { length: 64 }),
+    /** The `DubCtaScript` the clip was made from (JSON). */
+    script: text("script"),
+    /** The book title the clip says — the book row can change after. */
+    bookTitle: varchar("bookTitle", { length: 255 }),
+    videoUrl: varchar("videoUrl", { length: 512 }),
+    durationMs: int("durationMs"),
+    error: text("error"),
+    /** Who made the current clip. */
+    userId: int("userId"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  t => [
+    uniqueIndex("dub_cta_clips_channel_language_position").on(
+      t.channelKey,
+      t.language,
+      t.position
+    ),
+  ]
+);
+
+export type DubCtaClip = typeof dubCtaClips.$inferSelect;
+
+/**
+ * Dub CTAs: the SCRIPT for one channel, language and position — what the clip says, one
+ * paragraph in the language with `{book}` where the title goes (`shared/dubCta.ts`
+ * `splitDubScript`). Claude writes it; a person may read and edit it before a clip is made, and
+ * Make clips speaks it word for word. Kept apart from the clip row so an edit never touches the
+ * clip already made.
+ */
+export const dubCtaScripts = mysqlTable(
+  "dub_cta_scripts",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    channelKey: varchar("channelKey", { length: 64 }).notNull(),
+    language: varchar("language", { length: 32 }).notNull(),
+    position: varchar("position", { length: 8 }).notNull(),
+    /** The script with `{book}` for the title. */
+    text: text("text").notNull(),
+    /** Its plain-English meaning, for a reader who does not speak the language. */
+    english: text("english"),
+    updatedBy: int("updatedBy"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  t => [
+    uniqueIndex("dub_cta_scripts_channel_language_position").on(
+      t.channelKey,
+      t.language,
+      t.position
+    ),
+  ]
+);
+
+export type DubCtaScriptRow = typeof dubCtaScripts.$inferSelect;
+
+/**
+ * Dub CTAs: the channel's SHARED B-ROLL for one position (mid / end) — three pictures drawn once
+ * and used under every language's clip of that position (`shared/dubCta.ts` `DubBrollSet`), so
+ * only the voice, the book cover and the QR change between languages. One row per channel and
+ * position; redrawing replaces it, and a failed redraw keeps the pictures it had.
+ */
+export const dubCtaBroll = mysqlTable(
+  "dub_cta_broll",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    channelKey: varchar("channelKey", { length: 64 }).notNull(),
+    position: varchar("position", { length: 8 }).notNull(),
+    status: mysqlEnum("status", ["working", "done", "failed"]).default("working").notNull(),
+    /** The `DubBrollSet` (JSON): each picture's description and drawn URL. */
+    pictures: text("pictures"),
+    error: text("error"),
+    updatedBy: int("updatedBy"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  t => [uniqueIndex("dub_cta_broll_channel_position").on(t.channelKey, t.position)]
+);
+
+export type DubCtaBrollRow = typeof dubCtaBroll.$inferSelect;
 
 /**
  * Sales reported by the webstore, one row per paid line item.

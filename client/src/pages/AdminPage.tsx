@@ -16,6 +16,7 @@ import { LongformInstruction } from "@/components/admin/LongformInstruction";
 import { LongformPacing } from "@/components/admin/LongformPacing";
 import { UserManagement } from "@/components/admin/UserManagement";
 import { MonthlySpend } from "@/components/admin/MonthlySpend";
+import { DubVoices } from "@/components/admin/DubVoices";
 
 /**
  * MiniMax provider card — the TTS FALLBACK lane.
@@ -364,6 +365,9 @@ export default function AdminPage() {
           )}
           <TabsTrigger value="instruction">Longform instruction</TabsTrigger>
           <TabsTrigger value="pacing">Longform pacing</TabsTrigger>
+          {canManageKeys && (
+            <TabsTrigger value="dub">Dub voices</TabsTrigger>
+          )}
           {canManageKeys && <TabsTrigger value="spend">Spend</TabsTrigger>}
           {canManageKeys && <TabsTrigger value="users">Users</TabsTrigger>}
         </TabsList>
@@ -384,6 +388,11 @@ export default function AdminPage() {
             <LongformPacing />
           </SharedSetting>
         </TabsContent>
+        {canManageKeys && (
+          <TabsContent value="dub">
+            <DubVoices />
+          </TabsContent>
+        )}
         {canManageKeys && (
           <TabsContent value="spend">
             <MonthlySpend />

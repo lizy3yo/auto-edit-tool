@@ -97,6 +97,10 @@ const state = {
     id: number;
     channelKey: string;
     imageUrl: string;
+    phoneImageUrl: string | null;
+    useOriginal: boolean;
+    phoneLookError: string | null;
+    phoneLookVersion: number;
     isSelected: boolean;
   }[],
   rows: [
@@ -154,20 +158,27 @@ function handle(path: string, input: any): unknown {
       : [];
   if (path === "channelHostPhoto.list") {
     const hue = input.channelKey === "hank" ? 30 : 300;
+    // A photo kept on the channel gets its phone look on the poll after it was saved.
     const kept = state.kept.filter(k => k.channelKey === input.channelKey);
+    const out = JSON.parse(JSON.stringify(kept));
+    for (const k of kept) k.phoneImageUrl ??= swatch(150, `phone ${k.id}`);
     return [
-      { id: 11, imageUrl: swatch(hue, "photo 1"), isSelected: true },
-      { id: 12, imageUrl: swatch(hue + 60, "photo 2"), isSelected: true },
-      ...kept,
+      { id: 11, imageUrl: swatch(hue, "orig 1"), phoneImageUrl: swatch(hue + 10, "phone 1"), useOriginal: false, phoneLookError: null, phoneLookVersion: 2, isSelected: true },
+      { id: 12, imageUrl: swatch(hue + 60, "orig 2"), phoneImageUrl: swatch(hue + 70, "phone 2"), useOriginal: false, phoneLookError: null, phoneLookVersion: 2, isSelected: true },
+      ...out,
     ];
   }
-  if (path === "styleReference.upload") return { url: swatch(200, "upload") };
+  if (path === "styleReference.upload") return { url: swatch(200, "upload orig") };
+  if (path === "heygenTest.phoneLook") return { url: swatch(210, "upload phone") };
   if (path === "channelHostPhoto.save") {
     const id = nextId++;
     state.kept.push({
       id,
       channelKey: input.channelKey,
       imageUrl: input.imageUrl,
+      phoneImageUrl: null,
+      useOriginal: false,
+      phoneLookError: null, phoneLookVersion: 2,
       isSelected: input.isSelected ?? true,
     });
     return { id };
@@ -252,6 +263,25 @@ window.fetch = (async (req: any, init?: RequestInit) => {
 }) as typeof window.fetch;
 (window as any).__kept = state.kept;
 
+/** The channel picker the Add-ons page puts above its tabs, keyed the same way. */
+function HarnessChannel() {
+  const [channelKey, setChannelKey] = useState("hank");
+  return (
+    <div className="space-y-4 p-6">
+      <select
+        className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+        value={channelKey}
+        onChange={e => setChannelKey(e.target.value)}
+      >
+        <option value="hank">Hank&apos;s Workshop</option>
+        <option value="granny-mae">Granny Mae</option>
+        <option value="no-voice">No voice yet</option>
+      </select>
+      <UpsellVsl key={channelKey} channelKey={channelKey} />
+    </div>
+  );
+}
+
 function Harness() {
   const [queryClient] = useState(() => new QueryClient());
   const [client] = useState(() =>
@@ -262,7 +292,7 @@ function Harness() {
   return (
     <trpc.Provider client={client} queryClient={queryClient}>
       <QueryClientProvider client={queryClient}>
-        <UpsellVsl />
+        <HarnessChannel />
         <Toaster />
       </QueryClientProvider>
     </trpc.Provider>

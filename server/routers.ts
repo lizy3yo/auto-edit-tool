@@ -256,7 +256,19 @@ import {
   setLipsyncCameraMode,
   runpodLipsyncReadiness,
 } from "./lipsyncProvider";
-import { selectedHostPhotos, canDeselectHostPhoto } from "./hostPhotoSelection";
+import { selectedHostPhotos } from "./hostPhotoSelection";
+import { ensurePhoneLook, phoneLookWithin, phoneLookForUrl } from "./hostPhoneLook";
+import {
+  pickChannelHostPhotoByHand,
+  syncChannelHostPhoto,
+  syncChannelHostPhotoWithin,
+} from "./hostPhotoChoice";
+import {
+  hostPhotoUrl,
+  phoneLookFailure,
+  PHONE_LOOK_VERSION,
+  usablePhoneLook,
+} from "@shared/hostPhotoLook";
 import { extractBookName } from "./ctaDetector";
 import { createProviderAdapter } from "./providers";
 import { rehostToR2 } from "./storage";
@@ -286,6 +298,22 @@ import {
   HEYGEN_TEST_RUNS_PER_PAGE,
 } from "../shared/heygenTest";
 import { VSL_MAX_BOOK_TITLE } from "../shared/vsl";
+import {
+  DubCtaInputError,
+  getDubLanguages,
+  listDubCta,
+  saveDubBook,
+  saveDubScript,
+  setDubLanguages,
+  startDubBrollRedraw,
+  startDubCtas,
+  writeDubScript,
+} from "./dubCta";
+import {
+  channelDubVoicesError,
+  cleanChannelDubVoices,
+  dubLanguagesError,
+} from "../shared/dubCta";
 
 /** Decrypt a stored provider API key. */
 async function getProviderApiKey(provider: any): Promise<string> {
@@ -611,18 +639,30 @@ const channelConfigRouter = router({
         // render is set to voice on MiniMax. Blank ⇒ no MiniMax option for this channel.
         minimaxVoiceId: z.string().optional(),
         minimaxVoiceName: z.string().optional(),
+        // The channel's own dub voice per language (`{ [code]: voiceId }`); a blank entry
+        // falls back to the language default. Omitted ⇒ left as stored.
+        dubVoices: z.record(z.string(), z.string().max(64)).optional(),
         ttsModel: z.string().optional(),
         ttsSpeed: ttsSpeedInput,
         ttsVolume: ttsVolumeInput,
         defaultAngle: z.string().optional(),
         defaultFormat: z.string().optional(),
         defaultWordCount: z.number().optional(),
+        /** Motion graphics on this channel's videos (on by default). Omitted ⇒ left as stored. */
+        motionGraphics: z.boolean().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const { channelKey, ...data } = input;
+      const { channelKey, dubVoices, ...rest } = input;
       await assertChannelEditable(ctx.user, channelKey);
-      await upsertChannelConfig(channelKey, data);
+      if (dubVoices) {
+        const error = channelDubVoicesError(dubVoices);
+        if (error) throw new TRPCError({ code: "BAD_REQUEST", message: error });
+      }
+      await upsertChannelConfig(channelKey, {
+        ...rest,
+        ...(dubVoices ? { dubVoices: cleanChannelDubVoices(dubVoices) } : {}),
+      });
       return { success: true };
     }),
 
@@ -1125,6 +1165,24 @@ const heygenTestRouter = router({
       return { ok: true };
     }),
 
+  /**
+   * The phone-look version of an UPLOADED test photo — the default the test renders from, the
+   * same as a channel's photos (shared/hostPhotoLook.ts). Cached per source photo; the page shows
+   * both and the operator can switch the photo back to its original.
+   */
+  phoneLook: managerProcedure
+    .input(z.object({ imageUrl: z.string().url().max(512) }))
+    .mutation(async ({ input }) => {
+      try {
+        return { url: await phoneLookForUrl(input.imageUrl) };
+      } catch (err: any) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: `Could not make the phone look (${String(err?.message ?? err).slice(0, 160)}) — the original will be used.`,
+        });
+      }
+    }),
+
   start: managerProcedure
     .input(
       z.object({
@@ -1177,7 +1235,7 @@ const heygenTestRouter = router({
     }),
 });
 
-// ─── Upsell VSL (the "Upsell VSL" page, /vsl) ───
+// ─── Upsell VSL (the Add-ons page's "Upsell VSL" tab, /add-ons?tab=vsl) ───
 // A channel's host thanking a buyer on the upsell page (`shared/vsl.ts`). Runs on the HeyGen
 // test's engine as `kind = "vsl"`, so accounts, retry, rename and delete are the `heygenTest`
 // routes; only what a VSL adds is here. Same gate: every clip is a paid HeyGen render.
@@ -1266,19 +1324,214 @@ const vslRouter = router({
     }),
 });
 
+// ─── Dub CTAs (the Add-ons page's "Dub CTAs" tab, /add-ons?tab=dub) ───
+// A channel's faceless call to action in another language, mid-video and end-of-video, for the
+// dubbing team (`shared/dubCta.ts`, `server/dubCta.ts`). Each language has a default voice for
+// every channel (admin only), which a channel can override with its own (`channel_configs.
+// dubVoices`, Admin → Channels); the books and clips are per channel.
+const dubCtaRouter = router({
+  /** The languages and their voices. */
+  languages: managerProcedure.query(() => getDubLanguages()),
+
+  /** Replace the language list (names and voice ids). */
+  setLanguages: adminProcedure
+    .input(
+      z.object({
+        languages: z
+          .array(
+            z.object({
+              code: z.string().min(1).max(32),
+              name: z.string().min(1).max(64),
+              voiceId: z.string().max(64),
+            })
+          )
+          .max(50),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const list = input.languages.map(l => ({
+        code: l.code,
+        name: l.name.trim(),
+        voiceId: l.voiceId.trim(),
+      }));
+      const error = dubLanguagesError(list);
+      if (error) throw new TRPCError({ code: "BAD_REQUEST", message: error });
+      await setDubLanguages(list);
+      return { ok: true };
+    }),
+
+  /** A channel's books and clips, every language. */
+  list: managerProcedure
+    .input(z.object({ channelKey: z.string().min(1).max(64) }))
+    .query(({ input }) => listDubCta(input.channelKey)),
+
+  /** Save the channel's book for one language. */
+  saveBook: managerProcedure
+    .input(
+      z.object({
+        channelKey: z.string().min(1).max(64),
+        language: z.string().min(1).max(32),
+        title: z.string().trim().min(1).max(255),
+        coverImageUrl: z.string().url().max(512).nullable(),
+        shopUrl: z.string().max(512).nullable(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertChannelEditable(ctx.user, input.channelKey);
+      await saveDubBook({ ...input, userId: ctx.user.id });
+      return { ok: true };
+    }),
+
+  /** Claude writes (or writes again) one language's script for one position, and saves it. */
+  writeScript: managerProcedure
+    .input(
+      z.object({
+        channelKey: z.string().min(1).max(64),
+        language: z.string().min(1).max(32),
+        position: z.enum(["mid", "end"]),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertChannelEditable(ctx.user, input.channelKey);
+      try {
+        return await writeDubScript({ ...input, userId: ctx.user.id });
+      } catch (err) {
+        if (err instanceof DubCtaInputError)
+          throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
+        throw err;
+      }
+    }),
+
+  /** Save a person's edit of one language's script for one position. */
+  saveScript: managerProcedure
+    .input(
+      z.object({
+        channelKey: z.string().min(1).max(64),
+        language: z.string().min(1).max(32),
+        position: z.enum(["mid", "end"]),
+        text: z.string().max(2000),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertChannelEditable(ctx.user, input.channelKey);
+      try {
+        return await saveDubScript({ ...input, userId: ctx.user.id });
+      } catch (err) {
+        if (err instanceof DubCtaInputError)
+          throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
+        throw err;
+      }
+    }),
+
+  /**
+   * Draw a channel's shared b-roll for one position again (the three pictures every language's
+   * clip of that position uses). The clips already made keep the old pictures until made again.
+   */
+  redrawBroll: managerProcedure
+    .input(
+      z.object({
+        channelKey: z.string().min(1).max(64),
+        position: z.enum(["mid", "end"]),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertChannelEditable(ctx.user, input.channelKey);
+      try {
+        return await startDubBrollRedraw({ ...input, userId: ctx.user.id });
+      } catch (err) {
+        if (err instanceof DubCtaInputError)
+          throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
+        throw err;
+      }
+    }),
+
+  /** Make (or make again) the mid and end clips for each language picked. */
+  start: managerProcedure
+    .input(
+      z.object({
+        channelKey: z.string().min(1).max(64),
+        languages: z.array(z.string().min(1).max(32)).min(1).max(50),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertChannelEditable(ctx.user, input.channelKey);
+      try {
+        return await startDubCtas({ ...input, userId: ctx.user.id });
+      } catch (err) {
+        if (err instanceof DubCtaInputError)
+          throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
+        throw err;
+      }
+    }),
+});
+
+/** How long a starting video waits for a photo's phone look before using the original. */
+const PHONE_LOOK_WAIT_MS = 150_000;
+/** How long a starting video waits for the channel's photos to be scored. */
+const PHOTO_CHOICE_WAIT_MS = 45_000;
+
 /**
  * The photos a channel shoots its host from RIGHT NOW, primary first: the library narrowed to
- * the ticked angles (`hostPhotoIds` from the form, else the channel's saved ticks), each as
- * uploaded. Empty when the channel has no library.
+ * the ticked angles (`hostPhotoIds` from the form, else the channel's saved ticks), each in the
+ * look it is switched to. Each photo renders from its PHONE LOOK unless switched to the original
+ * (shared/hostPhotoLook.ts); one whose phone look is still being made gets a short wait, then
+ * the original — a render is never held up by it. Empty when the channel has no library.
  * Shared by generate and "Redo host clips", so the two cannot read the channel differently.
  */
 async function channelHostPhotoUrls(
   channelKey: string,
   hostPhotoIds?: number[]
 ): Promise<string[]> {
+  // the channel's one photo is settled first (scores any new upload), but a video never waits
+  // long for it — past the wait the saved tick stands
+  await syncChannelHostPhotoWithin(channelKey, PHOTO_CHOICE_WAIT_MS);
   const libraryPhotos = await getChannelHostPhotos(channelKey, true);
   const wanted = selectedHostPhotos(libraryPhotos, hostPhotoIds);
-  return wanted.map(p => p.imageUrl).filter((u): u is string => !!u);
+  const looked = await Promise.all(
+    wanted.map(async p => {
+      if (p.useOriginal || usablePhoneLook(p) || phoneLookFailure(p)) return p;
+      const phone = await phoneLookWithin(p, PHONE_LOOK_WAIT_MS);
+      if (!phone) {
+        console.warn(
+          `[longform] host photo ${p.id}: phone look not ready — rendering the original`
+        );
+        return p;
+      }
+      return {
+        ...p,
+        phoneImageUrl: phone,
+        phoneLookError: null,
+        phoneLookVersion: PHONE_LOOK_VERSION,
+      };
+    })
+  );
+  return looked
+    .map(p => hostPhotoUrl(p))
+    .filter((u): u is string => !!u);
+}
+
+/**
+ * Make `useOriginal` the channel's DEFAULT host photo look and switch every photo on it to that
+ * look. Only photos whose look changes are written; switching to the phone look makes a copy for
+ * a photo that has none yet (in the background, like the per-photo switch). A photo already on
+ * the phone look whose copy failed is left alone, so this never pays for a redraw nobody asked
+ * for. Returns how many photos changed.
+ */
+async function applyChannelLook(channelKey: string, useOriginal: boolean): Promise<number> {
+  await upsertChannelConfig(channelKey, { hostPhotoUseOriginal: useOriginal });
+  const changed = (await getChannelHostPhotos(channelKey, true)).filter(
+    p => p.useOriginal !== useOriginal
+  );
+  for (const p of changed) {
+    await updateChannelHostPhoto(p.id, {
+      useOriginal,
+      ...(!useOriginal ? { phoneLookError: null } : {}),
+    });
+    const wanted = { ...p, useOriginal: false, phoneLookError: null };
+    // only the channel's ONE photo is rendered, so only it gets a copy (`hostPhotoChoice.ts`)
+    if (!useOriginal && p.isSelected && !usablePhoneLook(wanted)) void ensurePhoneLook(wanted);
+  }
+  return changed.length;
 }
 
 const channelHostPhotoRouter = router({
@@ -1291,7 +1544,12 @@ const channelHostPhotoRouter = router({
       })
     )
     .query(async ({ input }) => {
-      return getChannelHostPhotos(input.channelKey, input.activeOnly);
+      const rows = await getChannelHostPhotos(input.channelKey, input.activeOnly);
+      // ONE photo per channel (`server/hostPhotoChoice.ts`): photos not yet scored are scored in
+      // the background, the best keeps the tick, and only that photo gets its PHONE LOOK
+      // (shared/hostPhotoLook.ts) — the tile says "Making phone look…" until the next poll.
+      void syncChannelHostPhoto(input.channelKey);
+      return rows;
     }),
 
   /**
@@ -1325,29 +1583,139 @@ const channelHostPhotoRouter = router({
       // a worse second copy of the thumbnail and friction on every upload.
       const data = { channelKey: input.channelKey, imageUrl: input.imageUrl };
       if (input.id) {
-        await updateChannelHostPhoto(input.id, data);
+        // A new picture needs its own phone look — the old one showed a different photo.
+        const before = (await getChannelHostPhotos(input.channelKey, false)).find(p => p.id === input.id);
+        const changed = before && before.imageUrl !== input.imageUrl;
+        await updateChannelHostPhoto(input.id, {
+          ...data,
+          ...(changed
+            ? { phoneImageUrl: null, phoneLookError: null, phoneLookVersion: 0 }
+            : {}),
+        });
+        // a new picture is scored again (`needsScore`), and may change the channel's photo
+        if (changed) void syncChannelHostPhoto(input.channelKey);
         return { id: input.id };
       }
       const existing = await getChannelHostPhotos(input.channelKey, false);
+      const channel = await getChannelConfig(input.channelKey);
       const id = await createChannelHostPhoto({
         ...data,
         sortOrder: existing.length,
         isActive: true,
         createdBy: ctx.user.id,
-        // A channel's only photo stays ticked whatever was asked: videos need one angle, and
-        // the last ticked photo can never be unticked (`canDeselectHostPhoto`).
-        isSelected:
-          input.isSelected !== false ||
-          !existing.some(p => p.isActive && p.isSelected),
+        // A new photo starts on the channel's default look (Host Photos → "Default look").
+        useOriginal: !!channel?.hostPhotoUseOriginal,
+        // A channel uses ONE photo (`server/hostPhotoChoice.ts`): a new photo starts unticked
+        // unless the channel has none, and the background sync below scores it and moves the
+        // tick to it only if it is the channel's best.
+        isSelected: !existing.some(p => p.isActive && p.isSelected),
       });
+      void syncChannelHostPhoto(input.channelKey);
       return { id };
     }),
 
-  /** Soft-delete — finished videos keep the angle they snapshotted at render time. */
+  /**
+   * Phone look or the original for one photo — the switch on every tile. Open to every signed-in
+   * role, like ticking: which look a channel shoots in is the same kind of choice. Switching back
+   * to the phone look after it FAILED tries to make it again. Returns the channel's list.
+   */
+  setLook: approvedProcedure
+    .input(
+      z.object({
+        channelKey: z.string().min(1),
+        id: z.number(),
+        useOriginal: z.boolean(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertChannelEditable(ctx.user, input.channelKey);
+      const library = await getChannelHostPhotos(input.channelKey, false);
+      const row = library.find(p => p.id === input.id);
+      if (!row) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "That host photo is no longer on the channel." });
+      }
+      await updateChannelHostPhoto(input.id, {
+        useOriginal: input.useOriginal,
+        ...(!input.useOriginal ? { phoneLookError: null } : {}),
+      });
+      const wanted = { ...row, useOriginal: false, phoneLookError: null };
+      if (!input.useOriginal && !usablePhoneLook(wanted)) void ensurePhoneLook(wanted);
+      return getChannelHostPhotos(input.channelKey, true);
+    }),
+
+  /** The channel's default look — the "Default look" switch at the top of Host Photos. */
+  defaultLook: approvedProcedure
+    .input(z.object({ channelKey: z.string().min(1) }))
+    .query(async ({ input }) => {
+      const channel = await getChannelConfig(input.channelKey);
+      return { useOriginal: !!channel?.hostPhotoUseOriginal };
+    }),
+
+  /**
+   * Set this channel's default look and switch every photo on it to that look. Open to every
+   * signed-in role, like the per-photo switch. Returns the channel's list.
+   */
+  setChannelLook: approvedProcedure
+    .input(z.object({ channelKey: z.string().min(1), useOriginal: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      await assertChannelEditable(ctx.user, input.channelKey);
+      if (!(await getChannelConfig(input.channelKey))) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "That channel no longer exists." });
+      }
+      const changed = await applyChannelLook(input.channelKey, input.useOriginal);
+      return { changed, photos: await getChannelHostPhotos(input.channelKey, true) };
+    }),
+
+  /**
+   * The same for EVERY channel the caller may change; a guest's own channels only — the rest
+   * are skipped and counted, never refused as a whole.
+   */
+  setAllChannelsLook: managerProcedure
+    .input(z.object({ useOriginal: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      let channels = 0;
+      let skipped = 0;
+      let photos = 0;
+      for (const c of await getAllChannelConfigs()) {
+        if (!c.displayName) continue; // not a listed channel (listAllChannels skips it too)
+        if (!(await canEditChannel(ctx.user, c.channelKey))) {
+          skipped++;
+          continue;
+        }
+        photos += await applyChannelLook(c.channelKey, input.useOriginal);
+        channels++;
+      }
+      return { channels, skipped, photos };
+    }),
+
+  /** Throw the phone look away and make a new one (a manager did not like the first). */
+  remakePhoneLook: managerProcedure
+    .input(z.object({ channelKey: z.string().min(1), id: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      await assertChannelEditable(ctx.user, input.channelKey);
+      const row = (await getChannelHostPhotos(input.channelKey, false)).find(p => p.id === input.id);
+      if (!row) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "That host photo is no longer on the channel." });
+      }
+      // Version 0 is what makes the tile read "Making phone look…" and `ensurePhoneLook` draw
+      // again. The copy being replaced stays on the row until the new one lands.
+      const fresh = { phoneLookError: null, phoneLookVersion: 0, useOriginal: false };
+      await updateChannelHostPhoto(input.id, fresh);
+      void ensurePhoneLook({ ...row, ...fresh });
+      return getChannelHostPhotos(input.channelKey, true);
+    }),
+
+  /** Soft-delete — finished videos keep the photo they snapshotted at render time. */
   deactivate: removerProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
+      const row = await getChannelHostPhotoById(input.id);
       await deactivateChannelHostPhoto(input.id);
+      // removing the channel's photo hands the tick to the next best
+      if (row) {
+        if (row.pickedByHand) await updateChannelHostPhoto(row.id, { pickedByHand: false });
+        void syncChannelHostPhoto(row.channelKey);
+      }
       return { success: true };
     }),
 
@@ -1368,9 +1736,23 @@ const channelHostPhotoRouter = router({
     }),
 
   /**
-   * Tick or untick one angle for the channel's videos — the picker's saved state, shared by every
-   * operator and device. The channel's last ticked photo cannot be unticked: a video with no host
-   * photo cannot render a host scene. Returns the resulting list so the client can reconcile.
+   * Hand the channel's photo choice back to the system: the best-scoring photo is used again.
+   * Returns the resulting list.
+   */
+  autoPick: approvedProcedure
+    .input(z.object({ channelKey: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      await assertChannelEditable(ctx.user, input.channelKey);
+      await pickChannelHostPhotoByHand(input.channelKey, null);
+      return getChannelHostPhotos(input.channelKey, true);
+    }),
+
+  /**
+   * Use one photo for the channel's videos — "Use this one" on a tile, shared by every operator
+   * and device. A channel uses exactly ONE photo, so choosing one moves the tick from the photo
+   * the channel had, and the choice is the operator's until "Pick automatically" (`autoPick`).
+   * Unticking the channel's photo is refused: there must always be one, so pick another instead.
+   * Returns the resulting list so the client can reconcile.
    */
   setSelected: approvedProcedure
     .input(
@@ -1390,16 +1772,15 @@ const channelHostPhotoRouter = router({
           message: "That host photo is no longer on the channel.",
         });
       }
-      if (!input.selected && !canDeselectHostPhoto(library, input.id)) {
+      if (!input.selected) {
+        if (!row.isSelected) return library; // already not the channel's photo — a no-op
         throw new TRPCError({
           code: "BAD_REQUEST",
           message:
-            "At least one host photo must stay ticked — a video needs one to render host scenes.",
+            "A channel always uses one host photo — choose another photo to switch to it.",
         });
       }
-      if (row.isSelected !== input.selected) {
-        await updateChannelHostPhoto(input.id, { isSelected: input.selected });
-      }
+      await pickChannelHostPhotoByHand(input.channelKey, input.id);
       return getChannelHostPhotos(input.channelKey, true);
     }),
 });
@@ -2521,6 +2902,20 @@ const longformVideoRouter = router({
         // What the video was MADE WITH (`shared/jobPicks.ts`): the picks as they were at
         // Generate, since the form above the card only shows the picks for the next video.
         picks: jobPickFacts(previewParams, job),
+        // The film's motion graphics, as a summary for the card (never the plan itself):
+        // how many are in the film, the QA, or why the last assembly left them out.
+        graphics: (() => {
+          const g = (job.inputParams as LongformInputParams | null)?.graphics;
+          if (!g) return null;
+          return {
+            placed: g.placed?.length ?? 0,
+            dropped: g.dropped?.length ?? 0,
+            qaPass: g.qa?.pass ?? null,
+            failures: g.qa?.failures ?? [],
+            skipped: g.skipped ?? null,
+            replanQueued: !!g.replan,
+          };
+        })(),
         // A guest on a video someone else made: the card shows it and pauses every button
         // (`mayEditOwned`; `assertJobAccess` refuses the writes too).
         viewOnly: !mayEditOwned(ctx.user, job.userId),
@@ -3700,6 +4095,32 @@ const longformVideoRouter = router({
     }),
 
   /**
+   * "Re-plan graphics": a Reassemble whose graphics step writes a FRESH plan (one model call,
+   * "Graphics plan" on the Cost dialog) instead of reusing the saved one (server/graphics).
+   */
+  replanGraphics: approvedProcedure
+    .input(z.object({ jobId: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      const job = await getLongformVideoJobById(input.jobId);
+      if (!job)
+        throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
+      await assertJobAccess(job, ctx.user, "write");
+      if (job.status === "processing") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Job is still processing — wait for it to settle first",
+        });
+      }
+      const params = { ...(job.inputParams as LongformInputParams) };
+      params.graphics = { ...(params.graphics ?? {}), replan: true };
+      await updateLongformVideoJob(input.jobId, { inputParams: params });
+      retryJobAssembly(input.jobId, true).catch(err => {
+        console.error(`[Longform ${input.jobId}] replanGraphics error:`, err);
+      });
+      return { ok: true };
+    }),
+
+  /**
    * "Even out voice" — level the stored narration of a film rendered before the narration
    * leveller existed (`levelJobNarration`). Level-only: the operator previews it and assembles
    * separately. Spends nothing.
@@ -4461,6 +4882,7 @@ export const appRouter = router({
   channelHostPhoto: channelHostPhotoRouter,
   heygenTest: heygenTestRouter,
   vsl: vslRouter,
+  dubCta: dubCtaRouter,
   activity: activityRouter,
 });
 

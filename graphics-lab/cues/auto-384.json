@@ -1,0 +1,143 @@
+{
+ "job": 384,
+ "notes": "Written by scripts/plan.mts (claude-opus-5-5) on 2026-10-16: 8 graphics for a 3.4-min film (limits: 2 cards, 4 overlays). Every cue resolved against the word times and checked by scripts/rules.mts; 1 dropped after one repair round.",
+ "cues": [
+  {
+   "id": "01-dimcaption-slow-at-night",
+   "template": "DimCaption",
+   "start": "It just happens to be",
+   "startPad": -0.15,
+   "end": "while the house is asleep.",
+   "endPad": 0.3,
+   "props": {
+    "phrase": {
+     "text": "slow at the fire that likes to start while asleep",
+     "words": true
+    },
+    "emphasis": [
+     "slow"
+    ]
+   }
+  },
+  {
+   "id": "02-bignumber-three-minutes",
+   "template": "BigNumber",
+   "start": "And once today's foam furniture",
+   "startPad": -0.15,
+   "end": "in about 3 minutes.",
+   "endPad": 0.3,
+   "props": {
+    "kicker": "Once it catches",
+    "value": 3,
+    "unit": "minutes",
+    "at": "@3 minutes",
+    "countSec": 0.6,
+    "line": {
+     "text": "a bedroom goes from smoking to fully involved",
+     "words": true
+    }
+   }
+  },
+  {
+   "id": "03-chapter-type",
+   "template": "ChapterLabel",
+   "start": "First thing on the label.",
+   "startPad": -0.15,
+   "durationSec": 4.5,
+   "props": {
+    "kicker": "On the label · 1 of 3",
+    "number": 1,
+    "title": "The type"
+   }
+  },
+  {
+   "id": "04-steplabels-read-label",
+   "template": "StepLabels",
+   "start": "get a stepladder,",
+   "startPad": -0.15,
+   "end": "and read the label.",
+   "endPad": 0.3,
+   "props": {
+    "steps": [
+     {
+      "text": "Get a stepladder",
+      "at": "@get a stepladder"
+     },
+     {
+      "text": "Take one down",
+      "at": "@take one alarm down"
+     },
+     {
+      "text": "Read the label",
+      "at": "@read the label"
+     }
+    ]
+   }
+  },
+  {
+   "id": "05-iconlabels-what-you-want",
+   "template": "IconLabels",
+   "start": "Photoelectric, or dual sensor,",
+   "startPad": -0.15,
+   "end": "is what you want.",
+   "endPad": 0.3,
+   "props": {
+    "items": [
+     {
+      "icon": "1f6a8",
+      "text": "Photoelectric",
+      "say": "Photoelectric",
+      "at": "@Photoelectric"
+     },
+     {
+      "icon": "1f514",
+      "text": "Dual sensor",
+      "say": "dual sensor",
+      "at": "@dual sensor"
+     }
+    ]
+   }
+  },
+  {
+   "id": "06-chapter-power",
+   "template": "ChapterLabel",
+   "start": "Second thing on the label.",
+   "startPad": -0.15,
+   "durationSec": 4.5,
+   "props": {
+    "kicker": "On the label · 2 of 3",
+    "number": 2,
+    "title": "Power"
+   }
+  },
+  {
+   "id": "08-chapter-interconnection",
+   "template": "ChapterLabel",
+   "start": "Third thing. Interconnection.",
+   "startPad": -0.15,
+   "durationSec": 4.5,
+   "props": {
+    "kicker": "On the label · 3 of 3",
+    "number": 3,
+    "title": "Interconnection"
+   }
+  },
+  {
+   "id": "09-warning-alarms-expire",
+   "template": "WarningLabel",
+   "start": "Smoke alarms expire.",
+   "startPad": -0.15,
+   "end": "the unit is finished.",
+   "endPad": 0.3,
+   "props": {
+    "text": {
+     "text": "Smoke alarms expire. At 10 years the unit is finished.",
+     "words": true
+    },
+    "emphasis": [
+     "expire."
+    ]
+   }
+  }
+ ]
+}

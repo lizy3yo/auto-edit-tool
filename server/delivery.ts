@@ -51,9 +51,13 @@ export const PACE_SPEED: Record<DeliveryPace, number> = {
 };
 /** Pauses Claude may ask for, ms. Anything else is snapped to the nearest. */
 export const PAUSE_STEPS_MS = [0, 300, 600];
-/** Final speed sent to TTS is clamped here — the provider accepts far more, the ear does not. */
-export const SPEED_MIN = 0.6;
-export const SPEED_MAX = 1.3;
+/**
+ * Final speed sent to TTS is clamped here — to what 69Labs accepts for an ElevenLabs voice
+ * (`ELEVEN_SPEED_MIN/MAX`, which the adapter enforces too). It was 0.6-1.3: a "slow" paragraph
+ * on a 0.8 channel asked for 0.68 and was refused with 400, so the paced read was thrown away.
+ */
+export const SPEED_MIN = 0.7;
+export const SPEED_MAX = 1.2;
 const MOOD_MAX_WORDS = 5;
 const GESTURE_MAX_WORDS = 6;
 

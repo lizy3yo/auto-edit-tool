@@ -529,6 +529,17 @@ export interface StoryboardScene {
   brollHostLook?: string;
   brollHostRef?: string;
   /**
+   * The host's picture is a step on their OWN FACE (make-up, skin care — `FACE_ROUTINE`), so the
+   * face is shown: drawn from the host photo (`hostFaceClause`) and checked to be the same person
+   * (`scanSameHost`). Unset on every other host picture, which keeps the face out of frame.
+   */
+  hostFaceShown?: boolean;
+  /**
+   * Where the device sits in a SCREEN picture (an app, a listing): each screen of a film gets the
+   * next of several settings (`assignScreenSetups` in server/pictureVariety.ts), so no two look alike.
+   */
+  screenSetup?: string;
+  /**
    * The person this picture shows when the line is about SOMEONE ELSE than the host — a customer,
    * a neighbour ("a woman customer"), in the line's own words. Drawn from behind or the side, face
    * never shown, WITHOUT the host's photo or look (`otherPersonClause`); the host is never put in
@@ -1163,6 +1174,21 @@ export interface TtsWaitState {
 }
 
 /** Persisted input parameters for a long-form video job */
+/** A film's motion graphics: the plan, what was placed, what was left out and why, and the QA. */
+export interface JobGraphics {
+  at?: string;
+  /** The cue sheet (graphics/src/cueResolve CueSpec[]), reused by the next assembly. */
+  plan?: unknown[];
+  placed?: { id: string; template: string; start: number; end: number }[];
+  dropped?: { id: string; why: string }[];
+  theme?: { accent: string; bg: string };
+  qa?: { pass: boolean; lines: string[]; failures: string[] };
+  /** Set by "Re-plan graphics": the next assembly writes a fresh plan. */
+  replan?: boolean;
+  /** Why the last assembly shipped the film without graphics, when it did. */
+  skipped?: string;
+}
+
 export interface LongformInputParams {
   /** The script the video is narrated from (voiced verbatim as one continuous track) */
   script: string;
@@ -1416,6 +1442,12 @@ export interface LongformInputParams {
    * See `rehearseSceneClips`.
    */
   rehearsal?: boolean;
+  /**
+   * The film's MOTION GRAPHICS, as the last assembly added them (server/graphics/finish.ts). The
+   * plan is reused by every later assembly (a Reassemble brings back the same graphics, no model
+   * call); `replan` asks the next assembly for a fresh plan. Unset on a film made without them.
+   */
+  graphics?: JobGraphics;
   /**
    * Test mode: every b-roll cutaway renders as a VIDEO clip (never the still/image lane).
    * Skips `enforceStillMotionRatio` and allows adjacent motion scenes. Pair with `brollOnly`

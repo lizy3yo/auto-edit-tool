@@ -265,6 +265,10 @@ export interface TTSParams {
   stability?: number;
   similarity?: number;
   style?: number;
+  /** ElevenLabs "Speaker boost" (69Labs `voiceSettings.useSpeakerBoost`); unset = provider default. */
+  speakerBoost?: boolean;
+  /** Clone voices: the pause added after each sentence (`withSentencePauses`); 0 = none. */
+  sentencePauseSec?: number;
   /** Minimax catalog-voice tuning (overrides individual fields below if set) */
   minimaxSettings?: {
     speed?: number; // 0.01–10
@@ -282,6 +286,42 @@ export interface TTSResult {
   error?: string;
   /** If censored, contains the blocked chunks that need rewriting */
   blockedChunks?: Array<{ index: number; text: string }>;
+}
+
+/**
+ * The speeds 69Labs accepts for an ElevenLabs voice. Anything outside is refused with
+ * `400 Validation failed` — a "slow" delivery paragraph on a channel set to 0.8 asked for 0.68,
+ * every Hank film had its paced read refused three times and re-voiced flat (2026-10-16).
+ */
+export const ELEVEN_SPEED_MIN = 0.7;
+export const ELEVEN_SPEED_MAX = 1.2;
+export const clampElevenSpeed = (speed: number): number =>
+  Math.min(ELEVEN_SPEED_MAX, Math.max(ELEVEN_SPEED_MIN, speed));
+
+/**
+ * A pause after every sentence for a CLONE voice, in MiniMax's own syntax (`<#0.3#>`, honoured on
+ * /voice-clones/generate and never read aloud — tested). The clone lane takes no speed (0.7, 1.0
+ * and 1.4 came back the same length) and about half of Frederick's takes came back RUSHED — 0.2-0.3 s
+ * between sentences, too short for HeyGen to close the mouth, so it kept moving through every pause.
+ * With the mark: 0 rushed takes of 5, steady ~0.55 s pauses, the mouth rests (Frederick 0.62 against
+ * 0.75, Scarlett 0.47 against 0.55-0.69); Bertha Ramirez leaves 0.40 s, Steve Cooper 0.72 s. 0.2 s
+ * was too short. Only the voiced text carries it — the script the pipeline aligns against does not.
+ */
+export const CLONE_SENTENCE_PAUSE_SEC = 0.3;
+// "Dr. Smith", "St. Louis", "e.g. this": a full stop that does not end a sentence
+const NOT_A_SENTENCE_END = /(?:^|[\s(])(?:Mr|Mrs|Ms|Dr|St|Jr|Sr|Mt|vs|etc|e\.g|i\.e)\.$/;
+export function withSentencePauses(
+  text: string,
+  sec: number = CLONE_SENTENCE_PAUSE_SEC
+): string {
+  if (!(sec > 0)) return text;
+  return text.replace(
+    /([.?!]+["'”’)]*)(\s+)(?=\S)/g,
+    (all, end: string, space: string, at: number, src: string) =>
+      NOT_A_SENTENCE_END.test(src.slice(Math.max(0, at - 6), at) + end.replace(/["'”’)]+$/, ""))
+        ? all
+        : `${end} <#${sec}#>${space}`
+  );
 }
 
 /**
@@ -312,12 +352,18 @@ function buildStandardBody(params: TTSParams): Record<string, any> {
   } else {
     // Build voiceSettings if any are provided (elevenlabs / edgetts)
     const voiceSettings: Record<string, any> = {};
-    if (params.speed !== undefined) voiceSettings.speed = params.speed;
+    if (params.speed !== undefined)
+      voiceSettings.speed =
+        params.voiceProvider === "edgetts"
+          ? params.speed
+          : clampElevenSpeed(params.speed);
     if (params.stability !== undefined)
       voiceSettings.stability = params.stability;
     if (params.similarity !== undefined)
       voiceSettings.similarityBoost = params.similarity;
     if (params.style !== undefined) voiceSettings.style = params.style;
+    if (params.speakerBoost !== undefined)
+      voiceSettings.useSpeakerBoost = params.speakerBoost;
     if (Object.keys(voiceSettings).length > 0) {
       body.voiceSettings = voiceSettings;
     }
@@ -332,7 +378,7 @@ function buildCloneBody(params: TTSParams): Record<string, any> {
   const mm = params.minimaxSettings ?? {};
   const body: Record<string, any> = {
     voiceCloneId: params.voiceId,
-    text: params.text,
+    text: withSentencePauses(params.text, params.sentencePauseSec),
     // Clone synthesis runs on minimax models; an elevenlabs modelId would fail validation here.
     model:
       (params.voiceProvider === "minimax" && params.modelId) || "speech-02-hd",

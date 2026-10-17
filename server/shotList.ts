@@ -1053,10 +1053,14 @@ const SHOT_LIST_SYSTEM =
   "about printing on a thing without saying it (\"check the date on it\", \"three things printed on " +
   "the box\"), show the thing WITH its printing and set print: \"blurred\" — the print is there, soft " +
   "and out of focus, unreadable.\n" +
-  "5b. APPS. When the words name an app, a website or selling online, the shot is a phone lying on " +
-  "a table (or in the host's hands) with its screen showing a simple buy-and-sell app — a grid of " +
-  "small photos of items. Never a brand or app name in show: any named app or site is written as " +
-  "what it is (\"a buy-and-sell app\", \"an online shop\").\n" +
+  "5b. APPS. A screen is shown ONLY when the line is about the app, the website or the act of " +
+  "listing or selling online itself (\"I listed it on a buy-and-sell app\", \"open the app\"). When " +
+  "the line only MENTIONS where something sold and is about the thing, the buyer, the sale or the " +
+  "money, show THAT instead — the piece itself, it being packed, handed over or shipped. Never two " +
+  "screens in a row. A screen shows what the line says is on it (a listing, a message, a search, " +
+  "a sale) — not always the same grid — on a phone, tablet or laptop, in a different place each " +
+  "time. Never a brand or app name in show: any named app or site is written as what it is (\"a " +
+  "buy-and-sell app\", \"an online shop\").\n" +
   "6. PEOPLE. The only person who may ever appear is THE HOST (described below, when given), and " +
   "only DOING the work — seen from behind or from the side, over the shoulder, hands at the task, " +
   "face turned away or out of frame. Never a face. With no host given, only bare hands at the " +

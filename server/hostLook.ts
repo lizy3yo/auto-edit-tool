@@ -18,14 +18,18 @@ import { presignOwnBucketUrl } from "./storage";
 
 const HOST_LOOK_MODEL = () => process.env.HOST_LOOK_MODEL || "claude-sonnet-5";
 
+// Age range and skin tone are asked for (2026-10-15): a host picture that shows hands, a neck or a
+// face — a make-up step on the face — must be that person's, and without them the picture model drew
+// Scarlett's routine as "a different woman", younger and smoother. Still never a name or ethnicity.
 const HOST_LOOK_SYSTEM =
-  "You describe a person's visible appearance for a picture generator that will draw them from " +
-  "BEHIND or from the SIDE doing a task, with the face never shown. Write ONE line of 15-30 " +
-  "plain words: build, hair (colour, length, style) and any head covering, every piece of " +
-  "clothing with its colour, anything worn over it (an apron, a shawl). Never the face, eyes or " +
-  "expression; never an age, a name, an ethnicity or a guess about who they are; never the " +
-  "background. Example: a slim woman with auburn hair under a sheer white head covering, a plain " +
-  "blue dress with elbow sleeves and a black apron. Output only the line.";
+  "You describe a person's visible appearance for a picture generator that will draw them doing " +
+  "a task, usually from the side or behind. Write ONE line of 18-36 plain words: an age range in " +
+  "plain words (in his fifties, in her late sixties), skin tone (fair, olive, tan, deep brown), " +
+  "build, hair (colour, length, style) and any head covering, every piece of clothing with its " +
+  "colour, anything worn over it (an apron, a shawl). Never the expression; never a name, an " +
+  "ethnicity or a guess about who they are; never the background. Example: a slim woman in her " +
+  "fifties with fair skin and auburn hair under a sheer white head covering, a plain blue dress " +
+  "with elbow sleeves and a black apron. Output only the line.";
 
 /** One line describing the host in `photoUrl`, or "" when it cannot be read (the film goes on). */
 export async function deriveHostLook(photoUrl: string): Promise<string> {
@@ -104,8 +108,30 @@ export const WORN_ON_BODY =
 const PERSON_WORDS =
   /\b(hands?|fingers?|fingertips?|host|she|he|her|his|herself|himself|someone|a person|a woman|a man|wearing|worn by|collarbone|neck|wrists?|earlobes?|held (?:up|out|near|against|over|to|above|beside|in front)|hold(?:s|ing) (?:up|out)|in use|scalp|skin|nails|fingernails|forehead|cheeks?|eyelashes|eyebrows?|hairline|strands?|hair(?!\s*(?:dryer|brush|clip|tie|spray|band|pin|comb|product|net|cut(?:ting)? scissors)))\b/i;
 
+/**
+ * The person's OWN face or a part of it, with a possessive ("her face", "your lips", "under the
+ * eyes"). A person is in such a picture, so it is the host's (2026-10-15, the review: Scarlett's
+ * concealer video showed "a different woman" — "under the eyes" named no person and was drawn with
+ * no host photo). A possessive is required for the bare words so "the face of the board" or "a
+ * clock face" is never a person. This alone does NOT show the face (`FACE_ROUTINE` does).
+ */
+export const OWN_FACE =
+  /\b(?:her|his|your|their|my|own)\s+(?:face|eyes|eyelids|lids|lips|chin|jawline|cheekbones?|under-?eyes?|complexion)\b|\bunder(?:-|\s+)(?:(?:the|her|his|your|their)\s+)?eyes\b/i;
+
+/**
+ * A make-up or skin-care STEP on the face — an action on a product, or a product on a part of the
+ * face. Only these pictures show the host's face (`scene.hostFaceShown`): a routine on the face
+ * cannot be shown with it turned away. "her face lit by the glow of a phone" is not a step (Dale's
+ * job 372 test, 2026-10-15), and "a tube of concealer on the counter" is a thing.
+ */
+export const FACE_ROUTINE =
+  /\b(?:appl(?:y|ies|ying|ied)|dab(?:s|bing|bed)?|blend(?:s|ing|ed)?|pat(?:s|ting|ted)?|tap(?:s|ping|ped)?|sweep(?:s|ing)?|swip(?:e|es|ing|ed)|lin(?:e|es|ing|ed)|fill(?:s|ing|ed)?|brush(?:es|ing|ed)?|smooth(?:s|ing|ed)?|press(?:es|ing|ed)?|set(?:s|ting)?)\b[^.;]{0,50}?\b(?:concealer|foundation|blush|bronzer|lipstick|lip liner|lip colou?r|lip balm|mascara|eyeliner|eye ?shadow|setting powder|face powder|primer|highlighter|serum|moisturi[sz]er|face cream|eye cream|brow pencil|brow gel)\b|\b(?:concealer|foundation|blush|bronzer|lipstick|mascara|eyeliner|eye ?shadow|primer|highlighter|serum|moisturi[sz]er)\b[^.;]{0,40}?\b(?:on|under|over|along|across|into)\s+(?:the|her|his|your|their)\s+(?:face|eyes?|lids?|eyelids?|lips|cheeks?|cheekbones?|lashes|brows?|skin|under-?eyes?|jawline)\b/i;
+
 /** Words in a shot description that mean a person is in it, doing something. */
-export const SHOWS_PERSON = new RegExp(`${PERSON_WORDS.source}|${WORN_ON_BODY.source}`, "i");
+export const SHOWS_PERSON = new RegExp(
+  `${PERSON_WORDS.source}|${WORN_ON_BODY.source}|${OWN_FACE.source}|${FACE_ROUTINE.source}`,
+  "i"
+);
 // A BODY PART is always on a person (2026-10-02, Diane's job 309: "dry hair at the bare sink counter"
 // drew a head of hair lying on the counter, and "a brush spreading gloss through silver hair" drew
 // hair hanging from nothing — read as person-free, those pictures got NO_FIGURES_SUFFIX, which bans
@@ -221,8 +247,14 @@ export function markHostBroll(
     } else if (on && eligible && person) {
       s.humanPresent = true;
       s.brollHostLook = look;
-      if (s.showSubject) s.showSubject = withoutFaceAsks(withoutMirrors(s.showSubject));
-      if (s.visualPrompt) s.visualPrompt = withoutFaceAsks(withoutMirrors(s.visualPrompt));
+      // A step on the host's OWN FACE (make-up, skin care) shows that face — hers, drawn from her
+      // photo and checked against it (`hostFaceClause`, `scanSameHost`) — since a routine on the face
+      // cannot be shown with the face turned away (the operator, 2026-10-15). Everything else keeps
+      // the face out of the picture, as before.
+      s.hostFaceShown = FACE_ROUTINE.test(`${s.showSubject ?? ""} ${s.visualPrompt ?? ""}`) || undefined;
+      const tidy = (t: string) => (s.hostFaceShown ? withoutMirrors(t) : withoutFaceAsks(withoutMirrors(t)));
+      if (s.showSubject) s.showSubject = tidy(s.showSubject);
+      if (s.visualPrompt) s.visualPrompt = tidy(s.visualPrompt);
       s.brollHostRef = hostPhotoUrl;
       n++;
     } else if (on && s.hostPresent && s.splitVisual && BODY_PART_WORDS.test(s.splitVisual) && !REAL_HOLDER.test(s.splitVisual)) {

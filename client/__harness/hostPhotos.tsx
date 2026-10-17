@@ -30,13 +30,28 @@ const swatch = (hue: number, label: string) =>
       `</svg>`
   );
 
+// Every look state: A and B have their phone look (B switched to the original), C's is still
+// being made and lands ~6 s after load, D's failed. ONE photo per channel (2026-10-15): B is the
+// channel's photo (best score); D is still being scored and lands ~4 s after load.
 const state = {
   rows: [
-    { id: 11, sortOrder: 0, isSelected: true, imageUrl: swatch(30, "A") },
-    { id: 12, sortOrder: 1, isSelected: true, imageUrl: swatch(120, "B") },
-    { id: 13, sortOrder: 2, isSelected: true, imageUrl: swatch(210, "C") },
-    { id: 14, sortOrder: 3, isSelected: true, imageUrl: swatch(300, "D") },
+    { id: 11, sortOrder: 0, isSelected: false, qualityScore: 84 as number | null, qualityNotes: "lips hard to see (beard, shadow or a closed smile)" as string | null, pickedByHand: false, imageUrl: swatch(30, "A orig"), phoneImageUrl: swatch(40, "A phone") as string | null, useOriginal: false, phoneLookError: null as string | null, phoneLookVersion: 2 },
+    { id: 12, sortOrder: 1, isSelected: true, qualityScore: 96 as number | null, qualityNotes: null as string | null, pickedByHand: false, imageUrl: swatch(120, "B orig"), phoneImageUrl: swatch(130, "B phone") as string | null, useOriginal: true, phoneLookError: null as string | null, phoneLookVersion: 2 },
+    { id: 13, sortOrder: 2, isSelected: false, qualityScore: 71 as number | null, qualityNotes: "skin looks airbrushed; face soft or out of focus" as string | null, pickedByHand: false, imageUrl: swatch(210, "C orig"), phoneImageUrl: null as string | null, useOriginal: false, phoneLookError: null as string | null, phoneLookVersion: 2 },
+    { id: 14, sortOrder: 3, isSelected: false, qualityScore: null as number | null, qualityNotes: null as string | null, pickedByHand: false, imageUrl: swatch(300, "D orig"), phoneImageUrl: null as string | null, useOriginal: false, phoneLookError: "no face in the phone-look result" as string | null, phoneLookVersion: 2 },
   ],
+};
+setTimeout(() => (state.rows[2].phoneImageUrl = swatch(220, "C phone")), 6000);
+setTimeout(() => {
+  state.rows[3].qualityScore = 58;
+  state.rows[3].qualityNotes = "more than one face; host off centre";
+}, 4000);
+/** The server's rule (`pickHostPhoto`): a hand pick, else the best score; exactly one ticked. */
+const resync = () => {
+  const best =
+    state.rows.find(r => r.pickedByHand) ??
+    [...state.rows].sort((a, b) => (b.qualityScore ?? -1) - (a.qualityScore ?? -1))[0];
+  state.rows.forEach(r => (r.isSelected = r.id === best.id));
 };
 const list = () =>
   [...state.rows]
@@ -81,12 +96,15 @@ window.fetch = (async (input: any, init?: RequestInit) => {
 
   if (path.includes("channelHostPhoto.setSelected")) {
     const row = state.rows.find(r => r.id === input0.id)!;
-    const ticked = state.rows.filter(r => r.isSelected);
-    if (!input0.selected && ticked.length === 1 && row.isSelected)
-      return fail(
-        "At least one host photo must stay ticked — a video needs one to render host scenes."
-      );
-    row.isSelected = input0.selected;
+    if (!input0.selected && row.isSelected)
+      return fail("A channel always uses one host photo — choose another photo to switch to it.");
+    if (input0.selected) state.rows.forEach(r => (r.pickedByHand = r.id === row.id));
+    resync();
+    return reply(list());
+  }
+  if (path.includes("channelHostPhoto.autoPick")) {
+    state.rows.forEach(r => (r.pickedByHand = false));
+    resync();
     return reply(list());
   }
   if (path.includes("channelHostPhoto.setPrimary")) {
@@ -99,6 +117,12 @@ window.fetch = (async (input: any, init?: RequestInit) => {
     ordered.forEach((r, i) => (r.sortOrder = i));
     ordered[0].isSelected = true;
     return reply({ success: true });
+  }
+  if (path.includes("channelHostPhoto.setLook")) {
+    const row = state.rows.find(r => r.id === input0.id)!;
+    row.useOriginal = input0.useOriginal;
+    if (!input0.useOriginal) row.phoneLookError = null;
+    return reply(list());
   }
   if (path.includes("channelHostPhoto.list")) return reply(list());
   return reply(null);
