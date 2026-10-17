@@ -278,8 +278,8 @@ function rowText(item: string): string {
 
 /**
  * Where each spoken list is said — its first item's first word to its last item's last word — in
- * order, each searched from the list before it (a list said again later binds after the one before
- * it). A list whose first or last item is not heard word for word is left out. Pure.
+ * order, each searched from where the list before it starts (so a list said again after another list
+ * binds after that one). A list whose first or last item is not heard word for word is left out. Pure.
  */
 function locateLists(words: Word[], lists: { items: string[] }[]): { n: number; a: number; b: number }[] {
   const index = indexWords(words);
@@ -296,7 +296,7 @@ function locateLists(words: Word[], lists: { items: string[] }[]): { n: number; 
   return out;
 }
 
-/** Does `a`-`b` touch a call-to-action scene? No graphic may go there (rules.ts). */
+/** Does `a`-`b` run into a call-to-action scene (ending just as one starts does not)? No graphic may go there (rules.ts). */
 function inCallToAction(film: FilmLayout, a: number, b: number): boolean {
   return film.scenes.some(s => s.cta && a < s.narrationEndSec && b > s.narrationStartSec);
 }
@@ -306,7 +306,8 @@ function inCallToAction(film: FilmLayout, a: number, b: number): boolean {
  * are put to the planner as lists that MUST get a graphic — a replay of 12 films found 15 of 49 lists
  * in a CTA, in every film (Dale's job 397: "other woodworkers, old shop habits, and a fair pile of my
  * own spoiled boards" in the book pitch; Hank's job 398: the scan steps "Point your phone's camera…,
- * hold it steady…, tap the link"), each told it MUST have a graphic and each refused by the rules.
+ * hold it steady…, tap the link"), each told it MUST have a graphic where the rules allow none (none
+ * got one, rightly; what the model tried there is not kept, so the refusals cannot be counted).
  * Located exactly as `missingListCues` locates them, over the whole sequence, so the two agree; a list
  * that is not heard word for word is still offered (the planner may place it on the words it finds). Pure.
  */
@@ -440,8 +441,9 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
   const priority = (s: CueSpec) => structural.has(s.template) || required.has(s.id);
   const lists = (input.lists ?? []).filter(l => l.items.length >= 2 && l.items.length <= 5);
   // The model is told a list MUST get a graphic only where one may go: a list in the call to action
-  // can never have one, so naming it there only buys a refusal. `missingListCues` still reads every
-  // list, so a list said after a mid-roll CTA is located after it, not on an earlier copy of its words.
+  // can never have one, so naming it there is at best ignored and at worst refused. `missingListCues`
+  // still reads every list, so a list said after a mid-roll CTA is located after it, not on an earlier
+  // copy of its words.
   const offered = listsWhereGraphicsGo(words, film, lists);
 
   const validate = async (newSpecs: CueSpec[], final: boolean) => {
