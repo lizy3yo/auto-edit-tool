@@ -86,6 +86,34 @@ describe("namedPeople — the people a description names, read off its noun phra
     // "mother-of-pearl" is a thing; the woman wearing it is a person.
     expect(namedPeople("chunky strand of shimmering mother-of-pearl beads resting on a woman's bare collarbone")?.people.map(p => p.noun)).toEqual(["woman"]); // job 380 scene 26
   });
+
+  it("a driver is the tool unless the words make it a person (every stored 'driver' was a tool)", () => {
+    for (const tool of [
+      "Weathered bare hands from forearms down, fingers gripping a drill driver, driving a screw into a wooden cleat", // job 143 scene 100
+      "Weathered bare hands from the forearms down, fingers gripping an exterior screw and a driver, pressing the fastener in", // job 162 scene 247
+      "A handheld battery-powered drill and impact driver resting on a workbench with fasteners", // job 225 scene 48
+      "an impact driver sinking a screw into a pine board on the workbench",
+    ])
+      expect(namedPeople(tool), tool).toBeUndefined();
+    expect(namedPeople("a delivery driver leaving a box on the porch")?.people[0].phrase).toBe("a delivery driver");
+    expect(namedPeople("the driver's hands on the steering wheel at night")?.role).toBe("driver");
+  });
+
+  it("two person words naming one thing are no people; two people side by side are two", () => {
+    expect(namedPeople("a wooden bride and groom cake topper on a white cake")).toBeUndefined();
+    expect(namedPeople("the king and queen pieces on a handmade chessboard")).toBeUndefined();
+    expect(namedPeople("a bride and groom at the altar, seen from behind")?.count).toBe(2);
+    expect(namedPeople("a husband and wife team at their market stall")?.count).toBe(2);
+    expect(namedPeople("a mother and young daughter stitching a quilt block at a wooden table")?.count).toBe(2); // job 120 scene 7
+  });
+
+  it("a clause about people is no one in the frame, and the phrase never takes a verb", () => {
+    // job 149 scene 68: "…demonstrating what customers are purchasing — the lit lantern."
+    expect(namedPeople("showing the lantern in its intended use-case and demonstrating what customers are purchasing")).toBeUndefined();
+    // jobs 121 scene 94 and 135 scene 19: the phrase is what the prompt asks to draw.
+    expect(namedPeople("rows of tables, showing where handmade work meets local buyers")?.people[0].phrase).toBe("local buyers");
+    expect(namedPeople("a plain backdrop show whether hours of work drew buyers")?.people[0].phrase).toBe("buyers");
+  });
 });
 
 describe("showsPerson — one test for 'someone is in this picture'", () => {
@@ -149,6 +177,13 @@ describe("someoneElse — whether the words put someone other than the host in t
     expect(someoneElse("a plumber's hands tightening a compression fitting", { look: MAN, selfRoles: ["plumber"] })).toBeUndefined();
     expect(someoneElse("a plumber's hands tightening a compression fitting", { look: MAN })?.who).toBe("a plumber");
     expect(someoneElse("Uncle Joe's hands sanding a board", { look: MAN, hostName: "Uncle Joe" })).toBeUndefined();
+    // A family title in the host's name is theirs, in any of its words; a name without one gives none.
+    const gran = selfRolesOf("", undefined, "Grandma Lou");
+    expect(gran).toEqual(expect.arrayContaining(["grandma", "grandmother"]));
+    expect(someoneElse("a grandmother's hands working a crochet hook through soft yarn", { look: WOMAN, selfRoles: gran })).toBeUndefined();
+    expect(someoneElse("a grandmother's hands working a crochet hook through soft yarn", { look: WOMAN })?.who).toBe("a grandmother");
+    expect(someoneElse("her granddaughter's hands on the hook", { look: WOMAN, selfRoles: gran })?.who).toBe("her granddaughter");
+    expect(selfRolesOf("", undefined, "Nancy Hart")).toEqual([]);
   });
 
   it("reads the host's sex off their look", () => {
@@ -268,6 +303,10 @@ describe("someone else is carried by every step that rewrites, splits or groups 
     expect(whoOf("host")).toBeNull();
     expect(whoOf("the viewer")).toBeNull();
     expect(whoOf("you")).toBeNull();
+    expect(whoOf("your hands")).toBeNull();
+    // A viewer's customer is not the viewer.
+    expect(whoOf("your customer")).toBe("the customer");
+    expect(whoOf("the host's neighbour")).toBe("a neighbour");
     expect(whoOf("a buyer at home")).toBe("a buyer at home");
     expect(whoOf("a hen")).toBeUndefined();
     expect(whoOf("")).toBeUndefined();

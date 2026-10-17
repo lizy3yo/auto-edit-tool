@@ -1559,11 +1559,18 @@ export type PictureFix = {
   who?: string | null;
 };
 
-/** The check's `who`: null for the host or the viewer, someone else's words, or undefined. Pure. */
+/**
+ * The check's `who`: null for the host or the viewer, someone else's words, or undefined. "host",
+ * "you" and "your hands" are the host; "your customer" and "the host's neighbour" name someone else
+ * (a viewer's customer is not the viewer). Pure.
+ */
 export function whoOf(raw: unknown): string | null | undefined {
   if (typeof raw !== "string" || !raw.trim()) return undefined;
-  if (/^\s*(?:the\s+)?(?:host|narrator|presenter|viewer)(?:['’]s)?\b|^\s*(?:you|your|me|i)\b/i.test(raw)) return null;
-  return otherPersonOf(raw);
+  const hostOrViewer = /^\s*(?:the\s+)?(?:host|narrator|presenter|viewer)(?:['’]s)?\b|^\s*(?:you|your|me|my|i)\b/i.test(raw);
+  if (!hostOrViewer) return otherPersonOf(raw);
+  const others = namedPeople(raw)?.people.filter(p => p.kind !== "self") ?? [];
+  if (!others.length) return null;
+  return otherPersonOf(others.map(p => p.phrase.replace(/^(?:your|my|our)\s+/i, "the ")).join(" and "));
 }
 
 /**

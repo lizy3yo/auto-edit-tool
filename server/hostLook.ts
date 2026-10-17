@@ -162,7 +162,7 @@ const ROLE_NOUNS = [
   // care, trades and services
   "nurse", "doctor", "dentist", "pharmacist", "veterinarian", "caregiver", "nanny", "stylist",
   "hairdresser", "hairstylist", "barber", "plumber", "electrician", "contractor", "technician", "mechanic",
-  "inspector", "handyman", "repairman", "locksmith", "courier", "mailman", "postman", "driver", "pilot",
+  "inspector", "handyman", "repairman", "locksmith", "courier", "mailman", "postman", "pilot",
   "officer", "policeman", "policewoman", "cop", "firefighter", "fireman", "soldier", "sailor", "farmer",
   "rancher", "fisherman", "hunter", "miner", "labourer", "laborer", "teacher",
   "student", "apprentice", "employee", "coworker", "co-worker", "colleague", "volunteer", "manager",
@@ -187,11 +187,18 @@ const GROUP_NOUNS = ["couple", "crowd", "family"];
  * "viewer" are not here: "a coffee maker on the counter", "the best seller on the shelf".)
  */
 const SELF_NOUNS = ["host", "owner", "homeowner", "narrator", "presenter", "crafter", "vendor"];
-/** A word before that makes an ambiguous one a person: "family members", "a travel agent". */
+/**
+ * A word before that makes an ambiguous one a person: "family members", "a travel agent", "a
+ * delivery driver". Without it the word is a thing — a bare "driver" in a picture is the TOOL ("an
+ * impact driver", "a drill driver", "an exterior screw and a driver": every stored use, jobs 143,
+ * 162 and 225) — unless it owns a body part ("the driver's hands on the wheel").
+ */
 const COMPOUNDS: Record<string, RegExp> = {
   member: /^(?:family|crew|team|staff|church|club)$/,
   agent: /^(?:travel|estate|gate|ticket|booking|insurance|border|customs)$/,
   carrier: /^(?:mail|letter)$/,
+  driver:
+    /^(?:truck|bus|taxi|cab|delivery|race|racing|rideshare|getaway|lorry|van|train|tractor|school|designated|student|teen|new|older|elderly|young|other|woman|man|lady|careless|distracted|drunk|tired)$/,
 };
 
 const IRREGULAR_PLURALS: Record<string, string> = {
@@ -278,6 +285,13 @@ const NUMBERS = new Map<string, number>(
 const NOT_IN_FRAME =
   /^(?:photos?|photographs?|pictures?|portraits?|paintings?|drawings?|posters?|images?|prints?|statues?|figurines?|sketch(?:es)?|cards?|carvings?|sculptures?|dolls?|toys?|ornaments?|cutouts?|toppers?)$/;
 const DASH_OR_STOP = /^[,.;:!?()[\]—–"”-]$/;
+/**
+ * Words that never describe a person, so the phrase ends before them — a question word or a verb
+ * ("hours of work drew buyers", "where handmade work meets local buyers": jobs 135 and 121). The
+ * phrase is what the prompt tells the picture maker to draw ("The only person in this shot is …").
+ */
+const NOT_A_MODIFIER =
+  /^(?:what|which|whose|where|when|why|how|whether|if|than|then|so|but|drew|met|saw|told|brought|caught|sold|showed|gave|took|got|let|made|[a-z]*[^su'’]s)$/;
 /** "no people in the frame", "no clutter or shoppers", "empty of people": nobody is in it. */
 const NEGATION = /^(?:no|not|without|never|nobody|none|zero|empty|free|devoid|absent)$/;
 /** Someone a picture is FOR or WAITING for is not in it: "awaits a buyer", "to potential buyers". */
@@ -333,8 +347,17 @@ function headsPerson(tokens: string[], h: number, kind: NounKind, lemma: string)
   // A dash or a stop ends the phrase; a digit is a size ("baby 0-3 months").
   if (!isWord(next)) return DASH_OR_STOP.test(next);
   const n = next.toLowerCase();
+  // Two person words naming a THING together ("a bride and groom cake topper", "the king and queen
+  // pieces"): the first is a person only when the second is one.
+  const second = tokens[h + 2];
+  if ((n === "and" || n === "or") && isWord(second) && !/['’]s?$/.test(second)) {
+    const pair = PERSON_NOUN.get(second.toLowerCase());
+    if (pair && !COMPOUNDS[pair.lemma] && !headsPerson(tokens, h + 2, pair.kind, pair.lemma)) return false;
+  }
   return (
     FOLLOW.has(n) ||
+    // People working together: "a husband and wife team", "a mother-daughter duo".
+    /^(?:team|duo|pair|crew)$/.test(n) ||
     (n === "of" && kind === "group" && lemma !== "couple") ||
     (/^[a-z]{4,}ing$/.test(n) && !NOT_DOING.test(n)) ||
     (/^[a-z]{3,}ly$/.test(n) && !NOT_DOING_LY.test(n))
@@ -364,10 +387,11 @@ export function namedPeople(text: string | undefined): NamedPeople | undefined {
     const possessive = word !== tok.toLowerCase();
     let noun = entry.lemma;
     const compound = COMPOUNDS[entry.lemma];
+    const before = tokens[h - 1];
+    const joined = !!compound && isWord(before) && compound.test(bare(before));
     if (compound) {
-      const before = tokens[h - 1];
-      if (!isWord(before) || !compound.test(bare(before))) continue;
-      noun = `${bare(before)} ${entry.lemma}`;
+      if (!joined && !(possessive && ownsBodyPart(tokens, h))) continue;
+      if (joined) noun = `${bare(before!)} ${entry.lemma}`;
     }
     const next = tokens[h + 1];
     // A person noun right before another one describes it: "a woman customer", "a baby girl".
@@ -377,7 +401,7 @@ export function namedPeople(text: string | undefined): NamedPeople | undefined {
     }
     if (possessive ? !ownsBodyPart(tokens, h) : !headsPerson(tokens, h, entry.kind, entry.lemma)) continue;
     // The noun phrase: up to two describing words and a determiner before the noun.
-    let start = compound ? h - 1 : h;
+    let start = joined ? h - 1 : h;
     for (let mods = 0; start > 0; ) {
       const prev = tokens[start - 1];
       if (!isWord(prev)) break;
@@ -387,7 +411,7 @@ export function namedPeople(text: string | undefined): NamedPeople | undefined {
         if (p === "few" && tokens[start - 1]?.toLowerCase() === "a") start--;
         break;
       }
-      if (mods >= 2 || FOLLOW.has(p) || p === "of" || p === "or" || NEGATION.test(p) || NOT_THERE_YET.test(p) || /ing$/.test(p) || /['’]s?$/.test(prev)) break;
+      if (mods >= 2 || FOLLOW.has(p) || p === "of" || p === "or" || NEGATION.test(p) || NOT_THERE_YET.test(p) || /ing$/.test(p) || /['’]s?$/.test(prev) || NOT_A_MODIFIER.test(p) || p.length < 2) break;
       start--;
       mods++;
     }
@@ -397,6 +421,9 @@ export function namedPeople(text: string | undefined): NamedPeople | undefined {
     // ("no people in the frame", "empty of people", "no signage, pricing, or people"), or a
     // picture OF someone: not in the frame.
     if (NOT_THERE_YET.test(tokens[start - 1]?.toLowerCase() ?? "")) continue;
+    // A clause ABOUT people, not people in the frame: "demonstrating what customers are purchasing"
+    // (job 149 scene 68), "to see how buyers react".
+    if (/^(?:what|whether|how|why)$/.test(tokens[start - 1]?.toLowerCase() ?? "")) continue;
     const listed = /^(?:or|and)$/i.test(tokens[start - 1] ?? "");
     let absent = false;
     for (let k = start - 1; k >= Math.max(0, start - (listed ? 8 : 4)); k--) {
@@ -497,13 +524,25 @@ export function sexOfLook(look: string | undefined): "f" | "m" | undefined {
   return f && !m ? "f" : m && !f ? "m" : undefined;
 }
 
+/** A family title a host may go by in their name, and the role words that mean the same person. */
+const NAME_TITLES: [RegExp, string[]][] = [
+  [/^(?:granny|grandma|gran|nana|nan|grammy|grandmother)$/, ["grandma", "grandmother", "grandparent"]],
+  [/^(?:grandpa|grandad|granddad|gramps|grandfather)$/, ["grandpa", "grandfather", "grandparent"]],
+  [/^(?:aunt|auntie|aunty)$/, ["aunt"]],
+  [/^uncle$/, ["uncle"]],
+  [/^(?:mama|mom|mum|mother)$/, ["mother", "mom", "mum", "mama", "parent"]],
+  [/^(?:papa|dad|father)$/, ["father", "dad", "parent"]],
+];
+
 /**
  * The roles the host gives THEMSELF — their on-screen title and their self-introduction ("I'm Ana,
  * a hairdresser", "after thirty years as a plumber"): for that video a picture of "a plumber's
  * hands" is the host, never someone else. Only a role right after "I'm <Name>," / "I was" / "years
- * as" counts — "I'm Dale, and I've sold to a thousand customers" makes nobody a customer. Pure.
+ * as" counts — "I'm Dale, and I've sold to a thousand customers" makes nobody a customer. A family
+ * title in the host's NAME is theirs too, with its other words ("Granny <Name>": a grandmother's
+ * hands at the hook are the host's, not a stranger's). Pure.
  */
-export function selfRolesOf(intro: string | undefined, title?: string): string[] {
+export function selfRolesOf(intro: string | undefined, title?: string, hostName?: string): string[] {
   const roles = new Set<string>();
   const take = (t: string) => {
     for (const w of t.toLowerCase().match(/[a-z]+(?:-[a-z]+)*/g) ?? []) {
@@ -512,6 +551,8 @@ export function selfRolesOf(intro: string | undefined, title?: string): string[]
     }
   };
   if (title) take(title);
+  for (const w of hostName?.toLowerCase().match(/[a-z]+/g) ?? [])
+    for (const [family, same] of NAME_TITLES) if (family.test(w)) same.forEach(r => roles.add(r));
   const said =
     /\b(?:[Ii]['’]?m|[Ii] am|[Ii] was|[Ii]['’]?ve been|[Ii] have been|[Yy]ears as|[Cc]areer as|[Ww]ork(?:ed|s)? as)\s+(?:[A-Z][\w'’-]*,?\s+){0,3}(?:an?|the)\s+((?:[a-z][\w'’-]*\s+){0,2}[a-z][\w'’-]*)/g;
   for (const m of Array.from((intro ?? "").matchAll(said))) take(m[1]);
@@ -668,7 +709,7 @@ export function markHostBroll(
     .filter((s, i) => s.hostIntro || i < 3)
     .map(s => s.scriptText ?? "")
     .join(" ");
-  const selfRoles = selfRolesOf(intro, params.hostTitle);
+  const selfRoles = selfRolesOf(intro, params.hostTitle, params.hostName);
   let n = 0;
   for (const s of scenes) {
     const eligible =
