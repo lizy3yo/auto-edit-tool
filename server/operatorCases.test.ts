@@ -2066,3 +2066,17 @@ describe("a myth card's strike-through crosses every line of the myth (round 10 
     expect(full).toEqual({ fontSize: 112, maxWidth: 1240 }); // the myth before the turn is as it was
   });
 });
+
+describe("an arrow shows nothing before it draws (round 10 graphics, 2026-10-18)", () => {
+  // 400 clock-before-after (62.77-67.77 s): the Before → After card's arrow drew with "now" (~65.0 s);
+  // until then its shaft was a line of length 0, and the round cap painted a stray orange dot alone
+  // at the middle of the screen from the card's first frame.
+  it("400 clock-before-after: from the card's start to the arrow's start the shaft is not drawn at all, then it draws", async () => {
+    const { appearFrame, drawnTo, fadeIn } = await import("../graphics/src/timing");
+    const shaft = 180 - 8 * 3.2; // the card's arrow: 180 wide, 8 thick
+    const drawsAt = appearFrame(65.167 - 62.767, 30) - 6; // "now", as the card times it
+    for (let f = 0; f <= drawsAt; f++) expect(drawnTo(fadeIn(f, drawsAt, 10), shaft)).toBeNull();
+    expect(drawnTo(fadeIn(drawsAt + 1, drawsAt, 10), shaft)).toBeGreaterThan(0); // drawing, not a dot
+    expect(drawnTo(fadeIn(drawsAt + 10, drawsAt, 10), shaft)).toBe(shaft);
+  });
+});

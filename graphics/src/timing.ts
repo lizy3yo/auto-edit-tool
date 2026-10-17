@@ -84,6 +84,18 @@ export function strikeSweep(words: string[], progress: number): { words: number[
   return { words: struck, gaps };
 }
 
+/**
+ * Where a line drawn in from x 0 ends when it is `progress` (0-1) of the way along `length`, or
+ * null while it has not started — then it must not be drawn at all. A line of length 0 is not
+ * nothing: with round caps it paints a dot as wide as its stroke, and job 400's Before → After card
+ * (clock-before-after, 62.8-65.0 s) showed that dot alone in the middle of the screen for two
+ * seconds before its arrow drew. Pure.
+ */
+export function drawnTo(progress: number, length: number): number | null {
+  if (!(progress > 0) || !(length > 0)) return null;
+  return length * Math.min(1, progress);
+}
+
 /** 0 → 1 as a word fades in. Ease-out so it lands softly instead of popping. */
 export function fadeIn(frame: number, start: number, dur = MOTION.wordIn): number {
   return interpolate(frame, [start, start + dur], [0, 1], {

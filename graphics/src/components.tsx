@@ -11,7 +11,7 @@ import {
 } from "remotion";
 import { withAlpha } from "./palette";
 import { THEME, TYPE, type Theme } from "./theme";
-import { fadeIn, pageStarts, splitWords, strikeSweep, wordFrames, type Phrase } from "./timing";
+import { drawnTo, fadeIn, pageStarts, splitWords, strikeSweep, wordFrames, type Phrase } from "./timing";
 
 export const ThemeContext = React.createContext<Theme>(THEME);
 export const useTheme = () => React.useContext(ThemeContext);
@@ -335,7 +335,12 @@ export const NumberDot: React.FC<{ n: number; size: number }> = ({ n, size }) =>
   );
 };
 
-/** A right-pointing accent arrow that draws itself in from `atFrame`. */
+/**
+ * A right-pointing accent arrow that draws itself in from `atFrame`. Nothing of it shows before
+ * then: the shaft is left out until it has length (`drawnTo`) — drawn at length 0 its round cap was
+ * a stray dot at the middle of job 400's Before → After card for two seconds — while the empty box
+ * keeps its place in the row, so nothing beside it moves when it draws.
+ */
 export const Arrow: React.FC<{ atFrame: number; width: number; thickness?: number }> = ({
   atFrame,
   width,
@@ -345,17 +350,12 @@ export const Arrow: React.FC<{ atFrame: number; width: number; thickness?: numbe
   const frame = useCurrentFrame();
   const p = fadeIn(frame, atFrame, 10);
   const head = thickness * 3.2;
+  const shaftEnd = drawnTo(p, width - head);
   return (
     <svg width={width} height={head * 2} style={{ overflow: "visible", flex: "none" }}>
-      <line
-        x1={0}
-        y1={head}
-        x2={(width - head) * p}
-        y2={head}
-        stroke={t.accent}
-        strokeWidth={thickness}
-        strokeLinecap="round"
-      />
+      {shaftEnd !== null && (
+        <line x1={0} y1={head} x2={shaftEnd} y2={head} stroke={t.accent} strokeWidth={thickness} strokeLinecap="round" />
+      )}
       <polygon
         points={`${width - head * 1.4},${head - head * 0.75} ${width},${head} ${width - head * 1.4},${head + head * 0.75}`}
         fill={t.accent}
