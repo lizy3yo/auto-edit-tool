@@ -15,7 +15,8 @@
  *  - it is awaited up to the host scene's OWN wall clock (`withSceneDeadline`), less the room the
  *    composite needs, never a constant shorter than what the still lane needs;
  *  - a draw that FAILS is drawn once more; a draw still running when the time is up is not —
- *    a second draw beside a live one only doubles the cost and the image lane's queue;
+ *    a second draw beside a live one only doubles the cost and the image lane's queue — and no
+ *    draw is started with too little time left to wait for it (`SPLIT_PANEL_MIN_DRAW_MS`);
  *  - when the panel still does not come, the scene keeps its host take (paid for and on the
  *    words) and the job says which scene lost its panel, with `scene.splitPanelMissing`.
  *
@@ -37,6 +38,17 @@ export type SplitPanelResult =
  * take, which is worse.
  */
 export const SPLIT_COMPOSITE_MARGIN_MS = 3 * 60_000;
+
+/**
+ * The least wait worth STARTING a new draw for. A draw cannot be stopped once begun, so one
+ * started with no time left is a picture paid for and thrown away — the very waste this file
+ * exists to end. Two ways in: a host render that used most of its clock (the HeyGen wall clock
+ * counts the wait for a slot, so a beat can come back with under three minutes left), and the
+ * worker of a scene its clock already gave up on, which runs on with a deadline in the past —
+ * there a moving panel would be a paid video nobody sees. A still rarely lands in under a minute.
+ * A draw already running is still waited for, however little is left.
+ */
+export const SPLIT_PANEL_MIN_DRAW_MS = 60_000;
 
 const asError = (e: unknown): Error =>
   e instanceof Error ? e : new Error(String(e ?? "split panel failed"));
@@ -130,7 +142,8 @@ export function splitPanelMissingWarning(
  * has one (once; any failure falls to the still, which never moves wrong), then the still: the
  * draw started beside the host render when there is one, else one now. Everything is awaited up
  * to `deadlineAt` less the composite's room. A still that fails is drawn once more; one still
- * running when the time is up is not.
+ * running when the time is up is not. No draw is STARTED with less than
+ * `SPLIT_PANEL_MIN_DRAW_MS` left to wait for it.
  */
 export async function splitPanelFor(opts: {
   /** The moving panel's render, when the scene has one and a video lane is available. */
@@ -147,23 +160,33 @@ export async function splitPanelFor(opts: {
   const late: SplitPanelResult = {
     reason: "it was still being drawn when the scene's time ran out",
   };
+  const noTime = "the scene's time ran out before it could be drawn";
+  const roomToDraw = () =>
+    splitPanelWaitMs(opts.deadlineAt) >= SPLIT_PANEL_MIN_DRAW_MS;
+  let failed: string | undefined;
   if (opts.moving) {
+    if (!roomToDraw()) return { reason: noTime };
     const got = await within(
       settle(opts.moving),
       splitPanelWaitMs(opts.deadlineAt)
     );
     if (got === "late") return late;
     if ("url" in got) return { url: got.url };
+    failed = got.error.message;
     log(
-      `moving split panel failed (${got.error.message}) — falling back to the still panel`
+      `moving split panel failed (${failed}) — falling back to the still panel`
     );
   }
-  let outcome = opts.started ?? settle(opts.still);
+  let outcome = opts.started;
+  if (!outcome) {
+    if (!roomToDraw()) return { reason: failed ?? noTime };
+    outcome = settle(opts.still);
+  }
   for (let attempt = 1; ; attempt++) {
     const got = await within(outcome, splitPanelWaitMs(opts.deadlineAt));
     if (got === "late") return late;
     if ("url" in got) return { url: got.url };
-    if (attempt >= 2) return { reason: got.error.message };
+    if (attempt >= 2 || !roomToDraw()) return { reason: got.error.message };
     log(`split panel failed (${got.error.message}) — drawing it once more`);
     outcome = settle(opts.still);
   }

@@ -1422,11 +1422,12 @@ describe("a split ships with both halves, or the job says so (the audit's host-o
         hostClipUrls: [take(3)],
         clipUrls: [take(3)],
       }),
-      host(102, "So how do you choose well when you're standing in front of a", {
-        splitVisual: "A wall of eyeglass frames in an optician's shop",
+      // A split that got its panel: the clip is the composite, never the host take.
+      host(4, "and a stack of fabric on the table", {
+        splitVisual: "A stack of folded fabric on a sewing table",
         sceneStatus: "completed",
-        hostClipUrls: [take(102)],
-        clipUrls: ["https://r2/longform/226/split-102-0-a.mp4"],
+        hostClipUrls: [take(4)],
+        clipUrls: ["https://r2/longform/226/split-4-0-a.mp4"],
       }),
       host(133, "The scraps cost about nothing, the batting and", {
         splitVisual: "Fabric scraps, batting, and binding strip laid out on a sewing table",
@@ -1436,6 +1437,19 @@ describe("a split ships with both halves, or the job says so (the audit's host-o
       }),
     ];
     expect(splitPanelsMissing(board)).toEqual([3, 133]);
+  });
+
+  it("the production snapshot's scene 102: its last panel draw PASSED and it still shipped as the host alone", () => {
+    const take = "https://r2/longform/226/clip-102-0-a.mp4";
+    const board = [
+      host(102, "So how do you choose well when you're standing in front of a", {
+        splitVisual: "A wall of eyeglass frames in an optician's shop",
+        sceneStatus: "completed",
+        hostClipUrls: [take],
+        clipUrl: take,
+      }),
+    ];
+    expect(splitPanelsMissing(board)).toEqual([102]);
   });
 
   it("job 400 scene 3: a panel that passed on its third draw, after 300 s, is put beside the host", async () => {

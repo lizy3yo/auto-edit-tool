@@ -4,6 +4,7 @@ import { splitPanelMissing, splitPanelsMissing } from "@shared/splitPanel";
 import {
   markSplitPanelMissing,
   SPLIT_COMPOSITE_MARGIN_MS,
+  SPLIT_PANEL_MIN_DRAW_MS,
   splitPanelFor,
   splitPanelMissingWarning,
   splitPanelWaitMs,
@@ -189,6 +190,67 @@ describe("a split's panel waits as long as its host scene has left", () => {
     });
     await vi.advanceTimersByTimeAsync(8 * MIN);
     expect((await result).reason).toMatch(/time ran out/);
+    expect(still).not.toHaveBeenCalled();
+  });
+
+  it("a scene its clock already gave up on starts no panel at all — not a paid moving clip, not a still", async () => {
+    // Its worker runs on with a deadline in the past; a draw started now is paid for and unseen.
+    const moving = vi.fn(() => landsAfter(1_000, "https://r2/moving.mp4"));
+    const still = vi.fn(() => landsAfter(1_000, "https://r2/still.mp4"));
+    const panel = await splitPanelFor({
+      moving,
+      still,
+      deadlineAt: Date.now() - MIN,
+    });
+    expect(panel.url).toBeUndefined();
+    expect(panel.reason).toMatch(/time ran out before it could be drawn/);
+    expect(moving).not.toHaveBeenCalled();
+    expect(still).not.toHaveBeenCalled();
+  });
+
+  it("with no draw started and under a minute to wait, nothing is drawn; with a minute it is", async () => {
+    const still = vi.fn(() => landsAfter(5_000, "https://r2/still-7.mp4"));
+    const tooLittle = await splitPanelFor({
+      still,
+      deadlineAt:
+        Date.now() + SPLIT_COMPOSITE_MARGIN_MS + SPLIT_PANEL_MIN_DRAW_MS - 1,
+    });
+    expect(tooLittle.reason).toMatch(/before it could be drawn/);
+    expect(still).not.toHaveBeenCalled();
+
+    const enough = splitPanelFor({
+      still,
+      deadlineAt:
+        Date.now() + SPLIT_COMPOSITE_MARGIN_MS + SPLIT_PANEL_MIN_DRAW_MS,
+    });
+    await vi.advanceTimersByTimeAsync(5_000);
+    await expect(enough).resolves.toEqual({ url: "https://r2/still-7.mp4" });
+    expect(still).toHaveBeenCalledTimes(1);
+  });
+
+  it("a started draw that fails with under a minute left is not drawn again, and says why it failed", async () => {
+    const why = "Still image generation failed";
+    const still = vi.fn(() => landsAfter(1_000, "https://r2/never.mp4"));
+    const result = splitPanelFor({
+      started: asOutcome(failsAfter(30_000, why)),
+      still,
+      deadlineAt: Date.now() + SPLIT_COMPOSITE_MARGIN_MS + 80_000,
+    });
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(result).resolves.toEqual({ reason: why });
+    expect(still).not.toHaveBeenCalled();
+  });
+
+  it("a moving panel that fails with under a minute left gives its own reason and draws no still", async () => {
+    const why = "Split-screen right clip moves wrong";
+    const still = vi.fn(() => landsAfter(1_000, "https://r2/never.mp4"));
+    const result = splitPanelFor({
+      moving: () => failsAfter(2 * MIN, why),
+      still,
+      deadlineAt: Date.now() + SPLIT_COMPOSITE_MARGIN_MS + 2 * MIN + 30_000,
+    });
+    await vi.advanceTimersByTimeAsync(2 * MIN);
+    await expect(result).resolves.toEqual({ reason: why });
     expect(still).not.toHaveBeenCalled();
   });
 
