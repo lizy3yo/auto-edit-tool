@@ -73,6 +73,10 @@ import {
   withoutFaceAsks,
   WORN_ON_BODY,
 } from "./hostLook";
+import { tooShortToRead, type ResolvedCue, type Word } from "../graphics/src/cueResolve";
+import { wordsSaidOver } from "../graphics/src/plan/planner";
+import { plannerForJob } from "./graphics/apply";
+import { makeReadable, type Reading } from "./graphics/readable";
 
 const pic = (index: number, scriptText: string, showSubject: string, over: Partial<StoryboardScene> = {}) =>
   ({ index, scriptText, showSubject, visualPrompt: showSubject, ...over }) as StoryboardScene;
@@ -1030,5 +1034,101 @@ describe("only a make-up step shows the face (Dale's job 372 test, 2026-10-15)",
     markHostBroll(scenes, { hostLook: "a man with a grey beard" }, "https://x/host.png");
     expect(scenes[0].humanPresent).toBe(true);
     expect(scenes[0].hostFaceShown).toBeUndefined();
+  });
+});
+
+describe("a graphic is up long enough to read (Dale's job 397, found by the audit)", () => {
+  it("'3 piles' at 1.27 s and the 1.4 s chapter label are too short; 1.5 s is not", () => {
+    expect(tooShortToRead({ startFrame: 1446, endFrame: 1484 }, 30)).toBe(true);
+    expect(tooShortToRead({ startFrame: 4067, endFrame: 4109 }, 30)).toBe(true);
+    expect(tooShortToRead({ startFrame: 4067, endFrame: 4112 }, 30)).toBe(false);
+  });
+});
+
+describe("the graphics planner reads what the film says over each picture (Dale's job 397, found by the audit)", () => {
+  const W = (s: string): Word[] =>
+    s.split(" ").map(t => {
+      const [text, range] = t.split("@");
+      const [start, end] = range.split("-").map(Number);
+      return { text, start, end };
+    });
+  const at = (index: number, a: number, b: number, scriptText: string, hostPresent = false) => ({ index, narrationStartSec: a, narrationEndSec: b, scriptText, hostPresent });
+  it("'$500 to $1,500. Number five' is said over host scene 36, so it is read there, not under b-roll scene 35", () => {
+    const heard = W("One@186.35-186.45 Good@186.49-186.69 Saturday@186.73-187.15 market@187.21-187.55 can@187.61-187.75 gross@187.79-188.03 $500@188.35-189.21 to@189.29-189.74 $1,500.@190.25-191.42 Number@192.06-192.30 five,@192.38-192.74 sell@193.36-193.56 your@193.60-193.76 furniture@193.82-194.30 on@194.48-194.56 Facebook@194.66-195.16 Marketplace.@195.20-195.86");
+    const film = { scenes: [at(35, 185.9, 188.733, "One good Saturday market can gross $500 to $1,500. Number five."), at(36, 188.733, 196.437, "Sell your furniture on Facebook Marketplace.", true)] };
+    expect(wordsSaidOver(film, heard)).toEqual(["One Good Saturday market can gross", "$500 to $1,500. Number five, sell your furniture on Facebook Marketplace."]);
+  });
+  it("a line the film says as written keeps the script's own words (Hank's job 398: 'out of square' heard 'out a square')", () => {
+    const heard = W("the@70.25-70.37 whole@70.41-70.63 grid@70.69-70.99 twists@71.05-71.39 out@71.47-71.59 a@71.63-71.67 square.@71.73-72.09");
+    expect(wordsSaidOver({ scenes: [at(14, 70, 72.5, "the whole grid twists out of square.")] }, heard)).toEqual(["the whole grid twists out of square."]);
+  });
+});
+
+describe("a bare moment can be explained from the job (Dale's job 397, found by the audit)", () => {
+  it("'Smalls, about $10 to $40.' offered and passed over is kept as offered with no cue; a refused sentence keeps its cue and reason", () => {
+    const kept = plannerForJob(
+      {
+        model: "claude-opus-5-5",
+        rounds: [
+          {
+            step: "fill",
+            asked: 1,
+            kept: 0,
+            problems: [{ cue: "front-edge-price", problem: "waits 5.4 s between its own words (most 5 s) — start it nearer its point" }],
+            offered: [
+              { from: 49.68, to: 52.48, text: "Smalls, about $10 to $40.", asked: [], placed: false },
+              { from: 179.99, to: 185.59, text: "Put the $10 to $40 items along the front edge of the table, where hands reach first.", asked: ["front-edge-price"], placed: false },
+            ],
+          },
+        ],
+      },
+      "2026-10-17T12:00:00.000Z"
+    )!;
+    const [smalls, frontEdge] = kept.rounds[0].offered!;
+    expect(smalls).toEqual({ at: 49.68, text: "Smalls, about $10 to $40.", asked: [], placed: false });
+    expect(frontEdge.asked).toEqual(["front-edge-price"]);
+    expect(kept.rounds[0].problems).toEqual([{ cue: "front-edge-price", problem: "waits 5.4 s between its own words (most 5 s) — start it nearer its point" }]);
+  });
+});
+
+describe("an unreadable number gets one more try in the plain text colour (Hank's job 390, found by the audit)", () => {
+  // "a lattice panel that ate 6 hours of my Saturday": left out as "colour 4.0:1" after every fix.
+  const cue = (): ResolvedCue => ({
+    id: "lattice-six-hours",
+    template: "BigNumberOverlay",
+    start: 19.4,
+    end: 22.6,
+    startFrame: 582,
+    endFrame: 678,
+    props: { durationSec: 3.2, kicker: "Lattice panel", value: 6, unit: "hours", at: 0.9, theme: { bg: "#221710", accent: "#eb9046" } },
+    sync: [],
+    conformed: { start: false, end: true, held: true },
+  });
+  const run = async (plain: Reading) => {
+    const c = cue();
+    let n = 0;
+    const made = await makeReadable(
+      c,
+      false,
+      "designed.mov",
+      {
+        render: async () => `gfx-${++n}.mov`,
+        measure: async x => (x.props.plain === true ? plain : { colour: x.props.lift ? 4.0 : 3.6, pass: false }),
+        calmest: async () => ({ h: "left", v: "top" }),
+      },
+      []
+    );
+    return { c, made };
+  };
+  it("the number drawn white over the same dimmed footage is kept when it reads, at the same moment", async () => {
+    const { c, made } = await run({ white: 8.4, pass: true });
+    expect(made.r.pass).toBe(true);
+    expect(c.props.plain).toBe(true);
+    expect(made.steps.at(-1)).toBe("coloured words in the plain text colour: white 8.4:1");
+    expect([c.start, c.end, c.startFrame, c.endFrame]).toEqual([19.4, 22.6, 582, 678]);
+  });
+  it("it stays left out when the white number does not read either", async () => {
+    const { made } = await run({ white: 5.5, pass: false });
+    expect(made.r.pass).toBe(false);
   });
 });

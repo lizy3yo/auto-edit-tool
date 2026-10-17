@@ -16,6 +16,8 @@ import {
   findVerbatim,
   VERDICT_SEC,
   TAIL_SPILL_SEC,
+  endWithFilm,
+  type ResolvedCue,
   type Word,
 } from "./cueResolve";
 import { countUpValue, pageStarts, splitWords, wordFrames } from "./timing";
@@ -202,7 +204,9 @@ describe("a graphic leaves when its own words are done", () => {
     expect((c.props.left as Record<string, unknown>).say).toBeUndefined();
   });
 
-  it("is never shorter than MIN_ON_SCREEN_SEC, and a title keeps its planned length", () => {
+  // (only where nothing ends it sooner: the next-sentence cap and a snap back onto a cut can — the
+  // planner and QA hold the floor, planner.test.ts / qa.test.ts)
+  it("holds a short line for MIN_ON_SCREEN_SEC, and a title keeps its planned length", () => {
     const [short] = resolveCues([{ id: "h", template: "TitleOverFootage", start: "take one alarm", end: "read the label", props: { phrase: { text: "take one alarm down,", words: true } } }], words);
     expect(short.end - short.start).toBeGreaterThanOrEqual(MIN_ON_SCREEN_SEC - 0.04);
     const [title] = resolveCues(
@@ -531,5 +535,37 @@ describe("a card holds through silence until the picture changes (Dale's '$10 in
     const [c] = resolveCues([{ id: "n", template: "BigNumber", start: "roughly", props: { value: 10, prefix: "$", unit: "in fees", at: "@$10" } }], words, { cuts: [138.2, 143.37], cards: new Set(["BigNumber"]) });
     expect(c.end).toBeCloseTo(143.37, 1);
     expect(c.conformed.held).toBe(true);
+  });
+});
+
+describe("nothing outlasts the film, and the film's end never leaves a graphic too short to read", () => {
+  const FPS = 30;
+  const cue = (id: string, template: string, startFrame: number, endFrame: number) =>
+    ({ id, template, start: startFrame / FPS, end: endFrame / FPS, startFrame, endFrame, props: { durationSec: (endFrame - startFrame) / FPS }, sync: [], conformed: { start: false, end: false } }) as ResolvedCue;
+  const lastFrame = 5399; // a 3-minute film
+
+  it("a graphic the end cuts to 1.2 s is left out (it used to ship at a second, and QA failed the film for it)", () => {
+    const cues = [cue("outro-line", "TitleOverFootage", 5363, 5420)];
+    expect(endWithFilm(cues, lastFrame, FPS)).toEqual(["outro-line"]);
+    expect(cues).toEqual([]);
+  });
+
+  it("one the end leaves at 1.5 s — or a frame under it — ends on the last frame and stays", () => {
+    const cues = [cue("exact", "TitleOverFootage", 5354, 5420), cue("frame-short", "BigNumberOverlay", 5355, 5430)];
+    expect(endWithFilm(cues, lastFrame, FPS)).toEqual([]);
+    expect(cues.map(c => [c.endFrame, c.props.durationSec])).toEqual([
+      [lastFrame, 45 / FPS],
+      [lastFrame, 44 / FPS],
+    ]);
+    expect(cues[0].end).toBeCloseTo(lastFrame / FPS, 6);
+  });
+
+  it("a graphic the end does not touch keeps its length: Dale's approved 1.27 s '3 piles' is QA's to report (job 397); under a second is still left out", () => {
+    const cues = [cue("three-piles", "BigNumberOverlay", 1446, 1484), cue("chapter-3-ad-fee", "ChapterLabel", 4067, 4109), cue("edited-away", "BigNumberOverlay", 2000, 2025)];
+    expect(endWithFilm(cues, lastFrame, FPS)).toEqual(["edited-away"]);
+    expect(cues.map(c => [c.id, c.endFrame - c.startFrame])).toEqual([
+      ["three-piles", 38],
+      ["chapter-3-ad-fee", 42],
+    ]);
   });
 });

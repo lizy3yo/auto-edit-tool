@@ -275,7 +275,9 @@ export const NumberDot: React.FC<{ n: number; size: number }> = ({ n, size }) =>
         height: size,
         borderRadius: "50%",
         background: t.accent,
-        color: "#fff",
+        // A disc drawn in the plain text colour (the last readability fix, `plain`) carries its
+        // digit in the ground colour: a white digit on a white disc is no digit.
+        color: t.accent === t.text ? t.bg : "#fff",
         fontFamily: t.font,
         fontWeight: 800,
         fontSize: size * 0.56,

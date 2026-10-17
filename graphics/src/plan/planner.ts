@@ -20,7 +20,7 @@
 //
 // Pure apart from the two things it is handed: `ask` (the model call — metered by the app) and
 // `ensureIcon` (makes an emoji's image available).
-import { CueError, findPhrase, findVerbatim, indexWords, parseSpokenNumber, resolveCues, tokens, type CueSpec, type ResolvedCue, type Word } from "../cueResolve";
+import { CueError, MIN_ON_SCREEN_SEC, findPhrase, findVerbatim, indexWords, parseSpokenNumber, resolveCues, tokens, tooShortToRead, type CueSpec, type ResolvedCue, type Word } from "../cueResolve";
 import { TEMPLATES, templateById } from "../registry";
 import { FPS } from "../theme";
 import { MIN_GAP_SEC, checkRules, nameTagRange, type FilmLayout, type LayoutScene } from "./rules";
@@ -136,26 +136,58 @@ ${CATALOGUE}`;
 const mmss = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0")}`;
 const kindOf = (s: LayoutScene) => (s.cta ? "CTA" : s.split ? "SPLIT (host left, picture right)" : s.hostPresent ? "HOST" : "B-ROLL");
 
+/**
+ * What is said over each scene (one line per `film.scenes` entry), as the FILM'S OWN SOUND has it:
+ * the transcript's words whose middle falls inside the scene's span — the clock the resolver times a
+ * cue on and the rules hold it to. The scene's script text used to be read instead, and the two can
+ * disagree: Dale's job 397 put "…can gross $500 to $1,500. Number five." under b-roll scene 35 while
+ * the film says "$500 to $1,500. Number five," over host scene 36 (from 188.73 s), so the planner
+ * asked for a number label over b-roll that the rules then refused as over the host.
+ * Where the words heard in a span ARE the scene's script, word for word as the resolver matches
+ * them (a number read as digits, a compound split, one misheard word), the script's own text is
+ * kept: the same words on the same clock, spelled as written — the planner copies a line onto the
+ * screen, and Hank's "out of square" heard as "out a square" (job 398) must not be shown that way.
+ * A span with no words heard keeps its script text. Pure.
+ */
+export function wordsSaidOver(film: FilmLayout, words: Word[]): string[] {
+  const heard: Word[][] = film.scenes.map(() => []);
+  for (const w of words) {
+    const mid = (w.start + w.end) / 2;
+    const k = film.scenes.findIndex(s => mid >= s.narrationStartSec && mid < s.narrationEndSec);
+    if (k >= 0) heard[k].push(w);
+  }
+  return film.scenes.map((s, k) => {
+    const script = (s.scriptText ?? "").trim();
+    const index = indexWords(heard[k]);
+    if (!index.length) return script;
+    const hits = script ? findVerbatim(index, script, 0) : null;
+    if (hits && hits[0] === 0 && index[hits[hits.length - 1]].word === index[index.length - 1].word) return script;
+    return heard[k].map(w => w.text.trim()).join(" ");
+  });
+}
+
 /** The message the model reads: the film scene by scene, its b-roll stretches, and the graphics
- * already placed and approved. */
-export function userPrompt(film: FilmLayout, kept: ResolvedCue[]): string {
+ * already placed and approved. What is said over each scene is `wordsSaidOver` — the words the
+ * film's sound has under it (its script text when there is no transcript, as in a test). */
+export function userPrompt(film: FilmLayout, kept: ResolvedCue[], words: Word[] = []): string {
   const nameTag = nameTagRange(film);
+  const said = wordsSaidOver(film, words);
   const layout = film.scenes
-    .map(s => {
+    .map((s, k) => {
       const tagUp = nameTag && s.narrationStartSec < nameTag[1] && s.narrationEndSec > nameTag[0] ? " [NAME TAG UP]" : "";
-      return `#${s.index} ${mmss(s.narrationStartSec)}-${mmss(s.narrationEndSec)} ${kindOf(s)}${tagUp}: ${(s.scriptText ?? "").trim()}`;
+      return `#${s.index} ${mmss(s.narrationStartSec)}-${mmss(s.narrationEndSec)} ${kindOf(s)}${tagUp}: ${said[k]}`;
     })
     .join("\n");
   // Stretches of consecutive b-roll (no host, no CTA): where cards and picture graphics go.
   const stretches: { from: number; to: number; text: string }[] = [];
-  for (const s of film.scenes) {
-    if (s.hostPresent || s.cta) continue;
+  film.scenes.forEach((s, k) => {
+    if (s.hostPresent || s.cta) return;
     const last = stretches[stretches.length - 1];
     if (last && Math.abs(last.to - s.narrationStartSec) < 0.1) {
       last.to = s.narrationEndSec;
-      last.text += " " + (s.scriptText ?? "").trim();
-    } else stretches.push({ from: s.narrationStartSec, to: s.narrationEndSec, text: (s.scriptText ?? "").trim() });
-  }
+      last.text += " " + said[k];
+    } else stretches.push({ from: s.narrationStartSec, to: s.narrationEndSec, text: said[k] });
+  });
   const stretchList = stretches
     .filter(b => b.to - b.from >= 2.5)
     .map(b => `${mmss(b.from)}-${mmss(b.to)} (${(b.to - b.from).toFixed(1)} s): ${b.text}`)
@@ -277,12 +309,13 @@ function rowText(item: string): string {
 }
 
 /**
- * A list graphic for every spoken list no graphic covers yet, built from the list's own words —
- * ListWindow over b-roll, HostListWindow over the host — skipping a list in the call to action. Pure.
+ * Where each spoken list is said — its first item's first word to its last item's last word — in
+ * order, each searched from where the list before it starts (so a list said again after another list
+ * binds after that one). A list whose first or last item is not heard word for word is left out. Pure.
  */
-export function missingListCues(placed: ResolvedCue[], words: Word[], film: FilmLayout, lists: { items: string[]; kind?: string }[]): CueSpec[] {
+function locateLists(words: Word[], lists: { items: string[] }[]): { n: number; a: number; b: number }[] {
   const index = indexWords(words);
-  const out: CueSpec[] = [];
+  const out: { n: number; a: number; b: number }[] = [];
   let from = 0;
   lists.forEach((l, n) => {
     const first = findVerbatim(index, l.items[0], from);
@@ -290,10 +323,41 @@ export function missingListCues(placed: ResolvedCue[], words: Word[], film: Film
     const last = findVerbatim(index, l.items[l.items.length - 1], first[0]);
     if (!last) return;
     from = first[0];
-    const a = words[index[first[0]].word].start;
-    const b = words[index[last[last.length - 1]].word].end;
-    if (film.scenes.some(s => s.cta && a < s.narrationEndSec && b > s.narrationStartSec)) return;
-    if (placed.some(c => Math.min(c.end, b) - Math.max(c.start, a) > (b - a) * 0.4)) return;
+    out.push({ n, a: words[index[first[0]].word].start, b: words[index[last[last.length - 1]].word].end });
+  });
+  return out;
+}
+
+/** Does `a`-`b` run into a call-to-action scene (ending just as one starts does not)? No graphic may go there (rules.ts). */
+function inCallToAction(film: FilmLayout, a: number, b: number): boolean {
+  return film.scenes.some(s => s.cta && a < s.narrationEndSec && b > s.narrationStartSec);
+}
+
+/**
+ * The spoken lists a graphic may cover: every one but a list said in the call to action. Only these
+ * are put to the planner as lists that MUST get a graphic — a replay of 12 films found 15 of 49 lists
+ * in a CTA, in every film (Dale's job 397: "other woodworkers, old shop habits, and a fair pile of my
+ * own spoiled boards" in the book pitch; Hank's job 398: the scan steps "Point your phone's camera…,
+ * hold it steady…, tap the link"), each told it MUST have a graphic where the rules allow none (none
+ * got one, rightly; what the model tried there is not kept, so the refusals cannot be counted).
+ * Located exactly as `missingListCues` locates them, over the whole sequence, so the two agree; a list
+ * that is not heard word for word is still offered (the planner may place it on the words it finds). Pure.
+ */
+export function listsWhereGraphicsGo<L extends { items: string[] }>(words: Word[], film: FilmLayout, lists: L[]): L[] {
+  const cta = new Set(locateLists(words, lists).filter(p => inCallToAction(film, p.a, p.b)).map(p => p.n));
+  return lists.filter((_, n) => !cta.has(n));
+}
+
+/**
+ * A list graphic for every spoken list no graphic covers yet, built from the list's own words —
+ * ListWindow over b-roll, HostListWindow over the host — skipping a list in the call to action. Pure.
+ */
+export function missingListCues(placed: ResolvedCue[], words: Word[], film: FilmLayout, lists: { items: string[]; kind?: string }[]): CueSpec[] {
+  const out: CueSpec[] = [];
+  for (const { n, a, b } of locateLists(words, lists)) {
+    if (inCallToAction(film, a, b)) continue;
+    if (placed.some(c => Math.min(c.end, b) - Math.max(c.start, a) > (b - a) * 0.4)) continue;
+    const l = lists[n];
     const over = film.scenes.filter(s => a < s.narrationEndSec && b > s.narrationStartSec);
     const host = over.filter(s => s.hostPresent).length > over.length / 2;
     const say = (x: string) => x.replace(/[.,;:!?]+$/, "");
@@ -303,7 +367,7 @@ export function missingListCues(placed: ResolvedCue[], words: Word[], film: Film
       start: say(l.items[0]).split(/\s+/).slice(0, 2).join(" "),
       props: { items: l.items.map(x => ({ text: rowText(x), at: "@" + say(x).split(/\s+/).slice(0, 2).join(" "), say: say(x) })) },
     } as CueSpec);
-  });
+  }
   return out;
 }
 
@@ -356,11 +420,40 @@ export type PlanInput = {
   lists?: { items: string[]; kind?: "things" | "steps" }[];
 };
 
+/** A sentence the fill round offered back, and what came of it. */
+export type OfferedMoment = {
+  from: number;
+  to: number;
+  text: string;
+  /** The asked cues (fill or its repair) whose start words are said in it: none, and not placed,
+   * means the model passed it over (or named start words the narrator never says — that cue is in
+   * the round's problems, on no sentence). */
+  asked: string[];
+  /** A graphic is over it once the fill round is done. */
+  placed: boolean;
+};
+
+/** One round of the plan: what it asked for, how many passed, and what the checks refused. */
+export type PlanRound = {
+  /** The first answer, its repair, the fill (sentences offered back), the fill's repair, or the
+   * spoken lists built from their own words. */
+  step: "first" | "repair" | "fill" | "fill repair" | "lists";
+  asked: number;
+  kept: number;
+  problems: PlanProblem[];
+  /** The fill round only: every sentence offered back. A sentence the model passed over leaves no
+   * cue and no problem, so without this a bare moment could not be told from a refused one (Dale's
+   * job 397: "Smalls, about $10 to $40." was offered, has no graphic, and the rules accept one). */
+  offered?: OfferedMoment[];
+  /** The fill call failed, or its answer could not be read: nothing was added. */
+  error?: string;
+};
+
 export type PlanResult = {
   /** The cue sheet: approved graphics and new ones, in film order. */
   cues: CueSpec[];
   resolved: ResolvedCue[];
-  rounds: { asked: number; kept: number; problems: PlanProblem[] }[];
+  rounds: PlanRound[];
   /** Approved graphics that could not be kept (never, unless the film itself changed). */
   lostKept: string[];
 };
@@ -402,16 +495,37 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
     const hits = findPhrase(index, spec.start, 0);
     return hits ? words[index[hits[0]].word].start : Infinity;
   };
+  /** When a resolved cue's start words are said: the place they occur nearest its start. That start is
+   * padded and may snap onto a picture cut up to CUT_SNAP_SEC away, so on its own it often falls in the
+   * pause BEFORE its sentence (a shot changes in the half-second sentence pause): read that way, a cue
+   * asked for a sentence and refused sat on no sentence, and the sentence read as passed over. */
+  const startWordNear = (spec: CueSpec, t: number): number => {
+    const pad = spec.startPad ?? 0;
+    let best = approxStart(spec);
+    for (let hits = findPhrase(index, spec.start, 0); hits; hits = findPhrase(index, spec.start, hits[0] + 1)) {
+      const w = words[index[hits[0]].word].start;
+      if (Math.abs(w + pad - t) < Math.abs(best + pad - t)) best = w;
+    }
+    return best;
+  };
 
   // A chapter series and a spoken list's graphic come first: a NEW graphic that clashes with one
   // gives way (Dale's "Coasters, ornaments, small cutting boards" had only a "Smalls" label).
   const required = new Set<string>();
   const priority = (s: CueSpec) => structural.has(s.template) || required.has(s.id);
   const lists = (input.lists ?? []).filter(l => l.items.length >= 2 && l.items.length <= 5);
+  // The model is told a list MUST get a graphic only where one may go: a list in the call to action
+  // can never have one, so naming it there is at best ignored and at worst refused. `missingListCues`
+  // still reads every list, so a list said after a mid-roll CTA is located after it, not on an earlier
+  // copy of its words.
+  const offered = listsWhereGraphicsGo(words, film, lists);
 
   const validate = async (newSpecs: CueSpec[], final: boolean) => {
     const problems: PlanProblem[] = [];
     const ids = new Set<string>();
+    /** When each new cue's start words are said: where it resolved when it did, else the first place
+     * they occur (`approxStart`). */
+    const startsAt = new Map<string, number>();
     // 1. The APPROVED graphics are the fixed base: placed first, in their own order, never dropped.
     //    Their own issues (if any) are reported, not acted on.
     const placed: { spec: CueSpec; t: number; kept: boolean }[] = [];
@@ -437,6 +551,7 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
         continue;
       }
       ids.add(spec.id);
+      startsAt.set(spec.id, t);
       try {
         templateById(spec.template);
       } catch {
@@ -465,6 +580,11 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
         continue;
       }
       tidyNumbers(spec.props);
+      // A TITLE keeps the length it was planned with — but is never PLANNED under MIN_ON_SCREEN_SEC:
+      // Dale's "Where to sell · 3 of 5" was planned at 1.4 s (job 397, 2:15). Raised, never refused:
+      // a refused chapter takes its whole series down with it. An approved one keeps its length. (A
+      // cut within CUT_SNAP_SEC before its end still ends it there, sooner; QA reports that.)
+      if (structural.has(spec.template) && typeof spec.durationSec === "number" && spec.durationSec < MIN_ON_SCREEN_SEC) spec.durationSec = MIN_ON_SCREEN_SEC;
       const missing: string[] = [];
       await fixIcons(spec.props, missing);
       if (missing.length) {
@@ -485,12 +605,23 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
         continue;
       }
       const mine = next.find(r => r.id === spec.id)!;
+      startsAt.set(spec.id, startWordNear(spec, mine.start));
       // A graphic that sits still for seconds between its own words is a frozen frame, not a point.
       const times = [mine.start, ...mine.sync.map(x => x.wordStart), mine.contentEnd ?? mine.start].sort((a, b) => a - b);
       const wait = Math.max(0, ...times.slice(1).map((x, i) => x - times[i]));
       if (wait > MAX_WAIT_SEC) {
         undo();
         bad(`waits ${wait.toFixed(1)} s between its own words (most ${MAX_WAIT_SEC} s) — start it nearer its point`);
+        continue;
+      }
+      // Up long enough to READ. The resolver's reading floor can still be cut short — by the cap at
+      // the next sentence, then a snap back onto a picture cut: Dale's "3 piles" on the two-word shot
+      // "Three piles." came out 1.27 s (job 397, 0:48) and shipped. Refused here, where the repair
+      // round can join it to more words; forcing the floor in the resolver would carry it a second
+      // onto the next shot instead. (A title was raised above.)
+      if (!structural.has(spec.template) && tooShortToRead(mine, FPS)) {
+        undo();
+        bad(`on screen ${((mine.endFrame - mine.startFrame) / FPS).toFixed(2)} s — too short to read (at least ${MIN_ON_SCREEN_SEC} s); join it to the next sentence or drop it`);
         continue;
       }
       const unsaid = shownNumbers(spec).filter(n => !saidNear(n, mine.start, mine.end));
@@ -545,21 +676,21 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
         resolved = placed.length ? resolveAll() : [];
       }
     }
-    return { cues: placed.map(p => p.spec), resolved, problems };
+    return { cues: placed.map(p => p.spec), resolved, problems, startsAt };
   };
 
   const system = systemPrompt({ kept: kept0.length > 0 });
-  const listNote = lists.length
+  const listNote = offered.length
     ? `\n\nSPOKEN LISTS IN THIS SCRIPT — each one MUST get a list graphic wherever one may go (ListWindow over
 b-roll, HostListWindow over the host; steps may be StepCards or StepLabels), every item a row in the order
 said ("text" ≤5 words, "at": "@its first spoken words", "say": the item as said):
-${lists.map((l, i) => `${i + 1}. ${l.kind === "steps" ? "[steps] " : ""}${l.items.map(x => `"${x}"`).join(", ")}`).join("\n")}`
+${offered.map((l, i) => `${i + 1}. ${l.kind === "steps" ? "[steps] " : ""}${l.items.map(x => `"${x}"`).join(", ")}`).join("\n")}`
     : "";
-  const user = userPrompt(film, kept0.length ? resolveCues(kept0, words, opts) : []) + listNote;
+  const user = userPrompt(film, kept0.length ? resolveCues(kept0, words, opts) : [], words) + listNote;
   const first = await ask(system, [{ role: "user", content: user }]);
   let specs = parseSheet(first).filter(c => !keptIds.has(c.id));
   let verdict = await validate(structuredClone(specs), false);
-  const rounds = [{ asked: specs.length, kept: verdict.cues.length, problems: verdict.problems }];
+  const rounds: PlanRound[] = [{ step: "first", asked: specs.length, kept: verdict.cues.length, problems: verdict.problems }];
   if (verdict.problems.some(p => !p.cue.startsWith("[kept]"))) {
     const fix = `These cues failed the checks (resolved against the real word times and the film's layout):
 ${verdict.problems.filter(p => !p.cue.startsWith("[kept]")).map(p => `- ${p.cue}: ${p.problem}`).join("\n")}
@@ -574,7 +705,7 @@ narrator really says, numbers he says, move it to where it may go, or drop it. K
       ])
     ).filter(c => !keptIds.has(c.id));
     verdict = await validate(structuredClone(specs), true);
-    rounds.push({ asked: specs.length, kept: verdict.cues.length, problems: verdict.problems });
+    rounds.push({ step: "repair", asked: specs.length, kept: verdict.cues.length, problems: verdict.problems });
   }
 
   // FILL, by the SCRIPT (not by the clock — the operator, 2026-10-17: "if it should have a graphic
@@ -592,17 +723,31 @@ Add a NEW cue for each one that really fits a template (a number, a list, a comp
 a warning, a whole sentence worth a statement or a caption); skip one that does not. Every rule above
 still applies. Return JSON only: {"cues": [ ...the NEW cues only... ]}, with ids not used before.`;
     const base = [{ role: "user" as const, content: user }, { role: "assistant" as const, content: JSON.stringify({ cues: accepted }) }];
+    // The round is recorded even when nothing comes back: "offered, none asked" is the answer to
+    // why a moment is bare, and an empty answer is not a failed call.
+    const fillRound: PlanRound = { step: "fill", asked: 0, kept: 0, problems: [] };
+    rounds.push(fillRound);
+    /** Where each cue the fill (or its repair) asked for starts, to say which sentences were asked at all. */
+    const askedAt = new Map<string, number>();
+    const noteAsked = (v: { startsAt: Map<string, number> }, ids: Set<string>) => {
+      for (const [id, t] of Array.from(v.startsAt)) if (ids.has(id)) askedAt.set(id, t);
+    };
+    const why = (e: unknown) => (e instanceof Error ? e.message : String(e));
     let added: CueSpec[] = [];
     try {
       added = parseSheet(await ask(system, [...base, { role: "user", content: fill }])).filter(c => !taken.has(c.id) && !keptIds.has(c.id));
-    } catch {
+    } catch (e) {
       added = [];
+      fillRound.error = why(e);
     }
+    fillRound.asked = added.length;
     if (added.length) {
       let next = await validate(structuredClone([...accepted, ...added]), false);
       const addedIds = new Set(added.map(c => c.id));
+      noteAsked(next, addedIds);
       const failed = next.problems.filter(p => addedIds.has(p.cue));
-      rounds.push({ asked: added.length, kept: next.cues.length - accepted.length, problems: failed });
+      fillRound.kept = next.cues.length - accepted.length;
+      fillRound.problems = failed;
       if (failed.length) {
         const fix = `These added cues failed the checks:
 ${failed.map(p => `- ${p.cue}: ${p.problem}`).join("\n")}
@@ -612,9 +757,11 @@ words the narrator really says, a whole sentence where the template needs one, o
         try {
           const fixed = parseSheet(await ask(system, [...base, { role: "user", content: fill + "\n\nYOUR ADDED CUES WERE:\n" + JSON.stringify({ cues: added }) + "\n\n" + fix }])).filter(c => !taken.has(c.id) && !keptIds.has(c.id));
           next = await validate(structuredClone([...accepted, ...fixed]), true);
-          rounds.push({ asked: fixed.length, kept: next.cues.length - accepted.length, problems: next.problems.filter(p => fixed.some(x => x.id === p.cue)) });
-        } catch {
+          noteAsked(next, new Set(fixed.map(c => c.id)));
+          rounds.push({ step: "fill repair", asked: fixed.length, kept: next.cues.length - accepted.length, problems: next.problems.filter(p => fixed.some(x => x.id === p.cue)) });
+        } catch (e) {
           next = await validate(structuredClone([...accepted, ...added]), true);
+          rounds.push({ step: "fill repair", asked: 0, kept: next.cues.length - accepted.length, problems: [], error: why(e) });
         }
       } else {
         next = await validate(structuredClone([...accepted, ...added]), true);
@@ -622,6 +769,12 @@ words the narrator really says, a whole sentence where the template needs one, o
       // only ever MORE: a fill that somehow lost an accepted graphic is not taken
       if (accepted.every(a => next.cues.some(c => c.id === a.id))) verdict = next;
     }
+    // What came of each offered sentence: a graphic over it, asked for and refused (its cue's id is
+    // in the problems), or passed over (no cue's start words are said in it).
+    const bare = new Set(uncoveredMoments(verdict.resolved, words, film).map(m => m.from));
+    const offeredBack: OfferedMoment[] = moments.map(m => ({ from: m.from, to: m.to, text: m.text, asked: [], placed: !bare.has(m.from) }));
+    for (const [id, t] of Array.from(askedAt)) offeredBack.find(o => o.from <= t && t <= o.to)?.asked.push(id);
+    fillRound.offered = offeredBack;
   }
 
   // EVERY SPOKEN LIST HAS ITS GRAPHIC: one the planner still left without is built from the list's
@@ -632,7 +785,7 @@ words the narrator really says, a whole sentence where the template needs one, o
     const accepted = verdict.cues.filter(c => !keptIds.has(c.id));
     const next = await validate(structuredClone([...accepted, ...listCues]), true);
     const placedLists = listCues.filter(l => next.cues.some(c => c.id === l.id));
-    rounds.push({ asked: listCues.length, kept: placedLists.length, problems: next.problems.filter(p => listCues.some(l => l.id === p.cue) || p.problem.includes("gave way")) });
+    rounds.push({ step: "lists", asked: listCues.length, kept: placedLists.length, problems: next.problems.filter(p => listCues.some(l => l.id === p.cue) || p.problem.includes("gave way")) });
     if (placedLists.length) verdict = next;
   }
   return {

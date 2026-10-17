@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Hct, argbFromRgb } from "@material/material-color-utilities";
-import { MIN_CONTRAST, contrastOf, themeFromPixels, withAlpha } from "./palette";
+import { MIN_CONTRAST, contrastOf, themeFor, themeFromPixels, towardWhite, withAlpha } from "./palette";
 import { THEME } from "./theme";
 
 /** A synthetic "photo": a list of [r, g, b, share] blocks. */
@@ -57,5 +57,42 @@ describe("theme from the host photo", () => {
 
   it("withAlpha", () => {
     expect(withAlpha("#44A3FF", 0.25)).toBe("rgba(68,163,255,0.25)");
+  });
+});
+
+describe("the colours a cue renders with", () => {
+  // Hank's job 390: the video's theme when its "6 hours" number was left out as unreadable.
+  const theme = { bg: "#221710", accent: "#eb9046" };
+
+  it("as designed: the video's own accent", () => {
+    expect(themeFor({ theme }).accent).toBe("#eb9046");
+    expect(themeFor({ theme }).danger).toBe(THEME.danger);
+  });
+
+  it("`plain` draws the accent in the plain text colour, and the warning red keeps its colour", () => {
+    const t = themeFor({ theme, plain: true });
+    expect(t.accent).toBe(t.text);
+    expect(t.accent).toBe("#FFFFFF");
+    expect(t.danger).toBe(THEME.danger);
+    expect(t.bg).toBe("#221710");
+  });
+
+  it("`plain` on top of `lift`: the accent is plain, the warning red stays lifted", () => {
+    const t = themeFor({ theme, lift: 1, plain: true });
+    expect(t.accent).toBe("#FFFFFF");
+    expect(t.danger).toBe(towardWhite(THEME.danger, 0.4));
+  });
+
+  it("only `plain: true` turns it on", () => {
+    expect(themeFor({ theme, plain: "yes" }).accent).toBe("#eb9046");
+    expect(themeFor({ theme, plain: 1 }).accent).toBe("#eb9046");
+  });
+
+  it("the accent stays a #rrggbb even when a theme's text colour is not one, and still equals the text", () => {
+    const t = themeFor({ theme: { ...theme, text: "white" }, plain: true });
+    expect(t.accent).toBe("#FFFFFF");
+    expect(t.text).toBe(t.accent);
+    // Not drawn plain, such a theme's text is left exactly as it was.
+    expect(themeFor({ theme: { ...theme, text: "white" } }).text).toBe("white");
   });
 });

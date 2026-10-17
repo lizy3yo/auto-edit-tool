@@ -348,12 +348,54 @@ export const MIN_AFTER_TRIM_SEC = 1.5;
 
 /**
  * A graphic leaves this long after the last of its OWN words is spoken — broadcast caption
- * practice: text clears within about a second of the speech moving on — and is never on screen
- * for less than MIN_ON_SCREEN_SEC, so a short line can still be read. Job 384 at 0:10-0:13:
+ * practice: text clears within about a second of the speech moving on. Job 384 at 0:10-0:13:
  * "It isn't broken. It isn't dead." stayed 4.7 s into "It just happens to be slow…".
+ *
+ * MIN_ON_SCREEN_SEC is the shortest a graphic may be up and still be read. Here it is only where
+ * the reading floor (`readingSec`) STARTS: the cap at the next sentence and a snap back onto a
+ * picture cut can still end a graphic sooner — Dale's "3 piles" on the two-word shot "Three piles."
+ * was capped at "Smalls," then snapped back to the cut, 1.27 s on screen (job 397, 0:48) — and a
+ * title keeps the length it was planned with. So the floor is held where a graphic can be turned
+ * away, not here: the planner sends a new graphic that resolves shorter back for repair and raises
+ * a title's `durationSec` to it, and QA reports any shipped graphic under it.
  */
 export const LINGER_SEC = 0.8;
 export const MIN_ON_SCREEN_SEC = 1.5;
+
+/** Up too short to read: under MIN_ON_SCREEN_SEC, with one frame allowed for edges rounded onto the
+ * frame grid. The ONE test the planner (a new graphic is refused), the film's end (`endWithFilm`)
+ * and QA (a shipped one is reported) all ask, so they cannot disagree. */
+export function tooShortToRead(c: { startFrame: number; endFrame: number }, fps: number): boolean {
+  return c.endFrame - c.startFrame < MIN_ON_SCREEN_SEC * fps - 1 - 1e-6;
+}
+
+/**
+ * Nothing outlasts the film: a graphic held for its reading time near the end could run past the
+ * last frame, and measuring it there grabbed nothing (Scarlett's job 395 shipped without graphics),
+ * so it ends on the last frame. One the film's end leaves too short to read is LEFT OUT, by the same
+ * test the planner and QA ask — kept down to 1 s, it shipped and QA then failed the film for it. Any
+ * other graphic is only left out under a second (a saved plan on a film edited since): an approved
+ * one keeps its length, and a chapter label left out would break its series. `cues` is changed in
+ * place; returns the ids left out.
+ */
+export function endWithFilm(cues: ResolvedCue[], lastFrame: number, fps: number): string[] {
+  const cutByEnd = new Set<ResolvedCue>();
+  for (const c of cues) {
+    if (c.endFrame <= lastFrame) continue;
+    c.endFrame = lastFrame;
+    c.end = lastFrame / fps;
+    c.props = { ...c.props, durationSec: (c.endFrame - c.startFrame) / fps };
+    cutByEnd.add(c);
+  }
+  const out: string[] = [];
+  for (let k = cues.length - 1; k >= 0; k--) {
+    const c = cues[k];
+    if (cutByEnd.has(c) ? !tooShortToRead(c, fps) : c.endFrame - c.startFrame >= fps) continue;
+    out.push(c.id);
+    cues.splice(k, 1);
+  }
+  return out;
+}
 
 /**
  * HAND-OFF: two graphics never butt up against each other — the next one would read as the tail of

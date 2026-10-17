@@ -24,19 +24,19 @@ import { argbFromRgb } from "@material/material-color-utilities";
 import { invokeClaude } from "../claude";
 import { presignOwnBucketUrl } from "../storage";
 import { transcribeWordsFromBuffer } from "../_core/voiceTranscription";
-import { CueError, resolveCues, type CueSpec, type ResolvedCue, type Word } from "../../graphics/src/cueResolve";
+import { CueError, endWithFilm, resolveCues, type CueSpec, type ResolvedCue, type Word } from "../../graphics/src/cueResolve";
 import { TEMPLATES, templateById } from "../../graphics/src/registry";
 import { FPS, type Theme } from "../../graphics/src/theme";
 import { themeFromPixels } from "../../graphics/src/palette";
 import { WINDOW } from "../../graphics/src/more";
-import { NOTO_PNG, planGraphics, type PlanMessage } from "../../graphics/src/plan/planner";
+import { NOTO_PNG, planGraphics, type PlanMessage, type PlanRound } from "../../graphics/src/plan/planner";
 import { checkRules, type FilmLayout } from "../../graphics/src/plan/rules";
 import { detectCuts, judgeFilm, type QaResult, type Readability } from "../../graphics/src/plan/qa";
 import { getMediaDuration } from "../mediaProbe";
 import { ffmpeg, frameDiffs, levelsOf, narrationOf } from "./media";
 import { driftedStretches, LEVEL_FRAME_SEC, retimeWords, spliceStretch } from "../../graphics/src/plan/wordTiming";
 import { execFfmpeg } from "../ffmpegSpawn";
-import { calmestPlace, describe, measureCue, score, subjectOf } from "./readable";
+import { calmestPlace, describe, makeReadable, measureCue, subjectOf } from "./readable";
 import { GRAPHICS_DIR, renderGraphic } from "./render";
 
 /** The model that writes the plan (the lab measured Opus best at following the moments). */
@@ -57,7 +57,8 @@ export type GraphicsRecord = {
   theme?: { accent: string; bg: string };
   qa: QaResult;
   readability: Readability[];
-  planner?: { model: string; rounds: number };
+  /** How the plan was written, round by round — unset when the saved plan was reused (no model call). */
+  planner?: { model: string; rounds: PlanRound[] };
 };
 
 export type AddGraphicsInput = {
@@ -192,7 +193,7 @@ async function inlineIcons(node: unknown): Promise<void> {
 
 /* ───────────── the plan ───────────── */
 
-async function plan(input: AddGraphicsInput, words: Word[], cuts: number[]): Promise<{ cues: CueSpec[]; rounds?: number }> {
+async function plan(input: AddGraphicsInput, words: Word[], cuts: number[]): Promise<{ cues: CueSpec[]; rounds?: PlanRound[] }> {
   if (input.savedPlan?.length && !input.replan) return { cues: input.savedPlan };
   const ask = async (system: string, messages: PlanMessage[]): Promise<string> => {
     // The repair round is one message carrying the first answer, on the same metered call.
@@ -210,12 +211,14 @@ async function plan(input: AddGraphicsInput, words: Word[], cuts: number[]): Pro
     return r.text;
   };
   const p = await planGraphics({ words, cuts, film: input.film, ask, ensureIcon: async code => !!(await iconFile(code)), lists: input.lists });
-  // What each round asked for and what the checks refused, so a thin plan can be explained.
+  // What each round asked for and what the checks refused, so a thin plan can be explained. The
+  // rounds are also kept on the job (`withGraphics`): the render log is gone after a restart.
   p.rounds.forEach((r, i) => {
-    input.log?.(`graphics plan round ${i + 1}: ${r.asked} asked, ${r.kept} kept${r.problems.length ? `, ${r.problems.length} refused` : ""}`);
+    const offered = r.offered ? `, ${r.offered.length} sentences offered (${r.offered.filter(o => !o.asked.length && !o.placed).length} passed over)` : "";
+    input.log?.(`graphics plan round ${i + 1} (${r.step}): ${r.asked} asked, ${r.kept} kept${r.problems.length ? `, ${r.problems.length} refused` : ""}${offered}${r.error ? ` — ${r.error}` : ""}`);
     for (const pr of r.problems) input.log?.(`  refused ${pr.cue}: ${pr.problem}`);
   });
-  return { cues: p.cues, rounds: p.rounds.length };
+  return { cues: p.cues, rounds: p.rounds };
 }
 
 /** Resolve a plan cue by cue (film order), leaving out any that no longer resolve or break a
@@ -278,20 +281,9 @@ export async function addGraphics(input: AddGraphicsInput): Promise<GraphicsReco
   progress(input.savedPlan?.length && !input.replan ? "Using the saved graphics plan" : "Planning the graphics", 12);
   const planned = await plan(input, words, cuts);
   const { specs, cues } = resolveKeeping(planned.cues, words, cuts, input.film, dropped);
-  // Nothing outlasts the film: a graphic held for its reading time near the end could run past the
-  // last frame, and measuring it there grabbed nothing (Scarlett's job 395 shipped without graphics).
-  const lastFrame = filmDiffs.length - 1;
-  for (const c of cues) {
-    if (c.endFrame <= lastFrame) continue;
-    c.endFrame = lastFrame;
-    c.end = lastFrame / FPS;
-    c.props = { ...c.props, durationSec: (c.endFrame - c.startFrame) / FPS };
-  }
-  for (let k = cues.length - 1; k >= 0; k--) {
-    if (cues[k].endFrame - cues[k].startFrame >= FPS) continue;
-    dropped.push({ id: cues[k].id, why: "the film ends before it can be read" });
-    cues.splice(k, 1);
-  }
+  // Nothing outlasts the film (`endWithFilm`): ended on its last frame, and left out when that
+  // leaves it too short to read.
+  for (const id of endWithFilm(cues, filmDiffs.length - 1, FPS)) dropped.push({ id, why: "the film ends before it can be read" });
   log(`graphics: ${cues.length} placed${dropped.length ? `, ${dropped.length} left out` : ""}${theme ? `, accent ${theme.accent}` : ""}`);
 
   // Render each graphic (cached by what it is), text on footage held to readability.
@@ -333,42 +325,13 @@ export async function addGraphics(input: AddGraphicsInput): Promise<GraphicsReco
       }
       let file = await renderCue(c);
       if (def.kind === "overlay" && def.underlay !== "window") {
-        const steps: string[] = [];
-        let r = await measure(c, file);
-        steps.push(`as designed: ${describe(r)}`);
-        let best = { r, file, props: { ...c.props } };
-        const keep = () => {
-          attempts.push(file);
-          if (r.pass || score(r) > score(best.r)) best = { r, file, props: { ...c.props } };
-        };
-        for (const shade of [0.5, 1]) {
-          if (r.pass) break;
-          c.props.shade = shade;
-          file = await renderCue(c);
-          r = await measure(c, file);
-          steps.push(`darker behind the words (${shade}): ${describe(r)}`);
-          keep();
-        }
-        if (!r.pass && r.colour !== undefined && r.colour < 4.5) {
-          c.props.lift = 1;
-          file = await renderCue(c);
-          r = await measure(c, file);
-          steps.push(`lighter shade of the coloured words: ${describe(r)}`);
-          keep();
-        }
-        if (!r.pass && def.movable && r.box) {
-          c.props.place = await calmestPlace(input.filmPath, c, cuts, { w: r.box.x1 - r.box.x0, h: r.box.y1 - r.box.y0 });
-          file = await renderCue(c);
-          r = await measure(c, file);
-          steps.push(`moved to the calmest part of the picture: ${describe(r)}`);
-          keep();
-        }
-        c.props = best.props as typeof c.props;
-        file = best.file;
-        readability.push({ id: c.id, pass: best.r.pass, summary: describe(best.r), steps });
+        const io = { render: renderCue, measure, calmest: (cue: ResolvedCue, size: { w: number; h: number }) => calmestPlace(input.filmPath, cue, cuts, size) };
+        const made = await makeReadable(c, !!def.movable, file, io, attempts);
+        file = made.file;
+        readability.push({ id: c.id, pass: made.r.pass, summary: describe(made.r), steps: made.steps });
         // Text that cannot be read is left out, never shipped.
-        if (!best.r.pass) {
-          dropped.push({ id: c.id, why: `text not readable on the picture (${describe(best.r)})` });
+        if (!made.r.pass) {
+          dropped.push({ id: c.id, why: `text not readable on the picture (${describe(made.r)})` });
           continue;
         }
       }
