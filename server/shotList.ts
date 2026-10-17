@@ -736,8 +736,19 @@ const NOT_A_THING_PHRASE = new Set([
 /** Prepositions `NOT_A_LIST_ITEM` does not hold: a piece opening on one says where ("through the pine"). */
 const MORE_PREPOSITIONS = new Set([
   "through", "across", "along", "past", "behind", "between", "toward", "towards", "without", "within",
-  "upon", "against", "beneath", "beyond",
+  "upon", "against", "beneath", "beyond", "than",
 ]);
+/**
+ * `NOT_A_LIST_ITEM` words that also lead a counted or chosen thing ("ALL the scraps you can find",
+ * "EVERY spool of thread", "MORE glue", "JUST a pencil"): an item opening on one is judged on the
+ * words after it, and is never a time ("every single morning", "all day long"). Only the model's
+ * items reach this — the sentence-shape and piece tests refuse these openers themselves — and one
+ * refused item drops the model's WHOLE list, which the shape rules cannot rebuild around it, so
+ * refusing the opener lost "a tape measure, a pencil, and all the scraps you can find" outright.
+ */
+const LEADS_A_THING = new Set(["all", "every", "each", "most", "more", "less", "first", "next", "just", "only"]);
+/** Words skipped when asking whether what follows such an opener is a time ("every SINGLE morning"). */
+const TIME_FILLER = /^(?:the|a|an|single|other|whole|last|this)$/;
 /** Nouns a number labels ("round ten", "chapter two", "step three"). */
 const LABEL_NOUN = new Set([
   "round", "row", "chapter", "step", "part", "day", "week", "number", "page", "level", "size",
@@ -747,18 +758,22 @@ const LABEL_NOUN = new Set([
 const RATE = new RegExp(`^${NUMBER_WORD}\\s+(?:a|an|per)\\s+\\S+$`);
 /** "two or three rounds apiece", "three at once". */
 const RATE_END = /\s(?:apiece|each|at once|at a time)$/;
-/** A contracted IS ("that's rude", "this one's for…"): the piece says something, it names nothing. */
-const CONTRACTED_IS = /\b(?:that|it|this|there|here|who|one|he|she|everyone|nobody|everything)'s\b/;
+/**
+ * A contracted IS ("that's rude", "this one's for…"): the piece says something, it names nothing.
+ * Not "everyone's", which is far more often whose ("everyone's favorite pie") than a verb.
+ */
+const CONTRACTED_IS = /\b(?:that|it|this|there|here|who|one|he|she|nobody|everything)'s\b/;
 /** An adverb then a verb ("just looks", "still counts"). Never "even"/"only", which also lead a plural noun ("even stitches"). */
 const ADVERB_VERB = /\b(?:just|still|already|never|always|actually|really|also)\s+[a-z]+s\b/;
 /**
  * A thing, then a common linking or motion verb, then more ("the star LOOKS fine", "the word LIVES
  * in your head"). At least one word between the article and the verb, and never "… of" after it, so
  * "the sounds of the market" and "the wonders of the sea" stay things; never across "that/which/who"
- * ("a curtain that came down years ago" is a thing).
+ * or the subject of a clause with no "that" ("a curtain that came down years ago", "the box it came
+ * in" and "the jar they live in" are things).
  */
 const THING_THEN_VERB =
-  /^(?:a|an|the|this|that|my|your|our|his|her|their|some)\s+(?:(?!that\b|which\b|who\b)[a-z'-]+\s+){1,5}?(?:looks|lives|seems|feels|sounds|counts|wonder|wonders|belongs|means|stays|happens|started|starts|ended|came|comes|went|goes)\s+(?!of\b)\S/;
+  /^(?:a|an|the|this|that|my|your|our|his|her|their|some)\s+(?:(?!(?:that|which|who|i|you|he|she|it|we|they)\b)[a-z'-]+\s+){1,5}?(?:looks|lives|seems|feels|sounds|counts|wonder|wonders|belongs|means|stays|happens|started|starts|ended|came|comes|went|goes)\s+(?!of\b)\S/;
 
 /** A number of time units: "five minutes", "six and a half hours", "a few weeks of evenings", "two thousand years ago". */
 function lengthOfTime(words: string[]): boolean {
@@ -781,11 +796,12 @@ function lengthOfTime(words: string[]): boolean {
  * throat. Refused: numbers alone ("six and a half"), lengths of time ("five minutes", "a few weeks of
  * evenings", "two thousand years ago"), numbered labels ("round ten"), rates ("three a side", "…
  * apiece"), set phrases, greetings and pronouns ("give or take", "welcome", "nobody"), an aside or a
- * preposition first ("as rest", "through the pine"), and a clause ("…if that's rude", "that still
- * counts", "the star looks fine right afterward"). A trailing "too / as well / either" is not part
- * of what is named ("some glue too" is glue). A describing word ending in -ed is NOT refused:
- * "pieced from a few scraps, quilted, and bound" (jobs 159, 174, 178) is three real stages. Closed
- * lists of ordinary English, no channel's words. Pure.
+ * preposition first ("as rest", "through the pine"; "all/every/more…" are judged on what follows,
+ * `LEADS_A_THING`), and a clause ("…if that's rude", "that still counts", "the star looks fine right
+ * afterward"). A trailing "too / as well / either" is not part of what is named ("some glue too" is
+ * glue). A describing word ending in -ed is NOT refused: "pieced from a few scraps, quilted, and
+ * bound" (jobs 159, 174, 178) is three real stages. Closed lists of ordinary English, no channel's
+ * words. Pure.
  */
 export function notAThing(item: string): string | null {
   const core = item
@@ -800,6 +816,11 @@ export function notAThing(item: string): string | null {
   if (!words.length) return "no words";
   if (NOT_A_THING_PHRASE.has(core)) return "a set phrase or a pronoun";
   const first = words[0].replace(/[^a-z]/g, "");
+  if (LEADS_A_THING.has(first) && words.length > 1) {
+    const rest = words.slice(1).filter(w => !TIME_FILLER.test(w));
+    if (rest.length <= 3 && (TIME_UNIT.test(rest[0] ?? "") || TIME_UNIT.test(rest[rest.length - 1] ?? ""))) return "a time";
+    return notAThing(words.slice(1).join(" "));
+  }
   if (NOT_A_LIST_ITEM.has(first) || MORE_PREPOSITIONS.has(first)) return "an aside or a preposition first";
   if (words.some(isNumber) && words.every(w => isNumber(w) || NUMBER_FILLER.has(w))) return "only a number";
   if (words.length === 2 && LABEL_NOUN.has(words[0]) && isNumber(words[1])) return "a numbered label";

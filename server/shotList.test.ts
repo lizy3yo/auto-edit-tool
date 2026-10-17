@@ -1197,6 +1197,12 @@ describe("a list item is a thing (the audit's replay: jobs 351, 352, 357, 362, 4
       ["the star looks fine right afterward,", "a clause"],
       ["The word lives in your head and theirs", "a clause"], // job 322
       ["a week later his club friends started messaging me", "a clause"],
+      // "all / every / more …" are judged on what follows: a time or a where is still no thing.
+      ["every single morning", "a time"],
+      ["all day long", "a time"],
+      ["all of them", "an aside or a preposition first"],
+      ["just for fun", "an aside or a preposition first"],
+      ["less than a dollar", "an aside or a preposition first"],
     ];
     for (const [item, why] of refused) expect([item, notAThing(item)]).toEqual([item, why]);
     // Things stay things — the clean lists of the same replay, and the shapes the rule must not reach.
@@ -1220,6 +1226,13 @@ describe("a list item is a thing (the audit's replay: jobs 351, 352, 357, 362, 4
       "two weekend bags", // a time word that names a thing
       "the sounds of the market", // "sounds of" is a noun, not a verb
       "nice even stitches",
+      // A model item may open on "all / every / more / just": one refused item drops its whole list.
+      "all the scraps you can find",
+      "every spool of thread",
+      "and more glue",
+      "just a pencil",
+      "the box it came in", // a clause with no "that" still names the box
+      "everyone's favorite pie", // whose, not "everyone is"
     ])
       expect([item, notAThing(item)]).toEqual([item, null]);
   });

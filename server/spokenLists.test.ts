@@ -173,6 +173,10 @@ describe("a list item is a thing (the audit's replay of 336 jobs)", () => {
       "oil it",
       "put a felt dot on the bottom",
     ], "steps"); // job 326
+    // Lists of things whose items open on a quantity word or end in a clause with no "that": the
+    // shape rules cannot rebuild either, so refusing one item would lose every picture.
+    keep("Grab a tape measure, a pencil, and all the scraps you can find.", ["a tape measure", "a pencil", "all the scraps you can find"]);
+    keep("You need the quilt, the pattern, and the box it came in.", ["the quilt", "the pattern", "the box it came in"]);
   });
 
   it("a refused model list leaves the sentence to the shape rules, which still find the real list", async () => {
