@@ -152,6 +152,7 @@ import {
   extractSpokenScript,
   DEFAULT_LONGFORM_INSTRUCTION,
   generateSceneClips,
+  generateSceneStillClip,
   resumePendingRenders,
   withJobLock,
   isJobRendering,
@@ -8170,6 +8171,138 @@ describe("generateSceneClips routing (HeyGen lip-sync vs grok-imagine-video)", (
     const sub = adapter.submitVideo.mock.calls[0][0];
     expect(sub.imageUrls).toEqual(["https://cdn.example.com/face.jpg"]);
     expect(sub.videoInputMode).toBe("ingredients");
+  });
+
+  // Local job 262 scene 16 (the 2026-10-18 audit): a clip judged to move wrong was rendered again
+  // from a NEW keyframe, and its still drew a third image — the frame drawn and checked first sat
+  // unused on `pictureUrl`, which later pictures are drawn from.
+  describe("a glitch re-render and its still reuse the start frame already checked", () => {
+    const KF = "https://cdn.example.com/longform/262/broll-kf-16-0-a1b2c3.png";
+    const smoke: StoryboardScene = {
+      ...brollScene,
+      index: 16,
+      visualPrompt:
+        "main smoke alarm mounted on hallway ceiling with a thin curl of smoke rising beneath it",
+      selfMoving: true,
+      pictureUrl: KF,
+    };
+
+    it("renders the clip again from that frame — no new image is drawn", async () => {
+      const adapter = {
+        submitVideo: vi.fn().mockResolvedValue({ taskId: "vid-2" }),
+        pollVideo: vi.fn().mockResolvedValue(okVideoPoll),
+      };
+      vi.spyOn(storage, "storagePut").mockResolvedValue({
+        key: "k",
+        url: "https://cdn.example.com/asset",
+      });
+
+      await generateSceneClips(
+        adapter as any,
+        262,
+        { ...smoke },
+        baseParams,
+        null,
+        "instruction",
+        async () => {},
+        undefined,
+        true, // allow69Labs (mock adapter stands in for the APIMART one)
+        KF
+      );
+
+      expect(mockGenImage).not.toHaveBeenCalled();
+      expect(adapter.submitVideo).toHaveBeenCalledOnce();
+      expect(adapter.submitVideo.mock.calls[0][0].imageUrls).toEqual([KF]);
+    });
+
+    it("a content-policy step down still draws a softer frame", async () => {
+      mockInvoke.mockReset();
+      mockInvoke.mockRejectedValue(new Error("claude down"));
+      const adapter = {
+        submitVideo: vi
+          .fn()
+          .mockRejectedValueOnce(policyError())
+          .mockResolvedValue({ taskId: "vid-2" }),
+        pollVideo: vi.fn().mockResolvedValue(okVideoPoll),
+      };
+      vi.spyOn(storage, "storagePut").mockResolvedValue({
+        key: "k",
+        url: "https://cdn.example.com/asset",
+      });
+
+      await generateSceneClips(
+        adapter as any,
+        262,
+        { ...smoke },
+        baseParams,
+        null,
+        "instruction",
+        async () => {},
+        undefined,
+        true,
+        KF
+      );
+
+      expect(adapter.submitVideo.mock.calls[0][0].imageUrls).toEqual([KF]);
+      expect(mockGenImage).toHaveBeenCalled();
+      expect(adapter.submitVideo.mock.calls.at(-1)![0].imageUrls).toEqual([
+        "https://cdn.example.com/asset",
+      ]);
+    });
+
+    it("the still is that frame with the plain still look, not the cover's — no new image", async () => {
+      vi.spyOn(storage, "storagePut").mockResolvedValue({
+        key: "k",
+        url: "https://cdn.example.com/still.mp4",
+      });
+      const kenBurns = vi
+        .spyOn(videoAssembly, "renderKenBurnsClip")
+        .mockResolvedValue(Buffer.from("mp4"));
+      const scene: StoryboardScene = { ...smoke };
+
+      const urls = await generateSceneStillClip(
+        262,
+        scene,
+        undefined,
+        undefined,
+        undefined,
+        false,
+        null,
+        KF
+      );
+
+      expect(urls).toEqual(["https://cdn.example.com/still.mp4"]);
+      expect(mockGenImage).not.toHaveBeenCalled();
+      expect(kenBurns).toHaveBeenCalledOnce();
+      expect(kenBurns.mock.calls[0][0]).toBe(KF);
+      expect(kenBurns.mock.calls[0][1].cover).toBe(false);
+      expect(scene.pictureUrl).toBe(KF);
+      expect(scene.stillSourceUrl).toBe(KF);
+    });
+
+    it("a square split panel draws its own — the frame is 16:9", async () => {
+      vi.spyOn(storage, "storagePut").mockResolvedValue({
+        key: "k",
+        url: "https://cdn.example.com/panel.png",
+      });
+      const kenBurns = vi
+        .spyOn(videoAssembly, "renderKenBurnsClip")
+        .mockResolvedValue(Buffer.from("mp4"));
+
+      await generateSceneStillClip(
+        262,
+        { ...smoke },
+        undefined,
+        undefined,
+        undefined,
+        true,
+        null,
+        KF
+      );
+
+      expect(mockGenImage).toHaveBeenCalled();
+      expect(kenBurns.mock.calls[0][0]).toBe("https://cdn.example.com/panel.png");
+    });
   });
 });
 

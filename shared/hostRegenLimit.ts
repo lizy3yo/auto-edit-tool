@@ -42,6 +42,9 @@ const AUTOMATIC: ReadonlySet<SceneSubmitReason> = new Set<SceneSubmitReason>([
   "transient",
   "infra",
   "retry",
+  // A moving cutaway rendered again after its clip moved wrong — b-roll only, but the pipeline's
+  // own choice wherever it lands.
+  "glitch",
 ]);
 
 export const isAutomaticSubmit = (reason: SceneSubmitReason | undefined) =>

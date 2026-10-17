@@ -208,9 +208,19 @@ export interface SplitLayout {
 /**
  * Why a scene's clip was submitted to a paid provider. `first` is the render every scene
  * makes; everything else is a second payment for the same beat, and the ledger names which.
+ * `glitch` is a moving cutaway rendered again because its first clip moved wrong
+ * (`scanClipGlitch`) — it was written as `resume` before, so the Cost dialog could not tell it
+ * from a restart.
  */
 export type SceneSubmitReason =
-  "first" | "resume" | "transient" | "infra" | "regenerate" | "retry" | "merge";
+  | "first"
+  | "resume"
+  | "transient"
+  | "infra"
+  | "regenerate"
+  | "retry"
+  | "merge"
+  | "glitch";
 
 /** The person whose click paid for a render — kept on the ledger so the Cost dialog can name them. */
 export interface SubmitActor {
@@ -403,7 +413,8 @@ export interface StoryboardScene {
   /** Renders of this beat that came back BLACK (or one solid colour) and were refused. */
   blankClips?: number;
   /** Moving clips of this beat refused for impossible motion (`scanClipGlitch`); the second makes
-   *  the beat a still. */
+   *  the beat a still. Both the second render and that still use the start frame already drawn
+   *  and checked for the first (`checkedKeyframeOf`). */
   motionGlitches?: number;
   /** Every check of a picture drawn for this beat — its kind and what the check named
    *  (`server/pictureCheckLog.ts`), so a film shows which kinds come out right the first time. */

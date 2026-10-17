@@ -8,9 +8,20 @@
  * wrong?" over a small sheet of frames passed the kumiko clip with both Haiku and Sonnet, while
  * "list what moved" named the strips at once. The verdict is then decided HERE from the list,
  * not left to the model's own yes/no: a change is a glitch unless the shot is of something that
- * moves by itself (fire, water, smoke, traffic). Since 2026-09-30 a video never has hands in
- * it (`videoKind`), so hands appearing in a clip are a glitch too — and in a shot of something that
- * moves by itself, anything ELSE moving (the incense holder sliding while its smoke rises) is.
+ * moves by itself. Since 2026-09-30 a video never has hands in it (`videoKind`), so hands
+ * appearing in a clip are a glitch too — and in a shot of something that moves by itself, anything
+ * ELSE moving (the incense holder sliding while its smoke rises) is.
+ *
+ * THE THING MEANT TO MOVE IS NAMED (2026-10-18, the audit's thrown-away videos). Every glitch on
+ * record was judged on a self-moving shot, and the model was told what may move by a fixed list
+ * ("fire, water, smoke, steam, traffic") that disagreed with `judgeSelfMoving`, which decides what
+ * may be a video from the picture's own words (curtains in a breeze, a tumbling drum): six of the
+ * seven reasons logged on Frederick's renders named the moving thing itself — "smoke slightly
+ * denser/shifted on right", "flames height decreased" (job 262 scene 16, "a thin curl of smoke
+ * rising" under a ceiling alarm, was paid for twice and shipped as a still) — and the production
+ * snapshot threw 169 paid videos away for a still. Now the message names the shot
+ * (`clipGlitchMessage`), each change says whether it IS that thing or comes from it (`meant`), and
+ * only a change in something else counts.
  *
  * Fails open (no glitch) on any error: a check must never cost a render.
  */
@@ -29,23 +40,73 @@ export const CLIP_GLITCH_SYSTEM =
   "You compare two frames of ONE short AI-generated video clip: the FIRST frame on the LEFT, the " +
   "LAST frame on the RIGHT. The camera may have zoomed or panned, so ignore framing: compare where each " +
   "object sits and which way it points RELATIVE TO THE SURFACE AND THE OBJECTS AROUND IT.\n" +
+  "The message may name what the clip shows MOVING BY ITSELF. That thing, and what comes from it — " +
+  "what it gives off, carries or pushes along, and its light on what is near it — may change in any " +
+  "way. Everything else should hold still.\n" +
   "changes: every object that moved, turned, appeared, disappeared, multiplied or changed shape " +
-  "or size between the two frames (short phrases; [] when nothing did).\n" +
+  'or size between the two frames, each as {"what":"a short phrase","meant":true|false} ([] when ' +
+  "nothing did). meant is true ONLY when the change is the thing named as moving by itself, or " +
+  "comes from it; false for anything else, and false for every change when nothing is named.\n" +
   "hands_visible: are hands in either frame?\n" +
-  "untouched_moved: did anything in `changes` move without a hand touching it — other than " +
-  "things that move by themselves in real life (fire, water, smoke, steam, traffic)?\n" +
-  "morph: did anything melt, bend, stretch, change size or shape, merge into something else, or " +
-  "grow or lose fingers? Hands moving, a tool changing angle in a hand, or work progressing " +
-  "(a cut deepening, paper peeling where the hand pulls it) is NOT a morph.\n" +
+  "untouched_moved: did anything in `changes` that is not meant move without a hand touching it?\n" +
+  "morph: did anything that is not meant melt, bend, stretch, change size or shape, merge into " +
+  "something else, or grow or lose fingers? Hands moving, a tool changing angle in a hand, or work " +
+  "progressing (a cut deepening, paper peeling where the hand pulls it) is NOT a morph.\n" +
   "hands_visible counts any hand, finger or arm, even partly in frame.\n" +
   "cover: for each LARGE item (a quilt, cloth, sheet of fabric, board, rug, piece of work) say " +
   "where its edges are and what surface shows around it, LEFT frame then RIGHT frame — look at " +
   "the front edge of the table in both.\n" +
-  "vanished: is an item GONE, clearly SMALLER or clearly BIGGER on the right than on the left, " +
-  "or did something appear from nowhere — with no hand plainly lifting it away, bringing it in, " +
-  "cutting or folding it? Only sliding or turning a little is NOT vanished.\n" +
-  'Return ONLY this JSON, no prose: {"changes":["..."],"cover":["..."],"hands_visible":true|false,' +
-  '"untouched_moved":true|false,"morph":true|false,"vanished":true|false}';
+  "vanished: is an item that is not meant GONE, clearly SMALLER or clearly BIGGER on the right than " +
+  "on the left, or did something appear from nowhere — with no hand plainly lifting it away, " +
+  "bringing it in, cutting or folding it? Only sliding or turning a little is NOT vanished.\n" +
+  'Return ONLY this JSON, no prose: {"changes":[{"what":"...","meant":true|false}],"cover":["..."],' +
+  '"hands_visible":true|false,"untouched_moved":true|false,"morph":true|false,"vanished":true|false}';
+
+/**
+ * The question for one clip. `about` is what it should show; on a self-moving shot it is ALSO what
+ * is meant to move — the model picks the moving thing out of the description the same way
+ * `judgeSelfMoving` judged it ("a thin curl of smoke rising" under a ceiling alarm: the smoke moves,
+ * the alarm holds still). Pure — unit-tested.
+ */
+export function clipGlitchMessage(about: string | undefined, selfMoving: boolean): string {
+  const shows = about?.trim()
+    ? about.replace(/"/g, "'").replace(/\s+/g, " ").trim().slice(0, 200)
+    : "";
+  const meant = !selfMoving
+    ? ""
+    : shows
+      ? " Whatever moves by itself in that description is MEANT to move; everything else should hold still."
+      : " ONE thing in it is meant to move by itself — decide from the frames which; everything else should hold still.";
+  return (
+    "First frame on the left, last frame on the right." +
+    (shows ? ` The clip should show: ${shows}.` : "") +
+    meant +
+    " What changed?"
+  );
+}
+
+/** One entry of the model's `changes`: what changed and whether it is the thing meant to move. */
+type ClipChange = { what: string; meant?: boolean };
+
+/**
+ * The model's `changes`, read in either shape: `{what, meant}` objects, or the plain phrases of an
+ * answer that ignored the shape (`meant` then unknown). Pure.
+ */
+function readChanges(raw: unknown): ClipChange[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ClipChange[] = [];
+  for (const c of raw) {
+    if (typeof c === "string") {
+      if (c.trim()) out.push({ what: c.trim() });
+      continue;
+    }
+    if (!c || typeof c !== "object") continue;
+    const what = typeof (c as any).what === "string" ? (c as any).what.trim() : "";
+    const meant = typeof (c as any).meant === "boolean" ? ((c as any).meant as boolean) : undefined;
+    if (what || meant !== undefined) out.push({ what, meant });
+  }
+  return out;
+}
 
 export type ClipGlitchVerdict = { glitch: boolean; what: string };
 
@@ -61,9 +122,7 @@ export function parseClipGlitchVerdict(
   const parsed = safeParseJSON<any>(raw, stopReason);
   if (!parsed.success) return { glitch: false, what: "" };
   const d = parsed.data ?? {};
-  const changes: string[] = Array.isArray(d.changes)
-    ? d.changes.filter((c: unknown): c is string => typeof c === "string" && c.trim() !== "")
-    : [];
+  const changes = readChanges(d.changes);
   const morph = d.morph === true;
   const hands = d.hands_visible === true;
   // Something that disappears, appears or changes size with no hand doing it is a glitch EVEN
@@ -79,18 +138,23 @@ export function parseClipGlitchVerdict(
   // With no hands in the shot and nothing that moves by itself, ANY change is something moving
   // on its own — the model's own "untouched" call is not needed (and was wrong on the kumiko).
   const unexplained = !selfMoving && d.hands_visible === false && changes.length > 0;
-  // A self-moving shot (fire spreading a burn, water pouring) changes shape by nature: only an
-  // untouched move of something ELSE would count, and the model cannot tell us which — pass it.
   // No video may show hands any more (2026-09-30, the operator: "never do the videos with
   // fingers"): a hand that turns up in a clip is a glitch, whatever the clip is of.
   if (hands)
     return { glitch: true, what: "hands appear in the video" };
   // A shot of something that moves by itself changes by nature (a burn spreading, smoke drifting):
-  // only something ELSE moving on its own counts — the model's `untouched_moved` already leaves the
-  // smoke, fire and water out.
+  // only a change in something ELSE counts — the camera moving, an object sliding, appearing,
+  // vanishing or changing shape beside it. Each change says which it is (`meant`), and a
+  // morph/vanished answer is trusted only through those: a flat morph/vanished flag cannot say
+  // WHAT, and on these shots it was the flame or smoke itself ("flames height decreased",
+  // Frederick's renders). An answer in the old shape (plain phrases) falls back to the model's
+  // own untouched call, which now asks only about what is not meant.
   if (selfMoving) {
-    const glitch = d.untouched_moved === true && changes.length > 0;
-    return { glitch, what: glitch ? (changes[0] ?? "something moves on its own").slice(0, 80) : "" };
+    const other = changes.find(c => c.meant === false);
+    const unsorted = changes.filter(c => c.meant === undefined);
+    const glitch = !!other || (unsorted.length > 0 && d.untouched_moved === true);
+    const what = other?.what || unsorted[0]?.what || "something moves on its own";
+    return { glitch, what: glitch ? what.slice(0, 80) : "" };
   }
   const glitch = morph || untouched || unexplained || vanished;
   return {
@@ -98,7 +162,7 @@ export function parseClipGlitchVerdict(
     what: glitch
       ? (vanished && !morph
           ? "something disappears or changes size"
-          : (changes[0] ?? (morph ? "shape changes" : "something moves on its own"))
+          : (changes[0]?.what || (morph ? "shape changes" : "something moves on its own"))
         ).slice(0, 80)
       : "",
   };
@@ -153,7 +217,8 @@ async function firstAndLast(clipUrl: string): Promise<Buffer> {
 
 /**
  * Does this moving clip move something the way nothing moves in real life? `about` is what the
- * clip should show (context only); `selfMoving` when that is a thing that moves by itself.
+ * clip should show; `selfMoving` when that is a thing that moves by itself — `about` then also
+ * names what may move (`clipGlitchMessage`).
  */
 export async function scanClipGlitch(
   clipUrl: string,
@@ -164,11 +229,7 @@ export async function scanClipGlitch(
     const pair = await firstAndLast(clipUrl);
     const result = await invokeClaude({
       systemPrompt: CLIP_GLITCH_SYSTEM,
-      userMessage:
-        "First frame on the left, last frame on the right." +
-        (about ? ` The clip should show: ${about.replace(/"/g, "'").slice(0, 200)}.` : "") +
-
-        " What changed?",
+      userMessage: clipGlitchMessage(about, selfMoving),
       imageInput: { base64: pair.toString("base64"), mediaType: "image/png" },
       maxTokens: 500,
       model: CLIP_GLITCH_MODEL(),

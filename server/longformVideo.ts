@@ -3819,11 +3819,15 @@ export function planAutoBroll(
  * lane fails a cutaway, and now when the lip-sync lane fails a host beat (after `planAutoBroll`
  * has made it a cutaway). Throws if even the still cannot be made; the caller marks the scene
  * failed with the ORIGINAL error, since that is the one worth reading.
+ * `sourceImageUrl` is a picture already drawn and checked for this scene — the start frame of a
+ * clip that moved wrong (`checkedKeyframeOf`) — and the still is made from it instead of a new
+ * draw.
  */
 async function fallbackSceneToStill(
   jobId: number,
   scene: StoryboardScene,
-  params: LongformInputParams
+  params: LongformInputParams,
+  sourceImageUrl?: string
 ): Promise<void> {
   const apimartKey =
     await apimartKeyForJob(params);
@@ -3834,7 +3838,8 @@ async function fallbackSceneToStill(
     scene.showsBook ? params.bookCoverImageUrl : undefined,
     params.videoSubject,
     false,
-    apimartKey
+    apimartKey,
+    sourceImageUrl
   );
   syncSceneClipFields(scene);
   scene.stillImage = true;
@@ -8882,7 +8887,9 @@ async function generateSceneClip(
   params: LongformInputParams,
   clipIdx = 0,
   /** Per-clip generation length (b-roll `brollClipDuration`); omitted → chain default. */
-  durationSec?: number
+  durationSec?: number,
+  /** A start frame already drawn and checked — the glitch re-render's (`generateSceneClips`). */
+  keyframeUrl?: string
 ): Promise<string> {
   // Blocking b-roll generation that mirrors the resumable path's submit (`submitBrollClip` +
   // the chain loop above), walking `buildClipChain`'s elements (b-roll: normal + softer retry;
@@ -8897,7 +8904,11 @@ async function generateSceneClip(
   // On failure (whole image chain exhausted or 90s timeout) the error propagates — the scene
   // fails rather than degrading to a text-only clip.
   let keyframe: string | undefined;
-  if (!scene.hostPresent && !chain[0].imageUrls && !brollKeyframeDisabled()) {
+  const wantsKeyframe =
+    !scene.hostPresent && !chain[0].imageUrls && !brollKeyframeDisabled();
+  if (wantsKeyframe && keyframeUrl && clipIdx === 0) {
+    keyframe = keyframeUrl;
+  } else if (wantsKeyframe) {
     const apimartKey =
       await apimartKeyForJob(params);
     keyframe = await Promise.race([
@@ -9452,12 +9463,26 @@ export async function generateSceneStillClip(
    * cover-crop takes nothing off the sides.
    */
   square = false,
-  apimartKey?: string | null
+  apimartKey?: string | null,
+  /**
+   * A picture already drawn AND checked for this scene — the start frame of its moving clip, when
+   * that clip moved wrong (`checkedKeyframeOf`). The still IS this picture, with the ordinary
+   * still look; unlike `coverImageUrl`, which also switches on the cover's dark backdrop. Never
+   * on a square panel: the frame is 16:9.
+   */
+  sourceImageUrl?: string
 ): Promise<string[]> {
   let imageUrl: string;
   if (coverImageUrl) {
     // Cover beat: animate the actual cover image, no generation.
     imageUrl = coverImageUrl;
+  } else if (sourceImageUrl && !square) {
+    // Drawing a new picture paid for one more image and broke what later pictures were drawn
+    // from: picture memory takes this scene's `pictureUrl`, which IS that start frame (Frederick's
+    // job 262 scene 16 drew three images for the one still it shipped).
+    imageUrl = sourceImageUrl;
+    scene.pictureUrl = sourceImageUrl;
+    pictureSettled(scene);
   } else {
     // A still never shows a person: at most bare hands at the task (described in the
     // prompt via ANON_PERSON_SUFFIX) — never the channel host — so no face reference image is
@@ -9607,6 +9632,26 @@ export async function generateBrollKeyframe(
     pictureSettled(scene);
   }
   return url;
+}
+
+/**
+ * The start frame a moving cutaway's clip was rendered from — drawn by `generateBrollKeyframe`
+ * (a `broll-kf-` file) and already through the picture checks — or undefined when the clip had
+ * none (`BROLL_NO_KEYFRAME`, or a picture that is not a keyframe). Read right after the clip is
+ * judged, when `pictureUrl` is still that render's frame: a content-policy step down redraws it,
+ * and the clip that came back is the one drawn from the last. A clip that moved wrong is the
+ * video model's fault, not the frame's, so the second render and the still both use it instead
+ * of drawing again (local job 262 scene 16: two paid videos and three images for one still).
+ * Pure — unit-tested.
+ */
+export function checkedKeyframeOf(
+  scene: StoryboardScene,
+  keyframesOn = !brollKeyframeDisabled()
+): string | undefined {
+  const url = scene.pictureUrl;
+  return keyframesOn && url && /\/broll-kf-[^/]*$/.test(url.split("?")[0])
+    ? url
+    : undefined;
 }
 
 /** Clips needed to cover a scene whose narration is `audioDuration` long. */
@@ -12614,7 +12659,13 @@ export async function generateSceneClips(
    * Explicit 69Labs opt-in for the local 69labs-only test runner: allows a host shot to render
    * unsynced AND b-roll to fall back off APIMART. Production leaves this false.
    */
-  allow69Labs: boolean = false
+  allow69Labs: boolean = false,
+  /**
+   * A b-roll start frame already drawn and checked for this scene — the glitch re-render's
+   * (`renderSceneClip`, `checkedKeyframeOf`). The clip is rendered again from it instead of a new
+   * draw; after a content-policy block each step draws its own, as before.
+   */
+  keyframeUrl?: string
 ): Promise<string[]> {
   // ponytail: b-roll never depicts the book — neutralize any persisted `showsBook=true` from an
   // OLD job so no lane attaches the cover reference on regen/resume (new jobs already parse
@@ -12786,6 +12837,9 @@ export async function generateSceneClips(
     // normal; set on each escalation below.
     let kfVisual: string | undefined;
     let kfSubject = params.videoSubject;
+    // The glitch re-render's checked frame, used until the first content-policy block: from
+    // there each step draws its own, exactly as before.
+    let reuseKeyframe = keyframeUrl;
     while (true) {
       scene.renderModelIndex = idx;
       const req = chain[idx];
@@ -12804,16 +12858,20 @@ export async function generateSceneClips(
         if (!scene.hostPresent && !req.imageUrls && !brollKeyframeDisabled()) {
           // Reference baked into the keyframe: the real book cover on a showsBook beat, and
           // nothing else. The channel host photo is never referenced on b-roll — a cutaway
-          // shows no person at all (see NO_FIGURES_SUFFIX).
-          const kf = await generateBrollKeyframe(
-            jobId,
-            scene,
-            i,
-            scene.showsBook ? params.bookCoverImageUrl : undefined,
-            kfSubject,
-            kfVisual,
-            apimartKey
-          );
+          // shows no person at all (see NO_FIGURES_SUFFIX). The glitch re-render starts again
+          // from the frame already drawn and checked (`reuseKeyframe`).
+          const kf =
+            i === 0 && reuseKeyframe
+              ? reuseKeyframe
+              : await generateBrollKeyframe(
+                  jobId,
+                  scene,
+                  i,
+                  scene.showsBook ? params.bookCoverImageUrl : undefined,
+                  kfSubject,
+                  kfVisual,
+                  apimartKey
+                );
           // Grok takes the lone input image as the clip's start frame, with no videoInputMode
           // (only gemini-omni supports modes). buildVideoBody caps images and strips any mode;
           // we send a single keyframe and omit videoInputMode here too.
@@ -12898,6 +12956,7 @@ export async function generateSceneClips(
             ]
           } prompt`
         );
+        reuseKeyframe = undefined;
         idx += 1;
         scene.renderModelIndex = idx;
         scene.renderTaskIds = undefined; // resubmit fresh on the next model
@@ -12919,7 +12978,8 @@ export async function generateSceneClips(
           scene,
           params,
           0,
-          duration
+          duration,
+          keyframeUrl
         );
       } catch (e: any) {
         if (attempt === 1) throw e;
@@ -13259,6 +13319,30 @@ export async function dispatchScenesByProvider(
 }
 
 /**
+ * A moving cutaway whose clip moved wrong (`scanClipGlitch`): count it, clear the clip, and say
+ * what comes next — the first time one more render, the second time the still — with the start
+ * frame both are made from (`checkedKeyframeOf`, read before anything is cleared). The second
+ * render is ledgered `glitch`: it used to fall to `resume`, and the Cost dialog showed every
+ * glitch re-render as a restart (local, since 2026-09-30: the 11 `resume` entries were exactly
+ * the 11 glitched scenes). Pure — unit-tested.
+ */
+export function planGlitchRerender(scene: StoryboardScene): {
+  next: "rerender" | "still";
+  keyframe?: string;
+} {
+  const keyframe = checkedKeyframeOf(scene);
+  scene.motionGlitches = (scene.motionGlitches ?? 0) + 1;
+  scene.clipUrls = undefined;
+  scene.clipUrl = undefined;
+  scene.renderTaskIds = undefined;
+  if (scene.motionGlitches < 2) {
+    scene.nextSubmitReason = "glitch";
+    return { next: "rerender", keyframe };
+  }
+  return { next: "still", keyframe };
+}
+
+/**
  * Render one scene's clip(s) and fold the outcome into its status. Shared by the main clip
  * stage and the resume stage. A still-running render (PendingRenderError) stays "rendering"
  * so it resumes later; any other failure marks the scene "failed".
@@ -13285,6 +13369,9 @@ async function renderSceneClip(
   // first failure. The render gate in `runChunkTasks` holds the count, so this loop can never
   // pay past it; the pass bound only stops a failure that happens before any submit (no audio,
   // a photo that will not load) from spinning.
+  // The start frame of a cutaway whose clip moved wrong: the second render, and the still if that
+  // one moves wrong or fails too, are made from it (`planGlitchRerender`).
+  let glitchKeyframe: string | undefined;
   for (let pass = 0; ; pass++) {
     try {
       scene.clipUrls = await generateSceneClips(
@@ -13295,7 +13382,9 @@ async function renderSceneClip(
         lipsync,
         instruction,
         persist,
-        pollTimeoutMs
+        pollTimeoutMs,
+        false,
+        glitchKeyframe
       );
       syncSceneClipFields(scene);
       // A moving cutaway that moves something the way nothing moves in real life (wood sliding
@@ -13316,20 +13405,20 @@ async function renderSceneClip(
           scene.selfMoving ?? !!scene.objectMotion
         );
         if (g.glitch) {
-          scene.motionGlitches = (scene.motionGlitches ?? 0) + 1;
-          scene.clipUrls = undefined;
-          scene.clipUrl = undefined;
-          scene.renderTaskIds = undefined;
-          if (scene.motionGlitches < 2) {
+          const plan = planGlitchRerender(scene);
+          if (plan.next === "rerender") {
+            glitchKeyframe = plan.keyframe;
             console.warn(
-              `[Longform ${jobId}] scene ${scene.index} clip moves wrong (${g.what}) — rendering it again`
+              `[Longform ${jobId}] scene ${scene.index} clip moves wrong (${g.what}) — rendering it again` +
+                (plan.keyframe ? " from the same start frame" : "")
             );
             continue;
           }
           console.warn(
-            `[Longform ${jobId}] scene ${scene.index} clip moved wrong twice (${g.what}) — using the still`
+            `[Longform ${jobId}] scene ${scene.index} clip moved wrong twice (${g.what}) — using the still` +
+              (plan.keyframe ? " (its start frame)" : "")
           );
-          await fallbackSceneToStill(jobId, scene, params);
+          await fallbackSceneToStill(jobId, scene, params, plan.keyframe);
           return;
         }
       }
@@ -13354,7 +13443,10 @@ async function renderSceneClip(
           console.warn(
             `[Longform ${jobId}] scene ${scene.index} b-roll video failed (${e.message}) — falling back to Ken Burns still animation`
           );
-          await fallbackSceneToStill(jobId, scene, params);
+          // A second render after a glitch that failed: the first one's start frame was drawn
+          // and checked for this scene. Any other failure draws as before — there the frame
+          // may never have been drawn, and `pictureUrl` could be an older picture's.
+          await fallbackSceneToStill(jobId, scene, params, glitchKeyframe);
           return;
         } catch (stillErr: any) {
           console.error(

@@ -238,6 +238,7 @@ const REASON_LABEL: Record<SceneSubmitReason, string> = {
   retry: "retry clicks",
   regenerate: "regenerates",
   merge: "merges",
+  glitch: "glitch re-renders",
 };
 
 export const hostSpendReasonLabel = (r: SceneSubmitReason): string =>

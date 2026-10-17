@@ -66,6 +66,7 @@ import {
   personClauseFor,
   TOOL_POSITION_CLAUSE,
   withAllowedText,
+  planGlitchRerender,
 } from "./longformVideo";
 import {
   exactLookQuestion,
@@ -88,6 +89,7 @@ import {
 import { pictureKindOf } from "./pictureCheckLog";
 import { splitPanelFor } from "./splitPanel";
 import { splitPanelsMissing } from "@shared/splitPanel";
+import { clipGlitchMessage, parseClipGlitchVerdict } from "./clipGlitchScan";
 
 const pic = (index: number, scriptText: string, showSubject: string, over: Partial<StoryboardScene> = {}) =>
   ({ index, scriptText, showSubject, visualPrompt: showSubject, ...over }) as StoryboardScene;
@@ -1469,5 +1471,37 @@ describe("a split ships with both halves, or the job says so (the audit's host-o
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("a video that moves as asked is kept (the audit's thrown-away videos, 2026-10-18)", () => {
+  const ALARM = "main smoke alarm mounted on hallway ceiling with a thin curl of smoke rising beneath it";
+  const answer = (changes: { what: string; meant: boolean }[]) =>
+    JSON.stringify({ changes, cover: [], hands_visible: false, untouched_moved: false, morph: false, vanished: false });
+
+  it("job 262 scene 16: the smoke changing is the shot; the alarm sliding is a glitch", () => {
+    expect(clipGlitchMessage(ALARM, true)).toContain("Whatever moves by itself in that description is MEANT to move");
+    expect(parseClipGlitchVerdict(answer([{ what: "smoke slightly denser/shifted on right", meant: true }]), true).glitch).toBe(false);
+    expect(parseClipGlitchVerdict(answer([{ what: "the smoke alarm slid along the ceiling", meant: false }]), true).glitch).toBe(true);
+  });
+
+  it("production job 182 #40: curtains stirring from moving air — no fixed list leaves them out", () => {
+    const windows = "both open windows in the house with curtains stirring from moving air";
+    expect(clipGlitchMessage(windows, true)).toContain(windows);
+    expect(parseClipGlitchVerdict(answer([{ what: "curtains billowed further into the room", meant: true }]), true).glitch).toBe(false);
+  });
+
+  it("job 262 scene 16: a clip that does move wrong renders once more from the same frame, then the still is that frame", () => {
+    const kf = "https://r2/longform/262/broll-kf-16-0-a.png";
+    const scene = pic(16, "Photoelectric sees the slow, smoldering fire substantially earlier.", ALARM, {
+      selfMoving: true,
+      pictureUrl: kf,
+      clipUrls: ["https://r2/longform/262/clip-16-0-a.mp4"],
+      submits: [{ provider: "sixtynine_labs", at: "2026-10-01T00:00:00.000Z", reason: "first" }],
+    });
+    expect(planGlitchRerender(scene)).toEqual({ next: "rerender", keyframe: kf });
+    expect(scene.nextSubmitReason).toBe("glitch");
+    scene.nextSubmitReason = undefined; // the re-render's submit consumes it
+    expect(planGlitchRerender(scene)).toEqual({ next: "still", keyframe: kf });
   });
 });
