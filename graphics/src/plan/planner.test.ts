@@ -274,7 +274,7 @@ describe("the planner reads what the FILM says over each picture, on the resolve
     expect(stretches).not.toContain("$1,500");
   });
 
-  it("with no transcript (the lab, a test) every scene reads its script text, as before", () => {
+  it("with no transcript (a test that passes no words) every scene reads its script text, as before", () => {
     expect(wordsSaidOver(film, [])).toEqual(film.scenes.map(s => s.scriptText));
     expect(userPrompt(film, [])).toContain("#35 2:59.9-3:08.7 B-ROLL: Put the $10 to $40 items along the front edge of the table where hands reach first. One good Saturday market can gross $500 to $1,500. Number five.");
   });
@@ -304,6 +304,26 @@ describe("what is said over a picture comes from the film's sound only where it 
       ],
     };
     expect(wordsSaidOver(film, heard)).toEqual(["I'm Hank Hardwood. And this one's for anybody standing in a garage", "with a saw,", "a drill,"]);
+  });
+
+  it("Dale's job 397, 0:14-0:31: a word that runs a little past a cut stays with the scene holding its middle, so clean list shots keep their script", () => {
+    // "ranking" (19.05-19.39) crosses the cut at 19.37 and "Marketplace" (21.81-22.45) the one at
+    // 22.44: both are said mostly before the cut, so nothing moves and no line changes.
+    const heard = T(
+      "The@14.63-14.71 place@14.74-14.96 you@14.98-15.13 tried@15.15-15.37 to@15.39-15.47 sell@15.55-15.79 it@15.85-15.93 just@16.15-16.39 wasn't@16.45-16.75 built@16.85-17.11 for@17.17-17.27 that@17.31-17.47 piece.@17.55-17.85 Today,@18.45-18.75 I'm@18.87-18.99 ranking@19.05-19.39 " +
+        "Etsy,@19.55-19.93 craft@20.11-20.43 fairs,@20.49-20.85 and@21.05-21.19 Facebook@21.27-21.73 Marketplace@21.81-22.45 " +
+        "by@22.55-22.67 what@22.71-22.87 each@23.01-23.19 one@23.35-23.45 actually@23.71-24.17 does@24.23-24.49 well.@24.61-24.91 And@25.67-25.81 hang@25.95-26.19 on@26.31-26.41 for@26.45-26.57 the@26.61-26.69 Etsy@26.87-27.19 fee@27.27-27.51 that@27.57-27.69 can@27.73-27.87 more@27.95-28.13 than@28.17-28.33 double@28.55-28.91 what@28.97-29.11 comes@29.17-29.39 out@29.47-29.57 of@29.61-29.67 a@29.71-29.73 single@29.85-30.21 sale.@30.29-30.61"
+    );
+    const film = {
+      scenes: [
+        scene(4, 14.5177, 19.37115, { scriptText: "The place you tried to sell it just wasn't built for that piece. Today I'm ranking" }),
+        scene(5, 19.37115, 19.9447, { scriptText: "Etsy," }),
+        scene(6, 19.9447, 20.986, { scriptText: "craft fairs," }),
+        scene(7, 20.986, 22.4422, { scriptText: "and Facebook Marketplace" }),
+        scene(8, 22.4422, 31.1802, { scriptText: "by what each one actually does well. And hang on for the Etsy fee that can more than double what comes out of a single sale." }),
+      ],
+    };
+    expect(wordsSaidOver(film, heard)).toEqual(film.scenes.map(s => s.scriptText));
   });
 
   it("Hank's job 398: a line the film says word for word keeps the script's spelling ('out of square' heard 'out a square', '2 hours' heard 'two hours')", () => {
