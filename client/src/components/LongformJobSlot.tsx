@@ -3740,14 +3740,16 @@ export default function LongformJobSlot({
                               // film never stops for one, so it says so here (`shared/pictureFlaws.ts`).
                               const shipped = sceneShippedFlaws(scene);
                               if (!shipped) return null;
-                              const missing = shipped.flaws.includes("missing") && scene.showSubject;
+                              // A panel is drawn from its own description (`buildSplitRightScene`), never the host beat's subject.
+                              const subject = shipped.panel ? scene.splitVisual : scene.showSubject;
+                              const missing = shipped.flaws.includes("missing") && subject;
                               return (
                                 <Badge
                                   variant="outline"
                                   className="text-[10px] py-0 text-warning border-warning/40"
                                   title={
                                     `The picture check still found ${pictureFlawWords(shipped.flaws)} in the ${shipped.panel ? "split panel" : "picture"} that shipped — its redraws did not clear it.` +
-                                    (missing ? `\nIt was to show: ${scene.showSubject}` : "") +
+                                    (missing ? `\nIt was to show: ${subject}` : "") +
                                     "\nRegenerate the scene if it shows."
                                   }
                                 >

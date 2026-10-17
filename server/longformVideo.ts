@@ -99,12 +99,14 @@ export const PERSON_FREE_FALLBACK =
   "Show only the things this line is about, on a surface or in their place — no person, no " +
   "hands, no face, no body part anywhere in the frame.";
 /**
- * With `PERSON_FREE_FALLBACK` on the redraw of a picture whose geometry came back broken twice. Says
- * "used", never "still": smoke or steam that moves by itself stays in a self-moving shot's frame.
+ * With `PERSON_FREE_FALLBACK` on the redraw of a picture whose geometry came back broken twice. Only
+ * TOOLS are put down: "nothing is being used" also put out what a picture shows in use on purpose —
+ * a main thing lit, steaming or running (rule (n), "the main thing in use") — and smoke or steam that
+ * moves by itself in a self-moving shot's frame. Never "still" either, for the same reason.
  */
 export const THINGS_AT_REST_CLAUSE =
-  "Nothing in the frame is being used: every tool and piece rests where it belongs, and no blade, " +
-  "bit or point is cutting into anything.";
+  "No tool is at work: every tool and workpiece rests where it belongs, and no blade, bit or point " +
+  "is cutting into anything.";
 
 /**
  * A REDRAW THAT CHANGES WHAT CAUSED THE FAULT (2026-10-18, the audit). A picture whose check names
@@ -6776,6 +6778,31 @@ export function withAllowedText(
     : `${prompt} ${allowed}`;
 }
 
+/**
+ * Print on a picture whose line asks for NONE: whatever the picture maker puts there is blurred, and
+ * nothing is asked for. `BLURRED_PRINT_CLAUSE` is for a line that talks about print — it says the
+ * print "is visible" and an engraved name "is there too … never left off" — and on a plain picture
+ * that would carve a name onto a thing whose line never had one.
+ */
+export const UNASKED_PRINT_CLAUSE =
+  "Any printing or lettering in the frame — on a label, a box, a sign or a screen — is small, soft " +
+  "and out of focus, the way a phone blurs small print: no word, letter or number anywhere can be " +
+  "read. Frame it from about an arm's length away, never a close-up of any printing: the thing is " +
+  "clearly the subject.";
+
+/**
+ * The soft-print redraw of a PLAIN picture that came back with readable writing twice (`faultRedrawFor`
+ * "soft print", job 343 scene 17): the blurred-print path's framing — close-up words and "clearly
+ * showing" taken out, the no-writing rule swapped (`withAllowedText`) — with the clause that asks for
+ * no print (`UNASKED_PRINT_CLAUSE`), from further back (`STEP_BACK_CLAUSE`). Pure.
+ */
+export function softPrintRedraw(prompt: string): string {
+  const soft = withAllowedText(prompt, undefined, true)
+    .split(BLURRED_PRINT_CLAUSE)
+    .join(UNASKED_PRINT_CLAUSE);
+  return `${soft} ${STEP_BACK_CLAUSE}`;
+}
+
 /** A picture about an app or selling online (after `scrubLegibleWriting` has taken the brand off). */
 const APP_SCREEN =
   /\b(?:apps?|buy-and-sell|online (?:craft )?(?:shop|store)|website|phone screen|listings?)\b/i;
@@ -9237,7 +9264,7 @@ async function drawValidatedStill(
           prompt = `${buildStillPrompt({ ...scene, humanPresent: false, brollHostLook: undefined, brollHostRef: undefined, hostFaceShown: undefined }, false, visualOverride, subject, square)} ${PERSON_FREE_FALLBACK} ${THINGS_AT_REST_CLAUSE}`;
           lastError = `Still image has broken geometry (${defects.what})`;
         } else {
-          prompt = `${withAllowedText(prompt, undefined, true)} ${STEP_BACK_CLAUSE}`;
+          prompt = softPrintRedraw(prompt);
           lastError = "Still image has readable writing";
         }
         if (attempt === attempts) attempts++;
@@ -12082,26 +12109,42 @@ async function renderSplitRightMotionClip(
     pictureFlaws: undefined,
     panelFlaws: undefined,
   };
-  const urls = await Promise.race([
-    generateSceneClips(
-      adapter,
-      jobId,
-      right,
-      params,
-      null, // no lip-sync lane: the right half is a person-free cutaway
-      instruction,
-      persist
-    ),
-    new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error("Split-screen right clip timed out")),
-        SPLIT_RIGHT_MOTION_TIMEOUT_MS
-      )
-    ),
-  ]);
+  // The panel's keyframe is drawn by the ordinary cutaway lane, which says what it shipped with as
+  // this index's full-frame PICTURE (`notePictureFlaws`). It is the panel's: that line is taken back
+  // here whatever happens, and said as the panel's only once the panel is kept — one that glitches
+  // falls back to the still panel, which says its own, and left behind it read "picture shipped
+  // with …" on a host beat beside the still panel's own line.
+  const keyframeFlaws = (): string[] | undefined => {
+    const flaws = right.pictureFlaws;
+    notePictureFlaws(jobId, right, undefined, false);
+    return flaws;
+  };
+  let urls: string[];
+  try {
+    urls = await Promise.race([
+      generateSceneClips(
+        adapter,
+        jobId,
+        right,
+        params,
+        null, // no lip-sync lane: the right half is a person-free cutaway
+        instruction,
+        persist
+      ),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error("Split-screen right clip timed out")),
+          SPLIT_RIGHT_MOTION_TIMEOUT_MS
+        )
+      ),
+    ]);
+  } catch (e) {
+    keyframeFlaws();
+    throw e;
+  }
+  const flaws = keyframeFlaws();
   const url = urls[0];
   if (!url) throw new Error("Split-screen right clip produced no output");
-  carryPanelFlaws(scene, right.pictureFlaws);
   // The caller falls back to the still panel on any throw — which never moves wrong.
   // A moving panel is only ever a thing that moves by itself (`enforceHostSplitMix`).
   const g = await scanClipGlitch(
@@ -12110,6 +12153,7 @@ async function renderSplitRightMotionClip(
     true
   );
   if (g.glitch) throw new Error(`Split-screen right clip moves wrong (${g.what})`);
+  notePictureFlaws(jobId, scene, flaws, true);
   return url;
 }
 
@@ -18891,14 +18935,17 @@ function runVoiceTakeEdit(
  * A picture switch on a cutaway: put the chosen picture on the scene. Refused (not failed) when
  * the scene has no such picture, or has become a host beat.
  */
-function runPictureTakeEdit(
-  ctx: SceneEditContext,
+export function runPictureTakeEdit(
+  ctx: { jobId: number },
   scene: StoryboardScene,
   take: number
 ): void {
   const r = selectPictureTake(scene, take);
   if (!r.ok) throw new Error(r.reason);
   if (!r.changed) return;
+  // The take brings back what ITS picture shipped with (`pictureFlaws`): the job's line for this
+  // picture follows, so a switch to a clean take is not still warned about, nor a flawed one silent.
+  notePictureFlaws(ctx.jobId, scene, scene.pictureFlaws, false);
   // The finished film still has the other picture in it until it is re-stitched.
   scene.timingEdited = true;
   console.log(

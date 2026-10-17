@@ -1361,8 +1361,24 @@ describe("a picture never ships a known fault in silence (the audit, 2026-10-18)
   });
 
   it("the changed prompts name no channel's things", async () => {
-    const { THINGS_AT_REST_CLAUSE, PERSON_FREE_FALLBACK } = await import("./longformVideo");
-    for (const clause of [THINGS_AT_REST_CLAUSE, PERSON_FREE_FALLBACK])
-      expect(clause).not.toMatch(/table saw|oak|vise|sign|board|quilt|smoke alarm/i);
+    const { THINGS_AT_REST_CLAUSE, PERSON_FREE_FALLBACK, UNASKED_PRINT_CLAUSE } = await import("./longformVideo");
+    for (const clause of [THINGS_AT_REST_CLAUSE, PERSON_FREE_FALLBACK, UNASKED_PRINT_CLAUSE])
+      expect(clause).not.toMatch(/table saw|oak|vise|board|quilt|smoke alarm|house/i);
+  });
+
+  it("the at-rest redraw puts the TOOLS down, never what a picture shows lit, steaming or running", async () => {
+    // Rule (n): a main thing naturally used with a flame, steam or water is shown in use, and a
+    // self-moving shot's smoke moves by itself — "nothing in the frame is being used" put both out.
+    const { THINGS_AT_REST_CLAUSE } = await import("./longformVideo");
+    expect(THINGS_AT_REST_CLAUSE).toMatch(/\btool\b/i);
+    expect(THINGS_AT_REST_CLAUSE).not.toMatch(/nothing in the frame|being used|\bstill\b|unlit|no smoke|no steam/i);
+  });
+
+  it("343-17 the soft-print redraw of a plain picture asks for no print it never had", async () => {
+    const { softPrintRedraw, BLURRED_PRINT_CLAUSE, NO_READABLE_TEXT } = await import("./longformVideo");
+    const out = softPrintRedraw(`Carved wooden house sign with leaf design along its edge. ${NO_READABLE_TEXT}`);
+    expect(out).not.toContain(BLURRED_PRINT_CLAUSE); // "an engraved name … is there too, never left off"
+    expect(out).not.toMatch(/engrav|never left off/i);
+    expect(out).toContain("house sign");
   });
 });

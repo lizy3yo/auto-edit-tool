@@ -9748,7 +9748,9 @@ describe("a picture that ships with a fault says so, and two faults get one chan
     }) as any;
 
   it("job 343 scene 17: readable writing twice on a plain picture gets one draw with the print soft, from further back", async () => {
-    const { BLURRED_PRINT_CLAUSE, STEP_BACK_CLAUSE, NO_READABLE_TEXT } = await import("./longformVideo");
+    const { BLURRED_PRINT_CLAUSE, UNASKED_PRINT_CLAUSE, STEP_BACK_CLAUSE, NO_READABLE_TEXT } = await import(
+      "./longformVideo"
+    );
     const [a, b, c] = await Promise.all([pngOf("#911"), pngOf("#922"), pngOf("#2c2")]);
     checks({ writing: true, staged: true, what: "a name carved on it" }, { writing: true, what: "a name carved on it" });
     const genImage = drawsOf(a, b, c);
@@ -9756,7 +9758,9 @@ describe("a picture that ships with a fault says so, and two faults get one chan
     expect(genImage).toHaveBeenCalledTimes(3);
     const [p1, p2, p3] = genImage.mock.calls.map(c => c[0].prompt as string);
     expect(p2).toBe(p1);
-    expect(p3).toContain(BLURRED_PRINT_CLAUSE);
+    // the plain clause: print blurred, none asked for — the blurred-print one would carve a name on
+    expect(p3).toContain(UNASKED_PRINT_CLAUSE);
+    expect(p3).not.toContain(BLURRED_PRINT_CLAUSE);
     expect(p3).toContain(STEP_BACK_CLAUSE);
     expect(p3).not.toContain(NO_READABLE_TEXT);
     expect(p3).toContain("house sign"); // still the sign, never a picture without it
@@ -9977,6 +9981,57 @@ describe("notePictureFlaws — the scene and the job say what a picture shipped 
       "Scene 10: split panel shipped with its subject missing and a staged look — its redraws did not clear it",
     ]);
     clearJobWarnings(job);
+  });
+
+  it("a switch between picture takes brings the job's line for that picture with it", async () => {
+    const { runPictureTakeEdit, clearJobWarnings, jobProgress } = await import("./longformVideo");
+    const job = 990_031;
+    clearJobWarnings(job);
+    const warned = () => jobProgress(job, { scenesTotal: 1, scenesDone: 1 }).warnings ?? [];
+    const scene = {
+      index: 31,
+      clipUrls: ["new.mp4"],
+      clipUrl: "new.mp4",
+      pictureTakes: [
+        { clipUrls: ["old.mp4"], at: "2026-10-18T00:00:00Z", source: "original", pictureFlaws: ["writing"] },
+        { clipUrls: ["new.mp4"], at: "2026-10-18T01:00:00Z", source: "regenerate" },
+      ],
+      activePictureTake: 1,
+    } as any;
+    runPictureTakeEdit({ jobId: job }, scene, 0); // back to the old picture, which shipped with writing
+    expect(scene.pictureFlaws).toEqual(["writing"]);
+    expect(warned()).toEqual(["Scene 31: picture shipped with readable writing — its redraws did not clear it"]);
+    runPictureTakeEdit({ jobId: job }, scene, 0); // already showing it: nothing changes, nothing doubles
+    expect(warned()).toHaveLength(1);
+    runPictureTakeEdit({ jobId: job }, scene, 1); // the clean regenerate
+    expect(scene.pictureFlaws).toBeUndefined();
+    expect(warned()).toEqual([]);
+    clearJobWarnings(job);
+  });
+});
+
+describe("the soft-print redraw of a plain picture (R9, job 343 scene 17)", () => {
+  it("blurs whatever print comes back, from further back, and never asks for any", async () => {
+    const { softPrintRedraw, UNASKED_PRINT_CLAUSE, BLURRED_PRINT_CLAUSE, STEP_BACK_CLAUSE, NO_READABLE_TEXT } =
+      await import("./longformVideo");
+    const prompt = `A close-up of a carved wooden house sign leaning on the workbench. ${NO_READABLE_TEXT} Wide 16:9.`;
+    const out = softPrintRedraw(prompt);
+    expect(out).toContain("house sign");
+    expect(out).not.toContain("close-up of a carved"); // a close-up of print is drawn sharp
+    expect(out).toContain("arm's-length view of a carved");
+    expect(out).not.toContain(NO_READABLE_TEXT);
+    expect(out).toContain(UNASKED_PRINT_CLAUSE);
+    expect(out).not.toContain(BLURRED_PRINT_CLAUSE);
+    expect(out.split(STEP_BACK_CLAUSE).length - 1).toBe(1);
+    // the plain clause invents nothing: no engraving, no name, nothing "there too"
+    expect(UNASKED_PRINT_CLAUSE).not.toMatch(/engrav|carv|name|there too|never left off|visible/i);
+  });
+
+  it("a prompt without the no-writing rule still gets the plain clause, once", async () => {
+    const { softPrintRedraw, UNASKED_PRINT_CLAUSE, BLURRED_PRINT_CLAUSE } = await import("./longformVideo");
+    const out = softPrintRedraw("A cardboard box on a shelf.");
+    expect(out.split(UNASKED_PRINT_CLAUSE).length - 1).toBe(1);
+    expect(out).not.toContain(BLURRED_PRINT_CLAUSE);
   });
 });
 
