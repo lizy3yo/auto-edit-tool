@@ -350,6 +350,7 @@ import { steadyHostClip } from "./hostSteady";
 import {
   BODY_PART_WORDS,
   deriveHostLook,
+  facingTheCamera,
   hostLipsCut,
   looksCutOff,
   markHostBroll,
@@ -6629,8 +6630,13 @@ export function buildStillPrompt(
    */
   square = false
 ): string {
-  const angleSuffix = scene.showSubject
-    ? heroFramingClause(scene.showSubject)
+  // A host picture framed from the lips down (`hostLipsCut`) keeps none of its own words that turn
+  // the host away (`facingTheCamera`): a film drawn before the rule still says "face turned away".
+  const lipsCut = !aggressive && hostLipsCut(scene);
+  const facing = (t: string) => (lipsCut ? facingTheCamera(t) : t);
+  const shown = scene.showSubject ? facing(scene.showSubject) : undefined;
+  const angleSuffix = shown
+    ? heroFramingClause(shown)
     : scene.shotAngle && SHOT_ANGLE_SUFFIX[scene.shotAngle]
       ? `, ${SHOT_ANGLE_SUFFIX[scene.shotAngle]}`
       : "";
@@ -6642,15 +6648,17 @@ export function buildStillPrompt(
       : !aggressive && scene.humanPresent && scene.brollHostLook
         ? scene.hostFaceShown
           ? HOST_FACE_ONLY_SUFFIX
-          : hostLipsCut(scene)
+          : lipsCut
             ? HOST_LIPS_CUT_ONLY_SUFFIX
             : NO_OTHER_FIGURES_SUFFIX
         : NO_FIGURES_SUFFIX;
-  const visual = visualOverride
-    ? softenVisualPrompt(visualOverride)
-    : aggressive
-      ? aggressiveSoftenVisualPrompt(scene.visualPrompt)
-      : softenVisualPrompt(scene.visualPrompt);
+  const visual = facing(
+    visualOverride
+      ? softenVisualPrompt(visualOverride)
+      : aggressive
+        ? aggressiveSoftenVisualPrompt(scene.visualPrompt)
+        : softenVisualPrompt(scene.visualPrompt)
+  );
   const framing = square
     ? "Square 1:1 framing, the subject centered and filling the square frame."
     : "Wide 16:9 horizontal landscape framing.";
@@ -6666,7 +6674,7 @@ export function buildStillPrompt(
   // (`namedLook`) as it really looks, a selling screen as a plain buy-and-sell app, any other
   // screen as exactly what its own description says (`appScreenClause`).
   const app = screenPicture(visual) ? ` ${appScreenClause(scene, visual)}` : "";
-  const lead = !aggressive && !visualOverride ? subjectLead(scene.showSubject, visual) : "";
+  const lead = !aggressive && !visualOverride ? subjectLead(shown, visual) : "";
   const item = !visualOverride ? listItemClause(scene) : "";
   return withAllowedText(
     `${lead}${visual}${scrubLegibleWriting(namedLookClause(scene))}${item}${angleSuffix}${personSuffix}${memory}${app} ${amateurIphoneLook(subject, motion)} ${framing} ${noFigures} ${NO_BOOK_SUFFIX}`,
@@ -8680,11 +8688,13 @@ export function buildClipChain(
     : "";
   // The same person rule as the still (`buildStillPrompt`): someone else's picture never says
   // "no person is visible" beside the clause that draws them.
+  const lipsCut = !scene.hostPresent && hostLipsCut(scene);
+  const facing = (t: string) => (lipsCut ? facingTheCamera(t) : t);
   const clipNoFigures =
     !scene.hostPresent && scene.humanPresent && scene.otherPerson
       ? otherPeopleSuffix(scene.otherPeople)
       : !scene.hostPresent && scene.humanPresent && scene.brollHostLook
-        ? hostLipsCut(scene)
+        ? lipsCut
           ? HOST_LIPS_CUT_ONLY_SUFFIX
           : NO_OTHER_FIGURES_SUFFIX
         : NO_FIGURES_SUFFIX;
@@ -8692,7 +8702,7 @@ export function buildClipChain(
   // rather than relying on Claude's implicit framing choices.
   const angleSuffix =
     !scene.hostPresent && scene.showSubject
-      ? heroFramingClause(scene.showSubject)
+      ? heroFramingClause(facing(scene.showSubject))
       : !scene.hostPresent && scene.shotAngle && SHOT_ANGLE_SUFFIX[scene.shotAngle]
         ? `, ${SHOT_ANGLE_SUFFIX[scene.shotAngle]}`
         : "";
@@ -8712,7 +8722,7 @@ export function buildClipChain(
     ? `${scene.visualPrompt} ${TALKING_HEAD_BACKGROUND}${
         scene.cta ? ` ${CTA_EMPTY_HANDS_SUFFIX}` : ""
       } ${NO_OVERLAY_TEXT_SUFFIX}`
-    : `${softenVisualPrompt(scene.visualPrompt)}${angleSuffix}${peopleSuffix} ${amateurIphoneLook(params.videoSubject, brollLookMotion(scene))} ${clipNoFigures} ${NO_BOOK_SUFFIX}`;
+    : `${facing(softenVisualPrompt(scene.visualPrompt))}${angleSuffix}${peopleSuffix} ${amateurIphoneLook(params.videoSubject, brollLookMotion(scene))} ${clipNoFigures} ${NO_BOOK_SUFFIX}`;
 
   // `humanPresent` b-roll carries no ref image HERE — the hands are described by the prompt
   // (ANON_PERSON_SUFFIX + PERSON_MOTION_CAMERA_CLAUSE) and the only image it ever gets is the

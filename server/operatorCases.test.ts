@@ -1295,7 +1295,36 @@ describe("a line about the chin shows the chin, framed from the lips down (the a
       expect(scenes[0].brollHostLook, line).toBe(LOOK);
       expect(hostLipsCut(scenes[0]), line).toBe(true);
       expect(buildStillPrompt(scenes[0])).toContain(HOST_LIPS_CUT_CLAUSE);
+      // The description no longer asks for the opposite framing — the picture check reads it too.
+      expect(scenes[0].showSubject).not.toMatch(/turned away/);
+      expect(buildStillPrompt(scenes[0])).not.toMatch(/face turned away/);
     }
+  });
+
+  it("job 395 scene 25 on a film drawn before the rule: its stored 'face turned away' never reaches the prompt", () => {
+    const stored = pic(
+      25,
+      "The eye reads it together with the soft shadows under the chin, and the face looks tired.",
+      "woman wearing dark beaded necklace at collarbone, soft shadow under the chin above the dark beads, face turned away",
+      {
+        humanPresent: true,
+        brollHostLook: LOOK,
+        brollHostRef: "https://x/host.png",
+        visualPrompt: "A woman seen from behind wearing a dark beaded necklace at the collarbone, face turned away from the camera.",
+      }
+    );
+    const still = buildStillPrompt(stored);
+    expect(still).toContain(HOST_LIPS_CUT_CLAUSE);
+    expect(still).not.toMatch(/face turned away|woman seen from behind/);
+    const clip = buildClipChain(stored, { script: "x", lockMode: "ingredients", channelKey: "demo", voiceId: "v1" })[0].prompt;
+    expect(clip).not.toMatch(/face turned away|woman seen from behind/);
+    // Any other host picture keeps its own words.
+    const other = pic(3, "Sand with the grain, never across it.", "host seen from behind sanding a board", {
+      humanPresent: true,
+      brollHostLook: LOOK,
+      brollHostRef: "https://x/host.png",
+    });
+    expect(buildStillPrompt(other)).toMatch(/seen from behind sanding/);
   });
 
   it("job 223 scene 5: the pendant drawn on a dressing table under 'your jawline down with it' is worn by the host", () => {

@@ -710,20 +710,22 @@ export function withoutFaceAsks(text: string): string {
  * the look the line talks about sits on the chin and neck, which the host rule can show without a
  * face: the body facing the camera, the frame cut at the lips (`hostLipsCut`).
  * The neck needs "your" or "my" (the neck of a drawstring bag, the side of a dog's neck), a jaw
- * counts only as a jawline (a vise has jaws), and sayings never count. Pure.
+ * counts only as a jawline (a vise has jaws), "near the face" never as the face OF something (a
+ * board's face, a face frame), and sayings never count ("in my neck of the woods", "a pain in the
+ * neck"). Pure.
  */
 const CHIN_LINE =
-  /\b(?:(?:your|my|the)\s+chins?|(?:your|my)\s+necks?|jawlines?|collarbones?|near\s+(?:your|my|the)\s+face)\b/i;
+  /\b(?:(?:your|my|the)\s+chins?|(?:your|my)\s+necks?|jawlines?|collarbones?|near\s+(?:your|my|the)\s+face(?![\s-]+(?:of|edges?|frames?|grain|sides?|boards?|plates?|veneer|joints?|down|up)\b))\b/i;
 /** Words that name the chin or neck and mean something else ("keep your chin up", "the back of your neck"). */
 const CHIN_SAYINGS =
-  /\b(?:keep(?:s|ing)?|kept)\s+(?:your|my|the)\s+chins?\s+up\b|\bchins?[\s-]+(?:straps?|rests?|guards?|bars?|ups?|length)\b|\b(?:take|takes|took|taking|taken)\s+(?:it|that|this|one)\s+on\s+the\s+chin\b|\b(?:back|nape)\s+of\s+(?:your|my|the)\s+necks?\b|\b(?:stick|sticks|sticking|stuck|risk(?:s|ing|ed)?|sav(?:e|es|ing|ed)|break(?:s|ing)?|broke|wring)\s+(?:your|my)\s+necks?\b|\b(?:down|up\s+to)\s+(?:your|my)\s+necks?\b|\b(?:broke|broken|break(?:s|ing)?|fractur(?:e|ed|es|ing)|crack(?:ed|s)?)\s+(?:(?:a|my|your|the)\s+)?collarbones?\b/gi;
+  /\b(?:keep(?:s|ing)?|kept)\s+(?:your|my|the)\s+chins?\s+up\b|\bchins?[\s-]+(?:straps?|rests?|guards?|bars?|ups?|length)\b|\b(?:take|takes|took|taking|taken)\s+(?:it|that|this|one)\s+on\s+the\s+chin\b|\b(?:back|nape)\s+of\s+(?:your|my|the)\s+necks?\b|\bnecks?\s+of\s+the\s+woods\b|\b(?:pain|crick|kink)s?\s+in\s+(?:your|my|the)\s+necks?\b|\bbreath(?:e|es|ing)?\s+down\s+(?:your|my)\s+necks?\b|\b(?:stick|sticks|sticking|stuck|risk(?:s|ing|ed)?|sav(?:e|es|ing|ed)|break(?:s|ing)?|broke|wring)\s+(?:your|my)\s+necks?\b|\b(?:down|up\s+to)\s+(?:your|my)\s+necks?\b|\b(?:broke|broken|break(?:s|ing)?|fractur(?:e|ed|es|ing)|crack(?:ed|s)?)\s+(?:(?:a|my|your|the)\s+)?collarbones?\b/gi;
 /**
  * A line that COUNTS several things is an overview — its picture shows them all, laid out (job 223
  * scene 8, "Three necklaces today that read expensive…"), never one of them worn. A measure ("two
  * inches lower") or a count of ideas ("two things") is not one.
  */
 const COUNTS_THINGS =
-  /\b(?:two|three|four|five|six|seven|eight|nine|ten|several)\s+(?:[a-z'-]+\s+)?(?!(?:inch(?:es)?|feet|foot|seconds?|minutes?|hours?|days?|weeks?|months?|years?|times|percent|quarters|halves|thirds|dollars?|cents?|pounds?|ounces?|miles?|things|ways|rules|steps|tips|reasons|mistakes|questions|points|parts)\b)[a-z]{3,}s\b/i;
+  /\b(?:two|three|four|five|six|seven|eight|nine|ten|several)\s+(?:[a-z'-]+\s+)?(?!(?:inch(?:es)?|feet|foot|seconds?|minutes?|hours?|days?|weeks?|months?|years?|times|percent|quarters|halves|thirds|dollars?|cents?|pounds?|ounces?|miles?|hands|fingers|things|ways|rules|steps|tips|reasons|mistakes|questions|points|parts)\b)[a-z]{3,}s\b/i;
 
 /** Whether a line is about the chin, jaw or neck (see `CHIN_LINE`). Pure. */
 export function looksAtChinLine(line: string | undefined): boolean {
@@ -762,11 +764,16 @@ export function hostLipsCut(scene: StoryboardScene): boolean {
 /** Something worn at the neck: what a chin line's picture shows on the person. */
 const NECK_PIECE =
   /\b(?:necklaces?|pendants?|chokers?|lockets?|chains?|pearls?|beads?|scarf|scarves|neckerchiefs?)\b/i;
+/** A neck piece on a display stand: the one place a piece that is already worn is taken off. */
+const ON_A_STAND = String.raw`,?\s*\b(?:on|over)\s+(?:(?:a|an|the)\s+)?(?:dress form|mannequin|necklace stand|jewel(?:le)?ry stand|display stand|display bust)\b[^,.;]*`;
 /** A neck piece set down — on a table, in a box, over a mirror, on a stand — rather than worn. */
-const SET_DOWN_SOURCE = String.raw`,?\s*\b(?:draped|laid|lying|lies|resting|rests|displayed|arranged|spread|coiled|placed|sitting|sits|hanging|hangs|propped|tucked)\s+(?:out\s+|flat\s+)?(?:over|across|on|onto|in|inside|along|atop)\s+(?![^,.;]*\b(?:chest|neck|collarbones?|skin|throat|shoulders?|body|hands?|palms?|fingers?|sweater|crewneck|turtleneck|blouse|shirt|neckline|dress(?!\s+form))\b)[^,.;]+|,?\s*\b(?:on|over)\s+(?:(?:a|an|the)\s+)?(?:dress form|mannequin|necklace stand|jewel(?:le)?ry stand|display stand|display bust)\b[^,.;]*|,?\s*\b(?:on|onto|in|inside|atop)\s+(?:a|an|the|its)\s+${MODIFIER_WORD}{0,3}(?:tables?|tabletops?|dressers?|vanit(?:y|ies)|nightstands?|desks?|counters?|countertops?|shelf|shelves|trays?|dish(?:es)?|box(?:es)?|drawers?|rugs?|cloths?|towels?|velvet|linings?|cushions?|pillows?|beds?|bedspreads?|surfaces?|mats?)\b[^,.;]*`;
-/** Words saying the piece is already on someone ("worn at the collarbone", "on the chest"). */
+const SET_DOWN_SOURCE = String.raw`,?\s*\b(?:draped|laid|lying|lies|resting|rests|displayed|arranged|spread|coiled|placed|sitting|sits|hanging|hangs|propped|tucked)\s+(?:out\s+|flat\s+)?(?:over|across|on|onto|in|inside|along|atop)\s+(?![^,.;]*\b(?:chest|neck|collarbones?|skin|throat|shoulders?|body|hands?|palms?|fingers?|sweater|crewneck|turtleneck|blouse|shirt|neckline|dress(?!\s+form))\b)[^,.;]+|${ON_A_STAND}|,?\s*\b(?:on|onto|in|inside|atop)\s+(?:a|an|the|its)\s+${MODIFIER_WORD}{0,3}(?:tables?|tabletops?|dressers?|vanit(?:y|ies)|nightstands?|desks?|counters?|countertops?|shelf|shelves|trays?|dish(?:es)?|box(?:es)?|drawers?|rugs?|cloths?|towels?|velvet|linings?|cushions?|pillows?|beds?|bedspreads?|surfaces?|mats?)\b[^,.;]*`;
+/**
+ * Words saying the piece is already on someone ("worn at the collarbone", "on the chest"). "Host" or
+ * "woman" alone is not one: "the host's pearl necklace laid on the dresser" is set down.
+ */
 const ON_A_PERSON = new RegExp(
-  `${WORN_ON_BODY.source}|\\b(?:worn|wearing|host|woman|collarbones?|neck|chest|chin|jawline|throat)\\b`,
+  `${WORN_ON_BODY.source}|\\b(?:worn|wearing|collarbones?|neck|chest|chin|jawline|throat)\\b`,
   "i"
 );
 /** What `wornAtTheNeck` adds (and how it knows it already has). */
@@ -780,21 +787,64 @@ const HAND_ON_IT =
  * "and your jawline down with it", drew the pendant draped over a dressing table, and job 392 scene
  * 23 a host picture of the dark beads "laid on the soft cloth surface". The look the line is about is
  * the piece AT THE NECK, so where it was set down is taken out and it is worn — and the picture check,
- * which holds the frame to these words, then asks for that. Unchanged when no neck piece is named, a
- * hand is on it, or it is already worn. Pure.
+ * which holds the frame to these words, then asks for that. Unchanged when no neck piece is named or
+ * a hand is on it. A piece already worn loses only a display stand (job 364 scene 22, "worn at
+ * collarbone on dress form"): the chair, the bed or the dresser in the room is its setting. Pure.
  */
 export function wornAtTheNeck(text: string): string {
   if (!NECK_PIECE.test(text) || HAND_ON_IT.test(text) || text.includes(WORN_TAIL)) return text;
-  const setDown = new RegExp(SET_DOWN_SOURCE, "i").test(text);
-  if (!setDown && ON_A_PERSON.test(text)) return text;
+  const worn = ON_A_PERSON.test(text);
+  if (worn && !new RegExp(ON_A_STAND, "i").test(text)) return text;
   const out = text
-    .replace(new RegExp(SET_DOWN_SOURCE, "gi"), "")
+    .replace(new RegExp(worn ? ON_A_STAND : SET_DOWN_SOURCE, "gi"), "")
     .replace(/\s{2,}/g, " ")
     .replace(/\s+([,.])/g, "$1")
     .replace(/,\s*,/g, ",")
     .trim()
     .replace(/[.,;]?\s*$/, "");
-  return ON_A_PERSON.test(out) ? `${out}.` : `${out}, ${WORN_TAIL} — never set down.`;
+  return worn || ON_A_PERSON.test(out) ? `${out}.` : `${out}, ${WORN_TAIL} — never set down.`;
+}
+
+/**
+ * A view that turns the host AWAY — from behind, from the side, over the shoulder, the face or head
+ * turned away, the back to the camera — the opposite of the lips-cut framing. The shot list is told
+ * to draw the host that way ("seen from behind or from the side … face turned away"), so a chin
+ * line's description carries it (job 395 scene 25: "woman wearing dark beaded necklace at
+ * collarbone, soft shadow under the chin above the dark beads, face turned away"), and beside
+ * `HOST_LIPS_CUT_CLAUSE` the prompt would ask for both. Light from behind or the side is light, not
+ * a view, and "the face out of frame" agrees with a frame cut at the lips.
+ */
+const NOT_LIGHT = String.raw`(?<!\b(?:light|lit|lighting|glow|sun|sunlight|daylight|window|lamp|backlit|coming|falling|streaming|shining)\s)`;
+const TURNED_AWAY = new RegExp(
+  String.raw`,?\s*(?:and\s+)?(?:` +
+    [
+      String.raw`(?:(?:the|her|his|their)\s+)?(?:face|head)\s+(?:turned|angled|looking|facing)\s+away(?:\s+from\s+(?:the\s+)?(?:camera|lens|viewer))?`,
+      String.raw`(?:with\s+)?(?:(?:her|his|their|the)\s+)?back\s+(?:turned\s+)?to\s+(?:the\s+)?(?:camera|lens|viewer)`,
+      String.raw`turned\s+away(?:\s+from\s+(?:the\s+)?(?:camera|lens|viewer))?`,
+      String.raw`(?:an?\s+)?over[- ]the[- ]shoulder(?:\s+(?:view|shot|angle)(?:\s+of)?)?`,
+      String.raw`(?:(?:seen|shot|viewed|photographed|framed|shown)\s+(?:from\s+)?|from\s+)over\s+(?:the|her|his|their)\s+shoulder`,
+      String.raw`${NOT_LIGHT}(?:(?:seen|shot|viewed|photographed|framed|shown)\s+)?from\s+(?:behind|the\s+rear|the\s+back(?!\s+of\b)|the\s+side(?!\s+of\b))`,
+      String.raw`(?:(?:seen|shot|viewed|photographed|framed|shown)\s+)?in\s+profile`,
+      String.raw`(?:an?\s+)?side\s+view(?:\s+of)?`,
+    ].join("|") +
+    String.raw`)\b`,
+  "gi"
+);
+
+/**
+ * A lips-cut host picture's description with every view that turns the host away taken out, and a
+ * "from the chin down" framing (`withoutFaceAsks`) moved up to the lips — so the description and
+ * `HOST_LIPS_CUT_CLAUSE` ask for the same picture. Pure.
+ */
+export function facingTheCamera(text: string): string {
+  return text
+    .replace(TURNED_AWAY, "")
+    .replace(/\bframed\s+from\s+the\s+chin\s+down\b/gi, "framed from the lips down")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+([,.])/g, "$1")
+    .replace(/,\s*,/g, ",")
+    .replace(/^\s*,\s*/, "")
+    .trim();
 }
 
 /**
@@ -872,11 +922,12 @@ export function markHostBroll(
       // cannot be shown with the face turned away (the operator, 2026-10-15). Everything else keeps
       // the face out of the picture, as before.
       s.hostFaceShown = FACE_ROUTINE.test(`${s.showSubject ?? ""} ${s.visualPrompt ?? ""}`) || undefined;
-      // A chin line's picture is framed from the lips down (`hostLipsCut`), with the piece worn.
+      // A chin line's picture is framed from the lips down (`hostLipsCut`), facing the camera, with
+      // the piece worn.
       const chin = !s.hostFaceShown && chinFramed(s);
       const tidy = (t: string) => {
         const out = s.hostFaceShown ? withoutMirrors(t) : withoutFaceAsks(withoutMirrors(t));
-        return chin ? wornAtTheNeck(out) : out;
+        return chin ? wornAtTheNeck(facingTheCamera(out)) : out;
       };
       if (s.showSubject) s.showSubject = tidy(s.showSubject);
       if (s.visualPrompt) s.visualPrompt = tidy(s.visualPrompt);

@@ -149,9 +149,19 @@ describe("a line about the chin, jaw or neck (the audit, 2026-10-18)", () => {
       "Dry the hair at the nape of your neck first.",
       "Tighten the vise until the jaws grip the board.",
       "Buckle your chin strap before you ride.",
+      "I've sold more of these in my neck of the woods than anywhere else.",
+      "Sanding that edge by hand was a real pain in my neck.",
+      "The buyer was breathing down my neck about the date.",
+      "Clamp a scrap near the face of the board so it won't tear out.",
+      "Keep the bit near the face edge, never the end grain.",
       "", undefined,
     ])
       expect(looksAtChinLine(line), String(line)).toBe(false);
+  });
+
+  it("counts hands and fingers as no overview", async () => {
+    const { looksAtChinLine } = await import("./hostLook");
+    expect(looksAtChinLine("Hold it with two hands right under your chin and look at the light.")).toBe(true);
   });
 
   it("an overview that counts the pieces is not one, a measure is (job 223 scene 8 vs job 244 scene 3)", async () => {
@@ -201,6 +211,40 @@ describe("a line about the chin, jaw or neck (the audit, 2026-10-18)", () => {
       expect(wornAtTheNeck(as), as).toBe(as);
     const once = wornAtTheNeck("a pearl strand resting inside the open jewelry box");
     expect(wornAtTheNeck(once)).toBe(once);
+  });
+
+  it("a worn piece keeps its room, and 'the host's' alone does not mean worn", async () => {
+    const { wornAtTheNeck } = await import("./hostLook");
+    for (const as of [
+      "host wearing a pearl strand, a jewelry box open on the dresser beside her",
+      "a pearl strand at her collarbone, the host sitting on the edge of the bed",
+    ])
+      expect(wornAtTheNeck(as), as).toBe(as);
+    expect(wornAtTheNeck("the host's pearl necklace laid on the dresser")).toBe(
+      "the host's pearl necklace, worn at the host's own neck, the chin and jaw in view above it — never set down."
+    );
+  });
+
+  it("takes out every view that turns the host away, and nothing else (job 395 scene 25)", async () => {
+    const { facingTheCamera } = await import("./hostLook");
+    expect(
+      facingTheCamera(
+        "woman wearing dark beaded necklace at collarbone, soft shadow under the chin above the dark beads, face turned away"
+      )
+    ).toBe("woman wearing dark beaded necklace at collarbone, soft shadow under the chin above the dark beads");
+    expect(facingTheCamera("host from behind, a pearl strand at her collarbone")).toBe("host, a pearl strand at her collarbone");
+    expect(facingTheCamera("the host seen from the side, a gold chain under her chin")).toBe("the host, a gold chain under her chin");
+    expect(facingTheCamera("the host with her back to the camera, a pendant at her neck")).toBe("the host, a pendant at her neck");
+    expect(facingTheCamera("an over-the-shoulder view of the host fastening a pearl strand")).toBe("the host fastening a pearl strand");
+    expect(facingTheCamera("a gold chain at the throat, framed from the chin down")).toBe("a gold chain at the throat, framed from the lips down");
+    for (const as of [
+      "pearl strand at her collarbone, window light from behind",
+      "a pearl strand at her collarbone, lit from the side",
+      "a silk scarf draped over her shoulder, knotted at the neck",
+      "a gold chain at the throat, the face out of frame",
+      "a pearl strand at the collarbone, the box pulled from the back of the drawer",
+    ])
+      expect(facingTheCamera(as), as).toBe(as);
   });
 
   it("never lets a mirror take the chest with it (job 223 scene 4)", async () => {
