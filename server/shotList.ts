@@ -892,7 +892,8 @@ export const SHOWS_SCREEN =
  * item squeezed to a blink), whose own picture the join would lose
  * (Dale's job 293: a 1 s "Today I'm ranking" folded into "Etsy," and Etsy's picture was gone).
  * Every step that folds a too-short piece into a neighbour asks this — the shot list's settle, the
- * pause-snap fold and the plan gate. Pure.
+ * pause-snap fold and the plan gate. The one way in: a lead-in BETWEEN two items is said at the head
+ * of the item after it, which keeps its own picture (`leadIntoItem`). Pure.
  */
 export const mergeable = (
   n: StoryboardScene | undefined,
@@ -2528,7 +2529,16 @@ export function foldSnappedFlashes(
           : fits(next, false)
             ? i + 1
             : -1;
-    if (into < 0) continue;
+    if (into < 0) {
+      // Between two list items neither neighbour takes it — but the item after it can lead with it
+      // and keep its own picture (`leadIntoItem`).
+      if (leadInBetweenItems(out, i)) {
+        out.splice(i, 2, leadIntoItem(s, out[i + 1]));
+        changed = true;
+        i = Math.max(-1, i - 1);
+      }
+      continue;
+    }
     const [a, b] = into < i ? [out[into], s] : [s, out[into]];
     out.splice(Math.min(i, into), 2, joinPieces(a, b, sec(a), sec(b)));
     changed = true;
@@ -2536,4 +2546,155 @@ export function foldSnappedFlashes(
   }
   out.forEach((s, k) => (s.index = k + 1));
   return { scenes: out, changed };
+}
+
+/** The CTA's fixed frames: the big QR, the book cover, an operator's asset. Never folded, never a fold's target. */
+const fixedFrame = (s: StoryboardScene | undefined) =>
+  !!s && (!!s.qrHero || !!s.coverHero || !!s.assetImageUrl);
+
+/** Two beats on the same side of every CTA edge (a fold never carries words across one). */
+const sameSide = (a: StoryboardScene, b: StoryboardScene) =>
+  (a.cta === true) === (b.cta === true) && a.ctaIndex === b.ctaIndex;
+
+/**
+ * A short lead-in BETWEEN two items of a spoken list: "So tonight," | "If" | "Then" between one item
+ * and the next (production job 200 #184, "So tonight," 0.80 s before "walk over to that front door,";
+ * of the 16 sub-second non-list pictures in the audit's production snapshot, 14 sat strictly between
+ * two items). Nothing may be merged INTO a list item (`mergeable` — the joined piece would lose the
+ * item's picture), so the folds left it as a sub-second picture of its own. Only BETWEEN two items:
+ * a lead-in before a list's first item still joins the picture before it (Dale's job 293, "Today
+ * I'm ranking"). The caller decides it is under its floor. Pure.
+ */
+export function leadInBetweenItems(scenes: StoryboardScene[], i: number): boolean {
+  const s = scenes[i];
+  const item = (n: StoryboardScene | undefined) =>
+    !!n && !!n.listCut && !n.hostPresent && !fixedFrame(n);
+  return (
+    !!s &&
+    !s.hostPresent &&
+    !s.listCut &&
+    !fixedFrame(s) &&
+    item(scenes[i - 1]) &&
+    item(scenes[i + 1]) &&
+    sameSide(s, scenes[i + 1])
+  );
+}
+
+/**
+ * The lead-in spoken at the head of the item after it: the item keeps its OWN picture, subject and
+ * list mark — never `joinPieces`' longer-wins rule, under which a 0.8 s lead-in in front of a 0.5 s
+ * item would take the item's picture (the Dale job 293 failure again). The words lead into the item
+ * ("So tonight, walk over to that front door,"), so its picture arrives with them. Pure.
+ */
+export function leadIntoItem(lead: StoryboardScene, item: StoryboardScene): StoryboardScene {
+  const text = `${(lead.scriptText ?? "").trim()} ${(item.scriptText ?? "").trim()}`.trim();
+  return {
+    ...item,
+    ...FRESH,
+    scriptText: text,
+    narration: firstWords(text, 8),
+    listCut: true,
+  } as StoryboardScene;
+}
+
+/**
+ * A beat the voice gives NO time at all: its range is measured and is this long or shorter. The
+ * aligner allows a scene whose end equals its start when the transcript hears its words inside a
+ * neighbour's — a repeated word heard once (production job 236 #79-#81: "teakettle," "teakettle,"
+ * "teakettle." each 0.000 s), a digit group, a word the transcriber dropped — and every guard after
+ * it skipped zero as "not measured yet", so the paid picture played as one frame.
+ */
+export const UNSEEN_BEAT_SEC = 0.01;
+
+/** A beat's length on the master narration's clock, or undefined while it has no range. Pure. */
+export const rangeSec = (s: StoryboardScene): number | undefined =>
+  Number.isFinite(s.narrationStartSec) && Number.isFinite(s.narrationEndSec)
+    ? (s.narrationEndSec as number) - (s.narrationStartSec as number)
+    : undefined;
+
+const wordSet = (t: string | undefined) => new Set(tokenSpans(t ?? "").map(x => x.tok));
+
+/**
+ * Where an unseen beat's words go: a neighbour saying the SAME words first (the repeat the
+ * transcript heard once — production job 215: "piano," 0.054 s then "piano," 0.000 s), else the
+ * neighbour of its own kind before it (a picture or list item for a picture, a host take for a host
+ * take), else the one after, else the other kind, else any neighbour (a lead-in between two items
+ * leads into the one after). Never a QR, cover or asset beat, never the QR block's release beat (its
+ * last words pin the block's end on the voice), and never across a CTA edge. The target keeps its
+ * own picture, so a list item may take it. -1 when nothing may. Pure.
+ */
+export function unseenFoldTarget(scenes: StoryboardScene[], i: number): number {
+  const s = scenes[i];
+  if (!s || fixedFrame(s)) return -1;
+  const can = (n: StoryboardScene | undefined): n is StoryboardScene =>
+    !!n && !fixedFrame(n) && !n.qrTail && sameSide(s, n);
+  const own = wordSet(s.scriptText ?? s.narration);
+  const same = (n: StoryboardScene | undefined) => {
+    if (!can(n) || !own.size) return false;
+    const theirs = wordSet(n.scriptText ?? n.narration);
+    return theirs.size === own.size && Array.from(own).every(t => theirs.has(t));
+  };
+  // A picture is joined into the way every fold joins one (`mergeable`); a host take always may be.
+  const takes = (n: StoryboardScene) => !!n.hostPresent || mergeable(n, s);
+  const ownKind = (n: StoryboardScene | undefined) =>
+    can(n) && !!n.hostPresent === !!s.hostPresent && takes(n);
+  const otherKind = (n: StoryboardScene | undefined) =>
+    can(n) && !!n.hostPresent !== !!s.hostPresent && takes(n);
+  const order: [(n: StoryboardScene | undefined) => boolean, number][] = [
+    [same, -1],
+    [same, 1],
+    [ownKind, -1],
+    [ownKind, 1],
+    [otherKind, -1],
+    [otherKind, 1],
+    [can, 1],
+    [can, -1],
+  ];
+  for (const [ok, d] of order) if (ok(scenes[i + d])) return i + d;
+  return -1;
+}
+
+/**
+ * EVERY BEAT CAN BE SEEN (2026-10-18, the audit's production snapshot: 11 beats of 0.000 s in 6
+ * jobs, 9 of them list items). A beat whose measured length is `UNSEEN_BEAT_SEC` or less has its
+ * words joined into a neighbour (`unseenFoldTarget`), which keeps its own picture, list mark and
+ * timing — those words had no time of their own, so nothing seen changes and a picture nobody would
+ * see is not paid for. A host take that takes an unseen host beat keeps its intro/anchor roles.
+ * `measured` is the beat's length, or undefined while it has none (a piece just joined): only a
+ * MEASURED zero is folded. Run on the final lengths at voicing; `unplaced` are the unseen beats left
+ * (a QR, cover or asset beat, or one with no neighbour that may take it) — the plan gate names them
+ * on the job. Pure — returns a new list, renumbered.
+ */
+export function foldUnseenBeats(
+  scenes: StoryboardScene[],
+  measured: (s: StoryboardScene) => number | undefined
+): { scenes: StoryboardScene[]; changed: boolean; joined: number; unplaced: StoryboardScene[] } {
+  const out = [...scenes];
+  const unseen = (s: StoryboardScene) => {
+    const m = measured(s);
+    return m != null && m <= UNSEEN_BEAT_SEC;
+  };
+  let joined = 0;
+  for (let i = 0; i < out.length; i++) {
+    const s = out[i];
+    if (!unseen(s)) continue;
+    const into = unseenFoldTarget(out, i);
+    if (into < 0) continue;
+    const t = out[into];
+    const [a, b] = into < i ? [t, s] : [s, t];
+    const text = `${(a.scriptText ?? "").trim()} ${(b.scriptText ?? "").trim()}`.trim();
+    const host = !!t.hostPresent;
+    out.splice(Math.min(i, into), 2, {
+      ...t,
+      scriptText: text,
+      narration: firstWords(text, 8),
+      hostIntro: t.hostIntro || (host && s.hostIntro) || undefined,
+      hostProtected: t.hostProtected || (host && s.hostProtected) || undefined,
+    } as StoryboardScene);
+    joined++;
+    // Looked at again: the same-words neighbour may have had no time either (two of three repeats).
+    i = Math.max(-1, Math.min(i, into) - 1);
+  }
+  out.forEach((s, k) => (s.index = k + 1));
+  return { scenes: out, changed: joined > 0, joined, unplaced: out.filter(unseen) };
 }

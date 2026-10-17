@@ -30,6 +30,7 @@ import {
   atWork,
   CONTINUITY_SYSTEM,
   foldSnappedFlashes,
+  foldUnseenBeats,
   joinShortSplits,
   otherPersonOf,
   parseContextGroups,
@@ -207,6 +208,37 @@ describe("lists (Ruth's job 281, Hank's job 275, Dale's jobs 292-293)", () => {
     const secs = new Map([[scenes[0], 4], [scenes[1], 1], [scenes[2], 0.33]]);
     const r = foldSnappedFlashes(scenes, s => secs.get(s) ?? 5);
     expect(r.scenes.find(s => s.scriptText === "Etsy,")?.listCut).toBe(true);
+  });
+
+  it("the audit's production job 200 #184: a lead-in BETWEEN two items leads into the next one, which keeps its picture", () => {
+    const scenes = [
+      pic(1, "check the lock on the back window,", "a window latch", { wordCut: true, listCut: true }),
+      pic(2, "So tonight,", "a dark porch", { wordCut: true }),
+      pic(3, "walk over to that front door,", "a front door from the hallway", { wordCut: true, listCut: true }),
+    ];
+    const secs = new Map([[scenes[0], 2.1], [scenes[1], 0.8], [scenes[2], 1.6]]);
+    const r = foldSnappedFlashes(scenes, s => secs.get(s) ?? 5);
+    expect(r.scenes.map(s => [s.scriptText, s.showSubject, !!s.listCut])).toEqual([
+      ["check the lock on the back window,", "a window latch", true],
+      ["So tonight, walk over to that front door,", "a front door from the hallway", true],
+    ]);
+  });
+
+  it("the audit's production job 236 #79-#81: a word said three times and heard once is one item, never two unseen ones", () => {
+    const wren = "a wren with its beak wide open on the fence post";
+    const scenes = [
+      pic(1, "which birders remember as", "a wren on a fence", { audioDuration: 3.9 }),
+      pic(2, "teakettle,", wren, { listCut: true, audioDuration: 0 }),
+      pic(3, "teakettle,", wren, { listCut: true, audioDuration: 0 }),
+      pic(4, "teakettle.", wren, { listCut: true, audioDuration: 1.3 }),
+      pic(5, "If you hear that by the feeder, you know who it is.", "a feeder", { audioDuration: 5.6 }),
+    ];
+    const r = foldUnseenBeats(scenes, s => s.audioDuration);
+    expect(r.scenes.map(s => [s.scriptText, s.audioDuration])).toEqual([
+      ["which birders remember as", 3.9],
+      ["teakettle, teakettle, teakettle.", 1.3],
+      ["If you hear that by the feeder, you know who it is.", 5.6],
+    ]);
   });
 
   it("Dale: the pause-snap never takes a one-word item's word away", () => {

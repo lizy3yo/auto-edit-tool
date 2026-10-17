@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { StoryboardScene } from "@shared/types";
+import { assignSceneRanges } from "./narrationAlignment";
 import {
   applyShotPlan,
   foldSnappedFlashes,
+  foldUnseenBeats,
+  leadInBetweenItems,
+  UNSEEN_BEAT_SEC,
   joinHookPictures,
   joinSameContext,
   applyContextGroups,
@@ -1488,10 +1492,170 @@ describe("a short piece is never merged into a list item (Dale's job 293)", () =
       ["craft fairs,", true],
     ]);
   });
-  it("leaves a flash alone when its only neighbours are list items", async () => {
+  it("a flash between two list items leads into the item after it, which keeps its own picture", async () => {
+    // Nothing is merged INTO an item by the longer-wins join (it was left as a 0.3 s picture until
+    // 2026-10-18); the item after it now says it first, with its own picture and list mark.
     const { foldSnappedFlashes } = await import("./shotList");
     const scenes = [p(1, "a saw,", { listCut: true }), p(2, "and", {}), p(3, "a drill,", { listCut: true })];
     const r = foldSnappedFlashes(scenes, s => (s.listCut ? 0.6 : 0.3));
+    expect(r.scenes.map(s => [s.scriptText, s.showSubject, !!s.listCut])).toEqual([
+      ["a saw,", "picture 1", true],
+      ["and a drill,", "picture 3", true],
+    ]);
+  });
+});
+
+describe("every beat can be seen (the audit's production snapshot, 2026-10-18)", () => {
+  /** Words laid end to end from `t0`, one every `per` seconds, as the transcriber returns them. */
+  const spoken = (text: string, t0: number, per = 0.32) =>
+    text
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((word, k) => ({ word, start: t0 + k * per, end: t0 + k * per + per - 0.04 }));
+  const item = (index: number, text: string, subject: string) =>
+    scene(index, text, { listCut: true, wordCut: true, showSubject: subject, visualPrompt: subject });
+
+  it("production job 236 #79-#81: a word said three times and heard once is ONE item, not two unseen ones", () => {
+    const intro = "the wren sings three times in a row which birders remember as";
+    const scenes = [
+      scene(1, "Out back the loudest bird in the yard is the Carolina wren and"),
+      scene(2, intro),
+      item(3, "teakettle,", "a wren with its beak wide open on the fence post"),
+      item(4, "teakettle,", "a wren with its beak wide open on the fence post"),
+      item(5, "teakettle.", "a wren with its beak wide open on the fence post"),
+      scene(6, "If you hear that by the feeder you know who it is and you can stop looking for it."),
+    ];
+    const words = [
+      ...spoken("Out back the loudest bird in the yard is the Carolina wren and", 0),
+      ...spoken(intro, 4.2),
+      ...spoken("teakettle.", 8.1),
+      ...spoken("If you hear that by the feeder you know who it is and you can stop looking for it.", 9.4),
+    ];
+    // The aligner as it is: two of the three items get no time at all.
+    assignSceneRanges(scenes, words, 15, [], []);
+    expect(scenes.filter(s => (s.audioDuration ?? 0) <= UNSEEN_BEAT_SEC)).toHaveLength(2);
+    const r = foldUnseenBeats(scenes, s => s.audioDuration);
+    expect(r.joined).toBe(2);
+    expect(r.unplaced).toEqual([]);
+    assignSceneRanges(r.scenes, words, 15, [], []);
+    const one = r.scenes.find(s => /teakettle/.test(s.scriptText ?? ""));
+    expect(one?.scriptText).toBe("teakettle, teakettle, teakettle.");
+    expect(one?.listCut).toBe(true);
+    expect(one?.audioDuration).toBeCloseTo(1.3, 1);
+    expect(r.scenes.every(s => (s.audioDuration ?? 0) > UNSEEN_BEAT_SEC)).toBe(true);
+    expect(r.scenes.map(s => s.index)).toEqual([1, 2, 3, 4]);
+  });
+
+  it("production job 215 #191/#192: the unseen 'piano,' joins the same words before it, not the next item", () => {
+    const scenes = [
+      item(190, "a violin,", "a violin"),
+      { ...item(191, "piano,", "an upright piano"), audioDuration: 0.054 },
+      { ...item(192, "piano,", "an upright piano"), audioDuration: 0 },
+      { ...item(193, "and a cello.", "a cello"), audioDuration: 0.9 },
+    ];
+    scenes[0].audioDuration = 0.6;
+    const r = foldUnseenBeats(scenes, s => s.audioDuration);
+    expect(r.scenes.map(s => [s.scriptText, s.showSubject, s.audioDuration])).toEqual([
+      ["a violin,", "a violin", 0.6],
+      ["piano, piano,", "an upright piano", 0.054],
+      ["and a cello.", "a cello", 0.9],
+    ]);
+  });
+
+  it("only a MEASURED zero: a short beat, or one not measured yet, is left to the other folds", () => {
+    const scenes = [
+      { ...scene(1, "The first coat goes on thin,"), audioDuration: 2 },
+      { ...scene(2, "slowly,"), audioDuration: 0.05 },
+      { ...scene(3, "and then"), audioDuration: undefined },
+      { ...scene(4, "the second coat goes on after an hour."), audioDuration: 3 },
+    ];
+    const r = foldUnseenBeats(scenes, s => s.audioDuration);
     expect(r.changed).toBe(false);
+    expect(r.scenes).toHaveLength(4);
+  });
+
+  it("a QR, cover or asset beat is never folded, and nothing is folded INTO one or the release beat", () => {
+    const qr = { ...scene(2, "Scan the code on your screen now."), qrHero: true, cta: true, ctaIndex: 0, audioDuration: 0 };
+    const kept = foldUnseenBeats(
+      [{ ...scene(1, "Here is the guide."), cta: true, ctaIndex: 0, audioDuration: 4 }, qr],
+      s => s.audioDuration
+    );
+    expect(kept.changed).toBe(false);
+    expect(kept.unplaced).toEqual([qr]);
+    // A closing word after the scan window: the QR beat holds the block's release words.
+    const after = { ...scene(3, "Goodnight."), audioDuration: 0 };
+    const closing = foldUnseenBeats(
+      [{ ...scene(1, "Scan it, the guide is yours."), qrHero: true, qrTail: true, cta: true, ctaIndex: 0, audioDuration: 6 }, after],
+      s => s.audioDuration
+    );
+    expect(closing.changed).toBe(false);
+    expect(closing.unplaced).toEqual([after]);
+    // Never across a CTA edge either: the picture after it takes the words instead.
+    const edge = foldUnseenBeats(
+      [
+        { ...scene(1, "Now the guide itself."), hostPresent: true, cta: true, ctaIndex: 0, audioDuration: 3 },
+        { ...scene(2, "Anyway,"), audioDuration: 0 },
+        { ...scene(3, "back to the porch light."), audioDuration: 3 },
+      ],
+      s => s.audioDuration
+    );
+    expect(edge.scenes.map(s => s.scriptText)).toEqual(["Now the guide itself.", "Anyway, back to the porch light."]);
+  });
+
+  it("an unseen host beat's roles stay with the host take that takes its words", () => {
+    const r = foldUnseenBeats(
+      [
+        { ...scene(1, "Hello there, friends."), hostPresent: true, hostOpener: true, audioDuration: 3 },
+        { ...scene(2, "I'm the host."), hostPresent: true, hostIntro: true, hostProtected: true, audioDuration: 0 },
+        { ...scene(3, "a porch light on a timer"), audioDuration: 3 },
+      ],
+      s => s.audioDuration
+    );
+    expect(r.scenes).toHaveLength(2);
+    expect(r.scenes[0]).toMatchObject({ scriptText: "Hello there, friends. I'm the host.", hostIntro: true, hostProtected: true });
+  });
+
+  it("production job 200 #184: 'So tonight,' between two items leads into the next item, which keeps its picture", () => {
+    const scenes = [
+      { ...item(183, "check the lock on the back window,", "a window latch"), audioDuration: 2.1 },
+      { ...scene(184, "So tonight,", { wordCut: true, showSubject: "a dark porch" }), audioDuration: 0.8 },
+      { ...item(185, "walk over to that front door,", "a front door from the hallway"), audioDuration: 1.6 },
+      { ...item(186, "and test the deadbolt.", "a deadbolt"), audioDuration: 1.4 },
+    ];
+    const r = foldSnappedFlashes(scenes, s => s.audioDuration ?? 0);
+    expect(r.scenes.map(s => [s.scriptText, s.showSubject, !!s.listCut])).toEqual([
+      ["check the lock on the back window,", "a window latch", true],
+      ["So tonight, walk over to that front door,", "a front door from the hallway", true],
+      ["and test the deadbolt.", "a deadbolt", true],
+    ]);
+  });
+
+  it("a lead-in at its floor, before a list, or across a CTA edge is not led into an item", () => {
+    const lead = (over: Partial<StoryboardScene>, sec: number) =>
+      ({ ...scene(2, "So tonight,", { wordCut: true, showSubject: "a dark porch" }), audioDuration: sec, ...over }) as StoryboardScene;
+    const items = (l: StoryboardScene) => [
+      { ...item(1, "check the back window,", "a latch"), audioDuration: 2 },
+      l,
+      { ...item(3, "walk to the front door,", "a door"), audioDuration: 2 },
+    ];
+    // At its floor: left alone.
+    expect(foldSnappedFlashes(items(lead({}, 1.3)), s => s.audioDuration ?? 0).changed).toBe(false);
+    // Inside a CTA block while the items are not: left alone.
+    expect(foldSnappedFlashes(items(lead({ cta: true, ctaIndex: 0 }, 0.8)), s => s.audioDuration ?? 0).changed).toBe(false);
+    expect(leadInBetweenItems(items(lead({}, 0.8)), 1)).toBe(true);
+    // Before a list's first item it still joins the picture before it (Dale's job 293).
+    const before = [
+      { ...scene(1, "The place just wasn't built for that piece.", { wordCut: true, shotGroup: 2 }), audioDuration: 4 },
+      { ...scene(2, "Today I'm ranking", { wordCut: true, shotGroup: 4 }), audioDuration: 1 },
+      { ...item(3, "Etsy,", "a shop page"), audioDuration: 0.4 },
+      { ...item(4, "craft fairs,", "a fair"), audioDuration: 0.8 },
+    ];
+    expect(leadInBetweenItems(before, 1)).toBe(false);
+    const r = foldSnappedFlashes(before, s => s.audioDuration ?? 0);
+    expect(r.scenes.map(s => s.scriptText)).toEqual([
+      "The place just wasn't built for that piece. Today I'm ranking",
+      "Etsy,",
+      "craft fairs,",
+    ]);
   });
 });
