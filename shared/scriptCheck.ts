@@ -169,15 +169,18 @@ export function checkScript(raw: string): ScriptCheck {
   const words: Word[] = [];
   let inCta = false;
   for (const { line, text } of spokenScriptLines(raw)) {
-    if (CTA_START_LINE.test(text)) {
+    // Directions come off BEFORE the marker test, in the order `parseCtaMarkers` does it: there
+    // "[laughs] ===END CTA===" is a marker, so here it must not be a stray "===" note (refusing a
+    // script the voice would read correctly) nor leave the words after it counted as in a block.
+    const clean = stripVoiceDirections(text).trim();
+    if (CTA_START_LINE.test(clean)) {
       inCta = true;
       continue;
     }
-    if (CTA_END_LINE.test(text)) {
+    if (CTA_END_LINE.test(clean)) {
       inCta = false;
       continue;
     }
-    const clean = stripVoiceDirections(text).trim();
     if (!clean) continue;
     const why = noteLineReason(clean);
     if (why)

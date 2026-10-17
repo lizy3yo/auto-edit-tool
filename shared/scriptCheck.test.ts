@@ -235,6 +235,32 @@ describe("a pitch said in two CTA blocks", () => {
       againLine: 6,
     });
   });
+
+  it("a marker carrying a voice direction is a marker, as the voice reads it", () => {
+    // `parseCtaMarkers` takes directions off before it looks for markers, so these are two good
+    // blocks there — never a stray "===" note, and both pitches still count as inside a block.
+    const script = [
+      ...narration,
+      "[warmly] ===START CTA===",
+      pitch,
+      "===END CTA=== [laughs]",
+      "Next, the shelf. Two brackets and a plank, nothing more.",
+      "===START CTA===",
+      pitch,
+      "[softly] ===END CTA===",
+    ].join("\n");
+    const { problems, warnings } = checkScript(script);
+    expect(problems).toEqual([]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatchObject({ line: 4, againLine: 8 });
+  });
+
+  it("a misspelled marker with a direction on it is still a stray line", () => {
+    expect(
+      checkScript("Welcome back.\n[warmly] === START CTA ===\nThe book is below.")
+        .problems
+    ).toMatchObject([{ kind: "note", line: 2 }]);
+  });
 });
 
 describe("the generate route runs the check", () => {
