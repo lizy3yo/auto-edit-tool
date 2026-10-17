@@ -363,10 +363,38 @@ export const LINGER_SEC = 0.8;
 export const MIN_ON_SCREEN_SEC = 1.5;
 
 /** Up too short to read: under MIN_ON_SCREEN_SEC, with one frame allowed for edges rounded onto the
- * frame grid. The ONE test the planner (a new graphic is refused) and QA (a shipped one is reported)
- * both ask, so the two cannot disagree. */
+ * frame grid. The ONE test the planner (a new graphic is refused), the film's end (`endWithFilm`)
+ * and QA (a shipped one is reported) all ask, so they cannot disagree. */
 export function tooShortToRead(c: { startFrame: number; endFrame: number }, fps: number): boolean {
   return c.endFrame - c.startFrame < MIN_ON_SCREEN_SEC * fps - 1 - 1e-6;
+}
+
+/**
+ * Nothing outlasts the film: a graphic held for its reading time near the end could run past the
+ * last frame, and measuring it there grabbed nothing (Scarlett's job 395 shipped without graphics),
+ * so it ends on the last frame. One the film's end leaves too short to read is LEFT OUT, by the same
+ * test the planner and QA ask — kept down to 1 s, it shipped and QA then failed the film for it. Any
+ * other graphic is only left out under a second (a saved plan on a film edited since): an approved
+ * one keeps its length, and a chapter label left out would break its series. `cues` is changed in
+ * place; returns the ids left out.
+ */
+export function endWithFilm(cues: ResolvedCue[], lastFrame: number, fps: number): string[] {
+  const cutByEnd = new Set<ResolvedCue>();
+  for (const c of cues) {
+    if (c.endFrame <= lastFrame) continue;
+    c.endFrame = lastFrame;
+    c.end = lastFrame / fps;
+    c.props = { ...c.props, durationSec: (c.endFrame - c.startFrame) / fps };
+    cutByEnd.add(c);
+  }
+  const out: string[] = [];
+  for (let k = cues.length - 1; k >= 0; k--) {
+    const c = cues[k];
+    if (cutByEnd.has(c) ? !tooShortToRead(c, fps) : c.endFrame - c.startFrame >= fps) continue;
+    out.push(c.id);
+    cues.splice(k, 1);
+  }
+  return out;
 }
 
 /**

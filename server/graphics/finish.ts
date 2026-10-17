@@ -24,7 +24,7 @@ import { argbFromRgb } from "@material/material-color-utilities";
 import { invokeClaude } from "../claude";
 import { presignOwnBucketUrl } from "../storage";
 import { transcribeWordsFromBuffer } from "../_core/voiceTranscription";
-import { CueError, resolveCues, type CueSpec, type ResolvedCue, type Word } from "../../graphics/src/cueResolve";
+import { CueError, endWithFilm, resolveCues, type CueSpec, type ResolvedCue, type Word } from "../../graphics/src/cueResolve";
 import { TEMPLATES, templateById } from "../../graphics/src/registry";
 import { FPS, type Theme } from "../../graphics/src/theme";
 import { themeFromPixels } from "../../graphics/src/palette";
@@ -278,20 +278,9 @@ export async function addGraphics(input: AddGraphicsInput): Promise<GraphicsReco
   progress(input.savedPlan?.length && !input.replan ? "Using the saved graphics plan" : "Planning the graphics", 12);
   const planned = await plan(input, words, cuts);
   const { specs, cues } = resolveKeeping(planned.cues, words, cuts, input.film, dropped);
-  // Nothing outlasts the film: a graphic held for its reading time near the end could run past the
-  // last frame, and measuring it there grabbed nothing (Scarlett's job 395 shipped without graphics).
-  const lastFrame = filmDiffs.length - 1;
-  for (const c of cues) {
-    if (c.endFrame <= lastFrame) continue;
-    c.endFrame = lastFrame;
-    c.end = lastFrame / FPS;
-    c.props = { ...c.props, durationSec: (c.endFrame - c.startFrame) / FPS };
-  }
-  for (let k = cues.length - 1; k >= 0; k--) {
-    if (cues[k].endFrame - cues[k].startFrame >= FPS) continue;
-    dropped.push({ id: cues[k].id, why: "the film ends before it can be read" });
-    cues.splice(k, 1);
-  }
+  // Nothing outlasts the film (`endWithFilm`): ended on its last frame, and left out when that
+  // leaves it too short to read.
+  for (const id of endWithFilm(cues, filmDiffs.length - 1, FPS)) dropped.push({ id, why: "the film ends before it can be read" });
   log(`graphics: ${cues.length} placed${dropped.length ? `, ${dropped.length} left out` : ""}${theme ? `, accent ${theme.accent}` : ""}`);
 
   // Render each graphic (cached by what it is), text on footage held to readability.

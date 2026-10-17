@@ -502,9 +502,10 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
         continue;
       }
       tidyNumbers(spec.props);
-      // A TITLE keeps the length it was planned with — but never under MIN_ON_SCREEN_SEC: Dale's
-      // "Where to sell · 3 of 5" was planned at 1.4 s (job 397, 2:15). Raised, never refused: a
-      // refused chapter takes its whole series down with it. An approved one keeps its length.
+      // A TITLE keeps the length it was planned with — but is never PLANNED under MIN_ON_SCREEN_SEC:
+      // Dale's "Where to sell · 3 of 5" was planned at 1.4 s (job 397, 2:15). Raised, never refused:
+      // a refused chapter takes its whole series down with it. An approved one keeps its length. (A
+      // cut within CUT_SNAP_SEC before its end still ends it there, sooner; QA reports that.)
       if (structural.has(spec.template) && typeof spec.durationSec === "number" && spec.durationSec < MIN_ON_SCREEN_SEC) spec.durationSec = MIN_ON_SCREEN_SEC;
       const missing: string[] = [];
       await fixIcons(spec.props, missing);
