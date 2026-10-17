@@ -2072,3 +2072,27 @@ describe("a general head before its examples is no list item (job 400 at 0:47, '
     expect(spokenListsByShape(["You'll need some glue, a clamp, and a rag."]).map(l => l.items)).toEqual([["some glue", "a clamp", "a rag"]]);
   });
 });
+
+describe("the head's picture of its own is gone, not turned into a group picture (job 400 scene 8)", () => {
+  it("right after the host, the head the planner cut leads the waiting room's picture", () => {
+    const scenes = [
+      host(7, "Maybe you have done that arithmetic. Most people past sixty have — usually in silence, usually in"),
+      pic(8, "some ordinary place,", "an older woman standing alone at a sink by a window", { listCut: true }),
+      pic(9, "a waiting room,", "a row of grey padded waiting room chairs against a pale wall", { listCut: true }),
+      pic(10, "a church pew,", "a long empty dark polished wooden church pew", { listCut: true }),
+      pic(11, "the kitchen table at two in the morning when the house is too quiet.", "a wooden kitchen table at night"),
+      host(12, "And the math always presents itself as the problem."),
+    ];
+    // The list as job 400 saved it, head and all.
+    const r = applySpokenLists(scenes, [{ sentence: 1, items: ["some ordinary place", "a waiting room", "a church pew"] }]);
+    // The bridge rule had made it "a waiting room and a church pew together, laid out side by side".
+    expect(r.scenes.some(s => s.listSet)).toBe(false);
+    expect(r.scenes.map(s => [s.scriptText, s.showSubject])).toEqual([
+      ["Maybe you have done that arithmetic. Most people past sixty have — usually in silence, usually in", "the host"],
+      ["some ordinary place, a waiting room,", "a row of grey padded waiting room chairs against a pale wall"],
+      ["a church pew,", "a long empty dark polished wooden church pew"],
+      ["the kitchen table at two in the morning when the house is too quiet.", "a wooden kitchen table at night"],
+      ["And the math always presents itself as the problem.", "the host"],
+    ]);
+  });
+});

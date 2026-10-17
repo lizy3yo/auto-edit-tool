@@ -452,11 +452,11 @@ describe("a general head before its examples is never an item (job 400 at 0:47)"
     expect(rows(applySpokenLists(film(), saved).scenes)).toEqual(cut);
   });
 
-  it("a head the planner already cut as a list picture loses the mark, so it can join its neighbour", () => {
+  it("a head the planner cut as a picture of its own leads the first example's picture instead", () => {
     const scenes = [
       scene(1, "Most people past sixty have — usually in silence, usually in"),
       scene(2, "some ordinary place,", { listCut: true, showSubject: "an older woman at a sink by a window" }),
-      scene(3, "a waiting room,", { listCut: true }),
+      scene(3, "a waiting room,", { listCut: true, showSubject: "a row of grey padded waiting room chairs" }),
       scene(4, "a church pew,", { listCut: true }),
       scene(5, "the kitchen table at two in the morning when the house is too quiet."),
       host(6, "Bye."),
@@ -465,11 +465,118 @@ describe("a general head before its examples is never an item (job 400 at 0:47)"
     expect(r.cleared).toBe(1);
     expect(rows(r.scenes).map(([t, , l]) => [t, l])).toEqual([
       ["Most people past sixty have — usually in silence, usually in", false],
-      ["some ordinary place,", false],
-      ["a waiting room,", true],
+      ["some ordinary place, a waiting room,", true],
       ["a church pew,", true],
       ["the kitchen table at two in the morning when the house is too quiet.", false],
       ["Bye.", false],
+    ]);
+    expect(r.scenes[1].showSubject).toBe("a row of grey padded waiting room chairs");
+    expect(r.scenes.some(s => /sink/.test(s.showSubject ?? ""))).toBe(false);
+  });
+
+  // Job 400 as it was cut: the host line before the list (scene 7, later a split), then the head the
+  // planner cut on its own (scene 8, "an older woman at a sink"), then the examples.
+  const job400 = () => [
+    host(7, "Maybe you have done that arithmetic. Most people past sixty have — usually in silence, usually in"),
+    scene(8, "some ordinary place,", { listCut: true, showSubject: "an older woman standing alone at a sink by a window" }),
+    scene(9, "a waiting room,", { listCut: true, showSubject: "a row of grey padded waiting room chairs against a pale wall" }),
+    scene(10, "a church pew,", { listCut: true, showSubject: "a long empty dark polished wooden church pew" }),
+    scene(11, "the kitchen table at two in the morning when the house is too quiet.", { showSubject: "a wooden kitchen table at night" }),
+    host(12, "And the math always presents itself as the problem."),
+  ];
+
+  it("right after the host, the head is never the bridge's picture of the examples 'together'", () => {
+    const saved: SpokenList[] = [{ sentence: 1, items: ["some ordinary place", "a waiting room", "a church pew"] }];
+    for (const lists of [saved, shapeLists(job400())]) {
+      const r = applySpokenLists(job400(), lists);
+      // Before: scene 8 became "a waiting room and a church pew together, laid out side by side".
+      expect(r.scenes.some(s => s.listSet)).toBe(false);
+      expect(rows(r.scenes)).toEqual([
+        ["Maybe you have done that arithmetic. Most people past sixty have — usually in silence, usually in", true, false],
+        ["some ordinary place, a waiting room,", false, true],
+        ["a church pew,", false, true],
+        ["the kitchen table at two in the morning when the house is too quiet.", false, false],
+        ["And the math always presents itself as the problem.", true, false],
+      ]);
+      expect(r.scenes[1].showSubject).toBe("a row of grey padded waiting room chairs against a pale wall");
+      // The pass on the final lengths changes nothing more.
+      const again = applySpokenLists(r.scenes, lists);
+      expect(rows(again.scenes)).toEqual(rows(r.scenes));
+      expect(again.scenes.some(s => s.listSet)).toBe(false);
+    }
+  });
+
+  it("a head that opens the beat after the host leads its first example too; a longer lead-in keeps its own picture", () => {
+    const opens = [
+      host(1, "Maybe you have done that arithmetic. Most people past sixty have — usually in silence, usually in"),
+      scene(2, "some ordinary place, a waiting room, a church pew,", { showSubject: "an older man alone on a grey chair" }),
+      scene(3, "the kitchen table at two in the morning when the house is too quiet."),
+      host(4, "Bye."),
+    ];
+    const r = applySpokenLists(opens, shapeLists(opens));
+    expect(r.scenes.some(s => s.listSet)).toBe(false);
+    expect(rows(r.scenes).slice(1, 3)).toEqual([
+      ["some ordinary place, a waiting room,", false, true],
+      ["a church pew,", false, true],
+    ]);
+    const longer = [
+      host(1, "Maybe you have done that arithmetic."),
+      scene(2, "Most people past sixty have — usually in silence, usually in some ordinary place, a waiting room, a church pew,", {
+        showSubject: "an older man alone on a grey chair",
+      }),
+      scene(3, "the kitchen table at two in the morning when the house is too quiet."),
+      host(4, "Bye."),
+    ];
+    const l = applySpokenLists(longer, shapeLists(longer));
+    expect(l.scenes.some(s => s.listSet)).toBe(false);
+    expect(rows(l.scenes).slice(1, 4)).toEqual([
+      ["Most people past sixty have — usually in silence, usually in some ordinary place,", false, false],
+      ["a waiting room,", false, true],
+      ["a church pew,", false, true],
+    ]);
+    expect(l.scenes[1].showSubject).toBe("an older man alone on a grey chair");
+  });
+
+  it("a picture before a list that is not a head, or a head that IS the first item, keeps its own beat", () => {
+    // "some glue," is a thing, and the list's own first item here: never folded into the next one.
+    const glue = [
+      host(1, "Here is the whole kit."),
+      scene(2, "some glue,", { showSubject: "a bottle of glue" }),
+      scene(3, "a clamp,", { showSubject: "a clamp" }),
+      scene(4, "and a rag.", { showSubject: "a rag" }),
+      host(5, "Bye."),
+    ];
+    expect(rows(applySpokenLists(glue, shapeLists(glue)).scenes).map(([t]) => t)).toEqual([
+      "Here is the whole kit.",
+      "some glue,",
+      "a clamp,",
+      "and a rag.",
+      "Bye.",
+    ]);
+    // Heads one after another are the list: "Something sweet," is its item 1, never a lead-in.
+    const treats = [
+      host(1, "Bring three things."),
+      scene(2, "Something sweet,"),
+      scene(3, "something salty,"),
+      scene(4, "and something to drink."),
+      host(5, "Bye."),
+    ];
+    const lists: SpokenList[] = [{ sentence: 1, items: ["Something sweet", "something salty", "something to drink"] }];
+    expect(rows(applySpokenLists(treats, lists).scenes).map(([t, , l]) => [t, l])).toEqual([
+      ["Bring three things.", false],
+      ["Something sweet,", true],
+      ["something salty,", true],
+      ["and something to drink.", true],
+      ["Bye.", false],
+    ]);
+    // …even when an answer left it out: a head before a head is no lead-in.
+    const partial: SpokenList[] = [{ sentence: 1, items: ["something salty", "something to drink"] }];
+    expect(rows(applySpokenLists(treats, partial).scenes).map(([t]) => t)).toEqual([
+      "Bring three things.",
+      "Something sweet,",
+      "something salty,",
+      "and something to drink.",
+      "Bye.",
     ]);
   });
 });

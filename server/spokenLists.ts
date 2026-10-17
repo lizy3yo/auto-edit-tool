@@ -122,6 +122,15 @@ function endsOnGeneralHead(clause: string): boolean {
 }
 
 /**
+ * Whether a piece's words are a general head and nothing else ("some ordinary place,", job 400), in
+ * the middle of its sentence — the words that lead a list's first example. Pure.
+ */
+function onlyAGeneralHead(text: string | undefined): boolean {
+  const t = (text ?? "").trim();
+  return !!t && !/[.!?]["')\]]?$/.test(t) && generalHead(t);
+}
+
+/**
  * The trailing "a/the/some … thing" of a clause, when it is short enough to be a list's first item —
  * never a general head ("…usually in some ordinary place," before "a waiting room, a church pew",
  * job 400: the place was item 1 and got a picture of its own).
@@ -634,8 +643,9 @@ export function applySpokenLists(
     const ranges: [number, number][] = [];
     let from = cursor;
     // A list saved before the general-head rule (job 400's "some ordinary place, a waiting room, a
-    // church pew") is cut without its head on a resume too: the head's words stay with their beat.
-    for (const item of withoutGeneralHead(list.items)) {
+    // church pew") is cut without its head on a resume too, the same as a list found today.
+    const listItems = withoutGeneralHead(list.items);
+    for (const item of listItems) {
       const want = tokenSpans(item).map(t => t.tok);
       const at = findTokens(toks, want, from);
       if (at < 0 || (ranges.length && at - ranges[ranges.length - 1][1] > GAP_MAX_WORDS)) {
@@ -646,7 +656,7 @@ export function applySpokenLists(
       from = at + want.length;
     }
     if (ranges.length < 2) {
-      skipped.push(`"${list.items[0]}…": its words were not found in order in the film's text`);
+      skipped.push(`"${listItems[0]}…": its words were not found in order in the film's text`);
       continue;
     }
     cursor = ranges[ranges.length - 1][1];
@@ -760,6 +770,29 @@ export function applySpokenLists(
     let leadIn: string | null = null;
     const bounds = [...r.starts, r.end];
     const names = bounds.slice(0, -1).map((a, k) => bareItem(textOf(a, bounds[k + 1])));
+    // A GENERAL HEAD right before the first item ("some ordinary place," before "a waiting room,",
+    // job 400 scene 8) gets no picture of its own: its words lead the first example's picture, as in
+    // `splitListPieces` — whether the planner cut it as a beat of its own or it opens this beat. It is
+    // never the bridge's set picture below either: right after the host it read as a bridge, and job
+    // 400's head became "a waiting room and a church pew together, laid out side by side". The
+    // examples of a head are instances of it, not things that sit together in one place.
+    const before = out[out.length - 1];
+    // Never when the first item is a head too ("something sweet, | something salty, …" is the list).
+    const headLeads = (t: string | undefined) => onlyAGeneralHead(t) && !generalHead(names[0] ?? "");
+    if (
+      !prefix &&
+      before &&
+      !before.hostPresent &&
+      !before.listCut &&
+      !before.listSet &&
+      !fixedBeat(before) &&
+      headLeads(before.scriptText)
+    ) {
+      out.pop();
+      leadIn = (before.scriptText ?? "").trim();
+    } else if (prefix && !head.hostPresent && headLeads(prefix)) {
+      leadIn = prefix;
+    }
     // THE BRIDGE (Granny Ruth's job 302): the words leading from a host take into the list ("…I'm
     // Granny Ruth, | and this one's for anybody sitting at a kitchen table with | a straight-stitch
     // machine,"). Either a short picture of their own right after the host, the head's own words
@@ -773,7 +806,16 @@ export function applySpokenLists(
         ? last
         : null;
     const bridgeText = `${bridgePiece?.scriptText ?? ""} ${head.hostPresent ? "" : prefix}`.trim();
-    if (hostBefore && bridgeText && tokenSpans(bridgeText).length >= BRIDGE_MIN_WORDS) {
+    if (leadIn) {
+      // A general head: its words lead the first item (above).
+    } else if (
+      hostBefore &&
+      bridgeText &&
+      tokenSpans(bridgeText).length >= BRIDGE_MIN_WORDS &&
+      // A longer lead-in that ends on a general head ("usually in some ordinary place,") is no set
+      // picture either: it keeps a picture of its own, as any lead-in too long to lead an item does.
+      !endsOnGeneralHead(bridgeText)
+    ) {
       // The bridge is ONE picture of the place the line names with the whole list in it — never the
       // empty place. Always a picture, never the host: the host's minutes are planned later, and a
       // bridge the host said took a check-in's time away (Ruth's job 304 went 48 s without her).
