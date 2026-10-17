@@ -375,10 +375,12 @@ export function pictureLook(look: string, mode: "full" | "noStage" | "colourMate
       const m = PLACE_INSIDE.exec(c);
       if (!m) return c;
       // What is left before the place, minus a placing word left dangling ("hanging or grouped
-      // together near the coasters" leaves nothing of the look).
+      // together near the coasters" leaves nothing of the look) and an article left hanging ("knit
+      // sweater with a folded high neck" read "folded high" as a place and left "… with a").
       const left = c
         .slice(0, m.index)
         .replace(DANGLING, "")
+        .replace(/(?:\s+(?:a|an|the|its|his|her|their))+$/i, "")
         .replace(/\s+(?:or|and|with)$/i, "")
         .trim();
       return PLACING_START.test(left) ? "" : left;
@@ -395,15 +397,27 @@ export function pictureLook(look: string, mode: "full" | "noStage" | "colourMate
 /**
  * The look picture `s` is drawn by when nothing earlier of its own thing is there to follow, or
  * undefined: its own key thing's look (`ownKeyThing` — a list item that only inherited a key thing
- * gets none), cut down by its stage. Before the thing is finished, only colours and materials. The
- * MAIN thing's look describes the finished piece, so on a picture not marked finished ("done") its
- * finish and added parts go too. Pure.
+ * gets none), cut down by its stage. Before the thing is finished, only colours and materials. In a
+ * video that MAKES something (`makes`: some picture of it carries a stage), the MAIN thing's look
+ * describes the finished piece, so on a picture not marked finished ("done") its finish and added
+ * parts go too. A video that makes nothing has no stage to protect, so its MAIN look is kept whole:
+ * stripping it took the colours off job 373's dog ("a medium-sized tan and white dog with a short
+ * coat" — the coat read as a coat of oil) and left job 397's board only "rounded corners, medium
+ * size"; 48 of 113 stored MAIN looks lost colour or material words that way. Pure.
  */
-export function keyThingLookFor(s: StoryboardScene, things: KeyThing[] | undefined): string | undefined {
+export function keyThingLookFor(
+  s: StoryboardScene,
+  things: KeyThing[] | undefined,
+  makes = true
+): string | undefined {
   const own = ownKeyThing(s);
   const thing = own ? things?.find(k => k.name === own) : undefined;
   if (!thing?.look?.trim()) return undefined;
-  const mode = beforeFinished(s) ? "colourMaterial" : thing.main && s.buildStage !== "done" ? "noStage" : "full";
+  const mode = beforeFinished(s)
+    ? "colourMaterial"
+    : makes && thing.main && s.buildStage !== "done"
+      ? "noStage"
+      : "full";
   return pictureLook(thing.look, mode) || undefined;
 }
 
@@ -590,6 +604,8 @@ export function attachMemory(
   keyThings?: KeyThing[]
 ): void {
   tagKeyThings(board, keyThings);
+  // Whether the video makes something: the shot list stages only pictures of a thing being made.
+  const makes = board.some(x => !!x.buildStage);
   for (const s of board) {
     const items = listItemsAround(board, s);
     if (items) s.listItems = items;
@@ -599,7 +615,7 @@ export function attachMemory(
     sourcesOf.set(s, sources);
     ownSourcesOf.set(s, sources.filter(x => x === set || (!!s.keyThing && shows(x, s.keyThing))));
     viewOf.set(s, memoryViewFor(board, s));
-    lookOf.set(s, keyThingLookFor(s, keyThings));
+    lookOf.set(s, keyThingLookFor(s, keyThings, makes));
     copied.delete(s);
   }
   // A picture is COPIED when a later picture is drawn from it for the thing it is itself about — not
@@ -634,10 +650,15 @@ export function copiedLater(s: StoryboardScene): boolean {
  * that had no picture of its own thing to follow (`scene.keyThingLook` set at render) — the look is
  * then the only thing that decides how every copy looks, so a first picture that misses it is drawn
  * again on the check it already gets (`requiredThingsQuestion`), not copied into every later one.
+ * Never a named kind's picture: its exact look wins in the prompt (`keyThingLookClause`), and a
+ * check holding it to a look its prompt never carried would fail it for not drawing what was not
+ * asked (the exact-look question holds it instead).
  */
 export function lookToHold(s: StoryboardScene): { thing: string; look: string } | undefined {
   const own = ownKeyThing(s);
-  return own && s.keyThingLook && copied.has(s) ? { thing: own, look: s.keyThingLook } : undefined;
+  return own && s.keyThingLook && !s.namedLook && copied.has(s)
+    ? { thing: own, look: s.keyThingLook }
+    : undefined;
 }
 
 /** `s`'s picture is made — or its render ended without one: anything drawn from it may go on. */

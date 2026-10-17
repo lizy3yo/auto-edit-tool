@@ -100,6 +100,46 @@ describe("a key thing's look, cut down for the picture", () => {
     expect(done).not.toContain("sits upright on the bench");
   });
 
+  it("a video that makes nothing keeps its MAIN thing's whole look (jobs 373 and 397); one that makes something does not", async () => {
+    // Job 373's dog: in a video that makes something, "coat" reads as a coat of oil and the colours go.
+    const DOG: KeyThing[] = [
+      {
+        name: "dog",
+        main: true,
+        look: "a medium-sized tan and white dog with a short coat, floppy ears, and a dark, damp nose that leads every greeting, always sniffing low near legs and hands",
+      },
+    ];
+    const dog = pic(2, "a tan and white dog sniffing at the door", { keyThing: "dog" });
+    expect(keyThingLookFor(dog, DOG, false)).toContain("a medium-sized tan and white dog with a short coat");
+    expect(keyThingLookFor(dog, DOG)).not.toContain("tan and white");
+
+    // Job 397's board, through attachMemory: the board decides whether anything is made.
+    const BOARD: KeyThing[] = [
+      {
+        name: "cutting board",
+        main: true,
+        look: "rectangular board of dark walnut and pale maple strips glued in alternating stripes, smooth oiled finish, rounded corners, medium size, leans against the garage wall",
+      },
+    ];
+    const first = pic(1, "a walnut and maple cutting board on a market table", { keyThing: "cutting board" });
+    const coasters = pic(2, "a stack of coasters", { keyThing: "coasters" });
+    attachMemory([first, coasters], [first], BOARD);
+    expect((await memoryFor(first, 0)).look).toBe(
+      "rectangular board of dark walnut and pale maple strips glued in alternating stripes, smooth oiled finish, rounded corners, medium size"
+    );
+    // The same picture in a video that makes something (a picture of it being made elsewhere): its
+    // finish and how it is put together are left to the words.
+    const making = pic(3, "hands gluing walnut and maple strips", { keyThing: "cutting board", buildStage: "making" });
+    attachMemory([first, coasters, making], [first], BOARD);
+    expect((await memoryFor(first, 0)).look).toBe("rounded corners, medium size");
+  });
+
+  it("a hanging article never reaches the prompt (job 354's sweater)", () => {
+    expect(pictureLook("solid-color knit sweater with a folded high neck, smooth and simple")).toBe(
+      "solid-color knit sweater, smooth and simple"
+    );
+  });
+
   it("Ruth's job 305: a bowl being coiled keeps its fabric and colours, never the finished bowl's size or shape", () => {
     const coiling = pic(12, "hands coiling a fabric-wrapped strip round its cord", { keyThing: "scrappy fabric bowl", buildStage: "making" });
     expect(keyThingLookFor(coiling, RUTH)).toBe("fabric, cord, mixed scrap colors");
@@ -200,6 +240,20 @@ describe("the look goes only where nothing of the thing is there to follow", () 
     expect(item.memoryRefUrls).toEqual(["https://r2/machine.png"]);
     expect(item.keyThingLook).toBeUndefined(); // the reference carries the look, no text beside it
     expect(lookToHold(item)).toBeUndefined();
+  });
+
+  it("a named kind's picture is never held to the key thing's look its prompt did not carry", async () => {
+    const first = pic(3, "a straight-stitch machine with a churn dash block under its foot", {
+      keyThing: "straight-stitch machine",
+      namedLook: "churn dash block: a 3x3 block…",
+    });
+    const copy = pic(4, "a straight-stitch machine", { keyThing: "straight-stitch machine" });
+    attachMemory([first, copy], [first, copy], RUTH);
+    Object.assign(first, memoryFields(await memoryFor(first, 0), undefined));
+    expect(copiedLater(first)).toBe(true);
+    expect(first.keyThingLook).toBeTruthy();
+    expect(keyThingLookClause(first)).toBe("");
+    expect(lookToHold(first)).toBeUndefined();
   });
 
   it("a picture lent only for a thing beside it is not held to its own look (the heater beside the mattress)", () => {
