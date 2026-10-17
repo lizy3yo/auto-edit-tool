@@ -60,4 +60,17 @@ describe("reading a film's checks", () => {
   it("reads a film made before the record as nothing, not as all passes", () => {
     expect(tallyPictureChecks([scene()])).toEqual([]);
   });
+
+  // The audit (2026-10-18): a draw the defect check passed but the host or same-thing check refused
+  // read as "a clean picture thrown away" (job 390 scene 12's first draw).
+  it("hands back the entry it wrote, so a later check's refusal of that draw is on the record", () => {
+    const s = scene({ index: 12, humanPresent: true });
+    const entry = recordPictureCheck(s, "hands sawing a notch", false, {});
+    entry!.flags.push("not the host");
+    recordPictureCheck(s, "hands sawing a notch", false, { broken: true });
+    expect(s.pictureChecks!.map(c => c.flags)).toEqual([["not the host"], ["broken"]]);
+    const row = tallyPictureChecks([s])[0];
+    expect(row).toMatchObject({ pictures: 1, passedFirst: 0, checks: 2 });
+    expect(row.flags).toEqual({ "not the host": 1, broken: 1 });
+  });
 });

@@ -1322,3 +1322,47 @@ describe("what a line rules out is never drawn (the audit, 2026-10-18)", () => {
     expect(RULED_OUT_RULE).not.toMatch(/furnace|vault|shampoo|fence|belly|generator|risers/i);
   });
 });
+
+describe("a picture never ships a known fault in silence (the audit, 2026-10-18)", () => {
+  // The replay of 54 practice films: 240 of 1,810 checked pictures shipped with a fault on their last
+  // check, 217 of them kept the moment the same fault came back twice.
+  const plain = {};
+  const once = { broken: 1, writing: 1 };
+  const none = new Set<"at rest" | "soft print">();
+  it("352-147 broken → broken: one draw of the things at rest — never on the first broken, which a reroll clears", async () => {
+    const { faultRedrawFor } = await import("./longformVideo");
+    expect(faultRedrawFor(plain, { broken: true }, once, none, true)).toBe("at rest");
+    expect(faultRedrawFor(plain, { broken: true }, { broken: 0, writing: 0 }, none, true)).toBeUndefined();
+    expect(faultRedrawFor(plain, { broken: true }, once, new Set(["at rest" as const]), true)).toBeUndefined();
+    // Over a content-policy rung the prompt is not rebuilt: that would undo the softening.
+    expect(faultRedrawFor(plain, { broken: true }, once, none, false)).toBeUndefined();
+  });
+
+  it("343-17 a plain sign with writing on three of four draws: one draw with the print soft", async () => {
+    const { faultRedrawFor } = await import("./longformVideo");
+    expect(faultRedrawFor(plain, { writing: true }, once, none, true)).toBe("soft print");
+    // it may be on a softened prompt too: it only edits the text rule, never rebuilds
+    expect(faultRedrawFor(plain, { writing: true }, once, none, false)).toBe("soft print");
+    expect(faultRedrawFor(plain, { writing: true }, { broken: 0, writing: 0 }, none, true)).toBeUndefined();
+  });
+
+  it("383-33 a blurred-print picture (writing ten times), print the line says, a stamped caption: no soft-print draw", async () => {
+    const { faultRedrawFor } = await import("./longformVideo");
+    expect(faultRedrawFor({ blurPrint: true }, { writing: true }, once, none, true)).toBeUndefined();
+    expect(faultRedrawFor({ pictureText: "Photoelectric" }, { writing: true }, once, none, true)).toBeUndefined();
+    expect(faultRedrawFor(plain, { writing: true, overlay: true }, once, none, true)).toBeUndefined();
+  });
+
+  it("344-11 staged, 343-30 missing, and a check that could not run: kept as before, no changed draw", async () => {
+    const { faultRedrawFor } = await import("./longformVideo");
+    for (const v of [{ staged: true }, { missing: true }, { messy: true }, { wrongPlace: true }] as any[])
+      expect(faultRedrawFor(plain, v, once, none, true)).toBeUndefined();
+    expect(faultRedrawFor(plain, { broken: true, unchecked: true }, once, none, true)).toBeUndefined();
+  });
+
+  it("the changed prompts name no channel's things", async () => {
+    const { THINGS_AT_REST_CLAUSE, PERSON_FREE_FALLBACK } = await import("./longformVideo");
+    for (const clause of [THINGS_AT_REST_CLAUSE, PERSON_FREE_FALLBACK])
+      expect(clause).not.toMatch(/table saw|oak|vise|sign|board|quilt|smoke alarm/i);
+  });
+});

@@ -273,6 +273,8 @@ export interface PictureTake {
   clipShortSec?: number;
   /** The description this picture was drawn from, so the card reads true after a switch. */
   visualPrompt?: string;
+  /** The faults this picture shipped with (`StoryboardScene.pictureFlaws`), so its badge follows a switch. */
+  pictureFlaws?: string[];
   at: string;
   source: "original" | "regenerate";
   by?: SubmitActor;
@@ -415,6 +417,15 @@ export interface StoryboardScene {
   /** Every check of a picture drawn for this beat — its kind and what the check named
    *  (`server/pictureCheckLog.ts`), so a film shows which kinds come out right the first time. */
   pictureChecks?: { kind: string; panel?: boolean; flags: string[] }[];
+  /**
+   * The picture SHIPPED although its check still named these faults (`checkFlags` words, plus
+   * "different thing" / "near copy" from the later checks) — its redraws did not clear them, and
+   * the film never stops for a picture. Set or cleared every time the picture is drawn; the job
+   * warns and the card shows a badge (`shared/pictureFlaws.ts`).
+   */
+  pictureFlaws?: string[];
+  /** The same for the split-screen panel, which is drawn from a copy of the scene. */
+  panelFlaws?: string[];
   /** The clip URL last checked for a picture at assembly — so a Reassemble does not re-check it. */
   clipCheckedUrl?: string;
   /** One item of a spoken list ("a saw, a drill, …") — a quick cut, allowed down to `LIST_SHOT_MIN_SEC`. */

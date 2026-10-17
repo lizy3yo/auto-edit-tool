@@ -71,21 +71,28 @@ export function checkFlags(v: {
   ].filter((f): f is string => !!f);
 }
 
-/** Note one check on its scene. Never throws — a record must not cost a picture. */
+/**
+ * Note one check on its scene. Never throws — a record must not cost a picture. Returns the entry,
+ * so what a LATER check refuses the same draw for ("different thing", "not the host", "near copy",
+ * `shared/pictureFlaws.ts`) is written onto it: one entry per drawn picture, and a draw that passed
+ * this check but was redrawn anyway no longer reads as a clean picture thrown away.
+ */
 export function recordPictureCheck(
   scene: StoryboardScene,
   visual: string,
   panel: boolean,
   verdict: Parameters<typeof checkFlags>[0]
-): void {
+): PictureCheck | undefined {
   try {
-    (scene.pictureChecks ??= []).push({
+    const entry: PictureCheck = {
       kind: pictureKindOf(scene, visual),
       ...(panel ? { panel: true } : {}),
       flags: checkFlags(verdict),
-    });
+    };
+    (scene.pictureChecks ??= []).push(entry);
+    return entry;
   } catch {
-    /* a record, nothing more */
+    return undefined; /* a record, nothing more */
   }
 }
 

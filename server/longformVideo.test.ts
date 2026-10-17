@@ -231,8 +231,16 @@ const { mockScanStillDefects } = vi.hoisted(() => ({
     what: "",
   })),
 }));
+// The two side-by-side checks a still can meet after the defect check — the same key thing as its
+// memory, the host as the host. Default "same", so no test that never set them up is changed.
+const { mockScanSameHost, mockScanSameThing } = vi.hoisted(() => ({
+  mockScanSameHost: vi.fn(async () => ({ same: true, what: "" })),
+  mockScanSameThing: vi.fn(async () => ({ same: true, copy: false, what: "" })),
+}));
 vi.mock("./overlayTextScan", () => ({
   scanStillDefects: mockScanStillDefects,
+  scanSameHost: mockScanSameHost,
+  scanSameThing: mockScanSameThing,
 }));
 // The delivery plan is one more invokeClaude call in the pipeline; like the overlay scan it is
 // neutralized here so the call-count assertions hold. Default null = the one-speed read and
@@ -9655,6 +9663,320 @@ describe("the thing the way its description says — one redraw, told the detail
         "wrong here (padlock shut)."
     );
     expect(pictureDetailClause(undefined, undefined, true)).toMatch(/where each one sits\. The reference pictures/);
+  });
+});
+
+describe("a picture that ships with a fault says so, and two faults get one changed redraw (R9, the audit 2026-10-18)", () => {
+  const pngOf = (bg: string) =>
+    sharp({ create: { width: 8, height: 8, channels: 3, background: bg } }).png().toBuffer();
+  const verdict = (over: Record<string, unknown> = {}) => ({ overlay: false, broken: false, what: "", ...over }) as any;
+  const drawsOf = (...frames: Buffer[]) => {
+    const fn = vi.fn();
+    for (const f of frames) fn.mockResolvedValueOnce({ success: true, fileData: f });
+    return fn;
+  };
+  const checks = (...vs: Record<string, unknown>[]) => {
+    mockScanStillDefects.mockReset();
+    for (const v of vs) mockScanStillDefects.mockResolvedValueOnce(verdict(v));
+    mockScanStillDefects.mockResolvedValue(verdict());
+  };
+
+  afterEach(() => {
+    mockScanStillDefects.mockReset();
+    mockScanStillDefects.mockResolvedValue(verdict());
+    mockScanSameHost.mockReset();
+    mockScanSameHost.mockResolvedValue({ same: true, what: "" });
+    mockScanSameThing.mockReset();
+    mockScanSameThing.mockResolvedValue({ same: true, copy: false, what: "" });
+  });
+
+  // Job 352 scene 147: broken → broken, shipped through the same-faults keep.
+  const crosscut = () =>
+    ({
+      index: 147,
+      scriptText: "Crosscut to length last. Face, face, edge, edge, length.",
+      showSubject: "a rough oak board crosscut to length on a table saw",
+      visualPrompt:
+        "A rough oak board being crosscut to length on a table saw. The blade cuts through the board near its end.",
+    }) as any;
+
+  it("job 352 scene 147: broken twice gets ONE draw of its things at rest with nobody in it", async () => {
+    const { PERSON_FREE_FALLBACK, THINGS_AT_REST_CLAUSE } = await import("./longformVideo");
+    const [a, b, c] = await Promise.all([pngOf("#611"), pngOf("#622"), pngOf("#2a2")]);
+    checks({ broken: true, what: "blade through the fence" }, { broken: true, what: "board passes through blade" });
+    const genImage = drawsOf(a, b, c);
+    const out = await generateValidatedStill(crosscut(), 4, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(3);
+    const [p1, p2, p3] = genImage.mock.calls.map(c => c[0].prompt as string);
+    expect(p2).toBe(p1); // the first broken frame still gets its same-prompt reroll (7 of 9 clear)
+    expect(p3).toContain(PERSON_FREE_FALLBACK);
+    expect(p3).toContain(THINGS_AT_REST_CLAUSE);
+    expect(out.buffer.equals(c)).toBe(true);
+    expect(out.flaws).toBeUndefined();
+  });
+
+  it("job 352 scene 147: the at-rest draw broken too is kept, and says it shipped broken", async () => {
+    const [a, b, c] = await Promise.all([pngOf("#711"), pngOf("#722"), pngOf("#733")]);
+    checks({ broken: true }, { broken: true }, { broken: true });
+    const genImage = drawsOf(a, b, c);
+    const scene = crosscut();
+    const out = await generateValidatedStill(scene, 4, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(3); // never a second changed draw
+    expect(out.buffer.equals(c)).toBe(true);
+    expect(out.flaws).toEqual(["broken"]);
+    expect(scene.pictureChecks.map((c: any) => c.flags)).toEqual([["broken"], ["broken"], ["broken"]]);
+  });
+
+  it("the changed draw never loses its turn to the attempt budget — broken on the last attempt draws once more", async () => {
+    const { THINGS_AT_REST_CLAUSE } = await import("./longformVideo");
+    const [a, b, c] = await Promise.all([pngOf("#811"), pngOf("#822"), pngOf("#2b2")]);
+    checks({ broken: true }, { broken: true });
+    const genImage = drawsOf(a, b, c);
+    const out = await generateValidatedStill(crosscut(), 2, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(3);
+    expect(genImage.mock.calls[2][0].prompt).toContain(THINGS_AT_REST_CLAUSE);
+    expect(out.buffer.equals(c)).toBe(true);
+  });
+
+  // Job 343 scene 17: a plain picture (its line asks for no print) with writing on three of four draws.
+  const houseSign = () =>
+    ({
+      index: 17,
+      scriptText: "house signs,",
+      showSubject: "a carved wooden house sign",
+      visualPrompt: "Carved wooden house sign with leaf design along its edge, leaning on the workbench.",
+    }) as any;
+
+  it("job 343 scene 17: readable writing twice on a plain picture gets one draw with the print soft, from further back", async () => {
+    const { BLURRED_PRINT_CLAUSE, STEP_BACK_CLAUSE, NO_READABLE_TEXT } = await import("./longformVideo");
+    const [a, b, c] = await Promise.all([pngOf("#911"), pngOf("#922"), pngOf("#2c2")]);
+    checks({ writing: true, staged: true, what: "a name carved on it" }, { writing: true, what: "a name carved on it" });
+    const genImage = drawsOf(a, b, c);
+    const out = await generateValidatedStill(houseSign(), 4, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(3);
+    const [p1, p2, p3] = genImage.mock.calls.map(c => c[0].prompt as string);
+    expect(p2).toBe(p1);
+    expect(p3).toContain(BLURRED_PRINT_CLAUSE);
+    expect(p3).toContain(STEP_BACK_CLAUSE);
+    expect(p3).not.toContain(NO_READABLE_TEXT);
+    expect(p3).toContain("house sign"); // still the sign, never a picture without it
+    expect(out.buffer.equals(c)).toBe(true);
+    expect(out.flaws).toBeUndefined();
+  });
+
+  it("job 383 scene 33: a blurred-print picture already had its step back — no extra draw, and it says it shipped with writing", async () => {
+    const { STEP_BACK_CLAUSE } = await import("./longformVideo");
+    const [a, b] = await Promise.all([pngOf("#a11"), pngOf("#a22")]);
+    mockScanStillDefects.mockReset();
+    mockScanStillDefects.mockResolvedValue(verdict({ writing: true, what: "the label is sharp" }));
+    const genImage = drawsOf(a, b);
+    const out = await generateValidatedStill(
+      { index: 33, blurPrint: true, showSubject: "the label on a smoke alarm box", visualPrompt: "the label on a smoke alarm box" } as any,
+      4,
+      undefined,
+      genImage
+    );
+    expect(genImage).toHaveBeenCalledTimes(2);
+    expect((genImage.mock.calls[1][0].prompt as string).split(STEP_BACK_CLAUSE).length - 1).toBe(1);
+    expect(out.buffer.equals(b)).toBe(true);
+    expect(out.flaws).toEqual(["writing"]);
+  });
+
+  it("words the line says (pictureText) are wanted — writing twice there gets no soft-print draw", async () => {
+    const { BLURRED_PRINT_CLAUSE } = await import("./longformVideo");
+    const [a, b] = await Promise.all([pngOf("#b11"), pngOf("#b22")]);
+    mockScanStillDefects.mockReset();
+    mockScanStillDefects.mockResolvedValue(verdict({ writing: true, what: "a misspelled word" }));
+    const genImage = drawsOf(a, b);
+    const out = await generateValidatedStill(
+      { index: 9, pictureText: "Photoelectric", showSubject: "a smoke alarm box", visualPrompt: "a smoke alarm box" } as any,
+      4,
+      undefined,
+      genImage
+    );
+    expect(genImage).toHaveBeenCalledTimes(2);
+    expect(genImage.mock.calls[1][0].prompt).not.toContain(BLURRED_PRINT_CLAUSE);
+    expect(out.flaws).toEqual(["writing"]);
+  });
+
+  it("job 343 scene 30: 'missing' twice gets NO changed draw (not yet known to help) and says it shipped missing", async () => {
+    const [a, b] = await Promise.all([pngOf("#c11"), pngOf("#c22")]);
+    checks({ missing: true, what: "a settings page with no opt-out" }, { missing: true, what: "still no opt-out" });
+    const genImage = drawsOf(a, b);
+    const out = await generateValidatedStill(
+      { index: 30, showSubject: "a phone showing a shop's settings page", visualPrompt: "a phone showing a shop's settings page" } as any,
+      4,
+      undefined,
+      genImage
+    );
+    expect(genImage).toHaveBeenCalledTimes(2);
+    expect(genImage.mock.calls[1][0].prompt).toBe(genImage.mock.calls[0][0].prompt);
+    expect(out.missing).toBe(true);
+    expect(out.flaws).toEqual(["missing"]);
+  });
+
+  it("job 344 scene 11: staged twice is exactly as before — no extra draw — and says it shipped staged", async () => {
+    const [a, b] = await Promise.all([pngOf("#d11"), pngOf("#d22")]);
+    checks({ staged: true }, { staged: true });
+    const genImage = drawsOf(a, b);
+    const out = await generateValidatedStill(
+      { index: 11, showSubject: "a pile of small finished pieces", visualPrompt: "a pile of small finished pieces" } as any,
+      4,
+      undefined,
+      genImage
+    );
+    expect(genImage).toHaveBeenCalledTimes(2);
+    expect(genImage.mock.calls[1][0].prompt).toBe(genImage.mock.calls[0][0].prompt);
+    expect(out.flaws).toEqual(["staged"]);
+  });
+
+  it("a soft fault left after its one redraw ships through the ordinary return, and says so", async () => {
+    const [a, b, c] = await Promise.all([pngOf("#e11"), pngOf("#e22"), pngOf("#e33")]);
+    checks({ missing: true }, { staged: true }, { missing: true });
+    const genImage = drawsOf(a, b, c);
+    const out = await generateValidatedStill(
+      { index: 5, showSubject: "a sewing machine", visualPrompt: "a sewing machine" } as any,
+      4,
+      undefined,
+      genImage
+    );
+    expect(genImage).toHaveBeenCalledTimes(3);
+    expect(out.buffer.equals(c)).toBe(true);
+    expect(out.flaws).toEqual(["missing"]);
+  });
+
+  it("a frame that passed every check carries no flaws", async () => {
+    const out = await generateValidatedStill(
+      { index: 2, visualPrompt: "a raised garden bed" } as any,
+      4,
+      undefined,
+      drawsOf(await pngOf("#3a5"))
+    );
+    expect(out.flaws).toBeUndefined();
+  });
+
+  // Job 390 scene 12: a host-at-work picture of a key thing; checks ok → broken+missing → broken → broken.
+  // The first "ok" was refused by a check nothing recorded — keep-best would have shipped it.
+  it("job 390 scene 12: a frame the host check refused is on the record and never ships", async () => {
+    const { PERSON_FREE_FALLBACK } = await import("./longformVideo");
+    const frames = await Promise.all([pngOf("#f11"), pngOf("#f22"), pngOf("#f33"), pngOf("#f44")]);
+    checks({}, { broken: true, missing: true }, { broken: true }, { broken: true });
+    mockScanSameHost.mockReset();
+    mockScanSameHost.mockResolvedValueOnce({ same: false, what: "a younger man" }).mockResolvedValue({ same: true, what: "" });
+    const scene = {
+      index: 12,
+      scriptText: "Every place two strips cross needs a notch cut halfway through each one.",
+      showSubject: "hands sawing a small square notch in a thin strip held in a bench vise",
+      visualPrompt:
+        "Bare weathered hands holding a fine-toothed saw cutting a small square notch into a thin strip gripped in a black bench vise.",
+      humanPresent: true,
+      brollHostLook: "an older man, short grey hair, plaid shirt",
+      brollHostRef: "https://r2/host.jpg",
+      keyThing: "bench vise",
+      memoryRefUrls: ["https://r2/vise-1.png"],
+    } as any;
+    const genImage = drawsOf(...frames);
+    const out = await generateValidatedStill(scene, 4, undefined, genImage);
+    expect(out.buffer.equals(frames[0])).toBe(false);
+    expect(scene.pictureChecks[0].flags).toEqual(["not the host"]);
+    expect(genImage).toHaveBeenCalledTimes(4);
+    const last = genImage.mock.calls[3][0];
+    expect(last.prompt).toContain(PERSON_FREE_FALLBACK);
+    // Nobody in the frame, so no host photo — the thing's own memory stays, so its look holds.
+    expect(last.referenceImageUrl).toBe("https://r2/vise-1.png");
+    expect(last.referenceImageUrls ?? []).not.toContain("https://r2/host.jpg");
+    expect(out.buffer.equals(frames[3])).toBe(true);
+    expect(out.flaws).toEqual(["broken"]);
+  });
+
+  it("a different key thing or a copied framing is written on that draw's record entry", async () => {
+    const [a, b] = await Promise.all([pngOf("#151"), pngOf("#152")]);
+    const vise = () =>
+      ({ index: 21, visualPrompt: "a bench vise", showSubject: "a bench vise", keyThing: "bench vise", memoryRefUrls: ["https://r2/vise-1.png"] }) as any;
+    mockScanSameThing.mockReset();
+    mockScanSameThing.mockResolvedValueOnce({ same: false, copy: false, what: "a clamp, not the vise" });
+    const s1 = vise();
+    const out = await generateValidatedStill(s1, 4, undefined, drawsOf(a, b));
+    expect(out.buffer.equals(b)).toBe(true);
+    expect(out.flaws).toBeUndefined();
+    expect(s1.pictureChecks.map((c: any) => c.flags)).toEqual([["different thing"], []]);
+
+    mockScanSameThing.mockReset();
+    mockScanSameThing.mockResolvedValueOnce({ same: true, copy: true, what: "same framing" });
+    const s2 = vise();
+    await generateValidatedStill(s2, 4, undefined, drawsOf(a, b));
+    expect(s2.pictureChecks[0].flags).toEqual(["copies its memory"]);
+  });
+
+  it("a refused key-thing frame that ships for want of another says what it shipped with", async () => {
+    const a = await pngOf("#161");
+    mockScanSameThing.mockReset();
+    mockScanSameThing.mockResolvedValueOnce({ same: false, copy: false, what: "a different vise" });
+    const genImage = vi
+      .fn()
+      .mockResolvedValueOnce({ success: true, fileData: a })
+      .mockResolvedValue({ success: false, error: "OpenAI image 500: oops" });
+    const out = await generateValidatedStill(
+      { index: 22, visualPrompt: "a bench vise", showSubject: "a bench vise", keyThing: "bench vise", memoryRefUrls: ["https://r2/vise-1.png"] } as any,
+      3,
+      undefined,
+      genImage
+    );
+    expect(out.buffer.equals(a)).toBe(true);
+    expect(out.flaws).toEqual(["different thing"]);
+  });
+
+  it("FAULT_REDRAWS=0 keeps the frame exactly as before", async () => {
+    const [a, b] = await Promise.all([pngOf("#171"), pngOf("#172")]);
+    checks({ broken: true }, { broken: true });
+    process.env.FAULT_REDRAWS = "0";
+    try {
+      const genImage = drawsOf(a, b);
+      const out = await generateValidatedStill(crosscut(), 4, undefined, genImage);
+      expect(genImage).toHaveBeenCalledTimes(2);
+      expect(out.flaws).toEqual(["broken"]);
+    } finally {
+      delete process.env.FAULT_REDRAWS;
+    }
+  });
+});
+
+describe("notePictureFlaws — the scene and the job say what a picture shipped with", () => {
+  it("sets the field and warns; a picture drawn again replaces it, one drawn clean takes it away", async () => {
+    const { notePictureFlaws, clearJobWarnings, jobProgress } = await import("./longformVideo");
+    const job = 990_017;
+    clearJobWarnings(job);
+    const scene = { index: 17 } as any;
+    notePictureFlaws(job, scene, ["writing", "staged"], false);
+    expect(scene.pictureFlaws).toEqual(["writing", "staged"]);
+    expect(jobProgress(job, { scenesTotal: 1, scenesDone: 1 }).warnings).toEqual([
+      "Scene 17: picture shipped with readable writing and a staged look — its redraws did not clear it",
+    ]);
+    notePictureFlaws(job, scene, ["writing"], false); // a keyframe drawn again for a clip's next try
+    expect(jobProgress(job, { scenesTotal: 1, scenesDone: 1 }).warnings).toEqual([
+      "Scene 17: picture shipped with readable writing — its redraws did not clear it",
+    ]);
+    notePictureFlaws(job, { index: 170 } as any, ["missing"], false); // another scene is left alone
+    notePictureFlaws(job, scene, undefined, false); // a regenerate drawn clean
+    expect(scene.pictureFlaws).toBeUndefined();
+    expect(jobProgress(job, { scenesTotal: 1, scenesDone: 1 }).warnings).toEqual([
+      "Scene 170: picture shipped with its subject missing — its redraws did not clear it",
+    ]);
+    clearJobWarnings(job);
+  });
+
+  it("a split panel has its own field and says 'split panel'", async () => {
+    const { notePictureFlaws, clearJobWarnings, jobProgress } = await import("./longformVideo");
+    const job = 990_010;
+    clearJobWarnings(job);
+    const scene = { index: 10, pictureFlaws: ["staged"] } as any;
+    notePictureFlaws(job, scene, ["missing", "staged"], true);
+    expect(scene.panelFlaws).toEqual(["missing", "staged"]);
+    expect(scene.pictureFlaws).toEqual(["staged"]); // untouched
+    expect(jobProgress(job, { scenesTotal: 1, scenesDone: 1 }).warnings).toEqual([
+      "Scene 10: split panel shipped with its subject missing and a staged look — its redraws did not clear it",
+    ]);
+    clearJobWarnings(job);
   });
 });
 

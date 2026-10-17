@@ -29,6 +29,7 @@ export function currentPicture(
   if (scene.clipUrl) take.clipUrl = scene.clipUrl;
   if (scene.clipShortSec != null) take.clipShortSec = scene.clipShortSec;
   if (scene.visualPrompt) take.visualPrompt = scene.visualPrompt;
+  if (scene.pictureFlaws?.length) take.pictureFlaws = [...scene.pictureFlaws];
   if (by) take.by = by;
   return take;
 }
@@ -39,6 +40,8 @@ export function applyPicture(scene: StoryboardScene, take: PictureTake): void {
   scene.clipUrl = take.clipUrl ?? take.clipUrls[0];
   scene.clipShortSec = take.clipShortSec;
   if (take.visualPrompt) scene.visualPrompt = take.visualPrompt;
+  if (take.pictureFlaws?.length) scene.pictureFlaws = [...take.pictureFlaws];
+  else delete scene.pictureFlaws;
 }
 
 const sameClip = (a: PictureTake, b: PictureTake) =>

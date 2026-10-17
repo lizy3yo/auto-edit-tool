@@ -91,6 +91,7 @@ import { canCleanHostClips } from "@shared/roles";
 import { HOST_SPEND_EPSILON_SEC } from "@shared/hostSpend";
 import { SceneVersionsDialog } from "@/components/SceneVersionsDialog";
 import { sceneVersionCount } from "@shared/pictureTakes";
+import { pictureFlawWords, sceneShippedFlaws } from "@shared/pictureFlaws";
 import { voiceRedoRefusal } from "@shared/voiceTakes";
 import {
   scanCtaBlocks,
@@ -3734,6 +3735,26 @@ export default function LongformJobSlot({
                                     : "Waiting for HeyGen"}
                               </Badge>
                             )}
+                            {(() => {
+                              // A picture whose redraws did not clear what the check named — the
+                              // film never stops for one, so it says so here (`shared/pictureFlaws.ts`).
+                              const shipped = sceneShippedFlaws(scene);
+                              if (!shipped) return null;
+                              const missing = shipped.flaws.includes("missing") && scene.showSubject;
+                              return (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[10px] py-0 text-warning border-warning/40"
+                                  title={
+                                    `The picture check still found ${pictureFlawWords(shipped.flaws)} in the ${shipped.panel ? "split panel" : "picture"} that shipped — its redraws did not clear it.` +
+                                    (missing ? `\nIt was to show: ${scene.showSubject}` : "") +
+                                    "\nRegenerate the scene if it shows."
+                                  }
+                                >
+                                  {shipped.panel ? "Panel check not passed" : "Picture check not passed"}
+                                </Badge>
+                              );
+                            })()}
                             {scene.clipShortSec != null &&
                               scene.clipShortSec > 0 && (
                                 <Badge
