@@ -249,6 +249,10 @@ export const VersusCard: React.FC<VersusProps> = ({ kicker, left, right, winner 
 /* ───────────────────────── Big number ───────────────────────── */
 
 export type BigNumberProps = BaseProps & {
+  /** "card": the navy ground (a full-screen card). "dim": over the footage, darkened — Steve's
+   * "Big number over dimmed footage" (15,000 years), when the picture matters too. */
+  ground?: "card" | "dim";
+  dim?: number;
   kicker?: string;
   value: number;
   prefix?: string;
@@ -260,7 +264,7 @@ export type BigNumberProps = BaseProps & {
   countSec?: number;
 };
 
-export const BigNumberCard: React.FC<BigNumberProps> = ({ kicker, value, prefix, unit, at: atSec, line, countSec }) => {
+export const BigNumberCard: React.FC<BigNumberProps> = ({ kicker, value, prefix, unit, at: atSec, line, countSec, ground = "card", dim = 0.6 }) => {
   const t = useTheme();
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
@@ -279,7 +283,7 @@ export const BigNumberCard: React.FC<BigNumberProps> = ({ kicker, value, prefix,
   // running under it (job 384's "3 minutes" card drew the number over the line's second row).
   return (
     <AbsoluteFill>
-      <CardBackground />
+      {ground === "card" ? <CardBackground /> : <AbsoluteFill style={{ background: `rgba(5,10,18,${dim * Math.min(1, frame / 9)})` }} />}
       {kicker && (
         <div style={{ position: "absolute", left: LAYOUT.marginX, top: LAYOUT.kickerY }}>
           <Kicker text={kicker} />
@@ -317,7 +321,7 @@ export const BigNumberCard: React.FC<BigNumberProps> = ({ kicker, value, prefix,
             }}
           >
             {prefix}
-            {countUpValue(frame, start, value, fps, countFrames / fps)}
+            {countUpValue(frame, start, value, fps, countFrames / fps, prefix && /[$£€¥]/.test(prefix) ? 1000 : 10000)}
           </span>
           {unit && (
             <span

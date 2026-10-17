@@ -61,6 +61,41 @@ const NUMBER_WORDS: Record<string, string> = {
   eight: "8", nine: "9", ten: "10", eleven: "11", twelve: "12",
 };
 
+const UNITS: Record<string, number> = {
+  zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+  eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19,
+};
+const TENS: Record<string, number> = { twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90 };
+const SCALES: Record<string, number> = { thousand: 1e3, million: 1e6, billion: 1e9 };
+
+/**
+ * A number spoken in words, from `toks[i]`: "twenty five" → 25, "a hundred and fifty" → 150,
+ * "three million" → 3000000. Returns the value and how many tokens it took, or null when
+ * `toks[i]` does not start a number in words.
+ */
+export function parseSpokenNumber(toks: string[], i: number): { value: number; n: number } | null {
+  let total = 0, cur = 0, n = 0, any = false;
+  for (let j = i; j < Math.min(toks.length, i + 8); j++) {
+    const t = toks[j];
+    if (t in UNITS) cur += UNITS[t];
+    else if (t in TENS) cur += TENS[t];
+    else if (t === "hundred" && (any || toks[j - 1] === "a")) cur = (cur || 1) * 100;
+    else if (t in SCALES && (any || toks[j - 1] === "a")) {
+      total += (cur || 1) * SCALES[t];
+      cur = 0;
+    } else if (t === "a" && !any && (toks[j + 1] === "hundred" || toks[j + 1] in SCALES)) {
+      n++;
+      continue;
+    } else if (t === "and" && any && (toks[j + 1] in UNITS || toks[j + 1] in TENS)) {
+      n++;
+      continue;
+    } else break;
+    any = true;
+    n++;
+  }
+  return any ? { value: total + cur, n } : null;
+}
+
 /**
  * One word for another: case, number words ("three" = "3"), a plural "s", and — for words of four
  * letters or more — one letter changed, the way speech-to-text spells a word differently from the
@@ -71,6 +106,8 @@ function same(a: string, b: string): boolean {
   const x = NUMBER_WORDS[a] ?? a;
   const y = NUMBER_WORDS[b] ?? b;
   if (x === y || x === `${y}s` || y === `${x}s`) return true;
+  // A trailing -d, like the plural -s: "lap-sized" against a transcript's "lap size".
+  if (x.length >= 4 && y.length >= 4 && (x === `${y}d` || y === `${x}d`)) return true;
   if (x.length < 4 || x.length !== y.length || /\d/.test(x + y)) return false;
   let diff = 0;
   for (let i = 0; i < x.length && diff < 2; i++) if (x[i] !== y[i]) diff++;
@@ -87,6 +124,16 @@ const digitOf = (t: string) => (/^\d$/.test(NUMBER_WORDS[t] ?? "") ? NUMBER_WORD
 function step(index: TokenIndex, i: number, want: string[], k: number): { di: number; dk: number } | null {
   if (i >= index.length || k >= want.length) return null;
   if (same(index[i].tok, want[k])) return { di: 1, dk: 1 };
+  // A whole number in words on one side and digits on the other: the script's "twenty-five"
+  // against the transcript's "25", or the other way round.
+  if (/^\d+$/.test(index[i].tok)) {
+    const p = parseSpokenNumber(want, k);
+    if (p && String(p.value) === index[i].tok) return { di: 1, dk: p.n };
+  }
+  if (/^\d+$/.test(want[k])) {
+    const p = parseSpokenNumber(index.slice(i, i + 6).map(x => x.tok), 0);
+    if (p && String(p.value) === want[k]) return { di: p.n, dk: 1 };
+  }
   if (i + 1 < index.length && same(index[i].tok + index[i + 1].tok, want[k])) return { di: 2, dk: 1 };
   if (i + 1 < index.length && /^\d+$/.test(want[k]) && digitOf(index[i].tok) + digitOf(index[i + 1].tok) === want[k]) return { di: 2, dk: 1 };
   if (k + 1 < want.length && same(index[i].tok, want[k] + want[k + 1])) return { di: 1, dk: 2 };

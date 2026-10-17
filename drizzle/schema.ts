@@ -206,6 +206,9 @@ export const channelConfigs = mysqlTable("channel_configs", {
    * later starts on it; each photo's own switch (`channel_host_photos.useOriginal`) still decides.
    */
   hostPhotoUseOriginal: boolean("hostPhotoUseOriginal").default(false).notNull(),
+  /** Steve Cooper-style motion graphics (cards, labels, captions) on this channel's videos, added
+   * when a film is assembled (server/graphics). On by default; GRAPHICS=0 turns them off app-wide. */
+  motionGraphics: boolean("motionGraphics").default(true).notNull(),
   /** TTS speed multiplier (e.g., 0.90, 1.0, 1.10) */
   ttsSpeed: varchar("ttsSpeed", { length: 8 }),
   /** TTS volume multiplier applied as an ffmpeg gain (0.5–2, null/1.0 = neutral) */

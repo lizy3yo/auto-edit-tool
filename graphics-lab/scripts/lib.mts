@@ -11,9 +11,13 @@ import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
-import { templateById } from "../src/registry.ts";
+import { templateById } from "../../graphics/src/registry.ts";
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+/** The templates and their assets live in the app's shared `graphics/` folder (the app renders
+ * from the same code); the lab is the studio and test bench around them. */
+export const GRAPHICS_SRC = path.join(ROOT, "..", "graphics", "src");
+export const GRAPHICS_PUBLIC = path.join(ROOT, "..", "graphics", "public");
 export const OUT = path.join(ROOT, "out");
 
 export function outDir(...parts: string[]): string {
@@ -54,7 +58,7 @@ let bundled: Promise<string> | null = null;
 export function getBundle(): Promise<string> {
   bundled ??= (async () => {
     await ensureBrowser();
-    return bundle({ entryPoint: path.join(ROOT, "src", "index.ts"), publicDir: path.join(ROOT, "public") });
+    return bundle({ entryPoint: path.join(GRAPHICS_SRC, "index.ts"), publicDir: GRAPHICS_PUBLIC });
   })();
   return bundled;
 }

@@ -2,7 +2,7 @@
 //   tsx scripts/cuts.mts 385   → out/jobs/385/film.mp4 + cuts.json
 import path from "node:path";
 import { existsSync, writeFileSync } from "node:fs";
-import { FPS } from "../src/theme.ts";
+import { FPS } from "../../graphics/src/theme.ts";
 import { loadJob } from "./job.mts";
 import { ffmpegPath, outDir, run } from "./lib.mts";
 import { detectCuts, frameDiffs } from "./qa-lib.mts";

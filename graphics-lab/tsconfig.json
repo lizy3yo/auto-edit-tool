@@ -18,12 +18,13 @@
     ]
   },
   "include": [
-    "src/**/*",
+    "../graphics/src/**/*",
     "scripts/**/*",
     "remotion.config.ts"
   ],
   "exclude": [
     "scripts/render-job.mts",
-    "scripts/regen-scenes.mts"
+    "scripts/regen-scenes.mts",
+    "scripts/final-reassemble.mts"
   ]
 }

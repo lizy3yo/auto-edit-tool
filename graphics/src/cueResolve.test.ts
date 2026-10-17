@@ -10,6 +10,7 @@ import {
   findPhrase,
   findSubsequence,
   indexWords,
+  parseSpokenNumber,
   resolveCues,
   tokens,
   type Word,
@@ -48,6 +49,17 @@ describe("findPhrase / findSubsequence", () => {
   it("treats number words and digits alike, and a plural s", () => {
     expect(findPhrase(index, "at ten year")).not.toBeNull();
     expect(findPhrase(index, "at 10 years")).not.toBeNull();
+  });
+  it("reads a whole spoken number against its digits, either way round", () => {
+    expect(findPhrase(indexWords(W("It takes about 25 minutes apiece", 0)), "about twenty-five minutes")).not.toBeNull();
+    expect(findPhrase(indexWords(W("call it fifty cents", 0)), "call it 50 cents")).not.toBeNull();
+    expect(findPhrase(indexWords(W("a hundred and fifty dollars", 0)), "150 dollars")).not.toBeNull();
+    expect(findPhrase(indexWords(W("about 25 minutes", 0)), "about twenty-six minutes")).toBeNull();
+    expect(parseSpokenNumber(["three", "million", "dogs"], 0)).toEqual({ value: 3000000, n: 2 });
+    expect(parseSpokenNumber(["a", "dog"], 0)).toBeNull();
+  });
+  it("forgives a trailing -d like a plural -s", () => {
+    expect(findPhrase(indexWords(W("Mine was lap size, 12 blocks", 0)), "Mine was lap-sized, twelve blocks")).not.toBeNull();
   });
   it("forgives one changed letter in a long word, never in a short one or a number", () => {
     const idx = indexWords(W("a plastic disk glued to the ceiling 10 years", 0));
@@ -205,6 +217,11 @@ describe("timing", () => {
     expect(countUpValue(1000, 0, 60, 30)).toBe("60");
     expect(countUpValue(1000, 0, 2.5, 30)).toBe("2.5");
     expect(Number(countUpValue(10, 0, 60, 30))).toBeLessThan(60);
+    // Digits grouped as written: 10,000 and up, money from 1,000; a bare year stays bare.
+    expect(countUpValue(1000, 0, 10000, 30)).toBe("10,000");
+    expect(countUpValue(1000, 0, 1998, 30)).toBe("1998");
+    expect(countUpValue(1000, 0, 1500, 30, 1.1, 1000)).toBe("1,500");
+    expect(countUpValue(1000, 0, 1234567.5, 30)).toBe("1,234,567.5");
   });
   it("a word appears a little before it is spoken, never before frame 0", () => {
     const f = wordFrames({ text: "one two", at: 0, wordTimes: [0, 1] }, 30);

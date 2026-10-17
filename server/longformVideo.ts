@@ -444,6 +444,7 @@ import {
 } from "./tracking";
 import { stripHostNames } from "../shared/constants";
 import type { VideoSubmitResult } from "./providers/base";
+import { withGraphics } from "./graphics/apply";
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
@@ -16858,10 +16859,22 @@ async function assembleAndFinalizeCore(
     );
   }
 
+  // MOTION GRAPHICS (server/graphics): the finishing step, on the assembled film, before it is
+  // uploaded — so the saved film carries its graphics. Never fails the film: on any error, or with
+  // graphics off (GRAPHICS=0 or the channel's switch), the film ships as assembled.
+  const hadGraphics = JSON.stringify(params.graphics ?? null);
+  const filmBuffer = await withGraphics(jobId, buffer, readyScenes, params, {
+    phase: (label, pct) => setJobPhase(jobId, { title: "Adding graphics", label, pct }),
+    warn: m => appendJobWarning(jobId, m),
+    log: m => console.log(`[Longform ${jobId}] ${m}`),
+  });
+  const graphicsChanged = JSON.stringify(params.graphics ?? null) !== hadGraphics;
+  if (passStopped(jobId)) throw new AssemblyStoppedError();
+
   const key = `longform/${jobId}/final-${nanoid(8)}.mp4`;
   setJobPhase(jobId, assemblyPhase({ step: "upload" }));
   const uploadStart = Date.now();
-  const { url } = await storagePut(key, buffer, "video/mp4");
+  const { url } = await storagePut(key, filmBuffer, "video/mp4");
   console.log(
     `[Longform ${jobId}] final upload done in ${Math.round((Date.now() - uploadStart) / 1000)}s | assembly total ${sinceStart()}s`
   );
@@ -16884,7 +16897,7 @@ async function assembleAndFinalizeCore(
     finalFileKey: key,
     completedAt: new Date(),
     ...(hadTimingEdits || qrWindowChanged ? { storyboard: scenes } : {}),
-    ...(levelApplied ? { inputParams: params } : {}),
+    ...(levelApplied || graphicsChanged ? { inputParams: params } : {}),
   });
   // The light copy the page's player uses on a weak connection (`server/lightVideo.ts`). Started
   // only now that the film is finished and saved, and never awaited: it cannot delay or fail

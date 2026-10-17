@@ -5,10 +5,10 @@
 import path from "node:path";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import sharp from "sharp";
-import type { ResolvedCue } from "../src/cueResolve.ts";
+import type { ResolvedCue } from "../../graphics/src/cueResolve.ts";
 import { ffmpegPath, outDir, run } from "./lib.mts";
 import { audioOffsetMs } from "./qa-lib.mts";
-import { FPS } from "../src/theme.ts";
+import { FPS } from "../../graphics/src/theme.ts";
 
 const args = process.argv.slice(2);
 const arg = (k: string, d: string) => {

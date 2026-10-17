@@ -131,6 +131,7 @@ import {
   History,
   Merge,
   AudioLines,
+  Sparkles,
 } from "lucide-react";
 
 export type SlotStatus = "idle" | "processing" | "completed" | "failed";
@@ -1074,6 +1075,15 @@ export default function LongformJobSlot({
       },
       onError: err => toast.error(err.message),
     });
+
+  // "Re-plan graphics": a Reassemble whose graphics step writes a fresh plan (server/graphics).
+  const replanGraphicsMutation = trpc.longformVideo.replanGraphics.useMutation({
+    onSuccess: () => {
+      toast.success("Re-planning the motion graphics and re-stitching the film — no scenes re-render.");
+      if (jobId) utils.longformVideo.pollJob.invalidate({ jobId });
+    },
+    onError: err => toast.error(err.message),
+  });
 
   const levelNarrationMutation = trpc.longformVideo.levelNarration.useMutation({
     onSuccess: () => {
@@ -3134,6 +3144,40 @@ export default function LongformJobSlot({
                       )}
                       Reassemble
                     </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        if (!jobId) return;
+                        if (
+                          !window.confirm(
+                            "Write a fresh motion-graphics plan for this film and re-stitch it? One planning call (about $0.30); no scenes re-render."
+                          )
+                        )
+                          return;
+                        armNotifications();
+                        replanGraphicsMutation.mutate({ jobId });
+                      }}
+                      disabled={replanGraphicsMutation.isPending}
+                      title="A fresh plan for the cards, labels and captions. Reassemble keeps the graphics the film has."
+                    >
+                      {replanGraphicsMutation.isPending ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Sparkles className="mr-2 h-4 w-4" />
+                      )}
+                      Re-plan graphics
+                    </Button>
+                    {job.graphics && (
+                      <span
+                        className="self-center text-xs text-muted-foreground"
+                        title={job.graphics.failures.join(" · ") || undefined}
+                      >
+                        {job.graphics.skipped
+                          ? `Motion graphics: none — ${job.graphics.skipped}`
+                          : `Motion graphics: ${job.graphics.placed} placed${job.graphics.dropped ? `, ${job.graphics.dropped} left out` : ""} · QA ${job.graphics.qaPass ? "pass" : "see warnings"}`}
+                      </span>
+                    )}
                     <Button
                       variant="outline"
                       size="sm"

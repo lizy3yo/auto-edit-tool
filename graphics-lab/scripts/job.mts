@@ -52,14 +52,5 @@ export function loadJob(id: number): Job {
   return job;
 }
 
-/** Where the host's name tag is up — the app's `nameCardSceneIndices`: the leading run of
- * `hostOpener` host scenes, else the first host scene. */
-export function nameTagRange(job: Job): [number, number] | undefined {
-  const run: JobScene[] = [];
-  for (const s of job.scenes) {
-    if (!s.hostOpener) break;
-    if (s.hostPresent) run.push(s);
-  }
-  const scenes = run.length ? run : job.scenes.filter(s => s.hostPresent).slice(0, 1);
-  return scenes.length ? [scenes[0].narrationStartSec, scenes[scenes.length - 1].narrationEndSec] : undefined;
-}
+/** Where the host's name tag is up (graphics/src/plan/rules.ts). */
+export { nameTagRange } from "../../graphics/src/plan/rules.ts";

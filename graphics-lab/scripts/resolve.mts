@@ -2,7 +2,7 @@
 //   tsx scripts/resolve.mts [cues/frederick-376.json]
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { resolveCues, type CueSpec, type Word } from "../src/cueResolve.ts";
+import { resolveCues, type CueSpec, type Word } from "../../graphics/src/cueResolve.ts";
 import { OUT } from "./lib.mts";
 
 const sheet = JSON.parse(readFileSync(process.argv[2] ?? "cues/frederick-376.json", "utf8")) as { job: number; cues: CueSpec[] };

@@ -7,7 +7,7 @@ import sharp from "sharp";
 import { detectCuts, frameDiffs } from "./qa-lib.mts";
 import { ffmpegPath, outDir, run } from "./lib.mts";
 import { loadJob } from "./job.mts";
-import type { Word } from "../src/cueResolve.ts";
+import type { Word } from "../../graphics/src/cueResolve.ts";
 
 const jobId = Number(process.argv[process.argv.indexOf("--job") + 1]);
 const job = loadJob(jobId);

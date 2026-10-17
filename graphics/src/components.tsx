@@ -16,6 +16,51 @@ import { fadeIn, splitWords, wordFrames, type Phrase } from "./timing";
 export const ThemeContext = React.createContext<Theme>(THEME);
 export const useTheme = () => React.useContext(ThemeContext);
 
+/**
+ * READABILITY on footage. Text laid over a picture can land on a white box or a bright window, so
+ * every text graphic on footage takes a `shade` (0-1): how much MORE it darkens behind its words
+ * than its normal look. 0 is the designed look; the composite measures the real contrast on the
+ * rendered frames and raises it only where the picture needs it (scripts/legibility.mts).
+ */
+export const shaded = (base: number, shade = 0, max = 0.92): number => base + (max - base) * Math.min(1, Math.max(0, shade));
+
+/** Where a movable text graphic sits: side and band of the frame (title-safe). The composite
+ * moves one to the calmest part of the picture when its first place is too bright to read. */
+export type Place = { h: "left" | "right"; v: "top" | "middle" | "bottom" };
+export const PLACES: Place[] = [
+  { h: "left", v: "middle" },
+  { h: "left", v: "top" },
+  { h: "left", v: "bottom" },
+  { h: "right", v: "middle" },
+  { h: "right", v: "top" },
+  { h: "right", v: "bottom" },
+];
+
+/** Absolute position for a block of text at `place`; `align` follows the side. */
+export function placeStyle(place: Place | undefined, height: number): React.CSSProperties {
+  const p = place ?? PLACES[0];
+  const top = p.v === "top" ? 150 : p.v === "bottom" ? 1080 - 170 - height : (1080 - height) / 2;
+  return {
+    position: "absolute",
+    top,
+    ...(p.h === "left" ? { left: 160 } : { right: 160 }),
+    textAlign: p.h === "left" ? "left" : "right",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: p.h === "left" ? "flex-start" : "flex-end",
+  };
+}
+
+/** A soft dark pool behind a block of text (no hard box): stronger with `shade`. */
+export const textPool = (shade = 0): React.CSSProperties =>
+  shade > 0
+    ? {
+        background: `radial-gradient(ellipse 60% 70% at 50% 50%, rgba(0,0,0,${(0.62 * shade).toFixed(3)}) 0%, rgba(0,0,0,${(0.38 * shade).toFixed(3)}) 55%, rgba(0,0,0,0) 100%)`,
+        padding: "40px 60px",
+        margin: "-40px -60px",
+      }
+    : {};
+
 /** Soft shadow every piece of text on a card carries (measured off the reference). */
 export const TEXT_SHADOW = "0 6px 28px rgba(0,0,0,0.35)";
 
@@ -150,18 +195,33 @@ export const WordReveal: React.FC<{
   );
 };
 
+/** Anything that is not a letter, digit, apostrophe or hyphen (built at runtime: the app's type
+ * check targets a JavaScript older than the Unicode-property regex literal). */
+const NOT_WORD_CHAR = new RegExp("[^\\p{L}\\p{N}'-]", "gu");
+
 function norm(w: string): string {
-  return w.toLowerCase().replace(/[^\p{L}\p{N}'-]/gu, "");
+  return w.toLowerCase().replace(NOT_WORD_CHAR, "");
 }
+
+/** On when a graphic is rendered only to MEASURE its words' readability: everything that is not a
+ * word is left out — icons (pictures; one close to the accent's colour would read as coloured
+ * text) and decorative marks (a strike-through line across words). Each keeps its exact box, so
+ * the words sit where they sit in the real graphic. */
+export const MeasuringContext = React.createContext(false);
 
 /** A Noto Color Emoji icon (Apache-2.0), by code point file name in `public/icons`. */
 export const Icon: React.FC<{ code: string; size: number; style?: React.CSSProperties }> = ({
   code,
   size,
   style,
-}) => (
+}) =>
+  React.useContext(MeasuringContext) ? (
+    <div style={{ width: size, height: size, flex: "none", ...style }} />
+  ) : (
   <Img
-    src={staticFile(`icons/${code}.png`)}
+    // The app hands icons in INLINE (a data: URL): a long-running server bundles the templates
+    // once, so an icon fetched after that could not be served from the bundle's own folder.
+    src={code.startsWith("data:") ? code : staticFile(`icons/${code}.png`)}
     style={{ width: size, height: size, objectFit: "contain", ...style }}
   />
 );

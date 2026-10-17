@@ -8,7 +8,7 @@ import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import sharp from "sharp";
 import { argbFromRgb } from "@material/material-color-utilities";
-import { MIN_CONTRAST, themeFromPixels } from "../src/palette.ts";
+import { MIN_CONTRAST, themeFromPixels } from "../../graphics/src/palette.ts";
 import { outDir } from "./lib.mts";
 
 const jobId = Number(process.argv[process.argv.indexOf("--job") + 1]);

@@ -3,7 +3,7 @@
 // ≥ 57 dB PSNR — invisible; tabs = 1 is bit-identical at half the speed.  tsx scripts/tabs-check.mts [Id]
 import { renderMedia, selectComposition } from "@remotion/renderer";
 import path from "node:path";
-import { templateById } from "../src/registry.ts";
+import { templateById } from "../../graphics/src/registry.ts";
 import { ffmpegPath, getBundle, outDir, run } from "./lib.mts";
 
 const serveUrl = await getBundle();

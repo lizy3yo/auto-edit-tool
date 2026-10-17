@@ -14,6 +14,8 @@ Isolated prototype of **Steve Cooper–style motion graphics**: full-screen card
 | `src/timing.ts` | Pure timing maths: word appear frames, fades, count-up |
 | `src/cueResolve.ts` | Turns a cue sheet written in the **script's own words** into exact times from the word transcript (unit-tested) |
 | `cues/frederick-376.json` | The cue sheet for Frederick Barnes' smoke-alarm film (job 376): 14 graphics |
+| `src/more.tsx` | Steve's other 15 graphics (opening title, small label, checklist, crossed-out list, MYTH stamp, bar chart, number label, fact and yes/no cards, term/list/host windows, arrow caption, icon callout, number over footage) |
+| `src/legibility.ts`, `scripts/legibility.mts` | Text readable on the real frames (WCAG: white 7:1, colour 4.5:1), fixed by darkening or moving |
 | `src/palette.ts` | Colours from the host photo (Material Color Utilities), WCAG contrast guaranteed |
 | `scripts/plan.mts`, `scripts/rules.mts` | The automatic planner and the placement rules it and the composite share |
 | `scripts/` | `transcribe` (local whisper.cpp word times), `resolve`, `stills`, `composite`, `bench`, `highlights` |
@@ -32,7 +34,7 @@ npx tsx scripts/composite.mts --cues cues/frederick-376.json --tag try1
 npx tsx scripts/transcribe.mts --job 385     # word times
 npx tsx scripts/cuts.mts 385                 # the film's picture cuts
 npx tsx scripts/theme.mts --job 385          # colours from the host photo
-npx tsx scripts/plan.mts --job 385 --out cues/frederick-385.json   # one Claude call writes the cue sheet
+npx tsx scripts/plan.mts --job 385 --keep cues/frederick-385-keep.json --out cues/frederick-385-all.json   # every moment the script calls for; approved graphics kept
 npx tsx scripts/composite.mts --cues cues/frederick-385.json --tag run2
 npx tsx scripts/highlights.mts --job 385 --tag run2
 npx tsx scripts/bench.mts --runs 3            # speed + identical-output check

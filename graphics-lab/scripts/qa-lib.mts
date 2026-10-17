@@ -2,7 +2,7 @@
 // because the faults they catch (a one-frame flash, audio drifting at a join) only exist in the
 // output.
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 
 const DIFF_W = 160;
 const DIFF_H = 90;
@@ -12,8 +12,15 @@ const DIFF_H = 90;
  * `d[k]` is the change INTO frame k (d[0] = 0). Cached next to the video as `<file>.diffs.json`.
  */
 export async function frameDiffs(ff: string, file: string): Promise<number[]> {
+  // Cached per file VERSION (size + modified time): a reel rewritten under the same name must be
+  // measured again — a name-only cache judged every re-run on the first run's reel.
   const cache = `${file}.diffs.json`;
-  if (existsSync(cache)) return JSON.parse(readFileSync(cache, "utf8"));
+  const st = statSync(file);
+  const version = `${st.size}:${Math.round(st.mtimeMs)}`;
+  if (existsSync(cache)) {
+    const c = JSON.parse(readFileSync(cache, "utf8")) as { version?: string; diffs?: number[] } | number[];
+    if (!Array.isArray(c) && c.version === version && c.diffs) return c.diffs;
+  }
   const n = DIFF_W * DIFF_H;
   const d: number[] = await new Promise((resolve, reject) => {
     const p = spawn(ff, ["-hide_banner", "-loglevel", "error", "-i", file, "-vf", `scale=${DIFF_W}:${DIFF_H},format=gray`, "-f", "rawvideo", "-"], { windowsHide: true });
@@ -37,7 +44,7 @@ export async function frameDiffs(ff: string, file: string): Promise<number[]> {
     p.on("error", reject);
     p.on("close", code => (code === 0 ? resolve(out) : reject(new Error(`ffmpeg exited ${code}`))));
   });
-  writeFileSync(cache, JSON.stringify(d.map(x => Math.round(x * 100) / 100)));
+  writeFileSync(cache, JSON.stringify({ version, diffs: d.map(x => Math.round(x * 100) / 100) }));
   return d;
 }
 

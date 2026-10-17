@@ -1,0 +1,121 @@
+{
+ "job": 382,
+ "notes": "Written by scripts/plan.mts (claude-opus-5-5) on 2026-10-16: 6 graphics for a 2.3-min film. Every graphic placed where the script calls for it (no quota per type); every cue resolved against the word times and checked by scripts/rules.mts.",
+ "cues": [
+  {
+   "id": "burnt-scraps-label",
+   "template": "SmallLabel",
+   "start": "a coffee can of burnt scraps",
+   "startPad": -0.15,
+   "end": "can of burnt scraps",
+   "endPad": 0.3,
+   "props": {
+    "text": "Burnt scraps",
+    "at": "@burnt scraps"
+   }
+  },
+  {
+   "id": "lattice-14-an-hour",
+   "template": "BigNumberOverlay",
+   "start": "finished dead last at about",
+   "startPad": -0.15,
+   "end": "at about $14 an hour.",
+   "endPad": 0.3,
+   "props": {
+    "kicker": "Dead last",
+    "prefix": "$",
+    "value": 14,
+    "unit": "an hour",
+    "at": "@at about",
+    "line": {
+     "text": "finished dead last",
+     "words": true
+    },
+    "countSec": 0.6
+   }
+  },
+  {
+   "id": "garage-tools",
+   "template": "ListWindow",
+   "start": "a saw, a drill, and",
+   "startPad": -0.15,
+   "end": "a stack of sandpaper,",
+   "endPad": 0.3,
+   "props": {
+    "title": "In the garage",
+    "items": [
+     {
+      "text": "A saw",
+      "at": "@a saw,",
+      "say": "a saw,"
+     },
+     {
+      "text": "A drill",
+      "at": "@a drill,",
+      "say": "a drill,"
+     },
+     {
+      "text": "Sandpaper",
+      "at": "@sandpaper,",
+      "say": "a stack of sandpaper,"
+     }
+    ]
+   }
+  },
+  {
+   "id": "kumiko-term",
+   "template": "TermWindow",
+   "start": "Kumiko is the Japanese craft of",
+   "startPad": -0.15,
+   "end": "fitting thin strips of wood",
+   "endPad": 0.3,
+   "props": {
+    "kicker": "The term",
+    "term": "Kumiko",
+    "at": "@Kumiko",
+    "meaning": {
+     "text": "the Japanese craft of fitting thin strips of wood",
+     "words": true
+    }
+   }
+  },
+  {
+   "id": "notch-warning",
+   "template": "WarningLabel",
+   "start": "every notch has to be dead",
+   "startPad": -0.15,
+   "end": "has to be dead on",
+   "endPad": 0.3,
+   "props": {
+    "text": {
+     "text": "Every notch has to be dead on",
+     "words": true
+    },
+    "emphasis": [
+     "on"
+    ]
+   }
+  },
+  {
+   "id": "figured-vs-took",
+   "template": "NumberLabel",
+   "start": "I figured 2 hours. It",
+   "startPad": -0.15,
+   "end": "It took 6.",
+   "endPad": 0.3,
+   "props": {
+    "kicker": "Hours",
+    "a": {
+     "label": "Figured",
+     "value": "2 hours",
+     "at": "@2 hours."
+    },
+    "b": {
+     "label": "Took",
+     "value": "6",
+     "at": "@took 6."
+    }
+   }
+  }
+ ]
+}

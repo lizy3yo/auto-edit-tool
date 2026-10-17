@@ -4,8 +4,9 @@
 import sharp from "sharp";
 import path from "node:path";
 import { existsSync, readFileSync } from "node:fs";
-import { TEMPLATES } from "../src/registry.ts";
-import { FPS, WIDTH, HEIGHT } from "../src/theme.ts";
+import { TEMPLATES } from "../../graphics/src/registry.ts";
+import { WINDOW } from "../../graphics/src/more.tsx";
+import { FPS, WIDTH, HEIGHT } from "../../graphics/src/theme.ts";
 import { outDir, renderFrame } from "./lib.mts";
 
 const args = process.argv.slice(2);
@@ -34,6 +35,12 @@ for (const t of TEMPLATES) {
     if (t.kind === "overlay" && bg && existsSync(bg)) {
       let base = sharp(bg).resize(WIDTH, HEIGHT);
       if (t.underlay === "blur") base = base.blur(18);
+      // A window template: the picture scaled into the window, as the composite does.
+      if (t.underlay === "window") {
+        const win = await sharp(bg).resize(WINDOW.w, WINDOW.h).toBuffer();
+        base = sharp({ create: { width: WIDTH, height: HEIGHT, channels: 3, background: "#000" } }).composite([{ input: win, left: WINDOW.x, top: WINDOW.y }]);
+        base = sharp(await base.png().toBuffer());
+      }
       await base.composite([{ input: raw }]).png().toFile(file);
     } else {
       await sharp(raw).flatten({ background: "#808080" }).png().toFile(file);

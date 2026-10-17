@@ -5,7 +5,7 @@
   "description": "Isolated prototype: Steve Cooper-style motion graphics (cards, labels, word-timed captions) rendered with Remotion. Not imported by the app.",
   "type": "module",
   "scripts": {
-    "studio": "remotion studio src/index.ts",
+    "studio": "remotion studio ../graphics/src/index.ts --public-dir ../graphics/public",
     "check": "tsc --noEmit",
     "test": "vitest run",
     "cues": "tsx scripts/build-cues.mts",

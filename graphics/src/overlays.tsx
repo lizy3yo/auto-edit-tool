@@ -7,30 +7,39 @@
 // card's band, and nothing is ever planned inside a CTA block (the planner's rule, not ours).
 import React from "react";
 import { AbsoluteFill, useCurrentFrame, useVideoConfig } from "remotion";
-import { Arrow, Icon, NumberDot, TEXT_SHADOW, WordReveal, useEnter, useTheme } from "./components";
+import { Arrow, Icon, NumberDot, TEXT_SHADOW, WordReveal, placeStyle, shaded, textPool, useEnter, useTheme, type Place } from "./components";
 import { LAYOUT, TYPE } from "./theme";
-import { appearFrame, fadeIn, fadeOutAtEnd, scrimIn, type Phrase } from "./timing";
+import { appearFrame, fadeIn, fadeOutAtEnd, scrimIn, scrimOut, type Phrase } from "./timing";
 import type { BaseProps } from "./cards";
 
-const useAt = () => {
+export const useAt = () => {
   const { fps } = useVideoConfig();
   return (sec: number) => appearFrame(sec, fps);
 };
 
+/** How much more an overlay darkens behind its words (0-1), set per cue from the measured
+ * contrast (scripts/legibility.mts). Plates read it through `usePlate`. */
+export const ShadeContext = React.createContext(0);
+/** The dark label plate at the shade this cue needs (base alpha 0.62-0.74, up to 0.92). */
+export const usePlate = (baseAlpha: number): string => {
+  const shade = React.useContext(ShadeContext);
+  return `rgba(12,16,22,${shaded(baseAlpha, shade).toFixed(3)})`;
+};
+
 /** Wraps an overlay so it leaves softly at its end. */
-export const ExitContext = React.createContext<"fade" | "cut">("fade");
+export const ExitContext = React.createContext<"fade" | "cut" | "scrim">("fade");
 
 /** Wraps an overlay so it leaves softly at its end — or with the picture, on a cut. */
-const Leave: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export const Leave: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const frame = useCurrentFrame();
   const { durationInFrames } = useVideoConfig();
   const exit = React.useContext(ExitContext);
-  const opacity = exit === "cut" ? 1 : fadeOutAtEnd(frame, durationInFrames);
+  const opacity = exit === "cut" ? 1 : exit === "scrim" ? scrimOut(frame, durationInFrames) : fadeOutAtEnd(frame, durationInFrames);
   return <AbsoluteFill style={{ opacity }}>{children}</AbsoluteFill>;
 };
 
 /** Translucent plate behind text on footage: readable on a white wall or a dark room alike. */
-const plate = (bg: string): React.CSSProperties => ({
+export const plate = (bg: string): React.CSSProperties => ({
   background: bg,
   borderRadius: 6,
   boxShadow: "0 12px 40px rgba(0,0,0,0.30)",
@@ -62,7 +71,7 @@ export const ChapterLabel: React.FC<ChapterProps> = ({ kicker, number, title }) 
           height: 265,
           width: 960,
           clipPath: `inset(0 ${(1 - wipe) * 100}% 0 0)`,
-          ...plate(t.plate),
+          ...plate(usePlate(0.62)),
           borderRadius: 0,
           borderLeft: `7px solid ${t.accent}`,
           boxSizing: "border-box",
@@ -127,7 +136,7 @@ const Pill: React.FC<{ at: number; children: React.ReactNode }> = ({ at, childre
     <div
       style={{
         ...enter,
-        ...plate("rgba(14,16,20,0.74)"),
+        ...plate(usePlate(0.74)),
         borderRadius: 12,
         padding: "14px 22px 14px 16px",
         display: "flex",
@@ -191,7 +200,7 @@ export const WarningLabel: React.FC<WarningProps> = ({ label = "Warning", text, 
           top: 560,
           maxWidth: 1100,
           clipPath: `inset(0 ${(1 - wipe) * 100}% 0 0)`,
-          ...plate(t.plate),
+          ...plate(usePlate(0.62)),
           borderRadius: 0,
           borderLeft: `7px solid ${t.danger}`,
           padding: "26px 40px 30px 30px",
@@ -256,6 +265,15 @@ export const IconLabels: React.FC<IconLabelsProps> = ({ items }) => {
 
 /* ───────────────────────── Caption over the host ───────────────────────── */
 
+/**
+ * What sits behind a caption on the host: nothing designed (the words and their shadow), a soft
+ * dark pool as the readability check asks for more, and — its strongest step — a dark rounded
+ * caption BOX, broadcast captioning's answer to white words over a white beard or a light shirt
+ * (Dale, job 386: the pool alone left four captions unreadable).
+ */
+const captionBacking = (shade: number): React.CSSProperties =>
+  shade >= 1 ? { background: "rgba(12,16,22,0.84)", borderRadius: 12, padding: "14px 30px" } : textPool(shade);
+
 export type HostCaptionProps = BaseProps & {
   phrase: Phrase;
   emphasis?: string[];
@@ -277,9 +295,11 @@ export type HostCaptionProps = BaseProps & {
  */
 export const HostCaption: React.FC<HostCaptionProps> = ({ phrase, emphasis, top = 790, panel }) => {
   const t = useTheme();
+  const shade = React.useContext(ShadeContext);
   return (
     <Leave>
       <div style={{ position: "absolute", left: panel?.x ?? 0, width: panel?.w ?? 1920, top: panel ? top - 60 : top, display: "flex", justifyContent: "center" }}>
+        <div style={captionBacking(shade)}>
         <WordReveal
           phrase={phrase}
           emphasis={emphasis}
@@ -296,6 +316,7 @@ export const HostCaption: React.FC<HostCaptionProps> = ({ phrase, emphasis, top 
             textShadow: "0 4px 18px rgba(0,0,0,0.65), 0 2px 4px rgba(0,0,0,0.5)",
           }}
         />
+        </div>
       </div>
     </Leave>
   );
@@ -308,19 +329,20 @@ export type DimCaptionProps = BaseProps & {
   emphasis?: string[];
   /** How dark the footage goes (0-1). */
   dim?: number;
-  /** Where the line sits; defaults to the card's left column. */
-  x?: number;
-  y?: number;
+  /** Where the line sits (the composite moves it off a bright part of the picture). */
+  place?: Place;
 };
 
-export const DimCaption: React.FC<DimCaptionProps> = ({ phrase, emphasis, dim = 0.55, x = LAYOUT.marginX, y = 470 }) => {
+export const DimCaption: React.FC<DimCaptionProps> = ({ phrase, emphasis, dim = 0.55, place }) => {
   const t = useTheme();
   const frame = useCurrentFrame();
   const scrim = scrimIn(frame);
+  const shade = React.useContext(ShadeContext);
   return (
     <Leave>
-      <AbsoluteFill style={{ background: `rgba(5,10,18,${dim * scrim})` }} />
-      <div style={{ position: "absolute", left: x, top: y }}>
+      <AbsoluteFill style={{ background: `rgba(5,10,18,${shaded(dim, shade, 0.8) * scrim})` }} />
+      <div style={{ ...placeStyle(place, 220) }}>
+        <div style={textPool(shade)}>
         <WordReveal
           phrase={phrase}
           emphasis={emphasis}
@@ -334,6 +356,7 @@ export const DimCaption: React.FC<DimCaptionProps> = ({ phrase, emphasis, dim = 
             textShadow: TEXT_SHADOW,
           }}
         />
+        </div>
       </div>
     </Leave>
   );
@@ -378,7 +401,7 @@ export const QuoteCard: React.FC<QuoteProps> = ({ quote, author, emphasis }) => 
   const sig = useEnter(at(quote.at) + 14, 12);
   return (
     <Leave>
-      <AbsoluteFill style={{ background: `rgba(6,12,20,${0.62 * scrim})` }} />
+      <AbsoluteFill style={{ background: `rgba(6,12,20,${shaded(0.62, React.useContext(ShadeContext), 0.85) * scrim})` }} />
       <div style={{ ...mark, position: "absolute", left: 150, top: 150 }}>
         <QuoteMark size={190} color={t.accent} />
       </div>

@@ -648,6 +648,8 @@ const channelConfigRouter = router({
         defaultAngle: z.string().optional(),
         defaultFormat: z.string().optional(),
         defaultWordCount: z.number().optional(),
+        /** Motion graphics on this channel's videos (on by default). Omitted ⇒ left as stored. */
+        motionGraphics: z.boolean().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -2900,6 +2902,20 @@ const longformVideoRouter = router({
         // What the video was MADE WITH (`shared/jobPicks.ts`): the picks as they were at
         // Generate, since the form above the card only shows the picks for the next video.
         picks: jobPickFacts(previewParams, job),
+        // The film's motion graphics, as a summary for the card (never the plan itself):
+        // how many are in the film, the QA, or why the last assembly left them out.
+        graphics: (() => {
+          const g = (job.inputParams as LongformInputParams | null)?.graphics;
+          if (!g) return null;
+          return {
+            placed: g.placed?.length ?? 0,
+            dropped: g.dropped?.length ?? 0,
+            qaPass: g.qa?.pass ?? null,
+            failures: g.qa?.failures ?? [],
+            skipped: g.skipped ?? null,
+            replanQueued: !!g.replan,
+          };
+        })(),
         // A guest on a video someone else made: the card shows it and pauses every button
         // (`mayEditOwned`; `assertJobAccess` refuses the writes too).
         viewOnly: !mayEditOwned(ctx.user, job.userId),
@@ -4074,6 +4090,32 @@ const longformVideoRouter = router({
       }
       retryJobAssembly(input.jobId, true).catch(err => {
         console.error(`[Longform ${input.jobId}] reassembleFinal error:`, err);
+      });
+      return { ok: true };
+    }),
+
+  /**
+   * "Re-plan graphics": a Reassemble whose graphics step writes a FRESH plan (one model call,
+   * "Graphics plan" on the Cost dialog) instead of reusing the saved one (server/graphics).
+   */
+  replanGraphics: approvedProcedure
+    .input(z.object({ jobId: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      const job = await getLongformVideoJobById(input.jobId);
+      if (!job)
+        throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
+      await assertJobAccess(job, ctx.user, "write");
+      if (job.status === "processing") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Job is still processing — wait for it to settle first",
+        });
+      }
+      const params = { ...(job.inputParams as LongformInputParams) };
+      params.graphics = { ...(params.graphics ?? {}), replan: true };
+      await updateLongformVideoJob(input.jobId, { inputParams: params });
+      retryJobAssembly(input.jobId, true).catch(err => {
+        console.error(`[Longform ${input.jobId}] replanGraphics error:`, err);
       });
       return { ok: true };
     }),

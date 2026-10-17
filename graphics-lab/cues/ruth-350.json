@@ -1,0 +1,205 @@
+{
+ "job": 350,
+ "notes": "Written by scripts/plan.mts (claude-opus-5-5) on 2026-10-16: 10 graphics for a 3.4-min film. Every graphic placed where the script calls for it (no quota per type); every cue resolved against the word times and checked by scripts/rules.mts.",
+ "cues": [
+  {
+   "id": "title-paid-best",
+   "template": "TitleOverFootage",
+   "start": "the one that paid me best",
+   "startPad": -0.15,
+   "end": "best for my time",
+   "endPad": 0.3,
+   "props": {
+    "kicker": "Scrap quilting",
+    "phrase": {
+     "text": "The one that paid me best for my time",
+     "words": true
+    },
+    "emphasis": [
+     "best"
+    ]
+   }
+  },
+  {
+   "id": "sampler-four-dollars",
+   "template": "BigNumber",
+   "start": "finished dead last at about",
+   "startPad": -0.15,
+   "end": "about $4 an hour",
+   "endPad": 0.3,
+   "props": {
+    "kicker": "Finished dead last",
+    "say": "finished dead last",
+    "prefix": "$",
+    "value": 4,
+    "unit": "an hour",
+    "at": "@$4 an hour",
+    "countSec": 0.6
+   }
+  },
+  {
+   "id": "kitchen-table-kit",
+   "template": "ListWindow",
+   "start": "a straight-stitch machine, a rotary cutter",
+   "startPad": -0.15,
+   "end": "too pretty to throw out",
+   "endPad": 0.3,
+   "props": {
+    "title": "What you've got",
+    "items": [
+     {
+      "text": "Straight-stitch machine",
+      "at": "@a straight-stitch machine",
+      "say": "a straight-stitch machine"
+     },
+     {
+      "text": "Rotary cutter",
+      "at": "@a rotary cutter",
+      "say": "a rotary cutter"
+     },
+     {
+      "text": "Mountain of scraps",
+      "at": "@a mountain of scraps",
+      "say": "a mountain of scraps"
+     }
+    ]
+   }
+  },
+  {
+   "id": "classic-patterns",
+   "template": "ListWindow",
+   "start": "a churn dash here, a bear",
+   "startPad": -0.15,
+   "end": "a flying geese row",
+   "endPad": 0.3,
+   "props": {
+    "title": "Classic patterns",
+    "items": [
+     {
+      "text": "Churn dash",
+      "at": "@a churn dash",
+      "say": "a churn dash"
+     },
+     {
+      "text": "Bear paw",
+      "at": "@a bear paw",
+      "say": "a bear paw"
+     },
+     {
+      "text": "Flying geese row",
+      "at": "@a flying geese row",
+      "say": "a flying geese row"
+     }
+    ]
+   }
+  },
+  {
+   "id": "twelve-blocks",
+   "template": "BigNumberOverlay",
+   "start": "Mine was lap-sized, twelve blocks",
+   "startPad": -0.15,
+   "end": "each one a different pattern",
+   "endPad": 0.3,
+   "props": {
+    "kicker": "Lap-sized sampler",
+    "value": 12,
+    "unit": "blocks",
+    "at": "@twelve blocks",
+    "line": {
+     "text": "each one a different pattern",
+     "words": true
+    },
+    "countSec": 0.6
+   }
+  },
+  {
+   "id": "winner-fabric-bowls",
+   "template": "Statement",
+   "start": "Now the winner. Scrappy fabric bowls",
+   "startPad": -0.15,
+   "end": "made from the squares",
+   "endPad": 0.3,
+   "props": {
+    "kicker": "Now the winner",
+    "say": "Now the winner",
+    "headline": {
+     "text": "Scrappy fabric bowls, made from the squares",
+     "words": true
+    },
+    "emphasis": [
+     "bowls,"
+    ]
+   }
+  },
+  {
+   "id": "bowl-time-cost",
+   "template": "NumberLabel",
+   "start": "It takes about twenty-five minutes apiece",
+   "startPad": -0.15,
+   "end": "call it fifty cents",
+   "endPad": 0.3,
+   "props": {
+    "kicker": "Per bowl",
+    "a": {
+     "label": "Time",
+     "value": "25 minutes",
+     "at": "@twenty-five minutes"
+    },
+    "b": {
+     "label": "Cost",
+     "value": "50 cents",
+     "at": "@fifty cents"
+    }
+   }
+  },
+  {
+   "id": "no-hot-food",
+   "template": "WarningLabel",
+   "start": "These bowls are for keys",
+   "startPad": -0.15,
+   "end": "hot food or the microwave",
+   "endPad": 0.3,
+   "props": {
+    "text": {
+     "text": "These bowls are not for hot food or the microwave",
+     "words": true
+    },
+    "emphasis": [
+     "microwave"
+    ]
+   }
+  },
+  {
+   "id": "bowls-47-an-hour",
+   "template": "BigNumber",
+   "start": "comes out to about $47",
+   "startPad": -0.15,
+   "end": "about $47 an hour",
+   "endPad": 0.3,
+   "props": {
+    "kicker": "What the bowls paid",
+    "prefix": "$",
+    "value": 47,
+    "unit": "an hour",
+    "at": "@about $47"
+   }
+  },
+  {
+   "id": "rotary-cutter-warning",
+   "template": "WarningLabel",
+   "start": "Keep all ten fingers away",
+   "startPad": -0.15,
+   "end": "from that rotary cutter",
+   "endPad": 0.3,
+   "props": {
+    "text": {
+     "text": "Keep all ten fingers away from that rotary cutter",
+     "words": true
+    },
+    "emphasis": [
+     "fingers"
+    ]
+   }
+  }
+ ]
+}

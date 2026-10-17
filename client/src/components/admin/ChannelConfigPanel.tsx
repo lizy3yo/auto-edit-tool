@@ -222,6 +222,8 @@ type EditForm = {
   defaultAngle: string;
   defaultFormat: string;
   defaultWordCount: string;
+  /** Motion graphics on this channel's videos ("on" by default). */
+  motionGraphics: "on" | "off";
 };
 
 /** Field order and wording for the "review changes" step. Ordered as the form is,
@@ -240,6 +242,7 @@ const EDIT_FIELDS: FieldSpec<EditForm>[] = [
   { field: "defaultAngle", label: "Default Angle" },
   { field: "defaultFormat", label: "Default Format" },
   { field: "defaultWordCount", label: "Word Count" },
+  { field: "motionGraphics", label: "Motion graphics" },
 ];
 
 /** The voice models a channel can pick, in both the edit and the create form. v4 acts out
@@ -299,6 +302,7 @@ export function ChannelConfigPanel() {
         defaultAngle: createForm.defaultAngle,
         defaultFormat: createForm.defaultFormat,
         defaultWordCount: createForm.defaultWordCount,
+        motionGraphics: "on",
       };
       setEditForm(created);
       setOriginalForm(created);
@@ -353,6 +357,7 @@ export function ChannelConfigPanel() {
     defaultAngle: "",
     defaultFormat: "",
     defaultWordCount: "",
+    motionGraphics: "on",
   });
   /** The form as it was loaded, so Save can show what actually changed. */
   const [originalForm, setOriginalForm] = useState<EditForm | null>(null);
@@ -405,6 +410,7 @@ export function ChannelConfigPanel() {
       defaultWordCount: config?.defaultWordCount
         ? String(config.defaultWordCount)
         : "",
+      motionGraphics: config?.motionGraphics === false ? "off" : "on",
     };
     setEditForm(loaded);
     setOriginalForm(loaded);
@@ -471,6 +477,7 @@ export function ChannelConfigPanel() {
       defaultWordCount: editForm.defaultWordCount
         ? parseInt(editForm.defaultWordCount)
         : undefined,
+      motionGraphics: editForm.motionGraphics === "on",
     });
     setSaveConfirmOpen(false);
     setEditingChannel(null);
@@ -743,6 +750,24 @@ export function ChannelConfigPanel() {
               <div className="mt-1 flex h-8 items-center rounded-md border border-input bg-muted px-3 text-xs text-muted-foreground">
                 Set by each video's script
               </div>
+            </div>
+            {/* Steve Cooper-style cards, labels and captions, added when a video is assembled. */}
+            <div>
+              <Label className="text-xs">Motion graphics</Label>
+              <Select
+                value={editForm.motionGraphics}
+                onValueChange={v =>
+                  setEditForm(f => ({ ...f, motionGraphics: v === "off" ? "off" : "on" }))
+                }
+              >
+                <SelectTrigger className="mt-1 text-xs h-8">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="on">On</SelectItem>
+                  <SelectItem value="off">Off</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
         </div>

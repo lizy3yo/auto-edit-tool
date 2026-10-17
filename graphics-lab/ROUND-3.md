@@ -81,3 +81,18 @@ Rehearsed on job 384: 9 written, 8 kept, composite QA PASS with no hand edits.
 - **"10-year" read as "one zero year":** the transcript of both Frederick films has the voice saying
   "a sealed one zero year unit" (the two words take about a second). The matcher now accepts a
   number read digit by digit. The voice itself is app-side and not changed here.
+
+## 6. The full graphics set on the new film (`cues/frederick-385-full.json`)
+
+The automatic planner held job 385 to Steve's density (9 graphics), which dropped graphics the
+earlier test had, including the "It isn't broken. It isn't dead." card. The full 15-graphic set
+from the earlier test is now on job 385. The script is the same, so the words are the same.
+
+- 14 graphics fit this film's layout as they were.
+- The quote "Its job is catching the slow part." falls on a split host take here, where a quote
+  (which blurs and darkens the whole frame) is not allowed, so the same words are a host caption in
+  the host panel.
+- Both VS cards now name the spoken words their side labels stand for (`say`), so each card stays
+  until its second side is said.
+- QA: PASS. 18 word-timed elements within 67 ms of the voice, no flashes, flicker, spills or
+  lingering, every rule passing. Highlights: 10 pieces, 85 s, sound vs picture 0 ms.

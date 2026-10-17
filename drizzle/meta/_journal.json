@@ -176,6 +176,13 @@
       "when": 1792078264703,
       "tag": "0024_outgoing_silvermane",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "5",
+      "when": 1792177472045,
+      "tag": "0025_careless_wraith",
+      "breakpoints": true
     }
   ]
 }

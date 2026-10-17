@@ -32,6 +32,8 @@ export default defineConfig({
       // scene-preview A/V sync is the first. Still `environment: "node"`: these must not
       // reach for `document`, or they belong in a jsdom project of their own.
       "client/src/components/**/*.test.ts",
+      // The motion-graphics templates' pure maths (word timing, colours, readability).
+      "graphics/src/**/*.test.ts",
     ],
   },
 });

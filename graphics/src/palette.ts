@@ -102,7 +102,7 @@ const HUE_BIN = 15;
 function sourceColour(pixels: number[]): number | undefined {
   const quantized = QuantizerCelebi.quantize(pixels, 128);
   const bins = new Map<number, { weight: number; best: number; bestN: number }>();
-  for (const [argb, n] of quantized) {
+  for (const [argb, n] of Array.from(quantized)) {
     const h = Hct.fromInt(argb);
     if (h.chroma < MIN_SOURCE_CHROMA || isSkin(h)) continue;
     const bin = Math.floor(h.hue / HUE_BIN);
@@ -115,7 +115,7 @@ function sourceColour(pixels: number[]): number | undefined {
     bins.set(bin, b);
   }
   let winner: { weight: number; best: number } | undefined;
-  for (const b of bins.values()) if (!winner || b.weight > winner.weight) winner = b;
+  for (const b of Array.from(bins.values())) if (!winner || b.weight > winner.weight) winner = b;
   // A trace of colour is not a brand: at least ~1% of the photo at full chroma.
   return winner && winner.weight >= 0.4 ? winner.best : undefined;
 }
@@ -148,4 +148,23 @@ const round2 = (x: number) => Math.round(x * 100) / 100;
 export function withAlpha(hex: string, alpha: number): string {
   const n = parseInt(hex.slice(1), 16);
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
+}
+
+/** `#rrggbb` mixed toward white by `t` (0-1). */
+export function towardWhite(hex: string, t: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  const m = (c: number) => Math.round(c + (255 - c) * t).toString(16).padStart(2, "0");
+  return `#${m((n >> 16) & 255)}${m((n >> 8) & 255)}${m(n & 255)}`;
+}
+
+/**
+ * The theme a cue renders with: the video's own (from its host photo) or the default, and — when
+ * the composite measured its coloured words too dark to read on the picture — `lift` (0-1) moves
+ * the accent and the warning red toward white, the same colour in a lighter shade. One function,
+ * used by the renderer (Root) and by the readability check (which needs the exact text colours).
+ */
+export function themeFor(props: { theme?: unknown; lift?: unknown }): Theme {
+  const base = props.theme ? { ...THEME, ...(props.theme as Partial<Theme>) } : THEME;
+  const lift = typeof props.lift === "number" ? Math.min(1, Math.max(0, props.lift)) : 0;
+  return lift ? { ...base, accent: towardWhite(base.accent, 0.4 * lift), danger: towardWhite(base.danger, 0.4 * lift) } : base;
 }

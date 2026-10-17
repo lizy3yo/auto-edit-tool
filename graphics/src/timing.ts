@@ -54,6 +54,19 @@ export function scrimIn(frame: number, dur = 9): number {
   });
 }
 
+/**
+ * A full-frame darkening LEAVES the way it entered: eased in and out over ~0.4 s. The overlay
+ * fade's ease-in drops most of the darkness in its last two or three frames, which on a whole
+ * frame is a brightness jump the eye reads as a flash (job 385, 23.57 s).
+ */
+export function scrimOut(frame: number, total: number, dur = 12): number {
+  return interpolate(frame, [total - dur, total], [1, 0], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+    easing: Easing.inOut(Easing.cubic),
+  });
+}
+
 /** 1 → 0 over the last `dur` frames of a graphic (overlays leave softly; cards hard-cut). */
 export function fadeOutAtEnd(frame: number, total: number, dur = MOTION.overlayOut): number {
   return interpolate(frame, [total - dur, total], [1, 0], {
@@ -73,7 +86,9 @@ export function countUpValue(
   start: number,
   target: number,
   fps: number,
-  durSec = MOTION.countUpSec
+  durSec = MOTION.countUpSec,
+  /** Group digits from this size up: 10,000 by default, 1,000 for money. */
+  groupFrom = 10000
 ): string {
   const decimals = (String(target).split(".")[1] ?? "").length;
   const p = interpolate(frame, [start, start + durSec * fps], [0, 1], {
@@ -82,5 +97,15 @@ export function countUpValue(
     easing: Easing.out(Easing.cubic),
   });
   const v = p >= 1 ? target : target * p;
-  return v.toFixed(decimals);
+  return groupDigits(v.toFixed(decimals), Math.abs(target) >= groupFrom);
+}
+
+/** Thousands separators, as the script writes the number ("10,000"). A four-digit number is left
+ * bare unless it is money (`groupFrom` 1000): "1998" may be a year, "$1,500" never is. */
+export function groupDigits(n: string, group: boolean): string {
+  if (!group) return n;
+  const [int, dec] = n.split(".");
+  const sign = int.startsWith("-") ? "-" : "";
+  const grouped = int.replace("-", "").replace(new RegExp("\\B(?=(\\d{3})+(?!\\d))", "g"), ",");
+  return sign + grouped + (dec !== undefined ? "." + dec : "");
 }

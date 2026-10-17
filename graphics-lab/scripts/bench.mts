@@ -5,7 +5,7 @@
 //   tsx scripts/bench.mts [--runs 3] [--concurrency 4]
 import path from "node:path";
 import { writeFileSync } from "node:fs";
-import { TEMPLATES } from "../src/registry.ts";
+import { TEMPLATES } from "../../graphics/src/registry.ts";
 import { ffmpegPath, outDir, renderGraphic, run } from "./lib.mts";
 
 const args = process.argv.slice(2);

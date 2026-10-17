@@ -1174,6 +1174,21 @@ export interface TtsWaitState {
 }
 
 /** Persisted input parameters for a long-form video job */
+/** A film's motion graphics: the plan, what was placed, what was left out and why, and the QA. */
+export interface JobGraphics {
+  at?: string;
+  /** The cue sheet (graphics/src/cueResolve CueSpec[]), reused by the next assembly. */
+  plan?: unknown[];
+  placed?: { id: string; template: string; start: number; end: number }[];
+  dropped?: { id: string; why: string }[];
+  theme?: { accent: string; bg: string };
+  qa?: { pass: boolean; lines: string[]; failures: string[] };
+  /** Set by "Re-plan graphics": the next assembly writes a fresh plan. */
+  replan?: boolean;
+  /** Why the last assembly shipped the film without graphics, when it did. */
+  skipped?: string;
+}
+
 export interface LongformInputParams {
   /** The script the video is narrated from (voiced verbatim as one continuous track) */
   script: string;
@@ -1427,6 +1442,12 @@ export interface LongformInputParams {
    * See `rehearseSceneClips`.
    */
   rehearsal?: boolean;
+  /**
+   * The film's MOTION GRAPHICS, as the last assembly added them (server/graphics/finish.ts). The
+   * plan is reused by every later assembly (a Reassemble brings back the same graphics, no model
+   * call); `replan` asks the next assembly for a fresh plan. Unset on a film made without them.
+   */
+  graphics?: JobGraphics;
   /**
    * Test mode: every b-roll cutaway renders as a VIDEO clip (never the still/image lane).
    * Skips `enforceStillMotionRatio` and allows adjacent motion scenes. Pair with `brollOnly`
