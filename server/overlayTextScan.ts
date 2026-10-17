@@ -287,13 +287,27 @@ export const SOFT_PRINT_QUESTION =
  * QUESTION 4 widened for a picture about KEY THINGS: every one of them must really be there, and a
  * different object drawn in one's place counts as missing.
  */
-export function requiredThingsQuestion(things: string[]): string {
+export function requiredThingsQuestion(
+  things: string[],
+  /**
+   * The look its own key thing must have (`lookToHold`): a picture every later picture of the thing
+   * is drawn from, with nothing earlier to follow — a miss here is a different object in every copy.
+   */
+  look?: { thing: string; look: string }
+): string {
   const list = things.map(t => `"${t.replace(/"/g, "'")}"`).join(", ");
   return (
     "\n\nQUESTION 4, ALSO FOR THIS PICTURE — missing: each of these must be clearly in the frame: " +
     `${list}. Answer true if any of them is absent, or if a different object stands where it should ` +
     "be (a small box where a bookcase was asked for, a bowl where a quilt was), or if it is so small " +
-    "or hidden that a viewer would not notice it."
+    "or hidden that a viewer would not notice it." +
+    (look
+      ? ` Every later picture of the "${look.thing.replace(/"/g, "'")}" in this video is drawn from ` +
+        `this one, so it must also look like this: "${look.look.replace(/"/g, "'").slice(0, 400)}". ` +
+        "Answer true as well if it clearly does not — another colour, material, size or shape than " +
+        "that says. Where it is, which part of it shows and how far along it is are as the " +
+        "narrator's words say: never answer true for those."
+      : "")
   );
 }
 
@@ -392,7 +406,9 @@ export async function scanStillDefects(
    */
   required?: string[],
   /** The picture's printing is shown soft on purpose (`scene.blurPrint`) — `SOFT_PRINT_QUESTION`. */
-  softPrint?: boolean
+  softPrint?: boolean,
+  /** The look its own key thing must have, on a picture later ones copy (`lookToHold`). */
+  requiredLook?: { thing: string; look: string }
 ): Promise<StillDefectVerdict> {
   try {
     const mustShow = expect && required?.length ? required : undefined;
@@ -418,7 +434,7 @@ export async function scanStillDefects(
       systemSuffix:
         (expect ? missingQuestion(expect) : "") +
         (expect && exactLook ? exactLookQuestion(exactLook) : "") +
-        (mustShow ? requiredThingsQuestion(mustShow) : "") +
+        (mustShow ? requiredThingsQuestion(mustShow, requiredLook) : "") +
         (expect && softPrint ? SOFT_PRINT_QUESTION : "") +
         (line ? placeQuestion(line) : "") +
         (allowedText ? allowedTextQuestion(allowedText) : "") +

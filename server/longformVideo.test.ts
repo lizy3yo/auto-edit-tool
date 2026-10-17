@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import sharp from "sharp";
+import { attachMemory } from "./pictureMemory";
 import {
   clipDurationParam,
   narrationWordBudget,
@@ -9296,6 +9297,61 @@ describe("generateValidatedStill", () => {
     const out = await generateValidatedStill(scene, 3, undefined, genImage);
     expect(out.buffer.equals(textyFrame)).toBe(true);
     mockScanStillDefects.mockResolvedValue(defect()); // restore the default
+  });
+
+  // A FIRST PICTURE THAT MISSED IS NEVER COPIED: the frame that ships says whether its last check
+  // found its thing missing, and only that — a staged look or readable writing leaves it a memory.
+  it("says when the frame it ships was last checked 'missing', and not for writing alone", async () => {
+    const offA = await pngOf("#a11");
+    const offB = await pngOf("#a22");
+    mockScanStillDefects
+      .mockResolvedValueOnce(defect({ missing: true, what: "a box, not a machine" } as any))
+      .mockResolvedValueOnce(defect({ missing: true, what: "still a box" } as any));
+    const genImage = vi
+      .fn()
+      .mockResolvedValueOnce({ success: true, fileData: offA })
+      .mockResolvedValueOnce({ success: true, fileData: offB });
+    const missed = await generateValidatedStill({ ...scene, showSubject: "a sewing machine" }, 3, undefined, genImage);
+    expect(missed.missing).toBe(true);
+
+    const texty = await pngOf("#b33");
+    mockScanStillDefects.mockResolvedValue(defect({ writing: true, what: "label" } as any));
+    const written = await generateValidatedStill(
+      { ...scene, showSubject: "a sewing machine" },
+      3,
+      undefined,
+      vi.fn().mockResolvedValue({ success: true, fileData: texty })
+    );
+    expect(written.missing).toBe(false);
+    mockScanStillDefects.mockResolvedValue(defect()); // restore the default
+  });
+
+  it("holds a first picture that later ones copy to its thing's look, on the same check (Ruth's job 305)", async () => {
+    const things = [{ name: "straight-stitch machine", look: "small black and chrome sewing machine, sits centered on work table" }];
+    const first = {
+      index: 3,
+      visualPrompt: "a straight-stitch machine at a kitchen table",
+      showSubject: "a straight-stitch machine at a kitchen table",
+      keyThing: "straight-stitch machine",
+    } as any;
+    const copy = {
+      index: 4,
+      visualPrompt: "a straight-stitch machine",
+      showSubject: "a straight-stitch machine",
+      keyThing: "straight-stitch machine",
+    } as any;
+    attachMemory([first, copy], [first, copy], things);
+    first.keyThingLook = "small black and chrome sewing machine";
+    mockScanStillDefects.mockClear();
+    await generateValidatedStill(first, 3, undefined, vi.fn().mockResolvedValue({ success: true, fileData: await validPng() }));
+    expect((mockScanStillDefects.mock.calls[0] as any[])[7]).toEqual({
+      thing: "straight-stitch machine",
+      look: "small black and chrome sewing machine",
+    });
+    // The copy follows its memory: no look of its own to hold it to.
+    mockScanStillDefects.mockClear();
+    await generateValidatedStill(copy, 3, undefined, vi.fn().mockResolvedValue({ success: true, fileData: await validPng() }));
+    expect((mockScanStillDefects.mock.calls[0] as any[])[7]).toBeUndefined();
   });
 
   it("skips the gate when a reference image is attached (the cover asked for text)", async () => {

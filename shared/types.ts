@@ -527,6 +527,25 @@ export interface StoryboardScene {
   /** The camera position a memory picture is drawn from — never its memory's own (set at render). */
   memoryView?: string;
   /**
+   * The memory pictures show only the OTHER key things in this picture, none of its own — the
+   * heater's first picture beside the first mattress (set at render). The picture is then not told
+   * its references are its own thing, and not compared with them (`memoryClause`, `scanSameThing`).
+   */
+  memoryOthersOnly?: true;
+  /**
+   * Its key thing's look, cut down for this picture (`keyThingLookFor`) — set at render ONLY when it
+   * has no picture of its own thing to follow, so the look is what its first picture is drawn by
+   * (Ruth's job 305: the first straight-stitch machine was drawn with no colour or material, and 5
+   * later pictures copied it).
+   */
+  keyThingLook?: string;
+  /**
+   * The picture's last check said what it must show is not in it (`missing`), so no later picture is
+   * drawn from it (`memorySourcesFor`): stored films had 22 first pictures copied after failing
+   * their last check. Never set for a staged look or readable writing alone — the thing is there.
+   */
+  memoryUnfit?: true;
+  /**
    * The exact look of the specific named kind this picture shows ("churn dash block: a 3×3 block…"),
    * written by `describeNamedLooks` so the picture maker can draw what it cannot know by name.
    */

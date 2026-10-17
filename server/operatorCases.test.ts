@@ -11,6 +11,7 @@ import {
   BACKGROUND_VIEW,
   BLUR_PRINT_VIEW,
   isSubject,
+  keyThingLookFor,
   memorySourcesFor,
   memoryViewFor,
   ownKeyThing,
@@ -46,6 +47,7 @@ import {
   guardPitchVisuals,
   hostBrollClause,
   keepBodyPartsOnBody,
+  markMemoryFit,
   memoryClause,
   NO_FIGURES_SUFFIX,
   ONE_OTHER_PERSON_SUFFIX,
@@ -620,6 +622,42 @@ describe("a thing being made is never drawn from its finished picture (stored fi
     expect(clause).not.toMatch(/workbench, at the same or an earlier stage of being made/);
     expect(clause).toMatch(/this exact workbench, at the same or an earlier point in the making/);
     expect(requiredThingsFor(brush)[0]).toMatch(/^workbench — when it is what is being made:/);
+  });
+});
+
+describe("a key thing's first picture is worth copying (stored films, 2026-10-18)", () => {
+  // The first picture of a key thing is the one every later picture of it is drawn from.
+  it("Ruth's job 305: the first machine is drawn by its look, without the table the look puts it on", () => {
+    const first = pic(3, "at a kitchen table with", "a straight-stitch machine, a rotary cutter and a mountain of scraps at a kitchen table", {
+      keyThing: "straight-stitch machine",
+    });
+    const things: KeyThing[] = [
+      { name: "straight-stitch machine", look: "small black and chrome sewing machine, compact size, sits centered on work table" },
+    ];
+    const prompt = buildStillPrompt({ ...first, keyThingLook: keyThingLookFor(first, things) });
+    expect(prompt).toMatch(/black and chrome/);
+    expect(prompt).not.toMatch(/sits centered on work table/);
+  });
+
+  it("Dale's job 352: the planer's memory is the first picture about the planer, not the wide workshop shot", () => {
+    const wide = pic(8, "my garage", "garage workshop with table saw and benchtop planer along back wall", { keyThing: "benchtop planer" });
+    const feeding = pic(10, "through the planer", "man's hands feeding a rough-sawn board into a benchtop planer in a garage, pale shavings curling out", {
+      keyThing: "benchtop planer",
+    });
+    const later = pic(13, "another pass", "man's hands running a board face through benchtop planer in garage", { keyThing: "benchtop planer" });
+    expect(memorySourcesFor([wide, feeding, later], later)).toEqual([feeding]);
+  });
+
+  it("Dale's job 369: a group shot flagged only for writing is still the box's memory; one that missed the box is not", () => {
+    const group = pic(14, "Personalized mid-tier work.", "a walnut engraved board, a maple house sign and a small walnut keepsake box grouped together on a shelf", {
+      keyThing: "Engraved Board",
+      otherKeyThings: ["Keepsake Box"],
+    });
+    const box = pic(25, "a keepsake box", "Close-up of a finished walnut keepsake box sitting on the garage workbench", { keyThing: "Keepsake Box" });
+    markMemoryFit(group, false);
+    expect(memorySourcesFor([group, box], box)).toEqual([group]);
+    markMemoryFit(group, true);
+    expect(memorySourcesFor([group, box], box)).toEqual([]);
   });
 });
 

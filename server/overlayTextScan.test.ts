@@ -213,6 +213,25 @@ describe("scanStillDefects", () => {
     expect(mockInvoke.mock.calls[0][0].systemSuffix).not.toContain("QUESTION 4");
   });
 
+  it("holds a copied first picture to its thing's look inside the same question, on the careful checker", async () => {
+    // Ruth's job 305: the first straight-stitch machine, copied by 5 later pictures. No extra call:
+    // the look rides QUESTION 4, and a miss is an ordinary "missing".
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue({ text: '{"overlay":false,"broken":false,"writing":false,"missing":true,"what":"a white machine"}' } as any);
+    const look = { thing: "straight-stitch machine", look: "small black and chrome sewing machine, compact size" };
+    const v = await scanStillDefects(await imageOf(1280, 720), "a straight-stitch machine", undefined, undefined, undefined, [look.thing], false, look);
+    expect(v.missing).toBe(true);
+    expect(mockInvoke).toHaveBeenCalledTimes(1);
+    const call = mockInvoke.mock.calls[0][0];
+    expect(call.systemSuffix).toContain("small black and chrome sewing machine, compact size");
+    expect(call.systemPrompt).not.toContain("black and chrome");
+    expect(call.model).not.toBe("claude-haiku-4-5-20251001");
+    // A picture nothing copies is asked for the thing only.
+    mockInvoke.mockClear();
+    await scanStillDefects(await imageOf(1280, 720), "a straight-stitch machine", undefined, undefined, undefined, [look.thing]);
+    expect(mockInvoke.mock.calls[0][0].systemSuffix).not.toContain("black and chrome");
+  });
+
   it("reports broken geometry when the judge finds it", async () => {
     mockInvoke.mockReset();
     mockInvoke.mockResolvedValue({

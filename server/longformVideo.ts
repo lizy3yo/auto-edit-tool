@@ -56,7 +56,9 @@ import {
   requiredThingsFor,
   BACKGROUND_VIEW,
   BLUR_PRINT_VIEW,
-  memoryPicturesFor,
+  keyThingLookClause,
+  lookToHold,
+  memoryFor,
   memoryView,
   pictureSettled,
   SCREEN_ITEM_VIEW,
@@ -6562,8 +6564,11 @@ export function buildStillPrompt(
   const app = APP_SCREEN.test(visual) ? ` ${appScreenClause(scene)}` : "";
   const lead = !aggressive && !visualOverride ? subjectLead(scene.showSubject, visual) : "";
   const item = !visualOverride ? listItemClause(scene) : "";
+  // ITS KEY THING'S LOOK, when no earlier picture of it is there to follow (`keyThingLookClause`);
+  // a named kind's exact look wins. Not on a content-policy fallback, which no longer shows it.
+  const look = !visualOverride ? scrubLegibleWriting(keyThingLookClause(scene)) : "";
   return withAllowedText(
-    `${lead}${visual}${scrubLegibleWriting(namedLookClause(scene))}${item}${angleSuffix}${personSuffix}${memory}${app} ${amateurIphoneLook(subject, motion)} ${framing} ${noFigures} ${NO_BOOK_SUFFIX}`,
+    `${lead}${visual}${scrubLegibleWriting(namedLookClause(scene))}${look}${item}${angleSuffix}${personSuffix}${memory}${app} ${amateurIphoneLook(subject, motion)} ${framing} ${noFigures} ${NO_BOOK_SUFFIX}`,
     scene.pictureText,
     scene.blurPrint
   );
@@ -6748,6 +6753,36 @@ export const APP_SCREEN_CLAUSE =
   "other object; things for sale appear only as small photos on its screen.";
 
 /**
+ * The fields a picture's memory sets at render (`memoryFor`): its reference pictures and camera
+ * position; whether those show only the OTHER key things in it; and, when none is a picture of its
+ * own thing, the look it is drawn by instead (`keyThingLookClause`). Pure.
+ */
+export function memoryFields(
+  memory: { urls: string[]; own: boolean; look?: string },
+  view: string | undefined
+): Pick<StoryboardScene, "memoryRefUrls" | "memoryView" | "memoryOthersOnly" | "keyThingLook"> {
+  const has = memory.urls.length > 0;
+  return {
+    memoryRefUrls: has ? memory.urls : undefined,
+    memoryView: has ? view : undefined,
+    memoryOthersOnly: has && !memory.own ? true : undefined,
+    keyThingLook: memory.own ? undefined : memory.look,
+  };
+}
+
+/**
+ * A FIRST PICTURE THAT MISSED IS NEVER COPIED: a picture whose last check said what it must show is
+ * not in it still ships, but is no memory for later pictures (`memoryUnfit`). Stored films copied 22
+ * first pictures that failed their last check into 122 later pictures. Only `missing` counts: a staged
+ * look or readable writing leaves the thing itself right (Dale's job 369: the keepsake-box group
+ * shot, last check "writing", is the box's memory still). Mutates `scene`.
+ */
+export function markMemoryFit(scene: StoryboardScene, missing: boolean | undefined): void {
+  if (missing) scene.memoryUnfit = true;
+  else delete scene.memoryUnfit;
+}
+
+/**
  * PICTURE MEMORY: a picture of a key thing drawn from the earlier pictures of it
  * (`server/pictureMemory.ts`) is told what those reference images are — the SAME thing, seen from
  * another spot — and, when the host is in the shot, that the last reference is the host.
@@ -6778,6 +6813,25 @@ export function memoryClause(scene: StoryboardScene): string {
     scene.humanPresent && scene.brollHostRef
       ? " The last reference image is the host, only for how they look."
       : "";
+  // References of the OTHER key things only (`memoryOthersOnly`): the first picture of a thing, drawn
+  // beside another one seen before (the mattress beside the heater). Told the references showed
+  // "this exact mattress and heater", the picture maker had only a heater to copy for both — and the
+  // first mattress picture is the one every later mattress is drawn from.
+  if (scene.memoryOthersOnly) {
+    const others = scene.otherKeyThings ?? [];
+    if (!others.length) return "";
+    const named =
+      others.length > 1 ? `${others.slice(0, -1).join(", ")} and ${others[others.length - 1]}` : others[0];
+    const same = beforeFinished(scene)
+      ? "the same colours, materials and wear, at the same or an earlier point in the making"
+      : "identical shape, size, colours, materials and wear";
+    return (
+      ` ${which} this exact ${named}, seen earlier in this video: draw the SAME ${named} — ${same} — ` +
+      `from a different camera position, never copying the reference's framing. ` +
+      `${n === 1 ? "It does" : "They do"} NOT show the ${scene.keyThing}: draw it from this picture's own words.` +
+      host
+    );
+  }
   // The exact new camera position (`memoryViewFor`): told only "a different spot", the picture
   // maker copied the reference's framing — Frederick's job 257 showed one framing four times.
   const view = scene.memoryView
@@ -8775,6 +8829,13 @@ export function stillRetryDelayMs(error: string, attempt: number): number {
 }
 
 /**
+ * A drawn still, and whether its LAST check said what it must show is not in it (`missing`) — such
+ * a picture still ships (the film never stops for it), but no later picture is drawn from it
+ * (`scene.memoryUnfit`).
+ */
+export type ValidatedStill = { buffer: Buffer; mimeType?: string; missing?: boolean };
+
+/**
  * `drawValidatedStill`, but a video's SCREEN pictures (`scene.screenSetup`) are drawn one at a time
  * (`withScreenTurn`): pictures are drawn several at once, and two drawn together cannot see each
  * other, so Dale's job 372 test kept three near-identical "holding a phone" screens that were all
@@ -8783,7 +8844,7 @@ export function stillRetryDelayMs(error: string, attempt: number): number {
  */
 export async function generateValidatedStill(
   ...args: Parameters<typeof drawValidatedStill>
-): Promise<{ buffer: Buffer; mimeType?: string }> {
+): Promise<ValidatedStill> {
   const [scene, , , , , , square] = args;
   const job = currentCostJobId();
   const lane = varietyLane(scene);
@@ -8820,9 +8881,16 @@ async function drawValidatedStill(
    * still that came back 16:9 would get its sides cropped off in the square slot.
    */
   square = false
-): Promise<{ buffer: Buffer; mimeType?: string }> {
+): Promise<ValidatedStill> {
   if (!genImage)
     throw new Error("generateValidatedStill requires a genImage generator");
+  // Frames whose check said what they must show is not in them: whichever frame ships says so
+  // (`ValidatedStill.missing`), so it is never made the memory of later pictures.
+  const missed = new WeakSet<Buffer>();
+  const shipped = (f: { buffer: Buffer; mimeType?: string }): ValidatedStill => ({
+    ...f,
+    missing: missed.has(f.buffer),
+  });
   let prompt = buildStillPrompt(scene, false, visualOverride, subject, square);
   let tier = 0; // 0 normal → 1 aggressive → 2 llm-rewrite → 3 subject-generic → 4 generic
   let lastError = "Still image generation failed";
@@ -8977,8 +9045,12 @@ async function drawValidatedStill(
         // must really be in it — Dale's job 306 drew a box where the bookcase was asked for. A thing
         // still being made is asked for at that stage (`requiredThingsFor`), never as the finished one.
         scene.memoryView === SCREEN_ITEM_VIEW ? undefined : requiredThingsFor(scene),
-        scene.blurPrint
+        scene.blurPrint,
+        // A picture later ones copy, drawn with no earlier picture of its thing to follow, is held
+        // to the thing's look as well (`lookToHold`): a miss takes the `missing` redraw below.
+        visualOverride ? undefined : lookToHold(scene)
       );
+      if (defects.missing) missed.add(buffer);
       recordPictureCheck(
         scene,
         visualOverride ?? (square ? scene.splitVisual : undefined) ?? scene.visualPrompt ?? "",
@@ -9001,7 +9073,7 @@ async function drawValidatedStill(
         console.warn(
           `[Longform] scene ${scene.index} still came back with the same faults (${faults}) → keeping it`
         );
-        return { buffer, mimeType: r.mimeType };
+        return shipped({ buffer, mimeType: r.mimeType });
       }
       lastFaults = faults;
       if (defects.broken) {
@@ -9080,7 +9152,10 @@ async function drawValidatedStill(
         scene.memoryView !== SCREEN_ITEM_VIEW &&
         // A remembered thing kept small beside the subject is not compared side by side: it is
         // meant to look small and placed, not to fill a frame like its memory.
-        scene.memoryView !== BACKGROUND_VIEW
+        scene.memoryView !== BACKGROUND_VIEW &&
+        // References of the other things only (`memoryOthersOnly`): there is nothing of its own
+        // thing to compare it with — a first mattress is not "a different mattress" than a heater.
+        !scene.memoryOthersOnly
       ) {
         const same = await scanSameThing(scene.memoryRefUrls[0], buffer, scene.keyThing);
         if ((!same.same && !scene.partOf) || same.copy) {
@@ -9173,7 +9248,7 @@ async function drawValidatedStill(
       console.log(
         `[Longform] scene ${scene.index} still image OK on retry ${attempt}`
       );
-    return { buffer, mimeType: r.mimeType };
+    return shipped({ buffer, mimeType: r.mimeType });
   }
   // Fail open: a decodable-but-defective still renders fine, it's just ugly. Shipping it beats
   // failing a scene over a caption or a wonky shelf — the still lane has no resume, so a throw
@@ -9190,21 +9265,21 @@ async function drawValidatedStill(
       `[Longform] scene ${scene.index} still never showed "${scene.showSubject}" after ` +
         `${attempts} attempts → shipping the closest frame`
     );
-    return offSubjectFallback;
+    return shipped(offSubjectFallback);
   }
   if (textyFallback) {
     console.warn(
       `[Longform] scene ${scene.index} still has overlay text after ${attempts} ` +
         `attempts → shipping it: ${scene.visualPrompt.slice(0, 80)}`
     );
-    return textyFallback;
+    return shipped(textyFallback);
   }
   if (brokenFallback) {
     console.warn(
       `[Longform] scene ${scene.index} still has broken geometry after ${attempts} ` +
         `attempts → shipping the least-bad frame: ${scene.visualPrompt.slice(0, 80)}`
     );
-    return brokenFallback;
+    return shipped(brokenFallback);
   }
   throw new Error(lastError);
 }
@@ -9245,12 +9320,8 @@ export async function generateSceneStillClip(
     // failure would kill the scene with no resume, so we regenerate instead of failing.
     // A key thing seen before is drawn from its earlier pictures (`server/pictureMemory.ts`). A
     // split's panel (square) gets its memory from the caller, off the host scene.
-    if (!square) {
-      const memory = await memoryPicturesFor(scene);
-      scene.memoryRefUrls = memory.length ? memory : undefined;
-      scene.memoryView = memory.length ? memoryView(scene) : undefined;
-    }
-    const { buffer, mimeType } = await generateValidatedStill(
+    if (!square) Object.assign(scene, memoryFields(await memoryFor(scene), memoryView(scene)));
+    const { buffer, mimeType, missing } = await generateValidatedStill(
       scene,
       4,
       referenceImageUrl,
@@ -9267,7 +9338,10 @@ export async function generateSceneStillClip(
       mimeType || "image/jpeg"
     ));
     scene.pictureUrl = imageUrl;
-    if (!square) pictureSettled(scene);
+    if (!square) {
+      markMemoryFit(scene, missing);
+      pictureSettled(scene);
+    }
   }
   // ONE continuous Ken Burns clip for the whole narration: a single zoom (in/out by scene
   // index parity) stretched across the full duration. Long scenes read slow and gentle,
@@ -9354,12 +9428,9 @@ export async function generateBrollKeyframe(
   // Keyframe stills render on OpenAI's official gpt-image-2, 16:9.
   // Same validate + retry as the still lane (my earlier 10s motion cap tripled these calls).
   // A key thing seen before is drawn from its earlier pictures (`server/pictureMemory.ts`).
-  if (clipIdx === 0 && !scene.memoryRefUrls?.length) {
-    const memory = await memoryPicturesFor(scene);
-    scene.memoryRefUrls = memory.length ? memory : undefined;
-    scene.memoryView = memory.length ? memoryView(scene) : undefined;
-  }
-  const { buffer: src, mimeType } = await generateValidatedStill(
+  if (clipIdx === 0 && !scene.memoryRefUrls?.length)
+    Object.assign(scene, memoryFields(await memoryFor(scene), memoryView(scene)));
+  const { buffer: src, mimeType, missing } = await generateValidatedStill(
     scene,
     4,
     referenceImageUrl,
@@ -9376,6 +9447,7 @@ export async function generateBrollKeyframe(
   const { url } = await storagePut(key, buf, mime);
   if (clipIdx === 0) {
     scene.pictureUrl = url;
+    markMemoryFit(scene, missing);
     pictureSettled(scene);
   }
   return url;
@@ -11695,12 +11767,10 @@ async function withSplitMemory(
   right: StoryboardScene
 ): Promise<StoryboardScene> {
   if (!host.keyThing) return right;
-  const memory = await memoryPicturesFor(host);
   return {
     ...right,
     keyThing: host.keyThing,
-    memoryRefUrls: memory.length ? memory : undefined,
-    memoryView: memory.length ? memoryView(host) : undefined,
+    ...memoryFields(await memoryFor(host), memoryView(host)),
   };
 }
 
