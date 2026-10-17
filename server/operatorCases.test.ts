@@ -46,9 +46,14 @@ import {
   buildSplitRightScene,
   blurUnsaidPrint,
   brollDepictsBook,
+  buildClipChain,
   buildStillPrompt,
   guardPitchVisuals,
   hostBrollClause,
+  HOST_FRAMING_CLAUSE,
+  HOST_LIPS_CUT_CLAUSE,
+  HOST_LIPS_CUT_ONLY_SUFFIX,
+  NO_OTHER_FIGURES_SUFFIX,
   keepBodyPartsOnBody,
   memoryClause,
   NO_FIGURES_SUFFIX,
@@ -72,6 +77,7 @@ import {
 } from "./overlayTextScan";
 import {
   DETACHED_BODY_PART,
+  hostLipsCut,
   looksCutOff,
   markHostBroll,
   onTheBody,
@@ -1242,5 +1248,135 @@ describe("print the line never says is drawn soft, never asked for (the audit's 
     expect(split.splitVisual).toBe(screen);
     // Job 145 scene 12: a stack of books is still a book.
     expect(brollDepictsBook("a stack of closed stitch pattern books on the kitchen table")).toBe(true);
+  });
+});
+
+describe("a line about the chin shows the chin, framed from the lips down (the audit, 2026-10-18)", () => {
+  const LOOK = "a slender woman in her early sixties with fair skin and shoulder-length silver hair, a navy crewneck sweater";
+
+  it("job 244 scene 3: a host picture of 'drags your chin and your jawline down' faces the camera, cut at the lips", () => {
+    const scenes = [
+      pic(
+        3,
+        "Land two inches lower, and that same necklace drags your chin and your jawline down with it.",
+        "Host standing, fingertips adjusting a gold chain necklace resting at her collarbone, its pendant catching the window light",
+        { humanPresent: true }
+      ),
+    ];
+    markHostBroll(scenes, { hostLook: LOOK }, "https://x/host.png");
+    expect(hostLipsCut(scenes[0])).toBe(true);
+    const prompt = buildStillPrompt(scenes[0]);
+    expect(prompt).toContain(HOST_LIPS_CUT_CLAUSE);
+    expect(prompt).toContain(HOST_LIPS_CUT_ONLY_SUFFIX);
+    // Only the first framing: never turned away, never from behind.
+    expect(prompt).not.toContain(HOST_FRAMING_CLAUSE);
+    expect(prompt).not.toContain(NO_OTHER_FIGURES_SUFFIX);
+    expect(prompt).not.toMatch(/seen from the side so it shows there/);
+    expect(HOST_LIPS_CUT_CLAUSE).toMatch(/top edge of the frame cuts across the lower face at the lips/);
+    expect(HOST_LIPS_CUT_CLAUSE).toMatch(/chin, the jaw, the neck and the collarbone are in plain view/);
+    expect(personClauseFor(scenes[0], scenes[0].showSubject!)).toMatch(/necklace is worn where it really sits, on the FRONT of the head or body, and the body faces the camera/);
+    // The clip lane says the same.
+    const clip = buildClipChain(scenes[0], { script: "x", lockMode: "ingredients", channelKey: "demo", voiceId: "v1" })[0].prompt;
+    expect(clip).toContain(HOST_LIPS_CUT_CLAUSE);
+    expect(clip).toContain(HOST_LIPS_CUT_ONLY_SUFFIX);
+    expect(clip).not.toContain(NO_OTHER_FIGURES_SUFFIX);
+  });
+
+  it("job 378 scene 28 and job 395 scene 25: 'the skin under your chin', 'the soft shadows under the chin'", () => {
+    for (const [line, shows] of [
+      ["Does it brighten the skin under your chin, or does it put a shadow there?", "chunky light beads held near the chin at the window for daylight"],
+      [
+        "The eye reads it together with the soft shadows under the chin, and the face looks tired.",
+        "woman wearing dark beaded necklace at collarbone, soft shadow under the chin above the dark beads, face turned away",
+      ],
+    ]) {
+      const scenes = [pic(1, line, shows)];
+      markHostBroll(scenes, { hostLook: LOOK }, "https://x/host.png");
+      expect(scenes[0].brollHostLook, line).toBe(LOOK);
+      expect(hostLipsCut(scenes[0]), line).toBe(true);
+      expect(buildStillPrompt(scenes[0])).toContain(HOST_LIPS_CUT_CLAUSE);
+    }
+  });
+
+  it("job 223 scene 5: the pendant drawn on a dressing table under 'your jawline down with it' is worn by the host", () => {
+    const scenes = [
+      pic(
+        5,
+        "and your jawline down with it. The pendant is almost never the problem.",
+        "fine gold chain necklace with small pendant draped over dressing table close up",
+        {
+          visualPrompt:
+            "Fine gold chain necklace with small round pendant draped across the wooden dressing table near the mirror, in soft natural window light.",
+        }
+      ),
+    ];
+    markHostBroll(scenes, { hostLook: LOOK }, "https://x/host.png");
+    expect(scenes[0].humanPresent).toBe(true);
+    expect(scenes[0].brollHostRef).toBe("https://x/host.png");
+    expect(scenes[0].showSubject).toBe(
+      "fine gold chain necklace with small pendant, worn at the host's own neck, the chin and jaw in view above it — never set down."
+    );
+    expect(scenes[0].visualPrompt).not.toMatch(/dressing table/);
+    expect(buildStillPrompt(scenes[0])).toContain(HOST_LIPS_CUT_CLAUSE);
+  });
+
+  it("job 354 scene 13 and job 392 scene 23: a chain alone, or beads laid on a cloth, under a chin line", () => {
+    const line = "That thin line of gold puts a moving highlight right under your chin, and the eye reads light near the face as health.";
+    const alone = [pic(13, line, "close-up of a short length of thin polished gold chain with a glint of light running along it, filling the frame")];
+    markHostBroll(alone, { hostLook: LOOK }, "https://x/host.png");
+    expect(alone[0].humanPresent).toBe(true);
+    expect(alone[0].showSubject).toMatch(/worn at the host's own neck/);
+    const laid = [
+      pic(23, "Now the one that's aging you. Those beads put a shadow right under your chin.", "a chunky dark bead necklace laid on the soft cloth surface", {
+        humanPresent: true,
+      }),
+    ];
+    markHostBroll(laid, { hostLook: LOOK }, "https://x/host.png");
+    expect(laid[0].showSubject).toBe("a chunky dark bead necklace, worn at the host's own neck, the chin and jaw in view above it — never set down.");
+    expect(hostLipsCut(laid[0])).toBe(true);
+  });
+
+  it("the overview and every other line keep their pictures (job 223 scene 8, Scarlett's 'Wear it high', a cream on the counter)", () => {
+    const scenes = [
+      pic(
+        8,
+        "Three necklaces today that read expensive on a woman over sixty, and one that is aging you.",
+        "open jewelry box on dressing table with pearls, gold chain, and bead necklaces arranged in rows"
+      ),
+      pic(9, "Wear it high.", "a pearl strand at her collarbone over a navy sweater", { humanPresent: true }),
+      pic(10, "Does it brighten the skin under your chin?", "a jar of cream on the bathroom counter"),
+      pic(11, "Three necklaces today, each sitting at a different spot under your chin.", "a pearl necklace on the dresser"),
+    ];
+    markHostBroll(scenes, { hostLook: LOOK }, "https://x/host.png");
+    expect(scenes[0].humanPresent).toBeFalsy();
+    expect(scenes[0].showSubject).toMatch(/arranged in rows$/);
+    expect(hostLipsCut(scenes[1])).toBe(false);
+    expect(buildStillPrompt(scenes[1])).toContain(HOST_FRAMING_CLAUSE);
+    expect(scenes[2].humanPresent).toBeFalsy();
+    expect(scenes[3].humanPresent).toBeFalsy();
+    expect(scenes[3].showSubject).toBe("a pearl necklace on the dresser");
+  });
+
+  it("a make-up step on the jawline still shows the face; with no host a chin picture stays as it is", () => {
+    const face = [pic(1, "Blend it down past your jawline.", "her hand blending foundation along her jawline")];
+    markHostBroll(face, { hostLook: LOOK }, "https://x/host.png");
+    expect(face[0].hostFaceShown).toBe(true);
+    expect(hostLipsCut(face[0])).toBe(false);
+    expect(buildStillPrompt(face[0])).toMatch(/the SAME person as in the reference photo/);
+    const noHost = [pic(5, "and your jawline down with it.", "fine gold chain necklace draped over dressing table")];
+    markHostBroll(noHost, { hostLook: "" }, undefined);
+    expect(noHost[0].humanPresent).toBeFalsy();
+    expect(noHost[0].showSubject).toBe("fine gold chain necklace draped over dressing table");
+  });
+
+  it("a line about a dog's neck, hair at the collarbone or someone else is never framed for the chin", () => {
+    const scenes = [
+      pic(31, "Then say hello. Soft voice, calm pat on the chest or the side of the neck.", "host's hand giving a calm pat on the dog's chest"),
+      pic(2, "Shoulder-length hair that grazes your collarbone reads younger.", "host from behind brushing her shoulder-length silver hair"),
+      pic(3, "Her necklace sat right under her chin.", "an older woman customer wearing a pearl necklace at the market stall", { humanPresent: true }),
+    ];
+    markHostBroll(scenes, { hostLook: LOOK }, "https://x/host.png");
+    expect(scenes.map(s => hostLipsCut(s))).toEqual([false, false, false]);
+    expect(buildStillPrompt(scenes[1])).toContain(HOST_FRAMING_CLAUSE);
   });
 });

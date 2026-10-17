@@ -350,6 +350,7 @@ import { steadyHostClip } from "./hostSteady";
 import {
   BODY_PART_WORDS,
   deriveHostLook,
+  hostLipsCut,
   looksCutOff,
   markHostBroll,
   REAL_HOLDER,
@@ -5927,12 +5928,15 @@ const WORN_FRONT =
  */
 export function personClauseFor(scene: StoryboardScene, visual: string): string {
   if (!scene.humanPresent) return "";
+  // A host picture of a line about the chin, jaw or neck faces the camera, cut at the lips
+  // (`hostLipsCut`): every side or back view below would hide what the line is about.
+  const lipsCut = hostLipsCut(scene);
   const who = scene.otherPerson
     ? otherPersonClause(scene.otherPerson, scene.otherPeople)
     : scene.brollHostLook
       ? scene.hostFaceShown
         ? hostFaceClause(scene.brollHostLook)
-        : hostBrollClause(scene.brollHostLook)
+        : hostBrollClause(scene.brollHostLook, lipsCut)
       : ANON_PERSON_SUFFIX;
   const worn = WORN_FRONT.exec(visual)?.[0];
   // Hands on the person's OWN hair, scalp or face (Diane's job 313: a head twisted round, a third
@@ -5940,14 +5944,20 @@ export function personClauseFor(scene: StoryboardScene, visual: string): string 
   const ownHead =
     /\b(?:hair|scalp|face|forehead|cheeks?|neck)\b/i.test(visual) &&
     /\b(?:brush|comb|pin|twist|style|apply|appl(?:ies|ying)|work(?:s|ing)?|smooth|part|wash|rins|dry|spread|massag|tuck|clip)/i.test(visual);
-  const selfCare = ownHead
-    ? " Seen from the side, the head and shoulders turned the same way, the arms raised naturally " +
-      "from their own shoulders to the hair or face — one hand at it when one is enough."
-    : "";
-  const wornClause = worn
-    ? ` The ${worn.toLowerCase()} is worn where it really sits, on the FRONT of the head or body; ` +
-      `the person is seen from the side so it shows there — never on the back of the head or body.`
-    : "";
+  const selfCare = !ownHead
+    ? ""
+    : lipsCut
+      ? " The arm comes up naturally from its own shoulder to the neck or chin — one hand at it " +
+        "when one is enough."
+      : " Seen from the side, the head and shoulders turned the same way, the arms raised naturally " +
+        "from their own shoulders to the hair or face — one hand at it when one is enough.";
+  const wornClause = !worn
+    ? ""
+    : lipsCut
+      ? ` The ${worn.toLowerCase()} is worn where it really sits, on the FRONT of the head or body, ` +
+        `and the body faces the camera so it shows there.`
+      : ` The ${worn.toLowerCase()} is worn where it really sits, on the FRONT of the head or body; ` +
+        `the person is seen from the side so it shows there — never on the back of the head or body.`;
   return ` ${who} ${BODY_ON_PERSON_CLAUSE}${selfCare}${wornClause}`;
 }
 
@@ -6045,10 +6055,37 @@ export const HOST_FRAMING_CLAUSE =
   "the host by the same hair colour and cut, the same skin and the same clothes and accessories as " +
   "in the reference photo (unless the description names other clothes).";
 
-export function hostBrollClause(look: string): string {
+/**
+ * The first framing of `HOST_FRAMING_CLAUSE` ONLY, for a host picture of a line about the chin, jaw,
+ * neck or collarbone (`hostLipsCut`, 2026-10-18, the audit): "that same necklace drags your chin and
+ * your jawline down with it" (job 244 scene 3) and "the soft shadows under the chin" (job 395 scene
+ * 25) were drawn from behind or with the face turned away, so the chin the line is about was never
+ * in the frame. Facing the camera with the frame cut at the lips shows the chin, the jaw, the neck
+ * and the piece worn there, and still draws no face — the host's identity rests on the same skin and
+ * clothes as before.
+ */
+export const HOST_LIPS_CUT_CLAUSE =
+  "The body faces the camera, the head straight above the shoulders, and the top edge of the frame " +
+  "cuts across the lower face at the lips, so nothing of the face above the lips is shown — while the " +
+  "chin, the jaw, the neck and the collarbone are in plain view, with whatever is worn or held there " +
+  "sitting where it really sits. However close the description asks for, the frame runs from the lips " +
+  "down past that piece. Never seen from behind, never turned away, never a head turned to hide the " +
+  "face. They are recognisably the host by the same skin, the same hair colour where any shows, and " +
+  "the same clothes and accessories as in the reference photo (unless the description names other " +
+  "clothes).";
+
+/** `NO_OTHER_FIGURES_SUFFIX` for a host picture framed from the lips down (`HOST_LIPS_CUT_CLAUSE`). */
+export const HOST_LIPS_CUT_ONLY_SUFFIX =
+  "Apart from the host, framed from the lips down, no person is visible: no second person, no one in " +
+  "the background, no reflection of anyone, and nothing of any face above the lips — no eyes, nose or " +
+  "forehead anywhere in the frame. No mirror, window glass or other shiny surface anywhere the host " +
+  "could be reflected in it.";
+
+export function hostBrollClause(look: string, lipsCut = false): string {
   return (
     `The only person in this shot is the host — ${look.trim().replace(/\.$/, "")} — exactly as in ` +
-    `the reference photo, doing the task, hands at the work. ${HOST_FRAMING_CLAUSE} Nobody else ` +
+    `the reference photo, doing the task, hands at the work. ` +
+    `${lipsCut ? HOST_LIPS_CUT_CLAUSE : HOST_FRAMING_CLAUSE} Nobody else ` +
     `is in the frame, in the background or in a reflection. ${ONE_BODY_CLAUSE}`
   );
 }
@@ -6605,7 +6642,9 @@ export function buildStillPrompt(
       : !aggressive && scene.humanPresent && scene.brollHostLook
         ? scene.hostFaceShown
           ? HOST_FACE_ONLY_SUFFIX
-          : NO_OTHER_FIGURES_SUFFIX
+          : hostLipsCut(scene)
+            ? HOST_LIPS_CUT_ONLY_SUFFIX
+            : NO_OTHER_FIGURES_SUFFIX
         : NO_FIGURES_SUFFIX;
   const visual = visualOverride
     ? softenVisualPrompt(visualOverride)
@@ -8645,7 +8684,9 @@ export function buildClipChain(
     !scene.hostPresent && scene.humanPresent && scene.otherPerson
       ? otherPeopleSuffix(scene.otherPeople)
       : !scene.hostPresent && scene.humanPresent && scene.brollHostLook
-        ? NO_OTHER_FIGURES_SUFFIX
+        ? hostLipsCut(scene)
+          ? HOST_LIPS_CUT_ONLY_SUFFIX
+          : NO_OTHER_FIGURES_SUFFIX
         : NO_FIGURES_SUFFIX;
   // Shot-angle phrase appended to non-host prompts so camera variety is enforced in code
   // rather than relying on Claude's implicit framing choices.
@@ -15826,6 +15867,8 @@ async function runUnifiedPipeline(
       if (s.hostPresent && !s.splitVisual) s.visualPrompt = talkingHeadVisualPrompt(params.hostLook, s.index);
   }
   if (hostBroll) console.log(`[Longform ${jobId}] host in b-roll: ${hostBroll} picture(s) show the host at work`);
+  const chinShots = scenes.filter(s => !s.hostPresent && s.humanPresent && hostLipsCut(s)).length;
+  if (chinShots) console.log(`[Longform ${jobId}] chin lines: ${chinShots} host picture(s) framed from the lips down`);
   const othersShown = scenes.filter(s => s.otherPerson && !s.hostPresent).length;
   if (othersShown) console.log(`[Longform ${jobId}] someone else in b-roll: ${othersShown} picture(s), never from the host photo`);
   // Each screen picture (an app, a listing) sits somewhere else, in film order — after the host

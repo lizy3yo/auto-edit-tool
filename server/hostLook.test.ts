@@ -120,3 +120,96 @@ describe("the host is recognised however the line names them (Scarlett, job 244)
     expect(SHOWS_PERSON.test("a sweater's neckline folded on the bed")).toBe(false);
   });
 });
+
+describe("a line about the chin, jaw or neck (the audit, 2026-10-18)", () => {
+  it("knows a line about the chin, the jawline, the neck, the collarbone or a piece near the face", async () => {
+    const { looksAtChinLine } = await import("./hostLook");
+    for (const line of [
+      "Land two inches lower, and that same necklace drags your chin and your jawline down with it.", // job 244 scene 3
+      "Does it brighten the skin under your chin, or does it put a shadow there?", // job 378 scene 28
+      "The eye reads it together with the soft shadows under the chin, and the face looks tired.", // job 395 scene 25
+      "A single strand sitting right at the collarbone.", // job 325 scene 12
+      "hold the piece up near your face by a window,", // job 354 scene 30
+      "A soft scarf knotted at my neck keeps the wind off.",
+    ])
+      expect(looksAtChinLine(line), line).toBe(true);
+  });
+
+  it("leaves a product, a scarf's fringe, hair, sayings and the neck of a thing alone", async () => {
+    const { looksAtChinLine } = await import("./hostLook");
+    for (const line of [
+      "No lift, no bleach, no roots to manage afterward.", // job 320 scene 27
+      "A little fringe on each end, tied on with a hook, dresses it right up.", // job 219 scene 108
+      "The woman who spends the most money and the most time on her hair is usually the one who reads oldest in the room.", // job 222 scene 2
+      "The top gathers in like the neck of a drawstring bag.", // job 297 scene 23
+      "Then say hello. Soft voice, calm pat on the chest or the side of the neck.", // job 358 scene 31, a dog
+      "Scratch your dog under the chin before you clip the leash.",
+      "Keep your chin up, the first market is always slow.",
+      "I stuck my neck out for that order and it paid off.",
+      "Dry the hair at the nape of your neck first.",
+      "Tighten the vise until the jaws grip the board.",
+      "Buckle your chin strap before you ride.",
+      "", undefined,
+    ])
+      expect(looksAtChinLine(line), String(line)).toBe(false);
+  });
+
+  it("an overview that counts the pieces is not one, a measure is (job 223 scene 8 vs job 244 scene 3)", async () => {
+    const { looksAtChinLine } = await import("./hostLook");
+    expect(looksAtChinLine("Three necklaces today, each one sitting at a different spot under your chin.")).toBe(false);
+    expect(looksAtChinLine("Land two inches lower, and that same necklace drags your chin")).toBe(true);
+    expect(looksAtChinLine("Let it hang three quarters of an inch below your collarbone.")).toBe(true);
+    expect(looksAtChinLine("Number two is a fine gold chain. That thin line of gold puts a highlight right under your chin,")).toBe(true);
+  });
+
+  it("frames neither a hair picture, an overview picture nor an animal for the chin", async () => {
+    const { chinFramed } = await import("./hostLook");
+    const line = "That thin line of gold puts a moving highlight right under your chin.";
+    expect(chinFramed({ scriptText: line, showSubject: "a fine gold chain catching the light" })).toBe(true);
+    expect(chinFramed({ scriptText: "Shoulder-length hair that grazes your collarbone reads younger.", showSubject: "host from behind brushing her shoulder-length hair" })).toBe(false);
+    expect(chinFramed({ scriptText: line, showSubject: "pearl necklace, gold chain, and dark bead necklace laid together on the table" })).toBe(false);
+    expect(chinFramed({ scriptText: line, showSubject: "open jewelry box with pearls, gold chain, and bead necklaces arranged in rows" })).toBe(false);
+    expect(chinFramed({ scriptText: line, showSubject: "a gold chain in the cat's paws" })).toBe(false);
+    expect(chinFramed({ scriptText: line, showSubject: "the gold chain alone", listSet: true })).toBe(false);
+  });
+
+  it("puts a piece that was set down on the host's neck — and leaves a held or worn one as it is", async () => {
+    const { wornAtTheNeck } = await import("./hostLook");
+    // Job 223 scene 5 and job 392 scene 23: the piece on a table or a cloth under a line about the chin.
+    expect(wornAtTheNeck("fine gold chain necklace with small pendant draped over dressing table close up")).toBe(
+      "fine gold chain necklace with small pendant, worn at the host's own neck, the chin and jaw in view above it — never set down."
+    );
+    expect(wornAtTheNeck("a chunky dark bead necklace laid on the soft cloth surface")).toMatch(
+      /^a chunky dark bead necklace, worn at the host's own neck/
+    );
+    expect(wornAtTheNeck("single strand pearl necklace with round ivory pearls on the dressing room table near the window")).toMatch(
+      /^single strand pearl necklace with round ivory pearls, worn at the host's own neck/
+    );
+    // Job 354 scene 13: nothing says where it is — it is worn.
+    expect(wornAtTheNeck("close-up of a thin polished gold chain with a glint of light running along it")).toMatch(
+      /running along it, worn at the host's own neck, the chin and jaw in view above it/
+    );
+    // Job 364 scene 22: worn already, only the dress form goes.
+    expect(wornAtTheNeck("dark bead necklace worn at collarbone on dress form")).toBe("dark bead necklace worn at collarbone.");
+    for (const as of [
+      "fine gold chain necklace with pendant draped over a hand near the collarbone", // job 223 scene 15
+      "pearl necklace hanging two inches below the collarbone over a navy crewneck sweater", // job 378 scene 3
+      "host's hand holding a necklace up near her face beside a window", // job 234 scene 29
+      "Close-up of a fine thin gold chain as it lies on a navy knit sweater just below the collarbone", // job 364 scene 14
+      "a jar of cream on the bathroom counter",
+    ])
+      expect(wornAtTheNeck(as), as).toBe(as);
+    const once = wornAtTheNeck("a pearl strand resting inside the open jewelry box");
+    expect(wornAtTheNeck(once)).toBe(once);
+  });
+
+  it("never lets a mirror take the chest with it (job 223 scene 4)", async () => {
+    const { withoutMirrors } = await import("./hostLook");
+    expect(withoutMirrors("same necklace hanging two inches lower on the chest near mirror")).toBe(
+      "same necklace hanging two inches lower on the chest"
+    );
+    expect(withoutMirrors("a necklace on the dresser beside the dressing room mirror")).toBe(
+      "a necklace on the dresser beside the wall"
+    );
+  });
+});
