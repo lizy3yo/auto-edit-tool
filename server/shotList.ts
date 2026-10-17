@@ -1638,17 +1638,25 @@ export function applyPictureFixes(
  * A description with what it says is NOT there taken out: "a smoke alarm on the counter, no box, no
  * packaging" names an alarm, not a box. From "no", "not", "without", "never" or an "-n't" word to the
  * end of its phrase, or to an "and" / "but" that starts the next one; "no more than three" is a count
- * and stays. Pure.
+ * and stays, and so does a hyphened name ("a no-sew fleece blanket", "a never-ending scarf"), which
+ * is a kind of thing, not its absence. Pure.
  */
 export function withoutNegatedPhrases(text: string): string {
   return text
     .replace(
-      /\b(?:no|not|without|never|nor|[a-z]+n['’]t)\b(?!\s+(?:more|less|fewer)\s+than\b)(?:(?!\b(?:and|but)\b)[^,;.!?:()…])*/gi,
+      /\b(?:no|not|cannot|without|never|nor|[a-z]+n['’]t)\b(?![-‐‑])(?!\s+(?:more|less|fewer)\s+than\b)(?:(?!\b(?:and|but)\b)[^,;.!?:()…])*/gi,
       " "
     )
     .replace(/\s+/g, " ")
     .trim();
 }
+
+/**
+ * Typed words that say NOBODY is in the picture: "no hands", "without any people", "no one in the
+ * room", "nobody". Read on the words as typed — `withoutNegatedPhrases` takes exactly these out.
+ */
+const NOBODY_IN_IT =
+  /\b(?:no|without(?:\s+(?:a|any))?)\s+(?:other\s+)?(?:hands?|fingers?|arms?|people|persons?|figures?)\b|\bno(?:body|[- ]one)\b(?!\s+(?:of|thing|piece|part|more)\b)/i;
 
 /**
  * A TYPED PICTURE OWNS THE PICTURE (2026-10-18, job 383 scenes 20, 33 and 40). An operator's typed
@@ -1660,11 +1668,12 @@ export function withoutNegatedPhrases(text: string): string {
  * kind" kept soft print and the detector's back panel, and all 8 of its checks said writing. Now the
  * typed words are what the picture must show, and what the planner tied to the OLD picture goes
  * unless the typed words still name it: its key thing (so the memory it is drawn from and the things
- * the check requires), the part and the named kind it was about, the words it may print, and soft
- * print. What the typed words say is NOT there names nothing (`withoutNegatedPhrases`). Called
- * BEFORE the typed words land on `visualPrompt`: the card sends its prompt on every regenerate, typed
- * or not, and the prompt the picture already has is not typed — a plain regenerate keeps the
- * planner's subject. Returns whether it took the picture over. Pure apart from mutating `s`.
+ * the check requires), the part and the named kind it was about, the words it may print, soft print,
+ * and a person the typed words say is not in it. What the typed words say is NOT there names nothing
+ * (`withoutNegatedPhrases`). Called BEFORE the typed words land on `visualPrompt`: the card sends its
+ * prompt on every regenerate, typed or not, and the prompt the picture already has is not typed — a
+ * plain regenerate keeps the planner's subject. Returns whether it took the picture over. Pure apart
+ * from mutating `s`.
  */
 export function ownTypedPicture(s: StoryboardScene, typed: string, things: KeyThing[] | undefined): boolean {
   const text = typed.trim();
@@ -1682,6 +1691,16 @@ export function ownTypedPicture(s: StoryboardScene, typed: string, things: KeyTh
   if (s.namedLook && !names(s.namedLook.split(":")[0])) s.namedLook = undefined;
   if (s.pictureText && !saidText(s.pictureText, said)) s.pictureText = undefined;
   s.blurPrint = !s.pictureText && blurredPrint(said) ? true : undefined;
+  // NOBODY WHEN THE TYPED WORDS SAY SO: scene 20 was typed "… no hands, no readable writing anywhere"
+  // and still carried the person of the planner's "… box held in one hand", so its prompt asked for
+  // the host at work, with the host's photo attached, beside the operator's "no hands". Taken out
+  // only when the typed words also show no one themselves; a person they add is left as it was
+  // (who draws them — the host or someone else — is decided before the pictures, `markHostBroll`).
+  if (NOBODY_IN_IT.test(text) && !SHOWS_PERSON.test(said)) {
+    s.humanPresent = undefined;
+    s.otherPerson = undefined;
+    s.hostFaceShown = undefined;
+  }
   s.showSubject = text;
   return true;
 }

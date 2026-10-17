@@ -1194,6 +1194,42 @@ describe("the picture shows what its line and its typed words say (the audit, 20
     expect(requiredThingsFor(s)).toEqual(["smoke alarm"]);
   });
 
+  it("job 383 scene 20 as stored: 'no hands, no readable writing' is drawn with nobody and no words", async () => {
+    const { ownTypedPicture } = await import("./shotList");
+    const look = "A sturdy man in his fifties with a short grey-flecked beard, in a navy crew-neck t-shirt";
+    const old = "close-up of the front label of a small rectangular cardboard smoke detector box held in one hand";
+    const s = pic(20, "or dual sensor,", old, {
+      keyThing: "smoke detector box",
+      pictureText: "Dual Sensor",
+      humanPresent: true,
+      brollHostLook: look,
+      brollHostRef: "https://x/host.png",
+    });
+    const typed =
+      "A quick ordinary phone photo: one round white smoke alarm lying face up on a wooden kitchen counter in plain " +
+      "daylight, a second small grey sensor window beside its vents, no box, no packaging, no hands, no readable " +
+      "writing anywhere";
+    // Before: the host at work from the planner's "held in one hand", and the label's words allowed.
+    const before = buildStillPrompt({ ...s, visualPrompt: typed });
+    expect(before).toContain(hostBrollClause(look));
+    expect(before).toMatch(/Dual Sensor/);
+    ownTypedPicture(
+      s,
+      typed,
+      [
+        { name: "smoke detector", look: "round white plastic disc", main: true },
+        { name: "smoke detector box", look: "small rectangular cardboard box with a printed label" },
+      ]
+    );
+    s.visualPrompt = typed;
+    const prompt = buildStillPrompt(s);
+    expect(prompt).not.toContain(hostBrollClause(look));
+    expect(prompt).toContain(NO_FIGURES_SUFFIX);
+    expect(prompt).not.toMatch(/Dual Sensor/);
+    expect(prompt).not.toMatch(/THE PICTURE MUST SHOW/);
+    expect(requiredThingsFor(s)).toEqual([]);
+  });
+
   it("job 383 scene 40: 'no writing of any kind' is no soft print and no old back panel", async () => {
     const { ownTypedPicture } = await import("./shotList");
     const s = pic(40, "That number surprises people more than anything else I've mentioned tonight. That's the job.",

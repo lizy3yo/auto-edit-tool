@@ -266,10 +266,13 @@ export function missingQuestion(expect: string): string {
 }
 
 /**
- * Whether the `detail` question is asked (`PICTURE_DETAIL_CHECK=0` turns it off, and the check is
- * then exactly what it was before it).
+ * Whether the `detail` question is asked. OFF until it is measured (`PICTURE_DETAIL_CHECK=1` turns it
+ * on): it would be asked of two thirds of all pictures — 66% of descriptions name a state, an action,
+ * a count or a position — and how often it calls a RIGHT picture wrong is not known, while each such
+ * answer is another picture and another check. Off, the check is exactly what it was before it. The
+ * audit's 60 sampled wrong pictures and ~300 right ones, judged with and without it (~$1), decide it.
  */
-export const detailCheckOn = () => process.env.PICTURE_DETAIL_CHECK !== "0";
+export const detailCheckOn = () => process.env.PICTURE_DETAIL_CHECK === "1";
 
 /**
  * QUESTION 4b, asked with QUESTION 4: the thing is there, but is it the WAY its description says?
@@ -459,7 +462,8 @@ export async function scanStillDefects(
 ): Promise<StillDefectVerdict> {
   try {
     const mustShow = expect && required?.length ? required : undefined;
-    // The state, action, number and position the description says — asked with `missing`.
+    // The state, action, number and position the description says — asked with `missing`, and only
+    // once it is turned on (`detailCheckOn`).
     const askDetail = !!expect && detailCheckOn();
     // Spelling and a named pattern need the larger frame.
     const [w, h] = allowedText || exactLook ? [1280, 720] : [DEFECT_SCAN_WIDTH, DEFECT_SCAN_HEIGHT];

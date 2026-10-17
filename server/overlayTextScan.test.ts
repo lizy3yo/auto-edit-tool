@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import sharp from "sharp";
 
 // Mock the Claude client so nothing here hits the live model. Braces are load-bearing on any
@@ -302,6 +302,14 @@ describe("the thing the way its description says — the detail verdict (2026-10
   const LUMPY = "a bobbin wound lumpy and uneven beside the machine"; // 285-125, drawn neat
   const RAISED = "the host from behind, both arms raised over her head"; // 233-134, drawn arms down
 
+  // Off until it is measured: these cases turn it on; the last ones check it is off by default.
+  beforeEach(() => {
+    process.env.PICTURE_DETAIL_CHECK = "1";
+  });
+  afterEach(() => {
+    delete process.env.PICTURE_DETAIL_CHECK;
+  });
+
   it("asks it beside 'missing', in the uncached part, and reads it back with what came out otherwise", async () => {
     const { verdictShape } = await import("./overlayTextScan");
     mockInvoke.mockReset();
@@ -353,12 +361,13 @@ describe("the thing the way its description says — the detail verdict (2026-10
     expect(mockInvoke.mock.calls[0][0].systemSuffix).not.toContain("QUESTION 4b");
   });
 
-  it("PICTURE_DETAIL_CHECK=0 gives back exactly the check it was before", async () => {
-    mockInvoke.mockReset();
-    mockInvoke.mockResolvedValue({ text: '{"overlay":false,"broken":false,"writing":false,"missing":false,"detail":true}' } as any);
+  it("off by default (and with PICTURE_DETAIL_CHECK=0): exactly the check it was before", async () => {
     const img = await imageOf(1280, 720);
-    process.env.PICTURE_DETAIL_CHECK = "0";
-    try {
+    for (const setting of [undefined, "0"]) {
+      if (setting === undefined) delete process.env.PICTURE_DETAIL_CHECK;
+      else process.env.PICTURE_DETAIL_CHECK = setting;
+      mockInvoke.mockReset();
+      mockInvoke.mockResolvedValue({ text: '{"overlay":false,"broken":false,"writing":false,"missing":false,"detail":true}' } as any);
       const v = await scanStillDefects(img, OPEN, "and a padlock that just hangs there open,");
       expect(v).toEqual({
         overlay: false,
@@ -373,8 +382,6 @@ describe("the thing the way its description says — the detail verdict (2026-10
       const off = mockInvoke.mock.calls[0][0];
       expect(off.systemSuffix).not.toContain("detail");
       expect(off.userMessage).not.toMatch(/the way it is described/);
-    } finally {
-      delete process.env.PICTURE_DETAIL_CHECK;
     }
   });
 
