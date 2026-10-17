@@ -509,6 +509,8 @@ export function applySpokenLists(
   // Why each list found in the script was NOT cut here — logged by the caller, so a list that stays
   // on the host says why instead of having to be reproduced.
   const skipped: string[] = [];
+  // Whether the video MAKES its main thing: the shot list stages only pictures of a thing being made.
+  const mainMade = !!opts.main && scenes.some(s => s.keyThing === opts.main && !!s.buildStage);
   const G: FilmToken[] = [];
   scenes.forEach((s, i) => tokenSpans(s.scriptText ?? "").forEach(t => G.push({ scene: i, ...t })));
   const toks = G.map(g => g.tok);
@@ -699,16 +701,21 @@ export function applySpokenLists(
     }
     if (head.hostPresent) handed++;
     const items: StoryboardScene[] = [];
-    // A STEP is a moment of making the main thing: it keeps that thing as its own (`ownKeyThing`) and
-    // is "making" unless the planner already gave its picture a stage (a finishing step it called
-    // "done") — so it is drawn only from pictures of the piece at the same or an earlier stage, never
-    // from the finished piece the video opened on (Hank's job 269: "Square up the scrap with a couple
-    // of saw cuts," was drawn from "A finished charred cedar incense holder"). Any other list clears
-    // the mark.
-    const asItem = (p: StoryboardScene): StoryboardScene =>
-      r.kind === "steps"
-        ? { ...p, listKind: "steps", buildStage: p.buildStage ?? "making", keyThing: p.keyThing ?? opts.main }
-        : { ...p, listKind: undefined };
+    // A STEP of making the main thing is "making" unless the planner already gave its picture a stage
+    // (a finishing step it called "done"), and with no key thing of its own it takes the main thing
+    // (`ownKeyThing`) — so it is drawn only from pictures of the piece at the same or an earlier
+    // stage, never from the finished piece the video opened on (Hank's job 269: "Square up the scrap
+    // with a couple of saw cuts," was drawn from "A finished charred cedar incense holder"). A step
+    // filed under the bench or a tool is still a moment of the making (jobs 332, 361: "give it a quick
+    // brush," on the workbench). Only when the video MAKES its main thing — the shot list gave a
+    // picture of it a stage (`mainMade`): most step lists build nothing ("get a stepladder, take one
+    // alarm down, and read the label", Frederick's job 359; "hold the piece up near your face by a
+    // window", Scarlett's job 354) and stay exactly as they were. Any other list clears the mark.
+    const asItem = (p: StoryboardScene): StoryboardScene => {
+      if (r.kind !== "steps") return { ...p, listKind: undefined };
+      if (!mainMade) return { ...p, listKind: "steps" };
+      return { ...p, listKind: "steps", keyThing: p.keyThing ?? opts.main, buildStage: p.buildStage ?? "making" };
+    };
     for (let k = 0; k + 1 < bounds.length; k++) {
       const [a, b] = [bounds[k], bounds[k + 1]];
       const text = textOf(a, b);

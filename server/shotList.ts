@@ -1043,8 +1043,10 @@ const SHOT_LIST_SYSTEM =
   "assembled); \"done\" — finished. " +
   "Finishing touches (oil, wax, polish, a felt pad, a last brush) count as done. Many videos open " +
   "on the finished piece and then go back to the start: a making shot shows the piece only as far " +
-  "along as its words say, never already finished. stage is null for every other shot — a thing " +
-  "nobody makes in the video, a tool, a place, the weather.\n" +
+  "along as its words say, never already finished. The stage is about the piece in the shot, " +
+  "whatever its thing is (a shot filed under the bench or a tool with the piece on it still has " +
+  "one). stage is null for every other shot — a thing nobody makes in the video, a tool on its " +
+  "own, a place, the weather.\n" +
   "1d. DON'T REPEAT. When a line's subject is already on screen from the picture before (the line " +
   "says \"it\", \"this\", \"that one\") and the line names something NEW you can see — a thing, or a " +
   "kind of event or situation (\"the storms that roll in at night\") — the shot shows the new thing " +

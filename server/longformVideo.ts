@@ -6815,14 +6815,18 @@ export function memoryClause(scene: StoryboardScene): string {
   // and size are its own — "identical shape, size" would hold a strip being coiled into a bowl
   // (Ruth's job 281) to the flat strip, and the old "the reference is how it looked before" was
   // backwards when the reference was the finished piece the video opened on (Hank's job 268).
+  // The stage is the PICTURE's, and its key thing may be the bench or a tool the piece is made with
+  // (stored step pictures were filed under "workbench", "oil finish rag", the sewing machine), so the
+  // clause never calls the key thing unfinished — only "what is being made", which the words name.
   if (beforeFinished(scene))
     return (
-      ` ${which} this exact ${thing}, at the same or an earlier stage of being made than this ` +
+      ` ${which} this exact ${thing}, at the same or an earlier point in the making than this ` +
       `picture. Draw the SAME ${thing} — the same colours, materials and wear, in the same place — ` +
       `from a different camera position than the reference; never copy the reference's ` +
-      `framing.${view} Show it exactly as far along as the words say — NOT finished: raw pieces or ` +
-      `partly built, with only what the words say has been done to it so far. It is ONE thing: ` +
-      `never a second copy or a spare part of it beside, on or inside the first.` +
+      `framing.${view} What is being made is shown exactly as far along as the words say — NOT ` +
+      `finished: raw pieces or partly built, with only what the words say has been done to it so ` +
+      `far. ${all.length > 1 ? "Each is" : "It is"} ONE thing: never a second copy or a spare part ` +
+      `of it beside, on or inside the first.` +
       host
     );
   return (

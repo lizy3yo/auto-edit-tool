@@ -141,8 +141,9 @@ export function listItemsAround(
 export function ownKeyThing(s: StoryboardScene): string | undefined {
   if (!s.keyThing) return undefined;
   // A STEP of making the thing is about that thing whatever its words call it ("oil it,"): it is
-  // drawn from the thing's memory, and only at the same or an earlier stage (`laterStage`).
-  if (s.listCut && s.listKind === "steps") return s.keyThing;
+  // drawn from the thing's memory, and only at the same or an earlier stage (`laterStage`). A step
+  // with no stage builds nothing ("and read the label.") and keeps the list-item rule below.
+  if (s.listCut && s.listKind === "steps" && s.buildStage) return s.keyThing;
   if (s.listCut && !s.partOf && !wordsName(s.scriptText ?? s.narration ?? "", s.keyThing)) return undefined;
   return s.keyThing;
 }
@@ -164,9 +165,14 @@ export function laterStage(x: StoryboardScene, s: StoryboardScene): boolean {
 export const beforeFinished = (s: StoryboardScene) =>
   s.buildStage === "material" || s.buildStage === "making";
 
-/** How a key thing is named to the picture check while it is still being made. */
+/**
+ * How a key thing is named to the picture check while something is still being made. Conditional,
+ * because the stage belongs to the PICTURE and its key thing may be the bench or a tool it is made
+ * with (stored step pictures were filed under "workbench", "oil finish rag", the sewing machine):
+ * a workbench "not yet finished" would be failed for being a whole workbench.
+ */
 export const UNFINISHED_THING =
-  "as it is at this stage of being made (raw pieces or partly built, not yet finished)";
+  "— when it is what is being made: as it is at this stage of being made (raw pieces or partly built, not yet finished)";
 
 /**
  * The key things the picture check holds a picture to (`requiredThingsQuestion`): its own and every

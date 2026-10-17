@@ -546,8 +546,30 @@ describe("Hank's job 326: a list of STEPS (the operator, 2026-10-02)", () => {
       expect(s.buildStage).toBe("making");
       expect(ownKeyThing(s)).toBe("incense holder"); // "oil it," too
       expect(memorySourcesFor(r.scenes, s)).toEqual([]); // the finished holder is further along
-      expect(requiredThingsFor(s)[0]).toMatch(/^incense holder as it is at this stage of being made/);
+      expect(requiredThingsFor(s)[0]).toMatch(/^incense holder — when it is what is being made: as it is at this stage of being made/);
     }
+  });
+
+  it("steps that build nothing stay as they were (Frederick's job 359)", () => {
+    // The real rows: a video that makes nothing has no picture with a stage, so its steps get none —
+    // a smoke alarm told "NOT finished: raw pieces or partly built" would be drawn in pieces.
+    const scenes = [
+      pic(14, "Earlier in a way that decides whether anybody wakes up on their own. So", "a bedroom at night with the ceiling smoke alarm visible above the bed", { keyThing: "smoke alarm" }),
+      pic(15, "get a stepladder,", "an aluminum stepladder standing open beneath the ceiling alarm", { keyThing: "stepladder", listCut: true }),
+      pic(16, "take one alarm down,", "the host's hands taking the smoke alarm down from the ceiling", { keyThing: "smoke alarm", listCut: true }),
+      pic(17, "and read the label.", "close-up of the label on the back of a white round smoke alarm, held in the host's hands", { keyThing: "smoke alarm", listCut: true }),
+      host(18, "If it carries a notice about radioactive material, that's ionization."),
+    ];
+    const found = [{ sentence: 1, kind: "steps" as const, items: ["get a stepladder", "take one alarm down", "read the label"] }];
+    const r = applySpokenLists(scenes, found, { main: "smoke alarm" });
+    const steps = r.scenes.filter(s => s.listCut);
+    expect(steps.map(s => s.scriptText)).toEqual(["get a stepladder,", "take one alarm down,", "and read the label."]);
+    expect(steps.map(s => s.buildStage)).toEqual([undefined, undefined, undefined]);
+    expect(steps.map(s => s.keyThing)).toEqual(["stepladder", "smoke alarm", "smoke alarm"]);
+    // The list-item rule as before: "read the label" names no alarm, so it is not drawn from one.
+    expect(steps.map(ownKeyThing)).toEqual(["stepladder", "smoke alarm", undefined]);
+    expect(requiredThingsFor(steps[1])).toEqual(["smoke alarm"]);
+    expect(memoryClause({ ...steps[1], memoryRefUrls: ["https://x/alarm.png"] })).toMatch(/identical shape, size, colours/);
   });
 });
 
@@ -573,15 +595,31 @@ describe("a thing being made is never drawn from its finished picture (stored fi
   it("the prompt says not finished and drops 'identical shape, size'; the check asks for it at this stage", () => {
     const withMemory = { ...drilling, memoryRefUrls: ["https://x/raw.png"] } as StoryboardScene;
     const clause = memoryClause(withMemory);
-    expect(clause).toMatch(/at the same or an earlier stage of being made than this picture/);
-    expect(clause).toMatch(/NOT finished: raw pieces or partly built/);
+    expect(clause).toMatch(/at the same or an earlier point in the making than this picture/);
+    expect(clause).toMatch(/What is being made is shown exactly as far along as the words say — NOT finished: raw pieces or partly built/);
     expect(clause).not.toMatch(/identical shape, size/);
     expect(clause).not.toMatch(/the reference is how it looked before/);
     // A finished or unlabelled picture keeps the old clause word for word.
     for (const s of [{ ...withMemory, buildStage: "done" as const }, { ...withMemory, buildStage: undefined }])
       expect(memoryClause(s)).toMatch(/identical shape, size, colours/);
     expect(memoryClause(drilling)).toBe(""); // no memory, nothing said
-    expect(requiredThingsQuestion(requiredThingsFor(drilling))).toMatch(/"incense holder as it is at this stage of being made \(raw pieces or partly built, not yet finished\)"/);
+    expect(requiredThingsQuestion(requiredThingsFor(drilling))).toMatch(
+      /"incense holder — when it is what is being made: as it is at this stage of being made \(raw pieces or partly built, not yet finished\)"/
+    );
+  });
+
+  it("a step filed under the bench is still a moment of the making, and the bench is never called unfinished (job 361)", () => {
+    // Job 361's "give it a quick brush," was filed under the workbench. The stage is the picture's,
+    // so the prompt and the check speak of "what is being made", never of an unfinished workbench.
+    const brush = pic(25, "give it a quick brush,", "hands brushing sawdust off the squared cedar block on workbench", {
+      keyThing: "workbench",
+      buildStage: "making",
+      memoryRefUrls: ["https://x/bench.png"],
+    });
+    const clause = memoryClause(brush);
+    expect(clause).not.toMatch(/workbench, at the same or an earlier stage of being made/);
+    expect(clause).toMatch(/this exact workbench, at the same or an earlier point in the making/);
+    expect(requiredThingsFor(brush)[0]).toMatch(/^workbench — when it is what is being made:/);
   });
 });
 

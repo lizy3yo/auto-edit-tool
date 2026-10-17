@@ -195,6 +195,44 @@ describe("a step of a spoken list is the main thing, being made (Hank's job 269 
     expect(r.scenes.find(s => s.scriptText === "oil it,")!.buildStage).toBe("making");
   });
 
+  it("a step the planner filed under the bench or a tool is still making (job 361), keeping its key thing", () => {
+    const scenes = [
+      pic(1, "A finished charred cedar incense holder on the market table", { scriptText: "That's the winner.", keyThing: HOLDER, buildStage: "done" }),
+      pic(24, "hands using hand saw to square a charred cedar scrap on workbench", { scriptText: "Square up the scrap with a couple of saw cuts,", keyThing: "workbench", listCut: true }),
+      pic(25, "hands brushing sawdust off the squared cedar block on workbench", { scriptText: "give it a quick brush,", keyThing: "workbench", listCut: true }),
+      pic(26, "hands drilling an angled hole halfway into cedar block on workbench", { scriptText: "drill the hole about halfway through at a slight angle,", keyThing: "workbench", listCut: true }),
+      pic(27, "hands wiping oil onto the charred cedar block with an oil finish rag on workbench", { scriptText: "oil it,", keyThing: "oil finish rag", listCut: true }),
+      pic(28, "hands pressing a small round black felt dot onto the bottom of a small brushed black charred cedar cube", { scriptText: "and put a felt dot on the bottom.", keyThing: HOLDER, listCut: true }),
+      host(29, "Bye."),
+    ];
+    const r = applySpokenLists(scenes, lists, { main: HOLDER });
+    const steps = r.scenes.filter(s => s.listCut);
+    expect(steps.map(s => s.keyThing)).toEqual(["workbench", "workbench", "workbench", "oil finish rag", HOLDER]);
+    expect(steps.every(s => s.buildStage === "making" && s.listKind === "steps")).toBe(true);
+    // The finished holder is further along than every one of them.
+    for (const s of steps) expect(memorySourcesFor(r.scenes, s)).not.toContain(r.scenes[0]);
+  });
+
+  it("a video that does not make its main thing: steps get no stage and no main thing (Scarlett's job 354)", () => {
+    const scenes = [
+      pic(1, "a strand of pearls on a velvet tray", { scriptText: "Here's the test.", keyThing: "pearl necklace" }),
+      pic(2, "pearls by the window", { scriptText: "hold the piece up near your face by a window, and look at what it gives back." }),
+      host(3, "Bye."),
+    ];
+    const r = applySpokenLists(
+      scenes,
+      [{ sentence: 1, kind: "steps" as const, items: ["hold the piece up near your face by a window", "look at what it gives back"] }],
+      { main: "pearl necklace" }
+    );
+    const steps = r.scenes.filter(s => s.listCut);
+    expect(steps).toHaveLength(2);
+    for (const s of steps) {
+      expect(s.buildStage).toBeUndefined();
+      expect(s.keyThing).toBeUndefined(); // tagged later from its own words, as before
+      expect(ownKeyThing({ ...s, keyThing: "pearl necklace" })).toBeUndefined(); // "the piece" names no necklace
+    }
+  });
+
   it("a list of things carries no stage and stays its own thing", () => {
     const scenes = [
       host(1, "Before you start the build you need a saw, a drill, and a stack of sandpaper."),
