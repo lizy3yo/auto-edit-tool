@@ -73,9 +73,10 @@ import {
   withoutFaceAsks,
   WORN_ON_BODY,
 } from "./hostLook";
-import { tooShortToRead, type Word } from "../graphics/src/cueResolve";
+import { tooShortToRead, type ResolvedCue, type Word } from "../graphics/src/cueResolve";
 import { wordsSaidOver } from "../graphics/src/plan/planner";
 import { plannerForJob } from "./graphics/apply";
+import { makeReadable, type Reading } from "./graphics/readable";
 
 const pic = (index: number, scriptText: string, showSubject: string, over: Partial<StoryboardScene> = {}) =>
   ({ index, scriptText, showSubject, visualPrompt: showSubject, ...over }) as StoryboardScene;
@@ -1087,5 +1088,47 @@ describe("a bare moment can be explained from the job (Dale's job 397, found by 
     expect(smalls).toEqual({ at: 49.68, text: "Smalls, about $10 to $40.", asked: [], placed: false });
     expect(frontEdge.asked).toEqual(["front-edge-price"]);
     expect(kept.rounds[0].problems).toEqual([{ cue: "front-edge-price", problem: "waits 5.4 s between its own words (most 5 s) — start it nearer its point" }]);
+  });
+});
+
+describe("an unreadable number gets one more try in the plain text colour (Hank's job 390, found by the audit)", () => {
+  // "a lattice panel that ate 6 hours of my Saturday": left out as "colour 4.0:1" after every fix.
+  const cue = (): ResolvedCue => ({
+    id: "lattice-six-hours",
+    template: "BigNumberOverlay",
+    start: 19.4,
+    end: 22.6,
+    startFrame: 582,
+    endFrame: 678,
+    props: { durationSec: 3.2, kicker: "Lattice panel", value: 6, unit: "hours", at: 0.9, theme: { bg: "#221710", accent: "#eb9046" } },
+    sync: [],
+    conformed: { start: false, end: true, held: true },
+  });
+  const run = async (plain: Reading) => {
+    const c = cue();
+    let n = 0;
+    const made = await makeReadable(
+      c,
+      false,
+      "designed.mov",
+      {
+        render: async () => `gfx-${++n}.mov`,
+        measure: async x => (x.props.plain === true ? plain : { colour: x.props.lift ? 4.0 : 3.6, pass: false }),
+        calmest: async () => ({ h: "left", v: "top" }),
+      },
+      []
+    );
+    return { c, made };
+  };
+  it("the number drawn white over the same dimmed footage is kept when it reads, at the same moment", async () => {
+    const { c, made } = await run({ white: 8.4, pass: true });
+    expect(made.r.pass).toBe(true);
+    expect(c.props.plain).toBe(true);
+    expect(made.steps.at(-1)).toBe("coloured words in the plain text colour: white 8.4:1");
+    expect([c.start, c.end, c.startFrame, c.endFrame]).toEqual([19.4, 22.6, 582, 678]);
+  });
+  it("it stays left out when the white number does not read either", async () => {
+    const { made } = await run({ white: 5.5, pass: false });
+    expect(made.r.pass).toBe(false);
   });
 });

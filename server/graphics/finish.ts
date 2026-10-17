@@ -36,7 +36,7 @@ import { getMediaDuration } from "../mediaProbe";
 import { ffmpeg, frameDiffs, levelsOf, narrationOf } from "./media";
 import { driftedStretches, LEVEL_FRAME_SEC, retimeWords, spliceStretch } from "../../graphics/src/plan/wordTiming";
 import { execFfmpeg } from "../ffmpegSpawn";
-import { calmestPlace, describe, measureCue, score, subjectOf } from "./readable";
+import { calmestPlace, describe, makeReadable, measureCue, subjectOf } from "./readable";
 import { GRAPHICS_DIR, renderGraphic } from "./render";
 
 /** The model that writes the plan (the lab measured Opus best at following the moments). */
@@ -325,42 +325,13 @@ export async function addGraphics(input: AddGraphicsInput): Promise<GraphicsReco
       }
       let file = await renderCue(c);
       if (def.kind === "overlay" && def.underlay !== "window") {
-        const steps: string[] = [];
-        let r = await measure(c, file);
-        steps.push(`as designed: ${describe(r)}`);
-        let best = { r, file, props: { ...c.props } };
-        const keep = () => {
-          attempts.push(file);
-          if (r.pass || score(r) > score(best.r)) best = { r, file, props: { ...c.props } };
-        };
-        for (const shade of [0.5, 1]) {
-          if (r.pass) break;
-          c.props.shade = shade;
-          file = await renderCue(c);
-          r = await measure(c, file);
-          steps.push(`darker behind the words (${shade}): ${describe(r)}`);
-          keep();
-        }
-        if (!r.pass && r.colour !== undefined && r.colour < 4.5) {
-          c.props.lift = 1;
-          file = await renderCue(c);
-          r = await measure(c, file);
-          steps.push(`lighter shade of the coloured words: ${describe(r)}`);
-          keep();
-        }
-        if (!r.pass && def.movable && r.box) {
-          c.props.place = await calmestPlace(input.filmPath, c, cuts, { w: r.box.x1 - r.box.x0, h: r.box.y1 - r.box.y0 });
-          file = await renderCue(c);
-          r = await measure(c, file);
-          steps.push(`moved to the calmest part of the picture: ${describe(r)}`);
-          keep();
-        }
-        c.props = best.props as typeof c.props;
-        file = best.file;
-        readability.push({ id: c.id, pass: best.r.pass, summary: describe(best.r), steps });
+        const io = { render: renderCue, measure, calmest: (cue: ResolvedCue, size: { w: number; h: number }) => calmestPlace(input.filmPath, cue, cuts, size) };
+        const made = await makeReadable(c, !!def.movable, file, io, attempts);
+        file = made.file;
+        readability.push({ id: c.id, pass: made.r.pass, summary: describe(made.r), steps: made.steps });
         // Text that cannot be read is left out, never shipped.
-        if (!best.r.pass) {
-          dropped.push({ id: c.id, why: `text not readable on the picture (${describe(best.r)})` });
+        if (!made.r.pass) {
+          dropped.push({ id: c.id, why: `text not readable on the picture (${describe(made.r)})` });
           continue;
         }
       }
