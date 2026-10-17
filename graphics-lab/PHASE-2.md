@@ -121,3 +121,15 @@ Every spot reported on the first finals was traced to a cause, fixed as a genera
 | Dale 0:53 / 0:54: coasters and ornaments were the same picture | Both list items took the pile of small pieces as their key thing, so both were drawn from that pile picture. Both descriptions also said "round maple and walnut". | A list item is drawn from a key thing's picture only when its own words name that thing, or it is a part of it (`wordsName`, `memorySourcesFor`). Every list item's prompt names the other items of its list, so it is drawn as what makes it different from them (`listItems`, `listItemClause`). |
 | Dale 0:18: the "where to sell" window over the cutting-board picture | The window opened on "Today I'm ranking", 1.1 s before the Etsy picture its first item stands for. | A window opens on the cut to its first item's picture (2d in `resolveCues`). |
 | Hank 1:19-1:28: captions ahead of the voice | The transcriber put "But once you take out the lumber, that's" 3 s early. It cannot time "$90 to $130" and "$14" by their letters, so it slid the stretch around them. The caption then sat still for 3.7 s while he spoke. | The word times are checked against the sound: speech with no words under it, or a word stretched over a real pause (`driftedStretches`). Such a stretch is heard again on its own and kept only if it says the same words and fits the sound better (`spliceStretch`, `healDrift`). Across the four films it flagged Hank's stretch (fit 0.48 → 0.77, corrected) and one Dale stretch (kept: the second hearing was no better). |
+
+## Round 9: the audit's graphics checks (2026-10-18)
+
+Found by replaying the 12 films that have graphics, not by a viewer. No film changes except where noted.
+
+| Found | Rule now |
+| --- | --- |
+| The planner was told every spoken list MUST get a graphic, including lists inside the call to action, where no graphic may go (15 of 49 lists) | Only lists outside the CTA are named (`listsWhereGraphicsGo`, the same locate-and-CTA test as `missingListCues`). |
+| A graphic could be on screen for 1.27 s (Dale's "3 piles") and still pass QA | Nothing under 1.5 s (`tooShortToRead`): the planner sends it back, a chapter label is raised to 1.5 s, QA fails a shorter one. |
+| The planner read each scene's script text; where the film says a line over the next scene, it asked for graphics the rules then refused | The planner reads what the film's sound says over each picture (`wordsSaidOver`), keeping the script's spelling where the words match. |
+| A refusal left no trace on the job | The job keeps every planning round (asked, kept, refused), the sentences the fill round offered, and the readability steps (`graphics.planner`, `graphics.readability`); a saved-plan Reassemble carries them over. |
+| An overlay left out because its coloured number could not be read | One last, timing-neutral try: the number in the plain text colour (white on the dim ground), judged at 7:1. |

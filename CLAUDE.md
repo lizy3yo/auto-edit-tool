@@ -720,6 +720,43 @@ Express · tRPC · Drizzle · MySQL.
   persona, through the voice session's own `scripts/voice-bench.mts --heygen` (words, loudness, noise
   in pauses, lip-sync against the voice) plus the lower mouth vs Bertha and the clip's skin, one pass
   line per check, each failure named as the VOICE half or the PHOTO half.
+- **The audit's rules, built and tested on new channels** (round 9, 2026-10-18). The audit of 139
+  production films (`analysis/generation-audit-2026-10.md`, 17% of clips with a visible error)
+  proposed R1-R15. Each was replayed over the 336 local storyboards (read only, free), challenged by
+  a second reviewer, built as a general rule with tests from the real rows, and reviewed again. Seven
+  channels were copied from the hosted app for this (`scripts/channels/import-hosted-channels.mts`,
+  skips any that exist; 3-minute excerpts of their real scripts in `scripts/stress/scripts/`).
+  (a) WHO IS IN THE PICTURE (`namedPeople`/`showsPerson`/`someoneElse`, hostLook.ts): people are read
+  off the picture's own words ("an older man", "a crowd", "a shopper's hand"); a role, a sex the host
+  does not have, or two or more people make `otherPerson` (+ `otherPeople`), never the host photo;
+  the line check answers `who` per person picture (`applyWho`). (b) BUILD STAGE (`scene.buildStage`
+  material/making/done from the shot list and line check): memory never draws a step from a later
+  stage (`laterStage` in `memorySourcesFor`). (c) ONE LOOK PER KEY THING: memory is the earliest
+  picture that is ABOUT the thing (`memoryOf`/`isSubject`); a picture with no own memory gets the
+  props list's look (`keyThingLookClause`, no place/light/writing); a first picture whose check said
+  missing is never memory (`memoryUnfit`). (d) THE LINE CHECK holds who does what, the state and the
+  count the line makes its point with, and writes `forbids` for a sentence that rules something out
+  (shot-list rule 6b "what not to do"; the still check's QUESTION 8 only on those pictures). A separate
+  `detail` question (right thing, wrong state/count/position) exists but is OFF until measured:
+  `PICTURE_DETAIL_CHECK=1` turns it on. A typed redo owns its picture (`ownTypedPicture`). (e) NO
+  SILENT FAULTS (`shared/pictureFlaws.ts`): a picture that ships flagged says so (`pictureFlaws`/
+  `panelFlaws`, one job warning, a card badge); later refusals are recorded on `pictureChecks`; broken
+  geometry and plain-picture writing get one changed-prompt redraw (`faultRedrawFor`,
+  `FAULT_REDRAWS=0` off). (f) PRINT the line never says is drawn soft (`blurUnsaidPrint`); the book
+  guard reads the scrubbed words, so "Facebook" is not a book. (g) SCREENS show what their own
+  description says (`namesDevice`, `sellingScreen`, `DESCRIBED_SCREEN_CLAUSE`); the shopping grid is
+  for selling screens only. (h) SPLITS ship with both halves or say so (`server/splitPanel.ts`: the
+  panel starts when HeyGen accepts the render, waits on the host scene's own clock, one retry,
+  `splitPanelMissing` + a "Draw the picture(s)" banner for films already rendered). (i) CLIP CHECK is
+  told what is meant to move (`{what, meant}`); a glitch re-render reuses its checked keyframe and is
+  ledgered `glitch`. (j) CHIN/NECK LINES frame the host at the lips (`looksAtChinLine`,
+  `HOST_LIPS_CUT_CLAUSE`). (k) LIST ITEMS ARE THINGS (`notAThing`): numbers, durations, rates, set
+  phrases, clauses and describing words never make a list, and a list with one refused item is
+  dropped whole. (l) NO UNSEEN BEATS (`foldUnseenBeats`): a measured zero-length beat joins a
+  neighbour; a lead-in between two list items goes to the next item. (m) ONLY NARRATION IS VOICED
+  (`shared/scriptCheck.ts`): notes, headings and a 60+ word repeat are refused at Generate by line.
+  Left for the operator: the face on beauty/fashion "looks" lines (audit cause 9), and the
+  pay-once video rule (R14 kept the second render).
 - `server/hostPlate.ts` — **provider-independent**. The lip-sync model animates the image it
   is handed and never changes the setting, so `HOST_PLATES=1` generates a 16:9 plate of the host
   IN each beat's setting (host photo as identity reference) and syncs from that instead of the
