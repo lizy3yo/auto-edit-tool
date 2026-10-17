@@ -1078,6 +1078,18 @@ describe("a screen shows what its own description says (the audit's grid screens
         visualPrompt:
           "Smartphone held at chest height displaying an open messaging app with incoming customer inquiries, bare hands visible from forearms down.",
       }),
+      // Production job 332 (Lance): the scanner app "listing manufacturer names" (a verb, not a
+      // listing for sale), and the rental listing that came back as a grid of bags and flashlights.
+      pic(119, "a good one shows a plain list, names each manufacturer, and asks you to configure nothing.", "phone screen close on the scanner app listing manufacturer names, with the host's hands at work on it", {
+        visualPrompt:
+          "Close view of a smartphone screen showing a network scanner app list with manufacturer names and device types, held in bare hands in the rental bedroom.",
+        humanPresent: true,
+      }),
+      pic(154, "Fifth, screenshot the listing again before anything about it changes,", "phone held showing rental listing photos on screen", {
+        visualPrompt:
+          "Close view of bare hands holding a slim black smartphone, the dark glass screen displaying a rental listing with photos, fingers visible on the sides of the phone.",
+        humanPresent: true,
+      }),
     ];
     for (const s of screens) {
       const prompt = buildStillPrompt(s);
@@ -1086,6 +1098,15 @@ describe("a screen shows what its own description says (the audit's grid screens
       expect(prompt).toMatch(/never stands upright by itself/);
       expect(prompt).toContain(SCREEN_TEXT_AS_BARS.trim());
     }
+    // Words the line SAYS stay readable on a described screen too (production job 338: the buyer's
+    // message that her wall is exactly 41 inches).
+    const said = appScreenClause(
+      pic(145, "When a buyer messages that her wall is exactly 41 inches,", "a phone held up showing a buy-and-sell app message screen", {
+        pictureText: "41 inches",
+      })
+    );
+    expect(said).toContain('nothing readable on the screen except "41 inches"');
+    expect(said).not.toMatch(GRID);
   });
 
   it("a screen word with no device in the picture adds no screen at all", () => {
@@ -1141,6 +1162,13 @@ describe("a screen shows what its own description says (the audit's grid screens
     });
     expect(buildStillPrompt(listing)).toMatch(GRID);
     expect(buildStillPrompt(pic(1, "x", "a phone showing a buy-and-sell app with handmade listings"))).toContain(APP_SCREEN_CLAUSE);
+    // Production job 244: a marketplace SEARCH is a grid of things for sale — the described clause's
+    // "never a grid of items for sale" would have contradicted its own description.
+    const search = pic(27, "dresser,", "phone search bar listing results of wooden dressers", {
+      visualPrompt: "Phone screen showing a marketplace search results grid, listings of wooden dressers displayed in thumbnail photos.",
+    });
+    expect(buildStillPrompt(search)).toMatch(GRID);
+    expect(buildStillPrompt(search)).not.toContain(DESCRIBED_SCREEN_CLAUSE);
     expect(appScreenClause(pic(1, "x", "a phone showing a listing of the walnut bookcase"))).toMatch(/ONE item's own listing page/);
     // Job 338: "Etsy," with the real app's look stays the real app.
     const etsy = pic(5, "Etsy,", "A phone showing a white shopping app screen with a two-column grid of product photos", {

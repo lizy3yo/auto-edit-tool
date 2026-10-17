@@ -765,10 +765,11 @@ const SCREEN_WORDS =
  * one side of the table" (job 151), a lit lantern "showing why the listing photo sells" (job 122)
  * and a split panel of a board "ready for an online shop photograph" (job 342) were each told what
  * a phone's screen shows — and, with a key thing, drawn as the photo inside a listing. A
- * screen-printed shirt and a screen door are not devices.
+ * screen-printed shirt and a screen door are not devices, and neither is a thing MADE FOR one: a
+ * phone stand, a tablet holder or a computer desk ready for its listing photo has no screen in it.
  */
 const NAMES_DEVICE =
-  /\b(?:(?:smart|i)?phones?|tablets?|ipads?|laptops?|computers?|monitors?|screens?(?![-\s](?:print|door))|devices?|apps?|websites?|web\s?pages?|browsers?)\b/i;
+  /\b(?:(?:smart|i)?phones?|tablets?|ipads?|laptops?|computers?|monitors?|screens?(?![-\s](?:print|door))|devices?|apps?|websites?|web\s?pages?|browsers?)\b(?![-\s](?:stands?|holders?|cases?|desks?|risers?|docks?|mounts?|cradles?|chargers?|cabinets?|carts?|shel(?:f|ves))\b)/i;
 
 /** Whether a picture's words name a device or its screen (`NAMES_DEVICE`). Pure. */
 export const namesDevice = (text: string): boolean => NAMES_DEVICE.test(text);
@@ -781,15 +782,31 @@ export const namesDevice = (text: string): boolean => NAMES_DEVICE.test(text);
  */
 export const showsScreen = (text: string): boolean => SCREEN_WORDS.test(text) && namesDevice(text);
 
-/** A screen that asks, in its own words, for things for sale. */
+/**
+ * A screen that asks, in its own words, for things for sale. Not "listed" ("the three checks
+ * listed", "morning flights listed at the top"): a thing listed for sale says so in other words.
+ */
 const SELLING_SCREEN =
-  /\b(?:buy-and-sell|listings?|listed|marketplace|online (?:craft )?(?:shop|store)|shop page|web-?shop|shopping (?:app|site|page)|for sale|storefront|product (?:photos?|pages?|listings?)|etsy|ebay|craigslist|offerup|mercari|poshmark|kijiji|gumtree)\b/i;
+  /\b(?:buy-and-sell|listings?|marketplace|online (?:craft )?(?:shop|store)|shop page|web-?shop|shopping (?:app|site|page)|for sale|storefront|product (?:photos?|pages?|listings?)|etsy|ebay|craigslist|offerup|mercari|poshmark|kijiji|gumtree)\b/i;
+/**
+ * "listing" as a VERB — an app, a menu or a chart listing what it lists — is no listing for sale:
+ * "the scanner app listing manufacturer names" (production job 332) kept the grid of items for sale
+ * while its neighbours, worded "app list", were drawn as described. Only the word goes, never the
+ * noun before it ("the shop page listing the board" still sells), and the noun "listing" stays: "a
+ * buy-and-sell app listing screen", "app listing with a price field", "app listing, a close-up".
+ */
+const LISTING_VERB =
+  /(?<=\b(?:apps?|menus?|charts?|pages?|sheets?|lists?|panels?|windows?|screens?|displays?|logs?|forms?|bars?|columns?|rows?)\s+)listing(?=\s+(?!(?:photo\w*|pictures?|images?|pages?|screens?|titles?|texts?|grids?|details?|descriptions?|renewals?|prices?|fields?|feeds?|fees?|drafts?|previews?|thumbnails?|cards?|with|of|for|on|in|at|and|or|from|that|which|is|was|showing|open|visible)\b)[a-z])/gi;
 /**
  * Screen content that is not a page of things for sale, even inside a selling app ("a buy-and-sell
- * app message screen"). "Setting" alone is a place ("a kitchen setting"); "settings" is the page.
+ * app message screen"). "Setting" alone is a place ("a kitchen setting"); "settings" is the page. A
+ * listing of a place to stay is a listing but not of things for sale (production job 332's rental
+ * listing came back as a grid of bags and flashlights). A marketplace SEARCH is still a page of
+ * things for sale — "a marketplace search results grid, listings of wooden dressers" (production
+ * job 244) — so search results are left to the selling words.
  */
 const OTHER_SCREEN_CONTENT =
-  /\b(?:messag(?:e|es|ing)|chats?|text messages?|e-?mails?|inbox|maps?|booking|itinerar(?:y|ies)|calendar|reminders?|alarms?|camera|settings|setting (?:page|screen|menu)|passwords?|log-?in|sign-?in|search results?|forum|videos?|weather|bank(?:ing)?|payments?|receipts?|notifications?|cloud (?:storage|backup|account|app))\b/i;
+  /\b(?:messag(?:e|es|ing)|chats?|text messages?|e-?mails?|inbox|maps?|booking|itinerar(?:y|ies)|calendar|reminders?|alarms?|camera|settings|setting (?:page|screen|menu)|passwords?|log-?in|sign-?in|forum|videos?|weather|bank(?:ing)?|payments?|receipts?|notifications?|cloud (?:storage|backup|account|app)|rentals?|propert(?:y|ies)|real estate|hotels?)\b/i;
 
 /**
  * WHAT A SCREEN SHOWS IS WHAT ITS PICTURE SAYS. Every screen used to get one clause, "a simple
@@ -800,8 +817,10 @@ const OTHER_SCREEN_CONTENT =
  * words — never the line's: a selling line can show a message — ask for a selling screen and name
  * nothing else on it. Pure.
  */
-export const sellingScreen = (text: string): boolean =>
-  SELLING_SCREEN.test(text) && !OTHER_SCREEN_CONTENT.test(text);
+export const sellingScreen = (text: string): boolean => {
+  const own = text.replace(LISTING_VERB, " ");
+  return SELLING_SCREEN.test(own) && !OTHER_SCREEN_CONTENT.test(own);
+};
 
 /**
  * A piece another may be merged INTO: never a list item (unless the piece merged is itself a list

@@ -180,7 +180,9 @@ describe("a screen sits beside things for sale only when it is about selling (th
     const afghan = scene(7, "Finished lace shell afghan, the afghan angled and listing to one side of the table's center.");
     const lantern = scene(8, "A finished andon lantern sits lit on a low table in a darkened room, a settled moment showing why the listing photo sells.");
     const pile = scene(9, "Workbench in the garage workshop, a few finished wooden cutting boards and coasters in a calm pile, ready for listing or sale.");
-    const film = [afghan, lantern, pile];
+    // A thing made for a device is no device: it is not moved into a screen setting.
+    const stand = scene(10, "A walnut phone stand on the workbench, ready for its listing photo.");
+    const film = [afghan, lantern, pile, stand];
     expect(assignScreenSetups(film)).toBe(0);
     for (const s of film) {
       expect(screenPicture(s.visualPrompt!)).toBe(false);

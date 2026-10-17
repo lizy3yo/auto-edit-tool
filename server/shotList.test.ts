@@ -1419,4 +1419,42 @@ describe("a screen is a device, and it sells only when its own words say so (the
     // The LINE is never read: a hand tapping a phone under "Subscribe to…" has no selling words.
     expect(sellingScreen("a hand tapping a phone screen in a hallway beneath a ceiling smoke alarm")).toBe(false);
   });
+
+  it("an app LISTING names, a rental listing and a thing 'listed' are no page of things for sale", () => {
+    // Production job 332: the network scanner app "listing manufacturer names" kept the grid while
+    // its neighbours ("app list") did not; the rental listing came back as a grid of bags.
+    expect(
+      sellingScreen(
+        "phone screen close on the scanner app listing manufacturer names, with the host's hands at work on it Close view of a smartphone screen showing a network scanner app list with manufacturer names and device types"
+      )
+    ).toBe(false);
+    expect(sellingScreen("a phone held showing a rental listing screen A slim black smartphone displaying a vacation rental listing with photos and details")).toBe(false);
+    expect(sellingScreen("a phone showing a notes app listing the three checks")).toBe(false);
+    expect(sellingScreen("a laptop screen with the three checks listed")).toBe(false);
+    // …while the noun "listing" still sells, whatever follows it.
+    expect(sellingScreen("a phone on the workbench showing a buy-and-sell app listing, a close-up of one detail")).toBe(true);
+    expect(sellingScreen("Bare hands holding a smartphone displaying an app listing screen, framed close.")).toBe(true);
+    expect(sellingScreen("a phone displaying an app listing with an editable price box")).toBe(true);
+    expect(sellingScreen("a smartphone on the workbench showing a listing screen with dimensions noted")).toBe(true);
+    expect(sellingScreen("a laptop showing the shop page listing the walnut board")).toBe(true);
+    expect(sellingScreen("a phone showing a coffee table listing on a marketplace")).toBe(true);
+  });
+
+  it("a marketplace search is still a page of things for sale (production job 244)", () => {
+    expect(
+      sellingScreen(
+        "phone search bar listing results of wooden dressers Phone screen showing a marketplace search results grid, listings of wooden dressers displayed in thumbnail photos."
+      )
+    ).toBe(true);
+    // A search with nothing for sale in it is not.
+    expect(sellingScreen("a laptop showing search results for flights home")).toBe(false);
+  });
+
+  it("a thing made FOR a device is no device", () => {
+    expect(namesDevice("a walnut phone stand ready for its listing photo")).toBe(false);
+    expect(showsScreen("a tablet holder and a computer desk photographed for an online listing")).toBe(false);
+    // The device itself, in its stand or charging, still is.
+    expect(showsScreen("a phone resting in a walnut phone stand, its screen showing a listing")).toBe(true);
+    expect(showsScreen("a phone charging on the counter, its screen showing a listing")).toBe(true);
+  });
 });
