@@ -3928,7 +3928,7 @@ const CLICKBAIT_TAIL =
  * the original render used, and so an old job's clickbait subject is repaired for free on regen.
  * Widen the lists when a real title slips through.
  */
-export function normalizeVideoSubject(title: string): string {
+export function normalizeVideoSubject(title: string, hostName?: string): string {
   let s = (title ?? "").replace(/\([^)]*\)|\[[^\]]*\]/g, " ");
   // A leading shouted fragment ("STOP! ", "You won't believe this! ") — up to 3 words then bang.
   s = s.replace(/^\s*(?:\S+\s+){0,2}\S*[!?]+\s+/, "");
@@ -3943,7 +3943,24 @@ export function normalizeVideoSubject(title: string): string {
     .replace(/^[\s,.;:—-]+|[\s,.;:—-]+$/g, "")
     .trim();
   const out = truncateWords(s, 8) || (title ?? "").trim();
-  return isOperatorLabelTitle(title ?? "", out) ? "" : out;
+  return isOperatorLabelTitle(title ?? "", out, hostName) ? "" : out;
+}
+
+/**
+ * Whether a title opens with the channel host's own name as a label — "Dale: final with motion
+ * graphics" (job 386), "Frederick: smoke alarm (graphics review)" (jobs 384-385, which put the
+ * host's name into every picture prompt as "where Frederick: smoke alarm is done"). The words before
+ * the colon must ALL be words of the host's name (a run number beside them is fine: "Dale v2:"), so
+ * a real title that opens on a topic word ("Composting: A Beginner's Guide") is never one. Pure.
+ */
+function leadsWithHostName(raw: string, hostName: string | undefined): boolean {
+  const m = /^\s*([^:]{1,40}):/.exec(raw);
+  if (!m || !hostName?.trim()) return false;
+  const tokens = (t: string) =>
+    t.toLowerCase().replace(/['’]s\b/g, "").match(/[a-z]+\d*|\d+/g) ?? [];
+  const name = new Set(tokens(hostName));
+  const label = tokens(m[1]).filter(w => !/^(?:v?\d+|take|run)$/.test(w));
+  return label.length > 0 && label.every(w => name.has(w));
 }
 
 /**
@@ -3954,9 +3971,16 @@ export function normalizeVideoSubject(title: string): string {
  * (under three words — a topic is a phrase), or a test marker falls back to the subject read from
  * the SCRIPT (`deriveVideoSubject`). Pure — unit-tested.
  */
-export function isOperatorLabelTitle(raw: string, normalized: string): boolean {
+export function isOperatorLabelTitle(raw: string, normalized: string, hostName?: string): boolean {
   const words = normalized.split(/\s+/).filter(Boolean).length;
   if (words < 3) return true;
+  // The host's own name as the label ("Dale: final with motion graphics") — see `leadsWithHostName`.
+  if (leadsWithHostName(raw, hostName)) return true;
+  // A practice render named as one ("Practice: Hank adapt", jobs 194-210 — each of those films
+  // drew "where Practice: Hank adapt is done" into every picture). Only as the title's leading
+  // label and short, so "Practice Makes Perfect: …" stays a title.
+  if (/^\s*practice\b(?:\s+(?:run|take|render|\d+))?\s*[:—–-]/i.test(raw) && words <= 6)
+    return true;
   if (
     /#\d|\b\d{3,4}p\b|\b0\.\d+\b|\b(ltx|longcat|heygen|runpod|infinitetalk)\b/i.test(
       raw
@@ -3983,7 +4007,7 @@ export async function deriveVideoSubject(
   params: LongformInputParams,
   spokenScript: string
 ): Promise<string> {
-  const fromTitle = normalizeVideoSubject(params.title ?? "");
+  const fromTitle = normalizeVideoSubject(params.title ?? "", params.hostName);
   if (fromTitle) return fromTitle;
   try {
     const r = await invokeGemini({
@@ -4009,8 +4033,14 @@ export async function deriveVideoSubject(
 export async function ensureVideoSubject(
   params: LongformInputParams
 ): Promise<string> {
-  const fromTitle = normalizeVideoSubject(params.title ?? "");
+  const title = params.title ?? "";
+  const fromTitle = normalizeVideoSubject(title, params.hostName);
   if (fromTitle) return (params.videoSubject = fromTitle);
+  // A title read as a label NOW whose subject an older normalizer copied straight from it ("Dale:
+  // final with motion graphics", job 386; "Stress: Hank #1", jobs 111-113) is read from the script
+  // again — kept, the label would stay the setting of every picture the regenerate draws.
+  if (params.videoSubject && title.includes(params.videoSubject))
+    params.videoSubject = undefined;
   if (!params.videoSubject)
     params.videoSubject = await deriveVideoSubject(
       params,
@@ -6640,6 +6670,67 @@ const READABLE_PRINT_ASK =
   /\b(?:clearly|plainly|sharply|legibly)\s+(?:showing|displaying|reading|printed with|marked with)\b/gi;
 const PRINTED_FIGURE =
   /\b(?:(?:the|a)\s+)?(?:printed\s+)?(?:year|date)\s+(?:of\s+)?(?:19|20)\d{2}\b/gi;
+/** A figure a display or gauge is asked to read out ("a small grey display reading 7%", job 352). */
+const READ_OUT_FIGURE =
+  /\b(?:(reading|reads)\s+\$?\d[\d.,]*(?:\s*(?:%|°|percent\b|degrees\b))?|(displaying|showing)\s+(?:\$\d[\d.,]*|\d[\d.,]*\s*(?:%|°|percent\b|degrees\b)))/gi;
+
+/**
+ * A description that asks for print to be READ: handwriting, lettering, a label turned to the
+ * camera, printed text, a display reading a figure, a name carved or stitched in. On a picture with
+ * no words the line says (`pictureText`) and no soft print (`blurPrint`), the prompt asked for that
+ * AND, a clause later, for no writing at all (`NO_READABLE_TEXT`) — and the picture maker draws the
+ * thing it is asked for: job 352's handwritten cut lists (scenes 38, 52, 89) and moisture meter
+ * "reading 7%" (106), job 383's box "with its printed label facing forward" (scene 31, six checks,
+ * writing every time), job 376's alarm "with printed text" (35), job 345's board with "carved
+ * lettering" (17). Of the checked pictures that asked this way, 9 of 13 failed for readable writing,
+ * against 1.5% of the rest. A negated mention ("no lettering visible") asks for nothing.
+ */
+const PRINT_TO_READ = new RegExp(
+  [
+    String.raw`\bhand-?(?:written|lettered)\b`,
+    String.raw`\blettering\b`,
+    String.raw`\b(?:printed|front|back)\s+labels?\b[^.;]{0,30}\b(?:facing|visible|showing|readable|legible)\b`,
+    String.raw`\blabels?\s+facing\b`,
+    String.raw`\bprinted\s+(?:text|dates?|designation|type|words?|numbers?|model|wording|writing|lines)\b`,
+    String.raw`\b(?:reading|reads)\s+(?:["'“‘]|\$?\d)`,
+    String.raw`\b(?:displaying|showing)\s+(?:["'“‘]|\$\d|\d[\d.,]*\s*(?:%|°|percent\b|degrees\b))`,
+    String.raw`\b(?:numbers|figures|measurements|calculations|sums)\b[^.;]{0,30}\b(?:written|visible|readable|legible|jotted|scribbled)\b`,
+    String.raw`\b(?:writing|jotting|scribbling|penciling|pencilling)\s+(?:down\s+)?(?:numbers|figures|measurements|calculations|sums|lettering|a list|notes)\b`,
+    String.raw`\b(?:legible|readable)\s+(?:text|print|printing|words?|labels?|writing|numbers?|letters)\b`,
+    String.raw`\b(?:names?|initials|monograms?|words?|dates?)\s+(?:burnt|burned|engraved|carved|stitched|embroidered|painted|written|stamped|printed)\b`,
+  ].join("|"),
+  "i"
+);
+/** A negation and the rest of its clause: "no lettering visible", "without readable labels". */
+const NEGATED_CLAUSE = /\b(?:no|not|without|never|nor|nothing|none)\b[^.;—–]*/gi;
+
+/** Whether a description asks for print to be read (`PRINT_TO_READ`), negations aside. Pure. */
+export function asksToReadPrint(text: string | undefined): boolean {
+  return PRINT_TO_READ.test((text ?? "").replace(NEGATED_CLAUSE, " "));
+}
+
+/**
+ * A PLAIN picture that asks for print to be read (`asksToReadPrint`) is marked `blurPrint` before it
+ * is drawn, so it takes the road every unsaid print already takes: the print is shown soft and
+ * unreadable from arm's length (`withAllowedText` → `BLURRED_PRINT_CLAUSE`), the check counts soft
+ * print as shown (`SOFT_PRINT_QUESTION`), a readable redraw steps back (`STEP_BACK_CLAUSE`), and a
+ * remembered close-up keeps its distance (`BLUR_PRINT_VIEW`). The thing carrying the print stays
+ * the subject — it is never removed. Never a picture whose line says the words (`pictureText`), one
+ * already soft, a cover or an operator's asset, or a SCREEN: its words are already drawn as soft
+ * bars (`SCREEN_TEXT_AS_BARS`) and an arm's-length view would shrink the screen it is about. A split
+ * scene is read off its panel (`splitVisual`), which inherits the mark (`buildSplitRightScene`).
+ * Returns whether it marked. Mutates the scene.
+ */
+export function blurUnsaidPrint(scene: StoryboardScene): boolean {
+  if (scene.pictureText || scene.blurPrint || scene.coverHero || scene.assetImageUrl) return false;
+  if (scene.hostPresent && !scene.splitVisual) return false;
+  const words = scene.hostPresent
+    ? scene.splitVisual ?? ""
+    : `${scene.showSubject ?? ""}. ${scene.visualPrompt ?? ""}`;
+  if (!asksToReadPrint(words) || screenPicture(words)) return false;
+  scene.blurPrint = true;
+  return true;
+}
 
 /**
  * A picture whose line says the words printed on a thing (`scene.pictureText`) shows exactly those,
@@ -6655,7 +6746,8 @@ export function withAllowedText(
     const framed = prompt
       .replace(CLOSE_UP_WORDS, "arm's-length view")
       .replace(READABLE_PRINT_ASK, "with")
-      .replace(PRINTED_FIGURE, "a printed date");
+      .replace(PRINTED_FIGURE, "a printed date")
+      .replace(READ_OUT_FIGURE, "$1$2 a soft, unreadable number");
     return framed.includes(NO_READABLE_TEXT)
       ? framed.split(NO_READABLE_TEXT).join(BLURRED_PRINT_CLAUSE)
       : `${framed} ${BLURRED_PRINT_CLAUSE}`;
@@ -6979,10 +7071,16 @@ const CTA_VISUAL_BANNED_PATTERNS: RegExp[] = [
   /\bsubscrib(?:e|es|ed|ing|ers?)\b/i,
 ];
 
-/** True when a VISUAL prompt would render literal CTA/sales imagery. Pure — unit-tested. */
+/**
+ * True when a VISUAL prompt would render literal CTA/sales imagery. Read on the words as written AND
+ * as the picture maker gets them (`scrubLegibleWriting`): a marketplace or social brand is "a
+ * buy-and-sell app" / "a social app" there, an app under the card. It used to be caught only because
+ * the book guard read "Facebook" as a book (`brollDepictsBook`). Pure — unit-tested.
+ */
 export function ctaVisualIsLiteral(text: string): boolean {
   const t = text ?? "";
-  return CTA_VISUAL_BANNED_PATTERNS.some(re => re.test(t));
+  const sent = scrubLegibleWriting(t);
+  return CTA_VISUAL_BANNED_PATTERNS.some(re => re.test(t) || re.test(sent));
 }
 
 /**
@@ -7051,9 +7149,17 @@ const BOOK_VISUAL_PATTERNS: RegExp[] = [
   ),
 ];
 
-/** True when a b-roll VISUAL prompt would render a book/printed publication. Pure — unit-tested. */
+/**
+ * True when a b-roll VISUAL prompt would render a book/printed publication. Read on the words the
+ * picture maker is actually sent (`scrubLegibleWriting`, which every prompt crosses in
+ * `softenVisualPrompt`): the -book pattern matched "Facebook", so a "phone screen showing Facebook
+ * Marketplace" (Dale's jobs 343, 363 and 372, scene 7 of each) was swapped for a neighbour's
+ * picture — a cutting board or a craft fair under "and Facebook Marketplace", against the
+ * description `subjectLead` still put at the head of the prompt. Scrubbed, the brand is "a
+ * buy-and-sell app" and no book. Pure — unit-tested.
+ */
 export function brollDepictsBook(text: string): boolean {
-  const t = text ?? "";
+  const t = scrubLegibleWriting(text ?? "");
   return BOOK_VISUAL_PATTERNS.some(re => re.test(t));
 }
 
@@ -9251,6 +9357,10 @@ export async function generateSceneStillClip(
     // Stills render on OpenAI's official gpt-image-2, 16:9 (1:1 for a split-screen panel).
     // Validate + retry: a corrupt buffer would crash the Ken Burns ffmpeg and a lone image
     // failure would kill the scene with no resume, so we regenerate instead of failing.
+    // Print the picture asks to read and its line never says is drawn soft (`blurUnsaidPrint`) —
+    // here too, for a regenerate or an edited prompt the pipeline's pass never saw. Never on a
+    // picture drawn from a caller's own reference (the book cover asks for its real lettering).
+    if (!referenceImageUrl) blurUnsaidPrint(scene);
     // A key thing seen before is drawn from its earlier pictures (`server/pictureMemory.ts`). A
     // split's panel (square) gets its memory from the caller, off the host scene.
     if (!square) {
@@ -9361,6 +9471,8 @@ export async function generateBrollKeyframe(
 ): Promise<string> {
   // Keyframe stills render on OpenAI's official gpt-image-2, 16:9.
   // Same validate + retry as the still lane (my earlier 10s motion cap tripled these calls).
+  // Print the keyframe asks to read and its line never says is drawn soft (`blurUnsaidPrint`).
+  if (!referenceImageUrl) blurUnsaidPrint(scene);
   // A key thing seen before is drawn from its earlier pictures (`server/pictureMemory.ts`).
   if (clipIdx === 0 && !scene.memoryRefUrls?.length) {
     const memory = await memoryPicturesFor(scene);
@@ -11703,6 +11815,9 @@ async function withSplitMemory(
   right: StoryboardScene
 ): Promise<StoryboardScene> {
   if (!host.keyThing) return right;
+  // The panel's soft print decides its remembered close-up (`BLUR_PRINT_VIEW`), so it is marked
+  // before the view is (`blurUnsaidPrint` reads the panel's own words on a split).
+  blurUnsaidPrint(host);
   const memory = await memoryPicturesFor(host);
   return {
     ...right,
@@ -15666,6 +15781,10 @@ async function runUnifiedPipeline(
   // marks, so a screen in the host's hands gets a held setting.
   const screens = assignScreenSetups(scenes);
   if (screens) console.log(`[Longform ${jobId}] screen pictures: ${screens}, each in its own setting`);
+  // A picture that asks for print to be read, with no words its line says, shows that print soft
+  // (`blurUnsaidPrint`) — on the final descriptions, before memory views and prompts are built.
+  const softPrint = scenes.filter(s => blurUnsaidPrint(s)).length;
+  if (softPrint) console.log(`[Longform ${jobId}] soft print: ${softPrint} picture(s) asked for print to read`);
 
   // The passes above created and removed host beats after the adjacency pass assigned angles —
   // re-derive so any surviving pair still reads main → alt. Pure and O(n); the last register

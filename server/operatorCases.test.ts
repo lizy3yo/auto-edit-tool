@@ -44,6 +44,8 @@ import {
   REAL_APP_SCREEN_CLAUSE,
   BLURRED_PRINT_CLAUSE,
   buildSplitRightScene,
+  blurUnsaidPrint,
+  brollDepictsBook,
   buildStillPrompt,
   guardPitchVisuals,
   hostBrollClause,
@@ -1181,5 +1183,44 @@ describe("a screen shows what its own description says (the audit's grid screens
     expect(appScreenClause(pic(1, "x", "a phone showing a message from the buyer about her listing"))).not.toMatch(
       /ONE item's own listing page/
     );
+  });
+});
+
+describe("print the line never says is drawn soft, never asked for (the audit's writing pictures, 2026-10-18)", () => {
+  it("a picture that asks for print to read takes the blurred-print road; the thing carrying it stays", () => {
+    // Job 352 scene 106: the moisture meter "reading 7%" failed for writing twice and shipped.
+    const meter = pic(106, "For furniture that lives indoors, you want boards reading somewhere between six and nine percent.", "close-up of the black meter's two pins pressed into a rough oak board, its small grey display reading 7%", {
+      visualPrompt:
+        "Close view of a black handheld moisture meter's two metal pins pressed into a rough oak board, showing a small grey display reading 7%.",
+    });
+    // Job 383 scene 31: six checks, writing every time — the label was asked for in the description.
+    const box = pic(31, "If your house isn't wired for it, there are wireless models that pair out of the box.", "two white smoke detectors lying side by side on a counter beside their open box", {
+      visualPrompt:
+        "Two white round smoke detectors lying side by side on a kitchen counter next to an open cardboard box with its printed label facing forward.",
+    });
+    for (const s of [meter, box]) {
+      expect(blurUnsaidPrint(s)).toBe(true);
+      expect(buildStillPrompt(s)).toContain(BLURRED_PRINT_CLAUSE);
+    }
+    expect(buildStillPrompt(meter)).not.toMatch(/7%/);
+    expect(buildStillPrompt(box)).toMatch(/cardboard box/);
+    // Frederick's job 329: words the line SAYS stay readable and exact.
+    const label = pic(30, "First thing on the label. The type.", "the alarm box's printed label facing forward", {
+      pictureText: "Photoelectric",
+    });
+    expect(blurUnsaidPrint(label)).toBe(false);
+    expect(buildStillPrompt(label)).toMatch(/exactly "Photoelectric"/);
+  });
+
+  it("'Facebook' is a brand, not a book: its screen keeps its own picture (Dale's jobs 343, 363, 372)", () => {
+    const screen =
+      "a phone screen showing Facebook Marketplace: a white screen with a soft blue top bar, a two-column grid of item photos with soft grey bars below them, and a small logo that cannot be read";
+    expect(brollDepictsBook(screen)).toBe(false);
+    // A split panel is swapped for ANY book (`guardPitchVisuals`) — this one is no book, so it stays.
+    const split = host(7, "and Facebook Marketplace", { splitVisual: screen });
+    expect(guardPitchVisuals([split])).toEqual([]);
+    expect(split.splitVisual).toBe(screen);
+    // Job 145 scene 12: a stack of books is still a book.
+    expect(brollDepictsBook("a stack of closed stitch pattern books on the kitchen table")).toBe(true);
   });
 });
