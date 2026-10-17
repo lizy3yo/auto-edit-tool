@@ -426,4 +426,30 @@ describe("every round of the plan says what it asked, and the fill round what it
       ["Put the $10 to $40 items along the front edge.", ["front-edge-price"], true],
     ]);
   });
+
+  it("a cue whose start snapped back onto the picture cut in the pause before its sentence is still asked for that sentence", async () => {
+    // The shot changes 0.43 s before "Smalls," (in the pause after "piles."): the cue's padded start
+    // snaps back onto that cut, more than a lead-in pad before the first word. Refused over the host,
+    // it must read "asked and refused", not "passed over".
+    const early = {
+      scenes: [
+        scene(12, 48.2104, 49.25, { scriptText: "Three piles." }),
+        scene(13, 49.25, 53.0381, { hostPresent: true, scriptText: "Smalls, about $10 to $40." }),
+        scene(14, 53.0381, 56.2, { scriptText: "Coasters, ornaments, small cutting boards." }),
+      ],
+    };
+    const out = await planGraphics({ words: heard, cuts: [48.2104, 49.25, 53.0381, 56.2], film: early, ask: answering([smallsPrice], []), ensureIcon: async () => true });
+    const fill = out.rounds.find(r => r.step === "fill")!;
+    expect(fill.problems.map(p => p.cue)).toEqual(["probe-smalls-price"]);
+    expect(fill.offered).toEqual([expect.objectContaining({ text: "Smalls, about $10 to $40.", asked: ["probe-smalls-price"], placed: false })]);
+  });
+
+  it("a cue that starts on a sentence that was not offered is not put on the offered one after it", async () => {
+    // "Three piles." is not offered (too short to be a moment); a cue on it belongs to no offered sentence.
+    const piles: CueSpec = { id: "three-piles", template: "BigNumberOverlay", start: "Three piles.", startPad: -0.15, end: "Three piles.", endPad: 0.3, props: { at: "@Three piles.", unit: "piles", value: 3, kicker: "Sort into", countSec: 0.6 } };
+    const out = await planGraphics({ words: heard, cuts, film: film(), ask: answering([piles], []), ensureIcon: async () => true });
+    const fill = out.rounds.find(r => r.step === "fill")!;
+    expect(fill.asked).toBe(1);
+    expect(fill.offered).toEqual([expect.objectContaining({ text: "Smalls, about $10 to $40.", asked: [], placed: false })]);
+  });
 });

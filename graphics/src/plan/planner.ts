@@ -420,17 +420,14 @@ export type PlanInput = {
   lists?: { items: string[]; kind?: "things" | "steps" }[];
 };
 
-/** How far before an offered sentence's first word a cue may start and still be asked for it (a
- * cue's lead-in pad is -0.15 s). */
-const OFFERED_LEAD_SEC = 0.3;
-
 /** A sentence the fill round offered back, and what came of it. */
 export type OfferedMoment = {
   from: number;
   to: number;
   text: string;
-  /** The asked cues (fill or its repair) that start inside it: none, and not placed, means the model
-   * passed it over. */
+  /** The asked cues (fill or its repair) whose start words are said in it: none, and not placed,
+   * means the model passed it over (or named start words the narrator never says — that cue is in
+   * the round's problems, on no sentence). */
   asked: string[];
   /** A graphic is over it once the fill round is done. */
   placed: boolean;
@@ -498,6 +495,19 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
     const hits = findPhrase(index, spec.start, 0);
     return hits ? words[index[hits[0]].word].start : Infinity;
   };
+  /** When a resolved cue's start words are said: the place they occur nearest its start. That start is
+   * padded and may snap onto a picture cut up to CUT_SNAP_SEC away, so on its own it often falls in the
+   * pause BEFORE its sentence (a shot changes in the half-second sentence pause): read that way, a cue
+   * asked for a sentence and refused sat on no sentence, and the sentence read as passed over. */
+  const startWordNear = (spec: CueSpec, t: number): number => {
+    const pad = spec.startPad ?? 0;
+    let best = approxStart(spec);
+    for (let hits = findPhrase(index, spec.start, 0); hits; hits = findPhrase(index, spec.start, hits[0] + 1)) {
+      const w = words[index[hits[0]].word].start;
+      if (Math.abs(w + pad - t) < Math.abs(best + pad - t)) best = w;
+    }
+    return best;
+  };
 
   // A chapter series and a spoken list's graphic come first: a NEW graphic that clashes with one
   // gives way (Dale's "Coasters, ornaments, small cutting boards" had only a "Smalls" label).
@@ -513,7 +523,8 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
   const validate = async (newSpecs: CueSpec[], final: boolean) => {
     const problems: PlanProblem[] = [];
     const ids = new Set<string>();
-    /** Where each new cue starts: resolved when it resolved, else the first place its start words occur. */
+    /** When each new cue's start words are said: where it resolved when it did, else the first place
+     * they occur (`approxStart`). */
     const startsAt = new Map<string, number>();
     // 1. The APPROVED graphics are the fixed base: placed first, in their own order, never dropped.
     //    Their own issues (if any) are reported, not acted on.
@@ -594,7 +605,7 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
         continue;
       }
       const mine = next.find(r => r.id === spec.id)!;
-      startsAt.set(spec.id, mine.start);
+      startsAt.set(spec.id, startWordNear(spec, mine.start));
       // A graphic that sits still for seconds between its own words is a frozen frame, not a point.
       const times = [mine.start, ...mine.sync.map(x => x.wordStart), mine.contentEnd ?? mine.start].sort((a, b) => a - b);
       const wait = Math.max(0, ...times.slice(1).map((x, i) => x - times[i]));
@@ -759,11 +770,10 @@ words the narrator really says, a whole sentence where the template needs one, o
       if (accepted.every(a => next.cues.some(c => c.id === a.id))) verdict = next;
     }
     // What came of each offered sentence: a graphic over it, asked for and refused (its cue's id is
-    // in the problems), or passed over (no cue starts in it). A cue starting just before a
-    // sentence's first word (its lead-in pad) belongs to that sentence.
+    // in the problems), or passed over (no cue's start words are said in it).
     const bare = new Set(uncoveredMoments(verdict.resolved, words, film).map(m => m.from));
-    const offeredBack: OfferedMoment[] = moments.map(m => ({ ...m, asked: [], placed: !bare.has(m.from) }));
-    for (const [id, t] of Array.from(askedAt)) offeredBack.findLast(o => o.from - OFFERED_LEAD_SEC <= t && t <= o.to)?.asked.push(id);
+    const offeredBack: OfferedMoment[] = moments.map(m => ({ from: m.from, to: m.to, text: m.text, asked: [], placed: !bare.has(m.from) }));
+    for (const [id, t] of Array.from(askedAt)) offeredBack.find(o => o.from <= t && t <= o.to)?.asked.push(id);
     fillRound.offered = offeredBack;
   }
 

@@ -1073,7 +1073,7 @@ describe("a bare moment can be explained from the job (Dale's job 397, found by 
             step: "fill",
             asked: 1,
             kept: 0,
-            problems: [{ cue: "front-edge-price", problem: "starts 0.4 s after three-piles ends (needs 1 s)" }],
+            problems: [{ cue: "front-edge-price", problem: "waits 5.4 s between its own words (most 5 s) — start it nearer its point" }],
             offered: [
               { from: 49.68, to: 52.48, text: "Smalls, about $10 to $40.", asked: [], placed: false },
               { from: 179.99, to: 185.59, text: "Put the $10 to $40 items along the front edge of the table, where hands reach first.", asked: ["front-edge-price"], placed: false },
@@ -1086,6 +1086,6 @@ describe("a bare moment can be explained from the job (Dale's job 397, found by 
     const [smalls, frontEdge] = kept.rounds[0].offered!;
     expect(smalls).toEqual({ at: 49.68, text: "Smalls, about $10 to $40.", asked: [], placed: false });
     expect(frontEdge.asked).toEqual(["front-edge-price"]);
-    expect(kept.rounds[0].problems).toEqual([{ cue: "front-edge-price", problem: "starts 0.4 s after three-piles ends (needs 1 s)" }]);
+    expect(kept.rounds[0].problems).toEqual([{ cue: "front-edge-price", problem: "waits 5.4 s between its own words (most 5 s) — start it nearer its point" }]);
   });
 });

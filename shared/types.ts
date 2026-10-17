@@ -1197,7 +1197,7 @@ export interface JobGraphics {
    * How the plan was written, round by round (server/graphics/apply.ts `plannerForJob`): what each
    * round asked for, how many passed, and what the checks refused. Kept so a bare moment can be
    * explained from the job and not only from a render log. Carried over by a Reassemble that reuses
-   * the saved plan (that one makes no model call). Capped, so it stays a few KB.
+   * the saved plan (that one makes no model call). Capped: 60 problems a round, each cut short.
    */
   planner?: JobGraphicsPlanner;
   /** The graphics whose words the readability check had to fix (or could not), with each step tried. */
@@ -1218,8 +1218,8 @@ export interface JobGraphicsPlanner {
     /** Problems past the cap, not kept. */
     truncated?: number;
     /** The fill round only: each sentence offered back (`at` = its first word, the text cut short),
-     * the cues asked for it, and whether a graphic is over it after the round (no cue and not placed =
-     * passed over). */
+     * the cues whose start words are said in it, and whether a graphic is over it after the round (no
+     * cue and not placed = passed over). */
     offered?: { at: number; text: string; asked: string[]; placed: boolean }[];
     /** Offered sentences past the cap, not kept. */
     offeredTruncated?: number;
