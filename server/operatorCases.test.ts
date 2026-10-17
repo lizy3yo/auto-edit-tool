@@ -5,7 +5,7 @@
  * there" as the whole quilt. The rules under test are general; these lines are only the examples
  * that proved each one.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import type { KeyThing, StoryboardScene } from "@shared/types";
 import {
   BACKGROUND_VIEW,
@@ -86,6 +86,8 @@ import {
   WORN_ON_BODY,
 } from "./hostLook";
 import { pictureKindOf } from "./pictureCheckLog";
+import { splitPanelFor } from "./splitPanel";
+import { splitPanelsMissing } from "@shared/splitPanel";
 
 const pic = (index: number, scriptText: string, showSubject: string, over: Partial<StoryboardScene> = {}) =>
   ({ index, scriptText, showSubject, visualPrompt: showSubject, ...over }) as StoryboardScene;
@@ -1407,5 +1409,51 @@ describe("a line about the chin shows the chin, framed from the lips down (the a
     markHostBroll(scenes, { hostLook: LOOK }, "https://x/host.png");
     expect(scenes.map(s => hostLipsCut(s))).toEqual([false, false, false]);
     expect(buildStillPrompt(scenes[1])).toContain(HOST_FRAMING_CLAUSE);
+  });
+});
+
+describe("a split ships with both halves, or the job says so (the audit's host-only splits, 2026-10-18)", () => {
+  it("job 226: the splits that shipped as the host take alone are found from their clips", () => {
+    const take = (i: number) => `https://r2/longform/226/clip-${i}-0-a.mp4`;
+    const board = [
+      host(3, "But the one I loved the most, a", {
+        splitVisual: "A finished twelve-block sampler quilt folded over a wooden rocker in a sewing room",
+        sceneStatus: "completed",
+        hostClipUrls: [take(3)],
+        clipUrls: [take(3)],
+      }),
+      host(102, "So how do you choose well when you're standing in front of a", {
+        splitVisual: "A wall of eyeglass frames in an optician's shop",
+        sceneStatus: "completed",
+        hostClipUrls: [take(102)],
+        clipUrls: ["https://r2/longform/226/split-102-0-a.mp4"],
+      }),
+      host(133, "The scraps cost about nothing, the batting and", {
+        splitVisual: "Fabric scraps, batting, and binding strip laid out on a sewing table",
+        sceneStatus: "completed",
+        hostClipUrls: [take(133)],
+        clipUrls: [take(133)],
+      }),
+    ];
+    expect(splitPanelsMissing(board)).toEqual([3, 133]);
+  });
+
+  it("job 400 scene 3: a panel that passed on its third draw, after 300 s, is put beside the host", async () => {
+    vi.useFakeTimers();
+    try {
+      const deadlineAt = Date.now() + 25 * 60_000;
+      const started = new Promise<{ url: string }>(resolve =>
+        setTimeout(() => resolve({ url: "https://r2/still-3.mp4" }), 301_000)
+      );
+      const result = splitPanelFor({
+        started,
+        still: () => Promise.reject(new Error("must not draw again")),
+        deadlineAt,
+      });
+      await vi.advanceTimersByTimeAsync(301_000);
+      await expect(result).resolves.toEqual({ url: "https://r2/still-3.mp4" });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

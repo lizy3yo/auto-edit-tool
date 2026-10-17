@@ -864,6 +864,14 @@ export interface StoryboardScene {
    */
   splitRightUrl?: string;
   /**
+   * The render gave up on this split's panel (`server/splitPanel.ts`): the draw failed twice, was
+   * still running when the host scene's time ran out, or the two halves could not be put
+   * together — so the scene shipped as its host take alone and the job carries a warning naming
+   * it. Why and when, for the card. Cleared by the next composite. Films rendered before the
+   * flag are found by `splitPanelMissing` (`shared/splitPanel.ts`), which reads the clips.
+   */
+  splitPanelMissing?: { reason: string; at: string };
+  /**
    * Operator-chosen geometry of the split composite. Absent ⇒ the historical default layout
    * (host LEFT at the canvas remainder, b-roll in a full-height square panel, host crop panned
    * by automatic face detection). Every field is optional so a partial edit (say, just a seam

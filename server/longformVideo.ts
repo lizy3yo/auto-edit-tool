@@ -348,6 +348,12 @@ import { ENV } from "./_core/env";
 import { pickMusicBeds } from "./musicBeds";
 import { steadyHostClip } from "./hostSteady";
 import {
+  markSplitPanelMissing,
+  splitPanelFor,
+  startSplitPanelDraw,
+  takeSplitPanelDraw,
+} from "./splitPanel";
+import {
   BODY_PART_WORDS,
   deriveHostLook,
   facingTheCamera,
@@ -3640,6 +3646,7 @@ export function convertHostSceneToBroll(s: StoryboardScene): boolean {
   s.splitMotion = undefined;
   s.splitLayout = undefined;
   s.splitRightUrl = undefined;
+  s.splitPanelMissing = undefined;
   s.hostClipUrls = undefined;
   // The enhancer rewrites FROM the seed — a host beat's seed (if any) is the talking-head prompt.
   s.visualPromptSeed = undefined;
@@ -3753,6 +3760,7 @@ export function convertBrollSceneToHost(
   s.splitMotion = undefined;
   s.splitVisualSeed = undefined;
   s.splitRightUrl = undefined;
+  s.splitPanelMissing = undefined;
   s.splitAutoFocusX = undefined;
   s.splitFocusSource = undefined;
   if (split) s.splitVisual = s.brollVisual ?? cutaway;
@@ -11902,6 +11910,8 @@ async function compositeSceneSplit(
     const { url } = await storagePut(key, res.buffer, "video/mp4");
     composited.push(url);
   }
+  // Both halves are together again — whatever lost the panel before (`server/splitPanel.ts`).
+  scene.splitPanelMissing = undefined;
   return composited;
 }
 
@@ -11931,8 +11941,12 @@ async function withSplitMemory(
  * Render the split-screen RIGHT panel: a gpt-image-2 still from `splitVisual`, Ken Burns'd to
  * the scene length — same still lane as every other still in the video, so the right panel
  * never hallucinates b-roll motion. Square, because the panel is a full-height 1:1 slot (see
- * `buildSplitScreenArgs`), so nothing is cropped off its sides. Bounded so a wedged image
- * render can't hold the host clip hostage.
+ * `buildSplitScreenArgs`), so nothing is cropped off its sides.
+ *
+ * No timer of its own: the caller bounds the wait — the host scene's own wall clock in
+ * `composeHostScene` (`server/splitPanel.ts`), the edit's still-lane clock in
+ * `regenerateSplitRight`. A fixed 300 s here, shorter than one 480 s draw, threw away panels still
+ * being redrawn, and the draw ran on and was paid for anyway (job 400 scene 3, job 383 scene 26).
  */
 async function renderSplitRightClip(
   jobId: number,
@@ -11941,24 +11955,41 @@ async function renderSplitRightClip(
   apimartKey?: string | null
 ): Promise<string> {
   const right = await withSplitMemory(scene, buildSplitRightScene(scene));
-  const [rightUrl] = await Promise.race([
-    generateSceneStillClip(
-      jobId,
-      right,
-      undefined,
-      undefined,
-      params.videoSubject,
-      true,
-      apimartKey
-    ),
-    new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error("Split-screen right still timed out")),
-        300_000
-      )
-    ),
-  ]);
+  const [rightUrl] = await generateSceneStillClip(
+    jobId,
+    right,
+    undefined,
+    undefined,
+    params.videoSubject,
+    true,
+    apimartKey
+  );
+  if (!rightUrl) throw new Error("Split-screen right still produced no output");
   return rightUrl;
+}
+
+/**
+ * Start a split host beat's still panel beside its host render (`server/splitPanel.ts`), so the
+ * panel is drawn while the lip-sync provider renders instead of after. Only a still panel: a
+ * MOVING one is tried after the host as before (it falls back to the still, drawn then). Not on a
+ * voice redo, which composites the panel the scene already has back on (`keepSplitPanel`).
+ */
+function startSplitPanelBeside(
+  jobId: number,
+  scene: StoryboardScene,
+  params: LongformInputParams,
+  movingPanel: boolean
+): void {
+  if (!scene.splitVisual || movingPanel) return;
+  if (scene.splitRightUrl && keepSplitPanel.has(scene)) return;
+  if (
+    startSplitPanelDraw(scene, async () =>
+      renderSplitRightClip(jobId, scene, params, await apimartKeyForJob(params))
+    )
+  )
+    console.log(
+      `[Longform ${jobId}] scene ${scene.index} split panel drawing beside the host render`
+    );
 }
 
 /**
@@ -12155,6 +12186,14 @@ async function generateSceneLipsyncClips(
   }
   const chunkCount = scene.renderTaskIds?.length ?? chunkUrls.length;
 
+  // A split's panel is drawn BESIDE the host render, from the moment there is one: a render
+  // already accepted (a resume polls it) or the one just submitted. Never before the provider
+  // takes it — a beat the spend limit, its allowance or a paused account refuses would pay for a
+  // panel nobody uses, on every pass while the account is down.
+  const movingPanel = !!(scene.splitMotion && videoAdapter);
+  if (scene.renderTaskIds?.some(Boolean))
+    startSplitPanelBeside(jobId, scene, params, movingPanel);
+
   // Lip-sync runs on whichever lane `resolveLipsyncAdapter` handed us (HeyGen in production,
   // RunPod InfiniteTalk in staging) — the payload difference lives there, not here. A terminal
   // provider failure surfaces as a PendingRenderError (from runChunkTasks) so the scene
@@ -12165,13 +12204,19 @@ async function generateSceneLipsyncClips(
     lipsync.provider,
     chunkCount,
     (i, reason) =>
-      lipsync.submit({
-        scene,
-        imageUrl: faceImageUrl,
-        audioUrl: chunkUrls[i],
-        useAlt: useAltPhoto,
-        reason,
-      }),
+      lipsync
+        .submit({
+          scene,
+          imageUrl: faceImageUrl,
+          audioUrl: chunkUrls[i],
+          useAlt: useAltPhoto,
+          reason,
+        })
+        .then(sub => {
+          if (sub.taskId)
+            startSplitPanelBeside(jobId, scene, params, movingPanel);
+          return sub;
+        }),
     id => lipsync.poll(id, pollTimeoutMs),
     persist,
     lipsync.slots,
@@ -12231,6 +12276,22 @@ async function renderHostGroup(opts: {
     m.sceneStatus = "rendering";
     m.error = undefined;
   }
+  // Members are finished inside the LEADER's wall clock, so a member's split panel may wait only
+  // as long as the leader has left (`composeHostScene`).
+  const leaderDeadline = sceneDeadlineAt.get(leader);
+  if (leaderDeadline != null)
+    for (const m of members) sceneDeadlineAt.set(m, leaderDeadline);
+  // Every split in the group has its panel drawn beside the one render (`startSplitPanelBeside`).
+  const startGroupPanels = () => {
+    for (const s of [leader, ...members])
+      startSplitPanelBeside(
+        jobId,
+        s,
+        params,
+        !!(s.splitMotion && videoAdapter)
+      );
+  };
+  if (leader.renderTaskIds?.some(Boolean)) startGroupPanels();
   try {
     const job = await getLongformVideoJobById(jobId);
     const masterAudioUrl = job?.masterAudioUrl;
@@ -12266,14 +12327,19 @@ async function renderHostGroup(opts: {
       "runpod",
       1,
       (_i, reason) =>
-        lipsync.submit({
-          scene: leader,
-          imageUrl: faceImageUrl,
-          audioUrl: chunkUrls[0],
-          useAlt: useAltPhoto,
-          audioDurationSec: leader.lipsyncGroup?.totalSec,
-          reason,
-        }),
+        lipsync
+          .submit({
+            scene: leader,
+            imageUrl: faceImageUrl,
+            audioUrl: chunkUrls[0],
+            useAlt: useAltPhoto,
+            audioDurationSec: leader.lipsyncGroup?.totalSec,
+            reason,
+          })
+          .then(sub => {
+            if (sub.taskId) startGroupPanels();
+            return sub;
+          }),
       id => lipsync.poll(id, pollTimeoutMs),
       persist,
       lipsync.slots,
@@ -12340,6 +12406,8 @@ async function renderHostGroup(opts: {
       }
     }
     throw e;
+  } finally {
+    for (const m of members) sceneDeadlineAt.delete(m);
   }
 }
 
@@ -12415,7 +12483,8 @@ const keepSplitPanel = new WeakSet<StoryboardScene>();
 
 /**
  * Finish a host render: remember the bare host clip, then composite the split-screen right
- * panel when the scene has one (falling back to the full-frame host on any failure).
+ * panel when the scene has one. When the panel cannot be had the scene keeps its full-frame host
+ * take, and the job says so (`server/splitPanel.ts`).
  */
 async function composeHostScene(
   jobId: number,
@@ -12433,7 +12502,7 @@ async function composeHostScene(
   // full-height SQUARE (see buildSplitScreenArgs) and its still is generated 1:1 to match, so the
   // b-roll is shown whole instead of side-cropped. If the right-half generation or compositing
   // fails, fall back to the plain full-frame host clips (still script-faithful) rather than
-  // failing the whole job.
+  // failing a beat that is already paid for — and say so on the job, naming the scene.
   // Remember the bare host renders. They already live in R2 (uploaded by runChunkTasks); without
   // this the composite below is the only surviving URL and a regenerate has to re-run the
   // lip-sync provider just to change the right half. See `regenerateSplitRight`.
@@ -12463,46 +12532,64 @@ async function composeHostScene(
   }
 
   if (scene.splitVisual) {
+    // The still panel started beside the host render (`startSplitPanelBeside`), usually done by
+    // now. Taken here whatever comes next, so a later render of this same scene starts afresh.
+    const started = takeSplitPanelDraw(scene);
+    let reason: string;
     try {
-      const apimartKey =
-        await apimartKeyForJob(params);
+      const apimartKey = await apimartKeyForJob(params);
       // A MOVING right panel when the pacing config assigned one and a video adapter is available;
-      // the Ken Burns still otherwise. The motion attempt degrades to the still on ANY failure —
-      // the host half is already rendered and paid for, so a slow or refused panel must not cost
-      // the scene. Both feed the same composite.
-      let rightUrl: string | undefined;
-      if (scene.splitMotion && videoAdapter) {
+      // the Ken Burns still otherwise. The motion attempt degrades to the still on ANY failure.
+      // A still that FAILS is drawn once more; everything waits only as long as this host scene
+      // has left on its own clock — the host half is rendered and paid for, and must not be lost
+      // to a slow panel. Both feed the same composite.
+      const panel = await splitPanelFor({
+        moving:
+          scene.splitMotion && videoAdapter
+            ? () =>
+                renderSplitRightMotionClip(
+                  jobId,
+                  scene,
+                  params,
+                  videoAdapter,
+                  instruction,
+                  persist
+                )
+            : undefined,
+        still: () => renderSplitRightClip(jobId, scene, params, apimartKey),
+        started: scene.splitMotion && videoAdapter ? undefined : started,
+        deadlineAt:
+          sceneDeadlineAt.get(scene) ?? Date.now() + SCENE_DEADLINE_STILL_MS,
+        log: line =>
+          console.warn(`[Longform ${jobId}] scene ${scene.index} ${line}`),
+      });
+      if (panel.url == null) reason = panel.reason;
+      else {
+        scene.splitRightUrl = panel.url; // the panel's own clip — the split editor recomposites from it
         try {
-          rightUrl = await renderSplitRightMotionClip(
+          return await compositeSceneSplit(
             jobId,
             scene,
-            params,
-            videoAdapter,
-            instruction,
-            persist
+            urls,
+            panel.url,
+            scene.splitLayout,
+            params
           );
         } catch (e: any) {
-          console.warn(
-            `[Longform ${jobId}] scene ${scene.index} moving split panel failed ` +
-              `(${e.message}) — falling back to the still panel`
-          );
+          reason = `the two halves could not be put together: ${describeError(e)}`;
         }
       }
-      rightUrl ??= await renderSplitRightClip(jobId, scene, params, apimartKey);
-      scene.splitRightUrl = rightUrl; // the panel's own clip — the split editor recomposites from it
-      return await compositeSceneSplit(
-        jobId,
-        scene,
-        urls,
-        rightUrl,
-        scene.splitLayout,
-        params
-      );
     } catch (e: any) {
-      console.warn(
-        `[Longform ${jobId}] scene ${scene.index} split-screen composite failed, using full-frame host: ${e.message}`
-      );
+      reason = describeError(e);
     }
+    console.warn(
+      `[Longform ${jobId}] scene ${scene.index} split screen ships as the host alone: ${reason}`
+    );
+    // A scene its wall clock gave up on is already a failed card; its worker says nothing more.
+    if (!abandonedScenes.has(scene))
+      markSplitPanelMissing(scene, reason, line =>
+        appendJobWarning(jobId, line)
+      );
   }
 
   return urls;
@@ -12927,8 +13014,10 @@ function startSixtyNineLaneUsageLogger(jobId: number): () => void {
  * the 30-min inactivity watchdog killed a job that was still alive, one scene short of done.
  *
  * host: `HEYGEN_LIPSYNC_TIMEOUT_MS` is 15min (providers/heygen-lipsync.ts) and that clock only
- *   starts once the scene wins a global HeyGen slot; add the ≤5min split-screen right panel and
- *   the composite. The RunPod lane gets its own, longer number — see below.
+ *   starts once the scene wins a global HeyGen slot; then the composite. A split's still panel is
+ *   drawn BESIDE the render and waited for only as long as this clock has left
+ *   (`server/splitPanel.ts`), so it adds no fixed share. The RunPod lane gets its own, longer
+ *   number — see below.
  * motion: 69Labs video polls 6min per chunk, a scene may run several, plus lane queueing.
  * still: typically <2min, but the worst legit case stacks the process-global gpt-image-2 bucket,
  *   up to 4 `generateValidatedStill` attempts with 429 backoff, the Ken Burns encode + its wait for
@@ -12967,6 +13056,13 @@ export const SCENE_DEADLINE_STILL_MS = 20 * 60_000;
 /** Scenes `withSceneDeadline` has given up on — their still-running render path must not resubmit. */
 const abandonedScenes = new WeakSet<StoryboardScene>();
 
+/**
+ * When each scene's wall clock runs out (epoch ms), for work inside it that may wait only as long
+ * as the scene has left: a split's panel (`composeHostScene`), so a slow panel costs the scene its
+ * panel and never its paid host take.
+ */
+const sceneDeadlineAt = new WeakMap<StoryboardScene, number>();
+
 async function withSceneDeadline(
   scene: StoryboardScene,
   ms: number,
@@ -12979,6 +13075,7 @@ async function withSceneDeadline(
   onAbandon?: (s: StoryboardScene) => Promise<void>
 ): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined;
+  sceneDeadlineAt.set(scene, Date.now() + ms);
   const expired = new Promise<"expired">(resolve => {
     timer = setTimeout(() => resolve("expired"), ms);
   });
@@ -13012,6 +13109,9 @@ async function withSceneDeadline(
     }
   } finally {
     clearTimeout(timer);
+    // A scene given up on keeps its (passed) deadline: its worker runs on, and must not wait on
+    // a panel for a scene nobody is waiting for.
+    if (!abandonedScenes.has(scene)) sceneDeadlineAt.delete(scene);
   }
 }
 
@@ -20343,6 +20443,7 @@ async function runSplitEdit(
     scene.splitVisualSeed = undefined;
     scene.splitMotion = undefined;
     scene.splitRightUrl = undefined;
+    scene.splitPanelMissing = undefined;
     scene.splitLayout = undefined; // geometry of a composite that no longer exists
     scene.clipUrls = [...scene.hostClipUrls!];
     syncSceneClipFields(scene);

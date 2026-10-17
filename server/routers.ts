@@ -239,6 +239,7 @@ import { voiceRedoRefusal } from "../shared/voiceTakes";
 import { summarizeHostSpend } from "../shared/hostSpend";
 import { jobPickFacts } from "../shared/jobPicks";
 import { planHostRedo } from "../shared/hostRedo";
+import { splitPanelsMissing } from "../shared/splitPanel";
 import { answerPoll } from "./pollRevision";
 import { lightVideoFor } from "./lightVideo";
 import { once } from "./requestOnce";
@@ -2860,6 +2861,14 @@ const longformVideoRouter = router({
           job.status === "processing" || !Array.isArray(rawScenes)
             ? []
             : auditStoryboardTimeline(rawScenes),
+        // Split screens that shipped as the host alone — the picture beside the host was never
+        // drawn (`shared/splitPanel.ts`). Read off the clips, so films rendered before the render
+        // path said so are found too. Drives the card's badge and its "Draw the pictures" banner;
+        // empty while a pass is running, like the timeline audit.
+        splitPanelsMissing:
+          job.status === "processing" || !Array.isArray(rawScenes)
+            ? []
+            : splitPanelsMissing(rawScenes),
         // The continuous master narration — the cut-room preview plays the exact slice under a
         // scene (seeking into this) so a moved cut previews with the right words, where the
         // per-scene `audioUrl` slice was cut at the ORIGINAL boundaries.
