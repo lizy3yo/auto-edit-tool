@@ -22,7 +22,7 @@
 import type { KeyThing, StoryboardScene } from "@shared/types";
 import { invokeClaude } from "./claude";
 import { safeParseJSON } from "./jsonRepair";
-import { SHOWS_PERSON } from "./hostLook";
+import { SHOWS_PERSON, showsPerson, namedPeople, namesOnlyAnimal } from "./hostLook";
 
 /** A picture shorter than this is a flash and folds into a neighbour. */
 export const SHOT_MIN_SEC = 1.2;
@@ -143,7 +143,10 @@ export interface PlannedShot {
 /**
  * Who a planner's `other` names, or undefined: a few plain words for a person who is NOT the host.
  * The host and the viewer ("you") are never "someone else" — their pictures stay the host's — and
- * an answer too long to be a description is dropped. Pure.
+ * an answer too long to be a description is dropped. An ANIMAL is no person (job 371: the planner
+ * named "a hen" for "A hen will stick her head in the feeder", and the hen was forced into a picture
+ * of a person). Any other answer stands — a story's people are too many for a list ("a scribe", a
+ * name) — and the picture's own words decide again before it is drawn (`markHostBroll`). Pure.
  */
 export function otherPersonOf(raw: unknown): string | undefined {
   if (typeof raw !== "string") return undefined;
@@ -151,7 +154,17 @@ export function otherPersonOf(raw: unknown): string | undefined {
   if (!who || who.split(" ").length > 8) return undefined;
   if (/\b(?:the )?(?:host|narrator|presenter|viewer)\b|^(?:you|me|i|null|none|no one|nobody)$/i.test(who))
     return undefined;
+  if (namesOnlyAnimal(who)) return undefined;
   return who;
+}
+
+/**
+ * How many people a "someone else" names, when more than one: "two airline passengers" is 2, "a
+ * crowd" 3 (several). Undefined for one person. Pure.
+ */
+export function otherPeopleOf(who: string | undefined): number | undefined {
+  const n = namedPeople(who)?.count ?? 1;
+  return n > 1 ? n : undefined;
 }
 
 export interface ShotPlan {
@@ -328,7 +341,10 @@ export function videoKind(
     opts.contact ||
     contactToolWork(show) ||
     SHOWS_HANDS.test(show) ||
-    SHOWS_PERSON.test(show)
+    // A person anywhere in the words (`showsPerson`: "an older couple walking"); the raw person
+    // words too, so a pronoun read as an animal's never turns a picture into a video.
+    SHOWS_PERSON.test(show) ||
+    showsPerson(show)
   )
     return "none";
   return opts.selfMoving === false ? "none" : "object";
@@ -486,9 +502,10 @@ function picturePiece(
     // is never drawn held up by nobody (Norbert's job 238: a drill "held near the doorframe"
     // floated). A person in a still is the host from behind (`markHostBroll`).
     // Hands in the photo, or someone holding the thing: the host at work (`markHostBroll`).
-    humanPresent: shot.held || shot.other || SHOWS_PERSON.test(shot.show) ? true : undefined,
+    humanPresent: shot.held || shot.other || showsPerson(shot.show) ? true : undefined,
     // A line about someone else shows THAT person, never the host in their place (`markHostBroll`).
     otherPerson: shot.other || undefined,
+    otherPeople: otherPeopleOf(shot.other),
     objectMotion: moving ? true : undefined,
     cameraMove: undefined,
     keyThing: shot.thing || undefined,
@@ -1513,12 +1530,18 @@ FIRST picture of the MAIN thing that
 shows it idle when it is naturally in use that way is WRONG too: rewrite it in use. No writing, no logos,
 no faces, never "or".
 
+WHO IS IN THE PICTURE. For every picture that shows a person (or hands), say who: "host" when it is
+the host — their own work, or the viewer the line speaks to ("you") — or a few plain words for
+ANYONE ELSE the line is about: a customer at a counter, a child, a stranger in a story, two
+neighbours. A line about someone else is never shown as the host or the host's hands. Leave who out
+of a picture of things alone.
+
 Answer with JSON only, one entry for EVERY picture:
-{"pictures":[{"id":7,"about":"...","shows_it":true},
+{"pictures":[{"id":7,"about":"...","shows_it":true,"who":"host"},
 {"id":8,"about":"...","shows_it":false,"show":"...","thing":null,"split":[{"from":"exact words","show":"...","thing":null}]},
-{"id":9,"about":"...","shows_it":false,"join":true,"show":"...","thing":null}]}
+{"id":9,"about":"...","shows_it":false,"join":true,"show":"...","thing":null,"who":"a customer at a counter"}]}
 show and thing only when shows_it is false or join is true; split only when a new picture must start;
-join only on a picture marked "same sentence".`;
+join only on a picture marked "same sentence"; who only on a picture of a person.`;
 
 /** A new picture starting inside a line, at `from` (its first words, verbatim). */
 export type PictureSplit = { from: string; show: string; thing?: string };
@@ -1529,7 +1552,38 @@ export type PictureFix = {
   split?: PictureSplit[];
   /** This picture and the one before it are ONE idea of one sentence: make them one picture. */
   join?: boolean;
+  /**
+   * Who the picture's person is, by the line (`WHO IS IN THE PICTURE`): null for the host or the
+   * viewer, else the words for someone else (`applyWho`). Absent when the check said nothing.
+   */
+  who?: string | null;
 };
+
+/** The check's `who`: null for the host or the viewer, someone else's words, or undefined. Pure. */
+export function whoOf(raw: unknown): string | null | undefined {
+  if (typeof raw !== "string" || !raw.trim()) return undefined;
+  if (/^\s*(?:the\s+)?(?:host|narrator|presenter|viewer)(?:['’]s)?\b|^\s*(?:you|your|me|i)\b/i.test(raw)) return null;
+  return otherPersonOf(raw);
+}
+
+/**
+ * WHO IS IN THE PICTURE, by the line (the line check's `who`, 2026-10-18). Only a model reading the
+ * line can tell whose hands a plain "hands holding a glowing phone" are: job 369 scene 22 drew a
+ * buyer's line as the host's hands, job 399 scene 16 drew "the flight attendant pours your soda" as
+ * the host's hands. The host (or the viewer) clears any "someone else"; anyone else is drawn as that
+ * person, never the host. A picture of things stays a picture of things. Pure apart from mutating `s`.
+ */
+export function applyWho(s: StoryboardScene, who: string | null): void {
+  if (who === null) {
+    s.otherPerson = undefined;
+    s.otherPeople = undefined;
+    return;
+  }
+  if (!s.humanPresent && !showsPerson(s.showSubject ?? s.visualPrompt)) return;
+  s.otherPerson = who;
+  s.otherPeople = otherPeopleOf(who);
+  s.humanPresent = true;
+}
 
 /** The pictures the fit check reads and may fix — drawn cutaways, never the CTA, cover or assets. */
 // A list's group picture (`listSet`) is right by construction — the line check never rewrites it.
@@ -1560,13 +1614,15 @@ export function parsePictureFixes(text: string, scenes: StoryboardScene[]): Pict
     const split: PictureSplit[] = (Array.isArray(f?.split) ? f.split : [])
       .map((x: any) => ({ from: clean(x?.from), show: clean(x?.show), thing: clean(x?.thing) || undefined }))
       .filter((x: PictureSplit) => x.from && x.show);
-    if (!show && !split.length && !join) continue;
+    const who = whoOf(f?.who);
+    if (!show && !split.length && !join && who === undefined) continue;
     out.push({
       id,
       ...(join ? { join } : {}),
       ...(show ? { show } : {}),
       ...(show && typeof f?.thing === "string" && f.thing ? { thing: f.thing } : {}),
       ...(split.length ? { split } : {}),
+      ...(who !== undefined ? { who } : {}),
     });
   }
   return out;
@@ -1574,8 +1630,9 @@ export function parsePictureFixes(text: string, scenes: StoryboardScene[]): Pict
 
 /**
  * Put each fix on its picture: the new description, its key thing (the planner's name matched to
- * the list, else the ones the description names), a person only if one is in it, and the video rule
- * applied again. Returns how many pictures changed. Pure apart from mutating `scenes`.
+ * the list, else the ones the description names), a person only if one is in it, the video rule
+ * applied again, and who the person is (`applyWho`). Returns how many pictures were rewritten. Pure
+ * apart from mutating `scenes`.
  */
 export function applyPictureFixes(
   scenes: StoryboardScene[],
@@ -1595,9 +1652,9 @@ export function applyPictureFixes(
     s.keyThing = primary?.name;
     const others = named.map(t => t.name).filter(name => name !== primary?.name);
     s.otherKeyThings = others.length ? others : undefined;
-    s.humanPresent = SHOWS_PERSON.test(f.show) ? true : undefined;
+    s.humanPresent = showsPerson(f.show) ? true : undefined;
     // A rewrite with no person in it has nobody to be "someone else".
-    if (!s.humanPresent) s.otherPerson = undefined;
+    if (!s.humanPresent) s.otherPerson = s.otherPeople = undefined;
     s.sameShot = undefined;
     s.toolContact = contactToolWork(f.show) ? true : undefined;
     s.blurPrint = !s.pictureText && blurredPrint(f.show) ? true : undefined;
@@ -1607,6 +1664,8 @@ export function applyPictureFixes(
     settleVideoKind(s);
     n++;
   }
+  // Who is in each picture, on the descriptions as they now are (rewritten or not).
+  for (const f of fixes) if (f.who !== undefined && scenes[f.id]) applyWho(scenes[f.id], f.who);
   return n;
 }
 
@@ -1662,8 +1721,12 @@ export function applyPictureJoins(
       joinedLine: true,
       wordCut: prev.wordCut || s.wordCut,
       humanPresent: prev.humanPresent || s.humanPresent || undefined,
+      // Someone else in either half is still in the one picture (cleared below if it shows no one).
+      otherPerson: prev.otherPerson ?? s.otherPerson,
+      otherPeople: prev.otherPerson ? prev.otherPeople : s.otherPeople,
     } as StoryboardScene;
-    if (f!.show) applyPictureFixes([merged], [{ id: 0, show: f!.show, thing: f!.thing }], things);
+    if (f!.show || f!.who !== undefined)
+      applyPictureFixes([merged], [{ id: 0, show: f!.show, thing: f!.thing, who: f!.who }], things);
     out[k] = merged;
     lens[k] += sec(s);
     remap.set(id, k);
@@ -1741,7 +1804,11 @@ export function applyPictureSplits(
         brollVisual: undefined,
         keyThing: primary?.name,
         otherKeyThings: others.length ? others : undefined,
-        humanPresent: SHOWS_PERSON.test(cut.show) ? true : undefined,
+        humanPresent: showsPerson(cut.show) ? true : undefined,
+        // The person goes with the words that show them: a new part that shows only a thing has
+        // nobody to be (the audit found "a woman customer" left on an incense holder, job 361 scene 32).
+        otherPerson: showsPerson(cut.show) ? s.otherPerson : undefined,
+        otherPeople: showsPerson(cut.show) ? s.otherPeople : undefined,
         stillImage: true,
         objectMotion: undefined,
         selfMoving: undefined,
@@ -2229,7 +2296,7 @@ const contextCandidate = (s: StoryboardScene | undefined) =>
 
 /** Whether a picture shows someone at work (the host, their hands) rather than a thing on its own. */
 export const atWork = (s: StoryboardScene | undefined) =>
-  !!s && (!!s.humanPresent || SHOWS_PERSON.test(s.showSubject ?? s.visualPrompt ?? ""));
+  !!s && (!!s.humanPresent || showsPerson(s.showSubject ?? s.visualPrompt ?? ""));
 
 /** The runs of consecutive candidate pictures (2+), as scene indexes. Pure. */
 export function contextRuns(scenes: StoryboardScene[]): number[][] {
@@ -2301,7 +2368,7 @@ export function parseContextGroups(
       if (part.length < 2) continue;
       // Pictures of a thing on its own never take a group picture of someone at work: that is a
       // later line's moment, and each keeps its own picture instead.
-      if (atWorkOf && !part.some(atWorkOf) && SHOWS_PERSON.test(show)) continue;
+      if (atWorkOf && !part.some(atWorkOf) && showsPerson(show)) continue;
       part.forEach(id => used.add(id));
       out.push({ ids: part, show });
     }
@@ -2327,19 +2394,24 @@ export function namesSomethingElse(own: string | undefined, group: string): bool
 /**
  * Mark each group as one picture: its first picture shows `show`, the rest are `sameShot`, so
  * `joinSameContext` joins them within the quarter's limit. A person in any of them stays in the
- * picture (the host from behind, `markHostBroll`) even if the description lost them. Returns how
- * many pictures were marked to join another. Pure apart from mutating `scenes`.
+ * picture (the host from behind, `markHostBroll`) even if the description lost them — and someone
+ * else stays THAT person, never "the host's hands" (2026-10-18, the audit), unless the host is at work
+ * in another of the group's pictures. Returns how many pictures were marked to join another. Pure
+ * apart from mutating `scenes`.
  */
 export function applyContextGroups(scenes: StoryboardScene[], groups: ContextGroup[]): number {
   let marked = 0;
   for (const g of groups) {
     const members = g.ids.map(i => scenes[i]);
-    const person = members.some(
-      s => s.humanPresent || SHOWS_PERSON.test(s.showSubject ?? "")
-    );
+    const shows = (s: StoryboardScene) => !!s.humanPresent || showsPerson(s.showSubject ?? "");
+    const person = members.some(shows);
+    const other = members.find(s => s.otherPerson);
+    const theirs = person && !!other && !members.some(s => shows(s) && !s.otherPerson);
     const show =
-      person && !SHOWS_PERSON.test(g.show)
-        ? `${g.show}, with the host's hands at work on it`
+      person && !showsPerson(g.show)
+        ? theirs
+          ? `${g.show}, with ${other!.otherPerson} in the picture`
+          : `${g.show}, with the host's hands at work on it`
         : g.show;
     // ONE TOPIC, ONE SHOT (the operator: "1 topic/context 1 video or 1 photo"): a VIDEO when
     // anything in the topic is being done, else a PHOTO — never a photo then a video of one thing.
@@ -2361,6 +2433,8 @@ export function applyContextGroups(scenes: StoryboardScene[], groups: ContextGro
       s.visualPrompt = show;
       s.stillImage = motion === "none";
       s.humanPresent = person ? true : undefined;
+      s.otherPerson = theirs ? other!.otherPerson : undefined;
+      s.otherPeople = theirs ? other!.otherPeople : undefined;
       s.objectMotion = motion !== "none" ? true : undefined;
       s.cameraMove = undefined;
       s.keyThing = thing;

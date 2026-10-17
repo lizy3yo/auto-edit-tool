@@ -549,9 +549,15 @@ export interface StoryboardScene {
    * The person this picture shows when the line is about SOMEONE ELSE than the host — a customer,
    * a neighbour ("a woman customer"), in the line's own words. Drawn from behind or the side, face
    * never shown, WITHOUT the host's photo or look (`otherPersonClause`); the host is never put in
-   * their place. Set by the shot list (`other`).
+   * their place. Set by the shot list (`other`), the line check (`who`), or the picture's own words
+   * (`someoneElse` in server/hostLook.ts: a role, a sex the host does not have, two or more people).
    */
   otherPerson?: string;
+  /**
+   * How many people `otherPerson` is when more than one (2, or 3 for several): two people are never
+   * drawn from one photo, and the prompt asks for each of them (`otherPersonClause`).
+   */
+  otherPeople?: number;
   /**
    * This beat sits inside the FAST-OPEN window (`LongformPacing.fastOpen`): the first `zoneSec`
    * of narration, where cuts land faster to match the script's opening pace. Set once at

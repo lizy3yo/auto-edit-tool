@@ -354,6 +354,7 @@ import {
   markHostBroll,
   REAL_HOLDER,
   onTheBody,
+  showsSomeoneElse,
 } from "./hostLook";
 import {
   assemblePerSceneFilm,
@@ -2335,7 +2336,12 @@ function checkInShaped(
   // The host comes IN only where a sentence starts. Coming in after a comma was allowed until
   // 2026-09-28 ("the voice never stops, only the picture changes") — the operator saw it as the
   // host cutting in before the sentence was finished (Mae 2:12 "…well now, | why not…").
+  // A picture of SOMEONE ELSE is never taken for a check-in (2026-10-18, the audit): the host then
+  // talked over the line about that person, and the person's description went on into a split
+  // panel that may show nobody — "a woman customer holding a coaster" failed its panel check twice
+  // (job 397 scene 34). The line keeps its picture of them.
   return (
+    !showsSomeoneElse(s) &&
     startsSentence(scenes, i) &&
     (endsSentence(s.scriptText ?? s.narration) || (!!s.wordCut && !s.listCut)) &&
     sec >= (s.wordCut ? HOST_CHECKIN_MIN_SEC : HOST_MIN_HOLD_SEC) &&
@@ -5922,7 +5928,7 @@ const WORN_FRONT =
 export function personClauseFor(scene: StoryboardScene, visual: string): string {
   if (!scene.humanPresent) return "";
   const who = scene.otherPerson
-    ? otherPersonClause(scene.otherPerson)
+    ? otherPersonClause(scene.otherPerson, scene.otherPeople)
     : scene.brollHostLook
       ? scene.hostFaceShown
         ? hostFaceClause(scene.brollHostLook)
@@ -5949,14 +5955,31 @@ export function personClauseFor(scene: StoryboardScene, visual: string): string 
  * SOMEONE ELSE in the picture (`scene.otherPerson`): the line is about a person who is not the
  * host, so that person is drawn — the way the host is, from behind or the side, the face never
  * shown, one body — and told apart from the host in so many words, with no host photo attached.
+ * TWO OR MORE people (`scene.otherPeople`, 2026-10-18: "two passengers seated in the same row", "a
+ * flight attendant speaking with a passenger", "two people hugging") are each drawn that way, none
+ * of them the host — the one-person wording ("nobody else", "no second person") asked for one of
+ * them and against the other.
  */
-export function otherPersonClause(who: string): string {
+export function otherPersonClause(who: string, count: number = 1): string {
+  const named = who.trim().replace(/\.$/, "");
+  if (count > 1) {
+    const body = ONE_BODY_CLAUSE.replace(/The host has/g, "Each person has")
+      .replace(/both of the host's hands/g, "both of that person's hands")
+      .replace(/the host's/g, "that person's")
+      .replace(/anywhere in the frame/, "on anyone");
+    return (
+      `The people in this shot are ${named} — ${count === 2 ? "two" : "a small group of"} different, ` +
+      `ordinary people of that description, NONE of them the video's host: each seen from behind or ` +
+      `from the side, over the shoulder, faces turned away or out of frame so no face is ever shown. ` +
+      `Nobody else is in the frame, in the background or in a reflection. ${body}`
+    );
+  }
   const body = ONE_BODY_CLAUSE.replace(/The host has/g, "This person has").replace(
     /the host's/g,
     "their"
   );
   return (
-    `The only person in this shot is ${who.trim().replace(/\.$/, "")} — NOT the video's host, a ` +
+    `The only person in this shot is ${named} — NOT the video's host, a ` +
     `different, ordinary person of that description: seen from behind or from the side, over ` +
     `the shoulder, the face turned away or out of frame so it is never shown. Nobody else is in ` +
     `the frame, in the background or in a reflection. ${body}`
@@ -5968,6 +5991,17 @@ export const ONE_OTHER_PERSON_SUFFIX =
   "Apart from that one person seen from behind or from the side, no person is visible: no second " +
   "person, no one in the background, no reflection of anyone, and no face anywhere in the frame. " +
   "No mirror, window glass or other shiny surface anywhere they could be reflected in it.";
+
+/** `ONE_OTHER_PERSON_SUFFIX` for `count` people (`scene.otherPeople`): those people, nobody more. */
+export function otherPeopleSuffix(count: number = 1): string {
+  if (count <= 1) return ONE_OTHER_PERSON_SUFFIX;
+  return (
+    `Apart from those ${count === 2 ? "two people" : "few people"}, each seen from behind or from the ` +
+    "side, no person is visible: no one else, no one in the background, no reflection of anyone, and " +
+    "no face anywhere in the frame. No mirror, window glass or other shiny surface anywhere they " +
+    "could be reflected in it."
+  );
+}
 
 /**
  * The host doing a step on their OWN FACE (`scene.hostFaceShown`, 2026-10-15): the face is shown,
@@ -6567,7 +6601,7 @@ export function buildStillPrompt(
   const personSuffix = !aggressive ? personClauseFor(scene, scene.showSubject ?? scene.visualPrompt ?? "") : "";
   const noFigures =
     !aggressive && scene.humanPresent && scene.otherPerson
-      ? ONE_OTHER_PERSON_SUFFIX
+      ? otherPeopleSuffix(scene.otherPeople)
       : !aggressive && scene.humanPresent && scene.brollHostLook
         ? scene.hostFaceShown
           ? HOST_FACE_ONLY_SUFFIX
@@ -8605,10 +8639,14 @@ export function buildClipChain(
   const peopleSuffix = !scene.hostPresent
     ? personClauseFor(scene, scene.showSubject ?? scene.visualPrompt ?? "")
     : "";
+  // The same person rule as the still (`buildStillPrompt`): someone else's picture never says
+  // "no person is visible" beside the clause that draws them.
   const clipNoFigures =
-    !scene.hostPresent && scene.humanPresent && scene.brollHostLook
-      ? NO_OTHER_FIGURES_SUFFIX
-      : NO_FIGURES_SUFFIX;
+    !scene.hostPresent && scene.humanPresent && scene.otherPerson
+      ? otherPeopleSuffix(scene.otherPeople)
+      : !scene.hostPresent && scene.humanPresent && scene.brollHostLook
+        ? NO_OTHER_FIGURES_SUFFIX
+        : NO_FIGURES_SUFFIX;
   // Shot-angle phrase appended to non-host prompts so camera variety is enforced in code
   // rather than relying on Claude's implicit framing choices.
   const angleSuffix =
@@ -15788,6 +15826,8 @@ async function runUnifiedPipeline(
       if (s.hostPresent && !s.splitVisual) s.visualPrompt = talkingHeadVisualPrompt(params.hostLook, s.index);
   }
   if (hostBroll) console.log(`[Longform ${jobId}] host in b-roll: ${hostBroll} picture(s) show the host at work`);
+  const othersShown = scenes.filter(s => s.otherPerson && !s.hostPresent).length;
+  if (othersShown) console.log(`[Longform ${jobId}] someone else in b-roll: ${othersShown} picture(s), never from the host photo`);
   // Each screen picture (an app, a listing) sits somewhere else, in film order — after the host
   // marks, so a screen in the host's hands gets a held setting.
   const screens = assignScreenSetups(scenes);

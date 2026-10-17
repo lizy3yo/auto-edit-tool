@@ -807,6 +807,26 @@ describe("a line about someone else shows that person, not the host", () => {
     // The person stays in the words that lead the prompt.
     expect(prompt).toMatch(/^(THE PICTURE MUST SHOW: )?a woman seen from behind/);
   });
+
+  // The audit of 336 jobs (2026-10-18): the picture's OWN words decide too, not only the planner.
+  it("reads someone else off the picture's own words — a role, the other sex, two people — never the host photo", () => {
+    const man = "A man in his late sixties with fair skin, short grey hair, wire-rimmed glasses";
+    const scenes = [
+      pic(16, "grief,", "an older woman's hand resting on a framed photograph on a table", { humanPresent: true }), // job 400
+      pic(35, "Coasters and ornaments are impulse buys.", "a shopper's hand picking up a coaster from a market table of coasters and ornaments"), // job 341
+      pic(8, "or some kind of jealousy thing.", "medium-sized short-haired tan and white dog squeezing his nose between two people hugging in the entryway"), // job 370
+      pic(17, "A hen will stick her head in the feeder", "a hen with head in the feeder tossing pellets over her shoulder", { otherPerson: "a hen", humanPresent: true }), // job 371
+      pic(2, "buying his third sympathy card since spring,", "a man standing in a narrow pharmacy aisle holding a greeting card"), // job 400
+    ];
+    markHostBroll(scenes, { hostLook: man }, "https://x/host.png");
+    expect(scenes.map(s => s.otherPerson)).toEqual(["an older woman", "a shopper", "two people", undefined, undefined]);
+    expect(scenes.slice(0, 4).every(s => !s.brollHostRef)).toBe(true);
+    expect(scenes[2].otherPeople).toBe(2);
+    expect(scenes[3].humanPresent).toBeUndefined(); // a hen is no person
+    // A plain man on a man's channel is left to the planner and the line check: the host.
+    expect(scenes[4].brollHostRef).toBe("https://x/host.png");
+    expect(otherPersonOf("a hen")).toBeUndefined();
+  });
 });
 
 // 2026-10-11, practice runs of six channels (jobs 358-363). Every rule here names no channel.
