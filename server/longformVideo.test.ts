@@ -10796,6 +10796,36 @@ describe("blurUnsaidPrint — a plain picture that asks for print to read shows 
     expect(asksToReadPrint("a woman reading a seed catalogue")).toBe(false);
     expect(asksToReadPrint("no lettering visible, only the curved stroke of a needle")).toBe(false);
     expect(asksToReadPrint("")).toBe(false);
+    // "Figures" may be people in the frame; written figures are print.
+    expect(asksToReadPrint("two small figures visible far down the lane")).toBe(false);
+    expect(asksToReadPrint("a notepad with figures jotted down the margin")).toBe(true);
+    expect(asksToReadPrint("a page filled with neat handwriting")).toBe(true);
+  });
+
+  it("a label turned away and a place left for lettering ask for nothing (jobs 119 and 288)", () => {
+    // Job 119 scene 46: the label is turned AWAY; scene 28 turns them forward.
+    const away = pic(46, undefined, "A skein of pale worsted acrylic yarn rests on a neutral kitchen table in soft natural light, its label facing away, the yarn's soft texture and affordable weight clear at a glance.");
+    expect(blurUnsaidPrint(away)).toBe(false);
+    const forward = pic(28, undefined, "Six skeins of pale cream and white acrylic yarn arranged tightly in a row on a kitchen table, their smooth synthetic surface catching flat indoor daylight, labels facing forward, against a calm neutral background.");
+    expect(blurUnsaidPrint(forward)).toBe(true);
+    expect(asksToReadPrint("a bottle lying on the shelf, its front label facing the wall")).toBe(false);
+    expect(asksToReadPrint("a can of oil finish, label facing the camera")).toBe(true);
+    // Job 288 scenes 12 and 14: the sign's routed panel is BLANK — soft carved lines would be added.
+    for (const s of [
+      pic(12, "An engraved board, a walnut house sign and a small keepsake box grouped together on the workbench", "An engraved maple board with blank routed lettering area, a walnut house sign with blank routed lettering area, and a small walnut keepsake box with maple inlay on the lid."),
+      pic(14, "a walnut house sign propped against the garage wall", "Walnut house sign with routed lettering area propped against the garage wall, rectangular plank with natural oil finish and smooth edges, concrete floor and pegboard visible behind it."),
+    ])
+      expect(blurUnsaidPrint(s)).toBe(false);
+    // Job 345 scene 17's carved lettering still asks.
+    expect(asksToReadPrint("Walnut cutting board with recessed carved lettering lying on a scarred workbench")).toBe(true);
+  });
+
+  it("the blur road drops a read-out figure with its unit", () => {
+    const tape = pic(5, undefined, "A steel tape measure stretched along a pine board on the bench, its blade reading 36 inches at the end.");
+    expect(blurUnsaidPrint(tape)).toBe(true);
+    const prompt = buildStillPrompt(tape);
+    expect(prompt).toMatch(/reading a soft, unreadable number at the end/);
+    expect(prompt).not.toMatch(/36|number inches/);
   });
 });
 

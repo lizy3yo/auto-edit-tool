@@ -6670,9 +6670,17 @@ const READABLE_PRINT_ASK =
   /\b(?:clearly|plainly|sharply|legibly)\s+(?:showing|displaying|reading|printed with|marked with)\b/gi;
 const PRINTED_FIGURE =
   /\b(?:(?:the|a)\s+)?(?:printed\s+)?(?:year|date)\s+(?:of\s+)?(?:19|20)\d{2}\b/gi;
-/** A figure a display or gauge is asked to read out ("a small grey display reading 7%", job 352). */
+/**
+ * A figure a display or gauge is asked to read out ("a small grey display reading 7%", job 352),
+ * with its unit, so "a tape reading 36 inches" does not become "a soft, unreadable number inches".
+ */
 const READ_OUT_FIGURE =
-  /\b(?:(reading|reads)\s+\$?\d[\d.,]*(?:\s*(?:%|°|percent\b|degrees\b))?|(displaying|showing)\s+(?:\$\d[\d.,]*|\d[\d.,]*\s*(?:%|°|percent\b|degrees\b)))/gi;
+  /\b(?:(reading|reads)\s+\$?\d[\d.,]*(?:\s*(?:%|°[CF]?|(?:percent|degrees?|inch(?:es)?|feet|foot|ft|mm|cm|pounds?|lbs?|volts?|psi)\b))?|(displaying|showing)\s+(?:\$\d[\d.,]*|\d[\d.,]*\s*(?:%|°|percent\b|degrees\b)))/gi;
+/**
+ * A label turned TOWARD the picture. "Its label facing away" (job 119 scene 46) asks for the
+ * opposite of print to read, and so does a label facing down or to the wall.
+ */
+const FACING_VIEWER = String.raw`facing\b(?!\s+(?:away|down(?:wards?)?|back(?:wards?)?|inwards?|the\s+(?:wall|back|other\s+way))\b)`;
 
 /**
  * A description that asks for print to be READ: handwriting, lettering, a label turned to the
@@ -6683,18 +6691,21 @@ const READ_OUT_FIGURE =
  * "reading 7%" (106), job 383's box "with its printed label facing forward" (scene 31, six checks,
  * writing every time), job 376's alarm "with printed text" (35), job 345's board with "carved
  * lettering" (17). Of the checked pictures that asked this way, 9 of 13 failed for readable writing,
- * against 1.5% of the rest. A negated mention ("no lettering visible") asks for nothing.
+ * against 1.5% of the rest. A negated mention ("no lettering visible") asks for nothing, nor does a
+ * place made for lettering ("a sign with a blank routed lettering area", job 288), a label facing
+ * away (`FACING_VIEWER`), or "figures" in the frame that may be people.
  */
 const PRINT_TO_READ = new RegExp(
   [
-    String.raw`\bhand-?(?:written|lettered)\b`,
-    String.raw`\blettering\b`,
-    String.raw`\b(?:printed|front|back)\s+labels?\b[^.;]{0,30}\b(?:facing|visible|showing|readable|legible)\b`,
-    String.raw`\blabels?\s+facing\b`,
+    String.raw`\bhand-?(?:written|writing|lettered|lettering)\b`,
+    String.raw`\blettering\b(?!\s+(?:area|space|panel|field|zone|spot|section)s?\b)`,
+    String.raw`\b(?:printed|front|back)\s+labels?\b[^.;]{0,30}\b(?:${FACING_VIEWER}|visible|showing|readable|legible)`,
+    String.raw`\blabels?\s+${FACING_VIEWER}`,
     String.raw`\bprinted\s+(?:text|dates?|designation|type|words?|numbers?|model|wording|writing|lines)\b`,
     String.raw`\b(?:reading|reads)\s+(?:["'“‘]|\$?\d)`,
     String.raw`\b(?:displaying|showing)\s+(?:["'“‘]|\$\d|\d[\d.,]*\s*(?:%|°|percent\b|degrees\b))`,
-    String.raw`\b(?:numbers|figures|measurements|calculations|sums)\b[^.;]{0,30}\b(?:written|visible|readable|legible|jotted|scribbled)\b`,
+    String.raw`\b(?:numbers|measurements|calculations|sums)\b[^.;]{0,30}\b(?:written|visible|readable|legible|jotted|scribbled)\b`,
+    String.raw`\bfigures\b[^.;]{0,30}\b(?:written|readable|legible|jotted|scribbled)\b`,
     String.raw`\b(?:writing|jotting|scribbling|penciling|pencilling)\s+(?:down\s+)?(?:numbers|figures|measurements|calculations|sums|lettering|a list|notes)\b`,
     String.raw`\b(?:legible|readable)\s+(?:text|print|printing|words?|labels?|writing|numbers?|letters)\b`,
     String.raw`\b(?:names?|initials|monograms?|words?|dates?)\s+(?:burnt|burned|engraved|carved|stitched|embroidered|painted|written|stamped|printed)\b`,
