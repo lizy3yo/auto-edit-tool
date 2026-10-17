@@ -10,8 +10,10 @@
  * Now the lists are found ONCE, in whole sentences, before anything is cut to fit them:
  *  1. `findSpokenLists` — one call reads the numbered sentences and writes every list's items word
  *     for word; `validateSpokenList` keeps only items that are really there, in order, joined the
- *     way list items are (commas, "and"/"or"). When the call fails, `listsByShape` finds them by
- *     sentence shape alone ("X, Y, and Z") — the same rules, so a film is never worse off.
+ *     way list items are (commas, "and"/"or"), and `itemsAreThings` keeps a list of things only
+ *     when every item names one (never "six,", "round ten," or "as rest,"). When the call fails,
+ *     `listsByShape` finds them by sentence shape alone ("X, Y, and Z") — the same rules, so a
+ *     film is never worse off.
  *  2. `applySpokenLists` — re-cuts the film so every item is exactly one picture, wherever the
  *     storyboard cut: a list that starts inside a host line hands over at its first item, words
  *     after the last item go to the next picture, and a piece that is NOT an item of any list loses
@@ -28,6 +30,7 @@ import {
   LIST_ITEM_CLAUSE,
   NOT_A_LIST_ITEM,
   firstWords,
+  notAThing,
   tokenSpans,
 } from "./shotList";
 
@@ -85,6 +88,10 @@ export function namesAThing(piece: string, maxWords = SHAPE_ITEM_MAX_WORDS): boo
   if (!first || NOT_A_LIST_ITEM.has(first)) return false;
   // An adverb opener is an aside ("Usually,", "Honestly,"), never a thing.
   if (/ly$/.test(first)) return false;
+  // A number, a length of time, a set phrase or a clause names nothing, even when it opens on a
+  // number word like a counted thing does ("six and a half", "give or take", "round ten"), so a
+  // run of them never becomes a list (`notAThing`).
+  if (notAThing(core)) return false;
   if (DETERMINER.test(core)) return true;
   // With no "a/the/some/two…" in front, only a bare name of a few words is a thing ("flour",
   // "brown sugar", "fine sandpaper") — never a phrase saying where or what someone is doing
@@ -233,6 +240,38 @@ export function validateSpokenList(sentence: string, items: string[]): boolean {
   return commas >= 1;
 }
 
+/**
+ * What bare words after it DESCRIBE ("it looks | clean, bright, and calm", "it's | cheap, simple,
+ * quick and quiet"): a linking verb other than "be", or "be" right after a pronoun. "Be" after a
+ * thing is left alone — "the woods I use are | oak, maple, and cherry" is a list of things.
+ */
+const DESCRIBED_BY =
+  /(?:\b(?:looks?|looked|feels?|felt|sounds?|sounded|seems?|seemed|stays?|stayed|(?:keeps?|kept|makes?|made) (?:it|them))|\b(?:it|that|this|they|he|she)(?:'s|'re| is| are| was| were))\s*$/i;
+
+/**
+ * Bare words of one or two each, with no "a/the/some", right after a word that makes them describe
+ * something (`DESCRIBED_BY`) — describing words, not things, however short and noun-like each
+ * looks on its own. Pure.
+ */
+function describingWords(sentence: string, items: string[]): boolean {
+  if (items.some(i => DETERMINER.test(bareItem(i)) || bareItem(i).split(/\s+/).length > 2)) return false;
+  const spans = tokenSpans(sentence);
+  const at = findTokens(spans.map(t => t.tok), tokenSpans(bareItem(items[0] ?? "")).map(t => t.tok), 0);
+  return at >= 0 && DESCRIBED_BY.test(sentence.slice(0, spans[at].start).replace(/’/g, "'"));
+}
+
+/**
+ * Whether every item of a list of things names a thing (`notAThing`), and the items are not
+ * describing words after a linking verb (`describingWords`). One item that is not a thing means the
+ * sentence is not a list of things, so the WHOLE list goes — never trimmed to the items that pass:
+ * trimmed, "the fence for thrifty, old-fashioned chicken keeping, tell me" (job 355) and "Two
+ * thousand years ago, a man named … wrote a short, furious" (job 400) each still left two false
+ * items. Never asked of a sequence of steps (steps are things someone does). Pure.
+ */
+export function itemsAreThings(sentence: string, items: string[]): boolean {
+  return items.every(i => !notAThing(String(i ?? ""))) && !describingWords(sentence, items);
+}
+
 // ─── Finding them ───────────────────────────────────────────────────────────────────────────────
 
 export const LISTS_SYSTEM = `You read a video's spoken script, one numbered sentence per line, and
@@ -257,7 +296,10 @@ NOT a list:
 Answer with JSON only: {"lists":[{"sentence":<number>,"kind":"things"|"steps","items":["…","…"]}]} —
 {"lists":[]} when there are none.`;
 
-/** Read the model's answer: lists that pass `validateSpokenList` against their own sentence. Pure. */
+/**
+ * Read the model's answer: lists that pass `validateSpokenList` against their own sentence and, for
+ * a list of things, `itemsAreThings`. Pure.
+ */
 export function parseSpokenLists(text: string, sentences: string[]): SpokenList[] | null {
   const r = safeParseJSON<{ lists?: unknown }>(text);
   const parsed = r.success ? r.data : null;
@@ -267,8 +309,13 @@ export function parseSpokenLists(text: string, sentences: string[]): SpokenList[
     const n = Number(String(raw?.sentence ?? "").replace(/^#/, ""));
     const items = Array.isArray(raw?.items) ? raw.items.map(i => String(i ?? "").trim()) : [];
     if (!Number.isInteger(n) || !sentences[n]) continue;
+    const steps = raw?.kind === "steps";
+    // The model is told numbers and describing words are not lists, and still answered "as health,
+    // as rest, as a good night's sleep…" (job 362, again in jobs 392 and 395). Dropped here, the
+    // sentence shape may still find the real list in that sentence (`findSpokenLists` adds it).
+    if (!steps && !itemsAreThings(sentences[n], items)) continue;
     if (validateSpokenList(sentences[n], items))
-      out.push({ sentence: n, items, ...(raw?.kind === "steps" ? { kind: "steps" as const } : {}) });
+      out.push({ sentence: n, items, ...(steps ? { kind: "steps" as const } : {}) });
   }
   return out.sort((a, b) => a.sentence - b.sentence);
 }
@@ -315,13 +362,16 @@ const STATE_VERB = /^(?:was|were|is|are|am|be|been|had|has|have|did|does|do|got|
 /** The most words one step may have. */
 const STEP_MAX_WORDS = 12;
 
-/** Every list the shape rules find, sentence by sentence — things, then steps. Pure. */
+/**
+ * Every list the shape rules find, sentence by sentence — things (each item naming one,
+ * `itemsAreThings`), then steps. Pure.
+ */
 export function spokenListsByShape(sentences: string[], only?: Set<number>): SpokenList[] {
   const out: SpokenList[] = [];
   sentences.forEach((s, n) => {
     if (only && !only.has(n)) return;
     for (const items of listsByShape(s))
-      if (validateSpokenList(s, items)) out.push({ sentence: n, items });
+      if (validateSpokenList(s, items) && itemsAreThings(s, items)) out.push({ sentence: n, items });
     if (out.some(l => l.sentence === n)) return;
     const steps = stepsByShape(s);
     if (steps && validateSpokenList(s, steps)) out.push({ sentence: n, items: steps, kind: "steps" });

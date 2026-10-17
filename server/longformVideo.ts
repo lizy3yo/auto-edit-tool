@@ -41,6 +41,7 @@ import {
   settleShots,
   SHOT_MIN_SEC,
   foldSnappedFlashes,
+  foldUnseenBeats,
   HOST_PART_MAX_SEC,
   wordsAfterName,
   spokenListItems,
@@ -14963,8 +14964,31 @@ async function runUnifiedPipeline(
   // a picture to 0.99 s); fold any such piece into its neighbour and cut once more — the same
   // master, so free.
   // A fold re-measures, and the re-snap can squeeze the joined shot's neighbour in turn — a few passes.
+  // EVERY BEAT CAN BE SEEN: a beat the voice gave NO time (a repeated word heard once — production
+  // job 236's three "teakettle," items at 0.000 s) has its words joined into a neighbour first; the
+  // folds below skip zero as "not measured yet". A QR, cover or asset beat is never folded — the plan
+  // gate names one on the job.
+  const foldUnseen = (when: string) => {
+    for (let pass = 0; pass < 3; pass++) {
+      const unseen = foldUnseenBeats(scenes, s => s.audioDuration);
+      if (!unseen.changed) return;
+      scenes = unseen.scenes;
+      sceneRanges = assignSceneRanges(
+        scenes,
+        words,
+        masterDurationSec,
+        silences,
+        shortSilences,
+        newAlignmentReport()
+      );
+      console.log(
+        `[Longform ${jobId}] ${when}: ${unseen.joined} beat(s) with no narration under them joined a neighbour`
+      );
+    }
+  };
   for (let pass = 0; pass < 3; pass++) {
-    const folded = foldSnappedFlashes(scenes, s => s.audioDuration ?? 0);
+    const unseen = foldUnseenBeats(scenes, s => s.audioDuration);
+    const folded = foldSnappedFlashes(unseen.scenes, s => s.audioDuration ?? 0);
     // The hook's pictures are joined to a readable length here too, on the same final lengths.
     const hook = joinHookPictures(folded.scenes, s => s.audioDuration ?? 0);
     // Pictures the shot list marked as the same context play as one, within the quarter's limit.
@@ -14987,7 +15011,8 @@ async function runUnifiedPipeline(
       s => s.audioDuration ?? 0,
       pictureLimitFor(same.scenes, masterDurationSec)
     );
-    if (!folded.changed && !hook.changed && !same.changed && !short.changed && !scan.changed) break;
+    if (!unseen.changed && !folded.changed && !hook.changed && !same.changed && !short.changed && !scan.changed)
+      break;
     scenes = scan.scenes;
     sceneRanges = assignSceneRanges(
       scenes,
@@ -14997,6 +15022,8 @@ async function runUnifiedPipeline(
       shortSilences,
       newAlignmentReport()
     );
+    if (unseen.joined > 0)
+      console.log(`[Longform ${jobId}] ${unseen.joined} beat(s) with no narration under them joined a neighbour`);
     console.log(`[Longform ${jobId}] folded shots the pause-snap squeezed under their floor`);
   }
   // The spoken lists, once more on the final lengths: any step since the shot list that undid an
@@ -15023,6 +15050,8 @@ async function runUnifiedPipeline(
       console.log(`[Longform ${jobId}] spoken lists: put back one picture per item after the folds`);
     }
   }
+  // Putting every item back can bring back an item the voice gives no time (the repeat heard once).
+  foldUnseen("after the list check");
   // SAY IT, SHOW IT, checked: every picture read beside its line, line by line, and any that shows
   // something the line is not about rewritten (`fitPicturesToLines` — Frederick's job 259 put the
   // smoke alarm on "Fires don't all behave the same way"); a line that names something new partway
@@ -15049,6 +15078,9 @@ async function runUnifiedPipeline(
       );
       console.log(`[Longform ${jobId}] ${fit.split} new picture(s) where a line names something new`);
     }
+    // A split or join re-cuts the film, which can leave a beat with no time: folded before the
+    // named looks are written onto the final pictures.
+    foldUnseen("after the line check");
     // NAMED THINGS, DRAWN EXACTLY (`server/namedLooks.ts`): every specific named kind a picture
     // shows gets its exact look, and a picture about one part of a key thing is a close-up of that
     // part — Granny Ruth's job 281 drew three named quilt blocks as copies of the whole quilt.

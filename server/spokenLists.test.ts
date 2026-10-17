@@ -81,6 +81,113 @@ describe("the double-check every list passes", () => {
   });
 });
 
+describe("a list item is a thing (the audit's replay of 336 jobs)", () => {
+  const things = (s: string) => spokenListsByShape([s]).filter(l => l.kind !== "steps").map(l => l.items);
+
+  it("finds no list where the items name nothing — the false lists that were cut", () => {
+    for (const s of [
+      "One, two, three, four, all the way up to twelve.", // job 351
+      "Round three, three a side, round ten, ten a side, and round twenty, twenty.",
+      "Trouble is, the star looks fine right afterward, and the round after that too.",
+      "The rounds get long out past the middle, and if yours takes a few weeks of evenings, or a couple of months, that still counts.",
+      "Mostly four, six, and eight inch widths.", // job 352
+      "A whole lot of folks wonder if that's rude, or nosy, or some kind of jealousy thing.", // job 357
+      "Hit subscribe and make Backyard Brenda your neighbor over the fence for thrifty, old-fashioned chicken keeping, and tell me in the comments which leak your girls are guilty of.", // job 355
+      "Hello, friend, and welcome to Pearl Parker.", // job 220
+      "The word lives in your head and theirs, and nowhere else.", // job 322
+      "It runs six, six and a half hours, give or take, start to finish.", // the audit's own phrases
+      "It's cheap, simple, quick and quiet.",
+      "It looks clean, bright, and calm.",
+    ])
+      expect([s, things(s)]).toEqual([s, []]);
+  });
+
+  it("documented change: a list with one item that is not a thing goes whole (job 11)", () => {
+    // "five minutes" is not a thing, and the two things left are not joined like a list.
+    expect(things("Two slip nuts, one bucket, five minutes, and that is where nearly every kitchen clog actually lives.")).toEqual([]);
+  });
+
+  it("leaves lists of things exactly as they were", () => {
+    // Job 352 (the model's answer, with "small tables", is kept below).
+    expect(
+      things("Drawer fronts, boxes, frame parts, shelf brackets, legs, and small tables all come out of short stock, and a knot you'd cut around anyway costs you nothing.")
+    ).toEqual([["Drawer fronts", "boxes", "frame parts", "shelf brackets", "legs"]]);
+    expect(things("Wash, towel, dryer, brush, every single morning.")).toEqual([["Wash", "towel", "dryer", "brush"]]); // job 222
+    expect(
+      things("A feed sack, a curtain that came down years ago, the good half of a canvas drop cloth, any of those will do, and all of them are already yours.")
+    ).toEqual([["A feed sack", "a curtain that came down years ago", "the good half of a canvas drop cloth"]]); // job 106
+    // Jobs 159/174/178: three real making stages, not describing words.
+    expect(
+      things("A coaster mat is a tiny quilted square about four inches across, pieced from a few scraps, quilted, and bound, and one bin of leftovers gives you enough for a dozen sets.")
+    ).toEqual([["scraps", "quilted", "bound"]]);
+    // A trailing "too" is not what is named — and the item stays as spoken, so the cut keeps its word.
+    expect(things("Get a saw, a drill, and some glue too.")).toEqual([["a saw", "a drill", "some glue too"]]);
+    // "be" after a THING is followed by things; only a pronoun's "it's" or a word like "looks" describes.
+    expect(things("The woods I use are oak, maple, and cherry.")).toEqual([["oak", "maple", "cherry"]]);
+    expect(things("You'll want a penny, a nickel, a dime, and a quarter.")).toEqual([["a penny", "a nickel", "a dime", "a quarter"]]);
+  });
+
+  it("a sequence of steps is not asked to be things (job 351)", () => {
+    expect(spokenListsByShape(["Down the side, skip the two at the bottom, back up, and add at the tip."])).toEqual([
+      { sentence: 0, items: ["Down the side", "skip the two at the bottom", "back up", "add at the tip"], kind: "steps" },
+    ]);
+  });
+
+  it("drops the model's list of things when an item names nothing (jobs 362, 392, 400)", () => {
+    const gold =
+      "That thin line of gold puts a moving highlight right under your chin, and the eye reads light near the face as health, as rest, as a good night's sleep you may or may not have had.";
+    const answer = (items: string[], kind = "things") => JSON.stringify({ lists: [{ sentence: 0, kind, items }] });
+    expect(parseSpokenLists(answer(["as health", "as rest", "as a good night's sleep you may or may not have had"]), [gold])).toEqual([]);
+    expect(parseSpokenLists(answer(["health", "as rest", "as a good night's sleep you may or may not have had"]), [gold])).toEqual([]);
+    const essay =
+      "Two thousand years ago, a man named Lucius Annaeus Seneca wrote a short, furious, loving essay to a man named Paulinus, the official in charge of Rome’s grain supply — busy, important, and worn down to the rims.";
+    expect(parseSpokenLists(answer(["Two thousand years ago", "a man named Lucius Annaeus Seneca wrote a short", "furious"]), [essay])).toEqual([]);
+    // Documented change (job 359): a topic list whose item opens on "when" goes too.
+    expect(parseSpokenLists(answer(["Detectors", "where they go", "when to retire one"]), ["Detectors, where they go, and when to retire one."])).toEqual([]);
+  });
+
+  it("keeps the model's lists of things and of steps as they were", () => {
+    const keep = (sentence: string, items: string[], kind = "things") =>
+      expect(parseSpokenLists(JSON.stringify({ lists: [{ sentence: 0, kind, items }] }), [sentence])).toEqual([
+        { sentence: 0, items, ...(kind === "steps" ? { kind } : {}) },
+      ]);
+    keep("Ivory, oat, a warm coral, mother of pearl.", ["Ivory", "oat", "a warm coral", "mother of pearl"]); // job 362
+    keep(
+      "Drawer fronts, boxes, frame parts, shelf brackets, legs, and small tables all come out of short stock, and a knot you'd cut around anyway costs you nothing.",
+      ["Drawer fronts", "boxes", "frame parts", "shelf brackets", "legs", "small tables"]
+    ); // job 352
+    keep("But a good chunk gets flicked into the dirt, carried off by a rat after dark, or shared with every sparrow on the block.", [
+      "flicked into the dirt",
+      "carried off by a rat after dark",
+      "shared with every sparrow on the block",
+    ]); // job 355
+    keep("Smalls to the markets, personalized work on Etsy, furniture on Marketplace.", [
+      "Smalls to the markets",
+      "personalized work on Etsy",
+      "furniture on Marketplace",
+    ]); // job 293 and 24 more
+    keep("Square up the scrap with a couple of saw cuts, give it a quick brush, drill the hole, oil it, and put a felt dot on the bottom.", [
+      "Square up the scrap with a couple of saw cuts",
+      "give it a quick brush",
+      "drill the hole",
+      "oil it",
+      "put a felt dot on the bottom",
+    ], "steps"); // job 326
+    // Lists of things whose items open on a quantity word or end in a clause with no "that": the
+    // shape rules cannot rebuild either, so refusing one item would lose every picture.
+    keep("Grab a tape measure, a pencil, and all the scraps you can find.", ["a tape measure", "a pencil", "all the scraps you can find"]);
+    keep("You need the quilt, the pattern, and the box it came in.", ["the quilt", "the pattern", "the box it came in"]);
+  });
+
+  it("a refused model list leaves the sentence to the shape rules, which still find the real list", async () => {
+    const r = await findSpokenLists("Number two. The daily blow dry. Wash, towel, dryer, brush, every single morning.", {
+      ask: async () => '{"lists":[{"sentence":2,"items":["Wash","towel","dryer","brush","every single morning"]}]}',
+    });
+    expect(r.fromModel).toBe(true);
+    expect(r.lists).toEqual([{ sentence: 2, items: ["Wash", "towel", "dryer", "brush"] }]);
+  });
+});
+
 describe("the film is cut to fit its lists", () => {
   it("Granny Ruth (job 281): the host hands over at the first item, one picture each, the rest goes on", () => {
     const scenes = [

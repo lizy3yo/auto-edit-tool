@@ -30,6 +30,7 @@ import {
   atWork,
   CONTINUITY_SYSTEM,
   foldSnappedFlashes,
+  foldUnseenBeats,
   joinShortSplits,
   otherPersonOf,
   parseContextGroups,
@@ -77,6 +78,7 @@ import { tooShortToRead, type ResolvedCue, type Word } from "../graphics/src/cue
 import { wordsSaidOver } from "../graphics/src/plan/planner";
 import { plannerForJob } from "./graphics/apply";
 import { makeReadable, type Reading } from "./graphics/readable";
+import { checkScript } from "@shared/scriptCheck";
 
 const pic = (index: number, scriptText: string, showSubject: string, over: Partial<StoryboardScene> = {}) =>
   ({ index, scriptText, showSubject, visualPrompt: showSubject, ...over }) as StoryboardScene;
@@ -210,6 +212,37 @@ describe("lists (Ruth's job 281, Hank's job 275, Dale's jobs 292-293)", () => {
     const secs = new Map([[scenes[0], 4], [scenes[1], 1], [scenes[2], 0.33]]);
     const r = foldSnappedFlashes(scenes, s => secs.get(s) ?? 5);
     expect(r.scenes.find(s => s.scriptText === "Etsy,")?.listCut).toBe(true);
+  });
+
+  it("the audit's production job 200 #184: a lead-in BETWEEN two items leads into the next one, which keeps its picture", () => {
+    const scenes = [
+      pic(1, "check the lock on the back window,", "a window latch", { wordCut: true, listCut: true }),
+      pic(2, "So tonight,", "a dark porch", { wordCut: true }),
+      pic(3, "walk over to that front door,", "a front door from the hallway", { wordCut: true, listCut: true }),
+    ];
+    const secs = new Map([[scenes[0], 2.1], [scenes[1], 0.8], [scenes[2], 1.6]]);
+    const r = foldSnappedFlashes(scenes, s => secs.get(s) ?? 5);
+    expect(r.scenes.map(s => [s.scriptText, s.showSubject, !!s.listCut])).toEqual([
+      ["check the lock on the back window,", "a window latch", true],
+      ["So tonight, walk over to that front door,", "a front door from the hallway", true],
+    ]);
+  });
+
+  it("the audit's production job 236 #79-#81: a word said three times and heard once is one item, never two unseen ones", () => {
+    const wren = "a wren with its beak wide open on the fence post";
+    const scenes = [
+      pic(1, "which birders remember as", "a wren on a fence", { audioDuration: 3.9 }),
+      pic(2, "teakettle,", wren, { listCut: true, audioDuration: 0 }),
+      pic(3, "teakettle,", wren, { listCut: true, audioDuration: 0 }),
+      pic(4, "teakettle.", wren, { listCut: true, audioDuration: 1.3 }),
+      pic(5, "If you hear that by the feeder, you know who it is.", "a feeder", { audioDuration: 5.6 }),
+    ];
+    const r = foldUnseenBeats(scenes, s => s.audioDuration);
+    expect(r.scenes.map(s => [s.scriptText, s.audioDuration])).toEqual([
+      ["which birders remember as", 3.9],
+      ["teakettle, teakettle, teakettle.", 1.3],
+      ["If you hear that by the feeder, you know who it is.", 5.6],
+    ]);
   });
 
   it("Dale: the pause-snap never takes a one-word item's word away", () => {
@@ -403,6 +436,35 @@ describe("lists: the model and the sentence rules together (Diane's job 319)", (
       ask: async () => '{"lists":[]}',
     });
     expect(r.fromModel).toBe(true);
+    expect(r.lists.map(l => l.items)).toEqual([["Wash", "towel", "dryer", "brush"]]);
+  });
+});
+
+describe("a list item is a thing (the audit's jobs 351, 352, 357, 362)", () => {
+  it("job 351: numbers, labels and rates are not items — the pictures lose their list mark and may join", () => {
+    const scenes = [
+      host(1, "Here is how the sides grow.", { hostOpener: true }),
+      pic(2, "Round three,", "the small star blanket after round three", { listCut: true }),
+      pic(3, "three a side,", "three stitches along one side", { listCut: true }),
+      pic(4, "round ten,", "the growing star blanket", { listCut: true }),
+      pic(5, "ten a side,", "ten stitches along one side", { listCut: true }),
+      pic(6, "and round twenty,", "a much larger star blanket", { listCut: true }),
+      pic(7, "twenty.", "one long side of the blanket", { listCut: true }),
+      host(8, "Bye."),
+    ];
+    const r = applySpokenLists(scenes, lists(scenes));
+    expect(r.applied).toBe(0);
+    expect(r.scenes.filter(s => s.listCut)).toEqual([]);
+  });
+
+  it("jobs 352, 357 and 362: no list of a number, of a clause, or of the model's 'as rest'", async () => {
+    const text =
+      "Mostly four, six, and eight inch widths. A whole lot of folks wonder if that's rude, or nosy, or some kind of jealousy thing. " +
+      "The eye reads light near the face as health, as rest, as a good night's sleep. Wash, towel, dryer, brush, every single morning.";
+    const r = await findSpokenLists(text, {
+      ask: async () => '{"lists":[{"sentence":2,"kind":"things","items":["as health","as rest","as a good night\'s sleep"]}]}',
+    });
+    // The real list in the same script is still found.
     expect(r.lists.map(l => l.items)).toEqual([["Wash", "towel", "dryer", "brush"]]);
   });
 });
@@ -1130,5 +1192,22 @@ describe("an unreadable number gets one more try in the plain text colour (Hank'
   it("it stays left out when the white number does not read either", async () => {
     const { made } = await run({ white: 5.5, pass: false });
     expect(made.r.pass).toBe(false);
+  });
+});
+
+describe("only narration is voiced (the audit's jobs 204/205)", () => {
+  it("the writer's QA notes and the script's second copy are refused at Generate, by line", () => {
+    const narration = [
+      "Picture this. You're walking home just after sunset, and a black cat slips out from under a parked car, looks straight at you, and trots across the road like he owns it. And somewhere in the back of your head, a very old voice suggests that maybe you should take the long way around tonight.",
+      "I'm Luca, and this one is for anyone who shares a couch with a black cat, or has ever walked past one at a shelter without quite knowing why. We're going to take the old stories apart one at a time, keep what's true, and gently set down what isn't.",
+    ];
+    const pasted = [...narration, "VERDICT: PASS", "VO COPY — ELEVENLABS V4", `[warm] ${narration[0]}`, narration[1]].join("\n");
+    const { problems } = checkScript(pasted);
+    expect(problems.map(p => [p.kind, p.line])).toEqual([["note", 3], ["note", 4], ["repeat", 1]]);
+    expect(problems[2].againLine).toBe(5);
+  });
+
+  it("a narration line that says 'verdict' (job 46) is narration", () => {
+    expect(checkScript("So today, twelve things about plain white vinegar, and an honest verdict on every one.").problems).toEqual([]);
   });
 });

@@ -99,6 +99,7 @@ import {
   CTA_MARKER_TEMPLATE,
   CTA_TEMPLATE_PLACEHOLDER,
 } from "@shared/ctaMarkers";
+import { checkScript, SCRIPT_FRAME_TIP } from "@shared/scriptCheck";
 import {
   directionsBlockedBy,
   stripVoiceDirections,
@@ -2009,6 +2010,14 @@ export default function LongformJobSlot({
   // render would be rejected (unmarked script on a channel with a cover/QR or with books
   // assigned) and which block each named book lands on.
   const ctaScan = useMemo(() => scanCtaBlocks(script), [script]);
+  // Only narration may be voiced: notes, headings and a second copy of the script are refused by
+  // the router (`shared/scriptCheck.ts` — production jobs 204/205 voiced their QA notes and the
+  // whole script twice), so the same check runs here, live, naming the line to fix before the
+  // click instead of in an error after it.
+  const scriptCheck = useMemo(() => checkScript(script), [script]);
+  const scriptWouldReject = scriptCheck.problems.length > 0;
+  const scriptNotes = scriptCheck.problems.filter(p => p.kind === "note");
+  const scriptRepeats = scriptCheck.problems.filter(p => p.kind === "repeat");
   const ctaBookTitles = useMemo(
     () => ctaBooks.map(b => b.title.trim()).filter(Boolean),
     [ctaBooks]
@@ -2316,6 +2325,29 @@ export default function LongformJobSlot({
               {wordCount.toLocaleString()} word{wordCount === 1 ? "" : "s"}
               {wordCount > 0 && ` · roughly ${estimatedMinutes} of narration`}
             </p>
+            {/* What the router would refuse, as you type: a note pasted in with the script, or
+              the script pasted twice, is read aloud and paid for (`shared/scriptCheck.ts`). */}
+            {scriptNotes.slice(0, 3).map((p, i) => (
+              <StepIssue key={`script-note-${i}`} tone="error">
+                {p.message}
+              </StepIssue>
+            ))}
+            {scriptNotes.length > 3 && (
+              <StepIssue tone="error">
+                {`…and ${scriptNotes.length - 3} more line${scriptNotes.length - 3 === 1 ? "" : "s"} like these.`}
+              </StepIssue>
+            )}
+            {scriptNotes.length > 0 && (
+              <StepIssue tone="error">{SCRIPT_FRAME_TIP}</StepIssue>
+            )}
+            {scriptRepeats.map((p, i) => (
+              <StepIssue key={`script-repeat-${i}`} tone="error">
+                {p.message}
+              </StepIssue>
+            ))}
+            {scriptCheck.warnings.map((w, i) => (
+              <StepIssue key={`script-warning-${i}`}>{w.message}</StepIssue>
+            ))}
             {/* B-roll VIDEO renders on an APIMART account (stills always use OpenAI gpt-image-2).
               Key status is admin-only (getApimartKeys is adminProcedure), so the warning is too. */}
             {apimartKeyMissing && (
@@ -4913,6 +4945,40 @@ export default function LongformJobSlot({
                     )}
                   </Alert>
                 )}
+                {/* Script check — only narration may be voiced; the router refuses the rest
+                    (`shared/scriptCheck.ts`), so the lines to fix are named here. A pitch said
+                    again in another CTA block is only a warning. */}
+                {(scriptWouldReject || scriptCheck.warnings.length > 0) && (
+                  <div className="space-y-1.5 rounded-md border border-border p-3 text-xs">
+                    <p className="font-medium text-foreground">Script</p>
+                    {scriptNotes.slice(0, 3).map((p, i) => (
+                      <p key={`note-${i}`} className="text-destructive">
+                        {p.message}
+                      </p>
+                    ))}
+                    {scriptNotes.length > 3 && (
+                      <p className="text-destructive">
+                        …and {scriptNotes.length - 3} more line
+                        {scriptNotes.length - 3 === 1 ? "" : "s"} like these.
+                      </p>
+                    )}
+                    {scriptNotes.length > 0 && (
+                      <p className="text-muted-foreground">
+                        {SCRIPT_FRAME_TIP}
+                      </p>
+                    )}
+                    {scriptRepeats.map((p, i) => (
+                      <p key={`repeat-${i}`} className="text-destructive">
+                        {p.message}
+                      </p>
+                    ))}
+                    {scriptCheck.warnings.map((w, i) => (
+                      <p key={`warning-${i}`} className="text-warning">
+                        {w.message}
+                      </p>
+                    ))}
+                  </div>
+                )}
                 {/* CTA check — the cases the router would reject are announced HERE, with the
                     fix next to them, instead of surfacing as a server error after the click. */}
                 <div className="space-y-1.5 rounded-md border border-border p-3 text-xs">
@@ -5025,14 +5091,18 @@ export default function LongformJobSlot({
               <>
                 <AlertDialogAction
                   onClick={() => confirmGenerate(false)}
-                  disabled={ctaWouldReject || ctaPlaceholderLeft}
+                  disabled={
+                    ctaWouldReject || ctaPlaceholderLeft || scriptWouldReject
+                  }
                   className="bg-secondary text-secondary-foreground hover:bg-secondary/80"
                 >
                   Use the guide — {formatMinSec(hostEstimate.guideSec)}
                 </AlertDialogAction>
                 <AlertDialogAction
                   onClick={() => confirmGenerate(true)}
-                  disabled={ctaWouldReject || ctaPlaceholderLeft}
+                  disabled={
+                    ctaWouldReject || ctaPlaceholderLeft || scriptWouldReject
+                  }
                 >
                   Use {formatMinSec(hostOverride.budgetSec)} anyway
                 </AlertDialogAction>
@@ -5040,7 +5110,9 @@ export default function LongformJobSlot({
             ) : (
               <AlertDialogAction
                 onClick={() => confirmGenerate()}
-                disabled={ctaWouldReject || ctaPlaceholderLeft}
+                disabled={
+                  ctaWouldReject || ctaPlaceholderLeft || scriptWouldReject
+                }
               >
                 Generate
               </AlertDialogAction>

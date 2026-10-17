@@ -508,3 +508,120 @@ describe("rule 15: a video only of a big thing", () => {
     expect(r.scenes[2].stillImage).toBe(false);
   });
 });
+
+describe("every beat can be seen (the audit's production snapshot, 2026-10-18)", () => {
+  const items = (scenes: StoryboardScene[], ...at: number[]) => {
+    for (const k of at) Object.assign(scenes[k], { listCut: true, wordCut: true });
+    return scenes;
+  };
+
+  it("rule 7 names a measured zero an unseen beat; a beat with no range yet is not one", () => {
+    const scenes = film([
+      ["H", 5, sentence(1)],
+      ["P", 3, "The wren sings it three times,"],
+      ["P", 0, "teakettle,"],
+      ["H", 5, sentence(2)],
+    ]);
+    expect(checkPlan(scenes, params).findings).toContainEqual(
+      expect.objectContaining({ rule: 7, scene: 3, detail: expect.stringMatching(/^unseen beat \(0\.00s/) })
+    );
+    const unmeasured = scenes.map(s => ({ ...s, narrationStartSec: undefined, narrationEndSec: undefined }));
+    expect(checkPlan(unmeasured, params).findings.some(f => /unseen beat/.test(f.detail))).toBe(false);
+  });
+
+  it("production job 236 #79-#81: the unseen repeats join the item that was heard, which keeps its slice", () => {
+    const scenes = items(
+      film([
+        ["H", 5, sentence(1)],
+        ["P", 3, "The wren sings it three times,"],
+        ["P", 1.3, "teakettle,"],
+        ["P", 0, "teakettle,"],
+        ["P", 0, "teakettle."],
+        ["H", 5, sentence(2)],
+      ]),
+      2,
+      3,
+      4
+    );
+    const slice = scenes[2].audioUrl;
+    const r = enforcePlanRules(scenes, params);
+    expect(r.unresolved.filter(f => /unseen beat/.test(f.detail))).toEqual([]);
+    const one = r.scenes.find(s => /teakettle/.test(s.scriptText ?? ""));
+    expect(one).toMatchObject({
+      scriptText: "teakettle, teakettle, teakettle.",
+      listCut: true,
+      narrationStartSec: 8,
+      narrationEndSec: 9.3,
+      audioUrl: slice,
+    });
+    expect(r.scenes).toHaveLength(4);
+  });
+
+  it("production job 215 #191/#192: 'piano,' at 0.000 s joins the 'piano,' before it, whose start and end do not move", () => {
+    const scenes = items(
+      film([
+        ["H", 5, sentence(1)],
+        ["P", 3, "You can hear it in every room of the house:"],
+        ["P", 0.6, "a violin,"],
+        ["P", 0.054, "piano,"],
+        ["P", 0, "piano,"],
+        ["P", 0.9, "and a cello."],
+        ["H", 5, sentence(2)],
+      ]),
+      2,
+      3,
+      4,
+      5
+    );
+    const [start, end] = [scenes[3].narrationStartSec, scenes[3].narrationEndSec];
+    const r = enforcePlanRules(scenes, params);
+    const piano = r.scenes.find(s => /piano/.test(s.scriptText ?? ""));
+    expect(piano?.scriptText).toBe("piano, piano,");
+    expect([piano?.narrationStartSec, piano?.narrationEndSec]).toEqual([start, end]);
+    expect(r.scenes.find(s => s.scriptText === "and a cello.")?.listCut).toBe(true);
+  });
+
+  it("a zero-length QR beat is never folded: the job is told", () => {
+    const scenes = film([
+      ["H", 5, sentence(1)],
+      ["H", 4, "The whole guide is in the link below."],
+      ["P", 0, "Scan the code now."],
+      ["H", 5, sentence(2)],
+    ]);
+    Object.assign(scenes[2], { qrHero: true, cta: true, ctaIndex: 0 });
+    Object.assign(scenes[1], { cta: true, ctaIndex: 0 });
+    const r = enforcePlanRules(scenes, params);
+    expect(r.unresolved).toContainEqual(
+      expect.objectContaining({ rule: 7, detail: expect.stringMatching(/^unseen beat .*Scan the code now/) })
+    );
+    expect(r.scenes.some(s => s.qrHero && s.scriptText === "Scan the code now.")).toBe(true);
+  });
+
+  it("production job 200 #184: 'So tonight,' between two items leads into the next item with that item's picture", () => {
+    const scenes = items(
+      film([
+        ["H", 5, sentence(1)],
+        ["P", 2.1, "check the lock on the back window,"],
+        ["P", 0.8, "So tonight,"],
+        ["P", 1.6, "walk over to that front door,"],
+        ["P", 1.4, "and test the deadbolt."],
+        ["H", 5, sentence(2)],
+      ]),
+      1,
+      3,
+      4
+    );
+    const door = scenes[3].showSubject;
+    const r = enforcePlanRules(scenes, params);
+    const led = r.scenes.find(s => /front door/.test(s.scriptText ?? ""));
+    expect(led).toMatchObject({
+      scriptText: "So tonight, walk over to that front door,",
+      showSubject: door,
+      listCut: true,
+      narrationStartSec: 7.1,
+      narrationEndSec: 9.5,
+    });
+    expect(led?.audioUrl).toBeUndefined();
+    expect(r.unresolved.filter(f => f.rule === 7 && /flash shot/.test(f.detail))).toEqual([]);
+  });
+});

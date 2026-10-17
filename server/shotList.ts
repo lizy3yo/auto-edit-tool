@@ -223,7 +223,9 @@ export function spokenListItems(text: string | undefined): string[] | null {
     .map(p => p.replace(/^(?:and|or|maybe|plus|then|also|even)\s+/i, "").trim())
     .filter(Boolean);
   if (items.length < 3) return null;
-  return items.every(p => LIST_ITEM_START.test(p) && p.split(/\s+/).length <= 8) ? items : null;
+  // "the hem went around once, the straps were four short seams, and the four squares finished it."
+  // (job 106) is three clauses, not three things (`notAThing`).
+  return items.every(p => LIST_ITEM_START.test(p) && p.split(/\s+/).length <= 8 && !notAThing(p)) ? items : null;
 }
 
 export function shotListEligible(
@@ -690,6 +692,8 @@ export function looksLikeListItem(text: string | undefined): boolean {
   // A clause is not an item: "the cheapest fabric won," and "the one I loved most" say something
   // about a thing — a list item only names one.
   if (LIST_ITEM_CLAUSE.test(t)) return false;
+  // "six and a half," and "three a side," open on a number but name nothing (`notAThing`).
+  if (notAThing(t)) return false;
   return /^(?:(?:and|or|plus|maybe|then|also)\s+)?(?:a|an|the|some|one|two|three|four|five|six|seven|eight|nine|ten|a few|a couple of|your|my|his|her|their|our|this|that|these|those|old|new)\b[^.;:!?]*[,.;]?$/i.test(
     t
   );
@@ -706,6 +710,126 @@ export const NOT_A_LIST_ITEM = new Set([
   "from", "by", "to", "into", "onto", "over", "under", "about", "around", "like", "as", "of",
 ]);
 
+/** A number word or figure ("six", "twenty", "half", "$20"). "quarter" is left out: a quarter is a coin. */
+const NUMBER_WORD =
+  "(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|dozen|half|halves|third|thirds|\\$?\\d+(?:[.,]\\d+)?%?)";
+const IS_NUMBER = new RegExp(`^${NUMBER_WORD}$`);
+/** "thirty-five" is one number. */
+const isNumber = (w: string) => w.split("-").every(p => IS_NUMBER.test(p));
+/** Words that sit between number words without naming anything ("six AND A half", "two OR three"). */
+const NUMBER_FILLER = new Set(["a", "an", "and", "or", "to", "point", "about", "maybe", "nearly", "almost", "roughly", "around"]);
+/** A unit of time: a number of them is a length of time, not a thing. */
+const TIME_UNIT = /^(?:seconds?|minutes?|hours?|days?|nights?|evenings?|mornings?|weeks?|weekends?|months?|years?|decades?|century|centuries)$/;
+/** What may lead a length of time besides number words ("A FEW weeks", "A COUPLE OF months"). */
+const TIME_QUANTITY = /^(?:a few|a couple|a couple of|several|another|many)$/;
+/** One word that may follow it and keep it a length of time ("… AGO"); "of …" may too ("… OF evenings"). */
+const AFTER_TIME = /^(?:ago|later|earlier|back)$/;
+/** Set phrases, greetings and pronouns: said, never drawn. Closed list of ordinary English. */
+const NOT_A_THING_PHRASE = new Set([
+  "give or take", "more or less", "sooner or later", "and so on", "so on", "etc", "et cetera", "or so",
+  "as well", "too", "either", "neither", "you know", "i mean", "of course", "at least", "at most",
+  "for sure", "no doubt", "back up", "hello", "hi", "hey", "welcome", "thanks", "thank you",
+  "goodbye", "bye", "please", "tell me", "nowhere else", "somewhere else", "anywhere", "everywhere",
+  "anybody", "anyone", "everybody", "everyone", "nobody", "no one", "somebody", "someone", "anything",
+  "everything", "something", "nothing", "whatever", "whoever", "that", "this", "it", "them", "those", "these",
+]);
+/** Prepositions `NOT_A_LIST_ITEM` does not hold: a piece opening on one says where ("through the pine"). */
+const MORE_PREPOSITIONS = new Set([
+  "through", "across", "along", "past", "behind", "between", "toward", "towards", "without", "within",
+  "upon", "against", "beneath", "beyond", "than",
+]);
+/**
+ * `NOT_A_LIST_ITEM` words that also lead a counted or chosen thing ("ALL the scraps you can find",
+ * "EVERY spool of thread", "MORE glue", "JUST a pencil"): an item opening on one is judged on the
+ * words after it, and is never a time ("every single morning", "all day long"). Only the model's
+ * items reach this — the sentence-shape and piece tests refuse these openers themselves — and one
+ * refused item drops the model's WHOLE list, which the shape rules cannot rebuild around it, so
+ * refusing the opener lost "a tape measure, a pencil, and all the scraps you can find" outright.
+ */
+const LEADS_A_THING = new Set(["all", "every", "each", "most", "more", "less", "first", "next", "just", "only"]);
+/** Words skipped when asking whether what follows such an opener is a time ("every SINGLE morning"). */
+const TIME_FILLER = /^(?:the|a|an|single|other|whole|last|this)$/;
+/** Nouns a number labels ("round ten", "chapter two", "step three"). */
+const LABEL_NOUN = new Set([
+  "round", "row", "chapter", "step", "part", "day", "week", "number", "page", "level", "size",
+  "volume", "lesson", "rule", "tip", "stage", "phase", "item", "section",
+]);
+/** "three a side", "two per row". */
+const RATE = new RegExp(`^${NUMBER_WORD}\\s+(?:a|an|per)\\s+\\S+$`);
+/** "two or three rounds apiece", "three at once". */
+const RATE_END = /\s(?:apiece|each|at once|at a time)$/;
+/**
+ * A contracted IS ("that's rude", "this one's for…"): the piece says something, it names nothing.
+ * Not "everyone's", which is far more often whose ("everyone's favorite pie") than a verb.
+ */
+const CONTRACTED_IS = /\b(?:that|it|this|there|here|who|one|he|she|nobody|everything)'s\b/;
+/** An adverb then a verb ("just looks", "still counts"). Never "even"/"only", which also lead a plural noun ("even stitches"). */
+const ADVERB_VERB = /\b(?:just|still|already|never|always|actually|really|also)\s+[a-z]+s\b/;
+/**
+ * A thing, then a common linking or motion verb, then more ("the star LOOKS fine", "the word LIVES
+ * in your head"). At least one word between the article and the verb, and never "… of" after it, so
+ * "the sounds of the market" and "the wonders of the sea" stay things; never across "that/which/who"
+ * or the subject of a clause with no "that" ("a curtain that came down years ago", "the box it came
+ * in" and "the jar they live in" are things).
+ */
+const THING_THEN_VERB =
+  /^(?:a|an|the|this|that|my|your|our|his|her|their|some)\s+(?:(?!(?:that|which|who|i|you|he|she|it|we|they)\b)[a-z'-]+\s+){1,5}?(?:looks|lives|seems|feels|sounds|counts|wonder|wonders|belongs|means|stays|happens|started|starts|ended|came|comes|went|goes)\s+(?!of\b)\S/;
+
+/** A number of time units: "five minutes", "six and a half hours", "a few weeks of evenings", "two thousand years ago". */
+function lengthOfTime(words: string[]): boolean {
+  const u = words.findIndex(w => TIME_UNIT.test(w));
+  if (u < 1) return false;
+  const lead = words.slice(0, u);
+  const counted =
+    TIME_QUANTITY.test(lead.join(" ")) ||
+    (lead.some(isNumber) && lead.every(w => isNumber(w) || NUMBER_FILLER.has(w)));
+  const after = words.slice(u + 1);
+  return counted && (!after.length || after[0] === "of" || (after.length === 1 && AFTER_TIME.test(after[0])));
+}
+
+/**
+ * A LIST ITEM IS A THING (2026-10-18, the audit's replay of 336 jobs): why a spoken-list item names
+ * nothing a picture could show, or null when it may. A list gets one picture per item, and nothing
+ * asked what an item named — so "Round three, three a side, round ten, ten a side, and round twenty,
+ * twenty." (job 351) became five pictures of one blanket, "six," (job 352) a stack of boards of its
+ * own, "or nosy," (job 357) a dog's nose, and the model's "as health, as rest" (job 362) a chain on a
+ * throat. Refused: numbers alone ("six and a half"), lengths of time ("five minutes", "a few weeks of
+ * evenings", "two thousand years ago"), numbered labels ("round ten"), rates ("three a side", "…
+ * apiece"), set phrases, greetings and pronouns ("give or take", "welcome", "nobody"), an aside or a
+ * preposition first ("as rest", "through the pine"; "all/every/more…" are judged on what follows,
+ * `LEADS_A_THING`), and a clause ("…if that's rude", "that still counts", "the star looks fine right
+ * afterward"). A trailing "too / as well / either" is not part of what is named ("some glue too" is
+ * glue). A describing word ending in -ed is NOT refused: "pieced from a few scraps, quilted, and
+ * bound" (jobs 159, 174, 178) is three real stages. Closed lists of ordinary English, no channel's
+ * words. Pure.
+ */
+export function notAThing(item: string): string | null {
+  const core = item
+    .trim()
+    .replace(/’/g, "'")
+    .replace(/[.!?;:,]+$/, "")
+    .replace(/^(?:(?:and|or|plus|maybe|then|also|even|nor)\s+)+/i, "")
+    .replace(/\s+(?:too|as well|either)$/i, "")
+    .trim()
+    .toLowerCase();
+  const words = core.split(/\s+/).filter(Boolean);
+  if (!words.length) return "no words";
+  if (NOT_A_THING_PHRASE.has(core)) return "a set phrase or a pronoun";
+  const first = words[0].replace(/[^a-z]/g, "");
+  if (LEADS_A_THING.has(first) && words.length > 1) {
+    const rest = words.slice(1).filter(w => !TIME_FILLER.test(w));
+    if (rest.length <= 3 && (TIME_UNIT.test(rest[0] ?? "") || TIME_UNIT.test(rest[rest.length - 1] ?? ""))) return "a time";
+    return notAThing(words.slice(1).join(" "));
+  }
+  if (NOT_A_LIST_ITEM.has(first) || MORE_PREPOSITIONS.has(first)) return "an aside or a preposition first";
+  if (words.some(isNumber) && words.every(w => isNumber(w) || NUMBER_FILLER.has(w))) return "only a number";
+  if (words.length === 2 && LABEL_NOUN.has(words[0]) && isNumber(words[1])) return "a numbered label";
+  if (RATE.test(core) || RATE_END.test(core)) return "a rate";
+  if (lengthOfTime(words)) return "a length of time";
+  if (CONTRACTED_IS.test(core) || ADVERB_VERB.test(core) || THING_THEN_VERB.test(core)) return "a clause";
+  return null;
+}
+
 /**
  * A list item with no article — "flour,", "sugar,", "and butter." — a bare name of one to four
  * words: no subject or verb (`LIST_ITEM_CLAUSE`), no "-ly" word, not an aside ("Honestly,"). Only
@@ -719,7 +843,9 @@ export function looksLikeBareListItem(text: string | undefined): boolean {
   if (words.length > 4) return false;
   if (!/^[a-z0-9][a-z0-9' -]*[,.;]?$/i.test(core)) return false;
   if (words.some(w => /ly[,.;]?$/i.test(w))) return false;
-  return !NOT_A_LIST_ITEM.has(words[0].replace(/[^a-z]/gi, "").toLowerCase());
+  if (NOT_A_LIST_ITEM.has(words[0].replace(/[^a-z]/gi, "").toLowerCase())) return false;
+  // "twenty.", "give or take," and "too." are short and bare, and name nothing (`notAThing`).
+  return !notAThing(t);
 }
 
 /** Either shape of list item. */
@@ -766,7 +892,8 @@ export const SHOWS_SCREEN =
  * item squeezed to a blink), whose own picture the join would lose
  * (Dale's job 293: a 1 s "Today I'm ranking" folded into "Etsy," and Etsy's picture was gone).
  * Every step that folds a too-short piece into a neighbour asks this — the shot list's settle, the
- * pause-snap fold and the plan gate. Pure.
+ * pause-snap fold and the plan gate. The one way in: a lead-in BETWEEN two items is said at the head
+ * of the item after it, which keeps its own picture (`leadIntoItem`). Pure.
  */
 export const mergeable = (
   n: StoryboardScene | undefined,
@@ -2402,7 +2529,16 @@ export function foldSnappedFlashes(
           : fits(next, false)
             ? i + 1
             : -1;
-    if (into < 0) continue;
+    if (into < 0) {
+      // Between two list items neither neighbour takes it — but the item after it can lead with it
+      // and keep its own picture (`leadIntoItem`).
+      if (leadInBetweenItems(out, i)) {
+        out.splice(i, 2, leadIntoItem(s, out[i + 1]));
+        changed = true;
+        i = Math.max(-1, i - 1);
+      }
+      continue;
+    }
     const [a, b] = into < i ? [out[into], s] : [s, out[into]];
     out.splice(Math.min(i, into), 2, joinPieces(a, b, sec(a), sec(b)));
     changed = true;
@@ -2410,4 +2546,155 @@ export function foldSnappedFlashes(
   }
   out.forEach((s, k) => (s.index = k + 1));
   return { scenes: out, changed };
+}
+
+/** The CTA's fixed frames: the big QR, the book cover, an operator's asset. Never folded, never a fold's target. */
+const fixedFrame = (s: StoryboardScene | undefined) =>
+  !!s && (!!s.qrHero || !!s.coverHero || !!s.assetImageUrl);
+
+/** Two beats on the same side of every CTA edge (a fold never carries words across one). */
+const sameSide = (a: StoryboardScene, b: StoryboardScene) =>
+  (a.cta === true) === (b.cta === true) && a.ctaIndex === b.ctaIndex;
+
+/**
+ * A short lead-in BETWEEN two items of a spoken list: "So tonight," | "If" | "Then" between one item
+ * and the next (production job 200 #184, "So tonight," 0.80 s before "walk over to that front door,";
+ * of the 16 sub-second non-list pictures in the audit's production snapshot, 14 sat strictly between
+ * two items). Nothing may be merged INTO a list item (`mergeable` — the joined piece would lose the
+ * item's picture), so the folds left it as a sub-second picture of its own. Only BETWEEN two items:
+ * a lead-in before a list's first item still joins the picture before it (Dale's job 293, "Today
+ * I'm ranking"). The caller decides it is under its floor. Pure.
+ */
+export function leadInBetweenItems(scenes: StoryboardScene[], i: number): boolean {
+  const s = scenes[i];
+  const item = (n: StoryboardScene | undefined) =>
+    !!n && !!n.listCut && !n.hostPresent && !fixedFrame(n);
+  return (
+    !!s &&
+    !s.hostPresent &&
+    !s.listCut &&
+    !fixedFrame(s) &&
+    item(scenes[i - 1]) &&
+    item(scenes[i + 1]) &&
+    sameSide(s, scenes[i + 1])
+  );
+}
+
+/**
+ * The lead-in spoken at the head of the item after it: the item keeps its OWN picture, subject and
+ * list mark — never `joinPieces`' longer-wins rule, under which a 0.8 s lead-in in front of a 0.5 s
+ * item would take the item's picture (the Dale job 293 failure again). The words lead into the item
+ * ("So tonight, walk over to that front door,"), so its picture arrives with them. Pure.
+ */
+export function leadIntoItem(lead: StoryboardScene, item: StoryboardScene): StoryboardScene {
+  const text = `${(lead.scriptText ?? "").trim()} ${(item.scriptText ?? "").trim()}`.trim();
+  return {
+    ...item,
+    ...FRESH,
+    scriptText: text,
+    narration: firstWords(text, 8),
+    listCut: true,
+  } as StoryboardScene;
+}
+
+/**
+ * A beat the voice gives NO time at all: its range is measured and is this long or shorter. The
+ * aligner allows a scene whose end equals its start when the transcript hears its words inside a
+ * neighbour's — a repeated word heard once (production job 236 #79-#81: "teakettle," "teakettle,"
+ * "teakettle." each 0.000 s), a digit group, a word the transcriber dropped — and every guard after
+ * it skipped zero as "not measured yet", so the paid picture played as one frame.
+ */
+export const UNSEEN_BEAT_SEC = 0.01;
+
+/** A beat's length on the master narration's clock, or undefined while it has no range. Pure. */
+export const rangeSec = (s: StoryboardScene): number | undefined =>
+  Number.isFinite(s.narrationStartSec) && Number.isFinite(s.narrationEndSec)
+    ? (s.narrationEndSec as number) - (s.narrationStartSec as number)
+    : undefined;
+
+const wordSet = (t: string | undefined) => new Set(tokenSpans(t ?? "").map(x => x.tok));
+
+/**
+ * Where an unseen beat's words go: a neighbour saying the SAME words first (the repeat the
+ * transcript heard once — production job 215: "piano," 0.054 s then "piano," 0.000 s), else the
+ * neighbour of its own kind before it (a picture or list item for a picture, a host take for a host
+ * take), else the one after, else the other kind, else any neighbour (a lead-in between two items
+ * leads into the one after). Never a QR, cover or asset beat, never the QR block's release beat (its
+ * last words pin the block's end on the voice), and never across a CTA edge. The target keeps its
+ * own picture, so a list item may take it. -1 when nothing may. Pure.
+ */
+export function unseenFoldTarget(scenes: StoryboardScene[], i: number): number {
+  const s = scenes[i];
+  if (!s || fixedFrame(s)) return -1;
+  const can = (n: StoryboardScene | undefined): n is StoryboardScene =>
+    !!n && !fixedFrame(n) && !n.qrTail && sameSide(s, n);
+  const own = wordSet(s.scriptText ?? s.narration);
+  const same = (n: StoryboardScene | undefined) => {
+    if (!can(n) || !own.size) return false;
+    const theirs = wordSet(n.scriptText ?? n.narration);
+    return theirs.size === own.size && Array.from(own).every(t => theirs.has(t));
+  };
+  // A picture is joined into the way every fold joins one (`mergeable`); a host take always may be.
+  const takes = (n: StoryboardScene) => !!n.hostPresent || mergeable(n, s);
+  const ownKind = (n: StoryboardScene | undefined) =>
+    can(n) && !!n.hostPresent === !!s.hostPresent && takes(n);
+  const otherKind = (n: StoryboardScene | undefined) =>
+    can(n) && !!n.hostPresent !== !!s.hostPresent && takes(n);
+  const order: [(n: StoryboardScene | undefined) => boolean, number][] = [
+    [same, -1],
+    [same, 1],
+    [ownKind, -1],
+    [ownKind, 1],
+    [otherKind, -1],
+    [otherKind, 1],
+    [can, 1],
+    [can, -1],
+  ];
+  for (const [ok, d] of order) if (ok(scenes[i + d])) return i + d;
+  return -1;
+}
+
+/**
+ * EVERY BEAT CAN BE SEEN (2026-10-18, the audit's production snapshot: 11 beats of 0.000 s in 6
+ * jobs, 9 of them list items). A beat whose measured length is `UNSEEN_BEAT_SEC` or less has its
+ * words joined into a neighbour (`unseenFoldTarget`), which keeps its own picture, list mark and
+ * timing — those words had no time of their own, so nothing seen changes and a picture nobody would
+ * see is not paid for. A host take that takes an unseen host beat keeps its intro/anchor roles.
+ * `measured` is the beat's length, or undefined while it has none (a piece just joined): only a
+ * MEASURED zero is folded. Run on the final lengths at voicing; `unplaced` are the unseen beats left
+ * (a QR, cover or asset beat, or one with no neighbour that may take it) — the plan gate names them
+ * on the job. Pure — returns a new list, renumbered.
+ */
+export function foldUnseenBeats(
+  scenes: StoryboardScene[],
+  measured: (s: StoryboardScene) => number | undefined
+): { scenes: StoryboardScene[]; changed: boolean; joined: number; unplaced: StoryboardScene[] } {
+  const out = [...scenes];
+  const unseen = (s: StoryboardScene) => {
+    const m = measured(s);
+    return m != null && m <= UNSEEN_BEAT_SEC;
+  };
+  let joined = 0;
+  for (let i = 0; i < out.length; i++) {
+    const s = out[i];
+    if (!unseen(s)) continue;
+    const into = unseenFoldTarget(out, i);
+    if (into < 0) continue;
+    const t = out[into];
+    const [a, b] = into < i ? [t, s] : [s, t];
+    const text = `${(a.scriptText ?? "").trim()} ${(b.scriptText ?? "").trim()}`.trim();
+    const host = !!t.hostPresent;
+    out.splice(Math.min(i, into), 2, {
+      ...t,
+      scriptText: text,
+      narration: firstWords(text, 8),
+      hostIntro: t.hostIntro || (host && s.hostIntro) || undefined,
+      hostProtected: t.hostProtected || (host && s.hostProtected) || undefined,
+    } as StoryboardScene);
+    joined++;
+    // Looked at again: the same-words neighbour may have had no time either (two of three repeats).
+    i = Math.max(-1, Math.min(i, into) - 1);
+  }
+  out.forEach((s, k) => (s.index = k + 1));
+  return { scenes: out, changed: joined > 0, joined, unplaced: out.filter(unseen) };
 }

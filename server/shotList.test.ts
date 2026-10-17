@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { StoryboardScene } from "@shared/types";
+import { assignSceneRanges } from "./narrationAlignment";
 import {
   applyShotPlan,
   foldSnappedFlashes,
+  foldUnseenBeats,
+  leadInBetweenItems,
+  UNSEEN_BEAT_SEC,
   joinHookPictures,
   joinSameContext,
   applyContextGroups,
@@ -1168,6 +1172,123 @@ describe("a list without articles is recognised too — any channel", () => {
   });
 });
 
+describe("a list item is a thing (the audit's replay: jobs 351, 352, 357, 362, 400)", () => {
+  it("refuses numbers, lengths of time, labels, rates, set phrases and clauses — the items that were drawn", async () => {
+    const { notAThing } = await import("./shotList");
+    const refused: [string, string][] = [
+      ["six,", "only a number"], // job 352: "Mostly four, six, and eight inch widths."
+      ["twenty.", "only a number"], // job 351
+      ["six and a half", "only a number"],
+      ["One", "only a number"], // job 351: "One, two, three, four, all the way up to twelve."
+      ["round ten,", "a numbered label"], // job 351: "Round three, three a side, round ten, …"
+      ["and round twenty,", "a numbered label"],
+      ["three a side,", "a rate"],
+      ["two or three rounds apiece,", "a rate"],
+      ["a few weeks of evenings,", "a length of time"], // job 351
+      ["or a couple of months,", "a length of time"],
+      ["five minutes", "a length of time"], // job 11
+      ["Two thousand years ago,", "a length of time"], // job 400
+      ["give or take", "a set phrase or a pronoun"],
+      ["too", "a set phrase or a pronoun"],
+      ["and nowhere else.", "a set phrase or a pronoun"], // job 322
+      ["Hello", "a set phrase or a pronoun"], // job 220: "Hello, friend, and welcome to …"
+      ["tell me", "a set phrase or a pronoun"], // job 355
+      ["as rest,", "an aside or a preposition first"], // job 362, the model's list
+      ["through the pine", "an aside or a preposition first"],
+      ["A whole lot of folks wonder if that's rude,", "a clause"], // job 357
+      ["That's called joining,", "a clause"], // job 351
+      ["that still counts.", "a clause"],
+      ["the star looks fine right afterward,", "a clause"],
+      ["The word lives in your head and theirs", "a clause"], // job 322
+      ["a week later his club friends started messaging me", "a clause"],
+      // "all / every / more …" are judged on what follows: a time or a where is still no thing.
+      ["every single morning", "a time"],
+      ["all day long", "a time"],
+      ["all of them", "an aside or a preposition first"],
+      ["just for fun", "an aside or a preposition first"],
+      ["less than a dollar", "an aside or a preposition first"],
+    ];
+    for (const [item, why] of refused) expect([item, notAThing(item)]).toEqual([item, why]);
+    // Things stay things — the clean lists of the same replay, and the shapes the rule must not reach.
+    for (const item of [
+      "and eight inch widths.",
+      "Two slip nuts",
+      "one bucket",
+      "a dozen eggs",
+      "2 eggs,",
+      "a curtain that came down years ago", // job 106: a relative clause still names a thing
+      "the good half of a canvas drop cloth",
+      "quilted,", // jobs 159/174/178: "pieced from a few scraps, quilted, and bound" — three real stages
+      "and bound,",
+      "flicked into the dirt", // job 355
+      "carried off by a rat after dark",
+      "mother of pearl", // job 362: "Ivory, oat, a warm coral, mother of pearl."
+      "Drawer fronts", // job 352
+      "and some glue too.", // a trailing "too" is not what is named
+      "the round after that too",
+      "a quarter", // a coin, not a number
+      "two weekend bags", // a time word that names a thing
+      "the sounds of the market", // "sounds of" is a noun, not a verb
+      "nice even stitches",
+      // A model item may open on "all / every / more / just": one refused item drops its whole list.
+      "all the scraps you can find",
+      "every spool of thread",
+      "and more glue",
+      "just a pencil",
+      "the box it came in", // a clause with no "that" still names the box
+      "everyone's favorite pie", // whose, not "everyone is"
+    ])
+      expect([item, notAThing(item)]).toEqual([item, null]);
+  });
+
+  it("never splits or marks pieces that name nothing as list items", async () => {
+    const { looksLikeBareListItem, looksLikeListItem, splitListPieces } = await import("./shotList");
+    for (const t of ["twenty.", "give or take,", "too.", "and round twenty,"]) expect([t, looksLikeBareListItem(t)]).toEqual([t, false]);
+    for (const t of ["six and a half,", "three a side,", "a few weeks of evenings,", "the star looks fine right afterward,"])
+      expect([t, looksLikeListItem(t)]).toEqual([t, false]);
+    expect(looksLikeListItem("and eight inch widths.")).toBe(true);
+    expect(looksLikeBareListItem("quilted,")).toBe(true);
+    const one = scene(1, "six and a half, give or take,", { showSubject: "a clock on the wall" });
+    expect(splitListPieces([one])).toEqual([one]);
+    // Job 351: "Round three, three a side, round ten, ten a side, and round twenty, twenty." — every
+    // piece read as a list item, so each was marked and kept apart, and "and round twenty, twenty."
+    // was split in two: six pictures of one blanket. Now none is a list item, so they may join.
+    const b = scene(3, "Round three, three a side, round ten, ten a side, and round twenty, twenty.");
+    const { scenes } = applyShotPlan(
+      [b],
+      [
+        {
+          scene: 3,
+          shots: [
+            { from: "Round three", show: "the small star blanket after round three" },
+            { from: "three a side", show: "three stitches along one side" },
+            { from: "round ten", show: "the growing star blanket" },
+            { from: "ten a side", show: "ten stitches along one side" },
+            { from: "and round twenty", show: "a much larger star blanket" },
+          ],
+        },
+      ]
+    );
+    expect(scenes.map(s => [s.scriptText, !!s.listCut])).toEqual([
+      ["Round three,", false],
+      ["three a side,", false],
+      ["round ten,", false],
+      ["ten a side,", false],
+      ["and round twenty, twenty.", false],
+    ]);
+  });
+
+  it("a host line of clauses is not 'just a list' (job 106)", async () => {
+    const { spokenListItems } = await import("./shotList");
+    expect(spokenListItems("the hem went around once, the straps were four short seams, and the four squares finished it.")).toBeNull();
+    expect(spokenListItems("A bin in the hall closet, a bag in the garage, maybe a box under the bed.")).toEqual([
+      "A bin in the hall closet",
+      "a bag in the garage",
+      "a box under the bed",
+    ]);
+  });
+});
+
 describe("a picture shows what its line is about, in the place it names (Hank's job 269: an empty market table)", () => {
   it("tells the line check a place alone is wrong, and a new thing the line names is right", async () => {
     const { FIT_SYSTEM } = await import("./shotList");
@@ -1371,10 +1492,170 @@ describe("a short piece is never merged into a list item (Dale's job 293)", () =
       ["craft fairs,", true],
     ]);
   });
-  it("leaves a flash alone when its only neighbours are list items", async () => {
+  it("a flash between two list items leads into the item after it, which keeps its own picture", async () => {
+    // Nothing is merged INTO an item by the longer-wins join (it was left as a 0.3 s picture until
+    // 2026-10-18); the item after it now says it first, with its own picture and list mark.
     const { foldSnappedFlashes } = await import("./shotList");
     const scenes = [p(1, "a saw,", { listCut: true }), p(2, "and", {}), p(3, "a drill,", { listCut: true })];
     const r = foldSnappedFlashes(scenes, s => (s.listCut ? 0.6 : 0.3));
+    expect(r.scenes.map(s => [s.scriptText, s.showSubject, !!s.listCut])).toEqual([
+      ["a saw,", "picture 1", true],
+      ["and a drill,", "picture 3", true],
+    ]);
+  });
+});
+
+describe("every beat can be seen (the audit's production snapshot, 2026-10-18)", () => {
+  /** Words laid end to end from `t0`, one every `per` seconds, as the transcriber returns them. */
+  const spoken = (text: string, t0: number, per = 0.32) =>
+    text
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((word, k) => ({ word, start: t0 + k * per, end: t0 + k * per + per - 0.04 }));
+  const item = (index: number, text: string, subject: string) =>
+    scene(index, text, { listCut: true, wordCut: true, showSubject: subject, visualPrompt: subject });
+
+  it("production job 236 #79-#81: a word said three times and heard once is ONE item, not two unseen ones", () => {
+    const intro = "the wren sings three times in a row which birders remember as";
+    const scenes = [
+      scene(1, "Out back the loudest bird in the yard is the Carolina wren and"),
+      scene(2, intro),
+      item(3, "teakettle,", "a wren with its beak wide open on the fence post"),
+      item(4, "teakettle,", "a wren with its beak wide open on the fence post"),
+      item(5, "teakettle.", "a wren with its beak wide open on the fence post"),
+      scene(6, "If you hear that by the feeder you know who it is and you can stop looking for it."),
+    ];
+    const words = [
+      ...spoken("Out back the loudest bird in the yard is the Carolina wren and", 0),
+      ...spoken(intro, 4.2),
+      ...spoken("teakettle.", 8.1),
+      ...spoken("If you hear that by the feeder you know who it is and you can stop looking for it.", 9.4),
+    ];
+    // The aligner as it is: two of the three items get no time at all.
+    assignSceneRanges(scenes, words, 15, [], []);
+    expect(scenes.filter(s => (s.audioDuration ?? 0) <= UNSEEN_BEAT_SEC)).toHaveLength(2);
+    const r = foldUnseenBeats(scenes, s => s.audioDuration);
+    expect(r.joined).toBe(2);
+    expect(r.unplaced).toEqual([]);
+    assignSceneRanges(r.scenes, words, 15, [], []);
+    const one = r.scenes.find(s => /teakettle/.test(s.scriptText ?? ""));
+    expect(one?.scriptText).toBe("teakettle, teakettle, teakettle.");
+    expect(one?.listCut).toBe(true);
+    expect(one?.audioDuration).toBeCloseTo(1.3, 1);
+    expect(r.scenes.every(s => (s.audioDuration ?? 0) > UNSEEN_BEAT_SEC)).toBe(true);
+    expect(r.scenes.map(s => s.index)).toEqual([1, 2, 3, 4]);
+  });
+
+  it("production job 215 #191/#192: the unseen 'piano,' joins the same words before it, not the next item", () => {
+    const scenes = [
+      item(190, "a violin,", "a violin"),
+      { ...item(191, "piano,", "an upright piano"), audioDuration: 0.054 },
+      { ...item(192, "piano,", "an upright piano"), audioDuration: 0 },
+      { ...item(193, "and a cello.", "a cello"), audioDuration: 0.9 },
+    ];
+    scenes[0].audioDuration = 0.6;
+    const r = foldUnseenBeats(scenes, s => s.audioDuration);
+    expect(r.scenes.map(s => [s.scriptText, s.showSubject, s.audioDuration])).toEqual([
+      ["a violin,", "a violin", 0.6],
+      ["piano, piano,", "an upright piano", 0.054],
+      ["and a cello.", "a cello", 0.9],
+    ]);
+  });
+
+  it("only a MEASURED zero: a short beat, or one not measured yet, is left to the other folds", () => {
+    const scenes = [
+      { ...scene(1, "The first coat goes on thin,"), audioDuration: 2 },
+      { ...scene(2, "slowly,"), audioDuration: 0.05 },
+      { ...scene(3, "and then"), audioDuration: undefined },
+      { ...scene(4, "the second coat goes on after an hour."), audioDuration: 3 },
+    ];
+    const r = foldUnseenBeats(scenes, s => s.audioDuration);
     expect(r.changed).toBe(false);
+    expect(r.scenes).toHaveLength(4);
+  });
+
+  it("a QR, cover or asset beat is never folded, and nothing is folded INTO one or the release beat", () => {
+    const qr = { ...scene(2, "Scan the code on your screen now."), qrHero: true, cta: true, ctaIndex: 0, audioDuration: 0 };
+    const kept = foldUnseenBeats(
+      [{ ...scene(1, "Here is the guide."), cta: true, ctaIndex: 0, audioDuration: 4 }, qr],
+      s => s.audioDuration
+    );
+    expect(kept.changed).toBe(false);
+    expect(kept.unplaced).toEqual([qr]);
+    // A closing word after the scan window: the QR beat holds the block's release words.
+    const after = { ...scene(3, "Goodnight."), audioDuration: 0 };
+    const closing = foldUnseenBeats(
+      [{ ...scene(1, "Scan it, the guide is yours."), qrHero: true, qrTail: true, cta: true, ctaIndex: 0, audioDuration: 6 }, after],
+      s => s.audioDuration
+    );
+    expect(closing.changed).toBe(false);
+    expect(closing.unplaced).toEqual([after]);
+    // Never across a CTA edge either: the picture after it takes the words instead.
+    const edge = foldUnseenBeats(
+      [
+        { ...scene(1, "Now the guide itself."), hostPresent: true, cta: true, ctaIndex: 0, audioDuration: 3 },
+        { ...scene(2, "Anyway,"), audioDuration: 0 },
+        { ...scene(3, "back to the porch light."), audioDuration: 3 },
+      ],
+      s => s.audioDuration
+    );
+    expect(edge.scenes.map(s => s.scriptText)).toEqual(["Now the guide itself.", "Anyway, back to the porch light."]);
+  });
+
+  it("an unseen host beat's roles stay with the host take that takes its words", () => {
+    const r = foldUnseenBeats(
+      [
+        { ...scene(1, "Hello there, friends."), hostPresent: true, hostOpener: true, audioDuration: 3 },
+        { ...scene(2, "I'm the host."), hostPresent: true, hostIntro: true, hostProtected: true, audioDuration: 0 },
+        { ...scene(3, "a porch light on a timer"), audioDuration: 3 },
+      ],
+      s => s.audioDuration
+    );
+    expect(r.scenes).toHaveLength(2);
+    expect(r.scenes[0]).toMatchObject({ scriptText: "Hello there, friends. I'm the host.", hostIntro: true, hostProtected: true });
+  });
+
+  it("production job 200 #184: 'So tonight,' between two items leads into the next item, which keeps its picture", () => {
+    const scenes = [
+      { ...item(183, "check the lock on the back window,", "a window latch"), audioDuration: 2.1 },
+      { ...scene(184, "So tonight,", { wordCut: true, showSubject: "a dark porch" }), audioDuration: 0.8 },
+      { ...item(185, "walk over to that front door,", "a front door from the hallway"), audioDuration: 1.6 },
+      { ...item(186, "and test the deadbolt.", "a deadbolt"), audioDuration: 1.4 },
+    ];
+    const r = foldSnappedFlashes(scenes, s => s.audioDuration ?? 0);
+    expect(r.scenes.map(s => [s.scriptText, s.showSubject, !!s.listCut])).toEqual([
+      ["check the lock on the back window,", "a window latch", true],
+      ["So tonight, walk over to that front door,", "a front door from the hallway", true],
+      ["and test the deadbolt.", "a deadbolt", true],
+    ]);
+  });
+
+  it("a lead-in at its floor, before a list, or across a CTA edge is not led into an item", () => {
+    const lead = (over: Partial<StoryboardScene>, sec: number) =>
+      ({ ...scene(2, "So tonight,", { wordCut: true, showSubject: "a dark porch" }), audioDuration: sec, ...over }) as StoryboardScene;
+    const items = (l: StoryboardScene) => [
+      { ...item(1, "check the back window,", "a latch"), audioDuration: 2 },
+      l,
+      { ...item(3, "walk to the front door,", "a door"), audioDuration: 2 },
+    ];
+    // At its floor: left alone.
+    expect(foldSnappedFlashes(items(lead({}, 1.3)), s => s.audioDuration ?? 0).changed).toBe(false);
+    // Inside a CTA block while the items are not: left alone.
+    expect(foldSnappedFlashes(items(lead({ cta: true, ctaIndex: 0 }, 0.8)), s => s.audioDuration ?? 0).changed).toBe(false);
+    expect(leadInBetweenItems(items(lead({}, 0.8)), 1)).toBe(true);
+    // Before a list's first item it still joins the picture before it (Dale's job 293).
+    const before = [
+      { ...scene(1, "The place just wasn't built for that piece.", { wordCut: true, shotGroup: 2 }), audioDuration: 4 },
+      { ...scene(2, "Today I'm ranking", { wordCut: true, shotGroup: 4 }), audioDuration: 1 },
+      { ...item(3, "Etsy,", "a shop page"), audioDuration: 0.4 },
+      { ...item(4, "craft fairs,", "a fair"), audioDuration: 0.8 },
+    ];
+    expect(leadInBetweenItems(before, 1)).toBe(false);
+    const r = foldSnappedFlashes(before, s => s.audioDuration ?? 0);
+    expect(r.scenes.map(s => s.scriptText)).toEqual([
+      "The place just wasn't built for that piece. Today I'm ranking",
+      "Etsy,",
+      "craft fairs,",
+    ]);
   });
 });

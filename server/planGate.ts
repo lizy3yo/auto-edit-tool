@@ -9,7 +9,7 @@
  *  7. Clean host switches             — host takes start on a sentence (never after a comma; a take
  *                                       that does takes its sentence back, `finishSentenceBeforeHost`)
  *                                       and end on one (or hand over at a shot-list break); no flash
- *                                       shots.
+ *                                       shots, and no beat the voice gives no time at all.
  *  8. Host often                      — ≤40 s without the host in the first 3 min, ≤75 s after.
  *  9. Pictures don't linger           — a picture outside the CTA runs ≤6.5 s.
  * 11. Real video                      — 10-25% of cutaway time moves.
@@ -47,6 +47,10 @@ import {
   settleVideoKind,
   videoKind,
   mergeable,
+  leadInBetweenItems,
+  rangeSec,
+  unseenFoldTarget,
+  UNSEEN_BEAT_SEC,
 } from "./shotList";
 
 export type PlanFinding = { rule: number; scene?: number; detail: string };
@@ -143,6 +147,18 @@ export function checkPlan(
   // 7. Clean host switches, no flash shots.
   let midTakes = 0;
   scenes.forEach((s, i) => {
+    // A beat the voice gives no time at all is not "unmeasured": it plays as one frame of a picture
+    // that was paid for (production job 236 #79-#81, three "teakettle," items at 0.000 s). `len`
+    // reads a zero range as missing, so the range itself is asked here.
+    const measured = rangeSec(s);
+    if (measured != null && measured <= UNSEEN_BEAT_SEC) {
+      findings.push({
+        rule: 7,
+        scene: s.index,
+        detail: `unseen beat (${Math.max(0, measured).toFixed(2)}s, no narration under it): "${textOf(s).slice(0, 70)}"`,
+      });
+      return;
+    }
     const flash = s.listCut ? LIST_SHOT_MIN_SEC : s.wordCut ? SHOT_MIN_SEC : FLASH_SHOT_SEC;
     // The final snap onto real pauses moves a cut by up to ~0.2 s after the shot list measured it.
     if (len(s) > 0 && len(s) < flash - 0.2)
@@ -1099,6 +1115,29 @@ export function enforcePlanRules(
         scenes = mergeInto(scenes, host, host + 1);
       }
       if (n > 0) did = `picture blink at scene ${s.index} given back to the host (${n} picture(s))`;
+    } else if (f.rule === 7 && s && i >= 0 && /^unseen beat/.test(f.detail)) {
+      // Its words join a neighbour (the same words first), which keeps its own picture, list mark
+      // and roles; a QR, cover or asset beat is never folded and stays named on the job.
+      const into = unseenFoldTarget(scenes, i);
+      if (into >= 0) {
+        const keep = scenes[into];
+        const was = {
+          listCut: keep.listCut,
+          start: keep.narrationStartSec,
+          end: keep.narrationEndSec,
+          audioUrl: keep.audioUrl,
+        };
+        const host = !!keep.hostPresent;
+        const roles = { intro: host && !!s.hostIntro, anchor: host && !!s.hostProtected };
+        scenes = mergeInto(scenes, into, i);
+        keep.listCut = was.listCut;
+        if (roles.intro) keep.hostIntro = true;
+        if (roles.anchor) keep.hostProtected = true;
+        // Nothing was said in the unseen beat: a range that did not move keeps its slice.
+        if (keep.narrationStartSec === was.start && keep.narrationEndSec === was.end)
+          keep.audioUrl = was.audioUrl;
+        did = `unseen beat at scene ${s.index} joined scene ${keep.index}`;
+      }
     } else if (f.rule === 7 && s && i >= 0) {
       const protectedHost = isProtectedHost(scenes, i, opts.sectionSec ?? 0);
       const prev = scenes[i - 1];
@@ -1154,6 +1193,17 @@ export function enforcePlanRules(
         if (into >= 0) {
           scenes = mergeInto(scenes, into, i);
           did = `flash shot at scene ${s.index} joined the shot beside it`;
+        } else if (
+          leadInBetweenItems(scenes, i) &&
+          plainPicture(s) &&
+          plainPicture(next) &&
+          sameRegister(s, next)
+        ) {
+          // A lead-in between two list items ("So tonight," — production job 200 #184) leads into
+          // the item after it, which keeps its own picture and its list mark.
+          scenes = mergeInto(scenes, i + 1, i);
+          next.listCut = true;
+          did = `lead-in at scene ${s.index} joined the list item after it`;
         }
       }
     } else if (f.rule === 9 && s && i >= 0) {
