@@ -2088,3 +2088,58 @@ describe("a picture that already has a view, split in two, never says that view 
     expect(parts.map(p => p.showSubject)).toEqual([BOARD, `${BOARD}${OTHER_VIEWS[0]}`]);
   });
 });
+
+describe("a picture drawn from the one right before it is a new photo, not that one again (job 399 scenes 16-17)", () => {
+  // "a small plastic cup barely filled with ginger ale on a tray table" came back as the picture just
+  // shown — the same hands tipping the same can into the same cup — with only the background new, and
+  // the same-thing check let it through as a new view.
+  const LINE_16 =
+    "airlines, the flight attendant pours your soda into a plastic cup packed with ice, fills it about halfway, and the rest of the can rolls off down the aisle on the cart.";
+  const LINE_17 =
+    "I figured that out much too late, after more flights than I care to count spent nursing a thimble of ginger ale. So when the cart reaches your row, speak up.";
+  const pouring = () =>
+    pic(16, LINE_16, "hands pouring soda into an ice-filled plastic cup at the cart", { keyThing: "plastic cup", humanPresent: true });
+  const thimble = () =>
+    pic(17, LINE_17, "a small plastic cup barely filled with ginger ale on a tray table", { keyThing: "plastic cup", humanPresent: true });
+
+  it("399-17: told the picture right before lends only the cup's look — another camera, framing and pose", async () => {
+    const { rightBeforeToRecompose } = await import("./pictureMemory");
+    const board = [pouring(), thimble()];
+    expect(rightBeforeToRecompose(board, board[1])).toBe(board[0]);
+    const clause = memoryClause({
+      ...board[1],
+      memoryRefUrls: ["https://r2/still-src-16.png"],
+      memoryView: "a close view of one part of it, filling most of the frame",
+      memoryRightBefore: 0,
+    });
+    expect(clause).toMatch(/RIGHT BEFORE this one in the video, and it is about something else/);
+    expect(clause).toMatch(/take ONLY how the plastic cup looks from it/);
+    expect(clause).toMatch(/never the same pose, the same hands or the same things at the same angles/);
+  });
+
+  it("399-17: a copy that survives its redraw is drawn from words with the cup's written look", async () => {
+    const { sameThingMove } = await import("./pictureMemory");
+    const { memoryToWords } = await import("./longformVideo");
+    const copy = { same: true, copy: true };
+    expect(sameThingMove(copy, undefined)).toBe("redraw");
+    expect(sameThingMove(copy, "copy")).toBe("words");
+    const LOOK = "clear hard plastic, filled with ice cubes, half-filled with soda, no markings";
+    const words = memoryToWords({ ...thimble(), memoryRefUrls: ["https://r2/still-src-16.png"], memoryWordsLook: LOOK });
+    expect(words).toMatchObject({ memoryRefUrls: undefined, keyThingLook: LOOK });
+    expect(buildStillPrompt({ ...thimble(), ...words })).toContain(`HOW THE PLASTIC CUP LOOKS in every picture of this video: ${LOOK}`);
+  });
+
+  it("399-20/21 and a far memory are untouched: a continuation keeps its view, scene 22 its ordinary memory", async () => {
+    const { rightBeforeToRecompose } = await import("./pictureMemory");
+    const BAG = "several closed small liquor bottles tucked inside an open carry-on bag on a seat";
+    const pair = [pic(20, "n", BAG, { keyThing: "small liquor bottle" }), pic(21, "n", `${BAG}, a close-up`, { keyThing: "small liquor bottle" })];
+    expect(rightBeforeToRecompose(pair, pair[1])).toBeUndefined();
+    const far = [
+      pic(5, "and a second bag of pretzels", "a second pretzel bag held in a passenger's hand", { keyThing: "pretzel basket" }),
+      pair[1],
+      pic(22, "n", "the pretzel basket sitting on the beverage cart in the cabin aisle", { keyThing: "pretzel basket" }),
+    ];
+    expect(memorySourcesFor(far, far[2])).toEqual([far[0]]);
+    expect(rightBeforeToRecompose(far, far[2])).toBeUndefined();
+  });
+});

@@ -63,6 +63,7 @@ import {
   memoryFor,
   memoryView,
   pictureSettled,
+  sameThingMove,
   SCREEN_ITEM_VIEW,
   SET_ITEM_VIEW,
 } from "./pictureMemory";
@@ -7109,19 +7110,75 @@ export const DESCRIBED_SCREEN_CLAUSE =
 /**
  * The fields a picture's memory sets at render (`memoryFor`): its reference pictures and camera
  * position; whether those show only the OTHER key things in it; and, when none is a picture of its
- * own thing, the look it is drawn by instead (`keyThingLookClause`). Pure.
+ * own thing, the look it is drawn by instead (`keyThingLookClause`); which of them was shown right
+ * before it, about something else (`memoryRightBefore`); and the look kept for a redraw from words
+ * (`memoryWordsLook`). Pure.
  */
 export function memoryFields(
-  memory: { urls: string[]; own: boolean; look?: string },
+  memory: { urls: string[]; own: boolean; look?: string; wordsLook?: string; before?: number },
   view: string | undefined
-): Pick<StoryboardScene, "memoryRefUrls" | "memoryView" | "memoryOthersOnly" | "keyThingLook"> {
+): Pick<
+  StoryboardScene,
+  "memoryRefUrls" | "memoryView" | "memoryOthersOnly" | "keyThingLook" | "memoryRightBefore" | "memoryWordsLook"
+> {
   const has = memory.urls.length > 0;
   return {
     memoryRefUrls: has ? memory.urls : undefined,
     memoryView: has ? view : undefined,
     memoryOthersOnly: has && !memory.own ? true : undefined,
     keyThingLook: memory.own ? undefined : memory.look,
+    memoryRightBefore:
+      has && memory.before != null && memory.before >= 0 && memory.before < memory.urls.length
+        ? memory.before
+        : undefined,
+    memoryWordsLook: has && memory.own ? memory.wordsLook : undefined,
   };
+}
+
+/**
+ * The memory picture the same-thing check lays beside a new one: the picture shown right before it
+ * when that is one of its references (`memoryRightBefore`) — the copy a viewer would see is a copy
+ * of THAT picture — else its first reference, the thing's memory. Pure.
+ */
+export function sameThingReference(scene: StoryboardScene): string | undefined {
+  const refs = scene.memoryRefUrls ?? [];
+  return refs[scene.memoryRightBefore ?? 0] ?? refs[0];
+}
+
+/**
+ * A MEMORY PICTURE THAT COPIES TWICE IS DRAWN FROM WORDS (2026-10-18, job 399 scene 17: the same
+ * hands, can and cup as scene 16, only the background new — the same-thing check's one redraw was
+ * kept whatever it came back as). The fields that make it a picture drawn from words: no reference
+ * pictures, no memory camera position, and its key thing's written look in their place
+ * (`keyThingLookClause`) — so the thing still looks like the one before, without the picture.
+ * Without a written look it is drawn from its own words alone. Pure.
+ */
+export function memoryToWords(
+  scene: StoryboardScene
+): Pick<
+  StoryboardScene,
+  "memoryRefUrls" | "memoryView" | "memoryOthersOnly" | "keyThingLook" | "memoryRightBefore" | "memoryWordsLook"
+> {
+  return {
+    memoryRefUrls: undefined,
+    memoryView: undefined,
+    memoryOthersOnly: undefined,
+    keyThingLook: scene.memoryWordsLook ?? scene.keyThingLook,
+    memoryRightBefore: undefined,
+    memoryWordsLook: undefined,
+  };
+}
+
+/**
+ * The prompt of a picture switched to words (`memoryToWords`): its memory clause, exactly as it was
+ * written into `prompt`, swapped for its key thing's look clause, so every clause a redraw added
+ * (soft print, things at rest, a stated detail) stays. Undefined when the clause is not in the
+ * prompt as written (a blurred-print rewrite reworded it) — the caller then builds the prompt again.
+ * Pure.
+ */
+export function promptFromWords(prompt: string, memory: string, look: string): string | undefined {
+  if (!memory || !prompt.includes(memory)) return undefined;
+  return prompt.replace(memory, () => look);
 }
 
 /**
@@ -7171,9 +7228,48 @@ function carryPanelFlaws(host: StoryboardScene, flaws: string[] | undefined): vo
 /**
  * PICTURE MEMORY: a picture of a key thing drawn from the earlier pictures of it
  * (`server/pictureMemory.ts`) is told what those reference images are — the SAME thing, seen from
- * another spot — and, when the host is in the shot, that the last reference is the host.
+ * another spot — and, when the host is in the shot, that the last reference is the host. When one
+ * of them is the picture shown right before it, about something else, it is told that picture lends
+ * only the thing's look (`rightBeforeClause`).
  */
 export function memoryClause(scene: StoryboardScene): string {
+  const clause = memoryReferenceClause(scene);
+  return clause ? `${clause}${rightBeforeClause(scene)}` : "";
+}
+
+/** Names in a sentence: "a", "a and b", "a, b and c". */
+const namesInSentence = (names: string[]) =>
+  names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names[0] ?? "";
+
+/**
+ * THE PICTURE RIGHT BEFORE LENDS ONLY THE LOOK (`memoryRightBefore`, `rightBeforeToRecompose`): job
+ * 399 scene 17 ("a small plastic cup barely filled with ginger ale on a tray table") was drawn from
+ * scene 16 ("hands pouring soda into an ice-filled plastic cup at the cart"), told only to draw the
+ * same cup from another camera position, and came back as scene 16 — the same hands tipping the same
+ * can into the same cup — on a new background. A picture the viewer has just seen is a reference for
+ * how the thing looks and nothing else: another camera, framing and arrangement, and this picture's
+ * own subject filling the frame. Empty for any other picture. Pure.
+ */
+export function rightBeforeClause(scene: StoryboardScene): string {
+  const n = scene.memoryRefUrls?.length ?? 0;
+  const p = scene.memoryRightBefore;
+  if (!n || p == null || p < 0 || p >= n || !scene.keyThing) return "";
+  if (scene.memoryView === SCREEN_ITEM_VIEW || scene.memoryView === SET_ITEM_VIEW) return "";
+  const names = scene.memoryOthersOnly
+    ? scene.otherKeyThings ?? []
+    : [scene.partOf ?? scene.keyThing, ...(scene.otherKeyThings ?? [])];
+  if (!names.length) return "";
+  const which = n === 1 ? "The first reference image" : `Reference image ${p + 1}`;
+  return (
+    ` ${which} is the picture shown RIGHT BEFORE this one in the video, and it is about something ` +
+    `else: take ONLY how the ${namesInSentence(names)} ${names.length > 1 ? "look" : "looks"} from it, ` +
+    `never the picture itself. This is a clearly different photo — another camera position, distance ` +
+    `and framing; never the same pose, the same hands or the same things at the same angles in the ` +
+    `same places — and what THIS picture's own words are about fills the frame.`
+  );
+}
+
+function memoryReferenceClause(scene: StoryboardScene): string {
   const n = scene.memoryRefUrls?.length ?? 0;
   // A phone or laptop screen showing a key thing (`SCREEN_ITEM_VIEW`): the thing is only the photo
   // inside the listing, never the device — Dale's job 295 framed a tablet with the cutting board.
@@ -7250,6 +7346,13 @@ export function memoryClause(scene: StoryboardScene): string {
       `fabrics, colours, materials and wear as the reference.` +
       host
     );
+  // Where it is: where its memory had it — but a picture that follows the one right before it, about
+  // something else (`rightBeforeClause`), is wherever its own words put it (job 399 scene 17: the cup
+  // on a tray table, its memory the cup at the cart).
+  const place =
+    scene.memoryRightBefore != null
+      ? "in the same place unless this picture's own words put it somewhere else"
+      : "in the same place";
   // A picture of the thing BEFORE it is finished (`buildStage` material / making): its references
   // are the same or an earlier stage (`memorySourcesFor` drops anything further along), so its shape
   // and size are its own — "identical shape, size" would hold a strip being coiled into a bowl
@@ -7261,7 +7364,7 @@ export function memoryClause(scene: StoryboardScene): string {
   if (beforeFinished(scene))
     return (
       ` ${which} this exact ${thing}, at the same or an earlier point in the making than this ` +
-      `picture. Draw the SAME ${thing} — the same colours, materials and wear, in the same place — ` +
+      `picture. Draw the SAME ${thing} — the same colours, materials and wear, ${place} — ` +
       `from a different camera position than the reference; never copy the reference's ` +
       `framing.${view} What is being made is shown exactly as far along as the words say — NOT ` +
       `finished: raw pieces or partly built, with only what the words say has been done to it so ` +
@@ -7271,7 +7374,7 @@ export function memoryClause(scene: StoryboardScene): string {
     );
   return (
     ` ${which} this exact ${thing}. Draw the SAME ${thing} — identical shape, size, colours, ` +
-    `materials and wear, in the same place — from a different camera position than the reference; ` +
+    `materials and wear, ${place} — from a different camera position than the reference; ` +
     `never copy the reference's framing.${view} If the words say it is further along (being made, ` +
     `finished, changed) or that something has been done or added to it (carved, engraved, ` +
     `painted, fitted with a part), show the same piece WITH that — the reference is how it ` +
@@ -9333,9 +9436,15 @@ async function drawValidatedStill(
   // A frame that shows what its line rules out (`scene.forbids`): one fresh seed, its own budget —
   // it is asked only on the few pictures the line check marked.
   let ruledOutRerolls = 0;
-  // A picture of a key thing that came back a DIFFERENT one: one re-roll from its memory, then
-  // it is drawn from words alone (`sameThingMisses`).
-  let sameThingMisses = 0;
+  // A picture of a key thing that came back a DIFFERENT one, or a copy of its memory: one re-roll
+  // from its memory (`sameThingMove`). What the check refused the last draw for: after a different
+  // thing the redraw is kept unasked; after a copy it is asked again, and a second copy is drawn
+  // from words (`memoryToWords`).
+  let sameThingRefused: "copy" | "different" | undefined;
+  // Frames the check found copying their memory: once the picture is drawn from words, they ship only
+  // when nothing else can (`copyFallback`).
+  const copiesMemory = new WeakSet<Buffer>();
+  let copyFallback: Drawn | undefined;
   // A check that could not run is never a pass: one more picture and check (`unchecked`).
   let uncheckedRerolls = 0;
   // THE HOST IS THE HOST: a picture of the host that shows someone else is drawn again
@@ -9644,9 +9753,12 @@ async function drawValidatedStill(
         continue;
       }
       // PICTURE MEMORY: the same key thing as its memory picture, from another spot. A different
-      // one is drawn again from the memory once, then from words alone (the film never stops).
-      // SAMENESS BEATS THE ANGLE: one redraw from memory, then the memory-drawn picture is kept — a
-      // fallback drawn from words gave Frederick's job 259 a different heater and mattress.
+      // one, or a copy of the memory's framing, is drawn again from the memory once (`sameThingMove`).
+      // SAMENESS BEATS THE ANGLE: after a different thing the memory-drawn redraw is kept — a
+      // fallback drawn from words gave Frederick's job 259 a different heater and mattress. A COPY
+      // is asked again, and a second copy is drawn from words with the thing's written look
+      // (`memoryToWords`): job 399 scene 17 kept its redraw, the same hands, can and cup as the
+      // picture just before it on a new background.
       // A close-up of one part (`partOf`) is held only to not COPYING its memory: it is a different
       // view of the whole by design (the check above holds it to the part and its exact look).
       // A screen shows its item as a small photo: comparing it with the item's own picture tells
@@ -9654,7 +9766,7 @@ async function drawValidatedStill(
       if (
         scene.keyThing &&
         scene.memoryRefUrls?.length &&
-        sameThingMisses < 1 &&
+        sameThingRefused !== "different" &&
         scene.memoryView !== SCREEN_ITEM_VIEW &&
         // A remembered thing kept small beside the subject is not compared side by side: it is
         // meant to look small and placed, not to fill a frame like its memory.
@@ -9663,19 +9775,65 @@ async function drawValidatedStill(
         // thing to compare it with — a first mattress is not "a different mattress" than a heater.
         !scene.memoryOthersOnly
       ) {
-        const same = await scanSameThing(scene.memoryRefUrls[0], buffer, scene.keyThing);
-        if ((!same.same && !scene.partOf) || same.copy) {
-          sameThingMisses++;
-          flags.push(same.same ? COPIES_MEMORY : DIFFERENT_THING);
-          lastError = same.same
+        // Laid beside the picture shown right before it when that is one of its memories: the copy
+        // a viewer would see is a copy of THAT picture (`sameThingReference`).
+        const same = await scanSameThing(sameThingReference(scene)!, buffer, scene.keyThing);
+        const move = sameThingMove(same, sameThingRefused, !!scene.partOf);
+        if (move === "redraw") {
+          sameThingRefused = same.copy ? "copy" : "different";
+          flags.push(same.copy ? COPIES_MEMORY : DIFFERENT_THING);
+          lastError = same.copy
             ? `Still image copies its memory picture's framing`
             : `Still image shows a different ${scene.keyThing}`;
           offSubjectFallback ??= drawn;
+          if (same.copy) copiesMemory.add(buffer);
           console.warn(
-            `[Longform] scene ${scene.index} ${same.same ? "copies its memory picture of" : "shows a different"} ${scene.keyThing} (${same.what}) → ` +
+            `[Longform] scene ${scene.index} ${same.copy ? "copies its memory picture of" : "shows a different"} ${scene.keyThing} (${same.what}) → ` +
               "drawing it again from its memory"
           );
           continue;
+        }
+        if (move === "words") {
+          flags.push(COPIES_MEMORY);
+          copiesMemory.add(buffer);
+          // The copies stay only as the last fallback: a copy is a picture the viewer has just seen.
+          if (offSubjectFallback && copiesMemory.has(offSubjectFallback.buffer)) {
+            copyFallback ??= offSubjectFallback;
+            offSubjectFallback = undefined;
+          }
+          copyFallback ??= drawn;
+          // The memory clause as it was written into the prompt (a picture drawn with nobody in it was
+          // written without the host), swapped for the key thing's look; built again if reworded.
+          const nobodyIn = (s: StoryboardScene): StoryboardScene => ({
+            ...s,
+            humanPresent: false,
+            brollHostLook: undefined,
+            brollHostRef: undefined,
+            hostFaceShown: undefined,
+          });
+          const memory = memoryClause(personFree ? nobodyIn(scene) : scene);
+          Object.assign(scene, memoryToWords(scene));
+          const look = visualOverride ? "" : scrubLegibleWriting(keyThingLookClause(scene));
+          prompt =
+            promptFromWords(prompt, memory, look) ??
+            (personFree
+              ? `${buildStillPrompt(nobodyIn(scene), false, visualOverride, subject, square)} ${PERSON_FREE_FALLBACK}`
+              : buildStillPrompt(scene, false, visualOverride, subject, square));
+          sameThingRefused = undefined;
+          lastError = `Still image copies its memory picture's framing again`;
+          // The copy's last chance, so it never loses its turn to the attempt budget.
+          if (attempt === attempts) attempts++;
+          console.warn(
+            `[Longform] scene ${scene.index} copies its memory picture of ${scene.keyThing} again (${same.what}) → ` +
+              "drawing it from words with its look"
+          );
+          continue;
+        }
+        if (move === "flag") {
+          // The redraw after a copy came back a different one: kept, like any redraw after a
+          // different thing, but the check's answer is on the record.
+          flags.push(DIFFERENT_THING);
+          sameThingRefused = "different";
         }
       }
       // THE HOST IS THE HOST (2026-10-15, the review: Scarlett's routine pictures showed "a
@@ -9781,6 +9939,16 @@ async function drawValidatedStill(
         `${attempts} attempts → shipping the closest frame`
     );
     return shipped(offSubjectFallback);
+  }
+  // A frame that copies its memory, kept only when its redraw from words found nothing better: a
+  // clean frame of the right thing, shown twice, still reads truer than stamped text or broken
+  // geometry.
+  if (copyFallback) {
+    console.warn(
+      `[Longform] scene ${scene.index} still was never drawn apart from its memory picture after ` +
+        `${attempts} attempts → shipping the copy`
+    );
+    return shipped(copyFallback);
   }
   if (textyFallback) {
     console.warn(

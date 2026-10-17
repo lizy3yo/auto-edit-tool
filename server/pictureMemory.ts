@@ -14,7 +14,7 @@
  */
 import { PART_VIEW } from "./namedLooks";
 import type { KeyThing, StoryboardScene } from "@shared/types";
-import { BUILD_STAGES, keyThingsIn, showsScreen } from "./shotList";
+import { BUILD_STAGES, keyThingsIn, nearlySameSubject, sameSubject, showsScreen } from "./shotList";
 
 /** The longest a picture waits for its memory before it is drawn from words alone. */
 export const MEMORY_WAIT_MS = 8 * 60_000;
@@ -91,6 +91,67 @@ export function memorySourcesFor(
   // Every other key thing in it: that thing's memory (the heater beside the mattress).
   for (const t of s.otherKeyThings ?? []) add(memoryOf(before.filter(x => shows(x, t)), t));
   return out;
+}
+
+/** The words a picture is drawn by: a split's panel description, else its own. */
+const pictureWords = (s: StoryboardScene) =>
+  s.hostPresent ? s.splitVisual ?? "" : s.showSubject ?? s.visualPrompt ?? "";
+
+/**
+ * THE PICTURE RIGHT BEFORE IS A MEMORY, NEVER A TEMPLATE (2026-10-18, job 399 scenes 16-17): "hands
+ * pouring soda into an ice-filled plastic cup at the cart" was the memory of the next picture, "a
+ * small plastic cup barely filled with ginger ale on a tray table". Handed the picture just shown, the
+ * picture maker came back with the same hands tipping the same can into the same cup at the same
+ * angle — only the background changed, one picture for 27 s. Told "the same cup, from another spot",
+ * it kept everything but the spot. So when the picture shown right before `s` is one of `s`'s memory
+ * pictures and is about something else, `s` is told to take only the thing's look from it
+ * (`rightBeforeClause`), and the same-thing check compares `s` with THAT picture.
+ *
+ * Returns that picture, or undefined: when the picture before is not one of its memories, when `s`
+ * continues it (`sameShot`, or the same or nearly the same words — a continuation has its own view,
+ * `joinSameContext`), and for a list item drawn from its list's group picture or a screen, whose
+ * framing is set apart already (`SET_ITEM_VIEW`, `SCREEN_ITEM_VIEW`). Pure.
+ */
+export function rightBeforeToRecompose(
+  scenes: StoryboardScene[],
+  s: StoryboardScene,
+  sources: StoryboardScene[] = memorySourcesFor(scenes, s)
+): StoryboardScene | undefined {
+  const i = scenes.indexOf(s);
+  if (i <= 0 || s.sameShot || listSetFor(scenes, s) || isScreen(s)) return undefined;
+  const before = scenes[i - 1];
+  if (!sources.includes(before)) return undefined;
+  const [a, b] = [pictureWords(before), pictureWords(s)];
+  if (!a.trim() || !b.trim() || sameSubject(a, b) || nearlySameSubject(a, b)) return undefined;
+  return before;
+}
+
+/** What the still loop does with the same-thing check's answer on a memory picture (`sameThingMove`). */
+export type SameThingMove = "pass" | "redraw" | "words" | "flag";
+
+/**
+ * WHAT THE SAME-THING CHECK'S ANSWER DOES (`scanSameThing`). `before`: what it refused the draw
+ * before this one for, if anything.
+ * - The first answer: a different thing, or a copy of the reference's framing → "redraw" from memory.
+ * - After a DIFFERENT thing it is not asked again (the caller skips it): SAMENESS BEATS THE ANGLE —
+ *   the one redraw from memory is kept, since a fallback drawn from words gave Frederick's job 259 a
+ *   different heater and mattress.
+ * - After a COPY, still a copy → "words": a copy repeats a picture the viewer has just seen, so it is
+ *   drawn from words with the thing's written look rather than kept (job 399 scene 17). Now a
+ *   different thing → "flag": kept, as before, but on the record — the check said so.
+ * A close-up of one part (`partOf`) is a different view of the whole by design: only a copy counts.
+ * Pure.
+ */
+export function sameThingMove(
+  verdict: { same: boolean; copy: boolean },
+  before: "copy" | "different" | undefined,
+  partOf = false
+): SameThingMove {
+  if (before === "different") return "pass";
+  const different = !verdict.same && !partOf;
+  if (verdict.copy) return before === "copy" ? "words" : "redraw";
+  if (different) return before === "copy" ? "flag" : "redraw";
+  return "pass";
 }
 
 /**
@@ -576,6 +637,8 @@ const viewOf = new WeakMap<StoryboardScene, string | undefined>();
 const ownSourcesOf = new WeakMap<StoryboardScene, StoryboardScene[]>();
 /** The look a scene is drawn by when no picture of its own thing comes (`keyThingLookFor`). */
 const lookOf = new WeakMap<StoryboardScene, string | undefined>();
+/** Of `sourcesOf`, the picture shown right before the scene, about something else (`rightBeforeToRecompose`). */
+const rightBeforeOf = new WeakMap<StoryboardScene, StoryboardScene | undefined>();
 /** Pictures a later picture is drawn from for their OWN key thing (`copiedLater`). */
 const copied = new WeakSet<StoryboardScene>();
 /** Scenes whose picture is being made in the current pass — only those are worth waiting for. */
@@ -616,6 +679,7 @@ export function attachMemory(
     ownSourcesOf.set(s, sources.filter(x => x === set || (!!s.keyThing && shows(x, s.keyThing))));
     viewOf.set(s, memoryViewFor(board, s));
     lookOf.set(s, keyThingLookFor(s, keyThings, makes));
+    rightBeforeOf.set(s, rightBeforeToRecompose(board, s, sources));
     copied.delete(s);
   }
   // A picture is COPIED when a later picture is drawn from it for the thing it is itself about — not
@@ -672,15 +736,20 @@ export function pictureSettled(s: StoryboardScene): void {
  * pass. A memory that never came is skipped — the picture is then drawn from words, as before — and
  * so is one whose own check said its thing is not in it (`memoryUnfit`, set when it settled in this
  * same pass). `own` says whether any of them is a picture of `s`'s own thing; when none is, `look`
- * is the look it is drawn by instead (`keyThingLookFor`).
+ * is the look it is drawn by instead (`keyThingLookFor`). When one is, `wordsLook` is that same look,
+ * kept for a redraw from words should the picture copy its memory (`memoryToWords`). `before` is
+ * where in `urls` the picture shown right before `s` is, when it is about something else
+ * (`rightBeforeToRecompose`).
  */
 export async function memoryFor(
   s: StoryboardScene,
   timeoutMs = MEMORY_WAIT_MS
-): Promise<{ urls: string[]; own: boolean; look?: string }> {
+): Promise<{ urls: string[]; own: boolean; look?: string; wordsLook?: string; before?: number }> {
   const urls: string[] = [];
   const mine = ownSourcesOf.get(s) ?? [];
+  const prev = rightBeforeOf.get(s);
   let own = false;
+  let before: number | undefined;
   for (const src of sourcesOf.get(s) ?? []) {
     if (!src.pictureUrl && pending.has(src)) {
       let timer: ReturnType<typeof setTimeout> | undefined;
@@ -693,8 +762,10 @@ export async function memoryFor(
     if (!src.pictureUrl || src.memoryUnfit || urls.includes(src.pictureUrl)) continue;
     urls.push(src.pictureUrl);
     if (mine.includes(src)) own = true;
+    if (src === prev) before = urls.length - 1;
   }
-  return { urls, own, look: own ? undefined : lookOf.get(s) };
+  const look = lookOf.get(s);
+  return { urls, own, look: own ? undefined : look, wordsLook: own ? look : undefined, before };
 }
 
 /** The pictures `s` is drawn from (`memoryFor`). */

@@ -751,6 +751,12 @@ export async function scanSameHost(
   }
 }
 
+/**
+ * A new background is not a new view (2026-10-18, job 399 scenes 16-17): the cup on a tray table came
+ * back as the cup at the cart — the same hands tipping the same can into it at the same angle, the
+ * name bar and pin in the same places — and passed as "not a copy" because the room behind it was
+ * another one. `copy` now names that case.
+ */
 export const SAME_THING_SYSTEM =
   "You compare two photos. LEFT: an earlier photo of a thing. RIGHT: a new photo that must show " +
   "the SAME thing — the very same object, not just the same kind — usually from another spot, " +
@@ -758,7 +764,9 @@ export const SAME_THING_SYSTEM =
   "crop or light is fine, and so is the piece being further along. What is NOT fine: a different " +
   "shape, colour, material, size or design, or a different object of the same kind.\n" +
   "copy: true when the RIGHT photo is taken from nearly the same spot, distance and framing as the " +
-  "LEFT — a near-copy of it rather than a new view.\n" +
+  "LEFT — a near-copy of it rather than a new view. A new background or setting alone does NOT make " +
+  "a new view: the same pose, the same hands and the same things at the same angles and in the same " +
+  "places in the frame, with only what is behind them changed, is a copy.\n" +
   'Return ONLY JSON: {"same":true|false,"copy":true|false,"what":"<what differs, a few words, or empty>"}';
 
 /** Decide from the model's answer; anything unreadable passes (a check never costs a render). Pure. */

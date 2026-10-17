@@ -10041,9 +10041,13 @@ describe("a picture that ships with a fault says so, and two faults get one chan
     expect(out.buffer.equals(b)).toBe(true);
     expect(out.flaws).toBeUndefined();
     expect(s1.pictureChecks.map((c: any) => c.flags)).toEqual([["different thing"], []]);
+    // Sameness beats the angle: the redraw after a different thing is kept without asking again.
+    expect(mockScanSameThing).toHaveBeenCalledTimes(1);
 
     mockScanSameThing.mockReset();
-    mockScanSameThing.mockResolvedValueOnce({ same: true, copy: true, what: "same framing" });
+    mockScanSameThing
+      .mockResolvedValueOnce({ same: true, copy: true, what: "same framing" })
+      .mockResolvedValueOnce({ same: true, copy: false, what: "" });
     const s2 = vise();
     await generateValidatedStill(s2, 4, undefined, drawsOf(a, b));
     expect(s2.pictureChecks[0].flags).toEqual(["copies its memory"]);
@@ -10079,6 +10083,136 @@ describe("a picture that ships with a fault says so, and two faults get one chan
     } finally {
       delete process.env.FAULT_REDRAWS;
     }
+  });
+});
+
+describe("a memory picture that copies its memory twice is drawn from words (job 399 scenes 16-17)", () => {
+  const pngOf = (bg: string) =>
+    sharp({ create: { width: 8, height: 8, channels: 3, background: bg } }).png().toBuffer();
+  const drawsOf = (...frames: Buffer[]) => {
+    const fn = vi.fn();
+    for (const f of frames) fn.mockResolvedValueOnce({ success: true, fileData: f });
+    return fn;
+  };
+  afterEach(() => {
+    mockScanSameThing.mockReset();
+    mockScanSameThing.mockResolvedValue({ same: true, copy: false, what: "" });
+  });
+
+  // Job 399's props-list look for the cup, and scene 17 as it was drawn: from scene 16's picture.
+  const CUP_LOOK = "clear hard plastic, filled with ice cubes, half-filled with soda, no markings";
+  const SCENE_16 = "https://r2/longform/399/still-src-16.png";
+  const HOST = "https://r2/host.jpg";
+  const cup = () =>
+    ({
+      index: 17,
+      scriptText:
+        "I figured that out much too late, after more flights than I care to count spent nursing a thimble of ginger ale.",
+      showSubject: "a small plastic cup barely filled with ginger ale on a tray table",
+      visualPrompt: "A plastic cup half-filled with ginger ale sitting on a fold-down tray table in an aircraft seat.",
+      keyThing: "plastic cup",
+      humanPresent: true,
+      brollHostLook: "a woman in her late fifties, shoulder-length grey-blonde hair, navy uniform",
+      brollHostRef: HOST,
+      memoryRefUrls: [SCENE_16],
+      memoryView: "a close view of one part of it, filling most of the frame",
+      memoryRightBefore: 0,
+      memoryWordsLook: CUP_LOOK,
+    }) as any;
+  const copy = { same: true, copy: true, what: "the same framing" };
+
+  it("399-17: a copy, then a copy again → drawn from words with the cup's look, no reference but the host", async () => {
+    const [a, b, c] = await Promise.all([pngOf("#a11"), pngOf("#a22"), pngOf("#a33")]);
+    mockScanSameThing.mockReset();
+    mockScanSameThing.mockResolvedValueOnce(copy).mockResolvedValueOnce(copy);
+    const genImage = drawsOf(a, b, c);
+    const scene = cup();
+    const out = await generateValidatedStill(scene, 4, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(3);
+    const [c1, c2, c3] = genImage.mock.calls.map(x => x[0]);
+    expect(c1.referenceImageUrls).toEqual([SCENE_16, HOST]);
+    expect(c1.prompt).toMatch(/RIGHT BEFORE this one in the video/);
+    expect(c2.prompt).toBe(c1.prompt); // the first copy gets its same-prompt redraw from memory
+    // The third is drawn from words: the cup by its written look, the host photo only for the host.
+    expect(c3.referenceImageUrl).toBe(HOST);
+    expect(c3.referenceImageUrls).toBeUndefined();
+    expect(c3.prompt).toContain(`HOW THE PLASTIC CUP LOOKS in every picture of this video: ${CUP_LOOK}`);
+    expect(c3.prompt).not.toMatch(/reference image shows this exact plastic cup|RIGHT BEFORE/);
+    expect(out.buffer.equals(c)).toBe(true);
+    expect(out.flaws).toBeUndefined();
+    expect(scene.pictureChecks.map((x: any) => x.flags)).toEqual([["copies its memory"], ["copies its memory"], []]);
+    // Compared with the picture shown right before it, and never again once it has no reference.
+    expect(mockScanSameThing).toHaveBeenCalledTimes(2);
+    expect(mockScanSameThing.mock.calls.map(x => x[0])).toEqual([SCENE_16, SCENE_16]);
+    expect(scene.memoryRefUrls).toBeUndefined();
+    expect(scene.keyThingLook).toBe(CUP_LOOK);
+  });
+
+  it("a copy whose redraw is a new view keeps the redraw — nothing is drawn from words", async () => {
+    const [a, b] = await Promise.all([pngOf("#b11"), pngOf("#b22")]);
+    mockScanSameThing.mockReset();
+    mockScanSameThing.mockResolvedValueOnce(copy).mockResolvedValueOnce({ same: true, copy: false, what: "" });
+    const genImage = drawsOf(a, b);
+    const scene = cup();
+    const out = await generateValidatedStill(scene, 4, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(2);
+    expect(out.buffer.equals(b)).toBe(true);
+    expect(out.flaws).toBeUndefined();
+    expect(scene.memoryRefUrls).toEqual([SCENE_16]);
+    expect(scene.keyThingLook).toBeUndefined();
+  });
+
+  it("a copy whose redraw is a different cup keeps the redraw, and says so", async () => {
+    const [a, b] = await Promise.all([pngOf("#c11"), pngOf("#c22")]);
+    mockScanSameThing.mockReset();
+    mockScanSameThing.mockResolvedValueOnce(copy).mockResolvedValueOnce({ same: false, copy: false, what: "a paper cup" });
+    const genImage = drawsOf(a, b);
+    const out = await generateValidatedStill(cup(), 4, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(2);
+    expect(out.buffer.equals(b)).toBe(true);
+    expect(out.flaws).toEqual(["different thing"]);
+  });
+
+  it("a copy twice whose redraw from words never comes ships the first copy, saying so — never no picture", async () => {
+    const [a, b] = await Promise.all([pngOf("#d11"), pngOf("#d22")]);
+    mockScanSameThing.mockReset();
+    mockScanSameThing.mockResolvedValueOnce(copy).mockResolvedValueOnce(copy);
+    const genImage = drawsOf(a, b).mockResolvedValue({ success: false, error: "OpenAI image 500: oops" });
+    const out = await generateValidatedStill(cup(), 4, undefined, genImage);
+    expect(out.buffer.equals(a)).toBe(true);
+    expect(out.flaws).toEqual(["copies its memory"]);
+  });
+
+  it("a frame of the wrong subject still ships before a copy, as before", async () => {
+    const [a, b, c] = await Promise.all([pngOf("#e11"), pngOf("#e22"), pngOf("#e33")]);
+    mockScanStillDefects.mockReset();
+    mockScanStillDefects
+      .mockResolvedValueOnce({ overlay: false, broken: false, what: "", missing: true } as any)
+      .mockResolvedValue({ overlay: false, broken: false, what: "" } as any);
+    mockScanSameThing.mockReset();
+    mockScanSameThing.mockResolvedValueOnce(copy).mockResolvedValueOnce(copy);
+    const genImage = drawsOf(a, b, c).mockResolvedValue({ success: false, error: "OpenAI image 500: oops" });
+    try {
+      const out = await generateValidatedStill(cup(), 5, undefined, genImage);
+      // a: subject missing (the off-subject fallback); b and c copies; the words draw never comes.
+      expect(out.buffer.equals(a)).toBe(true);
+    } finally {
+      mockScanStillDefects.mockReset();
+      mockScanStillDefects.mockResolvedValue({ overlay: false, broken: false, what: "" } as any);
+    }
+  });
+
+  it("with no picture right before among its memories, it is compared with its first memory as before", async () => {
+    const a = await pngOf("#f11");
+    const genImage = drawsOf(a);
+    await generateValidatedStill(
+      { ...cup(), memoryRefUrls: ["https://r2/first.png", SCENE_16], memoryRightBefore: undefined },
+      4,
+      undefined,
+      genImage
+    );
+    expect(mockScanSameThing.mock.calls[0][0]).toBe("https://r2/first.png");
+    expect(genImage.mock.calls[0][0].prompt).not.toMatch(/RIGHT BEFORE/);
   });
 });
 

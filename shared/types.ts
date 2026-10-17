@@ -563,6 +563,18 @@ export interface StoryboardScene {
    */
   keyThingLook?: string;
   /**
+   * Where in `memoryRefUrls` the picture shown RIGHT BEFORE this one is, when it is one of its memory
+   * pictures and about something else (set at render, `rightBeforeToRecompose`): it lends only the
+   * thing's look, never its composition (job 399 scene 17 came back as scene 16 on a new background).
+   */
+  memoryRightBefore?: number;
+  /**
+   * Its key thing's written look, set at render only on a picture drawn FROM a picture of its own
+   * thing (where `keyThingLook` stays unset): kept for the redraw from words a picture gets when it
+   * copies its memory twice (`memoryToWords`).
+   */
+  memoryWordsLook?: string;
+  /**
    * The picture's last check said what it must show is not in it (`missing`), so no later picture is
    * drawn from it (`memorySourcesFor`): stored films had 22 first pictures copied after failing
    * their last check. Never set for a staged look or readable writing alone — the thing is there.
