@@ -152,6 +152,7 @@ import {
   extractSpokenScript,
   DEFAULT_LONGFORM_INSTRUCTION,
   generateSceneClips,
+  generateSceneStillClip,
   resumePendingRenders,
   withJobLock,
   isJobRendering,
@@ -169,6 +170,10 @@ import {
   joinScanWindow,
   voiceRunWithRetries,
   isOperatorLabelTitle,
+  asksToReadPrint,
+  blurUnsaidPrint,
+  BLURRED_PRINT_CLAUSE,
+  buildSplitRightScene,
 } from "./longformVideo";
 import { ENV } from "./_core/env";
 import { getBookNameTokens } from "./ctaDetector";
@@ -8167,6 +8172,138 @@ describe("generateSceneClips routing (HeyGen lip-sync vs grok-imagine-video)", (
     expect(sub.imageUrls).toEqual(["https://cdn.example.com/face.jpg"]);
     expect(sub.videoInputMode).toBe("ingredients");
   });
+
+  // Local job 262 scene 16 (the 2026-10-18 audit): a clip judged to move wrong was rendered again
+  // from a NEW keyframe, and its still drew a third image — the frame drawn and checked first sat
+  // unused on `pictureUrl`, which later pictures are drawn from.
+  describe("a glitch re-render and its still reuse the start frame already checked", () => {
+    const KF = "https://cdn.example.com/longform/262/broll-kf-16-0-a1b2c3.png";
+    const smoke: StoryboardScene = {
+      ...brollScene,
+      index: 16,
+      visualPrompt:
+        "main smoke alarm mounted on hallway ceiling with a thin curl of smoke rising beneath it",
+      selfMoving: true,
+      pictureUrl: KF,
+    };
+
+    it("renders the clip again from that frame — no new image is drawn", async () => {
+      const adapter = {
+        submitVideo: vi.fn().mockResolvedValue({ taskId: "vid-2" }),
+        pollVideo: vi.fn().mockResolvedValue(okVideoPoll),
+      };
+      vi.spyOn(storage, "storagePut").mockResolvedValue({
+        key: "k",
+        url: "https://cdn.example.com/asset",
+      });
+
+      await generateSceneClips(
+        adapter as any,
+        262,
+        { ...smoke },
+        baseParams,
+        null,
+        "instruction",
+        async () => {},
+        undefined,
+        true, // allow69Labs (mock adapter stands in for the APIMART one)
+        KF
+      );
+
+      expect(mockGenImage).not.toHaveBeenCalled();
+      expect(adapter.submitVideo).toHaveBeenCalledOnce();
+      expect(adapter.submitVideo.mock.calls[0][0].imageUrls).toEqual([KF]);
+    });
+
+    it("a content-policy step down still draws a softer frame", async () => {
+      mockInvoke.mockReset();
+      mockInvoke.mockRejectedValue(new Error("claude down"));
+      const adapter = {
+        submitVideo: vi
+          .fn()
+          .mockRejectedValueOnce(policyError())
+          .mockResolvedValue({ taskId: "vid-2" }),
+        pollVideo: vi.fn().mockResolvedValue(okVideoPoll),
+      };
+      vi.spyOn(storage, "storagePut").mockResolvedValue({
+        key: "k",
+        url: "https://cdn.example.com/asset",
+      });
+
+      await generateSceneClips(
+        adapter as any,
+        262,
+        { ...smoke },
+        baseParams,
+        null,
+        "instruction",
+        async () => {},
+        undefined,
+        true,
+        KF
+      );
+
+      expect(adapter.submitVideo.mock.calls[0][0].imageUrls).toEqual([KF]);
+      expect(mockGenImage).toHaveBeenCalled();
+      expect(adapter.submitVideo.mock.calls.at(-1)![0].imageUrls).toEqual([
+        "https://cdn.example.com/asset",
+      ]);
+    });
+
+    it("the still is that frame with the plain still look, not the cover's — no new image", async () => {
+      vi.spyOn(storage, "storagePut").mockResolvedValue({
+        key: "k",
+        url: "https://cdn.example.com/still.mp4",
+      });
+      const kenBurns = vi
+        .spyOn(videoAssembly, "renderKenBurnsClip")
+        .mockResolvedValue(Buffer.from("mp4"));
+      const scene: StoryboardScene = { ...smoke };
+
+      const urls = await generateSceneStillClip(
+        262,
+        scene,
+        undefined,
+        undefined,
+        undefined,
+        false,
+        null,
+        KF
+      );
+
+      expect(urls).toEqual(["https://cdn.example.com/still.mp4"]);
+      expect(mockGenImage).not.toHaveBeenCalled();
+      expect(kenBurns).toHaveBeenCalledOnce();
+      expect(kenBurns.mock.calls[0][0]).toBe(KF);
+      expect(kenBurns.mock.calls[0][1].cover).toBe(false);
+      expect(scene.pictureUrl).toBe(KF);
+      expect(scene.stillSourceUrl).toBe(KF);
+    });
+
+    it("a square split panel draws its own — the frame is 16:9", async () => {
+      vi.spyOn(storage, "storagePut").mockResolvedValue({
+        key: "k",
+        url: "https://cdn.example.com/panel.png",
+      });
+      const kenBurns = vi
+        .spyOn(videoAssembly, "renderKenBurnsClip")
+        .mockResolvedValue(Buffer.from("mp4"));
+
+      await generateSceneStillClip(
+        262,
+        { ...smoke },
+        undefined,
+        undefined,
+        undefined,
+        true,
+        null,
+        KF
+      );
+
+      expect(mockGenImage).toHaveBeenCalled();
+      expect(kenBurns.mock.calls[0][0]).toBe("https://cdn.example.com/panel.png");
+    });
+  });
 });
 
 describe("sanitizeSplitLayout (split editor position input)", () => {
@@ -10587,6 +10724,242 @@ describe("isOperatorLabelTitle — a run label is not the video's subject", () =
     expect(t("Norbert take 2")).toBe(true);
     expect(t("Ten Scrap Quilting Projects That Actually Sell")).toBe(false);
   });
+
+  it("a leading 'Practice:' label is not the subject (jobs 194-210)", () => {
+    expect(normalizeVideoSubject("Practice: Hank adapt")).toBe("");
+    expect(normalizeVideoSubject("Practice: Hannah CTA edge")).toBe("");
+    expect(normalizeVideoSubject("Practice: Ruth phone photo")).toBe("");
+    // Only as the leading label: a title that merely starts with the word stays a title.
+    expect(
+      normalizeVideoSubject("Practice Makes Perfect: Ten Drills for Cleaner Dovetails")
+    ).not.toBe("");
+  });
+
+  it("a leading '<host name>:' label is not the subject — only the channel host's own name (jobs 384-388)", () => {
+    expect(normalizeVideoSubject("Dale: final with motion graphics", "Dale Oakfield")).toBe("");
+    expect(
+      normalizeVideoSubject("Frederick: smoke alarm (graphics review)", "Frederick Barnes")
+    ).toBe("");
+    expect(normalizeVideoSubject("Mae: final with motion graphics", "Granny Mae")).toBe("");
+    expect(normalizeVideoSubject("Dale 2: the craft fair cut", "Dale Oakfield")).toBe("");
+    // Any other word before a colon is a real title's topic, whoever the host is.
+    expect(normalizeVideoSubject("Dale: final with motion graphics")).not.toBe("");
+    expect(
+      normalizeVideoSubject("Kumiko: The Japanese Art of Wood Lattice", "Hank Hardwood")
+    ).toBe("Kumiko: The Japanese Art of Wood Lattice");
+    // No free words were added: a review is still a title.
+    expect(normalizeVideoSubject("My Honest Review of Five Cheap Table Saws", "Hank Hardwood")).not.toBe("");
+    expect(
+      normalizeVideoSubject(
+        "Etsy, Craft Fairs or Facebook Marketplace: Where Your Woodworking Actually Sells",
+        "Dale Oakfield"
+      )
+    ).not.toBe("");
+  });
+
+  it("deriveVideoSubject reads a host-labelled title's subject from the script (job 386)", async () => {
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue({ text: "Where to sell handmade wooden pieces" } as any);
+    const subject = await deriveVideoSubject(
+      { ...baseParams, title: "Dale: final with motion graphics", hostName: "Dale Oakfield" },
+      "a script about selling woodwork"
+    );
+    expect(subject).toBe("Where to sell handmade wooden pieces");
+    expect(mockInvoke).toHaveBeenCalledTimes(1);
+  });
+
+  it("a regenerate drops a subject an older normalizer copied from a label title, and keeps a script one", async () => {
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue({ text: "Choosing the right smoke alarm for your home" } as any);
+    // Job 384: the stored subject is the label itself.
+    const labelled = {
+      ...baseParams,
+      title: "Frederick: smoke alarm (graphics review)",
+      hostName: "Frederick Barnes",
+      videoSubject: "Frederick: smoke alarm",
+    };
+    expect(await ensureVideoSubject(labelled)).toBe("Choosing the right smoke alarm for your home");
+    expect(mockInvoke).toHaveBeenCalledTimes(1);
+    // Job 393: the subject was already read from the script — kept, no call.
+    mockInvoke.mockClear();
+    const read = {
+      ...baseParams,
+      title: "Frederick: final v2 (fixes)",
+      hostName: "Frederick Barnes",
+      videoSubject: "Choosing the right smoke alarm for your home",
+    };
+    expect(await ensureVideoSubject(read)).toBe("Choosing the right smoke alarm for your home");
+    expect(mockInvoke).not.toHaveBeenCalled();
+  });
+});
+
+describe("brollDepictsBook reads the words the picture maker gets — 'Facebook' is no book", () => {
+  // Dale's jobs 343, 363 and 372 (scene 7 of each): the line "and Facebook Marketplace" had its
+  // phone-screen picture swapped for a neighbour's cutting board or craft fair.
+  const FB = [
+    "A phone screen showing Facebook Marketplace: a white page with blue accents and a two-column grid of square listing photos, one of them a cutting board of alternating dark walnut and pale maple strips, with a small bold price below. The text is soft and unreadable.",
+    "a phone screen showing Facebook Marketplace: a white screen with a soft blue top bar, a two-column grid of item photos with soft grey bars below them, and a small logo that cannot be read",
+    "A phone screen showing the Facebook Marketplace app: a white two-column grid of square item photos, the walnut and maple striped cutting board in one tile, a bold price under it, small blue accents, and unreadable soft text.",
+    "a phone propped on the bench open to a Facebook group",
+  ];
+
+  it("a brand that only contains 'book' is not a book; real books still are", () => {
+    for (const t of FB) expect(brollDepictsBook(t)).toBe(false);
+    // Job 145 scene 12.
+    expect(brollDepictsBook("a stack of closed stitch pattern books on the kitchen table")).toBe(true);
+    expect(brollDepictsBook("a worn notebook beside the Facebook Marketplace listing")).toBe(true);
+  });
+
+  it("the enhancer keeps a Facebook Marketplace screen instead of borrowing a neighbour's picture", async () => {
+    mockInvoke.mockReset();
+    const scenes: StoryboardScene[] = [
+      {
+        index: 6,
+        narration: "Etsy, craft fairs,",
+        visualPrompt: "a craft fair table outdoors under a canopy",
+        hostPresent: false,
+      },
+      {
+        index: 7,
+        narration: "and Facebook Marketplace",
+        visualPrompt: FB[0],
+        hostPresent: false,
+      },
+    ];
+    mockInvoke.mockImplementation(async ({ userMessage }: any) => ({
+      text: (userMessage as string).includes("and Facebook Marketplace") ? FB[0] : "a craft fair table outdoors under a canopy",
+    }));
+    await enhanceBrollPrompts(scenes, baseParams);
+    expect(scenes[1].visualPrompt).toMatch(/Facebook Marketplace/);
+    expect(scenes[1].visualPrompt).not.toMatch(/craft fair/);
+  });
+
+  it("a pitch picture of a marketplace is still literal CTA imagery", () => {
+    // Under the QR card it was caught only by the book guard's 'Facebook' match.
+    expect(ctaVisualIsLiteral("a Facebook Marketplace listing for a walnut cutting board")).toBe(true);
+    expect(ctaVisualIsLiteral("an Etsy shop's walnut cutting board on the bench")).toBe(true);
+    expect(ctaVisualIsLiteral("a walnut cutting board on the bench")).toBe(false);
+  });
+});
+
+describe("blurUnsaidPrint — a plain picture that asks for print to read shows it soft", () => {
+  const pic = (index: number, showSubject: string | undefined, visualPrompt: string, over: Partial<StoryboardScene> = {}) =>
+    ({ index, narration: "n", showSubject, visualPrompt, hostPresent: false, ...over }) as StoryboardScene;
+  // The checked pictures that asked for print and failed the writing check every time.
+  const ASKED = [
+    // Job 352 scene 38.
+    pic(38, "handwritten board foot calculation on cut list paper on the workbench", "Plain white paper resting on a garage workbench with handwritten measurements and calculations for board feet, unlined sheet with pen nearby on the concrete bench surface."),
+    // Job 352 scene 52.
+    pic(52, "handwritten cut list paper with measurements on workbench", "Bare weathered hands holding a pencil, writing measurements onto a plain white sheet on a wooden workbench in a cold garage workshop."),
+    // Job 352 scene 89.
+    pic(89, "cut list paper with handwritten measurements on the workbench", "Cut list paper with handwritten measurements lying on a workbench in an unheated garage workshop."),
+    // Job 352 scene 106.
+    pic(106, "close-up of the black meter's two pins pressed into a rough oak board, its small grey display reading 7%", "Close view of a black handheld moisture meter's two metal pins pressed into a rough oak board, showing a small grey display reading 7%."),
+    // Job 345 scene 17.
+    pic(17, "a walnut cutting board with a family name carved into its surface, lying on the workbench", "Walnut cutting board with recessed carved lettering lying on a scarred workbench, garage workshop with finished boards leaning against walls."),
+    // Job 376 scene 35.
+    pic(35, "hands turning a smoke alarm over to view its label underside", "Bare hands holding a round white smoke alarm turned over to show its pale plastic underside with printed text."),
+    // Job 383 scene 31: the box's label in the description only.
+    pic(31, "two white smoke detectors lying side by side on a counter beside their open box", "Two white round smoke detectors lying side by side on a kitchen counter next to an open cardboard box with its printed label facing forward."),
+  ];
+
+  it("marks each one and draws its print soft, with the thing that carries it still the subject", () => {
+    for (const s of ASKED) {
+      expect(blurUnsaidPrint(s)).toBe(true);
+      expect(s.blurPrint).toBe(true);
+      const prompt = buildStillPrompt(s);
+      expect(prompt).toContain(BLURRED_PRINT_CLAUSE);
+      expect(prompt).not.toContain(NO_READABLE_TEXT);
+    }
+    // The meter keeps its display, not the figure it was asked to read out.
+    const meter = buildStillPrompt(ASKED[3]);
+    expect(meter).toMatch(/moisture meter/);
+    expect(meter).not.toMatch(/7%/);
+    // The box keeps its label, soft.
+    expect(buildStillPrompt(ASKED[6])).toMatch(/cardboard box/);
+  });
+
+  it("leaves alone print the line says, a soft one already, a negation, a screen and a plain picture", () => {
+    // Frederick's job 329: the label's words are SAID, so they stay readable and exact.
+    const said = pic(12, "the box's label", "a smoke alarm box with its printed label facing forward", {
+      pictureText: "Photoelectric, Sealed 10-Year Battery, Interconnected",
+    });
+    expect(blurUnsaidPrint(said)).toBe(false);
+    expect(said.blurPrint).toBeUndefined();
+    // Job 119 scene 6 and job 121 scene 89: writing named only to forbid it.
+    for (const s of [
+      pic(6, undefined, "A kitchen table workspace in flat afternoon light, scattered with skeins of yarn. Soft, even daylight through a window, neutral background. No words, numbers, or notes visible."),
+      pic(89, undefined, "A finished quilted pouch resting on a wooden shelf, angled to show the zippered top and quilted texture without any readable lettering visible."),
+    ])
+      expect(blurUnsaidPrint(s)).toBe(false);
+    // A screen (job 369 scene 4's kind): its words are soft grey bars already, whatever it asks.
+    expect(
+      blurUnsaidPrint(
+        pic(4, "a phone screen showing a marketplace app with legible text rows under each photo", "A phone screen displaying a marketplace app, a two-column grid of product photos with legible text rows beneath each thumbnail.")
+      )
+    ).toBe(false);
+    expect(blurUnsaidPrint(pic(9, "a walnut cutting board on the bench", "A walnut cutting board lying on a workbench."))).toBe(false);
+    // Nothing to draw: a full-frame host, a cover, an operator's asset.
+    expect(blurUnsaidPrint(pic(1, undefined, "handwritten notes", { hostPresent: true }))).toBe(false);
+    expect(blurUnsaidPrint(pic(2, undefined, "handwritten notes", { coverHero: true }))).toBe(false);
+    expect(blurUnsaidPrint(pic(3, undefined, "handwritten notes", { assetImageUrl: "https://x/a.png" }))).toBe(false);
+  });
+
+  it("reads a split scene off its panel, and the panel carries the mark", () => {
+    const split = pic(20, "the host explaining", "the host talking", {
+      hostPresent: true,
+      splitVisual: "a handheld moisture meter pressed into an oak board, its display reading 7%",
+    });
+    expect(blurUnsaidPrint(split)).toBe(true);
+    const panel = buildSplitRightScene(split);
+    expect(panel.blurPrint).toBe(true);
+    expect(buildStillPrompt(panel, false, undefined, undefined, true)).toContain(BLURRED_PRINT_CLAUSE);
+    // The host's own words never decide it.
+    const hostAsk = pic(21, "the host reading 7% off the meter", "the host talking", {
+      hostPresent: true,
+      splitVisual: "an oak board on the bench",
+    });
+    expect(blurUnsaidPrint(hostAsk)).toBe(false);
+  });
+
+  it("asksToReadPrint: the wording of a print ask, not every number or label", () => {
+    expect(asksToReadPrint("a meter reading 12%")).toBe(true);
+    expect(asksToReadPrint("a jar with a plain label on the shelf")).toBe(false);
+    expect(asksToReadPrint("a market table showing 12 finished boards")).toBe(false);
+    expect(asksToReadPrint("a woman reading a seed catalogue")).toBe(false);
+    expect(asksToReadPrint("no lettering visible, only the curved stroke of a needle")).toBe(false);
+    expect(asksToReadPrint("")).toBe(false);
+    // "Figures" may be people in the frame; written figures are print.
+    expect(asksToReadPrint("two small figures visible far down the lane")).toBe(false);
+    expect(asksToReadPrint("a notepad with figures jotted down the margin")).toBe(true);
+    expect(asksToReadPrint("a page filled with neat handwriting")).toBe(true);
+  });
+
+  it("a label turned away and a place left for lettering ask for nothing (jobs 119 and 288)", () => {
+    // Job 119 scene 46: the label is turned AWAY; scene 28 turns them forward.
+    const away = pic(46, undefined, "A skein of pale worsted acrylic yarn rests on a neutral kitchen table in soft natural light, its label facing away, the yarn's soft texture and affordable weight clear at a glance.");
+    expect(blurUnsaidPrint(away)).toBe(false);
+    const forward = pic(28, undefined, "Six skeins of pale cream and white acrylic yarn arranged tightly in a row on a kitchen table, their smooth synthetic surface catching flat indoor daylight, labels facing forward, against a calm neutral background.");
+    expect(blurUnsaidPrint(forward)).toBe(true);
+    expect(asksToReadPrint("a bottle lying on the shelf, its front label facing the wall")).toBe(false);
+    expect(asksToReadPrint("a can of oil finish, label facing the camera")).toBe(true);
+    // Job 288 scenes 12 and 14: the sign's routed panel is BLANK — soft carved lines would be added.
+    for (const s of [
+      pic(12, "An engraved board, a walnut house sign and a small keepsake box grouped together on the workbench", "An engraved maple board with blank routed lettering area, a walnut house sign with blank routed lettering area, and a small walnut keepsake box with maple inlay on the lid."),
+      pic(14, "a walnut house sign propped against the garage wall", "Walnut house sign with routed lettering area propped against the garage wall, rectangular plank with natural oil finish and smooth edges, concrete floor and pegboard visible behind it."),
+    ])
+      expect(blurUnsaidPrint(s)).toBe(false);
+    // Job 345 scene 17's carved lettering still asks.
+    expect(asksToReadPrint("Walnut cutting board with recessed carved lettering lying on a scarred workbench")).toBe(true);
+  });
+
+  it("the blur road drops a read-out figure with its unit", () => {
+    const tape = pic(5, undefined, "A steel tape measure stretched along a pine board on the bench, its blade reading 36 inches at the end.");
+    expect(blurUnsaidPrint(tape)).toBe(true);
+    const prompt = buildStillPrompt(tape);
+    expect(prompt).toMatch(/reading a soft, unreadable number at the end/);
+    expect(prompt).not.toMatch(/36|number inches/);
+  });
 });
 
 describe("titleMatcher — a word the title repeats counts once (Diane, job 245)", () => {
@@ -10609,9 +10982,8 @@ describe("joinScanWindow — the QR part is one picture however long (Dale, job 
 });
 
 describe("picture rules (2026-09-30): memory, the app screen, no brands", async () => {
-  const { buildStillPrompt, memoryClause, scrubLegibleWriting, APP_SCREEN_CLAUSE } = await import(
-    "./longformVideo"
-  );
+  const { buildStillPrompt, memoryClause, scrubLegibleWriting, APP_SCREEN_CLAUSE, DESCRIBED_SCREEN_CLAUSE } =
+    await import("./longformVideo");
   it("tells the picture maker the reference is the SAME thing from another spot", () => {
     const scene = {
       index: 7,
@@ -10640,6 +11012,16 @@ describe("picture rules (2026-09-30): memory, the app screen, no brands", async 
     expect(APP_SCREEN_CLAUSE).toMatch(/no logo, no brand, no app name/);
     // A picture with no app in it gets no screen clause.
     expect(buildStillPrompt({ index: 1, narration: "n", visualPrompt: "a wood stove" } as StoryboardScene)).not.toContain(APP_SCREEN_CLAUSE);
+  });
+
+  it("a social app the brand scrub names is drawn as described, never as the buy-and-sell grid", () => {
+    // The scrub turns YouTube/Instagram/WhatsApp into "a social app", and "app" alone used to fetch
+    // the shopping grid (job 242's video description link was one).
+    const show = scrubLegibleWriting("a phone showing a YouTube video description with a blue link");
+    expect(show).toMatch(/a social app/);
+    const prompt = buildStillPrompt({ index: 1, narration: "n", visualPrompt: show } as StoryboardScene);
+    expect(prompt).not.toContain(APP_SCREEN_CLAUSE);
+    expect(prompt).toContain(DESCRIBED_SCREEN_CLAUSE);
   });
 });
 

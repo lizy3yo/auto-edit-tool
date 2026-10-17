@@ -76,6 +76,8 @@ import {
   pictureHash,
   pictureThumb,
   rememberPicture,
+  screenPicture,
+  screenSells,
   varietyLane,
   withScreenTurn,
 } from "./pictureVariety";
@@ -347,12 +349,21 @@ import { ENV } from "./_core/env";
 import { pickMusicBeds } from "./musicBeds";
 import { steadyHostClip } from "./hostSteady";
 import {
+  markSplitPanelMissing,
+  splitPanelFor,
+  startSplitPanelDraw,
+  takeSplitPanelDraw,
+} from "./splitPanel";
+import {
   BODY_PART_WORDS,
   deriveHostLook,
+  facingTheCamera,
+  hostLipsCut,
   looksCutOff,
   markHostBroll,
   REAL_HOLDER,
   onTheBody,
+  showsSomeoneElse,
 } from "./hostLook";
 import {
   assemblePerSceneFilm,
@@ -2334,7 +2345,12 @@ function checkInShaped(
   // The host comes IN only where a sentence starts. Coming in after a comma was allowed until
   // 2026-09-28 ("the voice never stops, only the picture changes") — the operator saw it as the
   // host cutting in before the sentence was finished (Mae 2:12 "…well now, | why not…").
+  // A picture of SOMEONE ELSE is never taken for a check-in (2026-10-18, the audit): the host then
+  // talked over the line about that person, and the person's description went on into a split
+  // panel that may show nobody — "a woman customer holding a coaster" failed its panel check twice
+  // (job 397 scene 34). The line keeps its picture of them.
   return (
+    !showsSomeoneElse(s) &&
     startsSentence(scenes, i) &&
     (endsSentence(s.scriptText ?? s.narration) || (!!s.wordCut && !s.listCut)) &&
     sec >= (s.wordCut ? HOST_CHECKIN_MIN_SEC : HOST_MIN_HOLD_SEC) &&
@@ -3631,6 +3647,7 @@ export function convertHostSceneToBroll(s: StoryboardScene): boolean {
   s.splitMotion = undefined;
   s.splitLayout = undefined;
   s.splitRightUrl = undefined;
+  s.splitPanelMissing = undefined;
   s.hostClipUrls = undefined;
   // The enhancer rewrites FROM the seed — a host beat's seed (if any) is the talking-head prompt.
   s.visualPromptSeed = undefined;
@@ -3744,6 +3761,7 @@ export function convertBrollSceneToHost(
   s.splitMotion = undefined;
   s.splitVisualSeed = undefined;
   s.splitRightUrl = undefined;
+  s.splitPanelMissing = undefined;
   s.splitAutoFocusX = undefined;
   s.splitFocusSource = undefined;
   if (split) s.splitVisual = s.brollVisual ?? cutaway;
@@ -3802,11 +3820,15 @@ export function planAutoBroll(
  * lane fails a cutaway, and now when the lip-sync lane fails a host beat (after `planAutoBroll`
  * has made it a cutaway). Throws if even the still cannot be made; the caller marks the scene
  * failed with the ORIGINAL error, since that is the one worth reading.
+ * `sourceImageUrl` is a picture already drawn and checked for this scene — the start frame of a
+ * clip that moved wrong (`checkedKeyframeOf`) — and the still is made from it instead of a new
+ * draw.
  */
 async function fallbackSceneToStill(
   jobId: number,
   scene: StoryboardScene,
-  params: LongformInputParams
+  params: LongformInputParams,
+  sourceImageUrl?: string
 ): Promise<void> {
   const apimartKey =
     await apimartKeyForJob(params);
@@ -3817,7 +3839,8 @@ async function fallbackSceneToStill(
     scene.showsBook ? params.bookCoverImageUrl : undefined,
     params.videoSubject,
     false,
-    apimartKey
+    apimartKey,
+    sourceImageUrl
   );
   syncSceneClipFields(scene);
   scene.stillImage = true;
@@ -3827,6 +3850,9 @@ async function fallbackSceneToStill(
   scene.renderModelIndex = undefined;
   scene.renderAttempts = undefined;
   scene.infraRetries = undefined;
+  // A glitch re-render that failed before it reached a submit leaves its `glitch` reason behind;
+  // a still is settled, so the next paid render (a regenerate, a retry) must not inherit it.
+  scene.nextSubmitReason = undefined;
 }
 
 /**
@@ -3927,7 +3953,7 @@ const CLICKBAIT_TAIL =
  * the original render used, and so an old job's clickbait subject is repaired for free on regen.
  * Widen the lists when a real title slips through.
  */
-export function normalizeVideoSubject(title: string): string {
+export function normalizeVideoSubject(title: string, hostName?: string): string {
   let s = (title ?? "").replace(/\([^)]*\)|\[[^\]]*\]/g, " ");
   // A leading shouted fragment ("STOP! ", "You won't believe this! ") — up to 3 words then bang.
   s = s.replace(/^\s*(?:\S+\s+){0,2}\S*[!?]+\s+/, "");
@@ -3942,7 +3968,24 @@ export function normalizeVideoSubject(title: string): string {
     .replace(/^[\s,.;:—-]+|[\s,.;:—-]+$/g, "")
     .trim();
   const out = truncateWords(s, 8) || (title ?? "").trim();
-  return isOperatorLabelTitle(title ?? "", out) ? "" : out;
+  return isOperatorLabelTitle(title ?? "", out, hostName) ? "" : out;
+}
+
+/**
+ * Whether a title opens with the channel host's own name as a label — "Dale: final with motion
+ * graphics" (job 386), "Frederick: smoke alarm (graphics review)" (jobs 384-385, which put the
+ * host's name into every picture prompt as "where Frederick: smoke alarm is done"). The words before
+ * the colon must ALL be words of the host's name (a run number beside them is fine: "Dale v2:"), so
+ * a real title that opens on a topic word ("Composting: A Beginner's Guide") is never one. Pure.
+ */
+function leadsWithHostName(raw: string, hostName: string | undefined): boolean {
+  const m = /^\s*([^:]{1,40}):/.exec(raw);
+  if (!m || !hostName?.trim()) return false;
+  const tokens = (t: string) =>
+    t.toLowerCase().replace(/['’]s\b/g, "").match(/[a-z]+\d*|\d+/g) ?? [];
+  const name = new Set(tokens(hostName));
+  const label = tokens(m[1]).filter(w => !/^(?:v?\d+|take|run)$/.test(w));
+  return label.length > 0 && label.every(w => name.has(w));
 }
 
 /**
@@ -3953,9 +3996,16 @@ export function normalizeVideoSubject(title: string): string {
  * (under three words — a topic is a phrase), or a test marker falls back to the subject read from
  * the SCRIPT (`deriveVideoSubject`). Pure — unit-tested.
  */
-export function isOperatorLabelTitle(raw: string, normalized: string): boolean {
+export function isOperatorLabelTitle(raw: string, normalized: string, hostName?: string): boolean {
   const words = normalized.split(/\s+/).filter(Boolean).length;
   if (words < 3) return true;
+  // The host's own name as the label ("Dale: final with motion graphics") — see `leadsWithHostName`.
+  if (leadsWithHostName(raw, hostName)) return true;
+  // A practice render named as one ("Practice: Hank adapt", jobs 194-210 — each of those films
+  // drew "where Practice: Hank adapt is done" into every picture). Only as the title's leading
+  // label and short, so "Practice Makes Perfect: …" stays a title.
+  if (/^\s*practice\b(?:\s+(?:run|take|render|\d+))?\s*[:—–-]/i.test(raw) && words <= 6)
+    return true;
   if (
     /#\d|\b\d{3,4}p\b|\b0\.\d+\b|\b(ltx|longcat|heygen|runpod|infinitetalk)\b/i.test(
       raw
@@ -3982,7 +4032,7 @@ export async function deriveVideoSubject(
   params: LongformInputParams,
   spokenScript: string
 ): Promise<string> {
-  const fromTitle = normalizeVideoSubject(params.title ?? "");
+  const fromTitle = normalizeVideoSubject(params.title ?? "", params.hostName);
   if (fromTitle) return fromTitle;
   try {
     const r = await invokeGemini({
@@ -4008,8 +4058,14 @@ export async function deriveVideoSubject(
 export async function ensureVideoSubject(
   params: LongformInputParams
 ): Promise<string> {
-  const fromTitle = normalizeVideoSubject(params.title ?? "");
+  const title = params.title ?? "";
+  const fromTitle = normalizeVideoSubject(title, params.hostName);
   if (fromTitle) return (params.videoSubject = fromTitle);
+  // A title read as a label NOW whose subject an older normalizer copied straight from it ("Dale:
+  // final with motion graphics", job 386; "Stress: Hank #1", jobs 111-113) is read from the script
+  // again — kept, the label would stay the setting of every picture the regenerate draws.
+  if (params.videoSubject && title.includes(params.videoSubject))
+    params.videoSubject = undefined;
   if (!params.videoSubject)
     params.videoSubject = await deriveVideoSubject(
       params,
@@ -5890,12 +5946,15 @@ const WORN_FRONT =
  */
 export function personClauseFor(scene: StoryboardScene, visual: string): string {
   if (!scene.humanPresent) return "";
+  // A host picture of a line about the chin, jaw or neck faces the camera, cut at the lips
+  // (`hostLipsCut`): every side or back view below would hide what the line is about.
+  const lipsCut = hostLipsCut(scene);
   const who = scene.otherPerson
-    ? otherPersonClause(scene.otherPerson)
+    ? otherPersonClause(scene.otherPerson, scene.otherPeople)
     : scene.brollHostLook
       ? scene.hostFaceShown
         ? hostFaceClause(scene.brollHostLook)
-        : hostBrollClause(scene.brollHostLook)
+        : hostBrollClause(scene.brollHostLook, lipsCut)
       : ANON_PERSON_SUFFIX;
   const worn = WORN_FRONT.exec(visual)?.[0];
   // Hands on the person's OWN hair, scalp or face (Diane's job 313: a head twisted round, a third
@@ -5903,14 +5962,20 @@ export function personClauseFor(scene: StoryboardScene, visual: string): string 
   const ownHead =
     /\b(?:hair|scalp|face|forehead|cheeks?|neck)\b/i.test(visual) &&
     /\b(?:brush|comb|pin|twist|style|apply|appl(?:ies|ying)|work(?:s|ing)?|smooth|part|wash|rins|dry|spread|massag|tuck|clip)/i.test(visual);
-  const selfCare = ownHead
-    ? " Seen from the side, the head and shoulders turned the same way, the arms raised naturally " +
-      "from their own shoulders to the hair or face — one hand at it when one is enough."
-    : "";
-  const wornClause = worn
-    ? ` The ${worn.toLowerCase()} is worn where it really sits, on the FRONT of the head or body; ` +
-      `the person is seen from the side so it shows there — never on the back of the head or body.`
-    : "";
+  const selfCare = !ownHead
+    ? ""
+    : lipsCut
+      ? " The arm comes up naturally from its own shoulder to the neck or chin — one hand at it " +
+        "when one is enough."
+      : " Seen from the side, the head and shoulders turned the same way, the arms raised naturally " +
+        "from their own shoulders to the hair or face — one hand at it when one is enough.";
+  const wornClause = !worn
+    ? ""
+    : lipsCut
+      ? ` The ${worn.toLowerCase()} is worn where it really sits, on the FRONT of the head or body, ` +
+        `and the body faces the camera so it shows there.`
+      : ` The ${worn.toLowerCase()} is worn where it really sits, on the FRONT of the head or body; ` +
+        `the person is seen from the side so it shows there — never on the back of the head or body.`;
   return ` ${who} ${BODY_ON_PERSON_CLAUSE}${selfCare}${wornClause}`;
 }
 
@@ -5918,14 +5983,31 @@ export function personClauseFor(scene: StoryboardScene, visual: string): string 
  * SOMEONE ELSE in the picture (`scene.otherPerson`): the line is about a person who is not the
  * host, so that person is drawn — the way the host is, from behind or the side, the face never
  * shown, one body — and told apart from the host in so many words, with no host photo attached.
+ * TWO OR MORE people (`scene.otherPeople`, 2026-10-18: "two passengers seated in the same row", "a
+ * flight attendant speaking with a passenger", "two people hugging") are each drawn that way, none
+ * of them the host — the one-person wording ("nobody else", "no second person") asked for one of
+ * them and against the other.
  */
-export function otherPersonClause(who: string): string {
+export function otherPersonClause(who: string, count: number = 1): string {
+  const named = who.trim().replace(/\.$/, "");
+  if (count > 1) {
+    const body = ONE_BODY_CLAUSE.replace(/The host has/g, "Each person has")
+      .replace(/both of the host's hands/g, "both of that person's hands")
+      .replace(/the host's/g, "that person's")
+      .replace(/anywhere in the frame/, "on anyone");
+    return (
+      `The people in this shot are ${named} — ${count === 2 ? "two" : "a small group of"} different, ` +
+      `ordinary people of that description, NONE of them the video's host: each seen from behind or ` +
+      `from the side, over the shoulder, faces turned away or out of frame so no face is ever shown. ` +
+      `Nobody else is in the frame, in the background or in a reflection. ${body}`
+    );
+  }
   const body = ONE_BODY_CLAUSE.replace(/The host has/g, "This person has").replace(
     /the host's/g,
     "their"
   );
   return (
-    `The only person in this shot is ${who.trim().replace(/\.$/, "")} — NOT the video's host, a ` +
+    `The only person in this shot is ${named} — NOT the video's host, a ` +
     `different, ordinary person of that description: seen from behind or from the side, over ` +
     `the shoulder, the face turned away or out of frame so it is never shown. Nobody else is in ` +
     `the frame, in the background or in a reflection. ${body}`
@@ -5937,6 +6019,17 @@ export const ONE_OTHER_PERSON_SUFFIX =
   "Apart from that one person seen from behind or from the side, no person is visible: no second " +
   "person, no one in the background, no reflection of anyone, and no face anywhere in the frame. " +
   "No mirror, window glass or other shiny surface anywhere they could be reflected in it.";
+
+/** `ONE_OTHER_PERSON_SUFFIX` for `count` people (`scene.otherPeople`): those people, nobody more. */
+export function otherPeopleSuffix(count: number = 1): string {
+  if (count <= 1) return ONE_OTHER_PERSON_SUFFIX;
+  return (
+    `Apart from those ${count === 2 ? "two people" : "few people"}, each seen from behind or from the ` +
+    "side, no person is visible: no one else, no one in the background, no reflection of anyone, and " +
+    "no face anywhere in the frame. No mirror, window glass or other shiny surface anywhere they " +
+    "could be reflected in it."
+  );
+}
 
 /**
  * The host doing a step on their OWN FACE (`scene.hostFaceShown`, 2026-10-15): the face is shown,
@@ -5980,10 +6073,37 @@ export const HOST_FRAMING_CLAUSE =
   "the host by the same hair colour and cut, the same skin and the same clothes and accessories as " +
   "in the reference photo (unless the description names other clothes).";
 
-export function hostBrollClause(look: string): string {
+/**
+ * The first framing of `HOST_FRAMING_CLAUSE` ONLY, for a host picture of a line about the chin, jaw,
+ * neck or collarbone (`hostLipsCut`, 2026-10-18, the audit): "that same necklace drags your chin and
+ * your jawline down with it" (job 244 scene 3) and "the soft shadows under the chin" (job 395 scene
+ * 25) were drawn from behind or with the face turned away, so the chin the line is about was never
+ * in the frame. Facing the camera with the frame cut at the lips shows the chin, the jaw, the neck
+ * and the piece worn there, and still draws no face — the host's identity rests on the same skin and
+ * clothes as before.
+ */
+export const HOST_LIPS_CUT_CLAUSE =
+  "The body faces the camera, the head straight above the shoulders, and the top edge of the frame " +
+  "cuts across the lower face at the lips, so nothing of the face above the lips is shown — while the " +
+  "chin, the jaw, the neck and the collarbone are in plain view, with whatever is worn or held there " +
+  "sitting where it really sits. However close the description asks for, the frame runs from the lips " +
+  "down past that piece. Never seen from behind, never turned away, never a head turned to hide the " +
+  "face. They are recognisably the host by the same skin, the same hair colour where any shows, and " +
+  "the same clothes and accessories as in the reference photo (unless the description names other " +
+  "clothes).";
+
+/** `NO_OTHER_FIGURES_SUFFIX` for a host picture framed from the lips down (`HOST_LIPS_CUT_CLAUSE`). */
+export const HOST_LIPS_CUT_ONLY_SUFFIX =
+  "Apart from the host, framed from the lips down, no person is visible: no second person, no one in " +
+  "the background, no reflection of anyone, and nothing of any face above the lips — no eyes, nose or " +
+  "forehead anywhere in the frame. No mirror, window glass or other shiny surface anywhere the host " +
+  "could be reflected in it.";
+
+export function hostBrollClause(look: string, lipsCut = false): string {
   return (
     `The only person in this shot is the host — ${look.trim().replace(/\.$/, "")} — exactly as in ` +
-    `the reference photo, doing the task, hands at the work. ${HOST_FRAMING_CLAUSE} Nobody else ` +
+    `the reference photo, doing the task, hands at the work. ` +
+    `${lipsCut ? HOST_LIPS_CUT_CLAUSE : HOST_FRAMING_CLAUSE} Nobody else ` +
     `is in the frame, in the background or in a reflection. ${ONE_BODY_CLAUSE}`
   );
 }
@@ -6527,8 +6647,13 @@ export function buildStillPrompt(
    */
   square = false
 ): string {
-  const angleSuffix = scene.showSubject
-    ? heroFramingClause(scene.showSubject)
+  // A host picture framed from the lips down (`hostLipsCut`) keeps none of its own words that turn
+  // the host away (`facingTheCamera`): a film drawn before the rule still says "face turned away".
+  const lipsCut = !aggressive && hostLipsCut(scene);
+  const facing = (t: string) => (lipsCut ? facingTheCamera(t) : t);
+  const shown = scene.showSubject ? facing(scene.showSubject) : undefined;
+  const angleSuffix = shown
+    ? heroFramingClause(shown)
     : scene.shotAngle && SHOT_ANGLE_SUFFIX[scene.shotAngle]
       ? `, ${SHOT_ANGLE_SUFFIX[scene.shotAngle]}`
       : "";
@@ -6536,17 +6661,21 @@ export function buildStillPrompt(
   const personSuffix = !aggressive ? personClauseFor(scene, scene.showSubject ?? scene.visualPrompt ?? "") : "";
   const noFigures =
     !aggressive && scene.humanPresent && scene.otherPerson
-      ? ONE_OTHER_PERSON_SUFFIX
+      ? otherPeopleSuffix(scene.otherPeople)
       : !aggressive && scene.humanPresent && scene.brollHostLook
         ? scene.hostFaceShown
           ? HOST_FACE_ONLY_SUFFIX
-          : NO_OTHER_FIGURES_SUFFIX
+          : lipsCut
+            ? HOST_LIPS_CUT_ONLY_SUFFIX
+            : NO_OTHER_FIGURES_SUFFIX
         : NO_FIGURES_SUFFIX;
-  const visual = visualOverride
-    ? softenVisualPrompt(visualOverride)
-    : aggressive
-      ? aggressiveSoftenVisualPrompt(scene.visualPrompt)
-      : softenVisualPrompt(scene.visualPrompt);
+  const visual = facing(
+    visualOverride
+      ? softenVisualPrompt(visualOverride)
+      : aggressive
+        ? aggressiveSoftenVisualPrompt(scene.visualPrompt)
+        : softenVisualPrompt(scene.visualPrompt)
+  );
   const framing = square
     ? "Square 1:1 framing, the subject centered and filling the square frame."
     : "Wide 16:9 horizontal landscape framing.";
@@ -6558,9 +6687,11 @@ export function buildStillPrompt(
   // A camera move's first frame is the thing at rest: the CAMERA moves, the thing does not.
   const motion = !aggressive && scene.objectMotion ? "objectStill" : "settle";
   const memory = memoryClause(scene);
-  // A real app the line names (`namedLook`) is drawn as it really looks; otherwise a plain one.
-  const app = APP_SCREEN.test(visual) ? ` ${appScreenClause(scene)}` : "";
-  const lead = !aggressive && !visualOverride ? subjectLead(scene.showSubject, visual) : "";
+  // A screen only when the picture names a device (`screenPicture`): a real app the line names
+  // (`namedLook`) as it really looks, a selling screen as a plain buy-and-sell app, any other
+  // screen as exactly what its own description says (`appScreenClause`).
+  const app = screenPicture(visual) ? ` ${appScreenClause(scene, visual)}` : "";
+  const lead = !aggressive && !visualOverride ? subjectLead(shown, visual) : "";
   const item = !visualOverride ? listItemClause(scene) : "";
   return withAllowedText(
     `${lead}${visual}${scrubLegibleWriting(namedLookClause(scene))}${item}${angleSuffix}${personSuffix}${memory}${app} ${amateurIphoneLook(subject, motion)} ${framing} ${noFigures} ${NO_BOOK_SUFFIX}`,
@@ -6637,6 +6768,78 @@ const READABLE_PRINT_ASK =
   /\b(?:clearly|plainly|sharply|legibly)\s+(?:showing|displaying|reading|printed with|marked with)\b/gi;
 const PRINTED_FIGURE =
   /\b(?:(?:the|a)\s+)?(?:printed\s+)?(?:year|date)\s+(?:of\s+)?(?:19|20)\d{2}\b/gi;
+/**
+ * A figure a display or gauge is asked to read out ("a small grey display reading 7%", job 352),
+ * with its unit, so "a tape reading 36 inches" does not become "a soft, unreadable number inches".
+ */
+const READ_OUT_FIGURE =
+  /\b(?:(reading|reads)\s+\$?\d[\d.,]*(?:\s*(?:%|°[CF]?|(?:percent|degrees?|inch(?:es)?|feet|foot|ft|mm|cm|pounds?|lbs?|volts?|psi)\b))?|(displaying|showing)\s+(?:\$\d[\d.,]*|\d[\d.,]*\s*(?:%|°|percent\b|degrees\b)))/gi;
+/**
+ * A label turned TOWARD the picture. "Its label facing away" (job 119 scene 46) asks for the
+ * opposite of print to read, and so does a label facing down or to the wall.
+ */
+const FACING_VIEWER = String.raw`facing\b(?!\s+(?:away|down(?:wards?)?|back(?:wards?)?|inwards?|the\s+(?:wall|back|other\s+way))\b)`;
+
+/**
+ * A description that asks for print to be READ: handwriting, lettering, a label turned to the
+ * camera, printed text, a display reading a figure, a name carved or stitched in. On a picture with
+ * no words the line says (`pictureText`) and no soft print (`blurPrint`), the prompt asked for that
+ * AND, a clause later, for no writing at all (`NO_READABLE_TEXT`) — and the picture maker draws the
+ * thing it is asked for: job 352's handwritten cut lists (scenes 38, 52, 89) and moisture meter
+ * "reading 7%" (106), job 383's box "with its printed label facing forward" (scene 31, six checks,
+ * writing every time), job 376's alarm "with printed text" (35), job 345's board with "carved
+ * lettering" (17). Of the checked pictures that asked this way, 9 of 13 failed for readable writing,
+ * against 1.5% of the rest. A negated mention ("no lettering visible") asks for nothing, nor does a
+ * place made for lettering ("a sign with a blank routed lettering area", job 288), a label facing
+ * away (`FACING_VIEWER`), or "figures" in the frame that may be people.
+ */
+const PRINT_TO_READ = new RegExp(
+  [
+    String.raw`\bhand-?(?:written|writing|lettered|lettering)\b`,
+    String.raw`\blettering\b(?!\s+(?:area|space|panel|field|zone|spot|section)s?\b)`,
+    String.raw`\b(?:printed|front|back)\s+labels?\b[^.;]{0,30}\b(?:${FACING_VIEWER}|visible|showing|readable|legible)`,
+    String.raw`\blabels?\s+${FACING_VIEWER}`,
+    String.raw`\bprinted\s+(?:text|dates?|designation|type|words?|numbers?|model|wording|writing|lines)\b`,
+    String.raw`\b(?:reading|reads)\s+(?:["'“‘]|\$?\d)`,
+    String.raw`\b(?:displaying|showing)\s+(?:["'“‘]|\$\d|\d[\d.,]*\s*(?:%|°|percent\b|degrees\b))`,
+    String.raw`\b(?:numbers|measurements|calculations|sums)\b[^.;]{0,30}\b(?:written|visible|readable|legible|jotted|scribbled)\b`,
+    String.raw`\bfigures\b[^.;]{0,30}\b(?:written|readable|legible|jotted|scribbled)\b`,
+    String.raw`\b(?:writing|jotting|scribbling|penciling|pencilling)\s+(?:down\s+)?(?:numbers|figures|measurements|calculations|sums|lettering|a list|notes)\b`,
+    String.raw`\b(?:legible|readable)\s+(?:text|print|printing|words?|labels?|writing|numbers?|letters)\b`,
+    String.raw`\b(?:names?|initials|monograms?|words?|dates?)\s+(?:burnt|burned|engraved|carved|stitched|embroidered|painted|written|stamped|printed)\b`,
+  ].join("|"),
+  "i"
+);
+/** A negation and the rest of its clause: "no lettering visible", "without readable labels". */
+const NEGATED_CLAUSE = /\b(?:no|not|without|never|nor|nothing|none)\b[^.;—–]*/gi;
+
+/** Whether a description asks for print to be read (`PRINT_TO_READ`), negations aside. Pure. */
+export function asksToReadPrint(text: string | undefined): boolean {
+  return PRINT_TO_READ.test((text ?? "").replace(NEGATED_CLAUSE, " "));
+}
+
+/**
+ * A PLAIN picture that asks for print to be read (`asksToReadPrint`) is marked `blurPrint` before it
+ * is drawn, so it takes the road every unsaid print already takes: the print is shown soft and
+ * unreadable from arm's length (`withAllowedText` → `BLURRED_PRINT_CLAUSE`), the check counts soft
+ * print as shown (`SOFT_PRINT_QUESTION`), a readable redraw steps back (`STEP_BACK_CLAUSE`), and a
+ * remembered close-up keeps its distance (`BLUR_PRINT_VIEW`). The thing carrying the print stays
+ * the subject — it is never removed. Never a picture whose line says the words (`pictureText`), one
+ * already soft, a cover or an operator's asset, or a SCREEN: its words are already drawn as soft
+ * bars (`SCREEN_TEXT_AS_BARS`) and an arm's-length view would shrink the screen it is about. A split
+ * scene is read off its panel (`splitVisual`), which inherits the mark (`buildSplitRightScene`).
+ * Returns whether it marked. Mutates the scene.
+ */
+export function blurUnsaidPrint(scene: StoryboardScene): boolean {
+  if (scene.pictureText || scene.blurPrint || scene.coverHero || scene.assetImageUrl) return false;
+  if (scene.hostPresent && !scene.splitVisual) return false;
+  const words = scene.hostPresent
+    ? scene.splitVisual ?? ""
+    : `${scene.showSubject ?? ""}. ${scene.visualPrompt ?? ""}`;
+  if (!asksToReadPrint(words) || screenPicture(words)) return false;
+  scene.blurPrint = true;
+  return true;
+}
 
 /**
  * A picture whose line says the words printed on a thing (`scene.pictureText`) shows exactly those,
@@ -6652,7 +6855,8 @@ export function withAllowedText(
     const framed = prompt
       .replace(CLOSE_UP_WORDS, "arm's-length view")
       .replace(READABLE_PRINT_ASK, "with")
-      .replace(PRINTED_FIGURE, "a printed date");
+      .replace(PRINTED_FIGURE, "a printed date")
+      .replace(READ_OUT_FIGURE, "$1$2 a soft, unreadable number");
     return framed.includes(NO_READABLE_TEXT)
       ? framed.split(NO_READABLE_TEXT).join(BLURRED_PRINT_CLAUSE)
       : `${framed} ${BLURRED_PRINT_CLAUSE}`;
@@ -6666,9 +6870,6 @@ export function withAllowedText(
     : `${prompt} ${allowed}`;
 }
 
-/** A picture about an app or selling online (after `scrubLegibleWriting` has taken the brand off). */
-const APP_SCREEN =
-  /\b(?:apps?|buy-and-sell|online (?:craft )?(?:shop|store)|website|phone screen|listings?)\b/i;
 /**
  * The phone screen of an app shot (2026-09-30, the operator: "facebook marketplace in an app" — no
  * logo, no brand): a plain buy-and-sell app, a grid of item photos, nothing readable.
@@ -6693,12 +6894,16 @@ export const REAL_APP_SCREEN_CLAUSE =
   "never built from, framed by or set inside any other object; things for sale appear only as " +
   "small photos on its screen.";
 /**
- * The screen clause for an app picture: the real app's look when the line names one, else a plain
- * one; one item's listing page when the picture is about one item; and the words the line SAYS
+ * The screen clause for a screen picture: the real app's look when the line names one; a plain
+ * buy-and-sell app only when the picture's own words ask for a selling screen (`screenSells`), and
+ * one item's listing page when it is about one item; every other screen exactly as its description
+ * says (`DESCRIBED_SCREEN_CLAUSE`) — the grid used to go on every screen, an airline seat map and a
+ * hand tapping "Subscribe" included (production job 310, job 393). And the words the line SAYS
  * (`scene.pictureText` — a price, a name) readable and exact, where the clauses alone would blur
- * them (Dale's job 306 showed a said price as a grey bar).
+ * them (Dale's job 306 showed a said price as a grey bar). `visual` is the description the prompt
+ * draws, when it is not `scene.visualPrompt` as it stands.
  */
-export function appScreenClause(scene: StoryboardScene): string {
+export function appScreenClause(scene: StoryboardScene, visual?: string): string {
   // Each screen of a film sits somewhere else (`assignScreenSetups`, server/pictureVariety.ts):
   // with one fixed setting every screen came back the same phone on the same bench (Dale, job 372).
   const placed = (clause: string) =>
@@ -6712,10 +6917,14 @@ export function appScreenClause(scene: StoryboardScene): string {
               `${scene.screenSetup}.`
           )
       : clause;
-  const base = placed(scene.namedLook ? REAL_APP_SCREEN_CLAUSE : APP_SCREEN_CLAUSE);
-  const one = ONE_LISTING.test(scene.showSubject ?? scene.visualPrompt ?? "")
-    ? " It is ONE item's own listing page: one large photo of that item, not a grid of other things."
-    : "";
+  const selling = !scene.namedLook && screenSells(scene, visual);
+  const base = placed(
+    scene.namedLook ? REAL_APP_SCREEN_CLAUSE : selling ? APP_SCREEN_CLAUSE : DESCRIBED_SCREEN_CLAUSE
+  );
+  const one =
+    (scene.namedLook || selling) && ONE_LISTING.test(scene.showSubject ?? scene.visualPrompt ?? "")
+      ? " It is ONE item's own listing page: one large photo of that item, not a grid of other things."
+      : "";
   if (!scene.pictureText) return `${base}${one}${SCREEN_TEXT_AS_BARS}`;
   const said = scene.pictureText.replace(/"/g, "'");
   return (
@@ -6746,6 +6955,19 @@ export const APP_SCREEN_CLAUSE =
   DEVICE_RESTS +
   " It is never built from, framed by or set inside any " +
   "other object; things for sale appear only as small photos on its screen.";
+
+/**
+ * Every screen that is not a selling screen (`appScreenClause`): what its own description says is
+ * on it, and nothing for sale. No list of screen kinds — the description already names the seat
+ * map, the message or the video; the grid clause was what overrode it.
+ */
+export const DESCRIBED_SCREEN_CLAUSE =
+  "The device's screen shows exactly what this description says is on it — when it says nothing, " +
+  "a plain, simple screen — and never a grid of items for sale: no logo, no brand, no app name, and " +
+  "no readable words, letters, numbers or prices anywhere on the screen. The device is an ordinary " +
+  "real phone, tablet or laptop. " +
+  DEVICE_RESTS +
+  " It is never built from, framed by or set inside any other object.";
 
 /**
  * PICTURE MEMORY: a picture of a key thing drawn from the earlier pictures of it
@@ -6958,10 +7180,16 @@ const CTA_VISUAL_BANNED_PATTERNS: RegExp[] = [
   /\bsubscrib(?:e|es|ed|ing|ers?)\b/i,
 ];
 
-/** True when a VISUAL prompt would render literal CTA/sales imagery. Pure — unit-tested. */
+/**
+ * True when a VISUAL prompt would render literal CTA/sales imagery. Read on the words as written AND
+ * as the picture maker gets them (`scrubLegibleWriting`): a marketplace or social brand is "a
+ * buy-and-sell app" / "a social app" there, an app under the card. It used to be caught only because
+ * the book guard read "Facebook" as a book (`brollDepictsBook`). Pure — unit-tested.
+ */
 export function ctaVisualIsLiteral(text: string): boolean {
   const t = text ?? "";
-  return CTA_VISUAL_BANNED_PATTERNS.some(re => re.test(t));
+  const sent = scrubLegibleWriting(t);
+  return CTA_VISUAL_BANNED_PATTERNS.some(re => re.test(t) || re.test(sent));
 }
 
 /**
@@ -7030,9 +7258,17 @@ const BOOK_VISUAL_PATTERNS: RegExp[] = [
   ),
 ];
 
-/** True when a b-roll VISUAL prompt would render a book/printed publication. Pure — unit-tested. */
+/**
+ * True when a b-roll VISUAL prompt would render a book/printed publication. Read on the words the
+ * picture maker is actually sent (`scrubLegibleWriting`, which every prompt crosses in
+ * `softenVisualPrompt`): the -book pattern matched "Facebook", so a "phone screen showing Facebook
+ * Marketplace" (Dale's jobs 343, 363 and 372, scene 7 of each) was swapped for a neighbour's
+ * picture — a cutting board or a craft fair under "and Facebook Marketplace", against the
+ * description `subjectLead` still put at the head of the prompt. Scrubbed, the brand is "a
+ * buy-and-sell app" and no book. Pure — unit-tested.
+ */
 export function brollDepictsBook(text: string): boolean {
-  const t = text ?? "";
+  const t = scrubLegibleWriting(text ?? "");
   return BOOK_VISUAL_PATTERNS.some(re => re.test(t));
 }
 
@@ -8467,15 +8703,23 @@ export function buildClipChain(
   const peopleSuffix = !scene.hostPresent
     ? personClauseFor(scene, scene.showSubject ?? scene.visualPrompt ?? "")
     : "";
+  // The same person rule as the still (`buildStillPrompt`): someone else's picture never says
+  // "no person is visible" beside the clause that draws them.
+  const lipsCut = !scene.hostPresent && hostLipsCut(scene);
+  const facing = (t: string) => (lipsCut ? facingTheCamera(t) : t);
   const clipNoFigures =
-    !scene.hostPresent && scene.humanPresent && scene.brollHostLook
-      ? NO_OTHER_FIGURES_SUFFIX
-      : NO_FIGURES_SUFFIX;
+    !scene.hostPresent && scene.humanPresent && scene.otherPerson
+      ? otherPeopleSuffix(scene.otherPeople)
+      : !scene.hostPresent && scene.humanPresent && scene.brollHostLook
+        ? lipsCut
+          ? HOST_LIPS_CUT_ONLY_SUFFIX
+          : NO_OTHER_FIGURES_SUFFIX
+        : NO_FIGURES_SUFFIX;
   // Shot-angle phrase appended to non-host prompts so camera variety is enforced in code
   // rather than relying on Claude's implicit framing choices.
   const angleSuffix =
     !scene.hostPresent && scene.showSubject
-      ? heroFramingClause(scene.showSubject)
+      ? heroFramingClause(facing(scene.showSubject))
       : !scene.hostPresent && scene.shotAngle && SHOT_ANGLE_SUFFIX[scene.shotAngle]
         ? `, ${SHOT_ANGLE_SUFFIX[scene.shotAngle]}`
         : "";
@@ -8495,7 +8739,7 @@ export function buildClipChain(
     ? `${scene.visualPrompt} ${TALKING_HEAD_BACKGROUND}${
         scene.cta ? ` ${CTA_EMPTY_HANDS_SUFFIX}` : ""
       } ${NO_OVERLAY_TEXT_SUFFIX}`
-    : `${softenVisualPrompt(scene.visualPrompt)}${angleSuffix}${peopleSuffix} ${amateurIphoneLook(params.videoSubject, brollLookMotion(scene))} ${clipNoFigures} ${NO_BOOK_SUFFIX}`;
+    : `${facing(softenVisualPrompt(scene.visualPrompt))}${angleSuffix}${peopleSuffix} ${amateurIphoneLook(params.videoSubject, brollLookMotion(scene))} ${clipNoFigures} ${NO_BOOK_SUFFIX}`;
 
   // `humanPresent` b-roll carries no ref image HERE — the hands are described by the prompt
   // (ANON_PERSON_SUFFIX + PERSON_MOTION_CAMERA_CLAUSE) and the only image it ever gets is the
@@ -8647,7 +8891,9 @@ async function generateSceneClip(
   params: LongformInputParams,
   clipIdx = 0,
   /** Per-clip generation length (b-roll `brollClipDuration`); omitted → chain default. */
-  durationSec?: number
+  durationSec?: number,
+  /** A start frame already drawn and checked — the glitch re-render's (`generateSceneClips`). */
+  keyframeUrl?: string
 ): Promise<string> {
   // Blocking b-roll generation that mirrors the resumable path's submit (`submitBrollClip` +
   // the chain loop above), walking `buildClipChain`'s elements (b-roll: normal + softer retry;
@@ -8662,7 +8908,11 @@ async function generateSceneClip(
   // On failure (whole image chain exhausted or 90s timeout) the error propagates — the scene
   // fails rather than degrading to a text-only clip.
   let keyframe: string | undefined;
-  if (!scene.hostPresent && !chain[0].imageUrls && !brollKeyframeDisabled()) {
+  const wantsKeyframe =
+    !scene.hostPresent && !chain[0].imageUrls && !brollKeyframeDisabled();
+  if (wantsKeyframe && keyframeUrl && clipIdx === 0) {
+    keyframe = keyframeUrl;
+  } else if (wantsKeyframe) {
     const apimartKey =
       await apimartKeyForJob(params);
     keyframe = await Promise.race([
@@ -9132,7 +9382,12 @@ async function drawValidatedStill(
             varietyRerolls++;
             offSubjectFallback ??= { buffer, mimeType: r.mimeType };
             if (scene.screenSetup) {
-              scene.screenSetup = nextScreenSetup(scene.screenSetup, !!scene.humanPresent, copiedSetup);
+              scene.screenSetup = nextScreenSetup(
+                scene.screenSetup,
+                !!scene.humanPresent,
+                copiedSetup,
+                screenSells(scene, visualOverride)
+              );
               prompt = buildStillPrompt(scene, false, visualOverride, subject, square);
             }
             // a CONCRETE new camera view each redraw — "look different" alone came back as the same
@@ -9212,12 +9467,26 @@ export async function generateSceneStillClip(
    * cover-crop takes nothing off the sides.
    */
   square = false,
-  apimartKey?: string | null
+  apimartKey?: string | null,
+  /**
+   * A picture already drawn AND checked for this scene — the start frame of its moving clip, when
+   * that clip moved wrong (`checkedKeyframeOf`). The still IS this picture, with the ordinary
+   * still look; unlike `coverImageUrl`, which also switches on the cover's dark backdrop. Never
+   * on a square panel: the frame is 16:9.
+   */
+  sourceImageUrl?: string
 ): Promise<string[]> {
   let imageUrl: string;
   if (coverImageUrl) {
     // Cover beat: animate the actual cover image, no generation.
     imageUrl = coverImageUrl;
+  } else if (sourceImageUrl && !square) {
+    // Drawing a new picture paid for one more image and broke what later pictures were drawn
+    // from: picture memory takes this scene's `pictureUrl`, which IS that start frame (Frederick's
+    // job 262 scene 16 drew three images for the one still it shipped).
+    imageUrl = sourceImageUrl;
+    scene.pictureUrl = sourceImageUrl;
+    pictureSettled(scene);
   } else {
     // A still never shows a person: at most bare hands at the task (described in the
     // prompt via ANON_PERSON_SUFFIX) — never the channel host — so no face reference image is
@@ -9225,6 +9494,10 @@ export async function generateSceneStillClip(
     // Stills render on OpenAI's official gpt-image-2, 16:9 (1:1 for a split-screen panel).
     // Validate + retry: a corrupt buffer would crash the Ken Burns ffmpeg and a lone image
     // failure would kill the scene with no resume, so we regenerate instead of failing.
+    // Print the picture asks to read and its line never says is drawn soft (`blurUnsaidPrint`) —
+    // here too, for a regenerate or an edited prompt the pipeline's pass never saw. Never on a
+    // picture drawn from a caller's own reference (the book cover asks for its real lettering).
+    if (!referenceImageUrl) blurUnsaidPrint(scene);
     // A key thing seen before is drawn from its earlier pictures (`server/pictureMemory.ts`). A
     // split's panel (square) gets its memory from the caller, off the host scene.
     if (!square) {
@@ -9335,6 +9608,8 @@ export async function generateBrollKeyframe(
 ): Promise<string> {
   // Keyframe stills render on OpenAI's official gpt-image-2, 16:9.
   // Same validate + retry as the still lane (my earlier 10s motion cap tripled these calls).
+  // Print the keyframe asks to read and its line never says is drawn soft (`blurUnsaidPrint`).
+  if (!referenceImageUrl) blurUnsaidPrint(scene);
   // A key thing seen before is drawn from its earlier pictures (`server/pictureMemory.ts`).
   if (clipIdx === 0 && !scene.memoryRefUrls?.length) {
     const memory = await memoryPicturesFor(scene);
@@ -9361,6 +9636,26 @@ export async function generateBrollKeyframe(
     pictureSettled(scene);
   }
   return url;
+}
+
+/**
+ * The start frame a moving cutaway's clip was rendered from — drawn by `generateBrollKeyframe`
+ * (a `broll-kf-` file) and already through the picture checks — or undefined when the clip had
+ * none (`BROLL_NO_KEYFRAME`, or a picture that is not a keyframe). Read right after the clip is
+ * judged, when `pictureUrl` is still that render's frame: a content-policy step down redraws it,
+ * and the clip that came back is the one drawn from the last. A clip that moved wrong is the
+ * video model's fault, not the frame's, so the second render and the still both use it instead
+ * of drawing again (local job 262 scene 16: two paid videos and three images for one still).
+ * Pure — unit-tested.
+ */
+export function checkedKeyframeOf(
+  scene: StoryboardScene,
+  keyframesOn = !brollKeyframeDisabled()
+): string | undefined {
+  const url = scene.pictureUrl;
+  return keyframesOn && url && /\/broll-kf-[^/]*$/.test(url.split("?")[0])
+    ? url
+    : undefined;
 }
 
 /** Clips needed to cover a scene whose narration is `audioDuration` long. */
@@ -11664,6 +11959,8 @@ async function compositeSceneSplit(
     const { url } = await storagePut(key, res.buffer, "video/mp4");
     composited.push(url);
   }
+  // Both halves are together again — whatever lost the panel before (`server/splitPanel.ts`).
+  scene.splitPanelMissing = undefined;
   return composited;
 }
 
@@ -11677,6 +11974,9 @@ async function withSplitMemory(
   right: StoryboardScene
 ): Promise<StoryboardScene> {
   if (!host.keyThing) return right;
+  // The panel's soft print decides its remembered close-up (`BLUR_PRINT_VIEW`), so it is marked
+  // before the view is (`blurUnsaidPrint` reads the panel's own words on a split).
+  blurUnsaidPrint(host);
   const memory = await memoryPicturesFor(host);
   return {
     ...right,
@@ -11690,8 +11990,12 @@ async function withSplitMemory(
  * Render the split-screen RIGHT panel: a gpt-image-2 still from `splitVisual`, Ken Burns'd to
  * the scene length — same still lane as every other still in the video, so the right panel
  * never hallucinates b-roll motion. Square, because the panel is a full-height 1:1 slot (see
- * `buildSplitScreenArgs`), so nothing is cropped off its sides. Bounded so a wedged image
- * render can't hold the host clip hostage.
+ * `buildSplitScreenArgs`), so nothing is cropped off its sides.
+ *
+ * No timer of its own: the caller bounds the wait — the host scene's own wall clock in
+ * `composeHostScene` (`server/splitPanel.ts`), the edit's still-lane clock in
+ * `regenerateSplitRight`. A fixed 300 s here, shorter than one 480 s draw, threw away panels still
+ * being redrawn, and the draw ran on and was paid for anyway (job 400 scene 3, job 383 scene 26).
  */
 async function renderSplitRightClip(
   jobId: number,
@@ -11700,24 +12004,41 @@ async function renderSplitRightClip(
   apimartKey?: string | null
 ): Promise<string> {
   const right = await withSplitMemory(scene, buildSplitRightScene(scene));
-  const [rightUrl] = await Promise.race([
-    generateSceneStillClip(
-      jobId,
-      right,
-      undefined,
-      undefined,
-      params.videoSubject,
-      true,
-      apimartKey
-    ),
-    new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error("Split-screen right still timed out")),
-        300_000
-      )
-    ),
-  ]);
+  const [rightUrl] = await generateSceneStillClip(
+    jobId,
+    right,
+    undefined,
+    undefined,
+    params.videoSubject,
+    true,
+    apimartKey
+  );
+  if (!rightUrl) throw new Error("Split-screen right still produced no output");
   return rightUrl;
+}
+
+/**
+ * Start a split host beat's still panel beside its host render (`server/splitPanel.ts`), so the
+ * panel is drawn while the lip-sync provider renders instead of after. Only a still panel: a
+ * MOVING one is tried after the host as before (it falls back to the still, drawn then). Not on a
+ * voice redo, which composites the panel the scene already has back on (`keepSplitPanel`).
+ */
+function startSplitPanelBeside(
+  jobId: number,
+  scene: StoryboardScene,
+  params: LongformInputParams,
+  movingPanel: boolean
+): void {
+  if (!scene.splitVisual || movingPanel) return;
+  if (scene.splitRightUrl && keepSplitPanel.has(scene)) return;
+  if (
+    startSplitPanelDraw(scene, async () =>
+      renderSplitRightClip(jobId, scene, params, await apimartKeyForJob(params))
+    )
+  )
+    console.log(
+      `[Longform ${jobId}] scene ${scene.index} split panel drawing beside the host render`
+    );
 }
 
 /**
@@ -11914,6 +12235,14 @@ async function generateSceneLipsyncClips(
   }
   const chunkCount = scene.renderTaskIds?.length ?? chunkUrls.length;
 
+  // A split's panel is drawn BESIDE the host render, from the moment there is one: a render
+  // already accepted (a resume polls it) or the one just submitted. Never before the provider
+  // takes it — a beat the spend limit, its allowance or a paused account refuses would pay for a
+  // panel nobody uses, on every pass while the account is down.
+  const movingPanel = !!(scene.splitMotion && videoAdapter);
+  if (scene.renderTaskIds?.some(Boolean))
+    startSplitPanelBeside(jobId, scene, params, movingPanel);
+
   // Lip-sync runs on whichever lane `resolveLipsyncAdapter` handed us (HeyGen in production,
   // RunPod InfiniteTalk in staging) — the payload difference lives there, not here. A terminal
   // provider failure surfaces as a PendingRenderError (from runChunkTasks) so the scene
@@ -11924,13 +12253,19 @@ async function generateSceneLipsyncClips(
     lipsync.provider,
     chunkCount,
     (i, reason) =>
-      lipsync.submit({
-        scene,
-        imageUrl: faceImageUrl,
-        audioUrl: chunkUrls[i],
-        useAlt: useAltPhoto,
-        reason,
-      }),
+      lipsync
+        .submit({
+          scene,
+          imageUrl: faceImageUrl,
+          audioUrl: chunkUrls[i],
+          useAlt: useAltPhoto,
+          reason,
+        })
+        .then(sub => {
+          if (sub.taskId)
+            startSplitPanelBeside(jobId, scene, params, movingPanel);
+          return sub;
+        }),
     id => lipsync.poll(id, pollTimeoutMs),
     persist,
     lipsync.slots,
@@ -11990,6 +12325,22 @@ async function renderHostGroup(opts: {
     m.sceneStatus = "rendering";
     m.error = undefined;
   }
+  // Members are finished inside the LEADER's wall clock, so a member's split panel may wait only
+  // as long as the leader has left (`composeHostScene`).
+  const leaderDeadline = sceneDeadlineAt.get(leader);
+  if (leaderDeadline != null)
+    for (const m of members) sceneDeadlineAt.set(m, leaderDeadline);
+  // Every split in the group has its panel drawn beside the one render (`startSplitPanelBeside`).
+  const startGroupPanels = () => {
+    for (const s of [leader, ...members])
+      startSplitPanelBeside(
+        jobId,
+        s,
+        params,
+        !!(s.splitMotion && videoAdapter)
+      );
+  };
+  if (leader.renderTaskIds?.some(Boolean)) startGroupPanels();
   try {
     const job = await getLongformVideoJobById(jobId);
     const masterAudioUrl = job?.masterAudioUrl;
@@ -12025,14 +12376,19 @@ async function renderHostGroup(opts: {
       "runpod",
       1,
       (_i, reason) =>
-        lipsync.submit({
-          scene: leader,
-          imageUrl: faceImageUrl,
-          audioUrl: chunkUrls[0],
-          useAlt: useAltPhoto,
-          audioDurationSec: leader.lipsyncGroup?.totalSec,
-          reason,
-        }),
+        lipsync
+          .submit({
+            scene: leader,
+            imageUrl: faceImageUrl,
+            audioUrl: chunkUrls[0],
+            useAlt: useAltPhoto,
+            audioDurationSec: leader.lipsyncGroup?.totalSec,
+            reason,
+          })
+          .then(sub => {
+            if (sub.taskId) startGroupPanels();
+            return sub;
+          }),
       id => lipsync.poll(id, pollTimeoutMs),
       persist,
       lipsync.slots,
@@ -12099,6 +12455,8 @@ async function renderHostGroup(opts: {
       }
     }
     throw e;
+  } finally {
+    for (const m of members) sceneDeadlineAt.delete(m);
   }
 }
 
@@ -12174,7 +12532,8 @@ const keepSplitPanel = new WeakSet<StoryboardScene>();
 
 /**
  * Finish a host render: remember the bare host clip, then composite the split-screen right
- * panel when the scene has one (falling back to the full-frame host on any failure).
+ * panel when the scene has one. When the panel cannot be had the scene keeps its full-frame host
+ * take, and the job says so (`server/splitPanel.ts`).
  */
 async function composeHostScene(
   jobId: number,
@@ -12192,7 +12551,7 @@ async function composeHostScene(
   // full-height SQUARE (see buildSplitScreenArgs) and its still is generated 1:1 to match, so the
   // b-roll is shown whole instead of side-cropped. If the right-half generation or compositing
   // fails, fall back to the plain full-frame host clips (still script-faithful) rather than
-  // failing the whole job.
+  // failing a beat that is already paid for — and say so on the job, naming the scene.
   // Remember the bare host renders. They already live in R2 (uploaded by runChunkTasks); without
   // this the composite below is the only surviving URL and a regenerate has to re-run the
   // lip-sync provider just to change the right half. See `regenerateSplitRight`.
@@ -12222,46 +12581,64 @@ async function composeHostScene(
   }
 
   if (scene.splitVisual) {
+    // The still panel started beside the host render (`startSplitPanelBeside`), usually done by
+    // now. Taken here whatever comes next, so a later render of this same scene starts afresh.
+    const started = takeSplitPanelDraw(scene);
+    let reason: string;
     try {
-      const apimartKey =
-        await apimartKeyForJob(params);
+      const apimartKey = await apimartKeyForJob(params);
       // A MOVING right panel when the pacing config assigned one and a video adapter is available;
-      // the Ken Burns still otherwise. The motion attempt degrades to the still on ANY failure —
-      // the host half is already rendered and paid for, so a slow or refused panel must not cost
-      // the scene. Both feed the same composite.
-      let rightUrl: string | undefined;
-      if (scene.splitMotion && videoAdapter) {
+      // the Ken Burns still otherwise. The motion attempt degrades to the still on ANY failure.
+      // A still that FAILS is drawn once more; everything waits only as long as this host scene
+      // has left on its own clock — the host half is rendered and paid for, and must not be lost
+      // to a slow panel. Both feed the same composite.
+      const panel = await splitPanelFor({
+        moving:
+          scene.splitMotion && videoAdapter
+            ? () =>
+                renderSplitRightMotionClip(
+                  jobId,
+                  scene,
+                  params,
+                  videoAdapter,
+                  instruction,
+                  persist
+                )
+            : undefined,
+        still: () => renderSplitRightClip(jobId, scene, params, apimartKey),
+        started: scene.splitMotion && videoAdapter ? undefined : started,
+        deadlineAt:
+          sceneDeadlineAt.get(scene) ?? Date.now() + SCENE_DEADLINE_STILL_MS,
+        log: line =>
+          console.warn(`[Longform ${jobId}] scene ${scene.index} ${line}`),
+      });
+      if (panel.url == null) reason = panel.reason;
+      else {
+        scene.splitRightUrl = panel.url; // the panel's own clip — the split editor recomposites from it
         try {
-          rightUrl = await renderSplitRightMotionClip(
+          return await compositeSceneSplit(
             jobId,
             scene,
-            params,
-            videoAdapter,
-            instruction,
-            persist
+            urls,
+            panel.url,
+            scene.splitLayout,
+            params
           );
         } catch (e: any) {
-          console.warn(
-            `[Longform ${jobId}] scene ${scene.index} moving split panel failed ` +
-              `(${e.message}) — falling back to the still panel`
-          );
+          reason = `the two halves could not be put together: ${describeError(e)}`;
         }
       }
-      rightUrl ??= await renderSplitRightClip(jobId, scene, params, apimartKey);
-      scene.splitRightUrl = rightUrl; // the panel's own clip — the split editor recomposites from it
-      return await compositeSceneSplit(
-        jobId,
-        scene,
-        urls,
-        rightUrl,
-        scene.splitLayout,
-        params
-      );
     } catch (e: any) {
-      console.warn(
-        `[Longform ${jobId}] scene ${scene.index} split-screen composite failed, using full-frame host: ${e.message}`
-      );
+      reason = describeError(e);
     }
+    console.warn(
+      `[Longform ${jobId}] scene ${scene.index} split screen ships as the host alone: ${reason}`
+    );
+    // A scene its wall clock gave up on is already a failed card; its worker says nothing more.
+    if (!abandonedScenes.has(scene))
+      markSplitPanelMissing(scene, reason, line =>
+        appendJobWarning(jobId, line)
+      );
   }
 
   return urls;
@@ -12286,7 +12663,13 @@ export async function generateSceneClips(
    * Explicit 69Labs opt-in for the local 69labs-only test runner: allows a host shot to render
    * unsynced AND b-roll to fall back off APIMART. Production leaves this false.
    */
-  allow69Labs: boolean = false
+  allow69Labs: boolean = false,
+  /**
+   * A b-roll start frame already drawn and checked for this scene — the glitch re-render's
+   * (`renderSceneClip`, `checkedKeyframeOf`). The clip is rendered again from it instead of a new
+   * draw; after a content-policy block each step draws its own, as before.
+   */
+  keyframeUrl?: string
 ): Promise<string[]> {
   // ponytail: b-roll never depicts the book — neutralize any persisted `showsBook=true` from an
   // OLD job so no lane attaches the cover reference on regen/resume (new jobs already parse
@@ -12458,6 +12841,9 @@ export async function generateSceneClips(
     // normal; set on each escalation below.
     let kfVisual: string | undefined;
     let kfSubject = params.videoSubject;
+    // The glitch re-render's checked frame, used until the first content-policy block: from
+    // there each step draws its own, exactly as before.
+    let reuseKeyframe = keyframeUrl;
     while (true) {
       scene.renderModelIndex = idx;
       const req = chain[idx];
@@ -12476,16 +12862,20 @@ export async function generateSceneClips(
         if (!scene.hostPresent && !req.imageUrls && !brollKeyframeDisabled()) {
           // Reference baked into the keyframe: the real book cover on a showsBook beat, and
           // nothing else. The channel host photo is never referenced on b-roll — a cutaway
-          // shows no person at all (see NO_FIGURES_SUFFIX).
-          const kf = await generateBrollKeyframe(
-            jobId,
-            scene,
-            i,
-            scene.showsBook ? params.bookCoverImageUrl : undefined,
-            kfSubject,
-            kfVisual,
-            apimartKey
-          );
+          // shows no person at all (see NO_FIGURES_SUFFIX). The glitch re-render starts again
+          // from the frame already drawn and checked (`reuseKeyframe`).
+          const kf =
+            i === 0 && reuseKeyframe
+              ? reuseKeyframe
+              : await generateBrollKeyframe(
+                  jobId,
+                  scene,
+                  i,
+                  scene.showsBook ? params.bookCoverImageUrl : undefined,
+                  kfSubject,
+                  kfVisual,
+                  apimartKey
+                );
           // Grok takes the lone input image as the clip's start frame, with no videoInputMode
           // (only gemini-omni supports modes). buildVideoBody caps images and strips any mode;
           // we send a single keyframe and omit videoInputMode here too.
@@ -12570,6 +12960,7 @@ export async function generateSceneClips(
             ]
           } prompt`
         );
+        reuseKeyframe = undefined;
         idx += 1;
         scene.renderModelIndex = idx;
         scene.renderTaskIds = undefined; // resubmit fresh on the next model
@@ -12591,7 +12982,8 @@ export async function generateSceneClips(
           scene,
           params,
           0,
-          duration
+          duration,
+          keyframeUrl
         );
       } catch (e: any) {
         if (attempt === 1) throw e;
@@ -12686,8 +13078,10 @@ function startSixtyNineLaneUsageLogger(jobId: number): () => void {
  * the 30-min inactivity watchdog killed a job that was still alive, one scene short of done.
  *
  * host: `HEYGEN_LIPSYNC_TIMEOUT_MS` is 15min (providers/heygen-lipsync.ts) and that clock only
- *   starts once the scene wins a global HeyGen slot; add the ≤5min split-screen right panel and
- *   the composite. The RunPod lane gets its own, longer number — see below.
+ *   starts once the scene wins a global HeyGen slot; then the composite. A split's still panel is
+ *   drawn BESIDE the render and waited for only as long as this clock has left
+ *   (`server/splitPanel.ts`), so it adds no fixed share. The RunPod lane gets its own, longer
+ *   number — see below.
  * motion: 69Labs video polls 6min per chunk, a scene may run several, plus lane queueing.
  * still: typically <2min, but the worst legit case stacks the process-global gpt-image-2 bucket,
  *   up to 4 `generateValidatedStill` attempts with 429 backoff, the Ken Burns encode + its wait for
@@ -12726,6 +13120,13 @@ export const SCENE_DEADLINE_STILL_MS = 20 * 60_000;
 /** Scenes `withSceneDeadline` has given up on — their still-running render path must not resubmit. */
 const abandonedScenes = new WeakSet<StoryboardScene>();
 
+/**
+ * When each scene's wall clock runs out (epoch ms), for work inside it that may wait only as long
+ * as the scene has left: a split's panel (`composeHostScene`), so a slow panel costs the scene its
+ * panel and never its paid host take.
+ */
+const sceneDeadlineAt = new WeakMap<StoryboardScene, number>();
+
 async function withSceneDeadline(
   scene: StoryboardScene,
   ms: number,
@@ -12738,6 +13139,7 @@ async function withSceneDeadline(
   onAbandon?: (s: StoryboardScene) => Promise<void>
 ): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined;
+  sceneDeadlineAt.set(scene, Date.now() + ms);
   const expired = new Promise<"expired">(resolve => {
     timer = setTimeout(() => resolve("expired"), ms);
   });
@@ -12771,6 +13173,9 @@ async function withSceneDeadline(
     }
   } finally {
     clearTimeout(timer);
+    // A scene given up on keeps its (passed) deadline: its worker runs on, and must not wait on
+    // a panel for a scene nobody is waiting for.
+    if (!abandonedScenes.has(scene)) sceneDeadlineAt.delete(scene);
   }
 }
 
@@ -12918,6 +13323,30 @@ export async function dispatchScenesByProvider(
 }
 
 /**
+ * A moving cutaway whose clip moved wrong (`scanClipGlitch`): count it, clear the clip, and say
+ * what comes next — the first time one more render, the second time the still — with the start
+ * frame both are made from (`checkedKeyframeOf`, read before anything is cleared). The second
+ * render is ledgered `glitch`: it used to fall to `resume`, and the Cost dialog showed every
+ * glitch re-render as a restart (local, since 2026-09-30: the 11 `resume` entries were exactly
+ * the 11 glitched scenes). Pure — unit-tested.
+ */
+export function planGlitchRerender(scene: StoryboardScene): {
+  next: "rerender" | "still";
+  keyframe?: string;
+} {
+  const keyframe = checkedKeyframeOf(scene);
+  scene.motionGlitches = (scene.motionGlitches ?? 0) + 1;
+  scene.clipUrls = undefined;
+  scene.clipUrl = undefined;
+  scene.renderTaskIds = undefined;
+  if (scene.motionGlitches < 2) {
+    scene.nextSubmitReason = "glitch";
+    return { next: "rerender", keyframe };
+  }
+  return { next: "still", keyframe };
+}
+
+/**
  * Render one scene's clip(s) and fold the outcome into its status. Shared by the main clip
  * stage and the resume stage. A still-running render (PendingRenderError) stays "rendering"
  * so it resumes later; any other failure marks the scene "failed".
@@ -12944,6 +13373,9 @@ async function renderSceneClip(
   // first failure. The render gate in `runChunkTasks` holds the count, so this loop can never
   // pay past it; the pass bound only stops a failure that happens before any submit (no audio,
   // a photo that will not load) from spinning.
+  // The start frame of a cutaway whose clip moved wrong: the second render, and the still if that
+  // one moves wrong or fails too, are made from it (`planGlitchRerender`).
+  let glitchKeyframe: string | undefined;
   for (let pass = 0; ; pass++) {
     try {
       scene.clipUrls = await generateSceneClips(
@@ -12954,7 +13386,9 @@ async function renderSceneClip(
         lipsync,
         instruction,
         persist,
-        pollTimeoutMs
+        pollTimeoutMs,
+        false,
+        glitchKeyframe
       );
       syncSceneClipFields(scene);
       // A moving cutaway that moves something the way nothing moves in real life (wood sliding
@@ -12975,20 +13409,20 @@ async function renderSceneClip(
           scene.selfMoving ?? !!scene.objectMotion
         );
         if (g.glitch) {
-          scene.motionGlitches = (scene.motionGlitches ?? 0) + 1;
-          scene.clipUrls = undefined;
-          scene.clipUrl = undefined;
-          scene.renderTaskIds = undefined;
-          if (scene.motionGlitches < 2) {
+          const plan = planGlitchRerender(scene);
+          if (plan.next === "rerender") {
+            glitchKeyframe = plan.keyframe;
             console.warn(
-              `[Longform ${jobId}] scene ${scene.index} clip moves wrong (${g.what}) — rendering it again`
+              `[Longform ${jobId}] scene ${scene.index} clip moves wrong (${g.what}) — rendering it again` +
+                (plan.keyframe ? " from the same start frame" : "")
             );
             continue;
           }
           console.warn(
-            `[Longform ${jobId}] scene ${scene.index} clip moved wrong twice (${g.what}) — using the still`
+            `[Longform ${jobId}] scene ${scene.index} clip moved wrong twice (${g.what}) — using the still` +
+              (plan.keyframe ? " (its start frame)" : "")
           );
-          await fallbackSceneToStill(jobId, scene, params);
+          await fallbackSceneToStill(jobId, scene, params, plan.keyframe);
           return;
         }
       }
@@ -13013,7 +13447,10 @@ async function renderSceneClip(
           console.warn(
             `[Longform ${jobId}] scene ${scene.index} b-roll video failed (${e.message}) — falling back to Ken Burns still animation`
           );
-          await fallbackSceneToStill(jobId, scene, params);
+          // A second render after a glitch that failed: the first one's start frame was drawn
+          // and checked for this scene. Any other failure draws as before — there the frame
+          // may never have been drawn, and `pictureUrl` could be an older picture's.
+          await fallbackSceneToStill(jobId, scene, params, glitchKeyframe);
           return;
         } catch (stillErr: any) {
           console.error(
@@ -15667,10 +16104,18 @@ async function runUnifiedPipeline(
       if (s.hostPresent && !s.splitVisual) s.visualPrompt = talkingHeadVisualPrompt(params.hostLook, s.index);
   }
   if (hostBroll) console.log(`[Longform ${jobId}] host in b-roll: ${hostBroll} picture(s) show the host at work`);
+  const chinShots = scenes.filter(s => !s.hostPresent && s.humanPresent && hostLipsCut(s)).length;
+  if (chinShots) console.log(`[Longform ${jobId}] chin lines: ${chinShots} host picture(s) framed from the lips down`);
+  const othersShown = scenes.filter(s => s.otherPerson && !s.hostPresent).length;
+  if (othersShown) console.log(`[Longform ${jobId}] someone else in b-roll: ${othersShown} picture(s), never from the host photo`);
   // Each screen picture (an app, a listing) sits somewhere else, in film order — after the host
   // marks, so a screen in the host's hands gets a held setting.
   const screens = assignScreenSetups(scenes);
   if (screens) console.log(`[Longform ${jobId}] screen pictures: ${screens}, each in its own setting`);
+  // A picture that asks for print to be read, with no words its line says, shows that print soft
+  // (`blurUnsaidPrint`) — on the final descriptions, before memory views and prompts are built.
+  const softPrint = scenes.filter(s => blurUnsaidPrint(s)).length;
+  if (softPrint) console.log(`[Longform ${jobId}] soft print: ${softPrint} picture(s) asked for print to read`);
 
   // The passes above created and removed host beats after the adjacency pass assigned angles —
   // re-derive so any surviving pair still reads main → alt. Pure and O(n); the last register
@@ -20125,6 +20570,7 @@ async function runSplitEdit(
     scene.splitVisualSeed = undefined;
     scene.splitMotion = undefined;
     scene.splitRightUrl = undefined;
+    scene.splitPanelMissing = undefined;
     scene.splitLayout = undefined; // geometry of a composite that no longer exists
     scene.clipUrls = [...scene.hostClipUrls!];
     syncSceneClipFields(scene);

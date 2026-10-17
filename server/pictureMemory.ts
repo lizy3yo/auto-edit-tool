@@ -12,7 +12,7 @@
  */
 import { PART_VIEW } from "./namedLooks";
 import type { KeyThing, StoryboardScene } from "@shared/types";
-import { keyThingsIn, SHOWS_SCREEN } from "./shotList";
+import { keyThingsIn, showsScreen } from "./shotList";
 
 /** The longest a picture waits for its memory before it is drawn from words alone. */
 export const MEMORY_WAIT_MS = 8 * 60_000;
@@ -215,7 +215,7 @@ export function shotFraming(s: StoryboardScene): "close" | undefined {
 
 /** A picture of a phone, tablet or laptop screen (its own words, or a split panel's). */
 const isScreen = (s: StoryboardScene) =>
-  SHOWS_SCREEN.test(s.hostPresent ? s.splitVisual ?? "" : s.showSubject ?? s.visualPrompt ?? "");
+  showsScreen(s.hostPresent ? s.splitVisual ?? "" : s.showSubject ?? s.visualPrompt ?? "");
 
 /** At most this many memory pictures go with one picture (the host photo may follow them). */
 export const MAX_MEMORY_REFS = 3;

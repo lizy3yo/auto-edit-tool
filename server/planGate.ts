@@ -19,7 +19,7 @@
 import type { StoryboardScene, LongformInputParams } from "../shared/types";
 import { sceneHoldPlan } from "../shared/filmTimeline";
 import type { SilenceInterval } from "./videoAssembly";
-import { SHOWS_PERSON } from "./hostLook";
+import { SHOWS_PERSON, showsSomeoneElse } from "./hostLook";
 import {
   demoteHostToStill,
   promoteCutawayToHost,
@@ -664,11 +664,12 @@ const gapsOk = (g: { early: number; late: number }) =>
 
 /**
  * A picture that can become a clean host take: in at the start of a sentence, out at its end or
- * at a shot-list break — the same shapes rule 7 accepts. Never next to another host take.
+ * at a shot-list break — the same shapes rule 7 accepts. Never next to another host take, and never
+ * a picture of someone else (`showsSomeoneElse`, as `checkInShaped`): that line shows the person.
  */
 function cleanHostCandidate(scenes: StoryboardScene[], k: number): boolean {
   const s = scenes[k];
-  if (!plainPicture(s)) return false;
+  if (!plainPicture(s) || showsSomeoneElse(s)) return false;
   const d = len(s);
   if (d < 2.5 || d > 9) return false;
   const prev = scenes[k - 1];

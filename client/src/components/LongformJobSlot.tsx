@@ -1916,6 +1916,23 @@ export default function LongformJobSlot({
   const retryQueued = job?.retryQueued === true;
   // Stretches the server's timeline audit flagged (see `pollJob.timelineIssues`).
   const timelineIssues = job?.timelineIssues ?? [];
+  // Split screens that shipped as the host alone (see `pollJob.splitPanelsMissing`).
+  const splitPanelsMissing: number[] = job?.splitPanelsMissing ?? [];
+  // Draw those panels: a split's Regenerate draws only the picture beside the host and keeps the
+  // host take (`regenerateSplitRight`), so this is one still each and no host render.
+  const drawMissingSplitPanels = () => {
+    if (!jobId || !splitPanelsMissing.length) return;
+    armNotifications();
+    for (const i of splitPanelsMissing)
+      if (!queuedScenes.includes(i)) {
+        queuePhase.current.set(i, "queued");
+        queuedAt.current.set(i, Date.now());
+      }
+    setQueuedScenes(prev =>
+      prev.concat(splitPanelsMissing.filter(i => !prev.includes(i)))
+    );
+    regenBatchMutation.mutate({ jobId, sceneIndices: splitPanelsMissing });
+  };
   const clock = (sec: number) => {
     const s = Math.max(0, Math.round(sec));
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
@@ -2776,6 +2793,39 @@ export default function LongformJobSlot({
                     {repairTimelineMutation.isPending
                       ? "Starting…"
                       : "Repair timeline"}
+                  </Button>
+                </div>
+              )}
+
+              {/* Split screens that shipped as the host alone (`shared/splitPanel.ts`): the
+                picture beside the host was never drawn. Every scene has a clip, so nothing reads
+                as failed; this names them and offers the panel-only redraw. */}
+              {splitPanelsMissing.length > 0 && (
+                <div className="space-y-2 rounded-md border border-warning/40 bg-warning/5 p-3">
+                  <p className="text-xs font-medium">
+                    {splitPanelsMissing.length === 1
+                      ? `Scene ${splitPanelsMissing[0]} is a split screen showing the host alone.`
+                      : `Scenes ${splitPanelsMissing.join(", ")} are split screens showing the host alone.`}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    The picture beside the host was never drawn. Drawing it keeps
+                    the host take as it is and does not render the host again —
+                    one picture per scene. Reassemble afterwards.
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={drawMissingSplitPanels}
+                    disabled={
+                      regenBatchMutation.isPending ||
+                      isPipelineRunning ||
+                      splitPanelsMissing.some(i => queuedScenes.includes(i))
+                    }
+                  >
+                    {splitPanelsMissing.length === 1
+                      ? "Draw the picture"
+                      : `Draw the ${splitPanelsMissing.length} pictures`}
                   </Button>
                 </div>
               )}
@@ -3745,6 +3795,15 @@ export default function LongformJobSlot({
                                 title={`${scene.hostNeeded.reason}\nThe start, a CTA or the end: its automatic retries are used, so it was not made b-roll behind your back. Regenerate it or make it b-roll — the film will not assemble until you do.`}
                               >
                                 Host needed
+                              </Badge>
+                            )}
+                            {splitPanelsMissing.includes(scene.index) && (
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] py-0 text-warning border-warning/40"
+                                title={`${scene.splitPanelMissing ? `${scene.splitPanelMissing.reason}\n` : ""}The split screen's picture was never drawn, so this scene shows the host alone. Regenerate draws only the picture and keeps the host take.`}
+                              >
+                                Split picture missing
                               </Badge>
                             )}
                             {scene.hostWaiting && (

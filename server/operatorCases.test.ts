@@ -5,7 +5,7 @@
  * there" as the whole quilt. The rules under test are general; these lines are only the examples
  * that proved each one.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import type { KeyThing, StoryboardScene } from "@shared/types";
 import {
   BACKGROUND_VIEW,
@@ -38,12 +38,23 @@ import {
 import { keepOwnWords } from "./narrationAlignment";
 import {
   ANON_PERSON_SUFFIX,
+  APP_SCREEN_CLAUSE,
   appScreenClause,
+  DESCRIBED_SCREEN_CLAUSE,
+  DEVICE_RESTS,
+  REAL_APP_SCREEN_CLAUSE,
   BLURRED_PRINT_CLAUSE,
   buildSplitRightScene,
+  blurUnsaidPrint,
+  brollDepictsBook,
+  buildClipChain,
   buildStillPrompt,
   guardPitchVisuals,
   hostBrollClause,
+  HOST_FRAMING_CLAUSE,
+  HOST_LIPS_CUT_CLAUSE,
+  HOST_LIPS_CUT_ONLY_SUFFIX,
+  NO_OTHER_FIGURES_SUFFIX,
   keepBodyPartsOnBody,
   memoryClause,
   NO_FIGURES_SUFFIX,
@@ -56,6 +67,7 @@ import {
   personClauseFor,
   TOOL_POSITION_CLAUSE,
   withAllowedText,
+  planGlitchRerender,
 } from "./longformVideo";
 import {
   exactLookQuestion,
@@ -67,6 +79,7 @@ import {
 } from "./overlayTextScan";
 import {
   DETACHED_BODY_PART,
+  hostLipsCut,
   looksCutOff,
   markHostBroll,
   onTheBody,
@@ -79,6 +92,10 @@ import { wordsSaidOver } from "../graphics/src/plan/planner";
 import { plannerForJob } from "./graphics/apply";
 import { makeReadable, type Reading } from "./graphics/readable";
 import { checkScript } from "@shared/scriptCheck";
+import { pictureKindOf } from "./pictureCheckLog";
+import { splitPanelFor } from "./splitPanel";
+import { splitPanelsMissing } from "@shared/splitPanel";
+import { clipGlitchMessage, parseClipGlitchVerdict } from "./clipGlitchScan";
 
 const pic = (index: number, scriptText: string, showSubject: string, over: Partial<StoryboardScene> = {}) =>
   ({ index, scriptText, showSubject, visualPrompt: showSubject, ...over }) as StoryboardScene;
@@ -866,6 +883,26 @@ describe("a line about someone else shows that person, not the host", () => {
     // The person stays in the words that lead the prompt.
     expect(prompt).toMatch(/^(THE PICTURE MUST SHOW: )?a woman seen from behind/);
   });
+
+  // The audit of 336 jobs (2026-10-18): the picture's OWN words decide too, not only the planner.
+  it("reads someone else off the picture's own words — a role, the other sex, two people — never the host photo", () => {
+    const man = "A man in his late sixties with fair skin, short grey hair, wire-rimmed glasses";
+    const scenes = [
+      pic(16, "grief,", "an older woman's hand resting on a framed photograph on a table", { humanPresent: true }), // job 400
+      pic(35, "Coasters and ornaments are impulse buys.", "a shopper's hand picking up a coaster from a market table of coasters and ornaments"), // job 341
+      pic(8, "or some kind of jealousy thing.", "medium-sized short-haired tan and white dog squeezing his nose between two people hugging in the entryway"), // job 370
+      pic(17, "A hen will stick her head in the feeder", "a hen with head in the feeder tossing pellets over her shoulder", { otherPerson: "a hen", humanPresent: true }), // job 371
+      pic(2, "buying his third sympathy card since spring,", "a man standing in a narrow pharmacy aisle holding a greeting card"), // job 400
+    ];
+    markHostBroll(scenes, { hostLook: man }, "https://x/host.png");
+    expect(scenes.map(s => s.otherPerson)).toEqual(["an older woman", "a shopper", "two people", undefined, undefined]);
+    expect(scenes.slice(0, 4).every(s => !s.brollHostRef)).toBe(true);
+    expect(scenes[2].otherPeople).toBe(2);
+    expect(scenes[3].humanPresent).toBeUndefined(); // a hen is no person
+    // A plain man on a man's channel is left to the planner and the line check: the host.
+    expect(scenes[4].brollHostRef).toBe("https://x/host.png");
+    expect(otherPersonOf("a hen")).toBeUndefined();
+  });
 });
 
 // 2026-10-11, practice runs of six channels (jobs 358-363). Every rule here names no channel.
@@ -1209,5 +1246,441 @@ describe("only narration is voiced (the audit's jobs 204/205)", () => {
 
   it("a narration line that says 'verdict' (job 46) is narration", () => {
     expect(checkScript("So today, twelve things about plain white vinegar, and an honest verdict on every one.").problems).toEqual([]);
+  });
+});
+
+describe("a screen shows what its own description says (the audit's grid screens, 2026-10-18)", () => {
+  const GRID = /buy-and-sell app: a grid of small photos/;
+
+  it("a screen not about selling is drawn as described, never as a grid of items for sale", () => {
+    const screens = [
+      // Job 393: "Subscribe to Frederick Barnes," — a hand tapping a phone.
+      pic(39, "Subscribe to Frederick Barnes,", "a hand tapping a phone screen in a hallway beneath a ceiling smoke alarm", {
+        visualPrompt:
+          "Suburban hallway at night, a round white smoke alarm mounted on the painted ceiling above, a single bare hand tapping a phone screen held at chest level.",
+        humanPresent: true,
+      }),
+      // Job 294: the same "Subscribe" tap at a café table.
+      pic(34, "Subscribe to Diane De Chambray if you want the rest…", "A woman's hand tapping a phone screen beside a white coffee cup", {
+        visualPrompt: "A bare hand tapping a phone screen beside a white coffee cup on a marble café table near a window in soft morning light.",
+        humanPresent: true,
+      }),
+      // Job 103: the tutorial video that went too fast.
+      pic(3, "and the video you were following went too fast to show you.", "", {
+        showSubject: undefined,
+        visualPrompt:
+          "A smartphone resting on a kitchen table beside yarn balls and a crochet hook, its screen showing blurred hands moving quickly through stitches. The phone screen tilts slightly, framing the rushed tutorial against the calm workspace around it.",
+      }),
+      // Production job 235 (Helena): an airline app; job 310: a seat map with a price on it.
+      pic(11, "Fee number one is basic economy, and it finds you before you've packed a thing.", "mobile phone on the kitchen table showing an airline app screen", {
+        visualPrompt:
+          "Slim black smartphone with glass screen resting on a round honey-toned wood kitchen table displaying an airline app interface, shot in a sunlit home kitchen.",
+      }),
+      pic(102, "On a lot of airlines and a lot of fares, choosing your seat ahead of time costs extra.", "close-up of a phone screen showing a seat map with a price on a chosen seat", {
+        visualPrompt: "A phone screen showing an airline seat map with colored seats and one seat highlighted on the map.",
+      }),
+      // Production job 260 (Lance): a camera app's password page.
+      pic(126, "Start in the camera's app tonight and give the account a brand new password…", "hands holding black smartphone changing password in camera app settings", {
+        visualPrompt: "Bare hands holding black smartphone upright, fingers adjusting password field in the camera app security settings screen.",
+        humanPresent: true,
+      }),
+      // Production job 271 (Dale): a buyer's message INSIDE the selling app is still a message.
+      pic(80, "Answer every message and every quote request before the night's over.", "a smartphone in hand showing a buy-and-sell app message screen", {
+        visualPrompt:
+          "Smartphone held at chest height displaying an open messaging app with incoming customer inquiries, bare hands visible from forearms down.",
+      }),
+      // Production job 332 (Lance): the scanner app "listing manufacturer names" (a verb, not a
+      // listing for sale), and the rental listing that came back as a grid of bags and flashlights.
+      pic(119, "a good one shows a plain list, names each manufacturer, and asks you to configure nothing.", "phone screen close on the scanner app listing manufacturer names, with the host's hands at work on it", {
+        visualPrompt:
+          "Close view of a smartphone screen showing a network scanner app list with manufacturer names and device types, held in bare hands in the rental bedroom.",
+        humanPresent: true,
+      }),
+      pic(154, "Fifth, screenshot the listing again before anything about it changes,", "phone held showing rental listing photos on screen", {
+        visualPrompt:
+          "Close view of bare hands holding a slim black smartphone, the dark glass screen displaying a rental listing with photos, fingers visible on the sides of the phone.",
+        humanPresent: true,
+      }),
+    ];
+    for (const s of screens) {
+      const prompt = buildStillPrompt(s);
+      expect(prompt).toContain(DESCRIBED_SCREEN_CLAUSE);
+      expect(prompt).not.toMatch(GRID);
+      expect(prompt).toMatch(/never stands upright by itself/);
+      expect(prompt).toContain(SCREEN_TEXT_AS_BARS.trim());
+    }
+    // Words the line SAYS stay readable on a described screen too (production job 338: the buyer's
+    // message that her wall is exactly 41 inches).
+    const said = appScreenClause(
+      pic(145, "When a buyer messages that her wall is exactly 41 inches,", "a phone held up showing a buy-and-sell app message screen", {
+        pictureText: "41 inches",
+      })
+    );
+    expect(said).toContain('nothing readable on the screen except "41 inches"');
+    expect(said).not.toMatch(GRID);
+  });
+
+  it("a screen word with no device in the picture adds no screen at all", () => {
+    const noDevice = [
+      // Job 151: the afghan "listing" to one side; job 122: the lantern "showing why the listing photo sells".
+      pic(38, "or the whole thing leans off to one side,", "the afghan lying crooked, leaning off to one side on the kitchen table", {
+        visualPrompt:
+          "Finished lace shell afghan in soft neutral yarn, its scalloped edge draping unevenly off the wooden kitchen table, the afghan angled and listing to one side of the table's center.",
+      }),
+      pic(42, "Take your listing photo with the lantern lit and the room dark…", "", {
+        showSubject: undefined,
+        visualPrompt:
+          "A finished andon lantern with warm paper panels and wooden frame sits lit on a low table in a darkened room, a settled moment showing why the listing photo sells.",
+      }),
+      // Job 230: the picture behind the scan card, "ready for listing or sale".
+      pic(26, "Or look at the top of the description under this video…", "", {
+        showSubject: undefined,
+        cta: true,
+        qrHero: true,
+        visualPrompt:
+          "Workbench in the garage workshop, a few finished wooden cutting boards and coasters arranged in a calm, orderly pile, soft daylight from a side window, ready for listing or sale.",
+      }),
+    ];
+    // Job 342: a split panel of a board "ready for an online shop photograph", under its host beat's
+    // real-app look — it was told the phone's screen shows that app.
+    const panel = buildSplitRightScene(
+      host(22, "Number two. Use Etsy for the thing it does best, which is reach.", {
+        splitVisual:
+          "Walnut cutting board with a small carved motif displayed flat on a plain background, ready for an online shop photograph.",
+        namedLook: "a buy-and-sell app: white background, a grid of square product photos in two columns",
+      })
+    );
+    for (const s of noDevice) {
+      const prompt = buildStillPrompt(s);
+      expect(prompt).not.toContain(DEVICE_RESTS);
+      expect(prompt).not.toMatch(/screen shows/);
+    }
+    const panelPrompt = buildStillPrompt(panel, false, undefined, undefined, true);
+    expect(panelPrompt).not.toContain(REAL_APP_SCREEN_CLAUSE);
+    expect(panelPrompt).not.toContain(DEVICE_RESTS);
+    // …and neither the memory step nor the check log takes the afghan for a screen.
+    const first = pic(37, "Here is the afghan.", "the finished lace shell afghan on the table", { keyThing: "afghan" });
+    const crooked = { ...noDevice[0], keyThing: "afghan" } as StoryboardScene;
+    expect(memoryViewFor([first, crooked], crooked)).not.toBe(SCREEN_ITEM_VIEW);
+    expect(pictureKindOf(crooked, crooked.visualPrompt!)).not.toBe("screen");
+  });
+
+  it("a selling screen keeps the buy-and-sell grid, and a named app its real look", () => {
+    // Job 221: the bookcase's listing screen; a plain buy-and-sell app with listings.
+    const listing = pic(42, "Put the measurements in the very first line, and", "A finished wooden furniture piece being noted for its dimensions in the workshop", {
+      visualPrompt:
+        "Tall wooden bookcase standing upright in the garage workshop near the sliding door, a smartphone resting on the workbench edge nearby showing a listing screen with dimensions noted.",
+    });
+    expect(buildStillPrompt(listing)).toMatch(GRID);
+    expect(buildStillPrompt(pic(1, "x", "a phone showing a buy-and-sell app with handmade listings"))).toContain(APP_SCREEN_CLAUSE);
+    // Production job 244: a marketplace SEARCH is a grid of things for sale — the described clause's
+    // "never a grid of items for sale" would have contradicted its own description.
+    const search = pic(27, "dresser,", "phone search bar listing results of wooden dressers", {
+      visualPrompt: "Phone screen showing a marketplace search results grid, listings of wooden dressers displayed in thumbnail photos.",
+    });
+    expect(buildStillPrompt(search)).toMatch(GRID);
+    expect(buildStillPrompt(search)).not.toContain(DESCRIBED_SCREEN_CLAUSE);
+    expect(appScreenClause(pic(1, "x", "a phone showing a listing of the walnut bookcase"))).toMatch(/ONE item's own listing page/);
+    // Job 338: "Etsy," with the real app's look stays the real app.
+    const etsy = pic(5, "Etsy,", "A phone showing a white shopping app screen with a two-column grid of product photos", {
+      visualPrompt:
+        "A smartphone held near the workbench, its screen showing a white shopping app with a two-column grid of small product photos, words unreadable.",
+      namedLook: "a shopping app: a white screen, a small orange logo at the top left, a two-column grid of product photos",
+    });
+    expect(buildStillPrompt(etsy)).toContain(REAL_APP_SCREEN_CLAUSE);
+    // A screen not about selling never gets the one-listing page either.
+    expect(appScreenClause(pic(1, "x", "a phone showing a message from the buyer about her listing"))).not.toMatch(
+      /ONE item's own listing page/
+    );
+  });
+});
+
+describe("print the line never says is drawn soft, never asked for (the audit's writing pictures, 2026-10-18)", () => {
+  it("a picture that asks for print to read takes the blurred-print road; the thing carrying it stays", () => {
+    // Job 352 scene 106: the moisture meter "reading 7%" failed for writing twice and shipped.
+    const meter = pic(106, "For furniture that lives indoors, you want boards reading somewhere between six and nine percent.", "close-up of the black meter's two pins pressed into a rough oak board, its small grey display reading 7%", {
+      visualPrompt:
+        "Close view of a black handheld moisture meter's two metal pins pressed into a rough oak board, showing a small grey display reading 7%.",
+    });
+    // Job 383 scene 31: six checks, writing every time — the label was asked for in the description.
+    const box = pic(31, "If your house isn't wired for it, there are wireless models that pair out of the box.", "two white smoke detectors lying side by side on a counter beside their open box", {
+      visualPrompt:
+        "Two white round smoke detectors lying side by side on a kitchen counter next to an open cardboard box with its printed label facing forward.",
+    });
+    for (const s of [meter, box]) {
+      expect(blurUnsaidPrint(s)).toBe(true);
+      expect(buildStillPrompt(s)).toContain(BLURRED_PRINT_CLAUSE);
+    }
+    expect(buildStillPrompt(meter)).not.toMatch(/7%/);
+    expect(buildStillPrompt(box)).toMatch(/cardboard box/);
+    // Frederick's job 329: words the line SAYS stay readable and exact.
+    const label = pic(30, "First thing on the label. The type.", "the alarm box's printed label facing forward", {
+      pictureText: "Photoelectric",
+    });
+    expect(blurUnsaidPrint(label)).toBe(false);
+    expect(buildStillPrompt(label)).toMatch(/exactly "Photoelectric"/);
+  });
+
+  it("'Facebook' is a brand, not a book: its screen keeps its own picture (Dale's jobs 343, 363, 372)", () => {
+    const screen =
+      "a phone screen showing Facebook Marketplace: a white screen with a soft blue top bar, a two-column grid of item photos with soft grey bars below them, and a small logo that cannot be read";
+    expect(brollDepictsBook(screen)).toBe(false);
+    // A split panel is swapped for ANY book (`guardPitchVisuals`) — this one is no book, so it stays.
+    const split = host(7, "and Facebook Marketplace", { splitVisual: screen });
+    expect(guardPitchVisuals([split])).toEqual([]);
+    expect(split.splitVisual).toBe(screen);
+    // Job 145 scene 12: a stack of books is still a book.
+    expect(brollDepictsBook("a stack of closed stitch pattern books on the kitchen table")).toBe(true);
+  });
+});
+
+describe("a line about the chin shows the chin, framed from the lips down (the audit, 2026-10-18)", () => {
+  const LOOK = "a slender woman in her early sixties with fair skin and shoulder-length silver hair, a navy crewneck sweater";
+
+  it("job 244 scene 3: a host picture of 'drags your chin and your jawline down' faces the camera, cut at the lips", () => {
+    const scenes = [
+      pic(
+        3,
+        "Land two inches lower, and that same necklace drags your chin and your jawline down with it.",
+        "Host standing, fingertips adjusting a gold chain necklace resting at her collarbone, its pendant catching the window light",
+        { humanPresent: true }
+      ),
+    ];
+    markHostBroll(scenes, { hostLook: LOOK }, "https://x/host.png");
+    expect(hostLipsCut(scenes[0])).toBe(true);
+    const prompt = buildStillPrompt(scenes[0]);
+    expect(prompt).toContain(HOST_LIPS_CUT_CLAUSE);
+    expect(prompt).toContain(HOST_LIPS_CUT_ONLY_SUFFIX);
+    // Only the first framing: never turned away, never from behind.
+    expect(prompt).not.toContain(HOST_FRAMING_CLAUSE);
+    expect(prompt).not.toContain(NO_OTHER_FIGURES_SUFFIX);
+    expect(prompt).not.toMatch(/seen from the side so it shows there/);
+    expect(HOST_LIPS_CUT_CLAUSE).toMatch(/top edge of the frame cuts across the lower face at the lips/);
+    expect(HOST_LIPS_CUT_CLAUSE).toMatch(/chin, the jaw, the neck and the collarbone are in plain view/);
+    expect(personClauseFor(scenes[0], scenes[0].showSubject!)).toMatch(/necklace is worn where it really sits, on the FRONT of the head or body, and the body faces the camera/);
+    // The clip lane says the same.
+    const clip = buildClipChain(scenes[0], { script: "x", lockMode: "ingredients", channelKey: "demo", voiceId: "v1" })[0].prompt;
+    expect(clip).toContain(HOST_LIPS_CUT_CLAUSE);
+    expect(clip).toContain(HOST_LIPS_CUT_ONLY_SUFFIX);
+    expect(clip).not.toContain(NO_OTHER_FIGURES_SUFFIX);
+  });
+
+  it("job 378 scene 28 and job 395 scene 25: 'the skin under your chin', 'the soft shadows under the chin'", () => {
+    for (const [line, shows] of [
+      ["Does it brighten the skin under your chin, or does it put a shadow there?", "chunky light beads held near the chin at the window for daylight"],
+      [
+        "The eye reads it together with the soft shadows under the chin, and the face looks tired.",
+        "woman wearing dark beaded necklace at collarbone, soft shadow under the chin above the dark beads, face turned away",
+      ],
+    ]) {
+      const scenes = [pic(1, line, shows)];
+      markHostBroll(scenes, { hostLook: LOOK }, "https://x/host.png");
+      expect(scenes[0].brollHostLook, line).toBe(LOOK);
+      expect(hostLipsCut(scenes[0]), line).toBe(true);
+      expect(buildStillPrompt(scenes[0])).toContain(HOST_LIPS_CUT_CLAUSE);
+      // The description no longer asks for the opposite framing — the picture check reads it too.
+      expect(scenes[0].showSubject).not.toMatch(/turned away/);
+      expect(buildStillPrompt(scenes[0])).not.toMatch(/face turned away/);
+    }
+  });
+
+  it("job 395 scene 25 on a film drawn before the rule: its stored 'face turned away' never reaches the prompt", () => {
+    const stored = pic(
+      25,
+      "The eye reads it together with the soft shadows under the chin, and the face looks tired.",
+      "woman wearing dark beaded necklace at collarbone, soft shadow under the chin above the dark beads, face turned away",
+      {
+        humanPresent: true,
+        brollHostLook: LOOK,
+        brollHostRef: "https://x/host.png",
+        visualPrompt: "A woman seen from behind wearing a dark beaded necklace at the collarbone, face turned away from the camera.",
+      }
+    );
+    const still = buildStillPrompt(stored);
+    expect(still).toContain(HOST_LIPS_CUT_CLAUSE);
+    expect(still).not.toMatch(/face turned away|woman seen from behind/);
+    const clip = buildClipChain(stored, { script: "x", lockMode: "ingredients", channelKey: "demo", voiceId: "v1" })[0].prompt;
+    expect(clip).not.toMatch(/face turned away|woman seen from behind/);
+    // Any other host picture keeps its own words.
+    const other = pic(3, "Sand with the grain, never across it.", "host seen from behind sanding a board", {
+      humanPresent: true,
+      brollHostLook: LOOK,
+      brollHostRef: "https://x/host.png",
+    });
+    expect(buildStillPrompt(other)).toMatch(/seen from behind sanding/);
+  });
+
+  it("job 223 scene 5: the pendant drawn on a dressing table under 'your jawline down with it' is worn by the host", () => {
+    const scenes = [
+      pic(
+        5,
+        "and your jawline down with it. The pendant is almost never the problem.",
+        "fine gold chain necklace with small pendant draped over dressing table close up",
+        {
+          visualPrompt:
+            "Fine gold chain necklace with small round pendant draped across the wooden dressing table near the mirror, in soft natural window light.",
+        }
+      ),
+    ];
+    markHostBroll(scenes, { hostLook: LOOK }, "https://x/host.png");
+    expect(scenes[0].humanPresent).toBe(true);
+    expect(scenes[0].brollHostRef).toBe("https://x/host.png");
+    expect(scenes[0].showSubject).toBe(
+      "fine gold chain necklace with small pendant, worn at the host's own neck, the chin and jaw in view above it — never set down."
+    );
+    expect(scenes[0].visualPrompt).not.toMatch(/dressing table/);
+    expect(buildStillPrompt(scenes[0])).toContain(HOST_LIPS_CUT_CLAUSE);
+  });
+
+  it("job 354 scene 13 and job 392 scene 23: a chain alone, or beads laid on a cloth, under a chin line", () => {
+    const line = "That thin line of gold puts a moving highlight right under your chin, and the eye reads light near the face as health.";
+    const alone = [pic(13, line, "close-up of a short length of thin polished gold chain with a glint of light running along it, filling the frame")];
+    markHostBroll(alone, { hostLook: LOOK }, "https://x/host.png");
+    expect(alone[0].humanPresent).toBe(true);
+    expect(alone[0].showSubject).toMatch(/worn at the host's own neck/);
+    const laid = [
+      pic(23, "Now the one that's aging you. Those beads put a shadow right under your chin.", "a chunky dark bead necklace laid on the soft cloth surface", {
+        humanPresent: true,
+      }),
+    ];
+    markHostBroll(laid, { hostLook: LOOK }, "https://x/host.png");
+    expect(laid[0].showSubject).toBe("a chunky dark bead necklace, worn at the host's own neck, the chin and jaw in view above it — never set down.");
+    expect(hostLipsCut(laid[0])).toBe(true);
+  });
+
+  it("the overview and every other line keep their pictures (job 223 scene 8, Scarlett's 'Wear it high', a cream on the counter)", () => {
+    const scenes = [
+      pic(
+        8,
+        "Three necklaces today that read expensive on a woman over sixty, and one that is aging you.",
+        "open jewelry box on dressing table with pearls, gold chain, and bead necklaces arranged in rows"
+      ),
+      pic(9, "Wear it high.", "a pearl strand at her collarbone over a navy sweater", { humanPresent: true }),
+      pic(10, "Does it brighten the skin under your chin?", "a jar of cream on the bathroom counter"),
+      pic(11, "Three necklaces today, each sitting at a different spot under your chin.", "a pearl necklace on the dresser"),
+    ];
+    markHostBroll(scenes, { hostLook: LOOK }, "https://x/host.png");
+    expect(scenes[0].humanPresent).toBeFalsy();
+    expect(scenes[0].showSubject).toMatch(/arranged in rows$/);
+    expect(hostLipsCut(scenes[1])).toBe(false);
+    expect(buildStillPrompt(scenes[1])).toContain(HOST_FRAMING_CLAUSE);
+    expect(scenes[2].humanPresent).toBeFalsy();
+    expect(scenes[3].humanPresent).toBeFalsy();
+    expect(scenes[3].showSubject).toBe("a pearl necklace on the dresser");
+  });
+
+  it("a make-up step on the jawline still shows the face; with no host a chin picture stays as it is", () => {
+    const face = [pic(1, "Blend it down past your jawline.", "her hand blending foundation along her jawline")];
+    markHostBroll(face, { hostLook: LOOK }, "https://x/host.png");
+    expect(face[0].hostFaceShown).toBe(true);
+    expect(hostLipsCut(face[0])).toBe(false);
+    expect(buildStillPrompt(face[0])).toMatch(/the SAME person as in the reference photo/);
+    const noHost = [pic(5, "and your jawline down with it.", "fine gold chain necklace draped over dressing table")];
+    markHostBroll(noHost, { hostLook: "" }, undefined);
+    expect(noHost[0].humanPresent).toBeFalsy();
+    expect(noHost[0].showSubject).toBe("fine gold chain necklace draped over dressing table");
+  });
+
+  it("a line about a dog's neck, hair at the collarbone or someone else is never framed for the chin", () => {
+    const scenes = [
+      pic(31, "Then say hello. Soft voice, calm pat on the chest or the side of the neck.", "host's hand giving a calm pat on the dog's chest"),
+      pic(2, "Shoulder-length hair that grazes your collarbone reads younger.", "host from behind brushing her shoulder-length silver hair"),
+      pic(3, "Her necklace sat right under her chin.", "an older woman customer wearing a pearl necklace at the market stall", { humanPresent: true }),
+    ];
+    markHostBroll(scenes, { hostLook: LOOK }, "https://x/host.png");
+    expect(scenes.map(s => hostLipsCut(s))).toEqual([false, false, false]);
+    expect(buildStillPrompt(scenes[1])).toContain(HOST_FRAMING_CLAUSE);
+  });
+});
+
+describe("a split ships with both halves, or the job says so (the audit's host-only splits, 2026-10-18)", () => {
+  it("job 226: the splits that shipped as the host take alone are found from their clips", () => {
+    const take = (i: number) => `https://r2/longform/226/clip-${i}-0-a.mp4`;
+    const board = [
+      host(3, "But the one I loved the most, a", {
+        splitVisual: "A finished twelve-block sampler quilt folded over a wooden rocker in a sewing room",
+        sceneStatus: "completed",
+        hostClipUrls: [take(3)],
+        clipUrls: [take(3)],
+      }),
+      // A split that got its panel: the clip is the composite, never the host take.
+      host(4, "and a stack of fabric on the table", {
+        splitVisual: "A stack of folded fabric on a sewing table",
+        sceneStatus: "completed",
+        hostClipUrls: [take(4)],
+        clipUrls: ["https://r2/longform/226/split-4-0-a.mp4"],
+      }),
+      host(133, "The scraps cost about nothing, the batting and", {
+        splitVisual: "Fabric scraps, batting, and binding strip laid out on a sewing table",
+        sceneStatus: "completed",
+        hostClipUrls: [take(133)],
+        clipUrls: [take(133)],
+      }),
+    ];
+    expect(splitPanelsMissing(board)).toEqual([3, 133]);
+  });
+
+  it("the production snapshot's scene 102: its last panel draw PASSED and it still shipped as the host alone", () => {
+    const take = "https://r2/longform/226/clip-102-0-a.mp4";
+    const board = [
+      host(102, "So how do you choose well when you're standing in front of a", {
+        splitVisual: "A wall of eyeglass frames in an optician's shop",
+        sceneStatus: "completed",
+        hostClipUrls: [take],
+        clipUrl: take,
+      }),
+    ];
+    expect(splitPanelsMissing(board)).toEqual([102]);
+  });
+
+  it("job 400 scene 3: a panel that passed on its third draw, after 300 s, is put beside the host", async () => {
+    vi.useFakeTimers();
+    try {
+      const deadlineAt = Date.now() + 25 * 60_000;
+      const started = new Promise<{ url: string }>(resolve =>
+        setTimeout(() => resolve({ url: "https://r2/still-3.mp4" }), 301_000)
+      );
+      const result = splitPanelFor({
+        started,
+        still: () => Promise.reject(new Error("must not draw again")),
+        deadlineAt,
+      });
+      await vi.advanceTimersByTimeAsync(301_000);
+      await expect(result).resolves.toEqual({ url: "https://r2/still-3.mp4" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("a video that moves as asked is kept (the audit's thrown-away videos, 2026-10-18)", () => {
+  const ALARM = "main smoke alarm mounted on hallway ceiling with a thin curl of smoke rising beneath it";
+  const answer = (changes: { what: string; meant: boolean }[]) =>
+    JSON.stringify({ changes, cover: [], hands_visible: false, untouched_moved: false, morph: false, vanished: false });
+
+  it("job 262 scene 16: the smoke changing is the shot; the alarm sliding is a glitch", () => {
+    expect(clipGlitchMessage(ALARM, true)).toContain("Whatever moves by itself in that description is MEANT to move");
+    expect(parseClipGlitchVerdict(answer([{ what: "smoke slightly denser/shifted on right", meant: true }]), true).glitch).toBe(false);
+    expect(parseClipGlitchVerdict(answer([{ what: "the smoke alarm slid along the ceiling", meant: false }]), true).glitch).toBe(true);
+  });
+
+  it("production job 182 #40: curtains stirring from moving air — no fixed list leaves them out", () => {
+    const windows = "both open windows in the house with curtains stirring from moving air";
+    expect(clipGlitchMessage(windows, true)).toContain(windows);
+    expect(parseClipGlitchVerdict(answer([{ what: "curtains billowed further into the room", meant: true }]), true).glitch).toBe(false);
+  });
+
+  it("job 262 scene 16: a clip that does move wrong renders once more from the same frame, then the still is that frame", () => {
+    const kf = "https://r2/longform/262/broll-kf-16-0-a.png";
+    const scene = pic(16, "Photoelectric sees the slow, smoldering fire substantially earlier.", ALARM, {
+      selfMoving: true,
+      pictureUrl: kf,
+      clipUrls: ["https://r2/longform/262/clip-16-0-a.mp4"],
+      submits: [{ provider: "sixtynine_labs", at: "2026-10-01T00:00:00.000Z", reason: "first" }],
+    });
+    expect(planGlitchRerender(scene)).toEqual({ next: "rerender", keyframe: kf });
+    expect(scene.nextSubmitReason).toBe("glitch");
+    scene.nextSubmitReason = undefined; // the re-render's submit consumes it
+    expect(planGlitchRerender(scene)).toEqual({ next: "still", keyframe: kf });
   });
 });

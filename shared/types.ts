@@ -208,9 +208,19 @@ export interface SplitLayout {
 /**
  * Why a scene's clip was submitted to a paid provider. `first` is the render every scene
  * makes; everything else is a second payment for the same beat, and the ledger names which.
+ * `glitch` is a moving cutaway rendered again because its first clip moved wrong
+ * (`scanClipGlitch`) — it was written as `resume` before, so the Cost dialog could not tell it
+ * from a restart.
  */
 export type SceneSubmitReason =
-  "first" | "resume" | "transient" | "infra" | "regenerate" | "retry" | "merge";
+  | "first"
+  | "resume"
+  | "transient"
+  | "infra"
+  | "regenerate"
+  | "retry"
+  | "merge"
+  | "glitch";
 
 /** The person whose click paid for a render — kept on the ledger so the Cost dialog can name them. */
 export interface SubmitActor {
@@ -403,7 +413,8 @@ export interface StoryboardScene {
   /** Renders of this beat that came back BLACK (or one solid colour) and were refused. */
   blankClips?: number;
   /** Moving clips of this beat refused for impossible motion (`scanClipGlitch`); the second makes
-   *  the beat a still. */
+   *  the beat a still. Both the second render and that still use the start frame already drawn
+   *  and checked for the first (`checkedKeyframeOf`). */
   motionGlitches?: number;
   /** Every check of a picture drawn for this beat — its kind and what the check named
    *  (`server/pictureCheckLog.ts`), so a film shows which kinds come out right the first time. */
@@ -549,9 +560,15 @@ export interface StoryboardScene {
    * The person this picture shows when the line is about SOMEONE ELSE than the host — a customer,
    * a neighbour ("a woman customer"), in the line's own words. Drawn from behind or the side, face
    * never shown, WITHOUT the host's photo or look (`otherPersonClause`); the host is never put in
-   * their place. Set by the shot list (`other`).
+   * their place. Set by the shot list (`other`), the line check (`who`), or the picture's own words
+   * (`someoneElse` in server/hostLook.ts: a role, a sex the host does not have, two or more people).
    */
   otherPerson?: string;
+  /**
+   * How many people `otherPerson` is when more than one (2, or 3 for several): two people are never
+   * drawn from one photo, and the prompt asks for each of them (`otherPersonClause`).
+   */
+  otherPeople?: number;
   /**
    * This beat sits inside the FAST-OPEN window (`LongformPacing.fastOpen`): the first `zoneSec`
    * of narration, where cuts land faster to match the script's opening pace. Set once at
@@ -857,6 +874,14 @@ export interface StoryboardScene {
    * field existed — a right-panel re-render backfills it.
    */
   splitRightUrl?: string;
+  /**
+   * The render gave up on this split's panel (`server/splitPanel.ts`): the draw failed twice, was
+   * still running when the host scene's time ran out, or the two halves could not be put
+   * together — so the scene shipped as its host take alone and the job carries a warning naming
+   * it. Why and when, for the card. Cleared by the next composite. Films rendered before the
+   * flag are found by `splitPanelMissing` (`shared/splitPanel.ts`), which reads the clips.
+   */
+  splitPanelMissing?: { reason: string; at: string };
   /**
    * Operator-chosen geometry of the split composite. Absent ⇒ the historical default layout
    * (host LEFT at the canvas remainder, b-roll in a full-height square panel, host crop panned

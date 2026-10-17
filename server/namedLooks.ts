@@ -19,7 +19,7 @@
 import type { KeyThing, StoryboardScene } from "@shared/types";
 import { invokeClaude } from "./claude";
 import { safeParseJSON } from "./jsonRepair";
-import { SHOWS_PERSON } from "./hostLook";
+import { showsPerson } from "./hostLook";
 import { blurredPrint, matchKeyThing, planningEffort, settleVideoKind } from "./shotList";
 
 const NAMED_LOOK_MODEL = () => process.env.NAMED_LOOK_MODEL || "claude-opus-5-5";
@@ -190,12 +190,12 @@ export function applyNamedLooks(
     const kind = p.kind ? lookOf.get(p.kind.toLowerCase()) : undefined;
     // A picture of someone at work keeps the person: it is never made a close-up of a part, and a
     // rewrite that drops the person is not used (only the exact look is kept).
-    const atWork = !!s.humanPresent || SHOWS_PERSON.test(s.showSubject ?? s.visualPrompt ?? "");
+    const atWork = !!s.humanPresent || showsPerson(s.showSubject ?? s.visualPrompt ?? "");
     // A list item may be a PART of one thing ("a churn dash here" on the quilt — Ruth's job 298 drew
     // the whole quilt when this was refused); separate things in a list are kept apart by the model's
     // own rule above and by memory, which never draws an item from the item before it.
     const part = p.partOf && !atWork ? matchKeyThing(p.partOf, things ?? []) : null;
-    if (atWork && p.show && !SHOWS_PERSON.test(p.show)) p.show = undefined;
+    if (atWork && p.show && !showsPerson(p.show)) p.show = undefined;
     // Words the SCRIPT says this part shows: readable and exact on it (Frederick's job 329: "First
     // thing on the label. The type." drew a stack of plain boxes).
     if (p.text && inScript(p.text)) {
@@ -213,7 +213,7 @@ export function applyNamedLooks(
       s.visualPrompt = p.show;
       s.visualPromptSeed = undefined;
       s.brollVisual = undefined;
-      s.humanPresent = SHOWS_PERSON.test(p.show) ? true : undefined;
+      s.humanPresent = showsPerson(p.show) ? true : undefined;
       // Writing the line does not say is shown soft and unreadable, like every other rewrite.
       s.blurPrint = !s.pictureText && blurredPrint(p.show) ? true : undefined;
       // Judged again on the new description (`judgeSelfMoving`), like any rewritten picture.

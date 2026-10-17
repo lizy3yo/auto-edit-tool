@@ -41,7 +41,7 @@ import {
   NEAR_COPY_BITS,
   pictureHash,
   pictureThumb,
-  SCREEN_PICTURE,
+  screenPicture,
 } from "../server/pictureVariety";
 
 const argv = process.argv.slice(2);
@@ -80,7 +80,7 @@ const storyboardOf = async (jobId: number): Promise<StoryboardScene[]> => {
   const sb = typeof job.storyboard === "string" ? JSON.parse(job.storyboard) : job.storyboard;
   return (Array.isArray(sb) ? sb : sb.scenes) as StoryboardScene[];
 };
-const isScreen = (s: StoryboardScene) => SCREEN_PICTURE.test(`${s.showSubject ?? ""} ${s.visualPrompt ?? ""}`);
+const isScreen = (s: StoryboardScene) => screenPicture(`${s.showSubject ?? ""} ${s.visualPrompt ?? ""}`);
 
 // the channel's ONE photo, in the look a video uses
 const photos = await getChannelHostPhotos(CH, true);

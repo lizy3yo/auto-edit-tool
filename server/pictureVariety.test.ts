@@ -11,6 +11,8 @@ import {
   pictureThumb,
   rememberPicture,
   SCREEN_SETUPS,
+  screenPicture,
+  screenSells,
   withScreenTurn,
   differentPictureClause,
 } from "./pictureVariety";
@@ -122,5 +124,70 @@ describe("a near-copy is redrawn from a named camera view (Frederick's practice 
     expect(a).not.toBe(b);
     expect(a).toMatch(/close-up/);
     expect(b).toMatch(/further back/);
+  });
+});
+
+describe("a screen sits beside things for sale only when it is about selling (the audit's grid screens)", () => {
+  // Production job 235 (an airline app), job 393 (a hand tapping a phone under "Subscribe to…"),
+  // production job 260 (a camera app's password page), job 294 (another "Subscribe" tap), and a
+  // selling screen like Dale's job 372.
+  const airline = scene(1, "mobile phone on the kitchen table showing an airline app screen");
+  const sell = scene(2, "a phone lying on the workbench showing a buy-and-sell app screen with handmade listings");
+  const sell2 = scene(3, "a laptop showing the online shop page with the board listed");
+  const subscribe = scene(4, "a hand tapping a phone screen in a hallway beneath a ceiling smoke alarm", { humanPresent: true });
+  const password = scene(5, "hands holding black smartphone changing password in camera app settings", { humanPresent: true });
+  const subscribe2 = scene(6, "A bare hand tapping a phone screen beside a white coffee cup on a marble café table", {
+    humanPresent: true,
+  });
+  const selling = new Set<string>([SCREEN_SETUPS[0], HELD_SCREEN_SETUPS[2]]);
+
+  it("never gives a screen not about selling the item-beside-the-phone or market-stall setting", () => {
+    const film = [airline, sell, sell2, subscribe, password, subscribe2].map(s => ({ ...s }));
+    expect(assignScreenSetups(film)).toBe(6);
+    expect(selling.has(film[0].screenSetup!)).toBe(false);
+    expect(film[0].screenSetup).toBe(SCREEN_SETUPS[1]);
+    for (const s of film.filter(x => !screenSells(x))) expect(selling.has(s.screenSetup!)).toBe(false);
+    // The third held screen would have been the market stall: a "Subscribe" tap moves past it.
+    expect(film[5].screenSetup).toBe(HELD_SCREEN_SETUPS[3]);
+    // Consecutive screens still differ.
+    expect(new Set(film.slice(0, 3).map(s => s.screenSetup)).size).toBe(3);
+  });
+
+  it("a selling screen may still sit beside the item it shows", () => {
+    const film = [{ ...sell }, { ...airline }];
+    assignScreenSetups(film);
+    expect(film[0].screenSetup).toBe(SCREEN_SETUPS[0]);
+    expect(film[1].screenSetup).toBe(SCREEN_SETUPS[1]);
+  });
+
+  it("a redraw of a screen not about selling never lands on a selling setting", () => {
+    for (const held of [false, true]) {
+      const list: readonly string[] = held ? HELD_SCREEN_SETUPS : SCREEN_SETUPS;
+      for (const cur of list)
+        for (const avoid of [undefined, ...list]) {
+          const next = nextScreenSetup(cur, held, avoid, false);
+          expect(selling.has(next)).toBe(false);
+          expect(next).not.toBe(cur);
+        }
+    }
+    // …while a selling screen can.
+    expect(SCREEN_SETUPS.map(c => nextScreenSetup(c, false, undefined, true))).toContain(SCREEN_SETUPS[0]);
+  });
+
+  it("a picture with a screen word but no device is no screen at all", () => {
+    // Job 151: "the afghan angled and listing to one side"; job 122: the lit lantern "showing why the
+    // listing photo sells"; job 230's scan-window picture, "ready for listing or sale".
+    const afghan = scene(7, "Finished lace shell afghan, the afghan angled and listing to one side of the table's center.");
+    const lantern = scene(8, "A finished andon lantern sits lit on a low table in a darkened room, a settled moment showing why the listing photo sells.");
+    const pile = scene(9, "Workbench in the garage workshop, a few finished wooden cutting boards and coasters in a calm pile, ready for listing or sale.");
+    // A thing made for a device is no device: it is not moved into a screen setting.
+    const stand = scene(10, "A walnut phone stand on the workbench, ready for its listing photo.");
+    const film = [afghan, lantern, pile, stand];
+    expect(assignScreenSetups(film)).toBe(0);
+    for (const s of film) {
+      expect(screenPicture(s.visualPrompt!)).toBe(false);
+      expect(s.screenSetup).toBeUndefined();
+    }
+    expect(screenPicture("phone screen showing a listing of the maple board")).toBe(true);
   });
 });
