@@ -2109,3 +2109,103 @@ describe("a typed redo prompt owns the picture (job 383 scenes 20, 33 and 40)", 
     expect(s.keyThing).toBe("coaster");
   });
 });
+
+describe("a general head before its examples is not a list item (job 400 at 0:47)", () => {
+  // "…usually in some ordinary place, a waiting room, a church pew, the kitchen table at two in the
+  // morning…": "some ordinary place" only says what kind of place the others are. It was item 1 — a
+  // picture of its own (a woman at a sink) and row 1 of the list graphic.
+  const LINE =
+    "Most people past sixty have — usually in silence, usually in some ordinary place, a waiting room, a church pew, the kitchen table at two in the morning when the house is too quiet.";
+
+  it("knows a head from a thing", async () => {
+    const { generalHead } = await import("./shotList");
+    for (const t of [
+      "some ordinary place,",
+      "Somewhere",
+      "something small",
+      "someone you trust",
+      "any old thing",
+      "some other way",
+      "a certain kind of wood",
+      "any sort of place",
+      "everything",
+    ])
+      expect([t, generalHead(t)]).toEqual([t, true]);
+    for (const t of [
+      "some glue",
+      "some scrap pine",
+      "some kind of glue", // "some kind of glue, a clamp, and a rag" is three things to get
+      "somebody's barn",
+      "anybody with a porch", // job 110: "…to anybody with a porch, a patio, or a houseplant habit"
+      "a quiet place",
+      "the kitchen table",
+      "some people",
+      "a waiting room",
+    ])
+      expect([t, generalHead(t)]).toEqual([t, false]);
+  });
+
+  it("drops the head only in front of two or more examples, never when the next item is a head too", async () => {
+    const { withoutGeneralHead, ledByGeneralHead } = await import("./shotList");
+    expect(withoutGeneralHead(["some ordinary place", "a waiting room", "a church pew"])).toEqual(["a waiting room", "a church pew"]);
+    const one = ["some quiet spot", "a porch"];
+    expect(withoutGeneralHead(one)).toBe(one);
+    expect(ledByGeneralHead(one)).toBe(true);
+    const three = ["Something sweet", "something salty", "something to drink"];
+    expect(withoutGeneralHead(three)).toBe(three);
+    const things = ["a saw", "a drill", "something to clamp it with"];
+    expect(withoutGeneralHead(things)).toBe(things);
+  });
+
+  it("a host line of a head and its examples is a list of the examples", async () => {
+    const { spokenListItems } = await import("./shotList");
+    expect(spokenListItems("Some ordinary place, a waiting room, a church pew.")).toEqual(["a waiting room", "a church pew"]);
+    expect(spokenListItems("Some quiet spot, a porch swing.")).toBeNull();
+    // A real thing first stays an item.
+    expect(spokenListItems("Some glue, a clamp, and a rag.")).toEqual(["Some glue", "a clamp", "a rag"]);
+  });
+
+  it("a picture of the head and its examples is cut per example, the head leading the first", async () => {
+    const { splitListPieces } = await import("./shotList");
+    const split = splitListPieces([scene(8, "some ordinary place, a waiting room, a church pew,", { showSubject: "quiet places" })]);
+    expect(split.map(s => [s.scriptText, s.showSubject, !!s.listCut])).toEqual([
+      ["some ordinary place, a waiting room,", "a waiting room", true],
+      ["a church pew,", "a church pew", true],
+    ]);
+    // A head with one example is no list: the picture is left whole.
+    const one = scene(8, "some quiet spot, a porch swing,", { showSubject: "a porch swing" });
+    expect(splitListPieces([one])).toEqual([one]);
+    // Unchanged: a real first thing is its own picture.
+    expect(splitListPieces([scene(3, "some glue, a clamp, a rag,", { showSubject: "shop things" })]).map(s => s.scriptText)).toEqual([
+      "some glue,",
+      "a clamp,",
+      "a rag,",
+    ]);
+  });
+
+  it("the shot list's own cut never marks the head a list item", () => {
+    const b = scene(7, LINE);
+    const { scenes } = applyShotPlan(
+      [b],
+      [
+        {
+          scene: 7,
+          shots: [
+            { from: "Most people past sixty", show: "an older man alone on a chair against a pale wall" },
+            { from: "some ordinary place", show: "a woman at a sink by a window" },
+            { from: "a waiting room", show: "a row of waiting room chairs" },
+            { from: "a church pew", show: "a church pew seen from the side" },
+            { from: "the kitchen table", show: "a kitchen table at night" },
+          ],
+        },
+      ]
+    );
+    expect(scenes.map(s => [s.scriptText, !!s.listCut])).toEqual([
+      ["Most people past sixty have — usually in silence, usually in", false],
+      ["some ordinary place,", false],
+      ["a waiting room,", true],
+      ["a church pew,", true],
+      ["the kitchen table at two in the morning when the house is too quiet.", false],
+    ]);
+  });
+});

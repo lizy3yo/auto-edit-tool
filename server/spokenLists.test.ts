@@ -373,3 +373,103 @@ describe("a list left alone says why", () => {
     expect(r.skipped.join(" ")).toMatch(/CTA/);
   });
 });
+
+describe("a general head before its examples is never an item (job 400 at 0:47)", () => {
+  // The list graphic read "1 Some ordinary place / 2 A waiting room / 3 A church pew", and the head
+  // got a picture of its own (a woman at a sink): three places, introduced, read as four.
+  const LINE =
+    "Most people past sixty have — usually in silence, usually in some ordinary place, a waiting room, a church pew, the kitchen table at two in the morning when the house is too quiet.";
+  const answer = (items: string[]) => JSON.stringify({ lists: [{ sentence: 0, kind: "things", items }] });
+
+  it("the shape rules list the examples, not the head that ends the clause before them", () => {
+    expect(listsByShape(LINE)).toEqual([["a waiting room", "a church pew"]]);
+    expect(spokenListsByShape([LINE])).toEqual([{ sentence: 0, items: ["a waiting room", "a church pew"] }]);
+    // Any wording: a head that opens the sentence, an indefinite pronoun, a "certain kind of".
+    expect(listsByShape("Some quiet spot, a porch swing, a park bench, and the front seat of a parked car.")).toEqual([
+      ["a porch swing", "a park bench", "the front seat of a parked car"],
+    ]);
+    expect(listsByShape("I looked everywhere, the attic, the barn, the truck.")).toEqual([["the attic", "the barn", "the truck"]]);
+    // The head's last word is never the first of a bare list either ("…kind of WOOD, oak, …").
+    expect(listsByShape("You want a certain kind of wood, oak, walnut, and cherry.")).toEqual([["oak", "walnut", "cherry"]]);
+  });
+
+  it("leaves a list whose first item is a real thing exactly as it was", () => {
+    // Job 110: the porch is item 1 — "anybody" is who it is for, not a head of porches.
+    expect(
+      listsByShape(
+        "Two pickets and a handful of screws come to about $11, it takes 50 minutes counting the burning and brushing, and they go for $38 to $60 to anybody with a porch, a patio, or a houseplant habit."
+      )
+    ).toEqual([["a porch", "a patio", "a houseplant habit"]]);
+    expect(listsByShape("You'll need some glue, a clamp, and a rag.")).toEqual([["some glue", "a clamp", "a rag"]]);
+    expect(listsByShape("You need some kind of glue, a clamp, and a rag.")).toEqual([["some kind of glue", "a clamp", "a rag"]]);
+    expect(listsByShape("Get some scrap pine, a saw, and a drill.")).toEqual([["some scrap pine", "a saw", "a drill"]]);
+  });
+
+  it("the model's head is dropped, never the list; a head with one example is no list", () => {
+    expect(parseSpokenLists(answer(["some ordinary place", "a waiting room", "a church pew", "the kitchen table at two in the morning"]), [LINE])).toEqual([
+      { sentence: 0, items: ["a waiting room", "a church pew", "the kitchen table at two in the morning"] },
+    ]);
+    expect(parseSpokenLists(answer(["some ordinary place", "a waiting room"]), [LINE])).toEqual([]);
+    // A head that names nothing no longer costs the whole list (`notAThing` refuses "anything").
+    expect(parseSpokenLists(answer(["anything", "a mouse", "a snake", "a raccoon"]), ["If you hear anything, a mouse, a snake, a raccoon, check the coop."])).toEqual([
+      { sentence: 0, items: ["a mouse", "a snake", "a raccoon"] },
+    ]);
+    // Heads one after another are the list itself.
+    const treats = ["Something sweet", "something salty", "something to drink"];
+    expect(parseSpokenLists(answer(treats), ["Bring something sweet, something salty, and something to drink."])).toEqual([
+      { sentence: 0, items: treats },
+    ]);
+    expect(validateSpokenList(LINE, ["some ordinary place", "a waiting room", "a church pew"])).toBe(false);
+    expect(validateSpokenList(LINE, ["a waiting room", "a church pew"])).toBe(true);
+  });
+
+  const film = () => [
+    scene(1, "Seventeen. He pays, he walks out to the parking lot, and the number rides home with him in the passenger seat."),
+    scene(2, "Most people past sixty have — usually in silence, usually in some ordinary place, a waiting room, a church pew,", {
+      showSubject: "an older man sitting alone on a grey padded chair against a pale wall",
+    }),
+    scene(3, "the kitchen table at two in the morning when the house is too quiet.", { showSubject: "a kitchen table at night" }),
+    host(4, "And the math always presents itself as the problem."),
+  ];
+  const cut = [
+    ["Seventeen. He pays, he walks out to the parking lot, and the number rides home with him in the passenger seat.", false, false],
+    ["Most people past sixty have — usually in silence, usually in some ordinary place,", false, false],
+    ["a waiting room,", false, true],
+    ["a church pew,", false, true],
+    ["the kitchen table at two in the morning when the house is too quiet.", false, false],
+    ["And the math always presents itself as the problem.", true, false],
+  ];
+
+  it("the film is cut on the examples: the head's words stay with their beat", () => {
+    const r = applySpokenLists(film(), shapeLists(film()));
+    expect(r.applied).toBe(1);
+    expect(rows(r.scenes)).toEqual(cut);
+    expect(r.scenes[1].showSubject).toBe("an older man sitting alone on a grey padded chair against a pale wall");
+  });
+
+  it("a list saved before the rule, head and all, is cut the same way on a resume", () => {
+    const saved: SpokenList[] = [{ sentence: 2, items: ["some ordinary place", "a waiting room", "a church pew"] }];
+    expect(rows(applySpokenLists(film(), saved).scenes)).toEqual(cut);
+  });
+
+  it("a head the planner already cut as a list picture loses the mark, so it can join its neighbour", () => {
+    const scenes = [
+      scene(1, "Most people past sixty have — usually in silence, usually in"),
+      scene(2, "some ordinary place,", { listCut: true, showSubject: "an older woman at a sink by a window" }),
+      scene(3, "a waiting room,", { listCut: true }),
+      scene(4, "a church pew,", { listCut: true }),
+      scene(5, "the kitchen table at two in the morning when the house is too quiet."),
+      host(6, "Bye."),
+    ];
+    const r = applySpokenLists(scenes, shapeLists(scenes));
+    expect(r.cleared).toBe(1);
+    expect(rows(r.scenes).map(([t, , l]) => [t, l])).toEqual([
+      ["Most people past sixty have — usually in silence, usually in", false],
+      ["some ordinary place,", false],
+      ["a waiting room,", true],
+      ["a church pew,", true],
+      ["the kitchen table at two in the morning when the house is too quiet.", false],
+      ["Bye.", false],
+    ]);
+  });
+});

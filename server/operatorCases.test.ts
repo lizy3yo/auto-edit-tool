@@ -2034,3 +2034,41 @@ describe("a picture never ships a known fault in silence (the audit, 2026-10-18)
     expect(out).toContain("house sign");
   });
 });
+
+describe("a general head before its examples is no list item (job 400 at 0:47, 'some ordinary place')", () => {
+  // The list graphic numbered "1 Some ordinary place" under the title "Ordinary places", and the head
+  // got its own picture (scene 8, a woman at a sink): the voice names three places, the film showed four.
+  const LINE =
+    "Most people past sixty have — usually in silence, usually in some ordinary place, a waiting room, a church pew, the kitchen table at two in the morning when the house is too quiet.";
+
+  it("the model's head is dropped and the film is cut on the examples only", async () => {
+    const r = await findSpokenLists(`Maybe you have done that arithmetic. ${LINE}`, {
+      ask: async () => '{"lists":[{"sentence":1,"kind":"things","items":["some ordinary place","a waiting room","a church pew"]}]}',
+    });
+    expect(r.lists).toEqual([{ sentence: 1, items: ["a waiting room", "a church pew"] }]);
+    const scenes = [
+      pic(1, "Maybe you have done that arithmetic.", "an older man at a pharmacy counter"),
+      pic(2, "Most people past sixty have — usually in silence, usually in some ordinary place, a waiting room, a church pew,", "an older man alone on a grey padded chair"),
+      pic(3, "the kitchen table at two in the morning when the house is too quiet.", "a kitchen table at night"),
+      host(4, "And the math always presents itself as the problem."),
+    ];
+    const cut = applySpokenLists(scenes, r.lists);
+    expect(cut.scenes.map(s => [s.scriptText, !!s.listCut])).toEqual([
+      ["Maybe you have done that arithmetic.", false],
+      ["Most people past sixty have — usually in silence, usually in some ordinary place,", false],
+      ["a waiting room,", true],
+      ["a church pew,", true],
+      ["the kitchen table at two in the morning when the house is too quiet.", false],
+      ["And the math always presents itself as the problem.", false],
+    ]);
+    // The shape rules agree when the call fails.
+    expect(spokenListsByShape([LINE])).toEqual([{ sentence: 0, items: ["a waiting room", "a church pew"] }]);
+  });
+
+  it("a real first thing stays item 1: job 110's porch, and 'some glue'", () => {
+    expect(
+      spokenListsByShape(["…and they go for $38 to $60 to anybody with a porch, a patio, or a houseplant habit."]).map(l => l.items)
+    ).toEqual([["a porch", "a patio", "a houseplant habit"]]);
+    expect(spokenListsByShape(["You'll need some glue, a clamp, and a rag."]).map(l => l.items)).toEqual([["some glue", "a clamp", "a rag"]]);
+  });
+});

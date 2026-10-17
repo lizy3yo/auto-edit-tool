@@ -250,9 +250,12 @@ export function spokenListItems(text: string | undefined): string[] | null {
     .map(p => p.replace(/^(?:and|or|maybe|plus|then|also|even)\s+/i, "").trim())
     .filter(Boolean);
   if (items.length < 3) return null;
+  // A general head in front of its examples is not one of them (`withoutGeneralHead`, job 400's "some
+  // ordinary place, a waiting room, a church pew"): the line still is a list — of the examples.
+  const things = withoutGeneralHead(items);
   // "the hem went around once, the straps were four short seams, and the four squares finished it."
   // (job 106) is three clauses, not three things (`notAThing`).
-  return items.every(p => LIST_ITEM_START.test(p) && p.split(/\s+/).length <= 8 && !notAThing(p)) ? items : null;
+  return things.every(p => LIST_ITEM_START.test(p) && p.split(/\s+/).length <= 8 && !notAThing(p)) ? things : null;
 }
 
 export function shotListEligible(
@@ -674,26 +677,33 @@ export function applyShotPlan(
 /**
  * A picture whose words are two or more list items ("a saw, a drill,") becomes one picture per item,
  * each showing its own item in the place the planner's picture was ("… on the workbench"). Only a
- * non-host picture whose every comma piece reads as a list item. Pure — returns a new list.
+ * non-host picture whose every comma piece (past a general head) reads as a list item. Pure — returns
+ * a new list.
  */
 export function splitListPieces(scenes: StoryboardScene[]): StoryboardScene[] {
   const out: StoryboardScene[] = [];
   for (const s of scenes) {
     const text = (s.scriptText ?? "").trim();
     const items = text.match(/[^,;]+[,;]?/g)?.map(x => x.trim()).filter(Boolean) ?? [];
-    if (s.hostPresent || items.length < 2 || !items.every(anyListItem)) {
+    // A general head in front of its examples ("some ordinary place, a waiting room, a church pew,",
+    // job 400) is not an item: its words lead the first example's picture, and with ONE example after
+    // it the picture is no list at all (`ledByGeneralHead`).
+    const headed = ledByGeneralHead(items);
+    const examples = headed ? items.slice(1) : items;
+    if (s.hostPresent || examples.length < 2 || !examples.every(anyListItem)) {
       out.push(s);
       continue;
     }
     const where = /\b(?:on|in|at|beside|by|near) the [^,]+$/i.exec(s.showSubject ?? "")?.[0];
-    items.forEach((item, k) => {
+    examples.forEach((item, k) => {
       const bare = item.replace(/^(?:and|or|plus|maybe|then|also)\s+/i, "").replace(/[,.;]$/, "");
       const show = `${bare}${where ? ` ${where}` : ""}`;
+      const said = headed && k === 0 ? `${items[0]} ${item}` : item;
       out.push({
         ...s,
         ...FRESH,
-        scriptText: item,
-        narration: item,
+        scriptText: said,
+        narration: said,
         showSubject: show,
         visualPrompt: show,
         visualPromptSeed: undefined,
@@ -865,6 +875,74 @@ export function notAThing(item: string): string | null {
   return null;
 }
 
+/** Nouns that name a whole KIND of thing rather than one a picture could show ("some ordinary PLACE"). */
+const GENERAL_NOUN = new Set([
+  "place", "places", "spot", "spots", "location", "locations", "setting", "settings", "thing", "things",
+  "stuff", "item", "items", "object", "objects", "way", "ways", "situation", "situations", "moment",
+  "moments", "occasion", "occasions",
+]);
+/** "some KIND of …", "any SORT of …": a general noun whose kind is named after "of". */
+const KIND_NOUN = new Set(["kind", "kinds", "sort", "sorts", "type", "types"]);
+/** A head on its own: "somewhere", "something", "someone", "anything", "everywhere", "someplace"… */
+const INDEFINITE_PRONOUN = /^(?:some|any|every)(?:thing|where|one|body|place)$/;
+/** Words that start a thing of its own after a pronoun ("anybody with A porch"). */
+const NEW_THING_WORD = new Set(["a", "an", "the", "my", "your", "his", "her", "our", "their", "this", "that", "these", "those"]);
+
+/**
+ * A GENERAL HEAD, never a list item (2026-10-18, job 400 at 0:47): in "…usually in some ordinary
+ * place, a waiting room, a church pew, the kitchen table at two in the morning…" the first piece only
+ * says what KIND of place the pieces after it are examples of, and it was cut as item 1 — a picture
+ * of its own (a woman at a sink, scene 8) and row 1 of the list graphic, under a title that only
+ * repeated it, so three places read as four. A head is an indefinite pronoun with at most four words
+ * after it and no thing of their own ("somewhere", "something small", "someone you trust" — never
+ * "anybody with a porch", whose porch is job 110's first item before "a patio, or a houseplant
+ * habit"), or "some / any / a certain" with at most three describing words before a general noun
+ * ("some ordinary place", "any old thing", "some other way"). "kind / sort / type of …" is a head
+ * only after "a certain" or before a general noun ("a certain kind of wood", "any sort of place"):
+ * "some kind of glue, a clamp, and a rag" is three things to get. "some glue", "some scrap pine" and
+ * "somebody's barn" name real things and are not heads. Only ever asked of a list's FIRST item, with
+ * examples after it (`ledByGeneralHead`). Closed lists of ordinary English. Pure.
+ */
+export function generalHead(item: string): boolean {
+  const words = item
+    .trim()
+    .replace(/’/g, "'")
+    .replace(/[.!?;:,]+$/, "")
+    .replace(/^(?:(?:and|or|plus|maybe|then|also|even|nor)\s+)+/i, "")
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!words.length) return false;
+  if (INDEFINITE_PRONOUN.test(words[0])) return words.length <= 5 && !words.slice(1).some(w => NEW_THING_WORD.has(w));
+  const opener =
+    words[0] === "some" || words[0] === "any" || words[0] === "certain" ? 1 : words[0] === "a" && words[1] === "certain" ? 2 : 0;
+  if (!opener) return false;
+  const rest = words.slice(opener);
+  const kind = rest.findIndex(w => KIND_NOUN.has(w));
+  if (kind >= 0 && kind <= 2 && rest[kind + 1] === "of")
+    return rest.length <= kind + 5 && (words.includes("certain") || GENERAL_NOUN.has(rest[rest.length - 1]));
+  return rest.length >= 1 && rest.length <= 4 && GENERAL_NOUN.has(rest[rest.length - 1]);
+}
+
+/**
+ * Whether a list's first item is a general head the items after it are examples of (`generalHead`)
+ * — never when the next item is a head too: "something sweet, something salty, and something to
+ * drink" is three things. Pure.
+ */
+export function ledByGeneralHead(items: readonly (string | undefined)[]): boolean {
+  return items.length >= 2 && generalHead(String(items[0] ?? "")) && !generalHead(String(items[1] ?? ""));
+}
+
+/**
+ * A list's items without the general head in front of its examples (`ledByGeneralHead`): "some
+ * ordinary place, a waiting room, a church pew" is two places. Only when two or more items follow the
+ * head — a head with ONE example ("some quiet spot, a porch") is no list, and is left for the list
+ * check to refuse. Returns the same array when there is nothing to drop. Pure.
+ */
+export function withoutGeneralHead<T extends string>(items: T[]): T[] {
+  return items.length >= 3 && ledByGeneralHead(items) ? items.slice(1) : items;
+}
+
 /**
  * A list item with no article — "flour,", "sugar,", "and butter." — a bare name of one to four
  * words: no subject or verb (`LIST_ITEM_CLAUSE`), no "-ly" word, not an aside ("Honestly,"). Only
@@ -903,7 +981,10 @@ export function markListPieces(scenes: StoryboardScene[]): number {
     }
     let j = i;
     while (j + 1 < scenes.length && item(scenes[j + 1]) && scenes[j + 1].shotGroup === scenes[i].shotGroup) j++;
-    const run = scenes.slice(i, j + 1);
+    let run = scenes.slice(i, j + 1);
+    // A general head at the front of the run ("some ordinary place," before "a waiting room,", job
+    // 400) leads the examples and never counts as one of them, so it is never marked here.
+    if (ledByGeneralHead(run.map(s => s.scriptText))) run = run.slice(1);
     if (run.length >= 2 || run.some(s => s.listCut))
       for (const s of run)
         if (!s.listCut) {

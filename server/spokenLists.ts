@@ -11,7 +11,9 @@
  *  1. `findSpokenLists` — one call reads the numbered sentences and writes every list's items word
  *     for word; `validateSpokenList` keeps only items that are really there, in order, joined the
  *     way list items are (commas, "and"/"or"), and `itemsAreThings` keeps a list of things only
- *     when every item names one (never "six,", "round ten," or "as rest,"). When the call fails,
+ *     when every item names one (never "six,", "round ten," or "as rest,"). A general head in front
+ *     of examples ("some ordinary place, a waiting room, a church pew") is never an item
+ *     (`withoutGeneralHead`). When the call fails,
  *     `listsByShape` finds them by sentence shape alone ("X, Y, and Z") — the same rules, so a
  *     film is never worse off.
  *  2. `applySpokenLists` — re-cuts the film so every item is exactly one picture, wherever the
@@ -30,8 +32,11 @@ import {
   LIST_ITEM_CLAUSE,
   NOT_A_LIST_ITEM,
   firstWords,
+  generalHead,
+  ledByGeneralHead,
   notAThing,
   tokenSpans,
+  withoutGeneralHead,
 } from "./shotList";
 
 export interface SpokenList {
@@ -105,8 +110,24 @@ const DETERMINER =
 /** Words that make a bare phrase say where, not name a thing. */
 const PLACE_WORD = new Set(["in", "on", "at", "with", "for", "from", "to", "into", "onto", "by", "near"]);
 
-/** The trailing "a/the/some … thing" of a clause, when it is short enough to be a list's first item. */
+/**
+ * Whether a clause ENDS on a general head (`generalHead`): "…usually in some ordinary place",
+ * "…I looked everywhere", "…you want a certain kind of wood". A list after such a clause is examples
+ * of the head, and the head is what the list hangs off, never its first item (job 400). Pure.
+ */
+function endsOnGeneralHead(clause: string): boolean {
+  const words = clause.trim().split(/\s+/).filter(Boolean);
+  for (let k = 1; k <= Math.min(6, words.length); k++) if (generalHead(words.slice(-k).join(" "))) return true;
+  return false;
+}
+
+/**
+ * The trailing "a/the/some … thing" of a clause, when it is short enough to be a list's first item —
+ * never a general head ("…usually in some ordinary place," before "a waiting room, a church pew",
+ * job 400: the place was item 1 and got a picture of its own).
+ */
 function trailingThing(clause: string): string | null {
+  if (endsOnGeneralHead(clause)) return null;
   const m =
     /(?:^|\s)((?:a|an|the|some|my|your|our|his|her|their|one|two|three|four|five)\s+[^,;]+)$/i.exec(
       clause.trim()
@@ -138,8 +159,12 @@ function lastItemBeforeClause(piece: string): string | null {
   return namesAThing(item) ? item : null;
 }
 
-/** A clause's last word, when a list of bare names follows it ("You need flour, | sugar, and butter"). */
+/**
+ * A clause's last word, when a list of bare names follows it ("You need flour, | sugar, and butter")
+ * — never the last word of a general head ("you want a certain kind of WOOD, | oak, walnut…").
+ */
 function trailingBareThing(clause: string): string | null {
+  if (endsOnGeneralHead(clause)) return null;
   const w = /(?:^|\s)([A-Za-z][A-Za-z'-]*)$/.exec(clause.trim())?.[1];
   return w && namesAThing(w) && !DETERMINER.test(w) ? w : null;
 }
@@ -147,10 +172,11 @@ function trailingBareThing(clause: string): string | null {
 /**
  * The lists in one sentence, by shape alone: three or more comma-separated pieces that each name a
  * thing ("a churn dash here, a bear paw there, a flying geese row"), or two when the second is
- * joined by a comma AND "and"/"or" ("a saw, and a drill"). A list's first item may end the clause
- * before it ("…sitting at a kitchen table with a straight-stitch machine,"). Two things joined by a
- * bare "and" are not a list ("the potholders and the coasters were done"), nor is "the one that…".
- * Returns each list's items without their joiners. Pure.
+ * joined by a comma AND "and"/"or" ("a saw, and a drill"), or after a general head ("some quiet
+ * spot, a porch swing, a park bench" — the head is never an item). A list's first item may end the
+ * clause before it ("…sitting at a kitchen table with a straight-stitch machine,"). Two things joined
+ * by a bare "and" are not a list ("the potholders and the coasters were done"), nor is "the one
+ * that…". Returns each list's items without their joiners. Pure.
  */
 export function listsByShape(sentence: string): string[][] {
   const pieces = sentence
@@ -189,9 +215,18 @@ export function listsByShape(sentence: string): string[][] {
       source && run.length >= 2
         ? (bare ? trailingBareThing(source) : trailingThing(source))
         : null;
-    const items = [...(lead ? [lead] : []), ...run];
+    let items = [...(lead ? [lead] : []), ...run];
+    // A GENERAL HEAD, then examples of it (job 400: "…usually in some ordinary place, a waiting room,
+    // a church pew,"): the head is what the list hangs off, never its first item — whether it ends the
+    // clause before the list (`trailingThing` refuses it) or opens the run itself ("Some quiet spot, a
+    // porch swing, a park bench"). Two examples after a head are a list: the head says examples follow.
+    let headed = !lead && run.length >= 2 && !!source && endsOnGeneralHead(source);
+    if (items.length >= 3 && ledByGeneralHead(items)) {
+      items = items.slice(1);
+      headed = true;
+    }
     const joinedByAnd = /^(?:and|or)\s/i.test(items[items.length - 1] ?? "");
-    if (items.length >= 3 || (items.length === 2 && joinedByAnd)) {
+    if (items.length >= 3 || (items.length === 2 && (joinedByAnd || headed))) {
       out.push(items.map(t => stripJoiners(t).replace(/[.!?;:,]+$/, "").trim()));
     }
     i = j;
@@ -215,10 +250,13 @@ function findTokens(toks: string[], want: string[], from: number): number {
  * Whether `items` really are a spoken list in `sentence`: every item is there, in order, at most
  * `LIST_ITEM_MAX_WORDS` words, with at most `GAP_MAX_WORDS` words between two items, and joined the
  * way list items are — two items need a comma between them, three or more at least one. A pair
- * joined only by "and" ("the potholders and the coasters") fails. Pure.
+ * joined only by "and" ("the potholders and the coasters") fails, and so does a list led by a general
+ * head (`ledByGeneralHead`: "some ordinary place, a waiting room, a church pew", job 400) — the head
+ * is dropped first (`withoutGeneralHead`), and a head with one example is no list at all. Pure.
  */
 export function validateSpokenList(sentence: string, items: string[]): boolean {
   if (!Array.isArray(items) || items.length < 2) return false;
+  if (ledByGeneralHead(items)) return false;
   const spans = tokenSpans(sentence);
   const toks = spans.map(t => t.tok);
   let cursor = 0;
@@ -284,7 +322,9 @@ For each list give its items EXACTLY as spoken, word for word — each item with
 words up to the next comma ("a flying geese row across the middle"), without the "and"/"or" that
 joins it. A list's first item may sit at the end of a longer clause ("…sitting at a kitchen table
 with a straight-stitch machine, a rotary cutter, and a pile of scraps": the machine is the first
-item).
+item). A GENERAL word the items are examples of is never an item: in "…waits in some quiet spot, a
+porch swing, a park bench, the front seat of a parked car" the items are the porch swing, the park
+bench and the front seat — "some quiet spot" only says what kind of things they are.
 
 NOT a list:
 - one thing being talked about ("the one that paid me best came out of a coffee can")
@@ -298,7 +338,7 @@ Answer with JSON only: {"lists":[{"sentence":<number>,"kind":"things"|"steps","i
 
 /**
  * Read the model's answer: lists that pass `validateSpokenList` against their own sentence and, for
- * a list of things, `itemsAreThings`. Pure.
+ * a list of things, `itemsAreThings` — each without a general head in front of its examples. Pure.
  */
 export function parseSpokenLists(text: string, sentences: string[]): SpokenList[] | null {
   const r = safeParseJSON<{ lists?: unknown }>(text);
@@ -307,7 +347,10 @@ export function parseSpokenLists(text: string, sentences: string[]): SpokenList[
   const out: SpokenList[] = [];
   for (const raw of parsed.lists as { sentence?: unknown; items?: unknown; kind?: unknown }[]) {
     const n = Number(String(raw?.sentence ?? "").replace(/^#/, ""));
-    const items = Array.isArray(raw?.items) ? raw.items.map(i => String(i ?? "").trim()) : [];
+    // A general head the model counted as item 1 ("some ordinary place", job 400) is dropped, not
+    // the whole list: the examples after it ARE the list. Dropped before the thing check, so a head
+    // that names nothing ("anything, a mouse, a snake, a raccoon") no longer costs the list.
+    const items = withoutGeneralHead(Array.isArray(raw?.items) ? raw.items.map(i => String(i ?? "").trim()) : []);
     if (!Number.isInteger(n) || !sentences[n]) continue;
     const steps = raw?.kind === "steps";
     // The model is told numbers and describing words are not lists, and still answered "as health,
@@ -590,7 +633,9 @@ export function applySpokenLists(
   for (const list of lists) {
     const ranges: [number, number][] = [];
     let from = cursor;
-    for (const item of list.items) {
+    // A list saved before the general-head rule (job 400's "some ordinary place, a waiting room, a
+    // church pew") is cut without its head on a resume too: the head's words stay with their beat.
+    for (const item of withoutGeneralHead(list.items)) {
       const want = tokenSpans(item).map(t => t.tok);
       const at = findTokens(toks, want, from);
       if (at < 0 || (ranges.length && at - ranges[ranges.length - 1][1] > GAP_MAX_WORDS)) {
