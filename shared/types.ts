@@ -439,8 +439,9 @@ export interface StoryboardScene {
    */
   hostCandidate?: true;
   /**
-   * The thing this picture must show, in the shot list's words ("a stack of sandpaper"). The still
-   * checker re-rolls a picture that does not show it (`scanStillDefects`' `missing` verdict).
+   * The thing this picture must show, in the shot list's words ("a stack of sandpaper"), or the
+   * operator's own once they type the picture again (`ownTypedPicture`). The still checker re-rolls a
+   * picture that does not show it (`missing`), or shows it other than described (`detail`).
    */
   showSubject?: string;
   /** Scenes cut from one storyboard beat share its index here — the shot list's own bookkeeping. */

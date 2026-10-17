@@ -1434,6 +1434,16 @@ is not only an object: a kind of event or situation the line describes counts to
 struggles with the storms that roll in at night" after a picture of a roof is that night storm. If a
 picture would look like the one right before it and its line says anything new you can see, it is
 WRONG.
+A picture of the right thing is still WRONG when it leaves out what the line makes its point with:
+WHO is doing WHAT ("my sister watched the whole thing from her porch" over an empty porch — the
+picture is the sister watching from the porch), the STATE the line describes (a gate left hanging
+open, a jar with its lid off, a shirt soaked through, a tent half put up, a coat zipped to the
+chin), or a COUNT the line makes the point of ("one bowl for every guest, plus a spare" over a
+single bowl). Rewrite it with the same thing, and that in it. Never for: a comparison that only says what
+something costs or is like (show the subject); a bare number, price or length of time (show the
+thing it is about); someone the line only sells to, tells, helps or mentions, who does nothing in
+it (show the thing); a warning about a danger (show the safe way, never the danger); something the
+line says does NOT happen or is NOT there (never draw it happening).
 It is WRONG when it does not show what the line points at. SHOW EXACTLY WHAT THE LINE POINTS AT: when a line points at a specific thing, or a specific part, side or detail of a thing (the box it comes in, its label, the battery door on the back, the dial, the date on the bottom, the hem), the picture is a close-up of exactly that — never the video's main thing somewhere else, never a plain version without it. What the script says that part shows (the words printed on it, a number, a setting) is shown exactly as the script says it.
 It is WRONG when a body part looks cut off. A BODY PART NEVER LOOKS CUT OFF: hair, a hand, a foot or a face is shown on the person, or on what really holds it — a wig on a mannequin head or wig stand, a practice hand, extensions in their packet. A few loose strands that really fall (in a brush, on a comb or towel, in a drain) are fine. Never hair still shaped like a head or a hairstyle with no head inside it, and never a hand, foot or face on its own. To show a colour or texture, show it on the person's own head or hands.
 A picture marked "FIRST of the MAIN thing" must show the main thing IN USE when it is naturally used
@@ -1486,16 +1496,23 @@ show it in use — lit, steaming, burning, running — because that is the momen
 FIRST picture of the MAIN thing that
 shows it idle when it is naturally in use that way is WRONG too: rewrite it in use. No writing, no logos,
 no faces, never "or".
+When the picture you write shows SOMEONE ELSE doing something — a customer, a buyer, a neighbour, a
+relative; never the host, never "you" — write them into show, seen from behind or from the side, and
+set other to who they are in 2-6 plain words from the line ("an older neighbour"). One person only.
+other is null otherwise.
 
 Answer with JSON only, one entry for EVERY picture:
 {"pictures":[{"id":7,"about":"...","shows_it":true},
-{"id":8,"about":"...","shows_it":false,"show":"...","thing":null,"stage":null,"split":[{"from":"exact words","show":"...","thing":null,"stage":null}]},
-{"id":9,"about":"...","shows_it":false,"join":true,"show":"...","thing":null,"stage":null}]}
-show, thing and stage only when shows_it is false or join is true; split only when a new picture must start;
+{"id":8,"about":"...","shows_it":false,"show":"...","thing":null,"stage":null,"other":null,"split":[{"from":"exact words","show":"...","thing":null,"stage":null,"other":null}]},
+{"id":9,"about":"...","shows_it":false,"join":true,"show":"...","thing":null,"stage":null,"other":null}]}
+show, thing, stage and other only when shows_it is false or join is true; split only when a new picture must start;
 join only on a picture marked "same sentence".`;
 
-/** A new picture starting inside a line, at `from` (its first words, verbatim). */
-export type PictureSplit = { from: string; show: string; thing?: string; stage?: BuildStage };
+/**
+ * A new picture starting inside a line, at `from` (its first words, verbatim). `other`: the person
+ * who is not the host it shows (`otherPersonOf`), only when the check named one.
+ */
+export type PictureSplit = { from: string; show: string; thing?: string; stage?: BuildStage; other?: string };
 export type PictureFix = {
   id: number;
   show?: string;
@@ -1505,6 +1522,11 @@ export type PictureFix = {
    * that the new picture shows no made thing, unset when it did not answer (`applyPictureFixes`).
    */
   stage?: BuildStage | null;
+  /**
+   * Who the rewrite shows when it is SOMEONE ELSE than the host (`otherPersonOf`): a person, `null`
+   * when the check answered that nobody else is in it, unset when it did not answer.
+   */
+  other?: string | null;
   split?: PictureSplit[];
   /** This picture and the one before it are ONE idea of one sentence: make them one picture. */
   join?: boolean;
@@ -1542,18 +1564,21 @@ export function parsePictureFixes(text: string, scenes: StoryboardScene[]): Pict
         show: clean(x?.show),
         thing: clean(x?.thing) || undefined,
         stage: buildStageOf(x?.stage),
+        other: otherPersonOf(x?.other),
       }))
       .filter((x: PictureSplit) => x.from && x.show);
     if (!show && !split.length && !join) continue;
     // A stage the check answered (a stage word, or null for "no made thing") replaces the old one;
-    // a missing field keeps it (`applyPictureFixes`).
+    // a missing field keeps it (`applyPictureFixes`). The person is read the same way.
     const answered = !!f && typeof f === "object" && "stage" in f;
+    const saidWho = !!f && typeof f === "object" && "other" in f;
     out.push({
       id,
       ...(join ? { join } : {}),
       ...(show ? { show } : {}),
       ...(show && typeof f?.thing === "string" && f.thing ? { thing: f.thing } : {}),
       ...(show && answered ? { stage: buildStageOf(f.stage) ?? null } : {}),
+      ...(show && saidWho ? { other: otherPersonOf(f.other) ?? null } : {}),
       ...(split.length ? { split } : {}),
     });
   }
@@ -1587,7 +1612,14 @@ export function applyPictureFixes(
     s.keyThing = primary?.name;
     const others = named.map(t => t.name).filter(name => name !== primary?.name);
     s.otherKeyThings = others.length ? others : undefined;
-    s.humanPresent = SHOWS_PERSON.test(f.show) ? true : undefined;
+    // SOMEONE ELSE IS DRAWN AS SOMEONE ELSE in a rewrite too (2026-10-18): the check now rewrites a
+    // picture that leaves out WHO does WHAT (Hank's job 171 scene 248, "my neighbor across the street
+    // watched the whole thing from his driveway" over an empty driveway), and the person it puts in
+    // used to reach `markHostBroll` with no `otherPerson` — drawn as the HOST. The check's answer
+    // replaces the old person (`null`: nobody else, so any person in it is the host); no answer keeps
+    // the old one while someone is still in the picture.
+    s.humanPresent = SHOWS_PERSON.test(f.show) || f.other ? true : undefined;
+    if (f.other !== undefined) s.otherPerson = f.other ?? undefined;
     // A rewrite with no person in it has nobody to be "someone else".
     if (!s.humanPresent) s.otherPerson = undefined;
     s.sameShot = undefined;
@@ -1600,6 +1632,58 @@ export function applyPictureFixes(
     n++;
   }
   return n;
+}
+
+/**
+ * A description with what it says is NOT there taken out: "a smoke alarm on the counter, no box, no
+ * packaging" names an alarm, not a box. From "no", "not", "without", "never" or an "-n't" word to the
+ * end of its phrase, or to an "and" / "but" that starts the next one; "no more than three" is a count
+ * and stays. Pure.
+ */
+export function withoutNegatedPhrases(text: string): string {
+  return text
+    .replace(
+      /\b(?:no|not|without|never|nor|[a-z]+n['’]t)\b(?!\s+(?:more|less|fewer)\s+than\b)(?:(?!\b(?:and|but)\b)[^,;.!?:()…])*/gi,
+      " "
+    )
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * A TYPED PICTURE OWNS THE PICTURE (2026-10-18, job 383 scenes 20, 33 and 40). An operator's typed
+ * prompt replaced only `visualPrompt`: `showSubject` stayed the planner's, so `subjectLead` still led
+ * every redo with it and the picture check still held the redo to it — scene 20 was typed "one round
+ * white smoke alarm lying face up on a wooden kitchen counter … no box, no packaging" and was led and
+ * judged by "close-up of the front label of a small rectangular cardboard smoke detector box held in
+ * one hand", its key thing still the box; scene 40's "blank yellow sticky note … no writing of any
+ * kind" kept soft print and the detector's back panel, and all 8 of its checks said writing. Now the
+ * typed words are what the picture must show, and what the planner tied to the OLD picture goes
+ * unless the typed words still name it: its key thing (so the memory it is drawn from and the things
+ * the check requires), the part and the named kind it was about, the words it may print, and soft
+ * print. What the typed words say is NOT there names nothing (`withoutNegatedPhrases`). Called
+ * BEFORE the typed words land on `visualPrompt`: the card sends its prompt on every regenerate, typed
+ * or not, and the prompt the picture already has is not typed — a plain regenerate keeps the
+ * planner's subject. Returns whether it took the picture over. Pure apart from mutating `s`.
+ */
+export function ownTypedPicture(s: StoryboardScene, typed: string, things: KeyThing[] | undefined): boolean {
+  const text = typed.trim();
+  if (!text || text === (s.visualPrompt ?? "").trim()) return false;
+  const said = withoutNegatedPhrases(text);
+  const names = (name: string | undefined) => !!name?.trim() && keyThingsIn(said, [{ name, look: "" }]).length > 0;
+  const named = keyThingsIn(said, things);
+  const primary = names(s.keyThing) ? s.keyThing : named[0]?.name;
+  // A stage belongs to the picture of ITS thing; another thing has no stage the typed words vouch for.
+  if (primary !== s.keyThing) s.buildStage = undefined;
+  s.keyThing = primary;
+  const others = named.map(t => t.name).filter(name => name !== primary);
+  s.otherKeyThings = others.length ? others : undefined;
+  if (s.partOf && !names(s.partOf)) s.partOf = undefined;
+  if (s.namedLook && !names(s.namedLook.split(":")[0])) s.namedLook = undefined;
+  if (s.pictureText && !saidText(s.pictureText, said)) s.pictureText = undefined;
+  s.blurPrint = !s.pictureText && blurredPrint(said) ? true : undefined;
+  s.showSubject = text;
+  return true;
 }
 
 /** A line that ends a sentence (so the next picture starts a new one). */
@@ -1655,7 +1739,8 @@ export function applyPictureJoins(
       wordCut: prev.wordCut || s.wordCut,
       humanPresent: prev.humanPresent || s.humanPresent || undefined,
     } as StoryboardScene;
-    if (f!.show) applyPictureFixes([merged], [{ id: 0, show: f!.show, thing: f!.thing, stage: f!.stage }], things);
+    if (f!.show)
+      applyPictureFixes([merged], [{ id: 0, show: f!.show, thing: f!.thing, stage: f!.stage, other: f!.other }], things);
     out[k] = merged;
     lens[k] += sec(s);
     remap.set(id, k);
@@ -1735,7 +1820,10 @@ export function applyPictureSplits(
         otherKeyThings: others.length ? others : undefined,
         // A new picture: only the stage the check gave it, never the line's old one.
         buildStage: cut.stage,
-        humanPresent: SHOWS_PERSON.test(cut.show) ? true : undefined,
+        humanPresent: SHOWS_PERSON.test(cut.show) || cut.other ? true : undefined,
+        // Only the person the check put in this new picture — never the line's old one, which
+        // `markHostBroll` would otherwise draw into a picture of something else.
+        otherPerson: cut.other,
         stillImage: true,
         objectMotion: undefined,
         selfMoving: undefined,

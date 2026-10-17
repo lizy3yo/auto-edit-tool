@@ -49,6 +49,7 @@ import {
   videoKind,
   fitPicturesToLines,
   judgeSelfMoving,
+  ownTypedPicture,
 } from "./shotList";
 import {
   attachMemory,
@@ -6630,6 +6631,36 @@ export const STEP_BACK_CLAUSE =
   "Step further back than before: the whole thing smaller in the frame, in its place, with no " +
   "printing on it large enough to make out.";
 
+/** How the detail redraw's clause starts — found again so a later one replaces it, never stacks. */
+export const DETAIL_CLAUSE_START = "THE DETAIL MATTERS:";
+
+/**
+ * The redraw after the check said the thing is there but not the way its description says (the
+ * `detail` verdict — job 305 scene 118's padlock "hanging open" drawn shut). A fresh seed alone
+ * draws the same: the prompt already asks for it, so the redraw is told which detail to get right
+ * and what the check saw instead. A picture drawn from memory is told its references are for the
+ * look only: they come first and show their thing at another moment, and 49 of the 60 sampled wrong
+ * pictures were memory pictures. Pure.
+ */
+export function pictureDetailClause(
+  subject: string | undefined,
+  missed: string | undefined,
+  fromMemory: boolean
+): string {
+  const want = subject?.trim().replace(/[.\s]+$/, "");
+  const off = missed?.trim().replace(/[.\s]+$/, "");
+  return (
+    `${DETAIL_CLAUSE_START} show it exactly as described — the state it is in, what is being done, ` +
+    "how many there are and where each one sits" +
+    (want ? `: ${want}.` : ".") +
+    (off ? ` This is easy to get wrong here (${off}).` : "") +
+    (fromMemory
+      ? " The reference pictures are only for how things look: never copy their state, position " +
+        "or number."
+      : "")
+  );
+}
+
 /** Close-up wording, which a picture maker answers with sharp, readable print. */
 const CLOSE_UP_WORDS = /\b(?:extreme\s+)?close[- ]?ups?\b|\bmacro\b/gi;
 /**
@@ -9117,6 +9148,30 @@ async function drawValidatedStill(
         console.warn(
           `[Longform] scene ${scene.index} still does not show "${scene.showSubject}" ` +
             `(${defects.what}, attempt ${attempt}/${attempts}) → regenerating`
+        );
+        continue;
+      }
+      // THE DETAIL THE DESCRIPTION SAYS: the thing is there but not in the state, action, number or
+      // position described (`detail`). The same single redraw as a missing thing — one budget for
+      // both, so no picture is redrawn more for what it shows than before — told what came back
+      // otherwise (`pictureDetailClause`). Not on a softened content-policy prompt, where naming the
+      // description again could trip the filter it was softened for. The frame is the fallback, and
+      // is still a fit memory: its thing is in it.
+      if (defects.detail && offSubjectRerolls < 1) {
+        offSubjectRerolls++;
+        lastError = `Still image does not show "${scene.showSubject}" as described`;
+        offSubjectFallback ??= { buffer, mimeType: r.mimeType };
+        if (!visualOverride && tier === 0) {
+          const cut = prompt.indexOf(DETAIL_CLAUSE_START);
+          prompt = `${cut >= 0 ? prompt.slice(0, cut).trimEnd() : prompt} ${pictureDetailClause(
+            scene.showSubject,
+            defects.detailWhat,
+            !!scene.memoryRefUrls?.length
+          )}`;
+        }
+        console.warn(
+          `[Longform] scene ${scene.index} still shows "${scene.showSubject}" but not as described ` +
+            `(${defects.detailWhat ?? defects.what}, attempt ${attempt}/${attempts}) → drawing it again`
         );
         continue;
       }
@@ -18388,6 +18443,13 @@ function prepareSceneEdit(ctx: SceneEditContext, req: SceneEditRequest): void {
     // effectively verbatim metadata either way.
     const typedSplit = req.customSplitVisual?.trim();
     const typedVisual = req.customVisualPrompt?.trim();
+    // A TYPED PICTURE OWNS THE PICTURE (`ownTypedPicture`): new words on a cutaway become what it must
+    // show and what the check holds it to, never the planner's old subject (job 383 scenes 20, 33,
+    // 40). Before the words land, so the prompt it already has (sent back by a plain regenerate)
+    // is told apart from typed words. A split panel is already drawn from, and checked against, its
+    // own words (`buildSplitRightScene`).
+    if (typedVisual && !scene.hostPresent && !splitOnly)
+      ownTypedPicture(scene, typedVisual, ctx.params.keyThings);
     if (typedVisual) scene.visualPrompt = typedVisual;
     if (splitOnly && typedSplit) scene.splitVisual = typedSplit;
     const edited = splitOnly ? !!typedSplit : !!typedVisual;

@@ -9532,6 +9532,93 @@ describe("generateValidatedStill", () => {
   });
 });
 
+describe("the thing the way its description says — one redraw, told the detail (2026-10-18)", () => {
+  const pngOf = (bg: string) =>
+    sharp({ create: { width: 8, height: 8, channels: 3, background: bg } }).png().toBuffer();
+  const verdict = (over: Record<string, unknown> = {}) => ({ overlay: false, broken: false, what: "", ...over }) as any;
+  // Job 305 scene 118: the description already said "hanging open", and the padlock came back shut.
+  const OPEN = "padlock hanging open on a mesh gate latch";
+  const padlock = (over: Record<string, unknown> = {}) =>
+    ({ index: 118, visualPrompt: "a padlock on a mesh gate latch", showSubject: OPEN, ...over }) as any;
+
+  afterEach(() => {
+    mockScanStillDefects.mockReset();
+    mockScanStillDefects.mockResolvedValue(verdict());
+  });
+
+  it("draws it once more, the prompt naming what came back otherwise", async () => {
+    const { DETAIL_CLAUSE_START } = await import("./longformVideo");
+    const shut = await pngOf("#511");
+    const open = await pngOf("#155");
+    mockScanStillDefects.mockReset();
+    mockScanStillDefects
+      .mockResolvedValueOnce(verdict({ detail: true, detailWhat: "padlock shut, should hang open", what: "closed padlock" }))
+      .mockResolvedValue(verdict());
+    const genImage = vi
+      .fn()
+      .mockResolvedValueOnce({ success: true, fileData: shut })
+      .mockResolvedValueOnce({ success: true, fileData: open });
+    const out = await generateValidatedStill(padlock(), 3, undefined, genImage);
+    expect(out.buffer.equals(open)).toBe(true);
+    expect(genImage).toHaveBeenCalledTimes(2);
+    const first = genImage.mock.calls[0][0].prompt as string;
+    const second = genImage.mock.calls[1][0].prompt as string;
+    expect(first).not.toContain(DETAIL_CLAUSE_START);
+    expect(second).toContain(DETAIL_CLAUSE_START);
+    expect(second).toContain("padlock shut, should hang open");
+    expect(second).toContain(OPEN);
+    // No memory: no word about reference pictures.
+    expect(second).not.toMatch(/reference pictures are only for how things look/);
+  });
+
+  it("tells a picture drawn from memory that its references are for the look only", async () => {
+    mockScanStillDefects.mockReset();
+    mockScanStillDefects.mockResolvedValueOnce(verdict({ detail: true })).mockResolvedValue(verdict());
+    const genImage = vi.fn().mockResolvedValue({ success: true, fileData: await pngOf("#225") });
+    await generateValidatedStill(padlock({ memoryRefUrls: ["https://x/first-padlock.png"] }), 3, undefined, genImage);
+    const second = genImage.mock.calls[1][0].prompt as string;
+    expect(second).toMatch(/reference pictures are only for how things look/);
+    expect(second).toMatch(/never copy their state, position or number/);
+  });
+
+  it("shares the one redraw with a missing thing — never a third picture for what it shows", async () => {
+    mockScanStillDefects.mockReset();
+    mockScanStillDefects
+      .mockResolvedValueOnce(verdict({ missing: true, what: "a chain, no padlock" }))
+      .mockResolvedValueOnce(verdict({ detail: true, detailWhat: "padlock shut" }))
+      .mockResolvedValue(verdict());
+    const a = await pngOf("#a11");
+    const b = await pngOf("#a22");
+    const genImage = vi
+      .fn()
+      .mockResolvedValueOnce({ success: true, fileData: a })
+      .mockResolvedValueOnce({ success: true, fileData: b });
+    const out = await generateValidatedStill(padlock(), 3, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(2);
+    expect(out.buffer.equals(b)).toBe(true);
+    // Its thing is in it: a picture that is only not-as-described is still a memory later ones may copy.
+    expect(out.missing).toBe(false);
+  });
+
+  it("a picture whose check names no detail is drawn exactly as before", async () => {
+    mockScanStillDefects.mockReset();
+    mockScanStillDefects.mockResolvedValue(verdict());
+    const genImage = vi.fn().mockResolvedValue({ success: true, fileData: await pngOf("#3a5") });
+    await generateValidatedStill(padlock(), 3, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(1);
+  });
+
+  it("the clause names the detail and the description, and nothing about memory when there is none", async () => {
+    const { pictureDetailClause } = await import("./longformVideo");
+    expect(pictureDetailClause(OPEN, "padlock shut.", false)).toBe(
+      "THE DETAIL MATTERS: show it exactly as described — the state it is in, what is being done, how many " +
+        "there are and where each one sits: padlock hanging open on a mesh gate latch. This is easy to get " +
+        "wrong here (padlock shut)."
+    );
+    expect(pictureDetailClause(undefined, undefined, true)).toMatch(/where each one sits\. The reference pictures/);
+  });
+});
+
 describe("rewritePolicySafeVisual (tier-3 content-policy rewrite)", () => {
   // Braced body on purpose: a braceless `() => mockInvoke.mockReset()` returns the mock,
   // which vitest would invoke as a teardown.

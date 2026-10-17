@@ -1164,3 +1164,72 @@ describe("only a make-up step shows the face (Dale's job 372 test, 2026-10-15)",
     expect(scenes[0].hostFaceShown).toBeUndefined();
   });
 });
+
+/**
+ * THE PICTURE AND ITS LINE (2026-10-18, the audit's picture-vs-line rows). A picture of the right
+ * thing can still miss what the line says about it — who is doing what, the state, the count — and a
+ * picture the operator types again is its own, not the planner's. None of the rules names a channel.
+ */
+describe("the picture shows what its line and its typed words say (the audit, 2026-10-18)", () => {
+  const SMOKE: KeyThing[] = [
+    { name: "smoke alarm", look: "round white ceiling alarm", main: true },
+    { name: "smoke detector box", look: "small rectangular cardboard box" },
+  ];
+
+  it("job 383 scene 20: a typed redo is led and checked by the typed words, not the planner's box", async () => {
+    const { ownTypedPicture } = await import("./shotList");
+    const old = "close-up of the front label of a small rectangular cardboard smoke detector box held in one hand";
+    const s = pic(20, "First thing on the label.", old, { keyThing: "smoke detector box", blurPrint: true });
+    const typed =
+      "A quick ordinary phone photo: one round white smoke alarm lying face up on a wooden kitchen counter in plain daylight, no box, no packaging";
+    // Before: the old subject leads the typed prompt (what job 383 shipped).
+    expect(buildStillPrompt({ ...s, visualPrompt: typed })).toMatch(/^THE PICTURE MUST SHOW: [^.]*front label of a small rectangular cardboard smoke detector box/);
+    ownTypedPicture(s, typed, SMOKE);
+    s.visualPrompt = typed; // as `prepareSceneEdit` lands it
+    const prompt = buildStillPrompt(s);
+    expect(prompt).not.toMatch(/THE PICTURE MUST SHOW/);
+    expect(prompt).not.toMatch(/front label of a small rectangular cardboard/);
+    expect(prompt).not.toContain(BLURRED_PRINT_CLAUSE);
+    // The check is held to the alarm, never to the box the operator said to leave out.
+    expect(requiredThingsFor(s)).toEqual(["smoke alarm"]);
+  });
+
+  it("job 383 scene 40: 'no writing of any kind' is no soft print and no old back panel", async () => {
+    const { ownTypedPicture } = await import("./shotList");
+    const s = pic(40, "That number surprises people more than anything else I've mentioned tonight. That's the job.",
+      "detector back panel close up showing battery compartment and date area", { keyThing: "smoke alarm", blurPrint: true });
+    const typed = "his hand holding a pen over a small BLANK yellow sticky note on the counter, no writing of any kind anywhere";
+    ownTypedPicture(s, typed, SMOKE);
+    s.visualPrompt = typed;
+    const prompt = buildStillPrompt(s);
+    expect(prompt).not.toMatch(/back panel|battery compartment/);
+    expect(prompt).not.toContain(BLURRED_PRINT_CLAUSE);
+    expect(requiredThingsFor(s)).toEqual([]);
+  });
+
+  it("job 171 scene 248: the neighbour a line check adds is that neighbour, never the host", async () => {
+    const { applyPictureFixes } = await import("./shotList");
+    const scenes = [
+      pic(248, "That changes right here, and my neighbor across the street watched the whole thing from his driveway.",
+        "an empty driveway across the street from the workshop garage"),
+    ];
+    applyPictureFixes(scenes, [{ id: 0, show: "an older neighbour standing in the driveway across the street, watching", other: "an older neighbour" }], undefined);
+    markHostBroll(scenes, { hostLook: "a man with a grey beard in a plaid shirt" }, "https://x/host.png");
+    expect(scenes[0].brollHostLook).toBeUndefined();
+    const prompt = buildStillPrompt(scenes[0]);
+    expect(prompt).toContain(otherPersonClause("an older neighbour"));
+    expect(prompt).toContain(ONE_OTHER_PERSON_SUFFIX);
+    expect(prompt).not.toContain(NO_FIGURES_SUFFIX);
+  });
+
+  it("job 305 scene 118: a description's state is checked apart from whether the thing is there", async () => {
+    const { detailQuestion, missingQuestion } = await import("./overlayTextScan");
+    const open = "padlock hanging open on a mesh gate latch";
+    expect(detailQuestion(open)).toContain(open);
+    expect(detailQuestion(open)).toMatch(/shut where it says open/);
+    // `missing` keeps its meaning — the thing itself absent, swapped or small — and its wording.
+    expect(missingQuestion(open)).not.toMatch(/STATE|detail/);
+    // The cached rulebook is untouched: the question rides the per-picture part.
+    expect(STILL_DEFECT_SYSTEM).not.toMatch(/QUESTION 4b/);
+  });
+});

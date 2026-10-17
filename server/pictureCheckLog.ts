@@ -49,6 +49,8 @@ export function checkFlags(v: {
   overlay?: boolean;
   writing?: boolean;
   missing?: boolean;
+  /** The thing is there but not in the state, number or position described (`detail`). */
+  detail?: boolean;
   messy?: boolean;
   wrongPlace?: boolean;
   staged?: boolean;
@@ -59,6 +61,7 @@ export function checkFlags(v: {
     v.overlay && "stamped text",
     v.writing && "writing",
     v.missing && "missing",
+    v.detail && "detail",
     v.messy && "brand or clutter",
     v.wrongPlace && "wrong place",
     v.staged && "staged",

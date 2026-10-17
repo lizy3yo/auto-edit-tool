@@ -32,6 +32,9 @@ describe("what kind of picture was checked", () => {
   it("lists every defect a verdict names, and nothing for a pass", () => {
     expect(checkFlags({})).toEqual([]);
     expect(checkFlags({ writing: true, staged: true })).toEqual(["writing", "staged"]);
+    // The thing there but not as described is its own flag, counted apart from a missing thing.
+    expect(checkFlags({ missing: true, detail: true })).toEqual(["missing", "detail"]);
+    expect(checkFlags({ detail: true })).toEqual(["detail"]);
   });
 });
 
