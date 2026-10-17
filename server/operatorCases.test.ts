@@ -2034,3 +2034,35 @@ describe("a picture never ships a known fault in silence (the audit, 2026-10-18)
     expect(out).toContain("house sign");
   });
 });
+
+describe("a myth card's strike-through crosses every line of the myth (round 10 graphics, 2026-10-18)", () => {
+  // 399 crew-myth-truth (25.1-26.5 s): "He figures she must know somebody on the crew." wrapped as it
+  // shrank for the truth; the ONE bar at half the block's height fell in the gap between the two
+  // lines, ran ~100 px past the words, and "somebody on the crew." was never struck.
+  const myth = "He figures she must know somebody on the crew.";
+
+  it("399 crew-myth-truth: when the stroke is done every word and every space between two is struck, the second line too", async () => {
+    const { splitWords, strikeSweep } = await import("../graphics/src/timing");
+    const words = splitWords(myth);
+    const done = strikeSweep(words, 1);
+    expect(done.words).toEqual(words.map(() => 1));
+    expect(done.gaps).toEqual(words.slice(1).map(() => 1));
+    // it is drawn left to right over the words in reading order, never all at once
+    const half = strikeSweep(words, 0.5);
+    expect(half.words[0]).toBe(1);
+    expect(half.words[words.length - 1]).toBe(0);
+    // and nothing before the truth comes
+    expect(strikeSweep(words, 0).words.every(a => a === 0)).toBe(true);
+  });
+
+  it("399: the myth keeps its line breaks while it shrinks, so 'know' no longer jumps up a line mid-strike", async () => {
+    const { mythType } = await import("../graphics/src/cards");
+    const full = mythType(0);
+    for (const p of [0.3, 0.6, 1]) {
+      const m = mythType(p);
+      expect(m.maxWidth / m.fontSize).toBeCloseTo(full.maxWidth / full.fontSize, 9);
+      expect(m.fontSize).toBeLessThan(full.fontSize);
+    }
+    expect(full).toEqual({ fontSize: 112, maxWidth: 1240 }); // the myth before the turn is as it was
+  });
+});
