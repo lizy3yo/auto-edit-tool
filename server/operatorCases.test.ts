@@ -1269,3 +1269,46 @@ describe("the picture shows what its line and its typed words say (the audit, 20
     expect(STILL_DEFECT_SYSTEM).not.toMatch(/QUESTION 4b/);
   });
 });
+
+describe("what a line rules out is never drawn (the audit, 2026-10-18)", () => {
+  // Production labels "shows what the line rules out": the stack beside the furnace under "and away
+  // from the furnace" (203-143, 211-135), a steel vault door under "I don't mean a steel vault"
+  // (224-22), a hand at the cat's belly under "isn't an invitation to rub it" (205-292).
+  it("203-143, 224-22, 205-292: the line check's mark reaches the picture check, whether or not it rewrote", async () => {
+    const { parsePictureFixes, applyPictureFixes } = await import("./shotList");
+    const { forbiddenQuestion } = await import("./overlayTextScan");
+    const scenes = [
+      pic(143, "and away from the furnace.", "a gas furnace with its burner flame glowing in a basement, a stickered board stack standing far across the room"),
+      pic(22, "Number two. A safe room, and no, I don't mean a steel vault like in the movies.", "a thick round steel vault door standing open"),
+      pic(292, "A belly on display isn't an invitation to rub it.", "The host's hand hovering near the belly-up tabby cat's tummy without touching it"),
+    ];
+    const fixes = parsePictureFixes(
+      JSON.stringify({
+        pictures: [
+          { id: 0, about: "where the stack is kept", shows_it: false, show: "a stickered board stack on a dry garage floor", forbids: "the board stack near the furnace" },
+          { id: 1, about: "a safe room", shows_it: false, show: "a small windowless interior room with a solid door", forbids: "a steel vault door" },
+          { id: 2, about: "leaving the belly alone", shows_it: true, forbids: "a hand rubbing or touching the cat's belly" },
+        ],
+      }),
+      scenes
+    );
+    expect(applyPictureFixes(scenes, fixes, undefined)).toBe(2);
+    expect(scenes.map(s => s.forbids)).toEqual([
+      "the board stack near the furnace",
+      "a steel vault door",
+      "a hand rubbing or touching the cat's belly",
+    ]);
+    // The rewrites name only what is in the frame; the third keeps its picture and its mark.
+    expect(scenes[0].showSubject).not.toMatch(/furnace/);
+    expect(scenes[1].showSubject).not.toMatch(/vault/);
+    expect(forbiddenQuestion(scenes[2].forbids!)).toContain("a hand rubbing or touching the cat's belly");
+  });
+
+  it("the prompt writer carries the same rule, in neutral words", async () => {
+    const { RULED_OUT_RULE, STILL_BROLL_ENHANCER_SYSTEM } = await import("./longformVideo");
+    expect(STILL_BROLL_ENHANCER_SYSTEM).toContain(RULED_OUT_RULE);
+    expect(RULED_OUT_RULE).toMatch(/never the ruled-out act, thing or\s+placement/);
+    expect(RULED_OUT_RULE).toMatch(/'away from' or 'across the room from'/);
+    expect(RULED_OUT_RULE).not.toMatch(/furnace|vault|shampoo|fence|belly|generator|risers/i);
+  });
+});

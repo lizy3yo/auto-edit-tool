@@ -159,6 +159,12 @@ export interface StillDefectVerdict {
   detail?: boolean;
   /** What the description asks for that the frame shows otherwise, in the check's words (`detail`). */
   detailWhat?: string;
+  /**
+   * The frame shows what its line RULES OUT (`scene.forbids`, from the line check) — the act the
+   * line says not to do, the thing it says is not meant, the place it says to keep something away
+   * from (`forbiddenQuestion`). Set only when true, and only asked when the caller passes it.
+   */
+  forbidden?: boolean;
   /** A legible brand name or logo, or a subject lost in busy unrelated clutter (rule 4). */
   messy: boolean;
   /** The line names a place (a market, a fair, a church hall) and the frame is clearly somewhere
@@ -210,6 +216,7 @@ export function parseStillDefectVerdict(
   const staged = parsed.data?.staged === true;
   const detail = parsed.data?.detail === true;
   const detailWhat = parsed.data?.detail_what;
+  const forbidden = parsed.data?.forbidden === true;
   const what = parsed.data?.what;
   return {
     overlay,
@@ -220,11 +227,12 @@ export function parseStillDefectVerdict(
     ...(detail && typeof detailWhat === "string" && detailWhat.trim()
       ? { detailWhat: detailWhat.trim().slice(0, 80) }
       : {}),
+    ...(forbidden ? { forbidden } : {}),
     messy,
     wrongPlace,
     staged,
     what:
-      (overlay || broken || writing || missing || detail || messy || wrongPlace || staged) &&
+      (overlay || broken || writing || missing || detail || forbidden || messy || wrongPlace || staged) &&
       typeof what === "string"
         ? what.slice(0, 80)
         : "",
@@ -407,13 +415,33 @@ export function placeQuestion(line: string): string {
   );
 }
 
+/**
+ * QUESTION 8, asked only on a picture whose sentence the line check found rules something out
+ * (`scene.forbids`, 2026-10-18, the audit): does the frame show THAT? Nothing asked it, so a picture
+ * drawn right for "keep the lumber away from the furnace" could still come back with the furnace
+ * beside the stack (production 203-143), and nothing looked. The phrase is the check's own, written
+ * for this picture — a word list as the gate fired on 39% of the sentences it caught ("just don't
+ * count on it"), so this is asked on the few pictures per film the line check marks.
+ */
+export function forbiddenQuestion(forbids: string): string {
+  return (
+    "\n\nQUESTION 8 — forbidden: the narrator's line rules this out, so the frame must NOT show it: " +
+    `"${forbids.replace(/"/g, "'").slice(0, 240)}". Does the frame clearly show exactly that? When ` +
+    "it names an act, answer true only if the act is being done; when it names a thing in a place or " +
+    "beside something, only if the thing is there, in that place or beside it; when it names a thing " +
+    "alone, if that thing is in the frame. The same task done the right way, a different thing in " +
+    "its place, or the thing on its own away from that place is false. When unsure, answer false."
+  );
+}
+
 /** The JSON shape, listing every question asked (`detail` only beside `missing`). */
-export function verdictShape(expect?: string, line?: string, detail?: boolean): string {
+export function verdictShape(expect?: string, line?: string, detail?: boolean, forbids?: boolean): string {
   return (
     '\n\nReturn ONLY this JSON, no prose: {"overlay":true|false,"broken":true|false,' +
     '"writing":true|false' +
     (expect ? ',"missing":true|false' : "") +
     (expect && detail ? ',"detail":true|false,"detail_what":"..."' : "") +
+    (forbids ? ',"forbidden":true|false' : "") +
     ',"messy":true|false' +
     (line ? ',"wrong_place":true|false' : "") +
     ',"staged":true|false' +
@@ -458,10 +486,17 @@ export async function scanStillDefects(
   /** The picture's printing is shown soft on purpose (`scene.blurPrint`) — `SOFT_PRINT_QUESTION`. */
   softPrint?: boolean,
   /** The look its own key thing must have, on a picture later ones copy (`lookToHold`). */
-  requiredLook?: { thing: string; look: string }
+  requiredLook?: { thing: string; look: string },
+  /**
+   * What the picture's sentence rules out (`scene.forbids`) — adds the `forbidden` question. Its own
+   * parameter, never `line`: the line feeds the place question, and a neighbour's words there would
+   * hold this picture to a place another picture names.
+   */
+  forbids?: string
 ): Promise<StillDefectVerdict> {
   try {
     const mustShow = expect && required?.length ? required : undefined;
+    const ruledOut = forbids?.trim() || undefined;
     // The state, action, number and position the description says — asked with `missing`, and only
     // once it is turned on (`detailCheckOn`).
     const askDetail = !!expect && detailCheckOn();
@@ -492,13 +527,15 @@ export async function scanStillDefects(
         (askDetail ? detailQuestion(expect!) : "") +
         (line ? placeQuestion(line) : "") +
         (allowedText ? allowedTextQuestion(allowedText) : "") +
-        verdictShape(expect, line, askDetail),
+        (ruledOut ? forbiddenQuestion(ruledOut) : "") +
+        verdictShape(expect, line, askDetail, !!ruledOut),
       userMessage:
         "Is any text stamped over this frame, does it contain obviously impossible structure, " +
         "is there readable writing in the scene, and is it messy or branded?" +
         (expect ? ` Does it show "${expect.replace(/"/g, "'")}"?` : "") +
         (askDetail ? " Is it the way it is described?" : "") +
         (line ? " Is it set where the line says?" : "") +
+        (ruledOut ? " Does it show what the line rules out?" : "") +
         " Does it look like an ordinary phone photo?",
       imageInput: image,
       // The verdict is ~40 tokens. The careful model THINKS unless told not to, and thinking
@@ -528,18 +565,21 @@ export async function scanStillDefects(
       delete verdict.detailWhat;
     }
     if (!line) verdict.wrongPlace = false;
+    // A stray "forbidden" on a picture nothing was ruled out for is not an answer to anything.
+    if (!ruledOut) delete verdict.forbidden;
     if (
       verdict.overlay ||
       verdict.broken ||
       verdict.writing ||
       verdict.missing ||
       verdict.detail ||
+      verdict.forbidden ||
       verdict.messy ||
       verdict.wrongPlace ||
       verdict.staged
     )
       console.log(
-        `[StillDefects] ${verdict.overlay ? "stamped text" : verdict.broken ? "broken geometry" : verdict.writing ? "readable writing" : verdict.missing ? "named thing missing" : verdict.detail ? `detail not as described (${verdict.detailWhat ?? ""})` : verdict.messy ? "brand or clutter" : verdict.wrongPlace ? "wrong place" : "staged look"} detected: ${verdict.what}`
+        `[StillDefects] ${verdict.overlay ? "stamped text" : verdict.broken ? "broken geometry" : verdict.writing ? "readable writing" : verdict.missing ? "named thing missing" : verdict.detail ? `detail not as described (${verdict.detailWhat ?? ""})` : verdict.forbidden ? `shows what the line rules out (${ruledOut})` : verdict.messy ? "brand or clutter" : verdict.wrongPlace ? "wrong place" : "staged look"} detected: ${verdict.what}`
       );
     return verdict;
   } catch (err: any) {

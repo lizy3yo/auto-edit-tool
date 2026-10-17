@@ -51,6 +51,8 @@ export function checkFlags(v: {
   missing?: boolean;
   /** The thing is there but not in the state, number or position described (`detail`). */
   detail?: boolean;
+  /** The frame shows what its line rules out (`forbidden`, from `scene.forbids`). */
+  forbidden?: boolean;
   messy?: boolean;
   wrongPlace?: boolean;
   staged?: boolean;
@@ -62,6 +64,7 @@ export function checkFlags(v: {
     v.writing && "writing",
     v.missing && "missing",
     v.detail && "detail",
+    v.forbidden && "ruled out",
     v.messy && "brand or clutter",
     v.wrongPlace && "wrong place",
     v.staged && "staged",

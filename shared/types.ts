@@ -590,6 +590,15 @@ export interface StoryboardScene {
    */
   otherPerson?: string;
   /**
+   * What this picture's SENTENCE rules out, so the picture must not show it — the act it says not
+   * to do, the thing it says is not meant or is used instead of, or the place it says to keep
+   * something away from ("the lumber stack near the furnace"), in the line check's words
+   * (`fitPicturesToLines`, `forbids`). The picture check asks whether the frame shows it
+   * (`scanStillDefects`' `forbids`) and draws once more when it does. It is about the LINE, so it
+   * stays through any later rewrite of the picture. Unset: the sentence rules nothing visible out.
+   */
+  forbids?: string;
+  /**
    * This beat sits inside the FAST-OPEN window (`LongformPacing.fastOpen`): the first `zoneSec`
    * of narration, where cuts land faster to match the script's opening pace. Set once at
    * segmentation (`markFastOpenScenes`) and read by `capFor`/`floorFor`/`measuredSizeFor`, so

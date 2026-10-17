@@ -35,6 +35,8 @@ describe("what kind of picture was checked", () => {
     // The thing there but not as described is its own flag, counted apart from a missing thing.
     expect(checkFlags({ missing: true, detail: true })).toEqual(["missing", "detail"]);
     expect(checkFlags({ detail: true })).toEqual(["detail"]);
+    // What the line rules out, shown anyway, is counted on its own (R5).
+    expect(checkFlags({ missing: true, forbidden: true, staged: true })).toEqual(["missing", "ruled out", "staged"]);
   });
 });
 

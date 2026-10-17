@@ -9354,6 +9354,45 @@ describe("generateValidatedStill", () => {
     expect((mockScanStillDefects.mock.calls[0] as any[])[7]).toBeUndefined();
   });
 
+  // WHAT THE LINE RULES OUT (R5, prod 203-143: the stack drawn beside the furnace under "and away
+  // from the furnace"): asked only with the line check's mark, one fresh seed from the SAME prompt —
+  // naming the ruled-out thing to the picture model is what draws it.
+  it("redraws once a frame that shows what its line rules out, from the same prompt, asked only when marked", async () => {
+    const bad = await pngOf("#c11");
+    const good = await pngOf("#1c1");
+    const marked = {
+      index: 143,
+      scriptText: "and away from the furnace.",
+      showSubject: "a stickered board stack on a dry garage floor",
+      visualPrompt: "a stickered board stack on a dry garage floor",
+      forbids: "the board stack near the furnace",
+    } as any;
+    mockScanStillDefects.mockClear();
+    mockScanStillDefects.mockResolvedValueOnce(defect({ forbidden: true, what: "furnace beside the stack" } as any));
+    const genImage = vi
+      .fn()
+      .mockResolvedValueOnce({ success: true, fileData: bad })
+      .mockResolvedValueOnce({ success: true, fileData: good });
+    const out = await generateValidatedStill(marked, 3, undefined, genImage);
+    expect(out.buffer.equals(good)).toBe(true);
+    expect(genImage).toHaveBeenCalledTimes(2);
+    expect(genImage.mock.calls[1][0].prompt).toBe(genImage.mock.calls[0][0].prompt);
+    expect((mockScanStillDefects.mock.calls[0] as any[])[8]).toBe("the board stack near the furnace");
+    // The line still goes to the place question as the piece's own words, apart from the mark.
+    expect((mockScanStillDefects.mock.calls[0] as any[])[2]).toBe("and away from the furnace.");
+    // A redraw that still shows it is kept, not drawn a third time (never shipping it is not this rule).
+    mockScanStillDefects.mockClear();
+    mockScanStillDefects.mockResolvedValue(defect({ forbidden: true, what: "still beside it" } as any));
+    const twice = vi.fn().mockResolvedValueOnce({ success: true, fileData: bad }).mockResolvedValueOnce({ success: true, fileData: good });
+    expect((await generateValidatedStill(marked, 3, undefined, twice)).buffer.equals(good)).toBe(true);
+    expect(twice).toHaveBeenCalledTimes(2);
+    mockScanStillDefects.mockResolvedValue(defect()); // restore the default
+    // Unmarked — the sentence rules nothing out: the question is never asked.
+    mockScanStillDefects.mockClear();
+    await generateValidatedStill(scene, 3, undefined, vi.fn().mockResolvedValue({ success: true, fileData: good }));
+    expect((mockScanStillDefects.mock.calls[0] as any[])[8]).toBeUndefined();
+  });
+
   it("skips the gate when a reference image is attached (the cover asked for text)", async () => {
     mockScanStillDefects.mockClear(); // call history only — keeps the false default impl
     const good = await validPng();

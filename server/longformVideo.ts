@@ -5135,6 +5135,22 @@ export const FIGURE_OF_SPEECH_RULE =
   "is a place, not a comparison — set the shot there.)";
 
 /**
+ * What a line rules out is not a shot (2026-10-18, the audit). "Depict only what the narration
+ * states" read a line that says NOT to do something as a statement of it: "and away from the
+ * furnace" came back as the lumber stack beside the furnace (production 203-143), "never use the rip
+ * fence as a stop" as the fence used as a stop (practice job 352 #154). The shot list and the line
+ * check carry the same rule; this is the prompt writer's copy, the last step before the picture
+ * model — which draws every thing it is told about, so a thing named with "away from" is drawn too.
+ */
+export const RULED_OUT_RULE =
+  "WHAT A LINE RULES OUT IS NOT SHOWN: when the narration says not to do something, what something " +
+  "is NOT, what to use INSTEAD, what to keep away or out, or that a job is for someone else, show " +
+  "the right way, the alternative, or the subject on its own — never the ruled-out act, thing or " +
+  "placement. Name only what IS in the frame: never the ruled-out thing, not even with 'without', " +
+  "'no', 'not', 'away from' or 'across the room from'. A figure of speech that rules out nothing " +
+  "you can see (\"don't count on it\") is not this rule.";
+
+/**
  * Composition rule for every generated b-roll frame. The setting clause used to ask for "natural
  * everyday clutter", and the model filled the frame edges with branded shop-vacs, tool chests and
  * bins while the subject sat small in the middle — an openwork lattice then showed that clutter
@@ -5552,6 +5568,7 @@ export const STILL_BROLL_ENHANCER_SYSTEM =
   "ordinary everyday setting — not always close up; often seen from a step or two back.\n" +
   `- ${CLEAN_FRAME_RULE}\n` +
   `- ${FIGURE_OF_SPEECH_RULE}\n` +
+  `- ${RULED_OUT_RULE}\n` +
   `- ${NO_NARRATION_TEXT_RULE}\n` +
   "- SAY IT, SHOW IT: when a MUST SHOW line is given, the frame's hero subject is exactly that " +
   "thing, named plainly first in your prompt and framed CLOSE — taking up much of the frame, the " +
@@ -8934,6 +8951,9 @@ async function drawValidatedStill(
   // cannot draw it, and each re-roll is another image.
   let offSubjectRerolls = 0;
   let cleanRerolls = 0;
+  // A frame that shows what its line rules out (`scene.forbids`): one fresh seed, its own budget —
+  // it is asked only on the few pictures the line check marked.
+  let ruledOutRerolls = 0;
   // A picture of a key thing that came back a DIFFERENT one: one re-roll from its memory, then
   // it is drawn from words alone (`sameThingMisses`).
   let sameThingMisses = 0;
@@ -9079,7 +9099,9 @@ async function drawValidatedStill(
         scene.blurPrint,
         // A picture later ones copy, drawn with no earlier picture of its thing to follow, is held
         // to the thing's look as well (`lookToHold`): a miss takes the `missing` redraw below.
-        visualOverride ? undefined : lookToHold(scene)
+        visualOverride ? undefined : lookToHold(scene),
+        // What its sentence rules out, as the line check wrote it — asked only of those pictures.
+        scene.forbids
       );
       if (defects.missing) missed.add(buffer);
       recordPictureCheck(
@@ -9172,6 +9194,21 @@ async function drawValidatedStill(
         console.warn(
           `[Longform] scene ${scene.index} still shows "${scene.showSubject}" but not as described ` +
             `(${defects.detailWhat ?? defects.what}, attempt ${attempt}/${attempts}) → drawing it again`
+        );
+        continue;
+      }
+      // WHAT THE LINE RULES OUT (2026-10-18, the audit: production 203-143 drew the lumber stack
+      // beside the furnace under "and away from the furnace"): one fresh seed. The prompt is NOT told
+      // what to leave out — naming the ruled-out thing is what puts it in the picture; the line check
+      // already wrote a description that names only what is in the frame. The frame is the fallback:
+      // never shipping a known-bad picture is a rule of its own, not this one's.
+      if (defects.forbidden && ruledOutRerolls < 1) {
+        ruledOutRerolls++;
+        lastError = `Still image shows what its line rules out (${scene.forbids})`;
+        offSubjectFallback ??= { buffer, mimeType: r.mimeType };
+        console.warn(
+          `[Longform] scene ${scene.index} still shows what its line rules out ("${scene.forbids}") ` +
+            `(${defects.what}, attempt ${attempt}/${attempts}) → regenerating`
         );
         continue;
       }

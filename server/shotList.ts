@@ -1100,9 +1100,21 @@ const SHOT_LIST_SYSTEM =
   "the side, the face never shown. Write them into show, and set other to who they are in 2-6 " +
   "plain words from the line (\"a woman customer\", \"an older neighbour\"). One person only. " +
   "other is null in every other shot.\n" +
-  "6b. SAFETY. A line that warns about a danger shows the SAFE way — the guard in place, a push " +
-  "stick, hands well back, the iron set down on its heel, the extinguisher by the bench — never " +
-  "the danger itself (no fingers near a blade or a needle, no open flame on the work, nobody hurt).\n" +
+  "6b. WHAT NOT TO DO. When a line — or the sentence it is part of — says not to do something " +
+  "(\"never…\", \"don't…\"), says what something is NOT (\"I don't mean…\"), what to use INSTEAD, " +
+  "what to keep away or out, that a job is for someone else (a licensed pro), or warns that doing " +
+  "something goes wrong (\"…is how people get hurt\", \"…only sets things back\"), the shot shows " +
+  "ONE of: the same task done the RIGHT way (the guard in place, a push stick, hands well back, " +
+  "the iron set down on its heel, the extinguisher by the bench), the alternative the line names, " +
+  "or the subject on its own and idle. Never the ruled-out act, the denied thing or the forbidden " +
+  "placement — no fingers near a blade or a needle, no open flame on the work, nobody hurt. show " +
+  "names only what IS in the frame: never the ruled-out thing, not even with \"without\", \"no\", " +
+  "\"not\", \"away from\" or \"across the room from\" — the picture generator draws everything it " +
+  "is told about (\"keep the paint tins away from the stove\" = the paint tins on a shelf in a cool " +
+  "cupboard; the stove is not named). Every shot of that sentence follows it (\"Never store it in | the " +
+  "attic | or the garage\": no shot puts it in the attic or the garage). A thing named only to be " +
+  "ruled out is never the new shot of rules 1c and 1d. A figure of speech that rules out nothing " +
+  "you can see (\"don't count on it\", \"you'll never look at it the same way\") is not this rule.\n" +
   "7. HOST BEATS are the host talking on camera. If, after the host has said at least 5 words, the " +
   "line goes on to NAME concrete things worth showing, hand over to pictures at the FIRST such " +
   "thing — not a later one: the host never talks past a thing worth showing — at a natural break " +
@@ -1455,6 +1467,29 @@ showing the topic of the line before it ONLY when its line names nothing new you
 kind of fire that likes to start while the house is asleep"), is WRONG: it gets its own picture of
 that new thing.
 
+WHAT NOT TO DO. A sentence RULES SOMETHING OUT when it says not to do something ("never…", "don't…"),
+says what something is NOT ("I don't mean…", "no, not the…"), what to use INSTEAD ("…instead of the
+plastic one"), what to keep away or out ("well away from the stove", "keep any flame out of the
+room"), that a job is for someone else ("that part is a job for a licensed electrician"), or that
+doing something goes wrong ("…is exactly how people get hurt", "…only sets things back"). Read the
+whole sentence: those words may sit in a neighbouring line of it, and every picture of that sentence
+follows them. Such a picture shows the same task done the RIGHT way, the alternative, or the subject
+on its own and idle. It is WRONG when it shows OR NAMES the ruled-out act, the denied thing or the
+forbidden placement — even with "without", "no", "not", "away from" or "across the room from",
+because the picture generator draws everything it is told about. Rewrite it naming only what IS in
+the frame ("keep the paint tins away from the stove" = the paint tins on a shelf in a cool cupboard;
+the stove is not named). A thing named only to be ruled out is never "something new you can see".
+For EVERY picture whose sentence rules something out, right or wrong, set forbids to what must NOT be
+seen in it, in 3-12 plain words: the act being done ("hands lifting the full pot off the stove"),
+the thing in the place it must be kept from ("the paint tins beside the stove"), or the thing itself
+only when the line says that thing is not meant or is used instead of ("a plastic bucket"). A thing
+the line only keeps away from something, or says you will not need, may still be shown on its own:
+forbids then names it WITH that place or act, never the thing alone. Leave forbids out when nothing
+you could see is ruled out: a figure of speech ("just don't count on it to pay the rent", "you'll
+never look at it the same way"), a step that says what to skip or when to stop ("skip one stitch and
+make a loop", "stop the moment it feels snug"), and a count ("two coats instead of three" is the
+COUNT: two coats).
+
 Go through EVERY picture, one at a time, never skipping: first write what its line is about — its
 subject, not its last noun; for a line that only refers to a key thing, name the key thing — then
 whether the picture shows that, where the line puts it. Only then decide.
@@ -1468,7 +1503,9 @@ the box of scraps beside it.
 A line that compares to something ELSE you can see — "the kind you see in …", "like the ones at …",
 "the kind you'd find in …" — ALWAYS gets that other thing as its own picture: SPLIT the line there.
 Give the exact first 2-5 words where the new picture starts, copied from the line, and what it shows.
-Split only when both parts are at least 4 words. Never split a picture marked "joined".
+Split only when both parts are at least 4 words. Never split a picture marked "joined". A comparison
+the sentence rules out ("no, I don't mean the kind you see in the movies") is never split off or
+drawn.
 
 ONE IDEA, ONE PICTURE. A picture marked "same sentence" continues a sentence the picture before it
 started. When the two parts are ONE idea about one thing — the thing and where, how or what it is
@@ -1504,9 +1541,10 @@ other is null otherwise.
 Answer with JSON only, one entry for EVERY picture:
 {"pictures":[{"id":7,"about":"...","shows_it":true},
 {"id":8,"about":"...","shows_it":false,"show":"...","thing":null,"stage":null,"other":null,"split":[{"from":"exact words","show":"...","thing":null,"stage":null,"other":null}]},
-{"id":9,"about":"...","shows_it":false,"join":true,"show":"...","thing":null,"stage":null,"other":null}]}
+{"id":9,"about":"...","shows_it":false,"join":true,"show":"...","thing":null,"stage":null,"other":null},
+{"id":10,"about":"...","shows_it":true,"forbids":"..."}]}
 show, thing, stage and other only when shows_it is false or join is true; split only when a new picture must start;
-join only on a picture marked "same sentence".`;
+join only on a picture marked "same sentence"; forbids only when the picture's sentence rules something out.`;
 
 /**
  * A new picture starting inside a line, at `from` (its first words, verbatim). `other`: the person
@@ -1530,7 +1568,23 @@ export type PictureFix = {
   split?: PictureSplit[];
   /** This picture and the one before it are ONE idea of one sentence: make them one picture. */
   join?: boolean;
+  /**
+   * What the picture's sentence rules out, so the picture must not show it (`scene.forbids`) —
+   * answered for a right picture as much as a wrong one, so it can come with no rewrite at all.
+   */
+  forbids?: string;
 };
+
+/**
+ * The check's `forbids`, cleaned: a short phrase, or nothing for an empty answer or one that only
+ * says "none". Pure.
+ */
+export function forbidsOf(v: unknown): string | undefined {
+  if (typeof v !== "string") return undefined;
+  const text = v.replace(/\s+/g, " ").replace(/^["'“”‘’\s]+|["'“”‘’\s.]+$/g, "").trim();
+  if (!/[a-z]{2}/i.test(text) || /^(?:null|none|nothing|n\/?a|no|nil|-)$/i.test(text)) return undefined;
+  return text.slice(0, 160);
+}
 
 /** The pictures the fit check reads and may fix — drawn cutaways, never the CTA, cover or assets. */
 // A list's group picture (`listSet`) is right by construction — the line check never rewrites it.
@@ -1567,7 +1621,10 @@ export function parsePictureFixes(text: string, scenes: StoryboardScene[]): Pict
         other: otherPersonOf(x?.other),
       }))
       .filter((x: PictureSplit) => x.from && x.show);
-    if (!show && !split.length && !join) continue;
+    // WHAT THE SENTENCE RULES OUT rides even a picture the check left as it is: a right picture can
+    // still come out of the picture model showing it.
+    const forbids = forbidsOf(f?.forbids);
+    if (!show && !split.length && !join && !forbids) continue;
     // A stage the check answered (a stage word, or null for "no made thing") replaces the old one;
     // a missing field keeps it (`applyPictureFixes`). The person is read the same way.
     const answered = !!f && typeof f === "object" && "stage" in f;
@@ -1580,6 +1637,7 @@ export function parsePictureFixes(text: string, scenes: StoryboardScene[]): Pict
       ...(show && answered ? { stage: buildStageOf(f.stage) ?? null } : {}),
       ...(show && saidWho ? { other: otherPersonOf(f.other) ?? null } : {}),
       ...(split.length ? { split } : {}),
+      ...(forbids ? { forbids } : {}),
     });
   }
   return out;
@@ -1598,6 +1656,9 @@ export function applyPictureFixes(
   let n = 0;
   for (const f of fixes) {
     const s = scenes[f.id];
+    // WHAT THE SENTENCE RULES OUT (2026-10-18, the audit): kept on the picture whether or not it is
+    // rewritten — the check is told it, and asks whether the drawn frame shows it.
+    if (s && f.forbids) s.forbids = f.forbids;
     if (!s || !f.show) continue;
     const named = keyThingsIn(f.show, things);
     const primary = (f.thing ? matchKeyThing(f.thing, things ?? []) : null) ?? named[0] ?? null;
@@ -1757,6 +1818,11 @@ export function applyPictureJoins(
       joinedLine: true,
       wordCut: prev.wordCut || s.wordCut,
       humanPresent: prev.humanPresent || s.humanPresent || undefined,
+      // One picture for the whole sentence must not show what either part of it rules out.
+      forbids:
+        [prev.forbids, s.forbids]
+          .filter((x, k, all): x is string => !!x && all.indexOf(x) === k)
+          .join("; ") || undefined,
     } as StoryboardScene;
     if (f!.show)
       applyPictureFixes([merged], [{ id: 0, show: f!.show, thing: f!.thing, stage: f!.stage, other: f!.other }], things);
@@ -1843,6 +1909,8 @@ export function applyPictureSplits(
         // Only the person the check put in this new picture — never the line's old one, which
         // `markHostBroll` would otherwise draw into a picture of something else.
         otherPerson: cut.other,
+        // Still the same sentence: what it rules out stays out of this part too.
+        forbids: s.forbids,
         stillImage: true,
         objectMotion: undefined,
         selfMoving: undefined,
@@ -1866,6 +1934,14 @@ export function applyPictureSplits(
  * checker only asks whether the frame shows its own description. One call per ~80 lines reads every
  * line beside its planned picture, before anything is paid for, and rewrites the pictures that do
  * not show what their line is about. Returns how many it fixed; any failure changes nothing.
+ *
+ * WHAT NOT TO DO (2026-10-18, the audit): it is also the gate for a sentence that rules something
+ * out. Only danger warnings had a rule, so "and away from the furnace" was drawn with the lumber
+ * stack beside the furnace (production 203-143, 211-135; practice job 352 #127 named the furnace
+ * "across the room"), "never use the rip fence as a stop" with the fence as a stop (352 #154).
+ * Opus reads every picture with the lines around it, so it — not a word list, which fired on "just
+ * don't count on it" in five channels — says what each such picture must not show (`forbids`); the
+ * picture check then asks only those pictures about it.
  */
 export async function fitPicturesToLines(
   scenes: StoryboardScene[],
@@ -2290,7 +2366,9 @@ and when a line is a clear new point about something else. A line that names som
 that the group's picture would not show (a different place, a different object, or a new kind of
 event or situation — "the fire that starts while the house is asleep", "the storms that roll in at
 night") is NOT in the group — it keeps its own picture, even in the middle of a topic. Never group
-across a "----" line.
+across a "----" line. A line that rules something out ("never…", "don't…", "instead of…", "I don't
+mean…", "keep it away from…") is grouped only when the group's picture shows the right way, and that
+picture never shows or names what any of its lines rules out — not even with "without" or "away from".
 
 The group's picture must fit the FIRST line of the group above all: it is what plays when the
 picture appears.

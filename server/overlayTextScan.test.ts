@@ -397,3 +397,79 @@ describe("the thing the way its description says — the detail verdict (2026-10
     expect(parseStillDefectVerdict('{"detail":"yes"}').detail).toBeUndefined();
   });
 });
+
+describe("what the line rules out — the forbidden verdict (R5, the audit, 2026-10-18)", () => {
+  // prod 203-143: "and away from the furnace." drawn with the stack beside the furnace.
+  const STACK = "a stickered board stack on a dry garage floor";
+  const RULED_OUT = "the board stack near the furnace";
+
+  it("asks it only with what the line check marked, after the cached rulebook, and reads it back", async () => {
+    const { verdictShape } = await import("./overlayTextScan");
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue({
+      text: '{"overlay":false,"broken":false,"writing":false,"missing":false,"forbidden":true,"what":"furnace right beside the stack"}',
+    } as any);
+    const line = "and away from the furnace.";
+    const v = await scanStillDefects(await imageOf(1280, 720), STACK, line, undefined, undefined, undefined, false, undefined, RULED_OUT);
+    expect(v.forbidden).toBe(true);
+    expect(v.what).toBe("furnace right beside the stack");
+    expect(v.missing).toBe(false);
+    const call = mockInvoke.mock.calls[0][0];
+    expect(call.systemSuffix).toContain("QUESTION 8 — forbidden");
+    expect(call.systemSuffix).toContain(RULED_OUT);
+    expect(call.systemSuffix).toContain('"forbidden":true|false');
+    expect(call.systemPrompt).not.toContain("QUESTION 8");
+    expect(call.userMessage).toMatch(/what the line rules out/);
+    // The place question keeps the piece's own words: the ruled-out phrase is never fed to it.
+    expect(call.systemSuffix).toContain(`narration line: "${line}"`);
+    expect(verdictShape(STACK, line, false, true)).toContain('"forbidden"');
+    expect(verdictShape(STACK, line)).not.toContain("forbidden");
+  });
+
+  it("is never asked on a picture the line check did not mark, and a stray answer is ignored", async () => {
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue({ text: '{"overlay":false,"broken":false,"writing":false,"missing":false,"forbidden":true}' } as any);
+    // A real line a word list flagged that rules nothing out: no forbids, so no question.
+    const v = await scanStillDefects(
+      await imageOf(1280, 720),
+      "a hand-built lattice panel hanging on a living-room wall",
+      "build it anyway for your own wall, just don't count on it to buy next month's pickets."
+    );
+    expect(v).toEqual({
+      overlay: false,
+      broken: false,
+      writing: false,
+      missing: false,
+      messy: false,
+      wrongPlace: false,
+      staged: false,
+      what: "",
+    });
+    const call = mockInvoke.mock.calls[0][0];
+    expect(call.systemSuffix).not.toContain("QUESTION 8");
+    expect(call.systemSuffix).not.toContain("forbidden");
+    // An empty mark is no mark.
+    mockInvoke.mockClear();
+    await scanStillDefects(await imageOf(1280, 720), STACK, undefined, undefined, undefined, undefined, false, undefined, "  ");
+    expect(mockInvoke.mock.calls[0][0].systemSuffix).not.toContain("QUESTION 8");
+  });
+
+  it("judges the act, the placement or the thing exactly as named — the right way and the thing alone pass", async () => {
+    const { forbiddenQuestion } = await import("./overlayTextScan");
+    const q = forbiddenQuestion("a lit candle in the room");
+    expect(q).toContain('"a lit candle in the room"');
+    expect(q).toMatch(/When\s+it names an act, answer true only if the act is being done/);
+    expect(q).toMatch(/only if the thing is there, in that place or beside it/);
+    expect(q).toMatch(/The same task done the right way, a different thing in\s+its place, or the thing on its own away from that place is false/);
+    expect(q).toMatch(/When unsure, answer false/);
+    // Neutral: the fixed wording names no channel's objects.
+    expect(forbiddenQuestion("X")).not.toMatch(/furnace|vault|shampoo|fence|candle/i);
+    expect(forbiddenQuestion('the "wrong" way')).toContain("the 'wrong' way");
+  });
+
+  it("parses forbidden only when it is true", () => {
+    expect(parseStillDefectVerdict('{"forbidden":true,"what":"hand on belly"}')).toMatchObject({ forbidden: true, what: "hand on belly" });
+    expect("forbidden" in parseStillDefectVerdict('{"forbidden":false}')).toBe(false);
+    expect(parseStillDefectVerdict('{"forbidden":"yes"}').forbidden).toBeUndefined();
+  });
+});
