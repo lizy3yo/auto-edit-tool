@@ -13,6 +13,8 @@ import {
   isSubject,
   memorySourcesFor,
   memoryViewFor,
+  ownKeyThing,
+  requiredThingsFor,
   SCREEN_ITEM_VIEW,
   shotFraming,
 } from "./pictureMemory";
@@ -526,6 +528,60 @@ describe("Hank's job 326: a list of STEPS (the operator, 2026-10-02)", () => {
     // a things-list is still a things-list
     expect(spokenListsByShape(["You need a saw, a drill, and a stack of sandpaper."])[0].kind).toBeUndefined();
     expect(spokenListsByShape([line])[0].kind).toBe("steps");
+  });
+
+  it("each step is the holder being made: drawn from its earlier stages, never the finished one (job 269)", () => {
+    const scenes = [
+      pic(1, "That's the winner.", "A finished charred cedar incense holder on the market table", {
+        keyThing: "incense holder",
+        buildStage: "done",
+      }),
+      host(2, "Square up the scrap with a couple of saw cuts, give it a quick brush,"),
+      pic(3, "drill the hole about halfway through at a slight angle, oil it, and put a felt dot on the bottom. That's the whole build.", "the holder"),
+      host(4, "Bye."),
+    ];
+    const r = applySpokenLists(scenes, lists(scenes), { main: "incense holder" });
+    const steps = r.scenes.filter(s => s.listCut);
+    for (const s of steps) {
+      expect(s.buildStage).toBe("making");
+      expect(ownKeyThing(s)).toBe("incense holder"); // "oil it," too
+      expect(memorySourcesFor(r.scenes, s)).toEqual([]); // the finished holder is further along
+      expect(requiredThingsFor(s)[0]).toMatch(/^incense holder as it is at this stage of being made/);
+    }
+  });
+});
+
+describe("a thing being made is never drawn from its finished picture (stored films, 2026-10-18)", () => {
+  // Hank's job 268 #17 was drawn from #14, the hook's finished holder; a video that makes nothing
+  // (Frederick's smoke alarm, job 262 #30) carries no stage and is drawn exactly as before.
+  const finished = pic(14, "I sold a dozen.", "Closeup of a charred cedar incense holder on the workbench, finished and oiled", {
+    keyThing: "incense holder",
+    buildStage: "done",
+  });
+  const drilling = pic(17, "why not drill a hole in one and see?", "hands drilling a hole into a charred cedar block on the workbench", {
+    keyThing: "incense holder",
+    buildStage: "making",
+  });
+
+  it("memory skips the finished picture; a video that makes nothing is unchanged", () => {
+    expect(memorySourcesFor([finished, drilling], drilling)).toEqual([]);
+    const alarm = pic(1, "This is it.", "a round white smoke alarm on the hallway ceiling", { keyThing: "smoke alarm" });
+    const back = pic(30, "Turn it over.", "a hand turning over the round white smoke alarm to view its back", { keyThing: "smoke alarm" });
+    expect(memorySourcesFor([alarm, back], back)).toEqual([alarm]);
+  });
+
+  it("the prompt says not finished and drops 'identical shape, size'; the check asks for it at this stage", () => {
+    const withMemory = { ...drilling, memoryRefUrls: ["https://x/raw.png"] } as StoryboardScene;
+    const clause = memoryClause(withMemory);
+    expect(clause).toMatch(/at the same or an earlier stage of being made than this picture/);
+    expect(clause).toMatch(/NOT finished: raw pieces or partly built/);
+    expect(clause).not.toMatch(/identical shape, size/);
+    expect(clause).not.toMatch(/the reference is how it looked before/);
+    // A finished or unlabelled picture keeps the old clause word for word.
+    for (const s of [{ ...withMemory, buildStage: "done" as const }, { ...withMemory, buildStage: undefined }])
+      expect(memoryClause(s)).toMatch(/identical shape, size, colours/);
+    expect(memoryClause(drilling)).toBe(""); // no memory, nothing said
+    expect(requiredThingsQuestion(requiredThingsFor(drilling))).toMatch(/"incense holder as it is at this stage of being made \(raw pieces or partly built, not yet finished\)"/);
   });
 });
 

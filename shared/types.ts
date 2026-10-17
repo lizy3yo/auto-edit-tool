@@ -301,6 +301,13 @@ export interface KeyThing {
   main?: true;
 }
 
+/**
+ * How far along a thing the video MAKES is in one picture, earliest first: "material" (the raw
+ * stock or pieces before any work), "making" (being made, partly built), "done" (finished —
+ * finishing touches such as oil, wax or a felt pad count as done).
+ */
+export type BuildStage = "material" | "making" | "done";
+
 export interface StoryboardScene {
   index: number;
   /** Short display label for this beat (derived = first words of `scriptText`) */
@@ -482,6 +489,16 @@ export interface StoryboardScene {
    * two shots linked only by the mattress).
    */
   otherKeyThings?: string[];
+  /**
+   * How far along the thing the video MAKES is in this picture, set only on a picture of that thing
+   * or what it is made from (the shot list, the line check, a step of a spoken list). The picture is
+   * drawn only from pictures of the same or an EARLIER stage (`memorySourcesFor`): a build video
+   * opens on the finished piece, and Hank's job 268 drew "hands drilling a hole into a charred cedar
+   * block" from the hook's finished, oiled holder. Unset: no stage, memory exactly as before.
+   */
+  buildStage?: BuildStage;
+  /** "steps": one step of a spoken list of steps (`applySpokenLists`) — the same piece, further along. */
+  listKind?: "steps";
   /**
    * Whether something in this picture MOVES BY ITSELF, as judged on its own description
    * (`judgeSelfMoving`, 2026-10-01 — it replaced a fixed word list that let "a sliding door" and

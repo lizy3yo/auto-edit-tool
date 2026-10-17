@@ -52,7 +52,8 @@ import {
 } from "./shotList";
 import {
   attachMemory,
-  ownKeyThing,
+  beforeFinished,
+  requiredThingsFor,
   BACKGROUND_VIEW,
   BLUR_PRINT_VIEW,
   memoryPicturesFor,
@@ -6809,6 +6810,21 @@ export function memoryClause(scene: StoryboardScene): string {
       `fabrics, colours, materials and wear as the reference.` +
       host
     );
+  // A picture of the thing BEFORE it is finished (`buildStage` material / making): its references
+  // are the same or an earlier stage (`memorySourcesFor` drops anything further along), so its shape
+  // and size are its own — "identical shape, size" would hold a strip being coiled into a bowl
+  // (Ruth's job 281) to the flat strip, and the old "the reference is how it looked before" was
+  // backwards when the reference was the finished piece the video opened on (Hank's job 268).
+  if (beforeFinished(scene))
+    return (
+      ` ${which} this exact ${thing}, at the same or an earlier stage of being made than this ` +
+      `picture. Draw the SAME ${thing} — the same colours, materials and wear, in the same place — ` +
+      `from a different camera position than the reference; never copy the reference's ` +
+      `framing.${view} Show it exactly as far along as the words say — NOT finished: raw pieces or ` +
+      `partly built, with only what the words say has been done to it so far. It is ONE thing: ` +
+      `never a second copy or a spare part of it beside, on or inside the first.` +
+      host
+    );
   return (
     ` ${which} this exact ${thing}. Draw the SAME ${thing} — identical shape, size, colours, ` +
     `materials and wear, in the same place — from a different camera position than the reference; ` +
@@ -8954,10 +8970,9 @@ async function drawValidatedStill(
         scene.pictureText,
         scene.namedLook,
         // The key things this picture is about (a screen shows them only as small photos): each
-        // must really be in it — Dale's job 306 drew a box where the bookcase was asked for.
-        scene.memoryView === SCREEN_ITEM_VIEW
-          ? undefined
-          : [ownKeyThing(scene), ...(scene.otherKeyThings ?? [])].filter((t): t is string => !!t),
+        // must really be in it — Dale's job 306 drew a box where the bookcase was asked for. A thing
+        // still being made is asked for at that stage (`requiredThingsFor`), never as the finished one.
+        scene.memoryView === SCREEN_ITEM_VIEW ? undefined : requiredThingsFor(scene),
         scene.blurPrint
       );
       recordPictureCheck(

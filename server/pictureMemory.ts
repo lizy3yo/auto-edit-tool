@@ -4,7 +4,9 @@
  * Every picture is drawn from words alone, so Frederick's heater at 0:45 was a different heater
  * from the one at 0:20. A picture of a KEY THING (`scene.keyThing`, from the shot list) is now
  * drawn FROM the earlier pictures of that thing: the first one (its memory) and the latest one
- * before it (so a before → during → after is the same piece further along). Pictures are made in
+ * before it (so a before → during → after is the same piece further along). Film order is not build
+ * order — a build video opens on the finished piece — so a picture of a thing being made
+ * (`buildStage`) is drawn only from pictures of it at the same or an earlier stage. Pictures are made in
  * parallel, so a picture whose memory is still being made in this pass waits for it —
  * `MEMORY_WAIT_MS` at most, then it is drawn from words as before. Waits only ever point to an
  * EARLIER scene, and the dispatcher hands scenes out in film order, so the earliest waiting scene's
@@ -12,7 +14,7 @@
  */
 import { PART_VIEW } from "./namedLooks";
 import type { KeyThing, StoryboardScene } from "@shared/types";
-import { keyThingsIn, SHOWS_SCREEN } from "./shotList";
+import { BUILD_STAGES, keyThingsIn, SHOWS_SCREEN } from "./shotList";
 
 /** The longest a picture waits for its memory before it is drawn from words alone. */
 export const MEMORY_WAIT_MS = 8 * 60_000;
@@ -66,7 +68,14 @@ export function memorySourcesFor(
   if (i <= 0) return [];
   // A list item is never drawn from another item's picture: each item is its own thing.
   // …nor is a screen ever a memory SOURCE: the thing on it is a small photo, not the thing.
-  const before = scenes.slice(0, i).filter(x => source(x) && !isScreen(x) && !(s.listCut && x.listCut));
+  // …nor a picture FURTHER ALONG than this one (`laterStage`): build videos open on the finished
+  // piece, and Hank's job 268 drew "hands drilling a hole into a charred cedar block" from the hook's
+  // "charred cedar incense holder …, finished and oiled". That holds for every source, whatever key
+  // thing it was filed under — Ruth's job 348 drew a strip being folded round its cord (key thing:
+  // the cord) from a finished bowl filed under the tin of squares.
+  const before = scenes
+    .slice(0, i)
+    .filter(x => source(x) && !isScreen(x) && !(s.listCut && x.listCut) && !laterStage(x, s));
   const out: StoryboardScene[] = [];
   const add = (x: StoryboardScene | undefined) => {
     if (x && !out.includes(x) && out.length < MAX_MEMORY_REFS) out.push(x);
@@ -131,8 +140,47 @@ export function listItemsAround(
  */
 export function ownKeyThing(s: StoryboardScene): string | undefined {
   if (!s.keyThing) return undefined;
+  // A STEP of making the thing is about that thing whatever its words call it ("oil it,"): it is
+  // drawn from the thing's memory, and only at the same or an earlier stage (`laterStage`).
+  if (s.listCut && s.listKind === "steps") return s.keyThing;
   if (s.listCut && !s.partOf && !wordsName(s.scriptText ?? s.narration ?? "", s.keyThing)) return undefined;
   return s.keyThing;
+}
+
+/** Where a stage sits, earliest first; undefined for a picture with no stage. */
+const stageRank = (s: StoryboardScene) =>
+  s.buildStage ? BUILD_STAGES.indexOf(s.buildStage) : undefined;
+
+/**
+ * Whether picture `x` shows the thing being made FURTHER ALONG than picture `s` does — both must
+ * carry a stage; a picture without one is never judged, so its memory is exactly as before. Pure.
+ */
+export function laterStage(x: StoryboardScene, s: StoryboardScene): boolean {
+  const [a, b] = [stageRank(x), stageRank(s)];
+  return a !== undefined && b !== undefined && a > b;
+}
+
+/** A picture of the thing being made before it is finished: the raw material, or partly made. */
+export const beforeFinished = (s: StoryboardScene) =>
+  s.buildStage === "material" || s.buildStage === "making";
+
+/** How a key thing is named to the picture check while it is still being made. */
+export const UNFINISHED_THING =
+  "as it is at this stage of being made (raw pieces or partly built, not yet finished)";
+
+/**
+ * The key things the picture check holds a picture to (`requiredThingsQuestion`): its own and every
+ * other one in it. Before the thing is finished its own is named at that stage — told only "incense
+ * holder", the check could fail a correct raw block being drilled as a different object where the
+ * holder should be, and push the step back toward the finished piece (on stored films, step
+ * pictures drawn from the finished piece were flagged "missing" 5 times in 31, every other
+ * key-thing picture 92 in 1,396). Pure.
+ */
+export function requiredThingsFor(s: StoryboardScene): string[] {
+  const own = ownKeyThing(s);
+  return [own && beforeFinished(s) ? `${own} ${UNFINISHED_THING}` : own, ...(s.otherKeyThings ?? [])].filter(
+    (t): t is string => !!t
+  );
 }
 
 /** How a SCREEN picture uses its item's memory: only as the photo inside the listing. */

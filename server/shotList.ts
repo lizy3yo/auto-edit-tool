@@ -19,7 +19,7 @@
  * Not touched: the CTA (its host → book → host → big QR layout is fixed), the cover, operator
  * assets, split screens and the cold open (the hook stays on camera).
  */
-import type { KeyThing, StoryboardScene } from "@shared/types";
+import type { BuildStage, KeyThing, StoryboardScene } from "@shared/types";
 import { invokeClaude } from "./claude";
 import { safeParseJSON } from "./jsonRepair";
 import { SHOWS_PERSON } from "./hostLook";
@@ -138,6 +138,20 @@ export interface PlannedShot {
   held?: boolean;
   /** The person shown when the line is about someone other than the host (`otherPersonOf`). */
   other?: string;
+  /** How far along the thing the video makes is in this shot — only on a shot of that thing. */
+  stage?: BuildStage;
+}
+
+/** The build stages, earliest first (`scene.buildStage`). */
+export const BUILD_STAGES: readonly BuildStage[] = ["material", "making", "done"];
+
+/**
+ * The build stage a model wrote, or undefined: only the three stage words count, any case — a null,
+ * a missing field or anything else is "no stage", so the picture keeps the memory it had. Pure.
+ */
+export function buildStageOf(raw: unknown): BuildStage | undefined {
+  const v = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+  return (BUILD_STAGES as readonly string[]).includes(v) ? (v as BuildStage) : undefined;
 }
 
 /**
@@ -462,7 +476,7 @@ function hostPiece(
 function picturePiece(
   parent: StoryboardScene,
   text: string,
-  shot: Pick<PlannedShot, "show" | "motion" | "list" | "same" | "contact" | "held" | "other" | "thing" | "text" | "print">,
+  shot: Pick<PlannedShot, "show" | "motion" | "list" | "same" | "contact" | "held" | "other" | "thing" | "text" | "print" | "stage">,
   k: number
 ): StoryboardScene {
   // A video only of a big thing (`videoKind`): never hands, a held thing, or a tool going in.
@@ -492,6 +506,9 @@ function picturePiece(
     objectMotion: moving ? true : undefined,
     cameraMove: undefined,
     keyThing: shot.thing || undefined,
+    // How far along the thing being made is in THIS picture — never the beat's, so a re-planned
+    // piece does not keep a stage its new picture may not have (`memorySourcesFor`).
+    buildStage: shot.stage,
     // Writing only when this piece's own words say it, exactly (`saidText`); printing it only talks
     // about is shown blurred (`blurredPrint`).
     pictureText: saidText(shot.text, text),
@@ -666,6 +683,7 @@ export function splitListPieces(scenes: StoryboardScene[]): StoryboardScene[] {
         humanPresent: undefined,
         keyThing: undefined,
         otherKeyThings: undefined,
+        buildStage: undefined,
         pictureText: undefined,
         sameShot: undefined,
         listCut: true,
@@ -1018,6 +1036,15 @@ const SHOT_LIST_SYSTEM =
   "spot — closer on one part, further back with the room around it, the other side, from above or " +
   "low down — the view the words point at, never the same view as the shot of it just before. A " +
   "before / during / after of one piece is the SAME piece each time, further along.\n" +
+  "1e. STAGE. Only for a shot that shows something the video MAKES (or shows being made), or what " +
+  "it is made from, set stage to how far along that thing is IN THIS SHOT: \"material\" — the raw " +
+  "stock or pieces before any work (a stack of rough boards, a pile of fabric scraps, a ball of " +
+  "dough); \"making\" — being made or partly built (cut, drilled, half-sewn, glued up, partly " +
+  "assembled); \"done\" — finished. " +
+  "Finishing touches (oil, wax, polish, a felt pad, a last brush) count as done. Many videos open " +
+  "on the finished piece and then go back to the start: a making shot shows the piece only as far " +
+  "along as its words say, never already finished. stage is null for every other shot — a thing " +
+  "nobody makes in the video, a tool, a place, the weather.\n" +
   "1d. DON'T REPEAT. When a line's subject is already on screen from the picture before (the line " +
   "says \"it\", \"this\", \"that one\") and the line names something NEW you can see — a thing, or a " +
   "kind of event or situation (\"the storms that roll in at night\") — the shot shows the new thing " +
@@ -1130,7 +1157,7 @@ const SHOT_LIST_SYSTEM =
   'term: "a herringbone brick path — bricks laid in a zigzag of short rows", never just "a brick ' +
   'path".\n\n' +
   "Return ONLY JSON: " +
-  '{"beats":[{"beat":N,"hostUntil":null|"...","shots":[{"from":"...","show":"...","motion":"none","thing":null,"text":null,"print":null,"list":false,"same":false,"contact":false,"held":false,"other":null}]}]}';
+  '{"beats":[{"beat":N,"hostUntil":null|"...","shots":[{"from":"...","show":"...","motion":"none","thing":null,"stage":null,"text":null,"print":null,"list":false,"same":false,"contact":false,"held":false,"other":null}]}]}';
 
 /**
  * Ask for the shot list, `SHOT_BATCH` beats per call, `SHOT_CONCURRENCY` calls at once. Each call
@@ -1212,6 +1239,7 @@ export async function planShotList(
           motion: x.motion === "object" || x.motion === "camera" ? "object" : "none",
           thing:
             typeof x.thing === "string" ? matchKeyThing(x.thing, keyThings)?.name : undefined,
+          stage: buildStageOf(x.stage),
           text: typeof x.text === "string" ? x.text : undefined,
           print: x.print === "blurred" ? "blurred" : undefined,
           list: x.list === true,
@@ -1444,8 +1472,13 @@ For a "joined" picture shows_it is false unless it already shows that.
 
 For each WRONG picture write the picture that fits: plain words, what is literally in the frame, one
 moment, one place, like a snapshot caption. When the line is about a key thing, name it exactly as
-the KEY THINGS list writes it and set thing to that name. When something in that moment moves by
-itself with no person moving it (a flame, smoke, steam, water), say it is happening. When the
+the KEY THINGS list writes it and set thing to that name. When the picture shows something the video
+MAKES (or shows being made), or what it is made from, set stage to how far along it is in that
+picture: "material" (the raw stock or pieces before any work), "making" (being made, partly built)
+or "done" (finished — oil, wax, polish or a felt pad count as done); a line about a step shows the
+piece only as far along as that step, never already finished. stage is null otherwise. When
+something in that moment moves by itself with no person moving it (a flame, smoke, steam, water),
+say it is happening. When the
 picture is the MAIN thing and it is something naturally in use with smoke, steam, a flame or water,
 show it in use — lit, steaming, burning, running — because that is the moment worth a video. The
 FIRST picture of the MAIN thing that
@@ -1454,17 +1487,22 @@ no faces, never "or".
 
 Answer with JSON only, one entry for EVERY picture:
 {"pictures":[{"id":7,"about":"...","shows_it":true},
-{"id":8,"about":"...","shows_it":false,"show":"...","thing":null,"split":[{"from":"exact words","show":"...","thing":null}]},
-{"id":9,"about":"...","shows_it":false,"join":true,"show":"...","thing":null}]}
-show and thing only when shows_it is false or join is true; split only when a new picture must start;
+{"id":8,"about":"...","shows_it":false,"show":"...","thing":null,"stage":null,"split":[{"from":"exact words","show":"...","thing":null,"stage":null}]},
+{"id":9,"about":"...","shows_it":false,"join":true,"show":"...","thing":null,"stage":null}]}
+show, thing and stage only when shows_it is false or join is true; split only when a new picture must start;
 join only on a picture marked "same sentence".`;
 
 /** A new picture starting inside a line, at `from` (its first words, verbatim). */
-export type PictureSplit = { from: string; show: string; thing?: string };
+export type PictureSplit = { from: string; show: string; thing?: string; stage?: BuildStage };
 export type PictureFix = {
   id: number;
   show?: string;
   thing?: string;
+  /**
+   * How far along the thing being made is in the rewrite: a stage, `null` when the check answered
+   * that the new picture shows no made thing, unset when it did not answer (`applyPictureFixes`).
+   */
+  stage?: BuildStage | null;
   split?: PictureSplit[];
   /** This picture and the one before it are ONE idea of one sentence: make them one picture. */
   join?: boolean;
@@ -1497,14 +1535,23 @@ export function parsePictureFixes(text: string, scenes: StoryboardScene[]): Pict
     const join = f?.join === true;
     const show = f?.shows_it === false || join ? clean(f?.show) : "";
     const split: PictureSplit[] = (Array.isArray(f?.split) ? f.split : [])
-      .map((x: any) => ({ from: clean(x?.from), show: clean(x?.show), thing: clean(x?.thing) || undefined }))
+      .map((x: any) => ({
+        from: clean(x?.from),
+        show: clean(x?.show),
+        thing: clean(x?.thing) || undefined,
+        stage: buildStageOf(x?.stage),
+      }))
       .filter((x: PictureSplit) => x.from && x.show);
     if (!show && !split.length && !join) continue;
+    // A stage the check answered (a stage word, or null for "no made thing") replaces the old one;
+    // a missing field keeps it (`applyPictureFixes`).
+    const answered = !!f && typeof f === "object" && "stage" in f;
     out.push({
       id,
       ...(join ? { join } : {}),
       ...(show ? { show } : {}),
       ...(show && typeof f?.thing === "string" && f.thing ? { thing: f.thing } : {}),
+      ...(show && answered ? { stage: buildStageOf(f.stage) ?? null } : {}),
       ...(split.length ? { split } : {}),
     });
   }
@@ -1531,6 +1578,10 @@ export function applyPictureFixes(
     s.visualPrompt = f.show;
     s.visualPromptSeed = undefined;
     s.brollVisual = undefined;
+    // The build stage: the check's own answer when it gave one; else the old stage while the picture
+    // is still of the same key thing — a rewrite onto something else has no stage it can vouch for.
+    s.buildStage =
+      f.stage !== undefined ? f.stage ?? undefined : s.keyThing === primary?.name ? s.buildStage : undefined;
     s.keyThing = primary?.name;
     const others = named.map(t => t.name).filter(name => name !== primary?.name);
     s.otherKeyThings = others.length ? others : undefined;
@@ -1602,7 +1653,7 @@ export function applyPictureJoins(
       wordCut: prev.wordCut || s.wordCut,
       humanPresent: prev.humanPresent || s.humanPresent || undefined,
     } as StoryboardScene;
-    if (f!.show) applyPictureFixes([merged], [{ id: 0, show: f!.show, thing: f!.thing }], things);
+    if (f!.show) applyPictureFixes([merged], [{ id: 0, show: f!.show, thing: f!.thing, stage: f!.stage }], things);
     out[k] = merged;
     lens[k] += sec(s);
     remap.set(id, k);
@@ -1680,6 +1731,8 @@ export function applyPictureSplits(
         brollVisual: undefined,
         keyThing: primary?.name,
         otherKeyThings: others.length ? others : undefined,
+        // A new picture: only the stage the check gave it, never the line's old one.
+        buildStage: cut.stage,
         humanPresent: SHOWS_PERSON.test(cut.show) ? true : undefined,
         stillImage: true,
         objectMotion: undefined,
@@ -2295,6 +2348,7 @@ export function applyContextGroups(scenes: StoryboardScene[], groups: ContextGro
     const counts = new Map<string, number>();
     for (const s of members) if (s.keyThing) counts.set(s.keyThing, (counts.get(s.keyThing) ?? 0) + 1);
     const thing = Array.from(counts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0];
+    const stage = groupStage(members);
     members.forEach((s, k) => {
       s.showSubject = show;
       s.visualPrompt = show;
@@ -2303,6 +2357,7 @@ export function applyContextGroups(scenes: StoryboardScene[], groups: ContextGro
       s.objectMotion = motion !== "none" ? true : undefined;
       s.cameraMove = undefined;
       s.keyThing = thing;
+      s.buildStage = stage;
       s.toolContact = contact ? true : undefined;
       if (k > 0) {
         s.sameShot = true;
@@ -2311,6 +2366,23 @@ export function applyContextGroups(scenes: StoryboardScene[], groups: ContextGro
     });
   }
   return marked;
+}
+
+/**
+ * The build stage of a same-topic group's ONE picture: the stage most of its pictures carry, the
+ * later one on a tie — a later stage keeps the memory a picture had before stages existed, so a
+ * group the planner labelled unevenly never loses a reference it would have had. No member with a
+ * stage ⇒ none. Pure.
+ */
+export function groupStage(members: StoryboardScene[]): BuildStage | undefined {
+  const counts = new Map<BuildStage, number>();
+  for (const s of members) if (s.buildStage) counts.set(s.buildStage, (counts.get(s.buildStage) ?? 0) + 1);
+  let best: BuildStage | undefined;
+  for (const st of BUILD_STAGES) {
+    const n = counts.get(st) ?? 0;
+    if (n > 0 && n >= (best ? counts.get(best)! : 0)) best = st;
+  }
+  return best;
 }
 
 /**
