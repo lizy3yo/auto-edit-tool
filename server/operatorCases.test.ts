@@ -75,6 +75,7 @@ import {
 } from "./hostLook";
 import { tooShortToRead, type Word } from "../graphics/src/cueResolve";
 import { wordsSaidOver } from "../graphics/src/plan/planner";
+import { plannerForJob } from "./graphics/apply";
 
 const pic = (index: number, scriptText: string, showSubject: string, over: Partial<StoryboardScene> = {}) =>
   ({ index, scriptText, showSubject, visualPrompt: showSubject, ...over }) as StoryboardScene;
@@ -1059,5 +1060,32 @@ describe("the graphics planner reads what the film says over each picture (Dale'
   it("a line the film says as written keeps the script's own words (Hank's job 398: 'out of square' heard 'out a square')", () => {
     const heard = W("the@70.25-70.37 whole@70.41-70.63 grid@70.69-70.99 twists@71.05-71.39 out@71.47-71.59 a@71.63-71.67 square.@71.73-72.09");
     expect(wordsSaidOver({ scenes: [at(14, 70, 72.5, "the whole grid twists out of square.")] }, heard)).toEqual(["the whole grid twists out of square."]);
+  });
+});
+
+describe("a bare moment can be explained from the job (Dale's job 397, found by the audit)", () => {
+  it("'Smalls, about $10 to $40.' offered and passed over is kept as offered with no cue; a refused sentence keeps its cue and reason", () => {
+    const kept = plannerForJob(
+      {
+        model: "claude-opus-5-5",
+        rounds: [
+          {
+            step: "fill",
+            asked: 1,
+            kept: 0,
+            problems: [{ cue: "front-edge-price", problem: "starts 0.4 s after three-piles ends (needs 1 s)" }],
+            offered: [
+              { from: 49.68, to: 52.48, text: "Smalls, about $10 to $40.", asked: [], placed: false },
+              { from: 179.99, to: 185.59, text: "Put the $10 to $40 items along the front edge of the table, where hands reach first.", asked: ["front-edge-price"], placed: false },
+            ],
+          },
+        ],
+      },
+      "2026-10-17T12:00:00.000Z"
+    )!;
+    const [smalls, frontEdge] = kept.rounds[0].offered!;
+    expect(smalls).toEqual({ at: 49.68, text: "Smalls, about $10 to $40.", asked: [], placed: false });
+    expect(frontEdge.asked).toEqual(["front-edge-price"]);
+    expect(kept.rounds[0].problems).toEqual([{ cue: "front-edge-price", problem: "starts 0.4 s after three-piles ends (needs 1 s)" }]);
   });
 });

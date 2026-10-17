@@ -7,11 +7,67 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import type { JobGraphics, LongformInputParams, StoryboardScene } from "@shared/types";
 import type { CueSpec } from "../../graphics/src/cueResolve";
 import type { FilmLayout } from "../../graphics/src/plan/rules";
+import type { Readability } from "../../graphics/src/plan/qa";
 import { getChannelConfig } from "../db";
-import { addGraphics } from "./finish";
+import { addGraphics, type GraphicsRecord } from "./finish";
 
 /** App-wide off switch: GRAPHICS=0. */
 export const graphicsEnabled = () => process.env.GRAPHICS !== "0";
+
+/** At most this many problems (and offered sentences) per round, and readability fixes, are kept on
+ * the job — it rides inputParams on every save; the render log still prints them all. */
+export const MAX_KEPT_PER_ROUND = 60;
+const MAX_PROBLEM_CHARS = 200;
+const MAX_ID_CHARS = 80;
+const MAX_OFFERED_CHARS = 80;
+const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+
+/**
+ * The planner's rounds as kept on the job. Before this, every refusal went only to the render log:
+ * across the 12 films made with graphics (jobs 385-398) the rows held one left-out graphic and no
+ * refusal, so three bare moments of Dale's job 397 ("Smalls, about $10 to $40." at 0:49, which the
+ * rules accept a graphic on) could not be explained. The fill round's offered sentences ride along
+ * (cut short), so "offered, never asked" shows apart from "asked and refused". Pure.
+ */
+export function plannerForJob(planner: GraphicsRecord["planner"], at: string): JobGraphics["planner"] {
+  if (!planner) return undefined;
+  return {
+    model: planner.model,
+    at,
+    rounds: planner.rounds.map(r => {
+      const problems = r.problems.slice(0, MAX_KEPT_PER_ROUND).map(p => ({ cue: clip(p.cue, MAX_ID_CHARS), problem: clip(p.problem, MAX_PROBLEM_CHARS) }));
+      const offered = r.offered?.slice(0, MAX_KEPT_PER_ROUND).map(o => ({
+        at: Math.round(o.from * 100) / 100,
+        text: clip(o.text, MAX_OFFERED_CHARS),
+        asked: o.asked.map(id => clip(id, MAX_ID_CHARS)),
+        placed: o.placed,
+      }));
+      return {
+        step: r.step,
+        asked: r.asked,
+        kept: r.kept,
+        problems,
+        ...(r.problems.length > problems.length ? { truncated: r.problems.length - problems.length } : {}),
+        ...(offered ? { offered } : {}),
+        ...(r.offered && offered && r.offered.length > offered.length ? { offeredTruncated: r.offered.length - offered.length } : {}),
+        ...(r.error ? { error: clip(r.error, MAX_PROBLEM_CHARS) } : {}),
+      };
+    }),
+  };
+}
+
+/**
+ * The readability results worth keeping: only the graphics the check had to work on (their first
+ * measure failed). One that passed as designed has nothing to explain, and one that never passed is
+ * also in `dropped` — its steps say what was tried (job 390: "colour 4.0:1" after every fix). Pure.
+ */
+export function readabilityForJob(readability: Readability[]): JobGraphics["readability"] {
+  const fixed = readability
+    .filter(r => !r.pass || r.steps.length > 1)
+    .slice(0, MAX_KEPT_PER_ROUND)
+    .map(r => ({ id: clip(r.id, MAX_ID_CHARS), pass: r.pass, summary: clip(r.summary, MAX_PROBLEM_CHARS), steps: r.steps.map(s => clip(s, MAX_PROBLEM_CHARS)) }));
+  return fixed.length ? fixed : undefined;
+}
 
 /** The film's layout for the rules: each scene's span on the film, and what is on screen. */
 export function filmLayoutOf(scenes: StoryboardScene[]): FilmLayout {
@@ -79,6 +135,11 @@ export async function withGraphics(jobId: number, film: Buffer, scenes: Storyboa
       theme: record.theme,
       qa: { pass: record.qa.pass, lines: record.qa.lines, failures: record.qa.failures },
       replan: false,
+      // A Reassemble that reuses the saved plan makes no model call and has no rounds of its own:
+      // the rounds that wrote that plan are carried over, or the first Reassemble would wipe them.
+      planner: record.planner ? plannerForJob(record.planner, record.at) : prior.planner,
+      // Measured again on every assembly, so this film's own.
+      readability: readabilityForJob(record.readability),
     };
     hooks.log(`graphics QA: ${record.qa.pass ? "PASS" : "FAIL"} — ${record.qa.lines.join(" | ")}`);
     if (!record.qa.pass) hooks.warn(`Motion graphics: ${record.qa.failures.join("; ")}`);

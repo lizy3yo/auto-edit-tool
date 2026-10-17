@@ -1193,6 +1193,39 @@ export interface JobGraphics {
   replan?: boolean;
   /** Why the last assembly shipped the film without graphics, when it did. */
   skipped?: string;
+  /**
+   * How the plan was written, round by round (server/graphics/apply.ts `plannerForJob`): what each
+   * round asked for, how many passed, and what the checks refused. Kept so a bare moment can be
+   * explained from the job and not only from a render log. Carried over by a Reassemble that reuses
+   * the saved plan (that one makes no model call). Capped, so it stays a few KB.
+   */
+  planner?: JobGraphicsPlanner;
+  /** The graphics whose words the readability check had to fix (or could not), with each step tried. */
+  readability?: { id: string; pass: boolean; summary: string; steps: string[] }[];
+}
+
+/** The graphics planner's rounds, as kept on the job (`JobGraphics.planner`). */
+export interface JobGraphicsPlanner {
+  model: string;
+  /** When this plan was written (a Reassemble that reuses it keeps this time). */
+  at?: string;
+  rounds: {
+    /** "first", "repair", "fill", "fill repair" or "lists". */
+    step: string;
+    asked: number;
+    kept: number;
+    problems: { cue: string; problem: string }[];
+    /** Problems past the cap, not kept. */
+    truncated?: number;
+    /** The fill round only: each sentence offered back (`at` = its first word, the text cut short),
+     * the cues asked for it, and whether a graphic is over it after the round (no cue and not placed =
+     * passed over). */
+    offered?: { at: number; text: string; asked: string[]; placed: boolean }[];
+    /** Offered sentences past the cap, not kept. */
+    offeredTruncated?: number;
+    /** The round's model call failed, or its answer could not be read. */
+    error?: string;
+  }[];
 }
 
 export interface LongformInputParams {

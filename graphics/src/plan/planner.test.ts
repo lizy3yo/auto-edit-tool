@@ -346,3 +346,84 @@ describe("what is said over a picture comes from the film's sound only where it 
     expect(wordsSaidOver(film, heard)).toEqual(["Number four.", "Coasters and ornaments are impulse buys."]);
   });
 });
+
+describe("every round of the plan says what it asked, and the fill round what it offered (G1, Dale's job 397, found by the audit)", () => {
+  // Dale's job 397, 0:47-0:56 as heard: "Smalls, about $10 to $40." has no graphic in the film, and
+  // the rules accept a number label on it — nothing on the job said whether it was offered, asked
+  // for and refused, or passed over.
+  const heard = T(
+    "them.@47.52-47.68 Three@48.38-48.64 piles.@48.70-49.12 Smalls,@49.68-50.14 about@50.50-50.74 $10@50.94-51.54 to@51.62-51.70 $40.@51.78-52.48 Coasters,@53.16-53.72 ornaments,@54.00-54.42 small@54.70-54.96 cutting@55.00-55.28 boards.@55.32-55.62"
+  );
+  const film = (host = false) => ({
+    scenes: [
+      scene(12, 48.2104, 49.4569, { scriptText: "Three piles." }),
+      scene(13, 49.4569, 53.0381, { hostPresent: host, scriptText: "Smalls, about $10 to $40." }),
+      scene(14, 53.0381, 56.2, { scriptText: "Coasters, ornaments, small cutting boards." }),
+    ],
+  });
+  const cuts = [48.2104, 49.4569, 53.0381, 56.2];
+  const smallsPrice: CueSpec = { id: "probe-smalls-price", template: "NumberLabel", start: "Smalls, about $10", startPad: -0.15, end: "to $40.", endPad: 0.3, props: { kicker: "Smalls", a: { label: "From", value: "$10", at: "@$10" }, b: { label: "To", value: "$40", at: "@$40" } } };
+  /** The model plans nothing at first, then answers the fill round (and its repair) in turn. */
+  const answering = (...later: (CueSpec[] | Error)[]) => {
+    let n = 0;
+    return async () => {
+      const a = n++ === 0 ? [] : (later.shift() ?? []);
+      if (a instanceof Error) throw a;
+      return JSON.stringify({ cues: a });
+    };
+  };
+
+  it("a sentence the model passed over is recorded as offered, with no cue asked for it", async () => {
+    const out = await planGraphics({ words: heard, cuts, film: film(), ask: answering([]), ensureIcon: async () => true });
+    expect(out.rounds.map(r => r.step)).toEqual(["first", "fill"]);
+    const fill = out.rounds[1];
+    expect(fill).toMatchObject({ asked: 0, kept: 0, problems: [] });
+    // only the sentence with a moment: "Three piles." is too short, the list names no number
+    expect(fill.offered).toEqual([{ from: 49.68, to: 52.48, text: "Smalls, about $10 to $40.", asked: [], placed: false }]);
+  });
+
+  it("a cue asked for it and kept: the sentence is placed, with the cue's id", async () => {
+    const out = await planGraphics({ words: heard, cuts, film: film(), ask: answering([smallsPrice]), ensureIcon: async () => true });
+    expect(out.cues.map(c => c.id)).toEqual(["probe-smalls-price"]);
+    const fill = out.rounds.find(r => r.step === "fill")!;
+    expect(fill).toMatchObject({ asked: 1, kept: 1, problems: [] });
+    expect(fill.offered).toEqual([expect.objectContaining({ text: "Smalls, about $10 to $40.", asked: ["probe-smalls-price"], placed: true })]);
+  });
+
+  it("a cue asked for it and refused: the id is on the sentence and the reason in the round's problems", async () => {
+    // The same line over the host: a number label points at the picture, so the rules refuse it.
+    const out = await planGraphics({ words: heard, cuts, film: film(true), ask: answering([smallsPrice], []), ensureIcon: async () => true });
+    expect(out.cues).toEqual([]);
+    expect(out.rounds.map(r => r.step)).toEqual(["first", "fill", "fill repair"]);
+    const fill = out.rounds[1];
+    expect(fill.problems).toContainEqual({ cue: "probe-smalls-price", problem: "points at the picture over host scene 13 — only over b-roll" });
+    expect(fill.offered).toEqual([expect.objectContaining({ asked: ["probe-smalls-price"], placed: false })]);
+    expect(out.rounds[2]).toMatchObject({ asked: 0, kept: 0, problems: [] });
+  });
+
+  it("a fill call that fails is recorded with its reason, the sentences still listed", async () => {
+    const out = await planGraphics({ words: heard, cuts, film: film(), ask: answering(new Error("overloaded")), ensureIcon: async () => true });
+    const fill = out.rounds.find(r => r.step === "fill")!;
+    expect(fill.error).toBe("overloaded");
+    expect(fill.offered?.map(o => [o.text, o.asked.length, o.placed])).toEqual([["Smalls, about $10 to $40.", 0, false]]);
+  });
+
+  it("no fill round when nothing is offered (the moment is in the call to action)", async () => {
+    const cta = { scenes: film().scenes.map(s => (s.index === 13 ? { ...s, cta: true } : s)) };
+    const out = await planGraphics({ words: heard, cuts, film: cta, ask: answering([smallsPrice]), ensureIcon: async () => true });
+    expect(out.rounds.map(r => r.step)).toEqual(["first"]);
+    expect(out.rounds[0].offered).toBeUndefined();
+  });
+
+  it("a cue is put on the sentence it starts in, not the one before (a lead-in pad before the first word still counts)", async () => {
+    const later = T("Put@179.99-180.15 the@180.17-180.57 $10@180.61-181.01 to@181.07-181.57 $40@181.69-181.95 items@182.07-182.35 along@182.47-182.71 the@182.75-182.83 front@182.97-183.21 edge.@183.29-183.43");
+    const twice = { scenes: [...film().scenes, scene(35, 179.89, 188.733, { scriptText: "Put the $10 to $40 items along the front edge." })] };
+    const putItems: CueSpec = { id: "front-edge-price", template: "NumberLabel", start: "Put the $10 to $40", startPad: -0.15, end: "items along the front edge.", endPad: 0.3, props: { kicker: "Front edge", a: { label: "From", value: "$10", at: "@$10" }, b: { label: "To", value: "$40", at: "@$40" } } };
+    const out = await planGraphics({ words: [...heard, ...later], cuts: [...cuts, 179.89, 188.733], film: twice, ask: answering([putItems]), ensureIcon: async () => true });
+    const offered = out.rounds.find(r => r.step === "fill")!.offered!;
+    expect(offered.map(o => [o.text, o.asked, o.placed])).toEqual([
+      ["Smalls, about $10 to $40.", [], false],
+      ["Put the $10 to $40 items along the front edge.", ["front-edge-price"], true],
+    ]);
+  });
+});

@@ -420,11 +420,43 @@ export type PlanInput = {
   lists?: { items: string[]; kind?: "things" | "steps" }[];
 };
 
+/** How far before an offered sentence's first word a cue may start and still be asked for it (a
+ * cue's lead-in pad is -0.15 s). */
+const OFFERED_LEAD_SEC = 0.3;
+
+/** A sentence the fill round offered back, and what came of it. */
+export type OfferedMoment = {
+  from: number;
+  to: number;
+  text: string;
+  /** The asked cues (fill or its repair) that start inside it: none, and not placed, means the model
+   * passed it over. */
+  asked: string[];
+  /** A graphic is over it once the fill round is done. */
+  placed: boolean;
+};
+
+/** One round of the plan: what it asked for, how many passed, and what the checks refused. */
+export type PlanRound = {
+  /** The first answer, its repair, the fill (sentences offered back), the fill's repair, or the
+   * spoken lists built from their own words. */
+  step: "first" | "repair" | "fill" | "fill repair" | "lists";
+  asked: number;
+  kept: number;
+  problems: PlanProblem[];
+  /** The fill round only: every sentence offered back. A sentence the model passed over leaves no
+   * cue and no problem, so without this a bare moment could not be told from a refused one (Dale's
+   * job 397: "Smalls, about $10 to $40." was offered, has no graphic, and the rules accept one). */
+  offered?: OfferedMoment[];
+  /** The fill call failed, or its answer could not be read: nothing was added. */
+  error?: string;
+};
+
 export type PlanResult = {
   /** The cue sheet: approved graphics and new ones, in film order. */
   cues: CueSpec[];
   resolved: ResolvedCue[];
-  rounds: { asked: number; kept: number; problems: PlanProblem[] }[];
+  rounds: PlanRound[];
   /** Approved graphics that could not be kept (never, unless the film itself changed). */
   lostKept: string[];
 };
@@ -481,6 +513,8 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
   const validate = async (newSpecs: CueSpec[], final: boolean) => {
     const problems: PlanProblem[] = [];
     const ids = new Set<string>();
+    /** Where each new cue starts: resolved when it resolved, else the first place its start words occur. */
+    const startsAt = new Map<string, number>();
     // 1. The APPROVED graphics are the fixed base: placed first, in their own order, never dropped.
     //    Their own issues (if any) are reported, not acted on.
     const placed: { spec: CueSpec; t: number; kept: boolean }[] = [];
@@ -506,6 +540,7 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
         continue;
       }
       ids.add(spec.id);
+      startsAt.set(spec.id, t);
       try {
         templateById(spec.template);
       } catch {
@@ -559,6 +594,7 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
         continue;
       }
       const mine = next.find(r => r.id === spec.id)!;
+      startsAt.set(spec.id, mine.start);
       // A graphic that sits still for seconds between its own words is a frozen frame, not a point.
       const times = [mine.start, ...mine.sync.map(x => x.wordStart), mine.contentEnd ?? mine.start].sort((a, b) => a - b);
       const wait = Math.max(0, ...times.slice(1).map((x, i) => x - times[i]));
@@ -629,7 +665,7 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
         resolved = placed.length ? resolveAll() : [];
       }
     }
-    return { cues: placed.map(p => p.spec), resolved, problems };
+    return { cues: placed.map(p => p.spec), resolved, problems, startsAt };
   };
 
   const system = systemPrompt({ kept: kept0.length > 0 });
@@ -643,7 +679,7 @@ ${offered.map((l, i) => `${i + 1}. ${l.kind === "steps" ? "[steps] " : ""}${l.it
   const first = await ask(system, [{ role: "user", content: user }]);
   let specs = parseSheet(first).filter(c => !keptIds.has(c.id));
   let verdict = await validate(structuredClone(specs), false);
-  const rounds = [{ asked: specs.length, kept: verdict.cues.length, problems: verdict.problems }];
+  const rounds: PlanRound[] = [{ step: "first", asked: specs.length, kept: verdict.cues.length, problems: verdict.problems }];
   if (verdict.problems.some(p => !p.cue.startsWith("[kept]"))) {
     const fix = `These cues failed the checks (resolved against the real word times and the film's layout):
 ${verdict.problems.filter(p => !p.cue.startsWith("[kept]")).map(p => `- ${p.cue}: ${p.problem}`).join("\n")}
@@ -658,7 +694,7 @@ narrator really says, numbers he says, move it to where it may go, or drop it. K
       ])
     ).filter(c => !keptIds.has(c.id));
     verdict = await validate(structuredClone(specs), true);
-    rounds.push({ asked: specs.length, kept: verdict.cues.length, problems: verdict.problems });
+    rounds.push({ step: "repair", asked: specs.length, kept: verdict.cues.length, problems: verdict.problems });
   }
 
   // FILL, by the SCRIPT (not by the clock — the operator, 2026-10-17: "if it should have a graphic
@@ -676,17 +712,31 @@ Add a NEW cue for each one that really fits a template (a number, a list, a comp
 a warning, a whole sentence worth a statement or a caption); skip one that does not. Every rule above
 still applies. Return JSON only: {"cues": [ ...the NEW cues only... ]}, with ids not used before.`;
     const base = [{ role: "user" as const, content: user }, { role: "assistant" as const, content: JSON.stringify({ cues: accepted }) }];
+    // The round is recorded even when nothing comes back: "offered, none asked" is the answer to
+    // why a moment is bare, and an empty answer is not a failed call.
+    const fillRound: PlanRound = { step: "fill", asked: 0, kept: 0, problems: [] };
+    rounds.push(fillRound);
+    /** Where each cue the fill (or its repair) asked for starts, to say which sentences were asked at all. */
+    const askedAt = new Map<string, number>();
+    const noteAsked = (v: { startsAt: Map<string, number> }, ids: Set<string>) => {
+      for (const [id, t] of Array.from(v.startsAt)) if (ids.has(id)) askedAt.set(id, t);
+    };
+    const why = (e: unknown) => (e instanceof Error ? e.message : String(e));
     let added: CueSpec[] = [];
     try {
       added = parseSheet(await ask(system, [...base, { role: "user", content: fill }])).filter(c => !taken.has(c.id) && !keptIds.has(c.id));
-    } catch {
+    } catch (e) {
       added = [];
+      fillRound.error = why(e);
     }
+    fillRound.asked = added.length;
     if (added.length) {
       let next = await validate(structuredClone([...accepted, ...added]), false);
       const addedIds = new Set(added.map(c => c.id));
+      noteAsked(next, addedIds);
       const failed = next.problems.filter(p => addedIds.has(p.cue));
-      rounds.push({ asked: added.length, kept: next.cues.length - accepted.length, problems: failed });
+      fillRound.kept = next.cues.length - accepted.length;
+      fillRound.problems = failed;
       if (failed.length) {
         const fix = `These added cues failed the checks:
 ${failed.map(p => `- ${p.cue}: ${p.problem}`).join("\n")}
@@ -696,9 +746,11 @@ words the narrator really says, a whole sentence where the template needs one, o
         try {
           const fixed = parseSheet(await ask(system, [...base, { role: "user", content: fill + "\n\nYOUR ADDED CUES WERE:\n" + JSON.stringify({ cues: added }) + "\n\n" + fix }])).filter(c => !taken.has(c.id) && !keptIds.has(c.id));
           next = await validate(structuredClone([...accepted, ...fixed]), true);
-          rounds.push({ asked: fixed.length, kept: next.cues.length - accepted.length, problems: next.problems.filter(p => fixed.some(x => x.id === p.cue)) });
-        } catch {
+          noteAsked(next, new Set(fixed.map(c => c.id)));
+          rounds.push({ step: "fill repair", asked: fixed.length, kept: next.cues.length - accepted.length, problems: next.problems.filter(p => fixed.some(x => x.id === p.cue)) });
+        } catch (e) {
           next = await validate(structuredClone([...accepted, ...added]), true);
+          rounds.push({ step: "fill repair", asked: 0, kept: next.cues.length - accepted.length, problems: [], error: why(e) });
         }
       } else {
         next = await validate(structuredClone([...accepted, ...added]), true);
@@ -706,6 +758,13 @@ words the narrator really says, a whole sentence where the template needs one, o
       // only ever MORE: a fill that somehow lost an accepted graphic is not taken
       if (accepted.every(a => next.cues.some(c => c.id === a.id))) verdict = next;
     }
+    // What came of each offered sentence: a graphic over it, asked for and refused (its cue's id is
+    // in the problems), or passed over (no cue starts in it). A cue starting just before a
+    // sentence's first word (its lead-in pad) belongs to that sentence.
+    const bare = new Set(uncoveredMoments(verdict.resolved, words, film).map(m => m.from));
+    const offeredBack: OfferedMoment[] = moments.map(m => ({ ...m, asked: [], placed: !bare.has(m.from) }));
+    for (const [id, t] of Array.from(askedAt)) offeredBack.findLast(o => o.from - OFFERED_LEAD_SEC <= t && t <= o.to)?.asked.push(id);
+    fillRound.offered = offeredBack;
   }
 
   // EVERY SPOKEN LIST HAS ITS GRAPHIC: one the planner still left without is built from the list's
@@ -716,7 +775,7 @@ words the narrator really says, a whole sentence where the template needs one, o
     const accepted = verdict.cues.filter(c => !keptIds.has(c.id));
     const next = await validate(structuredClone([...accepted, ...listCues]), true);
     const placedLists = listCues.filter(l => next.cues.some(c => c.id === l.id));
-    rounds.push({ asked: listCues.length, kept: placedLists.length, problems: next.problems.filter(p => listCues.some(l => l.id === p.cue) || p.problem.includes("gave way")) });
+    rounds.push({ step: "lists", asked: listCues.length, kept: placedLists.length, problems: next.problems.filter(p => listCues.some(l => l.id === p.cue) || p.problem.includes("gave way")) });
     if (placedLists.length) verdict = next;
   }
   return {

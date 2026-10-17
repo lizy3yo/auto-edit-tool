@@ -81,7 +81,7 @@ writeFileSync(
 const report = [
   `# Planner — job ${jobId}`,
   `model ${MODEL}, ${((Date.now() - t0) / 1000).toFixed(0)} s, ${usage.input} in / ${usage.output} out tokens`,
-  ...plan.rounds.map((r, i) => `round ${i + 1}: ${r.asked} new written, ${r.kept} graphics pass in all${r.problems.length ? "\n  " + r.problems.map(p => `${p.cue}: ${p.problem}`).join("\n  ") : ""}`),
+  ...plan.rounds.map((r, i) => `round ${i + 1} (${r.step}): ${r.asked} new written, ${r.kept} graphics pass in all${r.problems.length ? "\n  " + r.problems.map(p => `${p.cue}: ${p.problem}`).join("\n  ") : ""}`),
   kept.length ? `kept graphics: ${kept.length - plan.lostKept.length}/${kept.length}${plan.lostKept.length ? " — LOST: " + plan.lostKept.join(", ") : ""}` : "",
   `${plan.cues.length} graphics, ${(plan.cues.length / (filmSec / 60)).toFixed(1)} a minute: ${Array.from(byType).map(([t, n]) => `${t} ${n}`).join(", ")}`,
   "",

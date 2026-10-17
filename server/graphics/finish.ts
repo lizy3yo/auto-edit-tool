@@ -29,7 +29,7 @@ import { TEMPLATES, templateById } from "../../graphics/src/registry";
 import { FPS, type Theme } from "../../graphics/src/theme";
 import { themeFromPixels } from "../../graphics/src/palette";
 import { WINDOW } from "../../graphics/src/more";
-import { NOTO_PNG, planGraphics, type PlanMessage } from "../../graphics/src/plan/planner";
+import { NOTO_PNG, planGraphics, type PlanMessage, type PlanRound } from "../../graphics/src/plan/planner";
 import { checkRules, type FilmLayout } from "../../graphics/src/plan/rules";
 import { detectCuts, judgeFilm, type QaResult, type Readability } from "../../graphics/src/plan/qa";
 import { getMediaDuration } from "../mediaProbe";
@@ -57,7 +57,8 @@ export type GraphicsRecord = {
   theme?: { accent: string; bg: string };
   qa: QaResult;
   readability: Readability[];
-  planner?: { model: string; rounds: number };
+  /** How the plan was written, round by round — unset when the saved plan was reused (no model call). */
+  planner?: { model: string; rounds: PlanRound[] };
 };
 
 export type AddGraphicsInput = {
@@ -192,7 +193,7 @@ async function inlineIcons(node: unknown): Promise<void> {
 
 /* ───────────── the plan ───────────── */
 
-async function plan(input: AddGraphicsInput, words: Word[], cuts: number[]): Promise<{ cues: CueSpec[]; rounds?: number }> {
+async function plan(input: AddGraphicsInput, words: Word[], cuts: number[]): Promise<{ cues: CueSpec[]; rounds?: PlanRound[] }> {
   if (input.savedPlan?.length && !input.replan) return { cues: input.savedPlan };
   const ask = async (system: string, messages: PlanMessage[]): Promise<string> => {
     // The repair round is one message carrying the first answer, on the same metered call.
@@ -210,12 +211,14 @@ async function plan(input: AddGraphicsInput, words: Word[], cuts: number[]): Pro
     return r.text;
   };
   const p = await planGraphics({ words, cuts, film: input.film, ask, ensureIcon: async code => !!(await iconFile(code)), lists: input.lists });
-  // What each round asked for and what the checks refused, so a thin plan can be explained.
+  // What each round asked for and what the checks refused, so a thin plan can be explained. The
+  // rounds are also kept on the job (`withGraphics`): the render log is gone after a restart.
   p.rounds.forEach((r, i) => {
-    input.log?.(`graphics plan round ${i + 1}: ${r.asked} asked, ${r.kept} kept${r.problems.length ? `, ${r.problems.length} refused` : ""}`);
+    const offered = r.offered ? `, ${r.offered.length} sentences offered (${r.offered.filter(o => !o.asked.length && !o.placed).length} passed over)` : "";
+    input.log?.(`graphics plan round ${i + 1} (${r.step}): ${r.asked} asked, ${r.kept} kept${r.problems.length ? `, ${r.problems.length} refused` : ""}${offered}${r.error ? ` — ${r.error}` : ""}`);
     for (const pr of r.problems) input.log?.(`  refused ${pr.cue}: ${pr.problem}`);
   });
-  return { cues: p.cues, rounds: p.rounds.length };
+  return { cues: p.cues, rounds: p.rounds };
 }
 
 /** Resolve a plan cue by cue (film order), leaving out any that no longer resolve or break a
