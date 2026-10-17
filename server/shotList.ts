@@ -1043,6 +1043,13 @@ export function splitPicture(s: StoryboardScene, n: number): StoryboardScene[] {
   }
   const bounds = [0, ...cuts, spans.length];
   const out: StoryboardScene[] = [];
+  const subject = s.showSubject ?? s.visualPrompt;
+  // The view the picture already has (one `joinSameContext` gave a continuation): the parts count on
+  // from it. Counted from the first view instead, a picture that was already "a close-up" gave its
+  // second part "a close-up" again — the same words twice in a row, drawn as one photo twice. The
+  // plan gate splits such pictures AFTER the join, so nothing caught it: jobs 302, 307, 310, 341 and
+  // 352 each shipped a pair (job 341 scenes 3-4, the cutting board "unsold, a close-up" twice).
+  const own = viewIndexOf((subject ?? "").replace(/[\s.]+$/, ""));
   for (let k = 0; k < n; k++) {
     const from = spans[bounds[k]].start;
     const to = k + 1 < n ? spans[bounds[k + 1]].start : text.length;
@@ -1050,8 +1057,7 @@ export function splitPicture(s: StoryboardScene, n: number): StoryboardScene[] {
     // A split of ONE topic must not look like the same photo twice: each later part is a clearly
     // different VIEW of the same thing, named in its own subject so `joinSameContext` never folds
     // it back into the first.
-    const variant = ["", ...OTHER_VIEWS][k % 4];
-    const subject = s.showSubject ?? s.visualPrompt;
+    const variant = own ? OTHER_VIEWS[(own - 1 + k) % OTHER_VIEWS.length] : ["", ...OTHER_VIEWS][k % 4];
     out.push({
       ...s,
       ...FRESH,

@@ -2222,3 +2222,57 @@ describe("a picture that repeats the words before it gets its own view past the 
     expect(r3.scenes[1].showSubject).toBe("a small liquor bottle standing closed on the beverage cart tray");
   });
 });
+
+describe("a picture that already has a view, split in two, never says that view twice (job 341 scenes 3-4)", () => {
+  // Job 341: the join gave the cutting board's continuation "a close-up" (scene 2 was the board, plain),
+  // then the plan gate split that 12.2 s picture in two — and the second part came back with the SAME
+  // words, "…unsold, a close-up of one detail of it filling the frame", drawn as one photo twice.
+  // Jobs 302, 307, 310 and 352 each shipped the same pair. The parts count on from the picture's view.
+  const CLOSE = ", a close-up of one detail of it filling the frame";
+  const BACK = ", seen from much further back with the whole place around it";
+  const SIDE = ", seen from the other side";
+  const BOARD = "two-tone walnut and maple cutting board leaning against the garage wall, unsold";
+  const LINE =
+    "That happens to everybody who sells what they build, and it's fixable, because the board usually isn't the problem. The place you tried to sell it just wasn't built for that piece. Today I'm ranking";
+  const board = (showSubject: string) =>
+    scene(3, LINE, {
+      wordCut: true,
+      showSubject,
+      visualPrompt: "Close-up of the smooth oiled surface of a two-tone walnut and maple cutting board.",
+      keyThing: "walnut and maple cutting board",
+    });
+
+  it("gives the second part the view AFTER the picture's own", () => {
+    const parts = splitPicture(board(`${BOARD}${CLOSE}`), 2);
+    expect(parts).toHaveLength(2);
+    expect(parts[0].showSubject).toBe(`${BOARD}${CLOSE}`); // the first part keeps the picture
+    expect(parts[0].visualPrompt).toBe("Close-up of the smooth oiled surface of a two-tone walnut and maple cutting board.");
+    expect(parts[1].showSubject).toBe(`${BOARD}${BACK}`);
+    expect(parts[1].visualPrompt).toBe(`${BOARD}${BACK}`);
+  });
+
+  it("keeps rotating over three parts, and wraps from the last view to the first", () => {
+    const three = splitPicture(board(`${BOARD}${CLOSE}`), 3).map(p => p.showSubject);
+    expect(three).toEqual([`${BOARD}${CLOSE}`, `${BOARD}${BACK}`, `${BOARD}${SIDE}`]);
+    const fromSide = splitPicture(board(`${BOARD}${SIDE}`), 2).map(p => p.showSubject);
+    expect(fromSide).toEqual([`${BOARD}${SIDE}`, `${BOARD}${CLOSE}`]);
+    // A trailing full stop on the view is still read as that view.
+    expect(splitPicture(board(`${BOARD}${CLOSE}.`), 2)[1].showSubject).toBe(`${BOARD}${BACK}`);
+  });
+
+  it("a picture with no view of its own splits exactly as before", () => {
+    const plain = splitPicture(board(BOARD), 4).map(p => p.showSubject);
+    expect(plain).toEqual([BOARD, `${BOARD}${CLOSE}`, `${BOARD}${BACK}`, `${BOARD}${SIDE}`]);
+    // Only the description's END names its view: "a close-up" inside the words is not one.
+    const inside = "a close-up of the board's oiled edge on the garage shelf";
+    expect(splitPicture(board(inside), 2)[1].showSubject).toBe(`${inside}${CLOSE}`);
+  });
+
+  it("no two neighbouring parts ever share their words", () => {
+    for (const own of ["", CLOSE, BACK, SIDE])
+      for (const n of [2, 3, 4]) {
+        const words = splitPicture(board(`${BOARD}${own}`), n).map(p => p.showSubject);
+        for (let k = 1; k < words.length; k++) expect(words[k]).not.toBe(words[k - 1]);
+      }
+  });
+});

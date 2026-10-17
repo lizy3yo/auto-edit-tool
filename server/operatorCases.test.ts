@@ -2068,3 +2068,23 @@ describe("one topic past its limit is never the same picture twice (job 399 scen
     expect(apart.changed).toBe(false);
   });
 });
+
+describe("a picture that already has a view, split in two, never says that view twice (job 341 scenes 3-4)", () => {
+  // The plan gate split the cutting board's 12.2 s close-up after the join, and the second part was
+  // given "a close-up" again — the same picture twice under "The place you tried to sell it…".
+  const BOARD = "two-tone walnut and maple cutting board leaning against the garage wall, unsold";
+  const LINE =
+    "That happens to everybody who sells what they build, and it's fixable, because the board usually isn't the problem. The place you tried to sell it just wasn't built for that piece. Today I'm ranking";
+
+  it("341-4: the second part is seen from further back, not a second close-up", async () => {
+    const { splitPicture, OTHER_VIEWS } = await import("./shotList");
+    const parts = splitPicture(pic(3, LINE, `${BOARD}${OTHER_VIEWS[0]}`, { wordCut: true }), 2);
+    expect(parts.map(p => p.showSubject)).toEqual([`${BOARD}${OTHER_VIEWS[0]}`, `${BOARD}${OTHER_VIEWS[1]}`]);
+  });
+
+  it("a picture with no view still gets the close-up first, as before", async () => {
+    const { splitPicture, OTHER_VIEWS } = await import("./shotList");
+    const parts = splitPicture(pic(3, LINE, BOARD, { wordCut: true }), 2);
+    expect(parts.map(p => p.showSubject)).toEqual([BOARD, `${BOARD}${OTHER_VIEWS[0]}`]);
+  });
+});
