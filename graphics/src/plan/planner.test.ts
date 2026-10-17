@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { CueSpec, ResolvedCue, Word } from "../cueResolve";
+import { resolveCues, type CueSpec, type ResolvedCue, type Word } from "../cueResolve";
+import { TEMPLATES } from "../registry";
+import { FPS } from "../theme";
 import { listsWhereGraphicsGo, malformedPhrase, missingListCues, normalizePhrases, planGraphics, uncoveredMoments, type PlanMessage } from "./planner";
 
 const W = (s: string, start: number, step = 0.3): Word[] => s.split(" ").map((text, i) => ({ text, start: start + i * step, end: start + i * step + 0.26 }));
@@ -130,5 +132,103 @@ describe("a timed line written as plain text is repaired, never crashes the grap
     expect(malformedPhrase(spec)).toBeUndefined();
     const bad = { id: "b", template: "Statement", start: "x", props: { headline: { words: true } } } as unknown as CueSpec;
     expect(malformedPhrase(bad)).toBe("headline");
+  });
+});
+
+describe("no graphic is up too short to read (Dale's job 397: 1.27 s and 1.40 s, QA said pass)", () => {
+  const opts = {
+    fps: FPS,
+    structural: new Set(TEMPLATES.filter(t => t.structural).map(t => t.id)),
+    cards: new Set(TEMPLATES.filter(t => t.kind === "card").map(t => t.id)),
+    fullFrame: new Set(TEMPLATES.filter(t => t.kind === "card" || t.underlay === "window").map(t => t.id)),
+  };
+  /** The model answers `first` once, then adds nothing (repair, fill). */
+  const asking = (first: CueSpec[]) => {
+    const asked: string[] = [];
+    const ask = async (_system: string, messages: PlanMessage[]) => {
+      asked.push(messages[messages.length - 1].content);
+      return asked.length === 1 ? JSON.stringify({ cues: first }) : '{"cues": []}';
+    };
+    return { ask, asked };
+  };
+
+  // "…before you pick a place to sell them. | Three piles. | Smalls, about $10…": the two-word line
+  // has a shot of its own, 48.21-49.46.
+  const piles = T("them.@47.52-47.68 Three@48.38-48.64 piles.@48.70-49.12 Smalls,@49.68-50.14 about@50.50-50.74 $10@50.94-51.54 to@51.62-51.70 $40.@51.78-52.48");
+  const threePiles: CueSpec = { id: "three-piles", template: "BigNumberOverlay", start: "Three piles.", startPad: -0.15, end: "Three piles.", endPad: 0.3, props: { at: "@Three piles.", unit: "piles", value: 3, kicker: "Sort into", countSec: 0.6 } };
+  const shots = { scenes: [scene(11, 41.1439, 48.2104, { hostPresent: true, split: true }), scene(12, 48.2104, 49.4569, { scriptText: "Three piles." }), scene(13, 49.4569, 53.0381, { scriptText: "Smalls, about $10 to $40." })] };
+  const cuts = [41.1439, 48.2104, 49.4569, 53.0381];
+
+  it("Dale's '3 piles': capped at 'Smalls,' then snapped back to the cut, 1.27 s — refused and sent for repair", async () => {
+    // the resolver alone still makes it 1.27 s: the floor is held by the planner, not there
+    const [alone] = resolveCues([structuredClone(threePiles)], piles, { ...opts, cuts });
+    expect([alone.startFrame, alone.endFrame]).toEqual([1446, 1484]);
+    const { ask, asked } = asking([threePiles]);
+    const out = await planGraphics({ words: piles, cuts, film: shots, ask, ensureIcon: async () => true });
+    expect(out.cues.map(c => c.id)).not.toContain("three-piles");
+    expect(out.rounds[0].problems).toContainEqual({ cue: "three-piles", problem: expect.stringMatching(/^on screen 1\.27 s — too short to read \(at least 1\.5 s\)/) });
+    expect(asked[1]).toContain("three-piles: on screen 1.27 s — too short to read");
+  });
+
+  it("the same graphic on a shot that runs on through 'Smalls' is up 1.6 s and kept", async () => {
+    const oneShot = { scenes: [shots.scenes[0], scene(12, 48.2104, 53.0381, { scriptText: "Three piles. Smalls, about $10 to $40." })] };
+    const { ask } = asking([threePiles]);
+    const out = await planGraphics({ words: piles, cuts: [41.1439, 48.2104, 53.0381], film: oneShot, ask, ensureIcon: async () => true });
+    const r = out.resolved.find(c => c.id === "three-piles")!;
+    expect(r.endFrame - r.startFrame).toBeGreaterThanOrEqual(45);
+    expect(out.rounds[0].problems).toEqual([]);
+  });
+
+  // Dale's five counted places to sell (job 397), as heard, with his own picture cuts.
+  const counted = [
+    ...T("Number@41.30-41.58 one.@41.76-41.90 Sort@42.78-43.04 your@43.08-43.26 finished@43.32-43.66 pieces@43.74-44.16 by@44.24-44.40 size@44.52-44.90 and@45.00-45.10 price@45.24-45.64"),
+    ...T("Number@74.28-74.52 two,@74.58-74.83 use@75.50-75.70 Etsy@75.82-76.18 for@76.22-76.34 the@76.38-76.48 thing@76.52-76.70 it@76.76-76.82 does@76.88-77.10 best,@77.26-77.62"),
+    ...T(
+      "Number@135.72-135.96 three,@136.00-136.29 the@136.66-136.74 one@136.80-136.90 I@136.94-137.02 promised@137.06-137.46 you.@137.48-137.64 Etsy's@138.34-138.72 regular@138.84-139.26 fees@139.32-139.66 take@139.74-139.94 roughly@140.00-140.32 $10@140.34-140.62 off@140.64-140.72 a@140.74-140.76 $100@140.78-140.94 board.@141.00-141.18"
+    ),
+    ...T("Number@168.58-168.82 four,@168.90-169.16 take@169.90-170.06 your@170.10-170.26 smalls@170.30-170.68 to@170.74-170.84 craft@170.92-171.28 fairs@171.34-171.70"),
+    ...T("Number@192.06-192.30 five,@192.38-192.74 sell@193.36-193.56 your@193.60-193.76 furniture@193.82-194.30 on@194.48-194.56 Facebook@194.66-195.16 Marketplace.@195.20-195.86"),
+  ];
+  const places = {
+    scenes: [
+      scene(10, 34.6801, 41.1439),
+      scene(11, 41.1439, 48.2104, { hostPresent: true, split: true }),
+      scene(21, 64.4178, 75.2581),
+      scene(22, 75.2581, 80),
+      scene(29, 135.567, 143.367),
+      scene(30, 143.367, 153.654),
+      scene(32, 158.189, 168.437),
+      scene(33, 168.437, 175),
+      scene(36, 188.733, 196.437, { hostPresent: true, split: true }),
+    ],
+  };
+  const placeCuts = places.scenes.map(s => s.narrationStartSec);
+  const chapter = (n: number, title: string, start: string, durationSec: number): CueSpec => ({ id: `chapter-${n}`, template: "ChapterLabel", start, startPad: -0.15, durationSec, props: { title, kicker: `Where to sell · ${n} of 5`, number: n } });
+  const series = [
+    chapter(1, "Sort by size", "Number one. Sort your finished", 4.5),
+    chapter(2, "Etsy for reach", "Number two. Use Etsy for", 3.5),
+    chapter(3, "The ad fee", "Number three, the one I promised", 1.4),
+    chapter(4, "Craft fairs", "Number four. Take your smalls", 3.5),
+    chapter(5, "Marketplace", "Number five. Sell your furniture", 4.5),
+  ];
+  const fee: CueSpec = { id: "regular-fee-10", template: "BigNumber", start: "Etsy's regular fees take roughly $10", startPad: -0.15, end: "off a $100 board.", endPad: 0.3, props: { at: "@$10", line: { text: "Etsy's regular fees take roughly", words: true }, unit: "in fees", value: 10, kicker: "On a $100 board", prefix: "$", countSec: 0.6 } };
+
+  it("a chapter planned at 1.4 s is raised to 1.5 s, never refused, and the fee card after it still fits", async () => {
+    const { ask } = asking([...series, fee]);
+    const out = await planGraphics({ words: counted, cuts: placeCuts, film: places, ask, ensureIcon: async () => true });
+    // only the short one moves: 4.5 and 3.5 (and job 395's 3.2) are already long enough to read
+    expect(out.cues.filter(c => c.template === "ChapterLabel").map(c => c.durationSec)).toEqual([4.5, 3.5, 1.5, 3.5, 4.5]);
+    const three = out.resolved.find(c => c.id === "chapter-3")!;
+    expect(three.endFrame - three.startFrame).toBe(45);
+    const card = out.resolved.find(c => c.id === "regular-fee-10")!;
+    expect(card.start - three.end).toBeGreaterThanOrEqual(1);
+    expect(out.rounds[0].problems).toEqual([]);
+  });
+
+  it("an APPROVED chapter keeps the length it was approved with (QA reports it, the planner does not change it)", async () => {
+    const { ask } = asking([]);
+    const out = await planGraphics({ words: counted, cuts: placeCuts, film: places, kept: series, ask, ensureIcon: async () => true });
+    expect(out.cues.find(c => c.id === "chapter-3")!.durationSec).toBe(1.4);
+    expect(out.lostKept).toEqual([]);
   });
 });

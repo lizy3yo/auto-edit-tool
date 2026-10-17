@@ -348,12 +348,26 @@ export const MIN_AFTER_TRIM_SEC = 1.5;
 
 /**
  * A graphic leaves this long after the last of its OWN words is spoken — broadcast caption
- * practice: text clears within about a second of the speech moving on — and is never on screen
- * for less than MIN_ON_SCREEN_SEC, so a short line can still be read. Job 384 at 0:10-0:13:
+ * practice: text clears within about a second of the speech moving on. Job 384 at 0:10-0:13:
  * "It isn't broken. It isn't dead." stayed 4.7 s into "It just happens to be slow…".
+ *
+ * MIN_ON_SCREEN_SEC is the shortest a graphic may be up and still be read. Here it is only where
+ * the reading floor (`readingSec`) STARTS: the cap at the next sentence and a snap back onto a
+ * picture cut can still end a graphic sooner — Dale's "3 piles" on the two-word shot "Three piles."
+ * was capped at "Smalls," then snapped back to the cut, 1.27 s on screen (job 397, 0:48) — and a
+ * title keeps the length it was planned with. So the floor is held where a graphic can be turned
+ * away, not here: the planner sends a new graphic that resolves shorter back for repair and raises
+ * a title's `durationSec` to it, and QA reports any shipped graphic under it.
  */
 export const LINGER_SEC = 0.8;
 export const MIN_ON_SCREEN_SEC = 1.5;
+
+/** Up too short to read: under MIN_ON_SCREEN_SEC, with one frame allowed for edges rounded onto the
+ * frame grid. The ONE test the planner (a new graphic is refused) and QA (a shipped one is reported)
+ * both ask, so the two cannot disagree. */
+export function tooShortToRead(c: { startFrame: number; endFrame: number }, fps: number): boolean {
+  return c.endFrame - c.startFrame < MIN_ON_SCREEN_SEC * fps - 1 - 1e-6;
+}
 
 /**
  * HAND-OFF: two graphics never butt up against each other — the next one would read as the tail of

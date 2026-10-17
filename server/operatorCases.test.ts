@@ -73,6 +73,7 @@ import {
   withoutFaceAsks,
   WORN_ON_BODY,
 } from "./hostLook";
+import { tooShortToRead } from "../graphics/src/cueResolve";
 
 const pic = (index: number, scriptText: string, showSubject: string, over: Partial<StoryboardScene> = {}) =>
   ({ index, scriptText, showSubject, visualPrompt: showSubject, ...over }) as StoryboardScene;
@@ -1030,5 +1031,13 @@ describe("only a make-up step shows the face (Dale's job 372 test, 2026-10-15)",
     markHostBroll(scenes, { hostLook: "a man with a grey beard" }, "https://x/host.png");
     expect(scenes[0].humanPresent).toBe(true);
     expect(scenes[0].hostFaceShown).toBeUndefined();
+  });
+});
+
+describe("a graphic is up long enough to read (Dale's job 397, found by the audit)", () => {
+  it("'3 piles' at 1.27 s and the 1.4 s chapter label are too short; 1.5 s is not", () => {
+    expect(tooShortToRead({ startFrame: 1446, endFrame: 1484 }, 30)).toBe(true);
+    expect(tooShortToRead({ startFrame: 4067, endFrame: 4109 }, 30)).toBe(true);
+    expect(tooShortToRead({ startFrame: 4067, endFrame: 4112 }, 30)).toBe(false);
   });
 });

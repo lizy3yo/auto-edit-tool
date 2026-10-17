@@ -2,7 +2,7 @@
 // lab's composite. Pure: it reads frame-to-frame change measured off the RENDERED files (the
 // faults it catches — a one-frame flash, a graphic still up after its words — only exist in the
 // output), the resolved cues and the readability readings.
-import { CARD_HOLD_SILENT_MAX_SEC, CUT_SNAP_SEC, LINGER_SEC, MAX_LINGER_SEC, MIN_SHOT_SEC, PAUSE_REACH_SEC, type ResolvedCue } from "../cueResolve";
+import { CARD_HOLD_SILENT_MAX_SEC, CUT_SNAP_SEC, LINGER_SEC, MAX_LINGER_SEC, MIN_ON_SCREEN_SEC, MIN_SHOT_SEC, PAUSE_REACH_SEC, tooShortToRead, type ResolvedCue } from "../cueResolve";
 import { templateById } from "../registry";
 import { appearFrame } from "../timing";
 import type { RuleProblem } from "./rules";
@@ -110,6 +110,10 @@ export function judgeFilm(q: QaInput): QaResult {
   // A graphic carrying a tail of less than a second onto the next shot (one that ENDS on a cut
   // covers its last shot whole, which is not a spill).
   const spills = cues.filter(c => !c.conformed.end && filmCuts.some(k => k > c.startFrame + 3 && k < c.endFrame && c.endFrame - k < fps));
+  // Up too short to read (under MIN_ON_SCREEN_SEC) — titles and approved graphics too, which the
+  // planner raises or keeps rather than refuses: Dale's "3 piles" stood 1.27 s and his "The ad fee"
+  // chapter 1.40 s, and QA said pass (job 397).
+  const tooShort = cues.filter(c => tooShortToRead(c, fps));
   const unreadable = q.readability.filter(r => !r.pass);
 
   const failures: string[] = [];
@@ -120,6 +124,7 @@ export function judgeFilm(q: QaInput): QaResult {
   if (lingering.length) failures.push(`still up after its words: ${lingering.map(c => c.id).join(", ")}`);
   if (blinks.length) failures.push(`a blink of footage beside ${blinks.map(c => c.id).join(", ")}`);
   if (spills.length) failures.push(`a tail onto the next shot: ${spills.map(c => c.id).join(", ")}`);
+  if (tooShort.length) failures.push(`up too short to read (under ${MIN_ON_SCREEN_SEC} s): ${tooShort.map(c => `${c.id} (${at(c.endFrame - c.startFrame)})`).join(", ")}`);
   if (q.rules.length) failures.push(`placement: ${q.rules.map(p => `${p.cue} ${p.problem}`).join("; ")}`);
   if (unreadable.length) failures.push(`text not readable: ${unreadable.map(r => `${r.id} (${r.summary})`).join(", ")}`);
 
@@ -129,6 +134,7 @@ export function judgeFilm(q: QaInput): QaResult {
     `Flicker before a cut: ${pumps.length}`,
     `Words on screen vs. heard: worst ${worstSync} ms over ${rows.length - onCut.length} elements${onCut.length ? `; ${onCut.length} moved onto a shot change` : ""}`,
     `Still up after their words: ${lingering.length}`,
+    `Shorter than ${MIN_ON_SCREEN_SEC} s: ${tooShort.length}`,
     `Tails onto the next shot: ${spills.length}`,
     `Blinks of footage beside a card: ${blinks.length}`,
     `Placement rules: ${q.rules.length ? q.rules.length + " problem(s)" : "pass"}`,

@@ -20,7 +20,7 @@
 //
 // Pure apart from the two things it is handed: `ask` (the model call — metered by the app) and
 // `ensureIcon` (makes an emoji's image available).
-import { CueError, findPhrase, findVerbatim, indexWords, parseSpokenNumber, resolveCues, tokens, type CueSpec, type ResolvedCue, type Word } from "../cueResolve";
+import { CueError, MIN_ON_SCREEN_SEC, findPhrase, findVerbatim, indexWords, parseSpokenNumber, resolveCues, tokens, tooShortToRead, type CueSpec, type ResolvedCue, type Word } from "../cueResolve";
 import { TEMPLATES, templateById } from "../registry";
 import { FPS } from "../theme";
 import { MIN_GAP_SEC, checkRules, nameTagRange, type FilmLayout, type LayoutScene } from "./rules";
@@ -502,6 +502,10 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
         continue;
       }
       tidyNumbers(spec.props);
+      // A TITLE keeps the length it was planned with — but never under MIN_ON_SCREEN_SEC: Dale's
+      // "Where to sell · 3 of 5" was planned at 1.4 s (job 397, 2:15). Raised, never refused: a
+      // refused chapter takes its whole series down with it. An approved one keeps its length.
+      if (structural.has(spec.template) && typeof spec.durationSec === "number" && spec.durationSec < MIN_ON_SCREEN_SEC) spec.durationSec = MIN_ON_SCREEN_SEC;
       const missing: string[] = [];
       await fixIcons(spec.props, missing);
       if (missing.length) {
@@ -528,6 +532,16 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
       if (wait > MAX_WAIT_SEC) {
         undo();
         bad(`waits ${wait.toFixed(1)} s between its own words (most ${MAX_WAIT_SEC} s) — start it nearer its point`);
+        continue;
+      }
+      // Up long enough to READ. The resolver's reading floor can still be cut short — by the cap at
+      // the next sentence, then a snap back onto a picture cut: Dale's "3 piles" on the two-word shot
+      // "Three piles." came out 1.27 s (job 397, 0:48) and shipped. Refused here, where the repair
+      // round can join it to more words; forcing the floor in the resolver would carry it a second
+      // onto the next shot instead. (A title was raised above.)
+      if (!structural.has(spec.template) && tooShortToRead(mine, FPS)) {
+        undo();
+        bad(`on screen ${((mine.endFrame - mine.startFrame) / FPS).toFixed(2)} s — too short to read (at least ${MIN_ON_SCREEN_SEC} s); join it to the next sentence or drop it`);
         continue;
       }
       const unsaid = shownNumbers(spec).filter(n => !saidNear(n, mine.start, mine.end));

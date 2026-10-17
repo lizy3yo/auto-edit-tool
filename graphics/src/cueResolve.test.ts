@@ -202,7 +202,9 @@ describe("a graphic leaves when its own words are done", () => {
     expect((c.props.left as Record<string, unknown>).say).toBeUndefined();
   });
 
-  it("is never shorter than MIN_ON_SCREEN_SEC, and a title keeps its planned length", () => {
+  // (only where nothing ends it sooner: the next-sentence cap and a snap back onto a cut can — the
+  // planner and QA hold the floor, planner.test.ts / qa.test.ts)
+  it("holds a short line for MIN_ON_SCREEN_SEC, and a title keeps its planned length", () => {
     const [short] = resolveCues([{ id: "h", template: "TitleOverFootage", start: "take one alarm", end: "read the label", props: { phrase: { text: "take one alarm down,", words: true } } }], words);
     expect(short.end - short.start).toBeGreaterThanOrEqual(MIN_ON_SCREEN_SEC - 0.04);
     const [title] = resolveCues(
