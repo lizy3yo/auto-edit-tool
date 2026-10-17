@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { resolveCues, type CueSpec, type ResolvedCue, type Word } from "../cueResolve";
 import { TEMPLATES } from "../registry";
 import { FPS } from "../theme";
-import { listsWhereGraphicsGo, malformedPhrase, missingListCues, normalizePhrases, planGraphics, uncoveredMoments, type PlanMessage } from "./planner";
+import { listsWhereGraphicsGo, malformedPhrase, missingListCues, normalizePhrases, planGraphics, uncoveredMoments, userPrompt, wordsSaidOver, type PlanMessage } from "./planner";
 
 const W = (s: string, start: number, step = 0.3): Word[] => s.split(" ").map((text, i) => ({ text, start: start + i * step, end: start + i * step + 0.26 }));
 const scene = (index: number, a: number, b: number, extra: Record<string, unknown> = {}) => ({ index, narrationStartSec: a, narrationEndSec: b, scriptText: "", hostPresent: false, cta: false, split: false, hostOpener: false, ...extra });
@@ -230,5 +230,99 @@ describe("no graphic is up too short to read (Dale's job 397: 1.27 s and 1.40 s,
     const out = await planGraphics({ words: counted, cuts: placeCuts, film: places, kept: series, ask, ensureIcon: async () => true });
     expect(out.cues.find(c => c.id === "chapter-3")!.durationSec).toBe(1.4);
     expect(out.lostKept).toEqual([]);
+  });
+});
+
+describe("the planner reads what the FILM says over each picture, on the resolver's clock (Dale's job 397, found by the audit)", () => {
+  // Job 397 scenes 34-37 as laid out, and the film's own words over them. The storyboard put
+  // "…$500 to $1,500. Number five." under b-roll scene 35; the film says it over host scene 36.
+  const heard = T(
+    "Coasters@173.56-174.04 and@174.10-174.20 ornaments@174.30-174.72 are@174.84-174.96 impulse@175.12-175.54 buys.@175.60-175.97 People@176.66-176.93 decide@176.97-177.39 on@177.45-177.53 them@177.57-177.73 because@177.79-178.13 they're@178.17-178.41 already@178.45-178.77 holding@178.85-179.17 one.@179.29-179.41 " +
+      "Put@179.99-180.15 the@180.17-180.57 $10@180.61-181.01 to@181.07-181.57 $40@181.69-181.95 items@182.07-182.35 along@182.47-182.71 the@182.75-182.83 front@182.97-183.21 edge@183.29-183.43 of@183.47-183.53 the@183.57-183.65 table,@183.71-184.07 where@184.23-184.41 hands@184.47-184.83 reach@184.93-185.15 first.@185.23-185.59 " +
+      "One@186.35-186.45 Good@186.49-186.69 Saturday@186.73-187.15 market@187.21-187.55 can@187.61-187.75 gross@187.79-188.03 $500@188.35-189.21 to@189.29-189.74 $1,500.@190.25-191.42 Number@192.06-192.30 five,@192.38-192.74 " +
+      "sell@193.36-193.56 your@193.60-193.76 furniture@193.82-194.30 on@194.48-194.56 Facebook@194.66-195.16 Marketplace.@195.20-195.86 " +
+      "Shipping@196.62-196.94 a@196.98-197.02 bookcase@197.10-197.66 eats@197.80-198.00 the@198.06-198.14 profit,@198.20-198.70 and@199.06-199.18 hauling@199.26-199.58 one@199.66-199.76 to@199.80-199.92 a@199.98-200.00 fair@200.12-200.46 eats@200.60-200.78 the@200.84-200.94 booth.@200.98-201.28"
+  );
+  const film = {
+    scenes: [
+      scene(34, 173.429, 179.89, { hostPresent: true, split: true, scriptText: "Coasters and ornaments are impulse buys. People decide on them because they're already holding one." }),
+      scene(35, 179.89, 188.733, { scriptText: "Put the $10 to $40 items along the front edge of the table where hands reach first. One good Saturday market can gross $500 to $1,500. Number five." }),
+      scene(36, 188.733, 196.437, { hostPresent: true, split: true, scriptText: "Sell your furniture on Facebook Marketplace." }),
+      scene(37, 196.437, 201.838, { scriptText: "Shipping a bookcase eats the profit, and hauling one to a fair eats the booth." }),
+    ],
+  };
+
+  it("scene 35's line stops where the film cuts to the host; the rest of its sentence is read under host scene 36", () => {
+    const said = wordsSaidOver(film, heard);
+    expect(said[1]).toBe("Put the $10 to $40 items along the front edge of the table, where hands reach first. One Good Saturday market can gross");
+    // "$500" (188.35-189.21) is said mostly after the cut at 188.73: it goes with the host
+    expect(said[2]).toBe("$500 to $1,500. Number five, sell your furniture on Facebook Marketplace.");
+  });
+
+  it("a scene whose words the film says under it keeps its script text, as written", () => {
+    const said = wordsSaidOver(film, heard);
+    expect(said[0]).toBe(film.scenes[0].scriptText);
+    expect(said[3]).toBe(film.scenes[3].scriptText);
+  });
+
+  it("the scene list and the b-roll stretches read the same words", () => {
+    const msg = userPrompt(film, [], heard);
+    expect(msg).toContain("#35 2:59.9-3:08.7 B-ROLL: Put the $10 to $40 items along the front edge of the table, where hands reach first. One Good Saturday market can gross\n");
+    expect(msg).toContain("#36 3:08.7-3:16.4 SPLIT (host left, picture right): $500 to $1,500. Number five, sell your furniture on Facebook Marketplace.");
+    const stretches = msg.split("B-ROLL STRETCHES")[1];
+    expect(stretches).toContain("2:59.9-3:08.7 (8.8 s): Put the $10 to $40 items");
+    expect(stretches).not.toContain("$1,500");
+  });
+
+  it("with no transcript (the lab, a test) every scene reads its script text, as before", () => {
+    expect(wordsSaidOver(film, [])).toEqual(film.scenes.map(s => s.scriptText));
+    expect(userPrompt(film, [])).toContain("#35 2:59.9-3:08.7 B-ROLL: Put the $10 to $40 items along the front edge of the table where hands reach first. One good Saturday market can gross $500 to $1,500. Number five.");
+  });
+
+  it("the rules still refuse a number label over the host there — the planner now reads those words under the host", async () => {
+    const saturday: CueSpec = { id: "saturday-gross", template: "NumberLabel", start: "One good Saturday market can", startPad: -0.15, end: "$500 to $1,500.", endPad: 0.3, props: { kicker: "Price", a: { label: "From", value: "$500", at: "@$500" }, b: { label: "To", value: "$1,500", at: "@$1,500" } } };
+    const asked: string[] = [];
+    const ask = async (_system: string, messages: PlanMessage[]) => {
+      asked.push(messages[messages.length - 1].content);
+      return asked.length === 1 ? JSON.stringify({ cues: [saturday] }) : '{"cues": []}';
+    };
+    const out = await planGraphics({ words: heard, cuts: film.scenes.map(s => s.narrationStartSec), film, ask, ensureIcon: async () => true });
+    expect(asked[0]).toContain("SPLIT (host left, picture right): $500 to $1,500. Number five,");
+    expect(out.cues.map(c => c.id)).not.toContain("saturday-gross");
+    expect(out.rounds[0].problems).toContainEqual({ cue: "saturday-gross", problem: "points at the picture over host scene 36 — only over b-roll" });
+  });
+});
+
+describe("what is said over a picture comes from the film's sound only where it differs from the script", () => {
+  it("Hank's job 398: 'with' is said after the cut, so it is read under the saw, not under the host", () => {
+    const heard = T("I'm@25.07-25.21 Hank@25.25-25.47 Hardwood.@25.51-25.95 And@26.94-27.04 this@27.08-27.22 one's@27.36-27.50 for@27.56-27.68 anybody@27.74-28.18 standing@28.24-28.68 in@28.72-28.80 a@28.82-28.84 garage@28.90-29.38 with@29.42-29.58 a@29.62-29.64 saw,@29.74-30.08 a@30.38-30.40 drill,@30.46-30.84");
+    const film = {
+      scenes: [
+        scene(4, 24.8807, 29.45955, { hostPresent: true, scriptText: "I'm Hank Hardwood, and this one's for anybody standing in a garage with" }),
+        scene(5, 29.45955, 30.2002, { scriptText: "a saw," }),
+        scene(6, 30.2002, 30.849, { scriptText: "a drill," }),
+      ],
+    };
+    expect(wordsSaidOver(film, heard)).toEqual(["I'm Hank Hardwood. And this one's for anybody standing in a garage", "with a saw,", "a drill,"]);
+  });
+
+  it("Hank's job 398: a line the film says word for word keeps the script's spelling ('out of square' heard 'out a square', '2 hours' heard 'two hours')", () => {
+    const heard = T(
+      "Every@62.17-62.41 place@62.47-62.79 two@62.87-63.11 strips@63.15-63.49 cross@63.59-63.99 needs@64.09-64.31 a@64.37-64.39 notch@64.47-64.75 cut@64.81-65.07 halfway@65.69-66.11 through@66.15-66.47 each@66.69-66.87 one.@67.09-67.23 And@68.05-68.15 every@68.21-68.41 notch@68.47-68.73 has@68.77-68.97 to@69.01-69.09 be@69.13-69.25 dead@69.29-69.53 on@69.71-69.83 or@69.91-70.03 the@70.25-70.37 whole@70.41-70.63 grid@70.69-70.99 twists@71.05-71.39 out@71.47-71.59 a@71.63-71.67 square.@71.73-72.09 I@72.93-73.01 figured@73.07-73.41 two@73.47-73.65 hours.@73.71-74.11 It@74.91-74.99 took@75.03-75.25 six.@75.33-75.69"
+    );
+    const text = "Every place two strips cross needs a notch cut halfway through each one, and every notch has to be dead on or the whole grid twists out of square. I figured 2 hours. It took 6.";
+    expect(wordsSaidOver({ scenes: [scene(14, 61.9612, 76.5018, { scriptText: text })] }, heard)).toEqual([text]);
+  });
+
+  it("Dale's job 397 scene 1: words the film's transcript does not hear are not offered (no cue could be placed on them)", () => {
+    const heard = T("and@1.32-1.44 maple@1.52-1.86 cutting@1.94-2.26 board@2.30-2.52 a@2.54-2.58 few@2.62-2.76 weeks@2.80-3.02 back.@3.08-3.36 It's@3.90-4.06 still@4.14-4.40");
+    const film = { scenes: [scene(1, 0, 3.6785, { hostPresent: true, hostOpener: true, scriptText: "You finished a walnut and maple cutting board a few weeks back." }), scene(2, 3.6785, 6.87225, { scriptText: "It's still leaning against the wall in your garage." })] };
+    expect(wordsSaidOver(film, heard)[0]).toBe("and maple cutting board a few weeks back.");
+  });
+
+  it("a span with no words heard keeps its script text", () => {
+    const heard = T("Number@168.58-168.82 four,@168.90-169.16");
+    const film = { scenes: [scene(33, 168.437, 173.429, { scriptText: "Number four." }), scene(34, 173.429, 179.89, { hostPresent: true, scriptText: "Coasters and ornaments are impulse buys." })] };
+    expect(wordsSaidOver(film, heard)).toEqual(["Number four.", "Coasters and ornaments are impulse buys."]);
   });
 });

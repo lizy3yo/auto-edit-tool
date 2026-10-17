@@ -136,26 +136,58 @@ ${CATALOGUE}`;
 const mmss = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0")}`;
 const kindOf = (s: LayoutScene) => (s.cta ? "CTA" : s.split ? "SPLIT (host left, picture right)" : s.hostPresent ? "HOST" : "B-ROLL");
 
+/**
+ * What is said over each scene (one line per `film.scenes` entry), as the FILM'S OWN SOUND has it:
+ * the transcript's words whose middle falls inside the scene's span — the clock the resolver times a
+ * cue on and the rules hold it to. The scene's script text used to be read instead, and the two can
+ * disagree: Dale's job 397 put "…can gross $500 to $1,500. Number five." under b-roll scene 35 while
+ * the film says "$500 to $1,500. Number five," over host scene 36 (from 188.73 s), so the planner
+ * asked for a number label over b-roll that the rules then refused as over the host.
+ * Where the words heard in a span ARE the scene's script, word for word as the resolver matches
+ * them (a number read as digits, a compound split, one misheard word), the script's own text is
+ * kept: the same words on the same clock, spelled as written — the planner copies a line onto the
+ * screen, and Hank's "out of square" heard as "out a square" (job 398) must not be shown that way.
+ * A span with no words heard keeps its script text. Pure.
+ */
+export function wordsSaidOver(film: FilmLayout, words: Word[]): string[] {
+  const heard: Word[][] = film.scenes.map(() => []);
+  for (const w of words) {
+    const mid = (w.start + w.end) / 2;
+    const k = film.scenes.findIndex(s => mid >= s.narrationStartSec && mid < s.narrationEndSec);
+    if (k >= 0) heard[k].push(w);
+  }
+  return film.scenes.map((s, k) => {
+    const script = (s.scriptText ?? "").trim();
+    const index = indexWords(heard[k]);
+    if (!index.length) return script;
+    const hits = script ? findVerbatim(index, script, 0) : null;
+    if (hits && hits[0] === 0 && index[hits[hits.length - 1]].word === index[index.length - 1].word) return script;
+    return heard[k].map(w => w.text.trim()).join(" ");
+  });
+}
+
 /** The message the model reads: the film scene by scene, its b-roll stretches, and the graphics
- * already placed and approved. */
-export function userPrompt(film: FilmLayout, kept: ResolvedCue[]): string {
+ * already placed and approved. What is said over each scene is `wordsSaidOver` — the words the
+ * film's sound has under it (its script text when there is no transcript, as in a test). */
+export function userPrompt(film: FilmLayout, kept: ResolvedCue[], words: Word[] = []): string {
   const nameTag = nameTagRange(film);
+  const said = wordsSaidOver(film, words);
   const layout = film.scenes
-    .map(s => {
+    .map((s, k) => {
       const tagUp = nameTag && s.narrationStartSec < nameTag[1] && s.narrationEndSec > nameTag[0] ? " [NAME TAG UP]" : "";
-      return `#${s.index} ${mmss(s.narrationStartSec)}-${mmss(s.narrationEndSec)} ${kindOf(s)}${tagUp}: ${(s.scriptText ?? "").trim()}`;
+      return `#${s.index} ${mmss(s.narrationStartSec)}-${mmss(s.narrationEndSec)} ${kindOf(s)}${tagUp}: ${said[k]}`;
     })
     .join("\n");
   // Stretches of consecutive b-roll (no host, no CTA): where cards and picture graphics go.
   const stretches: { from: number; to: number; text: string }[] = [];
-  for (const s of film.scenes) {
-    if (s.hostPresent || s.cta) continue;
+  film.scenes.forEach((s, k) => {
+    if (s.hostPresent || s.cta) return;
     const last = stretches[stretches.length - 1];
     if (last && Math.abs(last.to - s.narrationStartSec) < 0.1) {
       last.to = s.narrationEndSec;
-      last.text += " " + (s.scriptText ?? "").trim();
-    } else stretches.push({ from: s.narrationStartSec, to: s.narrationEndSec, text: (s.scriptText ?? "").trim() });
-  }
+      last.text += " " + said[k];
+    } else stretches.push({ from: s.narrationStartSec, to: s.narrationEndSec, text: said[k] });
+  });
   const stretchList = stretches
     .filter(b => b.to - b.from >= 2.5)
     .map(b => `${mmss(b.from)}-${mmss(b.to)} (${(b.to - b.from).toFixed(1)} s): ${b.text}`)
@@ -607,7 +639,7 @@ b-roll, HostListWindow over the host; steps may be StepCards or StepLabels), eve
 said ("text" ≤5 words, "at": "@its first spoken words", "say": the item as said):
 ${offered.map((l, i) => `${i + 1}. ${l.kind === "steps" ? "[steps] " : ""}${l.items.map(x => `"${x}"`).join(", ")}`).join("\n")}`
     : "";
-  const user = userPrompt(film, kept0.length ? resolveCues(kept0, words, opts) : []) + listNote;
+  const user = userPrompt(film, kept0.length ? resolveCues(kept0, words, opts) : [], words) + listNote;
   const first = await ask(system, [{ role: "user", content: user }]);
   let specs = parseSheet(first).filter(c => !keptIds.has(c.id));
   let verdict = await validate(structuredClone(specs), false);
