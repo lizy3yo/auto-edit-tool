@@ -19,6 +19,7 @@
  */
 import sharp from "sharp";
 import type { StoryboardScene } from "@shared/types";
+import { namesDevice, sellingScreen } from "./shotList";
 
 /**
  * Where a screen sits, one per screen picture in turn. Every one keeps the rule that a device is
@@ -45,45 +46,82 @@ export const HELD_SCREEN_SETUPS = [
   "a phone held low in one hand at a kitchen counter, seen from the side at counter height",
 ] as const;
 
-/** A picture about an app or online selling (as `APP_SCREEN` in longformVideo — kept in step). */
+/**
+ * The settings that put things for sale in the frame — the real item beside the phone, a market
+ * stall and its items. Only a screen about selling sits in one (`screenSells`): an airline app or a
+ * "Subscribe" tap beside an item for sale is a picture of something the line never said.
+ */
+const SELLING_SETUPS: ReadonlySet<string> = new Set<string>([SCREEN_SETUPS[0], HELD_SCREEN_SETUPS[2]]);
+
+/** The words of a screen picture (an app, a website, a listing), before the device gate. */
 export const SCREEN_PICTURE =
   /\b(?:apps?|buy-and-sell|online (?:craft )?(?:shop|store)|website|phone screen|listings?)\b/i;
 
 /**
+ * A screen picture: its screen words AND a device or screen named (`namesDevice`) — "listing to one
+ * side" (job 151) or "ready for an online listing" (job 372's split panel) has no screen in it. The
+ * ONE test of the prompt's screen clause (`buildStillPrompt`) and of the screen settings here, so
+ * the two cannot drift. Pure.
+ */
+export const screenPicture = (text: string): boolean => SCREEN_PICTURE.test(text) && namesDevice(text);
+
+/**
+ * Whether a screen picture is about selling, read off its OWN words (`sellingScreen`): its subject
+ * and its description (`visual` when the prompt draws a softened one). Pure.
+ */
+export function screenSells(scene: Pick<StoryboardScene, "showSubject" | "visualPrompt">, visual?: string): boolean {
+  return sellingScreen(`${scene.showSubject ?? ""} ${visual ?? scene.visualPrompt ?? ""}`);
+}
+
+/**
  * Give each screen picture of the film its own setting, in film order (`scene.screenSetup`). Host
- * takes, split screens, the book cover, operator assets and the QR card are left alone. Returns how
- * many screens were set. Pure apart from mutating `scenes`.
+ * takes, split screens, the book cover, operator assets and the QR card are left alone; a screen not
+ * about selling skips the selling settings. Returns how many screens were set. Pure apart from
+ * mutating `scenes`.
  */
 export function assignScreenSetups(scenes: StoryboardScene[]): number {
   let free = 0;
   let held = 0;
+  let screens = 0;
   for (const s of scenes) {
     const eligible = !s.hostPresent && !s.splitVisual && !s.coverHero && !s.assetImageUrl && !s.qrHero && !s.showsBook;
-    const screen = eligible && SCREEN_PICTURE.test(`${s.showSubject ?? ""} ${s.visualPrompt ?? ""}`);
+    const screen = eligible && screenPicture(`${s.showSubject ?? ""} ${s.visualPrompt ?? ""}`);
     if (!screen) {
       s.screenSetup = undefined;
       continue;
     }
-    s.screenSetup = s.humanPresent
-      ? HELD_SCREEN_SETUPS[held++ % HELD_SCREEN_SETUPS.length]
-      : SCREEN_SETUPS[free++ % SCREEN_SETUPS.length];
+    const sells = screenSells(s);
+    let setup: string;
+    do {
+      setup = s.humanPresent
+        ? HELD_SCREEN_SETUPS[held++ % HELD_SCREEN_SETUPS.length]
+        : SCREEN_SETUPS[free++ % SCREEN_SETUPS.length];
+    } while (!sells && SELLING_SETUPS.has(setup));
+    s.screenSetup = setup;
+    screens++;
   }
-  return free + held;
+  return screens;
 }
 
 /**
  * A screen setting for a redraw that came back a near-copy: never `current`, never the setting of
  * the picture it copied (`avoid`) — Dale's job 372 test redrew a copy of the "held outdoors" screen
- * straight back into "held outdoors". Pure.
+ * straight back into "held outdoors" — and a selling setting only for a screen about selling. Pure.
  */
-export function nextScreenSetup(current: string | undefined, held: boolean, avoid?: string): string {
+export function nextScreenSetup(
+  current: string | undefined,
+  held: boolean,
+  avoid?: string,
+  selling = false
+): string {
   const list: readonly string[] = held ? HELD_SCREEN_SETUPS : SCREEN_SETUPS;
+  const allowed = (x: string) => selling || !SELLING_SETUPS.has(x);
   const i = current ? list.indexOf(current) : -1;
   for (let step = 1 + Math.floor(list.length / 2), n = 0; n < list.length; n++, step++) {
     const next = list[(i + step + list.length) % list.length];
-    if (next !== current && next !== avoid) return next;
+    if (next !== current && next !== avoid && allowed(next)) return next;
   }
-  return list[0];
+  return list.find(allowed) ?? list[0];
 }
 
 // ─── Near-copies across the film ─────────────────────────────────────────────────────────────

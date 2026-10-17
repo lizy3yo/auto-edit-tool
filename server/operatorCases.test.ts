@@ -37,7 +37,11 @@ import {
 import { keepOwnWords } from "./narrationAlignment";
 import {
   ANON_PERSON_SUFFIX,
+  APP_SCREEN_CLAUSE,
   appScreenClause,
+  DESCRIBED_SCREEN_CLAUSE,
+  DEVICE_RESTS,
+  REAL_APP_SCREEN_CLAUSE,
   BLURRED_PRINT_CLAUSE,
   buildSplitRightScene,
   buildStillPrompt,
@@ -73,6 +77,7 @@ import {
   withoutFaceAsks,
   WORN_ON_BODY,
 } from "./hostLook";
+import { pictureKindOf } from "./pictureCheckLog";
 
 const pic = (index: number, scriptText: string, showSubject: string, over: Partial<StoryboardScene> = {}) =>
   ({ index, scriptText, showSubject, visualPrompt: showSubject, ...over }) as StoryboardScene;
@@ -1030,5 +1035,123 @@ describe("only a make-up step shows the face (Dale's job 372 test, 2026-10-15)",
     markHostBroll(scenes, { hostLook: "a man with a grey beard" }, "https://x/host.png");
     expect(scenes[0].humanPresent).toBe(true);
     expect(scenes[0].hostFaceShown).toBeUndefined();
+  });
+});
+
+describe("a screen shows what its own description says (the audit's grid screens, 2026-10-18)", () => {
+  const GRID = /buy-and-sell app: a grid of small photos/;
+
+  it("a screen not about selling is drawn as described, never as a grid of items for sale", () => {
+    const screens = [
+      // Job 393: "Subscribe to Frederick Barnes," — a hand tapping a phone.
+      pic(39, "Subscribe to Frederick Barnes,", "a hand tapping a phone screen in a hallway beneath a ceiling smoke alarm", {
+        visualPrompt:
+          "Suburban hallway at night, a round white smoke alarm mounted on the painted ceiling above, a single bare hand tapping a phone screen held at chest level.",
+        humanPresent: true,
+      }),
+      // Job 294: the same "Subscribe" tap at a café table.
+      pic(34, "Subscribe to Diane De Chambray if you want the rest…", "A woman's hand tapping a phone screen beside a white coffee cup", {
+        visualPrompt: "A bare hand tapping a phone screen beside a white coffee cup on a marble café table near a window in soft morning light.",
+        humanPresent: true,
+      }),
+      // Job 103: the tutorial video that went too fast.
+      pic(3, "and the video you were following went too fast to show you.", "", {
+        showSubject: undefined,
+        visualPrompt:
+          "A smartphone resting on a kitchen table beside yarn balls and a crochet hook, its screen showing blurred hands moving quickly through stitches. The phone screen tilts slightly, framing the rushed tutorial against the calm workspace around it.",
+      }),
+      // Production job 235 (Helena): an airline app; job 310: a seat map with a price on it.
+      pic(11, "Fee number one is basic economy, and it finds you before you've packed a thing.", "mobile phone on the kitchen table showing an airline app screen", {
+        visualPrompt:
+          "Slim black smartphone with glass screen resting on a round honey-toned wood kitchen table displaying an airline app interface, shot in a sunlit home kitchen.",
+      }),
+      pic(102, "On a lot of airlines and a lot of fares, choosing your seat ahead of time costs extra.", "close-up of a phone screen showing a seat map with a price on a chosen seat", {
+        visualPrompt: "A phone screen showing an airline seat map with colored seats and one seat highlighted on the map.",
+      }),
+      // Production job 260 (Lance): a camera app's password page.
+      pic(126, "Start in the camera's app tonight and give the account a brand new password…", "hands holding black smartphone changing password in camera app settings", {
+        visualPrompt: "Bare hands holding black smartphone upright, fingers adjusting password field in the camera app security settings screen.",
+        humanPresent: true,
+      }),
+      // Production job 271 (Dale): a buyer's message INSIDE the selling app is still a message.
+      pic(80, "Answer every message and every quote request before the night's over.", "a smartphone in hand showing a buy-and-sell app message screen", {
+        visualPrompt:
+          "Smartphone held at chest height displaying an open messaging app with incoming customer inquiries, bare hands visible from forearms down.",
+      }),
+    ];
+    for (const s of screens) {
+      const prompt = buildStillPrompt(s);
+      expect(prompt).toContain(DESCRIBED_SCREEN_CLAUSE);
+      expect(prompt).not.toMatch(GRID);
+      expect(prompt).toMatch(/never stands upright by itself/);
+      expect(prompt).toContain(SCREEN_TEXT_AS_BARS.trim());
+    }
+  });
+
+  it("a screen word with no device in the picture adds no screen at all", () => {
+    const noDevice = [
+      // Job 151: the afghan "listing" to one side; job 122: the lantern "showing why the listing photo sells".
+      pic(38, "or the whole thing leans off to one side,", "the afghan lying crooked, leaning off to one side on the kitchen table", {
+        visualPrompt:
+          "Finished lace shell afghan in soft neutral yarn, its scalloped edge draping unevenly off the wooden kitchen table, the afghan angled and listing to one side of the table's center.",
+      }),
+      pic(42, "Take your listing photo with the lantern lit and the room dark…", "", {
+        showSubject: undefined,
+        visualPrompt:
+          "A finished andon lantern with warm paper panels and wooden frame sits lit on a low table in a darkened room, a settled moment showing why the listing photo sells.",
+      }),
+      // Job 230: the picture behind the scan card, "ready for listing or sale".
+      pic(26, "Or look at the top of the description under this video…", "", {
+        showSubject: undefined,
+        cta: true,
+        qrHero: true,
+        visualPrompt:
+          "Workbench in the garage workshop, a few finished wooden cutting boards and coasters arranged in a calm, orderly pile, soft daylight from a side window, ready for listing or sale.",
+      }),
+    ];
+    // Job 342: a split panel of a board "ready for an online shop photograph", under its host beat's
+    // real-app look — it was told the phone's screen shows that app.
+    const panel = buildSplitRightScene(
+      host(22, "Number two. Use Etsy for the thing it does best, which is reach.", {
+        splitVisual:
+          "Walnut cutting board with a small carved motif displayed flat on a plain background, ready for an online shop photograph.",
+        namedLook: "a buy-and-sell app: white background, a grid of square product photos in two columns",
+      })
+    );
+    for (const s of noDevice) {
+      const prompt = buildStillPrompt(s);
+      expect(prompt).not.toContain(DEVICE_RESTS);
+      expect(prompt).not.toMatch(/screen shows/);
+    }
+    const panelPrompt = buildStillPrompt(panel, false, undefined, undefined, true);
+    expect(panelPrompt).not.toContain(REAL_APP_SCREEN_CLAUSE);
+    expect(panelPrompt).not.toContain(DEVICE_RESTS);
+    // …and neither the memory step nor the check log takes the afghan for a screen.
+    const first = pic(37, "Here is the afghan.", "the finished lace shell afghan on the table", { keyThing: "afghan" });
+    const crooked = { ...noDevice[0], keyThing: "afghan" } as StoryboardScene;
+    expect(memoryViewFor([first, crooked], crooked)).not.toBe(SCREEN_ITEM_VIEW);
+    expect(pictureKindOf(crooked, crooked.visualPrompt!)).not.toBe("screen");
+  });
+
+  it("a selling screen keeps the buy-and-sell grid, and a named app its real look", () => {
+    // Job 221: the bookcase's listing screen; a plain buy-and-sell app with listings.
+    const listing = pic(42, "Put the measurements in the very first line, and", "A finished wooden furniture piece being noted for its dimensions in the workshop", {
+      visualPrompt:
+        "Tall wooden bookcase standing upright in the garage workshop near the sliding door, a smartphone resting on the workbench edge nearby showing a listing screen with dimensions noted.",
+    });
+    expect(buildStillPrompt(listing)).toMatch(GRID);
+    expect(buildStillPrompt(pic(1, "x", "a phone showing a buy-and-sell app with handmade listings"))).toContain(APP_SCREEN_CLAUSE);
+    expect(appScreenClause(pic(1, "x", "a phone showing a listing of the walnut bookcase"))).toMatch(/ONE item's own listing page/);
+    // Job 338: "Etsy," with the real app's look stays the real app.
+    const etsy = pic(5, "Etsy,", "A phone showing a white shopping app screen with a two-column grid of product photos", {
+      visualPrompt:
+        "A smartphone held near the workbench, its screen showing a white shopping app with a two-column grid of small product photos, words unreadable.",
+      namedLook: "a shopping app: a white screen, a small orange logo at the top left, a two-column grid of product photos",
+    });
+    expect(buildStillPrompt(etsy)).toContain(REAL_APP_SCREEN_CLAUSE);
+    // A screen not about selling never gets the one-listing page either.
+    expect(appScreenClause(pic(1, "x", "a phone showing a message from the buyer about her listing"))).not.toMatch(
+      /ONE item's own listing page/
+    );
   });
 });

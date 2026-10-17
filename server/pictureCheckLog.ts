@@ -10,7 +10,7 @@
  * Pure — unit-tested.
  */
 import type { StoryboardScene } from "@shared/types";
-import { SHOWS_SCREEN } from "./shotList";
+import { showsScreen } from "./shotList";
 
 /** The kinds, most failure-prone first: a picture is the FIRST one that fits. */
 export const PICTURE_KINDS = [
@@ -34,7 +34,7 @@ export interface PictureCheck {
 
 /** The kind of picture `visual` describes for this scene. */
 export function pictureKindOf(scene: StoryboardScene, visual: string): PictureKind {
-  if (SHOWS_SCREEN.test(visual)) return "screen";
+  if (showsScreen(visual)) return "screen";
   if (scene.pictureText || scene.blurPrint) return "writing";
   if (scene.namedLook) return "named kind";
   if (scene.humanPresent || scene.brollHostLook) return "person or hands";

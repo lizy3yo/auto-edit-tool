@@ -755,11 +755,53 @@ export function markListPieces(scenes: StoryboardScene[]): number {
   return n;
 }
 
-/**
- * A picture of a phone, tablet or laptop SCREEN (an app, a website, a listing). Pure.
- */
-export const SHOWS_SCREEN =
+/** Words of a phone, tablet or laptop SCREEN picture (an app, a website, a listing). */
+const SCREEN_WORDS =
   /\b(?:apps?|buy-and-sell|website|web\s?page|shop page|listings?|online (?:craft )?(?:shop|store)|(?:phone|tablet|laptop|computer)\s+screen|screen of (?:a|the|her|his) (?:phone|tablet|laptop))\b/i;
+
+/**
+ * A device or its screen, named in a picture's own words. A "screen picture" used to be any picture
+ * whose words held "listing", "online shop" or "app", device or not: a crooked afghan "listing to
+ * one side of the table" (job 151), a lit lantern "showing why the listing photo sells" (job 122)
+ * and a split panel of a board "ready for an online shop photograph" (job 342) were each told what
+ * a phone's screen shows — and, with a key thing, drawn as the photo inside a listing. A
+ * screen-printed shirt and a screen door are not devices.
+ */
+const NAMES_DEVICE =
+  /\b(?:(?:smart|i)?phones?|tablets?|ipads?|laptops?|computers?|monitors?|screens?(?![-\s](?:print|door))|devices?|apps?|websites?|web\s?pages?|browsers?)\b/i;
+
+/** Whether a picture's words name a device or its screen (`NAMES_DEVICE`). Pure. */
+export const namesDevice = (text: string): boolean => NAMES_DEVICE.test(text);
+
+/**
+ * A picture of a phone, tablet or laptop SCREEN (an app, a website, a listing) — only when its words
+ * also name the device or the screen (`namesDevice`). The screen test of the memory step and the
+ * picture-check log; `screenPicture` (server/pictureVariety.ts) is the same gate on the prompt's
+ * screen words. Pure.
+ */
+export const showsScreen = (text: string): boolean => SCREEN_WORDS.test(text) && namesDevice(text);
+
+/** A screen that asks, in its own words, for things for sale. */
+const SELLING_SCREEN =
+  /\b(?:buy-and-sell|listings?|listed|marketplace|online (?:craft )?(?:shop|store)|shop page|web-?shop|shopping (?:app|site|page)|for sale|storefront|product (?:photos?|pages?|listings?)|etsy|ebay|craigslist|offerup|mercari|poshmark|kijiji|gumtree)\b/i;
+/**
+ * Screen content that is not a page of things for sale, even inside a selling app ("a buy-and-sell
+ * app message screen"). "Setting" alone is a place ("a kitchen setting"); "settings" is the page.
+ */
+const OTHER_SCREEN_CONTENT =
+  /\b(?:messag(?:e|es|ing)|chats?|text messages?|e-?mails?|inbox|maps?|booking|itinerar(?:y|ies)|calendar|reminders?|alarms?|camera|settings|setting (?:page|screen|menu)|passwords?|log-?in|sign-?in|search results?|forum|videos?|weather|bank(?:ing)?|payments?|receipts?|notifications?|cloud (?:storage|backup|account|app))\b/i;
+
+/**
+ * WHAT A SCREEN SHOWS IS WHAT ITS PICTURE SAYS. Every screen used to get one clause, "a simple
+ * buy-and-sell app: a grid of small photos of items for sale" — over an airline seat map, a camera
+ * app's password page and a buyer's message (production jobs 310, 260, 271), a tutorial video (job
+ * 103) and a hand tapping "Subscribe" (job 393). The shot list had written what was on each screen;
+ * the prompt builder then overrode it with the grid. The grid is now only for a picture whose OWN
+ * words — never the line's: a selling line can show a message — ask for a selling screen and name
+ * nothing else on it. Pure.
+ */
+export const sellingScreen = (text: string): boolean =>
+  SELLING_SCREEN.test(text) && !OTHER_SCREEN_CONTENT.test(text);
 
 /**
  * A piece another may be merged INTO: never a list item (unless the piece merged is itself a list

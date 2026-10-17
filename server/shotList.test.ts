@@ -21,6 +21,9 @@ import {
   settleVideoKind,
   shotListEligible,
   tokenSpans,
+  namesDevice,
+  sellingScreen,
+  showsScreen,
 } from "./shotList";
 
 const scene = (
@@ -1376,5 +1379,44 @@ describe("a short piece is never merged into a list item (Dale's job 293)", () =
     const scenes = [p(1, "a saw,", { listCut: true }), p(2, "and", {}), p(3, "a drill,", { listCut: true })];
     const r = foldSnappedFlashes(scenes, s => (s.listCut ? 0.6 : 0.3));
     expect(r.changed).toBe(false);
+  });
+});
+
+describe("a screen is a device, and it sells only when its own words say so (the audit's grid screens)", () => {
+  it("a screen word with no device in the picture is no screen", () => {
+    // Job 151: a crooked afghan "listing to one side"; job 342's split panel "ready for an online
+    // shop photograph"; job 154: a hand-written page "listing items".
+    expect(
+      showsScreen("Finished lace shell afghan, the afghan angled and listing to one side of the table's center.")
+    ).toBe(false);
+    expect(showsScreen("walnut cutting board displayed flat on a plain background, ready for an online shop photograph.")).toBe(false);
+    expect(showsScreen("Close view of a hand-written page or chart listing items")).toBe(false);
+    expect(namesDevice("a screen-printed tee and a screen door")).toBe(false);
+    // With the device named it is a screen, whatever it shows.
+    expect(showsScreen("a phone screen showing a listing of the walnut bookcase")).toBe(true);
+    expect(showsScreen("a laptop screen showing the shop page with the board listed")).toBe(true);
+    expect(showsScreen("close-up of a phone screen showing a seat map")).toBe(true);
+  });
+
+  it("only a screen whose words ask for things for sale, and name nothing else on it, sells", () => {
+    expect(sellingScreen("a phone showing a buy-and-sell app with handmade listings")).toBe(true);
+    expect(sellingScreen("a phone showing Facebook Marketplace listings of dressers")).toBe(true);
+    expect(sellingScreen("a phone showing her Etsy shop")).toBe(true);
+    // "setting" alone is a place, not a settings page.
+    expect(sellingScreen("a phone showing a buy-and-sell app with listings, in a plain kitchen setting")).toBe(true);
+    // Production job 271 (Dale): a message INSIDE the selling app is a message screen.
+    expect(
+      sellingScreen(
+        "a smartphone in hand showing a buy-and-sell app message screen Smartphone held at chest height displaying an open messaging app with incoming customer inquiries"
+      )
+    ).toBe(false);
+    // Production jobs 310 / 235 (Helena), 260 (Lance), job 103 (Mae), job 345 (Dale's shop settings).
+    expect(sellingScreen("close-up of a phone screen showing a seat map with a price on a chosen seat")).toBe(false);
+    expect(sellingScreen("mobile phone on the kitchen table showing an airline app screen")).toBe(false);
+    expect(sellingScreen("hands holding black smartphone changing password in camera app settings")).toBe(false);
+    expect(sellingScreen("A smartphone on a kitchen table, its screen showing blurred hands moving quickly through stitches")).toBe(false);
+    expect(sellingScreen("close-up of a phone screen showing a shop settings page with an on-off toggle")).toBe(false);
+    // The LINE is never read: a hand tapping a phone under "Subscribe to…" has no selling words.
+    expect(sellingScreen("a hand tapping a phone screen in a hallway beneath a ceiling smoke alarm")).toBe(false);
   });
 });

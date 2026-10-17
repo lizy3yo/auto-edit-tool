@@ -75,6 +75,8 @@ import {
   pictureHash,
   pictureThumb,
   rememberPicture,
+  screenPicture,
+  screenSells,
   varietyLane,
   withScreenTurn,
 } from "./pictureVariety";
@@ -6557,8 +6559,10 @@ export function buildStillPrompt(
   // A camera move's first frame is the thing at rest: the CAMERA moves, the thing does not.
   const motion = !aggressive && scene.objectMotion ? "objectStill" : "settle";
   const memory = memoryClause(scene);
-  // A real app the line names (`namedLook`) is drawn as it really looks; otherwise a plain one.
-  const app = APP_SCREEN.test(visual) ? ` ${appScreenClause(scene)}` : "";
+  // A screen only when the picture names a device (`screenPicture`): a real app the line names
+  // (`namedLook`) as it really looks, a selling screen as a plain buy-and-sell app, any other
+  // screen as exactly what its own description says (`appScreenClause`).
+  const app = screenPicture(visual) ? ` ${appScreenClause(scene, visual)}` : "";
   const lead = !aggressive && !visualOverride ? subjectLead(scene.showSubject, visual) : "";
   const item = !visualOverride ? listItemClause(scene) : "";
   return withAllowedText(
@@ -6665,9 +6669,6 @@ export function withAllowedText(
     : `${prompt} ${allowed}`;
 }
 
-/** A picture about an app or selling online (after `scrubLegibleWriting` has taken the brand off). */
-const APP_SCREEN =
-  /\b(?:apps?|buy-and-sell|online (?:craft )?(?:shop|store)|website|phone screen|listings?)\b/i;
 /**
  * The phone screen of an app shot (2026-09-30, the operator: "facebook marketplace in an app" — no
  * logo, no brand): a plain buy-and-sell app, a grid of item photos, nothing readable.
@@ -6692,12 +6693,16 @@ export const REAL_APP_SCREEN_CLAUSE =
   "never built from, framed by or set inside any other object; things for sale appear only as " +
   "small photos on its screen.";
 /**
- * The screen clause for an app picture: the real app's look when the line names one, else a plain
- * one; one item's listing page when the picture is about one item; and the words the line SAYS
+ * The screen clause for a screen picture: the real app's look when the line names one; a plain
+ * buy-and-sell app only when the picture's own words ask for a selling screen (`screenSells`), and
+ * one item's listing page when it is about one item; every other screen exactly as its description
+ * says (`DESCRIBED_SCREEN_CLAUSE`) — the grid used to go on every screen, an airline seat map and a
+ * hand tapping "Subscribe" included (production job 310, job 393). And the words the line SAYS
  * (`scene.pictureText` — a price, a name) readable and exact, where the clauses alone would blur
- * them (Dale's job 306 showed a said price as a grey bar).
+ * them (Dale's job 306 showed a said price as a grey bar). `visual` is the description the prompt
+ * draws, when it is not `scene.visualPrompt` as it stands.
  */
-export function appScreenClause(scene: StoryboardScene): string {
+export function appScreenClause(scene: StoryboardScene, visual?: string): string {
   // Each screen of a film sits somewhere else (`assignScreenSetups`, server/pictureVariety.ts):
   // with one fixed setting every screen came back the same phone on the same bench (Dale, job 372).
   const placed = (clause: string) =>
@@ -6711,10 +6716,14 @@ export function appScreenClause(scene: StoryboardScene): string {
               `${scene.screenSetup}.`
           )
       : clause;
-  const base = placed(scene.namedLook ? REAL_APP_SCREEN_CLAUSE : APP_SCREEN_CLAUSE);
-  const one = ONE_LISTING.test(scene.showSubject ?? scene.visualPrompt ?? "")
-    ? " It is ONE item's own listing page: one large photo of that item, not a grid of other things."
-    : "";
+  const selling = !scene.namedLook && screenSells(scene, visual);
+  const base = placed(
+    scene.namedLook ? REAL_APP_SCREEN_CLAUSE : selling ? APP_SCREEN_CLAUSE : DESCRIBED_SCREEN_CLAUSE
+  );
+  const one =
+    (scene.namedLook || selling) && ONE_LISTING.test(scene.showSubject ?? scene.visualPrompt ?? "")
+      ? " It is ONE item's own listing page: one large photo of that item, not a grid of other things."
+      : "";
   if (!scene.pictureText) return `${base}${one}${SCREEN_TEXT_AS_BARS}`;
   const said = scene.pictureText.replace(/"/g, "'");
   return (
@@ -6745,6 +6754,19 @@ export const APP_SCREEN_CLAUSE =
   DEVICE_RESTS +
   " It is never built from, framed by or set inside any " +
   "other object; things for sale appear only as small photos on its screen.";
+
+/**
+ * Every screen that is not a selling screen (`appScreenClause`): what its own description says is
+ * on it, and nothing for sale. No list of screen kinds — the description already names the seat
+ * map, the message or the video; the grid clause was what overrode it.
+ */
+export const DESCRIBED_SCREEN_CLAUSE =
+  "The device's screen shows exactly what this description says is on it — when it says nothing, " +
+  "a plain, simple screen — and never a grid of items for sale: no logo, no brand, no app name, and " +
+  "no readable words, letters, numbers or prices anywhere on the screen. The device is an ordinary " +
+  "real phone, tablet or laptop. " +
+  DEVICE_RESTS +
+  " It is never built from, framed by or set inside any other object.";
 
 /**
  * PICTURE MEMORY: a picture of a key thing drawn from the earlier pictures of it
@@ -9131,7 +9153,12 @@ async function drawValidatedStill(
             varietyRerolls++;
             offSubjectFallback ??= { buffer, mimeType: r.mimeType };
             if (scene.screenSetup) {
-              scene.screenSetup = nextScreenSetup(scene.screenSetup, !!scene.humanPresent, copiedSetup);
+              scene.screenSetup = nextScreenSetup(
+                scene.screenSetup,
+                !!scene.humanPresent,
+                copiedSetup,
+                screenSells(scene, visualOverride)
+              );
               prompt = buildStillPrompt(scene, false, visualOverride, subject, square);
             }
             // a CONCRETE new camera view each redraw — "look different" alone came back as the same

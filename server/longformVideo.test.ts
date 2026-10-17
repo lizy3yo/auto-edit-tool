@@ -10609,9 +10609,8 @@ describe("joinScanWindow — the QR part is one picture however long (Dale, job 
 });
 
 describe("picture rules (2026-09-30): memory, the app screen, no brands", async () => {
-  const { buildStillPrompt, memoryClause, scrubLegibleWriting, APP_SCREEN_CLAUSE } = await import(
-    "./longformVideo"
-  );
+  const { buildStillPrompt, memoryClause, scrubLegibleWriting, APP_SCREEN_CLAUSE, DESCRIBED_SCREEN_CLAUSE } =
+    await import("./longformVideo");
   it("tells the picture maker the reference is the SAME thing from another spot", () => {
     const scene = {
       index: 7,
@@ -10640,6 +10639,16 @@ describe("picture rules (2026-09-30): memory, the app screen, no brands", async 
     expect(APP_SCREEN_CLAUSE).toMatch(/no logo, no brand, no app name/);
     // A picture with no app in it gets no screen clause.
     expect(buildStillPrompt({ index: 1, narration: "n", visualPrompt: "a wood stove" } as StoryboardScene)).not.toContain(APP_SCREEN_CLAUSE);
+  });
+
+  it("a social app the brand scrub names is drawn as described, never as the buy-and-sell grid", () => {
+    // The scrub turns YouTube/Instagram/WhatsApp into "a social app", and "app" alone used to fetch
+    // the shopping grid (job 242's video description link was one).
+    const show = scrubLegibleWriting("a phone showing a YouTube video description with a blue link");
+    expect(show).toMatch(/a social app/);
+    const prompt = buildStillPrompt({ index: 1, narration: "n", visualPrompt: show } as StoryboardScene);
+    expect(prompt).not.toContain(APP_SCREEN_CLAUSE);
+    expect(prompt).toContain(DESCRIBED_SCREEN_CLAUSE);
   });
 });
 
