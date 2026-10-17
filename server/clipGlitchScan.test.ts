@@ -86,6 +86,25 @@ describe("the thing meant to move is named, and only something else moving count
   it("with no description, the model is told one thing is meant to move and to find it", () => {
     expect(clipGlitchMessage(undefined, true)).toMatch(/ONE thing in it is meant to move by itself/);
     expect(clipGlitchMessage("  ", false)).toBe("First frame on the left, last frame on the right. What changed?");
+    // The system prompt makes every change not-meant only when the message says NOTHING is meant
+    // to move — so "decide from the frames which" still lets the one moving thing be meant.
+    expect(CLIP_GLITCH_SYSTEM).not.toMatch(/when nothing is named/);
+    expect(CLIP_GLITCH_SYSTEM).toContain("when the message does not say anything is meant to move");
+  });
+
+  it("names a moving thing that comes late in a long description, as far as the self-moving judge read", () => {
+    // `judgeSelfMoving` reads 300 characters; the old 200-character cut would drop the steam
+    // here, and the steam rising would then read as something else moving.
+    const long =
+      "a wide view of an ordinary home kitchen in plain daylight, a wooden counter along the back wall " +
+      "with a bread board, two mugs, a folded tea towel and a bowl of lemons on it, a window above the " +
+      "sink, and on the stove at the right a kettle with a thin curl of steam rising from its spout";
+    expect(long.length).toBeGreaterThan(200);
+    expect(long.length).toBeLessThanOrEqual(300);
+    expect(clipGlitchMessage(long, true)).toContain("a thin curl of steam rising from its spout.");
+    // Never longer than the judge read.
+    const m = clipGlitchMessage(long + " " + "x".repeat(200), true);
+    expect(m).not.toContain("x".repeat(80));
   });
 
   it("passes the logged reasons that were the smoke or flame itself", () => {

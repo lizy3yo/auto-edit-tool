@@ -3849,6 +3849,9 @@ async function fallbackSceneToStill(
   scene.renderModelIndex = undefined;
   scene.renderAttempts = undefined;
   scene.infraRetries = undefined;
+  // A glitch re-render that failed before it reached a submit leaves its `glitch` reason behind;
+  // a still is settled, so the next paid render (a regenerate, a retry) must not inherit it.
+  scene.nextSubmitReason = undefined;
 }
 
 /**

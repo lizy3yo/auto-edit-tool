@@ -40,13 +40,14 @@ export const CLIP_GLITCH_SYSTEM =
   "You compare two frames of ONE short AI-generated video clip: the FIRST frame on the LEFT, the " +
   "LAST frame on the RIGHT. The camera may have zoomed or panned, so ignore framing: compare where each " +
   "object sits and which way it points RELATIVE TO THE SURFACE AND THE OBJECTS AROUND IT.\n" +
-  "The message may name what the clip shows MOVING BY ITSELF. That thing, and what comes from it — " +
+  "The message may say what in the clip is MEANT to move by itself. That thing, and what comes from it — " +
   "what it gives off, carries or pushes along, and its light on what is near it — may change in any " +
   "way. Everything else should hold still.\n" +
   "changes: every object that moved, turned, appeared, disappeared, multiplied or changed shape " +
   'or size between the two frames, each as {"what":"a short phrase","meant":true|false} ([] when ' +
-  "nothing did). meant is true ONLY when the change is the thing named as moving by itself, or " +
-  "comes from it; false for anything else, and false for every change when nothing is named.\n" +
+  "nothing did). meant is true ONLY when the change is the thing meant to move by itself, or comes " +
+  "from it; false for anything else, and false for every change when the message does not say " +
+  "anything is meant to move.\n" +
   "hands_visible: are hands in either frame?\n" +
   "untouched_moved: did anything in `changes` that is not meant move without a hand touching it?\n" +
   "morph: did anything that is not meant melt, bend, stretch, change size or shape, merge into " +
@@ -69,8 +70,11 @@ export const CLIP_GLITCH_SYSTEM =
  * the alarm holds still). Pure — unit-tested.
  */
 export function clipGlitchMessage(about: string | undefined, selfMoving: boolean): string {
+  // As much of the description as `judgeSelfMoving` read (300 characters). On a self-moving shot
+  // it is now the only word on what may move: a moving thing named past a shorter cut would read
+  // as something ELSE moving and fail a good clip — the fixed list used to cover that.
   const shows = about?.trim()
-    ? about.replace(/"/g, "'").replace(/\s+/g, " ").trim().slice(0, 200)
+    ? about.replace(/"/g, "'").replace(/\s+/g, " ").trim().slice(0, 300)
     : "";
   const meant = !selfMoving
     ? ""
