@@ -46,7 +46,7 @@ writeFileSync(path.join(jobDir, "cuts.json"), JSON.stringify(filmCutFrames.map(f
 const words = JSON.parse(readFileSync(path.join(jobDir, "words.json"), "utf8")) as Word[];
 const structural = new Set(TEMPLATES.filter(t => t.structural).map(t => t.id));
 const cards = new Set(TEMPLATES.filter(t => t.kind === "card").map(t => t.id));
-const cues = resolveCues(sheet.cues, words, { cuts: filmCutFrames.map(f => f / FPS), fps: FPS, structural, cards });
+const cues = resolveCues(sheet.cues, words, { cuts: filmCutFrames.map(f => f / FPS), fps: FPS, structural, cards, fullFrame: new Set(TEMPLATES.filter(t => t.kind === "card" || t.underlay === "window").map(t => t.id)) });
 // A host caption on a split scene stays in the host panel.
 for (const c of cues) {
   if (c.template !== "HostCaption") continue;

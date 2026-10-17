@@ -33,6 +33,16 @@ if (planFile) {
   console.log(`[reassemble] job ${jobId}: graphics plan seeded with ${cues.length} approved graphics`);
 }
 
+// --replan: the same as the card's "Re-plan graphics" — the next assembly writes a fresh plan.
+if (process.argv.includes("--replan")) {
+  const job = await getLongformVideoJobById(jobId);
+  if (!job) throw new Error(`job ${jobId} not found`);
+  const params = { ...(job.inputParams as LongformInputParams) };
+  params.graphics = { ...(params.graphics ?? {}), replan: true };
+  await updateLongformVideoJob(jobId, { inputParams: params });
+  console.log(`[reassemble] job ${jobId}: graphics will be planned afresh`);
+}
+
 const caller = appRouter.createCaller({
   req: { headers: {} } as never,
   res: {} as never,

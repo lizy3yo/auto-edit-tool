@@ -8221,8 +8221,11 @@ export function ctaPitchBeats(scenes: StoryboardScene[]): number[] {
   );
 }
 
-/** Longest one continuous host take `joinBackToBackHostTakes` will make. */
-export const HOST_JOIN_MAX_SEC = 30;
+/** Longest one continuous host take `joinBackToBackHostTakes` will make. 60 s since 2026-10-17:
+ * at 30 Scarlett's CTA (job 387, 2:14) was two takes of 26 s and 6 s, so the host jumped mid-sentence
+ * ("If the phone feels like a nuisance, | the very first line…"). One take costs the same seconds;
+ * 60 s stays inside every length HeyGen is reported to render as one Avatar IV video. */
+export const HOST_JOIN_MAX_SEC = 60;
 
 /**
  * One continuous take where host beats sit back to back. Each host beat is its own HeyGen render,

@@ -59,6 +59,27 @@ export async function narrationOf(file: string): Promise<Buffer> {
   return stdout as Buffer;
 }
 
+/** The film's loudness, one dBFS value per `frameSec` (mono 16 kHz): what tells a pause from a
+ * word when the transcript's times are not trusted (graphics/src/plan/wordTiming). */
+export async function levelsOf(file: string, frameSec = 0.02): Promise<number[]> {
+  const { stdout } = await execFfmpeg(
+    ["-hide_banner", "-loglevel", "error", "-i", file, "-vn", "-ac", "1", "-ar", "16000", "-f", "s16le", "-"],
+    { encoding: "buffer", maxBuffer: 512 << 20, windowsHide: true }
+  );
+  const b = stdout as Buffer;
+  const per = Math.round(frameSec * 16000);
+  const out: number[] = [];
+  for (let i = 0; (i + per) * 2 <= b.length; i += per) {
+    let e = 0;
+    for (let j = i; j < i + per; j++) {
+      const v = b.readInt16LE(j * 2) / 32768;
+      e += v * v;
+    }
+    out.push(10 * Math.log10(e / per + 1e-12));
+  }
+  return out;
+}
+
 /** Run ffmpeg to completion (the composite pass). */
 export async function ffmpeg(args: string[]): Promise<void> {
   await execFfmpeg(["-hide_banner", "-loglevel", "error", ...args], { maxBuffer: 16 << 20, windowsHide: true });

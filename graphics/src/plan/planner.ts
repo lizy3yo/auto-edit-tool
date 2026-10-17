@@ -45,7 +45,12 @@ export function notoCode(icon: string): string {
 const CATALOGUE = `
 HOW PROPS WORK
 A "phrase" is {"text": "...", "words": true}: shown word by word as the narrator says each word.
-Its words must be the narrator's own, in order (you may leave words out, never change or reorder them).
+Its words are the narrator's own, WORD FOR WORD and IN A ROW — never leave out a word inside it, never
+change or reorder one. It starts where he starts a sentence or a clause (a sentence's opening "So"/"And" may
+be left off) and ends where one ends: at a full stop, a comma, a pause, or right before a clause word ("and",
+"but", "that", "where", "because"…). Never stop mid-phrase ("…along the front edge" when he goes on "of the
+table"). A sentence too long for the template becomes TWO graphics, split at a clause. A line may stop right
+before a number or label the same graphic shows ("That order carries an extra fee of" + 15 %).
 "at": "@words" makes an element appear on those spoken words; "at": 0 makes it appear at the cue start.
 Fixed text (titles, labels, subs, list items) is shown whole. When it stands for words the narrator says,
 add "say": "those exact spoken words" beside it, so the graphic stays until they are said.
@@ -69,7 +74,7 @@ Full-screen cards — replace the picture, so ONLY inside a b-roll stretch:
 
 Graphics with the picture in a window — they replace the picture with the footage framed beside text:
 - TermWindow — names a term or a word and explains what it means (ONLY over b-roll): {"kicker": "The term", "term": "the term as said", "at": "@the term", "meaning": phrase (≤12 words)}
-- ListWindow — lists 2-4 things or signs while the picture matters (ONLY over b-roll): {"title": "2-4 words", "items": [{"text" (≤5 words), "at": "@words", "say"}]}
+- ListWindow — lists 2-4 things or signs while the picture matters (ONLY over b-roll): {"title": "2-4 words", "items": [{"text" (≤5 words), "at": "@the item's FIRST spoken words", "say": "the item as said"}]}
 - HostListWindow — the HOST lists what is coming or 2-4 points, while on camera (ONLY over a HOST scene, never under the name tag): same props as ListWindow
 
 On top of the footage:
@@ -263,7 +268,8 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
   const index = indexWords(words);
   const structural = new Set(TEMPLATES.filter(t => t.structural).map(t => t.id));
   const cards = new Set(TEMPLATES.filter(t => t.kind === "card").map(t => t.id));
-  const opts = { cuts, fps: FPS, structural, cards };
+  const fullFrame = new Set(TEMPLATES.filter(t => t.kind === "card" || t.underlay === "window").map(t => t.id));
+  const opts = { cuts, fps: FPS, structural, cards, fullFrame };
 
   /** Converts every `icon` in a cue's props to its Noto code in place; collects the ones Noto lacks. */
   const fixIcons = async (node: unknown, missing: string[]): Promise<void> => {
@@ -377,7 +383,25 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
       }
       // The placement rules, with the gap a new graphic keeps from everything — only problems that
       // involve THIS graphic count (approved graphics may touch each other, as when approved).
-      const rule = checkRules(next, film, { gap: MIN_GAP_SEC }).filter(p => p.cue === spec.id || p.problem.includes(spec.id));
+      let rule = checkRules(next, film, { gap: MIN_GAP_SEC }).filter(p => p.cue === spec.id || p.problem.includes(spec.id));
+      // A chapter label is part of a SERIES, and one refused takes the whole series down with it
+      // (Frederick's job 393: chapter 3 landed right after a caption, and all three were lost). So
+      // where a chapter clashes only with NEW, non-structural graphics, those give way instead.
+      if (rule.length && structural.has(spec.template)) {
+        const others = placed.filter(p => p !== placed.find(q => q.spec === spec) && !p.kept && !structural.has(p.spec.template) && rule.some(r => r.cue === p.spec.id || r.problem.includes(p.spec.id)));
+        const blamed = rule.every(r => others.some(o => r.cue === o.spec.id || r.problem.includes(o.spec.id)));
+        if (others.length && blamed) {
+          const removed = others.map(o => placed.splice(placed.indexOf(o), 1)[0]);
+          try {
+            next = resolveAll();
+            rule = checkRules(next, film, { gap: MIN_GAP_SEC }).filter(p => p.cue === spec.id || p.problem.includes(spec.id));
+          } catch {
+            rule = [{ cue: spec.id, problem: "could not be placed" } as (typeof rule)[number]];
+          }
+          if (rule.length) for (const o of removed) placed.push(o);
+          else for (const o of removed) problems.push({ cue: o.spec.id, problem: `gave way to the chapter series (${spec.id})` });
+        }
+      }
       if (rule.length) {
         undo();
         for (const r of rule) bad(r.problem);

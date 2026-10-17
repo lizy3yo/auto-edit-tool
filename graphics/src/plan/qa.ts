@@ -2,7 +2,7 @@
 // lab's composite. Pure: it reads frame-to-frame change measured off the RENDERED files (the
 // faults it catches — a one-frame flash, a graphic still up after its words — only exist in the
 // output), the resolved cues and the readability readings.
-import { CUT_SNAP_SEC, MAX_LINGER_SEC, type ResolvedCue } from "../cueResolve";
+import { CARD_HOLD_MAX_SEC, CUT_SNAP_SEC, MAX_LINGER_SEC, MIN_SHOT_SEC, type ResolvedCue } from "../cueResolve";
 import { templateById } from "../registry";
 import { appearFrame } from "../timing";
 import type { RuleProblem } from "./rules";
@@ -83,13 +83,25 @@ export function judgeFilm(q: QaInput): QaResult {
     for (const s of c.sync) {
       const rel = appearFrame(s.wordStart - c.start, fps);
       const offsetMs = Math.round(((c.startFrame + rel) / fps - s.wordStart) * 1000);
-      rows.push({ cue: c.id, offsetMs, onCut: rel === 0 && c.conformed.start && Math.abs(offsetMs) <= CUT_SNAP_SEC * 1000 });
+      rows.push({ cue: c.id, offsetMs, onCut: ((rel === 0 && c.conformed.start) || !!s.onCut) && Math.abs(offsetMs) <= CUT_SNAP_SEC * 1000 });
     }
   const worstSync = rows.filter(r => !r.onCut).reduce((m, r) => Math.max(m, Math.abs(r.offsetMs)), 0);
   const onCut = rows.filter(r => r.onCut && Math.abs(r.offsetMs) > 100);
 
   const structural = (c: ResolvedCue) => !!templateById(c.template).structural;
-  const lingering = cues.filter(c => !structural(c) && c.contentEnd !== undefined && c.end - c.contentEnd > MAX_LINGER_SEC);
+  const lingering = cues.filter(
+    c => !structural(c) && c.contentEnd !== undefined && c.end - (c.spokenEnd ?? c.contentEnd) > (c.conformed.held ? CARD_HOLD_MAX_SEC : MAX_LINGER_SEC)
+  );
+  // A blink of footage (under MIN_SHOT_SEC) between a picture-replacing graphic and the next or
+  // previous shot change: card → b-roll for 0.8 s → host reads as a glitch.
+  const replaces = (c: ResolvedCue) => templateById(c.template).kind === "card" || templateById(c.template).underlay === "window";
+  const minShot = Math.round(MIN_SHOT_SEC * fps);
+  const blinks = cues.filter(c => {
+    if (!replaces(c)) return false;
+    const after = filmCuts.find(k => k >= c.endFrame);
+    const before = [...filmCuts].reverse().find(k => k <= c.startFrame);
+    return (after !== undefined && after > c.endFrame && after - c.endFrame < minShot) || (before !== undefined && before < c.startFrame && c.startFrame - before < minShot);
+  });
   // A graphic carrying a tail of less than a second onto the next shot (one that ENDS on a cut
   // covers its last shot whole, which is not a spill).
   const spills = cues.filter(c => !c.conformed.end && filmCuts.some(k => k > c.startFrame + 3 && k < c.endFrame && c.endFrame - k < fps));
@@ -101,6 +113,7 @@ export function judgeFilm(q: QaInput): QaResult {
   if (pumps.length) failures.push(`flicker before a cut at ${pumps.map(p => at(p.frame)).join(", ")}`);
   if (worstSync > 100) failures.push(`a word on screen ${worstSync} ms off its voice`);
   if (lingering.length) failures.push(`still up after its words: ${lingering.map(c => c.id).join(", ")}`);
+  if (blinks.length) failures.push(`a blink of footage beside ${blinks.map(c => c.id).join(", ")}`);
   if (spills.length) failures.push(`a tail onto the next shot: ${spills.map(c => c.id).join(", ")}`);
   if (q.rules.length) failures.push(`placement: ${q.rules.map(p => `${p.cue} ${p.problem}`).join("; ")}`);
   if (unreadable.length) failures.push(`text not readable: ${unreadable.map(r => `${r.id} (${r.summary})`).join(", ")}`);
@@ -112,6 +125,7 @@ export function judgeFilm(q: QaInput): QaResult {
     `Words on screen vs. heard: worst ${worstSync} ms over ${rows.length - onCut.length} elements${onCut.length ? `; ${onCut.length} moved onto a shot change` : ""}`,
     `Still up after their words: ${lingering.length}`,
     `Tails onto the next shot: ${spills.length}`,
+    `Blinks of footage beside a card: ${blinks.length}`,
     `Placement rules: ${q.rules.length ? q.rules.length + " problem(s)" : "pass"}`,
     `Text readable on every shot it crosses: ${q.readability.length - unreadable.length}/${q.readability.length}`,
   ];

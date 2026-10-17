@@ -10300,8 +10300,10 @@ describe("joinBackToBackHostTakes", () => {
       host(2, 5, 10, { hostOpener: true }),
     ]);
     expect(open.joins).toBe(0);
-    const long = joinBackToBackHostTakes([host(1, 0, 20), host(2, 20, 40)]);
+    const long = joinBackToBackHostTakes([host(1, 0, 35), host(2, 35, 65)]);
     expect(long.joins).toBe(0);
+    // Scarlett's job 387: 26 s + 6 s of one CTA sentence is ONE take.
+    expect(joinBackToBackHostTakes([host(1, 108.9, 135.1), host(2, 135.1, 140.9)]).joins).toBe(1);
     const gap = joinBackToBackHostTakes([host(1, 0, 5), host(2, 5.5, 9)]);
     expect(gap.joins).toBe(0);
   });

@@ -406,32 +406,56 @@ export const TermWindow: React.FC<TermWindowProps> = ({ kicker = "The term", ter
 
 export type ListWindowProps = BaseProps & { title?: string; items: { text: string; at: number }[] };
 
-const ListRow: React.FC<{ n: number; text: string; atFrame: number }> = ({ n, text, atFrame }) => {
+/** A list item's size: the list is the point of the moment, so it reads at a glance (60 px, against
+ * 46 before — Dale's ranking read as small print beside the picture). */
+const LIST_TEXT = 60;
+/** How far an item already said steps back when the next one is spoken. */
+const LIST_PAST_OPACITY = 0.45;
+
+const ListRow: React.FC<{ n: number; text: string; atFrame: number; nextFrame?: number }> = ({ n, text, atFrame, nextFrame }) => {
   const t = useTheme();
+  const frame = useCurrentFrame();
   const e = useEnter(atFrame, 16);
+  // The item being said is at full strength; once the next is spoken it steps back, so the eye
+  // follows the voice down the list.
+  const back = nextFrame === undefined ? 0 : fadeIn(frame, nextFrame, 8);
+  const opacity = (e.opacity as number) * (1 - (1 - LIST_PAST_OPACITY) * back);
   return (
-    <div style={{ ...e, display: "flex", alignItems: "flex-start", gap: 22, marginTop: n > 1 ? 30 : 0 }}>
-      <NumberDot n={n} size={50} />
-      <span style={{ fontFamily: t.font, fontWeight: 700, fontSize: 46, lineHeight: 1.15, color: t.text }}>{text}</span>
+    <div style={{ ...e, opacity, display: "flex", alignItems: "flex-start", gap: 26, marginTop: n > 1 ? 34 : 0 }}>
+      <NumberDot n={n} size={62} />
+      <span style={{ fontFamily: t.font, fontWeight: 800, fontSize: LIST_TEXT, lineHeight: 1.08, color: t.text, textWrap: "balance" } as React.CSSProperties}>{text}</span>
     </div>
   );
 };
 
 /** A short list beside the picture — the b-roll ("Half its life asleep") or, as HostListWindow,
- * the host ("6 things your dog hopes for", 3 bullets). */
+ * the host ("6 things your dog hopes for", 3 bullets). The list is centred on the picture's
+ * height, every row's place kept from the start so nothing moves as items arrive. */
 export const ListWindow: React.FC<ListWindowProps> = ({ title, items }) => {
   const at = useAt();
+  const frames = items.map(it => at(it.at));
   return (
     <AbsoluteFill>
       <WindowGround />
-      <div style={{ position: "absolute", left: RIGHT_COL, top: WINDOW.y, width: 1920 - RIGHT_COL - 110 }}>
+      <div
+        style={{
+          position: "absolute",
+          left: RIGHT_COL,
+          top: WINDOW.y - 40,
+          height: WINDOW.h + 80,
+          width: 1920 - RIGHT_COL - 100,
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "center",
+        }}
+      >
         {title && (
-          <div style={{ marginBottom: 40 }}>
+          <div style={{ marginBottom: 44 }}>
             <Kicker text={title} />
           </div>
         )}
         {items.map((it, i) => (
-          <ListRow key={i} n={i + 1} text={it.text} atFrame={at(it.at)} />
+          <ListRow key={i} n={i + 1} text={it.text} atFrame={frames[i]} nextFrame={frames[i + 1]} />
         ))}
       </div>
     </AbsoluteFill>

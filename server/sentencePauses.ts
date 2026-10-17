@@ -14,6 +14,14 @@
  *
  * `planSentencePauses` is pure (word timings in, insertions out); `padSentenceEnds` reads and writes
  * the audio. Every failure keeps the narration as voiced.
+ *
+ * THE TRANSCRIPT IS NOT TRUSTED WITH THE SCISSORS (2026-10-17). Where the transcriber misses words
+ * — prices most of all ("$150 to $600", "to $1,500", "to $130") — or hears a full stop that is not
+ * there ("a hundred ways." for "a hundred of them,"), a "gap" between two sentences is really
+ * speech, and quieting it erased what was said: Dale's and Hank's finals (jobs 386, 388) held
+ * 2.5-3.3 s of digital silence where the prices were. So a gap is only touched when the AUDIO
+ * agrees it is quiet (`holdsSpeech`): any stretch in it as loud as the narration's own speech
+ * leaves the gap exactly as voiced.
  */
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -32,6 +40,33 @@ const NOT_A_SENTENCE_END = /^(?:Mr|Mrs|Ms|Dr|St|Jr|Sr|Mt|vs|etc|e\.g|i\.e|No|Fig
 /** Kept clear of a word's tail and the next word's head when a gap is quieted. */
 export const EDGE_SEC = 0.04;
 
+/** Loudness frames (dBFS) used to check that a gap is really quiet. */
+export const LEVEL_FRAME_SEC = 0.02;
+/** A frame within this many dB of the narration's typical speech level is speech, not breath. */
+export const SPEECH_WITHIN_DB = 15;
+/** That loud for this long is a word (shorter is a click or a breath's peak). */
+export const SPEECH_MIN_SEC = 0.08;
+
+/** The narration's typical speech level: the median of the frames that carry sound. */
+export function speechLevelDb(levels: number[]): number {
+  const voiced = levels.filter(db => db > -50).sort((a, b) => a - b);
+  return voiced.length ? voiced[Math.floor(voiced.length / 2)] : -20;
+}
+
+/**
+ * Whether `from`..`to` (seconds) holds speech: a run of at least `SPEECH_MIN_SEC` within
+ * `SPEECH_WITHIN_DB` of the narration's speech level (pure; `levels` are `LEVEL_FRAME_SEC` frames).
+ */
+export function holdsSpeech(levels: number[], from: number, to: number, speechDb = speechLevelDb(levels)): boolean {
+  const need = Math.max(1, Math.round(SPEECH_MIN_SEC / LEVEL_FRAME_SEC));
+  let run = 0;
+  for (let i = Math.max(0, Math.floor(from / LEVEL_FRAME_SEC)); i < Math.min(levels.length, Math.ceil(to / LEVEL_FRAME_SEC)); i++) {
+    run = levels[i] >= speechDb - SPEECH_WITHIN_DB ? run + 1 : 0;
+    if (run >= need) return true;
+  }
+  return false;
+}
+
 export interface SentencePause {
   /** Where silence is inserted (the middle of the gap). */
   atSec: number;
@@ -49,17 +84,23 @@ export interface SentencePause {
  * model moves the mouth on a breath as if it were a word (Dale's takes: 0.58 s gaps by the
  * transcript, one real silence by the meter). Only sentence ends: quieting every pause ("debreath",
  * tried by the voice session) cost lip-sync and clipped words.
+ *
+ * With `levels` (the narration's loudness, `LEVEL_FRAME_SEC` frames), a gap that holds speech the
+ * transcript did not write down is left alone — never quieted, never split by an insertion.
  */
 export function planSentencePauses(
   words: Pick<WhisperWord, "word" | "start" | "end">[],
-  pauseSec = PAUSE_SEC()
+  pauseSec = PAUSE_SEC(),
+  levels?: number[]
 ): SentencePause[] {
+  const speechDb = levels ? speechLevelDb(levels) : 0;
   const out: SentencePause[] = [];
   for (let i = 0; i < words.length - 1; i++) {
     const w = words[i].word.trim().replace(/["'”’)\]]+$/, "");
     if (!/[.?!]$/.test(w) || NOT_A_SENTENCE_END.test(w) || /^\d+\.$/.test(w)) continue;
     const gap = words[i + 1].start - words[i].end;
     const mid = +(words[i].end + Math.max(0, gap) / 2).toFixed(3);
+    if (levels && gap > 0 && holdsSpeech(levels, words[i].end + EDGE_SEC, words[i + 1].start - EDGE_SEC, speechDb)) continue;
     if (gap < MIN_GAP_SEC) {
       const add = +(pauseSec - Math.max(0, gap)).toFixed(3);
       if (add > 0.02) out.push({ atSec: mid, addSec: add });
@@ -78,6 +119,22 @@ export function planSentencePauses(
 const RATE = 48000;
 const CH = 2;
 
+/** Loudness per `LEVEL_FRAME_SEC` frame (dBFS, both channels) of interleaved s16le PCM. */
+export function pcmLevels(pcm: Buffer, rate = RATE, ch = CH): number[] {
+  const per = Math.round(LEVEL_FRAME_SEC * rate) * ch;
+  const n = pcm.length >> 1;
+  const out: number[] = [];
+  for (let i = 0; i + per <= n; i += per) {
+    let e = 0;
+    for (let j = i; j < i + per; j++) {
+      const v = pcm.readInt16LE(j * 2) / 32768;
+      e += v * v;
+    }
+    out.push(10 * Math.log10(e / per + 1e-12));
+  }
+  return out;
+}
+
 /**
  * The narration with a real pause after every sentence. Transcribes it (WhisperX), plans the
  * insertions, splices silence in, re-encodes as the master's own shape (mp3, 48 kHz, stereo).
@@ -93,12 +150,15 @@ export async function padSentenceEnds(
   try {
     const t = await transcribeWordsFromBuffer(buf);
     if (!("words" in t) || t.words.length < 4) return buf;
-    const plan = planSentencePauses(t.words);
-    if (!plan.length) return buf;
     const src = path.join(dir, "in.mp3"), raw = path.join(dir, "in.pcm"), outRaw = path.join(dir, "out.pcm"), out = path.join(dir, "out.mp3");
     await writeFile(src, buf);
     await execFfmpeg(["-hide_banner", "-loglevel", "error", "-y", "-f", "mp3", "-i", src, "-f", "s16le", "-ac", String(CH), "-ar", String(RATE), raw]);
     const pcm = await readFile(raw);
+    const levels = pcmLevels(pcm);
+    const plan = planSentencePauses(t.words, PAUSE_SEC(), levels);
+    const spared = planSentencePauses(t.words, PAUSE_SEC()).length - plan.length;
+    if (spared > 0) log(`sentence pauses: ${spared} gap(s) left as voiced — they hold speech the transcript missed`);
+    if (!plan.length) return buf;
     // quiet the breath in each long sentence gap, with 20 ms fades so nothing clicks
     const FADE = Math.round(0.02 * RATE);
     for (const p of plan) {

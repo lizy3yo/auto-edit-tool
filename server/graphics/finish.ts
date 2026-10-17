@@ -33,7 +33,8 @@ import { NOTO_PNG, planGraphics, type PlanMessage } from "../../graphics/src/pla
 import { checkRules, type FilmLayout } from "../../graphics/src/plan/rules";
 import { detectCuts, judgeFilm, type QaResult, type Readability } from "../../graphics/src/plan/qa";
 import { getMediaDuration } from "../mediaProbe";
-import { ffmpeg, frameDiffs, narrationOf } from "./media";
+import { ffmpeg, frameDiffs, levelsOf, narrationOf } from "./media";
+import { LEVEL_FRAME_SEC, retimeNumbers } from "../../graphics/src/plan/wordTiming";
 import { calmestPlace, describe, measureCue, score, subjectOf } from "./readable";
 import { GRAPHICS_DIR, renderGraphic } from "./render";
 
@@ -77,6 +78,8 @@ export type AddGraphicsInput = {
 const MEASURE_WITHOUT_DECORATION = new Set(["CrossedList"]);
 const structural = new Set(TEMPLATES.filter(t => t.structural).map(t => t.id));
 const cards = new Set(TEMPLATES.filter(t => t.kind === "card").map(t => t.id));
+/** Graphics that replace the picture (cards, framed windows): held to the cut, never a blink of footage. */
+const fullFrame = new Set(TEMPLATES.filter(t => t.kind === "card" || t.underlay === "window").map(t => t.id));
 const sha = (x: Buffer | string) => createHash("sha1").update(x).digest("hex");
 
 function ensureDir(d: string): string {
@@ -87,16 +90,20 @@ function ensureDir(d: string): string {
 /* ───────────── inputs ───────────── */
 
 /** The film's narration, word by word on the film's own clock. Cached by the sound itself, so a
- * Reassemble that did not change the sound does not transcribe again. */
+ * Reassemble that did not change the sound does not transcribe again. Numbers are then put back
+ * where the sound says they were said (the transcriber guesses a digit's time, usually late). */
 async function wordsOf(filmPath: string): Promise<Word[]> {
   const audio = await narrationOf(filmPath);
   const file = path.join(ensureDir(path.join(CACHE, "words")), `${sha(audio)}.json`);
-  if (existsSync(file)) return JSON.parse(readFileSync(file, "utf8")) as Word[];
-  const t = await transcribeWordsFromBuffer(audio);
-  if ("error" in t) throw new Error(`the narration could not be transcribed (${t.error})`);
-  const words: Word[] = t.words.map(w => ({ text: w.word, start: w.start, end: w.end }));
-  writeFileSync(file, JSON.stringify(words));
-  return words;
+  let words: Word[];
+  if (existsSync(file)) words = JSON.parse(readFileSync(file, "utf8")) as Word[];
+  else {
+    const t = await transcribeWordsFromBuffer(audio);
+    if ("error" in t) throw new Error(`the narration could not be transcribed (${t.error})`);
+    words = t.words.map(w => ({ text: w.word, start: w.start, end: w.end }));
+    writeFileSync(file, JSON.stringify(words));
+  }
+  return retimeNumbers(words, await levelsOf(filmPath, LEVEL_FRAME_SEC).catch(() => []));
 }
 
 /** The video's colours, from its host photo; none (the default navy) when it cannot be read. */
@@ -165,13 +172,18 @@ async function plan(input: AddGraphicsInput, words: Word[], cuts: number[]): Pro
     return r.text;
   };
   const p = await planGraphics({ words, cuts, film: input.film, ask, ensureIcon: async code => !!(await iconFile(code)) });
+  // What each round asked for and what the checks refused, so a thin plan can be explained.
+  p.rounds.forEach((r, i) => {
+    input.log?.(`graphics plan round ${i + 1}: ${r.asked} asked, ${r.kept} kept${r.problems.length ? `, ${r.problems.length} refused` : ""}`);
+    for (const pr of r.problems) input.log?.(`  refused ${pr.cue}: ${pr.problem}`);
+  });
   return { cues: p.cues, rounds: p.rounds.length };
 }
 
 /** Resolve a plan cue by cue (film order), leaving out any that no longer resolve or break a
  * placement rule — a saved plan on a film that was edited since must not bring a broken graphic. */
 function resolveKeeping(specs: CueSpec[], words: Word[], cuts: number[], film: FilmLayout, dropped: GraphicsRecord["dropped"]): { specs: CueSpec[]; cues: ResolvedCue[] } {
-  const opts = { cuts, fps: FPS, structural, cards };
+  const opts = { cuts, fps: FPS, structural, cards, fullFrame };
   const kept: CueSpec[] = [];
   let resolved: ResolvedCue[] = [];
   for (const spec of specs) {

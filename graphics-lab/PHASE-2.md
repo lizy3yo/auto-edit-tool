@@ -56,3 +56,26 @@ Every graphic was checked by eye on a contact sheet, at `graphics-lab/out/finals
 
 - **No music bed in any of the four.** Every music bed download returned 404 ("shipping narration-only audio"), so the local bucket has no `music/beds/` files.
 - **Hank's voice errors.** At 1:15 the voice says "about four" where the script says "$14", and it reads "10-year" as "one zero year".
+
+## Round 5: the issues found in the finals (2026-10-17)
+
+Every spot reported on the first finals was traced to a cause, fixed as a general rule, and given a test.
+
+| Reported | Cause | Rule now |
+| --- | --- | --- |
+| Dale 1:06 and 3:04, Hank 1:20: the voice cut off | The sentence-pause step quieted any gap the transcript showed between sentences. The transcriber drops prices, so it erased "$150 to $600", "to $1,500", "to $130" and "of them": 2.5–3.3 s of digital silence. | A gap is only quieted when the audio says it is quiet (`holdsSpeech` in `server/sentencePauses.ts`). |
+| Dale 0:26: the caption did not follow the script | The planner was allowed to leave words out, and a caption could stop mid-sentence. | A word-by-word line is the narrator's exact words, in a row (`findVerbatim`). It starts and ends at a natural break (`breakProblem`): a full stop, comma, pause, clause word, or the graphic's own number. |
+| Dale 2:56: the caption was late | The transcriber guesses the time of a word written in digits, usually late. | A number is moved back to where the sound says it began (`graphics/src/plan/wordTiming.ts`). It is never moved later, and never across a pause. |
+| Dale 1:27, Scarlett 0:58, Hank 1:29: a blink of b-roll after a card | A card left 0.6–0.9 s before the shot change. | A card or window graphic holds to the cut when the shot left would be under 1.5 s. The rest of its own sentence may finish under it. QA checks "Blinks of footage beside a card". |
+| Hank 0:31: the list item was late; lists did not hold attention | An item waited for its last word. The text was small and sat at the top beside the picture. | An item appears on its first spoken word, and lands with its picture. Items are 60 px and centred on the picture. Earlier items step back. |
+| Scarlett 2:14: the host jumped mid-sentence | Back-to-back host takes were only joined up to 30 s (here 26 s + 6 s). | They are joined up to 60 s (`HOST_JOIN_MAX_SEC`). |
+
+**Found while checking the new films:**
+
+- **Chapter series.** A chapter label that clashes with another new graphic no longer takes the whole series down; the other graphic gives way. Frederick's "On the label" series had been lost this way.
+- **Numbers stay readable.** A graphic built around a number opens near it, counts the number as said once its unit is said, and is never cut at a shot change within 0.5 s of its number landing. Hank's "6 hours" had shown for 0.2 s.
+- **Planner refusals are logged.** The checks' refusals now appear in the render log ("graphics plan round N: … refused …").
+
+**Second finals** (generated in the tool, then re-assembled with the final code): Dale 389 — 18 graphics, QA pass; Hank 390 — 5 placed, 1 left out (the "6 hours" number read 4.0:1 on its picture, under the 4.5:1 minimum), QA pass; Scarlett 392 — 17, QA pass; Frederick 393 — 16, QA pass. No blinks, no lingering, no erased words in any of the four. Tests: 2,662 pass; the same 15 failures that predate this work.
+
+**Network.** Several runs failed on this connection (`ENOTFOUND` / connect timeouts to R2) and were re-run from where they stopped.

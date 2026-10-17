@@ -655,7 +655,11 @@ Express · tRPC · Drizzle · MySQL.
   20 ms fades clear of both words. Dale's voice fills sentence gaps with breath (0.58 s by the
   transcript, one silence by the meter), HeyGen moves the mouth on a breath, and his lip-sync failed
   0/4; an ellipsis made v4 pause only when it chose to (2/4). Only sentence ends — quieting every
-  pause ("debreath") cost lip-sync and words. `SENTENCE_PAUSES=0` turns it off; `voice-bench.mts`
+  pause ("debreath") cost lip-sync and words. A GAP IS ONLY TOUCHED WHEN THE AUDIO SAYS IT IS QUIET
+  (`holdsSpeech`, 2026-10-17): the transcriber drops prices and mishears full stops, so the step
+  erased "$150 to $600", "to $1,500" (Dale, job 386) and "to $130", "of them" (Hank, job 388) — 2.5-3.3 s
+  of digital silence where words were. Any 80 ms in a gap within 15 dB of the narration's speech level
+  leaves that gap exactly as voiced (the log says how many). `SENTENCE_PAUSES=0` turns it off; `voice-bench.mts`
   applies it by default (`sentencePauses: false` to compare). (c) A MOUTH AT REST (PHONE LOOK v4):
   HeyGen returns to the photo's mouth whenever the voice stops, so a photo taken MID-WORD gives a
   mouth that never closes between sentences (Dale's pauses showed teeth; HeyGen's own advice is a
@@ -2259,7 +2263,8 @@ Always 16:9. Fire-and-forget; progress persisted to the job row and polled by th
   Every HeyGen render starts from the same still pose, so two host beats in a row on one photo
   jump at the join — the CTA pitch after the book did it every time. Full-frame host beats that
   tile the narration join into one render (same seconds, same cost) up to `HOST_JOIN_MAX_SEC`
-  (30 s), never across a CTA edge, QR/cover/asset beat or the two-angle cold open; the joined
+  (60 s since 2026-10-17 — at 30 Scarlett's CTA, job 387, was a 26 s and a 6 s take of one sentence
+  and the host jumped at 2:14), never across a CTA edge, QR/cover/asset beat or the two-angle cold open; the joined
   narration is re-cut from the master before anything renders.
 - **Provider gate**: generation needs an _active_ `provider_configs` row. "No active
   provider configured" ⇒ re-run `scripts/seed.mjs` or set active in Admin.
