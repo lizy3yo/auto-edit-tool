@@ -223,7 +223,9 @@ export function spokenListItems(text: string | undefined): string[] | null {
     .map(p => p.replace(/^(?:and|or|maybe|plus|then|also|even)\s+/i, "").trim())
     .filter(Boolean);
   if (items.length < 3) return null;
-  return items.every(p => LIST_ITEM_START.test(p) && p.split(/\s+/).length <= 8) ? items : null;
+  // "the hem went around once, the straps were four short seams, and the four squares finished it."
+  // (job 106) is three clauses, not three things (`notAThing`).
+  return items.every(p => LIST_ITEM_START.test(p) && p.split(/\s+/).length <= 8 && !notAThing(p)) ? items : null;
 }
 
 export function shotListEligible(
@@ -690,6 +692,8 @@ export function looksLikeListItem(text: string | undefined): boolean {
   // A clause is not an item: "the cheapest fabric won," and "the one I loved most" say something
   // about a thing — a list item only names one.
   if (LIST_ITEM_CLAUSE.test(t)) return false;
+  // "six and a half," and "three a side," open on a number but name nothing (`notAThing`).
+  if (notAThing(t)) return false;
   return /^(?:(?:and|or|plus|maybe|then|also)\s+)?(?:a|an|the|some|one|two|three|four|five|six|seven|eight|nine|ten|a few|a couple of|your|my|his|her|their|our|this|that|these|those|old|new)\b[^.;:!?]*[,.;]?$/i.test(
     t
   );
@@ -706,6 +710,105 @@ export const NOT_A_LIST_ITEM = new Set([
   "from", "by", "to", "into", "onto", "over", "under", "about", "around", "like", "as", "of",
 ]);
 
+/** A number word or figure ("six", "twenty", "half", "$20"). "quarter" is left out: a quarter is a coin. */
+const NUMBER_WORD =
+  "(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|dozen|half|halves|third|thirds|\\$?\\d+(?:[.,]\\d+)?%?)";
+const IS_NUMBER = new RegExp(`^${NUMBER_WORD}$`);
+/** "thirty-five" is one number. */
+const isNumber = (w: string) => w.split("-").every(p => IS_NUMBER.test(p));
+/** Words that sit between number words without naming anything ("six AND A half", "two OR three"). */
+const NUMBER_FILLER = new Set(["a", "an", "and", "or", "to", "point", "about", "maybe", "nearly", "almost", "roughly", "around"]);
+/** A unit of time: a number of them is a length of time, not a thing. */
+const TIME_UNIT = /^(?:seconds?|minutes?|hours?|days?|nights?|evenings?|mornings?|weeks?|weekends?|months?|years?|decades?|century|centuries)$/;
+/** What may lead a length of time besides number words ("A FEW weeks", "A COUPLE OF months"). */
+const TIME_QUANTITY = /^(?:a few|a couple|a couple of|several|another|many)$/;
+/** One word that may follow it and keep it a length of time ("… AGO"); "of …" may too ("… OF evenings"). */
+const AFTER_TIME = /^(?:ago|later|earlier|back)$/;
+/** Set phrases, greetings and pronouns: said, never drawn. Closed list of ordinary English. */
+const NOT_A_THING_PHRASE = new Set([
+  "give or take", "more or less", "sooner or later", "and so on", "so on", "etc", "et cetera", "or so",
+  "as well", "too", "either", "neither", "you know", "i mean", "of course", "at least", "at most",
+  "for sure", "no doubt", "back up", "hello", "hi", "hey", "welcome", "thanks", "thank you",
+  "goodbye", "bye", "please", "tell me", "nowhere else", "somewhere else", "anywhere", "everywhere",
+  "anybody", "anyone", "everybody", "everyone", "nobody", "no one", "somebody", "someone", "anything",
+  "everything", "something", "nothing", "whatever", "whoever", "that", "this", "it", "them", "those", "these",
+]);
+/** Prepositions `NOT_A_LIST_ITEM` does not hold: a piece opening on one says where ("through the pine"). */
+const MORE_PREPOSITIONS = new Set([
+  "through", "across", "along", "past", "behind", "between", "toward", "towards", "without", "within",
+  "upon", "against", "beneath", "beyond",
+]);
+/** Nouns a number labels ("round ten", "chapter two", "step three"). */
+const LABEL_NOUN = new Set([
+  "round", "row", "chapter", "step", "part", "day", "week", "number", "page", "level", "size",
+  "volume", "lesson", "rule", "tip", "stage", "phase", "item", "section",
+]);
+/** "three a side", "two per row". */
+const RATE = new RegExp(`^${NUMBER_WORD}\\s+(?:a|an|per)\\s+\\S+$`);
+/** "two or three rounds apiece", "three at once". */
+const RATE_END = /\s(?:apiece|each|at once|at a time)$/;
+/** A contracted IS ("that's rude", "this one's for…"): the piece says something, it names nothing. */
+const CONTRACTED_IS = /\b(?:that|it|this|there|here|who|one|he|she|everyone|nobody|everything)'s\b/;
+/** An adverb then a verb ("just looks", "still counts"). Never "even"/"only", which also lead a plural noun ("even stitches"). */
+const ADVERB_VERB = /\b(?:just|still|already|never|always|actually|really|also)\s+[a-z]+s\b/;
+/**
+ * A thing, then a common linking or motion verb, then more ("the star LOOKS fine", "the word LIVES
+ * in your head"). At least one word between the article and the verb, and never "… of" after it, so
+ * "the sounds of the market" and "the wonders of the sea" stay things; never across "that/which/who"
+ * ("a curtain that came down years ago" is a thing).
+ */
+const THING_THEN_VERB =
+  /^(?:a|an|the|this|that|my|your|our|his|her|their|some)\s+(?:(?!that\b|which\b|who\b)[a-z'-]+\s+){1,5}?(?:looks|lives|seems|feels|sounds|counts|wonder|wonders|belongs|means|stays|happens|started|starts|ended|came|comes|went|goes)\s+(?!of\b)\S/;
+
+/** A number of time units: "five minutes", "six and a half hours", "a few weeks of evenings", "two thousand years ago". */
+function lengthOfTime(words: string[]): boolean {
+  const u = words.findIndex(w => TIME_UNIT.test(w));
+  if (u < 1) return false;
+  const lead = words.slice(0, u);
+  const counted =
+    TIME_QUANTITY.test(lead.join(" ")) ||
+    (lead.some(isNumber) && lead.every(w => isNumber(w) || NUMBER_FILLER.has(w)));
+  const after = words.slice(u + 1);
+  return counted && (!after.length || after[0] === "of" || (after.length === 1 && AFTER_TIME.test(after[0])));
+}
+
+/**
+ * A LIST ITEM IS A THING (2026-10-18, the audit's replay of 336 jobs): why a spoken-list item names
+ * nothing a picture could show, or null when it may. A list gets one picture per item, and nothing
+ * asked what an item named — so "Round three, three a side, round ten, ten a side, and round twenty,
+ * twenty." (job 351) became five pictures of one blanket, "six," (job 352) a stack of boards of its
+ * own, "or nosy," (job 357) a dog's nose, and the model's "as health, as rest" (job 362) a chain on a
+ * throat. Refused: numbers alone ("six and a half"), lengths of time ("five minutes", "a few weeks of
+ * evenings", "two thousand years ago"), numbered labels ("round ten"), rates ("three a side", "…
+ * apiece"), set phrases, greetings and pronouns ("give or take", "welcome", "nobody"), an aside or a
+ * preposition first ("as rest", "through the pine"), and a clause ("…if that's rude", "that still
+ * counts", "the star looks fine right afterward"). A trailing "too / as well / either" is not part
+ * of what is named ("some glue too" is glue). A describing word ending in -ed is NOT refused:
+ * "pieced from a few scraps, quilted, and bound" (jobs 159, 174, 178) is three real stages. Closed
+ * lists of ordinary English, no channel's words. Pure.
+ */
+export function notAThing(item: string): string | null {
+  const core = item
+    .trim()
+    .replace(/’/g, "'")
+    .replace(/[.!?;:,]+$/, "")
+    .replace(/^(?:(?:and|or|plus|maybe|then|also|even|nor)\s+)+/i, "")
+    .replace(/\s+(?:too|as well|either)$/i, "")
+    .trim()
+    .toLowerCase();
+  const words = core.split(/\s+/).filter(Boolean);
+  if (!words.length) return "no words";
+  if (NOT_A_THING_PHRASE.has(core)) return "a set phrase or a pronoun";
+  const first = words[0].replace(/[^a-z]/g, "");
+  if (NOT_A_LIST_ITEM.has(first) || MORE_PREPOSITIONS.has(first)) return "an aside or a preposition first";
+  if (words.some(isNumber) && words.every(w => isNumber(w) || NUMBER_FILLER.has(w))) return "only a number";
+  if (words.length === 2 && LABEL_NOUN.has(words[0]) && isNumber(words[1])) return "a numbered label";
+  if (RATE.test(core) || RATE_END.test(core)) return "a rate";
+  if (lengthOfTime(words)) return "a length of time";
+  if (CONTRACTED_IS.test(core) || ADVERB_VERB.test(core) || THING_THEN_VERB.test(core)) return "a clause";
+  return null;
+}
+
 /**
  * A list item with no article — "flour,", "sugar,", "and butter." — a bare name of one to four
  * words: no subject or verb (`LIST_ITEM_CLAUSE`), no "-ly" word, not an aside ("Honestly,"). Only
@@ -719,7 +822,9 @@ export function looksLikeBareListItem(text: string | undefined): boolean {
   if (words.length > 4) return false;
   if (!/^[a-z0-9][a-z0-9' -]*[,.;]?$/i.test(core)) return false;
   if (words.some(w => /ly[,.;]?$/i.test(w))) return false;
-  return !NOT_A_LIST_ITEM.has(words[0].replace(/[^a-z]/gi, "").toLowerCase());
+  if (NOT_A_LIST_ITEM.has(words[0].replace(/[^a-z]/gi, "").toLowerCase())) return false;
+  // "twenty.", "give or take," and "too." are short and bare, and name nothing (`notAThing`).
+  return !notAThing(t);
 }
 
 /** Either shape of list item. */

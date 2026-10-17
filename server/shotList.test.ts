@@ -1168,6 +1168,110 @@ describe("a list without articles is recognised too — any channel", () => {
   });
 });
 
+describe("a list item is a thing (the audit's replay: jobs 351, 352, 357, 362, 400)", () => {
+  it("refuses numbers, lengths of time, labels, rates, set phrases and clauses — the items that were drawn", async () => {
+    const { notAThing } = await import("./shotList");
+    const refused: [string, string][] = [
+      ["six,", "only a number"], // job 352: "Mostly four, six, and eight inch widths."
+      ["twenty.", "only a number"], // job 351
+      ["six and a half", "only a number"],
+      ["One", "only a number"], // job 351: "One, two, three, four, all the way up to twelve."
+      ["round ten,", "a numbered label"], // job 351: "Round three, three a side, round ten, …"
+      ["and round twenty,", "a numbered label"],
+      ["three a side,", "a rate"],
+      ["two or three rounds apiece,", "a rate"],
+      ["a few weeks of evenings,", "a length of time"], // job 351
+      ["or a couple of months,", "a length of time"],
+      ["five minutes", "a length of time"], // job 11
+      ["Two thousand years ago,", "a length of time"], // job 400
+      ["give or take", "a set phrase or a pronoun"],
+      ["too", "a set phrase or a pronoun"],
+      ["and nowhere else.", "a set phrase or a pronoun"], // job 322
+      ["Hello", "a set phrase or a pronoun"], // job 220: "Hello, friend, and welcome to …"
+      ["tell me", "a set phrase or a pronoun"], // job 355
+      ["as rest,", "an aside or a preposition first"], // job 362, the model's list
+      ["through the pine", "an aside or a preposition first"],
+      ["A whole lot of folks wonder if that's rude,", "a clause"], // job 357
+      ["That's called joining,", "a clause"], // job 351
+      ["that still counts.", "a clause"],
+      ["the star looks fine right afterward,", "a clause"],
+      ["The word lives in your head and theirs", "a clause"], // job 322
+      ["a week later his club friends started messaging me", "a clause"],
+    ];
+    for (const [item, why] of refused) expect([item, notAThing(item)]).toEqual([item, why]);
+    // Things stay things — the clean lists of the same replay, and the shapes the rule must not reach.
+    for (const item of [
+      "and eight inch widths.",
+      "Two slip nuts",
+      "one bucket",
+      "a dozen eggs",
+      "2 eggs,",
+      "a curtain that came down years ago", // job 106: a relative clause still names a thing
+      "the good half of a canvas drop cloth",
+      "quilted,", // jobs 159/174/178: "pieced from a few scraps, quilted, and bound" — three real stages
+      "and bound,",
+      "flicked into the dirt", // job 355
+      "carried off by a rat after dark",
+      "mother of pearl", // job 362: "Ivory, oat, a warm coral, mother of pearl."
+      "Drawer fronts", // job 352
+      "and some glue too.", // a trailing "too" is not what is named
+      "the round after that too",
+      "a quarter", // a coin, not a number
+      "two weekend bags", // a time word that names a thing
+      "the sounds of the market", // "sounds of" is a noun, not a verb
+      "nice even stitches",
+    ])
+      expect([item, notAThing(item)]).toEqual([item, null]);
+  });
+
+  it("never splits or marks pieces that name nothing as list items", async () => {
+    const { looksLikeBareListItem, looksLikeListItem, splitListPieces } = await import("./shotList");
+    for (const t of ["twenty.", "give or take,", "too.", "and round twenty,"]) expect([t, looksLikeBareListItem(t)]).toEqual([t, false]);
+    for (const t of ["six and a half,", "three a side,", "a few weeks of evenings,", "the star looks fine right afterward,"])
+      expect([t, looksLikeListItem(t)]).toEqual([t, false]);
+    expect(looksLikeListItem("and eight inch widths.")).toBe(true);
+    expect(looksLikeBareListItem("quilted,")).toBe(true);
+    const one = scene(1, "six and a half, give or take,", { showSubject: "a clock on the wall" });
+    expect(splitListPieces([one])).toEqual([one]);
+    // Job 351: "Round three, three a side, round ten, ten a side, and round twenty, twenty." — every
+    // piece read as a list item, so each was marked and kept apart, and "and round twenty, twenty."
+    // was split in two: six pictures of one blanket. Now none is a list item, so they may join.
+    const b = scene(3, "Round three, three a side, round ten, ten a side, and round twenty, twenty.");
+    const { scenes } = applyShotPlan(
+      [b],
+      [
+        {
+          scene: 3,
+          shots: [
+            { from: "Round three", show: "the small star blanket after round three" },
+            { from: "three a side", show: "three stitches along one side" },
+            { from: "round ten", show: "the growing star blanket" },
+            { from: "ten a side", show: "ten stitches along one side" },
+            { from: "and round twenty", show: "a much larger star blanket" },
+          ],
+        },
+      ]
+    );
+    expect(scenes.map(s => [s.scriptText, !!s.listCut])).toEqual([
+      ["Round three,", false],
+      ["three a side,", false],
+      ["round ten,", false],
+      ["ten a side,", false],
+      ["and round twenty, twenty.", false],
+    ]);
+  });
+
+  it("a host line of clauses is not 'just a list' (job 106)", async () => {
+    const { spokenListItems } = await import("./shotList");
+    expect(spokenListItems("the hem went around once, the straps were four short seams, and the four squares finished it.")).toBeNull();
+    expect(spokenListItems("A bin in the hall closet, a bag in the garage, maybe a box under the bed.")).toEqual([
+      "A bin in the hall closet",
+      "a bag in the garage",
+      "a box under the bed",
+    ]);
+  });
+});
+
 describe("a picture shows what its line is about, in the place it names (Hank's job 269: an empty market table)", () => {
   it("tells the line check a place alone is wrong, and a new thing the line names is right", async () => {
     const { FIT_SYSTEM } = await import("./shotList");

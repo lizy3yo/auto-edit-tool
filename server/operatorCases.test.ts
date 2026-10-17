@@ -404,6 +404,35 @@ describe("lists: the model and the sentence rules together (Diane's job 319)", (
   });
 });
 
+describe("a list item is a thing (the audit's jobs 351, 352, 357, 362)", () => {
+  it("job 351: numbers, labels and rates are not items — the pictures lose their list mark and may join", () => {
+    const scenes = [
+      host(1, "Here is how the sides grow.", { hostOpener: true }),
+      pic(2, "Round three,", "the small star blanket after round three", { listCut: true }),
+      pic(3, "three a side,", "three stitches along one side", { listCut: true }),
+      pic(4, "round ten,", "the growing star blanket", { listCut: true }),
+      pic(5, "ten a side,", "ten stitches along one side", { listCut: true }),
+      pic(6, "and round twenty,", "a much larger star blanket", { listCut: true }),
+      pic(7, "twenty.", "one long side of the blanket", { listCut: true }),
+      host(8, "Bye."),
+    ];
+    const r = applySpokenLists(scenes, lists(scenes));
+    expect(r.applied).toBe(0);
+    expect(r.scenes.filter(s => s.listCut)).toEqual([]);
+  });
+
+  it("jobs 352, 357 and 362: no list of a number, of a clause, or of the model's 'as rest'", async () => {
+    const text =
+      "Mostly four, six, and eight inch widths. A whole lot of folks wonder if that's rude, or nosy, or some kind of jealousy thing. " +
+      "The eye reads light near the face as health, as rest, as a good night's sleep. Wash, towel, dryer, brush, every single morning.";
+    const r = await findSpokenLists(text, {
+      ask: async () => '{"lists":[{"sentence":2,"kind":"things","items":["as health","as rest","as a good night\'s sleep"]}]}',
+    });
+    // The real list in the same script is still found.
+    expect(r.lists.map(l => l.items)).toEqual([["Wash", "towel", "dryer", "brush"]]);
+  });
+});
+
 describe("Lance's job 321: a list split across two host shots", () => {
   it("becomes one picture per item; the first shot keeps its words, the host comes back after", () => {
     const scenes = [
