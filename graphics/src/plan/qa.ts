@@ -2,7 +2,7 @@
 // lab's composite. Pure: it reads frame-to-frame change measured off the RENDERED files (the
 // faults it catches — a one-frame flash, a graphic still up after its words — only exist in the
 // output), the resolved cues and the readability readings.
-import { CARD_HOLD_MAX_SEC, CUT_SNAP_SEC, MAX_LINGER_SEC, MIN_SHOT_SEC, type ResolvedCue } from "../cueResolve";
+import { CARD_HOLD_SILENT_MAX_SEC, CUT_SNAP_SEC, LINGER_SEC, MAX_LINGER_SEC, MIN_SHOT_SEC, PAUSE_REACH_SEC, type ResolvedCue } from "../cueResolve";
 import { templateById } from "../registry";
 import { appearFrame } from "../timing";
 import type { RuleProblem } from "./rules";
@@ -90,7 +90,12 @@ export function judgeFilm(q: QaInput): QaResult {
 
   const structural = (c: ResolvedCue) => !!templateById(c.template).structural;
   const lingering = cues.filter(
-    c => !structural(c) && c.contentEnd !== undefined && c.end - (c.spokenEnd ?? c.contentEnd) > (c.conformed.held ? CARD_HOLD_MAX_SEC : MAX_LINGER_SEC)
+    c =>
+      !structural(c) &&
+      c.contentEnd !== undefined &&
+      c.end - (c.spokenEnd ?? c.contentEnd) >
+        (c.conformed.held ? CARD_HOLD_SILENT_MAX_SEC : c.leftInPause ? LINGER_SEC + PAUSE_REACH_SEC + 0.15 : MAX_LINGER_SEC) &&
+      c.end - c.start > (c.readSec ?? 0) + PAUSE_REACH_SEC + 0.15
   );
   // A blink of footage (under MIN_SHOT_SEC) between a picture-replacing graphic and the next or
   // previous shot change: card → b-roll for 0.8 s → host reads as a glitch.

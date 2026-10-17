@@ -91,7 +91,8 @@ describe("parts of one thing vs separate things (Ruth's job 298 vs Dale's job 29
   ];
 
   it("Ruth: each named block is a close-up of that block, drawn from the quilt's memory", () => {
-    const scenes = ruth();
+    // the named-looks step marks each block a part of the quilt (next case)
+    const scenes = ruth().map((s, k) => (k ? { ...s, partOf: "sampler quilt" } : s));
     for (const s of scenes.slice(1)) {
       expect(shotFraming(s)).toBe("close");
       expect(memoryViewFor(scenes, s)).toBe(PART_VIEW);
@@ -110,6 +111,16 @@ describe("parts of one thing vs separate things (Ruth's job 298 vs Dale's job 29
       pic(1, "Engraved boards,", "an engraved board", { listCut: true, keyThing: "personalized pile" }),
       pic(2, "house signs,", "a house sign", { listCut: true, keyThing: "personalized pile" }),
       pic(3, "keepsake boxes.", "a keepsake box", { listCut: true, keyThing: "personalized pile" }),
+    ];
+    expect(memorySourcesFor(scenes, scenes[1])).toEqual([]);
+    expect(memorySourcesFor(scenes, scenes[2])).toEqual([]);
+  });
+
+  it("Dale's job 397: list items that are not parts are never drawn from the group's pile", () => {
+    const scenes = [
+      pic(1, "Smalls, about $10 to $40.", "a pile of coasters and ornaments", { keyThing: "small wood pieces pile" }),
+      pic(2, "Coasters,", "close-up of round coasters", { listCut: true, keyThing: "small wood pieces pile" }),
+      pic(3, "ornaments,", "close-up of wood ornaments", { listCut: true, keyThing: "small wood pieces pile" }),
     ];
     expect(memorySourcesFor(scenes, scenes[1])).toEqual([]);
     expect(memorySourcesFor(scenes, scenes[2])).toEqual([]);
@@ -879,9 +890,15 @@ describe("the host's face is never drawn", () => {
       "https://x/host.png"
     );
     expect(scenes[0].showSubject).not.toMatch(/face/);
-    expect(hostBrollClause("a woman with silver hair")).toMatch(
-      /even when the description speaks of the face/
-    );
+    expect(hostBrollClause("a woman with silver hair")).toMatch(/the face is never shown/);
+  });
+
+  it("frames a host facing the camera at the lips or chin, never a body forward with the head twisted away (Scarlett's job 395, 2:22 / 2:41)", () => {
+    const clause = hostBrollClause("a woman with silver hair");
+    expect(clause).toMatch(/head always faces the same way as the body/);
+    expect(clause).toMatch(/cuts across the lower face, at the lips or the chin/);
+    expect(clause).toMatch(/Never a body facing the camera with the head turned away/);
+    expect(clause).toMatch(/same hair colour and cut, the same skin and the same clothes/);
   });
 });
 

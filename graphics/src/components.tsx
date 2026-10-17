@@ -11,7 +11,7 @@ import {
 } from "remotion";
 import { withAlpha } from "./palette";
 import { THEME, TYPE, type Theme } from "./theme";
-import { fadeIn, splitWords, wordFrames, type Phrase } from "./timing";
+import { fadeIn, pageStarts, splitWords, wordFrames, type Phrase } from "./timing";
 
 export const ThemeContext = React.createContext<Theme>(THEME);
 export const useTheme = () => React.useContext(ThemeContext);
@@ -162,12 +162,22 @@ export const WordReveal: React.FC<{
   uppercase?: boolean;
   /** Words not yet spoken: hidden (default) or shown dim, as a "ghost" line. */
   ghost?: boolean;
-}> = ({ phrase, style, emphasis = [], emphasisColor, uppercase, ghost }) => {
+  /** Page a long line like subtitles: at most this many words on screen, the next page replacing
+   * it the moment its first word is said — so a whole sentence is shown, never half of it. */
+  pageWords?: number;
+}> = ({ phrase, style, emphasis = [], emphasisColor, uppercase, ghost, pageWords }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const t = useTheme();
-  const words = splitWords(phrase.text);
-  const frames = wordFrames(phrase, fps);
+  const all = splitWords(phrase.text);
+  const allFrames = wordFrames(phrase, fps);
+  const starts = pageStarts(all, pageWords ?? 0);
+  let page = 0;
+  for (let p = 1; p < starts.length; p++) if (frame >= allFrames[starts[p]]) page = p;
+  const from = starts[page];
+  const to = starts[page + 1] ?? all.length;
+  const words = all.slice(from, to);
+  const frames = allFrames.slice(from, to);
   const em = new Set(emphasis.map(norm));
   return (
     <div style={{ textWrap: "balance", ...style } as React.CSSProperties}>

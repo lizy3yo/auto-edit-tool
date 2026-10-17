@@ -659,7 +659,18 @@ Express · tRPC · Drizzle · MySQL.
   (`holdsSpeech`, 2026-10-17): the transcriber drops prices and mishears full stops, so the step
   erased "$150 to $600", "to $1,500" (Dale, job 386) and "to $130", "of them" (Hank, job 388) — 2.5-3.3 s
   of digital silence where words were. Any 80 ms in a gap within 15 dB of the narration's speech level
-  leaves that gap exactly as voiced (the log says how many). `SENTENCE_PAUSES=0` turns it off; `voice-bench.mts`
+  leaves that gap exactly as voiced (the log says how many). A PAUSE IS MADE, NEVER CUT (2026-10-17,
+  Frederick's "The type." at 1:10 of job 393 sounded chopped): every edge comes from the SOUND — a gap
+  starts where the word has died away (`soundEnd`, 35 dB under the speech level) and ends where the
+  next word begins (`soundStart`), the fades are 80 ms (`FADE_SEC`, was 20), a breath is lowered 30 dB
+  (`QUIET_GAIN`), never to dead digital silence, and an inserted pause goes in at the quietest moment
+  between the words with the word before eased out over 60 ms. Sentence ends come from the SCRIPT as well
+  as the transcript (`scriptSentenceEnds`; "label. The type." was heard "label, the type").
+  The pause is 0.5 s (`PAUSE_SEC`, was 0.3): with the mark gone, 0.3 s left Scarlett's mouth moving in
+  pauses (three HeyGen rounds each, `bench/lipsync-pause`: mark 0.44 / sync 0.46, natural 0.3 s 0.62 / 0.31,
+  natural 0.5 s 0.59 / 0.35; Frederick 0.66/0.35 → 0.62/0.36). The operator chose the natural pause for
+  every channel over the mark: no word is cut, at the cost of Scarlett's calmer mouth (still above Bertha's 0.30).
+  `SENTENCE_PAUSES=0` turns it off; `voice-bench.mts`
   applies it by default (`sentencePauses: false` to compare). (c) A MOUTH AT REST (PHONE LOOK v4):
   HeyGen returns to the photo's mouth whenever the voice stops, so a photo taken MID-WORD gives a
   mouth that never closes between sentences (Dale's pauses showed teeth; HeyGen's own advice is a
@@ -876,7 +887,9 @@ Express · tRPC · Drizzle · MySQL.
   (`brollHostLook`/`brollHostRef`, never a split's picture half), and `buildStillPrompt` /
   the clip prompt use `hostBrollClause` + `NO_OTHER_FIGURES_SUFFIX` with the host photo as the
   image reference — seen from behind or the side, the face NEVER shown (a drawn face would not
-  match the HeyGen host; the operator chose this). ONE BODY, TWO ARMS (`ONE_BODY_CLAUSE`, in `hostBrollClause`; `NO_FIGURES_SUFFIX` for
+  match the HeyGen host; the operator chose this). THE HEAD FACES THE WAY THE BODY DOES (`HOST_FRAMING_CLAUSE`, 2026-10-17,
+  Scarlett's job 395 drew a forward body with the head twisted away): a body facing the camera is framed
+  from the lips or chin down; a body turned away shows the back or side of the head; never a twisted head. ONE BODY, TWO ARMS (`ONE_BODY_CLAUSE`, in `hostBrollClause`; `NO_FIGURES_SUFFIX` for
   hands-only shots, 2026-09-29): over-the-shoulder hands shots are where the picture model adds an
   arm — Norbert's 3-min test (job 232, 2:19) had a third sleeve ending at the drill's battery, and
   neither Haiku nor Sonnet could see it at 768 px or full size, even told to trace every sleeve, so
@@ -1117,7 +1130,11 @@ Express · tRPC · Drizzle · MySQL.
   (d) REAL THINGS LOOK REAL: a real app, website, store or market the LINE names is a named kind —
   its real colours and layout (`REAL_APP_SCREEN_CLAUSE`), logo and words soft and unreadable (the
   operator's option A). (e) A list item is its own thing: never `partOf` a group, never drawn from
-  the item before it (`memorySourcesFor`), a part close-up is still held to not COPYING its memory,
+  the item before it (`memorySourcesFor`), and drawn from a key thing's picture only when its OWN
+  words name that thing or it is a part of it (`wordsName` — Dale's job 397: "Coasters, ornaments"
+  both inherited the pile of small pieces and came back as the pile twice); every item's prompt
+  names the other items of its list so it is drawn as what sets it apart (`scene.listItems`, set in
+  `attachMemory`; `listItemClause`); a part close-up is still held to not COPYING its memory,
   and writing a rewrite names but the line does not say is blurred (`blurredPrint` now covers
   engraved/monogram/initials). (f) LISTS STAY CUT: the pause-snap may no longer take a piece's own
   words away (`keepOwnWords` — "…ranking | Etsy, |" snapped over the word), the opening line hands
@@ -1610,7 +1627,9 @@ Express · tRPC · Drizzle · MySQL.
   0.65/0.75 was worse; stays 0.5. (b) Speed is clamped to 0.7-1.2 (`ELEVEN_SPEED_MIN/MAX` in the
   adapter, `SPEED_MIN/MAX` in delivery): 69Labs REFUSES anything else with 400, and a "slow" paragraph
   on a 0.8 channel asked for 0.68 — every Hank film's paced read was refused three times and re-voiced
-  flat. Hank's channel speed is now 0.9. (c) CLONE voices get a 0.3 s pause after every sentence in
+  flat. Hank's channel speed is now 0.9. (c) [RETIRED 2026-10-17: `CLONE_SENTENCE_PAUSE_SEC` is 0 — the
+  provider fills its pause mark with dead digital silence and cuts each sentence's last word to fit
+  (-38 dB to nothing in 0.1 s); the sentence-pause step above makes the pause for every voice] CLONE voices got a 0.3 s pause after every sentence in
   the voiced text only (`withSentencePauses`, MiniMax's `<#0.3#>`, never read aloud): the clone lane
   IGNORES speed (0.7 / 1.0 / 1.4 came back the same length — the Speed field does nothing on the 8
   clone channels), and about half of Frederick's takes came back rushed, 0.2-0.3 s between sentences,

@@ -14,9 +14,11 @@ import {
   resolveCues,
   tokens,
   findVerbatim,
+  VERDICT_SEC,
+  TAIL_SPILL_SEC,
   type Word,
 } from "./cueResolve";
-import { countUpValue, splitWords, wordFrames } from "./timing";
+import { countUpValue, pageStarts, splitWords, wordFrames } from "./timing";
 
 // "So get a stepladder, take one alarm down, and read the label. ... read the label again."
 const W = (s: string, start: number): Word[] =>
@@ -105,7 +107,7 @@ describe("resolveCues", () => {
 
   it("gives each DISPLAYED word of a phrase its own spoken time", () => {
     const [cue] = resolveCues(
-      [{ id: "s", template: "Statement", start: "Ionization", durationSec: 4, props: { headline: { text: "Ionization is quick on open flame,", words: true } } }],
+      [{ id: "s", template: "DimCaption", start: "Ionization", durationSec: 4, props: { headline: { text: "Ionization is quick on open flame,", words: true } } }],
       words
     );
     const h = cue.props.headline as { wordTimes: number[] };
@@ -184,7 +186,7 @@ describe("a graphic leaves when its own words are done", () => {
 
   it("ends LINGER_SEC after its last displayed word, not at the far planned end", () => {
     const [c] = resolveCues(
-      [{ id: "s", template: "Statement", start: "Ionization", end: "read the label", props: { headline: { text: "Ionization is quick on open flame,", words: true } } }],
+      [{ id: "s", template: "DimCaption", start: "Ionization", end: "read the label", props: { headline: { text: "Ionization is quick on open flame,", words: true } } }],
       words
     );
     expect(c.contentEnd).toBeCloseTo(flame.end, 3);
@@ -201,7 +203,7 @@ describe("a graphic leaves when its own words are done", () => {
   });
 
   it("is never shorter than MIN_ON_SCREEN_SEC, and a title keeps its planned length", () => {
-    const [short] = resolveCues([{ id: "h", template: "HostCaption", start: "take one alarm", end: "read the label", props: { phrase: { text: "take one alarm down,", words: true } } }], words);
+    const [short] = resolveCues([{ id: "h", template: "TitleOverFootage", start: "take one alarm", end: "read the label", props: { phrase: { text: "take one alarm down,", words: true } } }], words);
     expect(short.end - short.start).toBeGreaterThanOrEqual(MIN_ON_SCREEN_SEC - 0.04);
     const [title] = resolveCues(
       [{ id: "t", template: "ChapterLabel", start: "get a stepladder", end: "read the label", props: { phrase: { text: "get a stepladder", words: true } } }],
@@ -237,7 +239,7 @@ describe("hand-off between graphics", () => {
   it("the earlier graphic leaves HANDOFF_GAP_SEC before the next one starts, its words kept", () => {
     const [a, b] = resolveCues(
       [
-        { id: "a", template: "HostCaption", start: "keep it simple", durationSec: 2, props: { phrase: { text: "keep it simple", words: true } } },
+        { id: "a", template: "TitleOverFootage", start: "keep it simple", durationSec: 2, props: { phrase: { text: "keep it simple", words: true } } },
         { id: "b", template: "ChapterLabel", start: "now the label", durationSec: 3, props: {} },
       ],
       ws,
@@ -247,7 +249,7 @@ describe("hand-off between graphics", () => {
     expect(a.end).toBeGreaterThanOrEqual(a.start + MIN_ON_SCREEN_SEC - 0.04);
     const [a2] = resolveCues(
       [
-        { id: "a", template: "HostCaption", start: "keep it", durationSec: 2, props: { phrase: { text: "keep it", words: true } } },
+        { id: "a", template: "TitleOverFootage", start: "keep it", durationSec: 2, props: { phrase: { text: "keep it", words: true } } },
         { id: "b", template: "ChapterLabel", start: "the label says", durationSec: 3, props: {} },
       ],
       ws,
@@ -258,7 +260,7 @@ describe("hand-off between graphics", () => {
   it("never cuts a graphic's own words short to make room", () => {
     const [a, b] = resolveCues(
       [
-        { id: "a", template: "HostCaption", start: "keep it simple", props: { phrase: { text: "keep it simple", words: true } } },
+        { id: "a", template: "TitleOverFootage", start: "keep it simple", props: { phrase: { text: "keep it simple", words: true } } },
         { id: "b", template: "ChapterLabel", start: "now the label", durationSec: 3, props: {} },
       ],
       ws,
@@ -293,7 +295,7 @@ describe("cards and cuts never leave the screen stale", () => {
     expect((c.props.left as { at: number }).at).toBe(0);
   });
   it("an end snaps forward onto a cut only while within MAX_LINGER_SEC of the last word", () => {
-    const spec = { id: "h", template: "HostCaption", start: "a bedroom", props: { phrase: { text: "a bedroom goes up in about 3 minutes", words: true } } };
+    const spec = { id: "h", template: "TitleOverFootage", start: "a bedroom", props: { phrase: { text: "a bedroom goes up in about 3 minutes", words: true } } };
     const last = ws[ws.length - 1].end;
     const [far] = resolveCues([spec], ws, { cuts: [last + LINGER_SEC + 0.45] });
     expect(far.end - last).toBeLessThanOrEqual(MAX_LINGER_SEC);
@@ -307,7 +309,7 @@ describe("a word-by-word line is exactly what is said, from one natural break to
   const W4 = (s: string, start: number, step = 0.3): Word[] => s.split(" ").map((text, i) => ({ text, start: start + i * step, end: start + i * step + 0.26 }));
   // Dale, job 386 at 0:25: "And hang on for the Etsy fee that can more than double what comes out of a single sale."
   const dale = [...W4("well.", 24.6), ...W4("And hang on for the Etsy fee that can more than double what comes out of a single sale.", 25.33), ...W4("I'm Dale", 30.7)];
-  const cap = (text: string, start = "And hang") => ({ id: "c", template: "DimCaption", start, props: { phrase: { text, words: true } } });
+  const cap = (text: string, start = "And hang") => ({ id: "c", template: "TitleOverFootage", start, props: { phrase: { text, words: true } } });
 
   it("refuses a caption that leaves words out, and names what he really says", () => {
     expect(() => resolveCues([cap("And the Etsy fee can more than double")], dale)).toThrow(/leaves out words he says \("And hang on for the Etsy fee that can more than double"\)/);
@@ -322,7 +324,7 @@ describe("a word-by-word line is exactly what is said, from one natural break to
   });
   it("a pause is a break, and a line may stop where its graphic's own number takes over", () => {
     const paused = [...W4("Put the items along the front edge", 1), ...W4("of the table.", 4)];
-    expect(() => resolveCues([{ id: "p", template: "DimCaption", start: "Put the", props: { phrase: { text: "Put the items along the front edge", words: true } } }], paused)).not.toThrow();
+    expect(() => resolveCues([{ id: "p", template: "TitleOverFootage", start: "Put the", props: { phrase: { text: "Put the items along the front edge", words: true } } }], paused)).not.toThrow();
     const fee = W4("That order carries an extra fee of 15% on one board.", 10);
     expect(() => resolveCues([{ id: "n", template: "BigNumber", start: "That order", props: { value: 15, unit: "%", at: "@15%", line: { text: "That order carries an extra fee of", words: true } } }], fee)).not.toThrow();
   });
@@ -343,7 +345,7 @@ describe("a card never leaves a blink of footage beside it (Dale 1:30, Scarlett 
   it("holds through the pause and leaves with the picture", () => {
     const [c] = resolveCues([statement], words, opts);
     expect(c.end).toBeCloseTo(91.19, 1);
-    expect(c.conformed).toMatchObject({ end: true, held: true });
+    expect(c.conformed.end).toBe(true); // held, or snapped onto the cut by its reading time
     expect(c.props.exit).toBe("cut");
   });
   it("does not hold past CARD_HOLD_MAX_SEC, or over a new line", () => {
@@ -382,6 +384,29 @@ describe("a list item appears on its first spoken word, with its picture (Hank 0
     const item = (c.props.items as { at: number }[])[1];
     expect(c.start + item.at).toBeCloseTo(cut, 2);
     expect(c.sync.find(x => x.element.includes("items[1]"))?.onCut).toBe(true);
+  });
+});
+
+describe("a list window opens on its first item's picture (Dale 0:18)", () => {
+  const W8 = (s: string, start: number, step = 0.3): Word[] => s.split(" ").map((text, i) => ({ text, start: start + i * step, end: start + i * step + 0.26 }));
+  // "Today I'm ranking | Etsy, | Facebook Marketplace…" — the cutting-board shot runs to the Etsy cut.
+  const words = W8("Today I'm ranking Etsy, Facebook Marketplace, and craft fairs.", 18.3);
+  const etsy = words.find(w => w.text === "Etsy,")!;
+  const etsyCut = etsy.start - 0.1;
+  const spec = {
+    id: "w",
+    template: "ListWindow",
+    start: "Today I'm ranking",
+    props: { title: "Where to sell", items: [{ text: "Etsy", at: "@Etsy", say: "Etsy" }, { text: "Facebook Marketplace", at: "@Facebook Marketplace", say: "Facebook Marketplace" }] },
+  };
+  it("starts on the cut to the first item's picture, never over the shot before", () => {
+    const [c] = resolveCues([spec], words, { cuts: [14.5, etsyCut], fullFrame: new Set(["ListWindow"]) });
+    expect(c.start).toBeCloseTo(Math.round(etsyCut * 30) / 30, 2);
+    expect((c.props.items as { at: number }[])[0].at).toBe(0);
+  });
+  it("keeps its start when the picture does not change at the first item", () => {
+    const [c] = resolveCues([spec], words, { cuts: [14.5], fullFrame: new Set(["ListWindow"]) });
+    expect(c.start).toBeCloseTo(18.3, 1);
   });
 });
 
@@ -424,5 +449,87 @@ describe("a number stays readable (Hank's '6 hours', job 390 at 0:20)", () => {
   it("counts the number as said once its unit is said, and is not cut off at the shot change", () => {
     expect(c.contentEnd).toBeCloseTo(20.95, 2);
     expect(c.end - 20.27).toBeGreaterThan(1);
+  });
+});
+
+describe("statement cards show a whole sentence; every graphic is up long enough to read (2026-10-17)", () => {
+  const W8 = (s: string, start: number, step = 0.3): Word[] => s.split(" ").map((text, i) => ({ text, start: start + i * step, end: start + i * step + 0.26 }));
+  it("refuses Dale's quote stopped at a comma, and takes the whole sentence (job 389, 3:56)", () => {
+    const words = [...W8("where you live.", 234.8), ...W8("Build it well, price it honest, and let every piece find its lane.", 236.04)];
+    const quote = (text: string) => ({ id: "q", template: "Quote", start: "Build it", props: { quote: { text, words: true }, author: "Dale Oakfield" } });
+    expect(() => resolveCues([quote("Build it well, price it honest,")], words)).toThrow(/not a whole sentence/);
+    expect(() => resolveCues([quote("Build it well, price it honest, and let every piece find its lane.")], words)).not.toThrow();
+  });
+  it("keeps Scarlett's '2 inches lower' up long enough to read, and leaves it in a pause (job 392, 0:13)", () => {
+    // "Land two inches lower, and that same necklace drags | your chin…" — a pause after "drags"
+    const words = [...W8("Land two inches lower, and that same necklace drags", 12.44), ...W8("your chin and your jawline down with it.", 15.6)];
+    const [c] = resolveCues(
+      [{ id: "n", template: "BigNumberOverlay", start: "Land two", props: { kicker: "Too low", value: 2, unit: "inches lower", at: "@two inches", line: { text: "Land two inches lower,", words: true } } }],
+      words
+    );
+    expect(c.readSec).toBeGreaterThanOrEqual(3.5);
+    expect(c.end - c.start).toBeGreaterThanOrEqual(c.readSec! - 0.05);
+    // it leaves in the pause before "your", not inside a word
+    expect(words.some(w => w.start < c.end - 0.01 && w.end > c.end + 0.01)).toBe(false);
+  });
+  it("a Versus side is not judged before it has been said (Scarlett's 'Polished metal', job 392, 0:54)", () => {
+    const words = W8("A pearl doesn't bounce light back at you the way a polished metal does. It scatters it.", 51.82);
+    const [c] = resolveCues(
+      [{ id: "v", template: "Versus", start: "A pearl", props: { winner: "left", left: { title: "Pearl", at: "@A pearl", say: "A pearl doesn't bounce light back" }, right: { title: "Polished metal", at: "@a polished metal", say: "the way a polished metal does" } } }],
+      words,
+      { cards: new Set(["Versus"]) }
+    );
+    const right = c.props.right as { at: number; saidUntil: number };
+    const does = words.find(w => w.text === "does.")!;
+    expect(c.start + right.saidUntil).toBeCloseTo(does.end, 2);
+    expect(c.contentEnd!).toBeGreaterThanOrEqual(does.end + VERDICT_SEC - 0.01);
+  });
+});
+
+describe("a graphic that crosses a shot change stays a second on the new shot (Scarlett's dark beads, job 395)", () => {
+  const W9 = (s: string, start: number, step = 0.3): Word[] => s.split(" ").map((text, i) => ({ text, start: start + i * step, end: start + i * step + 0.26 }));
+  it("is held a full second past the cut instead of leaving a sliver on it", () => {
+    const words = [...W9("Chunky black or very dark beads.", 151.24), ...W9("Those beads absorb light.", 154.0)];
+    const beads = words.find(w => w.text === "beads.")!;
+    const cut = beads.start + 0.3; // too close after the last word to end there
+    const [c] = resolveCues([{ id: "w", template: "WarningLabel", start: "Chunky black", props: { text: { text: "Chunky black or very dark beads.", words: true } } }], words, { cuts: [cut] });
+    expect(c.end - cut).toBeGreaterThanOrEqual(TAIL_SPILL_SEC - 0.04);
+  });
+});
+
+describe("a caption shows the whole sentence, paging a long one (Dale's closing line, job 397)", () => {
+  const W10 = (t: string, start: number, step = 0.3): Word[] => t.split(" ").map((text, i) => ({ text, start: start + i * step, end: start + i * step + 0.26 }));
+  const words = [...W10("where you live.", 234.8), ...W10("Build it well, price it honest, and let every piece find its lane.", 236.04)];
+  const cap = (text: string) => ({ id: "h", template: "HostCaption", start: "Build it", props: { phrase: { text, words: true } } });
+  it("refuses a caption stopped at a comma, and takes the whole sentence", () => {
+    expect(() => resolveCues([cap("Build it well, price it honest,")], words)).toThrow(/not a whole sentence/);
+    expect(() => resolveCues([cap("Build it well, price it honest, and let every piece find its lane.")], words)).not.toThrow();
+  });
+  it("pages a long line at a comma, never leaving one or two words alone", () => {
+    const w = "Build it well, price it honest, and let every piece find its lane.".split(" ");
+    expect(pageStarts(w, 8)).toEqual([0, 6]);
+    expect(pageStarts(w.slice(0, 7), 8)).toEqual([0]);
+    expect(pageStarts("one two three four five six seven eight nine".split(" "), 8)).toEqual([0]);
+  });
+});
+
+describe("a title label is never left on the next shot for a moment (Frederick's chapter 3, job 396)", () => {
+  it("stays a second past a cut that falls inside its planned length", () => {
+    const words: Word[] = [{ text: "Third", start: 160.34, end: 160.56 }, { text: "thing,", start: 160.6, end: 160.9 }, { text: "interconnection.", start: 161.86, end: 162.6 }];
+    const [c] = resolveCues([{ id: "c", template: "ChapterLabel", start: "Third thing", durationSec: 2, props: { title: "Interconnection", number: 3 } }], words, { cuts: [160.23, 161.6], structural: new Set(["ChapterLabel"]) });
+    expect(c.end - 161.6).toBeGreaterThanOrEqual(TAIL_SPILL_SEC - 0.04);
+  });
+});
+
+describe("a card holds through silence until the picture changes (Dale's '$10 in fees', job 397)", () => {
+  it("holds 2.2 s after its last word when nothing is said before the cut", () => {
+    const words: Word[] = [
+      { text: "roughly", start: 140.0, end: 140.32 }, { text: "$10", start: 140.34, end: 140.62 }, { text: "off", start: 140.64, end: 140.72 },
+      { text: "a", start: 140.74, end: 140.76 }, { text: "$100", start: 140.78, end: 140.94 }, { text: "board.", start: 141.0, end: 141.18 },
+      { text: "But", start: 143.56, end: 143.79 },
+    ];
+    const [c] = resolveCues([{ id: "n", template: "BigNumber", start: "roughly", props: { value: 10, prefix: "$", unit: "in fees", at: "@$10" } }], words, { cuts: [138.2, 143.37], cards: new Set(["BigNumber"]) });
+    expect(c.end).toBeCloseTo(143.37, 1);
+    expect(c.conformed.held).toBe(true);
   });
 });

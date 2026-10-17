@@ -372,7 +372,7 @@ async function run(v: Variant) {
       if (v.debreath) await debreath(mp3);
       // the film's master step: every sentence ends with a real pause (server/sentencePauses.ts);
       // sentencePauses: false measures the voice as it came from the provider
-      if (v.sentencePauses !== false) writeFileSync(mp3, await padSentenceEnds(readFileSync(mp3), m => console.log(`[bench] ${v.id}: ${m}`)));
+      if (v.sentencePauses !== false) writeFileSync(mp3, await padSentenceEnds(readFileSync(mp3), m => console.log(`[bench] ${v.id}: ${m}`), lineFor(v)));
     }
     const voiceM = await measureVoice(mp3, lineFor(v));
     let syncM = {};

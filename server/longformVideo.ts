@@ -52,6 +52,7 @@ import {
 } from "./shotList";
 import {
   attachMemory,
+  ownKeyThing,
   BACKGROUND_VIEW,
   BLUR_PRINT_VIEW,
   memoryPicturesFor,
@@ -5962,12 +5963,26 @@ export const HOST_FACE_ONLY_SUFFIX =
   "other face anywhere in the frame. No mirror, window glass or other shiny surface anywhere " +
   "anyone could be reflected in it.";
 
+/**
+ * How the host is framed so the face is never shown AND the pose is one a real body makes
+ * (2026-10-17, Scarlett's job 395 at 2:22 and 2:41: the body faced the camera and the head was
+ * twisted away to hide the face). Two framings only, the head always facing the way the body does:
+ * a body facing the camera is cut at the lips or chin, a body turned away shows the back or side of
+ * the head. The host is told apart by hair, skin, clothes and accessories — the reference photo's.
+ */
+export const HOST_FRAMING_CLAUSE =
+  "The head always faces the same way as the body, and the face is never shown — in one of two " +
+  "ways only: (1) the body facing the camera, and the top edge of the frame cuts across the lower " +
+  "face, at the lips or the chin, the head straight above the shoulders; or (2) the whole body " +
+  "turned away — seen from behind or from the side, the head turned the same way as the shoulders. " +
+  "Never a body facing the camera with the head turned away to hide the face. They are recognisably " +
+  "the host by the same hair colour and cut, the same skin and the same clothes and accessories as " +
+  "in the reference photo (unless the description names other clothes).";
+
 export function hostBrollClause(look: string): string {
   return (
     `The only person in this shot is the host — ${look.trim().replace(/\.$/, "")} — exactly as in ` +
-    `the reference photo, doing the task: seen from behind or from the side, over the shoulder, ` +
-    `hands at the work, the face turned away or out of frame so it is never shown — even when ` +
-    `the description speaks of the face, the frame stops at the chin or is taken from behind. Nobody else ` +
+    `the reference photo, doing the task, hands at the work. ${HOST_FRAMING_CLAUSE} Nobody else ` +
     `is in the frame, in the background or in a reflection. ${ONE_BODY_CLAUSE}`
   );
 }
@@ -6545,10 +6560,29 @@ export function buildStillPrompt(
   // A real app the line names (`namedLook`) is drawn as it really looks; otherwise a plain one.
   const app = APP_SCREEN.test(visual) ? ` ${appScreenClause(scene)}` : "";
   const lead = !aggressive && !visualOverride ? subjectLead(scene.showSubject, visual) : "";
+  const item = !visualOverride ? listItemClause(scene) : "";
   return withAllowedText(
-    `${lead}${visual}${scrubLegibleWriting(namedLookClause(scene))}${angleSuffix}${personSuffix}${memory}${app} ${amateurIphoneLook(subject, motion)} ${framing} ${noFigures} ${NO_BOOK_SUFFIX}`,
+    `${lead}${visual}${scrubLegibleWriting(namedLookClause(scene))}${item}${angleSuffix}${personSuffix}${memory}${app} ${amateurIphoneLook(subject, motion)} ${framing} ${noFigures} ${NO_BOOK_SUFFIX}`,
     scene.pictureText,
     scene.blurPrint
+  );
+}
+
+/**
+ * ONE ITEM OF A LIST, TOLD APART FROM THE OTHERS (`scene.listItems`). Each item of a spoken list is
+ * its own picture, and the picture maker drew two of them as one thing — Dale's job 397: "Coasters,
+ * ornaments, small cutting boards" came back as two pictures of the same round discs. The prompt
+ * names the item's neighbours so the item is drawn by what makes it different from them. Any list,
+ * any channel: the words are the script's own. Pure.
+ */
+export function listItemClause(scene: StoryboardScene): string {
+  const items = scene.listItems;
+  if (!items?.others.length) return "";
+  const others = items.others.map(o => `"${o}"`).join(", ");
+  return (
+    ` This picture is one item of a list said one after another — it shows "${items.own}", drawn so ` +
+    `it is clearly that, by the shape and features that make it what it is, and could never be ` +
+    `taken for the other items of the list (${others}), which each get their own picture.`
   );
 }
 
@@ -8923,7 +8957,7 @@ async function drawValidatedStill(
         // must really be in it — Dale's job 306 drew a box where the bookcase was asked for.
         scene.memoryView === SCREEN_ITEM_VIEW
           ? undefined
-          : [scene.keyThing, ...(scene.otherKeyThings ?? [])].filter((t): t is string => !!t),
+          : [ownKeyThing(scene), ...(scene.otherKeyThings ?? [])].filter((t): t is string => !!t),
         scene.blurPrint
       );
       recordPictureCheck(
@@ -13384,7 +13418,8 @@ async function voiceMasterNarration(
             runUrls,
             runs.map(r => r.pauseAfterMs)
           )
-        )
+        ),
+        spokenScript
       );
       const key = `longform/${jobId}/master-vo-${nanoid(6)}.mp3`;
       const { url } = await storagePut(key, buffer, "audio/mpeg");
@@ -13453,7 +13488,8 @@ async function voiceMasterNarration(
       key,
       await levelMasterNarration(
         jobId,
-        await capMasterPauses(jobId, await denoiseMasterHiss(jobId, buffer))
+        await capMasterPauses(jobId, await denoiseMasterHiss(jobId, buffer)),
+        spokenScript
       ),
       "audio/mpeg"
     );
@@ -13477,7 +13513,8 @@ async function voiceMasterNarration(
     key,
     await levelMasterNarration(
       jobId,
-      await capMasterPauses(jobId, await denoiseMasterHiss(jobId, buf))
+      await capMasterPauses(jobId, await denoiseMasterHiss(jobId, buf)),
+      spokenScript
     ),
     "audio/mpeg"
   );
@@ -13493,13 +13530,15 @@ async function voiceMasterNarration(
  */
 async function levelMasterNarration(
   jobId: number,
-  voiced: Buffer
+  voiced: Buffer,
+  /** The script as voiced: the pause step trusts its sentence ends over the transcript's. */
+  spokenScript?: string
 ): Promise<Buffer> {
   // Every sentence ends with a real pause before anything reads the master (whisperx, the slices,
   // lip-sync): a voice that runs sentences together gives the host's mouth no reason to close
   // (`server/sentencePauses.ts`). All three voiced-master paths come through here; a supplied
   // human read does not.
-  const buf = await padSentenceEnds(voiced, msg => console.log(`[Longform ${jobId}] ${msg}`));
+  const buf = await padSentenceEnds(voiced, msg => console.log(`[Longform ${jobId}] ${msg}`), spokenScript);
   try {
     const { buffer, plan } = await levelNarrationAudio(buf);
     console.log(`[Longform ${jobId}] ${describeLevelPlan(plan)}`);

@@ -52,6 +52,12 @@ export function memorySourcesFor(
   const set = listSetFor(scenes, s);
   if (set) return [set];
   if (!s.keyThing || !drawn(s)) return [];
+  // A LIST ITEM is its own thing: it is drawn from a key thing's memory only when its OWN words name
+  // that thing, or it is a part of it (`partOf`). Dale's job 397: "Smalls, about $10 to $40.
+  // Coasters, ornaments, small cutting boards." — the coasters and the ornaments both inherited the
+  // pile of small pieces as their key thing, were drawn from that pile picture, and came back as the
+  // same picture twice.
+  if (!ownKeyThing(s)) return [];
   // A SCREEN picture gets its item's memory for what is ON the screen only (`SCREEN_ITEM_VIEW`): with
   // none, Dale's bookcase listing showed four random items (job 306); told to draw "the SAME" board
   // as an object, the picture maker built the tablet out of it (job 295). A screen is still never a
@@ -72,6 +78,61 @@ export function memorySourcesFor(
   // Every other key thing in it: that thing's first picture (the heater beside the mattress).
   for (const t of s.otherKeyThings ?? []) add(before.find(x => shows(x, t)));
   return out;
+}
+
+/** Size and amount words: they say nothing about WHICH thing is meant. */
+const NOT_A_NAME_WORD = new Set([
+  "small", "smaller", "little", "big", "bigger", "large", "larger", "tiny", "huge", "few", "many",
+  "some", "one", "two", "three", "four", "five", "old", "new", "the", "and", "with", "for",
+]);
+
+/**
+ * Whether a line's own words name key thing `thing`: a word of its name (not a size or amount word),
+ * singular or plural, appears in the line. "small cutting boards" names "walnut and maple cutting
+ * board"; "Coasters," does not name "small wood pieces pile". Pure.
+ */
+export function wordsName(line: string, thing: string): boolean {
+  const base = (w: string) => w.replace(/(?:es|s)$/, "");
+  const have = new Set(nameWords(line).map(base));
+  return nameWords(thing).some(w => !NOT_A_NAME_WORD.has(w) && have.has(base(w)));
+}
+
+/** A list item as said: "and a stack of sandpaper." → "a stack of sandpaper". */
+const itemWords = (t: string) =>
+  t.trim().replace(/^(?:and|or|plus|then)\s+/i, "").replace(/[\s,.;:!?—–-]+$/, "").trim();
+
+/**
+ * A list item's own words and the other items of its list (the run of list items around it), or
+ * undefined for a picture that is not one of two or more items. Pure.
+ */
+export function listItemsAround(
+  scenes: StoryboardScene[],
+  s: StoryboardScene
+): { own: string; others: string[] } | undefined {
+  if (!s.listCut) return undefined;
+  const i = scenes.indexOf(s);
+  let a = i;
+  let b = i;
+  while (a > 0 && scenes[a - 1].listCut) a--;
+  while (b < scenes.length - 1 && scenes[b + 1].listCut) b++;
+  const own = itemWords(s.scriptText ?? "");
+  const others = scenes
+    .slice(a, b + 1)
+    .filter(x => x !== s)
+    .map(x => itemWords(x.scriptText ?? ""))
+    .filter(t => t && t.toLowerCase() !== own.toLowerCase());
+  return own && others.length ? { own, others } : undefined;
+}
+
+/**
+ * The key thing picture `s` is about, by the rule above: a list item's inherited key thing counts
+ * only when the item's own words name it or it is a part of it. The memory step and the picture
+ * check both read it, so a coasters picture is neither drawn from nor held to the pile. Pure.
+ */
+export function ownKeyThing(s: StoryboardScene): string | undefined {
+  if (!s.keyThing) return undefined;
+  if (s.listCut && !s.partOf && !wordsName(s.scriptText ?? s.narration ?? "", s.keyThing)) return undefined;
+  return s.keyThing;
 }
 
 /** How a SCREEN picture uses its item's memory: only as the photo inside the listing. */
@@ -238,6 +299,9 @@ export function attachMemory(
 ): void {
   tagKeyThings(board, keyThings);
   for (const s of board) {
+    const items = listItemsAround(board, s);
+    if (items) s.listItems = items;
+    else delete s.listItems;
     sourcesOf.set(s, memorySourcesFor(board, s));
     viewOf.set(s, memoryViewFor(board, s));
   }

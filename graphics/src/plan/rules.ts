@@ -48,7 +48,10 @@ export function checkRules(cues: ResolvedCue[], film: FilmLayout, opts: { gap?: 
     const c = cues[i];
     const def = templateById(c.template);
     const add = (problem: string) => out.push({ cue: c.id, problem });
-    if (i > 0 && c.start < cues[i - 1].end + gap - tol)
+    // Two graphics may follow each other straight away ACROSS a shot change: the change of picture
+    // already separates them (the breathing room is for two on one shot).
+    const acrossCut = i > 0 && cues[i - 1].conformed.end && c.start >= cues[i - 1].end - tol;
+    if (i > 0 && !acrossCut && c.start < cues[i - 1].end + gap - tol)
       add(gap ? `starts ${(c.start - cues[i - 1].end).toFixed(1)} s after ${cues[i - 1].id} ends (needs ${gap} s)` : `starts before ${cues[i - 1].id} ends`);
     // A frame of tolerance: an edge snapped onto the cut that STARTS the CTA touches it, not overlaps.
     if (cta.some(([a, b]) => c.start < b - tol && c.end > a + tol)) add("runs into the call to action");

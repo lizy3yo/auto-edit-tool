@@ -45,6 +45,10 @@ export type ResolvedCue = {
   endFrame: number;
   /** When the last of the graphic's own words is spoken (seconds), if it has any. */
   contentEnd?: number;
+  /** Seconds it needs on screen to be read (`readingSec`); the QA measures lingering past it. */
+  readSec?: number;
+  /** It left in the next pause (within PAUSE_REACH_SEC) instead of mid-word. */
+  leftInPause?: boolean;
   /** For a graphic held to a cut: when the sentence it belongs to finished (its hold is measured
    * from here, the same in the resolver and the QA). */
   spokenEnd?: number;
@@ -382,7 +386,62 @@ export const HANDOFF_MIN_TAIL_SEC = 0.3;
  * that would open just after a cut opens ON the cut, if its first word is then near enough.
  */
 export const MIN_SHOT_SEC = 1.5;
+
+/**
+ * READING TIME. A graphic stays up long enough to READ what it shows: about a second plus 0.3 s a
+ * word, between MIN_ON_SCREEN_SEC and READ_MAX_SEC (Scarlett's "2 inches lower" was up 1.8 s for
+ * nine words, job 392 at 0:13). And it leaves in a PAUSE rather than mid-word: when its end falls
+ * inside speech and a pause of PAUSE_GAP_SEC begins within PAUSE_REACH_SEC, it leaves in that pause.
+ */
+export const READ_BASE_SEC = 1.0;
+export const READ_PER_WORD_SEC = 0.3;
+export const READ_MAX_SEC = 4.0;
+export const PAUSE_GAP_SEC = 0.2;
+export const PAUSE_REACH_SEC = 1.0;
+/** A comparison with a winner holds this long after its last side is said, so the verdict is seen. */
+export const VERDICT_SEC = 0.6;
+
+/**
+ * Lines that must be a WHOLE SENTENCE as said — a statement, a quote, a fact, a myth and its truth,
+ * a question — never stopped at a comma: Dale's closing quote ended at "price it honest," while he
+ * went on "and let every piece find its lane." (job 389, 3:56). Captions keep clause breaks.
+ */
+const WHOLE_SENTENCE: Record<string, string[]> = {
+  Statement: ["headline"],
+  Quote: ["quote"],
+  FactCard: ["fact"],
+  MythTruth: ["myth", "truth"],
+  YesNoCard: ["question"],
+  // captions too, since 2026-10-17: a long sentence PAGES (WordReveal `pageWords`) instead of being
+  // stopped at a comma — Dale's closing caption "Build it well, price it honest," left the rest unsaid
+  HostCaption: ["phrase"],
+  DimCaption: ["phrase"],
+  ArrowCaption: ["phrase"],
+};
+const ENDS_SENTENCE = new RegExp("[.?!][\"”')]*$");
+
+/** How many words (and numbers) a graphic SHOWS, for its reading time. */
+function shownWordCount(props: unknown): number {
+  let n = 0;
+  const walk = (v: unknown, key = "") => {
+    if (["at", "say", "icon", "from", "start", "end", "winner", "answer", "theme", "place", "target", "exit"].includes(key)) return;
+    if (typeof v === "number" && key === "value") n += 1;
+    else if (typeof v === "string") n += v.trim().split(/\s+/).filter(Boolean).length;
+    else if (Array.isArray(v)) v.forEach(x => walk(x));
+    else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) walk(x, k);
+  };
+  walk(props);
+  return n;
+}
+
+/** Seconds a graphic needs on screen to be read. */
+export function readingSec(props: unknown): number {
+  return Math.min(READ_MAX_SEC, Math.max(MIN_ON_SCREEN_SEC, READ_BASE_SEC + READ_PER_WORD_SEC * shownWordCount(props)));
+}
 export const CARD_HOLD_MAX_SEC = 2.0;
+/** Through pure SILENCE (no word spoken until the picture changes) a card may hold this long:
+ * Dale's "$10 in fees" left 1.2 s before the cut, 2.2 s after his last word, in silence (job 397). */
+export const CARD_HOLD_SILENT_MAX_SEC = 3.5;
 export const NEW_LINE_GRACE_SEC = 0.3;
 /** A word that ends a sentence (the next word starts a new line). */
 const SENTENCE_END = new RegExp("[.?!][\"”')]*$");
@@ -464,6 +523,16 @@ export function resolveCues(specs: CueSpec[], words: Word[], opts: ResolveOption
         }
         const broken = breakProblem(o.text, hits, index, words, shownTokens(spec.props, v));
         if (broken) throw new CueError(`cue ${spec.id}: ${broken}`);
+        if (WHOLE_SENTENCE[spec.template]?.includes(pathName)) {
+          const first = index[hits[0]].word, last = index[hits[hits.length - 1]].word;
+          const prev = words[first - 1], next = words[last + 1];
+          const starts = !prev || ENDS_SENTENCE.test(prev.text.trim()) || words[first].start - prev.end >= 0.35;
+          const ends = ENDS_SENTENCE.test(o.text.trim()) && (!next || ENDS_SENTENCE.test(words[last].text.trim()) || next.start - words[last].end >= 0.35 || /^[A-Z]/.test(next.text.trim()));
+          if (!starts || !ends) {
+            const said = words.slice(first, Math.min(words.length, last + 9)).map(w => w.text.trim()).join(" ");
+            throw new CueError(`cue ${spec.id}: "${o.text}" is not a whole sentence ("${said}…") — ${spec.template} shows one complete sentence as said; use the whole sentence, or a caption for part of it`);
+          }
+        }
         const times = displayWordTimes(o.text, hits, index, words).map(t => round(t - t0));
         lastShown = Math.max(lastShown, words[index[hits[hits.length - 1]].word].start);
         sync.push({ element: `${pathName} "${o.text}"`, word: words[index[hits[0]].word].text, wordStart: words[index[hits[0]].word].start });
@@ -505,7 +574,10 @@ export function resolveCues(specs: CueSpec[], words: Word[], opts: ResolveOption
           // never drawn, only counted, so the graphic stays until they are said and no longer.
           const hits = findSubsequence(index, x, searchFrom);
           if (!hits) throw new CueError(`cue ${spec.id}: "${x}" (${pathName}.say) not in the narration`);
-          said(words[index[hits[hits.length - 1]].word].end);
+          const end = words[index[hits[hits.length - 1]].word].end;
+          said(end);
+          // When this side's words FINISH: a comparison waits for it before it gives its verdict.
+          out.saidUntil = round(Math.max(0, end - t0));
         } else {
           out[k] = walk(x, pathName ? `${pathName}.${k}` : k);
         }
@@ -513,6 +585,9 @@ export function resolveCues(specs: CueSpec[], words: Word[], opts: ResolveOption
       return out;
     };
     let props = walk(spec.props, "") as Record<string, unknown>;
+    // A comparison with a winner gives its verdict after its last side is said, and holds it.
+    if ((spec.props?.winner === "left" || spec.props?.winner === "right") && contentEnd !== undefined) said(contentEnd + VERDICT_SEC);
+    const readSec = readingSec(spec.props);
 
     // 2b. A card that would open on an empty ground moves later, onto its first word. One that
     // shows something from its first frame (a VS side "at": 0) is not empty and stays — moving it
@@ -543,6 +618,22 @@ export function resolveCues(specs: CueSpec[], words: Word[], opts: ResolveOption
       }
     }
 
+    // 2d. A framed window opens on its FIRST ITEM'S picture, never on the shot before it: Dale's
+    // "where to sell" window opened on "Today I'm ranking" over the cutting-board picture, 1.1 s
+    // before the Etsy picture its first item stands for (job 397, 0:18). When the first item lands
+    // with a picture cut, the window starts on that cut, its heading arriving with the first item.
+    if (windows.has(spec.template)) {
+      const items = sync.filter(x => x.element.includes(".at "));
+      const first = items.length ? items.reduce((a, b) => (b.wordStart < a.wordStart ? b : a)) : undefined;
+      const cut = first?.onCut ? cuts.filter(c => c <= first.wordStart + 1e-6 && first.wordStart - c <= CUT_SNAP_SEC).pop() : undefined;
+      if (cut !== undefined && cut - t0 > 0.1) {
+        const moved = onFrame(cut);
+        props = shiftTimes(props, moved - t0) as Record<string, unknown>;
+        t0 = moved;
+        startCut = cut;
+      }
+    }
+
     // 3. The end.
     let planned: number | undefined;
     if (spec.end) {
@@ -553,9 +644,47 @@ export function resolveCues(specs: CueSpec[], words: Word[], opts: ResolveOption
       planned = t0 + spec.durationSec;
     }
     let rawEnd: number;
+    let leftInPause = false;
     if (!structural.has(spec.template) && contentEnd !== undefined) {
       const byWords = contentEnd + LINGER_SEC;
-      rawEnd = Math.max(t0 + MIN_ON_SCREEN_SEC, planned === undefined ? byWords : Math.min(planned, byWords));
+      rawEnd = Math.max(t0 + readSec, planned === undefined ? byWords : Math.min(planned, byWords));
+      // Leave in a pause, not mid-word: an end inside speech moves to the next pause within reach.
+      const speaking = words.some(w => w.start < rawEnd - 1e-6 && w.end > rawEnd + 1e-6) || words.some(w => w.start > rawEnd && w.start - rawEnd < 0.15);
+      if (speaking) {
+        let moved = false;
+        for (let k = 0; k + 1 < words.length; k++) {
+          const gapAt = words[k].end;
+          if (gapAt < rawEnd - 1e-6) continue;
+          if (gapAt - rawEnd > PAUSE_REACH_SEC) break;
+          if (words[k + 1].start - gapAt >= PAUSE_GAP_SEC) {
+            rawEnd = gapAt + Math.min(0.1, (words[k + 1].start - gapAt) / 2);
+            moved = true;
+            leftInPause = true;
+            break;
+          }
+        }
+        // No pause within reach: at least never leave in the middle of a word.
+        const inside = moved ? undefined : words.find(w => w.start < rawEnd - 1e-6 && w.end > rawEnd + 1e-6);
+        if (inside) rawEnd = inside.end;
+      }
+      // Never into the NEXT sentence: reading time and a pause may carry a graphic through the rest of
+      // its own sentence, not into a new one (Scarlett's "Keep the scale. Change the finish." card
+      // stood over "Ivory, oat, a warm coral…", job 395).
+      const ownEnd = contentEnd;
+      const nextSentence = words.find((w, k) => w.start > ownEnd + 1e-6 && k > 0 && SENTENCE_END.test(words[k - 1].text.trim()));
+      if (nextSentence && rawEnd > nextSentence.start + 0.15) {
+        const cap = Math.max(ownEnd + 0.3, nextSentence.start + 0.15);
+        if (cap < rawEnd) {
+          rawEnd = cap;
+          leftInPause = false;
+        }
+      }
+      // A window shows its items' own pictures: it ends with the last item's picture, never showing
+      // the next shot (Dale's "Facebook Marketplace" over the Etsy picture that followed, job 397).
+      if (windows.has(spec.template)) {
+        const after = cuts.find(c => c > lastShown + 0.3 && c < rawEnd - 1e-6);
+        if (after !== undefined && after - t0 >= MIN_ON_SCREEN_SEC) rawEnd = after;
+      }
     } else if (planned !== undefined) {
       rawEnd = planned;
     } else {
@@ -571,6 +700,14 @@ export function resolveCues(specs: CueSpec[], words: Word[], opts: ResolveOption
       const spill = cuts.filter(c => c < rawEnd && c > rawEnd - TAIL_SPILL_SEC && c - t0 >= MIN_AFTER_TRIM_SEC && c - (lastShown - (spec.startPad ?? 0)) >= MIN_READ_SEC);
       if (spill.length) endCut = spill[spill.length - 1];
     }
+    // 4a. A graphic that must cross a shot change (its last element appears too close before the cut
+    // to end there) stays at least TAIL_SPILL_SEC onto the new shot — never a sliver of it (subtitle
+    // practice; Scarlett's "Chunky black or very dark beads." ran 0.x s onto the next shot, job 395).
+    if (endCut === undefined) {
+      const crossed = cuts.filter(c => c > t0 + 0.1 && c < rawEnd - 1e-6 && rawEnd - c < TAIL_SPILL_SEC);
+      const c = crossed[crossed.length - 1];
+      if (c !== undefined) rawEnd = c + TAIL_SPILL_SEC;
+    }
     // 4b. No blink of footage after a picture-replacing graphic: it holds through the pause and
     // leaves with the picture.
     let held = false;
@@ -580,18 +717,21 @@ export function resolveCues(specs: CueSpec[], words: Word[], opts: ResolveOption
       const next = cuts.find(c => c > end + 1e-6);
       // Words in the sliver that only FINISH the graphic's own sentence ("…a good night's sleep |
       // you may or may not have had.") keep it up; a NEW sentence starting there does not.
-      const inSliver = next === undefined ? [] : words.filter(w => w.start > end + 1e-6 && w.start < next);
+      // (from the graphic's own last word, so words it already stayed up for are counted too)
+      const inSliver = next === undefined ? [] : words.filter(w => w.start > (contentEnd ?? end) + 1e-6 && w.start < next);
       let spoken = contentEnd ?? end;
       let newLine = false;
       for (const w of inSliver) {
         const prev = words[words.indexOf(w) - 1];
         if (prev && SENTENCE_END.test(prev.text.trim()) && prev.end <= w.start) {
-          newLine = w.start < (next as number) - NEW_LINE_GRACE_SEC;
+          newLine = w.start > end + 1e-6 && w.start < (next as number) - NEW_LINE_GRACE_SEC;
           break;
         }
         spoken = Math.max(spoken, w.end);
       }
-      if (next !== undefined && next - end < MIN_SHOT_SEC && next - spoken <= CARD_HOLD_MAX_SEC && !newLine) {
+      const silent = next !== undefined && !words.some(w => w.start > spoken - 1e-6 && w.start < next);
+      const holdMax = silent ? CARD_HOLD_SILENT_MAX_SEC : CARD_HOLD_MAX_SEC;
+      if (next !== undefined && next - end < MIN_SHOT_SEC && next - spoken <= holdMax && !newLine) {
         endCut = next;
         held = true;
         heldFrom = spoken;
@@ -617,6 +757,8 @@ export function resolveCues(specs: CueSpec[], words: Word[], opts: ResolveOption
       sync,
       conformed,
       contentEnd: contentEnd === undefined ? undefined : round(contentEnd),
+      readSec: round(readSec),
+      ...(leftInPause ? { leftInPause: true } : {}),
       ...(heldFrom !== undefined ? { spokenEnd: round(heldFrom) } : {}),
     };
   });
@@ -627,8 +769,8 @@ export function resolveCues(specs: CueSpec[], words: Word[], opts: ResolveOption
     const next = out[i + 1];
     if (next.start - a.end >= HANDOFF_GAP_SEC - 1e-6) continue;
     // A graphic held to a cut leaves WITH the picture; the next one is on a new shot.
-    if (a.conformed.held && next.start >= a.end - 1e-6) continue;
-    const floor = Math.max(a.start + MIN_ON_SCREEN_SEC, (a.contentEnd ?? a.start) + HANDOFF_MIN_TAIL_SEC);
+    if (a.conformed.end && next.start >= a.end - 1e-6) continue;
+    const floor = Math.max(a.start + (a.readSec ?? MIN_ON_SCREEN_SEC), (a.contentEnd ?? a.start) + HANDOFF_MIN_TAIL_SEC);
     const t1 = Math.floor((next.start - HANDOFF_GAP_SEC) * fps + 1e-6) / fps;
     if (t1 < floor - 1e-6 || t1 >= a.end) continue;
     a.end = round(t1);
@@ -656,7 +798,7 @@ function shiftTimes(v: unknown, delta: number): unknown {
   if (!v || typeof v !== "object") return v;
   const out: Record<string, unknown> = {};
   for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
-    if (k === "at" && typeof x === "number") out[k] = round(Math.max(0, x - delta));
+    if ((k === "at" || k === "saidUntil") && typeof x === "number") out[k] = round(Math.max(0, x - delta));
     else if (k === "wordTimes" && Array.isArray(x)) out[k] = x.map(t => round(Math.max(0, (t as number) - delta)));
     else out[k] = shiftTimes(x, delta);
   }

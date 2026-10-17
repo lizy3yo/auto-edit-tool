@@ -134,7 +134,14 @@ export const MythTruthCard: React.FC<MythTruthProps> = ({ myth, truth, emphasis 
 
 /* ───────────────────────── This vs That ───────────────────────── */
 
-export type Side = { icon?: string; title: string; sub?: string; at: number };
+export type Side = {
+  icon?: string;
+  title: string;
+  sub?: string;
+  at: number;
+  /** When this side's spoken words finish (set by the resolver from its "say"). */
+  saidUntil?: number;
+};
 
 export type VersusProps = BaseProps & {
   kicker?: string;
@@ -218,7 +225,9 @@ export const VersusCard: React.FC<VersusProps> = ({ kicker, left, right, winner 
   const line = fadeIn(frame, 0, 14);
   const tone = (s: "left" | "right") =>
     winner === "none" ? "plain" : winner === s ? "win" : "lose";
-  const decide = Math.max(at(left.at), at(right.at)) + 6;
+  // The verdict waits until BOTH sides have been said: each side is at full strength while it is
+  // spoken (Scarlett's "Polished metal" greyed 0.2 s after it appeared, while she was saying it).
+  const decide = Math.max(at(left.saidUntil ?? left.at), at(right.saidUntil ?? right.at)) + 8;
   return (
     <AbsoluteFill>
       <CardBackground />

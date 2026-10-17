@@ -307,7 +307,10 @@ export const clampElevenSpeed = (speed: number): number =>
  * 0.75, Scarlett 0.47 against 0.55-0.69); Bertha Ramirez leaves 0.40 s, Steve Cooper 0.72 s. 0.2 s
  * was too short. Only the voiced text carries it — the script the pipeline aligns against does not.
  */
-export const CLONE_SENTENCE_PAUSE_SEC = 0.3;
+// 2026-10-17: 0. The provider fills the mark with dead digital silence and cuts each sentence's
+// last word to fit it — Frederick's "The type." (job 393, 1:10) sounded chopped. The pause is now made
+// for every voice by server/sentencePauses.ts, from the sound, with no word cut.
+export const CLONE_SENTENCE_PAUSE_SEC = 0;
 // "Dr. Smith", "St. Louis", "e.g. this": a full stop that does not end a sentence
 const NOT_A_SENTENCE_END = /(?:^|[\s(])(?:Mr|Mrs|Ms|Dr|St|Jr|Sr|Mt|vs|etc|e\.g|i\.e)\.$/;
 export function withSentencePauses(

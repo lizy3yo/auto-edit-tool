@@ -2046,13 +2046,15 @@ export async function downloadToTemp(
       return Buffer.from(await resp.arrayBuffer());
     },
     {
-      attempts: 3,
+      // 5 tries over ~30 s (2, 4, 8, 16 s): on a flaky connection a lookup or connect failure
+      // lasts seconds — 0.5 s / 1 s lost 17 of Dale's 45 scenes in one assembly (job 389).
+      attempts: 5,
       label: `download ${name}`,
       tag: "[Assembly]",
-      // A 4xx is permanent (expired or deleted object); burning two more attempts and
-      // 1.5s of backoff on it only delays the failure. Network errors, timeouts and 5xx retry.
+      // A 4xx is permanent (expired or deleted object); burning more attempts on it only delays
+      // the failure. Network errors, timeouts and 5xx retry.
       isRetryable: (_msg, err) => !(err?.status >= 400 && err?.status < 500),
-      backoffMs: tryNo => 500 * (tryNo + 1),
+      backoffMs: tryNo => 2000 * 2 ** tryNo,
     }
   );
   const filePath = path.join(dir, name);

@@ -8,6 +8,9 @@ import {
   memoryViewFor,
   pictureSettled,
   tagKeyThings,
+  wordsName,
+  listItemsAround,
+  ownKeyThing,
 } from "./pictureMemory";
 import { matchKeyThing, parseKeyThings } from "./shotList";
 import { allowedTextQuestion, parseSameThingVerdict } from "./overlayTextScan";
@@ -28,6 +31,39 @@ describe("picture memory: the same thing is drawn from its earlier pictures", ()
     expect(memorySourcesFor(board, board[2])).toEqual([board[0]]);
     expect(memorySourcesFor(board, board[4])).toEqual([board[0], board[2]]);
     expect(memorySourcesFor(board, board[1])).toEqual([]);
+  });
+
+  it("draws a list item from a key thing's memory only when the item's own words name it", () => {
+    // Dale's job 397: "Smalls, about $10 to $40. Coasters, ornaments, small cutting boards." — both
+    // items inherited the pile as their key thing and came back as the pile picture twice.
+    const board = [
+      pic(1, "walnut and maple cutting board", { scriptText: "the cutting board" }),
+      pic(2, "small wood pieces pile", { scriptText: "Smalls, about $10 to $40." }),
+      pic(3, "small wood pieces pile", { listCut: true, scriptText: "Coasters," }),
+      pic(4, "small wood pieces pile", { listCut: true, scriptText: "ornaments," }),
+      pic(5, "walnut and maple cutting board", { listCut: true, scriptText: "small cutting boards." }),
+      pic(6, "quilt", { listCut: true, partOf: "quilt", scriptText: "a churn dash here," }),
+    ];
+    expect(memorySourcesFor(board, board[2])).toEqual([]);
+    expect(memorySourcesFor(board, board[3])).toEqual([]);
+    expect(memorySourcesFor(board, board[4])).toEqual([board[0]]); // its words name the board
+    expect(memorySourcesFor([pic(0, "quilt"), board[5]], board[5]).length).toBe(1); // a part keeps it
+    expect([2, 3, 4, 5].map(k => ownKeyThing(board[k]))).toEqual([undefined, undefined, "walnut and maple cutting board", "quilt"]);
+    expect(wordsName("small cutting boards.", "small wood pieces pile")).toBe(false); // size words never match
+    expect(wordsName("two boxes of matches", "matchbox")).toBe(false);
+    expect(wordsName("the boxes", "cardboard box")).toBe(true);
+  });
+
+  it("names a list item's neighbours so it is told apart from them", () => {
+    const board = [
+      pic(1, undefined, { scriptText: "Smalls, about $10 to $40." }),
+      pic(2, undefined, { listCut: true, scriptText: "Coasters," }),
+      pic(3, undefined, { listCut: true, scriptText: "ornaments," }),
+      pic(4, undefined, { listCut: true, scriptText: "and small cutting boards." }),
+    ];
+    expect(listItemsAround(board, board[0])).toBeUndefined();
+    expect(listItemsAround(board, board[2])).toEqual({ own: "ornaments", others: ["Coasters", "small cutting boards"] });
+    expect(listItemsAround([board[1]], board[1])).toBeUndefined(); // a lone item has nothing to differ from
   });
 
   it("draws a split's panel and the QR background from memory; a split is never a memory itself", () => {

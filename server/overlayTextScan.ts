@@ -102,6 +102,8 @@ export const STILL_DEFECT_SYSTEM =
   "work — with no hand holding it; " +
   "a needle through a finger; scissors cutting where the blades do not " +
   "meet; a tool held in a way no hand could hold it; a hand with too many or too few fingers\n" +
+  "- a person whose body faces the camera while the head is turned away over a shoulder (a pose a " +
+  "real body does not hold), or a head turned round further than a real neck turns\n" +
   "- a hand, finger or arm inside, through, behind or merged into a vise, clamp, machine or tool " +
   "body (a hand in a vise's jaws)\n" +
   "- a tool held or angled in a way no real user holds it, or whose path runs into the table, the " +

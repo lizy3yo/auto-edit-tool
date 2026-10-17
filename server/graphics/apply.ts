@@ -67,6 +67,7 @@ export async function withGraphics(jobId: number, film: Buffer, scenes: Storyboa
       hostPhotoUrl: params.faceImageUrl,
       savedPlan: (prior.plan as CueSpec[] | undefined) ?? undefined,
       replan: !!prior.replan,
+      lists: params.spokenLists,
       onProgress: hooks.phase,
       log: hooks.log,
     });

@@ -293,6 +293,9 @@ export type HostCaptionProps = BaseProps & {
  * Big uppercase words over the host, each landing as it is said ("NOT · THE · BOWL"), centred
  * below the face and clear of the name card (bottom-left) and the CTA QR (bottom-right).
  */
+/** Words a caption shows at once; a longer sentence pages (see WordReveal). */
+export const CAPTION_PAGE_WORDS = { HostCaption: 8, DimCaption: 10, ArrowCaption: 10 } as const;
+
 export const HostCaption: React.FC<HostCaptionProps> = ({ phrase, emphasis, top = 790, panel }) => {
   const t = useTheme();
   const shade = React.useContext(ShadeContext);
@@ -304,6 +307,7 @@ export const HostCaption: React.FC<HostCaptionProps> = ({ phrase, emphasis, top 
           phrase={phrase}
           emphasis={emphasis}
           uppercase
+          pageWords={CAPTION_PAGE_WORDS.HostCaption}
           style={{
             fontFamily: t.font,
             fontWeight: 900,
@@ -346,6 +350,7 @@ export const DimCaption: React.FC<DimCaptionProps> = ({ phrase, emphasis, dim = 
         <WordReveal
           phrase={phrase}
           emphasis={emphasis}
+          pageWords={CAPTION_PAGE_WORDS.DimCaption}
           style={{
             fontFamily: t.font,
             fontWeight: 800,

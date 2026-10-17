@@ -24,7 +24,7 @@ import {
   type Place,
 } from "./components";
 import { withAlpha } from "./palette";
-import { Leave, ShadeContext, plate, useAt, usePlate } from "./overlays";
+import { CAPTION_PAGE_WORDS, Leave, ShadeContext, plate, useAt, usePlate } from "./overlays";
 import { LAYOUT, TYPE } from "./theme";
 import { fadeIn, scrimIn, type Phrase } from "./timing";
 
@@ -505,7 +505,7 @@ export const ArrowCaption: React.FC<ArrowCaptionProps> = ({ phrase, emphasis, pl
       </svg>
       <div style={box}>
         <div style={textPool(shade)}>
-          <WordReveal phrase={phrase} emphasis={emphasis} style={{ fontFamily: t.font, fontWeight: 800, fontSize: 72, lineHeight: 1.12, color: t.text, maxWidth: 820, textShadow: TEXT_SHADOW }} />
+          <WordReveal phrase={phrase} emphasis={emphasis} pageWords={CAPTION_PAGE_WORDS.ArrowCaption} style={{ fontFamily: t.font, fontWeight: 800, fontSize: 72, lineHeight: 1.12, color: t.text, maxWidth: 820, textShadow: TEXT_SHADOW }} />
         </div>
       </div>
     </Leave>

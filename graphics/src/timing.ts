@@ -24,6 +24,29 @@ export function appearFrame(sec: number, fps: number): number {
   return Math.max(0, Math.round((sec - MOTION.wordLeadSec) * fps));
 }
 
+/**
+ * A long line split into PAGES the way subtitles page: at most `max` words each, broken after a
+ * comma, colon or full stop once a page holds at least half its share, never leaving a last page of
+ * one or two words. Returns the index of each page's first word. Pure.
+ */
+export function pageStarts(words: string[], max: number): number[] {
+  if (!(max > 0) || words.length <= max) return [0];
+  const starts = [0];
+  let start = 0;
+  for (let i = 0; i < words.length; i++) {
+    const len = i - start + 1;
+    const left = words.length - i - 1;
+    const breakHere = len >= max || (/[,;:.?!]["”')]*$/.test(words[i]) && len >= Math.ceil(max / 2) && left > 2);
+    if (breakHere && left > 0) {
+      start = i + 1;
+      starts.push(start);
+    }
+  }
+  // a last page of one or two words joins the page before
+  if (starts.length > 1 && words.length - starts[starts.length - 1] <= 2) starts.pop();
+  return starts;
+}
+
 /** Per-word appear frames for a phrase. Missing / short `wordTimes` fall back to `at`. */
 export function wordFrames(phrase: Phrase, fps: number): number[] {
   const words = splitWords(phrase.text);

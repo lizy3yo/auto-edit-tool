@@ -413,6 +413,12 @@ export interface StoryboardScene {
   /** One item of a spoken list ("a saw, a drill, …") — a quick cut, allowed down to `LIST_SHOT_MIN_SEC`. */
   listCut?: true;
   /**
+   * A list item's place in its list: its own item and the other items said with it, as spoken
+   * (`listItemsAround` in pictureMemory). The picture is drawn so it could not be taken for another
+   * item — Dale's job 397 drew "coasters" and "ornaments" as the same round discs.
+   */
+  listItems?: { own: string; others: string[] };
+  /**
    * The picture leading into a spoken list when the host could not say the bridge words: the place
    * the line names with ALL the list's items in it together. The items after it are drawn from it
    * (`listSetFor` in pictureMemory), so each close-up is the same thing as in the group.

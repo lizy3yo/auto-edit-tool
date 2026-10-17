@@ -258,15 +258,18 @@ describe("a cloned voice goes straight to the clone lane (2026-10-02)", () => {
 describe("voice settings judged on the mouth (2026-10-16)", () => {
   it("adds a pause after every sentence for a clone voice, never inside one", async () => {
     const { withSentencePauses } = await import("./tts69labs");
-    expect(withSentencePauses("Most folks quit. The first try? No. Will it be yours! Yes.")).toBe(
+    // off by default since 2026-10-17: the provider filled the mark with dead silence and cut each
+    // sentence's last word (Frederick's "The type."); server/sentencePauses.ts makes the pause instead
+    expect(withSentencePauses("One line. Two lines.")).toBe("One line. Two lines.");
+    expect(withSentencePauses("Most folks quit. The first try? No. Will it be yours! Yes.", 0.3)).toBe(
       "Most folks quit. <#0.3#> The first try? <#0.3#> No. <#0.3#> Will it be yours! <#0.3#> Yes."
     );
     // a quote or bracket after the stop, and a paragraph break, keep their place
-    expect(withSentencePauses('He said "stop." Then\n\nwe left.')).toBe(
+    expect(withSentencePauses('He said "stop." Then\n\nwe left.', 0.3)).toBe(
       'He said "stop." <#0.3#> Then\n\nwe left.'
     );
     // abbreviations, decimals and the last sentence get nothing
-    expect(withSentencePauses("Ask Dr. Smith on St. Paul road, e.g. near 1.5 miles.")).toBe(
+    expect(withSentencePauses("Ask Dr. Smith on St. Paul road, e.g. near 1.5 miles.", 0.3)).toBe(
       "Ask Dr. Smith on St. Paul road, e.g. near 1.5 miles."
     );
     expect(withSentencePauses("One. Two.", 0)).toBe("One. Two.");
@@ -286,7 +289,7 @@ describe("voice settings judged on the mouth (2026-10-16)", () => {
     }) as any;
     try {
       await createTTSTask69Labs("k-settings-1", { text: "One line. Two lines.", voiceId: CLONE });
-      expect(bodies["voice-clones/generate"].text).toBe("One line. <#0.3#> Two lines.");
+      expect(bodies["voice-clones/generate"].text).toBe("One line. Two lines.");
 
       await createTTSTask69Labs("k-settings-1", {
         text: "One line. Two lines.",
