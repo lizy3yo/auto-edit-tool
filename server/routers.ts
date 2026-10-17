@@ -200,6 +200,7 @@ import {
   MAX_HEAD_HOLD_SEC,
 } from "./sceneTiming";
 import { previewBookAssignments, ctaLabelMatches } from "../shared/ctaMarkers";
+import { checkScript, scriptRefusal } from "../shared/scriptCheck";
 import {
   buildTrackingUrl,
   stripTrackingParam,
@@ -2480,6 +2481,14 @@ const longformVideoRouter = router({
           code: "BAD_REQUEST",
           message: `CTA marker error: ${ctaMarkers.errors.join("; ")}`,
         });
+      }
+      // Only narration may be voiced (`shared/scriptCheck.ts`): notes, headings and a second copy
+      // of the script pasted into the box are refused here, by line, before anything is paid for
+      // — production jobs 204/205 voiced "VERDICT: PASS" and the whole script twice. The generate
+      // dialog runs the same check, so this fires only for a caller that skipped it.
+      const scriptRefused = scriptRefusal(checkScript(input.script));
+      if (scriptRefused) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: scriptRefused });
       }
       // A book assignment is keyed by BLOCK INDEX, so assigning one to a script with no marked
       // blocks would silently do nothing. Reject it here rather than render a film that quietly

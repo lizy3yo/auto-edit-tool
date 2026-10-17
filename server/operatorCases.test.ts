@@ -73,6 +73,7 @@ import {
   withoutFaceAsks,
   WORN_ON_BODY,
 } from "./hostLook";
+import { checkScript } from "@shared/scriptCheck";
 
 const pic = (index: number, scriptText: string, showSubject: string, over: Partial<StoryboardScene> = {}) =>
   ({ index, scriptText, showSubject, visualPrompt: showSubject, ...over }) as StoryboardScene;
@@ -1030,5 +1031,22 @@ describe("only a make-up step shows the face (Dale's job 372 test, 2026-10-15)",
     markHostBroll(scenes, { hostLook: "a man with a grey beard" }, "https://x/host.png");
     expect(scenes[0].humanPresent).toBe(true);
     expect(scenes[0].hostFaceShown).toBeUndefined();
+  });
+});
+
+describe("only narration is voiced (the audit's jobs 204/205)", () => {
+  it("the writer's QA notes and the script's second copy are refused at Generate, by line", () => {
+    const narration = [
+      "Picture this. You're walking home just after sunset, and a black cat slips out from under a parked car, looks straight at you, and trots across the road like he owns it. And somewhere in the back of your head, a very old voice suggests that maybe you should take the long way around tonight.",
+      "I'm Luca, and this one is for anyone who shares a couch with a black cat, or has ever walked past one at a shelter without quite knowing why. We're going to take the old stories apart one at a time, keep what's true, and gently set down what isn't.",
+    ];
+    const pasted = [...narration, "VERDICT: PASS", "VO COPY — ELEVENLABS V4", `[warm] ${narration[0]}`, narration[1]].join("\n");
+    const { problems } = checkScript(pasted);
+    expect(problems.map(p => [p.kind, p.line])).toEqual([["note", 3], ["note", 4], ["repeat", 1]]);
+    expect(problems[2].againLine).toBe(5);
+  });
+
+  it("a narration line that says 'verdict' (job 46) is narration", () => {
+    expect(checkScript("So today, twelve things about plain white vinegar, and an honest verdict on every one.").problems).toEqual([]);
   });
 });

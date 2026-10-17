@@ -73,6 +73,44 @@ export function extractSpokenScript(raw: string): string {
   return paras.slice(i).join("\n\n").trim();
 }
 
+/**
+ * `extractSpokenScript(raw)` line by line, each line with its 1-based number in the RAW script —
+ * so a message about the spoken text names the line the operator pasted, not a line of a text
+ * they never see (a stripped preamble or `=== SCRIPT ===` frame shifts every number after it).
+ * The spoken text is the raw text minus its framing, line for line, so each spoken line is found
+ * in order; the search starts after an `=== SCRIPT ===` marker when there is one, so a copy of
+ * the narration kept ABOVE the frame is never the line named. A blank line gets the number of
+ * the line after the last one found (it is never named). Pure — unit-tested.
+ */
+export function spokenScriptLines(
+  raw: string
+): Array<{ line: number; text: string }> {
+  const spoken = extractSpokenScript(raw);
+  if (!spoken) return [];
+  const norm = raw.replace(/\r\n?/g, "\n");
+  const rawLines = norm.split("\n");
+  const start = norm.match(SCRIPT_START_MARKER);
+  let at =
+    start && start.index !== undefined
+      ? norm.slice(0, start.index).split("\n").length // the line after the marker
+      : 0;
+  const find = (want: string, from: number) => {
+    for (let j = from; j < rawLines.length; j++)
+      if (rawLines[j].trim() === want) return j;
+    return -1;
+  };
+  return spoken.split("\n").map(text => {
+    const want = text.trim();
+    if (!want) return { line: at + 1, text };
+    // Missing after the marker only when the frame was empty and the whole text came back.
+    let j = find(want, at);
+    if (j < 0) j = find(want, 0);
+    if (j < 0) return { line: at + 1, text };
+    at = j + 1;
+    return { line: j + 1, text };
+  });
+}
+
 // Exact CTA block markers (own line; surrounding spaces/tabs tolerated, nothing else).
 // Deliberately NOT tolerant like the SCRIPT markers — the script template emits them verbatim.
 // The START marker takes an optional book name — `===START CTA (The Old Way Home)===` — which
