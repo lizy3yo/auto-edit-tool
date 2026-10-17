@@ -147,7 +147,7 @@ describe("the Myth/Truth card strikes the myth on its words, every line", () => 
     for (let i = 1; i < s.length; i++) expect(s[i].alpha).toBeLessThanOrEqual(s[i - 1].alpha);
   });
 
-  it("a myth of one, a few or many words (one, two or three lines) is struck word for word", () => {
+  it("a myth of one, a few or many words (one, two or five lines at full size; 399's three-line myth is above) is struck word for word", () => {
     for (const myth of ["Wrong.", "Crew get the best seats.", "Flight attendants only help passengers they already know from earlier trips on this route."]) {
       const n = splitWords(myth).length;
       const s = strokes(render(turn + 15, myth));
