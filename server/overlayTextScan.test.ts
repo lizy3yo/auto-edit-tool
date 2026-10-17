@@ -467,6 +467,36 @@ describe("what the line rules out — the forbidden verdict (R5, the audit, 2026
     expect(forbiddenQuestion('the "wrong" way')).toContain("the 'wrong' way");
   });
 
+  it("one picture of a joined sentence is held to any one of its marks", async () => {
+    const { forbiddenQuestion } = await import("./overlayTextScan");
+    expect(forbiddenQuestion("a lit candle in the room; a lit cigarette in the room")).toMatch(
+      /exactly that — any one of the things listed\? When/
+    );
+    expect(forbiddenQuestion("a lit candle in the room")).not.toContain("any one of");
+  });
+
+  // prod 225-83: "Never in | the garage, | the basement, | the shed, | or on the porch," — the piece
+  // "or on the porch," names the porch only to rule it out, and the place question used to call a
+  // picture drawn the right way (out in the open) the wrong place for it.
+  it("the place question never holds a marked picture to the place its sentence rules out", async () => {
+    const { placeQuestion } = await import("./overlayTextScan");
+    expect(placeQuestion("or on the porch,", true)).toMatch(
+      /a place it says to keep something\s+away from, out of, or never to use is NOT where the frame must be/
+    );
+    expect(placeQuestion("or on the porch,", true)).toMatch(/If the line names no such place, or you are unsure, answer false\.$/);
+    // Unmarked, the question is exactly as before: a place a line names is where the frame belongs.
+    expect(placeQuestion("sold at the fair")).not.toMatch(/rules something out/);
+    expect(placeQuestion("sold at the fair")).toMatch(/never make it wrong\. If the line names no such place/);
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue({ text: '{"overlay":false,"broken":false,"writing":false,"missing":false}' } as any);
+    const run = "a portable generator running on an open gravel driveway";
+    await scanStillDefects(await imageOf(1280, 720), run, "or on the porch,", undefined, undefined, undefined, false, undefined, "the generator running inside a building");
+    expect(mockInvoke.mock.calls[0][0].systemSuffix).toMatch(/rules something out here/);
+    mockInvoke.mockClear();
+    await scanStillDefects(await imageOf(1280, 720), "a quilt folded on a market stall", "sold at the fair");
+    expect(mockInvoke.mock.calls[0][0].systemSuffix).not.toMatch(/rules something out here/);
+  });
+
   it("parses forbidden only when it is true", () => {
     expect(parseStillDefectVerdict('{"forbidden":true,"what":"hand on belly"}')).toMatchObject({ forbidden: true, what: "hand on belly" });
     expect("forbidden" in parseStillDefectVerdict('{"forbidden":false}')).toBe(false);

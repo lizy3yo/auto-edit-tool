@@ -202,6 +202,12 @@ describe("forbids, from the check's answer to the picture check", () => {
     expect(forbidsOf('  "the board stack near the furnace."  ')).toBe("the board stack near the furnace");
     expect(forbidsOf("a   steel\nvault door")).toBe("a steel vault door");
     for (const empty of [null, undefined, 3, "", "none", "None", "null", "N/A", "nothing", "-", '""']) expect(forbidsOf(empty)).toBeUndefined();
+    // "None" with its reason is still no mark — it would be asked of the frame as the thing to avoid.
+    for (const empty of ["none — a figure of speech", "Nothing visible is ruled out", "N/A (an idiom)", "null."])
+      expect(forbidsOf(empty)).toBeUndefined();
+    // A real phrase that happens to start with those letters is kept.
+    expect(forbidsOf("no guard on the running saw")).toBe("no guard on the running saw");
+    expect(forbidsOf("nonstick spray on the cutting board")).toBe("nonstick spray on the cutting board");
     expect(forbidsOf("x".repeat(400))!.length).toBe(160);
   });
 
@@ -232,10 +238,18 @@ describe("forbids, from the check's answer to the picture check", () => {
 describe("the check end to end (canned answer — the plumbing, not the model)", () => {
   it("prod 225-79..83: the pieces of one sentence are shown to the check as one sentence, and each is marked", async () => {
     const pieces = ["Never in", "the garage,", "the basement,", "the shed,", "or on the porch,"];
+    // As shipped: the generator drawn inside the garage the sentence rules out.
     const scenes = pieces.map((t, k) => pic(k + 1, t, "portable generator sitting inside a garage on the concrete floor"));
+    const outside = "a portable generator running on an open gravel driveway";
+    // The first piece is already drawn the right way: it is marked and left as it is.
+    scenes[0].showSubject = scenes[0].visualPrompt = outside;
     mockInvoke.mockResolvedValueOnce({
       text: JSON.stringify({
-        pictures: pieces.map((_, id) => ({ id, about: "where never to run it", shows_it: true, forbids: "the generator running inside a closed space" })),
+        pictures: pieces.map((_, id) =>
+          id === 0
+            ? { id, about: "where never to run it", shows_it: true, forbids: "the generator running inside a building" }
+            : { id, about: "where never to run it", shows_it: false, show: outside, forbids: "the generator running inside a building" }
+        ),
       }),
     });
     const r = await fitPicturesToLines(scenes);
@@ -243,10 +257,11 @@ describe("the check end to end (canned answer — the plumbing, not the model)",
     // The check sees every piece after the first marked as continuing the sentence, so it reads
     // "Never in" with each place.
     expect(sent.match(/\(same sentence\)/g)?.length).toBe(4);
-    expect(r.fixed).toBe(0);
-    expect(r.scenes.every(s => s.forbids === "the generator running inside a closed space")).toBe(true);
-    // No rewrite: the pictures are unchanged, only marked for the picture check.
-    expect(r.scenes.map(s => s.showSubject)).toEqual(scenes.map(s => s.showSubject));
+    // Only the four rewrites count; the right picture is only marked for the picture check.
+    expect(r.fixed).toBe(4);
+    expect(r.scenes.every(s => s.forbids === "the generator running inside a building")).toBe(true);
+    // Every piece names only what is in the frame — none of the places the sentence rules out.
+    expect(r.scenes.every(s => s.showSubject === outside)).toBe(true);
   });
 
   it("a failed check marks nothing", async () => {

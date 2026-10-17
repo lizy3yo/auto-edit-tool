@@ -1577,12 +1577,13 @@ export type PictureFix = {
 
 /**
  * The check's `forbids`, cleaned: a short phrase, or nothing for an empty answer or one that only
- * says "none". Pure.
+ * says "none" — also with a reason after it ("none — a figure of speech", "nothing visible"), which
+ * would otherwise be asked of the frame as the thing it must not show. Pure.
  */
 export function forbidsOf(v: unknown): string | undefined {
   if (typeof v !== "string") return undefined;
   const text = v.replace(/\s+/g, " ").replace(/^["'“”‘’\s]+|["'“”‘’\s.]+$/g, "").trim();
-  if (!/[a-z]{2}/i.test(text) || /^(?:null|none|nothing|n\/?a|no|nil|-)$/i.test(text)) return undefined;
+  if (!/[a-z]{2}/i.test(text) || /^(?:no|na|-)$|^(?:null|none|nothing|n\/a|nil)\b/i.test(text)) return undefined;
   return text.slice(0, 160);
 }
 

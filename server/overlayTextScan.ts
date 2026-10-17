@@ -401,8 +401,16 @@ export const STAGED_RULE =
 /** QUESTION 7, always asked: an ordinary phone photo, not a styled or AI-looking render. */
 export const STAGED_QUESTION = `\n\nQUESTION 7 — staged: ${STAGED_RULE}`;
 
-/** QUESTION 6, asked only with the narration line: the frame is set where the line says. */
-export function placeQuestion(line: string): string {
+/**
+ * QUESTION 6, asked only with the narration line: the frame is set where the line says.
+ *
+ * `rulesOut`: the picture's sentence rules something out (`scene.forbids`, QUESTION 8). A place such
+ * a line names is where the thing must NOT be — "Never in | the garage, | … | or on the porch"
+ * (production 225-79..83) — and asked plainly, this question would call a picture drawn the right
+ * way (out in the open) the wrong place for "or on the porch,", spending a redraw on pulling it
+ * toward the very place the line rules out. Said only on the pictures the line check marked.
+ */
+export function placeQuestion(line: string, rulesOut = false): string {
   return (
     "\n\nQUESTION 6 — wrong_place: this frame plays under the narration line: " +
     `"${line.replace(/"/g, "'").slice(0, 400)}". ONLY about the SETTING, never which object is ` +
@@ -411,7 +419,13 @@ export function placeQuestion(line: string): string {
     "or patio, a garden or field, a hospital, a particular country's buildings — is the frame " +
     "clearly somewhere else, or showing that place only as a picture or poster on a wall? A " +
     "workshop, garage, shed, sewing room, kitchen table or work bench all count as the same home " +
-    "base and never make it wrong. If the line names no such place, or you are unsure, answer false."
+    "base and never make it wrong. " +
+    (rulesOut
+      ? "The narrator's sentence rules something out here: a place it says to keep something " +
+        "away from, out of, or never to use is NOT where the frame must be — a frame anywhere else " +
+        "is false for it. "
+      : "") +
+    "If the line names no such place, or you are unsure, answer false."
   );
 }
 
@@ -424,9 +438,13 @@ export function placeQuestion(line: string): string {
  * count on it"), so this is asked on the few pictures per film the line check marks.
  */
 export function forbiddenQuestion(forbids: string): string {
+  // One picture for a joined sentence carries both parts' marks, "a; b" (`applyPictureJoins`).
+  const several = forbids.includes(";");
   return (
     "\n\nQUESTION 8 — forbidden: the narrator's line rules this out, so the frame must NOT show it: " +
-    `"${forbids.replace(/"/g, "'").slice(0, 240)}". Does the frame clearly show exactly that? When ` +
+    `"${forbids.replace(/"/g, "'").slice(0, 240)}". Does the frame clearly show exactly that` +
+    (several ? " — any one of the things listed" : "") +
+    "? When " +
     "it names an act, answer true only if the act is being done; when it names a thing in a place or " +
     "beside something, only if the thing is there, in that place or beside it; when it names a thing " +
     "alone, if that thing is in the frame. The same task done the right way, a different thing in " +
@@ -525,7 +543,7 @@ export async function scanStillDefects(
         (mustShow ? requiredThingsQuestion(mustShow, requiredLook) : "") +
         (expect && softPrint ? SOFT_PRINT_QUESTION : "") +
         (askDetail ? detailQuestion(expect!) : "") +
-        (line ? placeQuestion(line) : "") +
+        (line ? placeQuestion(line, !!ruledOut) : "") +
         (allowedText ? allowedTextQuestion(allowedText) : "") +
         (ruledOut ? forbiddenQuestion(ruledOut) : "") +
         verdictShape(expect, line, askDetail, !!ruledOut),

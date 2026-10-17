@@ -1304,6 +1304,16 @@ describe("what a line rules out is never drawn (the audit, 2026-10-18)", () => {
     expect(forbiddenQuestion(scenes[2].forbids!)).toContain("a hand rubbing or touching the cat's belly");
   });
 
+  // 225-79..83: "Never in | the garage, | the basement, | the shed, | or on the porch," — the place
+  // question read "or on the porch," as where the picture belongs, so a picture drawn the right way
+  // (out in the open) was "the wrong place" and its redraw pulled toward the porch.
+  it("225-83: a marked picture is never held to the place its sentence rules out", async () => {
+    const { placeQuestion } = await import("./overlayTextScan");
+    expect(placeQuestion("or on the porch,", true)).toMatch(/is NOT where the frame must be/);
+    // Every other picture is asked exactly as before ("sold at the fair" is where it belongs).
+    expect(placeQuestion("sold at the fair", false)).not.toMatch(/NOT where the frame must be/);
+  });
+
   it("the prompt writer carries the same rule, in neutral words", async () => {
     const { RULED_OUT_RULE, STILL_BROLL_ENHANCER_SYSTEM } = await import("./longformVideo");
     expect(STILL_BROLL_ENHANCER_SYSTEM).toContain(RULED_OUT_RULE);
