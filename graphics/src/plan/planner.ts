@@ -277,12 +277,13 @@ function rowText(item: string): string {
 }
 
 /**
- * A list graphic for every spoken list no graphic covers yet, built from the list's own words —
- * ListWindow over b-roll, HostListWindow over the host — skipping a list in the call to action. Pure.
+ * Where each spoken list is said — its first item's first word to its last item's last word — in
+ * order, each searched from the list before it (a list said again later binds after the one before
+ * it). A list whose first or last item is not heard word for word is left out. Pure.
  */
-export function missingListCues(placed: ResolvedCue[], words: Word[], film: FilmLayout, lists: { items: string[]; kind?: string }[]): CueSpec[] {
+function locateLists(words: Word[], lists: { items: string[] }[]): { n: number; a: number; b: number }[] {
   const index = indexWords(words);
-  const out: CueSpec[] = [];
+  const out: { n: number; a: number; b: number }[] = [];
   let from = 0;
   lists.forEach((l, n) => {
     const first = findVerbatim(index, l.items[0], from);
@@ -290,10 +291,40 @@ export function missingListCues(placed: ResolvedCue[], words: Word[], film: Film
     const last = findVerbatim(index, l.items[l.items.length - 1], first[0]);
     if (!last) return;
     from = first[0];
-    const a = words[index[first[0]].word].start;
-    const b = words[index[last[last.length - 1]].word].end;
-    if (film.scenes.some(s => s.cta && a < s.narrationEndSec && b > s.narrationStartSec)) return;
-    if (placed.some(c => Math.min(c.end, b) - Math.max(c.start, a) > (b - a) * 0.4)) return;
+    out.push({ n, a: words[index[first[0]].word].start, b: words[index[last[last.length - 1]].word].end });
+  });
+  return out;
+}
+
+/** Does `a`-`b` touch a call-to-action scene? No graphic may go there (rules.ts). */
+function inCallToAction(film: FilmLayout, a: number, b: number): boolean {
+  return film.scenes.some(s => s.cta && a < s.narrationEndSec && b > s.narrationStartSec);
+}
+
+/**
+ * The spoken lists a graphic may cover: every one but a list said in the call to action. Only these
+ * are put to the planner as lists that MUST get a graphic — a replay of 12 films found 15 of 49 lists
+ * in a CTA, in every film (Dale's job 397: "other woodworkers, old shop habits, and a fair pile of my
+ * own spoiled boards" in the book pitch; Hank's job 398: the scan steps "Point your phone's camera…,
+ * hold it steady…, tap the link"), each told it MUST have a graphic and each refused by the rules.
+ * Located exactly as `missingListCues` locates them, over the whole sequence, so the two agree; a list
+ * that is not heard word for word is still offered (the planner may place it on the words it finds). Pure.
+ */
+export function listsWhereGraphicsGo<L extends { items: string[] }>(words: Word[], film: FilmLayout, lists: L[]): L[] {
+  const cta = new Set(locateLists(words, lists).filter(p => inCallToAction(film, p.a, p.b)).map(p => p.n));
+  return lists.filter((_, n) => !cta.has(n));
+}
+
+/**
+ * A list graphic for every spoken list no graphic covers yet, built from the list's own words —
+ * ListWindow over b-roll, HostListWindow over the host — skipping a list in the call to action. Pure.
+ */
+export function missingListCues(placed: ResolvedCue[], words: Word[], film: FilmLayout, lists: { items: string[]; kind?: string }[]): CueSpec[] {
+  const out: CueSpec[] = [];
+  for (const { n, a, b } of locateLists(words, lists)) {
+    if (inCallToAction(film, a, b)) continue;
+    if (placed.some(c => Math.min(c.end, b) - Math.max(c.start, a) > (b - a) * 0.4)) continue;
+    const l = lists[n];
     const over = film.scenes.filter(s => a < s.narrationEndSec && b > s.narrationStartSec);
     const host = over.filter(s => s.hostPresent).length > over.length / 2;
     const say = (x: string) => x.replace(/[.,;:!?]+$/, "");
@@ -303,7 +334,7 @@ export function missingListCues(placed: ResolvedCue[], words: Word[], film: Film
       start: say(l.items[0]).split(/\s+/).slice(0, 2).join(" "),
       props: { items: l.items.map(x => ({ text: rowText(x), at: "@" + say(x).split(/\s+/).slice(0, 2).join(" "), say: say(x) })) },
     } as CueSpec);
-  });
+  }
   return out;
 }
 
@@ -408,6 +439,10 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
   const required = new Set<string>();
   const priority = (s: CueSpec) => structural.has(s.template) || required.has(s.id);
   const lists = (input.lists ?? []).filter(l => l.items.length >= 2 && l.items.length <= 5);
+  // The model is told a list MUST get a graphic only where one may go: a list in the call to action
+  // can never have one, so naming it there only buys a refusal. `missingListCues` still reads every
+  // list, so a list said after a mid-roll CTA is located after it, not on an earlier copy of its words.
+  const offered = listsWhereGraphicsGo(words, film, lists);
 
   const validate = async (newSpecs: CueSpec[], final: boolean) => {
     const problems: PlanProblem[] = [];
@@ -549,11 +584,11 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
   };
 
   const system = systemPrompt({ kept: kept0.length > 0 });
-  const listNote = lists.length
+  const listNote = offered.length
     ? `\n\nSPOKEN LISTS IN THIS SCRIPT — each one MUST get a list graphic wherever one may go (ListWindow over
 b-roll, HostListWindow over the host; steps may be StepCards or StepLabels), every item a row in the order
 said ("text" ≤5 words, "at": "@its first spoken words", "say": the item as said):
-${lists.map((l, i) => `${i + 1}. ${l.kind === "steps" ? "[steps] " : ""}${l.items.map(x => `"${x}"`).join(", ")}`).join("\n")}`
+${offered.map((l, i) => `${i + 1}. ${l.kind === "steps" ? "[steps] " : ""}${l.items.map(x => `"${x}"`).join(", ")}`).join("\n")}`
     : "";
   const user = userPrompt(film, kept0.length ? resolveCues(kept0, words, opts) : []) + listNote;
   const first = await ask(system, [{ role: "user", content: user }]);
