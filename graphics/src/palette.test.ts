@@ -88,7 +88,11 @@ describe("the colours a cue renders with", () => {
     expect(themeFor({ theme, plain: 1 }).accent).toBe("#eb9046");
   });
 
-  it("the accent stays a #rrggbb even when a theme's text colour is not one", () => {
-    expect(themeFor({ theme: { ...theme, text: "white" }, plain: true }).accent).toBe("#FFFFFF");
+  it("the accent stays a #rrggbb even when a theme's text colour is not one, and still equals the text", () => {
+    const t = themeFor({ theme: { ...theme, text: "white" }, plain: true });
+    expect(t.accent).toBe("#FFFFFF");
+    expect(t.text).toBe(t.accent);
+    // Not drawn plain, such a theme's text is left exactly as it was.
+    expect(themeFor({ theme: { ...theme, text: "white" } }).text).toBe("white");
   });
 });

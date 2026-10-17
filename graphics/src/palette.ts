@@ -170,6 +170,10 @@ export function themeFor(props: { theme?: unknown; lift?: unknown; plain?: unkno
   const base = props.theme ? { ...THEME, ...(props.theme as Partial<Theme>) } : THEME;
   const lift = typeof props.lift === "number" ? Math.min(1, Math.max(0, props.lift)) : 0;
   const t = lift ? { ...base, accent: towardWhite(base.accent, 0.4 * lift), danger: towardWhite(base.danger, 0.4 * lift) } : base;
-  // The accent stays a #rrggbb: glows (`withAlpha`) and the readability check's inks parse it.
-  return props.plain === true ? { ...t, accent: /^#[0-9a-f]{6}$/i.test(base.text) ? base.text : "#FFFFFF" } : t;
+  if (props.plain !== true) return t;
+  // The accent stays a #rrggbb (glows `withAlpha` and the readability check's inks parse it), and
+  // accent and text stay the SAME string: the check's inks and a step disc (NumberDot) both read
+  // "drawn plain" as accent === text, and a mismatch would draw a white digit on a white disc.
+  const ink = /^#[0-9a-f]{6}$/i.test(base.text) ? base.text : "#FFFFFF";
+  return { ...t, accent: ink, text: ink };
 }

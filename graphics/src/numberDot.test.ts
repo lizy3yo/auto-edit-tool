@@ -19,4 +19,9 @@ describe("a step number's disc", () => {
     expect(html).toContain("background:#FFFFFF");
     expect(html).toContain("color:#221710");
   });
+  it("still a dark digit on the white disc when the theme names its text colour some other way", () => {
+    const html = dot({ theme: { ...theme, text: "white" }, plain: true });
+    expect(html).toContain("background:#FFFFFF");
+    expect(html).toContain("color:#221710");
+  });
 });
