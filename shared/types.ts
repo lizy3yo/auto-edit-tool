@@ -283,6 +283,8 @@ export interface PictureTake {
   clipShortSec?: number;
   /** The description this picture was drawn from, so the card reads true after a switch. */
   visualPrompt?: string;
+  /** The faults this picture shipped with (`StoryboardScene.pictureFlaws`), so its badge follows a switch. */
+  pictureFlaws?: string[];
   at: string;
   source: "original" | "regenerate";
   by?: SubmitActor;
@@ -310,6 +312,13 @@ export interface KeyThing {
   look: string;
   main?: true;
 }
+
+/**
+ * How far along a thing the video MAKES is in one picture, earliest first: "material" (the raw
+ * stock or pieces before any work), "making" (being made, partly built), "done" (finished —
+ * finishing touches such as oil, wax or a felt pad count as done).
+ */
+export type BuildStage = "material" | "making" | "done";
 
 export interface StoryboardScene {
   index: number;
@@ -419,6 +428,15 @@ export interface StoryboardScene {
   /** Every check of a picture drawn for this beat — its kind and what the check named
    *  (`server/pictureCheckLog.ts`), so a film shows which kinds come out right the first time. */
   pictureChecks?: { kind: string; panel?: boolean; flags: string[] }[];
+  /**
+   * The picture SHIPPED although its check still named these faults (`checkFlags` words, plus
+   * "different thing" / "near copy" from the later checks) — its redraws did not clear them, and
+   * the film never stops for a picture. Set or cleared every time the picture is drawn; the job
+   * warns and the card shows a badge (`shared/pictureFlaws.ts`).
+   */
+  pictureFlaws?: string[];
+  /** The same for the split-screen panel, which is drawn from a copy of the scene. */
+  panelFlaws?: string[];
   /** The clip URL last checked for a picture at assembly — so a Reassemble does not re-check it. */
   clipCheckedUrl?: string;
   /** One item of a spoken list ("a saw, a drill, …") — a quick cut, allowed down to `LIST_SHOT_MIN_SEC`. */
@@ -443,8 +461,9 @@ export interface StoryboardScene {
    */
   hostCandidate?: true;
   /**
-   * The thing this picture must show, in the shot list's words ("a stack of sandpaper"). The still
-   * checker re-rolls a picture that does not show it (`scanStillDefects`' `missing` verdict).
+   * The thing this picture must show, in the shot list's words ("a stack of sandpaper"), or the
+   * operator's own once they type the picture again (`ownTypedPicture`). The still checker re-rolls a
+   * picture that does not show it (`missing`), or shows it other than described (`detail`).
    */
   showSubject?: string;
   /** Scenes cut from one storyboard beat share its index here — the shot list's own bookkeeping. */
@@ -494,6 +513,16 @@ export interface StoryboardScene {
    */
   otherKeyThings?: string[];
   /**
+   * How far along the thing the video MAKES is in this picture, set only on a picture of that thing
+   * or what it is made from (the shot list, the line check, a step of a spoken list). The picture is
+   * drawn only from pictures of the same or an EARLIER stage (`memorySourcesFor`): a build video
+   * opens on the finished piece, and Hank's job 268 drew "hands drilling a hole into a charred cedar
+   * block" from the hook's finished, oiled holder. Unset: no stage, memory exactly as before.
+   */
+  buildStage?: BuildStage;
+  /** "steps": one step of a spoken list of steps (`applySpokenLists`) — the same piece, further along. */
+  listKind?: "steps";
+  /**
    * Whether something in this picture MOVES BY ITSELF, as judged on its own description
    * (`judgeSelfMoving`, 2026-10-01 — it replaced a fixed word list that let "a sliding door" and
    * "a smoke alarm" count as moving). Only `true` may be a video; unset means not judged yet.
@@ -520,6 +549,25 @@ export interface StoryboardScene {
   memoryRefUrls?: string[];
   /** The camera position a memory picture is drawn from — never its memory's own (set at render). */
   memoryView?: string;
+  /**
+   * The memory pictures show only the OTHER key things in this picture, none of its own — the
+   * heater's first picture beside the first mattress (set at render). The picture is then not told
+   * its references are its own thing, and not compared with them (`memoryClause`, `scanSameThing`).
+   */
+  memoryOthersOnly?: true;
+  /**
+   * Its key thing's look, cut down for this picture (`keyThingLookFor`) — set at render ONLY when it
+   * has no picture of its own thing to follow, so the look is what its first picture is drawn by
+   * (Ruth's job 305: the first straight-stitch machine was drawn with no colour or material, and 5
+   * later pictures copied it).
+   */
+  keyThingLook?: string;
+  /**
+   * The picture's last check said what it must show is not in it (`missing`), so no later picture is
+   * drawn from it (`memorySourcesFor`): stored films had 22 first pictures copied after failing
+   * their last check. Never set for a staged look or readable writing alone — the thing is there.
+   */
+  memoryUnfit?: true;
   /**
    * The exact look of the specific named kind this picture shows ("churn dash block: a 3×3 block…"),
    * written by `describeNamedLooks` so the picture maker can draw what it cannot know by name.
@@ -569,6 +617,15 @@ export interface StoryboardScene {
    * drawn from one photo, and the prompt asks for each of them (`otherPersonClause`).
    */
   otherPeople?: number;
+  /**
+   * What this picture's SENTENCE rules out, so the picture must not show it — the act it says not
+   * to do, the thing it says is not meant or is used instead of, or the place it says to keep
+   * something away from ("the lumber stack near the furnace"), in the line check's words
+   * (`fitPicturesToLines`, `forbids`). The picture check asks whether the frame shows it
+   * (`scanStillDefects`' `forbids`) and draws once more when it does. It is about the LINE, so it
+   * stays through any later rewrite of the picture. Unset: the sentence rules nothing visible out.
+   */
+  forbids?: string;
   /**
    * This beat sits inside the FAST-OPEN window (`LongformPacing.fastOpen`): the first `zoneSec`
    * of narration, where cuts land faster to match the script's opening pace. Set once at

@@ -497,9 +497,11 @@ function setPicture(base: StoryboardScene, text: string, names: string[]): Story
     visualPromptSeed: undefined,
     keyThing: undefined,
     otherKeyThings: undefined,
+    buildStage: undefined,
     sameShot: undefined,
     joinedLine: undefined,
     listCut: undefined,
+    listKind: undefined,
     listSet: true,
     wordCut: true,
     shotGroup: base.shotGroup ?? base.index,
@@ -530,6 +532,7 @@ function listPicture(base: StoryboardScene, text: string, show: string): Storybo
     visualPromptSeed: undefined,
     keyThing: undefined,
     otherKeyThings: undefined,
+    buildStage: undefined,
     pictureText: undefined,
     blurPrint: undefined,
     sameShot: undefined,
@@ -556,6 +559,8 @@ export function applySpokenLists(
   // Why each list found in the script was NOT cut here — logged by the caller, so a list that stays
   // on the host says why instead of having to be reproduced.
   const skipped: string[] = [];
+  // Whether the video MAKES its main thing: the shot list stages only pictures of a thing being made.
+  const mainMade = !!opts.main && scenes.some(s => s.keyThing === opts.main && !!s.buildStage);
   const G: FilmToken[] = [];
   scenes.forEach((s, i) => tokenSpans(s.scriptText ?? "").forEach(t => G.push({ scene: i, ...t })));
   const toks = G.map(g => g.tok);
@@ -688,7 +693,7 @@ export function applySpokenLists(
     if (!r) {
       let s = scenes[i];
       if (s.listCut && !s.hostPresent && !itemScenes.has(i)) {
-        s = { ...s, listCut: undefined };
+        s = { ...s, listCut: undefined, listKind: undefined };
         cleared++;
       }
       if (carry) {
@@ -702,7 +707,7 @@ export function applySpokenLists(
     if (carry) {
       // The words after a list run straight into another list: they keep a picture of their own.
       const prev = out[out.length - 1];
-      out.push({ ...prev, ...FRESH, scriptText: carry, narration: firstWords(carry, 8), listCut: undefined, wordCut: true } as StoryboardScene);
+      out.push({ ...prev, ...FRESH, scriptText: carry, narration: firstWords(carry, 8), listCut: undefined, listKind: undefined, wordCut: true } as StoryboardScene);
       carry = null;
     }
     const head = scenes[i];
@@ -740,11 +745,27 @@ export function applySpokenLists(
         scriptText: prefix,
         narration: firstWords(prefix, 8),
         listCut: head.hostPresent ? head.listCut : undefined,
+        listKind: head.hostPresent ? head.listKind : undefined,
         wordCut: true,
       } as StoryboardScene);
     }
     if (head.hostPresent) handed++;
     const items: StoryboardScene[] = [];
+    // A STEP of making the main thing is "making" unless the planner already gave its picture a stage
+    // (a finishing step it called "done"), and with no key thing of its own it takes the main thing
+    // (`ownKeyThing`) — so it is drawn only from pictures of the piece at the same or an earlier
+    // stage, never from the finished piece the video opened on (Hank's job 269: "Square up the scrap
+    // with a couple of saw cuts," was drawn from "A finished charred cedar incense holder"). A step
+    // filed under the bench or a tool is still a moment of the making (jobs 332, 361: "give it a quick
+    // brush," on the workbench). Only when the video MAKES its main thing — the shot list gave a
+    // picture of it a stage (`mainMade`): most step lists build nothing ("get a stepladder, take one
+    // alarm down, and read the label", Frederick's job 359; "hold the piece up near your face by a
+    // window", Scarlett's job 354) and stay exactly as they were. Any other list clears the mark.
+    const asItem = (p: StoryboardScene): StoryboardScene => {
+      if (r.kind !== "steps") return { ...p, listKind: undefined };
+      if (!mainMade) return { ...p, listKind: "steps" };
+      return { ...p, listKind: "steps", keyThing: p.keyThing ?? opts.main, buildStage: p.buildStage ?? "making" };
+    };
     for (let k = 0; k + 1 < bounds.length; k++) {
       const [a, b] = [bounds[k], bounds[k + 1]];
       const text = textOf(a, b);
@@ -753,7 +774,7 @@ export function applySpokenLists(
         (s, j) => j >= r.first && j <= r.last && !s.hostPresent && firstTok.get(j) === a && endTok.get(j) === b
       );
       if (exact >= 0) {
-        items.push({ ...scenes[exact], listCut: true, wordCut: true, sameShot: undefined });
+        items.push(asItem({ ...scenes[exact], listCut: true, wordCut: true, sameShot: undefined }));
         continue;
       }
       const bare = bareItem(text);
@@ -778,9 +799,10 @@ export function applySpokenLists(
         pic.visualPrompt = scenes[own].visualPrompt ?? show;
         pic.humanPresent = scenes[own].humanPresent;
         pic.keyThing = scenes[own].keyThing;
+        pic.buildStage = scenes[own].buildStage;
       }
       if (r.kind === "steps") pic.humanPresent = true;
-      items.push(pic);
+      items.push(asItem(pic));
     }
     if (leadIn && items.length) {
       const first = items[0];
@@ -804,6 +826,7 @@ export function applySpokenLists(
           hostIntro: undefined,
           hostOpener: undefined,
           listCut: undefined,
+          listKind: undefined,
           wordCut: true,
         } as StoryboardScene);
       } else if (lastScene.hostPresent) {
@@ -813,7 +836,7 @@ export function applySpokenLists(
       } else if (next && !next.hostPresent && !fixedBeat(next) && !startsRegion.has(r.last + 1)) {
         carry = tail;
       } else {
-        items.push({ ...lastScene, ...FRESH, scriptText: tail, narration: firstWords(tail, 8), listCut: undefined, wordCut: true } as StoryboardScene);
+        items.push({ ...lastScene, ...FRESH, scriptText: tail, narration: firstWords(tail, 8), listCut: undefined, listKind: undefined, wordCut: true } as StoryboardScene);
       }
     }
     out.push(...items);

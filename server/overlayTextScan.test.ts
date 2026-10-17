@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import sharp from "sharp";
 
 // Mock the Claude client so nothing here hits the live model. Braces are load-bearing on any
@@ -213,6 +213,25 @@ describe("scanStillDefects", () => {
     expect(mockInvoke.mock.calls[0][0].systemSuffix).not.toContain("QUESTION 4");
   });
 
+  it("holds a copied first picture to its thing's look inside the same question, on the careful checker", async () => {
+    // Ruth's job 305: the first straight-stitch machine, copied by 5 later pictures. No extra call:
+    // the look rides QUESTION 4, and a miss is an ordinary "missing".
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue({ text: '{"overlay":false,"broken":false,"writing":false,"missing":true,"what":"a white machine"}' } as any);
+    const look = { thing: "straight-stitch machine", look: "small black and chrome sewing machine, compact size" };
+    const v = await scanStillDefects(await imageOf(1280, 720), "a straight-stitch machine", undefined, undefined, undefined, [look.thing], false, look);
+    expect(v.missing).toBe(true);
+    expect(mockInvoke).toHaveBeenCalledTimes(1);
+    const call = mockInvoke.mock.calls[0][0];
+    expect(call.systemSuffix).toContain("small black and chrome sewing machine, compact size");
+    expect(call.systemPrompt).not.toContain("black and chrome");
+    expect(call.model).not.toBe("claude-haiku-4-5-20251001");
+    // A picture nothing copies is asked for the thing only.
+    mockInvoke.mockClear();
+    await scanStillDefects(await imageOf(1280, 720), "a straight-stitch machine", undefined, undefined, undefined, [look.thing]);
+    expect(mockInvoke.mock.calls[0][0].systemSuffix).not.toContain("black and chrome");
+  });
+
   it("reports broken geometry when the judge finds it", async () => {
     mockInvoke.mockReset();
     mockInvoke.mockResolvedValue({
@@ -274,5 +293,213 @@ describe("still checks for rules 3 and 4", () => {
     expect(verdictShape("a saw", "sold at the market")).toContain('"wrong_place"');
     expect(verdictShape("a saw")).toContain('"missing"');
     expect(placeQuestion("sold at the fair")).toContain("sold at the fair");
+  });
+});
+
+describe("the thing the way its description says — the detail verdict (2026-10-18, the audit's picture-vs-line rows)", () => {
+  // Hand-sampled rows whose description already named the detail the picture missed.
+  const OPEN = "padlock hanging open on a mesh gate latch"; // 305-118, drawn shut
+  const LUMPY = "a bobbin wound lumpy and uneven beside the machine"; // 285-125, drawn neat
+  const RAISED = "the host from behind, both arms raised over her head"; // 233-134, drawn arms down
+
+  // Off until it is measured: these cases turn it on; the last ones check it is off by default.
+  beforeEach(() => {
+    process.env.PICTURE_DETAIL_CHECK = "1";
+  });
+  afterEach(() => {
+    delete process.env.PICTURE_DETAIL_CHECK;
+  });
+
+  it("asks it beside 'missing', in the uncached part, and reads it back with what came out otherwise", async () => {
+    const { verdictShape } = await import("./overlayTextScan");
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue({
+      text: '{"overlay":false,"broken":false,"writing":false,"missing":false,"detail":true,"detail_what":"padlock shut, should hang open","what":"padlock closed"}',
+    } as any);
+    const v = await scanStillDefects(await imageOf(1280, 720), OPEN, "and a padlock that just hangs there open,");
+    expect(v.detail).toBe(true);
+    expect(v.detailWhat).toBe("padlock shut, should hang open");
+    expect(v.missing).toBe(false); // the thing is there — `missing` keeps its meaning
+    const call = mockInvoke.mock.calls[0][0];
+    expect(call.systemSuffix).toContain("QUESTION 4b — detail");
+    expect(call.systemSuffix).toContain(OPEN);
+    expect(call.systemSuffix).toContain('"detail":true|false');
+    expect(call.systemPrompt).not.toContain("QUESTION 4b");
+    expect(verdictShape(OPEN, undefined, true)).toContain('"detail_what"');
+    expect(verdictShape(OPEN)).not.toContain("detail");
+  });
+
+  it("names the state, the action, the number and the position — in neutral words, for any description", async () => {
+    const { detailQuestion } = await import("./overlayTextScan");
+    for (const d of [OPEN, LUMPY, RAISED]) expect(detailQuestion(d)).toContain(d);
+    const fixed = detailQuestion("X");
+    expect(fixed).toMatch(/STATE/);
+    expect(fixed).toMatch(/NUMBER/);
+    expect(fixed).toMatch(/POSITION/);
+    expect(fixed).toMatch(/someone is\s+doing something/);
+    // Never about the camera, the place, the light or printing; never the missing thing's question.
+    expect(fixed).toMatch(/Never answer about the camera/);
+    expect(fixed).toMatch(/that is question 4/);
+    expect(fixed).not.toMatch(/padlock|bobbin|arms raised/i);
+  });
+
+  it("holds the picture to its DESCRIPTION, never to the line — a person the line only mentions is never asked for", async () => {
+    const { detailQuestion } = await import("./overlayTextScan");
+    // 144-99: "and they go to women setting up a kitchen" rightly shows the cloths.
+    const q = detailQuestion("bread cloths sitting in a farmhouse kitchen near the cookstove");
+    expect(q).not.toMatch(/women/);
+    // 153-296: a safety line is drawn the safe way, and that is the description it is held to.
+    expect(detailQuestion("rags kept spread out flat, not wadded, drying safely outside")).toContain("spread out flat, not wadded");
+  });
+
+  it("is never asked, and a stray answer ignored, without a description", async () => {
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue({ text: '{"overlay":false,"broken":false,"writing":false,"detail":true,"detail_what":"x"}' } as any);
+    const v = await scanStillDefects(await imageOf(1280, 720));
+    expect(v.detail).toBeUndefined();
+    expect(v.detailWhat).toBeUndefined();
+    expect(mockInvoke.mock.calls[0][0].systemSuffix).not.toContain("QUESTION 4b");
+  });
+
+  it("off by default (and with PICTURE_DETAIL_CHECK=0): exactly the check it was before", async () => {
+    const img = await imageOf(1280, 720);
+    for (const setting of [undefined, "0"]) {
+      if (setting === undefined) delete process.env.PICTURE_DETAIL_CHECK;
+      else process.env.PICTURE_DETAIL_CHECK = setting;
+      mockInvoke.mockReset();
+      mockInvoke.mockResolvedValue({ text: '{"overlay":false,"broken":false,"writing":false,"missing":false,"detail":true}' } as any);
+      const v = await scanStillDefects(img, OPEN, "and a padlock that just hangs there open,");
+      expect(v).toEqual({
+        overlay: false,
+        broken: false,
+        writing: false,
+        missing: false,
+        messy: false,
+        wrongPlace: false,
+        staged: false,
+        what: "",
+      });
+      const off = mockInvoke.mock.calls[0][0];
+      expect(off.systemSuffix).not.toContain("detail");
+      expect(off.userMessage).not.toMatch(/the way it is described/);
+    }
+  });
+
+  it("parses detail only when it is true, and its words only beside it", async () => {
+    const { parseStillDefectVerdict } = await import("./overlayTextScan");
+    const v = parseStillDefectVerdict('{"detail":true,"what":"arms down"}');
+    expect(v.detail).toBe(true);
+    expect(v.detailWhat).toBeUndefined();
+    expect(v.what).toBe("arms down");
+    const no = parseStillDefectVerdict('{"detail":false,"detail_what":"arms down"}');
+    expect("detail" in no).toBe(false);
+    expect(no.detailWhat).toBeUndefined();
+    expect(parseStillDefectVerdict('{"detail":"yes"}').detail).toBeUndefined();
+  });
+});
+
+describe("what the line rules out — the forbidden verdict (R5, the audit, 2026-10-18)", () => {
+  // prod 203-143: "and away from the furnace." drawn with the stack beside the furnace.
+  const STACK = "a stickered board stack on a dry garage floor";
+  const RULED_OUT = "the board stack near the furnace";
+
+  it("asks it only with what the line check marked, after the cached rulebook, and reads it back", async () => {
+    const { verdictShape } = await import("./overlayTextScan");
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue({
+      text: '{"overlay":false,"broken":false,"writing":false,"missing":false,"forbidden":true,"what":"furnace right beside the stack"}',
+    } as any);
+    const line = "and away from the furnace.";
+    const v = await scanStillDefects(await imageOf(1280, 720), STACK, line, undefined, undefined, undefined, false, undefined, RULED_OUT);
+    expect(v.forbidden).toBe(true);
+    expect(v.what).toBe("furnace right beside the stack");
+    expect(v.missing).toBe(false);
+    const call = mockInvoke.mock.calls[0][0];
+    expect(call.systemSuffix).toContain("QUESTION 8 — forbidden");
+    expect(call.systemSuffix).toContain(RULED_OUT);
+    expect(call.systemSuffix).toContain('"forbidden":true|false');
+    expect(call.systemPrompt).not.toContain("QUESTION 8");
+    expect(call.userMessage).toMatch(/what the line rules out/);
+    // The place question keeps the piece's own words: the ruled-out phrase is never fed to it.
+    expect(call.systemSuffix).toContain(`narration line: "${line}"`);
+    expect(verdictShape(STACK, line, false, true)).toContain('"forbidden"');
+    expect(verdictShape(STACK, line)).not.toContain("forbidden");
+  });
+
+  it("is never asked on a picture the line check did not mark, and a stray answer is ignored", async () => {
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue({ text: '{"overlay":false,"broken":false,"writing":false,"missing":false,"forbidden":true}' } as any);
+    // A real line a word list flagged that rules nothing out: no forbids, so no question.
+    const v = await scanStillDefects(
+      await imageOf(1280, 720),
+      "a hand-built lattice panel hanging on a living-room wall",
+      "build it anyway for your own wall, just don't count on it to buy next month's pickets."
+    );
+    expect(v).toEqual({
+      overlay: false,
+      broken: false,
+      writing: false,
+      missing: false,
+      messy: false,
+      wrongPlace: false,
+      staged: false,
+      what: "",
+    });
+    const call = mockInvoke.mock.calls[0][0];
+    expect(call.systemSuffix).not.toContain("QUESTION 8");
+    expect(call.systemSuffix).not.toContain("forbidden");
+    // An empty mark is no mark.
+    mockInvoke.mockClear();
+    await scanStillDefects(await imageOf(1280, 720), STACK, undefined, undefined, undefined, undefined, false, undefined, "  ");
+    expect(mockInvoke.mock.calls[0][0].systemSuffix).not.toContain("QUESTION 8");
+  });
+
+  it("judges the act, the placement or the thing exactly as named — the right way and the thing alone pass", async () => {
+    const { forbiddenQuestion } = await import("./overlayTextScan");
+    const q = forbiddenQuestion("a lit candle in the room");
+    expect(q).toContain('"a lit candle in the room"');
+    expect(q).toMatch(/When\s+it names an act, answer true only if the act is being done/);
+    expect(q).toMatch(/only if the thing is there, in that place or beside it/);
+    expect(q).toMatch(/The same task done the right way, a different thing in\s+its place, or the thing on its own away from that place is false/);
+    expect(q).toMatch(/When unsure, answer false/);
+    // Neutral: the fixed wording names no channel's objects.
+    expect(forbiddenQuestion("X")).not.toMatch(/furnace|vault|shampoo|fence|candle/i);
+    expect(forbiddenQuestion('the "wrong" way')).toContain("the 'wrong' way");
+  });
+
+  it("one picture of a joined sentence is held to any one of its marks", async () => {
+    const { forbiddenQuestion } = await import("./overlayTextScan");
+    expect(forbiddenQuestion("a lit candle in the room; a lit cigarette in the room")).toMatch(
+      /exactly that — any one of the things listed\? When/
+    );
+    expect(forbiddenQuestion("a lit candle in the room")).not.toContain("any one of");
+  });
+
+  // prod 225-83: "Never in | the garage, | the basement, | the shed, | or on the porch," — the piece
+  // "or on the porch," names the porch only to rule it out, and the place question used to call a
+  // picture drawn the right way (out in the open) the wrong place for it.
+  it("the place question never holds a marked picture to the place its sentence rules out", async () => {
+    const { placeQuestion } = await import("./overlayTextScan");
+    expect(placeQuestion("or on the porch,", true)).toMatch(
+      /a place it says to keep something\s+away from, out of, or never to use is NOT where the frame must be/
+    );
+    expect(placeQuestion("or on the porch,", true)).toMatch(/If the line names no such place, or you are unsure, answer false\.$/);
+    // Unmarked, the question is exactly as before: a place a line names is where the frame belongs.
+    expect(placeQuestion("sold at the fair")).not.toMatch(/rules something out/);
+    expect(placeQuestion("sold at the fair")).toMatch(/never make it wrong\. If the line names no such place/);
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue({ text: '{"overlay":false,"broken":false,"writing":false,"missing":false}' } as any);
+    const run = "a portable generator running on an open gravel driveway";
+    await scanStillDefects(await imageOf(1280, 720), run, "or on the porch,", undefined, undefined, undefined, false, undefined, "the generator running inside a building");
+    expect(mockInvoke.mock.calls[0][0].systemSuffix).toMatch(/rules something out here/);
+    mockInvoke.mockClear();
+    await scanStillDefects(await imageOf(1280, 720), "a quilt folded on a market stall", "sold at the fair");
+    expect(mockInvoke.mock.calls[0][0].systemSuffix).not.toMatch(/rules something out here/);
+  });
+
+  it("parses forbidden only when it is true", () => {
+    expect(parseStillDefectVerdict('{"forbidden":true,"what":"hand on belly"}')).toMatchObject({ forbidden: true, what: "hand on belly" });
+    expect("forbidden" in parseStillDefectVerdict('{"forbidden":false}')).toBe(false);
+    expect(parseStillDefectVerdict('{"forbidden":"yes"}').forbidden).toBeUndefined();
   });
 });

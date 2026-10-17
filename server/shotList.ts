@@ -19,7 +19,7 @@
  * Not touched: the CTA (its host → book → host → big QR layout is fixed), the cover, operator
  * assets, split screens and the cold open (the hook stays on camera).
  */
-import type { KeyThing, StoryboardScene } from "@shared/types";
+import type { BuildStage, KeyThing, StoryboardScene } from "@shared/types";
 import { invokeClaude } from "./claude";
 import { safeParseJSON } from "./jsonRepair";
 import { SHOWS_PERSON, showsPerson, namedPeople, namesOnlyAnimal } from "./hostLook";
@@ -138,6 +138,20 @@ export interface PlannedShot {
   held?: boolean;
   /** The person shown when the line is about someone other than the host (`otherPersonOf`). */
   other?: string;
+  /** How far along the thing the video makes is in this shot — only on a shot of that thing. */
+  stage?: BuildStage;
+}
+
+/** The build stages, earliest first (`scene.buildStage`). */
+export const BUILD_STAGES: readonly BuildStage[] = ["material", "making", "done"];
+
+/**
+ * The build stage a model wrote, or undefined: only the three stage words count, any case — a null,
+ * a missing field or anything else is "no stage", so the picture keeps the memory it had. Pure.
+ */
+export function buildStageOf(raw: unknown): BuildStage | undefined {
+  const v = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+  return (BUILD_STAGES as readonly string[]).includes(v) ? (v as BuildStage) : undefined;
 }
 
 /**
@@ -480,7 +494,7 @@ function hostPiece(
 function picturePiece(
   parent: StoryboardScene,
   text: string,
-  shot: Pick<PlannedShot, "show" | "motion" | "list" | "same" | "contact" | "held" | "other" | "thing" | "text" | "print">,
+  shot: Pick<PlannedShot, "show" | "motion" | "list" | "same" | "contact" | "held" | "other" | "thing" | "text" | "print" | "stage">,
   k: number
 ): StoryboardScene {
   // A video only of a big thing (`videoKind`): never hands, a held thing, or a tool going in.
@@ -511,6 +525,9 @@ function picturePiece(
     objectMotion: moving ? true : undefined,
     cameraMove: undefined,
     keyThing: shot.thing || undefined,
+    // How far along the thing being made is in THIS picture — never the beat's, so a re-planned
+    // piece does not keep a stage its new picture may not have (`memorySourcesFor`).
+    buildStage: shot.stage,
     // Writing only when this piece's own words say it, exactly (`saidText`); printing it only talks
     // about is shown blurred (`blurredPrint`).
     pictureText: saidText(shot.text, text),
@@ -685,6 +702,7 @@ export function splitListPieces(scenes: StoryboardScene[]): StoryboardScene[] {
         humanPresent: undefined,
         keyThing: undefined,
         otherKeyThings: undefined,
+        buildStage: undefined,
         pictureText: undefined,
         sameShot: undefined,
         listCut: true,
@@ -1223,6 +1241,17 @@ const SHOT_LIST_SYSTEM =
   "spot — closer on one part, further back with the room around it, the other side, from above or " +
   "low down — the view the words point at, never the same view as the shot of it just before. A " +
   "before / during / after of one piece is the SAME piece each time, further along.\n" +
+  "1e. STAGE. Only for a shot that shows something the video MAKES (or shows being made), or what " +
+  "it is made from, set stage to how far along that thing is IN THIS SHOT: \"material\" — the raw " +
+  "stock or pieces before any work (a stack of rough boards, a pile of fabric scraps, a ball of " +
+  "dough); \"making\" — being made or partly built (cut, drilled, half-sewn, glued up, partly " +
+  "assembled); \"done\" — finished. " +
+  "Finishing touches (oil, wax, polish, a felt pad, a last brush) count as done. Many videos open " +
+  "on the finished piece and then go back to the start: a making shot shows the piece only as far " +
+  "along as its words say, never already finished. The stage is about the piece in the shot, " +
+  "whatever its thing is (a shot filed under the bench or a tool with the piece on it still has " +
+  "one). stage is null for every other shot — a thing nobody makes in the video, a tool on its " +
+  "own, a place, the weather.\n" +
   "1d. DON'T REPEAT. When a line's subject is already on screen from the picture before (the line " +
   "says \"it\", \"this\", \"that one\") and the line names something NEW you can see — a thing, or a " +
   "kind of event or situation (\"the storms that roll in at night\") — the shot shows the new thing " +
@@ -1276,9 +1305,21 @@ const SHOT_LIST_SYSTEM =
   "the side, the face never shown. Write them into show, and set other to who they are in 2-6 " +
   "plain words from the line (\"a woman customer\", \"an older neighbour\"). One person only. " +
   "other is null in every other shot.\n" +
-  "6b. SAFETY. A line that warns about a danger shows the SAFE way — the guard in place, a push " +
-  "stick, hands well back, the iron set down on its heel, the extinguisher by the bench — never " +
-  "the danger itself (no fingers near a blade or a needle, no open flame on the work, nobody hurt).\n" +
+  "6b. WHAT NOT TO DO. When a line — or the sentence it is part of — says not to do something " +
+  "(\"never…\", \"don't…\"), says what something is NOT (\"I don't mean…\"), what to use INSTEAD, " +
+  "what to keep away or out, that a job is for someone else (a licensed pro), or warns that doing " +
+  "something goes wrong (\"…is how people get hurt\", \"…only sets things back\"), the shot shows " +
+  "ONE of: the same task done the RIGHT way (the guard in place, a push stick, hands well back, " +
+  "the iron set down on its heel, the extinguisher by the bench), the alternative the line names, " +
+  "or the subject on its own and idle. Never the ruled-out act, the denied thing or the forbidden " +
+  "placement — no fingers near a blade or a needle, no open flame on the work, nobody hurt. show " +
+  "names only what IS in the frame: never the ruled-out thing, not even with \"without\", \"no\", " +
+  "\"not\", \"away from\" or \"across the room from\" — the picture generator draws everything it " +
+  "is told about (\"keep the paint tins away from the stove\" = the paint tins on a shelf in a cool " +
+  "cupboard; the stove is not named). Every shot of that sentence follows it (\"Never store it in | the " +
+  "attic | or the garage\": no shot puts it in the attic or the garage). A thing named only to be " +
+  "ruled out is never the new shot of rules 1c and 1d. A figure of speech that rules out nothing " +
+  "you can see (\"don't count on it\", \"you'll never look at it the same way\") is not this rule.\n" +
   "7. HOST BEATS are the host talking on camera. If, after the host has said at least 5 words, the " +
   "line goes on to NAME concrete things worth showing, hand over to pictures at the FIRST such " +
   "thing — not a later one: the host never talks past a thing worth showing — at a natural break " +
@@ -1335,7 +1376,7 @@ const SHOT_LIST_SYSTEM =
   'term: "a herringbone brick path — bricks laid in a zigzag of short rows", never just "a brick ' +
   'path".\n\n' +
   "Return ONLY JSON: " +
-  '{"beats":[{"beat":N,"hostUntil":null|"...","shots":[{"from":"...","show":"...","motion":"none","thing":null,"text":null,"print":null,"list":false,"same":false,"contact":false,"held":false,"other":null}]}]}';
+  '{"beats":[{"beat":N,"hostUntil":null|"...","shots":[{"from":"...","show":"...","motion":"none","thing":null,"stage":null,"text":null,"print":null,"list":false,"same":false,"contact":false,"held":false,"other":null}]}]}';
 
 /**
  * Ask for the shot list, `SHOT_BATCH` beats per call, `SHOT_CONCURRENCY` calls at once. Each call
@@ -1417,6 +1458,7 @@ export async function planShotList(
           motion: x.motion === "object" || x.motion === "camera" ? "object" : "none",
           thing:
             typeof x.thing === "string" ? matchKeyThing(x.thing, keyThings)?.name : undefined,
+          stage: buildStageOf(x.stage),
           text: typeof x.text === "string" ? x.text : undefined,
           print: x.print === "blurred" ? "blurred" : undefined,
           list: x.list === true,
@@ -1609,6 +1651,16 @@ is not only an object: a kind of event or situation the line describes counts to
 struggles with the storms that roll in at night" after a picture of a roof is that night storm. If a
 picture would look like the one right before it and its line says anything new you can see, it is
 WRONG.
+A picture of the right thing is still WRONG when it leaves out what the line makes its point with:
+WHO is doing WHAT ("my sister watched the whole thing from her porch" over an empty porch — the
+picture is the sister watching from the porch), the STATE the line describes (a gate left hanging
+open, a jar with its lid off, a shirt soaked through, a tent half put up, a coat zipped to the
+chin), or a COUNT the line makes the point of ("one bowl for every guest, plus a spare" over a
+single bowl). Rewrite it with the same thing, and that in it. Never for: a comparison that only says what
+something costs or is like (show the subject); a bare number, price or length of time (show the
+thing it is about); someone the line only sells to, tells, helps or mentions, who does nothing in
+it (show the thing); a warning about a danger (show the safe way, never the danger); something the
+line says does NOT happen or is NOT there (never draw it happening).
 It is WRONG when it does not show what the line points at. SHOW EXACTLY WHAT THE LINE POINTS AT: when a line points at a specific thing, or a specific part, side or detail of a thing (the box it comes in, its label, the battery door on the back, the dial, the date on the bottom, the hem), the picture is a close-up of exactly that — never the video's main thing somewhere else, never a plain version without it. What the script says that part shows (the words printed on it, a number, a setting) is shown exactly as the script says it.
 It is WRONG when a body part looks cut off. A BODY PART NEVER LOOKS CUT OFF: hair, a hand, a foot or a face is shown on the person, or on what really holds it — a wig on a mannequin head or wig stand, a practice hand, extensions in their packet. A few loose strands that really fall (in a brush, on a comb or towel, in a drain) are fine. Never hair still shaped like a head or a hairstyle with no head inside it, and never a hand, foot or face on its own. To show a colour or texture, show it on the person's own head or hands.
 A picture marked "FIRST of the MAIN thing" must show the main thing IN USE when it is naturally used
@@ -1619,6 +1671,29 @@ showing the topic of the line before it ONLY when its line names nothing new you
 "continues" picture whose line brings up a new thing, or a new kind of event or situation ("the one
 kind of fire that likes to start while the house is asleep"), is WRONG: it gets its own picture of
 that new thing.
+
+WHAT NOT TO DO. A sentence RULES SOMETHING OUT when it says not to do something ("never…", "don't…"),
+says what something is NOT ("I don't mean…", "no, not the…"), what to use INSTEAD ("…instead of the
+plastic one"), what to keep away or out ("well away from the stove", "keep any flame out of the
+room"), that a job is for someone else ("that part is a job for a licensed electrician"), or that
+doing something goes wrong ("…is exactly how people get hurt", "…only sets things back"). Read the
+whole sentence: those words may sit in a neighbouring line of it, and every picture of that sentence
+follows them. Such a picture shows the same task done the RIGHT way, the alternative, or the subject
+on its own and idle. It is WRONG when it shows OR NAMES the ruled-out act, the denied thing or the
+forbidden placement — even with "without", "no", "not", "away from" or "across the room from",
+because the picture generator draws everything it is told about. Rewrite it naming only what IS in
+the frame ("keep the paint tins away from the stove" = the paint tins on a shelf in a cool cupboard;
+the stove is not named). A thing named only to be ruled out is never "something new you can see".
+For EVERY picture whose sentence rules something out, right or wrong, set forbids to what must NOT be
+seen in it, in 3-12 plain words: the act being done ("hands lifting the full pot off the stove"),
+the thing in the place it must be kept from ("the paint tins beside the stove"), or the thing itself
+only when the line says that thing is not meant or is used instead of ("a plastic bucket"). A thing
+the line only keeps away from something, or says you will not need, may still be shown on its own:
+forbids then names it WITH that place or act, never the thing alone. Leave forbids out when nothing
+you could see is ruled out: a figure of speech ("just don't count on it to pay the rent", "you'll
+never look at it the same way"), a step that says what to skip or when to stop ("skip one stitch and
+make a loop", "stop the moment it feels snug"), and a count ("two coats instead of three" is the
+COUNT: two coats).
 
 Go through EVERY picture, one at a time, never skipping: first write what its line is about — its
 subject, not its last noun; for a line that only refers to a key thing, name the key thing — then
@@ -1633,7 +1708,9 @@ the box of scraps beside it.
 A line that compares to something ELSE you can see — "the kind you see in …", "like the ones at …",
 "the kind you'd find in …" — ALWAYS gets that other thing as its own picture: SPLIT the line there.
 Give the exact first 2-5 words where the new picture starts, copied from the line, and what it shows.
-Split only when both parts are at least 4 words. Never split a picture marked "joined".
+Split only when both parts are at least 4 words. Never split a picture marked "joined". A comparison
+the sentence rules out ("no, I don't mean the kind you see in the movies") is never split off or
+drawn.
 
 ONE IDEA, ONE PICTURE. A picture marked "same sentence" continues a sentence the picture before it
 started. When the two parts are ONE idea about one thing — the thing and where, how or what it is
@@ -1649,13 +1726,22 @@ For a "joined" picture shows_it is false unless it already shows that.
 
 For each WRONG picture write the picture that fits: plain words, what is literally in the frame, one
 moment, one place, like a snapshot caption. When the line is about a key thing, name it exactly as
-the KEY THINGS list writes it and set thing to that name. When something in that moment moves by
-itself with no person moving it (a flame, smoke, steam, water), say it is happening. When the
+the KEY THINGS list writes it and set thing to that name. When the picture shows something the video
+MAKES (or shows being made), or what it is made from, set stage to how far along it is in that
+picture: "material" (the raw stock or pieces before any work), "making" (being made, partly built)
+or "done" (finished — oil, wax, polish or a felt pad count as done); a line about a step shows the
+piece only as far along as that step, never already finished. stage is null otherwise. When
+something in that moment moves by itself with no person moving it (a flame, smoke, steam, water),
+say it is happening. When the
 picture is the MAIN thing and it is something naturally in use with smoke, steam, a flame or water,
 show it in use — lit, steaming, burning, running — because that is the moment worth a video. The
 FIRST picture of the MAIN thing that
 shows it idle when it is naturally in use that way is WRONG too: rewrite it in use. No writing, no logos,
 no faces, never "or".
+When the picture you write shows SOMEONE ELSE doing something — a customer, a buyer, a neighbour, a
+relative; never the host, never "you" — write them into show, seen from behind or from the side, and
+set other to who they are in 2-6 plain words from the line ("an older neighbour"). One person only.
+other is null otherwise.
 
 WHO IS IN THE PICTURE. For every picture that shows a person (or hands), say who: "host" when it is
 the host — their own work, or the viewer the line speaks to ("you") — or a few plain words for
@@ -1665,17 +1751,32 @@ of a picture of things alone.
 
 Answer with JSON only, one entry for EVERY picture:
 {"pictures":[{"id":7,"about":"...","shows_it":true,"who":"host"},
-{"id":8,"about":"...","shows_it":false,"show":"...","thing":null,"split":[{"from":"exact words","show":"...","thing":null}]},
-{"id":9,"about":"...","shows_it":false,"join":true,"show":"...","thing":null,"who":"a customer at a counter"}]}
-show and thing only when shows_it is false or join is true; split only when a new picture must start;
-join only on a picture marked "same sentence"; who only on a picture of a person.`;
+{"id":8,"about":"...","shows_it":false,"show":"...","thing":null,"stage":null,"other":null,"split":[{"from":"exact words","show":"...","thing":null,"stage":null,"other":null}]},
+{"id":9,"about":"...","shows_it":false,"join":true,"show":"...","thing":null,"stage":null,"other":null,"who":"a customer at a counter"},
+{"id":10,"about":"...","shows_it":true,"forbids":"..."}]}
+show, thing, stage and other only when shows_it is false or join is true; split only when a new picture must start;
+join only on a picture marked "same sentence"; who only on a picture of a person (as it will be drawn);
+forbids only when the picture's sentence rules something out.`;
 
-/** A new picture starting inside a line, at `from` (its first words, verbatim). */
-export type PictureSplit = { from: string; show: string; thing?: string };
+/**
+ * A new picture starting inside a line, at `from` (its first words, verbatim). `other`: the person
+ * who is not the host it shows (`otherPersonOf`), only when the check named one.
+ */
+export type PictureSplit = { from: string; show: string; thing?: string; stage?: BuildStage; other?: string };
 export type PictureFix = {
   id: number;
   show?: string;
   thing?: string;
+  /**
+   * How far along the thing being made is in the rewrite: a stage, `null` when the check answered
+   * that the new picture shows no made thing, unset when it did not answer (`applyPictureFixes`).
+   */
+  stage?: BuildStage | null;
+  /**
+   * Who the rewrite shows when it is SOMEONE ELSE than the host (`otherPersonOf`): a person, `null`
+   * when the check answered that nobody else is in it, unset when it did not answer.
+   */
+  other?: string | null;
   split?: PictureSplit[];
   /** This picture and the one before it are ONE idea of one sentence: make them one picture. */
   join?: boolean;
@@ -1684,6 +1785,11 @@ export type PictureFix = {
    * viewer, else the words for someone else (`applyWho`). Absent when the check said nothing.
    */
   who?: string | null;
+  /**
+   * What the picture's sentence rules out, so the picture must not show it (`scene.forbids`) —
+   * answered for a right picture as much as a wrong one, so it can come with no rewrite at all.
+   */
+  forbids?: string;
 };
 
 /**
@@ -1719,6 +1825,18 @@ export function applyWho(s: StoryboardScene, who: string | null): void {
   s.humanPresent = true;
 }
 
+/**
+ * The check's `forbids`, cleaned: a short phrase, or nothing for an empty answer or one that only
+ * says "none" — also with a reason after it ("none — a figure of speech", "nothing visible"), which
+ * would otherwise be asked of the frame as the thing it must not show. Pure.
+ */
+export function forbidsOf(v: unknown): string | undefined {
+  if (typeof v !== "string") return undefined;
+  const text = v.replace(/\s+/g, " ").replace(/^["'“”‘’\s]+|["'“”‘’\s.]+$/g, "").trim();
+  if (!/[a-z]{2}/i.test(text) || /^(?:no|na|-)$|^(?:null|none|nothing|n\/a|nil)\b/i.test(text)) return undefined;
+  return text.slice(0, 160);
+}
+
 /** The pictures the fit check reads and may fix — drawn cutaways, never the CTA, cover or assets. */
 // A list's group picture (`listSet`) is right by construction — the line check never rewrites it.
 const fitCandidate = (s: StoryboardScene) =>
@@ -1746,17 +1864,33 @@ export function parsePictureFixes(text: string, scenes: StoryboardScene[]): Pict
     const join = f?.join === true;
     const show = f?.shows_it === false || join ? clean(f?.show) : "";
     const split: PictureSplit[] = (Array.isArray(f?.split) ? f.split : [])
-      .map((x: any) => ({ from: clean(x?.from), show: clean(x?.show), thing: clean(x?.thing) || undefined }))
+      .map((x: any) => ({
+        from: clean(x?.from),
+        show: clean(x?.show),
+        thing: clean(x?.thing) || undefined,
+        stage: buildStageOf(x?.stage),
+        other: otherPersonOf(x?.other),
+      }))
       .filter((x: PictureSplit) => x.from && x.show);
     const who = whoOf(f?.who);
-    if (!show && !split.length && !join && who === undefined) continue;
+    // WHAT THE SENTENCE RULES OUT rides even a picture the check left as it is: a right picture can
+    // still come out of the picture model showing it.
+    const forbids = forbidsOf(f?.forbids);
+    if (!show && !split.length && !join && who === undefined && !forbids) continue;
+    // A stage the check answered (a stage word, or null for "no made thing") replaces the old one;
+    // a missing field keeps it (`applyPictureFixes`). The person is read the same way.
+    const answered = !!f && typeof f === "object" && "stage" in f;
+    const saidWho = !!f && typeof f === "object" && "other" in f;
     out.push({
       id,
       ...(join ? { join } : {}),
       ...(show ? { show } : {}),
       ...(show && typeof f?.thing === "string" && f.thing ? { thing: f.thing } : {}),
+      ...(show && answered ? { stage: buildStageOf(f.stage) ?? null } : {}),
+      ...(show && saidWho ? { other: otherPersonOf(f.other) ?? null } : {}),
       ...(split.length ? { split } : {}),
       ...(who !== undefined ? { who } : {}),
+      ...(forbids ? { forbids } : {}),
     });
   }
   return out;
@@ -1776,6 +1910,9 @@ export function applyPictureFixes(
   let n = 0;
   for (const f of fixes) {
     const s = scenes[f.id];
+    // WHAT THE SENTENCE RULES OUT (2026-10-18, the audit): kept on the picture whether or not it is
+    // rewritten — the check is told it, and asks whether the drawn frame shows it.
+    if (s && f.forbids) s.forbids = f.forbids;
     if (!s || !f.show) continue;
     const named = keyThingsIn(f.show, things);
     const primary = (f.thing ? matchKeyThing(f.thing, things ?? []) : null) ?? named[0] ?? null;
@@ -1783,10 +1920,24 @@ export function applyPictureFixes(
     s.visualPrompt = f.show;
     s.visualPromptSeed = undefined;
     s.brollVisual = undefined;
+    // The build stage: the check's own answer when it gave one; else the old stage while the picture
+    // is still of the same key thing — a rewrite onto something else has no stage it can vouch for.
+    s.buildStage =
+      f.stage !== undefined ? f.stage ?? undefined : s.keyThing === primary?.name ? s.buildStage : undefined;
     s.keyThing = primary?.name;
     const others = named.map(t => t.name).filter(name => name !== primary?.name);
     s.otherKeyThings = others.length ? others : undefined;
-    s.humanPresent = showsPerson(f.show) ? true : undefined;
+    // SOMEONE ELSE IS DRAWN AS SOMEONE ELSE in a rewrite too (2026-10-18): the check now rewrites a
+    // picture that leaves out WHO does WHAT (Hank's job 171 scene 248, "my neighbor across the street
+    // watched the whole thing from his driveway" over an empty driveway), and the person it puts in
+    // used to reach `markHostBroll` with no `otherPerson` — drawn as the HOST. The check's answer
+    // replaces the old person (`null`: nobody else, so any person in it is the host); no answer keeps
+    // the old one while someone is still in the picture.
+    s.humanPresent = showsPerson(f.show) || f.other ? true : undefined;
+    if (f.other !== undefined) {
+      s.otherPerson = f.other ?? undefined;
+      s.otherPeople = f.other ? otherPeopleOf(f.other) : undefined;
+    }
     // A rewrite with no person in it has nobody to be "someone else".
     if (!s.humanPresent) s.otherPerson = s.otherPeople = undefined;
     s.sameShot = undefined;
@@ -1801,6 +1952,77 @@ export function applyPictureFixes(
   // Who is in each picture, on the descriptions as they now are (rewritten or not).
   for (const f of fixes) if (f.who !== undefined && scenes[f.id]) applyWho(scenes[f.id], f.who);
   return n;
+}
+
+/**
+ * A description with what it says is NOT there taken out: "a smoke alarm on the counter, no box, no
+ * packaging" names an alarm, not a box. From "no", "not", "without", "never" or an "-n't" word to the
+ * end of its phrase, or to an "and" / "but" that starts the next one; "no more than three" is a count
+ * and stays, and so does a hyphened name ("a no-sew fleece blanket", "a never-ending scarf"), which
+ * is a kind of thing, not its absence. Pure.
+ */
+export function withoutNegatedPhrases(text: string): string {
+  return text
+    .replace(
+      /\b(?:no|not|cannot|without|never|nor|[a-z]+n['’]t)\b(?![-‐‑])(?!\s+(?:more|less|fewer)\s+than\b)(?:(?!\b(?:and|but)\b)[^,;.!?:()…])*/gi,
+      " "
+    )
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Typed words that say NOBODY is in the picture: "no hands", "without any people", "no one in the
+ * room", "nobody". Read on the words as typed — `withoutNegatedPhrases` takes exactly these out.
+ */
+const NOBODY_IN_IT =
+  /\b(?:no|without(?:\s+(?:a|any))?)\s+(?:other\s+)?(?:hands?|fingers?|arms?|people|persons?|figures?)\b|\bno(?:body|[- ]one)\b(?!\s+(?:of|thing|piece|part|more)\b)/i;
+
+/**
+ * A TYPED PICTURE OWNS THE PICTURE (2026-10-18, job 383 scenes 20, 33 and 40). An operator's typed
+ * prompt replaced only `visualPrompt`: `showSubject` stayed the planner's, so `subjectLead` still led
+ * every redo with it and the picture check still held the redo to it — scene 20 was typed "one round
+ * white smoke alarm lying face up on a wooden kitchen counter … no box, no packaging" and was led and
+ * judged by "close-up of the front label of a small rectangular cardboard smoke detector box held in
+ * one hand", its key thing still the box; scene 40's "blank yellow sticky note … no writing of any
+ * kind" kept soft print and the detector's back panel, and all 8 of its checks said writing. Now the
+ * typed words are what the picture must show, and what the planner tied to the OLD picture goes
+ * unless the typed words still name it: its key thing (so the memory it is drawn from and the things
+ * the check requires), the part and the named kind it was about, the words it may print, soft print,
+ * and a person the typed words say is not in it. What the typed words say is NOT there names nothing
+ * (`withoutNegatedPhrases`). Called BEFORE the typed words land on `visualPrompt`: the card sends its
+ * prompt on every regenerate, typed or not, and the prompt the picture already has is not typed — a
+ * plain regenerate keeps the planner's subject. Returns whether it took the picture over. Pure apart
+ * from mutating `s`.
+ */
+export function ownTypedPicture(s: StoryboardScene, typed: string, things: KeyThing[] | undefined): boolean {
+  const text = typed.trim();
+  if (!text || text === (s.visualPrompt ?? "").trim()) return false;
+  const said = withoutNegatedPhrases(text);
+  const names = (name: string | undefined) => !!name?.trim() && keyThingsIn(said, [{ name, look: "" }]).length > 0;
+  const named = keyThingsIn(said, things);
+  const primary = names(s.keyThing) ? s.keyThing : named[0]?.name;
+  // A stage belongs to the picture of ITS thing; another thing has no stage the typed words vouch for.
+  if (primary !== s.keyThing) s.buildStage = undefined;
+  s.keyThing = primary;
+  const others = named.map(t => t.name).filter(name => name !== primary);
+  s.otherKeyThings = others.length ? others : undefined;
+  if (s.partOf && !names(s.partOf)) s.partOf = undefined;
+  if (s.namedLook && !names(s.namedLook.split(":")[0])) s.namedLook = undefined;
+  if (s.pictureText && !saidText(s.pictureText, said)) s.pictureText = undefined;
+  s.blurPrint = !s.pictureText && blurredPrint(said) ? true : undefined;
+  // NOBODY WHEN THE TYPED WORDS SAY SO: scene 20 was typed "… no hands, no readable writing anywhere"
+  // and still carried the person of the planner's "… box held in one hand", so its prompt asked for
+  // the host at work, with the host's photo attached, beside the operator's "no hands". Taken out
+  // only when the typed words also show no one themselves; a person they add is left as it was
+  // (who draws them — the host or someone else — is decided before the pictures, `markHostBroll`).
+  if (NOBODY_IN_IT.test(text) && !SHOWS_PERSON.test(said)) {
+    s.humanPresent = undefined;
+    s.otherPerson = undefined;
+    s.hostFaceShown = undefined;
+  }
+  s.showSubject = text;
+  return true;
 }
 
 /** A line that ends a sentence (so the next picture starts a new one). */
@@ -1858,9 +2080,18 @@ export function applyPictureJoins(
       // Someone else in either half is still in the one picture (cleared below if it shows no one).
       otherPerson: prev.otherPerson ?? s.otherPerson,
       otherPeople: prev.otherPerson ? prev.otherPeople : s.otherPeople,
+      // One picture for the whole sentence must not show what either part of it rules out.
+      forbids:
+        [prev.forbids, s.forbids]
+          .filter((x, k, all): x is string => !!x && all.indexOf(x) === k)
+          .join("; ") || undefined,
     } as StoryboardScene;
     if (f!.show || f!.who !== undefined)
-      applyPictureFixes([merged], [{ id: 0, show: f!.show, thing: f!.thing, who: f!.who }], things);
+      applyPictureFixes(
+        [merged],
+        [{ id: 0, show: f!.show, thing: f!.thing, stage: f!.stage, other: f!.other, who: f!.who }],
+        things
+      );
     out[k] = merged;
     lens[k] += sec(s);
     remap.set(id, k);
@@ -1938,11 +2169,16 @@ export function applyPictureSplits(
         brollVisual: undefined,
         keyThing: primary?.name,
         otherKeyThings: others.length ? others : undefined,
-        humanPresent: showsPerson(cut.show) ? true : undefined,
-        // The person goes with the words that show them: a new part that shows only a thing has
-        // nobody to be (the audit found "a woman customer" left on an incense holder, job 361 scene 32).
-        otherPerson: showsPerson(cut.show) ? s.otherPerson : undefined,
-        otherPeople: showsPerson(cut.show) ? s.otherPeople : undefined,
+        // A new picture: only the stage the check gave it, never the line's old one.
+        buildStage: cut.stage,
+        humanPresent: showsPerson(cut.show) || cut.other ? true : undefined,
+        // The person the check put in this new picture; else the line's, but only while the new part
+        // still shows a person (the audit found "a woman customer" left on an incense holder, job 361
+        // scene 32) — `markHostBroll` would otherwise draw them into a picture of something else.
+        otherPerson: cut.other ?? (showsPerson(cut.show) ? s.otherPerson : undefined),
+        otherPeople: cut.other ? otherPeopleOf(cut.other) : showsPerson(cut.show) ? s.otherPeople : undefined,
+        // Still the same sentence: what it rules out stays out of this part too.
+        forbids: s.forbids,
         stillImage: true,
         objectMotion: undefined,
         selfMoving: undefined,
@@ -1966,6 +2202,14 @@ export function applyPictureSplits(
  * checker only asks whether the frame shows its own description. One call per ~80 lines reads every
  * line beside its planned picture, before anything is paid for, and rewrites the pictures that do
  * not show what their line is about. Returns how many it fixed; any failure changes nothing.
+ *
+ * WHAT NOT TO DO (2026-10-18, the audit): it is also the gate for a sentence that rules something
+ * out. Only danger warnings had a rule, so "and away from the furnace" was drawn with the lumber
+ * stack beside the furnace (production 203-143, 211-135; practice job 352 #127 named the furnace
+ * "across the room"), "never use the rip fence as a stop" with the fence as a stop (352 #154).
+ * Opus reads every picture with the lines around it, so it — not a word list, which fired on "just
+ * don't count on it" in five channels — says what each such picture must not show (`forbids`); the
+ * picture check then asks only those pictures about it.
  */
 export async function fitPicturesToLines(
   scenes: StoryboardScene[],
@@ -2390,7 +2634,9 @@ and when a line is a clear new point about something else. A line that names som
 that the group's picture would not show (a different place, a different object, or a new kind of
 event or situation — "the fire that starts while the house is asleep", "the storms that roll in at
 night") is NOT in the group — it keeps its own picture, even in the middle of a topic. Never group
-across a "----" line.
+across a "----" line. A line that rules something out ("never…", "don't…", "instead of…", "I don't
+mean…", "keep it away from…") is grouped only when the group's picture shows the right way, and that
+picture never shows or names what any of its lines rules out — not even with "without" or "away from".
 
 The group's picture must fit the FIRST line of the group above all: it is what plays when the
 picture appears.
@@ -2562,6 +2808,7 @@ export function applyContextGroups(scenes: StoryboardScene[], groups: ContextGro
     const counts = new Map<string, number>();
     for (const s of members) if (s.keyThing) counts.set(s.keyThing, (counts.get(s.keyThing) ?? 0) + 1);
     const thing = Array.from(counts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0];
+    const stage = groupStage(members);
     members.forEach((s, k) => {
       s.showSubject = show;
       s.visualPrompt = show;
@@ -2572,6 +2819,7 @@ export function applyContextGroups(scenes: StoryboardScene[], groups: ContextGro
       s.objectMotion = motion !== "none" ? true : undefined;
       s.cameraMove = undefined;
       s.keyThing = thing;
+      s.buildStage = stage;
       s.toolContact = contact ? true : undefined;
       if (k > 0) {
         s.sameShot = true;
@@ -2580,6 +2828,23 @@ export function applyContextGroups(scenes: StoryboardScene[], groups: ContextGro
     });
   }
   return marked;
+}
+
+/**
+ * The build stage of a same-topic group's ONE picture: the stage most of its pictures carry, the
+ * later one on a tie — a later stage keeps the memory a picture had before stages existed, so a
+ * group the planner labelled unevenly never loses a reference it would have had. No member with a
+ * stage ⇒ none. Pure.
+ */
+export function groupStage(members: StoryboardScene[]): BuildStage | undefined {
+  const counts = new Map<BuildStage, number>();
+  for (const s of members) if (s.buildStage) counts.set(s.buildStage, (counts.get(s.buildStage) ?? 0) + 1);
+  let best: BuildStage | undefined;
+  for (const st of BUILD_STAGES) {
+    const n = counts.get(st) ?? 0;
+    if (n > 0 && n >= (best ? counts.get(best)! : 0)) best = st;
+  }
+  return best;
 }
 
 /**

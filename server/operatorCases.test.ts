@@ -11,8 +11,11 @@ import {
   BACKGROUND_VIEW,
   BLUR_PRINT_VIEW,
   isSubject,
+  keyThingLookFor,
   memorySourcesFor,
   memoryViewFor,
+  ownKeyThing,
+  requiredThingsFor,
   SCREEN_ITEM_VIEW,
   shotFraming,
 } from "./pictureMemory";
@@ -56,6 +59,7 @@ import {
   HOST_LIPS_CUT_ONLY_SUFFIX,
   NO_OTHER_FIGURES_SUFFIX,
   keepBodyPartsOnBody,
+  markMemoryFit,
   memoryClause,
   NO_FIGURES_SUFFIX,
   ONE_OTHER_PERSON_SUFFIX,
@@ -609,6 +613,134 @@ describe("Hank's job 326: a list of STEPS (the operator, 2026-10-02)", () => {
     // a things-list is still a things-list
     expect(spokenListsByShape(["You need a saw, a drill, and a stack of sandpaper."])[0].kind).toBeUndefined();
     expect(spokenListsByShape([line])[0].kind).toBe("steps");
+  });
+
+  it("each step is the holder being made: drawn from its earlier stages, never the finished one (job 269)", () => {
+    const scenes = [
+      pic(1, "That's the winner.", "A finished charred cedar incense holder on the market table", {
+        keyThing: "incense holder",
+        buildStage: "done",
+      }),
+      host(2, "Square up the scrap with a couple of saw cuts, give it a quick brush,"),
+      pic(3, "drill the hole about halfway through at a slight angle, oil it, and put a felt dot on the bottom. That's the whole build.", "the holder"),
+      host(4, "Bye."),
+    ];
+    const r = applySpokenLists(scenes, lists(scenes), { main: "incense holder" });
+    const steps = r.scenes.filter(s => s.listCut);
+    for (const s of steps) {
+      expect(s.buildStage).toBe("making");
+      expect(ownKeyThing(s)).toBe("incense holder"); // "oil it," too
+      expect(memorySourcesFor(r.scenes, s)).toEqual([]); // the finished holder is further along
+      expect(requiredThingsFor(s)[0]).toMatch(/^incense holder — when it is what is being made: as it is at this stage of being made/);
+    }
+  });
+
+  it("steps that build nothing stay as they were (Frederick's job 359)", () => {
+    // The real rows: a video that makes nothing has no picture with a stage, so its steps get none —
+    // a smoke alarm told "NOT finished: raw pieces or partly built" would be drawn in pieces.
+    const scenes = [
+      pic(14, "Earlier in a way that decides whether anybody wakes up on their own. So", "a bedroom at night with the ceiling smoke alarm visible above the bed", { keyThing: "smoke alarm" }),
+      pic(15, "get a stepladder,", "an aluminum stepladder standing open beneath the ceiling alarm", { keyThing: "stepladder", listCut: true }),
+      pic(16, "take one alarm down,", "the host's hands taking the smoke alarm down from the ceiling", { keyThing: "smoke alarm", listCut: true }),
+      pic(17, "and read the label.", "close-up of the label on the back of a white round smoke alarm, held in the host's hands", { keyThing: "smoke alarm", listCut: true }),
+      host(18, "If it carries a notice about radioactive material, that's ionization."),
+    ];
+    const found = [{ sentence: 1, kind: "steps" as const, items: ["get a stepladder", "take one alarm down", "read the label"] }];
+    const r = applySpokenLists(scenes, found, { main: "smoke alarm" });
+    const steps = r.scenes.filter(s => s.listCut);
+    expect(steps.map(s => s.scriptText)).toEqual(["get a stepladder,", "take one alarm down,", "and read the label."]);
+    expect(steps.map(s => s.buildStage)).toEqual([undefined, undefined, undefined]);
+    expect(steps.map(s => s.keyThing)).toEqual(["stepladder", "smoke alarm", "smoke alarm"]);
+    // The list-item rule as before: "read the label" names no alarm, so it is not drawn from one.
+    expect(steps.map(ownKeyThing)).toEqual(["stepladder", "smoke alarm", undefined]);
+    expect(requiredThingsFor(steps[1])).toEqual(["smoke alarm"]);
+    expect(memoryClause({ ...steps[1], memoryRefUrls: ["https://x/alarm.png"] })).toMatch(/identical shape, size, colours/);
+  });
+});
+
+describe("a thing being made is never drawn from its finished picture (stored films, 2026-10-18)", () => {
+  // Hank's job 268 #17 was drawn from #14, the hook's finished holder; a video that makes nothing
+  // (Frederick's smoke alarm, job 262 #30) carries no stage and is drawn exactly as before.
+  const finished = pic(14, "I sold a dozen.", "Closeup of a charred cedar incense holder on the workbench, finished and oiled", {
+    keyThing: "incense holder",
+    buildStage: "done",
+  });
+  const drilling = pic(17, "why not drill a hole in one and see?", "hands drilling a hole into a charred cedar block on the workbench", {
+    keyThing: "incense holder",
+    buildStage: "making",
+  });
+
+  it("memory skips the finished picture; a video that makes nothing is unchanged", () => {
+    expect(memorySourcesFor([finished, drilling], drilling)).toEqual([]);
+    const alarm = pic(1, "This is it.", "a round white smoke alarm on the hallway ceiling", { keyThing: "smoke alarm" });
+    const back = pic(30, "Turn it over.", "a hand turning over the round white smoke alarm to view its back", { keyThing: "smoke alarm" });
+    expect(memorySourcesFor([alarm, back], back)).toEqual([alarm]);
+  });
+
+  it("the prompt says not finished and drops 'identical shape, size'; the check asks for it at this stage", () => {
+    const withMemory = { ...drilling, memoryRefUrls: ["https://x/raw.png"] } as StoryboardScene;
+    const clause = memoryClause(withMemory);
+    expect(clause).toMatch(/at the same or an earlier point in the making than this picture/);
+    expect(clause).toMatch(/What is being made is shown exactly as far along as the words say — NOT finished: raw pieces or partly built/);
+    expect(clause).not.toMatch(/identical shape, size/);
+    expect(clause).not.toMatch(/the reference is how it looked before/);
+    // A finished or unlabelled picture keeps the old clause word for word.
+    for (const s of [{ ...withMemory, buildStage: "done" as const }, { ...withMemory, buildStage: undefined }])
+      expect(memoryClause(s)).toMatch(/identical shape, size, colours/);
+    expect(memoryClause(drilling)).toBe(""); // no memory, nothing said
+    expect(requiredThingsQuestion(requiredThingsFor(drilling))).toMatch(
+      /"incense holder — when it is what is being made: as it is at this stage of being made \(raw pieces or partly built, not yet finished\)"/
+    );
+  });
+
+  it("a step filed under the bench is still a moment of the making, and the bench is never called unfinished (job 361)", () => {
+    // Job 361's "give it a quick brush," was filed under the workbench. The stage is the picture's,
+    // so the prompt and the check speak of "what is being made", never of an unfinished workbench.
+    const brush = pic(25, "give it a quick brush,", "hands brushing sawdust off the squared cedar block on workbench", {
+      keyThing: "workbench",
+      buildStage: "making",
+      memoryRefUrls: ["https://x/bench.png"],
+    });
+    const clause = memoryClause(brush);
+    expect(clause).not.toMatch(/workbench, at the same or an earlier stage of being made/);
+    expect(clause).toMatch(/this exact workbench, at the same or an earlier point in the making/);
+    expect(requiredThingsFor(brush)[0]).toMatch(/^workbench — when it is what is being made:/);
+  });
+});
+
+describe("a key thing's first picture is worth copying (stored films, 2026-10-18)", () => {
+  // The first picture of a key thing is the one every later picture of it is drawn from.
+  it("Ruth's job 305: the first machine is drawn by its look, without the table the look puts it on", () => {
+    const first = pic(3, "at a kitchen table with", "a straight-stitch machine, a rotary cutter and a mountain of scraps at a kitchen table", {
+      keyThing: "straight-stitch machine",
+    });
+    const things: KeyThing[] = [
+      { name: "straight-stitch machine", look: "small black and chrome sewing machine, compact size, sits centered on work table" },
+    ];
+    const prompt = buildStillPrompt({ ...first, keyThingLook: keyThingLookFor(first, things) });
+    expect(prompt).toMatch(/black and chrome/);
+    expect(prompt).not.toMatch(/sits centered on work table/);
+  });
+
+  it("Dale's job 352: the planer's memory is the first picture about the planer, not the wide workshop shot", () => {
+    const wide = pic(8, "my garage", "garage workshop with table saw and benchtop planer along back wall", { keyThing: "benchtop planer" });
+    const feeding = pic(10, "through the planer", "man's hands feeding a rough-sawn board into a benchtop planer in a garage, pale shavings curling out", {
+      keyThing: "benchtop planer",
+    });
+    const later = pic(13, "another pass", "man's hands running a board face through benchtop planer in garage", { keyThing: "benchtop planer" });
+    expect(memorySourcesFor([wide, feeding, later], later)).toEqual([feeding]);
+  });
+
+  it("Dale's job 369: a group shot flagged only for writing is still the box's memory; one that missed the box is not", () => {
+    const group = pic(14, "Personalized mid-tier work.", "a walnut engraved board, a maple house sign and a small walnut keepsake box grouped together on a shelf", {
+      keyThing: "Engraved Board",
+      otherKeyThings: ["Keepsake Box"],
+    });
+    const box = pic(25, "a keepsake box", "Close-up of a finished walnut keepsake box sitting on the garage workbench", { keyThing: "Keepsake Box" });
+    markMemoryFit(group, false);
+    expect(memorySourcesFor([group, box], box)).toEqual([group]);
+    markMemoryFit(group, true);
+    expect(memorySourcesFor([group, box], box)).toEqual([]);
   });
 });
 
@@ -1682,5 +1814,223 @@ describe("a video that moves as asked is kept (the audit's thrown-away videos, 2
     expect(scene.nextSubmitReason).toBe("glitch");
     scene.nextSubmitReason = undefined; // the re-render's submit consumes it
     expect(planGlitchRerender(scene)).toEqual({ next: "still", keyframe: kf });
+  });
+});
+
+/**
+ * THE PICTURE AND ITS LINE (2026-10-18, the audit's picture-vs-line rows). A picture of the right
+ * thing can still miss what the line says about it — who is doing what, the state, the count — and a
+ * picture the operator types again is its own, not the planner's. None of the rules names a channel.
+ */
+describe("the picture shows what its line and its typed words say (the audit, 2026-10-18)", () => {
+  const SMOKE: KeyThing[] = [
+    { name: "smoke alarm", look: "round white ceiling alarm", main: true },
+    { name: "smoke detector box", look: "small rectangular cardboard box" },
+  ];
+
+  it("job 383 scene 20: a typed redo is led and checked by the typed words, not the planner's box", async () => {
+    const { ownTypedPicture } = await import("./shotList");
+    const old = "close-up of the front label of a small rectangular cardboard smoke detector box held in one hand";
+    const s = pic(20, "First thing on the label.", old, { keyThing: "smoke detector box", blurPrint: true });
+    const typed =
+      "A quick ordinary phone photo: one round white smoke alarm lying face up on a wooden kitchen counter in plain daylight, no box, no packaging";
+    // Before: the old subject leads the typed prompt (what job 383 shipped).
+    expect(buildStillPrompt({ ...s, visualPrompt: typed })).toMatch(/^THE PICTURE MUST SHOW: [^.]*front label of a small rectangular cardboard smoke detector box/);
+    ownTypedPicture(s, typed, SMOKE);
+    s.visualPrompt = typed; // as `prepareSceneEdit` lands it
+    const prompt = buildStillPrompt(s);
+    expect(prompt).not.toMatch(/THE PICTURE MUST SHOW/);
+    expect(prompt).not.toMatch(/front label of a small rectangular cardboard/);
+    expect(prompt).not.toContain(BLURRED_PRINT_CLAUSE);
+    // The check is held to the alarm, never to the box the operator said to leave out.
+    expect(requiredThingsFor(s)).toEqual(["smoke alarm"]);
+  });
+
+  it("job 383 scene 20 as stored: 'no hands, no readable writing' is drawn with nobody and no words", async () => {
+    const { ownTypedPicture } = await import("./shotList");
+    const look = "A sturdy man in his fifties with a short grey-flecked beard, in a navy crew-neck t-shirt";
+    const old = "close-up of the front label of a small rectangular cardboard smoke detector box held in one hand";
+    const s = pic(20, "or dual sensor,", old, {
+      keyThing: "smoke detector box",
+      pictureText: "Dual Sensor",
+      humanPresent: true,
+      brollHostLook: look,
+      brollHostRef: "https://x/host.png",
+    });
+    const typed =
+      "A quick ordinary phone photo: one round white smoke alarm lying face up on a wooden kitchen counter in plain " +
+      "daylight, a second small grey sensor window beside its vents, no box, no packaging, no hands, no readable " +
+      "writing anywhere";
+    // Before: the host at work from the planner's "held in one hand", and the label's words allowed.
+    const before = buildStillPrompt({ ...s, visualPrompt: typed });
+    expect(before).toContain(hostBrollClause(look));
+    expect(before).toMatch(/Dual Sensor/);
+    ownTypedPicture(
+      s,
+      typed,
+      [
+        { name: "smoke detector", look: "round white plastic disc", main: true },
+        { name: "smoke detector box", look: "small rectangular cardboard box with a printed label" },
+      ]
+    );
+    s.visualPrompt = typed;
+    const prompt = buildStillPrompt(s);
+    expect(prompt).not.toContain(hostBrollClause(look));
+    expect(prompt).toContain(NO_FIGURES_SUFFIX);
+    expect(prompt).not.toMatch(/Dual Sensor/);
+    expect(prompt).not.toMatch(/THE PICTURE MUST SHOW/);
+    expect(requiredThingsFor(s)).toEqual([]);
+  });
+
+  it("job 383 scene 40: 'no writing of any kind' is no soft print and no old back panel", async () => {
+    const { ownTypedPicture } = await import("./shotList");
+    const s = pic(40, "That number surprises people more than anything else I've mentioned tonight. That's the job.",
+      "detector back panel close up showing battery compartment and date area", { keyThing: "smoke alarm", blurPrint: true });
+    const typed = "his hand holding a pen over a small BLANK yellow sticky note on the counter, no writing of any kind anywhere";
+    ownTypedPicture(s, typed, SMOKE);
+    s.visualPrompt = typed;
+    const prompt = buildStillPrompt(s);
+    expect(prompt).not.toMatch(/back panel|battery compartment/);
+    expect(prompt).not.toContain(BLURRED_PRINT_CLAUSE);
+    expect(requiredThingsFor(s)).toEqual([]);
+  });
+
+  it("job 171 scene 248: the neighbour a line check adds is that neighbour, never the host", async () => {
+    const { applyPictureFixes } = await import("./shotList");
+    const scenes = [
+      pic(248, "That changes right here, and my neighbor across the street watched the whole thing from his driveway.",
+        "an empty driveway across the street from the workshop garage"),
+    ];
+    applyPictureFixes(scenes, [{ id: 0, show: "an older neighbour standing in the driveway across the street, watching", other: "an older neighbour" }], undefined);
+    markHostBroll(scenes, { hostLook: "a man with a grey beard in a plaid shirt" }, "https://x/host.png");
+    expect(scenes[0].brollHostLook).toBeUndefined();
+    const prompt = buildStillPrompt(scenes[0]);
+    expect(prompt).toContain(otherPersonClause("an older neighbour"));
+    expect(prompt).toContain(ONE_OTHER_PERSON_SUFFIX);
+    expect(prompt).not.toContain(NO_FIGURES_SUFFIX);
+  });
+
+  it("job 305 scene 118: a description's state is checked apart from whether the thing is there", async () => {
+    const { detailQuestion, missingQuestion } = await import("./overlayTextScan");
+    const open = "padlock hanging open on a mesh gate latch";
+    expect(detailQuestion(open)).toContain(open);
+    expect(detailQuestion(open)).toMatch(/shut where it says open/);
+    // `missing` keeps its meaning — the thing itself absent, swapped or small — and its wording.
+    expect(missingQuestion(open)).not.toMatch(/STATE|detail/);
+    // The cached rulebook is untouched: the question rides the per-picture part.
+    expect(STILL_DEFECT_SYSTEM).not.toMatch(/QUESTION 4b/);
+  });
+});
+
+describe("what a line rules out is never drawn (the audit, 2026-10-18)", () => {
+  // Production labels "shows what the line rules out": the stack beside the furnace under "and away
+  // from the furnace" (203-143, 211-135), a steel vault door under "I don't mean a steel vault"
+  // (224-22), a hand at the cat's belly under "isn't an invitation to rub it" (205-292).
+  it("203-143, 224-22, 205-292: the line check's mark reaches the picture check, whether or not it rewrote", async () => {
+    const { parsePictureFixes, applyPictureFixes } = await import("./shotList");
+    const { forbiddenQuestion } = await import("./overlayTextScan");
+    const scenes = [
+      pic(143, "and away from the furnace.", "a gas furnace with its burner flame glowing in a basement, a stickered board stack standing far across the room"),
+      pic(22, "Number two. A safe room, and no, I don't mean a steel vault like in the movies.", "a thick round steel vault door standing open"),
+      pic(292, "A belly on display isn't an invitation to rub it.", "The host's hand hovering near the belly-up tabby cat's tummy without touching it"),
+    ];
+    const fixes = parsePictureFixes(
+      JSON.stringify({
+        pictures: [
+          { id: 0, about: "where the stack is kept", shows_it: false, show: "a stickered board stack on a dry garage floor", forbids: "the board stack near the furnace" },
+          { id: 1, about: "a safe room", shows_it: false, show: "a small windowless interior room with a solid door", forbids: "a steel vault door" },
+          { id: 2, about: "leaving the belly alone", shows_it: true, forbids: "a hand rubbing or touching the cat's belly" },
+        ],
+      }),
+      scenes
+    );
+    expect(applyPictureFixes(scenes, fixes, undefined)).toBe(2);
+    expect(scenes.map(s => s.forbids)).toEqual([
+      "the board stack near the furnace",
+      "a steel vault door",
+      "a hand rubbing or touching the cat's belly",
+    ]);
+    // The rewrites name only what is in the frame; the third keeps its picture and its mark.
+    expect(scenes[0].showSubject).not.toMatch(/furnace/);
+    expect(scenes[1].showSubject).not.toMatch(/vault/);
+    expect(forbiddenQuestion(scenes[2].forbids!)).toContain("a hand rubbing or touching the cat's belly");
+  });
+
+  // 225-79..83: "Never in | the garage, | the basement, | the shed, | or on the porch," — the place
+  // question read "or on the porch," as where the picture belongs, so a picture drawn the right way
+  // (out in the open) was "the wrong place" and its redraw pulled toward the porch.
+  it("225-83: a marked picture is never held to the place its sentence rules out", async () => {
+    const { placeQuestion } = await import("./overlayTextScan");
+    expect(placeQuestion("or on the porch,", true)).toMatch(/is NOT where the frame must be/);
+    // Every other picture is asked exactly as before ("sold at the fair" is where it belongs).
+    expect(placeQuestion("sold at the fair", false)).not.toMatch(/NOT where the frame must be/);
+  });
+
+  it("the prompt writer carries the same rule, in neutral words", async () => {
+    const { RULED_OUT_RULE, STILL_BROLL_ENHANCER_SYSTEM } = await import("./longformVideo");
+    expect(STILL_BROLL_ENHANCER_SYSTEM).toContain(RULED_OUT_RULE);
+    expect(RULED_OUT_RULE).toMatch(/never the ruled-out act, thing or\s+placement/);
+    expect(RULED_OUT_RULE).toMatch(/'away from' or 'across the room from'/);
+    expect(RULED_OUT_RULE).not.toMatch(/furnace|vault|shampoo|fence|belly|generator|risers/i);
+  });
+});
+
+describe("a picture never ships a known fault in silence (the audit, 2026-10-18)", () => {
+  // The replay of 54 practice films: 240 of 1,810 checked pictures shipped with a fault on their last
+  // check, 217 of them kept the moment the same fault came back twice.
+  const plain = {};
+  const once = { broken: 1, writing: 1 };
+  const none = new Set<"at rest" | "soft print">();
+  it("352-147 broken → broken: one draw of the things at rest — never on the first broken, which a reroll clears", async () => {
+    const { faultRedrawFor } = await import("./longformVideo");
+    expect(faultRedrawFor(plain, { broken: true }, once, none, true)).toBe("at rest");
+    expect(faultRedrawFor(plain, { broken: true }, { broken: 0, writing: 0 }, none, true)).toBeUndefined();
+    expect(faultRedrawFor(plain, { broken: true }, once, new Set(["at rest" as const]), true)).toBeUndefined();
+    // Over a content-policy rung the prompt is not rebuilt: that would undo the softening.
+    expect(faultRedrawFor(plain, { broken: true }, once, none, false)).toBeUndefined();
+  });
+
+  it("343-17 a plain sign with writing on three of four draws: one draw with the print soft", async () => {
+    const { faultRedrawFor } = await import("./longformVideo");
+    expect(faultRedrawFor(plain, { writing: true }, once, none, true)).toBe("soft print");
+    // it may be on a softened prompt too: it only edits the text rule, never rebuilds
+    expect(faultRedrawFor(plain, { writing: true }, once, none, false)).toBe("soft print");
+    expect(faultRedrawFor(plain, { writing: true }, { broken: 0, writing: 0 }, none, true)).toBeUndefined();
+  });
+
+  it("383-33 a blurred-print picture (writing ten times), print the line says, a stamped caption: no soft-print draw", async () => {
+    const { faultRedrawFor } = await import("./longformVideo");
+    expect(faultRedrawFor({ blurPrint: true }, { writing: true }, once, none, true)).toBeUndefined();
+    expect(faultRedrawFor({ pictureText: "Photoelectric" }, { writing: true }, once, none, true)).toBeUndefined();
+    expect(faultRedrawFor(plain, { writing: true, overlay: true }, once, none, true)).toBeUndefined();
+  });
+
+  it("344-11 staged, 343-30 missing, and a check that could not run: kept as before, no changed draw", async () => {
+    const { faultRedrawFor } = await import("./longformVideo");
+    for (const v of [{ staged: true }, { missing: true }, { messy: true }, { wrongPlace: true }] as any[])
+      expect(faultRedrawFor(plain, v, once, none, true)).toBeUndefined();
+    expect(faultRedrawFor(plain, { broken: true, unchecked: true }, once, none, true)).toBeUndefined();
+  });
+
+  it("the changed prompts name no channel's things", async () => {
+    const { THINGS_AT_REST_CLAUSE, PERSON_FREE_FALLBACK, UNASKED_PRINT_CLAUSE } = await import("./longformVideo");
+    for (const clause of [THINGS_AT_REST_CLAUSE, PERSON_FREE_FALLBACK, UNASKED_PRINT_CLAUSE])
+      expect(clause).not.toMatch(/table saw|oak|vise|board|quilt|smoke alarm|house/i);
+  });
+
+  it("the at-rest redraw puts the TOOLS down, never what a picture shows lit, steaming or running", async () => {
+    // Rule (n): a main thing naturally used with a flame, steam or water is shown in use, and a
+    // self-moving shot's smoke moves by itself — "nothing in the frame is being used" put both out.
+    const { THINGS_AT_REST_CLAUSE } = await import("./longformVideo");
+    expect(THINGS_AT_REST_CLAUSE).toMatch(/\btool\b/i);
+    expect(THINGS_AT_REST_CLAUSE).not.toMatch(/nothing in the frame|being used|\bstill\b|unlit|no smoke|no steam/i);
+  });
+
+  it("343-17 the soft-print redraw of a plain picture asks for no print it never had", async () => {
+    const { softPrintRedraw, BLURRED_PRINT_CLAUSE, NO_READABLE_TEXT } = await import("./longformVideo");
+    const out = softPrintRedraw(`Carved wooden house sign with leaf design along its edge. ${NO_READABLE_TEXT}`);
+    expect(out).not.toContain(BLURRED_PRINT_CLAUSE); // "an engraved name … is there too, never left off"
+    expect(out).not.toMatch(/engrav|never left off/i);
+    expect(out).toContain("house sign");
   });
 });

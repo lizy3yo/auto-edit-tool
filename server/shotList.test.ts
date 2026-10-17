@@ -1739,3 +1739,373 @@ describe("a screen is a device, and it sells only when its own words say so (the
     expect(showsScreen("a phone charging on the counter, its screen showing a listing")).toBe(true);
   });
 });
+
+describe("a picture shows WHO does WHAT, the STATE and the COUNT its line makes the point with (2026-10-18)", () => {
+  it("tells the line check those are WRONG when left out — keeping the planner's exceptions", async () => {
+    const { FIT_SYSTEM } = await import("./shotList");
+    // 218-113: "Put on gloves and a mask and open the window." planned as "host opening the bedroom
+    // window wide"; 292-163: "one box per cat plus one extra" planned as a single box.
+    expect(FIT_SYSTEM).toMatch(/still WRONG when it leaves out what the line makes its point with/);
+    expect(FIT_SYSTEM).toMatch(/WHO is doing WHAT/);
+    expect(FIT_SYSTEM).toMatch(/the STATE the line describes/);
+    expect(FIT_SYSTEM).toMatch(/COUNT the line makes the point of/);
+    // Never for: a comparison (rule 4), a bare number (rule 5), someone only mentioned (6a — 144-99's
+    // "they go to women setting up a kitchen" shows the cloths), a warning (6b — 153-296's soaked,
+    // wadded rags are shown spread out safely), or what the line says does not happen (148-313's
+    // "not one buyer ever asked", 293-34's "strangers aren't walking through your house").
+    expect(FIT_SYSTEM).toMatch(/a comparison that only says what\s+something costs or is like/);
+    expect(FIT_SYSTEM).toMatch(/a bare number, price or length of time/);
+    expect(FIT_SYSTEM).toMatch(/only sells to, tells, helps or mentions, who does nothing/);
+    expect(FIT_SYSTEM).toMatch(/show the safe way, never the danger/);
+    expect(FIT_SYSTEM).toMatch(/does NOT happen or is NOT there \(never draw it happening\)/);
+    // The person a rewrite adds is named, so it is never drawn as the host.
+    expect(FIT_SYSTEM).toMatch(/set other to who they are/);
+    expect(FIT_SYSTEM).toMatch(/"other":null/);
+    // No channel's own things in the wording.
+    expect(FIT_SYSTEM).not.toMatch(/padlock|bobbin|neighbor across|driveway|gloves and a mask|litter|\bcats?\b/i);
+  });
+
+  // Hank's job 171 scene 248: "That changes right here, and my neighbor across the street watched the
+  // whole thing from his driveway." planned as "an empty driveway across the street from the workshop".
+  const NEIGHBOUR_LINE =
+    "That changes right here, and my neighbor across the street watched the whole thing from his driveway.";
+
+  it("reads who the rewrite shows: a person, nobody (null), or no answer at all", async () => {
+    const { parsePictureFixes } = await import("./shotList");
+    const scenes = [
+      scene(1, NEIGHBOUR_LINE, { showSubject: "an empty driveway across the street from the workshop garage" }),
+      scene(2, "Then I swept up.", { showSubject: "a broom" }),
+      scene(3, "And it sold.", { showSubject: "a piece" }),
+    ];
+    const fixes = parsePictureFixes(
+      JSON.stringify({
+        pictures: [
+          {
+            id: 0,
+            about: "the neighbour watching",
+            shows_it: false,
+            show: "an older neighbour standing at the end of his driveway across the street, watching",
+            thing: null,
+            stage: null,
+            other: "an older neighbour",
+          },
+          { id: 1, about: "sweeping", shows_it: false, show: "the host's hands sweeping sawdust", other: null },
+          { id: 2, about: "the sale", shows_it: false, show: "the piece wrapped for a buyer" },
+        ],
+      }),
+      scenes
+    );
+    expect(fixes[0].other).toBe("an older neighbour");
+    expect(fixes[1].other).toBeNull();
+    expect("other" in fixes[2]).toBe(false);
+    // The host or the viewer is never "someone else".
+    const host = parsePictureFixes(
+      JSON.stringify({ pictures: [{ id: 0, about: "x", shows_it: false, show: "the host at the bench", other: "the host" }] }),
+      scenes
+    );
+    expect(host[0].other).toBeNull();
+  });
+
+  it("draws the person a rewrite adds as that person, never as the host", async () => {
+    const { applyPictureFixes } = await import("./shotList");
+    const { markHostBroll } = await import("./hostLook");
+    const scenes = [scene(1, NEIGHBOUR_LINE, { showSubject: "an empty driveway across the street from the workshop garage" })];
+    applyPictureFixes(
+      scenes,
+      [{ id: 0, show: "an older neighbour standing in the driveway across the street, watching", other: "an older neighbour" }],
+      undefined
+    );
+    expect(scenes[0].humanPresent).toBe(true);
+    expect(scenes[0].otherPerson).toBe("an older neighbour");
+    markHostBroll(scenes, { hostLook: "a grey-bearded man in a plaid shirt" }, "https://x/host.png");
+    expect(scenes[0].brollHostLook).toBeUndefined();
+    expect(scenes[0].brollHostRef).toBeUndefined();
+  });
+
+  it("an answer of nobody else clears the old person; no answer keeps it while someone is still there", async () => {
+    const { applyPictureFixes } = await import("./shotList");
+    const make = () => [
+      scene(1, "and buyers liked picking out their favorite.", {
+        showSubject: "a woman customer picking out her favorite holder at the table",
+        humanPresent: true,
+        otherPerson: "a woman customer",
+      }),
+    ];
+    const cleared = make();
+    applyPictureFixes(cleared, [{ id: 0, show: "the host's hands setting the holders out", other: null }], undefined);
+    expect(cleared[0].otherPerson).toBeUndefined();
+    expect(cleared[0].humanPresent).toBe(true); // the host's hands
+    const kept = make();
+    applyPictureFixes(kept, [{ id: 0, show: "a woman picking up one holder from the table" }], undefined);
+    expect(kept[0].otherPerson).toBe("a woman customer");
+    const nobody = make();
+    applyPictureFixes(nobody, [{ id: 0, show: "the holders laid out on the table" }], undefined);
+    expect(nobody[0].otherPerson).toBeUndefined();
+    expect(nobody[0].humanPresent).toBeUndefined();
+  });
+
+  it("a split's new picture takes only the person the check named, never the line's old one", async () => {
+    const { applyPictureSplits, parsePictureFixes } = await import("./shotList");
+    const line =
+      "My aunt picked one up at the table and turned it over, the kind of thing you see in an old farmhouse kitchen.";
+    const s = scene(1, line, {
+      showSubject: "an older aunt turning a bowl over at the table",
+      humanPresent: true,
+      otherPerson: "an older aunt",
+      wordCut: true,
+    });
+    const plain = applyPictureSplits([s], [{ id: 0, split: [{ from: "the kind of thing", show: "an old farmhouse kitchen" }] }], []);
+    expect(plain.split).toBe(1);
+    expect(plain.scenes[0].otherPerson).toBe("an older aunt");
+    expect(plain.scenes[1].otherPerson).toBeUndefined();
+    expect(plain.scenes[1].humanPresent).toBeUndefined();
+    const fixes = parsePictureFixes(
+      JSON.stringify({
+        pictures: [
+          {
+            id: 0,
+            about: "x",
+            shows_it: true,
+            split: [{ from: "the kind of thing", show: "a woman cooking in an old farmhouse kitchen", other: "a farm woman" }],
+          },
+        ],
+      }),
+      [s]
+    );
+    const named = applyPictureSplits([s], fixes, []);
+    expect(named.scenes[1].otherPerson).toBe("a farm woman");
+    expect(named.scenes[1].humanPresent).toBe(true);
+  });
+
+  it("a joined picture carries the person too", async () => {
+    const { applyPictureJoins } = await import("./shotList");
+    const pic = (index: number, scriptText: string, showSubject: string) =>
+      ({ index, scriptText, showSubject, visualPrompt: showSubject, wordCut: true, audioDuration: 3 }) as StoryboardScene;
+    const r = applyPictureJoins(
+      [pic(1, "My neighbor stopped by", "a porch"), pic(2, "to buy two of them.", "two bowls")],
+      [{ id: 1, join: true, show: "an older neighbour on the porch holding two bowls", other: "an older neighbour" }],
+      undefined,
+      s => s.audioDuration ?? 0,
+      () => 12
+    );
+    expect(r.joined).toBe(1);
+    expect(r.scenes[0].otherPerson).toBe("an older neighbour");
+    expect(r.scenes[0].humanPresent).toBe(true);
+  });
+});
+
+describe("a typed redo prompt owns the picture (job 383 scenes 20, 33 and 40)", () => {
+  const things = [
+    { name: "smoke alarm", look: "round white ceiling alarm", main: true as const },
+    { name: "smoke detector box", look: "small rectangular cardboard box" },
+  ];
+
+  it("reads what typed words say is NOT there as naming nothing", async () => {
+    const { withoutNegatedPhrases } = await import("./shotList");
+    expect(withoutNegatedPhrases("one round white smoke alarm on a counter, no box, no packaging")).toBe(
+      "one round white smoke alarm on a counter, ,"
+    );
+    expect(withoutNegatedPhrases("a pen over a blank sticky note… no writing of any kind anywhere")).toBe(
+      "a pen over a blank sticky note…"
+    );
+    expect(withoutNegatedPhrases("a jar without a lid and a spoon beside it")).toBe("a jar and a spoon beside it");
+    expect(withoutNegatedPhrases("it isn't plugged in, the cord coiled")).toBe("it , the cord coiled");
+    // A count stays.
+    expect(withoutNegatedPhrases("no more than three jars on the shelf")).toBe("no more than three jars on the shelf");
+  });
+
+  it("scene 20: the typed alarm replaces the planner's box — subject, key thing, soft print", async () => {
+    const { ownTypedPicture } = await import("./shotList");
+    const old = "close-up of the front label of a small rectangular cardboard smoke detector box held in one hand";
+    const s = scene(20, "First thing on the label.", {
+      showSubject: old,
+      visualPrompt: old,
+      keyThing: "smoke detector box",
+      buildStage: "done",
+      blurPrint: true,
+    });
+    const typed =
+      "A quick ordinary phone photo: one round white smoke alarm lying face up on a wooden kitchen counter in plain daylight, no box, no packaging";
+    expect(ownTypedPicture(s, typed, things)).toBe(true);
+    expect(s.showSubject).toBe(typed);
+    expect(s.keyThing).toBe("smoke alarm");
+    expect(s.otherKeyThings).toBeUndefined(); // "no box" names no box
+    expect(s.buildStage).toBeUndefined();
+    expect(s.blurPrint).toBeUndefined();
+  });
+
+  it("scene 40: a blank sticky note with 'no writing of any kind' keeps no soft print and no detector", async () => {
+    const { ownTypedPicture } = await import("./shotList");
+    const old = "detector back panel close up showing battery compartment and date area";
+    const s = scene(40, "That number surprises people more than anything else I've mentioned tonight. That's the job.", {
+      showSubject: old,
+      visualPrompt: old,
+      keyThing: "smoke alarm",
+      blurPrint: true,
+      pictureText: "10 years",
+      namedLook: "smoke alarm back panel: a round white plastic back with a battery door",
+      partOf: "smoke alarm",
+    });
+    ownTypedPicture(
+      s,
+      "his hand holding a pen over a small BLANK yellow sticky note on the counter, no writing of any kind anywhere",
+      things
+    );
+    expect(s.blurPrint).toBeUndefined();
+    expect(s.pictureText).toBeUndefined();
+    expect(s.keyThing).toBeUndefined();
+    expect(s.partOf).toBeUndefined();
+    expect(s.namedLook).toBeUndefined();
+  });
+
+  it("keeps what the typed words still name — the key thing, its stage, the said words", async () => {
+    const { ownTypedPicture } = await import("./shotList");
+    const s = scene(33, "At 10 years the unit is finished.", {
+      showSubject: "the date area on the back of the smoke alarm",
+      visualPrompt: "the date area on the back of the smoke alarm",
+      keyThing: "smoke alarm",
+      buildStage: "done",
+      pictureText: "10 years",
+    });
+    ownTypedPicture(s, "the back of the smoke alarm at arm's length, its label reading 10 years, soft", things);
+    expect(s.keyThing).toBe("smoke alarm");
+    expect(s.buildStage).toBe("done");
+    expect(s.pictureText).toBe("10 years");
+    expect(s.blurPrint).toBeUndefined(); // the words are said, so printed exactly
+  });
+
+  // Job 383 as it was stored: its real key things, lines, typed prompts and planner fields.
+  const STORED = [
+    { name: "smoke detector", look: "round white plastic disc", main: true as const },
+    { name: "smoke detector box", look: "small rectangular cardboard box with a printed label" },
+    { name: "detector back panel", look: "the disc turned over to show a battery compartment and date area" },
+  ];
+  const HOST_LOOK = "A sturdy man in his fifties with a short grey-flecked beard, in a navy crew-neck t-shirt";
+
+  it("stored scene 20: 'no hands, no readable writing' drops the planner's person and its words", async () => {
+    const { ownTypedPicture } = await import("./shotList");
+    const s = scene(20, "or dual sensor,", {
+      showSubject: "close-up of the front label of a small rectangular cardboard smoke detector box held in one hand",
+      visualPrompt: "close-up of the front label of a small rectangular cardboard smoke detector box held in one hand",
+      keyThing: "smoke detector box",
+      pictureText: "Dual Sensor",
+      humanPresent: true,
+      brollHostLook: HOST_LOOK,
+      listCut: true,
+    });
+    const typed =
+      "A quick ordinary phone photo: one round white smoke alarm lying face up on a wooden kitchen counter in plain " +
+      "daylight, a second small grey sensor window beside its vents, no box, no packaging, no hands, no readable " +
+      "writing anywhere";
+    expect(ownTypedPicture(s, typed, STORED)).toBe(true);
+    expect(s.showSubject).toBe(typed);
+    expect(s.keyThing).toBeUndefined(); // the box is said to be left out, and no other key thing is named
+    expect(s.pictureText).toBeUndefined(); // "no readable writing anywhere"
+    expect(s.blurPrint).toBeUndefined();
+    expect(s.humanPresent).toBeUndefined(); // "no hands": the host is not drawn into it
+  });
+
+  it("stored scene 40: the typed hand keeps the person; 'his face not shown' and 'no writing' name nothing", async () => {
+    const { ownTypedPicture } = await import("./shotList");
+    const s = scene(40, "That number surprises people more than anything else I've mentioned tonight. That's the job.", {
+      showSubject: "detector back panel turned over showing battery compartment and date area",
+      visualPrompt: "detector back panel turned over showing battery compartment and date area",
+      keyThing: "detector back panel",
+      blurPrint: true,
+      humanPresent: true,
+      brollHostLook: HOST_LOOK,
+    });
+    ownTypedPicture(
+      s,
+      "A quick ordinary phone photo taken from behind a man's shoulder at a kitchen table: his hand holding a pen " +
+        "over a small BLANK yellow sticky note, an old yellowed smoke alarm lying FACE UP beside it showing only its " +
+        "smooth vented front, his face not shown, plain daylight, no writing of any kind anywhere",
+      STORED
+    );
+    expect(s.humanPresent).toBe(true);
+    expect(s.brollHostLook).toBe(HOST_LOOK);
+    expect(s.keyThing).toBeUndefined();
+    expect(s.blurPrint).toBeUndefined();
+  });
+
+  it("stored scene 33: typed soft print on the back labels stays soft print; the part it no longer names goes", async () => {
+    const { ownTypedPicture } = await import("./shotList");
+    const s = scene(33, "At 10 years the unit is finished.", {
+      showSubject: "close-up of the printed date area on the flat gray back of a turned-over round white smoke detector",
+      visualPrompt: "close-up of the printed date area on the flat gray back of a turned-over round white smoke detector",
+      keyThing: "detector back panel",
+      otherKeyThings: ["smoke detector"],
+      partOf: "detector back panel",
+      blurPrint: true,
+    });
+    ownTypedPicture(
+      s,
+      "A quick ordinary phone photo from arm's length: two smoke alarms lying on a wooden workbench turned over to " +
+        "show their back panels, the left one old and yellow-brown with age, the right one clean and white and new; " +
+        "the small printing on both back labels soft, blurred and impossible to read, plain daylight, no hands",
+      STORED
+    );
+    expect(s.blurPrint).toBe(true);
+    expect(s.partOf).toBeUndefined();
+    expect(s.keyThing).toBeUndefined();
+    expect(s.otherKeyThings).toBeUndefined();
+    expect(s.humanPresent).toBeUndefined(); // there was none, and none is added
+  });
+
+  it("only words that really say nobody take the person out", async () => {
+    const { ownTypedPicture } = await import("./shotList");
+    const person = (typed: string) => {
+      const s = scene(1, "and I sanded it smooth.", {
+        showSubject: "the host's hands sanding a board",
+        visualPrompt: "the host's hands sanding a board",
+        humanPresent: true,
+        brollHostLook: HOST_LOOK,
+      });
+      ownTypedPicture(s, typed, undefined);
+      return s.humanPresent;
+    };
+    expect(person("a smooth maple board on the bench, nobody in the shot")).toBeUndefined();
+    expect(person("a smooth maple board on the bench without any people")).toBeUndefined();
+    // The typed words show a person themselves: kept.
+    expect(person("her hands sanding the board, no other people in the room")).toBe(true);
+    // "no one thing" is not "no one".
+    expect(person("a board where no one thing stands out")).toBe(true);
+    // Saying nothing about people leaves the picture's person as it was.
+    expect(person("a smooth maple board lying on the bench")).toBe(true);
+  });
+
+  it("a hyphened name is a kind of thing, never its absence", async () => {
+    const { ownTypedPicture, withoutNegatedPhrases } = await import("./shotList");
+    expect(withoutNegatedPhrases("a no-sew fleece blanket folded on the couch")).toBe(
+      "a no-sew fleece blanket folded on the couch"
+    );
+    expect(withoutNegatedPhrases("a never-ending scarf on a chair")).toBe("a never-ending scarf on a chair");
+    expect(withoutNegatedPhrases("a jar whose lid cannot close, on the shelf")).toBe("a jar whose lid , on the shelf");
+    const s = scene(5, "This no-sew blanket takes an afternoon.", {
+      showSubject: "the no-sew fleece blanket laid flat",
+      visualPrompt: "the no-sew fleece blanket laid flat",
+      keyThing: "no-sew fleece blanket",
+      namedLook: "no-sew fleece blanket: two layers of fleece knotted along every edge",
+    });
+    ownTypedPicture(s, "a no-sew fleece blanket folded over the arm of a couch", [
+      { name: "no-sew fleece blanket", look: "two layers of fleece knotted along every edge", main: true },
+    ]);
+    expect(s.keyThing).toBe("no-sew fleece blanket");
+    expect(s.namedLook).toBe("no-sew fleece blanket: two layers of fleece knotted along every edge");
+  });
+
+  it("a plain regenerate, which sends the picture's own prompt back, changes nothing", async () => {
+    const { ownTypedPicture } = await import("./shotList");
+    // Job 397 scene 14, "Coasters,": regenerated with the card's own prompt.
+    const s = scene(14, "Coasters,", {
+      showSubject: "round maple and walnut coasters stacked on the workbench",
+      visualPrompt: "Round maple and walnut coasters stacked in a neat pile on the workbench.",
+      keyThing: "coaster",
+    });
+    expect(
+      ownTypedPicture(s, "  Round maple and walnut coasters stacked in a neat pile on the workbench.  ", undefined)
+    ).toBe(false);
+    expect(s.showSubject).toBe("round maple and walnut coasters stacked on the workbench");
+    expect(s.keyThing).toBe("coaster");
+  });
+});

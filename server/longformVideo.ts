@@ -50,13 +50,17 @@ import {
   videoKind,
   fitPicturesToLines,
   judgeSelfMoving,
+  ownTypedPicture,
 } from "./shotList";
 import {
   attachMemory,
-  ownKeyThing,
+  beforeFinished,
+  requiredThingsFor,
   BACKGROUND_VIEW,
   BLUR_PRINT_VIEW,
-  memoryPicturesFor,
+  keyThingLookClause,
+  lookToHold,
+  memoryFor,
   memoryView,
   pictureSettled,
   SCREEN_ITEM_VIEW,
@@ -64,6 +68,15 @@ import {
 } from "./pictureMemory";
 import { safeParseJSON, stripMarkdownFences } from "./jsonRepair";
 import { checkFlags, recordPictureCheck } from "./pictureCheckLog";
+import {
+  COPIES_MEMORY,
+  DIFFERENT_THING,
+  NEAR_COPY,
+  NOT_THE_HOST,
+  pictureFlawWarning,
+  pictureFlawWarningPrefix,
+  shippedFlaws,
+} from "../shared/pictureFlaws";
 import { scanNearCopy, scanSameHost, scanSameThing, scanStillDefects } from "./overlayTextScan";
 import { padSentenceEnds } from "./sentencePauses";
 import {
@@ -88,6 +101,56 @@ export const HOST_IDENTITY_REDRAWS = 2;
 export const PERSON_FREE_FALLBACK =
   "Show only the things this line is about, on a surface or in their place — no person, no " +
   "hands, no face, no body part anywhere in the frame.";
+/**
+ * With `PERSON_FREE_FALLBACK` on the redraw of a picture whose geometry came back broken twice. Only
+ * TOOLS are put down: "nothing is being used" also put out what a picture shows in use on purpose —
+ * a main thing lit, steaming or running (rule (n), "the main thing in use") — and smoke or steam that
+ * moves by itself in a self-moving shot's frame. Never "still" either, for the same reason.
+ */
+export const THINGS_AT_REST_CLAUSE =
+  "No tool is at work: every tool and workpiece rests where it belongs, and no blade, bit or point " +
+  "is cutting into anything.";
+
+/**
+ * A REDRAW THAT CHANGES WHAT CAUSED THE FAULT (2026-10-18, the audit). A picture whose check names
+ * the same fault twice used to be kept on the spot (`REDRAW_SAME_FAULTS`), since a third draw from
+ * the same prompt bought nothing; the replay of 54 practice films found that the main way a picture
+ * ships with a known fault — 217 of 240. Two faults get ONE draw with a prompt changed against them,
+ * and only where nothing changed it yet:
+ * - broken geometry (job 352 scene 147: a board crosscut on a table saw, broken twice) → the line's
+ *   things at rest, nobody in the frame — hands and tools in contact are where the impossible
+ *   geometry comes from (`PERSON_FREE_FALLBACK`, the host-identity check's own last move);
+ * - readable writing on a picture whose line asks for none (job 343 scene 17: a carved house sign,
+ *   "writing" on three of four draws) → the print soft and the thing further back.
+ * Never a picture that already had its print changed: a blurred-print one got that redraw on its
+ * first "writing" (job 383 scene 33, writing ten times), and printed words the line says are wanted.
+ * Never "missing": the subject already leads the prompt when the description drops it (`subjectLead`),
+ * so a changed prompt for it is not yet known to help. Every other fault keeps the picture as before,
+ * and the job says so (`notePictureFlaws`). Pure.
+ */
+export type FaultRedraw = "at rest" | "soft print";
+export function faultRedrawFor(
+  scene: Pick<StoryboardScene, "blurPrint" | "pictureText">,
+  defects: { broken?: boolean; writing?: boolean; overlay?: boolean; unchecked?: boolean },
+  /** Earlier draws of this picture the check named broken / readable writing. */
+  seen: { broken: number; writing: number },
+  tried: ReadonlySet<FaultRedraw>,
+  /** The prompt is still the ordinary one — a content-policy rung must not be rebuilt over. */
+  ordinaryPrompt: boolean
+): FaultRedraw | undefined {
+  if (defects.unchecked) return undefined;
+  if (defects.broken && seen.broken > 0 && ordinaryPrompt && !tried.has("at rest")) return "at rest";
+  if (
+    defects.writing &&
+    !defects.overlay &&
+    !scene.blurPrint &&
+    !scene.pictureText &&
+    seen.writing > 0 &&
+    !tried.has("soft print")
+  )
+    return "soft print";
+  return undefined;
+}
 import {
   deriveStyleBible,
   deriveVisualDirection,
@@ -5188,6 +5251,22 @@ export const FIGURE_OF_SPEECH_RULE =
   "is a place, not a comparison — set the shot there.)";
 
 /**
+ * What a line rules out is not a shot (2026-10-18, the audit). "Depict only what the narration
+ * states" read a line that says NOT to do something as a statement of it: "and away from the
+ * furnace" came back as the lumber stack beside the furnace (production 203-143), "never use the rip
+ * fence as a stop" as the fence used as a stop (practice job 352 #154). The shot list and the line
+ * check carry the same rule; this is the prompt writer's copy, the last step before the picture
+ * model — which draws every thing it is told about, so a thing named with "away from" is drawn too.
+ */
+export const RULED_OUT_RULE =
+  "WHAT A LINE RULES OUT IS NOT SHOWN: when the narration says not to do something, what something " +
+  "is NOT, what to use INSTEAD, what to keep away or out, or that a job is for someone else, show " +
+  "the right way, the alternative, or the subject on its own — never the ruled-out act, thing or " +
+  "placement. Name only what IS in the frame: never the ruled-out thing, not even with 'without', " +
+  "'no', 'not', 'away from' or 'across the room from'. A figure of speech that rules out nothing " +
+  "you can see (\"don't count on it\") is not this rule.";
+
+/**
  * Composition rule for every generated b-roll frame. The setting clause used to ask for "natural
  * everyday clutter", and the model filled the frame edges with branded shop-vacs, tool chests and
  * bins while the subject sat small in the middle — an openwork lattice then showed that clutter
@@ -5605,6 +5684,7 @@ export const STILL_BROLL_ENHANCER_SYSTEM =
   "ordinary everyday setting — not always close up; often seen from a step or two back.\n" +
   `- ${CLEAN_FRAME_RULE}\n` +
   `- ${FIGURE_OF_SPEECH_RULE}\n` +
+  `- ${RULED_OUT_RULE}\n` +
   `- ${NO_NARRATION_TEXT_RULE}\n` +
   "- SAY IT, SHOW IT: when a MUST SHOW line is given, the frame's hero subject is exactly that " +
   "thing, named plainly first in your prompt and framed CLOSE — taking up much of the frame, the " +
@@ -6693,8 +6773,11 @@ export function buildStillPrompt(
   const app = screenPicture(visual) ? ` ${appScreenClause(scene, visual)}` : "";
   const lead = !aggressive && !visualOverride ? subjectLead(shown, visual) : "";
   const item = !visualOverride ? listItemClause(scene) : "";
+  // ITS KEY THING'S LOOK, when no earlier picture of it is there to follow (`keyThingLookClause`);
+  // a named kind's exact look wins. Not on a content-policy fallback, which no longer shows it.
+  const look = !visualOverride ? scrubLegibleWriting(keyThingLookClause(scene)) : "";
   return withAllowedText(
-    `${lead}${visual}${scrubLegibleWriting(namedLookClause(scene))}${item}${angleSuffix}${personSuffix}${memory}${app} ${amateurIphoneLook(subject, motion)} ${framing} ${noFigures} ${NO_BOOK_SUFFIX}`,
+    `${lead}${visual}${scrubLegibleWriting(namedLookClause(scene))}${look}${item}${angleSuffix}${personSuffix}${memory}${app} ${amateurIphoneLook(subject, motion)} ${framing} ${noFigures} ${NO_BOOK_SUFFIX}`,
     scene.pictureText,
     scene.blurPrint
   );
@@ -6755,6 +6838,36 @@ export const BLURRED_PRINT_CLAUSE =
 export const STEP_BACK_CLAUSE =
   "Step further back than before: the whole thing smaller in the frame, in its place, with no " +
   "printing on it large enough to make out.";
+
+/** How the detail redraw's clause starts — found again so a later one replaces it, never stacks. */
+export const DETAIL_CLAUSE_START = "THE DETAIL MATTERS:";
+
+/**
+ * The redraw after the check said the thing is there but not the way its description says (the
+ * `detail` verdict — job 305 scene 118's padlock "hanging open" drawn shut). A fresh seed alone
+ * draws the same: the prompt already asks for it, so the redraw is told which detail to get right
+ * and what the check saw instead. A picture drawn from memory is told its references are for the
+ * look only: they come first and show their thing at another moment, and 49 of the 60 sampled wrong
+ * pictures were memory pictures. Pure.
+ */
+export function pictureDetailClause(
+  subject: string | undefined,
+  missed: string | undefined,
+  fromMemory: boolean
+): string {
+  const want = subject?.trim().replace(/[.\s]+$/, "");
+  const off = missed?.trim().replace(/[.\s]+$/, "");
+  return (
+    `${DETAIL_CLAUSE_START} show it exactly as described — the state it is in, what is being done, ` +
+    "how many there are and where each one sits" +
+    (want ? `: ${want}.` : ".") +
+    (off ? ` This is easy to get wrong here (${off}).` : "") +
+    (fromMemory
+      ? " The reference pictures are only for how things look: never copy their state, position " +
+        "or number."
+      : "")
+  );
+}
 
 /** Close-up wording, which a picture maker answers with sharp, readable print. */
 const CLOSE_UP_WORDS = /\b(?:extreme\s+)?close[- ]?ups?\b|\bmacro\b/gi;
@@ -6871,6 +6984,31 @@ export function withAllowedText(
 }
 
 /**
+ * Print on a picture whose line asks for NONE: whatever the picture maker puts there is blurred, and
+ * nothing is asked for. `BLURRED_PRINT_CLAUSE` is for a line that talks about print — it says the
+ * print "is visible" and an engraved name "is there too … never left off" — and on a plain picture
+ * that would carve a name onto a thing whose line never had one.
+ */
+export const UNASKED_PRINT_CLAUSE =
+  "Any printing or lettering in the frame — on a label, a box, a sign or a screen — is small, soft " +
+  "and out of focus, the way a phone blurs small print: no word, letter or number anywhere can be " +
+  "read. Frame it from about an arm's length away, never a close-up of any printing: the thing is " +
+  "clearly the subject.";
+
+/**
+ * The soft-print redraw of a PLAIN picture that came back with readable writing twice (`faultRedrawFor`
+ * "soft print", job 343 scene 17): the blurred-print path's framing — close-up words and "clearly
+ * showing" taken out, the no-writing rule swapped (`withAllowedText`) — with the clause that asks for
+ * no print (`UNASKED_PRINT_CLAUSE`), from further back (`STEP_BACK_CLAUSE`). Pure.
+ */
+export function softPrintRedraw(prompt: string): string {
+  const soft = withAllowedText(prompt, undefined, true)
+    .split(BLURRED_PRINT_CLAUSE)
+    .join(UNASKED_PRINT_CLAUSE);
+  return `${soft} ${STEP_BACK_CLAUSE}`;
+}
+
+/**
  * The phone screen of an app shot (2026-09-30, the operator: "facebook marketplace in an app" — no
  * logo, no brand): a plain buy-and-sell app, a grid of item photos, nothing readable.
  */
@@ -6968,6 +7106,67 @@ export const DESCRIBED_SCREEN_CLAUSE =
   "real phone, tablet or laptop. " +
   DEVICE_RESTS +
   " It is never built from, framed by or set inside any other object.";
+/**
+ * The fields a picture's memory sets at render (`memoryFor`): its reference pictures and camera
+ * position; whether those show only the OTHER key things in it; and, when none is a picture of its
+ * own thing, the look it is drawn by instead (`keyThingLookClause`). Pure.
+ */
+export function memoryFields(
+  memory: { urls: string[]; own: boolean; look?: string },
+  view: string | undefined
+): Pick<StoryboardScene, "memoryRefUrls" | "memoryView" | "memoryOthersOnly" | "keyThingLook"> {
+  const has = memory.urls.length > 0;
+  return {
+    memoryRefUrls: has ? memory.urls : undefined,
+    memoryView: has ? view : undefined,
+    memoryOthersOnly: has && !memory.own ? true : undefined,
+    keyThingLook: memory.own ? undefined : memory.look,
+  };
+}
+
+/**
+ * A FIRST PICTURE THAT MISSED IS NEVER COPIED: a picture whose last check said what it must show is
+ * not in it still ships, but is no memory for later pictures (`memoryUnfit`). Stored films copied 22
+ * first pictures that failed their last check into 122 later pictures. Only `missing` counts: a staged
+ * look or readable writing leaves the thing itself right (Dale's job 369: the keepsake-box group
+ * shot, last check "writing", is the box's memory still). Mutates `scene`.
+ */
+export function markMemoryFit(scene: StoryboardScene, missing: boolean | undefined): void {
+  if (missing) scene.memoryUnfit = true;
+  else delete scene.memoryUnfit;
+}
+
+/**
+ * A PICTURE THAT SHIPS WITH A FAULT SAYS SO (2026-10-18, the audit): the still loop keeps a frame
+ * whose redraws did not clear what the check named, and that used to leave no trace past a server
+ * log line — 240 of 1,810 checked pictures in 54 practice films (job 343 scene 30: a settings screen
+ * "missing" twice and kept). The scene carries the faults (`pictureFlaws`, or `panelFlaws` for a split
+ * panel) and the job warns, so the card shows which pictures to look at. A picture drawn again — a
+ * regenerate, a keyframe for a clip's next try — replaces what its last one said, and one drawn clean
+ * takes the warning away. Mutates `scene`.
+ */
+export function notePictureFlaws(
+  jobId: number,
+  scene: StoryboardScene,
+  flaws: string[] | undefined,
+  panel: boolean
+): void {
+  const key = panel ? "panelFlaws" : "pictureFlaws";
+  const prefix = pictureFlawWarningPrefix(scene.index, panel);
+  dropJobWarnings(jobId, m => m.startsWith(prefix));
+  if (!flaws?.length) {
+    delete scene[key];
+    return;
+  }
+  scene[key] = [...flaws];
+  appendJobWarning(jobId, pictureFlawWarning(scene.index, flaws, panel));
+}
+
+/** A split's panel is drawn from a copy of its scene: what it shipped with goes back to the scene. */
+function carryPanelFlaws(host: StoryboardScene, flaws: string[] | undefined): void {
+  if (flaws?.length) host.panelFlaws = [...flaws];
+  else delete host.panelFlaws;
+}
 
 /**
  * PICTURE MEMORY: a picture of a key thing drawn from the earlier pictures of it
@@ -7000,6 +7199,25 @@ export function memoryClause(scene: StoryboardScene): string {
     scene.humanPresent && scene.brollHostRef
       ? " The last reference image is the host, only for how they look."
       : "";
+  // References of the OTHER key things only (`memoryOthersOnly`): the first picture of a thing, drawn
+  // beside another one seen before (the mattress beside the heater). Told the references showed
+  // "this exact mattress and heater", the picture maker had only a heater to copy for both — and the
+  // first mattress picture is the one every later mattress is drawn from.
+  if (scene.memoryOthersOnly) {
+    const others = scene.otherKeyThings ?? [];
+    if (!others.length) return "";
+    const named =
+      others.length > 1 ? `${others.slice(0, -1).join(", ")} and ${others[others.length - 1]}` : others[0];
+    const same = beforeFinished(scene)
+      ? "the same colours, materials and wear, at the same or an earlier point in the making"
+      : "identical shape, size, colours, materials and wear";
+    return (
+      ` ${which} this exact ${named}, seen earlier in this video: draw the SAME ${named} — ${same} — ` +
+      `from a different camera position, never copying the reference's framing. ` +
+      `${n === 1 ? "It does" : "They do"} NOT show the ${scene.keyThing}: draw it from this picture's own words.` +
+      host
+    );
+  }
   // The exact new camera position (`memoryViewFor`): told only "a different spot", the picture
   // maker copied the reference's framing — Frederick's job 257 showed one framing four times.
   const view = scene.memoryView
@@ -7030,6 +7248,25 @@ export function memoryClause(scene: StoryboardScene): string {
       ` ${which} the whole ${scene.partOf}. This picture is a CLOSE-UP of just the part of it the ` +
       `words are about, filling the frame — never the whole ${scene.partOf} again. Keep the same ` +
       `fabrics, colours, materials and wear as the reference.` +
+      host
+    );
+  // A picture of the thing BEFORE it is finished (`buildStage` material / making): its references
+  // are the same or an earlier stage (`memorySourcesFor` drops anything further along), so its shape
+  // and size are its own — "identical shape, size" would hold a strip being coiled into a bowl
+  // (Ruth's job 281) to the flat strip, and the old "the reference is how it looked before" was
+  // backwards when the reference was the finished piece the video opened on (Hank's job 268).
+  // The stage is the PICTURE's, and its key thing may be the bench or a tool the piece is made with
+  // (stored step pictures were filed under "workbench", "oil finish rag", the sewing machine), so the
+  // clause never calls the key thing unfinished — only "what is being made", which the words name.
+  if (beforeFinished(scene))
+    return (
+      ` ${which} this exact ${thing}, at the same or an earlier point in the making than this ` +
+      `picture. Draw the SAME ${thing} — the same colours, materials and wear, in the same place — ` +
+      `from a different camera position than the reference; never copy the reference's ` +
+      `framing.${view} What is being made is shown exactly as far along as the words say — NOT ` +
+      `finished: raw pieces or partly built, with only what the words say has been done to it so ` +
+      `far. ${all.length > 1 ? "Each is" : "It is"} ONE thing: never a second copy or a spare part ` +
+      `of it beside, on or inside the first.` +
       host
     );
   return (
@@ -9006,6 +9243,14 @@ export function stillRetryDelayMs(error: string, attempt: number): number {
 }
 
 /**
+ * A drawn still, and whether its LAST check said what it must show is not in it (`missing`) — such
+ * a picture still ships (the film never stops for it), but no later picture is drawn from it
+ * (`scene.memoryUnfit`). `flaws`: what the checks still named on the frame that shipped
+ * (`shared/pictureFlaws.ts`) — absent on a frame that passed.
+ */
+export type ValidatedStill = { buffer: Buffer; mimeType?: string; missing?: boolean; flaws?: string[] };
+
+/**
  * `drawValidatedStill`, but a video's SCREEN pictures (`scene.screenSetup`) are drawn one at a time
  * (`withScreenTurn`): pictures are drawn several at once, and two drawn together cannot see each
  * other, so Dale's job 372 test kept three near-identical "holding a phone" screens that were all
@@ -9014,7 +9259,7 @@ export function stillRetryDelayMs(error: string, attempt: number): number {
  */
 export async function generateValidatedStill(
   ...args: Parameters<typeof drawValidatedStill>
-): Promise<{ buffer: Buffer; mimeType?: string }> {
+): Promise<ValidatedStill> {
   const [scene, , , , , , square] = args;
   const job = currentCostJobId();
   const lane = varietyLane(scene);
@@ -9051,21 +9296,43 @@ async function drawValidatedStill(
    * still that came back 16:9 would get its sides cropped off in the square slot.
    */
   square = false
-): Promise<{ buffer: Buffer; mimeType?: string }> {
+): Promise<ValidatedStill> {
   if (!genImage)
     throw new Error("generateValidatedStill requires a genImage generator");
+  // Frames whose check said what they must show is not in them: whichever frame ships says so
+  // (`ValidatedStill.missing`), so it is never made the memory of later pictures.
+  const missed = new WeakSet<Buffer>();
+  // Every frame carries what the checks named on it (its own `pictureChecks` entry), so a frame that
+  // ships with a fault says which (`ValidatedStill.flaws`) — whichever path ships it.
+  type Drawn = { buffer: Buffer; mimeType?: string; flags: string[] };
+  const shipped = (f: Drawn): ValidatedStill => {
+    const flaws = shippedFlaws(f.flags);
+    return {
+      buffer: f.buffer,
+      mimeType: f.mimeType,
+      missing: missed.has(f.buffer),
+      ...(flaws.length ? { flaws } : {}),
+    };
+  };
   let prompt = buildStillPrompt(scene, false, visualOverride, subject, square);
   let tier = 0; // 0 normal → 1 aggressive → 2 llm-rewrite → 3 subject-generic → 4 generic
   let lastError = "Still image generation failed";
   // Fail-open ballast for the defect gates below — see the return past the loop. Kept separate:
   // if every attempt is defective, a texty-but-physically-sound frame ships before a broken one.
-  let textyFallback: { buffer: Buffer; mimeType?: string } | undefined;
-  let brokenFallback: { buffer: Buffer; mimeType?: string } | undefined;
-  let offSubjectFallback: { buffer: Buffer; mimeType?: string } | undefined;
+  let textyFallback: Drawn | undefined;
+  let brokenFallback: Drawn | undefined;
+  let offSubjectFallback: Drawn | undefined;
+  // The one changed-prompt redraw each of broken geometry and readable writing may get
+  // (`faultRedrawFor`), and how many draws the check has named each on so far.
+  const faultRedraws = new Set<FaultRedraw>();
+  const faultsSeen = { broken: 0, writing: 0 };
   // One re-roll for a frame that drew the wrong thing — a second miss usually means the model
   // cannot draw it, and each re-roll is another image.
   let offSubjectRerolls = 0;
   let cleanRerolls = 0;
+  // A frame that shows what its line rules out (`scene.forbids`): one fresh seed, its own budget —
+  // it is asked only on the few pictures the line check marked.
+  let ruledOutRerolls = 0;
   // A picture of a key thing that came back a DIFFERENT one: one re-roll from its memory, then
   // it is drawn from words alone (`sameThingMisses`).
   let sameThingMisses = 0;
@@ -9197,6 +9464,9 @@ async function drawValidatedStill(
     // prompt, so a free one would loop forever on a visual that always renders defective.
     // Skipped when a reference image is attached — that caller (the book cover) asked for text,
     // and the real cover art trips the geometry judge on stylised artwork.
+    // What the checks named on this frame — its own `pictureChecks` entry, so a later check's
+    // refusal lands on the record too. Empty when no check ran (the book cover).
+    let flags: string[] = [];
     if (!referenceImageUrl) {
       const defects = await scanStillDefects(
         buffer,
@@ -9205,25 +9475,62 @@ async function drawValidatedStill(
         scene.pictureText,
         scene.namedLook,
         // The key things this picture is about (a screen shows them only as small photos): each
-        // must really be in it — Dale's job 306 drew a box where the bookcase was asked for.
-        scene.memoryView === SCREEN_ITEM_VIEW
-          ? undefined
-          : [ownKeyThing(scene), ...(scene.otherKeyThings ?? [])].filter((t): t is string => !!t),
-        scene.blurPrint
+        // must really be in it — Dale's job 306 drew a box where the bookcase was asked for. A thing
+        // still being made is asked for at that stage (`requiredThingsFor`), never as the finished one.
+        scene.memoryView === SCREEN_ITEM_VIEW ? undefined : requiredThingsFor(scene),
+        scene.blurPrint,
+        // A picture later ones copy, drawn with no earlier picture of its thing to follow, is held
+        // to the thing's look as well (`lookToHold`): a miss takes the `missing` redraw below.
+        visualOverride ? undefined : lookToHold(scene),
+        // What its sentence rules out, as the line check wrote it — asked only of those pictures.
+        scene.forbids
       );
-      recordPictureCheck(
+      if (defects.missing) missed.add(buffer);
+      const check = recordPictureCheck(
         scene,
         visualOverride ?? (square ? scene.splitVisual : undefined) ?? scene.visualPrompt ?? "",
         square,
         defects
       );
+      flags = check?.flags ?? checkFlags(defects);
+      const drawn: Drawn = { buffer, mimeType: r.mimeType, flags };
+      const faults = checkFlags(defects).join("+");
+      // A REDRAW THAT CHANGES WHAT CAUSED IT (`faultRedrawFor`): broken geometry or readable writing
+      // named a second time gets one draw with its prompt changed against it, before the keep below
+      // can settle for the frame (job 352 scene 147 shipped broken → broken; job 343 scene 17 a sign
+      // with writing on three of four draws). It is that fault's last chance, so it never loses its
+      // turn to the attempt budget. `FAULT_REDRAWS=0` turns it off.
+      const redraw = faultRedrawFor(scene, defects, faultsSeen, faultRedraws, tier === 0);
+      if (defects.broken) faultsSeen.broken++;
+      if (defects.writing) faultsSeen.writing++;
+      if (redraw && process.env.FAULT_REDRAWS !== "0") {
+        faultRedraws.add(redraw);
+        lastFaults = faults;
+        if (defects.broken) brokenFallback ??= drawn;
+        else textyFallback ??= drawn;
+        if (redraw === "at rest") {
+          // The host-identity check's own last move: nobody in the frame, so no host photo either.
+          personFree = true;
+          prompt = `${buildStillPrompt({ ...scene, humanPresent: false, brollHostLook: undefined, brollHostRef: undefined, hostFaceShown: undefined }, false, visualOverride, subject, square)} ${PERSON_FREE_FALLBACK} ${THINGS_AT_REST_CLAUSE}`;
+          lastError = `Still image has broken geometry (${defects.what})`;
+        } else {
+          prompt = softPrintRedraw(prompt);
+          lastError = "Still image has readable writing";
+        }
+        if (attempt === attempts) attempts++;
+        console.warn(
+          `[Longform] scene ${scene.index} still has ${redraw === "at rest" ? "broken geometry" : "readable writing"} ` +
+            `again (${defects.what}) → drawing it once more ` +
+            (redraw === "at rest" ? "with its things at rest and nobody in it" : "with the print soft, from further back")
+        );
+        continue;
+      }
       // THE SAME FAULTS TWICE IN A ROW: the redraw came back exactly as wrong as the picture it
       // replaced, so another one from the same prompt is a third picture and a third check for
       // the same result (job 343: a phone screen drawn four times, "writing, brand, staged" each
       // time). Keep this one. A redraw that changes what is wrong still gets its next try — two of
       // that film's screens came right on the third and fourth. `REDRAW_SAME_FAULTS=1` restores
       // the old run to the last attempt.
-      const faults = checkFlags(defects).join("+");
       if (
         faults &&
         faults === lastFaults &&
@@ -9233,12 +9540,12 @@ async function drawValidatedStill(
         console.warn(
           `[Longform] scene ${scene.index} still came back with the same faults (${faults}) → keeping it`
         );
-        return { buffer, mimeType: r.mimeType };
+        return shipped(drawn);
       }
       lastFaults = faults;
       if (defects.broken) {
         lastError = `Still image has broken geometry (${defects.what})`;
-        brokenFallback ??= { buffer, mimeType: r.mimeType };
+        brokenFallback ??= drawn;
         console.warn(
           `[Longform] scene ${scene.index} still has broken geometry ` +
             `(${defects.what}, attempt ${attempt}/${attempts}) → regenerating`
@@ -9248,7 +9555,7 @@ async function drawValidatedStill(
       if (defects.unchecked && uncheckedRerolls < 1) {
         uncheckedRerolls++;
         lastError = "Still image could not be checked";
-        offSubjectFallback ??= { buffer, mimeType: r.mimeType };
+        offSubjectFallback ??= drawn;
         console.warn(
           `[Longform] scene ${scene.index} still could not be checked (attempt ${attempt}/${attempts}) → drawing again`
         );
@@ -9261,7 +9568,7 @@ async function drawValidatedStill(
       if (defects.overlay || defects.writing) {
         const kind = defects.overlay ? "overlaid text" : "readable writing";
         lastError = `Still image has ${kind}`;
-        textyFallback ??= { buffer, mimeType: r.mimeType };
+        textyFallback ??= drawn;
         console.warn(
           `[Longform] scene ${scene.index} still has ${kind} ` +
             `(${defects.what}, attempt ${attempt}/${attempts}) → regenerating`
@@ -9273,9 +9580,48 @@ async function drawValidatedStill(
       if (defects.missing && offSubjectRerolls < 1) {
         offSubjectRerolls++;
         lastError = `Still image does not show ${scene.showSubject}`;
-        offSubjectFallback ??= { buffer, mimeType: r.mimeType };
+        offSubjectFallback ??= drawn;
         console.warn(
           `[Longform] scene ${scene.index} still does not show "${scene.showSubject}" ` +
+            `(${defects.what}, attempt ${attempt}/${attempts}) → regenerating`
+        );
+        continue;
+      }
+      // THE DETAIL THE DESCRIPTION SAYS: the thing is there but not in the state, action, number or
+      // position described (`detail`). The same single redraw as a missing thing — one budget for
+      // both, so no picture is redrawn more for what it shows than before — told what came back
+      // otherwise (`pictureDetailClause`). Not on a softened content-policy prompt, where naming the
+      // description again could trip the filter it was softened for. The frame is the fallback, and
+      // is still a fit memory: its thing is in it.
+      if (defects.detail && offSubjectRerolls < 1) {
+        offSubjectRerolls++;
+        lastError = `Still image does not show "${scene.showSubject}" as described`;
+        offSubjectFallback ??= drawn;
+        if (!visualOverride && tier === 0) {
+          const cut = prompt.indexOf(DETAIL_CLAUSE_START);
+          prompt = `${cut >= 0 ? prompt.slice(0, cut).trimEnd() : prompt} ${pictureDetailClause(
+            scene.showSubject,
+            defects.detailWhat,
+            !!scene.memoryRefUrls?.length
+          )}`;
+        }
+        console.warn(
+          `[Longform] scene ${scene.index} still shows "${scene.showSubject}" but not as described ` +
+            `(${defects.detailWhat ?? defects.what}, attempt ${attempt}/${attempts}) → drawing it again`
+        );
+        continue;
+      }
+      // WHAT THE LINE RULES OUT (2026-10-18, the audit: production 203-143 drew the lumber stack
+      // beside the furnace under "and away from the furnace"): one fresh seed. The prompt is NOT told
+      // what to leave out — naming the ruled-out thing is what puts it in the picture; the line check
+      // already wrote a description that names only what is in the frame. The frame is the fallback:
+      // never shipping a known-bad picture is a rule of its own, not this one's.
+      if (defects.forbidden && ruledOutRerolls < 1) {
+        ruledOutRerolls++;
+        lastError = `Still image shows what its line rules out (${scene.forbids})`;
+        offSubjectFallback ??= drawn;
+        console.warn(
+          `[Longform] scene ${scene.index} still shows what its line rules out ("${scene.forbids}") ` +
             `(${defects.what}, attempt ${attempt}/${attempts}) → regenerating`
         );
         continue;
@@ -9290,7 +9636,7 @@ async function drawValidatedStill(
             ? "the wrong place for its line"
             : "a staged, not-a-phone-photo look";
         lastError = `Still image has ${kind}`;
-        offSubjectFallback ??= { buffer, mimeType: r.mimeType };
+        offSubjectFallback ??= drawn;
         console.warn(
           `[Longform] scene ${scene.index} still has ${kind} ` +
             `(${defects.what}, attempt ${attempt}/${attempts}) → regenerating`
@@ -9312,15 +9658,19 @@ async function drawValidatedStill(
         scene.memoryView !== SCREEN_ITEM_VIEW &&
         // A remembered thing kept small beside the subject is not compared side by side: it is
         // meant to look small and placed, not to fill a frame like its memory.
-        scene.memoryView !== BACKGROUND_VIEW
+        scene.memoryView !== BACKGROUND_VIEW &&
+        // References of the other things only (`memoryOthersOnly`): there is nothing of its own
+        // thing to compare it with — a first mattress is not "a different mattress" than a heater.
+        !scene.memoryOthersOnly
       ) {
         const same = await scanSameThing(scene.memoryRefUrls[0], buffer, scene.keyThing);
         if ((!same.same && !scene.partOf) || same.copy) {
           sameThingMisses++;
+          flags.push(same.same ? COPIES_MEMORY : DIFFERENT_THING);
           lastError = same.same
             ? `Still image copies its memory picture's framing`
             : `Still image shows a different ${scene.keyThing}`;
-          offSubjectFallback ??= { buffer, mimeType: r.mimeType };
+          offSubjectFallback ??= drawn;
           console.warn(
             `[Longform] scene ${scene.index} ${same.same ? "copies its memory picture of" : "shows a different"} ${scene.keyThing} (${same.what}) → ` +
               "drawing it again from its memory"
@@ -9343,6 +9693,8 @@ async function drawValidatedStill(
         const who = await scanSameHost(scene.brollHostRef, buffer, !!scene.hostFaceShown);
         if (!who.same) {
           hostMisses++;
+          // On the record, and never kept as a fallback: this frame cannot ship.
+          flags.push(NOT_THE_HOST);
           lastError = `Still image shows someone other than the host (${who.what})`;
           if (hostMisses > HOST_IDENTITY_REDRAWS) {
             personFree = true;
@@ -9380,7 +9732,8 @@ async function drawValidatedStill(
             }
           if (copies != null) {
             varietyRerolls++;
-            offSubjectFallback ??= { buffer, mimeType: r.mimeType };
+            flags.push(NEAR_COPY);
+            offSubjectFallback ??= drawn;
             if (scene.screenSetup) {
               scene.screenSetup = nextScreenSetup(
                 scene.screenSetup,
@@ -9410,13 +9763,13 @@ async function drawValidatedStill(
       console.log(
         `[Longform] scene ${scene.index} still image OK on retry ${attempt}`
       );
-    return { buffer, mimeType: r.mimeType };
+    return shipped({ buffer, mimeType: r.mimeType, flags });
   }
   // Fail open: a decodable-but-defective still renders fine, it's just ugly. Shipping it beats
   // failing a scene over a caption or a wonky shelf — the still lane has no resume, so a throw
-  // here kills the job at the completeness gate. Nothing downstream badges it, so the warns
-  // below are the only trace. A texty frame ships before a broken one: stamped text is cosmetic,
-  // impossible geometry reads as fake.
+  // here kills the job at the completeness gate. The frame says what it shipped with
+  // (`ValidatedStill.flaws`) and the caller badges the scene and warns the job (`notePictureFlaws`).
+  // A texty frame ships before a broken one: stamped text is cosmetic, impossible geometry reads as fake.
   // ponytail: the ceiling this names is a visualPrompt that literally asks for lettering ("a
   // packet labeled X") or un-renderable structure. No suffix fixes that — a second negation
   // clause just stacks, which NO_BOOK_SUFFIX already warns doesn't work. Log the visual so the
@@ -9427,21 +9780,21 @@ async function drawValidatedStill(
       `[Longform] scene ${scene.index} still never showed "${scene.showSubject}" after ` +
         `${attempts} attempts → shipping the closest frame`
     );
-    return offSubjectFallback;
+    return shipped(offSubjectFallback);
   }
   if (textyFallback) {
     console.warn(
       `[Longform] scene ${scene.index} still has overlay text after ${attempts} ` +
         `attempts → shipping it: ${scene.visualPrompt.slice(0, 80)}`
     );
-    return textyFallback;
+    return shipped(textyFallback);
   }
   if (brokenFallback) {
     console.warn(
       `[Longform] scene ${scene.index} still has broken geometry after ${attempts} ` +
         `attempts → shipping the least-bad frame: ${scene.visualPrompt.slice(0, 80)}`
     );
-    return brokenFallback;
+    return shipped(brokenFallback);
   }
   throw new Error(lastError);
 }
@@ -9478,8 +9831,9 @@ export async function generateSceneStillClip(
 ): Promise<string[]> {
   let imageUrl: string;
   if (coverImageUrl) {
-    // Cover beat: animate the actual cover image, no generation.
+    // Cover beat: animate the actual cover image, no generation — and nothing checked to report.
     imageUrl = coverImageUrl;
+    notePictureFlaws(jobId, scene, undefined, square);
   } else if (sourceImageUrl && !square) {
     // Drawing a new picture paid for one more image and broke what later pictures were drawn
     // from: picture memory takes this scene's `pictureUrl`, which IS that start frame (Frederick's
@@ -9500,12 +9854,8 @@ export async function generateSceneStillClip(
     if (!referenceImageUrl) blurUnsaidPrint(scene);
     // A key thing seen before is drawn from its earlier pictures (`server/pictureMemory.ts`). A
     // split's panel (square) gets its memory from the caller, off the host scene.
-    if (!square) {
-      const memory = await memoryPicturesFor(scene);
-      scene.memoryRefUrls = memory.length ? memory : undefined;
-      scene.memoryView = memory.length ? memoryView(scene) : undefined;
-    }
-    const { buffer, mimeType } = await generateValidatedStill(
+    if (!square) Object.assign(scene, memoryFields(await memoryFor(scene), memoryView(scene)));
+    const { buffer, mimeType, missing, flaws } = await generateValidatedStill(
       scene,
       4,
       referenceImageUrl,
@@ -9522,7 +9872,11 @@ export async function generateSceneStillClip(
       mimeType || "image/jpeg"
     ));
     scene.pictureUrl = imageUrl;
-    if (!square) pictureSettled(scene);
+    notePictureFlaws(jobId, scene, flaws, square);
+    if (!square) {
+      markMemoryFit(scene, missing);
+      pictureSettled(scene);
+    }
   }
   // ONE continuous Ken Burns clip for the whole narration: a single zoom (in/out by scene
   // index parity) stretched across the full duration. Long scenes read slow and gentle,
@@ -9611,12 +9965,9 @@ export async function generateBrollKeyframe(
   // Print the keyframe asks to read and its line never says is drawn soft (`blurUnsaidPrint`).
   if (!referenceImageUrl) blurUnsaidPrint(scene);
   // A key thing seen before is drawn from its earlier pictures (`server/pictureMemory.ts`).
-  if (clipIdx === 0 && !scene.memoryRefUrls?.length) {
-    const memory = await memoryPicturesFor(scene);
-    scene.memoryRefUrls = memory.length ? memory : undefined;
-    scene.memoryView = memory.length ? memoryView(scene) : undefined;
-  }
-  const { buffer: src, mimeType } = await generateValidatedStill(
+  if (clipIdx === 0 && !scene.memoryRefUrls?.length)
+    Object.assign(scene, memoryFields(await memoryFor(scene), memoryView(scene)));
+  const { buffer: src, mimeType, missing, flaws } = await generateValidatedStill(
     scene,
     4,
     referenceImageUrl,
@@ -9633,6 +9984,8 @@ export async function generateBrollKeyframe(
   const { url } = await storagePut(key, buf, mime);
   if (clipIdx === 0) {
     scene.pictureUrl = url;
+    markMemoryFit(scene, missing);
+    notePictureFlaws(jobId, scene, flaws, false);
     pictureSettled(scene);
   }
   return url;
@@ -11977,12 +12330,10 @@ async function withSplitMemory(
   // The panel's soft print decides its remembered close-up (`BLUR_PRINT_VIEW`), so it is marked
   // before the view is (`blurUnsaidPrint` reads the panel's own words on a split).
   blurUnsaidPrint(host);
-  const memory = await memoryPicturesFor(host);
   return {
     ...right,
     keyThing: host.keyThing,
-    memoryRefUrls: memory.length ? memory : undefined,
-    memoryView: memory.length ? memoryView(host) : undefined,
+    ...memoryFields(await memoryFor(host), memoryView(host)),
   };
 }
 
@@ -12004,6 +12355,7 @@ async function renderSplitRightClip(
   apimartKey?: string | null
 ): Promise<string> {
   const right = await withSplitMemory(scene, buildSplitRightScene(scene));
+  delete right.panelFlaws; // the host scene's, spread onto the copy — the draw below writes its own
   const [rightUrl] = await generateSceneStillClip(
     jobId,
     right,
@@ -12013,6 +12365,7 @@ async function renderSplitRightClip(
     true,
     apimartKey
   );
+  carryPanelFlaws(scene, right.panelFlaws);
   if (!rightUrl) throw new Error("Split-screen right still produced no output");
   return rightUrl;
 }
@@ -12073,24 +12426,44 @@ async function renderSplitRightMotionClip(
     renderAttempts: undefined,
     infraRetries: undefined,
     sceneStatus: "pending",
+    // the host scene's, spread onto the copy — the keyframe drawn for it writes its own
+    pictureFlaws: undefined,
+    panelFlaws: undefined,
   };
-  const urls = await Promise.race([
-    generateSceneClips(
-      adapter,
-      jobId,
-      right,
-      params,
-      null, // no lip-sync lane: the right half is a person-free cutaway
-      instruction,
-      persist
-    ),
-    new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error("Split-screen right clip timed out")),
-        SPLIT_RIGHT_MOTION_TIMEOUT_MS
-      )
-    ),
-  ]);
+  // The panel's keyframe is drawn by the ordinary cutaway lane, which says what it shipped with as
+  // this index's full-frame PICTURE (`notePictureFlaws`). It is the panel's: that line is taken back
+  // here whatever happens, and said as the panel's only once the panel is kept — one that glitches
+  // falls back to the still panel, which says its own, and left behind it read "picture shipped
+  // with …" on a host beat beside the still panel's own line.
+  const keyframeFlaws = (): string[] | undefined => {
+    const flaws = right.pictureFlaws;
+    notePictureFlaws(jobId, right, undefined, false);
+    return flaws;
+  };
+  let urls: string[];
+  try {
+    urls = await Promise.race([
+      generateSceneClips(
+        adapter,
+        jobId,
+        right,
+        params,
+        null, // no lip-sync lane: the right half is a person-free cutaway
+        instruction,
+        persist
+      ),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error("Split-screen right clip timed out")),
+          SPLIT_RIGHT_MOTION_TIMEOUT_MS
+        )
+      ),
+    ]);
+  } catch (e) {
+    keyframeFlaws();
+    throw e;
+  }
+  const flaws = keyframeFlaws();
   const url = urls[0];
   if (!url) throw new Error("Split-screen right clip produced no output");
   // The caller falls back to the still panel on any throw — which never moves wrong.
@@ -12101,6 +12474,7 @@ async function renderSplitRightMotionClip(
     true
   );
   if (g.glitch) throw new Error(`Split-screen right clip moves wrong (${g.what})`);
+  notePictureFlaws(jobId, scene, flaws, true);
   return url;
 }
 
@@ -18776,6 +19150,13 @@ function prepareSceneEdit(ctx: SceneEditContext, req: SceneEditRequest): void {
     // effectively verbatim metadata either way.
     const typedSplit = req.customSplitVisual?.trim();
     const typedVisual = req.customVisualPrompt?.trim();
+    // A TYPED PICTURE OWNS THE PICTURE (`ownTypedPicture`): new words on a cutaway become what it must
+    // show and what the check holds it to, never the planner's old subject (job 383 scenes 20, 33,
+    // 40). Before the words land, so the prompt it already has (sent back by a plain regenerate)
+    // is told apart from typed words. A split panel is already drawn from, and checked against, its
+    // own words (`buildSplitRightScene`).
+    if (typedVisual && !scene.hostPresent && !splitOnly)
+      ownTypedPicture(scene, typedVisual, ctx.params.keyThings);
     if (typedVisual) scene.visualPrompt = typedVisual;
     if (splitOnly && typedSplit) scene.splitVisual = typedSplit;
     const edited = splitOnly ? !!typedSplit : !!typedVisual;
@@ -19030,14 +19411,17 @@ function runVoiceTakeEdit(
  * A picture switch on a cutaway: put the chosen picture on the scene. Refused (not failed) when
  * the scene has no such picture, or has become a host beat.
  */
-function runPictureTakeEdit(
-  ctx: SceneEditContext,
+export function runPictureTakeEdit(
+  ctx: { jobId: number },
   scene: StoryboardScene,
   take: number
 ): void {
   const r = selectPictureTake(scene, take);
   if (!r.ok) throw new Error(r.reason);
   if (!r.changed) return;
+  // The take brings back what ITS picture shipped with (`pictureFlaws`): the job's line for this
+  // picture follows, so a switch to a clean take is not still warned about, nor a flawed one silent.
+  notePictureFlaws(ctx.jobId, scene, scene.pictureFlaws, false);
   // The finished film still has the other picture in it until it is re-stitched.
   scene.timingEdited = true;
   console.log(

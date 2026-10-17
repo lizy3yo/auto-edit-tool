@@ -150,6 +150,21 @@ export interface StillDefectVerdict {
    * what the frame must show; re-rolls the still like `writing`.
    */
   missing: boolean;
+  /**
+   * The thing is there, but not in the STATE, action, number or position its description says
+   * (`detailQuestion`) — a padlock described hanging open drawn shut. Kept apart from `missing` so
+   * it can be counted on its own and `missing` keeps its meaning (the thing itself is absent or
+   * swapped). Set only when true, and only asked alongside `missing`.
+   */
+  detail?: boolean;
+  /** What the description asks for that the frame shows otherwise, in the check's words (`detail`). */
+  detailWhat?: string;
+  /**
+   * The frame shows what its line RULES OUT (`scene.forbids`, from the line check) — the act the
+   * line says not to do, the thing it says is not meant, the place it says to keep something away
+   * from (`forbiddenQuestion`). Set only when true, and only asked when the caller passes it.
+   */
+  forbidden?: boolean;
   /** A legible brand name or logo, or a subject lost in busy unrelated clutter (rule 4). */
   messy: boolean;
   /** The line names a place (a market, a fair, a church hall) and the frame is clearly somewhere
@@ -199,17 +214,25 @@ export function parseStillDefectVerdict(
   const messy = parsed.data?.messy === true;
   const wrongPlace = parsed.data?.wrong_place === true;
   const staged = parsed.data?.staged === true;
+  const detail = parsed.data?.detail === true;
+  const detailWhat = parsed.data?.detail_what;
+  const forbidden = parsed.data?.forbidden === true;
   const what = parsed.data?.what;
   return {
     overlay,
     broken,
     writing,
     missing,
+    ...(detail ? { detail } : {}),
+    ...(detail && typeof detailWhat === "string" && detailWhat.trim()
+      ? { detailWhat: detailWhat.trim().slice(0, 80) }
+      : {}),
+    ...(forbidden ? { forbidden } : {}),
     messy,
     wrongPlace,
     staged,
     what:
-      (overlay || broken || writing || missing || messy || wrongPlace || staged) &&
+      (overlay || broken || writing || missing || detail || forbidden || messy || wrongPlace || staged) &&
       typeof what === "string"
         ? what.slice(0, 80)
         : "",
@@ -250,6 +273,40 @@ export function missingQuestion(expect: string): string {
   );
 }
 
+/**
+ * Whether the `detail` question is asked. OFF until it is measured (`PICTURE_DETAIL_CHECK=1` turns it
+ * on): it would be asked of two thirds of all pictures — 66% of descriptions name a state, an action,
+ * a count or a position — and how often it calls a RIGHT picture wrong is not known, while each such
+ * answer is another picture and another check. Off, the check is exactly what it was before it. The
+ * audit's 60 sampled wrong pictures and ~300 right ones, judged with and without it (~$1), decide it.
+ */
+export const detailCheckOn = () => process.env.PICTURE_DETAIL_CHECK === "1";
+
+/**
+ * QUESTION 4b, asked with QUESTION 4: the thing is there, but is it the WAY its description says?
+ * (2026-10-18, the audit's picture-vs-line rows.) Question 4 asks only whether the named thing is
+ * the centre of attention, so a picture of the right thing in the wrong state passed it: in a hand
+ * sample of 60 pictures the audit judged wrong for their line, 25 had a description that already
+ * named the state, action or position the picture then missed — job 305 scene 118 "padlock hanging
+ * open on a mesh gate latch" drawn shut, 285-125 a bobbin "wound lumpy" drawn neat, 233-134 "both
+ * arms raised over her head" drawn with the arms down. A separate verdict, so `missing` keeps its
+ * meaning and its fallback order, and so it can be counted on its own.
+ */
+export function detailQuestion(expect: string): string {
+  return (
+    `\n\nQUESTION 4b — detail: does the description "${expect.replace(/"/g, "'")}" give the thing ` +
+    "a STATE (open or shut, folded, lit, wet, half done), something being done with it or by " +
+    "someone, a NUMBER, or a POSITION against something else (hanging from, inside, on top of)? If " +
+    "so, is the thing there but clearly NOT that way — shut where it says open, one where it says " +
+    "three, lying flat where it says hanging, nobody where it says someone is doing something? " +
+    "Answer false when it names no such detail, when the detail is shown, when it is too small to " +
+    "judge, when the thing itself is not there (that is question 4), and when unsure. Never answer " +
+    "about the camera (how close, from which side, how it is framed), the setting, the light, or " +
+    'words and printing. When true, also give detail_what: 3-8 words on what differs (e.g. "gate ' +
+    'shut, should hang open").'
+  );
+}
+
 /** The stronger checker a picture with an exact look is judged by (`scanStillDefects`' `exactLook`). */
 const EXACT_LOOK_MODEL = () => process.env.EXACT_LOOK_MODEL || "claude-sonnet-5-5";
 
@@ -287,13 +344,27 @@ export const SOFT_PRINT_QUESTION =
  * QUESTION 4 widened for a picture about KEY THINGS: every one of them must really be there, and a
  * different object drawn in one's place counts as missing.
  */
-export function requiredThingsQuestion(things: string[]): string {
+export function requiredThingsQuestion(
+  things: string[],
+  /**
+   * The look its own key thing must have (`lookToHold`): a picture every later picture of the thing
+   * is drawn from, with nothing earlier to follow — a miss here is a different object in every copy.
+   */
+  look?: { thing: string; look: string }
+): string {
   const list = things.map(t => `"${t.replace(/"/g, "'")}"`).join(", ");
   return (
     "\n\nQUESTION 4, ALSO FOR THIS PICTURE — missing: each of these must be clearly in the frame: " +
     `${list}. Answer true if any of them is absent, or if a different object stands where it should ` +
     "be (a small box where a bookcase was asked for, a bowl where a quilt was), or if it is so small " +
-    "or hidden that a viewer would not notice it."
+    "or hidden that a viewer would not notice it." +
+    (look
+      ? ` Every later picture of the "${look.thing.replace(/"/g, "'")}" in this video is drawn from ` +
+        `this one, so it must also look like this: "${look.look.replace(/"/g, "'").slice(0, 400)}". ` +
+        "Answer true as well if it clearly does not — another colour, material, size or shape than " +
+        "that says. Where it is, which part of it shows and how far along it is are as the " +
+        "narrator's words say: never answer true for those."
+      : "")
   );
 }
 
@@ -330,8 +401,16 @@ export const STAGED_RULE =
 /** QUESTION 7, always asked: an ordinary phone photo, not a styled or AI-looking render. */
 export const STAGED_QUESTION = `\n\nQUESTION 7 — staged: ${STAGED_RULE}`;
 
-/** QUESTION 6, asked only with the narration line: the frame is set where the line says. */
-export function placeQuestion(line: string): string {
+/**
+ * QUESTION 6, asked only with the narration line: the frame is set where the line says.
+ *
+ * `rulesOut`: the picture's sentence rules something out (`scene.forbids`, QUESTION 8). A place such
+ * a line names is where the thing must NOT be — "Never in | the garage, | … | or on the porch"
+ * (production 225-79..83) — and asked plainly, this question would call a picture drawn the right
+ * way (out in the open) the wrong place for "or on the porch,", spending a redraw on pulling it
+ * toward the very place the line rules out. Said only on the pictures the line check marked.
+ */
+export function placeQuestion(line: string, rulesOut = false): string {
   return (
     "\n\nQUESTION 6 — wrong_place: this frame plays under the narration line: " +
     `"${line.replace(/"/g, "'").slice(0, 400)}". ONLY about the SETTING, never which object is ` +
@@ -340,16 +419,47 @@ export function placeQuestion(line: string): string {
     "or patio, a garden or field, a hospital, a particular country's buildings — is the frame " +
     "clearly somewhere else, or showing that place only as a picture or poster on a wall? A " +
     "workshop, garage, shed, sewing room, kitchen table or work bench all count as the same home " +
-    "base and never make it wrong. If the line names no such place, or you are unsure, answer false."
+    "base and never make it wrong. " +
+    (rulesOut
+      ? "The narrator's sentence rules something out here: a place it says to keep something " +
+        "away from, out of, or never to use is NOT where the frame must be — a frame anywhere else " +
+        "is false for it. "
+      : "") +
+    "If the line names no such place, or you are unsure, answer false."
   );
 }
 
-/** The JSON shape, listing every question asked. */
-export function verdictShape(expect?: string, line?: string): string {
+/**
+ * QUESTION 8, asked only on a picture whose sentence the line check found rules something out
+ * (`scene.forbids`, 2026-10-18, the audit): does the frame show THAT? Nothing asked it, so a picture
+ * drawn right for "keep the lumber away from the furnace" could still come back with the furnace
+ * beside the stack (production 203-143), and nothing looked. The phrase is the check's own, written
+ * for this picture — a word list as the gate fired on 39% of the sentences it caught ("just don't
+ * count on it"), so this is asked on the few pictures per film the line check marks.
+ */
+export function forbiddenQuestion(forbids: string): string {
+  // One picture for a joined sentence carries both parts' marks, "a; b" (`applyPictureJoins`).
+  const several = forbids.includes(";");
+  return (
+    "\n\nQUESTION 8 — forbidden: the narrator's line rules this out, so the frame must NOT show it: " +
+    `"${forbids.replace(/"/g, "'").slice(0, 240)}". Does the frame clearly show exactly that` +
+    (several ? " — any one of the things listed" : "") +
+    "? When " +
+    "it names an act, answer true only if the act is being done; when it names a thing in a place or " +
+    "beside something, only if the thing is there, in that place or beside it; when it names a thing " +
+    "alone, if that thing is in the frame. The same task done the right way, a different thing in " +
+    "its place, or the thing on its own away from that place is false. When unsure, answer false."
+  );
+}
+
+/** The JSON shape, listing every question asked (`detail` only beside `missing`). */
+export function verdictShape(expect?: string, line?: string, detail?: boolean, forbids?: boolean): string {
   return (
     '\n\nReturn ONLY this JSON, no prose: {"overlay":true|false,"broken":true|false,' +
     '"writing":true|false' +
     (expect ? ',"missing":true|false' : "") +
+    (expect && detail ? ',"detail":true|false,"detail_what":"..."' : "") +
+    (forbids ? ',"forbidden":true|false' : "") +
     ',"messy":true|false' +
     (line ? ',"wrong_place":true|false' : "") +
     ',"staged":true|false' +
@@ -392,10 +502,22 @@ export async function scanStillDefects(
    */
   required?: string[],
   /** The picture's printing is shown soft on purpose (`scene.blurPrint`) — `SOFT_PRINT_QUESTION`. */
-  softPrint?: boolean
+  softPrint?: boolean,
+  /** The look its own key thing must have, on a picture later ones copy (`lookToHold`). */
+  requiredLook?: { thing: string; look: string },
+  /**
+   * What the picture's sentence rules out (`scene.forbids`) — adds the `forbidden` question. Its own
+   * parameter, never `line`: the line feeds the place question, and a neighbour's words there would
+   * hold this picture to a place another picture names.
+   */
+  forbids?: string
 ): Promise<StillDefectVerdict> {
   try {
     const mustShow = expect && required?.length ? required : undefined;
+    const ruledOut = forbids?.trim() || undefined;
+    // The state, action, number and position the description says — asked with `missing`, and only
+    // once it is turned on (`detailCheckOn`).
+    const askDetail = !!expect && detailCheckOn();
     // Spelling and a named pattern need the larger frame.
     const [w, h] = allowedText || exactLook ? [1280, 720] : [DEFECT_SCAN_WIDTH, DEFECT_SCAN_HEIGHT];
     const small = await sharp(buffer)
@@ -418,16 +540,20 @@ export async function scanStillDefects(
       systemSuffix:
         (expect ? missingQuestion(expect) : "") +
         (expect && exactLook ? exactLookQuestion(exactLook) : "") +
-        (mustShow ? requiredThingsQuestion(mustShow) : "") +
+        (mustShow ? requiredThingsQuestion(mustShow, requiredLook) : "") +
         (expect && softPrint ? SOFT_PRINT_QUESTION : "") +
-        (line ? placeQuestion(line) : "") +
+        (askDetail ? detailQuestion(expect!) : "") +
+        (line ? placeQuestion(line, !!ruledOut) : "") +
         (allowedText ? allowedTextQuestion(allowedText) : "") +
-        verdictShape(expect, line),
+        (ruledOut ? forbiddenQuestion(ruledOut) : "") +
+        verdictShape(expect, line, askDetail, !!ruledOut),
       userMessage:
         "Is any text stamped over this frame, does it contain obviously impossible structure, " +
         "is there readable writing in the scene, and is it messy or branded?" +
         (expect ? ` Does it show "${expect.replace(/"/g, "'")}"?` : "") +
+        (askDetail ? " Is it the way it is described?" : "") +
         (line ? " Is it set where the line says?" : "") +
+        (ruledOut ? " Does it show what the line rules out?" : "") +
         " Does it look like an ordinary phone photo?",
       imageInput: image,
       // The verdict is ~40 tokens. The careful model THINKS unless told not to, and thinking
@@ -452,18 +578,26 @@ export async function scanStillDefects(
     }
     const verdict = parseStillDefectVerdict(result.text, result.stopReason);
     if (!expect) verdict.missing = false;
+    if (!askDetail) {
+      delete verdict.detail;
+      delete verdict.detailWhat;
+    }
     if (!line) verdict.wrongPlace = false;
+    // A stray "forbidden" on a picture nothing was ruled out for is not an answer to anything.
+    if (!ruledOut) delete verdict.forbidden;
     if (
       verdict.overlay ||
       verdict.broken ||
       verdict.writing ||
       verdict.missing ||
+      verdict.detail ||
+      verdict.forbidden ||
       verdict.messy ||
       verdict.wrongPlace ||
       verdict.staged
     )
       console.log(
-        `[StillDefects] ${verdict.overlay ? "stamped text" : verdict.broken ? "broken geometry" : verdict.writing ? "readable writing" : verdict.missing ? "named thing missing" : verdict.messy ? "brand or clutter" : verdict.wrongPlace ? "wrong place" : "staged look"} detected: ${verdict.what}`
+        `[StillDefects] ${verdict.overlay ? "stamped text" : verdict.broken ? "broken geometry" : verdict.writing ? "readable writing" : verdict.missing ? "named thing missing" : verdict.detail ? `detail not as described (${verdict.detailWhat ?? ""})` : verdict.forbidden ? `shows what the line rules out (${ruledOut})` : verdict.messy ? "brand or clutter" : verdict.wrongPlace ? "wrong place" : "staged look"} detected: ${verdict.what}`
       );
     return verdict;
   } catch (err: any) {

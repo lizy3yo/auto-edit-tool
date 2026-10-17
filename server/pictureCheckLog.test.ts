@@ -32,6 +32,11 @@ describe("what kind of picture was checked", () => {
   it("lists every defect a verdict names, and nothing for a pass", () => {
     expect(checkFlags({})).toEqual([]);
     expect(checkFlags({ writing: true, staged: true })).toEqual(["writing", "staged"]);
+    // The thing there but not as described is its own flag, counted apart from a missing thing.
+    expect(checkFlags({ missing: true, detail: true })).toEqual(["missing", "detail"]);
+    expect(checkFlags({ detail: true })).toEqual(["detail"]);
+    // What the line rules out, shown anyway, is counted on its own (R5).
+    expect(checkFlags({ missing: true, forbidden: true, staged: true })).toEqual(["missing", "ruled out", "staged"]);
   });
 });
 
@@ -54,5 +59,18 @@ describe("reading a film's checks", () => {
 
   it("reads a film made before the record as nothing, not as all passes", () => {
     expect(tallyPictureChecks([scene()])).toEqual([]);
+  });
+
+  // The audit (2026-10-18): a draw the defect check passed but the host or same-thing check refused
+  // read as "a clean picture thrown away" (job 390 scene 12's first draw).
+  it("hands back the entry it wrote, so a later check's refusal of that draw is on the record", () => {
+    const s = scene({ index: 12, humanPresent: true });
+    const entry = recordPictureCheck(s, "hands sawing a notch", false, {});
+    entry!.flags.push("not the host");
+    recordPictureCheck(s, "hands sawing a notch", false, { broken: true });
+    expect(s.pictureChecks!.map(c => c.flags)).toEqual([["not the host"], ["broken"]]);
+    const row = tallyPictureChecks([s])[0];
+    expect(row).toMatchObject({ pictures: 1, passedFirst: 0, checks: 2 });
+    expect(row.flags).toEqual({ "not the host": 1, broken: 1 });
   });
 });

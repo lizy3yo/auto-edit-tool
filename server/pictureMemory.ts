@@ -4,7 +4,9 @@
  * Every picture is drawn from words alone, so Frederick's heater at 0:45 was a different heater
  * from the one at 0:20. A picture of a KEY THING (`scene.keyThing`, from the shot list) is now
  * drawn FROM the earlier pictures of that thing: the first one (its memory) and the latest one
- * before it (so a before → during → after is the same piece further along). Pictures are made in
+ * before it (so a before → during → after is the same piece further along). Film order is not build
+ * order — a build video opens on the finished piece — so a picture of a thing being made
+ * (`buildStage`) is drawn only from pictures of it at the same or an earlier stage. Pictures are made in
  * parallel, so a picture whose memory is still being made in this pass waits for it —
  * `MEMORY_WAIT_MS` at most, then it is drawn from words as before. Waits only ever point to an
  * EARLIER scene, and the dispatcher hands scenes out in film order, so the earliest waiting scene's
@@ -12,7 +14,7 @@
  */
 import { PART_VIEW } from "./namedLooks";
 import type { KeyThing, StoryboardScene } from "@shared/types";
-import { keyThingsIn, showsScreen } from "./shotList";
+import { BUILD_STAGES, keyThingsIn, showsScreen } from "./shotList";
 
 /** The longest a picture waits for its memory before it is drawn from words alone. */
 export const MEMORY_WAIT_MS = 8 * 60_000;
@@ -66,18 +68,41 @@ export function memorySourcesFor(
   if (i <= 0) return [];
   // A list item is never drawn from another item's picture: each item is its own thing.
   // …nor is a screen ever a memory SOURCE: the thing on it is a small photo, not the thing.
-  const before = scenes.slice(0, i).filter(x => source(x) && !isScreen(x) && !(s.listCut && x.listCut));
+  // …nor a picture FURTHER ALONG than this one (`laterStage`): build videos open on the finished
+  // piece, and Hank's job 268 drew "hands drilling a hole into a charred cedar block" from the hook's
+  // "charred cedar incense holder …, finished and oiled". That holds for every source, whatever key
+  // thing it was filed under — Ruth's job 348 drew a strip being folded round its cord (key thing:
+  // the cord) from a finished bowl filed under the tin of squares.
+  // …nor a picture whose own check said the thing is not in it (`memoryUnfit`): stored films had 22
+  // first pictures copied after failing their last check, 122 later pictures drawn from them.
+  const before = scenes
+    .slice(0, i)
+    .filter(
+      x => source(x) && !isScreen(x) && !(s.listCut && x.listCut) && !laterStage(x, s) && !x.memoryUnfit
+    );
   const out: StoryboardScene[] = [];
   const add = (x: StoryboardScene | undefined) => {
     if (x && !out.includes(x) && out.length < MAX_MEMORY_REFS) out.push(x);
   };
-  // Its own thing: the first picture (the memory) and the latest before it.
+  // Its own thing: the memory (`memoryOf`) and the latest picture before it.
   const same = before.filter(x => shows(x, s.keyThing!));
-  add(same[0]);
+  add(memoryOf(same, s.keyThing));
   add(same[same.length - 1]);
-  // Every other key thing in it: that thing's first picture (the heater beside the mattress).
-  for (const t of s.otherKeyThings ?? []) add(before.find(x => shows(x, t)));
+  // Every other key thing in it: that thing's memory (the heater beside the mattress).
+  for (const t of s.otherKeyThings ?? []) add(memoryOf(before.filter(x => shows(x, t)), t));
   return out;
+}
+
+/**
+ * THE MEMORY IS A PICTURE ABOUT THE THING: the earliest of `pictures` whose own key thing is `thing`
+ * and that is about it (`isSubject`), else the earliest. The first picture to show a thing is often
+ * a wide shot with it small — Dale's job 352 drew every later benchtop planer from "garage workshop
+ * with table saw and benchtop planer along back wall", while the very next picture was "man's hands
+ * feeding a rough-sawn board into a benchtop planer" (stored films: 123 of 467 memories were not
+ * about their thing, copied 390 times). Pure.
+ */
+function memoryOf(pictures: StoryboardScene[], thing: string): StoryboardScene | undefined {
+  return pictures.find(x => ownKeyThing(x) === thing && isSubject(x, thing)) ?? pictures[0];
 }
 
 /** Size and amount words: they say nothing about WHICH thing is meant. */
@@ -131,8 +156,282 @@ export function listItemsAround(
  */
 export function ownKeyThing(s: StoryboardScene): string | undefined {
   if (!s.keyThing) return undefined;
+  // A STEP of making the thing is about that thing whatever its words call it ("oil it,"): it is
+  // drawn from the thing's memory, and only at the same or an earlier stage (`laterStage`). A step
+  // with no stage builds nothing ("and read the label.") and keeps the list-item rule below.
+  if (s.listCut && s.listKind === "steps" && s.buildStage) return s.keyThing;
   if (s.listCut && !s.partOf && !wordsName(s.scriptText ?? s.narration ?? "", s.keyThing)) return undefined;
   return s.keyThing;
+}
+
+/** Where a stage sits, earliest first; undefined for a picture with no stage. */
+const stageRank = (s: StoryboardScene) =>
+  s.buildStage ? BUILD_STAGES.indexOf(s.buildStage) : undefined;
+
+/**
+ * Whether picture `x` shows the thing being made FURTHER ALONG than picture `s` does — both must
+ * carry a stage; a picture without one is never judged, so its memory is exactly as before. Pure.
+ */
+export function laterStage(x: StoryboardScene, s: StoryboardScene): boolean {
+  const [a, b] = [stageRank(x), stageRank(s)];
+  return a !== undefined && b !== undefined && a > b;
+}
+
+/** A picture of the thing being made before it is finished: the raw material, or partly made. */
+export const beforeFinished = (s: StoryboardScene) =>
+  s.buildStage === "material" || s.buildStage === "making";
+
+/**
+ * How a key thing is named to the picture check while something is still being made. Conditional,
+ * because the stage belongs to the PICTURE and its key thing may be the bench or a tool it is made
+ * with (stored step pictures were filed under "workbench", "oil finish rag", the sewing machine):
+ * a workbench "not yet finished" would be failed for being a whole workbench.
+ */
+export const UNFINISHED_THING =
+  "— when it is what is being made: as it is at this stage of being made (raw pieces or partly built, not yet finished)";
+
+/**
+ * The key things the picture check holds a picture to (`requiredThingsQuestion`): its own and every
+ * other one in it. Before the thing is finished its own is named at that stage — told only "incense
+ * holder", the check could fail a correct raw block being drilled as a different object where the
+ * holder should be, and push the step back toward the finished piece (on stored films, step
+ * pictures drawn from the finished piece were flagged "missing" 5 times in 31, every other
+ * key-thing picture 92 in 1,396). Pure.
+ */
+export function requiredThingsFor(s: StoryboardScene): string[] {
+  const own = ownKeyThing(s);
+  return [own && beforeFinished(s) ? `${own} ${UNFINISHED_THING}` : own, ...(s.otherKeyThings ?? [])].filter(
+    (t): t is string => !!t
+  );
+}
+
+/*
+ * ONE LOOK PER KEY THING (2026-10-18). Every key thing has a look written from the script before
+ * anything is drawn (`KeyThing.look`, the props list), but it reached the picture maker only through
+ * the prompt writer: Ruth's job 305 drew its first straight-stitch machine from "a straight-stitch
+ * machine, a rotary cutter and a mountain of scraps … at a kitchen table" — no colour, no material —
+ * while the look said "small black and chrome sewing machine", and 5 later pictures were drawn from
+ * that one. A picture drawn FROM memory has its thing's own earlier picture to follow, and a text
+ * look beside that reference only sets up a conflict, so the look goes ONLY into a picture with no
+ * picture of its own thing to follow (`keyThingLookFor`, `memoryFor`). It is cut down first: where
+ * the thing sits belongs to the picture (581 of 1229 stored looks name a place — "sits centered on
+ * work table" would put a work table into every picture of the machine), and so does how far along
+ * it is.
+ */
+
+/** Verbs that say where a thing is kept or left: with a place word after them, always its place. */
+const STORING =
+  "sitting|sat|resting|rested|placed|kept|stored|stacked|piled|hanging|hung|leaning|leaned|propped|" +
+  "standing|lying|laid|displayed|positioned|tucked|perched|parked|located|pushed|staged|grouped|" +
+  "left|lined";
+/** Verbs that also say how a part sits on the thing itself ("a felt dot centered on the bottom"). */
+const ATTACHING =
+  "set|mounted|centered|centred|fixed|pinned|tacked|nailed|tied|clipped|held|arranged|spread|" +
+  "scattered|draped|folded|pressed";
+/** Verbs that say where it is with no place word after them ("sits upright", "resting open"). */
+const ALWAYS_PLACE = "sits|rests|hangs|stands|lies|leans|lives|waits|perches";
+const STARTS_RESTING = `${ALWAYS_PLACE}|sitting|resting|hanging|standing|lying|leaning|propped|perched|parked|positioned|displayed|located`;
+/** What follows a placing verb when it places ("set apart on", "clipped to", "lies flat under"). */
+const PLACE_PREPS =
+  "on|onto|in|inside|into|at|by|near|nearby|beside|next to|against|along|across|over|under|" +
+  "underneath|beneath|below|above|behind|in front of|among|amid|within|around|outside|off|atop|" +
+  "upon|to|from|up|down|together|apart|upright|flat|flush|evenly|loosely|neatly|tightly|closely|" +
+  "directly|away|out|open|closed|ready|high|low";
+/** The places a look puts its thing ("on the work table", "in the garage", "by the table leg"). */
+const PLACE_NOUNS =
+  "tables?|bench(?:es)?|workbench(?:es)?|shel(?:f|ves)|counters?|countertops?|desks?|floors?|walls?|" +
+  "garage|kitchen|workshop|shop|studio|room|corner|porch|yard|garden|barn|shed|stands?|sawhorses?|" +
+  "windows?|windowsills?|sills?|doors?|doorways?|driveway|pegboard|racks?|stalls?|fair|market|" +
+  "trays?|baskets?|hooks?|ceiling|mantel|hearth|chairs?|beds?|couch|sofa|steps|stairs|lawn|" +
+  "field|street|road|curb|belt|station|area|spot|mat|vise|pockets?";
+/**
+ * A part of the thing itself, not followed by a place: "a felt dot centered on the bottom", "a
+ * button set into the center of its face" are its look — "the front door" is a place.
+ */
+const OWN_PART =
+  `(?!\\s+(?:(?:the|its|a|an|one)\\s+)?(?:(?:front|back|top|bottom)\\s+)?(?:bottom|top|underside|front|back|sides?|ends?|edges?|faces?|lid|base|middle|cent(?:er|re)|rim|surface|handle)\\b(?!(?:\\s+[\\w'-]+){0,3}\\s+(?:${PLACE_NOUNS})\\b))`;
+const ADVERB = `(?:\\s+(?:[a-z]+ly|just|right))?`;
+const PLACING =
+  `(?:(?:${STORING})${ADVERB}\\s+(?:${PLACE_PREPS})\\b` + `|(?:${ATTACHING})${ADVERB}\\s+(?:${PLACE_PREPS})\\b${OWN_PART})`;
+const PLACE_CLAUSE = new RegExp(
+  `^(?:[a-z]+ly\\s+)?(?:` +
+    `(?:[a-z]+-)?(?:(?:${STARTS_RESTING})\\b|${PLACING})` +
+    `|(?:[a-z]+-)?(?:${STORING}|${ATTACHING})\\b.*\\b(?:${PLACE_NOUNS})\\b` +
+    `|(?:beside|near|nearby|next to|against|under|underneath|beneath|behind|above|below|outside|` +
+    `inside|outdoors?|indoors?|atop|within reach)\\b` +
+    `|(?:on|in|at|by|along|off)\\s+(?:the|a|an|its|his|her|their)?\\s*(?:[\\w'-]+\\s+){0,3}(?:${PLACE_NOUNS}|hands?)\\b` +
+    `|(?:cent(?:er|re)|middle|corner|edge|end|side|top) of (?:the|a|an)\\s+(?:[\\w'-]+\\s+){0,2}(?:${PLACE_NOUNS})\\b)`,
+  "i"
+);
+/** Where a place starts INSIDE a clause ("neatly folded quilts stacked in a row"). */
+const PLACE_INSIDE = new RegExp(
+  `\\s(?:(?:${ALWAYS_PLACE})\\b|(?:[a-z]+-)?${PLACING}` +
+    `|(?:near|nearby|beside|next to|against|behind)\\b${OWN_PART}` +
+    `|(?:on|in|at|by|under|beneath|underneath|outside|inside|along|above|below|atop)\\s+` +
+    `(?:the|a|an|its|his|her|their)?\\s*(?:[\\w'-]+\\s+){0,2}(?:${PLACE_NOUNS})\\b)`,
+  "i"
+);
+/** A clause about the light, the time or the scene around the thing, what it is for, or another thing. */
+const NOT_ITS_LOOK =
+  /\b(?:outdoors?|indoors?|setting|lighting|daylight|sunlight|lamplight|sky|casting|glow(?:ing)?|in the (?:evening|morning|afternoon|night)|at night|visible beyond|in the background|backdrop|shown|seen|used (?:for|to|as)|for comparison|where|than)\b/i;
+/** What a cut leaves dangling: a placing word with nothing after it ("furniture piece sitting ready"). */
+const DANGLING = new RegExp(
+  `(?:\\s+(?:${STORING}|${ATTACHING}|${ALWAYS_PLACE})(?:\\s+(?:or|and)\\s+[a-z]+)*(?:\\s+(?:[a-z]+ly|together|ready|open|closed))*)+$`,
+  "i"
+);
+/** A clause left starting on a placing word ("hanging or grouped together") says only where it is. */
+const PLACING_START = new RegExp(`^(?:${STORING}|${ATTACHING}|${STARTS_RESTING})\\b`, "i");
+
+/**
+ * Words of how far along a thing is — what has been done or added to it. A first picture of a thing
+ * being made has no picture of it to follow (`memorySourcesFor` drops the finished ones), and the
+ * MAIN thing's look describes it finished: Hank's job 258 — "single angled hole drilled halfway
+ * through, thin coat of oil giving a soft sheen, round felt dot centered on the bottom" — put onto
+ * "hands drilling an angled hole into a charred cedar scrap" would draw the finished holder again.
+ * SURFACE work changes the colour as well (charred black, oiled, painted), so its colours are not the
+ * raw thing's; SHAPE work (coiled, stitched, drilled, a felt dot added) leaves the material's colour
+ * as it was.
+ */
+const SURFACE_STAGE =
+  /\b(?:(?:un)?finish(?:ed|es|ing)?|oil(?:ed|s|y)?|coat(?:ed|ing|s)?|sheen|glossy|sanded|polish\w*|paint(?:ed)?|stain(?:ed)?|dyed|bleached|varnish\w*|lacquer\w*|waxed|glazed|fired|baked|charred|scorched|blackened|burn(?:t|ed)|brushed|sealed|cured)\b/i;
+const SHAPE_STAGE =
+  /\b(?:drill(?:ed|ing)|holes?|felt (?:dots?|pads?)|dots?|carv\w*|routed|glue[ds]?|quilt(?:ed|ing)|stitch(?:ed|es|ing)?|sewn|seams?|hemmed|binding|coil(?:ed|s)?|wrapped|crochet\w*|knit(?:ted)?|woven|pieced|braided|assembled|joined|joints?|fitted|attached|installed|upholstered|trimmed|completed?|framed|mounted)\b/i;
+/** A part added to the thing: its material is the part's, not the thing's ("a felt dot"). */
+const ADDED_PART = /^(?:dots?|pads?|patch(?:es)?|trim|binding|edging|backing|lining|tassels?|fringe|buttons?|tags?)$/;
+/**
+ * Writing on the thing: a picture carries none unless its line says it (`pictureText`), and the
+ * props list is told to list nothing with marks — yet "marked with letter I" and "routed lettering"
+ * are stored looks, and would ask for writing in every picture of the thing.
+ */
+const WRITING =
+  /\b(?:letter(?:s|ing|ed)?|labell?ed|labels?|text|words?|numbers?|numbered|writing|written|handwritten|logo|brand(?:ed)?|monogram\w*|initials?|date code|marked with|engrav\w*|last-name|names?)\b/i;
+
+/** Colour and material words: the part of a look that holds at every stage of making. */
+const COLOUR_MATERIAL = new Set(
+  (
+    "black white grey gray silver chrome gold golden brass bronze copper red orange yellow green blue " +
+    "navy teal turquoise purple violet pink brown tan beige cream ivory khaki olive maroon burgundy " +
+    "rust amber charcoal two-tone multicolored multicoloured colour colours color colors coloured " +
+    "colored colorful colourful striped stripes plaid checked floral print prints patterned " +
+    "wood wooden timber oak walnut maple cedar pine cherry ash birch beech mahogany teak poplar " +
+    "plywood mdf melamine bamboo cork metal metallic steel iron cast-iron aluminium aluminum tin " +
+    "zinc plastic vinyl rubber silicone glass ceramic porcelain clay stone marble granite slate " +
+    "concrete brick leather suede fabric cloth cotton wool woollen woolen yarn linen denim felt " +
+    "canvas burlap silk velvet fleece flannel paper cardboard wicker rattan straw cord rope twine " +
+    "string thread wire mesh resin acrylic"
+  ).split(" ")
+);
+/** Words that shade a colour or material ("dark walnut", "mixed scrap colors") — never alone. */
+const SHADES = new Set(
+  "dark pale light deep bright soft muted mixed varied assorted natural warm cool dull matte scrap and".split(" ")
+);
+const lookWords = (clause: string) =>
+  clause
+    .toLowerCase()
+    .split(/\s+/)
+    .flatMap(w => {
+      const bare = w.replace(/[^a-z-]/g, "");
+      return COLOUR_MATERIAL.has(bare) ? [bare] : bare.split("-");
+    })
+    .filter(Boolean);
+const hasColourMaterial = (clause: string) => lookWords(clause).some(w => COLOUR_MATERIAL.has(w));
+
+/**
+ * The colour and material words of one clause, in their own runs ("dark walnut and pale maple"),
+ * leaving out a material that belongs to an added part ("round felt dot" is not felt all over).
+ */
+function colourMaterialRuns(clause: string): string[] {
+  const runs: string[] = [];
+  let run: string[] = [];
+  const close = (next?: string) => {
+    while (run.length && SHADES.has(run[run.length - 1])) run.pop();
+    if (run.some(w => COLOUR_MATERIAL.has(w)) && !(next && ADDED_PART.test(next))) runs.push(run.join(" "));
+    run = [];
+  };
+  for (const w of lookWords(clause)) {
+    if (COLOUR_MATERIAL.has(w) || (SHADES.has(w) && (w !== "and" || run.length))) run.push(w);
+    else close(w);
+  }
+  close();
+  return runs;
+}
+
+/**
+ * A key thing's look cut down for ONE picture. Every mode drops where it sits, the light and
+ * setting around it, what it is used for, comparisons with other things and any writing on it.
+ * "noStage" also drops every clause about what has been done or added to it. "colourMaterial" keeps
+ * only its colours and materials, the one part of a look that holds at every stage of making — Ruth's
+ * coiled bowl, "roughly six inches across, smooth rounded shape", is not the strip it starts as: a
+ * clause of plain colour or material stays whole ("striped in rounds of color"), a clause about
+ * shaping keeps only its colour and material words, a clause about the surface keeps nothing. Pure.
+ */
+export function pictureLook(look: string, mode: "full" | "noStage" | "colourMaterial" = "full"): string {
+  const clauses = look
+    .replace(/[.\s]+$/, "")
+    .split(/\s*[,;]\s*|\s+[—–]\s+/)
+    .map(c => c.trim())
+    .filter(c => c && !PLACE_CLAUSE.test(c) && !NOT_ITS_LOOK.test(c) && !WRITING.test(c))
+    .map(c => {
+      const m = PLACE_INSIDE.exec(c);
+      if (!m) return c;
+      // What is left before the place, minus a placing word left dangling ("hanging or grouped
+      // together near the coasters" leaves nothing of the look) and an article left hanging ("knit
+      // sweater with a folded high neck" read "folded high" as a place and left "… with a").
+      const left = c
+        .slice(0, m.index)
+        .replace(DANGLING, "")
+        .replace(/(?:\s+(?:a|an|the|its|his|her|their))+$/i, "")
+        .replace(/\s+(?:or|and|with)$/i, "")
+        .trim();
+      return PLACING_START.test(left) ? "" : left;
+    })
+    .filter(c => c && !/^(?:and|or|with)$/i.test(c));
+  if (mode === "full") return clauses.join(", ");
+  if (mode === "noStage") return clauses.filter(c => !SURFACE_STAGE.test(c) && !SHAPE_STAGE.test(c)).join(", ");
+  const kept = clauses.flatMap(c =>
+    SURFACE_STAGE.test(c) ? [] : SHAPE_STAGE.test(c) ? colourMaterialRuns(c) : hasColourMaterial(c) ? [c] : []
+  );
+  return Array.from(new Set(kept)).join(", ");
+}
+
+/**
+ * The look picture `s` is drawn by when nothing earlier of its own thing is there to follow, or
+ * undefined: its own key thing's look (`ownKeyThing` — a list item that only inherited a key thing
+ * gets none), cut down by its stage. Before the thing is finished, only colours and materials. In a
+ * video that MAKES something (`makes`: some picture of it carries a stage), the MAIN thing's look
+ * describes the finished piece, so on a picture not marked finished ("done") its finish and added
+ * parts go too. A video that makes nothing has no stage to protect, so its MAIN look is kept whole:
+ * stripping it took the colours off job 373's dog ("a medium-sized tan and white dog with a short
+ * coat" — the coat read as a coat of oil) and left job 397's board only "rounded corners, medium
+ * size"; 48 of 113 stored MAIN looks lost colour or material words that way. Pure.
+ */
+export function keyThingLookFor(
+  s: StoryboardScene,
+  things: KeyThing[] | undefined,
+  makes = true
+): string | undefined {
+  const own = ownKeyThing(s);
+  const thing = own ? things?.find(k => k.name === own) : undefined;
+  if (!thing?.look?.trim()) return undefined;
+  const mode = beforeFinished(s)
+    ? "colourMaterial"
+    : makes && thing.main && s.buildStage !== "done"
+      ? "noStage"
+      : "full";
+  return pictureLook(thing.look, mode) || undefined;
+}
+
+/**
+ * The image-prompt line that carries a key thing's look (`scene.keyThingLook`, set only on a picture
+ * with no picture of its own thing to follow). A named kind's exact look (`namedLook`) wins. The
+ * picture's own words still decide where it is, which part shows and how far along it is. Pure.
+ */
+export function keyThingLookClause(scene: StoryboardScene): string {
+  if (scene.namedLook || !scene.keyThingLook || !scene.keyThing) return "";
+  const own = " — where it is, which part of it shows and how far along it is are as this picture's own words say.";
+  return beforeFinished(scene)
+    ? ` THE ${scene.keyThing.toUpperCase()}'S COLOURS AND MATERIALS, the same in every picture of this video: ${scene.keyThingLook}${own}`
+    : ` HOW THE ${scene.keyThing.toUpperCase()} LOOKS in every picture of this video: ${scene.keyThingLook}. Draw this same one${own}`;
 }
 
 /** How a SCREEN picture uses its item's memory: only as the photo inside the listing. */
@@ -273,6 +572,12 @@ export function tagKeyThings(scenes: StoryboardScene[], things: KeyThing[] | und
 
 const sourcesOf = new WeakMap<StoryboardScene, StoryboardScene[]>();
 const viewOf = new WeakMap<StoryboardScene, string | undefined>();
+/** Of `sourcesOf`, the pictures of the scene's OWN thing — its key thing's, or its list's group picture. */
+const ownSourcesOf = new WeakMap<StoryboardScene, StoryboardScene[]>();
+/** The look a scene is drawn by when no picture of its own thing comes (`keyThingLookFor`). */
+const lookOf = new WeakMap<StoryboardScene, string | undefined>();
+/** Pictures a later picture is drawn from for their OWN key thing (`copiedLater`). */
+const copied = new WeakSet<StoryboardScene>();
 /** Scenes whose picture is being made in the current pass — only those are worth waiting for. */
 const pending = new WeakSet<StoryboardScene>();
 const gates = new WeakMap<StoryboardScene, { promise: Promise<void>; open: () => void }>();
@@ -289,8 +594,9 @@ function gate(s: StoryboardScene) {
 }
 
 /**
- * Before a pass renders `rendering` out of the film `board`: remember each scene's memory, and
- * which scenes' pictures are about to be made.
+ * Before a pass renders `rendering` out of the film `board`: remember each scene's memory, the look
+ * it is drawn by when it has none, which pictures later ones copy, and which scenes' pictures are
+ * about to be made.
  */
 export function attachMemory(
   board: StoryboardScene[],
@@ -298,12 +604,29 @@ export function attachMemory(
   keyThings?: KeyThing[]
 ): void {
   tagKeyThings(board, keyThings);
+  // Whether the video makes something: the shot list stages only pictures of a thing being made.
+  const makes = board.some(x => !!x.buildStage);
   for (const s of board) {
     const items = listItemsAround(board, s);
     if (items) s.listItems = items;
     else delete s.listItems;
-    sourcesOf.set(s, memorySourcesFor(board, s));
+    const sources = memorySourcesFor(board, s);
+    const set = listSetFor(board, s);
+    sourcesOf.set(s, sources);
+    ownSourcesOf.set(s, sources.filter(x => x === set || (!!s.keyThing && shows(x, s.keyThing))));
     viewOf.set(s, memoryViewFor(board, s));
+    lookOf.set(s, keyThingLookFor(s, keyThings, makes));
+    copied.delete(s);
+  }
+  // A picture is COPIED when a later picture is drawn from it for the thing it is itself about — not
+  // a list's group picture its items are cut from, and not a picture lent only for a thing beside it.
+  for (const s of board) {
+    if (listSetFor(board, s)) continue;
+    const things = [s.keyThing, ...(s.otherKeyThings ?? [])];
+    for (const src of sourcesOf.get(s) ?? []) {
+      const own = ownKeyThing(src);
+      if (own && things.includes(own)) copied.add(src);
+    }
   }
   for (const s of rendering) {
     if (!source(s) || s.pictureUrl) continue;
@@ -317,6 +640,27 @@ export function memoryView(s: StoryboardScene): string | undefined {
   return viewOf.get(s);
 }
 
+/** Whether a later picture is drawn from `s` for the key thing `s` is about (`attachMemory`). */
+export function copiedLater(s: StoryboardScene): boolean {
+  return copied.has(s);
+}
+
+/**
+ * The look the picture CHECK holds `s` to, or undefined: only a picture that later pictures copy and
+ * that had no picture of its own thing to follow (`scene.keyThingLook` set at render) — the look is
+ * then the only thing that decides how every copy looks, so a first picture that misses it is drawn
+ * again on the check it already gets (`requiredThingsQuestion`), not copied into every later one.
+ * Never a named kind's picture: its exact look wins in the prompt (`keyThingLookClause`), and a
+ * check holding it to a look its prompt never carried would fail it for not drawing what was not
+ * asked (the exact-look question holds it instead).
+ */
+export function lookToHold(s: StoryboardScene): { thing: string; look: string } | undefined {
+  const own = ownKeyThing(s);
+  return own && s.keyThingLook && !s.namedLook && copied.has(s)
+    ? { thing: own, look: s.keyThingLook }
+    : undefined;
+}
+
 /** `s`'s picture is made — or its render ended without one: anything drawn from it may go on. */
 export function pictureSettled(s: StoryboardScene): void {
   pending.delete(s);
@@ -325,13 +669,18 @@ export function pictureSettled(s: StoryboardScene): void {
 
 /**
  * The pictures `s` is drawn from, waiting (at most `timeoutMs`) for one still being made in this
- * pass. A memory that never came is skipped — the picture is then drawn from words, as before.
+ * pass. A memory that never came is skipped — the picture is then drawn from words, as before — and
+ * so is one whose own check said its thing is not in it (`memoryUnfit`, set when it settled in this
+ * same pass). `own` says whether any of them is a picture of `s`'s own thing; when none is, `look`
+ * is the look it is drawn by instead (`keyThingLookFor`).
  */
-export async function memoryPicturesFor(
+export async function memoryFor(
   s: StoryboardScene,
   timeoutMs = MEMORY_WAIT_MS
-): Promise<string[]> {
+): Promise<{ urls: string[]; own: boolean; look?: string }> {
   const urls: string[] = [];
+  const mine = ownSourcesOf.get(s) ?? [];
+  let own = false;
   for (const src of sourcesOf.get(s) ?? []) {
     if (!src.pictureUrl && pending.has(src)) {
       let timer: ReturnType<typeof setTimeout> | undefined;
@@ -341,7 +690,17 @@ export async function memoryPicturesFor(
       ]);
       if (timer) clearTimeout(timer);
     }
-    if (src.pictureUrl && !urls.includes(src.pictureUrl)) urls.push(src.pictureUrl);
+    if (!src.pictureUrl || src.memoryUnfit || urls.includes(src.pictureUrl)) continue;
+    urls.push(src.pictureUrl);
+    if (mine.includes(src)) own = true;
   }
-  return urls;
+  return { urls, own, look: own ? undefined : lookOf.get(s) };
+}
+
+/** The pictures `s` is drawn from (`memoryFor`). */
+export async function memoryPicturesFor(
+  s: StoryboardScene,
+  timeoutMs = MEMORY_WAIT_MS
+): Promise<string[]> {
+  return (await memoryFor(s, timeoutMs)).urls;
 }
