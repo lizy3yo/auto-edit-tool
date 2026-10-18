@@ -19,6 +19,8 @@
  *     after the last item go to the next picture, and a piece that is NOT an item of any list loses
  *     the list mark it may have picked up, so it joins its neighbours like any other picture.
  * It replaces the per-piece list patches (`handOffHostLists`, `pullListLeadIns`) as the last word.
+ * The motion-graphics planner holds a list graphic it writes on its own to the same rules
+ * (`notAListAsSaid`), so a numbered list on screen is always a list the narrator says.
  * Nothing here names a channel or a craft.
  */
 import type { StoryboardScene } from "@shared/types";
@@ -221,9 +223,10 @@ const waysOf = (step: string) => step.split(/\s*[,;]\s*(?=(?:or|alternatively)\b
  * way list items are — two items need a comma between them, three or more at least one. A pair
  * joined only by "and" ("the potholders and the coasters") fails. For a list of `steps` the word
  * limit holds for each WAY of a step (`waysOf`): job 399's "catch a flight attendant as they pass, or
- * step back to the galley" is one step of 13 words, two ways of 7 and 6. Pure.
+ * step back to the galley" is one step of 13 words, two ways of 7 and 6. `maxWords` is that limit:
+ * a list graphic's rows are held to everything else but not to it (`notAListAsSaid`). Pure.
  */
-export function validateSpokenList(sentence: string, items: string[], steps = false): boolean {
+export function validateSpokenList(sentence: string, items: string[], steps = false, maxWords = LIST_ITEM_MAX_WORDS): boolean {
   if (!Array.isArray(items) || items.length < 2) return false;
   const spans = tokenSpans(sentence);
   const toks = spans.map(t => t.tok);
@@ -233,7 +236,7 @@ export function validateSpokenList(sentence: string, items: string[], steps = fa
   for (const item of items) {
     const want = tokenSpans(String(item ?? "")).map(t => t.tok);
     const ways = steps ? waysOf(String(item ?? "")) : [String(item ?? "")];
-    if (!want.length || ways.some(w => tokenSpans(w).length > LIST_ITEM_MAX_WORDS)) return false;
+    if (!want.length || ways.some(w => tokenSpans(w).length > maxWords)) return false;
     const at = findTokens(toks, want, cursor);
     if (at < 0) return false;
     if (prevEnd >= 0) {
@@ -277,6 +280,78 @@ function describingWords(sentence: string, items: string[]): boolean {
  */
 export function itemsAreThings(sentence: string, items: string[]): boolean {
   return items.every(i => !notAThing(String(i ?? ""))) && !describingWords(sentence, items);
+}
+
+/** A point a host lists rather than a thing: a topic opening on a question word ("where they go",
+ * "when to retire one", "how much to charge"). */
+const POINT = /^(?:how|what|when|where|why|which|whether)\b/i;
+
+/** A sentence quoted in a message, cut to a readable length. */
+const quoted = (s: string, max = 140) => `"${s.length > max ? `${s.slice(0, max - 1).trimEnd()}…` : s}"`;
+
+/**
+ * A LIST GRAPHIC IS A LIST THE NARRATOR SAYS (2026-10-18, Gideon's job 400, 1:41): the graphics
+ * planner numbered "1 Two thousand years ago / 2 Seneca wrote a short / 3 Furious / 4 Loving essay"
+ * on ONE sentence — "Two thousand years ago, a man named Lucius Annaeus Seneca wrote a short,
+ * furious, loving essay to a man named Paulinus" — a time, a broken clause and describing words. A
+ * list the pipeline finds has passed the rules here already; a list graphic the planner writes on
+ * its own had passed nothing. Why a list graphic's rows, as said (`rows`: each row's spoken words),
+ * are NOT a spoken list by the rules every found list passes — or undefined when they are:
+ *  - every row names a thing (`notAThing`: never a number, a length of time, a set phrase, an
+ *    aside or a clause);
+ *  - rows said in ONE sentence of `script` (what is said around the graphic) are said there as a
+ *    list: in order, at most `GAP_MAX_WORDS` words apart, joined by commas (`validateSpokenList`),
+ *    and are not describing words after a linking verb (`describingWords`). A row may be as long as
+ *    it is said — a graphic shows a short label for it, where a list's pictures need short items:
+ *    the same film's "Who Seneca was" rows ("an advisor standing one step from the throne, buried
+ *    under exactly the kind of obligations we are about to talk about — and a man who, years later,
+ *    would be ordered to end his own life") are a list of what one man was, 13 words to a row.
+ * Rows in different sentences ("A cord under a rug. A space heater quietly cooking the side of a
+ * mattress at 2 in the morning.", Frederick's job 393) and rows not found in `script` (a number
+ * said as digits) are held to the first rule only: nothing here refuses what it cannot read.
+ * With `points` (the host listing what is coming), a row may also be a TOPIC opening on a question
+ * word (`POINT`): Frederick's opening "…detectors, where they go, and when to retire one" (jobs 385,
+ * 393, 396) is three points of an agenda — no picture could show "when to retire one", but a host's
+ * list window can. Pure.
+ */
+export function notAListAsSaid(script: string, rows: string[], opts: { points?: boolean } = {}): string | undefined {
+  const said = rows.map(r => bareItem(String(r ?? "")));
+  for (let k = 0; k < said.length; k++) {
+    if (opts.points && POINT.test(said[k])) continue;
+    const why = notAThing(said[k]);
+    if (why) return `row ${k + 1} ("${said[k]}") names no thing (${why})`;
+  }
+  if (said.length < 2) return undefined;
+  // Where the rows are said: the tightest run holding every row in order.
+  const sentences = splitSentences(script);
+  const flat: { tok: string; s: number }[] = [];
+  sentences.forEach((s, n) => tokenSpans(s).forEach(t => flat.push({ tok: t.tok, s: n })));
+  const toks = flat.map(t => t.tok);
+  const wants = said.map(r => tokenSpans(r).map(t => t.tok));
+  let best: number[] | null = null;
+  let span = Infinity;
+  for (let i = findTokens(toks, wants[0], 0); i >= 0; i = findTokens(toks, wants[0], i + 1)) {
+    const at = [i];
+    let cursor = i + wants[0].length;
+    for (const w of wants.slice(1)) {
+      const j = findTokens(toks, w, cursor);
+      if (j < 0) break;
+      at.push(j);
+      cursor = j + w.length;
+    }
+    if (at.length === wants.length && cursor - i < span) [best, span] = [at, cursor - i];
+  }
+  if (!best) return undefined;
+  const bySentence = new Map<number, string[]>();
+  best.forEach((i, k) => bySentence.set(flat[i].s, [...(bySentence.get(flat[i].s) ?? []), said[k]]));
+  for (const [s, group] of Array.from(bySentence)) {
+    if (group.length < 2) continue;
+    const named = group.map(r => `"${r}"`).join(", ");
+    if (!validateSpokenList(sentences[s], group, false, Infinity))
+      return `${named} are not said as a list — one after another, joined by commas — in ${quoted(sentences[s])}`;
+    if (describingWords(sentences[s], group)) return `${named} are describing words in ${quoted(sentences[s])}, not things`;
+  }
+  return undefined;
 }
 
 // ─── Finding them ───────────────────────────────────────────────────────────────────────────────

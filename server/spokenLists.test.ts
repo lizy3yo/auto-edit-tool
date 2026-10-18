@@ -5,6 +5,7 @@ import {
   findSpokenLists,
   joinChoiceSteps,
   listsByShape,
+  notAListAsSaid,
   parseSpokenLists,
   splitSentences,
   spokenListsByShape,
@@ -464,5 +465,67 @@ describe("a step offered as a choice is part of the step before it (A6, Helena's
       "wipe it down",
       "oil it",
     ]);
+  });
+});
+
+describe("a list graphic is a list the narrator says (round 10 graphics review, 2026-10-18)", () => {
+  // Gideon's job 400 (1:41): the planner's own ListWindow "Seneca's essay" numbered pieces of one
+  // sentence — a time, a broken clause and describing words.
+  const seneca =
+    "Two thousand years ago, a man named Lucius Annaeus Seneca wrote a short, furious, loving essay to a man named Paulinus, the official in charge of Rome’s grain supply — busy, important, and worn down to the rims.";
+  const whoHeWas =
+    "Seneca was no monk on a hillside. He was one of the richest men in the empire, an advisor standing one step from the throne, buried under exactly the kind of obligations we are about to talk about — and a man who, years later, would be ordered to end his own life by the very emperor he had served.";
+
+  it("job 400's 'Seneca's essay' rows are refused for the time row; the stored list it came from is too", () => {
+    expect(notAListAsSaid(seneca, ["Two thousand years ago", "wrote a short", "furious", "loving essay"])).toBe(
+      'row 1 ("Two thousand years ago") names no thing (a length of time)'
+    );
+    expect(notAListAsSaid(seneca, ["Two thousand years ago", "a man named Lucius Annaeus Seneca wrote a short", "furious"])).toMatch(/^row 1 .*a length of time/);
+  });
+
+  it("rows of one sentence that are not said one after another as a list are refused", () => {
+    // the two men of job 400's sentence are 7 words apart: not a list
+    expect(notAListAsSaid(seneca, ["a man named Lucius Annaeus Seneca", "a man named Paulinus"])).toMatch(/^"a man named Lucius Annaeus Seneca", "a man named Paulinus" are not said as a list/);
+    // joined only by "and" (the finder's own example): not a list
+    expect(notAListAsSaid("By the time the potholders and the coasters were done, it was dark.", ["the potholders", "the coasters"])).toMatch(/are not said as a list/);
+    // describing words after a linking verb
+    expect(notAListAsSaid("It looks clean, bright, and calm.", ["clean", "bright", "calm"])).toMatch(/are describing words/);
+  });
+
+  it("a list the narrator says passes — however long its rows are said (job 400's 'Who Seneca was'), across sentences (job 393), or with a number said as digits", () => {
+    expect(
+      notAListAsSaid(whoHeWas, [
+        "an advisor standing one step from the throne",
+        "buried under exactly the kind of obligations we are about to talk about",
+        "and a man who, years later, would be ordered to end his own life",
+      ])
+    ).toBeUndefined();
+    expect(
+      notAListAsSaid("The other one is the slow one. A cord under a rug. A space heater quietly cooking the side of a mattress at 2 in the morning. It smolders.", [
+        "A cord under a rug",
+        "A space heater quietly cooking the side of a mattress",
+      ])
+    ).toBeUndefined();
+    const places = "Most people past sixty have — usually in silence, usually in some ordinary place, a waiting room, a church pew, the kitchen table at two in the morning when the house is too quiet.";
+    expect(notAListAsSaid(places, ["some ordinary place", "a waiting room", "a church pew", "the kitchen table at two in the morning"])).toBeUndefined();
+    expect(notAListAsSaid("Smalls to the markets, personalized work on Etsy, furniture on Marketplace.", ["Smalls to the markets", "personalized work on Etsy", "furniture on Marketplace"])).toBeUndefined();
+    // rows the script holds nowhere are held to the item rule alone
+    expect(notAListAsSaid("Coasters run $10 to $40.", ["10 coasters", "40 ornaments"])).toBeUndefined();
+  });
+
+  it("a host's agenda may list topics (Frederick's 'Detectors, where they go, and when to retire one', jobs 385/393/396); a list of things may not", () => {
+    const agenda = "Chapter 9 is tonight's chapter. Detectors, where they go, and when to retire one. There's a code on your screen.";
+    const rows = ["Detectors", "where they go", "when to retire one"];
+    expect(notAListAsSaid(agenda, rows, { points: true })).toBeUndefined();
+    expect(notAListAsSaid(agenda, rows)).toMatch(/^row 3 \("when to retire one"\) names no thing/);
+    // a topic row never excuses a time
+    expect(notAListAsSaid(seneca, ["Two thousand years ago", "wrote a short", "furious"], { points: true })).toMatch(/a length of time/);
+  });
+
+  it("validateSpokenList keeps its 12-word item limit unless told otherwise", () => {
+    const rows = ["an advisor standing one step from the throne", "buried under exactly the kind of obligations we are about to talk about"];
+    const sentence = whoHeWas.split(". ")[1];
+    expect(validateSpokenList(sentence, rows)).toBe(false);
+    expect(validateSpokenList(sentence, rows, false, Infinity)).toBe(true);
   });
 });

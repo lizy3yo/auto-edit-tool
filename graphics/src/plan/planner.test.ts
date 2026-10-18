@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { resolveCues, type CueSpec, type ResolvedCue, type Word } from "../cueResolve";
 import { TEMPLATES } from "../registry";
 import { FPS } from "../theme";
-import { choiceSteps, listsWhereGraphicsGo, malformedPhrase, missingListCues, namesTheDanger, normalizePhrases, notTheHostsWords, planGraphics, quotedInScript, systemPrompt, uncoveredMoments, userPrompt, wordsSaidOver, type PlanMessage } from "./planner";
+import { notAListAsSaid } from "../../../server/spokenLists";
+import { ROW_MAX_WORDS, choiceSteps, fromAFoundList, listsWhereGraphicsGo, malformedPhrase, missingListCues, namesTheDanger, normalizePhrases, notTheHostsWords, planGraphics, quotedInScript, restoreRowGrammar, systemPrompt, uncoveredMoments, userPrompt, wordsSaidOver, type PlanMessage } from "./planner";
 
 const W = (s: string, start: number, step = 0.3): Word[] => s.split(" ").map((text, i) => ({ text, start: start + i * step, end: start + i * step + 0.26 }));
 const scene = (index: number, a: number, b: number, extra: Record<string, unknown> = {}) => ({ index, narrationStartSec: a, narrationEndSec: b, scriptText: "", hostPresent: false, cta: false, split: false, hostOpener: false, ...extra });
@@ -847,5 +848,176 @@ describe("steps are done one after another; a choice is not the next step (A6, H
     const out = await planGraphics({ words, film: { scenes: [scene(12, 59, 65, { scriptText: words.map(w => w.text).join(" ") })] }, ask, ensureIcon: async () => true });
     expect(out.rounds[0].problems).toEqual([]);
     expect(out.cues.map(c => c.id)).toEqual(["07-step-labels"]);
+  });
+});
+
+describe("a list window is a list the narrator says, in his own words (round 10 graphics review, Gideon's job 400)", () => {
+  // Job 400 as heard, 1:40-2:19: the "Seneca's essay" window (1:41) and the "Who Seneca was" window (2:03).
+  const heard = T(
+    "thieves.@99.24-100.91 2,000@101.08-101.34 years@101.36-101.63 ago,@101.69-101.97 a@102.28-102.33 man@102.39-102.58 named@102.64-102.89 Lucius@102.98-103.48" +
+      " " + "Anaeus@103.63-104.06 Seneca@104.11-104.63 wrote@104.78-104.99 a@105.01-105.05 short,@105.17-105.51 furious,@105.91-106.51 loving@106.85-107.21" +
+      " " + "essay@107.33-107.67 to@107.75-107.89 a@107.95-107.97 man@108.03-108.25 named@108.31-108.53 Paulinus,@108.63-109.27 the@109.67-109.77" +
+      " " + "official@109.81-110.23 in@110.27-110.35 charge@110.41-110.77 of@110.83-110.89 Rome's@110.99-111.37 grain@111.41-111.73 supply,@111.77-112.25" +
+      " " + "busy,@112.67-113.05 important,@113.43-114.01 and@114.37-114.47 worn@114.55-114.85 down@114.93-115.15 to@115.23-115.31 the@115.35-115.47" +
+      " " + "rims.@115.57-115.93 Seneca@117.06-117.52 was@117.58-117.74 no@117.88-118.06 monk@118.18-118.44 on@118.52-118.58 a@118.62-118.66" +
+      " " + "hillside.@118.72-119.28 He@119.92-120.02 was@120.04-120.18 one@120.26-120.36 of@120.40-120.46 the@120.50-120.60 richest@120.72-121.10" +
+      " " + "men@121.20-121.44 in@121.60-121.68 the@121.70-121.80 empire,@122.00-122.50 an@123.04-123.14 advisor@123.18-123.78 standing@123.90-124.28" +
+      " " + "one@124.54-124.68 step@124.84-125.18 from@125.24-125.38 the@125.42-125.52 throne,@125.58-125.98 buried@126.52-126.89 under@126.98-127.17" +
+      " " + "exactly@127.27-127.86 the@127.92-128.00 kind@128.04-128.23 of@128.27-128.33 obligations@128.43-129.09 we@129.15-129.25 are@129.31-129.43" +
+      " " + "about@129.47-129.67 to@129.73-129.79 talk@129.85-130.07 about,@130.15-130.41 and@131.11-131.21 a@131.25-131.27 man@131.33-131.57 who,@131.65-131.87" +
+      " " + "years@132.17-132.45 later,@132.53-132.85 would@133.29-133.45 be@133.47-133.57 ordered@133.69-133.95 to@133.99-134.07 end@134.25-134.41" +
+      " " + "his@134.47-134.61 own@134.81-134.95 life@135.05-135.35 by@135.51-135.63 the@135.67-135.77 very@135.89-136.21 emperor@136.39-136.77 he@136.87-136.95" +
+      " " + "had@136.99-137.11 served.@137.21-137.63 When@138.31-138.45 a@138.47-138.51 man@138.55-138.73 like@138.81-138.99 that@139.11-139.41"
+  );
+  const film = {
+    scenes: [
+      scene(20, 91.17, 100.63, { scriptText: "was never your problem. Your problem is theft, and by the end of this video you will be able to name all seven of the thieves." }),
+      scene(21, 100.63, 102.13, { scriptText: "Two thousand years ago," }),
+      scene(22, 102.13, 105.8, { scriptText: "a man named Lucius Annaeus Seneca wrote a short," }),
+      scene(23, 105.8, 106.59, { scriptText: "furious," }),
+      scene(24, 106.59, 116.89, { scriptText: "loving essay to a man named Paulinus, the official in charge of Rome’s grain supply — busy, important, and worn down to the rims." }),
+      scene(25, 116.89, 130.97, { scriptText: "Seneca was no monk on a hillside. He was one of the richest men in the empire, an advisor standing one step from the throne, buried under exactly the kind of obligations we are about to talk about —" }),
+      scene(26, 130.97, 138.19, { scriptText: "and a man who, years later, would be ordered to end his own life by the very emperor he had served." }),
+      scene(27, 138.19, 144.12, { hostPresent: true, split: true, scriptText: "When a man like that sits down to write about time, I pull my chair in closer." }),
+    ],
+  };
+  const cuts = [100.63, 102.13, 105.8, 106.59, 116.89, 130.97, 138.19];
+  // The two windows exactly as the planner wrote them (the job's saved plan).
+  const essay: CueSpec = {
+    id: "seneca-essay-list",
+    template: "ListWindow",
+    start: "Two thousand years ago, a man",
+    startPad: -0.15,
+    end: "furious, loving essay",
+    endPad: 0.3,
+    props: {
+      title: "Seneca's essay",
+      items: [
+        { at: "@Two thousand years ago", say: "Two thousand years ago", text: "Two thousand years ago" },
+        { at: "@a man named Lucius", say: "wrote a short", text: "Seneca wrote a short" },
+        { at: "@furious", say: "furious", text: "Furious" },
+        { at: "@loving essay", say: "loving essay", text: "Loving essay" },
+      ],
+    },
+  };
+  const whoHeWas: CueSpec = {
+    id: "who-seneca-was",
+    template: "ListWindow",
+    start: "an advisor standing one step from",
+    startPad: -0.15,
+    end: "emperor he had served.",
+    endPad: 0.3,
+    props: {
+      title: "Who Seneca was",
+      items: [
+        { at: "@an advisor standing one step", say: "an advisor standing one step from the throne", text: "One step from throne" },
+        { at: "@buried under exactly the kind", say: "buried under exactly the kind of obligations we are about to talk about", text: "Buried under obligations" },
+        { at: "@and a man who", say: "and a man who, years later, would be ordered to end his own life", text: "Ordered to end life" },
+      ],
+    },
+  };
+  // The list the job kept from before the item rules: the false one, found in the essay's sentence.
+  const stored = [{ items: ["Two thousand years ago", "a man named Lucius Annaeus Seneca wrote a short", "furious"] }];
+  /** The first answer, then the repair's: the model keeps the cues that passed (`repair`). */
+  const asking = (first: CueSpec[], repair: CueSpec[] = []) => {
+    const asked: string[] = [];
+    const ask = async (_system: string, messages: PlanMessage[]) => {
+      asked.push(messages[messages.length - 1].content);
+      return JSON.stringify({ cues: asked.length === 1 ? first : asked.length === 2 ? repair : [] });
+    };
+    return { ask, asked };
+  };
+
+  it("job 400: 'Seneca's essay' is refused and the repair told why; 'Who Seneca was' is kept, its rows in the spoken words", async () => {
+    const { ask, asked } = asking([essay, whoHeWas], [whoHeWas]);
+    const out = await planGraphics({ words: heard, cuts, film, ask, ensureIcon: async () => true, listCheck: notAListAsSaid });
+    expect(out.cues.map(c => c.id)).toEqual(["who-seneca-was"]);
+    const refused = out.rounds[0].problems.find(p => p.cue === "seneca-essay-list");
+    expect(refused?.problem).toMatch(
+      /^"Seneca's essay" is not a list the narrator says: row 1 \("Two thousand years ago"\) names no thing \(a length of time\)\. A list window numbers separate things he names/
+    );
+    expect(asked[1]).toContain(`seneca-essay-list: "Seneca's essay" is not a list the narrator says`);
+    expect((out.cues[0].props.items as { text: string }[]).map(i => i.text)).toEqual(["One step from the throne", "Buried under obligations", "Ordered to end his own life"]);
+  });
+
+  it("job 400: the stored list from before the rules is put to the planner as no list, gets no list graphic, and is named with the first round", async () => {
+    const { ask, asked } = asking([]);
+    const out = await planGraphics({ words: heard, cuts, film, ask, ensureIcon: async () => true, lists: stored, listCheck: notAListAsSaid });
+    expect(asked[0]).not.toContain("SPOKEN LISTS IN THIS SCRIPT");
+    expect(out.cues).toEqual([]);
+    expect(out.rounds.map(r => r.step)).not.toContain("lists");
+    expect(out.rounds[0].problems).toEqual([
+      { cue: expect.stringMatching(/^spoken list "Two thousand years ago, /), problem: expect.stringMatching(/a length of time\); it gets no list graphic$/) },
+    ]);
+    // …and the window the planner built on it is not excused as a list the pipeline found
+    const again = await planGraphics({ words: heard, cuts, film, ask: asking([essay]).ask, ensureIcon: async () => true, lists: stored, listCheck: notAListAsSaid });
+    expect(again.cues).toEqual([]);
+  });
+
+  it("a list the pipeline found is not asked again, and a planner's window on it is kept; without the check nothing changes", async () => {
+    // as if the pipeline had found the "Who Seneca was" list (its 13-word items are past the finder's limit)
+    const found = [
+      { items: ["an advisor standing one step from the throne", "buried under exactly the kind of obligations we are about to talk about", "and a man who, years later, would be ordered to end his own life"] },
+    ];
+    const calls: string[][] = [];
+    const listCheck = (script: string, rows: string[]) => {
+      calls.push(rows);
+      return notAListAsSaid(script, rows);
+    };
+    const out = await planGraphics({ words: heard, cuts, film, ask: asking([whoHeWas]).ask, ensureIcon: async () => true, lists: found, listCheck });
+    expect(out.cues.map(c => c.id)).toEqual(["who-seneca-was"]);
+    expect(calls).toEqual([found[0].items]); // the stored list, once; never the window built on it
+    const bare = await planGraphics({ words: heard, cuts, film, ask: asking([essay]).ask, ensureIcon: async () => true });
+    expect(bare.cues.map(c => c.id)).toEqual(["seneca-essay-list"]);
+  });
+
+  it("which windows are a found list: each row one item in order, its words inside the item's or holding them", () => {
+    const complains = [{ items: ["The farmer complains", "the senator complains", "the old complain"] }];
+    expect(fromAFoundList(["The farmer complains", "the senator complains", "the old complain"], complains)).toBe(true);
+    expect(fromAFoundList(["The farmer", "The senator", "The old"], complains)).toBe(true);
+    expect(fromAFoundList(["the senator complains", "The farmer complains"], complains)).toBe(false); // out of order
+    // job 400's "Ordinary places" added a fourth row the found list does not hold
+    const places = [{ items: ["some ordinary place", "a waiting room", "a church pew"] }];
+    expect(fromAFoundList(["some ordinary place", "a waiting room", "a church pew", "the kitchen table at two in the morning"], places)).toBe(false);
+    expect(fromAFoundList([], places)).toBe(false);
+  });
+
+  it("a row clipped into a headline gets its articles and possessives back; a row in the planner's own words is kept", () => {
+    expect(restoreRowGrammar("One step from throne", "an advisor standing one step from the throne")).toBe("One step from the throne");
+    expect(restoreRowGrammar("Ordered to end life", "and a man who, years later, would be ordered to end his own life")).toBe("Ordered to end his own life");
+    expect(restoreRowGrammar("Smalls to markets", "Smalls to the markets")).toBe("Smalls to the markets"); // Dale's job 397
+    expect(restoreRowGrammar("Second bag of pretzels", "a second bag of pretzels")).toBe("A second bag of pretzels"); // Helena's job 399
+    // the planner's own short version: a word that is not grammar left out, a word added, a symbol, digits
+    expect(restoreRowGrammar("Buried under obligations", "buried under exactly the kind of obligations we are about to talk about")).toBe("Buried under obligations");
+    expect(restoreRowGrammar("Seneca wrote a short", "wrote a short")).toBe("Seneca wrote a short");
+    expect(restoreRowGrammar("Smalls → markets", "Smalls to the markets")).toBe("Smalls → markets");
+    expect(restoreRowGrammar("Water for later", "a bottle of water for later")).toBe("Water for later");
+    expect(restoreRowGrammar("Sandpaper", "a stack of sandpaper")).toBe("Sandpaper");
+    expect(restoreRowGrammar("3 piles", "three piles")).toBe("3 piles");
+    // …and never past the row limit
+    expect(restoreRowGrammar("Kept rest of can for later", "kept the rest of the can for later")).toBe("Kept rest of can for later");
+    expect(ROW_MAX_WORDS).toBe(6);
+  });
+
+  it("a row over the limit is refused; a list built from the found words keeps their grammar and never ends on a hanging word", async () => {
+    const rows = whoHeWas.props.items as object[];
+    const long: CueSpec = {
+      ...whoHeWas,
+      props: { ...whoHeWas.props, items: [{ at: "@an advisor standing one step", say: "an advisor standing one step from the throne", text: "An advisor standing one step from the throne" }, ...rows.slice(1)] },
+    };
+    const out = await planGraphics({ words: heard, cuts, film, ask: asking([long]).ask, ensureIcon: async () => true });
+    expect(out.rounds[0].problems).toEqual([
+      { cue: "who-seneca-was", problem: 'row "An advisor standing one step from the throne" is 8 words — a list row takes at most 6: the item in its own spoken words, shortened' },
+    ]);
+    const words = W("usually in some ordinary place, a waiting room, a church pew, the kitchen table at two in the morning when the house is too quiet.", 40);
+    const [c] = missingListCues([], words, { scenes: [scene(8, 39, 60)] }, [{ items: ["a waiting room", "a church pew", "the kitchen table at two in the morning"] }]);
+    expect((c.props.items as { text: string }[]).map(i => i.text)).toEqual(["A waiting room", "A church pew", "The kitchen table at two"]);
+  });
+
+  it("the prompt asks for a list he names, rows in his own words, at the new limit", () => {
+    const prompt = systemPrompt({ kept: false });
+    expect(prompt).toContain(`"text" (≤${ROW_MAX_WORDS} words)`);
+    expect(prompt).toContain("never a sentence chopped at its commas");
+    expect(prompt).toContain(`never clipped like a headline, "Seat by window"`);
   });
 });

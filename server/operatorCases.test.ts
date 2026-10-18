@@ -2228,3 +2228,44 @@ describe("a step chain shows steps done in order; a choice is not the next step 
     expect(steps("Or look underneath this video, open the description, and tap the link at the top.", scan)?.[0].items).toEqual(scan);
   });
 });
+
+describe("a list window is a list the narrator says, its rows in his own words (round 10 graphics review, 2026-10-18)", () => {
+  // 400 seneca-essay-list (1:41-1:48, over scenes 21-24): the planner's own ListWindow "Seneca's essay"
+  // numbered "1 Two thousand years ago / 2 Seneca wrote a short / 3 Furious / 4 Loving essay" on one
+  // sentence. 400 who-seneca-was (2:03-2:16): rows clipped into headlines, "One step from throne" and
+  // "Ordered to end life".
+  const essay =
+    "Two thousand years ago, a man named Lucius Annaeus Seneca wrote a short, furious, loving essay to a man named Paulinus, the official in charge of Rome’s grain supply — busy, important, and worn down to the rims.";
+  const who =
+    "He was one of the richest men in the empire, an advisor standing one step from the throne, buried under exactly the kind of obligations we are about to talk about — and a man who, years later, would be ordered to end his own life by the very emperor he had served.";
+
+  it("400: 'Seneca's essay' is not a list; 'Who Seneca was' and the lists placed before (397, 399, 400) are", async () => {
+    const { notAListAsSaid } = await import("./spokenLists");
+    expect(notAListAsSaid(essay, ["Two thousand years ago", "wrote a short", "furious", "loving essay"])).toMatch(/a length of time/);
+    expect(notAListAsSaid(essay, ["a man named Lucius Annaeus Seneca", "a man named Paulinus"])).toMatch(/not said as a list/);
+    expect(
+      notAListAsSaid(who, [
+        "an advisor standing one step from the throne",
+        "buried under exactly the kind of obligations we are about to talk about",
+        "and a man who, years later, would be ordered to end his own life",
+      ])
+    ).toBeUndefined();
+    expect(notAListAsSaid("Run all three, and let each one carry its own lane. Smalls to the markets, personalized work on Etsy, furniture on Marketplace.", ["Smalls to the markets", "personalized work on Etsy", "furniture on Marketplace"])).toBeUndefined();
+    expect(
+      notAListAsSaid("one of them was sitting in an empty row closer to the front, holding the whole can of ginger ale, a second bag of pretzels, and a bottle of water for later.", [
+        "the whole can of ginger ale",
+        "a second bag of pretzels",
+        "a bottle of water for later",
+      ])
+    ).toBeUndefined();
+    expect(notAListAsSaid("The farmer complains, the senator complains, the old complain, and the young are already rehearsing the complaint.", ["The farmer complains", "the senator complains", "the old complain"])).toBeUndefined();
+  });
+
+  it("400: the clipped rows get their 'the' and 'his own' back; a row in the planner's own words stays", async () => {
+    const { restoreRowGrammar } = await import("../graphics/src/plan/planner");
+    expect(restoreRowGrammar("One step from throne", "an advisor standing one step from the throne")).toBe("One step from the throne");
+    expect(restoreRowGrammar("Ordered to end life", "and a man who, years later, would be ordered to end his own life")).toBe("Ordered to end his own life");
+    expect(restoreRowGrammar("Buried under obligations", "buried under exactly the kind of obligations we are about to talk about")).toBe("Buried under obligations");
+    expect(restoreRowGrammar("Smalls → markets", "Smalls to the markets")).toBe("Smalls → markets");
+  });
+});

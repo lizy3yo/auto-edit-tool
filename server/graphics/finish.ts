@@ -36,6 +36,7 @@ import { getMediaDuration } from "../mediaProbe";
 import { ffmpeg, frameDiffs, levelsOf, narrationOf } from "./media";
 import { driftedStretches, LEVEL_FRAME_SEC, retimeWords, spliceStretch } from "../../graphics/src/plan/wordTiming";
 import { execFfmpeg } from "../ffmpegSpawn";
+import { notAListAsSaid } from "../spokenLists";
 import { calmestPlace, describe, makeReadable, measureCue, subjectOf } from "./readable";
 import { GRAPHICS_DIR, renderGraphic } from "./render";
 
@@ -210,7 +211,8 @@ async function plan(input: AddGraphicsInput, words: Word[], cuts: number[]): Pro
     });
     return r.text;
   };
-  const p = await planGraphics({ words, cuts, film: input.film, ask, ensureIcon: async code => !!(await iconFile(code)), lists: input.lists });
+  // A list window is held to the rules every spoken list is found by (`notAListAsSaid`).
+  const p = await planGraphics({ words, cuts, film: input.film, ask, ensureIcon: async code => !!(await iconFile(code)), lists: input.lists, listCheck: notAListAsSaid });
   // What each round asked for and what the checks refused, so a thin plan can be explained. The
   // rounds are also kept on the job (`withGraphics`): the render log is gone after a restart.
   p.rounds.forEach((r, i) => {

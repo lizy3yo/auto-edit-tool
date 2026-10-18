@@ -29,6 +29,18 @@ import { MIN_GAP_SEC, checkRules, nameTagRange, type FilmLayout, type LayoutScen
  * number graphic opened on "But the one I was proudest of" and waited 9 s for the number). */
 export const MAX_WAIT_SEC = 5;
 
+/**
+ * The most words a row of a list window (ListWindow, HostListWindow) shows. It was 5, and the
+ * planner clipped rows into headlines to fit: Gideon's job 400 (2:03) showed "One step from throne"
+ * and "Ordered to end life" for "one step from the throne" and "ordered to end his own life". Six
+ * holds the spoken words with their grammar; a row may take two lines in the window, as five-word
+ * rows already did.
+ */
+export const ROW_MAX_WORDS = 6;
+
+/** The list windows: numbered rows, each standing for an item the narrator says. */
+const LIST_WINDOWS = new Set(["ListWindow", "HostListWindow"]);
+
 /** Noto Color Emoji (Apache-2.0), pinned: the image of an emoji, by its code points. */
 export const NOTO_PNG = "https://cdn.jsdelivr.net/gh/googlefonts/noto-emoji@v2.047/png/512";
 
@@ -80,7 +92,11 @@ Full-screen cards — replace the picture, so ONLY inside a b-roll stretch:
 
 Graphics with the picture in a window — they replace the picture with the footage framed beside text:
 - TermWindow — names a term or a word and explains what it means (ONLY over b-roll): {"kicker": "The term", "term": "the term as said", "at": "@the term", "meaning": phrase (≤12 words)}
-- ListWindow — lists 2-4 things or signs while the picture matters (ONLY over b-roll): {"title": "2-4 words", "items": [{"text" (≤5 words), "at": "@the item's FIRST spoken words", "say": "the item as said"}]}
+- ListWindow — lists 2-4 things or signs the narrator NAMES one after another, while the picture matters (ONLY over b-roll): {"title": "2-4 words", "items": [{"text" (≤${ROW_MAX_WORDS} words), "at": "@the item's FIRST spoken words", "say": "the item as said"}]}
+  (a list is separate things he names one after another — never a sentence chopped at its commas into a
+  time, a clause and describing words: "a short, quiet, careful letter" is one letter. Each row is the item in his
+  own words, keeping their "a", "the", "his", "her": "A seat by the window", "Her grandmother's sewing box" —
+  never clipped like a headline, "Seat by window")
 - HostListWindow — the HOST lists what is coming or 2-4 points, while on camera (ONLY over a HOST scene, never under the name tag): same props as ListWindow
 
 On top of the footage:
@@ -516,10 +532,110 @@ export function uncoveredMoments(placed: ResolvedCue[], words: Word[], film: Fil
   });
 }
 
-/** An item as a list row: no leading article, at most five words, a capital first letter. */
+/** A word as compared: lower case, no punctuation ("throne," is "throne", "Rome’s" is "rome's"). */
+const plainWord = (w: string) => w.toLowerCase().replace(/[’‘]/g, "'").replace(/[^a-z0-9']/g, "");
+/** The words a headline leaves out: an article or a possessive, and the "own" after one. */
+const GRAMMAR_WORD = /^(?:a|an|the|his|her|its|their|my|your|our|own)$/;
+/** Words a row never ends on: each needs the word after it ("…at two IN", "…to end HIS"). */
+const HANGING_WORD = /^(?:a|an|the|his|her|its|their|my|your|our|own|of|in|on|at|to|for|from|with|by|into|onto|and|or|but|that|who|which|where|when)$/;
+/** A row's first letter in capitals. */
+const capitalized = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/**
+ * An item as a list row: its spoken words with their grammar ("A waiting room", never "Waiting
+ * room"), at most `ROW_MAX_WORDS`, never ending on a word that needs the next ("The kitchen table at
+ * two in" — the cut used to stop wherever five words ran out), a capital first letter. The joining
+ * "and"/"or", and the "as" of "as rest", are left off.
+ */
 function rowText(item: string): string {
-  const w = item.replace(/^(a|an|the|as|and|or)\s+/i, "").replace(/[.,;:!?]+$/, "").split(/\s+/).slice(0, 5).join(" ");
-  return w.charAt(0).toUpperCase() + w.slice(1);
+  const words = item.replace(/^(?:as|and|or)\s+/i, "").replace(/[.,;:!?]+$/, "").split(/\s+/).filter(Boolean);
+  const w = words.slice(0, ROW_MAX_WORDS);
+  while (w.length > 1 && w.length < words.length && HANGING_WORD.test(plainWord(w[w.length - 1]))) w.pop();
+  return capitalized(w.join(" ").replace(/[,;:]+$/, ""));
+}
+
+/**
+ * A ROW KEEPS THE SPOKEN WORDS' GRAMMAR. A row the planner clipped from its item's spoken words by
+ * leaving out only the articles and possessives between them reads like a headline: Gideon's job 400
+ * (2:03) showed "One step from throne" for "an advisor standing one step from the throne" and
+ * "Ordered to end life" for "…would be ordered to end his own life". Those words go back in — and an
+ * article or possessive said right before the row's first word ("Second bag of pretzels" → "A second
+ * bag of pretzels") — when the row still fits `ROW_MAX_WORDS`. A row in the planner's own words (it
+ * left out a word that is not grammar, added one, or wrote a spoken number in digits) is its short
+ * version and is kept as written: "Buried under obligations" for "buried under exactly the kind of
+ * obligations…". Returns the row to show. Pure.
+ */
+export function restoreRowGrammar(text: string, say: string): string {
+  const row = text.trim().split(/\s+/).filter(Boolean);
+  const spoken = say.trim().replace(/[.,;:!?]+$/, "").split(/\s+/).filter(Boolean);
+  const r = row.map(plainWord);
+  const s = spoken.map(plainWord);
+  if (!r.length || r.some(w => !w)) return text;
+  for (let i = s.indexOf(r[0]); i >= 0; i = s.indexOf(r[0], i + 1)) {
+    // The row's words in the spoken words, in order, with only grammar words between them.
+    let j = i;
+    let k = 1;
+    for (; k < r.length; k++) {
+      let n = j + 1;
+      while (n < s.length && s[n] !== r[k] && GRAMMAR_WORD.test(s[n])) n++;
+      if (n >= s.length || s[n] !== r[k]) break;
+      j = n;
+    }
+    if (k < r.length) continue;
+    let from = i;
+    while (from > 0 && GRAMMAR_WORD.test(s[from - 1])) from--;
+    const words = spoken.slice(from, j + 1);
+    if (words.length === row.length || words.length > ROW_MAX_WORDS) return text;
+    return capitalized(words.join(" ").replace(/[,;:]+$/, ""));
+  }
+  return text;
+}
+
+/** One run of words found whole inside another ("the farmer" in "the farmer complains"). */
+function within(part: string[], whole: string[]): boolean {
+  if (!part.length || part.length > whole.length) return false;
+  for (let i = 0; i + part.length <= whole.length; i++) if (part.every((t, k) => whole[i + k] === t)) return true;
+  return false;
+}
+
+/**
+ * Are a list window's rows (each row's spoken words) the items of a list the pipeline found — each
+ * row one item, in the order said, its words inside that item's or holding them ("The farmer" for
+ * "The farmer complains")? Such a list passed the item rules when it was found. Pure.
+ */
+export function fromAFoundList(rows: string[], lists: { items: string[] }[]): boolean {
+  if (!rows.length) return false;
+  return lists.some(l => {
+    let k = 0;
+    return rows.every(row => {
+      const r = tokens(row);
+      while (k < l.items.length) {
+        const item = tokens(l.items[k++]);
+        if (within(r, item) || within(item, r)) return true;
+      }
+      return false;
+    });
+  });
+}
+
+/** A list window's rows as said: each item's "say", else its shown text. */
+function listRows(items: unknown): string[] {
+  if (!Array.isArray(items)) return [];
+  return items.map(it => {
+    const o = (it ?? {}) as { say?: unknown; text?: unknown };
+    return String(typeof o.say === "string" && o.say.trim() ? o.say : (o.text ?? "")).trim();
+  });
+}
+
+/** What the script says around `a`-`b` (seconds): the scenes it overlaps and one either side, so a
+ * sentence that starts in the scene before is whole. Pure. */
+function scriptAround(film: FilmLayout, a: number, b: number): string {
+  const over = film.scenes.map((s, k) => (s.narrationEndSec > a && s.narrationStartSec < b ? k : -1)).filter(k => k >= 0);
+  if (!over.length) return "";
+  return film.scenes
+    .slice(Math.max(0, over[0] - 1), over[over.length - 1] + 2)
+    .map(s => (s.scriptText ?? "").trim())
+    .join(" ");
 }
 
 /**
@@ -632,6 +748,16 @@ export type PlanInput = {
   /** The spoken lists the pipeline found in the script (`server/spokenLists.ts`): each one gets a
    * list graphic wherever one may go. */
   lists?: { items: string[]; kind?: "things" | "steps" }[];
+  /**
+   * Why a list's rows, as said, are not a spoken list by the rules every list the pipeline finds
+   * passes — or undefined when they are (the app hands `notAListAsSaid` from `server/spokenLists.ts`,
+   * so there is one set of rules). `script` is what the script says around the list. A list window
+   * the planner writes on its own is held to it (job 400's "Seneca's essay" numbered pieces of one
+   * sentence), and so is a stored list of things, which may predate the rules. Without it, neither is.
+   * `points`: the rows are the host's points (a HostListWindow's "what is coming"), which may be
+   * topics ("where they go", "when to retire one") as well as things.
+   */
+  listCheck?: (script: string, rows: string[], opts?: { points?: boolean }) => string | undefined;
 };
 
 /** A sentence the fill round offered back, and what came of it. */
@@ -727,7 +853,22 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
   // gives way (Dale's "Coasters, ornaments, small cutting boards" had only a "Smalls" label).
   const required = new Set<string>();
   const priority = (s: CueSpec) => structural.has(s.template) || required.has(s.id);
-  const lists = (input.lists ?? []).filter(l => l.items.length >= 2 && l.items.length <= 5);
+  const sized = (input.lists ?? []).filter(l => l.items.length >= 2 && l.items.length <= 5);
+  // A STORED list of things is held to the same rules as a list window the planner writes
+  // (`listCheck`): a job keeps the lists found when it was made, and Gideon's job 400 kept "Two
+  // thousand years ago, | a man named Lucius Annaeus Seneca wrote a short, | furious" from before the
+  // rules — put to the planner as a list that MUST get a graphic, and built by `missingListCues` all
+  // the same. Read where it is said; one not heard word for word is held to its rows alone. A list
+  // of steps is never asked whether its steps are things.
+  const where = new Map(locateLists(words, sized).map(p => [p.n, p] as const));
+  const staleLists: PlanProblem[] = [];
+  const lists = sized.filter((l, n) => {
+    if (l.kind === "steps" || !input.listCheck) return true;
+    const at = where.get(n);
+    const why = input.listCheck(at ? scriptAround(film, at.a, at.b) : "", l.items);
+    if (why) staleLists.push({ cue: `spoken list "${l.items.join(", ")}"`, problem: `not a list of things by the rules lists are found by — ${why}; it gets no list graphic` });
+    return !why;
+  });
   // The model is told a list MUST get a graphic only where one may go: a list in the call to action
   // can never have one, so naming it there is at best ignored and at worst refused. `missingListCues`
   // still reads every list, so a list said after a mid-roll CTA is located after it, not on an earlier
@@ -793,6 +934,17 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
         bad(`"${fragment[1]}" (${fragment[0]}) starts mid-sentence — a shown line must read as a whole thought`);
         continue;
       }
+      // A LIST WINDOW's rows are the spoken words with their grammar, never clipped into a headline
+      // (`restoreRowGrammar`: job 400's "Ordered to end life"), and at most ROW_MAX_WORDS each.
+      if (LIST_WINDOWS.has(spec.template) && Array.isArray(spec.props.items)) {
+        const items = spec.props.items as { text?: unknown; say?: unknown }[];
+        for (const it of items) if (it && typeof it.text === "string" && typeof it.say === "string") it.text = restoreRowGrammar(it.text, it.say);
+        const longRow = items.map(it => it?.text).find((s): s is string => typeof s === "string" && wordCount(s) > ROW_MAX_WORDS);
+        if (longRow) {
+          bad(`row "${longRow}" is ${wordCount(longRow)} words — a list row takes at most ${ROW_MAX_WORDS}: the item in its own spoken words, shortened`);
+          continue;
+        }
+      }
       // A WARNING reads as one: its line, alone under the header, says what to avoid or what goes
       // wrong — job 399's "Ask while the cart is still working its way back," told the viewer to do
       // the very thing the script warned against (`namesTheDanger`).
@@ -846,6 +998,27 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
           bad(
             `"${line}" is not the host's own words — ${why}. Signed with the host's name it reads as if the host said it. ` +
               `Show it as a caption with no name (DimCaption over b-roll), or drop it`
+          );
+          continue;
+        }
+      }
+      // A LIST WINDOW is a list the narrator says (`listCheck`): Gideon's job 400 (1:41) numbered "1 Two
+      // thousand years ago / 2 Seneca wrote a short / 3 Furious / 4 Loving essay" on ONE sentence,
+      // the planner's own list. A list the pipeline found passed the same rules when it was found
+      // (`fromAFoundList`). Read around where it resolved.
+      if (LIST_WINDOWS.has(spec.template) && input.listCheck) {
+        const rows = listRows(spec.props.items);
+        const why =
+          rows.length && !fromAFoundList(rows, lists)
+            ? input.listCheck(scriptAround(film, mine.start, mine.contentEnd ?? mine.end), rows, { points: spec.template === "HostListWindow" })
+            : undefined;
+        if (why) {
+          undo();
+          const title = typeof spec.props.title === "string" && spec.props.title.trim() ? `"${spec.props.title.trim()}"` : "The list window";
+          bad(
+            `${title} is not a list the narrator says: ${why}. A list window numbers separate things he names one after ` +
+              `another ("a pen, a notebook, and a lamp"), each row on that item's own words — never a sentence chopped at ` +
+              `its commas, a time or describing words. Show the line another way (a caption or a statement), or drop it`
           );
           continue;
         }
@@ -948,14 +1121,16 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
   const listNote = offered.length
     ? `\n\nSPOKEN LISTS IN THIS SCRIPT — each one MUST get a list graphic wherever one may go (ListWindow over
 b-roll, HostListWindow over the host; steps may be StepCards or StepLabels), every item a row in the order
-said ("text" ≤5 words, "at": "@its first spoken words", "say": the item as said):
+said ("text" ≤${ROW_MAX_WORDS} words, the item's own spoken words with their "a"/"the"/"his", "at": "@its first spoken words", "say": the item as said):
 ${offered.map((l, i) => `${i + 1}. ${l.kind === "steps" ? "[steps] " : ""}${l.items.map(x => `"${x}"`).join(", ")}`).join("\n")}`
     : "";
   const user = userPrompt(film, kept0.length ? resolveCues(kept0, words, opts) : [], words) + listNote;
   const first = await ask(system, [{ role: "user", content: user }]);
   let specs = parseSheet(first).filter(c => !keptIds.has(c.id));
   let verdict = await validate(structuredClone(specs), false);
-  const rounds: PlanRound[] = [{ step: "first", asked: specs.length, kept: verdict.cues.length, problems: verdict.problems }];
+  // A stored list the rules refused is named with the first round, so a list left without a graphic
+  // is explained (it is no cue, so it is never put to the repair).
+  const rounds: PlanRound[] = [{ step: "first", asked: specs.length, kept: verdict.cues.length, problems: [...staleLists, ...verdict.problems] }];
   if (verdict.problems.some(p => !p.cue.startsWith("[kept]"))) {
     const fix = `These cues failed the checks (resolved against the real word times and the film's layout):
 ${verdict.problems.filter(p => !p.cue.startsWith("[kept]")).map(p => `- ${p.cue}: ${p.problem}`).join("\n")}
