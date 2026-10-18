@@ -983,25 +983,36 @@ export function tagKeyThings(scenes: StoryboardScene[], things: KeyThing[] | und
     // picture's item, so the picture is the item's (or nobody's, drawn from its words).
     const surface = onlyItsSurface(s, s.keyThing) ? s.keyThing : undefined;
     if (surface) s.keyThing = undefined;
+    // …and one an earlier pass gave up is still only a surface. Every pass over a board — a retry's,
+    // a regenerate's, a resume's, each read back from the database with the last pass's filing on it
+    // — must file the picture the same way: asked only of `s.keyThing`, the second pass no longer saw
+    // the cart under job 399 scene 18's juice carton, filed it under the cup BESIDE it, and the view
+    // that keeps a thing beside the subject small (`BACKGROUND_VIEW`) came back.
+    const surfaces = [surface, ...(s.otherKeyThings ?? []).filter(t => onlyItsSurface(s, t))].filter(
+      (t, k, all): t is string => !!t && all.indexOf(t) === k
+    );
     if (!things?.length) {
-      if (surface) s.otherKeyThings = [surface, ...(s.otherKeyThings ?? []).filter(t => t !== surface)];
+      if (surfaces.length)
+        s.otherKeyThings = [...surfaces, ...(s.otherKeyThings ?? []).filter(t => !surfaces.includes(t))];
       continue;
     }
     const text = s.hostPresent ? s.splitVisual : (s.showSubject ?? s.visualPrompt);
     const named = keyThingsIn(text, things).map(t => t.name);
     // Filed anew only under a key thing the picture is ABOUT (or the item a screen shows): one beside
     // the subject would take the view that keeps its memory small (`BACKGROUND_VIEW`), and the surface
-    // with it — job 399 scene 18's juice carton on the cart tray, beside a cup.
+    // with it — job 399 scene 18's juice carton on the cart tray, beside a cup. Asked whenever the
+    // picture names a surface at all, filed under it or not, so the answer never depends on the pass.
+    const onSurface = surfaces.length > 0 || named.some(name => onlyItsSurface(s, name));
     const own = named.find(
-      name => !onlyItsSurface(s, name) && (!surface || isSubject(s, name) || isScreen(s))
+      name => !onlyItsSurface(s, name) && (!onSurface || isSubject(s, name) || isScreen(s))
     );
     if (!s.keyThing && own) {
       s.keyThing = own;
       n++;
     }
-    // Every other key thing the picture names is remembered too.
+    // Every other key thing the picture names is remembered too, and every surface it gave up.
     const others = named.filter(name => name !== s.keyThing);
-    if (surface && !others.includes(surface)) others.push(surface);
+    for (const t of surfaces) if (!others.includes(t)) others.push(t);
     s.otherKeyThings = others.length ? others : undefined;
   }
   return n;

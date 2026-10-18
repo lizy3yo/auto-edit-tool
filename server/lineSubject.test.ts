@@ -94,6 +94,50 @@ describe("the item, not what it sits on (job 410 scene 20)", () => {
     expect(board[1].keyThing).toBe("soda can");
   });
 
+  it("every pass files it the same way, as a retry reads the board back (job 399 scene 18: the carton on the cart, beside a cup)", () => {
+    const KT_399: KeyThing[] = [
+      { name: "beverage cart", main: true, look: "metal trolley with two tiers" },
+      { name: "plastic cup", look: "clear hard plastic, filled with ice cubes" },
+    ];
+    const board = [
+      pic(16, "Number one. The whole can.", "hands pouring soda into an ice-filled plastic cup at the cart", { keyThing: "plastic cup", humanPresent: true }),
+      pic(17, "a few inches of soda over ice.", "a small plastic cup barely filled with ginger ale on a tray table", { keyThing: "plastic cup", humanPresent: true }),
+      pic(18, JUICE, "a small juice carton on the beverage cart tray beside an ice-filled plastic cup", {
+        keyThing: "beverage cart",
+        otherKeyThings: ["plastic cup"],
+      }),
+    ];
+    attachMemory(board, board, KT_399);
+    const first = { keyThing: board[2].keyThing, others: board[2].otherKeyThings, view: memoryView(board[2]) };
+    expect(first.keyThing).toBeUndefined();
+    expect(first.others).toEqual(expect.arrayContaining(["beverage cart", "plastic cup"]));
+    expect(first.view).toBeUndefined();
+    // A retry, regenerate or resume starts from the stored board, this pass's filing on it. Asked only
+    // of the key thing, the second pass filed the carton under the cup BESIDE it and kept it small.
+    const again = JSON.parse(JSON.stringify(board)) as StoryboardScene[];
+    attachMemory(again, again, KT_399);
+    expect(again[2].keyThing).toBeUndefined();
+    expect(again[2].otherKeyThings).toEqual(first.others);
+    expect(memoryView(again[2])).toBeUndefined();
+    expect(memorySourcesFor(again, again[2])).toEqual([]);
+    // The pictures about the cup keep it on every pass.
+    expect(again[0].keyThing).toBe("plastic cup");
+    expect(again[1].keyThing).toBe("plastic cup");
+    // The same when the shot list never filed it: the cup beside the carton is not what it is about.
+    const untagged = JSON.parse(JSON.stringify(board)) as StoryboardScene[];
+    delete untagged[2].keyThing;
+    delete untagged[2].otherKeyThings;
+    attachMemory(untagged, untagged, KT_399);
+    expect(untagged[2].keyThing).toBeUndefined();
+    expect(memoryView(untagged[2])).toBeUndefined();
+    // With no props list a surface given up stays given up, pass after pass.
+    const bare = job410();
+    tagKeyThings(bare, undefined);
+    tagKeyThings(bare, undefined);
+    expect(bare[2].keyThing).toBeUndefined();
+    expect(bare[2].otherKeyThings).toEqual(["beverage cart"]);
+  });
+
   it("a line that names the surface is about it: the picture keeps it, and never as a thing kept small", () => {
     const board = job410();
     board[2] = pic(20, "The beverage cart comes back around with juice on it.", JUICE_SHOW, { keyThing: "beverage cart" });
@@ -229,9 +273,9 @@ describe("a list of what someone holds keeps the one holding it (job 410 scene 6
     const scenes = held410();
     expect(keepListHolders(scenes)).toBe(1);
     const water = scenes[3];
-    expect(water.showSubject).toBe("small water bottle in the empty row, held in an older woman passenger's hand");
+    expect(water.showSubject).toBe("small water bottle in the empty row, held in the hand of an older woman passenger");
     expect(water.visualPrompt).toBe(
-      "A small clear plastic water bottle with a blue cap in the empty row of blue seats, held in an older woman passenger's hand."
+      "A small clear plastic water bottle with a blue cap in the empty row of blue seats, held in the hand of an older woman passenger."
     );
     expect(water).toMatchObject({ humanPresent: true, otherPerson: "an older woman passenger" });
     // The items that already showed her, and the line after the list, are left as they were.
@@ -260,6 +304,36 @@ describe("a list of what someone holds keeps the one holding it (job 410 scene 6
     expect(scenes[2].showSubject).toBe("a small metal cash box, held in the host's hand");
     expect(scenes[2].humanPresent).toBe(true);
     expect(scenes[2].otherPerson).toBeUndefined();
+    // …and the host stays in the picture after the person pass, as the host at work.
+    markHostBroll(scenes, { hostLook: "a man in his sixties, grey beard", hostName: "the host" }, "https://r2/host.jpg");
+    expect(scenes[2]).toMatchObject({ humanPresent: true });
+    expect(scenes[2].brollHostLook).toBeTruthy();
+  });
+
+  it("the holder is named the way English names a phrase, and taken from the items before the lead-in", () => {
+    // A holder written as a phrase ("a man in his sixties" on stored films) has no possessive.
+    const phrase = [
+      pic(1, "He came back to his seat holding", "a man in his sixties walking down the aisle", { otherPerson: "a man in his sixties", humanPresent: true }),
+      pic(2, "a paper cup,", "a paper cup of coffee", { listCut: true }),
+      pic(3, "and a folded newspaper.", "a folded newspaper lying on the seat", { listCut: true }),
+    ];
+    expect(keepListHolders(phrase)).toBe(2);
+    expect(phrase[1].showSubject).toBe("a paper cup of coffee, held in the hand of a man in his sixties");
+    expect(phrase[2].showSubject).toBe("a folded newspaper, held in the hand of a man in his sixties");
+    // The lead-in shows someone beside the holder; the items show whose hands the things are in.
+    const beside = [
+      pic(1, "The flight attendant smiled, and she sat back down holding", "a flight attendant smiling down the aisle", {
+        otherPerson: "a flight attendant",
+        humanPresent: true,
+      }),
+      pic(2, "the whole can,", "an older woman's hand holding a full soda can", { listCut: true, otherPerson: "an older woman passenger", humanPresent: true }),
+      pic(3, "and a bottle of water.", "a small water bottle standing on the tray table", { listCut: true }),
+    ];
+    expect(keepListHolders(beside)).toBe(1);
+    expect(beside[2]).toMatchObject({
+      showSubject: "a small water bottle, held in the hand of an older woman passenger",
+      otherPerson: "an older woman passenger",
+    });
   });
 
   it("never a thing holding things, a list after 'with', a list of steps, or a holder nobody knows", () => {
@@ -313,6 +387,13 @@ describe("the line's last word, and a state a photo cannot show (job 408 scene 2
     expect(
       closingThing("It held up. There was a little more paper than usual in the bin by the door that week.", "a bathroom bin")
     ).toBeUndefined();
+    // a closing sentence that names an idea, not a thing a camera can see
+    for (const end of ["There's a reason for that.", "There is a better way.", "There's one more thing.", "There's the catch."])
+      expect(closingThing(`It looked fine for a year. ${end}`, "a smoke alarm on a hallway ceiling")).toBeUndefined();
+    // …while a thing named after "the problem was" is one
+    expect(closingThing("It kept tripping. The problem was a loose wire.", "a breaker panel with its door open")).toBe(
+      "The problem was a loose wire."
+    );
   });
 
   it("the rulebook keeps a line's last thing and draws what a speed leaves, in neutral words", () => {

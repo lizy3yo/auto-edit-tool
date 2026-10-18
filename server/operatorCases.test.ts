@@ -5746,7 +5746,7 @@ describe("the line's own subject is the picture's (round 13: jobs 410 and 408)",
     ];
     expect(keepListHolders(scenes)).toBe(1);
     expect(scenes[2]).toMatchObject({
-      showSubject: "small water bottle in the empty row, held in an older woman passenger's hand",
+      showSubject: "small water bottle in the empty row, held in the hand of an older woman passenger",
       otherPerson: "an older woman passenger",
       humanPresent: true,
     });
@@ -5762,5 +5762,27 @@ describe("the line's own subject is the picture's (round 13: jobs 410 and 408)",
     const line = "Then the next. The toilet starts flushing slow, and you decide the toilet is getting old. The toilet is fine. There is a stick in it.";
     expect(closingThing(line, "toilet bowl with water draining slowly, paper piling near the bend")).toBe("There is a stick in it.");
     expect(closingThing(line, "a toilet bowl with high standing water, paper caught on a stick across the drain")).toBeUndefined();
+  });
+
+  it("399 scene 18 on a retry: the carton on the cart is never filed under the cup beside it", async () => {
+    const { attachMemory, memoryView } = await import("./pictureMemory");
+    const things: KeyThing[] = [
+      { name: "beverage cart", main: true, look: "metal trolley with two tiers" },
+      { name: "plastic cup", look: "clear hard plastic, filled with ice cubes" },
+    ];
+    const board = [
+      pic(16, "Number one. The whole can.", "hands pouring soda into an ice-filled plastic cup at the cart", { keyThing: "plastic cup", humanPresent: true }),
+      pic(18, "Juice works the same way.", "a small juice carton on the beverage cart tray beside an ice-filled plastic cup", {
+        keyThing: "beverage cart",
+        otherKeyThings: ["plastic cup"],
+      }),
+    ];
+    attachMemory(board, board, things);
+    // "Retry failed scenes" reads the board back with the first pass's filing on it.
+    const retry = JSON.parse(JSON.stringify(board)) as StoryboardScene[];
+    attachMemory(retry, retry, things);
+    expect(retry[1].keyThing).toBeUndefined();
+    expect(memoryView(retry[1])).not.toBe(BACKGROUND_VIEW);
+    expect(memorySourcesFor(retry, retry[1])).toEqual([]);
   });
 });

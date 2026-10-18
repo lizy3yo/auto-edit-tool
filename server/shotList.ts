@@ -2491,6 +2491,9 @@ export function forbidsOf(v: unknown): string | undefined {
 /** "There is a stick in it.", "The problem was a loose wire.": a short sentence that reveals a thing. */
 const REVEALS_A_THING =
   /^(?:(?:and|but|so)\s+)?(?:there(?:'s|’s|\s+is|\s+are|\s+was|\s+were)|the\s+(?:problem|culprit|cause|answer|catch|reason)\s+(?:is|was))\s+(?:(?:just|only|simply|actually|really|still)\s+)?(?:a|an|the|one|some|two|three|your|its|their)\s+(.+?)[.!?…"”’]*$/i;
+/** The last word of what such a sentence names, when it names an idea rather than a thing. */
+const NOT_A_SEEN_THING =
+  /^(?:reasons?|ways?|things?|catch|answers?|problems?|point|difference|trick|secret|rules?|lessons?|chance|time|ideas?|questions?|truth|fix|part|steps?|options?|choices?|deal|issues?|risks?|cost|price|story|solutions?|method|plan|need|limit|lot|bit|more|better|upside|downside|benefit|bonus)$/i;
 
 /**
  * THE LINE'S LAST WORD (2026-10-18, job 408 scene 21): the short closing sentence a picture's line
@@ -2511,6 +2514,9 @@ export function closingThing(line: string | undefined, show: string | undefined)
   if (!m || last.split(/\s+/).length > 8) return undefined;
   const thing = m[1].split(/\s+(?:in|on|at|inside|under|behind|stuck|caught|of|with|for|from|that|which|to|left)\b/i)[0];
   const words = thing.toLowerCase().replace(/[^a-z\s-]/g, " ").split(/\s+/).filter(w => w.length >= 3);
+  // "There's a reason for that.", "There is a better way.", "There's one more thing." reveal nothing a
+  // camera can see: no mark for the check to chase.
+  if (NOT_A_SEEN_THING.test(words[words.length - 1] ?? "")) return undefined;
   const have = new Set((show ?? "").toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/));
   const named = (w: string) => have.has(w) || have.has(`${w}s`) || have.has(w.replace(/(?:es|s)$/, ""));
   return words.length && !words.some(named) ? last : undefined;

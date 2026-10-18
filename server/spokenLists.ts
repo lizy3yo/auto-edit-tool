@@ -1592,15 +1592,17 @@ function heldIn(text: string | undefined, hand: string): string | undefined {
 }
 
 /**
- * Who holds what a list of HELD things names, from the picture that leads into it and the list's own
- * pictures: the one someone else they show (one person only), else the host when the host is at work
- * in them or says it of their own hands. Undefined when nobody is known — nothing is guessed.
+ * Who holds what a list of HELD things names, from the list's own pictures and the picture that leads
+ * into it — the items first, since they show the hands the things are in, where the lead-in may show
+ * someone beside the holder: the one someone else they show (one person only), else the host when
+ * the host is at work in them or says it of their own hands. Undefined when nobody is known —
+ * nothing is guessed.
  */
 function listHolder(
   head: StoryboardScene | undefined,
   run: StoryboardScene[]
 ): { who: string; people?: number } | "host" | undefined {
-  const pictures = [...(head && !head.hostPresent ? [head] : []), ...run];
+  const pictures = [...run, ...(head && !head.hostPresent ? [head] : [])];
   const other = pictures.find(s => s.otherPerson);
   if (other) return (other.otherPeople ?? 1) > 1 ? undefined : { who: other.otherPerson!, people: other.otherPeople };
   if (pictures.some(s => s.humanPresent)) return "host";
@@ -1639,7 +1641,9 @@ export function keepListHolders(scenes: StoryboardScene[]): number {
       (HOLDING_START.test(run[0].scriptText ?? "") && PERSON_WORD.test(sentence));
     const holder = held && !run.some(s => s.listKind === "steps") ? listHolder(head, run) : undefined;
     if (holder) {
-      const hand = holder === "host" ? "the host's hand" : `${holder.who}'s hand`;
+      // "the hand of …", never "…'s hand": a holder is often a phrase ("a man in his sixties", "a
+      // woman at a baby shower" on stored films), and its possessive is not English.
+      const hand = holder === "host" ? "the host's hand" : `the hand of ${holder.who}`;
       for (const s of run) {
         if (s.humanPresent || fixedBeat(s) || showsPerson(`${s.showSubject ?? ""} ${s.visualPrompt ?? ""}`)) continue;
         s.showSubject = heldIn(s.showSubject, hand);
