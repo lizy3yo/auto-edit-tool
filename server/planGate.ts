@@ -25,6 +25,7 @@ import type { StoryboardScene, LongformInputParams } from "../shared/types";
 import { sceneHoldPlan } from "../shared/filmTimeline";
 import type { SilenceInterval } from "./videoAssembly";
 import { SHOWS_PERSON, showsSomeoneElse } from "./hostLook";
+import { namesHostBefore } from "./hostIntro";
 import {
   demoteHostToStill,
   promoteCutawayToHost,
@@ -960,10 +961,18 @@ function finishSentenceAfterHost(
   // 2. BACK — the host hands over at its own last clause punctuation (the voice pauses there).
   const floor = Math.max(HOST_HANDOFF_MIN_SEC, host.minHoldSec ?? 0);
   const at = (b: number) => timeAtWord(host, b, opts.silences, opts.words);
+  // The introduction keeps the WHOLE name on the host, asked the way the shot list asks it
+  // (`namesHostBefore`): asked of the kept words alone, "I'm Hank" counted as an introduction and a
+  // walk back from a cut at no break handed over between the two words — "…I'm Hank | Hardwood
+  // talking to you…", "…I'm Sawdust | Sam…". With no host name there is no name to keep whole.
+  const keepsName = (b: number) => {
+    const said = hw.slice(0, b).join(" ");
+    return params.hostName?.trim()
+      ? namesHostBefore(hw.join(" "), params.hostName, said.length)
+      : introducesHost(said, params.hostName);
+  };
   const keeps = (b: number) =>
-    b >= HOST_HANDOFF_MIN_WORDS &&
-    at(b) - from >= floor &&
-    (!host.hostIntro || introducesHost(hw.slice(0, b).join(" "), params.hostName));
+    b >= HOST_HANDOFF_MIN_WORDS && at(b) - from >= floor && (!host.hostIntro || keepsName(b));
   const back = (b: number) =>
     handOff(
       at(b),

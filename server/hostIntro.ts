@@ -94,18 +94,21 @@ function introPatterns(hostName: string | undefined): RegExp[] {
       );
       continue;
     }
-    // One word of a longer name: capitalised, and "<word> here" only as a sign-on — at the start of
-    // a sentence or after a greeting's comma, then a pause or a sign-on's next word ("Sam here, back
-    // in the shop.", "Hank here again.") — so "the Carolina Wren here, though," or "Sawdust here
-    // gets into everything" is not one.
+    // One word of a longer name: capitalised, and "<word> here" only as a sign-on, never "the
+    // Carolina Wren here, though,". At the start of a sentence every word is capitalised, so a pause
+    // or a sign-on's next word must follow ("Sam here, back in the shop.", "Hank here again.") and
+    // "Sawdust here gets into everything" is not one. After a greeting's comma or a dash the capital
+    // already says it is a name, so the sign-on may go on as it likes — "Hi folks, Hank here in the
+    // shop", "Howdy — Hank here": the old first-word rule found those, and they must stay found.
     const esc = escapeName(f.words.charAt(0).toUpperCase() + f.words.slice(1));
     out.push(
       new RegExp(`\\b${INTRO_LEAD}\\s+${esc}${NOT_POSSESSIVE}`, "g"),
       new RegExp(
-        `(?:^|(?<=[.!?…,;:]["'”’)\\]]*\\s+))${esc}\\s+here` +
+        `(?:^|(?<=[.!?…]["'”’)\\]]*\\s+))${esc}\\s+here` +
           `(?=\\s*(?:[,.;:!?…—–-]|$)|\\s+(?:again|and|with|from|today|back)\\b)`,
         "g"
-      )
+      ),
+      new RegExp(`(?<=[,;:]["'”’)\\]]*\\s+|[—–]\\s*)${esc}\\s+here${NOT_POSSESSIVE}`, "g")
     );
   }
   return out;

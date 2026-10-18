@@ -89,6 +89,21 @@ describe("introducesHost — a two-word name said by its last word", () => {
     expect(introducesHost("It's Hank's favourite saw.", "Hank Hardwood")).toBe(false);
     expect(introducesHost("I'm going to cut it now.", "Hank Hardwood")).toBe(false);
   });
+
+  it("finds a sign-on after a greeting's comma or a dash however it goes on, as the first-word rule did", () => {
+    // Mid-sentence the capital already says it is a name, so the next word may be anything.
+    expect(introducesHost("Hi folks, Hank here in the shop today.", "Hank Hardwood")).toBe(true);
+    expect(introducesHost("Howdy, Sam here at the bench with a new box.", "Sawdust Sam")).toBe(true);
+    expect(introducesHost("Howdy — Hank here, back in the shop.", "Hank Hardwood")).toBe(true);
+    expect(introducesHost("Well, folks—Brenda here in the garden.", "Backyard Brenda")).toBe(true);
+    // At the start of a sentence every word has a capital, so the strict form still holds there…
+    expect(introducesHost("Sawdust here in the corner gets into everything.", "Sawdust Sam")).toBe(false);
+    expect(introducesHost("Hardwood here in the Midwest runs about four dollars a foot.", "Hank Hardwood")).toBe(false);
+    // …and mid-sentence the word must still be the name, capitalised, and not "here's".
+    expect(introducesHost("In this shop, sawdust here gets everywhere.", "Sawdust Sam")).toBe(false);
+    expect(introducesHost("Folks, Sam here's the trick.", "Sawdust Sam")).toBe(false);
+    expect(introducesHost("You can see the Carolina Wren here — on the feeder.", "Walter Wren")).toBe(false);
+  });
 });
 
 describe("hostNameRanges / namesHostBefore", () => {

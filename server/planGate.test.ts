@@ -963,6 +963,58 @@ describe("a host take stops mid-sentence only at a natural break (job 400)", () 
     expect(r.scenes[1].narrationEndSec).toBe(9);
   });
 
+  // The introduction hands over only once the WHOLE name is said. Asked of the kept words alone,
+  // "…I'm Hank" read as an introduction, and with the host minutes spent the walk back from a cut
+  // at no break handed over between the two words of the name.
+  const intro = (hostText: string) => {
+    const s = cut(
+      film([
+        ["P", 5, sentence(1)],
+        ["H", 6, hostText],
+        ["P", 6, "talking to you from my garage today about a box."],
+        ["H", 5, sentence(2)],
+      ]),
+      1,
+      2
+    );
+    s[1].hostIntro = true;
+    return s;
+  };
+
+  it("never hands the introduction over between the two words of the host's name", () => {
+    for (const [hostName, text] of [
+      ["Hank Hardwood", "So before we get going on any of it, I'm Hank Hardwood"],
+      ["Sawdust Sam", "So before we get going on any of it, I'm Sawdust Sam"],
+    ]) {
+      const r = enforcePlanRules(intro(text), { ...params, hostName }, { budgetSec: 11 });
+      expect(r.scenes[1].scriptText, hostName).toBe(text);
+      expect(r.scenes[2].scriptText, hostName).toBe("talking to you from my garage today about a box.");
+    }
+  });
+
+  it("hands the introduction over after the name — said whole, or by its last word (job 407)", () => {
+    for (const [hostName, text, kept] of [
+      [
+        "Hank Hardwood",
+        "Before anything else, I'm Hank Hardwood, and today we start with the",
+        "Before anything else, I'm Hank Hardwood,",
+      ],
+      ["Sawdust Sam", "Before anything else, I am Sam, and today we start with the", "Before anything else, I am Sam,"],
+    ]) {
+      const r = enforcePlanRules(intro(text), { ...params, hostName }, { budgetSec: 11 });
+      expect(r.scenes[1].scriptText, hostName).toBe(kept);
+      expect(r.scenes[2].scriptText, hostName).toMatch(/^and today we start with the talking/);
+    }
+    // Never before the name: with no comma after it, the last clause mark is "today," — where the
+    // name is not yet said — so the hand-off comes later, after "I am Sam".
+    const r = enforcePlanRules(
+      intro("Before we get going on any of it today, I am Sam and we start with the"),
+      { ...params, hostName: "Sawdust Sam" },
+      { budgetSec: 11 }
+    );
+    expect(r.scenes[1].scriptText).toMatch(/^Before we get going on any of it today, I am Sam\b/);
+  });
+
   it("a stretch without the host never takes a picture that stops at no break as its check-in", () => {
     const rows = (a: string, b: string): [("H" | "P" | "M"), number, string][] => [
       ["H", 5, sentence(1)],

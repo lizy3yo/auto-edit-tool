@@ -3739,5 +3739,30 @@ describe("the host introduced by one word of a two-word channel name (job 407)",
     expect(introducesHost("Sweep up the sawdust here, before it spreads.", "Sawdust Sam")).toBe(false);
     expect(introducesHost("It's sterling silver, not plate.", "Scarlett Sterling")).toBe(false);
     expect(introducesHost("You can see the Carolina Wren here, on the feeder.", "Walter Wren")).toBe(false);
+    // A sign-on after a greeting's comma or a dash is found however it goes on.
+    expect(introducesHost("Hi folks, Hank here in the shop today.", "Hank Hardwood")).toBe(true);
+    expect(introducesHost("Howdy — Sam here, back at the bench.", "Sawdust Sam")).toBe(true);
+  });
+
+  it("the plan gate never hands the introduction over between the two words of the name", async () => {
+    // With the host minutes spent, the gate walked back from a cut at no break and asked only the
+    // kept words whether they named the host — "…I'm Sawdust" did, so the take ended there and
+    // "Sam talking to you…" went under a picture. The name is now asked of the whole line.
+    const { enforcePlanRules } = await import("./planGate");
+    let t = 0;
+    const timed = (s: StoryboardScene, sec: number) => {
+      Object.assign(s, { narrationStartSec: t, narrationEndSec: t + sec, audioDuration: sec });
+      t += sec;
+      return s;
+    };
+    const scenes = [
+      timed(pic(1, "That steel is why the last skill held the other twenty-four together.", "an axe head", { stillImage: true }), 5),
+      timed(host(2, "So before we get going on any of it, I'm Sawdust Sam", { hostIntro: true, wordCut: true }), 6),
+      timed(pic(3, "talking to you from my shop today about a winter.", "a woodlot", { stillImage: true, wordCut: true }), 6),
+      timed(host(4, "Now, back to the cabin."), 5),
+    ];
+    const r = enforcePlanRules(scenes, params, { budgetSec: 11 });
+    expect(r.scenes[1].scriptText).toBe("So before we get going on any of it, I'm Sawdust Sam");
+    expect(r.scenes[2].scriptText).toMatch(/^talking to you/);
   });
 });
