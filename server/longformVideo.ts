@@ -8228,7 +8228,11 @@ export function titleMatcher(
   const tests = full.map(t => ({ main: mainSet.has(t), fn: tokenTest(t) }));
   const main = tests.filter(t => t.main);
   return text => {
-    const hay = (text ?? "").toLowerCase();
+    // A curly apostrophe is the title's straight one. A two-word title needs both words now, so a
+    // possessive one ("Grandpa's Workshop") typed straight in the book row would never match a
+    // script typed with curly quotes — and scripts are: job 400's reached its scenes with curly
+    // apostrophes intact, and a CTA marker can say "Can't" while its own line says "Can’t".
+    const hay = (text ?? "").toLowerCase().replace(/[\u2018\u2019]/g, "'");
     const mainHits = main.filter(t => t.fn(hay)).length;
     if (main.length >= 2 && mainHits >= Math.max(2, main.length - 1)) {
       return true;

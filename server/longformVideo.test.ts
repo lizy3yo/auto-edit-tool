@@ -3952,6 +3952,24 @@ describe("titleMatcher", () => {
     expect(titleMatcher("Homesteading")("a little book I call Homesteading")).toBe(true);
     expect(titleMatcher("Homesteading")("a quiet morning on the porch")).toBe(false);
   });
+
+  it("reads a curly apostrophe in the script as the title's straight one", () => {
+    // Job 400's script reached its scenes with curly apostrophes; a two-word possessive title
+    // needs both words now, so the possessive must still match.
+    const shop = titleMatcher("Grandpa's Workshop");
+    expect(shop("it's all in Grandpa’s Workshop, my digital book")).toBe(true);
+    expect(shop("it's all in Grandpa's Workshop, my digital book")).toBe(true);
+    expect(shop("Grandpa’s old saw still hangs by the door")).toBe(false);
+    expect(shop("back in the workshop, the light was going")).toBe(false);
+    // A curly title is tokenised without its apostrophe and still finds either spelling.
+    expect(titleMatcher("Grandpa’s Workshop")("it's in Grandpa's Workshop")).toBe(true);
+    // The mismatch is real: Luca's 3-min script marks its CTA "Can't" and says "Can’t".
+    expect(
+      titleMatcher("Everything Your Cat Can't Tell You")(
+        "into my book, Everything Your Cat Can’t Tell You."
+      )
+    ).toBe(true);
+  });
 });
 
 describe("markCoverReveal", () => {
@@ -11660,6 +11678,14 @@ describe("titleMatcher — a word the title repeats counts once (Diane, job 245)
     const m = titleMatcher(
       "The French Way: 101 Style Hair and Makeup Secrets The French Use To Look 20 Years Younger"
     );
+    expect(m("None of this is secret. It is ordinary French habit that nobody bothers to write down, so I did.")).toBe(false);
+    expect(m("A digital book of mine, called The French Way.")).toBe(true);
+  });
+
+  it("does the same on the channel's stored two-word title, 'The French Way'", () => {
+    // The book row holds only the main title, and half of two words is one: "French" alone used
+    // to name it, the same wrong line as job 245.
+    const m = titleMatcher("The French Way");
     expect(m("None of this is secret. It is ordinary French habit that nobody bothers to write down, so I did.")).toBe(false);
     expect(m("A digital book of mine, called The French Way.")).toBe(true);
   });
