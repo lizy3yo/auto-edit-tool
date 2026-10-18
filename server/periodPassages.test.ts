@@ -81,10 +81,11 @@ describe("the list finder says where and when a list's sentence is set", () => {
     expect(parseSpokenLists(answer(FOUR, ROME), [SERIES])).toEqual([{ sentence: 0, items: FOUR, setting: ROME }]);
     // The model stopping one member early still gets "the young…" back, setting and all.
     expect(parseSpokenLists(answer(FOUR.slice(0, 3), `"${ROME}."`), [SERIES])).toEqual([{ sentence: 0, items: FOUR, setting: ROME }]);
-    // A list of steps keeps it too.
+    // Clean: a list of STEPS never takes one — each step is drawn as the host's own hands doing it,
+    // here and now, and a setting would dress the host's sleeves for another age.
     const steps = ["Knead the dough", "shape the loaf", "bake it in the stone oven"];
     expect(parseSpokenLists(answer(steps, "a medieval town, about 1300", "steps"), ["Knead the dough, shape the loaf, and bake it in the stone oven."])).toEqual([
-      { sentence: 0, items: steps, kind: "steps", setting: "a medieval town, about 1300" },
+      { sentence: 0, items: steps, kind: "steps" },
     ]);
   });
 
@@ -161,6 +162,20 @@ describe("every item of the list is set where its sentence is (job 409, 156-164 
     expect(buildStillPrompt(r.scenes.find(s => s.listCut)!)).not.toMatch(/Like the sentence it is said in/);
   });
 
+  it("clean: a list of steps sets nothing, even one saved with a setting — each step is the host's own hands", () => {
+    const said = "Knead the dough, shape the loaf, and bake it in the stone oven.";
+    const r = applySpokenLists([pic(1, said, "the host's hands kneading dough on the counter", { humanPresent: true })], [
+      { sentence: 0, items: ["Knead the dough", "shape the loaf", "bake it in the stone oven"], kind: "steps", setting: "a medieval town, about 1300" },
+    ]);
+    const items = r.scenes.filter(s => s.listCut);
+    expect(items.length).toBeGreaterThanOrEqual(3);
+    for (const s of items) {
+      expect(s.listKind).toBe("steps");
+      expect(s.listSetting).toBeUndefined();
+      expect(buildStillPrompt(s)).not.toMatch(/Like the sentence it is said in/);
+    }
+  });
+
   it("listItemClause: the setting follows the tell-apart clause; with none the clause is exactly as before", () => {
     const listItems = { own: "The farmer complains", others: ["the senator complains", "the old complain", "the young are already rehearsing the complaint"] };
     const before =
@@ -235,6 +250,8 @@ describe("a 'he' of the story is never the host, and a figure of speech is drawn
     expect(SHOT_LIST_SYSTEM).toMatch(/Only a how-to that really turns, opens or lifts a thing \("turn the board over and sand the other side"\) is shown literally/);
     expect(SHOT_LIST_SYSTEM).toMatch(/a person of the story the line calls "he" or "she" \(rule 1f\); never the host/);
     expect(SHOT_LIST_SYSTEM).toMatch(/1h\. ANOTHER TIME OR PLACE/);
+    // A passage AWAY from the video's own here and now — never a whole video about another country.
+    expect(SHOT_LIST_SYSTEM).toMatch(/a faraway place, away from the video's own here and now — history/);
     expect(SHOT_LIST_SYSTEM).toMatch(/names that time and place in show and dresses its people, tools and buildings for it/);
     expect(SHOT_LIST_SYSTEM).toMatch(/the shots of a spoken list and a shot of a bare word too/);
     expect(SHOT_LIST_SYSTEM).toMatch(/A line inside it about today is today/);
@@ -255,6 +272,10 @@ describe("a 'he' of the story is never the host, and a figure of speech is drawn
     expect(FIT_SYSTEM).toMatch(/or an animal the script is about/);
     expect(FIT_SYSTEM).toMatch(/A picture marked "its he\/she is not the host" has such a line/);
     expect(FIT_SYSTEM).toMatch(/ANOTHER TIME OR PLACE\. A stretch of lines may be set in another time or a faraway place/);
+    // Only a stretch away from the video's own world: a host showing a household of their own country
+    // is not a video of "another country" whose every picture must name it.
+    expect(FIT_SYSTEM).toMatch(/a faraway place, away from the\s+video's own here and now/);
+    expect(FIT_SYSTEM).toMatch(/A video whose own world is that time or place has no such stretch/);
     expect(FIT_SYSTEM).toMatch(/A picture there whose words give no sign of that time or place, so it would be drawn as\s+today, is WRONG/);
     expect(FIT_SYSTEM).toMatch(/A picture marked "inside a passage set in …" is in such a stretch/);
     // Earlier pins, kept.

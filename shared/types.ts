@@ -1642,9 +1642,11 @@ export interface LongformInputParams {
   viewerPerson?: RecurringPerson;
   /**
    * The spoken lists found in the whole script (`server/spokenLists.ts`), kept for the voicing
-   * stage's last pass, which applies them again on the final lengths.
+   * stage's last pass, which applies them again on the final lengths — with each list's kind and the
+   * time and place its sentence is set in (`setting`, job 409), so that pass and a resume set the
+   * items where the first pass did.
    */
-  spokenLists?: { sentence: number; items: string[] }[];
+  spokenLists?: { sentence: number; items: string[]; kind?: "things" | "steps"; setting?: string }[];
   /**
    * Which long-form tab (slot 0–4) launched this job. Selects BOTH per-tab provider keys: the
    * APIMART key for b-roll VIDEO generation (unset or a slot with no key ⇒ the 69Labs video path)

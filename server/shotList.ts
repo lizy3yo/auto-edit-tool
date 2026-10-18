@@ -1689,7 +1689,7 @@ export const SHOT_LIST_SYSTEM =
   // complains, … the old complain, and the young …" named no time and came back as today's people —
   // overalls, a park bench, a hoodie — because rule 11 sent a shot with no place of its own home.
   "1h. ANOTHER TIME OR PLACE. When the words are inside a passage set in another time or a faraway " +
-  "place — history, a story of long ago, what a writer of another age wrote or saw, how things are " +
+  "place, away from the video's own here and now — history, a story of long ago, what a writer of another age wrote or saw, how things are " +
   "done in another country — every shot until the words come back to today or to the host's own " +
   "life names that time and place in show and dresses its people, tools and buildings for it: the " +
   "shots of a spoken list and a shot of a bare word too (\"the baker\" in a passage about a medieval " +
@@ -2642,7 +2642,10 @@ export function keyThingsIn(text: string | undefined, things: KeyThing[] | undef
 // job 409's (round 13): "Then he turns the whole thing over in a single motion: life is not short" —
 // a writer of ancient times reversing his argument — passed the check as the host turning a page, and
 // the list said inside that passage passed as today's farmer, old man and young man. `fitPictureNotes`
-// marks the pictures the code can tell are such.
+// marks the pictures the code can tell are such. ANOTHER TIME OR PLACE is a stretch AWAY from the
+// video's own here and now: read without that, a video whose whole subject is how things are done in
+// another country (a host showing a household of their own country) would have every picture that
+// does not name the country called WRONG and rewritten.
 export const FIT_SYSTEM = `You check a video's pictures against what is said under them. Between the host's
 on-camera lines the viewer sees one picture at a time. You get every line in film order: HOST lines
 for context, and PICTURE lines with what the picture shows.
@@ -2709,8 +2712,9 @@ closed the book on it", said of a part of her life, is no book. A picture that d
 speech literally is WRONG: give it the moment that carries what the line means (A LINE WITH NOTHING
 TO SEE). A how-to that really turns, opens or lifts a thing ("turn the board over and sand the other
 side") is literal, and so is its picture.
-ANOTHER TIME OR PLACE. A stretch of lines may be set in another time or a faraway place — history, a
-story of long ago, what a writer of another age wrote or saw, how things are done in another country.
+ANOTHER TIME OR PLACE. A stretch of lines may be set in another time or a faraway place, away from the
+video's own here and now — history, a story of long ago, what a writer of another age wrote or saw, how
+things are done in another country. A video whose own world is that time or place has no such stretch.
 Every picture inside that stretch shows that time and place: its people dressed for it, its tools,
 buildings and land of it — a spoken list's pictures and a picture of a bare word ("the baker", "the
 young") too. A picture there whose words give no sign of that time or place, so it would be drawn as

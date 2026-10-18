@@ -67,7 +67,8 @@ export interface SpokenList {
    * (`listSettingOf`): asked in the same call that finds the lists, since it reads the whole script
    * and so knows the passage a sentence sits in even when the sentence names no time itself (job 409:
    * "The farmer complains, the senator complains, …" is said inside a passage about an ancient
-   * writer). Each item's picture is told it (`scene.listSetting`, `listItemClause`).
+   * writer). Each item's picture is told it (`scene.listSetting`, `listItemClause`). Never on a list
+   * of steps, whose pictures are the host's own hands here and now.
    */
   setting?: string;
 }
@@ -714,12 +715,15 @@ export function parseSpokenLists(text: string, sentences: string[]): SpokenList[
     // 401: "the kitchen table at two in the morning when the house is too quiet").
     const kept = steps ? joinChoiceSteps(sentences[n], items) : withLastItemCut(items);
     if (!validateSpokenList(sentences[n], kept, steps)) continue;
+    // The time and place it is set in, when not the video's own here and now (job 409, `listSettingOf`).
+    // Never on STEPS: each step is drawn as "the host's hands, mid-step" (`applySpokenLists`), steps
+    // are what the viewer does here and now, and a setting there would ask the host's own sleeves to
+    // be dressed for another age beside the clause that draws them in the host's clothes.
+    const setting = steps ? undefined : listSettingOf(raw?.setting);
+    const where = setting ? { setting } : {};
+    if (steps) out.push({ sentence: n, items: kept, kind: "steps" });
     // A parallel series the model ended one member early, at the member said differently ("…, the old
     // complain, and the young are already rehearsing the complaint", job 400), gets it back.
-    // The time and place it is set in, when not the video's own here and now (job 409, `listSettingOf`).
-    const setting = listSettingOf(raw?.setting);
-    const where = setting ? { setting } : {};
-    if (steps) out.push({ sentence: n, items: kept, kind: "steps", ...where });
     else out.push({ sentence: n, items: withLastSeriesMember(sentences[n], kept), ...where });
   }
   return out.sort((a, b) => a.sentence - b.sentence);
@@ -1339,8 +1343,9 @@ export function applySpokenLists(
       first: G[starts[0]].scene,
       last: G[end - 1].scene,
       kind: list.kind,
-      // A list saved before the setting was asked for has none, and its pictures stay as they were.
-      setting: listSettingOf(list.setting),
+      // A list saved before the setting was asked for has none, and its pictures stay as they were;
+      // a list of steps never has one (the host's own hands, `parseSpokenLists`).
+      setting: list.kind === "steps" ? undefined : listSettingOf(list.setting),
     });
   }
 
