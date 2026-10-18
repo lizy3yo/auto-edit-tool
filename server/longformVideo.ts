@@ -113,6 +113,7 @@ import {
   varietyLane,
   withScreenTurn,
 } from "./pictureVariety";
+import { detailRedrawsPerVideo, takeDetailRedraw } from "./detailRedraws";
 
 /**
  * Redraws a host picture gets when it shows someone else — or the face it must never show — before
@@ -122,9 +123,10 @@ export const HOST_IDENTITY_REDRAWS = 2;
 /**
  * What the still loop does with a host picture after `scanSameHost` (2026-10-18, the review of jobs
  * 401-407): a picture of the host is kept only when it is the host AND, unless it is a step on their
- * own face (`hostFaceShown`), the face is not shown. Job 401 scene 20 (the host reading at a desk,
- * face on), job 406 scene 14 (smiling into the lens, phone at the ear) and job 407 scene 27 (a
- * full-body axe swing, the face in three-quarter view) all shipped as "the same person". A miss is
+ * own face or a look on it (`hostFaceShown`), the face is not shown. Job 401 scene 20 (the host
+ * reading at a desk, face on), job 406 scene 14 (smiling into the lens, phone at the ear) and job
+ * 407 scene 27 (a full-body axe swing, the face in three-quarter view) all shipped as "the same
+ * person". A miss is
  * drawn again — a drawn face from behind or the side (`turnAway`, `turnHostAway`) unless its framing
  * is settled otherwise (`mayTurnHostAway`: a chin line, a piece worn at the neck) — and counts with
  * the identity misses: past `HOST_IDENTITY_REDRAWS`, or on the last attempt, the picture is drawn with
@@ -136,7 +138,7 @@ export type HostPictureMove =
   | { move: "redraw" | "nobody"; why: "someone else" | "face"; turnAway: boolean };
 export function hostPictureMove(
   verdict: { same: boolean; face?: boolean },
-  /** A step on the host's own face (`scene.hostFaceShown`) shows the face by design. */
+  /** A step on the host's own face, or a look on it (`scene.hostFaceShown`), shows the face by design. */
   faceAllowed: boolean,
   /** Earlier draws of this picture the host check refused. */
   missesBefore: number,
@@ -477,6 +479,8 @@ import {
   castOfPicture,
   deriveHostLook,
   facingTheCamera,
+  hairLookOnFace,
+  hostFaceLook,
   hostLipsCut,
   hostTurnedAway,
   looksCutOff,
@@ -6185,6 +6189,8 @@ export function personClauseFor(scene: StoryboardScene, visual: string): string 
   // A pose drawn face-on (the whole body in action, a call at the ear) or a picture whose drawing
   // already showed the face is framed from behind or the side only (`hostTurnedAway`).
   const turnedAway = hostTurnedAway(scene);
+  // The host's own face shown: a step of a routine on it, or a look on it (`hostFaceLook`).
+  const faceShown = !!scene.brollHostLook && !!scene.hostFaceShown && !scene.otherPerson;
   const others = peopleAskedFor(scene);
   const who = scene.otherPerson
     ? scene.hostAmongOthers
@@ -6192,12 +6198,15 @@ export function personClauseFor(scene: StoryboardScene, visual: string): string 
       : otherPersonClause(others.who, others.count, scene.otherPersonLooks)
     : scene.brollHostLook
       ? scene.hostFaceShown
-        ? hostFaceClause(scene.brollHostLook)
+        ? hostFaceLook(scene)
+          ? hostFaceLookClause(scene.brollHostLook, hairLookOnFace(scene))
+          : hostFaceClause(scene.brollHostLook)
         : hostBrollClause(scene.brollHostLook, lipsCut, turnedAway)
       : ANON_PERSON_SUFFIX;
   const worn = WORN_FRONT.exec(visual)?.[0];
   // Hands on the person's OWN hair, scalp or face (Diane's job 313: a head twisted round, a third
   // arm): a side or three-quarter view of a natural pose, never "from behind" with both arms up.
+  // With the face shown, "seen from the side" would hide what the picture is about — the arm only.
   const ownHead =
     /\b(?:hair|scalp|face|forehead|cheeks?|neck)\b/i.test(visual) &&
     /\b(?:brush|comb|pin|twist|style|apply|appl(?:ies|ying)|work(?:s|ing)?|smooth|part|wash|rins|dry|spread|massag|tuck|clip)/i.test(visual);
@@ -6206,11 +6215,15 @@ export function personClauseFor(scene: StoryboardScene, visual: string): string 
     : lipsCut
       ? " The arm comes up naturally from its own shoulder to the neck or chin — one hand at it " +
         "when one is enough."
-      : " Seen from the side, the head and shoulders turned the same way, the arms raised naturally " +
-        "from their own shoulders to the hair or face — one hand at it when one is enough.";
+      : faceShown
+        ? " The arm comes up naturally from its own shoulder to the hair or face — one hand at it " +
+          "when one is enough."
+        : " Seen from the side, the head and shoulders turned the same way, the arms raised naturally " +
+          "from their own shoulders to the hair or face — one hand at it when one is enough.";
+  // Glasses or earrings on a face that is shown are seen from the front, where they sit.
   const wornClause = !worn
     ? ""
-    : lipsCut
+    : lipsCut || faceShown
       ? ` The ${worn.toLowerCase()} is worn where it really sits, on the FRONT of the head or body, ` +
         `and the body faces the camera so it shows there.`
       : ` The ${worn.toLowerCase()} is worn where it really sits, on the FRONT of the head or body; ` +
@@ -6398,6 +6411,39 @@ export function hostFaceClause(look: string): string {
     `head turned a little, eyes on what they are doing (never looking at the camera), one hand ` +
     `at the face. Nobody else is in the frame, in the background or in a reflection. ` +
     `${ONE_BODY_CLAUSE}`
+  );
+}
+
+/**
+ * The host with a LOOK on their own face (`hostFaceLook`, 2026-10-18, the operator's decision on the
+ * audit's cause 9): a line about how a lipstick or blush shade, a hair colour or cut round the face,
+ * glasses, earrings or a colour near the face LOOKS was drawn from behind or on a hanger, because the
+ * host's face is never drawn — and how a face reads cannot be shown without it (Diane's job 309 scene
+ * 29, "A woman with gray hair that catches the light will read younger…", the back of a head at a
+ * restaurant table). The face is shown and must be HERS: the host photo is the reference, named as
+ * the face to keep, and the picture is compared with it (`scanSameHost`). The look itself is what the
+ * picture is about, so it is in view and drawn as the description says; a HAIR look (`hairLookOnFace`)
+ * draws the hair the picture's description gives, on the same face — named as the picture's own,
+ * since the host's look just before it names the photo's hair. Facing the camera or three-quarter,
+ * eyes just off the lens, so it reads as a photo of the look and not a second talking head. No look
+ * is listed as an example: a thing a prompt names is a thing the picture maker draws (the props list
+ * put an oil lamp in most of Hannah's shots), so a list of looks would put glasses, earrings or a
+ * lip colour on a picture whose line is about her hair.
+ */
+export function hostFaceLookClause(look: string, hairFromWords = false): string {
+  const hair = hairFromWords
+    ? `the same face and features, the same age, the same skin and complexion — not a younger, ` +
+      `smoother or different person — with the hair exactly as the picture's own description above ` +
+      `gives it, its colour and cut, even where the reference photo's hair is different`
+    : `the same face and features, the same age, the same skin and complexion, the same hair colour ` +
+      `and hairstyle, not a younger, smoother or different person`;
+  return (
+    `The only person in this shot is the host — ${look.trim().replace(/\.$/, "")} — the SAME person ` +
+    `as in the reference photo: ${hair}. A close, natural photo of their face and shoulders with the ` +
+    `look this line is about ON them and clearly in view, exactly as the description says and ` +
+    `nothing added to it: facing the camera or in three-quarter view, a relaxed, ordinary expression, ` +
+    `the eyes resting just off the lens (never staring into it), not posed like a portrait or an ` +
+    `advert. Nobody else is in the frame, in the background or in a reflection. ${ONE_BODY_CLAUSE}`
   );
 }
 
@@ -10565,9 +10611,15 @@ async function drawValidatedStill(
       // time). Keep this one. A redraw that changes what is wrong still gets its next try — two of
       // that film's screens came right on the third and fourth. `REDRAW_SAME_FAULTS=1` restores
       // the old run to the last attempt.
+      // NOT A DETAIL ALONE (2026-10-18, the detail check turned on by default): a detail is never
+      // redrawn twice — one redraw (`offSubjectRerolls`), or none past the video's cap — so keeping
+      // here saves no picture; it only skips the checks below. A host picture whose detail redraw
+      // came back with the same detail shipped without ever meeting the host check, which with the
+      // detail check off it would have met: the face or a stranger, unasked. It goes on to them.
       if (
         faults &&
         faults === lastFaults &&
+        faults !== "detail" &&
         !defects.unchecked &&
         process.env.REDRAW_SAME_FAULTS !== "1"
       ) {
@@ -10645,23 +10697,50 @@ async function drawValidatedStill(
       // otherwise (`pictureDetailClause`). Not on a softened content-policy prompt, where naming the
       // description again could trip the filter it was softened for. The frame is the fallback, and
       // is still a fit memory: its thing is in it.
+      // A HARD CAP PER VIDEO (2026-10-18: the operator turned the question on only if it does not
+      // raise what a video costs). A redraw only the detail asks for is one of the video's
+      // `DETAIL_REDRAWS_PER_VIDEO` (`takeDetailRedraw`, 3). One this draw gets anyway — it also shows
+      // what its line rules out, a brand, the wrong place or a staged look, with that redraw left —
+      // IS that redraw: it spends that budget and none of the video's, so it costs no extra picture.
+      // A picture already redrawn for a missing thing has no redraw left here (one budget for both)
+      // and is never counted. Past the cap the frame goes on to the later checks and, when nothing
+      // else redraws it, ships carrying "detail" (`pictureFlaws`: the card's badge, a job warning).
+      // On the LAST draw nothing is taken: the `continue` would end the loop with no picture drawn,
+      // so the video would lose a redraw it never got, and the frame would ship as a fallback without
+      // the later checks — it goes on to them exactly as past the cap.
       if (defects.detail && offSubjectRerolls < 1) {
-        offSubjectRerolls++;
-        lastError = `Still image does not show "${scene.showSubject}" as described`;
-        offSubjectFallback ??= drawn;
-        if (!visualOverride && tier === 0) {
-          const cut = prompt.indexOf(DETAIL_CLAUSE_START);
-          prompt = `${cut >= 0 ? prompt.slice(0, cut).trimEnd() : prompt} ${pictureDetailClause(
-            scene.showSubject,
-            defects.detailWhat,
-            !!scene.memoryRefUrls?.length
-          )}`;
+        const sharesRuledOut = !!defects.forbidden && ruledOutRerolls < 1;
+        const sharesClean =
+          !sharesRuledOut && (defects.messy || defects.wrongPlace || defects.staged) && cleanRerolls < 1;
+        const drawLeft = attempt < attempts;
+        if (sharesRuledOut || sharesClean || (drawLeft && takeDetailRedraw(currentCostJobId()))) {
+          offSubjectRerolls++;
+          if (sharesRuledOut) ruledOutRerolls++;
+          if (sharesClean) cleanRerolls++;
+          lastError = `Still image does not show "${scene.showSubject}" as described`;
+          offSubjectFallback ??= drawn;
+          if (!visualOverride && tier === 0) {
+            const cut = prompt.indexOf(DETAIL_CLAUSE_START);
+            prompt = `${cut >= 0 ? prompt.slice(0, cut).trimEnd() : prompt} ${pictureDetailClause(
+              scene.showSubject,
+              defects.detailWhat,
+              !!scene.memoryRefUrls?.length
+            )}`;
+          }
+          console.warn(
+            `[Longform] scene ${scene.index} still shows "${scene.showSubject}" but not as described ` +
+              `(${defects.detailWhat ?? defects.what}, attempt ${attempt}/${attempts}) → drawing it again`
+          );
+          continue;
         }
         console.warn(
           `[Longform] scene ${scene.index} still shows "${scene.showSubject}" but not as described ` +
-            `(${defects.detailWhat ?? defects.what}, attempt ${attempt}/${attempts}) → drawing it again`
+            `(${defects.detailWhat ?? defects.what}) — ` +
+            (drawLeft
+              ? `the video's ${detailRedrawsPerVideo()} detail redraws are spent`
+              : "no draw is left") +
+            " → not redrawn for it, flagged"
         );
-        continue;
       }
       // WHAT THE LINE RULES OUT (2026-10-18, the audit: production 203-143 drew the lumber stack
       // beside the furnace under "and away from the furnace"): one fresh seed. The prompt is NOT told
@@ -10791,8 +10870,10 @@ async function drawValidatedStill(
       // person — hair, age, skin, build, and the face when it is shown. AND NO FACE (2026-10-18, the
       // review of jobs 401-407: the host reading at a desk face on, smiling into the lens with a phone
       // at the ear, a full-body axe swing — all passed as "the same person"): the same call says
-      // whether the face shows, and outside a step on the host's own face a shown face is a miss too,
-      // redrawn from behind or the side (`turnHostAway`; `hostTurnedAway` keeps it for a Regenerate).
+      // whether the face shows, and outside a step on the host's own face or a look on it
+      // (`hostFaceShown`) a shown face is a miss too, redrawn from behind or the side (`turnHostAway`;
+      // `hostTurnedAway` keeps it for a Regenerate). A face-shown picture of someone else is a miss
+      // like any other: redrawn, then drawn with nobody in it.
       // Drawn again on a miss; after `HOST_IDENTITY_REDRAWS` misses — or on the last attempt — the
       // picture is drawn with nobody in it, and a frame of a stranger or a face is never kept as a
       // fallback (`hostPictureMove`). `HOST_IDENTITY_CHECK=0` turns it off.
@@ -10803,7 +10884,9 @@ async function drawValidatedStill(
         !personFree &&
         process.env.HOST_IDENTITY_CHECK !== "0"
       ) {
-        const who = await scanSameHost(scene.brollHostRef, buffer, !!scene.hostFaceShown);
+        // A look on the host's face whose look is the HAIR (`hairLookOnFace`) is judged on the face,
+        // age and skin: its hair is drawn as its words give it, never the photo's.
+        const who = await scanSameHost(scene.brollHostRef, buffer, !!scene.hostFaceShown, hairLookOnFace(scene));
         const move = hostPictureMove(who, !!scene.hostFaceShown, hostMisses, attempt >= attempts);
         if (move.move !== "keep") {
           hostMisses++;
@@ -17642,6 +17725,8 @@ async function runUnifiedPipeline(
   if (hostBroll) console.log(`[Longform ${jobId}] host in b-roll: ${hostBroll} picture(s) show the host at work`);
   const chinShots = scenes.filter(s => !s.hostPresent && s.humanPresent && hostLipsCut(s)).length;
   if (chinShots) console.log(`[Longform ${jobId}] chin lines: ${chinShots} host picture(s) framed from the lips down`);
+  const faceLooks = scenes.filter(s => !s.hostPresent && s.humanPresent && hostFaceLook(s)).length;
+  if (faceLooks) console.log(`[Longform ${jobId}] looks on the face: ${faceLooks} host picture(s) show the host's own face`);
   const othersShown = scenes.filter(s => s.otherPerson && !s.hostPresent).length;
   if (othersShown) console.log(`[Longform ${jobId}] someone else in b-roll: ${othersShown} picture(s), never from the host photo`);
   // Each screen picture (an app, a listing) sits somewhere else, in film order — after the host

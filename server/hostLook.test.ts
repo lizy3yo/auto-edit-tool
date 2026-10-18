@@ -535,3 +535,128 @@ describe("someone in the words — never a thing named for a hand or a finger (r
       expect(namesSomeone(words)).toBe(true);
   });
 });
+
+describe("a look on the host's own face (the operator's decision on the audit's cause 9, 2026-10-18)", () => {
+  it("knows a line about how a shade, a cut, glasses or earrings look on the face", async () => {
+    const { looksOnTheFace } = await import("./hostLook");
+    for (const line of [
+      // Diane's stored lines — each drawn as the back of a head.
+      "A woman with gray hair that catches the light will read younger than a woman with flawlessly dyed brown hair that goes flat under a restaurant lamp.", // job 309 scene 29
+      "The woman who spends the most money and the most time on her hair is usually the one who reads oldest in the room.", // job 309 scene 2
+      "Shine is the single thing people read as healthy hair. A woman with gray hair that catches the light will read younger than a woman with flawlessly dyed brown hair that goes flat under a restaurant lamp.", // job 222 scene 40
+      "Shoulder-length hair that grazes your collarbone reads younger.",
+      // the operator's kinds of look, in general words
+      "A blue-red lipstick brightens the whole face.",
+      "That coral lipstick looks fresher on older skin than any brown.",
+      "Blush placed too low makes you look tired.",
+      "Thin wire-rimmed glasses soften the face.",
+      "Small pearl earrings bring out your eyes.",
+      "A dye a shade too dark washes you out.",
+      "A chin-length bob takes ten years off.",
+      "A V neckline frames your face.",
+      "Go two shades lighter and you'll look ten years younger.",
+    ])
+      expect(looksOnTheFace(line), line).toBe(true);
+  });
+
+  it("leaves a thing's own look, a word that only names glasses or an earring, sayings and overviews alone", async () => {
+    const { looksOnTheFace } = await import("./hostLook");
+    for (const line of [
+      "A dye job carries one. The hair looks applied.", // job 309 scene 11 — the hair's own look
+      "Shine is the single thing people read as healthy hair.", // job 309 scene 28
+      "Not because she is older. Because she is trying harder, and it shows.", // job 309 scene 3
+      "Real hair carries eight or ten tones at once, which is why it moves in the light.", // job 309 scene 10
+      "By the afternoon your hair looks dull and heavy.", // the hair's own shine and weight, not the face
+      "Hey, it's me again. If your lawn looks tired no matter how often you mow,", // job 28 scene 1
+      "wear gloves and safety glasses,", // job 143 scene 190
+      "I once watched a hen toss beakful after beakful over her shoulder like she'd lost an earring in there.", // job 355 scene 17
+      "Three necklaces today that read expensive on a woman over sixty, and one that is aging you.", // job 244 scene 6
+      "On the face of it, the cheaper saw looks older than it is.",
+      "Keep your eyes on the line so the edge looks fresh.",
+      "Pick whatever suits you.",
+      "A sharp blade takes years off the life of the motor.",
+      "That's the aging you see in old pine.",
+      "Plane the face of the board until it looks bright.",
+      "Your dog's face looks tired after a long walk.",
+      "The light in that room looks harsh at noon.",
+      "", undefined,
+    ])
+      expect(looksOnTheFace(line), String(line)).toBe(false);
+  });
+
+  it("asks the line to name the thing whose look it judges — a line about the person alone is no look", async () => {
+    const { looksOnTheFace } = await import("./hostLook");
+    for (const line of [
+      // Scarlett's full script: a bridge to the next section, nothing worn named in it.
+      "Before we turn to the three that are aging you, I want to say something about money, because I know what happens the moment a woman hears the word expensive.",
+      "Stress ages you faster than anything.",
+      "You look tired.",
+      "You'll look younger, you'll feel better, and you'll sleep through the night.",
+      "Her eyes looked tired after the long drive home.",
+      "His face looked older than I remembered when I saw him at the funeral.",
+      "Your skin looks dull because you don't drink water.",
+      "A good night's sleep brightens your whole face.",
+      "Walking every day takes ten years off.",
+      "That old truck makes you look older than you are, honey.",
+      "The cream softens the skin overnight.",
+    ])
+      expect(looksOnTheFace(line), line).toBe(false);
+    // The same judgements with the thing named are looks.
+    for (const line of [
+      "Black right under the face ages you faster than anything.",
+      "This shade? It takes ten years off.",
+      "A side part softens the face.",
+      "A crew neck in navy makes you look tired.",
+    ])
+      expect(looksOnTheFace(line), line).toBe(true);
+  });
+
+  it("frames a host picture of the look on the face — never a chin line's, a neck piece's, an overview's or a group picture", async () => {
+    const { faceLookFramed } = await import("./hostLook");
+    // Diane's job 309 scene 2: her hair being styled, under the line about who reads oldest.
+    expect(
+      faceLookFramed({
+        scriptText: "The woman who spends the most money and the most time on her hair is usually the one who reads oldest in the room.",
+        showSubject: "Host's hair being styled elaborately at the bathroom counter with hair-care products nearby.",
+      })
+    ).toBe(true);
+    // Pearl earrings are earrings, not a neck piece.
+    expect(faceLookFramed({ scriptText: "Small pearl earrings bring out your eyes.", showSubject: "the host wearing small pearl stud earrings" })).toBe(true);
+    // Job 354 scene 23: "the face looks tired" is a chin line, framed at the lips as round 9 made it.
+    expect(
+      faceLookFramed({
+        scriptText: "The eye reads it together with the soft shadows under the chin, and the face looks tired.",
+        showSubject: "dark bead necklace on the chest over a navy sweater in a mirror, with shadows under the chin above it",
+      })
+    ).toBe(false);
+    // Job 240 scene 2: a necklace "flattering you" is a picture of the piece worn at the neck.
+    expect(
+      faceLookFramed({
+        scriptText: "decides whether a necklace is flattering you or working against you.",
+        showSubject: "A long gold chain hanging low on the host's chest, catching window light, with a navy sweater nearby in the dressing room.",
+      })
+    ).toBe(false);
+    const line = "A blue-red lipstick brightens the whole face.";
+    expect(faceLookFramed({ scriptText: line, showSubject: "three lipsticks laid side by side on the vanity" })).toBe(false);
+    expect(faceLookFramed({ scriptText: line, showSubject: "the host wearing a blue-red lipstick", listSet: true })).toBe(false);
+    expect(faceLookFramed({ scriptText: "Silver goes brassy and yellow over time.", showSubject: "host's brassy silver hair at the sink" })).toBe(false);
+  });
+
+  it("takes every view that hides the face out of a face-shown picture's words, and nothing else", async () => {
+    const { faceInView } = await import("./hostLook");
+    // Diane's job 282 scenes 34 and 2.
+    expect(faceInView("host from behind, gray-blended hair catching light near the wall")).toBe("host, gray-blended hair catching light near the wall");
+    expect(faceInView("Woman's shoulder-length hair rinsing under running shower water, seen from behind in the bathroom.")).toBe(
+      "Woman's shoulder-length hair rinsing under running shower water in the bathroom."
+    );
+    expect(faceInView("The host stands, both hands resting in her hair, viewed from behind.")).toBe("The host stands, both hands resting in her hair.");
+    expect(faceInView("a coral lipstick on the host, framed from the chin down")).toBe("a coral lipstick on the host");
+    expect(faceInView("the host in thin glasses, her face out of frame")).toBe("the host in thin glasses");
+    for (const as of [
+      "the host's silver hair catching window light from behind",
+      "the host wearing a blue-red lipstick, close view",
+      "a soft bob framing the host's face, lit from the side",
+    ])
+      expect(faceInView(as), as).toBe(as);
+  });
+});

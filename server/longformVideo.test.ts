@@ -10456,6 +10456,216 @@ describe("the thing the way its description says — one redraw, told the detail
   });
 });
 
+describe("the detail check never raises a video's cost — its redraws are capped per video (2026-10-18)", () => {
+  // The operator turned the `detail` question on with this condition. Job 402 scene 26: "beverage cart
+  // in the rear rows with a nearly empty snack basket" came back well stocked.
+  const pngOf = (bg: string) =>
+    sharp({ create: { width: 8, height: 8, channels: 3, background: bg } }).png().toBuffer();
+  const verdict = (over: Record<string, unknown> = {}) => ({ overlay: false, broken: false, what: "", ...over }) as any;
+  const FULL = { detail: true, detailWhat: "snack basket well stocked, not nearly empty", what: "full basket" };
+  const cart = (index: number) =>
+    ({
+      index,
+      scriptText: "Ask while the cart is still working its way back,",
+      showSubject: "beverage cart in the rear rows with a nearly empty snack basket",
+      visualPrompt: "A beverage cart in the rear rows with a nearly empty snack basket.",
+    }) as any;
+  const checks = (...vs: Record<string, unknown>[]) => {
+    mockScanStillDefects.mockReset();
+    for (const v of vs) mockScanStillDefects.mockResolvedValueOnce(verdict(v));
+    mockScanStillDefects.mockResolvedValue(verdict());
+  };
+  const draws = async (n: number, tag: string) => {
+    const fn = vi.fn();
+    for (let k = 0; k < n; k++) fn.mockResolvedValueOnce({ success: true, fileData: await pngOf(`#${tag}${k}`) });
+    return fn;
+  };
+
+  afterEach(() => {
+    delete process.env.DETAIL_REDRAWS_PER_VIDEO;
+    mockScanStillDefects.mockReset();
+    mockScanStillDefects.mockResolvedValue(verdict());
+    mockScanNearCopy.mockReset();
+    mockScanNearCopy.mockResolvedValue({ copy: false, what: "" });
+  });
+
+  it("three detail redraws per video; the fourth flagged picture ships at once, saying so", async () => {
+    const { withCostMeter } = await import("./costMeter");
+    const { detailRedrawsTaken } = await import("./detailRedraws");
+    const { DETAIL_CLAUSE_START } = await import("./longformVideo");
+    const job = 9601;
+    for (const index of [26, 27, 28]) {
+      checks(FULL);
+      const genImage = await draws(2, "a1");
+      const out = await withCostMeter(job, () => generateValidatedStill(cart(index), 4, undefined, genImage));
+      expect(genImage).toHaveBeenCalledTimes(2);
+      expect(genImage.mock.calls[1][0].prompt).toContain(DETAIL_CLAUSE_START);
+      expect(out.flaws).toBeUndefined();
+    }
+    expect(detailRedrawsTaken(job)).toBe(3);
+    checks(FULL);
+    const genImage = await draws(2, "b1");
+    const scene = cart(29);
+    const out = await withCostMeter(job, () => generateValidatedStill(scene, 4, undefined, genImage));
+    expect(genImage).toHaveBeenCalledTimes(1); // past the cap: no fourth extra picture
+    expect(out.flaws).toEqual(["detail"]);
+    expect(scene.pictureChecks.map((c: any) => c.flags)).toEqual([["detail"]]);
+    expect(out.missing).toBe(false); // its thing is in it: still a fit memory
+    expect(detailRedrawsTaken(job)).toBe(3);
+  });
+
+  it("past the cap the frame still meets the later checks — a staged look keeps its own redraw", async () => {
+    const { withCostMeter } = await import("./costMeter");
+    const { takeDetailRedraw } = await import("./detailRedraws");
+    const job = 9602;
+    for (let k = 0; k < 3; k++) takeDetailRedraw(job);
+    checks({ ...FULL, staged: true });
+    const genImage = await draws(2, "c1");
+    const out = await withCostMeter(job, () => generateValidatedStill(cart(26), 4, undefined, genImage));
+    expect(genImage).toHaveBeenCalledTimes(2);
+    expect(out.flaws).toBeUndefined();
+  });
+
+  it("a picture already redrawn for a missing thing shares that redraw — never a second one, never counted", async () => {
+    const { withCostMeter } = await import("./costMeter");
+    const { detailRedrawsTaken } = await import("./detailRedraws");
+    const job = 9603;
+    checks({ missing: true, what: "an empty aisle" }, FULL);
+    const genImage = await draws(3, "d1");
+    const out = await withCostMeter(job, () => generateValidatedStill(cart(26), 4, undefined, genImage));
+    expect(genImage).toHaveBeenCalledTimes(2);
+    expect(out.flaws).toEqual(["detail"]);
+    // Missing and detail on the same draw: the missing redraw is the one taken.
+    checks({ ...FULL, missing: true });
+    const both = await draws(2, "d2");
+    await withCostMeter(job, () => generateValidatedStill(cart(27), 4, undefined, both));
+    expect(both).toHaveBeenCalledTimes(2);
+    expect(detailRedrawsTaken(job)).toBe(0);
+  });
+
+  it("a detail on a draw redrawn anyway for a staged look or a ruled-out thing IS that redraw — no extra picture, not counted", async () => {
+    const { withCostMeter } = await import("./costMeter");
+    const { detailRedrawsTaken } = await import("./detailRedraws");
+    const { DETAIL_CLAUSE_START } = await import("./longformVideo");
+    const job = 9604;
+    // Staged twice: the second staged answer finds that redraw spent, as it would without the detail.
+    checks({ ...FULL, staged: true }, { staged: true });
+    const staged = await draws(3, "e1");
+    const out = await withCostMeter(job, () => generateValidatedStill(cart(26), 4, undefined, staged));
+    expect(staged).toHaveBeenCalledTimes(2);
+    expect(staged.mock.calls[1][0].prompt).toContain(DETAIL_CLAUSE_START);
+    expect(out.flaws).toEqual(["staged"]);
+    checks({ ...FULL, forbidden: true }, { forbidden: true });
+    const ruled = await draws(3, "e2");
+    const kept = await withCostMeter(job, () => generateValidatedStill(cart(27), 4, undefined, ruled));
+    expect(ruled).toHaveBeenCalledTimes(2);
+    expect(kept.flaws).toEqual(["ruled out"]);
+    expect(detailRedrawsTaken(job)).toBe(0);
+  });
+
+  it("each video has its own cap", async () => {
+    const { withCostMeter } = await import("./costMeter");
+    const { takeDetailRedraw } = await import("./detailRedraws");
+    for (let k = 0; k < 3; k++) takeDetailRedraw(9605);
+    checks(FULL);
+    const spent = await draws(2, "f1");
+    await withCostMeter(9605, () => generateValidatedStill(cart(26), 4, undefined, spent));
+    expect(spent).toHaveBeenCalledTimes(1);
+    checks(FULL);
+    const fresh = await draws(2, "f2");
+    await withCostMeter(9606, () => generateValidatedStill(cart(26), 4, undefined, fresh));
+    expect(fresh).toHaveBeenCalledTimes(2);
+  });
+
+  it("on the last draw no redraw is taken: the video keeps it, and the frame still meets the later checks", async () => {
+    const { withCostMeter } = await import("./costMeter");
+    const { detailRedrawsTaken } = await import("./detailRedraws");
+    const { PERSON_FREE_FALLBACK } = await import("./longformVideo");
+    const job = 9608;
+    // A picture of the host at work, one attempt: a redraw taken here would end the loop with no
+    // picture drawn, count it anyway, and ship the frame as a fallback the host check never saw.
+    const hostAtWork = (index: number) => ({ ...cart(index), humanPresent: true, brollHostRef: "https://x/host.png" });
+    try {
+      mockScanSameHost.mockReset();
+      mockScanSameHost.mockResolvedValue({ same: true, what: "" });
+      checks(FULL);
+      const last = await draws(2, "a8");
+      const out = await withCostMeter(job, () => generateValidatedStill(hostAtWork(26), 1, undefined, last));
+      expect(last).toHaveBeenCalledTimes(1);
+      expect(mockScanSameHost).toHaveBeenCalledTimes(1);
+      expect(out.flaws).toEqual(["detail"]);
+      expect(detailRedrawsTaken(job)).toBe(0);
+      // Someone else on that last draw is still refused — drawn once more with nobody in it.
+      mockScanSameHost.mockReset();
+      mockScanSameHost.mockResolvedValue({ same: false, what: "a younger man" } as any);
+      checks(FULL);
+      const stranger = await draws(2, "b8");
+      await withCostMeter(job, () => generateValidatedStill(hostAtWork(27), 1, undefined, stranger));
+      expect(stranger).toHaveBeenCalledTimes(2);
+      expect(stranger.mock.calls[1][0].prompt).toContain(PERSON_FREE_FALLBACK);
+      expect(detailRedrawsTaken(job)).toBe(0);
+      // With a draw left the same picture takes one, as ever.
+      checks(FULL);
+      const more = await draws(2, "c8");
+      await withCostMeter(job, () => generateValidatedStill(cart(28), 2, undefined, more));
+      expect(more).toHaveBeenCalledTimes(2);
+      expect(detailRedrawsTaken(job)).toBe(1);
+    } finally {
+      mockScanSameHost.mockReset();
+      mockScanSameHost.mockResolvedValue({ same: true, what: "" });
+    }
+  });
+
+  it("a frame that comes back with only the detail again still meets the host check — never kept unchecked", async () => {
+    const { withCostMeter } = await import("./costMeter");
+    const { takeDetailRedraw } = await import("./detailRedraws");
+    const hostAtWork = (index: number) => ({ ...cart(index), humanPresent: true, brollHostRef: "https://x/host.png" });
+    try {
+      // The detail redraw comes back with the same detail: it is not redrawn for it again (one
+      // redraw), but "the same faults twice" must not ship it past the host check — with the detail
+      // check off this frame would have met it.
+      mockScanSameHost.mockReset();
+      mockScanSameHost.mockResolvedValueOnce({ same: false, what: "a younger man" } as any);
+      mockScanSameHost.mockResolvedValue({ same: true, what: "" });
+      checks(FULL, FULL, FULL);
+      const again = await draws(3, "d9");
+      const out = await withCostMeter(9609, () => generateValidatedStill(hostAtWork(26), 4, undefined, again));
+      expect(mockScanSameHost).toHaveBeenCalledTimes(2);
+      expect(again).toHaveBeenCalledTimes(3);
+      expect(out.flaws).toEqual(["detail"]);
+      // Past the cap, redrawn by the host check, back with only the detail: met by the host check again.
+      for (let k = 0; k < 3; k++) takeDetailRedraw(9610);
+      mockScanSameHost.mockReset();
+      mockScanSameHost.mockResolvedValueOnce({ same: false, what: "a younger man" } as any);
+      mockScanSameHost.mockResolvedValue({ same: true, what: "" });
+      checks(FULL, FULL);
+      const past = await draws(3, "e9");
+      await withCostMeter(9610, () => generateValidatedStill(hostAtWork(27), 4, undefined, past));
+      expect(mockScanSameHost).toHaveBeenCalledTimes(2);
+      expect(past).toHaveBeenCalledTimes(2);
+      // Any other fault twice in a row is still kept as before (job 343): a staged look, redrawn once.
+      checks({ staged: true }, { staged: true });
+      const staged = await draws(3, "f9");
+      const kept = await withCostMeter(9611, () => generateValidatedStill(hostAtWork(28), 4, undefined, staged));
+      expect(staged).toHaveBeenCalledTimes(2);
+      expect(kept.flaws).toEqual(["staged"]);
+    } finally {
+      mockScanSameHost.mockReset();
+      mockScanSameHost.mockResolvedValue({ same: true, what: "" });
+    }
+  });
+
+  it("DETAIL_REDRAWS_PER_VIDEO=0: a detail is only flagged, never redrawn", async () => {
+    const { withCostMeter } = await import("./costMeter");
+    process.env.DETAIL_REDRAWS_PER_VIDEO = "0";
+    checks(FULL);
+    const genImage = await draws(2, "a7");
+    const out = await withCostMeter(9607, () => generateValidatedStill(cart(26), 4, undefined, genImage));
+    expect(genImage).toHaveBeenCalledTimes(1);
+    expect(out.flaws).toEqual(["detail"]);
+  });
+});
+
 describe("a picture that ships with a fault says so, and two faults get one changed redraw (R9, the audit 2026-10-18)", () => {
   const pngOf = (bg: string) =>
     sharp({ create: { width: 8, height: 8, channels: 3, background: bg } }).png().toBuffer();
@@ -10884,6 +11094,109 @@ describe("a host picture that drew the face is drawn again turned away (round 11
     await generateValidatedStill(scene, 4, undefined, genImage);
     expect(scene.pictureChecks[0].flags).toEqual(["not the host", "face shown"]);
     expect(genImage.mock.calls[1][0].prompt).toContain(HOST_TURNED_AWAY_CLAUSE);
+  });
+});
+
+describe("a look on the host's own face shows her face, and only hers (the operator's decision on the audit's cause 9)", () => {
+  const pngOf = (bg: string) =>
+    sharp({ create: { width: 8, height: 8, channels: 3, background: bg } }).png().toBuffer();
+  const drawsOf = (...frames: Buffer[]) => {
+    const fn = vi.fn();
+    for (const f of frames) fn.mockResolvedValueOnce({ success: true, fileData: f });
+    return fn;
+  };
+  const hostSays = (...vs: { same: boolean; face?: boolean; what?: string }[]) => {
+    mockScanSameHost.mockReset();
+    for (const v of vs) mockScanSameHost.mockResolvedValueOnce({ what: "", ...v } as any);
+    mockScanSameHost.mockResolvedValue({ same: true, what: "" });
+  };
+  afterEach(() => {
+    mockScanSameHost.mockReset();
+    mockScanSameHost.mockResolvedValue({ same: true, what: "" });
+  });
+  // Diane's job 282 scene 34 as `markHostBroll` now leaves it: "host from behind" is gone, the face shown.
+  const grayHair = () =>
+    ({
+      index: 34,
+      scriptText: "A woman with gray hair that catches the light will read younger than a woman with flawlessly dyed brown hair",
+      showSubject: "host, gray-blended hair catching light near the wall",
+      visualPrompt: "The host with gray-blended shoulder-length hair catching the window light near the wall.",
+      humanPresent: true,
+      brollHostLook: "A slender woman in her sixties with fair skin and shoulder-length blonde hair pinned back",
+      brollHostRef: "https://r2/host.jpg",
+      hostFaceShown: true,
+    }) as any;
+  const lipstick = () =>
+    ({
+      ...grayHair(),
+      index: 12,
+      scriptText: "A blue-red lipstick brightens the whole face.",
+      showSubject: "the host wearing a blue-red lipstick, close view",
+      visualPrompt: "The host wearing a blue-red lipstick, a close view of her face.",
+    }) as any;
+
+  it("her face is kept when it is hers — never refused for showing the face, never turned away", async () => {
+    const [a] = await Promise.all([pngOf("#a71")]);
+    hostSays({ same: true, face: true, what: "face in three-quarter view" });
+    const scene = lipstick();
+    const genImage = drawsOf(a);
+    const out = await generateValidatedStill(scene, 4, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(1);
+    expect(out.buffer.equals(a)).toBe(true);
+    expect(out.flaws).toBeUndefined();
+    expect(scene.hostTurnedAway).toBeUndefined();
+    expect(scene.pictureChecks.map((c: any) => c.flags)).toEqual([[]]);
+    // Drawn from her photo, asked about the face, and a lipstick look holds her to her photo's hair.
+    expect(genImage.mock.calls[0][0].referenceImageUrl).toBe("https://r2/host.jpg");
+    expect(mockScanSameHost).toHaveBeenCalledWith("https://r2/host.jpg", a, true, false);
+  });
+
+  it("a stranger's face is drawn again from her photo, twice, then with nobody in it — it never ships", async () => {
+    const { PERSON_FREE_FALLBACK, HOST_IDENTITY_REDRAWS } = await import("./longformVideo");
+    const frames = await Promise.all([pngOf("#b71"), pngOf("#b72"), pngOf("#b73"), pngOf("#b74")]);
+    hostSays(
+      { same: false, face: true, what: "a younger woman" },
+      { same: false, face: true, what: "a younger woman" },
+      { same: false, face: true, what: "a younger woman" }
+    );
+    const scene = lipstick();
+    const genImage = drawsOf(...frames);
+    const out = await generateValidatedStill(scene, 4, undefined, genImage);
+    expect(HOST_IDENTITY_REDRAWS).toBe(2);
+    expect(genImage).toHaveBeenCalledTimes(4);
+    // The redraws are still her, from her photo — the face is allowed, so nothing turns her away.
+    for (const k of [1, 2]) {
+      expect(genImage.mock.calls[k][0].referenceImageUrl).toBe("https://r2/host.jpg");
+      expect(genImage.mock.calls[k][0].prompt).toMatch(/the SAME person as in the reference photo/);
+    }
+    expect(scene.hostTurnedAway).toBeUndefined();
+    const last = genImage.mock.calls[3][0];
+    expect(last.prompt).toContain(PERSON_FREE_FALLBACK);
+    expect(last.referenceImageUrl).toBeUndefined();
+    expect(scene.pictureChecks.slice(0, 3).map((c: any) => c.flags)).toEqual([["not the host"], ["not the host"], ["not the host"]]);
+    expect(out.buffer.equals(frames[3])).toBe(true);
+    for (const f of frames.slice(0, 3)) expect(out.buffer.equals(f)).toBe(false);
+  });
+
+  it("a hair look is judged on the face, age and skin — its hair is the one its words give", async () => {
+    const [a] = await Promise.all([pngOf("#c71")]);
+    hostSays({ same: true, face: true });
+    const scene = grayHair();
+    const genImage = drawsOf(a);
+    await generateValidatedStill(scene, 4, undefined, genImage);
+    expect(mockScanSameHost).toHaveBeenCalledWith("https://r2/host.jpg", a, true, true);
+    expect(genImage.mock.calls[0][0].prompt).toMatch(/with the hair exactly as the picture's own description above gives it/);
+  });
+
+  it("an ordinary host picture is still refused for a face, and asked as before", async () => {
+    const [a, b] = await Promise.all([pngOf("#d71"), pngOf("#d72")]);
+    hostSays({ same: true, face: true, what: "face on" }, { same: true, face: false });
+    const scene = { ...grayHair(), scriptText: "Silver goes brassy and yellow over time.", hostFaceShown: undefined };
+    const genImage = drawsOf(a, b);
+    const out = await generateValidatedStill(scene, 4, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(2);
+    expect(mockScanSameHost).toHaveBeenNthCalledWith(1, "https://r2/host.jpg", a, false, false);
+    expect(out.buffer.equals(b)).toBe(true);
   });
 });
 

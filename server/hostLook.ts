@@ -1176,6 +1176,186 @@ export function hostLipsCut(scene: StoryboardScene): boolean {
   return !!scene.brollHostLook && !scene.hostFaceShown && !scene.otherPerson && chinFramed(scene);
 }
 
+// ─── A look on the host's own face ───────────────────────────────────────────────────────
+
+/**
+ * A part of the face named as a person's own — "your face", "her skin", "the lips" — never the face
+ * OF a thing ("the face of the board", "the skin of the drum"). Bare "complexion" and "skin tone" are
+ * only ever a person's.
+ */
+const FACE_PART =
+  String.raw`\b(?:(?:your|her|his|their|my|one['’]s|a\s+(?:woman|man|person)['’]s)\s+(?:own\s+|whole\s+|entire\s+)?(?:face|skin|complexion|skin\s?tone|colou?ring|eyes|eye\s+area|lips|cheeks?|cheekbones|features|smile|brows|eyebrows|forehead|hairline|under-?eyes)|the\s+(?:whole\s+|entire\s+)?(?:face|skin|complexion|eyes|lips|cheeks|cheekbones))\b(?!\s+of\b)|\b(?:complexion|skin\s?tones?)\b`;
+/**
+ * Things worn or put on the face: make-up, glasses, earrings. Glasses only as a person's ("reading
+ * glasses", "her glasses", "wire-rimmed glasses" — never wine glasses).
+ */
+const ON_THE_FACE_THING =
+  String.raw`\b(?:lipsticks?|lip\s+(?:colou?rs?|liners?|gloss|stains?|shades?)|(?:red|pink|nude|coral|berry|plum|bold|dark|bright|soft|rose)\s+lips?|blush(?:er)?|bronzer|concealer|eye\s?shadows?|eye\s?liner|mascara|brow\s+(?:pencil|gel|colou?r)|(?:eye|reading|sun)\s?glasses|eyeglass(?:es)?|spectacles|glasses\s+frames?|(?:wire|rimless|tortoiseshell|thin|thick|round|square|oval|cat-eye|oversized)[- ](?:rimmed\s+|framed\s+)?glasses|(?:your|her|his|my|their|new)\s+glasses|earrings?|ear\s+studs?)\b`;
+/**
+ * The hair round the face: its colour, its cut. Never a tool named for it, a hairline crack or a
+ * hair's breadth, and a bob only as a cut.
+ */
+const HAIR_ROUND_FACE =
+  String.raw`\b(?:haircuts?|hairstyles?|hair(?!\s*(?:dryer|brush|clip|tie|spray|band|pin|comb|product|net|line|['’]s\s+breadth))|(?:a|the|this|that|soft|short|chin-length|blunt)\s+bob|bangs|(?:gr[ae]y|silver|white)\s+roots|face[- ]framing)\b`;
+/**
+ * What else is worn near the face and judged by how it looks there: a dye, a shade or a colour, a
+ * neckline or collar, a top round the neck, a piece at the neck, a parting.
+ */
+const WORN_NEAR_FACE =
+  String.raw`\b(?:dye[sd]?|tints?|highlights|lowlights|balayage|colou?rs?|shades?|black|white|navy|beige|camel|ivory|taupe|mustard|olive|khaki|pastels?|neutrals?|(?:jewel|earth)\s+tones?|necklines?|(?:v|crew|scoop|boat|cowl|square)[- ]?necks?|turtlenecks?|collars?|blouses?|sweaters?|cardigans?|scarf|scarves|necklaces?|pendants?|chokers?|lockets?|pearls?|beads?|(?:side|centre|center|middle|deep)\s+part|partings?)\b`;
+/**
+ * The THING whose look on the face a line judges. A line that says how a face or a person looks and
+ * names nothing put on them is about the person, not a look: "Before we turn to the three that are
+ * aging you, I want to say something about money" (Scarlett's script), "Stress ages you faster than
+ * anything", "You look tired", "Her eyes looked tired after the long drive home".
+ */
+const LOOK_THING = new RegExp(`${ON_THE_FACE_THING}|${HAIR_ROUND_FACE}|${WORN_NEAR_FACE}`, "i");
+/** What a look does to a face, or how old it reads — never a quality of a thing on its own. */
+const FACE_LOOK_WORD = String.raw`(?:younger|youngest|older|oldest|aged|tired|exhausted|washed[- ]out|drained|drawn|gaunt|sallow|ashy|pale|paler|sickly|gr[ae]y(?:er)?|harsh(?:er)?|severe|soft(?:er)?|fresh(?:er)?|bright(?:er)?|awake|rested|radiant|glowing|luminous|dull(?:er)?|muddy|dated|frumpy|puffy|lifted|healthier|alive|overdone|cakey|heavy)`;
+/** Words between "looks" and the word that judges: "a decade", "ten years", "so much". */
+const LOOK_FILLER = String.raw`(?:(?:a\s+(?:little|lot|bit|touch|decade|few\s+years)|much|far|so|too|very|even|more|less|instantly|immediately|suddenly|years|decades|ten|five|twenty|\d+)\s+){0,3}`;
+/** "looks younger", "reads ten years older", "looking tired". */
+const LOOKS_AS = String.raw`\b(?:look|looks|looked|looking|read|reads|reading)\s+(?:as\s+)?${LOOK_FILLER}${FACE_LOOK_WORD}\b`;
+/**
+ * How the HAIR makes the face read — its age, a tired or harsh look — never the hair's own shine,
+ * weight or texture ("your hair looks dull by noon", "The hair looks applied"), which shows from
+ * behind as well as from the front.
+ */
+const HAIR_LOOKS_AS = String.raw`\b(?:look|looks|looked|looking|read|reads|reading)\s+(?:as\s+)?${LOOK_FILLER}(?:younger|youngest|older|oldest|aged|tired|washed[- ]out|drawn|sallow|harsh(?:er)?|severe|dated|frumpy)\b`;
+/** A face as the thing a look acts on: "your face", "the skin", "older skin". */
+const FACE_OBJECT =
+  String.raw`(?:(?:the|your|her|his|their|my)\s+(?:whole\s+|entire\s+|own\s+)?(?:face|skin|complexion|colou?ring|eyes|eye\s+area|lips|cheeks|cheekbones|features|smile|jawline|under-?eyes)|(?:older|mature)\s+(?:skin|faces?))\b(?!\s+of\b)`;
+/** A person a look acts on — "ages you", "washes her out" — never "you see" or "you can". */
+const PERSON_OBJECT = String.raw`(?:you|her|him|me|a\s+woman|anyone|everyone)\b(?!\s+(?:see|saw|seen|notice|get|got|find|can|will|would|could|might|need|want|to)\b)(?!['’])`;
+/**
+ * What a look DOES to a face: "brightens your whole face", "softens the face", "frames her face",
+ * "washes you out", "ages you", "takes ten years off". Never "lift your face to the light" (an
+ * instruction), "whatever suits you" (a saying) or "takes years off the life of the blade".
+ */
+const FACE_EFFECT =
+  String.raw`\b(?:(?:flatter(?:s|ed|ing)?|suit(?:s|ed|ing)?|fram(?:e|es|ed|ing)|brighten(?:s|ed|ing)?|light(?:s|ed|ing)?\s+up|warm(?:s|ed|ing)?(?:\s+up)?|soften(?:s|ed|ing)?|sharpen(?:s|ed|ing)?|drain(?:s|ed|ing)?|ag(?:es|ed|ing)|bring(?:s|ing)?\s+out|brought\s+out|open(?:s|ed|ing)?\s+up|shadow(?:s|ed|ing)?)\s+${FACE_OBJECT}|` +
+  String.raw`wash(?:es|ed|ing)?\s+(?:you|her|him|me|(?:your|her|his|my)\s+(?:face|skin|complexion))\s+out|wash(?:es|ed|ing)?\s+out\s+(?:your|her|his|my)\s+(?:face|skin|complexion)|` +
+  String.raw`(?:flatter(?:s|ed|ing)?|ag(?:es|ed|ing)|drain(?:s|ed|ing)?)\s+${PERSON_OBJECT}|` +
+  String.raw`(?:tak(?:e|es|ing)|took|knock(?:s|ed|ing)?)\s+(?:(?:ten|five|a\s+few|several|\d+)\s+)?years\s+off(?!\s+(?:the|its|a)\s+(?:life|lifespan)\b))`;
+/** "makes you look older", "you'll look ten years younger", "she reads tired". */
+const PERSON_LOOKS =
+  String.raw`\b(?:(?:make|makes|making|made|leave|leaves|leaving|left)\s+(?:you|her|him|me|a\s+woman|anyone|everyone)\s+(?:look|read)|(?:you|she|he)(?:['’]ll|\s+will|\s+would|\s+can|\s+might)?\s+(?:look|looks|read|reads))\s+${LOOK_FILLER}(?:younger|older|tired|exhausted|washed[- ]out|drained|drawn|sallow|ashy|pale|sickly|gr[ae]y|harsh|severe|fresher|brighter|awake|rested|radiant|dated|frumpy|puffy)\b`;
+/** Inside one clause: a stop, a comma, a dash or a bracket ends it. */
+const IN_CLAUSE = String.raw`[^,.;:!?—–()]{0,60}?`;
+const ON_FACE = `(?:${FACE_PART}|${ON_THE_FACE_THING})`;
+/**
+ * A line judging how something LOOKS ON OR NEAR THE FACE (see `looksOnTheFace`): a look word and a
+ * face — or a thing worn on it, or the hair round it — in one clause, or a look acting on the face
+ * or the person.
+ */
+const FACE_LOOK_LINE = new RegExp(
+  `${ON_FACE}${IN_CLAUSE}${LOOKS_AS}|${LOOKS_AS}${IN_CLAUSE}${ON_FACE}|` +
+    `${HAIR_ROUND_FACE}${IN_CLAUSE}${HAIR_LOOKS_AS}|${HAIR_LOOKS_AS}${IN_CLAUSE}${HAIR_ROUND_FACE}|` +
+    `${FACE_EFFECT}|${PERSON_LOOKS}`,
+  "i"
+);
+/**
+ * Sayings that name a face, the eyes, the skin, the lips or the hair and mean something else: "on
+ * the face of it", "save face", "keep your eyes on the line", "skin in the game", "let your hair
+ * down", "split hairs", "lip service".
+ */
+const FACE_SAYINGS =
+  /\b(?:sav(?:e|es|ing|ed)|los(?:e|es|ing)|lost)\s+face\b|\bface\s+value\b|\bon\s+the\s+face\s+of\s+it\b|\bface\s+to\s+face\b|\bface\s+(?:the\s+)?(?:music|facts)\b|\bstraight\s+face\b|\bslap\s+in\s+the\s+face\b|\begg\s+on\s+(?:your|my|his|her|their)\s+face\b|\bfly(?:ing)?\s+in\s+the\s+face\b|\b(?:keep|keeps|kept|keeping)\s+(?:an?|your|my|her|his|their)\s+eyes?\s+(?:on|out|peeled)\b|\beye\s+to\s+eye\b|\bwith\s+(?:your|my|her|his|their)\s+eyes\s+(?:closed|shut)\b|\bblind\s+eye\b|\bapple\s+of\s+(?:your|my|her|his|their)\s+eye\b|\bskin\s+in\s+the\s+game\b|\bunder\s+(?:your|my|her|his|their)\s+skin\b|\bthick[- ]skin(?:ned)?\b|\bby\s+the\s+skin\s+of\b|\bno\s+skin\s+off\b|\blet\s+(?:your|my|her|his|their)\s+hair\s+down\b|\bsplit(?:s|ting)?\s+hairs?\b|\blip\s+service\b|\bbit(?:e|es|ing)?\s+(?:your|my|her|his|their)\s+lip\b|\bstiff\s+upper\s+lip\b|\btongue\s+in\s+cheek\b|\bthe\s+other\s+cheek\b/gi;
+
+/**
+ * Whether a line is about how something LOOKS ON THE FACE (2026-10-18, the operator's decision on
+ * the audit's cause 9, "a look shown from behind"): a lipstick or blush shade, a hair colour or cut
+ * round the face, glasses, earrings, a colour or neckline worn near the face — judged by what it
+ * does to the face ("will read younger", "brightens your whole face", "washes you out", "makes you
+ * look tired"). Diane's job 309 scene 29, "A woman with gray hair that catches the light will read
+ * younger than a woman with flawlessly dyed brown hair", was drawn as the back of a head at a
+ * restaurant table: how a face reads cannot be shown with the face turned away.
+ * Never a line about a thing's own look ("The hair looks applied", "people read as healthy hair",
+ * "your lawn looks tired"), never one that names glasses or an earring and judges nothing ("wear
+ * gloves and safety glasses"), never a saying ("on the face of it", "keep your eyes on the line"),
+ * and never an overview that counts several pieces ("Three necklaces today that read expensive on a
+ * woman over sixty, and one that is aging you") — as with the chin lines (`COUNTS_THINGS`). And the
+ * line names the thing whose look it judges (`LOOK_THING`): "Stress ages you" or "You look tired"
+ * judge the person, and their picture keeps the face out like any other — a face drawn for them is
+ * the second, AI-drawn host the face check exists to stop. Pure.
+ */
+export function looksOnTheFace(line: string | undefined): boolean {
+  const t = (line ?? "").replace(FACE_SAYINGS, " ");
+  // "two shades lighter" is a measure, like "two inches lower" — never a count of pieces.
+  const counted = t.replace(
+    /\b(?:two|three|four|five|several)\s+(?:shades|tones|sizes|levels)\s+(?:lighter|darker|warmer|cooler|softer|brighter|deeper|paler|richer)\b/gi,
+    " "
+  );
+  return FACE_LOOK_LINE.test(t) && LOOK_THING.test(t) && !t.match(ANIMAL) && !COUNTS_THINGS.test(counted);
+}
+
+/** A neck piece in a picture — but "pearl earrings" are earrings. */
+const wornAtNeck = (words: string) =>
+  NECK_PIECE.test(words.replace(/\b(?:pearl|bead(?:ed)?|chain|drop|gold|silver)s?\s+(?:stud\s+|drop\s+|hoop\s+)?earrings?\b/gi, "earrings"));
+
+/**
+ * Whether a picture shows its line's look ON THE HOST'S FACE (`looksOnTheFace`), the face shown —
+ * read off the line and the picture's own words. Not a chin line's lips-cut picture (`chinFramed`:
+ * round 9 framed those at the lips, the look under the chin in view), not a picture of a piece worn
+ * at the neck (its framing is the neck's, `mayTurnHostAway`), not an overview of several pieces, an
+ * animal, or a list's group picture. Whether the picture is the host's at all is `markHostBroll`'s
+ * call. Pure.
+ */
+export function faceLookFramed(
+  scene: Pick<StoryboardScene, "scriptText" | "showSubject" | "visualPrompt" | "listSet">
+): boolean {
+  if (scene.listSet || !looksOnTheFace(scene.scriptText)) return false;
+  const words = `${scene.showSubject ?? ""} ${scene.visualPrompt ?? ""}`;
+  return !chinFramed(scene) && !wornAtNeck(words) && !SEVERAL_PIECES.test(words) && !words.match(ANIMAL);
+}
+
+/** Whether a face-shown picture is a STEP of a routine on the face (`FACE_ROUTINE`), not a look. Pure. */
+export function faceRoutinePicture(scene: Pick<StoryboardScene, "showSubject" | "visualPrompt">): boolean {
+  return FACE_ROUTINE.test(`${scene.showSubject ?? ""} ${scene.visualPrompt ?? ""}`);
+}
+
+/**
+ * A HOST picture that shows a LOOK on the host's own face (`hostFaceLookClause` in longformVideo):
+ * the face shown for its line (`hostFaceShown`), and not a step of a routine, which keeps its own
+ * framing — the hand at the face, the eyes on the task. Read off the scene each time. Pure.
+ */
+export function hostFaceLook(scene: StoryboardScene): boolean {
+  return !!scene.brollHostLook && !!scene.hostFaceShown && !scene.otherPerson && !faceRoutinePicture(scene);
+}
+
+/**
+ * Whether a look on the host's face is a HAIR look ("gray hair that catches the light", "a soft
+ * bob"): the hair is the look itself, so it may be drawn otherwise than in the host photo — the
+ * face, age and skin still the host's (`scanSameHost`'s `hairMayDiffer`). Diane's job 309: a check
+ * that holds a blonde host to her photo's hair calls her picture under "A woman with gray hair …
+ * will read younger" a different person every time, and it ends with nobody in it. Pure.
+ */
+export function hairLookOnFace(scene: StoryboardScene): boolean {
+  return hostFaceLook(scene) && HAIR_PICTURE.test(`${scene.showSubject ?? ""} ${scene.visualPrompt ?? ""}`);
+}
+
+/** Words that keep the face out of frame: "framed from the chin down", "the face out of frame". */
+const FACE_HIDDEN =
+  /,?\s*(?:and\s+)?(?:(?:with\s+)?(?:the|her|his|their)\s+face\s+(?:out\s+of\s+(?:the\s+)?frame|not\s+shown|hidden|unseen|cropped\s+out|never\s+shown)|(?:framed|cropped|cut|shot|seen|photographed)\s+from\s+the\s+(?:lips|chin|mouth|nose|neck|shoulders)\s+down)\b/gi;
+
+/**
+ * A face-shown host picture's description (`hostFaceShown`) with every view that turns the host
+ * away (`TURNED_AWAY`) or keeps the face out of frame taken out — so the words and the face clause
+ * ask for the same picture. Diane's job 282 scene 34, "host from behind, gray-blended hair catching
+ * light near the wall", under "A woman with gray hair that catches the light will read younger": the
+ * planner had written the old rule into the words. Light from behind is light, not a view. Pure.
+ */
+export function faceInView(text: string): string {
+  return text
+    .replace(TURNED_AWAY, "")
+    .replace(FACE_HIDDEN, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+([,.])/g, "$1")
+    .replace(/,\s*,/g, ",")
+    .replace(/^\s*,\s*/, "")
+    .trim();
+}
+
 // ─── A pose drawn face-on: from behind or the side only ─────────────────────────────────
 
 /**
@@ -1239,7 +1419,8 @@ export function turnAwayPose(text: string | undefined): boolean {
 /**
  * Whether a picture may be framed from behind or the side only: the host's own picture, and none of
  * the pictures whose framing is settled otherwise — a chin line keeps its lips cut (the chin is what
- * the line is about), a step on the host's own face shows the face, and a picture of a piece WORN AT
+ * the line is about), a step on the host's own face or a look on it shows the face (`hostFaceShown`,
+ * never turned away — not even after the still check saw the face), and a picture of a piece WORN AT
  * THE NECK faces the camera: the piece sits on the front, so from behind it is not in the picture.
  * "A woman in a plain navy crewneck sweater with a cream pearl strand at her collarbone, walking down
  * a bright grocery aisle" (job 362 scene 9) and "full-length view of a woman with a long gold chain
@@ -1575,14 +1756,19 @@ export function markHostBroll(
       s.brollHostLook = look;
       // A step on the host's OWN FACE (make-up, skin care) shows that face — hers, drawn from her
       // photo and checked against it (`hostFaceClause`, `scanSameHost`) — since a routine on the face
-      // cannot be shown with the face turned away (the operator, 2026-10-15). Everything else keeps
-      // the face out of the picture, as before.
-      s.hostFaceShown = FACE_ROUTINE.test(`${s.showSubject ?? ""} ${s.visualPrompt ?? ""}`) || undefined;
+      // cannot be shown with the face turned away (the operator, 2026-10-15). So does a line about
+      // how something LOOKS on the face — a shade on the lips, a cut or colour round the face,
+      // glasses, earrings (`faceLookFramed`, the operator's decision on the audit's cause 9,
+      // 2026-10-18): Diane's "gray hair that catches the light will read younger" was the back of a
+      // head. Everything else keeps the face out of the picture, as before.
+      s.hostFaceShown = FACE_ROUTINE.test(`${s.showSubject ?? ""} ${s.visualPrompt ?? ""}`) || faceLookFramed(s) || undefined;
       // A chin line's picture is framed from the lips down (`hostLipsCut`), facing the camera, with
       // the piece worn.
       const chin = !s.hostFaceShown && chinFramed(s);
+      // A face-shown picture keeps no words that turn the host away or crop the face out
+      // (`faceInView`): the planner writes the face-never-shown rule into its descriptions.
       const tidy = (t: string) => {
-        const out = s.hostFaceShown ? withoutMirrors(t) : withoutFaceAsks(withoutMirrors(t));
+        const out = s.hostFaceShown ? faceInView(withoutMirrors(t)) : withoutFaceAsks(withoutMirrors(t));
         return chin ? wornAtTheNeck(facingTheCamera(out)) : out;
       };
       if (s.showSubject) s.showSubject = tidy(s.showSubject);
@@ -1592,12 +1778,15 @@ export function markHostBroll(
       n++;
     } else if (on && s.hostPresent && s.splitVisual && BODY_PART_WORDS.test(s.splitVisual) && !REAL_HOLDER.test(s.splitVisual)) {
       // A split panel about a body part (hair, nails, skin) shows it on the host: it gets the host's
-      // look for the panel (`buildSplitRightScene`); the take on the left is untouched.
+      // look for the panel (`buildSplitRightScene`); the take on the left is untouched. The panel
+      // never shows the face, a look line's included — the host's own face is the take beside it.
       s.brollHostLook = look;
       s.brollHostRef = hostPhotoUrl;
+      s.hostFaceShown = undefined;
     } else {
       s.brollHostLook = undefined;
       s.brollHostRef = undefined;
+      s.hostFaceShown = undefined;
     }
   }
   return n;

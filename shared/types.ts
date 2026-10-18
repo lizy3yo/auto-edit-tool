@@ -644,9 +644,11 @@ export interface StoryboardScene {
   brollHostLook?: string;
   brollHostRef?: string;
   /**
-   * The host's picture is a step on their OWN FACE (make-up, skin care — `FACE_ROUTINE`), so the
-   * face is shown: drawn from the host photo (`hostFaceClause`) and checked to be the same person
-   * (`scanSameHost`). Unset on every other host picture, which keeps the face out of frame.
+   * The host's picture is a step on their OWN FACE (make-up, skin care — `FACE_ROUTINE`), or its line
+   * is about how something LOOKS on the face (a lipstick shade, a cut or colour round the face,
+   * glasses, earrings — `faceLookFramed`, 2026-10-18), so the face is shown: drawn from the host photo
+   * (`hostFaceClause` / `hostFaceLookClause`) and checked to be the same person (`scanSameHost`). Unset
+   * on every other host picture, which keeps the face out of frame, and on a split's panel.
    */
   hostFaceShown?: boolean;
   /**
