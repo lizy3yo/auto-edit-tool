@@ -376,3 +376,36 @@ export const REDRAW_VIEWS = REDRAW_CAMERAS.map(c => `Camera for THIS picture: ${
 export function differentPictureClause(k: number): string {
   return `${DIFFERENT_PICTURE_CLAUSE} ${REDRAW_VIEWS[k % REDRAW_VIEWS.length]} Never the reference picture's framing.`;
 }
+
+/** Where the camera that shrinks the subject ("seen from much further back …") is in `REDRAW_CAMERAS`. */
+export const FAR_CAMERA = 1;
+
+/**
+ * The camera the `k`-th near-copy redraw (1-based) of a picture is drawn from, as an index into
+ * `REDRAW_CAMERAS`: in turn from the one after `own` (the camera a continuation was drawn from, -1 for
+ * any other picture), never `own` itself — and never the far camera when `small`: a picture of one
+ * small thing, or one its own words frame close (`smallSubject` in pictureMemory.ts).
+ * THE FAR CAMERA ERASES A SMALL SUBJECT (job 408 scene 16): the split panel "close view of a single
+ * white cotton swab … on pale beige tile floor" was a near copy twice, and its second redraw was told
+ * "seen from much further back, the whole place around it and the subject small in it" — the swab came
+ * back a 30 px speck on a wide bathroom floor and shipped "subject missing". Any other picture keeps
+ * the turn it always had (`own` + k). Pure.
+ */
+export function nearCopyCameraIndex(k: number, own: number, small: boolean): number {
+  const n = REDRAW_CAMERAS.length;
+  const turn = Array.from({ length: n }, (_, i) => (own + 1 + i + n) % n).filter(
+    c => c !== own && !(small && c === FAR_CAMERA)
+  );
+  return turn[(Math.max(1, k) - 1) % turn.length];
+}
+
+/**
+ * `prompt` with the far camera (`REDRAW_VIEWS[FAR_CAMERA]`, written the same way by a near-copy redraw
+ * and by a continuation drawn from words) swapped for camera `instead`: a redraw for a subject the
+ * check could not find never keeps the camera that made it small (job 408 scene 16: after the
+ * near-copy redraws, the "missing" redraw only changed the seed, kept "the subject small in it", and
+ * came back missing again). Unchanged when there is none. Pure.
+ */
+export function withoutFarCamera(prompt: string, instead: number): string {
+  return prompt.split(REDRAW_VIEWS[FAR_CAMERA]).join(REDRAW_VIEWS[instead]);
+}

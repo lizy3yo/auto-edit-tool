@@ -339,6 +339,17 @@ export interface RecurringPerson {
  */
 export type BuildStage = "material" | "making" | "done";
 
+/**
+ * One reference picture a picture of a key thing is drawn from (`StoryboardScene.memoryRefScenes`):
+ * the scene it was drawn for, whether it is a picture of the drawn picture's OWN thing (else it lends
+ * only another key thing), and which of the drawn picture's other key things it shows.
+ */
+export interface MemoryRef {
+  index: number;
+  own?: true;
+  shows?: string[];
+}
+
 export interface StoryboardScene {
   index: number;
   /** Short display label for this beat (derived = first words of `scriptText`) */
@@ -570,6 +581,12 @@ export interface StoryboardScene {
   blurPrint?: true;
   /** The earlier pictures of the same key thing this one was drawn from (set at render). */
   memoryRefUrls?: string[];
+  /**
+   * What each picture in `memoryRefUrls` is, in the same order (set at render, `memoryFor`): its scene,
+   * whether it is a picture of this one's own thing, and which of its other key things it shows. A
+   * near-copy redraw of one of them drops just that reference (`withoutMemoryRef`, job 408 scene 19).
+   */
+  memoryRefScenes?: MemoryRef[];
   /** The camera position a memory picture is drawn from — never its memory's own (set at render). */
   memoryView?: string;
   /**

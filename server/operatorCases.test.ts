@@ -5724,3 +5724,190 @@ describe("job 409 scene 28: a picture of the host is never kept past the host ch
     expect(hostPictureMove({ same: true, face: false }, false, 0, true)).toEqual({ move: "keep" });
   });
 });
+describe("a redraw drops what caused its fault (round 13, jobs 408 and 410)", () => {
+  // The panels and pictures as stored on jobs 408 and 410. Their redraws were sent exactly what had
+  // made them miss: the same memory pictures, the same memory camera, the far near-copy camera.
+  const TOILET_LOOK =
+    "a white porcelain toilet, oval bowl, curved trapway inside its base visible as a smooth porcelain contour at the bowl's rear, closed lid often up";
+  const S10 = "https://r2/longform/408/still-src-10.png";
+  const S14 = "https://r2/longform/408/still-src-14.png";
+  const S18 = "https://r2/longform/408/still-src-18.png";
+  const SWAB_PANEL =
+    "close view of a single white cotton swab with cotton tufts on both ends lying on pale beige tile floor beside the base of a white porcelain toilet";
+  const SWAB_IN_BOWL =
+    "looking down into the toilet bowl: a single white cotton swab lying sideways across the dark drain opening at the bottom, under clear water";
+  const s19 = (over: Partial<StoryboardScene> = {}) =>
+    pic(19, "Good design. But a stiff stick does not always follow a curve. It can turn sideways and catch across the passage, like a bar across a doorway.", SWAB_IN_BOWL, {
+      keyThing: "toilet",
+      partOf: "toilet",
+      memoryRefUrls: [S14, S18],
+      memoryRefScenes: [{ index: 14, own: true }, { index: 18, own: true }],
+      memoryRightBefore: 1,
+      memoryView: PART_VIEW,
+      memoryWordsLook: TOILET_LOOK,
+      ...over,
+    });
+
+  it("408-16 and 408-19 are pictures a far camera would lose; a wide view is not", async () => {
+    const { smallSubject } = await import("./pictureMemory");
+    expect(smallSubject(host(16, "Cotton swabs. The little stick with cotton on both ends.", { splitVisual: SWAB_PANEL }))).toBe(true);
+    expect(smallSubject(s19())).toBe(true); // a part close-up
+    // Job 410 scene 20: "a small plastic cup of orange juice beside a juice can on the beverage cart".
+    expect(smallSubject(pic(20, "Juice works the same way.", "a small plastic cup of orange juice beside a juice can on the beverage cart"))).toBe(true);
+    expect(smallSubject(pic(1, "n", "a little bird on the feeder"))).toBe(true);
+    // Job 403 scene 14's pipe run, a garden, and "a little" that is no size.
+    expect(smallSubject(pic(14, "n", "grey PVC pipe network running beneath the house toward the street"))).toBe(false);
+    expect(smallSubject(pic(2, "n", "the whole backyard garden with raised beds along the fence"))).toBe(false);
+    expect(smallSubject(pic(3, "n", "a red barn seen a little to one side under a grey sky"))).toBe(false);
+  });
+
+  it("408-16: a small subject's near-copy redraws never take the far camera; any other keeps its turn", async () => {
+    const { nearCopyCameraIndex, FAR_CAMERA, REDRAW_CAMERAS } = await import("./pictureVariety");
+    expect(REDRAW_CAMERAS[FAR_CAMERA]).toMatch(/much further back, the whole place around it and the subject small in it/);
+    // The swab panel (no camera of its own): a close-up, then the other side — never "much further back".
+    expect([nearCopyCameraIndex(1, -1, true), nearCopyCameraIndex(2, -1, true)]).toEqual([0, 2]);
+    // A continuation drawn close up: the other side, and never its own camera.
+    expect([nearCopyCameraIndex(1, 0, true), nearCopyCameraIndex(2, 0, true)]).toEqual([2, 2]);
+    // Any other picture: exactly the turn it had (`own` + k), the far camera included.
+    for (const own of [-1, 0, 1, 2]) for (const k of [1, 2]) expect(nearCopyCameraIndex(k, own, false)).toBe((own + k + 3) % 3);
+  });
+
+  it("408-16: a redraw for a subject the check could not find swaps the far camera for a near one", async () => {
+    const { withoutFarCamera, differentPictureClause, DIFFERENT_PICTURE_CLAUSE, REDRAW_VIEWS, FAR_CAMERA } = await import("./pictureVariety");
+    const far = `${SWAB_PANEL}. ${differentPictureClause(FAR_CAMERA)}`;
+    const near = withoutFarCamera(far, 2);
+    expect(near).not.toContain(REDRAW_VIEWS[FAR_CAMERA]);
+    expect(near).toContain(REDRAW_VIEWS[2]);
+    expect(near).toContain(DIFFERENT_PICTURE_CLAUSE); // still told to differ from the copy
+    // A continuation drawn from words with the far camera says it the same way.
+    expect(withoutFarCamera(`${SWAB_PANEL} ${REDRAW_VIEWS[FAR_CAMERA]}`, 0)).toBe(`${SWAB_PANEL} ${REDRAW_VIEWS[0]}`);
+    // No far camera: unchanged.
+    const close = `${SWAB_PANEL}. ${differentPictureClause(0)}`;
+    expect(withoutFarCamera(close, 2)).toBe(close);
+  });
+
+  it("410-18, 410-20, 408-5: a missing or detail redraw drops the memory pictures — never a screen's item photo", async () => {
+    const { memoryDropsOnRedraw, memoryToWords } = await import("./longformVideo");
+    const { BACKGROUND_VIEW, SCREEN_ITEM_VIEW } = await import("./pictureMemory");
+    const panel = {
+      ...buildSplitRightScene(
+        host(18, "spent nursing a thimble of ginger ale.", {
+          splitVisual: "A plastic cup half-filled with ice and ginger ale sits on an airplane tray table, the cup tilted slightly as if just set down mid-sip.",
+          keyThing: "soda cup",
+        })
+      ),
+      memoryRefUrls: ["https://r2/longform/410/still-src-7.png"],
+      memoryWordsLook: "a clear plastic cup packed with ice, filled about halfway with soda",
+    } as StoryboardScene;
+    expect(memoryDropsOnRedraw(panel)).toBe(true);
+    expect(memoryToWords(panel)).toMatchObject({ memoryRefUrls: undefined, memoryView: undefined, keyThingLook: panel.memoryWordsLook });
+    const juice = pic(20, "Juice works the same way.", "a small plastic cup of orange juice beside a juice can on the beverage cart", {
+      keyThing: "beverage cart",
+      memoryRefUrls: ["https://r2/longform/410/still-src-3.png"],
+      memoryView: BACKGROUND_VIEW,
+    });
+    expect(memoryDropsOnRedraw(juice)).toBe(true);
+    // A screen's reference is only the photo inside its listing (Dale's job 306); nothing to drop otherwise.
+    expect(memoryDropsOnRedraw({ ...juice, memoryView: SCREEN_ITEM_VIEW })).toBe(false);
+    expect(memoryDropsOnRedraw({ ...juice, memoryRefUrls: undefined })).toBe(false);
+  });
+
+  it("a continuation keeps its near camera when its memory is dropped; any other view goes with the memory", async () => {
+    const { redrawCameraClause } = await import("./longformVideo");
+    const { REDRAW_CAMERAS, REDRAW_VIEWS } = await import("./pictureVariety");
+    const { BACKGROUND_VIEW } = await import("./pictureMemory");
+    const cont = (view: string) => s19({ partOf: undefined, memoryView: view, memoryContinues: true });
+    // Job 405 scene 8's lesson: drawn from nearly the words it continues and no camera, it is that picture again.
+    expect(redrawCameraClause(cont(REDRAW_CAMERAS[0]))).toBe(` ${REDRAW_VIEWS[0]}`);
+    expect(redrawCameraClause(cont(REDRAW_CAMERAS[2]))).toBe(` ${REDRAW_VIEWS[2]}`);
+    // …but never the far one: the next near camera instead.
+    expect(redrawCameraClause(cont(REDRAW_CAMERAS[1]))).toBe(` ${REDRAW_VIEWS[2]}`);
+    expect(redrawCameraClause(cont(BACKGROUND_VIEW))).toBe("");
+    expect(redrawCameraClause(cont(PART_VIEW))).toBe("");
+    expect(redrawCameraClause(s19())).toBe("");
+  });
+
+  it("408-19: the near copy of scene 18 drops scene 18 and keeps the toilet's first picture", async () => {
+    const { withoutMemoryRef, memoryClause: clauseOf } = await import("./longformVideo");
+    const before = s19();
+    expect(clauseOf(before)).toMatch(/Reference image 2 is the picture shown RIGHT BEFORE this one/);
+    const fields = withoutMemoryRef(before, 18)!;
+    expect(fields).toMatchObject({
+      memoryRefUrls: [S14],
+      memoryRefScenes: [{ index: 14, own: true }],
+      memoryRightBefore: undefined,
+      memoryContinues: undefined,
+      memoryView: PART_VIEW,
+      memoryOthersOnly: undefined,
+      memoryWordsLook: TOILET_LOOK,
+      keyThingLook: undefined,
+    });
+    const after = { ...before, ...fields };
+    expect(clauseOf(after)).toMatch(/^ The first reference image shows the whole toilet\. This picture is a CLOSE-UP/);
+    expect(clauseOf(after)).not.toMatch(/RIGHT BEFORE/);
+    // Dropping the other one moves the picture just shown to the first place.
+    expect(withoutMemoryRef(before, 14)).toMatchObject({ memoryRefUrls: [S18], memoryRightBefore: 0 });
+    // Not one of its references, or references that say nothing of what they are: nothing changes.
+    expect(withoutMemoryRef(before, 12)).toBeUndefined();
+    expect(withoutMemoryRef({ ...before, memoryRefScenes: undefined }, 18)).toBeUndefined();
+  });
+
+  it("dropping the last picture of its own thing draws it by its written look; dropping the last one draws it from words", async () => {
+    const { withoutMemoryRef, memoryToWords, memoryClause: clauseOf } = await import("./longformVideo");
+    // A soda can drawn from its own first picture and the cart's picture that also shows the cup.
+    const can = pic(16, "n", "a soda can on the beverage cart beside a cup of soda", {
+      keyThing: "soda can",
+      otherKeyThings: ["beverage cart", "soda cup"],
+      memoryRefUrls: ["https://r2/4.png", "https://r2/3.png"],
+      memoryRefScenes: [{ index: 4, own: true }, { index: 3, shows: ["beverage cart"] }],
+      memoryView: "a close view of one part of it, filling most of the frame",
+      memoryNotShown: ["soda cup"],
+      memoryWordsLook: "a slim aluminum can, silver and red body, small pull tab on top",
+    });
+    const others = withoutMemoryRef(can, 4)!;
+    expect(others).toMatchObject({
+      memoryRefUrls: ["https://r2/3.png"],
+      memoryOthersOnly: true,
+      keyThingLook: "a slim aluminum can, silver and red body, small pull tab on top",
+      memoryWordsLook: undefined,
+      memoryNotShown: ["soda cup"],
+    });
+    expect(clauseOf({ ...can, ...others })).toMatch(/this exact beverage cart, seen earlier in this video/);
+    expect(clauseOf({ ...can, ...others })).toMatch(/does NOT show the soda can: draw it from this picture's own words/);
+    // Without the cart's picture the cart is no longer shown by any reference.
+    expect(withoutMemoryRef(can, 3)).toMatchObject({ memoryRefUrls: ["https://r2/4.png"], memoryNotShown: ["beverage cart", "soda cup"] });
+    const one = { ...can, memoryRefUrls: ["https://r2/4.png"], memoryRefScenes: [{ index: 4, own: true as const }] };
+    expect(withoutMemoryRef(one, 4)).toEqual(memoryToWords(one));
+    // A continuation whose continued picture is dropped loses the camera it took to stand apart from it.
+    const { REDRAW_CAMERAS } = await import("./pictureVariety");
+    const cont = s19({ partOf: undefined, memoryView: REDRAW_CAMERAS[0], memoryContinues: true });
+    expect(withoutMemoryRef(cont, 18)).toMatchObject({ memoryView: undefined, memoryContinues: undefined, memoryRightBefore: undefined });
+    expect(withoutMemoryRef(cont, 14)).toMatchObject({ memoryView: REDRAW_CAMERAS[0], memoryContinues: true, memoryRightBefore: 0 });
+  });
+
+  it("at render each reference says which scene it is, whether it is of its own thing, and what else it shows", async () => {
+    const { attachMemory, memoryFor, memoryView } = await import("./pictureMemory");
+    const { memoryFields } = await import("./longformVideo");
+    const b = [
+      pic(10, "n", "white porcelain toilet seen from the side beside the small white bin", {
+        keyThing: "toilet",
+        otherKeyThings: ["bin"],
+        pictureUrl: S10,
+      }),
+      pic(18, "That curve is called the trapway.", "looking down into the white porcelain toilet bowl at still clear water sitting over the dark rear drain opening at the bottom", {
+        keyThing: "toilet",
+        partOf: "toilet",
+        pictureUrl: S18,
+      }),
+      pic(19, "Good design.", SWAB_IN_BOWL, { keyThing: "toilet", partOf: "toilet", otherKeyThings: ["bin"] }),
+    ];
+    attachMemory(b, [b[2]]);
+    const m = await memoryFor(b[2], 0);
+    expect(m.urls).toEqual([S10, S18]);
+    expect(m.refs).toEqual([{ index: 10, own: true, shows: ["bin"] }, { index: 18, own: true }]);
+    const fields = memoryFields(m, memoryView(b[2]));
+    expect(fields.memoryRefScenes).toEqual(m.refs);
+    // References that do not each say what they are are not described at all.
+    expect(memoryFields({ ...m, refs: m.refs!.slice(0, 1) }, undefined).memoryRefScenes).toBeUndefined();
+  });
+});

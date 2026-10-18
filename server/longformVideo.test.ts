@@ -10408,14 +10408,31 @@ describe("the thing the way its description says — one redraw, told the detail
     expect(second).not.toMatch(/reference pictures are only for how things look/);
   });
 
-  it("tells a picture drawn from memory that its references are for the look only", async () => {
+  it("a picture drawn from memory is redrawn without its memory pictures — only a screen keeps its item photo", async () => {
+    // Round 13 (job 410 scene 18): told its references were for the look only, the redraw still drew
+    // the reference's state. It now goes without them, so it has no references to be told about.
     mockScanStillDefects.mockReset();
     mockScanStillDefects.mockResolvedValueOnce(verdict({ detail: true })).mockResolvedValue(verdict());
     const genImage = vi.fn().mockResolvedValue({ success: true, fileData: await pngOf("#225") });
     await generateValidatedStill(padlock({ memoryRefUrls: ["https://x/first-padlock.png"] }), 3, undefined, genImage);
-    const second = genImage.mock.calls[1][0].prompt as string;
-    expect(second).toMatch(/reference pictures are only for how things look/);
-    expect(second).toMatch(/never copy their state, position or number/);
+    expect(genImage.mock.calls[0][0].referenceImageUrl).toBe("https://x/first-padlock.png");
+    const second = genImage.mock.calls[1][0];
+    expect(second.referenceImageUrl).toBeUndefined();
+    expect(second.prompt).not.toMatch(/reference pictures are only for how things look/);
+    // A screen's reference is the photo inside its listing: kept, and the clause still says so.
+    const { SCREEN_ITEM_VIEW } = await import("./pictureMemory");
+    mockScanStillDefects.mockReset();
+    mockScanStillDefects.mockResolvedValueOnce(verdict({ detail: true })).mockResolvedValue(verdict());
+    const screen = vi.fn().mockResolvedValue({ success: true, fileData: await pngOf("#226") });
+    await generateValidatedStill(
+      padlock({ memoryRefUrls: ["https://x/padlock-listing.png"], memoryView: SCREEN_ITEM_VIEW }),
+      3,
+      undefined,
+      screen
+    );
+    expect(screen.mock.calls[1][0].referenceImageUrl).toBe("https://x/padlock-listing.png");
+    expect(screen.mock.calls[1][0].prompt).toMatch(/reference pictures are only for how things look/);
+    expect(screen.mock.calls[1][0].prompt).toMatch(/never copy their state, position or number/);
   });
 
   it("shares the one redraw with a missing thing — never a third picture for what it shows", async () => {
@@ -11509,17 +11526,24 @@ describe("a memory picture that copies its memory twice is drawn from words (job
 
   it("a frame of the wrong subject still ships before a copy, as before", async () => {
     const [a, b, c] = await Promise.all([pngOf("#e11"), pngOf("#e22"), pngOf("#e33")]);
+    const clean = { overlay: false, broken: false, what: "" } as any;
     mockScanStillDefects.mockReset();
+    // The copies come first: since round 13 a missing thing's redraw goes without the memory, so no
+    // copy of it can follow one (`memoryDropsOnRedraw`).
     mockScanStillDefects
-      .mockResolvedValueOnce({ overlay: false, broken: false, what: "", missing: true } as any)
-      .mockResolvedValue({ overlay: false, broken: false, what: "" } as any);
+      .mockResolvedValueOnce(clean)
+      .mockResolvedValueOnce(clean)
+      .mockResolvedValueOnce({ ...clean, missing: true })
+      .mockResolvedValue(clean);
     mockScanSameThing.mockReset();
     mockScanSameThing.mockResolvedValueOnce(copy).mockResolvedValueOnce(copy);
     const genImage = drawsOf(a, b, c).mockResolvedValue({ success: false, error: "OpenAI image 500: oops" });
     try {
       const out = await generateValidatedStill(cup(), 5, undefined, genImage);
-      // a: subject missing (the off-subject fallback); b and c copies; the words draw never comes.
-      expect(out.buffer.equals(a)).toBe(true);
+      // a and b copies; c, drawn from words, the wrong subject (the off-subject fallback); its redraw
+      // never comes.
+      expect(out.buffer.equals(c)).toBe(true);
+      expect(out.missing).toBe(true);
     } finally {
       mockScanStillDefects.mockReset();
       mockScanStillDefects.mockResolvedValue({ overlay: false, broken: false, what: "" } as any);
@@ -11625,9 +11649,12 @@ describe("a continuation is compared with the picture it continues (jobs 401-405
     // The third is drawn from words and keeps its concrete camera.
     expect(prompts[2]).not.toMatch(/reference image/i);
     expect(prompts[2]).toContain(`Camera for THIS picture: ${REDRAW_CAMERAS[0]}.`);
-    // Compared with scene 7 though 7's fingerprint is far; the copy redraws from the camera after its own.
+    // Compared with scene 7 though 7's fingerprint is far; the copy redraws from the camera after its
+    // own — never the far one (round 13): its words ask for "a close-up of one detail" of "a small
+    // tabby cat", which "much further back, the subject small in it" would lose (`smallSubject`).
     expect(mockScanNearCopy.mock.calls[0][0].equals(sevenThumb)).toBe(true);
-    expect(prompts[3]).toContain(REDRAW_VIEWS[1]);
+    expect(prompts[3]).toContain(REDRAW_VIEWS[2]);
+    expect(prompts[3]).not.toContain(REDRAW_VIEWS[1]);
     // …and only that camera: the close-up it was drawn from words with is gone, never both at once.
     expect(prompts[3]).not.toContain(`Camera for THIS picture: ${REDRAW_CAMERAS[0]}.`);
     expect(prompts[3].match(/Camera for THIS picture:/g)).toHaveLength(1);
@@ -13574,5 +13601,277 @@ describe("a thing seen cut open is drawn from outside, and is no memory (job 403
       drawsOf(b)
     );
     expect((mockScanStillDefects.mock.calls[0] as any[])[1]).toBe(bowl);
+  });
+});
+describe("a redraw drops what caused its fault (round 13, jobs 408 and 410)", () => {
+  // Seeded "photos" so the fingerprints are real ones (as in the split-panel near-copy tests).
+  const photo = (seed: number, w: number, h: number) => {
+    let a = seed >>> 0;
+    const rnd = () => {
+      a = (a + 0x6d2b79f5) >>> 0;
+      let t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const cols = Math.round((w / h) * 9);
+    const px = Buffer.alloc(cols * 9 * 3);
+    for (let i = 0; i < cols * 9; i++) px.fill(Math.floor(rnd() * 256), i * 3, i * 3 + 3);
+    return sharp(px, { raw: { width: cols, height: 9, channels: 3 } }).resize(w, h, { kernel: "cubic", fit: "fill" }).png().toBuffer();
+  };
+  const verdict = (over: Record<string, unknown> = {}) => ({ overlay: false, broken: false, what: "", ...over }) as any;
+  const checks = (...vs: Record<string, unknown>[]) => {
+    mockScanStillDefects.mockReset();
+    for (const v of vs) mockScanStillDefects.mockResolvedValueOnce(verdict(v));
+    mockScanStillDefects.mockResolvedValue(verdict());
+  };
+  const drawsOf = (...frames: Buffer[]) => {
+    const fn = vi.fn();
+    for (const f of frames) fn.mockResolvedValueOnce({ success: true, fileData: f });
+    return fn;
+  };
+  afterEach(() => {
+    mockScanStillDefects.mockReset();
+    mockScanStillDefects.mockResolvedValue(verdict());
+    mockScanSameThing.mockReset();
+    mockScanSameThing.mockResolvedValue({ same: true, copy: false, what: "" });
+    mockScanNearCopy.mockReset();
+    mockScanNearCopy.mockResolvedValue({ copy: false, what: "" });
+  });
+
+  // Job 410's props-list looks, and the stored memory of the pictures below (`memoryRefUrls`).
+  const SODA_CUP_LOOK = "a clear plastic cup packed with ice, filled about halfway with soda";
+  const CART_LOOK = "a metal service cart with wheels, a flat top holding plastic cups, ice, aluminum cans, and small bottles";
+  const S7 = "https://r2/longform/410/still-src-7.png";
+  const S16 = "https://r2/longform/410/still-src-16.png";
+  const FURTHER_BACK = "seen from a few steps further back, with the place around it in view";
+  // Job 410 scene 18: "…spent nursing a thimble of ginger ale." — the panel drawn from scene 7's cup.
+  const gingerAlePanel = () => ({
+    ...buildSplitRightScene({
+      index: 18,
+      hostPresent: true,
+      scriptText: "I figured that out much too late, after more flights than I care to count spent nursing a thimble of ginger ale.",
+      splitVisual:
+        "A plastic cup half-filled with ice and ginger ale sits on an airplane tray table, the cup tilted slightly as if just set down mid-sip.",
+      keyThing: "soda cup",
+    } as StoryboardScene),
+    memoryRefUrls: [S7, S16],
+    memoryRefScenes: [{ index: 7, own: true as const }, { index: 16, own: true as const }],
+    memoryView: FURTHER_BACK,
+    memoryWordsLook: SODA_CUP_LOOK,
+  });
+
+  it("410-18: the ginger-ale panel's detail redraw goes without scene 7's cola cup and its view, drawn by the cup's written look", async () => {
+    const { DETAIL_CLAUSE_START } = await import("./longformVideo");
+    const [cola, ale] = await Promise.all([photo(181, 1024, 1024), photo(182, 1024, 1024)]);
+    checks({ detail: true, detailWhat: "dark cola over ice, not pale ginger ale", what: "a cup of cola" });
+    const panel = gingerAlePanel();
+    const genImage = drawsOf(cola, ale);
+    const out = await generateValidatedStill(panel, 4, undefined, genImage, undefined, undefined, true);
+    expect(genImage).toHaveBeenCalledTimes(2);
+    const [first, second] = genImage.mock.calls.map(c => c[0]);
+    expect(first.referenceImageUrls).toEqual([S7, S16]);
+    expect(first.prompt).toContain(FURTHER_BACK);
+    // The redraw: no reference, no memory view, the cup by its written look, the detail named.
+    expect(second.referenceImageUrl).toBeUndefined();
+    expect(second.referenceImageUrls).toBeUndefined();
+    expect(second.prompt).not.toMatch(/reference image/i);
+    expect(second.prompt).not.toContain(FURTHER_BACK);
+    expect(second.prompt).toContain(`HOW THE SODA CUP LOOKS in every picture of this video: ${SODA_CUP_LOOK}`);
+    expect(second.prompt).toContain(DETAIL_CLAUSE_START);
+    expect(second.prompt).toContain("ginger ale");
+    expect(second.square).toBe(true);
+    expect(out.buffer.equals(ale)).toBe(true);
+    expect(out.flaws).toBeUndefined();
+    expect(panel).toMatchObject({ memoryRefUrls: undefined, memoryRefScenes: undefined, memoryView: undefined, keyThingLook: SODA_CUP_LOOK });
+  });
+
+  it("410-20 and 408-5: the missing redraw goes without the background view and the 'further back' memory view", async () => {
+    const { BACKGROUND_VIEW } = await import("./pictureMemory");
+    // Job 410 scene 20: the juice on the cart, the cart kept small "beside what the picture is about".
+    const juice = {
+      index: 20,
+      scriptText: "Juice works the same way. If they're running short, they'll tell you, and you're no worse off for trying.",
+      showSubject: "a small plastic cup of orange juice beside a juice can on the beverage cart",
+      visualPrompt:
+        "A small clear plastic cup of orange juice sitting beside a full aluminum juice can on a metal beverage cart in an aircraft aisle.",
+      keyThing: "beverage cart",
+      memoryRefUrls: ["https://r2/longform/410/still-src-3.png", "https://r2/longform/410/still-src-16.png"],
+      memoryView: BACKGROUND_VIEW,
+      memoryWordsLook: CART_LOOK,
+    } as any;
+    const [speck, cup] = await Promise.all([photo(201, 1536, 864), photo(202, 1536, 864)]);
+    checks({ missing: true, detail: true, what: "an empty seat row, the juice a speck on the far cart" });
+    const genImage = drawsOf(speck, cup);
+    const out = await generateValidatedStill(juice, 4, undefined, genImage);
+    const [first, second] = genImage.mock.calls.map(c => c[0]);
+    expect(first.prompt).toMatch(/It is NOT what this picture is about/);
+    expect(second.referenceImageUrl).toBeUndefined();
+    expect(second.prompt).not.toMatch(/It is NOT what this picture is about|reference image/i);
+    expect(second.prompt).toContain(`HOW THE BEVERAGE CART LOOKS in every picture of this video: ${CART_LOOK}`);
+    expect(out.buffer.equals(cup)).toBe(true);
+    expect(out.missing).toBe(false);
+
+    // Job 408 scene 5: "small items grouped nearby", drawn from the bin's pictures a few steps further back.
+    const BIN_LOOK = "a small white plastic bin with a hinged lid, round shape";
+    const bin = {
+      index: 5,
+      scriptText:
+        "Nine things stay out of the toilet there, and in plenty of American homes, most of them go down it in an ordinary week.",
+      showSubject: "bin with lid open beside toilet, small items grouped nearby on tile floor",
+      visualPrompt:
+        "Small white plastic bin with open lid on pale beige tile floor beside toilet base. Cotton swabs and other small items grouped on the tile nearby.",
+      keyThing: "bin",
+      otherKeyThings: ["toilet"],
+      memoryRefUrls: ["https://r2/longform/408/still-src-2.png", "https://r2/longform/408/still-src-3.png"],
+      memoryView: FURTHER_BACK,
+      memoryWordsLook: BIN_LOOK,
+    } as any;
+    checks({ missing: true, detail: true, what: "an empty open bin, no items" }, { detail: true, what: "still no items" });
+    const twice = drawsOf(await photo(51, 1536, 864), await photo(52, 1536, 864));
+    await generateValidatedStill(bin, 4, undefined, twice);
+    expect(twice).toHaveBeenCalledTimes(2);
+    expect(twice.mock.calls[1][0].referenceImageUrl).toBeUndefined();
+    expect(twice.mock.calls[1][0].prompt).not.toContain(FURTHER_BACK);
+    expect(twice.mock.calls[1][0].prompt).toContain(`HOW THE BIN LOOKS in every picture of this video: ${BIN_LOOK}`);
+  });
+
+  it("a redraw for anything else keeps the memory: a staged look, broken geometry, a clean first draw", async () => {
+    for (const fault of [{ staged: true }, { broken: true, what: "cup floating above the tray" }]) {
+      checks(fault);
+      const panel = gingerAlePanel();
+      const genImage = drawsOf(await photo(311, 1024, 1024), await photo(312, 1024, 1024));
+      await generateValidatedStill(panel, 4, undefined, genImage, undefined, undefined, true);
+      expect(genImage).toHaveBeenCalledTimes(2);
+      expect(genImage.mock.calls[1][0].referenceImageUrls).toEqual([S7, S16]);
+      expect(genImage.mock.calls[1][0].prompt).toContain(FURTHER_BACK);
+      expect(panel.memoryRefUrls).toEqual([S7, S16]);
+    }
+    checks();
+    const clean = drawsOf(await photo(313, 1024, 1024));
+    await generateValidatedStill(gingerAlePanel(), 4, undefined, clean, undefined, undefined, true);
+    expect(clean).toHaveBeenCalledTimes(1);
+    expect(clean.mock.calls[0][0].referenceImageUrls).toEqual([S7, S16]);
+  });
+
+  it("408-16: the swab panel's near-copy redraws never go 'much further back', nor does its missing redraw", async () => {
+    const { withCostMeter } = await import("./costMeter");
+    const { pictureFingerprint, pictureThumb, rememberPicture, REDRAW_VIEWS, FAR_CAMERA } = await import("./pictureVariety");
+    const host = {
+      index: 16,
+      hostPresent: true,
+      scriptText: "Number one never leaves the toilet. Cotton swabs. The little stick with cotton on both ends.",
+      splitVisual:
+        "close view of a single white cotton swab with cotton tufts on both ends lying on pale beige tile floor beside the base of a white porcelain toilet",
+      keyThing: "cotton swabs",
+    } as StoryboardScene;
+    const eleven = await photo(1101, 1024, 1024);
+    rememberPicture(94816, 11, await pictureFingerprint(eleven, true), await pictureThumb(eleven, true));
+    mockScanNearCopy
+      .mockResolvedValueOnce({ copy: true, what: "the same swabs by the bin" })
+      .mockResolvedValueOnce({ copy: true, what: "still the same" });
+    checks({}, {}, { missing: true, what: "a wide bathroom floor, the swab a speck" }, { missing: true, what: "still a speck" });
+    const genImage = drawsOf(eleven, eleven, await photo(1603, 1024, 1024), await photo(1604, 1024, 1024));
+    const out = await withCostMeter(94816, () =>
+      generateValidatedStill(buildSplitRightScene(host), 4, undefined, genImage, undefined, undefined, true)
+    );
+    expect(genImage).toHaveBeenCalledTimes(4);
+    const prompts = genImage.mock.calls.map(c => c[0].prompt as string);
+    expect(prompts[1]).toContain(REDRAW_VIEWS[0]);
+    // The second near-copy redraw used to be the far camera: "the subject small in it".
+    expect(prompts[2]).toContain(REDRAW_VIEWS[2]);
+    for (const p of prompts) expect(p).not.toContain(REDRAW_VIEWS[FAR_CAMERA]);
+    expect(host.pictureChecks?.map(c => c.flags)).toEqual([["near copy"], ["near copy"], ["missing"], ["missing"]]);
+    expect(out.missing).toBe(true);
+  });
+
+  it("a big subject keeps the far camera on its near-copy turn, and loses it on the missing redraw after", async () => {
+    const { withCostMeter } = await import("./costMeter");
+    const { pictureFingerprint, pictureThumb, rememberPicture, REDRAW_VIEWS } = await import("./pictureVariety");
+    const yard = {
+      index: 30,
+      scriptText: "By June the whole yard has filled in.",
+      showSubject: "the whole backyard garden with raised beds along the fence",
+      visualPrompt: "The whole backyard garden with raised wooden beds along the fence.",
+    } as any;
+    const before = await photo(3001, 1536, 864);
+    rememberPicture(94830, 29, await pictureFingerprint(before), await pictureThumb(before));
+    mockScanNearCopy.mockResolvedValueOnce({ copy: true, what: "the same beds" }).mockResolvedValueOnce({ copy: true, what: "again" });
+    checks({}, {}, { missing: true, what: "no raised beds" });
+    const genImage = drawsOf(before, before, await photo(3003, 1536, 864), await photo(3004, 1536, 864));
+    await withCostMeter(94830, () => generateValidatedStill(yard, 5, undefined, genImage));
+    const prompts = genImage.mock.calls.map(c => c[0].prompt as string);
+    expect(prompts[1]).toContain(REDRAW_VIEWS[0]);
+    expect(prompts[2]).toContain(REDRAW_VIEWS[1]); // its turn, as before
+    expect(prompts[3]).not.toContain(REDRAW_VIEWS[1]);
+    expect(prompts[3]).toContain(REDRAW_VIEWS[2]);
+  });
+
+  // Job 408 scene 19, as stored: drawn from the toilet's first picture and scene 18 (the picture right
+  // before it), at the part close-up.
+  const TOILET_LOOK =
+    "a white porcelain toilet, oval bowl, curved trapway inside its base visible as a smooth porcelain contour at the bowl's rear, closed lid often up";
+  const S14 = "https://r2/longform/408/still-src-14.png";
+  const S18 = "https://r2/longform/408/still-src-18.png";
+  const swabInBowl = async () => {
+    const { PART_VIEW } = await import("./namedLooks");
+    return {
+      index: 19,
+      scriptText:
+        "Good design. But a stiff stick does not always follow a curve. It can turn sideways and catch across the passage, like a bar across a doorway.",
+      showSubject:
+        "looking down into the toilet bowl: a single white cotton swab lying sideways across the dark drain opening at the bottom, under clear water",
+      visualPrompt:
+        "Looking down into a toilet bowl. A single white cotton swab with tufts on both ends lies sideways across the dark drain opening at the bottom, resting under clear water.",
+      keyThing: "toilet",
+      partOf: "toilet",
+      memoryRefUrls: [S14, S18],
+      memoryRefScenes: [{ index: 14, own: true }, { index: 18, own: true }],
+      memoryRightBefore: 1,
+      memoryView: PART_VIEW,
+      memoryWordsLook: TOILET_LOOK,
+    } as StoryboardScene;
+  };
+
+  it("408-19: a near copy of scene 18, its own reference, is redrawn without scene 18 — the toilet's first picture stays", async () => {
+    const { withCostMeter } = await import("./costMeter");
+    const { pictureFingerprint, pictureThumb, rememberPicture, REDRAW_VIEWS } = await import("./pictureVariety");
+    const eighteen = await photo(1801, 1536, 864);
+    rememberPicture(94819, 18, await pictureFingerprint(eighteen), await pictureThumb(eighteen));
+    mockScanNearCopy.mockResolvedValueOnce({ copy: true, what: "the same look down into the bowl" });
+    checks();
+    const scene = await swabInBowl();
+    const fresh = await photo(1902, 1536, 864);
+    const genImage = drawsOf(eighteen, fresh);
+    const out = await withCostMeter(94819, () => generateValidatedStill(scene, 4, undefined, genImage));
+    expect(genImage).toHaveBeenCalledTimes(2);
+    const [first, second] = genImage.mock.calls.map(c => c[0]);
+    expect(first.referenceImageUrls).toEqual([S14, S18]);
+    expect(first.prompt).toMatch(/Reference image 2 is the picture shown RIGHT BEFORE/);
+    expect(second.referenceImageUrl).toBe(S14);
+    expect(second.referenceImageUrls).toBeUndefined();
+    expect(second.prompt).toMatch(/The first reference image shows the whole toilet\. This picture is a CLOSE-UP/);
+    expect(second.prompt).not.toMatch(/RIGHT BEFORE|Reference image 2/);
+    // A part close-up is framed close: its near-copy redraw is never the far camera.
+    expect(second.prompt).toContain(REDRAW_VIEWS[0]);
+    expect(out.buffer.equals(fresh)).toBe(true);
+    expect(scene).toMatchObject({ memoryRefUrls: [S14], memoryRefScenes: [{ index: 14, own: true }], memoryRightBefore: undefined });
+    // Laid beside the toilet's first picture from then on.
+    expect(mockScanSameThing.mock.calls.map(c => c[0])).toEqual([S18, S14]);
+  });
+
+  it("a near copy of a picture that is not one of its references keeps every reference", async () => {
+    const { withCostMeter } = await import("./costMeter");
+    const { pictureFingerprint, pictureThumb, rememberPicture } = await import("./pictureVariety");
+    const twelve = await photo(1201, 1536, 864);
+    rememberPicture(94820, 12, await pictureFingerprint(twelve), await pictureThumb(twelve));
+    mockScanNearCopy.mockResolvedValueOnce({ copy: true, what: "the same swirl" });
+    checks();
+    const scene = await swabInBowl();
+    const genImage = drawsOf(twelve, await photo(1903, 1536, 864));
+    await withCostMeter(94820, () => generateValidatedStill(scene, 4, undefined, genImage));
+    expect(genImage.mock.calls[1][0].referenceImageUrls).toEqual([S14, S18]);
+    expect(genImage.mock.calls[1][0].prompt).toMatch(/Reference image 2 is the picture shown RIGHT BEFORE/);
+    expect(scene.memoryRefUrls).toEqual([S14, S18]);
   });
 });

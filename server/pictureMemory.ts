@@ -14,7 +14,7 @@
  */
 import { insideView } from "./cutOpen";
 import { PART_VIEW } from "./namedLooks";
-import type { KeyThing, StoryboardScene } from "@shared/types";
+import type { KeyThing, MemoryRef, StoryboardScene } from "@shared/types";
 import { REDRAW_CAMERAS } from "./pictureVariety";
 import {
   BUILD_STAGES,
@@ -857,6 +857,25 @@ export function shotFraming(s: StoryboardScene): "close" | undefined {
   return CLOSE_WORDS.test(words) ? "close" : undefined;
 }
 
+/**
+ * Words that say the subject is ONE SMALL THING: "a single white cotton swab", "a small plastic cup",
+ * "a tiny screw". "little" only as a size — never "a little to one side" or "a little closer".
+ */
+const SMALL_THING =
+  /\b(?:single|lone|tiny|small|miniature)\b|\blittle\b(?!\s+(?:to|closer|further|farther|more|less|bit|off|higher|lower|way|while|later|earlier)\b)/i;
+
+/**
+ * Whether a far camera would lose this picture's subject: one its own words frame close or about one
+ * part (`shotFraming`), or one naming a single small thing (`SMALL_THING`). Job 408 scene 16's panel,
+ * "close view of a single white cotton swab", came back a speck when a near-copy redraw sent it "much
+ * further back", and scene 19's look down into the bowl at "a single white cotton swab" across the
+ * drain is a part close-up. Read off the picture's own words (a split's panel's). Pure.
+ */
+export function smallSubject(s: StoryboardScene): boolean {
+  if (shotFraming(s) === "close") return true;
+  return SMALL_THING.test(s.hostPresent ? s.splitVisual ?? "" : s.showSubject ?? s.visualPrompt ?? "");
+}
+
 /** A picture of a phone, tablet or laptop screen (its own words, or a split panel's). */
 const isScreen = (s: StoryboardScene) =>
   showsScreen(s.hostPresent ? s.splitVisual ?? "" : s.showSubject ?? s.visualPrompt ?? "");
@@ -1087,8 +1106,10 @@ export async function memoryFor(
   before?: number;
   continues?: boolean;
   notShown?: string[];
+  refs?: MemoryRef[];
 }> {
   const urls: string[] = [];
+  const refs: MemoryRef[] = [];
   const used: StoryboardScene[] = [];
   const mine = ownSourcesOf.get(s) ?? [];
   const prev = rightBeforeOf.get(s);
@@ -1105,8 +1126,21 @@ export async function memoryFor(
     }
     if (!src.pictureUrl || src.memoryUnfit) continue;
     used.push(src);
-    if (urls.includes(src.pictureUrl)) continue;
+    // Which of this picture's other key things the reference shows: a redraw that drops one reference
+    // (`withoutMemoryRef`) knows which of them no reference shows any more.
+    const shown = (s.otherKeyThings ?? []).filter(t => shows(src, t));
+    const at = urls.indexOf(src.pictureUrl);
+    if (at >= 0) {
+      const more = shown.filter(t => !refs[at].shows?.includes(t));
+      if (more.length) refs[at] = { ...refs[at], shows: [...(refs[at].shows ?? []), ...more] };
+      continue;
+    }
     urls.push(src.pictureUrl);
+    refs.push({
+      index: src.index,
+      ...(mine.includes(src) ? { own: true as const } : {}),
+      ...(shown.length ? { shows: shown } : {}),
+    });
     if (mine.includes(src)) own = true;
     if (src === prev) before = urls.length - 1;
   }
@@ -1122,6 +1156,7 @@ export async function memoryFor(
     before,
     ...(before != null && continuesOf.has(s) ? { continues: true } : {}),
     ...(notShown.length ? { notShown } : {}),
+    ...(refs.length ? { refs } : {}),
   };
 }
 
