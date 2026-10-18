@@ -5667,3 +5667,62 @@ describe("the film never ends on a host shot under a second (the audit, 2026-10-
     expect(closingFoldTarget(notTail, 1)).toBe(-1);
   });
 });
+
+describe("the cutaway book guard keeps out the CTA's book only, and never borrows a neighbour's picture (job 409)", () => {
+  const STOIC = ["The Stoic Way"];
+  const pic = (extra: Partial<StoryboardScene>): StoryboardScene =>
+    ({ index: 0, narration: "n", visualPrompt: "vp", hostPresent: false, ...extra }) as StoryboardScene;
+
+  it("job 409 scene 28: the essay line keeps its reader — no farmer from the next line through the window", async () => {
+    const { unwantedCutawayBook, dropUnwantedBook } = await import("./longformVideo");
+    const line =
+      "The essay is called On the Shortness of Life, and it opens by picking a fight with its own title. Everyone complains that life is too short, Seneca says.";
+    const rewrite = "An older man seen from behind reading an open hardback book at a wooden desk by a window.";
+    expect(unwantedCutawayBook(rewrite, line, STOIC)).toBe(false);
+    expect(unwantedCutawayBook("the host reading a book at the desk in the study", line, STOIC)).toBe(false);
+    // even if a later step calls the guard's rewrite, nothing of the scene is lost
+    const s = pic({ index: 28, scriptText: line, narration: line, showSubject: "the host reading a book at the desk in the study", visualPrompt: rewrite });
+    dropUnwantedBook(s, 27, STOIC, "You're Not Running Out of Time After 60");
+    expect(s.visualPrompt).toBe(rewrite);
+    expect(s.showSubject).toBe("the host reading a book at the desk in the study");
+  });
+
+  it("job 409 scene 15: 'money,' keeps its bills and checkbook — not the next item's sympathy card", async () => {
+    const { unwantedCutawayBook } = await import("./longformVideo");
+    expect(
+      unwantedCutawayBook("a few folded bills and an open checkbook on the wooden desk by the window", "money,", STOIC)
+    ).toBe(false);
+  });
+
+  it("jobs 404/411: the field guide's page stays under 'the one printed in the field guides'", async () => {
+    const { unwantedCutawayBook } = await import("./longformVideo");
+    expect(
+      unwantedCutawayBook(
+        "Close-up of an open field guide page: a painted robin illustration beside short soft grey text bars, with the robin's scientific name printed beneath the illustration",
+        "The funny part is that the robin’s own scientific name, the one printed in the field guides, ends in the word migratorius.",
+        ["The Backyard Birder"]
+      )
+    ).toBe(false);
+  });
+
+  it("the CTA's own book is still taken out of a cutaway — from the scene's own words, never a neighbour's", async () => {
+    const { unwantedCutawayBook, dropUnwantedBook } = await import("./longformVideo");
+    const line = "As I lay out in The Stoic Way, the days are not short.";
+    const s = pic({
+      index: 30,
+      scriptText: line,
+      narration: line,
+      visualPromptSeed: "the wooden desk by the window in the morning",
+      showSubject: "a copy of The Stoic Way on the desk",
+      visualPrompt: "A hardback copy of The Stoic Way on a wooden desk by a window, a mug beside it.",
+    });
+    expect(unwantedCutawayBook(s.visualPrompt, line, STOIC)).toBe(true);
+    dropUnwantedBook(s, 29, STOIC, "You're Not Running Out of Time After 60");
+    expect(s.visualPrompt).toBe("the wooden desk by the window in the morning");
+    expect(s.showSubject).toBeUndefined();
+    // a made-up book under a line that never speaks of one goes too, the rest of the picture kept
+    const card = pic({ scriptText: "grief,", narration: "grief,", visualPrompt: "a plain cream sympathy card on a wooden desk, a stack of hardback books beside it" });
+    dropUnwantedBook(card, 16, STOIC);
+    expect(card.visualPrompt).toBe("a plain cream sympathy card on a wooden desk");
+  });
+});

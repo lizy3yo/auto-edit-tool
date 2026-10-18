@@ -57,6 +57,7 @@ import {
   oneThingPanels,
   ownTypedPicture,
   ownTypedPanel,
+  showsScreen,
 } from "./shotList";
 import {
   attachMemory,
@@ -8193,20 +8194,22 @@ function directionParts(sentence: string): { sep: string; text: string }[] {
  * subject): when that is the print, the sentence goes whole, so nothing is left as a dangling
  * modifier ("Home base: under a window."). A later part naming print goes on its own — a trailing
  * clause, or a list item ("Recurring props: sympathy cards, a clock, a book, a phone." keeps the
- * cards, the clock and the phone). What is kept is re-checked.
+ * cards, the clock and the phone). What is kept is re-checked. `isPrint` is what counts as the print
+ * to take out — every book by default, only an unwanted one for a cutaway (`dropUnwantedBook`).
  */
 function withoutPrintedParts(
-  sentence: string
+  sentence: string,
+  isPrint: (text: string) => boolean = brollDepictsBook
 ): { kept: string; dropped: string[] } | null {
   const body = sentence.replace(/[.!?]+$/, "");
   const end = sentence.slice(body.length);
   const parts = directionParts(body);
-  if (parts.length < 2 || brollDepictsBook(parts[0].text)) return null;
-  const keep = parts.filter((p, i) => i === 0 || !brollDepictsBook(p.text));
+  if (parts.length < 2 || isPrint(parts[0].text)) return null;
+  const keep = parts.filter((p, i) => i === 0 || !isPrint(p.text));
   if (keep.length === parts.length) return null; // the print spans parts — no part to single out
   const kept =
     keep.map((p, i) => (i === 0 ? p.text : p.sep + p.text)).join("").trim() + end;
-  if (brollDepictsBook(kept)) return null;
+  if (isPrint(kept)) return null;
   const dropped = parts.filter(p => !keep.includes(p)).map(p => p.text.trim());
   return { kept, dropped };
 }
@@ -8221,9 +8224,14 @@ function withoutPrintedParts(
  * cost the home base, the places the script travels to and the tone. Text with nothing to drop
  * comes back as it was, byte for byte; what is kept is re-checked whole, and anything still
  * reading as print is dropped entirely (never trust the split) — so this never returns text the
- * guard flags, which is what the old whole-drop promised. Pure — unit-tested.
+ * guard flags, which is what the old whole-drop promised. `isPrint` narrows what is taken out (a
+ * cutaway loses only an unwanted book, `dropUnwantedBook`); the bible keeps the default, every book.
+ * Pure — unit-tested.
  */
-export function withoutPrintedMatter(text: string): {
+export function withoutPrintedMatter(
+  text: string,
+  isPrint: (text: string) => boolean = brollDepictsBook
+): {
   kept: string;
   dropped: string[];
 } {
@@ -8237,20 +8245,20 @@ export function withoutPrintedMatter(text: string): {
   const kept: string[] = [];
   const dropped: string[] = [];
   for (const s of sentences) {
-    if (!brollDepictsBook(s)) {
+    if (!isPrint(s)) {
       kept.push(s);
       continue;
     }
-    const partly = withoutPrintedParts(s);
+    const partly = withoutPrintedParts(s, isPrint);
     if (partly) {
       kept.push(partly.kept);
       dropped.push(...partly.dropped);
     } else dropped.push(s);
   }
   const all = { kept: "", dropped: sentences.length ? sentences : [src] };
-  if (!dropped.length) return brollDepictsBook(src) ? all : { kept: src, dropped };
+  if (!dropped.length) return isPrint(src) ? all : { kept: src, dropped };
   const rest = kept.join(" ");
-  return brollDepictsBook(rest) ? all : { kept: rest, dropped };
+  return isPrint(rest) ? all : { kept: rest, dropped };
 }
 
 /** What a style bible with nothing left after the printed-matter sentences says on the job. */
@@ -8275,6 +8283,207 @@ export function bibleWithoutPrintedMatter(bible: string): {
     bible: kept,
     warning: `Style bible: printed matter left out, the rest kept (${dropped.join(" / ")})`,
   };
+}
+
+/**
+ * Words with "book" in them that name no publication — a checkbook, a notebook, a bookcase. Never
+ * the video's book, and never a reason to take a picture away from its line: job 409 scene 15, the
+ * list item "money,", was "a few folded bills and an open checkbook on the wooden desk", and the old
+ * guard swapped it for the next item's sympathy card.
+ */
+const NOT_A_PUBLICATION =
+  /\b(?:(?:check|cheque|note|pass|bank|sketch|scrap|log|address|phone|guest)[\s-]?books?|book(?:cases?|shel(?:f|ves)|ends?|marks?|stands?))\b/gi;
+
+/** A booklet is a publication only when it can be the video's own book (`publicationIn`). */
+const BOOKLET = /\bbooklets?\b/gi;
+
+/** "Leafing through" a word set aside above handles that thing, not a book. */
+const HANDLED_THROUGH =
+  /\b(?:leaf|flip|thumb|pag|riffl)\w*(?:s|ing|ed)\s+through\s+((?:[\w'’-]+\s+){0,3})object\b/gi;
+
+/** A word a CTA title may hold that names the book itself ("Guide", "Playbook", "Bible"). */
+const TITLE_PRINT_NOUN = /^(?:\w*books?|booklets?|guides?|manuals?|bibles?|almanacs?|journals?)$/;
+
+/** Words that name a book by its title rather than by a print noun ("a copy of …", "its cover"). */
+const BOOK_BY_NAME_CUE = /\b(?:cop(?:y|ies)|covers?|titled|editions?|volumes?)\b/i;
+
+/**
+ * A line that speaks of something written or printed — a book, an essay, a letter, a page, what a
+ * field guide prints. A book in its picture is what the line is about, never one the picture made up:
+ * job 409 scene 28, "The essay is called On the Shortness of Life … Seneca says", under the host
+ * reading at the desk; jobs 404 and 411, "the one printed in the field guides", under a field guide's
+ * page. Bare "prints" is left out: paw prints are no print, and neither is "Facebook".
+ */
+const LINE_SPEAKS_OF_PRINT =
+  /\b(?:(?!facebook)\w*books?|booklets?|essays?|letters?|poems?|poetry|verses?|chapters?|pages?|paragraphs?|articles?|novels?|magazines?|newspapers?|journals?|diar(?:y|ies)|manuals?|guides?|recipes?|manuscripts?|scrolls?|catalog(?:ue)?s?|brochures?|pamphlets?|almanacs?|publications?|handouts?|printouts?|encycloped\w*|librar(?:y|ies)|titles?|titled|printed|read|reads|reading|wrote|writes|written|scriptures?|bibles?)\b/i;
+
+/**
+ * The titles of the video's own books — one per CTA block (`ctaBooks`) and the channel's
+ * (`bookTitle`). Pure.
+ */
+export function ctaBookTitles(
+  params: Pick<LongformInputParams, "ctaBooks" | "bookTitle">
+): string[] {
+  const titles = [...(params.ctaBooks ?? []).map(b => b.title), params.bookTitle];
+  return Array.from(new Set(titles.filter((t): t is string => !!t?.trim())));
+}
+
+/**
+ * Whether a line speaks of the HOST'S OWN book — the one the CTA sells — without naming it: "in my
+ * book I walk you through this trick", "the guide I put together", "a digital book". A word of the
+ * CTA's title that names the book counts as well ("my playbook" for "… Lockdown Playbook"). Pure.
+ */
+function speaksOfOwnBook(line: string, titles: string[]): boolean {
+  const nouns = new Set(["e-?books?", "books?", "booklets?"]);
+  const named = new Set(["new", "little", "own", "latest", "free", "digital", "short", "whole", "first", "next", "other"]);
+  for (const t of titles)
+    for (const w of getBookNameTokens(t)) {
+      if (TITLE_PRINT_NOUN.test(w)) nouns.add(`${w.replace(/s$/, "")}s?`);
+      else named.add(w); // "my Lockdown Playbook" — a host drops their own name from the title
+    }
+  const n = `(?:${Array.from(nouns).join("|")})`;
+  // A guide or a handbook someone WROTE is a book; "my guide" alone may be a person who guides.
+  const writ = `(?:${n}|(?:guide|hand|play|work)?books?|guides?|manuals?)`;
+  const adj = String.raw`(?:(?:${Array.from(named).join("|")})\s+){0,3}`;
+  const made = String.raw`(?:I|we)(?:'ve|’ve|\s+have)?\s+(?:wrote|written|put\s+together|made|created|compiled|gathered)`;
+  return new RegExp(
+    [
+      String.raw`\b(?:my|our)\s+${adj}${n}\b`,
+      String.raw`\b${writ}\s+(?:that\s+|which\s+)?${made}\b`,
+      String.raw`\b${made}\s+(?:a|an|the|this|one)\s+${adj}${writ}\b`,
+      String.raw`\b(?:e-?books?|digital\s+(?:book|guide)s?)\b`,
+    ].join("|"),
+    "i"
+  ).test(line ?? "");
+}
+
+/**
+ * Whether words name a CTA title AS A TITLE: every distinctive word of its main part (before a
+ * colon), in order, a word or two apart at most. Stricter than the spoken-line test
+ * (`titleMatcher`, all but one word, any order), because a title is often everyday words: job 351's
+ * "a printed crochet pattern page … on a kitchen table" and job 327's "stack of stitch reference
+ * books on kitchen table" are not "The Kitchen Table Crochet Book". Pure.
+ */
+function namesTitle(text: string, title: string): boolean {
+  const words = getBookNameTokens(title.split(":")[0]);
+  if (!words.length) return false;
+  const stem = (w: string) => `${w.replace(/(es|s)$/, "")}(?:e?s)?`;
+  const gap = String.raw`(?:\W+[\w']+){0,2}?\W+`;
+  return new RegExp(String.raw`\b${words.map(stem).join(gap)}\b`, "i").test(
+    (text ?? "").replace(/[\u2018\u2019]/g, "'")
+  );
+}
+
+/**
+ * Whether words show a PUBLICATION: printed matter (`brollDepictsBook`) with the words that only
+ * carry "book" in their name set aside (`NOT_A_PUBLICATION`), a booklet set aside too unless it can
+ * be the video's own book (`booklets`), and a page on a screen read as the screen it is. A word the
+ * CTA's own title holds always counts ("… Notebook" makes a notebook the book). Pure.
+ */
+function publicationIn(text: string, titleWords: Set<string>, booklets: boolean): boolean {
+  const titled = (m: string) =>
+    titleWords.has(m.toLowerCase().replace(/[\s-]/g, "").replace(/s$/, ""));
+  let t = (text ?? "").replace(NOT_A_PUBLICATION, m => (titled(m) ? m : "object"));
+  if (!booklets) t = t.replace(BOOKLET, m => (titled(m) ? m : "object"));
+  if (showsScreen(t)) t = t.replace(/\bpages?\b/gi, "screen");
+  return brollDepictsBook(t.replace(HANDLED_THROUGH, "holding $1object"));
+}
+
+/**
+ * THE BOOK GUARD FOR A CUTAWAY (2026-10-18, the review of job 409). Its job is to keep the video's
+ * OWN book — the one the CTA sells — out of the b-roll: a line that mentions it without a hard CTA
+ * signal is not flagged `cta`, so the prompt writer drew it, and a positive mention beats the
+ * trailing `NO_BOOK_SUFFIX`. It used to fire on ANY book word, so it took pictures away from the
+ * lines they were for: job 409 scene 28 (the host reading under "The essay is called On the Shortness
+ * of Life"), scene 15 ("an open checkbook" under "money,"), jobs 404 and 411 (a field guide's page
+ * under "the one printed in the field guides"), job 401 scene 27 (the essay's manuscript page).
+ *
+ * True only for a book the picture must not show: the CTA's book named by its title (`namesTitle`,
+ * with a publication or "a copy of"/"its cover"); any publication under a line that speaks of the
+ * host's own book (`speaksOfOwnBook`) or names its title; or a publication the line does not speak
+ * of at all — one the picture made up. Never a book or print the line is about: the line speaks of
+ * print (`LINE_SPEAKS_OF_PRINT`), or `about` — the picture's own "what it must show", written for
+ * this line by the shot list and the line check — shows a publication itself (job 351 scene 10, "If
+ * you've ever opened a star pattern … Round after round of numbers," under a printed pattern page).
+ * Never a word that only has "book" in it either (a checkbook, a notebook, a bookcase; a booklet
+ * unless it can be the CTA's). Pure — unit-tested.
+ */
+export function unwantedCutawayBook(
+  text: string | undefined,
+  line: string | undefined,
+  ctaTitles: string[] = [],
+  about?: string
+): boolean {
+  const t = text ?? "";
+  const said = line ?? "";
+  const titles = ctaTitles.filter(x => x?.trim());
+  const printed = brollDepictsBook(t);
+  if (!printed && !BOOK_BY_NAME_CUE.test(t)) return false;
+  const titleWords = new Set(titles.flatMap(getBookNameTokens));
+  // A title alone is not a book: "The Backyard Birder" (jobs 404/411) is also "a backyard birder".
+  const byName = publicationIn(t, titleWords, true) || BOOK_BY_NAME_CUE.test(t);
+  if (byName && titles.some(x => namesTitle(t, x))) return true;
+  if (!printed) return false;
+  const ownBook = speaksOfOwnBook(said, titles) || titles.some(x => namesTitle(said, x));
+  if (!publicationIn(t, titleWords, ownBook)) return false;
+  if (ownBook) return true;
+  if (LINE_SPEAKS_OF_PRINT.test(said)) return false;
+  // What it must show vouches for the print only when it is not the CTA's book itself.
+  const vouched = !!about?.trim() && publicationIn(about, titleWords, true);
+  return !vouched || titles.some(x => namesTitle(about!, x));
+}
+
+/**
+ * A cutaway that must not show its book (`unwantedCutawayBook`) is drawn from its OWN words with the
+ * book taken out — never from a neighbour's. The guard used to put the nearest cutaway's prompt in
+ * its place (`genericCtaBrollFor`) and leave `showSubject` alone, and `subjectLead` then led the
+ * borrowed prompt with the scene's own subject, so the picture maker drew BOTH: job 409 scene 28 came
+ * back as the host reading at the desk with the next line's farmer through the window, and scene 15's
+ * bills beside the next item's sympathy card — the book still there, as large as before.
+ *
+ * What leads the prompt (`showSubject`) loses the book too, with its print when nothing is left; the
+ * prompt is the rewrite without the book, else the scene's own first prompt (`visualPromptSeed`)
+ * without it, else what it must show, else the video's own subject (`genericCtaBrollFor` with no
+ * neighbours). An exact look or key thing that is that book goes with it. Mutates the scene.
+ */
+export function dropUnwantedBook(
+  scene: StoryboardScene,
+  i: number,
+  ctaTitles: string[],
+  videoSubject?: string
+): void {
+  const line = scene.scriptText ?? scene.narration ?? "";
+  const about = scene.showSubject;
+  const unwanted = (t: string) => unwantedCutawayBook(t, line, ctaTitles, about);
+  const without = (t: string | undefined): string | undefined => {
+    const src = t?.trim();
+    return src ? withoutPrintedMatter(src, unwanted).kept.trim() || undefined : undefined;
+  };
+  if (scene.showSubject?.trim() && unwanted(scene.showSubject)) {
+    scene.showSubject = without(scene.showSubject);
+    if (!scene.showSubject) {
+      scene.pictureText = undefined;
+      scene.blurPrint = undefined;
+    }
+  }
+  // The CTA's title is never the one readable writing allowed in a cutaway (`withAllowedText`).
+  const said = scene.pictureText;
+  if (said && ctaTitles.some(x => namesTitle(said, x))) scene.pictureText = undefined;
+  if (scene.visualPrompt?.trim() && unwanted(scene.visualPrompt)) {
+    scene.visualPrompt =
+      without(scene.visualPrompt) ??
+      without(scene.visualPromptSeed) ??
+      (scene.showSubject?.trim() || genericCtaBrollFor([], i, videoSubject));
+  }
+  if (scene.namedLook && unwanted(scene.namedLook)) scene.namedLook = undefined;
+  if (scene.keyThing && unwanted(scene.keyThing)) {
+    scene.keyThing = undefined;
+    scene.partOf = undefined;
+  }
+  if (scene.otherKeyThings?.some(unwanted)) {
+    const others = scene.otherKeyThings.filter(k => !unwanted(k));
+    scene.otherKeyThings = others.length ? others : undefined;
+  }
 }
 
 /** Calm, generic topic-neutral cutaway subjects — the LAST resort, used only when a CTA cutaway
@@ -16235,6 +16444,23 @@ export async function enhanceBrollPrompts(
   const splitSeedOf = (scene: StoryboardScene): string | undefined =>
     (scene.splitVisualSeed ??= scene.splitVisual);
 
+  // THE VIDEO'S OWN BOOK STAYS OUT OF A CUTAWAY, and nothing else is taken from it. A line that
+  // mentions the book without a hard CTA signal (URL/QR/price) is not flagged cta, so the prompt
+  // writer can write the book in — and a positive mention beats the trailing NO_BOOK_SUFFIX. Only
+  // that book, or one the line never speaks of, is taken out (`unwantedCutawayBook`), and the scene
+  // keeps its own words (`dropUnwantedBook`): a book the line is about stays (job 409 scene 28's
+  // essay, scene 15's checkbook), and a neighbour's prompt is never borrowed.
+  const ctaTitles = ctaBookTitles(params);
+  const guardCutawayBook = (scene: StoryboardScene, i: number): void => {
+    const line = scene.scriptText ?? scene.narration;
+    const about = scene.showSubject;
+    if (
+      unwantedCutawayBook(scene.visualPrompt, line, ctaTitles, about) ||
+      unwantedCutawayBook(about, line, ctaTitles, about)
+    )
+      dropUnwantedBook(scene, i, ctaTitles, subject);
+  };
+
   // Resolves to null when the rewrite landed, or to the caught error when the original was
   // kept. Safe to re-run: `seedOf` latched the seed, so a retry rewrites from the same
   // baseline rather than from the failure fallback, and both guards below are idempotent.
@@ -16320,15 +16546,9 @@ export async function enhanceBrollPrompts(
         );
       }
     }
-    // Book guard for non-CTA cutaways (CTA lane already bans books via sanitizeCtaCutaway):
-    // a narration that mentions the book without a hard CTA signal (URL/QR/price) is not
-    // flagged cta, so the enhancer's script-alignment rule writes a book into the prompt —
-    // and a positive book mention beats the trailing NO_BOOK_SUFFIX negation. Swap in the
-    // same on-topic fallback the CTA lane uses. Runs on both the enhanced and the
-    // LLM-failure/original prompt.
-    if (!isCta && brollDepictsBook(scene.visualPrompt ?? "")) {
-      scene.visualPrompt = genericCtaBrollFor(scenes, i, subject);
-    }
+    // Book guard for non-CTA cutaways (CTA lane already bans books via sanitizeCtaCutaway). Runs on
+    // both the enhanced and the LLM-failure/original prompt.
+    if (!isCta) guardCutawayBook(scene, i);
     return failure;
   };
 
@@ -16377,9 +16597,8 @@ export async function enhanceBrollPrompts(
           typeof entry?.prompt === "string" ? entry.prompt : ""
         );
         if (!enhanced) return void left.push(item);
-        item.scene.visualPrompt = brollDepictsBook(enhanced)
-          ? genericCtaBrollFor(scenes, item.i, subject)
-          : enhanced;
+        item.scene.visualPrompt = enhanced;
+        guardCutawayBook(item.scene, item.i);
       });
       return left;
     } catch (err) {
