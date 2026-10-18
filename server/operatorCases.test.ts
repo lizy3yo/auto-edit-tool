@@ -5772,3 +5772,49 @@ describe("a thing only the CTA names is no prop of the film (job 409)", () => {
     expect(parseKeyThings(withoutCtaOnlyProps(sheet, told, cta).sheet).map(t => t.name)).toContain("phone");
   });
 });
+
+describe("the people the story follows keep one look, and 'you' is read from what the host does (jobs 410, 412)", () => {
+  // Job 410 follows two passengers ("The other was still in row fourteen… He figures she must know
+  // somebody on the crew. She doesn't.") and the props call wrote no PERSON line: the man changed
+  // clothes between scenes 2 and 7. It echoed the host block back as the prop "THE HOST", and with no
+  // host title and a look that never named the job it wrote no VIEWER line, so "you" asking the crew
+  // politely (scene 15) was the host in uniform talking to a colleague. Job 412's VIEWER look gave
+  // no man or woman, age or hair, and the sleeper changed from shot to shot.
+  const script410 =
+    "Two people paid the same fare, boarded the same flight, and sat in the same row. By the time the beverage cart had come and gone, one of them was sitting in an empty row closer to the front, holding the whole can of ginger ale, a second bag of pretzels, and a bottle of water for later. The other was still in row fourteen with a few inches of soda over ice. He figures she must know somebody on the crew. She doesn't. What she knows is which questions flight attendants like hearing, and when to ask them. I'm Helena Hart, and I read the fine print so travelers like us can stop learning these things the hard way.";
+
+  it("job 410: the she and the he are owed a PERSON line each; the host's own words reach the props call", async () => {
+    const { peopleOwed, hostBlockFor } = await import("./shotList");
+    const { hostOwnWords } = await import("./followedPeople");
+    expect(peopleOwed(script410, { people: [], viewer: [] }, { hostName: "Helena Hart" }).uncovered.map(f => f.cue)).toEqual(["she", "he"]);
+    expect(hostBlockFor("a slender woman in her forties, navy blazer with gold pin, striped scarf", undefined, hostOwnWords(script410, { hostName: "Helena Hart" }))).toContain(
+      'in their own words — "I\'m Helena Hart, and I read the fine print so travelers like us can stop learning these things the hard way."'
+    );
+  });
+
+  it("job 410: the host block echoed back is never a key thing", async () => {
+    const { parseKeyThings } = await import("./shotList");
+    const sheet = [
+      "aircraft cabin: narrow rows of blue upholstered seats, a center aisle",
+      "MAIN beverage cart: a metal service cart with wheels",
+      "THE HOST: a slender woman in her forties, fair skin, brown hair pinned back, white blouse, navy blazer with gold pin, striped scarf",
+    ].join("\n");
+    expect(parseKeyThings(sheet).map(k => k.name)).toEqual(["beverage cart"]);
+  });
+
+  it("job 412: the viewer's 'adult of average build, wearing plain pajamas' is owed a whole look", async () => {
+    const { peopleOwed } = await import("./shotList");
+    const viewer = "VIEWER the cat owner: an adult of average build, wearing plain pajamas, lying in the unmade bed in the dim pre-dawn bedroom";
+    expect(peopleOwed("Three in the morning. The house is dark.", { people: [], viewer: [viewer] }).incomplete.map(x => x.gaps)).toEqual([
+      ["man or woman", "an age range", "hair"],
+    ]);
+  });
+
+  it("clean: job 411's robins follow nobody, and a whole look owes nothing", async () => {
+    const { peopleOwed } = await import("./shotList");
+    const robins =
+      "Every fall, the robins that worked your lawn all summer pack up and head for Florida. The song at first light goes quiet, the grass sits empty in the mornings, and nobody sees another robin until spring. I’m Walter, and if you keep an eye on the yard from the kitchen window, this one’s for you.";
+    const sleeper = "VIEWER the cat owner: a woman in her thirties, shoulder-length brown hair, a plain grey sleep shirt";
+    expect(peopleOwed(robins, { people: [], viewer: [sleeper] }, { hostName: "Walter Wren" })).toEqual({ uncovered: [], incomplete: [] });
+  });
+});

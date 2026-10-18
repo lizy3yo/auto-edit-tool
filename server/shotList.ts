@@ -30,10 +30,20 @@ import {
   SHOWS_PERSON,
   showsPerson,
   namedPeople,
+  matchRecurringPeople,
   namesOnlyAnimal,
   personKey,
 } from "./hostLook";
 import { hostNameRanges, namesHostBefore } from "./hostIntro";
+import {
+  followedPeople,
+  hostOwnWords,
+  lookGaps,
+  scriptSentences,
+  uncoveredPeople,
+  type FollowedPerson,
+  type LookGap,
+} from "./followedPeople";
 
 /** A picture shorter than this is a flash and folds into a neighbour. */
 export const SHOT_MIN_SEC = 1.2;
@@ -1961,10 +1971,27 @@ export const EXACT_KIND_RULE =
   "`deer: a white-tailed deer, reddish-brown coat, a broad tail brown on top and bright white " +
   "underneath, a white patch on the throat`. ";
 
+/**
+ * What a PERSON (and VIEWER) look says, shared by the props call and the people repair
+ * (`repairPeopleLines`) so the two can never ask for different things. Man or woman, an age range
+ * and hair are what keep one person the same from picture to picture (`lookGaps` checks them).
+ */
+export const PERSON_LOOK_RULE =
+  "look is 12-30 " +
+  "plain words a picture generator can draw from behind or the side: man or woman, an age range, " +
+  "build, hair (colour, length, style) and the clothes they wear in every picture, with colours — " +
+  "fitting everything the script says about them (age, work, place, time). ";
+
 // A PERSON name says WHAT the person is (job 399's script calls its two passengers only "one of
 // them", "the other", "she" and "he"): the pictures and the line check label them "a woman
 // passenger" / "a male passenger", and `matchRecurringPeople` finds a look by that role and sex —
 // a name like "the other" would match no label but its own words.
+const PERSON_NAME_RULE =
+  "name is 1-5 plain words " +
+  "saying WHAT they are — the role or relation the script or its setting gives them, with man or " +
+  "woman when two share one (the woman customer, the older neighbour, my sister) — never only a " +
+  "pronoun, \"one of them\" or \"the other\"; ";
+
 export const CONTINUITY_SYSTEM =
   "You read a narration script for a faceless YouTube video and write its PROPS LIST: every " +
   "physical thing that is shown more than once — the things being made, the key tools and " +
@@ -1992,26 +2019,35 @@ export const CONTINUITY_SYSTEM =
   "PEOPLE WHO COME BACK: after the props, one more line for each person other than the narrator " +
   "whom the story shows or talks about in two or more different sentences — the same \"she\" or " +
   "\"he\" a story follows, a customer who comes back, a neighbour seen again — written " +
-  "`PERSON name: look`, so every picture of them shows the same person. name is 1-5 plain words " +
-  "saying WHAT they are — the role or relation the script or its setting gives them, with man or " +
-  "woman when two share one (the woman customer, the older neighbour, my sister) — never only a " +
-  "pronoun, \"one of them\" or \"the other\"; look is 12-30 " +
-  "plain words a picture generator can draw from behind or the side: man or woman, an age range, " +
-  "build, hair (colour, length, style) and the clothes they wear in every picture, with colours — " +
-  "fitting everything the script says about them (age, work, place, time). Two people the story " +
+  "`PERSON name: look`, so every picture of them shows the same person. " +
+  PERSON_NAME_RULE +
+  PERSON_LOOK_RULE +
+  "Two people the story " +
   "tells apart get two lines that look clearly different. Never the narrator, the host or \"you\"; " +
   "never a crowd or a group; never a face, an expression or a name the script does not give; never " +
   "someone in only one sentence. No PERSON line when nobody comes back; at most 4. Example: " +
   "`PERSON the neighbour: a tall man in his seventies, thin white hair combed back, a faded green " +
   "zip-up jacket over a grey shirt, dark trousers`. " +
-  "WHO \"YOU\" IS: when the script speaks to \"you\" as someone the HOST'S OWN JOB SERVES — the " +
-  "job the host's title, their own words or the work clothes in THE HOST line show: a nurse's " +
+  // Job 410 (2026-10-18): no host title, and a look that never names the job ("a white blouse, navy
+  // blazer with gold pin, and striped scarf"), so the call could not see that the host's work serves
+  // the "you" who asks, wrote no VIEWER line, and "you" asking politely was drawn as the host in
+  // uniform talking to a colleague. THE HOST block now carries the host's own words about themself,
+  // and their clothes are read against the work the video is about.
+  "WHO \"YOU\" IS: THE HOST block (never a line of the list) says how the host looks and, when " +
+  "known, their title and their own words about themself. The host's JOB is the one their title " +
+  "or own words name; when neither names one and the video is about a kind of work whose uniform " +
+  "or work clothes THE HOST's clothes could be (scrubs in a video about what nurses notice, a " +
+  "chef's jacket in one about restaurant kitchens), the host does that work. When the script " +
+  "speaks to \"you\" as someone the HOST'S OWN JOB SERVES — a nurse's " +
   "patient, a hairdresser's client, a waiter's diner, a tax adviser's client — add ONE last line " +
   "`VIEWER name: look`, so every picture of \"you\" shows that same ordinary person and never the " +
   "host. Also when the host calls themself one of \"you\" but THE HOST line dresses them for the " +
   "job that serves \"you\": the host in work clothes drawn as \"you\" reads as the worker. name is " +
   "1-4 plain words for the role the script gives \"you\" (the patient, the client, the diner); look " +
-  "is written like a PERSON look, in everyday clothes that fit that role — never the host's " +
+  // Job 412: the VIEWER look came back as "an adult of average build, wearing plain pajamas" — no
+  // man or woman, age or hair — and the sleeper changed sex and hair from shot to shot.
+  "is written like a PERSON look — man or woman, an age range, build, hair (colour, length, style) " +
+  "and clothes with colours — in everyday clothes that fit that role — never the host's " +
   "uniform, badge or work clothes — and clearly different from every PERSON line. No VIEWER line " +
   "when \"you\" does the host's own kind of work (a how-to: \"you\" sand, sew, fix, cook or plant " +
   "the way the host does), when there is no host, or when no picture will show \"you\". " +
@@ -2035,46 +2071,315 @@ export function isViewerLine(line: string): boolean {
   return VIEWER_LINE.test(line.replace(/^[-*•\d.)\s]+/, "").trim());
 }
 
+/** Words that only ever name the host, the narrator or "you" — never a prop. */
+const HOST_ECHO_WORDS = new Set(
+  "host narrator presenter look looks appearance you yourself viewer me myself".split(" ")
+);
+
+/**
+ * Whether a props line is THE HOST block echoed back as a prop (job 410: "THE HOST: a slender woman
+ * in her forties… navy blazer with gold pin, striped scarf" came back as the last line of the list,
+ * became the key thing "THE HOST", and nothing caught it), or a line named "you", the viewer, or the
+ * host by their WHOLE name. A thing the host owns ("host's desk: …") stays, and so does a thing
+ * that shares one word of the host's name — a channel's name is often "<thing> <name>", and its
+ * home or main thing is that thing (a backyard, hardwood, a wren). Pure.
+ */
+export function isHostEchoLine(line: string, hostName?: string): boolean {
+  const at = line.indexOf(":");
+  if (at <= 0) return false;
+  const name = line.slice(0, at).replace(/^[-*•\d.)\s]+/, "").replace(/^MAIN\b[\s:-]*/i, "");
+  // "THE HOST (the narrator, on camera)" is the host; a prop named "camera" is a camera.
+  const words = personKey(name.replace(/\([^)]*\)/g, " ")).split(" ").filter(Boolean);
+  if (!words.length) return false;
+  const hostWords = personKey(hostName).split(" ").filter(Boolean);
+  const echo = words.filter(w => !HOST_ECHO_WORDS.has(w));
+  return (
+    echo.length === 0 ||
+    (hostWords.length > 0 && hostWords.every(w => echo.includes(w)) && echo.every(w => hostWords.includes(w)))
+  );
+}
+
+/**
+ * A props reply read into its three parts: the props (at most 16, the host block's echo dropped),
+ * the `PERSON` lines (at most `MAX_RECURRING_PEOPLE`) and the one `VIEWER` line. A line with
+ * nothing after its colon is a heading ("PEOPLE:"), never a prop: kept, it became the home line or
+ * a key thing with no look. Pure.
+ */
+export function splitPropsReply(
+  text: string,
+  opts: { hostName?: string } = {}
+): { props: string[]; people: string[]; viewer: string[] } {
+  const lines = text
+    .split("\n")
+    .map(l => l.replace(/^[-*•\d.)\s]+/, "").trim())
+    .filter(l => l.includes(":") && l.slice(l.indexOf(":") + 1).trim() !== "");
+  return {
+    props: lines.filter(l => !isPersonLine(l) && !isViewerLine(l) && !isHostEchoLine(l, opts.hostName)).slice(0, 16),
+    people: lines.filter(isPersonLine).slice(0, MAX_RECURRING_PEOPLE),
+    viewer: lines.filter(isViewerLine).slice(0, 1),
+  };
+}
+
+/**
+ * THE HOST block of the props call: how the host looks, their title and their own words about
+ * themself (`hostOwnWords`) — what tells the call what the host does, and so whether "you" is the
+ * host or someone their job serves. Written with dashes, never as a `name: look` line: job 410's
+ * "THE HOST (the narrator, on camera): …" came back as a prop. "" with nothing to say. Pure.
+ */
+export function hostBlockFor(look?: string, title?: string, ownWords: string[] = []): string {
+  const parts = [
+    look?.trim() ? `looks — ${look.trim()}` : "",
+    title?.trim() ? `title — ${title.trim()}` : "",
+    ownWords.length ? `in their own words — ${ownWords.map(s => `"${s}"`).join(" ")}` : "",
+  ].filter(Boolean);
+  return parts.length ? `THE HOST (the narrator, on camera; never a line of the list) ${parts.join("; ")}\n` : "";
+}
+
+/** A people line whose look leaves out something a picture needs (`lookGaps`). */
+export interface IncompletePeopleLine {
+  line: string;
+  kind: "PERSON" | "VIEWER";
+  person: RecurringPerson;
+  gaps: LookGap[];
+}
+
+/**
+ * What the people lines of a props reply still owe (2026-10-18, jobs 410 and 412): a person the
+ * script follows over two or more sentences with no `PERSON` line (`followedPeople`,
+ * `uncoveredPeople` — job 410's she and he, none written), and a `PERSON`/`VIEWER` look with no man
+ * or woman, age or hair (`lookGaps` — job 412's "an adult of average build, wearing plain
+ * pajamas"). Lines the parsers drop (the host, a group, an animal) owe nothing. Pure.
+ */
+export function peopleOwed(
+  script: string,
+  lines: { people: string[]; viewer: string[] },
+  opts: { hostName?: string; hostTitle?: string } = {}
+): { uncovered: FollowedPerson[]; incomplete: IncompletePeopleLine[] } {
+  const people = parseRecurringPeople(lines.people.join("\n"), opts);
+  const viewer = parseViewerPerson(lines.viewer.join("\n"), opts);
+  const incomplete: IncompletePeopleLine[] = [];
+  for (const line of lines.people) {
+    const person = parseRecurringPeople(line, opts)[0];
+    const gaps = person ? lookGaps(person.look) : [];
+    if (person && gaps.length) incomplete.push({ line, kind: "PERSON", person, gaps });
+  }
+  if (viewer) {
+    const gaps = lookGaps(viewer.look);
+    if (gaps.length) incomplete.push({ line: lines.viewer[0], kind: "VIEWER", person: viewer, gaps });
+  }
+  return { uncovered: uncoveredPeople(followedPeople(script, opts), people, viewer), incomplete };
+}
+
+/**
+ * The people repair (`repairPeopleLines`): ONE small call, made only when `peopleOwed` finds
+ * something, that writes the missing `PERSON` lines and rewrites the incomplete looks. A "she" can
+ * be a cat or a hen, so who is a person is the model's to say, and NONE is a fine answer.
+ */
+export const PEOPLE_REPAIR_SYSTEM =
+  "You finish the PEOPLE lines of a faceless YouTube video's props list, so every picture of one " +
+  "person shows the same person. You are given the host (never a line of yours), the people lines " +
+  "already written, any line whose look leaves something out, and numbered sentences of the " +
+  "script where the story may follow someone. Write, one per line: (1) `PERSON name: look` for " +
+  "each person those sentences follow — the same person talked about in two or more sentences, a " +
+  "pronoun, \"one of them\", \"the other\" and a name all counting as them — who has no line yet. " +
+  "Never the narrator, the host or \"you\"; never an animal, a thing or a place (a \"she\" or \"he\" " +
+  "may be a pet, a bird or a boat: then no line); never a crowd or a group; never people met once " +
+  "each (any customer, a doctor in general). " +
+  PERSON_NAME_RULE +
+  "(2) each line to rewrite, with the SAME kind (PERSON or VIEWER) and the SAME name, its look " +
+  "written again whole: keep everything it says and add what it leaves out. " +
+  PERSON_LOOK_RULE +
+  "A VIEWER is \"you\", someone the host's work serves, in everyday clothes — never the host's " +
+  "uniform, badge or work clothes. Two people the story tells apart look clearly different, and " +
+  "every line you write looks clearly different from the lines already written and from the host. " +
+  "Never a face, an expression or a name the script does not give. Output ONLY those lines, no " +
+  "headings; NONE when there is nothing to write.";
+
+/** The most script sentences the people repair is shown — the followed ones and their neighbours. */
+const REPAIR_MAX_SENTENCES = 40;
+
+/**
+ * The people repair's question: the host, the lines already written, the lines to rewrite with
+ * what each leaves out, the script's opening (its place and time) and the sentences that follow
+ * someone, each with its neighbours. Pure.
+ */
+export function peopleRepairMessage(
+  script: string,
+  lines: { people: string[]; viewer: string[] },
+  owed: { uncovered: FollowedPerson[]; incomplete: IncompletePeopleLine[] },
+  opts: { subject?: string; hostBlock?: string } = {}
+): string {
+  const sentences = scriptSentences(script);
+  const wanted = new Set<number>();
+  for (const f of owed.uncovered)
+    for (const i of f.sentences) for (const k of [i - 1, i, i + 1]) if (k >= 0 && k < sentences.length) wanted.add(k);
+  const shown = Array.from(wanted)
+    .sort((a, b) => a - b)
+    .slice(0, REPAIR_MAX_SENTENCES);
+  const rewrite = new Set(owed.incomplete.map(x => x.line));
+  const written = [...lines.people, ...lines.viewer].filter(l => !rewrite.has(l));
+  return (
+    (opts.subject ? `Video subject: ${opts.subject}\n` : "") +
+    (opts.hostBlock ?? "") +
+    `\nPEOPLE LINES ALREADY WRITTEN:\n${written.length ? written.join("\n") : "none"}\n` +
+    (owed.incomplete.length
+      ? `\nLINES TO REWRITE WHOLE:\n${owed.incomplete.map(x => `${x.line}  (leaves out: ${x.gaps.join(", ")})`).join("\n")}\n`
+      : "") +
+    `\nTHE SCRIPT'S OPENING:\n${sentences.slice(0, 6).join(" ")}\n` +
+    (shown.length
+      ? `\nSENTENCES WHERE THE STORY MAY FOLLOW SOMEONE (numbered, with their neighbours):\n${shown.map(i => `#${i + 1} ${sentences[i]}`).join("\n")}\n`
+      : "") +
+    `\nPEOPLE LINES:`
+  );
+}
+
+/**
+ * The people lines after the repair's answer: an incomplete line takes the rewrite of the same
+ * person (same name, or the one VIEWER line for the viewer) only when it leaves out less, keeping
+ * its own kind and name, which every shot already uses; a new `PERSON` is added when it is nobody
+ * already written (by name, or by the same role and sex) and says at least two of man or woman, age
+ * and hair, up to `MAX_RECURRING_PEOPLE`. A `VIEWER` line is never added here — whether "you" is
+ * someone the host serves is the props call's to say. Pure.
+ */
+export function mergeRepairedPeople(
+  lines: { people: string[]; viewer: string[] },
+  incomplete: IncompletePeopleLine[],
+  reply: string,
+  opts: { hostName?: string } = {}
+): { people: string[]; viewer: string[]; added: string[]; rewritten: string[] } {
+  const replyLines = reply.split("\n").map(l => l.replace(/^[-*•\d.)\s]+/, "").trim());
+  const newPeople = parseRecurringPeople(replyLines.filter(isPersonLine).join("\n"), opts);
+  const newViewers = replyLines.filter(isViewerLine);
+  const newViewer = parseViewerPerson(newViewers.join("\n"), opts);
+  const people = [...lines.people];
+  const viewer = [...lines.viewer];
+  const added: string[] = [];
+  const rewritten: string[] = [];
+  const used = new Set<RecurringPerson>();
+  for (const x of incomplete) {
+    const key = personKey(x.person.name);
+    const candidates = [...newPeople, ...(newViewer ? [newViewer] : [])];
+    const same =
+      candidates.find(c => personKey(c.name) === key) ??
+      (x.kind === "VIEWER" && newViewers.length === 1 ? newViewer : undefined);
+    if (!same || used.has(same) || lookGaps(same.look).length >= x.gaps.length) continue;
+    used.add(same);
+    const line = `${x.kind} ${x.person.name}: ${same.look}`;
+    if (x.kind === "VIEWER") viewer[0] = line;
+    else people[people.indexOf(x.line)] = line;
+    rewritten.push(x.person.name);
+  }
+  const have = parseRecurringPeople(people.join("\n"), opts);
+  const viewerNow = parseViewerPerson(viewer.join("\n"), opts);
+  for (const p of newPeople) {
+    if (used.has(p) || people.length >= MAX_RECURRING_PEOPLE || lookGaps(p.look).length > 1) continue;
+    const key = personKey(p.name);
+    if (have.some(h => personKey(h.name) === key) || (viewerNow && personKey(viewerNow.name) === key)) continue;
+    // The same role and sex as someone already written is them, renamed — never a second person.
+    if (matchRecurringPeople(p.name, 1, have).length) continue;
+    people.push(`PERSON ${p.name}: ${p.look}`);
+    have.push(p);
+    added.push(p.name);
+  }
+  return { people, viewer, added, rewritten };
+}
+
+/**
+ * Asks once for the people lines the props reply still owes (`peopleOwed`) and merges the answer
+ * (`mergeRepairedPeople`). Never throws: a failed call keeps the lines as they were.
+ */
+async function repairPeopleLines(
+  script: string,
+  lines: { people: string[]; viewer: string[] },
+  owed: { uncovered: FollowedPerson[]; incomplete: IncompletePeopleLine[] },
+  opts: { subject?: string; hostBlock?: string; hostName?: string; onNote?: (m: string) => void }
+): Promise<{ people: string[]; viewer: string[] }> {
+  try {
+    const r = await invokeClaude({
+      systemPrompt: PEOPLE_REPAIR_SYSTEM,
+      userMessage: peopleRepairMessage(script, lines, owed, opts),
+      maxTokens: 6000,
+      model: SHOT_LIST_MODEL(),
+      effort: planningEffort("PROPS_EFFORT"),
+      step: "Props list (people)",
+    });
+    const merged = mergeRepairedPeople(lines, owed.incomplete, r.text, opts);
+    opts.onNote?.(
+      `people lines asked for again (${[
+        owed.uncovered.length ? `followed with no line: ${owed.uncovered.map(f => f.cue).join(", ")}` : "",
+        owed.incomplete.length ? `incomplete look: ${owed.incomplete.map(x => x.person.name).join(", ")}` : "",
+      ]
+        .filter(Boolean)
+        .join("; ")}) — ` +
+        (merged.added.length || merged.rewritten.length
+          ? [
+              merged.added.length ? `added ${merged.added.join(", ")}` : "",
+              merged.rewritten.length ? `rewrote ${merged.rewritten.join(", ")}` : "",
+            ]
+              .filter(Boolean)
+              .join("; ")
+          : "nothing changed")
+    );
+    return { people: merged.people, viewer: merged.viewer };
+  } catch (err: any) {
+    opts.onNote?.(`people lines repair failed (${err?.message ?? err}) — kept as written`);
+    return lines;
+  }
+}
+
 /**
  * The props list for one script (`LongformInputParams.continuitySheet`), with its `PERSON` lines
  * (the people who come back, `parseRecurringPeople`) and its one `VIEWER` line (who "you" is when
  * the host's job serves them, `parseViewerPerson`) at the end. "" on any failure. `host` is how the
- * host looks and their title — what tells the call whether "you" is the host or their customer.
+ * host looks, `hostTitle` their title, and the host's own words about themself are read off the
+ * script (`hostOwnWords`) — what tells the call whether "you" is the host or their customer. Then,
+ * only when the reply owes a person the script follows or a look that cannot keep one person
+ * (`peopleOwed`), ONE more small call asks for just those lines (`repairPeopleLines`).
  */
 export async function deriveContinuitySheet(
   script: string,
-  opts: { subject?: string; styleBible?: string; host?: string } = {}
+  opts: {
+    subject?: string;
+    styleBible?: string;
+    host?: string;
+    hostTitle?: string;
+    hostName?: string;
+    onNote?: (m: string) => void;
+  } = {}
 ): Promise<string> {
+  const hasHost = opts.host != null || opts.hostTitle != null || opts.hostName != null;
+  const hostBlock = hasHost
+    ? hostBlockFor(opts.host, opts.hostTitle, hostOwnWords(script, { hostName: opts.hostName }))
+    : "";
   // Room for the model's own thinking ahead of the list: at 1200 the thinking could spend the whole
   // budget and the call came back with no text (Hannah's real render, job 163) — and one retry.
   for (let attempt = 1; attempt <= 2; attempt++) {
+    let reply: ReturnType<typeof splitPropsReply>;
     try {
       const r = await invokeClaude({
         systemPrompt: CONTINUITY_SYSTEM,
         userMessage:
           (opts.subject ? `Video subject: ${opts.subject}\n` : "") +
           (opts.styleBible ? `Visual direction: ${opts.styleBible}\n` : "") +
-          (opts.host?.trim() ? `THE HOST (the narrator, on camera): ${opts.host.trim()}\n` : "") +
+          hostBlock +
           `\nScript:\n${script.slice(0, 60000)}\n\nPROPS LIST:`,
         maxTokens: 16000,
         model: SHOT_LIST_MODEL(),
         effort: planningEffort("PROPS_EFFORT"),
         step: "Props list",
       });
-      // A line with nothing after its colon is a heading ("PEOPLE:"), never a prop: kept, it became
-      // the home line or a key thing with no look. The PERSON lines go last and are capped on their
-      // own, so they never push a prop out or take the home line's place.
-      const lines = r.text
-        .split("\n")
-        .map(l => l.replace(/^[-*•\d.)\s]+/, "").trim())
-        .filter(l => l.includes(":") && l.slice(l.indexOf(":") + 1).trim() !== "");
-      const props = lines.filter(l => !isPersonLine(l) && !isViewerLine(l)).slice(0, 16);
-      const people = lines.filter(isPersonLine).slice(0, MAX_RECURRING_PEOPLE);
-      const viewer = lines.filter(isViewerLine).slice(0, 1);
-      if (props.length) return [...props, ...people, ...viewer].join("\n");
+      // The PERSON lines go last and are capped on their own, so they never push a prop out or take
+      // the home line's place.
+      reply = splitPropsReply(r.text, opts);
     } catch {
-      /* try once more */
+      continue; // try once more
     }
+    if (!reply.props.length) continue;
+    let { people, viewer } = reply;
+    const owed = peopleOwed(script, { people, viewer }, opts);
+    if (owed.uncovered.length || owed.incomplete.length)
+      ({ people, viewer } = await repairPeopleLines(script, { people, viewer }, owed, { ...opts, hostBlock }));
+    return [...reply.props, ...people, ...viewer].join("\n");
   }
   return "";
 }
@@ -2094,6 +2399,8 @@ export function parseKeyThings(sheet: string | undefined): KeyThing[] {
     const main = /^MAIN\b/i.test(name);
     name = name.replace(/^MAIN\b[\s:-]*/i, "").trim();
     if (!name || out.some(t => keyName(t.name) === keyName(name))) continue;
+    // The host is never a key thing (job 410's list ended "THE HOST: a slender woman in her forties…").
+    if (isHostEchoLine(line)) continue;
     out.push({ name, look, ...(main && !out.some(t => t.main) ? { main: true as const } : {}) });
   }
   return out;

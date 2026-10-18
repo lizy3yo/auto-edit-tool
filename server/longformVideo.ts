@@ -12303,11 +12303,16 @@ async function cutShotsOnWords(
         await deriveContinuitySheet(ctx.contentScript, {
           subject: params.videoSubject,
           styleBible: params.visualStyleBible,
-          // How the host looks and what they call themself: what tells the call whether "you" is
-          // the host or someone the host's job serves (job 402: a host in a crew uniform).
-          host: params.brollOnly
-            ? undefined
-            : [params.hostLook, params.hostTitle ? `title: ${params.hostTitle}` : ""].filter(Boolean).join("; "),
+          // How the host looks, what they call themself and what they say they do (their own words,
+          // read off the script): what tells the call whether "you" is the host or someone the
+          // host's job serves (job 402: a host in a crew uniform; job 410: no title, and a look
+          // that never named the job).
+          host: params.brollOnly ? undefined : (params.hostLook ?? ""),
+          hostTitle: params.brollOnly ? undefined : params.hostTitle,
+          hostName: params.brollOnly ? undefined : params.hostName,
+          // A person the script follows with no PERSON line, or a look with no man or woman, age
+          // or hair, is asked for once more (jobs 410 and 412) — said in the render log.
+          onNote: m => log(`props list: ${m}`),
         })
       ).replace(/\b(?:cluttered|messy|jumbled|crowded)\b/gi, "tidy");
       // And what still names a CTA-only thing (a style bible kept from before, on a resume) goes.

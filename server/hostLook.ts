@@ -305,7 +305,7 @@ const pluralOf = (n: string) =>
   IRREGULAR_PLURALS[n] ??
   (/(?:ss|ch|sh|x)$/.test(n) ? `${n}es` : /[^aeiou]y$/.test(n) ? `${n.slice(0, -1)}ies` : `${n}s`);
 
-type NounKind = "role" | "generic" | "group" | "self";
+export type NounKind = "role" | "generic" | "group" | "self";
 /** Every form (singular and plural) of every person noun → its singular and kind. */
 const PERSON_NOUN = new Map<string, { lemma: string; kind: NounKind; plural: boolean }>();
 for (const [list, kind] of [
@@ -649,6 +649,22 @@ export function namesSomeone(text: string | undefined): boolean {
   const t = text ?? "";
   if (!t.trim()) return false;
   return !!namedPeople(t) || PERSON_PART.test(withoutAnimalPronouns(t));
+}
+
+/**
+ * A person noun's entry — its singular, its kind (a role or relation, a plain man or woman, a
+ * group, or the host's own word) and the sex the word itself gives — or undefined for any other
+ * word. For reading a SCRIPT's people (`followedPeople`), where `namedPeople`'s picture-description
+ * rules do not fit prose. Pure.
+ */
+export function personNounOf(
+  word: string
+): { lemma: string; kind: NounKind; plural: boolean; sex?: "f" | "m" } | undefined {
+  const w = word.toLowerCase();
+  const e = PERSON_NOUN.get(w);
+  if (!e) return undefined;
+  const sex = FEMALE.has(w) ? ("f" as const) : MALE.has(w) ? ("m" as const) : undefined;
+  return { ...e, ...(sex ? { sex } : {}) };
 }
 
 /** The host's sex as their own look gives it, or undefined when it does not say. */

@@ -472,7 +472,11 @@ describe("deriveContinuitySheet asks who 'you' is, from how the host looks", () 
       text: `${PROPS_399}\nVIEWER the passenger: ${FLYER}\n${PEOPLE_LINES_399}\nVIEWER the traveller: ${SHE}`,
     });
     const sheet = await deriveContinuitySheet("script", { host: CREW_LOOK });
-    expect(mockInvoke.mock.calls[0][0].userMessage).toContain(`THE HOST (the narrator, on camera): ${CREW_LOOK}`);
+    // Written with dashes, never as a `name: look` line the model can echo back as a prop (job 410).
+    expect(mockInvoke.mock.calls[0][0].userMessage).toContain(
+      `THE HOST (the narrator, on camera; never a line of the list) looks — ${CREW_LOOK}`
+    );
+    expect(mockInvoke).toHaveBeenCalledTimes(1); // nothing owed, no second call
     const lines = sheet.split("\n");
     expect(lines.slice(0, 6).join("\n")).toBe(PROPS_399);
     expect(lines.slice(6, 8).every(isPersonLine)).toBe(true);
