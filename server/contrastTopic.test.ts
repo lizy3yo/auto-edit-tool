@@ -217,6 +217,52 @@ describe("contrastAcross: lines that set one side against another", () => {
       ])
     ).toBe(false);
   });
+
+  it("one country under names that do not start alike is one side; two countries still compare", () => {
+    // Job 408's own comparison could as well have said "the U.S." for its American side.
+    expect(
+      contrastAcross([
+        "In the U.S., that stretch of tile is just tile.",
+        "In most American bathrooms, it is empty.",
+      ])
+    ).toBe(false);
+    expect(
+      contrastAcross([
+        "In France, bread is bought every morning.",
+        "In a French kitchen, a linen bag hangs by the door.",
+      ])
+    ).toBe(false);
+    expect(
+      contrastAcross([
+        "In the U.S., the floor there is bare.",
+        "In Germany, a small bin stands there.",
+      ])
+    ).toBe(true);
+    expect(
+      contrastAcross([
+        "In France, bread is bought every morning.",
+        "In most American homes, it comes sliced in a bag.",
+      ])
+    ).toBe(true);
+  });
+
+  it("a month that ends its sentence is still a time, never a place", () => {
+    // "in March." kept its full stop and read as a PLACE, so a month at a sentence end was set
+    // against "Florida" — the very pairing job 404 showed is not a comparison.
+    expect(
+      contrastAcross([
+        "I start the seedlings in March.",
+        "Down in Florida, they bloom all winter.",
+      ])
+    ).toBe(false);
+    // Two times are compared with each other, as two places are.
+    expect(
+      contrastAcross([
+        "I start the seedlings in March.",
+        "In June they finally bloom.",
+      ])
+    ).toBe(true);
+  });
 });
 
 describe("the same-topic groups never join lines that compare (job 408, scenes 2-3)", () => {

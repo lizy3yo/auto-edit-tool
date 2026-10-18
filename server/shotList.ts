@@ -4034,14 +4034,35 @@ const PLACE_IN =
   /\b(?:[Ii]n|[Aa]cross|[Tt]hroughout)\s+(?:(?:most|many|some|all|plenty of|lots of|a lot of|nearly all|almost every|every|a|an|the|our|your|their|these|those|this|that)\s+)*([A-Z][A-Za-z]*(?:\.[A-Z][A-Za-z]*)*\.?)(?!['A-Za-z])/g;
 /**
  * A month or a weekday is a TIME, compared only with another time: "the robin you see in January"
- * then "down in Florida" (job 404) is not one place set against another.
+ * then "down in Florida" (job 404) is not one place set against another. Read with the full stop
+ * `PLACE_IN` keeps for "U.S.": a month that ends its sentence ("I start them in March.") is a time too.
  */
 const TIME_NAME =
-  /^(?:January|February|March|April|May|June|July|August|September|October|November|December|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)$/;
+  /^(?:January|February|March|April|May|June|July|August|September|October|November|December|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\.?$/;
+/**
+ * Names of one country that do not start alike, so the shared-start rule below cannot see they are
+ * one side: "in the U.S." then "in most American homes" is one side, as is "in France" then "in a
+ * French kitchen". Only the irregular ones — "Germany"/"German", "Japan"/"Japanese" share a start.
+ */
+const ONE_COUNTRY: Record<string, string> = {
+  us: "america", usa: "america", america: "america", american: "america", americans: "america",
+  uk: "britain", britain: "britain", british: "britain",
+  france: "france", french: "france",
+  spain: "spain", spanish: "spain",
+  netherlands: "dutch", holland: "dutch", dutch: "dutch",
+  ireland: "ireland", irish: "ireland",
+  denmark: "denmark", danish: "denmark",
+  finland: "finland", finnish: "finland",
+  poland: "poland", polish: "poland",
+  wales: "wales", welsh: "wales",
+  switzerland: "swiss", swiss: "swiss",
+  philippines: "philippines", filipino: "philippines",
+};
 /** Two names of one place ("America", "American"; "Germany", "German"): one starts the other. */
 const samePlace = (a: string, b: string) => {
   const x = a.toLowerCase().replace(/\./g, "");
   const y = b.toLowerCase().replace(/\./g, "");
+  if (ONE_COUNTRY[x] && ONE_COUNTRY[x] === ONE_COUNTRY[y]) return true;
   let k = 0;
   while (k < x.length && k < y.length && x[k] === y[k]) k++;
   return k >= Math.min(4, x.length, y.length);
