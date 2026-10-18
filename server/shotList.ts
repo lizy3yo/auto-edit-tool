@@ -2797,9 +2797,45 @@ const BEFORE_A_THING =
 const DETERMINER = /^(?:a|an|the|its|their|his|her|my|your|our|this|that|these|those|some|each|every|another)$/i;
 /** A doing word, not a thing: a choice of verbs ("adjusting or pointing at", "stacked or fanned") is left alone. */
 const DOING_WORD = /^[a-z]{3,}(?:ing|ed)$/i;
+/**
+ * A THING whose name ends like a doing word. Read as one, it closed the second choice inside its own
+ * name and the cut glued the two halves together: "an old worn blanket or plain batting beneath it"
+ * came out "an old worn blanket batting beneath it" (job 154), "a table runner or small pieced wall
+ * hanging" came out "a table runner hanging" (job 166), "autumn foliage or market setting softly
+ * behind" came out "autumn foliage setting softly behind" (job 261). Read as a thing when it is a
+ * doing word, the doing word only goes with the dropped choice ("a large white cup or plate setting on
+ * the table" → "a large white cup on the table"), which still reads. "Hanging" is a thing only after
+ * "wall": as a doing word it is everywhere ("a pot holder hanging from a peg").
+ */
+const THING_ENDING_IN_ING =
+  /^(?:batting|bedding|building|ceiling|clothing|frosting|icing|railing|siding|stuffing|string|spring|topping|tubing|wedding|awning|shelving|decking|flooring|roofing|fencing|tiling|paneling|panelling|carpeting|plumbing|housing|lining|padding|molding|moulding|sapling|seedling|duckling|earring|pudding|wiring|setting)$/i;
+const isThingName = (word: string, before: string) =>
+  THING_ENDING_IN_ING.test(word) || (/^hanging$/i.test(word) && /^wall$/i.test(before));
+/**
+ * A word a picture writer puts after a doing word to say how it is done, so the thing's name has
+ * ended before the doing word: "a small square | folded neatly", "a bar | sliding up".
+ */
+const AFTER_A_DOING = /^(?:up|down|out|off|away|back|open|shut|flat|upright|[a-z]{3,}ly)$/i;
+/**
+ * A word that says what a thing does, so the first choice starts after it: "the shelf holds | jars or
+ * small glass spice tins" (cutting back past it would drop "shelf holds" with the first choice).
+ */
+const SAYS_WHAT_IT_DOES =
+  /^(?:holds|has|have|shows|sits|rests|lies|stands|hangs|leans|waits|contains|carries|keeps|needs|gets|makes|looks|seems|becomes|reads|wears)$/i;
 /** A describing word: a colour, a tone, a kind ("very dark | or black beads", "a different floral | or check print"). */
 const DESCRIBING =
   /^(?:[a-z]{3,}(?:ful|ous|ive|ish|less|ral)|black|white|grey|gray|brown|red|blue|green|yellow|orange|pink|purple|cream|ivory|beige|tan|navy|dark|light|pale|bright|deep|plain)$/i;
+/**
+ * A word that describes the NAME after it rather than being the name: a describing word, a material,
+ * a pattern, a size or shape ("a simple wooden | or metal rail", "faded geometric | or floral print",
+ * "a small | or large bowl"). A choice that ends on one shares the name the second choice carries.
+ */
+const describesTheName = (w: string) =>
+  DESCRIBING.test(w) ||
+  /^[a-z]{4,}ic$|-(?:colou?red|toned|tone)$/i.test(w) ||
+  /^(?:wooden|wood|metal|plastic|glass|steel|iron|copper|brass|tin|cotton|wool|woollen|woolen|linen|leather|paper|stone|ceramic|porcelain|silver|gold|golden|velvet|silk|denim|rubber|vinyl|bamboo|wicker|cardboard|concrete|marble|clay|terracotta|stainless|aluminum|aluminium|oak|pine|maple|walnut|cedar|birch|teak|mahogany|check|checked|checkered|plaid|striped|patterned|spotted|dotted|tartan|small|large|big|tiny|little|tall|short|long|wide|narrow|thick|thin|old|new|worn|soft|heavy|round|square|simple|clean|smooth|rough|shiny|matte|indoor|outdoor|handmade|homemade|vintage|antique|modern)$/i.test(
+    w
+  );
 /** The word before an "or" that is no choice between two things: a count, "more or less", "with or without". */
 const NO_CHOICE_BEFORE =
   /^(?:\d[\d.,/]*|one|two|three|four|five|six|seven|eight|nine|ten|twelve|twenty|thirty|fifty|hundred|few|several|more|less|sooner|later|with|whether|rather)$/i;
@@ -2815,14 +2851,17 @@ const NEGATED_SENTENCE = /\b(?:no|not|without|never|neither|nor|none|nothing|nob
  * workshop bench" (job 406 scene 19's split panel, 2026-10-18 — the line offered the choice, every
  * picture writer is told "never X or Y", and the panel path let it through: the picture model drew
  * one of them, the cheap one its memory held, under "a belt setup runs $100 to $300"). The first
- * thing is kept, unless the second is the longer and so carries the thing's name ("a white or
- * cream-colored smoke alarm" → "a cream-colored smoke alarm"). Cut only where both are clear: the
- * first runs back to a word that opens a name (`BEFORE_A_THING`), the second ends within five words at
- * a comma, the end, or a word saying where it is or what it is doing (`AFTER_A_THING`). Left exactly
- * as written: a count ("one or two"), "or so", "more or less", "with or without", a sentence that
- * says what is NOT there ("no face, head, or body"), a list closed by ", or", "A, B or C", a choice
- * of doing words, and anything less clear. Replayed over the local storyboards (jobs 200-407) before
- * it went in: 16 of 686 split panels changed, each to one clean thing. Pure.
+ * thing is kept, unless the second is the longer and so carries the thing's name ("a coaster or small
+ * ornament" → "a small ornament"); a first choice that is only a word describing the name gives way
+ * to the second's ("a simple wooden or metal rail" → "a simple metal rail"). Cut only where both are
+ * clear: the first runs back to a word that opens a name (`BEFORE_A_THING`), the second ends within
+ * five words at a comma, the end, or a word saying where it is or what it is doing (`AFTER_A_THING`).
+ * Left exactly as written: a count ("one or two"), "or so", "more or less", "with or without", a
+ * sentence that says what is NOT there ("no face, head, or body"), a list closed by ", or", "A, B or
+ * C", a choice of doing words, and anything less clear. Replayed over the local storyboards (jobs
+ * 150-407): 30 of 1,277 split panels changed, each to one clean thing; run over the 15,554 full-frame
+ * descriptions as a harder test, the first version glued halves together ("a pot holder lined pouch",
+ * "a simple wooden in a modest room") and the rules above came from those rows. Pure.
  */
 export function oneThingOnly(text: string): string {
   let out = text;
@@ -2844,14 +2883,16 @@ function cutOneChoice(text: string): string {
     const before = text.slice(0, m.index);
     if (NEGATED_SENTENCE.test(before.slice(lastOf(before, [".", ";", ":", "!", "?", "("])))) continue;
     const clauseAt = lastOf(before, [",", ";", ":", ".", "!", "?", "(", "—", "–"]);
-    // The first alternative: back to the word that opens its name.
+    // The first alternative: back to the word that opens its name, or says what the thing does.
     const xs = Array.from(before.slice(clauseAt).matchAll(/\S+/g));
     let from = xs.length;
-    while (from > 0 && !BEFORE_A_THING.test(bareOf(xs[from - 1][0]))) from--;
+    while (from > 0 && !BEFORE_A_THING.test(bareOf(xs[from - 1][0])) && !SAYS_WHAT_IT_DOES.test(bareOf(xs[from - 1][0])))
+      from--;
     const x = xs.slice(from);
     if (!x.length) continue;
     const prev = bareOf(x[x.length - 1][0]);
-    if (NO_CHOICE_BEFORE.test(prev) || DOING_WORD.test(prev)) continue;
+    const prevPrev = x.length >= 2 ? bareOf(x[x.length - 2][0]) : "";
+    if (NO_CHOICE_BEFORE.test(prev) || (DOING_WORD.test(prev) && !isThingName(prev, prevPrev))) continue;
     // "chisels, planes or saws" is a list of three, not a choice of two.
     if (from === 0 && x.length <= 2 && before[clauseAt - 1] === ",") continue;
     // The second alternative: on to where its name ends, within five words.
@@ -2867,18 +2908,25 @@ function cutOneChoice(text: string): string {
     if (AFTER_A_THING.test(leadBare) || (BEFORE_A_THING.test(leadBare) && !DETERMINER.test(leadBare))) continue;
     let end = -1;
     let words = 0;
+    let closedByWord = false;
     for (let k = 0; k < Math.min(ys.length, 6); k++) {
       const w = ys[k][0];
       const bare = bareOf(w);
       // A doing word after the name ("a guide | opened to a page", "a bar | sliding up"), never one in
-      // front of it ("a very old rusty dented metal tin").
+      // front of it ("a very old rusty dented metal tin", "a small lined pouch", job 150: "a pot holder
+      // or small | lined pouch" came out "a pot holder lined pouch") and never a thing's own name
+      // ("plain batting", `THING_ENDING_IN_ING`). The same holds for the doing words that say where a
+      // thing is: they end the name only when what follows says so.
       const next = bareOf(ys[k + 1]?.[0] ?? "");
-      const after =
-        DOING_WORD.test(bare) &&
-        (!next || bare !== w || AFTER_A_THING.test(next) || DETERMINER.test(next) || /^(?:up|down|out|off|away|back|open|shut|flat|upright)$/i.test(next));
-      if (k > 0 && (AFTER_A_THING.test(bare) || after || /^[(\[“"]/.test(w))) {
+      const doingShape = DOING_WORD.test(bare) && !/^during$/i.test(bare);
+      const ends = doingShape
+        ? !isThingName(bare, k > 0 ? bareOf(ys[k - 1][0]) : "") &&
+          (!next || bare !== w || AFTER_A_THING.test(next) || DETERMINER.test(next) || AFTER_A_DOING.test(next))
+        : AFTER_A_THING.test(bare);
+      if (k > 0 && (ends || /^[(\[“"]/.test(w))) {
         end = ys[k - 1].index! + bareOf(ys[k - 1][0]).length;
         words = k;
+        closedByWord = true;
         break;
       }
       if (k === 5) break;
@@ -2890,30 +2938,59 @@ function cutOneChoice(text: string): string {
       }
     }
     if (end < 0) continue;
-    // The longer of the two carries the thing's name ("a white | or cream-colored smoke alarm", "the
-    // worn wood | or tile floor"), and so does the second when the first ends on a describing word
-    // ("very dark | or black beads"). A second opening on "a" or "the" would leave two: the first.
-    const keepSecond =
-      !DETERMINER.test(leadBare) && (words > x.length || (words === x.length && DESCRIBING.test(prev)));
-    let head = keepSecond ? before.slice(0, clauseAt + x[0].index!) : before;
-    let second = rest;
-    if (keepSecond) {
+    // A second choice that stops on a describing word stopped inside its name ("a bag or small | set
+    // of tools"): not clear, left as written. One that runs to a comma or the end is whole ("in
+    // cream or pale grey,").
+    const lastOfSecond = bareOf(ys[words - 1][0]);
+    if (closedByWord && describesTheName(lastOfSecond)) continue;
+    // ONE DESCRIBING WORD FOR ANOTHER: a first choice that ends on a word describing the name ("a
+    // simple wooden | or metal rail", "faded geometric | or floral print") shares the name the second
+    // choice carries, so only that word and the "or" go — keeping the first and dropping the second
+    // left "a simple wooden in a modest room" (job 154), "faded geometric in muted tones" (job 163).
+    // A second choice opening on "a" or "the" names a whole new thing: not clear, left as written.
+    // A second choice ENDING on a describing word is a whole choice like the first, and the usual rule
+    // below decides ("in light maple | or dark walnut." — swapping one word left "in light dark
+    // walnut", job 295).
+    if (describesTheName(prev) && DETERMINER.test(leadBare)) continue;
+    const swapOneWord = describesTheName(prev) && words >= 2 && !describesTheName(lastOfSecond);
+    // How much of `before` is kept (up to `keep`), the first word it drops, and what follows it.
+    let keep = before.length;
+    let dropped = x[0];
+    let tail: string;
+    if (swapOneWord) {
+      // An intensifier goes with its word ("very dark | or black beads" → "black beads").
+      const intensified =
+        x.length >= 2 && /^(?:very|quite|rather|fairly|slightly|really)$/i.test(bareOf(x[x.length - 2][0]));
+      dropped = intensified ? x[x.length - 2] : x[x.length - 1];
+      keep = clauseAt + dropped.index!;
+      tail = rest;
+    } else {
+      // The longer of the two carries the thing's name ("a coaster | or small ornament", "late autumn
+      // | or winter evening light"), and so does the second when the first is one describing word
+      // ("a white | or cream,"). A second opening on "a" or "the" would leave two: the first.
+      const keepSecond =
+        !DETERMINER.test(leadBare) && (words > x.length || (words === x.length && DESCRIBING.test(prev)));
+      if (keepSecond) keep = clauseAt + x[0].index!;
+      tail = keepSecond ? rest : rest.slice(end);
+    }
+    let head = before.slice(0, keep);
+    if (keep < before.length) {
       // "a white or ivory smoke alarm" → "an ivory smoke alarm"; a sentence keeps its capital.
       head = head.replace(/\b(a|an)(\s+)$/i, (_, art: string, gap: string) => {
-        const an = /^[aeiou]/i.test(rest) ? "an" : "a";
+        const an = /^[aeiou]/i.test(tail) ? "an" : "a";
         return (/^A/.test(art) ? an.charAt(0).toUpperCase() + an.slice(1) : an) + gap;
       });
-      if (from === 0 && /^[A-Z]/.test(x[0][0])) second = rest.charAt(0).toUpperCase() + rest.slice(1);
+      if (/^\s*$|[.!?:;]\s*$/.test(head) && /^[A-Z]/.test(dropped[0])) tail = tail.charAt(0).toUpperCase() + tail.slice(1);
     }
     // "either a stand mixer or a hand whisk" keeps one of them, without its "either".
     const either = /\beither\s+/gi;
     let at = -1;
     for (let e = either.exec(head); e; e = either.exec(head)) if (e.index >= clauseAt) at = e.index;
     if (at >= 0) {
-      const tail = head.slice(at).replace(/^either\s+/i, "");
-      head = head.slice(0, at) + (/^E/.test(head.charAt(at)) ? tail.charAt(0).toUpperCase() + tail.slice(1) : tail);
+      const after = head.slice(at).replace(/^either\s+/i, "");
+      head = head.slice(0, at) + (/^E/.test(head.charAt(at)) ? after.charAt(0).toUpperCase() + after.slice(1) : after);
     }
-    return head + (keepSecond ? second : rest.slice(end));
+    return head + tail;
   }
   return text;
 }
@@ -2962,7 +3039,9 @@ and HOST/OTHER lines are said with nothing beside the host: read both for contex
 them. Judge every PANEL by all the rules above, and also:
 - A panel shows NO person: no face, body, hands or arms. When its line is about someone doing
   something, the panel shows the thing it is done to or leaves behind, at rest. A rewrite never puts
-  a person or hands in it, so who and other are never set on a panel.
+  a person or hands in it, so who and other are never set on a panel. The one exception is a body
+  part the line is about (hair, skin, nails): it is drawn on the host, close, the face not shown — a
+  panel showing it that way is RIGHT; never rewrite it into a product or a part lying on its own.
 - A FIGURE OF SPEECH about what the host does or feels ("I lean in a little closer", "that one
   stopped me in my tracks") is never drawn as the empty prop of that action: the panel shows what
   the line is really about.

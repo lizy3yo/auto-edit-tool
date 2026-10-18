@@ -3530,4 +3530,22 @@ describe("split panels are checked against their lines and name one thing (round
     expect(s.splitVisual).toBe(words);
     expect(s.keyThing).toBe("sharpening system");
   });
+
+  it("a panel offering a choice is cut to one thing without gluing the halves together (job 150, a split panel)", () => {
+    // The first cut read "lined" as where the pouch sits and drew "a pot holder lined pouch" beside the host.
+    const s = split(
+      97,
+      "that code on your screen. Or look just below this video, and you'll find it right at the top.",
+      "A finished quilted pot holder or small lined pouch resting flat on the wooden sewing table by the window, morning light soft across its stitched surface, empty and at rest."
+    );
+    expect(oneThingPanels([s], undefined)).toBe(1);
+    expect(buildSplitRightScene(s).showSubject).toBe(
+      "A finished quilted pot holder resting flat on the wooden sewing table by the window, morning light soft across its stitched surface, empty and at rest."
+    );
+    // A describing word gives way to the other one, never leaving the name behind (job 154 scene 32's
+    // description, the same shape: "a simple wooden in a modest room").
+    const rail = split(32, "and now and again an English lady who wants a bit of handwork to hang over a rail.", "A small hand-pieced quilt draped over a simple wooden or metal rail in a modest room.");
+    oneThingPanels([rail], undefined);
+    expect(rail.splitVisual).toBe("A small hand-pieced quilt draped over a simple metal rail in a modest room.");
+  });
 });

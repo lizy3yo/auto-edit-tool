@@ -147,6 +147,53 @@ describe("one thing, never X or Y (job 406 scene 19)", () => {
       expect(oneThingOnly(text), text).toBe(text);
   });
 
+  it("the cut never glues the two choices together (rows of the local storyboards, jobs 150-295)", () => {
+    // Job 150 #96, a split panel: "lined" was read as where the pouch is, so the cut left "a pot
+    // holder lined pouch".
+    expect(
+      oneThingOnly(
+        "A finished quilted pot holder or small lined pouch resting flat on the wooden sewing table by the window, morning light soft across its stitched surface, empty and at rest."
+      )
+    ).toBe(
+      "A finished quilted pot holder resting flat on the wooden sewing table by the window, morning light soft across its stitched surface, empty and at rest."
+    );
+    // A first choice that is only a word describing the name gives way to the second's (jobs 154, 163,
+    // 172): keeping it and dropping the second left "a simple wooden in a modest room".
+    expect(oneThingOnly("A small hand-pieced quilt draped over a simple wooden or metal rail in a modest room, the light soft and pale.")).toBe(
+      "A small hand-pieced quilt draped over a simple metal rail in a modest room, the light soft and pale."
+    );
+    expect(oneThingOnly("The cloth shows faded geometric or floral print in muted tones; the weave is soft and worn at the edges.")).toBe(
+      "The cloth shows faded floral print in muted tones; the weave is soft and worn at the edges."
+    );
+    expect(oneThingOnly("each square showing a distinct small-scale floral or check pattern in muted cotton prints")).toBe(
+      "each square showing a distinct small-scale check pattern in muted cotton prints"
+    );
+    // A thing whose name ends like a doing word is still the thing (jobs 154, 166, 261).
+    expect(oneThingOnly("a pale finished nine-patch top, an old worn blanket or plain batting beneath it, all layered")).toBe(
+      "a pale finished nine-patch top, an old worn blanket beneath it, all layered"
+    );
+    expect(oneThingOnly("A finished scrap quilt project—a small pieced pillow or wall hanging—lies flat on the sewing room table")).toBe(
+      "A finished scrap quilt project—a small pieced pillow—lies flat on the sewing room table"
+    );
+    expect(oneThingOnly("A finished scrap quilt project—perhaps a patchwork table runner or small pieced wall hanging—displayed flat")).toBe(
+      "A finished scrap quilt project—perhaps a small pieced wall hanging—displayed flat"
+    );
+    expect(oneThingOnly("its blackened surface and simple geometry, with blurred autumn foliage or market setting softly behind.")).toBe(
+      "its blackened surface and simple geometry, with blurred autumn foliage behind."
+    );
+    // Two whole choices, each with its own describing word (job 295): the first, never "light dark walnut".
+    expect(oneThingOnly("Fingers curl around a small round wooden coaster in light maple or dark walnut. Other coasters sit stacked.")).toBe(
+      "Fingers curl around a small round wooden coaster in light maple. Other coasters sit stacked."
+    );
+    // The first choice starts after the word saying what the thing does, never before it.
+    expect(oneThingOnly("The shelf holds jars or small glass spice tins near the stove")).toBe(
+      "The shelf holds small glass spice tins near the stove"
+    );
+    // Not clear where the second choice's name ends, or two whole new things: left as written.
+    for (const text of ["a bag or small set of tools on the bench", "a rack of a wooden or a metal kind by the door"])
+      expect(oneThingOnly(text), text).toBe(text);
+  });
+
   it("oneThingPanels cuts only panels, and moves the key thing to what the panel still names", () => {
     const scenes = [
       panel(19, LINE_19, PANEL_19, { keyThing: "belt sharpening setup", otherKeyThings: ["sharpening system"] }),
@@ -182,6 +229,10 @@ describe("the panel rules", () => {
     expect(PANEL_FIT_RULES).toMatch(/never the video's\s+MAIN thing unless the line names it/);
     expect(PANEL_FIT_RULES).toMatch(/a thing only a neighbouring line talks about/);
     expect(PANEL_FIT_RULES).toMatch(/NO person: no face, body, hands or arms/);
+    // A body-part panel is drawn on the host (`buildSplitRightScene`): the check must not turn it into
+    // a bottle or a loose lock, which the line check's own body-part rule forbids.
+    expect(PANEL_FIT_RULES).toMatch(/The one exception is a body\s+part the line is about \(hair, skin, nails\): it is drawn on the host/);
+    expect(PANEL_FIT_RULES).toMatch(/never rewrite it into a product or a part lying on its own/);
     expect(PANEL_FIT_RULES).toMatch(/never split or joined/);
     expect(PANEL_FIT_RULES).not.toMatch(CHANNEL_OBJECTS);
   });
