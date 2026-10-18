@@ -69,6 +69,7 @@ import {
   markCtaQrBlock,
   ONE_BODY_CLAUSE,
   personClauseFor,
+  TOOL_CONTACT_CLAUSE,
   TOOL_POSITION_CLAUSE,
   withAllowedText,
   planGlitchRerender,
@@ -3907,5 +3908,101 @@ describe("'hand tools' are tools, not hands (round 11's review, job 406 scene 7)
     expect(scenes[1].brollHostLook).toBe(GARAGE);
     expect(scenes[2].brollHostLook).toBeUndefined();
     expect(buildStillPrompt(scenes[2])).toContain(NO_FIGURES_SUFFIX);
+  });
+});
+
+describe("a splitting tool works in the end grain, and no hand is in an edge's path (jobs 406, 407)", () => {
+  const SAWYER = "A broad man in his sixties with a short white beard, wearing a sage green work shirt with rolled sleeves";
+  const SPLIT_RULE = /splitting tool is driven into its END grain/;
+
+  it("every host-at-work picture of a froe asks for its edge in the end grain, along the split", () => {
+    const scenes = [
+      // Job 407 scene 14: the blade came back resting on top, across a split already open.
+      pic(14, "Number one is the roof, split by hand from white oak or chestnut with a froe, and the direction of the split mattered most.",
+        "hands holding a froe's upright wooden handle, its flat steel blade driven into the top of a short white oak log section along the grain", {
+          visualPrompt:
+            "Bare weathered hands gripping a froe's wooden handle, its flat steel blade pressed into the top of a white oak log bolt along the grain, inside a log cabin with the split-oak roof visible above.",
+          humanPresent: true,
+        }),
+      // Job 407 scene 17: the blade out in mid-air, a board peeling away with no blade in its split.
+      pic(17, "and rived the boards along those same lines,", "a froe splitting a wedge into a board on a tree stump", {
+        visualPrompt:
+          "A froe with its flat steel blade driven into a white oak wedge on a tree stump, a freshly split board starting to separate along the grain.",
+        humanPresent: true,
+      }),
+    ];
+    markHostBroll(scenes, { hostLook: SAWYER, hostName: "Sam" }, "https://x/host.png");
+    for (const s of scenes) {
+      const prompt = buildStillPrompt(s);
+      expect(prompt, s.showSubject).toMatch(SPLIT_RULE);
+      expect(prompt, s.showSubject).toMatch(/split opens along the line of the blade/);
+      expect(prompt, s.showSubject).toMatch(/never pushed into the side of the piece/);
+      expect(prompt, s.showSubject).toMatch(/sticking out into the air with no wood under its edge/);
+      expect(prompt, s.showSubject).toMatch(/lying across a split already open/);
+    }
+    expect(TOOL_CONTACT_CLAUSE).toMatch(/a splitting tool \(a froe, wedge, maul or axe\) driven edge-down into the end grain/);
+    expect(TOOL_CONTACT_CLAUSE).toContain(TOOL_POSITION_CLAUSE);
+  });
+
+  it("people splitting together keep the rule, and no hand grips a piece where it splits (job 407 scene 10)", () => {
+    // A froe pushed into the SIDE of an upright bolt, a second bare hand gripping it where it would open.
+    const s = pic(10, "since folk schools still teach plenty of these", "students at a folk school workshop splitting oak bolts with froes beside a stump", {
+      visualPrompt: "Bare weathered hands at a woodlot workshop holding a froe against a log bolt braced on a tree stump, splitting oak.",
+      humanPresent: true,
+      otherPerson: "folk school students",
+      otherPeople: 2,
+    });
+    const clause = personClauseFor(s, s.visualPrompt!);
+    expect(clause).toMatch(SPLIT_RULE);
+    expect(clause).toMatch(/never by a hand where it splits open/);
+    // The one-person wording reaches a lone other person too.
+    expect(otherPersonClause("a folk school student")).toMatch(SPLIT_RULE);
+  });
+
+  it("an edge tool is pushed away from the other hand (job 406 scene 9)", () => {
+    // A chisel pushed straight at the other hand lying flat on the board, under a vague description.
+    const scenes = [
+      pic(9, "and this channel is for working people who want extra income", "the host working quietly at the garage workbench with simple hand tools", {
+        visualPrompt:
+          "Bare weathered hands from the forearms down working with a simple hand tool at a wooden garage workbench, fingers already gripping and adjusting, pegboard and window in the background.",
+        humanPresent: true,
+      }),
+    ];
+    markHostBroll(scenes, { hostLook: SAWYER, hostName: "Gary" }, "https://x/host.png");
+    const prompt = buildStillPrompt(scenes[0]);
+    expect(prompt).toMatch(/A chisel, knife, gouge or plane is pushed AWAY from the other hand/);
+    expect(prompt).toMatch(/no hand ever lies on the work ahead of where the edge points/);
+    // The hands-only lane carries both as well.
+    expect(ANON_PERSON_SUFFIX).toMatch(/pushed AWAY from the other hand/);
+    expect(ANON_PERSON_SUFFIX).toMatch(SPLIT_RULE);
+  });
+
+  it("a tool at rest, with nobody in the picture, is not told how to work", () => {
+    const scenes = [pic(3, "The froe is the tool that made those roofs.", "a froe hanging from a peg on a log cabin wall")];
+    markHostBroll(scenes, { hostLook: SAWYER, hostName: "Sam" }, "https://x/host.png");
+    expect(scenes[0].humanPresent).toBeFalsy();
+    const prompt = buildStillPrompt(scenes[0]);
+    expect(prompt).toContain(NO_FIGURES_SUFFIX);
+    expect(prompt).not.toMatch(SPLIT_RULE);
+    expect(prompt).not.toMatch(/pushed AWAY from the other hand/);
+  });
+
+  it("the still check names a splitting tool out of the end grain and a hand ahead of an edge", () => {
+    expect(STILL_DEFECT_SYSTEM).toMatch(/a splitting tool \(a froe, wedge, maul or axe\) that is not driven into the wood's end grain/);
+    expect(STILL_DEFECT_SYSTEM).toMatch(/pushed into the SIDE of an upright piece/);
+    expect(STILL_DEFECT_SYSTEM).toMatch(/its edge resting on the wood but not in it/);
+    expect(STILL_DEFECT_SYSTEM).toMatch(/sticking out into the air with no wood under its edge/);
+    expect(STILL_DEFECT_SYSTEM).toMatch(/lying ACROSS a split already open/);
+    expect(STILL_DEFECT_SYSTEM).toMatch(/a hand gripping a piece where it is splitting open/);
+    expect(STILL_DEFECT_SYSTEM).toMatch(/a hand or fingers AHEAD of a chisel, knife, gouge or plane/);
+    // Both sit inside QUESTION 2 (broken), before QUESTION 3, and the question still leans to false.
+    const q2 = STILL_DEFECT_SYSTEM.slice(
+      STILL_DEFECT_SYSTEM.indexOf("QUESTION 2"),
+      STILL_DEFECT_SYSTEM.indexOf("QUESTION 3")
+    );
+    expect(q2).toMatch(/splitting tool/);
+    expect(q2).toMatch(/AHEAD of a chisel/);
+    expect(q2).toMatch(/When unsure, answer false/);
+    expect(STILL_DEFECT_SYSTEM).toMatch(/fingers in front of or right beside a blade/);
   });
 });

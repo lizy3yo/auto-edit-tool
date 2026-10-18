@@ -5956,27 +5956,49 @@ const SHOT_ANGLE_SUFFIX: Record<string, string> = {
  * Every tool in its REAL working position, and the hands safe from it (2026-10-02, the operator on
  * Hank's job 332: the host sawing a small block lying flat on the bench, his other hand right beside
  * the blade — "unrealistic … it will damage his fingers"). Any tool, any channel.
+ *
+ * SPLITTING and EDGE TOOLS spelled out (2026-10-18, the review of jobs 401-407). A tool that splits
+ * wood works only one way — edge down in the END grain, the split running along its blade — and the
+ * clause named none, so the image model drew a cleaver's pose: job 407 scene 10, a blade pushed into
+ * the SIDE of an upright piece with a second hand gripping it where it would split; scene 14, the
+ * blade resting on top, across a split already open; scene 17, the blade out in mid-air while a
+ * board peeled away with nothing in its split. And "never in its path" did not stop job 406 scene 9,
+ * a chisel pushed straight at the other hand lying flat on the board ("working with a simple hand
+ * tool" left the set-up to the model): an edge tool is now pushed AWAY from the other hand, which
+ * sits behind the edge or the work is clamped.
  */
 export const TOOL_POSITION_CLAUSE =
   "Every tool is held and placed the way a person who really uses it does: by its handle, in its " +
   "normal grip, at its normal working angle, from the side a real user stands. The work is set up " +
   "so the tool's path is clear of the table and of every hand: a piece being sawn overhangs the " +
   "bench edge, sits in a vise or against a bench hook; a piece being drilled is clamped, with a " +
-  "scrap block under it; cloth is cut on a cutting mat, food on a cutting board. The holding hand " +
-  "stays well back and to the side of the blade, bit or edge — never in front of it, in its path, " +
-  "or right beside the cut — and a blade never cuts into the table under the work. The piece " +
+  "scrap block under it; cloth is cut on a cutting mat, food on a cutting board; a piece being " +
+  "split stands on end on a chopping block or stump, or is wedged in a fork or brake, and the " +
+  "splitting tool is driven into its END grain — down into the top as it stands — its edge sunk " +
+  "in the wood and its blade along the grain, so the split opens along the line of the blade; " +
+  "never pushed into the side of the piece, resting on the wood with its edge not in it, sticking " +
+  "out into the air with no wood under its edge, or lying across a split already open. The holding " +
+  "hand stays well back and to the side of the blade, bit or edge — never in front of it, in its " +
+  "path, or right beside the cut — and a blade never cuts into the table under the work. A chisel, " +
+  "knife, gouge or plane is pushed AWAY from the other hand: that hand rests on the tool behind its " +
+  "edge or holds the work behind the edge, or the work is clamped, and no hand ever lies on the " +
+  "work ahead of where the edge points. A piece being split is held by its block, fork or wedge, " +
+  "never by a hand where it splits open. The piece " +
   "being worked sits ON its surface or in its holder as a separate solid thing — never sunk " +
   "into, passing through or grown out of the table or bench.";
 
 /**
  * A tool in a picture is really WORKING on its material. Norbert's 3-min test (job 236, 2:19)
  * showed a drill whose bit never went into the wood; the still is the video's first frame, so it
- * starts right here. (Such shots are also kept as photos — `contactToolWork` in shotList.ts.)
+ * starts right here. (Such shots are also kept as photos — `contactToolWork` in shotList.ts.) A
+ * splitting tool's contact is its edge in the end grain (job 407 scenes 14 and 17, a froe blade on
+ * top of the wood and out in the air).
  */
 export const TOOL_CONTACT_CLAUSE =
   "Any tool in the shot is really working on its material: a drill bit or screw sunk into the " +
   "wood, a saw blade down in its cut, a chisel edge in the wood, scissor or cutter blades closing " +
-  "on the cloth, a needle through the fabric — never held in the air beside the work. " +
+  "on the cloth, a needle through the fabric, a splitting tool (a froe, wedge, maul or axe) driven " +
+  "edge-down into the end grain along the split it opens — never held in the air beside the work. " +
   TOOL_POSITION_CLAUSE;
 
 /**
