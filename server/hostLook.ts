@@ -552,6 +552,36 @@ export function showsPerson(text: string | undefined): boolean {
   return !!namedPeople(t) || SHOWS_PERSON.test(withoutAnimalPronouns(t));
 }
 
+/** Things named for the hand: "a hand plane", "hand cream" — no hand is in the picture. */
+const HAND_THINGS =
+  "tools?|planes?|saws?|drills?|towels?|cream|lotion|soap|mixers?|trucks?|carts?|rails?|pumps?|" +
+  "brakes?|cranks?|warmers?|sanitizers?|wash|puppets?|bells?|luggage|signals?";
+/** A pronoun or a part only a person brings into a frame (`namesSomeone`). */
+const PERSON_PART = new RegExp(
+  String.raw`\b(?:someone|somebody|a person|she|he)\b|` +
+    // a hand — never one in a compound ("hand-stitched", "second-hand"), a thing named for it, or a
+    // clock's ("its hands at three": a person's hands are his, her or their own)
+    String.raw`(?<![-\w])(?<!\b(?:clock(?:'s)?|its)\s+)hands?(?![-\w])(?!\s+(?:${HAND_THINGS})\b)(?!\s+of\s+(?:a|the)\s+clock\b)|` +
+    String.raw`\b(?:fingers?|fingertips?|thumbs?|wrists?|forearms?|knuckles?)\b`,
+  "i"
+);
+
+/**
+ * SOMEONE IN THE WORDS, NARROWLY — for a picture that must show nobody, where a false hit costs a
+ * good picture: the backdrop behind the big QR card (`qrBackdrop`, job 402 scene 33's "A flight
+ * attendant's hands holding a small packet … toward a seated passenger"). Someone a noun names
+ * (`namedPeople`: a passenger, a woman, the host), "someone", "she" or "he" (an animal's pronoun not
+ * counted), or a part only a person brings — a hand, fingers, a thumb, a wrist. `showsPerson` also
+ * counts what a person uses or wears and pronouns it cannot tell from an animal's — "a coffee can of
+ * nails", "a jar of skin cream", "a kettle in use", "a robin in her nest" — right for deciding who to
+ * draw, wrong for swapping a picture of nobody away. Pure.
+ */
+export function namesSomeone(text: string | undefined): boolean {
+  const t = text ?? "";
+  if (!t.trim()) return false;
+  return !!namedPeople(t) || PERSON_PART.test(withoutAnimalPronouns(t));
+}
+
 /** The host's sex as their own look gives it, or undefined when it does not say. */
 export function sexOfLook(look: string | undefined): "f" | "m" | undefined {
   if (!look) return undefined;

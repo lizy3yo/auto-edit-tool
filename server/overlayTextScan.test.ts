@@ -529,3 +529,61 @@ describe("a picture drawn from outside on purpose is not missing its inside (job
     expect(STILL_DEFECT_SYSTEM).toContain(CUT_OPEN_BROKEN);
   });
 });
+
+describe("nobody behind the big QR card — the person verdict (job 402 scene 33)", () => {
+  // The scan window's backdrop: a passenger's hand holding a cookie packet where the card sits, the
+  // fingers round the card's lower-left edge, so for 19.6 s a hand held the QR code. The check ran as
+  // "named kind" and passed: nothing asked whether the frame showed anyone.
+  const SHIPPED =
+    "A flight attendant's hands holding a small packet of crackers or cookies, offering it downward toward a seated passenger in the cabin row";
+  // expect, line, allowedText, exactLook, required, softPrint, requiredLook, forbids, fromOutside
+  const args = [undefined, undefined, undefined, undefined, undefined, false, undefined, undefined, undefined] as const;
+
+  it("asks it only of a QR backdrop, after the cached rulebook, and reads it back", async () => {
+    const { QR_BACKDROP_PERSON_QUESTION, verdictShape } = await import("./overlayTextScan");
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue({
+      text: '{"overlay":false,"broken":false,"writing":false,"person":true,"what":"a hand holding a packet, lower left"}',
+    } as any);
+    const v = await scanStillDefects(await imageOf(1280, 720), ...args, true);
+    expect(v.person).toBe(true);
+    expect(v.what).toBe("a hand holding a packet, lower left");
+    const call = mockInvoke.mock.calls[0][0];
+    expect(call.systemSuffix).toContain(QR_BACKDROP_PERSON_QUESTION);
+    expect(call.systemSuffix).toContain('"person":true|false');
+    expect(call.systemPrompt).not.toContain("QUESTION 9");
+    expect(call.userMessage).toMatch(/any part of one/);
+    expect(verdictShape(undefined, undefined, false, false, true)).toContain('"person"');
+    expect(verdictShape()).not.toContain("person");
+  });
+
+  it("is never asked of any other picture, and a stray answer is dropped (a cutaway may show hands at work)", async () => {
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue({ text: '{"overlay":false,"broken":false,"writing":false,"person":true}' } as any);
+    const v = await scanStillDefects(await imageOf(1280, 720), "bare hands passing a packet of cookies");
+    expect("person" in v).toBe(false);
+    expect(mockInvoke.mock.calls[0][0].systemSuffix).not.toContain("QUESTION 9");
+    mockInvoke.mockClear();
+    await scanStillDefects(await imageOf(1280, 720), ...args, false);
+    expect(mockInvoke.mock.calls[0][0].systemSuffix).not.toContain("QUESTION 9");
+  });
+
+  it("counts any part of a person, at an edge too — never an empty glove or a picture of one", async () => {
+    const { QR_BACKDROP_PERSON_QUESTION } = await import("./overlayTextScan");
+    expect(QR_BACKDROP_PERSON_QUESTION).toMatch(/hand, finger\s+or thumb/);
+    expect(QR_BACKDROP_PERSON_QUESTION).toMatch(/even small, partly, or at an edge/);
+    expect(QR_BACKDROP_PERSON_QUESTION).toMatch(/glove, sleeve, coat or shoe with nobody in it is not a person/);
+    // General: the wording names no channel's things.
+    expect(QR_BACKDROP_PERSON_QUESTION).not.toMatch(/cookie|packet|passenger|attendant|cabin/i);
+    expect(SHIPPED).toMatch(/hands/);
+  });
+
+  it("parses person only when it is true", () => {
+    expect(parseStillDefectVerdict('{"person":true,"what":"fingers at the left edge"}')).toMatchObject({
+      person: true,
+      what: "fingers at the left edge",
+    });
+    expect("person" in parseStillDefectVerdict('{"person":false}')).toBe(false);
+    expect(parseStillDefectVerdict('{"person":"yes"}').person).toBeUndefined();
+  });
+});

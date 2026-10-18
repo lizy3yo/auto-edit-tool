@@ -25,6 +25,7 @@ import {
   showsScreen,
   viewIndexOf,
 } from "./shotList";
+import { namesSomeone } from "./hostLook";
 
 /** The longest a picture waits for its memory before it is drawn from words alone. */
 export const MEMORY_WAIT_MS = 8 * 60_000;
@@ -90,6 +91,10 @@ export function memorySourcesFor(
   // porcelain S-shaped trapway channel", came back a fixture sawn in half, and every later picture of
   // it was drawn from that cut — the host lifting a sliced toilet off its flange (scene 23), an auger
   // pushed through the cut wall (scene 22). A cutaway is never what a real-world shot copies.
+  // …nor, for the picture behind the big QR card, a picture with someone in it (`withSomeone`): job
+  // 402 scene 33 drew its cookie packet from scene 29's, a hand passing the packet to a passenger, and
+  // the hand came along under the card — for 19.6 s a hand held the QR code.
+  const backdrop = !!s.qrHero && !s.coverHero && !s.assetImageUrl && !s.hostPresent;
   const before = scenes
     .slice(0, i)
     .filter(
@@ -100,7 +105,8 @@ export function memorySourcesFor(
         !laterStage(x, s) &&
         !x.memoryUnfit &&
         !insideView(x.showSubject) &&
-        !insideView(x.visualPrompt)
+        !insideView(x.visualPrompt) &&
+        !(backdrop && withSomeone(x))
     );
   const out: StoryboardScene[] = [];
   const add = (x: StoryboardScene | undefined) => {
@@ -118,6 +124,18 @@ export function memorySourcesFor(
 /** The words a picture is drawn by: a split's panel description, else its own. */
 const pictureWords = (s: StoryboardScene) =>
   s.hostPresent ? s.splitVisual ?? "" : s.showSubject ?? s.visualPrompt ?? "";
+
+/**
+ * A picture with someone in it: marked so (the host at work, someone else, any person) or naming
+ * someone or a hand in what it was drawn by (`namesSomeone`). A reference picture of a thing in
+ * someone's hands brings the hands.
+ */
+const withSomeone = (x: StoryboardScene) =>
+  !!x.humanPresent ||
+  !!x.brollHostLook ||
+  !!x.otherPerson ||
+  namesSomeone(x.showSubject) ||
+  namesSomeone(x.visualPrompt);
 
 /**
  * THE PICTURE RIGHT BEFORE IS A MEMORY, NEVER A TEMPLATE (2026-10-18, job 399 scenes 16-17): "hands

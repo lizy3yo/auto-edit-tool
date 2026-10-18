@@ -37,6 +37,8 @@ describe("what kind of picture was checked", () => {
     expect(checkFlags({ detail: true })).toEqual(["detail"]);
     // What the line rules out, shown anyway, is counted on its own (R5).
     expect(checkFlags({ missing: true, forbidden: true, staged: true })).toEqual(["missing", "ruled out", "staged"]);
+    // A person behind the big QR card (job 402 scene 33), in the order the loop acts on it.
+    expect(checkFlags({ writing: true, person: true })).toEqual(["person", "writing"]);
   });
 });
 

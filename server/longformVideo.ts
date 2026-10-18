@@ -442,6 +442,7 @@ import {
   markHostBroll,
   REAL_HOLDER,
   onTheBody,
+  namesSomeone,
   showsSomeoneElse,
 } from "./hostLook";
 import {
@@ -5789,7 +5790,9 @@ const CTA_BROLL_ENHANCER_SYSTEM =
   "- A single concrete composed subject as a frame (the clip barely moves; any motion is " +
   "added in code).\n" +
   "- NO people: no face, head, body, or figure of any kind. Bare hands at the task are the " +
-  "only human parts allowed, and only when the shot needs them.\n" +
+  "only human parts allowed, and only when the shot needs them — NEVER in a picture that sits " +
+  "behind the big scan card (the message says when): that one shows no person, hand or body part " +
+  "at all, and nothing held or offered.\n" +
   "- Soft, neutral, muted natural light — never vivid or saturated. No AI-image clichés.\n" +
   "- PHYSICS & REALISM: a real, physically-plausible, accurate everyday " +
   "moment with correct anatomy and natural materials — not a CGI render.\n\n" +
@@ -5840,6 +5843,48 @@ export const CTA_SPLIT_PANEL_DIRECTIVE =
   "hands beside her reads off). If the subject you would otherwise describe involves a person " +
   "or their hands, show the physical thing the action happens to or leaves behind instead, " +
   "unattended and at rest.";
+
+/**
+ * THE PICTURE BEHIND THE BIG QR CARD SHOWS NOBODY (2026-10-18, the review of jobs 401-407). The scan
+ * window was person-free only by its flags (`toQrCard` clears `humanPresent`), never by its words,
+ * and this lane lets bare hands in: job 402 scene 33 came back "A flight attendant's hands holding a
+ * small packet of crackers or cookies, offering it downward toward a seated passenger" — the topic
+ * context it read held a hands-passing-a-packet picture — and the card sat over the packet, so for
+ * 19.6 s a hand held the QR code. Prepended to the CTA enhancer's message on a scan-window beat
+ * (`qrBackdrop`); `guardPitchVisuals` swaps any answer that still names someone.
+ */
+export const QR_BACKDROP_DIRECTIVE =
+  "IMPORTANT: this picture is the BACKDROP behind a large scan card laid over its middle — it must " +
+  "be OBJECT / SETTING ONLY, with NO people, NO hands, NO fingers, arms or body parts of any kind, " +
+  "even when the topic context's pictures show someone at work. Nothing is held, offered or reached " +
+  "for: the thing rests on its own, unattended, in its place.";
+
+/**
+ * The same rule in the scan-window picture's own image prompt (`buildStillPrompt`), with
+ * `NO_PEOPLE_SUFFIX` in place of `NO_FIGURES_SUFFIX` — the cutaway guard lets bare hands in, and on
+ * this picture a hand left at the card's edge reads as holding the code (job 402 scene 33).
+ */
+export const QR_BACKDROP_CLAUSE =
+  "This picture is the backdrop behind a large card set over its middle: nobody is in it — no " +
+  "person, no hand, finger or arm anywhere, not even at an edge — and nothing is held, offered or " +
+  "reached for; whatever it shows rests on its own.";
+/** With `QR_BACKDROP_CLAUSE` when the picture is drawn from earlier pictures of its thing. */
+export const QR_BACKDROP_REFERENCE_NOTE =
+  "Take only the thing from the reference images, never a person or a hand holding it.";
+/** The redraw of a scan-window picture the check found a person or a hand in (`person`). */
+export const QR_BACKDROP_REDRAW =
+  "The last try showed a person or a hand: this time nobody is in the frame at all, not even a " +
+  "hand at an edge — only the thing itself, resting on its own.";
+
+/**
+ * The picture behind the big centred QR card (`qrPlacementFor` "center") — the scan window's still,
+ * never a host take. Pure.
+ */
+export function qrBackdrop(
+  s: Pick<StoryboardScene, "qrHero" | "coverHero" | "assetImageUrl" | "hostPresent">
+): boolean {
+  return !s.hostPresent && qrPlacementFor(s) === "center";
+}
 
 /**
  * Cutaway sibling of `SPLIT_PANEL_PERSON_FREE_DIRECTIVE`, prepended to the b-roll enhancer's
@@ -6875,10 +6920,15 @@ export function buildStillPrompt(
     : scene.shotAngle && SHOT_ANGLE_SUFFIX[scene.shotAngle]
       ? `, ${SHOT_ANGLE_SUFFIX[scene.shotAngle]}`
       : "";
+  // The picture behind the big QR card shows nobody, on every rung (`QR_BACKDROP_CLAUSE`): a hand
+  // left in it reads as holding the code (job 402 scene 33).
+  const backdrop = qrBackdrop(scene);
   // The host at work (from behind) when the pipeline marked it, else anonymous hands.
-  const personSuffix = !aggressive ? personClauseFor(scene, scene.showSubject ?? scene.visualPrompt ?? "") : "";
-  const noFigures =
-    !aggressive && scene.humanPresent && scene.otherPerson
+  const personSuffix =
+    !aggressive && !backdrop ? personClauseFor(scene, scene.showSubject ?? scene.visualPrompt ?? "") : "";
+  const noFigures = backdrop
+    ? `${NO_PEOPLE_SUFFIX} ${QR_BACKDROP_CLAUSE}${scene.memoryRefUrls?.length ? ` ${QR_BACKDROP_REFERENCE_NOTE}` : ""}`
+    : !aggressive && scene.humanPresent && scene.otherPerson
       ? otherPeopleSuffix(peopleInShot(scene))
       : !aggressive && scene.humanPresent && scene.brollHostLook
         ? scene.hostFaceShown
@@ -8075,23 +8125,35 @@ const cleanPitchVisual = (text: string | undefined): text is string =>
   !!text?.trim() && !ctaVisualIsLiteral(text) && !brollDepictsBook(text);
 
 /**
+ * …and, behind the BIG card (`qrBackdrop`), no person either: words naming someone or a hand are
+ * drawn as written, whatever the flags say (job 402 scene 33, a hand "holding" the code for 19.6 s).
+ */
+const cleanBackdropVisual = (text: string | undefined): text is string =>
+  cleanPitchVisual(text) && !namesSomeone(text);
+
+/**
  * Deterministic, on-topic fallback for a CTA cutaway's visual, in order of how specific it is to
  * THIS video: the subject of the nearest non-CTA, non-host scene (a concrete shot the video
  * already shows); else the video's own subject line (`params.videoSubject` — "cedar bird feeder
  * build"), so even a film with no clean cutaway to borrow from stays on its topic; else the
- * generic pool, varied by index. Pure — unit-tested.
+ * generic pool, varied by index. `personFree` (the picture behind the big QR card) borrows only a
+ * picture of nobody — no person or hands in its words or its flags — and skips the pool's hands.
+ * Pure — unit-tested.
  */
 export function genericCtaBrollFor(
   scenes: StoryboardScene[],
   i: number,
-  videoSubject?: string
+  videoSubject?: string,
+  personFree = false
 ): string {
+  const clean = personFree ? cleanBackdropVisual : cleanPitchVisual;
   for (let d = 1; d < scenes.length; d++) {
     for (const j of [i - d, i + d]) {
       const s = scenes[j];
       if (!s || s.cta || s.hostPresent) continue;
+      if (personFree && (s.humanPresent || s.otherPerson || s.brollHostLook)) continue;
       const subject = s.visualPrompt ?? s.brollVisual;
-      if (cleanPitchVisual(subject)) return subject;
+      if (clean(subject)) return subject;
     }
   }
   const topic = videoSubject?.trim();
@@ -8099,13 +8161,15 @@ export function genericCtaBrollFor(
     ? `${topic} — the real-world subject of this video, shown as a calm, photoreal cutaway ` +
       `with no people in the frame`
     : undefined;
-  if (cleanPitchVisual(fromTopic)) return fromTopic;
-  return GENERIC_CTA_BROLL[i % GENERIC_CTA_BROLL.length];
+  if (clean(fromTopic)) return fromTopic;
+  const pool = personFree ? GENERIC_CTA_BROLL.filter(t => !namesSomeone(t)) : GENERIC_CTA_BROLL;
+  return pool[i % pool.length];
 }
 
 /**
  * Keyword guard for CTA cutaways: keep `candidate` if it is non-empty and not literal CTA
- * imagery, otherwise swap in an on-topic generic. Pure — unit-tested.
+ * imagery, otherwise swap in an on-topic generic. Pure — unit-tested. (Behind the big QR card,
+ * `guardPitchVisuals` also swaps words that name someone, as the enhancer's last step.)
  */
 export function sanitizeCtaCutaway(
   candidate: string | undefined,
@@ -8135,7 +8199,8 @@ export function sanitizeCtaCutaway(
  * Checks the full-frame prompt of a person-free beat and the split panel of a split beat. Leaves
  * cover reveals and operator assets alone (literal images, no prompt renders) and a full-frame
  * host (no b-roll prompt at all). A book in ANY split panel is swapped too — the long-standing
- * book guard this pass absorbed. Deterministic, idempotent, no LLM. Returns the indices it
+ * book guard this pass absorbed. Behind the big QR card it also takes every person and hand out of
+ * the words (`guardQrBackdrop`). Deterministic, idempotent, no LLM. Returns the indices it
  * changed. Mutates in place; pure otherwise — unit-tested.
  */
 export function guardPitchVisuals(
@@ -8180,9 +8245,113 @@ export function guardPitchVisuals(
       if (s.qrHero) s.humanPresent = undefined;
       touched = true;
     }
+    // An exact look written for the pitch itself is a second, made-up code drawn under the real one:
+    // job 402 scene 33's line names "the little black and white code", and the named-things step gave
+    // the scan window "QR code: a small square pattern of black and white…".
+    if (
+      pitch &&
+      !s.hostPresent &&
+      !s.coverHero &&
+      !s.assetImageUrl &&
+      s.namedLook?.trim() &&
+      ctaVisualIsLiteral(s.namedLook)
+    ) {
+      s.namedLook = undefined;
+      touched = true;
+    }
+    if (qrBackdrop(s) && guardQrBackdrop(scenes, i, videoSubject)) touched = true;
     if (touched) changed.push(s.index);
   });
   return changed;
+}
+
+/**
+ * The words with every clause that names someone taken out (`namesSomeone`), when the lead clause —
+ * what the picture is OF — names nobody: job 405 scene 33's scan window, "A small tabby cat standing
+ * on the bed at 3 a.m., one front paw extended mid-step across grey bedding, ears alert, the sleeping
+ * person's shoulder barely visible at frame edge, bedroom dark and still", keeps its cat and loses
+ * the shoulder. Undefined when the lead itself is someone or their hands (job 402 scene 33's "A
+ * flight attendant's hands holding a small packet …"): nothing of it is then a picture of nobody.
+ * Pure.
+ */
+export function withoutSomeone(text: string | undefined): string | undefined {
+  const t = (text ?? "").trim();
+  // Clauses and the separators between them, alternating: [clause, sep, clause, sep, clause…].
+  const parts = t.split(/(\s*[,;]\s+|\s+[—–]\s+|(?<=[.!?])\s+(?=[A-Z]))/);
+  if (!parts[0]?.trim() || namesSomeone(parts[0])) return undefined;
+  let out = parts[0];
+  // A dropped clause takes the separator after the clause before it along; the next kept one gets it.
+  let pending: string | undefined;
+  for (let k = 2; k < parts.length; k += 2) {
+    const sep = parts[k - 1];
+    if (namesSomeone(parts[k])) {
+      pending ??= sep;
+      continue;
+    }
+    const use = pending ?? sep;
+    pending = undefined;
+    const sentence = !/[,;—–]/.test(use);
+    out += use + (sentence ? parts[k].charAt(0).toUpperCase() + parts[k].slice(1) : parts[k]);
+  }
+  out = out.replace(/[,;\s]+$/, "");
+  return /[.!?]$/.test(t) && !/[.!?]$/.test(out) ? `${out}.` : out;
+}
+
+/**
+ * THE PICTURE BEHIND THE BIG QR CARD SHOWS NOBODY — in its WORDS, not only its flags (2026-10-18,
+ * the review of jobs 401-407). `toQrCard` clears `humanPresent`, but the words are drawn as written:
+ * job 402 scene 33 shipped "A flight attendant's hands holding a small packet of crackers or
+ * cookies, offering it downward toward a seated passenger", the card sat over the packet, and for
+ * 19.6 s a hand held the QR code. Words that name someone or a hand (`namesSomeone`) lose those
+ * clauses when the picture is of something else (`withoutSomeone`: job 405 scene 33's cat, with a
+ * sleeper's shoulder at the frame's edge); when the picture IS the person or the hands, the words are
+ * swapped for a picture of nobody (`genericCtaBrollFor`, `personFree`), and what was written for the
+ * old words — its key things, its exact look, what it must show, its print — goes with them: the key
+ * things are read again from the new words at render (`tagKeyThings`), so the check never holds the
+ * new picture to the old packet and no memory of the packet in someone's hands is attached. A "what
+ * it must show" that names someone loses that part too (it leads the prompt, `subjectLead`), and so
+ * does every person flag a later step could have set. Returns whether it changed anything. Mutates
+ * in place.
+ */
+function guardQrBackdrop(
+  scenes: StoryboardScene[],
+  i: number,
+  videoSubject: string | undefined
+): boolean {
+  const s = scenes[i];
+  let touched = false;
+  if (s.visualPrompt?.trim() && namesSomeone(s.visualPrompt)) {
+    const kept = withoutSomeone(s.visualPrompt);
+    if (kept) s.visualPrompt = kept;
+    else {
+      s.visualPrompt = genericCtaBrollFor(scenes, i, videoSubject, true);
+      s.keyThing = undefined;
+      s.otherKeyThings = undefined;
+      s.partOf = undefined;
+      s.namedLook = undefined;
+      s.showSubject = undefined;
+      s.pictureText = undefined;
+      s.blurPrint = undefined;
+    }
+    touched = true;
+  }
+  if (s.showSubject?.trim() && namesSomeone(s.showSubject)) {
+    s.showSubject = withoutSomeone(s.showSubject);
+    if (!s.showSubject) s.pictureText = undefined;
+    touched = true;
+  }
+  if (s.humanPresent || s.otherPerson || s.brollHostLook || s.brollHostRef || s.hostFaceShown) {
+    s.humanPresent = undefined;
+    s.otherPerson = undefined;
+    s.otherPeople = undefined;
+    s.otherPersonLooks = undefined;
+    s.hostAmongOthers = undefined;
+    s.brollHostLook = undefined;
+    s.brollHostRef = undefined;
+    s.hostFaceShown = undefined;
+    touched = true;
+  }
+  return touched;
 }
 
 /**
@@ -9922,6 +10091,10 @@ async function drawValidatedStill(
   let copyFallback: Drawn | undefined;
   // A check that could not run is never a pass: one more picture and check (`unchecked`).
   let uncheckedRerolls = 0;
+  // A person or a hand behind the big QR card (`person`): one redraw told to show nobody; the frame
+  // ships only when nothing better came (`personFallback`).
+  let personRedraws = 0;
+  let personFallback: Drawn | undefined;
   // THE HOST IS THE HOST: a picture of the host that shows someone else is drawn again
   // (`HOST_IDENTITY_REDRAWS`), then drawn with nobody in it — a stranger never ships.
   let hostMisses = 0;
@@ -10079,7 +10252,10 @@ async function drawValidatedStill(
         // What its sentence rules out, as the line check wrote it — asked only of those pictures.
         scene.forbids,
         // Drawn from outside on purpose: a whole fixture is not "missing" the channel inside it.
-        drawnFromOutside(scene)
+        drawnFromOutside(scene),
+        // The picture behind the big QR card must show nobody (job 402 scene 33: a hand at the
+        // card's edge "held" the code for 19.6 s, and the check never asked).
+        qrBackdrop(scene) && !square
       );
       if (defects.missing) missed.add(buffer);
       // A THING SEEN CUT OPEN (`cutOpenFault`) is drawn from outside from then on, every redraw built
@@ -10162,6 +10338,24 @@ async function drawValidatedStill(
         offSubjectFallback ??= drawn;
         console.warn(
           `[Longform] scene ${scene.index} still could not be checked (attempt ${attempt}/${attempts}) → drawing again`
+        );
+        continue;
+      }
+      // NOBODY BEHIND THE BIG QR CARD (`qrBackdrop`, 2026-10-18, the review of jobs 401-407): job 402
+      // scene 33 put a passenger's hand holding a packet where the card sits, so for 19.6 s a hand
+      // held the QR code, and no check asked. One redraw told so (`QR_BACKDROP_REDRAW`) — that
+      // fault's last chance, so it never loses its turn to the attempt budget; the frame ships only
+      // behind every frame with nobody in it.
+      if (defects.person && personRedraws < 1) {
+        personRedraws++;
+        personFallback ??= drawn;
+        personFree = true;
+        if (!prompt.includes(QR_BACKDROP_REDRAW)) prompt = `${prompt} ${QR_BACKDROP_REDRAW}`;
+        lastError = `Still image shows a person behind the QR card (${defects.what})`;
+        if (attempt === attempts) attempts++;
+        console.warn(
+          `[Longform] scene ${scene.index} still shows a person behind the QR card (${defects.what}) → ` +
+            "drawing it again with nobody in it"
         );
         continue;
       }
@@ -10474,6 +10668,14 @@ async function drawValidatedStill(
         `attempts → shipping it: ${scene.visualPrompt.slice(0, 80)}`
     );
     return shipped(textyFallback);
+  }
+  // A person behind the big QR card reads as someone holding the code — kept only over broken geometry.
+  if (personFallback) {
+    console.warn(
+      `[Longform] scene ${scene.index} still showed a person behind the QR card after ${attempts} ` +
+        `attempts → shipping it: ${scene.visualPrompt.slice(0, 80)}`
+    );
+    return shipped(personFallback);
   }
   if (brokenFallback) {
     console.warn(
@@ -15681,11 +15883,14 @@ export async function enhanceBrollPrompts(
     i: number;
   }): Promise<unknown> => {
     const isCta = scene.cta === true;
+    // The scan window's picture sits behind the big card: nobody in it (`QR_BACKDROP_DIRECTIVE`).
+    const backdrop = isCta && qrBackdrop(scene);
     const systemPrompt = isCta
       ? CTA_BROLL_ENHANCER_SYSTEM
       : STILL_BROLL_ENHANCER_SYSTEM;
     const userMessage = isCta
-      ? channelLine +
+      ? (backdrop ? `${QR_BACKDROP_DIRECTIVE}\n` : "") +
+        channelLine +
         subjectLine +
         directionLine +
         `Type: ${scene.stillImage ? "still" : "motion"}\n` +
@@ -17100,8 +17305,8 @@ async function runUnifiedPipeline(
   const guarded = guardPitchVisuals(scenes, params.videoSubject);
   if (guarded.length > 0) {
     console.log(
-      `[Longform ${jobId}] pitch guard: swapped a literal phone/screen/QR/link/book prompt ` +
-        `for on-topic b-roll on scene(s) ${guarded.join(", ")}`
+      `[Longform ${jobId}] pitch guard: swapped a literal phone/screen/QR/link/book prompt, or a ` +
+        `person behind the big QR card, for on-topic b-roll on scene(s) ${guarded.join(", ")}`
     );
   }
   // One continuous take where host beats now sit back to back (the CTA pitch after the book):

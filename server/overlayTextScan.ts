@@ -162,6 +162,12 @@ export interface StillDefectVerdict {
   /** What the description asks for that the frame shows otherwise, in the check's words (`detail`). */
   detailWhat?: string;
   /**
+   * A person or any part of one — a hand at an edge included — in a picture that must show nobody:
+   * the backdrop behind the big QR card (`QR_BACKDROP_PERSON_QUESTION`). Set only when true, and
+   * only asked when the caller says the picture is one.
+   */
+  person?: boolean;
+  /**
    * The frame shows what its line RULES OUT (`scene.forbids`, from the line check) — the act the
    * line says not to do, the thing it says is not meant, the place it says to keep something away
    * from (`forbiddenQuestion`). Set only when true, and only asked when the caller passes it.
@@ -219,6 +225,7 @@ export function parseStillDefectVerdict(
   const detail = parsed.data?.detail === true;
   const detailWhat = parsed.data?.detail_what;
   const forbidden = parsed.data?.forbidden === true;
+  const person = parsed.data?.person === true;
   const what = parsed.data?.what;
   return {
     overlay,
@@ -230,11 +237,12 @@ export function parseStillDefectVerdict(
       ? { detailWhat: detailWhat.trim().slice(0, 80) }
       : {}),
     ...(forbidden ? { forbidden } : {}),
+    ...(person ? { person } : {}),
     messy,
     wrongPlace,
     staged,
     what:
-      (overlay || broken || writing || missing || detail || forbidden || messy || wrongPlace || staged) &&
+      (overlay || broken || writing || missing || detail || forbidden || person || messy || wrongPlace || staged) &&
       typeof what === "string"
         ? what.slice(0, 80)
         : "",
@@ -454,14 +462,35 @@ export function forbiddenQuestion(forbids: string): string {
   );
 }
 
+/**
+ * QUESTION 9, asked only of the picture behind the big QR card (2026-10-18, the review of jobs
+ * 401-407): job 402 scene 33's backdrop had a passenger's hand holding a packet where the card sits,
+ * the fingers round the card's edge, so for 19.6 s a hand held the QR code — and the check, asked
+ * only about the packet's exact look, passed it. Nothing else asks whether a picture is person-free:
+ * the cutaway rule lets bare hands in, so this question is for this picture alone.
+ */
+export const QR_BACKDROP_PERSON_QUESTION =
+  "\n\nQUESTION 9 — person: this picture is the backdrop behind a large card laid over its middle, " +
+  "and it must show NOBODY. Is a person or any part of one — a face, head, body, arm, hand, finger " +
+  "or thumb, a leg or a foot — visible anywhere in the frame, even small, partly, or at an edge? A " +
+  "glove, sleeve, coat or shoe with nobody in it is not a person, and neither is a picture or " +
+  "statue of one. Answer false when no part of a person is there.";
+
 /** The JSON shape, listing every question asked (`detail` only beside `missing`). */
-export function verdictShape(expect?: string, line?: string, detail?: boolean, forbids?: boolean): string {
+export function verdictShape(
+  expect?: string,
+  line?: string,
+  detail?: boolean,
+  forbids?: boolean,
+  noPerson?: boolean
+): string {
   return (
     '\n\nReturn ONLY this JSON, no prose: {"overlay":true|false,"broken":true|false,' +
     '"writing":true|false' +
     (expect ? ',"missing":true|false' : "") +
     (expect && detail ? ',"detail":true|false,"detail_what":"..."' : "") +
     (forbids ? ',"forbidden":true|false' : "") +
+    (noPerson ? ',"person":true|false' : "") +
     ',"messy":true|false' +
     (line ? ',"wrong_place":true|false' : "") +
     ',"staged":true|false' +
@@ -517,7 +546,12 @@ export async function scanStillDefects(
    * The picture is drawn from the OUTSIDE on purpose (`drawnFromOutside`, job 403) — adds
    * `INSIDE_PART_NOTE`, so a whole fixture is not called missing for not showing the channel in it.
    */
-  fromOutside?: boolean
+  fromOutside?: boolean,
+  /**
+   * The picture must show nobody — the backdrop behind the big QR card (`qrBackdrop`) — adds the
+   * `person` question (`QR_BACKDROP_PERSON_QUESTION`).
+   */
+  noPerson?: boolean
 ): Promise<StillDefectVerdict> {
   try {
     const mustShow = expect && required?.length ? required : undefined;
@@ -554,7 +588,8 @@ export async function scanStillDefects(
         (line ? placeQuestion(line, !!ruledOut) : "") +
         (allowedText ? allowedTextQuestion(allowedText) : "") +
         (ruledOut ? forbiddenQuestion(ruledOut) : "") +
-        verdictShape(expect, line, askDetail, !!ruledOut),
+        (noPerson ? QR_BACKDROP_PERSON_QUESTION : "") +
+        verdictShape(expect, line, askDetail, !!ruledOut, noPerson),
       userMessage:
         "Is any text stamped over this frame, does it contain obviously impossible structure, " +
         "is there readable writing in the scene, and is it messy or branded?" +
@@ -562,6 +597,7 @@ export async function scanStillDefects(
         (askDetail ? " Is it the way it is described?" : "") +
         (line ? " Is it set where the line says?" : "") +
         (ruledOut ? " Does it show what the line rules out?" : "") +
+        (noPerson ? " Is any person, or any part of one, in it?" : "") +
         " Does it look like an ordinary phone photo?",
       imageInput: image,
       // The verdict is ~40 tokens. The careful model THINKS unless told not to, and thinking
@@ -593,6 +629,8 @@ export async function scanStillDefects(
     if (!line) verdict.wrongPlace = false;
     // A stray "forbidden" on a picture nothing was ruled out for is not an answer to anything.
     if (!ruledOut) delete verdict.forbidden;
+    // …nor a "person" on a picture allowed one (a cutaway may show hands at work).
+    if (!noPerson) delete verdict.person;
     if (
       verdict.overlay ||
       verdict.broken ||
@@ -600,12 +638,13 @@ export async function scanStillDefects(
       verdict.missing ||
       verdict.detail ||
       verdict.forbidden ||
+      verdict.person ||
       verdict.messy ||
       verdict.wrongPlace ||
       verdict.staged
     )
       console.log(
-        `[StillDefects] ${verdict.overlay ? "stamped text" : verdict.broken ? "broken geometry" : verdict.writing ? "readable writing" : verdict.missing ? "named thing missing" : verdict.detail ? `detail not as described (${verdict.detailWhat ?? ""})` : verdict.forbidden ? `shows what the line rules out (${ruledOut})` : verdict.messy ? "brand or clutter" : verdict.wrongPlace ? "wrong place" : "staged look"} detected: ${verdict.what}`
+        `[StillDefects] ${verdict.overlay ? "stamped text" : verdict.broken ? "broken geometry" : verdict.writing ? "readable writing" : verdict.missing ? "named thing missing" : verdict.detail ? `detail not as described (${verdict.detailWhat ?? ""})` : verdict.forbidden ? `shows what the line rules out (${ruledOut})` : verdict.person ? "a person behind the QR card" : verdict.messy ? "brand or clutter" : verdict.wrongPlace ? "wrong place" : "staged look"} detected: ${verdict.what}`
       );
     return verdict;
   } catch (err: any) {

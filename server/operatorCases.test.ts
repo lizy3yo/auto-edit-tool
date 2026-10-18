@@ -3882,3 +3882,101 @@ describe("a picture never cuts a solid thing open (job 403, the review of 2026-1
     expect(buildStillPrompt(cutting)).not.toContain(SEEN_FROM_OUTSIDE_CLAUSE);
   });
 });
+
+describe("job 402 scene 33: nobody behind the big QR card", () => {
+  // Helena Hart's flight-attendant film (183.56-203.15): the scan window's picture was "A flight
+  // attendant's hands holding a small packet of crackers or cookies, offering it downward toward a
+  // seated passenger in the cabin row", drawn from scene 29's packet passed hand to hand. The card
+  // covered the packet, the fingers wrapped its lower-left edge, and for 19.6 s a hand held the QR code.
+  const SHIPPED =
+    "A flight attendant's hands holding a small packet of crackers or cookies, offering it downward toward a seated passenger in the cabin row, soft cabin light on the materials, the seat back and armrest visible at the edges.";
+  const film = (): StoryboardScene[] => [
+    pic(26, "Ask while the cart is still working its way back,", "a fully stocked beverage cart in the galley", {
+      visualPrompt: "Overhead view of a fully stocked beverage cart parked in the galley, rows of cans and a snack basket",
+    }),
+    pic(29, "and phrase it as an offer.", "a flight attendant smiling as she hands a cookie packet to an older passenger, seen from the side", {
+      visualPrompt:
+        "Bare hands holding a small foil-lined paper packet of cookies sealed, one hand extending it toward another hand reaching to receive it at a stainless steel galley counter, aircraft interior blurred behind.",
+      keyThing: "cookie packet",
+      humanPresent: true,
+      otherPerson: "a flight attendant and an older passenger",
+    }),
+    host(32, "Chapter four covers in-flight requests, so when the right sentence won't come to you at the galley, it's already in your pocket.", { cta: true }),
+    {
+      index: 33,
+      scriptText:
+        "Hold your phone up to the screen with its camera on, and aim it at the little black and white code. A link appears, and you tap it.",
+      cta: true,
+      qrHero: true,
+      qrTail: true,
+      stillImage: true,
+      keyThing: "cookie packet",
+      namedLook: "QR code: A small square pattern of black and white made of many tiny square dots.",
+      visualPrompt: SHIPPED,
+    } as StoryboardScene,
+  ];
+
+  it("its words name nobody: the hands prompt is swapped for a picture of nobody, its key thing and QR look go", () => {
+    const scenes = film();
+    expect(guardPitchVisuals(scenes)).toEqual([33]);
+    expect(scenes[3].visualPrompt).toBe(scenes[0].visualPrompt);
+    expect(SHOWS_PERSON.test(scenes[3].visualPrompt)).toBe(false);
+    expect(scenes[3].keyThing).toBeUndefined();
+    expect(scenes[3].namedLook).toBeUndefined();
+  });
+
+  it("its prompt says nobody is in it, not even a hand, and it is never drawn from the hands picture", async () => {
+    const { NO_PEOPLE_SUFFIX, QR_BACKDROP_CLAUSE } = await import("./longformVideo");
+    const scenes = film();
+    // Before the guard, with the packet still its key thing: the hands picture is no memory for it.
+    expect(memorySourcesFor(scenes, scenes[3])).toEqual([]);
+    guardPitchVisuals(scenes);
+    const p = buildStillPrompt(scenes[3]);
+    expect(p).toContain(QR_BACKDROP_CLAUSE);
+    expect(p).toContain(NO_PEOPLE_SUFFIX);
+    expect(p).not.toContain(NO_FIGURES_SUFFIX);
+    expect(p).not.toMatch(/hands holding|passenger/);
+  });
+
+  it("the picture check asks it — and only it — whether anyone is in the frame", async () => {
+    const { QR_BACKDROP_PERSON_QUESTION } = await import("./overlayTextScan");
+    expect(QR_BACKDROP_PERSON_QUESTION).toMatch(/must show NOBODY/);
+    expect(QR_BACKDROP_PERSON_QUESTION).toMatch(/even small, partly, or at an edge/);
+    // The rulebook every picture is asked never bans hands: a cutaway's hands at work are fine.
+    expect(STILL_DEFECT_SYSTEM).not.toContain(QR_BACKDROP_PERSON_QUESTION);
+  });
+
+  it("jobs 401 and 404: a backdrop of nobody keeps its picture", () => {
+    const card = film();
+    card[3] = { ...card[3], keyThing: "sympathy card", namedLook: undefined, visualPrompt: "Plain cream sympathy card with simple embossed border resting on a wooden desk in a quiet study, late-spring light from a nearby window." };
+    expect(guardPitchVisuals(card)).toEqual([]);
+    expect(card[3].keyThing).toBe("sympathy card");
+    const robin = film();
+    robin[3] = { ...robin[3], keyThing: "robin", namedLook: undefined, visualPrompt: "A robin perched on frost-covered grass in a suburban winter yard at dawn, with bare shrubs and the fence line softly visible behind, early morning light gentle and pale." };
+    expect(guardPitchVisuals(robin)).toEqual([]);
+    expect(robin[3].visualPrompt).toMatch(/^A robin perched/);
+  });
+});
+
+describe("job 405 scene 33: a sleeper's shoulder asked for behind the big QR card", () => {
+  // Luca Marino's cat film: the scan window's words put "the sleeping person's shoulder barely
+  // visible at frame edge" beside the cat. The cat stays; only the person leaves the words.
+  it("keeps the cat and takes the shoulder out", async () => {
+    const { withoutSomeone } = await import("./longformVideo");
+    const qr = {
+      index: 33,
+      cta: true,
+      qrHero: true,
+      stillImage: true,
+      keyThing: "tabby cat",
+      visualPrompt:
+        "A small tabby cat standing on the bed at 3 a.m., one front paw extended mid-step across grey bedding, ears alert, the sleeping person's shoulder barely visible at frame edge, bedroom dark and still.",
+    } as StoryboardScene;
+    expect(guardPitchVisuals([qr])).toEqual([33]);
+    expect(qr.visualPrompt).toBe(
+      "A small tabby cat standing on the bed at 3 a.m., one front paw extended mid-step across grey bedding, ears alert, bedroom dark and still."
+    );
+    expect(qr.keyThing).toBe("tabby cat");
+    expect(withoutSomeone(qr.visualPrompt)).toBe(qr.visualPrompt);
+  });
+});

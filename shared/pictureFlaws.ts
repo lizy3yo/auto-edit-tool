@@ -32,6 +32,7 @@ const WORDS: Record<string, string> = {
   missing: "its subject missing",
   detail: "its subject not as described",
   "ruled out": "something its line rules out",
+  person: "a person or a hand behind the QR card",
   "brand or clutter": "a brand or clutter",
   "wrong place": "the wrong place for its line",
   staged: "a staged look",

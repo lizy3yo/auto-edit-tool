@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { StoryboardScene } from "@shared/types";
-import { cleanHostLook, markHostBroll } from "./hostLook";
+import { cleanHostLook, markHostBroll, namesSomeone, showsPerson } from "./hostLook";
 import { buildStillPrompt, hostBrollClause, NO_FIGURES_SUFFIX, NO_OTHER_FIGURES_SUFFIX } from "./longformVideo";
 
 const pic = (index: number, showSubject: string, extra: Partial<StoryboardScene> = {}) =>
@@ -345,5 +345,37 @@ describe("a strand is part of a person only when it is hair (round 9's review, 2
     markHostBroll([pearls, hair], look, "https://x/host.jpg");
     expect(pearls.brollHostLook).toBeUndefined();
     expect(hair.brollHostLook).toBe(look.hostLook);
+  });
+});
+
+describe("someone in the words, narrowly — the picture behind the big QR card (job 402 scene 33)", () => {
+  it("finds the person and the hand the scan window was drawn with", () => {
+    expect(
+      namesSomeone(
+        "A flight attendant's hands holding a small packet of crackers or cookies, offering it downward toward a seated passenger in the cabin row"
+      )
+    ).toBe(true);
+    expect(namesSomeone("one hand extending it toward another hand reaching to receive it")).toBe(true);
+    expect(namesSomeone("fingers wrapped round a foil packet")).toBe(true);
+    expect(namesSomeone("a woman pouring tea")).toBe(true);
+    expect(namesSomeone("someone's coffee left on the tray")).toBe(true);
+  });
+
+  it("never swaps away a picture of nobody that only names what a person uses or wears", () => {
+    for (const words of [
+      "a coffee can full of nails on the workbench",
+      "a jar of skin cream on a vanity",
+      "a kettle in use on the stove",
+      "a robin in her nest",
+      "a hand plane resting on the bench",
+      "a hand-stitched quilt over a chair",
+      "an old clock, its hands at three",
+      "an empty passenger seat with its tray table down",
+      "Plain cream sympathy card with simple embossed border resting on a wooden desk in a quiet study",
+      "the hen as she scratches at the feed",
+    ])
+      expect(namesSomeone(words)).toBe(false);
+    // The wider test every other step uses still counts the first four (who to draw is its job).
+    expect(showsPerson("a coffee can full of nails on the workbench")).toBe(true);
   });
 });

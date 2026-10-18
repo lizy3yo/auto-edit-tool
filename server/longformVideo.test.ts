@@ -176,6 +176,12 @@ import {
   blurUnsaidPrint,
   BLURRED_PRINT_CLAUSE,
   buildSplitRightScene,
+  qrBackdrop,
+  QR_BACKDROP_CLAUSE,
+  QR_BACKDROP_DIRECTIVE,
+  QR_BACKDROP_REDRAW,
+  QR_BACKDROP_REFERENCE_NOTE,
+  withoutSomeone,
 } from "./longformVideo";
 import { ENV } from "./_core/env";
 import { getBookNameTokens } from "./ctaDetector";
@@ -2609,6 +2615,148 @@ describe("CTA split panel (splitVisual on a pitch beat)", () => {
     } as any);
     await enhanceBrollPrompts(scenes, baseParams);
     expect(brollDepictsBook(scenes[0].splitVisual!)).toBe(false);
+  });
+});
+
+// THE PICTURE BEHIND THE BIG QR CARD SHOWS NOBODY — in its words, not only its flags (job 402 scene
+// 33): the CTA lane allows bare hands, the topic context held a hands-passing-a-packet picture, and
+// "A flight attendant's hands holding a small packet …" put a hand under the card for 19.6 s, as if
+// holding the QR code.
+describe("the picture behind the big QR card shows nobody (job 402 scene 33)", () => {
+  const SHIPPED =
+    "A flight attendant's hands holding a small packet of crackers or cookies, offering it downward toward a seated passenger in the cabin row, soft cabin light on the materials, the seat back and armrest visible at the edges.";
+  const CART =
+    "Overhead view of a fully stocked beverage cart parked in the galley, rows of cans and a snack basket";
+  const HANDS =
+    "Bare hands holding a small foil-lined paper packet of cookies sealed, one hand extending it toward another hand reaching to receive it at a stainless steel galley counter, aircraft interior blurred behind.";
+  const film = (qr: Partial<StoryboardScene> = {}): StoryboardScene[] => [
+    { index: 26, narration: "n", stillImage: true, visualPrompt: CART },
+    {
+      index: 29,
+      narration: "n",
+      stillImage: true,
+      humanPresent: true,
+      otherPerson: "a flight attendant and an older passenger",
+      keyThing: "cookie packet",
+      visualPrompt: HANDS,
+    },
+    { index: 32, narration: "n", hostPresent: true, cta: true, visualPrompt: "the host talking" },
+    {
+      index: 33,
+      narration: "Hold your phone up to the screen with",
+      scriptText:
+        "Hold your phone up to the screen with its camera on, and aim it at the little black and white code.",
+      cta: true,
+      qrHero: true,
+      qrTail: true,
+      stillImage: true,
+      keyThing: "cookie packet",
+      namedLook: "QR code: A small square pattern of black and white made of many tiny square dots.",
+      visualPrompt: SHIPPED,
+      ...qr,
+    },
+  ];
+
+  afterEach(() => mockInvoke.mockReset());
+
+  it("swaps words naming someone for a picture of nobody, and drops what was written for them", () => {
+    const scenes = film();
+    // The old fallback would have borrowed the hands picture right beside it.
+    expect(genericCtaBrollFor(scenes, 3)).toBe(HANDS);
+    expect(guardPitchVisuals(scenes, "flight attendant secrets")).toEqual([33]);
+    expect(scenes[3].visualPrompt).toBe(CART);
+    expect(scenes[3].keyThing).toBeUndefined();
+    expect(scenes[3].namedLook).toBeUndefined(); // the made-up second QR code under the real one
+    expect(scenes[1].visualPrompt).toBe(HANDS); // a cutaway may show hands at work
+    expect(guardPitchVisuals(scenes, "flight attendant secrets")).toEqual([]); // idempotent
+  });
+
+  it("leaves a backdrop of nobody alone, and every other pitch beat's hands (jobs 401, 404)", () => {
+    const sympathyCard =
+      "Plain cream sympathy card with simple embossed border resting on a wooden desk in a quiet study, late-spring light from a nearby window.";
+    const robin =
+      "A robin perched on frost-covered grass in a suburban winter yard at dawn, with bare shrubs and the fence line softly visible behind, early morning light gentle and pale.";
+    for (const words of [sympathyCard, robin]) {
+      const scenes = film({ visualPrompt: words, namedLook: undefined, keyThing: undefined });
+      expect(guardPitchVisuals(scenes)).toEqual([]);
+      expect(scenes[3].visualPrompt).toBe(words);
+    }
+    // A pitch cutaway with the small corner card is a full frame of its own: hands at work stay.
+    const corner = film({ qrHero: undefined, qrCorner: true, namedLook: undefined, visualPrompt: HANDS });
+    expect(guardPitchVisuals(corner)).toEqual([]);
+    expect(corner[3].visualPrompt).toBe(HANDS);
+  });
+
+  it("keeps a picture of something else and takes only the person out of its words (job 405 scene 33)", () => {
+    // The cat film's scan window asked for a sleeper's shoulder at the frame's edge beside the cat.
+    const CAT =
+      "A small tabby cat standing on the bed at 3 a.m., one front paw extended mid-step across grey bedding, ears alert, the sleeping person's shoulder barely visible at frame edge, bedroom dark and still.";
+    const scenes = film({ visualPrompt: CAT, keyThing: "tabby cat", namedLook: undefined });
+    expect(guardPitchVisuals(scenes)).toEqual([33]);
+    expect(scenes[3].visualPrompt).toBe(
+      "A small tabby cat standing on the bed at 3 a.m., one front paw extended mid-step across grey bedding, ears alert, bedroom dark and still."
+    );
+    expect(scenes[3].keyThing).toBe("tabby cat"); // the same picture, so the same key thing
+    // A picture OF the person or the hands has nothing of nobody to keep.
+    expect(withoutSomeone(SHIPPED)).toBeUndefined();
+    expect(withoutSomeone("a beverage cart in the galley — a passenger reaching for a cup")).toBe(
+      "a beverage cart in the galley"
+    );
+    expect(withoutSomeone("The cat sits on the sill. A man reads beside it, the lamp on.")).toBe(
+      "The cat sits on the sill. The lamp on."
+    );
+  });
+
+  it("clears a person flag a later step set on it, and borrows only a picture of nobody", () => {
+    const scenes = film({ visualPrompt: "a sealed packet of cookies on a galley tray", namedLook: undefined, humanPresent: true });
+    expect(guardPitchVisuals(scenes)).toEqual([33]);
+    expect(scenes[3].humanPresent).toBeUndefined();
+    expect(scenes[3].visualPrompt).toBe("a sealed packet of cookies on a galley tray");
+    // The generic pool's hands are skipped too.
+    expect(genericCtaBrollFor([], 3)).toMatch(/hands/);
+    expect(genericCtaBrollFor([], 3, undefined, true)).not.toMatch(/hands/);
+  });
+
+  it("says so in the picture's own prompt — no hands allowed, on every rung", () => {
+    const qr = film({ visualPrompt: CART, namedLook: undefined })[3];
+    expect(qrBackdrop(qr)).toBe(true);
+    for (const p of [buildStillPrompt(qr), buildStillPrompt(qr, true)]) {
+      expect(p).toContain(QR_BACKDROP_CLAUSE);
+      expect(p).toContain(NO_PEOPLE_SUFFIX);
+      expect(p).not.toContain(NO_FIGURES_SUFFIX); // the cutaway guard lets bare hands in
+    }
+    expect(buildStillPrompt(qr)).not.toContain(QR_BACKDROP_REFERENCE_NOTE);
+    expect(buildStillPrompt({ ...qr, memoryRefUrls: ["https://r2/packet.png"] })).toContain(QR_BACKDROP_REFERENCE_NOTE);
+    // A person flag that reached it never brings a person clause.
+    expect(buildStillPrompt({ ...qr, humanPresent: true })).not.toContain(ANON_PERSON_SUFFIX);
+    // Every other picture is as before.
+    const cutaway = { ...qr, qrHero: undefined };
+    expect(qrBackdrop(cutaway)).toBe(false);
+    expect(buildStillPrompt(cutaway)).toContain(NO_FIGURES_SUFFIX);
+    expect(buildStillPrompt(cutaway)).not.toContain(QR_BACKDROP_CLAUSE);
+    expect(qrBackdrop({ ...qr, coverHero: true })).toBe(false);
+    expect(qrBackdrop({ ...qr, assetImageUrl: "https://r2/a.png" })).toBe(false);
+    expect(qrBackdrop({ ...qr, hostPresent: true })).toBe(false);
+  });
+
+  it("tells the CTA prompt writer, and an answer that still names someone is swapped", async () => {
+    mockInvoke.mockResolvedValue({ text: SHIPPED } as any);
+    const scenes = film({ namedLook: undefined });
+    await enhanceBrollPrompts(scenes, baseParams, [33]);
+    const { systemPrompt, userMessage } = mockInvoke.mock.calls[0][0] as any;
+    expect(userMessage.startsWith(QR_BACKDROP_DIRECTIVE)).toBe(true);
+    expect(systemPrompt).toMatch(/NEVER in a picture that sits\s+behind the big scan card/);
+    expect(scenes[3].visualPrompt).toBe(CART);
+    // A pitch cutaway with the small corner card is not told.
+    mockInvoke.mockClear();
+    const corner = film({ qrHero: undefined, qrCorner: true, namedLook: undefined });
+    await enhanceBrollPrompts(corner, baseParams, [33]);
+    expect((mockInvoke.mock.calls[0][0] as any).userMessage).not.toContain(QR_BACKDROP_DIRECTIVE);
+  });
+
+  it("names no channel's things in the wording", () => {
+    for (const w of [QR_BACKDROP_DIRECTIVE, QR_BACKDROP_CLAUSE, QR_BACKDROP_REDRAW, QR_BACKDROP_REFERENCE_NOTE])
+      expect(w).not.toMatch(/cookie|packet|passenger|attendant|cabin|flight/i);
   });
 });
 
@@ -9692,6 +9840,48 @@ describe("generateValidatedStill", () => {
     mockScanStillDefects.mockClear();
     await generateValidatedStill(scene, 3, undefined, vi.fn().mockResolvedValue({ success: true, fileData: good }));
     expect((mockScanStillDefects.mock.calls[0] as any[])[8]).toBeUndefined();
+  });
+
+  // NOBODY BEHIND THE BIG QR CARD (job 402 scene 33: a passenger's hand holding a packet where the
+  // card sits, so for 19.6 s a hand held the code, and the check never asked).
+  it("asks the scan window's picture for a person, and redraws one with a hand in it told to show nobody", async () => {
+    const withHand = await pngOf("#d11");
+    const nobody = await pngOf("#1d1");
+    const backdrop = {
+      index: 33,
+      cta: true,
+      qrHero: true,
+      stillImage: true,
+      visualPrompt: "a sealed foil-lined paper packet of cookies on a galley tray",
+    } as any;
+    mockScanStillDefects.mockClear();
+    mockScanStillDefects.mockResolvedValueOnce(defect({ person: true, what: "a hand holding the packet" } as any));
+    const genImage = vi
+      .fn()
+      .mockResolvedValueOnce({ success: true, fileData: withHand })
+      .mockResolvedValueOnce({ success: true, fileData: nobody });
+    const out = await generateValidatedStill(backdrop, 3, undefined, genImage);
+    expect(out.buffer.equals(nobody)).toBe(true);
+    expect((mockScanStillDefects.mock.calls[0] as any[])[10]).toBe(true);
+    expect(genImage.mock.calls[0][0].prompt).toContain(QR_BACKDROP_CLAUSE);
+    expect(genImage.mock.calls[0][0].prompt).not.toContain(QR_BACKDROP_REDRAW);
+    expect(genImage.mock.calls[1][0].prompt).toContain(QR_BACKDROP_REDRAW);
+    expect(backdrop.pictureChecks[0].flags).toEqual(["person"]);
+    // A redraw that still shows someone is kept (never drawn a third time) and ships saying so.
+    mockScanStillDefects.mockClear();
+    mockScanStillDefects.mockResolvedValue(defect({ person: true, what: "fingers at the edge" } as any));
+    const twice = vi
+      .fn()
+      .mockResolvedValueOnce({ success: true, fileData: withHand })
+      .mockResolvedValueOnce({ success: true, fileData: nobody });
+    const kept = await generateValidatedStill({ ...backdrop, pictureChecks: undefined }, 3, undefined, twice);
+    expect(twice).toHaveBeenCalledTimes(2);
+    expect(kept.flaws).toEqual(["person"]);
+    mockScanStillDefects.mockResolvedValue(defect()); // restore the default
+    // Any other picture — a cutaway may show hands at work — is never asked.
+    mockScanStillDefects.mockClear();
+    await generateValidatedStill(scene, 3, undefined, vi.fn().mockResolvedValue({ success: true, fileData: nobody }));
+    expect((mockScanStillDefects.mock.calls[0] as any[])[10]).toBe(false);
   });
 
   it("skips the gate when a reference image is attached (the cover asked for text)", async () => {
