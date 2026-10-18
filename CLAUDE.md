@@ -757,6 +757,34 @@ Express · tRPC · Drizzle · MySQL.
   (`shared/scriptCheck.ts`): notes, headings and a 60+ word repeat are refused at Generate by line.
   Left for the operator: the face on beauty/fashion "looks" lines (audit cause 9), and the
   pay-once video rule (R14 kept the second render).
+- **What the practice films of the new channels found** (round 10, 2026-10-18). Helena Hart (job
+  399) and Gideon Grant (job 400) were reviewed picture by picture with a second reviewer re-checking
+  each finding against the frames (73 confirmed; `graphics-lab/out/review-pack.mts` builds a review
+  pack: a frame per scene beside its line, frames of every graphic, the words heard). General rules
+  that came out of it: (a) A RECURRING PERSON KEEPS ONE LOOK: the props call also writes `PERSON name:
+  look` for someone other than the host shown in two or more sentences (`inputParams.recurringPeople`),
+  matched by name or role (`scene.otherPersonLooks`) — Helena's passenger was three women in 13 s. (b)
+  TWO PEOPLE, A CLAUSE EACH: a description naming two people asks for each, no face for anyone; the
+  host's own job on a host-led channel is the host drawn in words, never the photo. (c) A CONTINUATION
+  past the limit gets its own view even when the planner repeated the words without `sameShot`
+  (`joinSameContext`). (d) A PICTURE DRAWN FROM THE ONE RIGHT BEFORE IT, about something else, takes
+  only the thing's look (`rightBeforeClause`); a second copy is drawn from words + the written look.
+  (e) LISTS: a general head before its examples is no item (`generalHead`, "some ordinary place, a
+  waiting room…"); commas between describing words of ONE thing never split items (`seriesCommas`,
+  "a short, furious, loving essay"); a time a sentence opens on is no item; a parallel series keeps
+  its last member (`withLastSeriesMember`); a step offered as a choice ("…, or step back to the
+  galley") is part of the step before it (`joinChoiceSteps`). (f) THE BRIDGE into a list is one group
+  picture only when one photograph can hold every item (`notInOnePhoto`; no "money, grief, people"
+  cut-outs). (g) THE STYLE BIBLE loses only its sentences about printed matter, never the whole
+  (`bibleWithoutPrintedMatter`). (h) SPLIT PANELS borrow their key thing's named look
+  (`panelNamedLook`). (i) "strand" is a person only when it is hair. (j) CTA: the big QR starts on
+  any common scan wording (holding/lifting/aiming a phone at the screen or code, `SCAN_INTENT`); a
+  two-word title needs both words before the cover shows (`titleMatcher`); after the cover the host
+  comes back on a sentence start, the cover finishing its sentence up to 15 s
+  (`COVER_SENTENCE_MAX_SEC`). (k) A HOST TAKE stops mid-sentence only at a natural break
+  (`naturalBreak` in planGate.ts: a comma, before a joining word, an article, a count or a name),
+  never between subject and verb. A short practice film's 47 s without the host was NOT a bug: on a
+  3:52 film the 3 host minutes are capped at the 35% guide (1:21), two check-ins.
 - `server/hostPlate.ts` — **provider-independent**. The lip-sync model animates the image it
   is handed and never changes the setting, so `HOST_PLATES=1` generates a 16:9 plate of the host
   IN each beat's setting (host photo as identity reference) and syncs from that instead of the

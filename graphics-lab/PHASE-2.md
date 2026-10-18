@@ -133,3 +133,19 @@ Found by replaying the 12 films that have graphics, not by a viewer. No film cha
 | The planner read each scene's script text; where the film says a line over the next scene, it asked for graphics the rules then refused | The planner reads what the film's sound says over each picture (`wordsSaidOver`), keeping the script's spelling where the words match. |
 | A refusal left no trace on the job | The job keeps every planning round (asked, kept, refused), the sentences the fill round offered, and the readability steps (`graphics.planner`, `graphics.readability`); a saved-plan Reassemble carries them over. |
 | An overlay left out because its coloured number could not be read | One last, timing-neutral try: the number in the plain text colour (white on the dim ground), judged at 7:1. |
+
+## Round 10: what the new channels' practice films showed (2026-10-18)
+
+Helena Hart (job 399) and Gideon Grant (job 400), reviewed graphic by graphic; every finding re-checked against the frames.
+
+| Found | Rule now |
+| --- | --- |
+| Myth/Truth: on a two-line myth the strike-through fell between the lines | Every word and space of the myth is struck where it sits, however it wraps (`strikeSweep`). |
+| A red dot sat alone before an arrow drew | Nothing of an arrow shows before it has length (`drawnTo`). |
+| A caption on a split straddled the seam onto the picture | A caption over a split sits inside the host panel (`hostPanelFor`, registry flag `panel`). |
+| A WARNING card showed the thing to avoid as advice ("Ask while the cart is still working its way back,") | A warning's words must say what not to do or what goes wrong (`namesTheDanger`), else another template. |
+| A Quote signed with the host's name held words the viewer is told to say | A Quote is the host's own words only; a line handed to the viewer becomes an unsigned caption. |
+| A step chain numbered an "or" alternative as the next step | A choice is part of the step before it, never a numbered step. |
+| The planner wrote its own list from one sentence ("Two thousand years ago / Seneca wrote a short / Furious") | A list window must be a list the narrator says (`notAListAsSaid`); rows keep the spoken grammar, up to 6 words. |
+| QA failed a card the resolver had held to the cut through a pause | QA asks the resolver's own hold rule (`stillUpAfterWords`, `holdToCut`). |
+| A soup tin for a soda can; cartoon clock and megaphone | An icon only when one emoji IS the object; otherwise none (every card but IconCallout works without one). |
