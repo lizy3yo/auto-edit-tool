@@ -23,10 +23,16 @@ export type LayoutScene = {
    * the operator dragged, or the host on the right, included. Unset on a split ⇒ the default
    * layout (`DEFAULT_SPLIT_HOST_PANEL`). */
   hostPanel?: HostPanel;
-  /** The locked cold open: the host's name tag (lower third) is up over its leading run. */
+  /** The locked cold open. Where the name tag goes when the film does not say (`nameTagRange`). */
   hostOpener?: boolean;
 };
-export type FilmLayout = { scenes: LayoutScene[] };
+export type FilmLayout = {
+  scenes: LayoutScene[];
+  /** The scenes (`index`) the app drew the host's name tag on — its self-introduction take, else
+   * the first host take that can hold it (`nameCardSceneIndices`). `[]` = the film has no tag.
+   * Unset (the lab, an old caller) ⇒ the tag is assumed on the cold open. */
+  nameCardScenes?: number[];
+};
 
 /** The default split: the picture in a full-height square on the right, the host in the rest on
  * the left (assembly's `splitPanelWidths` — 840 px on 1920×1080). */
@@ -68,9 +74,15 @@ export type RuleProblem = { cue: string; problem: string };
 /** Breathing room between two graphics, so one never reads as the tail of the other. */
 export const MIN_GAP_SEC = 1.0;
 
-/** Where the host's name tag is up — the app's `nameCardSceneIndices`: the leading run of
- * `hostOpener` host scenes, else the first host scene. */
+/** Where the host's name tag is up: the scenes the app says it drew it on (`nameCardScenes`) — the
+ * self-introduction take since jobs 401 and 406, which a rule guessing "the cold open" would have
+ * left open to a host caption under the card — else the leading run of `hostOpener` host scenes,
+ * else the first host scene. */
 export function nameTagRange(film: FilmLayout): [number, number] | undefined {
+  if (film.nameCardScenes) {
+    const tagged = film.scenes.filter(s => film.nameCardScenes!.includes(s.index));
+    return tagged.length ? [tagged[0].narrationStartSec, tagged[tagged.length - 1].narrationEndSec] : undefined;
+  }
   const run: LayoutScene[] = [];
   for (const s of film.scenes) {
     if (!s.hostOpener) break;

@@ -3708,6 +3708,106 @@ describe("nameCardSceneIndices", () => {
     expect(nameCardSceneIndices(lanes("bbbbb"))).toEqual([]);
     expect(nameCardSceneIndices([])).toEqual([]);
   });
+
+  // The practice films' host takes, at their positions and on-screen lengths; every other scene is
+  // a 3 s picture.
+  type HostAt = { at: number; sec: number } & Partial<StoryboardScene>;
+  const filmOf = (n: number, hosts: HostAt[]) => {
+    const scenes: Partial<StoryboardScene>[] = Array.from({ length: n }, () => ({}));
+    const secs: number[] = Array.from({ length: n }, () => 3);
+    for (const { at, sec, ...flags } of hosts) {
+      scenes[at] = { hostPresent: true, ...flags };
+      secs[at] = sec;
+    }
+    return [scenes, secs] as const;
+  };
+  const SPLIT = { splitRightUrl: "https://r2.example/split.jpg" };
+
+  it("goes on the self-introduction, not the cold open (job 401: 'My name is Gideon Grant…')", () => {
+    const [scenes, secs] = filmOf(37, [
+      { at: 0, sec: 3.03, hostOpener: true },
+      { at: 5, sec: 4.19 },
+      { at: 11, sec: 6.06, ...SPLIT },
+      { at: 13, sec: 6.51, hostIntro: true },
+    ]);
+    expect(nameCardSceneIndices(scenes, secs)).toEqual([13]);
+  });
+
+  it("goes on the introduction take when the cold open is too short to hold it (406, 403)", () => {
+    // 406: a 2.56 s cold open drew no card; "…I'm Gary," closes the 10.4 s take at 18.8-29.2 s.
+    const [gary, garySecs] = filmOf(34, [
+      { at: 0, sec: 2.56, hostOpener: true },
+      { at: 7, sec: 10.44, hostIntro: true },
+      { at: 15, sec: 7.56, ...SPLIT },
+    ]);
+    expect(nameCardSceneIndices(gary, garySecs)).toEqual([7]);
+    // 403: a 2.33 s cold open; "I am Werner Finkbeiner." opens a 4.8 s take.
+    const [werner, wernerSecs] = filmOf(27, [
+      { at: 0, sec: 2.33, hostOpener: true },
+      { at: 3, sec: 8.54, ...SPLIT },
+      { at: 8, sec: 4.82, hostIntro: true },
+    ]);
+    expect(nameCardSceneIndices(werner, wernerSecs)).toEqual([8]);
+  });
+
+  it("with no introduction and a cold open too short, takes the first full-frame host take that can hold it", () => {
+    // 406 had the introduction not been found: the three splits are passed over.
+    const [scenes, secs] = filmOf(34, [
+      { at: 0, sec: 2.56, hostOpener: true },
+      { at: 15, sec: 7.56, ...SPLIT },
+      { at: 18, sec: 6.7, ...SPLIT },
+      { at: 23, sec: 5.69, ...SPLIT },
+      { at: 28, sec: 8.18 },
+      { at: 30, sec: 6.56 },
+    ]);
+    expect(nameCardSceneIndices(scenes, secs)).toEqual([28]);
+  });
+
+  it("keeps the cold open when the introduction was not found and the opening can hold it (407)", () => {
+    // "I am Sam" for the host name "Sawdust Sam": no `hostIntro`, so the 7.2 s cold open keeps it.
+    const [scenes, secs] = filmOf(28, [
+      { at: 0, sec: 7.15, hostOpener: true },
+      { at: 8, sec: 8.57, ...SPLIT },
+    ]);
+    expect(nameCardSceneIndices(scenes, secs)).toEqual([0]);
+  });
+
+  it("an introduction too short to hold the card gives way to the cold open", () => {
+    const [scenes, secs] = filmOf(10, [
+      { at: 0, sec: 5.2, hostOpener: true },
+      { at: 6, sec: 2.4, hostIntro: true },
+    ]);
+    expect(nameCardSceneIndices(scenes, secs)).toEqual([0]);
+  });
+
+  it("an introduction said across the two-angle cold open keeps one card over both", () => {
+    const [scenes, secs] = filmOf(8, [
+      { at: 0, sec: 2.0, hostOpener: true, hostIntro: true },
+      { at: 1, sec: 2.6, hostOpener: true },
+    ]);
+    // The first take alone could not hold it; the run shows it in the second.
+    expect(nameCardSceneIndices(scenes, secs)).toEqual([0, 1]);
+  });
+
+  it("never a CTA beat: the QR card owns that take's corner", () => {
+    const [scenes, secs] = filmOf(12, [
+      { at: 0, sec: 2.4, hostOpener: true },
+      { at: 5, sec: 8, cta: true, qrCorner: true },
+      { at: 9, sec: 5 },
+    ]);
+    expect(nameCardSceneIndices(scenes, secs)).toEqual([9]);
+  });
+
+  it("no card at all when no host take can hold it — and a lone take needs a little over 3 s", () => {
+    const [short, shortSecs] = filmOf(6, [
+      { at: 0, sec: 2.0, hostOpener: true },
+      { at: 3, sec: 2.5 },
+    ]);
+    expect(nameCardSceneIndices(short, shortSecs)).toEqual([]);
+    // 0.5 s wait + 0.5 s in + 1.5 s held + 0.5 s out, and a frame or two of slack.
+    expect(nameCardSceneIndices(...filmOf(3, [{ at: 0, sec: 3.0, hostOpener: true }]))).toEqual([]);
+    expect(nameCardSceneIndices(...filmOf(3, [{ at: 0, sec: 3.2, hostOpener: true }]))).toEqual([0]);
+  });
 });
 
 describe("hostTheCtaPitch", () => {

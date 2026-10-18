@@ -6,6 +6,7 @@ import {
   HOST_UPSCALE_SHARPEN,
   buildOverlayMuxArgs,
   buildSceneMuxArgs,
+  nameCardOnWindow,
   phoneLookFilter,
   buildConcatCopyArgs,
   buildAudioConcatFilterArgs,
@@ -673,6 +674,30 @@ describe("buildSceneMuxArgs QR overlay (CTA scenes)", () => {
       expect(f).toContain("pad=302:302:");
       expect(f).toMatch(/overlay=W-w-\d+:H-h-\d+\[v\]/);
     });
+  });
+});
+
+describe("nameCardOnWindow — when the name card is fully on", () => {
+  it("a lone take needs 3 s: 0.5 s wait, 0.5 s in, 1.5 s held, 0.5 s out", () => {
+    expect(nameCardOnWindow(3, true, true)).toEqual({ on: 1, off: 2.5 });
+    expect(nameCardOnWindow(2.99, true, true)).toBeUndefined();
+  });
+
+  // Jobs 403 and 406: the one-photo cold open was a lone 2.33 s / 2.56 s take, the card's hold
+  // came to 0.83 s / 1.06 s and it was dropped — the film shipped with no name.
+  it("the short cold opens of jobs 403 and 406 could not show it", () => {
+    expect(nameCardOnWindow(2.33, true, true)).toBeUndefined();
+    expect(nameCardOnWindow(2.56, true, true)).toBeUndefined();
+    // Their introduction takes could.
+    expect(nameCardOnWindow(4.82, true, true)).toEqual({ on: 1, off: 4.32 });
+    expect(nameCardOnWindow(10.44, true, true)?.on).toBe(1);
+  });
+
+  it("inside a run, a scene needs only its own fade's share", () => {
+    expect(nameCardOnWindow(2.5, true, false)).toEqual({ on: 1, off: 2.5 });
+    expect(nameCardOnWindow(2.0, false, true)).toEqual({ on: 0, off: 1.5 });
+    expect(nameCardOnWindow(1.5, false, false)).toEqual({ on: 0, off: 1.5 });
+    expect(nameCardOnWindow(1.4, false, false)).toBeUndefined();
   });
 });
 

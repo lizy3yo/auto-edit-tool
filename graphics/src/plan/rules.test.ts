@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { TEMPLATES } from "../registry";
-import { DEFAULT_SPLIT_HOST_PANEL, hostPanelFor, type FilmLayout, type LayoutScene } from "./rules";
+import type { ResolvedCue } from "../cueResolve";
+import { DEFAULT_SPLIT_HOST_PANEL, checkRules, hostPanelFor, nameTagRange, type FilmLayout, type LayoutScene } from "./rules";
 
 /**
  * A caption on a split stays in the host's panel. Gideon's job 400 at 2:18 (scene 27, host left, a
@@ -100,5 +101,47 @@ describe("the planner is told which side the host is on", () => {
     const right = userPrompt({ scenes: [scene(27, 138.19, 144.12, { hostPresent: true, split: true, hostPanel: { x: 1080, w: 840 }, scriptText: "I pull my chair in closer." })] }, []);
     expect(right).toContain("#27 2:18.2-2:24.1 SPLIT (host right, picture left)");
     expect(userPrompt(film, [])).toContain("#27 2:18.2-2:24.1 SPLIT (host left, picture right)");
+  });
+});
+
+/**
+ * The name tag is where the app drew it. Gideon's job 401 now carries it on "My name is Gideon
+ * Grant…" (scene 14, 67.54-74.05 s), not the cold open; a rule still guessing "the cold open" would
+ * let a host caption sit under the card on the introduction and keep one off the opening for nothing.
+ */
+describe("nameTagRange — the scenes the app drew the name card on", () => {
+  const gideon = (nameCardScenes?: number[]): FilmLayout => ({
+    scenes: [
+      scene(1, 0, 3.03, { hostPresent: true, hostOpener: true }),
+      scene(2, 3.03, 8.1),
+      scene(13, 61.86, 67.54),
+      scene(14, 67.54, 74.05, { hostPresent: true }),
+      scene(15, 74.05, 80.2),
+    ],
+    ...(nameCardScenes ? { nameCardScenes } : {}),
+  });
+  const caption = (start: number, end: number) =>
+    ({ id: "cap", template: "HostCaption", start, end, props: { durationSec: end - start }, sync: [], conformed: { start: false, end: false }, startFrame: Math.round(start * 30), endFrame: Math.round(end * 30) }) as ResolvedCue;
+
+  it("401: the introduction take, as the app says", () => {
+    expect(nameTagRange(gideon([14]))).toEqual([67.54, 74.05]);
+    expect(checkRules([caption(68, 72)], gideon([14])).map(p => p.problem)).toContain("host caption while the name tag is up");
+    expect(checkRules([caption(0.2, 2.8)], gideon([14]))).toEqual([]);
+  });
+
+  it("a film the app drew no card on has no tag at all", () => {
+    expect(nameTagRange(gideon([]))).toBeUndefined();
+    expect(checkRules([caption(0.2, 2.8)], gideon([]))).toEqual([]);
+  });
+
+  it("unset (the lab, an old caller): the cold open, as before", () => {
+    expect(nameTagRange(gideon())).toEqual([0, 3.03]);
+  });
+
+  it("the planner is told the tag is up on the introduction, not on the opening", async () => {
+    const { userPrompt } = await import("./planner");
+    const told = userPrompt(gideon([14]), []);
+    expect(told).toMatch(/#14 [^\n]*\[NAME TAG UP\]/);
+    expect(told).not.toMatch(/#1 [^\n]*\[NAME TAG UP\]/);
   });
 });

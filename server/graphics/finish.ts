@@ -147,7 +147,7 @@ async function healDrift(filmPath: string, words: Word[], levels: number[]): Pro
 }
 
 /** The video's colours, from its host photo; none (the default navy) when it cannot be read. */
-async function themeOf(photoUrl: string | undefined): Promise<Theme | undefined> {
+export async function themeOf(photoUrl: string | undefined): Promise<Theme | undefined> {
   if (!photoUrl) return undefined;
   try {
     // Our own photo read over the storage endpoint, never the public r2.dev address: that one is

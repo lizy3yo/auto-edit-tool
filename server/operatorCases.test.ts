@@ -3545,3 +3545,69 @@ describe("a graphic that hides the picture leaves no blink of footage, and none 
     expect([t.startFrame, t.endFrame, t.props.exit]).toEqual([171, 312, "cut"]);
   });
 });
+
+describe("the host name card: on the self-introduction, in Inter, in the graphics' look (round 11 review, 2026-10-18)", () => {
+  // Each film's host takes at their real positions and lengths (seconds on screen); every other
+  // scene a 3 s picture. Real script text where the introduction is found from it.
+  const filmOf = (n: number, hosts: ({ at: number; sec: number } & Partial<StoryboardScene>)[]) => {
+    const scenes: StoryboardScene[] = Array.from({ length: n }, (_, i) => ({ index: i + 1, scriptText: "" }) as StoryboardScene);
+    const secs: number[] = Array.from({ length: n }, () => 3);
+    for (const { at, sec, ...over } of hosts) {
+      scenes[at] = { ...scenes[at], hostPresent: true, ...over } as StoryboardScene;
+      secs[at] = sec;
+    }
+    return { scenes, secs };
+  };
+
+  // 406 (Gary): the 2.56 s cold open could not hold the card, so it drew none, and "…I'm Gary," at
+  // 28.5 s closed a 10.4 s take with no name on screen. The whole film had no card.
+  it("406: the card goes on the take that ends '…I'm Gary,'", async () => {
+    const { markHostIntroductions, nameCardSceneIndices } = await import("./longformVideo");
+    const { scenes, secs } = filmOf(34, [
+      { at: 0, sec: 2.56, hostOpener: true, scriptText: "Somewhere along the line, everybody agreed" },
+      {
+        at: 7,
+        sec: 10.44,
+        scriptText:
+          "Tonight we’re taking it apart: seventeen real businesses that start for under five hundred dollars, most of them with gear you already own. I’m Gary,",
+      },
+      { at: 15, sec: 7.56, splitRightUrl: "https://r2.example/406-16.jpg" },
+    ]);
+    markHostIntroductions(scenes, "Gary", true);
+    expect(scenes[7].hostIntro).toBe(true);
+    expect(nameCardSceneIndices(scenes, secs)).toEqual([7]);
+  });
+
+  // 401 (Gideon Grant): the card showed on the opening line, more than a minute before "My name is
+  // Gideon Grant…", and the introduction itself had none.
+  it("401: the card goes on 'My name is Gideon Grant…', not the opening line", async () => {
+    const { markHostIntroductions, nameCardSceneIndices } = await import("./longformVideo");
+    const { scenes, secs } = filmOf(37, [
+      { at: 0, sec: 3.03, hostOpener: true, scriptText: "There is a man standing in the greeting card aisle of" },
+      { at: 13, sec: 6.51, scriptText: "My name is Gideon Grant, and this channel is for men and women in their fifties, sixties, and beyond —" },
+    ]);
+    markHostIntroductions(scenes, "Gideon Grant", true);
+    expect(nameCardSceneIndices(scenes, secs)).toEqual([13]);
+  });
+
+  // 403 (Werner): the same short cold open (2.33 s) — and "I am Werner Finkbeiner." opens a 4.8 s take.
+  it("403: the card goes on 'I am Werner Finkbeiner.'", async () => {
+    const { markHostIntroductions, nameCardSceneIndices } = await import("./longformVideo");
+    const { scenes, secs } = filmOf(27, [
+      { at: 0, sec: 2.33, hostOpener: true, scriptText: "Look at the floor beside your toilet." },
+      { at: 8, sec: 4.82, scriptText: "I am Werner Finkbeiner. This channel is for people in older houses and apartments" },
+    ]);
+    markHostIntroductions(scenes, "Werner Finkbeiner", true);
+    expect(nameCardSceneIndices(scenes, secs)).toEqual([8]);
+  });
+
+  // 405 ("Luca Marino / Cat Trainer") and 407 ("Sawdust Sam"): the card was a Times-style serif in a
+  // grey box, the only serif in the film — librsvg on the Windows machine never found Inter.
+  it("405, 407: the card is drawn in Inter, with the role as the graphics' accent kicker", async () => {
+    const { renderNameCardPng } = await import("./nameCard");
+    const { interFontReady } = await import("./fontConfig");
+    const png = await renderNameCardPng({ name: "Luca Marino", title: "Cat Trainer", accent: "#E8A13A", width: 1920, height: 1080 });
+    expect(png).not.toBeNull();
+    expect(await interFontReady()).toBe(true);
+  });
+});

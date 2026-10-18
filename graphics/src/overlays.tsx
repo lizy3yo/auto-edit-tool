@@ -2,8 +2,9 @@
 // assembly composites them over whatever picture is under them — a b-roll still, a clip or the
 // host take. They enter on the word that names them and fade out over their last frames.
 //
-// Placement keeps clear of what the film already owns: the host name card (bottom-left, cold
-// open only) and the CTA QR card (bottom-right). Labels sit bottom-LEFT but above the name
+// Placement keeps clear of what the film already owns: the host name card (bottom-left, on one
+// host take — the self-introduction, else the first that can hold it) and the CTA QR card
+// (bottom-right). Labels sit bottom-LEFT but above the name
 // card's band, and nothing is ever planned inside a CTA block (the planner's rule, not ours).
 import React from "react";
 import { AbsoluteFill, useCurrentFrame, useVideoConfig } from "remotion";
