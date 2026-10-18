@@ -2435,3 +2435,173 @@ describe("after the book cover the host comes back on a sentence (job 399)", () 
     }
   });
 });
+
+describe("a host take stops mid-sentence only at a natural break (job 400)", () => {
+  // Gideon's 3-min test at 1:31: the host stopped between subject and verb — "…I want to show you
+  // that the arithmetic | was never your problem." — and a scroll played under the rest. The first
+  // half of a picture split for length had been made a check-in, and two word-cut pieces passed as
+  // a shot-list hand-off. The same film opened on "There is a man standing in the greeting card |
+  // aisle of a pharmacy…". Scenes, words and pauses are the job's own.
+  const at = (index: number, from: number, to: number, scriptText: string, over: Partial<StoryboardScene> = {}) =>
+    ({
+      index,
+      scriptText,
+      showSubject: "x",
+      narrationStartSec: from,
+      narrationEndSec: to,
+      audioDuration: to - from,
+      audioUrl: `https://example.com/${index}.mp3`,
+      wordCut: true,
+      stillImage: over.hostPresent ? undefined : true,
+      ...over,
+    }) as StoryboardScene;
+  const heard = (line: string) =>
+    line.split(" ").map(tok => {
+      const [, word, start, end] = /^(.*)@([\d.]+)-([\d.]+)$/.exec(tok)!;
+      return { word, start: Number(start), end: Number(end) };
+    });
+  const params = { faceImageUrl: "https://example.com/host.jpg", hostName: "Gideon Grant" } as any;
+
+  const minute = () => [
+    at(18, 79.885, 83.2955, "and what the remaining years are actually for.", { listCut: true }),
+    at(
+      19,
+      83.2955,
+      91.169,
+      "Today, with the help of a Roman who wrote the sharpest essay on time ever put to paper, I want to show you that the arithmetic",
+      { hostPresent: true }
+    ),
+    at(
+      20,
+      91.169,
+      100.63,
+      "was never your problem. Your problem is theft, and by the end of this video you will be able to name all seven of the thieves."
+    ),
+    at(21, 100.63, 102.133, "Two thousand years ago,", { listCut: true }),
+  ];
+  const minuteWords = heard(
+    "Today,@83.42-83.82 with@84.141-84.281 the@84.301-84.381 help@84.441-84.641 of@84.681-84.761 " +
+      "a@84.821-84.861 Roman@84.921-85.341 who@85.402-85.522 wrote@85.582-85.762 the@85.802-85.922 " +
+      "sharpest@86.042-86.542 essay@86.702-86.983 on@87.063-87.163 time@87.223-87.543 ever@87.803-87.983 " +
+      "put@88.043-88.204 to@88.264-88.344 paper,@88.384-88.744 I@89.242-89.282 want@89.322-89.462 " +
+      "to@89.502-89.562 show@89.622-89.842 you@89.882-90.042 that@90.122-90.242 the@90.282-90.382 " +
+      "arithmetic@90.442-91.142 was@91.342-91.503 never@91.703-91.983 your@92.043-92.203 " +
+      "problem.@92.243-92.703 Your@93.243-93.443 problem@93.503-93.963 is@94.243-94.343 " +
+      "theft.@94.503-94.903 And@95.343-95.423 by@95.463-95.563 the@95.603-95.703 end@95.743-95.863 " +
+      "of@95.883-95.944 this@95.984-96.124 video,@96.184-96.624 you@96.884-97.004 will@97.044-97.184 " +
+      "be@97.224-97.304 able@97.364-97.544 to@97.584-97.664 name@97.724-97.964 all@98.284-98.464 " +
+      "seven@98.604-98.944 of@98.984-99.044 the@99.104-99.204 thieves.@99.244-100.905"
+  );
+  const minutePauses = [
+    { start: 88.68, end: 89.1286 },
+    { start: 90.9832, end: 91.2883 },
+    { start: 92.4921, end: 93.1914 },
+    { start: 93.8825, end: 94.1527 },
+  ];
+
+  it("rule 7 names the take: two word-cut pieces at no break are not a hand-off", async () => {
+    const { checkPlan } = await import("./planGate");
+    const found = checkPlan(minute(), params).findings.filter(f => f.rule === 7);
+    expect(found.map(f => [f.scene, f.detail])).toEqual([
+      [19, expect.stringMatching(/^host take ends mid-sentence, at no natural break/)],
+    ]);
+  });
+
+  it("with host minutes to spare the host finishes the sentence, cut in the pause after 'problem.'", async () => {
+    const { enforcePlanRules } = await import("./planGate");
+    const r = enforcePlanRules(minute(), params, { words: minuteWords, silences: minutePauses });
+    const host = r.scenes.find(s => s.hostPresent)!;
+    const pic = r.scenes[r.scenes.indexOf(host) + 1];
+    expect(host.scriptText).toMatch(/I want to show you that the arithmetic was never your problem\.$/);
+    expect(pic.scriptText).toMatch(/^Your problem is theft, and by the end of this video/);
+    expect(host.narrationEndSec!).toBeGreaterThanOrEqual(92.703); // "problem." has ended
+    expect(host.narrationEndSec!).toBeLessThanOrEqual(93.243); // "Your" has not begun
+    expect(pic.narrationStartSec).toBe(host.narrationEndSec);
+    expect(r.unresolved.filter(f => f.rule === 7)).toEqual([]);
+  });
+
+  it("with the host minutes spent (the job's own state) the host hands over at 'put to paper,'", async () => {
+    const { enforcePlanRules } = await import("./planGate");
+    const r = enforcePlanRules(minute(), params, {
+      words: minuteWords,
+      silences: minutePauses,
+      budgetSec: 91.169 - 83.2955,
+    });
+    const host = r.scenes.find(s => s.hostPresent)!;
+    const pic = r.scenes[r.scenes.indexOf(host) + 1];
+    expect(host.scriptText).toBe(
+      "Today, with the help of a Roman who wrote the sharpest essay on time ever put to paper,"
+    );
+    expect(pic.scriptText).toMatch(/^I want to show you that the arithmetic was never your problem\. Your problem/);
+    expect(host.narrationEndSec!).toBeGreaterThanOrEqual(88.744); // "paper," has ended
+    expect(host.narrationEndSec!).toBeLessThanOrEqual(89.242); // "I" has not begun
+    expect(pic.narrationStartSec).toBe(host.narrationEndSec);
+    expect(host.wordCut && pic.wordCut).toBe(true);
+    expect(r.unresolved.filter(f => f.rule === 7)).toEqual([]);
+  });
+
+  it("the opening hands over after 'aisle of', right before 'a pharmacy' — never inside 'greeting card aisle'", async () => {
+    const { checkPlan, enforcePlanRules } = await import("./planGate");
+    const opening = () => [
+      at(1, 0, 2.50044, "There is a man standing in the greeting card", {
+        hostPresent: true,
+        hostOpener: true,
+        hostProtected: true,
+      }),
+      at(
+        2,
+        2.50044,
+        12.88,
+        "aisle of a pharmacy on a Tuesday morning, buying his third sympathy card since spring, and doing a kind of arithmetic nobody ever taught him."
+      ),
+      at(3, 12.88, 17.3236, "He is counting backward. He is sixty-four.", { hostPresent: true, hostProtected: true }),
+    ];
+    expect(checkPlan(opening(), params).findings.filter(f => f.rule === 7).map(f => f.scene)).toEqual([1]);
+    const words = heard(
+      "There@0.22-0.38 is@0.44-0.54 a@0.58-0.62 man@0.7-1.04 standing@1.18-1.601 in@1.621-1.681 " +
+        "the@1.721-1.801 greeting@1.861-2.181 card@2.241-2.521 aisle@2.721-2.921 of@2.981-3.021 " +
+        "a@3.041-3.061 pharmacy@3.221-3.862 on@4.022-4.102 a@4.142-4.162 Tuesday@4.242-4.682 " +
+        "morning,@4.742-5.122 buying@5.643-5.983 his@6.063-6.203 third@6.343-6.643 " +
+        "sympathy@6.743-7.163 card@7.223-7.564 since@7.604-7.824 spring@7.904-8.344 and@8.944-9.024 " +
+        "doing@9.064-9.324 a@9.365-9.425 kind@9.485-9.705 of@9.745-9.805 arithmetic@9.885-10.605 " +
+        "nobody@10.785-11.185 ever@11.285-11.486 taught@11.546-11.826 him.@11.886-12.046"
+    );
+    // The whole sentence would make a 12.9 s opening — past the hook's 8 s, which the shot list
+    // makes hand over — and 2.5 s of host has nothing to give back.
+    const r = enforcePlanRules(opening(), params, { words });
+    const [host, pic] = r.scenes;
+    expect(host.scriptText).toBe("There is a man standing in the greeting card aisle of");
+    expect(pic.scriptText).toMatch(/^a pharmacy on a Tuesday morning,/);
+    expect(host.narrationEndSec!).toBeGreaterThanOrEqual(3.021); // "of" has ended
+    expect(host.narrationEndSec!).toBeLessThanOrEqual(3.041); // "a" has not begun
+    expect(r.unresolved.filter(f => f.rule === 7)).toEqual([]);
+  });
+
+  it("the hand-offs these films made at a break stay exactly as they were (jobs 398, 399, 400)", async () => {
+    const { checkPlan, enforcePlanRules } = await import("./planGate");
+    const pairs: [StoryboardScene, StoryboardScene][] = [
+      [
+        at(1, 0, 9.786905, "Out of 10 Japanese woodworking projects you can build from cheap box-store lumber, the one that paid me best for my time came out of", { hostPresent: true, hostOpener: true }),
+        at(2, 9.786905, 14.8299, "a coffee can of burnt scraps I almost threw in the trash."),
+      ],
+      [
+        at(1, 5.96425, 12.173, "By the time the beverage cart had come and gone, one of them was sitting in an empty row closer to the front, holding", { hostPresent: true }),
+        at(2, 12.173, 13.8031, "the whole can of ginger ale,", { listCut: true }),
+      ],
+      [
+        at(1, 39.9348, 47.253, "Maybe you have done that arithmetic. Most people past sixty have — usually in silence, usually in", { hostPresent: true }),
+        at(2, 47.253, 49.2444, "some ordinary place,", { listCut: true }),
+      ],
+      [
+        at(1, 67.7626, 70.934, "My name is Gideon Grant, and this channel is for", { hostPresent: true, hostIntro: true }),
+        at(2, 70.934, 76.935, "men and women in their fifties, sixties, and beyond — people carrying real questions about"),
+      ],
+    ];
+    for (const pair of pairs) {
+      expect(checkPlan(pair, params).findings.filter(f => f.rule === 7)).toEqual([]);
+      const end = pair[0].narrationEndSec;
+      const r = enforcePlanRules(pair, params);
+      expect(r.scenes[0].narrationEndSec).toBe(end);
+    }
+  });
+});

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LongformInputParams, StoryboardScene } from "@shared/types";
-import { capMovingLength, checkPlan, enforcePlanRules, len, topicOf } from "./planGate";
+import { breakBetween, capMovingLength, checkPlan, enforcePlanRules, len, topicOf } from "./planGate";
 
 const params = {
   faceImageUrl: "https://example.com/host.jpg",
@@ -824,5 +824,182 @@ describe("a sentence cut goes right after the word the script ends it on (job 40
     // One word late: after "13", before "chapters," — which is why the heard word is used.
     expect(cover.narrationEndSec!).toBeGreaterThanOrEqual(190.87);
     expect(cover.narrationEndSec!).toBeLessThanOrEqual(190.91);
+  });
+});
+
+describe("a host take stops mid-sentence only at a natural break (job 400)", () => {
+  // Job 400 at 1:31: "…I want to show you that the arithmetic | was never your problem." — the
+  // first half of a picture split for length, made a check-in, and passed as a shot-list hand-off
+  // because both pieces were word-cut.
+  const cut = (scenes: StoryboardScene[], ...at: number[]) => {
+    for (const k of at) scenes[k].wordCut = true;
+    return scenes;
+  };
+  const ends = (scenes: StoryboardScene[]) =>
+    checkPlan(scenes, params).findings.filter(f => f.rule === 7 && /ends mid-sentence/.test(f.detail));
+
+  it("knows a break from the words alone: a comma, a list, a joining word, an article, a name, a count, a preposition's object", () => {
+    const breaks: [string, string, boolean?][] = [
+      ["Today, with the help of a Roman who wrote the sharpest essay on time ever put to paper,", "I want to show you"],
+      ["and this one's for anybody standing in a garage with", "a saw,", true],
+      ["the one that paid me best for my time came out of", "a coffee can of burnt scraps I almost threw in the trash."],
+      ["Two thousand years ago, a man named", "Lucius Annaeus Seneca wrote a short,"],
+      ["My name is Gideon Grant, and this channel is for", "men and women in their fifties, sixties,"],
+      ["Every one comes out a little different", "and folks loved picking out the one that spoke to them."],
+      ["by the end of this video you will be able to name all", "seven of the thieves."],
+      ["men and women in their fifties, sixties, and beyond", "— people carrying real questions about"],
+    ];
+    for (const [before, after, list] of breaks) expect(breakBetween(before, after, { list }), before).toBe(true);
+    const notBreaks: [string, string][] = [
+      ["I want to show you that the arithmetic", "was never your problem."], // subject | verb (job 400)
+      ["There is a man standing in the greeting card", "aisle of a pharmacy on a Tuesday morning,"], // inside a name (job 400)
+      ["I want to show you that", "the arithmetic was never your problem."], // "that" waits for its clause
+      ["Then I", "sanded the whole thing smooth."], // a subject waits for its verb
+      ["Nobody could say what it was made of", "was a mystery to me."], // a stranded preposition, then a verb
+    ];
+    for (const [before, after] of notBreaks) expect(breakBetween(before, after), before).toBe(false);
+  });
+
+  it("two word-cut pieces at no break are not a hand-off; at a comma they are", () => {
+    const bad = cut(
+      film([
+        ["H", 5, sentence(1)],
+        ["H", 8, "Today, with the help of a Roman who wrote the sharpest essay, I want to show you that the arithmetic"],
+        ["P", 4, "was never your problem. Your problem is theft."],
+        ["H", 5, sentence(2)],
+      ]),
+      1,
+      2
+    );
+    expect(ends(bad).map(f => f.detail)).toEqual([
+      expect.stringMatching(/^host take ends mid-sentence, at no natural break: "Today, with the help/),
+    ]);
+    const good = cut(
+      film([
+        ["H", 5, sentence(1)],
+        ["H", 5, "Today, with the help of a Roman who wrote the sharpest essay on time ever put to paper,"],
+        ["P", 4, "I want to show you that the arithmetic was never your problem."],
+        ["H", 5, sentence(2)],
+      ]),
+      1,
+      2
+    );
+    expect(ends(good)).toEqual([]);
+  });
+
+  it("'too long to finish' is measured on the rest of the SENTENCE, not the whole picture after", () => {
+    // 8 s of host, then 1.5 s of its sentence inside a 9.5 s picture: the old check added the whole
+    // picture, called it past the 15 s ceiling and excused the take.
+    const short = film([
+      ["H", 5, sentence(1)],
+      ["H", 8, "Today, with the help of a Roman who wrote the sharpest essay, I want to show you that the arithmetic"],
+      ["P", 9.5, "was never your problem. Your problem is theft, and by the end of this video you will be able to name all seven of the thieves."],
+      ["H", 5, sentence(2)],
+    ]);
+    expect(ends(short)).toHaveLength(1);
+    // A sentence that really runs on past the ceiling may be left at a break — the ordinary L-cut…
+    const long = (hostText: string) =>
+      film([
+        ["H", 5, sentence(1)],
+        ["H", 8, hostText],
+        ["P", 12, "and every one of them came back with a story about the market they sold at and the people who stopped"],
+        ["P", 3, "to ask about the price."],
+        ["H", 5, sentence(2)],
+      ]);
+    expect(ends(long("Today I want to tell you about the thirty boards I made last winter,"))).toEqual([]);
+    // …but never inside a phrase.
+    expect(ends(long("Today I want to tell you about the thirty boards I made last winter for the"))).toHaveLength(1);
+  });
+
+  const arithmetic = () =>
+    cut(
+      film([
+        ["H", 5, sentence(1)],
+        ["H", 8, "Today, with the help of a Roman who wrote the sharpest essay, I want to show you that the arithmetic"],
+        ["P", 8, "was never your problem. Your problem is theft, and by the end of this video you will name the thieves."],
+        ["H", 5, sentence(2)],
+      ]),
+      1,
+      2
+    );
+
+  it("finishes the sentence when the host minutes allow it", () => {
+    const r = enforcePlanRules(arithmetic(), params);
+    expect(r.unresolved.filter(f => f.rule === 7)).toEqual([]);
+    const [host, pic] = [r.scenes[1], r.scenes[2]];
+    expect(host.hostPresent).toBe(true);
+    expect(host.scriptText).toMatch(/that the arithmetic was never your problem\.$/);
+    expect(pic.scriptText).toMatch(/^Your problem is theft,/);
+    expect(pic.narrationStartSec).toBeCloseTo(host.narrationEndSec!, 5);
+    expect(host.audioUrl).toBeUndefined();
+    expect(pic.audioUrl).toBeUndefined();
+  });
+
+  it("with the host minutes spent it hands over at its own last comma instead", () => {
+    const r = enforcePlanRules(arithmetic(), params, { budgetSec: 18 });
+    expect(r.unresolved.filter(f => f.rule === 7)).toEqual([]);
+    const [host, pic] = [r.scenes[1], r.scenes[2]];
+    expect(host.hostPresent).toBe(true);
+    expect(host.scriptText).toBe("Today, with the help of a Roman who wrote the sharpest essay,");
+    expect(pic.scriptText).toMatch(/^I want to show you that the arithmetic was never your problem\./);
+    expect(pic.narrationStartSec).toBeCloseTo(host.narrationEndSec!, 5);
+    expect(host.wordCut && pic.wordCut).toBe(true);
+    expect(r.scenes.filter(s => s.hostPresent).reduce((a, s) => a + len(s), 0)).toBeLessThanOrEqual(18.5);
+  });
+
+  it("a host take already at a break keeps its hand-off untouched", () => {
+    const scenes = cut(
+      film([
+        ["H", 5, sentence(1)],
+        ["H", 4, "Out of ten projects, the one that paid me best came out of"],
+        ["P", 4, "a coffee can of burnt scraps I almost threw in the trash."],
+        ["H", 5, sentence(2)],
+      ]),
+      1,
+      2
+    );
+    const r = enforcePlanRules(scenes, params);
+    expect(r.scenes[1].scriptText).toBe("Out of ten projects, the one that paid me best came out of");
+    expect(r.scenes[1].narrationEndSec).toBe(9);
+  });
+
+  it("a stretch without the host never takes a picture that stops at no break as its check-in", () => {
+    const rows = (a: string, b: string): [("H" | "P" | "M"), number, string][] => [
+      ["H", 5, sentence(1)],
+      ["P", 9.5, sentence(2)],
+      ["P", 9.5, sentence(3)],
+      ["P", 5, a],
+      ["P", 4, b],
+      ["P", 9.5, sentence(4)],
+      ["P", 9.5, sentence(5)],
+      ["H", 5, sentence(6)],
+    ];
+    const atComma = cut(
+      film(
+        rows(
+          "Today, with the help of a Roman who wrote the sharpest essay on time ever put to paper,",
+          "I want to show you that the arithmetic was never your problem."
+        )
+      ),
+      3,
+      4
+    );
+    expect(enforcePlanRules(atComma, params).scenes[3].hostPresent).toBe(true);
+    const noBreak = cut(
+      film(
+        rows(
+          "Today, with the help of a Roman who wrote the sharpest essay, I want to show you that the arithmetic",
+          "was never your problem. Your problem is theft."
+        )
+      ),
+      3,
+      4
+    );
+    const hosts = enforcePlanRules(noBreak, params)
+      .scenes.filter(s => s.hostPresent)
+      .map(s => s.scriptText ?? "");
+    expect(hosts.some(t => /the arithmetic$/.test(t))).toBe(false);
+    // The host comes in on the clause instead — a glimpse that leaves at the comma.
+    expect(hosts).toContain("Today, with the help of a Roman who wrote the sharpest essay,");
   });
 });
