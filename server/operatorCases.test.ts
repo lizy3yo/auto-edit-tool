@@ -5737,3 +5737,38 @@ describe("the cutaway book guard keeps out the CTA's book only, and never borrow
     expect(s.visualPrompt).toBe(plate);
   });
 });
+
+describe("a thing only the CTA names is no prop of the film (job 409)", () => {
+  // The closing CTA's "lift your phone toward the pattern in the corner of the screen" was the
+  // script's only phone. Read with the rest of the script, it became the style bible's "Props recur:
+  // … a phone" and a key thing on the study desk, and filled the split panel under "Maybe you have
+  // done that arithmetic" (scene 7) and the study shots 14 and 19.
+  it("the world and the props read the content; the CTA's phone is dropped, a content phone stays", async () => {
+    const { parseCtaMarkers, splitCtaFromContent } = await import("./longformVideo");
+    const { parseKeyThings, withoutCtaOnlyProps } = await import("./shotList");
+    const raw = [
+      "Seventeen. He pays, he walks out to the parking lot, and the number rides home with him in the passenger seat. Maybe you have done that arithmetic.",
+      "===START CTA(The Stoic Way)===",
+      "Getting there is one small motion: lift your phone toward the pattern in the corner of the screen and tap what rises, or find the first line of the description below.",
+      "===END CTA===",
+    ].join("\n");
+    const { script, spans } = parseCtaMarkers(raw);
+    const { content, cta } = splitCtaFromContent(script, spans);
+    expect(content).toBe(
+      "Seventeen. He pays, he walks out to the parking lot, and the number rides home with him in the passenger seat. Maybe you have done that arithmetic."
+    );
+    const sheet = [
+      "HOME: a quiet home study, pale cream walls, a wooden desk by a window, soft gray morning light",
+      "MAIN sympathy card: a plain cream greeting card with a muted gray ribbon print on the front",
+      "phone: a black smartphone with a glass screen and thin silver edges, resting face-up on the desk",
+      "parking lot: a flat paved lot with faint lane lines, a few parked cars, gray overcast sky",
+    ].join("\n");
+    expect(parseKeyThings(withoutCtaOnlyProps(sheet, content, cta).sheet).map(t => t.name)).toEqual([
+      "sympathy card",
+      "parking lot",
+    ]);
+    // A phone the film's own content talks about is still a key thing.
+    const told = `${content} He keeps the phone face-down on the desk so the number cannot reach him.`;
+    expect(parseKeyThings(withoutCtaOnlyProps(sheet, told, cta).sheet).map(t => t.name)).toContain("phone");
+  });
+});

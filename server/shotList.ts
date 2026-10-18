@@ -2111,6 +2111,57 @@ export function withoutPersonLines(sheet: string | undefined): string {
     .trim();
 }
 
+/** Words that say nothing about WHICH thing a prop is ("MAIN", sizes, amounts, joiners). */
+const NOT_A_PROP_NAME_WORD = new Set([
+  "main", "the", "and", "with", "for", "small", "large", "big", "little", "tiny", "old", "new",
+  "one", "two", "three", "few", "some",
+]);
+
+/**
+ * A props list without the things only a marked CTA names (job 409: the closing CTA's "lift your
+ * phone" made "phone: a black smartphone … resting face-up on the desk" a key thing, and it filled a
+ * split panel and two study shots whose lines never speak of a phone). The props call reads the
+ * content alone (`splitCtaFromContent`), so this guards what reaches it another way — a style bible
+ * written before the call, kept on a resume — and costs nothing. A prop line (never the first, the
+ * home setting; never a PERSON or VIEWER line) is dropped only when EVERY word of its name is said
+ * in a CTA block and none is said anywhere in the content, in any form: "phone" said only in the
+ * CTA goes, while a phone the content talks about — as "phone", "phones" or "smartphone" — stays.
+ * Built to keep when unsure, because a CTA's own words are ordinary ones: over the stored films a
+ * looser rule dropped job 413's "gas can" for the CTA's "you can already see" and job 368's chicken
+ * "run" for "it runs eight chapters", while their content says "gasoline" and "come running". As
+ * written, over the 225 stored films with a marked CTA it takes something from 12, every one the
+ * CTA's own (a phone, a phone screen, a camera phone, the CTA's digital book), and nothing else. With no CTA words the list comes back as it was. Pure — unit-tested.
+ */
+export function withoutCtaOnlyProps(
+  sheet: string,
+  content: string,
+  cta: string
+): { sheet: string; dropped: string[] } {
+  if (!cta.trim()) return { sheet, dropped: [] };
+  const base = (w: string) => w.replace(/(?:es|s)$/, "");
+  const wordsOf = (t: string) => t.toLowerCase().match(/[a-z]+/g) ?? [];
+  const ctaWords = new Set(wordsOf(cta).map(base));
+  const contentWords = wordsOf(content);
+  const contentBases = new Set(contentWords.map(base));
+  // In the content in any form: the word itself, a longer form of it ("running" for "run"), or
+  // inside a longer word ("phone" in "smartphone").
+  const saidInContent = (w: string) =>
+    contentBases.has(w) ||
+    contentWords.some(c => c.startsWith(w) || (w.length >= 4 && c.includes(w)));
+  const dropped: string[] = [];
+  let props = 0;
+  const kept = sheet.split("\n").filter(line => {
+    if (isPersonLine(line) || isViewerLine(line) || !line.includes(":")) return true;
+    if (props++ === 0) return true;
+    const name = line.slice(0, line.indexOf(":")).replace(/^[-*•\d.)\s]+/, "").replace(/^MAIN\b[\s:-]*/i, "");
+    const words = wordsOf(name).filter(w => w.length >= 3 && !NOT_A_PROP_NAME_WORD.has(w)).map(base);
+    if (!words.length || !words.every(w => ctaWords.has(w)) || words.some(saidInContent)) return true;
+    dropped.push(name.trim());
+    return false;
+  });
+  return { sheet: kept.join("\n"), dropped };
+}
+
 /**
  * WHO "YOU" IS, when the props list says the viewer is someone the host's own job serves (its one
  * `VIEWER name: look` line, 2026-10-18, the review of job 402): every picture of "you" was the host,

@@ -49,6 +49,7 @@ import {
   parseRecurringPeople,
   parseViewerPerson,
   withoutPersonLines,
+  withoutCtaOnlyProps,
   settleVideoKind,
   videoKind,
   fitPicturesToLines,
@@ -1598,6 +1599,48 @@ export function parseCtaMarkers(spoken: string): {
     .replace(/\n{3,}/g, "\n\n")
     .trim();
   return { script, spans, errors };
+}
+
+/**
+ * The script's CONTENT and its marked CTA blocks, apart (`spans` from `parseCtaMarkers`: word
+ * offsets into `script`). The style bible and the props list read the content only. Job 409's one
+ * phone was the closing CTA's "lift your phone toward the pattern in the corner of the screen", and
+ * both passes read the whole script: the bible wrote "Props recur: sympathy cards, greeting cards,
+ * a phone", the props list made the phone a key thing "resting face-up on the desk", and it filled
+ * the split panel under "Maybe you have done that arithmetic" (scene 7) and the study shots 14 and
+ * 19, whose lines never speak of one. What a CTA asks the viewer to do (a phone, a link, the
+ * description) is no prop of the film; the CTA's own pictures are made by the CTA path. `cta` is
+ * the blocks' words, for the props-list guard (`withoutCtaOnlyProps`). A script with no marked
+ * block, or nothing outside its blocks, keeps its whole text as content. Pure — unit-tested.
+ */
+export function splitCtaFromContent(
+  script: string,
+  spans: CtaSpan[]
+): { content: string; cta: string } {
+  if (!spans.length) return { content: script, cta: "" };
+  const blockOf = (w: number) => spans.findIndex(s => w >= s.start && w < s.end);
+  const content: string[] = [];
+  const blocks: string[][] = spans.map(() => []);
+  let at = 0;
+  for (const line of script.split("\n")) {
+    const words = line.split(/\s+/).filter(Boolean);
+    const kept: string[] = [];
+    words.forEach((word, k) => {
+      const b = blockOf(at + k);
+      if (b < 0) kept.push(word);
+      else blocks[b].push(word);
+    });
+    // A blank line is a paragraph break and stays; a line wholly outside every block stays as
+    // written. (Markers sit on their own lines, so a line is never split in practice.)
+    if (!words.length || kept.length === words.length) content.push(line);
+    else if (kept.length) content.push(kept.join(" "));
+    at += words.length;
+  }
+  const text = content.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  return {
+    content: text || script,
+    cta: blocks.map(b => b.join(" ")).filter(Boolean).join("\n\n"),
+  };
 }
 
 /**
@@ -12236,7 +12279,10 @@ async function cutShotsOnWords(
   ctx: {
     jobId: number;
     params: LongformInputParams;
-    spokenScript: string;
+    /** The script with its marked CTA blocks taken out (`splitCtaFromContent`) — what the props
+     *  list reads — and the blocks' own words, for `withoutCtaOnlyProps`. */
+    contentScript: string;
+    ctaScript: string;
     words: WhisperWord[];
     masterDurationSec: number;
   }
@@ -12251,8 +12297,10 @@ async function cutShotsOnWords(
       log(params.hostLook ? `host look: ${params.hostLook}` : "host look: unread — b-roll keeps anonymous hands");
     }
     if (params.continuitySheet == null) {
-      const sheet = (
-        await deriveContinuitySheet(ctx.spokenScript, {
+      // The CONTENT only: a thing the film's CTA asks for (job 409's "lift your phone") is no prop
+      // of the film, and as one it was drawn into pictures that never speak of it.
+      const derived = (
+        await deriveContinuitySheet(ctx.contentScript, {
           subject: params.videoSubject,
           styleBible: params.visualStyleBible,
           // How the host looks and what they call themself: what tells the call whether "you" is
@@ -12262,6 +12310,10 @@ async function cutShotsOnWords(
             : [params.hostLook, params.hostTitle ? `title: ${params.hostTitle}` : ""].filter(Boolean).join("; "),
         })
       ).replace(/\b(?:cluttered|messy|jumbled|crowded)\b/gi, "tidy");
+      // And what still names a CTA-only thing (a style bible kept from before, on a resume) goes.
+      const { sheet, dropped } = withoutCtaOnlyProps(derived, ctx.contentScript, ctx.ctaScript);
+      if (dropped.length)
+        log(`props list: dropped ${dropped.join(", ")} — named only in a call to action`);
       // The same call names the PEOPLE WHO COME BACK, each with one look (job 399: the passenger
       // the story follows was three different women in 13 s). They are kept apart from the props
       // list, which every shot and picture writer reads as things only, exactly as before.
@@ -16875,15 +16927,18 @@ async function runUnifiedPipeline(
   // threaded into every per-scene prompt so an ambiguous narration noun ("the meat") resolves to
   // the right subject instead of drifting (e.g. a "field dress a deer" video showing chicken).
   params.videoSubject = await deriveVideoSubject(params, spokenScript);
-  // The one physical WORLD the whole video lives in (channel persona + full script), derived HERE —
-  // before storyboarding — so the same world seeds every scene instead of only re-converging them
-  // at the enhancer. Guard preserves an operator's persisted/hand-edited bible on regenerate (same
-  // intent as the beats pass below). The book guard stays at this call site (import cycle), so
-  // printed matter never reaches the seeds — only the words that name it go: job 400 lost its
-  // whole bible to one clause about books, and its Rome pictures lost their look with it
-  // (`bibleWithoutPrintedMatter`).
+  // The script without its marked CTA blocks: the world and the props are the CONTENT's (job 409:
+  // the CTA's "lift your phone" became "Props recur: … a phone" and a key thing on the study desk).
+  const scriptParts = splitCtaFromContent(spokenScript, ctaSpans);
+  // The one physical WORLD the whole video lives in (channel persona + the script's content),
+  // derived HERE — before storyboarding — so the same world seeds every scene instead of only
+  // re-converging them at the enhancer. Guard preserves an operator's persisted/hand-edited bible on
+  // regenerate (same intent as the beats pass below). The book guard stays at this call site
+  // (import cycle), so printed matter never reaches the seeds — only the words that name it go:
+  // job 400 lost its whole bible to one clause about books, and its Rome pictures lost their look
+  // with it (`bibleWithoutPrintedMatter`).
   if (!params.visualStyleBible) {
-    const bible = await deriveStyleBible(params, spokenScript);
+    const bible = await deriveStyleBible(params, scriptParts.content);
     if (bible) {
       const safe = bibleWithoutPrintedMatter(bible);
       if (safe.warning) appendJobWarning(jobId, safe.warning);
@@ -17253,7 +17308,8 @@ async function runUnifiedPipeline(
     scenes = await cutShotsOnWords(scenes, {
       jobId,
       params,
-      spokenScript,
+      contentScript: scriptParts.content,
+      ctaScript: scriptParts.cta,
       words,
       masterDurationSec,
     });
