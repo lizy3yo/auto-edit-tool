@@ -173,8 +173,11 @@ export const SQUARE_WINDOWS = 5;
 /**
  * Fingerprint a drawn picture (`PictureFingerprint`). A split panel (`square`) is hashed as the
  * centre square its slot shows — the whole picture when it came back square, as asked. A full-frame
- * picture keeps its ordinary hash (`pictureHash`, so every full-frame pair reads as before) and adds
- * the hashes of `SQUARE_WINDOWS` square windows across it, decoded once.
+ * picture keeps its ordinary hash and adds the hashes of `SQUARE_WINDOWS` square windows across it,
+ * decoded once. On a PNG — every still of jobs 401-407 — that hash is `pictureHash`'s bit for bit, so
+ * full-frame pairs read as before. A JPEG (the image fallback's) is decoded whole here, where
+ * `pictureHash` lets sharp shrink it on load, and reads up to ~10 bits differently on the review
+ * frames: the same way for every picture, so pictures are still compared like with like.
  */
 export async function pictureFingerprint(image: Buffer, square = false): Promise<PictureFingerprint> {
   const { data, info } = await sharp(image).greyscale().raw().toBuffer({ resolveWithObject: true });

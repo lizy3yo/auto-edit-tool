@@ -10566,12 +10566,21 @@ describe("a split panel meets the near-copy check like any picture (job 405 scen
     await withCostMeter(9406, () => generateValidatedStill(buildSplitRightScene(host()), 4, undefined, once, undefined, undefined, true));
     expect(once).toHaveBeenCalledTimes(1);
     expect(mockScanNearCopy).not.toHaveBeenCalled();
+    // Switched off, even scene 2 cut square is never looked at — with scene 2 remembered for THIS job,
+    // so it is the switch that keeps the look away, not an empty memory.
     process.env.PICTURE_VARIETY = "0";
+    rememberPicture(9407, 2, await pictureFingerprint(two), await pictureThumb(two));
     const copy = await sharp(two).extract({ left: 336, top: 0, width: 864, height: 864 }).resize(1024, 1024).png().toBuffer();
     const off = drawsOf(copy);
     await withCostMeter(9407, () => generateValidatedStill(buildSplitRightScene(host()), 4, undefined, off, undefined, undefined, true));
     expect(off).toHaveBeenCalledTimes(1);
     expect(mockScanNearCopy).not.toHaveBeenCalled();
+    // …and switched back on, the same draw is laid beside scene 2.
+    delete process.env.PICTURE_VARIETY;
+    await withCostMeter(9407, () =>
+      generateValidatedStill(buildSplitRightScene(host()), 4, undefined, drawsOf(copy), undefined, undefined, true)
+    );
+    expect(mockScanNearCopy).toHaveBeenCalledTimes(1);
   });
 });
 
