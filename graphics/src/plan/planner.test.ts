@@ -1706,3 +1706,23 @@ describe("a card sent back for a blink is told when a new clause, not its senten
     expect(p).not.toContain("after its own sentence ends");
   });
 });
+
+describe("a DimCaption is a glance: one short sentence, never two in a row (round 13 verification films)", () => {
+  // Job 408 (2:07-2:12): "If you think one is already in there, the plunger is the wrong tool." — 14
+  // words built word by word over two pages, the second opening on a lowercase "the", 1.2 s after
+  // the "The toilet is fine." caption. The catalogue asked for 10 words; the hard limit was 24.
+  it("the hard limit is the catalogue's, and one page of the caption", async () => {
+    const { MAX_WORDS } = await import("./planner");
+    const { CAPTION_PAGE_WORDS } = await import("../overlays");
+    expect(MAX_WORDS.DimCaption).toBe(10);
+    expect(MAX_WORDS.DimCaption).toBeLessThanOrEqual(CAPTION_PAGE_WORDS.DimCaption);
+    const prompt = systemPrompt({ kept: false });
+    expect(prompt).toContain(`- DimCaption — a striking line over b-roll, one short sentence seen at a glance — never two in a row: {"phrase": phrase (≤${MAX_WORDS.DimCaption} words), "emphasis"}`);
+    expect(prompt).toContain("a DimCaption is read at a glance, so it is a SHORT sentence (≤10 words) and never pages");
+  });
+
+  it("the planner is told to keep two graphics that darken the picture 3 s apart, and which they are", () => {
+    const prompt = systemPrompt({ kept: false }).replace(/\s+/g, " ");
+    expect(prompt).toContain("3 s between two that darken the picture (DimCaption, Quote, TitleOverFootage, BigNumberOverlay, BarChart, ArrowCaption), a cut between them or not");
+  });
+});

@@ -3631,21 +3631,37 @@ describe("the host name card is judged on the take's real length (round 11 revie
   // Assembly handed the card's placement `audioDurationSec`, which `sceneHoldPlan` leaves unset on
   // every scene — so every take read as long enough to hold the card, and a take that could not show
   // it still took it. Scarlett's job 387: "I'm Scarlett Sterling, and this channel is for" is 2.98 s
-  // on screen, too short for the card, and the film would have had no name at all.
-  it("387: the 2.98 s introduction gives the card to the 7.1 s cold open, which can show it", async () => {
-    const { assembledSceneSecs, nameCardSceneIndices } = await import("./longformVideo");
+  // on screen, too short for the card with its fixed 0.5 s wait and fades, which then went to the
+  // 7.1 s cold open. Since round 13 a short take's edges shrink and the 1.5 s hold stays, so the
+  // introduction holds the card itself (the round-13 cases at the end of this file).
+  const scarlett = (introEnd: number) => {
     const rows: [number, number, Partial<StoryboardScene>][] = [
       [0, 7.14569, { hostPresent: true, hostOpener: true }],
       [7.14569, 11.3309, {}],
       [11.3309, 16.597, { hostPresent: true, splitRightUrl: "https://r2.example/387-3.jpg" }],
       [16.597, 27.1868, {}],
-      [27.1868, 30.216, { hostPresent: true, hostIntro: true }],
-      [30.216, 35.54, {}],
+      [27.1868, introEnd, { hostPresent: true, hostIntro: true }],
+      [introEnd, 35.54, {}],
     ];
-    const scenes = rows.map(([, , f]) => f as StoryboardScene);
-    // As assembly builds its entries: the slice set, `audioDurationSec` unset.
-    const secs = assembledSceneSecs(rows.map(([a, b]) => ({ sliceStartSec: a, sliceEndSec: b, audioDurationSec: undefined })));
-    expect(nameCardSceneIndices(scenes, secs)).toEqual([0]);
+    return {
+      scenes: rows.map(([, , f]) => f as StoryboardScene),
+      // As assembly builds its entries: the slice set, `audioDurationSec` unset.
+      entries: rows.map(([a, b]) => ({ sliceStartSec: a, sliceEndSec: b, audioDurationSec: undefined })),
+    };
+  };
+
+  it("387: the 2.98 s introduction holds the card, judged on its real on-screen length", async () => {
+    const { assembledSceneSecs, nameCardSceneIndices } = await import("./longformVideo");
+    const { scenes, entries } = scarlett(30.216);
+    expect(nameCardSceneIndices(scenes, assembledSceneSecs(entries))).toEqual([4]);
+  });
+
+  it("387 with an introduction too short even for that (1.8 s): no card — the unset lengths would have put it there", async () => {
+    const { assembledSceneSecs, nameCardSceneIndices } = await import("./longformVideo");
+    const { scenes, entries } = scarlett(28.9868);
+    // Never the cold open 20 s before the name, and no full-frame host take follows it.
+    expect(nameCardSceneIndices(scenes, assembledSceneSecs(entries))).toEqual([]);
+    expect(nameCardSceneIndices(scenes, entries.map(e => e.audioDurationSec))).toEqual([4]);
   });
 });
 
@@ -6080,5 +6096,206 @@ describe("a comparison's sub comes with its words, and a number leaves with its 
     expect([placed.start, placed.end, placed.spokenEnd]).toEqual([22.267, 25.1, 24.476]);
     expect(stillUpAfterWords(placed, 30)).toBe(false);
     expect(stillUpAfterWords({ ...placed, end: 26.6, endFrame: 798, leftInPause: true }, 30)).toBe(true);
+  });
+});
+
+describe("the host's name card sits on the introduction (round 13 verification films, 2026-10-18)", () => {
+  // Self-introduction takes are short by design — the host hands over to a picture a few words after
+  // the name — and the card asked for 3 s (a fixed 0.5 s wait, 0.5 s fades and a 1.5 s hold) plus a
+  // 0.1 s margin. 409's "My name is Gideon Grant, and this channel is for" (3.07 s) missed by 0.025 s
+  // and the card went to the first host take from the START of the film, 11 s before the name; 410's
+  // "I'm Helena Hart, and I read the fine print" (2.51 s) sent it a minute later, onto "One more thing
+  // about drinks…"; 411's "I'm Walter, …" (2.62 s) sent it to the opening line, 30 s before the name.
+  // Each film's scenes as stored (their slices of the master), as assembly measures them.
+  const H = { hostPresent: true } as const;
+  const SPLIT = { hostPresent: true, splitRightUrl: "https://r2.example/split.jpg" } as const;
+  type Row = [number, number, Partial<StoryboardScene>?];
+  const filmOf = async (rows: Row[]) => {
+    const { assembledSceneSecs } = await import("./longformVideo");
+    return {
+      scenes: rows.map(([, , f]) => ({ ...(f ?? {}) }) as StoryboardScene),
+      secs: assembledSceneSecs(rows.map(([a, b]) => ({ sliceStartSec: a, sliceEndSec: b, audioDurationSec: undefined }))),
+    };
+  };
+  const gideon = (intro: [number, number] = [67.3134, 70.388]): Row[] => [
+    [0, 3.01075, { ...H, hostOpener: true }],
+    [3.01075, 12.937],
+    [12.937, 17.2378],
+    [17.2378, 24.901, SPLIT],
+    [24.901, 31.7654],
+    [31.7654, 39.8564],
+    [39.8564, 49.106, SPLIT],
+    [49.106, 50.2075],
+    [50.2075, 51.5511],
+    [51.5511, 55.6569],
+    [55.6569, 61.7232, H], // "And the math always presents itself as the problem. …" — the card went here
+    [61.7232, intro[0]],
+    [intro[0], intro[1], { ...H, hostIntro: true }], // "My name is Gideon Grant, and this channel is for"
+    [intro[1], 76.0756],
+    [76.0756, 76.8483],
+    [76.8483, 77.6837],
+    [77.6837, 79.0389],
+    [79.0389, 82.1842],
+    [82.1842, 92.10735],
+    [92.10735, 94.7266, H], // "Your problem is theft,"
+    [94.7266, 100.675],
+  ];
+  const helena: Row[] = [
+    [0, 2.20081, { ...H, hostOpener: true }],
+    [2.20081, 5.75244],
+    [5.75244, 12.1],
+    [12.1, 13.7468],
+    [13.7468, 15.4539],
+    [15.4539, 17.8119],
+    [17.8119, 25.1146],
+    [25.1146, 31.473],
+    [31.473, 33.983, { ...H, hostIntro: true }], // "I'm Helena Hart, and I read the fine print"
+    [33.983, 37.8661],
+    [37.8661, 43.59, SPLIT],
+    [43.59, 44.37],
+    [44.37, 44.93955],
+    [44.93955, 46.5846],
+    [46.5846, 55.0921],
+    [55.0921, 69.6498],
+    [69.6498, 74.0742],
+    [74.0742, 81.0643, SPLIT],
+    [81.0643, 86.1486],
+    [86.1486, 92.3571],
+    [92.3571, 96.509, H], // "One more thing about drinks, …" — the card went here
+    [96.509, 108.695],
+  ];
+  const walter = (intro: [number, number] = [34.1683, 36.792]): Row[] => [
+    [0, 6.08119, { ...H, hostOpener: true }], // "Every fall, the robins …" — the card went here
+    [6.08119, 10.614],
+    [10.614, 17.6771],
+    [17.6771, 26.7464, SPLIT],
+    [26.7464, intro[0]],
+    [intro[0], intro[1], { ...H, hostIntro: true }], // "I'm Walter, and if you keep an eye on the yard from"
+    [intro[1], 39.7349],
+    [39.7349, 44.4649, H], // "We're going through seven things about the robin …"
+    [44.4649, 50.9824],
+    [50.9824, 54.9814, SPLIT],
+  ];
+
+  it("409: on 'My name is Gideon Grant, and this channel is for', not the take 11 s before it", async () => {
+    const { nameCardSceneIndices } = await import("./longformVideo");
+    const { nameCardOnWindow } = await import("./videoAssembly");
+    const { scenes, secs } = await filmOf(gideon());
+    expect(nameCardSceneIndices(scenes, secs)).toEqual([12]);
+    // Assembly draws it there, held 1.5 s or more.
+    const w = nameCardOnWindow(secs[12]!, true, true)!;
+    expect(w.off - w.on).toBeGreaterThanOrEqual(1.5);
+  });
+
+  it("410: on 'I'm Helena Hart, and I read the fine print' (2.51 s), the wait cut and the 1.5 s hold kept", async () => {
+    const { nameCardSceneIndices } = await import("./longformVideo");
+    const { nameCardOnWindow } = await import("./videoAssembly");
+    const { scenes, secs } = await filmOf(helena);
+    expect(nameCardSceneIndices(scenes, secs)).toEqual([8]);
+    const w = nameCardOnWindow(secs[8]!, true, true)!;
+    expect(w.delay).toBeLessThan(0.1);
+    expect(w.off - w.on).toBeCloseTo(1.5, 6);
+    // The graphics are told the same scene, so nothing is planned under the card there.
+    const { nameTagRange } = await import("../graphics/src/plan/rules");
+    const layout = { scenes: helena.map(([a, b, f], i) => ({ index: i + 1, narrationStartSec: a, narrationEndSec: b, hostPresent: !!f?.hostPresent })), nameCardScenes: [9] };
+    expect(nameTagRange(layout)).toEqual([31.473, 33.983]);
+  });
+
+  it("411: on 'I'm Walter, …' (2.62 s), not the opening line 30 s before it", async () => {
+    const { nameCardSceneIndices } = await import("./longformVideo");
+    const { scenes, secs } = await filmOf(walter());
+    expect(nameCardSceneIndices(scenes, secs)).toEqual([5]);
+  });
+
+  it("an introduction too short even for the shorter edges: the host take right after it, never one before it", async () => {
+    const { nameCardSceneIndices } = await import("./longformVideo");
+    // Walter's introduction cut to 1.8 s: his next take starts 3.8 s after it — the card goes there.
+    const short = await filmOf(walter([34.1683, 35.9683]));
+    expect(nameCardSceneIndices(short.scenes, short.secs)).toEqual([7]);
+    // Gideon's cut to 1.8 s: his next full-frame take is 23 s after it, too far to be read as his
+    // introduction — no card, rather than the take 11 s before the name or the cold open.
+    const far = await filmOf(gideon([67.3134, 69.1134]));
+    expect(nameCardSceneIndices(far.scenes, far.secs)).toEqual([]);
+  });
+});
+
+describe("a dimming caption is a glance, and two never come back to back (round 13 verification films, 2026-10-18)", () => {
+  // 408 (2:04-2:12): "The toilet is fine." as a caption, the picture back for 1.2 s under "There is a
+  // stick in it.", then "If you think one is already in there, the plunger is the wrong tool." — 14
+  // words built word by word over two pages, the second opening on a lowercase "the". The catalogue
+  // asked for 10 words, the hard limit was 24, and nothing kept two captions apart beyond 1 s. Plans,
+  // words and scenes as stored.
+  const words = (s: string) =>
+    s.split(" ").map(t => {
+      const [text, range] = t.split("@");
+      const [start, end] = range.split("-").map(Number);
+      return { text, start, end };
+    });
+  const said = words(
+    "you@121.996-122.136 decide@122.156-122.556 the@122.797-122.897 toilet@122.957-123.317 is@123.357-123.417 getting@123.457-123.737 old.@123.837-124.017 The@124.717-124.817 toilet@124.857-125.157 is@125.217-125.277 fine.@125.377-125.697 There@126.377-126.497 is@126.557-126.617 a@126.657-126.697 stick@126.777-127.038 in@127.078-127.138 it.@127.198-127.298 " +
+      "If@127.898-127.978 you@127.998-128.098 think@128.138-128.318 one@128.438-128.518 is@128.578-128.638 already@128.698-129.018 in@129.078-129.198 there,@129.238-129.478 the@129.778-129.878 plunger@129.958-130.398 is@130.478-130.558 the@130.598-130.678 wrong@130.718-130.938 tool.@130.998-131.319 " +
+      "It@131.979-132.039 can@132.059-132.199 push@132.239-132.459 the@132.499-132.599 stick@132.639-132.879 deeper@133.019-133.359 into@133.439-133.599 the@133.639-133.719 curve.@133.779-134.159 A@134.839-134.899 toilet@134.959-135.36"
+  );
+  const cuts = [118.375, 127.76, 134.693];
+  const scene = (index: number, a: number, b: number, extra: Record<string, unknown> = {}) => ({ index, narrationStartSec: a, narrationEndSec: b, scriptText: "", hostPresent: false, cta: false, split: false, hostOpener: false, ...extra });
+  const film = {
+    scenes: [
+      scene(21, 118.375, 127.76, { video: true, scriptText: "Then the next. The toilet starts flushing slow, and you decide the toilet is getting old. The toilet is fine. There is a stick in it." }),
+      scene(22, 127.76, 134.693, { scriptText: "If you think one is already in there, the plunger is the wrong tool. It can push the stick deeper into the curve." }),
+      scene(23, 134.693, 139.444, { scriptText: "A toilet auger, the short kind made for toilets, can sometimes hook it out." }),
+    ],
+  };
+  const fine = { id: "toilet-is-fine", template: "DimCaption", start: "The toilet is fine. There", startPad: -0.15, end: "The toilet is fine.", endPad: 0.3, props: { phrase: { text: "The toilet is fine.", words: true }, emphasis: ["fine."] } };
+  const plunger = {
+    id: "plunger-wrong-tool-caption",
+    template: "DimCaption",
+    start: "If you think one is already",
+    startPad: -0.15,
+    end: "is the wrong tool.",
+    endPad: 0.3,
+    props: { phrase: { text: "If you think one is already in there, the plunger is the wrong tool.", words: true }, emphasis: ["wrong"] },
+  };
+  const asking = (answers: object[][]) => {
+    const told: string[] = [];
+    const ask = async (_system: string, messages: { content: string }[]) => {
+      told.push(messages[messages.length - 1].content);
+      return JSON.stringify({ cues: answers[told.length - 1] ?? [] });
+    };
+    return { ask, told };
+  };
+
+  it("408: the 14-word plunger caption is refused for its length, and the planner is told why", async () => {
+    const { planGraphics } = await import("../graphics/src/plan/planner");
+    // The repair answer keeps the one that passed and leaves the long one out.
+    const { ask, told } = asking([[fine, plunger], [fine]]);
+    const out = await planGraphics({ words: said, cuts, film, ask, ensureIcon: async () => true });
+    expect(out.rounds[0].problems).toContainEqual({
+      cue: "plunger-wrong-tool-caption",
+      problem: `"If you think one is already in there, the plunger is the wrong tool." is 14 words — DimCaption takes at most 10`,
+    });
+    expect(told[1]).toContain("DimCaption takes at most 10");
+    expect(out.cues.map(c => c.id)).toEqual(["toilet-is-fine"]);
+  });
+
+  it("408: as shipped, the pair is refused by the spacing too, so a Reassemble from the saved plan drops the second", async () => {
+    const { resolveCues } = await import("../graphics/src/cueResolve");
+    const { resolveSets } = await import("../graphics/src/registry");
+    const { checkRules } = await import("../graphics/src/plan/rules");
+    const resolved = resolveCues([fine, plunger], said, { cuts, fps: 30, ...resolveSets() });
+    expect(resolved.map(c => [c.id, c.start, c.end])).toEqual([
+      ["toilet-is-fine", 124.567, 126.533],
+      ["plunger-wrong-tool-caption", 127.767, 131.767],
+    ]);
+    expect(checkRules(resolved, film)).toEqual([
+      expect.objectContaining({ cue: "plunger-wrong-tool-caption", problem: expect.stringMatching(/^darkens the frame again 1\.2 s after toilet-is-fine — two graphics that darken the picture need 3 s between them/) }),
+    ]);
+  });
+
+  it("a short caption 3 s or more after the last one is placed (the next sentence on the same picture)", async () => {
+    const { planGraphics } = await import("../graphics/src/plan/planner");
+    const deeper = { id: "stick-deeper", template: "DimCaption", start: "It can push the stick", startPad: -0.15, end: "deeper into the curve.", endPad: 0.3, props: { phrase: { text: "It can push the stick deeper into the curve.", words: true }, emphasis: ["deeper"] } };
+    const out = await planGraphics({ words: said, cuts, film, ask: asking([[fine, deeper]]).ask, ensureIcon: async () => true });
+    expect(out.rounds[0].problems).toEqual([]);
+    expect(out.cues.map(c => c.id)).toEqual(["toilet-is-fine", "stick-deeper"]);
   });
 });

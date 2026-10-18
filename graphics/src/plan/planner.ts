@@ -21,14 +21,17 @@
 // Pure apart from the two things it is handed: `ask` (the model call — metered by the app) and
 // `ensureIcon` (makes an emoji's image available).
 import { CARD_HOLD_MAX_SEC, CueError, LINGER_SEC, MIN_ON_SCREEN_SEC, MIN_SHOT_SEC, NEW_LINE_GRACE_SEC, blinkBeside, findPhrase, findVerbatim, holdToCut, indexWords, ownSentenceEnd, parseSpokenNumber, resolveCues, sameWord, tokens, tooShortToRead, type CueSpec, type ResolvedCue, type Word } from "../cueResolve";
-import { resolveSets, templateById } from "../registry";
+import { TEMPLATES, resolveSets, templateById } from "../registry";
 import { FPS, LAYOUT, WIDTH } from "../theme";
-import { MIN_GAP_SEC, checkRules, nameTagRange, type FilmLayout, type LayoutScene } from "./rules";
+import { DIM_GAP_SEC, MIN_GAP_SEC, checkRules, nameTagRange, type FilmLayout, type LayoutScene } from "./rules";
 import { VIDEO_MIN_SEEN_SEC, pictureNote, pictureProblem } from "./pictures";
 
 /** The longest a graphic may sit still between one of its words and the next (Hank's job 382: a
  * number graphic opened on "But the one I was proudest of" and waited 9 s for the number). */
 export const MAX_WAIT_SEC = 5;
+
+/** The templates that darken the picture (`TemplateDef.dims`), which keep `DIM_GAP_SEC` apart. */
+const DIMMING = TEMPLATES.filter(t => t.dims).map(t => t.id);
 
 /**
  * The most words a row of a list window (ListWindow, HostListWindow) shows. It was 5, and the
@@ -133,8 +136,9 @@ extra fee of" + 15 %).
 "at": "@words" makes an element appear on those spoken words; "at": 0 makes it appear at the cue start.
 Statement, MythTruth, FactCard, YesNoCard, Quote and every caption (HostCaption, DimCaption, ArrowCaption)
 show a WHOLE SENTENCE as said — from where the sentence starts to its full stop, never stopped at a comma.
-A caption pages a long sentence by itself (8-10 words on screen at a time), so never cut one short to fit;
-a sentence longer than a card's limit is shown as a caption instead of that card.
+A HostCaption or an ArrowCaption pages a long sentence by itself (8-10 words on screen at a time), so never
+cut one short to fit; a DimCaption is read at a glance, so it is a SHORT sentence (≤10 words) and never pages.
+A sentence longer than a card's limit is shown as a caption that pages instead of that card, or not at all.
 Fixed text (titles, labels, subs, list items) is shown whole. When it stands for words the narrator says,
 add "say": "those exact spoken words" beside it, so the graphic stays until they are said.
 "emphasis": ["word."] = ONE word of the shown text, copied exactly as written there (with its punctuation),
@@ -205,7 +209,7 @@ On top of the footage:
   cost) are not compared: leave "compare" out, and the two stand side by side)
 - BarChart — says 2-4 numbers to compare (over b-roll): {"title", "bars": [{"label","value": number,"display": "as said","at": "@the number"}]}
 - BigNumberOverlay — says a number that matters while the picture matters too (over b-roll): same props as BigNumber
-- DimCaption — a striking line over b-roll: {"phrase": phrase (≤10 words), "emphasis"}
+- DimCaption — a striking line over b-roll, one short sentence seen at a glance — never two in a row: {"phrase": phrase (≤10 words), "emphasis"}
 - ArrowCaption — a line pointing at something in the picture ("this one", "that disc", "right here") (over b-roll): {"phrase": phrase (≤10 words), "emphasis"}
 - MythStamp — says a myth over footage (no correction card needed): {"label": "Myth", "at": "@the myth's key words", "phrase": phrase (optional, ≤10 words)}
 - Quote — the host's OWN advice or saying, in one memorable line (over b-roll): {"quote": ONE WHOLE SENTENCE (≤16 words), "author": "the host's name", "emphasis"}.
@@ -239,7 +243,9 @@ What every graphic must keep:
 - No graphic waits: never more than ${MAX_WAIT_SEC} s between one of its words appearing and the next.
 - Where it may go: full-screen cards, window graphics and graphics about the picture go ONLY inside a
   b-roll stretch, with all their words inside that one stretch. Nothing in the call to action (CTA
-  scenes). Nothing about the host's words under the name tag. ${MIN_GAP_SEC} s between graphics.
+  scenes). Nothing about the host's words under the name tag. ${MIN_GAP_SEC} s between graphics, and
+  ${DIM_GAP_SEC} s between two that darken the picture (${DIMMING.join(", ")}), a cut between them or not: the
+  picture dimmed, lifted and dimmed again reads as running subtitles — keep the stronger of the two.
 - A graphic that HIDES the picture (a full-screen card, a window graphic, a Quote) leaves no blink of a
   shot. Either it stays to the picture change — after its last word only the rest of its own sentence is
   said, and the change comes within ${CARD_HOLD_MAX_SEC} s of that sentence's end — or the shot plays on ${MIN_SHOT_SEC} s or
@@ -354,9 +360,12 @@ export function parseSheet(text: string): CueSpec[] {
 const LINE_KEYS = ["headline", "phrase", "quote", "myth", "truth", "title", "text", "fact", "question"] as const;
 
 /** Hard word limits on a template's shown line (Steve's labels are a glance, not a subtitle:
- * job 385's 19-word warning stayed 11.5 s). */
+ * job 385's 19-word warning stayed 11.5 s). A DimCaption takes what the catalogue asks of it, one
+ * page (`CAPTION_PAGE_WORDS`): at 24 it let job 408's "If you think one is already in there, the
+ * plunger is the wrong tool." (14 words) build word by word over two pages, the second opening on a
+ * lowercase "the" — a subtitle, not a line to glance at. HostCaption and ArrowCaption still page. */
 export const MAX_WORDS: Record<string, number> = {
-  Statement: 12, MythTruth: 14, TwoPoint: 12, WarningLabel: 10, HostCaption: 24, DimCaption: 24, Quote: 16,
+  Statement: 12, MythTruth: 14, TwoPoint: 12, WarningLabel: 10, HostCaption: 24, DimCaption: 10, Quote: 16,
   TitleOverFootage: 10, ArrowCaption: 20, IconCallout: 8, FactCard: 14, YesNoCard: 14, MythStamp: 10,
 };
 
