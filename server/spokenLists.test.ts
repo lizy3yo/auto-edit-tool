@@ -448,4 +448,21 @@ describe("a step offered as a choice is part of the step before it (A6, Helena's
     expect(stepsByShape("Pick one up, look it over, or ask the seller, and you'll know.")).toBeNull();
     expect(stepsByShape("Pick one up, look it over, or ask the seller, and I'll explain the rest.")).toBeNull();
   });
+
+  it("only an 'or' that leads into the step makes it a choice; one the model left off the step before does not", () => {
+    // said right before the step, "or else", or opening the comma piece ("…, or you can step back"): a choice
+    const ask = (lead: string) => ask399.replace(", or step back", lead);
+    const ways = ["wait until everyone's been served", "catch a flight attendant as they pass", "step back to the galley", "phrase it as an offer"];
+    expect(steps(ask(", or else step back"), ways)?.[0].items[1]).toBe("catch a flight attendant as they pass, or else step back to the galley");
+    expect(steps(ask(", or you can step back"), ways)?.[0].items[1]).toBe("catch a flight attendant as they pass, or you can step back to the galley");
+    // the gap may hold words the model trimmed off a real step ("or two", "or so"): those steps stay apart
+    expect(steps("Let it sit a minute or two, then wipe it off, and buff it dry.", ["let it sit a minute", "wipe it off", "buff it dry"])).toEqual([
+      { sentence: 0, items: ["let it sit a minute", "wipe it off", "buff it dry"], kind: "steps" },
+    ]);
+    expect(joinChoiceSteps("Sand it for an hour or so, then wipe it down, and oil it.", ["Sand it for an hour", "wipe it down", "oil it"])).toEqual([
+      "Sand it for an hour",
+      "wipe it down",
+      "oil it",
+    ]);
+  });
 });

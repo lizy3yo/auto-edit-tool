@@ -346,15 +346,22 @@ const SUBJECT_START = /^(?:i|you|we|he|she|they|it|there|that|this|these|those|m
 const OFFERS_A_CHOICE = /^(?:or|alternatively)\b/i;
 const CHOICE_WORDS = new Set(["or", "alternatively"]);
 
+/** The words between two steps open a new comma piece on a choice: "…as they pass, or step back". */
+const CHOICE_PIECE = /^\s*[,;]\s*(?:or|alternatively)\b/i;
+
 /**
  * A step list with every CHOICE joined to the step before it: a step that opens on "or" /
- * "alternatively", or has one in the words between it and the step before (the model leaves the
- * joining "or" out of its items, job 399's "…as they pass, or step back to the galley"), becomes part
- * of that step — one item, the sentence's own words from the first way's start to the choice's end.
- * The first step is never joined to anything (job 399's "Or look underneath this video, open the
- * description, and tap the link at the top." offers the whole sequence as a choice, and its steps
- * are still done in order). A list whose items are not found in order is returned as it is, for
- * `validateSpokenList` to refuse; an item not joined keeps its own text. Pure.
+ * "alternatively", or that the words between it and the step before lead into with one (the model
+ * leaves the joining "or" out of its items, job 399's "…as they pass, or step back to the galley")
+ * — said right before the step ("or", "or else"), or opening a comma piece ("…, or you can step
+ * back") — becomes part of that step: one item, the sentence's own words from the first way's start
+ * to the choice's end. An "or" elsewhere in those words is no choice: they may hold up to
+ * `GAP_MAX_WORDS` words the model left off the step before ("let it sit a minute | or two, then |
+ * wipe it off"), and that "or" belongs to that step. The first step is never joined to anything
+ * (job 399's "Or look underneath this video, open the description, and tap the link at the top."
+ * offers the whole sequence as a choice, and its steps are still done in order). A list whose items
+ * are not found in order is returned as it is, for `validateSpokenList` to refuse; an item not
+ * joined keeps its own text. Pure.
  */
 export function joinChoiceSteps(sentence: string, items: string[]): string[] {
   const spans = tokenSpans(sentence);
@@ -371,7 +378,13 @@ export function joinChoiceSteps(sentence: string, items: string[]): string[] {
   const out: { a: number; b: number; item: string }[] = [];
   for (const f of found) {
     const prev = out[out.length - 1];
-    const choice = !!prev && (CHOICE_WORDS.has(toks[f.a]) || toks.slice(prev.b, f.a).some(t => CHOICE_WORDS.has(t)));
+    const gap = prev ? toks.slice(prev.b, f.a) : [];
+    const choice =
+      !!prev &&
+      (CHOICE_WORDS.has(toks[f.a]) ||
+        (gap.length > 0 && CHOICE_WORDS.has(gap[gap.length - 1])) ||
+        gap.slice(-2).join(" ") === "or else" ||
+        CHOICE_PIECE.test(sentence.slice(spans[prev.b - 1].end, spans[f.a].start)));
     if (!choice) out.push({ ...f });
     else {
       prev.b = f.b;
