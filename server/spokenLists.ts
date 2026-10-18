@@ -778,13 +778,26 @@ export function stepsByShape(sentence: string): string[] | null {
   const last = pieces[pieces.length - 1];
   if (!/^(?:and|then|and then)\s/i.test(last)) return null;
   const items = pieces.map(p => unmaskSeriesCommas(p.replace(/^(?:and then|and|then)\s+/i, "").replace(/[.!?]+$/, "").trim()));
-  return items.every(isInstruction) ? items : null;
+  // …never a date or a number among the pieces ("in 2019, in 2020, and in 2021").
+  return items.every(t => isInstruction(t) && !/\d/.test(t)) ? items : null;
 }
+
+/**
+ * A past or -ing form ("grabbed", "making"), never an instruction's plain verb — though a plain verb
+ * may END like one: "feed", "bleed", "speed" (one or two letters before "-eed"; "agreed" is past) and
+ * "bring", "string", "sing" (no vowel before the "-ing"). Read as past forms, they sank job 352's "Bring
+ * your cut list, match the short parts to short boards, and save the long, clear stock…" by its shape,
+ * and — once a model's two steps were held to `isInstruction` too (job 408) — would have refused "fill
+ * the feeder, and bring it inside at dusk". Pure.
+ */
+const pastOrIng = (w: string) =>
+  /ing$/.test(w) ? /[aeiouy]/.test(w.slice(0, -3)) : /ed$/.test(w) && !/^(?:[a-z]{0,2}eed|proceed|succeed|exceed|shred|embed)$/.test(w);
 
 /**
  * Whether one step is a short instruction that starts on its own verb-like word — no subject ("I
  * went…"), no determiner ("a saw" is a thing), no aside ("Honestly"), at most `STEP_MAX_WORDS` words
- * in each of its ways (`waysOf`). Pure.
+ * in each of its ways (`waysOf`). A number inside it is the shape rules' concern only (`stepsByShape`):
+ * "cut it to 24 inches" is an instruction all the same. Pure.
  */
 function isInstruction(t: string): boolean {
   // The step itself is its first way; a choice joined to it is held only to the length limit.
@@ -805,10 +818,9 @@ function isInstruction(t: string): boolean {
     !/ly$/.test(first) &&
     !JOINERS.has(first) &&
     // An instruction opens on its plain verb ("drill", "oil", "give"): never a past or -ing form,
-    // never "money was tight" (a subject then its verb), never a date or a number.
-    !/(?:ed|ing)$/.test(first) &&
-    !STATE_VERB.test(words[1] ?? "") &&
-    !/\d/.test(t)
+    // never "money was tight" (a subject then its verb).
+    !pastOrIng(first) &&
+    !STATE_VERB.test(words[1] ?? "")
   );
 }
 
@@ -821,17 +833,17 @@ const VERB_PARTICLE = new Set(["at", "to", "on", "onto", "into", "in", "over", "
  * Whether one step does something TO A THING it names: past its verb, a noun phrase led by "a/the/
  * your/…" or a count ("hold your phone up to the screen", "tap the link"), or "it/them/…" right after
  * the verb, or after the verb and one particle, for a thing named before ("drain it outside", "store it
- * sealed", "look at it"). A bare verb names nothing ("flush", "follow"), and neither does a step that
- * only says how, when or where ("go slow", "wait until everyone's been served", "look at what it gives
- * back"). Pure.
+ * sealed", "look at it"), or a NAME past the verb ("open Etsy", "tap Sell" — a capital that is not
+ * "I"). A bare verb names nothing ("flush", "follow"), and neither does a step that only says how, when
+ * or where ("go slow", "wait until everyone's been served", "look at what it gives back"). Pure.
  */
 function actsOnAThing(step: string): boolean {
-  const words = waysOf(step)[0]
-    .trim()
-    .split(/\s+/)
+  const raw = waysOf(step)[0].trim().split(/\s+/).filter(Boolean);
+  const words = raw
     .map(w => w.toLowerCase().replace(/’/g, "'").replace(/^[^a-z0-9$]+|[^a-z0-9%']+$/g, ""))
     .filter(Boolean);
   if (words.length < 2) return false;
+  if (raw.slice(1).some(w => /^[A-ZÀ-ÖØ-Þ]/.test(w.replace(/^["'“‘(]+/, "")) && !/^I(?:['’]\w+)?\W*$/.test(w))) return true;
   if (OBJECT_WORD.has(words[1]) || (VERB_PARTICLE.has(words[1]) && OBJECT_WORD.has(words[2] ?? ""))) return true;
   return words.slice(1).some((_, k) => DETERMINER.test(words.slice(k + 1).join(" ")));
 }
@@ -866,9 +878,10 @@ export function stepsAreASequence(items: string[]): boolean {
  * them, two single words joined by a comma read as two actions as easily as two things — "Flush, and
  * follow." passed every rule a list of things is held to, by sentence shape and by the model alike,
  * and became the false list above. One of them a NAME is a thing all the same ("on Etsy, or eBay"): a
- * capital that is not the sentence's first letter. Three or more bare words stay a list ("Wash,
- * towel, dryer, brush", job 319), and so do two with words of their own ("brown sugar, and butter").
- * Pure.
+ * capital that is not the sentence's first letter — read where the sentence SAYS the word, since a
+ * list graphic's rows come capitalised ("1 Flush → 2 Follow"). Three or more bare words stay a list
+ * ("Wash, towel, dryer, brush", job 319), and so do two with words of their own ("brown sugar, and
+ * butter"). Pure.
  */
 export function twoBareWords(sentence: string, items: string[]): boolean {
   if (!Array.isArray(items) || items.length !== 2) return false;
@@ -876,8 +889,10 @@ export function twoBareWords(sentence: string, items: string[]): boolean {
   return items.every(i => {
     const word = stripJoiners(String(i ?? "").trim()).replace(/[.!?;:,]+$/, "").trim();
     if (!word || /\s/.test(word) || DETERMINER.test(word)) return false;
-    const name = opening.startsWith(word) ? /[A-Z]/.test(word.slice(1)) : /[A-Z]/.test(word);
-    return !name;
+    const said = new RegExp(`(?<![\\p{L}\\p{N}'’])${word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu").exec(opening);
+    const form = said ? said[0] : word;
+    const atStart = said ? said.index === 0 : opening.startsWith(word);
+    return !/[A-Z]/.test(atStart ? form.slice(1) : form);
   });
 }
 

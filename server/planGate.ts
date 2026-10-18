@@ -981,7 +981,10 @@ function finishSentenceBeforeHost(
 /**
  * A host take that stops mid-sentence where it may not (`naturalBreak`) — job 400 (1:31): "…I want
  * to show you that the arithmetic | was never your problem.", the first half of a picture split for
- * length, made a check-in. Four ways out, in order:
+ * length, made a check-in. The ways out, in order:
+ *  0. A host that stopped on a preposition at no break hands over right BEFORE it, on the terms of
+ *     step 2 (job 408: "…for people | in older houses and apartments…") — ahead of finishing the
+ *     sentence, since such a cut is the shot list handing over to what the preposition leads to.
  *  1. The host FINISHES THE SENTENCE, taking its words off the plain pictures after it (never a list
  *     item's), while the take stays under its ceiling — `HOST_SENTENCE_MAX_SEC`, or
  *     `HOOK_MAX_WHOLE_SEC` on the opening and the introduction, which the shot list makes hand over
@@ -990,14 +993,13 @@ function finishSentenceBeforeHost(
  *     ending up against it.
  *  2. Only when the cut is at no break: the host hands over at ITS OWN LAST clause punctuation (the
  *     voice already pauses there), keeping `HOST_HANDOFF_MIN_WORDS`, its own floor, and its name on
- *     the introduction. Or, when it stopped on a preposition, it hands over right BEFORE that
- *     preposition (2b, job 408: "…for people | in older houses and apartments…"), on the same terms.
+ *     the introduction.
  *  3. Or it says the picture's words up to THE NEXT natural break and hands over there — job 400's
  *     opening, 2.5 s of "There is a man standing in the greeting card | aisle of a pharmacy…",
  *     too short to give anything back and too long a sentence to finish as a hook.
  *  4. Or, with no room to go on, it hands over at its own last word break (the same floor).
- * 2-4 mark both pieces as the hand-off they now are. Null when nothing fits (the caller demotes the
- * take, or leaves a protected one and reports it). Pure — unit-tested through `enforcePlanRules`.
+ * All but 1 mark both pieces as the hand-off they now are. Null when nothing fits (the caller demotes
+ * the take, or leaves a protected one and reports it). Pure — unit-tested through `enforcePlanRules`.
  */
 function finishSentenceAfterHost(
   scenes: StoryboardScene[],
@@ -1011,6 +1013,21 @@ function finishSentenceAfterHost(
   if (!host.hostPresent || from == null || to == null) return null;
   const room = opts.budgetSec == null ? Infinity : opts.budgetSec + 0.5 - hostSeconds(scenes);
   const ceiling = host.hostOpener || host.hostIntro ? HOOK_MAX_WHOLE_SEC : HOST_SENTENCE_MAX_SEC;
+  // What every hand-off below needs — null when the take cannot hand over to the picture after it.
+  const hand = handOffTools();
+
+  // 0. BEFORE THE PREPOSITION — a host that stops on one hands it, with its object, to the picture:
+  // job 408's "…This channel is for people in | older houses and apartments…" goes "…for people | in
+  // older houses and apartments…". Going on instead (3) found its first break inside the object,
+  // "…in older houses | and apartments", splitting what the preposition was about. Ahead of finishing
+  // the sentence (1): replayed on job 189's storyboard, the shot list's hand-off "…fitting thin strips
+  // of wood together into | patterns, the kind of lattice you see in Japanese sliding doors." was
+  // finished on the host instead, and the picture of the patterns was dropped.
+  if (hand && hand.hw.length > 1 && endsOnPreposition(hand.hw)) {
+    const b = hand.hw.length - 1;
+    if (breakBetween(hand.hw.slice(0, b).join(" "), `${hand.hw[b]} ${textOf(hand.next)}`) && hand.keeps(b))
+      return hand.back(b);
+  }
 
   // 1. FORWARD — walk the pictures after the host to where its sentence ends.
   let add = 0;
@@ -1054,53 +1071,11 @@ function finishSentenceAfterHost(
     };
   }
 
-  // Already at a break — what it lacks is its sentence, which moving the cut does not give it.
-  const next = scenes[i + 1];
-  const nFrom = next?.narrationStartSec;
-  const nTo = next?.narrationEndSec;
-  if (!plainPicture(next) || !sameRegister(next, host) || nFrom == null || nTo == null) return null;
-  if (naturalBreak(host, next)) return null;
-  const hw = wordsOf(textOf(host));
-  const handOff = (t: number, hostText: string, picText: string, after: string) => {
-    reslice(next, t, nTo, picText);
-    reslice(host, from, t, hostText);
-    host.wordCut = true;
-    next.wordCut = true;
-    return { scenes, how: `now hands over at a natural break, after "${after}"` };
-  };
+  if (!hand) return null;
+  const { next, nFrom, nTo, hw, handOff, keeps, back } = hand;
 
   // 2. BACK — the host hands over at its own last clause punctuation (the voice pauses there).
-  const floor = Math.max(HOST_HANDOFF_MIN_SEC, host.minHoldSec ?? 0);
-  const at = (b: number) => timeAtWord(host, b, opts.silences, opts.words);
-  // The introduction keeps the WHOLE name on the host, asked the way the shot list asks it
-  // (`namesHostBefore`): asked of the kept words alone, "I'm Hank" counted as an introduction and a
-  // walk back from a cut at no break handed over between the two words — "…I'm Hank | Hardwood
-  // talking to you…", "…I'm Sawdust | Sam…". With no host name there is no name to keep whole.
-  const keepsName = (b: number) => {
-    const said = hw.slice(0, b).join(" ");
-    return params.hostName?.trim()
-      ? namesHostBefore(hw.join(" "), params.hostName, said.length)
-      : introducesHost(said, params.hostName);
-  };
-  const keeps = (b: number) =>
-    b >= HOST_HANDOFF_MIN_WORDS && at(b) - from >= floor && (!host.hostIntro || keepsName(b));
-  const back = (b: number) =>
-    handOff(
-      at(b),
-      hw.slice(0, b).join(" "),
-      `${hw.slice(b).join(" ")} ${textOf(next)}`.trim(),
-      hw.slice(Math.max(0, b - 3), b).join(" ")
-    );
   for (let b = hw.length - 1; b >= 1; b--) if (endMark(hw[b - 1]) && keeps(b)) return back(b);
-
-  // 2b. BEFORE THE PREPOSITION — a host that stops on one hands it, with its object, to the picture:
-  // job 408's "…This channel is for people in | older houses and apartments…" goes "…for people | in
-  // older houses and apartments…". Going on instead (3) found its first break inside the object,
-  // "…in older houses | and apartments", splitting what the preposition was about.
-  if (hw.length > 1 && endsOnPreposition(hw)) {
-    const b = hw.length - 1;
-    if (breakBetween(hw.slice(0, b).join(" "), `${hw[b]} ${textOf(next)}`) && keeps(b)) return back(b);
-  }
 
   // 3. ON — the host says the picture's words up to the next break, and hands over there. What is
   // left of the picture must read, and must not blink between two takes (`PICTURE_RUN_MIN_SEC`).
@@ -1131,17 +1106,62 @@ function finishSentenceAfterHost(
     if (breakBetween(hw.slice(0, b).join(" "), hw.slice(b).join(" ")) && keeps(b)) return back(b);
   }
   return null;
+
+  /**
+   * The picture after the host and the ways to hand over to it — null when the take cannot: that
+   * picture is not a plain one of its own register, or the cut is already at a break (what such a
+   * take lacks is its sentence, which moving the cut does not give it).
+   */
+  function handOffTools() {
+    const next = scenes[i + 1];
+    const nFrom = next?.narrationStartSec;
+    const nTo = next?.narrationEndSec;
+    if (from == null || !plainPicture(next) || !sameRegister(next, host) || nFrom == null || nTo == null) return null;
+    if (naturalBreak(host, next)) return null;
+    const start = from;
+    const hw = wordsOf(textOf(host));
+    const handOff = (t: number, hostText: string, picText: string, after: string) => {
+      reslice(next, t, nTo, picText);
+      reslice(host, start, t, hostText);
+      host.wordCut = true;
+      next.wordCut = true;
+      return { scenes, how: `now hands over at a natural break, after "${after}"` };
+    };
+    // Where the host may stop when it hands back words: `HOST_HANDOFF_MIN_WORDS`, its own floor, and
+    // on the introduction its WHOLE name, asked the way the shot list asks it (`namesHostBefore`):
+    // asked of the kept words alone, "I'm Hank" counted as an introduction and a walk back from a cut
+    // at no break handed over between the two words — "…I'm Hank | Hardwood talking to you…", "…I'm
+    // Sawdust | Sam…". With no host name there is no name to keep whole.
+    const floor = Math.max(HOST_HANDOFF_MIN_SEC, host.minHoldSec ?? 0);
+    const at = (b: number) => timeAtWord(host, b, opts.silences, opts.words);
+    const keepsName = (b: number) => {
+      const said = hw.slice(0, b).join(" ");
+      return params.hostName?.trim()
+        ? namesHostBefore(hw.join(" "), params.hostName, said.length)
+        : introducesHost(said, params.hostName);
+    };
+    const keeps = (b: number) =>
+      b >= HOST_HANDOFF_MIN_WORDS && at(b) - start >= floor && (!host.hostIntro || keepsName(b));
+    const back = (b: number) =>
+      handOff(
+        at(b),
+        hw.slice(0, b).join(" "),
+        `${hw.slice(b).join(" ")} ${textOf(next)}`.trim(),
+        hw.slice(Math.max(0, b - 3), b).join(" ")
+      );
+    return { next, nFrom, nTo, hw, handOff, keeps, back };
+  }
 }
 
 /**
  * Whether a host's words stop right after a preposition, with no punctuation ("…for people in"): a
- * take that stops there at no break is handed over right before it (step 2b above, job 408). Pure.
+ * take that stops there at no break is handed over right before it (step 0 above, job 408). Not "to":
+ * a picture never opens on it (`PREP_START`, "every notch has | to be dead on"). Pure.
  */
 function endsOnPreposition(words: string[]): boolean {
   const last = words[words.length - 1];
   if (!last || endMark(last)) return false;
-  const l = plainWord(last);
-  return PREPOSITION.has(l) || l === "to";
+  return PREPOSITION.has(plainWord(last));
 }
 
 /** Words that, walking back from a subject | verb cut, open a part of the subject (step 4 above). */

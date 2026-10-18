@@ -1548,4 +1548,50 @@ describe("a host take never stops right after a preposition (job 408)", () => {
     const r = enforcePlanRules(scenes, params);
     expect(r.scenes.map(s => s.scriptText)).toEqual(scenes.map(s => s.scriptText));
   });
+
+  // Job 189's shot list handed over right after "into", before the thing a picture shows. The sentence
+  // is short enough to finish on the host, and finishing it came first: replayed, the host said the
+  // patterns and their picture was dropped. Handing over before the preposition comes ahead of that.
+  const ends = (scenes: StoryboardScene[]) =>
+    checkPlan(scenes, params).findings.filter(f => f.rule === 7 && /ends mid-sentence/.test(f.detail));
+  const kumiko = (hostText: string, hostSec: number) => {
+    const scenes = film([
+      ["H", 5, sentence(1)],
+      ["P", 6, sentence(2)],
+      ["H", hostSec, hostText],
+      ["P", 3.5, "patterns, the kind of lattice you see in Japanese sliding doors."],
+      ["P", 6, sentence(3)],
+      ["H", 5, sentence(4)],
+    ]);
+    scenes[2].wordCut = true;
+    scenes[3].wordCut = true;
+    return scenes;
+  };
+
+  it("a check-in that stops on 'into' hands over before it — the picture of the patterns stays, the host does not say them", () => {
+    const scenes = kumiko("Kumiko is the Japanese craft of fitting thin strips of wood together into", 4);
+    expect(ends(scenes).map(f => f.scene)).toEqual([3]);
+    const r = enforcePlanRules(scenes, params);
+    expect(r.scenes.map(s => s.scriptText)).toEqual([
+      sentence(1),
+      sentence(2),
+      "Kumiko is the Japanese craft of fitting thin strips of wood together",
+      "into patterns, the kind of lattice you see in Japanese sliding doors.",
+      sentence(3),
+      sentence(4),
+    ]);
+    expect(r.scenes[2].hostPresent).toBe(true);
+    expect(r.scenes[3].hostPresent).toBeFalsy();
+    expect(r.scenes[2].narrationEndSec).toBe(r.scenes[3].narrationStartSec);
+    expect(ends(r.scenes)).toEqual([]);
+  });
+
+  it("a take too short to give the preposition back still finishes its sentence, as before", () => {
+    // Three words before "into" — under `HOST_HANDOFF_MIN_WORDS` — so nothing can go back.
+    const r = enforcePlanRules(kumiko("Kumiko fits strips into", 2.5), params);
+    expect(r.scenes[2].scriptText).toBe(
+      "Kumiko fits strips into patterns, the kind of lattice you see in Japanese sliding doors."
+    );
+    expect(r.scenes.map(s => s.scriptText)).toEqual([sentence(1), sentence(2), r.scenes[2].scriptText, sentence(3), sentence(4)]);
+  });
 });

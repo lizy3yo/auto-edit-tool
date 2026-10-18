@@ -1342,5 +1342,31 @@ describe("two steps or two bare words are a list only when they name things (job
     const around = "So. We will go the way the water goes. Flush, and follow. Each of the nine stops somewhere.";
     expect(notAListAsSaid(around, ["Flush", "follow"])).toMatch(/two bare words/);
     expect(notAListAsSaid("Today I'm ranking Etsy, and eBay.", ["Etsy", "eBay"])).toBeUndefined();
+    // A list graphic's rows come capitalised ("1 Flush → 2 Follow"): a name is read where it is said.
+    expect(notAListAsSaid(around, ["Flush", "Follow"])).toMatch(/two bare words/);
+    expect(twoBareWords(flush, ["FLUSH", "Follow"])).toBe(true);
+    expect(twoBareWords("Today I'm ranking etsy, and ebay.", ["Etsy", "Ebay"])).toBe(true); // said bare
+  });
+
+  it("the floor on two steps refuses no real instruction: a plain verb ending like a past form, a number, a name", () => {
+    // "feed", "bring", "string" are plain verbs; "agreed" and "making" are not.
+    expect(stepsAreASequence(["fill the feeder", "bring it inside at dusk"])).toBe(true);
+    expect(stepsAreASequence(["feed the cat first", "then fill her water bowl"])).toBe(true);
+    expect(stepsAreASequence(["string the beads", "tie the ends"])).toBe(true);
+    expect(stepsAreASequence(["agreed on a price", "shook hands with him"])).toBe(false);
+    expect(stepsAreASequence(["making the cut", "sanding the edge"])).toBe(false);
+    // A number inside a step is an instruction all the same; dates stay out of the shape rules.
+    expect(stepsAreASequence(["cut the board to 24 inches", "sand the edges"])).toBe(true);
+    expect(stepsByShape("We went in 2019, in 2020, and in 2021.")).toBeNull();
+    // A name past the verb is a thing it acts on.
+    expect(stepsAreASequence(["open Etsy on your phone", "tap Sell"])).toBe(true);
+    expect(stepsAreASequence(["do what I say", "go slow"])).toBe(false); // "I" is no name
+    // Job 352: a plain verb ending in "-ing" no longer sinks a list of steps by its shape.
+    const cutList = "Bring your cut list, match the short parts to short boards, and save the long, clear stock for the places that need it.";
+    expect(stepsByShape(cutList)).toEqual([
+      "Bring your cut list",
+      "match the short parts to short boards",
+      "save the long, clear stock for the places that need it",
+    ]);
   });
 });

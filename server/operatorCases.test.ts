@@ -5940,4 +5940,32 @@ describe("Werner's job 408 at 0:54 and 1:08: no host take ends on a preposition,
       { sentence: 5, items: ["Hold your phone up to the screen with its camera on", "aim it at the little black and white code"], kind: "steps" },
     ]);
   });
+
+  it("a shot-list hand-off right after a preposition keeps its picture — job 189's kumiko patterns are not said by the host instead", async () => {
+    // Job 189 (0:30): the shot list handed over "…fitting thin strips of wood together into | patterns,
+    // the kind of lattice you see in Japanese sliding doors." The sentence fits a host take, and
+    // finishing it came before handing over at the preposition: replayed, the host said the patterns
+    // and their picture was gone. Scene ranges are the job's own.
+    const { enforcePlanRules } = await import("./planGate");
+    const params = { faceImageUrl: "https://example.com/host.jpg", hostName: "Hank Hardwood" } as any;
+    const r = enforcePlanRules(
+      [
+        at(11, 26.7643, 28.4797, "on a market table."),
+        at(12, 28.4797, 30.5545, "Start with the one that lost."),
+        at(13, 30.5545, 34.2148, "Kumiko is the Japanese craft of fitting thin strips of wood together into", { hostPresent: true }),
+        at(14, 34.2148, 38.0545, "patterns, the kind of lattice you see in Japanese sliding doors."),
+        at(15, 38.0545, 40.5216, "Mine was a plain grid about a foot square,"),
+        at(16, 40.5216, 43.9902, "made from pine screen molding at about $3 a stick."),
+      ],
+      params
+    );
+    expect(r.scenes.map(s => [!!s.hostPresent, s.scriptText])).toEqual([
+      [false, "on a market table."],
+      [false, "Start with the one that lost."],
+      [true, "Kumiko is the Japanese craft of fitting thin strips of wood together"],
+      [false, "into patterns, the kind of lattice you see in Japanese sliding doors."],
+      [false, "Mine was a plain grid about a foot square,"],
+      [false, "made from pine screen molding at about $3 a stick."],
+    ]);
+  });
 });
