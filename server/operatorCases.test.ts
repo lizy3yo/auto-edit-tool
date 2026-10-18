@@ -3476,3 +3476,58 @@ describe("a pearl strand on a dresser is a necklace, not the host (round 9's rev
     expect(scenes[2].showSubject).toMatch(/worn at the host's own neck/);
   });
 });
+
+describe("split panels are checked against their lines and name one thing (round 11, jobs 401 and 406)", async () => {
+  // The line check ran before any split existed and never read a panel, so a split's picture half
+  // shipped whatever its old cutaway or the panel rewrite said: job 401 scene 26 an empty chair for
+  // "I pull my chair in closer", job 406 scene 19 "a guided sharpening system or belt sander setup".
+  const { applyPanelFixes, oneThingPanels, parsePanelFixes, parsePictureFixes } = await import("./shotList");
+  const HOST = "the channel's host, exactly as in their host photo, seated in a chair talking directly to the camera";
+  const split = (index: number, line: string, panelWords: string, o: Partial<StoryboardScene> = {}) =>
+    ({ index, narration: line, scriptText: line, hostPresent: true, visualPrompt: HOST, splitVisual: panelWords, ...o }) as StoryboardScene;
+  const garage: KeyThing[] = [
+    { main: true, name: "sharpening system", look: "a tabletop guided knife sharpener, black plastic base with metal guide rods, clamps to bench edge" },
+    { name: "belt sharpening setup", look: "a benchtop machine with a spinning abrasive belt, metal frame, bolted to the garage workbench" },
+  ];
+
+  it("job 406 scene 19: the panel draws one thing, and is drawn from that thing's pictures", () => {
+    const s = split(
+      19,
+      "A guided sharpening system or a belt setup runs a hundred to three hundred dollars, and that’s the whole buy-in.",
+      "A guided sharpening system or belt sander setup sitting on a garage workshop bench, viewed from a step back, with hand tools and wall storage visible at the edges.",
+      { keyThing: "belt sharpening setup", otherKeyThings: ["sharpening system"] }
+    );
+    expect(oneThingPanels([s], garage)).toBe(1);
+    const drawn = buildSplitRightScene(s);
+    expect(drawn.showSubject).not.toMatch(/\bor\b/);
+    expect(drawn.showSubject).toMatch(/^A guided sharpening system sitting on a garage workshop bench/);
+    expect(s.keyThing).toBe("sharpening system");
+    expect(s.visualPrompt).toBe(HOST);
+  });
+
+  it("job 401 scene 26: a figure of speech the check rewrote is the panel; the host take is untouched", () => {
+    const line = "When a man like that sits down to write about time, I pull my chair in closer.";
+    const s = split(26, line, "A wooden chair pulled close to a desk in a quiet study, positioned as if just moved nearer.", { keyThing: "chair" });
+    const scenes = [s];
+    const answer = JSON.stringify({
+      pictures: [{ id: 0, about: "a man writing about time", shows_it: false, show: "a half-unrolled scroll and a reed pen on a wooden desk", thing: null }],
+    });
+    // The line check proper still never reads a panel; the panel pass does.
+    expect(parsePictureFixes(answer, scenes)).toEqual([]);
+    expect(applyPanelFixes(scenes, parsePanelFixes(answer, scenes), [{ name: "chair", look: "a wooden chair with a curved back" }])).toBe(1);
+    expect(buildSplitRightScene(s).showSubject).toBe("a half-unrolled scroll and a reed pen on a wooden desk");
+    expect(s.keyThing).toBeUndefined();
+    expect(s.visualPrompt).toBe(HOST);
+    expect(s.scriptText).toBe(line);
+  });
+
+  it("a panel the check says is right, and a panel with one thing, stay exactly as they were", () => {
+    const words = "A tabletop knife sharpener clamped to a garage workbench, a dull kitchen knife laid in its guide slot.";
+    const s = split(16, "Number one: knife and tool sharpening.", words, { keyThing: "sharpening system" });
+    const fixes = parsePanelFixes(JSON.stringify({ pictures: [{ id: 0, about: "knife sharpening", shows_it: true }] }), [s]);
+    expect(applyPanelFixes([s], fixes, garage)).toBe(0);
+    expect(oneThingPanels([s], garage)).toBe(0);
+    expect(s.splitVisual).toBe(words);
+    expect(s.keyThing).toBe("sharpening system");
+  });
+});

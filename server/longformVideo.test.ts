@@ -2204,6 +2204,28 @@ describe("brollDepictsBook / non-CTA book guard", () => {
     );
   });
 
+  it("job 406 scene 19: a panel rewrite that kept the line's 'X or Y' names one thing", async () => {
+    // The line offered a choice and the panel kept both; the picture model drew one of them.
+    const scenes = [
+      sc({
+        index: 0,
+        hostPresent: true,
+        narration: "A guided sharpening system or a belt setup runs a hundred to three hundred dollars.",
+        visualPrompt: "the host talking",
+        splitVisual: "A guided sharpening system or belt sander setup sitting on a workshop bench.",
+      }),
+    ];
+    mockInvoke.mockResolvedValue({
+      text: "A guided sharpening system or belt sander setup sitting on a garage workshop bench, viewed from a step back.",
+    } as any);
+    await enhanceBrollPrompts(scenes, baseParams);
+    expect(scenes[0].splitVisual).toBe(
+      "A guided sharpening system sitting on a garage workshop bench, viewed from a step back."
+    );
+    expect(scenes[0].visualPrompt).toBe("the host talking");
+    expect(SPLIT_PANEL_PERSON_FREE_DIRECTIVE).toMatch(/name ONE thing — never "X or Y", even when the narration offers a choice/);
+  });
+
   it("scopes the splitVisual pass to onlyIndices, and runs with zero cutaways in scope", async () => {
     const scenes = [
       sc({

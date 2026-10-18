@@ -51,7 +51,9 @@ import {
   settleVideoKind,
   videoKind,
   fitPicturesToLines,
+  fitSplitPanelsToLines,
   judgeSelfMoving,
+  oneThingPanels,
   ownTypedPicture,
   ownTypedPanel,
 } from "./shotList";
@@ -5809,7 +5811,12 @@ export const SPLIT_PANEL_PERSON_FREE_DIRECTIVE =
   "panel is always a real photograph of real objects.\n" +
   "IMPORTANT: the narration decides the SUBJECT; the original prompt only supplies wording. If " +
   "the original prompt is about something this narration is not about, DISCARD it entirely and " +
-  'describe the narrated subject instead — here that outranks the "do not add new objects" rule.';
+  'describe the narrated subject instead — here that outranks the "do not add new objects" rule.\n' +
+  // Job 406 scene 19 (2026-10-18): the line offered a choice ("a guided sharpening system or a belt
+  // setup runs…") and the panel kept both, "… or belt sander setup …" — this lane's system prompt
+  // never said one thing. `oneThingPanels` cuts what still gets through.
+  'IMPORTANT: name ONE thing — never "X or Y", even when the narration offers a choice. The ' +
+  "picture model draws one thing.";
 
 /**
  * The CTA lane's replacement for `SPLIT_PANEL_PERSON_FREE_DIRECTIVE`, prepended to the split
@@ -15737,6 +15744,10 @@ export async function enhanceBrollPrompts(
     const err = await enhanceSplit(item);
     if (err) noteFailure(item.scene.index, err);
   }
+  // ONE THING PER PANEL, whatever the rewrite (or its failure) left: every panel this call wrote —
+  // the pipeline's, a retrofit's, a retry's, an operator's non-verbatim prompt (`oneThingPanels`).
+  const splitScenes = new Set(splits.map(x => x.scene));
+  oneThingPanels(scenes, params.keyThings, s => splitScenes.has(s));
 
   // Deterministic book→on-topic swap over every scene's splitVisual, plus the literal-pitch swap
   // on every pitch beat's panel AND full-frame prompt (a phone, a screen, a QR code, a scan, a
@@ -16802,6 +16813,25 @@ async function runUnifiedPipeline(
   if (enhanceResult.failedScenes.length) {
     appendJobWarning(jobId, enhanceWarningFor(enhanceResult));
   }
+
+  // SPLIT PANELS, CHECKED AGAINST THEIR LINES (`fitSplitPanelsToLines`): the line check above ran
+  // before any panel existed, so a panel was never asked whether it shows what its line is about —
+  // job 401 scene 26 drew "I pull my chair in closer" as an empty chair, job 406 scene 19 "a guided
+  // sharpening system or belt sander setup". Only the panels are rewritten; then every panel names
+  // one thing, whatever the check left (`oneThingPanels`). Before the host-name scrub below.
+  if (!(await isMockMode())) {
+    const panels = await fitSplitPanelsToLines(scenes, {
+      keyThings: params.keyThings,
+      subject: params.videoSubject,
+    });
+    if (panels.fixed > 0)
+      console.log(
+        `[Longform ${jobId}] ${panels.fixed} of ${panels.checked} split panel(s) rewritten to show what their line is about`
+      );
+  }
+  const oneThing = oneThingPanels(scenes, params.keyThings);
+  if (oneThing > 0)
+    console.log(`[Longform ${jobId}] ${oneThing} split panel(s) named two things with "or" — cut to one`);
 
   // Safety net: no proper host name may reach 69labs ("well-known person" filter).
   // Scrub every scene's prompt fields once, after the last mutation stage, so

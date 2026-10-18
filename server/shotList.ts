@@ -22,7 +22,15 @@
 import type { BuildStage, KeyThing, RecurringPerson, StoryboardScene } from "@shared/types";
 import { invokeClaude } from "./claude";
 import { safeParseJSON } from "./jsonRepair";
-import { SHOWS_PERSON, showsPerson, namedPeople, namesOnlyAnimal, personKey } from "./hostLook";
+import {
+  BODY_PART_WORDS,
+  REAL_HOLDER,
+  SHOWS_PERSON,
+  showsPerson,
+  namedPeople,
+  namesOnlyAnimal,
+  personKey,
+} from "./hostLook";
 
 /** A picture shorter than this is a flash and folds into a neighbour. */
 export const SHOT_MIN_SEC = 1.2;
@@ -2282,11 +2290,32 @@ const fitCandidate = (s: StoryboardScene) =>
   !s.hostPresent && !s.cta && !s.qrHero && !s.coverHero && !s.assetImageUrl && !s.showsBook && !s.splitVisual && !s.listSet;
 
 /**
+ * The split panels the panel pass reads and may rewrite (`fitSplitPanelsToLines`): a host beat's
+ * picture half, never a CTA beat's (its panel shows calm b-roll, not the pitch it sits beside).
+ */
+export const panelCandidate = (s: StoryboardScene) =>
+  !!s.hostPresent && !!s.splitVisual?.trim() && !s.cta && !s.qrHero && !s.coverHero && !s.assetImageUrl && !s.showsBook;
+
+/**
  * The model's fixes, kept only for candidate pictures: a rewrite where it said the picture does not
  * show what its line is about, and any split. Reads the per-picture answer (`pictures`) and the older
  * list of fixes (`fix`). Pure.
  */
 export function parsePictureFixes(text: string, scenes: StoryboardScene[]): PictureFix[] {
+  return readPictureFixes(text, scenes, false);
+}
+
+/**
+ * The panel pass's answer (`fitSplitPanelsToLines`), kept only for split panels: a rewrite, its key
+ * thing and stage, and what the sentence rules out. A panel is never split or joined and shows
+ * nobody, so a split, a join, `who` and `other` are dropped. Pure.
+ */
+export function parsePanelFixes(text: string, scenes: StoryboardScene[]): PictureFix[] {
+  return readPictureFixes(text, scenes, true);
+}
+
+function readPictureFixes(text: string, scenes: StoryboardScene[], panel: boolean): PictureFix[] {
+  const isCandidate = panel ? panelCandidate : fitCandidate;
   const parsed = safeParseJSON<any>(text);
   const data = parsed.success ? parsed.data : undefined;
   const entries: any[] = Array.isArray(data?.pictures)
@@ -2298,11 +2327,12 @@ export function parsePictureFixes(text: string, scenes: StoryboardScene[]): Pict
   const clean = (v: unknown) => (typeof v === "string" ? v.trim().slice(0, 400) : "");
   for (const f of entries) {
     const id = pictureId(f?.id);
-    if (id == null || !scenes[id] || !fitCandidate(scenes[id])) continue;
+    if (id == null || !scenes[id] || !isCandidate(scenes[id])) continue;
     if (out.some(x => x.id === id)) continue;
-    const join = f?.join === true;
+    // A panel sits beside a host take whose timing is fixed: never joined or split, nobody in it.
+    const join = !panel && f?.join === true;
     const show = f?.shows_it === false || join ? clean(f?.show) : "";
-    const split: PictureSplit[] = (Array.isArray(f?.split) ? f.split : [])
+    const split: PictureSplit[] = (!panel && Array.isArray(f?.split) ? f.split : [])
       .map((x: any) => ({
         from: clean(x?.from),
         show: clean(x?.show),
@@ -2311,7 +2341,7 @@ export function parsePictureFixes(text: string, scenes: StoryboardScene[]): Pict
         other: otherPersonOf(x?.other),
       }))
       .filter((x: PictureSplit) => x.from && x.show);
-    const who = whoOf(f?.who);
+    const who = panel ? undefined : whoOf(f?.who);
     // WHAT THE SENTENCE RULES OUT rides even a picture the check left as it is: a right picture can
     // still come out of the picture model showing it.
     const forbids = forbidsOf(f?.forbids);
@@ -2319,7 +2349,7 @@ export function parsePictureFixes(text: string, scenes: StoryboardScene[]): Pict
     // A stage the check answered (a stage word, or null for "no made thing") replaces the old one;
     // a missing field keeps it (`applyPictureFixes`). The person is read the same way.
     const answered = !!f && typeof f === "object" && "stage" in f;
-    const saidWho = !!f && typeof f === "object" && "other" in f;
+    const saidWho = !panel && !!f && typeof f === "object" && "other" in f;
     out.push({
       id,
       ...(join ? { join } : {}),
@@ -2747,6 +2777,306 @@ export async function fitPicturesToLines(
     .map(f => ({ ...f, id: merged.remap.get(f.id)! }));
   const cut = applyPictureSplits(merged.scenes, moved, opts.keyThings, s => s.audioDuration ?? 0);
   return { scenes: cut.scenes, fixed, split: cut.split, joined: merged.joined };
+}
+
+// ─── One picture, one thing: never "X or Y" ─────────────────────────────────────────────
+
+/**
+ * A word that says where a thing is or what state it is in — so the end of the thing's own name, and
+ * of the second alternative: "… or belt sander setup | sitting on a garage workshop bench". A doing
+ * word (`DOING_WORD`) closes it too.
+ */
+const AFTER_A_THING =
+  /^(?:on|in|at|by|beside|next|near|with|under|over|against|from|of|for|inside|behind|below|above|across|along|around|atop|into|onto|through|between|among|beneath|underneath|that|which|where|while|whose|and|or|but|so|to|as|like|during|after|before|until|when|if|because|since|sitting|resting|lying|standing|hanging|leaning|propped|placed|laid|set|left|stacked|spread|perched|mounted|clamped|bolted|parked|tucked|displayed|arranged|scattered|piled|lined|waiting|glowing|burning|steaming|running|showing|displaying|holding|containing|filled|covered|marked|labeled|labelled|printed|made|used|related|attached|wrapped|facing|shown|seen|viewed|visible|nearby|still|rests|sits|lies|stands|hangs|leans|waits|shows|is|are|was|were)$/i;
+/**
+ * A word that opens a thing's name — so the start of the first alternative: "a | white or
+ * cream-colored smoke alarm", "a small packet of | crackers or cookies".
+ */
+const BEFORE_A_THING =
+  /^(?:a|an|the|its|their|his|her|my|your|our|this|that|these|those|some|each|every|another|either|on|in|at|by|beside|next|near|with|under|over|against|from|of|for|inside|behind|below|above|across|along|around|atop|into|onto|through|between|among|beneath|underneath|to|like|and|or|but|while|as|is|are|was|were|be)$/i;
+const DETERMINER = /^(?:a|an|the|its|their|his|her|my|your|our|this|that|these|those|some|each|every|another)$/i;
+/** A doing word, not a thing: a choice of verbs ("adjusting or pointing at", "stacked or fanned") is left alone. */
+const DOING_WORD = /^[a-z]{3,}(?:ing|ed)$/i;
+/** A describing word: a colour, a tone, a kind ("very dark | or black beads", "a different floral | or check print"). */
+const DESCRIBING =
+  /^(?:[a-z]{3,}(?:ful|ous|ive|ish|less|ral)|black|white|grey|gray|brown|red|blue|green|yellow|orange|pink|purple|cream|ivory|beige|tan|navy|dark|light|pale|bright|deep|plain)$/i;
+/** The word before an "or" that is no choice between two things: a count, "more or less", "with or without". */
+const NO_CHOICE_BEFORE =
+  /^(?:\d[\d.,/]*|one|two|three|four|five|six|seven|eight|nine|ten|twelve|twenty|thirty|fifty|hundred|few|several|more|less|sooner|later|with|whether|rather)$/i;
+/** The word after one: a count, "or so", "or similar", "or else", or a new clause ("… or it cracks", "… or is about to"). */
+const NO_CHOICE_AFTER =
+  /^(?:\d[\d.,/]*|one|two|three|four|five|six|seven|eight|nine|ten|twelve|twenty|thirty|fifty|hundred|few|several|so|not|more|less|fewer|else|other|another|any|anything|something|whatever|similar|nothing|never|without|it|they|you|we|he|she|i|this|that|these|those|there|its|their|is|are|was|were|be|has|have|had|will|can|could|would)$/i;
+/** A sentence saying what is NOT there bans every thing it names: "no writing or logos", "no face, head, or body". */
+const NEGATED_SENTENCE = /\b(?:no|not|without|never|neither|nor|none|nothing|nobody|any|whether)\b|n['’]t\b/i;
+
+/**
+ * A description naming ONE thing where it offered a choice: "A guided sharpening system or belt
+ * sander setup sitting on a garage workshop bench" → "A guided sharpening system sitting on a garage
+ * workshop bench" (job 406 scene 19's split panel, 2026-10-18 — the line offered the choice, every
+ * picture writer is told "never X or Y", and the panel path let it through: the picture model drew
+ * one of them, the cheap one its memory held, under "a belt setup runs $100 to $300"). The first
+ * thing is kept, unless the second is the longer and so carries the thing's name ("a white or
+ * cream-colored smoke alarm" → "a cream-colored smoke alarm"). Cut only where both are clear: the
+ * first runs back to a word that opens a name (`BEFORE_A_THING`), the second ends within five words at
+ * a comma, the end, or a word saying where it is or what it is doing (`AFTER_A_THING`). Left exactly
+ * as written: a count ("one or two"), "or so", "more or less", "with or without", a sentence that
+ * says what is NOT there ("no face, head, or body"), a list closed by ", or", "A, B or C", a choice
+ * of doing words, and anything less clear. Replayed over the local storyboards (jobs 200-407) before
+ * it went in: 16 of 686 split panels changed, each to one clean thing. Pure.
+ */
+export function oneThingOnly(text: string): string {
+  let out = text;
+  for (let pass = 0; pass < 3; pass++) {
+    const next = cutOneChoice(out);
+    if (next === out) break;
+    out = next;
+  }
+  return out;
+}
+
+function cutOneChoice(text: string): string {
+  const bareOf = (w: string) => w.replace(/[^A-Za-z0-9'’-]+$/, "");
+  const lastOf = (s: string, marks: string[]) => Math.max(...marks.map(c => s.lastIndexOf(c))) + 1;
+  // ", or" closes a list ("no face, head, or body") or opens a new clause: never a cut.
+  const re = /(?<!,)\s+or\s+/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) {
+    const before = text.slice(0, m.index);
+    if (NEGATED_SENTENCE.test(before.slice(lastOf(before, [".", ";", ":", "!", "?", "("])))) continue;
+    const clauseAt = lastOf(before, [",", ";", ":", ".", "!", "?", "(", "—", "–"]);
+    // The first alternative: back to the word that opens its name.
+    const xs = Array.from(before.slice(clauseAt).matchAll(/\S+/g));
+    let from = xs.length;
+    while (from > 0 && !BEFORE_A_THING.test(bareOf(xs[from - 1][0]))) from--;
+    const x = xs.slice(from);
+    if (!x.length) continue;
+    const prev = bareOf(x[x.length - 1][0]);
+    if (NO_CHOICE_BEFORE.test(prev) || DOING_WORD.test(prev)) continue;
+    // "chisels, planes or saws" is a list of three, not a choice of two.
+    if (from === 0 && x.length <= 2 && before[clauseAt - 1] === ",") continue;
+    // The second alternative: on to where its name ends, within five words.
+    const rest = text.slice(m.index + m[0].length);
+    const ys = Array.from(rest.matchAll(/[^\s—–]+/g));
+    const lead = ys[0]?.[0] ?? "";
+    if (!lead || ys[0].index !== 0 || /^[(\[“"]/.test(lead)) continue;
+    const leadBare = bareOf(lead);
+    // "wet or freshly styled", "ready or just stitched": a choice of states.
+    const howWord = /^(?:[a-z]{2,}ly|just|already|almost|newly|barely|half)$/i.test(leadBare);
+    if (NO_CHOICE_AFTER.test(leadBare) || DOING_WORD.test(leadBare) || howWord) continue;
+    // "… outdoors or in a covered market": a choice of places or of clauses, not of things.
+    if (AFTER_A_THING.test(leadBare) || (BEFORE_A_THING.test(leadBare) && !DETERMINER.test(leadBare))) continue;
+    let end = -1;
+    let words = 0;
+    for (let k = 0; k < Math.min(ys.length, 6); k++) {
+      const w = ys[k][0];
+      const bare = bareOf(w);
+      // A doing word after the name ("a guide | opened to a page", "a bar | sliding up"), never one in
+      // front of it ("a very old rusty dented metal tin").
+      const next = bareOf(ys[k + 1]?.[0] ?? "");
+      const after =
+        DOING_WORD.test(bare) &&
+        (!next || bare !== w || AFTER_A_THING.test(next) || DETERMINER.test(next) || /^(?:up|down|out|off|away|back|open|shut|flat|upright)$/i.test(next));
+      if (k > 0 && (AFTER_A_THING.test(bare) || after || /^[(\[“"]/.test(w))) {
+        end = ys[k - 1].index! + bareOf(ys[k - 1][0]).length;
+        words = k;
+        break;
+      }
+      if (k === 5) break;
+      const dash = /^[—–]/.test(rest.slice(ys[k].index! + w.length));
+      if (bare !== w || dash || k === ys.length - 1) {
+        end = ys[k].index! + bare.length;
+        words = k + 1;
+        break;
+      }
+    }
+    if (end < 0) continue;
+    // The longer of the two carries the thing's name ("a white | or cream-colored smoke alarm", "the
+    // worn wood | or tile floor"), and so does the second when the first ends on a describing word
+    // ("very dark | or black beads"). A second opening on "a" or "the" would leave two: the first.
+    const keepSecond =
+      !DETERMINER.test(leadBare) && (words > x.length || (words === x.length && DESCRIBING.test(prev)));
+    let head = keepSecond ? before.slice(0, clauseAt + x[0].index!) : before;
+    let second = rest;
+    if (keepSecond) {
+      // "a white or ivory smoke alarm" → "an ivory smoke alarm"; a sentence keeps its capital.
+      head = head.replace(/\b(a|an)(\s+)$/i, (_, art: string, gap: string) => {
+        const an = /^[aeiou]/i.test(rest) ? "an" : "a";
+        return (/^A/.test(art) ? an.charAt(0).toUpperCase() + an.slice(1) : an) + gap;
+      });
+      if (from === 0 && /^[A-Z]/.test(x[0][0])) second = rest.charAt(0).toUpperCase() + rest.slice(1);
+    }
+    // "either a stand mixer or a hand whisk" keeps one of them, without its "either".
+    const either = /\beither\s+/gi;
+    let at = -1;
+    for (let e = either.exec(head); e; e = either.exec(head)) if (e.index >= clauseAt) at = e.index;
+    if (at >= 0) {
+      const tail = head.slice(at).replace(/^either\s+/i, "");
+      head = head.slice(0, at) + (/^E/.test(head.charAt(at)) ? tail.charAt(0).toUpperCase() + tail.slice(1) : tail);
+    }
+    return head + (keepSecond ? second : rest.slice(end));
+  }
+  return text;
+}
+
+/**
+ * Every split panel named as ONE thing (`oneThingOnly`). A key thing only the dropped choice named
+ * is no longer the panel's: the panel is drawn from its thing's pictures (`withSplitMemory`), and
+ * those must be of what the panel now shows. `only` limits it to the panels just written. Returns
+ * how many changed. Pure apart from mutating `scenes`.
+ */
+export function oneThingPanels(
+  scenes: StoryboardScene[],
+  things: KeyThing[] | undefined,
+  only?: (s: StoryboardScene) => boolean
+): number {
+  let n = 0;
+  for (const s of scenes) {
+    if (!s.hostPresent || !s.splitVisual || (only && !only(s))) continue;
+    const one = oneThingOnly(s.splitVisual);
+    if (one === s.splitVisual) continue;
+    const was = keyThingsIn(s.splitVisual, things).map(t => t.name);
+    const now = keyThingsIn(one, things).map(t => t.name);
+    s.splitVisual = one;
+    if (s.keyThing && was.includes(s.keyThing) && !now.includes(s.keyThing)) {
+      s.keyThing = now[0];
+      s.buildStage = undefined;
+    }
+    const others = s.otherKeyThings?.filter(name => name !== s.keyThing && (now.includes(name) || !was.includes(name)));
+    s.otherKeyThings = others?.length ? others : undefined;
+    n++;
+  }
+  return n;
+}
+
+// ─── Does each split panel show what its line is about? ─────────────────────────────────
+
+/**
+ * The panel pass's own rules, sent after `FIT_SYSTEM` (`systemSuffix`, so the line check's rulebook
+ * stays one cached block). Neutral examples only: the cases are in the tests.
+ */
+export const PANEL_FIT_RULES = `
+
+SPLIT PANELS — THIS PASS. Here the only pictures to check are the PANEL lines: a square picture shown
+BESIDE the host while the host says the line on camera. CONTEXT lines are pictures already checked
+and HOST/OTHER lines are said with nothing beside the host: read both for context, never answer for
+them. Judge every PANEL by all the rules above, and also:
+- A panel shows NO person: no face, body, hands or arms. When its line is about someone doing
+  something, the panel shows the thing it is done to or leaves behind, at rest. A rewrite never puts
+  a person or hands in it, so who and other are never set on a panel.
+- A FIGURE OF SPEECH about what the host does or feels ("I lean in a little closer", "that one
+  stopped me in my tracks") is never drawn as the empty prop of that action: the panel shows what
+  the line is really about.
+- A line about an idea with nothing literal to see shows what the idea points at, never the video's
+  MAIN thing unless the line names it or clearly refers to it.
+- A panel names ONE thing. A panel that says "X or Y" ("a stand mixer or a hand whisk on the
+  counter") is WRONG even when the line itself offers the choice: rewrite it as the one thing the
+  line and the pictures around it point at — the one a nearby picture shows, else the first the line
+  names.
+- A panel shows what ITS line is about: a thing only a neighbouring line talks about, added beside
+  or behind the subject, is WRONG — rewrite it without.
+- A panel is a real photograph: never a diagram, a cut-open or see-through view, a cross-section or
+  a view no camera could take.
+A panel is never split or joined. Answer one entry for EVERY PANEL line, with the same JSON.`;
+
+/**
+ * Put each panel rewrite on its panel, and ONLY the panel: the host take beside it (its prompt, its
+ * angle, its timing) is never touched. The panel's words, the seed a later redraw rewrites from, its
+ * key thing (the check's name, else the first the words name — the panel is drawn from that thing's
+ * pictures, `withSplitMemory`), the part, named look and words it was tied to while the new words
+ * still name them (`tieToTypedWords`), and its stage while it is still of the same thing. A rewrite
+ * with a person or hands in it is not used: a panel is person-free beside the host (a body part is
+ * drawn on the host by `buildSplitRightScene`, so that one is kept). Returns how many were rewritten.
+ * Pure apart from mutating `scenes`.
+ */
+export function applyPanelFixes(scenes: StoryboardScene[], fixes: PictureFix[], things: KeyThing[] | undefined): number {
+  let n = 0;
+  for (const f of fixes) {
+    const s = scenes[f.id];
+    if (!s || !panelCandidate(s)) continue;
+    if (f.forbids) s.forbids = f.forbids;
+    if (!f.show) continue;
+    const bodyPart = BODY_PART_WORDS.test(f.show) && !REAL_HOLDER.test(f.show);
+    if (showsPerson(f.show) && !bodyPart) continue;
+    const said = withoutNegatedPhrases(f.show);
+    const named = keyThingsIn(said, things);
+    const primary = (f.thing ? matchKeyThing(f.thing, things ?? []) : null) ?? named[0] ?? null;
+    const was = { thing: s.keyThing, stage: s.buildStage };
+    tieToTypedWords(s, said, things);
+    s.keyThing = primary?.name;
+    const others = named.map(t => t.name).filter(name => name !== primary?.name);
+    s.otherKeyThings = others.length ? others : undefined;
+    s.buildStage = f.stage !== undefined ? f.stage ?? undefined : was.thing === primary?.name ? was.stage : undefined;
+    s.splitVisual = f.show;
+    s.splitVisualSeed = f.show;
+    // Judged again on the new words (`judgeSelfMoving`) before any panel is made to move.
+    s.splitSelfMoving = undefined;
+    n++;
+  }
+  return n;
+}
+
+/**
+ * SPLIT PANELS ARE CHECKED AGAINST THEIR LINES (2026-10-18, the review of jobs 401-407). The line
+ * check (`fitPicturesToLines`) runs at voicing, before the host plan, and never read a split's
+ * picture half: the panels only exist once `enforceHostSplitMix` has picked them, from each host
+ * beat's old cutaway, and the panel rewrite after it (`enhanceBrollPrompts`) answers to the line's
+ * words, not to what the line is about. So job 401 scene 26, "When a man like that sits down to
+ * write about time, I pull my chair in closer", shipped an empty office chair beside the host — a
+ * figure of speech drawn literally, and with no person allowed in a panel, the action became a
+ * prop; scene 21, "Your problem is theft…", the video's main prop with no tie to the line; job 406
+ * scene 19, "A guided sharpening system or belt sander setup …", two things, one drawn; job 403
+ * scene 15 added the next line's subject behind its own. One pass, after the panels are written:
+ * every line in order, the panels marked, the same rulebook as the line check plus the panel's own
+ * rules (`PANEL_FIT_RULES`), on the same model. Only the panel is rewritten (`applyPanelFixes`),
+ * never the host half and never the timing. A batch with no panel costs nothing; any failure
+ * changes nothing. Returns how many panels were read and how many rewritten.
+ */
+export async function fitSplitPanelsToLines(
+  scenes: StoryboardScene[],
+  opts: { keyThings?: KeyThing[]; subject?: string } = {}
+): Promise<{ checked: number; fixed: number }> {
+  const BATCH = 80;
+  const fixes: PictureFix[] = [];
+  let checked = 0;
+  for (let from = 0; from < scenes.length; from += BATCH) {
+    const lines: string[] = [];
+    let panels = 0;
+    for (let i = Math.max(0, from - 4); i < Math.min(scenes.length, from + BATCH); i++) {
+      const s = scenes[i];
+      const said = (s.scriptText ?? "").trim().replace(/\s+/g, " ");
+      if (i >= from && panelCandidate(s)) {
+        panels++;
+        const secs = s.audioDuration ? ` (${s.audioDuration.toFixed(1)} s)` : "";
+        lines.push(`#${i} PANEL${secs}: said "${said}" | shows: ${s.splitVisual!.trim()}`);
+      } else if (fitCandidate(s)) {
+        lines.push(`CONTEXT: said "${said}" | shows: ${s.showSubject ?? s.visualPrompt ?? ""}`);
+      } else {
+        lines.push(`HOST/OTHER: "${said}"`);
+      }
+    }
+    if (!panels) continue;
+    try {
+      const r = await invokeClaude({
+        systemPrompt: FIT_SYSTEM,
+        systemSuffix: PANEL_FIT_RULES,
+        userMessage:
+          (opts.subject ? `VIDEO SUBJECT: ${opts.subject}\n` : "") +
+          (opts.keyThings?.length
+            ? `KEY THINGS: ${opts.keyThings.map(k => `${k.main ? "MAIN " : ""}${k.name}: ${k.look}`).join(" | ")}\n`
+            : "") +
+          `\n${lines.join("\n")}\n\nJSON:`,
+        maxTokens: 12000,
+        model: FIT_MODEL(),
+        effort: planningEffort("FIT_EFFORT"),
+        step: "Line check (split panels)",
+      });
+      fixes.push(...parsePanelFixes(r.text, scenes));
+      checked += panels;
+    } catch {
+      /* a failed check changes nothing */
+    }
+  }
+  return { checked, fixed: applyPanelFixes(scenes, fixes, opts.keyThings) };
 }
 
 // ─── Does something in each picture move by itself? ─────────────────────────────────────
