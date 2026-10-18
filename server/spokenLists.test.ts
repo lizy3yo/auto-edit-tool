@@ -665,3 +665,32 @@ describe("describing words in front of ONE thing are no list (job 400 at 1:41, '
     expect(spokenListsByShape(["Years ago, flour, sugar, and butter cost pennies."])).toEqual([]);
   });
 });
+
+describe("describing-run review: the lists around a run stay whole", () => {
+  it("'and warm, dry socks' is the last item of three, whole", () => {
+    expect(spokenListsByShape(["Pack a flashlight, a blanket, and warm, dry socks."]).map(l => l.items)).toEqual([
+      ["a flashlight", "a blanket", "warm, dry socks"],
+    ]);
+    const answer = (items: string[]) => JSON.stringify({ lists: [{ sentence: 0, kind: "things", items }] });
+    const s = "Pack a flashlight, a blanket, and warm, dry socks.";
+    expect(parseSpokenLists(answer(["a flashlight", "a blanket", "warm, dry socks"]), [s])).toEqual([
+      { sentence: 0, items: ["a flashlight", "a blanket", "warm, dry socks"] },
+    ]);
+    // Cut inside the socks' describing words, it is no list.
+    expect(parseSpokenLists(answer(["a flashlight", "a blanket", "warm", "dry socks"]), [s])).toEqual([]);
+  });
+
+  it("a food ending in -ous keeps its list", () => {
+    expect(spokenListsByShape(["You can serve it with rice, couscous, or quinoa."]).map(l => l.items)).toEqual([
+      ["rice", "couscous", "quinoa"],
+    ]);
+  });
+
+  it("a list after 'is too small,' is not swallowed as describing words (like 'life is too short, Seneca says' in job 400's script)", () => {
+    // "too" after a verb used to start a run, so every comma up to "wood screws" read as inside one thing.
+    const s = "Honestly the kit is too small, glue, sandpaper, and wood screws.";
+    expect(spokenListsByShape([s]).map(l => l.items)).toEqual([["glue", "sandpaper", "wood screws"]]);
+    expect(validateSpokenList(s, ["glue", "sandpaper", "wood screws"])).toBe(true);
+    expect(listsByShape("Everyone complains that life is too short, Seneca says.")).toEqual([]);
+  });
+});

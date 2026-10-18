@@ -2300,3 +2300,46 @@ describe("describing words in front of ONE thing are never list items (job 400 a
     expect(markListPieces(tools)).toBe(3);
   });
 });
+
+describe("a run of describing words starts only where one can (review of job 400's describing-run rule)", () => {
+  const at = async (s: string) => {
+    const { seriesCommas } = await import("./shotList");
+    return Array.from(seriesCommas(s)).map(c => s.slice(0, c).split(/\s+/).pop());
+  };
+
+  it("never after a verb: the words say what something IS, and the comma separates nothing", async () => {
+    // Job 400's own script, and another practice script: "too" after "is" read as "a REALLY long, …".
+    for (const s of [
+      "Everyone complains that life is too short, Seneca says.",
+      "The title says lost, which is too strong, since folk schools still teach plenty of these.",
+      "That's too short, my doctor says.",
+      "It's simple, folks tell me.",
+    ])
+      expect([s, await at(s)]).toEqual([s, []]);
+    // A degree word that itself stands where a run may start still leads one.
+    expect(await at("a really long, very slow walk")).toEqual(["long"]);
+    expect(await at("Very long, dull meetings wear everyone out.")).toEqual(["long"]);
+    expect(await at("Grandma's old, worn quilt")).toEqual(["old"]);
+  });
+
+  it("a describing word that is a whole piece starts the next thing; one after 'and' never continues a run", async () => {
+    // "and warm," used to be pulled into a run starting at "blanket", which joined the blanket and the
+    // socks into one item and lost a list of three.
+    expect(await at("Pack a flashlight, a blanket, and warm, dry socks.")).toEqual(["warm"]);
+    expect(await at("They hewed green, right after felling, and tall, straight tulip poplar was a favorite.")).toEqual(["tall"]); // a practice script
+    expect(await at("A big, heavy, and sturdy table")).toEqual(["big", "heavy"]);
+    // Still no run where nothing describes ("Pilot holes, long screws, snug." / "busy, important, and worn down").
+    expect(await at("Pilot holes, long screws, snug.")).toEqual([]);
+    expect(await at("the official in charge of the grain supply — busy, important, and worn down to the rims.")).toEqual([]);
+  });
+
+  it("a thing ending in -ous is still a thing", async () => {
+    const { describingWord, notAThing } = await import("./shotList");
+    for (const w of ["couscous", "rendezvous", "bayous"]) {
+      expect([w, describingWord(w)]).toEqual([w, false]);
+      expect([w, notAThing(w)]).toEqual([w, null]);
+    }
+    expect(describingWord("furious")).toBe(true);
+    expect(describingWord("generous")).toBe(true);
+  });
+});

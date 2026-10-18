@@ -1025,6 +1025,11 @@ const DESCRIBING_WORD = new Set([
 /** "-ful" words that are an amount, not a describing word ("a handful", "a spoonful"). */
 const AMOUNT_FUL =
   /(?:hand|cup|spoon|mouth|arm|bucket|pocket|room|house|tank|truck|boat|basket|bowl|plate|jar|fist|lung|scoop|bag|box|car|pail|shovel|barrel|belly|eye|skin|tea|table|fork|glass|pot|pan|sack|cart|ship|bus|van|bed|head|lap|tub)ful$/;
+/**
+ * Things that end in "-ous" like a describing word: "rice, couscous, and quinoa" is three foods, and
+ * one refused item drops a whole list of things (`itemsAreThings`).
+ */
+const OUS_THING = new Set(["couscous", "rendezvous", "bayous", "caribous"]);
 
 /**
  * Whether a word only describes (2026-10-18, job 400: "a short, furious, loving essay" was cut into
@@ -1036,6 +1041,7 @@ export function describingWord(word: string): boolean {
   const w = word.toLowerCase().replace(/’/g, "'").replace(/^[^a-z]+|[^a-z]+$/g, "");
   if (!/^[a-z][a-z'-]*$/.test(w)) return false;
   if (DESCRIBING_WORD.has(w)) return true;
+  if (OUS_THING.has(w)) return false;
   if (/^[a-z]{2,}ous$/.test(w) || /^[a-z]{3,}less$/.test(w)) return true;
   if (/^[a-z]{2,}ful$/.test(w)) return !AMOUNT_FUL.test(w);
   if (w.length > 5 && w.endsWith("est")) {
@@ -1059,8 +1065,33 @@ const FUNCTION_WORD = new Set([
   "what", "where", "why", "how", "and", "or", "nor", "but", "yet", "is", "are", "was", "were", "be",
   "been", "am", "do", "does", "did", "has", "have", "had", "will", "would", "can", "could", "should",
   "may", "might", "must", "shall", "to", "than", "up", "down", "out", "off", "away", "back", "please",
-  "ago", "later", "earlier", "too", "either", "though",
+  "ago", "later", "earlier", "too", "either", "though", "although", "since", "unless", "whereas",
+  "whether", "except", "till", "lest",
 ]);
+/**
+ * A pronoun and a contracted IS ("that's", "it's"): what follows says what something IS, it does not
+ * describe a thing in front of it — "that's too short, my doctor says" is no run, though "Grandma's"
+ * leads one like "his" does ("Grandma's old, worn quilt").
+ */
+const PRONOUN_IS = /^(?:it|that|this|there|here|he|she|what|who|where|how|everything|nothing|something|everyone|everybody|nobody|someone)'s$/;
+
+/**
+ * Whether a run of describing words may start at `words[i]` (the last word of a comma piece): right
+ * after "a / the / his / two…", a possessive or another describing word, at the start of a sentence,
+ * or after a degree word that itself stands there ("a REALLY long, very slow walk"). Never after a
+ * verb: "…complains that life is too short, Seneca says" (job 400's own script) and "which is too
+ * strong, since folk schools…" say what something IS, and their commas separate nothing in front of
+ * a thing. Pure.
+ */
+function runMayStart(words: string[], i: number, sentenceStart: boolean): boolean {
+  if (i === 0) return sentenceStart;
+  const before = words[i - 1];
+  if (/[.!?]["'’”)\]]*$/.test(before)) return true;
+  if (!PLAIN_WORD.test(before)) return false;
+  const lb = lowerWord(before).replace(/^[^a-z0-9]+|[^a-z0-9']+$/g, "");
+  if (DEGREE_WORD.has(lb)) return runMayStart(words, i - 1, sentenceStart);
+  return SERIES_LEAD.has(lb) || isNumber(lb) || describingWord(lb) || (/'s$/.test(lb) && !PRONOUN_IS.test(lb));
+}
 /** One word with nothing after it — no full stop, comma or dash. */
 const PLAIN_WORD = /^[A-Za-z][A-Za-z'’-]*$/;
 const lowerWord = (w: string) => w.toLowerCase().replace(/’/g, "'");
@@ -1081,12 +1112,13 @@ function seriesWords(words: string[]): string[] {
  * "…wrote a short, furious, loving essay to a man named Paulinus" the commas only separate the words
  * that describe ONE essay, and the shape rules cut them as list items ("Seneca wrote a short /
  * Furious / Loving essay"): three pictures, and a list graphic of nonsense. A run is: a piece ending
- * on a word right after "a / the / his / two…", a degree word, another describing word, or at the
- * start of a sentence ("a short,"); then pieces of ONE word each ("furious,"); then a piece that is a
- * word and the thing it describes ("loving essay…") — with at least one word before that piece a
- * describing word whatever it stands beside (`describingWord`), so "a hammer, nails, and wood glue"
- * stays three things, and "bring something warm, dry socks" (no "a / the" before "warm") is no run.
- * Returns each such comma's offset in `text`. Pure.
+ * on a word where a run may start (`runMayStart`: right after "a / the / his / two…", a describing
+ * word, or at the start of a sentence — never after a verb, "life is too short, he says"), or a
+ * piece that is one describing word ("and warm,"); then pieces of ONE word each ("furious,"), none
+ * after "and"; then a piece that is a word and the thing it describes ("loving essay…") — with at
+ * least one word before that piece a describing word whatever it stands beside (`describingWord`),
+ * so "a hammer, nails, and wood glue" stays three things, and "bring something warm, dry socks" (no
+ * "a / the" before "warm") is no run. Returns each such comma's offset in `text`. Pure.
  */
 export function seriesCommas(text: string): Set<number> {
   const out = new Set<number>();
@@ -1101,17 +1133,16 @@ export function seriesCommas(text: string): Set<number> {
     const ws = pieces[s].words;
     const w1 = ws[ws.length - 1];
     if (!contentWord(w1)) continue;
-    const before = ws[ws.length - 2];
-    const lb = lowerWord(before ?? "").replace(/^[^a-z0-9]+|[^a-z0-9']+$/g, "");
-    const leads =
-      before === undefined
-        ? s === 0
-        : /[.!?]["'’”)\]]*$/.test(before) ||
-          (PLAIN_WORD.test(before) && (SERIES_LEAD.has(lb) || DEGREE_WORD.has(lb) || isNumber(lb) || describingWord(lb) || /'s$/.test(lb)));
-    if (!leads) continue;
+    // A describing word that is a whole piece ("…a blanket, and WARM, dry socks") starts a run of its
+    // own: one describing word is never a list item (`notAThing`), so it belongs to the thing after it.
+    const lone = ws.length === 1 || (ws.length === 2 && /^(?:and|or)$/i.test(ws[0]));
+    if (!runMayStart(ws, ws.length - 1, s === 0) && !(s > 0 && lone && describingWord(w1))) continue;
     const run = [w1];
     let e = s + 1;
     for (; e < pieces.length; e++) {
+      // Only the LAST describing word follows "and" ("a big, heavy, and sturdy table"): "and warm,"
+      // after a thing begins the NEXT thing ("a flashlight, a blanket, and warm, dry socks" is three).
+      if (/^(?:and|or)$/i.test(pieces[e].words[0] ?? "")) break;
       const one = seriesWords(pieces[e].words);
       if (one.length !== 1 || !contentWord(one[0])) break;
       run.push(one[0]);
