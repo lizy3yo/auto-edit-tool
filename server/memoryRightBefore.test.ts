@@ -161,11 +161,25 @@ describe("the memory says the picture right before lends only the look", () => {
     expect(m.wordsLook).toContain("clear hard plastic");
     const fields = memoryFields(m, MEMORY_VIEWS[0]);
     expect(fields).toMatchObject({ memoryRightBefore: 0, memoryWordsLook: m.wordsLook, keyThingLook: undefined });
-    // 18 holds the cup beside the cart: references of another thing, and not the picture before.
+    // 18 is the juice carton ON the cart (round 13, job 410 scene 20 the same line): the cart is only
+    // its surface, so 18 is filed under no key thing and drawn from its words — no references at all,
+    // never the cart's memory with the carton pushed to the back with it (`onlyItsSurface`).
     const m18 = await memoryFor(board[3], 0);
-    expect(m18).toMatchObject({ urls: ["https://r2/still-src-16.png"], own: false });
-    expect(m18.before).toBeUndefined();
-    expect(memoryFields(m18, undefined)).toMatchObject({ memoryRightBefore: undefined, memoryWordsLook: undefined });
+    expect(board[3].keyThing).toBeUndefined();
+    expect(board[3].otherKeyThings).toEqual(expect.arrayContaining(["beverage cart", "plastic cup"]));
+    expect(m18).toMatchObject({ urls: [], own: false });
+    // A picture ABOUT the cart, with the cup beside it: references of another thing, and not the
+    // picture before.
+    const cart = job399();
+    cart[3].showSubject = cart[3].visualPrompt = "the beverage cart's top tray holding a small juice carton, beside an ice-filled plastic cup";
+    attachMemory(cart, cart, KT);
+    cart[1].pictureUrl = "https://r2/still-src-16.png";
+    pictureSettled(cart[1]);
+    expect(cart[3].keyThing).toBe("beverage cart");
+    const mCart = await memoryFor(cart[3], 0);
+    expect(mCart).toMatchObject({ urls: ["https://r2/still-src-16.png"], own: false });
+    expect(mCart.before).toBeUndefined();
+    expect(memoryFields(mCart, undefined)).toMatchObject({ memoryRightBefore: undefined, memoryWordsLook: undefined });
   });
 
   const s17 = () =>

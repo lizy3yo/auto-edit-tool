@@ -33,7 +33,7 @@
 import type { StoryboardScene } from "@shared/types";
 import { invokeClaude } from "./claude";
 import { safeParseJSON } from "./jsonRepair";
-import { namedPeople } from "./hostLook";
+import { namedPeople, showsPerson } from "./hostLook";
 import { namesHostBefore } from "./hostIntro";
 import {
   FRESH,
@@ -407,10 +407,12 @@ const waysOf = (step: string) => step.split(/\s*[,;]\s*(?=(?:or|alternatively)\b
  * sentence shape proposed it, and became three pictures and a list graphic. For a list of `steps` the
  * word limit holds for each WAY of a step (`waysOf`): job 399's "catch a flight attendant as they pass,
  * or step back to the galley" is one step of 13 words, two ways of 7 and 6. `maxWords` is that limit:
- * a list graphic's rows are held to everything else but not to it (`notAListAsSaid`). Pure.
+ * a list graphic's rows are held to everything else but not to it (`notAListAsSaid`). Two steps are a
+ * list only when each does something to a thing it names (`stepsAreASequence`, job 408). Pure.
  */
 export function validateSpokenList(sentence: string, items: string[], steps = false, maxWords = LIST_ITEM_MAX_WORDS): boolean {
   if (!Array.isArray(items) || items.length < 2) return false;
+  if (steps && !stepsAreASequence(items)) return false;
   if (ledByGeneralHead(items)) return false;
   const spans = tokenSpans(sentence);
   const toks = spans.map(t => t.tok);
@@ -473,10 +475,11 @@ function describingWords(sentence: string, items: string[]): boolean {
  * sentence is not a list of things, so the WHOLE list goes — never trimmed to the items that pass:
  * trimmed, "the fence for thrifty, old-fashioned chicken keeping, tell me" (job 355) and "Two
  * thousand years ago, a man named … wrote a short, furious" (job 400) each still left two false
- * items. Never asked of a sequence of steps (steps are things someone does). Pure.
+ * items. Two bare words alone are no list of things either (`twoBareWords`: "Flush, and follow.", job
+ * 408). Never asked of a sequence of steps (steps are things someone does). Pure.
  */
 export function itemsAreThings(sentence: string, items: string[]): boolean {
-  return items.every(i => !notAThing(String(i ?? ""))) && !describingWords(sentence, items);
+  return items.every(i => !notAThing(String(i ?? ""))) && !describingWords(sentence, items) && !twoBareWords(sentence, items);
 }
 
 /** A point a host lists rather than a thing: a topic opening on a question word ("where they go",
@@ -547,6 +550,9 @@ export function notAListAsSaid(script: string, rows: string[], opts: { points?: 
     if (!validateSpokenList(sentences[s], group, false, Infinity))
       return `${named} are not said as a list — one after another, joined by commas — in ${quoted(sentences[s])}`;
     if (describingWords(sentences[s], group)) return `${named} are describing words in ${quoted(sentences[s])}, not things`;
+    // A job keeps the lists found when it was made: job 408 kept "Flush, follow" and its planner
+    // numbered it "1 Flush → 2 Follow".
+    if (twoBareWords(sentences[s], group)) return `${named} are two bare words in ${quoted(sentences[s])} — as likely two actions as two things`;
   }
   return undefined;
 }
@@ -647,6 +653,8 @@ NOT a list:
 - the describing words in front of ONE thing ("she wrote a long, slow, careful letter" is one letter),
   and the time a sentence opens on ("years ago, …")
 - a story of what happened ("I went home, made dinner, and slept") — steps are things to DO
+- words about how the video itself will go, or two bare words ("watch, and learn") — steps are three
+  or more, or two that each do something to a thing they name ("fill the jar, and close the lid")
 
 For each list also give setting: when its sentence is set in ANOTHER TIME or a FARAWAY PLACE than the
 video's own here and now — inside a passage of history, a story of long ago, what a writer of another
@@ -821,32 +829,122 @@ export function stepsByShape(sentence: string): string[] | null {
   const last = pieces[pieces.length - 1];
   if (!/^(?:and|then|and then)\s/i.test(last)) return null;
   const items = pieces.map(p => unmaskSeriesCommas(p.replace(/^(?:and then|and|then)\s+/i, "").replace(/[.!?]+$/, "").trim()));
-  const isStep = (t: string) => {
-    // The step itself is its first way; a choice joined to it is held only to the length limit.
-    const ways = waysOf(t);
-    const words = ways[0].split(/\s+/);
-    const first = (words[0] ?? "").replace(/[^a-z]/gi, "").toLowerCase();
-    return (
-      words.length >= 2 &&
-      ways.every(w => w.split(/\s+/).length <= STEP_MAX_WORDS) &&
-      !!first &&
-      !SUBJECT_START.test(first) &&
-      // …and a subject in a contraction ("and you'll know", "and I'll answer" read "youll", "ill"
-      // above): a sentence an "or" piece used to sink can now reach this line, so its last piece is
-      // held to the same rule.
-      !SUBJECT_START.test((words[0] ?? "").toLowerCase().replace(/’/g, "'")) &&
-      !DETERMINER.test(t) &&
-      !NOT_A_LIST_ITEM.has(first) &&
-      !/ly$/.test(first) &&
-      !JOINERS.has(first) &&
-      // An instruction opens on its plain verb ("drill", "oil", "give"): never a past or -ing form,
-      // never "money was tight" (a subject then its verb), never a date or a number.
-      !/(?:ed|ing)$/.test(first) &&
-      !STATE_VERB.test(words[1] ?? "") &&
-      !/\d/.test(t)
-    );
-  };
-  return items.every(isStep) ? items : null;
+  // …never a date or a number among the pieces ("in 2019, in 2020, and in 2021").
+  return items.every(t => isInstruction(t) && !/\d/.test(t)) ? items : null;
+}
+
+/**
+ * A past or -ing form ("grabbed", "making"), never an instruction's plain verb — though a plain verb
+ * may END like one: "feed", "bleed", "speed" (one or two letters before "-eed"; "agreed" is past) and
+ * "bring", "string", "sing" (no vowel before the "-ing"). Read as past forms, they sank job 352's "Bring
+ * your cut list, match the short parts to short boards, and save the long, clear stock…" by its shape,
+ * and — once a model's two steps were held to `isInstruction` too (job 408) — would have refused "fill
+ * the feeder, and bring it inside at dusk". Pure.
+ */
+const pastOrIng = (w: string) =>
+  /ing$/.test(w) ? /[aeiouy]/.test(w.slice(0, -3)) : /ed$/.test(w) && !/^(?:[a-z]{0,2}eed|proceed|succeed|exceed|shred|embed)$/.test(w);
+
+/**
+ * Whether one step is a short instruction that starts on its own verb-like word — no subject ("I
+ * went…"), no determiner ("a saw" is a thing), no aside ("Honestly"), at most `STEP_MAX_WORDS` words
+ * in each of its ways (`waysOf`). A number inside it is the shape rules' concern only (`stepsByShape`):
+ * "cut it to 24 inches" is an instruction all the same. Pure.
+ */
+function isInstruction(t: string): boolean {
+  // The step itself is its first way; a choice joined to it is held only to the length limit.
+  const ways = waysOf(t);
+  const words = ways[0].split(/\s+/);
+  const first = (words[0] ?? "").replace(/[^a-z]/gi, "").toLowerCase();
+  return (
+    words.length >= 2 &&
+    ways.every(w => w.split(/\s+/).length <= STEP_MAX_WORDS) &&
+    !!first &&
+    !SUBJECT_START.test(first) &&
+    // …and a subject in a contraction ("and you'll know", "and I'll answer" read "youll", "ill"
+    // above): a sentence an "or" piece used to sink can now reach this line, so its last piece is
+    // held to the same rule.
+    !SUBJECT_START.test((words[0] ?? "").toLowerCase().replace(/’/g, "'")) &&
+    !DETERMINER.test(t) &&
+    !NOT_A_LIST_ITEM.has(first) &&
+    !/ly$/.test(first) &&
+    !JOINERS.has(first) &&
+    // An instruction opens on its plain verb ("drill", "oil", "give"): never a past or -ing form,
+    // never "money was tight" (a subject then its verb).
+    !pastOrIng(first) &&
+    !STATE_VERB.test(words[1] ?? "")
+  );
+}
+
+/** Words right after a step's verb that point at a thing named before ("drain IT outside"). */
+const OBJECT_WORD = new Set(["it", "them", "this", "that", "these", "those", "both", "everything"]);
+/** A word that may stand between a verb and the thing it acts on ("look AT it", "turn OVER the board"). */
+const VERB_PARTICLE = new Set(["at", "to", "on", "onto", "into", "in", "over", "with", "under", "through", "around", "up", "down", "out", "off"]);
+
+/**
+ * Whether one step does something TO A THING it names: past its verb, a noun phrase led by "a/the/
+ * your/…" or a count ("hold your phone up to the screen", "tap the link"), or "it/them/…" right after
+ * the verb, or after the verb and one particle, for a thing named before ("drain it outside", "store it
+ * sealed", "look at it"), or a NAME past the verb ("open Etsy", "tap Sell" — a capital that is not
+ * "I"). A bare verb names nothing ("flush", "follow"), and neither does a step that only says how, when
+ * or where ("go slow", "wait until everyone's been served", "look at what it gives back"). Pure.
+ */
+function actsOnAThing(step: string): boolean {
+  const raw = waysOf(step)[0].trim().split(/\s+/).filter(Boolean);
+  const words = raw
+    .map(w => w.toLowerCase().replace(/’/g, "'").replace(/^[^a-z0-9$]+|[^a-z0-9%']+$/g, ""))
+    .filter(Boolean);
+  if (words.length < 2) return false;
+  if (raw.slice(1).some(w => /^[A-ZÀ-ÖØ-Þ]/.test(w.replace(/^["'“‘(]+/, "")) && !/^I(?:['’]\w+)?\W*$/.test(w))) return true;
+  if (OBJECT_WORD.has(words[1]) || (VERB_PARTICLE.has(words[1]) && OBJECT_WORD.has(words[2] ?? ""))) return true;
+  return words.slice(1).some((_, k) => DETERMINER.test(words.slice(k + 1).join(" ")));
+}
+
+/** A clause of when or if in front of a step, up to its comma ("when a link shows on the phone, | tap it"). */
+const LEADING_WHEN = /^(?:when|whenever|once|after|before|if|as soon as|until|while)\b[^,]*,\s*/i;
+
+/**
+ * TWO STEPS ARE A LIST ONLY WHEN EACH ONE DOES SOMETHING TO A THING (2026-10-18, job 408 at 1:08): "So.
+ * We will go the way the water goes. Flush, and follow." says how the video will run — follow the
+ * water's route — and it was cut as a list: two flash pictures (0.75 s and 1.28 s) and a numbered "1
+ * Flush → 2 Follow", where "follow" names nothing a picture could show but the same water again.
+ * Three or more steps are a sequence by their number; two are a list of steps only when each is an
+ * instruction (`isInstruction`) on a thing it names (`actsOnAThing`): "Hold your phone up to the
+ * screen with its camera on, and aim it at the little black and white code" (job 410), "drain it
+ * outside, store it sealed" (job 413). A clause of when in front of a step is read past ("…, and when
+ * a link shows on the phone, tap it", job 404). The shape rules never found two (`stepsByShape` needs
+ * three pieces); the model's answer was held to nothing of the kind, and is now (`validateSpokenList`).
+ * Pure.
+ */
+export function stepsAreASequence(items: string[]): boolean {
+  if (!Array.isArray(items) || items.length < 2) return false;
+  if (items.length > 2) return true;
+  return items.every(i => {
+    const step = stripJoiners(String(i ?? "").trim()).replace(LEADING_WHEN, "").replace(/[.!?]+$/, "").trim();
+    return isInstruction(step) && actsOnAThing(step);
+  });
+}
+
+/**
+ * TWO BARE WORDS ARE NO LIST OF THINGS (same film): with no "a/the/some…" and nothing else said with
+ * them, two single words joined by a comma read as two actions as easily as two things — "Flush, and
+ * follow." passed every rule a list of things is held to, by sentence shape and by the model alike,
+ * and became the false list above. One of them a NAME is a thing all the same ("on Etsy, or eBay"): a
+ * capital that is not the sentence's first letter — read where the sentence SAYS the word, since a
+ * list graphic's rows come capitalised ("1 Flush → 2 Follow"). Three or more bare words stay a list
+ * ("Wash, towel, dryer, brush", job 319), and so do two with words of their own ("brown sugar, and
+ * butter"). Pure.
+ */
+export function twoBareWords(sentence: string, items: string[]): boolean {
+  if (!Array.isArray(items) || items.length !== 2) return false;
+  const opening = sentence.trim().replace(/^["'“‘(]+/, "");
+  return items.every(i => {
+    const word = stripJoiners(String(i ?? "").trim()).replace(/[.!?;:,]+$/, "").trim();
+    if (!word || /\s/.test(word) || DETERMINER.test(word)) return false;
+    const said = new RegExp(`(?<![\\p{L}\\p{N}'’])${word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu").exec(opening);
+    const form = said ? said[0] : word;
+    const atStart = said ? said.index === 0 : opening.startsWith(word);
+    return !/[A-Z]/.test(atStart ? form.slice(1) : form);
+  });
 }
 
 /** A second word that makes a piece a statement about something ("money WAS tight"), not a step. */
@@ -1630,4 +1728,105 @@ export function applySpokenLists(
   }
   out.forEach((s, k) => (s.index = k + 1));
   return { scenes: out, applied, handed, cleared, skipped, apart };
+}
+
+/**
+ * The words leading into a list that say someone is holding what it names ("…, holding"). Only the
+ * -ing forms, and only with a person in the sentence (`PERSON_WORD`): "Cut the pockets a little
+ * bigger, and the same tray holds | a small teapot" (job 143) is a thing holding things.
+ */
+const HOLDING_LEAD = /\b(?:holding|carrying|clutching|cradling|gripping|juggling|balancing|toting|hugging)\s*[,:]?$/i;
+/** A first item that opens on the holding word itself ("holding the whole can,"). */
+const HOLDING_START = /^\s*(?:holding|carrying|clutching|cradling|gripping|juggling|balancing|toting|hugging)\b/i;
+/**
+ * A person in the sentence that leads into the list: the one doing the holding is someone. Never
+ * "their" or "its", which things have too ("the rack, holding their lids").
+ */
+const PERSON_WORD =
+  /\b(?:she|he|they|them|i|you|we|her|him|his|my|your|our|someone|somebody|everyone|everybody)\b/i;
+/** The host speaking of their own hands ("I walked in holding", "my arms full"). */
+const FIRST_PERSON = /\b(?:i|i'm|i’m|i've|i’ve|me|my)\b/i;
+/**
+ * "resting on the tray table", "standing in a seat-back pocket": where a thing is put down, not held
+ * (job 402 scene 5's bottle stood in a seat-back pocket while the line said she was holding it).
+ */
+const PUT_DOWN_ON =
+  /,?\s+(?:resting|sitting|lying|standing|set|placed|left|propped|perched|laid|tucked)\s+(?:on\s+top\s+of|on|upon|atop|in|inside|into)\s+(?:the|a|an|its|her|his|their|this|that)\s+[a-z'’-]+(?:\s+(?!(?:in|at|near|beside|by|inside|under|next|with|of|on|among|against|and)\b)[a-z'’-]+){0,3}/i;
+
+/** A description of a list item with the hand that holds it: put down nowhere, held in `hand`. */
+function heldIn(text: string | undefined, hand: string): string | undefined {
+  if (!text?.trim()) return text;
+  const t = text.replace(PUT_DOWN_ON, "").trim();
+  const stop = /[.!]\s*$/.test(t);
+  return `${t.replace(/[\s.!,;]+$/, "")}, held in ${hand}${stop ? "." : ""}`;
+}
+
+/**
+ * Who holds what a list of HELD things names, from the list's own pictures and the picture that leads
+ * into it — the items first, since they show the hands the things are in, where the lead-in may show
+ * someone beside the holder: the one someone else they show (one person only), else the host when
+ * the host is at work in them or says it of their own hands. Undefined when nobody is known —
+ * nothing is guessed.
+ */
+function listHolder(
+  head: StoryboardScene | undefined,
+  run: StoryboardScene[]
+): { who: string; people?: number } | "host" | undefined {
+  const pictures = [...run, ...(head && !head.hostPresent ? [head] : [])];
+  const other = pictures.find(s => s.otherPerson);
+  if (other) return (other.otherPeople ?? 1) > 1 ? undefined : { who: other.otherPerson!, people: other.otherPeople };
+  if (pictures.some(s => s.humanPresent)) return "host";
+  const said = (head?.scriptText ?? "").split(/(?<=[.!?])\s+/).pop() ?? "";
+  return head?.hostPresent && FIRST_PERSON.test(said) ? "host" : undefined;
+}
+
+/**
+ * A LIST OF WHAT SOMEONE HOLDS KEEPS THE ONE HOLDING IT (2026-10-18, job 410 scene 6): "…one of them
+ * was sitting in an empty row closer to the front, holding | the whole can of ginger ale, | a second
+ * bag of pretzels, | and a bottle of water for later." Items one and two showed the older woman's
+ * hands holding the can and the pretzels; the third was planned as "small water bottle resting on the
+ * tray table in the empty row", nobody in it, and drawn from the empty row's look ("unoccupied") —
+ * her seat came back empty, as if she had vanished. When the words leading into a list say someone is
+ * holding what it names, every item picture that shows nobody is given the holder (`listHolder`): held
+ * in their hand, the person carried as someone else (`otherPerson`) or as the host at work. Never a
+ * list of steps (the host's hands already), a CTA or split beat, or a picture with a person in it;
+ * nothing when the holder is not known. Run after every writer of descriptions, before
+ * `markHostBroll`, which keeps a person only while the words show one. Returns how many pictures
+ * were given the holder. Pure apart from mutating `scenes`.
+ */
+export function keepListHolders(scenes: StoryboardScene[]): number {
+  let n = 0;
+  const item = (s: StoryboardScene | undefined) => !!s?.listCut && !s.hostPresent;
+  for (let i = 0; i < scenes.length; i++) {
+    if (!item(scenes[i]) || item(scenes[i - 1])) continue;
+    let j = i;
+    while (item(scenes[j + 1])) j++;
+    const run = scenes.slice(i, j + 1);
+    const head = scenes[i - 1];
+    // The sentence the list hangs on: the end of the line before it, else the first item's own words.
+    const lead = (head?.scriptText ?? "").trim().replace(/[.!?…]+$/, "");
+    const sentence = lead.split(/(?<=[.!?])\s+/).pop() ?? "";
+    const held =
+      (HOLDING_LEAD.test(lead) && (PERSON_WORD.test(sentence) || !!namedPeople(sentence))) ||
+      (HOLDING_START.test(run[0].scriptText ?? "") && PERSON_WORD.test(sentence));
+    const holder = held && !run.some(s => s.listKind === "steps") ? listHolder(head, run) : undefined;
+    if (holder) {
+      // "the hand of …", never "…'s hand": a holder is often a phrase ("a man in his sixties", "a
+      // woman at a baby shower" on stored films), and its possessive is not English.
+      const hand = holder === "host" ? "the host's hand" : `the hand of ${holder.who}`;
+      for (const s of run) {
+        if (s.humanPresent || fixedBeat(s) || showsPerson(`${s.showSubject ?? ""} ${s.visualPrompt ?? ""}`)) continue;
+        s.showSubject = heldIn(s.showSubject, hand);
+        s.visualPrompt = heldIn(s.visualPrompt, hand) ?? s.visualPrompt;
+        s.humanPresent = true;
+        if (holder !== "host") {
+          s.otherPerson = holder.who;
+          s.otherPeople = holder.people;
+        }
+        n++;
+      }
+    }
+    i = j;
+  }
+  return n;
 }

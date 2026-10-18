@@ -8,6 +8,8 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   checkScript,
+  ctaPlacementWarnings,
+  misplacedCodeWords,
   noteLineReason,
   REPEAT_MIN_WORDS,
   scriptRefusal,
@@ -275,5 +277,211 @@ describe("the generate route runs the check", () => {
     expect(routers.slice(start, end)).toContain(
       "scriptRefusal(checkScript(input.script))"
     );
+  });
+});
+
+describe("a line under the big QR card that puts the code somewhere else (job 409 scene 37)", () => {
+  // Job 409's real close (the Gideon Grant practice script, scripts/stress/scripts): the card went
+  // big and centred on the scan sentence, which sends the viewer to "the corner of the screen".
+  const CLOSE_409 = [
+    "So which door are you holding open?", // 1
+    "===START CTA(The Stoic Way)===", // 2
+    "Some of you are already a page ahead of me, wondering where all of this lives in one place. The thinking belongs to Seneca and the Stoics after him; my work was gathering it into a digital book called The Stoic Way — a hundred and one lessons on money, grief, people, and more.", // 3
+    "", // 4
+    "Chapter twelve stands on today’s exact ground — time, legacy, and what the remaining years are for. Getting there is one small motion: lift your phone toward the pattern in the corner of the screen and tap what rises, or find the first line of the description below. No timer on this — a lesson about hurry is a poor place to hurry you.", // 5
+    "", // 6
+    "Now, back to that door you have been holding open.", // 7
+    "===END CTA===", // 8
+  ];
+  const block = (...lines: string[]) =>
+    [
+      "Today, three small projects from one board.",
+      "===START CTA===",
+      ...lines,
+      "===END CTA===",
+    ].join("\n");
+  const placements = (script: string) =>
+    checkScript(script).warnings.filter(w => w.kind === "placement");
+
+  it("warns, naming the line and the words — never refuses", () => {
+    const check = checkScript(CLOSE_409.join("\n"));
+    expect(check.problems).toEqual([]);
+    expect(scriptRefusal(check)).toBeNull();
+    expect(check.warnings).toHaveLength(1);
+    expect(check.warnings[0]).toMatchObject({
+      kind: "placement",
+      line: 5,
+      ctaBlock: 0,
+      place: "the corner of the screen",
+    });
+    expect(check.warnings[0].message).toMatch(
+      /^Line 5 says the code is at "the corner of the screen", but from the scan line to the end of the call to action it is the big card in the middle of the screen: "Getting there is one small motion: lift your phone toward the pattern in the corner/
+    );
+    expect(check.warnings[0].message).toContain('Say "on your screen" instead');
+    expect(ctaPlacementWarnings(CLOSE_409.join("\n"))).toEqual(check.warnings);
+  });
+
+  it("says nothing about the real scan lines that place the code where the card is", () => {
+    // Every other scan line in the local practice scripts and jobs: "on your screen", "up on your
+    // screen", the description "below" or "at the top", and the phone's own link bar (job 223).
+    for (const line of [
+      "If you would rather have it in your hand than scattered across videos, you can find The Old Way Home at the link below, or scan the code on your screen.",
+      "The QR code is up on your screen right now, and the link sits at the top of the description if that's easier.",
+      "Just point your camera at the little square code up on your screen there and it'll carry you right to it, and the link's down under the video too if that suits you better.",
+      "Look to the code on your screen and hold your camera steady upon it a moment, and it'll carry you right to the book, and the link is down below the video too if that's easier for you.",
+      "That code is right there on your screen, so just point your camera at it and let it carry you on over, or the link's sitting at the top of the description if that's easier on you.",
+      "Point your phone at the code. A little bar slides up along the top of your screen.",
+      "Lift your phone, point it like you're taking a picture of the screen, and wait for the bar to slide in along the top.",
+      "The checkered code is on your screen, or you'll find the link in the description below.",
+      "Hold your phone up to the screen with its camera on, and aim it at the little black and white code. Or look underneath this video, open the description, and tap the link at the top.",
+      "Aim your phone’s camera at the code on your screen, hold steady, and tap the message that appears, or the first line of the description under this video goes to the same place.",
+      "You'll find it at the top of the description, and the code is on the screen if your phone is close by.",
+      "Phone at the code on the screen, or the first link under the video.",
+      "If you want it, point your phone camera at the square on the screen and touch the bar that comes up, or use the first link under this video.",
+      "To get it, use the link in the description below this video.",
+      "Point your camera at the code in the middle of the screen.",
+    ])
+      expect(placements(block(line)), line).toEqual([]);
+  });
+
+  it("reads the window as the pipeline does: before the trigger line the small corner card is right", () => {
+    const before =
+      "You'll see the little code down in the bottom right corner the whole time I talk.";
+    expect(
+      placements(
+        block(
+          before,
+          "Now go ahead and grab your phone and point it at the code on your screen."
+        )
+      )
+    ).toEqual([]);
+    // The same words AFTER the trigger are spoken under the big card.
+    expect(
+      placements(block("Now go ahead and grab your phone.", before)).map(
+        w => w.place
+      )
+    ).toEqual(["the bottom right corner"]);
+  });
+
+  it("only reads marked blocks, and numbers them the way the pipeline does", () => {
+    const corner = "Point your phone at the code in the corner of your screen.";
+    expect(placements(`Today, three projects.\n${corner}`)).toEqual([]);
+    const script = [
+      "Today, three small projects from one board.",
+      "===START CTA===",
+      "===END CTA===", // empty: not a block to the pipeline either
+      "===START CTA===",
+      "The plans are in a short book. Scan the code on your screen.",
+      "===END CTA===",
+      "Next, the shelf.",
+      "===START CTA===",
+      "The book again, for anyone who just joined us.",
+      corner, // line 10
+      "===END CTA===",
+    ].join("\n");
+    expect(placements(script).map(w => [w.ctaBlock, w.line])).toEqual([
+      [1, 10],
+    ]);
+  });
+
+  it("names the line the place words are on when a sentence runs over two lines", () => {
+    const w = placements(
+      block(
+        "Now go ahead and grab your phone and point it",
+        "at the square at the top of your screen."
+      )
+    );
+    expect(w.map(x => [x.line, x.place])).toEqual([[4, "top of your screen"]]);
+  });
+});
+
+describe("misplacedCodeWords", () => {
+  it.each([
+    [
+      "lift your phone toward the pattern in the corner of the screen and tap what rises",
+      "the corner of the screen",
+    ],
+    [
+      "Point your phone at the code in the bottom right corner.",
+      "the bottom right corner",
+    ],
+    ["The code's at the top of your screen.", "top of your screen"],
+    [
+      "Aim it at the square on the right side of the screen.",
+      "right side of the screen",
+    ],
+    ["Scan the QR code down in the lower-left.", "lower-left"],
+    ["Hold your camera up to the top-right corner.", "the top-right corner"],
+    [
+      "Up in the top corner of the screen, you'll see a little square code.",
+      "the top corner of the screen",
+    ],
+    [
+      "There's a black and white box on the left-hand side.",
+      "left-hand side",
+    ],
+    // Hyphenated, "black-and-white" is still one word: a hyphen is a word boundary, and its "and"
+    // used to split the part so the box was no longer the scannable one.
+    [
+      "Point your camera at the black-and-white box in the bottom corner.",
+      "the bottom corner",
+    ],
+    [
+      "The checkered box in the lower right takes you straight there.",
+      "lower right",
+    ],
+    ["The code's at the top right of the screen.", "top right of the screen"],
+  ])("%s → %s", (sentence, place) => {
+    expect(misplacedCodeWords(sentence)?.place).toBe(place);
+  });
+
+  it.each([
+    // Where the card really is, or the description's link.
+    "Scan the code on your screen.",
+    "The code is up on your screen right now.",
+    "Point your camera at the code in the middle of the screen.",
+    "Or tap the first link in the description below.",
+    "The link sits at the top of the description.",
+    "The link is at the top of the video description.",
+    // The phone's own link bar, never the code.
+    "A little bar slides up along the top of your screen.",
+    "Tap the link that pops up in the corner.",
+    "Point your phone at the code and tap the bar at the top of your phone's screen.",
+    // A corner that is not a place on the screen.
+    "Scan the code before the season comes around the corner.",
+    "Aim the camera at the corner of your porch so you see who knocks.",
+    "Every corner I trimmed off those squares went into the coffee can too.",
+    "Sew corner to corner across that square, so an X sits inside the box.",
+    "Mine is worked from one corner out to a square.",
+    // What a scan brings up on the PHONE, said as a box — the real scripts say "a little link pops
+    // up" (jobs 110, 221, 351) and "tap the bar that appears"; a plain box is not the code.
+    "A little box pops up at the top of your screen.",
+    "Once you scan the code a box pops up at the top of your screen.",
+    "Aim your phone at the code; you'll see a box come up at the top of your screen.",
+    // A side or a corner OF something else.
+    "Tap the link at the top right of the description box.",
+    "Look for the box on the right side of the page once you scan the code.",
+    "Scan the code, and a little button shows on the right side of your phone.",
+    // Not a place at all, and nothing aimed.
+    "Hold your phone right side up and point it at the code on the screen.",
+    "Bring it home from your corner store.",
+  ])("%s → nothing", sentence => {
+    expect(misplacedCodeWords(sentence)).toBeNull();
+  });
+
+  it("stays fast on a long sentence", () => {
+    const long =
+      "hold your phone up to the code on the right of the box and the top of the bench ".repeat(
+        300
+      );
+    const t0 = Date.now();
+    misplacedCodeWords(long);
+    expect(Date.now() - t0).toBeLessThan(500);
+    // One long part whose every place belongs to something else: each place is checked against
+    // the last naming of the code without re-reading the part.
+    const onePart = "the code with a little link in the corner ".repeat(2000);
+    const t1 = Date.now();
+    expect(misplacedCodeWords(onePart)).toBeNull();
+    expect(Date.now() - t1).toBeLessThan(500);
   });
 });

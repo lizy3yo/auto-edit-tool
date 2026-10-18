@@ -32,6 +32,7 @@ import {
   applyShotPlan,
   atWork,
   CONTINUITY_SYSTEM,
+  contrastAcross,
   foldSnappedFlashes,
   foldUnseenBeats,
   joinShortSplits,
@@ -73,6 +74,7 @@ import {
   TOOL_POSITION_CLAUSE,
   withAllowedText,
   planGlitchRerender,
+  ctaPlacementJobWarnings,
 } from "./longformVideo";
 import {
   exactLookQuestion,
@@ -2922,10 +2924,8 @@ describe("a host take stops mid-sentence only at a natural break (job 400)", () 
         at(1, 39.9348, 47.253, "Maybe you have done that arithmetic. Most people past sixty have — usually in silence, usually in", { hostPresent: true }),
         at(2, 47.253, 49.2444, "some ordinary place,", { listCut: true }),
       ],
-      [
-        at(1, 67.7626, 70.934, "My name is Gideon Grant, and this channel is for", { hostPresent: true, hostIntro: true }),
-        at(2, 70.934, 76.935, "men and women in their fifties, sixties, and beyond — people carrying real questions about"),
-      ],
+      // The introduction's "…this channel is for | men and women in their fifties" was here too: a
+      // preposition's bare object is no break since job 408 (the case at the end of this file).
     ];
     for (const pair of pairs) {
       expect(checkPlan(pair, params).findings.filter(f => f.rule === 7)).toEqual([]);
@@ -6624,5 +6624,386 @@ describe("a list inside a passage of another time is set there; a 'he' of the st
     expect(
       fitPictureNotes(pic(9, "Turn it over and sand the other side.", "the host's hands turning a board over on the workbench", { humanPresent: true }))
     ).toBe("");
+  });
+});
+
+describe("Werner's job 408 scenes 2-3: lines that compare are never one picture (round 13)", () => {
+  // The same-topic pass joined the set-up, "it is empty" and the reveal into one topic and drew the
+  // reveal for all of it: the bin stood beside the toilet under "In most American bathrooms, it is
+  // empty", and the Versus card then said the American side is empty (job 403 the same).
+  const setUp = "That little stretch of tile between the bowl and the wall. In most American bathrooms,";
+  const reveal = "it is empty. In a German bathroom, usually, a small bin stands there, with a lid.";
+  const binShow =
+    "a small white plastic bin with a closed hinged lid on pale beige tile floor beside the base of a white porcelain toilet, water swirling in the bowl as it flushes";
+
+  it("the set-up and the reveal each keep their own picture", () => {
+    const scenes = [
+      pic(0, setUp, "the narrow stretch of tile floor between a white toilet and the wall"),
+      pic(1, reveal, "a small white plastic bin with a closed hinged lid on tile beside a toilet"),
+    ];
+    const groups = parseContextGroups(
+      JSON.stringify({ groups: [{ ids: [0, 1], show: binShow }] }),
+      [[0, 1]],
+      i => scenes[i].showSubject,
+      i => atWork(scenes[i]),
+      i => scenes[i].scriptText
+    );
+    expect(contrastAcross([setUp, reveal])).toBe(true);
+    expect(groups).toEqual([]);
+  });
+
+  it("two lines about the one bin still share a picture", () => {
+    const show = "a small white bin with a lid beside a toilet";
+    const scenes = [
+      pic(0, "In a German bathroom, usually, a small bin stands there, with a lid.", show),
+      pic(1, "It has a lid, and it is emptied once a week.", show),
+    ];
+    const groups = parseContextGroups(
+      JSON.stringify({ groups: [{ ids: [0, 1], show }] }),
+      [[0, 1]],
+      i => scenes[i].showSubject,
+      i => atWork(scenes[i]),
+      i => scenes[i].scriptText
+    );
+    expect(groups).toEqual([{ ids: [0, 1], show }]);
+  });
+});
+
+describe("the line's own subject is the picture's (round 13: jobs 410 and 408)", () => {
+  it("410 scene 20: the juice on the beverage cart is the picture, not the cart kept small at the back", async () => {
+    const { attachMemory, memoryView } = await import("./pictureMemory");
+    const things: KeyThing[] = [
+      { name: "beverage cart", main: true, look: "a metal service cart with wheels, a flat top holding plastic cups, ice, aluminum cans" },
+      { name: "empty row", look: "a row of three blue seats near the front of the cabin, unoccupied" },
+    ];
+    const row = pic(3, "one of them was sitting in an empty row closer to the front, holding", "an older woman seen from the side sitting alone in an empty row of three blue seats, the beverage cart rolling away down the aisle behind her", {
+      keyThing: "empty row",
+      otherKeyThings: ["beverage cart"],
+    });
+    const juice = pic(20, "Juice works the same way. If they're running short, they'll tell you, and you're no worse off for trying.", "a small plastic cup of orange juice beside a juice can on the beverage cart", {
+      keyThing: "beverage cart",
+    });
+    const board = [row, juice];
+    attachMemory(board, board, things);
+    expect(juice.keyThing).toBeUndefined();
+    expect(juice.otherKeyThings).toEqual(["beverage cart"]);
+    expect(memorySourcesFor(board, juice)).toEqual([]);
+    expect(memoryView(juice)).not.toBe(BACKGROUND_VIEW);
+    expect(row.keyThing).toBe("empty row");
+  });
+
+  it("410 scene 6: the bottle of water she was holding is in her hand; a tray that holds things has no hand", async () => {
+    const { keepListHolders } = await import("./spokenLists");
+    const scenes = [
+      pic(3, "one of them was sitting in an empty row closer to the front, holding", "an older woman seen from the side sitting alone in an empty row", {
+        otherPerson: "an older woman passenger",
+        humanPresent: true,
+      }),
+      pic(4, "the whole can of ginger ale,", "an older woman's hand holding a full soda can in the empty row", { listCut: true, otherPerson: "an older woman passenger", humanPresent: true }),
+      pic(6, "and a bottle of water for later.", "small water bottle resting on the tray table in the empty row", { listCut: true }),
+    ];
+    expect(keepListHolders(scenes)).toBe(1);
+    expect(scenes[2]).toMatchObject({
+      showSubject: "small water bottle in the empty row, held in the hand of an older woman passenger",
+      otherPerson: "an older woman passenger",
+      humanPresent: true,
+    });
+    const tray = [
+      pic(236, "Cut the pockets a little bigger, and the same tray holds", "hands cutting wider pockets into a wooden tray", { humanPresent: true }),
+      pic(237, "a small teapot", "a small teapot sitting inside a tray pocket on the workbench", { listCut: true }),
+    ];
+    expect(keepListHolders(tray)).toBe(0);
+  });
+
+  it("408 scene 21: the line check is told the line ends on the stick the picture left out", async () => {
+    const { closingThing } = await import("./shotList");
+    const line = "Then the next. The toilet starts flushing slow, and you decide the toilet is getting old. The toilet is fine. There is a stick in it.";
+    expect(closingThing(line, "toilet bowl with water draining slowly, paper piling near the bend")).toBe("There is a stick in it.");
+    expect(closingThing(line, "a toilet bowl with high standing water, paper caught on a stick across the drain")).toBeUndefined();
+  });
+
+  it("399 scene 18 on a retry: the carton on the cart is never filed under the cup beside it", async () => {
+    const { attachMemory, memoryView } = await import("./pictureMemory");
+    const things: KeyThing[] = [
+      { name: "beverage cart", main: true, look: "metal trolley with two tiers" },
+      { name: "plastic cup", look: "clear hard plastic, filled with ice cubes" },
+    ];
+    const board = [
+      pic(16, "Number one. The whole can.", "hands pouring soda into an ice-filled plastic cup at the cart", { keyThing: "plastic cup", humanPresent: true }),
+      pic(18, "Juice works the same way.", "a small juice carton on the beverage cart tray beside an ice-filled plastic cup", {
+        keyThing: "beverage cart",
+        otherKeyThings: ["plastic cup"],
+      }),
+    ];
+    attachMemory(board, board, things);
+    // "Retry failed scenes" reads the board back with the first pass's filing on it.
+    const retry = JSON.parse(JSON.stringify(board)) as StoryboardScene[];
+    attachMemory(retry, retry, things);
+    expect(retry[1].keyThing).toBeUndefined();
+    expect(memoryView(retry[1])).not.toBe(BACKGROUND_VIEW);
+    expect(memorySourcesFor(retry, retry[1])).toEqual([]);
+  });
+});
+
+describe("Werner's job 408 scenes 23-24: a tool made for one job is drawn by its parts (round 13)", () => {
+  // "A toilet auger, the short kind made for toilets, can sometimes hook it out" was a bent rod on a
+  // screwdriver handle under a label naming the tool: the props list wrote "a slim metal rod with a
+  // curved tip and plastic handle", and the named-things step left the tool out as an everyday thing.
+  const AUGER =
+    "a closet auger about 1 m long, a steel tube bent into a J at its lower end, a black rubber sleeve over the bend, " +
+    "a coiled steel cable running through the tube to a small spring tip, a crank handle with a wooden grip at the top of the tube";
+
+  it("the props list and the named-things step both write a specialised tool as it is really built", async () => {
+    const { SPECIALISED_TOOL_RULE, TOOL_SHAPE_NOT_VERB } = await import("./shotList");
+    const { NAMED_LOOKS_SYSTEM } = await import("./namedLooks");
+    expect(CONTINUITY_SYSTEM).toContain(SPECIALISED_TOOL_RULE);
+    expect(SPECIALISED_TOOL_RULE).toMatch(/the 2-4 PARTS that make it that tool/);
+    expect(NAMED_LOOKS_SYSTEM).toMatch(/A SPECIALISED TOOL OR PIECE OF EQUIPMENT a picture is about/);
+    expect(NAMED_LOOKS_SYSTEM.replace(/\s+/g, " ")).toContain(TOOL_SHAPE_NOT_VERB);
+  });
+
+  it("scene 23 carries the auger's parts and keeps the hands; scene 24, with the tool only beside the toilet, is untouched", async () => {
+    const { parseNamedLooks } = await import("./namedLooks");
+    const { keyThingLookClause } = await import("./pictureMemory");
+    const scenes = [
+      pic(23, "A toilet auger, the short kind made for toilets, can sometimes hook it out.", "toilet auger hooked tip inserted into toilet bowl trapway opening", {
+        keyThing: "toilet auger",
+        humanPresent: true,
+        keyThingLook: "a slim metal rod with a curved tip and plastic handle, short household size",
+      }),
+      pic(24, "If it will not come, the toilet has to come up off the floor, and that is a fair place to stop and call someone.", "the white porcelain toilet standing on the pale beige tile floor with a toilet auger resting idle beside its base", {
+        keyThing: "toilet",
+        otherKeyThings: ["toilet auger"],
+      }),
+    ];
+    const before = JSON.stringify(scenes[1]);
+    const answer = parseNamedLooks(
+      JSON.stringify({
+        kinds: [{ name: "toilet auger", look: AUGER }],
+        pictures: [{ id: 0, kind: "toilet auger", show: "hands turning the crank handle of a closet auger, its rubber-sleeved bend resting in the toilet bowl's drain opening" }],
+      })
+    )!;
+    expect(applyNamedLooks(scenes, [0, 1], answer, [{ name: "toilet auger", look: "a slim metal rod with a curved tip and plastic handle" }])).toBe(1);
+    expect(scenes[0].namedLook).toBe(`toilet auger: ${AUGER}`);
+    expect(scenes[0].humanPresent).toBe(true);
+    expect(namedLookClause(scenes[0])).toContain("a coiled steel cable running through the tube");
+    expect(keyThingLookClause(scenes[0])).toBe("");
+    expect(JSON.stringify(scenes[1])).toBe(before);
+  });
+});
+
+describe("Werner's job 408 scene 23: a props look by its parts reaches the first picture whole (round 13)", () => {
+  // The auger's first picture is drawn by its props look. A look by parts says how each sits ("a
+  // black rubber sleeve where the tube bends"), and the place cut dropped every clause holding
+  // "where" — the sleeve that tells a closet auger from a bent rod went with it.
+  it("keeps the part before 'where', and a 'where' naming a place still goes", () => {
+    const things = [
+      {
+        name: "toilet auger",
+        look: "a closet auger, a J-bent steel tube, a black rubber sleeve where the tube bends, a crank handle joined to the top of the tube",
+      },
+      { name: "driveway", look: "paved slope in front of the garage, dusted with light frost, where furniture waits before pickup" },
+    ];
+    const auger = pic(23, "A toilet auger, the short kind made for toilets, can sometimes hook it out.", "hands turning a closet auger's crank handle", {
+      keyThing: "toilet auger",
+      humanPresent: true,
+    });
+    expect(keyThingLookFor(auger, things)).toBe(
+      "a closet auger, a J-bent steel tube, a black rubber sleeve, a crank handle joined to the top of the tube"
+    );
+    const drive = pic(5, "It waits by the road.", "a paved driveway", { keyThing: "driveway" });
+    expect(keyThingLookFor(drive, things)).toBe("paved slope in front of the garage, dusted with light frost");
+  });
+});
+
+describe("Werner's job 408 at 0:54 and 1:08: no host take ends on a preposition, and 'Flush, and follow.' is no list (round 13)", () => {
+  // At 0:54 the introduction ended "…This channel is for people in" and the picture began "older houses
+  // and apartments…" — the host's last word on camera was "in". At 1:08 "So. We will go the way the
+  // water goes. Flush, and follow." — how the video will run — played as two flash pictures under a
+  // numbered "1 Flush → 2 Follow". Sentences and scene ranges are the job's own.
+  const at = (index: number, from: number, to: number, scriptText: string, over: Partial<StoryboardScene> = {}) =>
+    ({
+      index,
+      scriptText,
+      showSubject: "x",
+      narrationStartSec: from,
+      narrationEndSec: to,
+      audioDuration: to - from,
+      audioUrl: `https://example.com/${index}.mp3`,
+      wordCut: true,
+      minHoldSec: over.hostPresent ? 2 : 1.2,
+      stillImage: over.hostPresent ? undefined : true,
+      ...over,
+    }) as StoryboardScene;
+
+  it("the introduction hands over before 'in', so the picture opens on 'in older houses and apartments'", async () => {
+    const { enforcePlanRules } = await import("./planGate");
+    const params = { faceImageUrl: "https://example.com/host.jpg", hostName: "Werner Finkbeiner" } as any;
+    const scenes = [
+      at(7, 34.38, 41.85, "One is a thread so thin you would never think it could stop anything, and it can stop a pump a long way from your house."),
+      at(8, 41.8467, 50.9829, "And besides what your own body sends there, exactly one thing is allowed in the bowl. It was built on purpose to do something the nine cannot."),
+      at(9, 50.9829, 54.39365, "I am Werner Finkbeiner. This channel is for people in", { hostPresent: true, hostIntro: true, hostProtected: true }),
+      at(10, 54.39365, 59.4103, "older houses and apartments who would rather understand the cause than pay for the visit."),
+      at(11, 59.4103, 65.482, "Today we go through all nine, one at a time, and look at what the German habit does instead."),
+      at(12, 65.482, 68.6937, "So. We will go the way the water goes.", { hostPresent: true }),
+    ];
+    const r = enforcePlanRules(scenes, params, { budgetSec: 72.16 });
+    const k = r.scenes.findIndex(s => s.hostIntro);
+    expect(r.scenes[k].scriptText).toBe("I am Werner Finkbeiner. This channel is for people");
+    expect(r.scenes[k + 1].scriptText).toMatch(/^in older houses and apartments who would rather/);
+    expect(r.scenes[k + 1].narrationStartSec).toBe(r.scenes[k].narrationEndSec);
+  });
+
+  it("job 400's introduction, which stopped on 'for', now hands over before it", async () => {
+    const { enforcePlanRules } = await import("./planGate");
+    const params = { faceImageUrl: "https://example.com/host.jpg", hostName: "Gideon Grant" } as any;
+    const r = enforcePlanRules(
+      [
+        at(1, 67.7626, 70.934, "My name is Gideon Grant, and this channel is for", { hostPresent: true, hostIntro: true }),
+        at(2, 70.934, 76.935, "men and women in their fifties, sixties, and beyond — people carrying real questions about"),
+      ],
+      params
+    );
+    expect(r.scenes[0].scriptText).toBe("My name is Gideon Grant, and this channel is");
+    expect(r.scenes[1].scriptText).toMatch(/^for men and women in their fifties/);
+  });
+
+  const sentences = [
+    "Today we go through all nine, one at a time, and look at what the German habit does instead.",
+    "So.",
+    "We will go the way the water goes.",
+    "Flush, and follow.",
+    "And treat gasoline like it’s actively looking for a reason — drain it outside, store it sealed, nowhere near a spark.",
+    "Hold your phone up to the screen with its camera on, and aim it at the little black and white code.",
+  ];
+  const answer = (kind: string) =>
+    JSON.stringify({
+      lists: [
+        { sentence: 3, kind, items: ["Flush", "follow"] },
+        { sentence: 4, kind: "steps", items: ["drain it outside", "store it sealed"] },
+        { sentence: 5, kind: "steps", items: ["Hold your phone up to the screen with its camera on", "aim it at the little black and white code"] },
+      ],
+    });
+
+  it("'Flush, and follow.' is found by neither the model (as steps or as things) nor the sentence shape", async () => {
+    for (const kind of ["steps", "things"]) {
+      const { lists } = await findSpokenLists(sentences.join(" "), { ask: async () => answer(kind) });
+      expect(lists.map(l => l.sentence)).toEqual([4, 5]);
+    }
+    expect(spokenListsByShape(sentences).filter(l => l.sentence === 3)).toEqual([]);
+  });
+
+  it("two steps that each do something to a thing they name stay a list (jobs 410, 413)", async () => {
+    const { lists } = await findSpokenLists(sentences.join(" "), { ask: async () => answer("steps") });
+    expect(lists).toEqual([
+      { sentence: 4, items: ["drain it outside", "store it sealed"], kind: "steps" },
+      { sentence: 5, items: ["Hold your phone up to the screen with its camera on", "aim it at the little black and white code"], kind: "steps" },
+    ]);
+  });
+
+  it("a shot-list hand-off right after a preposition keeps its picture — job 189's kumiko patterns are not said by the host instead", async () => {
+    // Job 189 (0:30): the shot list handed over "…fitting thin strips of wood together into | patterns,
+    // the kind of lattice you see in Japanese sliding doors." The sentence fits a host take, and
+    // finishing it came before handing over at the preposition: replayed, the host said the patterns
+    // and their picture was gone. Scene ranges are the job's own.
+    const { enforcePlanRules } = await import("./planGate");
+    const params = { faceImageUrl: "https://example.com/host.jpg", hostName: "Hank Hardwood" } as any;
+    const r = enforcePlanRules(
+      [
+        at(11, 26.7643, 28.4797, "on a market table."),
+        at(12, 28.4797, 30.5545, "Start with the one that lost."),
+        at(13, 30.5545, 34.2148, "Kumiko is the Japanese craft of fitting thin strips of wood together into", { hostPresent: true }),
+        at(14, 34.2148, 38.0545, "patterns, the kind of lattice you see in Japanese sliding doors."),
+        at(15, 38.0545, 40.5216, "Mine was a plain grid about a foot square,"),
+        at(16, 40.5216, 43.9902, "made from pine screen molding at about $3 a stick."),
+      ],
+      params
+    );
+    expect(r.scenes.map(s => [!!s.hostPresent, s.scriptText])).toEqual([
+      [false, "on a market table."],
+      [false, "Start with the one that lost."],
+      [true, "Kumiko is the Japanese craft of fitting thin strips of wood together"],
+      [false, "into patterns, the kind of lattice you see in Japanese sliding doors."],
+      [false, "Mine was a plain grid about a foot square,"],
+      [false, "made from pine screen molding at about $3 a stick."],
+    ]);
+  });
+});
+
+describe("round 13: a line under the big QR card never sends the viewer to the corner unwarned (job 409 scene 37)", () => {
+  // Job 409 (212.16-218.07): the QR went big and centred on the scan sentence, and five seconds later
+  // the voice said "lift your phone toward the pattern in the corner of the screen". Nothing compared
+  // the script's placement words with the layout. The Generate dialog now warns on that line, and the
+  // voicing stage records the same line on the job — never a refusal. The script is the job's own.
+  const SCRIPT_409 = [
+    "Then he turns the whole thing over in a single motion: life is not short.", // 1
+    "===START CTA(The Stoic Way)===", // 2
+    "Some of you are already a page ahead of me, wondering where all of this lives in one place. The thinking belongs to Seneca and the Stoics after him; my work was gathering it into a digital book called The Stoic Way — a hundred and one lessons on money, grief, people, and more.", // 3
+    "", // 4
+    "Chapter twelve stands on today’s exact ground — time, legacy, and what the remaining years are for. Getting there is one small motion: lift your phone toward the pattern in the corner of the screen and tap what rises, or find the first line of the description below. No timer on this — a lesson about hurry is a poor place to hurry you.", // 5
+    "", // 6
+    "Now, back to that door you have been holding open.", // 7
+    "===END CTA===", // 8
+    "Bye.", // 9
+  ].join("\n");
+  const cta = (index: number, scriptText: string) =>
+    ({ index, scriptText, hostPresent: true, cta: true, ctaIndex: 0, showSubject: "x" }) as StoryboardScene;
+  const scenesOf = (scanLine: string) => [
+    host(1, "Then he turns the whole thing over in a single motion: life is not short.", { hostOpener: true }),
+    cta(2, "Some of you are already a page ahead of me, wondering where all of this lives in one place. The thinking belongs to Seneca and the Stoics after him; my work was gathering it into a digital book called The Stoic Way — a hundred and one lessons on money, grief, people, and more."),
+    cta(3, `Chapter twelve stands on today’s exact ground — time, legacy, and what the remaining years are for. ${scanLine}`),
+    cta(4, "No timer on this — a lesson about hurry is a poor place to hurry you. Now, back to that door you have been holding open."),
+    host(5, "Bye."),
+  ];
+  const SCAN_409 =
+    "Getting there is one small motion: lift your phone toward the pattern in the corner of the screen and tap what rises, or find the first line of the description below.";
+  const params = { qrImageUrl: "q.png", bookTitle: "The Stoic Way", bookCoverImageUrl: "c.png" } as any;
+
+  it("the job records the line the card contradicts, in the Generate dialog's own words", () => {
+    const out = markCtaQrBlock(scenesOf(SCAN_409), params, true);
+    expect(out.find(s => s.qrHero)?.scriptText).toMatch(/^Getting there is one small motion/);
+    const warnings = ctaPlacementJobWarnings(SCRIPT_409, out);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/^Line 5 says the code is at "the corner of the screen"/);
+    expect(checkScript(SCRIPT_409).warnings.map(w => w.message)).toEqual(warnings);
+    expect(checkScript(SCRIPT_409).problems).toEqual([]);
+  });
+
+  it("with no QR or book there is no big card to contradict, so the job records nothing", () => {
+    const out = markCtaQrBlock(scenesOf(SCAN_409), {} as any, true);
+    expect(out.some(s => s.qrHero)).toBe(false);
+    expect(ctaPlacementJobWarnings(SCRIPT_409, out)).toEqual([]);
+  });
+
+  it("a scan line that says 'on your screen' and 'below' for the link is left alone", () => {
+    const clean =
+      "Getting there is one small motion: lift your phone toward the code on your screen and tap what rises, or find the first line of the description below.";
+    const script = SCRIPT_409.replace(SCAN_409, clean);
+    const out = markCtaQrBlock(scenesOf(clean), params, true);
+    expect(out.some(s => s.qrHero)).toBe(true);
+    expect(ctaPlacementJobWarnings(script, out)).toEqual([]);
+    expect(checkScript(script)).toEqual({ problems: [], warnings: [] });
+  });
+
+  it("job 400's card started after the corner line, so the corner was right and the job records nothing", () => {
+    // Job 400, the same script: the pipeline of its day missed the scan sentence and the card took
+    // only the block's last words (scene 38), so "the pattern in the corner" was spoken over the host
+    // with the small corner card (scene 37). The Generate dialog cannot know the cuts and still
+    // warns; the job records only a line the film speaks under the big card. The scenes as stored.
+    const stored = [
+      cta(35, "Some of you are already a page ahead of me, wondering where all of this lives in one place."),
+      { ...cta(36, "The thinking belongs to Seneca and the Stoics after him;"), hostPresent: false, coverHero: true },
+      cta(37, `my work was gathering it into a digital book called The Stoic Way — a hundred and one lessons on money, grief, people, and more. Chapter twelve stands on today’s exact ground — time, legacy, and what the remaining years are for. ${SCAN_409}`),
+      { ...cta(38, "No timer on this — a lesson about hurry is a poor place to hurry you. Now, back to that door you have been holding open."), hostPresent: false, qrHero: true, qrTail: true },
+    ] as StoryboardScene[];
+    expect(checkScript(SCRIPT_409).warnings).toHaveLength(1);
+    expect(ctaPlacementJobWarnings(SCRIPT_409, stored)).toEqual([]);
+    // Job 409's storyboard of the same block: the card from the scan sentence on — recorded.
+    const s409 = [
+      ...stored.slice(0, 2),
+      cta(37, "my work was gathering it into a digital book called The Stoic Way — a hundred and one lessons on money, grief, people, and more. Chapter twelve stands on today’s exact ground — time, legacy, and what the remaining years are for."),
+      { ...cta(38, `${SCAN_409} No timer on this — a lesson about hurry is a poor place to hurry you. Now, back to that door you have been holding open.`), hostPresent: false, qrHero: true, qrTail: true },
+    ] as StoryboardScene[];
+    expect(ctaPlacementJobWarnings(SCRIPT_409, s409)).toHaveLength(1);
   });
 });

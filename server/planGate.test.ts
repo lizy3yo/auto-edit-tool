@@ -847,13 +847,12 @@ describe("a host take stops mid-sentence only at a natural break (job 400)", () 
   const ends = (scenes: StoryboardScene[]) =>
     checkPlan(scenes, params).findings.filter(f => f.rule === 7 && /ends mid-sentence/.test(f.detail));
 
-  it("knows a break from the words alone: a comma, a list, a joining word, an article, a name, a count, a preposition's object", () => {
+  it("knows a break from the words alone: a comma, a list, a joining word, an article, a name, a count", () => {
     const breaks: [string, string, boolean?][] = [
       ["Today, with the help of a Roman who wrote the sharpest essay on time ever put to paper,", "I want to show you"],
       ["and this one's for anybody standing in a garage with", "a saw,", true],
       ["the one that paid me best for my time came out of", "a coffee can of burnt scraps I almost threw in the trash."],
       ["Two thousand years ago, a man named", "Lucius Annaeus Seneca wrote a short,"],
-      ["My name is Gideon Grant, and this channel is for", "men and women in their fifties, sixties,"],
       ["Every one comes out a little different", "and folks loved picking out the one that spoke to them."],
       ["by the end of this video you will be able to name all", "seven of the thieves."],
       ["men and women in their fifties, sixties, and beyond", "— people carrying real questions about"],
@@ -865,6 +864,8 @@ describe("a host take stops mid-sentence only at a natural break (job 400)", () 
       ["I want to show you that", "the arithmetic was never your problem."], // "that" waits for its clause
       ["Then I", "sanded the whole thing smooth."], // a subject waits for its verb
       ["Nobody could say what it was made of", "was a mystery to me."], // a stranded preposition, then a verb
+      // A preposition's bare object: the break goes before the preposition (job 408, below).
+      ["My name is Gideon Grant, and this channel is for", "men and women in their fifties, sixties,"],
     ];
     for (const [before, after] of notBreaks) expect(breakBetween(before, after), before).toBe(false);
   });
@@ -1466,5 +1467,131 @@ describe("the film never ends on a host shot under a second (the audit's last op
     expect(closingFoldTarget(paid, 2)).toBe(-1);
     // Only the last beat is a closing beat.
     expect(closingFoldTarget(film([["H", 5, sentence(1)], ["H", 0.7, "Right."], ["P", 6, sentence(2)]]), 1)).toBe(-1);
+  });
+});
+
+describe("a host take never stops right after a preposition (job 408)", () => {
+  // Job 408's introduction ended "…This channel is for people in" and the next picture began "older
+  // houses and apartments…": the host's last word on camera was "in". A preposition's bare object
+  // used to count as a natural break.
+  it("the break goes before the preposition, not after it — an article, a count or a name after one still opens a picture", () => {
+    expect(breakBetween("I am Werner Finkbeiner. This channel is for people in", "older houses and apartments who would rather understand the cause")).toBe(false);
+    expect(breakBetween("I am Werner Finkbeiner. This channel is for people", "in older houses and apartments who would rather understand the cause")).toBe(true);
+    expect(breakBetween("My name is Gideon Grant, and this channel is for", "men and women in their fifties, sixties,")).toBe(false);
+    expect(breakBetween("My name is Gideon Grant, and this channel is", "for men and women in their fifties, sixties,")).toBe(true);
+    // The operator's own breaks after a preposition are kept: an article, a count, a name, a list item.
+    expect(breakBetween("the one that paid me best for my time came out of", "a coffee can of burnt scraps")).toBe(true);
+    expect(breakBetween("I sold the whole batch for", "forty dollars at the market.")).toBe(true);
+    // Any number word is a count — before, the bare-object rule carried the ones the count list lacked.
+    expect(breakBetween("the boards sold for", "seventeen dollars apiece.")).toBe(true);
+    expect(breakBetween("fifteen minutes fetching around", "fourteen dollars comes to about a dollar an hour")).toBe(true); // job 172
+    expect(breakBetween("a pair went for", "thirty-five dollars.")).toBe(true);
+    expect(breakBetween("Out of 10 Japanese woodworking projects you can build from", "cheap box-store lumber, the one")).toBe(false); // job 153
+    expect(breakBetween("Out of 10 Japanese woodworking projects you can build", "from cheap box-store lumber, the one")).toBe(true);
+    expect(breakBetween("I learned it from", "Lucius Annaeus Seneca, of all people.")).toBe(true);
+    expect(breakBetween("and this one's for anybody standing in a garage with", "a saw,", { list: true })).toBe(true);
+  });
+
+  const werner = { ...params, hostName: "Werner Finkbeiner" } as LongformInputParams;
+  const intro = () => {
+    const scenes = film([
+      ["H", 2.12, "Look at the floor beside your toilet."],
+      ["P", 5.17, "That little stretch of tile between the bowl and the wall. In most American bathrooms,"],
+      ["P", 6.46, "it is empty. In a German bathroom, usually, a small bin stands there, with a lid."],
+      ["P", 8.52, "It is the answer to one plain sentence the water utilities in Germany have repeated for years: the toilet is not a trash can."],
+      ["P", 7.76, "Nine things stay out of the toilet there, and in plenty of American homes, most of them go down it in an ordinary week."],
+      ["H", 4.35, "One has a word printed on its package that your pipes do not agree with."],
+      ["P", 7.47, "One is a thread so thin you would never think it could stop anything, and it can stop a pump a long way from your house."],
+      ["P", 9.13, "And besides what your own body sends there, exactly one thing is allowed in the bowl. It was built on purpose to do something the nine cannot."],
+      ["H", 3.41, "I am Werner Finkbeiner. This channel is for people in"],
+      ["P", 5.02, "older houses and apartments who would rather understand the cause than pay for the visit."],
+      ["P", 6.07, "Today we go through all nine, one at a time, and look at what the German habit does instead."],
+      ["H", 3.21, "So. We will go the way the water goes."],
+      ["P", 2.03, "Flush, and follow."],
+      ["P", 6.11, "Each of the nine stops somewhere, and each one stops a little farther from your house than the one before."],
+      ["H", 7.13, "Number one never leaves the toilet. Cotton swabs. The little stick with cotton on both ends."],
+    ]);
+    for (const s of scenes) Object.assign(s, { wordCut: true, minHoldSec: s.hostPresent ? 2 : 1.2 });
+    Object.assign(scenes[0], { hostOpener: true });
+    Object.assign(scenes[8], { hostIntro: true, hostProtected: true });
+    return scenes;
+  };
+
+  it("job 408's introduction hands over before 'in', and the picture opens on 'in older houses'", () => {
+    const scenes = intro();
+    expect(
+      checkPlan(scenes, werner).findings.some(f => f.rule === 7 && f.scene === 9 && /ends mid-sentence/.test(f.detail))
+    ).toBe(true);
+    const r = enforcePlanRules(scenes, werner, { budgetSec: 72 });
+    const k = r.scenes.findIndex(s => s.hostIntro);
+    expect(r.scenes[k].scriptText).toBe("I am Werner Finkbeiner. This channel is for people");
+    expect(r.scenes[k + 1].scriptText).toBe(
+      "in older houses and apartments who would rather understand the cause than pay for the visit."
+    );
+    expect(r.scenes[k].narrationEndSec).toBe(r.scenes[k + 1].narrationStartSec);
+    // No host take ends on a preposition anywhere in the film.
+    expect(r.scenes.filter(s => s.hostPresent).map(s => s.scriptText)).not.toContainEqual(expect.stringMatching(/\b(?:in|for|with|of)$/));
+  });
+
+  it("a take that hands over before an article after a preposition is left as it is", () => {
+    const scenes = film([
+      ["H", 5, sentence(1)],
+      ["P", 6, sentence(2)],
+      ["H", 3.5, "And the one that paid me best for my time came out of"],
+      ["P", 4, "a coffee can of burnt scraps I almost threw in the trash."],
+      ["P", 6, sentence(3)],
+      ["H", 5, sentence(4)],
+    ]);
+    scenes[2].wordCut = true;
+    scenes[3].wordCut = true;
+    expect(checkPlan(scenes, params).findings.filter(f => f.rule === 7 && /ends mid-sentence/.test(f.detail))).toEqual([]);
+    const r = enforcePlanRules(scenes, params);
+    expect(r.scenes.map(s => s.scriptText)).toEqual(scenes.map(s => s.scriptText));
+  });
+
+  // Job 189's shot list handed over right after "into", before the thing a picture shows. The sentence
+  // is short enough to finish on the host, and finishing it came first: replayed, the host said the
+  // patterns and their picture was dropped. Handing over before the preposition comes ahead of that.
+  const ends = (scenes: StoryboardScene[]) =>
+    checkPlan(scenes, params).findings.filter(f => f.rule === 7 && /ends mid-sentence/.test(f.detail));
+  const kumiko = (hostText: string, hostSec: number) => {
+    const scenes = film([
+      ["H", 5, sentence(1)],
+      ["P", 6, sentence(2)],
+      ["H", hostSec, hostText],
+      ["P", 3.5, "patterns, the kind of lattice you see in Japanese sliding doors."],
+      ["P", 6, sentence(3)],
+      ["H", 5, sentence(4)],
+    ]);
+    scenes[2].wordCut = true;
+    scenes[3].wordCut = true;
+    return scenes;
+  };
+
+  it("a check-in that stops on 'into' hands over before it — the picture of the patterns stays, the host does not say them", () => {
+    const scenes = kumiko("Kumiko is the Japanese craft of fitting thin strips of wood together into", 4);
+    expect(ends(scenes).map(f => f.scene)).toEqual([3]);
+    const r = enforcePlanRules(scenes, params);
+    expect(r.scenes.map(s => s.scriptText)).toEqual([
+      sentence(1),
+      sentence(2),
+      "Kumiko is the Japanese craft of fitting thin strips of wood together",
+      "into patterns, the kind of lattice you see in Japanese sliding doors.",
+      sentence(3),
+      sentence(4),
+    ]);
+    expect(r.scenes[2].hostPresent).toBe(true);
+    expect(r.scenes[3].hostPresent).toBeFalsy();
+    expect(r.scenes[2].narrationEndSec).toBe(r.scenes[3].narrationStartSec);
+    expect(ends(r.scenes)).toEqual([]);
+  });
+
+  it("a take too short to give the preposition back still finishes its sentence, as before", () => {
+    // Three words before "into" — under `HOST_HANDOFF_MIN_WORDS` — so nothing can go back.
+    const r = enforcePlanRules(kumiko("Kumiko fits strips into", 2.5), params);
+    expect(r.scenes[2].scriptText).toBe(
+      "Kumiko fits strips into patterns, the kind of lattice you see in Japanese sliding doors."
+    );
+    expect(r.scenes.map(s => s.scriptText)).toEqual([sentence(1), sentence(2), r.scenes[2].scriptText, sentence(3), sentence(4)]);
   });
 });

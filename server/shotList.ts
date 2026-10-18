@@ -2009,6 +2009,39 @@ export const PERSON_LOOK_RULE =
   "build, hair (colour, length, style) and the clothes they wear in every picture, with colours — " +
   "fitting everything the script says about them (age, work, place, time). ";
 
+/**
+ * What a line says a tool DOES is never its shape — one wording for the props list and the
+ * named-things step (`SPECIALISED_TOOL_RULE`, `NAMED_LOOKS_SYSTEM`). Job 408 scene 23: "A toilet
+ * auger … can sometimes hook it out" was planned as a "hooked tip" and drawn as a hook on a handle.
+ */
+export const TOOL_SHAPE_NOT_VERB =
+  "a line that says a tool hooks, grabs, clears or lifts something says what it does, never what " +
+  "shape it is";
+
+/**
+ * A TOOL MADE FOR ONE JOB IS WRITTEN BY ITS PARTS (2026-10-18, job 408 scenes 23-24). "A toilet
+ * auger, the short kind made for toilets, can sometimes hook it out" was drawn as a plain bent steel
+ * rod with a screwdriver handle — a hex key, a hook — under an on-screen label naming the tool, and
+ * scene 24 copied it lying on the tile. The props list had written "a slim metal rod with a curved
+ * tip and plastic handle, short household size": a shape taken from what the line says it does, not
+ * from how the tool is built (a crank, a bent tube, a coiled cable, a rubber sleeve), and the look is
+ * all a first picture of a key thing is drawn by. Job 413's "a guided knife-sharpening unit, metal
+ * clamp guide and angled slots" mixed two kinds of sharpener into one look, and a picture drawn by it
+ * pushed a second knife down through the clamped one. So a specialised tool's look names its ONE
+ * kind and the parts that make it that tool, as it is really built. The example is neutral. Each part
+ * says "what it is joined to", never "where it joins": the look reaches a picture through the place
+ * cut (`pictureLook`), which reads "where" as a place unless the clause opens on a part.
+ */
+export const SPECIALISED_TOOL_RULE =
+  "A TOOL OR PIECE OF EQUIPMENT MADE FOR ONE JOB — a hand tool, gauge, jig, gadget or machine a " +
+  "picture generator would draw from its name alone as a plain rod, handle or box: its look STARTS " +
+  "with its one exact kind (when the tool comes in several kinds, the one the script means, else " +
+  "the most common one for that job — never two kinds mixed into one look), then the 2-4 PARTS " +
+  "that make it that tool, each with its shape, material and what it is joined to, as the tool " +
+  `is really built — ${TOOL_SHAPE_NOT_VERB}. Example: \`pipe wrench: a heavy steel pipe wrench ` +
+  "about 35 cm long, a straight red-painted handle, a fixed lower jaw and an adjustable upper jaw, " +
+  "both with angled teeth, a knurled round nut between them that sets the opening`. ";
+
 // A PERSON name says WHAT the person is (job 399's script calls its two passengers only "one of
 // them", "the other", "she" and "he"): the pictures and the line check label them "a woman
 // passenger" / "a male passenger", and `matchRecurringPeople` finds a look by that role and sex —
@@ -2039,6 +2072,7 @@ export const CONTINUITY_SYSTEM =
   "whole thing it is inside, with how it looks from the OUTSIDE, because no picture can show the " +
   "inside. " +
   EXACT_KIND_RULE +
+  SPECIALISED_TOOL_RULE +
   "6-14 lines. Plain words, no brands, no people in these lines. NOTHING WITH MARKS ON IT: " +
   "never list a chalk tally, a chalkboard, a sign, a price tag, a label, a calendar, a notebook, a " +
   "ledger or anything written or counted on — the pictures carry no writing, so such a prop would " +
@@ -2677,6 +2711,16 @@ something costs or is like (show the subject); a bare number, price or length of
 thing it is about); someone the line only sells to, tells, helps or mentions, who does nothing in
 it (show the thing); a warning about a danger (show the safe way, never the danger); something the
 line says does NOT happen or is NOT there (never draw it happening).
+THE LINE'S LAST WORD. A line that closes on a short sentence revealing the thing it was building to —
+the cause, the catch, the answer ("The printer is fine. There is a paper clip in the tray.") — makes
+its point with that thing: a picture without it is WRONG, however right the rest is. Rewrite it with
+that thing in it, where the line puts it. A picture marked ends on "…" closes on such a sentence.
+A STATE A PHOTO CANNOT SHOW. A still picture shows no speed and no change over time. When the line's
+point is how fast or slow something happens, or that it keeps getting worse (a queue that barely
+moves, dough that rose fast, a tyre slowly losing air), a picture that only names that speed is
+drawn as the ordinary everyday version and says nothing: it is WRONG. Write what the state leaves
+for the eye — a long line of people standing still, the dough domed high over the rim of its bowl,
+the tyre sagging flat at the bottom — with the cause the line names in view.
 It is WRONG when it does not show what the line points at. SHOW EXACTLY WHAT THE LINE POINTS AT: when a line points at a specific thing, or a specific part, side or detail of a thing (the box it comes in, its label, the battery door on the back, the dial, the date on the bottom, the hem), the picture is a close-up of exactly that — never the video's main thing somewhere else, never a plain version without it. What the script says that part shows (the words printed on it, a number, a setting) is shown exactly as the script says it.
 It is WRONG when a body part looks cut off. A BODY PART NEVER LOOKS CUT OFF: hair, a hand, a foot or a face is shown on the person, or on what really holds it — a wig on a mannequin head or wig stand, a practice hand, extensions in their packet. A few loose strands that really fall (in a brush, on a comb or towel, in a drain) are fine. Never hair still shaped like a head or a hairstyle with no head inside it, and never a hand, foot or face on its own. To show a colour or texture, show it on the person's own head or hands.
 It is WRONG when it shows a solid thing cut open, as a cutaway or see-through view, or from inside it — even as the close-up a line points at. ${NOTHING_CUT_OPEN_RULE}
@@ -2963,6 +3007,40 @@ export function fitPictureNotes(s: StoryboardScene): string {
       : "";
   const setting = s.listSetting?.trim() ? ` (inside a passage set in ${s.listSetting.trim()})` : "";
   return `${story}${setting}`;
+}
+
+/** "There is a stick in it.", "The problem was a loose wire.": a short sentence that reveals a thing. */
+const REVEALS_A_THING =
+  /^(?:(?:and|but|so)\s+)?(?:there(?:'s|’s|\s+is|\s+are|\s+was|\s+were)|the\s+(?:problem|culprit|cause|answer|catch|reason)\s+(?:is|was))\s+(?:(?:just|only|simply|actually|really|still)\s+)?(?:a|an|the|one|some|two|three|your|its|their)\s+(.+?)[.!?…"”’]*$/i;
+/** The last word of what such a sentence names, when it names an idea rather than a thing. */
+const NOT_A_SEEN_THING =
+  /^(?:reasons?|ways?|things?|catch|answers?|problems?|point|difference|trick|secret|rules?|lessons?|chance|time|ideas?|questions?|truth|fix|part|steps?|options?|choices?|deal|issues?|risks?|cost|price|story|solutions?|method|plan|need|limit|lot|bit|more|better|upside|downside|benefit|bonus)$/i;
+
+/**
+ * THE LINE'S LAST WORD (2026-10-18, job 408 scene 21): the short closing sentence a picture's line
+ * builds to, when it reveals a thing the picture's words never name — "…you decide the toilet is
+ * getting old. The toilet is fine. There is a stick in it." over "toilet bowl with water draining
+ * slowly, paper piling near the bend": the stick the whole line was about was left out, and the
+ * picture shipped as a strong flush. The line check is told the sentence (`ends on "…"`), and holds
+ * the picture to it. Only "there is a …" and "the problem was a …" sentences of eight words or fewer,
+ * after another sentence — replayed over 22,500 local pictures it marks five: this stick, job 403's
+ * (drawn as the swab it is, which the check can tell), and one script's "But there is a blanket" over
+ * a bag of scraps, three times. Undefined otherwise. Pure.
+ */
+export function closingThing(line: string | undefined, show: string | undefined): string | undefined {
+  const sentences = (line ?? "").trim().split(/(?<=[.!?])\s+/).filter(Boolean);
+  if (sentences.length < 2) return undefined;
+  const last = sentences[sentences.length - 1];
+  const m = REVEALS_A_THING.exec(last);
+  if (!m || last.split(/\s+/).length > 8) return undefined;
+  const thing = m[1].split(/\s+(?:in|on|at|inside|under|behind|stuck|caught|of|with|for|from|that|which|to|left)\b/i)[0];
+  const words = thing.toLowerCase().replace(/[^a-z\s-]/g, " ").split(/\s+/).filter(w => w.length >= 3);
+  // "There's a reason for that.", "There is a better way.", "There's one more thing." reveal nothing a
+  // camera can see: no mark for the check to chase.
+  if (NOT_A_SEEN_THING.test(words[words.length - 1] ?? "")) return undefined;
+  const have = new Set((show ?? "").toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/));
+  const named = (w: string) => have.has(w) || have.has(`${w}s`) || have.has(w.replace(/(?:es|s)$/, ""));
+  return words.length && !words.some(named) ? last : undefined;
 }
 
 /** The pictures the fit check reads and may fix — drawn cutaways, never the CTA, cover or assets. */
@@ -3478,8 +3556,10 @@ export async function fitPicturesToLines(
         continue;
       }
       any = true;
+      // The thing the line closes on, when the picture's words leave it out (`closingThing`).
+      const closing = closingThing(said, s.showSubject ?? s.visualPrompt);
       lines.push(
-        `#${i} PICTURE${secs}${s.sameShot ? " (continues)" : ""}${s.joinedLine ? " (joined)" : ""}${sameSentence ? " (same sentence)" : ""}${i === firstMain ? " (FIRST of the MAIN thing)" : ""}${fitPictureNotes(s)}: said "${said}" | shows: ${s.showSubject ?? s.visualPrompt ?? ""}`
+        `#${i} PICTURE${secs}${s.sameShot ? " (continues)" : ""}${s.joinedLine ? " (joined)" : ""}${sameSentence ? " (same sentence)" : ""}${i === firstMain ? " (FIRST of the MAIN thing)" : ""}${fitPictureNotes(s)}${closing ? ` (ends on "${closing}")` : ""}: said "${said}" | shows: ${s.showSubject ?? s.visualPrompt ?? ""}`
       );
     }
     if (!any) continue;
@@ -4332,6 +4412,10 @@ night") is NOT in the group — it keeps its own picture, even in the middle of 
 across a "----" line. A line that rules something out ("never…", "don't…", "instead of…", "I don't
 mean…", "keep it away from…") is grouped only when the group's picture shows the right way, and that
 picture never shows or names what any of its lines rules out — not even with "without" or "away from".
+Lines that COMPARE are never one group: one place, time or way set against another ("in most
+kitchens… in a camper…", "whereas", "unlike", "instead,", "while in…"), or a line saying a place is
+empty or has none next to a line where the thing is there ("the shelf is bare… a jar stands there").
+One still shows only one side, and that side under the other side's words gives the point away.
 
 The group's picture must fit the FIRST line of the group above all: it is what plays when the
 picture appears.
@@ -4393,7 +4477,8 @@ export type ContextGroup = { ids: number[]; show: string };
 
 /**
  * The model's groups, kept only when they are real: 2+ consecutive ids inside ONE run, not
- * overlapping another group, with a picture description. Anything else is dropped. Pure.
+ * overlapping another group, with a picture description, and not spanning a comparison
+ * (`contrastAcross`). Anything else is dropped. Pure.
  */
 export function parseContextGroups(
   text: string,
@@ -4401,7 +4486,9 @@ export function parseContextGroups(
   /** Each candidate picture's own description, by scene position — see `namesSomethingElse`. */
   showOf?: (i: number) => string | undefined,
   /** Whether a candidate picture shows someone at work, by scene position — see below. */
-  atWorkOf?: (i: number) => boolean
+  atWorkOf?: (i: number) => boolean,
+  /** What is said under each candidate picture, by scene position — see `contrastAcross`. */
+  saidOf?: (i: number) => string | undefined
 ): ContextGroup[] {
   const parsed = safeParseJSON<any>(text);
   const raw: unknown[] =
@@ -4445,6 +4532,11 @@ export function parseContextGroups(
       // Pictures of a thing on its own never take a group picture of someone at work: that is a
       // later line's moment, and each keeps its own picture instead.
       if (atWorkOf && !part.some(atWorkOf) && showsPerson(show)) continue;
+      // Lines that compare are never one picture, and the whole part goes: the model wrote ONE
+      // picture across both sides and nothing says which side it shows (job 408, scenes 2-3: the
+      // reveal's bin, under "In most American bathrooms, it is empty"). Each line keeps its own
+      // picture, which the line check then holds to its line.
+      if (saidOf && contrastAcross(part.map(id => saidOf(id) ?? ""))) continue;
       part.forEach(id => used.add(id));
       out.push({ ids: part, show });
     }
@@ -4465,6 +4557,178 @@ export function namesSomethingElse(own: string | undefined, group: string): bool
   const inGroup = new Set(words(group));
   const missing = thing.filter(w => !inGroup.has(w) && !inGroup.has(w.replace(/s$/, ""))).length;
   return missing / thing.length > 0.5;
+}
+
+/**
+ * A clause opening on a word that sets it against what came before. Bare "but" is not one ("it
+ * looks simple, but it took a week" is one picture); "but in …" is a second setting, unless it is
+ * only a figure of speech. "instead of …" holds both sides itself, and a line that rules something
+ * out has its own rule in CONTEXT_SYSTEM.
+ */
+const CONTRAST_OPENER =
+  /^(?:whereas|unlike|by contrast|in contrast|on the other hand|compared (?:to|with)|as opposed to|while (?:in|at|on|across|over)\b|instead\b(?!\s+of)|but (?:in|across|throughout) (?!(?:the end|fact|time|truth|short|general|practice|theory|a way|any case|the meantime)\b))/i;
+/** A clause opening on a turn: counts only when it then says the place is empty. */
+const TURN_OPENER = /^(?:but|yet|instead|however|though)\b/i;
+/**
+ * A place said to be EMPTY ("it is empty", "stands bare", "nothing there", "there are none",
+ * "Empty."). Never a figure of speech — on the local films "there's nothing a farmhouse kitchen goes
+ * through faster", "the cost is nothing at all" and "make it do, or do without" were not empty places.
+ */
+const SAID_EMPTY = [
+  /(?:\b(?:is|are|was|were|be|been|stands?|stood|sits?|sat|stays?|stayed|remains?|remained|lies?|lay|looks?|looked|goes|went|left|leaves?|kept|keeps?|it|them)|'s|'re)\s+(?:(?:usually|often|mostly|always|still|just|completely|totally|entirely|almost|nearly|simply|quite|again)\s+)*(?:empty|bare|vacant)\b/i,
+  /\bnothing\s+(?:\w+\s+)?(?:there|here|in it|on it)\b|\bthere(?:'s| is| was| are| were)\s+(?:nothing|none)(?=\s*(?:[.,;:!?]|$|there\b|here\b|left\b|in it\b|on it\b))|\bnone (?:there|at all)\b/i,
+  /\b(?:leave|leaves|left|keep|keeps|kept)\s+(?:(?:that|this|the|their|its|our|your|my)\s+)?(?:[\w-]+\s+){1,2}(?:empty|bare|vacant)\b/i,
+  /\b(?:go|goes|went|gone)\s+without\s+(?:a|an|one|any|it|them)\b/i,
+  /^(?:empty|bare|nothing|none)\W*$/i,
+];
+/**
+ * A clause that still says something is NOT there, in any words ("and nobody sees another robin
+ * until spring", job 404): after an empty place it continues the absence, it does not show the thing.
+ */
+const SAYS_NONE = /\b(?:no|nobody|none|nothing|never|not|without|empty|bare|vacant)\b|n't\b/i;
+/**
+ * A clause that puts a thing THERE ("a small bin stands there", "there is a basket", "you'll find a
+ * hook"). After an empty place only that is the other side: "At least, that's what just about
+ * everybody figures" after "the grass sits empty" (job 404) is a comment, not the thing.
+ */
+const SAYS_THERE =
+  /\bthere(?:'s| is| are| was| were)\s+(?:a|an|one|some|always|usually|often)\b|\b(?:you(?:'ll| will)?|we|they|people)\s+(?:find|see|keep|put)\s+(?:a|an|one|some)\b|\b(?:a|an|one|some)\s+(?:[\w-]+\s+){0,4}?(?:stands?|stood|sits?|sat|hangs?|hung|lies?|lay|waits?|rests?|is|are|was|were)\s+(?:right\s+)?(?:there|here|on|in|by|beside|next to|against|under|beneath|behind)\b/i;
+/**
+ * A named place or time after "in…": "in most American homes", "in a German bathroom", "in March".
+ * Never someone's place ("in Ann's kitchen" names a person, not where the comparison is).
+ */
+const PLACE_IN =
+  /\b(?:[Ii]n|[Aa]cross|[Tt]hroughout)\s+(?:(?:most|many|some|all|plenty of|lots of|a lot of|nearly all|almost every|every|a|an|the|our|your|their|these|those|this|that)\s+)*([A-Z][A-Za-z]*(?:\.[A-Z][A-Za-z]*)*\.?)(?!['A-Za-z])/g;
+/**
+ * A month or a weekday is a TIME, compared only with another time: "the robin you see in January"
+ * then "down in Florida" (job 404) is not one place set against another. Read with the full stop
+ * `PLACE_IN` keeps for "U.S.": a month that ends its sentence ("I start them in March.") is a time too.
+ */
+const TIME_NAME =
+  /^(?:January|February|March|April|May|June|July|August|September|October|November|December|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\.?$/;
+/**
+ * Names of one country that do not start alike, so the shared-start rule below cannot see they are
+ * one side: "in the U.S." then "in most American homes" is one side, as is "in France" then "in a
+ * French kitchen". Only the irregular ones — "Germany"/"German", "Japan"/"Japanese" share a start.
+ */
+const ONE_COUNTRY: Record<string, string> = {
+  us: "america", usa: "america", america: "america", american: "america", americans: "america",
+  uk: "britain", britain: "britain", british: "britain",
+  france: "france", french: "france",
+  spain: "spain", spanish: "spain",
+  netherlands: "dutch", holland: "dutch", dutch: "dutch",
+  ireland: "ireland", irish: "ireland",
+  denmark: "denmark", danish: "denmark",
+  finland: "finland", finnish: "finland",
+  poland: "poland", polish: "poland",
+  wales: "wales", welsh: "wales",
+  switzerland: "swiss", swiss: "swiss",
+  philippines: "philippines", filipino: "philippines",
+};
+/** Two names of one place ("America", "American"; "Germany", "German"): one starts the other. */
+const samePlace = (a: string, b: string) => {
+  const x = a.toLowerCase().replace(/\./g, "");
+  const y = b.toLowerCase().replace(/\./g, "");
+  if (ONE_COUNTRY[x] && ONE_COUNTRY[x] === ONE_COUNTRY[y]) return true;
+  let k = 0;
+  while (k < x.length && k < y.length && x[k] === y[k]) k++;
+  return k >= Math.min(4, x.length, y.length);
+};
+
+/**
+ * A CONTRAST IS NOT ONE TOPIC (2026-10-18, job 408 scenes 2-3). The same-topic pass joined
+ * "That little stretch of tile between the bowl and the wall. In most American bathrooms," and "it
+ * is empty. In a German bathroom, usually, a small bin stands there, with a lid." into one topic and
+ * drew the reveal for both, so the bin stood on the floor under the words saying the floor is empty
+ * (the same spoiler job 403 had). CONTEXT_SYSTEM asks for a picture that fits the first line, and the
+ * model drew the more visual side anyway — so it is held here, in code.
+ *
+ * Whether these lines, in order, set one side against another ACROSS a line boundary: two different
+ * places or times named after "in…" ("in most American homes" … "in a German one"), a clause opening
+ * on a contrast ("whereas", "unlike", "by contrast", "on the other hand", "compared to", "while in",
+ * "instead", "but in …"), a clause saying a place is empty followed by one that puts a thing there,
+ * or a "but / yet / instead / however" clause saying it is empty after one that does not. A
+ * comparison wholly inside ONE line is that line's own: its picture faces it joined or not. On the
+ * 232 local films' 9,530 neighbouring pictures it fires only on jobs 403 and 408's opening. Pure.
+ */
+export function contrastAcross(lines: string[]): boolean {
+  const texts = lines.map(l => (l ?? "").replace(/[’‘]/g, "'").replace(/\s+/g, " ").trim());
+  let joined = "";
+  const lineStarts: number[] = [];
+  texts.forEach((t, k) => {
+    if (k > 0) joined += " ";
+    lineStarts.push(joined.length);
+    joined += t;
+  });
+  const lineAt = (pos: number) => {
+    let k = 0;
+    while (k + 1 < lineStarts.length && lineStarts[k + 1] <= pos) k++;
+    return k;
+  };
+  // Sentences, then clauses inside them — cut before a turn or contrast word after a comma.
+  type Piece = { text: string; start: number; end: number; sentence: number };
+  const sentences: Piece[] = [];
+  const clauses: Piece[] = [];
+  const add = (into: Piece[], from: number, to: number, sentence: number) => {
+    const raw = joined.slice(from, to);
+    const text = raw.trim();
+    if (!text) return;
+    const start = from + raw.indexOf(text);
+    into.push({ text, start, end: start + text.length, sentence });
+  };
+  const sentenceEnd = /[.!?;:]["')\]]*\s+|\s*[—–]\s*/g;
+  let from = 0;
+  Array.from(joined.matchAll(sentenceEnd)).forEach(m => {
+    add(sentences, from, m.index! + m[0].length, sentences.length);
+    from = m.index! + m[0].length;
+  });
+  add(sentences, from, joined.length, sentences.length);
+  const clauseCut =
+    /,\s+(?=(?:but|yet|whereas|while|unlike|instead|however|though|compared|as opposed|by contrast|in contrast|on the other hand)\b)/gi;
+  sentences.forEach((s, n) => {
+    let at = s.start;
+    Array.from(joined.slice(s.start, s.end).matchAll(clauseCut)).forEach(m => {
+      add(clauses, at, s.start + m.index! + m[0].length, n);
+      at = s.start + m.index! + m[0].length;
+    });
+    add(clauses, at, s.end, n);
+  });
+  // A contrast counts when what it compares — from the sentence holding the one side to the end of
+  // the sentence holding the other — runs over more than one line.
+  const across = (n: number, m: number) =>
+    lineAt(sentences[n].start) !== lineAt(sentences[m].end - 1);
+  const saysEmpty = (t: string) => SAID_EMPTY.some(r => r.test(t));
+  for (let k = 1; k < clauses.length; k++) {
+    const a = clauses[k - 1];
+    const b = clauses[k];
+    // The thing may come after one short aside ("…leave that shelf bare. Mine? A row of jars…").
+    const c = clauses[k + 1];
+    const there = (x: Piece | undefined) =>
+      !!x && across(a.sentence, x.sentence) && !SAYS_NONE.test(x.text) && SAYS_THERE.test(x.text);
+    const aside = b.text.split(/\s+/).length <= 3 && !SAYS_THERE.test(b.text);
+    if (saysEmpty(a.text) && (there(b) || (aside && there(c)))) return true;
+    if (!across(a.sentence, b.sentence)) continue;
+    const opens = b.text.replace(/^[^A-Za-z]+/, "");
+    if (CONTRAST_OPENER.test(opens)) return true;
+    if (!saysEmpty(a.text) && saysEmpty(b.text) && TURN_OPENER.test(opens)) return true;
+  }
+  const sentenceAt = (pos: number) => {
+    const n = sentences.findIndex(s => pos >= s.start && pos < s.end);
+    return n < 0 ? sentences.length - 1 : n;
+  };
+  const named = Array.from(joined.matchAll(PLACE_IN), m => ({
+    name: m[1],
+    sentence: sentenceAt(m.index! + m[0].length - m[1].length),
+  }));
+  for (const time of [true, false]) {
+    const marks = named.filter(p => TIME_NAME.test(p.name) === time);
+    for (let k = 1; k < marks.length; k++) {
+      const a = marks[k - 1];
+      const b = marks[k];
+      if (!samePlace(a.name, b.name) && across(a.sentence, b.sentence)) return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -4581,7 +4845,8 @@ export async function markSameContext(
           r.text,
           runs,
           i => scenes[i]?.showSubject ?? scenes[i]?.visualPrompt,
-          i => atWork(scenes[i])
+          i => atWork(scenes[i]),
+          i => scenes[i]?.scriptText
         )
       );
     } catch {
