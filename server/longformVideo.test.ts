@@ -4301,17 +4301,25 @@ describe("nameCardSceneIndices", () => {
     expect(nameCardSceneIndices(werner, wernerSecs)).toEqual([8]);
   });
 
-  it("with no introduction and a cold open too short, takes the first full-frame host take that can hold it", () => {
-    // 406 had the introduction not been found: the three splits are passed over.
-    const [scenes, secs] = filmOf(34, [
-      { at: 0, sec: 2.56, hostOpener: true },
+  // 406 had the introduction not been found: its host takes, the cold open shorter than any of the
+  // practice films' (under 2 s, too short even for the card's shorter edges).
+  const gary406 = (openerSec: number) =>
+    filmOf(34, [
+      { at: 0, sec: openerSec, hostOpener: true },
       { at: 15, sec: 7.56, ...SPLIT },
       { at: 18, sec: 6.7, ...SPLIT },
       { at: 23, sec: 5.69, ...SPLIT },
       { at: 28, sec: 8.18 },
       { at: 30, sec: 6.56 },
     ]);
-    expect(nameCardSceneIndices(scenes, secs)).toEqual([28]);
+
+  it("with no introduction and a cold open too short, takes the first full-frame host take that can hold it", () => {
+    // The three splits are passed over.
+    expect(nameCardSceneIndices(...gary406(1.8))).toEqual([28]);
+  });
+
+  it("with no introduction, 406's own 2.56 s cold open holds the card, its edges shortened", () => {
+    expect(nameCardSceneIndices(...gary406(2.56))).toEqual([0]);
   });
 
   it("keeps the cold open when the introduction was not found and the opening can hold it (407)", () => {
@@ -4323,12 +4331,40 @@ describe("nameCardSceneIndices", () => {
     expect(nameCardSceneIndices(scenes, secs)).toEqual([0]);
   });
 
-  it("an introduction too short to hold the card gives way to the cold open", () => {
+  it("a short introduction keeps the card: 2.4 s holds it with shorter edges, over a 5.2 s cold open", () => {
     const [scenes, secs] = filmOf(10, [
       { at: 0, sec: 5.2, hostOpener: true },
       { at: 6, sec: 2.4, hostIntro: true },
     ]);
-    expect(nameCardSceneIndices(scenes, secs)).toEqual([0]);
+    expect(nameCardSceneIndices(scenes, secs)).toEqual([6]);
+  });
+
+  it("an introduction too short even for that never gives the card to a take before it — only to one right after", () => {
+    // The 1.8 s introduction at 6; a full-frame host take 3 s after its cut (one 3 s picture between).
+    const [near, nearSecs] = filmOf(12, [
+      { at: 0, sec: 5.2, hostOpener: true },
+      { at: 3, sec: 6 },
+      { at: 6, sec: 1.8, hostIntro: true },
+      { at: 8, sec: 4.7 },
+    ]);
+    expect(nameCardSceneIndices(near, nearSecs)).toEqual([8]);
+    // A split right after it is passed over; the full-frame take after it is still near.
+    const [split, splitSecs] = filmOf(12, [
+      { at: 0, sec: 5.2, hostOpener: true },
+      { at: 6, sec: 1.8, hostIntro: true },
+      { at: 7, sec: 4, ...SPLIT },
+      { at: 9, sec: 4.7 },
+    ]);
+    expect(nameCardSceneIndices(split, splitSecs)).toEqual([9]);
+    // The next host take 12 s after its cut (four 3 s pictures): too far — no card, never the cold
+    // open or the take before the introduction.
+    const [far, farSecs] = filmOf(14, [
+      { at: 0, sec: 5.2, hostOpener: true },
+      { at: 3, sec: 6 },
+      { at: 6, sec: 1.8, hostIntro: true },
+      { at: 11, sec: 4.7 },
+    ]);
+    expect(nameCardSceneIndices(far, farSecs)).toEqual([]);
   });
 
   it("an introduction said across the two-angle cold open keeps one card over both", () => {
@@ -4336,28 +4372,28 @@ describe("nameCardSceneIndices", () => {
       { at: 0, sec: 2.0, hostOpener: true, hostIntro: true },
       { at: 1, sec: 2.6, hostOpener: true },
     ]);
-    // The first take alone could not hold it; the run shows it in the second.
+    // Held across the cut: in on the first take, out at the end of the second.
     expect(nameCardSceneIndices(scenes, secs)).toEqual([0, 1]);
   });
 
   it("never a CTA beat: the QR card owns that take's corner", () => {
     const [scenes, secs] = filmOf(12, [
-      { at: 0, sec: 2.4, hostOpener: true },
+      { at: 0, sec: 1.8, hostOpener: true },
       { at: 5, sec: 8, cta: true, qrCorner: true },
       { at: 9, sec: 5 },
     ]);
     expect(nameCardSceneIndices(scenes, secs)).toEqual([9]);
   });
 
-  it("no card at all when no host take can hold it — and a lone take needs a little over 3 s", () => {
+  it("no card at all when no host take can hold it — and a lone take needs a little over 2 s", () => {
     const [short, shortSecs] = filmOf(6, [
-      { at: 0, sec: 2.0, hostOpener: true },
-      { at: 3, sec: 2.5 },
+      { at: 0, sec: 1.8, hostOpener: true },
+      { at: 3, sec: 1.95 },
     ]);
     expect(nameCardSceneIndices(short, shortSecs)).toEqual([]);
-    // 0.5 s wait + 0.5 s in + 1.5 s held + 0.5 s out, and a frame or two of slack.
-    expect(nameCardSceneIndices(...filmOf(3, [{ at: 0, sec: 3.0, hostOpener: true }]))).toEqual([]);
-    expect(nameCardSceneIndices(...filmOf(3, [{ at: 0, sec: 3.2, hostOpener: true }]))).toEqual([0]);
+    // 0.2 s in + 1.5 s held + 0.2 s out, and a frame or two of slack.
+    expect(nameCardSceneIndices(...filmOf(3, [{ at: 0, sec: 1.95, hostOpener: true }]))).toEqual([]);
+    expect(nameCardSceneIndices(...filmOf(3, [{ at: 0, sec: 2.05, hostOpener: true }]))).toEqual([0]);
   });
 });
 
@@ -4409,10 +4445,11 @@ describe("assembledSceneSecs — each scene's on-screen length, as assembly enco
     ).toEqual([5.3, undefined, 2.9]);
   });
 
-  it("406, had its introduction not been found: the first full-frame take that can hold it, not the 2.56 s cold open", () => {
-    const { scenes, entries } = filmOf([
-      [0, 2.55769, { ...H, hostOpener: true }],
-      [2.55769, 59.3921],
+  /** 406, had its introduction not been found, its cold open ending at `openerEnd`. */
+  const gary406 = (openerEnd: number) =>
+    filmOf([
+      [0, openerEnd, { ...H, hostOpener: true }],
+      [openerEnd, 59.3921],
       [59.3921, 66.9477, SPLIT],
       [66.9477, 75.3306],
       [75.3306, 82.0297, SPLIT],
@@ -4421,15 +4458,24 @@ describe("assembledSceneSecs — each scene's on-screen length, as assembly enco
       [117.131, 148.559],
       [148.559, 156.738, H],
     ]);
+
+  it("406, had its introduction not been found: its 2.56 s cold open holds the card, its edges shortened", () => {
+    const { scenes, entries } = gary406(2.55769);
+    expect(nameCardSceneIndices(scenes, assembledSceneSecs(entries))).toEqual([0]);
+  });
+
+  it("a cold open too short even for the shorter edges passes the card on, judged on its real length", () => {
+    // The same film with a 1.8 s cold open (none of the practice films had one that short).
+    const { scenes, entries } = gary406(1.8);
     expect(nameCardSceneIndices(scenes, assembledSceneSecs(entries))).toEqual([8]);
     // What assembly used to pass: every length unknown, so the cold open won and drew no card.
     expect(nameCardSceneIndices(scenes, entries.map(e => e.audioDurationSec))).toEqual([0]);
   });
 
-  it("387: a 2.98 s introduction cannot hold the card, so the 7.1 s cold open keeps it", () => {
+  it("387: the 2.98 s introduction holds the card itself, its wait shortened — not the 7.1 s cold open", () => {
     // "I'm Scarlett Sterling, and this channel is for" — 27.19-30.22 s, 2.98 s once frame-locked:
-    // 1.48 s fully on, under the 1.5 s minimum. Given the card, it would have drawn none and the film
-    // would have had no name at all.
+    // 1.48 s fully on with the fixed 0.5 s wait, under the 1.5 s minimum, so the card went to the
+    // cold open, 20 s before the name. With the wait cut to fit, it holds 1.5 s on the introduction.
     const { scenes, entries } = filmOf([
       [0, 7.14569, { ...H, hostOpener: true }],
       [7.14569, 11.3309],
@@ -4438,8 +4484,7 @@ describe("assembledSceneSecs — each scene's on-screen length, as assembly enco
       [27.1868, 30.216, { ...H, hostIntro: true }],
       [30.216, 35.54],
     ]);
-    expect(nameCardSceneIndices(scenes, assembledSceneSecs(entries))).toEqual([0]);
-    expect(nameCardSceneIndices(scenes, entries.map(e => e.audioDurationSec))).toEqual([4]);
+    expect(nameCardSceneIndices(scenes, assembledSceneSecs(entries))).toEqual([4]);
   });
 
   it("a film whose introduction can hold it keeps it there (401, 406)", () => {

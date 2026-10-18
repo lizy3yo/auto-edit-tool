@@ -145,6 +145,9 @@ export type Side = {
   title: string;
   sub?: string;
   at: number;
+  /** When the sub's own words are said (set by the resolver from the side's "say", cueResolve
+   * `subHeard`); without it the sub enters with the title. */
+  subAt?: number;
   /** When this side's spoken words finish (set by the resolver from its "say"). */
   saidUntil?: number;
 };
@@ -161,6 +164,10 @@ export type VersusProps = BaseProps & {
  * One side of the comparison. Both sides read neutral (white) until the comparison is DECIDED
  * — the moment the second side is said — then the favoured side turns accent and the other
  * steps back. Greying a side before its rival is even on screen gives the verdict away early.
+ *
+ * The title enters at `at`, the sub at its own words (`subAt`): entering together, job 408's
+ * "German bathroom — A small bin, with a lid" gave the reveal away 2.3 s before "a small bin stands
+ * there, with a lid" was said. The sub's place is kept from the start, so the title never moves.
  */
 const SidePanel: React.FC<{ side: Side; tone: "win" | "lose" | "plain"; cx: number; decideFrame: number }> = ({
   side,
@@ -172,6 +179,7 @@ const SidePanel: React.FC<{ side: Side; tone: "win" | "lose" | "plain"; cx: numb
   const frame = useCurrentFrame();
   const at = useAt();
   const enter = useEnter(at(side.at), 26);
+  const subEnter = useEnter(at(side.subAt ?? side.at), 14);
   const d = tone === "plain" ? 0 : fadeIn(frame, decideFrame, 12);
   const titleColor = tone === "win" && d > 0.5 ? t.accent : t.text;
   const loseDim = tone === "lose" ? 1 - 0.55 * d : 1;
@@ -210,6 +218,7 @@ const SidePanel: React.FC<{ side: Side; tone: "win" | "lose" | "plain"; cx: numb
       {side.sub && (
         <div
           style={{
+            ...(side.subAt !== undefined ? subEnter : {}),
             marginTop: 14,
             fontFamily: t.font,
             fontWeight: 600,
@@ -254,8 +263,10 @@ export const VersusCard: React.FC<VersusProps> = ({ kicker, left, right, winner 
       />
       <SidePanel side={left} tone={tone("left")} cx={480} decideFrame={decide} />
       <SidePanel side={right} tone={tone("right")} cx={1440} decideFrame={decide} />
+      {/* The badge enters WITH the second side, as NumberLabel's "vs" does: drawn with the first, it
+          pointed at an empty half for 2.8 s (job 408, "American bathroom" until "In a German bathroom"). */}
       <div style={{ position: "absolute", left: 960 - 75, top: 530 }}>
-        <VsBadge atFrame={Math.min(at(left.at), at(right.at)) + 4} />
+        <VsBadge atFrame={Math.max(at(left.at), at(right.at)) + 4} />
       </div>
     </AbsoluteFill>
   );

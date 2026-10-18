@@ -25,6 +25,23 @@ export type LayoutScene = {
   hostPanel?: HostPanel;
   /** The locked cold open. Where the name tag goes when the film does not say (`nameTagRange`). */
   hostOpener?: boolean;
+  /**
+   * WHAT A B-ROLL PICTURE SHOWS (`pictureOf` in ./pictures.ts; unset on a host take, a CTA beat, and
+   * wherever the film does not say — the lab's older cached jobs, a test). The planner used to see
+   * only "B-ROLL" and the words, so job 409 put the label "Paulinus" — the man the essay was written
+   * TO, spoken over the picture — on the picture of Seneca writing, labelled "Seneca" 2 s earlier.
+   * `shows`: the shot list's subject (the picture's own description when it has none); `person`:
+   * the someone-else it shows; `things`: the key things it shows.
+   */
+  shows?: string;
+  person?: string;
+  things?: string[];
+  /** A MOVING clip (a paid video in production), not a still with a slow zoom: job 408's Versus card
+   * hid the whole of one. Unset where the film does not say. */
+  video?: boolean;
+  /** The picture of ONE item ("item") or ONE step ("step") of a spoken list, drawn for it alone:
+   * job 410's full-screen step card hid all three for 8.3 s. */
+  listItem?: "item" | "step";
 };
 export type FilmLayout = {
   scenes: LayoutScene[];
@@ -73,6 +90,17 @@ export type RuleProblem = { cue: string; problem: string };
 
 /** Breathing room between two graphics, so one never reads as the tail of the other. */
 export const MIN_GAP_SEC = 1.0;
+
+/**
+ * Breathing room between two graphics that DARKEN the frame (`TemplateDef.dims`: a caption, a quote,
+ * a number over the footage), whatever is between them and a cut included. Job 408 (2:04-2:12): "The
+ * toilet is fine." as a caption, the picture back for 1.2 s under "There is a stick in it.", then the
+ * next caption — the frame dimmed, lifted and dimmed again, and with two more captions in the 25 s
+ * before, the stretch read as running subtitles, not a line to glance at. The 1 s between any two
+ * graphics allowed it; the same pair, ~1.9 s apart, came back in jobs 399, 402 and 410. One of the
+ * two is kept — the first placed.
+ */
+export const DIM_GAP_SEC = 3.0;
 
 /** Where the host's name tag is up: the scenes the app says it drew it on (`nameCardScenes`) — the
  * self-introduction take since jobs 401 and 406, which a rule guessing "the cold open" would have
@@ -148,8 +176,17 @@ export function checkRules(cues: ResolvedCue[], film: FilmLayout, opts: { gap?: 
     // Two graphics may follow each other straight away ACROSS a shot change: the change of picture
     // already separates them (the breathing room is for two on one shot).
     const acrossCut = i > 0 && cues[i - 1].conformed.end && c.start >= cues[i - 1].end - tol;
-    if (i > 0 && !acrossCut && c.start < cues[i - 1].end + gap - tol)
+    const tooClose = i > 0 && !acrossCut && c.start < cues[i - 1].end + gap - tol;
+    if (tooClose)
       add(gap ? `starts ${(c.start - cues[i - 1].end).toFixed(1)} s after ${cues[i - 1].id} ends (needs ${gap} s)` : `starts before ${cues[i - 1].id} ends`);
+    // Two that darken the frame keep DIM_GAP_SEC apart, across a cut too: dimmed, lifted and dimmed
+    // again reads as running subtitles (job 408's two captions 1.2 s apart).
+    if (def.dims) {
+      const dimmed = cues.slice(0, i).filter(p => templateById(p.template).dims);
+      const last = dimmed.reduce<ResolvedCue | undefined>((a, p) => (!a || p.end > a.end ? p : a), undefined);
+      if (last && c.start < last.end + DIM_GAP_SEC - tol && !(tooClose && last === cues[i - 1]))
+        add(`darkens the frame again ${Math.max(0, c.start - last.end).toFixed(1)} s after ${last.id} — two graphics that darken the picture need ${DIM_GAP_SEC} s between them: keep the stronger one, or show this one another way`);
+    }
     // A frame of tolerance: an edge snapped onto the cut that STARTS the CTA touches it, not overlaps.
     if (cta.some(([a, b]) => c.start < b - tol && c.end > a + tol)) add("runs into the call to action");
     const host = film.scenes.filter(s => s.hostPresent && c.start < s.narrationEndSec - 0.05 && c.end > s.narrationStartSec + 0.05);

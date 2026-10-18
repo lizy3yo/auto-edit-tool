@@ -4,6 +4,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { outDir } from "./lib.mts";
+import { pictureOf, type PictureSource, type ScenePicture } from "../../graphics/src/plan/pictures.ts";
 
 export type JobScene = {
   index: number;
@@ -16,7 +17,7 @@ export type JobScene = {
   split?: boolean;
   /** The locked cold open: the host's name tag (lower third) is up over its leading run. */
   hostOpener?: boolean;
-};
+} & ScenePicture;
 
 export type Job = {
   id: number;
@@ -46,6 +47,9 @@ export function loadJob(id: number): Job {
     cta: !!s.cta,
     split: !!(s as { splitRightUrl?: string }).splitRightUrl,
     hostOpener: !!(s as { hostOpener?: boolean }).hostOpener,
+    // What a b-roll picture is and shows, read as the app reads it (`pictureOf`), so a lab plan is
+    // held to the same picture checks. A job cached before this has none, and the checks pass it.
+    ...pictureOf(s as PictureSource),
   }));
   const job: Job = { id, finalVideoUrl: row.finalVideoUrl, masterAudioUrl: row.masterAudioUrl, scenes };
   writeFileSync(cache, JSON.stringify(job, null, 1));

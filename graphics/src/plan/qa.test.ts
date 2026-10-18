@@ -173,3 +173,28 @@ describe("QA counts a blink of footage beside a quote over the blurred picture (
     expect(judgeOn([placed("versus-january-robin", "Versus", 2492, 2640)], [2411, 2664]).failures).toContain("a blink of footage beside versus-january-robin");
   });
 });
+
+describe("QA measures a graphic's stay from its own words, never a new clause it does not show (job 408, round 13)", () => {
+  // Werner's "9 things" overlay, as shipped: 22.27-26.60, 2.1 s past "…the toilet there," over "and in
+  // plenty of American homes," — passed on its 4 s reading time (14 words), its stay measured to the end of
+  // "homes," as "the rest of its own sentence". QA said "Still up after their words: 0".
+  const toilet = "Nine@22.456-22.696 things@22.776-23.056 stay@23.116-23.356 out@23.456-23.576 of@23.616-23.656 the@23.696-23.776 toilet@23.836-24.216 there,@24.236-24.476 and@24.916-25.016 in@25.056-25.116 plenty@25.236-25.596 of@25.636-25.696 American@25.756-26.156 homes,@26.196-26.516 most@26.937-27.157 of@27.177-27.237 them@27.277-27.437"
+    .split(" ")
+    .map(t => {
+      const [text, range] = t.split("@");
+      const [start, end] = range.split("-").map(Number);
+      return { text, start, end };
+    });
+  const nine: CueSpec = { id: "nine-things-out", template: "BigNumberOverlay", start: "Nine things stay out of", startPad: -0.15, end: "the toilet there,", endPad: 0.3, props: { at: "@Nine", line: { text: "Nine things stay out of the toilet there", words: true }, unit: "things", value: 9, kicker: "Out of the toilet", countSec: 0.6 } };
+  const [placedNow] = resolveCues([nine], toilet, { cuts: [13.75, 22.27, 30.03], fps: FPS, structural: new Set(), cards: new Set(["BigNumber"]) });
+
+  it("the card as shipped is reported", () => {
+    const shipped = { ...placedNow, end: 26.6, endFrame: 798, leftInPause: true };
+    expect(judge([shipped]).failures).toContain("still up after its words: nine-things-out");
+  });
+
+  it("the card as the resolver places it now passes: 0.6 s after 'there,'", () => {
+    expect(placedNow.end).toBe(25.1);
+    expect(judge([placedNow]).lines).toContain("Still up after their words: 0");
+  });
+});

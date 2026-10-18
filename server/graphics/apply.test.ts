@@ -188,6 +188,28 @@ describe("the film's layout carries each split's host panel (job 400's caption r
   });
 });
 
+describe("the film's layout says what each b-roll picture is and shows (round 13: the planner saw only 'B-ROLL')", () => {
+  // Job 409's scenes 22 and 24 and job 408's scene 3, as stored (the fields the planner reads).
+  const seneca = {
+    index: 22,
+    narrationStartSec: 100.675,
+    narrationEndSec: 109.896,
+    stillImage: true,
+    humanPresent: true,
+    showSubject: "a man in an off-white wool toga draped over his left shoulder in deep folds, writing on a scroll with a reed pen by lamplight, seen from the side",
+    otherPerson: "Seneca, a Roman writer",
+  } as unknown as StoryboardScene;
+  const bin = { index: 3, narrationStartSec: 7.28991, narrationEndSec: 13.7519, objectMotion: true, showSubject: "a small white plastic bin with a closed hinged lid", keyThing: "bin", otherKeyThings: ["toilet"] } as unknown as StoryboardScene;
+  const host = { index: 24, narrationStartSec: 117.23, narrationEndSec: 119.963, hostPresent: true, showSubject: "a wealthy man in a fine off-white toga" } as unknown as StoryboardScene;
+
+  it("a still with who is in it, a video with its key things; a host take carries nothing about a picture", () => {
+    const [s22, s3, s24] = filmLayoutOf([seneca, bin, host]).scenes;
+    expect(s22).toMatchObject({ video: false, person: "Seneca, a Roman writer", shows: expect.stringMatching(/^a man in an off-white wool toga/) });
+    expect(s3).toMatchObject({ video: true, things: ["bin", "toilet"] });
+    for (const k of ["shows", "person", "things", "video", "listItem"]) expect(s24).not.toHaveProperty(k);
+  });
+});
+
 /**
  * The host name card moved to the self-introduction take (job 406: "…I'm Gary," closes scene 8,
  * 18.8-29.2 s, after a 2.56 s cold open that could not hold it). The graphics' rules are told where

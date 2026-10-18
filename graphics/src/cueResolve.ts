@@ -33,8 +33,10 @@ export type ResolvedCue = {
   start: number;
   end: number;
   props: Record<string, unknown> & { durationSec: number };
-  /** Every word-timed element: what it shows, the word it waits for, and when that word starts. */
-  sync: { element: string; word: string; wordStart: number; onCut?: boolean }[];
+  /** Every word-timed element: what it shows, the word it waits for, and when that word starts.
+   * `prop`: the path in `props` of the cue-relative seconds the element is DRAWN at, when it is not
+   * simply its word (a Versus side's sub, `left.subAt`) — QA reads the drawn time from there. */
+  sync: { element: string; word: string; wordStart: number; onCut?: boolean; prop?: string }[];
   /** Which edges were snapped onto a picture cut; `held` when the end was held through a pause to
    * the cut so no blink of footage is left (MIN_SHOT_SEC). */
   conformed: { start: boolean; end: boolean; held?: boolean };
@@ -47,11 +49,18 @@ export type ResolvedCue = {
   contentEnd?: number;
   /** Seconds it needs on screen to be read (`readingSec`); the QA measures lingering past it. */
   readSec?: number;
+  /** Seconds it needs once a new clause it does not show has begun (`readAlongSec`, and its last
+   * element on screen LINGER_SEC): the reading time that counts when it stays past `newClauseAt`. */
+  readAlongSec?: number;
+  /** When the first words it does NOT show began while it was up — a new clause after its own words,
+   * or the next sentence (`ownSentenceEnd`). */
+  newClauseAt?: number;
   /** It left in the next pause (within PAUSE_REACH_SEC) instead of mid-word. */
   leftInPause?: boolean;
-  /** When its own sentence finished, as said (`ownSentenceEnd`): the words after its own last word
-   * that only finish that sentence, among those said while it was up. A hold is measured from here,
-   * and so is every graphic's lingering (`stillUpAfterWords`), the same in the resolver and the QA. */
+  /** When its own words finished, as said (`ownSentenceEnd`): the words after its own last word that
+   * only finish its sentence — never a new clause of it — among those said while it was up. A hold is
+   * measured from here, and so is every graphic's lingering (`stillUpAfterWords`), the same in the
+   * resolver and the QA. */
   spokenEnd?: number;
   /** A picture-replacing graphic that leaves WITH the picture, on a cut the hold rule covers
    * (`holdToCut`) — held there, or its end already on it: that cut, and how long after `spokenEnd`
@@ -127,6 +136,9 @@ function same(a: string, b: string): boolean {
   for (let i = 0; i < x.length && diff < 2; i++) if (x[i] !== y[i]) diff++;
   return diff === 1;
 }
+/** The resolver's one word for another (`same`), for a check that holds a graphic's shown words to
+ * the spoken ones by the same measure (the planner's steps, which have no word-timed line). */
+export const sameWord = same;
 
 /**
  * Match want[k] at index[i], forgiving how the two sides SPLIT a compound — the script's
@@ -489,6 +501,40 @@ const ENDS_SENTENCE = new RegExp("[.?!][\"”')]*$");
  * values); a "vs" put in says the wrong thing — so an unclear pair goes without.
  */
 const SEPARATED_PAIRS = new Set(["NumberLabel"]);
+
+/**
+ * Templates whose sides draw their SUB at its own words (`subAt`) instead of with the side's title: a
+ * Versus side's sub is the half of the side the narrator gives last — its point, often the reveal
+ * ("German bathroom" … "A small bin, with a lid", job 408). Only templates that draw `subAt`, so QA's
+ * row for a sub is never a time the template ignores.
+ */
+const TIMED_SUBS = new Set(["Versus"]);
+
+/** The LAST run of `text`'s words in order (`findSubsequence`) that lies inside token positions
+ * lo..hi, or undefined: a common first word ("a") is never taken from earlier in the span. */
+function lastRunWithin(index: TokenIndex, text: string, lo: number, hi: number): number[] | undefined {
+  let best: number[] | undefined;
+  for (let s = lo; s <= hi; ) {
+    const m = findSubsequence(index, text, s);
+    if (!m || m[m.length - 1] > hi) break;
+    best = m;
+    s = m[0] + 1;
+  }
+  return best;
+}
+
+/**
+ * When a side's sub is said: the first of its words, in order, inside the side's own "say" (`sayHits`,
+ * as found) — else, when the sub rewords the narrator, the first word of the say itself. Both are the
+ * last run inside the span: the say "a small bin stands there, with a lid" is found from the card's
+ * start as "[In] a [German bathroom, usually,] … small bin…", 2.2 s before he says it (job 408). Pure.
+ */
+export function subHeard(index: TokenIndex, words: Word[], sub: string, say: string, sayHits: number[]): Word {
+  const lo = sayHits[0], hi = sayHits[sayHits.length - 1];
+  const run = lastRunWithin(index, sub, lo, hi) ?? lastRunWithin(index, say, lo, hi) ?? sayHits;
+  return words[index[run[0]].word];
+}
+
 const COMPARING_WORD = /\b(?:versus|vs|compared (?:to|with)|instead of|rather than|unlike|whereas|as opposed to)\b/;
 const AGAINST_THE_VALUE = /\bagainst(?: (?:the|a|an|his|her|its|their|my|your|our))?$/;
 const RANGE_JOIN = /^(?:(?:and|or) )?(?:all the way )?(?:up )?(?:to|through|thru)$/;
@@ -510,17 +556,30 @@ export function pairCompared(planned: unknown, said?: { join: string; second: st
 }
 
 /** How many words (and numbers) a graphic SHOWS, for its reading time. */
-function shownWordCount(props: unknown): number {
+function shownWordCount(props: unknown, fixedOnly = false): number {
   let n = 0;
   const walk = (v: unknown, key = "") => {
     if (["at", "say", "icon", "from", "start", "end", "winner", "answer", "theme", "place", "target", "exit"].includes(key)) return;
     if (typeof v === "number" && key === "value") n += 1;
     else if (typeof v === "string") n += v.trim().split(/\s+/).filter(Boolean).length;
     else if (Array.isArray(v)) v.forEach(x => walk(x));
-    else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) walk(x, k);
+    else if (v && typeof v === "object" && !(fixedOnly && (v as { words?: unknown }).words === true)) for (const [k, x] of Object.entries(v)) walk(x, k);
   };
   walk(props);
   return n;
+}
+
+/**
+ * Seconds a graphic needs to be read once a NEW CLAUSE it does not show has begun (`ownSentenceEnd`):
+ * its FIXED text — a kicker, a number, a side's title — at the reading rate, while a line shown word by
+ * word as it is said counts as read when it was heard (kinetic text is read with the voice). Job 408's
+ * "9 things" card was held its full 4.0 s for 14 words, 2.1 s over "…the toilet there, | and in plenty
+ * of American homes," — the contrast its line sets up — though only "Out of the toilet / 9 things"
+ * (6 words, 2.8 s) was still to be read. A graphic with no word-by-word line keeps its whole reading
+ * time (Dale's "Shop open at / 2 a.m.", job 397). Pure.
+ */
+export function readAlongSec(props: unknown): number {
+  return Math.min(READ_MAX_SEC, Math.max(MIN_ON_SCREEN_SEC, READ_BASE_SEC + READ_PER_WORD_SEC * shownWordCount(props, true)));
 }
 
 /** Seconds a graphic needs on screen to be read. */
@@ -534,29 +593,58 @@ export const CARD_HOLD_SILENT_MAX_SEC = 3.5;
 export const NEW_LINE_GRACE_SEC = 0.3;
 /** A word that ends a sentence (the next word starts a new line). */
 const SENTENCE_END = new RegExp("[.?!][\"”')]*$");
+/** A word a clause ends on INSIDE a sentence: a comma, semicolon, colon or dash. */
+const CLAUSE_END = new RegExp("[,;:—–][\"”')]*$");
+/** Joining words that open a NEW statement after a clause break ("…, and in plenty of American homes,
+ * most of them go down it"). Not the words that may open a relative clause (which, who, whose, that,
+ * where, when): "…the robin, which hardly anybody knows" still tells about what the graphic shows. */
+const NEW_CLAUSE_WORDS = new Set(["and", "but", "or", "so", "yet", "because", "while", "whereas", "if", "then", "until", "before", "after", "since", "though", "although", "unless", "whether", "once"]);
+/** Seconds a graphic may run into words it does not show (a new sentence or a new clause): one word's
+ * onset, as the cap at the next sentence has always allowed. */
+export const NEW_LINE_SPILL_SEC = 0.15;
+
+/** Does `w` open a NEW CLAUSE of its sentence after `prev`: a comma, semicolon, colon or dash, then a
+ * joining word — "…stay out of the toilet there, | and in plenty of American homes," (job 408, 0:24). */
+function opensClause(prev: Word, w: Word): boolean {
+  return CLAUSE_END.test(prev.text.trim()) && NEW_CLAUSE_WORDS.has(tokens(w.text)[0] ?? "");
+}
 
 /**
- * Where a graphic's OWN sentence finishes, as said: the words after its own last word (`from`) that
- * only finish that sentence ("…a good night's sleep | you may or may not have had."), among those
- * starting before `before`. `newLineAt` is when the next sentence begins, if it does before `before`.
+ * Where a graphic's OWN words finish, as said: the words after its own last word (`from`) that only
+ * finish what it shows — the rest of its sentence ("…a good night's sleep | you may or may not have
+ * had."), but never a NEW CLAUSE of it (`opensClause`) — among those starting before `before`.
+ * `newLineAt` is when the next sentence begins, if it does before `before`; `newClauseAt` when the
+ * first words it does not show begin: that new clause, else that sentence; `sentenceSpoken` where its
+ * whole sentence finished among those words, new clauses and all.
+ *
+ * The rest of a clause is its own ("7 things | about the robin that hardly anybody knows,", job 404);
+ * a new clause is not. Job 408's "9 things / Nine things stay out of the toilet there" was measured to
+ * the end of "…, and in plenty of American homes," — the contrast it sets up — so the 2 s it stood over
+ * those words passed as "the rest of its own sentence", and QA said "Still up after their words: 0".
+ * A graphic's lingering, its snap forward onto a cut and its hold to a cut are all measured from here.
  */
-export function ownSentenceEnd(words: Word[], from: number, before: number): { spoken: number; newLineAt?: number } {
+export function ownSentenceEnd(words: Word[], from: number, before: number): { spoken: number; sentenceSpoken: number; newLineAt?: number; newClauseAt?: number } {
   let spoken = from;
+  let sentenceSpoken = from;
+  let newClauseAt: number | undefined;
   for (let k = 0; k < words.length; k++) {
     const w = words[k];
     if (w.start <= from + 1e-6 || w.start >= before) continue;
     const prev = words[k - 1];
-    if (prev && SENTENCE_END.test(prev.text.trim()) && prev.end <= w.start) return { spoken, newLineAt: w.start };
-    spoken = Math.max(spoken, w.end);
+    if (prev && SENTENCE_END.test(prev.text.trim()) && prev.end <= w.start) return { spoken, sentenceSpoken, newLineAt: w.start, newClauseAt: newClauseAt ?? w.start };
+    if (newClauseAt === undefined && prev && opensClause(prev, w)) newClauseAt = w.start;
+    if (newClauseAt === undefined) spoken = Math.max(spoken, w.end);
+    sentenceSpoken = Math.max(sentenceSpoken, w.end);
   }
-  return { spoken };
+  return newClauseAt === undefined ? { spoken, sentenceSpoken } : { spoken, sentenceSpoken, newClauseAt };
 }
 
 /**
  * HOLD TO THE CUT: whether a picture-replacing graphic that would leave at `end` may stay until the
  * picture changes at `cut` — through the rest of its own sentence and the pause after it, as long as
- * the cut comes within CARD_HOLD_MAX_SEC of where that sentence finished (CARD_HOLD_SILENT_MAX_SEC
- * when nothing more is said before the cut) and no new line has begun more than NEW_LINE_GRACE_SEC
+ * the cut comes within CARD_HOLD_MAX_SEC of where its own words finished (`ownSentenceEnd`: a new
+ * clause of the sentence is not its own; CARD_HOLD_SILENT_MAX_SEC when nothing more is said before the
+ * cut) and no new line has begun more than NEW_LINE_GRACE_SEC
  * before it. The ONE test the resolver holds a card by and QA judges a card leaving with the picture
  * by (`stillUpAfterWords`), on the same words, so the two cannot disagree: job 400's "7 thieves" card
  * left on the cut at 100.63, in the pause after "…all seven of the thieves.", and QA failed it as
@@ -573,21 +661,33 @@ export function holdToCut(words: Word[], from: number, end: number, cut: number)
 /**
  * STILL UP AFTER ITS WORDS — QA's question, answered by the resolver's own rules on what it recorded
  * from the same words, so QA never fails a graphic the resolver deliberately kept up. A graphic may
- * stay, after its own sentence finished (`spokenEnd`, else its last word):
+ * stay, after its own words finished (`spokenEnd`, else its last word — never counting a new clause it
+ * does not show, `ownSentenceEnd`):
  *  - LINGER_SEC, or to a picture cut within MAX_LINGER_SEC (the end snaps forward onto one);
- *  - to the next pause within PAUSE_REACH_SEC (`leftInPause`), or for its reading time and then that pause;
+ *  - to the next pause within PAUSE_REACH_SEC (`leftInPause`), or for its reading time and then that
+ *    pause (`inReadingTime`) — over a new clause it does not show, only the time its fixed text needs;
  *  - a picture-replacing graphic leaving WITH the picture: until the cut its hold covers (`hold`,
  *    from `holdToCut`), never past it.
  * One frame is allowed for edges rounded onto the frame grid. QA leaves titles out: they keep their
- * planned length.
+ * planned length. Job 408's "9 things" card (22.27-26.60) passed, 2.1 s over "…, and in plenty of
+ * American homes," on its 4 s reading time; it fails now, and the resolver no longer places it so.
  */
 export function stillUpAfterWords(c: ResolvedCue, fps: number): boolean {
   if (c.contentEnd === undefined) return false;
   const slack = 1 / fps + 1e-6;
-  if (c.end - c.start <= (c.readSec ?? 0) + PAUSE_REACH_SEC + 0.15 + slack) return false;
+  if (inReadingTime(c, slack)) return false;
   const past = c.end - (c.spokenEnd ?? c.contentEnd);
   if (c.hold && c.end <= c.hold.cut + slack && past <= c.hold.max + slack) return false;
   return past > (c.leftInPause ? LINGER_SEC + PAUSE_REACH_SEC + 0.15 : MAX_LINGER_SEC) + slack;
+}
+
+/** Up no longer than its reading time and the pause it may leave in after it — the time its fixed text
+ * needs (`readAlongSec`) once it runs into words it does not show (`newClauseAt`): never lingering in
+ * QA's eyes, and never stale for a snap forward onto a cut in the resolver's (the same test). */
+function inReadingTime(c: { start: number; end: number; readSec?: number; readAlongSec?: number; newClauseAt?: number }, slack: number): boolean {
+  const overNew = c.newClauseAt !== undefined && c.end > c.newClauseAt + NEW_LINE_SPILL_SEC + slack;
+  const read = (overNew ? c.readAlongSec : undefined) ?? c.readSec ?? 0;
+  return c.end - c.start <= read + PAUSE_REACH_SEC + 0.15 + slack;
 }
 
 /**
@@ -628,6 +728,25 @@ export type ResolveOptions = {
    * replaces the picture but is no window (registry `resolveSets`). */
   windows?: Set<string>;
 };
+
+/**
+ * Where a graphic due to leave at `t` leaves: at `t` when nothing is being said, else in the next pause
+ * (PAUSE_GAP_SEC) that begins within PAUSE_REACH_SEC, else at the end of the word it is up in — never
+ * mid-word (Scarlett's "2 inches lower", job 392). Pure.
+ */
+function leaveInPause(words: Word[], t: number): { at: number; inPause: boolean } {
+  const speaking = words.some(w => w.start < t - 1e-6 && w.end > t + 1e-6) || words.some(w => w.start > t && w.start - t < 0.15);
+  if (!speaking) return { at: t, inPause: false };
+  for (let k = 0; k + 1 < words.length; k++) {
+    const gapAt = words[k].end;
+    if (gapAt < t - 1e-6) continue;
+    if (gapAt - t > PAUSE_REACH_SEC) break;
+    if (words[k + 1].start - gapAt >= PAUSE_GAP_SEC) return { at: gapAt + Math.min(0.1, (words[k + 1].start - gapAt) / 2), inPause: true };
+  }
+  // No pause within reach: at least never leave in the middle of a word.
+  const inside = words.find(w => w.start < t - 1e-6 && w.end > t + 1e-6);
+  return { at: inside ? inside.end : t, inPause: false };
+}
 
 /** The cut nearest `t` within `CUT_SNAP_SEC`, or undefined. */
 export function nearestCut(cuts: number[], t: number): number | undefined {
@@ -712,6 +831,8 @@ export function resolveCues(specs: CueSpec[], words: Word[], opts: ResolveOption
         return { text: o.text, at: times[0], wordTimes: times };
       }
       const out: Record<string, unknown> = {};
+      /** Where this element's "say" was found (token positions), for its sub's own timing. */
+      let sayHits: number[] | undefined;
       for (const [k, x] of Object.entries(o)) {
         if (k === "at" && typeof x === "string" && x.startsWith("@")) {
           const hits = findPhrase(index, x.slice(1), searchFrom);
@@ -747,12 +868,27 @@ export function resolveCues(specs: CueSpec[], words: Word[], opts: ResolveOption
           // never drawn, only counted, so the graphic stays until they are said and no longer.
           const hits = findSubsequence(index, x, searchFrom);
           if (!hits) throw new CueError(`cue ${spec.id}: "${x}" (${pathName}.say) not in the narration`);
+          sayHits = hits;
           const end = words[index[hits[hits.length - 1]].word].end;
           said(end);
           // When this side's words FINISH: a comparison waits for it before it gives its verdict.
           out.saidUntil = round(Math.max(0, end - t0));
         } else {
           out[k] = walk(x, pathName ? `${pathName}.${k}` : k);
+        }
+      }
+      // A comparison side's SUB appears when ITS words are said, not with the side's title: job 408's
+      // "American bathroom — It is empty" showed "It is empty" 1.6 s before it was said, and "German
+      // bathroom — A small bin, with a lid" gave the reveal away 2.3 s early, while the narrator was
+      // still on "In a German bathroom, usually,". A sub said with its title, or before it, enters with it
+      // (no time of its own: a frame or less after the title is the same moment).
+      if (TIMED_SUBS.has(spec.template) && typeof o.sub === "string" && o.sub.trim() && typeof o.say === "string" && sayHits && typeof out.at === "number") {
+        const heard = subHeard(index, words, o.sub, o.say, sayHits);
+        const subAt = round(heard.start - t0);
+        if (subAt - out.at > 1 / fps + 1e-6) {
+          out.subAt = subAt;
+          sync.push({ element: `${pathName}.sub "${o.sub}"`, word: heard.text, wordStart: heard.start, prop: `${pathName}.subAt` });
+          lastShown = Math.max(lastShown, heard.start);
         }
       }
       return out;
@@ -815,6 +951,10 @@ export function resolveCues(specs: CueSpec[], words: Word[], opts: ResolveOption
       }
     }
 
+    // What is still to read once a new clause it does not show has begun: its fixed text, and its last
+    // element on screen LINGER_SEC (job 401's "81" was readable 0.6 s and read as cut short).
+    const readAlong = Math.max(readAlongSec(spec.props), lastShown + LINGER_SEC - t0);
+
     // 3. The end.
     let planned: number | undefined;
     if (spec.end) {
@@ -830,34 +970,41 @@ export function resolveCues(specs: CueSpec[], words: Word[], opts: ResolveOption
       const byWords = contentEnd + LINGER_SEC;
       rawEnd = Math.max(t0 + readSec, planned === undefined ? byWords : Math.min(planned, byWords));
       // Leave in a pause, not mid-word: an end inside speech moves to the next pause within reach.
-      const speaking = words.some(w => w.start < rawEnd - 1e-6 && w.end > rawEnd + 1e-6) || words.some(w => w.start > rawEnd && w.start - rawEnd < 0.15);
-      if (speaking) {
-        let moved = false;
-        for (let k = 0; k + 1 < words.length; k++) {
-          const gapAt = words[k].end;
-          if (gapAt < rawEnd - 1e-6) continue;
-          if (gapAt - rawEnd > PAUSE_REACH_SEC) break;
-          if (words[k + 1].start - gapAt >= PAUSE_GAP_SEC) {
-            rawEnd = gapAt + Math.min(0.1, (words[k + 1].start - gapAt) / 2);
-            moved = true;
-            leftInPause = true;
-            break;
-          }
-        }
-        // No pause within reach: at least never leave in the middle of a word.
-        const inside = moved ? undefined : words.find(w => w.start < rawEnd - 1e-6 && w.end > rawEnd + 1e-6);
-        if (inside) rawEnd = inside.end;
-      }
+      const left = leaveInPause(words, rawEnd);
+      rawEnd = left.at;
+      leftInPause = left.inPause;
       // Never into the NEXT sentence: reading time and a pause may carry a graphic through the rest of
       // its own sentence, not into a new one (Scarlett's "Keep the scale. Change the finish." card
       // stood over "Ivory, oat, a warm coral…", job 395).
       const ownEnd = contentEnd;
       const nextSentence = words.find((w, k) => w.start > ownEnd + 1e-6 && k > 0 && SENTENCE_END.test(words[k - 1].text.trim()));
-      if (nextSentence && rawEnd > nextSentence.start + 0.15) {
-        const cap = Math.max(ownEnd + 0.3, nextSentence.start + 0.15);
+      if (nextSentence && rawEnd > nextSentence.start + NEW_LINE_SPILL_SEC) {
+        const cap = Math.max(ownEnd + 0.3, nextSentence.start + NEW_LINE_SPILL_SEC);
         if (cap < rawEnd) {
           rawEnd = cap;
           leftInPause = false;
+        }
+      }
+      // Nor into a NEW CLAUSE of its sentence (`ownSentenceEnd`) for longer than its FIXED text takes to
+      // read (`readAlong`): job 408's "9 things / Nine things stay out of the toilet there" was held its
+      // full 4 s reading time and then to the pause after "homes,", 2.1 s over "…, and in plenty of
+      // American homes," — the contrast its line sets up. Its line had been read as it was said. The same
+      // cap as at a new sentence, but the fixed text is still given its time, and then it leaves as any
+      // graphic does, in a pause or at a word's end (Scarlett's "Too low / 2 inches lower" over "…, and
+      // that same necklace drags", job 392, leaves in the pause after "drags": 2.8 s up, 1.6 s after its
+      // words — it was 3.7 s, over "your chin" too).
+      const clauseAt = ownSentenceEnd(words, ownEnd, Infinity).newClauseAt;
+      if (clauseAt !== undefined && clauseAt < (nextSentence?.start ?? Infinity) - 1e-6 && rawEnd > clauseAt + NEW_LINE_SPILL_SEC) {
+        const reading = t0 + readAlong;
+        const cap = Math.max(ownEnd + 0.3, clauseAt + NEW_LINE_SPILL_SEC, reading);
+        if (cap < rawEnd) {
+          // Held there for its fixed text, it leaves as any graphic does: in the next pause within
+          // reach, else at the end of the word it is up in.
+          const left = cap === reading ? leaveInPause(words, cap) : { at: cap, inPause: false };
+          if (left.at < rawEnd) {
+            rawEnd = left.at;
+            leftInPause = left.inPause;
+          }
         }
       }
       // A window shows its items' own pictures: it ends with the last item's picture, never showing
@@ -881,9 +1028,15 @@ export function resolveCues(specs: CueSpec[], words: Word[], opts: ResolveOption
     // two frames, and faded out into the cut instead: the fade lifts the old shot in its last frames,
     // a flicker right before the cut. Job 404's opening title "The song at first light goes quiet"
     // ("quiet" 7.88, "…in the mornings," to 10.24) ended at 10.33 for the cut at 10.40, and its "7
-    // things" at 42.57 for 42.63 — QA's "flicker before a cut at 10.40 s, 42.63 s".
-    if (endCut !== undefined && endCut > rawEnd && contentEnd !== undefined && !structural.has(spec.template) && endCut - ownSentenceEnd(words, contentEnd, endCut).spoken > MAX_LINGER_SEC)
-      endCut = undefined;
+    // things" at 42.57 for 42.63 — QA's "flicker before a cut at 10.40 s, 42.63 s". A new clause of the
+    // sentence is not its own (job 408): a snap more than MAX_LINGER_SEC past its own words is refused
+    // too, unless the graphic is still inside its reading time and pause (`inReadingTime`) — QA, which
+    // measures from its own words, excuses exactly that stay.
+    if (endCut !== undefined && endCut > rawEnd && contentEnd !== undefined && !structural.has(spec.template)) {
+      const said = ownSentenceEnd(words, contentEnd, endCut);
+      const stay = { start: t0, end: onFrame(endCut), readSec, readAlongSec: readAlong, newClauseAt: said.newClauseAt };
+      if (endCut - said.sentenceSpoken > MAX_LINGER_SEC || (endCut - said.spoken > MAX_LINGER_SEC && !inReadingTime(stay, 1 / fps + 1e-6))) endCut = undefined;
+    }
     if (endCut === undefined) {
       const spill = cuts.filter(c => c < rawEnd && c > rawEnd - TAIL_SPILL_SEC && c - t0 >= MIN_AFTER_TRIM_SEC && c - (lastShown - (spec.startPad ?? 0)) >= MIN_READ_SEC);
       if (spill.length) endCut = spill[spill.length - 1];
@@ -919,9 +1072,10 @@ export function resolveCues(specs: CueSpec[], words: Word[], opts: ResolveOption
         if (h.ok) holdMax = h.max;
       }
     }
-    // When its own sentence finished among the words said while it was up: its lingering is measured
-    // from here (a hold's too).
-    const spokenEnd = contentEnd === undefined ? undefined : ownSentenceEnd(words, contentEnd, endCut ?? rawEnd).spoken;
+    // When its own words finished among those said while it was up: its lingering is measured from here
+    // (a hold's too).
+    const own = contentEnd === undefined ? undefined : ownSentenceEnd(words, contentEnd, endCut ?? rawEnd);
+    const spokenEnd = own?.spoken;
     const t1 = onFrame(endCut ?? rawEnd);
     if (t1 <= t0) throw new CueError(`cue ${spec.id}: ends before it starts`);
     const conformed = { start: startCut !== undefined, end: endCut !== undefined, ...(held ? { held: true } : {}) };
@@ -943,6 +1097,7 @@ export function resolveCues(specs: CueSpec[], words: Word[], opts: ResolveOption
       conformed,
       contentEnd: contentEnd === undefined ? undefined : round(contentEnd),
       readSec: round(readSec),
+      ...(own?.newClauseAt !== undefined ? { readAlongSec: round(readAlong), newClauseAt: round(own.newClauseAt) } : {}),
       ...(leftInPause ? { leftInPause: true } : {}),
       ...(spokenEnd !== undefined ? { spokenEnd: round(spokenEnd) } : {}),
       ...(holdMax !== undefined ? { hold: { cut: round(t1), max: holdMax } } : {}),
@@ -984,7 +1139,7 @@ function shiftTimes(v: unknown, delta: number): unknown {
   if (!v || typeof v !== "object") return v;
   const out: Record<string, unknown> = {};
   for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
-    if ((k === "at" || k === "saidUntil") && typeof x === "number") out[k] = round(Math.max(0, x - delta));
+    if ((k === "at" || k === "saidUntil" || k === "subAt") && typeof x === "number") out[k] = round(Math.max(0, x - delta));
     else if (k === "wordTimes" && Array.isArray(x)) out[k] = x.map(t => round(Math.max(0, (t as number) - delta)));
     else out[k] = shiftTimes(x, delta);
   }

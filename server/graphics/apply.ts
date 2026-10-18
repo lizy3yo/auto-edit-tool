@@ -8,6 +8,7 @@ import type { JobGraphics, LongformInputParams, StoryboardScene } from "@shared/
 import type { CueSpec } from "../../graphics/src/cueResolve";
 import type { FilmLayout, HostPanel } from "../../graphics/src/plan/rules";
 import type { Readability } from "../../graphics/src/plan/qa";
+import { pictureOf } from "../../graphics/src/plan/pictures";
 import { HEIGHT, WIDTH } from "../../graphics/src/theme";
 import { splitPanelMissing } from "@shared/splitPanel";
 import { getChannelConfig } from "../db";
@@ -98,7 +99,8 @@ export const splitHostPanel = (s: StoryboardScene): HostPanel =>
   (({ hostX, hostW }) => ({ x: hostX, w: hostW }))(resolveSplitLayout(WIDTH, HEIGHT, s.splitLayout));
 
 /**
- * The film's layout for the rules: each scene's span on the film, and what is on screen.
+ * The film's layout for the rules: each scene's span on the film, and what is on screen — for a
+ * b-roll picture, whether it is a still or a video, a list item's own picture, and what it shows.
  * `nameCardScenes` are the `StoryboardScene.index` values assembly drew the host name card on
  * (`nameCardSceneIndices`; `[]` when the film has none): the rules then keep host graphics off
  * exactly those scenes, wherever the card went — the self-introduction take now, not always the
@@ -123,6 +125,10 @@ export function filmLayoutOf(scenes: StoryboardScene[], nameCardScenes?: number[
           // panel (`hostPanelFor`), as the lab's composite always did — job 400 scene 27 had none.
           ...(split ? { hostPanel: splitHostPanel(s) } : {}),
           hostOpener: !!s.hostOpener,
+          // What a b-roll picture is and shows, for the planner and its checks (`pictureOf`): it
+          // read only "B-ROLL", and put job 409's "Paulinus" label on the picture of Seneca, job
+          // 408's Versus card over a whole video, job 410's step card over all three step pictures.
+          ...pictureOf(s),
         };
       }),
   };

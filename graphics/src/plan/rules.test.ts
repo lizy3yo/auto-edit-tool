@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { TEMPLATES } from "../registry";
 import type { ResolvedCue } from "../cueResolve";
-import { DEFAULT_SPLIT_HOST_PANEL, checkRules, hostPanelFor, nameTagRange, overHostTake, placementFor, underNameTag, type FilmLayout, type LayoutScene } from "./rules";
+import { DEFAULT_SPLIT_HOST_PANEL, DIM_GAP_SEC, MIN_GAP_SEC, checkRules, hostPanelFor, nameTagRange, overHostTake, placementFor, underNameTag, type FilmLayout, type LayoutScene } from "./rules";
 
 /**
  * A caption on a split stays in the host's panel. Gideon's job 400 at 2:18 (scene 27, host left, a
@@ -218,5 +218,64 @@ describe("placementFor — where a graphic's drawing goes on this film", () => {
       expect(t.kind).toBe("overlay");
       expect(t.dims || t.on === "broll" || t.underlay).toBeFalsy();
     }
+  });
+});
+
+/**
+ * Two graphics that darken the frame keep DIM_GAP_SEC apart, a cut between them or not. Job 408
+ * (2:04-2:12): "The toilet is fine." as a caption, the picture back for 1.2 s, then "If you think one
+ * is already in there, the plunger is the wrong tool." — dimmed, lifted, dimmed again on the cut, a
+ * run of subtitles. Job 410 (1:24-1:32): "Could I keep the rest of the can, please?" then 1.9 s later
+ * "If they're running short, …". Times as shipped.
+ */
+describe("checkRules — two graphics that darken the frame keep apart", () => {
+  const placed = (id: string, template: string, start: number, end: number, conformedEnd = false) =>
+    ({ id, template, start, end, props: {}, sync: [], conformed: { start: false, end: conformedEnd }, startFrame: Math.round(start * 30), endFrame: Math.round(end * 30) }) as unknown as ResolvedCue;
+  const broll = (scenes: [number, number, number][]): FilmLayout => ({ scenes: scenes.map(([i, a, b]) => scene(i, a, b)) });
+  const toilet = broll([[21, 118.38, 127.767], [22, 127.767, 134.69], [23, 134.69, 139.44]]);
+  const dimProblems = (cues: ResolvedCue[], f: FilmLayout) => checkRules(cues, f, { gap: MIN_GAP_SEC }).filter(p => p.problem.includes("darkens the frame again"));
+
+  it("408: the plunger caption, 1.2 s after 'The toilet is fine.', is refused — naming the one before it", () => {
+    expect(DIM_GAP_SEC).toBe(3);
+    const fine = placed("toilet-is-fine", "DimCaption", 124.567, 126.533);
+    const plunger = placed("plunger-wrong-tool-caption", "DimCaption", 127.767, 131.767);
+    expect(checkRules([fine, plunger], toilet, { gap: MIN_GAP_SEC })).toEqual([
+      {
+        cue: "plunger-wrong-tool-caption",
+        problem:
+          "darkens the frame again 1.2 s after toilet-is-fine — two graphics that darken the picture need 3 s between them: keep the stronger one, or show this one another way",
+      },
+    ]);
+    // The final check (no gap asked) holds it too, so a saved plan does not bring it back.
+    expect(checkRules([fine, plunger], toilet).map(p => p.cue)).toEqual(["plunger-wrong-tool-caption"]);
+  });
+
+  it("410: the second caption, 1.9 s after 'Could I keep the rest of the can, please?', is refused", () => {
+    const can = broll([[19, 81.06, 86.15], [20, 86.15, 92.36]]);
+    const cues = [placed("keep-the-can-line", "DimCaption", 83.9, 86.133), placed("no-worse-off-caption", "DimCaption", 88.067, 92.367)];
+    expect(dimProblems(cues, can).map(p => p.cue)).toEqual(["no-worse-off-caption"]);
+  });
+
+  it("a cut does not separate them, and a graphic between them that does not darken does not either", () => {
+    // The first ends ON the cut and the second starts there: two graphics need no gap across a cut,
+    // but the frame stays dark across this one.
+    expect(dimProblems([placed("a", "DimCaption", 124.567, 127.767, true), placed("b", "ArrowCaption", 127.767, 130)], toilet).map(p => p.cue)).toEqual(["b"]);
+    // A label between the two.
+    expect(dimProblems([placed("a", "DimCaption", 120, 123), placed("label", "SmallLabel", 124, 125), placed("b", "Quote", 125.5, 128)], toilet).map(p => p.cue)).toEqual(["b"]);
+  });
+
+  it("clean cases are left alone: 3 s or more apart (406), or the next graphic does not darken (408)", () => {
+    // 406 (2:05-2:17): "9 out of 10" over the footage, then "Fixed and washed, …" 3.07 s later.
+    const mower = broll([[25, 117.13, 124.96], [26, 124.96, 132.44], [27, 132.44, 137.34]]);
+    const fuel = [placed("nine-of-ten-fuel", "BigNumberOverlay", 124.967, 129.367), placed("fixed-mower-resale", "DimCaption", 132.433, 137.333)];
+    expect(checkRules(fuel, mower, { gap: MIN_GAP_SEC })).toEqual([]);
+    // 408: the plunger caption, then the "A toilet auger" label 2.9 s later — a label leaves the
+    // picture as it is.
+    const auger = [placed("plunger-wrong-tool-caption", "DimCaption", 127.767, 131.767), placed("toilet-auger-label", "SmallLabel", 134.7, 136.733)];
+    expect(checkRules(auger, toilet, { gap: MIN_GAP_SEC })).toEqual([]);
+  });
+
+  it("every template that darkens the frame is held to it", () => {
+    expect(TEMPLATES.filter(t => t.dims).map(t => t.id).sort()).toEqual(["ArrowCaption", "BarChart", "BigNumberOverlay", "DimCaption", "Quote", "TitleOverFootage"]);
   });
 });

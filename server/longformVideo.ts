@@ -9630,25 +9630,54 @@ function runShowsNameCard(secs: (number | undefined)[]): boolean {
 }
 
 /**
- * Which scenes carry the host's lower third, in this order:
- *  1. the SELF-INTRODUCTION take (`hostIntro`, "My name is …", "I'm …") — where a viewer learns who
- *     is talking, so the name belongs there. Gideon's job 401 showed "Gideon Grant" on the opening
- *     line, more than a minute before "My name is Gideon Grant…", and nothing on that line;
- *  2. the LOCKED cold open (`hostOpener`, the leading run — two scenes on a two-angle opening, held
- *     across the cut rather than blinking out and back in) when the film has no introduction, or
- *     its introduction take cannot hold the card;
- *  3. then every other full-frame host take in order, one at a time (never a split, where the host
- *     sits in a panel, nor a CTA beat, whose corner the QR card owns).
- * The first of these that can SHOW the card (`nameCardOnWindow`, given each scene's on-screen
- * length in `onScreenSec`) wins: a lone 2.3-2.6 s cold open (jobs 403 and 406, one host photo so no
- * second opener angle) was given the card, drew none because the hold was under its minimum, and
- * the film shipped with no name at all. `[]` only when no host take can hold it (no card).
+ * How far after the self-introduction the name card may still go when the introduction's own take
+ * cannot hold it: from the cut out of the introduction to the start of the take, seconds. A viewer
+ * still joins a name shown that soon to "I'm …" — job 411's next host take began 2.9 s after its
+ * introduction — and not one shown on a later thought: job 410's card landed a minute after "I'm
+ * Helena Hart" on "One more thing about drinks…".
+ */
+export const NAME_CARD_NEAR_INTRO_SEC = 10;
+
+/** A take the card may go on by itself: full frame — never a split, where the host sits in a panel,
+ * nor a CTA beat, whose corner the QR card owns. */
+function nameCardFullFrame(
+  s: Pick<
+    StoryboardScene,
+    "hostPresent" | "splitVisual" | "splitRightUrl" | "cta" | "qrHero" | "qrCorner" | "coverHero" | "assetImageUrl"
+  >
+): boolean {
+  if (!s.hostPresent || s.splitVisual || s.splitRightUrl) return false;
+  return !(s.cta || s.qrHero || s.qrCorner || s.coverHero || s.assetImageUrl);
+}
+
+/**
+ * Which scenes carry the host's lower third.
+ *
+ * A film WITH a self-introduction (`hostIntro`, "My name is …", "I'm …") — where a viewer learns who
+ * is talking, so the name belongs there (Gideon's job 401 showed "Gideon Grant" on the opening line,
+ * more than a minute before "My name is Gideon Grant…", and nothing on that line):
+ *  1. the introduction take (with the takes it is said across);
+ *  2. else the first full-frame host take that starts within `NAME_CARD_NEAR_INTRO_SEC` after it;
+ *  3. else no card. NEVER a take before the introduction (the cold open included) nor one far after
+ *     it: job 409's 3.07 s introduction was refused, and the card went to a take 11 s BEFORE "My name
+ *     is Gideon Grant" — the walk ran from the start of the film; job 410's went a minute after.
+ *     With the card's edges now shortened on a short take (`nameCardOnWindow`), an introduction take
+ *     of 2 s or more holds it itself, so 2 and 3 are for a take shorter than that.
+ * A film WITHOUT one: the LOCKED cold open (`hostOpener`, the leading run — two scenes on a
+ * two-angle opening, held across the cut rather than blinking out and back in), then every other
+ * full-frame host take in order, one at a time.
+ *
+ * A candidate wins only when it can SHOW the card (`nameCardOnWindow`, given each scene's on-screen
+ * length in `onScreenSec`): a lone 2.3-2.6 s cold open (jobs 403 and 406) was given the card, drew
+ * none because the hold was under its minimum, and the film shipped with no name at all. `[]` = no
+ * card.
  *
  * Takes positions in the ASSEMBLED scene list (the filtered `ready` array), not
  * `StoryboardScene.index` — a scene dropped for a missing clip therefore shifts the card onto the
  * next surviving host shot instead of onto nothing, and a dropped opener shortens the run rather
- * than splitting it. `onScreenSec[i]` is position i's length (`assembledSceneSecs`); unknown
- * lengths count as long enough. Pure — unit-tested.
+ * than splitting it. `onScreenSec[i]` is position i's length (`assembledSceneSecs`); an unknown
+ * length counts as long enough to hold the card, and as no time on the way to the next take.
+ * Pure — unit-tested.
  */
 export function nameCardSceneIndices(
   scenes: Pick<
@@ -9666,7 +9695,7 @@ export function nameCardSceneIndices(
   >[],
   onScreenSec: readonly (number | undefined)[] = []
 ): number[] {
-  const candidates: number[][] = [];
+  const shows = (run: number[]) => runShowsNameCard(run.map(i => onScreenSec[i]));
   const intro = scenes.findIndex(s => s.hostPresent && s.hostIntro);
   if (intro >= 0) {
     // An introduction spread over consecutive host takes (or said across the two-angle cold open)
@@ -9680,8 +9709,17 @@ export function nameCardSceneIndices(
       j++
     )
       run.push(j);
-    candidates.push(run);
+    if (shows(run)) return run;
+    // Only forward, and only a short way: `since` is the time from the introduction's cut to the
+    // start of scene j.
+    let since = 0;
+    for (let j = run[run.length - 1] + 1; j < scenes.length && since <= NAME_CARD_NEAR_INTRO_SEC; j++) {
+      if (nameCardFullFrame(scenes[j]) && shows([j])) return [j];
+      since += onScreenSec[j] ?? 0;
+    }
+    return [];
   }
+  const candidates: number[][] = [];
   // Only a LEADING run counts: a gap would mean the card pops back on after an unrelated cutaway.
   const opener: number[] = [];
   for (let i = 0; i < scenes.length && scenes[i].hostOpener; i++) {
@@ -9689,13 +9727,9 @@ export function nameCardSceneIndices(
   }
   if (opener.length > 0) candidates.push(opener);
   scenes.forEach((s, i) => {
-    if (!s.hostPresent || s.splitVisual || s.splitRightUrl) return;
-    if (s.cta || s.qrHero || s.qrCorner || s.coverHero || s.assetImageUrl) return;
-    candidates.push([i]);
+    if (nameCardFullFrame(s)) candidates.push([i]);
   });
-  return (
-    candidates.find(run => runShowsNameCard(run.map(i => onScreenSec[i]))) ?? []
-  );
+  return candidates.find(shows) ?? [];
 }
 
 /**
@@ -19780,9 +19814,10 @@ async function assembleAndFinalizeCore(
   });
 
   // Host lower third ("Riley Danvers" / "Gardener" / "Fresno, CA") on the self-introduction take,
-  // else the first host take that can hold it (`nameCardSceneIndices`, judged on each scene's
-  // on-screen length), in the graphics' accent. Entirely non-fatal: a render failure — or no host
-  // identity on the channel, or no host take long enough — just means the film ships without a card.
+  // else a host take just after it, else (a film with no introduction) the first host take that can
+  // hold it (`nameCardSceneIndices`, judged on each scene's on-screen length), in the graphics'
+  // accent. Entirely non-fatal: a render failure — or no host identity on the channel, or no host
+  // take long enough — just means the film ships without a card.
   let nameCard: { png: Buffer; sceneIndices: number[] } | undefined;
   const hasHostIdentity = [params.hostName, params.hostTitle, params.hostLocation].some(v =>
     v?.trim()
@@ -19798,7 +19833,9 @@ async function assembleAndFinalizeCore(
     : [];
   if (hasHostIdentity && nameCardScenes.length === 0 && readyScenes.some(s => s.hostPresent)) {
     console.warn(
-      `[Longform ${jobId}] no host take is long enough to hold the name card — the film has none`
+      readyScenes.some(s => s.hostPresent && s.hostIntro)
+        ? `[Longform ${jobId}] neither the self-introduction take nor a host take just after it can hold the name card — the film has none`
+        : `[Longform ${jobId}] no host take is long enough to hold the name card — the film has none`
     );
   }
   if (nameCardScenes.length > 0) {

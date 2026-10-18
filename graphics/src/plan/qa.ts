@@ -47,6 +47,21 @@ export function preCutPumps(reel: number[], film: number[], cutFrames: number[],
 
 export type Readability = { id: string; pass: boolean; summary: string; steps: string[] };
 
+/** The number at `path` ("left.subAt", "items[1].at") in a graphic's props, or undefined. */
+function propSec(props: unknown, path: string): number | undefined {
+  let v: unknown = props;
+  for (const key of path.split(/[.[\]]+/).filter(Boolean)) v = v && typeof v === "object" ? (v as Record<string, unknown>)[key] : undefined;
+  return typeof v === "number" && Number.isFinite(v) ? v : undefined;
+}
+
+/** When a word-timed element is DRAWN, in its graphic's own seconds: where its `prop` says (a Versus
+ * side's sub, `left.subAt`), else on its word. The one reading for the app's QA and the lab's
+ * composite, so the lab cannot pass a sub drawn with its title that the app fails (job 408). */
+export function drawnSec(c: Pick<ResolvedCue, "start" | "props">, s: ResolvedCue["sync"][number]): number {
+  const drawn = s.prop === undefined ? undefined : propSec(c.props, s.prop);
+  return drawn ?? s.wordStart - c.start;
+}
+
 export type QaInput = {
   fps: number;
   cues: ResolvedCue[];
@@ -77,11 +92,13 @@ export function judgeFilm(q: QaInput): QaResult {
 
   // Every word-timed element: the frame it appears on vs. the word it waits for. Text that would
   // start just before a shot change starts ON it (the subtitling shot-change rule, BBC subtitle
-  // guidelines): listed as aligned to the cut, not out of sync.
+  // guidelines): listed as aligned to the cut, not out of sync. An element drawn at a time of its own (a
+  // Versus side's sub, `prop`) is read where it is DRAWN: job 408's subs entered with their titles, up to
+  // 2.3 s before their words, and this line said "worst 66 ms" — it had rows for the titles only.
   const rows: { cue: string; offsetMs: number; onCut: boolean }[] = [];
   for (const c of cues)
     for (const s of c.sync) {
-      const rel = appearFrame(s.wordStart - c.start, fps);
+      const rel = appearFrame(drawnSec(c, s), fps);
       const offsetMs = Math.round(((c.startFrame + rel) / fps - s.wordStart) * 1000);
       rows.push({ cue: c.id, offsetMs, onCut: ((rel === 0 && c.conformed.start) || !!s.onCut) && Math.abs(offsetMs) <= CUT_SNAP_SEC * 1000 });
     }

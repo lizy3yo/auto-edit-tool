@@ -3,7 +3,7 @@ import { resolveCues, type CueSpec, type ResolvedCue, type Word } from "../cueRe
 import { TEMPLATES } from "../registry";
 import { FPS } from "../theme";
 import { notAListAsSaid } from "../../../server/spokenLists";
-import { ICON_REQUIRED, ROW_MAX_WORDS, choiceSteps, fromAFoundList, iconsAsASet, listsWhereGraphicsGo, malformedPhrase, missingListCues, namesTheDanger, noIcon, normalizePhrases, notTheHostsWords, planGraphics, quotedInScript, restoreRowGrammar, systemPrompt, uncoveredMoments, userPrompt, wordsSaidOver, type PlanMessage } from "./planner";
+import { ICON_REQUIRED, ROW_MAX_WORDS, STEP_MAX_WORDS, STEP_STRIP_MAX_PX, choiceSteps, stepStripMaxChars, fromAFoundList, iconsAsASet, keepObject, listsWhereGraphicsGo, malformedPhrase, missingListCues, namesTheDanger, noIcon, normalizePhrases, notTheHostsWords, objectCutOff, planGraphics, quotedInScript, restoreRowGrammar, stepCardLines, stepStripWidth, stepTextProblems, systemPrompt, uncoveredMoments, userPrompt, wordsSaidOver, type PlanMessage } from "./planner";
 
 const W = (s: string, start: number, step = 0.3): Word[] => s.split(" ").map((text, i) => ({ text, start: start + i * step, end: start + i * step + 0.26 }));
 const scene = (index: number, a: number, b: number, extra: Record<string, unknown> = {}) => ({ index, narrationStartSec: a, narrationEndSec: b, scriptText: "", hostPresent: false, cta: false, split: false, hostOpener: false, ...extra });
@@ -662,6 +662,25 @@ describe("a quote is the host's own words, never a line the viewer is told to sa
     expect(out.rounds[0].problems).toEqual([{ cue: "q", problem: expect.stringContaining('the narrator hands it to the viewer to say ("…comes, speak up")') }]);
   });
 
+  // A Quote takes 16 words and a DimCaption 10 since round 13 (job 408): a longer request is told to
+  // go, not steered to a caption the next check refuses for its length.
+  it("a request too long for a DimCaption is not steered to one: the repair is told to drop it", async () => {
+    const long = T(
+      "So@80.89-80.99 when@81.01-81.13 the@81.15-81.23 cart@81.27-81.51 comes,@81.55-81.83 speak@82.72-82.97 up.@83.11-83.17 " +
+        "Could@83.77-83.91 I@83.93-84.01 keep@84.05-84.21 the@84.25-84.33 whole@84.37-84.51 can@84.53-84.69 and@84.71-84.79 a@84.81-84.85 second@84.87-85.11 bag@85.13-85.31 of@85.33-85.39 pretzels@85.41-85.79 for@85.81-85.91 later,@85.93-86.21 please?@86.23-86.53 " +
+        "Juice@87.05-87.31 works@87.37-87.59 the@87.65-87.73 same@87.77-87.99 way.@88.05-88.29"
+    );
+    const longFilm = { scenes: [scene(17, 73.71, 86.87, { scriptText: "So when the cart comes, speak up. Could I keep the whole can and a second bag of pretzels for later, please?" }), scene(18, 86.87, 92.12, { scriptText: "Juice works the same way." })] };
+    const text = "Could I keep the whole can and a second bag of pretzels for later, please?";
+    const quote: CueSpec = { id: "q", template: "Quote", start: "Could I keep the whole", startPad: -0.15, end: "for later, please", endPad: 0.2, props: { quote: { text, words: true }, author: "The Host" } };
+    const { ask } = asking([[quote]]);
+    const out = await planGraphics({ words: long, cuts: [73.71, 86.87, 92.12], film: longFilm, ask, ensureIcon: async () => true });
+    expect(out.rounds[0].problems).toEqual([
+      { cue: "q", problem: expect.stringMatching(/is not the host's own words — .*It is too long for a caption with no name \(a DimCaption takes at most 10 words\): drop it$/) },
+    ]);
+    expect(out.rounds[0].problems[0].problem).not.toContain("Show it as a caption");
+  });
+
   it("a host's own closing saying on the narrator's words is kept as before (Dale's job 389)", async () => {
     const words = [
       ...W("For more shop-tested fixes like these, subscribe to Dale Oakfield's Workshop, and tell me in the comments which of the three sells best where you live.", 220),
@@ -815,12 +834,17 @@ describe("steps are done one after another; a choice is not the next step (A6, H
     expect(out.rounds[0].problems).toEqual([
       {
         cue: "snack-ask-steps",
-        problem: expect.stringMatching(/^step 3 \("Or step to galley"\) is a choice instead of the step before, not the next step .*Put the choice inside the step before it, as ONE step \("Call or email"\), or drop it; or show the choice with Versus$/),
+        // …told in the same round that its four steps, "Phrase it as offer" given back its "an", run
+        // past the picture's edge (a cue has one repair: the merged chain of three fits)
+        problem: expect.stringMatching(
+          /^step 3 \("Or step to galley"\) is a choice instead of the step before, not the next step .*Put the choice inside the step before it, as ONE step \("Call or email"\), or drop it; or show the choice with Versus\. Also: the 4 steps side by side are about 1766 px wide, wider than the picture allows \(1728\)/
+        ),
       },
     ]);
     expect(asked[1]).toContain('snack-ask-steps: step 3 ("Or step to galley") is a choice');
     expect(out.cues.map(c => c.id)).toEqual(["snack-ask-steps"]);
-    expect((out.cues[0].props.steps as { text: string }[]).map(s => s.text)).toEqual(["Wait until served", "Catch attendant or galley", "Phrase it as offer"]);
+    // "Phrase it as offer" is drawn with the "an" he says (job 410's card had the same line)
+    expect((out.cues[0].props.steps as { text: string }[]).map(s => s.text)).toEqual(["Wait until served", "Catch attendant or galley", "Phrase it as an offer"]);
   });
 
   it("the same chain with the 'Or' left off the step is still refused: the narrator says it right before the step's words", async () => {
@@ -1328,5 +1352,409 @@ describe("a graphic that hides the picture is refused when it leaves a blink of 
     expect(prompt).toContain("A graphic that HIDES the picture (a full-screen card, a window graphic, a Quote) leaves no blink");
     expect(prompt).toContain("the change comes within 2 s of that sentence's end");
     expect(prompt).toContain("the shot plays on 1.5 s or\n  more after it leaves (the change at least 2.3 s after its last word)");
+  });
+});
+
+describe("a row keeps what its last word takes (round 13 review, Gideon's job 409 'everyone-complains')", () => {
+  // Job 409, 2:36-2:44 as heard. The ListWindow's row 4 read "The young are already rehearsing" for
+  // "and the young are already rehearsing the complaint": cut to six words, it stopped on a verb with
+  // what it takes cut off, a broken thought under "The farmer complains".
+  const heard = T(
+    "title.@150.718-151.078 Everyone@151.879-152.259 complains@152.319-152.959 that@153.039-153.179 life@153.259-153.499 is@153.599-153.679 too@153.759-153.979 short,@154.099-154.459 Seneca@154.799-155.199 says.@155.259-155.519 " +
+      "The@156.2-156.3 farmer@156.38-156.72 complains,@156.76-157.38 the@157.68-157.8 senator@157.88-158.3 complains,@158.36-158.98 the@159.36-159.48 old@159.681-159.881 complain,@159.981-160.561 and@160.941-161.041 the@161.081-161.161 " +
+      "young@161.221-161.561 are@161.721-161.821 already@161.941-162.321 rehearsing@162.381-162.961 the@163.001-163.081 complaint.@163.121-163.582 Then@164.282-164.462 he@164.522-164.622 turns@164.682-164.982 the@165.042-165.162 whole@165.282-165.522 " +
+      "thing@165.582-165.782 over@165.942-166.162 in@166.302-166.402 a@166.422-166.462 single@166.622-166.942"
+  );
+  const film = {
+    scenes: [
+      scene(28, 144.48, 156.11, { scriptText: "The essay is called On the Shortness of Life, and it opens by picking a fight with its own title. Everyone complains that life is too short, Seneca says." }),
+      scene(29, 156.11, 157.59, { scriptText: "The farmer complains," }),
+      scene(30, 157.59, 159.28, { scriptText: "the senator complains," }),
+      scene(31, 159.28, 160.85, { scriptText: "the old complain," }),
+      scene(32, 160.85, 164.13, { scriptText: "and the young are already rehearsing the complaint." }),
+      scene(33, 164.13, 170.51, { scriptText: "Then he turns the whole thing over in a single motion: life is not short." }),
+    ],
+  };
+  const cuts = [144.48, 156.11, 157.59, 159.28, 160.85, 164.13];
+  const items = ["The farmer complains", "the senator complains", "the old complain", "the young are already rehearsing the complaint"];
+  // The real cue (job 409's graphics plan).
+  const everyone: CueSpec = {
+    id: "everyone-complains",
+    template: "ListWindow",
+    start: "The farmer complains, the senator complains,",
+    startPad: 0,
+    end: "already rehearsing the complaint.",
+    endPad: 0.3,
+    props: {
+      title: "Everyone complains",
+      items: [
+        { at: "@The farmer complains", say: "The farmer complains", text: "The farmer complains" },
+        { at: "@the senator complains", say: "the senator complains", text: "The senator complains" },
+        { at: "@the old complain", say: "the old complain", text: "The old complain" },
+        { at: "@the young are already", say: "the young are already rehearsing the complaint", text: "The young are already rehearsing" },
+      ],
+    },
+  };
+  const answering = (answers: CueSpec[][]) => {
+    let n = 0;
+    return async () => JSON.stringify({ cues: answers[n++] ?? [] });
+  };
+
+  it("job 409's row stops before what 'rehearsing' takes; it takes it back and leaves out 'already' to fit", () => {
+    expect(objectCutOff("The young are already rehearsing", items[3])).toBe("the complaint");
+    expect(keepObject("The young are already rehearsing", items[3], ROW_MAX_WORDS)).toBe("The young are rehearsing the complaint");
+    // other ways a row stops before what its last word takes: a preposition, a verb after "to", a
+    // helping verb or a subject
+    expect(objectCutOff("Phrase it as", "phrase it as an offer.")).toBe("an offer");
+    expect(objectCutOff("Wait until", "wait until everyone's been served,")).toBe("everyone's been served");
+    expect(objectCutOff("Ordered to end", "would be ordered to end his own life")).toBe("his own life");
+    expect(objectCutOff("You need", "you need a good drill for this")).toBe("a good drill");
+    expect(objectCutOff("A flight attendant", "catch a flight attendant as they pass")).toBeUndefined();
+  });
+
+  it("a row that ends where he ends, on a pause, or on a word that needs nothing more is left alone (jobs 397-410)", () => {
+    const fine: [string, string][] = [
+      ["The kitchen table", "the kitchen table at two in the morning"], // 409's "ordinary-places"
+      ["What the remaining years are for", "what the remaining years are actually for"], // 409's "real-questions"
+      ["The farmer complains", "The farmer complains"],
+      ["Lowers her face", "lowers her face to yours"], // 405
+      ["Store it sealed", "store it sealed, nowhere near a spark"], // 413
+      ["Rive the boards", "rived the boards along those same lines"], // 407
+      ["Sell the table", "sell the table the day you finish it"],
+      ["Decode it", "decode it one layer at a time"], // 412
+      ["Wait until everyone's been served", "wait until everyone's been served, then"],
+      ["Ordered to end his own life", "would be ordered to end his own life"], // 400
+      ["The wedding", "the wedding the year after"],
+    ];
+    for (const [row, say] of fine) {
+      expect(objectCutOff(row, say), row).toBeUndefined();
+      expect(keepObject(row, say, ROW_MAX_WORDS), row).toBe(row);
+    }
+    // a one-word step is a command, so its verb takes what follows; a one-word row is a thing
+    expect(objectCutOff("Catch", "catch a flight attendant as they pass", true)).toBe("a flight attendant");
+    expect(objectCutOff("Catch", "catch a flight attendant as they pass")).toBeUndefined();
+  });
+
+  it("a list built from the found words loses a filler word before it loses its end, and never stops mid-thought", () => {
+    const [c] = missingListCues([], heard, film, [{ items }]);
+    expect((c.props.items as { text: string }[]).map(i => i.text)).toEqual(["The farmer complains", "The senator complains", "The old complain", "The young are rehearsing the complaint"]);
+    // 409's other found list is cut where it may stop, as before
+    const words = W("usually in some ordinary place, a waiting room, a church pew, the kitchen table at two in the morning when the house is too quiet.", 40);
+    const [d] = missingListCues([], words, { scenes: [scene(8, 39, 60)] }, [{ items: ["a waiting room", "a church pew", "the kitchen table at two in the morning"] }]);
+    expect((d.props.items as { text: string }[]).map(i => i.text)).toEqual(["A waiting room", "A church pew", "The kitchen table at two"]);
+    // …and its fifth (sentence 24): the old cut stopped on "before" and on "where"
+    const plan = W("Each chapter gives you the real struggle, the principle underneath it, a boxed exercise to run before the day ends, and an honest note on where the advice breaks down.", 90);
+    const fifth = ["the real struggle", "the principle underneath it", "a boxed exercise to run before the day ends", "an honest note on where the advice breaks down"];
+    const [f] = missingListCues([], plan, { scenes: [scene(20, 89, 110)] }, [{ items: fifth }]);
+    expect((f.props.items as { text: string }[]).map(i => i.text)).toEqual(["The real struggle", "The principle underneath it", "A boxed exercise to run", "An honest note"]);
+    // a cut before the next noun phrase is a place an item may stop
+    const skillet = W("I kept a rolling pin, a flour sifter, and an old cast iron skillet my grandmother left me.", 120);
+    const [g] = missingListCues([], skillet, { scenes: [scene(30, 119, 130)] }, [{ items: ["a rolling pin", "a flour sifter", "an old cast iron skillet my grandmother left me"] }]);
+    expect((g.props.items as { text: string }[])[2].text).toBe("An old cast iron skillet");
+    // stored lists of earlier films, built again (the old cut in the comment)
+    const rows = (said: string, items: string[]) => (missingListCues([], W(said, 0), { scenes: [scene(1, 0, 60)] }, [{ items }])[0].props.items as { text: string }[]).map(i => i.text);
+    expect(rows("They cut the log into short bolts, split each bolt into pie wedges, and rived the boards along those same lines.", ["cut the log into short bolts", "split each bolt into pie wedges", "rived the boards along those same lines"])).toEqual(
+      ["Cut the log into short bolts", "Split each bolt into pie wedges", "Rived the boards"] // 407: "Rived the boards along those same"
+    );
+    expect(rows("Slip stitch into the chain space right beside your hook, chain three, work one double crochet into that same space.", ["slip stitch into the chain space right beside your hook", "chain three", "work one double crochet into that same space"])).toEqual(
+      ["Slip stitch into the chain space", "Chain three", "Work one double crochet"] // 351: "Slip stitch into the chain space" (kept)
+    );
+    expect(rows("Square up the scrap, give it a quick brush, drill the hole about halfway through at a slight angle, oil it.", ["square up the scrap", "give it a quick brush", "drill the hole about halfway through at a slight angle", "oil it"])[2]).toBe(
+      "Drill the hole about halfway through" // 356: kept as it was
+    );
+    // an item with no filler and nowhere to stop is kept whole, and the row limit refuses it rather
+    // than show "The young are rehearsing the same old"
+    const long = W("The farmer complains, the senator complains, and the young are rehearsing the same old bitter complaint.", 70);
+    const [e] = missingListCues([], long, { scenes: [scene(9, 69, 80)] }, [{ items: ["The farmer complains", "the senator complains", "the young are rehearsing the same old bitter complaint"] }]);
+    expect((e.props.items as { text: string }[])[2].text).toBe("The young are rehearsing the same old bitter complaint");
+  });
+
+  it("job 409's window is kept with its last row whole; a row that cannot be mended within the limit is refused and the repair told why", async () => {
+    const out = await planGraphics({ words: heard, cuts, film, ask: answering([[everyone]]), ensureIcon: async () => true });
+    expect(out.rounds[0].problems).toEqual([]);
+    expect((out.cues[0].props.items as { text: string }[]).map(i => i.text)).toEqual(["The farmer complains", "The senator complains", "The old complain", "The young are rehearsing the complaint"]);
+
+    const words = W("The farmer complains, the senator complains, and the young are already rehearsing the same old bitter complaint.", 70);
+    const window: CueSpec = {
+      id: "complainers",
+      template: "ListWindow",
+      start: "The farmer complains, the senator",
+      end: "same old bitter complaint.",
+      props: {
+        title: "Everyone complains",
+        items: [
+          { at: "@The farmer complains", say: "The farmer complains", text: "The farmer complains" },
+          { at: "@the senator complains", say: "the senator complains", text: "The senator complains" },
+          { at: "@the young are", say: "the young are already rehearsing the same old bitter complaint", text: "The young are already rehearsing" },
+        ],
+      },
+    };
+    const refused = await planGraphics({ words, film: { scenes: [scene(9, 69, 80, { scriptText: words.map(w => w.text).join(" ") })] }, ask: answering([[window]]), ensureIcon: async () => true });
+    expect(refused.rounds[0].problems).toEqual([
+      {
+        cue: "complainers",
+        problem:
+          'row "The young are already rehearsing" stops before "the same old bitter complaint", which its last word needs — a row never ends on a word whose object is cut off: keep those words and shorten the row elsewhere (leave out a word like "already" or "just"), or show the item another way',
+      },
+    ]);
+  });
+
+  it("the prompt asks for rows that keep what their last word takes", () => {
+    expect(systemPrompt({ kept: false })).toContain('"The kids are\n  already practicing the song" is "The kids are practicing the song", never "The kids are already practicing"');
+  });
+});
+
+describe("a step is the narrator's own words, with their grammar (round 13 review, Helena's job 410 'snack-steps')", () => {
+  // Job 410, 2:21.1-2:29.1 as heard. The StepCards card read "Wait until all served → Ask in aisle or
+  // galley → Phrase it as offer": "all", "ask" and "aisle" are never said, and "an" was cut to fit a
+  // four-word limit. List rows had their grammar put back (job 400); steps did not.
+  const heard = T(
+    "So@141.115-141.275 wait@141.355-141.555 until@141.595-141.875 everyone's@142.015-142.415 been@142.455-142.615 served,@142.675-143.115 then@143.496-143.716 catch@143.756-143.996 a@144.036-144.056 flight@144.096-144.336 attendant@144.356-144.736 " +
+      "as@144.796-144.876 they@144.916-145.056 pass@145.116-145.556 or@146.076-146.276 step@146.356-146.596 back@146.636-146.796 to@146.836-146.936 the@146.956-147.016 galley@147.056-147.477 and@147.757-147.857 phrase@147.917-148.197 it@148.257-148.317 " +
+      "as@148.417-148.497 an@148.537-148.597 offer.@148.737-149.057"
+  );
+  const film = {
+    scenes: [
+      scene(28, 128.87, 141.29, { scriptText: "…and you're asking the crew to guess whether the last few rows will come up short. So" }),
+      scene(29, 141.29, 143.29, { scriptText: "wait until everyone's been served," }),
+      scene(30, 143.29, 147.62, { scriptText: "then catch a flight attendant as they pass, or step back to the galley," }),
+      scene(31, 147.62, 149.55, { scriptText: "and phrase it as an offer." }),
+      scene(32, 149.55, 163.5, { hostPresent: true, scriptText: "Two asks in, you might wonder how anyone keeps this straight." }),
+    ],
+  };
+  const cuts = [128.87, 141.29, 143.29, 147.62, 149.55];
+  // The real cue (job 410's graphics plan).
+  const snackSteps: CueSpec = {
+    id: "snack-steps",
+    template: "StepCards",
+    start: "wait until everyone's been served,",
+    startPad: -0.15,
+    end: "phrase it as an offer.",
+    endPad: 0.1,
+    props: {
+      kicker: "The second snack",
+      steps: [
+        { at: "@wait until everyone's been served", text: "Wait until all served" },
+        { at: "@then catch a flight attendant", text: "Ask in aisle or galley" },
+        { at: "@and phrase it as an offer", text: "Phrase it as offer" },
+      ],
+    },
+  };
+  const asking = (answers: CueSpec[][]) => {
+    const asked: string[] = [];
+    const ask = async (_system: string, messages: PlanMessage[]) => {
+      asked.push(messages[messages.length - 1].content);
+      return JSON.stringify({ cues: answers[asked.length - 1] ?? [] });
+    };
+    return { ask, asked };
+  };
+  const texts = (c: CueSpec) => (c.props.steps as { text: string }[]).map(s => s.text);
+
+  it("job 410's card is refused for the words never said, told what he says; the repair in his words is kept, 'an' given back", async () => {
+    const mended: CueSpec = {
+      ...snackSteps,
+      props: {
+        ...snackSteps.props,
+        steps: [
+          { at: "@wait until everyone's been served", text: "Wait until everyone's been served" },
+          { at: "@then catch a flight attendant", text: "Catch a flight attendant" },
+          { at: "@and phrase it as an offer", text: "Phrase it as offer" },
+        ],
+      },
+    };
+    const { ask, asked } = asking([[snackSteps], [mended]]);
+    const out = await planGraphics({ words: heard, cuts, film, ask, ensureIcon: async () => true });
+    expect(out.rounds[0].problems).toEqual([
+      {
+        cue: "snack-steps",
+        problem:
+          `step 1 ("Wait until all served") shows "all", which the narrator does not say — a step is his own words, shortened (he says "wait until everyone's been served"). ` +
+          `Also: step 2 ("Ask in aisle or galley") shows "ask", "in", "aisle", which the narrator does not say — a step is his own words, shortened (he says "then catch a flight attendant as they pass or step back to the galley")`,
+      },
+    ]);
+    expect(asked[1]).toContain('snack-steps: step 1 ("Wait until all served") shows "all"');
+    expect(out.rounds[1].problems).toEqual([]);
+    expect(texts(out.cues[0])).toEqual(["Wait until everyone's been served", "Catch a flight attendant", "Phrase it as an offer"]);
+  });
+
+  it("each step takes back the articles and the 'it' it left out (job 402's 'Phrase as offer'), as StepLabels too", () => {
+    const said = { each: ["wait until everyone's been served,", "then catch a flight attendant as they pass or step back to the galley", "and phrase it as an offer."], heard: heard.map(w => w.text) };
+    const steps = [{ text: "Wait until everyone's served" }, { text: "Catch attendant or galley" }, { text: "Phrase as offer" }];
+    expect(stepTextProblems("StepLabels", steps, said)).toEqual([]);
+    // a short version in his words is his to keep; only what was left out between its words comes back
+    expect(steps.map(s => s.text)).toEqual(["Wait until everyone's served", "Catch attendant or galley", "Phrase it as an offer"]);
+  });
+
+  it("a step stopped before what its last word takes gets it back when it fits; one that cannot, or runs past the limit, is refused", () => {
+    // a one-word step is a command: "Catch" takes back "a flight attendant"
+    const caught = [{ text: "Catch" }, { text: "Wait until everyone's served" }];
+    const said = { each: ["catch a flight attendant as they pass", "wait until everyone's been served,"], heard: "catch a flight attendant as they pass wait until everyone's been served,".split(" ") };
+    expect(stepTextProblems("StepLabels", caught, said)).toEqual([]);
+    expect(caught.map(s => s.text)).toEqual(["Catch a flight attendant", "Wait until everyone's served"]);
+    const words = "phrase it as a small friendly offer to the crew wait until everyone's been served on the whole plane";
+    const long = { each: ["phrase it as a small friendly offer to the crew", "wait until everyone's been served on the whole plane"], heard: words.split(" ") };
+    expect(stepTextProblems("StepLabels", [{ text: "Phrase it as" }, { text: "Wait until everyone's been served on the plane" }], long)).toEqual([
+      `step 1 ("Phrase it as") stops before "a small friendly offer", which its last word needs — a step never ends on a word whose object is cut off; keep those words and shorten elsewhere`,
+      `step 2 ("Wait until everyone's been served on the plane") is 8 words — a step takes at most ${STEP_MAX_WORDS}: his own words, shortened`,
+    ]);
+  });
+
+  it("steps placed in earlier films on the narrator's words still pass, his word in any form (jobs 397-414)", () => {
+    const placed: [string, string][][] = [
+      [["Build it well", "Build it well,"], ["Price it honest", "price it honest,"], ["Find its lane", "and let every piece find its lane."]], // 397
+      [["Measurements in first line", "Put the measurements in the very first line and"], ["Piece to driveway", "move the piece out to your driveway"]], // 397
+      [["Flush", "flush and"], ["Follow", "follow."]], // 403, 408
+      [["Stops on your chest", "Then she stops on your chest,"], ["Lowers her face", "lowers her face to yours, and"], ["Waits", "waits."]], // 405
+      [["Cut short bolts", "They cut the log into short bolts,"], ["Split pie wedges", "split each bolt into pie wedges, and"], ["Rive the boards", "rived the boards along those same lines"]], // 407
+      [["Drain it outside", "Drain it outside,"], ["Store it sealed", "store it sealed, nowhere near a spark."]], // 413
+      [["Get a stepladder", "So get a stepladder,"], ["Take one alarm down", "take one alarm down, and"], ["Read the label", "read the label."]], // 385
+    ];
+    for (const steps of placed) {
+      const said = { each: steps.map(([, say]) => say), heard: steps.flatMap(([, say]) => say.split(" ")) };
+      const shown = steps.map(([text]) => ({ text }));
+      expect(stepTextProblems("StepLabels", shown, said), steps[0][0]).toEqual([]);
+      expect(shown.map(s => s.text)).toEqual(steps.map(([text]) => text));
+    }
+  });
+
+  it("a step card's words fit its card: icons go when a step needs three lines, more than three is refused", () => {
+    expect([stepCardLines("Wait until all served"), stepCardLines("Phrase it as offer"), stepCardLines("Wait until everyone's been served")]).toEqual([2, 2, 3]); // job 410's card broke the first two after "all" and "as"
+    const said = { each: ["wait until everyone's been served,", "then catch a flight attendant", "and phrase it as an offer."], heard: heard.map(w => w.text) };
+    const iconed = [{ text: "Wait until everyone's been served", icon: "23f3" }, { text: "Catch a flight attendant", icon: "1f9d1" }, { text: "Phrase it as an offer", icon: "1f4ac" }];
+    expect(stepTextProblems("StepCards", iconed, said)).toEqual([]);
+    expect(iconed.map(s => "icon" in s)).toEqual([false, false, false]);
+    const short = [{ text: "Catch a flight attendant", icon: "1f9d1" }, { text: "Phrase it as an offer", icon: "1f4ac" }];
+    stepTextProblems("StepCards", short, { each: said.each.slice(1), heard: said.heard });
+    expect(short.map(s => "icon" in s)).toEqual([true, true]);
+    const tall = "Disconnect everything electrical underneath";
+    expect(stepTextProblems("StepCards", [{ text: tall }], { each: [tall.toLowerCase()], heard: tall.split(" ") })).toEqual([
+      `step 1 ("${tall}") takes about 4 lines, more than its card holds (3) — shorten it in his own words`,
+    ]);
+  });
+
+  it("a strip of step labels stays inside the picture: job 399's four fit, the same four with their grammar back do not", () => {
+    // Job 399's strip, measured on its frame: 1,718 px from the action-safe edge, to within 2 px of this.
+    expect(stepStripWidth(["Wait until served", "Catch an attendant", "Or step to galley", "Phrase it as offer"])).toBe(1720);
+    expect(STEP_STRIP_MAX_PX).toBe(1728);
+    const said = { each: [undefined, undefined, undefined, "and phrase it as an offer."], heard: heard.map(w => w.text) };
+    expect(stepTextProblems("StepLabels", [{ text: "Wait until served" }, { text: "Catch an attendant" }, { text: "Or step to galley" }, { text: "Phrase it as offer" }], said)).toEqual([
+      `the 4 steps side by side are about 1766 px wide, wider than the picture allows (1728) — shorten them in his own words, keeping his "a"/"the", or use fewer steps, or StepCards where the steps have no pictures of their own`,
+    ]);
+  });
+
+  it("the prompt asks for steps in his own words, at the new limit", () => {
+    const prompt = systemPrompt({ kept: false });
+    expect(prompt).toContain(`{"kicker", "steps": [{"text" (≤${STEP_MAX_WORDS} words), "icon" (optional), "at": "@words"}]}`);
+    expect(prompt).toContain(`"Leave it on the shelf", never\n  "Leave on shelf" — never a word he does not say`);
+    expect(prompt).toContain(`{"steps": [{"text" (≤${STEP_MAX_WORDS} words, his own words as for StepCards), "at": "@words"}]}`);
+  });
+
+  it("the prompt states the strip's budget, which is exactly where the width check draws its line", () => {
+    // five-word steps in his words, four of them, run past the picture's edge: told up front, not in
+    // the one repair round
+    expect([stepStripMaxChars(3), stepStripMaxChars(4)]).toEqual([82, 70]);
+    expect(systemPrompt({ kept: false })).toContain("the labels sit side by side\n  on ONE line, so all of them together hold at most 82 characters with three steps, 70 with four");
+    const fill = (n: number, chars: number) => Array.from({ length: n }, (_, k) => "x".repeat(Math.floor(chars / n) + (k < chars % n ? 1 : 0)));
+    for (const n of [2, 3, 4]) {
+      expect(stepStripWidth(fill(n, stepStripMaxChars(n))), `${n} at the budget`).toBeLessThanOrEqual(STEP_STRIP_MAX_PX);
+      expect(stepStripWidth(fill(n, stepStripMaxChars(n) + 1)), `${n} past it`).toBeGreaterThan(STEP_STRIP_MAX_PX);
+    }
+  });
+
+  it("mended steps are placed again: the graphic's reading time and the timing handed on are the drawn words'", async () => {
+    // "Catch" (a one-word step) is given back "a flight attendant": 8 words shown, not 5, so the
+    // graphic needs 3.4 s to be read, not 2.5 s — measured on what is drawn
+    const said = W("So catch a flight attendant as they pass, then wait until everyone's been served. After that the cart comes back around to you.", 200);
+    const labels: CueSpec = {
+      id: "two-steps",
+      template: "StepLabels",
+      start: "catch a flight attendant",
+      end: "everyone's been served.",
+      props: { steps: [{ at: "@catch a flight attendant", text: "Catch" }, { at: "@wait until everyone's", text: "Wait until everyone's served" }] },
+    };
+    const out = await planGraphics({ words: said, film: { scenes: [scene(5, 199, 240, { scriptText: said.map(w => w.text).join(" ") })] }, ask: async () => JSON.stringify({ cues: [labels] }), ensureIcon: async () => true });
+    expect(out.rounds[0].problems).toEqual([]);
+    expect(texts(out.cues[0])).toEqual(["Catch a flight attendant", "Wait until everyone's served"]);
+    const placed = out.resolved.find(r => r.id === "two-steps")!;
+    expect((placed.props.steps as { text: string }[]).map(s => s.text)).toEqual(["Catch a flight attendant", "Wait until everyone's served"]);
+    expect(placed.readSec).toBe(3.4);
+    // a step graphic left as written is placed once, as before (job 385's chain, 3 steps of his words)
+    const chain = W("So get a stepladder, take one alarm down, and read the label.", 60);
+    const asSaid: CueSpec = {
+      id: "07-step-labels",
+      template: "StepLabels",
+      start: "So get a stepladder",
+      end: "read the label.",
+      props: { steps: [{ text: "Get a stepladder", at: "@get a stepladder" }, { text: "Take one alarm down", at: "@take one alarm down" }, { text: "Read the label", at: "@read the label" }] },
+    };
+    const kept = await planGraphics({ words: chain, film: { scenes: [scene(12, 59, 65, { scriptText: chain.map(w => w.text).join(" ") })] }, ask: async () => JSON.stringify({ cues: [asSaid] }), ensureIcon: async () => true });
+    expect(kept.rounds[0].problems).toEqual([]);
+    expect(texts(kept.cues[0])).toEqual(["Get a stepladder", "Take one alarm down", "Read the label"]);
+    expect(kept.resolved[0].readSec).toBe(4);
+  });
+});
+
+describe("an item may stop before 'whose' or 'whom', and never on one (round 13 review)", () => {
+  const rows = (said: string, items: string[]) => (missingListCues([], W(said, 0), { scenes: [scene(1, 0, 60)] }, [{ items }])[0].props.items as { text: string }[]).map(i => i.text);
+  it("a stored item that found no place to stop but 'This one's' stops before 'whose' (job 357)", () => {
+    // the old cut was "This one's for anybody whose dog", the first build of this rule "This one's"
+    expect(rows("This one's for anybody whose dog greets them nose-first, anybody.", ["This one's for anybody whose dog greets them nose-first", "anybody"])[0]).toBe("This one's for anybody");
+    // …and never ends on one: "The cousin whom" stopped before "everybody" until "whom" hung
+    expect(rows("The cousin whom everybody always quietly blamed for everything, the mail carrier.", ["The cousin whom everybody always quietly blamed for everything", "the mail carrier"])[0]).toBe("The cousin");
+    // an item that fits is never cut, "whose" or not
+    expect(rows("A friend whose dog barks, the mail carrier.", ["A friend whose dog barks", "the mail carrier"])[0]).toBe("A friend whose dog barks");
+  });
+});
+
+describe("a card sent back for a blink is told when a new clause, not its sentence, is what it may not stay over (job 408, round 13)", () => {
+  // "Nine things stay out of the toilet there, | and in plenty of American homes, most of them go down
+  // it…": the rest of the sentence is a contrast the card does not show, so the hold is measured from
+  // "there," (24.48) — and the repair round is told so, instead of "after its own sentence ends".
+  const toilet = "there,@24.236-24.476 and@24.916-25.016 in@25.056-25.116 plenty@25.236-25.596 of@25.636-25.696 American@25.756-26.156 homes,@26.196-26.516 most@26.937-27.157 of@27.177-27.237"
+    .split(" ")
+    .map(t => {
+      const [text, range] = t.split("@");
+      const [start, end] = range.split("-").map(Number);
+      return { text, start, end };
+    });
+  it("names the clause and measures from the card's own words", async () => {
+    const { blinkProblem } = await import("./planner");
+    const card = { id: "nine-things", template: "BigNumber", start: 22.3, end: 25.2, startFrame: 669, endFrame: 756, contentEnd: 24.476, props: { durationSec: 2.9 }, sync: [], conformed: { start: true, end: false } } as ResolvedCue;
+    const p = blinkProblem("BigNumber", card, { side: "after", cutFrame: 798, sec: 1.4 }, toilet);
+    expect(p).toContain(`It may not stay to the change: that comes 2.12 s after its own words end — "and in plenty of…" opens a new clause it does not show (at most 2 s).`);
+    expect(p).not.toContain("after its own sentence ends");
+  });
+});
+
+describe("a DimCaption is a glance: one short sentence, never two in a row (round 13 verification films)", () => {
+  // Job 408 (2:07-2:12): "If you think one is already in there, the plunger is the wrong tool." — 14
+  // words built word by word over two pages, the second opening on a lowercase "the", 1.2 s after
+  // the "The toilet is fine." caption. The catalogue asked for 10 words; the hard limit was 24.
+  it("the hard limit is the catalogue's, and one page of the caption", async () => {
+    const { MAX_WORDS } = await import("./planner");
+    const { CAPTION_PAGE_WORDS } = await import("../overlays");
+    expect(MAX_WORDS.DimCaption).toBe(10);
+    expect(MAX_WORDS.DimCaption).toBeLessThanOrEqual(CAPTION_PAGE_WORDS.DimCaption);
+    const prompt = systemPrompt({ kept: false });
+    expect(prompt).toContain(`- DimCaption — a striking line over b-roll, one short sentence seen at a glance — never two in a row: {"phrase": phrase (≤${MAX_WORDS.DimCaption} words), "emphasis"}`);
+    expect(prompt).toContain("a DimCaption is read at a glance, so it is a SHORT sentence (≤10 words) and never pages");
+    // The prompt's other mention of a DimCaption gives the same limit.
+    expect(prompt.replace(/\s+/g, " ")).toContain("line as a DimCaption (no name) when it is 10 words or fewer, or nothing");
+  });
+
+  it("a sentence too long for a card is never sent to an ArrowCaption that points at nothing", () => {
+    // Over b-roll the only caption that pages is now the ArrowCaption, made for a line pointing at
+    // something in the picture: "shown as a caption that pages" would have steered every long b-roll
+    // sentence to an arrow.
+    const prompt = systemPrompt({ kept: false }).replace(/\s+/g, " ");
+    expect(prompt).toContain(
+      "A sentence longer than a card's limit is never cut to fit: over the host it may be a HostCaption, over b-roll an ArrowCaption only when the line points at something in the picture — otherwise it gets no graphic."
+    );
+    expect(prompt).not.toContain("shown as a caption that pages");
+  });
+
+  it("the planner is told to keep two graphics that darken the picture 3 s apart, and which they are", () => {
+    const prompt = systemPrompt({ kept: false }).replace(/\s+/g, " ");
+    expect(prompt).toContain("3 s between two that darken the picture (DimCaption, Quote, TitleOverFootage, BigNumberOverlay, BarChart, ArrowCaption), a cut between them or not");
   });
 });

@@ -14,6 +14,7 @@ import { loadJob } from "./job.mts";
 import { checkRules, placementFor } from "./rules.mts";
 import { GRAPHICS_SRC, ffmpegPath, outDir, renderGraphic, run } from "./lib.mts";
 import { appearFrame } from "../../graphics/src/timing.ts";
+import { drawnSec } from "../../graphics/src/plan/qa.ts";
 import { detectCuts, flashes, frameDiffs, preCutPumps } from "./qa-lib.mts";
 import { calmestPlace, describe, measureCue, subjectOf, type Reading } from "./legibility.mts";
 import { WINDOW } from "../../graphics/src/more.tsx";
@@ -211,11 +212,12 @@ const pumps = preCutPumps(reelDiffs, filmDiffs, filmCutFrames);
 // Every word-timed element: the frame it starts appearing on vs. the frame its word is heard on.
 // Text that would start just before a shot change starts ON it (the subtitling shot-change rule,
 // BBC subtitle guidelines): an element shown on its graphic's first frame, whose start was moved
-// onto a picture cut within CUT_SNAP_SEC, is aligned to the cut — listed, not out of sync.
+// onto a picture cut within CUT_SNAP_SEC, is aligned to the cut — listed, not out of sync. An element
+// drawn at a time of its own (a Versus side's sub) is read where it is drawn (`drawnSec`, the app's QA).
 const syncRows: { cue: string; element: string; offsetMs: number; onCut: boolean }[] = [];
 for (const c of cues) {
   for (const s of c.sync) {
-    const rel = appearFrame(s.wordStart - c.start, FPS);
+    const rel = appearFrame(drawnSec(c, s), FPS);
     const shown = c.startFrame + rel;
     const offsetMs = Math.round(((shown / FPS) - s.wordStart) * 1000);
     syncRows.push({ cue: c.id, element: s.element, offsetMs, onCut: rel === 0 && c.conformed.start && Math.abs(offsetMs) <= CUT_SNAP_SEC * 1000 });
