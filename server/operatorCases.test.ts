@@ -2332,3 +2332,106 @@ describe("the book cover lands on the line that says the title, never on one wor
     expect(out.filter(s => s.coverHero).map(s => s.index)).toEqual([2]);
   });
 });
+
+describe("after the book cover the host comes back on a sentence (job 399)", () => {
+  // Helena's 3-min test at 2:50: the cover ended on the storyboard's word count, "…every secret
+  // gives you the exact words,", and the host came back mid-list: "who to say them to, and the
+  // moment in the trip when they work." The cover now says the rest of that sentence.
+  const at = (index: number, from: number, to: number, scriptText: string, over: Partial<StoryboardScene>) =>
+    ({
+      index,
+      scriptText,
+      showSubject: "x",
+      narrationStartSec: from,
+      narrationEndSec: to,
+      audioDuration: to - from,
+      audioUrl: `https://example.com/${index}.mp3`,
+      cta: true,
+      ctaIndex: 0,
+      ...over,
+    }) as StoryboardScene;
+  const pitch = { hostPresent: true, qrCorner: true, hostProtected: true };
+  const cover = { coverHero: true, stillImage: true };
+  const card = { qrHero: true, qrTail: true, stillImage: true };
+  const block = (coverAt: [number, number, string], hostAt: [number, number, string]) => [
+    at(1, coverAt[0] - 6, coverAt[0], "Some of you are wondering where all of this lives in one place.", pitch),
+    at(2, ...coverAt, cover),
+    at(3, ...hostAt, pitch),
+    at(4, hostAt[1], hostAt[1] + 8, "Hold your phone up to the screen. A link appears, and you tap it.", card),
+  ];
+  const params = { faceImageUrl: "https://example.com/host.jpg" } as any;
+  const order = (scenes: StoryboardScene[]) =>
+    scenes.map(s => (s.qrHero ? "Q" : s.coverHero ? "B" : "H")).join("");
+
+  it("job 399: the cover runs on to 'when they work.' and the host comes back on 'Chapter four'", async () => {
+    const { enforcePlanRules } = await import("./planGate");
+    const scenes = block(
+      [
+        162.649,
+        170.752,
+        "It's called A Hundred Air Hostess Secrets, a four hundred eighty-five page PDF, and every secret gives you the exact words,",
+      ],
+      [
+        170.752,
+        181.8,
+        "who to say them to, and the moment in the trip when they work. Chapter four covers in-flight requests, so when the right sentence won't come to you at the galley, it's already in your pocket.",
+      ]
+    );
+    // The host take as the job's own transcript heard it, and the pause between "work." and "Chapter".
+    const words = (
+      "who@170.86-171.02 to@171.04-171.14 say@171.16-171.32 them@171.36-171.48 to,@171.54-171.78 " +
+      "and@172.12-172.20 the@172.24-172.32 moment@172.40-172.68 in@172.74-172.80 the@172.82-172.90 " +
+      "trip@172.96-173.20 when@173.26-173.38 they@173.40-173.54 work.@173.58-173.84 " +
+      "Chapter@174.48-174.82 4@175.10-175.18 covers@175.26-175.58 in-flight@175.76-176.18 " +
+      "requests,@176.24-176.76 so@177.20-177.44 when@177.70-177.84 the@177.86-177.94 right@178.00-178.18 " +
+      "sentence@178.24-178.54 won't@178.58-178.76 come@178.82-178.98 to@179.02-179.08 you@179.12-179.20 " +
+      "at@179.26-179.32 the@179.36-179.44 galley,@179.48-179.88 it's@180.12-180.28 already@180.42-180.78 " +
+      "in@180.84-180.90 your@180.94-181.08 pocket.@181.10-181.48"
+    )
+      .split(" ")
+      .map(tok => {
+        const [, word, start, end] = /^(.*)@([\d.]+)-([\d.]+)$/.exec(tok)!;
+        return { word, start: Number(start), end: Number(end) };
+      });
+    const r = enforcePlanRules(scenes, params, { words, silences: [{ start: 173.85, end: 174.47 }] });
+    const b = r.scenes.find(s => s.coverHero)!;
+    const h = r.scenes[r.scenes.indexOf(b) + 1];
+    expect(b.scriptText).toMatch(/gives you the exact words, who to say them to, and the moment in the trip when they work\.$/);
+    expect(h.scriptText).toMatch(/^Chapter four covers in-flight requests,/);
+    expect(h.hostPresent).toBe(true);
+    expect(b.narrationEndSec).toBeCloseTo(174.16, 5);
+    expect(order(r.scenes)).toBe("HBHQ");
+  });
+
+  it("jobs 397 and 398: a cover that ends its own sentence keeps its line", async () => {
+    const { checkPlan, enforcePlanRules } = await import("./planGate");
+    const films = [
+      block(
+        [103.8655, 109.497, "and I gathered it into a digital book called The Ultimate DIY Woodworking Guide."],
+        [
+          109.497,
+          117.54,
+          "It covers finishing and shop safety done right, and after every technique there's a breakdown of the common mistake that goes with it.",
+        ]
+      ),
+      block(
+        [
+          95.9197,
+          105.209,
+          "The projects that actually sell are gathered in my digital book, A Hundred Ways to Make Your First Thousand Dollars with Woodworking.",
+        ],
+        [
+          105.209,
+          121.614,
+          "That's a hundred of them, with what to make each one from and a fair price to ask, listed right beside it. So when a big fancy build starts calling your name, flip to one that sells and make that instead.",
+        ]
+      ),
+    ];
+    for (const scenes of films) {
+      const end = scenes[1].narrationEndSec;
+      expect(checkPlan(scenes, params).findings.filter(f => /after the book cover/.test(f.detail))).toEqual([]);
+      const r = enforcePlanRules(scenes, params);
+      expect(r.scenes.find(s => s.coverHero)?.narrationEndSec).toBe(end);
+    }
+  });
+});

@@ -6,8 +6,10 @@
  *  1. No pause after a CTA            — no automatic hold anywhere.
  *  2. CTA order                       — host → book → host → big QR, the QR moves once.
  *  6. Self-introduction on camera     — "I'm <host>" is the host, full frame.
- *  7. Clean host switches             — host takes start on a sentence (never after a comma; a take
- *                                       that does takes its sentence back, `finishSentenceBeforeHost`)
+ *  7. Clean host switches             — host takes start on a sentence (never after a comma, nor
+ *                                       inside one after the CTA's book cover; a take that does takes
+ *                                       its sentence back, or starts on its next one,
+ *                                       `finishSentenceBeforeHost`)
  *                                       and end on one (or hand over at a shot-list break); no flash
  *                                       shots, and no beat the voice gives no time at all.
  *  8. Host often                      — ≤40 s without the host in the first 3 min, ≤75 s after.
@@ -68,6 +70,12 @@ export const HOST_GAP_LATE_MAX_SEC = 75;
 export const PICTURE_MAX_SLACK_SEC = 0.5;
 /** Kept for callers that have no timeline: the first quarter's limit. */
 export const PICTURE_MAX_SEC = pictureMaxSecAt(0, 0) + PICTURE_MAX_SLACK_SEC;
+/**
+ * Rule 7 inside a CTA: the longest the book cover may run while it finishes the sentence the host
+ * would otherwise come back into — the ceiling a host take stretches to for the same reason
+ * (`HOST_SENTENCE_MAX_SEC`). Past it the host comes back inside the sentence, the ordinary L-cut.
+ */
+export const COVER_SENTENCE_MAX_SEC = HOST_SENTENCE_MAX_SEC;
 /**
  * Rule 11: the share of cutaway time that moves — between these (2026-09-28, the operator: "less
  * video b-roll than the image"; it used to demand at least 30%). Below the floor the gate adds
@@ -180,14 +188,24 @@ export function checkPlan(
     // the sentence's OWN start is too far back to take whole — not the whole picture before: Mae's
     // 13.7 s picture held just 4 s of the sentence her host cut into.
     const leadTooLong = len(s) + sentenceLeadSec(scenes, i) > HOST_SENTENCE_MAX_SEC - 0.5;
-    const badStart = !startsSentence(scenes, i) && !edge(prev) && !leadTooLong;
+    // The book cover is a fixed frame, an edge for every other check here, but not a licence for
+    // the host to come back mid-sentence: the cover says the rest of the sentence instead
+    // (`finishSentenceBeforeHost`), unless that runs it past `COVER_SENTENCE_MAX_SEC`. Job 399
+    // (2:50) came back mid-list: "…gives you the exact words, | who to say them to, and the moment…".
+    const afterCover = coverBeforeHost(scenes, i);
+    const coverFull =
+      afterCover && len(prev) + sentenceTailSec(s) > COVER_SENTENCE_MAX_SEC - 0.5;
+    const badStart =
+      !startsSentence(scenes, i) && (afterCover ? !coverFull : !edge(prev) && !leadTooLong);
     const badEnd = !endsSentence(textOf(s)) && !edge(next) && !capped(next) && !handsOff;
     if (badStart || badEnd) {
       midTakes++;
       findings.push({
         rule: 7,
         scene: s.index,
-        detail: `host take ${badStart ? "starts" : "ends"} mid-sentence: "${textOf(s).slice(0, 70)}"`,
+        detail:
+          `host take ${badStart ? "starts" : "ends"} mid-sentence` +
+          `${badStart && afterCover ? " after the book cover" : ""}: "${textOf(s).slice(0, 70)}"`,
       });
     }
   });
@@ -346,6 +364,37 @@ const sameRegister = (a: StoryboardScene, b: StoryboardScene) =>
   !fixed(a) &&
   !fixed(b);
 
+/**
+ * Host take `i` comes back right after its CTA block's book cover. The cover may say the rest of
+ * the sentence the host would otherwise come back into — never the other way round, since the
+ * cover has to keep the title. Job 399 (2:50): the cover ended on the storyboard's word count,
+ * "…every secret gives you the exact words,", and the host came back on "who to say them to, and
+ * the moment in the trip when they work." The QR card and an operator's asset are not covers.
+ */
+function coverBeforeHost(scenes: StoryboardScene[], i: number): boolean {
+  const cover = scenes[i - 1];
+  const host = scenes[i];
+  return (
+    !!cover?.coverHero &&
+    !cover.qrHero &&
+    !cover.assetImageUrl &&
+    !!host?.hostPresent &&
+    cover.cta === true &&
+    host.cta === true &&
+    cover.ctaIndex === host.ctaIndex
+  );
+}
+
+/**
+ * Seconds of scene `s` spoken before its first sentence ends (by word share), all of it when no
+ * sentence ends inside it — what the scene before it would have to say to finish that sentence.
+ */
+function sentenceTailSec(s: StoryboardScene): number {
+  const at = sentenceStarts(textOf(s));
+  if (!at.length) return len(s);
+  return (len(s) * at[0]) / Math.max(1, wordsOf(textOf(s)).length);
+}
+
 function starts(scenes: StoryboardScene[]): number[] {
   const out: number[] = [];
   let t = 0;
@@ -442,26 +491,61 @@ function sentenceStarts(t: string): number[] {
   return out;
 }
 
-/** One spoken word of the master, in seconds (the voicing transcript's shape). */
-export type TimedWord = { start: number; end: number };
+/** One spoken word of the master, in seconds (the voicing transcript's shape), and what was heard. */
+export type TimedWord = { start: number; end: number; word?: string };
+
+/** A word as the script and the transcript can both spell it: lower case, letters and digits. */
+const bare = (w: string | undefined) =>
+  (w ?? "").toLowerCase().replace(/[^a-z0-9\u00c0-\u024f]+/g, "");
+/** The kind of break a word ends on: a sentence, a clause, or none. */
+const endMark = (w: string | undefined) =>
+  /[.!?…]["'”’)\]]*$/.test(w ?? "") ? "." : /[,;:—–]["'”’)\]]*$/.test(w ?? "") ? "," : "";
+/**
+ * How far the transcript's word count may drift from the script's around a cut: a number the
+ * script spells out is one heard word ("a hundred and one" ⇄ "101"), and a dash is none. On job
+ * 400's pitch that put the share three words past "…people, and more." — inside the next sentence.
+ */
+const ANCHOR_WINDOW_WORDS = 6;
 
 /**
  * The cut before the word `share` of the way through the span [from, to], placed in the REAL gap
  * between two spoken words: the transcript's words inside the span are counted, the one at that
  * share is found, and the cut goes in a pause inside the gap before it when there is one, else in
- * the middle of the gap. Null without enough words to go on. Pure — unit-tested via the gate.
+ * the middle of the gap. When the script word the cut follows (`after`) was HEARD nearby, the cut
+ * goes right after it instead — the nearest one, preferring the one heard ending the same way (a
+ * full stop for a sentence). Null without enough words to go on. Pure — unit-tested via the gate.
  */
 function gapBeforeWord(
   from: number,
   to: number,
   share: number,
   silences: SilenceInterval[] | undefined,
-  words: TimedWord[] | undefined
+  words: TimedWord[] | undefined,
+  after?: string
 ): number | null {
   if (!words?.length) return null;
   const inSpan = words.filter(w => w.start >= from - 0.05 && w.end <= to + 0.05);
   if (inSpan.length < 2) return null;
-  const k = Math.min(inSpan.length - 1, Math.max(1, Math.round(share * inSpan.length)));
+  let k = Math.min(inSpan.length - 1, Math.max(1, Math.round(share * inSpan.length)));
+  const said = bare(after);
+  if (said) {
+    let best = -1;
+    let bestScore = 0;
+    for (
+      let j = Math.max(1, k - ANCHOR_WINDOW_WORDS);
+      j <= Math.min(inSpan.length - 1, k + ANCHOR_WINDOW_WORDS);
+      j++
+    ) {
+      if (bare(inSpan[j - 1].word) !== said) continue;
+      // Same word, same break first; then the one nearest the share.
+      const score = (endMark(inSpan[j - 1].word) === endMark(after) ? 100 : 0) - Math.abs(j - k);
+      if (best < 0 || score > bestScore) {
+        best = j;
+        bestScore = score;
+      }
+    }
+    if (best > 0) k = best;
+  }
   const a = inSpan[k - 1].end;
   const b = Math.max(a, inSpan[k].start);
   const pause = (silences ?? []).find(p => p.end > a && p.start < b);
@@ -483,8 +567,9 @@ function timeAtWord(
 ): number {
   const from = s.narrationStartSec ?? 0;
   const to = s.narrationEndSec ?? from;
-  const n = Math.max(1, wordsOf(textOf(s)).length);
-  const exact = gapBeforeWord(from, to, k / n, silences, words);
+  const said = wordsOf(textOf(s));
+  const n = Math.max(1, said.length);
+  const exact = gapBeforeWord(from, to, k / n, silences, words, said[k - 1]);
   if (exact != null) return exact;
   const ideal = from + ((to - from) * k) / n;
   let best = ideal;
@@ -535,9 +620,10 @@ function reslice(s: StoryboardScene, from: number, to: number, text: string) {
  * part never starts before the sentence is finished). BACK first: the host takes the words since
  * the sentence began off the pictures before it, as long as those are plain pictures on the same
  * side of every CTA edge and the take stays under `HOST_SENTENCE_MAX_SEC`. Else FORWARD: the host
- * starts at its own next sentence and the picture before keeps saying the rest of this one — as
- * long as the host keeps a readable part. Null when neither fits (the caller demotes the take, or
- * leaves a protected one and reports it). Pure — unit-tested through `enforcePlanRules`.
+ * starts at its own next sentence and the picture before — or the CTA's book cover — keeps saying
+ * the rest of this one, as long as the host keeps a readable part. Null when neither fits (the
+ * caller demotes the take, or leaves a protected one and reports it). Pure — unit-tested through
+ * `enforcePlanRules`.
  */
 function finishSentenceBeforeHost(
   scenes: StoryboardScene[],
@@ -584,12 +670,18 @@ function finishSentenceBeforeHost(
     };
   }
 
-  // FORWARD — the host starts at its next sentence; the picture before finishes this one.
+  // FORWARD — the host starts at its next sentence; the picture before finishes this one. So does
+  // the book cover the host comes back after (`coverBeforeHost`), up to `COVER_SENTENCE_MAX_SEC`:
+  // job 399's cover runs on through "…who to say them to, and the moment in the trip when they
+  // work." and the host comes back on "Chapter four covers…". Never past the host's last sentence —
+  // the host must still come back between the cover and the card.
   const prev = scenes[i - 1];
   const starts = sentenceStarts(textOf(host));
-  if (!plainPicture(prev) || !sameRegister(prev, host) || starts.length === 0) return null;
+  const cover = coverBeforeHost(scenes, i);
+  if (!(cover || (plainPicture(prev) && sameRegister(prev, host))) || starts.length === 0) return null;
   const at = timeAtWord(host, starts[0], silences, timed);
   if ((host.narrationEndSec ?? at) - at < HOST_HANDOFF_MIN_SEC) return null;
+  if (cover && len(prev) + (at - host.narrationStartSec) > COVER_SENTENCE_MAX_SEC) return null;
   const words = wordsOf(textOf(host));
   reslice(
     prev,
@@ -598,7 +690,12 @@ function finishSentenceBeforeHost(
     `${textOf(prev).trim()} ${words.slice(0, starts[0]).join(" ")}`.trim()
   );
   reslice(host, at, host.narrationEndSec ?? at, words.slice(starts[0]).join(" "));
-  return { scenes, how: `now starts on its next sentence` };
+  return {
+    scenes,
+    how: cover
+      ? `now starts on its next sentence (the book cover finishes this one)`
+      : `now starts on its next sentence`,
+  };
 }
 
 /** Split a lingering picture into shots at clause breaks, cutting on pauses in the voice. */
