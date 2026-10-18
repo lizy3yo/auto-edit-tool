@@ -119,7 +119,7 @@ import {
   withScreenTurn,
 } from "./pictureVariety";
 import { detailRedrawsPerVideo, takeDetailRedraw } from "./detailRedraws";
-import { PLAIN_LOOK_START, plainLight, plainLookClause, plainLookKeep, plainPicture } from "./plainLook";
+import { PLAIN_LOOK_START, namedLightKept, plainLight, plainLookClause, plainLookKeep, plainPicture } from "./plainLook";
 
 /**
  * Redraws a host picture gets when it shows someone else — or the face it must never show — before
@@ -7446,7 +7446,11 @@ const framedForPrint = (t: string) => withAllowedText(t, undefined, true).split(
  * (as `promptAfterMemoryChange` does). On a softened content-policy prompt only the clause is added:
  * rebuilding it from the ordinary words could trip the filter it was softened for. `fields` are the
  * picture's new words, kept on the scene so the check holds the frame to them and a Regenerate starts
- * from them; `visualOverride` the caller's own visual, changed the same way. Pure.
+ * from them; `visualOverride` the caller's own visual, changed the same way.
+ * AN OPERATOR'S OWN WORDS RENDER AS TYPED: a verbatim edit sets the seed to the typed prompt and skips
+ * the prompt writer on purpose (`runSceneEdit`, "render EXACTLY as given"), so a picture whose prompt
+ * is its seed keeps its words — the redraw only adds the clause, which keeps whatever light those words
+ * name (`namedLightKept`), never "no glow from a candle" beside the candle the operator typed. Pure.
  */
 export function plainLookRedraw(
   scene: StoryboardScene,
@@ -7462,8 +7466,11 @@ export function plainLookRedraw(
 ): { prompt: string; fields: Partial<Pick<StoryboardScene, "showSubject" | "visualPrompt">>; visualOverride?: string } {
   const before = o.visualOverride ?? scene.visualPrompt ?? "";
   const keep = plainLookKeep(scene, o.line, [scene.showSubject, before]);
-  const withClause = (p: string) => (p.includes(PLAIN_LOOK_START) ? p : `${p} ${plainLookClause(keep.named)}`);
+  const withClause = (p: string, named = keep.named) =>
+    p.includes(PLAIN_LOOK_START) ? p : `${p} ${plainLookClause(named)}`;
   if (!o.ordinaryPrompt) return { prompt: withClause(prompt), fields: {} };
+  const typed = !o.visualOverride && !!scene.visualPromptSeed?.trim() && scene.visualPromptSeed === scene.visualPrompt;
+  if (typed) return { prompt: withClause(prompt, namedLightKept(keep, scene.showSubject, before)), fields: {} };
   const showSubject = scene.showSubject ? plainPicture(scene.showSubject, keep) : scene.showSubject;
   const visual = plainPicture(before, keep);
   const look = scene.keyThingLook ? plainLight(scene.keyThingLook, keep) : scene.keyThingLook;

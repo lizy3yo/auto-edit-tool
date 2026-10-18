@@ -14080,6 +14080,33 @@ describe("a staged redraw is drawn plainer, never from the same prompt (round 13
     expect(second).toContain(BLURRED_PRINT_CLAUSE);
   });
 
+  it("an operator's verbatim prompt renders as typed: its staged redraw keeps every typed word, and the clause keeps the light they name", async () => {
+    // A verbatim edit sets the seed to the typed prompt and skips the prompt writer (`runSceneEdit`,
+    // "render EXACTLY as given"): the redraw that plains a pipeline's words must not plain an operator's.
+    const { PLAIN_LOOK_START } = await import("./plainLook");
+    const [a, b] = await Promise.all([pngOf("#9a7"), pngOf("#9a8")]);
+    checks({ staged: true, what: "golden glow, styled" });
+    const typed = "A man in a toga writing at a desk by candlelight beside a marble throne in a grand hall.";
+    const scene = { ...advisor(), showSubject: typed, visualPrompt: typed, visualPromptSeed: typed };
+    const genImage = drawsOf(a, b);
+    await generateValidatedStill(scene, 4, undefined, genImage);
+    const [first, second] = promptsOf(genImage);
+    expect(second.startsWith(first)).toBe(true);
+    expect(second).toContain(typed);
+    expect(second).toMatch(/the light the words name \("candlelight"\)/);
+    expect(second).not.toMatch(/no glow from a lamp, candle or fire/);
+    expect(second).toContain(PLAIN_LOOK_START);
+    expect(scene.visualPrompt).toBe(typed);
+    expect(scene.showSubject).toBe(typed);
+    // The same words written by the pipeline (the prompt writer's rewrite, not its seed) are plained.
+    const [c, d] = await Promise.all([pngOf("#9a9"), pngOf("#9aa")]);
+    checks({ staged: true });
+    const written = { ...advisor(), showSubject: typed, visualPrompt: typed, visualPromptSeed: "a man at a desk" };
+    const genImage2 = drawsOf(c, d);
+    await generateValidatedStill(written, 4, undefined, genImage2);
+    expect(promptsOf(genImage2)[1]).not.toMatch(/candlelight|\bmarble\b|\bgrand\b/);
+  });
+
   it("a brand, clutter or the wrong place alone keeps its redraw exactly as before", async () => {
     const { PLAIN_LOOK_START } = await import("./plainLook");
     for (const fault of [{ messy: true }, { wrongPlace: true }]) {

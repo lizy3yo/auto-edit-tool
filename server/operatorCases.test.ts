@@ -6047,3 +6047,77 @@ describe("a staged redraw changes what the line never asked for (jobs 409, 410)"
     expect(r.fields).toEqual({});
   });
 });
+
+/**
+ * THE STAGED REDRAW TAKES OUT ONLY WHAT ITS LINE NEVER ASKED FOR — AND NOTHING THE PICTURE IS (review of
+ * round 13's staged redraw, over every stored description): its first rules took "glowing" off a lit
+ * lantern and a wood-burning pen's tip, turned "no golden light" into "no light", made "a shoji lantern
+ * lit from within" "a shoji from within", stripped a velvet jewellery box, a marbled roast and a whole
+ * film's marble bathroom counter, and would have rewritten an operator's verbatim prompt. Each case is
+ * a stored picture as it was written.
+ */
+describe("a staged redraw never takes what the picture is (the stored films, round 13 review)", () => {
+  const redraw = async (s: StoryboardScene) => {
+    const { plainLookRedraw } = await import("./longformVideo");
+    return plainLookRedraw(s, buildStillPrompt(s), { line: s.scriptText, ordinaryPrompt: true });
+  };
+
+  it("job 146 scene 71: the lit lantern a channel makes keeps its glow, and the clause names its light", async () => {
+    const s = pic(71, "and it only beat the panel by about 4 bucks an hour.", "shoji-style lantern glowing warm on the nightstand, closer detail", {
+      keyThing: "shoji lantern",
+    });
+    const r = await redraw(s);
+    expect(r.fields).toEqual({});
+    expect(r.prompt).toContain("shoji-style lantern glowing warm on the nightstand");
+    expect(r.prompt).toMatch(/the light the words name \("lantern"\)/);
+    expect(r.prompt).not.toMatch(/no glow from a lamp, candle or fire/);
+  });
+
+  it("job 110 scene 111 and job 146 scene 140: a tool's glowing tip and a 'no golden light' stay word for word", async () => {
+    const pen = pic(
+      111,
+      "because every wobble from a wood-burning pen stays right there in the wood.",
+      "hands burning a line into pale pine with a wood-burning pen",
+      {
+        visualPrompt:
+          "Weathered bare hands grip a wood-burning pen with glowing copper tip pressed against pale pine, scorching a dark line into the grain.",
+      }
+    );
+    expect((await redraw(pen)).fields).toEqual({});
+    const saw = pic(140, "I cut all of it with the same pull saw from the lattice panel.", "hands cutting a pine board with a pull saw", {
+      visualPrompt: "Weathered bare hands grip a thin-bladed pull saw. Flat indoor daylight, neutral gray-white tone, no golden light.",
+    });
+    expect((await redraw(saw)).fields).toEqual({});
+  });
+
+  it("jobs 222 and 395: a marble bathroom counter and a velvet jewellery box are what those things are", async () => {
+    const counter = pic(12, "Root to tip, one flat color, refreshed every four weeks, forever.", "hair dyed one flat dark tone, in the vanity mirror", {
+      visualPrompt:
+        "Hair dyed in a single flat dark tone from root to tip, reflected in the oval vanity mirror above the white marble bathroom counter, the color uniform and even throughout.",
+    });
+    expect((await redraw(counter)).fields).toEqual({});
+    const pearls = pic(10, "The mistake with pearls is saving them.", "pearl strand necklace tucked away in a closed velvet jewelry box in a drawer");
+    expect((await redraw(pearls)).fields).toEqual({});
+  });
+
+  it("an operator's verbatim prompt renders as typed — only the clause is added", async () => {
+    const typed = "A writing desk by candlelight beside a marble throne in a grand hall.";
+    const s = pic(25, "He was one of the richest men in the empire, an advisor standing one step from the throne,", typed, {
+      visualPromptSeed: typed,
+    });
+    const before = buildStillPrompt(s);
+    const r = await redraw(s);
+    expect(r.fields).toEqual({});
+    expect(r.prompt.startsWith(before)).toBe(true);
+    expect(r.prompt).toMatch(/the light the words name \("candlelight"\)/);
+  });
+
+  it("409-25 as before: the pipeline's own grand words still go", async () => {
+    const s = pic(
+      25,
+      "He was one of the richest men in the empire, an advisor standing one step from the throne,",
+      "a wealthy man in a fine off-white toga, standing beside a marble throne in a grand hall, seen from behind"
+    );
+    expect((await redraw(s)).fields.showSubject).toBe("a wealthy man in a fine off-white toga, standing beside a throne in a hall, seen from behind");
+  });
+});

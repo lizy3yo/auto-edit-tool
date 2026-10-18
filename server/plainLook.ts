@@ -32,8 +32,10 @@ import { namedLight } from "./overlayTextScan";
  * material, finish or grand thing: the line plus every look the picture carries (its key thing's, a
  * named kind's, a recurring person's, the host's clothes). `named` — the light that stays named
  * (`namedLight`): the line's, or — when the line names none — the picture's own words' when they set
- * it in a dark or low hour (a night, a dark room, dusk), so a light source there is what lights it.
- * Empty: plain light, and every light source the line never named goes.
+ * it in a dark or low hour (a night, a dark room, dusk), so a light source there is what lights it —
+ * and the key thing's own light when the thing IS a light (a lamp, a lantern, a candle): lit is its use
+ * (the main thing in use), so a staged redraw of a lantern is never told "no glow from a lamp" and
+ * drawn dark. Empty: plain light, and every light source the line never named goes.
  */
 export type PlainLookKeep = { light: string; thing: string; named: string[] };
 
@@ -58,44 +60,95 @@ export function plainLookKeep(
   const light = [line, scene.keyThing, scene.pictureText].filter(Boolean).join(" ");
   const own = namedLight(...words);
   const said = namedLight(line);
-  const named = said.length ? said : own.some(w => !SOURCE_NAME.test(w)) ? own : [];
-  return { light, thing: [light, ...looks].filter(Boolean).join(" "), named };
+  const base = said.length ? said : own.some(w => !SOURCE_NAME.test(w)) ? own : [];
+  const thingLight = namedLight(scene.keyThing).filter(w => !base.some(b => b.toLowerCase() === w.toLowerCase()));
+  return { light, thing: [light, ...looks].filter(Boolean).join(" "), named: [...base, ...thingLight] };
 }
 
-/** Adjectives a light source carries ("warm lamplight", "a single flickering candle"). */
-const LIGHT_ADJ = String.raw`(?:(?:warm|soft|golden|flickering|dim|gentle|amber|faint|low|orange|single|lone|small|nearby)\s+)`;
+/**
+ * Adjectives a light source carries ("warm lamplight", "a single flickering candle"). "indoor" and the
+ * like too: "soft indoor lamplight catching fine dust" lost only its lamplight and left "soft indoor"
+ * behind (job 134 scene 11, over the stored films).
+ */
+const LIGHT_ADJ = String.raw`(?:(?:warm|soft|golden|flickering|dim|gentle|amber|faint|low|orange|single|lone|small|nearby|indoor|pale|yellow|steady|bright|evening|cozy|cosy|quiet|muted|diffused?|even|overhead)\s+)`;
 /** A source that glows: the light the staged rule names (a glowing lamp, a candle, firelight). */
 const SOURCE = String.raw`(?:oil[- ]?)?(?:lamp|candle|lantern|fire|torch|hearth)`;
 const POSSESSIVE = String.raw`(?:the|an?|its|his|her|their)`;
+/** How something is lit ("softly lit by lamplight") — never a noun that ends the same way ("a family lit by…"). */
+const HOW_LIT = String.raw`(?:softly|warmly|gently|dimly|faintly|brightly|evenly|only|partly|barely|just)`;
+/**
+ * What a sentence stands on, so a light phrase after it stays: "The page is lit by soft lamplight",
+ * "two squares, both in warm lamplight" left "The page is," and "both." (jobs 154 and 281 over the
+ * stored films).
+ */
+const STANDS_ON = String.raw`(?<!\b(?:is|are|was|were|be|been|being|remains?|stays?|both|all|each)\s+(?:${HOW_LIT}\s+)?)`;
+/** Where a light comes from, which goes with it: "lit by warm lamplight from above" (job 348 scene 18). */
+const FROM_WHERE = String.raw`(?:\s+from\s+(?:above|below|behind|overhead|the\s+(?:side|left|right|front|back)))?`;
+/**
+ * What may follow a light phrase that goes: a stop, a joining word or a place — never a noun it
+ * describes ("the needle in the lamplight sewing room" left "the needle sewing room", job 181 scene 15).
+ */
+const PHRASE_ENDS = String.raw`(?=\s*(?:[,.;:\u2014)]|$|\b(?:on|in|at|from|with|and|or|beside|by|near|under|over|across|through|into|onto|for|to|of|indoors|outdoors|inside|outside|nearby|behind|above|below|beneath|again|still|now|then|alone)\b|\b(?:softly|warmly|gently|quietly|calmly|slowly|steadily)\b))`;
+/**
+ * The word after an adjective that shows it describes what a thing is DOING, not the thing: an adverb,
+ * a preposition, a joining word or an article. "the metal zippers gleaming softly", "wet glue gleaming
+ * at the joint" — taking the word out there left "the metal zippers softly" (jobs 126 and 133 over the
+ * stored films).
+ */
+const NOT_A_NOUN = String.raw`(?:[a-z]+ly|in|on|at|under|with|and|or|but|against|as|from|through|into|across|beneath|behind|beside|over|above|below|near|by|to|for|of|the|a|an|its|their|his|her|is|are|was|were|than|when|while|where|that|which)\b`;
 
 /**
  * One rule: what it takes out, and which words keep it. `source` — a light source, kept also while
  * light stays named (`PlainLookKeep.named`); `light` — a glow or lighting style, kept only by the line
  * (light is never a property of the thing); `thing` — a material, finish or grand thing, kept by the
- * line or any look the picture carries.
+ * line or any look the picture carries. `phrase` — the match is a bare noun phrase, so it stays when
+ * what comes before it needs it as an object ("casting deep shadows", `NEEDS_AN_OBJECT`); `clause` —
+ * it goes only as a clause of its own, after a stop or its own lead-in (`CLAUSE_BEFORE`). A named
+ * group `stay` is put back after the removal: the words the rule reads to decide, not what it takes.
  */
-type Strip = { re: RegExp; kind: "source" | "light" | "thing" };
+type Strip = { re: RegExp; kind: "source" | "light" | "thing"; phrase?: boolean; clause?: boolean };
 
 /**
  * A finish the picture maker reads as an advert's. Never "glossy", "polished" or "sleek": over the
- * stored films those describe the thing itself — glossy holly leaves, a polished church pew.
+ * stored films those describe the thing itself — glossy holly leaves, a polished church pew. Nor
+ * "perfectly": over the stored films it is the craft the line claims ("stitches lying perfectly flat",
+ * "the dowel and hole perfectly aligned"), not a finish.
  */
-const FINISH = String.raw`(?:gleaming|pristine|spotless|immaculate|flawless|showroom|picture-perfect|perfectly)`;
-/** Grandeur — never a grand piano, a canyon or a prix. */
-const GRAND = String.raw`(?:grand(?!\s+(?:piano|canyon|prix|slam|total|opening|jury|central|rapids|marshal|finale)s?\b)|grandiose|opulent|lavish|luxurious|luxury|sumptuous|palatial|majestic|regal|magnificent|ornate|gilded|marble|marbled|velvet|stately|imposing)`;
+const FINISH = String.raw`(?:gleaming|pristine|spotless|immaculate|flawless|showroom|picture-perfect)`;
+/**
+ * Grandeur — never a grand piano, a canyon or a prix. Never "velvet" or "marbled" either: over the
+ * stored films they are what ordinary things are — a velvet jewellery box (job 395 scene 10), a velvet
+ * tray, the marbled surface of a raw roast (jobs 115 and 138). "marble" only for a hall, a throne,
+ * columns, a palace floor: a marble bathroom counter is an ordinary home's (jobs 222 and 235 kept
+ * theirs through a whole film, so one plain redraw would have stood out from its neighbours).
+ */
+const GRAND = String.raw`(?:grand(?!\s+(?:piano|canyon|prix|slam|total|opening|jury|central|rapids|marshal|finale)s?\b)|grandiose|opulent|lavish|luxurious|luxury|sumptuous|palatial|majestic|regal|magnificent|ornate|gilded|marble(?=\s+(?:halls?|thrones?|columns?|pillars?|palaces?|floors?|staircases?|stairs|steps|statues?|busts?|arch(?:es|way)?|fountains?|corridors?|chambers?|courtyards?|temples?|niches?)\b)|stately|imposing)`;
 /**
  * One of `words` where it describes the word after it: "a grand hall", "an opulent, gilded room" —
- * never a word at the end of a phrase ("made of marble, standing on…").
+ * never a word at the end of a phrase ("made of marble, standing on…"), nor one that says what a
+ * thing is doing ("an oil finish gleaming softly", `NOT_A_NOUN`).
  */
 const adjectives = (words: string) =>
-  new RegExp(String.raw`\b${words}(?:\s+(?=[a-z])|,\s*(?=(?:${FINISH}|${GRAND})\b))`, "gi");
+  new RegExp(String.raw`\b${words}(?:\s+(?=(?!${NOT_A_NOUN})[a-z])|,\s*(?=(?:${FINISH}|${GRAND})\b))`, "gi");
+/** A glow adjective: "a warm glow", "a soft golden glow". */
+const GLOW_ADJ = String.raw`(?:(?:warm|soft|gentle|faint|cozy|cosy|rich|deep|orange|amber|golden)\s+)`;
+/** A lighting style: "dramatic lighting", "studio light", "moody shadows". */
+const STYLE = String.raw`(?:dramatic|moody|cinematic|theatrical|atmospheric|studio|professional|chiaroscuro|rim|soft-?box)`;
+/** Where a phrase that is a whole clause of its own starts: the start, or after a comma or full stop. */
+const CLAUSE_START = String.raw`(?:^|,|(?<=[.;:—]))`;
+const CLAUSE_END = String.raw`(?=\s*(?:[,.;:—]|$))`;
 
 const STRIPS: Strip[] = [
-  // "lit by a lantern", "bathed in the glow of an oil lamp", "illuminated by candles".
+  // "lit by a lantern", "bathed in the glow of an oil lamp", "illuminated by candles" — with the word
+  // that said how ("the room behind him softly lit by lamplight" left "softly."), the lamp's own place
+  // ("lit by an oil lamp on a nearby table" left "a sewing room on a nearby table") and its whole name
+  // ("lit by soft oil lamp glow" left "glow"). Never what a sentence stands on (`STANDS_ON`), nor a
+  // phrase the words go on from ("lit by warm lamplight that shows the seams" left "that shows"; jobs
+  // 134, 154, 190 and 198 over the stored films).
   {
     kind: "source",
     re: new RegExp(
-      String.raw`,?\s*\b(?:lit|illuminated|bathed|warmed)\s+(?:only\s+)?(?:by|with|in)\s+(?:${POSSESSIVE}\s+)?${LIGHT_ADJ}{0,2}(?:(?:glow|light)\s+of\s+(?:${POSSESSIVE}\s+)?${LIGHT_ADJ}{0,2})?${SOURCE}(?:[- ]?light)?s?\b`,
+      String.raw`,?\s*${STANDS_ON}(?:\b${HOW_LIT}\s+)?\b(?:lit|illuminated|bathed|warmed)\s+(?:only\s+)?(?:by|with|in)\s+(?:${POSSESSIVE}\s+)?${LIGHT_ADJ}{0,3}(?:(?:glow|light)\s+of\s+(?:${POSSESSIVE}\s+)?${LIGHT_ADJ}{0,3})?${SOURCE}(?:[- ]?(?:light|glow))?s?\b(?:\s+(?:on|at|beside|near)\s+${POSSESSIVE}\s+(?:[a-z'\u2019-]+\s+){0,2}?[a-z'\u2019-]+(?=\s*(?:[,.;]|$)))?${FROM_WHERE}${PHRASE_ENDS}`,
       "gi"
     ),
   },
@@ -103,7 +156,7 @@ const STRIPS: Strip[] = [
   {
     kind: "source",
     re: new RegExp(
-      String.raw`,?\s*\b(?:by|in|under|beneath)\s+(?:the\s+)?${LIGHT_ADJ}{0,2}(?:oil[- ]?)?(?:lamp|candle|lantern|fire|torch)[- ]?light\b`,
+      String.raw`,?\s*${STANDS_ON}\b(?:by|in|under|beneath)\s+(?:the\s+)?${LIGHT_ADJ}{0,3}(?:oil[- ]?)?(?:lamp|candle|lantern|fire|torch)[- ]?light\b${FROM_WHERE}${PHRASE_ENDS}`,
       "gi"
     ),
   },
@@ -111,15 +164,20 @@ const STRIPS: Strip[] = [
   {
     kind: "source",
     re: new RegExp(
-      String.raw`,?\s*\b(?:by|in|under|beneath)\s+the\s+${LIGHT_ADJ}{0,2}(?:glow|light)\s+of\s+(?:${POSSESSIVE}\s+)?${LIGHT_ADJ}{0,2}${SOURCE}s?\b`,
+      String.raw`,?\s*${STANDS_ON}\b(?:by|in|under|beneath)\s+the\s+${LIGHT_ADJ}{0,3}(?:glow|light)\s+of\s+(?:${POSSESSIVE}\s+)?${LIGHT_ADJ}{0,3}${SOURCE}s?\b${FROM_WHERE}${PHRASE_ENDS}`,
       "gi"
     ),
   },
-  // "lamplight on the face of the scroll" (job 409 scene 22), "candlelight flickering across the wall".
+  // "lamplight on the face of the scroll" (job 409 scene 22), "candlelight flickering across the wall" —
+  // only as a clause of its own (`clause`): after "soft overhead" it left "soft overhead;" (job 178
+  // scene 357). Never across a dash: "lamplight catching the mixed-print patches—churn dash, bear paw,
+  // flying geese blocks" took the first named block with it and left the others hanging (job 281 scene
+  // 16). Whole words only: inside "campfire glow on the faces" it left "camp" behind.
   {
     kind: "source",
+    clause: true,
     re: new RegExp(
-      String.raw`,?\s*${LIGHT_ADJ}{0,2}(?:oil[- ]?)?(?:lamp|candle|lantern|fire|torch)[- ]?(?:light|glow)\s+(?:on|over|across|onto|upon|falling\s+(?:on|onto|across|over)|spilling\s+(?:on|onto|over|across)|catching|filling|flickering\s+(?:on|over|across))\s+[^,.;]+`,
+      String.raw`,?\s*(?:\b${LIGHT_ADJ}){0,3}\b(?:oil[- ]?)?(?:lamp|candle|lantern|fire|torch)[- ]?(?:light|glow)\s+(?:on|over|across|onto|upon|falling\s+(?:on|onto|across|over)|spilling\s+(?:on|onto|over|across)|catching|filling|flickering\s+(?:on|over|across))\s+[^,.;\u2014]+(?=\s*(?:[,.;]|$))`,
       "gi"
     ),
   },
@@ -128,40 +186,71 @@ const STRIPS: Strip[] = [
     kind: "source",
     re: new RegExp(String.raw`(?<=^|,)\s*${LIGHT_ADJ}{0,2}(?:oil[- ]?)?(?:lamp|candle|lantern|fire|torch)[- ]?(?:light|glow)\s*(?=[,.;]|$)`, "gi"),
   },
-  // "a candlelit table", "a lamp-lit desk".
-  { kind: "source", re: new RegExp(String.raw`\b(?:oil[- ]?)?(?:lamp|candle|lantern|fire|torch)[- ]?lit\s+(?=[a-z])`, "gi") },
+  // "a candlelit table", "a lamp-lit desk" — one word, before what it lights. Never "a shoji lantern lit
+  // from within by a battery LED" (job 113 scene 39 over the stored films): that took the lantern itself
+  // away; nor "lamp-lit from the side" (job 181 scene 10), which left "from the side" hanging.
+  {
+    kind: "source",
+    re: new RegExp(String.raw`\b(?:oil[- ]?)?(?:lamp|candle|lantern|fire|torch)-?lit\s+(?=(?!${NOT_A_NOUN})[a-z])`, "gi"),
+  },
   // "with a glowing oil lamp beside it", "beside two candles burning on the shelf" — a lamp the line never
-  // named, set beside the subject. A lamp that IS the subject has no word before it and stays.
+  // named, set beside the subject. A lamp that IS the subject has no word before it and stays. Never
+  // after "and": in "coasters, incense holders, and a small lantern" the lantern is one of the things
+  // made (job 112 scene 51); never a lamp whose light the words go on about ("under the oil lamp's pale
+  // glow" left "'s pale glow" behind, job 144 scene 281); never a lamp that only names another thing
+  // ("near the lantern parts" left "on the workbench parts", job 216 scene 48).
   {
     kind: "source",
     re: new RegExp(
-      String.raw`,?\s*\b(?:with|beside|next to|near|and|under)\s+(?:an?|the|one|two|three|several|a few|some)\s+(?:(?:glowing|lit|burning|flickering|small|single|lone|brass|clay|bronze|ceramic|terracotta|old|antique|tall|thin|white|little)\s+){0,3}(?:oil[- ]?)?(?:lamps?|candles?|lanterns?)\b(?:\s+(?:burning|glowing|flickering|lit))?(?:\s+(?:on|beside|by|near|next to|behind|at|in)\s+${POSSESSIVE}\s+[a-z-]+(?:\s+[a-z-]+)?(?=\s*(?:[,.;]|$)))?`,
+      String.raw`,?\s*\b(?:with|beside|next to|near|under)\s+(?:an?|the|one|two|three|several|a few|some)\s+(?:(?:glowing|lit|burning|flickering|small|single|lone|brass|clay|bronze|ceramic|terracotta|old|antique|tall|thin|white|little)\s+){0,3}(?:oil[- ]?)?(?:lamps?|candles?|lanterns?)\b(?!['’]s)(?:\s+(?:burning|glowing|flickering|lit))?(?:\s+(?:softly|warmly|gently|faintly|brightly|dimly))?(?:\s+nearby)?(?:\s+(?:on|beside|by|near|next to|behind|at|in)\s+${POSSESSIVE}\s+[a-z-]+(?:\s+[a-z-]+)?(?=\s*(?:[,.;]|$)))?(?=\s*(?:[,.;:—]|$|\b(?:on|in|at|beside|by|near|behind|under)\b))`,
       "gi"
     ),
   },
-  { kind: "source", re: /\bglowing\s+(?=[a-z])/gi },
-  // "a warm glow", "a soft golden glow over the room".
+  // "a glowing oil lamp" → "an oil lamp": the glow of a light source the line never named. Only before
+  // a light source: a glowing lantern that is the thing made, a wood-burning pen's glowing tip, a
+  // glowing incense stick, a lantern "glowing softly on a nightstand" — what a thing is doing, its
+  // use — stayed over the stored films only because they are not this (jobs 110-175, 245 of them).
+  // The source is read (a lamp that is the key thing keeps its glow) and put back.
+  {
+    kind: "source",
+    re: new RegExp(
+      String.raw`\bglowing\s+(?<stay>(?:\b${LIGHT_ADJ}){0,2}(?:oil[- ]?)?(?:lamps?|candles?|lanterns?|fires?|torch(?:es)?|hearths?)\b(?!['’]s))`,
+      "gi"
+    ),
+  },
+  // "…, a warm glow over the room" — a glow as a clause of its own, or "with a soft golden glow" at a
+  // clause's end. Never a glow in the middle of a sentence ("its warm glow diffusing softly through the
+  // grid", "creates a gentle glow", "a faint warm glow from a battery LED inside"): taking it out left
+  // "its diffusing softly" and "creates." (jobs 110, 127 over the stored films) — and that glow is the
+  // light of the thing itself.
   {
     kind: "light",
-    re: /,?\s*(?:\b(?:an?|the)\s+)?\b(?:(?:warm|soft|gentle|faint|cozy|cosy|rich|deep|orange|amber|golden)\s+){1,2}glow\b(?:\s+(?:on|over|across|from|filling|bathing)\s+[^,.;]+)?/gi,
+    re: new RegExp(
+      String.raw`${CLAUSE_START}\s*(?:(?:an?|the|its|their)\s+)?${GLOW_ADJ}{1,2}glow\b(?:\s+(?:on|over|across|filling|bathing)\s+[^,.;]+)?${CLAUSE_END}`,
+      "gi"
+    ),
   },
+  { kind: "light", re: new RegExp(String.raw`,?\s*\bwith\s+(?:an?\s+)?${GLOW_ADJ}{1,2}glow\b${CLAUSE_END}`, "gi") },
   // Golden light: "golden low light on distant hills" (job 412 scene 25), "at golden hour", "golden-lit".
-  // Only as light — never "a golden retriever" or "a golden-brown crust".
+  // Only as light — never "a golden retriever", "a golden-brown crust", or wood "in warm amber tones"
+  // (job 110 scene 220): a colour is the thing's own.
   { kind: "light", re: /,?\s*\b(?:at|during|in)\s+(?:the\s+)?golden hour\b/gi },
   { kind: "light", re: /\b(?:golden|amber|honeyed)[- ]lit\s+(?=[a-z])/gi },
   {
     kind: "light",
-    re: /\b(?:golden|amber|honeyed)(?:[- ]hour)?\s+(?=(?:(?:low|warm|soft|late|evening|morning|afternoon|sun|sunset|sunrise|dawn|dusk|early|hazy|setting)\s+){0,2}(?:light|glow|sunlight|sunshine|haze|hue|tones?|rays?|lighting|backlight(?:ing)?)\b)/gi,
+    re: /\b(?:golden|amber|honeyed)(?:[- ]hour)?\s+(?=(?:(?:low|warm|soft|late|evening|morning|afternoon|sun|sunset|sunrise|dawn|dusk|early|hazy|setting)\s+){0,2}(?:light|glow|sunlight|sunshine|haze|rays?|lighting|backlight(?:ing)?)\b)/gi,
   },
-  // A lighting style: "dramatic lighting", "moody shadows", "studio light", "perfectly lit".
+  // A lighting style: ", dramatic lighting," as a clause of its own goes whole; inside a sentence only
+  // the style word goes ("dulled by studio light" → "dulled by light", never "dulled by,"; jobs 117, 171
+  // and 175 over the stored films).
+  { kind: "light", re: new RegExp(String.raw`${CLAUSE_START}\s*${STYLE}\s*[- ]?(?:light(?:ing|s)?|lit|shadows?)${CLAUSE_END}`, "gi") },
+  { kind: "light", re: new RegExp(String.raw`\b${STYLE}(?:\s*-\s*|\s+)(?=(?:light(?:ing|s)?|lit|shadows?)\b)`, "gi") },
+  { kind: "light", re: /\b(?:perfectly|beautifully|dramatically|professionally)\s+(?=lit\b)/gi },
+  // A camera effect, with the "with" that brought it ("photographed with shallow depth of field to …").
   {
     kind: "light",
-    re: /,?\s*\b(?:dramatic|moody|cinematic|theatrical|atmospheric|studio|professional|chiaroscuro|rim|soft-?box)\s*[- ]?(?:light(?:ing|s)?|lit|shadows?)\b/gi,
-  },
-  { kind: "light", re: /,?\s*\b(?:perfectly|beautifully|dramatically|professionally)\s+lit\b/gi },
-  {
-    kind: "light",
-    re: /,?\s*\b(?:lens flares?|sun flares?|god rays|light rays|(?:shafts|beams) of (?:golden |warm |soft )?(?:sun)?light|bokeh|shallow depth of field|(?:dark,?\s+)?moody corners|deep shadows|vignett(?:e|ing))\b/gi,
+    phrase: true,
+    re: /,?\s*(?:\b(?:with|and|using)\s+(?:an?\s+)?)?\b(?:lens flares?|sun flares?|god rays|light rays|(?:shafts|beams) of (?:golden |warm |soft )?(?:sun)?light|bokeh|shallow depth of field|(?:dark,?\s+)?moody corners|deep shadows|vignett(?:e|ing))\b/gi,
   },
   // A finish or a style the picture maker reads as "make it an advert": "a product shot of …" — never
   // a listing's "product photo and price" on a screen (job 406 scene 25), which is what the screen shows.
@@ -177,7 +266,10 @@ const STRIPS: Strip[] = [
   },
   {
     kind: "light",
-    re: /\b(?:cinematic|dramatic|moody|epic|stunning|breathtaking|ethereal|atmospheric|hyper-?realistic|photo-?realistic|ultra-?detailed|highly detailed|high-end|award-winning|editorial)\s+(?=[a-z])/gi,
+    re: new RegExp(
+      String.raw`\b(?:cinematic|dramatic|moody|epic|stunning|breathtaking|ethereal|atmospheric|hyper-?realistic|photo-?realistic|ultra-?detailed|highly detailed|high-end|award-winning|editorial)\s+(?=(?!${NOT_A_NOUN})[a-z])`,
+      "gi"
+    ),
   },
   { kind: "thing", re: adjectives(FINISH) },
   // Grandeur: "a marble throne in a grand hall" (job 409 scene 25). Words last: a phrase rule above
@@ -199,24 +291,55 @@ const stemOf = (w: string) => {
 const says = (text: string, word: string) =>
   new RegExp(String.raw`\b${stemOf(word).replace(/[^a-z-]/g, "")}`, "i").test(text);
 
+/**
+ * Words ruled out stay: "no golden light" lost its "golden" and asked for "no light", and "casting no
+ * dramatic shadows" became "casting no." (jobs 146 and 131 over the stored films). Up to four words
+ * back in the same clause — never across a comma: "no hands visible, warm golden glow" is two clauses
+ * and the glow is not ruled out (a list "no lamps, candles or golden light" keeps its last item by its
+ * "or", `DEGREE`).
+ */
+const RULED_OUT =
+  /\b(?:no|not|never|without|nor|neither|avoid(?:s|ing)?|instead of|rather than|free of|none of)\b(?:\s+[a-z'’-]+){0,4}\s*$/i;
+/**
+ * A word whose partner it is: a degree word ("the more ornate farmhouse style" never becomes "the more
+ * farmhouse style"), or one side of an "and" or "or" ("the matte and gleaming surfaces" left "the matte
+ * and surfaces", job 175 scene 283) — before it, or after it ("working by lamplight or window light"
+ * left "working or window light", job 141 scene 155).
+ */
+const DEGREE = /\b(?:more|most|less|least|very|so|too|quite|rather|how|as|and|or|nor)\s*$/i;
+const PAIRED_AFTER = /^\s*(?:or|and|nor|that|which|who|whose)\b/i;
+/** A clause of its own starts after a stop (or the start). */
+const CLAUSE_BEFORE = /(?:^|[,.;:\u2014(])\s*$/;
+/** What needs the noun phrase after it: "casting deep shadows" never becomes "casting". */
+const NEEDS_AN_OBJECT =
+  /\b(?:casting|creating|throwing|showing|adding|catching|giving|casts|creates|throws|shows|adds|catches|gives|of|by|in|under|beneath|through|into|from|for|to|the|an?|its|their|his|her)\s*$/i;
+/** A phrase match that carries its own lead-in (a comma, or the word that brought it) needs nothing before it. */
+const OWN_LEAD = /^\s*(?:,|\b(?:with|and|using)\b)/i;
+
 /** Where a rule took words out, so the article before it is fitted to the word now after it. */
 const GONE = "\u0001";
 
 /**
  * The spaces, commas and articles a removal leaves behind, put right: "a marble throne" → "a throne",
  * "an ornate hall" → "a hall". Only an article right before a removal changes — "a user" or "an hour"
- * anywhere else are never touched.
+ * anywhere else are never touched. A sentence whose opening words went starts with a capital again
+ * ("…a wooden project. Shallow depth of field, natural indoor light." → "…a wooden project. Natural
+ * indoor light.", job 152 scene 273 over the stored films).
  */
 function tidy(text: string, original: string): string {
   let out = text
     .replace(/\b([Aa])n?\s*(?:\u0001\s*)+(?=([A-Za-z]))/g, (_m, a: string, next: string) =>
       `${a}${/[aeiou]/i.test(next) ? "n" : ""} `
     )
+    // A whole sentence gone leaves its full stop beside the one before ("…in even rows.. Cookstove", job 134 scene 63).
+    .replace(/([.!?;:])\s*(?:\u0001\s*)+[.!?;:]/g, "$1")
+    .replace(/([.!?])\s*(?:\u0001\s*)+[,;]?\s*([a-z])/g, (_m, p: string, c: string) => `${p} ${c.toUpperCase()}`)
     .replace(/\s*\u0001\s*/g, " ")
     .replace(/\s{2,}/g, " ")
     .replace(/\s+([,.;:])/g, "$1")
     .replace(/([,;])(?:\s*[,;])+/g, "$1")
     .replace(/,\s*([.;:])/g, "$1")
+    .replace(/([.;:])\s*,/g, "$1")
     .replace(/^\s*[,;:]\s*/, "")
     .replace(/[,;:]\s*$/, "")
     .trim();
@@ -229,11 +352,23 @@ function applyStrips(text: string, keep: PlainLookKeep, kinds: Strip["kind"][]):
   let out = text;
   for (const rule of STRIPS) {
     if (!kinds.includes(rule.kind)) continue;
-    out = out.replace(rule.re, m => {
+    out = out.replace(rule.re, (m: string, ...rest: unknown[]) => {
+      // replace() hands the captures, then the offset, the whole text and (with named groups) the groups.
+      const at = rest.findIndex(x => typeof x === "number");
+      const offset = rest[at] as number;
+      const whole = rest[at + 1] as string;
+      const groups = rest[at + 2] as Record<string, string | undefined> | undefined;
       if (rule.kind === "source" && keep.named.length) return m;
+      const before = whole.slice(Math.max(0, offset - 80), offset);
+      // A match that starts at its own comma is a clause of its own: a "no" before it is another clause's.
+      const ruledOut = !/^\s*,/.test(m) && RULED_OUT.test(before);
+      if (ruledOut || DEGREE.test(before) || PAIRED_AFTER.test(whole.slice(offset + m.length))) return m;
+      if (rule.phrase && !OWN_LEAD.test(m) && NEEDS_AN_OBJECT.test(before)) return m;
+      if (rule.clause && !OWN_LEAD.test(m) && !CLAUSE_BEFORE.test(before)) return m;
       const words = Array.from(m.matchAll(TRIGGER)).map(t => t[1]);
       const by = rule.kind === "thing" ? keep.thing : keep.light;
-      return words.some(w => says(by, w)) ? m : GONE;
+      if (words.some(w => says(by, w))) return m;
+      return `${GONE}${groups?.stay ?? ""}`;
     });
   }
   return out;
@@ -324,6 +459,17 @@ export function possibleView(text: string): string {
 /** Both, in order: what the line never asked for out, then the camera brought down to a person's. */
 export function plainPicture(text: string, keep: PlainLookKeep): string {
   return possibleView(plainDescription(text, keep));
+}
+
+/**
+ * The light that stays named when the picture's words stay as they are (an operator's own words,
+ * rendered as typed): `keep.named` and whatever light those words name, each once — so the clause
+ * never refuses the candle the words themselves ask for. Pure.
+ */
+export function namedLightKept(keep: PlainLookKeep, ...words: (string | undefined)[]): string[] {
+  const out = [...keep.named];
+  for (const w of namedLight(...words)) if (!out.some(o => o.toLowerCase() === w.toLowerCase())) out.push(w);
+  return out;
 }
 
 /** How the staged redraw's clause starts — found again so it is never added twice. */
