@@ -80,7 +80,13 @@ describe("the shot list is told (rules 1f and 1g)", () => {
     expect(system).toMatch(/or the host at work/);
     expect(system).toMatch(/Never the MAIN thing because nothing else came to mind/);
     expect(system).toMatch(/"the whole thing", "all of it" or "that", summing up what was just said, point at the idea, never at a thing/);
-    expect(system).toMatch(/never the same picture for two of them/);
+    expect(system).toMatch(/a later one never repeats a picture an earlier one already had/);
+    // Never a new shot per sentence: rule 2's one-shot-per-context still holds for a thought that runs
+    // on (the operator's "if the context is still the same no need to change the shots").
+    expect(system).toMatch(/one thought running on\s+across sentences is still ONE shot \(rule 2\)/);
+    // The person from the story is drawn as someone else, never with the host's look: a person with
+    // no `other` reaches `markHostBroll` as the host and is held to the host photo.
+    expect(system).toMatch(/Someone who is not the host is shown as rule 6a says, with other set to who they are/);
     // A price, count, quality or time is still shown as the thing it is about (rule 5).
     expect(system).toMatch(/by its quality, price, count or time is not one of these: it shows the thing/);
     // Rule 1b, "when a line only refers to the MAIN thing, the MAIN thing", now hands an idea to 1f.
@@ -141,6 +147,9 @@ describe("the line check is told", () => {
     expect(FIT_SYSTEM).toMatch(/the main thing is right only when the line names it or\s+clearly points back at it/);
     expect(FIT_SYSTEM).toMatch(/"The whole thing",\s+"all of it" or "that", summing up what was just said, point at the idea, never at a thing/);
     expect(FIT_SYSTEM).toMatch(/Two lines\s+with nothing to see never share a picture/);
+    // Only a REPEAT of an earlier picture: a "continues" picture is the same-topic group going on, and
+    // calling it wrong would rewrite it (`applyPictureFixes` clears `sameShot`) and undo the join.
+    expect(FIT_SYSTEM).toMatch(/A picture marked "continues" keeps the moment of the line right before it going and is not a repeat/);
     expect(FIT_SYSTEM).toMatch(/speaks of a thing by its quality, price, count or time is not one of these/);
     // The joined-picture rule, "the main thing when the line is about it", no longer covers an idea.
     expect(FIT_SYSTEM).toMatch(/the main thing when the line is about it \(never\s+for a line with nothing to see\)/);

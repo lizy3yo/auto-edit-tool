@@ -1624,10 +1624,12 @@ const SHOT_LIST_SYSTEM =
   "the end you'll know why\") — the shot is an everyday moment that carries what it means: a person " +
   "or a place the script already has, caught doing something that fits the thought (the neighbour " +
   "from the story back at her own kitchen sink, a writer the script names at work), or the host at " +
-  "work. Never the MAIN thing because nothing else came to mind: it appears only when the line " +
+  "work. Someone who is not the host is shown as rule 6a says, with other set to who they are. " +
+  "Never the MAIN thing because nothing else came to mind: it appears only when the line " +
   "names it or clearly points back at it, and \"the whole thing\", \"all of it\" or \"that\", summing " +
   "up what was just said, point at the idea, never at a thing. Each such line gets its own moment: " +
-  "never the same picture for two of them. A line that speaks of a thing by its quality, price, " +
+  "a later one never repeats a picture an earlier one already had — though one thought running on " +
+  "across sentences is still ONE shot (rule 2). A line that speaks of a thing by its quality, price, " +
   "count or time is not one of these: it shows the thing (rules 1 and 5).\n" +
   "1g. A SOUND. A line about a sound — a song, a call, a noise, a hum, a sound that has stopped — " +
   "shows what makes it (an animal, a machine, a person, the weather) in the moment the line " +
@@ -2144,9 +2146,11 @@ doing something that fits the thought, or the host at work. It is WRONG when it 
 MAIN thing only because nothing else fits: the main thing is right only when the line names it or
 clearly points back at it ("it", "this one", "the winner" after lines about it). "The whole thing",
 "all of it" or "that", summing up what was just said, point at the idea, never at a thing. Two lines
-with nothing to see never share a picture: when one shows what an earlier such line already showed
-(the same thing in the same place), the later one is WRONG — give it its own moment. A line that
-speaks of a thing by its quality, price, count or time is not one of these: it shows the thing.
+with nothing to see never share a picture: when one shows again what an earlier such line's own
+picture showed (the same thing in the same place), the later one is WRONG — give it its own moment.
+A picture marked "continues" keeps the moment of the line right before it going and is not a repeat.
+A line that speaks of a thing by its quality, price, count or time is not one of these: it shows the
+thing.
 A SOUND. A line about a sound — a song, a call, a noise, a hum, a sound that has stopped — is about
 what makes it: the picture shows that source in the moment the line describes, where it is, quiet
 when the line says it has gone quiet. It is WRONG when it shows only a window, a door or a room the
