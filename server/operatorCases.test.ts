@@ -2280,3 +2280,73 @@ describe("a picture of two people asks for both, faces hidden (job 399 scenes 8 
     expect(buildStillPrompt(seven)).toContain(otherPersonClause("a male passenger"));
   });
 });
+
+describe("the bridge into a list is a group picture only when one photograph can hold it (job 400 scene 14, the review)", () => {
+  // "…people carrying real questions about | money, grief, difficult people, and what the remaining
+  // years are actually for." The bridge asked for all four "together, laid out side by side" and came
+  // back as paper cut-outs on a kitchen table (a rain cloud, paper figures, an hourglass), and the
+  // "money" picture after it was drawn from that pile.
+  const gideon = () => [
+    host(13, "My name is Gideon Grant, and this channel is for", { hostIntro: true }),
+    pic(14, "men and women in their fifties, sixties, and beyond — people carrying real questions about", "older men and women reading at a kitchen table"),
+    pic(15, "money, grief, difficult people, and what the remaining years are actually for.", "bills on a table"),
+    host(19, "Today, with the help of a Roman who wrote the sharpest essay on time ever put to paper, I want to show you that the arithmetic"),
+  ];
+  const GIDEON_LIST = [{ sentence: 0, items: ["money", "grief", "difficult people", "what the remaining years are actually for"] }];
+
+  it("400-14: no group picture — the bridge keeps its own picture for the line check, and each item is its own picture", () => {
+    const r = applySpokenLists(gideon(), GIDEON_LIST, { hostName: "Gideon Grant" });
+    expect(r.applied).toBe(1);
+    expect(r.scenes.some(s => s.listSet)).toBe(false);
+    const bridge = r.scenes.find(s => s.scriptText?.startsWith("men and women"))!;
+    expect(bridge.showSubject).toBe("older men and women reading at a kitchen table");
+    expect(bridge.showSubject).not.toMatch(/together|side by side/);
+    expect(bridge.hostPresent).toBeFalsy();
+    expect(r.scenes.filter(s => s.listCut).map(s => s.scriptText)).toEqual([
+      "money,",
+      "grief,",
+      "difficult people,",
+      "and what the remaining years are actually for.",
+    ]);
+    // "money" is no longer drawn as one item picked out of a pile of all four.
+    const money = r.scenes.find(s => s.scriptText === "money,")!;
+    expect(memoryViewFor(r.scenes, money) ?? "").not.toMatch(/this one item/);
+    expect(r.apart).toEqual(['"men and women in their fifties,…": "grief" is an idea, a feeling, a time or a place']);
+    // The final check re-applies the lists on the final lengths: the same cut, still no group picture.
+    const again = applySpokenLists(r.scenes, GIDEON_LIST, { hostName: "Gideon Grant" });
+    expect(again.scenes.map(s => s.scriptText)).toEqual(r.scenes.map(s => s.scriptText));
+    expect(again.scenes.some(s => s.listSet)).toBe(false);
+  });
+
+  it("399-10: 'the airline, the flight, and what's left in the galley' gets no group picture either", () => {
+    const scenes = [
+      host(9, "I'm Helena Hart, and I read the fine print so travelers like us can stop learning these things the hard way.", { hostIntro: true }),
+      pic(10, "Today you're getting fourteen things flight attendants will quietly hand over for free, depending on", "a beverage cart in the aisle"),
+      pic(11, "the airline,", "a passenger jet parked at an airport gate", { listCut: true }),
+      pic(12, "the flight,", "a passenger jet flying above white clouds", { listCut: true }),
+      pic(13, "and what's left in the galley,", "small drawers in a galley counter", { listCut: true }),
+      pic(14, "along with the exact words that get each one.", "a flight attendant speaking politely to a seated passenger"),
+    ];
+    const r = applySpokenLists(scenes, [{ sentence: 1, items: ["the airline", "the flight", "what's left"] }], { hostName: "Helena Hart" });
+    expect(r.scenes.some(s => s.listSet)).toBe(false);
+    expect(r.scenes.find(s => s.scriptText?.startsWith("Today you're getting"))?.showSubject).toBe("a beverage cart in the aisle");
+    expect(r.apart.join(" ")).toMatch(/"what's left in the galley" is a question or a clause/);
+  });
+
+  it("a list of things still gets its group picture (Hank's job 398 words, Ruth's job 302 rule)", () => {
+    const scenes = [
+      host(3, "But the one I was proudest of finished dead last at about $14 an hour. I'm Hank Hardwood,", { hostIntro: true }),
+      pic(4, "and this one's for anybody standing in a garage with", "an empty garage"),
+      pic(5, "a saw,", "a hand saw", { listCut: true }),
+      pic(6, "a drill,", "a cordless drill", { listCut: true }),
+      pic(7, "and a stack of sandpaper,", "sandpaper sheets", { listCut: true }),
+      pic(8, "wondering if that clean Japanese look is really worth anything on a market table.", "a kumiko panel on a market table"),
+    ];
+    const r = applySpokenLists(scenes, lists(scenes), { hostName: "Hank Hardwood" });
+    const set = r.scenes.find(s => s.listSet);
+    expect(set?.showSubject).toBe("a saw, a drill and a stack of sandpaper together in a garage");
+    expect(r.apart).toEqual([]);
+    const drill = r.scenes.find(s => s.scriptText === "a drill,")!;
+    expect(memoryViewFor(r.scenes, drill)).toMatch(/this one item/);
+  });
+});

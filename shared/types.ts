@@ -462,7 +462,9 @@ export interface StoryboardScene {
   /**
    * The picture leading into a spoken list when the host could not say the bridge words: the place
    * the line names with ALL the list's items in it together. The items after it are drawn from it
-   * (`listSetFor` in pictureMemory), so each close-up is the same thing as in the group.
+   * (`listSetFor` in pictureMemory), so each close-up is the same thing as in the group. Only when
+   * one photograph can hold every item (`itemsInOnePhoto` in spokenLists): a list of ideas, people,
+   * times, places or steps keeps an ordinary bridge picture (job 400's paper cut-outs).
    */
   listSet?: true;
   /**

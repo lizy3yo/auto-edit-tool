@@ -24,6 +24,7 @@
 import type { StoryboardScene } from "@shared/types";
 import { invokeClaude } from "./claude";
 import { safeParseJSON } from "./jsonRepair";
+import { namedPeople } from "./hostLook";
 import {
   FRESH,
   HOST_HANDOFF_MIN_WORDS,
@@ -471,6 +472,136 @@ function placeOf(bridge: string): string | null {
   );
 }
 
+/** Words that open a question or a clause in an item's place ("WHAT the remaining years are for"). */
+const QUESTION_WORD = /^(?:what|what's|whats|how|how's|why|who|who's|whom|whose|when|where|where's|whether|which|whatever|whoever|wherever)$/;
+/**
+ * Words that end an item's leading words: a preposition, a clause or a describing phrase after its
+ * head ("a bottle OF water", "the moment IN the trip WHEN they work", "a mountain of scraps TOO
+ * pretty", "all the scraps YOU can find").
+ */
+const HEAD_ENDS = new Set([
+  "of", "in", "on", "at", "for", "with", "from", "to", "into", "onto", "over", "under", "underneath",
+  "beneath", "behind", "beside", "between", "by", "near", "about", "around", "across", "through",
+  "along", "past", "against", "inside", "outside", "above", "below", "without", "within", "after",
+  "before", "during", "toward", "towards", "up", "down", "off", "like", "than", "as", "too", "that",
+  "which", "who", "whom", "whose", "when", "where", "while", "if", "because", "and", "or", "but",
+  "so", "i", "you", "he", "she", "we", "they", "it", "here", "there",
+]);
+/**
+ * The word an item is about: the last word before its first preposition or clause ("old shop HABITS
+ * of mine"). A last word is the head even when it can be a preposition ("the past"), and a closing
+ * "too / as well / either" is not part of what is named ("some grief too").
+ */
+function headWord(item: string): string {
+  const words = bareItem(item)
+    .toLowerCase()
+    .replace(/’/g, "'")
+    .replace(/\s+(?:too|as well|either)$/, "")
+    .split(/\s+/)
+    .map(w => w.replace(/[^a-z'-]/g, ""))
+    .filter(Boolean);
+  const stop = words.findIndex((w, k) => k > 0 && k < words.length - 1 && HEAD_ENDS.has(w));
+  return (stop < 0 ? words : words.slice(0, stop)).pop() ?? "";
+}
+/**
+ * Endings that make a word an idea or a quality, never a thing on a table ("loneliness", "dignity",
+ * "stoicism", "childhood"). "-hood" only past seven letters ("a hood" is a thing), and the few
+ * things that end the same way are left out by name.
+ */
+const IDEA_ENDING = /^(?:[a-z-]{3,}(?:ness|ity|ism)|[a-z-]{4,}hood)$/;
+const ENDS_LIKE_AN_IDEA = new Set(["harness", "vanity", "mechanism"]);
+/**
+ * Head words that name an idea, a feeling, a quality, a time or a place — what no photograph can lay
+ * beside other things. A closed list of ordinary English, no channel's words; a thing it misses only
+ * keeps the group picture it had before.
+ */
+const NOT_LAID_OUT = new Set([
+  // feelings and states of mind
+  "grief", "sorrow", "joy", "love", "hate", "hatred", "fear", "anger", "rage", "guilt", "shame",
+  "pride", "regret", "remorse", "worry", "anxiety", "stress", "boredom", "hope", "despair", "envy",
+  "jealousy", "gratitude", "peace", "calm", "confidence", "courage", "patience", "faith", "trust",
+  "doubt", "loss", "pain", "suffering", "heartbreak", "nostalgia", "mood", "feeling", "emotion",
+  // ideas, qualities and the things a life is made of
+  "idea", "thought", "opinion", "purpose", "meaning", "wisdom", "truth", "freedom", "justice",
+  "virtue", "principle", "value", "belief", "philosophy", "advice", "lesson", "knowledge", "reason",
+  "luck", "fate", "chance", "risk", "success", "failure", "health", "wealth", "death", "mortality",
+  "life", "legacy", "character", "reputation", "respect", "dignity", "honor", "honour", "power",
+  "privacy", "safety", "struggle", "problem", "question", "answer", "decision", "choice",
+  "goal", "dream", "memory", "habit", "skill", "experience", "mindset", "attitude", "relationship",
+  "friendship", "marriage", "hardship", "history", "tradition", "culture", "progress", "growth",
+  "effort", "discipline", "motivation", "ambition", "attention", "focus",
+  // times
+  "time", "moment", "future", "past", "youth", "age", "retirement", "lifetime", "year", "month",
+  "week", "weekend", "day", "night", "morning", "evening", "hour", "minute", "season", "decade",
+  // places: two of them never share one photograph, and a place is not laid on a table
+  "place", "room", "kitchen", "bedroom", "bathroom", "garage", "basement", "attic", "yard",
+  "backyard", "porch", "home", "office", "store", "market", "marketplace", "fair", "church",
+  "school", "hospital", "airport", "park", "street", "town", "city",
+]);
+/** A head word as it may stand in `NOT_LAID_OUT`: itself or its singular ("habits", "memories", "churches"). */
+const singulars = (w: string) => [w, w.replace(/ies$/, "y"), w.replace(/es$/, ""), w.replace(/s$/, "")];
+
+/**
+ * ONE PHOTOGRAPH MUST HOLD THEM ALL (2026-10-18, the review of job 400 at 1:11): the bridge picture
+ * into a list asked for "money, grief, difficult people and what the remaining years are actually
+ * for together, laid out side by side", and the picture maker could only lay grief, people and the
+ * years on a kitchen table as paper cut-outs — a rain cloud, three paper figures, an hourglass —
+ * and the "money" picture after it was drawn from that pile as a close-up. Job 399's bridge asked
+ * the same of "the airline, the flight and what's left in the galley". Why one list item cannot be
+ * laid beside the others in ONE photograph, or null when it can: anything that is not a thing at
+ * all (`notAThing`); a question or a clause ("what's left", "who to say them to"); a person — the
+ * group picture is drawn with nobody in it, and people are not laid out (`namedPeople`: "difficult
+ * people", "my wife"); and a thing whose head word names an idea, a feeling, a quality, a time or a
+ * place, by its ending ("loneliness") or a closed list of ordinary English ("grief", "old shop
+ * habits", "the moment in the trip when they work", "a waiting room"). Things stay things ("a
+ * bottle of water for later", "a mountain of scraps too pretty to throw out"). Pure.
+ */
+export function notInOnePhoto(item: string): string | null {
+  const why = notAThing(item);
+  if (why) return why;
+  const first = bareItem(item).toLowerCase().replace(/’/g, "'").split(/\s+/)[0]?.replace(/[^a-z']/g, "") ?? "";
+  if (QUESTION_WORD.test(first)) return "a question or a clause";
+  if (namedPeople(bareItem(item))?.count) return "a person";
+  const head = headWord(item);
+  if (!head) return null;
+  if (IDEA_ENDING.test(head) && !ENDS_LIKE_AN_IDEA.has(head)) return "an idea or a quality";
+  if (singulars(head).some(w => NOT_LAID_OUT.has(w))) return "an idea, a feeling, a time or a place";
+  return null;
+}
+
+/**
+ * Whether a list's items can be drawn as ONE group picture (`setPicture`) that each item's own
+ * picture is then drawn from: a list of THINGS whose every item one photograph can hold
+ * (`notInOnePhoto`). A list of steps never is — steps are things someone does, one after another,
+ * never laid side by side. Pure.
+ */
+export function itemsInOnePhoto(names: string[], kind?: SpokenList["kind"]): boolean {
+  return kind !== "steps" && names.length > 0 && names.every(n => !notInOnePhoto(n));
+}
+
+/**
+ * The bridge into a list one photograph cannot hold (`itemsInOnePhoto`): still ONE picture of the
+ * bridge words and never the host (Ruth's job 304), but an ordinary one — the picture already
+ * planned for those words, which the line check judges against them and rewrites when it does not
+ * fit (`fitPicturesToLines` never reads a `listSet` picture) — and no item is drawn from it.
+ */
+function bridgePicture(base: StoryboardScene, text: string): StoryboardScene {
+  return {
+    ...base,
+    ...FRESH,
+    scriptText: text,
+    narration: firstWords(text, 8),
+    hostPresent: false,
+    sameShot: undefined,
+    joinedLine: undefined,
+    listCut: undefined,
+    listKind: undefined,
+    listSet: undefined,
+    wordCut: true,
+    hostCandidate: undefined,
+  } as StoryboardScene;
+}
+
 /** The bridge picture: the place the line names with every item of the list in it together. */
 function setPicture(base: StoryboardScene, text: string, names: string[]): StoryboardScene {
   const where = placeOf(text);
@@ -555,10 +686,20 @@ export function applySpokenLists(
   scenes: StoryboardScene[],
   lists: SpokenList[],
   opts: { hostName?: string; main?: string } = {}
-): { scenes: StoryboardScene[]; applied: number; handed: number; cleared: number; skipped: string[] } {
+): {
+  scenes: StoryboardScene[];
+  applied: number;
+  handed: number;
+  cleared: number;
+  skipped: string[];
+  apart: string[];
+} {
   // Why each list found in the script was NOT cut here — logged by the caller, so a list that stays
   // on the host says why instead of having to be reproduced.
   const skipped: string[] = [];
+  // Bridges left an ordinary picture because one photograph cannot hold the list (`itemsInOnePhoto`),
+  // each with the item that decided it — logged by the caller too.
+  const apart: string[] = [];
   // Whether the video MAKES its main thing: the shot list stages only pictures of a thing being made.
   const mainMade = !!opts.main && scenes.some(s => s.keyThing === opts.main && !!s.buildStage);
   const G: FilmToken[] = [];
@@ -734,7 +875,16 @@ export function applySpokenLists(
       // bridge the host said took a check-in's time away (Ruth's job 304 went 48 s without her).
       const base = bridgePiece ?? head;
       if (bridgePiece) out.pop();
-      out.push(setPicture(base, bridgeText, names));
+      // ...but only when one photograph can hold the whole list: abstract items laid out together
+      // came back as paper cut-outs on a table (job 400, `notInOnePhoto`), so such a bridge stays the
+      // picture already planned for its words, for the line check to judge and rewrite.
+      if (itemsInOnePhoto(names, r.kind)) out.push(setPicture(base, bridgeText, names));
+      else {
+        out.push(bridgePicture(base, bridgeText));
+        const odd = names.find(n => notInOnePhoto(n));
+        const why = r.kind === "steps" ? "a list of steps" : odd ? `"${odd}" is ${notInOnePhoto(odd)}` : "no items";
+        apart.push(`"${firstWords(bridgeText, 6)}…": ${why}`);
+      }
     } else if (prefix && head.hostPresent && tokenSpans(prefix).length < HOST_HANDOFF_MIN_WORDS) {
       // Too few words for a host take of their own ("Get | a saw, …"): they lead the first item.
       leadIn = prefix;
@@ -844,5 +994,5 @@ export function applySpokenLists(
     i = r.last + 1;
   }
   out.forEach((s, k) => (s.index = k + 1));
-  return { scenes: out, applied, handed, cleared, skipped };
+  return { scenes: out, applied, handed, cleared, skipped, apart };
 }

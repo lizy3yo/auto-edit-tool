@@ -11331,7 +11331,8 @@ async function cutShotsOnWords(
       `spoken lists: ${spoken.lists.length} found${spoken.fromModel ? "" : " (by sentence shape)"}, ` +
         `${listCuts.applied} cut to one picture per item, ${listCuts.handed} handed over from the host, ` +
         `${listCuts.cleared} piece(s) that were not list items unmarked` +
-        (listCuts.skipped.length ? ` — left as they were: ${listCuts.skipped.join("; ")}` : "")
+        (listCuts.skipped.length ? ` — left as they were: ${listCuts.skipped.join("; ")}` : "") +
+        (listCuts.apart.length ? ` — no group picture (one photo cannot hold the list): ${listCuts.apart.join("; ")}` : "")
     );
     for (const s of next) {
       if (!s.showSubject) continue;
