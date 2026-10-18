@@ -192,18 +192,22 @@ describe("the memory says the picture right before lends only the look", () => {
     expect(buildStillPrompt(s17())).toContain(clause);
   });
 
-  it("a memory picture that is not right after its memory is told exactly what it was told before", () => {
+  it("a memory picture that is not right after its memory is told nothing of the picture before, and goes where its words put it too", () => {
     const far = { ...s17(), memoryRightBefore: undefined };
     const clause = memoryClause(far);
     expect(clause).not.toMatch(/RIGHT BEFORE/);
-    expect(clause).toContain("identical shape, size, colours, materials and wear, in the same place — from a different camera position");
+    // Job 404 scene 14 followed a split, not its memory, and "in the same place" kept the snowy lawn
+    // under "a mild gulf coast yard": the words decide the place for every memory picture.
+    expect(clause).toContain(
+      "identical shape, size, colours, materials and wear, in the same place unless this picture's own words put it somewhere else — from a different camera position"
+    );
     expect(rightBeforeClause(far)).toBe("");
     // While the thing is being made, too.
     const making = { ...far, buildStage: "making" as const };
-    expect(memoryClause(making)).toContain("the same colours, materials and wear, in the same place — ");
-    expect(memoryClause({ ...making, memoryRightBefore: 0 })).toContain(
-      "the same colours, materials and wear, in the same place unless this picture's own words put it somewhere else — "
-    );
+    for (const s of [making, { ...making, memoryRightBefore: 0 }])
+      expect(memoryClause(s)).toContain(
+        "the same colours, materials and wear, in the same place unless this picture's own words put it somewhere else — "
+      );
   });
 
   it("names the reference by its place among several, and the other things when only they are remembered", () => {

@@ -7376,15 +7376,34 @@ function carryPanelFlaws(host: StoryboardScene, flaws: string[] | undefined): vo
 }
 
 /**
+ * THE REFERENCES LEND THE THING, NEVER ITS WEATHER OR ITS HOUR (2026-10-18, the review of jobs
+ * 401-407). A memory picture was told to draw "the SAME robin … in the same place", and the place
+ * came with everything in it: job 404 scenes 14-15, "a robin standing in a mild gulf coast yard with
+ * palm trees", were drawn from the robin's first pictures on a snowy northern lawn and came back with
+ * snow and frost on the grass under the palms. A reference picture is how the thing looks and nothing
+ * else: the season, the weather, the light and the time of day — and the place, whenever this
+ * picture's words name another — are what its own words say. So the hour must be in the words: job
+ * 405 scene 28, a clock under "three in the morning" drawn from its night-time memory (scene 11),
+ * came back in a daylit room because its own words had lost "at night" — no reference puts that
+ * back. Said after every memory clause, whatever its view; "every reference image … it" reads right
+ * for one reference or several, the host photo included. Pure data.
+ */
+export const MEMORY_SETTING_CLAUSE =
+  " Every reference image lends ONLY how the things in it look — never its season, weather, light " +
+  "or time of day, and never its place when THIS picture's words name another: those are what this " +
+  "picture's own words say, even where a reference shows otherwise.";
+
+/**
  * PICTURE MEMORY: a picture of a key thing drawn from the earlier pictures of it
  * (`server/pictureMemory.ts`) is told what those reference images are — the SAME thing, seen from
  * another spot — and, when the host is in the shot, that the last reference is the host. When one
  * of them is the picture shown right before it, about something else, it is told that picture lends
- * only the thing's look (`rightBeforeClause`).
+ * only the thing's look (`rightBeforeClause`). Every one is told the references lend only the look,
+ * never their setting (`MEMORY_SETTING_CLAUSE`).
  */
 export function memoryClause(scene: StoryboardScene): string {
   const clause = memoryReferenceClause(scene);
-  return clause ? `${clause}${rightBeforeClause(scene)}` : "";
+  return clause ? `${clause}${rightBeforeClause(scene)}${MEMORY_SETTING_CLAUSE}` : "";
 }
 
 /** Names in a sentence: "a", "a and b", "a, b and c". */
@@ -7513,13 +7532,12 @@ function memoryReferenceClause(scene: StoryboardScene): string {
       `fabrics, colours, materials and wear as the reference.` +
       host
     );
-  // Where it is: where its memory had it — but a picture that follows the one right before it, about
-  // something else (`rightBeforeClause`), is wherever its own words put it (job 399 scene 17: the cup
-  // on a tray table, its memory the cup at the cart).
-  const place =
-    scene.memoryRightBefore != null
-      ? "in the same place unless this picture's own words put it somewhere else"
-      : "in the same place";
+  // Where it is: where its memory had it unless its own words put it somewhere else — job 399 scene
+  // 17, the cup on a tray table, its memory the cup at the cart; and job 404 scene 14, "a robin in a
+  // mild gulf coast yard", told "in the same place" as its memory's snowy lawn, kept the snow. That
+  // one followed a split, not its memory, so the exception for the picture right before missed it:
+  // it holds for every memory picture (`MEMORY_SETTING_CLAUSE` says the rest of the setting).
+  const place = "in the same place unless this picture's own words put it somewhere else";
   // A picture of the thing BEFORE it is finished (`buildStage` material / making): its references
   // are the same or an earlier stage (`memorySourcesFor` drops anything further along), so its shape
   // and size are its own — "identical shape, size" would hold a strip being coiled into a bowl

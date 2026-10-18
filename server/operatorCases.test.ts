@@ -3644,3 +3644,46 @@ describe("a split panel is checked for near-copies like any picture (round 11, j
     expect(nearCopyCandidates(94030, 12, clock)).toEqual([]);
   });
 });
+
+describe("a memory picture takes only the thing from its references, never their weather or hour (round 11, jobs 404-405)", () => {
+  // Job 404 scenes 14-15, "a robin standing in a mild gulf coast yard with palm trees", were drawn
+  // from the robin's first pictures on a snowy northern lawn, told "the SAME robin … in the same
+  // place", and came back with snow and frost on the grass under the palms.
+  const robin = (index: number, show: string, refs: string[], memoryView: string) =>
+    pic(index, "n", show, { keyThing: "robin", otherKeyThings: ["gulf coast yard"], memoryRefUrls: refs, memoryView });
+
+  it("404-14 and 404-15: the references lend the robin's look; the yard, the season and the weather are the words'", async () => {
+    const { MEMORY_SETTING_CLAUSE } = await import("./longformVideo");
+    const { MEMORY_VIEWS } = await import("./pictureMemory");
+    const s14 = robin(14, "a robin standing in a mild gulf coast yard with palm trees", ["https://r2/404/5.png", "https://r2/404/12.png"], MEMORY_VIEWS[3]);
+    const s15 = robin(15, "a robin standing in a mild gulf coast yard with palm trees, a close-up of one detail of it filling the frame", ["https://r2/404/5.png", "https://r2/404/14.png"], PART_VIEW);
+    for (const s of [s14, s15]) {
+      const clause = memoryClause(s);
+      expect(clause).toContain("in the same place unless this picture's own words put it somewhere else");
+      expect(clause).not.toContain("in the same place —");
+      expect(clause.endsWith(MEMORY_SETTING_CLAUSE)).toBe(true);
+    }
+    expect(MEMORY_SETTING_CLAUSE).toMatch(/never its season, weather, light or time of day/);
+  });
+
+  it("405-28: the clock under 'three in the morning' is told its hour is its own words' — a remembered stove with no place named stays put", async () => {
+    const { MEMORY_SETTING_CLAUSE } = await import("./longformVideo");
+    const { MEMORY_VIEWS } = await import("./pictureMemory");
+    const clock = pic(28, "And three in the morning sits close enough to her pre-dawn window", "the round analog clock on the nightstand pointing near three", {
+      keyThing: "clock",
+      otherKeyThings: ["nightstand"],
+      memoryRefUrls: ["https://r2/405/11.png"],
+      memoryView: MEMORY_VIEWS[0],
+    });
+    expect(memoryClause(clock)).toContain(MEMORY_SETTING_CLAUSE);
+    expect(MEMORY_SETTING_CLAUSE).toMatch(/those are what this picture's own words say/);
+    // The place yields only to a place the words name: never sent somewhere new by itself.
+    expect(MEMORY_SETTING_CLAUSE).toMatch(/never its place when THIS picture's words name another/);
+    const stove = pic(7, "n", "the wood stove's door open with the fire inside", {
+      keyThing: "wood stove",
+      memoryRefUrls: ["https://r2/stove-1.png"],
+      memoryView: MEMORY_VIEWS[1],
+    });
+    expect(memoryClause(stove)).toContain("in the same place unless this picture's own words put it somewhere else");
+  });
+});
