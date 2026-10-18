@@ -3718,3 +3718,56 @@ describe("a memory picture takes only the thing from its references, never their
     expect(memoryClause(s15)).not.toContain("drawn as this picture's own words describe");
   });
 });
+
+describe("a living thing is drawn as its exact kind (job 404 scene 4)", () => {
+  // The film's first robin, a split panel "on a holly bush … snow", came back as the European robin
+  // on a channel about the American one: its written look never said which robin, and ran on into
+  // the place's list ("seen on grass, bare branches, and holly shrubs").
+  const STORED =
+    "a plump songbird about ten inches long, brown-grey back, bright orange-red breast, white eye ring, dark head, " +
+    "seen on grass, bare branches, and holly shrubs";
+  const EXACT = "an American robin, dark grey head, yellow bill, broken white ring around the eye, brick-orange breast";
+  const film = (look: string) => {
+    const b = [
+      pic(3, "Plenty of folks figure the robins took off months ago,", "the lawn under patches of melting snow", {
+        keyThing: "lawn",
+        pictureUrl: "https://r2/404/3.png",
+      }),
+      host(4, "Across a good part of the country, plenty of those robins never leave at all,", {
+        splitVisual: "A robin perched on a holly bush, its branches laden with bright red berries, snow on the ground nearby in winter.",
+        keyThing: "robin",
+      }),
+    ];
+    const things: KeyThing[] = [
+      { name: "robin", main: true, look },
+      { name: "lawn", look: "a flat suburban backyard lawn" },
+    ];
+    return { b, things };
+  };
+
+  it("the props list names the exact kind as the script's region says it, with what sets it apart", async () => {
+    const { EXACT_KIND_RULE } = await import("./shotList");
+    expect(CONTINUITY_SYSTEM).toContain(EXACT_KIND_RULE);
+    expect(EXACT_KIND_RULE).toMatch(/its look STARTS with that exact kind/);
+    expect(EXACT_KIND_RULE).toMatch(/the script's own country or region/);
+    expect(EXACT_KIND_RULE).toMatch(/each said as what it HAS, never naming the look-alike/);
+  });
+
+  it("the split panel is drawn by that look — still or moving — and never by the place's list", async () => {
+    const { attachMemory } = await import("./pictureMemory");
+    const { attachKeyframeMemory, withSplitMemory } = await import("./longformVideo");
+    const exact = film(EXACT);
+    attachMemory(exact.b, [], exact.things);
+    const panel = await withSplitMemory(exact.b[1], buildSplitRightScene(exact.b[1]), 0);
+    expect(buildStillPrompt(panel, false, undefined, undefined, true)).toContain(
+      `HOW THE ROBIN LOOKS in every picture of this video: ${EXACT}`
+    );
+    await attachKeyframeMemory(panel, 0); // a moving panel's start frame
+    expect(panel.keyThingLook).toBe(EXACT);
+    const stored = film(STORED);
+    attachMemory(stored.b, [], stored.things);
+    const old = await withSplitMemory(stored.b[1], buildSplitRightScene(stored.b[1]), 0);
+    expect(old.keyThingLook).toMatch(/dark head$/);
+    expect(buildStillPrompt(old, false, undefined, undefined, true)).not.toContain("holly shrubs");
+  });
+});

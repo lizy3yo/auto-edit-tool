@@ -507,10 +507,20 @@ const ADDED_PART = /^(?:dots?|pads?|patch(?:es)?|trim|binding|edging|backing|lin
 /**
  * Writing on the thing: a picture carries none unless its line says it (`pictureText`), and the
  * props list is told to list nothing with marks — yet "marked with letter I" and "routed lettering"
- * are stored looks, and would ask for writing in every picture of the thing.
+ * are stored looks, and would ask for writing in every picture of the thing. A living thing is
+ * marked with COLOURS, though ("wings marked with two white bars"), and those are the very features
+ * that tell it from a look-alike (`EXACT_KIND_RULE`): "marked with" a colour within two words is its
+ * look. A writing word in the clause still drops it ("marked with a black number").
  */
-const WRITING =
-  /\b(?:letter(?:s|ing|ed)?|labell?ed|labels?|text|words?|numbers?|numbered|writing|written|handwritten|logo|brand(?:ed)?|monogram\w*|initials?|date code|marked with|engrav\w*|last-name|names?)\b/i;
+const MARK_COLOURS =
+  "black|white|grey|gray|brown|red|orange|yellow|green|blue|buff|rust|chestnut|tan|cream|olive|dark|pale|light|bright";
+const WRITING = new RegExp(
+  "\\b(?:letter(?:s|ing|ed)?|labell?ed|labels?|text|words?|numbers?|numbered|writing|written|handwritten|" +
+    "logo|brand(?:ed)?|monogram\\w*|initials?|date code|" +
+    `marked with(?!\\s+(?:[a-z-]+\\s+){0,2}(?:${MARK_COLOURS})\\b)|` +
+    "engrav\\w*|last-name|names?)\\b",
+  "i"
+);
 
 /** Colour and material words: the part of a look that holds at every stage of making. */
 const COLOUR_MATERIAL = new Set(
@@ -562,6 +572,36 @@ function colourMaterialRuns(clause: string): string[] {
   return runs;
 }
 
+/** The longest item of a place's list ("bare branches", "and holly shrubs") — a longer clause is a look. */
+const PLACE_LIST_ITEM_WORDS = 4;
+
+/**
+ * A PLACE'S LIST GOES WITH IT (2026-10-18, job 404 scene 4). The look is cut clause by clause at its
+ * commas, so a place that runs on as a list lost only its first item: "…, dark head, seen on grass,
+ * bare branches, and holly shrubs" dropped "seen on grass" and told every picture of the robin it
+ * looks like "bare branches, and holly shrubs" — holly that pulled its first picture, a robin on a
+ * holly bush in snow, further toward the Christmas-card robin of another continent. The rest of that
+ * list is what follows the dropped clause up to and including an item opening on "and" or "or",
+ * each of a few words with no colour or material in it (job 328's rack: "holding a hand sander,
+ * clamps, and a square" left the rack looking like "clamps, and a square"). Anything else stops it:
+ * a colour or material is the thing's own look ("seen from the front, a red cab, and blue trim"), a
+ * longer clause is too, and a clause that never reaches an "and" was no list (job 400's seat: "seen
+ * from the side, quiet and empty"). A place listing what it has (job 395: "bright indoor store with
+ * wide aisles, pale flooring, and tall open shelves") is the thing itself, never cut on.
+ * Returns the index of the list's last item, or `i` when nothing follows as its list. Pure.
+ */
+function placeListEnd(clauses: string[], i: number): number {
+  if (/\bwith\b/i.test(clauses[i])) return i;
+  for (let j = i + 1; j < clauses.length; j++) {
+    const c = clauses[j];
+    const and = /^(?:and|or)\s+/i.test(c);
+    const words = c.replace(/^(?:and|or)\s+/i, "").split(/\s+/).length;
+    if (words > PLACE_LIST_ITEM_WORDS || hasColourMaterial(c)) return i;
+    if (and) return j;
+  }
+  return i;
+}
+
 /**
  * A key thing's look cut down for ONE picture. Every mode drops where it sits, the light and
  * setting around it, what it is used for, comparisons with other things and any writing on it.
@@ -572,11 +612,19 @@ function colourMaterialRuns(clause: string): string[] {
  * shaping keeps only its colour and material words, a clause about the surface keeps nothing. Pure.
  */
 export function pictureLook(look: string, mode: "full" | "noStage" | "colourMaterial" = "full"): string {
-  const clauses = look
+  const raw = look
     .replace(/[.\s]+$/, "")
     .split(/\s*[,;]\s*|\s+[—–]\s+/)
     .map(c => c.trim())
-    .filter(c => c && !PLACE_CLAUSE.test(c) && !NOT_ITS_LOOK.test(c) && !WRITING.test(c))
+    .filter(Boolean);
+  const placed = raw.map(c => PLACE_CLAUSE.test(c) || NOT_ITS_LOOK.test(c));
+  const gone = new Set(raw.flatMap((c, i) => (placed[i] || WRITING.test(c) ? [i] : [])));
+  for (let i = 0; i < raw.length; i++) {
+    if (!placed[i]) continue;
+    for (let j = i + 1; j <= placeListEnd(raw, i); j++) gone.add(j);
+  }
+  const clauses = raw
+    .filter((_, i) => !gone.has(i))
     .map(c => {
       const m = PLACE_INSIDE.exec(c);
       if (!m) return c;
@@ -895,6 +943,15 @@ export function attachMemory(
     pending.add(s);
     gates.delete(s); // a fresh gate for this pass
   }
+}
+
+/**
+ * Whether a pass over the film has seen `s` (`attachMemory`): only then does `memoryFor` know its
+ * pictures and its look. A copy made after — a split's panel, drawn as a scene of its own — is known
+ * to nobody, and its memory is what its caller gave it (`withSplitMemory`).
+ */
+export function memoryAttached(s: StoryboardScene): boolean {
+  return sourcesOf.has(s);
 }
 
 /** The camera position `s` is drawn from when it has a memory (`memoryViewFor`). */

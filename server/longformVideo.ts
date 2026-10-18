@@ -63,6 +63,7 @@ import {
   BLUR_PRINT_VIEW,
   keyThingLookClause,
   lookToHold,
+  memoryAttached,
   memoryFor,
   memoryView,
   nearCopyPartner,
@@ -10585,6 +10586,20 @@ export async function normalizeKeyframeToLandscape(
 const brollKeyframeDisabled = (): boolean =>
   process.env.BROLL_NO_KEYFRAME === "1";
 
+/**
+ * The memory a moving cutaway's start frame is drawn with (clip 0 only, and only when it has no
+ * reference pictures yet). Asked only of a scene a pass over the film has seen (`memoryAttached`):
+ * a MOVING split panel is a copy of its host scene that `withSplitMemory` already gave its memory
+ * and — with no earlier picture of its thing to follow — its key thing's written look. Asked again,
+ * `memoryFor` knew nothing of the copy and wiped that look, so a panel picked to move (one judged
+ * self-moving, like job 404 scene 13's flock of robins in flight) was drawn from its own words alone
+ * where the same panel drawn still kept the look. Mutates `scene`; exported for testing.
+ */
+export async function attachKeyframeMemory(scene: StoryboardScene, clipIdx: number): Promise<void> {
+  if (clipIdx !== 0 || scene.memoryRefUrls?.length || !memoryAttached(scene)) return;
+  Object.assign(scene, memoryFields(await memoryFor(scene), memoryView(scene)));
+}
+
 export async function generateBrollKeyframe(
   jobId: number,
   scene: StoryboardScene,
@@ -10609,8 +10624,7 @@ export async function generateBrollKeyframe(
   // Print the keyframe asks to read and its line never says is drawn soft (`blurUnsaidPrint`).
   if (!referenceImageUrl) blurUnsaidPrint(scene);
   // A key thing seen before is drawn from its earlier pictures (`server/pictureMemory.ts`).
-  if (clipIdx === 0 && !scene.memoryRefUrls?.length)
-    Object.assign(scene, memoryFields(await memoryFor(scene), memoryView(scene)));
+  await attachKeyframeMemory(scene, clipIdx);
   const { buffer: src, mimeType, missing, flaws } = await generateValidatedStill(
     scene,
     4,

@@ -1868,6 +1868,32 @@ export async function planShotList(
   return results.flat();
 }
 
+/**
+ * A LIVING THING OR A NAMED KIND IS WRITTEN AS THAT EXACT KIND (2026-10-18, job 404 scene 4). The
+ * look is all a first picture of a key thing is drawn by, and job 404's said "a plump songbird about
+ * ten inches long, brown-grey back, bright orange-red breast, white eye ring, dark head" — never
+ * which robin. On a channel about the North American bird, the split panel "a robin perched on a
+ * holly bush … snow" came back as the European Christmas-card robin (orange face, olive back, thin
+ * dark bill), the film's first robin, while every robin after it was the American one. One common
+ * name can mean different kinds in different countries, and look-alikes share most of a plain
+ * description, so the look names the kind the way the script's own region does and the few features
+ * that set it apart. Said as what it HAS, never "not a …": a picture generator draws what it reads,
+ * the look-alike included. Its name stays the script's own word — the shot list and the pictures
+ * find a key thing by it. And never where it is seen: "seen on grass, bare branches, and holly
+ * shrubs" was the rest of that same look.
+ */
+export const EXACT_KIND_RULE =
+  "A LIVING THING (an animal, bird, fish, insect, plant, tree or flower) or anything the script " +
+  "names by its KIND (a species, breed, variety or type): its name stays the word the script uses, " +
+  "and its look STARTS with that exact kind — its full name as people in the script's own country " +
+  "or region say it (one common name can mean different kinds in different countries; the script's " +
+  "places, spellings and money say where it is set) — then the 2-3 features a viewer tells it " +
+  "apart from its look-alikes by (the colour of its head, beak or tail, a stripe or band, the shape " +
+  "of its ears or leaves), each said as what it HAS, never naming the look-alike: a picture " +
+  "generator draws whatever it reads. Its look says how it looks, never where it is seen. Example: " +
+  "`deer: a white-tailed deer, reddish-brown coat, a broad tail brown on top and bright white " +
+  "underneath, a white patch on the throat`. ";
+
 // A PERSON name says WHAT the person is (job 399's script calls its two passengers only "one of
 // them", "the other", "she" and "he"): the pictures and the line check label them "a woman
 // passenger" / "a male passenger", and `matchRecurringPeople` finds a look by that role and sex —
@@ -1885,6 +1911,7 @@ export const CONTINUITY_SYSTEM =
   "animal's paw, a machine's dial, a garment's collar — its look STARTS with the whole it belongs " +
   "to (what kind it is, its colour, size and markings) and then describes the part, so every " +
   "picture of the whole shows the same one. " +
+  EXACT_KIND_RULE +
   "6-14 lines. Plain words, no brands, no people in these lines. NOTHING WITH MARKS ON IT: " +
   "never list a chalk tally, a chalkboard, a sign, a price tag, a label, a calendar, a notebook, a " +
   "ledger or anything written or counted on — the pictures carry no writing, so such a prop would " +
