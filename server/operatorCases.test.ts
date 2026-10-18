@@ -2993,3 +2993,486 @@ describe("a host take that finishes its sentence never leaves a blink before the
     expect(r.scenes[1].hostPresent).toBeFalsy();
   });
 });
+
+describe("one topic past its limit is never the same picture twice (job 399 scenes 20-21)", () => {
+  // The review of job 399: two shots planned with the identical description, unmarked, 11.7 s + 6.3 s
+  // past the second quarter's 15 s — the second came back a tighter crop of the first (18 s of one bag).
+  const BAG = "several closed small liquor bottles tucked inside an open carry-on bag on a seat";
+  const at = (index: number, scriptText: string, audioDuration: number, showSubject = BAG) =>
+    pic(index, scriptText, showSubject, { wordCut: true, audioDuration, keyThing: "small liquor bottle" });
+
+  it("399-21: the repeat gets a view of its own; the first keeps its look", async () => {
+    const { joinSameContext, OTHER_VIEWS } = await import("./shotList");
+    const r = joinSameContext(
+      [
+        at(20, "so the little bottles tucked in your carry-on stay closed. That's in the federal aviation rules,", 11.6667),
+        at(21, "section one twenty-one point five seventy-five, and it doesn't care how good your intentions were.", 6.332),
+      ],
+      s => s.audioDuration ?? 0,
+      () => 15
+    );
+    expect(r.scenes.map(s => s.showSubject)).toEqual([BAG, `${BAG}${OTHER_VIEWS[0]}`]);
+    expect(r.scenes[1].visualPrompt).toBe(`${BAG}${OTHER_VIEWS[0]}`);
+  });
+
+  it("within the limit the same words are still one picture, and different words are left alone", async () => {
+    const { joinSameContext } = await import("./shotList");
+    const fits = joinSameContext([at(20, "a", 11.6667), at(21, "b", 6.332)], s => s.audioDuration ?? 0, () => 18);
+    expect(fits.scenes).toHaveLength(1);
+    const apart = joinSameContext(
+      [at(20, "a", 11.6667), at(21, "b", 6.332, "the pretzel basket sitting on the beverage cart in the cabin aisle")],
+      s => s.audioDuration ?? 0,
+      () => 15
+    );
+    expect(apart.changed).toBe(false);
+  });
+});
+
+describe("a picture that already has a view, split in two, never says that view twice (job 341 scenes 3-4)", () => {
+  // The plan gate split the cutting board's 12.2 s close-up after the join, and the second part was
+  // given "a close-up" again — the same picture twice under "The place you tried to sell it…".
+  const BOARD = "two-tone walnut and maple cutting board leaning against the garage wall, unsold";
+  const LINE =
+    "That happens to everybody who sells what they build, and it's fixable, because the board usually isn't the problem. The place you tried to sell it just wasn't built for that piece. Today I'm ranking";
+
+  it("341-4: the second part is seen from further back, not a second close-up", async () => {
+    const { splitPicture, OTHER_VIEWS } = await import("./shotList");
+    const parts = splitPicture(pic(3, LINE, `${BOARD}${OTHER_VIEWS[0]}`, { wordCut: true }), 2);
+    expect(parts.map(p => p.showSubject)).toEqual([`${BOARD}${OTHER_VIEWS[0]}`, `${BOARD}${OTHER_VIEWS[1]}`]);
+  });
+
+  it("a picture with no view still gets the close-up first, as before", async () => {
+    const { splitPicture, OTHER_VIEWS } = await import("./shotList");
+    const parts = splitPicture(pic(3, LINE, BOARD, { wordCut: true }), 2);
+    expect(parts.map(p => p.showSubject)).toEqual([BOARD, `${BOARD}${OTHER_VIEWS[0]}`]);
+  });
+});
+
+describe("a picture drawn from the one right before it is a new photo, not that one again (job 399 scenes 16-17)", () => {
+  // "a small plastic cup barely filled with ginger ale on a tray table" came back as the picture just
+  // shown — the same hands tipping the same can into the same cup — with only the background new, and
+  // the same-thing check let it through as a new view.
+  const LINE_16 =
+    "airlines, the flight attendant pours your soda into a plastic cup packed with ice, fills it about halfway, and the rest of the can rolls off down the aisle on the cart.";
+  const LINE_17 =
+    "I figured that out much too late, after more flights than I care to count spent nursing a thimble of ginger ale. So when the cart reaches your row, speak up.";
+  const pouring = () =>
+    pic(16, LINE_16, "hands pouring soda into an ice-filled plastic cup at the cart", { keyThing: "plastic cup", humanPresent: true });
+  const thimble = () =>
+    pic(17, LINE_17, "a small plastic cup barely filled with ginger ale on a tray table", { keyThing: "plastic cup", humanPresent: true });
+
+  it("399-17: told the picture right before lends only the cup's look — another camera, framing and pose", async () => {
+    const { rightBeforeToRecompose } = await import("./pictureMemory");
+    const board = [pouring(), thimble()];
+    expect(rightBeforeToRecompose(board, board[1])).toBe(board[0]);
+    const clause = memoryClause({
+      ...board[1],
+      memoryRefUrls: ["https://r2/still-src-16.png"],
+      memoryView: "a close view of one part of it, filling most of the frame",
+      memoryRightBefore: 0,
+    });
+    expect(clause).toMatch(/RIGHT BEFORE this one in the video: take ONLY/);
+    expect(clause).toMatch(/take ONLY how the plastic cup looks from it/);
+    expect(clause).toMatch(/never the same pose, the same hand positions or the same things at the same angles/);
+  });
+
+  it("399-17: a copy that survives its redraw is drawn from words with the cup's written look", async () => {
+    const { sameThingMove } = await import("./pictureMemory");
+    const { memoryToWords } = await import("./longformVideo");
+    const copy = { same: true, copy: true };
+    expect(sameThingMove(copy, undefined)).toBe("redraw");
+    expect(sameThingMove(copy, "copy")).toBe("words");
+    const LOOK = "clear hard plastic, filled with ice cubes, half-filled with soda, no markings";
+    const words = memoryToWords({ ...thimble(), memoryRefUrls: ["https://r2/still-src-16.png"], memoryWordsLook: LOOK });
+    expect(words).toMatchObject({ memoryRefUrls: undefined, keyThingLook: LOOK });
+    expect(buildStillPrompt({ ...thimble(), ...words })).toContain(`HOW THE PLASTIC CUP LOOKS in every picture of this video: ${LOOK}`);
+  });
+
+  it("399-20/21 and a far memory are untouched: a continuation keeps its view, scene 22 its ordinary memory", async () => {
+    const { rightBeforeToRecompose } = await import("./pictureMemory");
+    const BAG = "several closed small liquor bottles tucked inside an open carry-on bag on a seat";
+    const pair = [pic(20, "n", BAG, { keyThing: "small liquor bottle" }), pic(21, "n", `${BAG}, a close-up`, { keyThing: "small liquor bottle" })];
+    expect(rightBeforeToRecompose(pair, pair[1])).toBeUndefined();
+    const far = [
+      pic(5, "and a second bag of pretzels", "a second pretzel bag held in a passenger's hand", { keyThing: "pretzel basket" }),
+      pair[1],
+      pic(22, "n", "the pretzel basket sitting on the beverage cart in the cabin aisle", { keyThing: "pretzel basket" }),
+    ];
+    expect(memorySourcesFor(far, far[2])).toEqual([far[0]]);
+    expect(rightBeforeToRecompose(far, far[2])).toBeUndefined();
+  });
+});
+
+describe("a picture drawn from the one right before it is told only to differ, never that it is about something else (job 397 scenes 28-29)", () => {
+  // The rule picks the picture before by its WORDS, and different words are as often the same thing
+  // described anew: the walnut and maple board close up on the bench, then leaning against the garage
+  // wall. A new photo is right for both; "it is about something else" was a false claim, and "never
+  // the same hands" beside the host photo asked for someone else's hands.
+  it("397-29: a new photo of the same board, by its own words, with no false claim and no other hands", async () => {
+    const { rightBeforeToRecompose } = await import("./pictureMemory");
+    const { SAME_THING_SYSTEM } = await import("./overlayTextScan");
+    const BOARD = "walnut and maple cutting board";
+    const closeUp = pic(28, "n", "", {
+      showSubject: undefined,
+      visualPrompt:
+        "Close-up of a striped cutting board—alternating dark walnut and pale maple—resting on the workshop bench, soft natural light catching the grain, with a few hand tools blurred at the edge.",
+      keyThing: BOARD,
+    });
+    const wall = pic(29, "n", "the walnut and maple cutting board leaning against the garage wall", { keyThing: BOARD });
+    expect(rightBeforeToRecompose([closeUp, wall], wall)).toBe(closeUp);
+    const clause = memoryClause({ ...wall, memoryRefUrls: ["https://r2/still-src-28.png"], memoryRightBefore: 0 });
+    expect(clause).toMatch(/RIGHT BEFORE this one in the video: take ONLY how the walnut and maple cutting board looks/);
+    expect(clause).toMatch(/the same hand positions/);
+    expect(clause).not.toMatch(/something else|same hands/);
+    expect(SAME_THING_SYSTEM).toMatch(/the hands in the same positions/);
+    expect(SAME_THING_SYSTEM).not.toMatch(/same hands/);
+  });
+});
+
+describe("someone the story comes back to keeps one look (job 399 scenes 2, 5, 7)", () => {
+  // The passenger the story follows ("she") was three different women in 13 s, and the man beside
+  // her changed too: each picture was drawn from "a woman passenger" alone. The props-list call now
+  // writes a PERSON line for anyone the story comes back to, and each picture of them carries it.
+  const SHE = "a woman in her late sixties, short silver hair in a neat bob, a lilac cardigan over a white blouse, grey slacks";
+  const HE = "a man in his late sixties, thinning grey hair, a navy quarter-zip sweater over a collared shirt, khaki trousers";
+  const SHEET = [
+    "aircraft cabin interior: narrow rows of blue upholstered seats, grey plastic overhead bins, dim carpeted aisle",
+    "MAIN beverage cart: metal trolley with two tiers, rows of soda cans lined on top",
+    `PERSON the woman passenger: ${SHE}`,
+    `PERSON the other passenger: ${HE}`,
+  ].join("\n");
+
+  it("399-2/5/7: her look on both her pictures, his on his; a passenger who could be either gets none", async () => {
+    const { parseRecurringPeople } = await import("./shotList");
+    const { markHostBroll: mark } = await import("./hostLook");
+    const { buildStillPrompt: still } = await import("./longformVideo");
+    const people = parseRecurringPeople(SHEET, { hostName: "Helena Hart" });
+    expect(people.map(p => p.name)).toEqual(["the woman passenger", "the other passenger"]);
+    const scenes = [
+      pic(2, "boarded the same flight, and sat in the same row.", "two passengers seated in the same cabin row", { humanPresent: true, otherPerson: "two airline passengers" }),
+      pic(5, "a second bag of pretzels,", "a second pretzel bag held in a passenger's hand", { humanPresent: true, otherPerson: "a woman passenger" }),
+      pic(7, "The other was still in row fourteen with a few inches of soda over ice.", "a passenger in row fourteen holding a cup with a little soda over ice", { humanPresent: true, otherPerson: "a male passenger" }),
+      pic(14, "None of them is an upgrade,", "a flight attendant speaking politely to a seated passenger", { humanPresent: true, otherPerson: "a seated passenger" }),
+    ];
+    mark(scenes, { hostLook: "a slender woman in her late thirties in a navy blazer", recurringPeople: people }, "https://x/host.png");
+    const [two, her, him, either] = scenes.map(s => still(s));
+    expect(two).toContain(SHE);
+    expect(two).toContain(HE);
+    expect(her).toContain(SHE);
+    expect(her).not.toContain(HE);
+    expect(him).toContain(HE);
+    expect(him).not.toContain(SHE);
+    expect(either).not.toContain(SHE);
+    expect(either).not.toContain(HE);
+  });
+});
+
+describe("a recurring look goes only where the label can mean that person (job 399, the review)", () => {
+  // The props call is now asked for names that say what each person is ("the woman passenger", "the
+  // man passenger" — the script itself only says "one of them" and "the other"). A label that could
+  // be either, says it is someone else, or is a crowd gets no one's look.
+  const SHE = "a woman in her late sixties, short silver hair in a neat bob, a lilac cardigan over a white blouse, grey slacks";
+  const HE = "a man in his late sixties, thinning grey hair, a navy quarter-zip sweater over a collared shirt, khaki trousers";
+
+  it("399-5/7 find her and him by role and sex; 399-23's 'a passenger', a crowd and 'another passenger' find nobody", async () => {
+    const { parseRecurringPeople } = await import("./shotList");
+    const { matchRecurringPeople } = await import("./hostLook");
+    const people = parseRecurringPeople(`PERSON the woman passenger: ${SHE}\nPERSON the man passenger: ${HE}`);
+    expect(matchRecurringPeople("a woman passenger", 1, people).map(p => p.look)).toEqual([SHE]); // 399-5
+    expect(matchRecurringPeople("a male passenger", 1, people).map(p => p.look)).toEqual([HE]); // 399-7
+    expect(matchRecurringPeople("a passenger", 1, people)).toEqual([]); // 399-23, a line to "you"
+    expect(matchRecurringPeople("several passengers", 3, people)).toEqual([]);
+    expect(matchRecurringPeople("another passenger", 1, people.slice(0, 1))).toEqual([]);
+  });
+});
+
+describe("a picture of two people asks for both, faces hidden (job 399 scenes 8 and 14, the review)", () => {
+  // Both described "a flight attendant" with "a passenger", the planner named only the passenger,
+  // and the prompt said "the only person … no face anywhere": the flight attendant was drawn by no
+  // rule — in profile, face shown (scene 8), and as a different smiling woman (scene 14).
+  const LOOK = "A slender woman in her late thirties with fair skin and dark hair pinned back, wearing a white blouse, navy blazer with gold pin, and striped scarf";
+  const scenes = () => [
+    host(9, "I'm Helena Hart, and I read the fine print so travelers like us can stop learning these things the hard way.", { hostIntro: true }),
+    pic(8, "He figures she must know somebody on the crew. She doesn't. What she knows is which questions flight attendants like hearing, and when to ask them.", "a flight attendant speaking quietly with a passenger in the aisle", {
+      visualPrompt: "Bare weathered hands of a flight attendant and a passenger meeting in the narrow aisle between rows, speaking quietly, blue seats and grey carpet visible.",
+      humanPresent: true,
+      otherPerson: "a male passenger",
+      stillImage: true,
+    }),
+    pic(14, "along with the exact words that get each one. None of them is an upgrade, and each of them starts with a single polite sentence.", "a flight attendant speaking politely to a seated passenger", {
+      visualPrompt: "Bare hands from the forearms down, adjusting a beverage cup on the cart tray in the aircraft aisle galley during service.",
+      humanPresent: true,
+      otherPerson: "a seated passenger",
+      stillImage: true,
+    }),
+  ];
+
+  it("399-8/14: the flight attendant and the passenger are both in the clause, no one-person wording", () => {
+    const s = scenes();
+    markHostBroll(s, { hostLook: LOOK, hostName: "Helena Hart" }, "https://x/host.png");
+    for (const [scene, passenger] of [[s[1], "a male passenger"], [s[2], "a seated passenger"]] as const) {
+      const prompt = buildStillPrompt(scene);
+      expect(prompt).toContain(`The people in this shot are a flight attendant and ${passenger} — two different, ordinary people`);
+      expect(prompt).toMatch(/faces turned away or out of frame so no face is ever shown/);
+      expect(prompt).not.toMatch(/The only person in this shot|Apart from that one person/);
+      expect(prompt).not.toContain(ONE_OTHER_PERSON_SUFFIX);
+      expect(scene.brollHostRef).toBeUndefined();
+    }
+  });
+
+  it("on a channel whose host IS a flight attendant, she is the host from her look, the passenger someone else", () => {
+    const s = scenes();
+    markHostBroll(s, { hostLook: LOOK, hostName: "Helena Hart", hostTitle: "Flight Attendant" }, "https://x/host.png");
+    const prompt = buildStillPrompt(s[1]);
+    expect(s[1].hostAmongOthers?.who).toBe("a flight attendant");
+    expect(s[1].brollHostRef).toBeUndefined();
+    expect(prompt).toContain(`The flight attendant is the video's host — ${LOOK} —`);
+    expect(prompt).toContain("The other person is a male passenger — NOT the video's host");
+    expect(prompt).not.toMatch(/The only person in this shot/);
+    // A picture of one passenger stays one passenger (399-7).
+    const seven = pic(7, "The other was still in row fourteen with a few inches of soda over ice.", "a passenger in row fourteen holding a cup with a little soda over ice", {
+      humanPresent: true,
+      otherPerson: "a male passenger",
+    });
+    markHostBroll([seven], { hostLook: LOOK, hostTitle: "Flight Attendant" }, "https://x/host.png");
+    expect(seven.hostAmongOthers).toBeUndefined();
+    expect(buildStillPrompt(seven)).toContain(otherPersonClause("a male passenger"));
+  });
+});
+
+describe("the bridge into a list is a group picture only when one photograph can hold it (job 400 scene 14, the review)", () => {
+  // "…people carrying real questions about | money, grief, difficult people, and what the remaining
+  // years are actually for." The bridge asked for all four "together, laid out side by side" and came
+  // back as paper cut-outs on a kitchen table (a rain cloud, paper figures, an hourglass), and the
+  // "money" picture after it was drawn from that pile.
+  const gideon = () => [
+    host(13, "My name is Gideon Grant, and this channel is for", { hostIntro: true }),
+    pic(14, "men and women in their fifties, sixties, and beyond — people carrying real questions about", "older men and women reading at a kitchen table"),
+    pic(15, "money, grief, difficult people, and what the remaining years are actually for.", "bills on a table"),
+    host(19, "Today, with the help of a Roman who wrote the sharpest essay on time ever put to paper, I want to show you that the arithmetic"),
+  ];
+  const GIDEON_LIST = [{ sentence: 0, items: ["money", "grief", "difficult people", "what the remaining years are actually for"] }];
+
+  it("400-14: no group picture — the bridge keeps its own picture for the line check, and each item is its own picture", () => {
+    const r = applySpokenLists(gideon(), GIDEON_LIST, { hostName: "Gideon Grant" });
+    expect(r.applied).toBe(1);
+    expect(r.scenes.some(s => s.listSet)).toBe(false);
+    const bridge = r.scenes.find(s => s.scriptText?.startsWith("men and women"))!;
+    expect(bridge.showSubject).toBe("older men and women reading at a kitchen table");
+    expect(bridge.showSubject).not.toMatch(/together|side by side/);
+    expect(bridge.hostPresent).toBeFalsy();
+    expect(r.scenes.filter(s => s.listCut).map(s => s.scriptText)).toEqual([
+      "money,",
+      "grief,",
+      "difficult people,",
+      "and what the remaining years are actually for.",
+    ]);
+    // "money" is no longer drawn as one item picked out of a pile of all four.
+    const money = r.scenes.find(s => s.scriptText === "money,")!;
+    expect(memoryViewFor(r.scenes, money) ?? "").not.toMatch(/this one item/);
+    expect(r.apart).toEqual(['"men and women in their fifties,…": "grief" is an idea, a feeling, a time or a place']);
+    // The final check re-applies the lists on the final lengths: the same cut, still no group picture.
+    const again = applySpokenLists(r.scenes, GIDEON_LIST, { hostName: "Gideon Grant" });
+    expect(again.scenes.map(s => s.scriptText)).toEqual(r.scenes.map(s => s.scriptText));
+    expect(again.scenes.some(s => s.listSet)).toBe(false);
+  });
+
+  it("399-10: 'the airline, the flight, and what's left in the galley' gets no group picture either", () => {
+    const scenes = [
+      host(9, "I'm Helena Hart, and I read the fine print so travelers like us can stop learning these things the hard way.", { hostIntro: true }),
+      pic(10, "Today you're getting fourteen things flight attendants will quietly hand over for free, depending on", "a beverage cart in the aisle"),
+      pic(11, "the airline,", "a passenger jet parked at an airport gate", { listCut: true }),
+      pic(12, "the flight,", "a passenger jet flying above white clouds", { listCut: true }),
+      pic(13, "and what's left in the galley,", "small drawers in a galley counter", { listCut: true }),
+      pic(14, "along with the exact words that get each one.", "a flight attendant speaking politely to a seated passenger"),
+    ];
+    const r = applySpokenLists(scenes, [{ sentence: 1, items: ["the airline", "the flight", "what's left"] }], { hostName: "Helena Hart" });
+    expect(r.scenes.some(s => s.listSet)).toBe(false);
+    expect(r.scenes.find(s => s.scriptText?.startsWith("Today you're getting"))?.showSubject).toBe("a beverage cart in the aisle");
+    expect(r.apart.join(" ")).toMatch(/"what's left in the galley" is a question or a clause/);
+  });
+
+  it("a list of things still gets its group picture (Hank's job 398 words, Ruth's job 302 rule)", () => {
+    const scenes = [
+      host(3, "But the one I was proudest of finished dead last at about $14 an hour. I'm Hank Hardwood,", { hostIntro: true }),
+      pic(4, "and this one's for anybody standing in a garage with", "an empty garage"),
+      pic(5, "a saw,", "a hand saw", { listCut: true }),
+      pic(6, "a drill,", "a cordless drill", { listCut: true }),
+      pic(7, "and a stack of sandpaper,", "sandpaper sheets", { listCut: true }),
+      pic(8, "wondering if that clean Japanese look is really worth anything on a market table.", "a kumiko panel on a market table"),
+    ];
+    const r = applySpokenLists(scenes, lists(scenes), { hostName: "Hank Hardwood" });
+    const set = r.scenes.find(s => s.listSet);
+    expect(set?.showSubject).toBe("a saw, a drill and a stack of sandpaper together in a garage");
+    expect(r.apart).toEqual([]);
+    const drill = r.scenes.find(s => s.scriptText === "a drill,")!;
+    expect(memoryViewFor(r.scenes, drill)).toMatch(/this one item/);
+  });
+});
+
+describe("job 400: the style bible keeps its world when it mentions books", async () => {
+  const { bibleWithoutPrintedMatter, brollDepictsBook } = await import("./longformVideo");
+  it("the home base and the Rome places stay in the bible, only the clause about books goes", () => {
+    // The film's warning was "Style bible depicted printed matter — dropped": the whole world went,
+    // and the Rome pictures came back as glossy costume-drama stills. This is its real bible, as
+    // the server logged it on the rehearsal run (the job never stored it).
+    const bible =
+      "Home base: a quiet home office or study in a temperate climate during autumn or early winter, where a man in his sixties sits with books and notes about Stoic philosophy. " +
+      "The video travels to: a pharmacy greeting card aisle on a Tuesday morning, a parking lot, a kitchen table at two in the morning, a Roman senator's study two thousand years ago (imagined through period objects and spaces), and a weekend or evening moment where a phone is held toward a screen corner. " +
+      "Recurring materials: sympathy cards, birthday cards,";
+    const r = bibleWithoutPrintedMatter(bible);
+    expect(r.bible).toMatch(/^Home base: a quiet home office or study in a temperate climate during autumn or early winter\. /);
+    expect(r.bible).toContain("a Roman senator's study two thousand years ago (imagined through period objects and spaces)");
+    expect(r.bible).not.toMatch(/books|Stoic/);
+    expect(brollDepictsBook(r.bible!)).toBe(false);
+    expect(r.warning).toBe(
+      "Style bible: printed matter left out, the rest kept " +
+        "(where a man in his sixties sits with books and notes about Stoic philosophy)"
+    );
+    // A bible with no printed matter (job 399's flight cabin) is untouched and says nothing.
+    const cabin =
+      "Home base: the interior cabin of a commercial aircraft in flight. Time of year is unspecified; the flight crosses U.S. airspace mid-continent.";
+    expect(bibleWithoutPrintedMatter(cabin)).toEqual({ bible: cabin });
+  });
+});
+
+describe("job 400 scene 27: a split panel of a key thing looks like that thing's other pictures", async () => {
+  const { attachMemory, panelNamedLook } = await import("./pictureMemory");
+  const { withSplitMemory } = await import("./longformVideo");
+  // The named-things step wrote this onto scenes 20, 28 and 34; it never reads a split's panel.
+  const PAPYRUS =
+    "papyrus scroll: a long strip of pale tan-beige reed paper with faint crisscross fibre texture, rolled into a cylinder about a forearm long, with ragged slightly darker edges and a thin brown cord tied around its middle; when partly unrolled, rows of small faded dark-brown script run in narrow columns, soft and unreadable";
+  const scene = (o: Partial<StoryboardScene>) => ({ narration: "n", scriptText: "n", ...o }) as StoryboardScene;
+  const board = () => [
+    scene({
+      index: 20,
+      keyThing: "scroll",
+      namedLook: PAPYRUS,
+      pictureUrl: "https://r2.test/longform/400/still-src-20.png",
+      showSubject: "an aged pale tan papyrus scroll rolled and tied with a thin brown cord, lying on a heavy carved dark wooden desk, a close-up of one detail of it filling the frame",
+      visualPrompt: "an aged pale tan papyrus scroll rolled and tied with a thin brown cord, lying on a heavy carved dark wooden desk",
+    }),
+    scene({
+      index: 27,
+      hostPresent: true,
+      keyThing: "scroll",
+      visualPrompt: "the channel's host, seated in a chair talking directly to the camera",
+      splitVisual: "An aged papyrus scroll laid flat on a wooden desk, the surface worn and darkened by age and use.",
+    }),
+    scene({
+      index: 34,
+      keyThing: "scroll",
+      namedLook: PAPYRUS,
+      showSubject: "an aged pale tan papyrus scroll unrolled open on a heavy carved dark desk, faded unreadable script in narrow columns, beside a round glass inkwell and dark feather quill",
+      visualPrompt: "an aged pale tan papyrus scroll unrolled open on a heavy carved dark desk",
+    }),
+  ];
+
+  it("the scroll panel is drawn from scene 20's picture, in the same papyrus look as 20 and 34", async () => {
+    const b = board();
+    attachMemory(b, [], [{ name: "scroll", look: "an aged papyrus scroll, rolled and tied with a thin cord, resting on a wooden desk" }]);
+    const panel = await withSplitMemory(b[1], buildSplitRightScene(b[1]), 0);
+    expect(panel.memoryRefUrls).toEqual(["https://r2.test/longform/400/still-src-20.png"]);
+    const prompt = buildStillPrompt(panel, false, undefined, undefined, true);
+    expect(prompt).toContain(`EXACT LOOK — ${PAPYRUS}.`);
+    // Two dark rollers came from the panel's own words alone; the look now says one tied roll.
+    expect(prompt).toContain("rolled into a cylinder");
+  });
+
+  it("a panel whose thing's pictures carry no look, or another thing's, gets none (job 397 scene 3)", () => {
+    const b = board();
+    for (const s of b) if (!s.hostPresent) s.namedLook = undefined;
+    expect(panelNamedLook(b, b[1])).toBeUndefined();
+    // The board's phone-screen pictures carry the app's look: never the board's own.
+    const thing = "walnut and maple cutting board";
+    const panel = scene({ index: 3, hostPresent: true, keyThing: thing, splitVisual: "Finished walnut and maple cutting boards leaning against the wall of a workshop garage." });
+    const screen = scene({ index: 8, keyThing: thing, showSubject: "cutting board shown on a phone screen as an online listing", namedLook: "Etsy: phone screen with a white background, a thin top bar with a small soft orange logo shape" });
+    expect(panelNamedLook([panel, screen], panel)).toBeUndefined();
+  });
+});
+
+describe("job 400 scene 27: a typed panel is drawn from its own words, not the scroll it replaced", async () => {
+  const { attachMemory } = await import("./pictureMemory");
+  const { withSplitMemory } = await import("./longformVideo");
+  const { ownTypedPanel } = await import("./shotList");
+  const PAPYRUS =
+    "papyrus scroll: a long strip of pale tan-beige reed paper with faint crisscross fibre texture, rolled into a cylinder about a forearm long, with ragged slightly darker edges and a thin brown cord tied around its middle";
+  const things: KeyThing[] = [
+    { name: "scroll", look: "an aged papyrus scroll, rolled and tied with a thin cord, resting on a wooden desk" },
+    { name: "inkwell and quill", look: "a small round glass inkwell with a dark feather quill resting against it" },
+  ];
+  const scene = (o: Partial<StoryboardScene>) => ({ narration: "n", scriptText: "n", ...o }) as StoryboardScene;
+  const board = () => [
+    scene({
+      index: 20,
+      keyThing: "scroll",
+      namedLook: PAPYRUS,
+      pictureUrl: "https://r2.test/longform/400/still-src-20.png",
+      showSubject: "an aged pale tan papyrus scroll rolled and tied with a thin brown cord, lying on a heavy carved dark wooden desk",
+    }),
+    scene({
+      index: 27,
+      hostPresent: true,
+      keyThing: "scroll",
+      visualPrompt: "the channel's host, seated in a chair talking directly to the camera",
+      splitVisual: "An aged papyrus scroll laid flat on a wooden desk, the surface worn and darkened by age and use.",
+    }),
+    scene({ index: 34, keyThing: "scroll", namedLook: PAPYRUS, showSubject: "an aged pale tan papyrus scroll unrolled open on a heavy carved dark desk" }),
+  ];
+  const redraw = async (typed: string) => {
+    const b = board();
+    ownTypedPanel(b[1], typed, things);
+    b[1].splitVisual = typed;
+    attachMemory(b, [b[1]], things);
+    return withSplitMemory(b[1], buildSplitRightScene(b[1]), 0);
+  };
+
+  it("typed as a cup of tea: no scroll picture, no papyrus look, nothing held to a scroll", async () => {
+    const panel = await redraw("A steaming cup of tea on a plain desk, morning light.");
+    expect(panel.keyThing).toBeUndefined();
+    expect(panel.memoryRefUrls).toBeUndefined();
+    expect(buildStillPrompt(panel, false, undefined, undefined, true)).not.toMatch(/papyrus|scroll/i);
+  });
+
+  it("typed words that still name the scroll keep its picture and its look", async () => {
+    const panel = await redraw("The papyrus scroll rolled and tied with its cord on the desk, seen from above.");
+    expect(panel.memoryRefUrls).toEqual(["https://r2.test/longform/400/still-src-20.png"]);
+    expect(buildStillPrompt(panel, false, undefined, undefined, true)).toContain(`EXACT LOOK — ${PAPYRUS}.`);
+  });
+});
+
+describe("a pearl strand on a dresser is a necklace, not the host (round 9's review, 2026-10-18)", () => {
+  // "strand" alone counted as a person (it was meant for hair), so the necklace films drew the host
+  // into pictures of a necklace set down, under lines about anything at all: job 392 scenes 26-28,
+  // the beads of "oat, / a warm coral, / mother of pearl." each lying on a cloth, were host pictures.
+  it("a strand of pearls or beads is never a person; a strand of hair still is", () => {
+    for (const thing of [
+      "a pearl strand on the dresser",
+      "pearl strand necklace resting unused inside the open jewelry box", // job 223 scene 12
+      "single strand pearl necklace with round ivory pearls laid on the dressing room table", // job 234 scene 7
+      "chunky strand of large oat-toned matte beads on a soft cloth, close view", // job 392 scene 26
+      "a loose strand of pearls caught in the bathroom drain",
+      "a pearl strand caught in the drain",
+    ])
+      expect(SHOWS_PERSON.test(thing), thing).toBe(false);
+    for (const hair of ["A few strands of gray hair caught in a round brush on the counter.", "stray gray strands catching the window light"])
+      expect(SHOWS_PERSON.test(hair), hair).toBe(true);
+  });
+
+  it("the necklace picture under a line not about the neck keeps nobody in it", () => {
+    const box = "pearl strand necklace resting unused inside the open jewelry box";
+    const scenes = [
+      pic(12, "The mistake with pearls is saving them.", box), // job 223 scene 12
+      pic(26, "oat,", "chunky strand of large oat-toned matte beads on a soft cloth, close view"), // job 392 scene 26
+      pic(12, "A single strand sitting right at the collarbone.", box), // job 325 scene 12's line
+    ];
+    expect(markHostBroll(scenes, { hostLook: "a woman with silver hair" }, "https://x/host.png")).toBe(1);
+    for (const s of scenes.slice(0, 2)) {
+      expect(s.humanPresent, s.showSubject).toBeFalsy();
+      expect(s.brollHostLook, s.showSubject).toBeUndefined();
+    }
+    // Under a line about the collarbone the piece is still worn by the host (`wornAtTheNeck`).
+    expect(scenes[2].brollHostLook).toBe("a woman with silver hair");
+    expect(scenes[2].showSubject).toMatch(/worn at the host's own neck/);
+  });
+});

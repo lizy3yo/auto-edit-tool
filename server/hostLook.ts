@@ -12,7 +12,7 @@
  * (the host is already on the other half).
  */
 import sharp from "sharp";
-import type { LongformInputParams, StoryboardScene } from "@shared/types";
+import type { LongformInputParams, RecurringPerson, StoryboardScene } from "@shared/types";
 import { invokeClaude } from "./claude";
 import { presignOwnBucketUrl } from "./storage";
 
@@ -112,9 +112,37 @@ export function withoutMirrors(text: string): string {
 export const WORN_ON_BODY =
   /\bworn (?:on|over|with|under|around|at|high|low|long|open|loose|together)\b|\b(?:sit(?:s|ting)?|rest(?:s|ing)?|l(?:ies|ying)|hang(?:s|ing)?|fall(?:s|ing)?|drap(?:ed|es|ing)) (?:(?:high|low|flat|straight|just|right|well|down) )*(?:on|at|against|across|over|below|above|around) (?:(?:the|her|his|their|a) )?(?:chest(?! of)|shoulders?|waist|hips?|lap|chin|jaw|throat|ankles?|body|bust)\b|\b(?:under|beneath|below) (?:the|her|his|their) chin\b|\b(?:shoes?|boots?|sneakers?|slippers?|sandals?|sleeves?|cuffs?|pant legs?|trouser legs?|coat|jacket)\b[^.,;]{0,50}\b(?:stepping|walking|striding|brushing (?:past|against)|reaching)\b/i;
 
+/** "strand(s)" not followed by "of" something that is not hair ("of pearls", "of yarn", "of lights"). */
+const NOT_A_STRAND_OF_SOMETHING_ELSE = String.raw`(?!\s+of\s+(?!(?:[a-z-]+\s+){0,2}hair\b))`;
+/**
+ * "strand(s)" not NAMED as something else by the word before it ("a pearl strand", "stray yarn
+ * strands", "light strands") or after it ("single strand pearl necklace", "strand lights"): a strand
+ * named that way is that thing wherever it lies, a drain or a brush included.
+ */
+const NOT_A_NAMED_STRAND =
+  String.raw`(?<!\b(?:pearl|bead|yarn|wool|cotton|thread|floss|tinsel|light|wire|fabric|cloth|silk|fib(?:er|re)|rope|twine|string|ribbon|garland)s?[\s-])` +
+  String.raw`(?=strands?(?![\s-]+(?:necklaces?|pearls?|beads?|bracelets?|chokers?|lights?)\b))`;
+/**
+ * A STRAND that is HAIR, the only strand that is part of a person (2026-10-18, round 9's review):
+ * "strand" counted on its own, so "pearl strand necklace resting unused inside the open jewelry box"
+ * (job 223 scene 12), "single strand pearl necklace … laid on the dressing room table" (job 234
+ * scene 7) and "chunky strand of large oat-toned matte beads on a soft cloth" (job 392 scenes 26-28,
+ * under "oat, / a warm coral, / mother of pearl.") read as a person under ANY line and became host
+ * pictures — the host drawn into a picture of a necklace set down. "strands of gray hair" counts
+ * through "hair" itself; without that word a strand is hair only when it is a kind only hair has
+ * (stray, flyaway, fallen, shed) or lies where hair falls (in a brush, a comb, a drain). A strand OF
+ * anything else — pearls, beads, yarn, lights — never counts, and neither does one its own name
+ * makes a thing (`NOT_A_NAMED_STRAND`: a "pearl strand", a "single strand pearl necklace").
+ */
+const HAIR_STRAND =
+  String.raw`(?:stray|flyaway|fly-away|fallen|shed)\s+(?:[a-z-]+\s+)?${NOT_A_NAMED_STRAND}strands?${NOT_A_STRAND_OF_SOMETHING_ELSE}|` +
+  String.raw`${NOT_A_NAMED_STRAND}strands?${NOT_A_STRAND_OF_SOMETHING_ELSE}(?=[^.;]{0,40}?\b(?:in|on|caught in|stuck in|around)\s+(?:(?:a|an|the|her|his|their|my|your)\s+)?(?:[a-z-]+\s+){0,2}(?:brush|hairbrush|comb|drain)\b)`;
+
 /** The person words themselves (the notes are under `SHOWS_PERSON`). */
-const PERSON_WORDS =
-  /\b(hands?|fingers?|fingertips?|host|she|he|her|his|herself|himself|someone|a person|a woman|a man|wearing|worn by|collarbone|neck|wrists?|earlobes?|held (?:up|out|near|against|over|to|above|beside|in front)|hold(?:s|ing) (?:up|out)|in use|scalp|skin|nails|fingernails|forehead|cheeks?|eyelashes|eyebrows?|hairline|strands?|hair(?!\s*(?:dryer|brush|clip|tie|spray|band|pin|comb|product|net|cut(?:ting)? scissors)))\b/i;
+const PERSON_WORDS = new RegExp(
+  String.raw`\b(hands?|fingers?|fingertips?|host|she|he|her|his|herself|himself|someone|a person|a woman|a man|wearing|worn by|collarbone|neck|wrists?|earlobes?|held (?:up|out|near|against|over|to|above|beside|in front)|hold(?:s|ing) (?:up|out)|in use|scalp|skin|nails|fingernails|forehead|cheeks?|eyelashes|eyebrows?|hairline|${HAIR_STRAND}|hair(?!\s*(?:dryer|brush|clip|tie|spray|band|pin|comb|product|net|cut(?:ting)? scissors)))\b`,
+  "i"
+);
 
 /**
  * The person's OWN face or a part of it, with a possessive ("her face", "your lips", "under the
@@ -618,6 +646,263 @@ export function someoneElse(
   return { who, count: named.count };
 }
 
+/**
+ * Everyone in a picture of someone else: who the other people are (`who`, `count`, never the host),
+ * and, on a channel with a host on camera, the words naming the ONE of them who is the host (`host`).
+ */
+export type PictureCast = SomeoneElse & { host?: string };
+
+/** One person in a picture's cast; `planner` when the shot list or line check named them. */
+type CastMember = Pick<NamedPerson, "phrase" | "noun" | "count" | "sex"> & {
+  kind: NounKind | "named";
+  planner: boolean;
+};
+
+/** "the host", "the narrator": the host by name or by word, never someone else. */
+const HOST_WORD = /\b(?:host|narrator|presenter)$/i;
+/** A word saying the role is ANOTHER one of that role, never the host: "another nurse", "a fellow plumber". */
+const ANOTHER_ONE = /\b(?:another|other|second|third|different|new|next|fellow)\b/i;
+
+/** People joined the way a sentence lists them: "a and b", "a, b and c". */
+const joinPeople = (phrases: string[]): string =>
+  phrases.length <= 2 ? phrases.join(" and ") : `${phrases.slice(0, -1).join(", ")} and ${phrases[phrases.length - 1]}`;
+
+/**
+ * The description's people with the planner's own words for the ones it named: the same noun first
+ * ("a passenger" is the planner's "a male passenger"), then a plain person, a group or a planner's
+ * proper name for anyone with no sex against it ("a man" is "a male passenger", "a woman" is never
+ * one). The host by name or word is never matched to someone else, and a role the host gives
+ * themself or an owner takes a planner's plain person only when no one else in the picture can: the
+ * planner's person is by definition someone else, so its "a man" beside "a flight attendant" and "a
+ * passenger" on an attendant's channel is the passenger, and the attendant is left to be the host.
+ * Pure.
+ */
+function mergeCast(desc: NamedPerson[], planner: CastMember[], selfRoles: string[] = []): CastMember[] {
+  const used = new Set<number>();
+  const out: CastMember[] = desc.map(d => ({ ...d, planner: false }));
+  const take = (i: number, fits: (p: CastMember) => boolean) => {
+    const k = planner.findIndex((p, j) => !used.has(j) && fits(p));
+    if (k < 0) return;
+    used.add(k);
+    // "two passengers" in the picture are more than the planner's "a male passenger": the
+    // picture's words keep the count, and they are still the planner's someone else.
+    out[i] = out[i].count > planner[k].count ? { ...out[i], planner: true } : planner[k];
+  };
+  desc.forEach((d, i) => take(i, p => !!p.noun && p.noun === d.noun));
+  const plain = (k: CastMember["kind"]) => k === "generic" || k === "group";
+  const hostish = (d: CastMember) => d.kind === "self" || (d.kind === "role" && selfRoles.includes(d.noun));
+  for (const late of [false, true])
+    out.forEach((d, i) => {
+      if (hostish(d) !== late || d.planner || (d.kind === "self" && HOST_WORD.test(d.phrase))) return;
+      take(i, p => !(p.sex && d.sex && p.sex !== d.sex) && (plain(d.kind) || plain(p.kind) || p.kind === "named"));
+    });
+  return out;
+}
+
+/**
+ * Which one of a picture's people is the HOST: a role the host gives themself ("a plumber" on a
+ * plumber's channel), else the host by name or word, else an owner, a vendor or a crafter (the
+ * words `SELF_NOUNS` makes the host in a picture of one). Only one person, never a crowd of them,
+ * never "another nurse", and never someone the planner named as someone else. Never someone whose
+ * words give a sex the host's look does not have: "a male flight attendant serving a woman
+ * passenger" on a woman attendant's channel is a colleague, and drawing him from her look would
+ * ask for a man with her hair and clothes. -1 for nobody. Pure.
+ */
+function hostIn(members: CastMember[], selfRoles: string[] = [], hostSex?: "f" | "m"): number {
+  const one = (m: CastMember) =>
+    m.count === 1 && !m.planner && !ANOTHER_ONE.test(m.phrase) && !(hostSex && m.sex && m.sex !== hostSex);
+  const tiers: ((m: CastMember) => boolean)[] = [
+    m => m.kind === "role" && selfRoles.includes(m.noun),
+    m => m.kind === "self" && HOST_WORD.test(m.phrase),
+    m => m.kind === "self",
+  ];
+  for (const tier of tiers) {
+    const at = members.findIndex(m => one(m) && tier(m));
+    if (at >= 0) return at;
+  }
+  return -1;
+}
+
+/**
+ * EVERYONE in a picture of someone else (2026-10-18, the review of job 399). Scenes 8 and 14 asked
+ * for "a flight attendant speaking quietly with a passenger in the aisle" and "a flight attendant
+ * speaking politely to a seated passenger", while the planner's `other` named only the passenger
+ * ("a male passenger", "a seated passenger") — so the prompt described one person, said "the only
+ * person … no face anywhere", and the flight attendant was drawn by nobody's rule: her face in
+ * profile in scene 8, a different smiling woman in scene 14. Now, when the description names MORE
+ * people than the planner did, every one of them is in the cast, in the planner's words for the ones
+ * it named (`mergeCast`): "a flight attendant and a male passenger".
+ * And on a channel with a host on camera (`hostLed`), ONE person the words make the host — a role the
+ * host gives themself (`selfRoles`: "a nurse" on a nurse's channel), the host by name or by word, an
+ * owner or a vendor — is the host (`host`), drawn from the host's look with the face never shown, and
+ * the rest are the other people. Off a host-led channel the host stays one more ordinary person, as
+ * `someoneElse` words them. Someone the planner named is never made the host: it read the line and
+ * said they are someone else. Undefined when no one but the host is in the picture. Pure.
+ */
+export function castOfPicture(
+  text: string | undefined,
+  planner: string | undefined,
+  opts: { look?: string; hostName?: string; selfRoles?: string[]; hostLed?: boolean } = {}
+): PictureCast | undefined {
+  const desc = namedPeople(withHostNamed(text ?? "", opts.hostName));
+  const total = (ms: CastMember[]) => Math.min(3, ms.reduce((n, m) => n + m.count, 0));
+  // The host by name or word, left among someone else's people, is one more ordinary person.
+  const said = (ms: CastMember[]) =>
+    joinPeople(ms.map(m => (m.kind === "self" && HOST_WORD.test(m.phrase) ? "a person" : m.phrase)));
+  let members: CastMember[];
+  let asWritten: SomeoneElse;
+  let merged = false;
+  if (planner) {
+    const named = namedPeople(planner);
+    const plannerCount = named?.count ?? 1;
+    // One person keeps the planner's own words ("a seated passenger": the noun phrase stops at
+    // "seated"); a name with no person noun in it ("Seneca") is someone all the same.
+    const theirs: CastMember[] = !named
+      ? [{ phrase: planner, noun: "", kind: "named", count: 1, planner: true }]
+      : named.people.length === 1
+        ? [{ ...named.people[0], phrase: planner, planner: true }]
+        : named.people.map(p => ({ ...p, planner: true }));
+    asWritten = { who: planner, count: Math.max(plannerCount, desc?.count ?? 1) };
+    merged = !!desc && desc.count > plannerCount;
+    members = merged ? mergeCast(desc!.people, theirs, opts.selfRoles) : theirs;
+  } else {
+    const other = someoneElse(text, opts);
+    if (other && !desc) return other;
+    if (!desc || (!other && desc.count < 2)) return undefined;
+    members = desc.people.map(p => ({ ...p, planner: false }));
+    // Two people the words both make the host ("a plumber explaining the repair to a homeowner" on
+    // a plumber's channel) are still two: one of them is someone else, never both from one photo.
+    asWritten = other ?? { who: said(members), count: total(members) };
+  }
+  const at = opts.hostLed && total(members) >= 2 ? hostIn(members, opts.selfRoles, sexOfLook(opts.look)) : -1;
+  if (at < 0) return merged ? { who: said(members), count: total(members) } : asWritten;
+  const rest = members.filter((_, k) => k !== at);
+  return { who: said(rest), count: total(rest), host: members[at].phrase };
+}
+
+// ─── People who come back ────────────────────────────────────────────────────────────────
+
+/** Words that say nothing about WHICH person is meant ("the", "her"), dropped when names are compared. */
+const NAME_FILLER = new Set("a an the this that these those her his their my your our its some".split(" "));
+/**
+ * The words in a label that set its `noun` APART from someone already named — "another passenger",
+ * "a second customer", "the next buyer", "a new client" — read off the label itself, since the
+ * noun phrase stops at "next" ("next to a passenger" is a place, not a second one). Pure.
+ */
+function elseWordsFor(who: string, noun: string): string[] {
+  const last = noun.split(" ").pop() ?? noun;
+  const forms = [last, pluralOf(last)].map(f => f.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+  const re = new RegExp(
+    `\\b(another|other|second|third|different|new|next)\\s+(?!to\\b)(?:(?!(?:and|or|to|with|of)\\b)[a-z'’-]+\\s+){0,2}(?:${forms})\\b`,
+    "gi"
+  );
+  return Array.from(who.matchAll(re), m => m[1].toLowerCase());
+}
+
+/**
+ * A person's name reduced to the words that tell them apart: "The woman passenger." → "woman
+ * passenger", "the passenger's" → "passenger". "other" and "one" stay: "the other passenger" is not
+ * "the passenger". Pure.
+ */
+export function personKey(name: string | undefined): string {
+  return (name ?? "")
+    .toLowerCase()
+    .replace(/['’]s\b/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(" ")
+    .filter(w => w && !NAME_FILLER.has(w))
+    .join(" ");
+}
+
+/**
+ * The recurring people (`inputParams.recurringPeople`) a picture's someone-else (`otherPerson`)
+ * is, so each is drawn with the one look the video gave them (2026-10-18, job 399: the woman
+ * passenger the story follows was a short-haired blonde in a puffer jacket in scene 2, a young
+ * dark-haired woman in scene 4 and a grey-blonde with older hands in scene 5 — 13 s apart — and the
+ * man beside her changed in scenes 2, 7 and 8, because each picture was drawn from the label "a
+ * woman passenger" alone). Matched by the words that say who they are, each person the label names
+ * on its own ("a flight attendant and a male passenger" is two):
+ *   - the same name ("a woman passenger" is "the woman passenger"), or the name's own noun phrase
+ *     when that is more than a bare "man"/"woman" ("an old man" is "the old man"; "a man" is not
+ *     "the man in the card aisle");
+ *   - the same ROLE noun (passenger, neighbour, sister) with no sex against it — "a male
+ *     passenger" is the passenger the look calls a man, never the one it calls a woman;
+ *   - a PROPER name (no role or person word, a capital letter) when every word of it is in the
+ *     label ("Seneca at his desk"); a vague name like "the other" only by the same words.
+ * One person the label names that fits two recurring people equally ("a seated passenger" beside a
+ * man and a woman passenger) is left as it was: guessing would give a stranger someone's look. So is
+ * a label that says it is someone ELSE ("another passenger", "a new customer", "the next buyer"),
+ * unless the name says the same. "Two passengers" takes the two passengers, never three; a crowd,
+ * "several passengers" or a bare "passengers" takes nobody — who is in a crowd is a guess. Empty
+ * when nothing fits. Pure.
+ */
+export function matchRecurringPeople(
+  who: string | undefined,
+  count: number | undefined,
+  people: RecurringPerson[] | undefined
+): RecurringPerson[] {
+  if (!who?.trim() || !people?.length) return [];
+  const facts = people.map(person => {
+    const named = namedPeople(person.name);
+    const first = named?.people[0];
+    const head = first ? personKey(first.phrase) : undefined;
+    return {
+      person,
+      key: personKey(person.name),
+      head: head && (head.includes(" ") || head === personKey(person.name)) ? head : undefined,
+      roles: (named?.people ?? []).filter(p => p.kind === "role").map(p => p.noun),
+      sex: named?.sex ?? sexOfLook(person.look),
+      // A name with a capital letter once a leading "the"/"my" is set aside ("Seneca", "Grandpa
+      // Joe"): found inside a label. A vague one ("the other", "one of them") is not — "the other"
+      // is in "the other customer" of any later story.
+      proper: !named && /\b[A-Z]/.test(person.name.replace(/^\W*(?:the|a|an|my|our|your|her|his|their)\b/i, "")),
+    };
+  });
+  type Fact = (typeof facts)[number];
+  const whoKey = personKey(who);
+  const whoWords = new Set(whoKey.split(" "));
+  const picked: Fact[] = [];
+  const take = (f: Fact) => {
+    if (!picked.includes(f)) picked.push(f);
+  };
+  for (const part of namedPeople(who)?.people ?? []) {
+    const key = personKey(part.phrase);
+    const exact = (f: Fact) => f.key === key || f.key === whoKey || (!!f.head && f.head === key);
+    // "another passenger", "a second customer", "the next buyer": by its own words NOT the one the
+    // story follows — with one recurring passenger, a role match alone would hand her look to the
+    // person the line sets apart from her.
+    const elseWords = elseWordsFor(who, part.noun);
+    const fits = facts.filter(
+      f =>
+        exact(f) ||
+        (part.kind === "role" &&
+          f.roles.includes(part.noun) &&
+          !(part.sex && f.sex && part.sex !== f.sex) &&
+          elseWords.every(w => f.key.split(" ").includes(w)))
+    );
+    if (part.count > 1) {
+      // Only a stated two ("two passengers", "both passengers") is the story's two; "several
+      // passengers", "three passengers" or a bare plural is a crowd, and who is in it is a guess.
+      const two = part.count === 2 && /\b(?:two|both)\b/i.test(part.phrase);
+      if (two && fits.length <= part.count) fits.forEach(take);
+      continue;
+    }
+    if (fits.length === 1) {
+      take(fits[0]);
+      continue;
+    }
+    const exacts = fits.filter(exact);
+    const sexed = fits.filter(f => !!part.sex && f.sex === part.sex);
+    if (exacts.length === 1) take(exacts[0]);
+    else if (sexed.length === 1) take(sexed[0]);
+  }
+  // The label IS the name (the planner was given the names and copied one), or holds a proper one.
+  for (const f of facts)
+    if (f.key && (f.key === whoKey || (f.proper && f.key.split(" ").every(w => whoWords.has(w))))) take(f);
+  return picked.slice(0, Math.max(1, count ?? 1)).map(f => f.person);
+}
+
 /** Whether a picture shows someone other than the host — named by the planner, or by its own words. */
 export function showsSomeoneElse(s: Pick<StoryboardScene, "otherPerson" | "showSubject" | "visualPrompt">): boolean {
   return !!s.otherPerson || !!someoneElse(s.showSubject ?? s.visualPrompt);
@@ -631,9 +916,15 @@ export function namesOnlyAnimal(text: string): boolean {
   return !!text.match(ANIMAL) && !namedPeople(text) && !SHOWS_PERSON.test(withoutAnimalPronouns(text));
 }
 
-/** Words naming a part of the body (not a thing used on it — a hair dryer is a thing). */
-export const BODY_PART_WORDS =
-  /\b(?:scalp|skin|nails|fingernails|forehead|cheeks?|eyelashes|eyebrows?|hairline|strands?|hair(?!\s*(?:dryer|brush|clip|tie|spray|band|pin|comb|product|net)))\b/i;
+/**
+ * Words naming a part of the body (not a thing used on it — a hair dryer is a thing, and a strand
+ * is one only when it is hair, `HAIR_STRAND`: a split panel of "a pearl strand on the dresser" is
+ * not about the host's body).
+ */
+export const BODY_PART_WORDS = new RegExp(
+  String.raw`\b(?:scalp|skin|nails|fingernails|forehead|cheeks?|eyelashes|eyebrows?|hairline|${HAIR_STRAND}|hair(?!\s*(?:dryer|brush|clip|tie|spray|band|pin|comb|product|net)))\b`,
+  "i"
+);
 
 /** A description asking for a body part OFF the body: "a lock of hair laid across a towel". */
 export const DETACHED_BODY_PART =
@@ -856,7 +1147,7 @@ export function facingTheCamera(text: string): string {
  */
 export function markHostBroll(
   scenes: StoryboardScene[],
-  params: Pick<LongformInputParams, "hostLook" | "brollOnly" | "hostName" | "hostTitle">,
+  params: Pick<LongformInputParams, "hostLook" | "brollOnly" | "hostName" | "hostTitle" | "recurringPeople">,
   hostPhotoUrl: string | undefined
 ): number {
   const look = params.hostLook?.trim();
@@ -878,6 +1169,8 @@ export function markHostBroll(
       !s.showsBook;
     const text = s.showSubject ?? s.visualPrompt ?? "";
     const words = `${s.showSubject ?? ""} ${s.visualPrompt ?? ""}`;
+    s.otherPersonLooks = undefined;
+    s.hostAmongOthers = undefined;
     // A planner's "someone else" lives and dies with the words it came from (2026-10-18, the
     // audit): "a woman customer" left on a picture of an incense holder (job 361 scene 32), "a
     // woman passenger" on a close-up of a soda can (job 399 scene 4), "a hen" (job 371) — each
@@ -894,12 +1187,11 @@ export function markHostBroll(
     const toWear = on && eligible && !s.otherPerson && NECK_PIECE.test(words) && chinFramed(s);
     const person = !!s.humanPresent || showsPerson(text) || toWear;
     // SOMEONE ELSE in the picture: named by the planner, or by the picture's own words — a role, a
-    // sex the host does not have, two or more people (`someoneElse`).
+    // sex the host does not have, two or more people (`someoneElse`) — with EVERYONE the words name
+    // in it, and the host among them when one is (`castOfPicture`, job 399 scenes 8 and 14).
     const other =
       eligible && person
-        ? s.otherPerson
-          ? { who: s.otherPerson, count: Math.max(namedPeople(s.otherPerson)?.count ?? 1, namedPeople(text)?.count ?? 1) }
-          : someoneElse(text, { look, hostName: params.hostName, selfRoles })
+        ? castOfPicture(text, s.otherPerson, { look, hostName: params.hostName, selfRoles, hostLed: on })
         : undefined;
     if (other) {
       // A line about SOMEONE ELSE (a customer, a neighbour): that person is drawn, from behind,
@@ -908,12 +1200,20 @@ export function markHostBroll(
       // more people are never drawn from the one host photo (job 370 scene 8: "two people hugging").
       s.otherPerson = other.who;
       s.otherPeople = other.count > 1 ? other.count : undefined;
+      // The host beside someone else is drawn from their look in words, the face never shown, and
+      // still never from the photo: one photo beside two people made both of them the host.
+      s.hostAmongOthers = other.host && look ? { who: other.host, look } : undefined;
+      // Someone the story comes back to keeps one look in every picture of them (job 399: the same
+      // passenger was three different women in scenes 2, 4 and 5) — `matchRecurringPeople`.
+      const looks = matchRecurringPeople(other.who, other.count, params.recurringPeople);
+      s.otherPersonLooks = looks.length ? looks : undefined;
       s.humanPresent = true;
       s.brollHostLook = undefined;
       s.brollHostRef = undefined;
       s.hostFaceShown = undefined;
-      if (s.showSubject) s.showSubject = withoutMirrors(s.showSubject);
-      if (s.visualPrompt) s.visualPrompt = withoutMirrors(s.visualPrompt);
+      // No face for anyone in it, so nothing in the words asks for one (`withoutFaceAsks`).
+      if (s.showSubject) s.showSubject = withoutFaceAsks(withoutMirrors(s.showSubject));
+      if (s.visualPrompt) s.visualPrompt = withoutFaceAsks(withoutMirrors(s.visualPrompt));
     } else if (on && eligible && person) {
       s.humanPresent = true;
       s.brollHostLook = look;

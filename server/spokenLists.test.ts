@@ -3,9 +3,11 @@ import type { StoryboardScene } from "@shared/types";
 import {
   applySpokenLists,
   findSpokenLists,
+  itemsInOnePhoto,
   joinChoiceSteps,
   listsByShape,
   notAListAsSaid,
+  notInOnePhoto,
   parseSpokenLists,
   splitSentences,
   spokenListsByShape,
@@ -941,5 +943,81 @@ describe("a parallel series keeps its last member (job 400 at 2:36, 'everyone co
       ["and the young are already rehearsing the complaint.", false, true],
       ["Then he turns the whole thing over in a single motion: life is not short.", false, false],
     ]);
+  });
+});
+
+describe("the bridge's group picture only when one photograph can hold the list (job 400 at 1:11, the review)", () => {
+  // Job 400 asked for "money, grief, difficult people and what the remaining years are actually for
+  // together, laid out side by side" and got paper cut-outs on a kitchen table.
+  it("refuses items no photograph can lay beside other things — every real case of jobs 397, 399 and 400", () => {
+    const refused = [
+      // job 400
+      "grief", "difficult people", "what the remaining years are actually for", "time", "legacy",
+      "people", "the real struggle", "the principle underneath it", "some ordinary place", "a waiting room",
+      // job 399
+      "what's left in the galley", "who to say them to", "the moment in the trip when they work",
+      // job 397
+      "old shop habits", "craft fairs",
+      // a last word that can be a preposition is still the head; a closing "too" is not
+      "the past", "some grief too",
+      // a yard nothing counts is still the place
+      "the back yard of the house",
+    ];
+    for (const item of refused) expect(notInOnePhoto(item), item).not.toBeNull();
+    expect(notInOnePhoto("what the remaining years are actually for")).toBe("a question or a clause");
+    expect(notInOnePhoto("difficult people")).toBe("a person");
+    expect(notInOnePhoto("loneliness")).toBe("an idea or a quality");
+    expect(notInOnePhoto("childhood")).toBe("an idea or a quality");
+  });
+
+  it("keeps every real list of things a thing, by its head word, not its describing words", () => {
+    const kept = [
+      // Ruth's job 281, Hank's job 398, Mae's job 231, Lance's job 311
+      "a straight-stitch machine", "a rotary cutter", "and a mountain of scraps too pretty to throw out",
+      "a saw", "a drill", "and a stack of sandpaper", "a hook", "a skein of yarn", "a stack of stitch books",
+      "a bin in the hall closet", "a bag in the garage", "maybe a box under the bed",
+      // Helena's job 399, Dale's job 397
+      "the whole can of ginger ale", "a second bag of pretzels", "and a bottle of water for later",
+      "Coasters", "ornaments", "small cutting boards", "Engraved boards", "house signs", "keepsake boxes",
+      "a fair pile of my own spoiled boards",
+      // any channel
+      "flour", "sugar", "and butter", "a tape measure", "a pencil", "and all the scraps you can find",
+      "money", "a church pew", "a kitchen table", "a garden hose", "a harness", "a hood", "a remote control",
+      // a counted length is what it measures, never the place "yard" names
+      "a yard of fabric", "two yards of denim", "half a yard of muslin", "2 yards of fleece", "a few feet of rope",
+    ];
+    for (const item of kept) expect(notInOnePhoto(item), item).toBeNull();
+  });
+
+  it("a list of steps is never one group picture; a list of things is when every item passes", () => {
+    expect(itemsInOnePhoto(["a saw", "a drill", "a stack of sandpaper"])).toBe(true);
+    expect(itemsInOnePhoto(["a saw", "a drill", "a stack of sandpaper"], "steps")).toBe(false);
+    // Job 355 scene 9 got a real one: "find every leak in that bag, plug them one at a time and fill
+    // the gaps with cheaper food together, laid out side by side".
+    expect(itemsInOnePhoto(["find every leak in that bag", "plug them one at a time", "then fill the gaps with cheaper food"], "steps")).toBe(false);
+    expect(itemsInOnePhoto(["money", "grief", "difficult people", "what the remaining years are actually for"])).toBe(false);
+    expect(itemsInOnePhoto([])).toBe(false);
+  });
+
+  it("a bridge into steps stays an ordinary picture (Hank's job 326 steps)", () => {
+    const steps = [
+      "Square up the scrap with a couple of saw cuts",
+      "give it a quick brush",
+      "drill the hole",
+      "oil it",
+      "put a felt dot on the bottom",
+    ];
+    const scenes = [
+      host(1, "Here is the whole build, and it takes one evening."),
+      scene(2, "and once the cedar is charred you just", { showSubject: "a charred cedar scrap on the bench" }),
+      scene(3, "Square up the scrap with a couple of saw cuts, give it a quick brush, drill the hole, oil it, and put a felt dot on the bottom."),
+      host(4, "Bye."),
+    ];
+    const r = applySpokenLists(scenes, [{ sentence: 1, items: steps, kind: "steps" }]);
+    expect(r.applied).toBe(1);
+    expect(r.scenes.some(s => s.listSet)).toBe(false);
+    const bridge = r.scenes.find(s => s.scriptText === "and once the cedar is charred you just")!;
+    expect(bridge.showSubject).toBe("a charred cedar scrap on the bench");
+    expect(r.apart).toEqual(['"and once the cedar is charred…": a list of steps']);
   });
 });

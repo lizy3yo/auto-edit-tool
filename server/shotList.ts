@@ -19,10 +19,10 @@
  * Not touched: the CTA (its host → book → host → big QR layout is fixed), the cover, operator
  * assets, split screens and the cold open (the hook stays on camera).
  */
-import type { BuildStage, KeyThing, StoryboardScene } from "@shared/types";
+import type { BuildStage, KeyThing, RecurringPerson, StoryboardScene } from "@shared/types";
 import { invokeClaude } from "./claude";
 import { safeParseJSON } from "./jsonRepair";
-import { SHOWS_PERSON, showsPerson, namedPeople, namesOnlyAnimal } from "./hostLook";
+import { SHOWS_PERSON, showsPerson, namedPeople, namesOnlyAnimal, personKey } from "./hostLook";
 
 /** A picture shorter than this is a flash and folds into a neighbour. */
 export const SHOT_MIN_SEC = 1.2;
@@ -1383,6 +1383,13 @@ export function splitPicture(s: StoryboardScene, n: number): StoryboardScene[] {
   }
   const bounds = [0, ...cuts, spans.length];
   const out: StoryboardScene[] = [];
+  const subject = s.showSubject ?? s.visualPrompt;
+  // The view the picture already has (one `joinSameContext` gave a continuation): the parts count on
+  // from it. Counted from the first view instead, a picture that was already "a close-up" gave its
+  // second part "a close-up" again — the same words twice in a row, drawn as one photo twice. The
+  // plan gate splits such pictures AFTER the join, so nothing caught it: jobs 302, 307, 310, 341 and
+  // 352 each shipped a pair (job 341 scenes 3-4, the cutting board "unsold, a close-up" twice).
+  const own = viewIndexOf((subject ?? "").replace(/[\s.]+$/, ""));
   for (let k = 0; k < n; k++) {
     const from = spans[bounds[k]].start;
     const to = k + 1 < n ? spans[bounds[k + 1]].start : text.length;
@@ -1390,8 +1397,7 @@ export function splitPicture(s: StoryboardScene, n: number): StoryboardScene[] {
     // A split of ONE topic must not look like the same photo twice: each later part is a clearly
     // different VIEW of the same thing, named in its own subject so `joinSameContext` never folds
     // it back into the first.
-    const variant = ["", ...OTHER_VIEWS][k % 4];
-    const subject = s.showSubject ?? s.visualPrompt;
+    const variant = own ? OTHER_VIEWS[(own - 1 + k) % OTHER_VIEWS.length] : ["", ...OTHER_VIEWS][k % 4];
     out.push({
       ...s,
       ...FRESH,
@@ -1644,7 +1650,8 @@ const SHOT_LIST_SYSTEM =
   "shown as the host's) — the picture may show THAT person, the same way: from behind or from " +
   "the side, the face never shown. Write them into show, and set other to who they are in 2-6 " +
   "plain words from the line (\"a woman customer\", \"an older neighbour\"). One person only. " +
-  "other is null in every other shot.\n" +
+  "When that person is one of the PEOPLE WHO COME BACK (listed below, when given), other is their " +
+  "name exactly as written there. other is null in every other shot.\n" +
   "6b. WHAT NOT TO DO. When a line — or the sentence it is part of — says not to do something " +
   "(\"never…\", \"don't…\"), says what something is NOT (\"I don't mean…\"), what to use INSTEAD, " +
   "what to keep away or out, that a job is for someone else (a licensed pro), or warns that doing " +
@@ -1731,6 +1738,13 @@ export async function planShotList(
     hostName?: string;
     /** How the host looks (`inputParams.hostLook`) — the only person b-roll may show, from behind. */
     hostLook?: string;
+    /**
+     * The people other than the host who come back in the story (`inputParams.recurringPeople`) —
+     * NAMES only, so a shot of one names them the same way every time (`matchRecurringPeople`
+     * finds their look by it). Their looks stay out of `show`, which the picture check holds the
+     * frame to.
+     */
+    people?: RecurringPerson[];
     subject?: string;
     log?: (m: string) => void;
     /** Plan only these beats (their eligibility is still judged in the full list). */
@@ -1773,6 +1787,11 @@ export async function planShotList(
         ? `THE HOST (shown from behind or the side whenever a picture is of someone doing the work): ${opts.hostLook}\n`
         : "") +
       (opts.sheet ? `PROPS LIST:\n${opts.sheet}\n` : "") +
+      // Scoped to rule 6a's someone-else: the list must never make the planner set `other` on a
+      // picture of the host at work (a name may share the host's own trade).
+      (opts.people?.length
+        ? `PEOPLE WHO COME BACK (never the host; when a shot's other person under rule 6a is one of them, other is this name exactly): ${opts.people.map(p => p.name).join(" | ")}\n`
+        : "") +
       (prior.length ? `SHOTS JUST BEFORE THIS BATCH: ${prior.join(" | ")}\n` : "") +
       `\n${lines.join("\n")}\n\nJSON:`;
     const r = await invokeClaude({
@@ -1849,6 +1868,10 @@ export async function planShotList(
   return results.flat();
 }
 
+// A PERSON name says WHAT the person is (job 399's script calls its two passengers only "one of
+// them", "the other", "she" and "he"): the pictures and the line check label them "a woman
+// passenger" / "a male passenger", and `matchRecurringPeople` finds a look by that role and sex —
+// a name like "the other" would match no label but its own words.
 export const CONTINUITY_SYSTEM =
   "You read a narration script for a faceless YouTube video and write its PROPS LIST: every " +
   "physical thing that is shown more than once — the things being made, the key tools and " +
@@ -1862,12 +1885,40 @@ export const CONTINUITY_SYSTEM =
   "animal's paw, a machine's dial, a garment's collar — its look STARTS with the whole it belongs " +
   "to (what kind it is, its colour, size and markings) and then describes the part, so every " +
   "picture of the whole shows the same one. " +
-  "6-14 lines. Plain words, no brands, no people. NOTHING WITH MARKS ON IT: " +
+  "6-14 lines. Plain words, no brands, no people in these lines. NOTHING WITH MARKS ON IT: " +
   "never list a chalk tally, a chalkboard, a sign, a price tag, a label, a calendar, a notebook, a " +
   "ledger or anything written or counted on — the pictures carry no writing, so such a prop would " +
-  "put writing in every shot that shows it. Output ONLY the list.";
+  "put writing in every shot that shows it. " +
+  "PEOPLE WHO COME BACK: after the props, one more line for each person other than the narrator " +
+  "whom the story shows or talks about in two or more different sentences — the same \"she\" or " +
+  "\"he\" a story follows, a customer who comes back, a neighbour seen again — written " +
+  "`PERSON name: look`, so every picture of them shows the same person. name is 1-5 plain words " +
+  "saying WHAT they are — the role or relation the script or its setting gives them, with man or " +
+  "woman when two share one (the woman customer, the older neighbour, my sister) — never only a " +
+  "pronoun, \"one of them\" or \"the other\"; look is 12-30 " +
+  "plain words a picture generator can draw from behind or the side: man or woman, an age range, " +
+  "build, hair (colour, length, style) and the clothes they wear in every picture, with colours — " +
+  "fitting everything the script says about them (age, work, place, time). Two people the story " +
+  "tells apart get two lines that look clearly different. Never the narrator, the host or \"you\"; " +
+  "never a crowd or a group; never a face, an expression or a name the script does not give; never " +
+  "someone in only one sentence. No PERSON line when nobody comes back; at most 4. Example: " +
+  "`PERSON the neighbour: a tall man in his seventies, thin white hair combed back, a faded green " +
+  "zip-up jacket over a grey shirt, dark trousers`. Output ONLY the list, no headings.";
 
-/** The props list for one script (`LongformInputParams.continuitySheet`). "" on any failure. */
+/** Recurring people a props list may name (`PERSON name: look` lines) — beyond these, none. */
+export const MAX_RECURRING_PEOPLE = 4;
+
+// "PERSON " or "PERSON:" only — a prop like "person-sized crate: …" stays a prop.
+const PERSON_LINE = /^PERSON(?=[\s:])[\s:]*/i;
+/** Whether a props-list line is a `PERSON name: look` line (bullets and numbering aside). Pure. */
+export function isPersonLine(line: string): boolean {
+  return PERSON_LINE.test(line.replace(/^[-*•\d.)\s]+/, "").trim());
+}
+
+/**
+ * The props list for one script (`LongformInputParams.continuitySheet`), with its `PERSON` lines
+ * (the people who come back, `parseRecurringPeople`) at the end. "" on any failure.
+ */
 export async function deriveContinuitySheet(
   script: string,
   opts: { subject?: string; styleBible?: string } = {}
@@ -1887,13 +1938,16 @@ export async function deriveContinuitySheet(
         effort: planningEffort("PROPS_EFFORT"),
         step: "Props list",
       });
-      const sheet = r.text
+      // A line with nothing after its colon is a heading ("PEOPLE:"), never a prop: kept, it became
+      // the home line or a key thing with no look. The PERSON lines go last and are capped on their
+      // own, so they never push a prop out or take the home line's place.
+      const lines = r.text
         .split("\n")
         .map(l => l.replace(/^[-*•\d.)\s]+/, "").trim())
-        .filter(l => l.includes(":"))
-        .slice(0, 16)
-        .join("\n");
-      if (sheet) return sheet;
+        .filter(l => l.includes(":") && l.slice(l.indexOf(":") + 1).trim() !== "");
+      const props = lines.filter(l => !isPersonLine(l)).slice(0, 16);
+      const people = lines.filter(isPersonLine).slice(0, MAX_RECURRING_PEOPLE);
+      if (props.length) return [...props, ...people].join("\n");
     } catch {
       /* try once more */
     }
@@ -1908,7 +1962,7 @@ export async function deriveContinuitySheet(
  */
 export function parseKeyThings(sheet: string | undefined): KeyThing[] {
   const out: KeyThing[] = [];
-  const lines = (sheet ?? "").split("\n").map(l => l.trim()).filter(l => l.includes(":"));
+  const lines = withoutPersonLines(sheet).split("\n").map(l => l.trim()).filter(l => l.includes(":"));
   for (const line of lines.slice(1)) {
     const at = line.indexOf(":");
     let name = line.slice(0, at).trim();
@@ -1917,6 +1971,51 @@ export function parseKeyThings(sheet: string | undefined): KeyThing[] {
     name = name.replace(/^MAIN\b[\s:-]*/i, "").trim();
     if (!name || out.some(t => keyName(t.name) === keyName(name))) continue;
     out.push({ name, look, ...(main && !out.some(t => t.main) ? { main: true as const } : {}) });
+  }
+  return out;
+}
+
+/** A props list with its `PERSON` lines taken out — the list every shot and picture writer reads. Pure. */
+export function withoutPersonLines(sheet: string | undefined): string {
+  return (sheet ?? "")
+    .split("\n")
+    .filter(l => !isPersonLine(l))
+    .join("\n")
+    .trim();
+}
+
+/**
+ * The PEOPLE WHO COME BACK in a props list (`deriveContinuitySheet`'s `PERSON name: look` lines):
+ * someone other than the host whom the story follows over several sentences, with the one look
+ * every picture of them keeps (job 399: the woman passenger the story follows was three different
+ * women in scenes 2, 4 and 5, drawn each time from "a woman passenger" alone). Read only from those
+ * lines, so a props list written before has none. Dropped: the host (by role or by `hostName`), the
+ * viewer, an animal, a group ("the passengers" — no one look fits a crowd), a name too long to be
+ * one, a look too short to draw, and a second line for the same name. At most
+ * `MAX_RECURRING_PEOPLE`. Pure — unit-tested.
+ */
+export function parseRecurringPeople(
+  sheet: string | undefined,
+  opts: { hostName?: string } = {}
+): RecurringPerson[] {
+  const out: RecurringPerson[] = [];
+  const hostWords = personKey(opts.hostName).split(" ").filter(w => w.length >= 3);
+  for (const raw of (sheet ?? "").split("\n")) {
+    if (!isPersonLine(raw)) continue;
+    const rest = raw.replace(/^[-*•\d.)\s]+/, "").trim().replace(PERSON_LINE, "");
+    const at = rest.indexOf(":");
+    if (at <= 0) continue;
+    const name = otherPersonOf(rest.slice(0, at).replace(/[*_`]/g, ""));
+    const words = rest.slice(at + 1).replace(/[`*_]/g, "").replace(/\s+/g, " ").trim().replace(/[.;,]+$/, "").split(" ");
+    if (!name || words.length < 3) continue;
+    const look = words.slice(0, 45).join(" ").replace(/[.;,]+$/, "");
+    const named = namedPeople(name);
+    if (named && (named.count > 1 || named.self)) continue;
+    const key = personKey(name);
+    if (hostWords.length && key.split(" ").every(w => hostWords.includes(w))) continue;
+    if (out.some(p => personKey(p.name) === key)) continue;
+    out.push({ name, look });
+    if (out.length >= MAX_RECURRING_PEOPLE) break;
   }
   return out;
 }
@@ -2339,6 +2438,28 @@ export function ownTypedPicture(s: StoryboardScene, typed: string, things: KeyTh
   const text = typed.trim();
   if (!text || text === (s.visualPrompt ?? "").trim()) return false;
   const said = withoutNegatedPhrases(text);
+  tieToTypedWords(s, said, things);
+  // NOBODY WHEN THE TYPED WORDS SAY SO: scene 20 was typed "… no hands, no readable writing anywhere"
+  // and still carried the person of the planner's "… box held in one hand", so its prompt asked for
+  // the host at work, with the host's photo attached, beside the operator's "no hands". Taken out
+  // only when the typed words also show no one themselves; a person they add is left as it was
+  // (who draws them — the host or someone else — is decided before the pictures, `markHostBroll`).
+  if (NOBODY_IN_IT.test(text) && !SHOWS_PERSON.test(said)) {
+    s.humanPresent = undefined;
+    s.otherPerson = undefined;
+    s.hostFaceShown = undefined;
+  }
+  s.showSubject = text;
+  return true;
+}
+
+/**
+ * What the planner tied to a picture's OLD words stays only while typed words `said` (negations
+ * already taken out) still name it: its key thing, the other key things in it, the stage, the part
+ * and the named kind it was about, the words it may print, and soft print. Shared by a typed cutaway
+ * (`ownTypedPicture`) and a typed split panel (`ownTypedPanel`). Pure apart from mutating `s`.
+ */
+function tieToTypedWords(s: StoryboardScene, said: string, things: KeyThing[] | undefined): void {
   const names = (name: string | undefined) => !!name?.trim() && keyThingsIn(said, [{ name, look: "" }]).length > 0;
   const named = keyThingsIn(said, things);
   const primary = names(s.keyThing) ? s.keyThing : named[0]?.name;
@@ -2351,17 +2472,24 @@ export function ownTypedPicture(s: StoryboardScene, typed: string, things: KeyTh
   if (s.namedLook && !names(s.namedLook.split(":")[0])) s.namedLook = undefined;
   if (s.pictureText && !saidText(s.pictureText, said)) s.pictureText = undefined;
   s.blurPrint = !s.pictureText && blurredPrint(said) ? true : undefined;
-  // NOBODY WHEN THE TYPED WORDS SAY SO: scene 20 was typed "… no hands, no readable writing anywhere"
-  // and still carried the person of the planner's "… box held in one hand", so its prompt asked for
-  // the host at work, with the host's photo attached, beside the operator's "no hands". Taken out
-  // only when the typed words also show no one themselves; a person they add is left as it was
-  // (who draws them — the host or someone else — is decided before the pictures, `markHostBroll`).
-  if (NOBODY_IN_IT.test(text) && !SHOWS_PERSON.test(said)) {
-    s.humanPresent = undefined;
-    s.otherPerson = undefined;
-    s.hostFaceShown = undefined;
-  }
-  s.showSubject = text;
+}
+
+/**
+ * A TYPED PANEL OWNS THE PANEL (2026-10-18, job 400 scene 27). A split's panel is drawn from its key
+ * thing's pictures and in their named kind's look (`withSplitMemory`), and an operator's panel redraw
+ * now gets both — but the key thing sits on the HOST scene, tagged from the panel's OLD words, and
+ * typed panel words left it there. Typed "a steaming cup of tea on the desk" over job 400's scroll
+ * panel, the redraw would have been handed the scroll's pictures, "the same scroll as in the
+ * reference" and the papyrus scroll's exact look, and held to a scroll by the check. So typed panel
+ * words keep what the old panel was tied to only while they still name it, as a typed cutaway does
+ * (`ownTypedPicture`); the host take beside it is never touched (no person or subject field changes).
+ * Called BEFORE the typed words land on `splitVisual`: a plain regenerate sends the panel's own words
+ * back, and those are not typed. Returns whether it took the panel over. Pure apart from mutating `s`.
+ */
+export function ownTypedPanel(s: StoryboardScene, typed: string, things: KeyThing[] | undefined): boolean {
+  const text = typed.trim();
+  if (!s.hostPresent || !text || text === (s.splitVisual ?? "").trim()) return false;
+  tieToTypedWords(s, withoutNegatedPhrases(text), things);
   return true;
 }
 
@@ -2773,9 +2901,10 @@ export function joinHookPictures(
  * Pictures the shot list marked `sameShot` (the context did not change) play as ONE picture with
  * the picture before them — across beats too, since the storyboard cut the script into beats by
  * length, not by topic — as long as the joined picture stays within `maxAt` for where it starts
- * (`pictureMaxSecAt`). The first picture's look is kept: it is the one being continued. Never a
- * host take, a list item, a CTA/cover/asset beat or a split. Run on the FINAL lengths beside
- * `foldSnappedFlashes`. Pure — unit-tested.
+ * (`pictureMaxSecAt`). The first picture's look is kept: it is the one being continued. Past the
+ * limit the later picture is a different VIEW of the topic (`OTHER_VIEWS`), whether it was marked
+ * `sameShot` or only repeats the words before it. Never a host take, a list item, a CTA/cover/asset
+ * beat or a split. Run on the FINAL lengths beside `foldSnappedFlashes`. Pure — unit-tested.
  */
 /** Two shot descriptions of the same thing (case, punctuation and spacing aside). Pure. */
 /**
@@ -2820,13 +2949,17 @@ export function joinSameContext(
   let changed = false;
   // How many views of one topic have been shown so far along a chain of same-topic pictures.
   const views = new Map<StoryboardScene, number>();
+  // The words a picture had before this pass gave it a view: a third picture repeating them is still
+  // the same topic as the second, and takes the NEXT view instead of going back to the first's.
+  const wordsBefore = new Map<StoryboardScene, string>();
+  // `b` says exactly what `a` says — as `a` reads now, or as it read before this pass changed it.
+  const repeats = (a: StoryboardScene, b: StoryboardScene) =>
+    !!b.showSubject && [a.showSubject, wordsBefore.get(a)].some(t => !!t && sameSubject(t, b.showSubject!));
   for (let i = 1; i < out.length; i++) {
     const a = out[i - 1];
     const b = out[i];
     // The planner repeating the SAME subject for the next shot is the same context too.
-    const same =
-      b.sameShot ||
-      (!!a.showSubject && sameSubject(a.showSubject, b.showSubject ?? ""));
+    const same = b.sameShot || repeats(a, b);
     // A list's last item and a line right after it that shows the SAME thing are one picture —
     // the list keeps its pace, the picture just stays (Dale's 3-min test, job 230: "furniture on
     // Marketplace" then the identical driveway picture again, 1.8 s + 3.9 s).
@@ -2850,12 +2983,21 @@ export function joinSameContext(
       // rotation keeps its place across passes (job 244 showed "a close-up" twice in a row).
       const view = (views.get(a) ?? viewIndexOf(a.showSubject)) + 1;
       views.set(b, view);
-      const seen = OTHER_VIEWS.some(v => (b.showSubject ?? "").endsWith(v));
-      if (b.sameShot && b.showSubject && !seen) {
+      const seen = viewIndexOf(b.showSubject) > 0;
+      // A picture that only REPEATS the words before it needs its view as much as one marked to
+      // continue it (job 399 scenes 20-21: two beats' shots planned with the identical description,
+      // 11.7 s + 6.3 s past the quarter's 15 s, unmarked — both went to the picture model with the
+      // same words and the second came back a tighter crop of the first, one picture for 18 s).
+      // Words the picture before shows too are a copy even when they already name a view.
+      if (b.showSubject && ((b.sameShot && !seen) || repeats(a, b))) {
         const v = OTHER_VIEWS[(view - 1) % OTHER_VIEWS.length];
-        b.showSubject = withView(b.showSubject, v);
-        if (b.visualPrompt && !b.visualPrompt.endsWith(v)) b.visualPrompt = withView(b.visualPrompt, v);
-        changed = true;
+        const next = withView(b.showSubject, v);
+        if (next !== b.showSubject) {
+          if (!wordsBefore.has(b)) wordsBefore.set(b, b.showSubject);
+          b.showSubject = next;
+          if (b.visualPrompt && !b.visualPrompt.endsWith(v)) b.visualPrompt = withView(b.visualPrompt, v);
+          changed = true;
+        }
       }
       continue;
     }
@@ -2874,6 +3016,7 @@ export function joinSameContext(
     len.splice(i - 1, 2, len[i - 1] + len[i]);
     // The joined picture is the same view as the one it continues, so the next view rotates on.
     if (views.has(a)) views.set(joined, views.get(a)!);
+    if (wordsBefore.has(a)) wordsBefore.set(joined, wordsBefore.get(a)!);
     changed = true;
     i--; // the joined picture may continue into the next one too
   }

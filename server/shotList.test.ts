@@ -2343,3 +2343,170 @@ describe("a run of describing words starts only where one can (review of job 400
     expect(describingWord("generous")).toBe(true);
   });
 });
+
+describe("a picture that repeats the words before it gets its own view past the limit (job 399 scenes 20-21)", () => {
+  // Job 399 (a 202.5 s film): the planner wrote the identical shot for two storyboard beats of one
+  // sentence, unmarked. 11.7 s + 6.3 s at 1:36 is past the second quarter's 15 s, so they could not
+  // join — and with no view of its own the second went to the picture model with the same words and
+  // came back a tighter crop of the first: the same bag on screen for 18 s.
+  const BAG = "several closed small liquor bottles tucked inside an open carry-on bag on a seat";
+  const BAG_PROMPT = "Several unopened small liquor bottles tucked inside an open carry-on bag placed on an aircraft seat.";
+  const CLOSE = ", a close-up of one detail of it filling the frame";
+  const FILM_SEC = 202.47;
+  const film = () => [
+    scene(19, "One more thing about drinks, because it catches good people off guard.", {
+      wordCut: true,
+      hostPresent: true,
+      showSubject: "a small liquor bottle standing closed on the beverage cart tray",
+      splitVisual: "A small unopened liquor bottle standing on the galley beverage cart during flight service.",
+      keyThing: "small liquor bottle",
+      audioDuration: 4.1519,
+    }),
+    scene(
+      20,
+      "On a U. S. airline, the only alcohol you're allowed to drink is alcohol the airline serves you, so the little bottles tucked in your carry-on stay closed. That's in the federal aviation rules,",
+      { wordCut: true, showSubject: BAG, visualPrompt: BAG_PROMPT, keyThing: "small liquor bottle", audioDuration: 11.6667 }
+    ),
+    scene(21, "section one twenty-one point five seventy-five, and it doesn't care how good your intentions were.", {
+      wordCut: true,
+      showSubject: BAG,
+      visualPrompt: BAG_PROMPT,
+      keyThing: "small liquor bottle",
+      audioDuration: 6.332,
+    }),
+    scene(
+      22,
+      "That takes care of your thirst. Now for the rumble that shows up somewhere over the middle of the country.",
+      {
+        wordCut: true,
+        showSubject: "the pretzel basket sitting on the beverage cart in the cabin aisle",
+        keyThing: "pretzel basket",
+        audioDuration: 13.821,
+      }
+    ),
+  ];
+  const START: Record<number, number> = { 19: 92.12, 20: 96.27, 21: 107.94, 22: 114.27 };
+  const limit = (s: StoryboardScene) => pictureMaxSecAt(START[s.index] ?? 0, FILM_SEC);
+
+  it("gives the later picture the next view when the two cannot join", () => {
+    expect(limit(film()[1])).toBeCloseTo(15);
+    const r = joinSameContext(film(), s => s.audioDuration ?? 0, limit);
+    expect(r.changed).toBe(true);
+    expect(r.scenes).toHaveLength(4);
+    expect(r.scenes[1].showSubject).toBe(BAG); // the first keeps its look
+    expect(r.scenes[1].visualPrompt).toBe(BAG_PROMPT);
+    expect(r.scenes[2].showSubject).toBe(`${BAG}${CLOSE}`);
+    expect(r.scenes[2].visualPrompt).toBe(`${BAG_PROMPT.replace(/\.$/, "")}${CLOSE}`);
+    // The next topic and the split are left alone.
+    expect(r.scenes[3].showSubject).toBe("the pretzel basket sitting on the beverage cart in the cabin aisle");
+    expect(r.scenes[0].showSubject).toBe("a small liquor bottle standing closed on the beverage cart tray");
+  });
+
+  it("does nothing more on the pipeline's next pass", () => {
+    const r = joinSameContext(film(), s => s.audioDuration ?? 0, limit);
+    const again = joinSameContext(r.scenes, s => s.audioDuration ?? 0, limit);
+    expect(again.changed).toBe(false);
+    expect(again.scenes.map(s => s.showSubject)).toEqual(r.scenes.map(s => s.showSubject));
+  });
+
+  it("still plays the same pair as ONE picture when it fits the limit", () => {
+    // Later in a film the limit is 18 s: 11.7 + 6.3 fits, so the line keeps the first picture.
+    const r = joinSameContext(film(), s => s.audioDuration ?? 0, () => 18);
+    expect(r.scenes).toHaveLength(3);
+    expect(r.scenes[1].showSubject).toBe(BAG);
+    expect(r.scenes[1].scriptText).toContain("good your intentions were.");
+  });
+
+  it("a third repeat takes the view after the second's, never back to the first's", () => {
+    const three = [20, 21, 22].map(i =>
+      scene(i, `line ${i}`, { wordCut: true, showSubject: BAG, visualPrompt: BAG_PROMPT, audioDuration: 7 })
+    );
+    const r = joinSameContext(three, s => s.audioDuration ?? 0, () => 10.5);
+    expect(r.scenes.map(s => s.showSubject)).toEqual([
+      BAG,
+      `${BAG}${CLOSE}`,
+      `${BAG}, seen from much further back with the whole place around it`,
+    ]);
+  });
+
+  it("words that already repeat a view are moved to the next one", () => {
+    const both = [20, 21].map(i => scene(i, `line ${i}`, { wordCut: true, showSubject: `${BAG}${CLOSE}`, audioDuration: 9 }));
+    const r = joinSameContext(both, s => s.audioDuration ?? 0, () => 10.5);
+    expect(r.scenes[0].showSubject).toBe(`${BAG}${CLOSE}`);
+    expect(r.scenes[1].showSubject).toBe(`${BAG}, seen from much further back with the whole place around it`);
+  });
+
+  it("leaves alone a picture with its own words, its own view, or beside a split", () => {
+    // Different words past the limit: two pictures already.
+    const other = film();
+    other[2].showSubject = "a printed page of aviation rules beside a closed carry-on bag";
+    const r1 = joinSameContext(other, s => s.audioDuration ?? 0, limit);
+    expect(r1.changed).toBe(false);
+    expect(r1.scenes[2].showSubject).toBe("a printed page of aviation rules beside a closed carry-on bag");
+    // A view of its own already (a split topic's later part): not touched again.
+    const viewed = film();
+    viewed[2].showSubject = `${BAG}, seen from the other side`;
+    const r2 = joinSameContext(viewed, s => s.audioDuration ?? 0, limit);
+    expect(r2.scenes[2].showSubject).toBe(`${BAG}, seen from the other side`);
+    // The same words as a split host beat: the split is never joined and its panel is drawn from its
+    // own description, so the picture after it keeps its words.
+    const besideSplit = film();
+    besideSplit[1].showSubject = besideSplit[0].showSubject;
+    const r3 = joinSameContext(besideSplit, s => s.audioDuration ?? 0, limit);
+    expect(r3.scenes[1].showSubject).toBe("a small liquor bottle standing closed on the beverage cart tray");
+  });
+});
+
+describe("a picture that already has a view, split in two, never says that view twice (job 341 scenes 3-4)", () => {
+  // Job 341: the join gave the cutting board's continuation "a close-up" (scene 2 was the board, plain),
+  // then the plan gate split that 12.2 s picture in two — and the second part came back with the SAME
+  // words, "…unsold, a close-up of one detail of it filling the frame", drawn as one photo twice.
+  // Jobs 302, 307, 310 and 352 each shipped the same pair. The parts count on from the picture's view.
+  const CLOSE = ", a close-up of one detail of it filling the frame";
+  const BACK = ", seen from much further back with the whole place around it";
+  const SIDE = ", seen from the other side";
+  const BOARD = "two-tone walnut and maple cutting board leaning against the garage wall, unsold";
+  const LINE =
+    "That happens to everybody who sells what they build, and it's fixable, because the board usually isn't the problem. The place you tried to sell it just wasn't built for that piece. Today I'm ranking";
+  const board = (showSubject: string) =>
+    scene(3, LINE, {
+      wordCut: true,
+      showSubject,
+      visualPrompt: "Close-up of the smooth oiled surface of a two-tone walnut and maple cutting board.",
+      keyThing: "walnut and maple cutting board",
+    });
+
+  it("gives the second part the view AFTER the picture's own", () => {
+    const parts = splitPicture(board(`${BOARD}${CLOSE}`), 2);
+    expect(parts).toHaveLength(2);
+    expect(parts[0].showSubject).toBe(`${BOARD}${CLOSE}`); // the first part keeps the picture
+    expect(parts[0].visualPrompt).toBe("Close-up of the smooth oiled surface of a two-tone walnut and maple cutting board.");
+    expect(parts[1].showSubject).toBe(`${BOARD}${BACK}`);
+    expect(parts[1].visualPrompt).toBe(`${BOARD}${BACK}`);
+  });
+
+  it("keeps rotating over three parts, and wraps from the last view to the first", () => {
+    const three = splitPicture(board(`${BOARD}${CLOSE}`), 3).map(p => p.showSubject);
+    expect(three).toEqual([`${BOARD}${CLOSE}`, `${BOARD}${BACK}`, `${BOARD}${SIDE}`]);
+    const fromSide = splitPicture(board(`${BOARD}${SIDE}`), 2).map(p => p.showSubject);
+    expect(fromSide).toEqual([`${BOARD}${SIDE}`, `${BOARD}${CLOSE}`]);
+    // A trailing full stop on the view is still read as that view.
+    expect(splitPicture(board(`${BOARD}${CLOSE}.`), 2)[1].showSubject).toBe(`${BOARD}${BACK}`);
+  });
+
+  it("a picture with no view of its own splits exactly as before", () => {
+    const plain = splitPicture(board(BOARD), 4).map(p => p.showSubject);
+    expect(plain).toEqual([BOARD, `${BOARD}${CLOSE}`, `${BOARD}${BACK}`, `${BOARD}${SIDE}`]);
+    // Only the description's END names its view: "a close-up" inside the words is not one.
+    const inside = "a close-up of the board's oiled edge on the garage shelf";
+    expect(splitPicture(board(inside), 2)[1].showSubject).toBe(`${inside}${CLOSE}`);
+  });
+
+  it("no two neighbouring parts ever share their words", () => {
+    for (const own of ["", CLOSE, BACK, SIDE])
+      for (const n of [2, 3, 4]) {
+        const words = splitPicture(board(`${BOARD}${own}`), n).map(p => p.showSubject);
+        for (let k = 1; k < words.length; k++) expect(words[k]).not.toBe(words[k - 1]);
+      }
+  });
+});

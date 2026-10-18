@@ -46,11 +46,14 @@ import {
   wordsAfterName,
   spokenListItems,
   parseKeyThings,
+  parseRecurringPeople,
+  withoutPersonLines,
   settleVideoKind,
   videoKind,
   fitPicturesToLines,
   judgeSelfMoving,
   ownTypedPicture,
+  ownTypedPanel,
 } from "./shotList";
 import {
   attachMemory,
@@ -62,7 +65,9 @@ import {
   lookToHold,
   memoryFor,
   memoryView,
+  panelLook,
   pictureSettled,
+  sameThingMove,
   SCREEN_ITEM_VIEW,
   SET_ITEM_VIEW,
 } from "./pictureMemory";
@@ -419,6 +424,7 @@ import {
 } from "./splitPanel";
 import {
   BODY_PART_WORDS,
+  castOfPicture,
   deriveHostLook,
   facingTheCamera,
   hostLipsCut,
@@ -483,6 +489,7 @@ import type {
   SceneSubmitReason,
   SubmitActor,
   TtsWaitState,
+  RecurringPerson,
 } from "../shared/types";
 import {
   extractSpokenScript,
@@ -6029,8 +6036,11 @@ export function personClauseFor(scene: StoryboardScene, visual: string): string 
   // A host picture of a line about the chin, jaw or neck faces the camera, cut at the lips
   // (`hostLipsCut`): every side or back view below would hide what the line is about.
   const lipsCut = hostLipsCut(scene);
+  const others = peopleAskedFor(scene);
   const who = scene.otherPerson
-    ? otherPersonClause(scene.otherPerson, scene.otherPeople)
+    ? scene.hostAmongOthers
+      ? hostWithOthersClause(scene.hostAmongOthers, others.who, others.count, scene.otherPersonLooks)
+      : otherPersonClause(others.who, others.count, scene.otherPersonLooks)
     : scene.brollHostLook
       ? scene.hostFaceShown
         ? hostFaceClause(scene.brollHostLook)
@@ -6067,31 +6077,142 @@ export function personClauseFor(scene: StoryboardScene, visual: string): string 
  * flight attendant speaking with a passenger", "two people hugging") are each drawn that way, none
  * of them the host — the one-person wording ("nobody else", "no second person") asked for one of
  * them and against the other.
+ * Someone the story COMES BACK TO (`scene.otherPersonLooks`, the video's `recurringPeople`) is
+ * drawn with the one look the video gave them, the same in every picture — job 399's woman
+ * passenger, drawn from the label alone, was three different women in 13 s (scenes 2, 4, 5).
  */
-export function otherPersonClause(who: string, count: number = 1): string {
+export function otherPersonClause(
+  who: string,
+  count: number = 1,
+  looks: RecurringPerson[] = []
+): string {
   const named = who.trim().replace(/\.$/, "");
+  const lookOf = (p: RecurringPerson) => p.look.trim().replace(/[.;,]+$/, "");
+  const same = "the same person in every picture of them in this video, always drawn exactly like this";
   if (count > 1) {
-    const body = ONE_BODY_CLAUSE.replace(/The host has/g, "Each person has")
-      .replace(/both of the host's hands/g, "both of that person's hands")
-      .replace(/the host's/g, "that person's")
-      .replace(/anywhere in the frame/, "on anyone");
     return (
       `The people in this shot are ${named} — ${count === 2 ? "two" : "a small group of"} different, ` +
       `ordinary people of that description, NONE of them the video's host: each seen from behind or ` +
       `from the side, over the shoulder, faces turned away or out of frame so no face is ever shown. ` +
-      `Nobody else is in the frame, in the background or in a reflection. ${body}`
+      `${knownLooks(looks, count)}Nobody else is in the frame, in the background or in a reflection. ` +
+      `${everyoneBodyClause()}`
     );
   }
   const body = ONE_BODY_CLAUSE.replace(/The host has/g, "This person has").replace(
     /the host's/g,
     "their"
   );
+  const person = looks[0]
+    ? `NOT the video's host, and ${same}: ${lookOf(looks[0])}. Seen`
+    : `NOT the video's host, a different, ordinary person of that description: seen`;
   return (
-    `The only person in this shot is ${named} — NOT the video's host, a ` +
-    `different, ordinary person of that description: seen from behind or from the side, over ` +
+    `The only person in this shot is ${named} — ${person} from behind or from the side, over ` +
     `the shoulder, the face turned away or out of frame so it is never shown. Nobody else is in ` +
     `the frame, in the background or in a reflection. ${body}`
   );
+}
+
+/**
+ * `ONE_BODY_CLAUSE` for a picture of several people: each of them has one body, two arms. A function,
+ * since `ONE_BODY_CLAUSE` is declared further down the file.
+ */
+const everyoneBodyClause = (): string =>
+  ONE_BODY_CLAUSE.replace(/The host has/g, "Each person has")
+    .replace(/both of the host's hands/g, "both of that person's hands")
+    .replace(/the host's/g, "that person's")
+    .replace(/anywhere in the frame/, "on anyone");
+
+/**
+ * The recurring looks among `count` people: "One of them is …", "They are …" only when the looks
+ * cover everyone in the shot — beside "a flight attendant and two passengers" the two passengers'
+ * looks are two of the three.
+ */
+function knownLooks(looks: RecurringPerson[], count: number): string {
+  const lookOf = (p: RecurringPerson) => p.look.trim().replace(/[.;,]+$/, "");
+  if (looks.length === 1)
+    return (
+      `One of them is ${looks[0].name}, the same person in every picture of them in this video, ` +
+      `always drawn exactly like this: ${lookOf(looks[0])}. `
+    );
+  if (!looks.length) return "";
+  return (
+    `${looks.length >= count ? "They are" : `${looks.length === 2 ? "Two" : "Some"} of them are`} ` +
+    `the same people in every picture of them in this video, always drawn exactly ` +
+    `like this — ${looks.map(p => `${p.name}: ${lookOf(p)}`).join("; ")}. `
+  );
+}
+
+/**
+ * The HOST in a picture WITH someone else (`scene.hostAmongOthers`, 2026-10-18, the review of job
+ * 399): a description naming two people — "a flight attendant speaking politely to a seated
+ * passenger" (scene 14) — went out with a clause for the passenger alone, "the only person … no face
+ * anywhere", and the image model drew the flight attendant by no rule at all: a different woman,
+ * face shown, smiling. When one of the people is the host (a role the host gives themself, the host
+ * by name), they are drawn from the host's look in words — never the photo, which beside a second
+ * person made both of them the host — seen from behind or the side, the face never shown; everyone
+ * else is a different, ordinary person, face never shown either, with their recurring look when
+ * they have one. Pure.
+ */
+export function hostWithOthersClause(
+  host: { who: string; look: string },
+  who: string,
+  count: number = 1,
+  looks: RecurringPerson[] = []
+): string {
+  const hostWho = host.who.trim().replace(/\.$/, "");
+  const named = who.trim().replace(/\.$/, "");
+  const look = host.look.trim().replace(/\.$/, "");
+  const theHost = /\b(?:host|narrator|presenter)$/i.test(hostWho)
+    ? `The host — ${look} — is`
+    : `The ${hostWho.replace(/^(?:a|an|the|one)\s+/i, "")} is the video's host — ${look} — and is`;
+  const others =
+    count > 1
+      ? `The others are ${named} — ${count === 2 ? "two" : "a small group of"} different, ordinary ` +
+        `people of that description, none of them the host: each seen from behind or from the side, ` +
+        `over the shoulder, faces turned away or out of frame so no face is ever shown. ` +
+        knownLooks(looks, count)
+      : looks[0]
+        ? `The other person is ${named} — NOT the video's host, and the same person in every picture ` +
+          `of them in this video, always drawn exactly like this: ` +
+          `${looks[0].look.trim().replace(/[.;,]+$/, "")}. Seen from behind or from the side, over the ` +
+          `shoulder, the face turned away or out of frame so it is never shown. `
+        : `The other person is ${named} — NOT the video's host, a different, ordinary person of that ` +
+          `description: seen from behind or from the side, over the shoulder, the face turned away or ` +
+          `out of frame so it is never shown. `;
+  return (
+    `The people in this shot are ${hostWho} and ${named}, and no face is shown anywhere. ${theHost} ` +
+    `always drawn with that same hair, skin and clothes, seen from behind or from the side with the ` +
+    `head turned the same way as the shoulders, so the face is never shown. ${others}Nobody else is ` +
+    `in the frame, in the background or in a reflection. ${everyoneBodyClause()}`
+  );
+}
+
+type PeopleFields = Pick<
+  StoryboardScene,
+  "otherPerson" | "otherPeople" | "hostAmongOthers" | "showSubject" | "visualPrompt"
+>;
+
+/**
+ * The other people a picture of someone else asks for, read off the scene each time: everyone its
+ * description names, in the planner's words for its own (`castOfPicture`) — so a picture of a film
+ * marked before, regenerated (job 399 scenes 8 and 14: "a flight attendant speaking quietly with a
+ * passenger" under `otherPerson` "a male passenger"), names both people too. A picture with the host
+ * among them was cast when it was marked, and is asked for as it was. Pure.
+ */
+export function peopleAskedFor(scene: PeopleFields): { who: string; count: number } {
+  const stored = { who: scene.otherPerson ?? "", count: scene.otherPeople ?? 1 };
+  if (!scene.otherPerson || scene.hostAmongOthers) return stored;
+  const cast = castOfPicture(scene.showSubject ?? scene.visualPrompt, scene.otherPerson);
+  return cast ? { who: cast.who, count: Math.max(cast.count, stored.count) } : stored;
+}
+
+/**
+ * How many people a picture of someone else holds: the other people (`peopleAskedFor`) and the host
+ * beside them (`hostAmongOthers`) — what `otherPeopleSuffix` is asked for, so a picture of two
+ * people never says "apart from that one person". 1, 2, or 3 for several. Pure.
+ */
+export function peopleInShot(scene: PeopleFields): number {
+  return Math.min(3, peopleAskedFor(scene).count + (scene.hostAmongOthers ? 1 : 0));
 }
 
 /** `NO_OTHER_FIGURES_SUFFIX` for a picture of someone else: that one person, nobody more. */
@@ -6741,7 +6862,7 @@ export function buildStillPrompt(
   const personSuffix = !aggressive ? personClauseFor(scene, scene.showSubject ?? scene.visualPrompt ?? "") : "";
   const noFigures =
     !aggressive && scene.humanPresent && scene.otherPerson
-      ? otherPeopleSuffix(scene.otherPeople)
+      ? otherPeopleSuffix(peopleInShot(scene))
       : !aggressive && scene.humanPresent && scene.brollHostLook
         ? scene.hostFaceShown
           ? HOST_FACE_ONLY_SUFFIX
@@ -7109,19 +7230,75 @@ export const DESCRIBED_SCREEN_CLAUSE =
 /**
  * The fields a picture's memory sets at render (`memoryFor`): its reference pictures and camera
  * position; whether those show only the OTHER key things in it; and, when none is a picture of its
- * own thing, the look it is drawn by instead (`keyThingLookClause`). Pure.
+ * own thing, the look it is drawn by instead (`keyThingLookClause`); which of them was shown right
+ * before it, about something else (`memoryRightBefore`); and the look kept for a redraw from words
+ * (`memoryWordsLook`). Pure.
  */
 export function memoryFields(
-  memory: { urls: string[]; own: boolean; look?: string },
+  memory: { urls: string[]; own: boolean; look?: string; wordsLook?: string; before?: number },
   view: string | undefined
-): Pick<StoryboardScene, "memoryRefUrls" | "memoryView" | "memoryOthersOnly" | "keyThingLook"> {
+): Pick<
+  StoryboardScene,
+  "memoryRefUrls" | "memoryView" | "memoryOthersOnly" | "keyThingLook" | "memoryRightBefore" | "memoryWordsLook"
+> {
   const has = memory.urls.length > 0;
   return {
     memoryRefUrls: has ? memory.urls : undefined,
     memoryView: has ? view : undefined,
     memoryOthersOnly: has && !memory.own ? true : undefined,
     keyThingLook: memory.own ? undefined : memory.look,
+    memoryRightBefore:
+      has && memory.before != null && memory.before >= 0 && memory.before < memory.urls.length
+        ? memory.before
+        : undefined,
+    memoryWordsLook: has && memory.own ? memory.wordsLook : undefined,
   };
+}
+
+/**
+ * The memory picture the same-thing check lays beside a new one: the picture shown right before it
+ * when that is one of its references (`memoryRightBefore`) — the copy a viewer would see is a copy
+ * of THAT picture — else its first reference, the thing's memory. Pure.
+ */
+export function sameThingReference(scene: StoryboardScene): string | undefined {
+  const refs = scene.memoryRefUrls ?? [];
+  return refs[scene.memoryRightBefore ?? 0] ?? refs[0];
+}
+
+/**
+ * A MEMORY PICTURE THAT COPIES TWICE IS DRAWN FROM WORDS (2026-10-18, job 399 scene 17: the same
+ * hands, can and cup as scene 16, only the background new — the same-thing check's one redraw was
+ * kept whatever it came back as). The fields that make it a picture drawn from words: no reference
+ * pictures, no memory camera position, and its key thing's written look in their place
+ * (`keyThingLookClause`) — so the thing still looks like the one before, without the picture.
+ * Without a written look it is drawn from its own words alone. Pure.
+ */
+export function memoryToWords(
+  scene: StoryboardScene
+): Pick<
+  StoryboardScene,
+  "memoryRefUrls" | "memoryView" | "memoryOthersOnly" | "keyThingLook" | "memoryRightBefore" | "memoryWordsLook"
+> {
+  return {
+    memoryRefUrls: undefined,
+    memoryView: undefined,
+    memoryOthersOnly: undefined,
+    keyThingLook: scene.memoryWordsLook ?? scene.keyThingLook,
+    memoryRightBefore: undefined,
+    memoryWordsLook: undefined,
+  };
+}
+
+/**
+ * The prompt of a picture switched to words (`memoryToWords`): its memory clause, exactly as it was
+ * written into `prompt`, swapped for its key thing's look clause, so every clause a redraw added
+ * (soft print, things at rest, a stated detail) stays. Undefined when the clause is not in the
+ * prompt as written (a blurred-print rewrite reworded it) — the caller then builds the prompt again.
+ * Pure.
+ */
+export function promptFromWords(prompt: string, memory: string, look: string): string | undefined {
+  if (!memory || !prompt.includes(memory)) return undefined;
+  return prompt.replace(memory, () => look);
 }
 
 /**
@@ -7171,9 +7348,53 @@ function carryPanelFlaws(host: StoryboardScene, flaws: string[] | undefined): vo
 /**
  * PICTURE MEMORY: a picture of a key thing drawn from the earlier pictures of it
  * (`server/pictureMemory.ts`) is told what those reference images are — the SAME thing, seen from
- * another spot — and, when the host is in the shot, that the last reference is the host.
+ * another spot — and, when the host is in the shot, that the last reference is the host. When one
+ * of them is the picture shown right before it, about something else, it is told that picture lends
+ * only the thing's look (`rightBeforeClause`).
  */
 export function memoryClause(scene: StoryboardScene): string {
+  const clause = memoryReferenceClause(scene);
+  return clause ? `${clause}${rightBeforeClause(scene)}` : "";
+}
+
+/** Names in a sentence: "a", "a and b", "a, b and c". */
+const namesInSentence = (names: string[]) =>
+  names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names[0] ?? "";
+
+/**
+ * THE PICTURE RIGHT BEFORE LENDS ONLY THE LOOK (`memoryRightBefore`, `rightBeforeToRecompose`): job
+ * 399 scene 17 ("a small plastic cup barely filled with ginger ale on a tray table") was drawn from
+ * scene 16 ("hands pouring soda into an ice-filled plastic cup at the cart"), told only to draw the
+ * same cup from another camera position, and came back as scene 16 — the same hands tipping the same
+ * can into the same cup — on a new background. A picture the viewer has just seen is a reference for
+ * how the thing looks and nothing else: another camera, framing and arrangement, and this picture's
+ * own subject filling the frame. Empty for any other picture. Pure.
+ * It never says the picture before is about something else: the two only have different words, and
+ * that is as often the same thing described anew (job 397 scenes 28-29: the walnut and maple board
+ * close up on the bench, then leaning against the garage wall) — a new photo is right for both.
+ * And it asks for other hand POSITIONS, never other hands: the host's hands are the host's in every
+ * picture, and "never the same hands" beside the host photo asks for someone else's.
+ */
+export function rightBeforeClause(scene: StoryboardScene): string {
+  const n = scene.memoryRefUrls?.length ?? 0;
+  const p = scene.memoryRightBefore;
+  if (!n || p == null || p < 0 || p >= n || !scene.keyThing) return "";
+  if (scene.memoryView === SCREEN_ITEM_VIEW || scene.memoryView === SET_ITEM_VIEW) return "";
+  const names = scene.memoryOthersOnly
+    ? scene.otherKeyThings ?? []
+    : [scene.partOf ?? scene.keyThing, ...(scene.otherKeyThings ?? [])];
+  if (!names.length) return "";
+  const which = n === 1 ? "The first reference image" : `Reference image ${p + 1}`;
+  return (
+    ` ${which} is the picture shown RIGHT BEFORE this one in the video: take ONLY how the ` +
+    `${namesInSentence(names)} ${names.length > 1 ? "look" : "looks"} from it, never the picture ` +
+    `itself. This is a clearly different photo — another camera position, distance and framing; never ` +
+    `the same pose, the same hand positions or the same things at the same angles in the same places ` +
+    `— and what THIS picture's own words are about fills the frame.`
+  );
+}
+
+function memoryReferenceClause(scene: StoryboardScene): string {
   const n = scene.memoryRefUrls?.length ?? 0;
   // A phone or laptop screen showing a key thing (`SCREEN_ITEM_VIEW`): the thing is only the photo
   // inside the listing, never the device — Dale's job 295 framed a tablet with the cutting board.
@@ -7250,6 +7471,13 @@ export function memoryClause(scene: StoryboardScene): string {
       `fabrics, colours, materials and wear as the reference.` +
       host
     );
+  // Where it is: where its memory had it — but a picture that follows the one right before it, about
+  // something else (`rightBeforeClause`), is wherever its own words put it (job 399 scene 17: the cup
+  // on a tray table, its memory the cup at the cart).
+  const place =
+    scene.memoryRightBefore != null
+      ? "in the same place unless this picture's own words put it somewhere else"
+      : "in the same place";
   // A picture of the thing BEFORE it is finished (`buildStage` material / making): its references
   // are the same or an earlier stage (`memorySourcesFor` drops anything further along), so its shape
   // and size are its own — "identical shape, size" would hold a strip being coiled into a bowl
@@ -7261,7 +7489,7 @@ export function memoryClause(scene: StoryboardScene): string {
   if (beforeFinished(scene))
     return (
       ` ${which} this exact ${thing}, at the same or an earlier point in the making than this ` +
-      `picture. Draw the SAME ${thing} — the same colours, materials and wear, in the same place — ` +
+      `picture. Draw the SAME ${thing} — the same colours, materials and wear, ${place} — ` +
       `from a different camera position than the reference; never copy the reference's ` +
       `framing.${view} What is being made is shown exactly as far along as the words say — NOT ` +
       `finished: raw pieces or partly built, with only what the words say has been done to it so ` +
@@ -7271,7 +7499,7 @@ export function memoryClause(scene: StoryboardScene): string {
     );
   return (
     ` ${which} this exact ${thing}. Draw the SAME ${thing} — identical shape, size, colours, ` +
-    `materials and wear, in the same place — from a different camera position than the reference; ` +
+    `materials and wear, ${place} — from a different camera position than the reference; ` +
     `never copy the reference's framing.${view} If the words say it is further along (being made, ` +
     `finished, changed) or that something has been done or added to it (carved, engraved, ` +
     `painted, fitted with a part), show the same piece WITH that — the reference is how it ` +
@@ -7573,6 +7801,133 @@ const BOOK_VISUAL_PATTERNS: RegExp[] = [
 export function brollDepictsBook(text: string): boolean {
   const t = scrubLegibleWriting(text ?? "");
   return BOOK_VISUAL_PATTERNS.some(re => re.test(t));
+}
+
+/**
+ * A sentence break in a style bible or beat: . ! or ? and a space, then a capital, a number or an
+ * opening quote. Stricter than the script splitter (`splitSentences`), so an abbreviation inside a
+ * sentence — job 399's bible: "the flight crosses U.S. airspace mid-continent" — stays one sentence
+ * and dropping its neighbour never leaves half of it behind.
+ */
+const DIRECTION_SENTENCE_BREAK = /(?<=[.!?]["'”’)\]]?)\s+(?=["'“‘(\[]?[A-Z0-9])/;
+
+/**
+ * One sentence's comma- and semicolon-separated parts, each with the separator before it ("" for
+ * the first). Only a mark FOLLOWED BY A SPACE separates, so "$10,000" stays whole, and nothing
+ * inside brackets does, so "(imagined through period objects, and spaces)" stays one part.
+ */
+function directionParts(sentence: string): { sep: string; text: string }[] {
+  const parts: { sep: string; text: string }[] = [];
+  let depth = 0;
+  let start = 0;
+  let sep = "";
+  for (let i = 0; i < sentence.length; i++) {
+    const c = sentence[i];
+    if (c === "(" || c === "[") depth++;
+    else if ((c === ")" || c === "]") && depth > 0) depth--;
+    else if (depth === 0 && (c === "," || c === ";") && sentence[i + 1] === " ") {
+      parts.push({ sep, text: sentence.slice(start, i) });
+      sep = `${c} `;
+      start = i + 2;
+      i++;
+    }
+  }
+  parts.push({ sep, text: sentence.slice(start) });
+  return parts;
+}
+
+/**
+ * A printed-matter sentence with only its printed-matter PARTS taken out, or null when it must go
+ * whole. Job 400's real bible opened "Home base: a quiet home office or study in a temperate
+ * climate during autumn or early winter, where a man in his sixties sits with books and notes
+ * about Stoic philosophy." — the books ride in a trailing ", where …" clause, the shape every
+ * stored bible's home base has (jobs 397-399), so dropping the whole sentence cost the film its
+ * home base for one clause. The FIRST part carries what the sentence is about (its label and
+ * subject): when that is the print, the sentence goes whole, so nothing is left as a dangling
+ * modifier ("Home base: under a window."). A later part naming print goes on its own — a trailing
+ * clause, or a list item ("Recurring props: sympathy cards, a clock, a book, a phone." keeps the
+ * cards, the clock and the phone). What is kept is re-checked.
+ */
+function withoutPrintedParts(
+  sentence: string
+): { kept: string; dropped: string[] } | null {
+  const body = sentence.replace(/[.!?]+$/, "");
+  const end = sentence.slice(body.length);
+  const parts = directionParts(body);
+  if (parts.length < 2 || brollDepictsBook(parts[0].text)) return null;
+  const keep = parts.filter((p, i) => i === 0 || !brollDepictsBook(p.text));
+  if (keep.length === parts.length) return null; // the print spans parts — no part to single out
+  const kept =
+    keep.map((p, i) => (i === 0 ? p.text : p.sep + p.text)).join("").trim() + end;
+  if (brollDepictsBook(kept)) return null;
+  const dropped = parts.filter(p => !keep.includes(p)).map(p => p.text.trim());
+  return { kept, dropped };
+}
+
+/**
+ * Direction text (a style bible or a beat) with only its PRINTED MATTER taken out — the sentences,
+ * or the parts of one (`withoutPrintedParts`), that the book guard (`brollDepictsBook`) reads as a
+ * book, cover, page or a writer's work as an object. The guard used to drop the WHOLE bible on any
+ * such mention: job 400 was about an essay a Roman wrote, its bible was thrown away ("Style bible
+ * depicted printed matter — dropped"), and with no shared world the Rome pictures came back as
+ * glossy costume-drama stills beside a film of plain phone snapshots. A mention of books must not
+ * cost the home base, the places the script travels to and the tone. Text with nothing to drop
+ * comes back as it was, byte for byte; what is kept is re-checked whole, and anything still
+ * reading as print is dropped entirely (never trust the split) — so this never returns text the
+ * guard flags, which is what the old whole-drop promised. Pure — unit-tested.
+ */
+export function withoutPrintedMatter(text: string): {
+  kept: string;
+  dropped: string[];
+} {
+  const src = text ?? "";
+  const sentences = src
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(DIRECTION_SENTENCE_BREAK)
+    .map(s => s.trim())
+    .filter(Boolean);
+  const kept: string[] = [];
+  const dropped: string[] = [];
+  for (const s of sentences) {
+    if (!brollDepictsBook(s)) {
+      kept.push(s);
+      continue;
+    }
+    const partly = withoutPrintedParts(s);
+    if (partly) {
+      kept.push(partly.kept);
+      dropped.push(...partly.dropped);
+    } else dropped.push(s);
+  }
+  const all = { kept: "", dropped: sentences.length ? sentences : [src] };
+  if (!dropped.length) return brollDepictsBook(src) ? all : { kept: src, dropped };
+  const rest = kept.join(" ");
+  return brollDepictsBook(rest) ? all : { kept: rest, dropped };
+}
+
+/** What a style bible with nothing left after the printed-matter sentences says on the job. */
+export const BIBLE_ALL_PRINT_WARNING =
+  "Style bible depicted printed matter — dropped; b-roll world consistency degraded";
+
+/**
+ * A derived style bible made safe for the prompts: its printed matter left out and the rest kept,
+ * with the job warning that says so — the left-out words in a parenthesis, which the card moves
+ * behind "Details" when long (`groupJobWarnings`). A bible that is nothing but print is dropped
+ * with the old warning. Shared by both derivations (before the storyboard, and the late fallback
+ * in the enhance stage) so they cannot disagree. Pure — unit-tested.
+ */
+export function bibleWithoutPrintedMatter(bible: string): {
+  bible?: string;
+  warning?: string;
+} {
+  const { kept, dropped } = withoutPrintedMatter(bible);
+  if (!dropped.length) return { bible };
+  if (!kept.trim()) return { warning: BIBLE_ALL_PRINT_WARNING };
+  return {
+    bible: kept,
+    warning: `Style bible: printed matter left out, the rest kept (${dropped.join(" / ")})`,
+  };
 }
 
 /** Calm, generic topic-neutral cutaway subjects — the LAST resort, used only when a CTA cutaway
@@ -9023,7 +9378,7 @@ export function buildClipChain(
   const facing = (t: string) => (lipsCut ? facingTheCamera(t) : t);
   const clipNoFigures =
     !scene.hostPresent && scene.humanPresent && scene.otherPerson
-      ? otherPeopleSuffix(scene.otherPeople)
+      ? otherPeopleSuffix(peopleInShot(scene))
       : !scene.hostPresent && scene.humanPresent && scene.brollHostLook
         ? lipsCut
           ? HOST_LIPS_CUT_ONLY_SUFFIX
@@ -9410,9 +9765,15 @@ async function drawValidatedStill(
   // A frame that shows what its line rules out (`scene.forbids`): one fresh seed, its own budget —
   // it is asked only on the few pictures the line check marked.
   let ruledOutRerolls = 0;
-  // A picture of a key thing that came back a DIFFERENT one: one re-roll from its memory, then
-  // it is drawn from words alone (`sameThingMisses`).
-  let sameThingMisses = 0;
+  // A picture of a key thing that came back a DIFFERENT one, or a copy of its memory: one re-roll
+  // from its memory (`sameThingMove`). What the check refused the last draw for: after a different
+  // thing the redraw is kept unasked; after a copy it is asked again, and a second copy is drawn
+  // from words (`memoryToWords`).
+  let sameThingRefused: "copy" | "different" | undefined;
+  // Frames the check found copying their memory: once the picture is drawn from words, they ship only
+  // when nothing else can (`copyFallback`).
+  const copiesMemory = new WeakSet<Buffer>();
+  let copyFallback: Drawn | undefined;
   // A check that could not run is never a pass: one more picture and check (`unchecked`).
   let uncheckedRerolls = 0;
   // THE HOST IS THE HOST: a picture of the host that shows someone else is drawn again
@@ -9721,9 +10082,12 @@ async function drawValidatedStill(
         continue;
       }
       // PICTURE MEMORY: the same key thing as its memory picture, from another spot. A different
-      // one is drawn again from the memory once, then from words alone (the film never stops).
-      // SAMENESS BEATS THE ANGLE: one redraw from memory, then the memory-drawn picture is kept — a
-      // fallback drawn from words gave Frederick's job 259 a different heater and mattress.
+      // one, or a copy of the memory's framing, is drawn again from the memory once (`sameThingMove`).
+      // SAMENESS BEATS THE ANGLE: after a different thing the memory-drawn redraw is kept — a
+      // fallback drawn from words gave Frederick's job 259 a different heater and mattress. A COPY
+      // is asked again, and a second copy is drawn from words with the thing's written look
+      // (`memoryToWords`): job 399 scene 17 kept its redraw, the same hands, can and cup as the
+      // picture just before it on a new background.
       // A close-up of one part (`partOf`) is held only to not COPYING its memory: it is a different
       // view of the whole by design (the check above holds it to the part and its exact look).
       // A screen shows its item as a small photo: comparing it with the item's own picture tells
@@ -9731,7 +10095,7 @@ async function drawValidatedStill(
       if (
         scene.keyThing &&
         scene.memoryRefUrls?.length &&
-        sameThingMisses < 1 &&
+        sameThingRefused !== "different" &&
         scene.memoryView !== SCREEN_ITEM_VIEW &&
         // A remembered thing kept small beside the subject is not compared side by side: it is
         // meant to look small and placed, not to fill a frame like its memory.
@@ -9740,19 +10104,65 @@ async function drawValidatedStill(
         // thing to compare it with — a first mattress is not "a different mattress" than a heater.
         !scene.memoryOthersOnly
       ) {
-        const same = await scanSameThing(scene.memoryRefUrls[0], buffer, scene.keyThing);
-        if ((!same.same && !scene.partOf) || same.copy) {
-          sameThingMisses++;
-          flags.push(same.same ? COPIES_MEMORY : DIFFERENT_THING);
-          lastError = same.same
+        // Laid beside the picture shown right before it when that is one of its memories: the copy
+        // a viewer would see is a copy of THAT picture (`sameThingReference`).
+        const same = await scanSameThing(sameThingReference(scene)!, buffer, scene.keyThing);
+        const move = sameThingMove(same, sameThingRefused, !!scene.partOf);
+        if (move === "redraw") {
+          sameThingRefused = same.copy ? "copy" : "different";
+          flags.push(same.copy ? COPIES_MEMORY : DIFFERENT_THING);
+          lastError = same.copy
             ? `Still image copies its memory picture's framing`
             : `Still image shows a different ${scene.keyThing}`;
           offSubjectFallback ??= drawn;
+          if (same.copy) copiesMemory.add(buffer);
           console.warn(
-            `[Longform] scene ${scene.index} ${same.same ? "copies its memory picture of" : "shows a different"} ${scene.keyThing} (${same.what}) → ` +
+            `[Longform] scene ${scene.index} ${same.copy ? "copies its memory picture of" : "shows a different"} ${scene.keyThing} (${same.what}) → ` +
               "drawing it again from its memory"
           );
           continue;
+        }
+        if (move === "words") {
+          flags.push(COPIES_MEMORY);
+          copiesMemory.add(buffer);
+          // The copies stay only as the last fallback: a copy is a picture the viewer has just seen.
+          if (offSubjectFallback && copiesMemory.has(offSubjectFallback.buffer)) {
+            copyFallback ??= offSubjectFallback;
+            offSubjectFallback = undefined;
+          }
+          copyFallback ??= drawn;
+          // The memory clause as it was written into the prompt (a picture drawn with nobody in it was
+          // written without the host), swapped for the key thing's look; built again if reworded.
+          const nobodyIn = (s: StoryboardScene): StoryboardScene => ({
+            ...s,
+            humanPresent: false,
+            brollHostLook: undefined,
+            brollHostRef: undefined,
+            hostFaceShown: undefined,
+          });
+          const memory = memoryClause(personFree ? nobodyIn(scene) : scene);
+          Object.assign(scene, memoryToWords(scene));
+          const look = visualOverride ? "" : scrubLegibleWriting(keyThingLookClause(scene));
+          prompt =
+            promptFromWords(prompt, memory, look) ??
+            (personFree
+              ? `${buildStillPrompt(nobodyIn(scene), false, visualOverride, subject, square)} ${PERSON_FREE_FALLBACK}`
+              : buildStillPrompt(scene, false, visualOverride, subject, square));
+          sameThingRefused = undefined;
+          lastError = `Still image copies its memory picture's framing again`;
+          // The copy's last chance, so it never loses its turn to the attempt budget.
+          if (attempt === attempts) attempts++;
+          console.warn(
+            `[Longform] scene ${scene.index} copies its memory picture of ${scene.keyThing} again (${same.what}) → ` +
+              "drawing it from words with its look"
+          );
+          continue;
+        }
+        if (move === "flag") {
+          // The redraw after a copy came back a different one: kept, like any redraw after a
+          // different thing, but the check's answer is on the record.
+          flags.push(DIFFERENT_THING);
+          sameThingRefused = "different";
         }
       }
       // THE HOST IS THE HOST (2026-10-15, the review: Scarlett's routine pictures showed "a
@@ -9858,6 +10268,16 @@ async function drawValidatedStill(
         `${attempts} attempts → shipping the closest frame`
     );
     return shipped(offSubjectFallback);
+  }
+  // A frame that copies its memory, kept only when its redraw from words found nothing better: a
+  // clean frame of the right thing, shown twice, still reads truer than stamped text or broken
+  // geometry.
+  if (copyFallback) {
+    console.warn(
+      `[Longform] scene ${scene.index} still was never drawn apart from its memory picture after ` +
+        `${attempts} attempts → shipping the copy`
+    );
+    return shipped(copyFallback);
   }
   if (textyFallback) {
     console.warn(
@@ -10921,15 +11341,23 @@ async function cutShotsOnWords(
       log(params.hostLook ? `host look: ${params.hostLook}` : "host look: unread — b-roll keeps anonymous hands");
     }
     if (params.continuitySheet == null) {
-      params.continuitySheet = (
+      const sheet = (
         await deriveContinuitySheet(ctx.spokenScript, {
           subject: params.videoSubject,
           styleBible: params.visualStyleBible,
         })
       ).replace(/\b(?:cluttered|messy|jumbled|crowded)\b/gi, "tidy");
+      // The same call names the PEOPLE WHO COME BACK, each with one look (job 399: the passenger
+      // the story follows was three different women in 13 s). They are kept apart from the props
+      // list, which every shot and picture writer reads as things only, exactly as before.
+      params.recurringPeople = parseRecurringPeople(sheet, { hostName: params.hostName });
+      params.continuitySheet = withoutPersonLines(sheet);
       log(
         params.continuitySheet
-          ? `props list: ${params.continuitySheet.split("\n").length} recurring thing(s)`
+          ? `props list: ${params.continuitySheet.split("\n").length} recurring thing(s)` +
+              (params.recurringPeople.length
+                ? `, ${params.recurringPeople.length} recurring person(s): ${params.recurringPeople.map(p => p.name).join(", ")}`
+                : "")
           : `props list: none (call failed) — shots are written without it`
       );
     }
@@ -10989,6 +11417,7 @@ async function cutShotsOnWords(
       sheet: params.continuitySheet || undefined,
       hostName: params.hostName,
       hostLook: params.hostLook,
+      people: params.recurringPeople,
       subject: params.videoSubject,
       log,
     });
@@ -11059,6 +11488,7 @@ async function cutShotsOnWords(
         sheet: params.continuitySheet || undefined,
         hostName: params.hostName,
         hostLook: params.hostLook,
+        people: params.recurringPeople,
         subject: params.videoSubject,
         log,
         only: ids,
@@ -11107,7 +11537,8 @@ async function cutShotsOnWords(
       `spoken lists: ${spoken.lists.length} found${spoken.fromModel ? "" : " (by sentence shape)"}, ` +
         `${listCuts.applied} cut to one picture per item, ${listCuts.handed} handed over from the host, ` +
         `${listCuts.cleared} piece(s) that were not list items unmarked` +
-        (listCuts.skipped.length ? ` — left as they were: ${listCuts.skipped.join("; ")}` : "")
+        (listCuts.skipped.length ? ` — left as they were: ${listCuts.skipped.join("; ")}` : "") +
+        (listCuts.apart.length ? ` — no group picture (one photo cannot hold the list): ${listCuts.apart.join("; ")}` : "")
     );
     for (const s of next) {
       if (!s.showSubject) continue;
@@ -12396,12 +12827,17 @@ async function compositeSceneSplit(
 
 /**
  * A split's panel of a KEY THING is drawn from that thing's earlier pictures, like any picture of it
- * (Hank's job 258: "that's the whole build" showed a square holder unlike the one just built). The
- * memory is looked up on the HOST scene — the panel's own scene object is a copy.
+ * (Hank's job 258: "that's the whole build" showed a square holder unlike the one just built), and
+ * by its written look when none of them is there to follow (`keyThingLookClause`). It also wears the
+ * named kind's exact look the pictures of that thing carry (`panelNamedLook`): the named-things step
+ * reads only full-frame pictures, and job 400's scroll panel at scene 27 was a blank parchment on two
+ * rollers between pictures of one tied papyrus roll. Everything is looked up on the HOST scene — the
+ * panel's own scene object is a copy. Exported for testing.
  */
-async function withSplitMemory(
+export async function withSplitMemory(
   host: StoryboardScene,
-  right: StoryboardScene
+  right: StoryboardScene,
+  timeoutMs?: number
 ): Promise<StoryboardScene> {
   if (!host.keyThing) return right;
   // The panel's soft print decides its remembered close-up (`BLUR_PRINT_VIEW`), so it is marked
@@ -12410,7 +12846,8 @@ async function withSplitMemory(
   return {
     ...right,
     keyThing: host.keyThing,
-    ...memoryFields(await memoryFor(host), memoryView(host)),
+    namedLook: right.namedLook ?? panelLook(host),
+    ...memoryFields(await memoryFor(host, timeoutMs), memoryView(host)),
   };
 }
 
@@ -15439,17 +15876,16 @@ async function runUnifiedPipeline(
   // The one physical WORLD the whole video lives in (channel persona + full script), derived HERE —
   // before storyboarding — so the same world seeds every scene instead of only re-converging them
   // at the enhancer. Guard preserves an operator's persisted/hand-edited bible on regenerate (same
-  // intent as the beats pass below). brollDepictsBook stays at this call site (import cycle), so a
-  // book-mentioning bible never reaches the seeds.
+  // intent as the beats pass below). The book guard stays at this call site (import cycle), so
+  // printed matter never reaches the seeds — only the words that name it go: job 400 lost its
+  // whole bible to one clause about books, and its Rome pictures lost their look with it
+  // (`bibleWithoutPrintedMatter`).
   if (!params.visualStyleBible) {
     const bible = await deriveStyleBible(params, spokenScript);
-    if (bible && brollDepictsBook(bible)) {
-      appendJobWarning(
-        jobId,
-        "Style bible depicted printed matter — dropped; b-roll world consistency degraded"
-      );
-    } else if (bible) {
-      params.visualStyleBible = bible;
+    if (bible) {
+      const safe = bibleWithoutPrintedMatter(bible);
+      if (safe.warning) appendJobWarning(jobId, safe.warning);
+      if (safe.bible) params.visualStyleBible = safe.bible;
     } else {
       appendJobWarning(
         jobId,
@@ -16345,18 +16781,17 @@ async function runUnifiedPipeline(
     // brollDepictsBook can't move into visualDirection.ts (import cycle), so the sweep is here.
     // Only adopt this pass's bible when the pre-storyboard pass produced none — never clobber the
     // world the scenes were already seeded with (or an operator's hand-edited one).
+    // As before the storyboard: the printed matter goes, the rest of the bible and of each beat
+    // stays (job 400).
     if (!params.visualStyleBible) {
-      if (brollDepictsBook(direction.styleBible)) {
-        console.warn(
-          `[Longform ${jobId}] style bible depicted printed matter — dropped`
-        );
-      } else {
-        params.visualStyleBible = direction.styleBible;
-      }
+      const safe = bibleWithoutPrintedMatter(direction.styleBible);
+      if (safe.warning) console.warn(`[Longform ${jobId}] ${safe.warning}`);
+      if (safe.bible) params.visualStyleBible = safe.bible;
     }
     for (const s of scenes) {
       const beat = direction.beats[s.index];
-      if (beat && !brollDepictsBook(beat)) s.visualBeat = beat;
+      const kept = beat ? withoutPrintedMatter(beat).kept : "";
+      if (kept.trim()) s.visualBeat = kept;
     }
   }
 
@@ -18660,6 +19095,12 @@ async function regenerateSplitRight(
   scene.sceneStatus = "processing";
   scene.error = undefined;
   const dims = dimensionsFor(TALKING_HEAD_ASPECT_RATIO);
+  // A regenerated panel of a key thing is still drawn from that thing's pictures, by its written
+  // look when it has none, and in its named kind's look (`withSplitMemory`) — all of which are read
+  // off what the last pass over THIS board found. Every path here starts from a storyboard read back
+  // from the database, new objects no pass has seen, so without this the operator's panel was drawn
+  // from its own words alone; a full-frame regenerate has always done the same (`renderSceneClipInPlace`).
+  attachMemory(scenes, [scene], params.keyThings);
 
   if (!scene.hostClipUrls?.length) {
     const existing = scene.clipUrls?.length
@@ -19230,10 +19671,13 @@ function prepareSceneEdit(ctx: SceneEditContext, req: SceneEditRequest): void {
     // A TYPED PICTURE OWNS THE PICTURE (`ownTypedPicture`): new words on a cutaway become what it must
     // show and what the check holds it to, never the planner's old subject (job 383 scenes 20, 33,
     // 40). Before the words land, so the prompt it already has (sent back by a plain regenerate)
-    // is told apart from typed words. A split panel is already drawn from, and checked against, its
-    // own words (`buildSplitRightScene`).
+    // is told apart from typed words. A split panel is drawn from, and checked against, its own words
+    // (`buildSplitRightScene`), but its key thing — and with it the memory pictures and named look a
+    // redraw is now given (`withSplitMemory`) — sits on the host scene: typed panel words keep it only
+    // while they still name it (`ownTypedPanel`).
     if (typedVisual && !scene.hostPresent && !splitOnly)
       ownTypedPicture(scene, typedVisual, ctx.params.keyThings);
+    if (splitOnly && typedSplit) ownTypedPanel(scene, typedSplit, ctx.params.keyThings);
     if (typedVisual) scene.visualPrompt = typedVisual;
     if (splitOnly && typedSplit) scene.splitVisual = typedSplit;
     const edited = splitOnly ? !!typedSplit : !!typedVisual;
@@ -21073,6 +21517,8 @@ async function runSplitEdit(
   } else if (edit.mode === "prompt") {
     const typed = edit.prompt?.trim();
     if (typed) {
+      // What the old panel was tied to goes unless the typed words name it (`ownTypedPanel`).
+      ownTypedPanel(scene, typed, params.keyThings);
       scene.splitVisual = typed;
       if (edit.verbatim) scene.splitVisualSeed = typed;
     } else if (!scene.splitVisual) {

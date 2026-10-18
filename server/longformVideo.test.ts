@@ -10193,9 +10193,13 @@ describe("a picture that ships with a fault says so, and two faults get one chan
     expect(out.buffer.equals(b)).toBe(true);
     expect(out.flaws).toBeUndefined();
     expect(s1.pictureChecks.map((c: any) => c.flags)).toEqual([["different thing"], []]);
+    // Sameness beats the angle: the redraw after a different thing is kept without asking again.
+    expect(mockScanSameThing).toHaveBeenCalledTimes(1);
 
     mockScanSameThing.mockReset();
-    mockScanSameThing.mockResolvedValueOnce({ same: true, copy: true, what: "same framing" });
+    mockScanSameThing
+      .mockResolvedValueOnce({ same: true, copy: true, what: "same framing" })
+      .mockResolvedValueOnce({ same: true, copy: false, what: "" });
     const s2 = vise();
     await generateValidatedStill(s2, 4, undefined, drawsOf(a, b));
     expect(s2.pictureChecks[0].flags).toEqual(["copies its memory"]);
@@ -10231,6 +10235,136 @@ describe("a picture that ships with a fault says so, and two faults get one chan
     } finally {
       delete process.env.FAULT_REDRAWS;
     }
+  });
+});
+
+describe("a memory picture that copies its memory twice is drawn from words (job 399 scenes 16-17)", () => {
+  const pngOf = (bg: string) =>
+    sharp({ create: { width: 8, height: 8, channels: 3, background: bg } }).png().toBuffer();
+  const drawsOf = (...frames: Buffer[]) => {
+    const fn = vi.fn();
+    for (const f of frames) fn.mockResolvedValueOnce({ success: true, fileData: f });
+    return fn;
+  };
+  afterEach(() => {
+    mockScanSameThing.mockReset();
+    mockScanSameThing.mockResolvedValue({ same: true, copy: false, what: "" });
+  });
+
+  // Job 399's props-list look for the cup, and scene 17 as it was drawn: from scene 16's picture.
+  const CUP_LOOK = "clear hard plastic, filled with ice cubes, half-filled with soda, no markings";
+  const SCENE_16 = "https://r2/longform/399/still-src-16.png";
+  const HOST = "https://r2/host.jpg";
+  const cup = () =>
+    ({
+      index: 17,
+      scriptText:
+        "I figured that out much too late, after more flights than I care to count spent nursing a thimble of ginger ale.",
+      showSubject: "a small plastic cup barely filled with ginger ale on a tray table",
+      visualPrompt: "A plastic cup half-filled with ginger ale sitting on a fold-down tray table in an aircraft seat.",
+      keyThing: "plastic cup",
+      humanPresent: true,
+      brollHostLook: "a woman in her late fifties, shoulder-length grey-blonde hair, navy uniform",
+      brollHostRef: HOST,
+      memoryRefUrls: [SCENE_16],
+      memoryView: "a close view of one part of it, filling most of the frame",
+      memoryRightBefore: 0,
+      memoryWordsLook: CUP_LOOK,
+    }) as any;
+  const copy = { same: true, copy: true, what: "the same framing" };
+
+  it("399-17: a copy, then a copy again → drawn from words with the cup's look, no reference but the host", async () => {
+    const [a, b, c] = await Promise.all([pngOf("#a11"), pngOf("#a22"), pngOf("#a33")]);
+    mockScanSameThing.mockReset();
+    mockScanSameThing.mockResolvedValueOnce(copy).mockResolvedValueOnce(copy);
+    const genImage = drawsOf(a, b, c);
+    const scene = cup();
+    const out = await generateValidatedStill(scene, 4, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(3);
+    const [c1, c2, c3] = genImage.mock.calls.map(x => x[0]);
+    expect(c1.referenceImageUrls).toEqual([SCENE_16, HOST]);
+    expect(c1.prompt).toMatch(/RIGHT BEFORE this one in the video/);
+    expect(c2.prompt).toBe(c1.prompt); // the first copy gets its same-prompt redraw from memory
+    // The third is drawn from words: the cup by its written look, the host photo only for the host.
+    expect(c3.referenceImageUrl).toBe(HOST);
+    expect(c3.referenceImageUrls).toBeUndefined();
+    expect(c3.prompt).toContain(`HOW THE PLASTIC CUP LOOKS in every picture of this video: ${CUP_LOOK}`);
+    expect(c3.prompt).not.toMatch(/reference image shows this exact plastic cup|RIGHT BEFORE/);
+    expect(out.buffer.equals(c)).toBe(true);
+    expect(out.flaws).toBeUndefined();
+    expect(scene.pictureChecks.map((x: any) => x.flags)).toEqual([["copies its memory"], ["copies its memory"], []]);
+    // Compared with the picture shown right before it, and never again once it has no reference.
+    expect(mockScanSameThing).toHaveBeenCalledTimes(2);
+    expect(mockScanSameThing.mock.calls.map(x => x[0])).toEqual([SCENE_16, SCENE_16]);
+    expect(scene.memoryRefUrls).toBeUndefined();
+    expect(scene.keyThingLook).toBe(CUP_LOOK);
+  });
+
+  it("a copy whose redraw is a new view keeps the redraw — nothing is drawn from words", async () => {
+    const [a, b] = await Promise.all([pngOf("#b11"), pngOf("#b22")]);
+    mockScanSameThing.mockReset();
+    mockScanSameThing.mockResolvedValueOnce(copy).mockResolvedValueOnce({ same: true, copy: false, what: "" });
+    const genImage = drawsOf(a, b);
+    const scene = cup();
+    const out = await generateValidatedStill(scene, 4, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(2);
+    expect(out.buffer.equals(b)).toBe(true);
+    expect(out.flaws).toBeUndefined();
+    expect(scene.memoryRefUrls).toEqual([SCENE_16]);
+    expect(scene.keyThingLook).toBeUndefined();
+  });
+
+  it("a copy whose redraw is a different cup keeps the redraw, and says so", async () => {
+    const [a, b] = await Promise.all([pngOf("#c11"), pngOf("#c22")]);
+    mockScanSameThing.mockReset();
+    mockScanSameThing.mockResolvedValueOnce(copy).mockResolvedValueOnce({ same: false, copy: false, what: "a paper cup" });
+    const genImage = drawsOf(a, b);
+    const out = await generateValidatedStill(cup(), 4, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(2);
+    expect(out.buffer.equals(b)).toBe(true);
+    expect(out.flaws).toEqual(["different thing"]);
+  });
+
+  it("a copy twice whose redraw from words never comes ships the first copy, saying so — never no picture", async () => {
+    const [a, b] = await Promise.all([pngOf("#d11"), pngOf("#d22")]);
+    mockScanSameThing.mockReset();
+    mockScanSameThing.mockResolvedValueOnce(copy).mockResolvedValueOnce(copy);
+    const genImage = drawsOf(a, b).mockResolvedValue({ success: false, error: "OpenAI image 500: oops" });
+    const out = await generateValidatedStill(cup(), 4, undefined, genImage);
+    expect(out.buffer.equals(a)).toBe(true);
+    expect(out.flaws).toEqual(["copies its memory"]);
+  });
+
+  it("a frame of the wrong subject still ships before a copy, as before", async () => {
+    const [a, b, c] = await Promise.all([pngOf("#e11"), pngOf("#e22"), pngOf("#e33")]);
+    mockScanStillDefects.mockReset();
+    mockScanStillDefects
+      .mockResolvedValueOnce({ overlay: false, broken: false, what: "", missing: true } as any)
+      .mockResolvedValue({ overlay: false, broken: false, what: "" } as any);
+    mockScanSameThing.mockReset();
+    mockScanSameThing.mockResolvedValueOnce(copy).mockResolvedValueOnce(copy);
+    const genImage = drawsOf(a, b, c).mockResolvedValue({ success: false, error: "OpenAI image 500: oops" });
+    try {
+      const out = await generateValidatedStill(cup(), 5, undefined, genImage);
+      // a: subject missing (the off-subject fallback); b and c copies; the words draw never comes.
+      expect(out.buffer.equals(a)).toBe(true);
+    } finally {
+      mockScanStillDefects.mockReset();
+      mockScanStillDefects.mockResolvedValue({ overlay: false, broken: false, what: "" } as any);
+    }
+  });
+
+  it("with no picture right before among its memories, it is compared with its first memory as before", async () => {
+    const a = await pngOf("#f11");
+    const genImage = drawsOf(a);
+    await generateValidatedStill(
+      { ...cup(), memoryRefUrls: ["https://r2/first.png", SCENE_16], memoryRightBefore: undefined },
+      4,
+      undefined,
+      genImage
+    );
+    expect(mockScanSameThing.mock.calls[0][0]).toBe("https://r2/first.png");
+    expect(genImage.mock.calls[0][0].prompt).not.toMatch(/RIGHT BEFORE/);
   });
 });
 
@@ -11790,5 +11924,125 @@ describe("blurred print swaps the no-writing rule for unreadable printing", asyn
     expect(withAllowedText(p, undefined, true)).not.toContain(NO_READABLE_TEXT);
     expect(withAllowedText(p, undefined, false)).toBe(p);
     expect(withAllowedText(p, "HANDMADE", true)).toMatch(/exactly "HANDMADE"/);
+  });
+});
+
+describe("a style bible loses only its printed matter (job 400)", async () => {
+  const { withoutPrintedMatter, bibleWithoutPrintedMatter, BIBLE_ALL_PRINT_WARNING, brollDepictsBook } =
+    await import("./longformVideo");
+  const { groupJobWarnings } = await import("../shared/jobWarnings");
+  // Job 400's two real bibles, as the server logged them on the rehearsal run (the job stored
+  // neither: both were dropped whole, "Style bible depicted printed matter — dropped").
+  const JOB_400_BIBLE =
+    "Home base: a quiet home office or study in a temperate climate during autumn or early winter, where a man in his sixties sits with books and notes about Stoic philosophy. " +
+    "The video travels to: a pharmacy greeting card aisle on a Tuesday morning, a parking lot, a kitchen table at two in the morning, a Roman senator's study two thousand years ago (imagined through period objects and spaces), and a weekend or evening moment where a phone is held toward a screen corner. " +
+    "Recurring materials: sympathy cards, birthday cards,";
+  const JOB_400_LATE_BIBLE =
+    "Home base: a quiet study or reading room where an older man sits with books and papers. " +
+    "The video travels to a pharmacy on a Tuesday morning, a parking lot, ordinary waiting rooms, a church pew, a kitchen table at night, and ancient Rome. " +
+    "Late spring through early summer. Recurring props: sympathy cards, a clock, a book, a phone. " +
+    "The tone is unhurried, meditative, and deeply personal.";
+
+  it("job 400: keeps the home base and the Rome places, leaves out only the clause about books", () => {
+    expect(brollDepictsBook(JOB_400_BIBLE)).toBe(true); // what dropped the whole bible before
+    const r = bibleWithoutPrintedMatter(JOB_400_BIBLE);
+    expect(r.bible).toBe(
+      "Home base: a quiet home office or study in a temperate climate during autumn or early winter. " +
+        "The video travels to: a pharmacy greeting card aisle on a Tuesday morning, a parking lot, a kitchen table at two in the morning, a Roman senator's study two thousand years ago (imagined through period objects and spaces), and a weekend or evening moment where a phone is held toward a screen corner. " +
+        "Recurring materials: sympathy cards, birthday cards,"
+    );
+    expect(brollDepictsBook(r.bible!)).toBe(false);
+    expect(r.warning).toBe(
+      "Style bible: printed matter left out, the rest kept " +
+        "(where a man in his sixties sits with books and notes about Stoic philosophy)"
+    );
+    // On the card the left-out words go behind "Details", the sentence stays short.
+    const [row] = groupJobWarnings([r.warning!]);
+    expect(row.text).toBe("Style bible: printed matter left out, the rest kept");
+    expect(row.details).toEqual(["where a man in his sixties sits with books and notes about Stoic philosophy"]);
+  });
+
+  it("job 400's late bible: a home base that IS the books goes whole, a book in a props list goes alone", () => {
+    const r = bibleWithoutPrintedMatter(JOB_400_LATE_BIBLE);
+    expect(r.bible).toBe(
+      "The video travels to a pharmacy on a Tuesday morning, a parking lot, ordinary waiting rooms, a church pew, a kitchen table at night, and ancient Rome. " +
+        "Late spring through early summer. Recurring props: sympathy cards, a clock, a phone. " +
+        "The tone is unhurried, meditative, and deeply personal."
+    );
+    expect(r.warning).toBe(
+      "Style bible: printed matter left out, the rest kept " +
+        "(Home base: a quiet study or reading room where an older man sits with books and papers. / a book)"
+    );
+  });
+
+  it("a sentence whose FIRST part is the print goes whole — never a dangling 'Home base: under a window.'", () => {
+    const r = withoutPrintedMatter(
+      "Home base: a reading nook lined with old books, under a window. " +
+        "Recurring props: a worn paperback of the essay with a cracked spine, a wall calendar, a wristwatch. " +
+        "The tone is unhurried and reflective."
+    );
+    expect(r.kept).toBe("The tone is unhurried and reflective.");
+    expect(r.dropped).toEqual([
+      "Home base: a reading nook lined with old books, under a window.",
+      "Recurring props: a worn paperback of the essay with a cracked spine, a wall calendar, a wristwatch.",
+    ]);
+  });
+
+  it("never splits a number or a bracket, and keeps the sentence's own full stop", () => {
+    const r = withoutPrintedMatter(
+      "Recurring materials: price tags (under $10,000 a year, all by hand), a stack of old magazines, a cash box."
+    );
+    expect(r.kept).toBe("Recurring materials: price tags (under $10,000 a year, all by hand), a cash box.");
+    expect(r.dropped).toEqual(["a stack of old magazines"]);
+    // The print as the LAST part: the full stop moves onto what is kept.
+    expect(withoutPrintedMatter("A workbench with a clamp, a mallet, and an open manual.").kept).toBe(
+      "A workbench with a clamp, a mallet."
+    );
+  });
+
+  it("leaves a bible with no printed matter exactly as it was — jobs 397, 398 and 399, no warning", () => {
+    const bibles = [
+      "Home base: an uncluttered workshop garage in a temperate climate, where finished wood pieces lean against walls and the work bench holds salvaged tools and shop habits. The script travels to a Saturday craft fair or farmers market (impulse buyers at a table edge), an Etsy shopper's home three states away (personalized board discovery), and a driveway at pickup time (furniture buyer with truck). Early spring or fall, when markets run. Recurring materials: walnut and maple boards in various stages of sale-readiness, price tags, shop notes. The tone is methodical",
+      "Home base: a one-car garage workshop in a temperate climate, where projects are built, sanded, and finished on a workbench with hand tools and power tools. The script travels to a weekend craft market or vendor table where finished pieces are priced and sold. Late Saturday, ongoing. Recurring materials: pine screen molding, burnt wood scraps in a coffee can, sandpaper, lattice panels in various stages of completion. The tone is methodical and cost-conscious — each project weighed for time spent versus dollars earned.",
+      "Home base: the interior cabin of a commercial aircraft in flight, where the beverage and snack service happens—rows, aisles, seats, overhead bins, the galley at the front. The script travels to: a gate area or boarding bridge (boarding), a seat in row fourteen mid-flight (the repeated reference point), and the galley during service. Time of year is unspecified; the flight crosses U.S. airspace mid-continent. Recurring materials: beverage cans, plastic cups with ice, pretzel baskets, cookie packets, small liquor bottles. The tone is methodical and transactional—observing the quiet protocols of airline",
+    ];
+    for (const b of bibles) {
+      expect(bibleWithoutPrintedMatter(b)).toEqual({ bible: b });
+      expect(withoutPrintedMatter(b)).toEqual({ kept: b, dropped: [] });
+    }
+  });
+
+  it("never splits inside an abbreviation, so dropping a neighbour keeps 'U.S. airspace' whole", () => {
+    const b =
+      "Home base: the cabin of a commercial aircraft in flight. Time of year is unspecified; the flight crosses U.S. airspace mid-continent. " +
+      "Recurring materials: an airline magazine in every seat pocket, plastic cups with ice.";
+    const r = withoutPrintedMatter(b);
+    expect(r.dropped).toEqual(["Recurring materials: an airline magazine in every seat pocket, plastic cups with ice."]);
+    expect(r.kept).toBe(
+      "Home base: the cabin of a commercial aircraft in flight. Time of year is unspecified; the flight crosses U.S. airspace mid-continent."
+    );
+  });
+
+  it("drops a bible that is nothing but printed matter, with the old warning", () => {
+    const b = "Home base: a reading nook lined with old books. Recurring props: a leather journal and a dog-eared paperback.";
+    expect(bibleWithoutPrintedMatter(b)).toEqual({ warning: BIBLE_ALL_PRINT_WARNING });
+  });
+
+  it("job 400's real beats pass untouched; only a printed-matter sentence added to one goes", () => {
+    // Real beats of job 400 (stored): naming the essay or a chapter is not printed matter to the
+    // guard, so none of them changes.
+    for (const beat of [
+      "Historical context: Seneca's life as a wealthy, powerful man in Rome, buried under obligations, later ordered to die by the emperor he served.",
+      "The host names the channel's audience and purpose, then introduces Seneca and the essay as the frame for understanding time as theft, not shortage.",
+      "The host places Seneca's thinking into a larger digital work, naming Chapter Twelve as the direct application to time and legacy in the remaining years.",
+    ]) {
+      expect(withoutPrintedMatter(beat)).toEqual({ kept: beat, dropped: [] });
+    }
+    const added =
+      "Historical context: Seneca's life as a wealthy, powerful man in Rome, buried under obligations. He writes the essay in a leather notebook.";
+    expect(withoutPrintedMatter(added).kept).toBe(
+      "Historical context: Seneca's life as a wealthy, powerful man in Rome, buried under obligations."
+    );
+    expect(withoutPrintedMatter("An open guidebook on the seat.").kept).toBe("");
   });
 });

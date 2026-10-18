@@ -314,6 +314,18 @@ export interface KeyThing {
 }
 
 /**
+ * Someone other than the host who comes back in a video's story — the same "she" a story follows
+ * over several shots, a customer seen again — and the one look every picture of them keeps
+ * (`parseRecurringPeople` in server/shotList.ts). `name` is how the script refers to them ("the
+ * woman passenger"); `look` is what a picture generator draws from behind or the side: age range,
+ * build, hair and clothes, never a face.
+ */
+export interface RecurringPerson {
+  name: string;
+  look: string;
+}
+
+/**
  * How far along a thing the video MAKES is in one picture, earliest first: "material" (the raw
  * stock or pieces before any work), "making" (being made, partly built), "done" (finished —
  * finishing touches such as oil, wax or a felt pad count as done).
@@ -450,7 +462,9 @@ export interface StoryboardScene {
   /**
    * The picture leading into a spoken list when the host could not say the bridge words: the place
    * the line names with ALL the list's items in it together. The items after it are drawn from it
-   * (`listSetFor` in pictureMemory), so each close-up is the same thing as in the group.
+   * (`listSetFor` in pictureMemory), so each close-up is the same thing as in the group. Only when
+   * one photograph can hold every item (`itemsInOnePhoto` in spokenLists): a list of ideas, people,
+   * times, places or steps keeps an ordinary bridge picture (job 400's paper cut-outs).
    */
   listSet?: true;
   /**
@@ -563,6 +577,18 @@ export interface StoryboardScene {
    */
   keyThingLook?: string;
   /**
+   * Where in `memoryRefUrls` the picture shown RIGHT BEFORE this one is, when it is one of its memory
+   * pictures and about something else (set at render, `rightBeforeToRecompose`): it lends only the
+   * thing's look, never its composition (job 399 scene 17 came back as scene 16 on a new background).
+   */
+  memoryRightBefore?: number;
+  /**
+   * Its key thing's written look, set at render only on a picture drawn FROM a picture of its own
+   * thing (where `keyThingLook` stays unset): kept for the redraw from words a picture gets when it
+   * copies its memory twice (`memoryToWords`).
+   */
+  memoryWordsLook?: string;
+  /**
    * The picture's last check said what it must show is not in it (`missing`), so no later picture is
    * drawn from it (`memorySourcesFor`): stored films had 22 first pictures copied after failing
    * their last check. Never set for a staged look or readable writing alone — the thing is there.
@@ -617,6 +643,21 @@ export interface StoryboardScene {
    * drawn from one photo, and the prompt asks for each of them (`otherPersonClause`).
    */
   otherPeople?: number;
+  /**
+   * The fixed look of the person (or people) `otherPerson` names when they come back in the story
+   * (`matchRecurringPeople` in server/hostLook.ts, stamped by `markHostBroll`): every picture of
+   * them is drawn with the same age, hair and clothes (`otherPersonClause`). Unset for someone the
+   * story shows only once, and for a name that fits no one or more than one recurring person.
+   */
+  otherPersonLooks?: RecurringPerson[];
+  /**
+   * The HOST when they are in a picture WITH someone else (`otherPerson`): the words naming them in
+   * the description (`who`: "a nurse" on a nurse's channel, "the host") and the host's look (`look`).
+   * Drawn from that look in words — never the host photo — seen from behind or the side, the face
+   * never shown, beside the other people (`hostWithOthersClause`). Set by `markHostBroll`
+   * (`castOfPicture` in server/hostLook.ts) on a channel with a host on camera; unset otherwise.
+   */
+  hostAmongOthers?: { who: string; look: string };
   /**
    * What this picture's SENTENCE rules out, so the picture must not show it — the act it says not
    * to do, the thing it says is not meant or is used instead of, or the place it says to keep
@@ -1525,6 +1566,12 @@ export interface LongformInputParams {
    * thing looks the same in every picture of it. Snapshotted with the props list.
    */
   keyThings?: KeyThing[];
+  /**
+   * The people other than the host who come back in the story, each with one fixed look, written
+   * by the same call as the props list (its `PERSON name: look` lines, `parseRecurringPeople`) and
+   * kept apart from `continuitySheet`, which stays things only. Snapshotted with the props list.
+   */
+  recurringPeople?: RecurringPerson[];
   /**
    * The spoken lists found in the whole script (`server/spokenLists.ts`), kept for the voicing
    * stage's last pass, which applies them again on the final lengths.

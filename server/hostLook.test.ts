@@ -257,3 +257,93 @@ describe("a line about the chin, jaw or neck (the audit, 2026-10-18)", () => {
     );
   });
 });
+
+describe("a strand is part of a person only when it is hair (round 9's review, 2026-10-18)", () => {
+  it("never reads a strand of pearls, beads, yarn or lights as a person", async () => {
+    const { SHOWS_PERSON, BODY_PART_WORDS, showsPerson } = await import("./hostLook");
+    for (const thing of [
+      "a pearl strand on the dresser",
+      "pearl strand necklace resting unused inside the open jewelry box", // job 223 scene 12
+      "single strand pearl necklace with round ivory pearls laid on the dressing room table", // job 234 scene 7
+      "chunky strand of large oat-toned matte beads on a soft cloth, close view", // job 392 scene 26
+      "a double strand of beads coiled on a velvet tray",
+      "a loose strand of pearls caught in the bathroom drain", // a strand OF something else, wherever it lies
+      "stray strands of tinsel on the bottom branches",
+      "two strands of yarn held together over the hook",
+      "strand lights wrapped around the porch rail",
+    ]) {
+      expect(SHOWS_PERSON.test(thing), thing).toBe(false);
+      expect(showsPerson(thing), thing).toBe(false);
+      expect(BODY_PART_WORDS.test(thing), thing).toBe(false);
+    }
+  });
+
+  it("still reads a strand of hair as a person, with or without the word 'hair'", async () => {
+    const { SHOWS_PERSON, BODY_PART_WORDS } = await import("./hostLook");
+    for (const hair of [
+      "A few strands of gray hair caught in a round brush on the counter.", // the operator's own case, 2026-10-02
+      "strands of her hair lifting in the breeze",
+      "stray gray strands catching the window light",
+      "flyaway strands lifting off the crown",
+      "a few fallen strands on the bathroom tile",
+      "a few strands caught in the wide-tooth comb",
+      "loose strands in the shower drain",
+    ]) {
+      expect(SHOWS_PERSON.test(hair), hair).toBe(true);
+      expect(BODY_PART_WORDS.test(hair), hair).toBe(true);
+    }
+  });
+
+  it("a strand its own name makes a thing is that thing even in a drain or a brush, or with 'stray' before it", async () => {
+    const { SHOWS_PERSON, BODY_PART_WORDS } = await import("./hostLook");
+    for (const thing of [
+      "a pearl strand caught in the drain",
+      "single strand pearl necklace in the bathroom drain",
+      "a yarn strand wrapped around a paint brush",
+      "strand lights caught in the gutter drain",
+      "stray yarn strands on the kitchen table",
+      "a few stray tinsel strands on the rug",
+      "fallen pearl strands on the carpet",
+    ]) {
+      expect(SHOWS_PERSON.test(thing), thing).toBe(false);
+      expect(BODY_PART_WORDS.test(thing), thing).toBe(false);
+    }
+    // Only a material or a piece right beside the strand names it: a hair word there does not.
+    for (const hair of [
+      "silky strands caught in the brush",
+      "stray light-brown strands on the collar",
+      "a single strand caught in the comb",
+      "shed strands collected in the drain cover",
+    ]) {
+      expect(SHOWS_PERSON.test(hair), hair).toBe(true);
+      expect(BODY_PART_WORDS.test(hair), hair).toBe(true);
+    }
+  });
+
+  it("a pearl strand set down is the necklace alone under any other line, and still worn under a neck line", () => {
+    const look = { hostLook: "a woman with silver hair in a striped top" };
+    const alone = pic(1, "a pearl strand on the dresser", { scriptText: "Pearls never really go out of style." });
+    const fallen = pic(2, "a few strands caught in the wide-tooth comb", { scriptText: "That is normal shedding." });
+    // Job 325 scene 12's line: the piece the line is about sits at the collarbone, so it is worn.
+    const neck = pic(3, "a pearl strand resting inside the open jewelry box", {
+      scriptText: "A single strand sitting right at the collarbone.",
+    });
+    expect(markHostBroll([alone, fallen, neck], look, "https://x/host.jpg")).toBe(2);
+    expect(alone.humanPresent).toBeFalsy();
+    expect(alone.brollHostLook).toBeUndefined();
+    expect(alone.showSubject).toBe("a pearl strand on the dresser");
+    expect(fallen.brollHostLook).toBe(look.hostLook);
+    expect(neck.brollHostLook).toBe(look.hostLook);
+    expect(neck.showSubject).toMatch(/worn at the host's own neck/);
+  });
+
+  it("a split panel of a pearl strand is not about the host's body; one of fallen hair is", () => {
+    const look = { hostLook: "a woman with silver hair" };
+    const panel = (splitVisual: string) => pic(1, "talking", { hostPresent: true, splitVisual } as Partial<StoryboardScene>);
+    const pearls = panel("a pearl strand laid on the dresser by the window");
+    const hair = panel("a few strands caught in a round brush on the counter");
+    markHostBroll([pearls, hair], look, "https://x/host.jpg");
+    expect(pearls.brollHostLook).toBeUndefined();
+    expect(hair.brollHostLook).toBe(look.hostLook);
+  });
+});

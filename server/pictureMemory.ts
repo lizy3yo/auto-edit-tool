@@ -14,7 +14,7 @@
  */
 import { PART_VIEW } from "./namedLooks";
 import type { KeyThing, StoryboardScene } from "@shared/types";
-import { BUILD_STAGES, keyThingsIn, showsScreen } from "./shotList";
+import { BUILD_STAGES, keyThingsIn, nearlySameSubject, sameSubject, showsScreen } from "./shotList";
 
 /** The longest a picture waits for its memory before it is drawn from words alone. */
 export const MEMORY_WAIT_MS = 8 * 60_000;
@@ -91,6 +91,69 @@ export function memorySourcesFor(
   // Every other key thing in it: that thing's memory (the heater beside the mattress).
   for (const t of s.otherKeyThings ?? []) add(memoryOf(before.filter(x => shows(x, t)), t));
   return out;
+}
+
+/** The words a picture is drawn by: a split's panel description, else its own. */
+const pictureWords = (s: StoryboardScene) =>
+  s.hostPresent ? s.splitVisual ?? "" : s.showSubject ?? s.visualPrompt ?? "";
+
+/**
+ * THE PICTURE RIGHT BEFORE IS A MEMORY, NEVER A TEMPLATE (2026-10-18, job 399 scenes 16-17): "hands
+ * pouring soda into an ice-filled plastic cup at the cart" was the memory of the next picture, "a
+ * small plastic cup barely filled with ginger ale on a tray table". Handed the picture just shown, the
+ * picture maker came back with the same hands tipping the same can into the same cup at the same
+ * angle — only the background changed, one picture for 27 s. Told "the same cup, from another spot",
+ * it kept everything but the spot. So when the picture shown right before `s` is one of `s`'s memory
+ * pictures and is about something else, `s` is told to take only the thing's look from it
+ * (`rightBeforeClause`), and the same-thing check compares `s` with THAT picture. "Something else" is
+ * told by the words alone, so it also takes the same thing described anew (job 397 scenes 28-29: the
+ * board close up on the bench, then leaning against the wall) — where a new photo is right too.
+ *
+ * Returns that picture, or undefined: when the picture before is not one of its memories, when `s`
+ * continues it (`sameShot`, or the same or nearly the same words — a continuation has its own view,
+ * `joinSameContext`), and for a list item drawn from its list's group picture or a screen, whose
+ * framing is set apart already (`SET_ITEM_VIEW`, `SCREEN_ITEM_VIEW`). Pure.
+ */
+export function rightBeforeToRecompose(
+  scenes: StoryboardScene[],
+  s: StoryboardScene,
+  sources: StoryboardScene[] = memorySourcesFor(scenes, s)
+): StoryboardScene | undefined {
+  const i = scenes.indexOf(s);
+  if (i <= 0 || s.sameShot || listSetFor(scenes, s) || isScreen(s)) return undefined;
+  const before = scenes[i - 1];
+  if (!sources.includes(before)) return undefined;
+  const [a, b] = [pictureWords(before), pictureWords(s)];
+  if (!a.trim() || !b.trim() || sameSubject(a, b) || nearlySameSubject(a, b)) return undefined;
+  return before;
+}
+
+/** What the still loop does with the same-thing check's answer on a memory picture (`sameThingMove`). */
+export type SameThingMove = "pass" | "redraw" | "words" | "flag";
+
+/**
+ * WHAT THE SAME-THING CHECK'S ANSWER DOES (`scanSameThing`). `before`: what it refused the draw
+ * before this one for, if anything.
+ * - The first answer: a different thing, or a copy of the reference's framing → "redraw" from memory.
+ * - After a DIFFERENT thing it is not asked again (the caller skips it): SAMENESS BEATS THE ANGLE —
+ *   the one redraw from memory is kept, since a fallback drawn from words gave Frederick's job 259 a
+ *   different heater and mattress.
+ * - After a COPY, still a copy → "words": a copy repeats a picture the viewer has just seen, so it is
+ *   drawn from words with the thing's written look rather than kept (job 399 scene 17). Now a
+ *   different thing → "flag": kept, as before, but on the record — the check said so.
+ * A close-up of one part (`partOf`) is a different view of the whole by design: only a copy counts.
+ * Pure.
+ */
+export function sameThingMove(
+  verdict: { same: boolean; copy: boolean },
+  before: "copy" | "different" | undefined,
+  partOf = false
+): SameThingMove {
+  if (before === "different") return "pass";
+  const different = !verdict.same && !partOf;
+  if (verdict.copy) return before === "copy" ? "words" : "redraw";
+  if (different) return before === "copy" ? "flag" : "redraw";
+  return "pass";
 }
 
 /**
@@ -434,6 +497,36 @@ export function keyThingLookClause(scene: StoryboardScene): string {
     : ` HOW THE ${scene.keyThing.toUpperCase()} LOOKS in every picture of this video: ${scene.keyThingLook}. Draw this same one${own}`;
 }
 
+/**
+ * A SPLIT PANEL WEARS ITS THING'S NAMED LOOK (2026-10-18, job 400 scene 27). The named-things step
+ * (`describeNamedLooks`) reads only full-frame pictures, so a panel never carried the exact look of
+ * the kind its key thing is: the essay scroll at scenes 20, 28 and 34 was drawn by "papyrus scroll:
+ * … rolled into a cylinder … a thin brown cord tied around its middle", while the panel at 27, six
+ * seconds before 28, had only its own words ("an aged papyrus scroll laid flat on a wooden desk, the
+ * surface worn and darkened") and came back a blank parchment on two dark rollers — another object.
+ * So a panel takes the look the pictures ABOUT its key thing carry — the one more than half of them
+ * carry — when that kind is a kind of the thing (its name names the thing, or the panel's own words
+ * name the kind). Counted from pictures whose own thing it is and that are about it (`isSubject`):
+ * never a close-up of one part (a block on a quilt is a kind of its own), a screen (an app's look),
+ * or a picture with the thing beside its subject. Never onto a panel that has a look of its own, or
+ * a screen panel. Undefined for anything that is not a split. Pure.
+ */
+export function panelNamedLook(scenes: StoryboardScene[], s: StoryboardScene): string | undefined {
+  if (!s.hostPresent || !s.splitVisual || s.namedLook || isScreen(s)) return undefined;
+  const thing = ownKeyThing(s);
+  if (!thing) return undefined;
+  const about = scenes.filter(
+    x => x !== s && source(x) && ownKeyThing(x) === thing && !x.partOf && !isScreen(x) && isSubject(x, thing)
+  );
+  const carried = new Map<string, number>();
+  for (const x of about) if (x.namedLook) carried.set(x.namedLook, (carried.get(x.namedLook) ?? 0) + 1);
+  for (const [look, n] of Array.from(carried)) {
+    const kind = look.split(":")[0];
+    if (n * 2 > about.length && (wordsName(thing, kind) || wordsName(s.splitVisual, kind))) return look;
+  }
+  return undefined;
+}
+
 /** How a SCREEN picture uses its item's memory: only as the photo inside the listing. */
 export const SCREEN_ITEM_VIEW =
   "the item appears only as the photo inside the listing on the screen";
@@ -576,6 +669,10 @@ const viewOf = new WeakMap<StoryboardScene, string | undefined>();
 const ownSourcesOf = new WeakMap<StoryboardScene, StoryboardScene[]>();
 /** The look a scene is drawn by when no picture of its own thing comes (`keyThingLookFor`). */
 const lookOf = new WeakMap<StoryboardScene, string | undefined>();
+/** The named kind's look a split's panel takes from the pictures of its thing (`panelNamedLook`). */
+const panelLookOf = new WeakMap<StoryboardScene, string | undefined>();
+/** Of `sourcesOf`, the picture shown right before the scene, about something else (`rightBeforeToRecompose`). */
+const rightBeforeOf = new WeakMap<StoryboardScene, StoryboardScene | undefined>();
 /** Pictures a later picture is drawn from for their OWN key thing (`copiedLater`). */
 const copied = new WeakSet<StoryboardScene>();
 /** Scenes whose picture is being made in the current pass — only those are worth waiting for. */
@@ -616,6 +713,8 @@ export function attachMemory(
     ownSourcesOf.set(s, sources.filter(x => x === set || (!!s.keyThing && shows(x, s.keyThing))));
     viewOf.set(s, memoryViewFor(board, s));
     lookOf.set(s, keyThingLookFor(s, keyThings, makes));
+    panelLookOf.set(s, panelNamedLook(board, s));
+    rightBeforeOf.set(s, rightBeforeToRecompose(board, s, sources));
     copied.delete(s);
   }
   // A picture is COPIED when a later picture is drawn from it for the thing it is itself about — not
@@ -638,6 +737,14 @@ export function attachMemory(
 /** The camera position `s` is drawn from when it has a memory (`memoryViewFor`). */
 export function memoryView(s: StoryboardScene): string | undefined {
   return viewOf.get(s);
+}
+
+/**
+ * The named kind's look the panel of split `s` is drawn by (`panelNamedLook`), as the last
+ * `attachMemory` over its film found it; undefined for a scene no pass has seen.
+ */
+export function panelLook(s: StoryboardScene): string | undefined {
+  return panelLookOf.get(s);
 }
 
 /** Whether a later picture is drawn from `s` for the key thing `s` is about (`attachMemory`). */
@@ -672,15 +779,20 @@ export function pictureSettled(s: StoryboardScene): void {
  * pass. A memory that never came is skipped — the picture is then drawn from words, as before — and
  * so is one whose own check said its thing is not in it (`memoryUnfit`, set when it settled in this
  * same pass). `own` says whether any of them is a picture of `s`'s own thing; when none is, `look`
- * is the look it is drawn by instead (`keyThingLookFor`).
+ * is the look it is drawn by instead (`keyThingLookFor`). When one is, `wordsLook` is that same look,
+ * kept for a redraw from words should the picture copy its memory (`memoryToWords`). `before` is
+ * where in `urls` the picture shown right before `s` is, when it is about something else
+ * (`rightBeforeToRecompose`).
  */
 export async function memoryFor(
   s: StoryboardScene,
   timeoutMs = MEMORY_WAIT_MS
-): Promise<{ urls: string[]; own: boolean; look?: string }> {
+): Promise<{ urls: string[]; own: boolean; look?: string; wordsLook?: string; before?: number }> {
   const urls: string[] = [];
   const mine = ownSourcesOf.get(s) ?? [];
+  const prev = rightBeforeOf.get(s);
   let own = false;
+  let before: number | undefined;
   for (const src of sourcesOf.get(s) ?? []) {
     if (!src.pictureUrl && pending.has(src)) {
       let timer: ReturnType<typeof setTimeout> | undefined;
@@ -693,8 +805,10 @@ export async function memoryFor(
     if (!src.pictureUrl || src.memoryUnfit || urls.includes(src.pictureUrl)) continue;
     urls.push(src.pictureUrl);
     if (mine.includes(src)) own = true;
+    if (src === prev) before = urls.length - 1;
   }
-  return { urls, own, look: own ? undefined : lookOf.get(s) };
+  const look = lookOf.get(s);
+  return { urls, own, look: own ? undefined : look, wordsLook: own ? look : undefined, before };
 }
 
 /** The pictures `s` is drawn from (`memoryFor`). */
