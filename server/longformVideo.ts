@@ -92,7 +92,7 @@ import {
   nearCopyCandidates,
   MAX_VARIETY_REDRAWS,
   nextScreenSetup,
-  pictureHash,
+  pictureFingerprint,
   pictureThumb,
   REDRAW_CAMERAS,
   rememberPicture,
@@ -9730,6 +9730,12 @@ export type ValidatedStill = { buffer: Buffer; mimeType?: string; missing?: bool
  * other, so Dale's job 372 test kept three near-identical "holding a phone" screens that were all
  * in flight at the same moment. Screens are where a film repeats itself; everything else stays
  * parallel.
+ *
+ * A split panel (`square`) is still CHECKED against every picture drawn before it, but never waits
+ * in a lane: it is awaited against its host scene's own clock (`server/splitPanel.ts`), and a panel
+ * queued behind its key thing's other draws, each up to several minutes, would ship its scene as
+ * the host take alone — worse than a copy drawn at the same moment as its original. A panel of a
+ * key thing already waits for that thing's earlier pictures (`memoryFor`), so those are drawn first.
  */
 export async function generateValidatedStill(
   ...args: Parameters<typeof drawValidatedStill>
@@ -10257,20 +10263,27 @@ async function drawValidatedStill(
       // NO NEAR-COPIES IN A VIDEO: compared with EVERY picture of this video drawn so far, not only
       // the one before (Dale's job 372: ~13 near-identical phone screens). One redraw, told to
       // differ — a screen also moves to another setting; the first draw is kept as the fallback.
-      // A split panel is square and composited, so it is left out. `PICTURE_VARIETY=0` turns it off.
+      // `PICTURE_VARIETY=0` turns it off.
       // The picture it continues, or is drawn from as the picture just shown (`nearCopyPartner`), is
       // ALWAYS looked at, however far apart the fingerprints read — unless the same-thing check above
       // just did: a continuation drawn from words has no memory check left, and job 405 scene 8 and
       // job 401 scenes 3 and 5 shipped as the picture they continued.
-      if (varietyJob != null && !square && process.env.PICTURE_VARIETY !== "0") {
+      // A SPLIT PANEL TOO (2026-10-18): it was left out as "square and composited", and job 405's
+      // panel beside "a cat just being a cat" (scene 9) was scene 2's picture again 14 s later — the
+      // same tabby mid-stride, white paw out, the same low angle — while its only check, the memory
+      // one, compared it with its own key thing's pictures, and scene 2 was filed under another. It is
+      // fingerprinted as the square it shows (`pictureFingerprint`), laid over every earlier picture
+      // (`fingerprintDistance`), remembered under its scene's number for every later one, and a copy
+      // is redrawn told to differ exactly like a full-frame picture.
+      if (varietyJob != null && process.env.PICTURE_VARIETY !== "0") {
         try {
-          const hash = await pictureHash(buffer);
-          const thumb = await pictureThumb(buffer);
+          const print = await pictureFingerprint(buffer, square);
+          const thumb = await pictureThumb(buffer, square);
           let copies: number | null = null;
           let copiedSetup: string | undefined;
           const partner = comparedWithPartner ? undefined : nearCopyPartner(scene)?.index;
           if (varietyRerolls < MAX_VARIETY_REDRAWS)
-            for (const c of nearCopyCandidates(varietyJob, scene.index, hash, partner)) {
+            for (const c of nearCopyCandidates(varietyJob, scene.index, print, partner)) {
               const look = await scanNearCopy(c.thumb, thumb);
               if (look.copy) {
                 copies = c.index;
@@ -10306,7 +10319,7 @@ async function drawValidatedStill(
             );
             continue;
           }
-          rememberPicture(varietyJob, scene.index, hash, thumb, scene.screenSetup);
+          rememberPicture(varietyJob, scene.index, print, thumb, scene.screenSetup);
         } catch {
           /* a fingerprint that cannot be taken never costs the picture */
         }

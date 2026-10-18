@@ -213,7 +213,8 @@ export function recomposeFrom(
  * repeats, else, marked to continue (`sameShot`), the picture right before it. That is the check a
  * copy drawn from WORDS still meets: job 405 scene 8 and job 401 scenes 3 and 5 copied their memory
  * twice, were drawn from words with no reference, and shipped as the same composition unchecked.
- * Never a split panel (the near-copy check leaves panels out). Pure.
+ * Never a split panel: a split is never a memory source, and panels meet the near-copy check through
+ * their fingerprints (`nearCopyCandidates`). Pure.
  */
 export function nearCopyPartnerFor(
   scenes: StoryboardScene[],

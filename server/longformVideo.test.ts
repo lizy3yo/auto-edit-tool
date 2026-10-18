@@ -10481,6 +10481,100 @@ describe("a continuation is compared with the picture it continues (jobs 401-405
   });
 });
 
+describe("a split panel meets the near-copy check like any picture (job 405 scene 9)", () => {
+  // Scene 9's panel beside "a cat just being a cat" came back as scene 2's walking tabby, cut square,
+  // and was never compared: panels were left out of the check. Seeded "photos" so the fingerprints are
+  // real ones.
+  const photo = (seed: number, w: number, h: number) => {
+    let a = seed >>> 0;
+    const rnd = () => {
+      a = (a + 0x6d2b79f5) >>> 0;
+      let t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const cols = Math.round((w / h) * 9);
+    const px = Buffer.alloc(cols * 9 * 3);
+    for (let i = 0; i < cols * 9; i++) px.fill(Math.floor(rnd() * 256), i * 3, i * 3 + 3);
+    return sharp(px, { raw: { width: cols, height: 9, channels: 3 } }).resize(w, h, { kernel: "cubic", fit: "fill" }).png().toBuffer();
+  };
+  const drawsOf = (...frames: Buffer[]) => {
+    const fn = vi.fn();
+    for (const f of frames) fn.mockResolvedValueOnce({ success: true, fileData: f });
+    return fn;
+  };
+  const host = () =>
+    ({
+      index: 9,
+      hostPresent: true,
+      splitVisual: "A tabby cat resting calmly on a bed at night, the bedding rumpled around it",
+      keyThing: "cat",
+      scriptText: "A lot of people call this random, a cat just being a cat.",
+    }) as StoryboardScene;
+  afterEach(() => {
+    mockScanNearCopy.mockReset();
+    mockScanNearCopy.mockResolvedValue({ copy: false, what: "" });
+    delete process.env.PICTURE_VARIETY;
+  });
+
+  it("405-9: the panel is laid beside scene 2, drawn again told to differ — still square — and remembered", async () => {
+    const { withCostMeter } = await import("./costMeter");
+    const { pictureFingerprint, pictureThumb, rememberPicture, nearCopyCandidates, REDRAW_VIEWS, DIFFERENT_PICTURE_CLAUSE } =
+      await import("./pictureVariety");
+    const { NEAR_COPY } = await import("../shared/pictureFlaws");
+    const two = await photo(2, 1536, 864);
+    const copy = await sharp(two).extract({ left: 336, top: 0, width: 864, height: 864 }).resize(1024, 1024).png().toBuffer();
+    const fresh = await photo(52, 1024, 1024);
+    const twoThumb = await pictureThumb(two);
+    rememberPicture(9405, 2, await pictureFingerprint(two), twoThumb);
+    mockScanNearCopy.mockResolvedValueOnce({ copy: true, what: "the same tabby mid-stride, paw out" });
+    const scene = host();
+    const genImage = drawsOf(copy, fresh);
+    const out = await withCostMeter(9405, () =>
+      generateValidatedStill(buildSplitRightScene(scene), 4, undefined, genImage, undefined, undefined, true)
+    );
+    expect(out.buffer.equals(fresh)).toBe(true);
+    expect(genImage).toHaveBeenCalledTimes(2);
+    // Laid beside scene 2, the panel shown whole (its square thumbnail).
+    expect(mockScanNearCopy.mock.calls[0][0].equals(twoThumb)).toBe(true);
+    expect(await sharp(mockScanNearCopy.mock.calls[0][1]).metadata()).toMatchObject({ width: 360, height: 360 });
+    // Redrawn like a full-frame copy: told to differ, from a named camera, and still a square panel.
+    const [first, second] = genImage.mock.calls.map(c => c[0]);
+    expect(first.prompt).not.toContain(DIFFERENT_PICTURE_CLAUSE);
+    expect(second.prompt).toContain(DIFFERENT_PICTURE_CLAUSE);
+    expect(second.prompt).toContain(REDRAW_VIEWS[0]);
+    expect(second.prompt).toMatch(/Square 1:1 framing/);
+    expect(second.square).toBe(true);
+    // The copy is on the host scene's record, marked as the panel's.
+    expect(scene.pictureChecks?.[0]).toMatchObject({ panel: true });
+    expect(scene.pictureChecks?.[0].flags).toContain(NEAR_COPY);
+    // The panel that shipped is remembered under its scene's number for every later picture.
+    const later = await sharp(await photo(92, 1536, 864))
+      .composite([{ input: await sharp(fresh).resize(864, 864).png().toBuffer(), left: 336, top: 0 }])
+      .png()
+      .toBuffer();
+    expect(nearCopyCandidates(9405, 28, await pictureFingerprint(later)).map(c => c.index)).toEqual([9]);
+  });
+
+  it("a panel unlike every earlier picture is drawn once; PICTURE_VARIETY=0 turns the check off for panels too", async () => {
+    const { withCostMeter } = await import("./costMeter");
+    const { pictureFingerprint, pictureThumb, rememberPicture } = await import("./pictureVariety");
+    const two = await photo(2, 1536, 864);
+    rememberPicture(9406, 2, await pictureFingerprint(two), await pictureThumb(two));
+    const once = drawsOf(await photo(52, 1024, 1024));
+    await withCostMeter(9406, () => generateValidatedStill(buildSplitRightScene(host()), 4, undefined, once, undefined, undefined, true));
+    expect(once).toHaveBeenCalledTimes(1);
+    expect(mockScanNearCopy).not.toHaveBeenCalled();
+    process.env.PICTURE_VARIETY = "0";
+    const copy = await sharp(two).extract({ left: 336, top: 0, width: 864, height: 864 }).resize(1024, 1024).png().toBuffer();
+    const off = drawsOf(copy);
+    await withCostMeter(9407, () => generateValidatedStill(buildSplitRightScene(host()), 4, undefined, off, undefined, undefined, true));
+    expect(off).toHaveBeenCalledTimes(1);
+    expect(mockScanNearCopy).not.toHaveBeenCalled();
+  });
+});
+
 describe("notePictureFlaws — the scene and the job say what a picture shipped with", () => {
   it("sets the field and warns; a picture drawn again replaces it, one drawn clean takes it away", async () => {
     const { notePictureFlaws, clearJobWarnings, jobProgress } = await import("./longformVideo");

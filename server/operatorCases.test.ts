@@ -3606,3 +3606,41 @@ describe("a later view of one topic is a new photo, never the picture it continu
     expect(memoryViewFor(k, k[2])).toBe(PART_VIEW);
   });
 });
+
+describe("a split panel is checked for near-copies like any picture (round 11, job 405 scene 9)", () => {
+  // A seeded "photo": light and dark patches smoothly enlarged, so the fingerprints are real ones.
+  const photo = async (seed: number, w: number, h: number) => {
+    const sharp = (await import("sharp")).default;
+    let a = seed >>> 0;
+    const rnd = () => {
+      a = (a + 0x6d2b79f5) >>> 0;
+      let t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const cols = Math.round((w / h) * 9);
+    const px = Buffer.alloc(cols * 9 * 3);
+    for (let i = 0; i < cols * 9; i++) px.fill(Math.floor(rnd() * 256), i * 3, i * 3 + 3);
+    return sharp(px, { raw: { width: cols, height: 9, channels: 3 } }).resize(w, h, { kernel: "cubic", fit: "fill" }).png().toBuffer();
+  };
+
+  it("405-9 (scene 2 cut square) and 403-15 (scene 11 drawn square) are each looked at beside the picture they repeat; a panel of something else is not", async () => {
+    const sharp = (await import("sharp")).default;
+    const { pictureFingerprint, pictureThumb, rememberPicture, nearCopyCandidates } = await import("./pictureVariety");
+    // 405: the walking tabby of scene 2, and the panel at scene 9 — the same picture cut square.
+    const cat = await photo(2, 1536, 864);
+    const catPanel = await sharp(cat).extract({ left: 336, top: 0, width: 864, height: 864 }).resize(1024, 1024).png().toBuffer();
+    rememberPicture(94050, 2, await pictureFingerprint(cat), await pictureThumb(cat));
+    expect(nearCopyCandidates(94050, 9, await pictureFingerprint(catPanel, true)).map(c => c.index)).toEqual([2]);
+    // 403: the cut-open toilet of scene 11, and the swab panel at scene 15 — its whole composition squeezed square.
+    const toilet = await photo(4, 1536, 864);
+    const swabPanel = await sharp(toilet).resize(1024, 1024, { fit: "fill" }).png().toBuffer();
+    rememberPicture(94030, 11, await pictureFingerprint(toilet), await pictureThumb(toilet));
+    expect(nearCopyCandidates(94030, 15, await pictureFingerprint(swabPanel, true)).map(c => c.index)).toEqual([11]);
+    // A panel of another thing (405's clock panel) is laid beside neither.
+    const clock = await pictureFingerprint(await photo(52, 1024, 1024), true);
+    expect(nearCopyCandidates(94050, 12, clock)).toEqual([]);
+    expect(nearCopyCandidates(94030, 12, clock)).toEqual([]);
+  });
+});

@@ -634,7 +634,9 @@ export const NEAR_COPY_SYSTEM =
   "picture was shown twice — the same kind of subject in the same setting, from nearly the same " +
   "spot, distance and framing (two near-identical phone screens on the same bench, the same pile " +
   "of pieces from the same angle). copy: false when they are clearly different pictures — " +
-  "another subject, another place, or the same subject from a clearly different distance or side.\n" +
+  "another subject, another place, or the same subject from a clearly different distance or side. " +
+  "One of them may be square, with black bars at its sides (a picture shown beside the host): " +
+  "compare what the two pictures show, never the shape of their frames.\n" +
   'Return ONLY JSON: {"copy":true|false,"what":"<what makes them look alike, a few words, or empty>"}';
 
 /** Decide from the model's answer; anything unreadable is "not a copy". Pure. */
@@ -649,18 +651,29 @@ export function parseNearCopyVerdict(raw: string, stopReason?: string): { copy: 
   }
 }
 
+/**
+ * The pair the near-copy look is shown: `earlier` LEFT, `buffer` RIGHT, each WHOLE in its 640×360
+ * half. A split panel's square thumbnail sits between black bars — cut to fill the half, the look saw
+ * only the panel's middle band (2026-10-18, panels joined the check: job 405 scene 9). A full-frame
+ * thumbnail fills its half exactly, as before.
+ */
+export async function nearCopyPair(earlier: Buffer, buffer: Buffer): Promise<Buffer> {
+  const side = (b: Buffer) =>
+    sharp(b).resize(640, 360, { fit: "contain", background: { r: 0, g: 0, b: 0 } }).png().toBuffer();
+  const [left, right] = await Promise.all([side(earlier), side(buffer)]);
+  return sharp({ create: { width: 1280, height: 360, channels: 3, background: "#000" } })
+    .composite([
+      { input: left, left: 0, top: 0 },
+      { input: right, left: 640, top: 0 },
+    ])
+    .png()
+    .toBuffer();
+}
+
 /** Are `earlier` and `buffer` near-copies? Side by side. Never throws: a dead check says no. */
 export async function scanNearCopy(earlier: Buffer, buffer: Buffer): Promise<{ copy: boolean; what: string }> {
   try {
-    const side = (b: Buffer) => sharp(b).resize(640, 360, { fit: "cover" }).png().toBuffer();
-    const [left, right] = await Promise.all([side(earlier), side(buffer)]);
-    const pair = await sharp({ create: { width: 1280, height: 360, channels: 3, background: "#000" } })
-      .composite([
-        { input: left, left: 0, top: 0 },
-        { input: right, left: 640, top: 0 },
-      ])
-      .png()
-      .toBuffer();
+    const pair = await nearCopyPair(earlier, buffer);
     const result = await invokeClaude({
       systemPrompt: NEAR_COPY_SYSTEM,
       userMessage: "Are these two pictures near-copies of each other?",
