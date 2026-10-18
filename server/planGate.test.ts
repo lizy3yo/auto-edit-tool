@@ -1241,4 +1241,49 @@ describe("the host comes back after the book cover on the whole number, never in
     expect(glimpse.narrationEndSec!).toBeGreaterThanOrEqual(words[6].end);
     expect(glimpse.narrationEndSec!).toBeLessThanOrEqual(words[7].start);
   });
+
+  it("a pause in the heard gap keeps the cut, even with a longer one past a word the transcript lost", () => {
+    // Job 404's own words and pauses (3:06-3:27): "…tap it. Or scroll down…" — the transcript lost
+    // "Or". The first pause after "it." (192.77-193.12) is the sentence's; the longer one after it
+    // (193.55-194.06) comes after "Or". Taking the longest pause within reach cut at 193.80 and gave
+    // "Or" to the picture finishing the sentence before.
+    const words404 = (
+      "The@180.601-180.701 robin@180.761-181.082 has@181.142-181.322 its@181.402-181.502 own@181.642-181.782 profile,@181.862-182.463 so@182.843-183.003 when@183.083-183.203 yours@183.243-183.504 slip@183.544-183.784 off@183.844-183.984 the@184.024-184.124 lawn,@184.144-184.505 you'll@184.705-184.925 know@184.965-185.105 what@185.145-185.285 draws@185.325-185.605 them@185.645-185.786 back.@185.826-186.126 " +
+      "If@186.906-186.967 your@186.987-187.127 phone's@187.167-187.427 within@187.487-187.767 reach,@187.867-188.168 point@188.468-188.668 its@188.708-188.828 camera@188.868-189.248 at@189.288-189.368 the@189.388-189.489 code@189.549-189.789 in@189.809-189.869 this@189.909-190.049 video,@190.109-190.569 and@190.79-190.89 when@190.91-191.07 a@191.11-191.13 link@191.19-191.41 shows@191.43-191.69 on@191.75-191.83 the@191.851-191.931 phone,@191.971-192.251 tap@192.511-192.771 it.@192.851-192.911 " +
+      "scroll@194.284-194.585 down@194.625-194.785 to@194.845-194.945 the@194.985-195.045 description@195.086-195.586 below@195.646-195.967 the@196.007-196.067 video@196.127-196.548 and@196.688-196.788 it's@196.828-196.949 on@196.989-197.049 the@197.089-197.169 very@197.229-197.469 first@197.529-197.79 line.@197.85-198.15 Today,@198.812-199.232 next@199.573-199.793 week,@199.873-200.654 or@200.675-200.715 once@200.835-201.015 the@201.075-201.155 snow@201.195-201.436 flies,@201.496-201.896 any@202.417-202.558 of@202.598-202.638 those@202.698-202.878 works@202.958-203.179 just@203.259-203.459 as@203.519-203.599 well.@203.659-203.92 " +
+      "Back@204.701-204.881 to@204.901-205.001 the@205.021-205.082 robins,@205.142-205.582 who've@205.843-206.043 picked@206.083-206.304 up@206.344-206.424 some@206.464-206.624 company.@206.684-207.085"
+    )
+      .split(" ")
+      .map(tok => {
+        const [, word, start, end] = /^(.*)@([\d.]+)-([\d.]+)$/.exec(tok)!;
+        return { word, start: Number(start), end: Number(end) };
+      });
+    const pauses404 = [
+      [179.869, 180.487], [182.437, 182.686], [186.106, 186.762], [188.218, 188.382], [190.528, 190.681],
+      [192.225, 192.431], [192.774, 193.116], [193.548, 194.057], [198.078, 198.72], [201.938, 202.228],
+      [203.867, 204.613], [205.621, 205.784], [205.887, 206.009], [207.058, 207.215],
+    ].map(([start, end]) => ({ start, end }));
+    // Laid out as a book cover finishing its sentence before the host comes back — the path that
+    // made job 406's cut.
+    const scenes = [
+      beat(1, "H", 180.487, 186.722, "The robin has its own profile, so when yours slip off the lawn, you’ll know what draws them back."),
+      beat(2, "B", 186.722, 192.45, "If your phone’s within reach, point its camera at the code in this video, and when a link shows on the phone,"),
+      beat(
+        3,
+        "H",
+        192.45,
+        204.2,
+        "tap it. Or scroll down to the description below the video, and it’s on the very first line. Today, next week, or once the snow flies, any of those works just as well."
+      ),
+      beat(4, "Q", 204.2, 207.1, "Back to the robins, who’ve picked up some company."),
+    ];
+    const r = enforcePlanRules(scenes, params, { words: words404, silences: pauses404 });
+    const cover = r.scenes.find(s => s.coverHero)!;
+    const host = r.scenes[r.scenes.indexOf(cover) + 1];
+    expect(cover.scriptText).toMatch(/tap it\.$/);
+    expect(host.scriptText).toMatch(/^Or scroll down/);
+    expect(cover.narrationEndSec!).toBeGreaterThanOrEqual(192.911);
+    expect(cover.narrationEndSec!).toBeLessThanOrEqual(193.116);
+    expect(host.narrationStartSec).toBeCloseTo(cover.narrationEndSec!, 5);
+  });
 });
