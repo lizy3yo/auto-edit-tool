@@ -65,6 +65,7 @@ import {
   lookToHold,
   memoryFor,
   memoryView,
+  nearCopyPartner,
   panelLook,
   pictureSettled,
   sameThingMove,
@@ -93,6 +94,7 @@ import {
   nextScreenSetup,
   pictureHash,
   pictureThumb,
+  REDRAW_CAMERAS,
   rememberPicture,
   screenPicture,
   screenSells,
@@ -7230,35 +7232,45 @@ export const DESCRIBED_SCREEN_CLAUSE =
 /**
  * The fields a picture's memory sets at render (`memoryFor`): its reference pictures and camera
  * position; whether those show only the OTHER key things in it; and, when none is a picture of its
- * own thing, the look it is drawn by instead (`keyThingLookClause`); which of them was shown right
- * before it, about something else (`memoryRightBefore`); and the look kept for a redraw from words
- * (`memoryWordsLook`). Pure.
+ * own thing, the look it is drawn by instead (`keyThingLookClause`); which of them it must not
+ * repeat — shown right before it about something else, or the one it continues (`memoryRightBefore`,
+ * `memoryContinues`); and the look kept for a redraw from words (`memoryWordsLook`). Pure.
  */
 export function memoryFields(
-  memory: { urls: string[]; own: boolean; look?: string; wordsLook?: string; before?: number },
+  memory: { urls: string[]; own: boolean; look?: string; wordsLook?: string; before?: number; continues?: boolean },
   view: string | undefined
 ): Pick<
   StoryboardScene,
-  "memoryRefUrls" | "memoryView" | "memoryOthersOnly" | "keyThingLook" | "memoryRightBefore" | "memoryWordsLook"
+  | "memoryRefUrls"
+  | "memoryView"
+  | "memoryOthersOnly"
+  | "keyThingLook"
+  | "memoryRightBefore"
+  | "memoryContinues"
+  | "memoryWordsLook"
 > {
   const has = memory.urls.length > 0;
+  const before =
+    has && memory.before != null && memory.before >= 0 && memory.before < memory.urls.length
+      ? memory.before
+      : undefined;
   return {
     memoryRefUrls: has ? memory.urls : undefined,
     memoryView: has ? view : undefined,
     memoryOthersOnly: has && !memory.own ? true : undefined,
     keyThingLook: memory.own ? undefined : memory.look,
-    memoryRightBefore:
-      has && memory.before != null && memory.before >= 0 && memory.before < memory.urls.length
-        ? memory.before
-        : undefined,
+    memoryRightBefore: before,
+    memoryContinues: before != null && memory.continues ? true : undefined,
     memoryWordsLook: has && memory.own ? memory.wordsLook : undefined,
   };
 }
 
 /**
- * The memory picture the same-thing check lays beside a new one: the picture shown right before it
- * when that is one of its references (`memoryRightBefore`) — the copy a viewer would see is a copy
- * of THAT picture — else its first reference, the thing's memory. Pure.
+ * The memory picture the same-thing check lays beside a new one: the picture it must not repeat when
+ * that is one of its references (`memoryRightBefore` — shown right before it, or the one it continues)
+ * — the copy a viewer would see is a copy of THAT picture — else its first reference, the thing's
+ * memory. Job 405 scene 22 continued scene 21 and was laid beside scene 7, the cat's first picture,
+ * so its copy of 21 passed. Pure.
  */
 export function sameThingReference(scene: StoryboardScene): string | undefined {
   const refs = scene.memoryRefUrls ?? [];
@@ -7277,7 +7289,13 @@ export function memoryToWords(
   scene: StoryboardScene
 ): Pick<
   StoryboardScene,
-  "memoryRefUrls" | "memoryView" | "memoryOthersOnly" | "keyThingLook" | "memoryRightBefore" | "memoryWordsLook"
+  | "memoryRefUrls"
+  | "memoryView"
+  | "memoryOthersOnly"
+  | "keyThingLook"
+  | "memoryRightBefore"
+  | "memoryContinues"
+  | "memoryWordsLook"
 > {
   return {
     memoryRefUrls: undefined,
@@ -7285,8 +7303,20 @@ export function memoryToWords(
     memoryOthersOnly: undefined,
     keyThingLook: scene.memoryWordsLook ?? scene.keyThingLook,
     memoryRightBefore: undefined,
+    memoryContinues: undefined,
     memoryWordsLook: undefined,
   };
+}
+
+/**
+ * The camera a CONTINUATION keeps when it is drawn from words (`memoryToWords`): its memory clause —
+ * the only place its concrete camera was written (`memoryViewFor`) — is swapped out, and drawn from
+ * nearly the same words as the picture it continues and no camera at all, it came back as that
+ * picture again (job 405 scene 8, job 401 scenes 3 and 5: the same composition shipped). Empty for
+ * any other picture. Pure.
+ */
+export function continuationCameraClause(scene: StoryboardScene): string {
+  return scene.memoryContinues && scene.memoryView ? ` Camera for THIS picture: ${scene.memoryView}.` : "";
 }
 
 /**
@@ -7385,6 +7415,18 @@ export function rightBeforeClause(scene: StoryboardScene): string {
     : [scene.partOf ?? scene.keyThing, ...(scene.otherKeyThings ?? [])];
   if (!names.length) return "";
   const which = n === 1 ? "The first reference image" : `Reference image ${p + 1}`;
+  // A CONTINUATION (`memoryContinues`): the picture it continues lends the look too, and the camera
+  // moves — job 405 scene 22, told only "a close-up of one detail of it", came back as scene 21 a
+  // little tighter; job 401 scene 3 kept scene 2's over-the-shoulder framing and changed the cards.
+  if (scene.memoryContinues)
+    return (
+      ` ${which} is the earlier picture this one CONTINUES — the same subject, already shown in this ` +
+      `video: take ONLY how the ${namesInSentence(names)} ${names.length > 1 ? "look" : "looks"} from ` +
+      `it, never the picture itself. This is a clearly new photo of it from the camera position given ` +
+      `for THIS picture — never that picture's angle with the subject only a little closer or further ` +
+      `away, never the same pose, the same hand positions or the same things at the same angles in the ` +
+      `same places.`
+    );
   return (
     ` ${which} is the picture shown RIGHT BEFORE this one in the video: take ONLY how the ` +
     `${namesInSentence(names)} ${names.length > 1 ? "look" : "looks"} from it, never the picture ` +
@@ -9784,6 +9826,8 @@ async function drawValidatedStill(
   // picture of the same video is drawn once more, told to differ.
   let varietyRerolls = 0;
   const varietyJob = currentCostJobId();
+  // The concrete camera a continuation is drawn from (`memoryViewFor`), -1 for any other picture.
+  const ownCamera = (REDRAW_CAMERAS as readonly string[]).indexOf(scene.memoryView ?? "");
   // What the check named on the picture before this one (`checkFlags`), to spot a redraw that
   // changed nothing.
   let lastFaults = "";
@@ -9905,6 +9949,9 @@ async function drawValidatedStill(
     // What the checks named on this frame — its own `pictureChecks` entry, so a later check's
     // refusal lands on the record too. Empty when no check ran (the book cover).
     let flags: string[] = [];
+    // Whether the same-thing check laid this frame beside the picture it must not repeat
+    // (`memoryRightBefore`) — the near-copy check below then need not look at that pair again.
+    let comparedWithPartner = false;
     if (!referenceImageUrl) {
       const defects = await scanStillDefects(
         buffer,
@@ -10104,9 +10151,12 @@ async function drawValidatedStill(
         // thing to compare it with — a first mattress is not "a different mattress" than a heater.
         !scene.memoryOthersOnly
       ) {
-        // Laid beside the picture shown right before it when that is one of its memories: the copy
-        // a viewer would see is a copy of THAT picture (`sameThingReference`).
-        const same = await scanSameThing(sameThingReference(scene)!, buffer, scene.keyThing);
+        // Laid beside the picture it must not repeat when that is one of its memories — shown right
+        // before it, or the one it continues: the copy a viewer would see is a copy of THAT picture
+        // (`sameThingReference`), and only a little closer or further back counts as a copy of it.
+        const justShown = scene.memoryRightBefore != null;
+        const same = await scanSameThing(sameThingReference(scene)!, buffer, scene.keyThing, justShown);
+        if (justShown) comparedWithPartner = true;
         const move = sameThingMove(same, sameThingRefused, !!scene.partOf);
         if (move === "redraw") {
           sameThingRefused = same.copy ? "copy" : "different";
@@ -10141,13 +10191,16 @@ async function drawValidatedStill(
             hostFaceShown: undefined,
           });
           const memory = memoryClause(personFree ? nobodyIn(scene) : scene);
+          // A continuation keeps its concrete camera, the one thing that set it apart from the
+          // picture it continues (`continuationCameraClause`).
+          const camera = continuationCameraClause(scene);
           Object.assign(scene, memoryToWords(scene));
-          const look = visualOverride ? "" : scrubLegibleWriting(keyThingLookClause(scene));
+          const look = `${visualOverride ? "" : scrubLegibleWriting(keyThingLookClause(scene))}${camera}`;
           prompt =
             promptFromWords(prompt, memory, look) ??
             (personFree
-              ? `${buildStillPrompt(nobodyIn(scene), false, visualOverride, subject, square)} ${PERSON_FREE_FALLBACK}`
-              : buildStillPrompt(scene, false, visualOverride, subject, square));
+              ? `${buildStillPrompt(nobodyIn(scene), false, visualOverride, subject, square)}${camera} ${PERSON_FREE_FALLBACK}`
+              : `${buildStillPrompt(scene, false, visualOverride, subject, square)}${camera}`);
           sameThingRefused = undefined;
           lastError = `Still image copies its memory picture's framing again`;
           // The copy's last chance, so it never loses its turn to the attempt budget.
@@ -10200,16 +10253,20 @@ async function drawValidatedStill(
       // NO NEAR-COPIES IN A VIDEO: compared with EVERY picture of this video drawn so far, not only
       // the one before (Dale's job 372: ~13 near-identical phone screens). One redraw, told to
       // differ — a screen also moves to another setting; the first draw is kept as the fallback.
-      // A memory picture is held to its own memory by the check above, a split panel is square
-      // and composited, so both are left out. `PICTURE_VARIETY=0` turns it off.
+      // A split panel is square and composited, so it is left out. `PICTURE_VARIETY=0` turns it off.
+      // The picture it continues, or is drawn from as the picture just shown (`nearCopyPartner`), is
+      // ALWAYS looked at, however far apart the fingerprints read — unless the same-thing check above
+      // just did: a continuation drawn from words has no memory check left, and job 405 scene 8 and
+      // job 401 scenes 3 and 5 shipped as the picture they continued.
       if (varietyJob != null && !square && process.env.PICTURE_VARIETY !== "0") {
         try {
           const hash = await pictureHash(buffer);
           const thumb = await pictureThumb(buffer);
           let copies: number | null = null;
           let copiedSetup: string | undefined;
+          const partner = comparedWithPartner ? undefined : nearCopyPartner(scene)?.index;
           if (varietyRerolls < MAX_VARIETY_REDRAWS)
-            for (const c of nearCopyCandidates(varietyJob, scene.index, hash)) {
+            for (const c of nearCopyCandidates(varietyJob, scene.index, hash, partner)) {
               const look = await scanNearCopy(c.thumb, thumb);
               if (look.copy) {
                 copies = c.index;
@@ -10231,9 +10288,11 @@ async function drawValidatedStill(
               prompt = buildStillPrompt(scene, false, visualOverride, subject, square);
             }
             // a CONCRETE new camera view each redraw — "look different" alone came back as the same
-            // shelf of boxes four times (Frederick's practice job 376); the earlier redraw's clause goes
+            // shelf of boxes four times (Frederick's practice job 376); the earlier redraw's clause goes.
+            // A continuation starts from the camera after its own (`REDRAW_CAMERAS`), never the one
+            // it was just drawn from.
             const cut = prompt.indexOf(DIFFERENT_PICTURE_CLAUSE);
-            prompt = `${cut >= 0 ? prompt.slice(0, cut).trimEnd() : prompt} ${differentPictureClause(varietyRerolls - 1)}`;
+            prompt = `${cut >= 0 ? prompt.slice(0, cut).trimEnd() : prompt} ${differentPictureClause(varietyRerolls + ownCamera)}`;
             lastError = `Still image nearly copies scene ${copies}'s picture`;
             console.warn(
               `[Longform] scene ${scene.index} nearly copies scene ${copies}'s picture → drawing it again, different`

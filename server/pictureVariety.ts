@@ -183,18 +183,29 @@ export async function pictureThumb(image: Buffer): Promise<Buffer> {
 /**
  * Earlier pictures of this video close enough to `hash` to be looked at, closest first (scene
  * index and its thumbnail). A scene is never compared with its own earlier draw.
+ *
+ * `always`: the scene index of the picture this one continues or is drawn from as the picture just
+ * shown (`nearCopyPartner` in pictureMemory.ts) — looked at FIRST, however far apart the
+ * fingerprints are. The fingerprint misses exactly those copies: job 403 scene 14, the pipe run
+ * under the house again a little closer, read 23 bits from scene 10; job 405 scene 8, the cat on
+ * the sleeper again at the same distance, shipped unflagged after its redraw from words.
  */
 export function nearCopyCandidates(
   jobId: number,
   sceneIndex: number,
-  hash: string
+  hash: string,
+  always?: number
 ): { index: number; thumb: Buffer; bits: number; setup?: string }[] {
   const out: { index: number; thumb: Buffer; bits: number; setup?: string }[] = [];
+  let partner: { index: number; thumb: Buffer; bits: number; setup?: string } | undefined;
   jobPictures(jobId).forEach((d, index) => {
+    if (index === sceneIndex) return;
     const bits = hashDistance(d.hash, hash);
-    if (index !== sceneIndex && bits <= NEAR_COPY_BITS) out.push({ index, thumb: d.thumb, bits, setup: d.setup });
+    if (index === always) partner = { index, thumb: d.thumb, bits, setup: d.setup };
+    else if (bits <= NEAR_COPY_BITS) out.push({ index, thumb: d.thumb, bits, setup: d.setup });
   });
-  return out.sort((a, b) => a.bits - b.bits).slice(0, MAX_CANDIDATES);
+  const closest = out.sort((a, b) => a.bits - b.bits);
+  return (partner ? [partner, ...closest] : closest).slice(0, MAX_CANDIDATES);
 }
 
 /** Remember the picture a scene kept. */
@@ -243,12 +254,15 @@ export const DIFFERENT_PICTURE_CLAUSE =
  * (`OTHER_VIEWS` in shotList.ts). "Look different" alone came back as the same shelf of boxes four
  * times in Frederick's practice job 376 — a picture of a key thing is drawn from its memory picture,
  * which pulls the framing back; a named view does not.
+ * The bare cameras (`REDRAW_CAMERAS`, one per `OTHER_VIEWS` entry, in the same order) are also the
+ * camera a same-topic continuation is drawn from (`memoryViewFor` in pictureMemory.ts).
  */
-export const REDRAW_VIEWS = [
-  "Camera for THIS picture: a close-up of one small detail of the subject filling the frame.",
-  "Camera for THIS picture: seen from much further back, the whole place around it and the subject small in it.",
-  "Camera for THIS picture: seen from the other side, from low down.",
+export const REDRAW_CAMERAS = [
+  "a close-up of one small detail of the subject filling the frame",
+  "seen from much further back, the whole place around it and the subject small in it",
+  "seen from the other side, from low down",
 ] as const;
+export const REDRAW_VIEWS = REDRAW_CAMERAS.map(c => `Camera for THIS picture: ${c}.`);
 
 /** The redraw clause for the k-th redraw (0-based). Pure. */
 export function differentPictureClause(k: number): string {

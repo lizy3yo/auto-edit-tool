@@ -3088,11 +3088,14 @@ describe("a picture drawn from the one right before it is a new photo, not that 
     expect(buildStillPrompt({ ...thimble(), ...words })).toContain(`HOW THE PLASTIC CUP LOOKS in every picture of this video: ${LOOK}`);
   });
 
-  it("399-20/21 and a far memory are untouched: a continuation keeps its view, scene 22 its ordinary memory", async () => {
-    const { rightBeforeToRecompose } = await import("./pictureMemory");
+  it("399-20/21 and a far memory: a continuation is the continuation rule's (jobs 401-405), scene 22 keeps its ordinary memory", async () => {
+    const { rightBeforeToRecompose, continuedPicture } = await import("./pictureMemory");
     const BAG = "several closed small liquor bottles tucked inside an open carry-on bag on a seat";
     const pair = [pic(20, "n", BAG, { keyThing: "small liquor bottle" }), pic(21, "n", `${BAG}, a close-up`, { keyThing: "small liquor bottle" })];
     expect(rightBeforeToRecompose(pair, pair[1])).toBeUndefined();
+    // Its view alone did not move the camera (the review of jobs 401-405), so it is a new photo of
+    // scene 20 now too — by the continuation rule (see the cases at the end of this file).
+    expect(continuedPicture(pair, pair[1])).toBe(pair[0]);
     const far = [
       pic(5, "and a second bag of pretzels", "a second pretzel bag held in a passenger's hand", { keyThing: "pretzel basket" }),
       pair[1],
@@ -3474,5 +3477,111 @@ describe("a pearl strand on a dresser is a necklace, not the host (round 9's rev
     // Under a line about the collarbone the piece is still worn by the host (`wornAtTheNeck`).
     expect(scenes[2].brollHostLook).toBe("a woman with silver hair");
     expect(scenes[2].showSubject).toMatch(/worn at the host's own neck/);
+  });
+});
+
+describe("a later view of one topic is a new photo, never the picture it continues (round 11, jobs 401-405)", () => {
+  // The review of the seven practice films found 15 near-copies. A topic past its limit or a split
+  // picture's later part was drawn as "the same words + a view" from the picture it continued, and
+  // came back as that picture again: job 405 scene 22 (the cat at the window, "a close-up of one
+  // detail of it") was scene 21 a little tighter; scene 24, after the host's "The honest word is
+  // crepuscular,", was scene 22 again; job 401 scene 3 kept scene 2's over-the-shoulder card shot;
+  // job 403 scene 14 was scene 10's pipe run a little closer.
+  const WINDOW = "a small tabby cat sitting alert on a windowsill, dim dawn light glowing through the bedroom window";
+  const window = async () => {
+    const { OTHER_VIEWS } = await import("./shotList");
+    return [
+      pic(7, "steady as a tightrope walker,", "a small tabby cat standing on a sleeping person's chest in the dark bedroom", { keyThing: "cat" }),
+      pic(21, "There's a stubborn old myth that cats are nocturnal,", WINDOW, { keyThing: "cat", otherKeyThings: ["window"] }),
+      pic(22, "creatures of the deep night, and that's mostly a costume they wear in cartoons.", `${WINDOW}${OTHER_VIEWS[0]}`, {
+        keyThing: "cat",
+        otherKeyThings: ["window"],
+      }),
+      host(23, "The honest word is crepuscular,"),
+      pic(24, "which is just a fancy way of saying dawn and dusk.", `${WINDOW}${OTHER_VIEWS[0]}`, {
+        keyThing: "cat",
+        otherKeyThings: ["window"],
+      }),
+    ];
+  };
+
+  it("405-22: drawn from scene 21 as the picture it continues, from a concrete close-up, and compared with 21", async () => {
+    const { continuedPicture, memoryViewFor } = await import("./pictureMemory");
+    const { REDRAW_CAMERAS } = await import("./pictureVariety");
+    const { sameThingReference } = await import("./longformVideo");
+    const w = await window();
+    expect(continuedPicture(w, w[2])).toBe(w[1]);
+    expect(memoryViewFor(w, w[2])).toBe(REDRAW_CAMERAS[0]);
+    const s = {
+      ...w[2],
+      memoryRefUrls: ["https://r2/still-src-7.png", "https://r2/still-src-21.png"],
+      memoryView: REDRAW_CAMERAS[0],
+      memoryRightBefore: 1,
+      memoryContinues: true as const,
+    };
+    expect(sameThingReference(s)).toBe("https://r2/still-src-21.png");
+    expect(memoryClause(s)).toMatch(/the earlier picture this one CONTINUES/);
+    expect(memoryClause(s)).toMatch(/never that picture's angle with the subject only a little closer or further away/);
+  });
+
+  it("405-24: the host take the gate placed inside the topic ends it — 24 is seen from much further back", async () => {
+    const { breakTopicsAtHostTakes, OTHER_VIEWS } = await import("./shotList");
+    const { memoryViewFor } = await import("./pictureMemory");
+    const { REDRAW_CAMERAS } = await import("./pictureVariety");
+    const w = await window();
+    w[4].sameShot = true;
+    expect(breakTopicsAtHostTakes(w)).toBe(1);
+    expect(w[4].sameShot).toBeUndefined();
+    expect(w[4].showSubject).toBe(`${WINDOW}${OTHER_VIEWS[1]}`);
+    expect(w[2].showSubject).toBe(`${WINDOW}${OTHER_VIEWS[0]}`);
+    expect(memoryViewFor(w, w[4])).toBe(REDRAW_CAMERAS[1]);
+  });
+
+  it("401-3 and 401-5: both continue scene 2 — 5 by its words, not scene 4 right before it", async () => {
+    const { continuedPicture, memoryViewFor } = await import("./pictureMemory");
+    const { OTHER_VIEWS } = await import("./shotList");
+    const { REDRAW_CAMERAS } = await import("./pictureVariety");
+    const AISLE = "man standing in pharmacy card aisle holding a sympathy and birthday card together";
+    const things = { keyThing: "sympathy card", otherKeyThings: ["pharmacy card aisle", "birthday card"], humanPresent: true };
+    const b = [
+      pic(2, "a pharmacy on a Tuesday morning, buying his third sympathy card since spring,", AISLE, things),
+      pic(3, "He is counting backward. He is sixty-four.", `${AISLE}${OTHER_VIEWS[0]}`, { ...things, sameShot: true }),
+      pic(4, "His father made it to eighty-one.", "a man's hand hovering between a row of cream sympathy cards and a row of pastel new-baby cards on a white pharmacy rack", {
+        keyThing: "pharmacy card aisle",
+        otherKeyThings: ["sympathy card"],
+        humanPresent: true,
+      }),
+      pic(5, "he has about seventeen summers left.", `${AISLE}${OTHER_VIEWS[2]}`, { ...things, sameShot: true }),
+    ];
+    expect(continuedPicture(b, b[1])).toBe(b[0]);
+    expect(continuedPicture(b, b[3])).toBe(b[0]);
+    expect([memoryViewFor(b, b[1]), memoryViewFor(b, b[3])]).toEqual([REDRAW_CAMERAS[0], REDRAW_CAMERAS[2]]);
+  });
+
+  it("403-14 repeats scene 10 three pictures later; 404-7 follows the robin before the host's introduction", async () => {
+    const { recomposeFrom } = await import("./pictureMemory");
+    const pipes = [
+      pic(10, "who would rather understand the cause than pay for the visit.", "grey PVC pipe network running beneath a house toward the street", { keyThing: "pipe network" }),
+      pic(11, "So. We will go the way the water goes.", "close view of the toilet's internal porcelain S-shaped trapway channel with water rushing through it", { keyThing: "toilet trapway" }),
+      pic(14, "Each of the nine stops somewhere,", "grey PVC pipe network running beneath the house toward the street", { keyThing: "pipe network" }),
+    ];
+    expect(recomposeFrom(pipes, pipes[2])).toEqual({ from: pipes[0], continues: true });
+    const robins = [
+      pic(5, "And that first robin of spring you'll be so happy to see in March?", "a robin standing on a green lawn in early spring with patches of melting snow", { keyThing: "robin" }),
+      host(6, "I'm Walter, and if you keep an eye on the yard from the kitchen window, this one's for you."),
+      pic(7, "We're going through seven things about the robin that hardly anybody knows,", "a robin standing on the snowy lawn near the fence", { keyThing: "robin" }),
+    ];
+    expect(recomposeFrom(robins, robins[2])).toEqual({ from: robins[0], continues: false });
+  });
+
+  it("the near-copy check always looks at the picture a continuation repeats; different pictures it leaves to the fingerprint", async () => {
+    const { nearCopyPartnerFor } = await import("./pictureMemory");
+    const w = await window();
+    expect(nearCopyPartnerFor(w, w[2])).toBe(w[1]);
+    const apart = [
+      pic(1, "n", "a dog asleep on the porch steps"),
+      pic(2, "n", "a red barn under a grey sky"),
+    ];
+    expect(nearCopyPartnerFor(apart, apart[1])).toBeUndefined();
   });
 });

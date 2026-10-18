@@ -2929,6 +2929,19 @@ export const sameSubject = (a: string, b: string): boolean => {
   return !!norm(a) && norm(a) === norm(b);
 };
 
+/** A description's own topic: any view `withView` added (`OTHER_VIEWS`) taken off. Pure. */
+export const topicWords = (text: string | undefined): string => withView(text ?? "", "");
+
+/**
+ * `b` describes the same topic as `a`: the same or nearly the same words once any view is taken off
+ * — a topic past its limit ("…, a close-up of one detail of it filling the frame"), a split
+ * picture's later part, or the planner repeating its own words. Pure.
+ */
+export const repeatsTopic = (a: string | undefined, b: string | undefined): boolean => {
+  const [x, y] = [topicWords(a), topicWords(b)];
+  return !!x.trim() && !!y.trim() && (sameSubject(x, y) || nearlySameSubject(x, y));
+};
+
 export function joinSameContext(
   scenes: StoryboardScene[],
   sec: (s: StoryboardScene) => number,
@@ -3022,6 +3035,52 @@ export function joinSameContext(
   }
   out.forEach((s, k) => (s.index = k + 1));
   return { scenes: out, changed };
+}
+
+/**
+ * A SAME-TOPIC CHAIN ENDS AT A HOST TAKE (2026-10-18, job 405 scenes 22-24). The same-topic join runs
+ * before the host check-ins and the plan gate place their host takes, so a take can land INSIDE a
+ * topic: the gate's last-resort glimpse cut the cat-at-the-window close-up in two around "The honest
+ * word is crepuscular," and both halves kept the identical words ("…, a close-up of one detail of it
+ * filling the frame") — the viewer saw the close-up, the host for 2.6 s, then the same close-up
+ * again. Re-checked on the final plan: a picture right after a host take no longer continues the
+ * picture before it (`sameShot` dropped — what the viewer saw last is the host), and when its words
+ * still repeat the last picture before the take (`repeatsTopic`) it takes the next view after that
+ * picture's (`OTHER_VIEWS`), so the two are never drawn from the same words. A picture whose words
+ * already name a different view keeps them. Never a list item, split, CTA, cover, asset or QR beat.
+ * Returns how many pictures changed. Pure apart from mutating `scenes`.
+ */
+export function breakTopicsAtHostTakes(scenes: StoryboardScene[]): number {
+  const trim = (t: string) => t.replace(/[\s.]+$/, "");
+  let changed = 0;
+  for (let i = 1; i < scenes.length; i++) {
+    const b = scenes[i];
+    if (!scenes[i - 1].hostPresent) continue;
+    if (b.hostPresent || b.splitVisual || b.listCut || b.coverHero || b.assetImageUrl || b.cta || b.qrHero) continue;
+    let did = false;
+    if (b.sameShot) {
+      b.sameShot = undefined;
+      did = true;
+    }
+    // The last picture the viewer saw: back over full-frame host takes (a split's panel is a picture).
+    let j = i - 1;
+    while (j >= 0 && scenes[j].hostPresent && !scenes[j].splitVisual) j--;
+    const a = j >= 0 && !scenes[j].hostPresent ? scenes[j] : undefined;
+    const aWords = a ? a.showSubject ?? a.visualPrompt : undefined;
+    const bWords = b.showSubject ?? b.visualPrompt;
+    if (aWords && bWords && repeatsTopic(aWords, bWords)) {
+      const was = viewIndexOf(trim(aWords));
+      const own = viewIndexOf(trim(bWords));
+      if (own === 0 || own === was) {
+        const v = OTHER_VIEWS[was % OTHER_VIEWS.length];
+        if (b.showSubject) b.showSubject = withView(b.showSubject, v);
+        if (b.visualPrompt) b.visualPrompt = withView(b.visualPrompt, v);
+        did = true;
+      }
+    }
+    if (did) changed++;
+  }
+  return changed;
 }
 
 /**

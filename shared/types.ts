@@ -577,11 +577,18 @@ export interface StoryboardScene {
    */
   keyThingLook?: string;
   /**
-   * Where in `memoryRefUrls` the picture shown RIGHT BEFORE this one is, when it is one of its memory
-   * pictures and about something else (set at render, `rightBeforeToRecompose`): it lends only the
-   * thing's look, never its composition (job 399 scene 17 came back as scene 16 on a new background).
+   * Where in `memoryRefUrls` the picture this one must not repeat is (set at render, `recomposeFrom`):
+   * the one shown RIGHT BEFORE it, about something else (job 399 scene 17 came back as scene 16 on a
+   * new background), or the one it CONTINUES as the same topic (`memoryContinues`). It lends only the
+   * thing's look, never its composition, and the same-thing check compares with it.
    */
   memoryRightBefore?: number;
+  /**
+   * The picture at `memoryRightBefore` is one this picture CONTINUES — a topic past its limit, a split
+   * picture's later part, the same words again (set at render, `continuedPicture`): job 405 scene 22
+   * came back as scene 21 a little tighter. It is drawn from a concrete new camera (`REDRAW_CAMERAS`).
+   */
+  memoryContinues?: true;
   /**
    * Its key thing's written look, set at render only on a picture drawn FROM a picture of its own
    * thing (where `keyThingLook` stays unset): kept for the redraw from words a picture gets when it

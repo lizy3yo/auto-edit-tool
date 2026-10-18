@@ -60,6 +60,7 @@ import {
   rangeSec,
   unseenFoldTarget,
   UNSEEN_BEAT_SEC,
+  breakTopicsAtHostTakes,
 } from "./shotList";
 
 export type PlanFinding = { rule: number; scene?: number; detail: string };
@@ -1664,6 +1665,11 @@ export function enforcePlanRules(
   // it stays, only the movement goes. A clip already paid for is left alone.
   const tooLong = capMovingLength(scenes);
   if (tooLong) fixes.push(`${tooLong} video(s) longer than ${MOVING_PICTURE_MAX_SEC} s made a photo`);
+  // A host take the gate (or a host pass before it) placed inside a same-topic run ends that topic
+  // there (`breakTopicsAtHostTakes`): job 405's glimpse left the cat's close-up on both sides of "The
+  // honest word is crepuscular," with identical words, and it was drawn twice.
+  const broken = breakTopicsAtHostTakes(scenes);
+  if (broken) fixes.push(`${broken} picture(s) after a host take no longer continue the picture before it`);
   renumber();
   const unresolved = checkPlan(scenes, params).findings;
   return { scenes, fixes, unresolved };

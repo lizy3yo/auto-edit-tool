@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 import type { KeyThing, StoryboardScene } from "@shared/types";
 import {
   attachMemory,
+  continuedPicture,
   keyThingLookClause,
   keyThingLookFor,
   memoryFor,
@@ -76,7 +77,7 @@ describe("which memory picture is the one shown right before (rightBeforeToRecom
     expect(rightBeforeToRecompose(board, board[3])).toBeUndefined();
   });
 
-  it("399-20/21: a picture that continues the one before (the same words, or with its own view) is left alone", () => {
+  it("399-20/21: a picture that continues the one before (the same words, or with its own view) is the continuation rule's, not this one's", () => {
     const BAG = "several closed small liquor bottles tucked inside an open carry-on bag on a seat";
     const same = [pic(20, BAG, { keyThing: "small liquor bottle" }), pic(21, BAG, { keyThing: "small liquor bottle" })];
     expect(memorySourcesFor(same, same[1])).toEqual([same[0]]);
@@ -85,6 +86,8 @@ describe("which memory picture is the one shown right before (rightBeforeToRecom
     expect(rightBeforeToRecompose(viewed, viewed[1])).toBeUndefined();
     const marked = [same[0], pic(21, "the carry-on bag on the seat", { keyThing: "small liquor bottle", sameShot: true })];
     expect(rightBeforeToRecompose(marked, marked[1])).toBeUndefined();
+    // Each of them is drawn from scene 20 as the picture it continues (continuationViews.test.ts).
+    for (const b of [same, viewed, marked]) expect(continuedPicture(b, b[1])).toBe(b[0]);
   });
 
   it("a memory from further back keeps its ordinary clause (job 399 scene 22, drawn from scene 5)", () => {

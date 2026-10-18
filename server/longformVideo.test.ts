@@ -239,14 +239,18 @@ const { mockScanStillDefects } = vi.hoisted(() => ({
 }));
 // The two side-by-side checks a still can meet after the defect check — the same key thing as its
 // memory, the host as the host. Default "same", so no test that never set them up is changed.
-const { mockScanSameHost, mockScanSameThing } = vi.hoisted(() => ({
+const { mockScanSameHost, mockScanSameThing, mockScanNearCopy } = vi.hoisted(() => ({
   mockScanSameHost: vi.fn(async () => ({ same: true, what: "" })),
   mockScanSameThing: vi.fn(async () => ({ same: true, copy: false, what: "" })),
+  // The near-copy look runs only inside a metered job (`currentCostJobId`), so only the tests that
+  // open one ever reach it. Default "not a copy".
+  mockScanNearCopy: vi.fn(async () => ({ copy: false, what: "" })),
 }));
 vi.mock("./overlayTextScan", () => ({
   scanStillDefects: mockScanStillDefects,
   scanSameHost: mockScanSameHost,
   scanSameThing: mockScanSameThing,
+  scanNearCopy: mockScanNearCopy,
 }));
 // The delivery plan is one more invokeClaude call in the pipeline; like the overlay scan it is
 // neutralized here so the call-count assertions hold. Default null = the one-speed read and
@@ -10364,7 +10368,113 @@ describe("a memory picture that copies its memory twice is drawn from words (job
       genImage
     );
     expect(mockScanSameThing.mock.calls[0][0]).toBe("https://r2/first.png");
+    expect(mockScanSameThing.mock.calls[0][3]).toBe(false);
     expect(genImage.mock.calls[0][0].prompt).not.toMatch(/RIGHT BEFORE/);
+  });
+});
+
+describe("a continuation is compared with the picture it continues (jobs 401-405)", () => {
+  // Two pictures whose fingerprints read far apart: job 403 scene 14 was scene 10 a little closer at
+  // 23 bits, over the 20 the near-copy look needs, and job 405 scene 8 went unchecked once drawn from
+  // words. Built as real images so the fingerprint really is far.
+  const stripes = (kind: "left" | "top") =>
+    sharp({ create: { width: 320, height: 180, channels: 3, background: kind === "left" ? "#284878" : "#c83c14" } })
+      .composite([
+        {
+          input: Buffer.from(
+            kind === "left"
+              ? `<svg width="320" height="180"><rect x="0" y="0" width="160" height="180" fill="white"/></svg>`
+              : `<svg width="320" height="180"><rect x="0" y="0" width="320" height="60" fill="white"/><rect x="200" y="90" width="40" height="90" fill="black"/></svg>`
+          ),
+          left: 0,
+          top: 0,
+        },
+      ])
+      .png()
+      .toBuffer();
+  const drawsOf = (...frames: Buffer[]) => {
+    const fn = vi.fn();
+    for (const f of frames) fn.mockResolvedValueOnce({ success: true, fileData: f });
+    return fn;
+  };
+  afterEach(() => {
+    mockScanSameThing.mockReset();
+    mockScanSameThing.mockResolvedValue({ same: true, copy: false, what: "" });
+    mockScanNearCopy.mockReset();
+    mockScanNearCopy.mockResolvedValue({ copy: false, what: "" });
+  });
+  const CHEST = "a small tabby cat standing on a sleeping person's chest in the dark bedroom, head lowered close to their face, waiting";
+  const VIEW = ", a close-up of one detail of it filling the frame";
+  const board = () =>
+    [
+      { index: 3, showSubject: "a small tabby cat padding across a rumpled grey bed at night", keyThing: "cat", pictureUrl: "https://r2/still-src-3.png" },
+      { index: 7, showSubject: CHEST, keyThing: "cat", pictureUrl: "https://r2/still-src-7.png" },
+      { index: 8, showSubject: `${CHEST}${VIEW}`, visualPrompt: `${CHEST}${VIEW}`, keyThing: "cat", scriptText: "Then she stops on your chest, lowers her face to yours, and waits." },
+    ] as any[];
+
+  it("405-22-like: the same-thing check meets the continued picture, told it was just shown; the near-copy look leaves that pair", async () => {
+    const { withCostMeter } = await import("./costMeter");
+    const { memoryFor, memoryView } = await import("./pictureMemory");
+    const { memoryFields } = await import("./longformVideo");
+    const { pictureHash, pictureThumb, rememberPicture, REDRAW_CAMERAS } = await import("./pictureVariety");
+    const [seven, drawn] = await Promise.all([stripes("left"), stripes("top")]);
+    const b = board();
+    attachMemory(b, [b[2]]);
+    Object.assign(b[2], memoryFields(await memoryFor(b[2], 0), memoryView(b[2])));
+    expect(b[2]).toMatchObject({ memoryRightBefore: 1, memoryContinues: true, memoryView: REDRAW_CAMERAS[0] });
+    rememberPicture(9301, 7, await pictureHash(seven), await pictureThumb(seven));
+    const genImage = drawsOf(drawn);
+    await withCostMeter(9301, () => generateValidatedStill(b[2], 4, undefined, genImage));
+    expect(mockScanSameThing).toHaveBeenCalledTimes(1);
+    expect(mockScanSameThing.mock.calls[0][0]).toBe("https://r2/still-src-7.png");
+    expect(mockScanSameThing.mock.calls[0][3]).toBe(true);
+    expect(mockScanNearCopy).not.toHaveBeenCalled();
+    expect(genImage.mock.calls[0][0].prompt).toMatch(/the earlier picture this one CONTINUES/);
+  });
+
+  it("405-8: copied twice, drawn from words — the near-copy look still meets scene 7 and redraws from the next camera", async () => {
+    const { withCostMeter } = await import("./costMeter");
+    const { memoryFor, memoryView } = await import("./pictureMemory");
+    const { memoryFields } = await import("./longformVideo");
+    const { pictureHash, pictureThumb, rememberPicture, REDRAW_CAMERAS, REDRAW_VIEWS, NEAR_COPY_BITS, hashDistance } =
+      await import("./pictureVariety");
+    const [seven, drawn] = await Promise.all([stripes("left"), stripes("top")]);
+    expect(hashDistance(await pictureHash(seven), await pictureHash(drawn))).toBeGreaterThan(NEAR_COPY_BITS);
+    const b = board();
+    attachMemory(b, [b[2]]);
+    Object.assign(b[2], memoryFields(await memoryFor(b[2], 0), memoryView(b[2])));
+    const sevenThumb = await pictureThumb(seven);
+    rememberPicture(9302, 7, await pictureHash(seven), sevenThumb);
+    const copy = { same: true, copy: true, what: "the same framing" };
+    mockScanSameThing.mockReset();
+    mockScanSameThing.mockResolvedValueOnce(copy).mockResolvedValueOnce(copy);
+    mockScanNearCopy.mockReset();
+    mockScanNearCopy.mockResolvedValueOnce({ copy: true, what: "same cat, same distance" }).mockResolvedValue({ copy: false, what: "" });
+    const genImage = drawsOf(drawn, drawn, drawn, drawn);
+    const out = await withCostMeter(9302, () => generateValidatedStill(b[2], 5, undefined, genImage));
+    expect(genImage).toHaveBeenCalledTimes(4);
+    const prompts = genImage.mock.calls.map(x => x[0].prompt as string);
+    // The third is drawn from words and keeps its concrete camera.
+    expect(prompts[2]).not.toMatch(/reference image/i);
+    expect(prompts[2]).toContain(`Camera for THIS picture: ${REDRAW_CAMERAS[0]}.`);
+    // Compared with scene 7 though 7's fingerprint is far; the copy redraws from the camera after its own.
+    expect(mockScanNearCopy.mock.calls[0][0].equals(sevenThumb)).toBe(true);
+    expect(prompts[3]).toContain(REDRAW_VIEWS[1]);
+    expect(out.flaws).toBeUndefined();
+  });
+
+  it("a picture that continues nothing is left to the fingerprint, as before", async () => {
+    const { withCostMeter } = await import("./costMeter");
+    const { pictureHash, pictureThumb, rememberPicture } = await import("./pictureVariety");
+    const [other, drawn] = await Promise.all([stripes("left"), stripes("top")]);
+    const b = [
+      { index: 1, showSubject: "a dog asleep on the porch steps", pictureUrl: "https://r2/1.png" },
+      { index: 2, showSubject: "a red barn under a grey sky" },
+    ] as any[];
+    attachMemory(b, [b[1]]);
+    rememberPicture(9303, 1, await pictureHash(other), await pictureThumb(other));
+    await withCostMeter(9303, () => generateValidatedStill(b[1], 4, undefined, drawsOf(drawn)));
+    expect(mockScanNearCopy).not.toHaveBeenCalled();
   });
 });
 

@@ -14,7 +14,16 @@
  */
 import { PART_VIEW } from "./namedLooks";
 import type { KeyThing, StoryboardScene } from "@shared/types";
-import { BUILD_STAGES, keyThingsIn, nearlySameSubject, sameSubject, showsScreen } from "./shotList";
+import { REDRAW_CAMERAS } from "./pictureVariety";
+import {
+  BUILD_STAGES,
+  keyThingsIn,
+  nearlySameSubject,
+  repeatsTopic,
+  sameSubject,
+  showsScreen,
+  viewIndexOf,
+} from "./shotList";
 
 /** The longest a picture waits for its memory before it is drawn from words alone. */
 export const MEMORY_WAIT_MS = 8 * 60_000;
@@ -109,10 +118,14 @@ const pictureWords = (s: StoryboardScene) =>
  * told by the words alone, so it also takes the same thing described anew (job 397 scenes 28-29: the
  * board close up on the bench, then leaning against the wall) — where a new photo is right too.
  *
+ * "Right before" skips full-frame host takes (`lastPictureBefore`): picture, host, picture reads as
+ * the same picture twice just the same (job 404 scenes 5-7: the robin on the lawn, the host's
+ * introduction, the robin on the lawn again a little closer).
+ *
  * Returns that picture, or undefined: when the picture before is not one of its memories, when `s`
- * continues it (`sameShot`, or the same or nearly the same words — a continuation has its own view,
- * `joinSameContext`), and for a list item drawn from its list's group picture or a screen, whose
- * framing is set apart already (`SET_ITEM_VIEW`, `SCREEN_ITEM_VIEW`). Pure.
+ * continues it (that is `continuedPicture`'s), and for a list item drawn from its list's group
+ * picture or a screen, whose framing is set apart already (`SET_ITEM_VIEW`, `SCREEN_ITEM_VIEW`).
+ * Pure.
  */
 export function rightBeforeToRecompose(
   scenes: StoryboardScene[],
@@ -121,11 +134,122 @@ export function rightBeforeToRecompose(
 ): StoryboardScene | undefined {
   const i = scenes.indexOf(s);
   if (i <= 0 || s.sameShot || listSetFor(scenes, s) || isScreen(s)) return undefined;
-  const before = scenes[i - 1];
-  if (!sources.includes(before)) return undefined;
+  const before = lastPictureBefore(scenes, s);
+  if (!before || !sources.includes(before)) return undefined;
   const [a, b] = [pictureWords(before), pictureWords(s)];
-  if (!a.trim() || !b.trim() || sameSubject(a, b) || nearlySameSubject(a, b)) return undefined;
+  if (!a.trim() || !b.trim() || sameSubject(a, b) || nearlySameSubject(a, b) || repeatsTopic(a, b)) return undefined;
   return before;
+}
+
+/**
+ * The picture a viewer saw last before `s`: the one right before it, or — when full-frame host takes
+ * sit between — the last picture before them. A split screen stops the walk: its panel is a picture
+ * the viewer sees. Undefined when that is not a drawn full-frame picture. Pure.
+ */
+export function lastPictureBefore(scenes: StoryboardScene[], s: StoryboardScene): StoryboardScene | undefined {
+  let i = scenes.indexOf(s) - 1;
+  while (i >= 0 && scenes[i].hostPresent && !scenes[i].splitVisual) i--;
+  const p = i >= 0 ? scenes[i] : undefined;
+  return p && source(p) ? p : undefined;
+}
+
+/**
+ * A CONTINUATION IS A NEW PHOTO OF THE SAME THING (2026-10-18, the review of jobs 401-405: 15
+ * near-copies). A topic that runs past its limit, a split picture's later part, or the planner
+ * repeating its own words is drawn as "the same words + a view" (`OTHER_VIEWS`) FROM the picture
+ * it continues — and the reference pinned the composition while the stock view phrase moved
+ * nothing: job 405 scene 8 (the cat lowering its face to the sleeper, "a close-up of one detail of
+ * it") came back at scene 7's distance and framing, scene 22 (the cat at the window, close up) was
+ * scene 21 a little tighter, job 401 scene 3 was scene 2's over-the-shoulder card shot with other
+ * cards in the hands, and job 403 scene 14 was scene 10's pipe run under the house a little closer.
+ * So a continuation is told what a picture drawn from the one just shown is told (`rightBeforeClause`):
+ * the picture it continues lends only the thing's look, with a concrete camera (`REDRAW_CAMERAS`,
+ * `memoryViewFor`), and the same-thing check lays it beside THAT picture (`sameThingReference`),
+ * where it used to be laid beside the thing's first picture (scene 22 was compared with scene 7, the
+ * cat on the sleeper's chest, and passed).
+ *
+ * Returns the latest of `s`'s memory pictures whose words `s` repeats once any view is taken off
+ * (`repeatsTopic` — job 403 scene 14 repeats scene 10, 11 s and three pictures later), else, for a
+ * picture marked to continue (`sameShot`) whose words were rewritten, the picture right before it.
+ * Undefined for a list item drawn from its group picture and a screen, whose framing is set apart
+ * already. Pure.
+ */
+export function continuedPicture(
+  scenes: StoryboardScene[],
+  s: StoryboardScene,
+  sources: StoryboardScene[] = memorySourcesFor(scenes, s)
+): StoryboardScene | undefined {
+  const i = scenes.indexOf(s);
+  if (i <= 0 || listSetFor(scenes, s) || isScreen(s)) return undefined;
+  const words = pictureWords(s);
+  const byWords = sources
+    .filter(x => repeatsTopic(pictureWords(x), words))
+    .sort((a, b) => scenes.indexOf(b) - scenes.indexOf(a))[0];
+  if (byWords) return byWords;
+  const before = scenes[i - 1];
+  return s.sameShot && sources.includes(before) ? before : undefined;
+}
+
+/**
+ * What `s` is drawn FROM as the picture it must not repeat: the picture it continues
+ * (`continuedPicture`, `continues: true`), else the one shown right before it about something else
+ * (`rightBeforeToRecompose`). Pure.
+ */
+export function recomposeFrom(
+  scenes: StoryboardScene[],
+  s: StoryboardScene,
+  sources: StoryboardScene[] = memorySourcesFor(scenes, s)
+): { from: StoryboardScene; continues: boolean } | undefined {
+  const cont = continuedPicture(scenes, s, sources);
+  if (cont) return { from: cont, continues: true };
+  const before = rightBeforeToRecompose(scenes, s, sources);
+  return before ? { from: before, continues: false } : undefined;
+}
+
+/**
+ * The picture the near-copy check ALWAYS lays beside `s`, whatever the fingerprints say
+ * (`nearCopyCandidates`' `always`): what it is drawn from as the picture it must not repeat
+ * (`recomposeFrom`), else — a picture with no memory link — the latest earlier picture whose words it
+ * repeats, else, marked to continue (`sameShot`), the picture right before it. That is the check a
+ * copy drawn from WORDS still meets: job 405 scene 8 and job 401 scenes 3 and 5 copied their memory
+ * twice, were drawn from words with no reference, and shipped as the same composition unchecked.
+ * Never a split panel (the near-copy check leaves panels out). Pure.
+ */
+export function nearCopyPartnerFor(
+  scenes: StoryboardScene[],
+  s: StoryboardScene,
+  sources: StoryboardScene[] = memorySourcesFor(scenes, s)
+): StoryboardScene | undefined {
+  const i = scenes.indexOf(s);
+  if (i <= 0 || !source(s) || listSetFor(scenes, s) || isScreen(s)) return undefined;
+  const re = recomposeFrom(scenes, s, sources);
+  if (re) return re.from;
+  const words = pictureWords(s);
+  for (let j = i - 1; j >= 0; j--) {
+    const x = scenes[j];
+    if (source(x) && !isScreen(x) && repeatsTopic(pictureWords(x), words)) return x;
+  }
+  const before = scenes[i - 1];
+  return s.sameShot && source(before) ? before : undefined;
+}
+
+/**
+ * The camera a continuation is drawn from, as an index into `REDRAW_CAMERAS` (one per `OTHER_VIEWS`
+ * entry, same order): the one its own words' view names, else the next after the camera of the
+ * picture it continues — and never that picture's own. Job 405 scenes 22 and 24 both said "a
+ * close-up of one detail of it" (a host glimpse cut one picture in two), were both drawn close up
+ * from the same reference, and came back as one picture twice. A picture that continues nothing
+ * reads its own view (-1 for none). Pure.
+ */
+export function continuationCameraIndex(scenes: StoryboardScene[], s: StoryboardScene, depth = 0): number {
+  const own = viewIndexOf(pictureWords(s).replace(/[\s.]+$/, ""));
+  const from = depth < 8 ? continuedPicture(scenes, s) : undefined;
+  if (!from) return own - 1;
+  const prev = continuationCameraIndex(scenes, from, depth + 1);
+  const n = REDRAW_CAMERAS.length;
+  let k = own > 0 ? own - 1 : (prev + 1) % n;
+  if (k === prev) k = (k + 1) % n;
+  return k;
 }
 
 /** What the still loop does with the same-thing check's answer on a memory picture (`sameThingMove`). */
@@ -632,6 +756,14 @@ export function memoryViewFor(scenes: StoryboardScene[], s: StoryboardScene): st
   // thing, at its natural size — never the close view the rotation would give the subject.
   // A picture of one PART of it (`partOf`) is about that part, whatever order the words name them in.
   if (!s.partOf && !isSubject(s, s.keyThing)) return BACKGROUND_VIEW;
+  // A CONTINUATION of a picture it is drawn from gets a concrete camera (`REDRAW_CAMERAS`), never the
+  // stock memory views: told "a close view of one part of it", job 403 scene 14 came back as scene
+  // 10 a little closer, and job 405 scene 22 as scene 21 a little tighter (`continuedPicture`).
+  // Printing that must stay unreadable is never a close-up of the print here either.
+  if (!s.partOf && continuedPicture(scenes, s)) {
+    const camera = REDRAW_CAMERAS[continuationCameraIndex(scenes, s)];
+    return s.blurPrint && camera === REDRAW_CAMERAS[0] ? BLUR_PRINT_VIEW : camera;
+  }
   // The picture's OWN framing decides first (`shotFraming`): one part of the thing, or a close view
   // its words ask for, is a close-up — never "a few steps further back" or "the other side", which
   // drew Ruth's "a bear paw there" as the whole quilt (job 298) while its words said "close view".
@@ -671,8 +803,15 @@ const ownSourcesOf = new WeakMap<StoryboardScene, StoryboardScene[]>();
 const lookOf = new WeakMap<StoryboardScene, string | undefined>();
 /** The named kind's look a split's panel takes from the pictures of its thing (`panelNamedLook`). */
 const panelLookOf = new WeakMap<StoryboardScene, string | undefined>();
-/** Of `sourcesOf`, the picture shown right before the scene, about something else (`rightBeforeToRecompose`). */
+/**
+ * Of `sourcesOf`, the picture the scene must not repeat (`recomposeFrom`): the one it continues, or
+ * the one shown right before it about something else.
+ */
 const rightBeforeOf = new WeakMap<StoryboardScene, StoryboardScene | undefined>();
+/** Scenes whose `rightBeforeOf` picture is one they CONTINUE as the same topic (`continuedPicture`). */
+const continuesOf = new WeakSet<StoryboardScene>();
+/** The picture the near-copy check always lays beside the scene (`nearCopyPartnerFor`). */
+const partnerOf = new WeakMap<StoryboardScene, StoryboardScene | undefined>();
 /** Pictures a later picture is drawn from for their OWN key thing (`copiedLater`). */
 const copied = new WeakSet<StoryboardScene>();
 /** Scenes whose picture is being made in the current pass — only those are worth waiting for. */
@@ -714,7 +853,11 @@ export function attachMemory(
     viewOf.set(s, memoryViewFor(board, s));
     lookOf.set(s, keyThingLookFor(s, keyThings, makes));
     panelLookOf.set(s, panelNamedLook(board, s));
-    rightBeforeOf.set(s, rightBeforeToRecompose(board, s, sources));
+    const re = recomposeFrom(board, s, sources);
+    rightBeforeOf.set(s, re?.from);
+    if (re?.continues) continuesOf.add(s);
+    else continuesOf.delete(s);
+    partnerOf.set(s, nearCopyPartnerFor(board, s, sources));
     copied.delete(s);
   }
   // A picture is COPIED when a later picture is drawn from it for the thing it is itself about — not
@@ -745,6 +888,14 @@ export function memoryView(s: StoryboardScene): string | undefined {
  */
 export function panelLook(s: StoryboardScene): string | undefined {
   return panelLookOf.get(s);
+}
+
+/**
+ * The picture the near-copy check always lays beside `s` (`nearCopyPartnerFor`), as the last
+ * `attachMemory` over its film found it; undefined for a scene no pass has seen.
+ */
+export function nearCopyPartner(s: StoryboardScene): StoryboardScene | undefined {
+  return partnerOf.get(s);
 }
 
 /** Whether a later picture is drawn from `s` for the key thing `s` is about (`attachMemory`). */
@@ -781,13 +932,20 @@ export function pictureSettled(s: StoryboardScene): void {
  * same pass). `own` says whether any of them is a picture of `s`'s own thing; when none is, `look`
  * is the look it is drawn by instead (`keyThingLookFor`). When one is, `wordsLook` is that same look,
  * kept for a redraw from words should the picture copy its memory (`memoryToWords`). `before` is
- * where in `urls` the picture shown right before `s` is, when it is about something else
- * (`rightBeforeToRecompose`).
+ * where in `urls` the picture `s` must not repeat is (`recomposeFrom`): the one shown right before
+ * it about something else, or — `continues` — the one it continues as the same topic.
  */
 export async function memoryFor(
   s: StoryboardScene,
   timeoutMs = MEMORY_WAIT_MS
-): Promise<{ urls: string[]; own: boolean; look?: string; wordsLook?: string; before?: number }> {
+): Promise<{
+  urls: string[];
+  own: boolean;
+  look?: string;
+  wordsLook?: string;
+  before?: number;
+  continues?: boolean;
+}> {
   const urls: string[] = [];
   const mine = ownSourcesOf.get(s) ?? [];
   const prev = rightBeforeOf.get(s);
@@ -808,7 +966,14 @@ export async function memoryFor(
     if (src === prev) before = urls.length - 1;
   }
   const look = lookOf.get(s);
-  return { urls, own, look: own ? undefined : look, wordsLook: own ? look : undefined, before };
+  return {
+    urls,
+    own,
+    look: own ? undefined : look,
+    wordsLook: own ? look : undefined,
+    before,
+    ...(before != null && continuesOf.has(s) ? { continues: true } : {}),
+  };
 }
 
 /** The pictures `s` is drawn from (`memoryFor`). */

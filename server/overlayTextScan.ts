@@ -793,13 +793,36 @@ export function parseSameThingVerdict(
 }
 
 /**
+ * Said with the pair when the LEFT picture is the one the new picture must not repeat — shown right
+ * before it, or the one it continues (`memoryRightBefore`). "A different distance or crop is fine"
+ * let a slightly tighter frame of the same composition through as a new view: job 405 scene 24 was
+ * scene 22 "only slightly tighter", job 403 scene 14 scene 10's pipe run a little closer, job 402
+ * scene 12 scene 9's stocked galley with "only the camera closer". A real close-up of one part, a
+ * wide view, another side or height is still a new view. Pure data.
+ */
+export const JUST_SHOWN_COPY_NOTE =
+  "The LEFT photo is shown in the video just before the RIGHT one, so the RIGHT must be a clearly " +
+  "new photo: the same camera angle with the same things in the same arrangement, only a little " +
+  "closer or further back, is a copy.";
+
+/** The question asked with the pair (`scanSameThing`); `justShown` adds `JUST_SHOWN_COPY_NOTE`. Pure. */
+export function sameThingQuestion(thing: string, justShown = false): string {
+  return (
+    `The thing: ${thing.replace(/"/g, "'").slice(0, 120)}. Is it the same one on the right, and is ` +
+    `the right a new view of it or a near-copy?${justShown ? ` ${JUST_SHOWN_COPY_NOTE}` : ""}`
+  );
+}
+
+/**
  * Is the `thing` in the new picture the same one as in its memory picture (`memoryUrl`)? The two are
- * laid SIDE BY SIDE, memory on the left. Never throws: a dead check passes the picture.
+ * laid SIDE BY SIDE, memory on the left. `justShown`: the memory picture is the one the new picture
+ * must not repeat (`JUST_SHOWN_COPY_NOTE`). Never throws: a dead check passes the picture.
  */
 export async function scanSameThing(
   memoryUrl: string,
   buffer: Buffer,
-  thing: string
+  thing: string,
+  justShown = false
 ): Promise<{ same: boolean; copy: boolean; what: string }> {
   try {
     const { presignOwnBucketUrl } = await import("./storage");
@@ -824,7 +847,7 @@ export async function scanSameThing(
       .toBuffer();
     const result = await invokeClaude({
       systemPrompt: SAME_THING_SYSTEM,
-      userMessage: `The thing: ${thing.replace(/"/g, "'").slice(0, 120)}. Is it the same one on the right, and is the right a new view of it or a near-copy?`,
+      userMessage: sameThingQuestion(thing, justShown),
       imageInput: { base64: pair.toString("base64"), mediaType: "image/png" },
       maxTokens: 200,
       model: SAME_THING_MODEL(),
