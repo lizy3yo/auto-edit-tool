@@ -574,6 +574,18 @@ function colourMaterialRuns(clause: string): string[] {
 
 /** The longest item of a place's list ("bare branches", "and holly shrubs") — a longer clause is a look. */
 const PLACE_LIST_ITEM_WORDS = 4;
+/**
+ * A part or mark the thing itself HAS: an animal's ears, tail or bill, a plant's leaves or bark, a
+ * tool's blade or handle, a spot, band or patch. These are exactly the 2-3 features `EXACT_KIND_RULE`
+ * asks a look to name, and they are short and often colourless ("tufted ears, and a bushy tail"), so
+ * after a dropped comparison or place ("larger than a house cat, tufted ears, and a short bobbed
+ * tail", "seen at dusk, pointed ears, and a bushy tail") they read just like a place's list, and the
+ * look was cut to "a bobcat". An item naming one is the thing's look and stops the list. Never a word
+ * a living thing's place is listed in (branches, berries, flowers — job 404's "bare branches, and
+ * holly shrubs" are where the robin is seen). A stop only keeps what the cut kept before.
+ */
+const OWN_FEATURE =
+  /\b(?:heads?|faces?|ears?|eyes?|bills?|beaks?|crests?|combs?|tufts?|throats?|necks?|breasts?|chests?|bell(?:y|ies)|backs?|rumps?|wings?|tails?|legs?|feet|foot|paws?|claws?|talons?|hoo(?:f|fs|ves)|snouts?|muzzles?|noses?|manes?|horns?|antlers?|whiskers?|coats?|fur|feathers?|plumage|scales?|fins?|gills?|shells?|antennae|spots?|bands?|bars?|patch(?:es)?|rings?|markings?|masks?|bod(?:y|ies)|frame|leaf|leaves|petals?|bark|stems?|stalks?|trunks?|needles?|blossoms?|buds?|cones?|thorns?|spines?|blades?|handles?|teeth|tooth|grips?|tips?)\b/i;
 
 /**
  * A PLACE'S LIST GOES WITH IT (2026-10-18, job 404 scene 4). The look is cut clause by clause at its
@@ -584,7 +596,8 @@ const PLACE_LIST_ITEM_WORDS = 4;
  * list is what follows the dropped clause up to and including an item opening on "and" or "or",
  * each of a few words with no colour or material in it (job 328's rack: "holding a hand sander,
  * clamps, and a square" left the rack looking like "clamps, and a square"). Anything else stops it:
- * a colour or material is the thing's own look ("seen from the front, a red cab, and blue trim"), a
+ * a colour or material is the thing's own look ("seen from the front, a red cab, and blue trim"), so
+ * is a part or mark it has (`OWN_FEATURE`: "seen at dusk, pointed ears, and a bushy tail"), a
  * longer clause is too, and a clause that never reaches an "and" was no list (job 400's seat: "seen
  * from the side, quiet and empty"). A place listing what it has (job 395: "bright indoor store with
  * wide aisles, pale flooring, and tall open shelves") is the thing itself, never cut on.
@@ -596,7 +609,7 @@ function placeListEnd(clauses: string[], i: number): number {
     const c = clauses[j];
     const and = /^(?:and|or)\s+/i.test(c);
     const words = c.replace(/^(?:and|or)\s+/i, "").split(/\s+/).length;
-    if (words > PLACE_LIST_ITEM_WORDS || hasColourMaterial(c)) return i;
+    if (words > PLACE_LIST_ITEM_WORDS || hasColourMaterial(c) || OWN_FEATURE.test(c)) return i;
     if (and) return j;
   }
   return i;

@@ -201,6 +201,25 @@ describe("a key thing's look cut for the picture", () => {
     ).toBe("a garden gnome, a pointed hat over a round face, and a long beard");
   });
 
+  it("never cuts the features the exact kind is told apart by, short and colourless as they are", () => {
+    // What the props list is now told to write: the kind, then 2-3 parts it has. After a dropped
+    // comparison or place they read like a place's list, and the look was cut to the bare kind.
+    expect(
+      pictureLook("a bobcat, larger than a house cat, tufted ears, and a short bobbed tail")
+    ).toBe("a bobcat, tufted ears, and a short bobbed tail");
+    expect(pictureLook("a red fox, seen at dusk, pointed ears, and a bushy tail")).toBe(
+      "a red fox, pointed ears, and a bushy tail"
+    );
+    expect(pictureLook("a sugar maple, seen in a park, lobed leaves, and furrowed bark")).toBe(
+      "a sugar maple, lobed leaves, and furrowed bark"
+    );
+    expect(pictureLook("a pull saw, kept on the pegboard, a thin blade, and a long handle")).toBe(
+      "a pull saw, a thin blade, and a long handle"
+    );
+    // Where a living thing is seen is still no part of it (job 404).
+    expect(pictureLook(STORED_ROBIN)).not.toMatch(/branches|holly/);
+  });
+
   it("a living thing marked with colours keeps them; anything marked with writing still goes", () => {
     expect(
       pictureLook(
