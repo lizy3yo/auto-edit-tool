@@ -74,6 +74,10 @@ describe("a pair gets 'vs' only when it is compared: the words between its value
   it("397 furniture-price-range: a range ('$150 to $600') is no comparison — even marked as one", () => {
     const range = label("furniture-price-range", "And furniture, $150 to $600.", "$150 to $600.", { label: "From", value: "$150", at: "@$150" }, { label: "Up to", value: "$600", at: "@$600." }, { compare: true });
     expect(compared(range, furniture)).toBe(false);
+    // the second "at" leading with the range's own word ("@to $600"): nothing is said between the
+    // two "at"s, and the "to" before the value still makes it a range
+    const ledByTo = label("furniture-price-range", "And furniture, $150 to $600.", "$150 to $600.", { label: "From", value: "$150", at: "@$150" }, { label: "Up to", value: "$600", at: "@to $600." }, { compare: true });
+    expect(compared(ledByTo, furniture)).toBe(false);
   });
 
   it("where the words between do not settle it, the plan's mark does (401's age and his father's, 406's volume math, 382's estimate and what it took)", () => {
@@ -98,6 +102,26 @@ describe("a pair gets 'vs' only when it is compared: the words between its value
     expect(pairCompared(undefined, { join: "a month instead of", second: "$90" })).toBe(true);
     const words = T("You@1.0-1.2 pay@1.2-1.4 $3@1.4-1.8 instead@1.9-2.2 of@2.2-2.3 $10.@2.3-2.8");
     expect(compared(label("pay", "You pay $3", "of $10.", { label: "Here", value: "$3", at: "@$3" }, { label: "There", value: "$10", at: "@$10." }), words)).toBe(true);
+    // the comparing word may lead the second "at" ("@versus $40")
+    expect(pairCompared(undefined, { join: "for the plain one", second: "versus $40 for the oak" })).toBe(true);
+    expect(pairCompared(undefined, { join: "this year, against the", second: "40 he did last spring" })).toBe(true);
+  });
+
+  it("'against' said on the way between the values compares nothing — only 'against' right before the second does", () => {
+    // 120 grit and 10 minutes are two different measures, side by side
+    expect(pairCompared(undefined, { join: "grit sanded against the grain takes", second: "10 minutes" })).toBe(false);
+    expect(pairCompared(undefined, { join: "boards leaned against the wall, and", second: "5 on the floor" })).toBe(false);
+    // 406's shape with an aside in it: still a price for each of two things, joined by "and"
+    expect(pairCompared(true, { join: "a knife, which I sharpen against a stone, and", second: "$10 to $20 a mower blade" })).toBe(false);
+    const words = T(
+      "You@1.0-1.2 charge@1.2-1.5 $5@1.5-1.8 a@1.8-1.9 knife,@1.9-2.2 which@2.3-2.4 I@2.4-2.5 sharpen@2.5-2.8 against@2.8-3.1 a@3.1-3.2 stone,@3.2-3.5 and@3.6-3.7 $10@3.7-4.0 a@4.0-4.1 blade.@4.1-4.5"
+    );
+    expect(compared(label("aside", "You charge $5", "a blade.", { label: "A knife", value: "$5", at: "@$5 a knife" }, { label: "A blade", value: "$10", at: "@$10 a blade" }), words)).toBe(false);
+  });
+
+  it("a list or a range join decides before a comparing word said earlier on the way", () => {
+    expect(pairCompared(undefined, { join: "a knife, compared to most shops, and", second: "$10 a blade" })).toBe(false);
+    expect(pairCompared(undefined, { join: "instead of the usual, or", second: "$10" })).toBe(false);
   });
 
   it("a contrast named after the 'and' is the plan's call, never read as a list", () => {

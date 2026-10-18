@@ -476,30 +476,35 @@ const ENDS_SENTENCE = new RegExp("[.?!][\"”')]*$");
  * $20" for "$5 to $10 a knife and $10 to $20 a mower blade" — a price for each of two services, not
  * a contest — and Dale's job 397 (1:04) "FROM $150 vs UP TO $600" for "And furniture, $150 to $600.",
  * a range. The separator is drawn only when the pair is compared (`compare`, set by the resolver on
- * each template in SEPARATED_PAIRS): the plan marks it, and the words the narrator says BETWEEN the two values —
- * after the first one's spoken words (`a.at`), before the second's (`b.at`) — settle it where they can:
- * a comparing word ("versus", "against", "compared to", "instead of"…) compares them, marked or not;
- * a range (only "to", "up to" or "through" between) or a list or a choice (the join ENDS on "and",
- * "or" or "plus" with the second value said right after it) never does, marked or not — a contrast
- * names its side between the "and" and the value ("…and now 3", "…and his 81"). Anything else is the
- * plan's call (Gideon's job 401, "He is 64. His father made it to 81."). A "vs" left out still reads
- * (the labels name both values); a "vs" put in says the wrong thing — so an unclear pair goes without.
+ * each template in SEPARATED_PAIRS): the plan marks it, and the words the narrator says BETWEEN the
+ * two VALUES — after the first one's spoken words (`a.at`), up to the second value's number (an "at"
+ * may lead with words of its own: "@took 6.", "@to $600") — settle it where they can. A range (only
+ * "to", "up to" or "through" between) or a list or a choice (the join ENDS on "and", "or" or "plus",
+ * the second value said right after it) never does, marked or not — that is how THESE two are joined,
+ * so it is read first; a contrast names its side between the "and" and the value ("…and now 3",
+ * "…and his 81"). A comparing word ("versus", "compared to", "instead of"…) compares them, marked or
+ * not — "against" only right before the second value ("$15 against $40"), never "sanded against the
+ * grain" or "leaned against the wall" said on the way. Anything else is the plan's call (Gideon's job
+ * 401, "He is 64. His father made it to 81."). A "vs" left out still reads (the labels name both
+ * values); a "vs" put in says the wrong thing — so an unclear pair goes without.
  */
 const SEPARATED_PAIRS = new Set(["NumberLabel"]);
-const COMPARING_WORD = /\b(?:versus|vs|compared (?:to|with)|against|instead of|rather than|unlike|whereas|as opposed to)\b/;
+const COMPARING_WORD = /\b(?:versus|vs|compared (?:to|with)|instead of|rather than|unlike|whereas|as opposed to)\b/;
+const AGAINST_THE_VALUE = /\bagainst(?: (?:the|a|an|his|her|its|their|my|your|our))?$/;
 const RANGE_JOIN = /^(?:(?:and|or) )?(?:all the way )?(?:up )?(?:to|through|thru)$/;
 const LIST_JOIN = /\b(?:and|or|plus)$/;
 
 /** Is a pair compared? `planned` is the plan's `compare`; `said` is what the narrator says between the
- * two values (`join`) and the second value's own spoken words (`second`), when both are timed to
- * words. Pure. */
+ * two elements' spoken words (`join`) and the second element's own spoken words (`second`), when both
+ * are timed to words. Pure. */
 export function pairCompared(planned: unknown, said?: { join: string; second: string }): boolean {
   if (said) {
-    const join = tokens(said.join).join(" ");
-    if (COMPARING_WORD.test(join)) return true;
     const second = tokens(said.second);
-    const opensOnValue = second.length > 0 && (/^\d/.test(second[0]) || parseSpokenNumber(second, 0) !== null);
-    if (opensOnValue && (RANGE_JOIN.test(join) || LIST_JOIN.test(join))) return false;
+    // Where the second VALUE is said: the first number among its own words ("took 6", "to $600").
+    const value = second.findIndex((t, i) => /^\d/.test(t) || parseSpokenNumber(second, i) !== null);
+    const join = [...tokens(said.join), ...second.slice(0, Math.max(0, value))].join(" ");
+    if (value >= 0 && (RANGE_JOIN.test(join) || LIST_JOIN.test(join))) return false;
+    if (COMPARING_WORD.test(join) || AGAINST_THE_VALUE.test(join)) return true;
   }
   return planned === true;
 }
