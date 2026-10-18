@@ -420,6 +420,17 @@ describe("misplacedCodeWords", () => {
       "There's a black and white box on the left-hand side.",
       "left-hand side",
     ],
+    // Hyphenated, "black-and-white" is still one word: a hyphen is a word boundary, and its "and"
+    // used to split the part so the box was no longer the scannable one.
+    [
+      "Point your camera at the black-and-white box in the bottom corner.",
+      "the bottom corner",
+    ],
+    [
+      "The checkered box in the lower right takes you straight there.",
+      "lower right",
+    ],
+    ["The code's at the top right of the screen.", "top right of the screen"],
   ])("%s → %s", (sentence, place) => {
     expect(misplacedCodeWords(sentence)?.place).toBe(place);
   });
@@ -442,6 +453,18 @@ describe("misplacedCodeWords", () => {
     "Every corner I trimmed off those squares went into the coffee can too.",
     "Sew corner to corner across that square, so an X sits inside the box.",
     "Mine is worked from one corner out to a square.",
+    // What a scan brings up on the PHONE, said as a box — the real scripts say "a little link pops
+    // up" (jobs 110, 221, 351) and "tap the bar that appears"; a plain box is not the code.
+    "A little box pops up at the top of your screen.",
+    "Once you scan the code a box pops up at the top of your screen.",
+    "Aim your phone at the code; you'll see a box come up at the top of your screen.",
+    // A side or a corner OF something else.
+    "Tap the link at the top right of the description box.",
+    "Look for the box on the right side of the page once you scan the code.",
+    "Scan the code, and a little button shows on the right side of your phone.",
+    // Not a place at all, and nothing aimed.
+    "Hold your phone right side up and point it at the code on the screen.",
+    "Bring it home from your corner store.",
   ])("%s → nothing", sentence => {
     expect(misplacedCodeWords(sentence)).toBeNull();
   });
@@ -454,5 +477,11 @@ describe("misplacedCodeWords", () => {
     const t0 = Date.now();
     misplacedCodeWords(long);
     expect(Date.now() - t0).toBeLessThan(500);
+    // One long part whose every place belongs to something else: each place is checked against
+    // the last naming of the code without re-reading the part.
+    const onePart = "the code with a little link in the corner ".repeat(2000);
+    const t1 = Date.now();
+    expect(misplacedCodeWords(onePart)).toBeNull();
+    expect(Date.now() - t1).toBeLessThan(500);
   });
 });

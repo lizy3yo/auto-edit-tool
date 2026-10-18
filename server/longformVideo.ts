@@ -12466,16 +12466,33 @@ export function extendQrHeroWindow(
  * The script check's placement warnings (`ctaPlacementWarnings`), for the voicing stage to record
  * on the job: a line spoken under the big card that puts the code somewhere else. Job 409 (scene
  * 37) said "lift your phone toward the pattern in the corner of the screen" five seconds after the
- * card went big and centred, and nothing compared the two. Only for a block that really got the big
- * card (`qrHero` on its `ctaIndex`) — with no QR or book there is no card to contradict. The same
- * words the Generate dialog showed. Pure — unit-tested.
+ * card went big and centred, and nothing compared the two. Only for a line the film really speaks
+ * under the big card: the place words, through to the end of their sentence, are in the text of the
+ * block's card beats (`qrHero` on its `ctaIndex`). With no QR or book there is no card to
+ * contradict, and where the storyboard's cuts made the card start later than the script check read
+ * it (a scan phrase cut across two beats, so the pipeline found a later scan line or fell back to
+ * the block's last words), the line was spoken over the host with the small corner card, and the
+ * corner was right. The same words the Generate dialog showed. Pure — unit-tested.
  */
 export function ctaPlacementJobWarnings(
   script: string,
-  scenes: ReadonlyArray<Pick<StoryboardScene, "qrHero" | "ctaIndex">>
+  scenes: ReadonlyArray<
+    Pick<StoryboardScene, "qrHero" | "ctaIndex" | "scriptText" | "narration">
+  >
 ): string[] {
+  const norm = (t: string) => t.replace(/\s+/g, " ").trim().toLowerCase();
   return ctaPlacementWarnings(script)
-    .filter(w => scenes.some(s => s.qrHero && s.ctaIndex === w.ctaBlock))
+    .filter(w => {
+      const card = norm(
+        scenes
+          .filter(s => s.qrHero && s.ctaIndex === w.ctaBlock)
+          .map(s => s.scriptText ?? s.narration ?? "")
+          .join(" ")
+      );
+      const sentence = norm(w.text);
+      const at = sentence.indexOf(norm(w.place ?? ""));
+      return card !== "" && at >= 0 && card.includes(sentence.slice(at));
+    })
     .map(w => w.message);
 }
 

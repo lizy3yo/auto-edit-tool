@@ -200,12 +200,15 @@ const MISPLACED = new RegExp(
     // "the": never a quilter's "corner to corner" or "every corner I trimmed", never the corner of
     // something else ("the corner of the bench"). "Around the corner" is dropped by the caller.
     String.raw`\b(?:the|that|this|your)\s+(?:${EDGE_WAY}[\s-]+){0,2}corners?\b(?:\s+of\s+${FILM_SCREEN})?(?!\s+of\b)`,
-    // "the bottom right", "lower-left", "top left-hand"
-    String.raw`\b(?:top|bottom|upper|lower)[\s-]+(?:right|left)(?:[- ]hand)?\b`,
+    // "the bottom right", "lower-left", "top left-hand" — never of something else, like the corner
+    // above: "the top right of the description box" is where the link is, not the code.
+    String.raw`\b(?:top|bottom|upper|lower)[\s-]+(?:right|left)(?:[- ]hand)?\b(?:\s+of\s+${FILM_SCREEN})?(?!\s+of\b)`,
     // "the top of the screen", "the right side of your screen", "the bottom edge of the video"
     String.raw`\b(?:${EDGE_WAY}[\s-]+(?:side|edge|half)|top|bottom|side|edge|left|right)\s+of\s+${FILM_SCREEN}`,
-    // "on the right side", "the left-hand edge"
-    String.raw`\b(?:far[\s-]+)?(?:left|right)(?:[- ]hand)?[\s-]+(?:side|edge)\b`,
+    // "on the right side", "the left-hand edge" — never of something else ("the right side of the
+    // page" a scan opens, "of your phone"; the film's own screen is the line above), and never
+    // "hold your phone right side up".
+    String.raw`\b(?:far[\s-]+)?(?:left|right)(?:[- ]hand)?[\s-]+(?:side|edge)\b(?!\s+up\b)(?!\s+of\b)`,
   ].join("|"),
   "gi"
 );
@@ -213,10 +216,22 @@ const MISPLACED = new RegExp(
 const AROUND_BEFORE = /\ba?round\s+$/i;
 /** What a placement must be ABOUT: the code (a scan line calls it a code, a square, a pattern), or
  *  a phone or camera aimed there. "A little bar slides up along the top of your screen" is the
- *  phone's own link bar (job 223), never the code. */
-const NAMES_CODE = /\b(?:qr|codes?|squares?|patterns?|box)\b/i;
+ *  phone's own link bar (job 223), never the code. A BOX is the code only when it is said to be
+ *  the scannable one ("a black and white box"): "a little box pops up at the top of your screen"
+ *  is the phone's link, the way the real scripts say "a little link pops up" (jobs 110, 221, 351)
+ *  or "tap the bar that appears". */
+const NAMES_CODE =
+  /\b(?:qr|codes?|squares?|patterns?|(?:patterned|black_and_white|checkered|checkerboard|scannable|square) box(?:es)?)\b/i;
+const NAMES_CODE_ALL = new RegExp(NAMES_CODE.source, "gi");
+/** A phone or camera (or "it", once named) aimed or held TOWARD a place: "hold your camera up to
+ *  the top-right corner", "point it at the bottom corner". Never just one of those verbs and an
+ *  "it" anywhere in the part — "bring it home from your corner store" aims nothing. */
 const AIMS_THERE =
-  /\b(?:hold|lift|raise|point|aim|tilt|bring|hover)\b.*\b(?:phone|camera|smartphone|it)\b|\b(?:phone|camera|smartphone)\b.*\b(?:point|aim)\b/i;
+  /\b(?:hold|lift|raise|point|aim|tilt|bring|hover)\b(?:\s+up)?\s+(?:(?:your|the|a|its|that)\s+)?(?:(?:cell\s?)?phone['’]?s?\s+)?(?:phone|camera|smartphone|it)\b(?:\s+(?:up|steady|still|straight|right|over|down))?\s+(?:at|to|toward|towards|over|on|up\s+to)\b|\b(?:phone|camera|smartphone)\b.*\b(?:point|aim)\b/i;
+/** Something ELSE the place can belong to, named between the code and the place: "once you scan
+ *  the code a box pops up at the top of your screen" — the top is where that box is, not the code. */
+const OTHER_THING =
+  /\b(?:link|bar|banner|bubble|button|box|message|notification|window|prompt|pop-?up|page|tab|menu)\b/i;
 /** Where one part of a sentence ends and the next begins: "…the corner of the screen and tap what
  *  rises, or find the first line of the description below" is three parts. */
 const CLAUSE_BREAK =
@@ -249,8 +264,9 @@ function sentencesOf(text: string): Array<{ at: number; text: string }> {
 export function misplacedCodeWords(
   sentence: string
 ): { place: string; at: number } | null {
-  // "black and white" is one word here, not two parts (same length, so offsets hold).
-  const text = sentence.replace(/\bblack and white\b/gi, "black-and-white");
+  // "black and white" is one word here, not two parts (same length, so offsets hold). Joined with
+  // underscores: a hyphen is a word boundary, so "black-and-white" still split at its "and".
+  const text = sentence.replace(/\bblack[- ]and[- ]white\b/gi, "black_and_white");
   const parts: Array<{ at: number; text: string }> = [];
   let from = 0;
   for (const m of Array.from(text.matchAll(CLAUSE_BREAK))) {
@@ -260,19 +276,26 @@ export function misplacedCodeWords(
   parts.push({ at: from, text: text.slice(from) });
   for (let i = 0; i < parts.length; i++) {
     const p = parts[i].text;
-    const m = Array.from(p.matchAll(MISPLACED)).find(
-      hit => !AROUND_BEFORE.test(p.slice(0, hit.index))
-    );
-    if (!m || m.index === undefined) continue;
-    if (
+    const aboutCode =
       NAMES_CODE.test(p) ||
       AIMS_THERE.test(p) ||
-      (LEADING_PLACE.test(p) && NAMES_CODE.test(parts[i + 1]?.text ?? ""))
-    )
+      (LEADING_PLACE.test(p) && NAMES_CODE.test(parts[i + 1]?.text ?? ""));
+    if (!aboutCode) continue;
+    // Where each naming of the code ends, in order, so every place is checked against the last one
+    // before it without re-reading the part.
+    const named = Array.from(p.matchAll(NAMES_CODE_ALL), n => n.index! + n[0].length);
+    let k = -1;
+    for (const m of Array.from(p.matchAll(MISPLACED))) {
+      const at = m.index!;
+      if (AROUND_BEFORE.test(p.slice(Math.max(0, at - 12), at))) continue;
+      while (k + 1 < named.length && named[k + 1] <= at) k++;
+      // The words since the code was last named hold nothing else the place could belong to.
+      if (OTHER_THING.test(p.slice(k >= 0 ? named[k] : 0, at))) continue;
       return {
         place: m[0].replace(/\s+/g, " ").trim(),
-        at: parts[i].at + m.index,
+        at: parts[i].at + at,
       };
+    }
   }
   return null;
 }

@@ -6025,4 +6025,26 @@ describe("round 13: a line under the big QR card never sends the viewer to the c
     expect(ctaPlacementJobWarnings(script, out)).toEqual([]);
     expect(checkScript(script)).toEqual({ problems: [], warnings: [] });
   });
+
+  it("job 400's card started after the corner line, so the corner was right and the job records nothing", () => {
+    // Job 400, the same script: the pipeline of its day missed the scan sentence and the card took
+    // only the block's last words (scene 38), so "the pattern in the corner" was spoken over the host
+    // with the small corner card (scene 37). The Generate dialog cannot know the cuts and still
+    // warns; the job records only a line the film speaks under the big card. The scenes as stored.
+    const stored = [
+      cta(35, "Some of you are already a page ahead of me, wondering where all of this lives in one place."),
+      { ...cta(36, "The thinking belongs to Seneca and the Stoics after him;"), hostPresent: false, coverHero: true },
+      cta(37, `my work was gathering it into a digital book called The Stoic Way — a hundred and one lessons on money, grief, people, and more. Chapter twelve stands on today’s exact ground — time, legacy, and what the remaining years are for. ${SCAN_409}`),
+      { ...cta(38, "No timer on this — a lesson about hurry is a poor place to hurry you. Now, back to that door you have been holding open."), hostPresent: false, qrHero: true, qrTail: true },
+    ] as StoryboardScene[];
+    expect(checkScript(SCRIPT_409).warnings).toHaveLength(1);
+    expect(ctaPlacementJobWarnings(SCRIPT_409, stored)).toEqual([]);
+    // Job 409's storyboard of the same block: the card from the scan sentence on — recorded.
+    const s409 = [
+      ...stored.slice(0, 2),
+      cta(37, "my work was gathering it into a digital book called The Stoic Way — a hundred and one lessons on money, grief, people, and more. Chapter twelve stands on today’s exact ground — time, legacy, and what the remaining years are for."),
+      { ...cta(38, `${SCAN_409} No timer on this — a lesson about hurry is a poor place to hurry you. Now, back to that door you have been holding open.`), hostPresent: false, qrHero: true, qrTail: true },
+    ] as StoryboardScene[];
+    expect(ctaPlacementJobWarnings(SCRIPT_409, s409)).toHaveLength(1);
+  });
 });
