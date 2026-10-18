@@ -2582,8 +2582,23 @@ describe("unwantedCutawayBook / dropUnwantedBook — the CTA's book only, the sc
       "a small booklet on the kitchen table",
       "hands flipping through a checkbook at the desk",
       "a phone book on the hall table",
+      "a worn leather pocketbook open on the kitchen counter, a few coupons inside",
+      "a silver MacBook open on the kitchen table showing a plain buy-and-sell app",
+      "a Chromebook on the desk beside a coffee mug",
+      "an empty book shelf on the far wall",
     ])
       expect(unwantedCutawayBook(t, "grief,", STOIC)).toBe(false);
+    // job 242 scenes 5 and 12: a strike plate "approximately matchbook-sized" keeps its size —
+    // whole, prompt and all, when the guard looks at it
+    const plateLine = "and the weak spot comes down to a small metal plate";
+    const plate =
+      "A factory-standard strike plate removed from a door frame, laid on a wooden surface in natural light, the small metal plate shown from above at a slight angle, its two short screw holes visible, approximately matchbook-sized, the worn wood around it where it was mounted visible at the edges.";
+    expect(unwantedCutawayBook(plate, plateLine, ["The Locksmith Way"])).toBe(false);
+    const s = sc({ index: 5, narration: plateLine, scriptText: plateLine, visualPrompt: plate });
+    dropUnwantedBook(s, 5, ["The Locksmith Way"]);
+    expect(s.visualPrompt).toBe(plate);
+    // …while a real book beside it still goes
+    expect(unwantedCutawayBook(`${plate} A paperback lies beside it.`, plateLine, ["The Locksmith Way"])).toBe(true);
     // a page on a screen is the screen (job 397 scene 32's shop settings)
     expect(
       unwantedCutawayBook(
@@ -2598,6 +2613,15 @@ describe("unwantedCutawayBook / dropUnwantedBook — the CTA's book only, the sc
     // named in the picture, even under a line that speaks of a book
     expect(unwantedCutawayBook("a hardback copy of The Stoic Way on the desk by the window", ESSAY_LINE, STOIC)).toBe(true);
     expect(unwantedCutawayBook("the cover of The Stoic Way propped against a mug", "grief,", STOIC)).toBe(true);
+    expect(unwantedCutawayBook("The Stoic Way's front cover face-up on the desk", "grief,", STOIC)).toBe(true);
+    // covers of anything else are not the book's: a quilting title's everyday words under "bed covers"
+    expect(
+      unwantedCutawayBook(
+        "two scrap quilts that sell at the fair, draped as bed covers over a rail",
+        "Those are the ones folks reach for first.",
+        ["Scrap Quilts That Sell"]
+      )
+    ).toBe(false);
     // the line speaks of the host's own book: any publication in its picture is that book
     expect(
       unwantedCutawayBook("weathered hands leafing through a gardening book on a bench", "In my book I walk you through this trick", [])

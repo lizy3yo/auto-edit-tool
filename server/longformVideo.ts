@@ -8289,10 +8289,13 @@ export function bibleWithoutPrintedMatter(bible: string): {
  * Words with "book" in them that name no publication — a checkbook, a notebook, a bookcase. Never
  * the video's book, and never a reason to take a picture away from its line: job 409 scene 15, the
  * list item "money,", was "a few folded bills and an open checkbook on the wooden desk", and the old
- * guard swapped it for the next item's sympathy card.
+ * guard swapped it for the next item's sympathy card. A size or a purse or a laptop is no book
+ * either: job 242's strike plate, "approximately matchbook-sized", lost that clause to the guard;
+ * a pocketbook is a handbag, a MacBook or Chromebook a laptop showing the app. And "book shelf"
+ * written apart is the bookshelf.
  */
 const NOT_A_PUBLICATION =
-  /\b(?:(?:check|cheque|note|pass|bank|sketch|scrap|log|address|phone|guest)[\s-]?books?|book(?:cases?|shel(?:f|ves)|ends?|marks?|stands?))\b/gi;
+  /\b(?:(?:check|cheque|note|pass|bank|sketch|scrap|log|address|phone|guest|ledger|receipt)[\s-]?books?|(?:match|pocket|mac|chrome)books?|book[\s-]?(?:cases?|shel(?:f|ves)|ends?|marks?|stands?))\b/gi;
 
 /** A booklet is a publication only when it can be the video's own book (`publicationIn`). */
 const BOOKLET = /\bbooklets?\b/gi;
@@ -8304,8 +8307,14 @@ const HANDLED_THROUGH =
 /** A word a CTA title may hold that names the book itself ("Guide", "Playbook", "Bible"). */
 const TITLE_PRINT_NOUN = /^(?:\w*books?|booklets?|guides?|manuals?|bibles?|almanacs?|journals?)$/;
 
-/** Words that name a book by its title rather than by a print noun ("a copy of …", "its cover"). */
-const BOOK_BY_NAME_CUE = /\b(?:cop(?:y|ies)|covers?|titled|editions?|volumes?)\b/i;
+/**
+ * Words that name a book by its title rather than by a print noun ("a copy of …", "its cover"). Only
+ * the book's own cover counts — "cover of", "its cover", "front cover" — never covers of anything
+ * else: a quilting channel's "Scrap Quilts That Sell" is also "scrap quilts that sell, draped as bed
+ * covers", and a bare "covers" read that picture as the book.
+ */
+const BOOK_BY_NAME_CUE =
+  /\b(?:cop(?:y|ies)|covers?\s+of|(?:its|front|back)\s+covers?|titled|editions?|volumes?)\b|['’]s\s+covers?\b/i;
 
 /**
  * A line that speaks of something written or printed — a book, an essay, a letter, a page, what a

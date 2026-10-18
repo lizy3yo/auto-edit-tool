@@ -5725,4 +5725,15 @@ describe("the cutaway book guard keeps out the CTA's book only, and never borrow
     dropUnwantedBook(card, 16, STOIC);
     expect(card.visualPrompt).toBe("a plain cream sympathy card on a wooden desk");
   });
+
+  it("job 242: a strike plate with 'matchbook-like proportions' keeps them — a word ending in 'book' is no book", async () => {
+    const { unwantedCutawayBook, dropUnwantedBook } = await import("./longformVideo");
+    const line = "and the flat piece of metal around that hole is the strike plate.";
+    const plate =
+      "A factory-standard strike plate removed and laid flat on a wooden work surface in natural light, the small metal plate shown at close range, its flat face and the hole for the bolt visible, the matchbook-like proportions clear, approximately 2 inches by 1 inch.";
+    expect(unwantedCutawayBook(plate, line, ["The Locksmith Way"])).toBe(false);
+    const s = pic({ index: 12, scriptText: line, narration: line, visualPrompt: plate });
+    dropUnwantedBook(s, 12, ["The Locksmith Way"]);
+    expect(s.visualPrompt).toBe(plate);
+  });
 });
