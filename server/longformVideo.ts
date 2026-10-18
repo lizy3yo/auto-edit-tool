@@ -7243,16 +7243,28 @@ export function buildStillPrompt(
  * its own picture, and the picture maker drew two of them as one thing — Dale's job 397: "Coasters,
  * ornaments, small cutting boards" came back as two pictures of the same round discs. The prompt
  * names the item's neighbours so the item is drawn by what makes it different from them. Any list,
- * any channel: the words are the script's own. Pure.
+ * any channel: the words are the script's own.
+ *
+ * AND SET WHERE ITS SENTENCE IS (`scene.listSetting`, job 409): an item is drawn from its own bare
+ * words, which carry no time — "the farmer complains, … the old complain, and the young …", said
+ * inside a passage about a writer of ancient times, came back as a farmer in overalls, an old man on
+ * a park bench and a young man in a hoodie. When the list finder read the sentence as set in another
+ * time or place, the prompt says so, for every item alike. Pure.
  */
 export function listItemClause(scene: StoryboardScene): string {
   const items = scene.listItems;
-  if (!items?.others.length) return "";
+  const setting = scene.listSetting?.trim();
+  const where = setting
+    ? ` Like the sentence it is said in, this picture is set in ${setting.replace(/[.\s]+$/, "")}: anyone ` +
+      `in it is dressed as people were there and then, and the tools, buildings and land belong to ` +
+      `that time and place — nothing from another time or place.`
+    : "";
+  if (!items?.others.length) return where;
   const others = items.others.map(o => `"${o}"`).join(", ");
   return (
     ` This picture is one item of a list said one after another — it shows "${items.own}", drawn so ` +
     `it is clearly that, by the shape and features that make it what it is, and could never be ` +
-    `taken for the other items of the list (${others}), which each get their own picture.`
+    `taken for the other items of the list (${others}), which each get their own picture.${where}`
   );
 }
 

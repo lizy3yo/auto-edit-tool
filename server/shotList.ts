@@ -29,6 +29,8 @@ import {
   REAL_HOLDER,
   SHOWS_PERSON,
   showsPerson,
+  showsSomeoneElse,
+  namesAnAnimal,
   namedPeople,
   matchRecurringPeople,
   namesOnlyAnimal,
@@ -1660,6 +1662,17 @@ export const SHOT_LIST_SYSTEM =
   "or a place the script already has, caught doing something that fits the thought (the neighbour " +
   "from the story back at her own kitchen sink, a writer the script names at work), or the host at " +
   "work. Someone who is not the host is shown as rule 6a says, with other set to who they are. " +
+  // Job 409 scene 33: "Then he turns the whole thing over in a single motion: life is not short" —
+  // the writer of the story reversing his argument — was planned as "the host turning a page slowly
+  // at the desk": the wrong person, and the idiom drawn as its literal verb.
+  "When the line tells what someone in the story thinks, says or does — \"he\" or \"she\" for a " +
+  "person the script is talking about (a writer, a figure from history, a neighbour) — the moment is " +
+  "THAT person's, never the host's: the host only ever speaks of themself as \"I\". A FIGURE OF " +
+  "SPEECH is shown by what it means, never by its literal words: \"he turns the argument on its " +
+  "head\" is that person at the moment the thought turns — nobody upside down, no page or object " +
+  "turned over; \"she closed the book on it\", said of a part of her life, is no book. Only a how-to " +
+  "that really turns, opens or lifts a thing (\"turn the board over and sand the other side\") is " +
+  "shown literally. " +
   "Never the MAIN thing because nothing else came to mind: it appears only when the line " +
   "names it or clearly points back at it, and \"the whole thing\", \"all of it\" or \"that\", summing " +
   "up what was just said, point at the idea, never at a thing. Each such line gets its own moment: " +
@@ -1672,6 +1685,16 @@ export const SHOT_LIST_SYSTEM =
   "barking\" = the dog lying still by the gate). Never only the window, door or room the sound is " +
   "heard through, even when the line names it — that is where the picture may be seen from, with " +
   "the source in it — and never an empty place the line does not say is empty.\n" +
+  // Job 409 (156-164 s): inside a passage about a writer of ancient times, the shots of "the farmer
+  // complains, … the old complain, and the young …" named no time and came back as today's people —
+  // overalls, a park bench, a hoodie — because rule 11 sent a shot with no place of its own home.
+  "1h. ANOTHER TIME OR PLACE. When the words are inside a passage set in another time or a faraway " +
+  "place — history, a story of long ago, what a writer of another age wrote or saw, how things are " +
+  "done in another country — every shot until the words come back to today or to the host's own " +
+  "life names that time and place in show and dresses its people, tools and buildings for it: the " +
+  "shots of a spoken list and a shot of a bare word too (\"the baker\" in a passage about a medieval " +
+  "town = a medieval baker in a linen tunic at a brick oven, never a baker of today). A line inside " +
+  "it about today is today.\n" +
   "2. CHANGE THE PICTURE ONLY WHEN THE CONTEXT CHANGES. A new shot starts only where the words move " +
   "on to a DIFFERENT thing, place or action. While the words stay on the same thing — even across " +
   'several sentences — it is ONE shot: "a pile of old crates the neighbour set out by the curb" ' +
@@ -1712,7 +1735,8 @@ export const SHOT_LIST_SYSTEM =
   "face turned away or out of frame. Never a face. With no host given, only bare hands at the " +
   "work.\n" +
   "6a. SOMEONE ELSE. When a line is about ANOTHER person doing something — a customer, a buyer, " +
-  "a neighbour, a relative, a stranger; never the host, and never \"you\" (the viewer's work is " +
+  "a neighbour, a relative, a stranger, a person of the story the line calls \"he\" or \"she\" " +
+  "(rule 1f); never the host, and never \"you\" (the viewer's work is " +
   "shown as the host's) unless THE VIEWER is given below — the picture may show THAT person, the " +
   "same way: from behind or from the side, the face never shown. Write them into show, and set " +
   "other to who they are in 2-6 plain words from the line (\"a woman customer\", \"an older " +
@@ -1783,7 +1807,8 @@ export const SHOT_LIST_SYSTEM =
   "11. show: 8-20 plain words saying what is in the frame, the way a person would caption their " +
   "own phone snapshot: the thing, where it is, and how far away the photo was taken from — vary " +
   "it, often a step or two back, sometimes closer; never a close-up of every thing. The place is " +
-  "the one the line names, else the props list's home setting. No light, mood, texture or style " +
+  "the one the line names, else the time and place of the passage it is in (rule 1h), else the " +
+  "props list's home setting. No light, mood, texture or style " +
   "words, and no decorative extras the words do not mention (\"the old crates stacked by the " +
   'curb in front of the house"). ONE picture: never "or" ("an engraved board or a ' +
   'keepsake box" — pick one), never two places.\n' +
@@ -2613,6 +2638,11 @@ export function keyThingsIn(text: string | undefined, things: KeyThing[] | undef
 
 // ─── Does each picture show what its line is about? ─────────────────────────────────────
 
+// A FIGURE OF SPEECH, ANOTHER TIME OR PLACE and the "he"/"she" sentence of WHO IS IN THE PICTURE are
+// job 409's (round 13): "Then he turns the whole thing over in a single motion: life is not short" —
+// a writer of ancient times reversing his argument — passed the check as the host turning a page, and
+// the list said inside that passage passed as today's farmer, old man and young man. `fitPictureNotes`
+// marks the pictures the code can tell are such.
 export const FIT_SYSTEM = `You check a video's pictures against what is said under them. Between the host's
 on-camera lines the viewer sees one picture at a time. You get every line in film order: HOST lines
 for context, and PICTURE lines with what the picture shows.
@@ -2673,6 +2703,21 @@ what makes it: the picture shows that source in the moment the line describes, w
 when the line says it has gone quiet. It is WRONG when it shows only a window, a door or a room the
 sound is heard through, or an empty place the line does not say is empty — even when the line names
 that window or room.
+A FIGURE OF SPEECH is about what it means, never its literal words: "he turns the argument on its
+head" is about him reversing his argument — nobody upside down, no page or object turned over; "she
+closed the book on it", said of a part of her life, is no book. A picture that draws a figure of
+speech literally is WRONG: give it the moment that carries what the line means (A LINE WITH NOTHING
+TO SEE). A how-to that really turns, opens or lifts a thing ("turn the board over and sand the other
+side") is literal, and so is its picture.
+ANOTHER TIME OR PLACE. A stretch of lines may be set in another time or a faraway place — history, a
+story of long ago, what a writer of another age wrote or saw, how things are done in another country.
+Every picture inside that stretch shows that time and place: its people dressed for it, its tools,
+buildings and land of it — a spoken list's pictures and a picture of a bare word ("the baker", "the
+young") too. A picture there whose words give no sign of that time or place, so it would be drawn as
+today, is WRONG: rewrite it naming the time and place, its people dressed for it ("the baker" in a
+passage about a medieval town = a medieval baker in a linen tunic at a brick oven, never a baker of
+today). A picture marked "inside a passage set in …" is in such a stretch. The stretch ends where the
+words come back to today or to the host's own life; a line inside it about today is today.
 
 WHAT NOT TO DO. A sentence RULES SOMETHING OUT when it says not to do something ("never…", "don't…"),
 says what something is NOT ("I don't mean…", "no, not the…"), what to use INSTEAD ("…instead of the
@@ -2699,8 +2744,8 @@ COUNT: two coats).
 
 Go through EVERY picture, one at a time, never skipping: first write what its line is about — its
 subject, not its last noun; for a line that only refers to a key thing, name the key thing; for a
-sound, what makes it; for an idea, the idea — then whether the picture shows that, where the line
-puts it. Only then decide.
+sound, what makes it; for an idea, the idea; for a figure of speech, what it MEANS, never its literal
+verb — then whether the picture shows that, where the line puts it. Only then decide.
 
 "The one that…", "the winner", "the one I was proudest of" is one of the THINGS the video counts or
 compares (a project, a product, a choice) — work out which from the whole script, usually named in
@@ -2763,7 +2808,11 @@ other is null otherwise.
 WHO IS IN THE PICTURE. For every picture that shows a person (or hands), say who: "host" when it is
 the host — their own work, or the viewer the line speaks to ("you") — or a few plain words for
 ANYONE ELSE the line is about: a customer at a counter, a child, a stranger in a story, two
-neighbours. A line about someone else is never shown as the host or the host's hands. When THE
+neighbours. A line about someone else is never shown as the host or the host's hands. "He" or "she"
+in a line is never the host, who speaks of themself as "I": it is a person of the story — a writer,
+a figure from history, a neighbour — or an animal the script is about. A picture of the host or the
+host's hands doing what that person or animal does is WRONG; rewrite it with them, other set to who
+the person is. A picture marked "its he/she is not the host" has such a line. When THE
 VIEWER is given, the viewer the line speaks to is never the host: who is the viewer's name for every
 picture of "you", the list pictures that go on from a sentence about "you" too. Leave who out of a
 picture of things alone.
@@ -2863,6 +2912,53 @@ export function forbidsOf(v: unknown): string | undefined {
   const text = v.replace(/\s+/g, " ").replace(/^["'“”‘’\s]+|["'“”‘’\s.]+$/g, "").trim();
   if (!/[a-z]{2}/i.test(text) || /^(?:no|na|-)$|^(?:null|none|nothing|n\/a|nil)\b/i.test(text)) return undefined;
   return text.slice(0, 160);
+}
+
+/** "he" or "she" as a word, in any contraction ("he's", "she'd", "he'll"). */
+const THIRD_PERSON = /\b(?:he|she)(?:['’](?:s|d|ll))?\b/i;
+/** The host speaking of themself, alone or with someone ("I", "my", "we", "us", …). */
+const FIRST_PERSON = /\b(?:i|i['’](?:m|ve|d|ll)|me|my|mine|myself|we|we['’](?:re|ve|d|ll)|us|our|ours|ourselves)\b/i;
+
+/**
+ * Whether a line is told about someone in the story: it says "he" or "she" and nothing in the first
+ * person. The host speaks of themself as "I", so such a line's person is never the host — job 409
+ * scene 33, "Then he turns the whole thing over in a single motion: life is not short" (the writer
+ * of the story reversing his argument), was drawn as the host turning a page at the desk. A line with
+ * "I", "my" or "we" in it ("He told me to wait", "I turn it over every morning") is not one, and
+ * neither is a how-to said to the viewer ("Turn it over and sand the other side"). Pure.
+ */
+export function storyPersonLine(line: string | undefined): boolean {
+  const text = (line ?? "").replace(/[“”"]/g, " ");
+  return THIRD_PERSON.test(text) && !FIRST_PERSON.test(text);
+}
+
+/**
+ * What the line check is told about one picture beyond its line and its words: that its line's
+ * "he"/"she" is someone in the story, when the picture shows a person that nothing marks as anyone
+ * else (so it would be drawn as the host — job 409 scene 33), and the time and place its list's
+ * sentence is set in (`scene.listSetting`, job 409's farmer, old man and young man drawn as today's).
+ * The rules that use them are in `FIT_SYSTEM` (WHO IS IN THE PICTURE, ANOTHER TIME OR PLACE).
+ *
+ * The note says only what is known for sure — the "he"/"she" is not the host — since it may be an
+ * animal the script is about. Replayed over the 352 local storyboards: 20 of 22,500 pictures get it —
+ * 409 scene 33, job 400's man in the pharmacy (scenes 5 and 6, "He pays, he walks out to the parking
+ * lot"), a hair channel's "a woman notices the gray … and she reaches for the shade she wore at forty"
+ * drawn as the host (16, jobs 222-320), and one dog line over its owner's coat (358 scene 19). Eight
+ * more were a dog the picture or the line names ("He can smell every bit of it", jobs 357-373): such
+ * a picture gets no note, and neither does one whose words already name someone else. Pure.
+ */
+export function fitPictureNotes(s: StoryboardScene): string {
+  const words = s.showSubject ?? s.visualPrompt ?? "";
+  const story =
+    storyPersonLine(s.scriptText) &&
+    !showsSomeoneElse(s) &&
+    showsPerson(words) &&
+    !namesAnAnimal(words) &&
+    !namesAnAnimal(s.scriptText)
+      ? " (its he/she is not the host)"
+      : "";
+  const setting = s.listSetting?.trim() ? ` (inside a passage set in ${s.listSetting.trim()})` : "";
+  return `${story}${setting}`;
 }
 
 /** The pictures the fit check reads and may fix — drawn cutaways, never the CTA, cover or assets. */
@@ -3379,7 +3475,7 @@ export async function fitPicturesToLines(
       }
       any = true;
       lines.push(
-        `#${i} PICTURE${secs}${s.sameShot ? " (continues)" : ""}${s.joinedLine ? " (joined)" : ""}${sameSentence ? " (same sentence)" : ""}${i === firstMain ? " (FIRST of the MAIN thing)" : ""}: said "${said}" | shows: ${s.showSubject ?? s.visualPrompt ?? ""}`
+        `#${i} PICTURE${secs}${s.sameShot ? " (continues)" : ""}${s.joinedLine ? " (joined)" : ""}${sameSentence ? " (same sentence)" : ""}${i === firstMain ? " (FIRST of the MAIN thing)" : ""}${fitPictureNotes(s)}: said "${said}" | shows: ${s.showSubject ?? s.visualPrompt ?? ""}`
       );
     }
     if (!any) continue;

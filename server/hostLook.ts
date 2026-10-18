@@ -1057,6 +1057,14 @@ export function namesOnlyAnimal(text: string): boolean {
 }
 
 /**
+ * Whether the words name an animal at all, a person beside it or not — so a line's "he" may be that
+ * animal ("He can smell every bit of it" over a dog at its owner's coat, job 357 scene 20). Pure.
+ */
+export function namesAnAnimal(text: string | undefined): boolean {
+  return !!(text ?? "").match(ANIMAL);
+}
+
+/**
  * Words naming a part of the body (not a thing used on it — a hair dryer is a thing, and a strand
  * is one only when it is hair, `HAIR_STRAND`: a split panel of "a pearl strand on the dresser" is
  * not about the host's body).

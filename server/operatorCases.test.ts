@@ -5926,3 +5926,55 @@ describe("someone else shows no face: no smile in the words, and the check asks 
     expect(planting.othersTurnedAway).toBeUndefined();
   });
 });
+
+describe("a list inside a passage of another time is set there; a 'he' of the story is never the host (job 409)", () => {
+  // Job 409, 156-164 s: "The farmer complains, the senator complains, the old complain, and the young
+  // are already rehearsing the complaint" — said inside the passage about a writer of ancient times —
+  // came back as a farmer in overalls, an old man on a park bench and a young man in a hoodie; only
+  // the senator was dressed for the time. Scene 33, "Then he turns the whole thing over in a single
+  // motion: life is not short" (the writer reversing his argument), was the HOST turning a page.
+  const ROME = "ancient Rome, first century AD";
+  const FOUR = ["The farmer complains", "the senator complains", "the old complain", "the young are already rehearsing the complaint"];
+  const TURN = "Then he turns the whole thing over in a single motion: life is not short.";
+  const film = () => [
+    pic(29, "The farmer complains,", "a farmer standing in a field, seen from behind", { humanPresent: true, otherPerson: "a farmer", listCut: true }),
+    pic(30, "the senator complains,", "a senator in robes standing in a hall, seen from the side", { humanPresent: true, otherPerson: "a senator", listCut: true }),
+    pic(31, "the old complain,", "an old man sitting on a bench, seen from behind", { humanPresent: true, otherPerson: "an old man", listCut: true }),
+    pic(32, "and the young are already rehearsing the complaint.", "a young man standing alone in a courtyard, seen from the side", {
+      humanPresent: true,
+      otherPerson: "a young man",
+      listCut: true,
+    }),
+    pic(33, TURN, "the host turning a page slowly at the desk", { humanPresent: true }),
+  ];
+
+  it("409-29..32: every item's prompt is set in the passage's time and place, the planner's picture kept", () => {
+    const r = applySpokenLists(film(), [{ sentence: 20, items: FOUR, setting: ROME }]);
+    const items = r.scenes.filter(s => s.listCut);
+    expect(items).toHaveLength(4);
+    for (const s of items) expect(buildStillPrompt(s)).toContain(`this picture is set in ${ROME}: anyone in it is dressed as people were there and then`);
+    expect(items.map(s => s.showSubject)).toEqual(film().slice(0, 4).map(s => s.showSubject));
+  });
+
+  it("409-33: the line check is told its he/she is not the host", async () => {
+    const { fitPictureNotes } = await import("./shotList");
+    expect(fitPictureNotes(film()[4])).toBe(" (its he/she is not the host)");
+  });
+
+  it("clean: Dale's list of today and a how-to that really turns a board over are left as they were", async () => {
+    const { fitPictureNotes } = await import("./shotList");
+    const dale = [
+      pic(4, "Coasters,", "a stack of round wooden coasters", { listCut: true }),
+      pic(5, "ornaments,", "a few small wooden ornaments", { listCut: true }),
+      pic(6, "small cutting boards.", "small cutting boards leaning on the bench", { listCut: true }),
+    ]; // job 397
+    const r = applySpokenLists(dale, [{ sentence: 0, items: ["Coasters", "ornaments", "small cutting boards"] }]);
+    for (const s of r.scenes) {
+      expect(s.listSetting).toBeUndefined();
+      expect(buildStillPrompt(s)).not.toMatch(/Like the sentence it is said in/);
+    }
+    expect(
+      fitPictureNotes(pic(9, "Turn it over and sand the other side.", "the host's hands turning a board over on the workbench", { humanPresent: true }))
+    ).toBe("");
+  });
+});

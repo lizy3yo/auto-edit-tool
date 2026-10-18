@@ -469,6 +469,15 @@ export interface StoryboardScene {
    */
   listItems?: { own: string; others: string[] };
   /**
+   * The time and place a list item's sentence is set in when it is not the video's own here and now
+   * ("a medieval market town, about 1300") — the list finder's `setting`, put on every item of the
+   * list and on its bridge picture (`applySpokenLists`) and said in its prompt (`listItemClause`). An
+   * item drawn from its bare words has no time of its own: job 409's "The farmer complains, the
+   * senator complains, the old complain, and the young…", inside a passage about a writer of ancient
+   * times, came back as a farmer in overalls, an old man on a park bench and a young man in a hoodie.
+   */
+  listSetting?: string;
+  /**
    * The picture leading into a spoken list when the host could not say the bridge words: the place
    * the line names with ALL the list's items in it together. The items after it are drawn from it
    * (`listSetFor` in pictureMemory), so each close-up is the same thing as in the group. Only when

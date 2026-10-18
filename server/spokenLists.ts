@@ -62,6 +62,14 @@ export interface SpokenList {
    * picture of the hands doing it. "things" (the default) for things named one after another.
    */
   kind?: "things" | "steps";
+  /**
+   * The time and place the list's sentence is set in when that is not the video's own here and now
+   * (`listSettingOf`): asked in the same call that finds the lists, since it reads the whole script
+   * and so knows the passage a sentence sits in even when the sentence names no time itself (job 409:
+   * "The farmer complains, the senator complains, …" is said inside a passage about an ancient
+   * writer). Each item's picture is told it (`scene.listSetting`, `listItemClause`).
+   */
+  setting?: string;
 }
 
 const LIST_MODEL = () => process.env.LIST_MODEL || "claude-sonnet-5-5";
@@ -639,8 +647,44 @@ NOT a list:
   and the time a sentence opens on ("years ago, …")
 - a story of what happened ("I went home, made dinner, and slept") — steps are things to DO
 
-Answer with JSON only: {"lists":[{"sentence":<number>,"kind":"things"|"steps","items":["…","…"]}]} —
+For each list also give setting: when its sentence is set in ANOTHER TIME or a FARAWAY PLACE than the
+video's own here and now — inside a passage of history, a story of long ago, what a writer of another
+age said or saw, how things are done in another country — that time and place in 3-10 plain words
+("a medieval market town, about 1300", "a fishing village in Norway in the 1890s"). Read the sentences
+around it: a list counts as inside such a passage even when its own sentence names no time or place
+("the baker grumbles, the miller grumbles, …" told of that town). setting is null when the list is
+about the video's own here and now.
+
+Answer with JSON only: {"lists":[{"sentence":<number>,"kind":"things"|"steps","items":["…","…"],"setting":null}]} —
 {"lists":[]} when there are none.`;
+
+/** Words that only say "here and now" (or nothing): a setting made of these adds nothing to a picture. */
+const PRESENT_WORDS = new Set([
+  "the", "a", "and", "of", "in", "s", "present", "day", "days", "today", "todays", "modern", "time", "times", "now",
+  "nowadays", "contemporary", "current", "currently", "here", "world", "video", "videos", "own", "ordinary",
+  "everyday", "same", "as", "rest", "null", "none", "n", "no", "nothing", "unknown", "unspecified", "setting",
+]);
+
+/**
+ * The list finder's `setting`, cleaned: the time and place a list's sentence is set in when that is
+ * not the video's own here and now — a short phrase of at most 14 words and 100 characters, quotes
+ * and closing marks taken off. Undefined for anything else: no answer, null, a rambling one, or one
+ * that only says the present ("today", "the present day", "modern times", "the video's own world"),
+ * which would add nothing to a picture. A faraway place today keeps its place ("a fishing village in
+ * Japan today"). Job 409's list inside its passage about an ancient writer is what it is for. Pure.
+ */
+export function listSettingOf(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const text = raw
+    .replace(/\s+/g, " ")
+    .replace(/^["'“”‘’\s]+|["'“”‘’\s.,;:!?]+$/g, "")
+    .trim();
+  if (!text || text.length > 100) return undefined;
+  const words = text.toLowerCase().match(/[a-z0-9]+/g) ?? [];
+  if (!words.length || words.length > 14) return undefined;
+  if (words.every(w => PRESENT_WORDS.has(w))) return undefined;
+  return text;
+}
 
 /**
  * Read the model's answer: lists that pass `validateSpokenList` against their own sentence and, for
@@ -651,7 +695,7 @@ export function parseSpokenLists(text: string, sentences: string[]): SpokenList[
   const parsed = r.success ? r.data : null;
   if (!parsed || !Array.isArray(parsed.lists)) return null;
   const out: SpokenList[] = [];
-  for (const raw of parsed.lists as { sentence?: unknown; items?: unknown; kind?: unknown }[]) {
+  for (const raw of parsed.lists as { sentence?: unknown; items?: unknown; kind?: unknown; setting?: unknown }[]) {
     const n = Number(String(raw?.sentence ?? "").replace(/^#/, ""));
     // A general head the model counted as item 1 ("some ordinary place", job 400) is dropped, not
     // the whole list: the examples after it ARE the list. Dropped before the thing check, so a head
@@ -672,8 +716,11 @@ export function parseSpokenLists(text: string, sentences: string[]): SpokenList[
     if (!validateSpokenList(sentences[n], kept, steps)) continue;
     // A parallel series the model ended one member early, at the member said differently ("…, the old
     // complain, and the young are already rehearsing the complaint", job 400), gets it back.
-    if (steps) out.push({ sentence: n, items: kept, kind: "steps" });
-    else out.push({ sentence: n, items: withLastSeriesMember(sentences[n], kept) });
+    // The time and place it is set in, when not the video's own here and now (job 409, `listSettingOf`).
+    const setting = listSettingOf(raw?.setting);
+    const where = setting ? { setting } : {};
+    if (steps) out.push({ sentence: n, items: kept, kind: "steps", ...where });
+    else out.push({ sentence: n, items: withLastSeriesMember(sentences[n], kept), ...where });
   }
   return out.sort((a, b) => a.sentence - b.sentence);
 }
@@ -891,7 +938,9 @@ export async function findSpokenLists(
       // too quiet" — the list graphic showed two of three places).
       for (const extra of spokenListsByShape(sentences, new Set(ids))) {
         const shorter = got.findIndex(l => l.sentence === extra.sentence && endsEarly(l, extra, sentences[extra.sentence]));
-        if (shorter >= 0) got[shorter] = extra;
+        // The shape knows no time or place: the longer list keeps the one the model read (job 409).
+        const setting = shorter >= 0 ? got[shorter].setting : undefined;
+        if (shorter >= 0) got[shorter] = setting ? { ...extra, setting } : extra;
         else if (!got.some(l => l.sentence === extra.sentence)) got.push(extra);
       }
       got.sort((a, b) => a.sentence - b.sentence);
@@ -1232,6 +1281,7 @@ export function applySpokenLists(
     first: number;
     last: number;
     kind?: SpokenList["kind"];
+    setting?: string;
   }
   const regions: Region[] = [];
   const itemScenes = new Set<number>();
@@ -1282,7 +1332,16 @@ export function applySpokenLists(
       const clause = clauseEnd(end);
       if (clause) [nameEnd, end] = [end, clause];
     }
-    regions.push({ starts, end, nameEnd, first: G[starts[0]].scene, last: G[end - 1].scene, kind: list.kind });
+    regions.push({
+      starts,
+      end,
+      nameEnd,
+      first: G[starts[0]].scene,
+      last: G[end - 1].scene,
+      kind: list.kind,
+      // A list saved before the setting was asked for has none, and its pictures stay as they were.
+      setting: listSettingOf(list.setting),
+    });
   }
 
   const textOf = (a: number, b: number): string => {
@@ -1359,7 +1418,7 @@ export function applySpokenLists(
     if (!r) {
       let s = scenes[i];
       if (s.listCut && !s.hostPresent && !itemScenes.has(i)) {
-        s = { ...s, listCut: undefined, listKind: undefined };
+        s = { ...s, listCut: undefined, listKind: undefined, listSetting: undefined };
         cleared++;
       }
       if (carry) {
@@ -1438,9 +1497,10 @@ export function applySpokenLists(
       // ...but only when one photograph can hold the whole list: abstract items laid out together
       // came back as paper cut-outs on a table (job 400, `notInOnePhoto`), so such a bridge stays the
       // picture already planned for its words, for the line check to judge and rewrite.
-      if (itemsInOnePhoto(names, r.kind)) out.push(setPicture(base, bridgeText, names));
+      // The bridge is said in the list's own sentence, so it is set where the list is (job 409).
+      if (itemsInOnePhoto(names, r.kind)) out.push({ ...setPicture(base, bridgeText, names), listSetting: r.setting });
       else {
-        out.push(bridgePicture(base, bridgeText));
+        out.push({ ...bridgePicture(base, bridgeText), listSetting: r.setting });
         const odd = names.find(n => notInOnePhoto(n));
         const why = r.kind === "steps" ? "a list of steps" : odd ? `"${odd}" is ${notInOnePhoto(odd)}` : "no items";
         apart.push(`"${firstWords(bridgeText, 6)}…": ${why}`);
@@ -1471,10 +1531,17 @@ export function applySpokenLists(
     // picture of it a stage (`mainMade`): most step lists build nothing ("get a stepladder, take one
     // alarm down, and read the label", Frederick's job 359; "hold the piece up near your face by a
     // window", Scarlett's job 354) and stay exactly as they were. Any other list clears the mark.
+    // EVERY ITEM IS SET WHERE ITS SENTENCE IS (job 409, 156-164 s): "The farmer complains, the senator
+    // complains, the old complain, and the young are already rehearsing the complaint", said inside a
+    // passage about a writer of ancient times, was drawn from each item's bare words — a farmer in
+    // overalls, an old man on a park bench, a young man in a hoodie; only the senator was dressed for
+    // the time. The list finder reads the passage (`setting`), and each item's prompt says it
+    // (`listItemClause`). A list with no setting clears any an earlier pass left.
     const asItem = (p: StoryboardScene): StoryboardScene => {
-      if (r.kind !== "steps") return { ...p, listKind: undefined };
-      if (!mainMade) return { ...p, listKind: "steps" };
-      return { ...p, listKind: "steps", keyThing: p.keyThing ?? opts.main, buildStage: p.buildStage ?? "making" };
+      const q = { ...p, listSetting: r.setting };
+      if (r.kind !== "steps") return { ...q, listKind: undefined };
+      if (!mainMade) return { ...q, listKind: "steps" };
+      return { ...q, listKind: "steps", keyThing: p.keyThing ?? opts.main, buildStage: p.buildStage ?? "making" };
     };
     for (let k = 0; k + 1 < bounds.length; k++) {
       const [a, b] = [bounds[k], bounds[k + 1]];
