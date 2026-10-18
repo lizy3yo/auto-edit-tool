@@ -2207,3 +2207,22 @@ describe("someone the story comes back to keeps one look (job 399 scenes 2, 5, 7
     expect(either).not.toContain(HE);
   });
 });
+
+describe("a recurring look goes only where the label can mean that person (job 399, the review)", () => {
+  // The props call is now asked for names that say what each person is ("the woman passenger", "the
+  // man passenger" — the script itself only says "one of them" and "the other"). A label that could
+  // be either, says it is someone else, or is a crowd gets no one's look.
+  const SHE = "a woman in her late sixties, short silver hair in a neat bob, a lilac cardigan over a white blouse, grey slacks";
+  const HE = "a man in his late sixties, thinning grey hair, a navy quarter-zip sweater over a collared shirt, khaki trousers";
+
+  it("399-5/7 find her and him by role and sex; 399-23's 'a passenger', a crowd and 'another passenger' find nobody", async () => {
+    const { parseRecurringPeople } = await import("./shotList");
+    const { matchRecurringPeople } = await import("./hostLook");
+    const people = parseRecurringPeople(`PERSON the woman passenger: ${SHE}\nPERSON the man passenger: ${HE}`);
+    expect(matchRecurringPeople("a woman passenger", 1, people).map(p => p.look)).toEqual([SHE]); // 399-5
+    expect(matchRecurringPeople("a male passenger", 1, people).map(p => p.look)).toEqual([HE]); // 399-7
+    expect(matchRecurringPeople("a passenger", 1, people)).toEqual([]); // 399-23, a line to "you"
+    expect(matchRecurringPeople("several passengers", 3, people)).toEqual([]);
+    expect(matchRecurringPeople("another passenger", 1, people.slice(0, 1))).toEqual([]);
+  });
+});

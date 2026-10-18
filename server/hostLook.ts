@@ -622,6 +622,20 @@ export function someoneElse(
 
 /** Words that say nothing about WHICH person is meant ("the", "her"), dropped when names are compared. */
 const NAME_FILLER = new Set("a an the this that these those her his their my your our its some".split(" "));
+/**
+ * The words in a label that set its `noun` APART from someone already named — "another passenger",
+ * "a second customer", "the next buyer", "a new client" — read off the label itself, since the
+ * noun phrase stops at "next" ("next to a passenger" is a place, not a second one). Pure.
+ */
+function elseWordsFor(who: string, noun: string): string[] {
+  const last = noun.split(" ").pop() ?? noun;
+  const forms = [last, pluralOf(last)].map(f => f.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+  const re = new RegExp(
+    `\\b(another|other|second|third|different|new|next)\\s+(?!to\\b)(?:(?!(?:and|or|to|with|of)\\b)[a-z'’-]+\\s+){0,2}(?:${forms})\\b`,
+    "gi"
+  );
+  return Array.from(who.matchAll(re), m => m[1].toLowerCase());
+}
 
 /**
  * A person's name reduced to the words that tell them apart: "The woman passenger." → "woman
@@ -652,11 +666,14 @@ export function personKey(name: string | undefined): string {
  *     "the man in the card aisle");
  *   - the same ROLE noun (passenger, neighbour, sister) with no sex against it — "a male
  *     passenger" is the passenger the look calls a man, never the one it calls a woman;
- *   - a person with no role or person word at all — a proper name — when every word of it is in
- *     the label ("Seneca at his desk").
+ *   - a PROPER name (no role or person word, a capital letter) when every word of it is in the
+ *     label ("Seneca at his desk"); a vague name like "the other" only by the same words.
  * One person the label names that fits two recurring people equally ("a seated passenger" beside a
- * man and a woman passenger) is left as it was: guessing would give a stranger someone's look. "Two
- * passengers" takes the two passengers, never three. Empty when nothing fits. Pure.
+ * man and a woman passenger) is left as it was: guessing would give a stranger someone's look. So is
+ * a label that says it is someone ELSE ("another passenger", "a new customer", "the next buyer"),
+ * unless the name says the same. "Two passengers" takes the two passengers, never three; a crowd,
+ * "several passengers" or a bare "passengers" takes nobody — who is in a crowd is a guess. Empty
+ * when nothing fits. Pure.
  */
 export function matchRecurringPeople(
   who: string | undefined,
@@ -674,7 +691,10 @@ export function matchRecurringPeople(
       head: head && (head.includes(" ") || head === personKey(person.name)) ? head : undefined,
       roles: (named?.people ?? []).filter(p => p.kind === "role").map(p => p.noun),
       sex: named?.sex ?? sexOfLook(person.look),
-      proper: !named,
+      // A name with a capital letter once a leading "the"/"my" is set aside ("Seneca", "Grandpa
+      // Joe"): found inside a label. A vague one ("the other", "one of them") is not — "the other"
+      // is in "the other customer" of any later story.
+      proper: !named && /\b[A-Z]/.test(person.name.replace(/^\W*(?:the|a|an|my|our|your|her|his|their)\b/i, "")),
     };
   });
   type Fact = (typeof facts)[number];
@@ -687,15 +707,23 @@ export function matchRecurringPeople(
   for (const part of namedPeople(who)?.people ?? []) {
     const key = personKey(part.phrase);
     const exact = (f: Fact) => f.key === key || f.key === whoKey || (!!f.head && f.head === key);
+    // "another passenger", "a second customer", "the next buyer": by its own words NOT the one the
+    // story follows — with one recurring passenger, a role match alone would hand her look to the
+    // person the line sets apart from her.
+    const elseWords = elseWordsFor(who, part.noun);
     const fits = facts.filter(
       f =>
         exact(f) ||
         (part.kind === "role" &&
           f.roles.includes(part.noun) &&
-          !(part.sex && f.sex && part.sex !== f.sex))
+          !(part.sex && f.sex && part.sex !== f.sex) &&
+          elseWords.every(w => f.key.split(" ").includes(w)))
     );
     if (part.count > 1) {
-      if (fits.length <= part.count) fits.forEach(take);
+      // Only a stated two ("two passengers", "both passengers") is the story's two; "several
+      // passengers", "three passengers" or a bare plural is a crowd, and who is in it is a guess.
+      const two = part.count === 2 && /\b(?:two|both)\b/i.test(part.phrase);
+      if (two && fits.length <= part.count) fits.forEach(take);
       continue;
     }
     if (fits.length === 1) {
@@ -707,8 +735,9 @@ export function matchRecurringPeople(
     if (exacts.length === 1) take(exacts[0]);
     else if (sexed.length === 1) take(sexed[0]);
   }
+  // The label IS the name (the planner was given the names and copied one), or holds a proper one.
   for (const f of facts)
-    if (f.proper && f.key && (f.key === whoKey || f.key.split(" ").every(w => whoWords.has(w)))) take(f);
+    if (f.key && (f.key === whoKey || (f.proper && f.key.split(" ").every(w => whoWords.has(w))))) take(f);
   return picked.slice(0, Math.max(1, count ?? 1)).map(f => f.person);
 }
 

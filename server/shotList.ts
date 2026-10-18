@@ -1447,8 +1447,10 @@ export async function planShotList(
         ? `THE HOST (shown from behind or the side whenever a picture is of someone doing the work): ${opts.hostLook}\n`
         : "") +
       (opts.sheet ? `PROPS LIST:\n${opts.sheet}\n` : "") +
+      // Scoped to rule 6a's someone-else: the list must never make the planner set `other` on a
+      // picture of the host at work (a name may share the host's own trade).
       (opts.people?.length
-        ? `PEOPLE WHO COME BACK (when a shot shows one of them, other is this name exactly): ${opts.people.map(p => p.name).join(" | ")}\n`
+        ? `PEOPLE WHO COME BACK (never the host; when a shot's other person under rule 6a is one of them, other is this name exactly): ${opts.people.map(p => p.name).join(" | ")}\n`
         : "") +
       (prior.length ? `SHOTS JUST BEFORE THIS BATCH: ${prior.join(" | ")}\n` : "") +
       `\n${lines.join("\n")}\n\nJSON:`;
@@ -1526,6 +1528,10 @@ export async function planShotList(
   return results.flat();
 }
 
+// A PERSON name says WHAT the person is (job 399's script calls its two passengers only "one of
+// them", "the other", "she" and "he"): the pictures and the line check label them "a woman
+// passenger" / "a male passenger", and `matchRecurringPeople` finds a look by that role and sex —
+// a name like "the other" would match no label but its own words.
 export const CONTINUITY_SYSTEM =
   "You read a narration script for a faceless YouTube video and write its PROPS LIST: every " +
   "physical thing that is shown more than once — the things being made, the key tools and " +
@@ -1546,8 +1552,10 @@ export const CONTINUITY_SYSTEM =
   "PEOPLE WHO COME BACK: after the props, one more line for each person other than the narrator " +
   "whom the story shows or talks about in two or more different sentences — the same \"she\" or " +
   "\"he\" a story follows, a customer who comes back, a neighbour seen again — written " +
-  "`PERSON name: look`, so every picture of them shows the same person. name is how the script " +
-  "refers to them, 1-5 plain words (the neighbour, my sister, the other customer); look is 12-30 " +
+  "`PERSON name: look`, so every picture of them shows the same person. name is 1-5 plain words " +
+  "saying WHAT they are — the role or relation the script or its setting gives them, with man or " +
+  "woman when two share one (the woman customer, the older neighbour, my sister) — never only a " +
+  "pronoun, \"one of them\" or \"the other\"; look is 12-30 " +
   "plain words a picture generator can draw from behind or the side: man or woman, an age range, " +
   "build, hair (colour, length, style) and the clothes they wear in every picture, with colours — " +
   "fitting everything the script says about them (age, work, place, time). Two people the story " +

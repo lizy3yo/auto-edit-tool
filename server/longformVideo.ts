@@ -6088,11 +6088,14 @@ export function otherPersonClause(
       .replace(/both of the host's hands/g, "both of that person's hands")
       .replace(/the host's/g, "that person's")
       .replace(/anywhere in the frame/, "on anyone");
+    // "They are" only when the looks cover everyone in the shot: beside "a flight attendant and two
+    // passengers" the two passengers' looks are two of the three.
     const known =
       looks.length === 1
         ? `One of them is ${looks[0].name}, ${same}: ${lookOf(looks[0])}. `
         : looks.length > 1
-          ? `They are the same people in every picture of them in this video, always drawn exactly ` +
+          ? `${looks.length >= count ? "They are" : `${looks.length === 2 ? "Two" : "Some"} of them are`} ` +
+            `the same people in every picture of them in this video, always drawn exactly ` +
             `like this — ${looks.map(p => `${p.name}: ${lookOf(p)}`).join("; ")}. `
           : "";
     return (

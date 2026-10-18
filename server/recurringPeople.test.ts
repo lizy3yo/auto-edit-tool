@@ -282,7 +282,7 @@ describe("planShotList hands the planner the NAMES of the people who come back, 
       people: PASSENGERS,
     });
     const { userMessage, systemPrompt } = mockInvoke.mock.calls[0][0];
-    expect(userMessage).toContain("PEOPLE WHO COME BACK (when a shot shows one of them, other is this name exactly): the woman passenger | the other passenger");
+    expect(userMessage).toContain("PEOPLE WHO COME BACK (never the host; when a shot's other person under rule 6a is one of them, other is this name exactly): the woman passenger | the other passenger");
     expect(userMessage).not.toContain(SHE);
     expect(systemPrompt).toMatch(/When that person is one of the PEOPLE WHO COME BACK/);
   });
@@ -291,5 +291,67 @@ describe("planShotList hands the planner the NAMES of the people who come back, 
     mockInvoke.mockResolvedValue({ text: '{"beats":[]}' });
     await planShotList([beat(1, "Two people paid the same fare, boarded the same flight")], { sheet: PROPS_399, people: [] });
     expect(mockInvoke.mock.calls[0][0].userMessage).not.toContain("PEOPLE WHO COME BACK");
+  });
+});
+
+describe("the review's follow-ups: a label that sets someone apart, a crowd, a vague name", () => {
+  const MAN: RecurringPerson = { name: "the man passenger", look: HE };
+  const WOMAN_ROLE: RecurringPerson = { name: "the woman passenger", look: SHE };
+
+  it("the props call asks for names that say WHAT the person is, never 'the other'", () => {
+    expect(CONTINUITY_SYSTEM).toMatch(/name is 1-5 plain words saying WHAT they are/);
+    expect(CONTINUITY_SYSTEM).toMatch(/never only a pronoun, "one of them" or "the other"/);
+  });
+
+  it("job 399 with role names (what the prompt asks): each label finds its own passenger", () => {
+    const both = [WOMAN_ROLE, MAN];
+    expect(matchRecurringPeople("a woman passenger", 1, both)).toEqual([WOMAN_ROLE]);
+    expect(matchRecurringPeople("a male passenger", 1, both)).toEqual([MAN]);
+    expect(matchRecurringPeople("a flight attendant and a male passenger", 2, both)).toEqual([MAN]);
+    expect(matchRecurringPeople("two airline passengers", 2, both)).toEqual(both);
+    expect(matchRecurringPeople("a seated passenger", 1, both)).toEqual([]);
+    expect(matchRecurringPeople("the other passenger", 1, both)).toEqual([]); // could be either: no guess
+  });
+
+  it("a label that says it is someone ELSE never takes the one recurring look", () => {
+    expect(matchRecurringPeople("another passenger", 1, [WOMAN])).toEqual([]);
+    expect(matchRecurringPeople("a second passenger", 1, [WOMAN])).toEqual([]);
+    expect(matchRecurringPeople("a different passenger", 1, [WOMAN])).toEqual([]);
+    const buyer: RecurringPerson = { name: "the woman buyer", look: SHE };
+    expect(matchRecurringPeople("a new buyer", 1, [buyer])).toEqual([]);
+    expect(matchRecurringPeople("the next buyer", 1, [buyer])).toEqual([]);
+    // …unless the name sets them apart the same way, and a plain role still matches.
+    const other: RecurringPerson = { name: "the other woman customer", look: SHE };
+    expect(matchRecurringPeople("the other customer", 1, [other])).toEqual([other]);
+    expect(matchRecurringPeople("a buyer", 1, [buyer])).toEqual([buyer]);
+    expect(matchRecurringPeople("the other passenger", 1, PASSENGERS)).toEqual([OTHER]);
+    // "next to" is a place, not a second one.
+    expect(matchRecurringPeople("a flight attendant next to a passenger", 2, [WOMAN])).toEqual([WOMAN]);
+  });
+
+  it("only a stated two is the story's two: a crowd, 'several' or a bare plural takes nobody", () => {
+    expect(matchRecurringPeople("both passengers", 2, PASSENGERS)).toEqual(PASSENGERS);
+    expect(matchRecurringPeople("two passengers", 2, [WOMAN])).toEqual([WOMAN]);
+    expect(matchRecurringPeople("several passengers", 3, PASSENGERS)).toEqual([]);
+    expect(matchRecurringPeople("three passengers", 3, PASSENGERS)).toEqual([]);
+    expect(matchRecurringPeople("passengers boarding the plane", 2, PASSENGERS)).toEqual([]);
+    expect(matchRecurringPeople("a crowd of passengers", 3, PASSENGERS)).toEqual([]);
+  });
+
+  it("a vague name matches only its own words; a proper name is found inside a label", () => {
+    const vague: RecurringPerson = { name: "the other", look: HE };
+    expect(matchRecurringPeople("the other customer", 1, [vague])).toEqual([]);
+    expect(matchRecurringPeople("the other", 1, [vague])).toEqual([vague]); // the planner copied it
+    const joe: RecurringPerson = { name: "Grandpa Joe", look: "a man in his eighties, white hair, a red flannel shirt, braces, grey trousers" };
+    expect(matchRecurringPeople("Grandpa Joe at his bench", 1, [joe])).toEqual([joe]);
+    expect(matchRecurringPeople("a grandfather", 1, [joe])).toEqual([]);
+  });
+
+  it("two looks beside a third person are two of them, not all of them", () => {
+    expect(matchRecurringPeople("a flight attendant and two passengers", 3, PASSENGERS)).toEqual(PASSENGERS);
+    const three = otherPersonClause("a flight attendant and two passengers", 3, PASSENGERS);
+    expect(three).toMatch(/Two of them are the same people in every picture of them/);
+    expect(three).not.toMatch(/They are the same people/);
+    expect(otherPersonClause("two airline passengers", 2, PASSENGERS)).toMatch(/They are the same people in every picture of them/);
   });
 });
