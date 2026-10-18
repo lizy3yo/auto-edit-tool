@@ -64,7 +64,6 @@ import {
   requiredThingsFor,
   BACKGROUND_VIEW,
   BLUR_PRINT_VIEW,
-  broughtThingsClause,
   keyThingLookClause,
   lookToHold,
   memoryAttached,
@@ -7635,9 +7634,8 @@ export type MemoryFields = Pick<
  * which of them it must not repeat — shown right before it about something else, or the one it
  * continues (`memoryRightBefore`, `memoryContinues`); the look kept for a redraw from words
  * (`memoryWordsLook`); the other key things none of the references shows (`memoryNotShown`); and the
- * written looks of the other key things in it and of those its references bring (`otherThingLooks`).
- * A screen's item photo and a list item's group picture bring nothing: the one is only the photo on
- * the screen, the other is drawn as ONE of the things in its reference. Pure.
+ * written looks of the other key things its own words name, kept for a redraw from words
+ * (`otherThingLooks`). Pure.
  */
 export function memoryFields(
   memory: {
@@ -7658,8 +7656,6 @@ export function memoryFields(
     has && memory.before != null && memory.before >= 0 && memory.before < memory.urls.length
       ? memory.before
       : undefined;
-  const bringsNothing = view === SCREEN_ITEM_VIEW || view === SET_ITEM_VIEW;
-  const otherLooks = memory.otherLooks?.filter(t => !t.brought || !bringsNothing);
   return {
     memoryRefUrls: has ? memory.urls : undefined,
     // What each reference is — only when it says it of every one of them.
@@ -7671,7 +7667,7 @@ export function memoryFields(
     memoryRightBefore: before,
     memoryContinues: before != null && memory.continues ? true : undefined,
     memoryWordsLook: has && memory.own ? memory.wordsLook : undefined,
-    otherThingLooks: has && otherLooks?.length ? otherLooks : undefined,
+    otherThingLooks: has && memory.otherLooks?.length ? memory.otherLooks : undefined,
   };
 }
 
@@ -7736,12 +7732,10 @@ export function looksAtClosestRelative(
  * pictures, no memory camera position, and its key thing's written look in their place
  * (`keyThingLookClause`) — so the thing still looks like the one before, without the picture.
  * Without a written look it is drawn from its own words alone.
- * EVERY key thing in it keeps its written look, not only its own (`otherThingLooks`): job 409 scene 3,
- * the pharmacy aisle with the sympathy card in a man's hands, kept only the aisle's look and came back
- * with a lily card where scene 2 and the props list have a cream card with a grey ribbon; and the
- * things its references brought keep theirs should they be in it (job 408 scenes 12 and 16: the
- * toilet's panels, drawn from words, put a stainless pedal bin where the toilet's first picture had
- * the small white lidded one). Pure.
+ * EVERY key thing its words name keeps its written look, not only its own (`otherThingLooks`): job 409
+ * scene 3, the pharmacy aisle with the sympathy card in a man's hands, kept only the aisle's look and
+ * came back with a lily card where scene 2 and the props list have a cream card with a grey ribbon.
+ * Pure.
  */
 export function memoryToWords(scene: StoryboardScene): MemoryFields {
   return {
@@ -7894,8 +7888,7 @@ export function withoutMemoryRef(scene: StoryboardScene, index: number): MemoryF
     memoryRightBefore: before,
     memoryContinues: before != null ? scene.memoryContinues : undefined,
     memoryWordsLook: own ? scene.memoryWordsLook : undefined,
-    // The things beside its own keep their written looks: the dropped picture may have been the only
-    // one showing them (`broughtThingsClause` says it whatever the references are).
+    // The things its words name beside its own keep their written looks for a later redraw from words.
     otherThingLooks: scene.otherThingLooks,
   };
 }
@@ -7969,16 +7962,11 @@ export const MEMORY_SETTING_CLAUSE =
  * another spot — and, when the host is in the shot, that the last reference is the host. When one
  * of them is the picture shown right before it, about something else, it is told that picture lends
  * only the thing's look (`rightBeforeClause`). Every one is told the references lend only the look,
- * never their setting (`MEMORY_SETTING_CLAUSE`). A key thing a reference shows that this picture's
- * words do not name keeps its written look should it be in the picture (`broughtThingsClause`, job
- * 408's bin beside the toilet); it goes with the rest of the clause when the picture is drawn from
- * words, where the look clause says it instead (`otherThingLooksClause`).
+ * never their setting (`MEMORY_SETTING_CLAUSE`).
  */
 export function memoryClause(scene: StoryboardScene): string {
   const clause = memoryReferenceClause(scene);
-  return clause
-    ? `${clause}${broughtThingsClause(scene)}${rightBeforeClause(scene)}${MEMORY_SETTING_CLAUSE}`
-    : "";
+  return clause ? `${clause}${rightBeforeClause(scene)}${MEMORY_SETTING_CLAUSE}` : "";
 }
 
 /** Names in a sentence: "a", "a and b", "a, b and c". */

@@ -6221,7 +6221,7 @@ describe("no near copy of the picture a picture was drawn from (round 13, jobs 4
   });
 });
 
-describe("every key thing keeps its look when a picture is drawn from words (round 13, jobs 408 and 409)", () => {
+describe("every key thing its words name keeps its look when a picture is drawn from words (round 13, jobs 404, 408 and 409)", () => {
   const CARD = "a plain cream greeting card with a muted gray ribbon print on the front, blank inside, small and rectangular";
   const BIN = "a small white plastic bin with a hinged lid, round shape";
 
@@ -6253,10 +6253,30 @@ describe("every key thing keeps its look when a picture is drawn from words (rou
     expect(prompt).not.toContain("reference image");
   });
 
-  it("408-12: the toilet's panel, drawn from the toilet's first picture with the bin beside it, keeps the bin's look", async () => {
-    const { attachMemory } = await import("./pictureMemory");
-    const { buildSplitRightScene, buildStillPrompt, memoryClause, memoryToWords, promptAfterMemoryChange, withSplitMemory } =
+  it("404-14 / 408-12: a thing that only stood in a reference picture is never written into the prompt", async () => {
+    const { attachMemory, memoryFor, memoryView } = await import("./pictureMemory");
+    const { buildSplitRightScene, buildStillPrompt, memoryFields, memoryToWords, promptAfterMemoryChange, withSplitMemory } =
       await import("./longformVideo");
+    // The gulf coast yard drawn from the robin's pictures on the northern lawn: handed the lawn's look
+    // ("frost-dusted"), it would bring back the snow under palms the setting rule took out.
+    const robin: KeyThing[] = [
+      { name: "robin", look: "a plump songbird about ten inches long, bright orange-red breast", main: true },
+      { name: "lawn", look: "a flat suburban backyard lawn, green fading to frost-dusted brown, bordered by a low wooden fence" },
+      { name: "gulf coast yard", look: "a flat grassy winter yard in a mild southern climate" },
+    ];
+    const r = [
+      pic(5, "In spring they come back,", "a robin standing on a green lawn in early spring with patches of melting snow", {
+        keyThing: "robin",
+        pictureUrl: "https://r2/404/still-src-5.png",
+      }),
+      pic(14, "Down on the Gulf Coast, they winter in the yards.", "a robin standing in a mild gulf coast yard with palm trees", { keyThing: "robin" }),
+    ];
+    attachMemory(r, [r[1]], robin);
+    const s14 = { ...r[1], ...memoryFields(await memoryFor(r[1], 0), memoryView(r[1])) } as StoryboardScene;
+    expect(s14.otherThingLooks?.map(t => t.name)).toEqual(["gulf coast yard"]);
+    expect(promptAfterMemoryChange(s14, buildStillPrompt(s14), memoryToWords(s14))).not.toContain("frost");
+    // The toilet's panel names no bin; the toilet's first picture has one beside it. Nothing about the
+    // bin is added — what is in a picture is up to its own words.
     const things: KeyThing[] = [
       { name: "toilet", look: "a white porcelain toilet, oval bowl, closed lid often up", main: true },
       { name: "bin", look: `${BIN}, sitting on tile floor beside the toilet base` },
@@ -6273,13 +6293,10 @@ describe("every key thing keeps its look when a picture is drawn from words (rou
     ];
     attachMemory(b, [], things);
     const panel = await withSplitMemory(b[1], buildSplitRightScene(b[1]), 0);
-    const bin = `keeps its look whenever it is in this picture too — the bin: ${BIN}.`;
-    expect(memoryClause(panel)).toContain(bin);
-    expect(memoryClause(panel)).toContain("Whether it is in it at all is up to this picture's own words.");
+    expect(panel.otherThingLooks).toBeUndefined();
     const prompt = buildStillPrompt(panel, false, undefined, undefined, true);
-    const words = promptAfterMemoryChange(panel, prompt, memoryToWords(panel), { square: true });
-    // Drawn from words (it copied its memory on both checks), the bin is no longer free to be a pedal bin.
-    expect(words.split(bin).length - 1).toBe(1);
+    expect(prompt).not.toContain(BIN);
+    expect(promptAfterMemoryChange(panel, prompt, memoryToWords(panel), { square: true })).not.toContain(BIN);
   });
 
   it("a first picture with nothing earlier keeps only its own look: nothing is added where no memory was", async () => {

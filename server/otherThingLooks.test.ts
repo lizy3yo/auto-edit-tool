@@ -1,29 +1,28 @@
 /**
- * EVERY KEY THING KEEPS ITS WRITTEN LOOK WHEN A PICTURE IS DRAWN FROM WORDS, AND A THING A REFERENCE
- * BRINGS KEEPS ITS LOOK TOO (2026-10-18, round 13, the review of jobs 408 and 409).
+ * EVERY KEY THING A PICTURE'S WORDS NAME KEEPS ITS WRITTEN LOOK WHEN IT IS DRAWN FROM WORDS (2026-10-18,
+ * round 13, the review of jobs 408 and 409).
  * - Job 409 scene 3, "a man in his sixties standing still in the pharmacy aisle, holding the sympathy
  *   card", was drawn from scene 2 (the card's first picture: the props list's "plain cream greeting
  *   card with a muted gray ribbon print"), copied it twice and was drawn from words. The redraw kept
  *   only the look of its OWN key thing, the aisle, and the card came back a white card with a painted
  *   lily spray; scene 5, drawn from scene 3 as the aisle's memory, carried the lily card on.
- * - Job 408: the toilet's split panels (scenes 12 and 16), whose own words never name a bin, were drawn
- *   from the toilet's first picture (scene 2), where the small white lidded bin stands beside it; both
- *   ended drawn from words, and the bin came back a stainless pedal bin.
- * The rows are the stored ones (local jobs 408 and 409); the rule names no channel's things.
+ * - What it does NOT do: write in the look of a thing that only stood in a reference picture. Job 408's
+ *   toilet panels (scenes 12 and 16), whose own words never name a bin, came back with a pedal bin where
+ *   the toilet's first picture had the white lidded one; bringing such things along touched half the
+ *   memory pictures of the stored films and handed job 404 scene 14's gulf coast yard the northern
+ *   lawn's frost (the snow under palms `MEMORY_SETTING_CLAUSE` took out).
+ * The rows are the stored ones (local jobs 404, 408 and 409); the rule names no channel's things.
  */
 import { describe, expect, it } from "vitest";
 import type { KeyThing, StoryboardScene } from "@shared/types";
 import {
   attachMemory,
-  broughtThingsClause,
   keyThingLookClause,
   keyThingLookFor,
   memoryFor,
   memoryView,
   otherThingLookFor,
   otherThingLooksClause,
-  SCREEN_ITEM_VIEW,
-  SET_ITEM_VIEW,
 } from "./pictureMemory";
 import {
   buildSplitRightScene,
@@ -64,6 +63,22 @@ const K408: KeyThing[] = [
   { name: "bin", look: `${BIN_LOOK}, sitting on tile floor beside the toilet base` },
   { name: "cotton swabs", look: `${SWAB_LOOK}, usually seen loose near the bin` },
   { name: "toilet paper", look: "a white paper roll with soft layered texture, mounted on a wall-fixed holder near the toilet" },
+];
+
+// Job 404's props list as stored (the robin, the northern lawn and the gulf coast yard).
+const LAWN_LOOK =
+  "a flat suburban backyard lawn, green fading to frost-dusted brown, bordered by a low wooden fence, viewed from the kitchen window";
+const K404: KeyThing[] = [
+  {
+    name: "robin",
+    look: "a plump songbird about ten inches long, brown-grey back, bright orange-red breast, white eye ring, dark head, seen on grass, bare branches, and holly shrubs",
+    main: true,
+  },
+  { name: "lawn", look: LAWN_LOOK },
+  {
+    name: "gulf coast yard",
+    look: "a flat grassy winter yard in a mild southern climate, palm trees and green shrubs in the background, bright winter sunlight",
+  },
 ];
 
 // Job 409 scenes 2, 3 and 5 as stored, before render (scene 2 already drawn).
@@ -120,10 +135,28 @@ const job408 = () => [
   }),
 ];
 
+// Job 404 scenes 5 and 12 (the robin on the northern lawn, drawn) and 14 (the gulf coast yard) as stored.
+const job404 = () => [
+  pic(5, "a robin standing on a green lawn in early spring with patches of melting snow", {
+    keyThing: "robin",
+    visualPrompt: "A robin standing on green lawn with patches of melting snow in early spring, suburban yard with low wooden fence behind.",
+    pictureUrl: "https://r2/404/still-src-5.png",
+  }),
+  pic(12, "a robin standing on frost dusted brown grass in winter", {
+    keyThing: "robin",
+    visualPrompt: "A robin standing on frost-dusted brown grass in winter, suburban backyard lawn, bare branches and low fence at edges.",
+    pictureUrl: "https://r2/404/still-src-12.png",
+  }),
+  pic(14, "a robin standing in a mild gulf coast yard with palm trees", {
+    keyThing: "robin",
+    visualPrompt: "A robin standing on grassy winter yard with palm trees and green shrubs in background, bright winter sunlight, Gulf Coast setting.",
+  }),
+];
+
 /** The scene as render leaves it: its memory fields set (`memoryFor` → `memoryFields`). */
 const rendered = async (s: StoryboardScene) => ({ ...s, ...memoryFields(await memoryFor(s, 0), memoryView(s)) });
 
-describe("409-3: a picture drawn from words keeps the look of every key thing in it", () => {
+describe("409-3: a picture drawn from words keeps the look of every key thing its words name", () => {
   it("at render the card's written look is kept beside the aisle's, and the reference carries it meanwhile", async () => {
     const board = job409();
     attachMemory(board, [board[1]], K409);
@@ -131,11 +164,11 @@ describe("409-3: a picture drawn from words keeps the look of every key thing in
     expect(s3.memoryRefUrls).toEqual(["https://r2/409/still-src-2.png"]);
     expect(s3.memoryWordsLook).toBe(AISLE_LOOK);
     expect(s3.otherThingLooks).toEqual([{ name: "sympathy card", look: CARD_LOOK }]);
-    // Drawn from memory, the reference shows the card: no written look beside it, nothing brought.
+    // Drawn from memory, the reference shows the card: no written look beside it — the prompt reads
+    // exactly as before.
     expect(keyThingLookClause(s3)).toBe("");
     expect(memoryClause(s3)).toMatch(/this exact pharmacy aisle and sympathy card/);
-    expect(memoryClause(s3)).not.toContain(CARD_LOOK);
-    expect(broughtThingsClause(s3)).toBe("");
+    expect(buildStillPrompt(s3)).not.toContain(CARD_LOOK);
   });
 
   it("after copying its memory twice it is drawn by the aisle's look AND the card's, each said once", async () => {
@@ -181,35 +214,53 @@ describe("409-3: a picture drawn from words keeps the look of every key thing in
     expect(dropped).toEqual(memoryToWords(s3));
     expect(keyThingLookClause({ ...s3, ...dropped })).toContain(`the sympathy card: ${CARD_LOOK}`);
   });
+
+  it("409-5: scene 2's visual words the card 'a plain cream greeting card', and the video's OTHER card never comes along", async () => {
+    const board = job409();
+    board[1].pictureUrl = "https://r2/409/still-src-3.png";
+    attachMemory(board, [board[2]], K409);
+    const s5 = await rendered(board[2]);
+    expect(s5.memoryRefUrls).toEqual(["https://r2/409/still-src-3.png", "https://r2/409/still-src-2.png"]);
+    expect(s5.otherThingLooks).toEqual([{ name: "sympathy card", look: CARD_LOOK }]);
+    expect(buildStillPrompt({ ...s5, ...memoryToWords(s5) })).not.toContain("pale blue");
+  });
 });
 
-describe("408-12/16: a key thing a reference brings keeps its look, whether the picture shows it or not", () => {
-  it("408-12: the toilet's panel names no bin, but its references show one — the bin's look goes with it", async () => {
+describe("a thing that only stood in a reference picture is never written in", () => {
+  it("404-14: the gulf coast yard drawn from the robin's lawn pictures is never handed the northern lawn's frost", async () => {
+    const board = job404();
+    attachMemory(board, [board[2]], K404);
+    expect(board[0].otherKeyThings).toEqual(["lawn"]);
+    expect(board[2].otherKeyThings).toEqual(["gulf coast yard"]);
+    const s14 = await rendered(board[2]);
+    expect(s14.memoryRefUrls).toEqual(["https://r2/404/still-src-5.png", "https://r2/404/still-src-12.png"]);
+    // Only the yard its words name keeps a written look — never the lawn its references stand on.
+    expect(s14.otherThingLooks?.map(t => t.name)).toEqual(["gulf coast yard"]);
+    expect(buildStillPrompt(s14)).not.toContain("frost");
+    const words = promptAfterMemoryChange(s14, buildStillPrompt(s14), memoryToWords(s14));
+    expect(words).not.toContain(LAWN_LOOK);
+    expect(words).not.toContain("frost");
+    expect(words).toContain("the gulf coast yard: a flat grassy winter yard in a mild southern climate");
+  });
+
+  it("408-12: the toilet's panel names no bin — its references show one, and no bin's look is written in, from memory or from words", async () => {
     const board = job408();
     attachMemory(board, [], K408);
     const host = board[2];
     expect(host.otherKeyThings).toBeUndefined();
     const panel = await withSplitMemory(host, buildSplitRightScene(host), 0);
     expect(panel.memoryRefUrls).toEqual(["https://r2/408/still-src-2.png", "https://r2/408/still-src-11.png"]);
-    expect(panel.otherThingLooks).toEqual([{ name: "bin", look: BIN_LOOK, brought: true }]);
-    const brought =
-      ` Another thing seen earlier in this video keeps its look whenever it is in this picture too — the bin: ${BIN_LOOK}.` +
-      " Whether it is in it at all is up to this picture's own words.";
-    // With its references: said inside the memory clause, never as one more thing to draw.
-    expect(memoryClause(panel)).toContain(brought);
-    expect(memoryClause(panel).endsWith(MEMORY_SETTING_CLAUSE)).toBe(true);
-    expect(keyThingLookClause(panel)).toBe("");
+    expect(panel.otherThingLooks).toBeUndefined();
     const prompt = buildStillPrompt(panel, false, undefined, undefined, true);
-    expect(count(prompt, BIN_LOOK)).toBe(1);
-    // Copied its memory twice (it did, on both checks): drawn from words, the toilet AND the bin keep their looks.
-    const fields = memoryToWords(panel);
-    const words = promptAfterMemoryChange(panel, prompt, fields, { square: true });
+    expect(prompt).not.toContain(BIN_LOOK);
+    expect(memoryClause(panel).endsWith(MEMORY_SETTING_CLAUSE)).toBe(true);
+    const words = promptAfterMemoryChange(panel, prompt, memoryToWords(panel), { square: true });
     expect(words).toContain(`HOW THE TOILET LOOKS in every picture of this video: ${TOILET_LOOK}`);
-    expect(count(words, brought)).toBe(1);
-    expect(words).not.toContain(MEMORY_SETTING_CLAUSE);
+    expect(words).not.toContain(BIN_LOOK);
+    expect(words).not.toContain("OTHER THING");
   });
 
-  it("408-16: the swab's panel keeps the toilet its words name and the bin its reference brings, after the redraw drops its memory", async () => {
+  it("408-16: the swab's panel keeps the toilet its words name after the redraw drops its memory, and only that", async () => {
     const board = job408();
     attachMemory(board, [], K408);
     const host = board[3];
@@ -218,71 +269,18 @@ describe("408-12/16: a key thing a reference brings keeps its look, whether the 
     // Its first swab picture: the references are the toilet's, so it is drawn by the swab's look.
     expect(panel.memoryOthersOnly).toBe(true);
     expect(panel.keyThingLook).toBe(SWAB_LOOK);
-    expect(panel.otherThingLooks).toEqual([
-      { name: "toilet", look: TOILET_LOOK },
-      { name: "bin", look: BIN_LOOK, brought: true },
-    ]);
+    expect(panel.otherThingLooks).toEqual([{ name: "toilet", look: TOILET_LOOK }]);
     const words = { ...panel, ...memoryToWords(panel) };
-    const look = otherThingLooksClause(words);
-    expect(look).toContain(`HOW THE OTHER THING IN IT LOOKS in every picture of this video — the toilet: ${TOILET_LOOK}.`);
-    expect(look).toContain(`keeps its look whenever it is in this picture too — the bin: ${BIN_LOOK}.`);
+    expect(otherThingLooksClause(words)).toBe(
+      ` HOW THE OTHER THING IN IT LOOKS in every picture of this video — the toilet: ${TOILET_LOOK}. Draw that same one, where this picture's own words put it.`
+    );
     expect(keyThingLookClause(words)).toContain(`HOW THE COTTON SWABS LOOKS in every picture of this video: ${SWAB_LOOK}`);
-  });
-
-  it("references showing only what the picture names bring nothing (409-5: the aisle and the card)", async () => {
-    const board = job409();
-    board[1].pictureUrl = "https://r2/409/still-src-3.png";
-    attachMemory(board, [board[2]], K409);
-    const s5 = await rendered(board[2]);
-    expect(s5.memoryRefUrls).toEqual(["https://r2/409/still-src-3.png", "https://r2/409/still-src-2.png"]);
-    // Scene 2's visual words its card "a plain cream greeting card": what a reference shows is what it is
-    // filed under, so the pale blue floral "greeting card" never comes along.
-    expect(s5.otherThingLooks).toEqual([{ name: "sympathy card", look: CARD_LOOK }]);
-    expect(broughtThingsClause(s5)).toBe("");
-    expect(buildStillPrompt(s5)).not.toContain("pale blue");
-  });
-
-  it("a crowded reference brings at most three things, the first seen first", async () => {
-    const things: KeyThing[] = [
-      { name: "toilet", look: TOILET_LOOK, main: true },
-      { name: "bin", look: BIN_LOOK },
-      { name: "plunger", look: "a wooden-handled rubber plunger with a black rubber cup" },
-      { name: "toilet paper", look: "a white paper roll with soft layered texture" },
-      { name: "bath mat", look: "a grey cotton bath mat" },
-    ];
-    const board = [
-      pic(2, "the toilet with the bin, the plunger, the toilet paper and the bath mat around it", {
-        keyThing: "toilet",
-        pictureUrl: "https://r2/2.png",
-      }),
-      pic(6, "the white porcelain toilet seen from the side", { keyThing: "toilet" }),
-    ];
-    attachMemory(board, [board[1]], things);
-    expect(board[0].otherKeyThings).toEqual(["toilet paper", "bath mat", "plunger", "bin"]);
-    const s = await rendered(board[1]);
-    expect(s.otherThingLooks?.map(t => t.name)).toEqual(["toilet paper", "bath mat", "plunger"]);
-    expect(s.otherThingLooks?.every(t => t.brought)).toBe(true);
-  });
-
-  it("a screen's item photo and a list item's group picture bring nothing", () => {
-    const memory = {
-      urls: ["https://r2/408/still-src-2.png"],
-      own: true,
-      otherLooks: [
-        { name: "toilet", look: TOILET_LOOK },
-        { name: "bin", look: BIN_LOOK, brought: true as const },
-      ],
-    };
-    expect(memoryFields(memory, SCREEN_ITEM_VIEW).otherThingLooks).toEqual([{ name: "toilet", look: TOILET_LOOK }]);
-    expect(memoryFields(memory, SET_ITEM_VIEW).otherThingLooks).toEqual([{ name: "toilet", look: TOILET_LOOK }]);
-    expect(memoryFields(memory, undefined).otherThingLooks).toHaveLength(2);
-    // No reference picture, no looks kept: a first picture is drawn as it always was.
-    expect(memoryFields({ ...memory, urls: [] }, undefined).otherThingLooks).toBeUndefined();
+    expect(keyThingLookClause(words)).not.toContain(BIN_LOOK);
   });
 });
 
 describe("what keeps the looks as they were", () => {
-  it("a picture with no other key thing and references that show nothing else keeps nothing more", async () => {
+  it("a picture with no other key thing keeps nothing more", async () => {
     const board = [
       pic(3, "a straight-stitch machine at a kitchen table", { keyThing: "machine", pictureUrl: "https://r2/m3.png" }),
       pic(5, "a straight-stitch machine on the wooden work table", { keyThing: "machine" }),
@@ -294,6 +292,12 @@ describe("what keeps the looks as they were", () => {
     expect(keyThingLookClause({ ...s, ...memoryToWords(s) })).toBe(
       " HOW THE MACHINE LOOKS in every picture of this video: small black and chrome sewing machine, compact size. Draw this same one — where it is, which part of it shows and how far along it is are as this picture's own words say."
     );
+  });
+
+  it("no reference picture, no looks kept: a first picture is drawn as it always was", () => {
+    const memory = { urls: ["https://r2/408/still-src-2.png"], own: true, otherLooks: [{ name: "toilet", look: TOILET_LOOK }] };
+    expect(memoryFields(memory, undefined).otherThingLooks).toEqual([{ name: "toilet", look: TOILET_LOOK }]);
+    expect(memoryFields({ ...memory, urls: [] }, undefined).otherThingLooks).toBeUndefined();
   });
 
   it("a thing with no written look, or an inside no camera sees, is left out", () => {
@@ -328,29 +332,33 @@ describe("what keeps the looks as they were", () => {
 
   it("a named kind's exact look wins over the written look of the thing it is a kind of", () => {
     const s = pic(27, "a man reading an aged papyrus scroll at a desk", {
-      keyThing: "desk",
-      otherKeyThings: ["essay scroll"],
+      keyThing: "reading lamp",
+      otherKeyThings: ["essay scroll", "desk"],
       namedLook: "papyrus scroll: rolled into a cylinder, a thin brown cord tied around its middle",
       otherThingLooks: [
         { name: "essay scroll", look: "a long rolled scroll of pale papyrus" },
-        { name: "lamp", look: "a small clay oil lamp", brought: true },
+        { name: "desk", look: "a heavy carved dark wooden desk" },
       ],
     });
     expect(otherThingLooksClause(s)).not.toContain("pale papyrus");
-    expect(otherThingLooksClause(s)).toContain("the lamp: a small clay oil lamp");
+    expect(otherThingLooksClause(s)).toBe(
+      " HOW THE OTHER THING IN IT LOOKS in every picture of this video — the desk: a heavy carved dark wooden desk. Draw that same one, where this picture's own words put it."
+    );
   });
 
-  it("several brought things are named together, the picture's words still deciding", () => {
-    const s = pic(12, "water draining in the toilet bowl", {
-      keyThing: "toilet",
+  it("several named things share one sentence, the picture's words still placing them", () => {
+    const s = pic(12, "a cotton swab beside the toilet and the bin", {
+      keyThing: "cotton swabs",
       otherThingLooks: [
-        { name: "bin", look: BIN_LOOK, brought: true },
-        { name: "toilet paper", look: "a white paper roll with soft layered texture", brought: true },
+        { name: "toilet", look: TOILET_LOOK },
+        { name: "bin", look: BIN_LOOK },
       ],
     });
-    expect(broughtThingsClause(s)).toBe(
-      ` Other things seen earlier in this video keep their look whenever they are in this picture too — the bin: ${BIN_LOOK}; ` +
-        "the toilet paper: a white paper roll with soft layered texture. Whether they are in it at all is up to this picture's own words."
+    expect(otherThingLooksClause(s)).toBe(
+      ` HOW THE OTHER THINGS IN IT LOOK in every picture of this video — the toilet: ${TOILET_LOOK}; the bin: ${BIN_LOOK}. ` +
+        "Draw those same ones, where this picture's own words put them."
     );
+    // With references they carry the things they show: nothing is written in.
+    expect(otherThingLooksClause({ ...s, memoryRefUrls: ["https://r2/2.png"] })).toBe("");
   });
 });
