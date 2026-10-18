@@ -19,10 +19,10 @@
  * Not touched: the CTA (its host → book → host → big QR layout is fixed), the cover, operator
  * assets, split screens and the cold open (the hook stays on camera).
  */
-import type { BuildStage, KeyThing, StoryboardScene } from "@shared/types";
+import type { BuildStage, KeyThing, RecurringPerson, StoryboardScene } from "@shared/types";
 import { invokeClaude } from "./claude";
 import { safeParseJSON } from "./jsonRepair";
-import { SHOWS_PERSON, showsPerson, namedPeople, namesOnlyAnimal } from "./hostLook";
+import { SHOWS_PERSON, showsPerson, namedPeople, namesOnlyAnimal, personKey } from "./hostLook";
 
 /** A picture shorter than this is a flash and folds into a neighbour. */
 export const SHOT_MIN_SEC = 1.2;
@@ -1310,7 +1310,8 @@ const SHOT_LIST_SYSTEM =
   "shown as the host's) — the picture may show THAT person, the same way: from behind or from " +
   "the side, the face never shown. Write them into show, and set other to who they are in 2-6 " +
   "plain words from the line (\"a woman customer\", \"an older neighbour\"). One person only. " +
-  "other is null in every other shot.\n" +
+  "When that person is one of the PEOPLE WHO COME BACK (listed below, when given), other is their " +
+  "name exactly as written there. other is null in every other shot.\n" +
   "6b. WHAT NOT TO DO. When a line — or the sentence it is part of — says not to do something " +
   "(\"never…\", \"don't…\"), says what something is NOT (\"I don't mean…\"), what to use INSTEAD, " +
   "what to keep away or out, that a job is for someone else (a licensed pro), or warns that doing " +
@@ -1397,6 +1398,13 @@ export async function planShotList(
     hostName?: string;
     /** How the host looks (`inputParams.hostLook`) — the only person b-roll may show, from behind. */
     hostLook?: string;
+    /**
+     * The people other than the host who come back in the story (`inputParams.recurringPeople`) —
+     * NAMES only, so a shot of one names them the same way every time (`matchRecurringPeople`
+     * finds their look by it). Their looks stay out of `show`, which the picture check holds the
+     * frame to.
+     */
+    people?: RecurringPerson[];
     subject?: string;
     log?: (m: string) => void;
     /** Plan only these beats (their eligibility is still judged in the full list). */
@@ -1439,6 +1447,9 @@ export async function planShotList(
         ? `THE HOST (shown from behind or the side whenever a picture is of someone doing the work): ${opts.hostLook}\n`
         : "") +
       (opts.sheet ? `PROPS LIST:\n${opts.sheet}\n` : "") +
+      (opts.people?.length
+        ? `PEOPLE WHO COME BACK (when a shot shows one of them, other is this name exactly): ${opts.people.map(p => p.name).join(" | ")}\n`
+        : "") +
       (prior.length ? `SHOTS JUST BEFORE THIS BATCH: ${prior.join(" | ")}\n` : "") +
       `\n${lines.join("\n")}\n\nJSON:`;
     const r = await invokeClaude({
@@ -1528,12 +1539,38 @@ export const CONTINUITY_SYSTEM =
   "animal's paw, a machine's dial, a garment's collar — its look STARTS with the whole it belongs " +
   "to (what kind it is, its colour, size and markings) and then describes the part, so every " +
   "picture of the whole shows the same one. " +
-  "6-14 lines. Plain words, no brands, no people. NOTHING WITH MARKS ON IT: " +
+  "6-14 lines. Plain words, no brands, no people in these lines. NOTHING WITH MARKS ON IT: " +
   "never list a chalk tally, a chalkboard, a sign, a price tag, a label, a calendar, a notebook, a " +
   "ledger or anything written or counted on — the pictures carry no writing, so such a prop would " +
-  "put writing in every shot that shows it. Output ONLY the list.";
+  "put writing in every shot that shows it. " +
+  "PEOPLE WHO COME BACK: after the props, one more line for each person other than the narrator " +
+  "whom the story shows or talks about in two or more different sentences — the same \"she\" or " +
+  "\"he\" a story follows, a customer who comes back, a neighbour seen again — written " +
+  "`PERSON name: look`, so every picture of them shows the same person. name is how the script " +
+  "refers to them, 1-5 plain words (the neighbour, my sister, the other customer); look is 12-30 " +
+  "plain words a picture generator can draw from behind or the side: man or woman, an age range, " +
+  "build, hair (colour, length, style) and the clothes they wear in every picture, with colours — " +
+  "fitting everything the script says about them (age, work, place, time). Two people the story " +
+  "tells apart get two lines that look clearly different. Never the narrator, the host or \"you\"; " +
+  "never a crowd or a group; never a face, an expression or a name the script does not give; never " +
+  "someone in only one sentence. No PERSON line when nobody comes back; at most 4. Example: " +
+  "`PERSON the neighbour: a tall man in his seventies, thin white hair combed back, a faded green " +
+  "zip-up jacket over a grey shirt, dark trousers`. Output ONLY the list, no headings.";
 
-/** The props list for one script (`LongformInputParams.continuitySheet`). "" on any failure. */
+/** Recurring people a props list may name (`PERSON name: look` lines) — beyond these, none. */
+export const MAX_RECURRING_PEOPLE = 4;
+
+// "PERSON " or "PERSON:" only — a prop like "person-sized crate: …" stays a prop.
+const PERSON_LINE = /^PERSON(?=[\s:])[\s:]*/i;
+/** Whether a props-list line is a `PERSON name: look` line (bullets and numbering aside). Pure. */
+export function isPersonLine(line: string): boolean {
+  return PERSON_LINE.test(line.replace(/^[-*•\d.)\s]+/, "").trim());
+}
+
+/**
+ * The props list for one script (`LongformInputParams.continuitySheet`), with its `PERSON` lines
+ * (the people who come back, `parseRecurringPeople`) at the end. "" on any failure.
+ */
 export async function deriveContinuitySheet(
   script: string,
   opts: { subject?: string; styleBible?: string } = {}
@@ -1553,13 +1590,16 @@ export async function deriveContinuitySheet(
         effort: planningEffort("PROPS_EFFORT"),
         step: "Props list",
       });
-      const sheet = r.text
+      // A line with nothing after its colon is a heading ("PEOPLE:"), never a prop: kept, it became
+      // the home line or a key thing with no look. The PERSON lines go last and are capped on their
+      // own, so they never push a prop out or take the home line's place.
+      const lines = r.text
         .split("\n")
         .map(l => l.replace(/^[-*•\d.)\s]+/, "").trim())
-        .filter(l => l.includes(":"))
-        .slice(0, 16)
-        .join("\n");
-      if (sheet) return sheet;
+        .filter(l => l.includes(":") && l.slice(l.indexOf(":") + 1).trim() !== "");
+      const props = lines.filter(l => !isPersonLine(l)).slice(0, 16);
+      const people = lines.filter(isPersonLine).slice(0, MAX_RECURRING_PEOPLE);
+      if (props.length) return [...props, ...people].join("\n");
     } catch {
       /* try once more */
     }
@@ -1574,7 +1614,7 @@ export async function deriveContinuitySheet(
  */
 export function parseKeyThings(sheet: string | undefined): KeyThing[] {
   const out: KeyThing[] = [];
-  const lines = (sheet ?? "").split("\n").map(l => l.trim()).filter(l => l.includes(":"));
+  const lines = withoutPersonLines(sheet).split("\n").map(l => l.trim()).filter(l => l.includes(":"));
   for (const line of lines.slice(1)) {
     const at = line.indexOf(":");
     let name = line.slice(0, at).trim();
@@ -1583,6 +1623,51 @@ export function parseKeyThings(sheet: string | undefined): KeyThing[] {
     name = name.replace(/^MAIN\b[\s:-]*/i, "").trim();
     if (!name || out.some(t => keyName(t.name) === keyName(name))) continue;
     out.push({ name, look, ...(main && !out.some(t => t.main) ? { main: true as const } : {}) });
+  }
+  return out;
+}
+
+/** A props list with its `PERSON` lines taken out — the list every shot and picture writer reads. Pure. */
+export function withoutPersonLines(sheet: string | undefined): string {
+  return (sheet ?? "")
+    .split("\n")
+    .filter(l => !isPersonLine(l))
+    .join("\n")
+    .trim();
+}
+
+/**
+ * The PEOPLE WHO COME BACK in a props list (`deriveContinuitySheet`'s `PERSON name: look` lines):
+ * someone other than the host whom the story follows over several sentences, with the one look
+ * every picture of them keeps (job 399: the woman passenger the story follows was three different
+ * women in scenes 2, 4 and 5, drawn each time from "a woman passenger" alone). Read only from those
+ * lines, so a props list written before has none. Dropped: the host (by role or by `hostName`), the
+ * viewer, an animal, a group ("the passengers" — no one look fits a crowd), a name too long to be
+ * one, a look too short to draw, and a second line for the same name. At most
+ * `MAX_RECURRING_PEOPLE`. Pure — unit-tested.
+ */
+export function parseRecurringPeople(
+  sheet: string | undefined,
+  opts: { hostName?: string } = {}
+): RecurringPerson[] {
+  const out: RecurringPerson[] = [];
+  const hostWords = personKey(opts.hostName).split(" ").filter(w => w.length >= 3);
+  for (const raw of (sheet ?? "").split("\n")) {
+    if (!isPersonLine(raw)) continue;
+    const rest = raw.replace(/^[-*•\d.)\s]+/, "").trim().replace(PERSON_LINE, "");
+    const at = rest.indexOf(":");
+    if (at <= 0) continue;
+    const name = otherPersonOf(rest.slice(0, at).replace(/[*_`]/g, ""));
+    const words = rest.slice(at + 1).replace(/[`*_]/g, "").replace(/\s+/g, " ").trim().replace(/[.;,]+$/, "").split(" ");
+    if (!name || words.length < 3) continue;
+    const look = words.slice(0, 45).join(" ").replace(/[.;,]+$/, "");
+    const named = namedPeople(name);
+    if (named && (named.count > 1 || named.self)) continue;
+    const key = personKey(name);
+    if (hostWords.length && key.split(" ").every(w => hostWords.includes(w))) continue;
+    if (out.some(p => personKey(p.name) === key)) continue;
+    out.push({ name, look });
+    if (out.length >= MAX_RECURRING_PEOPLE) break;
   }
   return out;
 }

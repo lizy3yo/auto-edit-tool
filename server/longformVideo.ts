@@ -46,6 +46,8 @@ import {
   wordsAfterName,
   spokenListItems,
   parseKeyThings,
+  parseRecurringPeople,
+  withoutPersonLines,
   settleVideoKind,
   videoKind,
   fitPicturesToLines,
@@ -484,6 +486,7 @@ import type {
   SceneSubmitReason,
   SubmitActor,
   TtsWaitState,
+  RecurringPerson,
 } from "../shared/types";
 import {
   extractSpokenScript,
@@ -6031,7 +6034,7 @@ export function personClauseFor(scene: StoryboardScene, visual: string): string 
   // (`hostLipsCut`): every side or back view below would hide what the line is about.
   const lipsCut = hostLipsCut(scene);
   const who = scene.otherPerson
-    ? otherPersonClause(scene.otherPerson, scene.otherPeople)
+    ? otherPersonClause(scene.otherPerson, scene.otherPeople, scene.otherPersonLooks)
     : scene.brollHostLook
       ? scene.hostFaceShown
         ? hostFaceClause(scene.brollHostLook)
@@ -6068,28 +6071,46 @@ export function personClauseFor(scene: StoryboardScene, visual: string): string 
  * flight attendant speaking with a passenger", "two people hugging") are each drawn that way, none
  * of them the host — the one-person wording ("nobody else", "no second person") asked for one of
  * them and against the other.
+ * Someone the story COMES BACK TO (`scene.otherPersonLooks`, the video's `recurringPeople`) is
+ * drawn with the one look the video gave them, the same in every picture — job 399's woman
+ * passenger, drawn from the label alone, was three different women in 13 s (scenes 2, 4, 5).
  */
-export function otherPersonClause(who: string, count: number = 1): string {
+export function otherPersonClause(
+  who: string,
+  count: number = 1,
+  looks: RecurringPerson[] = []
+): string {
   const named = who.trim().replace(/\.$/, "");
+  const lookOf = (p: RecurringPerson) => p.look.trim().replace(/[.;,]+$/, "");
+  const same = "the same person in every picture of them in this video, always drawn exactly like this";
   if (count > 1) {
     const body = ONE_BODY_CLAUSE.replace(/The host has/g, "Each person has")
       .replace(/both of the host's hands/g, "both of that person's hands")
       .replace(/the host's/g, "that person's")
       .replace(/anywhere in the frame/, "on anyone");
+    const known =
+      looks.length === 1
+        ? `One of them is ${looks[0].name}, ${same}: ${lookOf(looks[0])}. `
+        : looks.length > 1
+          ? `They are the same people in every picture of them in this video, always drawn exactly ` +
+            `like this — ${looks.map(p => `${p.name}: ${lookOf(p)}`).join("; ")}. `
+          : "";
     return (
       `The people in this shot are ${named} — ${count === 2 ? "two" : "a small group of"} different, ` +
       `ordinary people of that description, NONE of them the video's host: each seen from behind or ` +
       `from the side, over the shoulder, faces turned away or out of frame so no face is ever shown. ` +
-      `Nobody else is in the frame, in the background or in a reflection. ${body}`
+      `${known}Nobody else is in the frame, in the background or in a reflection. ${body}`
     );
   }
   const body = ONE_BODY_CLAUSE.replace(/The host has/g, "This person has").replace(
     /the host's/g,
     "their"
   );
+  const person = looks[0]
+    ? `NOT the video's host, and ${same}: ${lookOf(looks[0])}. Seen`
+    : `NOT the video's host, a different, ordinary person of that description: seen`;
   return (
-    `The only person in this shot is ${named} — NOT the video's host, a ` +
-    `different, ordinary person of that description: seen from behind or from the side, over ` +
+    `The only person in this shot is ${named} — ${person} from behind or from the side, over ` +
     `the shoulder, the face turned away or out of frame so it is never shown. Nobody else is in ` +
     `the frame, in the background or in a reflection. ${body}`
   );
@@ -11017,15 +11038,23 @@ async function cutShotsOnWords(
       log(params.hostLook ? `host look: ${params.hostLook}` : "host look: unread — b-roll keeps anonymous hands");
     }
     if (params.continuitySheet == null) {
-      params.continuitySheet = (
+      const sheet = (
         await deriveContinuitySheet(ctx.spokenScript, {
           subject: params.videoSubject,
           styleBible: params.visualStyleBible,
         })
       ).replace(/\b(?:cluttered|messy|jumbled|crowded)\b/gi, "tidy");
+      // The same call names the PEOPLE WHO COME BACK, each with one look (job 399: the passenger
+      // the story follows was three different women in 13 s). They are kept apart from the props
+      // list, which every shot and picture writer reads as things only, exactly as before.
+      params.recurringPeople = parseRecurringPeople(sheet, { hostName: params.hostName });
+      params.continuitySheet = withoutPersonLines(sheet);
       log(
         params.continuitySheet
-          ? `props list: ${params.continuitySheet.split("\n").length} recurring thing(s)`
+          ? `props list: ${params.continuitySheet.split("\n").length} recurring thing(s)` +
+              (params.recurringPeople.length
+                ? `, ${params.recurringPeople.length} recurring person(s): ${params.recurringPeople.map(p => p.name).join(", ")}`
+                : "")
           : `props list: none (call failed) — shots are written without it`
       );
     }
@@ -11085,6 +11114,7 @@ async function cutShotsOnWords(
       sheet: params.continuitySheet || undefined,
       hostName: params.hostName,
       hostLook: params.hostLook,
+      people: params.recurringPeople,
       subject: params.videoSubject,
       log,
     });
@@ -11155,6 +11185,7 @@ async function cutShotsOnWords(
         sheet: params.continuitySheet || undefined,
         hostName: params.hostName,
         hostLook: params.hostLook,
+        people: params.recurringPeople,
         subject: params.videoSubject,
         log,
         only: ids,

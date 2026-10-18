@@ -314,6 +314,18 @@ export interface KeyThing {
 }
 
 /**
+ * Someone other than the host who comes back in a video's story — the same "she" a story follows
+ * over several shots, a customer seen again — and the one look every picture of them keeps
+ * (`parseRecurringPeople` in server/shotList.ts). `name` is how the script refers to them ("the
+ * woman passenger"); `look` is what a picture generator draws from behind or the side: age range,
+ * build, hair and clothes, never a face.
+ */
+export interface RecurringPerson {
+  name: string;
+  look: string;
+}
+
+/**
  * How far along a thing the video MAKES is in one picture, earliest first: "material" (the raw
  * stock or pieces before any work), "making" (being made, partly built), "done" (finished —
  * finishing touches such as oil, wax or a felt pad count as done).
@@ -629,6 +641,13 @@ export interface StoryboardScene {
    * drawn from one photo, and the prompt asks for each of them (`otherPersonClause`).
    */
   otherPeople?: number;
+  /**
+   * The fixed look of the person (or people) `otherPerson` names when they come back in the story
+   * (`matchRecurringPeople` in server/hostLook.ts, stamped by `markHostBroll`): every picture of
+   * them is drawn with the same age, hair and clothes (`otherPersonClause`). Unset for someone the
+   * story shows only once, and for a name that fits no one or more than one recurring person.
+   */
+  otherPersonLooks?: RecurringPerson[];
   /**
    * What this picture's SENTENCE rules out, so the picture must not show it — the act it says not
    * to do, the thing it says is not meant or is used instead of, or the place it says to keep
@@ -1537,6 +1556,12 @@ export interface LongformInputParams {
    * thing looks the same in every picture of it. Snapshotted with the props list.
    */
   keyThings?: KeyThing[];
+  /**
+   * The people other than the host who come back in the story, each with one fixed look, written
+   * by the same call as the props list (its `PERSON name: look` lines, `parseRecurringPeople`) and
+   * kept apart from `continuitySheet`, which stays things only. Snapshotted with the props list.
+   */
+  recurringPeople?: RecurringPerson[];
   /**
    * The spoken lists found in the whole script (`server/spokenLists.ts`), kept for the voicing
    * stage's last pass, which applies them again on the final lengths.

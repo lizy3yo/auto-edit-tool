@@ -2169,3 +2169,41 @@ describe("a picture drawn from the one right before it is told only to differ, n
     expect(SAME_THING_SYSTEM).not.toMatch(/same hands/);
   });
 });
+
+describe("someone the story comes back to keeps one look (job 399 scenes 2, 5, 7)", () => {
+  // The passenger the story follows ("she") was three different women in 13 s, and the man beside
+  // her changed too: each picture was drawn from "a woman passenger" alone. The props-list call now
+  // writes a PERSON line for anyone the story comes back to, and each picture of them carries it.
+  const SHE = "a woman in her late sixties, short silver hair in a neat bob, a lilac cardigan over a white blouse, grey slacks";
+  const HE = "a man in his late sixties, thinning grey hair, a navy quarter-zip sweater over a collared shirt, khaki trousers";
+  const SHEET = [
+    "aircraft cabin interior: narrow rows of blue upholstered seats, grey plastic overhead bins, dim carpeted aisle",
+    "MAIN beverage cart: metal trolley with two tiers, rows of soda cans lined on top",
+    `PERSON the woman passenger: ${SHE}`,
+    `PERSON the other passenger: ${HE}`,
+  ].join("\n");
+
+  it("399-2/5/7: her look on both her pictures, his on his; a passenger who could be either gets none", async () => {
+    const { parseRecurringPeople } = await import("./shotList");
+    const { markHostBroll: mark } = await import("./hostLook");
+    const { buildStillPrompt: still } = await import("./longformVideo");
+    const people = parseRecurringPeople(SHEET, { hostName: "Helena Hart" });
+    expect(people.map(p => p.name)).toEqual(["the woman passenger", "the other passenger"]);
+    const scenes = [
+      pic(2, "boarded the same flight, and sat in the same row.", "two passengers seated in the same cabin row", { humanPresent: true, otherPerson: "two airline passengers" }),
+      pic(5, "a second bag of pretzels,", "a second pretzel bag held in a passenger's hand", { humanPresent: true, otherPerson: "a woman passenger" }),
+      pic(7, "The other was still in row fourteen with a few inches of soda over ice.", "a passenger in row fourteen holding a cup with a little soda over ice", { humanPresent: true, otherPerson: "a male passenger" }),
+      pic(14, "None of them is an upgrade,", "a flight attendant speaking politely to a seated passenger", { humanPresent: true, otherPerson: "a seated passenger" }),
+    ];
+    mark(scenes, { hostLook: "a slender woman in her late thirties in a navy blazer", recurringPeople: people }, "https://x/host.png");
+    const [two, her, him, either] = scenes.map(s => still(s));
+    expect(two).toContain(SHE);
+    expect(two).toContain(HE);
+    expect(her).toContain(SHE);
+    expect(her).not.toContain(HE);
+    expect(him).toContain(HE);
+    expect(him).not.toContain(SHE);
+    expect(either).not.toContain(SHE);
+    expect(either).not.toContain(HE);
+  });
+});

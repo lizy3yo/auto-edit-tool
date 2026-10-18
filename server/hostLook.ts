@@ -12,7 +12,7 @@
  * (the host is already on the other half).
  */
 import sharp from "sharp";
-import type { LongformInputParams, StoryboardScene } from "@shared/types";
+import type { LongformInputParams, RecurringPerson, StoryboardScene } from "@shared/types";
 import { invokeClaude } from "./claude";
 import { presignOwnBucketUrl } from "./storage";
 
@@ -618,6 +618,100 @@ export function someoneElse(
   return { who, count: named.count };
 }
 
+// ─── People who come back ────────────────────────────────────────────────────────────────
+
+/** Words that say nothing about WHICH person is meant ("the", "her"), dropped when names are compared. */
+const NAME_FILLER = new Set("a an the this that these those her his their my your our its some".split(" "));
+
+/**
+ * A person's name reduced to the words that tell them apart: "The woman passenger." → "woman
+ * passenger", "the passenger's" → "passenger". "other" and "one" stay: "the other passenger" is not
+ * "the passenger". Pure.
+ */
+export function personKey(name: string | undefined): string {
+  return (name ?? "")
+    .toLowerCase()
+    .replace(/['’]s\b/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(" ")
+    .filter(w => w && !NAME_FILLER.has(w))
+    .join(" ");
+}
+
+/**
+ * The recurring people (`inputParams.recurringPeople`) a picture's someone-else (`otherPerson`)
+ * is, so each is drawn with the one look the video gave them (2026-10-18, job 399: the woman
+ * passenger the story follows was a short-haired blonde in a puffer jacket in scene 2, a young
+ * dark-haired woman in scene 4 and a grey-blonde with older hands in scene 5 — 13 s apart — and the
+ * man beside her changed in scenes 2, 7 and 8, because each picture was drawn from the label "a
+ * woman passenger" alone). Matched by the words that say who they are, each person the label names
+ * on its own ("a flight attendant and a male passenger" is two):
+ *   - the same name ("a woman passenger" is "the woman passenger"), or the name's own noun phrase
+ *     when that is more than a bare "man"/"woman" ("an old man" is "the old man"; "a man" is not
+ *     "the man in the card aisle");
+ *   - the same ROLE noun (passenger, neighbour, sister) with no sex against it — "a male
+ *     passenger" is the passenger the look calls a man, never the one it calls a woman;
+ *   - a person with no role or person word at all — a proper name — when every word of it is in
+ *     the label ("Seneca at his desk").
+ * One person the label names that fits two recurring people equally ("a seated passenger" beside a
+ * man and a woman passenger) is left as it was: guessing would give a stranger someone's look. "Two
+ * passengers" takes the two passengers, never three. Empty when nothing fits. Pure.
+ */
+export function matchRecurringPeople(
+  who: string | undefined,
+  count: number | undefined,
+  people: RecurringPerson[] | undefined
+): RecurringPerson[] {
+  if (!who?.trim() || !people?.length) return [];
+  const facts = people.map(person => {
+    const named = namedPeople(person.name);
+    const first = named?.people[0];
+    const head = first ? personKey(first.phrase) : undefined;
+    return {
+      person,
+      key: personKey(person.name),
+      head: head && (head.includes(" ") || head === personKey(person.name)) ? head : undefined,
+      roles: (named?.people ?? []).filter(p => p.kind === "role").map(p => p.noun),
+      sex: named?.sex ?? sexOfLook(person.look),
+      proper: !named,
+    };
+  });
+  type Fact = (typeof facts)[number];
+  const whoKey = personKey(who);
+  const whoWords = new Set(whoKey.split(" "));
+  const picked: Fact[] = [];
+  const take = (f: Fact) => {
+    if (!picked.includes(f)) picked.push(f);
+  };
+  for (const part of namedPeople(who)?.people ?? []) {
+    const key = personKey(part.phrase);
+    const exact = (f: Fact) => f.key === key || f.key === whoKey || (!!f.head && f.head === key);
+    const fits = facts.filter(
+      f =>
+        exact(f) ||
+        (part.kind === "role" &&
+          f.roles.includes(part.noun) &&
+          !(part.sex && f.sex && part.sex !== f.sex))
+    );
+    if (part.count > 1) {
+      if (fits.length <= part.count) fits.forEach(take);
+      continue;
+    }
+    if (fits.length === 1) {
+      take(fits[0]);
+      continue;
+    }
+    const exacts = fits.filter(exact);
+    const sexed = fits.filter(f => !!part.sex && f.sex === part.sex);
+    if (exacts.length === 1) take(exacts[0]);
+    else if (sexed.length === 1) take(sexed[0]);
+  }
+  for (const f of facts)
+    if (f.proper && f.key && (f.key === whoKey || f.key.split(" ").every(w => whoWords.has(w)))) take(f);
+  return picked.slice(0, Math.max(1, count ?? 1)).map(f => f.person);
+}
+
 /** Whether a picture shows someone other than the host — named by the planner, or by its own words. */
 export function showsSomeoneElse(s: Pick<StoryboardScene, "otherPerson" | "showSubject" | "visualPrompt">): boolean {
   return !!s.otherPerson || !!someoneElse(s.showSubject ?? s.visualPrompt);
@@ -856,7 +950,7 @@ export function facingTheCamera(text: string): string {
  */
 export function markHostBroll(
   scenes: StoryboardScene[],
-  params: Pick<LongformInputParams, "hostLook" | "brollOnly" | "hostName" | "hostTitle">,
+  params: Pick<LongformInputParams, "hostLook" | "brollOnly" | "hostName" | "hostTitle" | "recurringPeople">,
   hostPhotoUrl: string | undefined
 ): number {
   const look = params.hostLook?.trim();
@@ -878,6 +972,7 @@ export function markHostBroll(
       !s.showsBook;
     const text = s.showSubject ?? s.visualPrompt ?? "";
     const words = `${s.showSubject ?? ""} ${s.visualPrompt ?? ""}`;
+    s.otherPersonLooks = undefined;
     // A planner's "someone else" lives and dies with the words it came from (2026-10-18, the
     // audit): "a woman customer" left on a picture of an incense holder (job 361 scene 32), "a
     // woman passenger" on a close-up of a soda can (job 399 scene 4), "a hen" (job 371) — each
@@ -908,6 +1003,10 @@ export function markHostBroll(
       // more people are never drawn from the one host photo (job 370 scene 8: "two people hugging").
       s.otherPerson = other.who;
       s.otherPeople = other.count > 1 ? other.count : undefined;
+      // Someone the story comes back to keeps one look in every picture of them (job 399: the same
+      // passenger was three different women in scenes 2, 4 and 5) — `matchRecurringPeople`.
+      const looks = matchRecurringPeople(other.who, other.count, params.recurringPeople);
+      s.otherPersonLooks = looks.length ? looks : undefined;
       s.humanPresent = true;
       s.brollHostLook = undefined;
       s.brollHostRef = undefined;
