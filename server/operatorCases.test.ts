@@ -92,7 +92,7 @@ import {
   WORN_ON_BODY,
 } from "./hostLook";
 import { tooShortToRead, type ResolvedCue, type Word } from "../graphics/src/cueResolve";
-import { wordsSaidOver } from "../graphics/src/plan/planner";
+import { missingListCues, wordsSaidOver } from "../graphics/src/plan/planner";
 import { plannerForJob } from "./graphics/apply";
 import { makeReadable, type Reading } from "./graphics/readable";
 import { checkScript } from "@shared/scriptCheck";
@@ -2363,7 +2363,9 @@ describe("a general head before its examples is no list item (job 400 at 0:47, '
     const r = await findSpokenLists(`Maybe you have done that arithmetic. ${LINE}`, {
       ask: async () => '{"lists":[{"sentence":1,"kind":"things","items":["some ordinary place","a waiting room","a church pew"]}]}',
     });
-    expect(r.lists).toEqual([{ sentence: 1, items: ["a waiting room", "a church pew"] }]);
+    // The model left out the third place; the sentence shape holds it (job 401), so the list is three.
+    const PLACES = ["a waiting room", "a church pew", "the kitchen table at two in the morning"];
+    expect(r.lists).toEqual([{ sentence: 1, items: PLACES }]);
     const scenes = [
       pic(1, "Maybe you have done that arithmetic.", "an older man at a pharmacy counter"),
       pic(2, "Most people past sixty have — usually in silence, usually in some ordinary place, a waiting room, a church pew,", "an older man alone on a grey padded chair"),
@@ -2376,11 +2378,11 @@ describe("a general head before its examples is no list item (job 400 at 0:47, '
       ["Most people past sixty have — usually in silence, usually in some ordinary place,", false],
       ["a waiting room,", true],
       ["a church pew,", true],
-      ["the kitchen table at two in the morning when the house is too quiet.", false],
+      ["the kitchen table at two in the morning when the house is too quiet.", true],
       ["And the math always presents itself as the problem.", false],
     ]);
     // The shape rules agree when the call fails.
-    expect(spokenListsByShape([LINE])).toEqual([{ sentence: 0, items: ["a waiting room", "a church pew"] }]);
+    expect(spokenListsByShape([LINE])).toEqual([{ sentence: 0, items: PLACES }]);
   });
 
   it("a real first thing stays item 1: job 110's porch, and 'some glue'", () => {
@@ -3817,5 +3819,61 @@ describe("the host comes back after the book cover on the whole number, never in
     const ranges = assignSceneRanges(scenes, late, 185.4, silences, fine);
     expect(ranges[0].endSec).toBeGreaterThanOrEqual(179.423);
     expect(ranges[0].endSec).toBeLessThanOrEqual(180.162);
+  });
+});
+
+describe("the list graphic shows every place the voice names, the last one too (job 401 at 0:49)", () => {
+  // Gideon's practice film: the voice says "…a waiting room, a church pew, the kitchen table at two in
+  // the morning when the house is too quiet." The list window "Some ordinary place" showed only
+  // "1 A waiting room / 2 A church pew" and closed as the table was said; the table played as a picture
+  // outside the list. The last item runs on into the sentence's closing clause with no comma or "and".
+  const SCRIPT =
+    "Maybe you have done that arithmetic. Most people past sixty have — usually in silence, usually in some ordinary place, a waiting room, a church pew, the kitchen table at two in the morning when the house is too quiet. And the math always presents itself as the problem.";
+  const PLACES = ["a waiting room", "a church pew", "the kitchen table at two in the morning"];
+  // What the voice was heard saying (job 401's transcript, 49.4-55.3 s).
+  const HEARD =
+    "A@49.395-49.435 waiting@49.475-49.775 room.@49.835-50.115 A@50.475-50.515 church@50.595-50.895 pew.@50.975-51.315 The@51.775-51.875 kitchen@51.915-52.215 table@52.275-52.636 at@52.696-52.776 2@52.936-53.016 in@53.056-53.116 the@53.136-53.216 morning@53.276-53.636 when@53.796-53.936 the@53.956-54.056 house@54.096-54.376 is@54.456-54.536 too@54.596-54.776 quiet.@54.876-55.276";
+  const heard: Word[] = HEARD.split(" ").map(tok => {
+    const [, text, start, end] = /^(.*)@([\d.]+)-([\d.]+)$/.exec(tok)!;
+    return { text, start: Number(start), end: Number(end) };
+  });
+
+  it("the list found is three places, whether the model left the third out or the call failed", async () => {
+    // The model's answer as job 400 gave it: the head and two places.
+    const r = await findSpokenLists(SCRIPT, {
+      ask: async () => '{"lists":[{"sentence":1,"kind":"things","items":["some ordinary place","a waiting room","a church pew"]}]}',
+    });
+    expect(r.lists).toEqual([{ sentence: 1, items: PLACES }]);
+    const failed = await findSpokenLists(SCRIPT, { ask: async () => "not json" });
+    expect(failed.lists).toEqual([{ sentence: 1, items: PLACES }]);
+  });
+
+  it("the table is the list's third picture and its graphic's third row", async () => {
+    const { lists: found } = await findSpokenLists(SCRIPT, { ask: async () => '{"lists":[]}' });
+    const scenes = [
+      pic(8, "Maybe you have done that arithmetic. Most people past sixty have — usually in silence, usually in some ordinary place,", "an older man sitting alone on a bench"),
+      pic(9, "a waiting room,", "empty waiting room with cushioned chairs under fluorescent light", { listCut: true }),
+      pic(10, "a church pew,", "empty polished wooden church pew with light through tall windows", { listCut: true }),
+      pic(11, "the kitchen table at two in the morning when the house is too quiet.", "round wooden kitchen table with two chairs and a dim lamp at night"),
+      host(12, "And the math always presents itself as the problem.", { splitVisual: "a desk in a study" }),
+    ];
+    const cut = applySpokenLists(scenes, found);
+    expect(cut.scenes.map(s => [s.scriptText, !!s.listCut])).toEqual([
+      ["Maybe you have done that arithmetic. Most people past sixty have — usually in silence, usually in some ordinary place,", false],
+      ["a waiting room,", true],
+      ["a church pew,", true],
+      // Before: no list mark, and the list window closed as these words began.
+      ["the kitchen table at two in the morning when the house is too quiet.", true],
+      ["And the math always presents itself as the problem.", false],
+    ]);
+    const film = {
+      scenes: [
+        { index: 9, narrationStartSec: 49.25, narrationEndSec: 50.35, scriptText: "a waiting room,", hostPresent: false, cta: false },
+        { index: 10, narrationStartSec: 50.35, narrationEndSec: 51.69, scriptText: "a church pew,", hostPresent: false, cta: false },
+        { index: 11, narrationStartSec: 51.69, narrationEndSec: 55.8, scriptText: "the kitchen table at two in the morning when the house is too quiet.", hostPresent: false, cta: false },
+      ],
+    };
+    const [graphic] = missingListCues([], heard, film as never, found);
+    expect((graphic.props.items as { say: string }[]).map(i => i.say)).toEqual(PLACES);
   });
 });
