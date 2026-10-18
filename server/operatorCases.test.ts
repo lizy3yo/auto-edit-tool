@@ -5786,3 +5786,50 @@ describe("the line's own subject is the picture's (round 13: jobs 410 and 408)",
     expect(memorySourcesFor(retry, retry[1])).toEqual([]);
   });
 });
+
+describe("Werner's job 408 scenes 23-24: a tool made for one job is drawn by its parts (round 13)", () => {
+  // "A toilet auger, the short kind made for toilets, can sometimes hook it out" was a bent rod on a
+  // screwdriver handle under a label naming the tool: the props list wrote "a slim metal rod with a
+  // curved tip and plastic handle", and the named-things step left the tool out as an everyday thing.
+  const AUGER =
+    "a closet auger about 1 m long, a steel tube bent into a J at its lower end, a black rubber sleeve over the bend, " +
+    "a coiled steel cable running through the tube to a small spring tip, a crank handle with a wooden grip at the top of the tube";
+
+  it("the props list and the named-things step both write a specialised tool as it is really built", async () => {
+    const { SPECIALISED_TOOL_RULE, TOOL_SHAPE_NOT_VERB } = await import("./shotList");
+    const { NAMED_LOOKS_SYSTEM } = await import("./namedLooks");
+    expect(CONTINUITY_SYSTEM).toContain(SPECIALISED_TOOL_RULE);
+    expect(SPECIALISED_TOOL_RULE).toMatch(/the 2-4 PARTS that make it that tool/);
+    expect(NAMED_LOOKS_SYSTEM).toMatch(/A SPECIALISED TOOL OR PIECE OF EQUIPMENT a picture is about/);
+    expect(NAMED_LOOKS_SYSTEM.replace(/\s+/g, " ")).toContain(TOOL_SHAPE_NOT_VERB);
+  });
+
+  it("scene 23 carries the auger's parts and keeps the hands; scene 24, with the tool only beside the toilet, is untouched", async () => {
+    const { parseNamedLooks } = await import("./namedLooks");
+    const { keyThingLookClause } = await import("./pictureMemory");
+    const scenes = [
+      pic(23, "A toilet auger, the short kind made for toilets, can sometimes hook it out.", "toilet auger hooked tip inserted into toilet bowl trapway opening", {
+        keyThing: "toilet auger",
+        humanPresent: true,
+        keyThingLook: "a slim metal rod with a curved tip and plastic handle, short household size",
+      }),
+      pic(24, "If it will not come, the toilet has to come up off the floor, and that is a fair place to stop and call someone.", "the white porcelain toilet standing on the pale beige tile floor with a toilet auger resting idle beside its base", {
+        keyThing: "toilet",
+        otherKeyThings: ["toilet auger"],
+      }),
+    ];
+    const before = JSON.stringify(scenes[1]);
+    const answer = parseNamedLooks(
+      JSON.stringify({
+        kinds: [{ name: "toilet auger", look: AUGER }],
+        pictures: [{ id: 0, kind: "toilet auger", show: "hands turning the crank handle of a closet auger, its rubber-sleeved bend resting in the toilet bowl's drain opening" }],
+      })
+    )!;
+    expect(applyNamedLooks(scenes, [0, 1], answer, [{ name: "toilet auger", look: "a slim metal rod with a curved tip and plastic handle" }])).toBe(1);
+    expect(scenes[0].namedLook).toBe(`toilet auger: ${AUGER}`);
+    expect(scenes[0].humanPresent).toBe(true);
+    expect(namedLookClause(scenes[0])).toContain("a coiled steel cable running through the tube");
+    expect(keyThingLookClause(scenes[0])).toBe("");
+    expect(JSON.stringify(scenes[1])).toBe(before);
+  });
+});

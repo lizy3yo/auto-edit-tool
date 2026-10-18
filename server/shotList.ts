@@ -1961,6 +1961,37 @@ export const EXACT_KIND_RULE =
   "`deer: a white-tailed deer, reddish-brown coat, a broad tail brown on top and bright white " +
   "underneath, a white patch on the throat`. ";
 
+/**
+ * What a line says a tool DOES is never its shape — one wording for the props list and the
+ * named-things step (`SPECIALISED_TOOL_RULE`, `NAMED_LOOKS_SYSTEM`). Job 408 scene 23: "A toilet
+ * auger … can sometimes hook it out" was planned as a "hooked tip" and drawn as a hook on a handle.
+ */
+export const TOOL_SHAPE_NOT_VERB =
+  "a line that says a tool hooks, grabs, clears or lifts something says what it does, never what " +
+  "shape it is";
+
+/**
+ * A TOOL MADE FOR ONE JOB IS WRITTEN BY ITS PARTS (2026-10-18, job 408 scenes 23-24). "A toilet
+ * auger, the short kind made for toilets, can sometimes hook it out" was drawn as a plain bent steel
+ * rod with a screwdriver handle — a hex key, a hook — under an on-screen label naming the tool, and
+ * scene 24 copied it lying on the tile. The props list had written "a slim metal rod with a curved
+ * tip and plastic handle, short household size": a shape taken from what the line says it does, not
+ * from how the tool is built (a crank, a bent tube, a coiled cable, a rubber sleeve), and the look is
+ * all a first picture of a key thing is drawn by. Job 413's "a guided knife-sharpening unit, metal
+ * clamp guide and angled slots" mixed two kinds of sharpener into one look, and a picture drawn by it
+ * pushed a second knife down through the clamped one. So a specialised tool's look names its ONE
+ * kind and the parts that make it that tool, as it is really built. The example is neutral.
+ */
+export const SPECIALISED_TOOL_RULE =
+  "A TOOL OR PIECE OF EQUIPMENT MADE FOR ONE JOB — a hand tool, gauge, jig, gadget or machine a " +
+  "picture generator would draw from its name alone as a plain rod, handle or box: its look STARTS " +
+  "with its one exact kind (when the tool comes in several kinds, the one the script means, else " +
+  "the most common one for that job — never two kinds mixed into one look), then the 2-4 PARTS " +
+  "that make it that tool, each with its shape, material and where it joins the rest, as the tool " +
+  `is really built — ${TOOL_SHAPE_NOT_VERB}. Example: \`pipe wrench: a heavy steel pipe wrench ` +
+  "about 35 cm long, a straight red-painted handle, a fixed lower jaw and an adjustable upper jaw, " +
+  "both with angled teeth, a knurled round nut between them that sets the opening`. ";
+
 // A PERSON name says WHAT the person is (job 399's script calls its two passengers only "one of
 // them", "the other", "she" and "he"): the pictures and the line check label them "a woman
 // passenger" / "a male passenger", and `matchRecurringPeople` finds a look by that role and sex —
@@ -1985,6 +2016,7 @@ export const CONTINUITY_SYSTEM =
   "whole thing it is inside, with how it looks from the OUTSIDE, because no picture can show the " +
   "inside. " +
   EXACT_KIND_RULE +
+  SPECIALISED_TOOL_RULE +
   "6-14 lines. Plain words, no brands, no people in these lines. NOTHING WITH MARKS ON IT: " +
   "never list a chalk tally, a chalkboard, a sign, a price tag, a label, a calendar, a notebook, a " +
   "ledger or anything written or counted on — the pictures carry no writing, so such a prop would " +

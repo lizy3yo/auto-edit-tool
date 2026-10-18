@@ -15,13 +15,21 @@
  * rides into the image prompt (`namedLookClause`) and the still checker (`scanStillDefects`'
  * exact-look question, on a stronger model); a part is drawn as a close-up of that part from its
  * thing's memory (`PART_VIEW`). Nothing here names a channel or a craft. Any failure changes nothing.
+ *
+ * A SPECIALISED TOOL IS A NAMED KIND TOO (2026-10-18, job 408 scenes 23-24): "A toilet auger, the
+ * short kind made for toilets, can sometimes hook it out" was drawn as a plain bent rod on a
+ * screwdriver handle, under an on-screen label naming the tool. The props list wrote a generic look
+ * ("a slim metal rod with a curved tip and plastic handle"), the shot list took a "hooked tip" from
+ * the verb, and this step wrote looks only for varieties and left out "everyday things" — a tool made
+ * for one job fell between the two, so no exact look was written and the checker held the picture to
+ * its own wrong words. Such a tool now gets its look here as it is really built, by its parts.
  */
 import type { KeyThing, StoryboardScene } from "@shared/types";
 import { invokeClaude } from "./claude";
 import { NOTHING_CUT_OPEN_RULE, withoutCutaway } from "./cutOpen";
 import { safeParseJSON } from "./jsonRepair";
 import { showsPerson } from "./hostLook";
-import { blurredPrint, matchKeyThing, planningEffort, settleVideoKind } from "./shotList";
+import { blurredPrint, matchKeyThing, planningEffort, settleVideoKind, TOOL_SHAPE_NOT_VERB } from "./shotList";
 
 const NAMED_LOOK_MODEL = () => process.env.NAMED_LOOK_MODEL || "claude-opus-5-5";
 
@@ -100,10 +108,20 @@ not know the names of specific kinds of things. You read the pictures, one per l
 1. NAMED KINDS. Find every specific NAMED KIND a picture is about — a named variety whose look a
 picture maker could not draw from its name alone, or would draw wrong: a quilt block or pattern, a
 stitch, a knot, a weave, a joint, a braid or haircut, a breed, a plant variety, a dish, a style of
-furniture or building. Not everyday things (a saw, a bowl, a chair). For each, write its LOOK
-exactly enough to draw it without knowing the name: the shapes, how many of each, how they are
-arranged, which parts are light and which dark, its size. Correct any planned description that gets
-it wrong. Leave out a kind when you are not sure how it looks — never invent.
+furniture or building. Not everyday things any picture maker knows (a saw, a bowl, a chair). For
+each, write its LOOK exactly enough to draw it without knowing the name: the shapes, how many of
+each, how they are arranged, which parts are light and which dark, its size. Correct any planned
+description that gets it wrong. Leave out a kind when you are not sure how it looks — never invent.
+
+A SPECIALISED TOOL OR PIECE OF EQUIPMENT a picture is about — one made for one job, which a picture
+maker given only its name draws as a plain rod, handle or box (a pipe wrench, a seam ripper, a grease
+gun), not an everyday one it knows (a hammer, a screwdriver, a broom) — is a named kind too. Its LOOK
+is the tool as it is really built: its one exact kind (never two kinds mixed into one), then each
+PART that makes it that tool — its shape, material and size, and where it joins the rest. Correct a
+planned description or a key thing's look that gives it another build: ${TOOL_SHAPE_NOT_VERB}. A
+picture of it in use keeps the hands and shows its parts working the way the tool really works. Give
+it only to a picture about the tool — in use, held, or shown on its own — never to one where it only
+lies beside what the picture is about.
 
 A REAL, RECOGNISABLE thing the LINE names — an app, a website, a store, a market or fair, a product
 line — is a named kind too, even when the planned picture calls it something generic ("a buy-and-sell
@@ -288,7 +306,7 @@ export async function describeNamedLooks(
  */
 export function namedLookClause(scene: StoryboardScene): string {
   return scene.namedLook
-    ? ` EXACT LOOK — ${withoutCutaway(scene.namedLook)}. Draw it exactly like this, whatever any other words say about its pattern or shape.${SUBJECT_OVER_LOOK}`
+    ? ` EXACT LOOK — ${withoutCutaway(scene.namedLook)}. Draw it exactly like this, whatever any other words say about its pattern, shape or parts.${SUBJECT_OVER_LOOK}`
     : "";
 }
 
@@ -301,8 +319,8 @@ export function namedLookClause(scene: StoryboardScene): string {
  * look settles how the kind looks; what this picture shows OF it is the picture's own.
  */
 export const SUBJECT_OVER_LOOK =
-  " That look settles how this kind of thing looks in general — its pattern, shapes, colours and " +
-  "style. WHAT this picture shows of it is as the picture's own words say: when they name a " +
+  " That look settles how this kind of thing looks in general — its pattern, shapes, parts, " +
+  "colours and style. WHAT this picture shows of it is as the picture's own words say: when they name a " +
   "particular part, page or screen of it, a stage of the work, or something done or added to it, " +
   "show exactly that, in this look's colours and style.";
 
