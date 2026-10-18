@@ -488,15 +488,26 @@ const HEAD_ENDS = new Set([
   "so", "i", "you", "he", "she", "we", "they", "it", "here", "there",
 ]);
 /**
+ * A counted length of something ("a yard of fabric", "two feet of rope", "half a yard of denim"),
+ * with what is measured — never "the back yard of the house", which nothing counts.
+ */
+const MEASURED_LENGTH =
+  /^(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|half an?|an? few|an? couple of|several|\d[\d./]*)\s+(?:yards?|foot|feet|inch(?:es)?|met(?:er|re)s?)\s+of\s+(.+)$/;
+/**
  * The word an item is about: the last word before its first preposition or clause ("old shop HABITS
  * of mine"). A last word is the head even when it can be a preposition ("the past"), and a closing
- * "too / as well / either" is not part of what is named ("some grief too").
+ * "too / as well / either" is not part of what is named ("some grief too"). A counted length is
+ * judged on what it measures: in "a yard of fabric, a spool of thread, and a pack of needles" — a
+ * sewing kit on a table — the "yard" is not the place `NOT_LAID_OUT` holds.
  */
 function headWord(item: string): string {
-  const words = bareItem(item)
+  const text = bareItem(item)
     .toLowerCase()
     .replace(/’/g, "'")
-    .replace(/\s+(?:too|as well|either)$/, "")
+    .replace(/\s+(?:too|as well|either)$/, "");
+  const measured = MEASURED_LENGTH.exec(text);
+  if (measured) return headWord(measured[1]);
+  const words = text
     .split(/\s+/)
     .map(w => w.replace(/[^a-z'-]/g, ""))
     .filter(Boolean);
@@ -573,7 +584,8 @@ export function notInOnePhoto(item: string): string | null {
  * Whether a list's items can be drawn as ONE group picture (`setPicture`) that each item's own
  * picture is then drawn from: a list of THINGS whose every item one photograph can hold
  * (`notInOnePhoto`). A list of steps never is — steps are things someone does, one after another,
- * never laid side by side. Pure.
+ * never laid side by side (job 355 scene 9 asked for "find every leak in that bag, plug them one at a
+ * time and fill the gaps with cheaper food together, laid out side by side"). Pure.
  */
 export function itemsInOnePhoto(names: string[], kind?: SpokenList["kind"]): boolean {
   return kind !== "steps" && names.length > 0 && names.every(n => !notInOnePhoto(n));

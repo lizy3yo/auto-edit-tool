@@ -390,6 +390,8 @@ describe("the bridge's group picture only when one photograph can hold the list 
       "old shop habits", "craft fairs",
       // a last word that can be a preposition is still the head; a closing "too" is not
       "the past", "some grief too",
+      // a yard nothing counts is still the place
+      "the back yard of the house",
     ];
     for (const item of refused) expect(notInOnePhoto(item), item).not.toBeNull();
     expect(notInOnePhoto("what the remaining years are actually for")).toBe("a question or a clause");
@@ -411,6 +413,8 @@ describe("the bridge's group picture only when one photograph can hold the list 
       // any channel
       "flour", "sugar", "and butter", "a tape measure", "a pencil", "and all the scraps you can find",
       "money", "a church pew", "a kitchen table", "a garden hose", "a harness", "a hood", "a remote control",
+      // a counted length is what it measures, never the place "yard" names
+      "a yard of fabric", "two yards of denim", "half a yard of muslin", "2 yards of fleece", "a few feet of rope",
     ];
     for (const item of kept) expect(notInOnePhoto(item), item).toBeNull();
   });
@@ -418,6 +422,9 @@ describe("the bridge's group picture only when one photograph can hold the list 
   it("a list of steps is never one group picture; a list of things is when every item passes", () => {
     expect(itemsInOnePhoto(["a saw", "a drill", "a stack of sandpaper"])).toBe(true);
     expect(itemsInOnePhoto(["a saw", "a drill", "a stack of sandpaper"], "steps")).toBe(false);
+    // Job 355 scene 9 got a real one: "find every leak in that bag, plug them one at a time and fill
+    // the gaps with cheaper food together, laid out side by side".
+    expect(itemsInOnePhoto(["find every leak in that bag", "plug them one at a time", "then fill the gaps with cheaper food"], "steps")).toBe(false);
     expect(itemsInOnePhoto(["money", "grief", "difficult people", "what the remaining years are actually for"])).toBe(false);
     expect(itemsInOnePhoto([])).toBe(false);
   });
