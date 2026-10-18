@@ -134,7 +134,9 @@ ${CATALOGUE}`;
 }
 
 const mmss = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0")}`;
-const kindOf = (s: LayoutScene) => (s.cta ? "CTA" : s.split ? "SPLIT (host left, picture right)" : s.hostPresent ? "HOST" : "B-ROLL");
+/** A split the operator turned round (host on the right, `hostPanel`) is named as it is drawn. */
+const splitKind = (s: LayoutScene) => (s.hostPanel && s.hostPanel.x > 0 ? "SPLIT (host right, picture left)" : "SPLIT (host left, picture right)");
+const kindOf = (s: LayoutScene) => (s.cta ? "CTA" : s.split ? splitKind(s) : s.hostPresent ? "HOST" : "B-ROLL");
 
 /**
  * What is said over each scene (one line per `film.scenes` entry), as the FILM'S OWN SOUND has it:

@@ -2080,3 +2080,37 @@ describe("an arrow shows nothing before it draws (round 10 graphics, 2026-10-18)
     expect(drawnTo(fadeIn(drawsAt + 10, drawsAt, 10), shaft)).toBe(shaft);
   });
 });
+
+describe("a caption on a split stays beside the host (round 10 graphics, 2026-10-18)", () => {
+  // 400 host-chair-closer (138.20-143.13 s, scene 27: host left, a blank scroll right): the caption
+  // was drawn for the full frame and its dark box ran across the seam, half over the scroll. The
+  // lab's composite gave it the host's panel; the app's finishing step never did.
+  const R2 = "https://pub-x.r2.dev/longform";
+  const split = (job: number, index: number, start: number, end: number, joined = true) =>
+    ({
+      index,
+      narrationStartSec: start,
+      narrationEndSec: end,
+      hostPresent: true,
+      sceneStatus: "completed",
+      splitVisual: "the picture beside the host",
+      ...(joined ? { splitRightUrl: `${R2}/${job}/still-${index}-a.mp4` } : {}),
+      clipUrls: [`${R2}/${job}/${joined ? "split" : "clip"}-${index}-0.mp4`],
+      hostClipUrls: [`${R2}/${job}/clip-${index}-0.mp4`],
+    }) as unknown as StoryboardScene;
+
+  it("400 host-chair-closer over split scene 27 is drawn inside the host's 840 px; 397 impulse-buys over split scene 34 too", async () => {
+    const { filmLayoutOf } = await import("./graphics/apply");
+    const { hostPanelFor } = await import("../graphics/src/plan/rules");
+    const { templateById } = await import("../graphics/src/registry");
+    expect(templateById("HostCaption").panel).toBe(true);
+    expect(hostPanelFor({ start: 138.2, end: 143.133 }, filmLayoutOf([split(400, 27, 138.19, 144.12)]))).toEqual({ x: 0, w: 840 });
+    expect(hostPanelFor({ start: 173.433, end: 176.533 }, filmLayoutOf([split(397, 34, 173.43, 179.89)]))).toEqual({ x: 0, w: 840 });
+  });
+
+  it("400 host-sixty-four over scene 3, a split whose picture never came (the host take plays full frame), keeps the full frame", async () => {
+    const { filmLayoutOf } = await import("./graphics/apply");
+    const { hostPanelFor } = await import("../graphics/src/plan/rules");
+    expect(hostPanelFor({ start: 15.267, end: 17.333 }, filmLayoutOf([split(400, 3, 12.88, 17.32, false)]))).toBeUndefined();
+  });
+});

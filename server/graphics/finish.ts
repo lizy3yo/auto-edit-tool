@@ -30,7 +30,7 @@ import { FPS, type Theme } from "../../graphics/src/theme";
 import { themeFromPixels } from "../../graphics/src/palette";
 import { WINDOW } from "../../graphics/src/more";
 import { NOTO_PNG, planGraphics, type PlanMessage, type PlanRound } from "../../graphics/src/plan/planner";
-import { checkRules, type FilmLayout } from "../../graphics/src/plan/rules";
+import { checkRules, hostPanelFor, type FilmLayout } from "../../graphics/src/plan/rules";
 import { detectCuts, judgeFilm, type QaResult, type Readability } from "../../graphics/src/plan/qa";
 import { getMediaDuration } from "../mediaProbe";
 import { ffmpeg, frameDiffs, levelsOf, narrationOf } from "./media";
@@ -318,6 +318,11 @@ export async function addGraphics(input: AddGraphicsInput): Promise<GraphicsReco
     try {
       const def = templateById(c.template);
       if (theme) c.props.theme = theme;
+      // On a split the caption stays in the host's panel (job 400 at 2:18 ran across the seam onto
+      // the picture). Set BEFORE the first drawing, so every readability measure — the measuring
+      // copy and each fix — reads the words where they ship, and the render cache keys the panel.
+      const panel = def.panel ? hostPanelFor(c, input.film) : undefined;
+      if (panel) c.props.panel = panel;
       await inlineIcons(c.props);
       if (c.template === "ArrowCaption" && !c.props.target) {
         const s = await subjectOf(input.filmPath, (c.start + c.end) / 2);

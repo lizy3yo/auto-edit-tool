@@ -11,7 +11,7 @@ import { CUT_SNAP_SEC, MAX_LINGER_SEC, resolveCues, type CueSpec, type Word } fr
 import { TEMPLATES, templateById } from "../../graphics/src/registry.ts";
 import { FPS } from "../../graphics/src/theme.ts";
 import { loadJob } from "./job.mts";
-import { checkRules } from "./rules.mts";
+import { checkRules, hostPanelFor } from "./rules.mts";
 import { GRAPHICS_SRC, ffmpegPath, outDir, renderGraphic, run } from "./lib.mts";
 import { appearFrame } from "../../graphics/src/timing.ts";
 import { detectCuts, flashes, frameDiffs, preCutPumps } from "./qa-lib.mts";
@@ -31,9 +31,6 @@ const dir = outDir("jobs", String(job.id), tag);
 const gfxDir = outDir("jobs", String(job.id), "gfx");
 const ff = ffmpegPath();
 
-/** Host panel of a split scene in the film (measured off job 376: the seam is at 840 px). */
-const SPLIT_HOST_PANEL = { x: 0, w: 840 };
-
 // 1. The film's REAL picture cuts, measured off the rendered file (the plan's scene ranges and the
 // edit disagree by a frame or two, and a frame is all a flash needs).
 const film = path.join(jobDir, "film.mp4");
@@ -47,11 +44,11 @@ const words = JSON.parse(readFileSync(path.join(jobDir, "words.json"), "utf8")) 
 const structural = new Set(TEMPLATES.filter(t => t.structural).map(t => t.id));
 const cards = new Set(TEMPLATES.filter(t => t.kind === "card").map(t => t.id));
 const cues = resolveCues(sheet.cues, words, { cuts: filmCutFrames.map(f => f / FPS), fps: FPS, structural, cards, fullFrame: new Set(TEMPLATES.filter(t => t.kind === "card" || t.underlay === "window").map(t => t.id)) });
-// A host caption on a split scene stays in the host panel.
+// A caption on a split scene stays in the host panel — the app's finishing step decides it the
+// same way (graphics/src/plan/rules.ts `hostPanelFor`; the lab's jobs carry the default layout).
 for (const c of cues) {
-  if (c.template !== "HostCaption") continue;
-  const scene = job.scenes.find(s => s.hostPresent && c.start >= s.narrationStartSec - 0.2 && c.start < s.narrationEndSec);
-  if (scene?.split) c.props.panel = SPLIT_HOST_PANEL;
+  const panel = templateById(c.template).panel ? hostPanelFor(c, job) : undefined;
+  if (panel) c.props.panel = panel;
 }
 // The video's colours, from its own host photo (scripts/theme.mts). Carried in every cue's props,
 // so it is part of each graphic's cache key: a new photo re-renders, the same one is reused.
