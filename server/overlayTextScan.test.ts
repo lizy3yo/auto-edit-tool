@@ -503,3 +503,138 @@ describe("what the line rules out — the forbidden verdict (R5, the audit, 2026
     expect(parseStillDefectVerdict('{"forbidden":"yes"}').forbidden).toBeUndefined();
   });
 });
+
+/**
+ * LIGHT THE WORDS NAME IS NOT STAGED (2026-10-18, the review of jobs 401-407). The picture check was
+ * never told what its line or description asked for, so night and lamplight the words named were
+ * called staged on both draws and shipped with the warning.
+ */
+describe("namedLight / namedLightQuestion", () => {
+  it("reads the light the line and the description name (jobs 401 and 405)", async () => {
+    const { namedLight } = await import("./overlayTextScan");
+    // Job 401 scene 11: the line's hour and the description's lamp at night.
+    expect(
+      namedLight(
+        "the kitchen table at two in the morning when the house is too quiet.",
+        "round wooden kitchen table with two chairs and a dim lamp at night"
+      )
+    ).toEqual(["two in the morning", "dim", "lamp", "night"]);
+    // Job 401 scene 22: only the description names it.
+    expect(
+      namedLight(
+        "Two thousand years ago, a man named Lucius Annaeus Seneca wrote a short, furious, loving essay to a man named Paulinus,",
+        "a Roman man in a toga writing on a scroll at a wooden desk by lamplight"
+      )
+    ).toEqual(["lamplight"]);
+    // Job 405: the night bedroom, the lamp at evening, dawn and dusk.
+    expect(namedLight("and decode it one layer at a time,", "a small tabby cat standing on the bed at night, ears forward, looking toward the pillows")).toEqual(["night"]);
+    expect(
+      namedLight(
+        "And by the end, you’ll have the one evening change that quietly takes the appointment off the books.",
+        "a quiet bedroom at evening with the lamp glowing softly on the nightstand"
+      )
+    ).toEqual(["evening", "lamp"]);
+    expect(namedLight("creatures of the deep night,", "a small tabby cat sitting alert on a windowsill, dim dawn light glowing through the bedroom window")).toEqual(["night", "dim", "dawn"]);
+    expect(namedLight("she inherited her whiskers.", "an open grassy wild landscape at dusk, low golden light over scattered brush")).toEqual(["dusk"]);
+    expect(namedLight("Three in the morning. The house is dark, the street outside has gone quiet,")).toEqual(["Three in the morning", "house is dark"]);
+    expect(namedLight("at 3 a.m. or 11pm", "her face lit by the glow of a phone, a candle, a night light")).toEqual(["3 a.m.", "11pm", "glow of a phone", "candle", "night light"]);
+    expect(namedLight("the one kind of fire that likes to start while the house is asleep")).toEqual(["fire"]);
+  });
+
+  it("names no light for words that only name a thing, a colour or the host talking", async () => {
+    const { namedLight } = await import("./overlayTextScan");
+    // Job 401 scenes 24 and 30, job 402 scene 11: nothing in the words lights the picture, so a
+    // golden glow or a glossy finish there is staged exactly as before.
+    expect(namedLight("Seneca was no monk on a hillside.", "a well dressed man standing near a grand desk in a study")).toEqual([]);
+    expect(namedLight("the senator complains,", "a senator in robes standing in a stone hall")).toEqual([]);
+    expect(namedLight("the flight,", "an airplane climbing through clouds in flight")).toEqual([]);
+    // Job 401 scene 12's panel: warm light nobody named is still judged.
+    expect(namedLight("Fewer years ahead than behind,", "quiet study room with desk and window in warm late-spring light")).toEqual([]);
+    // "tonight" is the host talking (job 405 scene 13's line), not a time of day.
+    expect(namedLight("So tonight we’re treating that scene like footage.")).toEqual([]);
+    // A word used as a name.
+    expect(namedLight("a smoke alarm and a fire extinguisher on the kitchen wall", "fire-resistant gloves beside a stack of firewood")).toEqual([]);
+    expect(namedLight("let the glue dry overnight, evening out the stain", "a nightstand, a dark walnut board, a clamp, a lampshade")).toEqual([]);
+    expect(namedLight("it's dark walnut", "a bowl in dark green paint, 12 amps, 5 amazing tips")).toEqual([]);
+    expect(namedLight("fire up the planer", "a misfire, rapid-fire cuts")).toEqual([]);
+    expect(namedLight(undefined, undefined)).toEqual([]);
+  });
+
+  it("'in the dark' names the light only where the phrase ends; the trade around a fire names none", async () => {
+    const { namedLight } = await import("./overlayTextScan");
+    // The practice scripts: a kit for a power cut, where "in the dark" is the light…
+    expect(namedLight("The first thing you need in the dark should never be at the bottom of the bag.")).toEqual(["in the dark"]);
+    expect(namedLight("clicks on, and runs itself dead in the dark of your closet for a week.")).toEqual(["in the dark"]);
+    expect(namedLight("Hands that glow a little in the dark, if you can find one like that.")).toEqual(["in the dark"]);
+    expect(namedLight("a person sitting in the dark scrolling a phone")).toEqual(["in the dark"]);
+    // …job 405 scene 7, where the dark room is named by itself…
+    expect(
+      namedLight(undefined, "a small tabby cat standing on a sleeping person's chest in the dark bedroom, head lowered close to their face")
+    ).toEqual(["dark bedroom"]);
+    // …and a style line, where "dark" describes the necklace, not the room.
+    expect(
+      namedLight("Take a photograph of yourself in the dark necklace, then take the same photograph with nothing on your neck at all, same light, same top, one minute apart.")
+    ).toEqual([]);
+    expect(namedLight("dressed in dark colors", "the app in dark mode, a man in dark clothing")).toEqual([]);
+    expect(namedLight("customers kept in the dark about the fees")).toEqual([]);
+    // A smoke-alarm script's "fire service" and "fire protection" are the trade, not a flame.
+    expect(namedLight("What there is, is a position the fire service has stated out loud for years.")).toEqual([]);
+    expect(namedLight("A closed hollow interior door is a serious piece of fire protection.")).toEqual([]);
+    expect(namedLight("a fire sale on old stock, a fire hose, fire off an email")).toEqual([]);
+    // A colour, a contract's end and an idiom.
+    expect(namedLight("a mug in midnight blue", "a wall in sunset orange paint, a sunset clause, a dim view of it")).toEqual([]);
+    // The light itself still counts (a charring script's fire, job 400 scene 18's sunset).
+    expect(
+      namedLight("the fire is doing most of the selling", "an older couple walking slowly along a quiet path at sunset")
+    ).toEqual(["fire", "sunset"]);
+  });
+
+  it("tells the check the named light is asked for, and keeps judging the finish and an unnamed glow", async () => {
+    const { namedLightQuestion, STAGED_RULE } = await import("./overlayTextScan");
+    const q = namedLightQuestion(["two in the morning", "lamp"]);
+    expect(q.startsWith("\n\nQUESTION 7 NOTE — staged:")).toBe(true);
+    expect(q).toContain('("two in the morning", "lamp")');
+    expect(q).toMatch(/Light that comes from that is what was asked for/);
+    expect(q).toMatch(/NEVER staged on its own/);
+    expect(q).toMatch(/answer true\s+for a glossy, polished advertising finish/);
+    expect(q).toMatch(/a golden glow or dramatic light that does not\s+come from what those words name/);
+    // Nothing named, nothing asked; the rule itself is unchanged.
+    expect(namedLightQuestion([])).toBe("");
+    expect(STAGED_RULE).toMatch(/Say true for: a glowing\s+lamp, candle or golden glow/);
+    // The audit asks it under its own heading.
+    expect(namedLightQuestion(["night"], "staged, for this frame")).toMatch(/^\n\nstaged, for this frame: /);
+  });
+
+  it("asks it after the cached rulebook, only when the line or description names light, and the verdict parses as before", async () => {
+    const { STAGED_QUESTION } = await import("./overlayTextScan");
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue({ text: '{"overlay":false,"broken":false,"writing":false,"staged":false}' } as any);
+    await scanStillDefects(
+      await imageOf(1280, 720),
+      "round wooden kitchen table with two chairs and a dim lamp at night",
+      "the kitchen table at two in the morning when the house is too quiet."
+    );
+    const call = mockInvoke.mock.calls[0][0];
+    expect(call.systemSuffix).toMatch(/QUESTION 7 NOTE — staged: .*\("two in the morning", "dim", "lamp", "night"\)/);
+    expect(call.systemPrompt).toContain(STAGED_QUESTION);
+    expect(call.systemPrompt).not.toMatch(/QUESTION 7 NOTE/);
+    // The note sits before the JSON shape, which still lists staged.
+    expect(call.systemSuffix!.indexOf("QUESTION 7 NOTE")).toBeLessThan(call.systemSuffix!.indexOf("Return ONLY this JSON"));
+    expect(call.systemSuffix).toContain('"staged":true|false');
+    // No named light (job 401 scene 24): no note, the rule alone judges it.
+    mockInvoke.mockClear();
+    mockInvoke.mockResolvedValue({ text: '{"overlay":false,"broken":false,"writing":false,"staged":true,"what":"glossy period-drama finish"}' } as any);
+    const v = await scanStillDefects(
+      await imageOf(1280, 720),
+      "a well dressed man standing near a grand desk in a study",
+      "Seneca was no monk on a hillside."
+    );
+    expect(mockInvoke.mock.calls[0][0].systemSuffix).not.toMatch(/QUESTION 7 NOTE/);
+    expect(v.staged).toBe(true);
+    expect(v.what).toBe("glossy period-drama finish");
+    // A picture with neither line nor description is asked nothing extra.
+    mockInvoke.mockClear();
+    await scanStillDefects(await imageOf(1280, 720));
+    expect(mockInvoke.mock.calls[0][0].systemSuffix).not.toMatch(/QUESTION 7 NOTE/);
+  });
+});

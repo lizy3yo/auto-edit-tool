@@ -47,6 +47,7 @@ import {
   spokenListItems,
   parseKeyThings,
   parseRecurringPeople,
+  parseViewerPerson,
   withoutPersonLines,
   settleVideoKind,
   videoKind,
@@ -76,6 +77,7 @@ import { checkFlags, recordPictureCheck } from "./pictureCheckLog";
 import {
   COPIES_MEMORY,
   DIFFERENT_THING,
+  FACE_SHOWN,
   NEAR_COPY,
   NOT_THE_HOST,
   pictureFlawWarning,
@@ -100,8 +102,43 @@ import {
   withScreenTurn,
 } from "./pictureVariety";
 
-/** Redraws a host picture gets when it shows someone else, before it is drawn with nobody in it. */
+/**
+ * Redraws a host picture gets when it shows someone else — or the face it must never show — before
+ * it is drawn with nobody in it. One budget for both: each miss is another paid image.
+ */
 export const HOST_IDENTITY_REDRAWS = 2;
+/**
+ * What the still loop does with a host picture after `scanSameHost` (2026-10-18, the review of jobs
+ * 401-407): a picture of the host is kept only when it is the host AND, unless it is a step on their
+ * own face (`hostFaceShown`), the face is not shown. Job 401 scene 20 (the host reading at a desk,
+ * face on), job 406 scene 14 (smiling into the lens, phone at the ear) and job 407 scene 27 (a
+ * full-body axe swing, the face in three-quarter view) all shipped as "the same person". A miss is
+ * drawn again — a drawn face from behind or the side (`turnAway`, `turnHostAway`) unless its framing
+ * is settled otherwise (`mayTurnHostAway`: a chin line, a piece worn at the neck) — and counts with
+ * the identity misses: past `HOST_IDENTITY_REDRAWS`, or on the last attempt, the picture is drawn with
+ * nobody in it, which always gets its turn — a face or a stranger never ships, and the scene never
+ * fails for it. Pure.
+ */
+export type HostPictureMove =
+  | { move: "keep" }
+  | { move: "redraw" | "nobody"; why: "someone else" | "face"; turnAway: boolean };
+export function hostPictureMove(
+  verdict: { same: boolean; face?: boolean },
+  /** A step on the host's own face (`scene.hostFaceShown`) shows the face by design. */
+  faceAllowed: boolean,
+  /** Earlier draws of this picture the host check refused. */
+  missesBefore: number,
+  /** No attempt is left for an ordinary redraw. */
+  lastAttempt: boolean
+): HostPictureMove {
+  const face = !!verdict.face && !faceAllowed;
+  if (verdict.same && !face) return { move: "keep" };
+  return {
+    move: missesBefore + 1 > HOST_IDENTITY_REDRAWS || lastAttempt ? "nobody" : "redraw",
+    why: verdict.same ? "face" : "someone else",
+    turnAway: face,
+  };
+}
 /** Added to a host picture redrawn with nobody in it: the line's things, never a stand-in person. */
 export const PERSON_FREE_FALLBACK =
   "Show only the things this line is about, on a surface or in their place — no person, no " +
@@ -428,8 +465,11 @@ import {
   deriveHostLook,
   facingTheCamera,
   hostLipsCut,
+  hostTurnedAway,
   looksCutOff,
   markHostBroll,
+  mayTurnHostAway,
+  personKey,
   REAL_HOLDER,
   onTheBody,
   showsSomeoneElse,
@@ -5917,27 +5957,61 @@ const SHOT_ANGLE_SUFFIX: Record<string, string> = {
  * Every tool in its REAL working position, and the hands safe from it (2026-10-02, the operator on
  * Hank's job 332: the host sawing a small block lying flat on the bench, his other hand right beside
  * the blade — "unrealistic … it will damage his fingers"). Any tool, any channel.
+ *
+ * SPLITTING and EDGE TOOLS spelled out (2026-10-18, the review of jobs 401-407). A tool that splits
+ * wood works only one way — edge down in the END grain, the split running along its blade — and the
+ * clause named none, so the image model drew a cleaver's pose: job 407 scene 10, a blade pushed into
+ * the SIDE of an upright piece with a second hand gripping it where it would split; scene 14, the
+ * blade resting on top, across a split already open; scene 17, the blade out in mid-air while a
+ * board peeled away with nothing in its split. And "never in its path" did not stop job 406 scene 9,
+ * a chisel pushed straight at the other hand lying flat on the board ("working with a simple hand
+ * tool" left the set-up to the model): an edge tool is now pushed AWAY from the other hand, which
+ * sits behind the edge or the work is clamped.
+ *
+ * Only a tool that is SPLITTING goes into the end grain: the same film's broadaxe biting into the
+ * side of a green log (job 407 scene 25, "They hewed green") is right, and so is any axe chopping,
+ * felling or hewing — told every axe is a splitting tool, the picture model could turn hewing into
+ * end-grain splitting and the checker could refuse the correct picture. And the edge rule names a
+ * knife only as a carving one: a kitchen knife cuts DOWN into the board beside the guide hand, and
+ * one being sharpened has fingers on its flat (job 406's knife-sharpening lines), poses "pushed away
+ * from the other hand" does not describe.
  */
 export const TOOL_POSITION_CLAUSE =
   "Every tool is held and placed the way a person who really uses it does: by its handle, in its " +
   "normal grip, at its normal working angle, from the side a real user stands. The work is set up " +
   "so the tool's path is clear of the table and of every hand: a piece being sawn overhangs the " +
   "bench edge, sits in a vise or against a bench hook; a piece being drilled is clamped, with a " +
-  "scrap block under it; cloth is cut on a cutting mat, food on a cutting board. The holding hand " +
-  "stays well back and to the side of the blade, bit or edge — never in front of it, in its path, " +
-  "or right beside the cut — and a blade never cuts into the table under the work. The piece " +
+  "scrap block under it; cloth is cut on a cutting mat, food on a cutting board; a piece being " +
+  "SPLIT (riven with a froe, or split with a wedge, a maul or an axe) stands on end on a chopping " +
+  "block or stump, or is wedged in a fork or brake, and the splitting tool is driven into its END " +
+  "grain — the top, when it stands on end — its edge sunk in the wood and its blade along the " +
+  "grain, so the split opens along the line of the blade; never pushed into the side of the piece, " +
+  "resting on the wood with its edge not in it, sticking out into the air with no wood under its " +
+  "edge, or lying across a split already open. An axe that is chopping, felling or hewing rather " +
+  "than splitting bites into the side of the log or trunk. The holding " +
+  "hand stays well back and to the side of the blade, bit or edge — never in front of it, in its " +
+  "path, or right beside the cut — and a blade never cuts into the table under the work. A chisel, " +
+  "gouge, plane or a knife carving wood is pushed AWAY from the other hand: that hand is on the " +
+  "tool itself or holds the work behind the edge, or the work is clamped, and no hand ever lies on " +
+  "the work ahead of where the edge points. A piece being split is held by its block, fork or " +
+  "wedge, never by a hand where it splits open. The piece " +
   "being worked sits ON its surface or in its holder as a separate solid thing — never sunk " +
   "into, passing through or grown out of the table or bench.";
 
 /**
  * A tool in a picture is really WORKING on its material. Norbert's 3-min test (job 236, 2:19)
  * showed a drill whose bit never went into the wood; the still is the video's first frame, so it
- * starts right here. (Such shots are also kept as photos — `contactToolWork` in shotList.ts.)
+ * starts right here. (Such shots are also kept as photos — `contactToolWork` in shotList.ts.) A
+ * splitting tool's contact is its edge in the end grain (job 407 scenes 14 and 17, a froe blade on
+ * top of the wood and out in the air) — only while it splits: an axe hewing is in the log's side
+ * (scene 25).
  */
 export const TOOL_CONTACT_CLAUSE =
   "Any tool in the shot is really working on its material: a drill bit or screw sunk into the " +
   "wood, a saw blade down in its cut, a chisel edge in the wood, scissor or cutter blades closing " +
-  "on the cloth, a needle through the fabric — never held in the air beside the work. " +
+  "on the cloth, a needle through the fabric, a froe, wedge, maul or axe that is SPLITTING wood " +
+  "driven edge-down into the end grain along the split it opens, an axe chopping or hewing bitten " +
+  "into the side of the log — never held in the air beside the work. " +
   TOOL_POSITION_CLAUSE;
 
 /**
@@ -6037,6 +6111,9 @@ export function personClauseFor(scene: StoryboardScene, visual: string): string 
   // A host picture of a line about the chin, jaw or neck faces the camera, cut at the lips
   // (`hostLipsCut`): every side or back view below would hide what the line is about.
   const lipsCut = hostLipsCut(scene);
+  // A pose drawn face-on (the whole body in action, a call at the ear) or a picture whose drawing
+  // already showed the face is framed from behind or the side only (`hostTurnedAway`).
+  const turnedAway = hostTurnedAway(scene);
   const others = peopleAskedFor(scene);
   const who = scene.otherPerson
     ? scene.hostAmongOthers
@@ -6045,7 +6122,7 @@ export function personClauseFor(scene: StoryboardScene, visual: string): string 
     : scene.brollHostLook
       ? scene.hostFaceShown
         ? hostFaceClause(scene.brollHostLook)
-        : hostBrollClause(scene.brollHostLook, lipsCut)
+        : hostBrollClause(scene.brollHostLook, lipsCut, turnedAway)
       : ANON_PERSON_SUFFIX;
   const worn = WORN_FRONT.exec(visual)?.[0];
   // Hands on the person's OWN hair, scalp or face (Diane's job 313: a head twisted round, a third
@@ -6301,13 +6378,43 @@ export const HOST_LIPS_CUT_ONLY_SUFFIX =
   "forehead anywhere in the frame. No mirror, window glass or other shiny surface anywhere the host " +
   "could be reflected in it.";
 
-export function hostBrollClause(look: string, lipsCut = false): string {
+/**
+ * The second framing of `HOST_FRAMING_CLAUSE` ONLY (`hostTurnedAway`, 2026-10-18, the review of jobs
+ * 401-407): for a pose the model draws face-on — the whole body in action, a call at the ear (job 407
+ * scene 27, "the host swinging a … broadaxe at a log, boots planted well back", came back full-body
+ * with the face in three-quarter view) — and for the redraw of any host picture that came back with
+ * the face (job 406 scene 14, job 401 scene 20). Offered two framings the model took neither, so
+ * this offers one. "From the side" leans behind: a true profile still draws an eye and the nose.
+ */
+export const HOST_TURNED_AWAY_CLAUSE =
+  "The whole body is turned away from the camera — seen from behind, or from the side and a little " +
+  "behind, the head turned the same way as the shoulders — so the face is never shown: no eyes, nose " +
+  "or mouth toward the camera, only the back or the side of the head. However the description has " +
+  "them stand, swing, walk or hold something, the camera is behind or beside them, never in front. " +
+  "Never a body facing the camera, never a head turned back toward the lens. They are recognisably " +
+  "the host by the same hair colour and cut, the same skin and the same clothes and accessories as " +
+  "in the reference photo (unless the description names other clothes).";
+
+export function hostBrollClause(look: string, lipsCut = false, turnedAway = false): string {
   return (
     `The only person in this shot is the host — ${look.trim().replace(/\.$/, "")} — exactly as in ` +
     `the reference photo, doing the task, hands at the work. ` +
-    `${lipsCut ? HOST_LIPS_CUT_CLAUSE : HOST_FRAMING_CLAUSE} Nobody else ` +
+    `${lipsCut ? HOST_LIPS_CUT_CLAUSE : turnedAway ? HOST_TURNED_AWAY_CLAUSE : HOST_FRAMING_CLAUSE} Nobody else ` +
     `is in the frame, in the background or in a reflection. ${ONE_BODY_CLAUSE}`
   );
+}
+
+/**
+ * A host picture's prompt framed from behind or the side only, for the redraw after `scanSameHost`
+ * saw the face (`hostPictureMove`'s `turnAway`): the "either" framing swapped for
+ * `HOST_TURNED_AWAY_CLAUSE` in place, so whatever an earlier redraw added to the prompt stays — the
+ * same prompt `buildStillPrompt` writes for a scene marked `hostTurnedAway`. A prompt with no host
+ * framing in it (a content-policy rung draws no person; a chin line keeps its lips cut) is returned
+ * as it is: the redraw is a fresh seed. Pure.
+ */
+export function turnHostAway(prompt: string): string {
+  if (prompt.includes(HOST_TURNED_AWAY_CLAUSE) || !prompt.includes(HOST_FRAMING_CLAUSE)) return prompt;
+  return prompt.replace(HOST_FRAMING_CLAUSE, HOST_TURNED_AWAY_CLAUSE);
 }
 /**
  * One body, two arms. Over-the-shoulder shots of hands at work are where the picture model adds
@@ -10270,9 +10377,14 @@ async function drawValidatedStill(
       }
       // THE HOST IS THE HOST (2026-10-15, the review: Scarlett's routine pictures showed "a
       // different woman"): a picture of the host is laid beside the host photo and must be the same
-      // person — hair, age, skin, build, and the face when it is shown. Drawn again on a miss; after
-      // `HOST_IDENTITY_REDRAWS` misses the picture is drawn with nobody in it, and a frame of a
-      // stranger is never kept as a fallback. `HOST_IDENTITY_CHECK=0` turns it off.
+      // person — hair, age, skin, build, and the face when it is shown. AND NO FACE (2026-10-18, the
+      // review of jobs 401-407: the host reading at a desk face on, smiling into the lens with a phone
+      // at the ear, a full-body axe swing — all passed as "the same person"): the same call says
+      // whether the face shows, and outside a step on the host's own face a shown face is a miss too,
+      // redrawn from behind or the side (`turnHostAway`; `hostTurnedAway` keeps it for a Regenerate).
+      // Drawn again on a miss; after `HOST_IDENTITY_REDRAWS` misses — or on the last attempt — the
+      // picture is drawn with nobody in it, and a frame of a stranger or a face is never kept as a
+      // fallback (`hostPictureMove`). `HOST_IDENTITY_CHECK=0` turns it off.
       if (
         scene.humanPresent &&
         scene.brollHostRef &&
@@ -10281,21 +10393,41 @@ async function drawValidatedStill(
         process.env.HOST_IDENTITY_CHECK !== "0"
       ) {
         const who = await scanSameHost(scene.brollHostRef, buffer, !!scene.hostFaceShown);
-        if (!who.same) {
+        const move = hostPictureMove(who, !!scene.hostFaceShown, hostMisses, attempt >= attempts);
+        if (move.move !== "keep") {
           hostMisses++;
           // On the record, and never kept as a fallback: this frame cannot ship.
-          flags.push(NOT_THE_HOST);
-          lastError = `Still image shows someone other than the host (${who.what})`;
-          if (hostMisses > HOST_IDENTITY_REDRAWS) {
+          if (move.why === "someone else") flags.push(NOT_THE_HOST);
+          if (move.turnAway) flags.push(FACE_SHOWN);
+          lastError =
+            move.why === "face"
+              ? `Still image shows the host's face (${who.what})`
+              : `Still image shows someone other than the host (${who.what})`;
+          // The face is never asked for again — on this redraw or a later Regenerate. A chin line
+          // keeps its lips cut (the chin is what its line is about) and a piece worn at the neck
+          // keeps the front it sits on (`mayTurnHostAway`): each is drawn again as it was.
+          const turn = move.turnAway && mayTurnHostAway(scene);
+          if (turn) {
+            scene.hostTurnedAway = true;
+            prompt = turnHostAway(prompt);
+          }
+          if (move.move === "nobody") {
             personFree = true;
             prompt = `${buildStillPrompt({ ...scene, humanPresent: false, brollHostLook: undefined, brollHostRef: undefined, hostFaceShown: undefined }, false, visualOverride, subject, square)} ${PERSON_FREE_FALLBACK}`;
             offSubjectFallback = undefined;
+            copyFallback = undefined;
             textyFallback = undefined;
             brokenFallback = undefined;
+            // The last move always gets its draw: nothing else may ship in its place.
+            if (attempt === attempts) attempts++;
           }
           console.warn(
-            `[Longform] scene ${scene.index} shows someone other than the host (${who.what}) → ` +
-              (personFree ? "drawing it with nobody in it" : "drawing them again from the host photo")
+            `[Longform] scene ${scene.index} shows ${move.why === "face" ? "the host's face" : "someone other than the host"} (${who.what}) → ` +
+              (personFree
+                ? "drawing it with nobody in it"
+                : turn
+                  ? "drawing them again from behind or the side"
+                  : "drawing them again from the host photo")
           );
           continue;
         }
@@ -11448,19 +11580,32 @@ async function cutShotsOnWords(
         await deriveContinuitySheet(ctx.spokenScript, {
           subject: params.videoSubject,
           styleBible: params.visualStyleBible,
+          // How the host looks and what they call themself: what tells the call whether "you" is
+          // the host or someone the host's job serves (job 402: a host in a crew uniform).
+          host: params.brollOnly
+            ? undefined
+            : [params.hostLook, params.hostTitle ? `title: ${params.hostTitle}` : ""].filter(Boolean).join("; "),
         })
       ).replace(/\b(?:cluttered|messy|jumbled|crowded)\b/gi, "tidy");
       // The same call names the PEOPLE WHO COME BACK, each with one look (job 399: the passenger
       // the story follows was three different women in 13 s). They are kept apart from the props
       // list, which every shot and picture writer reads as things only, exactly as before.
-      params.recurringPeople = parseRecurringPeople(sheet, { hostName: params.hostName });
+      // And WHO "YOU" IS when the host's job serves the viewer (job 402: a passenger's "you" drawn
+      // as the host in her crew uniform; job 405: a sleeping "you" drawn as a new stranger each
+      // time) — one ordinary person with one look, never the host.
+      params.viewerPerson = parseViewerPerson(sheet, { hostName: params.hostName });
+      const viewerKey = params.viewerPerson ? personKey(params.viewerPerson.name) : undefined;
+      params.recurringPeople = parseRecurringPeople(sheet, { hostName: params.hostName }).filter(
+        p => personKey(p.name) !== viewerKey
+      );
       params.continuitySheet = withoutPersonLines(sheet);
       log(
         params.continuitySheet
           ? `props list: ${params.continuitySheet.split("\n").length} recurring thing(s)` +
               (params.recurringPeople.length
                 ? `, ${params.recurringPeople.length} recurring person(s): ${params.recurringPeople.map(p => p.name).join(", ")}`
-                : "")
+                : "") +
+              (params.viewerPerson ? `, "you" is ${params.viewerPerson.name} (never the host)` : "")
           : `props list: none (call failed) — shots are written without it`
       );
     }
@@ -11521,6 +11666,7 @@ async function cutShotsOnWords(
       hostName: params.hostName,
       hostLook: params.hostLook,
       people: params.recurringPeople,
+      viewer: params.viewerPerson,
       subject: params.videoSubject,
       log,
     });
@@ -11592,6 +11738,7 @@ async function cutShotsOnWords(
         hostName: params.hostName,
         hostLook: params.hostLook,
         people: params.recurringPeople,
+        viewer: params.viewerPerson,
         subject: params.videoSubject,
         log,
         only: ids,
@@ -16489,6 +16636,7 @@ async function runUnifiedPipeline(
       keyThings: params.keyThings,
       subject: params.videoSubject,
       maxAt: pictureLimitFor(scenes, masterDurationSec),
+      viewer: params.viewerPerson,
     });
     if (fit.joined > 0) console.log(`[Longform ${jobId}] ${fit.joined} picture(s) joined with the one before: one idea, one picture`);
     if (fit.fixed > 0)

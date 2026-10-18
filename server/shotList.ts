@@ -22,7 +22,7 @@
 import type { BuildStage, KeyThing, RecurringPerson, StoryboardScene } from "@shared/types";
 import { invokeClaude } from "./claude";
 import { safeParseJSON } from "./jsonRepair";
-import { SHOWS_PERSON, showsPerson, namedPeople, namesOnlyAnimal, personKey } from "./hostLook";
+import { BODY_HAND, SHOWS_PERSON, showsPerson, namedPeople, namesOnlyAnimal, personKey } from "./hostLook";
 
 /** A picture shorter than this is a flash and folds into a neighbour. */
 export const SHOT_MIN_SEC = 1.2;
@@ -170,6 +170,23 @@ export function otherPersonOf(raw: unknown): string | undefined {
     return undefined;
   if (namesOnlyAnimal(who)) return undefined;
   return who;
+}
+
+/** A model's words for the person a line speaks to: "you", "yourself", "the viewer", "you (the viewer)". */
+const VIEWER_ANSWER = /^(?:(?:the\s+)?viewer|you|yourself)(?:\s*\((?:you|the viewer)\))?$/i;
+
+/**
+ * `otherPersonOf`, with THE VIEWER (`inputParams.viewerPerson`) when the video has one: "you" or
+ * "the viewer" is then that person by their name, so every picture of them finds the same look
+ * (`matchRecurringPeople`) — job 405 had its sleeping "you" written as "a sleeping person" in one
+ * shot and as the host in another. Without a viewer, "you" is the host as before. Pure.
+ */
+export function otherPersonFor(raw: unknown, viewer?: RecurringPerson): string | undefined {
+  if (viewer && typeof raw === "string") {
+    const said = raw.replace(/["“”]/g, "").replace(/\s+/g, " ").trim().replace(/[.,;:]+$/, "");
+    if (VIEWER_ANSWER.test(said)) return viewer.name;
+  }
+  return otherPersonOf(raw);
 }
 
 /**
@@ -324,8 +341,12 @@ const ANGLES: NonNullable<StoryboardScene["shotAngle"]>[] = [
   "low",
 ];
 
-/** The shot shows hands (or fingers) — never allowed to move in a video. */
-export const SHOWS_HANDS = /\b(hands?|fingers?|thumbs?|palms?|wrists?)\b/i;
+/**
+ * The shot shows hands (or fingers) — never allowed to move in a video. A hand on a body only
+ * (`BODY_HAND`): "hand tools on a pegboard" (job 406 scene 7) or "the hands of the wall clock" show
+ * no one.
+ */
+export const SHOWS_HANDS = new RegExp(String.raw`\b(${BODY_HAND}|fingers?|thumbs?|palms?|wrists?)\b`, "i");
 /**
  * Work where a tool must BITE into the material — drilling, sawing, driving a screw, hammering,
  * chiselling, cutting, carving. The video model cannot fake that contact: Norbert's 3-min test
@@ -1647,11 +1668,15 @@ const SHOT_LIST_SYSTEM =
   "work.\n" +
   "6a. SOMEONE ELSE. When a line is about ANOTHER person doing something — a customer, a buyer, " +
   "a neighbour, a relative, a stranger; never the host, and never \"you\" (the viewer's work is " +
-  "shown as the host's) — the picture may show THAT person, the same way: from behind or from " +
-  "the side, the face never shown. Write them into show, and set other to who they are in 2-6 " +
-  "plain words from the line (\"a woman customer\", \"an older neighbour\"). One person only. " +
-  "When that person is one of the PEOPLE WHO COME BACK (listed below, when given), other is their " +
-  "name exactly as written there. other is null in every other shot.\n" +
+  "shown as the host's) unless THE VIEWER is given below — the picture may show THAT person, the " +
+  "same way: from behind or from the side, the face never shown. Write them into show, and set " +
+  "other to who they are in 2-6 plain words from the line (\"a woman customer\", \"an older " +
+  "neighbour\"). One person only. When that person is one of the PEOPLE WHO COME BACK (listed " +
+  "below, when given), other is their name exactly as written there. When THE VIEWER is given " +
+  "below, \"you\" is that person and never the host: every shot of \"you\" — doing, holding, " +
+  "having or feeling something, or something happening to them, the list shots that go on from a " +
+  "sentence about \"you\" too — shows them the same way, with other set to the viewer's name " +
+  "exactly as written there. other is null in every other shot.\n" +
   "6b. WHAT NOT TO DO. When a line — or the sentence it is part of — says not to do something " +
   "(\"never…\", \"don't…\"), says what something is NOT (\"I don't mean…\"), what to use INSTEAD, " +
   "what to keep away or out, that a job is for someone else (a licensed pro), or warns that doing " +
@@ -1745,6 +1770,12 @@ export async function planShotList(
      * frame to.
      */
     people?: RecurringPerson[];
+    /**
+     * WHO "YOU" IS when the viewer is someone the host's job serves (`inputParams.viewerPerson`) —
+     * the NAME only, like `people`: every shot of "you" names them, never the host (job 402 scenes
+     * 17 and 20 drew a passenger's "you" as the host in her crew uniform).
+     */
+    viewer?: RecurringPerson;
     subject?: string;
     log?: (m: string) => void;
     /** Plan only these beats (their eligibility is still judged in the full list). */
@@ -1792,6 +1823,9 @@ export async function planShotList(
       (opts.people?.length
         ? `PEOPLE WHO COME BACK (never the host; when a shot's other person under rule 6a is one of them, other is this name exactly): ${opts.people.map(p => p.name).join(" | ")}\n`
         : "") +
+      (opts.viewer
+        ? `THE VIEWER ("you" in this script — someone the host's work serves, never the host; rule 6a: in every shot of "you", other is this name exactly): ${opts.viewer.name}\n`
+        : "") +
       (prior.length ? `SHOTS JUST BEFORE THIS BATCH: ${prior.join(" | ")}\n` : "") +
       `\n${lines.join("\n")}\n\nJSON:`;
     const r = await invokeClaude({
@@ -1824,7 +1858,7 @@ export async function planShotList(
           same: x.same === true,
           contact: x.contact === true,
           held: x.held === true,
-          other: otherPersonOf(x.other),
+          other: otherPersonFor(x.other, opts.viewer),
         }));
       out.push({
         scene,
@@ -1903,7 +1937,19 @@ export const CONTINUITY_SYSTEM =
   "never a crowd or a group; never a face, an expression or a name the script does not give; never " +
   "someone in only one sentence. No PERSON line when nobody comes back; at most 4. Example: " +
   "`PERSON the neighbour: a tall man in his seventies, thin white hair combed back, a faded green " +
-  "zip-up jacket over a grey shirt, dark trousers`. Output ONLY the list, no headings.";
+  "zip-up jacket over a grey shirt, dark trousers`. " +
+  "WHO \"YOU\" IS: when the script speaks to \"you\" as someone the HOST'S OWN JOB SERVES — the " +
+  "job the host's title, their own words or the work clothes in THE HOST line show: a nurse's " +
+  "patient, a hairdresser's client, a waiter's diner, a tax adviser's client — add ONE last line " +
+  "`VIEWER name: look`, so every picture of \"you\" shows that same ordinary person and never the " +
+  "host. Also when the host calls themself one of \"you\" but THE HOST line dresses them for the " +
+  "job that serves \"you\": the host in work clothes drawn as \"you\" reads as the worker. name is " +
+  "1-4 plain words for the role the script gives \"you\" (the patient, the client, the diner); look " +
+  "is written like a PERSON look, in everyday clothes that fit that role — never the host's " +
+  "uniform, badge or work clothes — and clearly different from every PERSON line. No VIEWER line " +
+  "when \"you\" does the host's own kind of work (a how-to: \"you\" sand, sew, fix, cook or plant " +
+  "the way the host does), when there is no host, or when no picture will show \"you\". " +
+  "Output ONLY the list, no headings.";
 
 /** Recurring people a props list may name (`PERSON name: look` lines) — beyond these, none. */
 export const MAX_RECURRING_PEOPLE = 4;
@@ -1915,13 +1961,23 @@ export function isPersonLine(line: string): boolean {
   return PERSON_LINE.test(line.replace(/^[-*•\d.)\s]+/, "").trim());
 }
 
+// "VIEWER " or "VIEWER:" in capitals, or "Viewer:" — a prop like "viewer-facing shelf: …" or "Viewer
+// seat: …" stays a prop (a viewer named "seat" would take every picture of "you").
+const VIEWER_LINE = /^(?:VIEWER(?=[\s:])|[Vv]iewer(?=\s*:))[\s:]*/;
+/** Whether a props-list line is the `VIEWER name: look` line (bullets and numbering aside). Pure. */
+export function isViewerLine(line: string): boolean {
+  return VIEWER_LINE.test(line.replace(/^[-*•\d.)\s]+/, "").trim());
+}
+
 /**
  * The props list for one script (`LongformInputParams.continuitySheet`), with its `PERSON` lines
- * (the people who come back, `parseRecurringPeople`) at the end. "" on any failure.
+ * (the people who come back, `parseRecurringPeople`) and its one `VIEWER` line (who "you" is when
+ * the host's job serves them, `parseViewerPerson`) at the end. "" on any failure. `host` is how the
+ * host looks and their title — what tells the call whether "you" is the host or their customer.
  */
 export async function deriveContinuitySheet(
   script: string,
-  opts: { subject?: string; styleBible?: string } = {}
+  opts: { subject?: string; styleBible?: string; host?: string } = {}
 ): Promise<string> {
   // Room for the model's own thinking ahead of the list: at 1200 the thinking could spend the whole
   // budget and the call came back with no text (Hannah's real render, job 163) — and one retry.
@@ -1932,6 +1988,7 @@ export async function deriveContinuitySheet(
         userMessage:
           (opts.subject ? `Video subject: ${opts.subject}\n` : "") +
           (opts.styleBible ? `Visual direction: ${opts.styleBible}\n` : "") +
+          (opts.host?.trim() ? `THE HOST (the narrator, on camera): ${opts.host.trim()}\n` : "") +
           `\nScript:\n${script.slice(0, 60000)}\n\nPROPS LIST:`,
         maxTokens: 16000,
         model: SHOT_LIST_MODEL(),
@@ -1945,9 +2002,10 @@ export async function deriveContinuitySheet(
         .split("\n")
         .map(l => l.replace(/^[-*•\d.)\s]+/, "").trim())
         .filter(l => l.includes(":") && l.slice(l.indexOf(":") + 1).trim() !== "");
-      const props = lines.filter(l => !isPersonLine(l)).slice(0, 16);
+      const props = lines.filter(l => !isPersonLine(l) && !isViewerLine(l)).slice(0, 16);
       const people = lines.filter(isPersonLine).slice(0, MAX_RECURRING_PEOPLE);
-      if (props.length) return [...props, ...people].join("\n");
+      const viewer = lines.filter(isViewerLine).slice(0, 1);
+      if (props.length) return [...props, ...people, ...viewer].join("\n");
     } catch {
       /* try once more */
     }
@@ -1975,13 +2033,46 @@ export function parseKeyThings(sheet: string | undefined): KeyThing[] {
   return out;
 }
 
-/** A props list with its `PERSON` lines taken out — the list every shot and picture writer reads. Pure. */
+/**
+ * A props list with its `PERSON` and `VIEWER` lines taken out — the list every shot and picture
+ * writer reads, things only. Pure.
+ */
 export function withoutPersonLines(sheet: string | undefined): string {
   return (sheet ?? "")
     .split("\n")
-    .filter(l => !isPersonLine(l))
+    .filter(l => !isPersonLine(l) && !isViewerLine(l))
     .join("\n")
     .trim();
+}
+
+/**
+ * WHO "YOU" IS, when the props list says the viewer is someone the host's own job serves (its one
+ * `VIEWER name: look` line, 2026-10-18, the review of job 402): every picture of "you" was the host,
+ * so a passenger's "you can have the whole thing just by asking" (scene 17) and "they'll tell you,
+ * and you're no worse off for trying" (scene 20) were the host in her crew blazer, scarf and wings
+ * pin in a passenger's seat — the crew playing the passenger who asks. The name is the role the
+ * script gives "you" (an owner or a homeowner too, which a picture otherwise reads as the host);
+ * the look is the one every picture of them keeps. Undefined — "you" stays the host — with no such
+ * line, a name that is the host, "you" or "the viewer", a group, an animal, or a look too short to
+ * draw. Pure — unit-tested.
+ */
+export function parseViewerPerson(
+  sheet: string | undefined,
+  opts: { hostName?: string } = {}
+): RecurringPerson | undefined {
+  const hostWords = personKey(opts.hostName).split(" ").filter(w => w.length >= 3);
+  const raw = (sheet ?? "").split("\n").find(isViewerLine);
+  if (!raw) return undefined;
+  const rest = raw.replace(/^[-*•\d.)\s]+/, "").trim().replace(VIEWER_LINE, "");
+  const at = rest.indexOf(":");
+  if (at <= 0) return undefined;
+  const name = otherPersonOf(rest.slice(0, at).replace(/[*_`]/g, ""));
+  const words = rest.slice(at + 1).replace(/[`*_]/g, "").replace(/\s+/g, " ").trim().replace(/[.;,]+$/, "").split(" ");
+  if (!name || words.length < 3) return undefined;
+  if ((namedPeople(name)?.count ?? 1) > 1) return undefined;
+  const key = personKey(name);
+  if (!key || (hostWords.length && key.split(" ").every(w => hostWords.includes(w)))) return undefined;
+  return { name, look: words.slice(0, 45).join(" ").replace(/[.;,]+$/, "") };
 }
 
 /**
@@ -2178,15 +2269,18 @@ FIRST picture of the MAIN thing that
 shows it idle when it is naturally in use that way is WRONG too: rewrite it in use. No writing, no logos,
 no faces, never "or".
 When the picture you write shows SOMEONE ELSE doing something — a customer, a buyer, a neighbour, a
-relative; never the host, never "you" — write them into show, seen from behind or from the side, and
+relative; never the host, never "you" unless THE VIEWER is given (then "you" is that person, and
+other is the viewer's name) — write them into show, seen from behind or from the side, and
 set other to who they are in 2-6 plain words from the line ("an older neighbour"). One person only.
 other is null otherwise.
 
 WHO IS IN THE PICTURE. For every picture that shows a person (or hands), say who: "host" when it is
 the host — their own work, or the viewer the line speaks to ("you") — or a few plain words for
 ANYONE ELSE the line is about: a customer at a counter, a child, a stranger in a story, two
-neighbours. A line about someone else is never shown as the host or the host's hands. Leave who out
-of a picture of things alone.
+neighbours. A line about someone else is never shown as the host or the host's hands. When THE
+VIEWER is given, the viewer the line speaks to is never the host: who is the viewer's name for every
+picture of "you", the list pictures that go on from a sentence about "you" too. Leave who out of a
+picture of things alone.
 
 Answer with JSON only, one entry for EVERY picture:
 {"pictures":[{"id":7,"about":"...","shows_it":true,"who":"host"},
@@ -2234,15 +2328,23 @@ export type PictureFix = {
 /**
  * The check's `who`: null for the host or the viewer, someone else's words, or undefined. "host",
  * "you" and "your hands" are the host; "your customer" and "the host's neighbour" name someone else
- * (a viewer's customer is not the viewer). Pure.
+ * (a viewer's customer is not the viewer). With THE VIEWER (`inputParams.viewerPerson`, a video
+ * whose "you" the host's job serves), "you", "your hands" and "the viewer" are that person by name,
+ * never the host — job 402 scenes 17 and 20 — and "you and a flight attendant" keeps them beside the
+ * other person (the host words of a "host and …" answer are found again in the description; the
+ * viewer's are not). Pure.
  */
-export function whoOf(raw: unknown): string | null | undefined {
+export function whoOf(raw: unknown, viewer?: RecurringPerson): string | null | undefined {
   if (typeof raw !== "string" || !raw.trim()) return undefined;
-  const hostOrViewer = /^\s*(?:the\s+)?(?:host|narrator|presenter|viewer)(?:['’]s)?\b|^\s*(?:you|your|me|my|i)\b/i.test(raw);
-  if (!hostOrViewer) return otherPersonOf(raw);
+  const host = /^\s*(?:the\s+)?(?:host|narrator|presenter)(?:['’]s)?\b|^\s*(?:me|my|i)\b/i.test(raw);
+  const you = /^\s*(?:the\s+)?viewer(?:['’]s)?\b|^\s*(?:you|your|yours|yourself)\b/i.test(raw);
+  if (!host && !you) return otherPersonOf(raw);
   const others = namedPeople(raw)?.people.filter(p => p.kind !== "self") ?? [];
-  if (!others.length) return null;
-  return otherPersonOf(others.map(p => p.phrase.replace(/^(?:your|my|our)\s+/i, "the ")).join(" and "));
+  if (!others.length) return you && !host && viewer ? viewer.name : null;
+  const alongside = you && !host && !!viewer && /^\s*(?:you|yourself|(?:the\s+)?viewer)\s*(?:,|&|\band\b|\bwith\b)/i.test(raw);
+  return otherPersonOf(
+    [...(alongside ? [viewer!.name] : []), ...others.map(p => p.phrase.replace(/^(?:your|my|our)\s+/i, "the "))].join(" and ")
+  );
 }
 
 /**
@@ -2284,9 +2386,13 @@ const fitCandidate = (s: StoryboardScene) =>
 /**
  * The model's fixes, kept only for candidate pictures: a rewrite where it said the picture does not
  * show what its line is about, and any split. Reads the per-picture answer (`pictures`) and the older
- * list of fixes (`fix`). Pure.
+ * list of fixes (`fix`). With THE VIEWER, "you" in `who` or `other` is the viewer by name. Pure.
  */
-export function parsePictureFixes(text: string, scenes: StoryboardScene[]): PictureFix[] {
+export function parsePictureFixes(
+  text: string,
+  scenes: StoryboardScene[],
+  viewer?: RecurringPerson
+): PictureFix[] {
   const parsed = safeParseJSON<any>(text);
   const data = parsed.success ? parsed.data : undefined;
   const entries: any[] = Array.isArray(data?.pictures)
@@ -2308,10 +2414,10 @@ export function parsePictureFixes(text: string, scenes: StoryboardScene[]): Pict
         show: clean(x?.show),
         thing: clean(x?.thing) || undefined,
         stage: buildStageOf(x?.stage),
-        other: otherPersonOf(x?.other),
+        other: otherPersonFor(x?.other, viewer),
       }))
       .filter((x: PictureSplit) => x.from && x.show);
-    const who = whoOf(f?.who);
+    const who = whoOf(f?.who, viewer);
     // WHAT THE SENTENCE RULES OUT rides even a picture the check left as it is: a right picture can
     // still come out of the picture model showing it.
     const forbids = forbidsOf(f?.forbids);
@@ -2326,7 +2432,7 @@ export function parsePictureFixes(text: string, scenes: StoryboardScene[]): Pict
       ...(show ? { show } : {}),
       ...(show && typeof f?.thing === "string" && f.thing ? { thing: f.thing } : {}),
       ...(show && answered ? { stage: buildStageOf(f.stage) ?? null } : {}),
-      ...(show && saidWho ? { other: otherPersonOf(f.other) ?? null } : {}),
+      ...(show && saidWho ? { other: otherPersonFor(f.other, viewer) ?? null } : {}),
       ...(split.length ? { split } : {}),
       ...(who !== undefined ? { who } : {}),
       ...(forbids ? { forbids } : {}),
@@ -2687,6 +2793,8 @@ export async function fitPicturesToLines(
     subject?: string;
     /** The longest a picture may stay where it sits (`pictureMaxSecAt`) — a join never passes it. */
     maxAt?: (s: StoryboardScene) => number;
+    /** WHO "YOU" IS when the host's job serves the viewer (`inputParams.viewerPerson`): never "host". */
+    viewer?: RecurringPerson;
   } = {}
 ): Promise<{ scenes: StoryboardScene[]; fixed: number; split: number; joined: number }> {
   const BATCH = 80;
@@ -2728,13 +2836,16 @@ export async function fitPicturesToLines(
           (opts.keyThings?.length
             ? `KEY THINGS: ${opts.keyThings.map(k => `${k.main ? "MAIN " : ""}${k.name}: ${k.look}`).join(" | ")}\n`
             : "") +
+          (opts.viewer
+            ? `THE VIEWER ("you" in this script — someone the host's work serves, never "host"): ${opts.viewer.name}\n`
+            : "") +
           `\n${lines.join("\n")}\n\nJSON:`,
         maxTokens: 24000,
         model: FIT_MODEL(),
         effort: planningEffort("FIT_EFFORT"),
         step: "Line check",
       });
-      fixes.push(...parsePictureFixes(r.text, scenes));
+      fixes.push(...parsePictureFixes(r.text, scenes, opts.viewer));
     } catch {
       /* a failed check changes nothing */
     }

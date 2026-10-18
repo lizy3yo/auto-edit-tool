@@ -138,9 +138,66 @@ const HAIR_STRAND =
   String.raw`(?:stray|flyaway|fly-away|fallen|shed)\s+(?:[a-z-]+\s+)?${NOT_A_NAMED_STRAND}strands?${NOT_A_STRAND_OF_SOMETHING_ELSE}|` +
   String.raw`${NOT_A_NAMED_STRAND}strands?${NOT_A_STRAND_OF_SOMETHING_ELSE}(?=[^.;]{0,40}?\b(?:in|on|caught in|stuck in|around)\s+(?:(?:a|an|the|her|his|their|my|your)\s+)?(?:[a-z-]+\s+){0,2}(?:brush|hairbrush|comb|drain)\b)`;
 
+/**
+ * Kinds of thing "hand" names when it stands before them: a hand saw, a hand plane, hand cream. Only
+ * nouns a hand cannot DO — "a hand rests", "a hand grips", "a hand brushes the dust off" are a
+ * person, so rest, grip and brush are not here, and a word that is also a verb is listed in its
+ * singular only ("hand pump", never "a hand pumps").
+ */
+const HAND_THING_NOUNS = [
+  "tools?", "saws?", "planes?", "drills?", "file", "rasps?", "augers?", "routers?", "sanders?", "grinders?",
+  "ax(?:e|es)?", "mills?", "winch(?:es)?", "crank", "pump", "trucks?", "carts?", "brakes?", "rails?", "railings?",
+  "mixers?", "blenders?", "whisk", "creams?", "lotions?", "soap", "sanitizers?", "sanitisers?", "towels?", "wash",
+  "dryers?", "warmers?", "weights?", "mirrors?", "fan", "bells?", "puppets?", "luggage", "prints?", "lettering",
+  "embroidery", "looms?", "spindles?", "trowels?", "pruners?", "rake", "forks?", "hoes?", "cultivators?", "brooms?",
+  "vacs?", "vacuum", "lens(?:es)?",
+].join("|");
+/**
+ * A hand tool DOING its work has a hand on it, whatever word names the tool: "a hand drill boring a
+ * hole into a small charred cedar block" (job 189 scene 36), "a hand drill bit entering the block"
+ * (scene 39), "a hand plane mid-stroke across a half-finished pine board" (job 133 scene 190). Read
+ * after one of `HAND_THING_NOUNS`; a tool at rest ("hanging", "resting", "on the bench") is not.
+ */
+const HAND_TOOL_AT_WORK =
+  String.raw`\s+(?:(?:bit|blade|iron|head|teeth)s?\s+)?` +
+  String.raw`(?:bor(?:es|ing)|cut(?:s|ting)|saw(?:s|ing)|drill(?:s|ing)|plan(?:es|ing)|shav(?:es|ing)|smooth(?:s|ing)|slic(?:es|ing)|carv(?:es|ing)|chisel(?:s|l?ing)|bit(?:es|ing)|enter(?:s|ing)|sink(?:s|ing)|driv(?:es|ing)|turn(?:s|ing)|tighten(?:s|ing)|loosen(?:s|ing)|scrap(?:es|ing)|fil(?:es|ing)|sand(?:s|ing)|trim(?:s|ming)|shap(?:es|ing)|grind(?:s|ing)|whisk(?:s|ing)|whip(?:s|ping)|mix(?:es|ing)|beat(?:s|ing)|pump(?:s|ing)|crank(?:s|ing)|rak(?:es|ing)|dig(?:s|ging)|sweep(?:s|ing)|squeez(?:es|ing)|mid-[a-z]+|in\s+use|at\s+work|being\s+used|working)\b`;
+/**
+ * "by hand" while the work is GOING ON is someone's hand: "a 3-inch screw being turned by hand with a
+ * screwdriver" (job 232 scene 23's panel), "an open-mesh market bag held stretched wide by hand" (job
+ * 168 scene 127), "nine-patch crib quilt being pieced by hand at the work table" (job 144 scene 3),
+ * "sanding the edge by hand" — "being", "held" or a doing word in front. Done already it is only how
+ * the thing was made ("hemmed by hand", "coils laced together by hand", "stitching done by hand").
+ */
+const DOING_BY =
+  String.raw`(?:\b(?:being|held)\s+(?:[a-z'’-]+\s+){0,3}|` +
+  String.raw`\b(?!(?:thing|nothing|something|anything|everything|morning|evening|ceiling|building|clothing|bedding|string|spring|wedding|during|binding|lining|edging|backing|siding|railing|ring|king|wing)\b)[a-z]{2,}ing\s+(?:(?:the|a|an|its|their|each|every|this|that)\s+(?:[a-z'’-]+\s+){0,2})?)by\s`;
+/** What follows "hand-" in a made-by-hand word: hand-stitched, hand-sewn, hand-me-down, hands-free. */
+const HAND_MADE_WORDS = String.raw`me-downs?|[a-z]+ed|sewn|made|built|spun|woven|thrown|drawn|written|knit|held|hewn|blown|wrought|strung|wound|ground|cut|split|set|free|on`;
+/**
+ * "hand" or "hands" that is part of a BODY, never "hand" naming a thing (2026-10-18, round 11's
+ * review): "hand tools hanging silent on a pegboard wall in the garage" (job 406 scene 7, under
+ * "That one belief keeps more good tools hanging silent on more garage walls") read as a person
+ * through "hand", so the host was drawn reaching up and gripping the hammer — tools in use, for 9 s,
+ * under a line about tools nobody uses. Names no person: "hand" before a noun it is a kind of (a
+ * hand saw, hand cream — "handsaw" and "handmade" never matched), a made-by-hand word
+ * (hand-stitched, hand-me-down, hands-free), a way of doing ("made by hand", "kept on hand", "close
+ * at hand"), used goods ("second-hand", "first-hand"), and a clock's hands ("the minute hand", "its
+ * second hand", "the hands of the wall clock", "black hands pointing near three o'clock" — job 405
+ * scene 28; no person's hand is "its"). A hand doing something stays a person: "a hand reaching for
+ * the hammer", "hand-sewing the binding", "walking hand in hand", "on hands and knees", and a farm
+ * hand is a worker — and so does a hand tool at work (`HAND_TOOL_AT_WORK`) and work being done by
+ * hand (`DOING_BY`), which "hand" alone used to carry and which nothing else in the words names.
+ */
+export const BODY_HAND =
+  String.raw`(?<!\b(?:clock|watch|wristwatch|stopwatch|minute|hour)(?:['’]s)?[\s-])(?<!\b(?:second|first)-)(?<!\bits\s+(?:(?:second|minute|hour)\s+)?)` +
+  String.raw`(?:(?:(?<=${DOING_BY})|(?<!\b(?:by|at|on)\s))hand(?![\s-]+(?:${HAND_THING_NOUNS})\b(?!${HAND_TOOL_AT_WORK}))|hands)` +
+  String.raw`(?!-(?:${HAND_MADE_WORDS})\b)` +
+  String.raw`(?!\s+of\s+(?:(?:a|an|the|its|this|that)\s+)?(?:[a-z'’-]+\s+){0,2}(?:clocks?|watch(?:es)?|wristwatch(?:es)?|stopwatch(?:es)?|timers?)\b)` +
+  String.raw`(?!\s+(?:pointing|point|set|showing|reading|stopped|frozen)\b[^.;,]{0,30}?(?:\bo['’]clock\b|\b\d{1,2}:\d\d\b|\bnoon\b|\bmidnight\b))`;
+
 /** The person words themselves (the notes are under `SHOWS_PERSON`). */
 const PERSON_WORDS = new RegExp(
-  String.raw`\b(hands?|fingers?|fingertips?|host|she|he|her|his|herself|himself|someone|a person|a woman|a man|wearing|worn by|collarbone|neck|wrists?|earlobes?|held (?:up|out|near|against|over|to|above|beside|in front)|hold(?:s|ing) (?:up|out)|in use|scalp|skin|nails|fingernails|forehead|cheeks?|eyelashes|eyebrows?|hairline|${HAIR_STRAND}|hair(?!\s*(?:dryer|brush|clip|tie|spray|band|pin|comb|product|net|cut(?:ting)? scissors)))\b`,
+  String.raw`\b(${BODY_HAND}|fingers?|fingertips?|host|she|he|her|his|herself|himself|someone|a person|a woman|a man|wearing|worn by|collarbone|neck|wrists?|earlobes?|held (?:up|out|near|against|over|to|above|beside|in front)|hold(?:s|ing) (?:up|out)|in use|scalp|skin|nails|fingernails|forehead|cheeks?|eyelashes|eyebrows?|hairline|${HAIR_STRAND}|hair(?!\s*(?:dryer|brush|clip|tie|spray|band|pin|comb|product|net|cut(?:ting)? scissors)))\b`,
   "i"
 );
 
@@ -520,6 +577,8 @@ const ANIMAL =
   /\b(?:dogs?|pupp(?:y|ies)|cats?|kittens?|hens?|chickens?|chicks?|roosters?|ducks?|ducklings?|geese|goose|horses?|pon(?:y|ies)|foals?|cows?|calf|calves|bulls?|goats?|sheep|lambs?|pigs?|piglets?|birds?|parrots?|rabbits?|bunn(?:y|ies)|deer|fox(?:es)?|squirrels?|mice|mouse|rats?|hamsters?|bees?|owls?|hawks?|turtles?|snakes?|lizards?|raccoons?|bears?|wol(?:f|ves)|cattle|donkeys?|mules?|llamas?|alpacas?|turkeys?|pigeons?|doves?|crows?)\b/gi;
 /** A part only a person has: "her lap", "his hands" stay a person's even right after a dog. */
 const HUMAN_ONLY_PART = /^\s+(?:own\s+)?(?:hands?|fingers?|fingertips?|thumbs?|palms?|wrists?|lap|knees?|arms?)\b/i;
+/** A person named between the animal and the pronoun ("a dog at the host's feet, her hand on it"). */
+const PERSON_SINCE = new RegExp(String.raw`\b(?:${BODY_HAND}|fingers?|host|someone|a person)\b`, "i");
 
 /**
  * The description with every he/she/her/his that refers to an ANIMAL turned into "its" (2026-10-18,
@@ -535,7 +594,7 @@ export function withoutAnimalPronouns(text: string): string {
     const animals = Array.from(before.matchAll(ANIMAL));
     if (!animals.length) return pronoun;
     const since = before.slice(animals[animals.length - 1].index ?? 0);
-    if (namedPeople(since) || /\b(?:hands?|fingers?|host|someone|a person)\b/i.test(since)) return pronoun;
+    if (namedPeople(since) || PERSON_SINCE.test(since)) return pronoun;
     if (HUMAN_ONLY_PART.test(text.slice(at + pronoun.length))) return pronoun;
     return /self$/i.test(pronoun) ? "itself" : "its";
   });
@@ -835,15 +894,22 @@ export function personKey(name: string | undefined): string {
  * a label that says it is someone ELSE ("another passenger", "a new customer", "the next buyer"),
  * unless the name says the same. "Two passengers" takes the two passengers, never three; a crowd,
  * "several passengers" or a bare "passengers" takes nobody — who is in a crowd is a guess. Empty
- * when nothing fits. Pure.
+ * when nothing fits.
+ * THE VIEWER (`inputParams.viewerPerson`, `viewer`) is one more person the pictures come back to —
+ * "you", when the host's job serves them — matched by the same name (ahead of a recurring person
+ * who only shares the role, never ahead of one named exactly), or by role when no recurring person
+ * even fits ("an older passenger"); never in a crowd, and never from a label that names "you" beside
+ * its person ("the passenger next to you"). The caller passes it only for a picture about "you"
+ * (`markHostBroll`). Pure.
  */
 export function matchRecurringPeople(
   who: string | undefined,
   count: number | undefined,
-  people: RecurringPerson[] | undefined
+  people: RecurringPerson[] | undefined,
+  viewer?: RecurringPerson
 ): RecurringPerson[] {
-  if (!who?.trim() || !people?.length) return [];
-  const facts = people.map(person => {
+  if (!who?.trim() || (!people?.length && !viewer)) return [];
+  const factOf = (person: RecurringPerson) => {
     const named = namedPeople(person.name);
     const first = named?.people[0];
     const head = first ? personKey(first.phrase) : undefined;
@@ -858,13 +924,19 @@ export function matchRecurringPeople(
       // is in "the other customer" of any later story.
       proper: !named && /\b[A-Z]/.test(person.name.replace(/^\W*(?:the|a|an|my|our|your|her|his|their)\b/i, "")),
     };
-  });
-  type Fact = (typeof facts)[number];
+  };
+  const facts = (people ?? []).map(factOf);
+  // A label that names "you" beside its person ("the passenger next to you", "your seatmate") is
+  // someone the viewer meets, never the viewer — "next to" is no else-word, so a role match would
+  // hand them the viewer's look.
+  const you = viewer && !/\b(?:you|your|yours)\b/i.test(who) ? factOf(viewer) : undefined;
+  type Fact = ReturnType<typeof factOf>;
   const whoKey = personKey(who);
   const whoWords = new Set(whoKey.split(" "));
   const picked: Fact[] = [];
-  const take = (f: Fact) => {
+  const take = (f: Fact): true => {
     if (!picked.includes(f)) picked.push(f);
+    return true;
   };
   for (const part of namedPeople(who)?.people ?? []) {
     const key = personKey(part.phrase);
@@ -873,14 +945,16 @@ export function matchRecurringPeople(
     // story follows — with one recurring passenger, a role match alone would hand her look to the
     // person the line sets apart from her.
     const elseWords = elseWordsFor(who, part.noun);
-    const fits = facts.filter(
-      f =>
-        exact(f) ||
-        (part.kind === "role" &&
-          f.roles.includes(part.noun) &&
-          !(part.sex && f.sex && part.sex !== f.sex) &&
-          elseWords.every(w => f.key.split(" ").includes(w)))
-    );
+    const fitsOf = (fs: Fact[]) =>
+      fs.filter(
+        f =>
+          exact(f) ||
+          (part.kind === "role" &&
+            f.roles.includes(part.noun) &&
+            !(part.sex && f.sex && part.sex !== f.sex) &&
+            elseWords.every(w => f.key.split(" ").includes(w)))
+      );
+    const fits = fitsOf(facts);
     if (part.count > 1) {
       // Only a stated two ("two passengers", "both passengers") is the story's two; "several
       // passengers", "three passengers" or a bare plural is a crowd, and who is in it is a guess.
@@ -888,18 +962,28 @@ export function matchRecurringPeople(
       if (two && fits.length <= part.count) fits.forEach(take);
       continue;
     }
-    if (fits.length === 1) {
-      take(fits[0]);
-      continue;
-    }
     const exacts = fits.filter(exact);
     const sexed = fits.filter(f => !!part.sex && f.sex === part.sex);
-    if (exacts.length === 1) take(exacts[0]);
-    else if (sexed.length === 1) take(sexed[0]);
+    // The viewer's own name beats a recurring person who only shares the role: the planner is told
+    // to write that name exactly in every shot of "you", and "the passenger" would otherwise go to
+    // the story's one "woman passenger" — every picture of "you" drawn as her. With no viewer the
+    // order is as before (an exact fit is the one fit, or the one exact among several).
+    const took =
+      exacts.length === 1
+        ? take(exacts[0])
+        : you && !exacts.length && exact(you)
+          ? take(you)
+          : fits.length === 1
+            ? take(fits[0])
+            : sexed.length === 1
+              ? take(sexed[0])
+              : false;
+    if (!took && you && !fits.length && fitsOf([you]).length > 0) take(you);
   }
   // The label IS the name (the planner was given the names and copied one), or holds a proper one.
   for (const f of facts)
     if (f.key && (f.key === whoKey || (f.proper && f.key.split(" ").every(w => whoWords.has(w))))) take(f);
+  if (you?.key && you.key === whoKey) take(you);
   return picked.slice(0, Math.max(1, count ?? 1)).map(f => f.person);
 }
 
@@ -1052,13 +1136,99 @@ export function hostLipsCut(scene: StoryboardScene): boolean {
   return !!scene.brollHostLook && !scene.hostFaceShown && !scene.otherPerson && chinFramed(scene);
 }
 
+// ─── A pose drawn face-on: from behind or the side only ─────────────────────────────────
+
+/**
+ * Feet, legs or heels are a stance only when they are a PERSON's — named as theirs, or bare; boots
+ * and shoes are always worn. A stepladder's "black rubber feet planted on beige hallway carpet" (job
+ * 276 scene 17) and "feet planted on pale flooring" (job 367 scene 16) are a ladder under a hands
+ * shot, and "two feet apart" is a measure.
+ */
+const PERSONS_FEET = String.raw`(?:(?:his|her|their|both|bare|the\s+host['’]s)\s+(?:feet|legs|heels)|(?:(?:his|her|their|work|leather|rubber|heavy)\s+)?(?:boots|shoes))`;
+/**
+ * The WHOLE BODY in action — the feet or the stance in view, a swing, a stride, a climb. A body in
+ * full cannot be cut at the lips, so the only framing that hides the face is from behind or the side.
+ * A walking stick, hiking boots, walking distance and a walk-in closet are things, not a stride;
+ * climbing roses are not a climb.
+ */
+const WHOLE_BODY_POSE = new RegExp(
+  [
+    String.raw`\b${PERSONS_FEET}\s+(?:(?:are|set|firmly|squarely)\s+)?(?:planted|apart|wide|braced|spread|well\s+back|shoulder[- ]width)\b`,
+    String.raw`\b(?:planted|braced|spread)\s+(?:(?:his|her|their|both)\s+(?:feet|boots|legs)|boots)\b`,
+    String.raw`\bstance\b`,
+    String.raw`\b(?:full|whole)[- ]body\b|\bfull[- ](?:length|figure)\s+(?:shot|view|photo|portrait)\b|\bhead\s+to\s+(?:toe|foot)\b`,
+    String.raw`\b(?:swing(?:s|ing)?|swung)\s+(?:an?|the|his|her|their)\b|\bmid[- ]swing\b|\b(?:take|takes|taking|took)\s+a\s+swing\b`,
+    String.raw`\b(?:axe|ax|maul|sledge(?:hammer)?|pickaxe|scythe)\s+(?:raised|lifted|held|swung)\s+(?:high|overhead|above)\b|\boverhead\s+(?:swing|strike|blow)\b`,
+    String.raw`\b(?:chop(?:s|ping|ped)?|split(?:s|ting)?)\s+(?:(?:the|some)\s+)?(?:fire)?(?:wood|logs?|rounds?)\b`,
+    String.raw`\b(?:walk(?:s|ing|ed)?|stroll(?:s|ing|ed)?|strid(?:es|ing)|strode|hik(?:es|ing|ed)|jog(?:s|ging|ged))\b(?![-'])(?!\s+(?:boots?|shoes?|sticks?|canes?|poles?|distance|pace|speed|frames?|trails?|paths?|tours?|routes?|shorts?|socks?|aids?)\b)`,
+    String.raw`\bclimb(?:s|ing|ed)?\s+(?:(?:up|down)\s+)?(?:(?:a|the|onto|into|up)\s+)?(?:ladder|stairs|staircase|steps|hill|slope|roof|tree|fence)\b`,
+  ].join("|"),
+  "i"
+);
+/**
+ * A CALL HELD AT THE EAR: the phone sits above the lips, so a lips cut would cut it off — from behind
+ * or the side shows it and no face. The phone's screen, case or stand is a thing, never a call, and
+ * so is a phone in use as a screen: "hands typing on a phone" (job 376 scene 36), "a web page on a
+ * phone" (job 306 scene 26), "fingers visible on the phone" (job 349 scene 6) are screen pictures,
+ * hands at the glass — so "on the phone" is a call only for a PERSON on it, or talking on it.
+ */
+const CALL_AT_THE_EAR = new RegExp(
+  [
+    String.raw`\bon\s+(?:a|the)\s+(?:(?:tele)?phone\s+)?call\b(?!\s*(?:screen|display|button|log|history|list)\b)`,
+    String.raw`\b(?:(?:host|man|woman|person|someone|he|she|they)(?:\s+(?:is|are|was|were))?|talk(?:s|ing|ed)?|chat(?:s|ting|ted)?|speak(?:s|ing)?|spoke)(?:\s+\w+ly)?\s+on\s+(?:a|the|his|her|their)\s+(?:tele)?phone\b(?!\s*(?:screen|display|case|app|stand|mount|holder|charger)\b)`,
+    String.raw`\b(?:phone|telephone|handset|receiver|cell\s*phone|mobile)\s+(?:(?:held|pressed|raised|tucked)\s+)?(?:up\s+)?(?:to|at|against|by)\s+(?:his|her|their|the|one)\s+ear\b`,
+    String.raw`\b(?:pressed|held|raised|tucked)\s+(?:up\s+)?(?:to|against)\s+(?:his|her|their|the|one)\s+ear\b`,
+    String.raw`\b(?:mak(?:es|ing)|made|tak(?:es|ing)|took|answer(?:s|ing|ed)?)\s+(?:a\s+)?(?:phone\s+)?call\b|\banswer(?:s|ing|ed)?\s+(?:a|the)\s+(?:tele)?phone\b`,
+  ].join("|"),
+  "i"
+);
+
+/**
+ * A pose the picture model draws FACE-ON whatever the prompt says (2026-10-18, the review of jobs
+ * 401-407): the whole body in action and a call held at the ear. Job 407 scene 27, "the host
+ * swinging a wide flat-headed broadaxe at a log in a clearing, boots planted well back from the
+ * swing", came back a full-body, three-quarter front shot with the whole face drawn; job 406 scene
+ * 14, "the host on a phone call beside the garage workbench", a smiling portrait with the handset at
+ * the ear. Offered "the lips cut OR from behind", the model took neither. Pure.
+ */
+export function turnAwayPose(text: string | undefined): boolean {
+  const t = text ?? "";
+  return WHOLE_BODY_POSE.test(t) || CALL_AT_THE_EAR.test(t);
+}
+
+/**
+ * Whether a picture may be framed from behind or the side only: the host's own picture, and none of
+ * the pictures whose framing is settled otherwise — a chin line keeps its lips cut (the chin is what
+ * the line is about), a step on the host's own face shows the face, and a picture of a piece WORN AT
+ * THE NECK faces the camera: the piece sits on the front, so from behind it is not in the picture.
+ * "A woman in a plain navy crewneck sweater with a cream pearl strand at her collarbone, walking down
+ * a bright grocery aisle" (job 362 scene 9) and "full-length view of a woman with a long gold chain
+ * hanging past her chest" (job 378 scene 17) are pictures of the pearls and the chain. Pure.
+ */
+export function mayTurnHostAway(scene: StoryboardScene): boolean {
+  if (!scene.brollHostLook || scene.hostFaceShown || scene.otherPerson || hostLipsCut(scene)) return false;
+  return !NECK_PIECE.test(`${scene.showSubject ?? ""} ${scene.visualPrompt ?? ""}`);
+}
+
+/**
+ * A HOST picture framed from behind or the side only (`HOST_TURNED_AWAY_CLAUSE` in longformVideo):
+ * its words ask for a pose drawn face-on (`turnAwayPose`), or a drawing of it already showed the face
+ * (`scene.hostTurnedAway`, set by the still loop on `scanSameHost`'s `face`) — never a picture whose
+ * framing is settled otherwise (`mayTurnHostAway`). Read off the scene each time, like `hostLipsCut`.
+ * Pure.
+ */
+export function hostTurnedAway(scene: StoryboardScene): boolean {
+  if (!mayTurnHostAway(scene)) return false;
+  return !!scene.hostTurnedAway || turnAwayPose(`${scene.showSubject ?? ""} ${scene.visualPrompt ?? ""}`);
+}
+
 /** Something worn at the neck: what a chin line's picture shows on the person. */
 const NECK_PIECE =
   /\b(?:necklaces?|pendants?|chokers?|lockets?|chains?|pearls?|beads?|scarf|scarves|neckerchiefs?)\b/i;
 /** A neck piece on a display stand: the one place a piece that is already worn is taken off. */
 const ON_A_STAND = String.raw`,?\s*\b(?:on|over)\s+(?:(?:a|an|the)\s+)?(?:dress form|mannequin|necklace stand|jewel(?:le)?ry stand|display stand|display bust)\b[^,.;]*`;
 /** A neck piece set down — on a table, in a box, over a mirror, on a stand — rather than worn. */
-const SET_DOWN_SOURCE = String.raw`,?\s*\b(?:draped|laid|lying|lies|resting|rests|displayed|arranged|spread|coiled|placed|sitting|sits|hanging|hangs|propped|tucked)\s+(?:out\s+|flat\s+)?(?:over|across|on|onto|in|inside|along|atop)\s+(?![^,.;]*\b(?:chest|neck|collarbones?|skin|throat|shoulders?|body|hands?|palms?|fingers?|sweater|crewneck|turtleneck|blouse|shirt|neckline|dress(?!\s+form))\b)[^,.;]+|${ON_A_STAND}|,?\s*\b(?:on|onto|in|inside|atop)\s+(?:a|an|the|its)\s+${MODIFIER_WORD}{0,3}(?:tables?|tabletops?|dressers?|vanit(?:y|ies)|nightstands?|desks?|counters?|countertops?|shelf|shelves|trays?|dish(?:es)?|box(?:es)?|drawers?|rugs?|cloths?|towels?|velvet|linings?|cushions?|pillows?|beds?|bedspreads?|surfaces?|mats?)\b[^,.;]*`;
+const SET_DOWN_SOURCE = String.raw`,?\s*\b(?:draped|laid|lying|lies|resting|rests|displayed|arranged|spread|coiled|placed|sitting|sits|hanging|hangs|propped|tucked)\s+(?:out\s+|flat\s+)?(?:over|across|on|onto|in|inside|along|atop)\s+(?![^,.;]*\b(?:chest|neck|collarbones?|skin|throat|shoulders?|body|${BODY_HAND}|palms?|fingers?|sweater|crewneck|turtleneck|blouse|shirt|neckline|dress(?!\s+form))\b)[^,.;]+|${ON_A_STAND}|,?\s*\b(?:on|onto|in|inside|atop)\s+(?:a|an|the|its)\s+${MODIFIER_WORD}{0,3}(?:tables?|tabletops?|dressers?|vanit(?:y|ies)|nightstands?|desks?|counters?|countertops?|shelf|shelves|trays?|dish(?:es)?|box(?:es)?|drawers?|rugs?|cloths?|towels?|velvet|linings?|cushions?|pillows?|beds?|bedspreads?|surfaces?|mats?)\b[^,.;]*`;
 /**
  * Words saying the piece is already on someone ("worn at the collarbone", "on the chest"). "Host" or
  * "woman" alone is not one: "the host's pearl necklace laid on the dresser" is set down.
@@ -1070,8 +1240,10 @@ const ON_A_PERSON = new RegExp(
 /** What `wornAtTheNeck` adds (and how it knows it already has). */
 const WORN_TAIL = "worn at the host's own neck, the chin and jaw in view above it";
 /** A hand on the piece: the picture is of someone doing something with it, and stays as it is. */
-const HAND_ON_IT =
-  /\b(?:hands?|fingers?|fingertips?|palms?|hold(?:s|ing)?|held|lift(?:s|ing)?|pick(?:s|ing)|tak(?:es|ing)|adjust(?:s|ing)?|fasten(?:s|ing)?)\b/i;
+const HAND_ON_IT = new RegExp(
+  String.raw`\b(?:${BODY_HAND}|fingers?|fingertips?|palms?|hold(?:s|ing)?|held|lift(?:s|ing)?|pick(?:s|ing)|tak(?:es|ing)|adjust(?:s|ing)?|fasten(?:s|ing)?)\b`,
+  "i"
+);
 
 /**
  * A chin line's picture of the piece alone, put on the host (2026-10-18, the audit): job 223 scene 5,
@@ -1138,6 +1310,119 @@ export function facingTheCamera(text: string): string {
     .trim();
 }
 
+// ─── The viewer, when the host's job serves them ─────────────────────────────────────────
+
+/** A line spoken to the viewer: "you" in any form. */
+const SPOKEN_TO_YOU = /\b(?:you|your|yours|yourself|yourselves)\b/i;
+/** The host speaking of themself — "I" (capital only: never a letter in a list) and "me", "my". */
+const SPEAKS_OF_SELF = /\bI(?:['’](?:m|ve|ll|d))?\b/;
+const SPEAKS_OF_SELF_LOWER = /\b(?:me|my|mine|myself)\b/i;
+
+/**
+ * The sentence a picture's line is part of: its own words with the beats before and after it, out
+ * to where the sentence starts and ends (at most 8 beats each way). A spoken list cuts one sentence
+ * into many pictures — job 405's "She walks the full length of you, | ankle, | knee, | hip, | ribs,"
+ * — and only the whole sentence says who the items are on. Pure.
+ */
+function sentenceAround(scenes: StoryboardScene[], i: number): string {
+  const ends = (t: string | undefined) => /[.!?]["”’')\]]*\s*$/.test((t ?? "").trim());
+  let a = i;
+  while (a > 0 && i - a < 8 && !ends(scenes[a - 1].scriptText)) a--;
+  let b = i;
+  while (b < scenes.length - 1 && b - i < 8 && !ends(scenes[b].scriptText)) b++;
+  return scenes
+    .slice(a, b + 1)
+    .map(s => (s.scriptText ?? "").trim())
+    .join(" ");
+}
+
+/** Whether a sentence speaks to "you" and never of the host themself ("I", "me", "my"). Pure. */
+function spokenToViewer(sentence: string): boolean {
+  return SPOKEN_TO_YOU.test(sentence) && !SPEAKS_OF_SELF.test(sentence) && !SPEAKS_OF_SELF_LOWER.test(sentence);
+}
+
+/**
+ * "You" as the one DOING something — at the start of a sentence or clause ("On many of those
+ * carriers, you can have…", "and you're no worse off"), never only on the receiving end ("they'll
+ * pour it for you", "they'll tell you,"). Hands at a viewer's thing on a line where "you" only
+ * receives are the worker's, not the viewer's. Pure.
+ */
+const VIEWER_DOES =
+  /(?:^|[,;:.!?"“(—–]\s*|\b(?:and|but|so|if|when|whenever|then|because|until|while|before|after|once|or|unless|now)\s+)you(?:['’](?:re|ve|ll|d))?\s+[a-z]/i;
+
+/**
+ * Whether a picture's person is THE VIEWER (`inputParams.viewerPerson`: "you", when the host's job
+ * serves them) though neither the shot list nor the line check named them (2026-10-18, the review
+ * of jobs 402 and 405). Three general cases, each with the evidence in the picture's own words:
+ *   - the planner named only a PLAIN person ("a sleeping person") on a sentence spoken to "you", that
+ *     never names such a person itself, never says "I" or "my", and names nobody else in the frame:
+ *     job 405's "you" the cat walks across was "a sleeping person" in scenes 3-8, a different
+ *     stranger each time, while its "your chest", "your bed" belong to one person;
+ *   - the only person the description names IS the viewer by their own words ("a sleeping cat
+ *     owner", "the homeowner"), on a sentence spoken to "you" — an owner otherwise reads as the host;
+ *   - nobody is named but a thing is the viewer's ("near a passenger's tray") beside hands, on a line
+ *     spoken to "you" with no "I" where "you" does something (`VIEWER_DOES`): job 402 scene 17, "On
+ *     many of those carriers, you can have the whole thing just by asking", drew the host in her crew
+ *     uniform in the passenger's seat.
+ * A picture whose words name the host, a role or two people is never taken: they decide. Pure.
+ */
+export function picturesTheViewer(
+  scenes: StoryboardScene[],
+  i: number,
+  viewer: RecurringPerson,
+  opts: { hostName?: string } = {}
+): boolean {
+  const s = scenes[i];
+  if (!s) return false;
+  // A stop between the two descriptions: "…a passenger's tray" + "Hands…" is no passenger's hands.
+  const words = withHostNamed(`${s.showSubject ?? ""}. ${s.visualPrompt ?? ""}`, opts.hostName);
+  const vKey = personKey(viewer.name);
+  const vNamed = namedPeople(viewer.name);
+  // A role the person words do not know ("the patient", "the diner") is its last word.
+  const vNoun = vNamed?.people[0]?.noun ?? vKey.split(" ").pop();
+  const vSex = vNamed?.sex ?? sexOfLook(viewer.look);
+  // "the passenger" is "a passenger"; "the cat owner" is "a sleeping cat owner", never "a shop owner".
+  const isViewer = (p: NamedPerson) => {
+    const k = personKey(p.phrase);
+    return p.count === 1 && (k === vKey || (vKey.includes(" ") && k.endsWith(` ${vKey}`)) || (!!vNoun && p.noun === vNoun && k === vNoun));
+  };
+  const desc = namedPeople(words);
+  if (s.otherPerson) {
+    const label = namedPeople(s.otherPerson);
+    const only = label?.people.length === 1 ? label.people[0] : undefined;
+    if (!only || only.kind !== "generic" || only.count !== 1) return false;
+    if (only.sex && vSex && only.sex !== vSex) return false;
+    if (desc && (desc.count > 1 || desc.people.some(p => p.kind !== "generic"))) return false;
+    const sentence = sentenceAround(scenes, i);
+    // The line names that person itself ("ask the woman at the counter"): she is someone else.
+    if (new RegExp(String.raw`\b${only.noun}s?\b`, "i").test(sentence)) return false;
+    return spokenToViewer(sentence);
+  }
+  // The viewer's role named on a line that never speaks to "you" is someone in the story ("a
+  // passenger reaching for the bin" under "She reached up for her bag"), as before.
+  if (desc) return desc.people.length === 1 && isViewer(desc.people[0]) && SPOKEN_TO_YOU.test(sentenceAround(scenes, i));
+  if (!vNoun) return false;
+  const owns = new RegExp(String.raw`\b(?:a|an|the|this|that|your)\s+(?:[a-z-]+\s+){0,2}${vNoun}['’]s\b`, "i");
+  const sentence = sentenceAround(scenes, i);
+  // "you" must be the one doing something: under "they'll pour it for you", hands pouring at a
+  // passenger's tray are the crew's — drawing them as the passenger is the same mistake turned round.
+  return owns.test(words) && spokenToViewer(sentence) && VIEWER_DOES.test(sentence);
+}
+
+/**
+ * A picture of THE VIEWER alone keeps no words naming the host — they are left from the rule that
+ * drew "you" as the host (job 405 scene 29, "the tabby cat stirring awake on the bed beside the
+ * sleeping host" under "right when yours is at its deepest"): "the sleeping host" becomes "the
+ * sleeping cat owner". Pure.
+ */
+export function hostWordsAsViewer(text: string, viewer: RecurringPerson): string {
+  const role = viewer.name.trim().replace(/^(?:the|a|an)\s+/i, "");
+  return text.replace(
+    /\b(?:the|a|an)\s+((?:[a-z-]+\s+){0,2}?)(?:host|narrator|presenter)\b(?!\s+of\b)/gi,
+    (_m, mods: string) => `the ${mods}${role}`
+  );
+}
+
 /**
  * Mark the pictures that show someone doing the work as the HOST (see the file comment), and the
  * ones that show SOMEONE ELSE as that person (`otherPerson`, `otherPeople`) — never the host photo.
@@ -1147,11 +1432,15 @@ export function facingTheCamera(text: string): string {
  */
 export function markHostBroll(
   scenes: StoryboardScene[],
-  params: Pick<LongformInputParams, "hostLook" | "brollOnly" | "hostName" | "hostTitle" | "recurringPeople">,
+  params: Pick<
+    LongformInputParams,
+    "hostLook" | "brollOnly" | "hostName" | "hostTitle" | "recurringPeople" | "viewerPerson"
+  >,
   hostPhotoUrl: string | undefined
 ): number {
   const look = params.hostLook?.trim();
   const on = !!look && !!hostPhotoUrl && !params.brollOnly;
+  const viewer = params.viewerPerson;
   // A role the host gives themself ("I'm <Name>, a plumber") is the host in their own pictures.
   const intro = scenes
     .filter((s, i) => s.hostIntro || i < 3)
@@ -1159,7 +1448,8 @@ export function markHostBroll(
     .join(" ");
   const selfRoles = selfRolesOf(intro, params.hostTitle, params.hostName);
   let n = 0;
-  for (const s of scenes) {
+  for (let i = 0; i < scenes.length; i++) {
+    const s = scenes[i];
     const eligible =
       !s.hostPresent &&
       !s.splitVisual &&
@@ -1171,6 +1461,9 @@ export function markHostBroll(
     const words = `${s.showSubject ?? ""} ${s.visualPrompt ?? ""}`;
     s.otherPersonLooks = undefined;
     s.hostAmongOthers = undefined;
+    // A face the still check refused stays refused while the picture is still the host's at work.
+    const turnedAway = s.hostTurnedAway;
+    s.hostTurnedAway = undefined;
     // A planner's "someone else" lives and dies with the words it came from (2026-10-18, the
     // audit): "a woman customer" left on a picture of an incense holder (job 361 scene 32), "a
     // woman passenger" on a close-up of a soda can (job 399 scene 4), "a hen" (job 371) — each
@@ -1186,6 +1479,22 @@ export function markHostBroll(
     // jawline down with it". A picture of anything else keeps no one in it.
     const toWear = on && eligible && !s.otherPerson && NECK_PIECE.test(words) && chinFramed(s);
     const person = !!s.humanPresent || showsPerson(text) || toWear;
+    // THE VIEWER, when the host's job serves "you" (`viewerPerson`, 2026-10-18, jobs 402 and 405):
+    // a picture of "you" the planner and the line check left unnamed, or named only as a plain
+    // person, is that one viewer — never the host in her work clothes, never a new stranger
+    // (`picturesTheViewer`).
+    if (viewer && eligible && person && !toWear && picturesTheViewer(scenes, i, viewer, { hostName: params.hostName })) {
+      s.otherPerson = viewer.name;
+      s.otherPeople = undefined;
+    }
+    // The viewer's look goes only to a picture ABOUT "you": one a model (or the rule above) named
+    // the viewer in, or one on a sentence spoken to "you". A passenger in the story's own telling
+    // (job 402 scenes 3 and 7, "He figures she must know somebody on the crew") is not the
+    // viewer, and with no PERSON line of her own she stays a stranger rather than borrow that look.
+    const aboutYou =
+      !!viewer &&
+      ((!!s.otherPerson && personKey(s.otherPerson) === personKey(viewer.name)) ||
+        SPOKEN_TO_YOU.test(sentenceAround(scenes, i)));
     // SOMEONE ELSE in the picture: named by the planner, or by the picture's own words — a role, a
     // sex the host does not have, two or more people (`someoneElse`) — with EVERYONE the words name
     // in it, and the host among them when one is (`castOfPicture`, job 399 scenes 8 and 14).
@@ -1204,13 +1513,20 @@ export function markHostBroll(
       // still never from the photo: one photo beside two people made both of them the host.
       s.hostAmongOthers = other.host && look ? { who: other.host, look } : undefined;
       // Someone the story comes back to keeps one look in every picture of them (job 399: the same
-      // passenger was three different women in scenes 2, 4 and 5) — `matchRecurringPeople`.
-      const looks = matchRecurringPeople(other.who, other.count, params.recurringPeople);
+      // passenger was three different women in scenes 2, 4 and 5) — `matchRecurringPeople` — and
+      // so does the viewer ("you") when the host's job serves them.
+      const looks = matchRecurringPeople(other.who, other.count, params.recurringPeople, aboutYou ? viewer : undefined);
       s.otherPersonLooks = looks.length ? looks : undefined;
       s.humanPresent = true;
       s.brollHostLook = undefined;
       s.brollHostRef = undefined;
       s.hostFaceShown = undefined;
+      // The viewer alone in the picture: words naming the host are left from the old "you is the
+      // host" rule (job 405 scene 29, "beside the sleeping host") and now name the viewer.
+      if (viewer && !other.host && other.count === 1 && personKey(other.who) === personKey(viewer.name)) {
+        if (s.showSubject) s.showSubject = hostWordsAsViewer(s.showSubject, viewer);
+        if (s.visualPrompt) s.visualPrompt = hostWordsAsViewer(s.visualPrompt, viewer);
+      }
       // No face for anyone in it, so nothing in the words asks for one (`withoutFaceAsks`).
       if (s.showSubject) s.showSubject = withoutFaceAsks(withoutMirrors(s.showSubject));
       if (s.visualPrompt) s.visualPrompt = withoutFaceAsks(withoutMirrors(s.visualPrompt));
@@ -1232,6 +1548,7 @@ export function markHostBroll(
       if (s.showSubject) s.showSubject = tidy(s.showSubject);
       if (s.visualPrompt) s.visualPrompt = tidy(s.visualPrompt);
       s.brollHostRef = hostPhotoUrl;
+      if (!s.hostFaceShown) s.hostTurnedAway = turnedAway;
       n++;
     } else if (on && s.hostPresent && s.splitVisual && BODY_PART_WORDS.test(s.splitVisual) && !REAL_HOLDER.test(s.splitVisual)) {
       // A split panel about a body part (hair, nails, skin) shows it on the host: it gets the host's

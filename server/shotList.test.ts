@@ -901,6 +901,47 @@ describe("a video is only ever of something that moves by itself — never hands
     expect(videoKind("the sliding glass door opening onto the deck", "object")).toBe("object");
     expect(videoKind("fire burning in the wood stove", "camera")).toBe("object");
   });
+  it("a hand that names a thing is not hands: hand tools and a clock's hands may be in a video (job 406 scene 7)", async () => {
+    const { SHOWS_HANDS, videoKind } = await import("./shotList");
+    for (const thing of [
+      "hand tools hanging silent on a pegboard wall in the garage",
+      "a hand towel fluttering on the line in the breeze",
+      "a kitchen wall clock, its second hand sweeping past the twelve",
+      "the hands of the old wall clock near midnight",
+    ])
+      expect(SHOWS_HANDS.test(thing), thing).toBe(false);
+    expect(videoKind("a hand towel fluttering on the line in the breeze", "object")).toBe("object");
+    expect(videoKind("a kitchen wall clock, its second hand sweeping past the twelve", "object")).toBe("object");
+    // A hand on a body still never moves.
+    for (const hand of [
+      "a hand reaching for the hammer on the pegboard",
+      "hands sanding a board",
+      "hand-sewing the binding",
+      "a hand drill boring a hole into a small charred cedar block", // job 189 scene 36: a hand on the drill
+      "nine-patch crib quilt being pieced by hand at the work table", // job 144 scene 3
+    ]) {
+      expect(SHOWS_HANDS.test(hand), hand).toBe(true);
+      expect(videoKind(hand, "object"), hand).toBe("none");
+    }
+  });
+});
+
+describe("a planned shot of hand tools has nobody in it (round 11's review, job 406 scene 7)", () => {
+  it("does not mark the picture as a person at work; a shot of a hand on a tool does", async () => {
+    const { applyShotPlan } = await import("./shotList");
+    const beat = {
+      index: 7,
+      scriptText: "That one belief keeps more good tools hanging silent on more garage walls than rust ever has.",
+      showSubject: "x",
+      visualPrompt: "x",
+    } as StoryboardScene;
+    const plan = (show: string) => [{ scene: 7, hostUntil: null, shots: [{ from: "That one belief", show }] }];
+    const wall = applyShotPlan([{ ...beat }], plan("hand tools hanging silent on a pegboard wall in the garage")).scenes[0];
+    expect(wall.showSubject).toBe("hand tools hanging silent on a pegboard wall in the garage");
+    expect(wall.humanPresent).toBeUndefined();
+    const grip = applyShotPlan([{ ...beat }], plan("a hand lifting the hammer off the pegboard wall")).scenes[0];
+    expect(grip.humanPresent).toBe(true);
+  });
 });
 
 describe("a line naming something new keeps its own picture (Hank's job 258)", () => {

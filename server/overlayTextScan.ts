@@ -108,6 +108,21 @@ export const STILL_DEFECT_SYSTEM =
   "body (a hand in a vise's jaws)\n" +
   "- a tool held or angled in a way no real user holds it, or whose path runs into the table, the " +
   "bench or a hand; fingers in front of or right beside a blade, saw, bit or cutting edge\n" +
+  // Job 406 scene 9 passed with a chisel pushed straight at the other hand flat on the board. A
+  // kitchen knife is not named: it cuts down beside the guide hand, and one being sharpened has
+  // fingers on its flat — the line above already covers fingers right beside an edge.
+  "- a hand or fingers AHEAD of a chisel, gouge, plane or a knife carving wood — on the work where " +
+  "its edge points or is being pushed (a chisel driven toward the other hand lying flat on the " +
+  "wood)\n" +
+  // Job 407 scenes 10, 14 and 17: a froe in the side of a piece, on top of it, out in the air. Only
+  // while SPLITTING: the same film's broadaxe hewing the side of a log (scene 25) is right.
+  "- a tool SPLITTING wood (a froe, wedge, maul or axe splitting a piece) whose edge is not in the " +
+  "wood's end grain: pushed into the SIDE of an upright piece, its edge resting on the wood but not " +
+  "in it, its blade sticking out into the air with no wood under its edge, or lying ACROSS a split " +
+  "already open (a split runs along the blade); a piece splitting apart with no blade in its " +
+  "split; a hand gripping a piece where it is splitting open. An axe chopping, felling or hewing " +
+  "into the side of a log or trunk is right, and a tool hanging, lying or resting unused is " +
+  "splitting nothing\n" +
   "- a phone, tablet or laptop built into, framed by or made of another object (a tablet whose " +
   "frame is a cutting board, a screen set inside a quilt or a shelf)\n" +
   "- a body part that looks CUT OFF: hair still shaped like a head or hairstyle with no head " +
@@ -402,6 +417,118 @@ export const STAGED_RULE =
 export const STAGED_QUESTION = `\n\nQUESTION 7 — staged: ${STAGED_RULE}`;
 
 /**
+ * Words that NAME a picture's light: a dark hour, the low light of dusk or dawn, or a light source.
+ * Each is narrow on purpose, since a word used as a name lights nothing: a fire extinguisher or a
+ * fire alarm, a nightstand, glue left overnight, "evening out" a finish, dark walnut, dim sum, a
+ * stack of firewood. "tonight" is left out too — "so tonight we're treating that scene like
+ * footage" (job 405 scene 13) is a host talking, not a time of day.
+ */
+const NOT_A_COLOUR =
+  "(?![-\\s]+(?:green|blue|red|brown|gr[ae]y|black|wood|walnut|oak|cherry|mahogany|stain|finish|roast|colou?r)\\b)";
+/**
+ * "In the dark" names the light only where the phrase ENDS: punctuation, the end, a small word, a
+ * new subject or what someone is doing ("glow in the dark, if…", "in the dark of your closet", "you
+ * need in the dark should…", "in the dark scrolling"). Followed by a noun, "dark" describes that
+ * thing instead — a style line's "yourself in the dark necklace", "in dark colors", "in dark mode" —
+ * and a list of colours could never name every thing a word can describe.
+ */
+const DARK_PHRASE_ENDS =
+  "(?=\\s*(?:[^\\w\\s]|$)|\\s+(?:of|with|and|or|but|so|as|at|on|for|to|by|from|under|near|beside|" +
+  "until|till|when|while|before|after|because|like|again|alone|all|now|then|too|where|without|is|" +
+  "was|are|were|will|would|should|can|could|may|might|must|does|did|has|had|i|you|he|she|we|they|" +
+  "this|that|there|here)\\b|\\s+(?!clothing\\b)\\w+ing\\b)";
+const NAMED_LIGHT: RegExp[] = [
+  // A dark hour: night, midnight, the small hours, one to five in the morning, a late evening hour.
+  // Never a colour ("midnight blue").
+  /\b(?:mid)?nights?(?:[- ]?time)?\b(?![-\s]+(?:stand|table|cream|gown|shirt|owl|guard|mode|serum|mask|blue|black)s?\b)/gi,
+  /\b(?:small|wee) hours\b/gi,
+  /\b(?:[1-5]|12|one|two|three|four|five|twelve)(?:[:.]\d\d|[- ](?:thirty|fifteen|forty(?:[- ]five)?))?(?: o'clock)? in the morning\b/gi,
+  /\b(?:[1-5]|12|one|two|three|four|five|twelve)(?::\d\d)?\s?a\.?\s?m\.?(?!\w)/gi,
+  /\b(?:[7-9]|1[01]|seven|eight|nine|ten|eleven)(?::\d\d)?\s?p\.?\s?m\.?(?!\w)/gi,
+  // The low light at either end of the day.
+  /\bevenings?\b(?![-\s]+(?:out|up)\b)/gi,
+  // Never a paint colour or a contract's end ("sunset orange", "a sunset clause").
+  /\b(?:dusk|dawn|pre-?dawn|daybreak|nightfall|twilight|sunset|sundown|sunrise|first light|last light)\b(?![-\s]+(?:orange|yellow|red|pink|gold|clauses?|provisions?)\b)/gi,
+  // The dark itself, said of a place or a time — never of a colour or a wood ("in dark walnut"), nor
+  // of a thing ("in the dark necklace", `DARK_PHRASE_ENDS`).
+  /\b(?:in|into) (?:the )?darkness\b/gi,
+  new RegExp(`\\bafter dark\\b${NOT_A_COLOUR}`, "gi"),
+  new RegExp(`\\b(?:in|into) (?:the )?dark\\b${DARK_PHRASE_ENDS}`, "gi"),
+  new RegExp(
+    "\\b(?:house|home|room|bedroom|kitchen|street|sky|outside|world|everything|it)(?:'s|\\s+(?:is|was|" +
+      "has gone|had gone|goes|went|gets|got|grows|grew|turns|turned|is getting|was getting))\\s+" +
+      `(?:pitch\\s+)?dark\\b${NOT_A_COLOUR}`,
+    "gi"
+  ),
+  /\bdark (?:room|house|home|bedroom|kitchen|hall|hallway|study|garage|shed|barn|street|road|yard|sky|window|windows|cabin|tent)s?\b/gi,
+  /\bpitch[- ](?:dark|black)\b/gi,
+  /\bdim(?:ly)?(?:[- ]lit)?\b(?![-\s]+(?:sum|view|wit(?:ted)?)\b)/gi,
+  /\blow light\b/gi,
+  /\b(?:power (?:outage|cut|failure)|blackout)s?\b/gi,
+  // A light source: a lamp, a candle, a fire, the moon, a screen in the dark.
+  /\b(?:head|street)?lamp(?:s|light|lit|-lit)?\b/gi,
+  /\bcandle(?:s|light|lit|-lit)?\b/gi,
+  /\blanterns?\b/gi,
+  /\b(?:flash|torch|moon|star|street|night)[- ]?lights?\b/gi,
+  /\bmoonlit\b/gi,
+  // Not the trade or the gear around a fire ("the fire service", "fire protection", a fire hose), nor
+  // the verb ("fire up", "fire off an email").
+  /(?<![\w-])(?:camp|bon|wild)?fires?(?:light|lit|place|places|side|pits?)?\b(?![-\s]+(?:extinguishers?|alarms?|trucks?|engines?|stations?|departments?|services?|protection|prevention|fighters?|safety|doors?|codes?|hazards?|escapes?|exits?|drills?|insurance|marshals?|chiefs?|hydrants?|hoses?|blankets?|risks?|starters?|sales?|ants?|resistant|rated|proof|up|away|off)\b)/gi,
+  /\b(?:hearth|embers)\b/gi,
+  /\bflames?\b(?![-\s]+(?:retardant|resistant|proof)\b)/gi,
+  /\bglow of (?:a|an|the|her|his|their|your|my) (?:phone|screen|laptop|tablet|tv|television|monitor)\b/gi,
+  /\b(?:phone|screen|laptop|tablet|tv|television|monitor) glow\b/gi,
+];
+
+/**
+ * The words in a picture's narration line and its own description that name its light, in the
+ * order they appear, each once (a word inside a longer match — "night" in "night light" — is
+ * dropped). Empty when neither names any. Pure — unit-tested.
+ */
+export function namedLight(...texts: (string | undefined)[]): string[] {
+  const found: string[] = [];
+  for (const text of texts) {
+    if (!text) continue;
+    const spans: { at: number; end: number; words: string }[] = [];
+    for (const re of NAMED_LIGHT)
+      for (const m of Array.from(text.matchAll(re))) spans.push({ at: m.index!, end: m.index! + m[0].length, words: m[0].trim() });
+    spans.sort((a, b) => a.at - b.at || b.end - a.end);
+    for (const s of spans) {
+      if (spans.some(o => o !== s && o.at <= s.at && o.end >= s.end && o.end - o.at > s.end - s.at)) continue;
+      if (!found.some(f => f.toLowerCase() === s.words.toLowerCase())) found.push(s.words);
+    }
+  }
+  return found.slice(0, 6);
+}
+
+/**
+ * LIGHT THE WORDS NAME IS NOT STAGED (2026-10-18, the review of jobs 401-407). `STAGED_RULE` counts
+ * a glowing lamp, a candle or moody light with dark corners as staged, and the picture prompt
+ * already lets that light in when the shot names it (`amateurSettingClause`: "no glowing lamps,
+ * candles or fire unless the shot names them") — but the check was never told what the shot named,
+ * so it refused the very light the line asked for. Job 405's night bedroom ("a quiet bedroom at
+ * night", "the lamp glowing softly on the nightstand", scenes 13, 16, 18, 20), job 401 scene 11
+ * ("the kitchen table at two in the morning", "a dim lamp at night") and scene 22 ("writing on a
+ * scroll … by lamplight") were each called staged on both draws and shipped with the warning: a
+ * redraw from the same words draws the same night again, so the flag only cost a picture. The check
+ * is now told which words name the light, and judges only what does not come from them — the
+ * golden glow nobody asked for, the glossy advert finish — as the rule always has. Asked after the
+ * cached rulebook, like `SOFT_PRINT_QUESTION`; `STAGED_RULE` itself is unchanged.
+ */
+export function namedLightQuestion(named: string[], heading = "QUESTION 7 NOTE — staged"): string {
+  if (!named.length) return "";
+  const words = named.map(w => `"${w.replace(/"/g, "'")}"`).join(", ");
+  return (
+    `\n\n${heading}: the narrator's line or this picture's own description names its light ` +
+    `(${words}). Light that comes from that is what was asked for — a lamp, candle, fire or screen ` +
+    "glowing in a dark room, dim or low light with dark corners, dark windows, the low warm light of " +
+    "dusk or dawn — and is NEVER staged on its own. Judge everything else as before: answer true " +
+    "for a glossy, polished advertising finish, or for a golden glow or dramatic light that does not " +
+    "come from what those words name."
+  );
+}
+
+/**
  * QUESTION 6, asked only with the narration line: the frame is set where the line says.
  *
  * `rulesOut`: the picture's sentence rules something out (`scene.forbids`, QUESTION 8). A place such
@@ -546,6 +673,8 @@ export async function scanStillDefects(
         (line ? placeQuestion(line, !!ruledOut) : "") +
         (allowedText ? allowedTextQuestion(allowedText) : "") +
         (ruledOut ? forbiddenQuestion(ruledOut) : "") +
+        // Light the line or the picture's own description names is what was asked for, not staged.
+        namedLightQuestion(namedLight(line, expect)) +
         verdictShape(expect, line, askDetail, !!ruledOut),
       userMessage:
         "Is any text stamped over this frame, does it contain obviously impossible structure, " +
@@ -681,6 +810,13 @@ export async function scanNearCopy(earlier: Buffer, buffer: Buffer): Promise<{ c
  * Is the person in a picture the HOST? (2026-10-15, the review: Scarlett's routine pictures showed
  * "a different woman".) The host photo LEFT, the picture RIGHT. Only what the picture shows is
  * judged — a picture from behind is judged on hair, build and clothes, one of the face on the face.
+ * IS THE FACE SHOWN? (`face`, 2026-10-18, the review of jobs 401-407): the same call also says
+ * whether the face is in the picture. The rule that a host picture never draws the face lived only
+ * in the prompt, and a well-matched drawn face was the easiest kind to pass this check — job 401
+ * scene 20 (the host reading at a desk, face on, 10 s), job 406 scene 14 (smiling into the lens with
+ * a phone at the ear) and job 407 scene 27 (a full-body axe swing, the face in three-quarter view)
+ * all passed as "the same person". Both eyes are the line: a three-quarter view shows both, a profile
+ * turned from the camera one — and "from the side" is a framing the host prompt asks for.
  */
 export const SAME_HOST_SYSTEM =
   "You compare two photos. LEFT: the host of a video. RIGHT: a new picture that must show THAT " +
@@ -692,30 +828,47 @@ export const SAME_HOST_SYSTEM =
   "clearly younger or older, different skin tone, a different face, or more than one person. " +
   "When too little of the person shows to tell (hands only), judge what shows (age and skin " +
   "tone of the hands) and give the benefit of the doubt.\n" +
-  'Return ONLY JSON: {"same":true|false,"what":"<what differs, a few words, or empty>"}';
+  "face: true when the RIGHT picture shows a person's FACE — the nose and both eyes (open, closed " +
+  "or looking down), from the front or in three-quarter view — however small the person is in the " +
+  "frame. false when the face is out of frame (the frame cut at the lips or the chin), turned away " +
+  "(seen from behind), seen edge-on in profile with only one eye showing, or when no head is in " +
+  "the picture. Answer face whatever you answer for same.\n" +
+  'Return ONLY JSON: {"same":true|false,"face":true|false,"what":"<what differs or shows, a few words, or empty>"}';
 
-/** Decide from the model's answer; anything unreadable passes (a check never costs a render). Pure. */
-export function parseSameHostVerdict(raw: string, stopReason?: string): { same: boolean; what: string } {
+/**
+ * Decide from the model's answer; anything unreadable passes (a check never costs a render) — so a
+ * face counts only when the answer says `face: true`. Pure.
+ */
+export function parseSameHostVerdict(
+  raw: string,
+  stopReason?: string
+): { same: boolean; face: boolean; what: string } {
   const m = /\{[\s\S]*\}/.exec(raw ?? "");
-  if (!m || stopReason === "max_tokens") return { same: true, what: "" };
+  if (!m || stopReason === "max_tokens") return { same: true, face: false, what: "" };
   try {
     const d = JSON.parse(m[0]);
     const same = d?.same !== false;
-    return { same, what: same ? "" : String(d?.what ?? "a different person").slice(0, 80) };
+    const face = d?.face === true;
+    const what = String(d?.what ?? "").trim().slice(0, 80);
+    return {
+      same,
+      face,
+      what: !same ? what || "a different person" : face ? what || "the face is shown" : "",
+    };
   } catch {
-    return { same: true, what: "" };
+    return { same: true, face: false, what: "" };
   }
 }
 
 /**
- * Is the person in `buffer` the host in `hostPhotoUrl`? Side by side, the photo on the left.
- * Never throws: a dead check passes the picture.
+ * Is the person in `buffer` the host in `hostPhotoUrl`, and is their face shown? Side by side, the
+ * photo on the left. Never throws: a dead check passes the picture.
  */
 export async function scanSameHost(
   hostPhotoUrl: string,
   buffer: Buffer,
   faceShown: boolean
-): Promise<{ same: boolean; what: string }> {
+): Promise<{ same: boolean; face: boolean; what: string }> {
   try {
     const { presignOwnBucketUrl } = await import("./storage");
     const res = await fetch(await presignOwnBucketUrl(hostPhotoUrl), {
@@ -735,7 +888,8 @@ export async function scanSameHost(
       systemPrompt: SAME_HOST_SYSTEM,
       userMessage: faceShown
         ? "The right picture shows the person's face. Is it the same person as on the left?"
-        : "Is the person in the right picture the same person as on the left, as far as it shows?",
+        : "Is the person in the right picture the same person as on the left, as far as it shows? " +
+          "And is their face shown?",
       imageInput: { base64: pair.toString("base64"), mediaType: "image/png" },
       maxTokens: 200,
       model: SAME_THING_MODEL(),
@@ -744,10 +898,11 @@ export async function scanSameHost(
     });
     const v = parseSameHostVerdict(result.text, result.stopReason);
     if (!v.same) console.log(`[SameHost] not the host: ${v.what}`);
+    else if (v.face && !faceShown) console.log(`[SameHost] the face is shown: ${v.what}`);
     return v;
   } catch (err: any) {
     console.warn(`[SameHost] check failed: ${err?.message ?? err} — passing the picture`);
-    return { same: true, what: "" };
+    return { same: true, face: false, what: "" };
   }
 }
 

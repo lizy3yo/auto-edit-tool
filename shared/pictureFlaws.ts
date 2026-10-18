@@ -23,6 +23,8 @@ import type { StoryboardScene } from "./types";
 export const DIFFERENT_THING = "different thing";
 export const COPIES_MEMORY = "copies its memory";
 export const NOT_THE_HOST = "not the host";
+/** A host picture that drew the face it must never show (`scanSameHost`'s `face`). */
+export const FACE_SHOWN = "face shown";
 export const NEAR_COPY = "near copy";
 
 const WORDS: Record<string, string> = {
@@ -39,6 +41,7 @@ const WORDS: Record<string, string> = {
   [COPIES_MEMORY]: "its earlier picture's framing",
   [NEAR_COPY]: "a near copy of another picture",
   [NOT_THE_HOST]: "someone other than the host",
+  [FACE_SHOWN]: "a drawn face",
 };
 
 /**

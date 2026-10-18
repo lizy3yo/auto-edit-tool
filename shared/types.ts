@@ -627,6 +627,14 @@ export interface StoryboardScene {
    */
   hostFaceShown?: boolean;
   /**
+   * A drawing of this host picture showed the face (`scanSameHost`'s `face`), so every later drawing
+   * of it — the redraw, and a Regenerate — is framed from behind or the side only
+   * (`HOST_TURNED_AWAY_CLAUSE`, `hostTurnedAway` in server/hostLook.ts), never the "either" framing
+   * the model ignored. Never set or acted on for a chin line's lips-cut picture, a step on the host's
+   * own face, or a picture of a piece worn at the neck (`mayTurnHostAway`).
+   */
+  hostTurnedAway?: true;
+  /**
    * Where the device sits in a SCREEN picture (an app, a listing): each screen of a film gets the
    * next of several settings (`assignScreenSetups` in server/pictureVariety.ts), so no two look alike.
    */
@@ -1573,6 +1581,15 @@ export interface LongformInputParams {
    * kept apart from `continuitySheet`, which stays things only. Snapshotted with the props list.
    */
   recurringPeople?: RecurringPerson[];
+  /**
+   * WHO "YOU" IS when the script speaks to the viewer as someone the host's own job SERVES (a
+   * patient, a client, a guest) rather than someone doing the host's own kind of work: the role the
+   * script gives them and one fixed look, written by the props-list call (its `VIEWER name: look`
+   * line, `parseViewerPerson`). Every picture of "you" is then that ordinary person, drawn with that
+   * look, never the host. Unset — "you" stays the host, as before — when the viewer does the host's
+   * own work (a how-to), and on every job made before it. Snapshotted with the props list.
+   */
+  viewerPerson?: RecurringPerson;
   /**
    * The spoken lists found in the whole script (`server/spokenLists.ts`), kept for the voicing
    * stage's last pass, which applies them again on the final lengths.

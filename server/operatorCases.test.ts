@@ -69,12 +69,15 @@ import {
   markCtaQrBlock,
   ONE_BODY_CLAUSE,
   personClauseFor,
+  TOOL_CONTACT_CLAUSE,
   TOOL_POSITION_CLAUSE,
   withAllowedText,
   planGlitchRerender,
 } from "./longformVideo";
 import {
   exactLookQuestion,
+  namedLight,
+  namedLightQuestion,
   requiredThingsQuestion,
   SOFT_PRINT_QUESTION,
   STAGED_QUESTION,
@@ -3700,5 +3703,629 @@ describe("two values get 'vs' only when they are compared (round 11 review, 2026
     const words = heard("He@15.427-15.528 is@15.608-15.688 64.@15.868-16.528 His@17.428-17.569 father@17.649-18.049 made@18.289-18.489 it@18.529-18.589 to@18.629-19.049 81.@19.289-19.409");
     const props = { kicker: "Counting backward", a: { label: "His age", value: "64", at: "@sixty-four" }, b: { label: "His father", value: "81", at: "@eighty-one" }, compare: true };
     expect(await drawnCompare(props, "He is 64.", "made it to 81.", words)).toBe(true);
+  });
+});
+
+describe("the host's face is never drawn in a host picture (round 11's review, jobs 401, 406, 407)", () => {
+  // The rule lived only in the prompt, and the same-host check passed a well-matched drawn face:
+  // job 401 scene 20 drew the host reading at a desk face on for 10 s, job 406 scene 14 smiling into
+  // the lens with a phone at the ear, job 407 scene 27 a full-body axe swing with the face in
+  // three-quarter view — each right beside the real host take.
+  const READER = "A man in his sixties with fair skin, short gray hair, wire-rimmed glasses, wearing a light gray sweater over a white collared shirt";
+  const GARAGE = "A lean man in his late fifties with fair, weathered skin, graying hair under a woven straw cowboy hat, wearing a light blue denim button-up shirt";
+  const HEWER = "A lean man in his sixties with fair, weathered skin, short gray hair, a gray beard, wearing a faded olive-green button-up shirt over a dark gray t-shirt";
+  const reader = () =>
+    pic(
+      20,
+      "Today, with the help of a Roman who wrote the sharpest essay on time ever put to paper, I want to show you that the arithmetic was never your problem.",
+      "man seated at wooden desk in study reading by the window",
+      { humanPresent: true, brollHostLook: READER, brollHostRef: "https://x/host.png" }
+    );
+  const phoneCall = () =>
+    pic(14, "Pull up a stool. One piece of housekeeping first: license rules change town by town,", "the host on a phone call beside the garage workbench", {
+      visualPrompt: "A telephone resting on a garage workbench beside hand tools, in a single-car garage workshop.",
+    });
+  const axeSwing = () =>
+    pic(27, "Keep your boots clear of the swing, and stop when your arms tire.", "the host swinging a wide flat-headed broadaxe at a log in a clearing, boots planted well back from the swing", {
+      visualPrompt:
+        "Bare feet in work boots planted well back from a wide flat-headed broadaxe held at rest beside a felled poplar log in a clearing.",
+    });
+
+  it("the same-host check also answers whether the face shows — both eyes, never a profile — and fails open", async () => {
+    const { parseSameHostVerdict, SAME_HOST_SYSTEM } = await import("./overlayTextScan");
+    expect(SAME_HOST_SYSTEM).toMatch(/face: true when the RIGHT picture shows a person's FACE — the nose and both eyes/);
+    expect(SAME_HOST_SYSTEM).toMatch(/profile with only one eye showing/);
+    expect(SAME_HOST_SYSTEM).toContain('"face":true|false');
+    expect(parseSameHostVerdict('{"same":true,"face":true,"what":"face on, reading at the desk"}')).toEqual({
+      same: true,
+      face: true,
+      what: "face on, reading at the desk",
+    });
+    expect(parseSameHostVerdict('{"same":true,"face":true}').what).toBe("the face is shown");
+    expect(parseSameHostVerdict('{"same":true,"face":false,"what":"seen from behind"}')).toEqual({ same: true, face: false, what: "" });
+    // An answer from before the question, a "yes", a cut-off answer or none: no face.
+    expect(parseSameHostVerdict('{"same":true}').face).toBe(false);
+    expect(parseSameHostVerdict('{"same":true,"face":"yes"}').face).toBe(false);
+    expect(parseSameHostVerdict('{"same":true,"face":true}', "max_tokens")).toEqual({ same: true, face: false, what: "" });
+    expect(parseSameHostVerdict("nonsense")).toEqual({ same: true, face: false, what: "" });
+  });
+
+  it("a shown face is a miss outside a step on the host's own face, counted with the identity misses", async () => {
+    const { hostPictureMove, HOST_IDENTITY_REDRAWS } = await import("./longformVideo");
+    expect(HOST_IDENTITY_REDRAWS).toBe(2);
+    expect(hostPictureMove({ same: true, face: false }, false, 0, false)).toEqual({ move: "keep" });
+    expect(hostPictureMove({ same: true }, false, 0, false)).toEqual({ move: "keep" });
+    // A concealer step on her own face shows the face by design.
+    expect(hostPictureMove({ same: true, face: true }, true, 0, false)).toEqual({ move: "keep" });
+    // Jobs 401 / 406 / 407: the host, face on — drawn again from behind or the side.
+    expect(hostPictureMove({ same: true, face: true }, false, 0, false)).toEqual({ move: "redraw", why: "face", turnAway: true });
+    expect(hostPictureMove({ same: true, face: true }, false, 1, false)).toEqual({ move: "redraw", why: "face", turnAway: true });
+    // The third miss, of either kind, is drawn with nobody in it.
+    expect(hostPictureMove({ same: true, face: true }, false, 2, false)).toEqual({ move: "nobody", why: "face", turnAway: true });
+    expect(hostPictureMove({ same: false, face: false }, false, 2, false)).toEqual({ move: "nobody", why: "someone else", turnAway: false });
+    // A stranger from behind is drawn again from the host photo; a stranger's face is turned away too.
+    expect(hostPictureMove({ same: false, face: false }, false, 0, false)).toEqual({ move: "redraw", why: "someone else", turnAway: false });
+    expect(hostPictureMove({ same: false, face: true }, false, 0, false)).toEqual({ move: "redraw", why: "someone else", turnAway: true });
+    // No attempt left for a redraw: nobody in it, never a face or a stranger shipped.
+    expect(hostPictureMove({ same: true, face: true }, false, 0, true)).toEqual({ move: "nobody", why: "face", turnAway: true });
+    expect(hostPictureMove({ same: true, face: false }, false, 0, true)).toEqual({ move: "keep" });
+  });
+
+  it("a whole-body action or a call at the ear is a pose drawn face-on; a thing or a measure is not", async () => {
+    const { turnAwayPose } = await import("./hostLook");
+    for (const pose of [
+      axeSwing().showSubject!, // job 407 scene 27
+      axeSwing().visualPrompt, // its rewrite: "boots planted well back"
+      phoneCall().showSubject!, // job 406 scene 14
+      "the host holding the phone pressed to her ear by the kitchen window",
+      "the host answering the phone at the counter",
+      "the host splitting firewood with a maul on a chopping block",
+      "the host climbing a ladder to the gutter",
+      "the host walking down the garden path with a basket",
+      "the host in a wide stance at the bench",
+      "a full-body view of the host at the potting bench",
+    ])
+      expect(turnAwayPose(pose), pose).toBe(true);
+    for (const not of [
+      reader().showSubject!, // job 401 scene 20: a seated reader is no pose — the check catches the face
+      phoneCall().visualPrompt, // a telephone resting on the bench
+      "the host's hands holding a phone, a listing on the phone screen",
+      "tomato plants spaced two feet apart along the bed",
+      "six feet of rope coiled on the bench",
+      "a porch swing on the veranda",
+      "the swing of the gate",
+      "hiking boots drying by the door",
+      "the host leaning on a walking stick",
+      "a cottage within walking distance of the market",
+      "a walk-in closet with shelves",
+      "climbing roses on a trellis",
+      "a full-length mirror",
+      "the host making a judgment call",
+      "hands sawing a small square notch in a thin strip held in a bench vise",
+    ])
+      expect(turnAwayPose(not), not).toBe(false);
+  });
+
+  it("jobs 406 and 407: the phone call and the axe swing are drawn from behind or the side only", async () => {
+    const { HOST_TURNED_AWAY_CLAUSE } = await import("./longformVideo");
+    const call = phoneCall();
+    const swing = axeSwing();
+    expect(markHostBroll([call], { hostLook: GARAGE }, "https://x/host.png")).toBe(1);
+    expect(markHostBroll([swing], { hostLook: HEWER }, "https://x/host.png")).toBe(1);
+    for (const s of [call, swing]) {
+      const prompt = buildStillPrompt(s);
+      expect(prompt, s.showSubject).toContain(HOST_TURNED_AWAY_CLAUSE);
+      expect(prompt, s.showSubject).not.toContain(HOST_FRAMING_CLAUSE);
+      expect(prompt, s.showSubject).not.toContain(HOST_LIPS_CUT_CLAUSE);
+    }
+    expect(HOST_TURNED_AWAY_CLAUSE).toMatch(/seen from behind, or from the side and a little behind/);
+    expect(HOST_TURNED_AWAY_CLAUSE).toMatch(/never in front/);
+    expect(hostBrollClause(GARAGE, false, true)).toContain(HOST_TURNED_AWAY_CLAUSE);
+    // The lips cut wins when both are asked for: a chin line is about the chin.
+    expect(hostBrollClause(GARAGE, true, true)).toContain(HOST_LIPS_CUT_CLAUSE);
+    expect(hostBrollClause(GARAGE, true, true)).not.toContain(HOST_TURNED_AWAY_CLAUSE);
+  });
+
+  it("job 401 scene 20: a seated reader keeps the two framings until a drawing shows the face, then turns away", async () => {
+    const { HOST_TURNED_AWAY_CLAUSE, turnHostAway } = await import("./longformVideo");
+    const { hostTurnedAway } = await import("./hostLook");
+    const s = reader();
+    const before = buildStillPrompt(s);
+    expect(before).toContain(HOST_FRAMING_CLAUSE);
+    expect(hostTurnedAway(s)).toBe(false);
+    // The redraw swaps the framing in place — the same prompt a Regenerate writes from the mark.
+    const turned = turnHostAway(before);
+    expect(turned).toContain(HOST_TURNED_AWAY_CLAUSE);
+    expect(turned).not.toContain(HOST_FRAMING_CLAUSE);
+    expect(turnHostAway(turned)).toBe(turned);
+    s.hostTurnedAway = true;
+    expect(hostTurnedAway(s)).toBe(true);
+    expect(buildStillPrompt(s)).toBe(turned);
+    // Whatever a redraw added to the prompt stays.
+    expect(turnHostAway(`${before} DRAW IT DIFFERENT.`)).toBe(`${turned} DRAW IT DIFFERENT.`);
+  });
+
+  it("the turn never touches a chin line's lips cut, a face step, someone else, or a prompt with no host in it", async () => {
+    const { turnHostAway } = await import("./longformVideo");
+    const { hostTurnedAway } = await import("./hostLook");
+    // Job 244 scene 3: a chin line keeps its lips cut, even marked.
+    const chin = pic(3, "That same necklace drags your chin and your jawline down with it.", "a gold chain worn at the host's own neck", {
+      humanPresent: true,
+      brollHostLook: "a woman with silver hair",
+      brollHostRef: "https://x/host.png",
+      hostTurnedAway: true,
+    });
+    expect(hostLipsCut(chin)).toBe(true);
+    expect(hostTurnedAway(chin)).toBe(false);
+    const lips = buildStillPrompt(chin);
+    expect(lips).toContain(HOST_LIPS_CUT_CLAUSE);
+    expect(turnHostAway(lips)).toBe(lips);
+    expect(hostTurnedAway({ ...axeSwing(), brollHostLook: HEWER, hostFaceShown: true })).toBe(false);
+    expect(hostTurnedAway({ ...axeSwing(), brollHostLook: HEWER, otherPerson: "a neighbour" })).toBe(false);
+    expect(hostTurnedAway(axeSwing())).toBe(false); // no host look: no host picture
+    // A content-policy rung draws no person, so there is nothing to turn.
+    const aggressive = buildStillPrompt(reader(), true);
+    expect(turnHostAway(aggressive)).toBe(aggressive);
+  });
+
+  it("the mark stays while the picture is the host's, and goes when it is not", () => {
+    const s = { ...reader(), hostTurnedAway: true as const };
+    markHostBroll([s], { hostLook: READER }, "https://x/host.png");
+    expect(s.brollHostLook).toBe(READER);
+    expect(s.hostTurnedAway).toBe(true);
+    const thing = { ...pic(14, "license rules change town by town,", "a corded telephone mounted on the garage wall"), hostTurnedAway: true as const };
+    markHostBroll([thing], { hostLook: GARAGE }, "https://x/host.png");
+    expect(thing.brollHostLook).toBeUndefined();
+    expect(thing.hostTurnedAway).toBeUndefined();
+  });
+});
+
+describe("a pose turns the host away only when it is one: a screen, a ladder and a worn piece are not (round 11's review of the face check)", () => {
+  // The turn-away words read on every host picture of the local films (345 jobs, 1,459 host pictures)
+  // turned 21 of them; 14 were not poses at all — a phone used as a SCREEN, a stepladder's feet, a
+  // pearl strand or a long chain the picture is about. Each would have been told to show the body
+  // from behind: a hands-at-the-glass close-up drawn with the head in it, the necklace hidden.
+  const LOOK = "A woman over sixty with fair skin, short silver hair, wearing a plain navy crewneck sweater";
+  const hostPic = (index: number, scriptText: string, showSubject: string, visualPrompt: string) =>
+    pic(index, scriptText, showSubject, {
+      visualPrompt,
+      humanPresent: true,
+      brollHostLook: LOOK,
+      brollHostRef: "https://x/host.png",
+    });
+
+  it("a phone in use as a screen is not a call; a person on it, or a phone at the ear, is", async () => {
+    const { turnAwayPose } = await import("./hostLook");
+    for (const screen of [
+      // job 376 scene 36
+      "hands typing on a phone beside a removed round white smoke alarm lying face down on a table",
+      // job 306 scene 26
+      "a finger tapping an ad picture of the cutting board on a web page on a phone",
+      // job 306 scene 27
+      "A finger switching off a toggle on a white shop settings screen on a phone with orange accents.",
+      // job 349 scene 6
+      "Bare hands holding a phone with a blue header bar. Screen displays a marketplace listing page with a photo of a warm walnut bookcase, grey text bars below. Hands already in frame, fingers visible on the phone.",
+      // job 372 scene 8
+      "Phone resting flat on a wooden workbench showing a buy-and-sell app screen, bare weathered hands visible at forearms only, fingers positioned on the phone as if scrolling or tapping.",
+      "the photo of the quilt on the phone screen",
+    ])
+      expect(turnAwayPose(screen), screen).toBe(false);
+    for (const call of [
+      "the host on a phone call beside the garage workbench", // job 406 scene 14
+      // job 352 scene 70
+      "A phone held in bare weathered hands, pressed to the ear making a call. Rough lumber racks and stacked boards visible beside and behind.",
+      "the host on the phone beside the workbench",
+      "the host talking quietly on the phone by the kitchen window",
+      "she is on the phone at the counter",
+      "the handset tucked against her ear while she writes",
+    ])
+      expect(turnAwayPose(call), call).toBe(true);
+  });
+
+  it("a stepladder's feet are not a stance; a person's planted feet or boots are", async () => {
+    const { turnAwayPose } = await import("./hostLook");
+    for (const ladder of [
+      // job 276 scene 17
+      "Bare weathered hands gripping a round white plastic smoke alarm mounted on a pale ceiling, fingers positioned to unscrew or twist it free, stepladder visible below with its aluminum frame and black rubber feet planted on beige hallway carpet.",
+      // job 367 scene 16
+      "Bare hands in frame positioning an aluminum stepladder with three rungs beneath a hallway ceiling at night, feet planted on pale flooring.",
+      "a camera tripod with spread legs on the lawn",
+    ])
+      expect(turnAwayPose(ladder), ladder).toBe(false);
+    for (const stance of [
+      "Bare feet in work boots planted well back from a wide flat-headed broadaxe held at rest beside a felled poplar log in a clearing.", // job 407 scene 27
+      "the host at the bench, her feet planted shoulder-width apart",
+      "the host with planted boots at the edge of the woodpile",
+    ])
+      expect(turnAwayPose(stance), stance).toBe(true);
+  });
+
+  it("a picture of a piece worn at the neck faces the camera, whatever the pose; any other host pose turns away", async () => {
+    const { hostTurnedAway, mayTurnHostAway } = await import("./hostLook");
+    // Job 362 scene 9: the pearls are what the picture is about, and they sit on the front.
+    const pearls = hostPic(
+      9,
+      "It scatters it, and soft even light is the kindest thing you can put near mature skin.",
+      "a woman in a plain navy crewneck sweater with a cream pearl strand at her collarbone, walking down a bright grocery aisle carrying a basket",
+      "A person in a plain navy crewneck sweater wearing a cream pearl strand at the collarbone and flat brown loafers, walking past bright grocery store shelves with a basket."
+    );
+    // Job 378 scene 17: the long chain down the front of the body.
+    const chain = hostPic(
+      17,
+      "Number three is the long chain, twenty-eight to thirty-two inches. A long unbroken vertical line makes a body look longer.",
+      "full-length view of a woman with a long gold chain hanging past her chest in an unbroken vertical line",
+      "Bare hands adjusting a long thin gold chain down the front of a neutral turtleneck sweater in a bright dressing room, the chain hanging in an unbroken vertical line past the chest."
+    );
+    for (const s of [pearls, chain]) {
+      expect(mayTurnHostAway(s), s.showSubject).toBe(false);
+      expect(hostTurnedAway(s), s.showSubject).toBe(false);
+      // Not even after a drawing showed the face: the redraw keeps the front the piece sits on.
+      expect(hostTurnedAway({ ...s, hostTurnedAway: true }), s.showSubject).toBe(false);
+      const prompt = buildStillPrompt(s);
+      expect(prompt, s.showSubject).toContain(HOST_FRAMING_CLAUSE);
+    }
+    // The same walk with no piece worn at the neck turns away (job 373 scene 17's coat in an aisle).
+    const coat = hostPic(
+      17,
+      "and a good coat does the rest.",
+      "a dark wool knee-length coat worn by someone walking down a softly lit grocery aisle past steel shelving and produce",
+      "A dark wool knee-length coat moving down a softly lit grocery aisle past steel shelving with plain boxes and produce."
+    );
+    expect(mayTurnHostAway(coat)).toBe(true);
+    expect(hostTurnedAway(coat)).toBe(true);
+    // A phone used as a screen keeps the two framings (job 376 scene 36).
+    const typing = hostPic(
+      36,
+      "Then you write the date down.",
+      "hands typing on a phone beside a removed round white smoke alarm lying face down on a table",
+      "Bare hands typing on a smartphone beside a round white smoke alarm lying face down on a table."
+    );
+    expect(hostTurnedAway(typing)).toBe(false);
+    expect(buildStillPrompt(typing)).toContain(HOST_FRAMING_CLAUSE);
+  });
+});
+
+describe("'you' is the host's customer, not the host: one ordinary viewer with one look (round 11's review, jobs 402 and 405)", () => {
+  // Job 402's host wears a crew blazer, scarf and wings pin; her viewer is a passenger. Every
+  // picture of "you" was the host, so the crew sat in a passenger's seat taking the can for herself
+  // (scenes 17 and 20). Job 405's "you" the cat walks across was "a sleeping person" — a different
+  // stranger in every picture (scenes 3-8). The props call now names the viewer when the host's job
+  // serves them (`viewerPerson`); a how-to's "you" stays the host.
+  const CREW = "A slender woman in her forties with fair skin and brown hair pinned back, wearing a white blouse, navy blazer with gold pin, and striped scarf";
+  const FLYER = "a woman in her seventies, short silver hair, a cream knit cardigan over a pale blue blouse, grey slacks";
+  const passenger = { name: "the passenger", look: FLYER };
+
+  it("job 402 scenes 17 and 20: the passenger in her own clothes, never the host's uniform", () => {
+    const scenes = [
+      pic(17, "On many of those carriers, you can have the whole thing just by asking.", "a full soda can held upright near a passenger's tray", {
+        visualPrompt: "Bare hands holding a slim aluminum soda can upright, positioned near a passenger's lap tray in an aircraft seat. Aircraft cabin interior visible in background.",
+        humanPresent: true,
+      }),
+      pic(20, "Juice works the same way. If they're running short, they'll tell you, and you're no worse off for trying. One more thing about drinks, because it catches good people off guard.", "plastic cup filled with juice-colored drink on a lap tray", {
+        visualPrompt: "Clear plastic cup filled with juice-colored drink sitting on a passenger's lap tray in an aircraft seat. Aircraft cabin interior visible in background.",
+        humanPresent: true,
+      }),
+    ];
+    markHostBroll(scenes, { hostLook: CREW, hostName: "Helena Hart", viewerPerson: passenger }, "https://x/host.png");
+    for (const s of scenes) {
+      expect(s.brollHostRef, `scene ${s.index}`).toBeUndefined();
+      const prompt = buildStillPrompt(s);
+      expect(prompt, `scene ${s.index}`).toContain(FLYER);
+      expect(prompt, `scene ${s.index}`).not.toMatch(/navy blazer|gold pin|striped scarf/);
+    }
+  });
+
+  it("job 405 scenes 3-8: the sleeper the cat walks across is one person in every picture", () => {
+    const owner = { name: "the cat owner", look: "a woman in her thirties, shoulder-length brown hair, a plain grey sleep shirt" };
+    const sleeper = (index: number, scriptText: string, showSubject: string, over: Partial<StoryboardScene> = {}) =>
+      pic(index, scriptText, showSubject, { humanPresent: true, otherPerson: "a sleeping person", ...over });
+    const scenes = [
+      host(1, "Three in the morning. The house is dark, the street outside has gone quiet, and somewhere in that quiet,"),
+      pic(2, "a small set of paws has just landed on the foot of your bed. She doesn’t hurry. She walks the full length of you,", "a tabby cat with white-socked paws walking slowly across the bed sheets at night"),
+      sleeper(3, "ankle,", "a small short-haired tabby cat stepping onto the ankle of a sleeping person under pale grey sheets at night", { listCut: true }),
+      sleeper(5, "hip,", "a small tabby cat balancing on the hip of a person sleeping on their side under pale grey sheets at night", { listCut: true }),
+      sleeper(6, "ribs,", "a tabby cat's white-socked paws stepping across the blanketed ribs of a sleeping person at night", { listCut: true }),
+      sleeper(7, "steady as a tightrope walker, because she has made this crossing a hundred times before.", "a small tabby cat standing on a sleeping person's chest in the dark bedroom, head lowered close to their face, waiting"),
+      sleeper(8, "Then she stops on your chest, lowers her face to yours, and waits.", "a small tabby cat standing on a sleeping person's chest in the dark bedroom, head lowered close to their face, waiting"),
+    ];
+    markHostBroll(scenes, { hostLook: "A man in his forties with olive skin, dark wavy hair and a full beard", hostName: "Luca Marino", viewerPerson: owner }, "https://x/host.png");
+    const sleepers = scenes.filter(s => s.index >= 3);
+    expect(sleepers.every(s => s.otherPerson === "the cat owner")).toBe(true);
+    expect(new Set(sleepers.map(s => buildStillPrompt(s).includes(owner.look))).size).toBe(1);
+    expect(buildStillPrompt(sleepers[0])).toContain(owner.look);
+  });
+
+  it("a how-to's 'you' is still the host (job 406 scene 20)", () => {
+    const GARAGE = "A lean man in his late fifties with fair, weathered skin, graying hair under a woven straw cowboy hat, wearing a light blue denim button-up shirt";
+    const s = pic(20, "You charge five to ten dollars a knife and ten to twenty a mower blade, and the work takes minutes once your hands learn it.", "the host sharpening a mower blade on a benchtop belt sharpening setup", {
+      visualPrompt: "Bare weathered hands guiding a dull mower blade against a spinning abrasive belt on a benchtop belt sharpening setup bolted to a garage workbench.",
+      humanPresent: true,
+    });
+    markHostBroll([s], { hostLook: GARAGE, hostName: "Gary" }, "https://x/host.png");
+    expect(s.brollHostLook).toBe(GARAGE);
+    expect(s.otherPerson).toBeUndefined();
+  });
+
+  it("with one passenger in the story, a shot named as the viewer is the viewer, not her (job 402)", () => {
+    // The planner writes the viewer's name in every shot of "you". With the story's ONE recurring
+    // passenger that name fitted her by role, and every picture of "you" was drawn as her.
+    const storyWoman = { name: "the woman passenger", look: "a woman in her sixties, long grey hair in a low ponytail, a red wool coat, black trousers" };
+    const story = pic(3, "the whole can of ginger ale,", "a woman passenger in an empty row holding a whole soda can upright", {
+      humanPresent: true,
+      otherPerson: "a woman passenger",
+    });
+    const ask = pic(17, "On many of those carriers, you can have the whole thing just by asking.", "a passenger holding a full soda can over the tray", {
+      humanPresent: true,
+      otherPerson: "the passenger",
+    });
+    markHostBroll([story, ask], { hostLook: CREW, hostName: "Helena Hart", recurringPeople: [storyWoman], viewerPerson: passenger }, "https://x/host.png");
+    expect(buildStillPrompt(ask)).toContain(FLYER);
+    expect(buildStillPrompt(ask)).not.toContain(storyWoman.look);
+    expect(buildStillPrompt(story)).toContain(storyWoman.look);
+    expect(buildStillPrompt(story)).not.toContain(FLYER);
+  });
+});
+
+describe("'hand tools' are tools, not hands (round 11's review, job 406 scene 7)", () => {
+  // "That one belief keeps more good tools hanging silent on more garage walls than rust ever has."
+  // The shot list asked for "hand tools hanging silent on a pegboard wall in the garage"; "hand" read
+  // as a person, so the host was drawn reaching up and gripping the hammer for 9.4 s — tools in use
+  // under a line about tools nobody uses.
+  const GARAGE = "A lean man in his late fifties with fair, weathered skin, graying hair under a woven straw cowboy hat, wearing a light blue denim button-up shirt";
+  const line = "That one belief keeps more good tools hanging silent on more garage walls than rust ever has.";
+
+  it("the planned picture of hand tools on a wall is drawn with nobody in it", () => {
+    const { scenes } = applyShotPlan(
+      [pic(7, line, "x")],
+      [{ scene: 7, hostUntil: null, shots: [{ from: "That one belief", show: "hand tools hanging silent on a pegboard wall in the garage" }] }]
+    );
+    markHostBroll(scenes, { hostLook: GARAGE, hostName: "Gary" }, "https://x/host.png");
+    const wall = scenes[0];
+    expect(wall.humanPresent).toBeFalsy();
+    expect(wall.brollHostLook).toBeUndefined();
+    expect(wall.brollHostRef).toBeUndefined();
+    const prompt = buildStillPrompt(wall);
+    expect(prompt).toContain(NO_FIGURES_SUFFIX);
+    expect(prompt).not.toContain(GARAGE);
+  });
+
+  it("a hand at work, or the host using hand tools, is still the host (job 406 scenes 9 and 20)", () => {
+    const scenes = [
+      pic(9, "This channel is about the work.", "the host working quietly at the garage workbench with simple hand tools", {
+        visualPrompt: "Bare weathered hands from the forearms down working with a simple hand tool at a wooden garage workbench",
+      }),
+      pic(10, "Grab the hammer.", "a hand lifting the hammer off the pegboard wall"),
+      pic(20, "the work takes minutes once your hands learn it.", "the host sharpening a mower blade on a benchtop belt sharpening setup", {
+        visualPrompt: "Bare weathered hands guiding a dull mower blade against a spinning abrasive belt on a benchtop belt sharpening setup bolted to a garage workbench.",
+      }),
+    ];
+    markHostBroll(scenes, { hostLook: GARAGE, hostName: "Gary" }, "https://x/host.png");
+    for (const s of scenes) {
+      expect(s.brollHostLook, s.showSubject).toBe(GARAGE);
+      expect(s.humanPresent, s.showSubject).toBe(true);
+    }
+  });
+
+  it("made by hand, second-hand and a clock's hands name no person; a hand in hand still does", () => {
+    for (const thing of [
+      "a hand-stitched quilt folded over the chair",
+      "a second-hand drill press in the corner of the garage",
+      "a basket woven by hand on the porch step",
+      "a hand saw and a hand plane on the bench",
+      "a tube of hand cream on the nightstand",
+      "Round analog clock on a wooden nightstand, white face and black hands pointing near three o'clock, cream lamp beside it glowing softly.", // job 405 scene 28
+    ])
+      expect(SHOWS_PERSON.test(thing), thing).toBe(false);
+    for (const hand of [
+      "two figures walking hand in hand along a sunny park path", // job 401 scene 19
+      "a hand reaching for the hammer on the pegboard",
+    ])
+      expect(SHOWS_PERSON.test(hand), hand).toBe(true);
+  });
+
+  it("a hand tool at work, or work being done by hand, keeps the host's hands on it", () => {
+    // "hand" alone carried these before the fix, and nothing else in their words names a person: a
+    // drill boring by itself, a quilt piecing itself.
+    const scenes = [
+      pic(36, "drill the hole for the incense stick", "a hand drill boring a hole into a small charred cedar block"), // job 189 scene 36
+      pic(3, "a crib quilt pieced at the kitchen table", "nine-patch crib quilt being pieced by hand at the work table under lamp light"), // job 144 scene 3
+      pic(7, line, "hand tools hanging silent on a pegboard wall in the garage"),
+    ];
+    markHostBroll(scenes, { hostLook: GARAGE, hostName: "Gary" }, "https://x/host.png");
+    expect(scenes[0].brollHostLook).toBe(GARAGE);
+    expect(scenes[1].brollHostLook).toBe(GARAGE);
+    expect(scenes[2].brollHostLook).toBeUndefined();
+    expect(buildStillPrompt(scenes[2])).toContain(NO_FIGURES_SUFFIX);
+  });
+});
+
+describe("a splitting tool works in the end grain, and no hand is in an edge's path (jobs 406, 407)", () => {
+  const SAWYER = "A broad man in his sixties with a short white beard, wearing a sage green work shirt with rolled sleeves";
+  const SPLIT_RULE = /splitting tool is driven into its END grain/;
+
+  it("every host-at-work picture of a froe asks for its edge in the end grain, along the split", () => {
+    const scenes = [
+      // Job 407 scene 14: the blade came back resting on top, across a split already open.
+      pic(14, "Number one is the roof, split by hand from white oak or chestnut with a froe, and the direction of the split mattered most.",
+        "hands holding a froe's upright wooden handle, its flat steel blade driven into the top of a short white oak log section along the grain", {
+          visualPrompt:
+            "Bare weathered hands gripping a froe's wooden handle, its flat steel blade pressed into the top of a white oak log bolt along the grain, inside a log cabin with the split-oak roof visible above.",
+          humanPresent: true,
+        }),
+      // Job 407 scene 17: the blade out in mid-air, a board peeling away with no blade in its split.
+      pic(17, "and rived the boards along those same lines,", "a froe splitting a wedge into a board on a tree stump", {
+        visualPrompt:
+          "A froe with its flat steel blade driven into a white oak wedge on a tree stump, a freshly split board starting to separate along the grain.",
+        humanPresent: true,
+      }),
+    ];
+    markHostBroll(scenes, { hostLook: SAWYER, hostName: "Sam" }, "https://x/host.png");
+    for (const s of scenes) {
+      const prompt = buildStillPrompt(s);
+      expect(prompt, s.showSubject).toMatch(SPLIT_RULE);
+      expect(prompt, s.showSubject).toMatch(/split opens along the line of the blade/);
+      expect(prompt, s.showSubject).toMatch(/never pushed into the side of the piece/);
+      expect(prompt, s.showSubject).toMatch(/sticking out into the air with no wood under its edge/);
+      expect(prompt, s.showSubject).toMatch(/lying across a split already open/);
+    }
+    expect(TOOL_CONTACT_CLAUSE).toMatch(/a froe, wedge, maul or axe that is SPLITTING wood driven edge-down into the end grain/);
+    expect(TOOL_CONTACT_CLAUSE).toContain(TOOL_POSITION_CLAUSE);
+  });
+
+  it("people splitting together keep the rule, and no hand grips a piece where it splits (job 407 scene 10)", () => {
+    // A froe pushed into the SIDE of an upright bolt, a second bare hand gripping it where it would open.
+    const s = pic(10, "since folk schools still teach plenty of these", "students at a folk school workshop splitting oak bolts with froes beside a stump", {
+      visualPrompt: "Bare weathered hands at a woodlot workshop holding a froe against a log bolt braced on a tree stump, splitting oak.",
+      humanPresent: true,
+      otherPerson: "folk school students",
+      otherPeople: 2,
+    });
+    const clause = personClauseFor(s, s.visualPrompt!);
+    expect(clause).toMatch(SPLIT_RULE);
+    expect(clause).toMatch(/never by a hand where it splits open/);
+    // The one-person wording reaches a lone other person too.
+    expect(otherPersonClause("a folk school student")).toMatch(SPLIT_RULE);
+  });
+
+  it("an edge tool is pushed away from the other hand (job 406 scene 9)", () => {
+    // A chisel pushed straight at the other hand lying flat on the board, under a vague description.
+    const scenes = [
+      pic(9, "and this channel is for working people who want extra income", "the host working quietly at the garage workbench with simple hand tools", {
+        visualPrompt:
+          "Bare weathered hands from the forearms down working with a simple hand tool at a wooden garage workbench, fingers already gripping and adjusting, pegboard and window in the background.",
+        humanPresent: true,
+      }),
+    ];
+    markHostBroll(scenes, { hostLook: SAWYER, hostName: "Gary" }, "https://x/host.png");
+    const prompt = buildStillPrompt(scenes[0]);
+    expect(prompt).toMatch(/A chisel, gouge, plane or a knife carving wood is pushed AWAY from the other hand/);
+    expect(prompt).toMatch(/no hand ever lies on the work ahead of where the edge points/);
+    // The hands-only lane carries both as well.
+    expect(ANON_PERSON_SUFFIX).toMatch(/pushed AWAY from the other hand/);
+    expect(ANON_PERSON_SUFFIX).toMatch(SPLIT_RULE);
+  });
+
+  it("a tool at rest, with nobody in the picture, is not told how to work", () => {
+    const scenes = [pic(3, "The froe is the tool that made those roofs.", "a froe hanging from a peg on a log cabin wall")];
+    markHostBroll(scenes, { hostLook: SAWYER, hostName: "Sam" }, "https://x/host.png");
+    expect(scenes[0].humanPresent).toBeFalsy();
+    const prompt = buildStillPrompt(scenes[0]);
+    expect(prompt).toContain(NO_FIGURES_SUFFIX);
+    expect(prompt).not.toMatch(SPLIT_RULE);
+    expect(prompt).not.toMatch(/pushed AWAY from the other hand/);
+  });
+
+  it("the still check names a splitting tool out of the end grain and a hand ahead of an edge", () => {
+    expect(STILL_DEFECT_SYSTEM).toMatch(/a tool SPLITTING wood \(a froe, wedge, maul or axe splitting a piece\) whose edge is not in the wood's end grain/);
+    expect(STILL_DEFECT_SYSTEM).toMatch(/pushed into the SIDE of an upright piece/);
+    expect(STILL_DEFECT_SYSTEM).toMatch(/its edge resting on the wood but not in it/);
+    expect(STILL_DEFECT_SYSTEM).toMatch(/sticking out into the air with no wood under its edge/);
+    expect(STILL_DEFECT_SYSTEM).toMatch(/lying ACROSS a split already open/);
+    expect(STILL_DEFECT_SYSTEM).toMatch(/a hand gripping a piece where it is splitting open/);
+    expect(STILL_DEFECT_SYSTEM).toMatch(/a hand or fingers AHEAD of a chisel, gouge, plane or a knife carving wood/);
+    // Both sit inside QUESTION 2 (broken), before QUESTION 3, and the question still leans to false.
+    const q2 = STILL_DEFECT_SYSTEM.slice(
+      STILL_DEFECT_SYSTEM.indexOf("QUESTION 2"),
+      STILL_DEFECT_SYSTEM.indexOf("QUESTION 3")
+    );
+    expect(q2).toMatch(/a tool SPLITTING wood/);
+    expect(q2).toMatch(/AHEAD of a chisel/);
+    expect(q2).toMatch(/When unsure, answer false/);
+    expect(STILL_DEFECT_SYSTEM).toMatch(/fingers in front of or right beside a blade/);
+  });
+});
+
+describe("only a tool that is SPLITTING goes into the end grain; a kitchen knife is not an edge tool pushed along (jobs 406, 407)", () => {
+  const SAWYER = "A broad man in his sixties with a short white beard, wearing a sage green work shirt with rolled sleeves";
+
+  it("a broadaxe hewing the side of a log is told it bites into the side, not the end grain (job 407 scene 25)", () => {
+    // The same film's hewing picture was right: the broadaxe in the side of a green poplar log. Told
+    // every axe is a splitting tool, it would be drawn in the log's end and refused by the checker.
+    const scenes = [
+      pic(25, "because a fresh log gives up its chips far easier than a seasoned one, and tall, straight tulip poplar was a favorite.",
+        "hands gripping a broadaxe as its wide flat blade bites into a fresh green poplar log, wood chips flying", {
+          visualPrompt:
+            "Bare weathered hands gripping a broadaxe, its wide flat blade pressing into a fresh green poplar log in a woodlot clearing, wood chips visible at the blade's edge.",
+          humanPresent: true,
+        }),
+    ];
+    markHostBroll(scenes, { hostLook: SAWYER, hostName: "Sam" }, "https://x/host.png");
+    const prompt = buildStillPrompt(scenes[0]);
+    expect(prompt).toMatch(/An axe that is chopping, felling or hewing rather than splitting bites into the side of the log or trunk/);
+    expect(prompt).toMatch(/an axe chopping or hewing bitten into the side of the log/);
+    // Every axe is no longer a splitting tool by name: the end-grain rule asks for a tool that IS splitting.
+    expect(TOOL_CONTACT_CLAUSE).not.toMatch(/a splitting tool \(a froe, wedge, maul or axe\)/);
+    expect(TOOL_POSITION_CLAUSE).toMatch(/a piece being SPLIT \(riven with a froe, or split with a wedge, a maul or an axe\)/);
+  });
+
+  it("the still check refuses only a tool that is splitting, never a hewing axe or a tool at rest", () => {
+    const q2 = STILL_DEFECT_SYSTEM.slice(
+      STILL_DEFECT_SYSTEM.indexOf("QUESTION 2"),
+      STILL_DEFECT_SYSTEM.indexOf("QUESTION 3")
+    );
+    expect(q2).toMatch(/An axe chopping, felling or hewing into the side of a log or trunk is right/);
+    // Job 407 scenes 4-8: the axe, froe and drawknife hanging on the cabin wall.
+    expect(q2).toMatch(/a tool hanging, lying or resting unused is splitting nothing/);
+    expect(q2).not.toMatch(/a splitting tool \(a froe, wedge, maul or axe\) that is not driven/);
+  });
+
+  it("the edge rule names a carving knife, not every knife (job 406's kitchen knives)", () => {
+    // Job 406 sharpens kitchen knives: a knife held up to the light (scene 13), sharpened on a guided
+    // sharpener (scene 16). A kitchen knife cuts down beside the guide hand and is sharpened with
+    // fingers on its flat; "fingers right beside a blade" still covers a hand in its way.
+    expect(TOOL_POSITION_CLAUSE).not.toMatch(/A chisel, knife, gouge or plane/);
+    expect(STILL_DEFECT_SYSTEM).not.toMatch(/AHEAD of a chisel, knife, gouge or plane/);
+    expect(STILL_DEFECT_SYSTEM).toMatch(/fingers in front of or right beside a blade, saw, bit or cutting edge/);
+    expect(TOOL_POSITION_CLAUSE).toMatch(/food on a cutting board/);
+    // A plane's front hand is on the tool, ahead of its iron: the rule asks for the hand ON the tool.
+    expect(TOOL_POSITION_CLAUSE).toMatch(/that hand is on the tool itself or holds the work behind the edge/);
+  });
+});
+
+/**
+ * LIGHT THE WORDS NAME IS NOT STAGED (2026-10-18, the review of jobs 401-407). The night and the
+ * lamplight a line or a picture's own description asks for were called "staged" on both draws and
+ * shipped with the warning — job 405's night bedroom, job 401's "kitchen table at two in the
+ * morning" and its writer "by lamplight". The check is now told the words that name the light;
+ * what they do not name (a glossy finish, a golden glow nobody asked for) is judged as before.
+ */
+describe("light the line or the description names is never staged (jobs 401, 405)", () => {
+  const noteFor = (s: StoryboardScene) => namedLightQuestion(namedLight(s.scriptText, s.showSubject));
+
+  it("the night and lamplight pictures are told their light was asked for", () => {
+    const named = [
+      // Job 401 scene 11 and scene 22.
+      pic(11, "the kitchen table at two in the morning when the house is too quiet.", "round wooden kitchen table with two chairs and a dim lamp at night"),
+      pic(22, "Two thousand years ago, a man named Lucius Annaeus Seneca wrote a short, furious, loving essay to a man named Paulinus,", "a Roman man in a toga writing on a scroll at a wooden desk by lamplight"),
+      // Job 405 scenes 13, 18, 21 and 26.
+      pic(13, "So tonight we’re treating that scene like footage. We’ll", "wide view of bedroom at night with cat on the bed"),
+      pic(18, "And by the end, you’ll have the one evening change that quietly takes the appointment off the books.", "a quiet bedroom at evening with the lamp glowing softly on the nightstand"),
+      pic(21, "There’s a stubborn old myth that cats are nocturnal,", "a small tabby cat sitting alert on a windowsill, dim dawn light glowing through the bedroom window"),
+      pic(26, "Think of her as a shift worker who moved into your home.", "an open grassy wild landscape at dusk, low golden light over scattered brush and distant hills"),
+    ];
+    for (const s of named) {
+      expect(noteFor(s)).toMatch(/QUESTION 7 NOTE — staged/);
+      expect(noteFor(s)).toMatch(/NEVER staged on its own/);
+    }
+    expect(noteFor(named[0])).toContain('"two in the morning"');
+    expect(noteFor(named[1])).toContain('"lamplight"');
+    expect(noteFor(named[2])).toContain('"night"');
+    expect(noteFor(named[2])).not.toContain("tonight");
+  });
+
+  it("pictures whose words name no light are judged by the rule alone", () => {
+    // Job 401 scenes 24 (the sunlit villa), 30 (the polished marble hall) and 15 (the bills): their
+    // staged flags were about the finish, not a light anyone asked for.
+    const unnamed = [
+      pic(24, "Seneca was no monk on a hillside. He was one of the richest men in the empire,", "a well dressed man standing near a grand desk in a study"),
+      pic(30, "the senator complains,", "a senator in robes standing in a stone hall"),
+      pic(15, "people carrying real questions about", "an older man at a kitchen table looking over a stack of household bills, seen from the side"),
+      // Dale's job 345: stacks in plain daylight — still never staged for content, and no note.
+      pic(1, "and every piece gets stacked and sorted by size,", "stacks of cutting boards and coasters sorted on a workbench"),
+    ];
+    for (const s of unnamed) expect(noteFor(s)).toBe("");
+    // The rule the check and the audit share is unchanged: an unnamed glowing lamp is still staged.
+    expect(STAGED_RULE).toMatch(/glowing lamp, candle or golden glow/);
+    expect(STAGED_QUESTION).toContain(STAGED_RULE);
   });
 });

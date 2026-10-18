@@ -13,15 +13,22 @@ import type { RecurringPerson, StoryboardScene } from "@shared/types";
 const { mockInvoke } = vi.hoisted(() => ({ mockInvoke: vi.fn() }));
 vi.mock("./claude", () => ({ invokeClaude: mockInvoke }));
 
-import { markHostBroll, matchRecurringPeople, personKey } from "./hostLook";
+import { hostWordsAsViewer, markHostBroll, matchRecurringPeople, personKey, picturesTheViewer } from "./hostLook";
 import {
   CONTINUITY_SYSTEM,
   deriveContinuitySheet,
+  FIT_SYSTEM,
+  fitPicturesToLines,
   isPersonLine,
+  isViewerLine,
   MAX_RECURRING_PEOPLE,
+  otherPersonFor,
   parseKeyThings,
+  parsePictureFixes,
   parseRecurringPeople,
+  parseViewerPerson,
   planShotList,
+  whoOf,
   withoutPersonLines,
 } from "./shotList";
 import { buildStillPrompt, otherPersonClause } from "./longformVideo";
@@ -353,5 +360,434 @@ describe("the review's follow-ups: a label that sets someone apart, a crowd, a v
     expect(three).toMatch(/Two of them are the same people in every picture of them/);
     expect(three).not.toMatch(/They are the same people/);
     expect(otherPersonClause("two airline passengers", 2, PASSENGERS)).toMatch(/They are the same people in every picture of them/);
+  });
+});
+
+// ─── THE VIEWER: "you" when the host's job serves them (round 11, jobs 402 and 405) ─────────
+
+// Job 402's host (her look as stored) and the viewer its props call would now write.
+const CREW_LOOK =
+  "A slender woman in her forties with fair skin and brown hair pinned back, wearing a white blouse, navy blazer with gold pin, and striped scarf";
+const FLYER = "a woman in her seventies, short silver hair, a cream knit cardigan over a pale blue blouse, grey slacks";
+const PASSENGER: RecurringPerson = { name: "the passenger", look: FLYER };
+// Job 405: the sleeper the cat walks across.
+const SLEEPER_LOOK = "a woman in her thirties, shoulder-length brown hair, a plain grey sleep shirt";
+const OWNER: RecurringPerson = { name: "the cat owner", look: SLEEPER_LOOK };
+const LUCA_LOOK =
+  "A man in his forties with olive skin, dark wavy hair and a full beard, wearing a white t-shirt under an open olive-green shirt";
+
+const line = (index: number, scriptText: string, show: string, over: Partial<StoryboardScene> = {}) =>
+  pic(index, show, { scriptText, narration: scriptText, ...over });
+// Job 402 scenes 17 and 20, as stored.
+const s402_17 = () =>
+  line(17, "On many of those carriers, you can have the whole thing just by asking.", "a full soda can held upright near a passenger's tray", {
+    visualPrompt: "Bare hands holding a slim aluminum soda can upright, positioned near a passenger's lap tray in an aircraft seat. Aircraft cabin interior visible in background.",
+    humanPresent: true,
+  });
+const s402_20 = () =>
+  line(
+    20,
+    "Juice works the same way. If they're running short, they'll tell you, and you're no worse off for trying. One more thing about drinks, because it catches good people off guard.",
+    "plastic cup filled with juice-colored drink on a lap tray",
+    {
+      visualPrompt: "Clear plastic cup filled with juice-colored drink sitting on a passenger's lap tray in an aircraft seat. Aircraft cabin interior visible in background.",
+      humanPresent: true,
+    }
+  );
+// Job 405 scenes 1-10 (the host's opening line, the cat's walk across "you", the split, the annoyed few).
+const film405 = () => [
+  line(1, "Three in the morning. The house is dark, the street outside has gone quiet, and somewhere in that quiet,", "the host", { hostPresent: true }),
+  line(2, "a small set of paws has just landed on the foot of your bed. She doesn’t hurry. She walks the full length of you,", "a tabby cat with white-socked paws walking slowly across the bed sheets at night"),
+  line(3, "ankle,", "a small short-haired tabby cat stepping onto the ankle of a sleeping person under pale grey sheets at night", {
+    visualPrompt: "A small grey and brown tabby cat with white paws stepping onto the ankle area of pale grey sheets on a bed at night.",
+    humanPresent: true, otherPerson: "a sleeping person", listCut: true,
+  }),
+  line(4, "knee,", "a tabby cat's white-socked paw pressing onto a blanketed knee on the bed at night", { listCut: true }),
+  line(5, "hip,", "a small tabby cat balancing on the hip of a person sleeping on their side under pale grey sheets at night", {
+    visualPrompt: "A small grey and brown tabby cat balancing on the hip area of a person lying on their side under pale grey sheets at night.",
+    humanPresent: true, otherPerson: "a sleeping person", listCut: true,
+  }),
+  line(6, "ribs,", "a tabby cat's white-socked paws stepping across the blanketed ribs of a sleeping person at night", {
+    visualPrompt: "A small tabby cat's white-socked paws stepping across the ribs area of a blanketed sleeping body at night on pale grey sheets.",
+    humanPresent: true, otherPerson: "a sleeping person", listCut: true,
+  }),
+  line(7, "steady as a tightrope walker, because she has made this crossing a hundred times before.", "a small tabby cat standing on a sleeping person's chest in the dark bedroom, head lowered close to their face, waiting", {
+    visualPrompt: "A small grey and brown tabby cat standing on a person's chest in a dark bedroom, head lowered close to the sleeping person's face, waiting still.",
+    humanPresent: true, otherPerson: "a sleeping person",
+  }),
+  line(8, "Then she stops on your chest, lowers her face to yours, and waits.", "a small tabby cat standing on a sleeping person's chest in the dark bedroom, head lowered close to their face, waiting", {
+    humanPresent: true, otherPerson: "a sleeping person",
+  }),
+  line(9, "A lot of people call this random, a cat just being a cat.", "a tabby cat resting calmly on the bed in soft lamp light", { hostPresent: true }),
+  line(10, "A few people, half awake and fully annoyed, call it revenge. Here’s the thing, though. It’s neither.", "a person half sitting up in the bed at night, seen from the side, frowning at the tabby cat sitting on the blanket", {
+    visualPrompt: "A person half sitting up in bed at night viewed from the side, frowning at a grey and brown tabby cat sitting on the pale blanket beside them.",
+    humanPresent: true, otherPerson: "a half awake annoyed person",
+  }),
+];
+
+describe("parseViewerPerson — the props list's VIEWER line", () => {
+  const sheet = `${PROPS_399}\n${PEOPLE_LINES_399}\nVIEWER the passenger: ${FLYER}`;
+
+  it("reads who 'you' is and keeps the line out of the props, the key things and the people", () => {
+    expect(parseViewerPerson(sheet)).toEqual(PASSENGER);
+    expect(isViewerLine(`VIEWER the passenger: ${FLYER}`)).toBe(true);
+    expect(isViewerLine("- VIEWER: the patient: a man in his eighties, thin white hair, a grey cardigan")).toBe(true);
+    expect(isViewerLine("viewer-facing shelf: a pine shelf at eye height")).toBe(false);
+    expect(isViewerLine("Viewer seat: a padded folding chair at the front row")).toBe(false);
+    expect(isViewerLine("Viewer: the patient: a man in his eighties, thin white hair, a grey cardigan")).toBe(true);
+    expect(withoutPersonLines(sheet)).toBe(PROPS_399);
+    expect(parseKeyThings(sheet)).toEqual(parseKeyThings(PROPS_399));
+    expect(parseRecurringPeople(sheet)).toEqual(PASSENGERS);
+  });
+
+  it("an owner may be the viewer (it reads as the host anywhere else)", () => {
+    expect(parseViewerPerson(`${PROPS_399}\nVIEWER the cat owner: ${SLEEPER_LOOK}`)).toEqual(OWNER);
+  });
+
+  it("no line, 'you', the viewer, the host, a group, an animal or a look too short: you stay the host", () => {
+    expect(parseViewerPerson(PROPS_399)).toBeUndefined();
+    expect(parseViewerPerson(undefined)).toBeUndefined();
+    expect(parseViewerPerson(`VIEWER you: ${FLYER}`)).toBeUndefined();
+    expect(parseViewerPerson(`VIEWER the viewer: ${FLYER}`)).toBeUndefined();
+    expect(parseViewerPerson(`VIEWER the host: ${FLYER}`)).toBeUndefined();
+    expect(parseViewerPerson(`VIEWER Helena Hart: ${FLYER}`, { hostName: "Helena Hart" })).toBeUndefined();
+    expect(parseViewerPerson(`VIEWER the passengers: ${FLYER}`)).toBeUndefined();
+    expect(parseViewerPerson(`VIEWER a hen: ${FLYER}`)).toBeUndefined();
+    expect(parseViewerPerson("VIEWER the passenger: a woman")).toBeUndefined();
+  });
+});
+
+describe("deriveContinuitySheet asks who 'you' is, from how the host looks", () => {
+  it("the prompt: the host's job serving 'you' makes a VIEWER line; a how-to never does", () => {
+    expect(CONTINUITY_SYSTEM).toMatch(/VIEWER name: look/);
+    expect(CONTINUITY_SYSTEM).toMatch(/someone the HOST'S OWN JOB SERVES/);
+    expect(CONTINUITY_SYSTEM).toMatch(/never the host's\s+uniform, badge or work clothes/);
+    expect(CONTINUITY_SYSTEM).toMatch(/No VIEWER line\s+when "you" does the host's own kind of work \(a how-to/);
+    // Neutral examples only.
+    expect(CONTINUITY_SYSTEM).not.toMatch(/passenger|flight|crew|\bcats?\b|sleep/i);
+  });
+
+  it("sends the host's look, keeps the VIEWER line last, one only", async () => {
+    mockInvoke.mockResolvedValue({
+      text: `${PROPS_399}\nVIEWER the passenger: ${FLYER}\n${PEOPLE_LINES_399}\nVIEWER the traveller: ${SHE}`,
+    });
+    const sheet = await deriveContinuitySheet("script", { host: CREW_LOOK });
+    expect(mockInvoke.mock.calls[0][0].userMessage).toContain(`THE HOST (the narrator, on camera): ${CREW_LOOK}`);
+    const lines = sheet.split("\n");
+    expect(lines.slice(0, 6).join("\n")).toBe(PROPS_399);
+    expect(lines.slice(6, 8).every(isPersonLine)).toBe(true);
+    expect(lines.slice(8)).toEqual([`VIEWER the passenger: ${FLYER}`]);
+    expect(parseViewerPerson(sheet)).toEqual(PASSENGER);
+  });
+
+  it("no host line without a host look", async () => {
+    mockInvoke.mockResolvedValue({ text: PROPS_399 });
+    await deriveContinuitySheet("script");
+    expect(mockInvoke.mock.calls[0][0].userMessage).not.toContain("THE HOST");
+  });
+});
+
+describe("the planner and the line check name the viewer, never the host", () => {
+  const beat = (index: number, scriptText: string) =>
+    ({ index, narration: scriptText, scriptText, visualPrompt: "a cabin", showSubject: "a cabin" }) as StoryboardScene;
+
+  it("planShotList: THE VIEWER by name, rule 6a lets 'you' be them; 'you' comes back as their name", async () => {
+    mockInvoke.mockResolvedValue({
+      text: JSON.stringify({
+        beats: [
+          { beat: 17, shots: [{ from: "On many", show: "a passenger holding a full soda can over the tray", other: "you", held: true }] },
+          { beat: 20, shots: [{ from: "Juice works", show: "a cup of juice on a passenger's tray", other: "the viewer" }] },
+        ],
+      }),
+    });
+    const plans = await planShotList([beat(17, "On many of those carriers, you can have the whole thing just by asking."), beat(20, "Juice works the same way.")], {
+      sheet: PROPS_399,
+      hostLook: CREW_LOOK,
+      viewer: PASSENGER,
+    });
+    const { userMessage, systemPrompt } = mockInvoke.mock.calls[0][0];
+    expect(userMessage).toContain(`THE VIEWER ("you" in this script — someone the host's work serves, never the host; rule 6a: in every shot of "you", other is this name exactly): the passenger`);
+    expect(userMessage).not.toContain(FLYER);
+    expect(systemPrompt).toMatch(/never "you" \(the viewer's work is\s+shown as the host's\) unless THE VIEWER is given below/);
+    expect(systemPrompt).toMatch(/When THE VIEWER is given\s+below, "you" is that person and never the host/);
+    expect(plans.map(p => p.shots[0].other)).toEqual(["the passenger", "the passenger"]);
+  });
+
+  it("planShotList without a viewer: no line, and 'you' is no one else (the host, as before)", async () => {
+    mockInvoke.mockResolvedValue({ text: JSON.stringify({ beats: [{ beat: 1, shots: [{ from: "You charge", show: "the host sharpening a blade", other: "you" }] }] }) });
+    const plans = await planShotList([beat(1, "You charge five to ten dollars a knife.")], { sheet: PROPS_399 });
+    expect(mockInvoke.mock.calls[0][0].userMessage).not.toContain("THE VIEWER");
+    expect(plans[0].shots[0].other).toBeUndefined();
+  });
+
+  it("otherPersonFor / whoOf: 'you' is the viewer when there is one, the host when not", () => {
+    expect(otherPersonFor("you", PASSENGER)).toBe("the passenger");
+    expect(otherPersonFor("The viewer.", PASSENGER)).toBe("the passenger");
+    expect(otherPersonFor("you (the viewer)", PASSENGER)).toBe("the passenger");
+    expect(otherPersonFor("an older passenger", PASSENGER)).toBe("an older passenger");
+    expect(otherPersonFor("the host", PASSENGER)).toBeUndefined();
+    expect(otherPersonFor("you")).toBeUndefined();
+    expect(whoOf("you", PASSENGER)).toBe("the passenger");
+    expect(whoOf("your hands", PASSENGER)).toBe("the passenger");
+    expect(whoOf("the viewer", PASSENGER)).toBe("the passenger");
+    expect(whoOf("yourself", PASSENGER)).toBe("the passenger");
+    expect(whoOf("the passenger", PASSENGER)).toBe("the passenger");
+    expect(whoOf("host", PASSENGER)).toBeNull();
+    expect(whoOf("the host's hands", PASSENGER)).toBeNull();
+    // A viewer's customer is still not the viewer.
+    expect(whoOf("your customer", PASSENGER)).toBe("the customer");
+    // No viewer: exactly as before.
+    expect(whoOf("you")).toBeNull();
+    expect(whoOf("your hands")).toBeNull();
+    expect(whoOf("yourself")).toBeNull();
+  });
+
+  it("the line check is told the viewer, and its 'you' becomes their name on the picture (job 402 scene 20)", async () => {
+    expect(FIT_SYSTEM).toMatch(/When THE\s+VIEWER is given, the viewer the line speaks to is never the host/);
+    expect(FIT_SYSTEM).not.toMatch(/passenger|flight|crew|\bcats?\b/i);
+    const scenes = [s402_17(), s402_20()];
+    mockInvoke.mockResolvedValue({
+      text: JSON.stringify({
+        pictures: [
+          { id: 0, about: "keeping the whole can", shows_it: true, who: "you" },
+          { id: 1, about: "asking for juice", shows_it: true, who: "your hands" },
+        ],
+      }),
+    });
+    const r = await fitPicturesToLines(scenes, { viewer: PASSENGER });
+    expect(mockInvoke.mock.calls[0][0].userMessage).toContain(`THE VIEWER ("you" in this script — someone the host's work serves, never "host"): the passenger`);
+    expect(r.scenes.map(s => s.otherPerson)).toEqual(["the passenger", "the passenger"]);
+    // Without the viewer the same answers are the host's, as before.
+    const fixes = parsePictureFixes(
+      JSON.stringify({ pictures: [{ id: 0, about: "x", shows_it: true, who: "you" }] }),
+      [s402_17()]
+    );
+    expect(fixes[0].who).toBeNull();
+  });
+});
+
+describe("markHostBroll draws the viewer as one ordinary person, never the host (jobs 402 and 405)", () => {
+  it("job 402 scenes 17 and 20: the passenger with her one look, not the host in her crew uniform", () => {
+    const scenes = [s402_17(), s402_20()];
+    markHostBroll(scenes, { hostLook: CREW_LOOK, hostName: "Helena Hart", viewerPerson: PASSENGER }, "https://x/host.png");
+    for (const s of scenes) {
+      expect(s.otherPerson).toBe("the passenger");
+      expect(s.otherPersonLooks).toEqual([PASSENGER]);
+      expect(s.brollHostLook).toBeUndefined();
+      expect(s.brollHostRef).toBeUndefined();
+      const prompt = buildStillPrompt(s);
+      expect(prompt).toContain(FLYER);
+      expect(prompt).not.toMatch(/blazer|gold pin|striped scarf/);
+      expect(prompt).toMatch(/NOT the video's host/);
+    }
+  });
+
+  it("the same pictures with no viewer are the host's, exactly as before", () => {
+    const scenes = [s402_17(), s402_20()];
+    markHostBroll(scenes, { hostLook: CREW_LOOK, hostName: "Helena Hart" }, "https://x/host.png");
+    for (const s of scenes) {
+      expect(s.otherPerson).toBeUndefined();
+      expect(s.brollHostLook).toBe(CREW_LOOK);
+    }
+  });
+
+  it("job 405 scenes 3-8: every 'sleeping person' on a sentence to 'you' is the one viewer; the annoyed few stay strangers", () => {
+    const scenes = film405();
+    markHostBroll(scenes, { hostLook: LUCA_LOOK, hostName: "Luca Marino", hostTitle: "Cat Trainer", viewerPerson: OWNER }, "https://x/host.png");
+    const byIndex = (k: number) => scenes.find(s => s.index === k)!;
+    for (const k of [3, 5, 6, 7, 8]) {
+      expect(byIndex(k).otherPerson, `scene ${k}`).toBe("the cat owner");
+      expect(byIndex(k).otherPersonLooks, `scene ${k}`).toEqual([OWNER]);
+      expect(buildStillPrompt(byIndex(k)), `scene ${k}`).toContain(SLEEPER_LOOK);
+    }
+    // "A few people, half awake and fully annoyed, call it revenge." is not said to "you".
+    expect(byIndex(10).otherPerson).toBe("a half awake annoyed person");
+    expect(byIndex(10).otherPersonLooks).toBeUndefined();
+    // A picture of the paw and a host take are untouched.
+    expect(byIndex(4).otherPerson).toBeUndefined();
+    expect(byIndex(1).otherPerson).toBeUndefined();
+  });
+
+  it("job 405 without a viewer: the sleepers stay as the planner named them, no look", () => {
+    const scenes = film405();
+    markHostBroll(scenes, { hostLook: LUCA_LOOK, hostName: "Luca Marino", hostTitle: "Cat Trainer" }, "https://x/host.png");
+    expect(scenes.filter(s => s.otherPerson === "a sleeping person")).toHaveLength(5);
+    expect(scenes.every(s => !s.otherPersonLooks)).toBe(true);
+  });
+
+  it("job 405 scene 29: the line check's 'you' turns 'the sleeping host' into the viewer, in its words too", () => {
+    const s = line(29, "that her body starts stirring right when yours is at its deepest.", "the tabby cat stirring awake on the bed beside the sleeping host", {
+      visualPrompt: "Grey and brown tabby cat with white paws stirring awake on pale grey sheets, a low wooden bed frame visible, dim bedroom at night, bare weathered hands resting on the sheet nearby at rest.",
+      humanPresent: true,
+      otherPerson: whoOf("you", OWNER)!,
+    });
+    markHostBroll([s], { hostLook: LUCA_LOOK, hostName: "Luca Marino", viewerPerson: OWNER }, "https://x/host.png");
+    expect(s.otherPerson).toBe("the cat owner");
+    expect(s.otherPersonLooks).toEqual([OWNER]);
+    expect(s.showSubject).toBe("the tabby cat stirring awake on the bed beside the sleeping cat owner");
+    expect(s.brollHostLook).toBeUndefined();
+    // Left alone (no line check answer), the host's own word keeps the host — the planner decides.
+    const host = line(29, "that her body starts stirring right when yours is at its deepest.", "the tabby cat stirring awake on the bed beside the sleeping host", { humanPresent: true });
+    markHostBroll([host], { hostLook: LUCA_LOOK, hostName: "Luca Marino", viewerPerson: OWNER }, "https://x/host.png");
+    expect(host.brollHostLook).toBe(LUCA_LOOK);
+    expect(host.showSubject).toBe("the tabby cat stirring awake on the bed beside the sleeping host");
+  });
+
+  it("a how-to's 'you' stays the host — with no viewer, and even beside a viewer when the words name the host (job 406)", () => {
+    const GARAGE = "A lean man in his late fifties with fair, weathered skin, graying hair under a woven straw cowboy hat, wearing a light blue denim button-up shirt";
+    const how = () => [
+      line(20, "You charge five to ten dollars a knife and ten to twenty a mower blade, and the work takes minutes once your hands learn it.", "the host sharpening a mower blade on a benchtop belt sharpening setup", {
+        visualPrompt: "Bare weathered hands guiding a dull mower blade against a spinning abrasive belt on a benchtop belt sharpening setup bolted to a garage workbench.",
+        humanPresent: true,
+      }),
+      line(28, "Two rules before your hands go near one: pull the spark plug wire first, every time, because a mower that turns over with your fingers under the deck will not apologize.", "hands pulling the black rubber-coated spark plug wire off the spark plug cap on a red and black push mower engine", {
+        visualPrompt: "On a red and black push mower engine, bare weathered hands gripping and pulling a black rubber-coated spark plug wire away from the spark plug cap.",
+        humanPresent: true,
+      }),
+    ];
+    const plain = how();
+    markHostBroll(plain, { hostLook: GARAGE, hostName: "Gary" }, "https://x/host.png");
+    expect(plain.every(s => s.brollHostLook === GARAGE && !s.otherPerson)).toBe(true);
+    // Even a viewer (a mistaken one) never takes the host's own work: no viewer's thing, no plain stranger.
+    const guarded = how();
+    markHostBroll(guarded, { hostLook: GARAGE, hostName: "Gary", viewerPerson: { name: "the customer", look: FLYER } }, "https://x/host.png");
+    expect(guarded.every(s => s.brollHostLook === GARAGE && !s.otherPerson)).toBe(true);
+  });
+});
+
+describe("picturesTheViewer and the viewer's look — the general rules, their edges", () => {
+  it("a plain person on a line that says 'I', names that person, or is not said to 'you' is not the viewer", () => {
+    const at = (scriptText: string, other = "a woman") => [
+      line(1, scriptText, "a woman at the counter holding a paper cup", { humanPresent: true, otherPerson: other }),
+    ];
+    expect(picturesTheViewer(at("Then you hand the cup across and wait."), 0, PASSENGER)).toBe(true);
+    expect(picturesTheViewer(at("Then you hand the cup across and wait."), 5, PASSENGER)).toBe(false); // no such picture
+    expect(picturesTheViewer(at("Then I hand you the cup and wait."), 0, PASSENGER)).toBe(false);
+    expect(picturesTheViewer(at("Ask the woman at the counter and you'll get one."), 0, PASSENGER)).toBe(false);
+    expect(picturesTheViewer(at("The counter opens at six."), 0, PASSENGER)).toBe(false);
+    expect(picturesTheViewer(at("Then you hand the cup across and wait.", "a man"), 0, PASSENGER)).toBe(false); // the viewer is a woman
+    expect(picturesTheViewer(at("Then you hand the cup across and wait.", "a woman customer"), 0, PASSENGER)).toBe(false); // a role decides
+  });
+
+  it("the viewer by their own words, a thing of theirs, never someone else's", () => {
+    const one = (show: string, scriptText = "You keep it.") => [line(1, scriptText, show, { humanPresent: true })];
+    expect(picturesTheViewer(one("a sleeping cat owner under the sheets"), 0, OWNER)).toBe(true);
+    expect(picturesTheViewer(one("the shop owner behind the till"), 0, OWNER)).toBe(false);
+    expect(picturesTheViewer(one("hands near a passenger's tray"), 0, PASSENGER)).toBe(true);
+    expect(picturesTheViewer(one("hands near a passenger's tray", "I keep it."), 0, PASSENGER)).toBe(false);
+    expect(picturesTheViewer(one("a flight attendant's hands setting a cup on a passenger's lap tray"), 0, PASSENGER)).toBe(false);
+    expect(picturesTheViewer(one("the host's hands near a passenger's tray"), 0, PASSENGER)).toBe(false);
+    // A role the person words do not know is read by its own word.
+    const patient: RecurringPerson = { name: "the patient", look: "a man in his eighties, thin white hair, a grey cardigan, brown trousers" };
+    expect(picturesTheViewer(one("hands resting on a patient's blanket", "You can ask for a second one."), 0, patient)).toBe(true);
+    expect(matchRecurringPeople("the patient", 1, [], patient)).toEqual([patient]);
+  });
+
+  it("the viewer's look goes only where no recurring person is taken (job 399's passengers first)", () => {
+    expect(matchRecurringPeople("a passenger", 1, PASSENGERS, PASSENGER)).toEqual([PASSENGER]); // 399-23, the line to "you"
+    expect(matchRecurringPeople("a woman passenger", 1, PASSENGERS, PASSENGER)).toEqual([WOMAN]);
+    expect(matchRecurringPeople("a male passenger", 1, PASSENGERS, PASSENGER)).toEqual([OTHER]);
+    expect(matchRecurringPeople("an older passenger", 1, PASSENGERS, PASSENGER)).toEqual([]); // fits all three: no guess
+    expect(matchRecurringPeople("a seated passenger", 1, PASSENGERS, PASSENGER)).toEqual([PASSENGER]); // reads "a passenger"
+    expect(matchRecurringPeople("an older passenger", 1, [], PASSENGER)).toEqual([PASSENGER]);
+    expect(matchRecurringPeople("an older man passenger", 1, [], PASSENGER)).toEqual([]); // her look says a woman
+    expect(matchRecurringPeople("another passenger", 1, [], PASSENGER)).toEqual([]);
+    expect(matchRecurringPeople("several passengers", 3, [], PASSENGER)).toEqual([]);
+    expect(matchRecurringPeople("a flight attendant and an older passenger", 2, [], PASSENGER)).toEqual([PASSENGER]);
+    expect(matchRecurringPeople("the cat owner", 1, [], OWNER)).toEqual([OWNER]);
+    expect(matchRecurringPeople("a sleeping person", 1, [], OWNER)).toEqual([]);
+    // No viewer: exactly as before.
+    expect(matchRecurringPeople("a passenger", 1, PASSENGERS)).toEqual([]);
+  });
+
+  it("host words become the viewer's role; nothing else is touched", () => {
+    expect(hostWordsAsViewer("the host's hands on the sheet", OWNER)).toBe("the cat owner's hands on the sheet");
+    expect(hostWordsAsViewer("a cat curled up beside the sleeping host", OWNER)).toBe("a cat curled up beside the sleeping cat owner");
+    expect(hostWordsAsViewer("a host of birds at the window", OWNER)).toBe("a host of birds at the window");
+    expect(hostWordsAsViewer("a cup on a lap tray", PASSENGER)).toBe("a cup on a lap tray");
+  });
+});
+
+describe("the viewer's look: the viewer's own name first, only on pictures about 'you' (review of round 11)", () => {
+  it("the viewer's exact name beats a recurring person who only shares the role", () => {
+    // The planner writes the viewer's name in every shot of "you"; with ONE recurring passenger
+    // that name used to fit her by role and every picture of "you" was drawn as her.
+    expect(matchRecurringPeople("the passenger", 1, [WOMAN], PASSENGER)).toEqual([PASSENGER]);
+    expect(matchRecurringPeople("a passenger", 1, [WOMAN], PASSENGER)).toEqual([PASSENGER]);
+    // Her own name, or her sex, still takes her.
+    expect(matchRecurringPeople("the woman passenger", 1, [WOMAN], PASSENGER)).toEqual([WOMAN]);
+    expect(matchRecurringPeople("a woman passenger", 1, [WOMAN], PASSENGER)).toEqual([WOMAN]);
+    // No viewer: the one passenger by role, exactly as before.
+    expect(matchRecurringPeople("the passenger", 1, [WOMAN])).toEqual([WOMAN]);
+  });
+
+  it("a label that names 'you' beside its person is someone the viewer meets, never the viewer", () => {
+    expect(matchRecurringPeople("the passenger next to you", 1, [], PASSENGER)).toEqual([]);
+    expect(matchRecurringPeople("a passenger beside you", 1, [], PASSENGER)).toEqual([]);
+    expect(matchRecurringPeople("your seatmate", 1, [], PASSENGER)).toEqual([]);
+    expect(matchRecurringPeople("an older passenger", 1, [], PASSENGER)).toEqual([PASSENGER]);
+  });
+
+  it("job 402: the story's own passengers keep no viewer look; the passengers of lines to 'you' get it", () => {
+    const scenes = [
+      line(3, "the whole can of ginger ale,", "an older woman passenger in an empty row holding a whole silver and red soda can upright", {
+        humanPresent: true, otherPerson: "an older woman passenger", listCut: true,
+      }),
+      line(7, "He figures she must know somebody on the crew. She doesn't. What she knows is which questions flight attendants like hearing, and when to ask them.", "a flight attendant leaning down to speak quietly with an older woman passenger in her seat", {
+        humanPresent: true, otherPerson: "a flight attendant and an older woman passenger",
+      }),
+      line(19, "So when the cart reaches your row, speak up. \"Could I keep the rest of the can, please?\"", "a passenger's hand reaching up toward a soda can held by a flight attendant at the beverage cart stopped at a row", {
+        humanPresent: true, otherPerson: "a passenger and a flight attendant",
+      }),
+      line(25, "You're also welcome to ask for another, and the only real trick is when.", "a passenger's hand reaching for a second pretzel bag from a snack basket held by a flight attendant", {
+        humanPresent: true, otherPerson: "a passenger and a flight attendant",
+      }),
+    ];
+    markHostBroll(scenes, { hostLook: CREW_LOOK, hostName: "Helena Hart", viewerPerson: PASSENGER }, "https://x/host.png");
+    const looksOf = (k: number) => scenes.find(s => s.index === k)!.otherPersonLooks;
+    expect(looksOf(3)).toBeUndefined();
+    expect(looksOf(7)).toBeUndefined();
+    expect(looksOf(19)).toEqual([PASSENGER]);
+    expect(looksOf(25)).toEqual([PASSENGER]);
+    // The story's passengers are still drawn as someone else, never the host.
+    expect(scenes.every(s => !s.brollHostLook && !!s.otherPerson)).toBe(true);
+  });
+
+  it("hands at a viewer's thing are the viewer's only when 'you' does something, never when 'you' only receives", () => {
+    const one = (scriptText: string, show = "hands pouring juice into a plastic cup on a passenger's tray") => [
+      line(1, scriptText, show, { humanPresent: true }),
+    ];
+    // Job 402 scenes 17 and 20: "you" is the one asking.
+    expect(picturesTheViewer(one("On many of those carriers, you can have the whole thing just by asking."), 0, PASSENGER)).toBe(true);
+    expect(picturesTheViewer(one("Juice works the same way. If they're running short, they'll tell you, and you're no worse off for trying."), 0, PASSENGER)).toBe(true);
+    // The crew pours FOR you: the hands are the worker's — the host's on a crew host's channel.
+    expect(picturesTheViewer(one("They'll pour it for you."), 0, PASSENGER)).toBe(false);
+    expect(picturesTheViewer(one("If they're running short, they'll tell you."), 0, PASSENGER)).toBe(false);
+    const served = one("They'll pour it for you.");
+    markHostBroll(served, { hostLook: CREW_LOOK, hostName: "Helena Hart", viewerPerson: PASSENGER }, "https://x/host.png");
+    expect(served[0].brollHostLook).toBe(CREW_LOOK);
+    expect(served[0].otherPerson).toBeUndefined();
+  });
+
+  it("the viewer's role in the words is the viewer only on a line to 'you'", () => {
+    const one = (scriptText: string) => [line(1, scriptText, "a passenger reaching up for a bag in the overhead bin", { humanPresent: true })];
+    expect(picturesTheViewer(one("Reach up for your bag before the aisle fills."), 0, PASSENGER)).toBe(true);
+    expect(picturesTheViewer(one("She reached up for her bag before the aisle filled."), 0, PASSENGER)).toBe(false);
+    const story = one("She reached up for her bag before the aisle filled.");
+    markHostBroll(story, { hostLook: CREW_LOOK, hostName: "Helena Hart", viewerPerson: PASSENGER }, "https://x/host.png");
+    expect(story[0].otherPerson).toBe("a passenger");
+    expect(story[0].otherPersonLooks).toBeUndefined();
+  });
+});
+
+describe("the line check's 'you and someone' keeps the viewer beside them", () => {
+  it("'you and a flight attendant' is the viewer and the attendant; with no viewer, as before", () => {
+    expect(whoOf("you and a flight attendant", PASSENGER)).toBe("the passenger and a flight attendant");
+    expect(whoOf("the viewer and a flight attendant", PASSENGER)).toBe("the passenger and a flight attendant");
+    expect(matchRecurringPeople(whoOf("you and a flight attendant", PASSENGER)!, 2, [], PASSENGER)).toEqual([PASSENGER]);
+    // A viewer's customer is still only the customer, and the host's answer is unchanged.
+    expect(whoOf("your customer", PASSENGER)).toBe("the customer");
+    expect(whoOf("host and a customer", PASSENGER)).toBe("a customer");
+    expect(whoOf("you and a flight attendant")).toBe("a flight attendant");
   });
 });
