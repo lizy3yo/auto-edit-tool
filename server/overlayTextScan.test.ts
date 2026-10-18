@@ -341,6 +341,8 @@ describe("the thing the way its description says — the detail verdict (2026-10
     // Never about the camera, the place, the light or printing; never the missing thing's question.
     expect(fixed).toMatch(/Never answer about the camera/);
     expect(fixed).toMatch(/that is question 4/);
+    // A face's expression is never a detail (job 401 scene 29: "looking weary" on a face hidden by design).
+    expect(fixed).toMatch(/a person's FACE — an expression or a feeling/);
     expect(fixed).not.toMatch(/padlock|bobbin|arms raised/i);
   });
 

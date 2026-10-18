@@ -149,3 +149,17 @@ Helena Hart (job 399) and Gideon Grant (job 400), reviewed graphic by graphic; e
 | The planner wrote its own list from one sentence ("Two thousand years ago / Seneca wrote a short / Furious") | A list window must be a list the narrator says (`notAListAsSaid`); rows keep the spoken grammar, up to 6 words. |
 | QA failed a card the resolver had held to the cut through a pause | QA asks the resolver's own hold rule (`stillUpAfterWords`, `holdToCut`). |
 | A soup tin for a soda can; cartoon clock and megaphone | An icon only when one emoji IS the object; otherwise none (every card but IconCallout works without one). |
+
+## Round 11: the seven new channels' practice films (2026-10-18)
+
+Jobs 401-407 (Gary, Gideon, Helena, Luca, Sam, Walter, Werner), reviewed graphic by graphic; every finding re-checked against the frames.
+
+| Found | Rule now |
+| --- | --- |
+| Cards left a sub-second blink of a shot before the cut (job 403 "The toilet is fine.", job 404's Versus card); QA only reported it | The planner runs QA's own blink check: a card, window graphic or Quote leaving under 1.5 s of a shot is sent back with the reason and a suggestion (a template over the footage, a better line, or none). |
+| A Quote showed a drawn face for half a second at its end (job 407) | A Quote blurs the whole picture, so it counts as hiding it: held to the cut, its blinks counted. One list of picture-hiding templates for planner, finishing step, lab and QA. |
+| Graphics faded out two frames before a cut (job 404, "flicker") | The resolver and QA measure from the same point (where the sentence finished), so a graphic leaves on the cut with no fade. |
+| The host name card fell back to Times on Windows, and a 2.3 s cold open took the card and drew none (jobs 403, 405, 406, 407) | Inter is registered with fontconfig through sharp before any text render and checked by width (`interFontReady`). The card uses the graphics' label style and goes on the intro take, else the first host take that can show it (`nameCardOnWindow`); no host caption is planned under it. |
+| The chapter label cut across the host's beard (job 407) and ran past a split's seam (job 402) | Over a host it sits below the chin at 0.8 size (`LAYOUT.belowChinY`); on a split it stays in the host panel; beside the name card it moves bottom-right (`placementFor`). |
+| NumberLabel drew "vs" between a range ("$150 to $600") and two prices (job 406) | "vs" only when the words compare the values ("versus", "compared to"…); "to", "up to" or a join on "and"/"or" never; else the plan's `compare` mark. The "vs" comes in with the second value. |
+| A list graphic showed two places of three (job 401) | A last item that runs into a closing clause keeps its words up to the clause word. |

@@ -542,6 +542,12 @@ export function closingFoldTarget(scenes: StoryboardScene[], i: number): number 
   const s = scenes[i];
   const before = scenes[i - 1];
   if (!s || !before || i !== scenes.length - 1 || !s.hostPresent || fixed(s)) return -1;
+  // THE END QR CARD TAKES A GOODBYE UNDER A SECOND (the operator's choice, 2026-10-18): 25 of 141
+  // production films ended on the scan window and then a 0.8 s goodbye on the host (job 179, "See
+  // you at the bench."), a flash of a face after the card. The card and its picture now run to the
+  // end under the goodbye: no paid render, and the CTA's order (host, cover, host, card) is unchanged.
+  // Only the release beat of the block (`qrTail`) and only the film's own last words.
+  if (before.qrTail && before.qrHero && !before.hostPresent && !before.submits?.length) return i - 1;
   if (!sameRegister(s, before) || before.qrTail) return -1;
   if (s.hostOpener && before.hostOpener) return -1;
   if (s.submits?.length || before.submits?.length) return -1;

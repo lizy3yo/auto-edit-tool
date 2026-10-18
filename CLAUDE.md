@@ -737,8 +737,8 @@ Express · tRPC · Drizzle · MySQL.
   missing is never memory (`memoryUnfit`). (d) THE LINE CHECK holds who does what, the state and the
   count the line makes its point with, and writes `forbids` for a sentence that rules something out
   (shot-list rule 6b "what not to do"; the still check's QUESTION 8 only on those pictures). A separate
-  `detail` question (right thing, wrong state/count/position) exists but is OFF until measured:
-  `PICTURE_DETAIL_CHECK=1` turns it on. A typed redo owns its picture (`ownTypedPicture`). (e) NO
+  `detail` question (right thing, wrong state/count/position) — ON since round 12, capped at 3
+  redraws a video, `PICTURE_DETAIL_CHECK=0` off. A typed redo owns its picture (`ownTypedPicture`). (e) NO
   SILENT FAULTS (`shared/pictureFlaws.ts`): a picture that ships flagged says so (`pictureFlaws`/
   `panelFlaws`, one job warning, a card badge); later refusals are recorded on `pictureChecks`; broken
   geometry and plain-picture writing get one changed-prompt redraw (`faultRedrawFor`,
@@ -748,15 +748,15 @@ Express · tRPC · Drizzle · MySQL.
   for selling screens only. (h) SPLITS ship with both halves or say so (`server/splitPanel.ts`: the
   panel starts when HeyGen accepts the render, waits on the host scene's own clock, one retry,
   `splitPanelMissing` + a "Draw the picture(s)" banner for films already rendered). (i) CLIP CHECK is
-  told what is meant to move (`{what, meant}`); a glitch re-render reuses its checked keyframe and is
-  ledgered `glitch`. (j) CHIN/NECK LINES frame the host at the lips (`looksAtChinLine`,
+  told what is meant to move (`{what, meant}`); a glitch ends as the still from its checked keyframe
+  (round 12; with `CLIP_GLITCH_RERENDER=1` it is rendered once more from it, ledgered `glitch`). (j) CHIN/NECK LINES frame the host at the lips (`looksAtChinLine`,
   `HOST_LIPS_CUT_CLAUSE`). (k) LIST ITEMS ARE THINGS (`notAThing`): numbers, durations, rates, set
   phrases, clauses and describing words never make a list, and a list with one refused item is
   dropped whole. (l) NO UNSEEN BEATS (`foldUnseenBeats`): a measured zero-length beat joins a
   neighbour; a lead-in between two list items goes to the next item. (m) ONLY NARRATION IS VOICED
   (`shared/scriptCheck.ts`): notes, headings and a 60+ word repeat are refused at Generate by line.
-  Left for the operator: the face on beauty/fashion "looks" lines (audit cause 9), and the
-  pay-once video rule (R14 kept the second render).
+  Left for the operator then, decided in round 12: the face on beauty/fashion "looks" lines (audit
+  cause 9) and the pay-once video rule.
 - **What the practice films of the new channels found** (round 10, 2026-10-18). Helena Hart (job
   399) and Gideon Grant (job 400) were reviewed picture by picture with a second reviewer re-checking
   each finding against the frames (73 confirmed; `graphics-lab/out/review-pack.mts` builds a review
@@ -785,6 +785,67 @@ Express · tRPC · Drizzle · MySQL.
   (`naturalBreak` in planGate.ts: a comma, before a joining word, an article, a count or a name),
   never between subject and verb. A short practice film's 47 s without the host was NOT a bug: on a
   3:52 film the 3 host minutes are capped at the 35% guide (1:21), two check-ins.
+- **What the seven new channels' practice films found** (round 11, 2026-10-18). Jobs 401-407 (Gary,
+  Gideon, Helena, Luca, Sam, Walter, Werner), reviewed picture by picture and graphic by graphic, each
+  finding re-checked against the frames; 21 general rules, each replayed over the local storyboards.
+  PEOPLE: (a) THE HOST'S FACE IS CHECKED, not only asked for: `scanSameHost` also answers whether the
+  face shows (nose and both eyes; a profile passes, "from the side" is a framing we ask for); outside
+  a step on the host's own face a shown face is a miss counted with the identity redraws, the redraw
+  is turned away (`HOST_TURNED_AWAY_CLAUSE`/`turnHostAway`, `scene.hostTurnedAway`), and after the
+  last miss the picture is drawn with nobody in it — that draw always gets its turn. A whole-body
+  action or a phone call is framed from behind or the side from the first draw (`turnAwayPose`).
+  (b) "YOU" IS THE HOST only when the viewer does the host's own work; when the host's job serves the
+  viewer (passenger, patient, guest) the props call writes `VIEWER name: look`
+  (`inputParams.viewerPerson`) and every picture of the viewer keeps that look. (c) "Hand" is a person
+  only as part of a body (`BODY_HAND`: not a hand saw, hand-stitched, by hand, a clock's hands).
+  (d) Splitting and edge tools in their real working position (end grain, edge-down; the other hand
+  behind the edge; `TOOL_CONTACT_CLAUSE`, the still check's `broken`). (e) Light the words name
+  (night, lamplight, screen glow) is never "staged" on its own (`namedLight`/`namedLightQuestion`,
+  audit rule 13 agrees). (f) The QR card's picture is person-free in its words too (`namesSomeone`,
+  `QR_BACKDROP_CLAUSE`, a "person" flag on that check). PICTURES: (g) a split panel gets its own line
+  check after the panel rewrite (`fitSplitPanelsToLines`, same rulebook and model) and a free cut of
+  "X or Y" to one thing; (h) split panels are in the near-copy check (`server/pictureVariety.ts`, a
+  panel looks at its three closest pictures up to 24 bits); (i) a continuation view is a NEW photo of
+  the thing from a camera in `REDRAW_CAMERAS`, checked against the picture it continues
+  (`JUST_SHOWN_COPY_NOTE`), and a picture after a host take no longer continues the one before it
+  (`breakTopicsAtHostTakes`); (j) memory lends only the THING, never its season, weather, light or
+  place (`MEMORY_SETTING_CLAUSE`); (k) a living thing's look names its exact regional kind with 2-3
+  features that tell it apart; (l) nothing solid is cut open (`server/cutOpen.ts`, `withoutCutaway`,
+  `SEEN_FROM_OUTSIDE_CLAUSE`); (m) a line with nothing to see gets an everyday moment that carries it,
+  never the main thing by default (shot-list rules 1f/1g); a sound shows what makes it; (n) the line
+  check may split a picture where a new sentence about another visible thing starts, even a joined
+  one. TIMING AND LISTS: (o) the intro is found by a short name too ("I am Sam", `server/hostIntro.ts`);
+  (p) a cut never lands inside a spoken number (`retimeSpokenNumbers`); (q) a list keeps its last item
+  when it runs into a closing clause ("…the kitchen table at two in the morning when…"). GRAPHICS:
+  (r) the planner refuses a card, window or Quote that would leave under 1.5 s of a shot (QA's own
+  blink check), a Quote counts as hiding the picture, and graphics leave ON the cut (one measuring
+  point for resolver and QA); (s) the name card is drawn in Inter everywhere (`interFontReady`,
+  `server/fontConfig.ts` — FONTCONFIG_FILE never reached librsvg on Windows) in the graphics' label
+  style, on the intro take else the first host take that can show it (`nameCardOnWindow`); (t) the
+  chapter label sits below the chin over a host (`LAYOUT.belowChinY`, `placementFor`); (u) NumberLabel
+  draws "vs" only when the two values are compared (a range or two prices never). Details and the
+  replay counts: `graphics-lab/out/round11-docs.json`.
+- **The operator's four decisions** (round 12, 2026-10-18). (a) THE DETAIL CHECK IS ON
+  (`detailCheckOn`, `PICTURE_DETAIL_CHECK=0` off) on the condition that it costs nothing more: it
+  rides the one check call, and its redraws are capped per video (`server/detailRedraws.ts`,
+  `DETAIL_REDRAWS_PER_VIDEO` 3, in memory per job; a detail on a draw redrawn anyway shares that
+  redraw). Past the cap the picture ships flagged "detail". It never judges a face's expression —
+  the one wrong flag of 148 measured (job 401 #29 "looking weary") was a face hidden by design.
+  Measured 5 flags in 148 pictures, never more than 2 a video. (b) EACH VIDEO CLIP IS PAID FOR ONCE:
+  a clip the motion check fails becomes the still it was rendered from (`checkedKeyframeOf`), the
+  submit marked `SceneSubmit.movedWrong`; locally 35 clips in 20 jobs had been rendered twice and 11
+  second renders failed too. `CLIP_GLITCH_RERENDER=1` restores the second render. (c) LOOKS ON THE
+  FACE SHOW THE HOST'S FACE, accurately: a line about what a shade, hair colour or cut, glasses,
+  earrings or a neckline does to the face (`looksOnTheFace`, "will read younger", "washes you out")
+  is drawn from the host photo (`faceLookFramed` → `hostFaceShown`, `hostFaceLookClause`) and checked
+  to be the host (`scanSameHost`; on a hair line it judges face, age and skin, not the hair,
+  `hairLookOnFace`). Replayed over 345 storyboards: 12 pictures, all Diane's hair lines. (d) THE FILM
+  NEVER ENDS ON A HOST SHOT UNDER A SECOND (plan-gate rule 7, `closingFoldTarget`,
+  `CLOSING_HOST_MIN_SEC` 1): the goodbye's words go to the beat before it — a host take joins into
+  one take (within `HOST_JOIN_MAX_SEC`), a picture or split runs to the end, and the END QR CARD's
+  release beat (`qrTail` + `qrHero`, the film's last words only) keeps its card and picture to the
+  end under the goodbye (25 of 141 production films ended card → a 0.8 s face; job 179). Never
+  across a CTA edge otherwise, into a cover or asset, or over a paid render.
 - `server/hostPlate.ts` — **provider-independent**. The lip-sync model animates the image it
   is handed and never changes the setting, so `HOST_PLATES=1` generates a 16:9 plate of the host
   IN each beat's setting (host photo as identity reference) and syncs from that instead of the
@@ -1390,8 +1451,9 @@ Express · tRPC · Drizzle · MySQL.
   it (`vanished`) fails even with hands in the shot, and the pair is laid SIDE BY SIDE (768 each):
   Granny Ruth's 3-min test (job 233, 1:00) had the quilt over the table front shrink away to bare
   table while she sewed; stacked, Sonnet called that pair "slight shifts" at 640 and 1024 px, side
-  by side it named it and still passed five good hands clips (2026-09-29). A glitch renders
-  the beat again once; a second makes it the still (`scene.motionGlitches`); a moving split panel
+  by side it named it and still passed five good hands clips (2026-09-29). A glitch makes the
+  beat the still its clip was rendered from — each video clip is paid for ONCE since 2026-10-18
+  (round 12; `CLIP_GLITCH_RERENDER=1` brings back one more render first) (`scene.motionGlitches`); a moving split panel
   that glitches falls back to its still panel. Skipped in rehearsals
 - **B-roll prompts** — the style bible is a HOME BASE plus the places the script travels to, not
   "the ONE physical world" (that put a whole Japanese-woodworking film in one garage, a Japanese

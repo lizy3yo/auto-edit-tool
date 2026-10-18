@@ -319,7 +319,9 @@ export const detailCheckOn = () => process.env.PICTURE_DETAIL_CHECK !== "0";
  * named the state, action or position the picture then missed — job 305 scene 118 "padlock hanging
  * open on a mesh gate latch" drawn shut, 285-125 a bobbin "wound lumpy" drawn neat, 233-134 "both
  * arms raised over her head" drawn with the arms down. A separate verdict, so `missing` keeps its
- * meaning and its fallback order, and so it can be counted on its own.
+ * meaning and its fallback order, and so it can be counted on its own. A FACE'S EXPRESSION is never
+ * asked: the one wrong flag of the 148 measured (job 401 scene 29, "a farmer standing in a field
+ * looking weary" — "expression not weary, appears neutral") judged a face the film hides by design.
  */
 export function detailQuestion(expect: string): string {
   return (
@@ -330,9 +332,10 @@ export function detailQuestion(expect: string): string {
     "three, lying flat where it says hanging, nobody where it says someone is doing something? " +
     "Answer false when it names no such detail, when the detail is shown, when it is too small to " +
     "judge, when the thing itself is not there (that is question 4), and when unsure. Never answer " +
-    "about the camera (how close, from which side, how it is framed), the setting, the light, or " +
-    'words and printing. When true, also give detail_what: 3-8 words on what differs (e.g. "gate ' +
-    'shut, should hang open").'
+    "about the camera (how close, from which side, how it is framed), the setting, the light, " +
+    "words and printing, or a person's FACE — an expression or a feeling (weary, proud, worried) is " +
+    "not a detail here, since a face is often turned away or left out on purpose. When true, also " +
+    'give detail_what: 3-8 words on what differs (e.g. "gate shut, should hang open").'
   );
 }
 

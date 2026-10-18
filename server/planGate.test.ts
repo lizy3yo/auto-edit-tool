@@ -1423,7 +1423,7 @@ describe("the film never ends on a host shot under a second (the audit's last op
     expect(r.scenes[1].scriptText).toBe(sentence(2));
   });
 
-  it("never into the big QR, across a CTA edge, past the one-take limit, or over a paid render — the job is told", () => {
+  it("into the end card's release beat (the operator's choice), never across a CTA edge, past the one-take limit, or over a paid render — the job is told", () => {
     const qr = film([
       ["H", 5, sentence(1)],
       ["H", 6, "The whole guide is in the link below."],
@@ -1433,9 +1433,10 @@ describe("the film never ends on a host shot under a second (the audit's last op
     Object.assign(qr[1], { cta: true, ctaIndex: 0, qrCorner: true });
     Object.assign(qr[2], { cta: true, ctaIndex: 0, qrHero: true, qrTail: true });
     const r = enforcePlanRules(qr, params);
-    expect(closing(r)).toHaveLength(1);
-    expect(r.scenes.find(s => s.qrHero)?.scriptText).toBe("Scan the code now.");
-    expect(r.scenes.at(-1)).toMatchObject({ hostPresent: true, scriptText: "See you next time." });
+    expect(closing(r)).toHaveLength(0);
+    // the card and its picture run to the end under the goodbye
+    expect(r.scenes.at(-1)).toMatchObject({ qrHero: true, scriptText: "Scan the code now. See you next time." });
+    expect(r.scenes.at(-1)?.hostPresent).toBeFalsy();
 
     // A pitch picture of an unmarked CTA (cta, no QR) is still the other side of the edge.
     const edge = film([

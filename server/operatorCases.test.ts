@@ -5627,10 +5627,10 @@ describe("the film never ends on a host shot under a second (the audit, 2026-10-
     expect(last.scriptText).toMatch(/whose head your first hat is going on\. This is Pearl Parker\.$/);
   });
 
-  it("job 179 (the audit's shape): 'See you at the bench.' (0.78 s) after the end QR card stays, and the job is told", async () => {
-    // Every one of the audit's 21 production films ends this way: the scan window under the big
-    // card, then the goodbye outside the CTA block. The goodbye never joins the QR beat and never
-    // crosses the CTA edge, so the scan window keeps its words and the short goodbye is named.
+  it("job 179 (the audit's shape): 'See you at the bench.' (0.78 s) after the end QR card joins the card, which runs to the end", async () => {
+    // 25 of 141 production films end this way: the scan window under the big card, then a goodbye
+    // under a second on the host. The operator chose the card running to the end under the goodbye
+    // (no paid render, no flash of a face, the CTA's order unchanged).
     const { closingFoldTarget, enforcePlanRules } = await import("./planGate");
     const cta = { cta: true, ctaIndex: 0 } as const;
     const scanWindow =
@@ -5640,12 +5640,30 @@ describe("the film never ends on a host shot under a second (the audit, 2026-10-
       at(193, "P", 993.122063, 1005.399875, scanWindow, { ...cta, qrHero: true, qrTail: true }),
       at(194, "H", 1005.399875, 1006.184, "See you at the bench."),
     ];
-    expect(closingFoldTarget(scenes, 2)).toBe(-1);
+    expect(closingFoldTarget(scenes, 2)).toBe(1);
     const r = enforcePlanRules(scenes, { faceImageUrl: "https://example.com/hank.jpg", hostName: "Hank Hardwood" } as any);
-    expect(r.scenes.find(s => s.qrHero)).toMatchObject({ scriptText: scanWindow, narrationEndSec: 1005.399875 });
-    expect(r.scenes.at(-1)).toMatchObject({ hostPresent: true, scriptText: "See you at the bench." });
-    expect(r.unresolved).toContainEqual(
-      expect.objectContaining({ rule: 7, detail: expect.stringMatching(/^closing host shot under 1 s \(0\.78s\)/) })
-    );
+    const last = r.scenes.at(-1)!;
+    expect(last).toMatchObject({ qrHero: true, qrTail: true, narrationEndSec: 1006.184 });
+    expect(last.hostPresent).toBeFalsy();
+    expect(last.scriptText).toMatch(/See you at the bench\.$/);
+    expect(r.unresolved.some(u => /^closing host shot/.test(u.detail))).toBe(false);
+  });
+
+  it("only the end card's own release beat takes the goodbye: a host take or a long goodbye does not", async () => {
+    const { closingFoldTarget } = await import("./planGate");
+    const cta = { cta: true, ctaIndex: 0 } as const;
+    // the card is a corner over the host (no release beat): never folded into
+    const corner = [
+      at(1, "P", 0, 10, "A plain picture line here.", {}),
+      at(2, "H", 10, 20, "Grab it with the link below.", { ...cta, qrCorner: true }),
+      at(3, "H", 20, 20.8, "Bye now."),
+    ];
+    expect(closingFoldTarget(corner, 2)).not.toBe(1);
+    // a QR beat that is not the block's release beat does not take it either
+    const notTail = [
+      at(1, "P", 0, 10, "Point your phone at the code.", { ...cta, qrHero: true }),
+      at(2, "H", 10, 10.8, "Bye now."),
+    ];
+    expect(closingFoldTarget(notTail, 1)).toBe(-1);
   });
 });
