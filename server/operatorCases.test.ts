@@ -2140,3 +2140,17 @@ describe("a warning card says what to avoid, never the thing to avoid as advice 
       expect(namesTheDanger(real), real).toBe(true);
   });
 });
+
+describe("a warning card may simply name the thing to avoid (round 10 graphics review, 2026-10-18)", () => {
+  // 395 dark-beads-warning: "Now the one that's aging you. Chunky black or very dark beads." — the card
+  // showed the second sentence under WARNING. It has no danger word, but a thing named on its own
+  // cannot tell the viewer to do anything, so it stays a warning. 389 leave-room-in-price ("Either way,
+  // leave enough room in the price") is the right way, a command, and goes to another template.
+  it("395's named thing passes; 389's command and 399's 'do X' half are still refused", async () => {
+    const { namesTheDanger } = await import("../graphics/src/plan/planner");
+    expect(namesTheDanger("Chunky black or very dark beads.")).toBe(true);
+    expect(namesTheDanger("Either way, leave enough room in the price")).toBe(false);
+    expect(namesTheDanger("Ask while the cart is still working its way back,")).toBe(false);
+    expect(namesTheDanger("Ask while the cart is still working its way back.")).toBe(false);
+  });
+});

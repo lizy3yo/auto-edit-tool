@@ -89,10 +89,11 @@ On top of the footage:
 - CrossedList — dismisses 2-3 things ("not the bowl, not the house"), optionally then names the real one (over b-roll): {"items": [{"text" (≤3 words), "icon", "at": "@words", "keep": true only for the real one}]}
 - WarningLabel — names a danger or a mistake to avoid, in words that SAY it: read alone under its "WARNING"
   header, the line itself says what not to do or what goes wrong ("never", "don't", "not", "avoid", "too…",
-  the harm or the bad result — "Never leave it plugged in overnight", "The glue fails in the cold"). A line
-  that tells the viewer to DO something is advice, not a warning: when the script warns with "do X, and [bad
-  result]" ("Open it while it's hot, and the jar cracks"), the "do X" half alone reads as an instruction to
-  do it — show words that name the danger, or show the right way with another template, or nothing:
+  the harm or the bad result — "Never leave it plugged in overnight", "The glue fails in the cold"), or is
+  a sentence of its own that only names the thing to avoid ("Cheap plastic hinges."). A line that tells the
+  viewer to DO something is advice, not a warning: when the script warns with "do X, and [bad result]"
+  ("Open it while it's hot, and the jar cracks"), the "do X" half alone reads as an instruction to do it —
+  show words that name the danger, or show the right way with another template, or nothing:
   {"text": phrase (≤10 words), "emphasis"}
 - IconLabels — names 1-3 right things to look for or buy: {"items": [{"icon","text" (1-3 words),"say","at"}]}
 - IconCallout — makes one short point that one object says well (over b-roll): {"icon", "phrase": phrase (≤8 words), "emphasis"}
@@ -264,9 +265,42 @@ const NAMES_A_DANGER = new RegExp(
   "i"
 );
 
-/** Does a warning's line, read alone, say what to avoid or what goes wrong (`NAMES_A_DANGER`)? Pure. */
+/**
+ * A SENTENCE OF ITS OWN THAT NAMES A THING — commanding nothing and speaking to no one — names the
+ * danger by itself under the WARNING header (as "Wet floor" does on a sign), and cannot tell the viewer
+ * to DO anything: the "do X" half of a warning needs a command. Scarlett's job 395 placed "Chunky black
+ * or very dark beads." right after "Now the one that's aging you."; no danger word is in it, and it is
+ * a good warning. Not one when it has a helper verb or a contraction ("is", "can", "'ll"), a person
+ * ("you", "your", "it" — "Sort your finished pieces by size and price", Dale's job 397), a clause word
+ * ("while", "until"), or a command verb first ("Use…", "Leave…" — Dale's job 389 placed "Either way,
+ * leave enough room in the price", the right way, which belongs in another template). And it must end
+ * its sentence (".", "!", "?"): a line stopped at a comma or before "but" may be the safe half of a
+ * contrast whose warning comes after it. (A possessive "'s" is not a sign — "a neighbour's ladder" is
+ * a thing.)
+ */
+const CLAUSE_SIGN =
+  /\b(?:is|are|was|were|be|been|being|am|do|does|did|has|have|had|will|would|shall|should|can|could|may|might|i|you|your|yours|he|she|it|we|they|me|him|us|them|my|our|their|while|until|till|when|whenever|if|because|whether)\b|'(?:re|ve|ll|d|m)\b/;
+const OPENERS = /^(?:(?:so|and|but|or|now|then|just|also|always|first|next|instead|simply|plus|please|okay|well|either way)\b[\s,.]*)+/;
+const COMMAND_VERBS = new Set(
+  (
+    "add apply ask bake boil bring buy call carry check choose clean close cook cover cut dip do drill drink drive drop dry eat " +
+    "fill find fix fold follow get give glue go grab hang heat hold keep leave let lift load lock look make measure mix move oil " +
+    "open order pack paint pay pick place plug pour press pull push put read remember remove rinse run sand save sell send set " +
+    "shop show sit soak sort spend spray start stir store switch take tap tell think throw tie try turn unplug use wait walk wash " +
+    "watch water wear wipe wrap write"
+  ).split(" ")
+);
+function namesAThingAlone(line: string): boolean {
+  if (!/[.!?]["”']?$/.test(line) || CLAUSE_SIGN.test(line)) return false;
+  const first = line.replace(OPENERS, "").split(/\s+/)[0]?.replace(/[^a-z0-9$']/g, "");
+  return !!first && !COMMAND_VERBS.has(first);
+}
+
+/** Does a warning's line, read alone, say what to avoid or what goes wrong (`NAMES_A_DANGER`), or
+ * name the thing to avoid in a sentence of its own (`namesAThingAlone`)? Pure. */
 export function namesTheDanger(text: string): boolean {
-  return NAMES_A_DANGER.test(text.toLowerCase().replace(/[’‘]/g, "'"));
+  const line = text.trim().toLowerCase().replace(/[’‘]/g, "'");
+  return NAMES_A_DANGER.test(line) || namesAThingAlone(line);
 }
 
 /** Keys whose strings are not shown words (or are checked by the resolver already). */

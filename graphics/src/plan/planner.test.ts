@@ -507,9 +507,26 @@ describe("a warning says what to avoid, never advises doing it (A4, Helena's job
     expect(namesTheDanger("Ask too early and the cart is empty")).toBe(true);
   });
 
+  it("a sentence of its own that only names the thing to avoid is a warning (Scarlett's job 395); a command or advice dressed as one is not", () => {
+    // job 395: "Now the one that's aging you. Chunky black or very dark beads." — placed as dark-beads-warning
+    expect(namesTheDanger("Chunky black or very dark beads.")).toBe(true);
+    expect(namesTheDanger("Sanding past 220 grit.")).toBe(true);
+    expect(namesTheDanger("A neighbour’s ladder against the wall.")).toBe(true); // a possessive is a thing
+    // …but never a line that commands, speaks to someone, or stops before its sentence ends
+    expect(namesTheDanger("Chunky black or very dark beads")).toBe(false); // said as part of a longer sentence
+    expect(namesTheDanger("Either way, leave enough room in the price")).toBe(false); // Dale's job 389: the right way
+    expect(namesTheDanger("Either way, leave enough room in the price.")).toBe(false);
+    expect(namesTheDanger("Use the cheapest glue.")).toBe(false); // a command, whole sentence
+    expect(namesTheDanger("Ask while the cart is still working its way back.")).toBe(false); // job 399 with a full stop
+    expect(namesTheDanger("Your finished pieces by size and price.")).toBe(false); // speaks to the viewer
+    expect(namesTheDanger("The glue is fine indoors,")).toBe(false); // the safe half of a contrast
+    expect(namesTheDanger("The glue is fine indoors.")).toBe(false);
+    expect(namesTheDanger("So wait until everyone’s been served.")).toBe(false);
+  });
+
   it("the prompt's own examples agree with the check: its warnings pass, its 'do X' half does not", () => {
     const prompt = systemPrompt({ kept: false });
-    for (const ok of ["Never leave it plugged in overnight", "The glue fails in the cold"]) {
+    for (const ok of ["Never leave it plugged in overnight", "The glue fails in the cold", "Cheap plastic hinges."]) {
       expect(prompt).toContain(ok);
       expect(namesTheDanger(ok)).toBe(true);
     }
