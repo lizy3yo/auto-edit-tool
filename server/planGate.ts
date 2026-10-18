@@ -73,9 +73,13 @@ export const PICTURE_MAX_SEC = pictureMaxSecAt(0, 0) + PICTURE_MAX_SLACK_SEC;
 /**
  * Rule 7 inside a CTA: the longest the book cover may run while it finishes the sentence the host
  * would otherwise come back into — the ceiling a host take stretches to for the same reason
- * (`HOST_SENTENCE_MAX_SEC`). Past it the host comes back inside the sentence, the ordinary L-cut.
+ * (`HOST_SENTENCE_MAX_SEC`, 15; a test holds the two equal). Past it the host comes back inside
+ * the sentence, the ordinary L-cut. A NUMBER, never `= HOST_SENTENCE_MAX_SEC`: longformVideo
+ * imports this file, so the server runs this file's top level before longformVideo's own — that
+ * import is not set yet here, and node stopped at boot on it ("Cannot access
+ * 'HOST_SENTENCE_MAX_SEC' before initialization"; vitest read it as undefined).
  */
-export const COVER_SENTENCE_MAX_SEC = HOST_SENTENCE_MAX_SEC;
+export const COVER_SENTENCE_MAX_SEC = 15;
 /**
  * Rule 11: the share of cutaway time that moves — between these (2026-09-28, the operator: "less
  * video b-roll than the image"; it used to demand at least 30%). Below the floor the gate adds
