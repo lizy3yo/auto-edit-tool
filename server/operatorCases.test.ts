@@ -2247,3 +2247,47 @@ describe("the big QR starts on the scan line, however it is worded (jobs 399 and
     expect(out.find(s => s.qrHero)?.scriptText).toMatch(/^There's a small patterned square on your screen/);
   });
 });
+
+describe("the big QR waits for the scan line and never starts on the pitch before it (jobs 391 and 399)", () => {
+  const cta = (index: number, scriptText: string) =>
+    ({ index, scriptText, hostPresent: true, cta: true, ctaIndex: 0, showSubject: "x" }) as StoryboardScene;
+  const order = (out: StoryboardScene[]) =>
+    out.filter(s => s.cta).map(s => (s.qrHero ? "Q" : s.coverHero ? "B" : "H")).join("");
+
+  it("job 391: a scan line cut over two beats is all under the card, 'point the camera at that square' included", () => {
+    const scenes = [
+      host(1, "Hello.", { hostOpener: true }),
+      cta(2, "These length rules aren't mine originally. They come out of the way jewelers and dressmakers have always matched a piece to a neckline,"),
+      cta(3, "and I gathered the ones that still hold up into a book of my own."),
+      cta(4, "It's called Three Hundred Budget-Friendly Ways to Look Expensive, and it's a digital download."),
+      cta(5, "The chapter called The Jewelry Rules is where the necklace lengths live, set by neckline."),
+      cta(6, "There's a small patterned square on your screen right now. Lift your phone,"),
+      cta(7, "point the camera at that square, and hold it steady for a second or two."),
+      cta(8, "A little bar slides up along the top of your screen."),
+      cta(9, "Touch that bar and the book opens. If the phone feels like a nuisance, the very first line in the description under this video goes to the same place."),
+      cta(10, "Whenever you get to it is fine."),
+      host(11, "Bye."),
+    ];
+    const out = markCtaQrBlock(scenes, { qrImageUrl: "q.png", bookTitle: "300 Budget-Friendly Ways to Look Expensive", bookCoverImageUrl: "c.png" } as any, true);
+    expect(order(out)).toBe("HHBHQQQQQ");
+    expect(out.find(s => s.qrHero)?.scriptText).toMatch(/^There's a small patterned square/);
+  });
+
+  it("a pitch about the book's description or download stays the host's; the card starts on the scan line", () => {
+    // Job 399's block with two pitch lines a script could as easily have written: "a full
+    // description of every" lesson and "easy to download it to any phone" are the book, not the way
+    // to it.
+    const scenes = [
+      host(1, "So wait until everyone's been served, then catch a flight attendant as they pass.", { hostOpener: true }),
+      cta(2, "Two asks in, you might wonder how anyone keeps this straight. I gathered it into one digital book."),
+      cta(3, "It's called A Hundred Air Hostess Secrets, a four hundred eighty-five page PDF, and every secret gives you the exact words,"),
+      cta(4, "who to say them to, and the moment in the trip when they work. Inside you'll find a full description of every request, and it's easy to download it to any phone. Hold your phone up to the screen with its camera on, and aim it at the little black and white code. A link appears, and you tap it."),
+      cta(5, "Or look underneath this video, open the description, and tap the link at the top. None of that needs doing today."),
+      host(6, "Bye."),
+    ];
+    const out = markCtaQrBlock(scenes, { qrImageUrl: "q.png", bookTitle: "100 Air Hostess Secrets", bookCoverImageUrl: "c.png" } as any, true);
+    expect(order(out)).toBe("HBHQQ");
+    expect(out.find(s => s.qrHero)?.scriptText).toMatch(/^Hold your phone up to the screen/);
+    expect(out.find(s => /easy to download it to any phone\.$/.test(s.scriptText ?? ""))?.hostPresent).toBe(true);
+  });
+});

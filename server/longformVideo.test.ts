@@ -4460,7 +4460,35 @@ describe("SCAN_INTENT", () => {
       "A link appears, and you tap it.",
       "When a little link pops up, tap it.",
       "Or scroll down to the description below the video.",
+      // Job 391's own second half of the scan line, cut into its own beat: "that square" is the
+      // one just pointed out on the screen.
+      "point the camera at that square, and hold it steady for a second or two.",
+      "Lift your phone toward the pattern in the corner and tap what rises.",
+      "Hover your phone over the code and wait a second.",
+      "Hold it up to the screen and wait for the link.",
+      "The code's on your screen right now.",
+      "There's a little square code in the corner of your screen.",
+      "Look in the description of this video.",
+      "Open this video's description.",
+      "To download it, open the camera on your phone.",
     ]) expect(SCAN_INTENT.test(part), part).toBe(true);
+  });
+
+  it("never reads a book pitch as the way to the book", () => {
+    // What a pitch says about the book itself — its description, its download, a code book —
+    // sits right before the scan line, and the card must not start there.
+    for (const line of [
+      "Inside you'll find a full description of every stitch and how to fix it.",
+      "You'll find a short description of each project, with the price it sells for.",
+      "Inside you'll find the description of each lesson.",
+      "Check each description before you buy a used lock.",
+      "It's a digital download, easy to download it to any phone or tablet.",
+      "The code book opens right on your screen.",
+      "Every code requirement laid out on your screen in plain words.",
+      "I'd hold it to the same code.",
+      "Aim the camera at the corner of your porch so you see who knocks.",
+      "Hold your phone over the pattern and take a picture before you start.",
+    ]) expect(SCAN_INTENT.test(line), line).toBe(false);
   });
 
   it("never catches narration that only mentions a phone, a screen, a code or a pattern", () => {
@@ -4495,8 +4523,10 @@ describe("SCAN_INTENT", () => {
 
   it("stays fast on a long line with no scan in it", () => {
     const long = "hold your phone up to the window and turn the camera toward the board ".repeat(400);
+    const long2 = "find the code is right there just now still in the full description of each ".repeat(400);
     const t0 = Date.now();
     expect(SCAN_INTENT.test(long)).toBe(false);
+    expect(SCAN_INTENT.test(long2)).toBe(false);
     expect(Date.now() - t0).toBeLessThan(500);
   });
 });
