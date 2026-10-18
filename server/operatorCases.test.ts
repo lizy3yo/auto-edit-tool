@@ -2186,3 +2186,64 @@ describe("a series keeps its last member (job 400 at 2:36, 'everyone complains')
     expect(spokenListsByShape(["Get a saw, a drill, a plane, and the whole thing cost me forty dollars."]).map(l => l.items)).toEqual([["a saw", "a drill", "a plane"]]);
   });
 });
+
+describe("the big QR starts on the scan line, however it is worded (jobs 399 and 400)", () => {
+  // Neither block carries the fixed trigger line, so the card starts on the first sentence that
+  // tells the viewer to scan. Job 399 said "Hold your phone up to the screen…" and job 400 "lift
+  // your phone toward the pattern in the corner of the screen…"; neither was recognised, so 399's
+  // card came on the later "tap the link" sentence and 400's on the block's last words — 7-8 s of
+  // scan instruction spoken over the host with only the small corner code.
+  const cta = (index: number, scriptText: string) =>
+    ({ index, scriptText, hostPresent: true, cta: true, ctaIndex: 0, showSubject: "x" }) as StoryboardScene;
+  const order = (out: StoryboardScene[]) =>
+    out.filter(s => s.cta).map(s => (s.qrHero ? "Q" : s.coverHero ? "B" : "H")).join("");
+
+  it("job 399: the card starts on 'Hold your phone up to the screen…', not on the backup line after it", () => {
+    const scenes = [
+      host(1, "So wait until everyone's been served, then catch a flight attendant as they pass.", { hostOpener: true }),
+      cta(2, "Two asks in, you might wonder how anyone keeps this straight. I read what nobody else bothers to, the federal rules airlines must honor and the policies they never mention, and I gathered it into one digital book."),
+      cta(3, "It's called A Hundred Air Hostess Secrets, a four hundred eighty-five page PDF, and every secret gives you the exact words,"),
+      cta(4, "who to say them to, and the moment in the trip when they work. Chapter four covers in-flight requests, so when the right sentence won't come to you at the galley, it's already in your pocket. Hold your phone up to the screen with its camera on, and aim it at the little black and white code. A link appears, and you tap it."),
+      cta(5, "Or look underneath this video, open the description, and tap the link at the top. None of that needs doing today, and it'll keep just fine. Back in row fourteen, the next ask skips the cart entirely."),
+      host(6, "Bye."),
+    ];
+    const out = markCtaQrBlock(scenes, { qrImageUrl: "q.png", bookTitle: "100 Air Hostess Secrets", bookCoverImageUrl: "c.png" } as any, true);
+    expect(order(out)).toBe("HBHQQ");
+    expect(out.find(s => s.coverHero)?.scriptText).toMatch(/^It's called A Hundred Air Hostess Secrets/);
+    expect(out.find(s => s.qrHero)?.scriptText).toMatch(/^Hold your phone up to the screen with its camera on/);
+    // The pitch before it stays the host's.
+    expect(out.find(s => /it's already in your pocket\.$/.test(s.scriptText ?? ""))?.hostPresent).toBe(true);
+  });
+
+  it("job 400: the card starts on 'Getting there is one small motion: lift your phone…', not on the block's last words", () => {
+    const scenes = [
+      host(1, "Then he turns the whole thing over in a single motion: life is not short.", { hostOpener: true }),
+      cta(2, "Some of you are already a page ahead of me, wondering where all of this lives in one place."),
+      cta(3, "The thinking belongs to Seneca and the Stoics after him;"),
+      cta(4, "my work was gathering it into a digital book called The Stoic Way — a hundred and one lessons on money, grief, people, and more. Thirteen chapters, each lesson built the same way: the real struggle, the principle underneath it, a boxed exercise to run before the day ends, and an honest note on where the advice breaks down. Chapter twelve stands on today’s exact ground — time, legacy, and what the remaining years are for. Getting there is one small motion: lift your phone toward the pattern in the corner of the screen and tap what rises, or find the first line of the description below."),
+      cta(5, "No timer on this — a lesson about hurry is a poor place to hurry you. Now, back to that door you have been holding open."),
+      host(6, "Bye."),
+    ];
+    const out = markCtaQrBlock(scenes, { qrImageUrl: "q.png", bookTitle: "The Stoic Way", bookCoverImageUrl: "c.png" } as any, true);
+    expect(order(out)).toMatch(/^H*BH+QQ$/);
+    expect(out.find(s => s.qrHero)?.scriptText).toMatch(/^Getting there is one small motion: lift your phone/);
+    expect(out.filter(s => s.qrHero).map(s => s.scriptText).join(" ")).toMatch(/holding open\.$/);
+  });
+
+  it("a CTA block that only mentions a phone before its scan line still opens on the host and the book", () => {
+    // The pitch's "it lands on your phone or your tablet" is not the scan line; the card waits for
+    // the line about the code on the screen.
+    const scenes = [
+      host(1, "Hello.", { hostOpener: true }),
+      cta(2, "I gathered the ones that still hold up into a book of my own."),
+      cta(3, "It's called Three Hundred Budget-Friendly Ways to Look Expensive, and it's a digital download, so it lands on your phone or your tablet."),
+      cta(4, "The chapter called The Jewelry Rules is where the necklace lengths live, set by neckline."),
+      cta(5, "There's a small patterned square on your screen right now. Lift your phone, point the camera at that square, and hold it steady for a second or two."),
+      cta(6, "Whenever you get to it is fine."),
+      host(7, "Bye."),
+    ];
+    const out = markCtaQrBlock(scenes, { qrImageUrl: "q.png", bookTitle: "300 Budget-Friendly Ways to Look Expensive", bookCoverImageUrl: "c.png" } as any, true);
+    expect(order(out)).toBe("HBHQQ");
+    expect(out.find(s => s.qrHero)?.scriptText).toMatch(/^There's a small patterned square on your screen/);
+  });
+});
