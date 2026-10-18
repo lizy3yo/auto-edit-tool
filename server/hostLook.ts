@@ -618,6 +618,130 @@ export function someoneElse(
   return { who, count: named.count };
 }
 
+/**
+ * Everyone in a picture of someone else: who the other people are (`who`, `count`, never the host),
+ * and, on a channel with a host on camera, the words naming the ONE of them who is the host (`host`).
+ */
+export type PictureCast = SomeoneElse & { host?: string };
+
+/** One person in a picture's cast; `planner` when the shot list or line check named them. */
+type CastMember = Pick<NamedPerson, "phrase" | "noun" | "count" | "sex"> & {
+  kind: NounKind | "named";
+  planner: boolean;
+};
+
+/** "the host", "the narrator": the host by name or by word, never someone else. */
+const HOST_WORD = /\b(?:host|narrator|presenter)$/i;
+/** A word saying the role is ANOTHER one of that role, never the host: "another nurse", "a fellow plumber". */
+const ANOTHER_ONE = /\b(?:another|other|second|third|different|new|next|fellow)\b/i;
+
+/** People joined the way a sentence lists them: "a and b", "a, b and c". */
+const joinPeople = (phrases: string[]): string =>
+  phrases.length <= 2 ? phrases.join(" and ") : `${phrases.slice(0, -1).join(", ")} and ${phrases[phrases.length - 1]}`;
+
+/**
+ * The description's people with the planner's own words for the ones it named: the same noun first
+ * ("a passenger" is the planner's "a male passenger"), then a plain person, a group or a planner's
+ * proper name for anyone with no sex against it ("a man" is "a male passenger", "a woman" is never
+ * one). The host by name or word is never matched to someone else. Pure.
+ */
+function mergeCast(desc: NamedPerson[], planner: CastMember[]): CastMember[] {
+  const used = new Set<number>();
+  const out: CastMember[] = desc.map(d => ({ ...d, planner: false }));
+  const take = (i: number, fits: (p: CastMember) => boolean) => {
+    const k = planner.findIndex((p, j) => !used.has(j) && fits(p));
+    if (k < 0) return;
+    used.add(k);
+    // "two passengers" in the picture are more than the planner's "a male passenger": the
+    // picture's words keep the count, and they are still the planner's someone else.
+    out[i] = out[i].count > planner[k].count ? { ...out[i], planner: true } : planner[k];
+  };
+  desc.forEach((d, i) => take(i, p => !!p.noun && p.noun === d.noun));
+  out.forEach((d, i) => {
+    if (d.planner || (d.kind === "self" && HOST_WORD.test(d.phrase))) return;
+    const plain = (k: CastMember["kind"]) => k === "generic" || k === "group";
+    take(i, p => !(p.sex && d.sex && p.sex !== d.sex) && (plain(d.kind) || plain(p.kind) || p.kind === "named"));
+  });
+  return out;
+}
+
+/**
+ * Which one of a picture's people is the HOST: a role the host gives themself ("a plumber" on a
+ * plumber's channel), else the host by name or word, else an owner, a vendor or a crafter (the
+ * words `SELF_NOUNS` makes the host in a picture of one). Only one person, never a crowd of them,
+ * never "another nurse", and never someone the planner named as someone else. -1 for nobody. Pure.
+ */
+function hostIn(members: CastMember[], selfRoles: string[] = []): number {
+  const one = (m: CastMember) => m.count === 1 && !m.planner && !ANOTHER_ONE.test(m.phrase);
+  const tiers: ((m: CastMember) => boolean)[] = [
+    m => m.kind === "role" && selfRoles.includes(m.noun),
+    m => m.kind === "self" && HOST_WORD.test(m.phrase),
+    m => m.kind === "self",
+  ];
+  for (const tier of tiers) {
+    const at = members.findIndex(m => one(m) && tier(m));
+    if (at >= 0) return at;
+  }
+  return -1;
+}
+
+/**
+ * EVERYONE in a picture of someone else (2026-10-18, the review of job 399). Scenes 8 and 14 asked
+ * for "a flight attendant speaking quietly with a passenger in the aisle" and "a flight attendant
+ * speaking politely to a seated passenger", while the planner's `other` named only the passenger
+ * ("a male passenger", "a seated passenger") — so the prompt described one person, said "the only
+ * person … no face anywhere", and the flight attendant was drawn by nobody's rule: her face in
+ * profile in scene 8, a different smiling woman in scene 14. Now, when the description names MORE
+ * people than the planner did, every one of them is in the cast, in the planner's words for the ones
+ * it named (`mergeCast`): "a flight attendant and a male passenger".
+ * And on a channel with a host on camera (`hostLed`), ONE person the words make the host — a role the
+ * host gives themself (`selfRoles`: "a nurse" on a nurse's channel), the host by name or by word, an
+ * owner or a vendor — is the host (`host`), drawn from the host's look with the face never shown, and
+ * the rest are the other people. Off a host-led channel the host stays one more ordinary person, as
+ * `someoneElse` words them. Someone the planner named is never made the host: it read the line and
+ * said they are someone else. Undefined when no one but the host is in the picture. Pure.
+ */
+export function castOfPicture(
+  text: string | undefined,
+  planner: string | undefined,
+  opts: { look?: string; hostName?: string; selfRoles?: string[]; hostLed?: boolean } = {}
+): PictureCast | undefined {
+  const desc = namedPeople(withHostNamed(text ?? "", opts.hostName));
+  const total = (ms: CastMember[]) => Math.min(3, ms.reduce((n, m) => n + m.count, 0));
+  // The host by name or word, left among someone else's people, is one more ordinary person.
+  const said = (ms: CastMember[]) =>
+    joinPeople(ms.map(m => (m.kind === "self" && HOST_WORD.test(m.phrase) ? "a person" : m.phrase)));
+  let members: CastMember[];
+  let asWritten: SomeoneElse;
+  let merged = false;
+  if (planner) {
+    const named = namedPeople(planner);
+    const plannerCount = named?.count ?? 1;
+    // One person keeps the planner's own words ("a seated passenger": the noun phrase stops at
+    // "seated"); a name with no person noun in it ("Seneca") is someone all the same.
+    const theirs: CastMember[] = !named
+      ? [{ phrase: planner, noun: "", kind: "named", count: 1, planner: true }]
+      : named.people.length === 1
+        ? [{ ...named.people[0], phrase: planner, planner: true }]
+        : named.people.map(p => ({ ...p, planner: true }));
+    asWritten = { who: planner, count: Math.max(plannerCount, desc?.count ?? 1) };
+    merged = !!desc && desc.count > plannerCount;
+    members = merged ? mergeCast(desc!.people, theirs) : theirs;
+  } else {
+    const other = someoneElse(text, opts);
+    if (other && !desc) return other;
+    if (!desc || (!other && desc.count < 2)) return undefined;
+    members = desc.people.map(p => ({ ...p, planner: false }));
+    // Two people the words both make the host ("a plumber explaining the repair to a homeowner" on
+    // a plumber's channel) are still two: one of them is someone else, never both from one photo.
+    asWritten = other ?? { who: said(members), count: total(members) };
+  }
+  const at = opts.hostLed && total(members) >= 2 ? hostIn(members, opts.selfRoles) : -1;
+  if (at < 0) return merged ? { who: said(members), count: total(members) } : asWritten;
+  const rest = members.filter((_, k) => k !== at);
+  return { who: said(rest), count: total(rest), host: members[at].phrase };
+}
+
 // ─── People who come back ────────────────────────────────────────────────────────────────
 
 /** Words that say nothing about WHICH person is meant ("the", "her"), dropped when names are compared. */
@@ -1002,6 +1126,7 @@ export function markHostBroll(
     const text = s.showSubject ?? s.visualPrompt ?? "";
     const words = `${s.showSubject ?? ""} ${s.visualPrompt ?? ""}`;
     s.otherPersonLooks = undefined;
+    s.hostAmongOthers = undefined;
     // A planner's "someone else" lives and dies with the words it came from (2026-10-18, the
     // audit): "a woman customer" left on a picture of an incense holder (job 361 scene 32), "a
     // woman passenger" on a close-up of a soda can (job 399 scene 4), "a hen" (job 371) — each
@@ -1018,12 +1143,11 @@ export function markHostBroll(
     const toWear = on && eligible && !s.otherPerson && NECK_PIECE.test(words) && chinFramed(s);
     const person = !!s.humanPresent || showsPerson(text) || toWear;
     // SOMEONE ELSE in the picture: named by the planner, or by the picture's own words — a role, a
-    // sex the host does not have, two or more people (`someoneElse`).
+    // sex the host does not have, two or more people (`someoneElse`) — with EVERYONE the words name
+    // in it, and the host among them when one is (`castOfPicture`, job 399 scenes 8 and 14).
     const other =
       eligible && person
-        ? s.otherPerson
-          ? { who: s.otherPerson, count: Math.max(namedPeople(s.otherPerson)?.count ?? 1, namedPeople(text)?.count ?? 1) }
-          : someoneElse(text, { look, hostName: params.hostName, selfRoles })
+        ? castOfPicture(text, s.otherPerson, { look, hostName: params.hostName, selfRoles, hostLed: on })
         : undefined;
     if (other) {
       // A line about SOMEONE ELSE (a customer, a neighbour): that person is drawn, from behind,
@@ -1032,6 +1156,9 @@ export function markHostBroll(
       // more people are never drawn from the one host photo (job 370 scene 8: "two people hugging").
       s.otherPerson = other.who;
       s.otherPeople = other.count > 1 ? other.count : undefined;
+      // The host beside someone else is drawn from their look in words, the face never shown, and
+      // still never from the photo: one photo beside two people made both of them the host.
+      s.hostAmongOthers = other.host && look ? { who: other.host, look } : undefined;
       // Someone the story comes back to keeps one look in every picture of them (job 399: the same
       // passenger was three different women in scenes 2, 4 and 5) — `matchRecurringPeople`.
       const looks = matchRecurringPeople(other.who, other.count, params.recurringPeople);
@@ -1040,8 +1167,9 @@ export function markHostBroll(
       s.brollHostLook = undefined;
       s.brollHostRef = undefined;
       s.hostFaceShown = undefined;
-      if (s.showSubject) s.showSubject = withoutMirrors(s.showSubject);
-      if (s.visualPrompt) s.visualPrompt = withoutMirrors(s.visualPrompt);
+      // No face for anyone in it, so nothing in the words asks for one (`withoutFaceAsks`).
+      if (s.showSubject) s.showSubject = withoutFaceAsks(withoutMirrors(s.showSubject));
+      if (s.visualPrompt) s.visualPrompt = withoutFaceAsks(withoutMirrors(s.visualPrompt));
     } else if (on && eligible && person) {
       s.humanPresent = true;
       s.brollHostLook = look;

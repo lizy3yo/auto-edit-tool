@@ -422,6 +422,7 @@ import {
 } from "./splitPanel";
 import {
   BODY_PART_WORDS,
+  castOfPicture,
   deriveHostLook,
   facingTheCamera,
   hostLipsCut,
@@ -6033,8 +6034,11 @@ export function personClauseFor(scene: StoryboardScene, visual: string): string 
   // A host picture of a line about the chin, jaw or neck faces the camera, cut at the lips
   // (`hostLipsCut`): every side or back view below would hide what the line is about.
   const lipsCut = hostLipsCut(scene);
+  const others = peopleAskedFor(scene);
   const who = scene.otherPerson
-    ? otherPersonClause(scene.otherPerson, scene.otherPeople, scene.otherPersonLooks)
+    ? scene.hostAmongOthers
+      ? hostWithOthersClause(scene.hostAmongOthers, others.who, others.count, scene.otherPersonLooks)
+      : otherPersonClause(others.who, others.count, scene.otherPersonLooks)
     : scene.brollHostLook
       ? scene.hostFaceShown
         ? hostFaceClause(scene.brollHostLook)
@@ -6084,25 +6088,12 @@ export function otherPersonClause(
   const lookOf = (p: RecurringPerson) => p.look.trim().replace(/[.;,]+$/, "");
   const same = "the same person in every picture of them in this video, always drawn exactly like this";
   if (count > 1) {
-    const body = ONE_BODY_CLAUSE.replace(/The host has/g, "Each person has")
-      .replace(/both of the host's hands/g, "both of that person's hands")
-      .replace(/the host's/g, "that person's")
-      .replace(/anywhere in the frame/, "on anyone");
-    // "They are" only when the looks cover everyone in the shot: beside "a flight attendant and two
-    // passengers" the two passengers' looks are two of the three.
-    const known =
-      looks.length === 1
-        ? `One of them is ${looks[0].name}, ${same}: ${lookOf(looks[0])}. `
-        : looks.length > 1
-          ? `${looks.length >= count ? "They are" : `${looks.length === 2 ? "Two" : "Some"} of them are`} ` +
-            `the same people in every picture of them in this video, always drawn exactly ` +
-            `like this — ${looks.map(p => `${p.name}: ${lookOf(p)}`).join("; ")}. `
-          : "";
     return (
       `The people in this shot are ${named} — ${count === 2 ? "two" : "a small group of"} different, ` +
       `ordinary people of that description, NONE of them the video's host: each seen from behind or ` +
       `from the side, over the shoulder, faces turned away or out of frame so no face is ever shown. ` +
-      `${known}Nobody else is in the frame, in the background or in a reflection. ${body}`
+      `${knownLooks(looks, count)}Nobody else is in the frame, in the background or in a reflection. ` +
+      `${everyoneBodyClause()}`
     );
   }
   const body = ONE_BODY_CLAUSE.replace(/The host has/g, "This person has").replace(
@@ -6117,6 +6108,109 @@ export function otherPersonClause(
     `the shoulder, the face turned away or out of frame so it is never shown. Nobody else is in ` +
     `the frame, in the background or in a reflection. ${body}`
   );
+}
+
+/**
+ * `ONE_BODY_CLAUSE` for a picture of several people: each of them has one body, two arms. A function,
+ * since `ONE_BODY_CLAUSE` is declared further down the file.
+ */
+const everyoneBodyClause = (): string =>
+  ONE_BODY_CLAUSE.replace(/The host has/g, "Each person has")
+    .replace(/both of the host's hands/g, "both of that person's hands")
+    .replace(/the host's/g, "that person's")
+    .replace(/anywhere in the frame/, "on anyone");
+
+/**
+ * The recurring looks among `count` people: "One of them is …", "They are …" only when the looks
+ * cover everyone in the shot — beside "a flight attendant and two passengers" the two passengers'
+ * looks are two of the three.
+ */
+function knownLooks(looks: RecurringPerson[], count: number): string {
+  const lookOf = (p: RecurringPerson) => p.look.trim().replace(/[.;,]+$/, "");
+  if (looks.length === 1)
+    return (
+      `One of them is ${looks[0].name}, the same person in every picture of them in this video, ` +
+      `always drawn exactly like this: ${lookOf(looks[0])}. `
+    );
+  if (!looks.length) return "";
+  return (
+    `${looks.length >= count ? "They are" : `${looks.length === 2 ? "Two" : "Some"} of them are`} ` +
+    `the same people in every picture of them in this video, always drawn exactly ` +
+    `like this — ${looks.map(p => `${p.name}: ${lookOf(p)}`).join("; ")}. `
+  );
+}
+
+/**
+ * The HOST in a picture WITH someone else (`scene.hostAmongOthers`, 2026-10-18, the review of job
+ * 399): a description naming two people — "a flight attendant speaking politely to a seated
+ * passenger" (scene 14) — went out with a clause for the passenger alone, "the only person … no face
+ * anywhere", and the image model drew the flight attendant by no rule at all: a different woman,
+ * face shown, smiling. When one of the people is the host (a role the host gives themself, the host
+ * by name), they are drawn from the host's look in words — never the photo, which beside a second
+ * person made both of them the host — seen from behind or the side, the face never shown; everyone
+ * else is a different, ordinary person, face never shown either, with their recurring look when
+ * they have one. Pure.
+ */
+export function hostWithOthersClause(
+  host: { who: string; look: string },
+  who: string,
+  count: number = 1,
+  looks: RecurringPerson[] = []
+): string {
+  const hostWho = host.who.trim().replace(/\.$/, "");
+  const named = who.trim().replace(/\.$/, "");
+  const look = host.look.trim().replace(/\.$/, "");
+  const theHost = /\b(?:host|narrator|presenter)$/i.test(hostWho)
+    ? `The host — ${look} — is`
+    : `The ${hostWho.replace(/^(?:a|an|the|one)\s+/i, "")} is the video's host — ${look} — and is`;
+  const others =
+    count > 1
+      ? `The others are ${named} — ${count === 2 ? "two" : "a small group of"} different, ordinary ` +
+        `people of that description, none of them the host: each seen from behind or from the side, ` +
+        `over the shoulder, faces turned away or out of frame so no face is ever shown. ` +
+        knownLooks(looks, count)
+      : looks[0]
+        ? `The other person is ${named} — NOT the video's host, and the same person in every picture ` +
+          `of them in this video, always drawn exactly like this: ` +
+          `${looks[0].look.trim().replace(/[.;,]+$/, "")}. Seen from behind or from the side, over the ` +
+          `shoulder, the face turned away or out of frame so it is never shown. `
+        : `The other person is ${named} — NOT the video's host, a different, ordinary person of that ` +
+          `description: seen from behind or from the side, over the shoulder, the face turned away or ` +
+          `out of frame so it is never shown. `;
+  return (
+    `The people in this shot are ${hostWho} and ${named}, and no face is shown anywhere. ${theHost} ` +
+    `always drawn with that same hair, skin and clothes, seen from behind or from the side with the ` +
+    `head turned the same way as the shoulders, so the face is never shown. ${others}Nobody else is ` +
+    `in the frame, in the background or in a reflection. ${everyoneBodyClause()}`
+  );
+}
+
+type PeopleFields = Pick<
+  StoryboardScene,
+  "otherPerson" | "otherPeople" | "hostAmongOthers" | "showSubject" | "visualPrompt"
+>;
+
+/**
+ * The other people a picture of someone else asks for, read off the scene each time: everyone its
+ * description names, in the planner's words for its own (`castOfPicture`) — so a picture of a film
+ * marked before, regenerated (job 399 scenes 8 and 14: "a flight attendant speaking quietly with a
+ * passenger" under `otherPerson` "a male passenger"), names both people too. A picture with the host
+ * among them was cast when it was marked, and is asked for as it was. Pure.
+ */
+export function peopleAskedFor(scene: PeopleFields): { who: string; count: number } {
+  const stored = { who: scene.otherPerson ?? "", count: scene.otherPeople ?? 1 };
+  if (!scene.otherPerson || scene.hostAmongOthers) return stored;
+  const cast = castOfPicture(scene.showSubject ?? scene.visualPrompt, scene.otherPerson);
+  return cast ? { who: cast.who, count: Math.max(cast.count, stored.count) } : stored;
+}
+
+/**
+ * How many people a picture of someone else holds: the other people (`peopleAskedFor`) and the host
+ * beside them (`hostAmongOthers`) — what `otherPeopleSuffix` is asked for, so a picture of two
+ * people never says "apart from that one person". 1, 2, or 3 for several. Pure.
+ */
+export function peopleInShot(scene: PeopleFields): number {
+  return Math.min(3, peopleAskedFor(scene).count + (scene.hostAmongOthers ? 1 : 0));
 }
 
 /** `NO_OTHER_FIGURES_SUFFIX` for a picture of someone else: that one person, nobody more. */
@@ -6766,7 +6860,7 @@ export function buildStillPrompt(
   const personSuffix = !aggressive ? personClauseFor(scene, scene.showSubject ?? scene.visualPrompt ?? "") : "";
   const noFigures =
     !aggressive && scene.humanPresent && scene.otherPerson
-      ? otherPeopleSuffix(scene.otherPeople)
+      ? otherPeopleSuffix(peopleInShot(scene))
       : !aggressive && scene.humanPresent && scene.brollHostLook
         ? scene.hostFaceShown
           ? HOST_FACE_ONLY_SUFFIX
@@ -9078,7 +9172,7 @@ export function buildClipChain(
   const facing = (t: string) => (lipsCut ? facingTheCamera(t) : t);
   const clipNoFigures =
     !scene.hostPresent && scene.humanPresent && scene.otherPerson
-      ? otherPeopleSuffix(scene.otherPeople)
+      ? otherPeopleSuffix(peopleInShot(scene))
       : !scene.hostPresent && scene.humanPresent && scene.brollHostLook
         ? lipsCut
           ? HOST_LIPS_CUT_ONLY_SUFFIX

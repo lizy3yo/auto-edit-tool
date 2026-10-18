@@ -8,6 +8,7 @@
 import { describe, expect, it } from "vitest";
 import type { StoryboardScene } from "@shared/types";
 import {
+  castOfPicture,
   markHostBroll,
   namedPeople,
   SHOWS_PERSON,
@@ -30,10 +31,13 @@ import {
   whoOf,
 } from "./shotList";
 import {
+  buildClipChain,
   buildStillPrompt,
+  hostWithOthersClause,
   ONE_OTHER_PERSON_SUFFIX,
   otherPeopleSuffix,
   otherPersonClause,
+  peopleInShot,
   planHostMinutes,
 } from "./longformVideo";
 import { enforcePlanRules } from "./planGate";
@@ -414,5 +418,154 @@ describe("a picture of someone else is never turned into a host check-in", () =>
     const r = enforcePlanRules(scenes, { faceImageUrl: "https://example.com/host.jpg" } as any);
     const customers = r.scenes.filter(s => /customer's hand/.test(s.showSubject ?? ""));
     expect(customers.filter(s => s.hostPresent && s.scriptText && /^Line number \d+ says a thing\.$/.test(s.scriptText))).toEqual([]);
+  });
+});
+
+describe("everyone in a picture of someone else gets a person clause (job 399 scenes 8 and 14)", () => {
+  // The planner's `other` named only the passenger, the description named a flight attendant AND a
+  // passenger, and the prompt said "the only person … no face anywhere": the flight attendant was
+  // drawn by no rule — her face in profile (scene 8), a different smiling woman (scene 14).
+  const LOOK_399 =
+    "A slender woman in her late thirties with fair skin and dark hair pinned back, wearing a white blouse, navy blazer with gold pin, and striped scarf";
+  const INTRO_399 = "I'm Helena Hart, and I read the fine print so travelers like us can stop learning these things the hard way.";
+  const scene8 = () =>
+    pic(8, "a flight attendant speaking quietly with a passenger in the aisle", {
+      scriptText: "He figures she must know somebody on the crew. She doesn't. What she knows is which questions flight attendants like hearing, and when to ask them.",
+      visualPrompt: "Bare weathered hands of a flight attendant and a passenger meeting in the narrow aisle between rows, speaking quietly, blue seats and grey carpet visible.",
+      humanPresent: true,
+      otherPerson: "a male passenger",
+      stillImage: true,
+    });
+  const scene14 = () =>
+    pic(14, "a flight attendant speaking politely to a seated passenger", {
+      scriptText: "along with the exact words that get each one. None of them is an upgrade, and each of them starts with a single polite sentence.",
+      visualPrompt: "Bare hands from the forearms down, adjusting a beverage cup on the cart tray in the aircraft aisle galley during service.",
+      humanPresent: true,
+      otherPerson: "a seated passenger",
+      stillImage: true,
+    });
+  const intro = (scriptText: string) => pic(9, "talking", { hostPresent: true, hostIntro: true, scriptText });
+
+  it("castOfPicture names everyone the description names, in the planner's words for its own", () => {
+    const opts = { look: LOOK_399, hostLed: true, selfRoles: selfRolesOf(INTRO_399) };
+    expect(castOfPicture(scene8().showSubject, "a male passenger", opts)).toEqual({ who: "a flight attendant and a male passenger", count: 2 });
+    expect(castOfPicture(scene14().showSubject, "a seated passenger", opts)).toEqual({ who: "a flight attendant and a seated passenger", count: 2 });
+    // "a man" is the planner's "a male passenger"; "a man" is never the planner's woman.
+    expect(castOfPicture("a flight attendant speaking with a man in the aisle", "a male passenger", opts)?.who).toBe("a flight attendant and a male passenger");
+    expect(castOfPicture("a woman talking with a man at the counter", "a woman customer", opts)?.who).toBe("a woman customer and a man");
+    // A name the planner gave ("Seneca") is one of the people; the description's second is added.
+    expect(castOfPicture("a man at his desk talking with a student", "Seneca", opts)).toEqual({ who: "Seneca and a student", count: 2 });
+    // The picture's own count stands over a planner's one passenger.
+    expect(castOfPicture("two passengers chatting in the aisle", "a male passenger", opts)).toEqual({ who: "two passengers", count: 2 });
+  });
+
+  it("a description naming only the planner's people is asked for exactly as before", () => {
+    const opts = { look: LOOK_399, hostLed: true };
+    expect(castOfPicture("a passenger in row fourteen holding a cup with a little soda over ice", "a male passenger", opts)).toEqual({ who: "a male passenger", count: 1 }); // job 399 scene 7
+    expect(castOfPicture("two passengers seated in the same cabin row", "two airline passengers", opts)).toEqual({ who: "two airline passengers", count: 2 }); // job 399 scene 2
+    const s26 = "a senior passenger standing at a stainless steel galley counter, speaking with a flight attendant"; // job 399 scene 26
+    expect(castOfPicture(s26, undefined, opts)).toEqual(someoneElse(s26, { look: LOOK_399 }));
+    expect(castOfPicture("the host sanding a board at the bench", undefined, opts)).toBeUndefined();
+    expect(castOfPicture("an older man walking across an open parking lot", undefined, { look: MAN, hostLed: true })).toBeUndefined(); // job 400 scene 6
+  });
+
+  it("the host's own job beside someone else is the host — never the planner's someone else, never 'another' one", () => {
+    const roles = selfRolesOf("", "Flight Attendant");
+    expect(roles).toEqual(["attendant"]);
+    const on = { look: LOOK_399, hostLed: true, selfRoles: roles };
+    expect(castOfPicture(scene8().showSubject, "a male passenger", on)).toEqual({ who: "a male passenger", count: 1, host: "a flight attendant" });
+    expect(castOfPicture("a senior passenger standing at a stainless steel galley counter, speaking with a flight attendant", undefined, on)).toEqual({
+      who: "a senior passenger",
+      count: 1,
+      host: "a flight attendant",
+    });
+    // The host by name beside someone else.
+    expect(castOfPicture("Helena talking with a passenger at the cart", "a passenger", { ...on, hostName: "Helena Hart" })).toEqual({ who: "a passenger", count: 1, host: "the host" });
+    // Two people the words both make the host are one host and one someone else.
+    expect(castOfPicture("a plumber explaining the repair to a homeowner at the sink", undefined, { look: MAN, hostLed: true, selfRoles: ["plumber"] })).toEqual({
+      who: "a homeowner",
+      count: 1,
+      host: "a plumber",
+    });
+    // Not the host: the planner named the role as someone else, "another" one, or no host on camera.
+    expect(castOfPicture("a flight attendant handing a cup to a passenger", "a flight attendant", on)).toEqual({ who: "a flight attendant and a passenger", count: 2 });
+    expect(castOfPicture("another nurse checking a chart beside an older man", "an older man", { look: WOMAN, hostLed: true, selfRoles: ["nurse"] })?.host).toBeUndefined();
+    expect(castOfPicture(scene8().showSubject, "a male passenger", { ...on, hostLed: false })).toEqual({ who: "a flight attendant and a male passenger", count: 2 });
+    expect(castOfPicture("Helena talking with a passenger at the cart", "a passenger", { ...on, hostLed: false, hostName: "Helena Hart" })).toEqual({ who: "a person and a passenger", count: 2 });
+  });
+
+  it("markHostBroll on job 399's real scenes: both people, no host photo, no host look", () => {
+    const s8 = scene8();
+    const s14 = scene14();
+    markHostBroll([intro(INTRO_399), s8, s14], { hostLook: LOOK_399, hostName: "Helena Hart" }, HOST_PHOTO);
+    expect([s8.otherPerson, s8.otherPeople]).toEqual(["a flight attendant and a male passenger", 2]);
+    expect([s14.otherPerson, s14.otherPeople]).toEqual(["a flight attendant and a seated passenger", 2]);
+    for (const s of [s8, s14]) {
+      expect(s.hostAmongOthers).toBeUndefined();
+      expect(s.brollHostRef).toBeUndefined();
+      expect(s.brollHostLook).toBeUndefined();
+    }
+    const prompt = buildStillPrompt(s14);
+    expect(prompt).toContain(otherPersonClause("a flight attendant and a seated passenger", 2));
+    expect(prompt).toContain(otherPeopleSuffix(2));
+    expect(prompt).not.toContain(ONE_OTHER_PERSON_SUFFIX);
+    expect(prompt).not.toMatch(/The only person in this shot/);
+  });
+
+  it("with the host's job known, the flight attendant is the host from her look in words, face never shown", () => {
+    const s8 = scene8();
+    markHostBroll([intro("I'm Ana Ruiz, a flight attendant, and I read the fine print."), s8], { hostLook: LOOK_399 }, HOST_PHOTO);
+    expect(s8.hostAmongOthers).toEqual({ who: "a flight attendant", look: LOOK_399 });
+    expect([s8.otherPerson, s8.otherPeople]).toEqual(["a male passenger", undefined]);
+    expect(s8.brollHostRef).toBeUndefined(); // never the photo beside a second person
+    expect(s8.brollHostLook).toBeUndefined();
+    expect(peopleInShot(s8)).toBe(2);
+    const prompt = buildStillPrompt(s8);
+    expect(prompt).toContain(hostWithOthersClause({ who: "a flight attendant", look: LOOK_399 }, "a male passenger"));
+    expect(prompt).toContain(`The flight attendant is the video's host — ${LOOK_399} —`);
+    expect(prompt).toContain("The other person is a male passenger — NOT the video's host");
+    expect(prompt).toContain(otherPeopleSuffix(2));
+    expect(prompt).not.toContain(ONE_OTHER_PERSON_SUFFIX);
+    expect(prompt).not.toMatch(/The only person in this shot|Apart from that one person/);
+    const clip = buildClipChain({ ...s8, stillImage: undefined }, { script: "x", lockMode: "ingredients", channelKey: "demo", voiceId: "v1" })[0].prompt;
+    expect(clip).toContain(otherPeopleSuffix(2));
+    expect(clip).toContain("The flight attendant is the video's host");
+    // A re-run with no host on camera takes the host out again.
+    markHostBroll([s8], { hostLook: LOOK_399, brollOnly: true }, HOST_PHOTO);
+    expect(s8.hostAmongOthers).toBeUndefined();
+  });
+
+  it("the host-and-others clause: the host drawn from words, every face hidden, no photo named", () => {
+    const one = hostWithOthersClause({ who: "a flight attendant", look: LOOK_399 }, "a male passenger");
+    expect(one).toMatch(/^The people in this shot are a flight attendant and a male passenger, and no face is shown anywhere\./);
+    expect(one).toMatch(/so the face is never shown\. The other person is a male passenger/);
+    expect(one).toMatch(/Each person has exactly two arms/);
+    expect(one).not.toMatch(/reference photo|The only person|no second person/);
+    const many = hostWithOthersClause({ who: "the host", look: MAN }, "two passengers", 2);
+    expect(many).toContain(`The host — ${MAN} — is always drawn`);
+    expect(many).toMatch(/The others are two passengers — two different, ordinary people/);
+    expect(peopleInShot({ otherPeople: 2, hostAmongOthers: { who: "the host", look: MAN } })).toBe(3);
+    expect(peopleInShot({ otherPeople: undefined, hostAmongOthers: undefined })).toBe(1);
+  });
+
+  it("a picture of a film marked before, regenerated, names both people too (job 399 as stored)", () => {
+    // Stored exactly as job 399 has them: `otherPerson` the passenger alone, no count.
+    const s8 = scene8();
+    const prompt = buildStillPrompt(s8);
+    expect(prompt).toContain(otherPersonClause("a flight attendant and a male passenger", 2));
+    expect(prompt).toContain(otherPeopleSuffix(2));
+    expect(prompt).not.toContain(ONE_OTHER_PERSON_SUFFIX);
+    expect(peopleInShot(scene14())).toBe(2);
+    // A picture of the passenger alone is asked for word for word as before (399-7).
+    const s7 = pic(7, "a passenger in row fourteen holding a cup with a little soda over ice", { humanPresent: true, otherPerson: "a male passenger", stillImage: true });
+    expect(buildStillPrompt(s7)).toContain(otherPersonClause("a male passenger"));
+    expect(buildStillPrompt(s7)).toContain(ONE_OTHER_PERSON_SUFFIX);
+  });
+
+  it("no face is asked for anyone in a picture of someone else", () => {
+    const s = pic(30, "an older woman at the window, face looking worried, photographed from the shoulders up", { humanPresent: true });
+    markHostBroll([s], { hostLook: MAN }, HOST_PHOTO);
+    expect(s.otherPerson).toBe("an older woman");
+    expect(s.showSubject).toBe("an older woman at the window, framed from the chin down");
   });
 });

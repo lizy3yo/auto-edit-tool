@@ -649,6 +649,14 @@ export interface StoryboardScene {
    */
   otherPersonLooks?: RecurringPerson[];
   /**
+   * The HOST when they are in a picture WITH someone else (`otherPerson`): the words naming them in
+   * the description (`who`: "a nurse" on a nurse's channel, "the host") and the host's look (`look`).
+   * Drawn from that look in words — never the host photo — seen from behind or the side, the face
+   * never shown, beside the other people (`hostWithOthersClause`). Set by `markHostBroll`
+   * (`castOfPicture` in server/hostLook.ts) on a channel with a host on camera; unset otherwise.
+   */
+  hostAmongOthers?: { who: string; look: string };
+  /**
    * What this picture's SENTENCE rules out, so the picture must not show it — the act it says not
    * to do, the thing it says is not meant or is used instead of, or the place it says to keep
    * something away from ("the lumber stack near the furnace"), in the line check's words

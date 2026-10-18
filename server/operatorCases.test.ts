@@ -2226,3 +2226,57 @@ describe("a recurring look goes only where the label can mean that person (job 3
     expect(matchRecurringPeople("another passenger", 1, people.slice(0, 1))).toEqual([]);
   });
 });
+
+describe("a picture of two people asks for both, faces hidden (job 399 scenes 8 and 14, the review)", () => {
+  // Both described "a flight attendant" with "a passenger", the planner named only the passenger,
+  // and the prompt said "the only person … no face anywhere": the flight attendant was drawn by no
+  // rule — in profile, face shown (scene 8), and as a different smiling woman (scene 14).
+  const LOOK = "A slender woman in her late thirties with fair skin and dark hair pinned back, wearing a white blouse, navy blazer with gold pin, and striped scarf";
+  const scenes = () => [
+    host(9, "I'm Helena Hart, and I read the fine print so travelers like us can stop learning these things the hard way.", { hostIntro: true }),
+    pic(8, "He figures she must know somebody on the crew. She doesn't. What she knows is which questions flight attendants like hearing, and when to ask them.", "a flight attendant speaking quietly with a passenger in the aisle", {
+      visualPrompt: "Bare weathered hands of a flight attendant and a passenger meeting in the narrow aisle between rows, speaking quietly, blue seats and grey carpet visible.",
+      humanPresent: true,
+      otherPerson: "a male passenger",
+      stillImage: true,
+    }),
+    pic(14, "along with the exact words that get each one. None of them is an upgrade, and each of them starts with a single polite sentence.", "a flight attendant speaking politely to a seated passenger", {
+      visualPrompt: "Bare hands from the forearms down, adjusting a beverage cup on the cart tray in the aircraft aisle galley during service.",
+      humanPresent: true,
+      otherPerson: "a seated passenger",
+      stillImage: true,
+    }),
+  ];
+
+  it("399-8/14: the flight attendant and the passenger are both in the clause, no one-person wording", () => {
+    const s = scenes();
+    markHostBroll(s, { hostLook: LOOK, hostName: "Helena Hart" }, "https://x/host.png");
+    for (const [scene, passenger] of [[s[1], "a male passenger"], [s[2], "a seated passenger"]] as const) {
+      const prompt = buildStillPrompt(scene);
+      expect(prompt).toContain(`The people in this shot are a flight attendant and ${passenger} — two different, ordinary people`);
+      expect(prompt).toMatch(/faces turned away or out of frame so no face is ever shown/);
+      expect(prompt).not.toMatch(/The only person in this shot|Apart from that one person/);
+      expect(prompt).not.toContain(ONE_OTHER_PERSON_SUFFIX);
+      expect(scene.brollHostRef).toBeUndefined();
+    }
+  });
+
+  it("on a channel whose host IS a flight attendant, she is the host from her look, the passenger someone else", () => {
+    const s = scenes();
+    markHostBroll(s, { hostLook: LOOK, hostName: "Helena Hart", hostTitle: "Flight Attendant" }, "https://x/host.png");
+    const prompt = buildStillPrompt(s[1]);
+    expect(s[1].hostAmongOthers?.who).toBe("a flight attendant");
+    expect(s[1].brollHostRef).toBeUndefined();
+    expect(prompt).toContain(`The flight attendant is the video's host — ${LOOK} —`);
+    expect(prompt).toContain("The other person is a male passenger — NOT the video's host");
+    expect(prompt).not.toMatch(/The only person in this shot/);
+    // A picture of one passenger stays one passenger (399-7).
+    const seven = pic(7, "The other was still in row fourteen with a few inches of soda over ice.", "a passenger in row fourteen holding a cup with a little soda over ice", {
+      humanPresent: true,
+      otherPerson: "a male passenger",
+    });
+    markHostBroll([seven], { hostLook: LOOK, hostTitle: "Flight Attendant" }, "https://x/host.png");
+    expect(seven.hostAmongOthers).toBeUndefined();
+    expect(buildStillPrompt(seven)).toContain(otherPersonClause("a male passenger"));
+  });
+});
