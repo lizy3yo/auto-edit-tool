@@ -10062,7 +10062,9 @@ async function drawValidatedStill(
     if (!referenceImageUrl) {
       const defects = await scanStillDefects(
         buffer,
-        scene.showSubject,
+        // Held to what the picture maker was asked for: job 403 scene 16's "cutaway close-up of the
+        // white porcelain S-shaped channel" asked QUESTION 4 for the very cut QUESTION 2 calls broken.
+        scene.showSubject ? withoutCutaway(scene.showSubject) : undefined,
         scene.cta ? undefined : scene.scriptText ?? scene.narration,
         scene.pictureText,
         scene.namedLook,

@@ -18,7 +18,7 @@
  */
 import type { KeyThing, StoryboardScene } from "@shared/types";
 import { invokeClaude } from "./claude";
-import { NOTHING_CUT_OPEN_RULE } from "./cutOpen";
+import { NOTHING_CUT_OPEN_RULE, withoutCutaway } from "./cutOpen";
 import { safeParseJSON } from "./jsonRepair";
 import { showsPerson } from "./hostLook";
 import { blurredPrint, matchKeyThing, planningEffort, settleVideoKind } from "./shotList";
@@ -281,10 +281,14 @@ export async function describeNamedLooks(
   return { kinds, pictures, parts: scenes.filter(s => s.partOf).length };
 }
 
-/** The image-prompt line that carries a picture's exact look. Empty when it has none. */
+/**
+ * The image-prompt line that carries a picture's exact look. Empty when it has none. A look that asks
+ * for a cut view loses those words (`withoutCutaway`): "draw it exactly like this" would otherwise
+ * win over the rule that nothing is drawn cut open (job 403).
+ */
 export function namedLookClause(scene: StoryboardScene): string {
   return scene.namedLook
-    ? ` EXACT LOOK — ${scene.namedLook}. Draw it exactly like this, whatever any other words say about its pattern or shape.${SUBJECT_OVER_LOOK}`
+    ? ` EXACT LOOK — ${withoutCutaway(scene.namedLook)}. Draw it exactly like this, whatever any other words say about its pattern or shape.${SUBJECT_OVER_LOOK}`
     : "";
 }
 

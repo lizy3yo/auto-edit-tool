@@ -3862,4 +3862,23 @@ describe("a picture never cuts a solid thing open (job 403, the review of 2026-1
     expect(STILL_DEFECT_SYSTEM).toMatch(/QUESTION 2 — broken[\s\S]*shown CUT OPEN[\s\S]*QUESTION 3/);
     expect(STILL_BROLL_ENHANCER_SYSTEM).toContain(NOTHING_CUT_OPEN_RULE);
   });
+
+  it("job 225: a door frame cut away in cross-section is asked for whole; a real repair cut stays the work", async () => {
+    const { SEEN_FROM_OUTSIDE_CLAUSE, CUT_OPEN_BROKEN } = await import("./cutOpen");
+    const frame = pic(16, "That gap is where the screws give up.", "pine door frame cross-section showing a shallow gap and thicker stud behind board", {
+      visualPrompt:
+        "Pine door frame cut away in cross-section, pale soft wood showing a shallow gap between the visible face board and a thicker stud set behind it, resting on a workbench.",
+    });
+    const p = buildStillPrompt(frame);
+    // Only the clause that forbids it may still say the word.
+    expect(p.replace(SEEN_FROM_OUTSIDE_CLAUSE, "")).not.toMatch(/cross[- ]?section|cut away/i);
+    expect(p).toContain("Pine door frame, pale soft wood showing a shallow gap");
+    expect(p).toContain(SEEN_FROM_OUTSIDE_CLAUSE);
+    // A pipe cut to length or a wall opened to reach a valve is what a repair film shows: never broken.
+    expect(CUT_OPEN_BROKEN).toMatch(/Fine:.*a pipe cut to length.*access hole cut in a wall/);
+    const cutting = pic(30, "Cut the new pipe to length.", "a hacksaw cutting a length of grey PVC pipe on a bench", {
+      humanPresent: true,
+    });
+    expect(buildStillPrompt(cutting)).not.toContain(SEEN_FROM_OUTSIDE_CLAUSE);
+  });
 });

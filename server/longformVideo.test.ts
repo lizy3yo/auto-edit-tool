@@ -12358,4 +12358,33 @@ describe("a thing seen cut open is drawn from outside, and is no memory (job 403
     );
     expect((mockScanStillDefects.mock.calls[0] as any[])[9]).toBe(true);
   });
+
+  it("job 403 scene 16: the check is held to the subject without its cutaway words, an ordinary one as written", async () => {
+    const [a, b] = await Promise.all([pngOf("#d11"), pngOf("#d22")]);
+    checks();
+    await generateValidatedStill(
+      {
+        index: 16,
+        scriptText: "Here is the part nobody sees.",
+        showSubject:
+          "cutaway close-up of the white porcelain S-shaped channel behind the bowl, water climbing up and over the curve before descending",
+        visualPrompt: "Cutaway view of the white porcelain S-shaped trapway channel behind a toilet bowl.",
+      } as any,
+      4,
+      undefined,
+      drawsOf(a)
+    );
+    expect((mockScanStillDefects.mock.calls[0] as any[])[1]).toBe(
+      "close-up of the white porcelain S-shaped channel behind the bowl, water climbing up and over the curve before descending"
+    );
+    checks();
+    const bowl = "water swirling down the white toilet bowl mid-flush";
+    await generateValidatedStill(
+      { index: 12, scriptText: "Flush,", showSubject: bowl, visualPrompt: "Water swirling down inside the white ceramic toilet bowl." } as any,
+      4,
+      undefined,
+      drawsOf(b)
+    );
+    expect((mockScanStillDefects.mock.calls[0] as any[])[1]).toBe(bowl);
+  });
 });

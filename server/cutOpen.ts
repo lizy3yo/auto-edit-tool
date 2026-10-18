@@ -12,7 +12,8 @@
  * One rule, said in every place a picture is written or drawn: an inside part is shown the way a
  * person can see it — the thing from outside, where that part opens or comes out, or a tool going in
  * there. Explaining the inside is the narration's and the graphics' job. Food, wood or cloth cut as
- * part of the work is a real photo and is never this rule. Pure — unit-tested.
+ * part of the work, and a real repair cut (a pipe cut to length, an access hole in a wall), are real
+ * photos and never this rule. Pure — unit-tested.
  */
 import type { StoryboardScene } from "@shared/types";
 
@@ -30,8 +31,9 @@ export const NOTHING_CUT_OPEN_RULE =
   "sliced open to show its inside, and never a view from inside a solid thing (\"the pipe inside " +
   "the wall\" = the wall with the pipe coming out of it under the sink; \"the gears inside the " +
   "clock\" = the clock with its back taken off). Explaining what happens inside is the narration's " +
-  "and the on-screen graphics' job, not the picture's. Food, wood or cloth cut as part of the work " +
-  "is not this rule.";
+  "and the on-screen graphics' job, not the picture's. Food, wood or cloth cut as part of the work, " +
+  "and a real repair cut the line is about (a pipe cut to length, a small access hole cut in a " +
+  "wall), are not this rule.";
 
 /**
  * Added to a picture's prompt when its words, or a key thing in it, name a part hidden inside
@@ -48,15 +50,19 @@ export const SEEN_FROM_OUTSIDE_CLAUSE =
 /**
  * QUESTION 2's line for it (`STILL_DEFECT_SYSTEM`): nothing checked for a cut-open object, so the
  * sawn toilet passed as "key thing, no flags" five times. It asks for "cut open" in `what` so the
- * redraw can tell this fault from another (`cutOpenFault`).
+ * redraw can tell this fault from another (`cutOpenFault`). "Even when hands are working on it":
+ * scene 22's auger went in through the sawn wall with the host's hands on it. A real repair cut —
+ * a pipe cut to length, an access hole in a wall — is the work itself, and a household-repair film
+ * shows it; this rulebook is asked of every picture of every channel.
  */
 export const CUT_OPEN_BROKEN =
   "- a solid made thing or building part (a fixture, an appliance, a machine, a pipe, a wall, a " +
   "piece of furniture) shown CUT OPEN — sawn or sliced through, sectioned, see-through or drawn as a " +
   "cutaway — so the inside it hides is on show where a real one is closed (a fixture sawn in half " +
-  'with its inner channel exposed); say "cut open" in what. Food, wood or cloth cut as part of the ' +
-  "work, and a thing opened the way it normally opens (a lid lifted, a door, cover or panel taken " +
-  "off), are fine\n";
+  'with its inner channel exposed), even when hands are working on it; say "cut open" in what. ' +
+  "Fine: food, wood or cloth cut as part of the work, a real repair cut (a pipe cut to length, a " +
+  "small access hole cut in a wall), and a thing opened the way it normally opens (a lid lifted, a " +
+  "door, cover or panel taken off)\n";
 
 /**
  * QUESTION 4's note on a picture drawn from outside on purpose (`drawnFromOutside`): asked to find
@@ -91,10 +97,12 @@ const INSIDE_NOUN = String.raw`(?:channels?|passages?|passageways?|ducts?|bores?
 /**
  * "the toilet's internal porcelain S-shaped trapway channel", "the toilet's internal trapway curve"
  * (job 403 scenes 11 and 15), "its hidden workings". "inner" asks less — "the inner curve of the
- * bowl", "the inner bend of the elbow" are in plain view — so it counts only before a passage.
+ * bowl", "the inner bend of the elbow" are in plain view — so it counts only before a passage, and so
+ * does "hidden": "a hidden bend in the creek", "the hidden curve of the path" are places a camera
+ * stands in. Only "internal" takes a curve or a bend.
  */
 const INNER_PART = new RegExp(
-  String.raw`\b(?:internal|hidden)\s+(?:[a-z-]+\s+){0,4}(?:${INSIDE_NOUN}|curves?|bends?)\b|\binner\s+(?:[a-z-]+\s+){0,3}${INSIDE_NOUN}\b`,
+  String.raw`\binternal\s+(?:[a-z-]+\s+){0,4}(?:${INSIDE_NOUN}|curves?|bends?)\b|\b(?:hidden|inner)\s+(?:[a-z-]+\s+){0,3}${INSIDE_NOUN}\b`,
   "i"
 );
 /**
@@ -140,15 +148,28 @@ const CUT_VIEW_THEN_CAMERA = new RegExp(String.raw`\b${CUT_VIEW_WORD}\s+(${CAMER
 const CUT_VIEW_THEN_DIAGRAM = new RegExp(String.raw`\b${CUT_VIEW_WORD}(?:\s+view)?\s+${DIAGRAM_NOUN}\b`, "gi");
 /** "A cross-section or cutaway view diagram …" (stored film 242): the first choice goes with the second. */
 const CUT_VIEW_OR = /\b(?:cut-?away|cross[- ]?section(?:al)?)\s+or\s+/gi;
-const CROSS_SECTION_OF = /\bcross[- ]?section(?:al)?\s+(?=of\b)/gi;
+/** "Pine door frame cut away in cross-section, …" (stored film 225): the cut and the view go together. */
+const CUT_IN_CROSS_SECTION = /\s*\b(?:cut|sawn|sliced)(?:\s+(?:away|open|through))?\s+in\s+cross[- ]?section\b/gi;
+const CROSS_SECTION_OF = /\bcross[- ]?section(?:al|s)?\s+(?=of\b)/gi;
+/** "a cross-section showing …" → "a view showing …" (an article, or the prompt's first word). */
+const A_CROSS_SECTION =
+  /(^|\b(?:an?|the)\s+)cross[- ]?section(?:al)?(?=\s+(?:showing|revealing|exposing|through|with)\b)/gi;
+/**
+ * The cross-section as a word after its thing: "a pine door frame cross section showing a shallow gap"
+ * (stored film 225), "Pot holder cross-section with old blanket padding visible" (stored film 176).
+ */
+const NOUN_CROSS_SECTION = /\s+cross[- ]?section(?:al)?(?=\s+(?:showing|revealing|exposing|through|with)\b)/gi;
+const CROSS_SECTIONED = /\bcross[- ]?sectioned\s+/gi;
 const IN_CROSS_SECTION = /\s*\bin\s+cross[- ]?section\b/gi;
 
 /**
  * The prompt with the words that ASK for a cut view taken out, so the picture maker is never told to
  * draw one: "Cutaway view of the white porcelain S-shaped channel" → "View of the white porcelain
  * S-shaped channel", "a cutaway diagram" → "a photo", "a cross-section of a house wall cavity" → "a
- * view of a house wall cavity". The place and the thing stay; `SEEN_FROM_OUTSIDE_CLAUSE` says how to
- * show them. Untouched prompts stay byte-identical. Pure.
+ * view of a house wall cavity", "a pine door frame cross section showing a gap" → "a pine door frame
+ * showing a gap", "door frame cut away in cross-section, …" → "door frame, …". The place and the
+ * thing stay; `SEEN_FROM_OUTSIDE_CLAUSE` says how to show them. Untouched prompts stay
+ * byte-identical. Pure.
  */
 export function withoutCutaway(text: string): string {
   if (!text || !insideView(text)) return text;
@@ -157,7 +178,11 @@ export function withoutCutaway(text: string): string {
     .replace(CUT_VIEW_OR, "")
     .replace(CUT_VIEW_THEN_DIAGRAM, "photo")
     .replace(CUT_VIEW_THEN_CAMERA, "$1")
+    .replace(CUT_IN_CROSS_SECTION, "")
     .replace(CROSS_SECTION_OF, "view ")
+    .replace(A_CROSS_SECTION, "$1view")
+    .replace(NOUN_CROSS_SECTION, "")
+    .replace(CROSS_SECTIONED, "")
     .replace(IN_CROSS_SECTION, "");
   if (out === text) return text;
   out = out
@@ -170,9 +195,14 @@ export function withoutCutaway(text: string): string {
   return /^[A-Z]/.test(text) ? out.charAt(0).toUpperCase() + out.slice(1) : out;
 }
 
-/** What the check named when it saw a thing cut open (`CUT_OPEN_BROKEN` asks for "cut open"). */
+/**
+ * What the check named when it saw a thing cut open (`CUT_OPEN_BROKEN` asks for "cut open"). Never
+ * "split" or "see-through": "a board split in two, floating" and "fingers see-through where they
+ * cross the handle" are other broken frames, and reading them as a cut would mark the picture drawn
+ * from outside for good (`scene.seenFromOutside`) and no memory.
+ */
 const CUT_OPEN_FAULT =
-  /\b(?:cut|sawn|sliced|split)\s+(?:open|in half|in two|away)\b|\bcross[- ]?section|\bcut-?away\b|\bsectioned\b|\bsee-?through\b|\bx-?ray\b|\binsides?\s+exposed\b|\bexposed\s+(?:inner|internal|interior|inside)\b/i;
+  /\b(?:cut|sawn|sliced)\s+(?:open|in half|in two|away)\b|\bcross[- ]?section|\bcut-?away\b|\bsectioned\b|\bx-?ray\b|\binsides?\s+exposed\b|\bexposed\s+(?:inner|internal|interior|inside)\b/i;
 
 /** Whether the still check's `what` names a thing cut open (`CUT_OPEN_BROKEN`). Pure. */
 export function cutOpenFault(what: string | undefined): boolean {
