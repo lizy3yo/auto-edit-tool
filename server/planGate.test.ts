@@ -1298,8 +1298,9 @@ describe("the host comes back after the book cover on the whole number, never in
 });
 
 describe("the film never ends on a host shot under a second (the audit's last open item)", () => {
-  // 21 of 139 production films ended on the goodbye as a host shot under a second. Its words go to
-  // the beat before it: a host take becomes one take with them, anything else plays on to the end.
+  // A goodbye on the host under a second goes to the beat before it: a host take becomes one take
+  // with it, anything else plays on to the end. (The audit's 21 production films all had it right
+  // after the end QR card, which it never joins — see the operator cases.)
   const closing = (r: { unresolved: { detail: string }[] }) =>
     r.unresolved.filter(f => /^closing host shot/.test(f.detail));
 

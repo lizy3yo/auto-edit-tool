@@ -5362,8 +5362,9 @@ describe("each paid video is rendered once (the operator, 2026-10-18)", () => {
 });
 
 describe("the film never ends on a host shot under a second (the audit, 2026-10-18)", () => {
-  // 21 of 139 production films ended on the goodbye as a host shot under a second. Its words go to
-  // the beat before it, so what was on screen runs to the end. Scenes and ranges are the jobs' own.
+  // A goodbye on the host under a second goes to the beat before it, so what was on screen runs to
+  // the end (practice jobs 45 and 297). The audit's 21 production films all had it right after the
+  // end CTA's big QR card, which it never joins (last case). Scenes and ranges are the jobs' own.
   const at = (index: number, kind: "H" | "P", from: number, to: number, scriptText: string, over: Partial<StoryboardScene> = {}) =>
     ({
       index,
@@ -5438,5 +5439,27 @@ describe("the film never ends on a host shot under a second (the audit, 2026-10-
     ]);
     expect(last).toMatchObject({ hostPresent: true, hostIntro: true, narrationStartSec: 185.352, narrationEndSec: 199.035 });
     expect(last.scriptText).toMatch(/whose head your first hat is going on\. This is Pearl Parker\.$/);
+  });
+
+  it("job 179 (the audit's shape): 'See you at the bench.' (0.78 s) after the end QR card stays, and the job is told", async () => {
+    // Every one of the audit's 21 production films ends this way: the scan window under the big
+    // card, then the goodbye outside the CTA block. The goodbye never joins the QR beat and never
+    // crosses the CTA edge, so the scan window keeps its words and the short goodbye is named.
+    const { closingFoldTarget, enforcePlanRules } = await import("./planGate");
+    const cta = { cta: true, ctaIndex: 0 } as const;
+    const scanWindow =
+      "Point your phone's camera at the QR code on the screen, or tap the link down in the description. And if turning cheap lumber into real money is your kind of weekend, subscribe to Hank Hardwood and tell me in the comments which stain you'd reach for first.";
+    const scenes = [
+      at(192, "H", 988.12625, 993.122063, "every one built from cheap box-store lumber and the basic tools already on your bench.", { ...cta, qrCorner: true }),
+      at(193, "P", 993.122063, 1005.399875, scanWindow, { ...cta, qrHero: true, qrTail: true }),
+      at(194, "H", 1005.399875, 1006.184, "See you at the bench."),
+    ];
+    expect(closingFoldTarget(scenes, 2)).toBe(-1);
+    const r = enforcePlanRules(scenes, { faceImageUrl: "https://example.com/hank.jpg", hostName: "Hank Hardwood" } as any);
+    expect(r.scenes.find(s => s.qrHero)).toMatchObject({ scriptText: scanWindow, narrationEndSec: 1005.399875 });
+    expect(r.scenes.at(-1)).toMatchObject({ hostPresent: true, scriptText: "See you at the bench." });
+    expect(r.unresolved).toContainEqual(
+      expect.objectContaining({ rule: 7, detail: expect.stringMatching(/^closing host shot under 1 s \(0\.78s\)/) })
+    );
   });
 });

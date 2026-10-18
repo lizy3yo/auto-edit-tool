@@ -93,12 +93,15 @@ export const PICTURE_MAX_SEC = pictureMaxSecAt(0, 0) + PICTURE_MAX_SLACK_SEC;
  */
 export const COVER_SENTENCE_MAX_SEC = 15;
 /**
- * Rule 7 at the very end: the shortest host shot a film may END on. The audit of 139 production
- * films found 21 ending on a host shot under a second — the goodbye blinking past as the film
- * stops (Hannah's job 45: "…one decision you make at the end of every square, | not at the
- * beginning." 0.80 s on the host after a 4.7 s picture; Pearl's job 297: "This is Pearl Parker."
- * 0.90 s after a 12.8 s picture). Such a beat's words go to the beat before it
- * (`closingFoldTarget`), so whatever was on screen runs to the end.
+ * Rule 7 at the very end: the shortest host shot a film may END on — shorter, the goodbye blinks
+ * past as the film stops. Such a beat's words go to the beat before it (`closingFoldTarget`), so
+ * whatever was on screen runs to the end: Hannah's job 45 ("…one decision you make at the end of
+ * every square, | not at the beginning." 0.80 s on the host after a 4.7 s picture) and Pearl's job
+ * 297 ("This is Pearl Parker." 0.90 s after a 12.8 s picture), both practice films. NOT the shape
+ * the audit counted: all 21 of its 139 production films (25 with two empty timelines) end on the
+ * end CTA's big QR card and THEN the goodbye outside the block (Hank's job 179: "See you at the
+ * bench." 0.78 s after the 12.3 s scan window). The fold never crosses a CTA edge and never goes
+ * into the QR beat, so those films keep the short goodbye, and it is named on the job.
  */
 export const CLOSING_HOST_MIN_SEC = 1;
 /**
@@ -520,9 +523,10 @@ function mergeInto(
 
 /**
  * THE FILM ENDS ON A BEAT THAT CAN BE SEEN (the audit's last open item, 2026-10-18: 21 of 139
- * production films ended on a host shot under `CLOSING_HOST_MIN_SEC`). Where the words of that
- * closing beat go: the beat right before it, which keeps its own picture and runs to the end. A
- * full-frame host take there is joined into one continuous take — the take's photo is the photo the
+ * production films ended on a host shot under `CLOSING_HOST_MIN_SEC`, every one of them right
+ * after the end CTA's big QR card — which this never folds into, so those stay named on the job).
+ * Where the words of that closing beat go: the beat right before it, which keeps its own picture
+ * and runs to the end. A full-frame host take there is joined into one continuous take — the take's photo is the photo the
  * words are said from, and `assignHostShots` gives a joined take one photo after the gate, so the
  * angle numbers the rotation left on two neighbours are not compared (it alternates them on
  * purpose). Any other beat — a picture, a list item (its mark stays), a split screen — takes the
