@@ -1119,3 +1119,126 @@ describe("a natural break, read on the films' own hand-offs (review of the job 4
     );
   });
 });
+
+describe("the host comes back after the book cover on the whole number, never inside it (job 406)", () => {
+  // Gary's practice film, 3:00: the cover ended on the storyboard's cut, "…Garage to Profit Bible,",
+  // and the gate let it finish its sentence, "…working people actually run.", with the host coming
+  // back on "Three hundred seventy pages". The cut came out at 180.69 — after "Three hundred", the
+  // middle of a transcript gap that sat wholly after the real 0.74 s pause (179.42-180.16): the word
+  // before heard running on over the pause and the number heard late, as one token, "370".
+  /** The film's own words as heard, 171-198 s (the graphics step's transcript of job 406). */
+  const HEARD =
+    "That@171.165-171.345 pattern@171.405-171.745 fills@171.785-172.005 a@172.065-172.105 digital@172.165-172.525 book@172.565-172.765 called@172.825-173.085 the@173.105-173.165 Garage@173.205-173.666 to@173.686-173.766 Profit@173.826-174.206 Bible,@174.246-174.606 put@174.846-175.006 together@175.046-175.406 under@175.486-175.646 this@175.686-175.846 channel's@175.886-176.267 name@176.307-176.547 from@176.607-176.747 the@176.767-176.867 honest@176.987-177.307 arithmetic@177.367-177.947 working@178.027-178.347 people@178.387-178.688 actually@178.888-179.308 run.@179.368-179.528 370@180.528-180.768 pages,@181.269-181.689 101@182.209-182.61 numbered@182.77-183.27 hustles@183.31-183.69 across@183.791-184.111 13@184.351-184.671 chapters,@184.731-185.212 each@185.752-185.912 one@186.032-186.152 printed@186.232-186.552 with@186.612-186.733 its@186.793-186.893 real@187.013-187.253 dollar@187.313-187.613 range@187.653-187.973 and@188.114-188.194 a@188.234-188.254 Know@188.334-188.534 Your@188.554-188.714 Limit@188.774-189.014 panel@189.054-189.374 that@189.434-189.575 states@189.635-189.935 the@189.975-190.095 downside@190.135-190.715 flat.@190.956-191.296 Tonight@191.936-192.256 covers@192.296-192.577 17@192.597-193.317 under@193.437-194.218 $500.@194.258-194.618 The@195.319-195.419 book@195.439-195.619 runs@195.659-195.879 the@195.939-196.039 same@196.099-196.339 math@196.399-196.639 on@196.72-196.78 the@196.8-196.9 other@196.98-197.16 84.@197.22-197.72";
+  const heard = () =>
+    HEARD.split(" ").map(tok => {
+      const [, word, start, end] = /^(.*)@([\d.]+)-([\d.]+)$/.exec(tok)!;
+      return { word, start: Number(start), end: Number(end) };
+    });
+  /** The words the cut was made from: "run." heard on over the pause, "370" heard late. */
+  const voiced = () =>
+    heard().map(x =>
+      x.word === "run." ? { ...x, end: 180.619 } : x.word === "370" ? { ...x, start: 180.768, end: 181.0 } : x
+    );
+  /** The job's real pauses (`masterSilences`) over the same stretch. */
+  const silences = [
+    [172.608, 172.733], [174.458, 174.783], [178.597, 178.719], [178.85, 179.028], [179.423, 180.162],
+    [181.513, 181.944], [184.013, 184.173], [184.836, 184.97], [185.039, 185.626], [186.716, 186.842],
+    [189.766, 189.913], [190.603, 190.914], [191.117, 191.853], [193.498, 193.653], [194.431, 195.244],
+    [197.287, 197.433], [197.594, 198.311],
+  ].map(([start, end]) => ({ start, end }));
+
+  type Kind = "H" | "B" | "Q" | "P";
+  const beat = (index: number, kind: Kind, from: number, to: number, text: string, cta = true) =>
+    ({
+      index,
+      scriptText: text,
+      narration: text,
+      visualPrompt: `picture ${index}`,
+      narrationStartSec: from,
+      narrationEndSec: to,
+      audioDuration: to - from,
+      audioUrl: `https://example.com/${index}.mp3`,
+      hostPresent: kind === "H",
+      stillImage: kind !== "H",
+      coverHero: kind === "B" ? true : undefined,
+      qrHero: kind === "Q" ? true : undefined,
+      qrTail: kind === "Q" ? true : undefined,
+      qrCorner: kind === "H" && cta ? true : undefined,
+      cta: cta ? true : undefined,
+      ctaIndex: cta ? 0 : undefined,
+      hostProtected: kind === "H" && cta ? true : undefined,
+    }) as StoryboardScene;
+  /** Job 406's scenes 30-34 as the gate got them. */
+  const block = () => [
+    beat(1, "P", 156.74, 164.46, "The downside is real: some mowers are just done, and you’ll eat a couple of corpses learning to tell the difference.", false),
+    beat(2, "H", 164.46, 171.023, "Three businesses in, and you can already see the pattern: the money lives in the math, not the hype."),
+    beat(3, "B", 171.023, 174.62, "That pattern fills a digital book called The Garage to Profit Bible,"),
+    beat(
+      4,
+      "H",
+      174.62,
+      198.271,
+      "put together under this channel’s name from the honest arithmetic working people actually run. Three hundred seventy pages, a hundred and one numbered hustles across thirteen chapters, each one printed with its real dollar range and a Know Your Limit panel that states the downside flat. Tonight covers seventeen under five hundred dollars; the book runs the same math on the other eighty-four."
+    ),
+    beat(
+      5,
+      "Q",
+      198.271,
+      219.76,
+      "There’s a QR code on your screen — aim your phone’s camera at it, and the page opens on its own. If it’s gone before you look up, the first line of this video’s description lands in the same place."
+    ),
+  ];
+  const cut = (words: { word: string; start: number; end: number }[]) => {
+    const r = enforcePlanRules(block(), params, { words, silences });
+    const cover = r.scenes.find(s => s.coverHero)!;
+    const host = r.scenes[r.scenes.indexOf(cover) + 1];
+    expect(cover.scriptText).toMatch(/working people actually run\.$/);
+    expect(host.scriptText).toMatch(/^Three hundred seventy pages,/);
+    expect(host.narrationStartSec).toBeCloseTo(cover.narrationEndSec!, 5);
+    return cover.narrationEndSec!;
+  };
+
+  it("on the words the cut was made from, it lands in the pause before the sentence, not at 180.69", () => {
+    const at = cut(voiced());
+    expect(at).toBeGreaterThanOrEqual(179.423);
+    expect(at).toBeLessThanOrEqual(180.162);
+  });
+
+  it("on the film's own words it stays where it was: the part of the pause after 'run.'", () => {
+    expect(cut(heard())).toBeCloseTo((179.528 + 180.162) / 2, 5);
+  });
+
+  it("a cut after a comma stays in the heard gap: a silence inside a heard word may be its own closure", () => {
+    // Mae's glimpse (job 205): "It takes me about ten minutes apiece, | and the cost is nothing…".
+    // A silence inside "apiece," (its "p" closure, 25.80-25.95) must not take the hand-off — only a
+    // sentence break reaches past the heard words to the pause.
+    const line =
+      "It takes me about ten minutes apiece, and the cost is nothing at all, because it's yarn I'd already paid for.";
+    const scenes = film([
+      ["H", 5, sentence(1)],
+      ["P", 9, sentence(2)],
+      ["P", 9, sentence(3)],
+      ["P", 8, line],
+      ["P", 9, sentence(4)],
+      ["P", 9, sentence(5)],
+      ["H", 5, sentence(6)],
+    ]);
+    const words: { word: string; start: number; end: number }[] = [];
+    let t = 23.1;
+    line.split(/\s+/).forEach((w, i) => {
+      const sec = i < 6 ? 0.38 : w === "apiece," ? 0.6 : 0.28;
+      if (i === 7) t = 26.5; // the gap after "apiece,"
+      words.push({ word: w, start: t, end: t + sec });
+      t += sec + 0.02;
+    });
+    const r = enforcePlanRules(scenes, params, {
+      budgetSec: 14,
+      words,
+      silences: [{ start: 25.8, end: 25.95 }],
+    });
+    const glimpse = r.scenes.find(s => s.hostPresent && s.scriptText?.startsWith("It takes"))!;
+    expect(glimpse.scriptText).toBe("It takes me about ten minutes apiece,");
+    expect(glimpse.narrationEndSec!).toBeGreaterThanOrEqual(words[6].end);
+    expect(glimpse.narrationEndSec!).toBeLessThanOrEqual(words[7].start);
+  });
+});

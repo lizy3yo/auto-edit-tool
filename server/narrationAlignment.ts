@@ -76,6 +76,56 @@ const SNAP_CUT_MARGIN_SEC = 0.04;
  * "th" of Hannah's "with" take a cut (the words met at 25.13-25.19, the gap sat at 25.04-25.09).
  */
 const SHORT_GAP_SLACK_SEC = 0.03;
+/**
+ * The most speech a number's sound may run before its transcribed start. The aligner times a word
+ * by its letters, and a number written in digits ("370", "$500") has none it can use, so its start
+ * is a guess — usually late: job 406's "Three hundred seventy pages" began at 180.16 s, right after
+ * a 0.74 s pause, and was heard as one token "370" at 180.53. Past this much speech between the
+ * pause and the guess, something else was said there (a word the transcript lost), and the number
+ * keeps the time it was heard at.
+ */
+const NUMBER_LATE_MAX_SEC = 1;
+/** The word before a number must have begun at least this long before the pause the number follows. */
+const PREV_SOUND_SEC = 0.03;
+/** A pause ending this close to the number's transcribed start already IS its start. */
+const NUMBER_ONSET_SLACK_SEC = 0.02;
+/** A word written with a digit — a time the transcriber guessed rather than aligned. */
+const SPOKEN_NUMBER = /\d/;
+
+/**
+ * The words with each NUMBER moved back to where its sound begins: the end of the last real pause
+ * (`silences`, ≥120 ms — never a closure inside a word) after the word before it began, when there
+ * is speech between that pause and the number's transcribed start. Job 406: the cut from the book
+ * cover to the host was placed by text, the host's line opened on "Three hundred seventy pages",
+ * and a cut made from the transcript's late "370" could land inside the number — "Three hundred |
+ * seventy" — where the real break was the pause before it. Only ever earlier, never past
+ * `NUMBER_LATE_MAX_SEC`, and never when the word before is heard running ON past that pause: such a
+ * word may be one the transcriber started early (Whisper puts onsets inside words), and the speech
+ * after the pause its own; a cut at a sentence break deals with that case by the pause itself
+ * (`gapBeforeWord` in planGate.ts). A number with no pause before it is left as heard — a voice
+ * running straight on gives no edge to trust. Returns new objects; pure — unit-tested.
+ */
+export function retimeSpokenNumbers<
+  W extends { start: number; end: number; word?: string },
+>(words: readonly W[], silences: readonly SilenceInterval[] | null | undefined): W[] {
+  const out = words.map(w => ({ ...w }));
+  if (!silences?.length) return out;
+  for (let i = 1; i < out.length; i++) {
+    const w = out[i];
+    const prev = out[i - 1];
+    if (!SPOKEN_NUMBER.test(w.word ?? "")) continue;
+    let pause: SilenceInterval | undefined;
+    for (const p of silences) {
+      if (p.start < prev.start + PREV_SOUND_SEC) continue; // before the word before was said
+      if (p.end >= w.start - NUMBER_ONSET_SLACK_SEC) continue; // no speech between it and the number
+      if (w.start - p.end > NUMBER_LATE_MAX_SEC) continue;
+      if (!pause || p.end > pause.end) pause = p;
+    }
+    if (!pause || prev.end > pause.end + NUMBER_ONSET_SLACK_SEC) continue;
+    w.start = pause.end;
+  }
+  return out;
+}
 
 /** Lowercased alphanumeric word tokens (digits kept so "2024" is one token; edge apostrophes dropped). */
 export function tokenizeNarration(text: string): string[] {
@@ -211,10 +261,17 @@ export function assignSceneRanges(
   const sceneTokens = scenes.map(s =>
     tokenizeNarration(s.scriptText ?? s.narration ?? "")
   );
+  // A number's transcribed start is a guess, usually late; with the real pauses known it goes back
+  // to where its sound begins, so a cut before it lands in the pause and never inside the number
+  // (job 406: "Three hundred | seventy pages").
+  const timed =
+    words && words.length > 0 && silences?.length
+      ? retimeSpokenNumbers(words, silences)
+      : words;
 
   const plan: BoundaryPlan =
-    words && words.length > 0
-      ? alignBoundaries(sceneTokens, words, dur, ctaAnchors(scenes))
+    timed && timed.length > 0
+      ? alignBoundaries(sceneTokens, timed, dur, ctaAnchors(scenes))
       : {
           boundaries: proportionalByTokens(sceneTokens, dur),
           gaps: [],

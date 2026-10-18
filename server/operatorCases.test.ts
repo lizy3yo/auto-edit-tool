@@ -38,7 +38,7 @@ import {
   otherPersonOf,
   parseContextGroups,
 } from "./shotList";
-import { keepOwnWords } from "./narrationAlignment";
+import { assignSceneRanges, keepOwnWords } from "./narrationAlignment";
 import {
   ANON_PERSON_SUFFIX,
   APP_SCREEN_CLAUSE,
@@ -3764,5 +3764,58 @@ describe("the host introduced by one word of a two-word channel name (job 407)",
     const r = enforcePlanRules(scenes, params, { budgetSec: 11 });
     expect(r.scenes[1].scriptText).toBe("So before we get going on any of it, I'm Sawdust Sam");
     expect(r.scenes[2].scriptText).toMatch(/^talking to you/);
+  });
+});
+
+describe("the host comes back after the book cover on the whole number, never inside it (job 406)", () => {
+  // Gary's practice film at 3:00: the voice says "…working people actually run." — a 0.74 s pause
+  // (179.42-180.16) — "Three hundred seventy pages", and the picture changed from the book cover to
+  // the host at 180.69, after "Three hundred". The transcript heard the number as one late token,
+  // "370", and the word before it running on over the pause, and the cut was placed between those
+  // two heard edges. A cut made from text now lands in the pause before a sentence, and before a
+  // number its sound's start, not the transcriber's guess.
+  const HEARD =
+    "working@178.027-178.347 people@178.387-178.688 actually@178.888-179.308 run.@179.368-180.619 370@180.768-181.0 pages,@181.269-181.689 101@182.209-182.61 numbered@182.77-183.27 hustles@183.31-183.69 across@183.791-184.111 13@184.351-184.671 chapters,@184.731-185.212";
+  const words = HEARD.split(" ").map(tok => {
+    const [, word, start, end] = /^(.*)@([\d.]+)-([\d.]+)$/.exec(tok)!;
+    return { word, start: Number(start), end: Number(end) };
+  });
+  const silences = [
+    [174.458, 174.783], [177.95, 178.0], [178.597, 178.719], [178.85, 179.028], [179.423, 180.162],
+    [181.513, 181.944], [184.013, 184.173], [185.25, 185.6],
+  ].map(([start, end]) => ({ start, end }));
+  const NUMBER = "Three hundred seventy pages, a hundred and one numbered hustles across thirteen chapters.";
+  const cta = (s: StoryboardScene, from: number, to: number) =>
+    Object.assign(s, { cta: true, ctaIndex: 0, narrationStartSec: from, narrationEndSec: to, audioDuration: to - from });
+
+  it("the cover finishes its sentence and the host comes back in the pause, before 'Three hundred'", async () => {
+    const { enforcePlanRules } = await import("./planGate");
+    const scenes = [
+      cta(host(1, "Three businesses in, and you can already see the pattern.", { qrCorner: true, hostProtected: true }), 165, 171.023),
+      cta(
+        pic(2, "That pattern fills a digital book called The Garage to Profit Bible, put together under this channel’s name from the honest arithmetic", "the book", { coverHero: true, stillImage: true }),
+        171.023,
+        177.975
+      ),
+      cta(host(3, `working people actually run. ${NUMBER}`, { qrCorner: true, hostProtected: true }), 177.975, 185.4),
+      cta(pic(4, "There’s a QR code on your screen — aim your phone’s camera at it, and the page opens on its own.", "a garage bench", { qrHero: true, qrTail: true, stillImage: true }), 185.4, 199),
+    ];
+    const r = enforcePlanRules(scenes, { faceImageUrl: "https://example.com/host.jpg" } as any, { words, silences });
+    const cover = r.scenes.find(s => s.coverHero)!;
+    const back = r.scenes[r.scenes.indexOf(cover) + 1];
+    expect(cover.scriptText).toMatch(/working people actually run\.$/);
+    expect(back.scriptText).toBe(NUMBER);
+    expect(cover.narrationEndSec!).toBeGreaterThanOrEqual(179.423);
+    expect(cover.narrationEndSec!).toBeLessThanOrEqual(180.162);
+    expect(back.narrationStartSec).toBeCloseTo(cover.narrationEndSec!, 5);
+  });
+
+  it("the cut the aligner places from the scene text lands in the same pause, even with the number heard late", () => {
+    const late = words.map(x => (x.word === "run." ? { ...x, end: 179.528 } : x.word === "370" ? { ...x, start: 180.95, end: 181.19 } : x));
+    const fine = [...silences, { start: 180.665, end: 180.722 }].sort((a, b) => a.start - b.start);
+    const scenes = [pic(1, "working people actually run.", "the book", { coverHero: true }), host(2, NUMBER)];
+    const ranges = assignSceneRanges(scenes, late, 185.4, silences, fine);
+    expect(ranges[0].endSec).toBeGreaterThanOrEqual(179.423);
+    expect(ranges[0].endSec).toBeLessThanOrEqual(180.162);
   });
 });
