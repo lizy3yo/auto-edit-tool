@@ -662,6 +662,25 @@ describe("a quote is the host's own words, never a line the viewer is told to sa
     expect(out.rounds[0].problems).toEqual([{ cue: "q", problem: expect.stringContaining('the narrator hands it to the viewer to say ("…comes, speak up")') }]);
   });
 
+  // A Quote takes 16 words and a DimCaption 10 since round 13 (job 408): a longer request is told to
+  // go, not steered to a caption the next check refuses for its length.
+  it("a request too long for a DimCaption is not steered to one: the repair is told to drop it", async () => {
+    const long = T(
+      "So@80.89-80.99 when@81.01-81.13 the@81.15-81.23 cart@81.27-81.51 comes,@81.55-81.83 speak@82.72-82.97 up.@83.11-83.17 " +
+        "Could@83.77-83.91 I@83.93-84.01 keep@84.05-84.21 the@84.25-84.33 whole@84.37-84.51 can@84.53-84.69 and@84.71-84.79 a@84.81-84.85 second@84.87-85.11 bag@85.13-85.31 of@85.33-85.39 pretzels@85.41-85.79 for@85.81-85.91 later,@85.93-86.21 please?@86.23-86.53 " +
+        "Juice@87.05-87.31 works@87.37-87.59 the@87.65-87.73 same@87.77-87.99 way.@88.05-88.29"
+    );
+    const longFilm = { scenes: [scene(17, 73.71, 86.87, { scriptText: "So when the cart comes, speak up. Could I keep the whole can and a second bag of pretzels for later, please?" }), scene(18, 86.87, 92.12, { scriptText: "Juice works the same way." })] };
+    const text = "Could I keep the whole can and a second bag of pretzels for later, please?";
+    const quote: CueSpec = { id: "q", template: "Quote", start: "Could I keep the whole", startPad: -0.15, end: "for later, please", endPad: 0.2, props: { quote: { text, words: true }, author: "The Host" } };
+    const { ask } = asking([[quote]]);
+    const out = await planGraphics({ words: long, cuts: [73.71, 86.87, 92.12], film: longFilm, ask, ensureIcon: async () => true });
+    expect(out.rounds[0].problems).toEqual([
+      { cue: "q", problem: expect.stringMatching(/is not the host's own words — .*It is too long for a caption with no name \(a DimCaption takes at most 10 words\): drop it$/) },
+    ]);
+    expect(out.rounds[0].problems[0].problem).not.toContain("Show it as a caption");
+  });
+
   it("a host's own closing saying on the narrator's words is kept as before (Dale's job 389)", async () => {
     const words = [
       ...W("For more shop-tested fixes like these, subscribe to Dale Oakfield's Workshop, and tell me in the comments which of the three sells best where you live.", 220),
@@ -1719,6 +1738,19 @@ describe("a DimCaption is a glance: one short sentence, never two in a row (roun
     const prompt = systemPrompt({ kept: false });
     expect(prompt).toContain(`- DimCaption — a striking line over b-roll, one short sentence seen at a glance — never two in a row: {"phrase": phrase (≤${MAX_WORDS.DimCaption} words), "emphasis"}`);
     expect(prompt).toContain("a DimCaption is read at a glance, so it is a SHORT sentence (≤10 words) and never pages");
+    // The prompt's other mention of a DimCaption gives the same limit.
+    expect(prompt.replace(/\s+/g, " ")).toContain("line as a DimCaption (no name) when it is 10 words or fewer, or nothing");
+  });
+
+  it("a sentence too long for a card is never sent to an ArrowCaption that points at nothing", () => {
+    // Over b-roll the only caption that pages is now the ArrowCaption, made for a line pointing at
+    // something in the picture: "shown as a caption that pages" would have steered every long b-roll
+    // sentence to an arrow.
+    const prompt = systemPrompt({ kept: false }).replace(/\s+/g, " ");
+    expect(prompt).toContain(
+      "A sentence longer than a card's limit is never cut to fit: over the host it may be a HostCaption, over b-roll an ArrowCaption only when the line points at something in the picture — otherwise it gets no graphic."
+    );
+    expect(prompt).not.toContain("shown as a caption that pages");
   });
 
   it("the planner is told to keep two graphics that darken the picture 3 s apart, and which they are", () => {

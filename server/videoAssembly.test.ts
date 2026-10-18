@@ -791,8 +791,9 @@ describe("buildSceneMuxArgs name card (host lower third)", () => {
     );
   });
 
-  // 410's "I'm Helena Hart, and I read the fine print", 2.51 s: no time for the 0.5 s wait, so the
-  // card fades in from the cut and still holds 1.5 s before fading out into the next cut.
+  // A take a little shorter than 410's "I'm Helena Hart, and I read the fine print" (2.51 s, whose
+  // wait shrinks to 0.01 s): at 2.41 s there is no time for any wait, so the card fades in from the
+  // cut over shorter fades and still holds 1.5 s before fading out into the next cut.
   it("draws a short take's card with shorter edges, the hold kept", () => {
     const f = filterOf(
       buildSceneMuxArgs({

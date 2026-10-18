@@ -138,7 +138,8 @@ Statement, MythTruth, FactCard, YesNoCard, Quote and every caption (HostCaption,
 show a WHOLE SENTENCE as said — from where the sentence starts to its full stop, never stopped at a comma.
 A HostCaption or an ArrowCaption pages a long sentence by itself (8-10 words on screen at a time), so never
 cut one short to fit; a DimCaption is read at a glance, so it is a SHORT sentence (≤10 words) and never pages.
-A sentence longer than a card's limit is shown as a caption that pages instead of that card, or not at all.
+A sentence longer than a card's limit is never cut to fit: over the host it may be a HostCaption, over b-roll
+an ArrowCaption only when the line points at something in the picture — otherwise it gets no graphic.
 Fixed text (titles, labels, subs, list items) is shown whole. When it stands for words the narrator says,
 add "say": "those exact spoken words" beside it, so the graphic stays until they are said.
 "emphasis": ["word."] = ONE word of the shown text, copied exactly as written there (with its punctuation),
@@ -216,7 +217,7 @@ On top of the footage:
   It is signed with the host's name, so it is never words the script gives someone ELSE to say: a line
   the viewer is told to say or ask ("Just ask: Could I get that in writing, please?"), a request to a
   clerk or a server, or what another person said — signed, it reads as if the host said it. Show such a
-  line as a DimCaption (no name), or nothing
+  line as a DimCaption (no name) when it is 10 words or fewer, or nothing
 - HostCaption — the host's punchline while on camera (HOST or SPLIT scene, never under the name tag): {"phrase": phrase (≤8 words), "emphasis"}
 `;
 
@@ -1476,9 +1477,14 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
         const why = typeof line === "string" && first >= 0 ? notTheHostsWords(line, wordsLeadingInto(words, first), quotedInScript(film, at!.wordStart, mine.contentEnd ?? mine.end, line)) : undefined;
         if (why) {
           undo();
+          // A Quote takes 16 words and a DimCaption 10: steering a longer line to the caption only
+          // spends the one repair round on a second refusal.
+          const fits = String(line).trim().split(" ").filter(Boolean).length <= MAX_WORDS.DimCaption;
           bad(
             `"${line}" is not the host's own words — ${why}. Signed with the host's name it reads as if the host said it. ` +
-              `Show it as a caption with no name (DimCaption over b-roll), or drop it`
+              (fits
+                ? `Show it as a caption with no name (DimCaption over b-roll), or drop it`
+                : `It is too long for a caption with no name (a DimCaption takes at most ${MAX_WORDS.DimCaption} words): drop it`)
           );
           continue;
         }
