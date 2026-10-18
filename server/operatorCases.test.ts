@@ -3620,3 +3620,53 @@ describe("a line with nothing to see never falls back to the main thing; a sound
     expect(s.otherKeyThings).toEqual(["storm window"]);
   });
 });
+
+describe("one picture, one subject: two sentences about different things are two pictures (round 11, job 407 scene 20)", async () => {
+  // Job 407 scene 20: one still of hands steadying a log bolt in a forked stump ran 16.6 s, and for
+  // its first 8.5 s the voice talked about cabin roofs held down with heavy poles — the roof was never
+  // shown. The roof sentence's pieces had been joined, the riving sentence joined on as the same
+  // topic, and the line check could only split at a comparison and never a joined picture. It now
+  // splits where a sentence about a different thing starts, every part 3 s or more.
+  const { applyPictureFixes, applyPictureSplits, FIT_SYSTEM, parsePictureFixes } = await import("./shotList");
+  const cabin: KeyThing[] = [
+    { name: "heavy roof poles", look: "long round timber poles laid across the roof boards to weigh them down without nails" },
+    { name: "log bolts", look: "short round sections cut from a white oak or chestnut log, pale grey bark with cream-colored inner wood" },
+  ];
+  const roof = "The oldest cabins held long boards down with heavy poles laid across each course, so the roof went on without a nail.";
+  const rive = "When you rive, the bolt sits in a fork or against a stump, never in your hand.";
+  const bolt = "a log bolt wedged into a forked stump in the woodlot, hands steadying it from the side, a close-up of one detail of it filling the frame";
+
+  it("the line check is told to split there, and never a joined sentence inside", () => {
+    expect(FIT_SYSTEM).toMatch(/ONE PICTURE, ONE SUBJECT/);
+    expect(FIT_SYSTEM).toMatch(/A picture marked "joined" may be split this way, where a sentence starts/);
+    expect(FIT_SYSTEM).not.toMatch(/cabin|log bolt|woodlot|\bstump/i);
+  });
+
+  it("scene 20: the roof over the roof sentence, the bolt over the riving one", () => {
+    const s = pic(20, `${roof} ${rive}`, bolt, { joinedLine: true, keyThing: "log bolts", humanPresent: true, wordCut: true });
+    const fixes = parsePictureFixes(
+      JSON.stringify({
+        pictures: [
+          {
+            id: 0,
+            about: "heavy poles holding the roof boards down",
+            shows_it: false,
+            show: "long round timber poles laid across overlapping courses of pale oak boards on an old cabin roof",
+            thing: "heavy roof poles",
+            split: [{ from: "When you rive", show: "a log bolt wedged upright in a forked stump, hands steadying it from the side", thing: "log bolts" }],
+          },
+        ],
+      }),
+      [s]
+    );
+    applyPictureFixes([s], fixes, cabin);
+    const r = applyPictureSplits([s], fixes, cabin, () => 16.55);
+    expect(r.scenes.map(x => [x.scriptText, x.keyThing])).toEqual([
+      [roof, "heavy roof poles"],
+      [rive, "log bolts"],
+    ]);
+    // Read in 5 s, the riving sentence would be a ~2 s flash: the line stays one picture.
+    const quick = pic(20, `${roof} ${rive}`, bolt, { joinedLine: true });
+    expect(applyPictureSplits([quick], fixes, cabin, () => 5).split).toBe(0);
+  });
+});

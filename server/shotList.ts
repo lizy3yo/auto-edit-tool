@@ -2194,9 +2194,20 @@ the box of scraps beside it.
 A line that compares to something ELSE you can see — "the kind you see in …", "like the ones at …",
 "the kind you'd find in …" — ALWAYS gets that other thing as its own picture: SPLIT the line there.
 Give the exact first 2-5 words where the new picture starts, copied from the line, and what it shows.
-Split only when both parts are at least 4 words. Never split a picture marked "joined". A comparison
-the sentence rules out ("no, I don't mean the kind you see in the movies") is never split off or
-drawn.
+Split only when both parts are at least 4 words. Never split a picture marked "joined" inside a
+sentence. A comparison the sentence rules out ("no, I don't mean the kind you see in the movies")
+is never split off or drawn.
+
+ONE PICTURE, ONE SUBJECT. A picture whose line holds TWO OR MORE SENTENCES, where a later sentence
+is about a different thing you can see — another object, place, person or moment ("The town square
+has an old stone fountain. On Saturdays the farmers park their trucks along the edge to sell." = the
+fountain, then the farmers' trucks) — gets a new picture where that sentence starts: SPLIT there,
+from = the exact first 2-5 words of that sentence. Then about, shows_it and show answer for the words
+BEFORE the split only, and the split's show for the sentence it starts: when the picture fits only
+the later sentence, write show for the earlier words and give the split the picture as it already is. Split only when each part
+runs at least 3 seconds (its share of the picture's seconds) and is at least 4 words. Never split
+sentences that stay on the same thing — more said about it, the same thing from another side, an
+idea about it. A picture marked "joined" may be split this way, where a sentence starts.
 
 ONE IDEA, ONE PICTURE. A picture marked "same sentence" continues a sentence the picture before it
 started. When the two parts are ONE idea about one thing — the thing and where, how or what it is
@@ -2204,7 +2215,8 @@ used, sold or kept ("Sell your furniture | on Facebook Marketplace", "I hang the
 next to the mirror") — set join: true and write show: the ONE picture for the whole sentence. Keep
 them apart only when the second part moves on to a genuinely different thing worth its own picture.
 
-A picture marked "joined", or one you join, shows the WHOLE line in ONE picture — what the line is
+A picture marked "joined", or one you join, shows the WHOLE line in ONE picture (unless a later
+sentence of it moves on to a different thing, split as above) — what the line is
 really pointing at: the new thing it names when that is its point (a comparison: "it's the same wood
 they make baseball bats from" = the baseball bats), the main thing when the line is about it (never
 for a line with nothing to see), or the things together when they belong together (the bookcase as a
@@ -2640,10 +2652,29 @@ export function applyPictureJoins(
 }
 
 /**
+ * The token at `at` starts a new sentence: the words before it end on ".", "!" or "?" (a closing
+ * quote or bracket allowed) and a space — "$1.50" is one price, not two sentences. Pure.
+ */
+function startsSentenceAt(text: string, spans: TokenSpan[], at: number): boolean {
+  return at > 0 && /[.!?]["'’”)\]]*\s/.test(text.slice(spans[at - 1].end, spans[at].start));
+}
+
+/**
  * Split pictures where the check says a line names something NEW partway through: the words from
  * `from` on become their own picture showing it (`show`), the part before keeps its picture. A split
  * whose words are not in the line, or that would leave either part under 4 words, is skipped. The
  * new pieces have no timing yet — the caller re-cuts the film's ranges. Pure — returns a new list.
+ *
+ * ONE PICTURE, ONE SUBJECT (2026-10-18, job 407 scene 20): a split may also come where a SENTENCE
+ * starts that is about a different thing. One still ran 16.6 s over "The oldest cabins held long
+ * boards down with heavy poles laid across each course, so the roof went on without a nail. When you
+ * rive, the bolt sits in a fork or against a stump, never in your hand." — the roof sentence's two
+ * pieces had been joined for being short (`joinShortSplits`, `joinedLine`), the riving sentence
+ * joined on as the same topic (`joinSameContext`), and the check only ever split at a comparison and
+ * never a joined picture, so the roof was never shown. A joined picture is still never cut INSIDE a
+ * sentence — only where a new one starts — and a split that draws the picture before it again (the
+ * check writing the old picture into the split without rewriting the part before) shows nothing new
+ * and is dropped.
  */
 export function applyPictureSplits(
   scenes: StoryboardScene[],
@@ -2669,6 +2700,13 @@ export function applyPictureSplits(
     for (const cut of cuts) {
       const at = findPhraseAt(spans, cut.from, cursor + 1);
       if (at < 0) continue;
+      // A joined picture is one sentence made one picture on purpose ("Sell your furniture | on
+      // Facebook Marketplace"): it is cut again only where a new sentence starts.
+      if (s.joinedLine && !startsSentenceAt(text, spans, at)) continue;
+      // A split drawing the part before it again would be two copies of one picture and still leave
+      // the earlier words unshown: the line keeps the picture it had.
+      const before = starts.length ? starts[starts.length - 1].cut.show : s.showSubject ?? s.visualPrompt ?? "";
+      if (sameSubject(before, cut.show) || nearlySameSubject(before, cut.show)) continue;
       starts.push({ at, cut });
       cursor = at;
     }
@@ -2680,7 +2718,7 @@ export function applyPictureSplits(
       k > 0 &&
       (b - bounds[k - 1] < 4 ||
         (total > 0 && ((b - bounds[k - 1]) / spans.length) * total < SPLIT_PART_MIN_SEC));
-    if (starts.length === 0 || s.joinedLine || bounds.some(tooShort)) {
+    if (starts.length === 0 || bounds.some(tooShort)) {
       out.push(s);
       return;
     }
@@ -2715,16 +2753,20 @@ export function applyPictureSplits(
         // scene 32) — `markHostBroll` would otherwise draw them into a picture of something else.
         otherPerson: cut.other ?? (showsPerson(cut.show) ? s.otherPerson : undefined),
         otherPeople: cut.other ? otherPeopleOf(cut.other) : showsPerson(cut.show) ? s.otherPeople : undefined,
-        // Still the same sentence: what it rules out stays out of this part too.
+        // What the line rules out (answered for the whole line) stays out of this part too.
         forbids: s.forbids,
         stillImage: true,
         objectMotion: undefined,
         selfMoving: undefined,
         toolContact: contactToolWork(cut.show) ? true : undefined,
         pictureText: undefined,
+        // Soft print by the new picture's own words, as a rewrite reads it (`applyPictureFixes`).
+        blurPrint: blurredPrint(cut.show) ? true : undefined,
         sameShot: undefined,
         listCut: undefined,
         hostCandidate: undefined,
+        // Its own sentence's picture, not a join: a picture cut from a joined one is not joined.
+        joinedLine: undefined,
         wordCut: true,
       } as StoryboardScene);
       split++;
@@ -2815,7 +2857,14 @@ export async function fitPicturesToLines(
   const moved = fixes
     .filter(f => f.split?.length && merged.remap.has(f.id))
     .map(f => ({ ...f, id: merged.remap.get(f.id)! }));
-  const cut = applyPictureSplits(merged.scenes, moved, opts.keyThings, s => s.audioDuration ?? 0);
+  // A picture a join just made has no measured length (`FRESH`): its seconds are its parts', so a
+  // split of it — now allowed where a new sentence starts — still leaves no part under 3 s.
+  const lenOf = new Map<StoryboardScene, number>();
+  scenes.forEach((s, id) => {
+    const into = merged.scenes[merged.remap.get(id) ?? -1];
+    if (into) lenOf.set(into, (lenOf.get(into) ?? 0) + (s.audioDuration ?? 0));
+  });
+  const cut = applyPictureSplits(merged.scenes, moved, opts.keyThings, s => lenOf.get(s) ?? s.audioDuration ?? 0);
   return { scenes: cut.scenes, fixed, split: cut.split, joined: merged.joined };
 }
 
