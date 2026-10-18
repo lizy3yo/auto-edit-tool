@@ -119,6 +119,7 @@ import {
   withScreenTurn,
 } from "./pictureVariety";
 import { detailRedrawsPerVideo, takeDetailRedraw } from "./detailRedraws";
+import { PLAIN_LOOK_START, plainLight, plainLookClause, plainLookKeep, plainPicture } from "./plainLook";
 
 /**
  * Redraws a host picture gets when it shows someone else — or the face it must never show — before
@@ -225,8 +226,10 @@ export const THINGS_AT_REST_CLAUSE =
  * Never a picture that already had its print changed: a blurred-print one got that redraw on its
  * first "writing" (job 383 scene 33, writing ten times), and printed words the line says are wanted.
  * Never "missing": the subject already leads the prompt when the description drops it (`subjectLead`),
- * so a changed prompt for it is not yet known to help. Every other fault keeps the picture as before,
- * and the job says so (`notePictureFlaws`). Pure.
+ * so a changed prompt for it is not yet known to help. Never "staged": its own one redraw already
+ * goes out with the prompt changed against it (`plainLookRedraw`, round 13), so a third draw buys
+ * nothing more. Every other fault keeps the picture as before, and the job says so
+ * (`notePictureFlaws`). Pure.
  */
 export type FaultRedraw = "at rest" | "soft print";
 export function faultRedrawFor(
@@ -7415,6 +7418,93 @@ export function softPrintRedraw(prompt: string): string {
 }
 
 /**
+ * The words of a picture as `buildStillPrompt` writes them into its prompt: the subject lead and the
+ * visual at its head, the subject inside the framing clause, and the subject as stored (a detail
+ * redraw's clause quotes it).
+ */
+function writtenPictureWords(s: StoryboardScene, visualOverride?: string) {
+  const lipsCut = hostLipsCut(s);
+  const facing = (t: string) => (lipsCut ? facingTheCamera(t) : t);
+  const shown = s.showSubject ? facing(withoutCutaway(s.showSubject)) : undefined;
+  const visual = facing(softenVisualPrompt(visualOverride ?? s.visualPrompt));
+  return { head: `${visualOverride ? "" : subjectLead(shown, visual)}${visual}`, shown, stored: s.showSubject };
+}
+
+/** A text as a blurred-print picture's prompt carries it: its close-up words framed from arm's length. */
+const framedForPrint = (t: string) => withAllowedText(t, undefined, true).split(` ${BLURRED_PRINT_CLAUSE}`).join("");
+
+/**
+ * THE STAGED REDRAW, CHANGED (2026-10-18, round 13, `server/plainLook.ts`): the one redraw a picture
+ * the check called "staged" gets (`cleanRerolls`, or the detail redraw it shares) used to send the same
+ * prompt again, so a picture whose own words ask for the staged look shipped flagged — job 409 scene
+ * 25's marble throne hall, job 410 scene 13's air-to-air airliner, job 410 scene 10's advert pose.
+ * Now its words lose the light, grandeur and finish its line never asked for, a view no phone can take
+ * is brought down to the nearest one a person can (`plainPicture`), its key thing's written look loses
+ * any light in it (`plainLight` — light is never the thing), and it is told to be an ordinary snapshot
+ * (`plainLookClause`). The words are swapped where they sit in the prompt, so every clause an
+ * earlier redraw added stays; a prompt reworded past finding them is built again from the new words
+ * (as `promptAfterMemoryChange` does). On a softened content-policy prompt only the clause is added:
+ * rebuilding it from the ordinary words could trip the filter it was softened for. `fields` are the
+ * picture's new words, kept on the scene so the check holds the frame to them and a Regenerate starts
+ * from them; `visualOverride` the caller's own visual, changed the same way. Pure.
+ */
+export function plainLookRedraw(
+  scene: StoryboardScene,
+  prompt: string,
+  o: {
+    line?: string;
+    visualOverride?: string;
+    personFree?: boolean;
+    subject?: string;
+    square?: boolean;
+    ordinaryPrompt: boolean;
+  }
+): { prompt: string; fields: Partial<Pick<StoryboardScene, "showSubject" | "visualPrompt">>; visualOverride?: string } {
+  const before = o.visualOverride ?? scene.visualPrompt ?? "";
+  const keep = plainLookKeep(scene, o.line, [scene.showSubject, before]);
+  const withClause = (p: string) => (p.includes(PLAIN_LOOK_START) ? p : `${p} ${plainLookClause(keep.named)}`);
+  if (!o.ordinaryPrompt) return { prompt: withClause(prompt), fields: {} };
+  const showSubject = scene.showSubject ? plainPicture(scene.showSubject, keep) : scene.showSubject;
+  const visual = plainPicture(before, keep);
+  const look = scene.keyThingLook ? plainLight(scene.keyThingLook, keep) : scene.keyThingLook;
+  const fields: Partial<Pick<StoryboardScene, "showSubject" | "visualPrompt">> = {
+    ...(showSubject !== scene.showSubject ? { showSubject } : {}),
+    ...(!o.visualOverride && visual !== before ? { visualPrompt: visual } : {}),
+  };
+  const visualOverride = o.visualOverride && visual !== before ? visual : undefined;
+  const next: StoryboardScene = { ...scene, ...fields };
+  // As the prompt was written: without the host once it is drawn with nobody in it.
+  const written = (s: StoryboardScene): StoryboardScene =>
+    o.personFree ? { ...s, humanPresent: false, brollHostLook: undefined, brollHostRef: undefined, hostFaceShown: undefined } : s;
+  const was = writtenPictureWords(written(scene), o.visualOverride);
+  const now = writtenPictureWords(written(next), visualOverride ?? o.visualOverride);
+  let out = prompt;
+  // Each written piece swapped where it sits — as written, or as a blurred-print rewrite framed it.
+  const swap = (from: string | undefined, to: string | undefined): boolean => {
+    if (!from || from === to) return true;
+    for (const [a, b] of [
+      [from, to ?? ""],
+      [framedForPrint(from), framedForPrint(to ?? "")],
+    ])
+      if (out.includes(a)) {
+        out = out.split(a).join(b);
+        return true;
+      }
+    return false;
+  };
+  if (!swap(was.head, now.head)) {
+    // Reworded past finding its words: built again from the new ones.
+    const v = visualOverride ?? o.visualOverride;
+    out = `${buildStillPrompt(written(next), false, v, o.subject, o.square)}${o.personFree ? ` ${PERSON_FREE_FALLBACK}` : ""}`;
+  } else {
+    swap(was.shown, now.shown);
+    swap(was.stored, now.stored);
+  }
+  if (look !== scene.keyThingLook) swap(scene.keyThingLook, look);
+  return { prompt: withClause(out), fields, ...(visualOverride !== undefined ? { visualOverride } : {}) };
+}
+
+/**
  * The phone screen of an app shot (2026-09-30, the operator: "facebook marketplace in an app" — no
  * logo, no brand): a plain buy-and-sell app, a grid of item photos, nothing readable.
  */
@@ -10708,6 +10798,26 @@ async function drawValidatedStill(
     wordsCamera = camera;
     Object.assign(scene, fields);
   };
+  // A STAGED REDRAW CHANGES WHAT CAUSED IT (round 13, `plainLookRedraw`): the one redraw a "staged"
+  // picture gets went out from the same prompt, so a picture whose own words ask for the staged look
+  // came back staged and shipped flagged (job 409 scene 25's marble throne hall, job 410 scene 13's
+  // airliner seen from beside it above the clouds). Its words go without the light, grandeur and finish
+  // its line never asked for, an impossible view is brought down to a person's, and it is told to be an
+  // ordinary snapshot. Rides that redraw: no extra draw. Its new words stay on the scene, so the check
+  // holds the next frame to them.
+  const plainLookNow = () => {
+    const r = plainLookRedraw(scene, prompt, {
+      line: scene.cta ? undefined : scene.scriptText ?? scene.narration,
+      visualOverride,
+      personFree,
+      subject,
+      square,
+      ordinaryPrompt: tier === 0,
+    });
+    prompt = r.prompt;
+    if (r.visualOverride !== undefined) visualOverride = r.visualOverride;
+    Object.assign(scene, r.fields);
+  };
   for (let attempt = 1; ; attempt++) {
     // THE DRAWS RAN OUT: a frame kept as a fallback ships below the loop, and a fallback of the host
     // meets the host check first (job 409: a "staged" frame of the host was a fallback the check never
@@ -10984,6 +11094,9 @@ async function drawValidatedStill(
           offSubjectFallback ??= drawn;
           // Before the clause is written: drawn without its memory, it has no references to warn about.
           redrawForWhatItShows();
+          // The staged look this redraw also answers for changes its prompt too (job 410 scene 10:
+          // "detail, staged", then "staged" from the same pose).
+          if (sharesClean && defects.staged) plainLookNow();
           if (!visualOverride && tier === 0) {
             const cut = prompt.indexOf(DETAIL_CLAUSE_START);
             prompt = `${cut >= 0 ? prompt.slice(0, cut).trimEnd() : prompt} ${pictureDetailClause(
@@ -11023,7 +11136,8 @@ async function drawValidatedStill(
         continue;
       }
       // A brand, a subject lost in clutter, or the wrong place for the line (rules 3 and 4): one
-      // fresh seed, the frame kept as the fallback — the same bargain as an off-subject frame.
+      // fresh seed, the frame kept as the fallback — the same bargain as an off-subject frame. A
+      // staged look gets that redraw with its prompt changed against it (`plainLookNow`).
       if ((defects.messy || defects.wrongPlace || defects.staged) && cleanRerolls < 1) {
         cleanRerolls++;
         const kind = defects.messy
@@ -11033,9 +11147,11 @@ async function drawValidatedStill(
             : "a staged, not-a-phone-photo look";
         lastError = `Still image has ${kind}`;
         offSubjectFallback ??= drawn;
+        if (defects.staged) plainLookNow();
         console.warn(
           `[Longform] scene ${scene.index} still has ${kind} ` +
-            `(${defects.what}, attempt ${attempt}/${attempts}) → regenerating`
+            `(${defects.what}, attempt ${attempt}/${attempts}) → ` +
+            (defects.staged ? "drawing it again plainer" : "regenerating")
         );
         continue;
       }

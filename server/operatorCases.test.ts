@@ -5911,3 +5911,139 @@ describe("a redraw drops what caused its fault (round 13, jobs 408 and 410)", ()
     expect(memoryFields({ ...m, refs: m.refs!.slice(0, 1) }, undefined).memoryRefScenes).toBeUndefined();
   });
 });
+
+/**
+ * THE STAGED REDRAW IS DRAWN PLAINER (round 13, the review of jobs 409 and 410). Its one redraw resent
+ * the same prompt, so a picture whose own words ask for the staged look came back staged and shipped
+ * flagged: 409-25's glossy marble throne hall, 409-22's golden oil-lamp glow, 410-13's air-to-air
+ * airliner, 410-10's advert pose at the galley. `plainLookRedraw` changes the prompt on that redraw.
+ */
+describe("a staged redraw changes what the line never asked for (jobs 409, 410)", () => {
+  const ADVISOR_LINE =
+    "He was one of the richest men in the empire, an advisor standing one step from the throne, buried under exactly the kind of obligations we are about to talk about —";
+  const advisor = () =>
+    pic(25, ADVISOR_LINE, "a wealthy man in a fine off-white toga draped over his left shoulder, standing beside a marble throne in a grand hall, seen from behind", {
+      visualPrompt:
+        "A wealthy man in a fine off-white toga draped over his left shoulder, standing beside a marble throne in a grand hall, viewed from behind.",
+      otherPerson: "Seneca, an imperial advisor",
+      humanPresent: true,
+    });
+  const redraw = async (s: StoryboardScene, prompt: string, o: Record<string, unknown> = {}) => {
+    const { plainLookRedraw } = await import("./longformVideo");
+    return plainLookRedraw(s, prompt, { line: s.scriptText, ordinaryPrompt: true, ...o });
+  };
+
+  it("409-25: the marble and the grand hall leave the prompt where they sit; the throne the line says, and every other clause, stay", async () => {
+    const { PLAIN_LOOK_START } = await import("./plainLook");
+    const s = advisor();
+    const before = buildStillPrompt(s);
+    const r = await redraw(s, before);
+    expect(before).toContain("marble throne in a grand hall");
+    expect(r.prompt).not.toMatch(/\bmarble\b|\bgrand\b/);
+    expect(r.prompt).toContain("standing beside a throne in a hall");
+    expect(r.fields).toEqual({
+      showSubject:
+        "a wealthy man in a fine off-white toga draped over his left shoulder, standing beside a throne in a hall, seen from behind",
+      visualPrompt:
+        "A wealthy man in a fine off-white toga draped over his left shoulder, standing beside a throne in a hall, viewed from behind.",
+    });
+    // Built fresh from the new words, the prompt is the one swapped in place — plus the clause.
+    expect(r.prompt).toBe(`${buildStillPrompt({ ...s, ...r.fields })} ${r.prompt.slice(r.prompt.indexOf(PLAIN_LOOK_START))}`);
+    // Asked twice, the clause is never added twice.
+    const again = await redraw({ ...s, ...r.fields }, r.prompt);
+    expect(again.prompt.split(PLAIN_LOOK_START)).toHaveLength(2);
+  });
+
+  it("410-13: 'the flight' — the airliner seen from beside it is drawn as a passenger sees it, its wing through the window", async () => {
+    const { WINDOW_VIEW } = await import("./plainLook");
+    const s = pic(13, "the flight,", "a passenger jet flying above the clouds", {
+      visualPrompt: "A commercial passenger jet flying above a layer of white clouds, seen from the side against blue sky.",
+      listCut: true,
+    });
+    const r = await redraw(s, buildStillPrompt(s));
+    expect(r.fields.showSubject).toBe(`the wing of a passenger jet, ${WINDOW_VIEW}, flying above the clouds`);
+    expect(r.prompt).toContain(`The wing of a commercial passenger jet, ${WINDOW_VIEW}`);
+    expect(r.prompt).not.toContain("seen from the side");
+  });
+
+  it("410-10: nothing in the galley picture's words asks for the look — they stay word for word, the clause alone is added", async () => {
+    const { plainLookClause } = await import("./plainLook");
+    const s = pic(10, "so travelers like us can stop learning these things the hard way.", "host at galley counter reviewing notes on a clipboard", {
+      visualPrompt: "Bare weathered hands at a galley metal counter holding and reviewing a clipboard with papers.",
+      humanPresent: true,
+      brollHostLook: "a woman in her forties in a navy blazer",
+    });
+    const before = buildStillPrompt(s);
+    const r = await redraw(s, before);
+    expect(r.fields).toEqual({});
+    expect(r.prompt).toBe(`${before} ${plainLookClause([])}`);
+  });
+
+  it("light the line names stays, the clause names it; a lamp only the picture added goes (409-22)", async () => {
+    const candle = pic(7, "We ate dinner by candlelight that night.", "a kitchen table set for two, lit by a single candle");
+    const kept = await redraw(candle, buildStillPrompt(candle));
+    expect(kept.fields).toEqual({});
+    expect(kept.prompt).toMatch(/the light the words name \("candlelight", "night"\)/);
+    const seneca = pic(
+      22,
+      "Two thousand years ago, a man named Lucius Annaeus Seneca wrote a short, furious, loving essay to a man named Paulinus,",
+      "a man in an off-white wool toga draped over his left shoulder in deep folds, writing on a scroll with a reed pen by lamplight, seen from the side",
+      {
+        visualPrompt:
+          "An off-white wool toga draped over a left shoulder in deep folds, a reed pen in hand writing on a scroll, lamplight on the face of the scroll, seen from the side.",
+        otherPerson: "Seneca, a Roman writer",
+        humanPresent: true,
+        blurPrint: true,
+      }
+    );
+    const gone = await redraw(seneca, buildStillPrompt(seneca));
+    expect(gone.prompt).not.toMatch(/lamplight/);
+    expect(gone.prompt).toMatch(/no glow from a lamp, candle or fire/);
+  });
+
+  it("job 412 scene 25: the key thing's written look loses its golden light in the prompt, never its wilderness", async () => {
+    const s = pic(25, "when small prey is out moving around", "a wild cat stalking low through scattered brush across the dawn-lit wild landscape toward a small mouse", {
+      visualPrompt:
+        "Wild cat crouched low and moving through scattered dry brush across an open dawn-lit wilderness, golden low light on distant hills, a small mouse ahead on the ground",
+      keyThing: "wild landscape",
+      keyThingLook: "an open dawn-lit wilderness with low golden light, scattered brush and distant hills, calm and empty of people",
+    });
+    const before = buildStillPrompt(s);
+    expect(before).toContain("HOW THE WILD LANDSCAPE LOOKS in every picture of this video: an open dawn-lit wilderness with low golden light");
+    const r = await redraw(s, before);
+    // ("no golden glow" stays: the fixed look clause and the redraw's own clause refuse it.)
+    expect(r.prompt).not.toMatch(/golden low light|low golden light/i);
+    expect(r.prompt).toContain("HOW THE WILD LANDSCAPE LOOKS in every picture of this video: an open dawn-lit wilderness with low light, scattered brush");
+    // The look itself is not rewritten on the scene: other pictures of the thing keep it.
+    expect(r.fields).not.toHaveProperty("keyThingLook");
+  });
+
+  it("every other clause a redraw added stays: drawn with nobody in it, from a caller's own visual, or reworded past finding", async () => {
+    const { PERSON_FREE_FALLBACK } = await import("./longformVideo");
+    const { PLAIN_LOOK_START } = await import("./plainLook");
+    const s = advisor();
+    const nobody = `${buildStillPrompt({ ...s, humanPresent: false })} ${PERSON_FREE_FALLBACK}`;
+    const r1 = await redraw(s, nobody, { personFree: true });
+    expect(r1.prompt).toContain(PERSON_FREE_FALLBACK);
+    expect(r1.prompt).toContain("standing beside a throne in a hall");
+    // A caller's own visual (a keyframe's softened clip text) changes with it; the scene's own stays.
+    const own = "A man in a toga beside a marble throne in a grand hall.";
+    const r2 = await redraw(s, buildStillPrompt(s, false, own), { visualOverride: own });
+    expect(r2.visualOverride).toBe("A man in a toga beside a throne in a hall.");
+    expect(r2.fields).not.toHaveProperty("visualPrompt");
+    expect(r2.prompt).toContain("A man in a toga beside a throne in a hall.");
+    // Words nowhere to be found: built again from the new ones.
+    const r3 = await redraw(s, "a prompt reworded past finding its words");
+    expect(r3.prompt.startsWith(buildStillPrompt({ ...s, ...r3.fields }))).toBe(true);
+    expect(r3.prompt).toContain(PLAIN_LOOK_START);
+  });
+
+  it("on a softened content-policy prompt only the clause is added — its words are never rebuilt", async () => {
+    const { plainLookClause } = await import("./plainLook");
+    const s = advisor();
+    const softened = "A man standing in a hall, seen from behind.";
+    const r = await redraw(s, softened, { ordinaryPrompt: false });
+    expect(r.prompt).toBe(`${softened} ${plainLookClause([])}`);
+    expect(r.fields).toEqual({});
+  });
+});

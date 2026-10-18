@@ -253,7 +253,10 @@ const { mockScanSameHost, mockScanSameThing, mockScanNearCopy } = vi.hoisted(() 
   // open one ever reach it. Default "not a copy".
   mockScanNearCopy: vi.fn(async () => ({ copy: false, what: "" })),
 }));
-vi.mock("./overlayTextScan", () => ({
+vi.mock("./overlayTextScan", async importOriginal => ({
+  // The words that name a picture's light are pure and real: the staged redraw keeps that light
+  // (`server/plainLook.ts`). Every vision call is mocked.
+  namedLight: (await importOriginal<typeof import("./overlayTextScan")>()).namedLight,
   scanStillDefects: mockScanStillDefects,
   scanSameHost: mockScanSameHost,
   scanSameThing: mockScanSameThing,
@@ -10836,7 +10839,8 @@ describe("a picture that ships with a fault says so, and two faults get one chan
     expect(out.flaws).toEqual(["missing"]);
   });
 
-  it("job 344 scene 11: staged twice is exactly as before — no extra draw — and says it shipped staged", async () => {
+  it("job 344 scene 11: staged twice — no extra draw, its one redraw told to be plainer, and it says it shipped staged", async () => {
+    const { PLAIN_LOOK_START } = await import("./plainLook");
     const [a, b] = await Promise.all([pngOf("#d11"), pngOf("#d22")]);
     checks({ staged: true }, { staged: true });
     const genImage = drawsOf(a, b);
@@ -10847,7 +10851,11 @@ describe("a picture that ships with a fault says so, and two faults get one chan
       genImage
     );
     expect(genImage).toHaveBeenCalledTimes(2);
-    expect(genImage.mock.calls[1][0].prompt).toBe(genImage.mock.calls[0][0].prompt);
+    // Nothing in its words asks for the look, so they stay word for word; only the clause is added.
+    const [first, second] = genImage.mock.calls.map(c => c[0].prompt as string);
+    expect(first).not.toContain(PLAIN_LOOK_START);
+    expect(second.startsWith(first)).toBe(true);
+    expect(second.slice(first.length)).toMatch(new RegExp(`^ ${PLAIN_LOOK_START}`));
     expect(out.flaws).toEqual(["staged"]);
   });
 
@@ -13911,5 +13919,177 @@ describe("a redraw drops what caused its fault (round 13, jobs 408 and 410)", ()
     expect(prompts[2]).not.toContain(`Camera for THIS picture: ${REDRAW_CAMERAS[0]}.`);
     expect(prompts[2].match(/Camera for THIS picture:/g)).toHaveLength(1);
     expect(prompts[2]).toContain(`HOW THE BEVERAGE CART LOOKS in every picture of this video: ${CART_LOOK}`);
+  });
+});
+
+describe("a staged redraw is drawn plainer, never from the same prompt (round 13, jobs 409 and 410)", () => {
+  // The one redraw a "staged" picture gets used to resend its prompt, so a picture whose own words ask
+  // for the staged look came back staged and shipped flagged. Each scene below is as it was stored.
+  const pngOf = (bg: string) =>
+    sharp({ create: { width: 8, height: 8, channels: 3, background: bg } }).png().toBuffer();
+  const verdict = (over: Record<string, unknown> = {}) => ({ overlay: false, broken: false, what: "", ...over }) as any;
+  const drawsOf = (...frames: Buffer[]) => {
+    const fn = vi.fn();
+    for (const f of frames) fn.mockResolvedValueOnce({ success: true, fileData: f });
+    return fn;
+  };
+  const checks = (...vs: Record<string, unknown>[]) => {
+    mockScanStillDefects.mockReset();
+    for (const v of vs) mockScanStillDefects.mockResolvedValueOnce(verdict(v));
+    mockScanStillDefects.mockResolvedValue(verdict());
+  };
+  const promptsOf = (fn: ReturnType<typeof vi.fn>) => fn.mock.calls.map(c => c[0].prompt as string);
+  const expectedOf = (k: number) => (mockScanStillDefects.mock.calls[k] as any[])[1] as string | undefined;
+  afterEach(() => {
+    mockScanStillDefects.mockReset();
+    mockScanStillDefects.mockResolvedValue(verdict());
+    mockScanSameHost.mockReset();
+    mockScanSameHost.mockResolvedValue({ same: true, what: "" });
+  });
+
+  const advisor = () =>
+    ({
+      index: 25,
+      scriptText:
+        "He was one of the richest men in the empire, an advisor standing one step from the throne, buried under exactly the kind of obligations we are about to talk about —",
+      showSubject:
+        "a wealthy man in a fine off-white toga draped over his left shoulder, standing beside a marble throne in a grand hall, seen from behind",
+      visualPrompt:
+        "A wealthy man in a fine off-white toga draped over his left shoulder, standing beside a marble throne in a grand hall, viewed from behind.",
+      namedLook:
+        "Roman toga: a long single piece of off-white wool cloth wrapped around the body over a knee-length tunic, draped over the left shoulder and arm in deep curved folds, the right arm left free",
+      otherPerson: "Seneca, an imperial advisor",
+      humanPresent: true,
+    }) as any;
+
+  it("409-25: the redraw loses the marble and the grand hall, keeps the throne its line says, and is checked by the new words", async () => {
+    const { PLAIN_LOOK_START } = await import("./plainLook");
+    const [a, b] = await Promise.all([pngOf("#9a1"), pngOf("#9a2")]);
+    checks({ staged: true, what: "a glossy marble throne hall, cinematic light" });
+    const scene = advisor();
+    const genImage = drawsOf(a, b);
+    const out = await generateValidatedStill(scene, 4, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(2);
+    const [first, second] = promptsOf(genImage);
+    expect(first).toContain("beside a marble throne in a grand hall");
+    expect(second).not.toMatch(/\bmarble\b|\bgrand\b/);
+    expect(second).toContain("standing beside a throne in a hall");
+    expect(second).toContain("Roman toga"); // the named kind's look is the thing, and stays
+    // The fixed look clause's own words about lamps and glow are never touched.
+    expect(second).toContain("no glowing lamps, candles or fire unless the shot names them, no golden glow");
+    expect(second).toContain(PLAIN_LOOK_START);
+    expect(scene.showSubject).toBe(
+      "a wealthy man in a fine off-white toga draped over his left shoulder, standing beside a throne in a hall, seen from behind"
+    );
+    expect(scene.visualPrompt).toBe(
+      "A wealthy man in a fine off-white toga draped over his left shoulder, standing beside a throne in a hall, viewed from behind."
+    );
+    expect(expectedOf(1)).toBe(scene.showSubject);
+    expect(out.buffer.equals(b)).toBe(true);
+    expect(out.flaws).toBeUndefined();
+  });
+
+  it("410-13: the airliner seen from beside it above the clouds is redrawn as its wing through a cabin window", async () => {
+    const { WINDOW_VIEW } = await import("./plainLook");
+    const [a, b] = await Promise.all([pngOf("#9b1"), pngOf("#9b2")]);
+    checks({ staged: true, what: "a glossy air-to-air render of the jet" });
+    const scene = {
+      index: 13,
+      scriptText: "the flight,",
+      showSubject: "a passenger jet flying above the clouds",
+      visualPrompt: "A commercial passenger jet flying above a layer of white clouds, seen from the side against blue sky.",
+      listCut: true,
+    } as any;
+    const genImage = drawsOf(a, b);
+    await generateValidatedStill(scene, 4, undefined, genImage);
+    const [, second] = promptsOf(genImage);
+    expect(second).toContain(`The wing of a commercial passenger jet, ${WINDOW_VIEW}`);
+    expect(second).not.toContain("seen from the side");
+    expect(expectedOf(1)).toBe(`the wing of a passenger jet, ${WINDOW_VIEW}, flying above the clouds`);
+  });
+
+  it("410-10: detail and staged on one draw — the one shared redraw carries both clauses; nothing in its words to take out", async () => {
+    const { PLAIN_LOOK_START } = await import("./plainLook");
+    const { DETAIL_CLAUSE_START } = await import("./longformVideo");
+    const [a, b] = await Promise.all([pngOf("#9c1"), pngOf("#9c2")]);
+    checks({ detail: true, detailWhat: "no papers on the clipboard", staged: true }, { staged: true });
+    const subject = "host at galley counter reviewing notes on a clipboard";
+    const scene = {
+      index: 10,
+      scriptText: "so travelers like us can stop learning these things the hard way.",
+      showSubject: subject,
+      visualPrompt: "Bare weathered hands at a galley metal counter holding and reviewing a clipboard with papers.",
+      humanPresent: true,
+      brollHostLook: "a woman in her forties in a navy blazer with a silk scarf and a wings pin",
+      brollHostRef: "https://r2/host.jpg",
+    } as any;
+    const genImage = drawsOf(a, b);
+    const out = await generateValidatedStill(scene, 4, undefined, genImage);
+    // No extra draw: the detail redraw IS the staged one, as before.
+    expect(genImage).toHaveBeenCalledTimes(2);
+    const [first, second] = promptsOf(genImage);
+    expect(second).toContain(PLAIN_LOOK_START);
+    expect(second).toContain(DETAIL_CLAUSE_START);
+    expect(second).toContain("Bare weathered hands at a galley metal counter");
+    expect(first).not.toContain(PLAIN_LOOK_START);
+    expect(scene.showSubject).toBe(subject);
+    expect(out.flaws).toEqual(["staged"]);
+  });
+
+  it("light the line names stays: a candlelit table under 'by candlelight' keeps its candle, and the clause names that light", async () => {
+    const { PLAIN_LOOK_START } = await import("./plainLook");
+    const [a, b] = await Promise.all([pngOf("#9d1"), pngOf("#9d2")]);
+    checks({ staged: true, what: "golden glow, styled table" });
+    const scene = {
+      index: 7,
+      scriptText: "We ate dinner by candlelight that night.",
+      showSubject: "a kitchen table set for two, lit by a single candle",
+      visualPrompt: "A kitchen table set for two, lit by a single candle, plates and glasses.",
+    } as any;
+    const genImage = drawsOf(a, b);
+    await generateValidatedStill(scene, 4, undefined, genImage);
+    const [, second] = promptsOf(genImage);
+    expect(second.startsWith("A kitchen table set for two, lit by a single candle, plates and glasses.")).toBe(true);
+    expect(second).toContain(PLAIN_LOOK_START);
+    expect(second).toMatch(/the light the words name \("candlelight", "night"\)/);
+    expect(scene.showSubject).toBe("a kitchen table set for two, lit by a single candle");
+  });
+
+  it("409-22: lamplight the line never names goes from the redraw, its print still soft", async () => {
+    const { BLURRED_PRINT_CLAUSE } = await import("./longformVideo");
+    const [a, b] = await Promise.all([pngOf("#9e1"), pngOf("#9e2")]);
+    checks({ staged: true, what: "golden oil-lamp glow" });
+    const scene = {
+      index: 22,
+      scriptText:
+        "Two thousand years ago, a man named Lucius Annaeus Seneca wrote a short, furious, loving essay to a man named Paulinus,",
+      showSubject:
+        "a man in an off-white wool toga draped over his left shoulder in deep folds, writing on a scroll with a reed pen by lamplight, seen from the side",
+      visualPrompt:
+        "An off-white wool toga draped over a left shoulder in deep folds, a reed pen in hand writing on a scroll, lamplight on the face of the scroll, seen from the side.",
+      otherPerson: "Seneca, a Roman writer",
+      humanPresent: true,
+      blurPrint: true,
+    } as any;
+    const genImage = drawsOf(a, b);
+    await generateValidatedStill(scene, 4, undefined, genImage);
+    const [first, second] = promptsOf(genImage);
+    expect(first).toMatch(/lamplight/);
+    expect(second).not.toMatch(/lamplight/);
+    expect(second).toContain("a reed pen in hand writing on a scroll, seen from the side.");
+    expect(second).toContain(BLURRED_PRINT_CLAUSE);
+  });
+
+  it("a brand, clutter or the wrong place alone keeps its redraw exactly as before", async () => {
+    const { PLAIN_LOOK_START } = await import("./plainLook");
+    for (const fault of [{ messy: true }, { wrongPlace: true }]) {
+      const [a, b] = await Promise.all([pngOf("#9f1"), pngOf("#9f2")]);
+      checks(fault);
+      const genImage = drawsOf(a, b);
+      await generateValidatedStill(advisor(), 4, undefined, genImage);
+      const [first, second] = promptsOf(genImage);
+      expect(second).toBe(first);
+      expect(second).not.toContain(PLAIN_LOOK_START);
+    }
   });
 });
