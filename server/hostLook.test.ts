@@ -403,6 +403,40 @@ describe("'hand' naming a thing is not a person (round 11's review, job 406 scen
     }
   });
 
+  it("a hand tool at work, or work being done by hand, still has someone's hand in it (stored jobs 133-232)", async () => {
+    const { SHOWS_PERSON, showsPerson } = await import("./hostLook");
+    // Every one of these was a person through "hand" alone before the fix, and needs one.
+    for (const doing of [
+      "a hand drill boring a hole into a small charred cedar block", // job 189 scene 36
+      "a hand drill bit entering a charred cedar block at a slight angle, close up on workbench", // job 189 scene 39
+      "A wooden workbench surface in soft garage light, scattered with fine wood shavings and a hand plane mid-stroke across a half-finished pine board", // job 133 scene 190
+      "a hand saw cutting through a pine board clamped to the bench",
+      "a hand mixer whipping cream in a glass bowl",
+      "A 3-inch screw being turned by hand with a screwdriver into the wooden door frame", // job 232 scene 23
+      "nine-patch crib quilt being pieced by hand at the work table under lamp light", // job 144 scene 3
+      "close up of two matching shell stitches being aligned by hand", // job 158 scene 40
+      "An open-mesh market bag held stretched wide by hand, close up", // job 168 scene 127
+      "sanding the edge by hand with a folded sheet of sandpaper",
+    ]) {
+      expect(SHOWS_PERSON.test(doing), doing).toBe(true);
+      expect(showsPerson(doing), doing).toBe(true);
+    }
+    // At rest, or made by hand some time ago: nobody.
+    for (const done of [
+      "a hand plane resting on the bench",
+      "a hand saw and sanding block on the bench",
+      "a hand saw with a turned beech handle",
+      "a soft pale bedsheet square, hemmed by hand with visible thread, folded flat", // job 147 scene 101
+      "Braided rag rug coiled flat on a wooden floor, coils laced together by hand with visible stitching", // job 129 scene 22
+      "the overall construction done by hand at a slow, deliberate pace", // job 107 scene 113
+      "visible stitching done by hand along the binding",
+      "a finished walnut cutting board lying flat on the workshop bench, surrounded by hand tools and wood shavings",
+    ]) {
+      expect(SHOWS_PERSON.test(done), done).toBe(false);
+      expect(showsPerson(done), done).toBe(false);
+    }
+  });
+
   it("an animal's pronoun after hand tools is the animal's; one after a hand stays the person's", async () => {
     const { withoutAnimalPronouns } = await import("./hostLook");
     expect(withoutAnimalPronouns("a dog asleep under the hand tools, his tail over his nose")).toBe(

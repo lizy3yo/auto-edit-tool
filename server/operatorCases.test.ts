@@ -3866,6 +3866,9 @@ describe("'hand tools' are tools, not hands (round 11's review, job 406 scene 7)
         visualPrompt: "Bare weathered hands from the forearms down working with a simple hand tool at a wooden garage workbench",
       }),
       pic(10, "Grab the hammer.", "a hand lifting the hammer off the pegboard wall"),
+      pic(20, "the work takes minutes once your hands learn it.", "the host sharpening a mower blade on a benchtop belt sharpening setup", {
+        visualPrompt: "Bare weathered hands guiding a dull mower blade against a spinning abrasive belt on a benchtop belt sharpening setup bolted to a garage workbench.",
+      }),
     ];
     markHostBroll(scenes, { hostLook: GARAGE, hostName: "Gary" }, "https://x/host.png");
     for (const s of scenes) {
@@ -3889,5 +3892,20 @@ describe("'hand tools' are tools, not hands (round 11's review, job 406 scene 7)
       "a hand reaching for the hammer on the pegboard",
     ])
       expect(SHOWS_PERSON.test(hand), hand).toBe(true);
+  });
+
+  it("a hand tool at work, or work being done by hand, keeps the host's hands on it", () => {
+    // "hand" alone carried these before the fix, and nothing else in their words names a person: a
+    // drill boring by itself, a quilt piecing itself.
+    const scenes = [
+      pic(36, "drill the hole for the incense stick", "a hand drill boring a hole into a small charred cedar block"), // job 189 scene 36
+      pic(3, "a crib quilt pieced at the kitchen table", "nine-patch crib quilt being pieced by hand at the work table under lamp light"), // job 144 scene 3
+      pic(7, line, "hand tools hanging silent on a pegboard wall in the garage"),
+    ];
+    markHostBroll(scenes, { hostLook: GARAGE, hostName: "Gary" }, "https://x/host.png");
+    expect(scenes[0].brollHostLook).toBe(GARAGE);
+    expect(scenes[1].brollHostLook).toBe(GARAGE);
+    expect(scenes[2].brollHostLook).toBeUndefined();
+    expect(buildStillPrompt(scenes[2])).toContain(NO_FIGURES_SUFFIX);
   });
 });

@@ -913,7 +913,13 @@ describe("a video is only ever of something that moves by itself — never hands
     expect(videoKind("a hand towel fluttering on the line in the breeze", "object")).toBe("object");
     expect(videoKind("a kitchen wall clock, its second hand sweeping past the twelve", "object")).toBe("object");
     // A hand on a body still never moves.
-    for (const hand of ["a hand reaching for the hammer on the pegboard", "hands sanding a board", "hand-sewing the binding"]) {
+    for (const hand of [
+      "a hand reaching for the hammer on the pegboard",
+      "hands sanding a board",
+      "hand-sewing the binding",
+      "a hand drill boring a hole into a small charred cedar block", // job 189 scene 36: a hand on the drill
+      "nine-patch crib quilt being pieced by hand at the work table", // job 144 scene 3
+    ]) {
       expect(SHOWS_HANDS.test(hand), hand).toBe(true);
       expect(videoKind(hand, "object"), hand).toBe("none");
     }

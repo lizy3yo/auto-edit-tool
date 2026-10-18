@@ -152,6 +152,25 @@ const HAND_THING_NOUNS = [
   "embroidery", "looms?", "spindles?", "trowels?", "pruners?", "rake", "forks?", "hoes?", "cultivators?", "brooms?",
   "vacs?", "vacuum", "lens(?:es)?",
 ].join("|");
+/**
+ * A hand tool DOING its work has a hand on it, whatever word names the tool: "a hand drill boring a
+ * hole into a small charred cedar block" (job 189 scene 36), "a hand drill bit entering the block"
+ * (scene 39), "a hand plane mid-stroke across a half-finished pine board" (job 133 scene 190). Read
+ * after one of `HAND_THING_NOUNS`; a tool at rest ("hanging", "resting", "on the bench") is not.
+ */
+const HAND_TOOL_AT_WORK =
+  String.raw`\s+(?:(?:bit|blade|iron|head|teeth)s?\s+)?` +
+  String.raw`(?:bor(?:es|ing)|cut(?:s|ting)|saw(?:s|ing)|drill(?:s|ing)|plan(?:es|ing)|shav(?:es|ing)|smooth(?:s|ing)|slic(?:es|ing)|carv(?:es|ing)|chisel(?:s|l?ing)|bit(?:es|ing)|enter(?:s|ing)|sink(?:s|ing)|driv(?:es|ing)|turn(?:s|ing)|tighten(?:s|ing)|loosen(?:s|ing)|scrap(?:es|ing)|fil(?:es|ing)|sand(?:s|ing)|trim(?:s|ming)|shap(?:es|ing)|grind(?:s|ing)|whisk(?:s|ing)|whip(?:s|ping)|mix(?:es|ing)|beat(?:s|ing)|pump(?:s|ing)|crank(?:s|ing)|rak(?:es|ing)|dig(?:s|ging)|sweep(?:s|ing)|squeez(?:es|ing)|mid-[a-z]+|in\s+use|at\s+work|being\s+used|working)\b`;
+/**
+ * "by hand" while the work is GOING ON is someone's hand: "a 3-inch screw being turned by hand with a
+ * screwdriver" (job 232 scene 23's panel), "an open-mesh market bag held stretched wide by hand" (job
+ * 168 scene 127), "nine-patch crib quilt being pieced by hand at the work table" (job 144 scene 3),
+ * "sanding the edge by hand" — "being", "held" or a doing word in front. Done already it is only how
+ * the thing was made ("hemmed by hand", "coils laced together by hand", "stitching done by hand").
+ */
+const DOING_BY =
+  String.raw`(?:\b(?:being|held)\s+(?:[a-z'’-]+\s+){0,3}|` +
+  String.raw`\b(?!(?:thing|nothing|something|anything|everything|morning|evening|ceiling|building|clothing|bedding|string|spring|wedding|during|binding|lining|edging|backing|siding|railing|ring|king|wing)\b)[a-z]{2,}ing\s+(?:(?:the|a|an|its|their|each|every|this|that)\s+(?:[a-z'’-]+\s+){0,2})?)by\s`;
 /** What follows "hand-" in a made-by-hand word: hand-stitched, hand-sewn, hand-me-down, hands-free. */
 const HAND_MADE_WORDS = String.raw`me-downs?|[a-z]+ed|sewn|made|built|spun|woven|thrown|drawn|written|knit|held|hewn|blown|wrought|strung|wound|ground|cut|split|set|free|on`;
 /**
@@ -166,11 +185,12 @@ const HAND_MADE_WORDS = String.raw`me-downs?|[a-z]+ed|sewn|made|built|spun|woven
  * second hand", "the hands of the wall clock", "black hands pointing near three o'clock" — job 405
  * scene 28; no person's hand is "its"). A hand doing something stays a person: "a hand reaching for
  * the hammer", "hand-sewing the binding", "walking hand in hand", "on hands and knees", and a farm
- * hand is a worker.
+ * hand is a worker — and so does a hand tool at work (`HAND_TOOL_AT_WORK`) and work being done by
+ * hand (`DOING_BY`), which "hand" alone used to carry and which nothing else in the words names.
  */
 export const BODY_HAND =
   String.raw`(?<!\b(?:clock|watch|wristwatch|stopwatch|minute|hour)(?:['’]s)?[\s-])(?<!\b(?:second|first)-)(?<!\bits\s+(?:(?:second|minute|hour)\s+)?)` +
-  String.raw`(?:(?<!\b(?:by|at|on)\s)hand(?![\s-]+(?:${HAND_THING_NOUNS})\b)|hands)` +
+  String.raw`(?:(?:(?<=${DOING_BY})|(?<!\b(?:by|at|on)\s))hand(?![\s-]+(?:${HAND_THING_NOUNS})\b(?!${HAND_TOOL_AT_WORK}))|hands)` +
   String.raw`(?!-(?:${HAND_MADE_WORDS})\b)` +
   String.raw`(?!\s+of\s+(?:(?:a|an|the|its|this|that)\s+)?(?:[a-z'’-]+\s+){0,2}(?:clocks?|watch(?:es)?|wristwatch(?:es)?|stopwatch(?:es)?|timers?)\b)` +
   String.raw`(?!\s+(?:pointing|point|set|showing|reading|stopped|frozen)\b[^.;,]{0,30}?(?:\bo['’]clock\b|\b\d{1,2}:\d\d\b|\bnoon\b|\bmidnight\b))`;
