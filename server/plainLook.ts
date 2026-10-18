@@ -29,13 +29,14 @@ import { namedLight } from "./overlayTextScan";
 /**
  * Who keeps what. `light` — the words that keep a light, glow or lighting style: the narration line
  * and the key thing's name (a lamp or candle that IS the thing). `thing` — the words that keep a
- * material, finish or grand thing: the line plus every look the picture carries (its key thing's, a
- * named kind's, a recurring person's, the host's clothes). `named` — the light that stays named
- * (`namedLight`): the line's, or — when the line names none — the picture's own words' when they set
- * it in a dark or low hour (a night, a dark room, dusk), so a light source there is what lights it —
- * and the key thing's own light when the thing IS a light (a lamp, a lantern, a candle): lit is its use
- * (the main thing in use), so a staged redraw of a lantern is never told "no glow from a lamp" and
- * drawn dark. Empty: plain light, and every light source the line never named goes.
+ * material, finish or grand thing: the line plus every look the picture carries (its key thing's, the
+ * other key things' (`otherThingLooks`), a named kind's, a recurring person's, the host's clothes).
+ * `named` — the light that stays named (`namedLight`): the line's, or — when the line names none —
+ * the picture's own words' when they set it in a dark or low hour (a night, a dark room, dusk), so a
+ * light source there is what lights it — and the key thing's own light when the thing IS a light (a
+ * lamp, a lantern, a candle): lit is its use (the main thing in use), so a staged redraw of a lantern
+ * is never told "no glow from a lamp" and drawn dark. Empty: plain light, and every light source the
+ * line never named goes.
  */
 export type PlainLookKeep = { light: string; thing: string; named: string[] };
 
@@ -45,7 +46,13 @@ const SOURCE_NAME = /lamp|candle|lantern|fire|flame|hearth|ember|glow|torch|flas
 export function plainLookKeep(
   scene: Pick<
     StoryboardScene,
-    "keyThing" | "keyThingLook" | "namedLook" | "pictureText" | "otherPersonLooks" | "brollHostLook"
+    | "keyThing"
+    | "keyThingLook"
+    | "namedLook"
+    | "pictureText"
+    | "otherPersonLooks"
+    | "brollHostLook"
+    | "otherThingLooks"
   >,
   line: string | undefined,
   /** The picture's own words (its subject and its visual). */
@@ -53,6 +60,7 @@ export function plainLookKeep(
 ): PlainLookKeep {
   const looks = [
     scene.keyThingLook,
+    ...(scene.otherThingLooks ?? []).map(t => t.look),
     scene.namedLook,
     scene.brollHostLook,
     ...(scene.otherPersonLooks ?? []).map(p => p.look),

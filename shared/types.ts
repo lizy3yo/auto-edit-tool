@@ -350,6 +350,17 @@ export interface MemoryRef {
   shows?: string[];
 }
 
+/**
+ * A key thing's written look, cut down for one picture (`StoryboardScene.otherThingLooks`). `brought`:
+ * the picture's own words do not name it — a reference picture it is drawn from shows it, so it may
+ * come along (job 408: the bin beside the toilet in the toilet's first picture).
+ */
+export interface ThingLook {
+  name: string;
+  look: string;
+  brought?: true;
+}
+
 export interface StoryboardScene {
   index: number;
   /** Short display label for this beat (derived = first words of `scriptText`) */
@@ -628,6 +639,14 @@ export interface StoryboardScene {
    * copies its memory twice (`memoryToWords`).
    */
   memoryWordsLook?: string;
+  /**
+   * The written looks of the OTHER key things in this picture, cut down for it (set at render with
+   * its memory, `memoryFor`): those its own words name, and — `brought` — those a reference picture
+   * shows that its words do not. Kept for the redraw from words (`memoryToWords`): job 409 scene 3,
+   * the aisle with the sympathy card in a man's hands, lost its reference and kept only the aisle's
+   * look, and came back holding a lily card in place of the cream card with a grey ribbon.
+   */
+  otherThingLooks?: ThingLook[];
   /**
    * The picture's last check said what it must show is not in it (`missing`), so no later picture is
    * drawn from it (`memorySourcesFor`): stored films had 22 first pictures copied after failing

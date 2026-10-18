@@ -14,7 +14,7 @@
  */
 import { insideView } from "./cutOpen";
 import { PART_VIEW } from "./namedLooks";
-import type { KeyThing, MemoryRef, StoryboardScene } from "@shared/types";
+import type { KeyThing, MemoryRef, StoryboardScene, ThingLook } from "@shared/types";
 import { REDRAW_CAMERAS } from "./pictureVariety";
 import {
   BUILD_STAGES,
@@ -724,6 +724,102 @@ export function keyThingLookFor(
 }
 
 /**
+ * The written look of key thing `name` for picture `s` when it is NOT the picture's own thing, or
+ * undefined: the sympathy card in a man's hands in a picture about the pharmacy aisle (job 409 scene
+ * 3), the bin beside the toilet (job 408). Cut down like the own thing's (`pictureLook`), but by the
+ * picture's stage only when it is the MAIN thing of a video that makes something: the stage belongs to
+ * what is being made, never to the card or the bench beside it. Never a look that describes an inside
+ * (`insideView`). Pure.
+ */
+export function otherThingLookFor(
+  s: StoryboardScene,
+  name: string,
+  things: KeyThing[] | undefined,
+  makes = true
+): string | undefined {
+  const thing = things?.find(k => k.name === name);
+  if (!thing?.look?.trim() || insideView(thing.look)) return undefined;
+  const mode =
+    !makes || !thing.main
+      ? "full"
+      : beforeFinished(s)
+        ? "colourMaterial"
+        : s.buildStage !== "done"
+          ? "noStage"
+          : "full";
+  return pictureLook(thing.look, mode) || undefined;
+}
+
+/**
+ * The written look of every key thing but `s`'s own, cut down for `s` (`otherThingLookFor`), by name:
+ * what its memory can lend for the things beside its own (`memoryFor`). Pure.
+ */
+export function otherThingLooksFor(
+  s: StoryboardScene,
+  things: KeyThing[] | undefined,
+  makes = true
+): Map<string, string> {
+  const looks = new Map<string, string>();
+  for (const k of things ?? []) {
+    if (k.name === s.keyThing) continue;
+    const look = otherThingLookFor(s, k.name, things, makes);
+    if (look) looks.set(k.name, look);
+  }
+  return looks;
+}
+
+/**
+ * Whether the picture's named kind's exact look (`namedLook`, "kind: look") is the look of `name`: it
+ * wins over that thing's written look, as it does over its own (`keyThingLookClause`). Pure.
+ */
+const namedKindIs = (scene: StoryboardScene, name: string) =>
+  !!scene.namedLook && wordsName(scene.namedLook.split(":")[0], name);
+
+/**
+ * THE THINGS A REFERENCE BRINGS KEEP THEIR LOOK (2026-10-18, job 408). A picture is drawn from the
+ * pictures of its own thing, and those show what stood beside it there: the toilet's first picture
+ * (scene 2) has the small white lidded bin beside it, and the toilet's split panels drawn from it
+ * (scenes 12 and 16, whose own words never name a bin) came back with a stainless pedal bin — told
+ * only to draw the SAME toilet, the picture maker kept the bin's place and made up a new one. A key
+ * thing a reference picture shows and the picture's own words do not (`ThingLook.brought`) keeps its
+ * written look should it be in the picture at all; the picture's own words still decide whether it
+ * is, so nothing is added to a picture that leaves it out. Said with the references and after a redraw
+ * takes them away (`memoryToWords`) alike. Empty when nothing was brought. Pure.
+ */
+export function broughtThingsClause(scene: StoryboardScene): string {
+  const brought = (scene.otherThingLooks ?? []).filter(t => t.brought && !namedKindIs(scene, t.name));
+  if (!brought.length) return "";
+  const list = brought.map(t => `the ${t.name}: ${t.look}`).join("; ");
+  return brought.length > 1
+    ? ` Other things seen earlier in this video keep their look whenever they are in this picture too — ${list}. Whether they are in it at all is up to this picture's own words.`
+    : ` Another thing seen earlier in this video keeps its look whenever it is in this picture too — ${list}. Whether it is in it at all is up to this picture's own words.`;
+}
+
+/**
+ * EVERY KEY THING DRAWN FROM WORDS KEEPS ITS LOOK (2026-10-18, job 409 scenes 2, 3 and 5). A picture
+ * with no reference pictures used to carry the written look of its OWN key thing only: job 409 scene
+ * 3, the pharmacy aisle with the sympathy card in a man's hands, copied its memory (scene 2) twice and
+ * was drawn from words (`memoryToWords`) with the aisle's look alone, and the card — "a plain cream
+ * greeting card with a muted gray ribbon print" in the props list and in scene 2 — came back a white
+ * card with a painted lily spray; scene 5, drawn from scene 3 as the aisle's memory, carried the lily
+ * card on. So a picture without references carries the look of every other key thing in it too — the
+ * ones its own words name (`otherThingLooks`) — and of the things its references had brought
+ * (`broughtThingsClause`). A named kind's exact look wins. With references it is empty: they carry
+ * the things they show, and the memory clause says the rest. Pure.
+ */
+export function otherThingLooksClause(scene: StoryboardScene): string {
+  if (scene.memoryRefUrls?.length) return "";
+  const named = (scene.otherThingLooks ?? []).filter(t => !t.brought && !namedKindIs(scene, t.name));
+  const list = named.map(t => `the ${t.name}: ${t.look}`).join("; ");
+  const these = !named.length
+    ? ""
+    : named.length > 1
+      ? ` HOW THE OTHER THINGS IN IT LOOK in every picture of this video — ${list}. Draw those same ones, where this picture's own words put them.`
+      : ` HOW THE OTHER THING IN IT LOOKS in every picture of this video — ${list}. Draw that same one, where this picture's own words put it.`;
+  return `${these}${broughtThingsClause(scene)}`;
+}
+
+/**
  * Whether a key thing in `s` — its own or one beside it — is a part HIDDEN INSIDE something: its
  * props-list look describes an inside (`insideView`). Job 403's main thing, "toilet trapway: the
  * toilet's internal porcelain passage behind the bowl", was on 12 scenes; "close-up of the smooth
@@ -739,9 +835,16 @@ export function hiddenInside(s: StoryboardScene, things: KeyThing[] | undefined)
 /**
  * The image-prompt line that carries a key thing's look (`scene.keyThingLook`, set only on a picture
  * with no picture of its own thing to follow). A named kind's exact look (`namedLook`) wins. The
- * picture's own words still decide where it is, which part shows and how far along it is. Pure.
+ * picture's own words still decide where it is, which part shows and how far along it is. On a
+ * picture with no references, the looks of the other key things in it follow
+ * (`otherThingLooksClause`). Pure.
  */
 export function keyThingLookClause(scene: StoryboardScene): string {
+  return `${ownThingLookClause(scene)}${otherThingLooksClause(scene)}`;
+}
+
+/** The line for its OWN key thing's look (`keyThingLook`), as it always was. */
+function ownThingLookClause(scene: StoryboardScene): string {
   if (scene.namedLook || !scene.keyThingLook || !scene.keyThing) return "";
   const own = " — where it is, which part of it shows and how far along it is are as this picture's own words say.";
   return beforeFinished(scene)
@@ -949,6 +1052,8 @@ const viewOf = new WeakMap<StoryboardScene, string | undefined>();
 const ownSourcesOf = new WeakMap<StoryboardScene, StoryboardScene[]>();
 /** The look a scene is drawn by when no picture of its own thing comes (`keyThingLookFor`). */
 const lookOf = new WeakMap<StoryboardScene, string | undefined>();
+/** The written looks of every key thing but the scene's own, cut down for it (`otherThingLooksFor`). */
+const otherLooksOf = new WeakMap<StoryboardScene, Map<string, string>>();
 /** The named kind's look a split's panel takes from the pictures of its thing (`panelNamedLook`). */
 const panelLookOf = new WeakMap<StoryboardScene, string | undefined>();
 /**
@@ -1000,6 +1105,7 @@ export function attachMemory(
     ownSourcesOf.set(s, sources.filter(x => x === set || (!!s.keyThing && shows(x, s.keyThing))));
     viewOf.set(s, memoryViewFor(board, s));
     lookOf.set(s, keyThingLookFor(s, keyThings, makes));
+    otherLooksOf.set(s, otherThingLooksFor(s, keyThings, makes));
     // Never cleared here: the still loop sets it too, on a picture the check saw cut open.
     if (hiddenInside(s, keyThings)) s.seenFromOutside = true;
     panelLookOf.set(s, panelNamedLook(board, s));
@@ -1093,7 +1199,8 @@ export function pictureSettled(s: StoryboardScene): void {
  * kept for a redraw from words should the picture copy its memory (`memoryToWords`). `before` is
  * where in `urls` the picture `s` must not repeat is (`recomposeFrom`): the one shown right before
  * it about something else, or — `continues` — the one it continues as the same topic. `notShown` is
- * the other key things of `s` that none of them shows (`memoryNotShown`).
+ * the other key things of `s` that none of them shows (`memoryNotShown`). `otherLooks` is the written
+ * looks of the other key things it shows, kept for a redraw from words (`lentLooks`).
  */
 export async function memoryFor(
   s: StoryboardScene,
@@ -1107,6 +1214,7 @@ export async function memoryFor(
   continues?: boolean;
   notShown?: string[];
   refs?: MemoryRef[];
+  otherLooks?: ThingLook[];
 }> {
   const urls: string[] = [];
   const refs: MemoryRef[] = [];
@@ -1148,6 +1256,7 @@ export async function memoryFor(
   // A key thing beside it that no picture among these shows (job 404 scene 14: the robin's two lawn
   // pictures, and "gulf coast yard" in its own words) is not one the references can lend.
   const notShown = urls.length ? (s.otherKeyThings ?? []).filter(t => !used.some(x => shows(x, t))) : [];
+  const otherLooks = urls.length ? lentLooks(s, used) : [];
   return {
     urls,
     own,
@@ -1157,7 +1266,40 @@ export async function memoryFor(
     ...(before != null && continuesOf.has(s) ? { continues: true } : {}),
     ...(notShown.length ? { notShown } : {}),
     ...(refs.length ? { refs } : {}),
+    ...(otherLooks.length ? { otherLooks } : {}),
   };
+}
+
+/** At most this many brought things keep their look on one picture (`lentLooks`), the first-seen first. */
+export const MAX_BROUGHT_LOOKS = 3;
+
+/**
+ * The written looks a picture drawn from `used` keeps for the things beside its own
+ * (`otherThingLooks`): every other key thing its own words name, then — `brought` — every key thing
+ * one of those pictures shows that its words do not (job 408: the bin in the toilet's first picture,
+ * under a panel about the toilet alone). What a reference shows is what it is filed under — its key
+ * thing and the ones its own words name (`tagKeyThings`, `shows`) — never every key thing its visual
+ * happens to word: job 409 scene 2's visual calls the sympathy card "a plain cream greeting card", and
+ * read that way it would bring the video's OTHER card, the pale blue floral one. Looked up on the looks
+ * the last pass over the film cut for `s` (`otherThingLooksFor`); a thing with no written look is left
+ * out, and at most `MAX_BROUGHT_LOOKS` are brought, so a crowded reference does not fill the prompt.
+ * Pure apart from that lookup.
+ */
+function lentLooks(s: StoryboardScene, used: StoryboardScene[]): ThingLook[] {
+  const looks = otherLooksOf.get(s);
+  if (!looks?.size) return [];
+  const mine = new Set([s.keyThing, s.partOf, ...(s.otherKeyThings ?? [])].filter(Boolean));
+  const brought = Array.from(
+    new Set(
+      used
+        .flatMap(x => [x.keyThing, ...(x.otherKeyThings ?? [])])
+        .filter((t): t is string => !!t && !mine.has(t) && looks.has(t))
+    )
+  ).slice(0, MAX_BROUGHT_LOOKS);
+  return [
+    ...(s.otherKeyThings ?? []).flatMap(name => (looks.has(name) ? [{ name, look: looks.get(name)! }] : [])),
+    ...brought.map(name => ({ name, look: looks.get(name)!, brought: true as const })),
+  ];
 }
 
 /** The pictures `s` is drawn from (`memoryFor`). */

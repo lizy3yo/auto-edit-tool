@@ -6220,3 +6220,81 @@ describe("no near copy of the picture a picture was drawn from (round 13, jobs 4
     expect(nearCopyCandidates(94091, 5, far, undefined, { drawnFrom: [3], lookAtClosest: true }).map(c => c.index)).toEqual([3]);
   });
 });
+
+describe("every key thing keeps its look when a picture is drawn from words (round 13, jobs 408 and 409)", () => {
+  const CARD = "a plain cream greeting card with a muted gray ribbon print on the front, blank inside, small and rectangular";
+  const BIN = "a small white plastic bin with a hinged lid, round shape";
+
+  it("409-3: the aisle drawn from words after copying scene 2 twice still holds the cream card with the grey ribbon", async () => {
+    const { attachMemory, memoryFor, memoryView, keyThingLookClause } = await import("./pictureMemory");
+    const { memoryFields, memoryToWords, promptAfterMemoryChange, buildStillPrompt } = await import("./longformVideo");
+    const things: KeyThing[] = [
+      { name: "sympathy card", look: CARD, main: true },
+      { name: "pharmacy aisle", look: "a narrow aisle lined with low wooden shelves holding neat rows of greeting cards, bright overhead lighting" },
+    ];
+    const b = [
+      pic(2, "a pharmacy on a Tuesday morning, buying his third sympathy card since spring,", "a man holding a sympathy card in a pharmacy aisle lined with shelves", {
+        keyThing: "sympathy card",
+        humanPresent: true,
+        pictureUrl: "https://r2/409/still-src-2.png",
+      }),
+      pic(3, "He is counting backward. He is sixty-four.", "a man in his sixties standing still in the pharmacy aisle, holding the sympathy card, seen from the side", {
+        keyThing: "pharmacy aisle",
+        humanPresent: true,
+      }),
+    ];
+    attachMemory(b, [b[1]], things);
+    const s3 = { ...b[1], ...memoryFields(await memoryFor(b[1], 0), memoryView(b[1])) } as StoryboardScene;
+    const fields = memoryToWords(s3);
+    expect(keyThingLookClause({ ...s3, ...fields })).toContain(`the sympathy card: ${CARD}`);
+    const prompt = promptAfterMemoryChange(s3, buildStillPrompt(s3), fields);
+    expect(prompt.split(CARD).length - 1).toBe(1);
+    // Before, the redraw carried the aisle's look alone and the card came back with a lily spray.
+    expect(prompt).not.toContain("reference image");
+  });
+
+  it("408-12: the toilet's panel, drawn from the toilet's first picture with the bin beside it, keeps the bin's look", async () => {
+    const { attachMemory } = await import("./pictureMemory");
+    const { buildSplitRightScene, buildStillPrompt, memoryClause, memoryToWords, promptAfterMemoryChange, withSplitMemory } =
+      await import("./longformVideo");
+    const things: KeyThing[] = [
+      { name: "toilet", look: "a white porcelain toilet, oval bowl, closed lid often up", main: true },
+      { name: "bin", look: `${BIN}, sitting on tile floor beside the toilet base` },
+    ];
+    const b = [
+      pic(2, "That little stretch of tile between the bowl and the wall.", "a small white plastic bin with a closed hinged lid on pale beige tile floor beside the base of a white porcelain toilet", {
+        keyThing: "bin",
+        pictureUrl: "https://r2/408/still-src-2.png",
+      }),
+      host(12, "So. We will go the way the water goes.", {
+        keyThing: "toilet",
+        splitVisual: "White porcelain toilet bowl with water draining downward into the trapway opening, viewed from above at a settled moment as the bowl empties.",
+      }),
+    ];
+    attachMemory(b, [], things);
+    const panel = await withSplitMemory(b[1], buildSplitRightScene(b[1]), 0);
+    const bin = `keeps its look whenever it is in this picture too — the bin: ${BIN}.`;
+    expect(memoryClause(panel)).toContain(bin);
+    expect(memoryClause(panel)).toContain("Whether it is in it at all is up to this picture's own words.");
+    const prompt = buildStillPrompt(panel, false, undefined, undefined, true);
+    const words = promptAfterMemoryChange(panel, prompt, memoryToWords(panel), { square: true });
+    // Drawn from words (it copied its memory on both checks), the bin is no longer free to be a pedal bin.
+    expect(words.split(bin).length - 1).toBe(1);
+  });
+
+  it("a first picture with nothing earlier keeps only its own look: nothing is added where no memory was", async () => {
+    const { attachMemory, memoryFor, memoryView, keyThingLookClause } = await import("./pictureMemory");
+    const { memoryFields } = await import("./longformVideo");
+    const first = pic(2, "a pharmacy on a Tuesday morning,", "a man holding a sympathy card in a pharmacy aisle lined with shelves", {
+      keyThing: "sympathy card",
+    });
+    attachMemory([first], [first], [
+      { name: "sympathy card", look: CARD, main: true },
+      { name: "pharmacy aisle", look: "a narrow aisle lined with low wooden shelves" },
+    ]);
+    const s = { ...first, ...memoryFields(await memoryFor(first, 0), memoryView(first)) } as StoryboardScene;
+    expect(s.otherThingLooks).toBeUndefined();
+    expect(keyThingLookClause(s)).not.toContain("OTHER THING");
+    expect(keyThingLookClause(s)).toContain(CARD);
+  });
+});
