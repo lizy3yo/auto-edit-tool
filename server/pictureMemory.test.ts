@@ -230,5 +230,7 @@ describe("brand words never reach the picture prompt", () => {
     const out = scrubLegibleWriting("A white page with a small orange 'Etsy' wordmark, it's tidy.");
     expect(out).not.toMatch(/Etsy/);
     expect(out).toMatch(/it's tidy/);
-  });
+    // The first import of longformVideo in this file: ~4.5 s alone, past the 5 s default in a busy
+    // parallel run of the whole suite (5.3 s once continuationViews.test.ts joined it).
+  }, 30_000);
 });

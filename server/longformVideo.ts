@@ -9828,6 +9828,9 @@ async function drawValidatedStill(
   const varietyJob = currentCostJobId();
   // The concrete camera a continuation is drawn from (`memoryViewFor`), -1 for any other picture.
   const ownCamera = (REDRAW_CAMERAS as readonly string[]).indexOf(scene.memoryView ?? "");
+  // The camera clause a continuation drawn from words carries (`continuationCameraClause`): a
+  // near-copy redraw swaps it for its own camera, so the prompt never names two.
+  let wordsCamera = "";
   // What the check named on the picture before this one (`checkFlags`), to spot a redraw that
   // changed nothing.
   let lastFaults = "";
@@ -10194,6 +10197,7 @@ async function drawValidatedStill(
           // A continuation keeps its concrete camera, the one thing that set it apart from the
           // picture it continues (`continuationCameraClause`).
           const camera = continuationCameraClause(scene);
+          wordsCamera = camera;
           Object.assign(scene, memoryToWords(scene));
           const look = `${visualOverride ? "" : scrubLegibleWriting(keyThingLookClause(scene))}${camera}`;
           prompt =
@@ -10290,7 +10294,10 @@ async function drawValidatedStill(
             // a CONCRETE new camera view each redraw — "look different" alone came back as the same
             // shelf of boxes four times (Frederick's practice job 376); the earlier redraw's clause goes.
             // A continuation starts from the camera after its own (`REDRAW_CAMERAS`), never the one
-            // it was just drawn from.
+            // it was just drawn from — and drawn from words, its own camera clause goes too, or the
+            // prompt would ask for a close-up and a view from much further back at once.
+            if (wordsCamera) prompt = prompt.replace(wordsCamera, "");
+            wordsCamera = "";
             const cut = prompt.indexOf(DIFFERENT_PICTURE_CLAUSE);
             prompt = `${cut >= 0 ? prompt.slice(0, cut).trimEnd() : prompt} ${differentPictureClause(varietyRerolls + ownCamera)}`;
             lastError = `Still image nearly copies scene ${copies}'s picture`;

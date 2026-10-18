@@ -234,16 +234,34 @@ export function nearCopyPartnerFor(
 }
 
 /**
- * The camera a continuation is drawn from, as an index into `REDRAW_CAMERAS` (one per `OTHER_VIEWS`
- * entry, same order): the one its own words' view names, else the next after the camera of the
- * picture it continues — and never that picture's own. Job 405 scenes 22 and 24 both said "a
- * close-up of one detail of it" (a host glimpse cut one picture in two), were both drawn close up
- * from the same reference, and came back as one picture twice. A picture that continues nothing
- * reads its own view (-1 for none). Pure.
+ * Of `continuedPicture`, the picture `s` continues by REPEATING its words, any view aside: nothing in
+ * its words sets it apart, so only a concrete camera can (`continuationCameraIndex`). A picture
+ * marked to continue (`sameShot`) whose words were rewritten keeps the framing its own words ask for:
+ * job 398 scene 10, "close view of hands pressing a thin pale pine strip into the half-depth notches
+ * of a crossing strip", marked to continue scene 9's lattice lying flat on the bench, was drawn close
+ * up and would have been told "seen from much further back … the subject small in it". It is still
+ * drawn from the picture it continues as one (`memoryContinues`) and compared with it. Pure.
+ */
+export function repeatedPicture(
+  scenes: StoryboardScene[],
+  s: StoryboardScene,
+  sources: StoryboardScene[] = memorySourcesFor(scenes, s)
+): StoryboardScene | undefined {
+  const from = continuedPicture(scenes, s, sources);
+  return from && repeatsTopic(pictureWords(from), pictureWords(s)) ? from : undefined;
+}
+
+/**
+ * The camera a continuation that repeats its picture's words (`repeatedPicture`) is drawn from, as
+ * an index into `REDRAW_CAMERAS` (one per `OTHER_VIEWS` entry, same order): the one its own words'
+ * view names, else the next after the camera of the picture it repeats — and never that picture's
+ * own. Job 405 scenes 22 and 24 both said "a close-up of one detail of it" (a host glimpse cut one
+ * picture in two), were both drawn close up from the same reference, and came back as one picture
+ * twice. Any other picture reads its own view (-1 for none). Pure.
  */
 export function continuationCameraIndex(scenes: StoryboardScene[], s: StoryboardScene, depth = 0): number {
   const own = viewIndexOf(pictureWords(s).replace(/[\s.]+$/, ""));
-  const from = depth < 8 ? continuedPicture(scenes, s) : undefined;
+  const from = depth < 8 ? repeatedPicture(scenes, s) : undefined;
   if (!from) return own - 1;
   const prev = continuationCameraIndex(scenes, from, depth + 1);
   const n = REDRAW_CAMERAS.length;
@@ -756,11 +774,12 @@ export function memoryViewFor(scenes: StoryboardScene[], s: StoryboardScene): st
   // thing, at its natural size — never the close view the rotation would give the subject.
   // A picture of one PART of it (`partOf`) is about that part, whatever order the words name them in.
   if (!s.partOf && !isSubject(s, s.keyThing)) return BACKGROUND_VIEW;
-  // A CONTINUATION of a picture it is drawn from gets a concrete camera (`REDRAW_CAMERAS`), never the
-  // stock memory views: told "a close view of one part of it", job 403 scene 14 came back as scene
-  // 10 a little closer, and job 405 scene 22 as scene 21 a little tighter (`continuedPicture`).
+  // A CONTINUATION that repeats the words of the picture it is drawn from gets a concrete camera
+  // (`REDRAW_CAMERAS`), never the stock memory views: told "a close view of one part of it", job 403
+  // scene 14 came back as scene 10 a little closer, and job 405 scene 22 as scene 21 a little tighter
+  // (`repeatedPicture`). One whose own words were rewritten keeps the framing they ask for, below.
   // Printing that must stay unreadable is never a close-up of the print here either.
-  if (!s.partOf && continuedPicture(scenes, s)) {
+  if (!s.partOf && repeatedPicture(scenes, s)) {
     const camera = REDRAW_CAMERAS[continuationCameraIndex(scenes, s)];
     return s.blurPrint && camera === REDRAW_CAMERAS[0] ? BLUR_PRINT_VIEW : camera;
   }

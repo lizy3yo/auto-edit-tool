@@ -26,9 +26,11 @@ import {
   nearCopyPartner,
   nearCopyPartnerFor,
   recomposeFrom,
+  repeatedPicture,
   rightBeforeToRecompose,
   SET_ITEM_VIEW,
 } from "./pictureMemory";
+import { PART_VIEW } from "./namedLooks";
 import {
   buildStillPrompt,
   continuationCameraClause,
@@ -236,6 +238,30 @@ describe("the camera a continuation is drawn from (REDRAW_CAMERAS)", () => {
     // A third repeat of the same words moves on again, never the second's camera.
     const third = pic(15, "grey PVC pipe network running beneath the house toward the street", { keyThing: "pipe network" });
     expect(memoryViewFor([...c, third], third)).toBe(REDRAW_CAMERAS[1]);
+  });
+
+  it("398-10: marked to continue with words of its own, it keeps the close view they ask for", () => {
+    // Job 398 as stored: scene 9 repeats scene 3's lattice (a continuation by words), scene 10 is
+    // marked to continue scene 9 but its words show hands fitting a strip, close up.
+    const LATTICE = "a one-foot-square kumiko lattice of thin pale pine strips in an even square grid, lying flat on a pale wooden workbench";
+    const k = [
+      pic(3, LATTICE.replace("strips in", "strips crossing in"), { keyThing: "lattice panel" }),
+      pic(9, LATTICE, { keyThing: "lattice panel" }),
+      pic(10, "close view of hands pressing a thin pale pine strip into the half-depth notches of a crossing strip, building a square kumiko grid on a workbench", {
+        keyThing: "lattice panel",
+        sameShot: true,
+      }),
+    ];
+    // Scene 9 repeats scene 3's words: a concrete camera.
+    expect(repeatedPicture(k, k[1])).toBe(k[0]);
+    expect(memoryViewFor(k, k[1])).toBe(REDRAW_CAMERAS[0]);
+    // Scene 10 still continues scene 9 (drawn from it as one, compared with it)…
+    expect(continuedPicture(k, k[2])).toBe(k[1]);
+    expect(recomposeFrom(k, k[2])).toEqual({ from: k[1], continues: true });
+    // …but its words set it apart: never "seen from much further back, the subject small in it".
+    expect(repeatedPicture(k, k[2])).toBeUndefined();
+    expect(continuationCameraIndex(k, k[2])).toBe(-1);
+    expect(memoryViewFor(k, k[2])).toBe(PART_VIEW);
   });
 
   it("printing that must stay unreadable is never a close-up, a continuation included", () => {

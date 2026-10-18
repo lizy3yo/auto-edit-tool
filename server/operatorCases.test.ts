@@ -3584,4 +3584,25 @@ describe("a later view of one topic is a new photo, never the picture it continu
     ];
     expect(nearCopyPartnerFor(apart, apart[1])).toBeUndefined();
   });
+
+  it("398-10 keeps the close view its own words ask for: marked to continue, never told 'much further back'", async () => {
+    const { continuedPicture, memoryViewFor } = await import("./pictureMemory");
+    const { REDRAW_CAMERAS } = await import("./pictureVariety");
+    const { PART_VIEW } = await import("./namedLooks");
+    const LATTICE = "a one-foot-square kumiko lattice of thin pale pine strips in an even square grid, lying flat on a pale wooden workbench";
+    const k = [
+      pic(3, "But the one I was proudest of, a lattice panel that ate 6 hours of my Saturday,", LATTICE.replace("strips in", "strips crossing in"), {
+        keyThing: "lattice panel",
+      }),
+      pic(9, "Start with the one that lost.", LATTICE, { keyThing: "lattice panel" }),
+      pic(10, "Kumiko is the Japanese craft of fitting thin strips of wood together into patterns,", "close view of hands pressing a thin pale pine strip into the half-depth notches of a crossing strip, building a square kumiko grid on a workbench", {
+        keyThing: "lattice panel",
+        sameShot: true,
+      }),
+    ];
+    // Scene 9 repeats scene 3 and takes the concrete close-up; scene 10 continues 9 with words of its own.
+    expect(memoryViewFor(k, k[1])).toBe(REDRAW_CAMERAS[0]);
+    expect(continuedPicture(k, k[2])).toBe(k[1]);
+    expect(memoryViewFor(k, k[2])).toBe(PART_VIEW);
+  });
 });

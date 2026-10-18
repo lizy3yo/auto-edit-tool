@@ -10460,6 +10460,9 @@ describe("a continuation is compared with the picture it continues (jobs 401-405
     // Compared with scene 7 though 7's fingerprint is far; the copy redraws from the camera after its own.
     expect(mockScanNearCopy.mock.calls[0][0].equals(sevenThumb)).toBe(true);
     expect(prompts[3]).toContain(REDRAW_VIEWS[1]);
+    // …and only that camera: the close-up it was drawn from words with is gone, never both at once.
+    expect(prompts[3]).not.toContain(`Camera for THIS picture: ${REDRAW_CAMERAS[0]}.`);
+    expect(prompts[3].match(/Camera for THIS picture:/g)).toHaveLength(1);
     expect(out.flaws).toBeUndefined();
   });
 
