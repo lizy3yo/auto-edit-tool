@@ -5346,7 +5346,7 @@ describe("a look on the face shows the host's own face (the operator's decision 
       const prompt = buildStillPrompt(s);
       expect(prompt).toMatch(/the SAME person as in the reference photo/);
       expect(prompt).toMatch(/with the look this line is about ON them/);
-      expect(prompt).toMatch(/with the hair exactly as this description gives it/);
+      expect(prompt).toMatch(/with the hair exactly as the picture's own description above gives it/);
       expect(prompt).toContain(HOST_FACE_ONLY_SUFFIX);
       expect(prompt).not.toContain(HOST_FRAMING_CLAUSE);
       expect(prompt).not.toMatch(/never shown|from behind/);
@@ -5423,5 +5423,37 @@ describe("a look on the face shows the host's own face (the operator's decision 
     markHostBroll([s], { hostLook: DIANE }, PHOTO);
     expect(s.hostFaceShown).toBeUndefined();
     expect(personClauseFor(s, s.showSubject!)).toMatch(/never shown/);
+  });
+});
+
+describe("a line about the person alone is no look on the face — the face stays out (review of the cause 9 rule, 2026-10-18)", () => {
+  const SCARLETT = "A slim woman in her sixties with a silver bob, wearing a navy crewneck sweater";
+  const PHOTO = "https://x/host.png";
+
+  it("Scarlett's bridge 'the three that are aging you' and a plain 'you look tired' keep the face out; the same judgement of a worn colour shows it", async () => {
+    const scenes = [
+      // Scarlett's full script: a bridge to the next section, about money — nothing worn named in it.
+      pic(
+        12,
+        "Before we turn to the three that are aging you, I want to say something about money, because I know what happens the moment a woman hears the word expensive.",
+        "the host at a jewelry counter looking at price tags"
+      ),
+      // Any channel: how the person looks, nothing put on them.
+      pic(13, "Stress ages you faster than anything.", "the host rubbing her temples at the kitchen table"),
+      pic(14, "You look tired.", "the host sitting at the kitchen table with a cup of coffee"),
+      // The same judgement, of a colour worn near the face: a look.
+      pic(15, "Navy right under the face ages you faster than anything.", "the host in a navy blouse by the window"),
+    ];
+    markHostBroll(scenes, { hostLook: SCARLETT }, PHOTO);
+    for (const s of scenes.slice(0, 3)) {
+      expect(s.brollHostRef, s.scriptText).toBe(PHOTO);
+      expect(s.hostFaceShown, s.scriptText).toBeUndefined();
+      expect(buildStillPrompt(s)).toContain(HOST_FRAMING_CLAUSE);
+      expect(buildStillPrompt(s)).not.toMatch(/the SAME person as in the reference photo/);
+    }
+    expect(scenes[3].hostFaceShown).toBe(true);
+    expect(buildStillPrompt(scenes[3])).toMatch(/the SAME person as in the reference photo/);
+    // The prompt names no look the description does not: no glasses, earrings or lip colour on a blouse picture.
+    expect(buildStillPrompt(scenes[3])).not.toMatch(/glasses|earrings|lips or cheeks/);
   });
 });

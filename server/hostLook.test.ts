@@ -584,6 +584,33 @@ describe("a look on the host's own face (the operator's decision on the audit's 
       expect(looksOnTheFace(line), String(line)).toBe(false);
   });
 
+  it("asks the line to name the thing whose look it judges — a line about the person alone is no look", async () => {
+    const { looksOnTheFace } = await import("./hostLook");
+    for (const line of [
+      // Scarlett's full script: a bridge to the next section, nothing worn named in it.
+      "Before we turn to the three that are aging you, I want to say something about money, because I know what happens the moment a woman hears the word expensive.",
+      "Stress ages you faster than anything.",
+      "You look tired.",
+      "You'll look younger, you'll feel better, and you'll sleep through the night.",
+      "Her eyes looked tired after the long drive home.",
+      "His face looked older than I remembered when I saw him at the funeral.",
+      "Your skin looks dull because you don't drink water.",
+      "A good night's sleep brightens your whole face.",
+      "Walking every day takes ten years off.",
+      "That old truck makes you look older than you are, honey.",
+      "The cream softens the skin overnight.",
+    ])
+      expect(looksOnTheFace(line), line).toBe(false);
+    // The same judgements with the thing named are looks.
+    for (const line of [
+      "Black right under the face ages you faster than anything.",
+      "This shade? It takes ten years off.",
+      "A side part softens the face.",
+      "A crew neck in navy makes you look tired.",
+    ])
+      expect(looksOnTheFace(line), line).toBe(true);
+  });
+
   it("frames a host picture of the look on the face — never a chin line's, a neck piece's, an overview's or a group picture", async () => {
     const { faceLookFramed } = await import("./hostLook");
     // Diane's job 309 scene 2: her hair being styled, under the line about who reads oldest.

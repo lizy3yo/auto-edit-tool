@@ -6423,23 +6423,27 @@ export function hostFaceClause(look: string): string {
  * restaurant table). The face is shown and must be HERS: the host photo is the reference, named as
  * the face to keep, and the picture is compared with it (`scanSameHost`). The look itself is what the
  * picture is about, so it is in view and drawn as the description says; a HAIR look (`hairLookOnFace`)
- * draws the hair the description gives, on the same face. Facing the camera or three-quarter, eyes
- * just off the lens, so it reads as a photo of the look and not a second talking head.
+ * draws the hair the picture's description gives, on the same face — named as the picture's own,
+ * since the host's look just before it names the photo's hair. Facing the camera or three-quarter,
+ * eyes just off the lens, so it reads as a photo of the look and not a second talking head. No look
+ * is listed as an example: a thing a prompt names is a thing the picture maker draws (the props list
+ * put an oil lamp in most of Hannah's shots), so a list of looks would put glasses, earrings or a
+ * lip colour on a picture whose line is about her hair.
  */
 export function hostFaceLookClause(look: string, hairFromWords = false): string {
   const hair = hairFromWords
     ? `the same face and features, the same age, the same skin and complexion — not a younger, ` +
-      `smoother or different person — with the hair exactly as this description gives it`
+      `smoother or different person — with the hair exactly as the picture's own description above ` +
+      `gives it, its colour and cut, even where the reference photo's hair is different`
     : `the same face and features, the same age, the same skin and complexion, the same hair colour ` +
       `and hairstyle, not a younger, smoother or different person`;
   return (
     `The only person in this shot is the host — ${look.trim().replace(/\.$/, "")} — the SAME person ` +
     `as in the reference photo: ${hair}. A close, natural photo of their face and shoulders with the ` +
-    `look this line is about ON them and clearly in view — the colour on the lips or cheeks, the hair ` +
-    `round the face, the glasses or earrings, the neckline — exactly as the description says: facing ` +
-    `the camera or in three-quarter view, a relaxed, ordinary expression, the eyes resting just off ` +
-    `the lens (never staring into it), not posed like a portrait or an advert. Nobody else is in the ` +
-    `frame, in the background or in a reflection. ${ONE_BODY_CLAUSE}`
+    `look this line is about ON them and clearly in view, exactly as the description says and ` +
+    `nothing added to it: facing the camera or in three-quarter view, a relaxed, ordinary expression, ` +
+    `the eyes resting just off the lens (never staring into it), not posed like a portrait or an ` +
+    `advert. Nobody else is in the frame, in the background or in a reflection. ${ONE_BODY_CLAUSE}`
   );
 }
 

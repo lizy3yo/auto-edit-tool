@@ -11185,7 +11185,7 @@ describe("a look on the host's own face shows her face, and only hers (the opera
     const genImage = drawsOf(a);
     await generateValidatedStill(scene, 4, undefined, genImage);
     expect(mockScanSameHost).toHaveBeenCalledWith("https://r2/host.jpg", a, true, true);
-    expect(genImage.mock.calls[0][0].prompt).toMatch(/with the hair exactly as this description gives it/);
+    expect(genImage.mock.calls[0][0].prompt).toMatch(/with the hair exactly as the picture's own description above gives it/);
   });
 
   it("an ordinary host picture is still refused for a face, and asked as before", async () => {

@@ -1197,6 +1197,19 @@ const ON_THE_FACE_THING =
  */
 const HAIR_ROUND_FACE =
   String.raw`\b(?:haircuts?|hairstyles?|hair(?!\s*(?:dryer|brush|clip|tie|spray|band|pin|comb|product|net|line|['’]s\s+breadth))|(?:a|the|this|that|soft|short|chin-length|blunt)\s+bob|bangs|(?:gr[ae]y|silver|white)\s+roots|face[- ]framing)\b`;
+/**
+ * What else is worn near the face and judged by how it looks there: a dye, a shade or a colour, a
+ * neckline or collar, a top round the neck, a piece at the neck, a parting.
+ */
+const WORN_NEAR_FACE =
+  String.raw`\b(?:dye[sd]?|tints?|highlights|lowlights|balayage|colou?rs?|shades?|black|white|navy|beige|camel|ivory|taupe|mustard|olive|khaki|pastels?|neutrals?|(?:jewel|earth)\s+tones?|necklines?|(?:v|crew|scoop|boat|cowl|square)[- ]?necks?|turtlenecks?|collars?|blouses?|sweaters?|cardigans?|scarf|scarves|necklaces?|pendants?|chokers?|lockets?|pearls?|beads?|(?:side|centre|center|middle|deep)\s+part|partings?)\b`;
+/**
+ * The THING whose look on the face a line judges. A line that says how a face or a person looks and
+ * names nothing put on them is about the person, not a look: "Before we turn to the three that are
+ * aging you, I want to say something about money" (Scarlett's script), "Stress ages you faster than
+ * anything", "You look tired", "Her eyes looked tired after the long drive home".
+ */
+const LOOK_THING = new RegExp(`${ON_THE_FACE_THING}|${HAIR_ROUND_FACE}|${WORN_NEAR_FACE}`, "i");
 /** What a look does to a face, or how old it reads — never a quality of a thing on its own. */
 const FACE_LOOK_WORD = String.raw`(?:younger|youngest|older|oldest|aged|tired|exhausted|washed[- ]out|drained|drawn|gaunt|sallow|ashy|pale|paler|sickly|gr[ae]y(?:er)?|harsh(?:er)?|severe|soft(?:er)?|fresh(?:er)?|bright(?:er)?|awake|rested|radiant|glowing|luminous|dull(?:er)?|muddy|dated|frumpy|puffy|lifted|healthier|alive|overdone|cakey|heavy)`;
 /** Words between "looks" and the word that judges: "a decade", "ten years", "so much". */
@@ -1261,7 +1274,10 @@ const FACE_SAYINGS =
  * "your lawn looks tired"), never one that names glasses or an earring and judges nothing ("wear
  * gloves and safety glasses"), never a saying ("on the face of it", "keep your eyes on the line"),
  * and never an overview that counts several pieces ("Three necklaces today that read expensive on a
- * woman over sixty, and one that is aging you") — as with the chin lines (`COUNTS_THINGS`). Pure.
+ * woman over sixty, and one that is aging you") — as with the chin lines (`COUNTS_THINGS`). And the
+ * line names the thing whose look it judges (`LOOK_THING`): "Stress ages you" or "You look tired"
+ * judge the person, and their picture keeps the face out like any other — a face drawn for them is
+ * the second, AI-drawn host the face check exists to stop. Pure.
  */
 export function looksOnTheFace(line: string | undefined): boolean {
   const t = (line ?? "").replace(FACE_SAYINGS, " ");
@@ -1270,7 +1286,7 @@ export function looksOnTheFace(line: string | undefined): boolean {
     /\b(?:two|three|four|five|several)\s+(?:shades|tones|sizes|levels)\s+(?:lighter|darker|warmer|cooler|softer|brighter|deeper|paler|richer)\b/gi,
     " "
   );
-  return FACE_LOOK_LINE.test(t) && !t.match(ANIMAL) && !COUNTS_THINGS.test(counted);
+  return FACE_LOOK_LINE.test(t) && LOOK_THING.test(t) && !t.match(ANIMAL) && !COUNTS_THINGS.test(counted);
 }
 
 /** A neck piece in a picture — but "pearl earrings" are earrings. */
