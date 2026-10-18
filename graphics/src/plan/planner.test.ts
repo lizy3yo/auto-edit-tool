@@ -3,7 +3,7 @@ import { resolveCues, type CueSpec, type ResolvedCue, type Word } from "../cueRe
 import { TEMPLATES } from "../registry";
 import { FPS } from "../theme";
 import { notAListAsSaid } from "../../../server/spokenLists";
-import { ICON_REQUIRED, ROW_MAX_WORDS, STEP_MAX_WORDS, STEP_STRIP_MAX_PX, choiceSteps, fromAFoundList, iconsAsASet, keepObject, listsWhereGraphicsGo, malformedPhrase, missingListCues, namesTheDanger, noIcon, normalizePhrases, notTheHostsWords, objectCutOff, planGraphics, quotedInScript, restoreRowGrammar, stepCardLines, stepStripWidth, stepTextProblems, systemPrompt, uncoveredMoments, userPrompt, wordsSaidOver, type PlanMessage } from "./planner";
+import { ICON_REQUIRED, ROW_MAX_WORDS, STEP_MAX_WORDS, STEP_STRIP_MAX_PX, choiceSteps, stepStripMaxChars, fromAFoundList, iconsAsASet, keepObject, listsWhereGraphicsGo, malformedPhrase, missingListCues, namesTheDanger, noIcon, normalizePhrases, notTheHostsWords, objectCutOff, planGraphics, quotedInScript, restoreRowGrammar, stepCardLines, stepStripWidth, stepTextProblems, systemPrompt, uncoveredMoments, userPrompt, wordsSaidOver, type PlanMessage } from "./planner";
 
 const W = (s: string, start: number, step = 0.3): Word[] => s.split(" ").map((text, i) => ({ text, start: start + i * step, end: start + i * step + 0.26 }));
 const scene = (index: number, a: number, b: number, extra: Record<string, unknown> = {}) => ({ index, narrationStartSec: a, narrationEndSec: b, scriptText: "", hostPresent: false, cta: false, split: false, hostOpener: false, ...extra });
@@ -1628,5 +1628,61 @@ describe("a step is the narrator's own words, with their grammar (round 13 revie
     expect(prompt).toContain(`{"kicker", "steps": [{"text" (≤${STEP_MAX_WORDS} words), "icon" (optional), "at": "@words"}]}`);
     expect(prompt).toContain(`"Leave it on the shelf", never\n  "Leave on shelf" — never a word he does not say`);
     expect(prompt).toContain(`{"steps": [{"text" (≤${STEP_MAX_WORDS} words, his own words as for StepCards), "at": "@words"}]}`);
+  });
+
+  it("the prompt states the strip's budget, which is exactly where the width check draws its line", () => {
+    // five-word steps in his words, four of them, run past the picture's edge: told up front, not in
+    // the one repair round
+    expect([stepStripMaxChars(3), stepStripMaxChars(4)]).toEqual([82, 70]);
+    expect(systemPrompt({ kept: false })).toContain("the labels sit side by side\n  on ONE line, so all of them together hold at most 82 characters with three steps, 70 with four");
+    const fill = (n: number, chars: number) => Array.from({ length: n }, (_, k) => "x".repeat(Math.floor(chars / n) + (k < chars % n ? 1 : 0)));
+    for (const n of [2, 3, 4]) {
+      expect(stepStripWidth(fill(n, stepStripMaxChars(n))), `${n} at the budget`).toBeLessThanOrEqual(STEP_STRIP_MAX_PX);
+      expect(stepStripWidth(fill(n, stepStripMaxChars(n) + 1)), `${n} past it`).toBeGreaterThan(STEP_STRIP_MAX_PX);
+    }
+  });
+
+  it("mended steps are placed again: the graphic's reading time and the timing handed on are the drawn words'", async () => {
+    // "Catch" (a one-word step) is given back "a flight attendant": 8 words shown, not 5, so the
+    // graphic needs 3.4 s to be read, not 2.5 s — measured on what is drawn
+    const said = W("So catch a flight attendant as they pass, then wait until everyone's been served. After that the cart comes back around to you.", 200);
+    const labels: CueSpec = {
+      id: "two-steps",
+      template: "StepLabels",
+      start: "catch a flight attendant",
+      end: "everyone's been served.",
+      props: { steps: [{ at: "@catch a flight attendant", text: "Catch" }, { at: "@wait until everyone's", text: "Wait until everyone's served" }] },
+    };
+    const out = await planGraphics({ words: said, film: { scenes: [scene(5, 199, 240, { scriptText: said.map(w => w.text).join(" ") })] }, ask: async () => JSON.stringify({ cues: [labels] }), ensureIcon: async () => true });
+    expect(out.rounds[0].problems).toEqual([]);
+    expect(texts(out.cues[0])).toEqual(["Catch a flight attendant", "Wait until everyone's served"]);
+    const placed = out.resolved.find(r => r.id === "two-steps")!;
+    expect((placed.props.steps as { text: string }[]).map(s => s.text)).toEqual(["Catch a flight attendant", "Wait until everyone's served"]);
+    expect(placed.readSec).toBe(3.4);
+    // a step graphic left as written is placed once, as before (job 385's chain, 3 steps of his words)
+    const chain = W("So get a stepladder, take one alarm down, and read the label.", 60);
+    const asSaid: CueSpec = {
+      id: "07-step-labels",
+      template: "StepLabels",
+      start: "So get a stepladder",
+      end: "read the label.",
+      props: { steps: [{ text: "Get a stepladder", at: "@get a stepladder" }, { text: "Take one alarm down", at: "@take one alarm down" }, { text: "Read the label", at: "@read the label" }] },
+    };
+    const kept = await planGraphics({ words: chain, film: { scenes: [scene(12, 59, 65, { scriptText: chain.map(w => w.text).join(" ") })] }, ask: async () => JSON.stringify({ cues: [asSaid] }), ensureIcon: async () => true });
+    expect(kept.rounds[0].problems).toEqual([]);
+    expect(texts(kept.cues[0])).toEqual(["Get a stepladder", "Take one alarm down", "Read the label"]);
+    expect(kept.resolved[0].readSec).toBe(4);
+  });
+});
+
+describe("an item may stop before 'whose' or 'whom', and never on one (round 13 review)", () => {
+  const rows = (said: string, items: string[]) => (missingListCues([], W(said, 0), { scenes: [scene(1, 0, 60)] }, [{ items }])[0].props.items as { text: string }[]).map(i => i.text);
+  it("a stored item that found no place to stop but 'This one's' stops before 'whose' (job 357)", () => {
+    // the old cut was "This one's for anybody whose dog", the first build of this rule "This one's"
+    expect(rows("This one's for anybody whose dog greets them nose-first, anybody.", ["This one's for anybody whose dog greets them nose-first", "anybody"])[0]).toBe("This one's for anybody");
+    // …and never ends on one: "The cousin whom" stopped before "everybody" until "whom" hung
+    expect(rows("The cousin whom everybody always quietly blamed for everything, the mail carrier.", ["The cousin whom everybody always quietly blamed for everything", "the mail carrier"])[0]).toBe("The cousin");
+    // an item that fits is never cut, "whose" or not
+    expect(rows("A friend whose dog barks, the mail carrier.", ["A friend whose dog barks", "the mail carrier"])[0]).toBe("A friend whose dog barks");
   });
 });

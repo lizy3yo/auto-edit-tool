@@ -6008,4 +6008,23 @@ describe("a list row and a step are the narrator's words, whole (round 13 verifi
     expect(out.rounds[0].problems).toEqual([]);
     expect((out.cues[0].props.steps as { text: string }[]).map(s => s.text)).toEqual(["Get a stepladder", "Take one alarm down", "Read the label"]);
   });
+
+  it("410: the steps given back their words are the steps placed and timed — the placed graphic shows 'an offer' and holds for its words", async () => {
+    const { planGraphics } = await import("../graphics/src/plan/planner");
+    const { readingSec } = await import("../graphics/src/cueResolve");
+    const labels = {
+      ...snackSteps,
+      id: "snack-step-labels",
+      template: "StepLabels",
+      start: "then catch a flight attendant",
+      props: { steps: [{ at: "@then catch a flight attendant", text: "Catch" }, { at: "@and phrase it as an offer", text: "Phrase it as offer" }] },
+    };
+    const out = await planGraphics({ words: snack, cuts: snackCuts, film: snackFilm, ask: asking([[labels]]).ask, ensureIcon: async () => true });
+    expect(out.rounds[0].problems).toEqual([]);
+    const placed = out.resolved.find(r => r.id === "snack-step-labels")!;
+    expect((placed.props.steps as { text: string }[]).map(s => s.text)).toEqual(["Catch a flight attendant", "Phrase it as an offer"]);
+    // read for the 9 words drawn (3.7 s), not the 5 the planner wrote (2.5 s)
+    expect(placed.readSec).toBe(Math.round(readingSec(out.cues[0].props) * 1000) / 1000);
+    expect(placed.readSec).toBeGreaterThan(readingSec(labels.props));
+  });
 });

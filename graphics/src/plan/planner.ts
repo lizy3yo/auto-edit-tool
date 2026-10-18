@@ -47,6 +47,24 @@ export const ROW_MAX_WORDS = 6;
  */
 export const STEP_MAX_WORDS = 5;
 
+/** A step label strip as measured off job 399's (four pills, 70 characters, 1,718 px across): about
+ * 15.4 px a character, 90 px a pill's number and padding, 94 px an arrow and its gaps. (Up here: the
+ * catalogue, built when the module loads, states the strip's budget from them.) */
+const STRIP_CHAR_PX = 15.4;
+const STRIP_PILL_PX = 90;
+const STRIP_ARROW_PX = 94;
+/** The widest a strip may be: it starts at the action-safe edge and ends inside the other one. */
+export const STEP_STRIP_MAX_PX = WIDTH - 2 * LAYOUT.actionSafeX;
+/**
+ * The most characters `n` step labels may hold between them and still fit the strip (82 for three,
+ * 70 for four). The pills never wrap or shrink, so five-word steps in his words, four of them, run
+ * past the picture's edge — and the planner is told this budget up front instead of learning it in
+ * its one repair round. Pure.
+ */
+export function stepStripMaxChars(n: number): number {
+  return Math.floor((STEP_STRIP_MAX_PX - n * STRIP_PILL_PX - Math.max(0, n - 1) * STRIP_ARROW_PX) / STRIP_CHAR_PX);
+}
+
 /** The list windows: numbered rows, each standing for an item the narrator says. */
 const LIST_WINDOWS = new Set(["ListWindow", "HostListWindow"]);
 
@@ -163,7 +181,8 @@ On top of the footage:
 - TitleOverFootage — the video's topic line in its opening, over its first b-roll: {"kicker" (optional), "phrase": phrase (≤10 words), "emphasis"}
 - ChapterLabel — the script counts its parts aloud ("first thing…", "second…"): label EVERY counted part (all or none): {"kicker": "Topic · 1 of 3", "number": 1, "title": "1-3 words"}, "durationSec": 4.5 instead of "end"
 - StepLabels — describes 2-4 actions in order: {"steps": [{"text" (≤${STEP_MAX_WORDS} words, his own words as for StepCards), "at": "@words"}]} (a choice
-  — "…, or …" — is part of the step before it, never the next step, as for StepCards)
+  — "…, or …" — is part of the step before it, never the next step, as for StepCards; the labels sit side by side
+  on ONE line, so all of them together hold at most ${stepStripMaxChars(3)} characters with three steps, ${stepStripMaxChars(4)} with four)
 - Checklist — lists 2-4 signs or things to check (each ticked as said) (over b-roll): {"title": "2-4 words", "items": [{"text" (≤5 words), "at": "@words"}]}
 - CrossedList — dismisses 2-3 things ("not the bowl, not the house"), optionally then names the real one (over b-roll): {"items": [{"text" (≤3 words), "icon" (optional), "at": "@words", "keep": true only for the real one}]}
 - WarningLabel — names a danger or a mistake to avoid, in words that SAY it: read alone under its "WARNING"
@@ -619,8 +638,9 @@ const plainWord = (w: string) => w.toLowerCase().replace(/[’‘]/g, "'").repla
 /** The words a headline leaves out: an article or a possessive, the "own" after one, and the "it" or
  * "them" of a step ("Phrase as offer" for "phrase it as an offer", Helena's job 402). */
 const GRAMMAR_WORD = /^(?:a|an|the|his|her|its|their|my|your|our|own|it|them)$/;
-/** Words a row never ends on: each needs the word after it ("…at two IN", "…to end HIS", "…as AN"). */
-const HANGING_WORD = /^(?:a|an|the|his|her|its|their|my|your|our|own|of|in|on|at|to|for|from|with|by|into|onto|as|like|than|until|without|and|or|but|that|who|which|where|when)$/;
+/** Words a row never ends on: each needs the word after it ("…at two IN", "…to end HIS", "…as AN",
+ * "the cousin WHOM"). */
+const HANGING_WORD = /^(?:a|an|the|his|her|its|their|my|your|our|own|of|in|on|at|to|for|from|with|by|into|onto|as|like|than|until|without|and|or|but|that|who|whose|whom|which|where|when)$/;
 /** A row's first letter in capitals. */
 const capitalized = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 /** An article or a possessive: one opens a noun phrase, and two never stack ("her the truth"). */
@@ -678,8 +698,10 @@ const BEFORE_TO_VERB = /^(?:[a-z]+ed|want|wants|need|needs|have|has|had|going|us
 const BEFORE_A_NOUN = /^(?:a|an|the|his|her|its|their|my|your|our|this|that|these|those|every|each|no|some|any|one)$/;
 /** "-ing" words that are things wherever they stand ("everything", "morning"). */
 const ING_THING = /(?:thing|morning|evening|ceiling|building|wedding|spring|string|king|ring)$/;
-/** Words that start a new part of a sentence: what a verb takes stops before one. */
-const JOINING_WORD = /^(?:and|or|but|that|who|which|where|when|while|because|if|then|so)$/;
+/** Words that start a new part of a sentence: what a verb takes stops before one, and an item may.
+ * "whose" and "whom" too: without them a stored item "…for anybody whose dog greets them" (job 357)
+ * found no place to stop but "This one's". */
+const JOINING_WORD = /^(?:and|or|but|that|who|whose|whom|which|where|when|while|because|if|then|so)$/;
 /** A word the narrator ends on a pause or a sentence's end. */
 const ENDS_ON_A_PAUSE = /[,;:.!?]["”')]*$/;
 /** Words that lead into where or how ("into the chain space | RIGHT beside your hook"): an item may stop before one. */
@@ -851,14 +873,6 @@ const STEP_CARD_LINE_CHARS = 17;
 /** The lines a step card has room for (it is 300 px tall): three, two under an icon. */
 const STEP_CARD_LINES = 3;
 const STEP_CARD_LINES_UNDER_ICON = 2;
-/** A step label strip as measured off job 399's (four pills, 70 characters, 1,718 px across): about
- * 15.4 px a character, 90 px a pill's number and padding, 94 px an arrow and its gaps. */
-const STRIP_CHAR_PX = 15.4;
-const STRIP_PILL_PX = 90;
-const STRIP_ARROW_PX = 94;
-/** The widest a strip may be: it starts at the action-safe edge and ends inside the other one. */
-export const STEP_STRIP_MAX_PX = WIDTH - 2 * LAYOUT.actionSafeX;
-
 /** About how many lines a step card's text takes, its words wrapped at `STEP_CARD_LINE_CHARS`. Pure. */
 export function stepCardLines(text: string): number {
   let lines = 0;
@@ -1433,7 +1447,7 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
         bad(e instanceof CueError ? e.message.replace(/^cue \S+: /, "") : String(e));
         continue;
       }
-      const mine = next.find(r => r.id === spec.id)!;
+      let mine = next.find(r => r.id === spec.id)!;
       startsAt.set(spec.id, startWordNear(spec, mine.start));
       // A QUOTE is signed with the host's name, so it must be the host's own words — job 399 signed
       // "Could I keep the rest of the can, please?", the line the host tells the viewer to say after
@@ -1495,6 +1509,7 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
               `("Call or email"), or drop it; or show the choice with Versus`
           );
         }
+        const asPlanned = JSON.stringify(steps);
         troubles.push(...stepTextProblems(spec.template, steps, stepsAsSaid(Array.isArray(steps) ? steps : [], mine, words, startsAt.get(spec.id) ?? mine.start)));
         if (troubles.length) {
           // A cue has ONE repair round, so it is told all that is wrong at once — job 410's step card,
@@ -1504,15 +1519,19 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
           bad([...troubles, ...(onPicture ? [onPicture] : [])].join(". Also: "));
           continue;
         }
-        // The mended steps are what is drawn: the resolved copy shows them too.
-        const drawn = mine.props.steps;
-        if (Array.isArray(steps) && Array.isArray(drawn))
-          steps.forEach((st, k) => {
-            const d = drawn[k] as Record<string, unknown> | undefined;
-            if (!d || !st || typeof st !== "object") return;
-            d.text = (st as { text?: unknown }).text;
-            if (!("icon" in st)) delete d.icon;
-          });
+        // The mended steps are what is drawn, and a graphic's reading time grows with the words it
+        // shows ("Catch" given back "a flight attendant" holds longer): placed again, so every check
+        // below — and the timing handed on — measures the steps as drawn, not as the planner wrote them.
+        if (JSON.stringify(steps) !== asPlanned) {
+          try {
+            next = resolveAll();
+          } catch (e) {
+            undo();
+            bad(e instanceof CueError ? e.message.replace(/^cue \S+: /, "") : String(e));
+            continue;
+          }
+          mine = next.find(r => r.id === spec.id)!;
+        }
       }
       // A graphic that sits still for seconds between its own words is a frozen frame, not a point.
       const times = [mine.start, ...mine.sync.map(x => x.wordStart), mine.contentEnd ?? mine.start].sort((a, b) => a - b);
