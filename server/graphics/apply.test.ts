@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { writeFileSync } from "node:fs";
-import type { JobGraphics, LongformInputParams } from "@shared/types";
+import type { JobGraphics, LongformInputParams, StoryboardScene } from "@shared/types";
 import type { AddGraphicsInput, GraphicsRecord } from "./finish";
 
 /**
@@ -20,7 +20,7 @@ vi.mock("./finish", () => ({
   }),
 }));
 
-const { withGraphics, plannerForJob, readabilityForJob, MAX_KEPT_PER_ROUND } = await import("./apply");
+const { withGraphics, plannerForJob, readabilityForJob, MAX_KEPT_PER_ROUND, filmLayoutOf, splitHostPanel } = await import("./apply");
 const finish = await import("./finish");
 
 const hooks = { phase: () => {}, warn: vi.fn(), log: () => {} };
@@ -125,5 +125,64 @@ describe("what is kept is capped (it rides every save of the job)", () => {
     expect(Object.keys(kept.rounds[0]).sort()).toEqual(["asked", "kept", "problems", "step"]);
     const failed = plannerForJob({ model: "m", rounds: [{ step: "fill", asked: 0, kept: 0, problems: [], offered: [], error: "overloaded" }] }, "t")!;
     expect(failed.rounds[0]).toEqual({ step: "fill", asked: 0, kept: 0, problems: [], offered: [], error: "overloaded" });
+  });
+});
+
+describe("the film's layout carries each split's host panel (job 400's caption ran across the seam)", () => {
+  const R2 = "https://pub-x.r2.dev/longform/400";
+  // Job 400's scene 27 as stored: a split, its finished clip the composite, the host take beside it.
+  const split27 = {
+    index: 27,
+    narrationStartSec: 138.19,
+    narrationEndSec: 144.12,
+    scriptText: "When a man like that sits down to write about time, I pull my chair in closer.",
+    hostPresent: true,
+    sceneStatus: "completed",
+    splitVisual: "An aged papyrus scroll laid flat on a wooden desk",
+    splitRightUrl: `${R2}/still-27-a.mp4`,
+    clipUrls: [`${R2}/split-27-0-weCNwc.mp4`],
+    hostClipUrls: [`${R2}/clip-27-0-k0tiiz.mp4`],
+  } as unknown as StoryboardScene;
+  // Its scene 3: a split whose picture never came, so the film plays the host take full frame.
+  const missing3 = {
+    index: 3,
+    narrationStartSec: 12.88,
+    narrationEndSec: 17.32,
+    scriptText: "He is counting backward. He is sixty-four.",
+    hostPresent: true,
+    sceneStatus: "completed",
+    splitVisual: "A sympathy card in a plain cream envelope",
+    clipUrls: [`${R2}/clip-3-0-tcI0x8.mp4`],
+    hostClipUrls: [`${R2}/clip-3-0-tcI0x8.mp4`],
+  } as unknown as StoryboardScene;
+
+  it("400 scene 27: a split, with the host's panel where the compositor drew it (840 px on the left)", () => {
+    const [s] = filmLayoutOf([split27]).scenes;
+    expect(s).toMatchObject({ index: 27, split: true, hostPanel: { x: 0, w: 840 } });
+  });
+
+  it("400 scene 3: no panel came, so it is not a split and carries no panel", () => {
+    const [s] = filmLayoutOf([missing3]).scenes;
+    expect(s.split).toBe(false);
+    expect(s.hostPanel).toBeUndefined();
+    // nor one whose panel was drawn but never put beside the host (its clip IS the host take)
+    const notJoined = { ...missing3, splitRightUrl: `${R2}/still-3-a.mp4` } as StoryboardScene;
+    expect(filmLayoutOf([notJoined]).scenes[0]).toMatchObject({ split: false });
+    expect(filmLayoutOf([notJoined]).scenes[0].hostPanel).toBeUndefined();
+  });
+
+  it("the operator's layout is passed through: a dragged seam, the host turned to the right", () => {
+    expect(splitHostPanel({ ...split27, splitLayout: { seamX: 0.5 } } as StoryboardScene)).toEqual({ x: 0, w: 960 });
+    expect(splitHostPanel({ ...split27, splitLayout: { hostSide: "right" } } as StoryboardScene)).toEqual({ x: 1080, w: 840 });
+    expect(filmLayoutOf([{ ...split27, splitLayout: { hostSide: "right", seamX: 0.6 } } as StoryboardScene]).scenes[0].hostPanel).toEqual({ x: 1152, w: 768 });
+  });
+
+  it("a host take or a picture carries no panel", () => {
+    const host = { index: 1, narrationStartSec: 0, narrationEndSec: 2.5, hostPresent: true, clipUrls: [`${R2}/clip-1-0.mp4`] } as unknown as StoryboardScene;
+    const still = { index: 2, narrationStartSec: 2.5, narrationEndSec: 12.88, clipUrls: [`${R2}/still-2-0.mp4`] } as unknown as StoryboardScene;
+    for (const s of filmLayoutOf([host, still]).scenes) {
+      expect(s.split).toBe(false);
+      expect(s.hostPanel).toBeUndefined();
+    }
   });
 });

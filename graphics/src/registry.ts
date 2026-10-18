@@ -51,6 +51,10 @@ export type TemplateDef = {
   on?: "broll" | "host";
   /** Its text can move to another part of the frame (`place`) to stay readable. */
   movable?: boolean;
+  /** Takes the host's panel on a SPLIT (`props.panel`, src/plan/rules.ts `hostPanelFor`): the
+   * finishing step sets it for every cue over a split, so the words stay beside the host and never
+   * run across the seam onto the picture. */
+  panel?: boolean;
   /** Darkens or blurs the whole frame: held to b-roll like a card, never over a host take. */
   dims?: boolean;
   /** A TITLE, not a caption (a chapter label): keeps its planned length instead of leaving when
@@ -189,6 +193,7 @@ export const TEMPLATES: TemplateDef[] = [
   {
     id: "HostCaption",
     kind: "overlay",
+    panel: true,
     component: HostCaption,
     defaultProps: {
       durationSec: 4,

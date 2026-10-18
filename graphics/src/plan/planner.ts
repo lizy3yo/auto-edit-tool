@@ -29,6 +29,18 @@ import { MIN_GAP_SEC, checkRules, nameTagRange, type FilmLayout, type LayoutScen
  * number graphic opened on "But the one I was proudest of" and waited 9 s for the number). */
 export const MAX_WAIT_SEC = 5;
 
+/**
+ * The most words a row of a list window (ListWindow, HostListWindow) shows. It was 5, and the
+ * planner clipped rows into headlines to fit: Gideon's job 400 (2:03) showed "One step from throne"
+ * and "Ordered to end life" for "one step from the throne" and "ordered to end his own life". Six
+ * holds the spoken words with their grammar; a row may take two lines in the window, as five-word
+ * rows already did.
+ */
+export const ROW_MAX_WORDS = 6;
+
+/** The list windows: numbered rows, each standing for an item the narrator says. */
+const LIST_WINDOWS = new Set(["ListWindow", "HostListWindow"]);
+
 /** Noto Color Emoji (Apache-2.0), pinned: the image of an emoji, by its code points. */
 export const NOTO_PNG = "https://cdn.jsdelivr.net/gh/googlefonts/noto-emoji@v2.047/png/512";
 
@@ -40,6 +52,46 @@ export function notoCode(icon: string): string {
     .filter(cp => cp !== 0xfe0f)
     .map(cp => cp.toString(16))
     .join("_");
+}
+
+/**
+ * AN ICON IS THE THING ITSELF, OR THERE IS NONE (round 10 review). The catalogue used to ask for an
+ * icon on every card, so where no emoji is the object the line names the planner took the nearest
+ * one: job 399 (whole-can-fact, 1:09) put the "canned food" tin on a fact about the rest of a drink
+ * can — Unicode has no drink can — and job 400 (clock-before-after, 1:03) a megaphone for "The
+ * loudest thing" beside an alarm clock for the clock. Now an icon is optional on every template but
+ * the one an icon IS (one short point one object says): there it is refused when missing, and the
+ * repair is steered to a caption. Everywhere else a card with no icon is complete.
+ *
+ * NOT CHECKED: whether the emoji is that object. The repo ships the Noto images by code point and
+ * no table of their names, so nothing here can tell "canned food" from a drink can; the prompt's
+ * rule is the only guard.
+ */
+export const ICON_REQUIRED = new Set(["IconCallout"]);
+
+/** An icon slot the planner left empty rather than filled: no string, blank, or a word for none. */
+export function noIcon(v: unknown): boolean {
+  return typeof v !== "string" || !v.trim() || /^(?:none|null|no icon|n\/a|-+)$/i.test(v.trim());
+}
+
+/**
+ * ICONS SIDE BY SIDE COME AS A SET: a graphic's two sides (Versus "left"/"right", BeforeAfter
+ * "before"/"after") or its rows ("steps", "items") show an icon on each or on none. With the icon
+ * optional, a set can come back half-filled — the planner gives one side its object and leaves the
+ * other out (job 400's after side, "The loudest thing", names no object), or an emoji Noto has no
+ * image for is taken off — and a half set is drawn unevenly: a side or step box without its icon
+ * sits its words a whole icon higher than its neighbour's. The icons of a half set are all taken
+ * off, in place. A single icon (FactCard, IconCallout) is not a set. Pure.
+ */
+const ICON_PAIRS = [["left", "right"], ["before", "after"]];
+const ICON_ROWS = ["steps", "items"];
+export function iconsAsASet(props: Record<string, unknown>): void {
+  const sets: unknown[][] = [...ICON_PAIRS.map(keys => keys.map(k => props[k])), ...ICON_ROWS.map(k => (Array.isArray(props[k]) ? (props[k] as unknown[]) : []))];
+  for (const set of sets) {
+    const slots = set.filter((x): x is Record<string, unknown> => !!x && typeof x === "object" && !Array.isArray(x));
+    const shown = slots.filter(s => typeof s.icon === "string");
+    if (shown.length && shown.length < slots.length) for (const s of slots) delete s.icon;
+  }
 }
 
 const CATALOGUE = `
@@ -59,7 +111,15 @@ a sentence longer than a card's limit is shown as a caption instead of that card
 Fixed text (titles, labels, subs, list items) is shown whole. When it stands for words the narrator says,
 add "say": "those exact spoken words" beside it, so the graphic stays until they are said.
 "emphasis": ["word."] = ONE word of the shown text, copied exactly as written there (with its punctuation),
-drawn in the accent colour. "icon" = ONE emoji character (a 3D Noto emoji): a plain, literal object.
+drawn in the accent colour.
+"icon" is OPTIONAL everywhere but IconCallout. It is ONE emoji character (a 3D Noto emoji) that IS the object
+its own words name (the side's title, the step, the item, the card's line): that same kind of thing, drawn as
+itself — an umbrella for "the umbrella", a light bulb for "the bulb". Leave "icon" out when those words name no
+object ("most people never ask"), and when no single emoji is that exact object: the nearest emoji of another
+kind is wrong (a mug for a bottle, a car for a truck, a tin of food for a paint can). Never an icon
+for an idea, a quality or a feeling (a trophy for "the best", a rocket for "fast", a heart for "love"). A
+graphic without an icon is complete. Icons side by side come as a set: on both sides of a Versus or a
+BeforeAfter, on every step or item, or on none. When one thing changes state, both sides show that same thing.
 
 EVERY GRAPHIC AND THE MOMENT THAT CALLS FOR IT
 Each line below is "Template — appears whenever the script…: props". Use a template EVERY time its
@@ -68,28 +128,43 @@ moment happens, as often as the script allows. Nothing here is limited to once.
 Full-screen cards — replace the picture, so ONLY inside a b-roll stretch:
 - Statement — sums up a point in one short line, or lands a punchline: {"kicker": "2-4 word label", "headline": ONE WHOLE SENTENCE as said (4-12 words), "emphasis"}
 - MythTruth — states what people believe, then corrects it: {"myth": ONE WHOLE SENTENCE (≤14 words), "truth": ONE WHOLE SENTENCE (≤14 words), "emphasis"}
-- Versus — compares two kinds or options: {"kicker", "left": {"icon","title" (1-3 words),"sub" (≤6 words),"say","at"}, "right": {same}, "winner": "left"|"right"|"none"}
+- Versus — compares two kinds or options: {"kicker", "left": {"icon" (optional),"title" (1-3 words),"sub" (≤6 words),"say","at"}, "right": {same}, "winner": "left"|"right"|"none"}
 - BigNumber — says a number that matters (a time, an amount, a count): {"kicker", "prefix": "$" (a currency sign, if any), "value": number, "unit": "1-2 words", "at": "@the spoken number", "line": phrase, "countSec": 0.6 for small numbers}. Start it on the sentence that holds the number, not sentences before.
-- StepCards — gives 2-4 steps the viewer should do: {"kicker", "steps": [{"text" (≤4 words), "icon", "at": "@words"}]}
-- BeforeAfter — an old way or state replaced by a new one: {"kicker", "before": {"icon","label","at"}, "after": {"icon","label","at"}}
+- StepCards — gives 2-4 steps the viewer should do: {"kicker", "steps": [{"text" (≤4 words), "icon" (optional), "at": "@words"}]}
+  (steps are done ONE AFTER ANOTHER: a choice the line offers — "…, or …", "alternatively" — is part of the
+  step before it, never a step of its own: "Call the office, or send an email" is ONE step, "Call or email")
+- BeforeAfter — an old way or state replaced by a new one: {"kicker", "before": {"icon" (optional),"label","at"}, "after": {"icon" (optional),"label","at"}}
 - TwoPoint — links two places or things ("the one in the basement sets off the one by your bed"): {"title": phrase, "a": {"label","sub","at"}, "b": {"label","sub","at"}}
-- FactCard — states a finding or a general fact ("most…", "studies show…", "the rule is…"): {"kicker": "Fact", "fact": ONE WHOLE SENTENCE (≤14 words), "emphasis", "source": "where it comes from, ONLY if the script says it", "icon"}
+- FactCard — states a finding or a general fact ("most…", "studies show…", "the rule is…"): {"kicker": "Fact", "fact": ONE WHOLE SENTENCE (≤14 words), "emphasis", "source": "where it comes from, ONLY if the script says it", "icon" (optional)}
 - YesNoCard — asks a yes/no question and answers it: {"kicker", "question": ONE WHOLE SENTENCE (≤14 words), "answer": "yes"|"no", "at": "@the spoken answer", "line": phrase (optional, the reason)}
 
 Graphics with the picture in a window — they replace the picture with the footage framed beside text:
 - TermWindow — names a term or a word and explains what it means (ONLY over b-roll): {"kicker": "The term", "term": "the term as said", "at": "@the term", "meaning": phrase (≤12 words)}
-- ListWindow — lists 2-4 things or signs while the picture matters (ONLY over b-roll): {"title": "2-4 words", "items": [{"text" (≤5 words), "at": "@the item's FIRST spoken words", "say": "the item as said"}]}
+- ListWindow — lists 2-4 things or signs the narrator NAMES one after another, while the picture matters (ONLY over b-roll): {"title": "2-4 words", "items": [{"text" (≤${ROW_MAX_WORDS} words), "at": "@the item's FIRST spoken words", "say": "the item as said"}]}
+  (a list is separate things he names one after another — never a sentence chopped at its commas into a
+  time, a clause and describing words: "a short, quiet, careful letter" is one letter. Each row is the item in his
+  own words, keeping their "a", "the", "his", "her": "A seat by the window", "Her grandmother's sewing box" —
+  never clipped like a headline, "Seat by window")
 - HostListWindow — the HOST lists what is coming or 2-4 points, while on camera (ONLY over a HOST scene, never under the name tag): same props as ListWindow
 
 On top of the footage:
 - TitleOverFootage — the video's topic line in its opening, over its first b-roll: {"kicker" (optional), "phrase": phrase (≤10 words), "emphasis"}
 - ChapterLabel — the script counts its parts aloud ("first thing…", "second…"): label EVERY counted part (all or none): {"kicker": "Topic · 1 of 3", "number": 1, "title": "1-3 words"}, "durationSec": 4.5 instead of "end"
-- StepLabels — describes 2-4 actions in order: {"steps": [{"text" (≤4 words), "at": "@words"}]}
+- StepLabels — describes 2-4 actions in order: {"steps": [{"text" (≤4 words), "at": "@words"}]} (a choice
+  — "…, or …" — is part of the step before it, never the next step, as for StepCards)
 - Checklist — lists 2-4 signs or things to check (each ticked as said) (over b-roll): {"title": "2-4 words", "items": [{"text" (≤5 words), "at": "@words"}]}
-- CrossedList — dismisses 2-3 things ("not the bowl, not the house"), optionally then names the real one (over b-roll): {"items": [{"text" (≤3 words), "icon", "at": "@words", "keep": true only for the real one}]}
-- WarningLabel — names a danger or a mistake to avoid: {"text": phrase (≤10 words), "emphasis"}
-- IconLabels — names 1-3 right things to look for or buy: {"items": [{"icon","text" (1-3 words),"say","at"}]}
-- IconCallout — makes one short point that one object says well (over b-roll): {"icon", "phrase": phrase (≤8 words), "emphasis"}
+- CrossedList — dismisses 2-3 things ("not the bowl, not the house"), optionally then names the real one (over b-roll): {"items": [{"text" (≤3 words), "icon" (optional), "at": "@words", "keep": true only for the real one}]}
+- WarningLabel — names a danger or a mistake to avoid, in words that SAY it: read alone under its "WARNING"
+  header, the line itself says what not to do or what goes wrong ("never", "don't", "not", "avoid", "too…",
+  the harm or the bad result — "Never leave it plugged in overnight", "The glue fails in the cold"), or is
+  a sentence of its own that only names the thing to avoid ("Cheap plastic hinges."). A line that tells the
+  viewer to DO something is advice, not a warning: when the script warns with "do X, and [bad result]"
+  ("Open it while it's hot, and the jar cracks"), the "do X" half alone reads as an instruction to do it —
+  show words that name the danger, or show the right way with another template, or nothing:
+  {"text": phrase (≤10 words), "emphasis"}
+- IconLabels — names 1-3 right things to look for or buy: {"items": [{"icon" (optional),"text" (1-3 words),"say","at"}]}
+- IconCallout — makes one short point that one object says well, ONLY when one emoji IS that object (else a
+  DimCaption) (over b-roll): {"icon" (required), "phrase": phrase (≤8 words), "emphasis"}
 - SmallLabel — names the thing in the picture when the line names it (over b-roll): {"text": "1-4 words as said", "at": "@words"}
 - NumberLabel — compares two values (over b-roll): {"kicker", "a": {"label","value","at"}, "b": {"label","value","at"}}
 - BarChart — says 2-4 numbers to compare (over b-roll): {"title", "bars": [{"label","value": number,"display": "as said","at": "@the number"}]}
@@ -97,7 +172,11 @@ On top of the footage:
 - DimCaption — a striking line over b-roll: {"phrase": phrase (≤10 words), "emphasis"}
 - ArrowCaption — a line pointing at something in the picture ("this one", "that disc", "right here") (over b-roll): {"phrase": phrase (≤10 words), "emphasis"}
 - MythStamp — says a myth over footage (no correction card needed): {"label": "Myth", "at": "@the myth's key words", "phrase": phrase (optional, ≤10 words)}
-- Quote — the host's own advice in one memorable line (over b-roll): {"quote": ONE WHOLE SENTENCE (≤16 words), "author": "the host's name", "emphasis"}
+- Quote — the host's OWN advice or saying, in one memorable line (over b-roll): {"quote": ONE WHOLE SENTENCE (≤16 words), "author": "the host's name", "emphasis"}.
+  It is signed with the host's name, so it is never words the script gives someone ELSE to say: a line
+  the viewer is told to say or ask ("Just ask: Could I get that in writing, please?"), a request to a
+  clerk or a server, or what another person said — signed, it reads as if the host said it. Show such a
+  line as a DimCaption (no name), or nothing
 - HostCaption — the host's punchline while on camera (HOST or SPLIT scene, never under the name tag): {"phrase": phrase (≤8 words), "emphasis"}
 `;
 
@@ -134,7 +213,9 @@ ${CATALOGUE}`;
 }
 
 const mmss = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0")}`;
-const kindOf = (s: LayoutScene) => (s.cta ? "CTA" : s.split ? "SPLIT (host left, picture right)" : s.hostPresent ? "HOST" : "B-ROLL");
+/** A split the operator turned round (host on the right, `hostPanel`) is named as it is drawn. */
+const splitKind = (s: LayoutScene) => (s.hostPanel && s.hostPanel.x > 0 ? "SPLIT (host right, picture left)" : "SPLIT (host left, picture right)");
+const kindOf = (s: LayoutScene) => (s.cta ? "CTA" : s.split ? splitKind(s) : s.hostPresent ? "HOST" : "B-ROLL");
 
 /**
  * What is said over each scene (one line per `film.scenes` entry), as the FILM'S OWN SOUND has it:
@@ -226,6 +307,204 @@ export const MAX_WORDS: Record<string, number> = {
   TitleOverFootage: 10, ArrowCaption: 20, IconCallout: 8, FactCard: 14, YesNoCard: 14, MythStamp: 10,
 };
 
+/**
+ * Words that make a line say what to AVOID or what goes WRONG: a negation, a word for steering clear,
+ * "too" + a word, a requirement said as one, or the danger or bad result itself. A WarningLabel's line
+ * is read ALONE under its "WARNING" header, so without one of these it reads as advice to do the
+ * thing: Helena's job 399 (2:13) showed "Ask while the cart is still working its way back," — the
+ * first half of "…, and you're asking the crew to guess whether the last few rows will come up
+ * short", which is advice NOT to ask then; the planner's own id was "dont-ask-too-early". Every
+ * warning the planner placed before passes (planner.test.ts). A requirement ("has to", "must") counts
+ * because it can never be the "do X" half of a "do X, and [bad result]" warning.
+ * (Joined from parts, one kind of word to a line.)
+ */
+const NAMES_A_DANGER = new RegExp(
+  [
+    // a negation: "not for hot food", "No date at all?", "doing absolutely nothing", "don't"
+    "\\b(?:no|not|never|nothing|none|nobody|nowhere|neither|nor|without|cannot|unless|otherwise|or else)\\b",
+    "n't\\b",
+    // steering clear of it: "Keep all ten fingers away from…"
+    "\\b(?:avoid(?:s|ed|ing)?|stop(?:s|ped|ping)?|careful(?:ly)?|cautio(?:n|us)|beware|warn(?:s|ed|ing|ings)?|watch out|look out|away from|stay (?:away|back|clear|off|out)|clear of|out of reach)\\b",
+    "\\bkeep (?:\\S+ ){1,4}away\\b",
+    // too much of it: "too early", "too hot"
+    "\\btoo [a-z]",
+    // a requirement said as one: "Every notch has to be dead on"
+    "\\b(?:must|has to|have to|had to|need to|needs to|got to|gotta)\\b",
+    // the danger or the bad result itself
+    "\\b(?:dangers?|dangerous(?:ly)?|hazards?|hazardous|risks?|risky|mistakes?|mistaken|wrong(?:ly)?|bad|badly|worse|worst|unsafe|harm(?:s|ed|ful|ing)?|hurts?|hurting|injur(?:e|es|ed|y|ies|ing)|toxic|poison(?:s|ed|ous)?|deadly|fatal|kill(?:s|ed|ing)?|die|dies|died|dying|death|fires?|burn(?:s|ed|t|ing)?|scald(?:s|ed|ing)?|shock(?:s|ed|ing)?|explod(?:e|es|ed|ing)|explosion|break|breaks|breaking|broke|broken|crack(?:s|ed|ing)?|fail(?:s|ed|ing|ure|ures)?|ruin(?:s|ed|ing)?|damag(?:e|es|ed|ing)|destroy(?:s|ed|ing)?|lose|loses|losing|lost|loss|wast(?:e|es|ed|ing)|spoil(?:s|ed|ing|t)?|rot|rots|rotted|rotten|rotting|mou?ld(?:y|s)?|leak(?:s|ed|ing)?|warp(?:s|ed|ing)?|expir(?:e|es|ed|ing|y)|problems?|trouble|illegal|scams?|regret(?:s|ted)?|costs? you)\\b",
+    "\\b(?:runs? out|ran out|running out|comes? up short|came up short)\\b",
+  ].join("|"),
+  "i"
+);
+
+/**
+ * A SENTENCE OF ITS OWN THAT NAMES A THING — commanding nothing and speaking to no one — names the
+ * danger by itself under the WARNING header (as "Wet floor" does on a sign), and cannot tell the viewer
+ * to DO anything: the "do X" half of a warning needs a command. Scarlett's job 395 placed "Chunky black
+ * or very dark beads." right after "Now the one that's aging you."; no danger word is in it, and it is
+ * a good warning. Not one when it has a helper verb or a contraction ("is", "can", "'ll"), a person
+ * ("you", "your", "it" — "Sort your finished pieces by size and price", Dale's job 397), a clause word
+ * ("while", "until"), or a command verb first ("Use…", "Leave…" — Dale's job 389 placed "Either way,
+ * leave enough room in the price", the right way, which belongs in another template). And it must end
+ * its sentence (".", "!", "?"): a line stopped at a comma or before "but" may be the safe half of a
+ * contrast whose warning comes after it. (A possessive "'s" is not a sign — "a neighbour's ladder" is
+ * a thing.)
+ */
+const CLAUSE_SIGN =
+  /\b(?:is|are|was|were|be|been|being|am|do|does|did|has|have|had|will|would|shall|should|can|could|may|might|i|you|your|yours|he|she|it|we|they|me|him|us|them|my|our|their|while|until|till|when|whenever|if|because|whether)\b|'(?:re|ve|ll|d|m)\b/;
+const OPENERS = /^(?:(?:so|and|but|or|now|then|just|also|always|first|next|instead|simply|plus|please|okay|well|either way)\b[\s,.]*)+/;
+const COMMAND_VERBS = new Set(
+  (
+    "add apply ask bake boil bring buy call carry check choose clean close cook cover cut dip do drill drink drive drop dry eat " +
+    "fill find fix fold follow get give glue go grab hang heat hold keep leave let lift load lock look make measure mix move oil " +
+    "open order pack paint pay pick place plug pour press pull push put read remember remove rinse run sand save sell send set " +
+    "shop show sit soak sort spend spray start stir store switch take tap tell think throw tie try turn unplug use wait walk wash " +
+    "watch water wear wipe wrap write"
+  ).split(" ")
+);
+function namesAThingAlone(line: string): boolean {
+  if (!/[.!?]["”']?$/.test(line) || CLAUSE_SIGN.test(line)) return false;
+  const first = line.replace(OPENERS, "").split(/\s+/)[0]?.replace(/[^a-z0-9$']/g, "");
+  return !!first && !COMMAND_VERBS.has(first);
+}
+
+/** Does a warning's line, read alone, say what to avoid or what goes wrong (`NAMES_A_DANGER`), or
+ * name the thing to avoid in a sentence of its own (`namesAThingAlone`)? Pure. */
+export function namesTheDanger(text: string): boolean {
+  const line = text.trim().toLowerCase().replace(/[’‘]/g, "'");
+  return NAMES_A_DANGER.test(line) || namesAThingAlone(line);
+}
+
+/**
+ * A QUOTE IS THE HOST'S OWN WORDS. The card signs its line with the host's name, so a line the
+ * script hands someone ELSE to say reads as the host saying it: Helena's job 399 (1:23) signed "Could
+ * I keep the rest of the can, please?" with her name, right after "So when the cart reaches your row,
+ * speak up." — the words she tells the VIEWER to say to the crew; signed, she (a flight attendant)
+ * was the one asking for the can.
+ *
+ * HANDS_A_LINE is how the words leading into it hand the viewer a line, at their very end: a speech
+ * verb as a command, at the start of a clause ("speak up", "ask", "just say", "tell them"), with only
+ * a person or a word on how after it ("ask the crew", "say it plainly", "Just ask:"). A speech verb with
+ * a subject is the host speaking ("here's what I tell everyone who asks"), and one followed by what
+ * it is about hands over nothing (Dale's job 389: "…and tell me in the comments which of the three
+ * sells best where you live." before his own signed "Build it well, price it honest, …").
+ * An adverb is part of the COMMAND only at the start of a clause ("Just ask:", "so always ask", "why
+ * not just ask"): after a subject it is the host telling what they do themselves — "Like I always say,"
+ * / "As I always tell them:" lead into the host's OWN saying, the very line a Quote is for.
+ * (Joined from parts: where the command starts, its adverbs, the verb, to whom, how.)
+ */
+const HANDS_A_LINE = new RegExp(
+  [
+    "(?:^|[,;:]\\s*|\\b(?:so|then|and|now|instead|why not)\\s+|\\byou (?:can|could|should|might|may|will|just)\\s+)",
+    "(?:(?:just|simply|always|politely|nicely|kindly|instead|now|then)\\s+)*",
+    "(?:speak|pipe up|say|ask|tell|request|call out|try saying|try asking|go with)",
+    "(?: (?:to )?(?:them|him|her|someone|somebody|anyone|anybody|(?:the|your|a|an) [a-z']+(?: [a-z']+)?))?",
+    "(?: (?:up|out|this|it|that|something like this|something like|like this|like so|for it|nicely|politely|kindly|plainly|simply|directly|out loud|aloud|clearly|instead|first|again))*$",
+  ].join("")
+);
+/** A REQUEST TO SOMEONE, whoever says it: a question asked with "please" (job 399's "Could I keep the
+ * rest of the can, please?"), "would you mind…", "excuse me…", or wanting something with "please"
+ * ("I'd like the aisle seat, please."). Never the host's own saying. The "please" is the courtesy word
+ * (`asksPolitely`), never the verb. */
+const A_REQUEST = /^(?:would|do) you mind\b|^(?:excuse|pardon) me\b/;
+const WANTS_SOMETHING = /^(?:i|we)(?:'d| would|'ll| will)? (?:like|love|take|have|want|need|prefer)\b/;
+/** "please" as a VERB — to please someone — asks nothing: "You can't please everyone, so why try?" and
+ * "We want to please everyone, and that is the trap." are a host's own sayings. */
+const PLEASE_AS_VERB =
+  /\b(?:to|can't|cannot|can not|couldn't|won't|never|trying to|try to)\s+please\b|\bplease\s+(?:everyone|everybody|anyone|anybody|nobody|no one|people|others|them|him|her|yourself|myself|ourselves|themselves|the (?:crowd|customers?|buyers?|people))\b/g;
+const asksPolitely = (q: string) => /\bplease\b/.test(q.replace(PLEASE_AS_VERB, ""));
+/** A line that sounds SAID TO SOMEONE, read once the words before it hand the viewer a line: a
+ * question in the first person ("Can we get the bigger one?"), a word of asking (`asksPolitely`) or
+ * thanks, or wanting something ("I'll take the whole jar.", `WANTS_SOMETHING`). The host's own question
+ * to the viewer ("What's the worst they can say?") and the host's own advice ("Nobody minds being asked
+ * twice.") have none of these: after "speak up" they are still the host's. */
+const SAID_TO_SOMEONE = /\b(?:i|i'm|i'd|i'll|i've|me|my|we|we're|we'd|we'll|us|our)\b.*\?$|\b(?:thanks|thank you|excuse me|pardon me)\b/;
+
+/**
+ * Why a Quote's line is NOT the host's own statement — words the narration hands the viewer to say
+ * (`before`, the words leading into it, ends handing a line, and the line sounds said to someone or
+ * the script puts it in quotation marks: `quoted`), or a request to someone at all — or undefined when
+ * it may be signed with the host's name. Pure.
+ */
+export function notTheHostsWords(quote: string, before = "", quoted = false): string | undefined {
+  const norm = (s: string) => s.trim().toLowerCase().replace(/[’‘]/g, "'").replace(/[“”]/g, '"').replace(/\s+/g, " ");
+  const q = norm(quote).replace(/^"+|"+$/g, "").trim();
+  const polite = asksPolitely(q);
+  if (A_REQUEST.test(q) || (polite && (/\?$/.test(q) || WANTS_SOMETHING.test(q)))) return "it is a request to someone, not a saying of the host's";
+  const lead = norm(before).replace(/[\s"'.,;:!?…-]+$/, "");
+  if (HANDS_A_LINE.test(lead) && (quoted || /^"/.test(norm(quote)) || polite || WANTS_SOMETHING.test(q) || SAID_TO_SOMEONE.test(q))) {
+    const tail = lead.split(" ").slice(-3).join(" ");
+    return `the narrator hands it to the viewer to say ("…${tail}")`;
+  }
+  return undefined;
+}
+
+/** The words leading into word `first`: back to the end of the sentence before (the same sentence's
+ * opening when the line starts inside one), at most 30 words. Pure. */
+function wordsLeadingInto(words: Word[], first: number): string {
+  const out: string[] = [];
+  for (let i = first - 1; i >= 0 && out.length < 30; i--) {
+    const t = words[i].text.trim();
+    if (out.length && /[.?!]["”')]*$/.test(t)) break;
+    out.unshift(t);
+  }
+  return out.join(" ");
+}
+
+/** Does the SCRIPT open a quotation mark on this line — someone's speech inside the narration? The
+ * film's sound carries no quotation marks (job 399 heard "speak up. Could I keep…"; its script reads
+ * `speak up. "Could I keep…"`). Read from the scenes the line is said over; a straight mark counts as
+ * opening only after a space, a colon or a dash, so the CLOSING mark of the speech before (`"No." Could
+ * I…`) is not one. Pure. */
+export function quotedInScript(film: FilmLayout, from: number, to: number, line: string): boolean {
+  const norm = (s: string) => s.toLowerCase().replace(/[’‘]/g, "'").replace(/\s+/g, " ").trim();
+  const script = norm(
+    film.scenes
+      .filter(s => s.narrationEndSec > from - 0.5 && s.narrationStartSec < to + 0.5)
+      .map(s => s.scriptText ?? "")
+      .join(" ")
+  );
+  const want = norm(line).replace(/^["“”]+|["“”]+$/g, "").trim();
+  for (const w of [want, want.replace(/[.?!,;:]+$/, "")]) {
+    const at = w ? script.indexOf(w) : -1;
+    if (at >= 0) return /(?:“|(?:^|[\s:(—-])")\s*$/.test(script.slice(Math.max(0, at - 4), at));
+  }
+  return false;
+}
+
+/**
+ * STEPS ARE DONE ONE AFTER ANOTHER. StepLabels and StepCards number every step and draw an arrow into
+ * it from the one before, so a step the line offers as a CHOICE reads as the next thing to do: Helena's
+ * job 399 (2:19) chained "1 Wait until served → 2 Catch an attendant → 3 Or step to galley → 4 Phrase
+ * it as offer" on "So wait until everyone's been served, then catch a flight attendant as they pass, or
+ * step back to the galley and phrase it as an offer." Stepping back to the galley is another way to
+ * reach the crew, and the arrows told the viewer to do both.
+ *
+ * A step after the first is a choice when its shown text or its spoken words ("at", "say") open on
+ * "or" / "or else" / "alternatively" (`OFFERS_A_CHOICE`), or the narrator says one of them right before
+ * its first word (`before(k)`: the words leading into step k, when it resolved). The first step never
+ * is: "Or look underneath this video, open the description, and tap the link" (the same film) offers
+ * the whole sequence as a choice, and its steps are still done in order. An "or" INSIDE a step ("Wait
+ * a minute or two") is part of it. Returns the steps that are choices, counted from 0. Pure.
+ */
+const OFFERS_A_CHOICE = /^(?:or|alternatively)\b/;
+export function choiceSteps(steps: unknown, before: (k: number) => string | undefined = () => undefined): number[] {
+  if (!Array.isArray(steps)) return [];
+  const opens = (v: unknown) => {
+    const s = typeof v === "string" ? v : (v as { text?: unknown } | null)?.text;
+    return typeof s === "string" && OFFERS_A_CHOICE.test(s.trim().replace(/^@/, "").replace(/^["“'‘(]+/, "").toLowerCase());
+  };
+  const out: number[] = [];
+  steps.forEach((step, k) => {
+    if (k === 0 || !step || typeof step !== "object") return;
+    const o = step as { text?: unknown; at?: unknown; say?: unknown };
+    const lead = (before(k) ?? "").toLowerCase().split(/[^a-z]+/).filter(Boolean);
+    const saidFirst = ["or", "alternatively"].includes(lead[lead.length - 1] ?? "") || lead.slice(-2).join(" ") === "or else";
+    if (opens(o.text) || opens(o.at) || opens(o.say) || saidFirst) out.push(k);
+  });
+  return out;
+}
+
 /** Keys whose strings are not shown words (or are checked by the resolver already). */
 const NOT_SHOWN = new Set(["icon", "at", "say", "winner", "answer", "author", "start", "end"]);
 
@@ -302,10 +581,127 @@ export function uncoveredMoments(placed: ResolvedCue[], words: Word[], film: Fil
   });
 }
 
-/** An item as a list row: no leading article, at most five words, a capital first letter. */
+/** A word as compared: lower case, no punctuation ("throne," is "throne", "Rome’s" is "rome's"). */
+const plainWord = (w: string) => w.toLowerCase().replace(/[’‘]/g, "'").replace(/[^a-z0-9']/g, "");
+/** The words a headline leaves out: an article or a possessive, and the "own" after one. */
+const GRAMMAR_WORD = /^(?:a|an|the|his|her|its|their|my|your|our|own)$/;
+/** Words a row never ends on: each needs the word after it ("…at two IN", "…to end HIS"). */
+const HANGING_WORD = /^(?:a|an|the|his|her|its|their|my|your|our|own|of|in|on|at|to|for|from|with|by|into|onto|and|or|but|that|who|which|where|when)$/;
+/** A row's first letter in capitals. */
+const capitalized = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+/** An article or a possessive: one opens a noun phrase, and two never stack ("her the truth"). */
+const DETERMINER_WORD = /^(?:a|an|the|his|her|its|their|my|your|our)$/;
+/** The possessives, the only words an "own" follows ("his own life"). */
+const POSSESSIVE_WORD = /^(?:his|her|its|their|my|your|our)$/;
+
+/**
+ * Where a row starting at spoken word `i` starts once the article or possessive said right before
+ * it is taken back ("a | second bag of pretzels", "his own | life"): one of them, or a possessive and
+ * its "own" — never one before a row that opens on its own ("tell her | the truth" is not "Her the
+ * truth"), never "own" the verb ("if you own | a truck"), and "her" only where it cannot be the
+ * object of the verb before it ("pour her | coffee", "give her | flowers"): as the first word said,
+ * after "and"/"or"/a comma, or before "own". Pure.
+ */
+function leadIn(s: string[], spoken: string[], i: number): number {
+  if (DETERMINER_WORD.test(s[i])) return i;
+  const from = i > 1 && s[i - 1] === "own" && POSSESSIVE_WORD.test(s[i - 2]) ? i - 2 : i > 0 && DETERMINER_WORD.test(s[i - 1]) ? i - 1 : i;
+  if (from === i || s[from] !== "her" || s[from + 1] === "own") return from;
+  return from === 0 || /^(?:and|or|plus|then)$/.test(s[from - 1]) || /[,;:]$/.test(spoken[from - 1]) ? from : i;
+}
+
+/**
+ * An item as a list row: its spoken words with their grammar ("A waiting room", never "Waiting
+ * room"), at most `ROW_MAX_WORDS`, never ending on a word that needs the next ("The kitchen table at
+ * two in" — the cut used to stop wherever five words ran out), a capital first letter. The joining
+ * "and"/"or", and the "as" of "as rest", are left off.
+ */
 function rowText(item: string): string {
-  const w = item.replace(/^(a|an|the|as|and|or)\s+/i, "").replace(/[.,;:!?]+$/, "").split(/\s+/).slice(0, 5).join(" ");
-  return w.charAt(0).toUpperCase() + w.slice(1);
+  const words = item.replace(/^(?:as|and|or)\s+/i, "").replace(/[.,;:!?]+$/, "").split(/\s+/).filter(Boolean);
+  const w = words.slice(0, ROW_MAX_WORDS);
+  while (w.length > 1 && w.length < words.length && HANGING_WORD.test(plainWord(w[w.length - 1]))) w.pop();
+  return capitalized(w.join(" ").replace(/[,;:]+$/, ""));
+}
+
+/**
+ * A ROW KEEPS THE SPOKEN WORDS' GRAMMAR. A row the planner clipped from its item's spoken words by
+ * leaving out only the articles and possessives between them reads like a headline: Gideon's job 400
+ * (2:03) showed "One step from throne" for "an advisor standing one step from the throne" and
+ * "Ordered to end life" for "…would be ordered to end his own life". Those words go back in — and an
+ * article or possessive said right before the row's first word ("Second bag of pretzels" → "A second
+ * bag of pretzels", `leadIn`) — when the row still fits `ROW_MAX_WORDS`. A row in the planner's own words (it
+ * left out a word that is not grammar, added one, or wrote a spoken number in digits) is its short
+ * version and is kept as written: "Buried under obligations" for "buried under exactly the kind of
+ * obligations…". Returns the row to show. Pure.
+ */
+export function restoreRowGrammar(text: string, say: string): string {
+  const row = text.trim().split(/\s+/).filter(Boolean);
+  const spoken = say.trim().replace(/[.,;:!?]+$/, "").split(/\s+/).filter(Boolean);
+  const r = row.map(plainWord);
+  const s = spoken.map(plainWord);
+  if (!r.length || r.some(w => !w)) return text;
+  for (let i = s.indexOf(r[0]); i >= 0; i = s.indexOf(r[0], i + 1)) {
+    // The row's words in the spoken words, in order, with only grammar words between them.
+    let j = i;
+    let k = 1;
+    for (; k < r.length; k++) {
+      let n = j + 1;
+      while (n < s.length && s[n] !== r[k] && GRAMMAR_WORD.test(s[n])) n++;
+      if (n >= s.length || s[n] !== r[k]) break;
+      j = n;
+    }
+    if (k < r.length) continue;
+    const words = spoken.slice(leadIn(s, spoken, i), j + 1);
+    if (words.length === row.length || words.length > ROW_MAX_WORDS) return text;
+    return capitalized(words.join(" ").replace(/[,;:]+$/, ""));
+  }
+  return text;
+}
+
+/** One run of words found whole inside another ("the farmer" in "the farmer complains"). */
+function within(part: string[], whole: string[]): boolean {
+  if (!part.length || part.length > whole.length) return false;
+  for (let i = 0; i + part.length <= whole.length; i++) if (part.every((t, k) => whole[i + k] === t)) return true;
+  return false;
+}
+
+/**
+ * Are a list window's rows (each row's spoken words) the items of a list the pipeline found — each
+ * row one item, in the order said, its words inside that item's or holding them ("The farmer" for
+ * "The farmer complains")? Such a list passed the item rules when it was found. Pure.
+ */
+export function fromAFoundList(rows: string[], lists: { items: string[] }[]): boolean {
+  if (!rows.length) return false;
+  return lists.some(l => {
+    let k = 0;
+    return rows.every(row => {
+      const r = tokens(row);
+      while (k < l.items.length) {
+        const item = tokens(l.items[k++]);
+        if (within(r, item) || within(item, r)) return true;
+      }
+      return false;
+    });
+  });
+}
+
+/** A list window's rows as said: each item's "say", else its shown text. */
+function listRows(items: unknown): string[] {
+  if (!Array.isArray(items)) return [];
+  return items.map(it => {
+    const o = (it ?? {}) as { say?: unknown; text?: unknown };
+    return String(typeof o.say === "string" && o.say.trim() ? o.say : (o.text ?? "")).trim();
+  });
+}
+
+/** What the script says around `a`-`b` (seconds): the scenes it overlaps and one either side, so a
+ * sentence that starts in the scene before is whole. Pure. */
+function scriptAround(film: FilmLayout, a: number, b: number): string {
+  const over = film.scenes.map((s, k) => (s.narrationEndSec > a && s.narrationStartSec < b ? k : -1)).filter(k => k >= 0);
+  if (!over.length) return "";
+  return film.scenes
+    .slice(Math.max(0, over[0] - 1), over[over.length - 1] + 2)
+    .map(s => (s.scriptText ?? "").trim())
+    .join(" ");
 }
 
 /**
@@ -418,6 +814,16 @@ export type PlanInput = {
   /** The spoken lists the pipeline found in the script (`server/spokenLists.ts`): each one gets a
    * list graphic wherever one may go. */
   lists?: { items: string[]; kind?: "things" | "steps" }[];
+  /**
+   * Why a list's rows, as said, are not a spoken list by the rules every list the pipeline finds
+   * passes — or undefined when they are (the app hands `notAListAsSaid` from `server/spokenLists.ts`,
+   * so there is one set of rules). `script` is what the script says around the list. A list window
+   * the planner writes on its own is held to it (job 400's "Seneca's essay" numbered pieces of one
+   * sentence), and so is a stored list of things, which may predate the rules. Without it, neither is.
+   * `points`: the rows are the host's points (a HostListWindow's "what is coming"), which may be
+   * topics ("where they go", "when to retire one") as well as things.
+   */
+  listCheck?: (script: string, rows: string[], opts?: { points?: boolean }) => string | undefined;
 };
 
 /** A sentence the fill round offered back, and what came of it. */
@@ -468,7 +874,10 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
   const fullFrame = new Set(TEMPLATES.filter(t => t.kind === "card" || t.underlay === "window").map(t => t.id));
   const opts = { cuts, fps: FPS, structural, cards, fullFrame };
 
-  /** Converts every `icon` in a cue's props to its Noto code in place; collects the ones Noto lacks. */
+  /** Converts every `icon` in a cue's props to its Noto code in place. An icon left empty (`noIcon`)
+   * is taken off; so is one Noto has no image for, which is also named in `missing`. Taken off, not
+   * sent back to "pick another": an icon is the object itself or none (`ICON_REQUIRED`), and asked
+   * for a substitute the planner reaches for the nearest emoji of another kind (job 399's food tin). */
   const fixIcons = async (node: unknown, missing: string[]): Promise<void> => {
     if (Array.isArray(node)) {
       for (const x of node) await fixIcons(x, missing);
@@ -477,11 +886,16 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
     if (!node || typeof node !== "object") return;
     const o = node as Record<string, unknown>;
     for (const [k, v] of Object.entries(o)) {
-      if (k === "icon" && typeof v === "string") {
-        const code = notoCode(v);
+      if (k !== "icon") await fixIcons(v, missing);
+      else if (noIcon(v)) delete o.icon;
+      else {
+        const code = notoCode(String(v).trim());
         if (await ensureIcon(code)) o.icon = code;
-        else missing.push(v);
-      } else await fixIcons(v, missing);
+        else {
+          missing.push(String(v));
+          delete o.icon;
+        }
+      }
     }
   };
   /** Is number `n` said (as digits or in words) while the graphic is up? */
@@ -513,7 +927,22 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
   // gives way (Dale's "Coasters, ornaments, small cutting boards" had only a "Smalls" label).
   const required = new Set<string>();
   const priority = (s: CueSpec) => structural.has(s.template) || required.has(s.id);
-  const lists = (input.lists ?? []).filter(l => l.items.length >= 2 && l.items.length <= 5);
+  const sized = (input.lists ?? []).filter(l => l.items.length >= 2 && l.items.length <= 5);
+  // A STORED list of things is held to the same rules as a list window the planner writes
+  // (`listCheck`): a job keeps the lists found when it was made, and Gideon's job 400 kept "Two
+  // thousand years ago, | a man named Lucius Annaeus Seneca wrote a short, | furious" from before the
+  // rules — put to the planner as a list that MUST get a graphic, and built by `missingListCues` all
+  // the same. Read where it is said; one not heard word for word is held to its rows alone. A list
+  // of steps is never asked whether its steps are things.
+  const where = new Map(locateLists(words, sized).map(p => [p.n, p] as const));
+  const staleLists: PlanProblem[] = [];
+  const lists = sized.filter((l, n) => {
+    if (l.kind === "steps" || !input.listCheck) return true;
+    const at = where.get(n);
+    const why = input.listCheck(at ? scriptAround(film, at.a, at.b) : "", l.items);
+    if (why) staleLists.push({ cue: `spoken list "${l.items.join(", ")}"`, problem: `not a list of things by the rules lists are found by — ${why}; it gets no list graphic` });
+    return !why;
+  });
   // The model is told a list MUST get a graphic only where one may go: a list in the call to action
   // can never have one, so naming it there is at best ignored and at worst refused. `missingListCues`
   // still reads every list, so a list said after a mid-roll CTA is located after it, not on an earlier
@@ -579,18 +1008,48 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
         bad(`"${fragment[1]}" (${fragment[0]}) starts mid-sentence — a shown line must read as a whole thought`);
         continue;
       }
+      // A LIST WINDOW's rows are the spoken words with their grammar, never clipped into a headline
+      // (`restoreRowGrammar`: job 400's "Ordered to end life"), and at most ROW_MAX_WORDS each.
+      if (LIST_WINDOWS.has(spec.template) && Array.isArray(spec.props.items)) {
+        const items = spec.props.items as { text?: unknown; say?: unknown }[];
+        for (const it of items) if (it && typeof it.text === "string" && typeof it.say === "string") it.text = restoreRowGrammar(it.text, it.say);
+        const longRow = items.map(it => it?.text).find((s): s is string => typeof s === "string" && wordCount(s) > ROW_MAX_WORDS);
+        if (longRow) {
+          bad(`row "${longRow}" is ${wordCount(longRow)} words — a list row takes at most ${ROW_MAX_WORDS}: the item in its own spoken words, shortened`);
+          continue;
+        }
+      }
+      // A WARNING reads as one: its line, alone under the header, says what to avoid or what goes
+      // wrong — job 399's "Ask while the cart is still working its way back," told the viewer to do
+      // the very thing the script warned against (`namesTheDanger`).
+      const warning = spec.template === "WarningLabel" ? (spec.props.text as { text?: unknown } | undefined)?.text : undefined;
+      if (typeof warning === "string" && !namesTheDanger(warning)) {
+        bad(
+          `"${warning}" does not say what to avoid or what goes wrong — read alone under WARNING it tells the viewer to DO it. ` +
+            `Show the narrator's words that name the mistake or the harm ("never…", "don't…", "not…", "avoid…", "too…", the bad result), ` +
+            `or show the right way with another template (a caption, a statement, step labels), or drop it`
+        );
+        continue;
+      }
       tidyNumbers(spec.props);
       // A TITLE keeps the length it was planned with — but is never PLANNED under MIN_ON_SCREEN_SEC:
       // Dale's "Where to sell · 3 of 5" was planned at 1.4 s (job 397, 2:15). Raised, never refused:
       // a refused chapter takes its whole series down with it. An approved one keeps its length. (A
       // cut within CUT_SNAP_SEC before its end still ends it there, sooner; QA reports that.)
       if (structural.has(spec.template) && typeof spec.durationSec === "number" && spec.durationSec < MIN_ON_SCREEN_SEC) spec.durationSec = MIN_ON_SCREEN_SEC;
+      // AN ICON IS THE OBJECT OR NONE (`ICON_REQUIRED`): an empty or unknown one is taken off, a set
+      // left half-filled loses the rest (`iconsAsASet`), and only a template that IS its icon is refused
+      // without one — steered to a caption, never to the nearest emoji of another kind.
       const missing: string[] = [];
       await fixIcons(spec.props, missing);
-      if (missing.length) {
-        bad(`no Noto emoji for ${missing.join(" ")} — pick another`);
+      if (ICON_REQUIRED.has(spec.template) && typeof spec.props.icon !== "string") {
+        bad(
+          `${missing.length ? `no Noto emoji for ${missing.join(" ")}` : "no icon"} — ${spec.template} makes its point with its icon: ONE emoji that IS the object ` +
+            `its words name. Use that emoji, or show the line as a DimCaption (no icon); never the nearest emoji of another kind`
+        );
         continue;
       }
+      iconsAsASet(spec.props);
       // Slot it among what is placed by time, then resolve the whole sheet in film order (a
       // repeated phrase binds after the graphic before it).
       const at = placed.findIndex(p => p.t > t);
@@ -606,6 +1065,66 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
       }
       const mine = next.find(r => r.id === spec.id)!;
       startsAt.set(spec.id, startWordNear(spec, mine.start));
+      // A QUOTE is signed with the host's name, so it must be the host's own words — job 399 signed
+      // "Could I keep the rest of the can, please?", the line the host tells the viewer to say after
+      // "speak up." (`notTheHostsWords`). Read where it resolved: the words leading into it, and
+      // whether the script puts it in quotation marks.
+      if (spec.template === "Quote") {
+        const line = (spec.props.quote as { text?: unknown } | undefined)?.text;
+        const at = mine.sync.find(s => s.element.startsWith('quote "'));
+        const first = at ? words.findIndex(w => w.start === at.wordStart) : -1;
+        const why = typeof line === "string" && first >= 0 ? notTheHostsWords(line, wordsLeadingInto(words, first), quotedInScript(film, at!.wordStart, mine.contentEnd ?? mine.end, line)) : undefined;
+        if (why) {
+          undo();
+          bad(
+            `"${line}" is not the host's own words — ${why}. Signed with the host's name it reads as if the host said it. ` +
+              `Show it as a caption with no name (DimCaption over b-roll), or drop it`
+          );
+          continue;
+        }
+      }
+      // A LIST WINDOW is a list the narrator says (`listCheck`): Gideon's job 400 (1:41) numbered "1 Two
+      // thousand years ago / 2 Seneca wrote a short / 3 Furious / 4 Loving essay" on ONE sentence,
+      // the planner's own list. A list the pipeline found passed the same rules when it was found
+      // (`fromAFoundList`). Read around where it resolved.
+      if (LIST_WINDOWS.has(spec.template) && input.listCheck) {
+        const rows = listRows(spec.props.items);
+        const why =
+          rows.length && !fromAFoundList(rows, lists)
+            ? input.listCheck(scriptAround(film, mine.start, mine.contentEnd ?? mine.end), rows, { points: spec.template === "HostListWindow" })
+            : undefined;
+        if (why) {
+          undo();
+          const title = typeof spec.props.title === "string" && spec.props.title.trim() ? `"${spec.props.title.trim()}"` : "The list window";
+          bad(
+            `${title} is not a list the narrator says: ${why}. A list window numbers separate things he names one after ` +
+              `another ("a pen, a notebook, and a lamp"), each row on that item's own words — never a sentence chopped at ` +
+              `its commas, a time or describing words. Show the line another way (a caption or a statement), or drop it`
+          );
+          continue;
+        }
+      }
+      // STEPS are done one after another: a step the line offers as a CHOICE is not the next step
+      // (job 399's "3 Or step to galley", `choiceSteps`). Read where it resolved: the two words said
+      // right before each step's first word.
+      if (spec.template === "StepLabels" || spec.template === "StepCards") {
+        const steps = spec.props.steps;
+        const choices = choiceSteps(steps, k => {
+          const at = mine.sync.find(s => s.element.startsWith(`steps[${k}].at `));
+          const i = at ? words.findIndex(w => w.start === at.wordStart) : -1;
+          return i > 0 ? words.slice(Math.max(0, i - 2), i).map(w => w.text.trim()).join(" ") : undefined;
+        });
+        if (choices.length) {
+          undo();
+          const named = choices.map(k => `step ${k + 1} ("${String((steps as { text?: unknown }[])[k]?.text ?? "")}")`).join(" and ");
+          bad(
+            `${named} ${choices.length > 1 ? "are choices" : "is a choice"} instead of the step before, not the next step ("…, or …") — ` +
+              `numbered with an arrow into it, it tells the viewer to do both. Put the choice inside the step before it, as ONE step ` +
+              `("Call or email"), or drop it; or show the choice with Versus`
+          );
+          continue;
+        }
+      }
       // A graphic that sits still for seconds between its own words is a frozen frame, not a point.
       const times = [mine.start, ...mine.sync.map(x => x.wordStart), mine.contentEnd ?? mine.start].sort((a, b) => a - b);
       const wait = Math.max(0, ...times.slice(1).map((x, i) => x - times[i]));
@@ -683,14 +1202,16 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
   const listNote = offered.length
     ? `\n\nSPOKEN LISTS IN THIS SCRIPT — each one MUST get a list graphic wherever one may go (ListWindow over
 b-roll, HostListWindow over the host; steps may be StepCards or StepLabels), every item a row in the order
-said ("text" ≤5 words, "at": "@its first spoken words", "say": the item as said):
+said ("text" ≤${ROW_MAX_WORDS} words, the item's own spoken words with their "a"/"the"/"his", "at": "@its first spoken words", "say": the item as said):
 ${offered.map((l, i) => `${i + 1}. ${l.kind === "steps" ? "[steps] " : ""}${l.items.map(x => `"${x}"`).join(", ")}`).join("\n")}`
     : "";
   const user = userPrompt(film, kept0.length ? resolveCues(kept0, words, opts) : [], words) + listNote;
   const first = await ask(system, [{ role: "user", content: user }]);
   let specs = parseSheet(first).filter(c => !keptIds.has(c.id));
   let verdict = await validate(structuredClone(specs), false);
-  const rounds: PlanRound[] = [{ step: "first", asked: specs.length, kept: verdict.cues.length, problems: verdict.problems }];
+  // A stored list the rules refused is named with the first round, so a list left without a graphic
+  // is explained (it is no cue, so it is never put to the repair).
+  const rounds: PlanRound[] = [{ step: "first", asked: specs.length, kept: verdict.cues.length, problems: [...staleLists, ...verdict.problems] }];
   if (verdict.problems.some(p => !p.cue.startsWith("[kept]"))) {
     const fix = `These cues failed the checks (resolved against the real word times and the film's layout):
 ${verdict.problems.filter(p => !p.cue.startsWith("[kept]")).map(p => `- ${p.cue}: ${p.problem}`).join("\n")}

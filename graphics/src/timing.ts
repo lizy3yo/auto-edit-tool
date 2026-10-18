@@ -56,6 +56,46 @@ export function wordFrames(phrase: Phrase, fps: number): number[] {
   });
 }
 
+/**
+ * A strike-through drawn left to right across a phrase, however it wraps: how far each word, and
+ * each space between two words, is struck (0-1) when the stroke is `progress` (0-1) of the way
+ * along. The stroke runs over the characters in reading order — the first line, then the next —
+ * so every line of a wrapped phrase is crossed, a word at a time, and its speed does not depend
+ * on where the lines break. One bar across the middle of the whole block could not do that: on a
+ * myth wrapped to two lines it fell in the gap between them, ran past the words and left the
+ * second line unstruck (job 399, "He figures she must know somebody on the crew."). Pure.
+ */
+export function strikeSweep(words: string[], progress: number): { words: number[]; gaps: number[] } {
+  const p = Number.isFinite(progress) ? Math.min(1, Math.max(0, progress)) : 0;
+  const lens = words.map(w => Math.max(1, w.length));
+  const front = p * (lens.reduce((n, l) => n + l, 0) + Math.max(0, words.length - 1));
+  const part = (start: number, len: number) => Math.min(1, Math.max(0, (front - start) / len));
+  const struck: number[] = [];
+  const gaps: number[] = [];
+  let at = 0;
+  lens.forEach((len, i) => {
+    struck.push(part(at, len));
+    at += len;
+    if (i < lens.length - 1) {
+      gaps.push(part(at, 1));
+      at += 1;
+    }
+  });
+  return { words: struck, gaps };
+}
+
+/**
+ * Where a line drawn in from x 0 ends when it is `progress` (0-1) of the way along `length`, or
+ * null while it has not started — then it must not be drawn at all. A line of length 0 is not
+ * nothing: with round caps it paints a dot as wide as its stroke, and job 400's Before → After card
+ * (clock-before-after, 62.8-65.0 s) showed that dot alone in the middle of the screen for two
+ * seconds before its arrow drew. Pure.
+ */
+export function drawnTo(progress: number, length: number): number | null {
+  if (!(progress > 0) || !(length > 0)) return null;
+  return length * Math.min(1, progress);
+}
+
 /** 0 → 1 as a word fades in. Ease-out so it lands softly instead of popping. */
 export function fadeIn(frame: number, start: number, dur = MOTION.wordIn): number {
   return interpolate(frame, [start, start + dur], [0, 1], {

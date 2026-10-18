@@ -3,10 +3,13 @@ import type { StoryboardScene } from "@shared/types";
 import {
   applySpokenLists,
   findSpokenLists,
+  joinChoiceSteps,
   listsByShape,
+  notAListAsSaid,
   parseSpokenLists,
   splitSentences,
   spokenListsByShape,
+  stepsByShape,
   validateSpokenList,
   type SpokenList,
 } from "./spokenLists";
@@ -371,5 +374,158 @@ describe("a list left alone says why", () => {
     const r = applySpokenLists(scenes, shapeLists(scenes));
     expect(r.applied).toBe(0);
     expect(r.skipped.join(" ")).toMatch(/CTA/);
+  });
+});
+
+describe("a step offered as a choice is part of the step before it (A6, Helena's job 399)", () => {
+  // Job 399's sentence 32. Stepping back to the galley is another way to reach the crew, not a step done
+  // after catching one; the film's step graphic chained it as step 3 of 4.
+  const ask399 =
+    "So wait until everyone's been served, then catch a flight attendant as they pass, or step back to the galley, and phrase it as an offer.";
+  const steps = (sentence: string, items: string[]) =>
+    parseSpokenLists(JSON.stringify({ lists: [{ sentence: 0, kind: "steps", items }] }), [sentence]);
+  const joined = ["wait until everyone's been served", "catch a flight attendant as they pass, or step back to the galley", "phrase it as an offer"];
+
+  it("the model's four steps become three: the choice joins the step before it, in the sentence's own words", () => {
+    // the model leaves the joining "or" out of its items, or keeps it
+    expect(steps(ask399, ["wait until everyone's been served", "catch a flight attendant as they pass", "step back to the galley", "phrase it as an offer"])).toEqual([
+      { sentence: 0, items: joined, kind: "steps" },
+    ]);
+    expect(steps(ask399, ["wait until everyone's been served", "catch a flight attendant as they pass", "or step back to the galley", "phrase it as an offer"])).toEqual([
+      { sentence: 0, items: joined, kind: "steps" },
+    ]);
+    // the joined step is 13 words — each way is held to the item limit, not the two together
+    expect(joinChoiceSteps("Rinse it, scrub it, alternatively soak it overnight, then dry it.", ["Rinse it", "scrub it", "soak it overnight", "dry it"])).toEqual([
+      "Rinse it",
+      "scrub it, alternatively soak it overnight",
+      "dry it",
+    ]);
+  });
+
+  it("by sentence shape, a choice piece joins its step instead of sinking the sentence", () => {
+    // the real sentence opens on "So", which the shape rules never take as a step — as before
+    expect(stepsByShape(ask399)).toBeNull();
+    expect(stepsByShape(ask399.replace(/^So w/, "W"))).toEqual(["Wait until everyone's been served", joined[1], "phrase it as an offer"]);
+    expect(spokenListsByShape(["Rinse the jar, dry it, or leave it on the rack, and fill it to the top."])).toEqual([
+      { sentence: 0, items: ["Rinse the jar", "dry it, or leave it on the rack", "fill it to the top"], kind: "steps" },
+    ]);
+  });
+
+  it("a choice step's picture shows its first way: a picture draws one thing, never 'X or Y'", () => {
+    const found = steps(ask399, ["wait until everyone's been served", "catch a flight attendant as they pass", "step back to the galley", "phrase it as an offer"])!;
+    const scenes = [
+      scene(24, "Ask while the cart is still working its way back, and you're asking the crew to guess whether the last few rows will come up short."),
+      host(25, "So wait until everyone's been served, then catch a flight attendant as they pass,"),
+      scene(26, "or step back to the galley, and phrase it as an offer."),
+      host(27, "Two asks in, you might wonder how anyone keeps this straight."),
+    ];
+    const r = applySpokenLists(scenes, found);
+    const made = r.scenes.filter(s => s.listCut);
+    expect(made.map(s => s.scriptText)).toEqual([
+      "So wait until everyone's been served,",
+      "then catch a flight attendant as they pass, or step back to the galley,",
+      "and phrase it as an offer.",
+    ]);
+    expect(made[1].showSubject).toBe("the host's hands, mid-step: catch a flight attendant as they pass");
+  });
+
+  it("real step lists with an 'or' INSIDE a step are kept exactly as they were (jobs 351, 354-395, 399)", () => {
+    for (const [sentence, items] of [
+      ["It means getting the fabric damp or warm, pinning it into shape, and letting it dry that way so it remembers.", ["getting the fabric damp or warm", "pinning it into shape", "letting it dry that way so it remembers"]], // 351
+      ["Lift your phone, point the camera at that square, and hold it steady for a second or two.", ["Lift your phone", "point the camera at that square", "hold it steady for a second or two"]], // 354…395
+      // the first step after a sentence-opening "Or" is not joined to anything: the steps are still done in order
+      ["Or look underneath this video, open the description, and tap the link at the top.", ["look underneath this video", "open the description", "tap the link at the top"]], // 399
+    ] as [string, string[]][])
+      expect(steps(sentence, items)).toEqual([{ sentence: 0, items, kind: "steps" }]);
+    // a list of THINGS keeps its "or": three things to show (job 355)
+    const sparrow = "But a good chunk gets flicked into the dirt, carried off by a rat after dark, or shared with every sparrow on the block.";
+    const things = ["flicked into the dirt", "carried off by a rat after dark", "shared with every sparrow on the block"];
+    expect(parseSpokenLists(JSON.stringify({ lists: [{ sentence: 0, kind: "things", items: things }] }), [sparrow])).toEqual([{ sentence: 0, items: things }]);
+  });
+
+  it("two ways of doing one thing are no sequence of steps; a subject in a contraction is no step", () => {
+    expect(steps("Call the office, or send an email.", ["Call the office", "send an email"])).toEqual([]);
+    // the "or" piece used to sink this sentence; joined, its "and you'll know" must still not be a step
+    expect(stepsByShape("Pick one up, look it over, or ask the seller, and you'll know.")).toBeNull();
+    expect(stepsByShape("Pick one up, look it over, or ask the seller, and I'll explain the rest.")).toBeNull();
+  });
+
+  it("only an 'or' that leads into the step makes it a choice; one the model left off the step before does not", () => {
+    // said right before the step, "or else", or opening the comma piece ("…, or you can step back"): a choice
+    const ask = (lead: string) => ask399.replace(", or step back", lead);
+    const ways = ["wait until everyone's been served", "catch a flight attendant as they pass", "step back to the galley", "phrase it as an offer"];
+    expect(steps(ask(", or else step back"), ways)?.[0].items[1]).toBe("catch a flight attendant as they pass, or else step back to the galley");
+    expect(steps(ask(", or you can step back"), ways)?.[0].items[1]).toBe("catch a flight attendant as they pass, or you can step back to the galley");
+    // the gap may hold words the model trimmed off a real step ("or two", "or so"): those steps stay apart
+    expect(steps("Let it sit a minute or two, then wipe it off, and buff it dry.", ["let it sit a minute", "wipe it off", "buff it dry"])).toEqual([
+      { sentence: 0, items: ["let it sit a minute", "wipe it off", "buff it dry"], kind: "steps" },
+    ]);
+    expect(joinChoiceSteps("Sand it for an hour or so, then wipe it down, and oil it.", ["Sand it for an hour", "wipe it down", "oil it"])).toEqual([
+      "Sand it for an hour",
+      "wipe it down",
+      "oil it",
+    ]);
+  });
+});
+
+describe("a list graphic is a list the narrator says (round 10 graphics review, 2026-10-18)", () => {
+  // Gideon's job 400 (1:41): the planner's own ListWindow "Seneca's essay" numbered pieces of one
+  // sentence — a time, a broken clause and describing words.
+  const seneca =
+    "Two thousand years ago, a man named Lucius Annaeus Seneca wrote a short, furious, loving essay to a man named Paulinus, the official in charge of Rome’s grain supply — busy, important, and worn down to the rims.";
+  const whoHeWas =
+    "Seneca was no monk on a hillside. He was one of the richest men in the empire, an advisor standing one step from the throne, buried under exactly the kind of obligations we are about to talk about — and a man who, years later, would be ordered to end his own life by the very emperor he had served.";
+
+  it("job 400's 'Seneca's essay' rows are refused for the time row; the stored list it came from is too", () => {
+    expect(notAListAsSaid(seneca, ["Two thousand years ago", "wrote a short", "furious", "loving essay"])).toBe(
+      'row 1 ("Two thousand years ago") names no thing (a length of time)'
+    );
+    expect(notAListAsSaid(seneca, ["Two thousand years ago", "a man named Lucius Annaeus Seneca wrote a short", "furious"])).toMatch(/^row 1 .*a length of time/);
+  });
+
+  it("rows of one sentence that are not said one after another as a list are refused", () => {
+    // the two men of job 400's sentence are 7 words apart: not a list
+    expect(notAListAsSaid(seneca, ["a man named Lucius Annaeus Seneca", "a man named Paulinus"])).toMatch(/^"a man named Lucius Annaeus Seneca", "a man named Paulinus" are not said as a list/);
+    // joined only by "and" (the finder's own example): not a list
+    expect(notAListAsSaid("By the time the potholders and the coasters were done, it was dark.", ["the potholders", "the coasters"])).toMatch(/are not said as a list/);
+    // describing words after a linking verb
+    expect(notAListAsSaid("It looks clean, bright, and calm.", ["clean", "bright", "calm"])).toMatch(/are describing words/);
+  });
+
+  it("a list the narrator says passes — however long its rows are said (job 400's 'Who Seneca was'), across sentences (job 393), or with a number said as digits", () => {
+    expect(
+      notAListAsSaid(whoHeWas, [
+        "an advisor standing one step from the throne",
+        "buried under exactly the kind of obligations we are about to talk about",
+        "and a man who, years later, would be ordered to end his own life",
+      ])
+    ).toBeUndefined();
+    expect(
+      notAListAsSaid("The other one is the slow one. A cord under a rug. A space heater quietly cooking the side of a mattress at 2 in the morning. It smolders.", [
+        "A cord under a rug",
+        "A space heater quietly cooking the side of a mattress",
+      ])
+    ).toBeUndefined();
+    const places = "Most people past sixty have — usually in silence, usually in some ordinary place, a waiting room, a church pew, the kitchen table at two in the morning when the house is too quiet.";
+    expect(notAListAsSaid(places, ["some ordinary place", "a waiting room", "a church pew", "the kitchen table at two in the morning"])).toBeUndefined();
+    expect(notAListAsSaid("Smalls to the markets, personalized work on Etsy, furniture on Marketplace.", ["Smalls to the markets", "personalized work on Etsy", "furniture on Marketplace"])).toBeUndefined();
+    // rows the script holds nowhere are held to the item rule alone
+    expect(notAListAsSaid("Coasters run $10 to $40.", ["10 coasters", "40 ornaments"])).toBeUndefined();
+  });
+
+  it("a host's agenda may list topics (Frederick's 'Detectors, where they go, and when to retire one', jobs 385/393/396); a list of things may not", () => {
+    const agenda = "Chapter 9 is tonight's chapter. Detectors, where they go, and when to retire one. There's a code on your screen.";
+    const rows = ["Detectors", "where they go", "when to retire one"];
+    expect(notAListAsSaid(agenda, rows, { points: true })).toBeUndefined();
+    expect(notAListAsSaid(agenda, rows)).toMatch(/^row 3 \("when to retire one"\) names no thing/);
+    // a topic row never excuses a time
+    expect(notAListAsSaid(seneca, ["Two thousand years ago", "wrote a short", "furious"], { points: true })).toMatch(/a length of time/);
+  });
+
+  it("validateSpokenList keeps its 12-word item limit unless told otherwise", () => {
+    const rows = ["an advisor standing one step from the throne", "buried under exactly the kind of obligations we are about to talk about"];
+    const sentence = whoHeWas.split(". ")[1];
+    expect(validateSpokenList(sentence, rows)).toBe(false);
+    expect(validateSpokenList(sentence, rows, false, Infinity)).toBe(true);
   });
 });

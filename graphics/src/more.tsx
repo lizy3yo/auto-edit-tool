@@ -514,7 +514,10 @@ export const ArrowCaption: React.FC<ArrowCaptionProps> = ({ phrase, emphasis, pl
 
 /* ───────────────────────── Icon callout ───────────────────────── */
 
-export type IconCalloutProps = BaseProps & { icon: string; phrase: Phrase; emphasis?: string[]; place?: Place };
+/** `icon` is required by the planner (the callout IS its icon). Typed optional because the finishing
+ * step takes off an icon whose image cannot be had (server/graphics `inlineIcons`): a saved cue then
+ * draws its words alone instead of crashing the render on a missing code. */
+export type IconCalloutProps = BaseProps & { icon?: string; phrase: Phrase; emphasis?: string[]; place?: Place };
 
 /** One short point with one icon on the footage ("Nobody earns a dime"). */
 export const IconCallout: React.FC<IconCalloutProps> = ({ icon, phrase, emphasis, place }) => {
@@ -525,10 +528,12 @@ export const IconCallout: React.FC<IconCalloutProps> = ({ icon, phrase, emphasis
   return (
     <Leave>
       <div style={placeStyle(place ?? { h: "left", v: "bottom" }, 150)}>
-        <div style={{ display: "flex", alignItems: "center", gap: 28, clipPath: `inset(0 ${(1 - wipe) * 100}% 0 0)`, ...plate(usePlate(0.7)), borderRadius: 80, padding: "18px 44px 18px 18px" }}>
-          <div style={{ ...ic, width: 110, height: 110, borderRadius: "50%", background: withAlpha(t.accent, 0.18), border: `3px solid ${t.accent}`, display: "flex", alignItems: "center", justifyContent: "center", flex: "none" }}>
-            <Icon code={icon} size={70} />
-          </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 28, clipPath: `inset(0 ${(1 - wipe) * 100}% 0 0)`, ...plate(usePlate(0.7)), borderRadius: 80, padding: icon ? "18px 44px 18px 18px" : "18px 44px" }}>
+          {icon && (
+            <div style={{ ...ic, width: 110, height: 110, borderRadius: "50%", background: withAlpha(t.accent, 0.18), border: `3px solid ${t.accent}`, display: "flex", alignItems: "center", justifyContent: "center", flex: "none" }}>
+              <Icon code={icon} size={70} />
+            </div>
+          )}
           <WordReveal phrase={phrase} emphasis={emphasis} style={{ fontFamily: t.font, fontWeight: 800, fontSize: 52, lineHeight: 1.12, color: t.text, maxWidth: 900 }} />
         </div>
       </div>

@@ -76,6 +76,22 @@ export type MythTruthProps = BaseProps & {
   emphasis?: string[];
 };
 
+/** The widest a Myth/Truth line runs at full size, px. */
+const MYTH_TRUTH_MEASURE = 1240;
+/** How many px the myth's type shrinks by as it steps back for the truth. */
+const MYTH_SHRINK = 24;
+
+/**
+ * The myth's type `p` (0-1) of the way into its step back: smaller, and its measure narrower in
+ * the same proportion, so its lines break exactly where they broke at full size. With the measure
+ * held at full width the shrinking words re-flowed mid-turn — three lines became two, "know"
+ * jumped up a line while the strike was being drawn (job 399). Pure.
+ */
+export function mythType(p: number): { fontSize: number; maxWidth: number } {
+  const fontSize = TYPE.headline - MYTH_SHRINK * Math.min(1, Math.max(0, p));
+  return { fontSize, maxWidth: (MYTH_TRUTH_MEASURE * fontSize) / TYPE.headline };
+}
+
 export const MythTruthCard: React.FC<MythTruthProps> = ({ myth, truth, emphasis }) => {
   const t = useTheme();
   const frame = useCurrentFrame();
@@ -88,7 +104,7 @@ export const MythTruthCard: React.FC<MythTruthProps> = ({ myth, truth, emphasis 
     fontWeight: 800,
     lineHeight: 1.12,
     letterSpacing: "-0.015em",
-    maxWidth: 1240,
+    maxWidth: MYTH_TRUTH_MEASURE,
     textShadow: TEXT_SHADOW,
   };
   return (
@@ -99,23 +115,13 @@ export const MythTruthCard: React.FC<MythTruthProps> = ({ myth, truth, emphasis 
           <div style={{ marginBottom: 22 }}>
             <Kicker text="Myth" bracketed />
           </div>
-          <div style={{ position: "relative", display: "inline-block" }}>
-            <WordReveal
-              phrase={myth}
-              style={{ ...big, fontSize: TYPE.headline - 24 * p, color: t.text }}
-            />
-            <div
-              style={{
-                position: "absolute",
-                left: 0,
-                top: "52%",
-                height: 7,
-                width: `${strike * 100}%`,
-                background: t.danger,
-                borderRadius: 4,
-              }}
-            />
-          </div>
+          {/* Struck word by word, every line (job 399: one bar at half the block's height fell
+              between the two lines of a wrapped myth and ran past its words). */}
+          <WordReveal
+            phrase={myth}
+            strike={{ progress: strike, color: t.danger }}
+            style={{ ...big, ...mythType(p), color: t.text }}
+          />
         </div>
         <div style={{ opacity: p, transform: `translateY(${(1 - p) * 24}px)` }}>
           <div style={{ marginBottom: 22 }}>
@@ -446,10 +452,12 @@ export const StepCardsCard: React.FC<StepCardsProps> = ({ kicker, steps }) => {
 
 /* ───────────────────────── Before → After ───────────────────────── */
 
+/** The icons are optional: an icon is the object a side names, or none (job 400's "The loudest
+ * thing" names no object, and was given a megaphone). The planner keeps them as a pair. */
 export type BeforeAfterProps = BaseProps & {
   kicker?: string;
-  before: { icon: string; label: string; at: number };
-  after: { icon: string; label: string; at: number };
+  before: { icon?: string; label: string; at: number };
+  after: { icon?: string; label: string; at: number };
 };
 
 export const BeforeAfterCard: React.FC<BeforeAfterProps> = ({ kicker, before, after }) => {
@@ -476,12 +484,12 @@ export const BeforeAfterCard: React.FC<BeforeAfterProps> = ({ kicker, before, af
       )}
       <AbsoluteFill style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 120, paddingTop: 80 }}>
         <div style={{ ...b, display: "flex", flexDirection: "column", alignItems: "center", width: 620 }}>
-          <Icon code={before.icon} size={240} />
+          {before.icon && <Icon code={before.icon} size={240} />}
           <div style={{ ...label, color: t.textSecondary }}>{before.label}</div>
         </div>
         <Arrow atFrame={at(after.at) - 6} width={180} thickness={8} />
         <div style={{ ...a, display: "flex", flexDirection: "column", alignItems: "center", width: 620 }}>
-          <Icon code={after.icon} size={240} />
+          {after.icon && <Icon code={after.icon} size={240} />}
           <div style={{ ...label, color: t.accent }}>{after.label}</div>
         </div>
       </AbsoluteFill>

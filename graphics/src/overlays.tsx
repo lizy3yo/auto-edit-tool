@@ -235,7 +235,9 @@ export const WarningLabel: React.FC<WarningProps> = ({ label = "Warning", text, 
 
 /* ───────────────────────── Icon labels ───────────────────────── */
 
-export type IconLabelsProps = BaseProps & { items: { icon: string; text: string; at: number }[] };
+/** The icons are optional: each is the thing its label names, or none (round 10 review); the planner
+ * gives every item one or none. */
+export type IconLabelsProps = BaseProps & { items: { icon?: string; text: string; at: number }[] };
 
 export const IconLabels: React.FC<IconLabelsProps> = ({ items }) => {
   const at = useAt();
@@ -254,7 +256,7 @@ export const IconLabels: React.FC<IconLabelsProps> = ({ items }) => {
       >
         {items.map((it, i) => (
           <Pill key={i} at={at(it.at)}>
-            <Icon code={it.icon} size={60} />
+            {it.icon && <Icon code={it.icon} size={60} />}
             <span style={{ fontSize: 36, fontWeight: 800 }}>{it.text}</span>
           </Pill>
         ))}

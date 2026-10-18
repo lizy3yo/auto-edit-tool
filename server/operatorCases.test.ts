@@ -2034,3 +2034,321 @@ describe("a picture never ships a known fault in silence (the audit, 2026-10-18)
     expect(out).toContain("house sign");
   });
 });
+
+describe("a myth card's strike-through crosses every line of the myth (round 10 graphics, 2026-10-18)", () => {
+  // 399 crew-myth-truth (25.1-26.5 s): "He figures she must know somebody on the crew." wrapped as it
+  // shrank for the truth; the ONE bar at half the block's height fell in the gap between the two
+  // lines, ran ~100 px past the words, and "somebody on the crew." was never struck.
+  const myth = "He figures she must know somebody on the crew.";
+
+  it("399 crew-myth-truth: when the stroke is done every word and every space between two is struck, the second line too", async () => {
+    const { splitWords, strikeSweep } = await import("../graphics/src/timing");
+    const words = splitWords(myth);
+    const done = strikeSweep(words, 1);
+    expect(done.words).toEqual(words.map(() => 1));
+    expect(done.gaps).toEqual(words.slice(1).map(() => 1));
+    // it is drawn left to right over the words in reading order, never all at once
+    const half = strikeSweep(words, 0.5);
+    expect(half.words[0]).toBe(1);
+    expect(half.words[words.length - 1]).toBe(0);
+    // and nothing before the truth comes
+    expect(strikeSweep(words, 0).words.every(a => a === 0)).toBe(true);
+  });
+
+  it("399: the myth keeps its line breaks while it shrinks, so 'know' no longer jumps up a line mid-strike", async () => {
+    const { mythType } = await import("../graphics/src/cards");
+    const full = mythType(0);
+    for (const p of [0.3, 0.6, 1]) {
+      const m = mythType(p);
+      expect(m.maxWidth / m.fontSize).toBeCloseTo(full.maxWidth / full.fontSize, 9);
+      expect(m.fontSize).toBeLessThan(full.fontSize);
+    }
+    expect(full).toEqual({ fontSize: 112, maxWidth: 1240 }); // the myth before the turn is as it was
+  });
+});
+
+describe("an arrow shows nothing before it draws (round 10 graphics, 2026-10-18)", () => {
+  // 400 clock-before-after (62.77-67.77 s): the Before → After card's arrow drew with "now" (~65.0 s);
+  // until then its shaft was a line of length 0, and the round cap painted a stray orange dot alone
+  // at the middle of the screen from the card's first frame.
+  it("400 clock-before-after: from the card's start to the arrow's start the shaft is not drawn at all, then it draws", async () => {
+    const { appearFrame, drawnTo, fadeIn } = await import("../graphics/src/timing");
+    const shaft = 180 - 8 * 3.2; // the card's arrow: 180 wide, 8 thick
+    const drawsAt = appearFrame(65.167 - 62.767, 30) - 6; // "now", as the card times it
+    for (let f = 0; f <= drawsAt; f++) expect(drawnTo(fadeIn(f, drawsAt, 10), shaft)).toBeNull();
+    expect(drawnTo(fadeIn(drawsAt + 1, drawsAt, 10), shaft)).toBeGreaterThan(0); // drawing, not a dot
+    expect(drawnTo(fadeIn(drawsAt + 10, drawsAt, 10), shaft)).toBe(shaft);
+  });
+});
+
+describe("a caption on a split stays beside the host (round 10 graphics, 2026-10-18)", () => {
+  // 400 host-chair-closer (138.20-143.13 s, scene 27: host left, a blank scroll right): the caption
+  // was drawn for the full frame and its dark box ran across the seam, half over the scroll. The
+  // lab's composite gave it the host's panel; the app's finishing step never did.
+  const R2 = "https://pub-x.r2.dev/longform";
+  const split = (job: number, index: number, start: number, end: number, joined = true) =>
+    ({
+      index,
+      narrationStartSec: start,
+      narrationEndSec: end,
+      hostPresent: true,
+      sceneStatus: "completed",
+      splitVisual: "the picture beside the host",
+      ...(joined ? { splitRightUrl: `${R2}/${job}/still-${index}-a.mp4` } : {}),
+      clipUrls: [`${R2}/${job}/${joined ? "split" : "clip"}-${index}-0.mp4`],
+      hostClipUrls: [`${R2}/${job}/clip-${index}-0.mp4`],
+    }) as unknown as StoryboardScene;
+
+  it("400 host-chair-closer over split scene 27 is drawn inside the host's 840 px; 397 impulse-buys over split scene 34 too", async () => {
+    const { filmLayoutOf } = await import("./graphics/apply");
+    const { hostPanelFor } = await import("../graphics/src/plan/rules");
+    const { templateById } = await import("../graphics/src/registry");
+    expect(templateById("HostCaption").panel).toBe(true);
+    expect(hostPanelFor({ start: 138.2, end: 143.133 }, filmLayoutOf([split(400, 27, 138.19, 144.12)]))).toEqual({ x: 0, w: 840 });
+    expect(hostPanelFor({ start: 173.433, end: 176.533 }, filmLayoutOf([split(397, 34, 173.43, 179.89)]))).toEqual({ x: 0, w: 840 });
+  });
+
+  it("400 host-sixty-four over scene 3, a split whose picture never came (the host take plays full frame), keeps the full frame", async () => {
+    const { filmLayoutOf } = await import("./graphics/apply");
+    const { hostPanelFor } = await import("../graphics/src/plan/rules");
+    expect(hostPanelFor({ start: 15.267, end: 17.333 }, filmLayoutOf([split(400, 3, 12.88, 17.32, false)]))).toBeUndefined();
+  });
+});
+
+describe("a warning card says what to avoid, never the thing to avoid as advice (round 10 graphics, 2026-10-18)", () => {
+  // 399 dont-ask-too-early (2:13.1-2:16.1, over scene 24): under the red WARNING header the card read
+  // "Ask while the cart is still working its way back," — the first ten words of "…, and you're asking
+  // the crew to guess whether the last few rows will come up short", which warns NOT to ask then. On
+  // screen it told the viewer to do it, and left just as the consequence began.
+  it("399: the 'do X' half of a 'do X, and [bad result]' warning is refused; the right way goes in another template", async () => {
+    const { namesTheDanger } = await import("../graphics/src/plan/planner");
+    expect(namesTheDanger("Ask while the cart is still working its way back,")).toBe(false);
+    expect(namesTheDanger("So wait until everyone's been served,")).toBe(false);
+  });
+
+  it("every warning card the planner placed in earlier films still passes (Ruth 350, Frederick 376/384/385, Hank 382, job 387)", async () => {
+    const { namesTheDanger } = await import("../graphics/src/plan/planner");
+    for (const real of [
+      "These bowls are not for hot food or the microwave",
+      "Keep all ten fingers away from that rotary cutter",
+      "No date at all? It's old enough.",
+      "Every notch has to be dead on",
+      "Smoke alarms expire. At 10 years the unit is finished.",
+      "The old 9-volt battery starts chirping, somebody yanks it out, and that alarm is now doing absolutely nothing.",
+      "The mistake with pearls is saving them.",
+    ])
+      expect(namesTheDanger(real), real).toBe(true);
+  });
+});
+
+describe("a warning card may simply name the thing to avoid (round 10 graphics review, 2026-10-18)", () => {
+  // 395 dark-beads-warning: "Now the one that's aging you. Chunky black or very dark beads." — the card
+  // showed the second sentence under WARNING. It has no danger word, but a thing named on its own
+  // cannot tell the viewer to do anything, so it stays a warning. 389 leave-room-in-price ("Either way,
+  // leave enough room in the price") is the right way, a command, and goes to another template.
+  it("395's named thing passes; 389's command and 399's 'do X' half are still refused", async () => {
+    const { namesTheDanger } = await import("../graphics/src/plan/planner");
+    expect(namesTheDanger("Chunky black or very dark beads.")).toBe(true);
+    expect(namesTheDanger("Either way, leave enough room in the price")).toBe(false);
+    expect(namesTheDanger("Ask while the cart is still working its way back,")).toBe(false);
+    expect(namesTheDanger("Ask while the cart is still working its way back.")).toBe(false);
+  });
+});
+
+describe("a quote card signed with the host's name is the host's own words (round 10 graphics review, 2026-10-18)", () => {
+  // 399 keep-the-can-quote (1:23.6-1:25.9, over scene 17): "So when the cart reaches your row, speak up.
+  // "Could I keep the rest of the can, please?"" — the card showed the second sentence signed
+  // "— HELENA HART". Those are the words the host tells the VIEWER to say to the crew; signed by the
+  // host, a flight attendant, it read as her asking for the can. Such a line goes to a caption with no name.
+  it("399: the line the viewer is told to say is refused as a quote, by its lead-in and as a request", async () => {
+    const { notTheHostsWords } = await import("../graphics/src/plan/planner");
+    expect(notTheHostsWords("Could I keep the rest of the can, please?", "So when the cart reaches your row, speak up.")).toBeDefined();
+    expect(notTheHostsWords("Could I keep the whole can?", "So when the cart comes, speak up.")).toBeDefined();
+  });
+
+  it("every quote the planner signed in earlier films still passes, with the words said before it (Frederick 376/383, Dale 389)", async () => {
+    const { notTheHostsWords } = await import("../graphics/src/plan/planner");
+    expect(notTheHostsWords("Close the bedroom doors at night.", "One more, and it's free.")).toBeUndefined();
+    expect(notTheHostsWords("Its job is catching the slow part.", "So the alarm's real job was never the flame.")).toBeUndefined();
+    expect(
+      notTheHostsWords(
+        "Build it well, price it honest, and let every piece find its lane.",
+        "For more shop-tested fixes like these, subscribe to Dale Oakfield's Workshop, and tell me in the comments which of the three sells best where you live."
+      )
+    ).toBeUndefined();
+  });
+});
+
+describe("a quote the host introduces as her own saying stays a quote (round 10 graphics review, 2026-10-18)", () => {
+  // The A5 check above first read "always"/"just" as a command wherever it stood, so "Like I always
+  // say," — the host introducing her OWN saying — read as handing the viewer a line, and "please" as a
+  // verb read as a request. Both refused the very line a Quote is for; job 399 stays refused.
+  it("'Like I always say, \"…\"' and 'You can't please everyone, so why try?' pass; job 399 is still refused", async () => {
+    const { notTheHostsWords } = await import("../graphics/src/plan/planner");
+    expect(notTheHostsWords("Measure twice, cut once.", "Like I always say,", true)).toBeUndefined();
+    expect(notTheHostsWords("Slow is smooth, and smooth is fast.", "As I always tell them:", true)).toBeUndefined();
+    expect(notTheHostsWords("You can't please everyone, so why try?")).toBeUndefined();
+    expect(notTheHostsWords("Could I keep the rest of the can, please?", "So when the cart reaches your row, speak up.", true)).toBeDefined();
+    expect(notTheHostsWords("Could I see the one in the window?", "So always ask:")).toBeDefined();
+  });
+});
+
+describe("a step chain shows steps done in order; a choice is not the next step (round 10 graphics review, 2026-10-18)", () => {
+  // 399 snack-ask-steps (2:19.8-2:28.6, over scenes 25-26): "So wait until everyone's been served, then
+  // catch a flight attendant as they pass, or step back to the galley, and phrase it as an offer." The
+  // StepLabels chain read "1 Wait until served → 2 Catch an attendant → 3 Or step to galley → 4 Phrase it
+  // as offer"; the galley is another way to reach the crew, and the arrows told the viewer to do both.
+  it("399: the chain with the choice as step 3 is refused; the step chains placed before (385, 386, 397) pass", async () => {
+    const { choiceSteps } = await import("../graphics/src/plan/planner");
+    expect(
+      choiceSteps([
+        { at: "@wait until everyone's", text: "Wait until served" },
+        { at: "@then catch a flight attendant", text: "Catch an attendant" },
+        { at: "@or step back", text: "Or step to galley" },
+        { at: "@and phrase it", text: "Phrase it as offer" },
+      ])
+    ).toEqual([2]);
+    expect(choiceSteps([{ text: "Get a stepladder" }, { text: "Take one alarm down" }, { text: "Read the label" }], k => [undefined, "a stepladder,", "down, and"][k])).toEqual([]);
+    expect(choiceSteps([{ text: "Measurements first line" }, { text: "Piece to driveway" }], k => [undefined, "line, and"][k])).toEqual([]);
+    expect(choiceSteps([{ text: "Build it well" }, { text: "Price it honest" }, { text: "Find its lane" }], k => [undefined, "it well,", "honest, and"][k])).toEqual([]);
+  });
+
+  it("399: the spoken-list finder joins the choice to the step before it; the same film's 'Or look underneath…' steps stay", async () => {
+    const { parseSpokenLists } = await import("./spokenLists");
+    const steps = (sentence: string, items: string[]) => parseSpokenLists(JSON.stringify({ lists: [{ sentence: 0, kind: "steps", items }] }), [sentence]);
+    expect(
+      steps("So wait until everyone's been served, then catch a flight attendant as they pass, or step back to the galley, and phrase it as an offer.", [
+        "wait until everyone's been served",
+        "catch a flight attendant as they pass",
+        "step back to the galley",
+        "phrase it as an offer",
+      ])?.[0].items
+    ).toEqual(["wait until everyone's been served", "catch a flight attendant as they pass, or step back to the galley", "phrase it as an offer"]);
+    const scan = ["look underneath this video", "open the description", "tap the link at the top"];
+    expect(steps("Or look underneath this video, open the description, and tap the link at the top.", scan)?.[0].items).toEqual(scan);
+  });
+});
+
+describe("a list window is a list the narrator says, its rows in his own words (round 10 graphics review, 2026-10-18)", () => {
+  // 400 seneca-essay-list (1:41-1:48, over scenes 21-24): the planner's own ListWindow "Seneca's essay"
+  // numbered "1 Two thousand years ago / 2 Seneca wrote a short / 3 Furious / 4 Loving essay" on one
+  // sentence. 400 who-seneca-was (2:03-2:16): rows clipped into headlines, "One step from throne" and
+  // "Ordered to end life".
+  const essay =
+    "Two thousand years ago, a man named Lucius Annaeus Seneca wrote a short, furious, loving essay to a man named Paulinus, the official in charge of Rome’s grain supply — busy, important, and worn down to the rims.";
+  const who =
+    "He was one of the richest men in the empire, an advisor standing one step from the throne, buried under exactly the kind of obligations we are about to talk about — and a man who, years later, would be ordered to end his own life by the very emperor he had served.";
+
+  it("400: 'Seneca's essay' is not a list; 'Who Seneca was' and the lists placed before (397, 399, 400) are", async () => {
+    const { notAListAsSaid } = await import("./spokenLists");
+    expect(notAListAsSaid(essay, ["Two thousand years ago", "wrote a short", "furious", "loving essay"])).toMatch(/a length of time/);
+    expect(notAListAsSaid(essay, ["a man named Lucius Annaeus Seneca", "a man named Paulinus"])).toMatch(/not said as a list/);
+    expect(
+      notAListAsSaid(who, [
+        "an advisor standing one step from the throne",
+        "buried under exactly the kind of obligations we are about to talk about",
+        "and a man who, years later, would be ordered to end his own life",
+      ])
+    ).toBeUndefined();
+    expect(notAListAsSaid("Run all three, and let each one carry its own lane. Smalls to the markets, personalized work on Etsy, furniture on Marketplace.", ["Smalls to the markets", "personalized work on Etsy", "furniture on Marketplace"])).toBeUndefined();
+    expect(
+      notAListAsSaid("one of them was sitting in an empty row closer to the front, holding the whole can of ginger ale, a second bag of pretzels, and a bottle of water for later.", [
+        "the whole can of ginger ale",
+        "a second bag of pretzels",
+        "a bottle of water for later",
+      ])
+    ).toBeUndefined();
+    expect(notAListAsSaid("The farmer complains, the senator complains, the old complain, and the young are already rehearsing the complaint.", ["The farmer complains", "the senator complains", "the old complain"])).toBeUndefined();
+  });
+
+  it("400: the clipped rows get their 'the' and 'his own' back; a row in the planner's own words stays", async () => {
+    const { restoreRowGrammar } = await import("../graphics/src/plan/planner");
+    expect(restoreRowGrammar("One step from throne", "an advisor standing one step from the throne")).toBe("One step from the throne");
+    expect(restoreRowGrammar("Ordered to end life", "and a man who, years later, would be ordered to end his own life")).toBe("Ordered to end his own life");
+    expect(restoreRowGrammar("Buried under obligations", "buried under exactly the kind of obligations we are about to talk about")).toBe("Buried under obligations");
+    expect(restoreRowGrammar("Smalls → markets", "Smalls to the markets")).toBe("Smalls → markets");
+  });
+});
+
+describe("QA never fails a card the resolver held to the cut through a pause (round 10 graphics review, 2026-10-18)", () => {
+  // 400 seven-thieves (1:35-1:41): the "7 thieves" card left on the cut at 100.63, in the silence after
+  // "…name all seven of the thieves.", and the film's QA said "still up after its words" — it kept its
+  // own, looser copy of the resolver's rules and measured from "seven" with a caption's 1.2 s.
+  it("400: the stored plan, its word times and cuts resolve the card where the film had it, and QA passes it", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolveCues, stillUpAfterWords } = await import("../graphics/src/cueResolve");
+    const { TEMPLATES } = await import("../graphics/src/registry");
+    const job = JSON.parse(readFileSync("graphics/src/plan/__fixtures__/job400-graphics.json", "utf8"));
+    const cues = resolveCues(job.plan, job.words, {
+      cuts: job.cutFrames.map((f: number) => f / 30),
+      fps: 30,
+      structural: new Set(TEMPLATES.filter(t => t.structural).map(t => t.id)),
+      cards: new Set(TEMPLATES.filter(t => t.kind === "card").map(t => t.id)),
+      fullFrame: new Set(TEMPLATES.filter(t => t.kind === "card" || t.underlay === "window").map(t => t.id)),
+    });
+    const card = cues.find(c => c.id === "seven-thieves")!;
+    expect([card.start, card.end, card.spokenEnd]).toEqual([95.3, 100.633, 100.905]);
+    expect(stillUpAfterWords(card, 30)).toBe(false);
+    // kept 2 s into the next sentence, it is still failed
+    expect(stillUpAfterWords({ ...card, end: 103 }, 30)).toBe(true);
+  });
+});
+
+describe("an icon is the object its words name, or none (round 10 graphics review, 2026-10-18)", () => {
+  // 399 whole-can-fact (1:09.5-1:13.7): the FactCard's icon was 1f96b "canned food", a food tin, on a
+  // fact about the rest of a drink can — Unicode has no drink can, and the catalogue asked for an icon
+  // on every card. 400 clock-before-after (1:02.8-1:07.8): an alarm clock for "Background noise at
+  // thirty" and a megaphone for "The loudest thing". The repo has no table of emoji names, so whether
+  // an emoji IS the object is the prompt's rule alone; what the code holds is that an icon may be left out.
+  const words = (s: string) =>
+    s.split(" ").map(t => {
+      const [text, range] = t.split("@");
+      const [start, end] = range.split("-").map(Number);
+      return { text, start, end };
+    });
+  const scene = (index: number, a: number, b: number, scriptText: string, hostPresent = false) => ({ index, narrationStartSec: a, narrationEndSec: b, scriptText, hostPresent, cta: false, split: false, hostOpener: false });
+  const answering = (cue: object) => async () => JSON.stringify({ cues: [cue] });
+
+  it("the planner is told: the object itself, or leave the icon out", async () => {
+    const { systemPrompt } = await import("../graphics/src/plan/planner");
+    const prompt = systemPrompt({ kept: false });
+    expect(prompt).toContain(`"icon" is OPTIONAL everywhere but IconCallout`);
+    expect(prompt).toContain("the nearest emoji of another");
+    expect(prompt).not.toContain("a plain, literal object");
+  });
+
+  it("399: the fact card is kept with no icon — an icon written blank is no longer refused as a missing emoji", async () => {
+    const { planGraphics } = await import("../graphics/src/plan/planner");
+    const heard = words(
+      "On@69.628-69.708 many@69.768-69.968 of@70.008-70.048 those@70.088-70.288 carriers,@70.328-70.828 you@71.008-71.108 can@71.149-71.249 have@71.289-71.409 the@71.449-71.529 whole@71.589-71.829 thing@71.909-72.189 just@72.329-72.489 by@72.529-72.649 asking.@72.769-73.13 I@73.87-73.97"
+    );
+    const film = { scenes: [scene(16, 59.25, 73.71, "On many of those carriers, you can have the whole thing just by asking."), scene(17, 73.71, 85.87, "I figured that out much too late,")] };
+    const fact = { id: "whole-can-fact", template: "FactCard", start: "On many of those carriers,", startPad: -0.15, end: "just by asking.", endPad: 0.3, props: { kicker: "Fact", fact: { text: "On many of those carriers, you can have the whole thing just by asking.", words: true }, emphasis: ["asking."], icon: "" } };
+    const out = await planGraphics({ words: heard, film, ask: answering(fact), ensureIcon: async () => true });
+    expect(out.rounds[0].problems).toEqual([]);
+    expect(out.cues.map(c => c.id)).toEqual(["whole-can-fact"]);
+    expect(out.cues[0].props).not.toHaveProperty("icon");
+  });
+
+  it("400: with the after side's icon left out, the clock card is kept and shows no icon on either side", async () => {
+    const { planGraphics } = await import("../graphics/src/plan/planner");
+    const heard = words(
+      "and@62.065-62.165 a@62.205-62.225 clock@62.305-62.625 that@62.665-62.805 was@62.825-62.965 background@63.065-63.546 noise@63.606-63.866 at@63.926-63.986 30@64.226-64.527 is@65.027-65.107 now@65.167-65.327 the@65.367-65.487 loudest@65.607-66.048 thing@66.108-66.288 in@66.328-66.368 the@66.408-66.508 room.@66.568-66.848 My@67.889-68.049"
+    );
+    const film = { scenes: [scene(12, 59.26, 67.76, "and a clock that was background noise at thirty is now the loudest thing in the room."), scene(13, 67.76, 70.93, "My name is", true)] };
+    const clock = {
+      id: "clock-before-after",
+      template: "BeforeAfter",
+      start: "and a clock that was background",
+      startPad: -0.15,
+      end: "loudest thing in the room.",
+      endPad: 0,
+      props: { kicker: "The clock", before: { at: "@background noise at thirty", icon: "23f0", label: "Background noise at thirty" }, after: { at: "@now the loudest thing", label: "The loudest thing" } },
+    };
+    const out = await planGraphics({ words: heard, cuts: [59.26, 67.76, 70.93], film, ask: answering(clock), ensureIcon: async () => true });
+    expect(out.rounds[0].problems).toEqual([]);
+    const props = out.cues[0].props as { before: object; after: object };
+    expect(props.before).not.toHaveProperty("icon");
+    expect(props.after).not.toHaveProperty("icon");
+  });
+});

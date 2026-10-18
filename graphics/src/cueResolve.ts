@@ -49,9 +49,15 @@ export type ResolvedCue = {
   readSec?: number;
   /** It left in the next pause (within PAUSE_REACH_SEC) instead of mid-word. */
   leftInPause?: boolean;
-  /** For a graphic held to a cut: when the sentence it belongs to finished (its hold is measured
-   * from here, the same in the resolver and the QA). */
+  /** When its own sentence finished, as said (`ownSentenceEnd`): the words after its own last word
+   * that only finish that sentence, among those said while it was up. A hold is measured from here,
+   * and so is every graphic's lingering (`stillUpAfterWords`), the same in the resolver and the QA. */
   spokenEnd?: number;
+  /** A picture-replacing graphic that leaves WITH the picture, on a cut the hold rule covers
+   * (`holdToCut`) — held there, or its end already on it: that cut, and how long after `spokenEnd`
+   * the rule lets it stay (CARD_HOLD_SILENT_MAX_SEC when nothing more is said before the cut, else
+   * CARD_HOLD_MAX_SEC). It excuses staying until THAT cut, never past it. */
+  hold?: { cut: number; max: number };
 };
 
 /** Lower-case, digits kept, punctuation dropped; "10-year" → ["10", "year"]. */
@@ -488,6 +494,61 @@ export const NEW_LINE_GRACE_SEC = 0.3;
 /** A word that ends a sentence (the next word starts a new line). */
 const SENTENCE_END = new RegExp("[.?!][\"”')]*$");
 
+/**
+ * Where a graphic's OWN sentence finishes, as said: the words after its own last word (`from`) that
+ * only finish that sentence ("…a good night's sleep | you may or may not have had."), among those
+ * starting before `before`. `newLineAt` is when the next sentence begins, if it does before `before`.
+ */
+export function ownSentenceEnd(words: Word[], from: number, before: number): { spoken: number; newLineAt?: number } {
+  let spoken = from;
+  for (let k = 0; k < words.length; k++) {
+    const w = words[k];
+    if (w.start <= from + 1e-6 || w.start >= before) continue;
+    const prev = words[k - 1];
+    if (prev && SENTENCE_END.test(prev.text.trim()) && prev.end <= w.start) return { spoken, newLineAt: w.start };
+    spoken = Math.max(spoken, w.end);
+  }
+  return { spoken };
+}
+
+/**
+ * HOLD TO THE CUT: whether a picture-replacing graphic that would leave at `end` may stay until the
+ * picture changes at `cut` — through the rest of its own sentence and the pause after it, as long as
+ * the cut comes within CARD_HOLD_MAX_SEC of where that sentence finished (CARD_HOLD_SILENT_MAX_SEC
+ * when nothing more is said before the cut) and no new line has begun more than NEW_LINE_GRACE_SEC
+ * before it. The ONE test the resolver holds a card by and QA judges a card leaving with the picture
+ * by (`stillUpAfterWords`), on the same words, so the two cannot disagree: job 400's "7 thieves" card
+ * left on the cut at 100.63, in the pause after "…all seven of the thieves.", and QA failed it as
+ * "still up after its words" — it measured from "seven" (98.94) with the 1.2 s a caption gets.
+ */
+export function holdToCut(words: Word[], from: number, end: number, cut: number): { ok: boolean; spoken: number; max: number } {
+  const { spoken, newLineAt } = ownSentenceEnd(words, from, cut);
+  const newLine = newLineAt !== undefined && newLineAt > end + 1e-6 && newLineAt < cut - NEW_LINE_GRACE_SEC;
+  const silent = !words.some(w => w.start > spoken - 1e-6 && w.start < cut);
+  const max = silent ? CARD_HOLD_SILENT_MAX_SEC : CARD_HOLD_MAX_SEC;
+  return { ok: cut - spoken <= max && !newLine, spoken, max };
+}
+
+/**
+ * STILL UP AFTER ITS WORDS — QA's question, answered by the resolver's own rules on what it recorded
+ * from the same words, so QA never fails a graphic the resolver deliberately kept up. A graphic may
+ * stay, after its own sentence finished (`spokenEnd`, else its last word):
+ *  - LINGER_SEC, or to a picture cut within MAX_LINGER_SEC (the end snaps forward onto one);
+ *  - to the next pause within PAUSE_REACH_SEC (`leftInPause`), or for its reading time and then that pause;
+ *  - a picture-replacing graphic leaving WITH the picture: until the cut its hold covers (`hold`,
+ *    from `holdToCut`), never past it.
+ * One frame is allowed for edges rounded onto the frame grid. QA leaves titles out: they keep their
+ * planned length.
+ */
+export function stillUpAfterWords(c: ResolvedCue, fps: number): boolean {
+  if (c.contentEnd === undefined) return false;
+  const slack = 1 / fps + 1e-6;
+  if (c.end - c.start <= (c.readSec ?? 0) + PAUSE_REACH_SEC + 0.15 + slack) return false;
+  const past = c.end - (c.spokenEnd ?? c.contentEnd);
+  if (c.hold && c.end <= c.hold.cut + slack && past <= c.hold.max + slack) return false;
+  return past > (c.leftInPause ? LINGER_SEC + PAUSE_REACH_SEC + 0.15 : MAX_LINGER_SEC) + slack;
+}
+
 export type ResolveOptions = {
   /** The film's real picture cuts, in seconds (the first frame of each new shot). */
   cuts?: number[];
@@ -753,32 +814,29 @@ export function resolveCues(specs: CueSpec[], words: Word[], opts: ResolveOption
     // 4b. No blink of footage after a picture-replacing graphic: it holds through the pause and
     // leaves with the picture.
     let held = false;
-    let heldFrom: number | undefined;
+    let holdMax: number | undefined;
     if (fullFrame.has(spec.template)) {
       const end = endCut ?? rawEnd;
       const next = cuts.find(c => c > end + 1e-6);
-      // Words in the sliver that only FINISH the graphic's own sentence ("…a good night's sleep |
-      // you may or may not have had.") keep it up; a NEW sentence starting there does not.
-      // (from the graphic's own last word, so words it already stayed up for are counted too)
-      const inSliver = next === undefined ? [] : words.filter(w => w.start > (contentEnd ?? end) + 1e-6 && w.start < next);
-      let spoken = contentEnd ?? end;
-      let newLine = false;
-      for (const w of inSliver) {
-        const prev = words[words.indexOf(w) - 1];
-        if (prev && SENTENCE_END.test(prev.text.trim()) && prev.end <= w.start) {
-          newLine = w.start > end + 1e-6 && w.start < (next as number) - NEW_LINE_GRACE_SEC;
-          break;
-        }
-        spoken = Math.max(spoken, w.end);
-      }
-      const silent = next !== undefined && !words.some(w => w.start > spoken - 1e-6 && w.start < next);
-      const holdMax = silent ? CARD_HOLD_SILENT_MAX_SEC : CARD_HOLD_MAX_SEC;
-      if (next !== undefined && next - end < MIN_SHOT_SEC && next - spoken <= holdMax && !newLine) {
+      // Words in the sliver that only FINISH the graphic's own sentence keep it up; a NEW sentence
+      // starting there does not (`holdToCut`, measured from the graphic's own last word, so words it
+      // already stayed up for are counted too).
+      if (next !== undefined && next - end < MIN_SHOT_SEC && holdToCut(words, contentEnd ?? end, end, next).ok) {
         endCut = next;
         held = true;
-        heldFrom = spoken;
+      }
+      // Leaving WITH the picture, however it got there — held to the cut, or its end already on it:
+      // the hold's verdict on that cut is recorded for QA, which judges the graphic by the same rule.
+      // Job 400's "7 thieves" card never took the hold: its end fell inside "thieves.", which the
+      // transcript stretched over the pause to 100.91, and snapped back onto the cut at 100.63.
+      if (endCut !== undefined) {
+        const h = holdToCut(words, contentEnd ?? end, end, endCut);
+        if (h.ok) holdMax = h.max;
       }
     }
+    // When its own sentence finished among the words said while it was up: its lingering is measured
+    // from here (a hold's too).
+    const spokenEnd = contentEnd === undefined ? undefined : ownSentenceEnd(words, contentEnd, endCut ?? rawEnd).spoken;
     const t1 = onFrame(endCut ?? rawEnd);
     if (t1 <= t0) throw new CueError(`cue ${spec.id}: ends before it starts`);
     const conformed = { start: startCut !== undefined, end: endCut !== undefined, ...(held ? { held: true } : {}) };
@@ -801,7 +859,8 @@ export function resolveCues(specs: CueSpec[], words: Word[], opts: ResolveOption
       contentEnd: contentEnd === undefined ? undefined : round(contentEnd),
       readSec: round(readSec),
       ...(leftInPause ? { leftInPause: true } : {}),
-      ...(heldFrom !== undefined ? { spokenEnd: round(heldFrom) } : {}),
+      ...(spokenEnd !== undefined ? { spokenEnd: round(spokenEnd) } : {}),
+      ...(holdMax !== undefined ? { hold: { cut: round(t1), max: holdMax } } : {}),
     };
   });
 

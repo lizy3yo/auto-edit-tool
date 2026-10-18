@@ -6,9 +6,12 @@ import path from "node:path";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import type { JobGraphics, LongformInputParams, StoryboardScene } from "@shared/types";
 import type { CueSpec } from "../../graphics/src/cueResolve";
-import type { FilmLayout } from "../../graphics/src/plan/rules";
+import type { FilmLayout, HostPanel } from "../../graphics/src/plan/rules";
 import type { Readability } from "../../graphics/src/plan/qa";
+import { HEIGHT, WIDTH } from "../../graphics/src/theme";
+import { splitPanelMissing } from "@shared/splitPanel";
 import { getChannelConfig } from "../db";
+import { resolveSplitLayout } from "../videoAssembly";
 import { addGraphics, type GraphicsRecord } from "./finish";
 
 /** App-wide off switch: GRAPHICS=0. */
@@ -69,21 +72,40 @@ export function readabilityForJob(readability: Readability[]): JobGraphics["read
   return fixed.length ? fixed : undefined;
 }
 
+/**
+ * Whether a scene plays as a split in the film. A split whose picture was never put beside the host
+ * plays the bare host take full frame (`splitPanelMissing`): a caption squeezed into a panel that is
+ * not there would sit off to one side of the host for nothing.
+ */
+const playsSplit = (s: StoryboardScene) => !!s.splitRightUrl && !splitPanelMissing(s);
+
+/** Where a split's host panel is on the graphics' frame — resolved by the same function the
+ * compositor drew it with, so a seam the operator dragged, or the host turned to the right, is
+ * where the caption goes. */
+export const splitHostPanel = (s: StoryboardScene): HostPanel =>
+  (({ hostX, hostW }) => ({ x: hostX, w: hostW }))(resolveSplitLayout(WIDTH, HEIGHT, s.splitLayout));
+
 /** The film's layout for the rules: each scene's span on the film, and what is on screen. */
 export function filmLayoutOf(scenes: StoryboardScene[]): FilmLayout {
   return {
     scenes: scenes
       .filter(s => typeof s.narrationStartSec === "number" && typeof s.narrationEndSec === "number")
-      .map(s => ({
-        index: s.index,
-        narrationStartSec: s.narrationStartSec as number,
-        narrationEndSec: s.narrationEndSec as number,
-        scriptText: s.scriptText,
-        hostPresent: !!s.hostPresent,
-        cta: !!s.cta,
-        split: !!s.splitRightUrl,
-        hostOpener: !!s.hostOpener,
-      })),
+      .map(s => {
+        const split = playsSplit(s);
+        return {
+          index: s.index,
+          narrationStartSec: s.narrationStartSec as number,
+          narrationEndSec: s.narrationEndSec as number,
+          scriptText: s.scriptText,
+          hostPresent: !!s.hostPresent,
+          cta: !!s.cta,
+          split,
+          // The split's layout passed through: a caption over this scene is drawn inside the host's
+          // panel (`hostPanelFor`), as the lab's composite always did — job 400 scene 27 had none.
+          ...(split ? { hostPanel: splitHostPanel(s) } : {}),
+          hostOpener: !!s.hostOpener,
+        };
+      }),
   };
 }
 

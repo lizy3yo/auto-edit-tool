@@ -7,11 +7,11 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import sharp from "sharp";
-import { CUT_SNAP_SEC, MAX_LINGER_SEC, resolveCues, type CueSpec, type Word } from "../../graphics/src/cueResolve.ts";
+import { CUT_SNAP_SEC, resolveCues, stillUpAfterWords, type CueSpec, type Word } from "../../graphics/src/cueResolve.ts";
 import { TEMPLATES, templateById } from "../../graphics/src/registry.ts";
 import { FPS } from "../../graphics/src/theme.ts";
 import { loadJob } from "./job.mts";
-import { checkRules } from "./rules.mts";
+import { checkRules, hostPanelFor } from "./rules.mts";
 import { GRAPHICS_SRC, ffmpegPath, outDir, renderGraphic, run } from "./lib.mts";
 import { appearFrame } from "../../graphics/src/timing.ts";
 import { detectCuts, flashes, frameDiffs, preCutPumps } from "./qa-lib.mts";
@@ -31,9 +31,6 @@ const dir = outDir("jobs", String(job.id), tag);
 const gfxDir = outDir("jobs", String(job.id), "gfx");
 const ff = ffmpegPath();
 
-/** Host panel of a split scene in the film (measured off job 376: the seam is at 840 px). */
-const SPLIT_HOST_PANEL = { x: 0, w: 840 };
-
 // 1. The film's REAL picture cuts, measured off the rendered file (the plan's scene ranges and the
 // edit disagree by a frame or two, and a frame is all a flash needs).
 const film = path.join(jobDir, "film.mp4");
@@ -47,11 +44,11 @@ const words = JSON.parse(readFileSync(path.join(jobDir, "words.json"), "utf8")) 
 const structural = new Set(TEMPLATES.filter(t => t.structural).map(t => t.id));
 const cards = new Set(TEMPLATES.filter(t => t.kind === "card").map(t => t.id));
 const cues = resolveCues(sheet.cues, words, { cuts: filmCutFrames.map(f => f / FPS), fps: FPS, structural, cards, fullFrame: new Set(TEMPLATES.filter(t => t.kind === "card" || t.underlay === "window").map(t => t.id)) });
-// A host caption on a split scene stays in the host panel.
+// A caption on a split scene stays in the host panel — the app's finishing step decides it the
+// same way (graphics/src/plan/rules.ts `hostPanelFor`; the lab's jobs carry the default layout).
 for (const c of cues) {
-  if (c.template !== "HostCaption") continue;
-  const scene = job.scenes.find(s => s.hostPresent && c.start >= s.narrationStartSec - 0.2 && c.start < s.narrationEndSec);
-  if (scene?.split) c.props.panel = SPLIT_HOST_PANEL;
+  const panel = templateById(c.template).panel ? hostPanelFor(c, job) : undefined;
+  if (panel) c.props.panel = panel;
 }
 // The video's colours, from its own host photo (scripts/theme.mts). Carried in every cue's props,
 // so it is part of each graphic's cache key: a new photo re-renders, the same one is reused.
@@ -249,11 +246,11 @@ const deadAir = cues
 // A graphic carrying a tail of less than a second onto the next shot (one that ENDS on a cut
 // covers its last shot whole, which is not a spill).
 const spills = cues.filter(c => !c.conformed.end && filmCutFrames.some(k => k > c.startFrame + 3 && k < c.endFrame && c.endFrame - k < FPS));
-// A caption-like graphic still up well after its own words are done (job 384, 0:10-0:13).
-const LINGER_LIMIT_SEC = MAX_LINGER_SEC;
+// A graphic still up well after its own words are done (job 384, 0:10-0:13) — by the resolver's own
+// rules, the ones the app's QA asks (`stillUpAfterWords`), so the lab cannot fail what the app passes.
 const lingering = cues
-  .filter(c => !structural.has(c.template) && c.contentEnd !== undefined && c.end - c.contentEnd > LINGER_LIMIT_SEC)
-  .map(c => ({ id: c.id, sec: c.end - (c.contentEnd as number) }));
+  .filter(c => !structural.has(c.template) && stillUpAfterWords(c, FPS))
+  .map(c => ({ id: c.id, sec: c.end - (c.spokenEnd ?? (c.contentEnd as number)) }));
 const unreadable = readability.filter(r => !r.final.pass);
 const qa = [
   `# QA — job ${job.id}, ${tag}`,
@@ -262,7 +259,7 @@ const qa = [
   `- Flashes (a shot of 3 frames or fewer) the graphics ADDED: ${newFlashes.length}${newFlashes.length ? " — at " + newFlashes.map(([a]) => (a / FPS).toFixed(2) + " s").join(", ") : ""}${fades.length ? ` (${fades.length} steep step${fades.length > 1 ? "s" : ""} inside a graphic's own fade, no picture cut near: ${fades.map(([a]) => (a / FPS).toFixed(2) + " s").join(", ")})` : ""}`,
   `- Flicker before a cut (graphic change in the 5 frames before a cut, film's own change removed): ${pumps.length}${pumps.length ? " — at " + pumps.map(p => `${(p.frame / FPS).toFixed(2)} s (+${p.added})`).join(", ") : ""}`,
   `- Words on screen vs. heard: worst ${worstSync} ms over ${syncRows.length - onCutRows.length} elements (a frame is ${Math.round(1000 / FPS)} ms)${onCutRows.length ? `; ${onCutRows.length} moved onto a shot change (subtitling rule): ${onCutRows.map(r => `${r.cue} ${r.offsetMs > 0 ? "+" : ""}${r.offsetMs} ms`).join(", ")}` : ""}`,
-  `- Graphics still up more than ${LINGER_LIMIT_SEC} s after their own words: ${lingering.length}${lingering.length ? " — " + lingering.map(l => `${l.id} ${l.sec.toFixed(1)} s`).join(", ") : ""}`,
+  `- Graphics still up after their own words: ${lingering.length}${lingering.length ? " — " + lingering.map(l => `${l.id} ${l.sec.toFixed(1)} s`).join(", ") : ""}`,
   `- Graphics spilling under 1 s onto the next shot: ${spills.length}${spills.length ? " — " + spills.map(s => s.id).join(", ") : ""}`,
   `- Cards waiting more than 0.7 s before showing anything: ${deadAir.length}${deadAir.length ? " — " + deadAir.map(d => `${d.id} ${d.sec.toFixed(1)} s`).join(", ") : ""}`,
   `- Rules: ${problems.length ? problems.join("; ") : "pass"}`,
