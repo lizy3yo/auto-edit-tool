@@ -17,6 +17,7 @@ import {
   namedLookCandidates,
   namedLookClause,
   parseNamedLooks,
+  SUBJECT_OVER_LOOK,
 } from "./namedLooks";
 import { keyThingLookClause, keyThingLookFor, pictureLook } from "./pictureMemory";
 import {
@@ -83,7 +84,7 @@ describe("the props list writes a tool made for one job by its parts", () => {
     expect(SPECIALISED_TOOL_RULE).toMatch(/its look STARTS with its one exact kind/);
     // Job 413's "metal clamp guide and angled slots" was two kinds of sharpener in one look.
     expect(SPECIALISED_TOOL_RULE).toMatch(/never two kinds mixed into one look/);
-    expect(SPECIALISED_TOOL_RULE).toMatch(/the 2-4 PARTS that make it that tool, each with its shape, material and where it joins the rest/);
+    expect(SPECIALISED_TOOL_RULE).toMatch(/the 2-4 PARTS that make it that tool, each with its shape, material and what it is joined to/);
     expect(SPECIALISED_TOOL_RULE).toMatch(/as the tool is really built/);
   });
 
@@ -127,7 +128,7 @@ describe("the named-things step gives a specialised tool its real look", () => {
 
   it("writes it as really built, by its parts, and corrects a look or plan built from the verb", () => {
     expect(NAMED_LOOKS_SYSTEM).toMatch(/Its LOOK\s+is the tool as it is really built: its one exact kind \(never two kinds mixed into one\)/);
-    expect(NAMED_LOOKS_SYSTEM).toMatch(/each\s+PART that makes it that tool — its shape, material and size, and where it joins the rest/);
+    expect(NAMED_LOOKS_SYSTEM).toMatch(/each\s+PART that makes it that tool — its shape, material and size, and what it is joined to/);
     expect(NAMED_LOOKS_SYSTEM).toMatch(/Correct a\s+planned description or a key thing's look that gives it another build/);
     expect(NAMED_LOOKS_SYSTEM.replace(/\s+/g, " ")).toContain(TOOL_SHAPE_NOT_VERB);
   });
@@ -176,7 +177,7 @@ describe("the named-things step gives a specialised tool its real look", () => {
     const clause = namedLookClause(auger);
     expect(clause).toContain("EXACT LOOK — toilet auger: a closet auger about 1 m long");
     expect(clause).toContain("a crank handle with a wooden grip");
-    expect(clause).toContain("whatever any other words say about its pattern, shape or parts");
+    expect(clause).toContain("whatever any other words say about its pattern, shape or build");
     // The plunger picture and the toilet with the tool beside it are not touched.
     expect(scenes[0]).toEqual(scenes408()[0]);
     expect(scenes[2]).toEqual(scenes408()[2]);
@@ -231,9 +232,81 @@ describe("the named-things step gives a specialised tool its real look", () => {
 describe("the checker holds a tool to its parts", () => {
   it("counts other parts or a generic tool as a miss, and lets a tool in use hide what is inside its work", () => {
     const q = exactLookQuestion(`toilet auger: ${AUGER_LOOK}`);
-    expect(q).toMatch(/other shapes or parts/);
+    expect(q).toMatch(/other shapes or a different build/);
     expect(q).toMatch(/a generic or different pattern or tool/);
     expect(q).toMatch(/A tool in use may hide the part of it that is inside what it works on/);
     expect(q).toContain("a crank handle with a wooden grip");
+  });
+});
+
+describe("the look settles the build; the picture still says which part is shown", () => {
+  it("never tells the picture maker to ignore other words about the parts (specific beats general, job 344)", () => {
+    const s = pic(1, "First, the jaw.", "close-up of the toothed upper jaw of a pipe wrench", {
+      namedLook: "pipe wrench: a heavy steel pipe wrench, a red handle, a fixed lower jaw, an adjustable upper jaw",
+    });
+    const clause = namedLookClause(s);
+    // "whatever any other words say about its parts" sat one sentence before "when they name a
+    // particular part … show exactly that": the two said opposite things about a close-up.
+    expect(clause).not.toMatch(/about its [^.]*\bparts\b/);
+    expect(clause).toContain("whatever any other words say about its pattern, shape or build");
+    expect(SUBJECT_OVER_LOOK).toMatch(/its pattern, shapes, build, colours and style/);
+    expect(SUBJECT_OVER_LOOK).toMatch(/when they name a\s+particular part/);
+    const q = exactLookQuestion(s.namedLook!);
+    expect(q).not.toMatch(/other shapes or parts/);
+    expect(q).toMatch(/never answer true only because the frame is/);
+  });
+
+  it("asks what each part is joined to, never where (the place cut reads 'where' as a place)", () => {
+    expect(SPECIALISED_TOOL_RULE).not.toMatch(/\bwhere\b/);
+    const tool = NAMED_LOOKS_SYSTEM.slice(
+      NAMED_LOOKS_SYSTEM.indexOf("A SPECIALISED TOOL"),
+      NAMED_LOOKS_SYSTEM.indexOf("A REAL, RECOGNISABLE")
+    );
+    expect(tool).toMatch(/what it is joined to/);
+    expect(tool).not.toMatch(/where it joins/);
+  });
+});
+
+describe("a part is kept when 'where' says how it sits on the thing", () => {
+  it("keeps the part a tool is told apart by", () => {
+    // Both clauses went whole: "where" read as a place.
+    expect(
+      pictureLook(
+        "a closet auger, a steel tube bent into a J, a black rubber sleeve where the tube bends, a crank handle at the top of the tube"
+      )
+    ).toBe("a closet auger, a steel tube bent into a J, a black rubber sleeve, a crank handle at the top of the tube");
+    expect(pictureLook("a pipe wrench, a red steel handle, a fixed lower jaw where it meets the handle, an adjustable upper jaw")).toBe(
+      "a pipe wrench, a red steel handle, a fixed lower jaw, an adjustable upper jaw"
+    );
+  });
+
+  it("job 376's stored smoke alarm keeps its test button and seam", () => {
+    const look =
+      "a round white plastic disc about 5 inches across, slightly domed, flush against the ceiling, with a small center test button and a thin seam where the cover separates from the base";
+    expect(pictureLook(look)).toBe(
+      "a round white plastic disc about 5 inches across, slightly domed, flush, with a small center test button and a thin seam"
+    );
+  });
+
+  it("a 'where' that says where the thing is still goes, as every stored look did before", () => {
+    // Real stored props-list looks (jobs 337, 300, 395, 274, 375, 370), each cut exactly as before.
+    expect(pictureLook("paved slope in front of the garage, dusted with light frost, where furniture waits before pickup")).toBe(
+      "paved slope in front of the garage, dusted with light frost"
+    );
+    expect(pictureLook("warm wood table in a bright kitchen corner, where knitting talk and lessons happen between people")).toBe(
+      "warm wood table"
+    );
+    expect(pictureLook("pale wooden table beside the mirror where necklaces are laid out and picked up one at a time")).toBe("");
+    expect(pictureLook("exposed wooden ceiling beam in the basement where a second alarm is mounted.")).toBe("");
+    expect(
+      pictureLook(
+        "a plain unfinished basement space with concrete walls, a single hanging bulb, and a low ceiling where a second alarm is mounted."
+      )
+    ).toBe("a plain unfinished basement space with concrete walls, a single hanging bulb");
+    expect(
+      pictureLook("dark denim jeans, cuffs slightly faded, a light dusting of outdoor residue near the ankle where the dog's nose reaches")
+    ).toBe("dark denim jeans, cuffs slightly faded");
+    // A part whose "where" names a place goes whole.
+    expect(pictureLook("a wall rack of pale pine, a row of brass hooks where the coats hang by the door")).toBe("a wall rack of pale pine");
   });
 });

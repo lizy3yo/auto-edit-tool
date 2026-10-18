@@ -117,7 +117,7 @@ A SPECIALISED TOOL OR PIECE OF EQUIPMENT a picture is about — one made for one
 maker given only its name draws as a plain rod, handle or box (a pipe wrench, a seam ripper, a grease
 gun), not an everyday one it knows (a hammer, a screwdriver, a broom) — is a named kind too. Its LOOK
 is the tool as it is really built: its one exact kind (never two kinds mixed into one), then each
-PART that makes it that tool — its shape, material and size, and where it joins the rest. Correct a
+PART that makes it that tool — its shape, material and size, and what it is joined to. Correct a
 planned description or a key thing's look that gives it another build: ${TOOL_SHAPE_NOT_VERB}. A
 picture of it in use keeps the hands and shows its parts working the way the tool really works. Give
 it only to a picture about the tool — in use, held, or shown on its own — never to one where it only
@@ -302,11 +302,14 @@ export async function describeNamedLooks(
 /**
  * The image-prompt line that carries a picture's exact look. Empty when it has none. A look that asks
  * for a cut view loses those words (`withoutCutaway`): "draw it exactly like this" would otherwise
- * win over the rule that nothing is drawn cut open (job 403).
+ * win over the rule that nothing is drawn cut open (job 403). It settles the thing's BUILD (a
+ * specialised tool's parts, job 408), never "its parts": `SUBJECT_OVER_LOOK` right after it says
+ * that when the picture's own words name a particular part, that part is shown, and "whatever any
+ * other words say about its parts" would have contradicted it in the next sentence.
  */
 export function namedLookClause(scene: StoryboardScene): string {
   return scene.namedLook
-    ? ` EXACT LOOK — ${withoutCutaway(scene.namedLook)}. Draw it exactly like this, whatever any other words say about its pattern, shape or parts.${SUBJECT_OVER_LOOK}`
+    ? ` EXACT LOOK — ${withoutCutaway(scene.namedLook)}. Draw it exactly like this, whatever any other words say about its pattern, shape or build.${SUBJECT_OVER_LOOK}`
     : "";
 }
 
@@ -319,7 +322,7 @@ export function namedLookClause(scene: StoryboardScene): string {
  * look settles how the kind looks; what this picture shows OF it is the picture's own.
  */
 export const SUBJECT_OVER_LOOK =
-  " That look settles how this kind of thing looks in general — its pattern, shapes, parts, " +
+  " That look settles how this kind of thing looks in general — its pattern, shapes, build, " +
   "colours and style. WHAT this picture shows of it is as the picture's own words say: when they name a " +
   "particular part, page or screen of it, a stage of the work, or something done or added to it, " +
   "show exactly that, in this look's colours and style.";

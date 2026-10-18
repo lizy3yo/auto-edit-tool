@@ -346,13 +346,15 @@ const EXACT_LOOK_MODEL = () => process.env.EXACT_LOOK_MODEL || "claude-sonnet-5-
  * QUESTION 4 sharpened for a picture of a NAMED KIND (`scene.namedLook`): the thing must be drawn
  * the way its exact look describes — shapes, counts, arrangement — not a generic or different one.
  * A specialised tool is a named kind too (job 408 scene 23: a toilet auger drawn as a bent rod on a
- * screwdriver handle), judged by its parts — one in use may hide the part that is inside its work.
+ * screwdriver handle), judged by its build — one in use may hide the part that is inside its work.
+ * "Build", never "parts": the same question goes on to say a picture of ONE particular part is right,
+ * and "other parts" beside that reads as failing a close-up for not showing the rest.
  */
 export function exactLookQuestion(look: string): string {
   return (
     "\n\nQUESTION 4, SHARPER FOR THIS PICTURE — missing: the frame must show this named kind exactly: " +
     `"${look.replace(/"/g, "'").slice(0, 600)}". Answer true if it is not clearly there as the main ` +
-    "thing, OR if what is drawn does not match that look (other shapes or parts, another " +
+    "thing, OR if what is drawn does not match that look (other shapes or a different build, another " +
     "arrangement, a generic or different pattern or tool), OR if the frame mostly shows something " +
     "bigger it belongs to instead of the thing itself up close. A tool in use may hide the part of " +
     "it that is inside what it works on. Answer false only when it clearly matches. That look " +

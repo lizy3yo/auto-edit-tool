@@ -1980,14 +1980,16 @@ export const TOOL_SHAPE_NOT_VERB =
  * all a first picture of a key thing is drawn by. Job 413's "a guided knife-sharpening unit, metal
  * clamp guide and angled slots" mixed two kinds of sharpener into one look, and a picture drawn by it
  * pushed a second knife down through the clamped one. So a specialised tool's look names its ONE
- * kind and the parts that make it that tool, as it is really built. The example is neutral.
+ * kind and the parts that make it that tool, as it is really built. The example is neutral. Each part
+ * says "what it is joined to", never "where it joins": the look reaches a picture through the place
+ * cut (`pictureLook`), which reads "where" as a place unless the clause opens on a part.
  */
 export const SPECIALISED_TOOL_RULE =
   "A TOOL OR PIECE OF EQUIPMENT MADE FOR ONE JOB — a hand tool, gauge, jig, gadget or machine a " +
   "picture generator would draw from its name alone as a plain rod, handle or box: its look STARTS " +
   "with its one exact kind (when the tool comes in several kinds, the one the script means, else " +
   "the most common one for that job — never two kinds mixed into one look), then the 2-4 PARTS " +
-  "that make it that tool, each with its shape, material and where it joins the rest, as the tool " +
+  "that make it that tool, each with its shape, material and what it is joined to, as the tool " +
   `is really built — ${TOOL_SHAPE_NOT_VERB}. Example: \`pipe wrench: a heavy steel pipe wrench ` +
   "about 35 cm long, a straight red-painted handle, a fixed lower jaw and an adjustable upper jaw, " +
   "both with angled teeth, a knurled round nut between them that sets the opening`. ";

@@ -647,6 +647,27 @@ function placeListEnd(clauses: string[], i: number): number {
 }
 
 /**
+ * A PART IS KEPT WHEN "WHERE" SAYS HOW IT SITS ON THE THING (2026-10-18, job 408 scenes 23-24). Any
+ * clause holding "where" read as a place (`NOT_ITS_LOOK`) and went whole, which is right for "where
+ * furniture waits before pickup" but took the parts a tool is told apart by: a look written by its
+ * parts (`SPECIALISED_TOOL_RULE`) says "a black rubber sleeve where the tube bends" or "a fixed lower
+ * jaw where it meets the handle", and the first picture lost the sleeve and the jaw. Stored looks lost
+ * the same way — job 376's smoke alarm "with a small center test button and a thin seam where the
+ * cover separates from the base". A clause that opens on a part ("a …", "the …", "with a …") keeps
+ * what comes before "where"; the place cut then runs on what is left. A "where" that names a place
+ * ("… where the coats hang by the door"), or a clause that opens any other way ("warm wood table in
+ * a bright kitchen corner, where knitting talk … happen", "exposed where plate is removed"), goes
+ * whole as before. Pure.
+ */
+const PART_BEFORE_WHERE = /^((?:with\s+)?(?:a|an|the|its|one|two)\s+.+?)\s+where\s+(.+)$/i;
+const NAMES_PLACE = new RegExp(`\\b(?:${PLACE_NOUNS})\\b`, "i");
+function partBeforeWhere(clause: string): string {
+  const m = PART_BEFORE_WHERE.exec(clause);
+  if (!m || NAMES_PLACE.test(m[2]) || NOT_ITS_LOOK.test(m[1])) return clause;
+  return m[1];
+}
+
+/**
  * A key thing's look cut down for ONE picture. Every mode drops where it sits, the light and
  * setting around it, what it is used for, comparisons with other things and any writing on it.
  * "noStage" also drops every clause about what has been done or added to it. "colourMaterial" keeps
@@ -660,7 +681,8 @@ export function pictureLook(look: string, mode: "full" | "noStage" | "colourMate
     .replace(/[.\s]+$/, "")
     .split(/\s*[,;]\s*|\s+[—–]\s+/)
     .map(c => c.trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    .map(partBeforeWhere);
   const placed = raw.map(c => PLACE_CLAUSE.test(c) || NOT_ITS_LOOK.test(c));
   const gone = new Set(raw.flatMap((c, i) => (placed[i] || WRITING.test(c) ? [i] : [])));
   for (let i = 0; i < raw.length; i++) {

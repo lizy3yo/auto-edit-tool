@@ -5833,3 +5833,27 @@ describe("Werner's job 408 scenes 23-24: a tool made for one job is drawn by its
     expect(JSON.stringify(scenes[1])).toBe(before);
   });
 });
+
+describe("Werner's job 408 scene 23: a props look by its parts reaches the first picture whole (round 13)", () => {
+  // The auger's first picture is drawn by its props look. A look by parts says how each sits ("a
+  // black rubber sleeve where the tube bends"), and the place cut dropped every clause holding
+  // "where" — the sleeve that tells a closet auger from a bent rod went with it.
+  it("keeps the part before 'where', and a 'where' naming a place still goes", () => {
+    const things = [
+      {
+        name: "toilet auger",
+        look: "a closet auger, a J-bent steel tube, a black rubber sleeve where the tube bends, a crank handle joined to the top of the tube",
+      },
+      { name: "driveway", look: "paved slope in front of the garage, dusted with light frost, where furniture waits before pickup" },
+    ];
+    const auger = pic(23, "A toilet auger, the short kind made for toilets, can sometimes hook it out.", "hands turning a closet auger's crank handle", {
+      keyThing: "toilet auger",
+      humanPresent: true,
+    });
+    expect(keyThingLookFor(auger, things)).toBe(
+      "a closet auger, a J-bent steel tube, a black rubber sleeve, a crank handle joined to the top of the tube"
+    );
+    const drive = pic(5, "It waits by the road.", "a paved driveway", { keyThing: "driveway" });
+    expect(keyThingLookFor(drive, things)).toBe("paved slope in front of the garage, dusted with light frost");
+  });
+});
