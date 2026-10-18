@@ -66,6 +66,28 @@ describe("picture memory: the same thing is drawn from its earlier pictures", ()
     expect(listItemsAround([board[1]], board[1])).toBeUndefined(); // a lone item has nothing to differ from
   });
 
+  it("draws the picture behind the big QR card only from pictures of nobody (job 402 scene 33)", () => {
+    // The scan window's cookie packet was drawn from scene 29's — a hand passing the packet to a
+    // passenger — and the hand came along under the card: a hand "held" the QR code for 19.6 s.
+    const board = [
+      pic(26, "cookie packet", { visualPrompt: "a sealed foil-lined paper packet of cookies on a galley tray" }),
+      pic(29, "cookie packet", {
+        visualPrompt:
+          "Bare hands holding a small foil-lined paper packet of cookies sealed, one hand extending it toward another hand reaching to receive it at a stainless steel galley counter",
+        humanPresent: true,
+        otherPerson: "a flight attendant and an older passenger",
+      }),
+      pic(31, "cookie packet", { visualPrompt: "the cookie packet, one hand tearing it open" }),
+      pic(33, "cookie packet", { qrHero: true, cta: true, stillImage: true }),
+    ];
+    expect(memorySourcesFor(board, board[3])).toEqual([board[0]]);
+    // Every other picture keeps a hands picture as its memory, as before (hands at work are fine there).
+    const cutaway = pic(34, "cookie packet");
+    expect(memorySourcesFor([...board.slice(0, 3), cutaway], cutaway)).toEqual([board[0], board[2]]);
+    // With only pictures in someone's hands to follow, it is drawn from its words.
+    expect(memorySourcesFor([board[1], board[2], board[3]], board[3])).toEqual([]);
+  });
+
   it("draws a split's panel and the QR background from memory; a split is never a memory itself", () => {
     const board = [
       pic(1, "wood stove", { hostPresent: true, splitVisual: "the stove" }),
@@ -230,5 +252,7 @@ describe("brand words never reach the picture prompt", () => {
     const out = scrubLegibleWriting("A white page with a small orange 'Etsy' wordmark, it's tidy.");
     expect(out).not.toMatch(/Etsy/);
     expect(out).toMatch(/it's tidy/);
-  });
+    // The first import of longformVideo in this file: ~4.5 s alone, past the 5 s default in a busy
+    // parallel run of the whole suite (5.3 s once continuationViews.test.ts joined it).
+  }, 30_000);
 });

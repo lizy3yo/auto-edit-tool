@@ -177,6 +177,12 @@ import {
   blurUnsaidPrint,
   BLURRED_PRINT_CLAUSE,
   buildSplitRightScene,
+  qrBackdrop,
+  QR_BACKDROP_CLAUSE,
+  QR_BACKDROP_DIRECTIVE,
+  QR_BACKDROP_REDRAW,
+  QR_BACKDROP_REFERENCE_NOTE,
+  withoutSomeone,
 } from "./longformVideo";
 import { ENV } from "./_core/env";
 import { getBookNameTokens } from "./ctaDetector";
@@ -240,14 +246,18 @@ const { mockScanStillDefects } = vi.hoisted(() => ({
 }));
 // The two side-by-side checks a still can meet after the defect check — the same key thing as its
 // memory, the host as the host. Default "same", so no test that never set them up is changed.
-const { mockScanSameHost, mockScanSameThing } = vi.hoisted(() => ({
+const { mockScanSameHost, mockScanSameThing, mockScanNearCopy } = vi.hoisted(() => ({
   mockScanSameHost: vi.fn(async () => ({ same: true, what: "" })),
   mockScanSameThing: vi.fn(async () => ({ same: true, copy: false, what: "" })),
+  // The near-copy look runs only inside a metered job (`currentCostJobId`), so only the tests that
+  // open one ever reach it. Default "not a copy".
+  mockScanNearCopy: vi.fn(async () => ({ copy: false, what: "" })),
 }));
 vi.mock("./overlayTextScan", () => ({
   scanStillDefects: mockScanStillDefects,
   scanSameHost: mockScanSameHost,
   scanSameThing: mockScanSameThing,
+  scanNearCopy: mockScanNearCopy,
 }));
 // The delivery plan is one more invokeClaude call in the pipeline; like the overlay scan it is
 // neutralized here so the call-count assertions hold. Default null = the one-speed read and
@@ -2628,6 +2638,203 @@ describe("CTA split panel (splitVisual on a pitch beat)", () => {
     } as any);
     await enhanceBrollPrompts(scenes, baseParams);
     expect(brollDepictsBook(scenes[0].splitVisual!)).toBe(false);
+  });
+});
+
+// THE PICTURE BEHIND THE BIG QR CARD SHOWS NOBODY — in its words, not only its flags (job 402 scene
+// 33): the CTA lane allows bare hands, the topic context held a hands-passing-a-packet picture, and
+// "A flight attendant's hands holding a small packet …" put a hand under the card for 19.6 s, as if
+// holding the QR code.
+describe("the picture behind the big QR card shows nobody (job 402 scene 33)", () => {
+  const SHIPPED =
+    "A flight attendant's hands holding a small packet of crackers or cookies, offering it downward toward a seated passenger in the cabin row, soft cabin light on the materials, the seat back and armrest visible at the edges.";
+  const CART =
+    "Overhead view of a fully stocked beverage cart parked in the galley, rows of cans and a snack basket";
+  const HANDS =
+    "Bare hands holding a small foil-lined paper packet of cookies sealed, one hand extending it toward another hand reaching to receive it at a stainless steel galley counter, aircraft interior blurred behind.";
+  const film = (qr: Partial<StoryboardScene> = {}): StoryboardScene[] => [
+    { index: 26, narration: "n", stillImage: true, visualPrompt: CART },
+    {
+      index: 29,
+      narration: "n",
+      stillImage: true,
+      humanPresent: true,
+      otherPerson: "a flight attendant and an older passenger",
+      keyThing: "cookie packet",
+      visualPrompt: HANDS,
+    },
+    { index: 32, narration: "n", hostPresent: true, cta: true, visualPrompt: "the host talking" },
+    {
+      index: 33,
+      narration: "Hold your phone up to the screen with",
+      scriptText:
+        "Hold your phone up to the screen with its camera on, and aim it at the little black and white code.",
+      cta: true,
+      qrHero: true,
+      qrTail: true,
+      stillImage: true,
+      keyThing: "cookie packet",
+      namedLook: "QR code: A small square pattern of black and white made of many tiny square dots.",
+      visualPrompt: SHIPPED,
+      ...qr,
+    },
+  ];
+
+  afterEach(() => mockInvoke.mockReset());
+
+  it("swaps words naming someone for a picture of nobody, and drops what was written for them", () => {
+    const scenes = film();
+    // The old fallback would have borrowed the hands picture right beside it.
+    expect(genericCtaBrollFor(scenes, 3)).toBe(HANDS);
+    expect(guardPitchVisuals(scenes, "flight attendant secrets")).toEqual([33]);
+    expect(scenes[3].visualPrompt).toBe(CART);
+    expect(scenes[3].keyThing).toBeUndefined();
+    expect(scenes[3].namedLook).toBeUndefined(); // the made-up second QR code under the real one
+    expect(scenes[1].visualPrompt).toBe(HANDS); // a cutaway may show hands at work
+    expect(guardPitchVisuals(scenes, "flight attendant secrets")).toEqual([]); // idempotent
+  });
+
+  it("leaves a backdrop of nobody alone, and every other pitch beat's hands (jobs 401, 404)", () => {
+    const sympathyCard =
+      "Plain cream sympathy card with simple embossed border resting on a wooden desk in a quiet study, late-spring light from a nearby window.";
+    const robin =
+      "A robin perched on frost-covered grass in a suburban winter yard at dawn, with bare shrubs and the fence line softly visible behind, early morning light gentle and pale.";
+    for (const words of [sympathyCard, robin]) {
+      const scenes = film({ visualPrompt: words, namedLook: undefined, keyThing: undefined });
+      expect(guardPitchVisuals(scenes)).toEqual([]);
+      expect(scenes[3].visualPrompt).toBe(words);
+    }
+    // A pitch cutaway with the small corner card is a full frame of its own: hands at work stay.
+    const corner = film({ qrHero: undefined, qrCorner: true, namedLook: undefined, visualPrompt: HANDS });
+    expect(guardPitchVisuals(corner)).toEqual([]);
+    expect(corner[3].visualPrompt).toBe(HANDS);
+  });
+
+  it("keeps a picture of something else and takes only the person out of its words (job 405 scene 33)", () => {
+    // The cat film's scan window asked for a sleeper's shoulder at the frame's edge beside the cat.
+    const CAT =
+      "A small tabby cat standing on the bed at 3 a.m., one front paw extended mid-step across grey bedding, ears alert, the sleeping person's shoulder barely visible at frame edge, bedroom dark and still.";
+    const scenes = film({ visualPrompt: CAT, keyThing: "tabby cat", namedLook: undefined });
+    expect(guardPitchVisuals(scenes)).toEqual([33]);
+    expect(scenes[3].visualPrompt).toBe(
+      "A small tabby cat standing on the bed at 3 a.m., one front paw extended mid-step across grey bedding, ears alert, bedroom dark and still."
+    );
+    expect(scenes[3].keyThing).toBe("tabby cat"); // the same picture, so the same key thing
+    // A picture OF the person or the hands has nothing of nobody to keep.
+    expect(withoutSomeone(SHIPPED)).toBeUndefined();
+    expect(withoutSomeone("a beverage cart in the galley — a passenger reaching for a cup")).toBe(
+      "a beverage cart in the galley"
+    );
+    // A sentence led by someone goes whole: "the lamp on" was his lamp, a fragment on its own.
+    expect(withoutSomeone("The cat sits on the sill. A man reads beside it, the lamp on.")).toBe(
+      "The cat sits on the sill."
+    );
+  });
+
+  it("never leaves a fragment of the words (jobs 357, 366, 385 — the stored films)", () => {
+    // Job 357 scene 24: the lead runs on past "dark," — a list of describing words, not a clause —
+    // and it is the dog's nose AT the person's leg: nothing of it is a picture of nobody. Cut at the
+    // comma it read "A dog's dark, late afternoon light soft across worn fabric, …".
+    expect(
+      withoutSomeone(
+        "A dog's dark, damp nose inches from a person's pant leg at the entry threshold, late afternoon light soft across worn fabric, the dog's breathing steady and unhurried, the moment suspended in calm attention."
+      )
+    ).toBeUndefined();
+    // Job 366 scene 23: the last sentence is the man, his hands with him; the full stop stays.
+    expect(
+      withoutSomeone(
+        "Dog's dark nose pressed against the shoe in a home entryway, seen from waist-down angle. Soft early-evening light from a window. Man standing still, hands relaxed at sides. Calm, intimate moment of arrival ritual."
+      )
+    ).toBe(
+      "Dog's dark nose pressed against the shoe in a home entryway, seen from waist-down angle. Soft early-evening light from a window. Calm, intimate moment of arrival ritual."
+    );
+    // Job 385 scene 23: a doing word opens its own clause, so only the hands go.
+    expect(
+      withoutSomeone(
+        "Close-up of a round white smoke alarm's back label, held in bare hands in a bedroom at night, showing the manufacture date printed clearly on the plastic surface."
+      )
+    ).toBe(
+      "Close-up of a round white smoke alarm's back label, showing the manufacture date printed clearly on the plastic surface."
+    );
+    // A sentence whose LAST clause went keeps its full stop.
+    expect(withoutSomeone("A kettle on the stove, a woman's hand on the lid. Steam rises.")).toBe(
+      "A kettle on the stove. Steam rises."
+    );
+  });
+
+  it("clears a person flag a later step set on it, and borrows only a picture of nobody", () => {
+    const scenes = film({ visualPrompt: "a sealed packet of cookies on a galley tray", namedLook: undefined, humanPresent: true });
+    expect(guardPitchVisuals(scenes)).toEqual([33]);
+    expect(scenes[3].humanPresent).toBeUndefined();
+    expect(scenes[3].visualPrompt).toBe("a sealed packet of cookies on a galley tray");
+    // The generic pool's hands are skipped too.
+    expect(genericCtaBrollFor([], 3)).toMatch(/hands/);
+    expect(genericCtaBrollFor([], 3, undefined, true)).not.toMatch(/hands/);
+  });
+
+  it("says so in the picture's own prompt — no hands allowed, on every rung", () => {
+    const qr = film({ visualPrompt: CART, namedLook: undefined })[3];
+    expect(qrBackdrop(qr)).toBe(true);
+    for (const p of [buildStillPrompt(qr), buildStillPrompt(qr, true)]) {
+      expect(p).toContain(QR_BACKDROP_CLAUSE);
+      expect(p).toContain(NO_PEOPLE_SUFFIX);
+      expect(p).not.toContain(NO_FIGURES_SUFFIX); // the cutaway guard lets bare hands in
+    }
+    expect(buildStillPrompt(qr)).not.toContain(QR_BACKDROP_REFERENCE_NOTE);
+    expect(buildStillPrompt({ ...qr, memoryRefUrls: ["https://r2/packet.png"] })).toContain(QR_BACKDROP_REFERENCE_NOTE);
+    // A person flag that reached it never brings a person clause.
+    expect(buildStillPrompt({ ...qr, humanPresent: true })).not.toContain(ANON_PERSON_SUFFIX);
+    // Every other picture is as before.
+    const cutaway = { ...qr, qrHero: undefined };
+    expect(qrBackdrop(cutaway)).toBe(false);
+    expect(buildStillPrompt(cutaway)).toContain(NO_FIGURES_SUFFIX);
+    expect(buildStillPrompt(cutaway)).not.toContain(QR_BACKDROP_CLAUSE);
+    expect(qrBackdrop({ ...qr, coverHero: true })).toBe(false);
+    expect(qrBackdrop({ ...qr, assetImageUrl: "https://r2/a.png" })).toBe(false);
+    expect(qrBackdrop({ ...qr, hostPresent: true })).toBe(false);
+  });
+
+  it("tells the CTA prompt writer, and an answer that still names someone is swapped", async () => {
+    mockInvoke.mockResolvedValue({ text: SHIPPED } as any);
+    const scenes = film({ namedLook: undefined });
+    await enhanceBrollPrompts(scenes, baseParams, [33]);
+    const { systemPrompt, userMessage } = mockInvoke.mock.calls[0][0] as any;
+    expect(userMessage.startsWith(QR_BACKDROP_DIRECTIVE)).toBe(true);
+    expect(systemPrompt).toMatch(/NEVER in a picture that sits\s+behind the big scan card/);
+    expect(scenes[3].visualPrompt).toBe(CART);
+    // A pitch cutaway with the small corner card is not told.
+    mockInvoke.mockClear();
+    const corner = film({ qrHero: undefined, qrCorner: true, namedLook: undefined });
+    await enhanceBrollPrompts(corner, baseParams, [33]);
+    expect((mockInvoke.mock.calls[0][0] as any).userMessage).not.toContain(QR_BACKDROP_DIRECTIVE);
+  });
+
+  it("takes a worn thing off the body and keeps a thing only named for a finger (job 380, review)", () => {
+    // Job 380's scan window asked for a chain on a person: the clause with the collarbone goes, and
+    // the prompt sends the chain to a stand or a dress form (the cutaway guard's worn-things rule
+    // went with NO_FIGURES_SUFFIX, so the backdrop says it again).
+    const CHAIN =
+      "A slim gold chain, twenty-eight to thirty-two inches, hanging past the chest in one unbroken vertical line, resting on bare collarbone and skin in a bright airy dressing room with a large mirror and soft sheer-curtained window.";
+    const chain = film({ visualPrompt: CHAIN, keyThing: "chain", namedLook: undefined });
+    expect(guardPitchVisuals(chain)).toEqual([33]);
+    expect(chain[3].visualPrompt).toBe(
+      "A slim gold chain, twenty-eight to thirty-two inches, hanging past the chest in one unbroken vertical line."
+    );
+    expect(chain[3].keyThing).toBe("chain");
+    expect(buildStillPrompt(chain[3])).toMatch(/stand or dress form, never filled out as if someone wore it/);
+    expect(QR_BACKDROP_DIRECTIVE).toMatch(/stand or dress form/);
+    // A woodwork backdrop that only names a joint for the fingers is a picture of nobody: kept.
+    const BOX =
+      "Close-up of a walnut box with tight finger joints at the corner, dovetails cut by hand, resting on the bench.";
+    const box = film({ visualPrompt: BOX, keyThing: "walnut box", namedLook: undefined });
+    expect(guardPitchVisuals(box)).toEqual([]);
+    expect(box[3].visualPrompt).toBe(BOX);
+    expect(box[3].keyThing).toBe("walnut box");
+  });
+
+  it("names no channel's things in the wording", () => {
+    for (const w of [QR_BACKDROP_DIRECTIVE, QR_BACKDROP_CLAUSE, QR_BACKDROP_REDRAW, QR_BACKDROP_REFERENCE_NOTE])
+      expect(w).not.toMatch(/cookie|packet|passenger|attendant|cabin|flight/i);
   });
 });
 
@@ -9942,6 +10149,48 @@ describe("generateValidatedStill", () => {
     expect((mockScanStillDefects.mock.calls[0] as any[])[8]).toBeUndefined();
   });
 
+  // NOBODY BEHIND THE BIG QR CARD (job 402 scene 33: a passenger's hand holding a packet where the
+  // card sits, so for 19.6 s a hand held the code, and the check never asked).
+  it("asks the scan window's picture for a person, and redraws one with a hand in it told to show nobody", async () => {
+    const withHand = await pngOf("#d11");
+    const nobody = await pngOf("#1d1");
+    const backdrop = {
+      index: 33,
+      cta: true,
+      qrHero: true,
+      stillImage: true,
+      visualPrompt: "a sealed foil-lined paper packet of cookies on a galley tray",
+    } as any;
+    mockScanStillDefects.mockClear();
+    mockScanStillDefects.mockResolvedValueOnce(defect({ person: true, what: "a hand holding the packet" } as any));
+    const genImage = vi
+      .fn()
+      .mockResolvedValueOnce({ success: true, fileData: withHand })
+      .mockResolvedValueOnce({ success: true, fileData: nobody });
+    const out = await generateValidatedStill(backdrop, 3, undefined, genImage);
+    expect(out.buffer.equals(nobody)).toBe(true);
+    expect((mockScanStillDefects.mock.calls[0] as any[])[10]).toBe(true);
+    expect(genImage.mock.calls[0][0].prompt).toContain(QR_BACKDROP_CLAUSE);
+    expect(genImage.mock.calls[0][0].prompt).not.toContain(QR_BACKDROP_REDRAW);
+    expect(genImage.mock.calls[1][0].prompt).toContain(QR_BACKDROP_REDRAW);
+    expect(backdrop.pictureChecks[0].flags).toEqual(["person"]);
+    // A redraw that still shows someone is kept (never drawn a third time) and ships saying so.
+    mockScanStillDefects.mockClear();
+    mockScanStillDefects.mockResolvedValue(defect({ person: true, what: "fingers at the edge" } as any));
+    const twice = vi
+      .fn()
+      .mockResolvedValueOnce({ success: true, fileData: withHand })
+      .mockResolvedValueOnce({ success: true, fileData: nobody });
+    const kept = await generateValidatedStill({ ...backdrop, pictureChecks: undefined }, 3, undefined, twice);
+    expect(twice).toHaveBeenCalledTimes(2);
+    expect(kept.flaws).toEqual(["person"]);
+    mockScanStillDefects.mockResolvedValue(defect()); // restore the default
+    // Any other picture — a cutaway may show hands at work — is never asked.
+    mockScanStillDefects.mockClear();
+    await generateValidatedStill(scene, 3, undefined, vi.fn().mockResolvedValue({ success: true, fileData: nobody }));
+    expect((mockScanStillDefects.mock.calls[0] as any[])[10]).toBe(false);
+  });
+
   it("skips the gate when a reference image is attached (the cover asked for text)", async () => {
     mockScanStillDefects.mockClear(); // call history only — keeps the false default impl
     const good = await validPng();
@@ -10764,7 +11013,219 @@ describe("a memory picture that copies its memory twice is drawn from words (job
       genImage
     );
     expect(mockScanSameThing.mock.calls[0][0]).toBe("https://r2/first.png");
+    expect(mockScanSameThing.mock.calls[0][3]).toBe(false);
     expect(genImage.mock.calls[0][0].prompt).not.toMatch(/RIGHT BEFORE/);
+  });
+});
+
+describe("a continuation is compared with the picture it continues (jobs 401-405)", () => {
+  // Two pictures whose fingerprints read far apart: job 403 scene 14 was scene 10 a little closer at
+  // 23 bits, over the 20 the near-copy look needs, and job 405 scene 8 went unchecked once drawn from
+  // words. Built as real images so the fingerprint really is far.
+  const stripes = (kind: "left" | "top") =>
+    sharp({ create: { width: 320, height: 180, channels: 3, background: kind === "left" ? "#284878" : "#c83c14" } })
+      .composite([
+        {
+          input: Buffer.from(
+            kind === "left"
+              ? `<svg width="320" height="180"><rect x="0" y="0" width="160" height="180" fill="white"/></svg>`
+              : `<svg width="320" height="180"><rect x="0" y="0" width="320" height="60" fill="white"/><rect x="200" y="90" width="40" height="90" fill="black"/></svg>`
+          ),
+          left: 0,
+          top: 0,
+        },
+      ])
+      .png()
+      .toBuffer();
+  const drawsOf = (...frames: Buffer[]) => {
+    const fn = vi.fn();
+    for (const f of frames) fn.mockResolvedValueOnce({ success: true, fileData: f });
+    return fn;
+  };
+  afterEach(() => {
+    mockScanSameThing.mockReset();
+    mockScanSameThing.mockResolvedValue({ same: true, copy: false, what: "" });
+    mockScanNearCopy.mockReset();
+    mockScanNearCopy.mockResolvedValue({ copy: false, what: "" });
+  });
+  const CHEST = "a small tabby cat standing on a sleeping person's chest in the dark bedroom, head lowered close to their face, waiting";
+  const VIEW = ", a close-up of one detail of it filling the frame";
+  const board = () =>
+    [
+      { index: 3, showSubject: "a small tabby cat padding across a rumpled grey bed at night", keyThing: "cat", pictureUrl: "https://r2/still-src-3.png" },
+      { index: 7, showSubject: CHEST, keyThing: "cat", pictureUrl: "https://r2/still-src-7.png" },
+      { index: 8, showSubject: `${CHEST}${VIEW}`, visualPrompt: `${CHEST}${VIEW}`, keyThing: "cat", scriptText: "Then she stops on your chest, lowers her face to yours, and waits." },
+    ] as any[];
+
+  it("405-22-like: the same-thing check meets the continued picture, told it was just shown; the near-copy look leaves that pair", async () => {
+    const { withCostMeter } = await import("./costMeter");
+    const { memoryFor, memoryView } = await import("./pictureMemory");
+    const { memoryFields } = await import("./longformVideo");
+    const { pictureHash, pictureThumb, rememberPicture, REDRAW_CAMERAS } = await import("./pictureVariety");
+    const [seven, drawn] = await Promise.all([stripes("left"), stripes("top")]);
+    const b = board();
+    attachMemory(b, [b[2]]);
+    Object.assign(b[2], memoryFields(await memoryFor(b[2], 0), memoryView(b[2])));
+    expect(b[2]).toMatchObject({ memoryRightBefore: 1, memoryContinues: true, memoryView: REDRAW_CAMERAS[0] });
+    rememberPicture(9301, 7, await pictureHash(seven), await pictureThumb(seven));
+    const genImage = drawsOf(drawn);
+    await withCostMeter(9301, () => generateValidatedStill(b[2], 4, undefined, genImage));
+    expect(mockScanSameThing).toHaveBeenCalledTimes(1);
+    expect(mockScanSameThing.mock.calls[0][0]).toBe("https://r2/still-src-7.png");
+    expect(mockScanSameThing.mock.calls[0][3]).toBe(true);
+    expect(mockScanNearCopy).not.toHaveBeenCalled();
+    expect(genImage.mock.calls[0][0].prompt).toMatch(/the earlier picture this one CONTINUES/);
+  });
+
+  it("405-8: copied twice, drawn from words — the near-copy look still meets scene 7 and redraws from the next camera", async () => {
+    const { withCostMeter } = await import("./costMeter");
+    const { memoryFor, memoryView } = await import("./pictureMemory");
+    const { memoryFields } = await import("./longformVideo");
+    const { pictureHash, pictureThumb, rememberPicture, REDRAW_CAMERAS, REDRAW_VIEWS, NEAR_COPY_BITS, hashDistance } =
+      await import("./pictureVariety");
+    const [seven, drawn] = await Promise.all([stripes("left"), stripes("top")]);
+    expect(hashDistance(await pictureHash(seven), await pictureHash(drawn))).toBeGreaterThan(NEAR_COPY_BITS);
+    const b = board();
+    attachMemory(b, [b[2]]);
+    Object.assign(b[2], memoryFields(await memoryFor(b[2], 0), memoryView(b[2])));
+    const sevenThumb = await pictureThumb(seven);
+    rememberPicture(9302, 7, await pictureHash(seven), sevenThumb);
+    const copy = { same: true, copy: true, what: "the same framing" };
+    mockScanSameThing.mockReset();
+    mockScanSameThing.mockResolvedValueOnce(copy).mockResolvedValueOnce(copy);
+    mockScanNearCopy.mockReset();
+    mockScanNearCopy.mockResolvedValueOnce({ copy: true, what: "same cat, same distance" }).mockResolvedValue({ copy: false, what: "" });
+    const genImage = drawsOf(drawn, drawn, drawn, drawn);
+    const out = await withCostMeter(9302, () => generateValidatedStill(b[2], 5, undefined, genImage));
+    expect(genImage).toHaveBeenCalledTimes(4);
+    const prompts = genImage.mock.calls.map(x => x[0].prompt as string);
+    // The third is drawn from words and keeps its concrete camera.
+    expect(prompts[2]).not.toMatch(/reference image/i);
+    expect(prompts[2]).toContain(`Camera for THIS picture: ${REDRAW_CAMERAS[0]}.`);
+    // Compared with scene 7 though 7's fingerprint is far; the copy redraws from the camera after its own.
+    expect(mockScanNearCopy.mock.calls[0][0].equals(sevenThumb)).toBe(true);
+    expect(prompts[3]).toContain(REDRAW_VIEWS[1]);
+    // …and only that camera: the close-up it was drawn from words with is gone, never both at once.
+    expect(prompts[3]).not.toContain(`Camera for THIS picture: ${REDRAW_CAMERAS[0]}.`);
+    expect(prompts[3].match(/Camera for THIS picture:/g)).toHaveLength(1);
+    expect(out.flaws).toBeUndefined();
+  });
+
+  it("a picture that continues nothing is left to the fingerprint, as before", async () => {
+    const { withCostMeter } = await import("./costMeter");
+    const { pictureHash, pictureThumb, rememberPicture } = await import("./pictureVariety");
+    const [other, drawn] = await Promise.all([stripes("left"), stripes("top")]);
+    const b = [
+      { index: 1, showSubject: "a dog asleep on the porch steps", pictureUrl: "https://r2/1.png" },
+      { index: 2, showSubject: "a red barn under a grey sky" },
+    ] as any[];
+    attachMemory(b, [b[1]]);
+    rememberPicture(9303, 1, await pictureHash(other), await pictureThumb(other));
+    await withCostMeter(9303, () => generateValidatedStill(b[1], 4, undefined, drawsOf(drawn)));
+    expect(mockScanNearCopy).not.toHaveBeenCalled();
+  });
+});
+
+describe("a split panel meets the near-copy check like any picture (job 405 scene 9)", () => {
+  // Scene 9's panel beside "a cat just being a cat" came back as scene 2's walking tabby, cut square,
+  // and was never compared: panels were left out of the check. Seeded "photos" so the fingerprints are
+  // real ones.
+  const photo = (seed: number, w: number, h: number) => {
+    let a = seed >>> 0;
+    const rnd = () => {
+      a = (a + 0x6d2b79f5) >>> 0;
+      let t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const cols = Math.round((w / h) * 9);
+    const px = Buffer.alloc(cols * 9 * 3);
+    for (let i = 0; i < cols * 9; i++) px.fill(Math.floor(rnd() * 256), i * 3, i * 3 + 3);
+    return sharp(px, { raw: { width: cols, height: 9, channels: 3 } }).resize(w, h, { kernel: "cubic", fit: "fill" }).png().toBuffer();
+  };
+  const drawsOf = (...frames: Buffer[]) => {
+    const fn = vi.fn();
+    for (const f of frames) fn.mockResolvedValueOnce({ success: true, fileData: f });
+    return fn;
+  };
+  const host = () =>
+    ({
+      index: 9,
+      hostPresent: true,
+      splitVisual: "A tabby cat resting calmly on a bed at night, the bedding rumpled around it",
+      keyThing: "cat",
+      scriptText: "A lot of people call this random, a cat just being a cat.",
+    }) as StoryboardScene;
+  afterEach(() => {
+    mockScanNearCopy.mockReset();
+    mockScanNearCopy.mockResolvedValue({ copy: false, what: "" });
+    delete process.env.PICTURE_VARIETY;
+  });
+
+  it("405-9: the panel is laid beside scene 2, drawn again told to differ — still square — and remembered", async () => {
+    const { withCostMeter } = await import("./costMeter");
+    const { pictureFingerprint, pictureThumb, rememberPicture, nearCopyCandidates, REDRAW_VIEWS, DIFFERENT_PICTURE_CLAUSE } =
+      await import("./pictureVariety");
+    const { NEAR_COPY } = await import("../shared/pictureFlaws");
+    const two = await photo(2, 1536, 864);
+    const copy = await sharp(two).extract({ left: 336, top: 0, width: 864, height: 864 }).resize(1024, 1024).png().toBuffer();
+    const fresh = await photo(52, 1024, 1024);
+    const twoThumb = await pictureThumb(two);
+    rememberPicture(9405, 2, await pictureFingerprint(two), twoThumb);
+    mockScanNearCopy.mockResolvedValueOnce({ copy: true, what: "the same tabby mid-stride, paw out" });
+    const scene = host();
+    const genImage = drawsOf(copy, fresh);
+    const out = await withCostMeter(9405, () =>
+      generateValidatedStill(buildSplitRightScene(scene), 4, undefined, genImage, undefined, undefined, true)
+    );
+    expect(out.buffer.equals(fresh)).toBe(true);
+    expect(genImage).toHaveBeenCalledTimes(2);
+    // Laid beside scene 2, the panel shown whole (its square thumbnail).
+    expect(mockScanNearCopy.mock.calls[0][0].equals(twoThumb)).toBe(true);
+    expect(await sharp(mockScanNearCopy.mock.calls[0][1]).metadata()).toMatchObject({ width: 360, height: 360 });
+    // Redrawn like a full-frame copy: told to differ, from a named camera, and still a square panel.
+    const [first, second] = genImage.mock.calls.map(c => c[0]);
+    expect(first.prompt).not.toContain(DIFFERENT_PICTURE_CLAUSE);
+    expect(second.prompt).toContain(DIFFERENT_PICTURE_CLAUSE);
+    expect(second.prompt).toContain(REDRAW_VIEWS[0]);
+    expect(second.prompt).toMatch(/Square 1:1 framing/);
+    expect(second.square).toBe(true);
+    // The copy is on the host scene's record, marked as the panel's.
+    expect(scene.pictureChecks?.[0]).toMatchObject({ panel: true });
+    expect(scene.pictureChecks?.[0].flags).toContain(NEAR_COPY);
+    // The panel that shipped is remembered under its scene's number for every later picture.
+    const later = await sharp(await photo(92, 1536, 864))
+      .composite([{ input: await sharp(fresh).resize(864, 864).png().toBuffer(), left: 336, top: 0 }])
+      .png()
+      .toBuffer();
+    expect(nearCopyCandidates(9405, 28, await pictureFingerprint(later)).map(c => c.index)).toEqual([9]);
+  });
+
+  it("a panel unlike every earlier picture is drawn once; PICTURE_VARIETY=0 turns the check off for panels too", async () => {
+    const { withCostMeter } = await import("./costMeter");
+    const { pictureFingerprint, pictureThumb, rememberPicture } = await import("./pictureVariety");
+    const two = await photo(2, 1536, 864);
+    rememberPicture(9406, 2, await pictureFingerprint(two), await pictureThumb(two));
+    const once = drawsOf(await photo(52, 1024, 1024));
+    await withCostMeter(9406, () => generateValidatedStill(buildSplitRightScene(host()), 4, undefined, once, undefined, undefined, true));
+    expect(once).toHaveBeenCalledTimes(1);
+    expect(mockScanNearCopy).not.toHaveBeenCalled();
+    // Switched off, even scene 2 cut square is never looked at — with scene 2 remembered for THIS job,
+    // so it is the switch that keeps the look away, not an empty memory.
+    process.env.PICTURE_VARIETY = "0";
+    rememberPicture(9407, 2, await pictureFingerprint(two), await pictureThumb(two));
+    const copy = await sharp(two).extract({ left: 336, top: 0, width: 864, height: 864 }).resize(1024, 1024).png().toBuffer();
+    const off = drawsOf(copy);
+    await withCostMeter(9407, () => generateValidatedStill(buildSplitRightScene(host()), 4, undefined, off, undefined, undefined, true));
+    expect(off).toHaveBeenCalledTimes(1);
+    expect(mockScanNearCopy).not.toHaveBeenCalled();
+    // …and switched back on, the same draw is laid beside scene 2.
+    delete process.env.PICTURE_VARIETY;
+    await withCostMeter(9407, () =>
+      generateValidatedStill(buildSplitRightScene(host()), 4, undefined, drawsOf(copy), undefined, undefined, true)
+    );
+    expect(mockScanNearCopy).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -12464,5 +12925,131 @@ describe("a style bible loses only its printed matter (job 400)", async () => {
       "Historical context: Seneca's life as a wealthy, powerful man in Rome, buried under obligations."
     );
     expect(withoutPrintedMatter("An open guidebook on the seat.").kept).toBe("");
+  });
+});
+
+describe("a thing seen cut open is drawn from outside, and is no memory (job 403)", () => {
+  const pngOf = (bg: string) =>
+    sharp({ create: { width: 8, height: 8, channels: 3, background: bg } }).png().toBuffer();
+  const verdict = (over: Record<string, unknown> = {}) => ({ overlay: false, broken: false, what: "", ...over }) as any;
+  const drawsOf = (...frames: Buffer[]) => {
+    const fn = vi.fn();
+    for (const f of frames) fn.mockResolvedValueOnce({ success: true, fileData: f });
+    return fn;
+  };
+  const checks = (...vs: Record<string, unknown>[]) => {
+    mockScanStillDefects.mockReset();
+    for (const v of vs) mockScanStillDefects.mockResolvedValueOnce(verdict(v));
+    mockScanStillDefects.mockResolvedValue(verdict());
+  };
+  afterEach(() => {
+    mockScanStillDefects.mockReset();
+    mockScanStillDefects.mockResolvedValue(verdict());
+  });
+
+  // Job 403 scene 13: no inside in its own words, drawn sawn open from the trapway's memory.
+  const scene13 = () =>
+    ({
+      index: 13,
+      scriptText: "and follow.",
+      showSubject: "close-up of the smooth white curved S-shaped porcelain channel, water flowing up and over its curve",
+      visualPrompt:
+        "Close-up of the smooth white curved S-shaped porcelain trapway channel inside a toilet bowl, water flowing up and over the curve.",
+    }) as any;
+
+  it("job 403 scene 13: a frame the check saw cut open is redrawn told to show it from outside", async () => {
+    const { SEEN_FROM_OUTSIDE_CLAUSE } = await import("./cutOpen");
+    const [a, b] = await Promise.all([pngOf("#911"), pngOf("#2c2")]);
+    checks({ broken: true, what: "toilet cut open, inner channel exposed" });
+    const genImage = drawsOf(a, b);
+    const scene = scene13();
+    const out = await generateValidatedStill(scene, 4, undefined, genImage);
+    const [p1, p2] = genImage.mock.calls.map(c => c[0].prompt as string);
+    expect(p1).not.toContain(SEEN_FROM_OUTSIDE_CLAUSE);
+    expect(p2).toContain(SEEN_FROM_OUTSIDE_CLAUSE);
+    expect(scene.seenFromOutside).toBe(true);
+    // The second check is told it is drawn from outside on purpose.
+    expect((mockScanStillDefects.mock.calls[1] as any[])[9]).toBe(true);
+    expect(out.buffer.equals(b)).toBe(true);
+    expect(out.cutOpen).toBeUndefined();
+  });
+
+  it("job 403 scene 13: a frame that ships cut open says so, and is no memory", async () => {
+    const { markMemoryFit } = await import("./longformVideo");
+    const [a, b, c] = await Promise.all([pngOf("#a11"), pngOf("#a22"), pngOf("#a33")]);
+    checks(
+      { broken: true, what: "porcelain sawn open, cut open channel" },
+      { broken: true, what: "cut open toilet" },
+      { broken: true, what: "cut open toilet" }
+    );
+    const scene = scene13();
+    const out = await generateValidatedStill(scene, 4, undefined, drawsOf(a, b, c));
+    expect(out.cutOpen).toBe(true);
+    markMemoryFit(scene, out.missing || out.cutOpen);
+    expect(scene.memoryUnfit).toBe(true);
+  });
+
+  it("a broken frame that is not cut open keeps its same-prompt redraw (job 352 scene 147)", async () => {
+    const [a, b] = await Promise.all([pngOf("#b11"), pngOf("#2d2")]);
+    checks({ broken: true, what: "blade through the fence" });
+    const genImage = drawsOf(a, b);
+    const scene = {
+      index: 147,
+      scriptText: "Crosscut to length last.",
+      showSubject: "a rough oak board crosscut to length on a table saw",
+      visualPrompt: "A rough oak board being crosscut to length on a table saw.",
+    } as any;
+    const out = await generateValidatedStill(scene, 4, undefined, genImage);
+    const [p1, p2] = genImage.mock.calls.map(c => c[0].prompt as string);
+    expect(p2).toBe(p1);
+    expect(scene.seenFromOutside).toBeUndefined();
+    expect((mockScanStillDefects.mock.calls[0] as any[])[9]).toBe(false);
+    expect(out.cutOpen).toBeUndefined();
+  });
+
+  it("job 403 scene 11: a picture whose own words ask for an inside is checked as drawn from outside", async () => {
+    const [a] = await Promise.all([pngOf("#c11")]);
+    checks();
+    await generateValidatedStill(
+      {
+        index: 11,
+        scriptText: "So. We will go the way the water goes.",
+        showSubject: "close view of the toilet's internal porcelain S-shaped trapway channel with water rushing through it",
+        visualPrompt: "Close view of the toilet's internal white porcelain S-shaped trapway channel.",
+      } as any,
+      4,
+      undefined,
+      drawsOf(a)
+    );
+    expect((mockScanStillDefects.mock.calls[0] as any[])[9]).toBe(true);
+  });
+
+  it("job 403 scene 16: the check is held to the subject without its cutaway words, an ordinary one as written", async () => {
+    const [a, b] = await Promise.all([pngOf("#d11"), pngOf("#d22")]);
+    checks();
+    await generateValidatedStill(
+      {
+        index: 16,
+        scriptText: "Here is the part nobody sees.",
+        showSubject:
+          "cutaway close-up of the white porcelain S-shaped channel behind the bowl, water climbing up and over the curve before descending",
+        visualPrompt: "Cutaway view of the white porcelain S-shaped trapway channel behind a toilet bowl.",
+      } as any,
+      4,
+      undefined,
+      drawsOf(a)
+    );
+    expect((mockScanStillDefects.mock.calls[0] as any[])[1]).toBe(
+      "close-up of the white porcelain S-shaped channel behind the bowl, water climbing up and over the curve before descending"
+    );
+    checks();
+    const bowl = "water swirling down the white toilet bowl mid-flush";
+    await generateValidatedStill(
+      { index: 12, scriptText: "Flush,", showSubject: bowl, visualPrompt: "Water swirling down inside the white ceramic toilet bowl." } as any,
+      4,
+      undefined,
+      drawsOf(b)
+    );
+    expect((mockScanStillDefects.mock.calls[0] as any[])[1]).toBe(bowl);
   });
 });

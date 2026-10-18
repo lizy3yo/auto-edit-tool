@@ -611,6 +611,46 @@ export function showsPerson(text: string | undefined): boolean {
   return !!namedPeople(t) || SHOWS_PERSON.test(withoutAnimalPronouns(t));
 }
 
+/** Things named for the hand: "a hand plane", "hand cream" — no hand is in the picture. */
+const HAND_THINGS =
+  "tools?|planes?|saws?|drills?|towels?|cream|lotion|soap|mixers?|trucks?|carts?|rails?|pumps?|" +
+  "brakes?|cranks?|warmers?|sanitizers?|wash|puppets?|bells?|luggage|signals?";
+/** A pronoun or a part only a person brings into a frame (`namesSomeone`). */
+const PERSON_PART = new RegExp(
+  String.raw`\b(?:someone|somebody|a person|she|he)\b|` +
+    // a hand — never one in a compound ("hand-stitched", "second-hand"), a thing named for it, a
+    // clock's ("its hands at three", "the hour hand": a person's hands are his, her or their own —
+    // "a second hand" reaching in is still one), or how a thing was made or kept ("dovetails cut by
+    // hand", "spare blades on hand", "the job at hand")
+    String.raw`(?<![-\w])(?<!\b(?:clock(?:'s)?|watch(?:'s)?|its|hour|minute|(?:the|its)\s+second|by|on|at)\s+)hands?(?![-\w])(?!\s+(?:${HAND_THINGS})\b)(?!\s+of\s+(?:a|the)\s+clock\b)|` +
+    // a finger or a thumb — never a joint, a food or a fastener named for it ("a box with finger
+    // joints" is woodwork, "fish fingers" a meal, "a thumb screw" hardware), nor in a compound
+    // ("finger-jointed", "a five-finger mitt"): on the backdrop a false hit swaps a good picture away
+    String.raw`(?<![-\w])(?<!\bfish\s+)(?:fingers?|thumbs?)(?![-\w])(?!\s+(?:joint|screw|tack|drive|nail)s?\b)|` +
+    // the rest only a body has, and a body left bare (job 380's scan window: a chain "resting on bare
+    // collarbone and skin") — never a collarbone alone, which a dress form has too (job 362's chain
+    // "rests at the collarbone" of a sweater on a dress form)
+    String.raw`\b(?:fingertips?|wrists?|forearms?|knuckles?)\b|\bbare\s+(?:skin|collarbones?|shoulders?|necks?|feet)\b`,
+  "i"
+);
+
+/**
+ * SOMEONE IN THE WORDS, NARROWLY — for a picture that must show nobody, where a false hit costs a
+ * good picture: the backdrop behind the big QR card (`qrBackdrop`, job 402 scene 33's "A flight
+ * attendant's hands holding a small packet … toward a seated passenger"). Someone a noun names
+ * (`namedPeople`: a passenger, a woman, the host), "someone", "she" or "he" (an animal's pronoun not
+ * counted), or a part only a person brings — a hand, fingers, a thumb, a wrist, bare skin (never a
+ * thing named for one: "finger joints", "cut by hand", "the hour hand"). `showsPerson` also
+ * counts what a person uses or wears and pronouns it cannot tell from an animal's — "a coffee can of
+ * nails", "a jar of skin cream", "a kettle in use", "a robin in her nest" — right for deciding who to
+ * draw, wrong for swapping a picture of nobody away. Pure.
+ */
+export function namesSomeone(text: string | undefined): boolean {
+  const t = text ?? "";
+  if (!t.trim()) return false;
+  return !!namedPeople(t) || PERSON_PART.test(withoutAnimalPronouns(t));
+}
+
 /** The host's sex as their own look gives it, or undefined when it does not say. */
 export function sexOfLook(look: string | undefined): "f" | "m" | undefined {
   if (!look) return undefined;

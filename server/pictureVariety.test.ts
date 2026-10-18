@@ -15,8 +15,14 @@ import {
   screenSells,
   withScreenTurn,
   differentPictureClause,
+  fingerprintDistance,
+  NEAR_COPY_BITS,
+  PANEL_CANDIDATES,
+  PANEL_NEAR_COPY_BITS,
+  pictureFingerprint,
+  SQUARE_WINDOWS,
 } from "./pictureVariety";
-import { parseNearCopyVerdict, parseSameHostVerdict } from "./overlayTextScan";
+import { NEAR_COPY_SYSTEM, nearCopyPair, parseNearCopyVerdict, parseSameHostVerdict } from "./overlayTextScan";
 import { appScreenClause } from "./longformVideo";
 
 const scene = (i: number, visualPrompt: string, extra: Partial<StoryboardScene> = {}) =>
@@ -193,5 +199,114 @@ describe("a screen sits beside things for sale only when it is about selling (th
       expect(s.screenSetup).toBeUndefined();
     }
     expect(screenPicture("phone screen showing a listing of the maple board")).toBe(true);
+  });
+});
+
+describe("a split panel meets the near-copy check like any picture (job 405 scene 9 copied scene 2)", () => {
+  // A seeded "photo": a coarse grid of light and dark patches, smoothly enlarged, so its fingerprint is
+  // a real one (flat drawn shapes all hash alike).
+  const photo = (seed: number, w: number, h: number) => {
+    let a = seed >>> 0;
+    const rnd = () => {
+      a = (a + 0x6d2b79f5) >>> 0;
+      let t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const cols = Math.round((w / h) * 9);
+    const px = Buffer.alloc(cols * 9 * 3);
+    for (let i = 0; i < cols * 9; i++) px.fill(Math.floor(rnd() * 256), i * 3, i * 3 + 3);
+    return sharp(px, { raw: { width: cols, height: 9, channels: 3 } }).resize(w, h, { kernel: "cubic", fit: "fill" }).png().toBuffer();
+  };
+  // Scene 2's walking cat, full frame; the panel at scene 9 is that picture again, cut square.
+  const scene2 = () => photo(2, 1536, 864);
+  const panelOf = async (wide: Buffer) =>
+    sharp(wide).extract({ left: 336, top: 0, width: 864, height: 864 }).resize(1024, 1024).png().toBuffer();
+  const bits = (n: number) => "1".repeat(n) + "0".repeat(64 - n);
+  const ZERO = bits(0);
+
+  it("405-9: the panel cut square from scene 2 is found, though the stretched hashes read far apart", async () => {
+    const wide = await scene2();
+    const [w, p] = [await pictureFingerprint(wide), await pictureFingerprint(await panelOf(wide), true)];
+    expect(p.square).toBe(true);
+    expect(w.windows).toHaveLength(SQUARE_WINDOWS);
+    // The old comparison (both hashes stretched over each other) would never have looked at the pair.
+    expect(hashDistance(w.hash, p.hash)).toBeGreaterThan(NEAR_COPY_BITS);
+    expect(fingerprintDistance(w, p)).toBeLessThanOrEqual(2);
+    rememberPicture(9405, 2, w, await pictureThumb(wide));
+    expect(nearCopyCandidates(9405, 9, p).map(c => c.index)).toEqual([2]);
+  });
+
+  it("a panel of something else is left alone, and so is a full-frame picture unlike the panel", async () => {
+    const wide = await scene2();
+    const clock = await photo(52, 1024, 1024);
+    rememberPicture(9406, 2, await pictureFingerprint(wide), await pictureThumb(wide));
+    const c = await pictureFingerprint(clock, true);
+    expect(fingerprintDistance(await pictureFingerprint(wide), c)).toBeGreaterThan(PANEL_NEAR_COPY_BITS);
+    expect(nearCopyCandidates(9406, 12, c)).toEqual([]);
+    rememberPicture(9406, 12, c, await pictureThumb(clock, true));
+    const p = await pictureFingerprint(await panelOf(wide), true);
+    expect(nearCopyCandidates(9406, 9, p).map(x => x.index)).toEqual([2]);
+  });
+
+  it("a full-frame picture drawn after a panel is compared with it", async () => {
+    const clock = await photo(52, 1024, 1024);
+    // A later full-frame picture with the panel's picture as its middle square.
+    const around = await sharp(await photo(92, 1536, 864))
+      .composite([{ input: await sharp(clock).resize(864, 864).png().toBuffer(), left: 336, top: 0 }])
+      .png()
+      .toBuffer();
+    rememberPicture(9407, 12, await pictureFingerprint(clock, true), await pictureThumb(clock, true));
+    expect(nearCopyCandidates(9407, 28, await pictureFingerprint(around)).map(x => x.index)).toEqual([12]);
+    // …and a bare hash, as callers before panels passed it, still meets only full-frame pictures it is near.
+    expect(nearCopyCandidates(9407, 28, await pictureHash(await photo(7, 1536, 864)))).toEqual([]);
+  });
+
+  it("the lines: a panel looks up to 24 bits at its three closest; a full-frame picture and two panels keep 20", async () => {
+    const thumb = await pictureThumb(await photo(3, 320, 180));
+    const wide = (n: number) => ({ hash: bits(40), windows: [bits(n), bits(40)] });
+    rememberPicture(9408, 1, wide(23), thumb);
+    rememberPicture(9408, 2, wide(25), thumb);
+    rememberPicture(9408, 3, { hash: bits(23), square: true }, thumb);
+    const panel = { hash: ZERO, square: true };
+    // Scene 1 at 23 bits is looked at; scene 2 at 25 is not; the earlier panel at 23 is not (same shape).
+    expect(nearCopyCandidates(9408, 9, panel).map(c => [c.index, c.bits])).toEqual([[1, 23]]);
+    // A full-frame picture 23 bits from the panel at scene 3 is not looked at; 18 bits is.
+    rememberPicture(9409, 3, panel, thumb);
+    expect(nearCopyCandidates(9409, 30, wide(23))).toEqual([]);
+    expect(nearCopyCandidates(9409, 30, wide(18)).map(c => c.index)).toEqual([3]);
+    // At most three for a panel, closest first; two for a full-frame picture, as before.
+    for (const [i, n] of [[11, 22], [12, 19], [13, 24], [14, 21], [15, 20]] as const) rememberPicture(9410, i, wide(n), thumb);
+    expect(nearCopyCandidates(9410, 9, panel).map(c => c.index)).toEqual([12, 15, 14]);
+    expect(PANEL_CANDIDATES).toBe(3);
+    for (const [i, n] of [[1, 12], [2, 10], [3, 15]] as const) rememberPicture(9411, i, bits(n), thumb);
+    expect(nearCopyCandidates(9411, 9, ZERO).map(c => c.index)).toEqual([2, 1]);
+  });
+
+  it("a panel that came back 16:9 is fingerprinted as the centre square its slot shows", async () => {
+    const wide = await scene2();
+    const centre = await sharp(wide).extract({ left: 336, top: 0, width: 864, height: 864 }).png().toBuffer();
+    expect((await pictureFingerprint(wide, true)).hash).toBe(await pictureHash(centre));
+    // A full-frame picture's own hash is the one it always had.
+    expect((await pictureFingerprint(wide)).hash).toBe(await pictureHash(wide));
+  });
+
+  it("the look sees the whole panel: a square thumbnail, laid between black bars", async () => {
+    const panel = await panelOf(await scene2());
+    const thumb = await pictureThumb(panel, true);
+    expect(await sharp(thumb).metadata()).toMatchObject({ width: 360, height: 360 });
+    expect(await sharp(await pictureThumb(panel)).metadata()).toMatchObject({ width: 640, height: 360 });
+    const white = await sharp({ create: { width: 640, height: 360, channels: 3, background: "#fff" } }).jpeg().toBuffer();
+    const whiteSquare = await sharp({ create: { width: 360, height: 360, channels: 3, background: "#fff" } }).jpeg().toBuffer();
+    const pair = await nearCopyPair(white, whiteSquare);
+    const { data, info } = await sharp(pair).raw().toBuffer({ resolveWithObject: true });
+    expect([info.width, info.height]).toEqual([1280, 360]);
+    const at = (x: number, y: number) => data[(y * info.width + x) * info.channels];
+    expect(at(20, 180)).toBeGreaterThan(240); // the full-frame thumbnail fills its half
+    expect(at(660, 180)).toBeLessThan(15); // a black bar beside the square
+    expect(at(960, 5)).toBeGreaterThan(240); // the square's top edge is kept, not cut to a band
+    expect(at(960, 354)).toBeGreaterThan(240);
+    expect(NEAR_COPY_SYSTEM).toMatch(/square, with black bars/);
   });
 });

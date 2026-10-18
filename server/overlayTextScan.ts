@@ -38,6 +38,7 @@
  */
 import sharp from "sharp";
 import { invokeClaude, type ClaudeImage } from "./claude";
+import { CUT_OPEN_BROKEN, INSIDE_PART_NOTE } from "./cutOpen";
 import { safeParseJSON } from "./jsonRepair";
 
 /**
@@ -134,6 +135,7 @@ export const STILL_DEFECT_SYSTEM =
   "- a head turned further round than a neck can turn, or facing a different way from the " +
   "shoulders; more than two arms or hands on one person\n" +
   "- a mirror that does not reflect what is in front of it\n" +
+  CUT_OPEN_BROKEN +
   "Answer false for everything else: unusual but possible products or craftsmanship, odd " +
   "compositions, shallow depth of field, soft focus, plain or boring frames, imperfect " +
   "staging, and any small detail you cannot clearly resolve at this size. This is AI-generated " +
@@ -174,6 +176,12 @@ export interface StillDefectVerdict {
   detail?: boolean;
   /** What the description asks for that the frame shows otherwise, in the check's words (`detail`). */
   detailWhat?: string;
+  /**
+   * A person or any part of one — a hand at an edge included — in a picture that must show nobody:
+   * the backdrop behind the big QR card (`QR_BACKDROP_PERSON_QUESTION`). Set only when true, and
+   * only asked when the caller says the picture is one.
+   */
+  person?: boolean;
   /**
    * The frame shows what its line RULES OUT (`scene.forbids`, from the line check) — the act the
    * line says not to do, the thing it says is not meant, the place it says to keep something away
@@ -232,6 +240,7 @@ export function parseStillDefectVerdict(
   const detail = parsed.data?.detail === true;
   const detailWhat = parsed.data?.detail_what;
   const forbidden = parsed.data?.forbidden === true;
+  const person = parsed.data?.person === true;
   const what = parsed.data?.what;
   return {
     overlay,
@@ -243,11 +252,12 @@ export function parseStillDefectVerdict(
       ? { detailWhat: detailWhat.trim().slice(0, 80) }
       : {}),
     ...(forbidden ? { forbidden } : {}),
+    ...(person ? { person } : {}),
     messy,
     wrongPlace,
     staged,
     what:
-      (overlay || broken || writing || missing || detail || forbidden || messy || wrongPlace || staged) &&
+      (overlay || broken || writing || missing || detail || forbidden || person || messy || wrongPlace || staged) &&
       typeof what === "string"
         ? what.slice(0, 80)
         : "",
@@ -579,14 +589,38 @@ export function forbiddenQuestion(forbids: string): string {
   );
 }
 
+/**
+ * QUESTION 9, asked only of the picture behind the big QR card (2026-10-18, the review of jobs
+ * 401-407): job 402 scene 33's backdrop had a passenger's hand holding a packet where the card sits,
+ * the fingers round the card's edge, so for 19.6 s a hand held the QR code — and the check, asked
+ * only about the packet's exact look, passed it. Nothing else asks whether a picture is person-free:
+ * the cutaway rule lets bare hands in, so this question is for this picture alone. A dress form is no
+ * person: the prompt sends worn things to one (`QR_BACKDROP_CLAUSE`), and a necklace on a stand must
+ * not be redrawn for it.
+ */
+export const QR_BACKDROP_PERSON_QUESTION =
+  "\n\nQUESTION 9 — person: this picture is the backdrop behind a large card laid over its middle, " +
+  "and it must show NOBODY. Is a person or any part of one — a face, head, body, arm, hand, finger " +
+  "or thumb, a leg or a foot — visible anywhere in the frame, even small, partly, or at an edge? A " +
+  "glove, sleeve, coat or shoe with nobody in it is not a person, and neither is a dress form or " +
+  "display stand holding something worn, or a picture or statue of one. Answer false when no part " +
+  "of a person is there.";
+
 /** The JSON shape, listing every question asked (`detail` only beside `missing`). */
-export function verdictShape(expect?: string, line?: string, detail?: boolean, forbids?: boolean): string {
+export function verdictShape(
+  expect?: string,
+  line?: string,
+  detail?: boolean,
+  forbids?: boolean,
+  noPerson?: boolean
+): string {
   return (
     '\n\nReturn ONLY this JSON, no prose: {"overlay":true|false,"broken":true|false,' +
     '"writing":true|false' +
     (expect ? ',"missing":true|false' : "") +
     (expect && detail ? ',"detail":true|false,"detail_what":"..."' : "") +
     (forbids ? ',"forbidden":true|false' : "") +
+    (noPerson ? ',"person":true|false' : "") +
     ',"messy":true|false' +
     (line ? ',"wrong_place":true|false' : "") +
     ',"staged":true|false' +
@@ -637,7 +671,17 @@ export async function scanStillDefects(
    * parameter, never `line`: the line feeds the place question, and a neighbour's words there would
    * hold this picture to a place another picture names.
    */
-  forbids?: string
+  forbids?: string,
+  /**
+   * The picture is drawn from the OUTSIDE on purpose (`drawnFromOutside`, job 403) — adds
+   * `INSIDE_PART_NOTE`, so a whole fixture is not called missing for not showing the channel in it.
+   */
+  fromOutside?: boolean,
+  /**
+   * The picture must show nobody — the backdrop behind the big QR card (`qrBackdrop`) — adds the
+   * `person` question (`QR_BACKDROP_PERSON_QUESTION`).
+   */
+  noPerson?: boolean
 ): Promise<StillDefectVerdict> {
   try {
     const mustShow = expect && required?.length ? required : undefined;
@@ -668,6 +712,7 @@ export async function scanStillDefects(
         (expect ? missingQuestion(expect) : "") +
         (expect && exactLook ? exactLookQuestion(exactLook) : "") +
         (mustShow ? requiredThingsQuestion(mustShow, requiredLook) : "") +
+        (expect && fromOutside ? INSIDE_PART_NOTE : "") +
         (expect && softPrint ? SOFT_PRINT_QUESTION : "") +
         (askDetail ? detailQuestion(expect!) : "") +
         (line ? placeQuestion(line, !!ruledOut) : "") +
@@ -675,7 +720,8 @@ export async function scanStillDefects(
         (ruledOut ? forbiddenQuestion(ruledOut) : "") +
         // Light the line or the picture's own description names is what was asked for, not staged.
         namedLightQuestion(namedLight(line, expect)) +
-        verdictShape(expect, line, askDetail, !!ruledOut),
+        (noPerson ? QR_BACKDROP_PERSON_QUESTION : "") +
+        verdictShape(expect, line, askDetail, !!ruledOut, noPerson),
       userMessage:
         "Is any text stamped over this frame, does it contain obviously impossible structure, " +
         "is there readable writing in the scene, and is it messy or branded?" +
@@ -683,6 +729,7 @@ export async function scanStillDefects(
         (askDetail ? " Is it the way it is described?" : "") +
         (line ? " Is it set where the line says?" : "") +
         (ruledOut ? " Does it show what the line rules out?" : "") +
+        (noPerson ? " Is any person, or any part of one, in it?" : "") +
         " Does it look like an ordinary phone photo?",
       imageInput: image,
       // The verdict is ~40 tokens. The careful model THINKS unless told not to, and thinking
@@ -714,6 +761,8 @@ export async function scanStillDefects(
     if (!line) verdict.wrongPlace = false;
     // A stray "forbidden" on a picture nothing was ruled out for is not an answer to anything.
     if (!ruledOut) delete verdict.forbidden;
+    // …nor a "person" on a picture allowed one (a cutaway may show hands at work).
+    if (!noPerson) delete verdict.person;
     if (
       verdict.overlay ||
       verdict.broken ||
@@ -721,12 +770,13 @@ export async function scanStillDefects(
       verdict.missing ||
       verdict.detail ||
       verdict.forbidden ||
+      verdict.person ||
       verdict.messy ||
       verdict.wrongPlace ||
       verdict.staged
     )
       console.log(
-        `[StillDefects] ${verdict.overlay ? "stamped text" : verdict.broken ? "broken geometry" : verdict.writing ? "readable writing" : verdict.missing ? "named thing missing" : verdict.detail ? `detail not as described (${verdict.detailWhat ?? ""})` : verdict.forbidden ? `shows what the line rules out (${ruledOut})` : verdict.messy ? "brand or clutter" : verdict.wrongPlace ? "wrong place" : "staged look"} detected: ${verdict.what}`
+        `[StillDefects] ${verdict.overlay ? "stamped text" : verdict.broken ? "broken geometry" : verdict.writing ? "readable writing" : verdict.missing ? "named thing missing" : verdict.detail ? `detail not as described (${verdict.detailWhat ?? ""})` : verdict.forbidden ? `shows what the line rules out (${ruledOut})` : verdict.person ? "a person behind the QR card" : verdict.messy ? "brand or clutter" : verdict.wrongPlace ? "wrong place" : "staged look"} detected: ${verdict.what}`
       );
     return verdict;
   } catch (err: any) {
@@ -763,7 +813,9 @@ export const NEAR_COPY_SYSTEM =
   "picture was shown twice — the same kind of subject in the same setting, from nearly the same " +
   "spot, distance and framing (two near-identical phone screens on the same bench, the same pile " +
   "of pieces from the same angle). copy: false when they are clearly different pictures — " +
-  "another subject, another place, or the same subject from a clearly different distance or side.\n" +
+  "another subject, another place, or the same subject from a clearly different distance or side. " +
+  "One of them may be square, with black bars at its sides (a picture shown beside the host): " +
+  "compare what the two pictures show, never the shape of their frames.\n" +
   'Return ONLY JSON: {"copy":true|false,"what":"<what makes them look alike, a few words, or empty>"}';
 
 /** Decide from the model's answer; anything unreadable is "not a copy". Pure. */
@@ -778,18 +830,29 @@ export function parseNearCopyVerdict(raw: string, stopReason?: string): { copy: 
   }
 }
 
+/**
+ * The pair the near-copy look is shown: `earlier` LEFT, `buffer` RIGHT, each WHOLE in its 640×360
+ * half. A split panel's square thumbnail sits between black bars — cut to fill the half, the look saw
+ * only the panel's middle band (2026-10-18, panels joined the check: job 405 scene 9). A full-frame
+ * thumbnail fills its half exactly, as before.
+ */
+export async function nearCopyPair(earlier: Buffer, buffer: Buffer): Promise<Buffer> {
+  const side = (b: Buffer) =>
+    sharp(b).resize(640, 360, { fit: "contain", background: { r: 0, g: 0, b: 0 } }).png().toBuffer();
+  const [left, right] = await Promise.all([side(earlier), side(buffer)]);
+  return sharp({ create: { width: 1280, height: 360, channels: 3, background: "#000" } })
+    .composite([
+      { input: left, left: 0, top: 0 },
+      { input: right, left: 640, top: 0 },
+    ])
+    .png()
+    .toBuffer();
+}
+
 /** Are `earlier` and `buffer` near-copies? Side by side. Never throws: a dead check says no. */
 export async function scanNearCopy(earlier: Buffer, buffer: Buffer): Promise<{ copy: boolean; what: string }> {
   try {
-    const side = (b: Buffer) => sharp(b).resize(640, 360, { fit: "cover" }).png().toBuffer();
-    const [left, right] = await Promise.all([side(earlier), side(buffer)]);
-    const pair = await sharp({ create: { width: 1280, height: 360, channels: 3, background: "#000" } })
-      .composite([
-        { input: left, left: 0, top: 0 },
-        { input: right, left: 640, top: 0 },
-      ])
-      .png()
-      .toBuffer();
+    const pair = await nearCopyPair(earlier, buffer);
     const result = await invokeClaude({
       systemPrompt: NEAR_COPY_SYSTEM,
       userMessage: "Are these two pictures near-copies of each other?",
@@ -948,13 +1011,36 @@ export function parseSameThingVerdict(
 }
 
 /**
+ * Said with the pair when the LEFT picture is the one the new picture must not repeat — shown right
+ * before it, or the one it continues (`memoryRightBefore`). "A different distance or crop is fine"
+ * let a slightly tighter frame of the same composition through as a new view: job 405 scene 24 was
+ * scene 22 "only slightly tighter", job 403 scene 14 scene 10's pipe run a little closer, job 402
+ * scene 12 scene 9's stocked galley with "only the camera closer". A real close-up of one part, a
+ * wide view, another side or height is still a new view. Pure data.
+ */
+export const JUST_SHOWN_COPY_NOTE =
+  "The LEFT photo is shown in the video just before the RIGHT one, so the RIGHT must be a clearly " +
+  "new photo: the same camera angle with the same things in the same arrangement, only a little " +
+  "closer or further back, is a copy.";
+
+/** The question asked with the pair (`scanSameThing`); `justShown` adds `JUST_SHOWN_COPY_NOTE`. Pure. */
+export function sameThingQuestion(thing: string, justShown = false): string {
+  return (
+    `The thing: ${thing.replace(/"/g, "'").slice(0, 120)}. Is it the same one on the right, and is ` +
+    `the right a new view of it or a near-copy?${justShown ? ` ${JUST_SHOWN_COPY_NOTE}` : ""}`
+  );
+}
+
+/**
  * Is the `thing` in the new picture the same one as in its memory picture (`memoryUrl`)? The two are
- * laid SIDE BY SIDE, memory on the left. Never throws: a dead check passes the picture.
+ * laid SIDE BY SIDE, memory on the left. `justShown`: the memory picture is the one the new picture
+ * must not repeat (`JUST_SHOWN_COPY_NOTE`). Never throws: a dead check passes the picture.
  */
 export async function scanSameThing(
   memoryUrl: string,
   buffer: Buffer,
-  thing: string
+  thing: string,
+  justShown = false
 ): Promise<{ same: boolean; copy: boolean; what: string }> {
   try {
     const { presignOwnBucketUrl } = await import("./storage");
@@ -979,7 +1065,7 @@ export async function scanSameThing(
       .toBuffer();
     const result = await invokeClaude({
       systemPrompt: SAME_THING_SYSTEM,
-      userMessage: `The thing: ${thing.replace(/"/g, "'").slice(0, 120)}. Is it the same one on the right, and is the right a new view of it or a near-copy?`,
+      userMessage: sameThingQuestion(thing, justShown),
       imageInput: { base64: pair.toString("base64"), mediaType: "image/png" },
       maxTokens: 200,
       model: SAME_THING_MODEL(),

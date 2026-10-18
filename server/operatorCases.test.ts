@@ -3093,11 +3093,14 @@ describe("a picture drawn from the one right before it is a new photo, not that 
     expect(buildStillPrompt({ ...thimble(), ...words })).toContain(`HOW THE PLASTIC CUP LOOKS in every picture of this video: ${LOOK}`);
   });
 
-  it("399-20/21 and a far memory are untouched: a continuation keeps its view, scene 22 its ordinary memory", async () => {
-    const { rightBeforeToRecompose } = await import("./pictureMemory");
+  it("399-20/21 and a far memory: a continuation is the continuation rule's (jobs 401-405), scene 22 keeps its ordinary memory", async () => {
+    const { rightBeforeToRecompose, continuedPicture } = await import("./pictureMemory");
     const BAG = "several closed small liquor bottles tucked inside an open carry-on bag on a seat";
     const pair = [pic(20, "n", BAG, { keyThing: "small liquor bottle" }), pic(21, "n", `${BAG}, a close-up`, { keyThing: "small liquor bottle" })];
     expect(rightBeforeToRecompose(pair, pair[1])).toBeUndefined();
+    // Its view alone did not move the camera (the review of jobs 401-405), so it is a new photo of
+    // scene 20 now too — by the continuation rule (see the cases at the end of this file).
+    expect(continuedPicture(pair, pair[1])).toBe(pair[0]);
     const far = [
       pic(5, "and a second bag of pretzels", "a second pretzel bag held in a passenger's hand", { keyThing: "pretzel basket" }),
       pair[1],
@@ -4728,5 +4731,543 @@ describe("the list graphic shows every place the voice names, the last one too (
     };
     const [graphic] = missingListCues([], heard, film as never, found);
     expect((graphic.props.items as { say: string }[]).map(i => i.say)).toEqual(PLACES);
+  });
+});
+
+describe("a later view of one topic is a new photo, never the picture it continues (round 11, jobs 401-405)", () => {
+  // The review of the seven practice films found 15 near-copies. A topic past its limit or a split
+  // picture's later part was drawn as "the same words + a view" from the picture it continued, and
+  // came back as that picture again: job 405 scene 22 (the cat at the window, "a close-up of one
+  // detail of it") was scene 21 a little tighter; scene 24, after the host's "The honest word is
+  // crepuscular,", was scene 22 again; job 401 scene 3 kept scene 2's over-the-shoulder card shot;
+  // job 403 scene 14 was scene 10's pipe run a little closer.
+  const WINDOW = "a small tabby cat sitting alert on a windowsill, dim dawn light glowing through the bedroom window";
+  const window = async () => {
+    const { OTHER_VIEWS } = await import("./shotList");
+    return [
+      pic(7, "steady as a tightrope walker,", "a small tabby cat standing on a sleeping person's chest in the dark bedroom", { keyThing: "cat" }),
+      pic(21, "There's a stubborn old myth that cats are nocturnal,", WINDOW, { keyThing: "cat", otherKeyThings: ["window"] }),
+      pic(22, "creatures of the deep night, and that's mostly a costume they wear in cartoons.", `${WINDOW}${OTHER_VIEWS[0]}`, {
+        keyThing: "cat",
+        otherKeyThings: ["window"],
+      }),
+      host(23, "The honest word is crepuscular,"),
+      pic(24, "which is just a fancy way of saying dawn and dusk.", `${WINDOW}${OTHER_VIEWS[0]}`, {
+        keyThing: "cat",
+        otherKeyThings: ["window"],
+      }),
+    ];
+  };
+
+  it("405-22: drawn from scene 21 as the picture it continues, from a concrete close-up, and compared with 21", async () => {
+    const { continuedPicture, memoryViewFor } = await import("./pictureMemory");
+    const { REDRAW_CAMERAS } = await import("./pictureVariety");
+    const { sameThingReference } = await import("./longformVideo");
+    const w = await window();
+    expect(continuedPicture(w, w[2])).toBe(w[1]);
+    expect(memoryViewFor(w, w[2])).toBe(REDRAW_CAMERAS[0]);
+    const s = {
+      ...w[2],
+      memoryRefUrls: ["https://r2/still-src-7.png", "https://r2/still-src-21.png"],
+      memoryView: REDRAW_CAMERAS[0],
+      memoryRightBefore: 1,
+      memoryContinues: true as const,
+    };
+    expect(sameThingReference(s)).toBe("https://r2/still-src-21.png");
+    expect(memoryClause(s)).toMatch(/the earlier picture this one CONTINUES/);
+    expect(memoryClause(s)).toMatch(/never that picture's angle with the subject only a little closer or further away/);
+  });
+
+  it("405-24: the host take the gate placed inside the topic ends it — 24 is seen from much further back", async () => {
+    const { breakTopicsAtHostTakes, OTHER_VIEWS } = await import("./shotList");
+    const { memoryViewFor } = await import("./pictureMemory");
+    const { REDRAW_CAMERAS } = await import("./pictureVariety");
+    const w = await window();
+    w[4].sameShot = true;
+    expect(breakTopicsAtHostTakes(w)).toBe(1);
+    expect(w[4].sameShot).toBeUndefined();
+    expect(w[4].showSubject).toBe(`${WINDOW}${OTHER_VIEWS[1]}`);
+    expect(w[2].showSubject).toBe(`${WINDOW}${OTHER_VIEWS[0]}`);
+    expect(memoryViewFor(w, w[4])).toBe(REDRAW_CAMERAS[1]);
+  });
+
+  it("401-3 and 401-5: both continue scene 2 — 5 by its words, not scene 4 right before it", async () => {
+    const { continuedPicture, memoryViewFor } = await import("./pictureMemory");
+    const { OTHER_VIEWS } = await import("./shotList");
+    const { REDRAW_CAMERAS } = await import("./pictureVariety");
+    const AISLE = "man standing in pharmacy card aisle holding a sympathy and birthday card together";
+    const things = { keyThing: "sympathy card", otherKeyThings: ["pharmacy card aisle", "birthday card"], humanPresent: true };
+    const b = [
+      pic(2, "a pharmacy on a Tuesday morning, buying his third sympathy card since spring,", AISLE, things),
+      pic(3, "He is counting backward. He is sixty-four.", `${AISLE}${OTHER_VIEWS[0]}`, { ...things, sameShot: true }),
+      pic(4, "His father made it to eighty-one.", "a man's hand hovering between a row of cream sympathy cards and a row of pastel new-baby cards on a white pharmacy rack", {
+        keyThing: "pharmacy card aisle",
+        otherKeyThings: ["sympathy card"],
+        humanPresent: true,
+      }),
+      pic(5, "he has about seventeen summers left.", `${AISLE}${OTHER_VIEWS[2]}`, { ...things, sameShot: true }),
+    ];
+    expect(continuedPicture(b, b[1])).toBe(b[0]);
+    expect(continuedPicture(b, b[3])).toBe(b[0]);
+    expect([memoryViewFor(b, b[1]), memoryViewFor(b, b[3])]).toEqual([REDRAW_CAMERAS[0], REDRAW_CAMERAS[2]]);
+  });
+
+  it("403-14 repeats scene 10 three pictures later; 404-7 follows the robin before the host's introduction", async () => {
+    const { recomposeFrom } = await import("./pictureMemory");
+    const pipes = [
+      pic(10, "who would rather understand the cause than pay for the visit.", "grey PVC pipe network running beneath a house toward the street", { keyThing: "pipe network" }),
+      pic(11, "So. We will go the way the water goes.", "close view of the toilet's internal porcelain S-shaped trapway channel with water rushing through it", { keyThing: "toilet trapway" }),
+      pic(14, "Each of the nine stops somewhere,", "grey PVC pipe network running beneath the house toward the street", { keyThing: "pipe network" }),
+    ];
+    expect(recomposeFrom(pipes, pipes[2])).toEqual({ from: pipes[0], continues: true });
+    const robins = [
+      pic(5, "And that first robin of spring you'll be so happy to see in March?", "a robin standing on a green lawn in early spring with patches of melting snow", { keyThing: "robin" }),
+      host(6, "I'm Walter, and if you keep an eye on the yard from the kitchen window, this one's for you."),
+      pic(7, "We're going through seven things about the robin that hardly anybody knows,", "a robin standing on the snowy lawn near the fence", { keyThing: "robin" }),
+    ];
+    expect(recomposeFrom(robins, robins[2])).toEqual({ from: robins[0], continues: false });
+  });
+
+  it("the near-copy check always looks at the picture a continuation repeats; different pictures it leaves to the fingerprint", async () => {
+    const { nearCopyPartnerFor } = await import("./pictureMemory");
+    const w = await window();
+    expect(nearCopyPartnerFor(w, w[2])).toBe(w[1]);
+    const apart = [
+      pic(1, "n", "a dog asleep on the porch steps"),
+      pic(2, "n", "a red barn under a grey sky"),
+    ];
+    expect(nearCopyPartnerFor(apart, apart[1])).toBeUndefined();
+  });
+
+  it("398-10 keeps the close view its own words ask for: marked to continue, never told 'much further back'", async () => {
+    const { continuedPicture, memoryViewFor } = await import("./pictureMemory");
+    const { REDRAW_CAMERAS } = await import("./pictureVariety");
+    const { PART_VIEW } = await import("./namedLooks");
+    const LATTICE = "a one-foot-square kumiko lattice of thin pale pine strips in an even square grid, lying flat on a pale wooden workbench";
+    const k = [
+      pic(3, "But the one I was proudest of, a lattice panel that ate 6 hours of my Saturday,", LATTICE.replace("strips in", "strips crossing in"), {
+        keyThing: "lattice panel",
+      }),
+      pic(9, "Start with the one that lost.", LATTICE, { keyThing: "lattice panel" }),
+      pic(10, "Kumiko is the Japanese craft of fitting thin strips of wood together into patterns,", "close view of hands pressing a thin pale pine strip into the half-depth notches of a crossing strip, building a square kumiko grid on a workbench", {
+        keyThing: "lattice panel",
+        sameShot: true,
+      }),
+    ];
+    // Scene 9 repeats scene 3 and takes the concrete close-up; scene 10 continues 9 with words of its own.
+    expect(memoryViewFor(k, k[1])).toBe(REDRAW_CAMERAS[0]);
+    expect(continuedPicture(k, k[2])).toBe(k[1]);
+    expect(memoryViewFor(k, k[2])).toBe(PART_VIEW);
+  });
+});
+
+describe("a split panel is checked for near-copies like any picture (round 11, job 405 scene 9)", () => {
+  // A seeded "photo": light and dark patches smoothly enlarged, so the fingerprints are real ones.
+  const photo = async (seed: number, w: number, h: number) => {
+    const sharp = (await import("sharp")).default;
+    let a = seed >>> 0;
+    const rnd = () => {
+      a = (a + 0x6d2b79f5) >>> 0;
+      let t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const cols = Math.round((w / h) * 9);
+    const px = Buffer.alloc(cols * 9 * 3);
+    for (let i = 0; i < cols * 9; i++) px.fill(Math.floor(rnd() * 256), i * 3, i * 3 + 3);
+    return sharp(px, { raw: { width: cols, height: 9, channels: 3 } }).resize(w, h, { kernel: "cubic", fit: "fill" }).png().toBuffer();
+  };
+
+  it("405-9 (scene 2 cut square) and 403-15 (scene 11 drawn square) are each looked at beside the picture they repeat; a panel of something else is not", async () => {
+    const sharp = (await import("sharp")).default;
+    const { pictureFingerprint, pictureThumb, rememberPicture, nearCopyCandidates } = await import("./pictureVariety");
+    // 405: the walking tabby of scene 2, and the panel at scene 9 — the same picture cut square.
+    const cat = await photo(2, 1536, 864);
+    const catPanel = await sharp(cat).extract({ left: 336, top: 0, width: 864, height: 864 }).resize(1024, 1024).png().toBuffer();
+    rememberPicture(94050, 2, await pictureFingerprint(cat), await pictureThumb(cat));
+    expect(nearCopyCandidates(94050, 9, await pictureFingerprint(catPanel, true)).map(c => c.index)).toEqual([2]);
+    // 403: the cut-open toilet of scene 11, and the swab panel at scene 15 — its whole composition squeezed square.
+    const toilet = await photo(4, 1536, 864);
+    const swabPanel = await sharp(toilet).resize(1024, 1024, { fit: "fill" }).png().toBuffer();
+    rememberPicture(94030, 11, await pictureFingerprint(toilet), await pictureThumb(toilet));
+    expect(nearCopyCandidates(94030, 15, await pictureFingerprint(swabPanel, true)).map(c => c.index)).toEqual([11]);
+    // A panel of another thing (405's clock panel) is laid beside neither.
+    const clock = await pictureFingerprint(await photo(52, 1024, 1024), true);
+    expect(nearCopyCandidates(94050, 12, clock)).toEqual([]);
+    expect(nearCopyCandidates(94030, 12, clock)).toEqual([]);
+  });
+});
+
+describe("a memory picture takes only the thing from its references, never their weather or hour (round 11, jobs 404-405)", () => {
+  // Job 404 scenes 14-15, "a robin standing in a mild gulf coast yard with palm trees", were drawn
+  // from the robin's first pictures on a snowy northern lawn, told "the SAME robin … in the same
+  // place", and came back with snow and frost on the grass under the palms.
+  const robin = (index: number, show: string, refs: string[], memoryView: string) =>
+    pic(index, "n", show, { keyThing: "robin", otherKeyThings: ["gulf coast yard"], memoryRefUrls: refs, memoryView });
+
+  it("404-14 and 404-15: the references lend the robin's look; the yard, the season and the weather are the words'", async () => {
+    const { MEMORY_SETTING_CLAUSE } = await import("./longformVideo");
+    const { MEMORY_VIEWS } = await import("./pictureMemory");
+    const s14 = robin(14, "a robin standing in a mild gulf coast yard with palm trees", ["https://r2/404/5.png", "https://r2/404/12.png"], MEMORY_VIEWS[3]);
+    const s15 = robin(15, "a robin standing in a mild gulf coast yard with palm trees, a close-up of one detail of it filling the frame", ["https://r2/404/5.png", "https://r2/404/14.png"], PART_VIEW);
+    for (const s of [s14, s15]) {
+      const clause = memoryClause(s);
+      expect(clause).toContain("in the same place unless this picture's own words put it somewhere else");
+      expect(clause).not.toContain("in the same place —");
+      expect(clause.endsWith(MEMORY_SETTING_CLAUSE)).toBe(true);
+    }
+    expect(MEMORY_SETTING_CLAUSE).toMatch(/never its season, weather, light or time of day/);
+  });
+
+  it("405-28: the clock under 'three in the morning' is told its hour is its own words' — a remembered stove with no place named stays put", async () => {
+    const { MEMORY_SETTING_CLAUSE } = await import("./longformVideo");
+    const { MEMORY_VIEWS } = await import("./pictureMemory");
+    const clock = pic(28, "And three in the morning sits close enough to her pre-dawn window", "the round analog clock on the nightstand pointing near three", {
+      keyThing: "clock",
+      otherKeyThings: ["nightstand"],
+      memoryRefUrls: ["https://r2/405/11.png"],
+      memoryView: MEMORY_VIEWS[0],
+    });
+    expect(memoryClause(clock)).toContain(MEMORY_SETTING_CLAUSE);
+    expect(MEMORY_SETTING_CLAUSE).toMatch(/those are what this picture's own words say/);
+    // The place yields only to a place the words name: never sent somewhere new by itself.
+    expect(MEMORY_SETTING_CLAUSE).toMatch(/never its place when THIS picture's words name another/);
+    const stove = pic(7, "n", "the wood stove's door open with the fire inside", {
+      keyThing: "wood stove",
+      memoryRefUrls: ["https://r2/stove-1.png"],
+      memoryView: MEMORY_VIEWS[1],
+    });
+    expect(memoryClause(stove)).toContain("in the same place unless this picture's own words put it somewhere else");
+  });
+
+  it("404-14: the robin's two lawn pictures are not called 'this exact gulf coast yard' — 404-15, drawn from 14's yard, still is", async () => {
+    // Told its references showed "this exact robin and gulf coast yard", 404-14 had only the snowy
+    // northern lawn to copy as its yard. The yard has no earlier picture, so render now says so.
+    const { attachMemory, memoryFor, MEMORY_VIEWS, pictureSettled } = await import("./pictureMemory");
+    const { memoryFields } = await import("./longformVideo");
+    const yard = "a robin standing in a mild gulf coast yard with palm trees";
+    const b = [
+      pic(5, "n", "a robin standing on a green lawn in early spring with patches of melting snow", { keyThing: "robin", pictureUrl: "https://r2/404/5.png" }),
+      pic(12, "n", "a robin standing on frost dusted brown grass in winter", { keyThing: "robin", pictureUrl: "https://r2/404/12.png" }),
+      host(13, "The ones that nest up in Canada and across the far north do head south,", {
+        splitVisual: "A flock of robins in flight above a snow-covered landscape, heading south, bare trees and white ground below.",
+        keyThing: "robin",
+      }),
+      pic(14, "so the robin you see in January could be a traveler from up north", yard, { keyThing: "robin", otherKeyThings: ["gulf coast yard"] }),
+      pic(15, "along the Gulf Coast or down in Florida", `${yard}, a close-up of one detail of it filling the frame`, {
+        keyThing: "robin",
+        otherKeyThings: ["gulf coast yard"],
+      }),
+    ];
+    attachMemory(b, [b[3]]);
+    const s14 = { ...b[3], ...memoryFields(await memoryFor(b[3], 0), MEMORY_VIEWS[3]) } as StoryboardScene;
+    expect(memoryClause(s14)).toMatch(/show this exact robin. Draw the SAME robin — /);
+    expect(memoryClause(s14)).toContain("The gulf coast yard is drawn as this picture's own words describe it.");
+    b[3].pictureUrl = "https://r2/404/14.png";
+    attachMemory(b, [b[4]]);
+    pictureSettled(b[3]);
+    const s15 = { ...b[4], ...memoryFields(await memoryFor(b[4], 0), MEMORY_VIEWS[0]) } as StoryboardScene;
+    expect(memoryClause(s15)).toMatch(/show this exact robin and gulf coast yard./);
+    expect(memoryClause(s15)).not.toContain("drawn as this picture's own words describe");
+  });
+});
+
+describe("a living thing is drawn as its exact kind (job 404 scene 4)", () => {
+  // The film's first robin, a split panel "on a holly bush … snow", came back as the European robin
+  // on a channel about the American one: its written look never said which robin, and ran on into
+  // the place's list ("seen on grass, bare branches, and holly shrubs").
+  const STORED =
+    "a plump songbird about ten inches long, brown-grey back, bright orange-red breast, white eye ring, dark head, " +
+    "seen on grass, bare branches, and holly shrubs";
+  const EXACT = "an American robin, dark grey head, yellow bill, broken white ring around the eye, brick-orange breast";
+  const film = (look: string) => {
+    const b = [
+      pic(3, "Plenty of folks figure the robins took off months ago,", "the lawn under patches of melting snow", {
+        keyThing: "lawn",
+        pictureUrl: "https://r2/404/3.png",
+      }),
+      host(4, "Across a good part of the country, plenty of those robins never leave at all,", {
+        splitVisual: "A robin perched on a holly bush, its branches laden with bright red berries, snow on the ground nearby in winter.",
+        keyThing: "robin",
+      }),
+    ];
+    const things: KeyThing[] = [
+      { name: "robin", main: true, look },
+      { name: "lawn", look: "a flat suburban backyard lawn" },
+    ];
+    return { b, things };
+  };
+
+  it("the props list names the exact kind as the script's region says it, with what sets it apart", async () => {
+    const { EXACT_KIND_RULE } = await import("./shotList");
+    expect(CONTINUITY_SYSTEM).toContain(EXACT_KIND_RULE);
+    expect(EXACT_KIND_RULE).toMatch(/its look STARTS with that exact kind/);
+    expect(EXACT_KIND_RULE).toMatch(/the script's own country or region/);
+    expect(EXACT_KIND_RULE).toMatch(/each said as what it HAS, never naming the look-alike/);
+  });
+
+  it("the split panel is drawn by that look — still or moving — and never by the place's list", async () => {
+    const { attachMemory } = await import("./pictureMemory");
+    const { attachKeyframeMemory, withSplitMemory } = await import("./longformVideo");
+    const exact = film(EXACT);
+    attachMemory(exact.b, [], exact.things);
+    const panel = await withSplitMemory(exact.b[1], buildSplitRightScene(exact.b[1]), 0);
+    expect(buildStillPrompt(panel, false, undefined, undefined, true)).toContain(
+      `HOW THE ROBIN LOOKS in every picture of this video: ${EXACT}`
+    );
+    await attachKeyframeMemory(panel, 0); // a moving panel's start frame
+    expect(panel.keyThingLook).toBe(EXACT);
+    const stored = film(STORED);
+    attachMemory(stored.b, [], stored.things);
+    const old = await withSplitMemory(stored.b[1], buildSplitRightScene(stored.b[1]), 0);
+    expect(old.keyThingLook).toMatch(/dark head$/);
+    expect(buildStillPrompt(old, false, undefined, undefined, true)).not.toContain("holly shrubs");
+  });
+});
+
+describe("a picture never cuts a solid thing open (job 403, the review of 2026-10-18)", () => {
+  // "Here is the part nobody sees. Inside the porcelain…" — five pictures in 45 s were the same sawn-
+  // open fixture, and memory carried the cut into the host lifting a sliced toilet (scene 23).
+  const TRAPWAY_LOOK =
+    "the toilet's internal porcelain passage behind the bowl, a smooth curved S-shaped channel molded white, climbing upward before descending";
+  const things: KeyThing[] = [
+    { name: "toilet trapway", main: true, look: TRAPWAY_LOOK },
+    { name: "plunger", look: "red rubber cup on a wooden handle, standing upright in a corner" },
+  ];
+  const film = () => [
+    pic(
+      11,
+      "Today we go through all nine, one at a time, and look at what the German habit does instead. So. We will go the way the water goes.",
+      "close view of the toilet's internal porcelain S-shaped trapway channel with water rushing through it",
+      { keyThing: "toilet trapway" }
+    ),
+    pic(12, "Flush,", "water swirling down the white toilet bowl mid-flush", { listCut: true }),
+    pic(13, "and follow.", "close-up of the smooth white curved S-shaped porcelain channel, water flowing up and over its curve", {
+      keyThing: "toilet trapway",
+      partOf: "toilet trapway",
+      listCut: true,
+    }),
+    pic(
+      16,
+      "Here is the part nobody sees. Inside the porcelain, the water does not fall straight down.",
+      "cutaway close-up of the white porcelain S-shaped channel behind the bowl, water climbing up and over the curve before descending",
+      {
+        keyThing: "toilet trapway",
+        partOf: "toilet trapway",
+        visualPrompt:
+          "Cutaway view of the white porcelain S-shaped trapway channel behind a toilet bowl, water climbing up and over the curve before descending.",
+      }
+    ),
+    pic(
+      23,
+      "If it will not come, the toilet has to come up off the floor, and that is a fair place to stop and call someone.",
+      "toilet lifted off the floor in the small German bathroom, pipe opening exposed",
+      { keyThing: "toilet trapway", humanPresent: true }
+    ),
+  ];
+
+  it("scene 16: the prompt never says cutaway, and says to show it from outside", async () => {
+    const { SEEN_FROM_OUTSIDE_CLAUSE } = await import("./cutOpen");
+    const p = buildStillPrompt(film()[3]);
+    expect(p).toContain("View of the white porcelain S-shaped trapway channel behind a toilet bowl");
+    expect(p).not.toMatch(/cutaway (?:view|close-up)/i);
+    expect(p).toContain(SEEN_FROM_OUTSIDE_CLAUSE);
+  });
+
+  it("scene 23: the lifted toilet is drawn from outside, by no inside look and from no cutaway", async () => {
+    const { SEEN_FROM_OUTSIDE_CLAUSE } = await import("./cutOpen");
+    const { attachMemory } = await import("./pictureMemory");
+    const b = film();
+    attachMemory(b, [], things);
+    expect(keyThingLookFor(b[4], things, false)).toBeUndefined();
+    expect(memorySourcesFor(b, b[4])).not.toContain(b[0]);
+    expect(memorySourcesFor(b, b[4])).not.toContain(b[3]);
+    const p = buildStillPrompt(b[4]);
+    expect(p).toContain(SEEN_FROM_OUTSIDE_CLAUSE);
+    expect(p).not.toContain("internal porcelain passage");
+  });
+
+  it("scene 12: the bowl looked into is an ordinary photo — no clause", async () => {
+    const { SEEN_FROM_OUTSIDE_CLAUSE } = await import("./cutOpen");
+    expect(buildStillPrompt(film()[1])).not.toContain(SEEN_FROM_OUTSIDE_CLAUSE);
+  });
+
+  it("the door frames too: Norbert's \"cutaway view of the pine door frame\" (job 232 scene 9)", async () => {
+    const { SEEN_FROM_OUTSIDE_CLAUSE } = await import("./cutOpen");
+    const door = pic(
+      9,
+      "Those little factory screws only reach the soft pine.",
+      "a cutaway view of the pine door frame showing the gap and wooden stud behind it, with the short factory screws falling short",
+      {
+        visualPrompt:
+          "Cutaway view of pale pine door frame, exposing the gap behind it and the squared wooden stud set back in that gap.",
+      }
+    );
+    const p = buildStillPrompt(door);
+    expect(p).toContain("View of pale pine door frame, exposing the gap behind it");
+    expect(p).toContain(SEEN_FROM_OUTSIDE_CLAUSE);
+  });
+
+  it("the still check calls a cut-open thing broken, and the prompt writer is told the rule", async () => {
+    const { CUT_OPEN_BROKEN, NOTHING_CUT_OPEN_RULE } = await import("./cutOpen");
+    const { STILL_BROLL_ENHANCER_SYSTEM } = await import("./longformVideo");
+    expect(STILL_DEFECT_SYSTEM).toContain(CUT_OPEN_BROKEN);
+    expect(STILL_DEFECT_SYSTEM).toMatch(/QUESTION 2 — broken[\s\S]*shown CUT OPEN[\s\S]*QUESTION 3/);
+    expect(STILL_BROLL_ENHANCER_SYSTEM).toContain(NOTHING_CUT_OPEN_RULE);
+  });
+
+  it("job 225: a door frame cut away in cross-section is asked for whole; a real repair cut stays the work", async () => {
+    const { SEEN_FROM_OUTSIDE_CLAUSE, CUT_OPEN_BROKEN } = await import("./cutOpen");
+    const frame = pic(16, "That gap is where the screws give up.", "pine door frame cross-section showing a shallow gap and thicker stud behind board", {
+      visualPrompt:
+        "Pine door frame cut away in cross-section, pale soft wood showing a shallow gap between the visible face board and a thicker stud set behind it, resting on a workbench.",
+    });
+    const p = buildStillPrompt(frame);
+    // Only the clause that forbids it may still say the word.
+    expect(p.replace(SEEN_FROM_OUTSIDE_CLAUSE, "")).not.toMatch(/cross[- ]?section|cut away/i);
+    expect(p).toContain("Pine door frame, pale soft wood showing a shallow gap");
+    expect(p).toContain(SEEN_FROM_OUTSIDE_CLAUSE);
+    // A pipe cut to length or a wall opened to reach a valve is what a repair film shows: never broken.
+    expect(CUT_OPEN_BROKEN).toMatch(/Fine:.*a pipe cut to length.*access hole cut in a wall/);
+    const cutting = pic(30, "Cut the new pipe to length.", "a hacksaw cutting a length of grey PVC pipe on a bench", {
+      humanPresent: true,
+    });
+    expect(buildStillPrompt(cutting)).not.toContain(SEEN_FROM_OUTSIDE_CLAUSE);
+  });
+});
+
+describe("job 402 scene 33: nobody behind the big QR card", () => {
+  // Helena Hart's flight-attendant film (183.56-203.15): the scan window's picture was "A flight
+  // attendant's hands holding a small packet of crackers or cookies, offering it downward toward a
+  // seated passenger in the cabin row", drawn from scene 29's packet passed hand to hand. The card
+  // covered the packet, the fingers wrapped its lower-left edge, and for 19.6 s a hand held the QR code.
+  const SHIPPED =
+    "A flight attendant's hands holding a small packet of crackers or cookies, offering it downward toward a seated passenger in the cabin row, soft cabin light on the materials, the seat back and armrest visible at the edges.";
+  const film = (): StoryboardScene[] => [
+    pic(26, "Ask while the cart is still working its way back,", "a fully stocked beverage cart in the galley", {
+      visualPrompt: "Overhead view of a fully stocked beverage cart parked in the galley, rows of cans and a snack basket",
+    }),
+    pic(29, "and phrase it as an offer.", "a flight attendant smiling as she hands a cookie packet to an older passenger, seen from the side", {
+      visualPrompt:
+        "Bare hands holding a small foil-lined paper packet of cookies sealed, one hand extending it toward another hand reaching to receive it at a stainless steel galley counter, aircraft interior blurred behind.",
+      keyThing: "cookie packet",
+      humanPresent: true,
+      otherPerson: "a flight attendant and an older passenger",
+    }),
+    host(32, "Chapter four covers in-flight requests, so when the right sentence won't come to you at the galley, it's already in your pocket.", { cta: true }),
+    {
+      index: 33,
+      scriptText:
+        "Hold your phone up to the screen with its camera on, and aim it at the little black and white code. A link appears, and you tap it.",
+      cta: true,
+      qrHero: true,
+      qrTail: true,
+      stillImage: true,
+      keyThing: "cookie packet",
+      namedLook: "QR code: A small square pattern of black and white made of many tiny square dots.",
+      visualPrompt: SHIPPED,
+    } as StoryboardScene,
+  ];
+
+  it("its words name nobody: the hands prompt is swapped for a picture of nobody, its key thing and QR look go", () => {
+    const scenes = film();
+    expect(guardPitchVisuals(scenes)).toEqual([33]);
+    expect(scenes[3].visualPrompt).toBe(scenes[0].visualPrompt);
+    expect(SHOWS_PERSON.test(scenes[3].visualPrompt)).toBe(false);
+    expect(scenes[3].keyThing).toBeUndefined();
+    expect(scenes[3].namedLook).toBeUndefined();
+  });
+
+  it("its prompt says nobody is in it, not even a hand, and it is never drawn from the hands picture", async () => {
+    const { NO_PEOPLE_SUFFIX, QR_BACKDROP_CLAUSE } = await import("./longformVideo");
+    const scenes = film();
+    // Before the guard, with the packet still its key thing: the hands picture is no memory for it.
+    expect(memorySourcesFor(scenes, scenes[3])).toEqual([]);
+    guardPitchVisuals(scenes);
+    const p = buildStillPrompt(scenes[3]);
+    expect(p).toContain(QR_BACKDROP_CLAUSE);
+    expect(p).toContain(NO_PEOPLE_SUFFIX);
+    expect(p).not.toContain(NO_FIGURES_SUFFIX);
+    expect(p).not.toMatch(/hands holding|passenger/);
+  });
+
+  it("the picture check asks it — and only it — whether anyone is in the frame", async () => {
+    const { QR_BACKDROP_PERSON_QUESTION } = await import("./overlayTextScan");
+    expect(QR_BACKDROP_PERSON_QUESTION).toMatch(/must show NOBODY/);
+    expect(QR_BACKDROP_PERSON_QUESTION).toMatch(/even small, partly, or at an edge/);
+    // The rulebook every picture is asked never bans hands: a cutaway's hands at work are fine.
+    expect(STILL_DEFECT_SYSTEM).not.toContain(QR_BACKDROP_PERSON_QUESTION);
+  });
+
+  it("jobs 401 and 404: a backdrop of nobody keeps its picture", () => {
+    const card = film();
+    card[3] = { ...card[3], keyThing: "sympathy card", namedLook: undefined, visualPrompt: "Plain cream sympathy card with simple embossed border resting on a wooden desk in a quiet study, late-spring light from a nearby window." };
+    expect(guardPitchVisuals(card)).toEqual([]);
+    expect(card[3].keyThing).toBe("sympathy card");
+    const robin = film();
+    robin[3] = { ...robin[3], keyThing: "robin", namedLook: undefined, visualPrompt: "A robin perched on frost-covered grass in a suburban winter yard at dawn, with bare shrubs and the fence line softly visible behind, early morning light gentle and pale." };
+    expect(guardPitchVisuals(robin)).toEqual([]);
+    expect(robin[3].visualPrompt).toMatch(/^A robin perched/);
+  });
+});
+
+describe("job 405 scene 33: a sleeper's shoulder asked for behind the big QR card", () => {
+  // Luca Marino's cat film: the scan window's words put "the sleeping person's shoulder barely
+  // visible at frame edge" beside the cat. The cat stays; only the person leaves the words.
+  it("keeps the cat and takes the shoulder out", async () => {
+    const { withoutSomeone } = await import("./longformVideo");
+    const qr = {
+      index: 33,
+      cta: true,
+      qrHero: true,
+      stillImage: true,
+      keyThing: "tabby cat",
+      visualPrompt:
+        "A small tabby cat standing on the bed at 3 a.m., one front paw extended mid-step across grey bedding, ears alert, the sleeping person's shoulder barely visible at frame edge, bedroom dark and still.",
+    } as StoryboardScene;
+    expect(guardPitchVisuals([qr])).toEqual([33]);
+    expect(qr.visualPrompt).toBe(
+      "A small tabby cat standing on the bed at 3 a.m., one front paw extended mid-step across grey bedding, ears alert, bedroom dark and still."
+    );
+    expect(qr.keyThing).toBe("tabby cat");
+    expect(withoutSomeone(qr.visualPrompt)).toBe(qr.visualPrompt);
+  });
+});
+
+describe("the picture behind the big QR card: a worn thing off the body, the words never a fragment", () => {
+  // The review of M6 on the stored films. Job 380's jewellery scan window asked for a chain "resting on
+  // bare collarbone and skin"; job 357's dog film for "A dog's dark, damp nose inches from a person's
+  // pant leg", which the first cut left as "A dog's dark, late afternoon light …".
+  const qr = (visualPrompt: string): StoryboardScene =>
+    ({ index: 16, cta: true, qrHero: true, stillImage: true, visualPrompt }) as StoryboardScene;
+
+  it("job 380: the chain stays, the bare collarbone goes, and the prompt puts it on a stand", async () => {
+    const { QR_BACKDROP_CLAUSE } = await import("./longformVideo");
+    const chain = qr(
+      "A slim gold chain, twenty-eight to thirty-two inches, hanging past the chest in one unbroken vertical line, resting on bare collarbone and skin in a bright airy dressing room with a large mirror and soft sheer-curtained window."
+    );
+    expect(guardPitchVisuals([chain])).toEqual([16]);
+    expect(chain.visualPrompt).toBe(
+      "A slim gold chain, twenty-eight to thirty-two inches, hanging past the chest in one unbroken vertical line."
+    );
+    expect(QR_BACKDROP_CLAUSE).toMatch(/jewellery, clothing, shoes — lies flat, hangs, or sits on a stand or dress form/);
+    expect(buildStillPrompt(chain)).toContain(QR_BACKDROP_CLAUSE);
+  });
+
+  it("job 357: a picture of a person's leg is swapped whole, never cut to a fragment", async () => {
+    const { withoutSomeone } = await import("./longformVideo");
+    const words =
+      "A dog's dark, damp nose inches from a person's pant leg at the entry threshold, late afternoon light soft across worn fabric, the dog's breathing steady and unhurried, the moment suspended in calm attention.";
+    expect(withoutSomeone(words)).toBeUndefined();
+    const nose = qr(words);
+    const scenes = [{ index: 15, narration: "n", stillImage: true, visualPrompt: "A dog's water bowl by the back door" } as StoryboardScene, nose];
+    guardPitchVisuals(scenes);
+    expect(nose.visualPrompt).toBe("A dog's water bowl by the back door");
+  });
+
+  it("a woodwork backdrop that only names a joint or a way of making keeps its picture", () => {
+    const box = qr("Close-up of a walnut box with tight finger joints at the corner, dovetails cut by hand, resting on the bench.");
+    expect(guardPitchVisuals([box])).toEqual([]);
   });
 });

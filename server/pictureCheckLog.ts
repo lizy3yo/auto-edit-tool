@@ -46,6 +46,8 @@ export function pictureKindOf(scene: StoryboardScene, visual: string): PictureKi
 export function checkFlags(v: {
   broken?: boolean;
   unchecked?: boolean;
+  /** A person or a hand behind the big QR card (`person`). */
+  person?: boolean;
   overlay?: boolean;
   writing?: boolean;
   missing?: boolean;
@@ -60,6 +62,7 @@ export function checkFlags(v: {
   return [
     v.broken && "broken",
     v.unchecked && "unchecked",
+    v.person && "person",
     v.overlay && "stamped text",
     v.writing && "writing",
     v.missing && "missing",

@@ -66,8 +66,10 @@ import {
   BLUR_PRINT_VIEW,
   keyThingLookClause,
   lookToHold,
+  memoryAttached,
   memoryFor,
   memoryView,
+  nearCopyPartner,
   panelLook,
   pictureSettled,
   sameThingMove,
@@ -87,6 +89,13 @@ import {
   shippedFlaws,
 } from "../shared/pictureFlaws";
 import { scanNearCopy, scanSameHost, scanSameThing, scanStillDefects } from "./overlayTextScan";
+import {
+  cutOpenFault,
+  drawnFromOutside,
+  NOTHING_CUT_OPEN_RULE,
+  SEEN_FROM_OUTSIDE_CLAUSE,
+  withoutCutaway,
+} from "./cutOpen";
 import { padSentenceEnds } from "./sentencePauses";
 import {
   assignScreenSetups,
@@ -95,8 +104,9 @@ import {
   nearCopyCandidates,
   MAX_VARIETY_REDRAWS,
   nextScreenSetup,
-  pictureHash,
+  pictureFingerprint,
   pictureThumb,
+  REDRAW_CAMERAS,
   rememberPicture,
   screenPicture,
   screenSells,
@@ -475,6 +485,7 @@ import {
   personKey,
   REAL_HOLDER,
   onTheBody,
+  namesSomeone,
   showsSomeoneElse,
 } from "./hostLook";
 import {
@@ -5737,6 +5748,9 @@ export const STILL_BROLL_ENHANCER_SYSTEM =
   `- ${FIGURE_OF_SPEECH_RULE}\n` +
   `- ${RULED_OUT_RULE}\n` +
   `- ${NO_NARRATION_TEXT_RULE}\n` +
+  // Job 403 scene 16: "Cutaway view of the white porcelain S-shaped trapway channel behind a toilet
+  // bowl" — the prompt writer kept the cutaway it was handed, and the fixture was drawn sawn open.
+  `- ${NOTHING_CUT_OPEN_RULE} Never write the words cutaway, cross-section, x-ray or see-through.\n` +
   "- SAY IT, SHOW IT: when a MUST SHOW line is given, the frame's hero subject is exactly that " +
   "thing, named plainly first in your prompt and framed CLOSE — taking up much of the frame, the " +
   "first thing the eye lands on, though casually framed like a real phone photo rather than dead " +
@@ -5820,7 +5834,9 @@ const CTA_BROLL_ENHANCER_SYSTEM =
   "- A single concrete composed subject as a frame (the clip barely moves; any motion is " +
   "added in code).\n" +
   "- NO people: no face, head, body, or figure of any kind. Bare hands at the task are the " +
-  "only human parts allowed, and only when the shot needs them.\n" +
+  "only human parts allowed, and only when the shot needs them — NEVER in a picture that sits " +
+  "behind the big scan card (the message says when): that one shows no person, hand or body part " +
+  "at all, and nothing held or offered.\n" +
   "- Soft, neutral, muted natural light — never vivid or saturated. No AI-image clichés.\n" +
   "- PHYSICS & REALISM: a real, physically-plausible, accurate everyday " +
   "moment with correct anatomy and natural materials — not a CGI render.\n\n" +
@@ -5876,6 +5892,53 @@ export const CTA_SPLIT_PANEL_DIRECTIVE =
   "hands beside her reads off). If the subject you would otherwise describe involves a person " +
   "or their hands, show the physical thing the action happens to or leaves behind instead, " +
   "unattended and at rest.";
+
+/**
+ * THE PICTURE BEHIND THE BIG QR CARD SHOWS NOBODY (2026-10-18, the review of jobs 401-407). The scan
+ * window was person-free only by its flags (`toQrCard` clears `humanPresent`), never by its words,
+ * and this lane lets bare hands in: job 402 scene 33 came back "A flight attendant's hands holding a
+ * small packet of crackers or cookies, offering it downward toward a seated passenger" — the topic
+ * context it read held a hands-passing-a-packet picture — and the card sat over the packet, so for
+ * 19.6 s a hand held the QR code. Prepended to the CTA enhancer's message on a scan-window beat
+ * (`qrBackdrop`); `guardPitchVisuals` swaps any answer that still names someone.
+ */
+export const QR_BACKDROP_DIRECTIVE =
+  "IMPORTANT: this picture is the BACKDROP behind a large scan card laid over its middle — it must " +
+  "be OBJECT / SETTING ONLY, with NO people, NO hands, NO fingers, arms or body parts of any kind, " +
+  "even when the topic context's pictures show someone at work. Nothing is held, offered or reached " +
+  "for: the thing rests on its own, unattended, in its place. Something worn (jewellery, clothing, " +
+  "shoes) lies flat, hangs, or sits on a stand or dress form — never on a neck, wrist or body.";
+
+/**
+ * The same rule in the scan-window picture's own image prompt (`buildStillPrompt`), with
+ * `NO_PEOPLE_SUFFIX` in place of `NO_FIGURES_SUFFIX` — the cutaway guard lets bare hands in, and on
+ * this picture a hand left at the card's edge reads as holding the code (job 402 scene 33). Losing
+ * that guard also lost its rule for worn things, which a jewellery film's scan window needs most —
+ * job 380's chain "resting on bare collarbone", job 387's necklace "at her collarbone" — so it is
+ * said here again.
+ */
+export const QR_BACKDROP_CLAUSE =
+  "This picture is the backdrop behind a large card set over its middle: nobody is in it — no " +
+  "person, no hand, finger or arm anywhere, not even at an edge — and nothing is held, offered or " +
+  "reached for; whatever it shows rests on its own. Anything worn — jewellery, clothing, shoes — " +
+  "lies flat, hangs, or sits on a stand or dress form, never filled out as if someone wore it.";
+/** With `QR_BACKDROP_CLAUSE` when the picture is drawn from earlier pictures of its thing. */
+export const QR_BACKDROP_REFERENCE_NOTE =
+  "Take only the thing from the reference images, never a person or a hand holding it.";
+/** The redraw of a scan-window picture the check found a person or a hand in (`person`). */
+export const QR_BACKDROP_REDRAW =
+  "The last try showed a person or a hand: this time nobody is in the frame at all, not even a " +
+  "hand at an edge — only the thing itself, resting on its own.";
+
+/**
+ * The picture behind the big centred QR card (`qrPlacementFor` "center") — the scan window's still,
+ * never a host take. Pure.
+ */
+export function qrBackdrop(
+  s: Pick<StoryboardScene, "qrHero" | "coverHero" | "assetImageUrl" | "hostPresent">
+): boolean {
+  return !s.hostPresent && qrPlacementFor(s) === "center";
+}
 
 /**
  * Cutaway sibling of `SPLIT_PANEL_PERSON_FREE_DIRECTIVE`, prepended to the b-roll enhancer's
@@ -6798,7 +6861,9 @@ export function softenVisualPrompt(text: string): string {
     (s, [re, rep]) => s.replace(re, rep),
     stripPromptArtifacts(text)
   );
-  return scrubLegibleWriting(stripAtmosphericWisps(softened));
+  // No prompt ever asks for a cut view (`withoutCutaway`): job 403 scene 16's "Cutaway view of the
+  // white porcelain S-shaped trapway channel" reached the picture maker word for word.
+  return withoutCutaway(scrubLegibleWriting(stripAtmosphericWisps(softened)));
 }
 
 /**
@@ -6968,16 +7033,23 @@ export function buildStillPrompt(
   // the host away (`facingTheCamera`): a film drawn before the rule still says "face turned away".
   const lipsCut = !aggressive && hostLipsCut(scene);
   const facing = (t: string) => (lipsCut ? facingTheCamera(t) : t);
-  const shown = scene.showSubject ? facing(scene.showSubject) : undefined;
+  // The framing clause repeats the subject's own words, so a cut view is taken out of them too (job
+  // 403 scene 16: "a close shot where cutaway close-up of the white porcelain S-shaped channel").
+  const shown = scene.showSubject ? facing(withoutCutaway(scene.showSubject)) : undefined;
   const angleSuffix = shown
     ? heroFramingClause(shown)
     : scene.shotAngle && SHOT_ANGLE_SUFFIX[scene.shotAngle]
       ? `, ${SHOT_ANGLE_SUFFIX[scene.shotAngle]}`
       : "";
+  // The picture behind the big QR card shows nobody, on every rung (`QR_BACKDROP_CLAUSE`): a hand
+  // left in it reads as holding the code (job 402 scene 33).
+  const backdrop = qrBackdrop(scene);
   // The host at work (from behind) when the pipeline marked it, else anonymous hands.
-  const personSuffix = !aggressive ? personClauseFor(scene, scene.showSubject ?? scene.visualPrompt ?? "") : "";
-  const noFigures =
-    !aggressive && scene.humanPresent && scene.otherPerson
+  const personSuffix =
+    !aggressive && !backdrop ? personClauseFor(scene, scene.showSubject ?? scene.visualPrompt ?? "") : "";
+  const noFigures = backdrop
+    ? `${NO_PEOPLE_SUFFIX} ${QR_BACKDROP_CLAUSE}${scene.memoryRefUrls?.length ? ` ${QR_BACKDROP_REFERENCE_NOTE}` : ""}`
+    : !aggressive && scene.humanPresent && scene.otherPerson
       ? otherPeopleSuffix(peopleInShot(scene))
       : !aggressive && scene.humanPresent && scene.brollHostLook
         ? scene.hostFaceShown
@@ -7013,8 +7085,12 @@ export function buildStillPrompt(
   // ITS KEY THING'S LOOK, when no earlier picture of it is there to follow (`keyThingLookClause`);
   // a named kind's exact look wins. Not on a content-policy fallback, which no longer shows it.
   const look = !visualOverride ? scrubLegibleWriting(keyThingLookClause(scene)) : "";
+  // A PART HIDDEN INSIDE IS SEEN FROM OUTSIDE (`drawnFromOutside`): job 403 drew its trapway sawn open
+  // on every picture that named it ("close view of the toilet's internal porcelain S-shaped trapway
+  // channel") or was about it ("close-up of the smooth white curved S-shaped porcelain channel").
+  const outside = !visualOverride && drawnFromOutside(scene) ? ` ${SEEN_FROM_OUTSIDE_CLAUSE}` : "";
   return withAllowedText(
-    `${lead}${visual}${scrubLegibleWriting(namedLookClause(scene))}${look}${item}${angleSuffix}${personSuffix}${memory}${app} ${amateurIphoneLook(subject, motion)} ${framing} ${noFigures} ${NO_BOOK_SUFFIX}`,
+    `${lead}${visual}${scrubLegibleWriting(namedLookClause(scene))}${look}${outside}${item}${angleSuffix}${personSuffix}${memory}${app} ${amateurIphoneLook(subject, motion)} ${framing} ${noFigures} ${NO_BOOK_SUFFIX}`,
     scene.pictureText,
     scene.blurPrint
   );
@@ -7346,35 +7422,56 @@ export const DESCRIBED_SCREEN_CLAUSE =
 /**
  * The fields a picture's memory sets at render (`memoryFor`): its reference pictures and camera
  * position; whether those show only the OTHER key things in it; and, when none is a picture of its
- * own thing, the look it is drawn by instead (`keyThingLookClause`); which of them was shown right
- * before it, about something else (`memoryRightBefore`); and the look kept for a redraw from words
- * (`memoryWordsLook`). Pure.
+ * own thing, the look it is drawn by instead (`keyThingLookClause`); which of them it must not
+ * repeat — shown right before it about something else, or the one it continues (`memoryRightBefore`,
+ * `memoryContinues`); the look kept for a redraw from words (`memoryWordsLook`); and the other key
+ * things none of the references shows (`memoryNotShown`). Pure.
  */
 export function memoryFields(
-  memory: { urls: string[]; own: boolean; look?: string; wordsLook?: string; before?: number },
+  memory: {
+    urls: string[];
+    own: boolean;
+    look?: string;
+    wordsLook?: string;
+    before?: number;
+    continues?: boolean;
+    notShown?: string[];
+  },
   view: string | undefined
 ): Pick<
   StoryboardScene,
-  "memoryRefUrls" | "memoryView" | "memoryOthersOnly" | "keyThingLook" | "memoryRightBefore" | "memoryWordsLook"
+  | "memoryRefUrls"
+  | "memoryView"
+  | "memoryOthersOnly"
+  | "memoryNotShown"
+  | "keyThingLook"
+  | "memoryRightBefore"
+  | "memoryContinues"
+  | "memoryWordsLook"
 > {
   const has = memory.urls.length > 0;
+  const before =
+    has && memory.before != null && memory.before >= 0 && memory.before < memory.urls.length
+      ? memory.before
+      : undefined;
   return {
     memoryRefUrls: has ? memory.urls : undefined,
     memoryView: has ? view : undefined,
     memoryOthersOnly: has && !memory.own ? true : undefined,
+    memoryNotShown: has && memory.notShown?.length ? memory.notShown : undefined,
     keyThingLook: memory.own ? undefined : memory.look,
-    memoryRightBefore:
-      has && memory.before != null && memory.before >= 0 && memory.before < memory.urls.length
-        ? memory.before
-        : undefined,
+    memoryRightBefore: before,
+    memoryContinues: before != null && memory.continues ? true : undefined,
     memoryWordsLook: has && memory.own ? memory.wordsLook : undefined,
   };
 }
 
 /**
- * The memory picture the same-thing check lays beside a new one: the picture shown right before it
- * when that is one of its references (`memoryRightBefore`) — the copy a viewer would see is a copy
- * of THAT picture — else its first reference, the thing's memory. Pure.
+ * The memory picture the same-thing check lays beside a new one: the picture it must not repeat when
+ * that is one of its references (`memoryRightBefore` — shown right before it, or the one it continues)
+ * — the copy a viewer would see is a copy of THAT picture — else its first reference, the thing's
+ * memory. Job 405 scene 22 continued scene 21 and was laid beside scene 7, the cat's first picture,
+ * so its copy of 21 passed. Pure.
  */
 export function sameThingReference(scene: StoryboardScene): string | undefined {
   const refs = scene.memoryRefUrls ?? [];
@@ -7393,16 +7490,36 @@ export function memoryToWords(
   scene: StoryboardScene
 ): Pick<
   StoryboardScene,
-  "memoryRefUrls" | "memoryView" | "memoryOthersOnly" | "keyThingLook" | "memoryRightBefore" | "memoryWordsLook"
+  | "memoryRefUrls"
+  | "memoryView"
+  | "memoryOthersOnly"
+  | "memoryNotShown"
+  | "keyThingLook"
+  | "memoryRightBefore"
+  | "memoryContinues"
+  | "memoryWordsLook"
 > {
   return {
     memoryRefUrls: undefined,
     memoryView: undefined,
     memoryOthersOnly: undefined,
+    memoryNotShown: undefined,
     keyThingLook: scene.memoryWordsLook ?? scene.keyThingLook,
     memoryRightBefore: undefined,
+    memoryContinues: undefined,
     memoryWordsLook: undefined,
   };
+}
+
+/**
+ * The camera a CONTINUATION keeps when it is drawn from words (`memoryToWords`): its memory clause —
+ * the only place its concrete camera was written (`memoryViewFor`) — is swapped out, and drawn from
+ * nearly the same words as the picture it continues and no camera at all, it came back as that
+ * picture again (job 405 scene 8, job 401 scenes 3 and 5: the same composition shipped). Empty for
+ * any other picture. Pure.
+ */
+export function continuationCameraClause(scene: StoryboardScene): string {
+  return scene.memoryContinues && scene.memoryView ? ` Camera for THIS picture: ${scene.memoryView}.` : "";
 }
 
 /**
@@ -7420,9 +7537,10 @@ export function promptFromWords(prompt: string, memory: string, look: string): s
 /**
  * A FIRST PICTURE THAT MISSED IS NEVER COPIED: a picture whose last check said what it must show is
  * not in it still ships, but is no memory for later pictures (`memoryUnfit`). Stored films copied 22
- * first pictures that failed their last check into 122 later pictures. Only `missing` counts: a staged
- * look or readable writing leaves the thing itself right (Dale's job 369: the keepsake-box group
- * shot, last check "writing", is the box's memory still). Mutates `scene`.
+ * first pictures that failed their last check into 122 later pictures. Only `missing` counts — and a
+ * frame seen cut open (`ValidatedStill.cutOpen`, job 403), whose thing is not the real one either: a
+ * staged look or readable writing leaves the thing itself right (Dale's job 369: the keepsake-box
+ * group shot, last check "writing", is the box's memory still). Mutates `scene`.
  */
 export function markMemoryFit(scene: StoryboardScene, missing: boolean | undefined): void {
   if (missing) scene.memoryUnfit = true;
@@ -7462,15 +7580,34 @@ function carryPanelFlaws(host: StoryboardScene, flaws: string[] | undefined): vo
 }
 
 /**
+ * THE REFERENCES LEND THE THING, NEVER ITS WEATHER OR ITS HOUR (2026-10-18, the review of jobs
+ * 401-407). A memory picture was told to draw "the SAME robin … in the same place", and the place
+ * came with everything in it: job 404 scenes 14-15, "a robin standing in a mild gulf coast yard with
+ * palm trees", were drawn from the robin's first pictures on a snowy northern lawn and came back with
+ * snow and frost on the grass under the palms. A reference picture is how the thing looks and nothing
+ * else: the season, the weather, the light and the time of day — and the place, whenever this
+ * picture's words name another — are what its own words say. So the hour must be in the words: job
+ * 405 scene 28, a clock under "three in the morning" drawn from its night-time memory (scene 11),
+ * came back in a daylit room because its own words had lost "at night" — no reference puts that
+ * back. Said after every memory clause, whatever its view; "every reference image … it" reads right
+ * for one reference or several, the host photo included. Pure data.
+ */
+export const MEMORY_SETTING_CLAUSE =
+  " Every reference image lends ONLY how the things in it look — never its season, weather, light " +
+  "or time of day, and never its place when THIS picture's words name another: those are what this " +
+  "picture's own words say, even where a reference shows otherwise.";
+
+/**
  * PICTURE MEMORY: a picture of a key thing drawn from the earlier pictures of it
  * (`server/pictureMemory.ts`) is told what those reference images are — the SAME thing, seen from
  * another spot — and, when the host is in the shot, that the last reference is the host. When one
  * of them is the picture shown right before it, about something else, it is told that picture lends
- * only the thing's look (`rightBeforeClause`).
+ * only the thing's look (`rightBeforeClause`). Every one is told the references lend only the look,
+ * never their setting (`MEMORY_SETTING_CLAUSE`).
  */
 export function memoryClause(scene: StoryboardScene): string {
   const clause = memoryReferenceClause(scene);
-  return clause ? `${clause}${rightBeforeClause(scene)}` : "";
+  return clause ? `${clause}${rightBeforeClause(scene)}${MEMORY_SETTING_CLAUSE}` : "";
 }
 
 /** Names in a sentence: "a", "a and b", "a, b and c". */
@@ -7497,10 +7634,22 @@ export function rightBeforeClause(scene: StoryboardScene): string {
   if (!n || p == null || p < 0 || p >= n || !scene.keyThing) return "";
   if (scene.memoryView === SCREEN_ITEM_VIEW || scene.memoryView === SET_ITEM_VIEW) return "";
   const names = scene.memoryOthersOnly
-    ? scene.otherKeyThings ?? []
-    : [scene.partOf ?? scene.keyThing, ...(scene.otherKeyThings ?? [])];
+    ? othersOnlyNames(scene)
+    : [scene.partOf ?? scene.keyThing, ...shownOthers(scene)];
   if (!names.length) return "";
   const which = n === 1 ? "The first reference image" : `Reference image ${p + 1}`;
+  // A CONTINUATION (`memoryContinues`): the picture it continues lends the look too, and the camera
+  // moves — job 405 scene 22, told only "a close-up of one detail of it", came back as scene 21 a
+  // little tighter; job 401 scene 3 kept scene 2's over-the-shoulder framing and changed the cards.
+  if (scene.memoryContinues)
+    return (
+      ` ${which} is the earlier picture this one CONTINUES — the same subject, already shown in this ` +
+      `video: take ONLY how the ${namesInSentence(names)} ${names.length > 1 ? "look" : "looks"} from ` +
+      `it, never the picture itself. This is a clearly new photo of it from the camera position given ` +
+      `for THIS picture — never that picture's angle with the subject only a little closer or further ` +
+      `away, never the same pose, the same hand positions or the same things at the same angles in the ` +
+      `same places.`
+    );
   return (
     ` ${which} is the picture shown RIGHT BEFORE this one in the video: take ONLY how the ` +
     `${namesInSentence(names)} ${names.length > 1 ? "look" : "looks"} from it, never the picture ` +
@@ -7508,6 +7657,37 @@ export function rightBeforeClause(scene: StoryboardScene): string {
     `the same pose, the same hand positions or the same things at the same angles in the same places ` +
     `— and what THIS picture's own words are about fills the frame.`
   );
+}
+
+/**
+ * The other key things the references SHOW (`memoryNotShown` left out): job 404 scene 14 was told
+ * its two pictures of the robin on a snowy northern lawn showed "this exact robin and gulf coast
+ * yard", and "draw the SAME … gulf coast yard" made the snowy lawn its yard. Every other key thing
+ * on a picture drawn before the field existed. Pure.
+ */
+function shownOthers(scene: StoryboardScene): string[] {
+  return (scene.otherKeyThings ?? []).filter(t => !scene.memoryNotShown?.includes(t));
+}
+
+/**
+ * References of the other things only (`memoryOthersOnly`): the ones they show — every one, should
+ * the field mark them all (each of those references was picked for one of them, so it never does).
+ */
+function othersOnlyNames(scene: StoryboardScene): string[] {
+  const shown = shownOthers(scene);
+  return shown.length ? shown : scene.otherKeyThings ?? [];
+}
+
+/**
+ * The other key things no reference shows, said apart: drawn as the picture's own words describe
+ * them. It claims nothing about what the references hold — a thing filed under no earlier picture
+ * may still stand in one (the bench under a board) — it only stops calling it "this exact" one.
+ */
+function notShownClause(scene: StoryboardScene): string {
+  const named = scene.memoryOthersOnly ? othersOnlyNames(scene) : shownOthers(scene);
+  const apart = (scene.otherKeyThings ?? []).filter(t => !named.includes(t));
+  if (!apart.length) return "";
+  return ` The ${namesInSentence(apart)} ${apart.length > 1 ? "are" : "is"} drawn as this picture's own words describe ${apart.length > 1 ? "them" : "it"}.`;
 }
 
 function memoryReferenceClause(scene: StoryboardScene): string {
@@ -7528,8 +7708,10 @@ function memoryReferenceClause(scene: StoryboardScene): string {
       "identical shape, colours, materials and wear."
     );
   if (!n || !scene.keyThing) return "";
-  // Every key thing in the picture is drawn from its own earlier picture (the heater AND the mattress).
-  const all = [scene.keyThing, ...(scene.otherKeyThings ?? [])];
+  // Every key thing in the picture is drawn from its own earlier picture (the heater AND the mattress)
+  // — those the references show; the rest are drawn from the words (`notShownClause`).
+  const all = [scene.keyThing, ...shownOthers(scene)];
+  const apart = notShownClause(scene);
   const thing = all.length > 1 ? `${all.slice(0, -1).join(", ")} and ${all[all.length - 1]}` : all[0];
   const which = n === 1 ? "The first reference image shows" : `The first ${n} reference images show`;
   const host =
@@ -7541,7 +7723,7 @@ function memoryReferenceClause(scene: StoryboardScene): string {
   // "this exact mattress and heater", the picture maker had only a heater to copy for both — and the
   // first mattress picture is the one every later mattress is drawn from.
   if (scene.memoryOthersOnly) {
-    const others = scene.otherKeyThings ?? [];
+    const others = othersOnlyNames(scene);
     if (!others.length) return "";
     const named =
       others.length > 1 ? `${others.slice(0, -1).join(", ")} and ${others[others.length - 1]}` : others[0];
@@ -7552,6 +7734,7 @@ function memoryReferenceClause(scene: StoryboardScene): string {
       ` ${which} this exact ${named}, seen earlier in this video: draw the SAME ${named} — ${same} — ` +
       `from a different camera position, never copying the reference's framing. ` +
       `${n === 1 ? "It does" : "They do"} NOT show the ${scene.keyThing}: draw it from this picture's own words.` +
+      apart +
       host
     );
   }
@@ -7570,6 +7753,7 @@ function memoryReferenceClause(scene: StoryboardScene): string {
       ` ${which} this exact ${thing}. It is NOT what this picture is about: draw the SAME ${thing} — ` +
       `identical shape, colours, materials and wear — small, where the words put it, never close up ` +
       `and never the centre of the picture. What the words name first fills the frame.` +
+      apart +
       host
     );
   // A part that carries printing nobody says (`BLUR_PRINT_VIEW`): the part is the subject, from an
@@ -7587,13 +7771,12 @@ function memoryReferenceClause(scene: StoryboardScene): string {
       `fabrics, colours, materials and wear as the reference.` +
       host
     );
-  // Where it is: where its memory had it — but a picture that follows the one right before it, about
-  // something else (`rightBeforeClause`), is wherever its own words put it (job 399 scene 17: the cup
-  // on a tray table, its memory the cup at the cart).
-  const place =
-    scene.memoryRightBefore != null
-      ? "in the same place unless this picture's own words put it somewhere else"
-      : "in the same place";
+  // Where it is: where its memory had it unless its own words put it somewhere else — job 399 scene
+  // 17, the cup on a tray table, its memory the cup at the cart; and job 404 scene 14, "a robin in a
+  // mild gulf coast yard", told "in the same place" as its memory's snowy lawn, kept the snow. That
+  // one followed a split, not its memory, so the exception for the picture right before missed it:
+  // it holds for every memory picture (`MEMORY_SETTING_CLAUSE` says the rest of the setting).
+  const place = "in the same place unless this picture's own words put it somewhere else";
   // A picture of the thing BEFORE it is finished (`buildStage` material / making): its references
   // are the same or an earlier stage (`memorySourcesFor` drops anything further along), so its shape
   // and size are its own — "identical shape, size" would hold a strip being coiled into a bowl
@@ -7611,6 +7794,7 @@ function memoryReferenceClause(scene: StoryboardScene): string {
       `finished: raw pieces or partly built, with only what the words say has been done to it so ` +
       `far. ${all.length > 1 ? "Each is" : "It is"} ONE thing: never a second copy or a spare part ` +
       `of it beside, on or inside the first.` +
+      apart +
       host
     );
   return (
@@ -7622,6 +7806,7 @@ function memoryReferenceClause(scene: StoryboardScene): string {
     `looked before. It is ONE thing: when the words open, fill, empty, tilt or use it, that same ` +
     `one is shown that way — never a second copy or a spare part of it beside, on or inside the ` +
     `first.` +
+    apart +
     host
   );
 }
@@ -8061,23 +8246,35 @@ const cleanPitchVisual = (text: string | undefined): text is string =>
   !!text?.trim() && !ctaVisualIsLiteral(text) && !brollDepictsBook(text);
 
 /**
+ * …and, behind the BIG card (`qrBackdrop`), no person either: words naming someone or a hand are
+ * drawn as written, whatever the flags say (job 402 scene 33, a hand "holding" the code for 19.6 s).
+ */
+const cleanBackdropVisual = (text: string | undefined): text is string =>
+  cleanPitchVisual(text) && !namesSomeone(text);
+
+/**
  * Deterministic, on-topic fallback for a CTA cutaway's visual, in order of how specific it is to
  * THIS video: the subject of the nearest non-CTA, non-host scene (a concrete shot the video
  * already shows); else the video's own subject line (`params.videoSubject` — "cedar bird feeder
  * build"), so even a film with no clean cutaway to borrow from stays on its topic; else the
- * generic pool, varied by index. Pure — unit-tested.
+ * generic pool, varied by index. `personFree` (the picture behind the big QR card) borrows only a
+ * picture of nobody — no person or hands in its words or its flags — and skips the pool's hands.
+ * Pure — unit-tested.
  */
 export function genericCtaBrollFor(
   scenes: StoryboardScene[],
   i: number,
-  videoSubject?: string
+  videoSubject?: string,
+  personFree = false
 ): string {
+  const clean = personFree ? cleanBackdropVisual : cleanPitchVisual;
   for (let d = 1; d < scenes.length; d++) {
     for (const j of [i - d, i + d]) {
       const s = scenes[j];
       if (!s || s.cta || s.hostPresent) continue;
+      if (personFree && (s.humanPresent || s.otherPerson || s.brollHostLook)) continue;
       const subject = s.visualPrompt ?? s.brollVisual;
-      if (cleanPitchVisual(subject)) return subject;
+      if (clean(subject)) return subject;
     }
   }
   const topic = videoSubject?.trim();
@@ -8085,13 +8282,15 @@ export function genericCtaBrollFor(
     ? `${topic} — the real-world subject of this video, shown as a calm, photoreal cutaway ` +
       `with no people in the frame`
     : undefined;
-  if (cleanPitchVisual(fromTopic)) return fromTopic;
-  return GENERIC_CTA_BROLL[i % GENERIC_CTA_BROLL.length];
+  if (clean(fromTopic)) return fromTopic;
+  const pool = personFree ? GENERIC_CTA_BROLL.filter(t => !namesSomeone(t)) : GENERIC_CTA_BROLL;
+  return pool[i % pool.length];
 }
 
 /**
  * Keyword guard for CTA cutaways: keep `candidate` if it is non-empty and not literal CTA
- * imagery, otherwise swap in an on-topic generic. Pure — unit-tested.
+ * imagery, otherwise swap in an on-topic generic. Pure — unit-tested. (Behind the big QR card,
+ * `guardPitchVisuals` also swaps words that name someone, as the enhancer's last step.)
  */
 export function sanitizeCtaCutaway(
   candidate: string | undefined,
@@ -8121,7 +8320,8 @@ export function sanitizeCtaCutaway(
  * Checks the full-frame prompt of a person-free beat and the split panel of a split beat. Leaves
  * cover reveals and operator assets alone (literal images, no prompt renders) and a full-frame
  * host (no b-roll prompt at all). A book in ANY split panel is swapped too — the long-standing
- * book guard this pass absorbed. Deterministic, idempotent, no LLM. Returns the indices it
+ * book guard this pass absorbed. Behind the big QR card it also takes every person and hand out of
+ * the words (`guardQrBackdrop`). Deterministic, idempotent, no LLM. Returns the indices it
  * changed. Mutates in place; pure otherwise — unit-tested.
  */
 export function guardPitchVisuals(
@@ -8166,9 +8366,144 @@ export function guardPitchVisuals(
       if (s.qrHero) s.humanPresent = undefined;
       touched = true;
     }
+    // An exact look written for the pitch itself is a second, made-up code drawn under the real one:
+    // job 402 scene 33's line names "the little black and white code", and the named-things step gave
+    // the scan window "QR code: a small square pattern of black and white…".
+    if (
+      pitch &&
+      !s.hostPresent &&
+      !s.coverHero &&
+      !s.assetImageUrl &&
+      s.namedLook?.trim() &&
+      ctaVisualIsLiteral(s.namedLook)
+    ) {
+      s.namedLook = undefined;
+      touched = true;
+    }
+    if (qrBackdrop(s) && guardQrBackdrop(scenes, i, videoSubject)) touched = true;
     if (touched) changed.push(s.index);
   });
   return changed;
+}
+
+/**
+ * A word that opens a clause of its own after a comma — an article, a possessive, a number, a
+ * preposition, a joining word, a doing word — never the next of a list of describing words ("dark,
+ * damp nose", "soft, neutral background"). Pure.
+ */
+const OPENS_A_CLAUSE =
+  /^(?:a|an|the|its|his|her|their|our|my|your|this|that|these|those|some|each|every|both|no|one|two|three|four|five|six|seven|eight|nine|ten|several|\d\S*|with|without|beside|near|next|on|in|at|under|over|behind|against|from|by|above|below|across|around|along|through|into|onto|while|as|and|or|but|where|which|who|whose|so|then|held|set|laid|left|lit|hung|seen|shown|cut|made|built|kept|sat|stood|spread|caught|shot|taken|[a-z]{3,}(?:ing|ed))$/i;
+
+/**
+ * The words with every clause that names someone taken out (`namesSomeone`), when the lead clause —
+ * what the picture is OF — names nobody: job 405 scene 33's scan window, "A small tabby cat standing
+ * on the bed at 3 a.m., one front paw extended mid-step across grey bedding, ears alert, the sleeping
+ * person's shoulder barely visible at frame edge, bedroom dark and still", keeps its cat and loses
+ * the shoulder. Undefined when the lead itself is someone or their hands (job 402 scene 33's "A
+ * flight attendant's hands holding a small packet …"): nothing of it is then a picture of nobody.
+ * NEVER A FRAGMENT (the review of this rule on the stored films): a sentence's lead runs on past a
+ * comma inside a list of describing words — job 357 scene 24's "A dog's dark, damp nose inches from a
+ * person's pant leg …" was cut to "A dog's dark, late afternoon light …", and is a picture of the
+ * person's leg, so it is undefined — and a later sentence whose lead names someone goes whole: what is
+ * left of it is about whoever went (job 366 scene 23's "Man standing still, hands relaxed at sides."
+ * — the hands are his). A sentence that lost its last clause keeps its full stop. Pure.
+ */
+export function withoutSomeone(text: string | undefined): string | undefined {
+  const t = (text ?? "").trim();
+  // Clauses and the separators between them, alternating: [clause, sep, clause, sep, clause…],
+  // gathered into sentences (a separator with no comma, semicolon or dash is a sentence break).
+  const parts = t.split(/(\s*[,;]\s+|\s+[—–]\s+|(?<=[.!?])\s+(?=[A-Z]))/);
+  const sentences: { text: string; sep: string }[][] = [];
+  for (let k = 0; k < parts.length; k += 2) {
+    const clause = { text: parts[k], sep: k ? parts[k - 1] : "" };
+    if (!k || !/[,;—–]/.test(clause.sep)) sentences.push([clause]);
+    else sentences[sentences.length - 1].push(clause);
+  }
+  const wordCount = (c: string) => c.trim().split(/\s+/).length;
+  const opens = (c: string) => OPENS_A_CLAUSE.test(c.trim().split(/\s+/)[0]?.replace(/^\W+|\W+$/g, "") ?? "");
+  for (const s of sentences)
+    while (s.length > 1 && (wordCount(s[0].text) < 4 || !opens(s[1].text))) {
+      s[0] = { text: s[0].text + s[1].sep + s[1].text, sep: s[0].sep };
+      s.splice(1, 1);
+    }
+  if (!sentences[0][0].text.trim() || namesSomeone(sentences[0][0].text)) return undefined;
+  let out = "";
+  for (const s of sentences) {
+    if (out && namesSomeone(s[0].text)) continue;
+    // A dropped clause hands its separator to the next kept one.
+    let kept = "";
+    let pending: string | undefined;
+    for (const c of s) {
+      if (kept && namesSomeone(c.text)) {
+        pending ??= c.sep;
+        continue;
+      }
+      kept += kept ? (pending ?? c.sep) + c.text : c.text;
+      pending = undefined;
+    }
+    kept = kept.replace(/[,;\s—–]+$/, "");
+    const stop = /[.!?]$/.exec(s[s.length - 1].text)?.[0];
+    if (stop && !/[.!?]$/.test(kept)) kept += stop;
+    out += out ? s[0].sep + kept.charAt(0).toUpperCase() + kept.slice(1) : kept;
+  }
+  return out;
+}
+
+/**
+ * THE PICTURE BEHIND THE BIG QR CARD SHOWS NOBODY — in its WORDS, not only its flags (2026-10-18,
+ * the review of jobs 401-407). `toQrCard` clears `humanPresent`, but the words are drawn as written:
+ * job 402 scene 33 shipped "A flight attendant's hands holding a small packet of crackers or
+ * cookies, offering it downward toward a seated passenger", the card sat over the packet, and for
+ * 19.6 s a hand held the QR code. Words that name someone or a hand (`namesSomeone`) lose those
+ * clauses when the picture is of something else (`withoutSomeone`: job 405 scene 33's cat, with a
+ * sleeper's shoulder at the frame's edge); when the picture IS the person or the hands, the words are
+ * swapped for a picture of nobody (`genericCtaBrollFor`, `personFree`), and what was written for the
+ * old words — its key things, its exact look, what it must show, its print — goes with them: the key
+ * things are read again from the new words at render (`tagKeyThings`), so the check never holds the
+ * new picture to the old packet and no memory of the packet in someone's hands is attached. A "what
+ * it must show" that names someone loses that part too (it leads the prompt, `subjectLead`), and so
+ * does every person flag a later step could have set. Returns whether it changed anything. Mutates
+ * in place.
+ */
+function guardQrBackdrop(
+  scenes: StoryboardScene[],
+  i: number,
+  videoSubject: string | undefined
+): boolean {
+  const s = scenes[i];
+  let touched = false;
+  if (s.visualPrompt?.trim() && namesSomeone(s.visualPrompt)) {
+    const kept = withoutSomeone(s.visualPrompt);
+    if (kept) s.visualPrompt = kept;
+    else {
+      s.visualPrompt = genericCtaBrollFor(scenes, i, videoSubject, true);
+      s.keyThing = undefined;
+      s.otherKeyThings = undefined;
+      s.partOf = undefined;
+      s.namedLook = undefined;
+      s.showSubject = undefined;
+      s.pictureText = undefined;
+      s.blurPrint = undefined;
+    }
+    touched = true;
+  }
+  if (s.showSubject?.trim() && namesSomeone(s.showSubject)) {
+    s.showSubject = withoutSomeone(s.showSubject);
+    if (!s.showSubject) s.pictureText = undefined;
+    touched = true;
+  }
+  if (s.humanPresent || s.otherPerson || s.brollHostLook || s.brollHostRef || s.hostFaceShown) {
+    s.humanPresent = undefined;
+    s.otherPerson = undefined;
+    s.otherPeople = undefined;
+    s.otherPersonLooks = undefined;
+    s.hostAmongOthers = undefined;
+    s.brollHostLook = undefined;
+    s.brollHostRef = undefined;
+    s.hostFaceShown = undefined;
+    touched = true;
+  }
+  return touched;
 }
 
 /**
@@ -9606,7 +9941,7 @@ export function buildClipChain(
   // rather than relying on Claude's implicit framing choices.
   const angleSuffix =
     !scene.hostPresent && scene.showSubject
-      ? heroFramingClause(facing(scene.showSubject))
+      ? heroFramingClause(facing(withoutCutaway(scene.showSubject)))
       : !scene.hostPresent && scene.shotAngle && SHOT_ANGLE_SUFFIX[scene.shotAngle]
         ? `, ${SHOT_ANGLE_SUFFIX[scene.shotAngle]}`
         : "";
@@ -9898,7 +10233,14 @@ export function stillRetryDelayMs(error: string, attempt: number): number {
  * (`scene.memoryUnfit`). `flaws`: what the checks still named on the frame that shipped
  * (`shared/pictureFlaws.ts`) — absent on a frame that passed.
  */
-export type ValidatedStill = { buffer: Buffer; mimeType?: string; missing?: boolean; flaws?: string[] };
+export type ValidatedStill = {
+  buffer: Buffer;
+  mimeType?: string;
+  missing?: boolean;
+  /** The check saw a thing cut open on the frame that shipped (`cutOpenFault`): it is no memory. */
+  cutOpen?: boolean;
+  flaws?: string[];
+};
 
 /**
  * `drawValidatedStill`, but a video's SCREEN pictures (`scene.screenSetup`) are drawn one at a time
@@ -9906,6 +10248,12 @@ export type ValidatedStill = { buffer: Buffer; mimeType?: string; missing?: bool
  * other, so Dale's job 372 test kept three near-identical "holding a phone" screens that were all
  * in flight at the same moment. Screens are where a film repeats itself; everything else stays
  * parallel.
+ *
+ * A split panel (`square`) is still CHECKED against every picture drawn before it, but never waits
+ * in a lane: it is awaited against its host scene's own clock (`server/splitPanel.ts`), and a panel
+ * queued behind its key thing's other draws, each up to several minutes, would ship its scene as
+ * the host take alone — worse than a copy drawn at the same moment as its original. A panel of a
+ * key thing already waits for that thing's earlier pictures (`memoryFor`), so those are drawn first.
  */
 export async function generateValidatedStill(
   ...args: Parameters<typeof drawValidatedStill>
@@ -9952,6 +10300,8 @@ async function drawValidatedStill(
   // Frames whose check said what they must show is not in them: whichever frame ships says so
   // (`ValidatedStill.missing`), so it is never made the memory of later pictures.
   const missed = new WeakSet<Buffer>();
+  // …and frames the check saw cut open (`cutOpenFault`): no later picture is drawn from one either.
+  const cutOpenFrames = new WeakSet<Buffer>();
   // Every frame carries what the checks named on it (its own `pictureChecks` entry), so a frame that
   // ships with a fault says which (`ValidatedStill.flaws`) — whichever path ships it.
   type Drawn = { buffer: Buffer; mimeType?: string; flags: string[] };
@@ -9961,6 +10311,7 @@ async function drawValidatedStill(
       buffer: f.buffer,
       mimeType: f.mimeType,
       missing: missed.has(f.buffer),
+      ...(cutOpenFrames.has(f.buffer) ? { cutOpen: true } : {}),
       ...(flaws.length ? { flaws } : {}),
     };
   };
@@ -9994,6 +10345,10 @@ async function drawValidatedStill(
   let copyFallback: Drawn | undefined;
   // A check that could not run is never a pass: one more picture and check (`unchecked`).
   let uncheckedRerolls = 0;
+  // A person or a hand behind the big QR card (`person`): one redraw told to show nobody; the frame
+  // ships only when nothing better came (`personFallback`).
+  let personRedraws = 0;
+  let personFallback: Drawn | undefined;
   // THE HOST IS THE HOST: a picture of the host that shows someone else is drawn again
   // (`HOST_IDENTITY_REDRAWS`), then drawn with nobody in it — a stranger never ships.
   let hostMisses = 0;
@@ -10002,6 +10357,11 @@ async function drawValidatedStill(
   // picture of the same video is drawn once more, told to differ.
   let varietyRerolls = 0;
   const varietyJob = currentCostJobId();
+  // The concrete camera a continuation is drawn from (`memoryViewFor`), -1 for any other picture.
+  const ownCamera = (REDRAW_CAMERAS as readonly string[]).indexOf(scene.memoryView ?? "");
+  // The camera clause a continuation drawn from words carries (`continuationCameraClause`): a
+  // near-copy redraw swaps it for its own camera, so the prompt never names two.
+  let wordsCamera = "";
   // What the check named on the picture before this one (`checkFlags`), to spot a redraw that
   // changed nothing.
   let lastFaults = "";
@@ -10123,10 +10483,15 @@ async function drawValidatedStill(
     // What the checks named on this frame — its own `pictureChecks` entry, so a later check's
     // refusal lands on the record too. Empty when no check ran (the book cover).
     let flags: string[] = [];
+    // Whether the same-thing check laid this frame beside the picture it must not repeat
+    // (`memoryRightBefore`) — the near-copy check below then need not look at that pair again.
+    let comparedWithPartner = false;
     if (!referenceImageUrl) {
       const defects = await scanStillDefects(
         buffer,
-        scene.showSubject,
+        // Held to what the picture maker was asked for: job 403 scene 16's "cutaway close-up of the
+        // white porcelain S-shaped channel" asked QUESTION 4 for the very cut QUESTION 2 calls broken.
+        scene.showSubject ? withoutCutaway(scene.showSubject) : undefined,
         scene.cta ? undefined : scene.scriptText ?? scene.narration,
         scene.pictureText,
         scene.namedLook,
@@ -10139,9 +10504,22 @@ async function drawValidatedStill(
         // to the thing's look as well (`lookToHold`): a miss takes the `missing` redraw below.
         visualOverride ? undefined : lookToHold(scene),
         // What its sentence rules out, as the line check wrote it — asked only of those pictures.
-        scene.forbids
+        scene.forbids,
+        // Drawn from outside on purpose: a whole fixture is not "missing" the channel inside it.
+        drawnFromOutside(scene),
+        // The picture behind the big QR card must show nobody (job 402 scene 33: a hand at the
+        // card's edge "held" the code for 19.6 s, and the check never asked).
+        qrBackdrop(scene) && !square
       );
       if (defects.missing) missed.add(buffer);
+      // A THING SEEN CUT OPEN (`cutOpenFault`) is drawn from outside from then on, every redraw built
+      // again included, and a frame that ships cut open is no memory for later pictures — job 403's
+      // sawn-open trapway (scene 11) was what scenes 13, 16, 17 and the lifted toilet at 23 copied.
+      if (defects.broken && cutOpenFault(defects.what)) {
+        cutOpenFrames.add(buffer);
+        scene.seenFromOutside = true;
+        if (!prompt.includes(SEEN_FROM_OUTSIDE_CLAUSE)) prompt = `${prompt} ${SEEN_FROM_OUTSIDE_CLAUSE}`;
+      }
       const check = recordPictureCheck(
         scene,
         visualOverride ?? (square ? scene.splitVisual : undefined) ?? scene.visualPrompt ?? "",
@@ -10214,6 +10592,24 @@ async function drawValidatedStill(
         offSubjectFallback ??= drawn;
         console.warn(
           `[Longform] scene ${scene.index} still could not be checked (attempt ${attempt}/${attempts}) → drawing again`
+        );
+        continue;
+      }
+      // NOBODY BEHIND THE BIG QR CARD (`qrBackdrop`, 2026-10-18, the review of jobs 401-407): job 402
+      // scene 33 put a passenger's hand holding a packet where the card sits, so for 19.6 s a hand
+      // held the QR code, and no check asked. One redraw told so (`QR_BACKDROP_REDRAW`) — that
+      // fault's last chance, so it never loses its turn to the attempt budget; the frame ships only
+      // behind every frame with nobody in it.
+      if (defects.person && personRedraws < 1) {
+        personRedraws++;
+        personFallback ??= drawn;
+        personFree = true;
+        if (!prompt.includes(QR_BACKDROP_REDRAW)) prompt = `${prompt} ${QR_BACKDROP_REDRAW}`;
+        lastError = `Still image shows a person behind the QR card (${defects.what})`;
+        if (attempt === attempts) attempts++;
+        console.warn(
+          `[Longform] scene ${scene.index} still shows a person behind the QR card (${defects.what}) → ` +
+            "drawing it again with nobody in it"
         );
         continue;
       }
@@ -10322,9 +10718,12 @@ async function drawValidatedStill(
         // thing to compare it with — a first mattress is not "a different mattress" than a heater.
         !scene.memoryOthersOnly
       ) {
-        // Laid beside the picture shown right before it when that is one of its memories: the copy
-        // a viewer would see is a copy of THAT picture (`sameThingReference`).
-        const same = await scanSameThing(sameThingReference(scene)!, buffer, scene.keyThing);
+        // Laid beside the picture it must not repeat when that is one of its memories — shown right
+        // before it, or the one it continues: the copy a viewer would see is a copy of THAT picture
+        // (`sameThingReference`), and only a little closer or further back counts as a copy of it.
+        const justShown = scene.memoryRightBefore != null;
+        const same = await scanSameThing(sameThingReference(scene)!, buffer, scene.keyThing, justShown);
+        if (justShown) comparedWithPartner = true;
         const move = sameThingMove(same, sameThingRefused, !!scene.partOf);
         if (move === "redraw") {
           sameThingRefused = same.copy ? "copy" : "different";
@@ -10359,13 +10758,17 @@ async function drawValidatedStill(
             hostFaceShown: undefined,
           });
           const memory = memoryClause(personFree ? nobodyIn(scene) : scene);
+          // A continuation keeps its concrete camera, the one thing that set it apart from the
+          // picture it continues (`continuationCameraClause`).
+          const camera = continuationCameraClause(scene);
+          wordsCamera = camera;
           Object.assign(scene, memoryToWords(scene));
-          const look = visualOverride ? "" : scrubLegibleWriting(keyThingLookClause(scene));
+          const look = `${visualOverride ? "" : scrubLegibleWriting(keyThingLookClause(scene))}${camera}`;
           prompt =
             promptFromWords(prompt, memory, look) ??
             (personFree
-              ? `${buildStillPrompt(nobodyIn(scene), false, visualOverride, subject, square)} ${PERSON_FREE_FALLBACK}`
-              : buildStillPrompt(scene, false, visualOverride, subject, square));
+              ? `${buildStillPrompt(nobodyIn(scene), false, visualOverride, subject, square)}${camera} ${PERSON_FREE_FALLBACK}`
+              : `${buildStillPrompt(scene, false, visualOverride, subject, square)}${camera}`);
           sameThingRefused = undefined;
           lastError = `Still image copies its memory picture's framing again`;
           // The copy's last chance, so it never loses its turn to the attempt budget.
@@ -10443,16 +10846,27 @@ async function drawValidatedStill(
       // NO NEAR-COPIES IN A VIDEO: compared with EVERY picture of this video drawn so far, not only
       // the one before (Dale's job 372: ~13 near-identical phone screens). One redraw, told to
       // differ — a screen also moves to another setting; the first draw is kept as the fallback.
-      // A memory picture is held to its own memory by the check above, a split panel is square
-      // and composited, so both are left out. `PICTURE_VARIETY=0` turns it off.
-      if (varietyJob != null && !square && process.env.PICTURE_VARIETY !== "0") {
+      // `PICTURE_VARIETY=0` turns it off.
+      // The picture it continues, or is drawn from as the picture just shown (`nearCopyPartner`), is
+      // ALWAYS looked at, however far apart the fingerprints read — unless the same-thing check above
+      // just did: a continuation drawn from words has no memory check left, and job 405 scene 8 and
+      // job 401 scenes 3 and 5 shipped as the picture they continued.
+      // A SPLIT PANEL TOO (2026-10-18): it was left out as "square and composited", and job 405's
+      // panel beside "a cat just being a cat" (scene 9) was scene 2's picture again 14 s later — the
+      // same tabby mid-stride, white paw out, the same low angle — while its only check, the memory
+      // one, compared it with its own key thing's pictures, and scene 2 was filed under another. It is
+      // fingerprinted as the square it shows (`pictureFingerprint`), laid over every earlier picture
+      // (`fingerprintDistance`), remembered under its scene's number for every later one, and a copy
+      // is redrawn told to differ exactly like a full-frame picture.
+      if (varietyJob != null && process.env.PICTURE_VARIETY !== "0") {
         try {
-          const hash = await pictureHash(buffer);
-          const thumb = await pictureThumb(buffer);
+          const print = await pictureFingerprint(buffer, square);
+          const thumb = await pictureThumb(buffer, square);
           let copies: number | null = null;
           let copiedSetup: string | undefined;
+          const partner = comparedWithPartner ? undefined : nearCopyPartner(scene)?.index;
           if (varietyRerolls < MAX_VARIETY_REDRAWS)
-            for (const c of nearCopyCandidates(varietyJob, scene.index, hash)) {
+            for (const c of nearCopyCandidates(varietyJob, scene.index, print, partner)) {
               const look = await scanNearCopy(c.thumb, thumb);
               if (look.copy) {
                 copies = c.index;
@@ -10474,16 +10888,21 @@ async function drawValidatedStill(
               prompt = buildStillPrompt(scene, false, visualOverride, subject, square);
             }
             // a CONCRETE new camera view each redraw — "look different" alone came back as the same
-            // shelf of boxes four times (Frederick's practice job 376); the earlier redraw's clause goes
+            // shelf of boxes four times (Frederick's practice job 376); the earlier redraw's clause goes.
+            // A continuation starts from the camera after its own (`REDRAW_CAMERAS`), never the one
+            // it was just drawn from — and drawn from words, its own camera clause goes too, or the
+            // prompt would ask for a close-up and a view from much further back at once.
+            if (wordsCamera) prompt = prompt.replace(wordsCamera, "");
+            wordsCamera = "";
             const cut = prompt.indexOf(DIFFERENT_PICTURE_CLAUSE);
-            prompt = `${cut >= 0 ? prompt.slice(0, cut).trimEnd() : prompt} ${differentPictureClause(varietyRerolls - 1)}`;
+            prompt = `${cut >= 0 ? prompt.slice(0, cut).trimEnd() : prompt} ${differentPictureClause(varietyRerolls + ownCamera)}`;
             lastError = `Still image nearly copies scene ${copies}'s picture`;
             console.warn(
               `[Longform] scene ${scene.index} nearly copies scene ${copies}'s picture → drawing it again, different`
             );
             continue;
           }
-          rememberPicture(varietyJob, scene.index, hash, thumb, scene.screenSetup);
+          rememberPicture(varietyJob, scene.index, print, thumb, scene.screenSetup);
         } catch {
           /* a fingerprint that cannot be taken never costs the picture */
         }
@@ -10528,6 +10947,14 @@ async function drawValidatedStill(
         `attempts → shipping it: ${scene.visualPrompt.slice(0, 80)}`
     );
     return shipped(textyFallback);
+  }
+  // A person behind the big QR card reads as someone holding the code — kept only over broken geometry.
+  if (personFallback) {
+    console.warn(
+      `[Longform] scene ${scene.index} still showed a person behind the QR card after ${attempts} ` +
+        `attempts → shipping it: ${scene.visualPrompt.slice(0, 80)}`
+    );
+    return shipped(personFallback);
   }
   if (brokenFallback) {
     console.warn(
@@ -10595,7 +11022,7 @@ export async function generateSceneStillClip(
     // A key thing seen before is drawn from its earlier pictures (`server/pictureMemory.ts`). A
     // split's panel (square) gets its memory from the caller, off the host scene.
     if (!square) Object.assign(scene, memoryFields(await memoryFor(scene), memoryView(scene)));
-    const { buffer, mimeType, missing, flaws } = await generateValidatedStill(
+    const { buffer, mimeType, missing, cutOpen, flaws } = await generateValidatedStill(
       scene,
       4,
       referenceImageUrl,
@@ -10614,7 +11041,7 @@ export async function generateSceneStillClip(
     scene.pictureUrl = imageUrl;
     notePictureFlaws(jobId, scene, flaws, square);
     if (!square) {
-      markMemoryFit(scene, missing);
+      markMemoryFit(scene, missing || cutOpen);
       pictureSettled(scene);
     }
   }
@@ -10681,6 +11108,20 @@ export async function normalizeKeyframeToLandscape(
 const brollKeyframeDisabled = (): boolean =>
   process.env.BROLL_NO_KEYFRAME === "1";
 
+/**
+ * The memory a moving cutaway's start frame is drawn with (clip 0 only, and only when it has no
+ * reference pictures yet). Asked only of a scene a pass over the film has seen (`memoryAttached`):
+ * a MOVING split panel is a copy of its host scene that `withSplitMemory` already gave its memory
+ * and — with no earlier picture of its thing to follow — its key thing's written look. Asked again,
+ * `memoryFor` knew nothing of the copy and wiped that look, so a panel picked to move (one judged
+ * self-moving, like job 404 scene 13's flock of robins in flight) was drawn from its own words alone
+ * where the same panel drawn still kept the look. Mutates `scene`; exported for testing.
+ */
+export async function attachKeyframeMemory(scene: StoryboardScene, clipIdx: number): Promise<void> {
+  if (clipIdx !== 0 || scene.memoryRefUrls?.length || !memoryAttached(scene)) return;
+  Object.assign(scene, memoryFields(await memoryFor(scene), memoryView(scene)));
+}
+
 export async function generateBrollKeyframe(
   jobId: number,
   scene: StoryboardScene,
@@ -10705,9 +11146,8 @@ export async function generateBrollKeyframe(
   // Print the keyframe asks to read and its line never says is drawn soft (`blurUnsaidPrint`).
   if (!referenceImageUrl) blurUnsaidPrint(scene);
   // A key thing seen before is drawn from its earlier pictures (`server/pictureMemory.ts`).
-  if (clipIdx === 0 && !scene.memoryRefUrls?.length)
-    Object.assign(scene, memoryFields(await memoryFor(scene), memoryView(scene)));
-  const { buffer: src, mimeType, missing, flaws } = await generateValidatedStill(
+  await attachKeyframeMemory(scene, clipIdx);
+  const { buffer: src, mimeType, missing, cutOpen, flaws } = await generateValidatedStill(
     scene,
     4,
     referenceImageUrl,
@@ -10724,7 +11164,7 @@ export async function generateBrollKeyframe(
   const { url } = await storagePut(key, buf, mime);
   if (clipIdx === 0) {
     scene.pictureUrl = url;
-    markMemoryFit(scene, missing);
+    markMemoryFit(scene, missing || cutOpen);
     notePictureFlaws(jobId, scene, flaws, false);
     pictureSettled(scene);
   }
@@ -15662,11 +16102,14 @@ export async function enhanceBrollPrompts(
     i: number;
   }): Promise<unknown> => {
     const isCta = scene.cta === true;
+    // The scan window's picture sits behind the big card: nobody in it (`QR_BACKDROP_DIRECTIVE`).
+    const backdrop = isCta && qrBackdrop(scene);
     const systemPrompt = isCta
       ? CTA_BROLL_ENHANCER_SYSTEM
       : STILL_BROLL_ENHANCER_SYSTEM;
     const userMessage = isCta
-      ? channelLine +
+      ? (backdrop ? `${QR_BACKDROP_DIRECTIVE}\n` : "") +
+        channelLine +
         subjectLine +
         directionLine +
         `Type: ${scene.stillImage ? "still" : "motion"}\n` +
@@ -17105,8 +17548,8 @@ async function runUnifiedPipeline(
   const guarded = guardPitchVisuals(scenes, params.videoSubject);
   if (guarded.length > 0) {
     console.log(
-      `[Longform ${jobId}] pitch guard: swapped a literal phone/screen/QR/link/book prompt ` +
-        `for on-topic b-roll on scene(s) ${guarded.join(", ")}`
+      `[Longform ${jobId}] pitch guard: swapped a literal phone/screen/QR/link/book prompt, or a ` +
+        `person behind the big QR card, for on-topic b-roll on scene(s) ${guarded.join(", ")}`
     );
   }
   // One continuous take where host beats now sit back to back (the CTA pitch after the book):

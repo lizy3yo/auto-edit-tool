@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 import type { KeyThing, StoryboardScene } from "@shared/types";
 import {
   attachMemory,
+  continuedPicture,
   keyThingLookClause,
   keyThingLookFor,
   memoryFor,
@@ -76,7 +77,7 @@ describe("which memory picture is the one shown right before (rightBeforeToRecom
     expect(rightBeforeToRecompose(board, board[3])).toBeUndefined();
   });
 
-  it("399-20/21: a picture that continues the one before (the same words, or with its own view) is left alone", () => {
+  it("399-20/21: a picture that continues the one before (the same words, or with its own view) is the continuation rule's, not this one's", () => {
     const BAG = "several closed small liquor bottles tucked inside an open carry-on bag on a seat";
     const same = [pic(20, BAG, { keyThing: "small liquor bottle" }), pic(21, BAG, { keyThing: "small liquor bottle" })];
     expect(memorySourcesFor(same, same[1])).toEqual([same[0]]);
@@ -85,6 +86,8 @@ describe("which memory picture is the one shown right before (rightBeforeToRecom
     expect(rightBeforeToRecompose(viewed, viewed[1])).toBeUndefined();
     const marked = [same[0], pic(21, "the carry-on bag on the seat", { keyThing: "small liquor bottle", sameShot: true })];
     expect(rightBeforeToRecompose(marked, marked[1])).toBeUndefined();
+    // Each of them is drawn from scene 20 as the picture it continues (continuationViews.test.ts).
+    for (const b of [same, viewed, marked]) expect(continuedPicture(b, b[1])).toBe(b[0]);
   });
 
   it("a memory from further back keeps its ordinary clause (job 399 scene 22, drawn from scene 5)", () => {
@@ -189,18 +192,22 @@ describe("the memory says the picture right before lends only the look", () => {
     expect(buildStillPrompt(s17())).toContain(clause);
   });
 
-  it("a memory picture that is not right after its memory is told exactly what it was told before", () => {
+  it("a memory picture that is not right after its memory is told nothing of the picture before, and goes where its words put it too", () => {
     const far = { ...s17(), memoryRightBefore: undefined };
     const clause = memoryClause(far);
     expect(clause).not.toMatch(/RIGHT BEFORE/);
-    expect(clause).toContain("identical shape, size, colours, materials and wear, in the same place — from a different camera position");
+    // Job 404 scene 14 followed a split, not its memory, and "in the same place" kept the snowy lawn
+    // under "a mild gulf coast yard": the words decide the place for every memory picture.
+    expect(clause).toContain(
+      "identical shape, size, colours, materials and wear, in the same place unless this picture's own words put it somewhere else — from a different camera position"
+    );
     expect(rightBeforeClause(far)).toBe("");
     // While the thing is being made, too.
     const making = { ...far, buildStage: "making" as const };
-    expect(memoryClause(making)).toContain("the same colours, materials and wear, in the same place — ");
-    expect(memoryClause({ ...making, memoryRightBefore: 0 })).toContain(
-      "the same colours, materials and wear, in the same place unless this picture's own words put it somewhere else — "
-    );
+    for (const s of [making, { ...making, memoryRightBefore: 0 }])
+      expect(memoryClause(s)).toContain(
+        "the same colours, materials and wear, in the same place unless this picture's own words put it somewhere else — "
+      );
   });
 
   it("names the reference by its place among several, and the other things when only they are remembered", () => {

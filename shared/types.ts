@@ -571,6 +571,13 @@ export interface StoryboardScene {
    */
   memoryOthersOnly?: true;
   /**
+   * The OTHER key things in this picture that none of its memory pictures shows (set at render,
+   * `memoryFor`): drawn as this picture's own words describe them, never called "this exact" thing
+   * of the references (`memoryClause`). Job 404 scene 14 was told its two snowy-lawn robin pictures
+   * showed "this exact robin and gulf coast yard" — the lawn was the only yard there to copy.
+   */
+  memoryNotShown?: string[];
+  /**
    * Its key thing's look, cut down for this picture (`keyThingLookFor`) — set at render ONLY when it
    * has no picture of its own thing to follow, so the look is what its first picture is drawn by
    * (Ruth's job 305: the first straight-stitch machine was drawn with no colour or material, and 5
@@ -578,11 +585,18 @@ export interface StoryboardScene {
    */
   keyThingLook?: string;
   /**
-   * Where in `memoryRefUrls` the picture shown RIGHT BEFORE this one is, when it is one of its memory
-   * pictures and about something else (set at render, `rightBeforeToRecompose`): it lends only the
-   * thing's look, never its composition (job 399 scene 17 came back as scene 16 on a new background).
+   * Where in `memoryRefUrls` the picture this one must not repeat is (set at render, `recomposeFrom`):
+   * the one shown RIGHT BEFORE it, about something else (job 399 scene 17 came back as scene 16 on a
+   * new background), or the one it CONTINUES as the same topic (`memoryContinues`). It lends only the
+   * thing's look, never its composition, and the same-thing check compares with it.
    */
   memoryRightBefore?: number;
+  /**
+   * The picture at `memoryRightBefore` is one this picture CONTINUES — a topic past its limit, a split
+   * picture's later part, the same words again (set at render, `continuedPicture`): job 405 scene 22
+   * came back as scene 21 a little tighter. It is drawn from a concrete new camera (`REDRAW_CAMERAS`).
+   */
+  memoryContinues?: true;
   /**
    * Its key thing's written look, set at render only on a picture drawn FROM a picture of its own
    * thing (where `keyThingLook` stays unset): kept for the redraw from words a picture gets when it
@@ -593,8 +607,17 @@ export interface StoryboardScene {
    * The picture's last check said what it must show is not in it (`missing`), so no later picture is
    * drawn from it (`memorySourcesFor`): stored films had 22 first pictures copied after failing
    * their last check. Never set for a staged look or readable writing alone — the thing is there.
+   * Set too when the frame that shipped was seen cut open (`cutOpenFault`, job 403).
    */
   memoryUnfit?: true;
+  /**
+   * Drawn from the OUTSIDE on purpose (`server/cutOpen.ts`): a key thing in it is a part hidden inside
+   * something — its props-list look describes an inside no camera sees (job 403: "the toilet's
+   * internal porcelain passage behind the bowl") — set by `attachMemory`; or the check saw this
+   * picture cut open (`cutOpenFault`). Its prompt then carries `SEEN_FROM_OUTSIDE_CLAUSE` and its
+   * check `INSIDE_PART_NOTE`. A picture whose own words ask for an inside view gets both without it.
+   */
+  seenFromOutside?: true;
   /**
    * The exact look of the specific named kind this picture shows ("churn dash block: a 3×3 block…"),
    * written by `describeNamedLooks` so the picture maker can draw what it cannot know by name.

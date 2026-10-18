@@ -21,6 +21,7 @@
  */
 import type { BuildStage, KeyThing, RecurringPerson, StoryboardScene } from "@shared/types";
 import { invokeClaude } from "./claude";
+import { NOTHING_CUT_OPEN_RULE } from "./cutOpen";
 import { safeParseJSON } from "./jsonRepair";
 import {
   BODY_HAND,
@@ -1592,7 +1593,7 @@ export function settleShots(
 
 // ─── The two LLM calls ──────────────────────────────────────────────────────────────
 
-const SHOT_LIST_SYSTEM =
+export const SHOT_LIST_SYSTEM =
   "You are the editor of a YouTube documentary, cutting b-roll to a narration that is already " +
   "recorded. For each numbered BEAT you get its exact words. Return the shots that play under it.\n\n" +
   "RULES\n" +
@@ -1677,6 +1678,9 @@ const SHOT_LIST_SYSTEM =
   'keep" = the finished pieces).\n' +
   "5d. A BODY PART NEVER LOOKS CUT OFF: hair, a hand, a foot or a face is shown on the person, or on what really holds it — a wig on a mannequin head or wig stand, a practice hand, extensions in their packet. A few loose strands that really fall (in a brush, on a comb or towel, in a drain) are fine. Never hair still shaped like a head or a hairstyle with no head inside it, and never a hand, foot or face on its own. To show a colour or texture, show it on the person's own head or hands.\n" +
   "5e. SHOW EXACTLY WHAT THE LINE POINTS AT: when a line points at a specific thing, or a specific part, side or detail of a thing (the box it comes in, its label, the battery door on the back, the dial, the date on the bottom, the hem), the picture is a close-up of exactly that — never the video's main thing somewhere else, never a plain version without it. What the script says that part shows (the words printed on it, a number, a setting) is shown exactly as the script says it.\n" +
+  // Job 403: "Here is the part nobody sees. Inside the porcelain…" was planned as a cutaway close-up
+  // of the channel inside the fixture, and the picture maker sawed the fixture open to draw it.
+  `5f. ${NOTHING_CUT_OPEN_RULE} It holds over rule 5e: a close-up of a hidden part is a close-up of where it opens or comes out.\n` +
   "5c. WRITING ONLY WHEN SAID. A picture may show readable writing ONLY when the line itself says " +
   "the exact words or number printed on a thing (\"the tag says HANDMADE\" = the tag with HANDMADE " +
   "on it): set text to exactly those words, spelled as spoken. Never invent any: when a line talks " +
@@ -1931,6 +1935,32 @@ export async function planShotList(
   return results.flat();
 }
 
+/**
+ * A LIVING THING OR A NAMED KIND IS WRITTEN AS THAT EXACT KIND (2026-10-18, job 404 scene 4). The
+ * look is all a first picture of a key thing is drawn by, and job 404's said "a plump songbird about
+ * ten inches long, brown-grey back, bright orange-red breast, white eye ring, dark head" — never
+ * which robin. On a channel about the North American bird, the split panel "a robin perched on a
+ * holly bush … snow" came back as the European Christmas-card robin (orange face, olive back, thin
+ * dark bill), the film's first robin, while every robin after it was the American one. One common
+ * name can mean different kinds in different countries, and look-alikes share most of a plain
+ * description, so the look names the kind the way the script's own region does and the few features
+ * that set it apart. Said as what it HAS, never "not a …": a picture generator draws what it reads,
+ * the look-alike included. Its name stays the script's own word — the shot list and the pictures
+ * find a key thing by it. And never where it is seen: "seen on grass, bare branches, and holly
+ * shrubs" was the rest of that same look.
+ */
+export const EXACT_KIND_RULE =
+  "A LIVING THING (an animal, bird, fish, insect, plant, tree or flower) or anything the script " +
+  "names by its KIND (a species, breed, variety or type): its name stays the word the script uses, " +
+  "and its look STARTS with that exact kind — its full name as people in the script's own country " +
+  "or region say it (one common name can mean different kinds in different countries; the script's " +
+  "places, spellings and money say where it is set) — then the 2-3 features a viewer tells it " +
+  "apart from its look-alikes by (the colour of its head, beak or tail, a stripe or band, the shape " +
+  "of its ears or leaves), each said as what it HAS, never naming the look-alike: a picture " +
+  "generator draws whatever it reads. Its look says how it looks, never where it is seen. Example: " +
+  "`deer: a white-tailed deer, reddish-brown coat, a broad tail brown on top and bright white " +
+  "underneath, a white patch on the throat`. ";
+
 // A PERSON name says WHAT the person is (job 399's script calls its two passengers only "one of
 // them", "the other", "she" and "he"): the pictures and the line check label them "a woman
 // passenger" / "a male passenger", and `matchRecurringPeople` finds a look by that role and sex —
@@ -1948,6 +1978,13 @@ export const CONTINUITY_SYSTEM =
   "animal's paw, a machine's dial, a garment's collar — its look STARTS with the whole it belongs " +
   "to (what kind it is, its colour, size and markings) and then describes the part, so every " +
   "picture of the whole shows the same one. " +
+  // Job 403's MAIN line was "toilet trapway: the toilet's internal porcelain passage behind the
+  // bowl": a look no camera can see, so every picture drawn by it cut the fixture open.
+  "A part HIDDEN INSIDE something — a channel inside a fixture, the pipes or wires inside a wall, " +
+  "the works inside a machine — is never a line of its own, and never the MAIN thing: list the " +
+  "whole thing it is inside, with how it looks from the OUTSIDE, because no picture can show the " +
+  "inside. " +
+  EXACT_KIND_RULE +
   "6-14 lines. Plain words, no brands, no people in these lines. NOTHING WITH MARKS ON IT: " +
   "never list a chalk tally, a chalkboard, a sign, a price tag, a label, a calendar, a notebook, a " +
   "ledger or anything written or counted on — the pictures carry no writing, so such a prop would " +
@@ -2222,6 +2259,7 @@ it (show the thing); a warning about a danger (show the safe way, never the dang
 line says does NOT happen or is NOT there (never draw it happening).
 It is WRONG when it does not show what the line points at. SHOW EXACTLY WHAT THE LINE POINTS AT: when a line points at a specific thing, or a specific part, side or detail of a thing (the box it comes in, its label, the battery door on the back, the dial, the date on the bottom, the hem), the picture is a close-up of exactly that — never the video's main thing somewhere else, never a plain version without it. What the script says that part shows (the words printed on it, a number, a setting) is shown exactly as the script says it.
 It is WRONG when a body part looks cut off. A BODY PART NEVER LOOKS CUT OFF: hair, a hand, a foot or a face is shown on the person, or on what really holds it — a wig on a mannequin head or wig stand, a practice hand, extensions in their packet. A few loose strands that really fall (in a brush, on a comb or towel, in a drain) are fine. Never hair still shaped like a head or a hairstyle with no head inside it, and never a hand, foot or face on its own. To show a colour or texture, show it on the person's own head or hands.
+It is WRONG when it shows a solid thing cut open, as a cutaway or see-through view, or from inside it — even as the close-up a line points at. ${NOTHING_CUT_OPEN_RULE}
 A picture marked "FIRST of the MAIN thing" must show the main thing IN USE when it is naturally used
 with smoke, steam, a flame or water (lit, steaming, burning, running) — otherwise it is WRONG. A picture is RIGHT when it shows the thing the line is
 about — even when the line only says "it", "this one" or "the one that…" (use the KEY THINGS and the
@@ -3557,6 +3595,19 @@ export const sameSubject = (a: string, b: string): boolean => {
   return !!norm(a) && norm(a) === norm(b);
 };
 
+/** A description's own topic: any view `withView` added (`OTHER_VIEWS`) taken off. Pure. */
+export const topicWords = (text: string | undefined): string => withView(text ?? "", "");
+
+/**
+ * `b` describes the same topic as `a`: the same or nearly the same words once any view is taken off
+ * — a topic past its limit ("…, a close-up of one detail of it filling the frame"), a split
+ * picture's later part, or the planner repeating its own words. Pure.
+ */
+export const repeatsTopic = (a: string | undefined, b: string | undefined): boolean => {
+  const [x, y] = [topicWords(a), topicWords(b)];
+  return !!x.trim() && !!y.trim() && (sameSubject(x, y) || nearlySameSubject(x, y));
+};
+
 export function joinSameContext(
   scenes: StoryboardScene[],
   sec: (s: StoryboardScene) => number,
@@ -3650,6 +3701,52 @@ export function joinSameContext(
   }
   out.forEach((s, k) => (s.index = k + 1));
   return { scenes: out, changed };
+}
+
+/**
+ * A SAME-TOPIC CHAIN ENDS AT A HOST TAKE (2026-10-18, job 405 scenes 22-24). The same-topic join runs
+ * before the host check-ins and the plan gate place their host takes, so a take can land INSIDE a
+ * topic: the gate's last-resort glimpse cut the cat-at-the-window close-up in two around "The honest
+ * word is crepuscular," and both halves kept the identical words ("…, a close-up of one detail of it
+ * filling the frame") — the viewer saw the close-up, the host for 2.6 s, then the same close-up
+ * again. Re-checked on the final plan: a picture right after a host take no longer continues the
+ * picture before it (`sameShot` dropped — what the viewer saw last is the host), and when its words
+ * still repeat the last picture before the take (`repeatsTopic`) it takes the next view after that
+ * picture's (`OTHER_VIEWS`), so the two are never drawn from the same words. A picture whose words
+ * already name a different view keeps them. Never a list item, split, CTA, cover, asset or QR beat.
+ * Returns how many pictures changed. Pure apart from mutating `scenes`.
+ */
+export function breakTopicsAtHostTakes(scenes: StoryboardScene[]): number {
+  const trim = (t: string) => t.replace(/[\s.]+$/, "");
+  let changed = 0;
+  for (let i = 1; i < scenes.length; i++) {
+    const b = scenes[i];
+    if (!scenes[i - 1].hostPresent) continue;
+    if (b.hostPresent || b.splitVisual || b.listCut || b.coverHero || b.assetImageUrl || b.cta || b.qrHero) continue;
+    let did = false;
+    if (b.sameShot) {
+      b.sameShot = undefined;
+      did = true;
+    }
+    // The last picture the viewer saw: back over full-frame host takes (a split's panel is a picture).
+    let j = i - 1;
+    while (j >= 0 && scenes[j].hostPresent && !scenes[j].splitVisual) j--;
+    const a = j >= 0 && !scenes[j].hostPresent ? scenes[j] : undefined;
+    const aWords = a ? a.showSubject ?? a.visualPrompt : undefined;
+    const bWords = b.showSubject ?? b.visualPrompt;
+    if (aWords && bWords && repeatsTopic(aWords, bWords)) {
+      const was = viewIndexOf(trim(aWords));
+      const own = viewIndexOf(trim(bWords));
+      if (own === 0 || own === was) {
+        const v = OTHER_VIEWS[was % OTHER_VIEWS.length];
+        if (b.showSubject) b.showSubject = withView(b.showSubject, v);
+        if (b.visualPrompt) b.visualPrompt = withView(b.visualPrompt, v);
+        did = true;
+      }
+    }
+    if (did) changed++;
+  }
+  return changed;
 }
 
 /**
@@ -3758,6 +3855,7 @@ still moment from ONE spot: the main thing being done or shown, plus at most one
 background. Never "or", never a sequence of actions ("painting, then hanging it"), never two
 places. If every
 picture in the group shows the host doing the work, the new picture shows that work too. Keep exact names of kinds (a herringbone path, a dovetail joint).
+${NOTHING_CUT_OPEN_RULE}
 
 Answer with JSON only:
 {"groups":[{"ids":[12,13,14],"show":"..."}]}

@@ -22,6 +22,10 @@ describe("what a shipped picture still carries (the audit, 2026-10-18)", () => {
       "broken geometry, its subject missing and a near copy of another picture"
     );
     expect(pictureFlawWords(["something new"])).toBe("something new"); // an unknown flag passes through
+    // A hand left behind the big QR card (job 402 scene 33) is named for what a viewer sees.
+    expect(pictureFlawWarning(33, ["person"], false)).toBe(
+      "Scene 33: picture shipped with a person or a hand behind the QR card — its redraws did not clear it"
+    );
   });
 
   it("reads the same sentence on every scene, so the card groups them into one row (jobs 343, 383)", () => {

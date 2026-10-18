@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { StoryboardScene } from "@shared/types";
-import { cleanHostLook, markHostBroll } from "./hostLook";
+import { cleanHostLook, markHostBroll, namesSomeone, showsPerson } from "./hostLook";
 import { buildStillPrompt, hostBrollClause, NO_FIGURES_SUFFIX, NO_OTHER_FIGURES_SUFFIX } from "./longformVideo";
 
 const pic = (index: number, showSubject: string, extra: Partial<StoryboardScene> = {}) =>
@@ -466,5 +466,72 @@ describe("'hand' naming a thing is not a person (round 11's review, job 406 scen
     expect(wall.brollHostRef).toBeUndefined();
     expect(buildStillPrompt(wall)).toContain(NO_FIGURES_SUFFIX);
     expect(work.brollHostLook).toBe(look.hostLook);
+  });
+});
+
+describe("someone in the words, narrowly — the picture behind the big QR card (job 402 scene 33)", () => {
+  it("finds the person and the hand the scan window was drawn with", () => {
+    expect(
+      namesSomeone(
+        "A flight attendant's hands holding a small packet of crackers or cookies, offering it downward toward a seated passenger in the cabin row"
+      )
+    ).toBe(true);
+    expect(namesSomeone("one hand extending it toward another hand reaching to receive it")).toBe(true);
+    expect(namesSomeone("fingers wrapped round a foil packet")).toBe(true);
+    expect(namesSomeone("a woman pouring tea")).toBe(true);
+    expect(namesSomeone("someone's coffee left on the tray")).toBe(true);
+  });
+
+  it("never swaps away a picture of nobody that only names what a person uses or wears", () => {
+    for (const words of [
+      "a coffee can full of nails on the workbench",
+      "a jar of skin cream on a vanity",
+      "a kettle in use on the stove",
+      "a robin in her nest",
+      "a hand plane resting on the bench",
+      "a hand-stitched quilt over a chair",
+      "an old clock, its hands at three",
+      "an empty passenger seat with its tray table down",
+      "Plain cream sympathy card with simple embossed border resting on a wooden desk in a quiet study",
+      "the hen as she scratches at the feed",
+    ])
+      expect(namesSomeone(words)).toBe(false);
+    // The wider test every other step uses still counts the first four (who to draw is its job).
+    expect(showsPerson("a coffee can full of nails on the workbench")).toBe(true);
+  });
+});
+
+describe("someone in the words — never a thing named for a hand or a finger (review of M6)", () => {
+  // On the backdrop behind the big QR card a false hit swaps a good picture for a borrowed one, so
+  // the craft and clock words that only NAME a hand or a finger must not count.
+  it("never counts a joint, a way of making, a clock's hand or a fastener", () => {
+    for (const words of [
+      "Close-up of a walnut box with tight finger joints at the corner, on the bench",
+      "a finger-jointed cedar box on the bench",
+      "a cherry box with dovetails cut by hand, resting on the workbench",
+      "a quilt stitched by hand folded over a chair",
+      "spare blades kept on hand by the door",
+      "a pocket watch with its hour hand on two",
+      "the second hand ticking past twelve on a kitchen clock",
+      "a brass thumb screw on the jig",
+      "a plate of fish fingers on a table",
+      "a five-finger mitt on a shelf",
+      // Job 362's scan window: a dress form has a collarbone too; only BARE skin is a person's.
+      "A plain knit sweater draped on a dress form. A simple gold chain rests at the collarbone.",
+    ])
+      expect(namesSomeone(words)).toBe(false);
+  });
+
+  it("still counts a person's hand, finger, thumb and bare skin", () => {
+    for (const words of [
+      "one hand extending it toward a second hand reaching to receive it",
+      "a ring on her hand",
+      "a mug in hand by the window",
+      "a thumb resting on the trigger",
+      "a 9-volt battery held between bare fingertips",
+      // Job 380's scan window: a chain on a person's collarbone behind the card.
+      "A slim gold chain resting on bare collarbone and skin in a bright airy dressing room",
+    ])
+      expect(namesSomeone(words)).toBe(true);
   });
 });
