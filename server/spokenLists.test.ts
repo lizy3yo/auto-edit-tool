@@ -580,3 +580,88 @@ describe("a general head before its examples is never an item (job 400 at 0:47)"
     ]);
   });
 });
+
+describe("describing words in front of ONE thing are no list (job 400 at 1:41, 'a short, furious, loving essay')", () => {
+  // The voice says one sentence; the film cut it into "Two thousand years ago," / "…wrote a short," /
+  // "furious," and numbered it "1 Two thousand years ago / 2 Seneca wrote a short / 3 Furious / 4 Loving
+  // essay" under the title "Seneca's essay".
+  const ESSAY =
+    "Two thousand years ago, a man named Lucius Annaeus Seneca wrote a short, furious, loving essay to a man named Paulinus, the official in charge of Rome’s grain supply — busy, important, and worn down to the rims.";
+  const answer = (items: string[], kind = "things") => JSON.stringify({ lists: [{ sentence: 0, kind, items }] });
+
+  it("the sentence shape finds nothing in it — documented change: 'busy, important, worn down' was a list too", () => {
+    expect(listsByShape(ESSAY)).toEqual([]);
+    expect(spokenListsByShape([ESSAY])).toEqual([]);
+  });
+
+  it("drops every way the model could cut it: job 400's own list, the adjectives, the clause", () => {
+    for (const items of [
+      ["Two thousand years ago", "a man named Lucius Annaeus Seneca wrote a short", "furious"], // as job 400 saved it
+      ["a man named Lucius Annaeus Seneca wrote a short", "furious", "loving essay to a man named Paulinus"],
+      ["a short", "furious", "loving essay"],
+      ["short", "furious", "loving essay"],
+      ["a short", "loving essay"],
+      ["busy", "important", "worn down to the rims"],
+    ])
+      expect([items, parseSpokenLists(answer(items), [ESSAY])]).toEqual([items, []]);
+    // An item may not end inside the run either (Hank's tea tray: one tray, "a plain, low serving tray").
+    const tray = "The tea tray, a plain, low serving tray, and it only moved up this list once I started putting names on it.";
+    expect(validateSpokenList(tray, ["The tea tray", "a plain"])).toBe(false);
+    expect(validateSpokenList(ESSAY, ["a short", "loving essay"])).toBe(false);
+  });
+
+  it("the other real describing runs: Hank's tea tray, Scarlett's 'Simple, warm', Norbert's 'snug' (documented change)", () => {
+    // Shape lists until now: "The tea tray / a plain / low serving tray" (Hank's script, jobs 110-216),
+    // "Simple / warm / impossible", and "Pilot holes / long screws / snug" — snug names nothing, and the
+    // two things left are not joined like a list.
+    for (const s of [
+      "The tea tray, a plain, low serving tray, and it only moved up this list once I started putting names on it.",
+      "Simple, warm, and impossible to argue with.",
+      "Pilot holes, long screws, snug.",
+      "She wrote a short, angry, bitter letter.",
+    ])
+      expect([s, spokenListsByShape([s])]).toEqual([s, []]);
+  });
+
+  it("real lists stay exactly as they were — even where a describing run sits in the same sentence", () => {
+    expect(spokenListsByShape(["I'm Granny Ruth, and this one's for anybody sitting at a kitchen table with a straight-stitch machine, a rotary cutter, and a mountain of scraps too pretty to throw out, wondering if all that piecing is really worth anything on a market table."]).map(l => l.items)).toEqual([
+      ["a straight-stitch machine", "a rotary cutter", "a mountain of scraps too pretty to throw out"],
+    ]);
+    expect(spokenListsByShape(["Matte black, dull tarnish, heavy dark wood, all of those take it away."]).map(l => l.items)).toEqual([
+      ["Matte black", "dull tarnish", "heavy dark wood"],
+    ]); // Scarlett's script
+    expect(spokenListsByShape(["You need flour, sugar, and butter."]).map(l => l.items)).toEqual([["flour", "sugar", "butter"]]);
+    const keep = (sentence: string, items: string[]) =>
+      expect(parseSpokenLists(answer(items), [sentence])).toEqual([{ sentence: 0, items }]);
+    // Ruth's: the list of things, then "a real, honest quilt" further on.
+    keep(
+      "The batting, backing, and thread run about $28 since the tops came from scraps, it takes about eight hours, and it sells for $120 to $170, mostly to folks who want a real, honest quilt without paying heirloom prices.",
+      ["The batting", "backing", "thread"]
+    );
+    // The same shape as "a short, furious, loving essay", but a hammer is a thing.
+    keep("You need a hammer, nails, and wood glue.", ["a hammer", "nails", "wood glue"]);
+    keep("Ivory, oat, a warm coral, mother of pearl.", ["Ivory", "oat", "a warm coral", "mother of pearl"]); // job 362
+  });
+
+  it("a thing with describing words of its own is ONE item, whole", () => {
+    expect(spokenListsByShape(["I packed a warm, waterproof jacket, a hat, and gloves."]).map(l => l.items)).toEqual([
+      ["a warm, waterproof jacket", "a hat", "gloves"],
+    ]);
+    expect(spokenListsByShape(["A big, heavy, and sturdy table, two chairs, and a lamp."]).map(l => l.items)).toEqual([
+      ["A big, heavy, and sturdy table", "two chairs", "a lamp"],
+    ]);
+    // A step keeps its strip whole: three steps, not four.
+    expect(spokenListsByShape(["Cut a long, thin strip, glue it down, and clamp it."])).toEqual([
+      { sentence: 0, items: ["Cut a long, thin strip", "glue it down", "clamp it"], kind: "steps" },
+    ]);
+  });
+
+  it("a time a sentence opens on is never an item", async () => {
+    const r = await findSpokenLists(`Your problem is theft. ${ESSAY}`, {
+      ask: async () => answer(["Two thousand years ago", "a man named Lucius Annaeus Seneca wrote a short", "furious"]).replace('"sentence":0', '"sentence":1'),
+    });
+    expect(r.lists).toEqual([]);
+    // "Years ago" used to name a thing, and its last word "ago" would have led the list.
+    expect(spokenListsByShape(["Years ago, flour, sugar, and butter cost pennies."])).toEqual([]);
+  });
+});

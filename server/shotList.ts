@@ -684,7 +684,13 @@ export function splitListPieces(scenes: StoryboardScene[]): StoryboardScene[] {
   const out: StoryboardScene[] = [];
   for (const s of scenes) {
     const text = (s.scriptText ?? "").trim();
-    const items = text.match(/[^,;]+[,;]?/g)?.map(x => x.trim()).filter(Boolean) ?? [];
+    // Never at a comma between describing words: "a short, heartfelt, loving essay" is one essay
+    // (`seriesCommas`, job 400).
+    const items =
+      maskSeriesCommas(text)
+        .match(/[^,;]+[,;]?/g)
+        ?.map(x => unmaskSeriesCommas(x).trim())
+        .filter(Boolean) ?? [];
     // A general head in front of its examples ("some ordinary place, a waiting room, a church pew,",
     // job 400) is not an item: its words lead the first example's picture, and with ONE example after
     // it the picture is no list at all (`ledByGeneralHead`).
@@ -764,11 +770,27 @@ const isNumber = (w: string) => w.split("-").every(p => IS_NUMBER.test(p));
 /** Words that sit between number words without naming anything ("six AND A half", "two OR three"). */
 const NUMBER_FILLER = new Set(["a", "an", "and", "or", "to", "point", "about", "maybe", "nearly", "almost", "roughly", "around"]);
 /** A unit of time: a number of them is a length of time, not a thing. */
-const TIME_UNIT = /^(?:seconds?|minutes?|hours?|days?|nights?|evenings?|mornings?|weeks?|weekends?|months?|years?|decades?|century|centuries)$/;
-/** What may lead a length of time besides number words ("A FEW weeks", "A COUPLE OF months"). */
-const TIME_QUANTITY = /^(?:a few|a couple|a couple of|several|another|many)$/;
+const TIME_UNIT = /^(?:seconds?|minutes?|hours?|days?|nights?|evenings?|mornings?|afternoons?|weeks?|weekends?|months?|years?|decades?|century|centuries|millennium|millennia)$/;
+/**
+ * What may lead a length of time besides number words ("A FEW weeks", "A COUPLE OF months", "A
+ * century ago", "SOME years back").
+ */
+const TIME_QUANTITY = /^(?:a few|a couple|a couple of|several|another|many|a|an|some|a good many|so many)$/;
 /** One word that may follow it and keep it a length of time ("… AGO"); "of …" may too ("… OF evenings"). */
 const AFTER_TIME = /^(?:ago|later|earlier|back)$/;
+/**
+ * A time a sentence opens on, said in set words ("Long ago,", "Once upon a time,", "Back then,") —
+ * the time a story starts at, never a thing in it. Closed list of ordinary English.
+ */
+const TIME_PHRASE = new Set([
+  "long ago", "long long ago", "a long time ago", "a while ago", "a while back", "once upon a time",
+  "back then", "back in the day", "way back when", "way back", "these days", "those days", "nowadays",
+  "someday", "some day", "ever since", "since then",
+]);
+/** What leads a time said by when it was ("THAT night", "LAST summer", "THE NEXT morning", "ONE time"). */
+const WHEN_LEAD = /^(?:that|this|last|next|the next|the following|the other|the same|one|early one|late one|early that|late that|later that|earlier that)$/;
+/** Times named by "that / last / the next …" besides the units ("that SUMMER", "the same TIME"). Never "spring" or "fall": a coil spring and a fall are things too. */
+const WHEN_WORD = /^(?:summer|winter|autumn|season|time|era)s?$/;
 /** Set phrases, greetings and pronouns: said, never drawn. Closed list of ordinary English. */
 const NOT_A_THING_PHRASE = new Set([
   "give or take", "more or less", "sooner or later", "and so on", "so on", "etc", "et cetera", "or so",
@@ -820,16 +842,38 @@ const ADVERB_VERB = /\b(?:just|still|already|never|always|actually|really|also)\
 const THING_THEN_VERB =
   /^(?:a|an|the|this|that|my|your|our|his|her|their|some)\s+(?:(?!(?:that|which|who|i|you|he|she|it|we|they)\b)[a-z'-]+\s+){1,5}?(?:looks|lives|seems|feels|sounds|counts|wonder|wonders|belongs|means|stays|happens|started|starts|ended|came|comes|went|goes)\s+(?!of\b)\S/;
 
-/** A number of time units: "five minutes", "six and a half hours", "a few weeks of evenings", "two thousand years ago". */
+/**
+ * A number of time units: "five minutes", "six and a half hours", "a few weeks of evenings", "two
+ * thousand years ago", "a century ago" — and bare units that say how long ago ("years ago", "months
+ * later"), which a sentence opens on as often as on a counted one.
+ */
 function lengthOfTime(words: string[]): boolean {
   const u = words.findIndex(w => TIME_UNIT.test(w));
-  if (u < 1) return false;
+  if (u < 0) return false;
+  const after = words.slice(u + 1);
+  const ago = after.length === 1 && AFTER_TIME.test(after[0]);
+  if (u === 0) return ago;
   const lead = words.slice(0, u);
   const counted =
     TIME_QUANTITY.test(lead.join(" ")) ||
     (lead.some(isNumber) && lead.every(w => isNumber(w) || NUMBER_FILLER.has(w)));
-  const after = words.slice(u + 1);
-  return counted && (!after.length || after[0] === "of" || (after.length === 1 && AFTER_TIME.test(after[0])));
+  return counted && (!after.length || after[0] === "of" || ago);
+}
+
+/**
+ * A time said in other words than a length of it (2026-10-18, job 400 at 1:41: "Two thousand years
+ * ago," was cut as item 1 of "Seneca's essay"; a counted time like it is `lengthOfTime`): a set
+ * phrase ("long ago", "once upon a time", "back then"), "back in …" ("back in 1850"), a time named by
+ * when it was ("that night", "last summer", "the next morning", "one time"), or "ago / later /
+ * earlier" said on its own. Pure.
+ */
+function whenSaid(words: string[]): boolean {
+  const core = words.join(" ");
+  if (TIME_PHRASE.has(core)) return true;
+  if (words.length === 1) return /^(?:ago|later|earlier)$/.test(core);
+  if (words[0] === "back" && /^(?:in|then|when|around)$/.test(words[1])) return true;
+  const last = words[words.length - 1];
+  return WHEN_LEAD.test(words.slice(0, -1).join(" ")) && (TIME_UNIT.test(last) || WHEN_WORD.test(last));
 }
 
 /**
@@ -871,7 +915,12 @@ export function notAThing(item: string): string | null {
   if (words.length === 2 && LABEL_NOUN.has(words[0]) && isNumber(words[1])) return "a numbered label";
   if (RATE.test(core) || RATE_END.test(core)) return "a rate";
   if (lengthOfTime(words)) return "a length of time";
+  if (whenSaid(words)) return "a time";
   if (CONTRACTED_IS.test(core) || ADVERB_VERB.test(core) || THING_THEN_VERB.test(core)) return "a clause";
+  // One describing word on its own names nothing (job 400: "furious," between "a short," and "loving
+  // essay" was a picture of its own; "busy, important, and worn down" a list of three) — only when
+  // the word is one whatever it stands beside (`describingWord`): "oak", "flour" and "quilted" stay.
+  if (words.length === 1 && describingWord(words[0])) return "a describing word";
   return null;
 }
 
@@ -944,6 +993,156 @@ export function withoutGeneralHead<T extends string>(items: T[]): T[] {
 }
 
 /**
+ * Words that only say what something is LIKE, whatever they stand beside — never a word that is as
+ * often a thing ("light", "cold", "flat", "square", "fine", "crisp", "firm", "safe", "special", a
+ * colour, a material) or an "-ed" stage ("quilted", "bound": jobs 159, 174, 178 are real stages).
+ * Closed list of ordinary English.
+ */
+const DESCRIBING_WORD = new Set([
+  "short", "long", "tall", "big", "small", "little", "tiny", "huge", "large", "vast", "great", "old",
+  "young", "new", "good", "bad", "nice", "hard", "soft", "quick", "slow", "cheap", "rich", "poor",
+  "bright", "dim", "simple", "plain", "clean", "dirty", "rough", "smooth", "warm", "hot", "cool", "loud",
+  "thick", "thin", "heavy", "wide", "narrow", "deep", "shallow", "high", "low", "fresh", "sour", "bitter",
+  "sharp", "dull", "busy", "angry", "happy", "sad", "glad", "tired", "weary", "proud", "brave", "gentle",
+  "cruel", "honest", "humble", "strong", "weak", "sudden", "steady", "tidy", "messy", "ugly", "pretty",
+  "strange", "odd", "rare", "common", "ordinary", "perfect", "stubborn", "bold", "fierce", "harsh",
+  "tender", "loving", "caring", "worn", "important", "quiet", "calm", "lonely", "lovely", "friendly",
+  "silly", "easy", "empty", "full", "lucky", "crazy", "afraid", "alive", "alone", "awake", "aware",
+  "ready", "real", "true", "false", "sick", "ill", "dry", "wet", "damp", "raw", "ripe", "rotten",
+  "broken", "sorry", "clever", "wise", "smart", "stupid", "polite", "rude", "patient", "tough",
+  "fragile", "sturdy", "solid", "hollow", "bare", "dead", "brisk", "eager", "keen", "modest", "grand",
+  "noble", "sacred", "holy", "ancient", "modern", "costly", "expensive", "inexpensive", "idle", "lazy",
+  "cozy", "cosy", "shiny", "rusty", "dusty", "sticky", "chunky", "sleepy", "hungry", "thirsty",
+  "filthy", "muddy", "dreary", "gloomy", "dark", "wild", "matte", "snug", "fuzzy", "homey", "scrappy",
+  "stretchy", "soggy", "crispy", "crunchy", "creamy", "juicy", "salty", "spicy", "tasty", "greasy",
+  "oily", "shabby", "sloppy", "grumpy", "quirky", "sleek", "plump", "skinny", "slim", "stiff", "loose",
+  "tight", "neat", "fancy", "handy", "sunny", "rainy", "windy", "cloudy", "foggy", "stormy", "icy",
+  "chilly", "frosty", "misty", "pricey", "typical", "normal", "elegant", "pleasant", "distant",
+  "silent", "violent", "decent", "brilliant", "beautiful", "terrible", "horrible", "incredible",
+  "impossible", "possible", "adorable", "comfortable", "durable", "affordable", "reliable", "washable",
+  "reusable", "flexible", "sensible", "visible", "invisible",
+]);
+/** "-ful" words that are an amount, not a describing word ("a handful", "a spoonful"). */
+const AMOUNT_FUL =
+  /(?:hand|cup|spoon|mouth|arm|bucket|pocket|room|house|tank|truck|boat|basket|bowl|plate|jar|fist|lung|scoop|bag|box|car|pail|shovel|barrel|belly|eye|skin|tea|table|fork|glass|pot|pan|sack|cart|ship|bus|van|bed|head|lap|tub)ful$/;
+
+/**
+ * Whether a word only describes (2026-10-18, job 400: "a short, furious, loving essay" was cut into
+ * three list items): one of `DESCRIBING_WORD`, a word with an ending that makes nothing else
+ * ("furious", "careless", "cheerful" — never an amount, "a handful"), or the "-est" of one
+ * ("biggest", "coziest"; "forest" and "harvest" end in -est too, so only when the rest is one). Pure.
+ */
+export function describingWord(word: string): boolean {
+  const w = word.toLowerCase().replace(/’/g, "'").replace(/^[^a-z]+|[^a-z]+$/g, "");
+  if (!/^[a-z][a-z'-]*$/.test(w)) return false;
+  if (DESCRIBING_WORD.has(w)) return true;
+  if (/^[a-z]{2,}ous$/.test(w) || /^[a-z]{3,}less$/.test(w)) return true;
+  if (/^[a-z]{2,}ful$/.test(w)) return !AMOUNT_FUL.test(w);
+  if (w.length > 5 && w.endsWith("est")) {
+    const base = w.slice(0, -3);
+    return [base, `${base}e`, base.replace(/i$/, "y"), base.replace(/([bdglmnpt])\1$/, "$1")].some(b => DESCRIBING_WORD.has(b));
+  }
+  return false;
+}
+
+/** Words a run of describing words follows: "A short, …", "HIS old, …", "TWO slowest, …". */
+const SERIES_LEAD = new Set([
+  "a", "an", "the", "my", "your", "his", "her", "its", "our", "their", "this", "that", "these", "those",
+  "some", "any", "no", "such", "another", "every", "each",
+]);
+/** Words that may stand before a describing word without ending the run ("a REALLY long, …", "the MOST careful …"). */
+const DEGREE_WORD = new Set(["very", "really", "so", "too", "quite", "rather", "pretty", "fairly", "most", "more", "less", "least", "extra", "super", "truly"]);
+/** Words that are never one of a run of describing words, nor the thing it describes. */
+const FUNCTION_WORD = new Set([
+  ...Array.from(NOT_A_LIST_ITEM), ...Array.from(MORE_PREPOSITIONS), ...Array.from(SERIES_LEAD),
+  "i", "you", "he", "she", "it", "we", "they", "me", "him", "us", "them", "who", "whom", "whose", "which",
+  "what", "where", "why", "how", "and", "or", "nor", "but", "yet", "is", "are", "was", "were", "be",
+  "been", "am", "do", "does", "did", "has", "have", "had", "will", "would", "can", "could", "should",
+  "may", "might", "must", "shall", "to", "than", "up", "down", "out", "off", "away", "back", "please",
+  "ago", "later", "earlier", "too", "either", "though",
+]);
+/** One word with nothing after it — no full stop, comma or dash. */
+const PLAIN_WORD = /^[A-Za-z][A-Za-z'’-]*$/;
+const lowerWord = (w: string) => w.toLowerCase().replace(/’/g, "'");
+/** A word that names or describes (not a function word, not a number). */
+const contentWord = (w: string | undefined) =>
+  !!w && PLAIN_WORD.test(w) && !FUNCTION_WORD.has(lowerWord(w)) && !isNumber(lowerWord(w));
+/** A comma piece's words without its joiner and degree word ("and very loving essay" → "loving essay"). */
+function seriesWords(words: string[]): string[] {
+  let k = 0;
+  if (/^(?:and|or)$/i.test(words[k] ?? "")) k++;
+  // Only with a word after it: "pretty," on its own is one of the run's describing words.
+  if (words.length - k > 1 && DEGREE_WORD.has(lowerWord(words[k] ?? ""))) k++;
+  return words.slice(k);
+}
+
+/**
+ * The commas INSIDE a run of describing words before one thing (2026-10-18, job 400 at 1:41): in
+ * "…wrote a short, furious, loving essay to a man named Paulinus" the commas only separate the words
+ * that describe ONE essay, and the shape rules cut them as list items ("Seneca wrote a short /
+ * Furious / Loving essay"): three pictures, and a list graphic of nonsense. A run is: a piece ending
+ * on a word right after "a / the / his / two…", a degree word, another describing word, or at the
+ * start of a sentence ("a short,"); then pieces of ONE word each ("furious,"); then a piece that is a
+ * word and the thing it describes ("loving essay…") — with at least one word before that piece a
+ * describing word whatever it stands beside (`describingWord`), so "a hammer, nails, and wood glue"
+ * stays three things, and "bring something warm, dry socks" (no "a / the" before "warm") is no run.
+ * Returns each such comma's offset in `text`. Pure.
+ */
+export function seriesCommas(text: string): Set<number> {
+  const out = new Set<number>();
+  const pieces: { words: string[]; comma: number }[] = [];
+  let from = 0;
+  for (let k = 0; k <= text.length; k++) {
+    if (k < text.length && text[k] !== ",") continue;
+    pieces.push({ words: text.slice(from, k).trim().split(/\s+/).filter(Boolean), comma: k });
+    from = k + 1;
+  }
+  for (let s = 0; s + 1 < pieces.length; s++) {
+    const ws = pieces[s].words;
+    const w1 = ws[ws.length - 1];
+    if (!contentWord(w1)) continue;
+    const before = ws[ws.length - 2];
+    const lb = lowerWord(before ?? "").replace(/^[^a-z0-9]+|[^a-z0-9']+$/g, "");
+    const leads =
+      before === undefined
+        ? s === 0
+        : /[.!?]["'’”)\]]*$/.test(before) ||
+          (PLAIN_WORD.test(before) && (SERIES_LEAD.has(lb) || DEGREE_WORD.has(lb) || isNumber(lb) || describingWord(lb) || /'s$/.test(lb)));
+    if (!leads) continue;
+    const run = [w1];
+    let e = s + 1;
+    for (; e < pieces.length; e++) {
+      const one = seriesWords(pieces[e].words);
+      if (one.length !== 1 || !contentWord(one[0])) break;
+      run.push(one[0]);
+    }
+    if (e >= pieces.length) continue;
+    const [w, noun] = seriesWords(pieces[e].words);
+    if (!contentWord(w) || !noun || FUNCTION_WORD.has(lowerWord(noun).replace(/[^a-z']+$/, "")) || !/^[A-Za-z]/.test(noun)) continue;
+    if (!run.some(describingWord)) continue;
+    for (let k = s; k < e; k++) out.add(pieces[k].comma);
+    s = e - 1;
+  }
+  return out;
+}
+
+/** What stands in for a comma inside a run of describing words while a sentence is cut at its commas. */
+const SERIES_MARK = "\u2063";
+/**
+ * `text` with every comma inside a run of describing words (`seriesCommas`) hidden, so a split at
+ * commas keeps "a short, furious, loving essay" one piece; `unmaskSeriesCommas` puts them back. Pure.
+ */
+export function maskSeriesCommas(text: string): string {
+  const inner = seriesCommas(text);
+  if (!inner.size) return text;
+  let out = "";
+  for (let k = 0; k < text.length; k++) out += inner.has(k) ? SERIES_MARK : text[k];
+  return out;
+}
+/** The commas `maskSeriesCommas` hid, back. Pure. */
+export const unmaskSeriesCommas = (text: string): string => text.split(SERIES_MARK).join(",");
+
+/**
  * A list item with no article — "flour,", "sugar,", "and butter." — a bare name of one to four
  * words: no subject or verb (`LIST_ITEM_CLAUSE`), no "-ly" word, not an aside ("Honestly,"). Only
  * ever counted inside a run of two or more (`markListPieces`), never alone. Pure.
@@ -965,6 +1164,32 @@ export function looksLikeBareListItem(text: string | undefined): boolean {
 const anyListItem = (t: string | undefined) => looksLikeListItem(t) || looksLikeBareListItem(t);
 
 /**
+ * The pieces ONE thing was cut into at the commas of its describing words ("a man wrote a short," |
+ * "heartfelt," | "loving essay…" — job 400's "a short, furious, loving essay" was cut this way):
+ * each piece a run of describing words crosses at its last comma, and the piece after it
+ * (`seriesCommas` over the film's running text). Never list items of their own. Pure.
+ */
+function piecesOfOneThing(scenes: StoryboardScene[]): Set<number> {
+  const texts = scenes.map(s => (s.scriptText ?? "").trim());
+  const ends: number[] = [];
+  let at = 0;
+  for (const t of texts) {
+    at += t.length;
+    ends.push(at - 1);
+    at += 1;
+  }
+  const out = new Set<number>();
+  const commas = seriesCommas(texts.join(" "));
+  ends.forEach((end, k) => {
+    if (k + 1 < scenes.length && commas.has(end)) {
+      out.add(k);
+      out.add(k + 1);
+    }
+  });
+  return out;
+}
+
+/**
  * Mark every run of two or more consecutive pictures of one beat that each read as a list item
  * (`looksLikeListItem`), or one such picture beside a piece the planner already marked, as
  * `listCut` — so no fold, join or flash rule ever merges one item into another, whatever the
@@ -972,15 +1197,18 @@ const anyListItem = (t: string | undefined) => looksLikeListItem(t) || looksLike
  */
 export function markListPieces(scenes: StoryboardScene[]): number {
   let n = 0;
-  const item = (s: StoryboardScene | undefined) =>
-    !!s && !s.hostPresent && (s.listCut === true || anyListItem(s.scriptText));
+  const oneThing = piecesOfOneThing(scenes);
+  const item = (k: number) => {
+    const s = scenes[k];
+    return !!s && !s.hostPresent && (s.listCut === true || (anyListItem(s.scriptText) && !oneThing.has(k)));
+  };
   for (let i = 0; i < scenes.length; ) {
-    if (!item(scenes[i])) {
+    if (!item(i)) {
       i++;
       continue;
     }
     let j = i;
-    while (j + 1 < scenes.length && item(scenes[j + 1]) && scenes[j + 1].shotGroup === scenes[i].shotGroup) j++;
+    while (j + 1 < scenes.length && item(j + 1) && scenes[j + 1].shotGroup === scenes[i].shotGroup) j++;
     let run = scenes.slice(i, j + 1);
     // A general head at the front of the run ("some ordinary place," before "a waiting room,", job
     // 400) leads the examples and never counts as one of them, so it is never marked here.

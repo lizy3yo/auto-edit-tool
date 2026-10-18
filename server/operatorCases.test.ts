@@ -2096,3 +2096,45 @@ describe("the head's picture of its own is gone, not turned into a group picture
     ]);
   });
 });
+
+describe("one essay is not a list (job 400 at 1:41, 'a short, furious, loving essay')", () => {
+  // The voice says one sentence; the film cut it into a forum (1.5 s), a quill (3.7 s) and the host
+  // writing as Seneca (0.8 s, "furious,"), under a list graphic "Seneca's essay: 1 Two thousand years
+  // ago / 2 Seneca wrote a short / 3 Furious / 4 Loving essay".
+  const CUT = [
+    host(19, "Today, with the help of a Roman who wrote the sharpest essay on time ever put to paper, I want to show you that the arithmetic"),
+    pic(20, "was never your problem. Your problem is theft, and by the end of this video you will be able to name all seven of the thieves.", "a papyrus scroll tied with a cord"),
+    pic(21, "Two thousand years ago,", "ancient Roman stone columns and a forum under a clear sky", { listCut: true }),
+    pic(22, "a man named Lucius Annaeus Seneca wrote a short,", "a dark feather quill in a round glass inkwell", { listCut: true }),
+    pic(23, "furious,", "a hand gripping a feather quill, pressing it hard to papyrus", { listCut: true }),
+    pic(24, "loving essay to a man named Paulinus, the official in charge of Rome’s grain supply — busy, important, and worn down to the rims.", "Roman grain sacks in a stone warehouse"),
+    pic(25, "Seneca was no monk on a hillside.", "a Roman palace hall with an empty throne"),
+  ];
+  const text = CUT.map(s => s.scriptText).join(" ");
+  const essay = splitSentences(text).findIndex(s => s.startsWith("Two thousand years ago"));
+
+  it("no list is kept in the sentence — job 400's own answer, the adjectives, or 'busy, important, worn down'", async () => {
+    expect(essay).toBe(2);
+    for (const items of [
+      ["Two thousand years ago", "a man named Lucius Annaeus Seneca wrote a short", "furious"], // as job 400 saved it
+      ["a short", "furious", "loving essay"],
+      ["busy", "important", "worn down to the rims"],
+    ]) {
+      const r = await findSpokenLists(text, { ask: async () => JSON.stringify({ lists: [{ sentence: essay, kind: "things", items }] }) });
+      expect([items, r.lists]).toEqual([items, []]);
+    }
+    expect(lists(CUT)).toEqual([]); // the sentence shape agrees when the call fails
+  });
+
+  it("the film's cut loses its list marks, so its pieces join like any pictures of one sentence", () => {
+    const r = applySpokenLists(CUT, []);
+    expect(r.cleared).toBe(3);
+    expect(r.scenes.map(s => !!s.listCut)).toEqual([false, false, false, false, false, false, false]);
+  });
+
+  it("a real list in the same film is still cut, one picture per item", () => {
+    expect(spokenListsByShape(["You'll want a penny, a nickel, a dime, and a quarter."]).map(l => l.items)).toEqual([
+      ["a penny", "a nickel", "a dime", "a quarter"],
+    ]);
+  });
+});

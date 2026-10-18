@@ -2209,3 +2209,94 @@ describe("a general head before its examples is not a list item (job 400 at 0:47
     ]);
   });
 });
+
+describe("describing words in front of ONE thing are never list items (job 400 at 1:41)", () => {
+  // "Two thousand years ago, a man named Lucius Annaeus Seneca wrote a short, furious, loving essay to
+  // a man named Paulinus…" was cut "Two thousand years ago," / "…wrote a short," / "furious," — three
+  // pictures and a list graphic for one essay.
+  const ESSAY =
+    "Two thousand years ago, a man named Lucius Annaeus Seneca wrote a short, furious, loving essay to a man named Paulinus, the official in charge of Rome’s grain supply — busy, important, and worn down to the rims.";
+
+  it("one describing word, and a time a sentence opens on, name nothing", async () => {
+    const { notAThing } = await import("./shotList");
+    for (const [t, why] of [
+      ["furious,", "a describing word"], // job 400
+      ["busy,", "a describing word"], // job 400: "— busy, important, and worn down to the rims"
+      ["important,", "a describing word"],
+      ["coziest", "a describing word"],
+      ["and careless", "a describing word"],
+      ["Two thousand years ago,", "a length of time"], // job 400
+      ["Years ago,", "a length of time"],
+      ["a century ago", "a length of time"],
+      ["months later", "a length of time"],
+      ["Long ago,", "a time"],
+      ["that night,", "a time"],
+      ["the next morning", "a time"],
+      ["last summer", "a time"],
+      ["back in 1850", "a time"],
+      ["ago", "a time"],
+    ])
+      expect([t, notAThing(t)]).toEqual([t, why]);
+    // Things stay things: a material, a food, a stage of making (jobs 159/174/178), an amount, a word
+    // that is as often a thing ("cooler", "light"), a colour, and a thing with its own describing word.
+    for (const t of ["oak", "flour", "quilted", "bound", "handful", "cooler", "light", "Ivory", "forest", "harvest", "a short", "a warm coral", "a night out", "a weekend bag", "this spring", "a second bag of pretzels", "back"])
+      expect([t, notAThing(t)]).toEqual([t, null]);
+  });
+
+  it("finds the commas inside a run of describing words, and only those", async () => {
+    const { seriesCommas } = await import("./shotList");
+    const at = (s: string) => Array.from(seriesCommas(s)).map(c => s.slice(0, c).split(/\s+/).pop());
+    expect(at(ESSAY)).toEqual(["short", "furious"]);
+    expect(at("The tea tray, a plain, low serving tray, and it only moved up this list once I started putting names on it.")).toEqual(["plain"]); // Hank's script
+    expect(at("It sells for $120 to $170, mostly to folks who want a real, honest quilt without paying heirloom prices.")).toEqual(["real"]); // Ruth's
+    // More from the practice scripts, and a degree word or a describing word of the run itself.
+    for (const [s, want] of [
+      ["a solid, matte, uniform shade", ["solid", "matte"]],
+      ["my two biggest, coziest things", ["biggest"]],
+      ["the slow, smoldering fire", ["slow"]],
+      ["a long, wet night", ["long"]],
+      ["a really long, very slow walk", ["long"]],
+      ["a nice, pretty, little house", ["nice", "pretty"]],
+    ] as [string, string[]][])
+      expect([s, at(s)]).toEqual([s, want]);
+    // Lists of things, and words that only look like the start of a run.
+    for (const s of [
+      "standing in a garage with a saw, a drill, and a stack of sandpaper,",
+      "You need a hammer, nails, and wood glue.",
+      "The batting, backing, and thread run about $28",
+      "Matte black, dull tarnish, heavy dark wood, all of those take it away.",
+      "Bring something warm, dry socks, and a hat.",
+      "Simple, warm, and impossible to argue with.",
+      "One short, check the other end.",
+    ])
+      expect([s, at(s)]).toEqual([s, []]);
+  });
+
+  it("a piece that is one describing word is no bare list item; 'flour,' still is", async () => {
+    const { looksLikeBareListItem } = await import("./shotList");
+    expect(looksLikeBareListItem("furious,")).toBe(false);
+    expect(looksLikeBareListItem("Years ago,")).toBe(false);
+    expect(looksLikeBareListItem("flour,")).toBe(true);
+    expect(looksLikeBareListItem("and wood glue.")).toBe(true);
+  });
+
+  it("a picture of one described thing is never split into items; 'a saw, a drill,' still is", async () => {
+    const { splitListPieces } = await import("./shotList");
+    const essay = scene(22, "a short, heartfelt, loving essay", { showSubject: "an essay on a desk" });
+    expect(splitListPieces([essay])).toEqual([essay]);
+    expect(splitListPieces([scene(3, "a saw, a drill,", { showSubject: "tools on the workbench" })]).map(s => s.scriptText)).toEqual(["a saw,", "a drill,"]);
+  });
+
+  it("pieces cut at those commas are never marked as list items; a real run still is", async () => {
+    const { markListPieces } = await import("./shotList");
+    const cut = [
+      scene(1, "a man wrote a short,", { shotGroup: 1 }),
+      scene(2, "heartfelt,", { shotGroup: 1 }),
+      scene(3, "loving essay to his friend.", { shotGroup: 1 }),
+    ];
+    expect(markListPieces(cut)).toBe(0);
+    expect(cut.map(s => !!s.listCut)).toEqual([false, false, false]);
+    const tools = [scene(1, "a saw,", { shotGroup: 2 }), scene(2, "a drill,", { shotGroup: 2 }), scene(3, "and a plane.", { shotGroup: 2 })];
+    expect(markListPieces(tools)).toBe(3);
+  });
+});

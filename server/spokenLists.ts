@@ -34,8 +34,11 @@ import {
   firstWords,
   generalHead,
   ledByGeneralHead,
+  maskSeriesCommas,
   notAThing,
+  seriesCommas,
   tokenSpans,
+  unmaskSeriesCommas,
   withoutGeneralHead,
 } from "./shotList";
 
@@ -95,7 +98,8 @@ export function namesAThing(piece: string, maxWords = SHAPE_ITEM_MAX_WORDS): boo
   if (/ly$/.test(first)) return false;
   // A number, a length of time, a set phrase or a clause names nothing, even when it opens on a
   // number word like a counted thing does ("six and a half", "give or take", "round ten"), so a
-  // run of them never becomes a list (`notAThing`).
+  // run of them never becomes a list (`notAThing`) — nor does a time a sentence opens on ("Two
+  // thousand years ago,", "Years ago,") or one describing word on its own ("furious,", job 400).
   if (notAThing(core)) return false;
   if (DETERMINER.test(core)) return true;
   // With no "a/the/some/two…" in front, only a bare name of a few words is a thing ("flour",
@@ -185,10 +189,12 @@ function trailingBareThing(clause: string): string | null {
  * spot, a porch swing, a park bench" — the head is never an item). A list's first item may end the
  * clause before it ("…sitting at a kitchen table with a straight-stitch machine,"). Two things joined
  * by a bare "and" are not a list ("the potholders and the coasters were done"), nor is "the one
- * that…". Returns each list's items without their joiners. Pure.
+ * that…", nor the describing words in front of ONE thing ("…wrote a short, furious, loving essay",
+ * job 400 — never cut at those commas, `seriesCommas`). Returns each list's items without their
+ * joiners. Pure.
  */
 export function listsByShape(sentence: string): string[][] {
-  const pieces = sentence
+  const pieces = maskSeriesCommas(sentence)
     .split(/[,;]/)
     .map(p => p.trim())
     .filter(Boolean);
@@ -201,8 +207,9 @@ export function listsByShape(sentence: string): string[][] {
     let j = i;
     let run: string[] = [];
     while (j < pieces.length && namesAThing(pieces[j])) {
-      // "a drill and a plane" inside a run is two items.
-      const both = /^(.*\S)\s+(?:and|or)\s+(\S.*)$/i.exec(stripJoiners(pieces[j]));
+      // "a drill and a plane" inside a run is two items — never the "and" between describing words
+      // ("a big, heavy, and sturdy table" is one table).
+      const both = inSeries(pieces[j]) ? null : /^(.*\S)\s+(?:and|or)\s+(\S.*)$/i.exec(stripJoiners(pieces[j]));
       if (run.length && both && namesAThing(both[1]) && namesAThing(both[2])) run.push(pieces[j].replace(/\s+(?:and|or)\s+\S.*$/i, ""), `and ${both[2]}`);
       else run.push(pieces[j]);
       j++;
@@ -236,12 +243,15 @@ export function listsByShape(sentence: string): string[][] {
     }
     const joinedByAnd = /^(?:and|or)\s/i.test(items[items.length - 1] ?? "");
     if (items.length >= 3 || (items.length === 2 && (joinedByAnd || headed))) {
-      out.push(items.map(t => stripJoiners(t).replace(/[.!?;:,]+$/, "").trim()));
+      out.push(items.map(t => unmaskSeriesCommas(stripJoiners(t).replace(/[.!?;:,]+$/, "").trim())));
     }
     i = j;
   }
   return out;
 }
+
+/** Whether a piece holds a run of describing words whose commas `maskSeriesCommas` hid. */
+const inSeries = (t: string) => unmaskSeriesCommas(t) !== t;
 
 // ─── The double-check every list passes ─────────────────────────────────────────────────────────
 
@@ -261,13 +271,21 @@ function findTokens(toks: string[], want: string[], from: number): number {
  * way list items are — two items need a comma between them, three or more at least one. A pair
  * joined only by "and" ("the potholders and the coasters") fails, and so does a list led by a general
  * head (`ledByGeneralHead`: "some ordinary place, a waiting room, a church pew", job 400) — the head
- * is dropped first (`withoutGeneralHead`), and a head with one example is no list at all. Pure.
+ * is dropped first (`withoutGeneralHead`), and a head with one example is no list at all. No item
+ * may begin or end at a comma between the describing words of ONE thing (`seriesCommas`): job 400's
+ * "…wrote a short, | furious, | loving essay" passed every other test, whether the model or the
+ * sentence shape proposed it, and became three pictures and a list graphic. Pure.
  */
 export function validateSpokenList(sentence: string, items: string[]): boolean {
   if (!Array.isArray(items) || items.length < 2) return false;
   if (ledByGeneralHead(items)) return false;
   const spans = tokenSpans(sentence);
   const toks = spans.map(t => t.tok);
+  const inner = seriesCommas(sentence);
+  const holdsInner = (from: number, to: number) => {
+    for (const c of Array.from(inner)) if (c >= from && c < to) return true;
+    return false;
+  };
   let cursor = 0;
   let prevEnd = -1;
   let commas = 0;
@@ -276,6 +294,13 @@ export function validateSpokenList(sentence: string, items: string[]): boolean {
     if (!want.length || want.length > LIST_ITEM_MAX_WORDS) return false;
     const at = findTokens(toks, want, cursor);
     if (at < 0) return false;
+    if (inner.size) {
+      // Before the item (past its joiner: ", and loving essay") and after it, up to the next word.
+      const b = at > 0 && JOINERS.has(toks[at - 1]) ? at - 1 : at;
+      const last = at + want.length - 1;
+      if (holdsInner(b > 0 ? spans[b - 1].end : 0, spans[b].start)) return false;
+      if (holdsInner(spans[last].end, last + 1 < spans.length ? spans[last + 1].start : sentence.length)) return false;
+    }
     if (prevEnd >= 0) {
       if (at - prevEnd > GAP_MAX_WORDS) return false;
       const between = sentence.slice(spans[prevEnd - 1].end, spans[at].start);
@@ -308,8 +333,9 @@ function describingWords(sentence: string, items: string[]): boolean {
 }
 
 /**
- * Whether every item of a list of things names a thing (`notAThing`), and the items are not
- * describing words after a linking verb (`describingWords`). One item that is not a thing means the
+ * Whether every item of a list of things names a thing (`notAThing`: never a time like "years ago",
+ * never one describing word like "busy,"), and the items are not describing words after a linking
+ * verb (`describingWords`). One item that is not a thing means the
  * sentence is not a list of things, so the WHOLE list goes — never trimmed to the items that pass:
  * trimmed, "the fence for thrifty, old-fashioned chicken keeping, tell me" (job 355) and "Two
  * thousand years ago, a man named … wrote a short, furious" (job 400) each still left two false
@@ -340,6 +366,8 @@ NOT a list:
 - two things together as the subject or object of a verb, joined only by "and" ("by the time the
   potholders and the coasters were done")
 - reasons, places, times, numbers, prices or describing words one after another
+- the describing words in front of ONE thing ("she wrote a long, slow, careful letter" is one letter),
+  and the time a sentence opens on ("years ago, …")
 - a story of what happened ("I went home, made dinner, and slept") — steps are things to DO
 
 Answer with JSON only: {"lists":[{"sentence":<number>,"kind":"things"|"steps","items":["…","…"]}]} —
@@ -378,14 +406,16 @@ const SUBJECT_START = /^(?:i|you|we|he|she|they|it|there|that|this|these|those|m
 /**
  * The steps in one sentence, by shape: three or more comma pieces, the last joined by "and"/"then",
  * each a short instruction that starts on its own verb-like word — no subject ("I went…"), no
- * determiner ("a saw" is a thing), no aside ("Honestly"), at most `STEP_MAX_WORDS`. Pure.
+ * determiner ("a saw" is a thing), no aside ("Honestly"), at most `STEP_MAX_WORDS`. Never cut at a
+ * comma between describing words: "Cut a long, thin strip, glue it down, and clamp it" is three
+ * steps, the first with its strip whole (`maskSeriesCommas`). Pure.
  */
 export function stepsByShape(sentence: string): string[] | null {
-  const pieces = sentence.split(/[,;]/).map(p => p.trim()).filter(Boolean);
+  const pieces = maskSeriesCommas(sentence).split(/[,;]/).map(p => p.trim()).filter(Boolean);
   if (pieces.length < 3) return null;
   const last = pieces[pieces.length - 1];
   if (!/^(?:and|then|and then)\s/i.test(last)) return null;
-  const items = pieces.map(p => p.replace(/^(?:and then|and|then)\s+/i, "").replace(/[.!?]+$/, "").trim());
+  const items = pieces.map(p => unmaskSeriesCommas(p.replace(/^(?:and then|and|then)\s+/i, "").replace(/[.!?]+$/, "").trim()));
   const isStep = (t: string) => {
     const words = t.split(/\s+/);
     const first = (words[0] ?? "").replace(/[^a-z]/gi, "").toLowerCase();
