@@ -3,7 +3,7 @@ import { resolveCues, type CueSpec, type ResolvedCue, type Word } from "../cueRe
 import { TEMPLATES } from "../registry";
 import { FPS } from "../theme";
 import { notAListAsSaid } from "../../../server/spokenLists";
-import { ROW_MAX_WORDS, choiceSteps, fromAFoundList, listsWhereGraphicsGo, malformedPhrase, missingListCues, namesTheDanger, normalizePhrases, notTheHostsWords, planGraphics, quotedInScript, restoreRowGrammar, systemPrompt, uncoveredMoments, userPrompt, wordsSaidOver, type PlanMessage } from "./planner";
+import { ICON_REQUIRED, ROW_MAX_WORDS, choiceSteps, fromAFoundList, iconsAsASet, listsWhereGraphicsGo, malformedPhrase, missingListCues, namesTheDanger, noIcon, normalizePhrases, notTheHostsWords, planGraphics, quotedInScript, restoreRowGrammar, systemPrompt, uncoveredMoments, userPrompt, wordsSaidOver, type PlanMessage } from "./planner";
 
 const W = (s: string, start: number, step = 0.3): Word[] => s.split(" ").map((text, i) => ({ text, start: start + i * step, end: start + i * step + 0.26 }));
 const scene = (index: number, a: number, b: number, extra: Record<string, unknown> = {}) => ({ index, narrationStartSec: a, narrationEndSec: b, scriptText: "", hostPresent: false, cta: false, split: false, hostOpener: false, ...extra });
@@ -1043,5 +1043,171 @@ describe("a row takes back only the article or possessive that opens its own nou
     expect(restoreRowGrammar("The price", "ask her the price")).toBe("The price");
     // between the row's own words, the spoken words always go back in: they are said in a row
     expect(restoreRowGrammar("Ask the price", "ask her the price")).toBe("Ask her the price");
+  });
+});
+
+describe("an icon is the object its words name, or none (A9, round 10 graphics review)", () => {
+  // 399 whole-can-fact (1:09.5-1:13.7, over b-roll scene 16): the FactCard carried 1f96b "canned
+  // food", a food tin, for the rest of a drink can. 400 clock-before-after (1:02.8-1:07.8, over b-roll
+  // scene 12): an alarm clock for "Background noise at thirty" and a megaphone for "The loudest thing".
+  const heard399 = T(
+    "and@66.026-66.126 the@66.166-66.246 rest@66.306-66.526 of@66.566-66.626 the@66.666-66.726 can@66.766-67.046 rolls@67.146-67.467 off@67.567-67.687 down@67.747-67.907 the@67.947-68.027 aisle@68.167-68.327 on@68.387-68.467 the@68.487-68.567 cart.@68.607-68.907 " +
+      "On@69.628-69.708 many@69.768-69.968 of@70.008-70.048 those@70.088-70.288 carriers,@70.328-70.828 you@71.008-71.108 can@71.149-71.249 have@71.289-71.409 the@71.449-71.529 whole@71.589-71.829 thing@71.909-72.189 just@72.329-72.489 by@72.529-72.649 asking.@72.769-73.13 " +
+      "I@73.87-73.97 figured@74.01-74.29"
+  );
+  const film399 = {
+    scenes: [
+      scene(16, 59.25, 73.71, { scriptText: "…and the rest of the can rolls off down the aisle on the cart. On many of those carriers, you can have the whole thing just by asking." }),
+      scene(17, 73.71, 85.87, { scriptText: "I figured that out much too late," }),
+    ],
+  };
+  const fact = (icon?: unknown): CueSpec => ({
+    id: "whole-can-fact",
+    template: "FactCard",
+    start: "On many of those carriers,",
+    startPad: -0.15,
+    end: "just by asking.",
+    endPad: 0.3,
+    props: { kicker: "Fact", fact: { text: "On many of those carriers, you can have the whole thing just by asking.", words: true }, emphasis: ["asking."], ...(icon === undefined ? {} : { icon }) },
+  });
+  const heard400 = T(
+    "Fewer@59.663-59.983 years@60.023-60.304 ahead@60.384-60.784 than@60.884-61.044 behind,@61.084-61.624 and@62.065-62.165 a@62.205-62.225 clock@62.305-62.625 that@62.665-62.805 was@62.825-62.965 " +
+      "background@63.065-63.546 noise@63.606-63.866 at@63.926-63.986 30@64.226-64.527 is@65.027-65.107 now@65.167-65.327 the@65.367-65.487 loudest@65.607-66.048 thing@66.108-66.288 in@66.328-66.368 the@66.408-66.508 room.@66.568-66.848 " +
+      "My@67.889-68.049 name@68.089-68.349 is@68.529-68.609"
+  );
+  const film400 = {
+    scenes: [
+      scene(12, 59.26, 67.76, { scriptText: "Fewer years ahead than behind, and a clock that was background noise at thirty is now the loudest thing in the room." }),
+      scene(13, 67.76, 70.93, { hostPresent: true, scriptText: "My name is" }),
+    ],
+  };
+  const cuts400 = [59.26, 67.76, 70.93];
+  const clock = (before: unknown, after: unknown): CueSpec => ({
+    id: "clock-before-after",
+    template: "BeforeAfter",
+    start: "and a clock that was background",
+    startPad: -0.15,
+    end: "loudest thing in the room.",
+    endPad: 0,
+    props: {
+      kicker: "The clock",
+      before: { at: "@background noise at thirty", label: "Background noise at thirty", ...(before === undefined ? {} : { icon: before }) },
+      after: { at: "@now the loudest thing", label: "The loudest thing", ...(after === undefined ? {} : { icon: after }) },
+    },
+  });
+  const asking = (answers: CueSpec[][]) => {
+    const asked: string[] = [];
+    const ask = async (_system: string, messages: PlanMessage[]) => {
+      asked.push(messages[messages.length - 1].content);
+      return JSON.stringify({ cues: answers[asked.length - 1] ?? [] });
+    };
+    return { ask, asked };
+  };
+  type Slot = { icon?: unknown } & Record<string, unknown>;
+  const props = (out: { cues: CueSpec[] }, id: string) => out.cues.find(c => c.id === id)?.props as (Slot & Record<string, Slot>) | undefined;
+
+  it("the prompt asks for the object itself or no icon, and marks the icon optional on every template but IconCallout", () => {
+    const prompt = systemPrompt({ kept: false });
+    expect(prompt).toContain(`"icon" is OPTIONAL everywhere but IconCallout`);
+    expect(prompt).toContain(`Leave "icon" out when those words name no`);
+    expect(prompt).toContain("the nearest emoji of another");
+    expect(prompt).toContain("When one thing changes state, both sides show that same thing.");
+    expect(prompt).not.toContain("a plain, literal object");
+    // every template's props say whether its icon is optional — a bare "icon" reads as one to fill
+    const templateLines = prompt.split("\n").filter(l => l.startsWith("- ") && l.includes('"icon"'));
+    expect(templateLines.length).toBe(6);
+    for (const l of templateLines) for (const m of Array.from(l.matchAll(/"icon"(.{0,11})/g))) expect(m[1], l).toMatch(/^ \((optional|required)\)/);
+    // IconCallout's own line wraps: its "required" icon is on the line after
+    expect(prompt).toMatch(/- IconCallout — [^\n]*\n[^\n]*\{"icon" \(required\)/);
+    expect(Array.from(ICON_REQUIRED)).toEqual(["IconCallout"]);
+  });
+
+  it("job 399: the fact card with no icon is complete, and an icon written blank is no icon — never refused as a missing emoji", async () => {
+    const bare = await planGraphics({ words: heard399, film: film399, ask: asking([[fact()]]).ask, ensureIcon: async () => true });
+    expect(bare.cues.map(c => c.id)).toEqual(["whole-can-fact"]);
+    expect(bare.rounds[0].problems).toEqual([]);
+    for (const blank of ["", "none", null]) {
+      const seen: string[] = [];
+      const out = await planGraphics({ words: heard399, film: film399, ask: asking([[fact(blank)]]).ask, ensureIcon: async code => (seen.push(code), true) });
+      expect(out.rounds[0].problems, String(blank)).toEqual([]); // was: 'no Noto emoji for  — pick another'
+      expect(props(out, "whole-can-fact")).not.toHaveProperty("icon");
+      expect(seen).toEqual([]);
+    }
+    // an icon Noto has the image for is still converted and kept: the rule takes nothing that is asked for
+    const kept = await planGraphics({ words: heard399, film: film399, ask: asking([[fact("\u{1F964}")]]).ask, ensureIcon: async () => true });
+    expect(props(kept, "whole-can-fact")?.icon).toBe("1f964");
+  });
+
+  it("job 400: a pair with one side left out (it names no object) loses the other icon too, and the card stays", async () => {
+    const out = await planGraphics({ words: heard400, cuts: cuts400, film: film400, ask: asking([[clock("23f0", undefined)]]).ask, ensureIcon: async () => true });
+    expect(out.cues.map(c => c.id)).toEqual(["clock-before-after"]);
+    expect(out.rounds[0].problems).toEqual([]);
+    expect(props(out, "clock-before-after")?.before).not.toHaveProperty("icon");
+    expect(props(out, "clock-before-after")?.after).not.toHaveProperty("icon");
+  });
+
+  it("an emoji Noto has no image for is taken off, not sent back for another (the nearest one is the wrong kind)", async () => {
+    const { ask, asked } = asking([[clock("23f0", "1f4e2")]]);
+    const out = await planGraphics({ words: heard400, cuts: cuts400, film: film400, ask, ensureIcon: async code => code !== "1f4e2" });
+    expect(out.cues.map(c => c.id)).toEqual(["clock-before-after"]);
+    expect(out.rounds[0].problems).toEqual([]); // was: 'no Noto emoji for 1f4e2 — pick another', and a repair round
+    expect(asked).toHaveLength(1);
+    expect(props(out, "clock-before-after")?.before).not.toHaveProperty("icon");
+  });
+
+  it("a pair that shows one thing on both sides is kept as written (the rule never takes a whole set)", async () => {
+    const mantel = "\u{1F570}\u{FE0F}";
+    const out = await planGraphics({ words: heard400, cuts: cuts400, film: film400, ask: asking([[clock(mantel, mantel)]]).ask, ensureIcon: async () => true });
+    expect(out.rounds[0].problems).toEqual([]);
+    expect(props(out, "clock-before-after")?.before.icon).toBe("1f570");
+    expect(props(out, "clock-before-after")?.after.icon).toBe("1f570");
+  });
+
+  it("IconCallout is its icon: refused without one and steered to a caption, kept with one", async () => {
+    const words = W("The battery was pulled.", 10);
+    const film = { scenes: [scene(9, 9, 16, { scriptText: "The battery was pulled." })] };
+    const battery = "\u{1F50B}";
+    const callout = (icon?: string): CueSpec => ({
+      id: "battery-callout",
+      template: "IconCallout",
+      start: "The battery was pulled.",
+      startPad: -0.15,
+      end: "was pulled.",
+      endPad: 0.3,
+      props: { phrase: { text: "The battery was pulled.", words: true }, emphasis: ["pulled."], ...(icon === undefined ? {} : { icon }) },
+    });
+    const { ask, asked } = asking([[callout()]]);
+    const out = await planGraphics({ words, film, ask, ensureIcon: async () => true });
+    expect(out.cues).toEqual([]);
+    expect(out.rounds[0].problems).toEqual([{ cue: "battery-callout", problem: expect.stringMatching(/^no icon — IconCallout makes its point with its icon: ONE emoji that IS the object .*DimCaption/) }]);
+    expect(asked[1]).toContain("show the line as a DimCaption");
+    const unknown = await planGraphics({ words, film, ask: asking([[callout(battery)]]).ask, ensureIcon: async () => false });
+    expect(unknown.rounds[0].problems[0].problem).toMatch(new RegExp(`^no Noto emoji for ${battery} — IconCallout makes its point`, "u"));
+    const ok = await planGraphics({ words, film, ask: asking([[callout(battery)]]).ask, ensureIcon: async () => true });
+    expect(ok.cues.map(c => c.id)).toEqual(["battery-callout"]);
+    expect(props(ok, "battery-callout")?.icon).toBe("1f50b");
+  });
+
+  it("icons side by side come as a set: a half set loses the rest; a whole set, no set or a single icon is left alone", () => {
+    const versus: Record<string, unknown> = { left: { icon: "1f525", title: "Ionization" }, right: { title: "Photoelectric" } };
+    iconsAsASet(versus);
+    expect(versus).toEqual({ left: { title: "Ionization" }, right: { title: "Photoelectric" } });
+    const steps: Record<string, unknown> = { steps: [{ text: "Get a stepladder", icon: "1fa9c" }, { text: "Phrase it as an offer" }, { text: "Read the label", icon: "1f3f7" }] };
+    iconsAsASet(steps);
+    expect((steps.steps as object[]).every(s => !("icon" in s))).toBe(true);
+    const whole: Record<string, unknown> = { items: [{ text: "Not broken", icon: "1f527" }, { text: "Not dead", icon: "1f50b" }] };
+    iconsAsASet(whole);
+    expect((whole.items as { icon?: string }[]).map(i => i.icon)).toEqual(["1f527", "1f50b"]);
+    const single: Record<string, unknown> = { icon: "1f50b", phrase: { text: "The battery was pulled.", words: true }, before: { label: "Old" } };
+    iconsAsASet(single);
+    expect(single.icon).toBe("1f50b");
+    const rows: Record<string, unknown> = { items: [{ text: "A seat by the window" }, { text: "Her sewing box" }] };
+    iconsAsASet(rows);
+    expect(rows).toEqual({ items: [{ text: "A seat by the window" }, { text: "Her sewing box" }] });
+  });
+
+  it("an empty slot is no icon; an emoji, a code or any other word is one to look up", () => {
+    for (const none of ["", "  ", "none", "None", "null", "no icon", "N/A", "-", null, undefined, 0, {}]) expect(noIcon(none), String(none)).toBe(true);
+    for (const some of ["\u{1F570}\u{FE0F}", "1f570", "23f0", "clock"]) expect(noIcon(some), some).toBe(false);
   });
 });

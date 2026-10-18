@@ -54,6 +54,46 @@ export function notoCode(icon: string): string {
     .join("_");
 }
 
+/**
+ * AN ICON IS THE THING ITSELF, OR THERE IS NONE (round 10 review). The catalogue used to ask for an
+ * icon on every card, so where no emoji is the object the line names the planner took the nearest
+ * one: job 399 (whole-can-fact, 1:09) put the "canned food" tin on a fact about the rest of a drink
+ * can — Unicode has no drink can — and job 400 (clock-before-after, 1:03) a megaphone for "The
+ * loudest thing" beside an alarm clock for the clock. Now an icon is optional on every template but
+ * the one an icon IS (one short point one object says): there it is refused when missing, and the
+ * repair is steered to a caption. Everywhere else a card with no icon is complete.
+ *
+ * NOT CHECKED: whether the emoji is that object. The repo ships the Noto images by code point and
+ * no table of their names, so nothing here can tell "canned food" from a drink can; the prompt's
+ * rule is the only guard.
+ */
+export const ICON_REQUIRED = new Set(["IconCallout"]);
+
+/** An icon slot the planner left empty rather than filled: no string, blank, or a word for none. */
+export function noIcon(v: unknown): boolean {
+  return typeof v !== "string" || !v.trim() || /^(?:none|null|no icon|n\/a|-+)$/i.test(v.trim());
+}
+
+/**
+ * ICONS SIDE BY SIDE COME AS A SET: a graphic's two sides (Versus "left"/"right", BeforeAfter
+ * "before"/"after") or its rows ("steps", "items") show an icon on each or on none. With the icon
+ * optional, a set can come back half-filled — the planner gives one side its object and leaves the
+ * other out (job 400's after side, "The loudest thing", names no object), or an emoji Noto has no
+ * image for is taken off — and a half set is drawn unevenly: a side or step box without its icon
+ * sits its words a whole icon higher than its neighbour's. The icons of a half set are all taken
+ * off, in place. A single icon (FactCard, IconCallout) is not a set. Pure.
+ */
+const ICON_PAIRS = [["left", "right"], ["before", "after"]];
+const ICON_ROWS = ["steps", "items"];
+export function iconsAsASet(props: Record<string, unknown>): void {
+  const sets: unknown[][] = [...ICON_PAIRS.map(keys => keys.map(k => props[k])), ...ICON_ROWS.map(k => (Array.isArray(props[k]) ? (props[k] as unknown[]) : []))];
+  for (const set of sets) {
+    const slots = set.filter((x): x is Record<string, unknown> => !!x && typeof x === "object" && !Array.isArray(x));
+    const shown = slots.filter(s => typeof s.icon === "string");
+    if (shown.length && shown.length < slots.length) for (const s of slots) delete s.icon;
+  }
+}
+
 const CATALOGUE = `
 HOW PROPS WORK
 A "phrase" is {"text": "...", "words": true}: shown word by word as the narrator says each word.
@@ -71,7 +111,15 @@ a sentence longer than a card's limit is shown as a caption instead of that card
 Fixed text (titles, labels, subs, list items) is shown whole. When it stands for words the narrator says,
 add "say": "those exact spoken words" beside it, so the graphic stays until they are said.
 "emphasis": ["word."] = ONE word of the shown text, copied exactly as written there (with its punctuation),
-drawn in the accent colour. "icon" = ONE emoji character (a 3D Noto emoji): a plain, literal object.
+drawn in the accent colour.
+"icon" is OPTIONAL everywhere but IconCallout. It is ONE emoji character (a 3D Noto emoji) that IS the object
+its own words name (the side's title, the step, the item, the card's line): that same kind of thing, drawn as
+itself — an umbrella for "the umbrella", a light bulb for "the bulb". Leave "icon" out when those words name no
+object ("most people never ask"), and when no single emoji is that exact object: the nearest emoji of another
+kind is wrong (a mug for a bottle, a car for a truck, a tin of food for a paint can). Never an icon
+for an idea, a quality or a feeling (a trophy for "the best", a rocket for "fast", a heart for "love"). A
+graphic without an icon is complete. Icons side by side come as a set: on both sides of a Versus or a
+BeforeAfter, on every step or item, or on none. When one thing changes state, both sides show that same thing.
 
 EVERY GRAPHIC AND THE MOMENT THAT CALLS FOR IT
 Each line below is "Template — appears whenever the script…: props". Use a template EVERY time its
@@ -80,14 +128,14 @@ moment happens, as often as the script allows. Nothing here is limited to once.
 Full-screen cards — replace the picture, so ONLY inside a b-roll stretch:
 - Statement — sums up a point in one short line, or lands a punchline: {"kicker": "2-4 word label", "headline": ONE WHOLE SENTENCE as said (4-12 words), "emphasis"}
 - MythTruth — states what people believe, then corrects it: {"myth": ONE WHOLE SENTENCE (≤14 words), "truth": ONE WHOLE SENTENCE (≤14 words), "emphasis"}
-- Versus — compares two kinds or options: {"kicker", "left": {"icon","title" (1-3 words),"sub" (≤6 words),"say","at"}, "right": {same}, "winner": "left"|"right"|"none"}
+- Versus — compares two kinds or options: {"kicker", "left": {"icon" (optional),"title" (1-3 words),"sub" (≤6 words),"say","at"}, "right": {same}, "winner": "left"|"right"|"none"}
 - BigNumber — says a number that matters (a time, an amount, a count): {"kicker", "prefix": "$" (a currency sign, if any), "value": number, "unit": "1-2 words", "at": "@the spoken number", "line": phrase, "countSec": 0.6 for small numbers}. Start it on the sentence that holds the number, not sentences before.
-- StepCards — gives 2-4 steps the viewer should do: {"kicker", "steps": [{"text" (≤4 words), "icon", "at": "@words"}]}
+- StepCards — gives 2-4 steps the viewer should do: {"kicker", "steps": [{"text" (≤4 words), "icon" (optional), "at": "@words"}]}
   (steps are done ONE AFTER ANOTHER: a choice the line offers — "…, or …", "alternatively" — is part of the
   step before it, never a step of its own: "Call the office, or send an email" is ONE step, "Call or email")
-- BeforeAfter — an old way or state replaced by a new one: {"kicker", "before": {"icon","label","at"}, "after": {"icon","label","at"}}
+- BeforeAfter — an old way or state replaced by a new one: {"kicker", "before": {"icon" (optional),"label","at"}, "after": {"icon" (optional),"label","at"}}
 - TwoPoint — links two places or things ("the one in the basement sets off the one by your bed"): {"title": phrase, "a": {"label","sub","at"}, "b": {"label","sub","at"}}
-- FactCard — states a finding or a general fact ("most…", "studies show…", "the rule is…"): {"kicker": "Fact", "fact": ONE WHOLE SENTENCE (≤14 words), "emphasis", "source": "where it comes from, ONLY if the script says it", "icon"}
+- FactCard — states a finding or a general fact ("most…", "studies show…", "the rule is…"): {"kicker": "Fact", "fact": ONE WHOLE SENTENCE (≤14 words), "emphasis", "source": "where it comes from, ONLY if the script says it", "icon" (optional)}
 - YesNoCard — asks a yes/no question and answers it: {"kicker", "question": ONE WHOLE SENTENCE (≤14 words), "answer": "yes"|"no", "at": "@the spoken answer", "line": phrase (optional, the reason)}
 
 Graphics with the picture in a window — they replace the picture with the footage framed beside text:
@@ -105,7 +153,7 @@ On top of the footage:
 - StepLabels — describes 2-4 actions in order: {"steps": [{"text" (≤4 words), "at": "@words"}]} (a choice
   — "…, or …" — is part of the step before it, never the next step, as for StepCards)
 - Checklist — lists 2-4 signs or things to check (each ticked as said) (over b-roll): {"title": "2-4 words", "items": [{"text" (≤5 words), "at": "@words"}]}
-- CrossedList — dismisses 2-3 things ("not the bowl, not the house"), optionally then names the real one (over b-roll): {"items": [{"text" (≤3 words), "icon", "at": "@words", "keep": true only for the real one}]}
+- CrossedList — dismisses 2-3 things ("not the bowl, not the house"), optionally then names the real one (over b-roll): {"items": [{"text" (≤3 words), "icon" (optional), "at": "@words", "keep": true only for the real one}]}
 - WarningLabel — names a danger or a mistake to avoid, in words that SAY it: read alone under its "WARNING"
   header, the line itself says what not to do or what goes wrong ("never", "don't", "not", "avoid", "too…",
   the harm or the bad result — "Never leave it plugged in overnight", "The glue fails in the cold"), or is
@@ -114,8 +162,9 @@ On top of the footage:
   ("Open it while it's hot, and the jar cracks"), the "do X" half alone reads as an instruction to do it —
   show words that name the danger, or show the right way with another template, or nothing:
   {"text": phrase (≤10 words), "emphasis"}
-- IconLabels — names 1-3 right things to look for or buy: {"items": [{"icon","text" (1-3 words),"say","at"}]}
-- IconCallout — makes one short point that one object says well (over b-roll): {"icon", "phrase": phrase (≤8 words), "emphasis"}
+- IconLabels — names 1-3 right things to look for or buy: {"items": [{"icon" (optional),"text" (1-3 words),"say","at"}]}
+- IconCallout — makes one short point that one object says well, ONLY when one emoji IS that object (else a
+  DimCaption) (over b-roll): {"icon" (required), "phrase": phrase (≤8 words), "emphasis"}
 - SmallLabel — names the thing in the picture when the line names it (over b-roll): {"text": "1-4 words as said", "at": "@words"}
 - NumberLabel — compares two values (over b-roll): {"kicker", "a": {"label","value","at"}, "b": {"label","value","at"}}
 - BarChart — says 2-4 numbers to compare (over b-roll): {"title", "bars": [{"label","value": number,"display": "as said","at": "@the number"}]}
@@ -825,7 +874,10 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
   const fullFrame = new Set(TEMPLATES.filter(t => t.kind === "card" || t.underlay === "window").map(t => t.id));
   const opts = { cuts, fps: FPS, structural, cards, fullFrame };
 
-  /** Converts every `icon` in a cue's props to its Noto code in place; collects the ones Noto lacks. */
+  /** Converts every `icon` in a cue's props to its Noto code in place. An icon left empty (`noIcon`)
+   * is taken off; so is one Noto has no image for, which is also named in `missing`. Taken off, not
+   * sent back to "pick another": an icon is the object itself or none (`ICON_REQUIRED`), and asked
+   * for a substitute the planner reaches for the nearest emoji of another kind (job 399's food tin). */
   const fixIcons = async (node: unknown, missing: string[]): Promise<void> => {
     if (Array.isArray(node)) {
       for (const x of node) await fixIcons(x, missing);
@@ -834,11 +886,16 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
     if (!node || typeof node !== "object") return;
     const o = node as Record<string, unknown>;
     for (const [k, v] of Object.entries(o)) {
-      if (k === "icon" && typeof v === "string") {
-        const code = notoCode(v);
+      if (k !== "icon") await fixIcons(v, missing);
+      else if (noIcon(v)) delete o.icon;
+      else {
+        const code = notoCode(String(v).trim());
         if (await ensureIcon(code)) o.icon = code;
-        else missing.push(v);
-      } else await fixIcons(v, missing);
+        else {
+          missing.push(String(v));
+          delete o.icon;
+        }
+      }
     }
   };
   /** Is number `n` said (as digits or in words) while the graphic is up? */
@@ -980,12 +1037,19 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
       // a refused chapter takes its whole series down with it. An approved one keeps its length. (A
       // cut within CUT_SNAP_SEC before its end still ends it there, sooner; QA reports that.)
       if (structural.has(spec.template) && typeof spec.durationSec === "number" && spec.durationSec < MIN_ON_SCREEN_SEC) spec.durationSec = MIN_ON_SCREEN_SEC;
+      // AN ICON IS THE OBJECT OR NONE (`ICON_REQUIRED`): an empty or unknown one is taken off, a set
+      // left half-filled loses the rest (`iconsAsASet`), and only a template that IS its icon is refused
+      // without one — steered to a caption, never to the nearest emoji of another kind.
       const missing: string[] = [];
       await fixIcons(spec.props, missing);
-      if (missing.length) {
-        bad(`no Noto emoji for ${missing.join(" ")} — pick another`);
+      if (ICON_REQUIRED.has(spec.template) && typeof spec.props.icon !== "string") {
+        bad(
+          `${missing.length ? `no Noto emoji for ${missing.join(" ")}` : "no icon"} — ${spec.template} makes its point with its icon: ONE emoji that IS the object ` +
+            `its words name. Use that emoji, or show the line as a DimCaption (no icon); never the nearest emoji of another kind`
+        );
         continue;
       }
+      iconsAsASet(spec.props);
       // Slot it among what is placed by time, then resolve the whole sheet in film order (a
       // repeated phrase binds after the graphic before it).
       const at = placed.findIndex(p => p.t > t);

@@ -2293,3 +2293,62 @@ describe("QA never fails a card the resolver held to the cut through a pause (ro
     expect(stillUpAfterWords({ ...card, end: 103 }, 30)).toBe(true);
   });
 });
+
+describe("an icon is the object its words name, or none (round 10 graphics review, 2026-10-18)", () => {
+  // 399 whole-can-fact (1:09.5-1:13.7): the FactCard's icon was 1f96b "canned food", a food tin, on a
+  // fact about the rest of a drink can — Unicode has no drink can, and the catalogue asked for an icon
+  // on every card. 400 clock-before-after (1:02.8-1:07.8): an alarm clock for "Background noise at
+  // thirty" and a megaphone for "The loudest thing". The repo has no table of emoji names, so whether
+  // an emoji IS the object is the prompt's rule alone; what the code holds is that an icon may be left out.
+  const words = (s: string) =>
+    s.split(" ").map(t => {
+      const [text, range] = t.split("@");
+      const [start, end] = range.split("-").map(Number);
+      return { text, start, end };
+    });
+  const scene = (index: number, a: number, b: number, scriptText: string, hostPresent = false) => ({ index, narrationStartSec: a, narrationEndSec: b, scriptText, hostPresent, cta: false, split: false, hostOpener: false });
+  const answering = (cue: object) => async () => JSON.stringify({ cues: [cue] });
+
+  it("the planner is told: the object itself, or leave the icon out", async () => {
+    const { systemPrompt } = await import("../graphics/src/plan/planner");
+    const prompt = systemPrompt({ kept: false });
+    expect(prompt).toContain(`"icon" is OPTIONAL everywhere but IconCallout`);
+    expect(prompt).toContain("the nearest emoji of another");
+    expect(prompt).not.toContain("a plain, literal object");
+  });
+
+  it("399: the fact card is kept with no icon — an icon written blank is no longer refused as a missing emoji", async () => {
+    const { planGraphics } = await import("../graphics/src/plan/planner");
+    const heard = words(
+      "On@69.628-69.708 many@69.768-69.968 of@70.008-70.048 those@70.088-70.288 carriers,@70.328-70.828 you@71.008-71.108 can@71.149-71.249 have@71.289-71.409 the@71.449-71.529 whole@71.589-71.829 thing@71.909-72.189 just@72.329-72.489 by@72.529-72.649 asking.@72.769-73.13 I@73.87-73.97"
+    );
+    const film = { scenes: [scene(16, 59.25, 73.71, "On many of those carriers, you can have the whole thing just by asking."), scene(17, 73.71, 85.87, "I figured that out much too late,")] };
+    const fact = { id: "whole-can-fact", template: "FactCard", start: "On many of those carriers,", startPad: -0.15, end: "just by asking.", endPad: 0.3, props: { kicker: "Fact", fact: { text: "On many of those carriers, you can have the whole thing just by asking.", words: true }, emphasis: ["asking."], icon: "" } };
+    const out = await planGraphics({ words: heard, film, ask: answering(fact), ensureIcon: async () => true });
+    expect(out.rounds[0].problems).toEqual([]);
+    expect(out.cues.map(c => c.id)).toEqual(["whole-can-fact"]);
+    expect(out.cues[0].props).not.toHaveProperty("icon");
+  });
+
+  it("400: with the after side's icon left out, the clock card is kept and shows no icon on either side", async () => {
+    const { planGraphics } = await import("../graphics/src/plan/planner");
+    const heard = words(
+      "and@62.065-62.165 a@62.205-62.225 clock@62.305-62.625 that@62.665-62.805 was@62.825-62.965 background@63.065-63.546 noise@63.606-63.866 at@63.926-63.986 30@64.226-64.527 is@65.027-65.107 now@65.167-65.327 the@65.367-65.487 loudest@65.607-66.048 thing@66.108-66.288 in@66.328-66.368 the@66.408-66.508 room.@66.568-66.848 My@67.889-68.049"
+    );
+    const film = { scenes: [scene(12, 59.26, 67.76, "and a clock that was background noise at thirty is now the loudest thing in the room."), scene(13, 67.76, 70.93, "My name is", true)] };
+    const clock = {
+      id: "clock-before-after",
+      template: "BeforeAfter",
+      start: "and a clock that was background",
+      startPad: -0.15,
+      end: "loudest thing in the room.",
+      endPad: 0,
+      props: { kicker: "The clock", before: { at: "@background noise at thirty", icon: "23f0", label: "Background noise at thirty" }, after: { at: "@now the loudest thing", label: "The loudest thing" } },
+    };
+    const out = await planGraphics({ words: heard, cuts: [59.26, 67.76, 70.93], film, ask: answering(clock), ensureIcon: async () => true });
+    expect(out.rounds[0].problems).toEqual([]);
+    const props = out.cues[0].props as { before: object; after: object };
+    expect(props.before).not.toHaveProperty("icon");
+    expect(props.after).not.toHaveProperty("icon");
+  });
+});

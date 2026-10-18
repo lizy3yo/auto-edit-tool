@@ -452,10 +452,12 @@ export const StepCardsCard: React.FC<StepCardsProps> = ({ kicker, steps }) => {
 
 /* ───────────────────────── Before → After ───────────────────────── */
 
+/** The icons are optional: an icon is the object a side names, or none (job 400's "The loudest
+ * thing" names no object, and was given a megaphone). The planner keeps them as a pair. */
 export type BeforeAfterProps = BaseProps & {
   kicker?: string;
-  before: { icon: string; label: string; at: number };
-  after: { icon: string; label: string; at: number };
+  before: { icon?: string; label: string; at: number };
+  after: { icon?: string; label: string; at: number };
 };
 
 export const BeforeAfterCard: React.FC<BeforeAfterProps> = ({ kicker, before, after }) => {
@@ -482,12 +484,12 @@ export const BeforeAfterCard: React.FC<BeforeAfterProps> = ({ kicker, before, af
       )}
       <AbsoluteFill style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 120, paddingTop: 80 }}>
         <div style={{ ...b, display: "flex", flexDirection: "column", alignItems: "center", width: 620 }}>
-          <Icon code={before.icon} size={240} />
+          {before.icon && <Icon code={before.icon} size={240} />}
           <div style={{ ...label, color: t.textSecondary }}>{before.label}</div>
         </div>
         <Arrow atFrame={at(after.at) - 6} width={180} thickness={8} />
         <div style={{ ...a, display: "flex", flexDirection: "column", alignItems: "center", width: 620 }}>
-          <Icon code={after.icon} size={240} />
+          {after.icon && <Icon code={after.icon} size={240} />}
           <div style={{ ...label, color: t.accent }}>{after.label}</div>
         </div>
       </AbsoluteFill>
