@@ -1805,7 +1805,9 @@ describe("a video that moves as asked is kept (the audit's thrown-away videos, 2
     expect(parseClipGlitchVerdict(answer([{ what: "curtains billowed further into the room", meant: true }]), true).glitch).toBe(false);
   });
 
-  it("job 262 scene 16: a clip that does move wrong renders once more from the same frame, then the still is that frame", () => {
+  it("job 262 scene 16, with CLIP_GLITCH_RERENDER=1: a clip that does move wrong renders once more from the same frame, then the still is that frame", () => {
+    // Since 2026-10-18 the default is ONE render (the case at the end of this file); the switch
+    // keeps the old second render exactly as it was.
     const kf = "https://r2/longform/262/broll-kf-16-0-a.png";
     const scene = pic(16, "Photoelectric sees the slow, smoldering fire substantially earlier.", ALARM, {
       selfMoving: true,
@@ -1813,10 +1815,10 @@ describe("a video that moves as asked is kept (the audit's thrown-away videos, 2
       clipUrls: ["https://r2/longform/262/clip-16-0-a.mp4"],
       submits: [{ provider: "sixtynine_labs", at: "2026-10-01T00:00:00.000Z", reason: "first" }],
     });
-    expect(planGlitchRerender(scene)).toEqual({ next: "rerender", keyframe: kf });
+    expect(planGlitchRerender(scene, { rerender: true })).toEqual({ next: "rerender", keyframe: kf });
     expect(scene.nextSubmitReason).toBe("glitch");
     scene.nextSubmitReason = undefined; // the re-render's submit consumes it
-    expect(planGlitchRerender(scene)).toEqual({ next: "still", keyframe: kf });
+    expect(planGlitchRerender(scene, { rerender: true })).toEqual({ next: "still", keyframe: kf });
   });
 });
 
@@ -5269,5 +5271,87 @@ describe("the picture behind the big QR card: a worn thing off the body, the wor
   it("a woodwork backdrop that only names a joint or a way of making keeps its picture", () => {
     const box = qr("Close-up of a walnut box with tight finger joints at the corner, dovetails cut by hand, resting on the bench.");
     expect(guardPitchVisuals([box])).toEqual([]);
+  });
+});
+
+describe("each paid video is rendered once (the operator, 2026-10-18)", () => {
+  // Job 262 scene 16 was paid for twice and drew three images for the one still it shipped; on the
+  // local renders 35 clips in 20 videos moved wrong, each was rendered again, and 11 of the second
+  // clips moved wrong too. Now a clip that moves wrong becomes the still made from the frame
+  // it started from, and the ledger keeps its one render. `CLIP_GLITCH_RERENDER=1` is the old way.
+  const ALARM = "main smoke alarm mounted on hallway ceiling with a thin curl of smoke rising beneath it";
+  const kf = "https://r2/longform/262/broll-kf-16-0-a.png";
+  const scene = () =>
+    pic(16, "Photoelectric sees the slow, smoldering fire substantially earlier.", ALARM, {
+      hostPresent: false,
+      selfMoving: true,
+      audioDuration: 4.2,
+      pictureUrl: kf,
+    });
+  const run = async (s: StoryboardScene, glitch: boolean) => {
+    const { renderSceneClip } = await import("./longformVideo");
+    const renders: (string | undefined)[] = [];
+    const stills: (string | undefined)[] = [];
+    await renderSceneClip(s, 262, {} as any, {} as any, null, "instruction", async () => {}, undefined, {
+      clips: async keyframe => {
+        renders.push(keyframe);
+        (s.submits ??= []).push({
+          provider: "sixtynine_labs",
+          at: "2026-10-18T00:00:00.000Z",
+          reason: s.nextSubmitReason ?? (s.submits?.length ? "resume" : "first"),
+        });
+        s.nextSubmitReason = undefined;
+        return [`https://r2/longform/262/clip-16-${renders.length}.mp4`];
+      },
+      scan: async () =>
+        glitch ? { glitch: true, what: "the smoke alarm slid along the ceiling" } : { glitch: false, what: "" },
+      still: async keyframe => {
+        stills.push(keyframe);
+        s.stillImage = true;
+        s.sceneStatus = "completed";
+      },
+    });
+    return { renders, stills };
+  };
+
+  it("job 262 scene 16: the alarm sliding makes it the still of its own start frame — one paid render, no new image", async () => {
+    vi.stubEnv("CLIP_GLITCH_RERENDER", "");
+    try {
+      const s = scene();
+      const { renders, stills } = await run(s, true);
+      expect(renders).toHaveLength(1);
+      expect(stills).toEqual([kf]);
+      expect(s.submits?.map(x => x.reason)).toEqual(["first"]);
+      expect(s.submits?.[0].movedWrong).toBe("the smoke alarm slid along the ceiling");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("a clip whose smoke is all that changes is kept — the check knows what is meant to move", async () => {
+    vi.stubEnv("CLIP_GLITCH_RERENDER", "");
+    try {
+      const s = scene();
+      const { renders, stills } = await run(s, false);
+      expect(renders).toHaveLength(1);
+      expect(stills).toEqual([]);
+      expect(s.clipUrls).toEqual(["https://r2/longform/262/clip-16-1.mp4"]);
+      expect(s.stillImage).toBeFalsy();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("CLIP_GLITCH_RERENDER=1: the second render from the same frame comes back, ledgered as a glitch re-render", async () => {
+    vi.stubEnv("CLIP_GLITCH_RERENDER", "1");
+    try {
+      const s = scene();
+      const { renders, stills } = await run(s, true);
+      expect(renders).toEqual([undefined, kf]);
+      expect(stills).toEqual([kf]); // it moved wrong again: the still, never a third render
+      expect(s.submits?.map(x => x.reason)).toEqual(["first", "glitch"]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

@@ -368,8 +368,9 @@ const RULE_ORDER = [1, 2, 6, 7, 9, 8, 15, 11];
 export const PICTURE_RUN_MIN_SEC = 2; // the same floor as a host part (`HOST_HANDOFF_MIN_SEC`)
 /**
  * The motion share the gate aims for — over the rule by enough that the clip stage's own swaps
- * cannot sink it: the glitch check turns a clip that moves wrong twice into its still, and on
- * Hank's first real render (job 175) four of those took a 31% plan to 29.8%.
+ * cannot sink it: the glitch check turns a clip that moves wrong into its still (on the first
+ * glitch since 2026-10-18 — a video is paid for once), and on Hank's first real render (job 175)
+ * four of those took a 31% plan to 29.8%.
  */
 const MOTION_SHARE_TARGET = 0.15;
 

@@ -210,7 +210,8 @@ export interface SplitLayout {
  * makes; everything else is a second payment for the same beat, and the ledger names which.
  * `glitch` is a moving cutaway rendered again because its first clip moved wrong
  * (`scanClipGlitch`) — it was written as `resume` before, so the Cost dialog could not tell it
- * from a restart.
+ * from a restart. Since 2026-10-18 only `CLIP_GLITCH_RERENDER=1` renders it: a clip that moves
+ * wrong is paid for once and the beat shows its start frame as a still (`movedWrong`).
  */
 export type SceneSubmitReason =
   | "first"
@@ -247,6 +248,12 @@ export interface SceneSubmit {
    * video's host spend limit (`shared/hostRegenLimit.ts`, `shared/hostSpend.ts`).
    */
   pastLimit?: boolean;
+  /**
+   * The clip this submit returned MOVED WRONG (what the motion check named, `scanClipGlitch`) and
+   * was not shown: the beat shipped its checked start frame as a still instead of paying for a
+   * second render (`planGlitchRerender`). Paid for, so it stays on the ledger — once.
+   */
+  movedWrong?: string;
 }
 
 /**
@@ -434,9 +441,10 @@ export interface StoryboardScene {
   wordCut?: true;
   /** Renders of this beat that came back BLACK (or one solid colour) and were refused. */
   blankClips?: number;
-  /** Moving clips of this beat refused for impossible motion (`scanClipGlitch`); the second makes
-   *  the beat a still. Both the second render and that still use the start frame already drawn
-   *  and checked for the first (`checkedKeyframeOf`). */
+  /** Moving clips of this beat refused for impossible motion (`scanClipGlitch`); the first makes
+   *  the beat a still, made from the start frame already drawn and checked for that clip
+   *  (`checkedKeyframeOf`) — never a second paid render. `CLIP_GLITCH_RERENDER=1` renders once
+   *  more from that frame first, and the second glitch makes the still. */
   motionGlitches?: number;
   /** Every check of a picture drawn for this beat — its kind and what the check named
    *  (`server/pictureCheckLog.ts`), so a film shows which kinds come out right the first time. */

@@ -3769,7 +3769,10 @@ export default function LongformJobSlot({
                                       (s.sec != null
                                         ? ` · ${s.sec.toFixed(1)}s`
                                         : "") +
-                                      ` · ${s.at.slice(0, 16).replace("T", " ")}`
+                                      ` · ${s.at.slice(0, 16).replace("T", " ")}` +
+                                      (s.movedWrong
+                                        ? ` · moved wrong, not shown (${s.movedWrong})`
+                                        : "")
                                   )
                                   .join("\n")}
                               >
