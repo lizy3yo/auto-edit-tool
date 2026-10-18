@@ -1724,7 +1724,12 @@ describe("a line about the chin shows the chin, framed from the lips down (the a
     ];
     markHostBroll(scenes, { hostLook: LOOK }, "https://x/host.png");
     expect(scenes.map(s => hostLipsCut(s))).toEqual([false, false, false]);
-    expect(buildStillPrompt(scenes[1])).toContain(HOST_FRAMING_CLAUSE);
+    // A cut that "reads younger" is a look on the face: since the operator's decision on the audit's
+    // cause 9 (2026-10-18) it shows the host's own face — never framed for the chin, never from behind.
+    expect(scenes[1].hostFaceShown).toBe(true);
+    expect(scenes[1].showSubject).toBe("host brushing her shoulder-length silver hair");
+    expect(buildStillPrompt(scenes[1])).not.toContain(HOST_FRAMING_CLAUSE);
+    expect(buildStillPrompt(scenes[1])).toMatch(/the SAME person as in the reference photo/);
   });
 });
 
@@ -5311,5 +5316,112 @@ describe("job 402 scene 26: the detail check is on, and never raises what a vide
     );
     // Another video's redraws are its own.
     expect(takeDetailRedraw(40227)).toBe(true);
+  });
+});
+
+describe("a look on the face shows the host's own face (the operator's decision on the audit's cause 9, 2026-10-18)", () => {
+  // Diane's host look as job 309 stored it.
+  const DIANE = "A slender woman with shoulder-length blonde hair pinned back, wearing a black blazer over a white top";
+  const PHOTO = "https://x/host.png";
+
+  it("Diane: a hair colour that 'will read younger' is her face, from her photo — no longer the back of a head", async () => {
+    const { HOST_FACE_ONLY_SUFFIX } = await import("./longformVideo");
+    const { hairLookOnFace, hostFaceLook } = await import("./hostLook");
+    const scenes = [
+      // job 309 scene 2
+      pic(2, "The woman who spends the most money and the most time on her hair is usually the one who reads oldest in the room.", "Host's hair being styled elaborately at the bathroom counter with hair-care products nearby."),
+      // job 282 scene 34
+      pic(34, "A woman with gray hair that catches the light will read younger than a woman with flawlessly dyed brown hair", "host from behind, gray-blended hair catching light near the wall"),
+      // job 245 scene 30
+      pic(30, "A woman with gray hair that catches the light will read younger", "a strand of gray hair catching light, silver-white roots visible, held close in hand"),
+    ];
+    markHostBroll(scenes, { hostLook: DIANE }, PHOTO);
+    for (const s of scenes) {
+      expect(s.humanPresent, s.scriptText).toBe(true);
+      expect(s.brollHostRef).toBe(PHOTO);
+      expect(s.hostFaceShown).toBe(true);
+      expect(hostFaceLook(s)).toBe(true);
+      // The look is the hair, so the hair is drawn as the words give it — on her face, checked as hers.
+      expect(hairLookOnFace(s)).toBe(true);
+      const prompt = buildStillPrompt(s);
+      expect(prompt).toMatch(/the SAME person as in the reference photo/);
+      expect(prompt).toMatch(/with the look this line is about ON them/);
+      expect(prompt).toMatch(/with the hair exactly as this description gives it/);
+      expect(prompt).toContain(HOST_FACE_ONLY_SUFFIX);
+      expect(prompt).not.toContain(HOST_FRAMING_CLAUSE);
+      expect(prompt).not.toMatch(/never shown|from behind/);
+    }
+    expect(scenes[1].showSubject).toBe("host, gray-blended hair catching light near the wall");
+  });
+
+  it("a lipstick shade, glasses, earrings: her face, her own hair, the piece worn at the front", async () => {
+    const { hairLookOnFace } = await import("./hostLook");
+    const scenes = [
+      pic(1, "A blue-red lipstick brightens the whole face.", "the host wearing a blue-red lipstick, close view"),
+      pic(2, "Thin wire-rimmed glasses soften the face.", "the host in thin wire-rimmed glasses at the kitchen table"),
+      pic(3, "Small pearl earrings bring out your eyes.", "the host wearing small pearl stud earrings by the window"),
+    ];
+    markHostBroll(scenes, { hostLook: DIANE }, PHOTO);
+    for (const s of scenes) {
+      expect(s.hostFaceShown, s.scriptText).toBe(true);
+      expect(hairLookOnFace(s)).toBe(false);
+      const prompt = buildStillPrompt(s);
+      expect(prompt).toMatch(/the same hair colour and hairstyle/);
+      expect(prompt).not.toMatch(/doing this to their own face/);
+    }
+    expect(personClauseFor(scenes[1], scenes[1].showSubject!)).toMatch(/the body faces the camera so it shows there/);
+    expect(personClauseFor(scenes[1], scenes[1].showSubject!)).not.toMatch(/seen from the side so it shows there/);
+  });
+
+  it("what stays as it was: a chin line, a piece at the neck, a thing's own look, a routine, someone else, a split panel", async () => {
+    const { hostFaceLook } = await import("./hostLook");
+    const scenes = [
+      // job 354 scene 23: "the face looks tired", but a chin line — framed at the lips as round 9 made it
+      pic(23, "The eye reads it together with the soft shadows under the chin, and the face looks tired.", "dark bead necklace on the chest over a navy sweater in a mirror, with shadows under the chin above it"),
+      // job 240 scene 2: a necklace "flattering you" is the piece worn at the neck
+      pic(2, "decides whether a necklace is flattering you or working against you.", "A long gold chain hanging low on the host's chest, catching window light, with a navy sweater nearby in the dressing room."),
+      // job 309 scene 11: the hair's own look, seen as before
+      pic(11, "A dye job carries one. The hair looks applied.", "close view of dyed hair with a single flat uniform tone near the mirror"),
+      // a step of a routine keeps the routine's framing, hand at the face
+      pic(4, "Dab it under the eyes and it brightens the whole face.", "the host dabbing concealer under her eyes"),
+      // someone else with the look is someone else — never the host photo, never a face
+      pic(5, "A silver bob reads younger on any woman.", "an older woman customer with a silver bob at the market stall"),
+    ];
+    markHostBroll(scenes, { hostLook: DIANE }, PHOTO);
+    expect(scenes[0].hostFaceShown).toBeUndefined();
+    expect(hostLipsCut(scenes[0])).toBe(true);
+    expect(buildStillPrompt(scenes[0])).toContain(HOST_LIPS_CUT_CLAUSE);
+    expect(scenes[1].hostFaceShown).toBeUndefined();
+    expect(buildStillPrompt(scenes[1])).toContain(HOST_FRAMING_CLAUSE);
+    expect(scenes[2].humanPresent).toBe(true);
+    expect(scenes[2].hostFaceShown).toBeUndefined();
+    expect(buildStillPrompt(scenes[2])).toContain(HOST_FRAMING_CLAUSE);
+    expect(scenes[3].hostFaceShown).toBe(true);
+    expect(hostFaceLook(scenes[3])).toBe(false);
+    expect(buildStillPrompt(scenes[3])).toMatch(/doing this to their own face/);
+    expect(scenes[4].otherPerson).toBeTruthy();
+    expect(scenes[4].brollHostRef).toBeUndefined();
+    expect(scenes[4].hostFaceShown).toBeUndefined();
+
+    // Job 309 scene 29 was a split: its panel never draws her face beside her own talking head, and a
+    // mark left from an earlier pass is taken off.
+    const split = host(29, "A woman with gray hair that catches the light will read younger than a woman with flawlessly dyed brown hair that goes flat under a restaurant lamp.", {
+      splitVisual: "Host's gray hair catching warm lamp light at the restaurant table",
+      hostFaceShown: true,
+    });
+    markHostBroll([split], { hostLook: DIANE }, PHOTO);
+    expect(split.brollHostRef).toBe(PHOTO);
+    expect(split.hostFaceShown).toBeUndefined();
+    expect(buildSplitRightScene(split).visualPrompt).toMatch(/the face not shown/);
+  });
+
+  it("the mark lives and dies with the line: a re-cut line that judges no look keeps the face out again", () => {
+    const s = pic(7, "A blue-red lipstick brightens the whole face.", "the host wearing a blue-red lipstick, close view");
+    markHostBroll([s], { hostLook: DIANE }, PHOTO);
+    expect(s.hostFaceShown).toBe(true);
+    s.scriptText = "Keep one tube in your bag.";
+    markHostBroll([s], { hostLook: DIANE }, PHOTO);
+    expect(s.hostFaceShown).toBeUndefined();
+    expect(personClauseFor(s, s.showSubject!)).toMatch(/never shown/);
   });
 });

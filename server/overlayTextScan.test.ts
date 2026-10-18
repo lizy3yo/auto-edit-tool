@@ -742,3 +742,23 @@ describe("nobody behind the big QR card — the person verdict (job 402 scene 33
     expect(parseStillDefectVerdict('{"person":"yes"}').person).toBeUndefined();
   });
 });
+
+describe("the same-host question — a look on the host's face is judged on the face (the audit's cause 9, 2026-10-18)", () => {
+  it("asks an ordinary host picture whether the face shows, and a face-shown one about the face", async () => {
+    const { sameHostQuestion } = await import("./overlayTextScan");
+    expect(sameHostQuestion(false)).toMatch(/And is their face shown\?/);
+    expect(sameHostQuestion(true)).toBe("The right picture shows the person's face. Is it the same person as on the left?");
+    // The hair flag means nothing without the face: from behind, the hair is what tells the host apart.
+    expect(sameHostQuestion(false, true)).toBe(sameHostQuestion(false));
+  });
+
+  it("judges a HAIR look on the face, age and skin — Diane's gray hair under 'will read younger' (job 309)", async () => {
+    const { sameHostQuestion, SAME_HOST_SYSTEM } = await import("./overlayTextScan");
+    const q = sameHostQuestion(true, true);
+    expect(q).toMatch(/styled or coloured on purpose/);
+    expect(q).toMatch(/Judge the face itself — its shape and features — the age and the skin tone, not the hair\./);
+    expect(SAME_HOST_SYSTEM).toMatch(/except the hair when the question says it is styled or coloured on purpose/);
+    // A different person is still a different person: the face, age and skin decide.
+    expect(SAME_HOST_SYSTEM).toMatch(/a different face, or more than one person/);
+  });
+});

@@ -892,7 +892,9 @@ export const SAME_HOST_SYSTEM =
   "skin tone; age (an older person must not become a young one, nor a woman a man); build; and, " +
   "when the face is shown, the face itself — its shape and features. Clothes may differ. " +
   "same: false when the RIGHT clearly shows a DIFFERENT person — different hair colour or style, " +
-  "clearly younger or older, different skin tone, a different face, or more than one person. " +
+  "clearly younger or older, different skin tone, a different face, or more than one person — " +
+  "except the hair when the question says it is styled or coloured on purpose: then the face, age " +
+  "and skin decide. " +
   "When too little of the person shows to tell (hands only), judge what shows (age and skin " +
   "tone of the hands) and give the benefit of the doubt.\n" +
   "face: true when the RIGHT picture shows a person's FACE — the nose and both eyes (open, closed " +
@@ -928,13 +930,34 @@ export function parseSameHostVerdict(
 }
 
 /**
+ * The question asked beside the two photos. A picture whose face is shown by design is asked about
+ * the face; one whose HAIR is the look it shows (`hairMayDiffer`, a look on the host's face such as
+ * "gray hair that catches the light will read younger" — `hairLookOnFace`) is judged on the face,
+ * age and skin, since its hair is drawn as its description gives it and would otherwise read as
+ * "a different person" every time, ending in a picture with nobody in it. Pure.
+ */
+export function sameHostQuestion(faceShown: boolean, hairMayDiffer = false): string {
+  if (!faceShown)
+    return (
+      "Is the person in the right picture the same person as on the left, as far as it shows? " +
+      "And is their face shown?"
+    );
+  return hairMayDiffer
+    ? "The right picture shows the person's face, with their hair styled or coloured on purpose as " +
+        "the picture asks. Is it the same person as on the left? Judge the face itself — its shape and " +
+        "features — the age and the skin tone, not the hair."
+    : "The right picture shows the person's face. Is it the same person as on the left?";
+}
+
+/**
  * Is the person in `buffer` the host in `hostPhotoUrl`, and is their face shown? Side by side, the
  * photo on the left. Never throws: a dead check passes the picture.
  */
 export async function scanSameHost(
   hostPhotoUrl: string,
   buffer: Buffer,
-  faceShown: boolean
+  faceShown: boolean,
+  hairMayDiffer = false
 ): Promise<{ same: boolean; face: boolean; what: string }> {
   try {
     const { presignOwnBucketUrl } = await import("./storage");
@@ -953,10 +976,7 @@ export async function scanSameHost(
       .toBuffer();
     const result = await invokeClaude({
       systemPrompt: SAME_HOST_SYSTEM,
-      userMessage: faceShown
-        ? "The right picture shows the person's face. Is it the same person as on the left?"
-        : "Is the person in the right picture the same person as on the left, as far as it shows? " +
-          "And is their face shown?",
+      userMessage: sameHostQuestion(faceShown, hairMayDiffer),
       imageInput: { base64: pair.toString("base64"), mediaType: "image/png" },
       maxTokens: 200,
       model: SAME_THING_MODEL(),

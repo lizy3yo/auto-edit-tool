@@ -123,9 +123,10 @@ export const HOST_IDENTITY_REDRAWS = 2;
 /**
  * What the still loop does with a host picture after `scanSameHost` (2026-10-18, the review of jobs
  * 401-407): a picture of the host is kept only when it is the host AND, unless it is a step on their
- * own face (`hostFaceShown`), the face is not shown. Job 401 scene 20 (the host reading at a desk,
- * face on), job 406 scene 14 (smiling into the lens, phone at the ear) and job 407 scene 27 (a
- * full-body axe swing, the face in three-quarter view) all shipped as "the same person". A miss is
+ * own face or a look on it (`hostFaceShown`), the face is not shown. Job 401 scene 20 (the host
+ * reading at a desk, face on), job 406 scene 14 (smiling into the lens, phone at the ear) and job
+ * 407 scene 27 (a full-body axe swing, the face in three-quarter view) all shipped as "the same
+ * person". A miss is
  * drawn again — a drawn face from behind or the side (`turnAway`, `turnHostAway`) unless its framing
  * is settled otherwise (`mayTurnHostAway`: a chin line, a piece worn at the neck) — and counts with
  * the identity misses: past `HOST_IDENTITY_REDRAWS`, or on the last attempt, the picture is drawn with
@@ -137,7 +138,7 @@ export type HostPictureMove =
   | { move: "redraw" | "nobody"; why: "someone else" | "face"; turnAway: boolean };
 export function hostPictureMove(
   verdict: { same: boolean; face?: boolean },
-  /** A step on the host's own face (`scene.hostFaceShown`) shows the face by design. */
+  /** A step on the host's own face, or a look on it (`scene.hostFaceShown`), shows the face by design. */
   faceAllowed: boolean,
   /** Earlier draws of this picture the host check refused. */
   missesBefore: number,
@@ -478,6 +479,8 @@ import {
   castOfPicture,
   deriveHostLook,
   facingTheCamera,
+  hairLookOnFace,
+  hostFaceLook,
   hostLipsCut,
   hostTurnedAway,
   looksCutOff,
@@ -6186,6 +6189,8 @@ export function personClauseFor(scene: StoryboardScene, visual: string): string 
   // A pose drawn face-on (the whole body in action, a call at the ear) or a picture whose drawing
   // already showed the face is framed from behind or the side only (`hostTurnedAway`).
   const turnedAway = hostTurnedAway(scene);
+  // The host's own face shown: a step of a routine on it, or a look on it (`hostFaceLook`).
+  const faceShown = !!scene.brollHostLook && !!scene.hostFaceShown && !scene.otherPerson;
   const others = peopleAskedFor(scene);
   const who = scene.otherPerson
     ? scene.hostAmongOthers
@@ -6193,12 +6198,15 @@ export function personClauseFor(scene: StoryboardScene, visual: string): string 
       : otherPersonClause(others.who, others.count, scene.otherPersonLooks)
     : scene.brollHostLook
       ? scene.hostFaceShown
-        ? hostFaceClause(scene.brollHostLook)
+        ? hostFaceLook(scene)
+          ? hostFaceLookClause(scene.brollHostLook, hairLookOnFace(scene))
+          : hostFaceClause(scene.brollHostLook)
         : hostBrollClause(scene.brollHostLook, lipsCut, turnedAway)
       : ANON_PERSON_SUFFIX;
   const worn = WORN_FRONT.exec(visual)?.[0];
   // Hands on the person's OWN hair, scalp or face (Diane's job 313: a head twisted round, a third
   // arm): a side or three-quarter view of a natural pose, never "from behind" with both arms up.
+  // With the face shown, "seen from the side" would hide what the picture is about — the arm only.
   const ownHead =
     /\b(?:hair|scalp|face|forehead|cheeks?|neck)\b/i.test(visual) &&
     /\b(?:brush|comb|pin|twist|style|apply|appl(?:ies|ying)|work(?:s|ing)?|smooth|part|wash|rins|dry|spread|massag|tuck|clip)/i.test(visual);
@@ -6207,11 +6215,15 @@ export function personClauseFor(scene: StoryboardScene, visual: string): string 
     : lipsCut
       ? " The arm comes up naturally from its own shoulder to the neck or chin — one hand at it " +
         "when one is enough."
-      : " Seen from the side, the head and shoulders turned the same way, the arms raised naturally " +
-        "from their own shoulders to the hair or face — one hand at it when one is enough.";
+      : faceShown
+        ? " The arm comes up naturally from its own shoulder to the hair or face — one hand at it " +
+          "when one is enough."
+        : " Seen from the side, the head and shoulders turned the same way, the arms raised naturally " +
+          "from their own shoulders to the hair or face — one hand at it when one is enough.";
+  // Glasses or earrings on a face that is shown are seen from the front, where they sit.
   const wornClause = !worn
     ? ""
-    : lipsCut
+    : lipsCut || faceShown
       ? ` The ${worn.toLowerCase()} is worn where it really sits, on the FRONT of the head or body, ` +
         `and the body faces the camera so it shows there.`
       : ` The ${worn.toLowerCase()} is worn where it really sits, on the FRONT of the head or body; ` +
@@ -6399,6 +6411,35 @@ export function hostFaceClause(look: string): string {
     `head turned a little, eyes on what they are doing (never looking at the camera), one hand ` +
     `at the face. Nobody else is in the frame, in the background or in a reflection. ` +
     `${ONE_BODY_CLAUSE}`
+  );
+}
+
+/**
+ * The host with a LOOK on their own face (`hostFaceLook`, 2026-10-18, the operator's decision on the
+ * audit's cause 9): a line about how a lipstick or blush shade, a hair colour or cut round the face,
+ * glasses, earrings or a colour near the face LOOKS was drawn from behind or on a hanger, because the
+ * host's face is never drawn — and how a face reads cannot be shown without it (Diane's job 309 scene
+ * 29, "A woman with gray hair that catches the light will read younger…", the back of a head at a
+ * restaurant table). The face is shown and must be HERS: the host photo is the reference, named as
+ * the face to keep, and the picture is compared with it (`scanSameHost`). The look itself is what the
+ * picture is about, so it is in view and drawn as the description says; a HAIR look (`hairLookOnFace`)
+ * draws the hair the description gives, on the same face. Facing the camera or three-quarter, eyes
+ * just off the lens, so it reads as a photo of the look and not a second talking head.
+ */
+export function hostFaceLookClause(look: string, hairFromWords = false): string {
+  const hair = hairFromWords
+    ? `the same face and features, the same age, the same skin and complexion — not a younger, ` +
+      `smoother or different person — with the hair exactly as this description gives it`
+    : `the same face and features, the same age, the same skin and complexion, the same hair colour ` +
+      `and hairstyle, not a younger, smoother or different person`;
+  return (
+    `The only person in this shot is the host — ${look.trim().replace(/\.$/, "")} — the SAME person ` +
+    `as in the reference photo: ${hair}. A close, natural photo of their face and shoulders with the ` +
+    `look this line is about ON them and clearly in view — the colour on the lips or cheeks, the hair ` +
+    `round the face, the glasses or earrings, the neckline — exactly as the description says: facing ` +
+    `the camera or in three-quarter view, a relaxed, ordinary expression, the eyes resting just off ` +
+    `the lens (never staring into it), not posed like a portrait or an advert. Nobody else is in the ` +
+    `frame, in the background or in a reflection. ${ONE_BODY_CLAUSE}`
   );
 }
 
@@ -10825,8 +10866,10 @@ async function drawValidatedStill(
       // person — hair, age, skin, build, and the face when it is shown. AND NO FACE (2026-10-18, the
       // review of jobs 401-407: the host reading at a desk face on, smiling into the lens with a phone
       // at the ear, a full-body axe swing — all passed as "the same person"): the same call says
-      // whether the face shows, and outside a step on the host's own face a shown face is a miss too,
-      // redrawn from behind or the side (`turnHostAway`; `hostTurnedAway` keeps it for a Regenerate).
+      // whether the face shows, and outside a step on the host's own face or a look on it
+      // (`hostFaceShown`) a shown face is a miss too, redrawn from behind or the side (`turnHostAway`;
+      // `hostTurnedAway` keeps it for a Regenerate). A face-shown picture of someone else is a miss
+      // like any other: redrawn, then drawn with nobody in it.
       // Drawn again on a miss; after `HOST_IDENTITY_REDRAWS` misses — or on the last attempt — the
       // picture is drawn with nobody in it, and a frame of a stranger or a face is never kept as a
       // fallback (`hostPictureMove`). `HOST_IDENTITY_CHECK=0` turns it off.
@@ -10837,7 +10880,9 @@ async function drawValidatedStill(
         !personFree &&
         process.env.HOST_IDENTITY_CHECK !== "0"
       ) {
-        const who = await scanSameHost(scene.brollHostRef, buffer, !!scene.hostFaceShown);
+        // A look on the host's face whose look is the HAIR (`hairLookOnFace`) is judged on the face,
+        // age and skin: its hair is drawn as its words give it, never the photo's.
+        const who = await scanSameHost(scene.brollHostRef, buffer, !!scene.hostFaceShown, hairLookOnFace(scene));
         const move = hostPictureMove(who, !!scene.hostFaceShown, hostMisses, attempt >= attempts);
         if (move.move !== "keep") {
           hostMisses++;
@@ -17676,6 +17721,8 @@ async function runUnifiedPipeline(
   if (hostBroll) console.log(`[Longform ${jobId}] host in b-roll: ${hostBroll} picture(s) show the host at work`);
   const chinShots = scenes.filter(s => !s.hostPresent && s.humanPresent && hostLipsCut(s)).length;
   if (chinShots) console.log(`[Longform ${jobId}] chin lines: ${chinShots} host picture(s) framed from the lips down`);
+  const faceLooks = scenes.filter(s => !s.hostPresent && s.humanPresent && hostFaceLook(s)).length;
+  if (faceLooks) console.log(`[Longform ${jobId}] looks on the face: ${faceLooks} host picture(s) show the host's own face`);
   const othersShown = scenes.filter(s => s.otherPerson && !s.hostPresent).length;
   if (othersShown) console.log(`[Longform ${jobId}] someone else in b-roll: ${othersShown} picture(s), never from the host photo`);
   // Each screen picture (an app, a listing) sits somewhere else, in film order — after the host

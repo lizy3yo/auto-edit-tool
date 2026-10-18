@@ -11097,6 +11097,109 @@ describe("a host picture that drew the face is drawn again turned away (round 11
   });
 });
 
+describe("a look on the host's own face shows her face, and only hers (the operator's decision on the audit's cause 9)", () => {
+  const pngOf = (bg: string) =>
+    sharp({ create: { width: 8, height: 8, channels: 3, background: bg } }).png().toBuffer();
+  const drawsOf = (...frames: Buffer[]) => {
+    const fn = vi.fn();
+    for (const f of frames) fn.mockResolvedValueOnce({ success: true, fileData: f });
+    return fn;
+  };
+  const hostSays = (...vs: { same: boolean; face?: boolean; what?: string }[]) => {
+    mockScanSameHost.mockReset();
+    for (const v of vs) mockScanSameHost.mockResolvedValueOnce({ what: "", ...v } as any);
+    mockScanSameHost.mockResolvedValue({ same: true, what: "" });
+  };
+  afterEach(() => {
+    mockScanSameHost.mockReset();
+    mockScanSameHost.mockResolvedValue({ same: true, what: "" });
+  });
+  // Diane's job 282 scene 34 as `markHostBroll` now leaves it: "host from behind" is gone, the face shown.
+  const grayHair = () =>
+    ({
+      index: 34,
+      scriptText: "A woman with gray hair that catches the light will read younger than a woman with flawlessly dyed brown hair",
+      showSubject: "host, gray-blended hair catching light near the wall",
+      visualPrompt: "The host with gray-blended shoulder-length hair catching the window light near the wall.",
+      humanPresent: true,
+      brollHostLook: "A slender woman in her sixties with fair skin and shoulder-length blonde hair pinned back",
+      brollHostRef: "https://r2/host.jpg",
+      hostFaceShown: true,
+    }) as any;
+  const lipstick = () =>
+    ({
+      ...grayHair(),
+      index: 12,
+      scriptText: "A blue-red lipstick brightens the whole face.",
+      showSubject: "the host wearing a blue-red lipstick, close view",
+      visualPrompt: "The host wearing a blue-red lipstick, a close view of her face.",
+    }) as any;
+
+  it("her face is kept when it is hers — never refused for showing the face, never turned away", async () => {
+    const [a] = await Promise.all([pngOf("#a71")]);
+    hostSays({ same: true, face: true, what: "face in three-quarter view" });
+    const scene = lipstick();
+    const genImage = drawsOf(a);
+    const out = await generateValidatedStill(scene, 4, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(1);
+    expect(out.buffer.equals(a)).toBe(true);
+    expect(out.flaws).toBeUndefined();
+    expect(scene.hostTurnedAway).toBeUndefined();
+    expect(scene.pictureChecks.map((c: any) => c.flags)).toEqual([[]]);
+    // Drawn from her photo, asked about the face, and a lipstick look holds her to her photo's hair.
+    expect(genImage.mock.calls[0][0].referenceImageUrl).toBe("https://r2/host.jpg");
+    expect(mockScanSameHost).toHaveBeenCalledWith("https://r2/host.jpg", a, true, false);
+  });
+
+  it("a stranger's face is drawn again from her photo, twice, then with nobody in it — it never ships", async () => {
+    const { PERSON_FREE_FALLBACK, HOST_IDENTITY_REDRAWS } = await import("./longformVideo");
+    const frames = await Promise.all([pngOf("#b71"), pngOf("#b72"), pngOf("#b73"), pngOf("#b74")]);
+    hostSays(
+      { same: false, face: true, what: "a younger woman" },
+      { same: false, face: true, what: "a younger woman" },
+      { same: false, face: true, what: "a younger woman" }
+    );
+    const scene = lipstick();
+    const genImage = drawsOf(...frames);
+    const out = await generateValidatedStill(scene, 4, undefined, genImage);
+    expect(HOST_IDENTITY_REDRAWS).toBe(2);
+    expect(genImage).toHaveBeenCalledTimes(4);
+    // The redraws are still her, from her photo — the face is allowed, so nothing turns her away.
+    for (const k of [1, 2]) {
+      expect(genImage.mock.calls[k][0].referenceImageUrl).toBe("https://r2/host.jpg");
+      expect(genImage.mock.calls[k][0].prompt).toMatch(/the SAME person as in the reference photo/);
+    }
+    expect(scene.hostTurnedAway).toBeUndefined();
+    const last = genImage.mock.calls[3][0];
+    expect(last.prompt).toContain(PERSON_FREE_FALLBACK);
+    expect(last.referenceImageUrl).toBeUndefined();
+    expect(scene.pictureChecks.slice(0, 3).map((c: any) => c.flags)).toEqual([["not the host"], ["not the host"], ["not the host"]]);
+    expect(out.buffer.equals(frames[3])).toBe(true);
+    for (const f of frames.slice(0, 3)) expect(out.buffer.equals(f)).toBe(false);
+  });
+
+  it("a hair look is judged on the face, age and skin — its hair is the one its words give", async () => {
+    const [a] = await Promise.all([pngOf("#c71")]);
+    hostSays({ same: true, face: true });
+    const scene = grayHair();
+    const genImage = drawsOf(a);
+    await generateValidatedStill(scene, 4, undefined, genImage);
+    expect(mockScanSameHost).toHaveBeenCalledWith("https://r2/host.jpg", a, true, true);
+    expect(genImage.mock.calls[0][0].prompt).toMatch(/with the hair exactly as this description gives it/);
+  });
+
+  it("an ordinary host picture is still refused for a face, and asked as before", async () => {
+    const [a, b] = await Promise.all([pngOf("#d71"), pngOf("#d72")]);
+    hostSays({ same: true, face: true, what: "face on" }, { same: true, face: false });
+    const scene = { ...grayHair(), scriptText: "Silver goes brassy and yellow over time.", hostFaceShown: undefined };
+    const genImage = drawsOf(a, b);
+    const out = await generateValidatedStill(scene, 4, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(2);
+    expect(mockScanSameHost).toHaveBeenNthCalledWith(1, "https://r2/host.jpg", a, false, false);
+    expect(out.buffer.equals(b)).toBe(true);
+  });
+});
+
 describe("a memory picture that copies its memory twice is drawn from words (job 399 scenes 16-17)", () => {
   const pngOf = (bg: string) =>
     sharp({ create: { width: 8, height: 8, channels: 3, background: bg } }).png().toBuffer();
