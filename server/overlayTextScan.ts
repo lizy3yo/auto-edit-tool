@@ -425,18 +425,35 @@ export const STAGED_QUESTION = `\n\nQUESTION 7 — staged: ${STAGED_RULE}`;
  */
 const NOT_A_COLOUR =
   "(?![-\\s]+(?:green|blue|red|brown|gr[ae]y|black|wood|walnut|oak|cherry|mahogany|stain|finish|roast|colou?r)\\b)";
+/**
+ * "In the dark" names the light only where the phrase ENDS: punctuation, the end, a small word, a
+ * new subject or what someone is doing ("glow in the dark, if…", "in the dark of your closet", "you
+ * need in the dark should…", "in the dark scrolling"). Followed by a noun, "dark" describes that
+ * thing instead — a style line's "yourself in the dark necklace", "in dark colors", "in dark mode" —
+ * and a list of colours could never name every thing a word can describe.
+ */
+const DARK_PHRASE_ENDS =
+  "(?=\\s*(?:[^\\w\\s]|$)|\\s+(?:of|with|and|or|but|so|as|at|on|for|to|by|from|under|near|beside|" +
+  "until|till|when|while|before|after|because|like|again|alone|all|now|then|too|where|without|is|" +
+  "was|are|were|will|would|should|can|could|may|might|must|does|did|has|had|i|you|he|she|we|they|" +
+  "this|that|there|here)\\b|\\s+(?!clothing\\b)\\w+ing\\b)";
 const NAMED_LIGHT: RegExp[] = [
   // A dark hour: night, midnight, the small hours, one to five in the morning, a late evening hour.
-  /\b(?:mid)?nights?(?:[- ]?time)?\b(?![-\s]+(?:stand|table|cream|gown|shirt|owl|guard|mode|serum|mask)s?\b)/gi,
+  // Never a colour ("midnight blue").
+  /\b(?:mid)?nights?(?:[- ]?time)?\b(?![-\s]+(?:stand|table|cream|gown|shirt|owl|guard|mode|serum|mask|blue|black)s?\b)/gi,
   /\b(?:small|wee) hours\b/gi,
   /\b(?:[1-5]|12|one|two|three|four|five|twelve)(?:[:.]\d\d|[- ](?:thirty|fifteen|forty(?:[- ]five)?))?(?: o'clock)? in the morning\b/gi,
   /\b(?:[1-5]|12|one|two|three|four|five|twelve)(?::\d\d)?\s?a\.?\s?m\.?(?!\w)/gi,
   /\b(?:[7-9]|1[01]|seven|eight|nine|ten|eleven)(?::\d\d)?\s?p\.?\s?m\.?(?!\w)/gi,
   // The low light at either end of the day.
   /\bevenings?\b(?![-\s]+(?:out|up)\b)/gi,
-  /\b(?:dusk|dawn|pre-?dawn|daybreak|nightfall|twilight|sunset|sundown|sunrise|first light|last light)\b/gi,
-  // The dark itself, said of a place or a time — never of a colour or a wood ("in dark walnut").
-  new RegExp(`\\b(?:after|in|into) (?:the )?dark(?:ness)?\\b${NOT_A_COLOUR}`, "gi"),
+  // Never a paint colour or a contract's end ("sunset orange", "a sunset clause").
+  /\b(?:dusk|dawn|pre-?dawn|daybreak|nightfall|twilight|sunset|sundown|sunrise|first light|last light)\b(?![-\s]+(?:orange|yellow|red|pink|gold|clauses?|provisions?)\b)/gi,
+  // The dark itself, said of a place or a time — never of a colour or a wood ("in dark walnut"), nor
+  // of a thing ("in the dark necklace", `DARK_PHRASE_ENDS`).
+  /\b(?:in|into) (?:the )?darkness\b/gi,
+  new RegExp(`\\bafter dark\\b${NOT_A_COLOUR}`, "gi"),
+  new RegExp(`\\b(?:in|into) (?:the )?dark\\b${DARK_PHRASE_ENDS}`, "gi"),
   new RegExp(
     "\\b(?:house|home|room|bedroom|kitchen|street|sky|outside|world|everything|it)(?:'s|\\s+(?:is|was|" +
       "has gone|had gone|goes|went|gets|got|grows|grew|turns|turned|is getting|was getting))\\s+" +
@@ -445,7 +462,7 @@ const NAMED_LIGHT: RegExp[] = [
   ),
   /\bdark (?:room|house|home|bedroom|kitchen|hall|hallway|study|garage|shed|barn|street|road|yard|sky|window|windows|cabin|tent)s?\b/gi,
   /\bpitch[- ](?:dark|black)\b/gi,
-  /\bdim(?:ly)?(?:[- ]lit)?\b(?! sum\b)/gi,
+  /\bdim(?:ly)?(?:[- ]lit)?\b(?![-\s]+(?:sum|view|wit(?:ted)?)\b)/gi,
   /\blow light\b/gi,
   /\b(?:power (?:outage|cut|failure)|blackout)s?\b/gi,
   // A light source: a lamp, a candle, a fire, the moon, a screen in the dark.
@@ -454,7 +471,9 @@ const NAMED_LIGHT: RegExp[] = [
   /\blanterns?\b/gi,
   /\b(?:flash|torch|moon|star|street|night)[- ]?lights?\b/gi,
   /\bmoonlit\b/gi,
-  /(?<![\w-])(?:camp|bon|wild)?fires?(?:light|lit|place|places|side|pits?)?\b(?![-\s]+(?:extinguishers?|alarms?|trucks?|engines?|stations?|departments?|fighters?|safety|doors?|codes?|hazards?|escapes?|exits?|drills?|insurance|marshals?|chiefs?|hydrants?|blankets?|risks?|starters?|resistant|rated|proof|up|away)\b)/gi,
+  // Not the trade or the gear around a fire ("the fire service", "fire protection", a fire hose), nor
+  // the verb ("fire up", "fire off an email").
+  /(?<![\w-])(?:camp|bon|wild)?fires?(?:light|lit|place|places|side|pits?)?\b(?![-\s]+(?:extinguishers?|alarms?|trucks?|engines?|stations?|departments?|services?|protection|prevention|fighters?|safety|doors?|codes?|hazards?|escapes?|exits?|drills?|insurance|marshals?|chiefs?|hydrants?|hoses?|blankets?|risks?|starters?|sales?|ants?|resistant|rated|proof|up|away|off)\b)/gi,
   /\b(?:hearth|embers)\b/gi,
   /\bflames?\b(?![-\s]+(?:retardant|resistant|proof)\b)/gi,
   /\bglow of (?:a|an|the|her|his|their|your|my) (?:phone|screen|laptop|tablet|tv|television|monitor)\b/gi,

@@ -560,6 +560,35 @@ describe("namedLight / namedLightQuestion", () => {
     expect(namedLight(undefined, undefined)).toEqual([]);
   });
 
+  it("'in the dark' names the light only where the phrase ends; the trade around a fire names none", async () => {
+    const { namedLight } = await import("./overlayTextScan");
+    // The practice scripts: a kit for a power cut, where "in the dark" is the light…
+    expect(namedLight("The first thing you need in the dark should never be at the bottom of the bag.")).toEqual(["in the dark"]);
+    expect(namedLight("clicks on, and runs itself dead in the dark of your closet for a week.")).toEqual(["in the dark"]);
+    expect(namedLight("Hands that glow a little in the dark, if you can find one like that.")).toEqual(["in the dark"]);
+    expect(namedLight("a person sitting in the dark scrolling a phone")).toEqual(["in the dark"]);
+    // …job 405 scene 7, where the dark room is named by itself…
+    expect(
+      namedLight(undefined, "a small tabby cat standing on a sleeping person's chest in the dark bedroom, head lowered close to their face")
+    ).toEqual(["dark bedroom"]);
+    // …and a style line, where "dark" describes the necklace, not the room.
+    expect(
+      namedLight("Take a photograph of yourself in the dark necklace, then take the same photograph with nothing on your neck at all, same light, same top, one minute apart.")
+    ).toEqual([]);
+    expect(namedLight("dressed in dark colors", "the app in dark mode, a man in dark clothing")).toEqual([]);
+    expect(namedLight("customers kept in the dark about the fees")).toEqual([]);
+    // A smoke-alarm script's "fire service" and "fire protection" are the trade, not a flame.
+    expect(namedLight("What there is, is a position the fire service has stated out loud for years.")).toEqual([]);
+    expect(namedLight("A closed hollow interior door is a serious piece of fire protection.")).toEqual([]);
+    expect(namedLight("a fire sale on old stock, a fire hose, fire off an email")).toEqual([]);
+    // A colour, a contract's end and an idiom.
+    expect(namedLight("a mug in midnight blue", "a wall in sunset orange paint, a sunset clause, a dim view of it")).toEqual([]);
+    // The light itself still counts (a charring script's fire, job 400 scene 18's sunset).
+    expect(
+      namedLight("the fire is doing most of the selling", "an older couple walking slowly along a quiet path at sunset")
+    ).toEqual(["fire", "sunset"]);
+  });
+
   it("tells the check the named light is asked for, and keeps judging the finish and an unnamed glow", async () => {
     const { namedLightQuestion, STAGED_RULE } = await import("./overlayTextScan");
     const q = namedLightQuestion(["two in the morning", "lamp"]);
