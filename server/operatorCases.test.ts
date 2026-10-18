@@ -5845,3 +5845,84 @@ describe("the repair keeps job 410's man beside the woman passenger, and adds no
     expect(merged.added).toEqual([]);
   });
 });
+
+describe("someone else shows no face: no smile in the words, and the check asks (job 410 scene 8)", () => {
+  // Job 410 scene 8, under "She doesn't. What she knows is which questions flight attendants like
+  // hearing": the shot list wrote "smiling politely up at a flight attendant" into a picture of
+  // another passenger. A smile is drawn on a face, so she came back in profile — eye, glasses, nose
+  // and a smiling mouth — beside a clause saying no face is ever shown, and no check looked.
+  const LOOK =
+    "A slender woman in her late thirties with fair skin and dark hair pinned back, wearing a white blouse, navy blazer with gold pin, and striped scarf";
+  const scene8 = () =>
+    pic(
+      8,
+      "She doesn't. What she knows is which questions flight attendants like hearing, and when to ask them.",
+      "an older woman seen from the side smiling politely up at a flight attendant standing in the aisle",
+      {
+        visualPrompt:
+          "An older woman sitting in her seat seen from the side, looking up and smiling politely at a flight attendant standing in the aisle.",
+        humanPresent: true,
+        otherPerson: "an older woman passenger and a flight attendant",
+        stillImage: true,
+      }
+    );
+
+  it("410-8: the words say it with the body, the prompt asks for no smile, and the still check asks about a face", async () => {
+    const { othersFaceAsked } = await import("./longformVideo");
+    const s = [scene8()];
+    markHostBroll(s, { hostLook: LOOK, hostName: "Helena Hart" }, "https://x/host.png");
+    expect(s[0].otherPerson).toBeTruthy();
+    expect(s[0].showSubject).toBe("an older woman seen from the side nodding politely up at a flight attendant standing in the aisle");
+    expect(s[0].visualPrompt).toBe(
+      "An older woman sitting in her seat seen from the side, looking up and nodding politely at a flight attendant standing in the aisle."
+    );
+    const prompt = buildStillPrompt(s[0]);
+    expect(prompt).not.toMatch(/smil/i);
+    expect(prompt).toMatch(/faces turned away or out of frame so no face is ever shown/);
+    expect(othersFaceAsked(s[0], false, false)).toBe(true);
+  });
+
+  it("410-8 as stored before the rule: a Regenerate's prompt and check words drop the smile too", async () => {
+    const { expressionAsBody } = await import("./hostLook");
+    // The stored scene was marked before this rule, so its words still say "smiling".
+    const stored = scene8();
+    expect(buildStillPrompt(stored)).not.toMatch(/smil/i);
+    expect(expressionAsBody(stored.showSubject!)).toContain("nodding politely up at a flight attendant");
+  });
+
+  it("402-29, 410-31, 405-10: a smile is a nod, a frown at the cat is leaning toward it", async () => {
+    const { expressionAsBody } = await import("./hostLook");
+    expect(expressionAsBody("a flight attendant smiling as she hands a cookie packet to an older passenger, seen from the side")).toBe(
+      "a flight attendant nodding as she hands a cookie packet to an older passenger, seen from the side"
+    );
+    expect(expressionAsBody("a flight attendant smiling and handing a cookie to an older passenger at the galley")).toBe(
+      "a flight attendant nodding and handing a cookie to an older passenger at the galley"
+    );
+    expect(
+      expressionAsBody(
+        "A person half sitting up in bed at night viewed from the side, frowning at a grey and brown tabby cat sitting on the pale blanket beside them."
+      )
+    ).toBe(
+      "A person half sitting up in bed at night viewed from the side, leaning toward a grey and brown tabby cat sitting on the pale blanket beside them."
+    );
+  });
+
+  it("clean: the host tearing cloth, the man planting a tree from behind and the cat at its owner's face keep their words", () => {
+    const tearing = pic(55, "Tear it into strips two fingers wide.", "hands tearing cloth into strips two fingers wide on the work table", {
+      humanPresent: true,
+    }); // job 144 scene 55
+    const planting = pic(18, "He plants it anyway.", "an older man planting a young tree in a backyard on a sunny morning, seen from behind", {
+      humanPresent: true,
+      otherPerson: "an older man",
+    }); // job 409 scene 18
+    const cat = pic(9, "Then it comes up to your face.", "cat lowering face close to owner's face in bed", {
+      humanPresent: true,
+      otherPerson: "the cat owner",
+    }); // job 412 scene 9
+    const words = [tearing, planting, cat].map(s => [s.showSubject, s.visualPrompt]);
+    markHostBroll([tearing, planting, cat], { hostLook: "a man in his sixties with a grey beard" }, "https://x/host.png");
+    expect([tearing, planting, cat].map(s => [s.showSubject, s.visualPrompt])).toEqual(words);
+    expect(buildStillPrompt(tearing)).toContain("hands tearing cloth into strips two fingers wide on the work table");
+    expect(planting.othersTurnedAway).toBeUndefined();
+  });
+});

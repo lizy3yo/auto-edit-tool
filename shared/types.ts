@@ -668,6 +668,14 @@ export interface StoryboardScene {
    */
   hostTurnedAway?: true;
   /**
+   * A drawing of this picture of SOMEONE ELSE (`otherPerson`) showed a face — the still check's
+   * `face` (job 410 scene 8: an older passenger in profile, eye, glasses and a smile) — so every later
+   * drawing of it, the redraw and a Regenerate, is framed from behind or the side and a little behind
+   * (`OTHERS_TURNED_AWAY_CLAUSE` in server/longformVideo.ts). Kept only while the picture is someone
+   * else's (`markHostBroll`).
+   */
+  othersTurnedAway?: true;
+  /**
    * Where the device sits in a SCREEN picture (an app, a listing): each screen of a film gets the
    * next of several settings (`assignScreenSetups` in server/pictureVariety.ts), so no two look alike.
    */

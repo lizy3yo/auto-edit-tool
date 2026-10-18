@@ -10,6 +10,7 @@
  * Pure — unit-tested.
  */
 import type { StoryboardScene } from "@shared/types";
+import { FACE_SHOWN } from "@shared/pictureFlaws";
 import { showsScreen } from "./shotList";
 
 /** The kinds, most failure-prone first: a picture is the FIRST one that fits. */
@@ -48,6 +49,8 @@ export function checkFlags(v: {
   unchecked?: boolean;
   /** A person or a hand behind the big QR card (`person`). */
   person?: boolean;
+  /** A face on a picture of someone else, whose face is never shown (`face`, job 410 scene 8). */
+  face?: boolean;
   overlay?: boolean;
   writing?: boolean;
   missing?: boolean;
@@ -63,6 +66,8 @@ export function checkFlags(v: {
     v.broken && "broken",
     v.unchecked && "unchecked",
     v.person && "person",
+    // The same words as the host's face (`FACE_SHOWN`), so a shipped one reads "a drawn face".
+    v.face && FACE_SHOWN,
     v.overlay && "stamped text",
     v.writing && "writing",
     v.missing && "missing",

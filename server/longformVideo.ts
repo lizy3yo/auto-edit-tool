@@ -493,6 +493,7 @@ import {
   onTheBody,
   namesSomeone,
   showsSomeoneElse,
+  expressionAsBody,
 } from "./hostLook";
 import {
   assemblePerSceneFilm,
@@ -6236,10 +6237,13 @@ export function personClauseFor(scene: StoryboardScene, visual: string): string 
   // The host's own face shown: a step of a routine on it, or a look on it (`hostFaceLook`).
   const faceShown = !!scene.brollHostLook && !!scene.hostFaceShown && !scene.otherPerson;
   const others = peopleAskedFor(scene);
+  // A drawing of someone else that showed a face is framed from behind from then on
+  // (`othersTurnedAway`, job 410 scene 8): on the redraw, and on a Regenerate.
+  const turnedFromUs = scene.othersTurnedAway ? ` ${OTHERS_TURNED_AWAY_CLAUSE}` : "";
   const who = scene.otherPerson
     ? scene.hostAmongOthers
-      ? hostWithOthersClause(scene.hostAmongOthers, others.who, others.count, scene.otherPersonLooks)
-      : otherPersonClause(others.who, others.count, scene.otherPersonLooks)
+      ? `${hostWithOthersClause(scene.hostAmongOthers, others.who, others.count, scene.otherPersonLooks)}${turnedFromUs}`
+      : `${otherPersonClause(others.who, others.count, scene.otherPersonLooks)}${turnedFromUs}`
     : scene.brollHostLook
       ? scene.hostFaceShown
         ? hostFaceLook(scene)
@@ -6577,6 +6581,50 @@ export function turnHostAway(prompt: string): string {
   if (prompt.includes(HOST_TURNED_AWAY_CLAUSE) || !prompt.includes(HOST_FRAMING_CLAUSE)) return prompt;
   return prompt.replace(HOST_FRAMING_CLAUSE, HOST_TURNED_AWAY_CLAUSE);
 }
+
+/**
+ * `HOST_TURNED_AWAY_CLAUSE` for SOMEONE ELSE (`scene.othersTurnedAway`, 2026-10-18, job 410 scene
+ * 8): "seen from behind or from the side … the face turned away" came back as an older passenger in
+ * profile, eye, glasses, nose and a smile all drawn. "From the side" leans behind here too, and what
+ * they feel is carried by the body, never a face.
+ */
+export const OTHERS_TURNED_AWAY_CLAUSE =
+  "Everyone in this shot is turned away from the camera — seen from behind, or from the side and a " +
+  "little behind, each head turned the same way as the shoulders — so no face is shown: no eyes, nose " +
+  "or mouth toward the camera, only the back or the side of each head. However the description has " +
+  "them sit, stand, talk or hand something over, the camera is behind or beside them, never in front, " +
+  "and what they feel shows in the body — a nod, a lean, the set of the shoulders — never on a face.";
+
+/**
+ * A picture of someone else's prompt framed from behind, for the redraw after the still check saw a
+ * face (`face`): the clause added once, so whatever an earlier redraw added stays — the same prompt
+ * `buildStillPrompt` writes for a scene marked `othersTurnedAway`. Pure.
+ */
+export function turnOthersAway(prompt: string): string {
+  return prompt.includes(OTHERS_TURNED_AWAY_CLAUSE) ? prompt : `${prompt} ${OTHERS_TURNED_AWAY_CLAUSE}`;
+}
+
+/**
+ * A picture of someone whose face is never drawn: someone else (`otherPerson`), the host at work from
+ * behind, the side or cut at the lips, and anonymous hands — every picture of a person but the host's
+ * own face (`hostFaceShown`). Its words are put through `expressionAsBody` right before the prompt,
+ * so a description written before that rule, or typed into a redo, asks for no smile either. Pure.
+ */
+export function faceNeverShown(scene: StoryboardScene): boolean {
+  if (!scene.humanPresent) return false;
+  return !!scene.otherPerson || !(scene.brollHostLook && scene.hostFaceShown);
+}
+
+/**
+ * Whether the still check asks a picture if a face shows (`OTHER_FACE_QUESTION`): a picture of
+ * someone else while it still has them in it — never once it is drawn with nobody in it, never a
+ * split's square panel or the picture behind the QR card (no one in either). The host's pictures are
+ * asked beside the host photo instead (`scanSameHost`). Pure.
+ */
+export function othersFaceAsked(scene: StoryboardScene, personFree: boolean, square: boolean): boolean {
+  return !!scene.otherPerson && !!scene.humanPresent && !personFree && !square && !qrBackdrop(scene);
+}
+
 /**
  * One body, two arms. Over-the-shoulder shots of hands at work are where the picture model adds
  * an arm: Norbert's 3-min test (job 232, 2:19) had a hand on the drill, a hand on the strike
@@ -7122,7 +7170,10 @@ export function buildStillPrompt(
   // A host picture framed from the lips down (`hostLipsCut`) keeps none of its own words that turn
   // the host away (`facingTheCamera`): a film drawn before the rule still says "face turned away".
   const lipsCut = !aggressive && hostLipsCut(scene);
-  const facing = (t: string) => (lipsCut ? facingTheCamera(t) : t);
+  // A person whose face is never drawn is never described with one (`faceNeverShown`): job 410
+  // scene 8's "smiling politely up at a flight attendant" drew the face beside the clause hiding it.
+  const unfaced = (t: string) => (!aggressive && faceNeverShown(scene) ? expressionAsBody(t) : t);
+  const facing = (t: string) => (lipsCut ? facingTheCamera(unfaced(t)) : unfaced(t));
   // The framing clause repeats the subject's own words, so a cut view is taken out of them too (job
   // 403 scene 16: "a close shot where cutaway close-up of the white porcelain S-shaped channel").
   const shown = scene.showSubject ? facing(withoutCutaway(scene.showSubject)) : undefined;
@@ -10235,7 +10286,9 @@ export function buildClipChain(
   // The same person rule as the still (`buildStillPrompt`): someone else's picture never says
   // "no person is visible" beside the clause that draws them.
   const lipsCut = !scene.hostPresent && hostLipsCut(scene);
-  const facing = (t: string) => (lipsCut ? facingTheCamera(t) : t);
+  // …and no face words for a person whose face is never drawn (`faceNeverShown`).
+  const unfaced = (t: string) => (!scene.hostPresent && faceNeverShown(scene) ? expressionAsBody(t) : t);
+  const facing = (t: string) => (lipsCut ? facingTheCamera(unfaced(t)) : unfaced(t));
   const clipNoFigures =
     !scene.hostPresent && scene.humanPresent && scene.otherPerson
       ? otherPeopleSuffix(peopleInShot(scene))
@@ -10656,6 +10709,10 @@ async function drawValidatedStill(
   // ships only when nothing better came (`personFallback`).
   let personRedraws = 0;
   let personFallback: Drawn | undefined;
+  // A face on someone else (`face`): one redraw framed from behind (`turnOthersAway`); the frame
+  // ships only when nothing better came (`faceFallback`).
+  let faceRedraws = 0;
+  let faceFallback: Drawn | undefined;
   // THE HOST IS THE HOST: a picture of the host that shows someone else is drawn again
   // (`HOST_IDENTITY_REDRAWS`), then drawn with nobody in it — a stranger never ships.
   let hostMisses = 0;
@@ -10798,7 +10855,12 @@ async function drawValidatedStill(
         buffer,
         // Held to what the picture maker was asked for: job 403 scene 16's "cutaway close-up of the
         // white porcelain S-shaped channel" asked QUESTION 4 for the very cut QUESTION 2 calls broken.
-        scene.showSubject ? withoutCutaway(scene.showSubject) : undefined,
+        // Nor is a face its prompt never asked for (`expressionAsBody`) held against it.
+        scene.showSubject
+          ? faceNeverShown(scene)
+            ? expressionAsBody(withoutCutaway(scene.showSubject))
+            : withoutCutaway(scene.showSubject)
+          : undefined,
         scene.cta ? undefined : scene.scriptText ?? scene.narration,
         scene.pictureText,
         scene.namedLook,
@@ -10816,7 +10878,10 @@ async function drawValidatedStill(
         drawnFromOutside(scene),
         // The picture behind the big QR card must show nobody (job 402 scene 33: a hand at the
         // card's edge "held" the code for 19.6 s, and the check never asked).
-        qrBackdrop(scene) && !square
+        qrBackdrop(scene) && !square,
+        // Someone else's face is never shown (job 410 scene 8: an older passenger in profile, her eye,
+        // glasses and a smile drawn, and nothing asked) — the same call, one more question.
+        othersFaceAsked(scene, personFree, square)
       );
       if (defects.missing) missed.add(buffer);
       // A THING SEEN CUT OPEN (`cutOpenFault`) is drawn from outside from then on, every redraw built
@@ -10923,6 +10988,26 @@ async function drawValidatedStill(
         console.warn(
           `[Longform] scene ${scene.index} still shows a person behind the QR card (${defects.what}) → ` +
             "drawing it again with nobody in it"
+        );
+        continue;
+      }
+      // NO FACE ON SOMEONE ELSE (2026-10-18, job 410 scene 8): "seen from the side … the face turned
+      // away" came back as an older passenger in profile — eye, glasses, nose and a smile — and only
+      // the host's pictures were ever checked for a face. One redraw framed from behind
+      // (`turnOthersAway`; `othersTurnedAway` keeps it for a Regenerate) — that fault's last chance, so
+      // it never loses its turn to the attempt budget. A redraw that still shows a face is kept, saying
+      // so ("face shown" on its record and the card). Not on a content-policy rung: its softened prompt
+      // draws no one, and a clause about the people in it would put them back.
+      if (defects.face && faceRedraws < 1) {
+        faceRedraws++;
+        faceFallback ??= drawn;
+        scene.othersTurnedAway = true;
+        if (tier === 0) prompt = turnOthersAway(prompt);
+        lastError = `Still image shows the face of someone other than the host (${defects.what})`;
+        if (attempt === attempts) attempts++;
+        console.warn(
+          `[Longform] scene ${scene.index} still shows ${scene.otherPerson}'s face (${defects.what}) → ` +
+            "drawing them again from behind"
         );
         continue;
       }
@@ -11299,6 +11384,15 @@ async function drawValidatedStill(
         `attempts → shipping it: ${scene.visualPrompt.slice(0, 80)}`
     );
     return shipped(personFallback);
+  }
+  // A face on someone else is a sound photo breaking one rule — kept only over broken geometry, and
+  // it ships saying so ("face shown").
+  if (faceFallback) {
+    console.warn(
+      `[Longform] scene ${scene.index} still showed a face on someone else after ${attempts} ` +
+        `attempts → shipping it: ${scene.visualPrompt.slice(0, 80)}`
+    );
+    return shipped(faceFallback);
   }
   if (brokenFallback) {
     console.warn(

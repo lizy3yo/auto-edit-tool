@@ -11415,6 +11415,111 @@ describe("a host picture that drew the face is drawn again turned away (round 11
   });
 });
 
+describe("someone else's face is asked about in the one check, and drawn again from behind (job 410 scene 8)", () => {
+  const pngOf = (bg: string) =>
+    sharp({ create: { width: 8, height: 8, channels: 3, background: bg } }).png().toBuffer();
+  const drawsOf = (...frames: Buffer[]) => {
+    const fn = vi.fn();
+    for (const f of frames) fn.mockResolvedValueOnce({ success: true, fileData: f });
+    return fn;
+  };
+  const clean = { overlay: false, broken: false, what: "" };
+  const checkSays = (...vs: Record<string, unknown>[]) => {
+    mockScanStillDefects.mockReset();
+    for (const v of vs) mockScanStillDefects.mockResolvedValueOnce({ ...clean, ...v } as any);
+    mockScanStillDefects.mockResolvedValue(clean as any);
+  };
+  afterEach(() => {
+    mockScanStillDefects.mockReset();
+    mockScanStillDefects.mockResolvedValue(clean as any);
+  });
+  // Job 410 scene 8 (25.11-31.47): the older passenger drawn in profile, eye, glasses and a smile.
+  const passenger = () =>
+    ({
+      index: 8,
+      scriptText: "She doesn't. What she knows is which questions flight attendants like hearing, and when to ask them.",
+      showSubject: "an older woman seen from the side smiling politely up at a flight attendant standing in the aisle",
+      visualPrompt:
+        "An older woman sitting in her seat seen from the side, looking up and smiling politely at a flight attendant standing in the aisle.",
+      humanPresent: true,
+      otherPerson: "an older woman passenger and a flight attendant",
+      otherPeople: 2,
+      stillImage: true,
+    }) as any;
+
+  it("a face is refused, the redraw is framed from behind, the mark stays, and no second call is made", async () => {
+    const { OTHERS_TURNED_AWAY_CLAUSE } = await import("./longformVideo");
+    const [a, b] = await Promise.all([pngOf("#a81"), pngOf("#a82")]);
+    checkSays({ face: true, what: "woman in profile, smiling" });
+    mockScanSameHost.mockClear();
+    const scene = passenger();
+    const genImage = drawsOf(a, b);
+    const out = await generateValidatedStill(scene, 4, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(2);
+    const [p1, p2] = genImage.mock.calls.map(c => c[0].prompt as string);
+    expect(p1).not.toContain(OTHERS_TURNED_AWAY_CLAUSE);
+    expect(p2.split(OTHERS_TURNED_AWAY_CLAUSE)).toHaveLength(2);
+    expect(scene.othersTurnedAway).toBe(true);
+    expect(scene.pictureChecks.map((c: any) => c.flags)).toEqual([["face shown"], []]);
+    expect(out.buffer.equals(b)).toBe(true);
+    // The question rode the one check of each draw; the host check never ran on someone else.
+    expect(mockScanStillDefects).toHaveBeenCalledTimes(2);
+    expect((mockScanStillDefects.mock.calls[0] as any[])[11]).toBe(true);
+    expect(mockScanSameHost).not.toHaveBeenCalled();
+    // Neither prompt asks for the smile: the words say it with the body.
+    expect(p1).not.toMatch(/smil/i);
+    expect(p1).toContain("nodding politely");
+  });
+
+  it("a redraw that still shows a face is kept after one redraw, and ships saying so", async () => {
+    const [a, b] = await Promise.all([pngOf("#b81"), pngOf("#b82")]);
+    checkSays({ face: true, what: "three-quarter face" }, { face: true, what: "profile" });
+    const genImage = drawsOf(a, b);
+    const out = await generateValidatedStill(passenger(), 4, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(2);
+    expect(out.flaws).toEqual(["face shown"]);
+    expect(out.buffer.equals(b)).toBe(true);
+  });
+
+  it("the face redraw keeps its turn on the last draw, and the face frame ships only over broken geometry", async () => {
+    const [a, b] = await Promise.all([pngOf("#c81"), pngOf("#c82")]);
+    checkSays({ face: true }, { broken: true, what: "a third arm" });
+    const genImage = drawsOf(a, b);
+    const out = await generateValidatedStill(passenger(), 1, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(2);
+    expect(out.buffer.equals(a)).toBe(true);
+    expect(out.flaws).toEqual(["face shown"]);
+  });
+
+  it("clean: the host's own pictures, a split panel and the picture behind the QR card are never asked", async () => {
+    const [a] = await Promise.all([pngOf("#d81")]);
+    checkSays();
+    const host = {
+      ...passenger(),
+      otherPerson: undefined,
+      otherPeople: undefined,
+      showSubject: "the host at a market table handing a jar of jam across",
+      visualPrompt: "The host at a market table handing a jar of jam across.",
+      brollHostLook: "a woman in her sixties with short grey hair",
+      brollHostRef: "https://r2/host.jpg",
+    };
+    await generateValidatedStill(host, 4, undefined, drawsOf(a));
+    expect((mockScanStillDefects.mock.calls[0] as any[])[11]).toBe(false);
+    mockScanStillDefects.mockClear();
+    await generateValidatedStill(passenger(), 4, undefined, drawsOf(a), undefined, undefined, true);
+    expect((mockScanStillDefects.mock.calls[0] as any[])[11]).toBe(false);
+  });
+
+  it("a Regenerate of a marked picture is framed from behind from the start, the clause written once", async () => {
+    const { OTHERS_TURNED_AWAY_CLAUSE, turnOthersAway } = await import("./longformVideo");
+    const marked = { ...passenger(), othersTurnedAway: true };
+    const prompt = buildStillPrompt(marked);
+    expect(prompt.split(OTHERS_TURNED_AWAY_CLAUSE)).toHaveLength(2);
+    expect(turnOthersAway(prompt)).toBe(prompt);
+    expect(buildStillPrompt(passenger())).not.toContain(OTHERS_TURNED_AWAY_CLAUSE);
+  });
+});
+
 describe("a look on the host's own face shows her face, and only hers (the operator's decision on the audit's cause 9)", () => {
   const pngOf = (bg: string) =>
     sharp({ create: { width: 8, height: 8, channels: 3, background: bg } }).png().toBuffer();

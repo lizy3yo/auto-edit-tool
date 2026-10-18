@@ -745,6 +745,79 @@ describe("nobody behind the big QR card — the person verdict (job 402 scene 33
   });
 });
 
+describe("no face on someone else — the face verdict (job 410 scene 8)", () => {
+  // An older passenger "seen from the side smiling politely up at a flight attendant" was drawn in
+  // profile — eye, glasses, nose and a smiling mouth — beside a prompt saying no face is ever shown.
+  // Only the host's pictures were ever asked about a face (`scanSameHost`), so her check passed clean.
+  // expect, line, allowedText, exactLook, required, softPrint, requiredLook, forbids, fromOutside, noPerson
+  const args = [
+    "an older woman seen from the side nodding politely up at a flight attendant standing in the aisle",
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    false,
+    undefined,
+    undefined,
+    undefined,
+    false,
+  ] as const;
+
+  it("asks it only of a picture of someone else, in the same call, and reads it back", async () => {
+    const { OTHER_FACE_QUESTION, verdictShape } = await import("./overlayTextScan");
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue({
+      text: '{"overlay":false,"broken":false,"writing":false,"missing":false,"face":true,"what":"woman in profile, smiling"}',
+    } as any);
+    const v = await scanStillDefects(await imageOf(1280, 720), ...args, true);
+    expect(v.face).toBe(true);
+    expect(v.what).toBe("woman in profile, smiling");
+    expect(mockInvoke).toHaveBeenCalledTimes(1);
+    const call = mockInvoke.mock.calls[0][0];
+    expect(call.systemSuffix).toContain(OTHER_FACE_QUESTION);
+    expect(call.systemSuffix).toContain('"face":true|false');
+    expect(call.systemPrompt).not.toContain("QUESTION 10");
+    expect(call.userMessage).toMatch(/Is anyone's face shown\?/);
+    expect(verdictShape(undefined, undefined, false, false, false, true)).toContain('"face"');
+    expect(verdictShape()).not.toContain('"face"');
+  });
+
+  it("is never asked of any other picture, and a stray answer is dropped", async () => {
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue({ text: '{"overlay":false,"broken":false,"writing":false,"face":true}' } as any);
+    const v = await scanStillDefects(await imageOf(1280, 720), ...args);
+    expect("face" in v).toBe(false);
+    expect(mockInvoke.mock.calls[0][0].systemSuffix).not.toContain("QUESTION 10");
+    mockInvoke.mockClear();
+    await scanStillDefects(await imageOf(1280, 720), ...args, false);
+    expect(mockInvoke.mock.calls[0][0].systemSuffix).not.toContain("QUESTION 10");
+  });
+
+  it("a profile with the eye, nose and mouth is a face; a head turned away with only the cheek is not", async () => {
+    const { OTHER_FACE_QUESTION, SAME_HOST_SYSTEM } = await import("./overlayTextScan");
+    // Job 410 scene 8: a profile clear enough to show the eye, the nose and the smile.
+    expect(OTHER_FACE_QUESTION).toMatch(/a profile clear enough to make out an eye, the nose and the mouth/);
+    expect(OTHER_FACE_QUESTION).toMatch(/what the face is\s+doing \(a smile, a frown\)/);
+    // Job 405 scene 10: the sleeper turned to the cat, hair and a cheek — no face.
+    expect(OTHER_FACE_QUESTION).toMatch(/only the\s+hair, an ear, the cheek or the edge of the jaw shows/);
+    expect(OTHER_FACE_QUESTION).toMatch(/the back of a head/);
+    expect(OTHER_FACE_QUESTION).toMatch(/When\s+unsure, answer false/);
+    // Stricter than the host's, whose prompt asks for "from the side": a profile passes there.
+    expect(SAME_HOST_SYSTEM).toMatch(/seen edge-on in profile with only one eye showing/);
+    // General: the wording names no channel's things.
+    expect(OTHER_FACE_QUESTION).not.toMatch(/passenger|attendant|cabin|flight|seat/i);
+  });
+
+  it("parses face only when it is true", () => {
+    expect(parseStillDefectVerdict('{"face":true,"what":"three-quarter face, left"}')).toMatchObject({
+      face: true,
+      what: "three-quarter face, left",
+    });
+    expect("face" in parseStillDefectVerdict('{"face":false}')).toBe(false);
+    expect(parseStillDefectVerdict('{"face":"yes"}').face).toBeUndefined();
+  });
+});
+
 describe("the same-host question — a look on the host's face is judged on the face (the audit's cause 9, 2026-10-18)", () => {
   it("asks an ordinary host picture whether the face shows, and a face-shown one about the face", async () => {
     const { sameHostQuestion } = await import("./overlayTextScan");
