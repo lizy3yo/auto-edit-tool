@@ -7234,16 +7234,26 @@ export const DESCRIBED_SCREEN_CLAUSE =
  * position; whether those show only the OTHER key things in it; and, when none is a picture of its
  * own thing, the look it is drawn by instead (`keyThingLookClause`); which of them it must not
  * repeat — shown right before it about something else, or the one it continues (`memoryRightBefore`,
- * `memoryContinues`); and the look kept for a redraw from words (`memoryWordsLook`). Pure.
+ * `memoryContinues`); the look kept for a redraw from words (`memoryWordsLook`); and the other key
+ * things none of the references shows (`memoryNotShown`). Pure.
  */
 export function memoryFields(
-  memory: { urls: string[]; own: boolean; look?: string; wordsLook?: string; before?: number; continues?: boolean },
+  memory: {
+    urls: string[];
+    own: boolean;
+    look?: string;
+    wordsLook?: string;
+    before?: number;
+    continues?: boolean;
+    notShown?: string[];
+  },
   view: string | undefined
 ): Pick<
   StoryboardScene,
   | "memoryRefUrls"
   | "memoryView"
   | "memoryOthersOnly"
+  | "memoryNotShown"
   | "keyThingLook"
   | "memoryRightBefore"
   | "memoryContinues"
@@ -7258,6 +7268,7 @@ export function memoryFields(
     memoryRefUrls: has ? memory.urls : undefined,
     memoryView: has ? view : undefined,
     memoryOthersOnly: has && !memory.own ? true : undefined,
+    memoryNotShown: has && memory.notShown?.length ? memory.notShown : undefined,
     keyThingLook: memory.own ? undefined : memory.look,
     memoryRightBefore: before,
     memoryContinues: before != null && memory.continues ? true : undefined,
@@ -7292,6 +7303,7 @@ export function memoryToWords(
   | "memoryRefUrls"
   | "memoryView"
   | "memoryOthersOnly"
+  | "memoryNotShown"
   | "keyThingLook"
   | "memoryRightBefore"
   | "memoryContinues"
@@ -7301,6 +7313,7 @@ export function memoryToWords(
     memoryRefUrls: undefined,
     memoryView: undefined,
     memoryOthersOnly: undefined,
+    memoryNotShown: undefined,
     keyThingLook: scene.memoryWordsLook ?? scene.keyThingLook,
     memoryRightBefore: undefined,
     memoryContinues: undefined,
@@ -7430,8 +7443,8 @@ export function rightBeforeClause(scene: StoryboardScene): string {
   if (!n || p == null || p < 0 || p >= n || !scene.keyThing) return "";
   if (scene.memoryView === SCREEN_ITEM_VIEW || scene.memoryView === SET_ITEM_VIEW) return "";
   const names = scene.memoryOthersOnly
-    ? scene.otherKeyThings ?? []
-    : [scene.partOf ?? scene.keyThing, ...(scene.otherKeyThings ?? [])];
+    ? othersOnlyNames(scene)
+    : [scene.partOf ?? scene.keyThing, ...shownOthers(scene)];
   if (!names.length) return "";
   const which = n === 1 ? "The first reference image" : `Reference image ${p + 1}`;
   // A CONTINUATION (`memoryContinues`): the picture it continues lends the look too, and the camera
@@ -7455,6 +7468,37 @@ export function rightBeforeClause(scene: StoryboardScene): string {
   );
 }
 
+/**
+ * The other key things the references SHOW (`memoryNotShown` left out): job 404 scene 14 was told
+ * its two pictures of the robin on a snowy northern lawn showed "this exact robin and gulf coast
+ * yard", and "draw the SAME … gulf coast yard" made the snowy lawn its yard. Every other key thing
+ * on a picture drawn before the field existed. Pure.
+ */
+function shownOthers(scene: StoryboardScene): string[] {
+  return (scene.otherKeyThings ?? []).filter(t => !scene.memoryNotShown?.includes(t));
+}
+
+/**
+ * References of the other things only (`memoryOthersOnly`): the ones they show — every one, should
+ * the field mark them all (each of those references was picked for one of them, so it never does).
+ */
+function othersOnlyNames(scene: StoryboardScene): string[] {
+  const shown = shownOthers(scene);
+  return shown.length ? shown : scene.otherKeyThings ?? [];
+}
+
+/**
+ * The other key things no reference shows, said apart: drawn as the picture's own words describe
+ * them. It claims nothing about what the references hold — a thing filed under no earlier picture
+ * may still stand in one (the bench under a board) — it only stops calling it "this exact" one.
+ */
+function notShownClause(scene: StoryboardScene): string {
+  const named = scene.memoryOthersOnly ? othersOnlyNames(scene) : shownOthers(scene);
+  const apart = (scene.otherKeyThings ?? []).filter(t => !named.includes(t));
+  if (!apart.length) return "";
+  return ` The ${namesInSentence(apart)} ${apart.length > 1 ? "are" : "is"} drawn as this picture's own words describe ${apart.length > 1 ? "them" : "it"}.`;
+}
+
 function memoryReferenceClause(scene: StoryboardScene): string {
   const n = scene.memoryRefUrls?.length ?? 0;
   // A phone or laptop screen showing a key thing (`SCREEN_ITEM_VIEW`): the thing is only the photo
@@ -7473,8 +7517,10 @@ function memoryReferenceClause(scene: StoryboardScene): string {
       "identical shape, colours, materials and wear."
     );
   if (!n || !scene.keyThing) return "";
-  // Every key thing in the picture is drawn from its own earlier picture (the heater AND the mattress).
-  const all = [scene.keyThing, ...(scene.otherKeyThings ?? [])];
+  // Every key thing in the picture is drawn from its own earlier picture (the heater AND the mattress)
+  // — those the references show; the rest are drawn from the words (`notShownClause`).
+  const all = [scene.keyThing, ...shownOthers(scene)];
+  const apart = notShownClause(scene);
   const thing = all.length > 1 ? `${all.slice(0, -1).join(", ")} and ${all[all.length - 1]}` : all[0];
   const which = n === 1 ? "The first reference image shows" : `The first ${n} reference images show`;
   const host =
@@ -7486,7 +7532,7 @@ function memoryReferenceClause(scene: StoryboardScene): string {
   // "this exact mattress and heater", the picture maker had only a heater to copy for both — and the
   // first mattress picture is the one every later mattress is drawn from.
   if (scene.memoryOthersOnly) {
-    const others = scene.otherKeyThings ?? [];
+    const others = othersOnlyNames(scene);
     if (!others.length) return "";
     const named =
       others.length > 1 ? `${others.slice(0, -1).join(", ")} and ${others[others.length - 1]}` : others[0];
@@ -7497,6 +7543,7 @@ function memoryReferenceClause(scene: StoryboardScene): string {
       ` ${which} this exact ${named}, seen earlier in this video: draw the SAME ${named} — ${same} — ` +
       `from a different camera position, never copying the reference's framing. ` +
       `${n === 1 ? "It does" : "They do"} NOT show the ${scene.keyThing}: draw it from this picture's own words.` +
+      apart +
       host
     );
   }
@@ -7515,6 +7562,7 @@ function memoryReferenceClause(scene: StoryboardScene): string {
       ` ${which} this exact ${thing}. It is NOT what this picture is about: draw the SAME ${thing} — ` +
       `identical shape, colours, materials and wear — small, where the words put it, never close up ` +
       `and never the centre of the picture. What the words name first fills the frame.` +
+      apart +
       host
     );
   // A part that carries printing nobody says (`BLUR_PRINT_VIEW`): the part is the subject, from an
@@ -7555,6 +7603,7 @@ function memoryReferenceClause(scene: StoryboardScene): string {
       `finished: raw pieces or partly built, with only what the words say has been done to it so ` +
       `far. ${all.length > 1 ? "Each is" : "It is"} ONE thing: never a second copy or a spare part ` +
       `of it beside, on or inside the first.` +
+      apart +
       host
     );
   return (
@@ -7566,6 +7615,7 @@ function memoryReferenceClause(scene: StoryboardScene): string {
     `looked before. It is ONE thing: when the words open, fill, empty, tilt or use it, that same ` +
     `one is shown that way — never a second copy or a spare part of it beside, on or inside the ` +
     `first.` +
+    apart +
     host
   );
 }

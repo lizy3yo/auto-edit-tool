@@ -570,6 +570,13 @@ export interface StoryboardScene {
    */
   memoryOthersOnly?: true;
   /**
+   * The OTHER key things in this picture that none of its memory pictures shows (set at render,
+   * `memoryFor`): drawn as this picture's own words describe them, never called "this exact" thing
+   * of the references (`memoryClause`). Job 404 scene 14 was told its two snowy-lawn robin pictures
+   * showed "this exact robin and gulf coast yard" — the lawn was the only yard there to copy.
+   */
+  memoryNotShown?: string[];
+  /**
    * Its key thing's look, cut down for this picture (`keyThingLookFor`) — set at render ONLY when it
    * has no picture of its own thing to follow, so the look is what its first picture is drawn by
    * (Ruth's job 305: the first straight-stitch machine was drawn with no colour or material, and 5

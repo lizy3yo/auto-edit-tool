@@ -3686,4 +3686,35 @@ describe("a memory picture takes only the thing from its references, never their
     });
     expect(memoryClause(stove)).toContain("in the same place unless this picture's own words put it somewhere else");
   });
+
+  it("404-14: the robin's two lawn pictures are not called 'this exact gulf coast yard' — 404-15, drawn from 14's yard, still is", async () => {
+    // Told its references showed "this exact robin and gulf coast yard", 404-14 had only the snowy
+    // northern lawn to copy as its yard. The yard has no earlier picture, so render now says so.
+    const { attachMemory, memoryFor, MEMORY_VIEWS, pictureSettled } = await import("./pictureMemory");
+    const { memoryFields } = await import("./longformVideo");
+    const yard = "a robin standing in a mild gulf coast yard with palm trees";
+    const b = [
+      pic(5, "n", "a robin standing on a green lawn in early spring with patches of melting snow", { keyThing: "robin", pictureUrl: "https://r2/404/5.png" }),
+      pic(12, "n", "a robin standing on frost dusted brown grass in winter", { keyThing: "robin", pictureUrl: "https://r2/404/12.png" }),
+      host(13, "The ones that nest up in Canada and across the far north do head south,", {
+        splitVisual: "A flock of robins in flight above a snow-covered landscape, heading south, bare trees and white ground below.",
+        keyThing: "robin",
+      }),
+      pic(14, "so the robin you see in January could be a traveler from up north", yard, { keyThing: "robin", otherKeyThings: ["gulf coast yard"] }),
+      pic(15, "along the Gulf Coast or down in Florida", `${yard}, a close-up of one detail of it filling the frame`, {
+        keyThing: "robin",
+        otherKeyThings: ["gulf coast yard"],
+      }),
+    ];
+    attachMemory(b, [b[3]]);
+    const s14 = { ...b[3], ...memoryFields(await memoryFor(b[3], 0), MEMORY_VIEWS[3]) } as StoryboardScene;
+    expect(memoryClause(s14)).toMatch(/show this exact robin. Draw the SAME robin — /);
+    expect(memoryClause(s14)).toContain("The gulf coast yard is drawn as this picture's own words describe it.");
+    b[3].pictureUrl = "https://r2/404/14.png";
+    attachMemory(b, [b[4]]);
+    pictureSettled(b[3]);
+    const s15 = { ...b[4], ...memoryFields(await memoryFor(b[4], 0), MEMORY_VIEWS[0]) } as StoryboardScene;
+    expect(memoryClause(s15)).toMatch(/show this exact robin and gulf coast yard./);
+    expect(memoryClause(s15)).not.toContain("drawn as this picture's own words describe");
+  });
 });

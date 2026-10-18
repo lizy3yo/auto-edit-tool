@@ -953,7 +953,8 @@ export function pictureSettled(s: StoryboardScene): void {
  * is the look it is drawn by instead (`keyThingLookFor`). When one is, `wordsLook` is that same look,
  * kept for a redraw from words should the picture copy its memory (`memoryToWords`). `before` is
  * where in `urls` the picture `s` must not repeat is (`recomposeFrom`): the one shown right before
- * it about something else, or — `continues` — the one it continues as the same topic.
+ * it about something else, or — `continues` — the one it continues as the same topic. `notShown` is
+ * the other key things of `s` that none of them shows (`memoryNotShown`).
  */
 export async function memoryFor(
   s: StoryboardScene,
@@ -965,8 +966,10 @@ export async function memoryFor(
   wordsLook?: string;
   before?: number;
   continues?: boolean;
+  notShown?: string[];
 }> {
   const urls: string[] = [];
+  const used: StoryboardScene[] = [];
   const mine = ownSourcesOf.get(s) ?? [];
   const prev = rightBeforeOf.get(s);
   let own = false;
@@ -980,12 +983,17 @@ export async function memoryFor(
       ]);
       if (timer) clearTimeout(timer);
     }
-    if (!src.pictureUrl || src.memoryUnfit || urls.includes(src.pictureUrl)) continue;
+    if (!src.pictureUrl || src.memoryUnfit) continue;
+    used.push(src);
+    if (urls.includes(src.pictureUrl)) continue;
     urls.push(src.pictureUrl);
     if (mine.includes(src)) own = true;
     if (src === prev) before = urls.length - 1;
   }
   const look = lookOf.get(s);
+  // A key thing beside it that no picture among these shows (job 404 scene 14: the robin's two lawn
+  // pictures, and "gulf coast yard" in its own words) is not one the references can lend.
+  const notShown = urls.length ? (s.otherKeyThings ?? []).filter(t => !used.some(x => shows(x, t))) : [];
   return {
     urls,
     own,
@@ -993,6 +1001,7 @@ export async function memoryFor(
     wordsLook: own ? look : undefined,
     before,
     ...(before != null && continuesOf.has(s) ? { continues: true } : {}),
+    ...(notShown.length ? { notShown } : {}),
   };
 }
 

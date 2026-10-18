@@ -5,16 +5,22 @@
  * same place", and came back with snow and frost under the palms. Every memory clause now ends on
  * `MEMORY_SETTING_CLAUSE` — the reference images lend only how the things in them look, never their
  * season, weather, light or time of day, nor their place when this picture's words name another —
- * and "in the same place" gives way to the picture's own words for every memory picture. The cases
- * are the stored rows of jobs 404 and 405; the rule is general, so every memory view is checked.
+ * and "in the same place" gives way to the picture's own words for every memory picture. And a key
+ * thing beside it that no reference shows is no longer called "this exact" one of the references
+ * (`memoryNotShown`): 404-14 was told its two lawn pictures showed "this exact robin and gulf coast
+ * yard". The cases are the stored rows of jobs 404 and 405; the rule is general, so every memory view
+ * is checked.
  */
 import { describe, expect, it } from "vitest";
 import type { StoryboardScene } from "@shared/types";
 import {
+  attachMemory,
   BACKGROUND_VIEW,
   BLUR_PRINT_VIEW,
   keyThingLookClause,
+  memoryFor,
   MEMORY_VIEWS,
+  pictureSettled,
   SCREEN_ITEM_VIEW,
   SET_ITEM_VIEW,
 } from "./pictureMemory";
@@ -24,8 +30,10 @@ import {
   buildStillPrompt,
   MEMORY_SETTING_CLAUSE,
   memoryClause,
+  memoryFields,
   memoryToWords,
   promptFromWords,
+  rightBeforeClause,
 } from "./longformVideo";
 
 const pic = (index: number, show: string, over: Partial<StoryboardScene> = {}) =>
@@ -34,7 +42,8 @@ const pic = (index: number, show: string, over: Partial<StoryboardScene> = {}) =
 const count = (text: string, part: string) => text.split(part).length - 1;
 
 // Job 404 scene 14 as stored: two references, both of the robin on the snowy northern lawn
-// (scenes 5 and 12), the camera from above, and no picture right before it (a split was).
+// (scenes 5 and 12), the camera from above, and no picture right before it (a split was). Neither
+// reference is a picture of the gulf coast yard, which render now records (`memoryNotShown`).
 const robin14 = () =>
   pic(14, "a robin standing in a mild gulf coast yard with palm trees", {
     visualPrompt:
@@ -43,7 +52,33 @@ const robin14 = () =>
     otherKeyThings: ["gulf coast yard"],
     memoryView: MEMORY_VIEWS[3],
     memoryRefUrls: ["https://r2/404/still-src-5.png", "https://r2/404/still-src-12.png"],
+    memoryNotShown: ["gulf coast yard"],
   });
+
+// Job 404 scenes 5, 12, 13 (the split), 14 and 15 as stored, before render.
+const job404 = () => [
+  pic(5, "a robin standing on a green lawn in early spring with patches of melting snow", {
+    keyThing: "robin",
+    pictureUrl: "https://r2/404/still-src-5.png",
+  }),
+  pic(12, "a robin standing on frost dusted brown grass in winter", {
+    keyThing: "robin",
+    pictureUrl: "https://r2/404/still-src-12.png",
+  }),
+  pic(13, "a flock of robins flying south over a snowy landscape", {
+    hostPresent: true,
+    splitVisual: "A flock of robins in flight above a snow-covered landscape, heading south, bare trees and white ground below.",
+    keyThing: "robin",
+  }),
+  pic(14, "a robin standing in a mild gulf coast yard with palm trees", {
+    keyThing: "robin",
+    otherKeyThings: ["gulf coast yard"],
+  }),
+  pic(15, "a robin standing in a mild gulf coast yard with palm trees, a close-up of one detail of it filling the frame", {
+    keyThing: "robin",
+    otherKeyThings: ["gulf coast yard"],
+  }),
+];
 
 // Job 405 scene 28 as stored: the clock under "three in the morning", drawn from scene 11's clock
 // in a dark bedroom at night, its own words with no hour in them.
@@ -135,10 +170,77 @@ describe("every memory view ends on the setting clause, once", () => {
   });
 });
 
+describe("a key thing no reference shows is never called 'this exact' one of them", () => {
+  it("404-14 at render: its two references are the robin's lawn pictures, so the gulf coast yard is not one they show", async () => {
+    const board = job404();
+    attachMemory(board, [board[3]]);
+    const m = await memoryFor(board[3], 0);
+    expect(m.urls).toEqual(["https://r2/404/still-src-5.png", "https://r2/404/still-src-12.png"]);
+    expect(m.notShown).toEqual(["gulf coast yard"]);
+    const s = { ...board[3], ...memoryFields(m, MEMORY_VIEWS[3]) } as StoryboardScene;
+    expect(s.memoryNotShown).toEqual(["gulf coast yard"]);
+    const clause = memoryClause(s);
+    expect(clause).toMatch(/The first 2 reference images show this exact robin. Draw the SAME robin — /);
+    expect(clause).not.toMatch(/this exact robin and gulf coast yard|SAME robin and gulf coast yard/);
+    expect(clause).toContain(" The gulf coast yard is drawn as this picture's own words describe it.");
+    expect(clause.endsWith(MEMORY_SETTING_CLAUSE)).toBe(true);
+  });
+
+  it("404-15 at render: drawn from scene 14, which IS a picture of the yard — both are named, nothing said apart", async () => {
+    const board = job404();
+    board[3].pictureUrl = "https://r2/404/still-src-14.png";
+    attachMemory(board, [board[4]]);
+    pictureSettled(board[3]);
+    const m = await memoryFor(board[4], 0);
+    expect(m.urls).toEqual(["https://r2/404/still-src-5.png", "https://r2/404/still-src-14.png"]);
+    expect(m.notShown).toBeUndefined();
+    const s = { ...board[4], ...memoryFields(m, MEMORY_VIEWS[0]) } as StoryboardScene;
+    expect(s.memoryNotShown).toBeUndefined();
+    expect(memoryClause(s)).toMatch(/show this exact robin and gulf coast yard. Draw the SAME robin and gulf coast yard/);
+    expect(memoryClause(s)).not.toContain("drawn as this picture's own words describe");
+  });
+
+  it("a picture drawn before the field names every key thing, as it always did", () => {
+    const old = { ...robin14(), memoryNotShown: undefined };
+    expect(memoryClause(old)).toMatch(/this exact robin and gulf coast yard/);
+    expect(memoryClause(old)).not.toContain("drawn as this picture's own words describe");
+  });
+
+  it("references of the other things only: the ones they show are named, the rest said apart; the picture right before names the same", () => {
+    const s = pic(30, "the new mattress on the floor beside the space heater and the rag rug", {
+      keyThing: "mattress",
+      otherKeyThings: ["space heater", "rag rug"],
+      memoryOthersOnly: true,
+      memoryNotShown: ["rag rug"],
+      memoryRefUrls: ["https://r2/heater-12.png"],
+      memoryRightBefore: 0,
+      memoryView: MEMORY_VIEWS[1],
+    });
+    const clause = memoryClause(s);
+    expect(clause).toContain("shows this exact space heater, seen earlier in this video: draw the SAME space heater — ");
+    expect(clause).toContain("It does NOT show the mattress: draw it from this picture's own words.");
+    expect(clause).toContain(" The rag rug is drawn as this picture's own words describe it.");
+    expect(clause).not.toMatch(/space heater and rag rug/);
+    expect(rightBeforeClause(s)).toContain("take ONLY how the space heater looks from it");
+    expect(clause.endsWith(MEMORY_SETTING_CLAUSE)).toBe(true);
+  });
+
+  it("a redraw from words drops the mark with the rest of the memory, and the sentence leaves with the clause", () => {
+    const s = robin14();
+    expect("memoryNotShown" in memoryToWords(s)).toBe(true);
+    expect(memoryToWords(s).memoryNotShown).toBeUndefined();
+    const memory = memoryClause(s);
+    const next = promptFromWords(buildStillPrompt(s), memory, " LOOK.")!;
+    expect(next).toBeDefined();
+    expect(next).not.toContain("drawn as this picture's own words describe");
+    expect(next).not.toContain(MEMORY_SETTING_CLAUSE);
+  });
+});
+
 describe("the review's cases (jobs 404 and 405)", () => {
   it("404-14: the robin in the gulf coast yard takes only the robin's look from the snowy lawn", () => {
     const clause = memoryClause(robin14());
-    expect(clause).toMatch(/The first 2 reference images show this exact robin and gulf coast yard/);
+    expect(clause).toMatch(/The first 2 reference images show this exact robin./);
     expect(clause).toContain("in the same place unless this picture's own words put it somewhere else");
     expect(clause).not.toContain("in the same place —");
     expect(clause).toContain(MEMORY_SETTING_CLAUSE);
