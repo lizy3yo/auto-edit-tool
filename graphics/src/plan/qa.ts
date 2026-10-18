@@ -54,6 +54,14 @@ function propSec(props: unknown, path: string): number | undefined {
   return typeof v === "number" && Number.isFinite(v) ? v : undefined;
 }
 
+/** When a word-timed element is DRAWN, in its graphic's own seconds: where its `prop` says (a Versus
+ * side's sub, `left.subAt`), else on its word. The one reading for the app's QA and the lab's
+ * composite, so the lab cannot pass a sub drawn with its title that the app fails (job 408). */
+export function drawnSec(c: Pick<ResolvedCue, "start" | "props">, s: ResolvedCue["sync"][number]): number {
+  const drawn = s.prop === undefined ? undefined : propSec(c.props, s.prop);
+  return drawn ?? s.wordStart - c.start;
+}
+
 export type QaInput = {
   fps: number;
   cues: ResolvedCue[];
@@ -90,8 +98,7 @@ export function judgeFilm(q: QaInput): QaResult {
   const rows: { cue: string; offsetMs: number; onCut: boolean }[] = [];
   for (const c of cues)
     for (const s of c.sync) {
-      const drawn = s.prop === undefined ? undefined : propSec(c.props, s.prop);
-      const rel = appearFrame(drawn ?? s.wordStart - c.start, fps);
+      const rel = appearFrame(drawnSec(c, s), fps);
       const offsetMs = Math.round(((c.startFrame + rel) / fps - s.wordStart) * 1000);
       rows.push({ cue: c.id, offsetMs, onCut: ((rel === 0 && c.conformed.start) || !!s.onCut) && Math.abs(offsetMs) <= CUT_SNAP_SEC * 1000 });
     }

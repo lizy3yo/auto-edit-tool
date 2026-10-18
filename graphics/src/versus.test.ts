@@ -19,7 +19,7 @@ vi.mock("remotion", async importOriginal => ({
 
 import { VersusCard, type VersusProps } from "./cards";
 import { resolveCues, type CueSpec, type ResolvedCue, type Word } from "./cueResolve";
-import { judgeFilm } from "./plan/qa";
+import { drawnSec, judgeFilm } from "./plan/qa";
 import { systemPrompt } from "./plan/planner";
 import { TEMPLATES, resolveSets } from "./registry";
 import { appearFrame } from "./timing";
@@ -193,5 +193,14 @@ describe("QA reads each sub where it is drawn", () => {
     expect(qa.failures).toHaveLength(1);
     const ms = Number(/^a word on screen (\d+) ms off its voice$/.exec(qa.failures[0])?.[1]);
     expect(ms).toBeGreaterThan(2000);
+  });
+
+  it("the one reading the app's QA and the lab's composite share: a sub at its subAt, a title on its word", () => {
+    const [titleRow, subRow] = c.sync.filter(s => s.element.startsWith("right."));
+    const right = c.props.right as ResolvedSide;
+    expect(drawnSec(c, subRow)).toBe(right.subAt);
+    expect(drawnSec(c, titleRow)).toBeCloseTo(titleRow.wordStart - c.start, 6);
+    // a prop that is not there falls back to the word, never NaN
+    expect(drawnSec({ ...c, props: { ...c.props, right: { ...right, subAt: undefined } } }, subRow)).toBeCloseTo(subRow.wordStart - c.start, 6);
   });
 });
