@@ -215,6 +215,21 @@ describe("a card never hides a whole video, or a spoken list's own pictures (408
     expect(pictureProblem(placed("two-things-steps", "StepCards", 185.367, 190.933), [], pearl, [])).toBeUndefined();
   });
 
+  it("410: the spoken-lists note offers StepCards only for steps with no pictures of their own, as the catalogue does", async () => {
+    // It said "steps may be StepCards or StepLabels", so a steps list over its own step pictures was
+    // invited to the very card the check then refused.
+    const { planGraphics } = await import("./planner");
+    const told: string[] = [];
+    const words = W(
+      "So@141.115-141.275 wait@141.355-141.555 until@141.595-141.875 everyone's@142.015-142.415 been@142.455-142.615 served,@142.675-143.115 then@143.496-143.716 catch@143.756-143.996 a@144.036-144.056 flight@144.096-144.336 attendant@144.356-144.736 as@144.796-144.876 they@144.916-145.056 pass@145.116-145.556 or@146.076-146.276 step@146.356-146.596 back@146.636-146.796 to@146.836-146.936 the@146.956-147.016 galley@147.056-147.477 and@147.757-147.857 phrase@147.917-148.197 it@148.257-148.317 as@148.417-148.497 an@148.537-148.597 offer.@148.737-149.057"
+    );
+    const film: FilmLayout = { scenes: [steps(29, 141.288, 143.286), steps(30, 143.286, 147.619), steps(31, 147.619, 149.553)] };
+    const lists = [{ kind: "steps" as const, items: ["wait until everyone's been served", "catch a flight attendant as they pass or step back to the galley", "phrase it as an offer"] }];
+    await planGraphics({ words, film, lists, ensureIcon: async () => true, ask: async (_s, m) => (told.push(m[m.length - 1].content), JSON.stringify({ cues: [] })) });
+    expect(told[0]).toContain("steps may be StepLabels, or StepCards when the steps have no pictures\nof their own)");
+    expect(told[0]).not.toContain("steps may be StepCards or StepLabels");
+  });
+
   it("a film that does not say which pictures are videos or list items changes nothing", () => {
     const film: FilmLayout = { scenes: [scene(3, 7.28991, 13.7519), scene(29, 141.288, 143.286), scene(30, 143.286, 147.619)] };
     expect(pictureProblem(placed("v", "Versus", 5.667, 13.767), [], film, [])).toBeUndefined();

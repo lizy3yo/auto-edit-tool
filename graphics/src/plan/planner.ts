@@ -1281,9 +1281,13 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
   };
 
   const system = systemPrompt({ kept: kept0.length > 0 });
+  // Steps take StepCards only when they have no pictures of their own: this note said "StepCards or
+  // StepLabels" while the catalogue and `pictureProblem` refuse a card over STEP PICTURE scenes (job
+  // 410's StepCards), so a list told it may have either was sent to the repair round for following it.
   const listNote = offered.length
     ? `\n\nSPOKEN LISTS IN THIS SCRIPT — each one MUST get a list graphic wherever one may go (ListWindow over
-b-roll, HostListWindow over the host; steps may be StepCards or StepLabels), every item a row in the order
+b-roll, HostListWindow over the host; steps may be StepLabels, or StepCards when the steps have no pictures
+of their own), every item a row in the order
 said ("text" ≤${ROW_MAX_WORDS} words, the item's own spoken words with their "a"/"the"/"his", "at": "@its first spoken words", "say": the item as said):
 ${offered.map((l, i) => `${i + 1}. ${l.kind === "steps" ? "[steps] " : ""}${l.items.map(x => `"${x}"`).join(", ")}`).join("\n")}`
     : "";
