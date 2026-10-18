@@ -2114,3 +2114,29 @@ describe("a caption on a split stays beside the host (round 10 graphics, 2026-10
     expect(hostPanelFor({ start: 15.267, end: 17.333 }, filmLayoutOf([split(400, 3, 12.88, 17.32, false)]))).toBeUndefined();
   });
 });
+
+describe("a warning card says what to avoid, never the thing to avoid as advice (round 10 graphics, 2026-10-18)", () => {
+  // 399 dont-ask-too-early (2:13.1-2:16.1, over scene 24): under the red WARNING header the card read
+  // "Ask while the cart is still working its way back," — the first ten words of "…, and you're asking
+  // the crew to guess whether the last few rows will come up short", which warns NOT to ask then. On
+  // screen it told the viewer to do it, and left just as the consequence began.
+  it("399: the 'do X' half of a 'do X, and [bad result]' warning is refused; the right way goes in another template", async () => {
+    const { namesTheDanger } = await import("../graphics/src/plan/planner");
+    expect(namesTheDanger("Ask while the cart is still working its way back,")).toBe(false);
+    expect(namesTheDanger("So wait until everyone's been served,")).toBe(false);
+  });
+
+  it("every warning card the planner placed in earlier films still passes (Ruth 350, Frederick 376/384/385, Hank 382, job 387)", async () => {
+    const { namesTheDanger } = await import("../graphics/src/plan/planner");
+    for (const real of [
+      "These bowls are not for hot food or the microwave",
+      "Keep all ten fingers away from that rotary cutter",
+      "No date at all? It's old enough.",
+      "Every notch has to be dead on",
+      "Smoke alarms expire. At 10 years the unit is finished.",
+      "The old 9-volt battery starts chirping, somebody yanks it out, and that alarm is now doing absolutely nothing.",
+      "The mistake with pearls is saving them.",
+    ])
+      expect(namesTheDanger(real), real).toBe(true);
+  });
+});

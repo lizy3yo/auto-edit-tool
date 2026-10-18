@@ -87,7 +87,13 @@ On top of the footage:
 - StepLabels — describes 2-4 actions in order: {"steps": [{"text" (≤4 words), "at": "@words"}]}
 - Checklist — lists 2-4 signs or things to check (each ticked as said) (over b-roll): {"title": "2-4 words", "items": [{"text" (≤5 words), "at": "@words"}]}
 - CrossedList — dismisses 2-3 things ("not the bowl, not the house"), optionally then names the real one (over b-roll): {"items": [{"text" (≤3 words), "icon", "at": "@words", "keep": true only for the real one}]}
-- WarningLabel — names a danger or a mistake to avoid: {"text": phrase (≤10 words), "emphasis"}
+- WarningLabel — names a danger or a mistake to avoid, in words that SAY it: read alone under its "WARNING"
+  header, the line itself says what not to do or what goes wrong ("never", "don't", "not", "avoid", "too…",
+  the harm or the bad result — "Never leave it plugged in overnight", "The glue fails in the cold"). A line
+  that tells the viewer to DO something is advice, not a warning: when the script warns with "do X, and [bad
+  result]" ("Open it while it's hot, and the jar cracks"), the "do X" half alone reads as an instruction to
+  do it — show words that name the danger, or show the right way with another template, or nothing:
+  {"text": phrase (≤10 words), "emphasis"}
 - IconLabels — names 1-3 right things to look for or buy: {"items": [{"icon","text" (1-3 words),"say","at"}]}
 - IconCallout — makes one short point that one object says well (over b-roll): {"icon", "phrase": phrase (≤8 words), "emphasis"}
 - SmallLabel — names the thing in the picture when the line names it (over b-roll): {"text": "1-4 words as said", "at": "@words"}
@@ -227,6 +233,41 @@ export const MAX_WORDS: Record<string, number> = {
   Statement: 12, MythTruth: 14, TwoPoint: 12, WarningLabel: 10, HostCaption: 24, DimCaption: 24, Quote: 16,
   TitleOverFootage: 10, ArrowCaption: 20, IconCallout: 8, FactCard: 14, YesNoCard: 14, MythStamp: 10,
 };
+
+/**
+ * Words that make a line say what to AVOID or what goes WRONG: a negation, a word for steering clear,
+ * "too" + a word, a requirement said as one, or the danger or bad result itself. A WarningLabel's line
+ * is read ALONE under its "WARNING" header, so without one of these it reads as advice to do the
+ * thing: Helena's job 399 (2:13) showed "Ask while the cart is still working its way back," — the
+ * first half of "…, and you're asking the crew to guess whether the last few rows will come up
+ * short", which is advice NOT to ask then; the planner's own id was "dont-ask-too-early". Every
+ * warning the planner placed before passes (planner.test.ts). A requirement ("has to", "must") counts
+ * because it can never be the "do X" half of a "do X, and [bad result]" warning.
+ * (Joined from parts, one kind of word to a line.)
+ */
+const NAMES_A_DANGER = new RegExp(
+  [
+    // a negation: "not for hot food", "No date at all?", "doing absolutely nothing", "don't"
+    "\\b(?:no|not|never|nothing|none|nobody|nowhere|neither|nor|without|cannot|unless|otherwise|or else)\\b",
+    "n't\\b",
+    // steering clear of it: "Keep all ten fingers away from…"
+    "\\b(?:avoid(?:s|ed|ing)?|stop(?:s|ped|ping)?|careful(?:ly)?|cautio(?:n|us)|beware|warn(?:s|ed|ing|ings)?|watch out|look out|away from|stay (?:away|back|clear|off|out)|clear of|out of reach)\\b",
+    "\\bkeep (?:\\S+ ){1,4}away\\b",
+    // too much of it: "too early", "too hot"
+    "\\btoo [a-z]",
+    // a requirement said as one: "Every notch has to be dead on"
+    "\\b(?:must|has to|have to|had to|need to|needs to|got to|gotta)\\b",
+    // the danger or the bad result itself
+    "\\b(?:dangers?|dangerous(?:ly)?|hazards?|hazardous|risks?|risky|mistakes?|mistaken|wrong(?:ly)?|bad|badly|worse|worst|unsafe|harm(?:s|ed|ful|ing)?|hurts?|hurting|injur(?:e|es|ed|y|ies|ing)|toxic|poison(?:s|ed|ous)?|deadly|fatal|kill(?:s|ed|ing)?|die|dies|died|dying|death|fires?|burn(?:s|ed|t|ing)?|scald(?:s|ed|ing)?|shock(?:s|ed|ing)?|explod(?:e|es|ed|ing)|explosion|break|breaks|breaking|broke|broken|crack(?:s|ed|ing)?|fail(?:s|ed|ing|ure|ures)?|ruin(?:s|ed|ing)?|damag(?:e|es|ed|ing)|destroy(?:s|ed|ing)?|lose|loses|losing|lost|loss|wast(?:e|es|ed|ing)|spoil(?:s|ed|ing|t)?|rot|rots|rotted|rotten|rotting|mou?ld(?:y|s)?|leak(?:s|ed|ing)?|warp(?:s|ed|ing)?|expir(?:e|es|ed|ing|y)|problems?|trouble|illegal|scams?|regret(?:s|ted)?|costs? you)\\b",
+    "\\b(?:runs? out|ran out|running out|comes? up short|came up short)\\b",
+  ].join("|"),
+  "i"
+);
+
+/** Does a warning's line, read alone, say what to avoid or what goes wrong (`NAMES_A_DANGER`)? Pure. */
+export function namesTheDanger(text: string): boolean {
+  return NAMES_A_DANGER.test(text.toLowerCase().replace(/[’‘]/g, "'"));
+}
 
 /** Keys whose strings are not shown words (or are checked by the resolver already). */
 const NOT_SHOWN = new Set(["icon", "at", "say", "winner", "answer", "author", "start", "end"]);
@@ -579,6 +620,18 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
       );
       if (fragment) {
         bad(`"${fragment[1]}" (${fragment[0]}) starts mid-sentence — a shown line must read as a whole thought`);
+        continue;
+      }
+      // A WARNING reads as one: its line, alone under the header, says what to avoid or what goes
+      // wrong — job 399's "Ask while the cart is still working its way back," told the viewer to do
+      // the very thing the script warned against (`namesTheDanger`).
+      const warning = spec.template === "WarningLabel" ? (spec.props.text as { text?: unknown } | undefined)?.text : undefined;
+      if (typeof warning === "string" && !namesTheDanger(warning)) {
+        bad(
+          `"${warning}" does not say what to avoid or what goes wrong — read alone under WARNING it tells the viewer to DO it. ` +
+            `Show the narrator's words that name the mistake or the harm ("never…", "don't…", "not…", "avoid…", "too…", the bad result), ` +
+            `or show the right way with another template (a caption, a statement, step labels), or drop it`
+        );
         continue;
       }
       tidyNumbers(spec.props);

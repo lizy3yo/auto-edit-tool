@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { resolveCues, type CueSpec, type ResolvedCue, type Word } from "../cueResolve";
 import { TEMPLATES } from "../registry";
 import { FPS } from "../theme";
-import { listsWhereGraphicsGo, malformedPhrase, missingListCues, normalizePhrases, planGraphics, uncoveredMoments, userPrompt, wordsSaidOver, type PlanMessage } from "./planner";
+import { listsWhereGraphicsGo, malformedPhrase, missingListCues, namesTheDanger, normalizePhrases, planGraphics, systemPrompt, uncoveredMoments, userPrompt, wordsSaidOver, type PlanMessage } from "./planner";
 
 const W = (s: string, start: number, step = 0.3): Word[] => s.split(" ").map((text, i) => ({ text, start: start + i * step, end: start + i * step + 0.26 }));
 const scene = (index: number, a: number, b: number, extra: Record<string, unknown> = {}) => ({ index, narrationStartSec: a, narrationEndSec: b, scriptText: "", hostPresent: false, cta: false, split: false, hostOpener: false, ...extra });
@@ -451,5 +451,88 @@ describe("every round of the plan says what it asked, and the fill round what it
     const fill = out.rounds.find(r => r.step === "fill")!;
     expect(fill.asked).toBe(1);
     expect(fill.offered).toEqual([expect.objectContaining({ text: "Smalls, about $10 to $40.", asked: [], placed: false })]);
+  });
+});
+
+describe("a warning says what to avoid, never advises doing it (A4, Helena's job 399 'dont-ask-too-early')", () => {
+  // Job 399, 2:08-2:21 as heard. The script: "Ask while the cart is still working its way back, and
+  // you're asking the crew to guess whether the last few rows will come up short. So wait until
+  // everyone's been served, …" — the card showed only the first ten words under WARNING.
+  const heard = T(
+    "You're@128.19-128.39 also@128.45-128.71 welcome@128.77-129.07 to@129.09-129.15 ask@129.25-129.41 for@129.45-129.59 another.@129.65-130.03 And@130.47-130.57 the@130.59-130.67 only@130.79-131.01 real@131.17-131.41 trick@131.49-131.77 is@132.01-132.11 when.@132.23-132.51 " +
+      "Ask@133.33-133.51 while@133.55-133.69 the@133.73-133.81 cart@133.85-134.09 is@134.17-134.25 still@134.33-134.61 working@134.67-134.97 its@135.03-135.16 way@135.22-135.34 back.@135.41-135.63 And@135.98-136.04 you're@136.06-136.22 asking@136.26-136.56 the@136.58-136.66 crew@136.74-137.02 to@137.10-137.18 guess@137.24-137.50 whether@137.54-137.78 the@137.84-137.92 last@137.98-138.22 few@138.28-138.46 rows@138.52-138.82 will@138.84-139.00 come@139.04-139.16 up@139.22-139.30 short.@139.38-139.70 " +
+      "So@139.98-140.21 wait@140.38-140.59 until@140.63-140.88 everyone's@141.03-141.43 been@141.47-141.63"
+  );
+  const film = {
+    scenes: [
+      scene(23, 128.09, 133.11, { hostPresent: true, split: true, scriptText: "You're also welcome to ask for another, and the only real trick is when." }),
+      scene(24, 133.11, 139.81, { scriptText: "Ask while the cart is still working its way back, and you're asking the crew to guess whether the last few rows will come up short." }),
+      scene(25, 139.81, 144.66, { hostPresent: true, scriptText: "So wait until everyone's been served, then catch a flight attendant as they pass," }),
+    ],
+  };
+  const cuts = [128.09, 133.11, 139.81, 144.66];
+  const dontAsk: CueSpec = { id: "dont-ask-too-early", template: "WarningLabel", start: "Ask while the cart is still", startPad: -0.15, end: "working its way back,", endPad: 0.3, props: { text: { text: "Ask while the cart is still working its way back,", words: true }, emphasis: ["back,"] } };
+  const asking = (first: CueSpec[]) => {
+    const asked: string[] = [];
+    const ask = async (_system: string, messages: PlanMessage[]) => {
+      asked.push(messages[messages.length - 1].content);
+      return asked.length === 1 ? JSON.stringify({ cues: first }) : '{"cues": []}';
+    };
+    return { ask, asked };
+  };
+
+  it("the half of a 'do X, and [bad result]' warning that says 'do X' is not a warning; nor is the right way, or any instruction", () => {
+    expect(namesTheDanger("Ask while the cart is still working its way back,")).toBe(false);
+    expect(namesTheDanger("So wait until everyone's been served,")).toBe(false); // the right way: another template
+    expect(namesTheDanger("Sort your finished pieces by size and price")).toBe(false); // Dale's job 397
+    // a word that only CONTAINS a cue is not one
+    expect(namesTheDanger("Take a note of the date now")).toBe(false);
+  });
+
+  it("every warning the planner placed before still passes (jobs 350, 376, 382, 384, 385, 387) — and the template's own example", () => {
+    for (const real of [
+      "These bowls are not for hot food or the microwave",
+      "Keep all ten fingers away from that rotary cutter",
+      "No date at all? It's old enough.",
+      "Every notch has to be dead on",
+      "Smoke alarms expire. At 10 years the unit is finished.",
+      "It happens to be slow at the one kind of fire that likes to start while the house is asleep.",
+      "The old 9-volt battery starts chirping, somebody yanks it out, and that alarm is now doing absolutely nothing.",
+      "The mistake with pearls is saving them.",
+      String((TEMPLATES.find(t => t.id === "WarningLabel")!.defaultProps as { text: { text: string } }).text.text),
+    ])
+      expect(namesTheDanger(real), real).toBe(true);
+    // curly apostrophes, as a script may be typed
+    expect(namesTheDanger("Don’t sand past 220")).toBe(true);
+    expect(namesTheDanger("Ask too early and the cart is empty")).toBe(true);
+  });
+
+  it("the prompt's own examples agree with the check: its warnings pass, its 'do X' half does not", () => {
+    const prompt = systemPrompt({ kept: false });
+    for (const ok of ["Never leave it plugged in overnight", "The glue fails in the cold"]) {
+      expect(prompt).toContain(ok);
+      expect(namesTheDanger(ok)).toBe(true);
+    }
+    expect(prompt).toContain("Open it while it's hot, and the jar cracks");
+    expect(namesTheDanger("Open it while it's hot,")).toBe(false);
+  });
+
+  it("job 399's card is refused, and the repair is told to name the danger or show the right way with another template", async () => {
+    const { ask, asked } = asking([dontAsk]);
+    const out = await planGraphics({ words: heard, cuts, film, ask, ensureIcon: async () => true });
+    expect(out.cues.map(c => c.id)).not.toContain("dont-ask-too-early");
+    expect(out.rounds[0].problems).toEqual([
+      { cue: "dont-ask-too-early", problem: expect.stringMatching(/^"Ask while the cart is still working its way back," does not say what to avoid or what goes wrong — read alone under WARNING it tells the viewer to DO it\. .*another template/) },
+    ]);
+    expect(asked[1]).toContain('dont-ask-too-early: "Ask while the cart is still working its way back," does not say what to avoid');
+  });
+
+  it("a real warning on the narrator's words is kept as before (Ruth's job 350)", async () => {
+    const words = W("These bowls are not for hot food or the microwave.", 10);
+    const bowls: CueSpec = { id: "no-hot-food", template: "WarningLabel", start: "These bowls are not for", startPad: -0.15, end: "or the microwave.", endPad: 0.3, props: { text: { text: "These bowls are not for hot food or the microwave", words: true }, emphasis: ["hot"] } };
+    const { ask } = asking([bowls]);
+    const out = await planGraphics({ words, film: { scenes: [scene(9, 9, 16, { scriptText: "These bowls are not for hot food or the microwave." })] }, ask, ensureIcon: async () => true });
+    expect(out.cues.map(c => c.id)).toEqual(["no-hot-food"]);
+    expect(out.rounds[0].problems).toEqual([]);
   });
 });
