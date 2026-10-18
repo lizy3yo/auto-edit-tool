@@ -58,8 +58,8 @@ import {
   oneThingPanels,
   ownTypedPicture,
   ownTypedPanel,
-  saidText,
   showsScreen,
+  tokenSpans,
 } from "./shotList";
 import {
   attachMemory,
@@ -7502,10 +7502,27 @@ export const ALLOWED_TEXT_REST_CLAUSE =
  * text" — asks for it a clause before the rule that allows one word, and the picture maker drew the
  * entry. Only a determiner-led ask ("with its text", "and the printed wording"), never one followed by
  * what it reads (that is the allowed words) or one already soft, and never a bare "print", which is
- * also a pattern.
+ * also a pattern. "Already soft" reads to the end of the clause: stored descriptions say "and the
+ * text is unreadable" (job 303 scene 18) and "a small logo and the text are soft and unreadable" (job
+ * 343 scene 4), which a second "soft and unreadable" would only garble. Nor is a thing named after
+ * print ("the writing desk", "the text message", "the printing press") an ask for print.
  */
 const OTHER_PRINT_ASK =
-  /\b(?:with|and|showing|plus)\s+(?:its|the|their|some|his|her)\s+(?:(?:(?:entry|body|printed|descriptive|written|surrounding|other|accompanying)\s+)?(?:text|writing|wording|paragraphs?|printing)|(?:fine|small)\s+print)\b(?!\s*(?:reading|reads|that\s+reads|saying|says|soft|blurred|["'“‘:]))/gi;
+  /\b(?:with|and|showing|plus)\s+(?:its|the|their|some|his|her)\s+(?:(?:(?:entry|body|printed|descriptive|written|surrounding|other|accompanying)\s+)?(?:text|writing|wording|paragraphs?|printing)|(?:fine|small)\s+print)\b(?!\s*(?:reading|reads|that\s+reads|saying|says|soft|blurred|["'“‘:]))(?!\s+(?:desk|pad|paper|press|message|box|table|tool|instrument|set|kit|hand|style|surface|area|space|block|book)s?\b)(?![^.;,]{0,40}\b(?:soft|blurred|blurry|unreadable|illegible|out\s+of\s+focus)\b)/gi;
+
+/**
+ * Whether the allowed words follow an ask for print (`OTHER_PRINT_ASK`) — "a page with the text
+ * migratorius in italics" asks for the allowed word, not for more. Read off the words' own tokens,
+ * never the whole text: a label's three said things ("Photoelectric, Sealed 10-Year, Interconnected",
+ * job 335 scene 5) run past any window, and the ask before them would be wrongly softened. A short
+ * word ("the", "a") alone says nothing, so only one of four letters or more counts when there is one.
+ */
+function allowedWordsFollow(after: string, text: string): boolean {
+  const said = tokenSpans(text).map(t => t.tok);
+  const key = said.filter(w => w.length >= 4);
+  const near = new Set(tokenSpans(after.slice(0, 48)).map(t => t.tok));
+  return (key.length ? key : said).some(w => near.has(w));
+}
 
 /**
  * A picture whose line says the words printed on a thing (`scene.pictureText`) shows exactly those,
@@ -7533,11 +7550,8 @@ export function withAllowedText(
     `The ONLY readable writing anywhere in the frame is exactly "${text}", printed clearly on the ` +
     `thing it belongs to and spelled exactly like that — no other words, letters, numbers, prices ` +
     `or labels readable on any surface. ${ALLOWED_TEXT_REST_CLAUSE}`;
-  const said = text.toLowerCase();
   const framed = prompt.replace(OTHER_PRINT_ASK, (ask: string, at: number, whole: string) =>
-    whole.slice(at + ask.length, at + ask.length + 40).toLowerCase().includes(said)
-      ? ask
-      : `${ask} soft and unreadable`
+    allowedWordsFollow(whole.slice(at + ask.length), text) ? ask : `${ask} soft and unreadable`
   );
   return framed.includes(NO_READABLE_TEXT)
     ? framed.split(NO_READABLE_TEXT).join(allowed)
@@ -7574,7 +7588,12 @@ export function allowedTextRedraw(prompt: string, text: string): string {
  * pass (`saidText`: every word in the line, at most six) — is not counted. Made-up writing still is:
  * any word the line does not say ("American Robin" over a line naming the robin), a read the check
  * cut short ("…"), and anything the prompt scrubber never lets into a prompt (`scrubLegibleWriting`:
- * a brand the line names, a price list, a receipt). Pure.
+ * a brand the line names, a price list, a receipt). A NAME the line says is not passed either: the
+ * scrubber knows only some brands, and "Every spring, Marketplace fills up…" (job 413 scene 26) names
+ * one it does not — a real app's words stay soft and unreadable (`REAL_APP_SCREEN_CLAUSE`). A name is
+ * read off the line itself: a word it only ever writes capitalised away from a sentence's start. Every
+ * word of the read is counted, never the first 60 characters `saidText` keeps (a long made-up sixth
+ * word would go unread). Pure.
  */
 export function writingTheLineSays(read: string | undefined, line: string | undefined): boolean {
   // Quote marks round what was read are the check's, not the picture's ("'LOAN'" is LOAN) — and the
@@ -7587,7 +7606,25 @@ export function writingTheLineSays(read: string | undefined, line: string | unde
     .trim();
   if (!words || !line?.trim() || /…|\.\.\./.test(words)) return false;
   if (scrubLegibleWriting(words) !== words) return false;
-  return !!saidText(words, line);
+  const want = tokenSpans(words).map(t => t.tok);
+  if (!want.length || want.length > 6) return false;
+  const ordinary = ordinaryLineWords(line);
+  return want.every(w => ordinary.has(w));
+}
+
+/**
+ * The words a line says as ORDINARY words: written in lower case somewhere, or capitalised only where
+ * a sentence (or the piece of it a picture plays under) starts. A word the line only ever capitalises
+ * mid-sentence is a name — a brand, a store, a person, a title — and is left out. Pure.
+ */
+function ordinaryLineWords(line: string): Set<string> {
+  const out = new Set<string>();
+  for (const t of tokenSpans(line)) {
+    const raw = line.slice(t.start, t.end);
+    const before = line.slice(0, t.start).replace(/[\s"'“”‘’([—–-]+$/, "");
+    if (raw[0] === raw[0].toLowerCase() || !before || /[.!?:]$/.test(before) || raw === "I") out.add(t.tok);
+  }
+  return out;
 }
 
 /**

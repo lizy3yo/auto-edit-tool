@@ -7733,4 +7733,46 @@ describe("allowed words and soft print go together; a word the line says is not 
     // A "read" beside no writing is no answer.
     expect("read" in parseStillDefectVerdict('{"writing":false,"read":"LOAN"}')).toBe(false);
   });
+
+  // Review of the fix: a name the scrubber does not know, a read longer than 60 characters, and asks
+  // for print that are no ask at all.
+  it("a name the line says is not passed, though the scrubber does not know it (413 scene 26's line)", async () => {
+    const { writingTheLineSays } = await import("./longformVideo");
+    const line =
+      "Every spring, Marketplace fills up with mowers listed as ran-last-season, priced twenty-five to seventy-five dollars.";
+    expect(writingTheLineSays("Marketplace", line)).toBe(false);
+    // …while an ordinary word of the same line still is.
+    expect(writingTheLineSays("MOWERS", line)).toBe(true);
+    // A capital where the line's sentence starts is no name.
+    expect(writingTheLineSays("EVERY SPRING", line)).toBe(true);
+    expect(writingTheLineSays("LOAN", "Somewhere along the line, everybody agreed. A loan, a lease")).toBe(true);
+  });
+
+  it("every word of a long read is counted, not only its first 60 characters", async () => {
+    const { writingTheLineSays } = await import("./longformVideo");
+    const line = "the agricultural department certification requirements overview";
+    expect(writingTheLineSays("Agricultural Department Certification Requirements Overview", line)).toBe(true);
+    expect(writingTheLineSays("Agricultural Department Certification Requirements Overview Fabricated", line)).toBe(false);
+  });
+
+  it("print already soft, a thing named after print, and long allowed words after the ask are left as written", () => {
+    // Stored descriptions (jobs 303 scene 18, 343 scene 4), had they carried allowed words.
+    expect(withAllowedText("a tablet with icons and boxes, and the text is unreadable.", "4")).toMatch(
+      /^a tablet with icons and boxes, and the text is unreadable\. The ONLY/
+    );
+    expect(withAllowedText("A small orange logo and the text are soft and unreadable.", "4")).toMatch(
+      /^A small orange logo and the text are soft and unreadable\. The ONLY/
+    );
+    expect(withAllowedText("a lamp beside the writing desk", "4")).toMatch(/^a lamp beside the writing desk The ONLY/);
+    expect(withAllowedText("a phone with the text message open", "4")).toMatch(/^a phone with the text message open The ONLY/);
+    // The label's three said things (job 335 scene 5) follow the ask: not softened, however long.
+    const said = "Photoelectric, Sealed 10-Year, Interconnected";
+    expect(withAllowedText(`a smoke alarm box with its printed text ${said} on the front`, said)).toMatch(
+      new RegExp(`^a smoke alarm box with its printed text ${said} on the front The ONLY`)
+    );
+    // …and an ask that is followed by nothing said is still softened.
+    expect(withAllowedText("a smoke alarm box with its printed text in sharp black ink", said)).toMatch(
+      /^a smoke alarm box with its printed text soft and unreadable in sharp black ink/
+    );
+  });
 });
