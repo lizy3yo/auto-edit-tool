@@ -119,26 +119,78 @@ export function parseSpokenNumber(toks: string[], i: number): { value: number; n
   return any ? { value: total + cur, n } : null;
 }
 
+/** Are `a` and `b` at most `max` single-letter edits apart (a letter added, dropped or changed)?
+ * Stops as soon as every way through costs more. Pure. */
+export function withinEdits(a: string, b: string, max: number): boolean {
+  if (Math.abs(a.length - b.length) > max) return false;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    let best = i;
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      best = Math.min(best, cur[j]);
+    }
+    if (best > max) return false;
+    prev = cur;
+  }
+  return prev[b.length] <= max;
+}
+
 /**
- * One word for another: case, number words ("three" = "3"), a plural "s", and — for words of four
- * letters or more — one letter changed, the way speech-to-text spells a word differently from the
- * script ("disc" heard as "disk", job 384). Never for short words, where one letter is a new word.
+ * Two spellings of ONE word, the way speech-to-text writes a word differently from the script:
+ * - from four letters, one letter CHANGED ("disc" heard as "disk", job 384);
+ * - from seven letters, one edit per seven letters of ANY kind, a letter added or dropped as well:
+ *   the rare word the transcriber has to guess (a Latin name, a brand, a coined term). Walter's job
+ *   411 (1:47) heard the robin's "migratorius" as "migratorious", one letter longer. One changed
+ *   letter was forgiven only between words of EQUAL length, so the script's spelling could not be
+ *   anchored ('start words "ends in the word migratorius" not found'), the repair round took the
+ *   transcript's, and the term card showed "migratorious" beside a field guide printing "migratorius".
+ * Never a word with a digit, never under four letters, and no letter added or dropped under seven,
+ * where one letter usually makes another word ("though"/"through", "plane"/"planet"). Pure.
  */
-function same(a: string, b: string): boolean {
+export function closeSpelling(a: string, b: string): boolean {
+  if (a === b || /\d/.test(a + b)) return false;
+  const shorter = Math.min(a.length, b.length);
+  if (shorter < 4) return false;
+  if (shorter < 7) return oneLetterChanged(a, b);
+  return withinEdits(a, b, Math.floor(shorter / 7));
+}
+
+/** The same length, four letters or more, no digit, and exactly one letter different. Pure. */
+function oneLetterChanged(a: string, b: string): boolean {
+  if (a.length < 4 || a.length !== b.length || /\d/.test(a + b)) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length && diff < 2; i++) if (a[i] !== b[i]) diff++;
+  return diff === 1;
+}
+
+/**
+ * One word for another: case, number words ("three" = "3"), a plural "s", an apostrophe one side
+ * writes and the other leaves out ("robin's" heard as "robins"), and a close spelling
+ * (`closeSpelling`). Never for short words, where one letter is a new word.
+ * `spelling` false is the measure for two words JOINED into one (a compound split differently on each
+ * side, `step`): only one letter changed, never one added — "a seasoned" joined is "aseasoned", one
+ * letter from "seasoned", and an article must not be read as part of the next word (job 407's Versus
+ * side "a seasoned one" would have had its sub land on "seasoned", a word late).
+ */
+function same(a: string, b: string, spelling = true): boolean {
   if (a === b) return true;
   const x = NUMBER_WORDS[a] ?? a;
   const y = NUMBER_WORDS[b] ?? b;
   if (x === y || x === `${y}s` || y === `${x}s`) return true;
   // A trailing -d, like the plural -s: "lap-sized" against a transcript's "lap size".
   if (x.length >= 4 && y.length >= 4 && (x === `${y}d` || y === `${x}d`)) return true;
-  if (x.length < 4 || x.length !== y.length || /\d/.test(x + y)) return false;
-  let diff = 0;
-  for (let i = 0; i < x.length && diff < 2; i++) if (x[i] !== y[i]) diff++;
-  return diff === 1;
+  if (!spelling) return oneLetterChanged(x, y);
+  // The apostrophe, from four letters ("it's" and "its" stay apart).
+  const bareX = x.replace(/'/g, "");
+  if (bareX.length >= 4 && bareX === y.replace(/'/g, "")) return true;
+  return closeSpelling(x, y);
 }
 /** The resolver's one word for another (`same`), for a check that holds a graphic's shown words to
- * the spoken ones by the same measure (the planner's steps, which have no word-timed line). */
-export const sameWord = same;
+ * the spoken ones by the same measure (the planner's steps, which have no word-timed line), and for
+ * putting a shown word back in the script's spelling (planner `inScriptSpelling`). */
+export const sameWord = (a: string, b: string): boolean => same(a, b);
 
 /**
  * Match want[k] at index[i], forgiving how the two sides SPLIT a compound — the script's
@@ -160,9 +212,9 @@ function step(index: TokenIndex, i: number, want: string[], k: number): { di: nu
     const p = parseSpokenNumber(index.slice(i, i + 6).map(x => x.tok), 0);
     if (p && String(p.value) === want[k]) return { di: p.n, dk: 1 };
   }
-  if (i + 1 < index.length && same(index[i].tok + index[i + 1].tok, want[k])) return { di: 2, dk: 1 };
+  if (i + 1 < index.length && same(index[i].tok + index[i + 1].tok, want[k], false)) return { di: 2, dk: 1 };
   if (i + 1 < index.length && /^\d+$/.test(want[k]) && digitOf(index[i].tok) + digitOf(index[i + 1].tok) === want[k]) return { di: 2, dk: 1 };
-  if (k + 1 < want.length && same(index[i].tok, want[k] + want[k + 1])) return { di: 1, dk: 2 };
+  if (k + 1 < want.length && same(index[i].tok, want[k] + want[k + 1], false)) return { di: 1, dk: 2 };
   return null;
 }
 

@@ -14,6 +14,7 @@ import {
   resolveCues,
   tokens,
   findVerbatim,
+  closeSpelling,
   VERDICT_SEC,
   TAIL_SPILL_SEC,
   endWithFilm,
@@ -78,6 +79,44 @@ describe("findPhrase / findSubsequence", () => {
     expect(findPhrase(idx, "a plastic disc gluted")).toBeNull();
     expect(findPhrase(indexWords(W("at the end", 0)), "at the and")).toBeNull();
     expect(findPhrase(idx, "11 years")).toBeNull();
+  });
+
+  // Walter's job 411 (1:47) as the transcriber heard it: the script's "migratorius" is
+  // "migratorious", one letter LONGER — refused as 'start words "ends in the word migratorius" not
+  // found', and the repair round put the transcript's spelling on the term card.
+  const robin = indexWords([
+    { text: "ends", start: 106.322, end: 106.482 },
+    { text: "in", start: 106.562, end: 106.622 },
+    { text: "the", start: 106.662, end: 106.742 },
+    { text: "word", start: 106.782, end: 107.042 },
+    { text: "migratorious,", start: 107.263, end: 108.223 },
+    { text: "which", start: 108.663, end: 108.823 },
+  ]);
+  it("forgives a letter added or dropped in a word of seven letters or more (job 411's 'migratorious')", () => {
+    expect(findPhrase(robin, "ends in the word migratorius")).toEqual([0, 1, 2, 3, 4]);
+    expect(findPhrase(robin, "migratorius")).toEqual([4]);
+    expect(findVerbatim(robin, "migratorius, which")).toEqual([4, 5]);
+    expect(closeSpelling("migratorius", "migratorious")).toBe(true);
+    expect(closeSpelling("migratorius", "migratories")).toBe(true);
+    expect(closeSpelling("disc", "disk")).toBe(true);
+  });
+  it("never under seven letters, never two edits under fourteen, never a number, never an article joined to its word", () => {
+    // one letter added to a short word usually makes another word
+    expect(closeSpelling("though", "through")).toBe(false);
+    expect(closeSpelling("plane", "planet")).toBe(false);
+    expect(findPhrase(indexWords(W("it went though the wall", 0)), "went through the wall")).toBeNull();
+    // two letters off in an 11-letter word is another word
+    expect(closeSpelling("migratorius", "migrations")).toBe(false);
+    expect(findPhrase(robin, "ends in the word migrations")).toBeNull();
+    expect(closeSpelling("1500000", "15000000")).toBe(false);
+    // "a seasoned" joined is one letter from "seasoned": two words joined keep the old measure, so
+    // an article is never read as part of the next word (job 407's Versus sub)
+    expect(findPhrase(indexWords(W("than a seasoned one.", 0)), "a seasoned one")).toEqual([1, 2, 3]);
+    expect(findPhrase(indexWords(W("than seasoned one.", 0)), "a seasoned one")).toBeNull();
+  });
+  it("forgives an apostrophe one side writes and the other leaves out, from four letters", () => {
+    expect(findPhrase(indexWords(W("the robins own scientific name", 0)), "the robin’s own scientific name")).not.toBeNull();
+    expect(findPhrase(indexWords(W("and its lid", 0)), "and it's lid")).toBeNull();
   });
 
   it("forgives a compound split differently on each side", () => {

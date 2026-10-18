@@ -29,7 +29,7 @@ import { resolveSets, templateById } from "../../graphics/src/registry";
 import { FPS, type Theme } from "../../graphics/src/theme";
 import { themeFromPixels } from "../../graphics/src/palette";
 import { WINDOW } from "../../graphics/src/more";
-import { NOTO_PNG, planGraphics, type PlanMessage, type PlanRound } from "../../graphics/src/plan/planner";
+import { NOTO_PNG, planGraphics, respellCue, type PlanMessage, type PlanRound } from "../../graphics/src/plan/planner";
 import { checkRules, placementFor, type FilmLayout } from "../../graphics/src/plan/rules";
 import { detectCuts, judgeFilm, type QaResult, type Readability } from "../../graphics/src/plan/qa";
 import { getMediaDuration } from "../mediaProbe";
@@ -283,6 +283,16 @@ export async function addGraphics(input: AddGraphicsInput): Promise<GraphicsReco
   progress(input.savedPlan?.length && !input.replan ? "Using the saved graphics plan" : "Planning the graphics", 12);
   const planned = await plan(input, words, cuts);
   const { specs, cues } = resolveKeeping(planned.cues, words, cuts, input.film, dropped);
+  // A SAVED plan is shown in the script's spelling too (`respellCue`; the planner does it for a new
+  // one): a plan approved before kept the transcript's spelling of a script word on screen (job 411's
+  // "migratorious"). Only shown words change, a word for a word, so every time stays and the resolved
+  // cue is mended the same way as its plan.
+  for (const c of cues) {
+    const changed = respellCue(c, c, input.film, words);
+    const spec = specs.find(s => s.id === c.id);
+    if (spec) respellCue(spec, c, input.film, words);
+    if (changed.length) log(`graphics: ${c.id} in the script's spelling: ${changed.join(", ")}`);
+  }
   // Nothing outlasts the film (`endWithFilm`): ended on its last frame, and left out when that
   // leaves it too short to read.
   for (const id of endWithFilm(cues, filmDiffs.length - 1, FPS)) dropped.push({ id, why: "the film ends before it can be read" });

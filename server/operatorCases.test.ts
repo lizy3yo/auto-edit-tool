@@ -7639,3 +7639,65 @@ describe("a dimming caption is a glance, and two never come back to back (round 
     expect(out.cues.map(c => c.id)).toEqual(["toilet-is-fine", "stick-deeper"]);
   });
 });
+
+describe("a graphic shows the script's spelling, never the transcript's (round 14, Walter's job 411)", () => {
+  // 411 (1:46-1:51): the term card read "migratorious" — the transcriber's spelling — while the script,
+  // the real name and the field guide inside the card's own window read "migratorius". The script's
+  // spelling could not be anchored (one letter longer), and the repair round copied the transcript's.
+  // Words and scenes as stored.
+  const words = (s: string) =>
+    s.split(" ").map(t => {
+      const [text, range] = t.split("@");
+      const [start, end] = range.split("-").map(Number);
+      return { text, start, end };
+    });
+  const heard = words(
+    "guides,@105.425-105.765 ends@106.322-106.482 in@106.562-106.622 the@106.662-106.742 word@106.782-107.042 migratorious,@107.263-108.223 which@108.663-108.823 means@108.903-109.164 just@109.304-109.504 about@109.564-109.764 what@109.804-109.924 it@109.964-110.024 sounds@110.064-110.344 like.@110.424-110.664 " +
+      "Seems@111.385-111.685 somebody@111.845-112.225 should@112.285-112.445 have@112.465-112.585 checked@112.645-112.926 with@112.946-113.086 the@113.106-113.186 robins@113.266-113.726 first.@113.806-114.186"
+  );
+  const cuts = [100.77, 114.66];
+  const scene = (index: number, a: number, b: number, scriptText: string) => ({ index, narrationStartSec: a, narrationEndSec: b, scriptText, hostPresent: false, cta: false, split: false, hostOpener: false });
+  const film = {
+    scenes: [
+      scene(17, 100.77, 114.66, "The funny part is that the robin’s own scientific name, the one printed in the field guides, ends in the word migratorius, which means just about what it sounds like. Seems somebody should have checked with the robins first."),
+      scene(18, 114.66, 120.05, "If so many of them stay, then why does the yard feel so empty come November?"),
+    ],
+  };
+  const card = (spelling: string) => ({
+    id: "term-migratorius-fix",
+    template: "TermWindow",
+    start: `ends in the word ${spelling}`,
+    startPad: -0.15,
+    end: "what it sounds like.",
+    endPad: 0.3,
+    props: { kicker: "The term", term: spelling, at: `@${spelling}`, meaning: { text: "which means just about what it sounds like", words: true } },
+  });
+
+  it("411: the card asked in the script's spelling is placed, and one in the transcript's is shown in the script's", async () => {
+    const { planGraphics } = await import("../graphics/src/plan/planner");
+    for (const spelling of ["migratorius", "migratorious"]) {
+      let n = 0;
+      const ask = async () => (n++ === 0 ? JSON.stringify({ cues: [card(spelling)] }) : '{"cues": []}');
+      const out = await planGraphics({ words: heard, cuts, film, ask, ensureIcon: async () => true });
+      expect(out.rounds[0].problems).toEqual([]);
+      expect(out.resolved.map(c => [c.id, c.props.term, c.start, c.end])).toEqual([["term-migratorius-fix", "migratorius", 106.167, 110.967]]);
+    }
+  });
+
+  it("411: the saved plan, on a Reassemble, is shown in the script's spelling at the same times", async () => {
+    const { resolveCues } = await import("../graphics/src/cueResolve");
+    const { respellCue } = await import("../graphics/src/plan/planner");
+    const [c] = resolveCues([card("migratorious")], heard, { cuts, fps: 30 });
+    expect(respellCue(c, c, film, heard)).toEqual(['"migratorious" → "migratorius"']);
+    expect([c.props.term, c.start, c.end]).toEqual(["migratorius", 106.167, 110.967]);
+  });
+
+  it("a word the script itself says is left as written, and so is every word of a clean caption", async () => {
+    const { resolveCues } = await import("../graphics/src/cueResolve");
+    const { respellCue } = await import("../graphics/src/plan/planner");
+    const seems = { id: "seems", template: "DimCaption", start: "Seems somebody should have checked", end: "the robins first.", props: { phrase: { text: "Seems somebody should have checked with the robins first.", words: true }, emphasis: ["robins"] } };
+    const [c] = resolveCues([seems], heard, { cuts, fps: 30 });
+    expect(respellCue(c, c, film, heard)).toEqual([]);
+    expect(c.props.phrase).toMatchObject({ text: "Seems somebody should have checked with the robins first." });
+  });
+});

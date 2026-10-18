@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { resolveCues, type CueSpec, type ResolvedCue, type Word } from "../cueResolve";
+import { resolveCues, tokens, type CueSpec, type ResolvedCue, type Word } from "../cueResolve";
 import { TEMPLATES } from "../registry";
 import { FPS } from "../theme";
 import { notAListAsSaid } from "../../../server/spokenLists";
-import { ICON_REQUIRED, ROW_MAX_WORDS, STEP_MAX_WORDS, STEP_STRIP_MAX_PX, choiceSteps, stepStripMaxChars, fromAFoundList, iconsAsASet, keepObject, listsWhereGraphicsGo, malformedPhrase, missingListCues, namesTheDanger, noIcon, normalizePhrases, notTheHostsWords, objectCutOff, planGraphics, quotedInScript, restoreRowGrammar, stepCardLines, stepStripWidth, stepTextProblems, systemPrompt, uncoveredMoments, userPrompt, wordsSaidOver, type PlanMessage } from "./planner";
+import { ICON_REQUIRED, ROW_MAX_WORDS, STEP_MAX_WORDS, STEP_STRIP_MAX_PX, choiceSteps, inScriptSpelling, respellCue, stepStripMaxChars, fromAFoundList, iconsAsASet, keepObject, listsWhereGraphicsGo, malformedPhrase, missingListCues, namesTheDanger, noIcon, normalizePhrases, notTheHostsWords, objectCutOff, planGraphics, quotedInScript, restoreRowGrammar, stepCardLines, stepStripWidth, stepTextProblems, systemPrompt, uncoveredMoments, userPrompt, wordsSaidOver, type PlanMessage } from "./planner";
 
 const W = (s: string, start: number, step = 0.3): Word[] => s.split(" ").map((text, i) => ({ text, start: start + i * step, end: start + i * step + 0.26 }));
 const scene = (index: number, a: number, b: number, extra: Record<string, unknown> = {}) => ({ index, narrationStartSec: a, narrationEndSec: b, scriptText: "", hostPresent: false, cta: false, split: false, hostOpener: false, ...extra });
@@ -1756,5 +1756,118 @@ describe("a DimCaption is a glance: one short sentence, never two in a row (roun
   it("the planner is told to keep two graphics that darken the picture 3 s apart, and which they are", () => {
     const prompt = systemPrompt({ kept: false }).replace(/\s+/g, " ");
     expect(prompt).toContain("3 s between two that darken the picture (DimCaption, Quote, TitleOverFootage, BigNumberOverlay, BarChart, ArrowCaption), a cut between them or not");
+  });
+});
+
+describe("nothing on screen is the transcript's spelling of a script word (Walter's job 411, 1:47, the term card)", () => {
+  // Job 411, 99.0-115.7 s as the transcriber heard it, and its scenes 16-18 with their script text.
+  // The script, the real name (Turdus migratorius) and the field guide drawn in the card's own window
+  // say "migratorius"; the transcript heard "migratorious", and the TermWindow showed that.
+  const heard = T(
+    "northern@99.061-99.381 birds@99.421-99.701 end@99.781-99.921 up.@100.082-100.182 The@100.922-101.022 funny@101.042-101.302 part@101.342-101.622 is@101.723-101.783 that@101.823-101.963 the@101.983-102.083 robin's@102.123-102.503 own@102.703-102.863 scientific@102.943-103.624 name,@103.684-103.924 the@104.204-104.304 one@104.384-104.504 printed@104.564-104.884 in@104.924-104.984 the@105.004-105.085 field@105.145-105.385 guides,@105.425-105.765 " +
+      "ends@106.322-106.482 in@106.562-106.622 the@106.662-106.742 word@106.782-107.042 migratorious,@107.263-108.223 which@108.663-108.823 means@108.903-109.164 just@109.304-109.504 about@109.564-109.764 what@109.804-109.924 it@109.964-110.024 sounds@110.064-110.344 like.@110.424-110.664 " +
+      "Seems@111.385-111.685 somebody@111.845-112.225 should@112.285-112.445 have@112.465-112.585 checked@112.645-112.926 with@112.946-113.086 the@113.106-113.186 robins@113.266-113.726 first.@113.806-114.186 If@114.807-114.887 so@114.947-115.107 many@115.167-115.387 of@115.427-115.487 them@115.527-115.667"
+  );
+  const line17 =
+    "The funny part is that the robin’s own scientific name, the one printed in the field guides, ends in the word migratorius, which means just about what it sounds like. Seems somebody should have checked with the robins first.";
+  const film = {
+    scenes: [
+      scene(16, 90.81, 100.77, { hostPresent: true, split: true, scriptText: "And if you live along the Gulf Coast or down in Florida, winter can be when you see the most robins all year, since that’s where a lot of those northern birds end up." }),
+      scene(17, 100.77, 114.66, { scriptText: line17 }),
+      scene(18, 114.66, 120.05, { scriptText: "If so many of them stay, then why does the yard feel so empty come November?" }),
+    ],
+  };
+  const cuts = [90.81, 100.77, 114.66];
+  const said = new Set(heard.flatMap(w => tokens(w.text)));
+  /** The card as the job's plan holds it: written in the fill round's repair, in the transcript's spelling. */
+  const shipped = (): CueSpec => ({
+    id: "term-migratorius-fix",
+    template: "TermWindow",
+    start: "ends in the word migratorious",
+    startPad: -0.15,
+    end: "what it sounds like.",
+    endPad: 0.3,
+    props: { kicker: "The term", term: "migratorious", at: "@migratorious", meaning: { text: "which means just about what it sounds like", words: true } },
+  });
+
+  it("a word heard while the graphic is up takes the script's spelling, in the shown word's case", () => {
+    expect(inScriptSpelling("migratorious", line17, said)).toBe("migratorius");
+    expect(inScriptSpelling("Migratorious", line17, said)).toBe("Migratorius");
+    expect(inScriptSpelling("MIGRATORIOUS", line17, said)).toBe("MIGRATORIUS");
+    expect(inScriptSpelling("ends in the word migratorious, which", line17, said)).toBe("ends in the word migratorius, which");
+    // a name keeps the script's capital
+    expect(inScriptSpelling("turdas migratorious", "Its name is Turdus migratorius.", new Set(["turdas", "migratorious"]))).toBe("Turdus migratorius");
+  });
+
+  it("a word the script writes, a word nobody said, a short word and two equally close script words never change", () => {
+    // the script itself writes the shown spelling somewhere near
+    expect(inScriptSpelling("migratorious", `${line17} Some say migratorious.`, said)).toBe("migratorious");
+    // the planner's own word: not what the transcript heard
+    expect(inScriptSpelling("migratorious", line17, new Set(["ends", "word"]))).toBe("migratorious");
+    // a short word is never respelled ("the" against "they")
+    expect(inScriptSpelling("the", "They went.", new Set(["the"]))).toBe("the");
+    // two script words one edit away: which one is meant cannot be told
+    expect(inScriptSpelling("migratorious", "migratorius or migratorios", said)).toBe("migratorious");
+    // the clean line from the same card is left exactly as written
+    expect(inScriptSpelling("which means just about what it sounds like", line17, said)).toBe("which means just about what it sounds like");
+    // no script, nothing to put back
+    expect(inScriptSpelling("migratorious", "", said)).toBe("migratorious");
+  });
+
+  it("respellCue mends the shown words of the card as planned and as resolved, never an anchor", () => {
+    const spec = shipped();
+    const [c] = resolveCues([spec], heard, { cuts, fps: FPS });
+    expect([c.start, c.end]).toEqual([106.167, 110.967]); // the card as the film had it
+    expect(respellCue(spec, c, film, heard)).toEqual(['"migratorious" → "migratorius"']);
+    expect(spec.props).toEqual({ kicker: "The term", term: "migratorius", at: "@migratorious", meaning: { text: "which means just about what it sounds like", words: true } });
+    expect(respellCue(c, c, film, heard)).toEqual(['"migratorious" → "migratorius"']);
+    expect(c.props.term).toBe("migratorius");
+    // the mended plan resolves to the same times
+    const [again] = resolveCues([spec], heard, { cuts, fps: FPS });
+    expect([again.start, again.end, again.sync.map(s => s.wordStart)]).toEqual([c.start, c.end, c.sync.map(s => s.wordStart)]);
+    // a clean graphic on the next sentence is not touched
+    const seems = { id: "seems", template: "DimCaption", start: "Seems somebody should have checked", end: "the robins first.", props: { phrase: { text: "Seems somebody should have checked with the robins first.", words: true }, emphasis: ["robins"] } } as CueSpec;
+    const [s] = resolveCues([seems], heard, { cuts, fps: FPS });
+    expect(respellCue(seems, s, film, heard)).toEqual([]);
+  });
+
+  it("the plan places the card on the script's spelling, and shows it even when the planner copied the transcript's", async () => {
+    const asking = (first: CueSpec) => {
+      let n = 0;
+      return async () => (n++ === 0 ? JSON.stringify({ cues: [first] }) : '{"cues": []}');
+    };
+    // The fill round asked for it in the script's spelling and was refused ('start words "ends in the
+    // word migratorius" not found'): now it is placed as asked.
+    const asWritten = { ...shipped(), id: "term-migratorius", start: "ends in the word migratorius", props: { ...shipped().props, term: "migratorius", at: "@migratorius" } };
+    const a = await planGraphics({ words: heard, cuts, film, ask: asking(asWritten), ensureIcon: async () => true });
+    expect(a.rounds[0].problems).toEqual([]);
+    expect(a.cues.map(c => [c.id, c.props.term])).toEqual([["term-migratorius", "migratorius"]]);
+    // The repair's answer, in the transcript's spelling: placed, and shown in the script's.
+    const b = await planGraphics({ words: heard, cuts, film, ask: asking(shipped()), ensureIcon: async () => true });
+    expect(b.rounds[0].problems).toEqual([]);
+    expect(b.cues.map(c => [c.id, c.props.term, c.props.at])).toEqual([["term-migratorius-fix", "migratorius", "@migratorious"]]);
+    expect(b.resolved.map(c => c.props.term)).toEqual(["migratorius"]);
+  });
+
+  it("an approved card saved in the transcript's spelling is shown in the script's, at the same times", async () => {
+    const out = await planGraphics({ words: heard, cuts, film, kept: [shipped()], ask: async () => '{"cues": []}', ensureIcon: async () => true });
+    expect(out.lostKept).toEqual([]);
+    expect(out.cues.map(c => c.props.term)).toEqual(["migratorius"]);
+    expect(out.resolved.map(c => [c.start, c.end])).toEqual([[106.167, 110.967]]);
+  });
+
+  it("what the planner reads — a scene read off the transcript, a sentence offered back — is in the script's spelling", () => {
+    // Scene 17 cut short at 110.0: its words are read off the transcript, and spelled as the script.
+    const short = { scenes: [film.scenes[0], { ...film.scenes[1], narrationEndSec: 110 }, { ...film.scenes[2], narrationStartSec: 110 }] };
+    expect(wordsSaidOver(short, heard)[1]).toBe(
+      "The funny part is that the robin's own scientific name, the one printed in the field guides, ends in the word migratorius, which means just about what it"
+    );
+    expect(uncoveredMoments([], heard, film).map(m => m.text)).toContain(
+      "The funny part is that the robin's own scientific name, the one printed in the field guides, ends in the word migratorius, which means just about what it sounds like."
+    );
+    // with no script to read, the words stay as heard
+    const bare = { scenes: short.scenes.map(s => ({ ...s, scriptText: "" })) };
+    expect(wordsSaidOver(bare, heard)[1]).toContain("ends in the word migratorious, which");
+    expect(uncoveredMoments([], heard, bare).map(m => m.text).join(" ")).toContain("migratorious");
   });
 });

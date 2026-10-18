@@ -20,7 +20,7 @@
 //
 // Pure apart from the two things it is handed: `ask` (the model call — metered by the app) and
 // `ensureIcon` (makes an emoji's image available).
-import { CARD_HOLD_MAX_SEC, CueError, LINGER_SEC, MIN_ON_SCREEN_SEC, MIN_SHOT_SEC, NEW_LINE_GRACE_SEC, blinkBeside, findPhrase, findVerbatim, holdToCut, indexWords, ownSentenceEnd, parseSpokenNumber, resolveCues, sameWord, tokens, tooShortToRead, type CueSpec, type ResolvedCue, type Word } from "../cueResolve";
+import { CARD_HOLD_MAX_SEC, CueError, LINGER_SEC, MIN_ON_SCREEN_SEC, MIN_SHOT_SEC, NEW_LINE_GRACE_SEC, blinkBeside, findPhrase, findVerbatim, holdToCut, indexWords, ownSentenceEnd, parseSpokenNumber, resolveCues, sameWord, tokens, tooShortToRead, withinEdits, type CueSpec, type ResolvedCue, type Word } from "../cueResolve";
 import { TEMPLATES, resolveSets, templateById } from "../registry";
 import { FPS, LAYOUT, WIDTH } from "../theme";
 import { DIM_GAP_SEC, MIN_GAP_SEC, checkRules, nameTagRange, type FilmLayout, type LayoutScene } from "./rules";
@@ -273,6 +273,102 @@ const mmss = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStar
 const splitKind = (s: LayoutScene) => (s.hostPanel && s.hostPanel.x > 0 ? "SPLIT (host right, picture left)" : "SPLIT (host left, picture right)");
 const kindOf = (s: LayoutScene) => (s.cta ? "CTA" : s.split ? splitKind(s) : s.hostPresent ? "HOST" : "B-ROLL");
 
+/* ───────────── The script's spelling ───────────── */
+
+/** A word as written: letters, with an apostrophe inside ("robin’s"). Numbers are never respelled. */
+const WRITTEN_WORD = /[A-Za-z]+(?:['’][A-Za-z]+)*/g;
+/** A written word as the transcript's tokens have it (`tokens`): lower case, a straight apostrophe. */
+const spellingKey = (w: string) => w.toLowerCase().replace(/[’‘]/g, "'");
+
+/** The script's words, each by its key: the first spelling as written, or one written as a NAME
+ * (a capital where no sentence starts), which keeps its capital. Pure. */
+function scriptSpellings(script: string): Map<string, { form: string; name: boolean }> {
+  const out = new Map<string, { form: string; name: boolean }>();
+  for (const m of Array.from(script.matchAll(WRITTEN_WORD))) {
+    const before = script.slice(0, m.index).trimEnd();
+    const name = /^[A-Z]/.test(m[0]) && !!before && !/[.?!:]["”’')]*$/.test(before);
+    const key = spellingKey(m[0]);
+    const had = out.get(key);
+    if (!had || (name && !had.name)) out.set(key, { form: m[0], name });
+  }
+  return out;
+}
+
+/** How many single-letter edits apart two keys are (at most 4 is looked for). Pure. */
+const editsApart = (a: string, b: string) => [0, 1, 2, 3, 4].find(n => withinEdits(a, b, n)) ?? Infinity;
+
+/** The script's word with the shown word's case: all capitals, a first capital, or lower case — a name
+ * keeps the script's capital; the shown word's apostrophe style is kept. */
+function asShown(shown: string, script: { form: string; name: boolean }): string {
+  const apostrophe = /['’]/.exec(shown)?.[0];
+  const form = apostrophe ? script.form.replace(/['’]/g, apostrophe) : script.form;
+  if (shown.length > 1 && shown === shown.toUpperCase()) return form.toUpperCase();
+  if (/^[A-Z]/.test(shown)) return form.charAt(0).toUpperCase() + form.slice(1);
+  return script.name ? form : form.toLowerCase();
+}
+
+/**
+ * A SHOWN LINE IN THE SCRIPT'S SPELLING. The resolver times a graphic on the TRANSCRIPT, and the planner
+ * copies its words from what it is shown and what the checks say, so a word the transcriber spelled its
+ * own way could reach the screen: Walter's job 411 (1:47) put "migratorious" — the transcript's — on the
+ * term card, while the script, the real name and the field guide in the card's own window all read
+ * "migratorius". A word on screen is put back in the script's spelling when:
+ * - it is HEARD while the graphic is up (`heard`, the transcript's tokens): the transcript's spelling;
+ * - the script around it never writes it that way; and
+ * - the script there writes a word the resolver takes for it (`sameWord`: a close spelling, an
+ *   apostrophe, a plural): the closest one, and the only one that close.
+ * So a word the script itself says, a word nobody said, a short word (under four letters) and a number
+ * never change, and every changed word still matches what is heard. Pure.
+ */
+export function inScriptSpelling(text: string, script: string, heard: Set<string>): string {
+  if (!script.trim() || !heard.size) return text;
+  const spellings = scriptSpellings(script);
+  return text.replace(WRITTEN_WORD, shown => {
+    const key = spellingKey(shown);
+    if (key.replace(/'/g, "").length < 4 || spellings.has(key) || !heard.has(key)) return shown;
+    let best: { form: string; name: boolean } | undefined;
+    let fewest = Infinity;
+    let tie = false;
+    for (const [k, written] of Array.from(spellings)) {
+      if (!sameWord(key, k)) continue;
+      const edits = editsApart(key, k);
+      if (edits < fewest) [best, fewest, tie] = [written, edits, false];
+      else if (edits === fewest) tie = true;
+    }
+    return best && !tie ? asShown(shown, best) : shown;
+  });
+}
+
+/** The props a graphic SHOWS as words (registry): its lines, labels, terms and accent words. Times,
+ * "at"/"say" anchors, icons and placement are never respelled. */
+const SHOWN_TEXT = new Set(["kicker", "headline", "phrase", "myth", "truth", "title", "sub", "label", "text", "fact", "question", "line", "meaning", "quote", "term", "emphasis", "value", "unit", "display", "source"]);
+
+/**
+ * Every word a graphic shows in the script's spelling (`inScriptSpelling`), in place: the script around
+ * where it resolved (`at`, the scenes it is up over and one either side) against the words heard while
+ * it is up (a second either side). Works on a planned cue and on a resolved one alike — only shown
+ * words change, one word for one word, so every time stays where it was. Returns what changed. Pure
+ * apart from mending `cue.props`.
+ */
+export function respellCue(cue: { props: Record<string, unknown> }, at: { start: number; end: number }, film: FilmLayout, words: Word[]): string[] {
+  const script = scriptAround(film, at.start, at.end);
+  const heard = new Set(words.filter(w => w.end >= at.start - 1 && w.start <= at.end + 1).flatMap(w => tokens(w.text)));
+  const changed: string[] = [];
+  const walk = (v: unknown, key: string): unknown => {
+    if (typeof v === "string") {
+      if (!SHOWN_TEXT.has(key)) return v;
+      const next = inScriptSpelling(v, script, heard);
+      if (next !== v) changed.push(`"${v}" → "${next}"`);
+      return next;
+    }
+    if (Array.isArray(v)) v.forEach((x, i) => (v[i] = walk(x, key)));
+    else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) (v as Record<string, unknown>)[k] = walk(x, k);
+    return v;
+  };
+  walk(cue.props, "");
+  return changed;
+}
+
 /**
  * What is said over each scene (one line per `film.scenes` entry), as the FILM'S OWN SOUND has it:
  * the transcript's words whose middle falls inside the scene's span — the clock the resolver times a
@@ -284,7 +380,9 @@ const kindOf = (s: LayoutScene) => (s.cta ? "CTA" : s.split ? splitKind(s) : s.h
  * them (a number read as digits, a compound split, one misheard word), the script's own text is
  * kept: the same words on the same clock, spelled as written — the planner copies a line onto the
  * screen, and Hank's "out of square" heard as "out a square" (job 398) must not be shown that way.
- * A span with no words heard keeps its script text. Pure.
+ * Where the heard words are read instead, each word the transcriber spelled its own way takes the
+ * script's spelling (`inScriptSpelling`, the scene's script and one either side): the planner copies
+ * these words onto the screen. A span with no words heard keeps its script text. Pure.
  */
 export function wordsSaidOver(film: FilmLayout, words: Word[]): string[] {
   const heard: Word[][] = film.scenes.map(() => []);
@@ -299,7 +397,11 @@ export function wordsSaidOver(film: FilmLayout, words: Word[]): string[] {
     if (!index.length) return script;
     const hits = script ? findVerbatim(index, script, 0) : null;
     if (hits && hits[0] === 0 && index[hits[hits.length - 1]].word === index[index.length - 1].word) return script;
-    return heard[k].map(w => w.text.trim()).join(" ");
+    const near = film.scenes
+      .slice(Math.max(0, k - 1), k + 2)
+      .map(x => (x.scriptText ?? "").trim())
+      .join(" ");
+    return inScriptSpelling(heard[k].map(w => w.text.trim()).join(" "), near, new Set(index.map(t => t.tok)));
   });
 }
 
@@ -623,25 +725,29 @@ const MOMENT = new RegExp(
 
 /**
  * Sentences with no graphic over them that hold a moment (`MOMENT`), outside the call to action, in
- * film order — what the fill round asks about. By the script, never by the clock. Pure.
+ * film order — what the fill round asks about. By the script, never by the clock: each sentence is
+ * the words heard in the script's spelling (`inScriptSpelling`), as the planner copies them onto the
+ * screen (job 411's fill round was offered the transcript's "migratorious"). Pure.
  */
 export function uncoveredMoments(placed: ResolvedCue[], words: Word[], film: FilmLayout): { from: number; to: number; text: string }[] {
   const cta = film.scenes.filter(s => s.cta).map(s => [s.narrationStartSec, s.narrationEndSec] as const);
-  const sentences: { from: number; to: number; text: string }[] = [];
+  const sentences: { from: number; to: number; text: string; heard: Set<string> }[] = [];
   let cur: Word[] = [];
   for (const w of words) {
     cur.push(w);
     if (/[.?!]["”')]*$/.test(w.text.trim())) {
-      sentences.push({ from: cur[0].start, to: cur[cur.length - 1].end, text: cur.map(x => x.text.trim()).join(" ") });
+      sentences.push({ from: cur[0].start, to: cur[cur.length - 1].end, text: cur.map(x => x.text.trim()).join(" "), heard: new Set(cur.flatMap(x => tokens(x.text))) });
       cur = [];
     }
   }
-  return sentences.filter(s => {
-    if (s.text.split(" ").length < 4 || !MOMENT.test(s.text)) return false;
-    if (cta.some(([a, b]) => s.from < b && s.to > a)) return false;
-    const len = s.to - s.from;
-    return !placed.some(c => Math.min(c.end, s.to) - Math.max(c.start, s.from) > len * 0.4);
-  });
+  return sentences
+    .filter(s => {
+      if (s.text.split(" ").length < 4 || !MOMENT.test(s.text)) return false;
+      if (cta.some(([a, b]) => s.from < b && s.to > a)) return false;
+      const len = s.to - s.from;
+      return !placed.some(c => Math.min(c.end, s.to) - Math.max(c.start, s.from) > len * 0.4);
+    })
+    .map(s => ({ from: s.from, to: s.to, text: inScriptSpelling(s.text, scriptAround(film, s.from, s.to), s.heard) }));
 }
 
 /** A word as compared: lower case, no punctuation ("throne," is "throne", "Rome’s" is "rome's"). */
@@ -1356,7 +1462,28 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
       placed.push({ spec, t: 0, kept: true });
     }
     const resolveAll = () => resolveCues(placed.map(p => p.spec), words, opts);
+    /** A cue's shown words in the script's spelling (`respellCue`, job 411's "migratorious"), read
+     * where it resolved, and the sheet resolved again — or undefined when nothing changed. A sheet that
+     * would no longer resolve keeps the words as they were (the script's spelling is the same word to
+     * the resolver, so it should never happen). */
+    const respelled = (spec: CueSpec, at: ResolvedCue): ResolvedCue[] | undefined => {
+      const was = structuredClone(spec.props);
+      if (!respellCue(spec, at, film, words).length) return undefined;
+      try {
+        return resolveAll();
+      } catch {
+        spec.props = was;
+        return undefined;
+      }
+    };
     let resolved: ResolvedCue[] = placed.length ? resolveAll() : [];
+    // An approved graphic is SHOWN in the script's spelling too: a word changes, never a time, and
+    // nothing approved is dropped for it.
+    for (const p of placed) {
+      const at = resolved.find(r => r.id === p.spec.id);
+      const fixed = at && respelled(p.spec, at);
+      if (fixed) resolved = fixed;
+    }
     for (const r of resolved) placed.find(p => p.spec.id === r.id)!.t = r.start;
     for (const p of checkRules(resolved, film)) problems.push({ cue: `[kept] ${p.cue}`, problem: p.problem });
 
@@ -1466,6 +1593,14 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
       }
       let mine = next.find(r => r.id === spec.id)!;
       startsAt.set(spec.id, startWordNear(spec, mine.start));
+      // NOTHING ON SCREEN IS THE TRANSCRIPT'S SPELLING OF A SCRIPT WORD (`respellCue`): job 411's term
+      // card read "migratorious" beside a field guide printing the script's "migratorius". Before every
+      // check below, so each reads the words as they will be drawn.
+      const fixed = respelled(spec, mine);
+      if (fixed) {
+        next = fixed;
+        mine = next.find(r => r.id === spec.id)!;
+      }
       // A QUOTE is signed with the host's name, so it must be the host's own words — job 399 signed
       // "Could I keep the rest of the can, please?", the line the host tells the viewer to say after
       // "speak up." (`notTheHostsWords`). Read where it resolved: the words leading into it, and
@@ -1544,6 +1679,8 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
         // The mended steps are what is drawn, and a graphic's reading time grows with the words it
         // shows ("Catch" given back "a flight attendant" holds longer): placed again, so every check
         // below — and the timing handed on — measures the steps as drawn, not as the planner wrote them.
+        // Words given back from what was heard are put in the script's spelling first (`respellCue`).
+        respellCue(spec, mine, film, words);
         if (JSON.stringify(steps) !== asPlanned) {
           try {
             next = resolveAll();
@@ -1675,7 +1812,8 @@ ${offered.map((l, i) => `${i + 1}. ${l.kind === "steps" ? "[steps] " : ""}${l.it
 ${verdict.problems.filter(p => !p.cue.startsWith("[kept]")).map(p => `- ${p.cue}: ${p.problem}`).join("\n")}
 
 Return the corrected NEW cues (JSON only, the whole list of new ones). Fix each failed cue — use words the
-narrator really says, numbers he says, move it to where it may go, or drop it. Keep the ones that passed.`;
+narrator really says (spelled as the script spells them), numbers he says, move it to where it may go, or
+drop it. Keep the ones that passed.`;
     specs = parseSheet(
       await ask(system, [
         { role: "user", content: user },
@@ -1732,7 +1870,8 @@ still applies. Return JSON only: {"cues": [ ...the NEW cues only... ]}, with ids
 ${failed.map(p => `- ${p.cue}: ${p.problem}`).join("\n")}
 
 Return the corrected ADDED cues (JSON only, {"cues": [...]}, only the ones you added). Fix each — use
-words the narrator really says, a whole sentence where the template needs one, or drop it.`;
+words the narrator really says (spelled as the script spells them), a whole sentence where the template
+needs one, or drop it.`;
         try {
           const fixed = parseSheet(await ask(system, [...base, { role: "user", content: fill + "\n\nYOUR ADDED CUES WERE:\n" + JSON.stringify({ cues: added }) + "\n\n" + fix }])).filter(c => !taken.has(c.id) && !keptIds.has(c.id));
           next = await validate(structuredClone([...accepted, ...fixed]), true);
