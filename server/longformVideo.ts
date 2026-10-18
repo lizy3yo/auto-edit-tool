@@ -64,6 +64,7 @@ import {
   lookToHold,
   memoryFor,
   memoryView,
+  panelLook,
   pictureSettled,
   sameThingMove,
   SCREEN_ITEM_VIEW,
@@ -12748,12 +12749,17 @@ async function compositeSceneSplit(
 
 /**
  * A split's panel of a KEY THING is drawn from that thing's earlier pictures, like any picture of it
- * (Hank's job 258: "that's the whole build" showed a square holder unlike the one just built). The
- * memory is looked up on the HOST scene — the panel's own scene object is a copy.
+ * (Hank's job 258: "that's the whole build" showed a square holder unlike the one just built), and
+ * by its written look when none of them is there to follow (`keyThingLookClause`). It also wears the
+ * named kind's exact look the pictures of that thing carry (`panelNamedLook`): the named-things step
+ * reads only full-frame pictures, and job 400's scroll panel at scene 27 was a blank parchment on two
+ * rollers between pictures of one tied papyrus roll. Everything is looked up on the HOST scene — the
+ * panel's own scene object is a copy. Exported for testing.
  */
-async function withSplitMemory(
+export async function withSplitMemory(
   host: StoryboardScene,
-  right: StoryboardScene
+  right: StoryboardScene,
+  timeoutMs?: number
 ): Promise<StoryboardScene> {
   if (!host.keyThing) return right;
   // The panel's soft print decides its remembered close-up (`BLUR_PRINT_VIEW`), so it is marked
@@ -12762,7 +12768,8 @@ async function withSplitMemory(
   return {
     ...right,
     keyThing: host.keyThing,
-    ...memoryFields(await memoryFor(host), memoryView(host)),
+    namedLook: right.namedLook ?? panelLook(host),
+    ...memoryFields(await memoryFor(host, timeoutMs), memoryView(host)),
   };
 }
 
@@ -19010,6 +19017,12 @@ async function regenerateSplitRight(
   scene.sceneStatus = "processing";
   scene.error = undefined;
   const dims = dimensionsFor(TALKING_HEAD_ASPECT_RATIO);
+  // A regenerated panel of a key thing is still drawn from that thing's pictures, by its written
+  // look when it has none, and in its named kind's look (`withSplitMemory`) — all of which are read
+  // off what the last pass over THIS board found. Every path here starts from a storyboard read back
+  // from the database, new objects no pass has seen, so without this the operator's panel was drawn
+  // from its own words alone; a full-frame regenerate has always done the same (`renderSceneClipInPlace`).
+  attachMemory(scenes, [scene], params.keyThings);
 
   if (!scene.hostClipUrls?.length) {
     const existing = scene.clipUrls?.length

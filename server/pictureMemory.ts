@@ -497,6 +497,36 @@ export function keyThingLookClause(scene: StoryboardScene): string {
     : ` HOW THE ${scene.keyThing.toUpperCase()} LOOKS in every picture of this video: ${scene.keyThingLook}. Draw this same one${own}`;
 }
 
+/**
+ * A SPLIT PANEL WEARS ITS THING'S NAMED LOOK (2026-10-18, job 400 scene 27). The named-things step
+ * (`describeNamedLooks`) reads only full-frame pictures, so a panel never carried the exact look of
+ * the kind its key thing is: the essay scroll at scenes 20, 28 and 34 was drawn by "papyrus scroll:
+ * … rolled into a cylinder … a thin brown cord tied around its middle", while the panel at 27, six
+ * seconds before 28, had only its own words ("an aged papyrus scroll laid flat on a wooden desk, the
+ * surface worn and darkened") and came back a blank parchment on two dark rollers — another object.
+ * So a panel takes the look the pictures ABOUT its key thing carry — the one more than half of them
+ * carry — when that kind is a kind of the thing (its name names the thing, or the panel's own words
+ * name the kind). Counted from pictures whose own thing it is and that are about it (`isSubject`):
+ * never a close-up of one part (a block on a quilt is a kind of its own), a screen (an app's look),
+ * or a picture with the thing beside its subject. Never onto a panel that has a look of its own, or
+ * a screen panel. Undefined for anything that is not a split. Pure.
+ */
+export function panelNamedLook(scenes: StoryboardScene[], s: StoryboardScene): string | undefined {
+  if (!s.hostPresent || !s.splitVisual || s.namedLook || isScreen(s)) return undefined;
+  const thing = ownKeyThing(s);
+  if (!thing) return undefined;
+  const about = scenes.filter(
+    x => x !== s && source(x) && ownKeyThing(x) === thing && !x.partOf && !isScreen(x) && isSubject(x, thing)
+  );
+  const carried = new Map<string, number>();
+  for (const x of about) if (x.namedLook) carried.set(x.namedLook, (carried.get(x.namedLook) ?? 0) + 1);
+  for (const [look, n] of Array.from(carried)) {
+    const kind = look.split(":")[0];
+    if (n * 2 > about.length && (wordsName(thing, kind) || wordsName(s.splitVisual, kind))) return look;
+  }
+  return undefined;
+}
+
 /** How a SCREEN picture uses its item's memory: only as the photo inside the listing. */
 export const SCREEN_ITEM_VIEW =
   "the item appears only as the photo inside the listing on the screen";
@@ -639,6 +669,8 @@ const viewOf = new WeakMap<StoryboardScene, string | undefined>();
 const ownSourcesOf = new WeakMap<StoryboardScene, StoryboardScene[]>();
 /** The look a scene is drawn by when no picture of its own thing comes (`keyThingLookFor`). */
 const lookOf = new WeakMap<StoryboardScene, string | undefined>();
+/** The named kind's look a split's panel takes from the pictures of its thing (`panelNamedLook`). */
+const panelLookOf = new WeakMap<StoryboardScene, string | undefined>();
 /** Of `sourcesOf`, the picture shown right before the scene, about something else (`rightBeforeToRecompose`). */
 const rightBeforeOf = new WeakMap<StoryboardScene, StoryboardScene | undefined>();
 /** Pictures a later picture is drawn from for their OWN key thing (`copiedLater`). */
@@ -681,6 +713,7 @@ export function attachMemory(
     ownSourcesOf.set(s, sources.filter(x => x === set || (!!s.keyThing && shows(x, s.keyThing))));
     viewOf.set(s, memoryViewFor(board, s));
     lookOf.set(s, keyThingLookFor(s, keyThings, makes));
+    panelLookOf.set(s, panelNamedLook(board, s));
     rightBeforeOf.set(s, rightBeforeToRecompose(board, s, sources));
     copied.delete(s);
   }
@@ -704,6 +737,14 @@ export function attachMemory(
 /** The camera position `s` is drawn from when it has a memory (`memoryViewFor`). */
 export function memoryView(s: StoryboardScene): string | undefined {
   return viewOf.get(s);
+}
+
+/**
+ * The named kind's look the panel of split `s` is drawn by (`panelNamedLook`), as the last
+ * `attachMemory` over its film found it; undefined for a scene no pass has seen.
+ */
+export function panelLook(s: StoryboardScene): string | undefined {
+  return panelLookOf.get(s);
 }
 
 /** Whether a later picture is drawn from `s` for the key thing `s` is about (`attachMemory`). */

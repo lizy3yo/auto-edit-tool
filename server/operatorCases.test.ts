@@ -2376,3 +2376,58 @@ describe("job 400: the style bible keeps its world when it mentions books", asyn
     expect(bibleWithoutPrintedMatter(cabin)).toEqual({ bible: cabin });
   });
 });
+
+describe("job 400 scene 27: a split panel of a key thing looks like that thing's other pictures", async () => {
+  const { attachMemory, panelNamedLook } = await import("./pictureMemory");
+  const { withSplitMemory } = await import("./longformVideo");
+  // The named-things step wrote this onto scenes 20, 28 and 34; it never reads a split's panel.
+  const PAPYRUS =
+    "papyrus scroll: a long strip of pale tan-beige reed paper with faint crisscross fibre texture, rolled into a cylinder about a forearm long, with ragged slightly darker edges and a thin brown cord tied around its middle; when partly unrolled, rows of small faded dark-brown script run in narrow columns, soft and unreadable";
+  const scene = (o: Partial<StoryboardScene>) => ({ narration: "n", scriptText: "n", ...o }) as StoryboardScene;
+  const board = () => [
+    scene({
+      index: 20,
+      keyThing: "scroll",
+      namedLook: PAPYRUS,
+      pictureUrl: "https://r2.test/longform/400/still-src-20.png",
+      showSubject: "an aged pale tan papyrus scroll rolled and tied with a thin brown cord, lying on a heavy carved dark wooden desk, a close-up of one detail of it filling the frame",
+      visualPrompt: "an aged pale tan papyrus scroll rolled and tied with a thin brown cord, lying on a heavy carved dark wooden desk",
+    }),
+    scene({
+      index: 27,
+      hostPresent: true,
+      keyThing: "scroll",
+      visualPrompt: "the channel's host, seated in a chair talking directly to the camera",
+      splitVisual: "An aged papyrus scroll laid flat on a wooden desk, the surface worn and darkened by age and use.",
+    }),
+    scene({
+      index: 34,
+      keyThing: "scroll",
+      namedLook: PAPYRUS,
+      showSubject: "an aged pale tan papyrus scroll unrolled open on a heavy carved dark desk, faded unreadable script in narrow columns, beside a round glass inkwell and dark feather quill",
+      visualPrompt: "an aged pale tan papyrus scroll unrolled open on a heavy carved dark desk",
+    }),
+  ];
+
+  it("the scroll panel is drawn from scene 20's picture, in the same papyrus look as 20 and 34", async () => {
+    const b = board();
+    attachMemory(b, [], [{ name: "scroll", look: "an aged papyrus scroll, rolled and tied with a thin cord, resting on a wooden desk" }]);
+    const panel = await withSplitMemory(b[1], buildSplitRightScene(b[1]), 0);
+    expect(panel.memoryRefUrls).toEqual(["https://r2.test/longform/400/still-src-20.png"]);
+    const prompt = buildStillPrompt(panel, false, undefined, undefined, true);
+    expect(prompt).toContain(`EXACT LOOK — ${PAPYRUS}.`);
+    // Two dark rollers came from the panel's own words alone; the look now says one tied roll.
+    expect(prompt).toContain("rolled into a cylinder");
+  });
+
+  it("a panel whose thing's pictures carry no look, or another thing's, gets none (job 397 scene 3)", () => {
+    const b = board();
+    for (const s of b) if (!s.hostPresent) s.namedLook = undefined;
+    expect(panelNamedLook(b, b[1])).toBeUndefined();
+    // The board's phone-screen pictures carry the app's look: never the board's own.
+    const thing = "walnut and maple cutting board";
+    const panel = scene({ index: 3, hostPresent: true, keyThing: thing, splitVisual: "Finished walnut and maple cutting boards leaning against the wall of a workshop garage." });
+    const screen = scene({ index: 8, keyThing: thing, showSubject: "cutting board shown on a phone screen as an online listing", namedLook: "Etsy: phone screen with a white background, a thin top bar with a small soft orange logo shape" });
+    expect(panelNamedLook([panel, screen], panel)).toBeUndefined();
+  });
+});
