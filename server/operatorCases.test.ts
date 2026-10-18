@@ -3611,3 +3611,25 @@ describe("the host name card: on the self-introduction, in Inter, in the graphic
     expect(await interFontReady()).toBe(true);
   });
 });
+
+describe("the host name card is judged on the take's real length (round 11 review, 2026-10-18)", () => {
+  // Assembly handed the card's placement `audioDurationSec`, which `sceneHoldPlan` leaves unset on
+  // every scene — so every take read as long enough to hold the card, and a take that could not show
+  // it still took it. Scarlett's job 387: "I'm Scarlett Sterling, and this channel is for" is 2.98 s
+  // on screen, too short for the card, and the film would have had no name at all.
+  it("387: the 2.98 s introduction gives the card to the 7.1 s cold open, which can show it", async () => {
+    const { assembledSceneSecs, nameCardSceneIndices } = await import("./longformVideo");
+    const rows: [number, number, Partial<StoryboardScene>][] = [
+      [0, 7.14569, { hostPresent: true, hostOpener: true }],
+      [7.14569, 11.3309, {}],
+      [11.3309, 16.597, { hostPresent: true, splitRightUrl: "https://r2.example/387-3.jpg" }],
+      [16.597, 27.1868, {}],
+      [27.1868, 30.216, { hostPresent: true, hostIntro: true }],
+      [30.216, 35.54, {}],
+    ];
+    const scenes = rows.map(([, , f]) => f as StoryboardScene);
+    // As assembly builds its entries: the slice set, `audioDurationSec` unset.
+    const secs = assembledSceneSecs(rows.map(([a, b]) => ({ sliceStartSec: a, sliceEndSec: b, audioDurationSec: undefined })));
+    expect(nameCardSceneIndices(scenes, secs)).toEqual([0]);
+  });
+});

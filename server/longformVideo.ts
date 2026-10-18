@@ -367,7 +367,7 @@ import {
   type Silence,
   type RippleEdge,
 } from "./sceneTiming";
-import { sceneHoldPlan } from "../shared/filmTimeline";
+import { planMasterOverlayScenes, sceneHoldPlan } from "../shared/filmTimeline";
 import {
   apimartAccountOf,
   heygenAccountOf,
@@ -8511,6 +8511,50 @@ export function ctaAssemblyScene(
  * differ by a frame or two: a run is only picked when it shows the card this much longer. */
 const NAME_CARD_FIT_MARGIN_SEC = 0.1;
 
+/**
+ * Each assembled scene's on-screen length, seconds, worked out the way `assemblePerSceneFilm` will
+ * encode it — what `nameCardSceneIndices` judges "can this take hold the card" on. On the master
+ * track (every scene carries its slice) it is the master-overlay plan's frame-locked length; off it,
+ * the scene's own voiced length plus its holds; unknown when neither is known.
+ *
+ * NOT the entries' `audioDurationSec`: `sceneHoldPlan` no longer emits a hold, so that is unset on
+ * every scene, every unknown length counted as long enough, and a lone 2.3-2.6 s cold open (jobs
+ * 403 and 406) would still have been picked over a take that can show the card. Pure.
+ */
+export function assembledSceneSecs(
+  scenes: {
+    sliceStartSec?: number;
+    sliceEndSec?: number;
+    audioDurationSec?: number;
+    minHoldSec?: number;
+    tailHoldSec?: number;
+    headHoldSec?: number;
+    /** The scene's own voiced length (`StoryboardScene.audioDuration`), for the per-scene path. */
+    audioDuration?: number;
+  }[]
+): (number | undefined)[] {
+  const overlay =
+    scenes.length > 0 &&
+    scenes.every(
+      s => Number.isFinite(s.sliceStartSec as number) && Number.isFinite(s.sliceEndSec as number)
+    );
+  if (overlay)
+    return planMasterOverlayScenes({
+      scenes: scenes.map(s => ({
+        sliceStartSec: s.sliceStartSec as number,
+        sliceEndSec: s.sliceEndSec as number,
+        holdSec: s.audioDurationSec,
+        minHoldSec: s.minHoldSec,
+        tailHoldSec: s.tailHoldSec,
+        headHoldSec: s.headHoldSec,
+      })),
+    }).scenes.map(p => p.muxDurationSec);
+  return scenes.map(s => {
+    const voiced = Math.max(s.audioDuration ?? 0, s.audioDurationSec ?? 0);
+    return voiced > 0 ? voiced + (s.tailHoldSec ?? 0) + (s.headHoldSec ?? 0) : undefined;
+  });
+}
+
 /** True when a contiguous run shows the name card in at least one of its scenes, by the rule
  * assembly draws it with (`nameCardOnWindow`). A scene of unknown length counts as long enough. */
 function runShowsNameCard(secs: (number | undefined)[]): boolean {
@@ -8539,8 +8583,8 @@ function runShowsNameCard(secs: (number | undefined)[]): boolean {
  * Takes positions in the ASSEMBLED scene list (the filtered `ready` array), not
  * `StoryboardScene.index` — a scene dropped for a missing clip therefore shifts the card onto the
  * next surviving host shot instead of onto nothing, and a dropped opener shortens the run rather
- * than splitting it. `onScreenSec[i]` is position i's length; unknown lengths count as long
- * enough. Pure — unit-tested.
+ * than splitting it. `onScreenSec[i]` is position i's length (`assembledSceneSecs`); unknown
+ * lengths count as long enough. Pure — unit-tested.
  */
 export function nameCardSceneIndices(
   scenes: Pick<
@@ -18261,7 +18305,10 @@ async function assembleAndFinalizeCore(
   const nameCardScenes = hasHostIdentity
     ? nameCardSceneIndices(
         readyScenes,
-        ready.map(r => r.audioDurationSec)
+        // Each scene's real on-screen length — `audioDurationSec` is unset on every scene now.
+        assembledSceneSecs(
+          ready.map((r, i) => ({ ...r, audioDuration: readyScenes[i].audioDuration }))
+        )
       )
     : [];
   if (hasHostIdentity && nameCardScenes.length === 0 && readyScenes.some(s => s.hostPresent)) {
