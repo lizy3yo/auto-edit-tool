@@ -65,6 +65,9 @@ describe("planGlitchRerender — a clip that moves wrong is paid for once (the o
     // The ledger keeps its ONE paid render and says what became of it.
     expect(s.submits).toHaveLength(1);
     expect(s.submits![0]).toMatchObject({ reason: "first", movedWrong: "the smoke alarm slid along the ceiling" });
+    // A still from now on, before the still is even made: a retry of a still that failed must
+    // never buy the video again.
+    expect(s.stillImage).toBe(true);
   });
 
   it("marks only a b-roll entry — a beat made b-roll keeps its lip-sync ledger untouched", () => {
@@ -109,11 +112,14 @@ describe("CLIP_GLITCH_RERENDER=1 — the old second render from the same frame",
     expect(s.nextSubmitReason).toBe("glitch");
     expect(s.clipUrls).toBeUndefined();
     expect(s.pictureUrl).toBe(KF);
+    // Still a moving cutaway: the second render is a video.
+    expect(s.stillImage).toBeFalsy();
   });
 
   it("the second glitch makes it the still, made from the frame — never a third paid render", () => {
     const s = smokeShot({ motionGlitches: 1 });
     expect(planGlitchRerender(s, { rerender: true })).toEqual({ next: "still", keyframe: KF });
+    expect(s.stillImage).toBe(true);
     expect(s.motionGlitches).toBe(2);
     expect(s.nextSubmitReason).toBeUndefined();
   });
@@ -161,6 +167,8 @@ describe("the glitch re-render has its own line on the ledger (CLIP_GLITCH_REREN
 function lanesFor(scene: StoryboardScene, verdicts: boolean[]) {
   const renders: (string | undefined)[] = [];
   const stills: (string | undefined)[] = [];
+  // What the check was told: the picture's description and whether its subject moves by itself.
+  const scanned: [string | undefined, boolean | undefined][] = [];
   let stillFailures = 0;
   const lanes: SceneClipLanes = {
     clips: async keyframe => {
@@ -174,10 +182,13 @@ function lanesFor(scene: StoryboardScene, verdicts: boolean[]) {
       scene.nextSubmitReason = undefined;
       return [`https://pub.example.r2.dev/longform/262/clip-16-${renders.length}.mp4`];
     },
-    scan: async () =>
-      verdicts.shift()
+    scan: async (_url, about, selfMoving) => {
+      scanned.push([about, selfMoving]);
+      return verdicts.shift()
         ? { glitch: true, what: "the smoke alarm slid along the ceiling" }
-        : { glitch: false, what: "" },
+        : { glitch: false, what: "" };
+    },
+    // Like `fallbackSceneToStill`: the scene is settled a still only once the still is made.
     still: async keyframe => {
       stills.push(keyframe);
       if (stillFailures-- > 0) throw new Error("ken burns encode failed");
@@ -185,7 +196,14 @@ function lanesFor(scene: StoryboardScene, verdicts: boolean[]) {
       scene.sceneStatus = "completed";
     },
   };
-  return { lanes, renders, stills, failStillOnce: () => (stillFailures = 1) };
+  return {
+    lanes,
+    renders,
+    stills,
+    scanned,
+    failStillOnce: () => (stillFailures = 1),
+    failStill: (n: number) => (stillFailures = n),
+  };
 }
 
 const PARAMS = {} as LongformInputParams;
@@ -224,6 +242,36 @@ describe("renderSceneClip — each paid video is rendered once", () => {
     expect(s.sceneStatus).toBe("completed");
   });
 
+  it("a still that fails twice leaves a failed STILL — a retry makes the still, never buys the video again", async () => {
+    vi.stubEnv("CLIP_GLITCH_RERENDER", "");
+    const s = fresh();
+    const t = lanesFor(s, [true]);
+    t.failStill(2);
+    await loop(s, t.lanes);
+    expect(t.renders).toHaveLength(1);
+    expect(t.stills).toEqual([KF, KF]);
+    expect(s.sceneStatus).toBe("failed");
+    // What "Retry failed scenes" and a restart render from: the scene says still.
+    expect(s.stillImage).toBe(true);
+    expect(s.submits).toHaveLength(1);
+  });
+
+  it("a video that FAILED (no clip judged) whose still fails stays a moving cutaway, as before", async () => {
+    vi.stubEnv("CLIP_GLITCH_RERENDER", "");
+    const s = fresh();
+    const t = lanesFor(s, []);
+    t.lanes.clips = async () => {
+      throw new Error("grok task failed");
+    };
+    t.failStillOnce();
+    await loop(s, t.lanes);
+    expect(t.stills).toEqual([undefined]); // a new draw: no frame was checked for a clip
+    expect(t.scanned).toEqual([]);
+    expect(s.sceneStatus).toBe("failed");
+    expect(s.stillImage).toBeFalsy();
+    expect(s.motionGlitches).toBeUndefined();
+  });
+
   it("with CLIP_GLITCH_RERENDER=1 the old one re-render from the same frame comes back", async () => {
     vi.stubEnv("CLIP_GLITCH_RERENDER", "1");
     const s = fresh();
@@ -255,6 +303,8 @@ describe("renderSceneClip — each paid video is rendered once", () => {
     await loop(s, t.lanes);
     expect(t.renders).toEqual([undefined]);
     expect(t.stills).toEqual([]);
+    // The check is told what the picture is and that its subject moves by itself.
+    expect(t.scanned).toEqual([[s.visualPrompt, true]]);
     expect(s.clipUrls).toEqual(["https://pub.example.r2.dev/longform/262/clip-16-1.mp4"]);
     expect(s.submits?.map(x => [x.reason, x.movedWrong])).toEqual([["first", undefined]]);
     expect(s.motionGlitches).toBeUndefined();

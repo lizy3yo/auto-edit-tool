@@ -5288,7 +5288,13 @@ describe("each paid video is rendered once (the operator, 2026-10-18)", () => {
       audioDuration: 4.2,
       pictureUrl: kf,
     });
-  const run = async (s: StoryboardScene, glitch: boolean) => {
+  // The check's own answer for the clip, decided by the real verdict code with what the loop
+  // tells it (the picture moves by itself): the job 262 answers from the earlier case above.
+  const SMOKE = { what: "smoke slightly denser/shifted on right", meant: true };
+  const SLID = { what: "the smoke alarm slid along the ceiling", meant: false };
+  const answer = (c: { what: string; meant: boolean }) =>
+    JSON.stringify({ changes: [c], cover: [], hands_visible: false, untouched_moved: false, morph: false, vanished: false });
+  const run = async (s: StoryboardScene, change: { what: string; meant: boolean }) => {
     const { renderSceneClip } = await import("./longformVideo");
     const renders: (string | undefined)[] = [];
     const stills: (string | undefined)[] = [];
@@ -5303,8 +5309,7 @@ describe("each paid video is rendered once (the operator, 2026-10-18)", () => {
         s.nextSubmitReason = undefined;
         return [`https://r2/longform/262/clip-16-${renders.length}.mp4`];
       },
-      scan: async () =>
-        glitch ? { glitch: true, what: "the smoke alarm slid along the ceiling" } : { glitch: false, what: "" },
+      scan: async (_url, _about, selfMoving) => parseClipGlitchVerdict(answer(change), selfMoving),
       still: async keyframe => {
         stills.push(keyframe);
         s.stillImage = true;
@@ -5318,7 +5323,7 @@ describe("each paid video is rendered once (the operator, 2026-10-18)", () => {
     vi.stubEnv("CLIP_GLITCH_RERENDER", "");
     try {
       const s = scene();
-      const { renders, stills } = await run(s, true);
+      const { renders, stills } = await run(s, SLID);
       expect(renders).toHaveLength(1);
       expect(stills).toEqual([kf]);
       expect(s.submits?.map(x => x.reason)).toEqual(["first"]);
@@ -5332,7 +5337,7 @@ describe("each paid video is rendered once (the operator, 2026-10-18)", () => {
     vi.stubEnv("CLIP_GLITCH_RERENDER", "");
     try {
       const s = scene();
-      const { renders, stills } = await run(s, false);
+      const { renders, stills } = await run(s, SMOKE);
       expect(renders).toHaveLength(1);
       expect(stills).toEqual([]);
       expect(s.clipUrls).toEqual(["https://r2/longform/262/clip-16-1.mp4"]);
@@ -5346,7 +5351,7 @@ describe("each paid video is rendered once (the operator, 2026-10-18)", () => {
     vi.stubEnv("CLIP_GLITCH_RERENDER", "1");
     try {
       const s = scene();
-      const { renders, stills } = await run(s, true);
+      const { renders, stills } = await run(s, SLID);
       expect(renders).toEqual([undefined, kf]);
       expect(stills).toEqual([kf]); // it moved wrong again: the still, never a third render
       expect(s.submits?.map(x => x.reason)).toEqual(["first", "glitch"]);

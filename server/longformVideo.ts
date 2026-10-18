@@ -14879,6 +14879,11 @@ export function planGlitchRerender(
     scene.nextSubmitReason = "glitch";
     return { next: "rerender", keyframe };
   }
+  // The beat is a still from here on, said BEFORE the still is made: if making it fails twice
+  // the scene is left failed, and "Retry failed scenes" (or a restart that finds it clip-less)
+  // renders whatever the scene says it is — without this, a moving cutaway: the video the
+  // operator said is paid for once, bought again for a beat whose first video moved wrong.
+  scene.stillImage = true;
   return { next: "still", keyframe };
 }
 
