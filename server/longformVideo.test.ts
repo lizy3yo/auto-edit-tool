@@ -10238,6 +10238,127 @@ describe("a picture that ships with a fault says so, and two faults get one chan
   });
 });
 
+describe("a host picture that drew the face is drawn again turned away (round 11's review, jobs 401/406/407)", () => {
+  const pngOf = (bg: string) =>
+    sharp({ create: { width: 8, height: 8, channels: 3, background: bg } }).png().toBuffer();
+  const drawsOf = (...frames: Buffer[]) => {
+    const fn = vi.fn();
+    for (const f of frames) fn.mockResolvedValueOnce({ success: true, fileData: f });
+    return fn;
+  };
+  const hostSays = (...vs: { same: boolean; face?: boolean; what?: string }[]) => {
+    mockScanSameHost.mockReset();
+    for (const v of vs) mockScanSameHost.mockResolvedValueOnce({ what: "", ...v } as any);
+    mockScanSameHost.mockResolvedValue({ same: true, what: "" });
+  };
+  afterEach(() => {
+    mockScanSameHost.mockReset();
+    mockScanSameHost.mockResolvedValue({ same: true, what: "" });
+  });
+  // Job 401 scene 20: the host reading at a desk, drawn face on for 10 s under the host's own promise.
+  const reader = () =>
+    ({
+      index: 20,
+      scriptText:
+        "Today, with the help of a Roman who wrote the sharpest essay on time ever put to paper, I want to show you that the arithmetic was never your problem.",
+      showSubject: "man seated at wooden desk in study reading by the window",
+      visualPrompt: "A man seated at a wooden desk in a study, reading a book by the window.",
+      humanPresent: true,
+      brollHostLook: "A man in his sixties with fair skin, short gray hair, wire-rimmed glasses, wearing a light gray sweater over a white collared shirt",
+      brollHostRef: "https://r2/host.jpg",
+    }) as any;
+
+  it("job 401 scene 20: a drawn face is refused, the redraw is from behind or the side, and the mark stays", async () => {
+    const { HOST_FRAMING_CLAUSE, HOST_TURNED_AWAY_CLAUSE } = await import("./longformVideo");
+    const [a, b] = await Promise.all([pngOf("#a11"), pngOf("#a22")]);
+    hostSays({ same: true, face: true, what: "face on, reading" }, { same: true, face: false });
+    const scene = reader();
+    const genImage = drawsOf(a, b);
+    const out = await generateValidatedStill(scene, 4, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(2);
+    const [p1, p2] = genImage.mock.calls.map(c => c[0].prompt as string);
+    expect(p1).toContain(HOST_FRAMING_CLAUSE);
+    expect(p2).toContain(HOST_TURNED_AWAY_CLAUSE);
+    expect(p2).not.toContain(HOST_FRAMING_CLAUSE);
+    // Still the host, from the host photo — only the framing changed.
+    expect(genImage.mock.calls[1][0].referenceImageUrl).toBe("https://r2/host.jpg");
+    expect(scene.hostTurnedAway).toBe(true);
+    expect(buildStillPrompt(scene)).toBe(p2);
+    expect(scene.pictureChecks.map((c: any) => c.flags)).toEqual([["face shown"], []]);
+    expect(out.buffer.equals(b)).toBe(true);
+    expect(out.flaws).toBeUndefined();
+  });
+
+  it("a face three times is drawn with nobody in it, and no face frame ever ships", async () => {
+    const { PERSON_FREE_FALLBACK } = await import("./longformVideo");
+    const frames = await Promise.all([pngOf("#b11"), pngOf("#b22"), pngOf("#b33"), pngOf("#b44")]);
+    hostSays({ same: true, face: true }, { same: true, face: true }, { same: true, face: true });
+    const scene = reader();
+    const genImage = drawsOf(...frames);
+    const out = await generateValidatedStill(scene, 4, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(4);
+    const last = genImage.mock.calls[3][0];
+    expect(last.prompt).toContain(PERSON_FREE_FALLBACK);
+    expect(last.referenceImageUrl).toBeUndefined();
+    expect(mockScanSameHost).toHaveBeenCalledTimes(3);
+    expect(out.buffer.equals(frames[3])).toBe(true);
+  });
+
+  it("a face on the last attempt still gets its draw with nobody in it — the scene never fails for it", async () => {
+    const { PERSON_FREE_FALLBACK } = await import("./longformVideo");
+    const frames = await Promise.all([pngOf("#c11"), pngOf("#c22"), pngOf("#c33")]);
+    hostSays({ same: true, face: true }, { same: true, face: true });
+    const genImage = drawsOf(...frames);
+    const out = await generateValidatedStill(reader(), 2, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(3);
+    expect(genImage.mock.calls[2][0].prompt).toContain(PERSON_FREE_FALLBACK);
+    expect(out.buffer.equals(frames[2])).toBe(true);
+  });
+
+  it("a step on the host's own face keeps its face; a chin line keeps its lips cut on the redraw", async () => {
+    const { HOST_LIPS_CUT_CLAUSE } = await import("./longformVideo");
+    const [a, b, c] = await Promise.all([pngOf("#d11"), pngOf("#d22"), pngOf("#d33")]);
+    hostSays({ same: true, face: true });
+    const routine = {
+      ...reader(),
+      scriptText: "A dab of concealer under the eyes, patted in.",
+      showSubject: "the host patting concealer under her eyes",
+      visualPrompt: "The host patting concealer under her eyes with a fingertip.",
+      brollHostLook: "a woman with silver hair",
+      hostFaceShown: true,
+    };
+    const kept = await generateValidatedStill(routine, 4, undefined, drawsOf(a));
+    expect(kept.buffer.equals(a)).toBe(true);
+    expect(routine.hostTurnedAway).toBeUndefined();
+
+    hostSays({ same: true, face: true });
+    const chin = {
+      ...reader(),
+      scriptText: "That same necklace drags your chin and your jawline down with it.",
+      showSubject: "a gold chain worn at the host's own neck",
+      visualPrompt: "A gold chain worn at the host's own neck.",
+      brollHostLook: "a woman with silver hair",
+    };
+    const genImage = drawsOf(b, c);
+    await generateValidatedStill(chin, 4, undefined, genImage);
+    const [p1, p2] = genImage.mock.calls.map(x => x[0].prompt as string);
+    expect(p1).toContain(HOST_LIPS_CUT_CLAUSE);
+    expect(p2).toBe(p1);
+    expect(chin.hostTurnedAway).toBeUndefined();
+  });
+
+  it("a stranger's face is both on the record, and turned away on the redraw", async () => {
+    const { HOST_TURNED_AWAY_CLAUSE } = await import("./longformVideo");
+    const [a, b] = await Promise.all([pngOf("#e11"), pngOf("#e22")]);
+    hostSays({ same: false, face: true, what: "a younger man" });
+    const scene = reader();
+    const genImage = drawsOf(a, b);
+    await generateValidatedStill(scene, 4, undefined, genImage);
+    expect(scene.pictureChecks[0].flags).toEqual(["not the host", "face shown"]);
+    expect(genImage.mock.calls[1][0].prompt).toContain(HOST_TURNED_AWAY_CLAUSE);
+  });
+});
+
 describe("a memory picture that copies its memory twice is drawn from words (job 399 scenes 16-17)", () => {
   const pngOf = (bg: string) =>
     sharp({ create: { width: 8, height: 8, channels: 3, background: bg } }).png().toBuffer();

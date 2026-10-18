@@ -626,6 +626,14 @@ export interface StoryboardScene {
    */
   hostFaceShown?: boolean;
   /**
+   * A drawing of this host picture showed the face (`scanSameHost`'s `face`), so every later drawing
+   * of it — the redraw, and a Regenerate — is framed from behind or the side only
+   * (`HOST_TURNED_AWAY_CLAUSE`, `hostTurnedAway` in server/hostLook.ts), never the "either" framing
+   * the model ignored. Never acted on for a chin line's lips-cut picture or a step on the host's own
+   * face.
+   */
+  hostTurnedAway?: true;
+  /**
    * Where the device sits in a SCREEN picture (an app, a listing): each screen of a film gets the
    * next of several settings (`assignScreenSetups` in server/pictureVariety.ts), so no two look alike.
    */

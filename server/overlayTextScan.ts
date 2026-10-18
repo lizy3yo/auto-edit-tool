@@ -681,6 +681,13 @@ export async function scanNearCopy(earlier: Buffer, buffer: Buffer): Promise<{ c
  * Is the person in a picture the HOST? (2026-10-15, the review: Scarlett's routine pictures showed
  * "a different woman".) The host photo LEFT, the picture RIGHT. Only what the picture shows is
  * judged — a picture from behind is judged on hair, build and clothes, one of the face on the face.
+ * IS THE FACE SHOWN? (`face`, 2026-10-18, the review of jobs 401-407): the same call also says
+ * whether the face is in the picture. The rule that a host picture never draws the face lived only
+ * in the prompt, and a well-matched drawn face was the easiest kind to pass this check — job 401
+ * scene 20 (the host reading at a desk, face on, 10 s), job 406 scene 14 (smiling into the lens with
+ * a phone at the ear) and job 407 scene 27 (a full-body axe swing, the face in three-quarter view)
+ * all passed as "the same person". Both eyes are the line: a three-quarter view shows both, a profile
+ * turned from the camera one — and "from the side" is a framing the host prompt asks for.
  */
 export const SAME_HOST_SYSTEM =
   "You compare two photos. LEFT: the host of a video. RIGHT: a new picture that must show THAT " +
@@ -692,30 +699,47 @@ export const SAME_HOST_SYSTEM =
   "clearly younger or older, different skin tone, a different face, or more than one person. " +
   "When too little of the person shows to tell (hands only), judge what shows (age and skin " +
   "tone of the hands) and give the benefit of the doubt.\n" +
-  'Return ONLY JSON: {"same":true|false,"what":"<what differs, a few words, or empty>"}';
+  "face: true when the RIGHT picture shows a person's FACE — the nose and both eyes (open, closed " +
+  "or looking down), from the front or in three-quarter view — however small the person is in the " +
+  "frame. false when the face is out of frame (the frame cut at the lips or the chin), turned away " +
+  "(seen from behind), seen edge-on in profile with only one eye showing, or when no head is in " +
+  "the picture. Answer face whatever you answer for same.\n" +
+  'Return ONLY JSON: {"same":true|false,"face":true|false,"what":"<what differs or shows, a few words, or empty>"}';
 
-/** Decide from the model's answer; anything unreadable passes (a check never costs a render). Pure. */
-export function parseSameHostVerdict(raw: string, stopReason?: string): { same: boolean; what: string } {
+/**
+ * Decide from the model's answer; anything unreadable passes (a check never costs a render) — so a
+ * face counts only when the answer says `face: true`. Pure.
+ */
+export function parseSameHostVerdict(
+  raw: string,
+  stopReason?: string
+): { same: boolean; face: boolean; what: string } {
   const m = /\{[\s\S]*\}/.exec(raw ?? "");
-  if (!m || stopReason === "max_tokens") return { same: true, what: "" };
+  if (!m || stopReason === "max_tokens") return { same: true, face: false, what: "" };
   try {
     const d = JSON.parse(m[0]);
     const same = d?.same !== false;
-    return { same, what: same ? "" : String(d?.what ?? "a different person").slice(0, 80) };
+    const face = d?.face === true;
+    const what = String(d?.what ?? "").trim().slice(0, 80);
+    return {
+      same,
+      face,
+      what: !same ? what || "a different person" : face ? what || "the face is shown" : "",
+    };
   } catch {
-    return { same: true, what: "" };
+    return { same: true, face: false, what: "" };
   }
 }
 
 /**
- * Is the person in `buffer` the host in `hostPhotoUrl`? Side by side, the photo on the left.
- * Never throws: a dead check passes the picture.
+ * Is the person in `buffer` the host in `hostPhotoUrl`, and is their face shown? Side by side, the
+ * photo on the left. Never throws: a dead check passes the picture.
  */
 export async function scanSameHost(
   hostPhotoUrl: string,
   buffer: Buffer,
   faceShown: boolean
-): Promise<{ same: boolean; what: string }> {
+): Promise<{ same: boolean; face: boolean; what: string }> {
   try {
     const { presignOwnBucketUrl } = await import("./storage");
     const res = await fetch(await presignOwnBucketUrl(hostPhotoUrl), {
@@ -735,7 +759,8 @@ export async function scanSameHost(
       systemPrompt: SAME_HOST_SYSTEM,
       userMessage: faceShown
         ? "The right picture shows the person's face. Is it the same person as on the left?"
-        : "Is the person in the right picture the same person as on the left, as far as it shows?",
+        : "Is the person in the right picture the same person as on the left, as far as it shows? " +
+          "And is their face shown?",
       imageInput: { base64: pair.toString("base64"), mediaType: "image/png" },
       maxTokens: 200,
       model: SAME_THING_MODEL(),
@@ -744,10 +769,11 @@ export async function scanSameHost(
     });
     const v = parseSameHostVerdict(result.text, result.stopReason);
     if (!v.same) console.log(`[SameHost] not the host: ${v.what}`);
+    else if (v.face && !faceShown) console.log(`[SameHost] the face is shown: ${v.what}`);
     return v;
   } catch (err: any) {
     console.warn(`[SameHost] check failed: ${err?.message ?? err} — passing the picture`);
-    return { same: true, what: "" };
+    return { same: true, face: false, what: "" };
   }
 }
 

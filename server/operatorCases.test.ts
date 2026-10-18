@@ -3476,3 +3476,177 @@ describe("a pearl strand on a dresser is a necklace, not the host (round 9's rev
     expect(scenes[2].showSubject).toMatch(/worn at the host's own neck/);
   });
 });
+
+describe("the host's face is never drawn in a host picture (round 11's review, jobs 401, 406, 407)", () => {
+  // The rule lived only in the prompt, and the same-host check passed a well-matched drawn face:
+  // job 401 scene 20 drew the host reading at a desk face on for 10 s, job 406 scene 14 smiling into
+  // the lens with a phone at the ear, job 407 scene 27 a full-body axe swing with the face in
+  // three-quarter view — each right beside the real host take.
+  const READER = "A man in his sixties with fair skin, short gray hair, wire-rimmed glasses, wearing a light gray sweater over a white collared shirt";
+  const GARAGE = "A lean man in his late fifties with fair, weathered skin, graying hair under a woven straw cowboy hat, wearing a light blue denim button-up shirt";
+  const HEWER = "A lean man in his sixties with fair, weathered skin, short gray hair, a gray beard, wearing a faded olive-green button-up shirt over a dark gray t-shirt";
+  const reader = () =>
+    pic(
+      20,
+      "Today, with the help of a Roman who wrote the sharpest essay on time ever put to paper, I want to show you that the arithmetic was never your problem.",
+      "man seated at wooden desk in study reading by the window",
+      { humanPresent: true, brollHostLook: READER, brollHostRef: "https://x/host.png" }
+    );
+  const phoneCall = () =>
+    pic(14, "Pull up a stool. One piece of housekeeping first: license rules change town by town,", "the host on a phone call beside the garage workbench", {
+      visualPrompt: "A telephone resting on a garage workbench beside hand tools, in a single-car garage workshop.",
+    });
+  const axeSwing = () =>
+    pic(27, "Keep your boots clear of the swing, and stop when your arms tire.", "the host swinging a wide flat-headed broadaxe at a log in a clearing, boots planted well back from the swing", {
+      visualPrompt:
+        "Bare feet in work boots planted well back from a wide flat-headed broadaxe held at rest beside a felled poplar log in a clearing.",
+    });
+
+  it("the same-host check also answers whether the face shows — both eyes, never a profile — and fails open", async () => {
+    const { parseSameHostVerdict, SAME_HOST_SYSTEM } = await import("./overlayTextScan");
+    expect(SAME_HOST_SYSTEM).toMatch(/face: true when the RIGHT picture shows a person's FACE — the nose and both eyes/);
+    expect(SAME_HOST_SYSTEM).toMatch(/profile with only one eye showing/);
+    expect(SAME_HOST_SYSTEM).toContain('"face":true|false');
+    expect(parseSameHostVerdict('{"same":true,"face":true,"what":"face on, reading at the desk"}')).toEqual({
+      same: true,
+      face: true,
+      what: "face on, reading at the desk",
+    });
+    expect(parseSameHostVerdict('{"same":true,"face":true}').what).toBe("the face is shown");
+    expect(parseSameHostVerdict('{"same":true,"face":false,"what":"seen from behind"}')).toEqual({ same: true, face: false, what: "" });
+    // An answer from before the question, a "yes", a cut-off answer or none: no face.
+    expect(parseSameHostVerdict('{"same":true}').face).toBe(false);
+    expect(parseSameHostVerdict('{"same":true,"face":"yes"}').face).toBe(false);
+    expect(parseSameHostVerdict('{"same":true,"face":true}', "max_tokens")).toEqual({ same: true, face: false, what: "" });
+    expect(parseSameHostVerdict("nonsense")).toEqual({ same: true, face: false, what: "" });
+  });
+
+  it("a shown face is a miss outside a step on the host's own face, counted with the identity misses", async () => {
+    const { hostPictureMove, HOST_IDENTITY_REDRAWS } = await import("./longformVideo");
+    expect(HOST_IDENTITY_REDRAWS).toBe(2);
+    expect(hostPictureMove({ same: true, face: false }, false, 0, false)).toEqual({ move: "keep" });
+    expect(hostPictureMove({ same: true }, false, 0, false)).toEqual({ move: "keep" });
+    // A concealer step on her own face shows the face by design.
+    expect(hostPictureMove({ same: true, face: true }, true, 0, false)).toEqual({ move: "keep" });
+    // Jobs 401 / 406 / 407: the host, face on — drawn again from behind or the side.
+    expect(hostPictureMove({ same: true, face: true }, false, 0, false)).toEqual({ move: "redraw", why: "face", turnAway: true });
+    expect(hostPictureMove({ same: true, face: true }, false, 1, false)).toEqual({ move: "redraw", why: "face", turnAway: true });
+    // The third miss, of either kind, is drawn with nobody in it.
+    expect(hostPictureMove({ same: true, face: true }, false, 2, false)).toEqual({ move: "nobody", why: "face", turnAway: true });
+    expect(hostPictureMove({ same: false, face: false }, false, 2, false)).toEqual({ move: "nobody", why: "someone else", turnAway: false });
+    // A stranger from behind is drawn again from the host photo; a stranger's face is turned away too.
+    expect(hostPictureMove({ same: false, face: false }, false, 0, false)).toEqual({ move: "redraw", why: "someone else", turnAway: false });
+    expect(hostPictureMove({ same: false, face: true }, false, 0, false)).toEqual({ move: "redraw", why: "someone else", turnAway: true });
+    // No attempt left for a redraw: nobody in it, never a face or a stranger shipped.
+    expect(hostPictureMove({ same: true, face: true }, false, 0, true)).toEqual({ move: "nobody", why: "face", turnAway: true });
+    expect(hostPictureMove({ same: true, face: false }, false, 0, true)).toEqual({ move: "keep" });
+  });
+
+  it("a whole-body action or a call at the ear is a pose drawn face-on; a thing or a measure is not", async () => {
+    const { turnAwayPose } = await import("./hostLook");
+    for (const pose of [
+      axeSwing().showSubject!, // job 407 scene 27
+      axeSwing().visualPrompt, // its rewrite: "boots planted well back"
+      phoneCall().showSubject!, // job 406 scene 14
+      "the host holding the phone pressed to her ear by the kitchen window",
+      "the host answering the phone at the counter",
+      "the host splitting firewood with a maul on a chopping block",
+      "the host climbing a ladder to the gutter",
+      "the host walking down the garden path with a basket",
+      "the host in a wide stance at the bench",
+      "a full-body view of the host at the potting bench",
+    ])
+      expect(turnAwayPose(pose), pose).toBe(true);
+    for (const not of [
+      reader().showSubject!, // job 401 scene 20: a seated reader is no pose — the check catches the face
+      phoneCall().visualPrompt, // a telephone resting on the bench
+      "the host's hands holding a phone, a listing on the phone screen",
+      "tomato plants spaced two feet apart along the bed",
+      "six feet of rope coiled on the bench",
+      "a porch swing on the veranda",
+      "the swing of the gate",
+      "hiking boots drying by the door",
+      "the host leaning on a walking stick",
+      "a cottage within walking distance of the market",
+      "a walk-in closet with shelves",
+      "climbing roses on a trellis",
+      "a full-length mirror",
+      "the host making a judgment call",
+      "hands sawing a small square notch in a thin strip held in a bench vise",
+    ])
+      expect(turnAwayPose(not), not).toBe(false);
+  });
+
+  it("jobs 406 and 407: the phone call and the axe swing are drawn from behind or the side only", async () => {
+    const { HOST_TURNED_AWAY_CLAUSE } = await import("./longformVideo");
+    const call = phoneCall();
+    const swing = axeSwing();
+    expect(markHostBroll([call], { hostLook: GARAGE }, "https://x/host.png")).toBe(1);
+    expect(markHostBroll([swing], { hostLook: HEWER }, "https://x/host.png")).toBe(1);
+    for (const s of [call, swing]) {
+      const prompt = buildStillPrompt(s);
+      expect(prompt, s.showSubject).toContain(HOST_TURNED_AWAY_CLAUSE);
+      expect(prompt, s.showSubject).not.toContain(HOST_FRAMING_CLAUSE);
+      expect(prompt, s.showSubject).not.toContain(HOST_LIPS_CUT_CLAUSE);
+    }
+    expect(HOST_TURNED_AWAY_CLAUSE).toMatch(/seen from behind, or from the side and a little behind/);
+    expect(HOST_TURNED_AWAY_CLAUSE).toMatch(/never in front/);
+    expect(hostBrollClause(GARAGE, false, true)).toContain(HOST_TURNED_AWAY_CLAUSE);
+    // The lips cut wins when both are asked for: a chin line is about the chin.
+    expect(hostBrollClause(GARAGE, true, true)).toContain(HOST_LIPS_CUT_CLAUSE);
+    expect(hostBrollClause(GARAGE, true, true)).not.toContain(HOST_TURNED_AWAY_CLAUSE);
+  });
+
+  it("job 401 scene 20: a seated reader keeps the two framings until a drawing shows the face, then turns away", async () => {
+    const { HOST_TURNED_AWAY_CLAUSE, turnHostAway } = await import("./longformVideo");
+    const { hostTurnedAway } = await import("./hostLook");
+    const s = reader();
+    const before = buildStillPrompt(s);
+    expect(before).toContain(HOST_FRAMING_CLAUSE);
+    expect(hostTurnedAway(s)).toBe(false);
+    // The redraw swaps the framing in place — the same prompt a Regenerate writes from the mark.
+    const turned = turnHostAway(before);
+    expect(turned).toContain(HOST_TURNED_AWAY_CLAUSE);
+    expect(turned).not.toContain(HOST_FRAMING_CLAUSE);
+    expect(turnHostAway(turned)).toBe(turned);
+    s.hostTurnedAway = true;
+    expect(hostTurnedAway(s)).toBe(true);
+    expect(buildStillPrompt(s)).toBe(turned);
+    // Whatever a redraw added to the prompt stays.
+    expect(turnHostAway(`${before} DRAW IT DIFFERENT.`)).toBe(`${turned} DRAW IT DIFFERENT.`);
+  });
+
+  it("the turn never touches a chin line's lips cut, a face step, someone else, or a prompt with no host in it", async () => {
+    const { turnHostAway } = await import("./longformVideo");
+    const { hostTurnedAway } = await import("./hostLook");
+    // Job 244 scene 3: a chin line keeps its lips cut, even marked.
+    const chin = pic(3, "That same necklace drags your chin and your jawline down with it.", "a gold chain worn at the host's own neck", {
+      humanPresent: true,
+      brollHostLook: "a woman with silver hair",
+      brollHostRef: "https://x/host.png",
+      hostTurnedAway: true,
+    });
+    expect(hostLipsCut(chin)).toBe(true);
+    expect(hostTurnedAway(chin)).toBe(false);
+    const lips = buildStillPrompt(chin);
+    expect(lips).toContain(HOST_LIPS_CUT_CLAUSE);
+    expect(turnHostAway(lips)).toBe(lips);
+    expect(hostTurnedAway({ ...axeSwing(), brollHostLook: HEWER, hostFaceShown: true })).toBe(false);
+    expect(hostTurnedAway({ ...axeSwing(), brollHostLook: HEWER, otherPerson: "a neighbour" })).toBe(false);
+    expect(hostTurnedAway(axeSwing())).toBe(false); // no host look: no host picture
+    // A content-policy rung draws no person, so there is nothing to turn.
+    const aggressive = buildStillPrompt(reader(), true);
+    expect(turnHostAway(aggressive)).toBe(aggressive);
+  });
+
+  it("the mark stays while the picture is the host's, and goes when it is not", () => {
+    const s = { ...reader(), hostTurnedAway: true as const };
+    markHostBroll([s], { hostLook: READER }, "https://x/host.png");
+    expect(s.brollHostLook).toBe(READER);
+    expect(s.hostTurnedAway).toBe(true);
+    const thing = { ...pic(14, "license rules change town by town,", "a corded telephone mounted on the garage wall"), hostTurnedAway: true as const };
+    markHostBroll([thing], { hostLook: GARAGE }, "https://x/host.png");
+    expect(thing.brollHostLook).toBeUndefined();
+    expect(thing.hostTurnedAway).toBeUndefined();
+  });
+});

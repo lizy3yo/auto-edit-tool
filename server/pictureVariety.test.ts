@@ -83,8 +83,12 @@ describe("near-copies are looked for across the WHOLE video", () => {
   it("reads the near-copy and same-host verdicts, failing open", () => {
     expect(parseNearCopyVerdict('{"copy":true,"what":"same bench"}')).toEqual({ copy: true, what: "same bench" });
     expect(parseNearCopyVerdict("nonsense")).toEqual({ copy: false, what: "" });
-    expect(parseSameHostVerdict('{"same":false,"what":"younger, dark hair"}')).toEqual({ same: false, what: "younger, dark hair" });
-    expect(parseSameHostVerdict("")).toEqual({ same: true, what: "" });
+    expect(parseSameHostVerdict('{"same":false,"what":"younger, dark hair"}')).toEqual({
+      same: false,
+      face: false,
+      what: "younger, dark hair",
+    });
+    expect(parseSameHostVerdict("")).toEqual({ same: true, face: false, what: "" });
   });
 });
 

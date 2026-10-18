@@ -1052,6 +1052,68 @@ export function hostLipsCut(scene: StoryboardScene): boolean {
   return !!scene.brollHostLook && !scene.hostFaceShown && !scene.otherPerson && chinFramed(scene);
 }
 
+// ─── A pose drawn face-on: from behind or the side only ─────────────────────────────────
+
+/** A count before "feet" makes it a measure ("two feet apart"), never a stance. */
+const NOT_A_MEASURE = String.raw`(?<!\b(?:\d[\d.,]*|one|two|three|four|five|six|seven|eight|nine|ten|twelve|few|several)[\s-]+)`;
+/**
+ * The WHOLE BODY in action — the feet or the stance in view, a swing, a stride, a climb. A body in
+ * full cannot be cut at the lips, so the only framing that hides the face is from behind or the side.
+ * A walking stick, hiking boots, walking distance and a walk-in closet are things, not a stride;
+ * climbing roses are not a climb.
+ */
+const WHOLE_BODY_POSE = new RegExp(
+  [
+    String.raw`${NOT_A_MEASURE}\b(?:feet|boots|shoes|legs|heels)\s+(?:(?:are|set|firmly|squarely)\s+)?(?:planted|apart|wide|braced|spread|well\s+back|shoulder[- ]width)\b`,
+    String.raw`\b(?:planted|braced|spread)\s+(?:(?:his|her|their|both)\s+)?(?:feet|boots|legs)\b`,
+    String.raw`\bstance\b`,
+    String.raw`\b(?:full|whole)[- ]body\b|\bfull[- ](?:length|figure)\s+(?:shot|view|photo|portrait)\b|\bhead\s+to\s+(?:toe|foot)\b`,
+    String.raw`\b(?:swing(?:s|ing)?|swung)\s+(?:an?|the|his|her|their)\b|\bmid[- ]swing\b|\b(?:take|takes|taking|took)\s+a\s+swing\b`,
+    String.raw`\b(?:axe|ax|maul|sledge(?:hammer)?|pickaxe|scythe)\s+(?:raised|lifted|held|swung)\s+(?:high|overhead|above)\b|\boverhead\s+(?:swing|strike|blow)\b`,
+    String.raw`\b(?:chop(?:s|ping|ped)?|split(?:s|ting)?)\s+(?:(?:the|some)\s+)?(?:fire)?(?:wood|logs?|rounds?)\b`,
+    String.raw`\b(?:walk(?:s|ing|ed)?|stroll(?:s|ing|ed)?|strid(?:es|ing)|strode|hik(?:es|ing|ed)|jog(?:s|ging|ged))\b(?![-'])(?!\s+(?:boots?|shoes?|sticks?|canes?|poles?|distance|pace|speed|frames?|trails?|paths?|tours?|routes?|shorts?|socks?|aids?)\b)`,
+    String.raw`\bclimb(?:s|ing|ed)?\s+(?:(?:up|down)\s+)?(?:(?:a|the|onto|into|up)\s+)?(?:ladder|stairs|staircase|steps|hill|slope|roof|tree|fence)\b`,
+  ].join("|"),
+  "i"
+);
+/**
+ * A CALL HELD AT THE EAR: the phone sits above the lips, so a lips cut would cut it off — from behind
+ * or the side shows it and no face. The phone's screen, case or stand is a thing, never a call.
+ */
+const CALL_AT_THE_EAR = new RegExp(
+  [
+    String.raw`\bon\s+(?:a|the)\s+(?:(?:tele)?phone(?:\s+call)?|call)\b(?!\s*(?:screen|display|case|app|stand|mount|holder|charger)\b)`,
+    String.raw`\b(?:phone|telephone|handset|receiver|cell\s*phone|mobile)\s+(?:(?:held|pressed|raised|tucked)\s+)?(?:up\s+)?(?:to|at|against|by)\s+(?:his|her|their|the|one)\s+ear\b`,
+    String.raw`\b(?:mak(?:es|ing)|made|tak(?:es|ing)|took|answer(?:s|ing|ed)?)\s+(?:a\s+)?(?:phone\s+)?call\b|\banswer(?:s|ing|ed)?\s+(?:a|the)\s+(?:tele)?phone\b`,
+  ].join("|"),
+  "i"
+);
+
+/**
+ * A pose the picture model draws FACE-ON whatever the prompt says (2026-10-18, the review of jobs
+ * 401-407): the whole body in action and a call held at the ear. Job 407 scene 27, "the host
+ * swinging a wide flat-headed broadaxe at a log in a clearing, boots planted well back from the
+ * swing", came back a full-body, three-quarter front shot with the whole face drawn; job 406 scene
+ * 14, "the host on a phone call beside the garage workbench", a smiling portrait with the handset at
+ * the ear. Offered "the lips cut OR from behind", the model took neither. Pure.
+ */
+export function turnAwayPose(text: string | undefined): boolean {
+  const t = text ?? "";
+  return WHOLE_BODY_POSE.test(t) || CALL_AT_THE_EAR.test(t);
+}
+
+/**
+ * A HOST picture framed from behind or the side only (`HOST_TURNED_AWAY_CLAUSE` in longformVideo):
+ * its words ask for a pose drawn face-on (`turnAwayPose`), or a drawing of it already showed the face
+ * (`scene.hostTurnedAway`, set by the still loop on `scanSameHost`'s `face`). A chin line keeps its
+ * lips cut — the chin is what the line is about — and a step on the host's own face shows the face.
+ * Read off the scene each time, like `hostLipsCut`. Pure.
+ */
+export function hostTurnedAway(scene: StoryboardScene): boolean {
+  if (!scene.brollHostLook || scene.hostFaceShown || scene.otherPerson || hostLipsCut(scene)) return false;
+  return !!scene.hostTurnedAway || turnAwayPose(`${scene.showSubject ?? ""} ${scene.visualPrompt ?? ""}`);
+}
+
 /** Something worn at the neck: what a chin line's picture shows on the person. */
 const NECK_PIECE =
   /\b(?:necklaces?|pendants?|chokers?|lockets?|chains?|pearls?|beads?|scarf|scarves|neckerchiefs?)\b/i;
@@ -1171,6 +1233,9 @@ export function markHostBroll(
     const words = `${s.showSubject ?? ""} ${s.visualPrompt ?? ""}`;
     s.otherPersonLooks = undefined;
     s.hostAmongOthers = undefined;
+    // A face the still check refused stays refused while the picture is still the host's at work.
+    const turnedAway = s.hostTurnedAway;
+    s.hostTurnedAway = undefined;
     // A planner's "someone else" lives and dies with the words it came from (2026-10-18, the
     // audit): "a woman customer" left on a picture of an incense holder (job 361 scene 32), "a
     // woman passenger" on a close-up of a soda can (job 399 scene 4), "a hen" (job 371) — each
@@ -1232,6 +1297,7 @@ export function markHostBroll(
       if (s.showSubject) s.showSubject = tidy(s.showSubject);
       if (s.visualPrompt) s.visualPrompt = tidy(s.visualPrompt);
       s.brollHostRef = hostPhotoUrl;
+      if (!s.hostFaceShown) s.hostTurnedAway = turnedAway;
       n++;
     } else if (on && s.hostPresent && s.splitVisual && BODY_PART_WORDS.test(s.splitVisual) && !REAL_HOLDER.test(s.splitVisual)) {
       // A split panel about a body part (hair, nails, skin) shows it on the host: it gets the host's
