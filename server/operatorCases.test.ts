@@ -3549,3 +3549,74 @@ describe("split panels are checked against their lines and name one thing (round
     expect(rail.splitVisual).toBe("A small hand-pieced quilt draped over a simple metal rail in a modest room.");
   });
 });
+
+describe("a line with nothing to see never falls back to the main thing; a sound shows what makes it (round 11, jobs 401 and 404)", async () => {
+  // Job 401: the opening story's sympathy card (the main thing) came back under "Your problem is
+  // theft…" and "Then he turns the whole thing over in a single motion: life is not short" — the
+  // same blank card each time. Job 404 scene 20: 15 s of an empty storm window under the winter
+  // robin's soft clucking. The rules go to the shot list and the line check; these are the rewrites.
+  const { applyPictureFixes, FIT_SYSTEM, parsePictureFixes } = await import("./shotList");
+  const essay: KeyThing[] = [
+    { main: true, name: "sympathy card", look: "a plain cream card with a simple embossed border, held or resting on the desk" },
+    { name: "kitchen table", look: "a round wooden table with two chairs, a single dim lamp" },
+  ];
+  const birds: KeyThing[] = [
+    { main: true, name: "robin", look: "a plump songbird, brown-grey back, bright orange-red breast, white eye ring" },
+    { name: "storm window", look: "a clear glass pane in a white aluminum frame, closed tight through winter" },
+  ];
+
+  it("the line check holds an idea and a sound to what they are about", () => {
+    expect(FIT_SYSTEM).toMatch(/A LINE WITH NOTHING TO SEE/);
+    expect(FIT_SYSTEM).toMatch(/"The whole thing",\s+"all of it" or "that", summing up what was just said, point at the idea/);
+    expect(FIT_SYSTEM).toMatch(/Two lines\s+with nothing to see never share a picture/);
+    expect(FIT_SYSTEM).toMatch(/A SOUND\. A line about a sound/);
+    // The cases' own words never reach the rulebook.
+    expect(FIT_SYSTEM).not.toMatch(/sympathy|robin|storm window|clucking|theft/i);
+  });
+
+  it("job 401 scene 33: the card under an idea becomes a moment that carries it", () => {
+    const s = pic(33, "Then he turns the whole thing over in a single motion: life is not short.", "a cream sympathy card resting on the wooden desk in the study", { keyThing: "sympathy card" });
+    const fixes = parsePictureFixes(
+      JSON.stringify({
+        pictures: [
+          {
+            id: 0,
+            about: "the writer reversing the claim that life is short",
+            shows_it: false,
+            show: "a man in a toga at a lamplit desk, turning a papyrus scroll over in his hands, seen from the side",
+            thing: null,
+            other: "a Roman writer",
+          },
+        ],
+      }),
+      [s]
+    );
+    expect(applyPictureFixes([s], fixes, essay)).toBe(1);
+    expect(s.showSubject).not.toMatch(/card/);
+    expect(s.keyThing).toBeUndefined();
+    expect(s.otherPerson).toBe("a Roman writer");
+  });
+
+  it("job 404 scene 20: the robin the line is about, the window only where it is seen from", () => {
+    const line =
+      "Once nesting season is over, that job is done, and through the winter a robin hardly sings at all. Mostly you’ll hear a low, soft clucking, a bit like somebody tutting under their breath, and that’s easy to miss with the storm windows shut.";
+    const s = pic(20, line, "a closed storm window pane viewed from inside the kitchen", { keyThing: "storm window" });
+    const fixes = parsePictureFixes(
+      JSON.stringify({
+        pictures: [
+          {
+            id: 0,
+            about: "the robin, quiet in winter",
+            shows_it: false,
+            show: "a robin puffed up on the snowy lawn, beak closed, seen through the closed storm window from the kitchen",
+            thing: "robin",
+          },
+        ],
+      }),
+      [s]
+    );
+    expect(applyPictureFixes([s], fixes, birds)).toBe(1);
+    expect(s.keyThing).toBe("robin");
+    expect(s.otherKeyThings).toEqual(["storm window"]);
+  });
+});

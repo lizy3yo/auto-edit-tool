@@ -1590,7 +1590,8 @@ const SHOT_LIST_SYSTEM =
   "line only refers to the MAIN thing, the MAIN thing), with what else the line names beside it, " +
   "and sets thing to its name exactly as the props list writes it (without MAIN). But a key thing " +
   "appears ONLY when the line is about it: a line about something else shows that, never the main " +
-  "thing out of habit (a line about the weather shows the weather). A later shot of a key thing " +
+  "thing out of habit (a line about the weather shows the weather; a line with nothing to see " +
+  "follows rule 1f). A later shot of a key thing " +
   "shows the SAME thing from another " +
   "spot — closer on one part, further back with the room around it, the other side, from above or " +
   "low down — the view the words point at, never the same view as the shot of it just before. A " +
@@ -1617,6 +1618,23 @@ const SHOT_LIST_SYSTEM =
   "A SHORT line stays ONE shot: when it names a thing and where or how it is used, sold or kept " +
   "(\"sell your quilts at the county fair\", \"list it on a buy-and-sell app\"), the one shot shows " +
   "them together — the thing in that place, or as a listing on a phone.\n" +
+  "1f. A LINE WITH NOTHING TO SEE. When a line carries an idea rather than a thing — an argument, " +
+  "a turn in the reasoning, a claim, a lesson, a feeling, a promise of what the video will show " +
+  "(\"then she turns the whole question around\", \"the money was never the real problem\", \"by " +
+  "the end you'll know why\") — the shot is an everyday moment that carries what it means: a person " +
+  "or a place the script already has, caught doing something that fits the thought (the neighbour " +
+  "from the story back at her own kitchen sink, a writer the script names at work), or the host at " +
+  "work. Never the MAIN thing because nothing else came to mind: it appears only when the line " +
+  "names it or clearly points back at it, and \"the whole thing\", \"all of it\" or \"that\", summing " +
+  "up what was just said, point at the idea, never at a thing. Each such line gets its own moment: " +
+  "never the same picture for two of them. A line that speaks of a thing by its quality, price, " +
+  "count or time is not one of these: it shows the thing (rules 1 and 5).\n" +
+  "1g. A SOUND. A line about a sound — a song, a call, a noise, a hum, a sound that has stopped — " +
+  "shows what makes it (an animal, a machine, a person, the weather) in the moment the line " +
+  "describes, where it is, and quiet when the line says it has gone quiet (\"the dog has stopped " +
+  "barking\" = the dog lying still by the gate). Never only the window, door or room the sound is " +
+  "heard through, even when the line names it — that is where the picture may be seen from, with " +
+  "the source in it — and never an empty place the line does not say is empty.\n" +
   "2. CHANGE THE PICTURE ONLY WHEN THE CONTEXT CHANGES. A new shot starts only where the words move " +
   "on to a DIFFERENT thing, place or action. While the words stay on the same thing — even across " +
   'several sentences — it is ONE shot: "a pile of old crates the neighbour set out by the curb" ' +
@@ -2119,6 +2137,22 @@ showing the topic of the line before it ONLY when its line names nothing new you
 kind of fire that likes to start while the house is asleep"), is WRONG: it gets its own picture of
 that new thing.
 
+A LINE WITH NOTHING TO SEE. When a line carries an idea rather than a thing — an argument, a turn
+in the reasoning, a claim, a lesson, a feeling, a promise of what the video will show — its picture
+is an everyday moment that carries what the line means: a person or a place the script already has,
+doing something that fits the thought, or the host at work. It is WRONG when it shows the video's
+MAIN thing only because nothing else fits: the main thing is right only when the line names it or
+clearly points back at it ("it", "this one", "the winner" after lines about it). "The whole thing",
+"all of it" or "that", summing up what was just said, point at the idea, never at a thing. Two lines
+with nothing to see never share a picture: when one shows what an earlier such line already showed
+(the same thing in the same place), the later one is WRONG — give it its own moment. A line that
+speaks of a thing by its quality, price, count or time is not one of these: it shows the thing.
+A SOUND. A line about a sound — a song, a call, a noise, a hum, a sound that has stopped — is about
+what makes it: the picture shows that source in the moment the line describes, where it is, quiet
+when the line says it has gone quiet. It is WRONG when it shows only a window, a door or a room the
+sound is heard through, or an empty place the line does not say is empty — even when the line names
+that window or room.
+
 WHAT NOT TO DO. A sentence RULES SOMETHING OUT when it says not to do something ("never…", "don't…"),
 says what something is NOT ("I don't mean…", "no, not the…"), what to use INSTEAD ("…instead of the
 plastic one"), what to keep away or out ("well away from the stove", "keep any flame out of the
@@ -2143,8 +2177,9 @@ make a loop", "stop the moment it feels snug"), and a count ("two coats instead 
 COUNT: two coats).
 
 Go through EVERY picture, one at a time, never skipping: first write what its line is about — its
-subject, not its last noun; for a line that only refers to a key thing, name the key thing — then
-whether the picture shows that, where the line puts it. Only then decide.
+subject, not its last noun; for a line that only refers to a key thing, name the key thing; for a
+sound, what makes it; for an idea, the idea — then whether the picture shows that, where the line
+puts it. Only then decide.
 
 "The one that…", "the winner", "the one I was proudest of" is one of the THINGS the video counts or
 compares (a project, a product, a choice) — work out which from the whole script, usually named in
@@ -2167,8 +2202,9 @@ them apart only when the second part moves on to a genuinely different thing wor
 
 A picture marked "joined", or one you join, shows the WHOLE line in ONE picture — what the line is
 really pointing at: the new thing it names when that is its point (a comparison: "it's the same wood
-they make baseball bats from" = the baseball bats), the main thing when the line is about it, or the
-things together when they belong together (the bookcase as a listing on a phone's buy-and-sell app).
+they make baseball bats from" = the baseball bats), the main thing when the line is about it (never
+for a line with nothing to see), or the things together when they belong together (the bookcase as a
+listing on a phone's buy-and-sell app).
 For a "joined" picture shows_it is false unless it already shows that.
 
 For each WRONG picture write the picture that fits: plain words, what is literally in the frame, one
@@ -3046,7 +3082,8 @@ them. Judge every PANEL by all the rules above, and also:
   stopped me in my tracks") is never drawn as the empty prop of that action: the panel shows what
   the line is really about.
 - A line about an idea with nothing literal to see shows what the idea points at, never the video's
-  MAIN thing unless the line names it or clearly refers to it.
+  MAIN thing unless the line names it or clearly refers to it. On a panel the everyday moment that
+  carries it is a place or a thing from the script, never a person.
 - A panel names ONE thing. A panel that says "X or Y" ("a stand mixer or a hand whisk on the
   counter") is WRONG even when the line itself offers the choice: rewrite it as the one thing the
   line and the pictures around it point at — the one a nearby picture shows, else the first the line
