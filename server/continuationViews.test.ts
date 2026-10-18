@@ -351,7 +351,8 @@ describe("at render: the continuation's memory, clause and the picture it is com
 
   it("the same-thing check is told a slightly tighter frame of the picture just shown is a copy", () => {
     expect(sameThingQuestion("cat", true)).toContain(JUST_SHOWN_COPY_NOTE);
-    expect(JUST_SHOWN_COPY_NOTE).toMatch(/only a little closer or further back, is a copy/);
+    // Round 13: any tighter or looser crop of the same layout, not only "a little" (`SAME_LAYOUT_RULE`).
+    expect(JUST_SHOWN_COPY_NOTE).toMatch(/only closer or further back .* is a copy/);
     expect(sameThingQuestion("cat")).not.toContain(JUST_SHOWN_COPY_NOTE);
     expect(sameThingQuestion('the "big" cat')).toMatch(/^The thing: the 'big' cat\. Is it the same one on the right/);
   });

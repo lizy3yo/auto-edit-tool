@@ -5667,3 +5667,651 @@ describe("the film never ends on a host shot under a second (the audit, 2026-10-
     expect(closingFoldTarget(notTail, 1)).toBe(-1);
   });
 });
+
+describe("job 409 scene 28: a picture of the host is never kept past the host check (round 13)", () => {
+  // Gideon's job 409: "The essay is called On the Shortness of Life…" drew the host reading face on at
+  // the study desk for 11.6 s — job 401 scene 20's picture again, the one the face check was built
+  // for. Its two draws came back "staged", "staged", and "the same faults twice in a row" kept the
+  // second before the host check ran. Scene 19 of the same film shows the check works when reached:
+  // its first draw was refused "face shown" and drawn again turned away.
+  const PHOTO = "https://x/host.png";
+  const reader = () =>
+    pic(
+      28,
+      "The essay is called On the Shortness of Life, and it opens by picking a fight with its own title. Everyone complains that life is too short, Seneca says.",
+      "the host reading a book at the desk in the study",
+      {
+        humanPresent: true,
+        brollHostRef: PHOTO,
+        brollHostLook:
+          "A man in his sixties with fair skin, short gray hair, wire-rimmed glasses, wearing a gray sweater over a white collared shirt",
+      }
+    );
+
+  it("scene 28 is a picture the host check must pass; a picture of nobody or of someone else is not", async () => {
+    const { hostCheckDue } = await import("./longformVideo");
+    expect(hostCheckDue(reader(), false)).toBe(true);
+    // A look on the host's own face is one too: its face is allowed, never a stranger's.
+    expect(hostCheckDue({ ...reader(), hostFaceShown: true }, false)).toBe(true);
+    // Drawn with nobody in it (no host photo sent), someone else's picture, a thing alone.
+    expect(hostCheckDue(reader(), true)).toBe(false);
+    expect(hostCheckDue({ ...reader(), otherPerson: "a passenger" }, false)).toBe(false);
+    expect(hostCheckDue({ ...reader(), humanPresent: false }, false)).toBe(false);
+    expect(hostCheckDue({ ...reader(), brollHostRef: undefined }, false)).toBe(false);
+  });
+
+  it("'staged' twice on it is kept only after the host check; the same repeat on a picture of no one is kept as before", async () => {
+    const { repeatedFaultsMove } = await import("./longformVideo");
+    const host = { unchecked: false, hostUnchecked: true };
+    const thing = { unchecked: false, hostUnchecked: false };
+    expect(repeatedFaultsMove("staged", "staged", host)).toBe("check the host");
+    expect(repeatedFaultsMove("staged", "staged", thing)).toBe("keep");
+    // Job 343's phone screen, "writing, brand, staged" each time: kept on the spot, as before.
+    expect(repeatedFaultsMove("writing+brand or clutter+staged", "writing+brand or clutter+staged", thing)).toBe("keep");
+    // Not a repeat, a detail alone, a check that could not run, a clean frame: on to the checks below.
+    expect(repeatedFaultsMove("staged", "wrong place", host)).toBe("go on");
+    expect(repeatedFaultsMove("detail", "detail", thing)).toBe("go on");
+    expect(repeatedFaultsMove("staged", "staged", { unchecked: true, hostUnchecked: true })).toBe("go on");
+    expect(repeatedFaultsMove("", "", host)).toBe("go on");
+  });
+
+  it("refused there, it takes the host check's own moves: turned away, then nobody — never kept", async () => {
+    const { hostPictureMove } = await import("./longformVideo");
+    const faceOn = { same: true, face: true };
+    expect(hostPictureMove(faceOn, false, 0, false)).toEqual({ move: "redraw", why: "face", turnAway: true });
+    // A fallback refused when the draws ran out: drawn with nobody in it, one draw past the budget.
+    expect(hostPictureMove(faceOn, false, 0, true)).toEqual({ move: "nobody", why: "face", turnAway: true });
+    expect(hostPictureMove({ same: true, face: false }, false, 0, true)).toEqual({ move: "keep" });
+  });
+});
+describe("a redraw drops what caused its fault (round 13, jobs 408 and 410)", () => {
+  // The panels and pictures as stored on jobs 408 and 410. Their redraws were sent exactly what had
+  // made them miss: the same memory pictures, the same memory camera, the far near-copy camera.
+  const TOILET_LOOK =
+    "a white porcelain toilet, oval bowl, curved trapway inside its base visible as a smooth porcelain contour at the bowl's rear, closed lid often up";
+  const S10 = "https://r2/longform/408/still-src-10.png";
+  const S14 = "https://r2/longform/408/still-src-14.png";
+  const S18 = "https://r2/longform/408/still-src-18.png";
+  const SWAB_PANEL =
+    "close view of a single white cotton swab with cotton tufts on both ends lying on pale beige tile floor beside the base of a white porcelain toilet";
+  const SWAB_IN_BOWL =
+    "looking down into the toilet bowl: a single white cotton swab lying sideways across the dark drain opening at the bottom, under clear water";
+  const s19 = (over: Partial<StoryboardScene> = {}) =>
+    pic(19, "Good design. But a stiff stick does not always follow a curve. It can turn sideways and catch across the passage, like a bar across a doorway.", SWAB_IN_BOWL, {
+      keyThing: "toilet",
+      partOf: "toilet",
+      memoryRefUrls: [S14, S18],
+      memoryRefScenes: [{ index: 14, own: true }, { index: 18, own: true }],
+      memoryRightBefore: 1,
+      memoryView: PART_VIEW,
+      memoryWordsLook: TOILET_LOOK,
+      ...over,
+    });
+
+  it("408-16 and 408-19 are pictures a far camera would lose; a wide view is not", async () => {
+    const { smallSubject } = await import("./pictureMemory");
+    expect(smallSubject(host(16, "Cotton swabs. The little stick with cotton on both ends.", { splitVisual: SWAB_PANEL }))).toBe(true);
+    expect(smallSubject(s19())).toBe(true); // a part close-up
+    // Job 410 scene 20: "a small plastic cup of orange juice beside a juice can on the beverage cart".
+    expect(smallSubject(pic(20, "Juice works the same way.", "a small plastic cup of orange juice beside a juice can on the beverage cart"))).toBe(true);
+    expect(smallSubject(pic(1, "n", "a little bird on the feeder"))).toBe(true);
+    // Job 403 scene 14's pipe run, a garden, and "a little" that is no size.
+    expect(smallSubject(pic(14, "n", "grey PVC pipe network running beneath the house toward the street"))).toBe(false);
+    expect(smallSubject(pic(2, "n", "the whole backyard garden with raised beds along the fence"))).toBe(false);
+    expect(smallSubject(pic(3, "n", "a red barn seen a little to one side under a grey sky"))).toBe(false);
+  });
+
+  it("408-16: a small subject's near-copy redraws never take the far camera; any other keeps its turn", async () => {
+    const { nearCopyCameraIndex, FAR_CAMERA, REDRAW_CAMERAS } = await import("./pictureVariety");
+    expect(REDRAW_CAMERAS[FAR_CAMERA]).toMatch(/much further back, the whole place around it and the subject small in it/);
+    // The swab panel (no camera of its own): a close-up, then the other side — never "much further back".
+    expect([nearCopyCameraIndex(1, -1, true), nearCopyCameraIndex(2, -1, true)]).toEqual([0, 2]);
+    // A continuation drawn close up: the other side, and never its own camera.
+    expect([nearCopyCameraIndex(1, 0, true), nearCopyCameraIndex(2, 0, true)]).toEqual([2, 2]);
+    // Any other picture: exactly the turn it had (`own` + k), the far camera included.
+    for (const own of [-1, 0, 1, 2]) for (const k of [1, 2]) expect(nearCopyCameraIndex(k, own, false)).toBe((own + k + 3) % 3);
+  });
+
+  it("408-16: a redraw for a subject the check could not find swaps the far camera for a near one", async () => {
+    const { withoutFarCamera, differentPictureClause, DIFFERENT_PICTURE_CLAUSE, REDRAW_VIEWS, FAR_CAMERA } = await import("./pictureVariety");
+    const far = `${SWAB_PANEL}. ${differentPictureClause(FAR_CAMERA)}`;
+    const near = withoutFarCamera(far, 2);
+    expect(near).not.toContain(REDRAW_VIEWS[FAR_CAMERA]);
+    expect(near).toContain(REDRAW_VIEWS[2]);
+    expect(near).toContain(DIFFERENT_PICTURE_CLAUSE); // still told to differ from the copy
+    // A continuation drawn from words with the far camera says it the same way.
+    expect(withoutFarCamera(`${SWAB_PANEL} ${REDRAW_VIEWS[FAR_CAMERA]}`, 0)).toBe(`${SWAB_PANEL} ${REDRAW_VIEWS[0]}`);
+    // No far camera: unchanged.
+    const close = `${SWAB_PANEL}. ${differentPictureClause(0)}`;
+    expect(withoutFarCamera(close, 2)).toBe(close);
+  });
+
+  it("410-18, 410-20, 408-5: a missing or detail redraw drops the memory pictures — never a screen's item photo", async () => {
+    const { memoryDropsOnRedraw, memoryToWords } = await import("./longformVideo");
+    const { BACKGROUND_VIEW, SCREEN_ITEM_VIEW } = await import("./pictureMemory");
+    const panel = {
+      ...buildSplitRightScene(
+        host(18, "spent nursing a thimble of ginger ale.", {
+          splitVisual: "A plastic cup half-filled with ice and ginger ale sits on an airplane tray table, the cup tilted slightly as if just set down mid-sip.",
+          keyThing: "soda cup",
+        })
+      ),
+      memoryRefUrls: ["https://r2/longform/410/still-src-7.png"],
+      memoryWordsLook: "a clear plastic cup packed with ice, filled about halfway with soda",
+    } as StoryboardScene;
+    expect(memoryDropsOnRedraw(panel)).toBe(true);
+    expect(memoryToWords(panel)).toMatchObject({ memoryRefUrls: undefined, memoryView: undefined, keyThingLook: panel.memoryWordsLook });
+    const juice = pic(20, "Juice works the same way.", "a small plastic cup of orange juice beside a juice can on the beverage cart", {
+      keyThing: "beverage cart",
+      memoryRefUrls: ["https://r2/longform/410/still-src-3.png"],
+      memoryView: BACKGROUND_VIEW,
+    });
+    expect(memoryDropsOnRedraw(juice)).toBe(true);
+    // A screen's reference is only the photo inside its listing (Dale's job 306); nothing to drop otherwise.
+    expect(memoryDropsOnRedraw({ ...juice, memoryView: SCREEN_ITEM_VIEW })).toBe(false);
+    expect(memoryDropsOnRedraw({ ...juice, memoryRefUrls: undefined })).toBe(false);
+  });
+
+  it("a continuation keeps its near camera when its memory is dropped; any other view goes with the memory", async () => {
+    const { redrawCameraClause } = await import("./longformVideo");
+    const { REDRAW_CAMERAS, REDRAW_VIEWS } = await import("./pictureVariety");
+    const { BACKGROUND_VIEW } = await import("./pictureMemory");
+    const cont = (view: string) => s19({ partOf: undefined, memoryView: view, memoryContinues: true });
+    // Job 405 scene 8's lesson: drawn from nearly the words it continues and no camera, it is that picture again.
+    expect(redrawCameraClause(cont(REDRAW_CAMERAS[0]))).toBe(` ${REDRAW_VIEWS[0]}`);
+    expect(redrawCameraClause(cont(REDRAW_CAMERAS[2]))).toBe(` ${REDRAW_VIEWS[2]}`);
+    // …but never the far one: the next near camera instead.
+    expect(redrawCameraClause(cont(REDRAW_CAMERAS[1]))).toBe(` ${REDRAW_VIEWS[2]}`);
+    expect(redrawCameraClause(cont(BACKGROUND_VIEW))).toBe("");
+    expect(redrawCameraClause(cont(PART_VIEW))).toBe("");
+    expect(redrawCameraClause(s19())).toBe("");
+  });
+
+  it("408-19: the near copy of scene 18 drops scene 18 and keeps the toilet's first picture", async () => {
+    const { withoutMemoryRef, memoryClause: clauseOf } = await import("./longformVideo");
+    const before = s19();
+    expect(clauseOf(before)).toMatch(/Reference image 2 is the picture shown RIGHT BEFORE this one/);
+    const fields = withoutMemoryRef(before, 18)!;
+    expect(fields).toMatchObject({
+      memoryRefUrls: [S14],
+      memoryRefScenes: [{ index: 14, own: true }],
+      memoryRightBefore: undefined,
+      memoryContinues: undefined,
+      memoryView: PART_VIEW,
+      memoryOthersOnly: undefined,
+      memoryWordsLook: TOILET_LOOK,
+      keyThingLook: undefined,
+    });
+    const after = { ...before, ...fields };
+    expect(clauseOf(after)).toMatch(/^ The first reference image shows the whole toilet\. This picture is a CLOSE-UP/);
+    expect(clauseOf(after)).not.toMatch(/RIGHT BEFORE/);
+    // Dropping the other one moves the picture just shown to the first place.
+    expect(withoutMemoryRef(before, 14)).toMatchObject({ memoryRefUrls: [S18], memoryRightBefore: 0 });
+    // Not one of its references, or references that say nothing of what they are: nothing changes.
+    expect(withoutMemoryRef(before, 12)).toBeUndefined();
+    expect(withoutMemoryRef({ ...before, memoryRefScenes: undefined }, 18)).toBeUndefined();
+  });
+
+  it("dropping the last picture of its own thing draws it by its written look; dropping the last one draws it from words", async () => {
+    const { withoutMemoryRef, memoryToWords, memoryClause: clauseOf } = await import("./longformVideo");
+    // A soda can drawn from its own first picture and the cart's picture that also shows the cup.
+    const can = pic(16, "n", "a soda can on the beverage cart beside a cup of soda", {
+      keyThing: "soda can",
+      otherKeyThings: ["beverage cart", "soda cup"],
+      memoryRefUrls: ["https://r2/4.png", "https://r2/3.png"],
+      memoryRefScenes: [{ index: 4, own: true }, { index: 3, shows: ["beverage cart"] }],
+      memoryView: "a close view of one part of it, filling most of the frame",
+      memoryNotShown: ["soda cup"],
+      memoryWordsLook: "a slim aluminum can, silver and red body, small pull tab on top",
+    });
+    const others = withoutMemoryRef(can, 4)!;
+    expect(others).toMatchObject({
+      memoryRefUrls: ["https://r2/3.png"],
+      memoryOthersOnly: true,
+      keyThingLook: "a slim aluminum can, silver and red body, small pull tab on top",
+      memoryWordsLook: undefined,
+      memoryNotShown: ["soda cup"],
+    });
+    expect(clauseOf({ ...can, ...others })).toMatch(/this exact beverage cart, seen earlier in this video/);
+    expect(clauseOf({ ...can, ...others })).toMatch(/does NOT show the soda can: draw it from this picture's own words/);
+    // Without the cart's picture the cart is no longer shown by any reference.
+    expect(withoutMemoryRef(can, 3)).toMatchObject({ memoryRefUrls: ["https://r2/4.png"], memoryNotShown: ["beverage cart", "soda cup"] });
+    const one = { ...can, memoryRefUrls: ["https://r2/4.png"], memoryRefScenes: [{ index: 4, own: true as const }] };
+    expect(withoutMemoryRef(one, 4)).toEqual(memoryToWords(one));
+    // A continuation whose continued picture is dropped loses the camera it took to stand apart from it.
+    const { REDRAW_CAMERAS } = await import("./pictureVariety");
+    const cont = s19({ partOf: undefined, memoryView: REDRAW_CAMERAS[0], memoryContinues: true });
+    expect(withoutMemoryRef(cont, 18)).toMatchObject({ memoryView: undefined, memoryContinues: undefined, memoryRightBefore: undefined });
+    expect(withoutMemoryRef(cont, 14)).toMatchObject({ memoryView: REDRAW_CAMERAS[0], memoryContinues: true, memoryRightBefore: 0 });
+  });
+
+  it("at render each reference says which scene it is, whether it is of its own thing, and what else it shows", async () => {
+    const { attachMemory, memoryFor, memoryView } = await import("./pictureMemory");
+    const { memoryFields } = await import("./longformVideo");
+    const b = [
+      pic(10, "n", "white porcelain toilet seen from the side beside the small white bin", {
+        keyThing: "toilet",
+        otherKeyThings: ["bin"],
+        pictureUrl: S10,
+      }),
+      pic(18, "That curve is called the trapway.", "looking down into the white porcelain toilet bowl at still clear water sitting over the dark rear drain opening at the bottom", {
+        keyThing: "toilet",
+        partOf: "toilet",
+        pictureUrl: S18,
+      }),
+      pic(19, "Good design.", SWAB_IN_BOWL, { keyThing: "toilet", partOf: "toilet", otherKeyThings: ["bin"] }),
+    ];
+    attachMemory(b, [b[2]]);
+    const m = await memoryFor(b[2], 0);
+    expect(m.urls).toEqual([S10, S18]);
+    expect(m.refs).toEqual([{ index: 10, own: true, shows: ["bin"] }, { index: 18, own: true }]);
+    const fields = memoryFields(m, memoryView(b[2]));
+    expect(fields.memoryRefScenes).toEqual(m.refs);
+    // References that do not each say what they are are not described at all.
+    expect(memoryFields({ ...m, refs: m.refs!.slice(0, 1) }, undefined).memoryRefScenes).toBeUndefined();
+  });
+});
+
+/**
+ * THE STAGED REDRAW IS DRAWN PLAINER (round 13, the review of jobs 409 and 410). Its one redraw resent
+ * the same prompt, so a picture whose own words ask for the staged look came back staged and shipped
+ * flagged: 409-25's glossy marble throne hall, 409-22's golden oil-lamp glow, 410-13's air-to-air
+ * airliner, 410-10's advert pose at the galley. `plainLookRedraw` changes the prompt on that redraw.
+ */
+describe("a staged redraw changes what the line never asked for (jobs 409, 410)", () => {
+  const ADVISOR_LINE =
+    "He was one of the richest men in the empire, an advisor standing one step from the throne, buried under exactly the kind of obligations we are about to talk about —";
+  const advisor = () =>
+    pic(25, ADVISOR_LINE, "a wealthy man in a fine off-white toga draped over his left shoulder, standing beside a marble throne in a grand hall, seen from behind", {
+      visualPrompt:
+        "A wealthy man in a fine off-white toga draped over his left shoulder, standing beside a marble throne in a grand hall, viewed from behind.",
+      otherPerson: "Seneca, an imperial advisor",
+      humanPresent: true,
+    });
+  const redraw = async (s: StoryboardScene, prompt: string, o: Record<string, unknown> = {}) => {
+    const { plainLookRedraw } = await import("./longformVideo");
+    return plainLookRedraw(s, prompt, { line: s.scriptText, ordinaryPrompt: true, ...o });
+  };
+
+  it("409-25: the marble and the grand hall leave the prompt where they sit; the throne the line says, and every other clause, stay", async () => {
+    const { PLAIN_LOOK_START } = await import("./plainLook");
+    const s = advisor();
+    const before = buildStillPrompt(s);
+    const r = await redraw(s, before);
+    expect(before).toContain("marble throne in a grand hall");
+    expect(r.prompt).not.toMatch(/\bmarble\b|\bgrand\b/);
+    expect(r.prompt).toContain("standing beside a throne in a hall");
+    expect(r.fields).toEqual({
+      showSubject:
+        "a wealthy man in a fine off-white toga draped over his left shoulder, standing beside a throne in a hall, seen from behind",
+      visualPrompt:
+        "A wealthy man in a fine off-white toga draped over his left shoulder, standing beside a throne in a hall, viewed from behind.",
+    });
+    // Built fresh from the new words, the prompt is the one swapped in place — plus the clause.
+    expect(r.prompt).toBe(`${buildStillPrompt({ ...s, ...r.fields })} ${r.prompt.slice(r.prompt.indexOf(PLAIN_LOOK_START))}`);
+    // Asked twice, the clause is never added twice.
+    const again = await redraw({ ...s, ...r.fields }, r.prompt);
+    expect(again.prompt.split(PLAIN_LOOK_START)).toHaveLength(2);
+  });
+
+  it("410-13: 'the flight' — the airliner seen from beside it is drawn as a passenger sees it, its wing through the window", async () => {
+    const { WINDOW_VIEW } = await import("./plainLook");
+    const s = pic(13, "the flight,", "a passenger jet flying above the clouds", {
+      visualPrompt: "A commercial passenger jet flying above a layer of white clouds, seen from the side against blue sky.",
+      listCut: true,
+    });
+    const r = await redraw(s, buildStillPrompt(s));
+    expect(r.fields.showSubject).toBe(`the wing of a passenger jet, ${WINDOW_VIEW}, flying above the clouds`);
+    expect(r.prompt).toContain(`The wing of a commercial passenger jet, ${WINDOW_VIEW}`);
+    expect(r.prompt).not.toContain("seen from the side");
+  });
+
+  it("410-10: nothing in the galley picture's words asks for the look — they stay word for word, the clause alone is added", async () => {
+    const { plainLookClause } = await import("./plainLook");
+    const s = pic(10, "so travelers like us can stop learning these things the hard way.", "host at galley counter reviewing notes on a clipboard", {
+      visualPrompt: "Bare weathered hands at a galley metal counter holding and reviewing a clipboard with papers.",
+      humanPresent: true,
+      brollHostLook: "a woman in her forties in a navy blazer",
+    });
+    const before = buildStillPrompt(s);
+    const r = await redraw(s, before);
+    expect(r.fields).toEqual({});
+    expect(r.prompt).toBe(`${before} ${plainLookClause([])}`);
+  });
+
+  it("light the line names stays, the clause names it; a lamp only the picture added goes (409-22)", async () => {
+    const candle = pic(7, "We ate dinner by candlelight that night.", "a kitchen table set for two, lit by a single candle");
+    const kept = await redraw(candle, buildStillPrompt(candle));
+    expect(kept.fields).toEqual({});
+    expect(kept.prompt).toMatch(/the light the words name \("candlelight", "night"\)/);
+    const seneca = pic(
+      22,
+      "Two thousand years ago, a man named Lucius Annaeus Seneca wrote a short, furious, loving essay to a man named Paulinus,",
+      "a man in an off-white wool toga draped over his left shoulder in deep folds, writing on a scroll with a reed pen by lamplight, seen from the side",
+      {
+        visualPrompt:
+          "An off-white wool toga draped over a left shoulder in deep folds, a reed pen in hand writing on a scroll, lamplight on the face of the scroll, seen from the side.",
+        otherPerson: "Seneca, a Roman writer",
+        humanPresent: true,
+        blurPrint: true,
+      }
+    );
+    const gone = await redraw(seneca, buildStillPrompt(seneca));
+    expect(gone.prompt).not.toMatch(/lamplight/);
+    expect(gone.prompt).toMatch(/no glow from a lamp, candle or fire/);
+  });
+
+  it("job 412 scene 25: the key thing's written look loses its golden light in the prompt, never its wilderness", async () => {
+    const s = pic(25, "when small prey is out moving around", "a wild cat stalking low through scattered brush across the dawn-lit wild landscape toward a small mouse", {
+      visualPrompt:
+        "Wild cat crouched low and moving through scattered dry brush across an open dawn-lit wilderness, golden low light on distant hills, a small mouse ahead on the ground",
+      keyThing: "wild landscape",
+      keyThingLook: "an open dawn-lit wilderness with low golden light, scattered brush and distant hills, calm and empty of people",
+    });
+    const before = buildStillPrompt(s);
+    expect(before).toContain("HOW THE WILD LANDSCAPE LOOKS in every picture of this video: an open dawn-lit wilderness with low golden light");
+    const r = await redraw(s, before);
+    // ("no golden glow" stays: the fixed look clause and the redraw's own clause refuse it.)
+    expect(r.prompt).not.toMatch(/golden low light|low golden light/i);
+    expect(r.prompt).toContain("HOW THE WILD LANDSCAPE LOOKS in every picture of this video: an open dawn-lit wilderness with low light, scattered brush");
+    // The look itself is not rewritten on the scene: other pictures of the thing keep it.
+    expect(r.fields).not.toHaveProperty("keyThingLook");
+  });
+
+  it("every other clause a redraw added stays: drawn with nobody in it, from a caller's own visual, or reworded past finding", async () => {
+    const { PERSON_FREE_FALLBACK } = await import("./longformVideo");
+    const { PLAIN_LOOK_START } = await import("./plainLook");
+    const s = advisor();
+    const nobody = `${buildStillPrompt({ ...s, humanPresent: false })} ${PERSON_FREE_FALLBACK}`;
+    const r1 = await redraw(s, nobody, { personFree: true });
+    expect(r1.prompt).toContain(PERSON_FREE_FALLBACK);
+    expect(r1.prompt).toContain("standing beside a throne in a hall");
+    // A caller's own visual (a keyframe's softened clip text) changes with it; the scene's own stays.
+    const own = "A man in a toga beside a marble throne in a grand hall.";
+    const r2 = await redraw(s, buildStillPrompt(s, false, own), { visualOverride: own });
+    expect(r2.visualOverride).toBe("A man in a toga beside a throne in a hall.");
+    expect(r2.fields).not.toHaveProperty("visualPrompt");
+    expect(r2.prompt).toContain("A man in a toga beside a throne in a hall.");
+    // Words nowhere to be found: built again from the new ones.
+    const r3 = await redraw(s, "a prompt reworded past finding its words");
+    expect(r3.prompt.startsWith(buildStillPrompt({ ...s, ...r3.fields }))).toBe(true);
+    expect(r3.prompt).toContain(PLAIN_LOOK_START);
+  });
+
+  it("on a softened content-policy prompt only the clause is added — its words are never rebuilt", async () => {
+    const { plainLookClause } = await import("./plainLook");
+    const s = advisor();
+    const softened = "A man standing in a hall, seen from behind.";
+    const r = await redraw(s, softened, { ordinaryPrompt: false });
+    expect(r.prompt).toBe(`${softened} ${plainLookClause([])}`);
+    expect(r.fields).toEqual({});
+  });
+});
+
+/**
+ * THE STAGED REDRAW TAKES OUT ONLY WHAT ITS LINE NEVER ASKED FOR — AND NOTHING THE PICTURE IS (review of
+ * round 13's staged redraw, over every stored description): its first rules took "glowing" off a lit
+ * lantern and a wood-burning pen's tip, turned "no golden light" into "no light", made "a shoji lantern
+ * lit from within" "a shoji from within", stripped a velvet jewellery box, a marbled roast and a whole
+ * film's marble bathroom counter, and would have rewritten an operator's verbatim prompt. Each case is
+ * a stored picture as it was written.
+ */
+describe("a staged redraw never takes what the picture is (the stored films, round 13 review)", () => {
+  const redraw = async (s: StoryboardScene) => {
+    const { plainLookRedraw } = await import("./longformVideo");
+    return plainLookRedraw(s, buildStillPrompt(s), { line: s.scriptText, ordinaryPrompt: true });
+  };
+
+  it("job 146 scene 71: the lit lantern a channel makes keeps its glow, and the clause names its light", async () => {
+    const s = pic(71, "and it only beat the panel by about 4 bucks an hour.", "shoji-style lantern glowing warm on the nightstand, closer detail", {
+      keyThing: "shoji lantern",
+    });
+    const r = await redraw(s);
+    expect(r.fields).toEqual({});
+    expect(r.prompt).toContain("shoji-style lantern glowing warm on the nightstand");
+    expect(r.prompt).toMatch(/the light the words name \("lantern"\)/);
+    expect(r.prompt).not.toMatch(/no glow from a lamp, candle or fire/);
+  });
+
+  it("job 110 scene 111 and job 146 scene 140: a tool's glowing tip and a 'no golden light' stay word for word", async () => {
+    const pen = pic(
+      111,
+      "because every wobble from a wood-burning pen stays right there in the wood.",
+      "hands burning a line into pale pine with a wood-burning pen",
+      {
+        visualPrompt:
+          "Weathered bare hands grip a wood-burning pen with glowing copper tip pressed against pale pine, scorching a dark line into the grain.",
+      }
+    );
+    expect((await redraw(pen)).fields).toEqual({});
+    const saw = pic(140, "I cut all of it with the same pull saw from the lattice panel.", "hands cutting a pine board with a pull saw", {
+      visualPrompt: "Weathered bare hands grip a thin-bladed pull saw. Flat indoor daylight, neutral gray-white tone, no golden light.",
+    });
+    expect((await redraw(saw)).fields).toEqual({});
+  });
+
+  it("jobs 222 and 395: a marble bathroom counter and a velvet jewellery box are what those things are", async () => {
+    const counter = pic(12, "Root to tip, one flat color, refreshed every four weeks, forever.", "hair dyed one flat dark tone, in the vanity mirror", {
+      visualPrompt:
+        "Hair dyed in a single flat dark tone from root to tip, reflected in the oval vanity mirror above the white marble bathroom counter, the color uniform and even throughout.",
+    });
+    expect((await redraw(counter)).fields).toEqual({});
+    const pearls = pic(10, "The mistake with pearls is saving them.", "pearl strand necklace tucked away in a closed velvet jewelry box in a drawer");
+    expect((await redraw(pearls)).fields).toEqual({});
+  });
+
+  it("an operator's verbatim prompt renders as typed — only the clause is added", async () => {
+    const typed = "A writing desk by candlelight beside a marble throne in a grand hall.";
+    const s = pic(25, "He was one of the richest men in the empire, an advisor standing one step from the throne,", typed, {
+      visualPromptSeed: typed,
+    });
+    const before = buildStillPrompt(s);
+    const r = await redraw(s);
+    expect(r.fields).toEqual({});
+    expect(r.prompt.startsWith(before)).toBe(true);
+    expect(r.prompt).toMatch(/the light the words name \("candlelight"\)/);
+  });
+
+  it("409-25 as before: the pipeline's own grand words still go", async () => {
+    const s = pic(
+      25,
+      "He was one of the richest men in the empire, an advisor standing one step from the throne,",
+      "a wealthy man in a fine off-white toga, standing beside a marble throne in a grand hall, seen from behind"
+    );
+    expect((await redraw(s)).fields.showSubject).toBe("a wealthy man in a fine off-white toga, standing beside a throne in a hall, seen from behind");
+  });
+});
+
+describe("no near copy of the picture a picture was drawn from (round 13, jobs 408-410)", () => {
+  // The rows as the films stored them (local jobs 408-410), and hashes as strings of 64 bits.
+  const ones = (n: number, from = 0) =>
+    Array.from({ length: 64 }, (_, i) => (i >= from && i < from + n ? "1" : "0")).join("");
+  const ref = (index: number, own = true) => ({ index, ...(own ? { own: true as const } : {}) });
+  const thumbOf = async () => {
+    const sharp = (await import("sharp")).default;
+    return sharp({ create: { width: 64, height: 36, channels: 3, background: "#777" } }).jpeg().toBuffer();
+  };
+
+  it("410-23 and 410-28: a punch-in on the picture just shown, or the same handout with one more passenger, is a copy to both checks", async () => {
+    const { NEAR_COPY_SYSTEM, JUST_SHOWN_COPY_NOTE, SAME_LAYOUT_RULE, sameThingQuestion } = await import("./overlayTextScan");
+    expect(SAME_LAYOUT_RULE).toMatch(/only closer or further back .* is a copy/);
+    expect(SAME_LAYOUT_RULE).toMatch(/a person or a hand taken out or put in/);
+    expect(sameThingQuestion("carry-on bag", true)).toContain(SAME_LAYOUT_RULE);
+    expect(JUST_SHOWN_COPY_NOTE).not.toMatch(/only a little closer/);
+    // 410-20: scene 3's seat row with the woman gone is not "another subject".
+    expect(NEAR_COPY_SYSTEM).toContain(SAME_LAYOUT_RULE);
+    expect(NEAR_COPY_SYSTEM).toMatch(/a person added or taken away does not make another subject/);
+    // A picture not shown right before keeps the same-thing check's own rule: a new distance is fine.
+    expect(sameThingQuestion("carry-on bag")).not.toContain(SAME_LAYOUT_RULE);
+  });
+
+  it("410-20 and 409-5: kept small beside the subject, each is laid beside the closest picture it was drawn from", async () => {
+    const { nearCopyRelatives, looksAtClosestRelative } = await import("./longformVideo");
+    const { nearCopyCandidates, rememberPicture } = await import("./pictureVariety");
+    // 410-20: "a small clear plastic cup of orange juice … on a metal beverage cart", drawn from scenes 3 and 16.
+    const juice = {
+      index: 20,
+      keyThing: "beverage cart",
+      memoryView: BACKGROUND_VIEW,
+      memoryRefUrls: ["https://r2/still-src-3.png", "https://r2/still-src-16.png"],
+      memoryRefScenes: [ref(3), ref(16)],
+    } as StoryboardScene;
+    const relatives = nearCopyRelatives(juice);
+    expect(relatives).toEqual({ drawnFrom: [3, 16], keptSmall: true, groupItem: false });
+    expect(looksAtClosestRelative(relatives, juice, false)).toBe(true);
+    const thumb = await thumbOf();
+    rememberPicture(94100, 3, ones(30), thumb);
+    rememberPicture(94100, 16, ones(38, 20), thumb);
+    const zero = ones(0);
+    expect(nearCopyCandidates(94100, 20, zero, undefined, { drawnFrom: [3, 16], lookAtClosest: true })[0].index).toBe(3);
+    // 409-5: "viewed from behind among the rows of cards", drawn from scene 3 (22 bits on the frames).
+    rememberPicture(94090, 3, ones(22), thumb);
+    rememberPicture(94090, 2, ones(33, 20), thumb);
+    expect(nearCopyCandidates(94090, 5, zero, undefined, { drawnFrom: [3, 2] }).map(c => c.index)).toEqual([3]);
+    // A picture drawn from nothing it is near keeps the 20-bit line: neither is looked at.
+    expect(nearCopyCandidates(94090, 5, zero)).toEqual([]);
+  });
+
+  it("the extra look is only the one a picture was owed: none beside a same-thing look, a screen's item photo or a list item's group picture", async () => {
+    const { nearCopyRelatives, looksAtClosestRelative } = await import("./longformVideo");
+    const { SET_ITEM_VIEW, MEMORY_VIEWS } = await import("./pictureMemory");
+    const urls = ["https://r2/still-src-2.png"];
+    // An ordinary memory picture: the same-thing check laid its memory beside it — no second look.
+    const bin = { index: 5, keyThing: "bin", memoryView: MEMORY_VIEWS[1], memoryRefUrls: urls, memoryRefScenes: [ref(2)] } as StoryboardScene;
+    expect(looksAtClosestRelative(nearCopyRelatives(bin), bin, true)).toBe(false);
+    // …but once a redraw took its memory away (drawn from words), the look is owed again.
+    expect(looksAtClosestRelative(nearCopyRelatives(bin), { memoryRefUrls: undefined }, false)).toBe(true);
+    // References of other things only keep the wider line, with no forced look.
+    const others = { ...bin, memoryView: undefined, memoryOthersOnly: true } as StoryboardScene;
+    expect(looksAtClosestRelative(nearCopyRelatives(others), others, false)).toBe(false);
+    const screen = { index: 9, memoryView: SCREEN_ITEM_VIEW, memoryRefUrls: urls, memoryRefScenes: [ref(4)] } as StoryboardScene;
+    expect(nearCopyRelatives(screen).drawnFrom).toEqual([]);
+    expect(looksAtClosestRelative(nearCopyRelatives(screen), screen, false)).toBe(false);
+    const item = { index: 7, listCut: true, memoryView: SET_ITEM_VIEW, memoryRefUrls: urls, memoryRefScenes: [ref(5)] } as StoryboardScene;
+    // Still related to the list's other items (412: "ribs" and "knee" came back alike), never forced.
+    expect(nearCopyRelatives(item)).toEqual({ drawnFrom: [5], keptSmall: false, groupItem: true });
+    expect(looksAtClosestRelative(nearCopyRelatives(item), { memoryRefUrls: undefined }, false)).toBe(false);
+  });
+
+  it("408-4/5: the toilet's panel and the bin, both drawn from scene 2, share one lane; pictures of other memories do not", async () => {
+    const { varietyLanes } = await import("./pictureVariety");
+    const shareLane = (a: StoryboardScene, b: StoryboardScene) => varietyLanes(a).some(l => varietyLanes(b).includes(l));
+    const panel = { index: 4, hostPresent: true, keyThing: "toilet", memoryRefScenes: [ref(2)] } as StoryboardScene;
+    const bin = { index: 5, keyThing: "bin", memoryRefScenes: [ref(2), ref(3)] } as StoryboardScene;
+    expect(shareLane(panel, bin)).toBe(true);
+    // 409: the sympathy card's first picture and the aisle drawn from scene 3 are not one memory.
+    expect(shareLane({ index: 2, keyThing: "sympathy card" } as StoryboardScene, bin)).toBe(false);
+    // 408-21: drawn from scene 8's toilet paper, it still waits for the toilet's other pictures (scene
+    // 15, drawn from scene 2) — the thing's lane is kept beside the memory lane, never swapped for it.
+    const fifteen = { index: 15, keyThing: "toilet", memoryRefScenes: [ref(2, false)] } as StoryboardScene;
+    const twentyOne = { index: 21, keyThing: "toilet", memoryRefScenes: [ref(8, false)] } as StoryboardScene;
+    expect(shareLane(fifteen, twentyOne)).toBe(true);
+  });
+
+  it("409-3: a fallback that shipped is remembered, so the next picture drawn from it meets it", async () => {
+    const sharp = (await import("sharp")).default;
+    const { nearCopyCandidates, pictureHash, rememberShippedPicture } = await import("./pictureVariety");
+    const frame = await sharp({ create: { width: 320, height: 180, channels: 3, background: "#5a3c1e" } })
+      .composite([{ input: Buffer.from(`<svg width="320" height="180"><rect x="200" y="0" width="120" height="180" fill="white"/></svg>`), left: 0, top: 0 }])
+      .png()
+      .toBuffer();
+    await rememberShippedPicture(94091, 3, frame, false, undefined, [2]);
+    const far = (await pictureHash(frame)).replace(/./g, (b, i) => (i < 30 ? (b === "1" ? "0" : "1") : b));
+    expect(nearCopyCandidates(94091, 5, far, undefined, { drawnFrom: [3], lookAtClosest: true }).map(c => c.index)).toEqual([3]);
+  });
+});
+
+describe("every key thing its words name keeps its look when a picture is drawn from words (round 13, jobs 404, 408 and 409)", () => {
+  const CARD = "a plain cream greeting card with a muted gray ribbon print on the front, blank inside, small and rectangular";
+  const BIN = "a small white plastic bin with a hinged lid, round shape";
+
+  it("409-3: the aisle drawn from words after copying scene 2 twice still holds the cream card with the grey ribbon", async () => {
+    const { attachMemory, memoryFor, memoryView, keyThingLookClause } = await import("./pictureMemory");
+    const { memoryFields, memoryToWords, promptAfterMemoryChange, buildStillPrompt } = await import("./longformVideo");
+    const things: KeyThing[] = [
+      { name: "sympathy card", look: CARD, main: true },
+      { name: "pharmacy aisle", look: "a narrow aisle lined with low wooden shelves holding neat rows of greeting cards, bright overhead lighting" },
+    ];
+    const b = [
+      pic(2, "a pharmacy on a Tuesday morning, buying his third sympathy card since spring,", "a man holding a sympathy card in a pharmacy aisle lined with shelves", {
+        keyThing: "sympathy card",
+        humanPresent: true,
+        pictureUrl: "https://r2/409/still-src-2.png",
+      }),
+      pic(3, "He is counting backward. He is sixty-four.", "a man in his sixties standing still in the pharmacy aisle, holding the sympathy card, seen from the side", {
+        keyThing: "pharmacy aisle",
+        humanPresent: true,
+      }),
+    ];
+    attachMemory(b, [b[1]], things);
+    const s3 = { ...b[1], ...memoryFields(await memoryFor(b[1], 0), memoryView(b[1])) } as StoryboardScene;
+    const fields = memoryToWords(s3);
+    expect(keyThingLookClause({ ...s3, ...fields })).toContain(`the sympathy card: ${CARD}`);
+    const prompt = promptAfterMemoryChange(s3, buildStillPrompt(s3), fields);
+    expect(prompt.split(CARD).length - 1).toBe(1);
+    // Before, the redraw carried the aisle's look alone and the card came back with a lily spray.
+    expect(prompt).not.toContain("reference image");
+  });
+
+  it("404-14 / 408-12: a thing that only stood in a reference picture is never written into the prompt", async () => {
+    const { attachMemory, memoryFor, memoryView } = await import("./pictureMemory");
+    const { buildSplitRightScene, buildStillPrompt, memoryFields, memoryToWords, promptAfterMemoryChange, withSplitMemory } =
+      await import("./longformVideo");
+    // The gulf coast yard drawn from the robin's pictures on the northern lawn: handed the lawn's look
+    // ("frost-dusted"), it would bring back the snow under palms the setting rule took out.
+    const robin: KeyThing[] = [
+      { name: "robin", look: "a plump songbird about ten inches long, bright orange-red breast", main: true },
+      { name: "lawn", look: "a flat suburban backyard lawn, green fading to frost-dusted brown, bordered by a low wooden fence" },
+      { name: "gulf coast yard", look: "a flat grassy winter yard in a mild southern climate" },
+    ];
+    const r = [
+      pic(5, "In spring they come back,", "a robin standing on a green lawn in early spring with patches of melting snow", {
+        keyThing: "robin",
+        pictureUrl: "https://r2/404/still-src-5.png",
+      }),
+      pic(14, "Down on the Gulf Coast, they winter in the yards.", "a robin standing in a mild gulf coast yard with palm trees", { keyThing: "robin" }),
+    ];
+    attachMemory(r, [r[1]], robin);
+    const s14 = { ...r[1], ...memoryFields(await memoryFor(r[1], 0), memoryView(r[1])) } as StoryboardScene;
+    expect(s14.otherThingLooks?.map(t => t.name)).toEqual(["gulf coast yard"]);
+    expect(promptAfterMemoryChange(s14, buildStillPrompt(s14), memoryToWords(s14))).not.toContain("frost");
+    // The toilet's panel names no bin; the toilet's first picture has one beside it. Nothing about the
+    // bin is added — what is in a picture is up to its own words.
+    const things: KeyThing[] = [
+      { name: "toilet", look: "a white porcelain toilet, oval bowl, closed lid often up", main: true },
+      { name: "bin", look: `${BIN}, sitting on tile floor beside the toilet base` },
+    ];
+    const b = [
+      pic(2, "That little stretch of tile between the bowl and the wall.", "a small white plastic bin with a closed hinged lid on pale beige tile floor beside the base of a white porcelain toilet", {
+        keyThing: "bin",
+        pictureUrl: "https://r2/408/still-src-2.png",
+      }),
+      host(12, "So. We will go the way the water goes.", {
+        keyThing: "toilet",
+        splitVisual: "White porcelain toilet bowl with water draining downward into the trapway opening, viewed from above at a settled moment as the bowl empties.",
+      }),
+    ];
+    attachMemory(b, [], things);
+    const panel = await withSplitMemory(b[1], buildSplitRightScene(b[1]), 0);
+    expect(panel.otherThingLooks).toBeUndefined();
+    const prompt = buildStillPrompt(panel, false, undefined, undefined, true);
+    expect(prompt).not.toContain(BIN);
+    expect(promptAfterMemoryChange(panel, prompt, memoryToWords(panel), { square: true })).not.toContain(BIN);
+  });
+
+  it("a first picture with nothing earlier keeps only its own look: nothing is added where no memory was", async () => {
+    const { attachMemory, memoryFor, memoryView, keyThingLookClause } = await import("./pictureMemory");
+    const { memoryFields } = await import("./longformVideo");
+    const first = pic(2, "a pharmacy on a Tuesday morning,", "a man holding a sympathy card in a pharmacy aisle lined with shelves", {
+      keyThing: "sympathy card",
+    });
+    attachMemory([first], [first], [
+      { name: "sympathy card", look: CARD, main: true },
+      { name: "pharmacy aisle", look: "a narrow aisle lined with low wooden shelves" },
+    ]);
+    const s = { ...first, ...memoryFields(await memoryFor(first, 0), memoryView(first)) } as StoryboardScene;
+    expect(s.otherThingLooks).toBeUndefined();
+    expect(keyThingLookClause(s)).not.toContain("OTHER THING");
+    expect(keyThingLookClause(s)).toContain(CARD);
+  });
+});
