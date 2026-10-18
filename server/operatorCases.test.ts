@@ -74,6 +74,7 @@ import {
   TOOL_POSITION_CLAUSE,
   withAllowedText,
   planGlitchRerender,
+  ctaPlacementJobWarnings,
 } from "./longformVideo";
 import {
   exactLookQuestion,
@@ -5967,5 +5968,61 @@ describe("Werner's job 408 at 0:54 and 1:08: no host take ends on a preposition,
       [false, "Mine was a plain grid about a foot square,"],
       [false, "made from pine screen molding at about $3 a stick."],
     ]);
+  });
+});
+
+describe("round 13: a line under the big QR card never sends the viewer to the corner unwarned (job 409 scene 37)", () => {
+  // Job 409 (212.16-218.07): the QR went big and centred on the scan sentence, and five seconds later
+  // the voice said "lift your phone toward the pattern in the corner of the screen". Nothing compared
+  // the script's placement words with the layout. The Generate dialog now warns on that line, and the
+  // voicing stage records the same line on the job — never a refusal. The script is the job's own.
+  const SCRIPT_409 = [
+    "Then he turns the whole thing over in a single motion: life is not short.", // 1
+    "===START CTA(The Stoic Way)===", // 2
+    "Some of you are already a page ahead of me, wondering where all of this lives in one place. The thinking belongs to Seneca and the Stoics after him; my work was gathering it into a digital book called The Stoic Way — a hundred and one lessons on money, grief, people, and more.", // 3
+    "", // 4
+    "Chapter twelve stands on today’s exact ground — time, legacy, and what the remaining years are for. Getting there is one small motion: lift your phone toward the pattern in the corner of the screen and tap what rises, or find the first line of the description below. No timer on this — a lesson about hurry is a poor place to hurry you.", // 5
+    "", // 6
+    "Now, back to that door you have been holding open.", // 7
+    "===END CTA===", // 8
+    "Bye.", // 9
+  ].join("\n");
+  const cta = (index: number, scriptText: string) =>
+    ({ index, scriptText, hostPresent: true, cta: true, ctaIndex: 0, showSubject: "x" }) as StoryboardScene;
+  const scenesOf = (scanLine: string) => [
+    host(1, "Then he turns the whole thing over in a single motion: life is not short.", { hostOpener: true }),
+    cta(2, "Some of you are already a page ahead of me, wondering where all of this lives in one place. The thinking belongs to Seneca and the Stoics after him; my work was gathering it into a digital book called The Stoic Way — a hundred and one lessons on money, grief, people, and more."),
+    cta(3, `Chapter twelve stands on today’s exact ground — time, legacy, and what the remaining years are for. ${scanLine}`),
+    cta(4, "No timer on this — a lesson about hurry is a poor place to hurry you. Now, back to that door you have been holding open."),
+    host(5, "Bye."),
+  ];
+  const SCAN_409 =
+    "Getting there is one small motion: lift your phone toward the pattern in the corner of the screen and tap what rises, or find the first line of the description below.";
+  const params = { qrImageUrl: "q.png", bookTitle: "The Stoic Way", bookCoverImageUrl: "c.png" } as any;
+
+  it("the job records the line the card contradicts, in the Generate dialog's own words", () => {
+    const out = markCtaQrBlock(scenesOf(SCAN_409), params, true);
+    expect(out.find(s => s.qrHero)?.scriptText).toMatch(/^Getting there is one small motion/);
+    const warnings = ctaPlacementJobWarnings(SCRIPT_409, out);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/^Line 5 says the code is at "the corner of the screen"/);
+    expect(checkScript(SCRIPT_409).warnings.map(w => w.message)).toEqual(warnings);
+    expect(checkScript(SCRIPT_409).problems).toEqual([]);
+  });
+
+  it("with no QR or book there is no big card to contradict, so the job records nothing", () => {
+    const out = markCtaQrBlock(scenesOf(SCAN_409), {} as any, true);
+    expect(out.some(s => s.qrHero)).toBe(false);
+    expect(ctaPlacementJobWarnings(SCRIPT_409, out)).toEqual([]);
+  });
+
+  it("a scan line that says 'on your screen' and 'below' for the link is left alone", () => {
+    const clean =
+      "Getting there is one small motion: lift your phone toward the code on your screen and tap what rises, or find the first line of the description below.";
+    const script = SCRIPT_409.replace(SCAN_409, clean);
+    const out = markCtaQrBlock(scenesOf(clean), params, true);
+    expect(out.some(s => s.qrHero)).toBe(true);
+    expect(ctaPlacementJobWarnings(script, out)).toEqual([]);
+    expect(checkScript(script)).toEqual({ problems: [], warnings: [] });
   });
 });
