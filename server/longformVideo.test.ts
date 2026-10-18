@@ -3927,6 +3927,31 @@ describe("titleMatcher", () => {
       )("it's all in the Whitetail Bible")
     ).toBe(true);
   });
+
+  it("never takes one word for a title of two or more (job 400)", () => {
+    const stoic = titleMatcher("The Stoic Way");
+    expect(stoic("The thinking belongs to Seneca and the Stoics after him;")).toBe(false);
+    expect(stoic("my work was gathering it into a digital book called The Stoic Way")).toBe(true);
+    const lock = titleMatcher("The Locksmith Way");
+    expect(lock("A heavy strike with long screws is everyday locksmith work,")).toBe(false);
+    expect(lock("or had fixed exactly the way you wanted it.")).toBe(false);
+    expect(lock("it's in The Locksmith Way, my digital book.")).toBe(true);
+  });
+
+  it("still takes half the words from two up, and one word for a one-word title", () => {
+    // The host drops their own name from the title.
+    expect(
+      titleMatcher("Lance Kavanaugh's Lockdown Playbook")("It's my Lockdown Playbook, a digital download.")
+    ).toBe(true);
+    // "A Hundred" and "Thousand" miss the number tokens; the four other words are enough.
+    expect(
+      titleMatcher("100 Ways to Make Your First $1,000 with Woodworking")(
+        "The projects that actually sell are gathered in my digital book, A Hundred Ways to Make Your First Thousand Dollars with Woodworking."
+      )
+    ).toBe(true);
+    expect(titleMatcher("Homesteading")("a little book I call Homesteading")).toBe(true);
+    expect(titleMatcher("Homesteading")("a quiet morning on the porch")).toBe(false);
+  });
 });
 
 describe("markCoverReveal", () => {

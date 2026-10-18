@@ -2291,3 +2291,44 @@ describe("the big QR waits for the scan line and never starts on the pitch befor
     expect(out.find(s => /easy to download it to any phone\.$/.test(s.scriptText ?? ""))?.hostPresent).toBe(true);
   });
 });
+
+describe("the book cover lands on the line that says the title, never on one word of it (job 400)", () => {
+  // "The Stoic Way" is two words, and half of two is one: "the Stoics after him" passed as naming
+  // the book, so the cover played under the clause before the title and was gone when the host
+  // said "a digital book called The Stoic Way".
+  const cta = (index: number, scriptText: string) =>
+    ({ index, scriptText, hostPresent: true, cta: true, ctaIndex: 0, showSubject: "x" }) as StoryboardScene;
+  const block = () => [
+    host(1, "Then he turns the whole thing over in a single motion: life is not short.", { hostOpener: true }),
+    cta(2, "Some of you are already a page ahead of me, wondering where all of this lives in one place."),
+    cta(3, "The thinking belongs to Seneca and the Stoics after him;"),
+    cta(4, "my work was gathering it into a digital book called The Stoic Way — a hundred and one lessons on money, grief, people, and more. Thirteen chapters, each lesson built the same way: the real struggle, the principle underneath it, a boxed exercise to run before the day ends, and an honest note on where the advice breaks down. Getting there is one small motion: lift your phone toward the pattern in the corner of the screen and tap what rises, or find the first line of the description below."),
+    cta(5, "No timer on this — a lesson about hurry is a poor place to hurry you. Now, back to that door you have been holding open."),
+    host(6, "Bye."),
+  ];
+  const params = { qrImageUrl: "q.png", bookTitle: "The Stoic Way", bookCoverImageUrl: "c.png" } as any;
+
+  it("the scan-window pass puts the cover on 'called The Stoic Way' and keeps 'the Stoics after him' on the host", () => {
+    const out = markCtaQrBlock(block(), params, true);
+    expect(out.find(s => s.coverHero)?.scriptText).toMatch(/^my work was gathering it into a digital book called The Stoic Way/);
+    expect(out.find(s => /Stoics after him;$/.test(s.scriptText ?? ""))?.coverHero).toBeFalsy();
+    const order = out.filter(s => s.cta).map(s => (s.qrHero ? "Q" : s.coverHero ? "B" : "H")).join("");
+    expect(order).toBe("HHBHQQ");
+  });
+
+  it("the cover reveal does the same on a run that has no scan window yet", async () => {
+    const { markCoverReveal } = await import("./longformVideo");
+    const out = markCoverReveal(block(), params);
+    expect(out.filter(s => s.coverHero).map(s => s.index)).toEqual([4]);
+  });
+
+  it("a two-word title said in full still gets the cover (Norbert's 'The Locksmith Way')", async () => {
+    const { markCoverReveal } = await import("./longformVideo");
+    const scenes = [
+      cta(1, "A heavy strike with long screws is everyday locksmith work,"),
+      cta(2, "and I collected a hundred and one fixes like it into a digital book called The Locksmith Way."),
+    ];
+    const out = markCoverReveal(scenes, { bookTitle: "The Locksmith Way", bookCoverImageUrl: "c.png" } as any);
+    expect(out.filter(s => s.coverHero).map(s => s.index)).toEqual([2]);
+  });
+});

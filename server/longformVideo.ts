@@ -8211,9 +8211,9 @@ function tokenTest(token: string): (hay: string) => boolean {
  * config carries the subtitle too), paraphrases it ("Save Nine Thousand Dollars a Year" / "$9,000"),
  * or swaps/drops one word of it ("the Texas Barbecue Bible", "it's in the Whitetail Bible").
  * So a line matches when it contains all-but-one distinctive token of the main title (the part
- * before the first colon — 2+ must still land, else one common word would fire everywhere), OR a
- * majority of the full title's tokens (the `mentionsTitle` rule, over the same tolerant tests).
- * Strictly more permissive than `mentionsTitle` alone.
+ * before the first colon — 2+ must still land, else one common word would fire everywhere), OR
+ * half or more of the full title's tokens, over the same tolerant tests, and never fewer than two
+ * — so a two-word title needs both words, and only a one-word title is named by one word.
  * Returns a never-matching predicate without a title. Pure — unit-tested.
  */
 export function titleMatcher(
@@ -8233,8 +8233,15 @@ export function titleMatcher(
     if (main.length >= 2 && mainHits >= Math.max(2, main.length - 1)) {
       return true;
     }
+    // Never ONE word when the title has two or more. Half of a two-word title is one word: "The
+    // Stoic Way" is [stoic, way], and "the Stoics after him" (the clause before "a digital book
+    // called The Stoic Way") took the cover, so it was gone before the title was said (Gideon's
+    // 3-min test, job 400). A short title's distinctive word is usually the channel's own subject,
+    // said all through the pitch ("everyday locksmith work" for "The Locksmith Way"). Exactly half
+    // still counts from two words up: "my Lockdown Playbook" names "Lance Kavanaugh's Lockdown
+    // Playbook" — a host drops their own name from the title.
     const hits = tests.filter(t => t.fn(hay)).length;
-    return hits >= Math.max(1, Math.ceil(full.length / 2));
+    return hits >= Math.min(full.length, Math.max(2, Math.ceil(full.length / 2)));
   };
 }
 
