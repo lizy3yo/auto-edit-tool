@@ -846,6 +846,57 @@ Express · tRPC · Drizzle · MySQL.
   release beat (`qrTail` + `qrHero`, the film's last words only) keeps its card and picture to the
   end under the goodbye (25 of 141 production films ended card → a 0.8 s face; job 179). Never
   across a CTA edge otherwise, into a cover or asset, or over a paid render.
+- **What the verification films on the round-12 code found** (round 13, 2026-10-19). The seven
+  channels' scripts were rendered again (jobs 408-414) and reviewed against their own earlier films
+  (401-407): severe faults 3 → 1, noticeable roughly halved (Luca 14 → 2). 19 general fixes, each
+  replayed over the ~350 local storyboards. REDRAWS: (a) a HOST PICTURE NEVER SHIPS UNCHECKED — the
+  "same faults twice → keep" step and the out-of-draws fallback used to ship before `scanSameHost`
+  ran (job 409 scene 28: the host reading face-on again, the severe one); now a kept or fallback host
+  picture passes the check or is turned away / drawn with nobody, at most one extra draw. (b) A REDRAW
+  DROPS WHAT CAUSED ITS FAULT: a missing/detail redraw goes without its memory pictures and memory
+  camera, drawn from the written look (a remembered cola cup had beaten "ginger ale", 410 scene 18);
+  a small subject never gets the far near-copy camera (408's swab as a speck); a copy of its own
+  memory drops only that reference (`memoryRefScenes`; 408's tunnel bowl). (c) A STAGED REDRAW IS
+  PLAINER (`server/plainLook.ts`, `plainLookRedraw`): light, grandeur and finish words the line never
+  said come out (marble throne, golden glow), and a view no phone could take is brought to one a person
+  could (an airliner above the clouds → a wing through a cabin window). (d) NEAR-COPY GAPS
+  (`server/pictureVariety.ts`): a picture is compared with the pictures it was drawn from and their
+  other children up to 24 bits; every shipped frame, fallbacks too, is remembered; a tighter or looser
+  crop of one layout, or a person taken out, is a copy (`SAME_LAYOUT_RULE`); pictures sharing a memory
+  draw in one lane as well as their thing's lane (`varietyLanes`, a panel waits ≤ 3 min). About three
+  more Sonnet looks per 3-minute film. (e) Drawn from words, a picture keeps every key thing's written
+  look (`otherThingLooks`), so 409's sympathy card stopped changing design. PEOPLE AND THINGS: (f) THE
+  BOOK GUARD keeps out only the video's own book (its title, "my book") — never a book or page the line
+  is about, never "checkbook"/"notebook" — and strips it from the scene's OWN words, never borrowing
+  a neighbour's prompt (`genericCtaBrollFor` had drawn 409's farmer through the study window). (g) A
+  THING ONLY THE CTA NAMES IS NO PROP: the style bible and props list read the script without its
+  marked CTA blocks (`splitCtaFromContent`, backstop `withoutCtaOnlyProps`; 409's CTA phone had filled
+  three pictures). (h) The props call gets the host's title and own words about themself, and one
+  small extra call ("Props list (people)", ~8 of 37 scripts) fills a PERSON line for someone the
+  script follows, or a PERSON/VIEWER look missing man/woman, age or hair (`followedPeople`,
+  `lookGaps`). (i) SOMEONE ELSE NEVER SHOWS A FACE: their expressions are said with the body
+  (`expressionAsBody`), and the still check asks those pictures whether a face shows (QUESTION 10,
+  same call; a clear profile counts), one redraw from behind (`OTHERS_TURNED_AWAY_CLAUSE`). (j) A
+  list said inside a passage of another time or place carries it (`listSetting`, from the list
+  finder's call); a story's "he/she" is never the host and a figure of speech is drawn by its meaning
+  (`fitPictureNotes`). PLANNING: (k) lines that COMPARE are never one same-topic picture
+  (`contrastAcross` in `parseContextGroups`; 408's bin under "it is empty"). (l) A picture is about the
+  ITEM, never the surface it sits on (`onlyItsSurface`), a held-things list keeps its holder
+  (`keepListHolders`), and the line check is told a closing "There is a …" thing the picture leaves
+  out (`closingThing`). (m) A TOOL MADE FOR ONE JOB is written by its parts, one kind
+  (`SPECIALISED_TOOL_RULE`, `TOOL_SHAPE_NOT_VERB`; 408's auger as a bent rod). (n) STEPS need three,
+  or two instructions on named things ("Flush, and follow." is none); a host take never stops right
+  after a preposition before a bare word — the gate hands over before the preposition. (o) The
+  Generate script check WARNS when a scan-window line puts the code in a corner/side
+  (`shared/scanIntent.ts`, `ctaPlacementJobWarnings`). GRAPHICS: (p) the planner SEES THE PICTURE
+  (`pictureOf`, graphics/src/plan/pictures.ts: still or video, list item, subject, person): a
+  SmallLabel names what its picture shows, one name a picture, no full-screen card leaves a video under
+  1.5 s or hides two list pictures. (q) Rows never stop before what their last word needs; steps get
+  their articles back and use only words said. (r) A Versus sub enters with its own words, the VS badge
+  with the second side; a graphic's own words end where a new clause begins (`subAt`, `drawnSec`).
+  (s) The name card sits on the self-introduction even when short (edges shrink to 0.2 s, the 1.5 s
+  hold kept), never on a take before it; a DimCaption is ≤ 10 words and darkening graphics are ≥ 3 s
+  apart. Details and replay counts: `graphics-lab/out/round13-docs.json`; the reviews: `graphics-lab/out/review3/`.
 - `server/hostPlate.ts` — **provider-independent**. The lip-sync model animates the image it
   is handed and never changes the setting, so `HOST_PLATES=1` generates a 16:9 plate of the host
   IN each beat's setting (host photo as identity reference) and syncs from that instead of the
