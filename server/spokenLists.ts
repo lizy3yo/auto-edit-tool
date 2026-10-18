@@ -13,7 +13,9 @@
  *     way list items are (commas, "and"/"or"), and `itemsAreThings` keeps a list of things only
  *     when every item names one (never "six,", "round ten," or "as rest,"). A general head in front
  *     of examples ("some ordinary place, a waiting room, a church pew") is never an item
- *     (`withoutGeneralHead`). When the call fails,
+ *     (`withoutGeneralHead`), and a parallel series keeps its last member when it is said differently
+ *     ("the farmer complains, the senator complains, and the young are already rehearsing the
+ *     complaint", `withLastSeriesMember`). When the call fails,
  *     `listsByShape` finds them by sentence shape alone ("X, Y, and Z") — the same rules, so a
  *     film is never worse off.
  *  2. `applySpokenLists` — re-cuts the film so every item is exactly one picture, wherever the
@@ -241,10 +243,12 @@ export function listsByShape(sentence: string): string[][] {
       items = items.slice(1);
       headed = true;
     }
-    const joinedByAnd = /^(?:and|or)\s/i.test(items[items.length - 1] ?? "");
-    if (items.length >= 3 || (items.length === 2 && (joinedByAnd || headed))) {
-      out.push(items.map(t => unmaskSeriesCommas(stripJoiners(t).replace(/[.!?;:,]+$/, "").trim())));
-    }
+    const clean = items.map(t => unmaskSeriesCommas(stripJoiners(t).replace(/[.!?;:,]+$/, "").trim()));
+    // The run stops at a parallel series' last member when it is said differently ("…, the old
+    // complain, and the young are already rehearsing the complaint", job 400) — it is still an item.
+    const full = withLastSeriesMember(sentence, clean);
+    const joinedByAnd = full !== clean || /^(?:and|or)\s/i.test(items[items.length - 1] ?? "");
+    if (full.length >= 3 || (full.length === 2 && (joinedByAnd || headed))) out.push(full);
     i = j;
   }
   return out;
@@ -345,6 +349,66 @@ export function itemsAreThings(sentence: string, items: string[]): boolean {
   return items.every(i => !notAThing(String(i ?? ""))) && !describingWords(sentence, items);
 }
 
+/** What opens each clause of a parallel series ("THE farmer complains, THE senator complains"). */
+const SERIES_OPENER = new Set(["a", "an", "the", "my", "your", "our", "his", "her", "their", "every", "each"]);
+/** The most words one clause of such a series may have: an opener, who or what, and the shared word. */
+const SERIES_CLAUSE_MAX_WORDS = 6;
+/** Where the series' last member stops: the next comma, semicolon, colon or dash, or the sentence's end. */
+const MEMBER_END = /[,;:—–]|\s-\s|[.!?](?=["')\]]?(?:\s|$))/;
+
+/**
+ * A PARALLEL SERIES KEEPS ITS LAST MEMBER (2026-10-18, job 400 at 2:36): "The farmer complains, the
+ * senator complains, the old complain, and the young are already rehearsing the complaint." was cut
+ * after "the old" — the last member of a series is where a speaker says it differently, and the shape
+ * rules stop at the first piece that does not name a thing — so "the young", the point of the line,
+ * played after the list graphic had closed, on a picture outside the list. When every item is a short
+ * clause ENDING ON THE SAME WORD ("… complains", "… complain"), and right after the last one comes
+ * "and" (a comma before it or not) with a clause that opens like them ("the …") and says that word
+ * again in any form ("… rehearsing the complaint"), that clause is the series' last item, whole, up
+ * to the next comma or the sentence's end — so its picture is the whole clause, like the items before
+ * it. Nothing is added without that echo: "the farmer complains, the senator complains, and the truth
+ * is nobody listens" ends on a clause about something else, and a list of things that do not end on
+ * one word ("a saw, a drill, and the whole thing cost me forty dollars") is never touched. The longer
+ * list is kept only when it still passes `validateSpokenList` and `itemsAreThings`, so a member that
+ * fails them never costs the list the items it had. Returns the same array when nothing is added. Pure.
+ */
+export function withLastSeriesMember(sentence: string, items: string[]): string[] {
+  if (!Array.isArray(items) || items.length < 2) return items;
+  const spans = tokenSpans(sentence);
+  const toks = spans.map(t => t.tok);
+  const openers = new Set<string>();
+  let shared: string | null = null;
+  let cursor = 0;
+  for (const item of items) {
+    const want = tokenSpans(String(item ?? "")).map(t => t.tok);
+    // An opener, at least one word for who or what, then the word every clause ends on.
+    if (want.length < 3 || want.length > SERIES_CLAUSE_MAX_WORDS || !SERIES_OPENER.has(want[0])) return items;
+    const end = stem(want[want.length - 1]);
+    if (shared === null) shared = end;
+    else if (end !== shared) return items;
+    const at = findTokens(toks, want, cursor);
+    if (at < 0) return items;
+    openers.add(want[0]);
+    cursor = at + want.length;
+  }
+  if (!shared || shared.length < 3 || cursor >= toks.length || toks[cursor] !== "and") return items;
+  if (!/^\s*,?\s*$/.test(sentence.slice(spans[cursor - 1].end, spans[cursor].start))) return items;
+  const open = cursor + 1;
+  if (open >= toks.length || !openers.has(toks[open])) return items;
+  const rest = sentence.slice(spans[open].start);
+  const stop = rest.search(MEMBER_END);
+  const member = (stop < 0 ? rest : rest.slice(0, stop)).trim();
+  const words = tokenSpans(member).map(t => t.tok);
+  if (words.length < 2 || words.length > LIST_ITEM_MAX_WORDS) return items;
+  const said = shared;
+  const echoes = (w: string) => stem(w) === said || (said.length >= 5 && w.startsWith(said));
+  // Said again AFTER its own who or what, like the clauses before it: "and the complaints never end"
+  // only sums the series up — its subject is the shared word itself, not one more member.
+  if (!words.slice(2).some(echoes)) return items;
+  const longer = [...items, member];
+  return validateSpokenList(sentence, longer) && itemsAreThings(sentence, longer) ? longer : items;
+}
+
 // ─── Finding them ───────────────────────────────────────────────────────────────────────────────
 
 export const LISTS_SYSTEM = `You read a video's spoken script, one numbered sentence per line, and
@@ -394,8 +458,11 @@ export function parseSpokenLists(text: string, sentences: string[]): SpokenList[
     // as rest, as a good night's sleep…" (job 362, again in jobs 392 and 395). Dropped here, the
     // sentence shape may still find the real list in that sentence (`findSpokenLists` adds it).
     if (!steps && !itemsAreThings(sentences[n], items)) continue;
-    if (validateSpokenList(sentences[n], items))
-      out.push({ sentence: n, items, ...(steps ? { kind: "steps" as const } : {}) });
+    if (!validateSpokenList(sentences[n], items)) continue;
+    // A parallel series the model ended one member early, at the member said differently ("…, the old
+    // complain, and the young are already rehearsing the complaint", job 400), gets it back.
+    if (steps) out.push({ sentence: n, items, kind: "steps" });
+    else out.push({ sentence: n, items: withLastSeriesMember(sentences[n], items) });
   }
   return out.sort((a, b) => a.sentence - b.sentence);
 }

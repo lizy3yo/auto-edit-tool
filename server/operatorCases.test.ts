@@ -2138,3 +2138,51 @@ describe("one essay is not a list (job 400 at 1:41, 'a short, furious, loving es
     ]);
   });
 });
+
+describe("a series keeps its last member (job 400 at 2:36, 'everyone complains')", () => {
+  // The voice says "The farmer complains, the senator complains, the old complain, and the young are
+  // already rehearsing the complaint." The list graphic "Everyone complains" read 1 The farmer / 2 The
+  // senator / 3 The old and closed at 160.97 s, just as "and the young" — the line's point — began on a
+  // full-frame watch picture outside the list. The list was saved with three items.
+  const CUT = [
+    pic(29, "Everyone complains that life is too short, Seneca says.", "a crowd of people in a Roman street gesturing and complaining to each other", { narrationStartSec: 151.76, narrationEndSec: 156.29 }),
+    pic(30, "The farmer complains,", "a farmer leaning on a hoe in a dry field, shaking his head", { listCut: true, narrationStartSec: 156.29, narrationEndSec: 157.78 }),
+    pic(31, "the senator complains,", "a Roman senator in an off-white draped toga gesturing in frustration in a marble hall", { listCut: true, narrationStartSec: 157.78, narrationEndSec: 159.45 }),
+    pic(32, "the old complain,", "an old man sitting on a bench, sighing, hands on his cane", { listCut: true, narrationStartSec: 159.45, narrationEndSec: 160.96 }),
+    pic(33, "and the young are already rehearsing the complaint.", "a young man checking a wristwatch impatiently on a street corner", { narrationStartSec: 160.96, narrationEndSec: 164.23 }),
+    pic(34, "Then he turns the whole thing over in a single motion: life is not short.", "an aged papyrus scroll unrolled open on a heavy carved dark desk", { narrationStartSec: 164.23, narrationEndSec: 170.62 }),
+  ];
+  const SAVED = ["The farmer complains", "the senator complains", "the old complain"]; // as job 400 saved it
+  const FOUR = [...SAVED, "the young are already rehearsing the complaint"];
+  const text = CUT.map(s => s.scriptText).join(" ");
+
+  it("found either way, the list has all four — the model's three get the fourth back", async () => {
+    expect(lists(CUT)).toEqual([{ sentence: 1, items: FOUR }]);
+    const r = await findSpokenLists(text, { ask: async () => JSON.stringify({ lists: [{ sentence: 1, kind: "things", items: SAVED }] }) });
+    expect(r.lists).toEqual([{ sentence: 1, items: FOUR }]);
+  });
+
+  it("'and the young…' is the fourth item's picture, and the list graphic runs to 'complaint'", async () => {
+    const r = applySpokenLists(CUT, lists(CUT));
+    expect(r.scenes.map(s => [s.scriptText, !!s.listCut])).toEqual(CUT.map((s, k) => [s.scriptText, k >= 1 && k <= 4]));
+    // The fallback list window (built when the planner leaves a list without one) has a fourth row,
+    // said from "the young" to the end of the clause.
+    const { missingListCues } = await import("../graphics/src/plan/planner");
+    const words = CUT.flatMap(s => {
+      const w = (s.scriptText ?? "").split(" ");
+      const a = s.narrationStartSec!;
+      const step = (s.narrationEndSec! - a) / w.length;
+      return w.map((t, k) => ({ text: t, start: a + k * step, end: a + (k + 0.9) * step }));
+    });
+    const film = { scenes: CUT.map(s => ({ index: s.index, narrationStartSec: s.narrationStartSec!, narrationEndSec: s.narrationEndSec! })) };
+    const [cue] = missingListCues([], words, film, [{ items: FOUR }]);
+    const rows = cue.props.items as { text: string; at: string; say: string }[];
+    expect(rows.map(x => x.say)).toEqual(FOUR);
+    expect(rows[3].at).toBe("@the young");
+  });
+
+  it("a series ended by a clause about something else stays three; a list of things is untouched", () => {
+    expect(spokenListsByShape(["The farmer complains, the senator complains, the old complain, and the truth is nobody listens."]).map(l => l.items)).toEqual([SAVED]);
+    expect(spokenListsByShape(["Get a saw, a drill, a plane, and the whole thing cost me forty dollars."]).map(l => l.items)).toEqual([["a saw", "a drill", "a plane"]]);
+  });
+});

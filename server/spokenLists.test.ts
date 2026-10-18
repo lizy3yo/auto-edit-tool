@@ -8,6 +8,7 @@ import {
   splitSentences,
   spokenListsByShape,
   validateSpokenList,
+  withLastSeriesMember,
   type SpokenList,
 } from "./spokenLists";
 
@@ -692,5 +693,83 @@ describe("describing-run review: the lists around a run stay whole", () => {
     expect(spokenListsByShape([s]).map(l => l.items)).toEqual([["glue", "sandpaper", "wood screws"]]);
     expect(validateSpokenList(s, ["glue", "sandpaper", "wood screws"])).toBe(true);
     expect(listsByShape("Everyone complains that life is too short, Seneca says.")).toEqual([]);
+  });
+});
+
+describe("a parallel series keeps its last member (job 400 at 2:36, 'everyone complains')", () => {
+  // The list graphic read "1 The farmer / 2 The senator / 3 The old" and closed as "and the young" began,
+  // the series' point, which played outside the list on a picture of its own.
+  const SERIES = "The farmer complains, the senator complains, the old complain, and the young are already rehearsing the complaint.";
+  const THREE = ["The farmer complains", "the senator complains", "the old complain"];
+  const FOUR = [...THREE, "the young are already rehearsing the complaint"];
+  const answer = (items: string[], kind = "things") => JSON.stringify({ lists: [{ sentence: 0, kind, items }] });
+
+  it("the sentence shape keeps 'the young…' whole, as the fourth item (job 400 saved three)", () => {
+    expect(listsByShape(SERIES)).toEqual([FOUR]);
+    expect(spokenListsByShape([SERIES])).toEqual([{ sentence: 0, items: FOUR }]);
+    // Two members before it are a series too: a list of three, where there was none.
+    expect(listsByShape("The farmer complains, the senator complains, and the young are already rehearsing the complaint.")).toEqual([
+      ["The farmer complains", "the senator complains", "the young are already rehearsing the complaint"],
+    ]);
+    // The member stops at its own comma.
+    expect(listsByShape(SERIES.replace(/\.$/, ", Seneca says."))).toEqual([FOUR]);
+  });
+
+  it("the model's list that stopped one member early gets it back; its full answer is unchanged", async () => {
+    expect(parseSpokenLists(answer(THREE), [SERIES])).toEqual([{ sentence: 0, items: FOUR }]);
+    expect(parseSpokenLists(answer(FOUR), [SERIES])).toEqual([{ sentence: 0, items: FOUR }]);
+    // With no comma before "and", too.
+    const plain = SERIES.replace("complain, and", "complain and");
+    expect(parseSpokenLists(answer(THREE), [plain])).toEqual([{ sentence: 0, items: FOUR }]);
+    // In the whole script, as the pipeline asks it.
+    const text = `Everyone complains that life is too short, Seneca says. ${SERIES} Then he turns the whole thing over in a single motion: life is not short.`;
+    const r = await findSpokenLists(text, { ask: async () => answer(THREE).replace('"sentence":0', '"sentence":1') });
+    expect(r.lists).toEqual([{ sentence: 1, items: FOUR }]);
+    // Steps are never given a member.
+    expect(parseSpokenLists(answer(THREE, "steps"), [SERIES])).toEqual([{ sentence: 0, items: THREE, kind: "steps" }]);
+  });
+
+  it("nothing is added without the echo, a like opening, a member that names something, or room", () => {
+    // A clause about something else ends the series: no echo of "complain".
+    expect(listsByShape("The farmer complains, the senator complains, the old complain, and the truth is nobody listens.")).toEqual([THREE]);
+    expect(listsByShape("The farmer complains, the senator complains, and the truth is nobody listens.")).toEqual([]);
+    // A member that names nothing (`itemsAreThings`) never costs the list its three.
+    expect(spokenListsByShape(["The farmer complains, the senator complains, the old complain, and the young just complains."])).toEqual([
+      { sentence: 0, items: THREE },
+    ]);
+    // Too long to be one item.
+    expect(
+      listsByShape("The farmer complains, the senator complains, the old complain, and the young are already rehearsing the complaint they will make forty years from now.")
+    ).toEqual([THREE]);
+    // A list of things that do not end on one word is never touched.
+    expect(listsByShape("Get a saw, a drill, a plane, and the whole thing cost me forty dollars.")).toEqual([["a saw", "a drill", "a plane"]]);
+    // The helper itself: a summing-up whose subject IS the shared word, an unlike opening, a list of things.
+    for (const [s, items] of [
+      ["The farmer complains, the senator complains, the old complain, and the complaints never end.", THREE],
+      ["The farmer complains, the senator complains, the old complain, and nobody listens to a complaint.", THREE],
+      ["Get a saw, a drill, a plane, and the whole thing cost me forty dollars.", ["a saw", "a drill", "a plane"]],
+      ["You need flour, sugar, and butter.", ["flour", "sugar", "butter"]],
+    ] as [string, string[]][])
+      expect(withLastSeriesMember(s, items)).toBe(items);
+  });
+
+  it("the film is cut on all four: 'and the young…' is an item's picture", () => {
+    const CUT = [
+      scene(29, "Everyone complains that life is too short, Seneca says."),
+      scene(30, "The farmer complains,", { listCut: true }),
+      scene(31, "the senator complains,", { listCut: true }),
+      scene(32, "the old complain,", { listCut: true }),
+      scene(33, "and the young are already rehearsing the complaint."),
+      scene(34, "Then he turns the whole thing over in a single motion: life is not short."),
+    ];
+    const r = applySpokenLists(CUT, shapeLists(CUT));
+    expect(rows(r.scenes)).toEqual([
+      ["Everyone complains that life is too short, Seneca says.", false, false],
+      ["The farmer complains,", false, true],
+      ["the senator complains,", false, true],
+      ["the old complain,", false, true],
+      ["and the young are already rehearsing the complaint.", false, true],
+      ["Then he turns the whole thing over in a single motion: life is not short.", false, false],
+    ]);
   });
 });
