@@ -25,7 +25,7 @@ import { invokeClaude } from "../claude";
 import { presignOwnBucketUrl } from "../storage";
 import { transcribeWordsFromBuffer } from "../_core/voiceTranscription";
 import { CueError, endWithFilm, resolveCues, type CueSpec, type ResolvedCue, type Word } from "../../graphics/src/cueResolve";
-import { TEMPLATES, templateById } from "../../graphics/src/registry";
+import { resolveSets, templateById } from "../../graphics/src/registry";
 import { FPS, type Theme } from "../../graphics/src/theme";
 import { themeFromPixels } from "../../graphics/src/palette";
 import { WINDOW } from "../../graphics/src/more";
@@ -81,10 +81,10 @@ export type AddGraphicsInput = {
 
 /** Templates whose decorations (not words) carry the theme's colours: measured without them. */
 const MEASURE_WITHOUT_DECORATION = new Set(["CrossedList"]);
-const structural = new Set(TEMPLATES.filter(t => t.structural).map(t => t.id));
-const cards = new Set(TEMPLATES.filter(t => t.kind === "card").map(t => t.id));
-/** Graphics that replace the picture (cards, framed windows): held to the cut, never a blink of footage. */
-const fullFrame = new Set(TEMPLATES.filter(t => t.kind === "card" || t.underlay === "window").map(t => t.id));
+/** The resolver's template sets — graphics that replace the picture (cards, framed windows, a quote
+ * over the blurred picture) are held to the cut, never a blink of footage — from the one definition
+ * the planner and QA use (`resolveSets`). */
+const { structural, cards, fullFrame, windows } = resolveSets();
 const sha = (x: Buffer | string) => createHash("sha1").update(x).digest("hex");
 
 function ensureDir(d: string): string {
@@ -226,7 +226,7 @@ async function plan(input: AddGraphicsInput, words: Word[], cuts: number[]): Pro
 /** Resolve a plan cue by cue (film order), leaving out any that no longer resolve or break a
  * placement rule — a saved plan on a film that was edited since must not bring a broken graphic. */
 function resolveKeeping(specs: CueSpec[], words: Word[], cuts: number[], film: FilmLayout, dropped: GraphicsRecord["dropped"]): { specs: CueSpec[]; cues: ResolvedCue[] } {
-  const opts = { cuts, fps: FPS, structural, cards, fullFrame };
+  const opts = { cuts, fps: FPS, structural, cards, fullFrame, windows };
   const kept: CueSpec[] = [];
   let resolved: ResolvedCue[] = [];
   for (const spec of specs) {

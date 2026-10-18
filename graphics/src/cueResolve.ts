@@ -549,6 +549,27 @@ export function stillUpAfterWords(c: ResolvedCue, fps: number): boolean {
   return past > (c.leftInPause ? LINGER_SEC + PAUSE_REACH_SEC + 0.15 : MAX_LINGER_SEC) + slack;
 }
 
+/**
+ * A BLINK OF FOOTAGE beside a graphic that replaces the picture: the shot it leaves behind before
+ * the next picture cut — or the one it opens after, past the cut before it — shows for less than
+ * MIN_SHOT_SEC, and card → a flash of the picture → a new picture reads as a glitch. Measured on
+ * FRAMES, the film's cuts as the composite and QA see them. The ONE test the planner refuses a new
+ * graphic by and QA fails a film by: QA alone saw job 404's Versus card leave 0.80 s of its shot
+ * before the next one (1:28) and job 403's "The toilet is fine." leave 1.22 s (2:06), and both films
+ * shipped with it. Whether a graphic replaces the picture is the caller's to
+ * say (registry `replacesPicture`). Returns the side, the cut and how long the sliver is, or
+ * undefined. `cutFrames` ascending.
+ */
+export function blinkBeside(c: { startFrame: number; endFrame: number }, cutFrames: number[], fps: number): { side: "after" | "before"; cutFrame: number; sec: number } | undefined {
+  const minShot = Math.round(MIN_SHOT_SEC * fps);
+  const after = cutFrames.find(k => k >= c.endFrame);
+  if (after !== undefined && after > c.endFrame && after - c.endFrame < minShot) return { side: "after", cutFrame: after, sec: (after - c.endFrame) / fps };
+  let before: number | undefined;
+  for (const k of cutFrames) if (k <= c.startFrame) before = k;
+  if (before !== undefined && before < c.startFrame && c.startFrame - before < minShot) return { side: "before", cutFrame: before, sec: (c.startFrame - before) / fps };
+  return undefined;
+}
+
 export type ResolveOptions = {
   /** The film's real picture cuts, in seconds (the first frame of each new shot). */
   cuts?: number[];
@@ -557,9 +578,14 @@ export type ResolveOptions = {
   structural?: Set<string>;
   /** Full-screen CARDS (they replace the picture), held to CARD_MAX_WAIT_SEC. */
   cards?: Set<string>;
-  /** Every template that replaces the picture (cards and framed windows): held to the cut so no
-   * sliver of footage under MIN_SHOT_SEC is left beside it. Defaults to `cards`. */
+  /** Every template that replaces the picture (cards, framed windows, an overlay over the blurred
+   * picture): held to the cut so no sliver of footage under MIN_SHOT_SEC is left beside it. Defaults
+   * to `cards`. */
   fullFrame?: Set<string>;
+  /** Framed WINDOWS (their items land with their pictures; one ends with its last item's picture).
+   * Defaults to `fullFrame` minus `cards` — pass it when `fullFrame` holds a blurred overlay, which
+   * replaces the picture but is no window (registry `resolveSets`). */
+  windows?: Set<string>;
 };
 
 /** The cut nearest `t` within `CUT_SNAP_SEC`, or undefined. */
@@ -584,7 +610,7 @@ export function resolveCues(specs: CueSpec[], words: Word[], opts: ResolveOption
   const structural = opts.structural ?? new Set<string>();
   const cards = opts.cards ?? new Set<string>();
   const fullFrame = opts.fullFrame ?? cards;
-  const windows = new Set(Array.from(fullFrame).filter(id => !cards.has(id)));
+  const windows = opts.windows ?? new Set(Array.from(fullFrame).filter(id => !cards.has(id)));
   // Every edge lands on a frame boundary: an edit between frames does not exist.
   const onFrame = (t: number) => Math.round(t * fps) / fps;
   let cursor = 0;
@@ -796,8 +822,15 @@ export function resolveCues(specs: CueSpec[], words: Word[], opts: ResolveOption
 
     // 4. The end, conformed to the edit.
     let endCut = nearestCut(cuts, rawEnd);
-    // Never stay stale to leave with a picture: a forward snap past MAX_LINGER_SEC is refused.
-    if (endCut !== undefined && endCut > rawEnd && contentEnd !== undefined && !structural.has(spec.template) && endCut - contentEnd > MAX_LINGER_SEC)
+    // Never stay stale to leave with a picture: a forward snap more than MAX_LINGER_SEC past where its
+    // own sentence finished, as said before that cut, is refused — the point QA measures lingering
+    // from (`spokenEnd`, `stillUpAfterWords`). It was measured from the graphic's own last word, so a
+    // graphic its reading time had carried through the rest of its sentence could not take a snap of
+    // two frames, and faded out into the cut instead: the fade lifts the old shot in its last frames,
+    // a flicker right before the cut. Job 404's opening title "The song at first light goes quiet"
+    // ("quiet" 7.88, "…in the mornings," to 10.24) ended at 10.33 for the cut at 10.40, and its "7
+    // things" at 42.57 for 42.63 — QA's "flicker before a cut at 10.40 s, 42.63 s".
+    if (endCut !== undefined && endCut > rawEnd && contentEnd !== undefined && !structural.has(spec.template) && endCut - ownSentenceEnd(words, contentEnd, endCut).spoken > MAX_LINGER_SEC)
       endCut = undefined;
     if (endCut === undefined) {
       const spill = cuts.filter(c => c < rawEnd && c > rawEnd - TAIL_SPILL_SEC && c - t0 >= MIN_AFTER_TRIM_SEC && c - (lastShown - (spec.startPad ?? 0)) >= MIN_READ_SEC);

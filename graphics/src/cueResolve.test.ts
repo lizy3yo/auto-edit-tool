@@ -17,10 +17,14 @@ import {
   VERDICT_SEC,
   TAIL_SPILL_SEC,
   endWithFilm,
+  blinkBeside,
+  stillUpAfterWords,
+  type CueSpec,
   type ResolvedCue,
   type Word,
 } from "./cueResolve";
 import { countUpValue, pageStarts, splitWords, wordFrames } from "./timing";
+import { replacesPicture, resolveSets, templateById } from "./registry";
 
 // "So get a stepladder, take one alarm down, and read the label. ... read the label again."
 const W = (s: string, start: number): Word[] =>
@@ -423,7 +427,11 @@ describe("a card stays while its own sentence finishes (Scarlett, job 392)", () 
   it("holds to the cut through the rest of its sentence", () => {
     const cut = face.end + 1.1;
     const [c] = resolveCues([steps], words, { cuts: [185.4, cut], cards: new Set(["StepCards"]) });
-    expect(c.conformed.held).toBe(true);
+    // it leaves WITH the picture: since round 11 the end snaps onto the cut by itself (the cut comes
+    // within MAX_LINGER_SEC of where its sentence finished), so the hold has nothing left to do — and
+    // the hold's verdict on that cut is still what QA reads
+    expect(c.conformed.end).toBe(true);
+    expect(c.hold).toEqual({ cut: c.end, max: 3.5 }); // nothing more is said before the cut
     // the hold is measured from where the sentence finished ("window."), not from "face"
     expect(c.spokenEnd).toBeCloseTo(words.find(w => w.text === "window.")!.end, 2);
     expect(c.end).toBeCloseTo(Math.round(cut * 30) / 30, 2);
@@ -567,5 +575,98 @@ describe("nothing outlasts the film, and the film's end never leaves a graphic t
       ["three-piles", 38],
       ["chapter-3-ad-fee", 42],
     ]);
+  });
+});
+
+/** Words as the transcriber timed them: "text@start-end …" (round 11's practice films, as heard). */
+const heard = (s: string): Word[] =>
+  s.split(" ").map(t => {
+    const [text, range] = t.split("@");
+    const [start, end] = range.split("-").map(Number);
+    return { text, start, end };
+  });
+
+describe("a graphic leaves WITH the picture instead of fading out into the cut (Walter Wren, job 404: 'flicker before a cut at 10.40 s, 42.63 s')", () => {
+  const FPS = 30;
+  // Its first two graphics, with the film's picture cuts (frames 171, 312, 1159, 1279). Each was carried
+  // through the rest of its own sentence by its reading time and the pause, and ended 2 frames before
+  // the cut: the snap onto it was refused, measured from its own last word ("quiet," 7.88; "seven" /
+  // "things" 40.07), and its darkening faded out over those frames, lifting the old shot right before
+  // the cut.
+  const words = heard(
+    "Florida.@4.62-5.12 The@5.82-5.92 song@5.98-6.30 at@6.36-6.44 first@6.50-6.76 light@6.84-7.08 goes@7.12-7.36 quiet,@7.46-7.88 the@8.34-8.44 grass@8.48-8.84 sits@8.88-9.12 empty@9.28-9.58 in@9.62-9.68 the@9.72-9.78 mornings,@9.84-10.24 and@10.66-10.78 nobody@10.90-11.28 " +
+      "one's@37.43-37.61 for@37.67-37.81 you.@37.85-38.07 We're@38.73-38.91 going@38.93-39.11 through@39.15-39.37 seven@39.49-39.77 things@39.83-40.07 about@40.15-40.35 the@40.39-40.47 robin@40.53-40.87 that@40.89-41.03 hardly@41.09-41.41 anybody@41.65-42.07 knows,@42.11-42.47 and@42.81-42.89 by@42.93-43.05 the@43.09-43.17 end,@43.31-43.49"
+  );
+  const title: CueSpec = { id: "title-song-goes-quiet", template: "TitleOverFootage", start: "The song at first light goes", startPad: -0.15, end: "at first light goes quiet", endPad: 0.3, props: { kicker: "Winter robins", phrase: { text: "The song at first light goes quiet", words: true }, emphasis: ["quiet"] } };
+  const seven: CueSpec = { id: "seven-things", template: "BigNumberOverlay", start: "We’re going through seven things about", startPad: -0.15, end: "seven things about the robin", endPad: 0.3, props: { at: "@seven", line: { text: "We’re going through", words: true }, unit: "things", value: 7, kicker: "Robin facts", countSec: 0.6 } };
+  const cuts = [171, 312, 1159, 1279].map(f => f / FPS);
+
+  it("both end ON their cut, with no fade: the snap is measured from where the sentence finished ('mornings,' 10.24; 'knows,' 42.47)", () => {
+    const [t, s] = resolveCues([title, seven], words, { cuts, fps: FPS, ...resolveSets() });
+    expect([t.startFrame, t.endFrame, s.startFrame, s.endFrame]).toEqual([171, 312, 1159, 1279]);
+    for (const c of [t, s]) {
+      expect(c.conformed.end, c.id).toBe(true);
+      expect(c.props.exit, c.id).toBe("cut");
+      // QA measures from the same point and does not call it lingering
+      expect(stillUpAfterWords(c, FPS), c.id).toBe(false);
+    }
+    expect([t.spokenEnd, s.spokenEnd]).toEqual([10.24, 42.47]);
+  });
+
+  it("reading time alone still earns no snap: the same title with its sentence ending on 'quiet.' stays off a cut 2.1 s after it", () => {
+    const short = heard("Florida.@4.62-5.12 The@5.82-5.92 song@5.98-6.30 at@6.36-6.44 first@6.50-6.76 light@6.84-7.08 goes@7.12-7.36 quiet.@7.46-7.88");
+    const [t] = resolveCues([title], short, { cuts: [5.7, 10.0], fps: FPS, ...resolveSets() });
+    expect(t.end).toBeCloseTo(9.7, 3); // its reading time (4 s), then it leaves
+    expect(t.conformed.end).toBe(false);
+  });
+});
+
+describe("a quote over the blurred picture is held to the cut like a card (Sawdust Sam, job 407 at 2:45)", () => {
+  const FPS = 30;
+  // The Quote blurs the whole picture. It ended on "tire." + its tail, 0.54 s before the cut to the host
+  // (frames 4814, 4973), and the sharp picture — a drawn face — blinked up for 16 frames.
+  const words = heard(
+    "year.@159.04-159.34 Keep@160.58-160.78 your@160.82-160.98 boots@161.02-161.30 clear@161.40-161.64 of@161.68-161.74 the@161.78-161.88 swing@161.96-162.42 and@162.90-163.00 stop@163.14-163.58 when@163.72-163.86 your@163.88-164.08 arms@164.24-164.48 tire.@164.58-164.94 The@165.88-166.00 logs@166.08-166.50 still@166.66-166.98"
+  );
+  const quote: CueSpec = { id: "boots-clear-quote", template: "Quote", start: "Keep your boots clear of", startPad: -0.15, end: "when your arms tire", endPad: 0.3, props: { quote: { text: "Keep your boots clear of the swing, and stop when your arms tire.", words: true }, author: "Sam", emphasis: ["boots"] } };
+  const cuts = [4814, 4973].map(f => f / FPS);
+  const sets = resolveSets();
+
+  it("replaces the picture by the registry, and is no window", () => {
+    expect(replacesPicture(templateById("Quote"))).toBe(true);
+    expect(sets.fullFrame.has("Quote")).toBe(true);
+    expect(sets.windows.has("Quote")).toBe(false);
+    expect(sets.windows).toEqual(new Set(["TermWindow", "ListWindow", "HostListWindow"]));
+    // a darkening alone leaves the picture in view
+    for (const id of ["DimCaption", "TitleOverFootage", "BigNumberOverlay", "ArrowCaption", "BarChart"]) expect(replacesPicture(templateById(id)), id).toBe(false);
+  });
+
+  it("held through the silence to the cut — the shipped film had it end 0.54 s short", () => {
+    const [q] = resolveCues([quote], words, { cuts, fps: FPS, ...sets });
+    expect([q.startFrame, q.endFrame]).toEqual([4814, 4973]);
+    expect(q.conformed).toEqual({ start: true, end: true, held: true });
+    expect(blinkBeside(q, [4814, 4973], FPS)).toBeUndefined();
+    expect(stillUpAfterWords(q, FPS)).toBe(false);
+    const [old] = resolveCues([quote], words, { cuts, fps: FPS, ...sets, fullFrame: new Set(["Statement"]), windows: new Set() });
+    expect([old.startFrame, old.endFrame]).toEqual([4814, 4957]);
+    expect(blinkBeside(old, [4814, 4973], FPS)).toEqual({ side: "after", cutFrame: 4973, sec: 16 / FPS });
+  });
+});
+
+describe("a blink of footage is one test, on frames (blinkBeside)", () => {
+  const FPS = 30;
+  const at = (startFrame: number, endFrame: number) => ({ startFrame, endFrame });
+  it("the shot after the graphic, under 1.5 s: job 404's Versus (0.80 s) and job 403's Statement (1.23 s)", () => {
+    expect(blinkBeside(at(2492, 2640), [2411, 2664, 2936], FPS)).toEqual({ side: "after", cutFrame: 2664, sec: 24 / FPS });
+    expect(blinkBeside(at(3727, 3785), [3542, 3727, 3822], FPS)).toEqual({ side: "after", cutFrame: 3822, sec: 37 / FPS });
+  });
+  it("the shot before it, under 1.5 s", () => {
+    expect(blinkBeside(at(3020, 3200), [3000, 3400], FPS)).toEqual({ side: "before", cutFrame: 3000, sec: 20 / FPS });
+  });
+  it("none when it leaves with the picture, opens on it, or leaves 1.5 s of the shot either side", () => {
+    expect(blinkBeside(at(2492, 2664), [2411, 2664, 2936], FPS)).toBeUndefined();
+    expect(blinkBeside(at(2411, 2600), [2411, 2664, 2936], FPS)).toBeUndefined();
+    expect(blinkBeside(at(2456, 2619), [2411, 2664], FPS)).toBeUndefined();
+    expect(blinkBeside(at(2492, 2640), [], FPS)).toBeUndefined();
   });
 });

@@ -388,3 +388,29 @@ export const templateById = (id: string): TemplateDef => {
   if (!t) throw new Error(`Unknown template "${id}"`);
   return t;
 };
+
+/**
+ * Whether a graphic HIDES THE PICTURE while it is up: a full-screen card, a framed window, or an
+ * overlay laid over the footage blurred (`underlay: "blur"`, the Quote). The blurred one was left
+ * out, so it was neither held to the cut nor counted by QA's blink check: job 407's quote (2:45)
+ * ended 0.54 s before the cut to the host, and the sharp picture it had hidden — a drawn face —
+ * blinked up for 16 frames while QA said "Blinks: 0".
+ * A darkening alone (`dims`) leaves the picture in view and is not one of these.
+ */
+export const replacesPicture = (t: TemplateDef): boolean => t.kind === "card" || t.underlay === "window" || t.underlay === "blur";
+
+/**
+ * The template sets the cue resolver reads (`ResolveOptions` in cueResolve.ts), from this one list:
+ * the planner, the finishing step, the lab's composite and the tests all take them from here, so a
+ * template cannot be held to the cut in one place and not in another. `windows` is named on its own:
+ * a blurred overlay replaces the picture like a window but has no items landing on their pictures.
+ */
+export function resolveSets(): { structural: Set<string>; cards: Set<string>; fullFrame: Set<string>; windows: Set<string> } {
+  const ids = (keep: (t: TemplateDef) => boolean) => new Set(TEMPLATES.filter(keep).map(t => t.id));
+  return {
+    structural: ids(t => !!t.structural),
+    cards: ids(t => t.kind === "card"),
+    fullFrame: ids(replacesPicture),
+    windows: ids(t => t.underlay === "window"),
+  };
+}

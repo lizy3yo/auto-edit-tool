@@ -3476,3 +3476,72 @@ describe("a pearl strand on a dresser is a necklace, not the host (round 9's rev
     expect(scenes[2].showSubject).toMatch(/worn at the host's own neck/);
   });
 });
+
+describe("a graphic that hides the picture leaves no blink of footage, and none fades out into a cut (round 11 graphics review, 2026-10-18)", () => {
+  const heard = (s: string) =>
+    s.split(" ").map(t => {
+      const [text, range] = t.split("@");
+      const [start, end] = range.split("-").map(Number);
+      return { text, start, end };
+    });
+  const scene = (index: number, a: number, b: number, hostPresent = false) => ({ index, narrationStartSec: a, narrationEndSec: b, scriptText: "", hostPresent, cta: false, split: false, hostOpener: false });
+  const frames = (f: number[]) => f.map(x => x / 30);
+
+  // 404 versus-january-robin (1:23-1:28): the Versus card left 0.80 s of the robin before the next shot,
+  // "And if you live…" starting a new sentence in that sliver; the film's QA reported the blink and the
+  // film shipped. The planner now asks QA's own test and sends the card back.
+  it("404: the planner refuses the Versus card that leaves 0.80 s of the shot, and says why", async () => {
+    const { planGraphics } = await import("../graphics/src/plan/planner");
+    const words = heard(
+      "so@80.80-81.00 the@81.14-81.24 robin@81.28-81.56 you@81.60-81.74 see@81.78-81.92 in@81.96-82.04 January@82.12-82.80 could@82.94-83.14 be@83.20-83.32 a@83.36-83.40 traveler@83.48-83.92 from@83.96-84.12 up@84.20-84.28 north@84.36-84.70 instead@84.98-85.38 of@85.40-85.46 the@85.50-85.58 one@85.68-85.78 that@85.80-85.92 raised@85.96-86.22 a@86.28-86.32 family@86.36-86.74 on@86.84-86.90 your@86.94-87.08 porch@87.14-87.42 light.@87.484-87.684 And@88.33-88.41 if@88.45-88.51 you@88.55-88.67 live@88.71-88.85 along@88.91-89.15"
+    );
+    const versus = {
+      id: "versus-january-robin",
+      template: "Versus",
+      start: "so the robin you see in January",
+      startPad: -0.15,
+      end: "family on your porch light",
+      endPad: 0.3,
+      props: {
+        kicker: "Your January robin",
+        left: { at: "@a traveler from up north", say: "a traveler from up north", sub: "A traveler from up north", title: "Northern traveler" },
+        right: { at: "@the one that raised a family", say: "the one that raised a family on your porch light", sub: "Raised a family here", title: "Your porch robin" },
+        winner: "none",
+      },
+    };
+    const out = await planGraphics({ words, cuts: frames([2411, 2664]), film: { scenes: [scene(14, 80.3578, 88.803), scene(15, 88.803, 97.8576)] }, ask: async () => JSON.stringify({ cues: [versus] }), ensureIcon: async () => true });
+    expect(out.cues).toEqual([]);
+    expect(out.rounds[0].problems[0].problem).toMatch(/^Versus hides the picture, and it leaves 0\.80 s of the shot alone .*"And if you live…" starts a new sentence first/);
+  });
+
+  // 407 boots-clear-quote (2:40-2:45): the Quote blurs the whole picture, but only cards and windows
+  // were held to the cut and counted by QA — it ended 0.54 s before the cut to the host, the sharp
+  // picture (a drawn face) blinked up, and QA said "Blinks: 0".
+  it("407: the Quote over the blurred picture is held to the cut, and QA would have failed the shipped one", async () => {
+    const { resolveCues } = await import("../graphics/src/cueResolve");
+    const { resolveSets } = await import("../graphics/src/registry");
+    const { judgeFilm } = await import("../graphics/src/plan/qa");
+    const words = heard("year.@159.04-159.34 Keep@160.58-160.78 your@160.82-160.98 boots@161.02-161.30 clear@161.40-161.64 of@161.68-161.74 the@161.78-161.88 swing@161.96-162.42 and@162.90-163.00 stop@163.14-163.58 when@163.72-163.86 your@163.88-164.08 arms@164.24-164.48 tire.@164.58-164.94 The@165.88-166.00 logs@166.08-166.50");
+    const quote = { id: "boots-clear-quote", template: "Quote", start: "Keep your boots clear of", startPad: -0.15, end: "when your arms tire", endPad: 0.3, props: { quote: { text: "Keep your boots clear of the swing, and stop when your arms tire.", words: true }, author: "Sam", emphasis: ["boots"] } };
+    const [q] = resolveCues([quote], words, { cuts: frames([4814, 4973]), fps: 30, ...resolveSets() });
+    expect([q.startFrame, q.endFrame]).toEqual([4814, 4973]);
+    const d = new Array(5100).fill(0.5);
+    d[4814] = d[4973] = 60;
+    const shipped = { ...q, endFrame: 4957, end: 4957 / 30 };
+    expect(judgeFilm({ fps: 30, cues: [shipped], filmDiffs: d, reelDiffs: d, rules: [], readability: [] }).failures).toContain("a blink of footage beside boots-clear-quote");
+  });
+
+  // 404 title-song-goes-quiet and seven-things: each ended 2 frames before its cut (10.33 for 10.40,
+  // 42.57 for 42.63) because the snap onto the cut was measured from its own last word, not from where
+  // its sentence finished; its darkening faded out over those frames — QA's "flicker before a cut".
+  it("404: the opening title leaves on its cut with no fade", async () => {
+    const { resolveCues } = await import("../graphics/src/cueResolve");
+    const { resolveSets } = await import("../graphics/src/registry");
+    const words = heard(
+      "Florida.@4.62-5.12 The@5.82-5.92 song@5.98-6.30 at@6.36-6.44 first@6.50-6.76 light@6.84-7.08 goes@7.12-7.36 quiet,@7.46-7.88 the@8.34-8.44 grass@8.48-8.84 sits@8.88-9.12 empty@9.28-9.58 in@9.62-9.68 the@9.72-9.78 mornings,@9.84-10.24 and@10.66-10.78 nobody@10.90-11.28"
+    );
+    const title = { id: "title-song-goes-quiet", template: "TitleOverFootage", start: "The song at first light goes", startPad: -0.15, end: "at first light goes quiet", endPad: 0.3, props: { kicker: "Winter robins", phrase: { text: "The song at first light goes quiet", words: true }, emphasis: ["quiet"] } };
+    const [t] = resolveCues([title], words, { cuts: frames([171, 312]), fps: 30, ...resolveSets() });
+    expect([t.startFrame, t.endFrame, t.props.exit]).toEqual([171, 312, "cut"]);
+  });
+});

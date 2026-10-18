@@ -1211,3 +1211,93 @@ describe("an icon is the object its words name, or none (A9, round 10 graphics r
     for (const some of ["\u{1F570}\u{FE0F}", "1f570", "23f0", "clock"]) expect(noIcon(some), some).toBe(false);
   });
 });
+
+describe("a graphic that hides the picture is refused when it leaves a blink of footage (round 11: jobs 403, 404, 407)", () => {
+  /** The model answers `first` once, then adds nothing (repair, fill). */
+  const asking = (first: CueSpec[]) => {
+    const asked: string[] = [];
+    const ask = async (_system: string, messages: PlanMessage[]) => {
+      asked.push(messages[messages.length - 1].content);
+      return asked.length === 1 ? JSON.stringify({ cues: first }) : '{"cues": []}';
+    };
+    return { ask, asked };
+  };
+  const at = (frames: number[]) => frames.map(f => f / FPS);
+
+  // Walter Wren, job 404 (1:23-1:28): the Versus card leaves on "…porch light." + its tail at 88.00 and
+  // the picture changes at 88.80 — 0.80 s of the robin alone, and "And if you live…" starts a new
+  // sentence in it, so the card may not hold to the cut. QA failed the film; it shipped.
+  const robin = T(
+    "south,@79.92-80.26 so@80.80-81.00 the@81.14-81.24 robin@81.28-81.56 you@81.60-81.74 see@81.78-81.92 in@81.96-82.04 January@82.12-82.80 could@82.94-83.14 be@83.20-83.32 a@83.36-83.40 traveler@83.48-83.92 from@83.96-84.12 up@84.20-84.28 north@84.36-84.70 instead@84.98-85.38 of@85.40-85.46 the@85.50-85.58 one@85.68-85.78 that@85.80-85.92 raised@85.96-86.22 a@86.28-86.32 family@86.36-86.74 on@86.84-86.90 your@86.94-87.08 porch@87.14-87.42 light.@87.484-87.684 And@88.33-88.41 if@88.45-88.51 you@88.55-88.67 live@88.71-88.85 along@88.91-89.15 the@89.17-89.25 Gulf@89.31-89.59"
+  );
+  const versus: CueSpec = {
+    id: "versus-january-robin",
+    template: "Versus",
+    start: "so the robin you see in January",
+    startPad: -0.15,
+    end: "family on your porch light",
+    endPad: 0.3,
+    props: {
+      kicker: "Your January robin",
+      left: { at: "@a traveler from up north", say: "a traveler from up north", sub: "A traveler from up north", title: "Northern traveler" },
+      right: { at: "@the one that raised a family", say: "the one that raised a family on your porch light", sub: "Raised a family here", title: "Your porch robin" },
+      winner: "none",
+    },
+  };
+  const robinFilm = { scenes: [scene(14, 80.3578, 88.803), scene(15, 88.803, 97.8576)] };
+
+  it("404: the Versus card is sent back, told why it may not hold and what to do instead", async () => {
+    const { ask, asked } = asking([versus]);
+    const out = await planGraphics({ words: robin, cuts: at([2411, 2664, 2936]), film: robinFilm, ask, ensureIcon: async () => true });
+    expect(out.cues).toEqual([]);
+    const [p] = out.rounds[0].problems;
+    expect(p.cue).toBe("versus-january-robin");
+    expect(p.problem).toMatch(/^Versus hides the picture, and it leaves 0\.80 s of the shot alone before the picture changes at 1:28\.8: a blink of footage/);
+    expect(p.problem).toContain('"And if you live…" starts a new sentence first.');
+    expect(p.problem).toContain("use a template that plays over the footage");
+    expect(asked[1]).toContain("versus-january-robin: Versus hides the picture");
+  });
+
+  it("404: the same card is kept where the shot plays on 1.5 s past it, or where it can hold to the change", async () => {
+    const runsOn = await planGraphics({ words: robin, cuts: at([2411, 2685]), film: robinFilm, ask: asking([versus]).ask, ensureIcon: async () => true });
+    expect(runsOn.cues.map(c => c.id)).toEqual(["versus-january-robin"]);
+    // the picture changing in the pause after "light." (88.10): it leaves with it
+    const pause = await planGraphics({ words: robin, cuts: at([2411, 2643]), film: robinFilm, ask: asking([versus]).ask, ensureIcon: async () => true });
+    expect(pause.cues.map(c => c.id)).toEqual(["versus-january-robin"]);
+    expect(pause.resolved[0].endFrame).toBe(2643);
+  });
+
+  // Werner, job 403 (2:04-2:07): "The toilet is fine." is cut off at the next sentence's start + 0.15
+  // (126.17), and "There is a stick in it." plays over 1.22 s of the shot before the host comes in.
+  it("403: the Statement card is sent back — a new sentence is said between it and the picture change", async () => {
+    const words = T(
+      "the@122.41-122.53 toilet@122.59-122.95 is@123.01-123.07 getting@123.11-123.35 old.@123.51-123.69 The@124.35-124.45 toilet@124.49-124.81 is@124.85-124.93 fine.@125.01-125.35 There@126.01-126.15 is@126.19-126.27 a@126.31-126.35 stick@126.43-126.67 in@126.71-126.77 it.@126.85-126.95 If@127.53-127.59 you@127.63-127.73 think@127.75-127.93"
+    );
+    const statement: CueSpec = { id: "toilet-is-fine", template: "Statement", start: "The toilet is fine. There is", startPad: -0.15, end: "The toilet is fine", endPad: 0.3, props: { kicker: "The real cause", emphasis: ["fine."], headline: { text: "The toilet is fine.", words: true } } };
+    const film = { scenes: [scene(19, 118.077, 124.236, { hostPresent: true, split: true }), scene(20, 124.236, 127.391), scene(21, 127.391, 134.203, { hostPresent: true })] };
+    const out = await planGraphics({ words, cuts: at([3542, 3727, 3822]), film, ask: asking([statement]).ask, ensureIcon: async () => true });
+    expect(out.cues).toEqual([]);
+    expect(out.rounds[0].problems).toEqual([
+      { cue: "toilet-is-fine", problem: expect.stringMatching(/^Statement hides the picture, and it leaves 1\.23 s of the shot alone before the picture changes at 2:07\.4: .*"There is a stick…" starts a new sentence first\./) },
+    ]);
+  });
+
+  // Sawdust Sam, job 407 (2:40-2:45): the Quote blurs the whole picture. Counted as hiding it, it is
+  // held through the silence after "…when your arms tire." to the cut to the host, and passes.
+  it("407: the Quote is kept, held to the cut — no blink, no refusal", async () => {
+    const words = T(
+      "first@158.66-158.98 year.@159.04-159.34 Keep@160.58-160.78 your@160.82-160.98 boots@161.02-161.30 clear@161.40-161.64 of@161.68-161.74 the@161.78-161.88 swing@161.96-162.42 and@162.90-163.00 stop@163.14-163.58 when@163.72-163.86 your@163.88-164.08 arms@164.24-164.48 tire.@164.58-164.94 The@165.88-166.00 logs@166.08-166.50 still@166.66-166.98"
+    );
+    const quote: CueSpec = { id: "boots-clear-quote", template: "Quote", start: "Keep your boots clear of", startPad: -0.15, end: "when your arms tire", endPad: 0.3, props: { quote: { text: "Keep your boots clear of the swing, and stop when your arms tire.", words: true }, author: "Sam", emphasis: ["boots"] } };
+    const film = { scenes: [scene(26, 153.313, 160.459), scene(27, 160.459, 165.768), scene(28, 165.768, 174.475, { hostPresent: true })] };
+    const out = await planGraphics({ words, cuts: at([4600, 4814, 4973]), film, ask: asking([quote]).ask, ensureIcon: async () => true });
+    expect(out.rounds[0].problems).toEqual([]);
+    expect(out.resolved.map(c => [c.id, c.startFrame, c.endFrame])).toEqual([["boots-clear-quote", 4814, 4973]]);
+  });
+
+  it("the planner is told the rule before it writes", () => {
+    const prompt = systemPrompt({ kept: false });
+    expect(prompt).toContain("A graphic that HIDES the picture (a full-screen card, a window graphic, a Quote) leaves no blink");
+    expect(prompt).toContain("1.5 s or more pass (the shot plays on)");
+  });
+});
