@@ -1810,7 +1810,9 @@ describe("a video that moves as asked is kept (the audit's thrown-away videos, 2
     expect(parseClipGlitchVerdict(answer([{ what: "curtains billowed further into the room", meant: true }]), true).glitch).toBe(false);
   });
 
-  it("job 262 scene 16: a clip that does move wrong renders once more from the same frame, then the still is that frame", () => {
+  it("job 262 scene 16, with CLIP_GLITCH_RERENDER=1: a clip that does move wrong renders once more from the same frame, then the still is that frame", () => {
+    // Since 2026-10-18 the default is ONE render (the case at the end of this file); the switch
+    // keeps the old second render exactly as it was.
     const kf = "https://r2/longform/262/broll-kf-16-0-a.png";
     const scene = pic(16, "Photoelectric sees the slow, smoldering fire substantially earlier.", ALARM, {
       selfMoving: true,
@@ -1818,10 +1820,10 @@ describe("a video that moves as asked is kept (the audit's thrown-away videos, 2
       clipUrls: ["https://r2/longform/262/clip-16-0-a.mp4"],
       submits: [{ provider: "sixtynine_labs", at: "2026-10-01T00:00:00.000Z", reason: "first" }],
     });
-    expect(planGlitchRerender(scene)).toEqual({ next: "rerender", keyframe: kf });
+    expect(planGlitchRerender(scene, { rerender: true })).toEqual({ next: "rerender", keyframe: kf });
     expect(scene.nextSubmitReason).toBe("glitch");
     scene.nextSubmitReason = undefined; // the re-render's submit consumes it
-    expect(planGlitchRerender(scene)).toEqual({ next: "still", keyframe: kf });
+    expect(planGlitchRerender(scene, { rerender: true })).toEqual({ next: "still", keyframe: kf });
   });
 });
 
@@ -5455,5 +5457,195 @@ describe("a line about the person alone is no look on the face — the face stay
     expect(buildStillPrompt(scenes[3])).toMatch(/the SAME person as in the reference photo/);
     // The prompt names no look the description does not: no glasses, earrings or lip colour on a blouse picture.
     expect(buildStillPrompt(scenes[3])).not.toMatch(/glasses|earrings|lips or cheeks/);
+  });
+});
+
+describe("each paid video is rendered once (the operator, 2026-10-18)", () => {
+  // Job 262 scene 16 was paid for twice and drew three images for the one still it shipped; on the
+  // local renders 35 clips in 20 videos moved wrong, each was rendered again, and 11 of the second
+  // clips moved wrong too. Now a clip that moves wrong becomes the still made from the frame
+  // it started from, and the ledger keeps its one render. `CLIP_GLITCH_RERENDER=1` is the old way.
+  const ALARM = "main smoke alarm mounted on hallway ceiling with a thin curl of smoke rising beneath it";
+  const kf = "https://r2/longform/262/broll-kf-16-0-a.png";
+  const scene = () =>
+    pic(16, "Photoelectric sees the slow, smoldering fire substantially earlier.", ALARM, {
+      hostPresent: false,
+      selfMoving: true,
+      audioDuration: 4.2,
+      pictureUrl: kf,
+    });
+  // The check's own answer for the clip, decided by the real verdict code with what the loop
+  // tells it (the picture moves by itself): the job 262 answers from the earlier case above.
+  const SMOKE = { what: "smoke slightly denser/shifted on right", meant: true };
+  const SLID = { what: "the smoke alarm slid along the ceiling", meant: false };
+  const answer = (c: { what: string; meant: boolean }) =>
+    JSON.stringify({ changes: [c], cover: [], hands_visible: false, untouched_moved: false, morph: false, vanished: false });
+  const run = async (s: StoryboardScene, change: { what: string; meant: boolean }) => {
+    const { renderSceneClip } = await import("./longformVideo");
+    const renders: (string | undefined)[] = [];
+    const stills: (string | undefined)[] = [];
+    await renderSceneClip(s, 262, {} as any, {} as any, null, "instruction", async () => {}, undefined, {
+      clips: async keyframe => {
+        renders.push(keyframe);
+        (s.submits ??= []).push({
+          provider: "sixtynine_labs",
+          at: "2026-10-18T00:00:00.000Z",
+          reason: s.nextSubmitReason ?? (s.submits?.length ? "resume" : "first"),
+        });
+        s.nextSubmitReason = undefined;
+        return [`https://r2/longform/262/clip-16-${renders.length}.mp4`];
+      },
+      scan: async (_url, _about, selfMoving) => parseClipGlitchVerdict(answer(change), selfMoving),
+      still: async keyframe => {
+        stills.push(keyframe);
+        s.stillImage = true;
+        s.sceneStatus = "completed";
+      },
+    });
+    return { renders, stills };
+  };
+
+  it("job 262 scene 16: the alarm sliding makes it the still of its own start frame — one paid render, no new image", async () => {
+    vi.stubEnv("CLIP_GLITCH_RERENDER", "");
+    try {
+      const s = scene();
+      const { renders, stills } = await run(s, SLID);
+      expect(renders).toHaveLength(1);
+      expect(stills).toEqual([kf]);
+      expect(s.submits?.map(x => x.reason)).toEqual(["first"]);
+      expect(s.submits?.[0].movedWrong).toBe("the smoke alarm slid along the ceiling");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("a clip whose smoke is all that changes is kept — the check knows what is meant to move", async () => {
+    vi.stubEnv("CLIP_GLITCH_RERENDER", "");
+    try {
+      const s = scene();
+      const { renders, stills } = await run(s, SMOKE);
+      expect(renders).toHaveLength(1);
+      expect(stills).toEqual([]);
+      expect(s.clipUrls).toEqual(["https://r2/longform/262/clip-16-1.mp4"]);
+      expect(s.stillImage).toBeFalsy();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("CLIP_GLITCH_RERENDER=1: the second render from the same frame comes back, ledgered as a glitch re-render", async () => {
+    vi.stubEnv("CLIP_GLITCH_RERENDER", "1");
+    try {
+      const s = scene();
+      const { renders, stills } = await run(s, SLID);
+      expect(renders).toEqual([undefined, kf]);
+      expect(stills).toEqual([kf]); // it moved wrong again: the still, never a third render
+      expect(s.submits?.map(x => x.reason)).toEqual(["first", "glitch"]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+});
+
+describe("the film never ends on a host shot under a second (the audit, 2026-10-18)", () => {
+  // A goodbye on the host under a second goes to the beat before it, so what was on screen runs to
+  // the end (practice jobs 45 and 297). The audit's 21 production films all had it right after the
+  // end CTA's big QR card, which it never joins (last case). Scenes and ranges are the jobs' own.
+  const at = (index: number, kind: "H" | "P", from: number, to: number, scriptText: string, over: Partial<StoryboardScene> = {}) =>
+    ({
+      index,
+      scriptText,
+      narration: scriptText,
+      visualPrompt: `picture ${index}`,
+      showSubject: kind === "P" ? `picture ${index}` : undefined,
+      hostPresent: kind === "H" ? true : undefined,
+      stillImage: kind === "P" ? true : undefined,
+      narrationStartSec: from,
+      narrationEndSec: to,
+      audioDuration: to - from,
+      audioUrl: `https://example.com/${index}.mp3`,
+      ...over,
+    }) as StoryboardScene;
+
+  it("job 45: Hannah's 'not at the beginning.' (0.80 s on the host) ends on the picture of its sentence", async () => {
+    const { enforcePlanRules } = await import("./planGate");
+    const scenes = [
+      at(1, "H", 0, 6.00025, "There is a bag somewhere in your house that holds the end of every project you have ever finished.", { hostOpener: true }),
+      at(2, "P", 6.00025, 9.94406, "A yard of green in one corner, half a ball of rust in another,"),
+      at(3, "P", 9.94406, 13.0785, "and not one of them long enough to make anything on its own."),
+      at(4, "P", 13.0785, 15.8982, "So the bag sits, and it grows,"),
+      at(5, "P", 15.8982, 20.9164, "and every so often you look at it and close it again. But there is a blanket"),
+      at(6, "P", 20.9164, 22.8738, "that was built for exactly that bag,"),
+      at(7, "P", 22.8738, 27.5443, "and the whole thing turns on one decision you make at the end of every square,"),
+      at(8, "H", 27.5443, 28.342, "not at the beginning."),
+    ];
+    const r = enforcePlanRules(scenes, { faceImageUrl: "https://example.com/hannah.jpg", hostName: "Hannah Yoder" } as any);
+    const last = r.scenes.at(-1)!;
+    expect(last.hostPresent).toBeFalsy();
+    expect(last).toMatchObject({
+      showSubject: "picture 7",
+      scriptText: "and the whole thing turns on one decision you make at the end of every square, not at the beginning.",
+      narrationStartSec: 22.8738,
+      narrationEndSec: 28.342,
+    });
+    // It used to become an 8.9 s host take that took "But there is a blanket that was built for
+    // exactly that bag," away from the pictures.
+    expect(r.scenes.at(-2)?.scriptText).toBe("that was built for exactly that bag,");
+    expect(r.unresolved.filter(f => /closing host shot/.test(f.detail))).toEqual([]);
+  });
+
+  it("job 297: Pearl's 'This is Pearl Parker.' (0.90 s) joins the line before it, and the name stays on camera", async () => {
+    const { checkPlan, closingFoldTarget, enforcePlanRules } = await import("./planGate");
+    const params = { faceImageUrl: "https://example.com/pearl.jpg", hostName: "Pearl Parker" } as any;
+    const scenes = [
+      at(1, "P", 177.495, 182.009, "Knot it on the inside, weave the ends away, and turn it right side out.", { wordCut: true }),
+      at(2, "P", 182.009, 185.352, "Every stitch in that hat is a knit or a purl,", { wordCut: true, shotGroup: 37 }),
+      at(
+        3,
+        "P",
+        185.352,
+        198.135,
+        "and on a cold morning, your ears won't have the faintest idea it came off a loom. For a new slow, beginner friendly lesson every week, subscribe to Pearl Parker, then tell me in the comments whose head your first hat is going on.",
+        { wordCut: true, shotGroup: 37 }
+      ),
+      at(4, "H", 198.135, 199.035, "This is Pearl Parker.", { hostIntro: true }),
+    ];
+    expect(checkPlan(scenes, params).findings).toContainEqual(
+      expect.objectContaining({ rule: 7, scene: 4, detail: expect.stringMatching(/^closing host shot under 1 s \(0\.90s\)/) })
+    );
+    expect(closingFoldTarget(scenes, 3)).toBe(2);
+    const r = enforcePlanRules(scenes, params);
+    const last = r.scenes.at(-1)!;
+    expect(r.scenes).toHaveLength(3);
+    // The words go to the picture first; the line then names the host, so it is the host's take
+    // (the self-introduction rule), never a 0.9 s blink.
+    expect(r.fixes.slice(0, 2)).toEqual([
+      "closing host shot at scene 4 (0.90s) folded into the picture before it, which runs to the end",
+      "introduction put on camera at scene 3",
+    ]);
+    expect(last).toMatchObject({ hostPresent: true, hostIntro: true, narrationStartSec: 185.352, narrationEndSec: 199.035 });
+    expect(last.scriptText).toMatch(/whose head your first hat is going on\. This is Pearl Parker\.$/);
+  });
+
+  it("job 179 (the audit's shape): 'See you at the bench.' (0.78 s) after the end QR card stays, and the job is told", async () => {
+    // Every one of the audit's 21 production films ends this way: the scan window under the big
+    // card, then the goodbye outside the CTA block. The goodbye never joins the QR beat and never
+    // crosses the CTA edge, so the scan window keeps its words and the short goodbye is named.
+    const { closingFoldTarget, enforcePlanRules } = await import("./planGate");
+    const cta = { cta: true, ctaIndex: 0 } as const;
+    const scanWindow =
+      "Point your phone's camera at the QR code on the screen, or tap the link down in the description. And if turning cheap lumber into real money is your kind of weekend, subscribe to Hank Hardwood and tell me in the comments which stain you'd reach for first.";
+    const scenes = [
+      at(192, "H", 988.12625, 993.122063, "every one built from cheap box-store lumber and the basic tools already on your bench.", { ...cta, qrCorner: true }),
+      at(193, "P", 993.122063, 1005.399875, scanWindow, { ...cta, qrHero: true, qrTail: true }),
+      at(194, "H", 1005.399875, 1006.184, "See you at the bench."),
+    ];
+    expect(closingFoldTarget(scenes, 2)).toBe(-1);
+    const r = enforcePlanRules(scenes, { faceImageUrl: "https://example.com/hank.jpg", hostName: "Hank Hardwood" } as any);
+    expect(r.scenes.find(s => s.qrHero)).toMatchObject({ scriptText: scanWindow, narrationEndSec: 1005.399875 });
+    expect(r.scenes.at(-1)).toMatchObject({ hostPresent: true, scriptText: "See you at the bench." });
+    expect(r.unresolved).toContainEqual(
+      expect.objectContaining({ rule: 7, detail: expect.stringMatching(/^closing host shot under 1 s \(0\.78s\)/) })
+    );
   });
 });

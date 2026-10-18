@@ -3951,7 +3951,7 @@ export function planAutoBroll(
  * failed with the ORIGINAL error, since that is the one worth reading.
  * `sourceImageUrl` is a picture already drawn and checked for this scene — the start frame of a
  * clip that moved wrong (`checkedKeyframeOf`) — and the still is made from it instead of a new
- * draw.
+ * draw: the clip was paid for once and the picture once, and nothing more.
  */
 async function fallbackSceneToStill(
   jobId: number,
@@ -11260,8 +11260,9 @@ export async function generateBrollKeyframe(
  * none (`BROLL_NO_KEYFRAME`, or a picture that is not a keyframe). Read right after the clip is
  * judged, when `pictureUrl` is still that render's frame: a content-policy step down redraws it,
  * and the clip that came back is the one drawn from the last. A clip that moved wrong is the
- * video model's fault, not the frame's, so the second render and the still both use it instead
- * of drawing again (local job 262 scene 16: two paid videos and three images for one still).
+ * video model's fault, not the frame's, so the still is made from it (and the second render
+ * `CLIP_GLITCH_RERENDER=1` asks for) instead of drawing again (local job 262 scene 16: two paid
+ * videos and three images for one still).
  * Pure — unit-tested.
  */
 export function checkedKeyframeOf(
@@ -14259,9 +14260,10 @@ export async function generateSceneClips(
    */
   allow69Labs: boolean = false,
   /**
-   * A b-roll start frame already drawn and checked for this scene — the glitch re-render's
-   * (`renderSceneClip`, `checkedKeyframeOf`). The clip is rendered again from it instead of a new
-   * draw; after a content-policy block each step draws its own, as before.
+   * A b-roll start frame already drawn and checked for this scene — the glitch re-render's, which
+   * only `CLIP_GLITCH_RERENDER=1` asks for (`renderSceneClip`, `checkedKeyframeOf`). The clip is
+   * rendered again from it instead of a new draw; after a content-policy block each step draws its
+   * own, as before.
    */
   keyframeUrl?: string
 ): Promise<string[]> {
@@ -14917,35 +14919,76 @@ export async function dispatchScenesByProvider(
 }
 
 /**
- * A moving cutaway whose clip moved wrong (`scanClipGlitch`): count it, clear the clip, and say
- * what comes next — the first time one more render, the second time the still — with the start
- * frame both are made from (`checkedKeyframeOf`, read before anything is cleared). The second
- * render is ledgered `glitch`: it used to fall to `resume`, and the Cost dialog showed every
- * glitch re-render as a restart (local, since 2026-09-30: the 11 `resume` entries were exactly
- * the 11 glitched scenes). Pure — unit-tested.
+ * Whether a moving cutaway whose clip moved wrong is rendered a SECOND time before it becomes the
+ * still. Off by default (2026-10-18, the operator: every paid video is rendered ONCE — errors are
+ * prevented up front, never paid for twice). On the local renders 35 clips in 20 videos were judged
+ * to move wrong and each was rendered again; 11 of those second clips moved wrong too and shipped
+ * the still anyway (job 262 scene 16 among them). `CLIP_GLITCH_RERENDER=1` brings the second render
+ * back.
  */
-export function planGlitchRerender(scene: StoryboardScene): {
+export const clipGlitchRerenderEnabled = (): boolean =>
+  process.env.CLIP_GLITCH_RERENDER === "1";
+
+/**
+ * A moving cutaway whose clip moved wrong (`scanClipGlitch`): count it, clear the clip, and say
+ * what comes next — the still, made from the start frame the clip was rendered from
+ * (`checkedKeyframeOf`, read before anything is cleared), so no new image is drawn and no second
+ * clip is paid for. The paid submit that made the clip is marked with what moved wrong
+ * (`SceneSubmit.movedWrong`): the ledger shows one render, not used, and never a re-render.
+ * With `CLIP_GLITCH_RERENDER=1` (`rerender`) the first glitch still renders once more from that
+ * frame, ledgered `glitch` — it used to fall to `resume`, and the Cost dialog showed every glitch
+ * re-render as a restart (local, since 2026-09-30: the 11 `resume` entries were exactly the 11
+ * glitched scenes) — and a second glitch makes it the still. Pure — unit-tested.
+ */
+export function planGlitchRerender(
+  scene: StoryboardScene,
+  opts: { what?: string; rerender?: boolean } = {}
+): {
   next: "rerender" | "still";
   keyframe?: string;
 } {
   const keyframe = checkedKeyframeOf(scene);
+  const rerender = opts.rerender ?? clipGlitchRerenderEnabled();
   scene.motionGlitches = (scene.motionGlitches ?? 0) + 1;
+  // The clip judged is the last one paid for. A host lane's entry is never this cutaway's clip (a
+  // beat made b-roll keeps its lip-sync ledger), and a scene from before the ledger has none.
+  const paid = scene.submits?.at(-1);
+  if (paid && paid.provider !== "heygen" && paid.provider !== "runpod")
+    paid.movedWrong = opts.what?.trim() || "moved wrong";
   scene.clipUrls = undefined;
   scene.clipUrl = undefined;
   scene.renderTaskIds = undefined;
-  if (scene.motionGlitches < 2) {
+  if (rerender && scene.motionGlitches < 2) {
     scene.nextSubmitReason = "glitch";
     return { next: "rerender", keyframe };
   }
+  // The beat is a still from here on, said BEFORE the still is made: if making it fails twice
+  // the scene is left failed, and "Retry failed scenes" (or a restart that finds it clip-less)
+  // renders whatever the scene says it is — without this, a moving cutaway: the video the
+  // operator said is paid for once, bought again for a beat whose first video moved wrong.
+  scene.stillImage = true;
   return { next: "still", keyframe };
+}
+
+/**
+ * The paid lanes `renderSceneClip` calls, each a seam a test fills in: the clip render
+ * (`generateSceneClips`, given the start frame to reuse), the motion check (`scanClipGlitch`) and
+ * the still a cutaway falls back to (`fallbackSceneToStill`, given the frame to make it from).
+ * Production passes none.
+ */
+export interface SceneClipLanes {
+  clips: (keyframe?: string) => Promise<string[]>;
+  scan: typeof scanClipGlitch;
+  still: (keyframe?: string) => Promise<void>;
 }
 
 /**
  * Render one scene's clip(s) and fold the outcome into its status. Shared by the main clip
  * stage and the resume stage. A still-running render (PendingRenderError) stays "rendering"
- * so it resumes later; any other failure marks the scene "failed".
+ * so it resumes later; any other failure marks the scene "failed". `lanes` is a test seam
+ * (`SceneClipLanes`); production passes none.
  */
-async function renderSceneClip(
+export async function renderSceneClip(
   scene: StoryboardScene,
   jobId: number,
   adapter: ReturnType<typeof createProviderAdapter>,
@@ -14953,8 +14996,28 @@ async function renderSceneClip(
   lipsync: LipsyncLane | null,
   instruction: string,
   persist: () => Promise<void>,
-  pollTimeoutMs?: number
+  pollTimeoutMs?: number,
+  lanes: Partial<SceneClipLanes> = {}
 ): Promise<void> {
+  const renderClips =
+    lanes.clips ??
+    ((keyframe?: string) =>
+      generateSceneClips(
+        adapter,
+        jobId,
+        scene,
+        params,
+        lipsync,
+        instruction,
+        persist,
+        pollTimeoutMs,
+        false,
+        keyframe
+      ));
+  const judgeClip = lanes.scan ?? scanClipGlitch;
+  const toStill =
+    lanes.still ??
+    ((keyframe?: string) => fallbackSceneToStill(jobId, scene, params, keyframe));
   scene.sceneStatus = "processing";
   // The video rule, held at the last step before a clip is paid for — whatever path made this
   // scene moving (`videoKind`: big things only, never hands, nothing small).
@@ -14967,27 +15030,19 @@ async function renderSceneClip(
   // first failure. The render gate in `runChunkTasks` holds the count, so this loop can never
   // pay past it; the pass bound only stops a failure that happens before any submit (no audio,
   // a photo that will not load) from spinning.
-  // The start frame of a cutaway whose clip moved wrong: the second render, and the still if that
-  // one moves wrong or fails too, are made from it (`planGlitchRerender`).
+  // The start frame of a cutaway whose clip moved wrong: the still is made from it — and, with
+  // `CLIP_GLITCH_RERENDER=1`, the second render first (`planGlitchRerender`). Kept here so a still
+  // that fails to encode is tried again from the same frame, never a new draw.
   let glitchKeyframe: string | undefined;
   for (let pass = 0; ; pass++) {
     try {
-      scene.clipUrls = await generateSceneClips(
-        adapter,
-        jobId,
-        scene,
-        params,
-        lipsync,
-        instruction,
-        persist,
-        pollTimeoutMs,
-        false,
-        glitchKeyframe
-      );
+      scene.clipUrls = await renderClips(glitchKeyframe);
       syncSceneClipFields(scene);
       // A moving cutaway that moves something the way nothing moves in real life (wood sliding
-      // on its own, a melting hand): render it once more, and a second glitch makes it the still,
-      // which never moves wrong.
+      // on its own, a melting hand) becomes the still, which never moves wrong. The clip is paid
+      // for ONCE: the errors are kept out up front (only what moves by itself is a video, the clip
+      // starts from a checked frame, the check is told what is meant to move), and the second
+      // render moved wrong again on 11 of the 35 local glitches.
       if (
         !scene.hostPresent &&
         !scene.stillImage &&
@@ -14995,7 +15050,7 @@ async function renderSceneClip(
         scene.clipUrls?.[0]
       ) {
         const about = scene.showSubject ?? scene.visualPrompt;
-        const g = await scanClipGlitch(
+        const g = await judgeClip(
           scene.clipUrls[0],
           about,
           // Something moving by itself: change is the point (a torch charring a board "grew" the
@@ -15003,20 +15058,25 @@ async function renderSceneClip(
           scene.selfMoving ?? !!scene.objectMotion
         );
         if (g.glitch) {
-          const plan = planGlitchRerender(scene);
+          const plan = planGlitchRerender(scene, { what: g.what });
+          glitchKeyframe = plan.keyframe;
           if (plan.next === "rerender") {
-            glitchKeyframe = plan.keyframe;
             console.warn(
               `[Longform ${jobId}] scene ${scene.index} clip moves wrong (${g.what}) — rendering it again` +
-                (plan.keyframe ? " from the same start frame" : "")
+                (plan.keyframe ? " from the same start frame" : "") +
+                " (CLIP_GLITCH_RERENDER=1)"
             );
             continue;
           }
+          const twice = (scene.motionGlitches ?? 0) > 1;
           console.warn(
-            `[Longform ${jobId}] scene ${scene.index} clip moved wrong twice (${g.what}) — using the still` +
-              (plan.keyframe ? " (its start frame)" : "")
+            `[Longform ${jobId}] scene ${scene.index} clip moved wrong` +
+              (twice ? " twice" : "") +
+              ` (${g.what}) — using the still` +
+              (plan.keyframe ? " made from its start frame" : "") +
+              (twice ? "" : ", no second render")
           );
-          await fallbackSceneToStill(jobId, scene, params, plan.keyframe);
+          await toStill(plan.keyframe);
           return;
         }
       }
@@ -15041,10 +15101,11 @@ async function renderSceneClip(
           console.warn(
             `[Longform ${jobId}] scene ${scene.index} b-roll video failed (${e.message}) — falling back to Ken Burns still animation`
           );
-          // A second render after a glitch that failed: the first one's start frame was drawn
-          // and checked for this scene. Any other failure draws as before — there the frame
-          // may never have been drawn, and `pictureUrl` could be an older picture's.
-          await fallbackSceneToStill(jobId, scene, params, glitchKeyframe);
+          // After a glitch (a still from its frame that failed to encode, or the second render
+          // `CLIP_GLITCH_RERENDER=1` asks for): that start frame was drawn and checked for this
+          // scene. Any other failure draws as before — there the frame may never have been
+          // drawn, and `pictureUrl` could be an older picture's.
+          await toStill(glitchKeyframe);
           return;
         } catch (stillErr: any) {
           console.error(
