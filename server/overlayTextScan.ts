@@ -162,6 +162,12 @@ export interface StillDefectVerdict {
    *  prompt bans it (`NO_READABLE_TEXT`); a true verdict re-rolls the still like `overlay`. */
   writing: boolean;
   /**
+   * The words the check read in the frame, as printed (`READ_WORDS_QUESTION`) — set only beside a
+   * `writing` verdict, and asked only of a picture with a line and no allowed words, so the caller
+   * can tell words its own line says from made-up writing (`writingTheLineSays`, job 413 scene 2).
+   */
+  read?: string;
+  /**
    * The frame does not show the thing its line names (`scene.showSubject`) — "a stack of
    * sandpaper" drawn as a sanding block, or not there at all. Only asked when the caller passes
    * what the frame must show; re-rolls the still like `writing`.
@@ -249,10 +255,12 @@ export function parseStillDefectVerdict(
   const person = parsed.data?.person === true;
   const face = parsed.data?.face === true;
   const what = parsed.data?.what;
+  const read = parsed.data?.read;
   return {
     overlay,
     broken,
     writing,
+    ...(writing && typeof read === "string" && read.trim() ? { read: read.trim().slice(0, 160) } : {}),
     missing,
     ...(detail ? { detail } : {}),
     ...(detail && typeof detailWhat === "string" && detailWhat.trim()
@@ -384,6 +392,31 @@ export const SOFT_PRINT_QUESTION =
   "SOFT on purpose in this picture: a blurred patch of print, or shallow carved lines too soft " +
   "to read, counts as that printing or engraving being shown. Never answer missing because its " +
   "words cannot be read. Answer missing only when there is no sign of it at all.";
+
+/**
+ * QUESTION 4 for a picture ALLOWED some words (`scene.pictureText`), whose other print is now asked
+ * soft around them (`ALLOWED_TEXT_REST_CLAUSE`, job 411 scene 17: "a field guide page … with its
+ * entry text" beside the one word the line says). That soft entry is the entry shown, as for a
+ * blurred-print picture (`SOFT_PRINT_QUESTION`); the allowed words themselves are judged by QUESTION
+ * 3, which still fails them missing or misspelt.
+ */
+export const SOFT_REST_QUESTION =
+  "\n\nQUESTION 4 NOTE — apart from the words this picture is allowed to show, any printing on the " +
+  "named thing (the rest of a page, a label, a box) is drawn SOFT on purpose: a blurred patch of " +
+  "print counts as that printing being shown. Never answer missing because the rest of its words " +
+  "cannot be read.";
+
+/**
+ * Asked beside QUESTION 3 of a picture with a line and no allowed words (2026-10-19, job 413 scene 2:
+ * the heading "LOAN" on loan papers under the line "A loan," was refused for writing three times).
+ * The check only REPORTS what it can read — every word, so a heading named alone cannot hide the
+ * paragraphs under it; whether those are words the picture's own line says is decided in code
+ * (`writingTheLineSays`), never by the model.
+ */
+export const READ_WORDS_QUESTION =
+  '\n\nREAD — when writing is true, also give "read": EVERY word, number or letter a viewer can ' +
+  "read in the frame, exactly as printed and in reading order — all of it, not only the largest " +
+  '(at most 12 words; end with "…" when there are more). "" when writing is false.';
 
 /**
  * QUESTION 4 widened for a picture about KEY THINGS: every one of them must really be there, and a
@@ -654,11 +687,14 @@ export function verdictShape(
   detail?: boolean,
   forbids?: boolean,
   noPerson?: boolean,
-  noFace?: boolean
+  noFace?: boolean,
+  /** The words the check reads, beside `writing` (`READ_WORDS_QUESTION`). */
+  read?: boolean
 ): string {
   return (
     '\n\nReturn ONLY this JSON, no prose: {"overlay":true|false,"broken":true|false,' +
     '"writing":true|false' +
+    (read ? ',"read":"..."' : "") +
     (expect ? ',"missing":true|false' : "") +
     (expect && detail ? ',"detail":true|false,"detail_what":"..."' : "") +
     (forbids ? ',"forbidden":true|false' : "") +
@@ -737,6 +773,10 @@ export async function scanStillDefects(
     // The state, action, number and position the description says — asked with `missing`, unless it
     // is turned off (`detailCheckOn`).
     const askDetail = !!expect && detailCheckOn();
+    // What it reads, so the caller can pass words the picture's own line says (job 413 scene 2). A
+    // picture allowed words is held to exactly those (`allowedTextQuestion`), and one with no line
+    // (the CTA) has no words of its own to pass.
+    const askRead = !!line?.trim() && !allowedText;
     // Spelling and a named pattern need the larger frame.
     const [w, h] = allowedText || exactLook ? [1280, 720] : [DEFECT_SCAN_WIDTH, DEFECT_SCAN_HEIGHT];
     const small = await sharp(buffer)
@@ -761,16 +801,17 @@ export async function scanStillDefects(
         (expect && exactLook ? exactLookQuestion(exactLook) : "") +
         (mustShow ? requiredThingsQuestion(mustShow, requiredLook) : "") +
         (expect && fromOutside ? INSIDE_PART_NOTE : "") +
-        (expect && softPrint ? SOFT_PRINT_QUESTION : "") +
+        (expect && softPrint ? SOFT_PRINT_QUESTION : expect && allowedText ? SOFT_REST_QUESTION : "") +
         (askDetail ? detailQuestion(expect!) : "") +
         (line ? placeQuestion(line, !!ruledOut) : "") +
         (allowedText ? allowedTextQuestion(allowedText) : "") +
+        (askRead ? READ_WORDS_QUESTION : "") +
         (ruledOut ? forbiddenQuestion(ruledOut) : "") +
         // Light the line or the picture's own description names is what was asked for, not staged.
         namedLightQuestion(namedLight(line, expect)) +
         (noPerson ? QR_BACKDROP_PERSON_QUESTION : "") +
         (noFace ? OTHER_FACE_QUESTION : "") +
-        verdictShape(expect, line, askDetail, !!ruledOut, noPerson, noFace),
+        verdictShape(expect, line, askDetail, !!ruledOut, noPerson, noFace, askRead),
       userMessage:
         "Is any text stamped over this frame, does it contain obviously impossible structure, " +
         "is there readable writing in the scene, and is it messy or branded?" +
@@ -809,6 +850,8 @@ export async function scanStillDefects(
       delete verdict.detailWhat;
     }
     if (!line) verdict.wrongPlace = false;
+    // …nor a "read" nobody asked for: on a picture allowed words, it must never excuse other writing.
+    if (!askRead) delete verdict.read;
     // A stray "forbidden" on a picture nothing was ruled out for is not an answer to anything.
     if (!ruledOut) delete verdict.forbidden;
     // …nor a "person" on a picture allowed one (a cutaway may show hands at work).

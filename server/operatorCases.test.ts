@@ -7639,3 +7639,98 @@ describe("a dimming caption is a glance, and two never come back to back (round 
     expect(out.cues.map(c => c.id)).toEqual(["toilet-is-fine", "stick-deeper"]);
   });
 });
+
+describe("allowed words and soft print go together; a word the line says is not made-up writing (round 13 verification films, 2026-10-19)", () => {
+  // 411 scene 17, as stored: the line allows one word, and the picture came back twice as a sharp
+  // field-guide page — heading and two readable paragraphs of made-up entry text beside it.
+  const ROBIN_LINE =
+    "The funny part is that the robin’s own scientific name, the one printed in the field guides, ends in the word migratorius, which means just about what it sounds like. Seems somebody should have checked with the robins first.";
+  const fieldGuide = () =>
+    pic(17, ROBIN_LINE, "close-up of an open bird field guide page showing a painted American robin with its entry text", {
+      visualPrompt: "the empty backyard lawn in late November light",
+      keyThing: "robin",
+      pictureText: "migratorius",
+    });
+
+  it("411 scene 17: the one said word stays exact and sharp, the rest of the page is asked soft, and its ask for the entry text too", async () => {
+    const { ALLOWED_TEXT_REST_CLAUSE, NO_READABLE_TEXT } = await import("./longformVideo");
+    const s = fieldGuide();
+    const prompt = buildStillPrompt(s);
+    expect(prompt).toMatch(/ONLY readable writing anywhere in the frame is exactly "migratorius"/);
+    expect(prompt).toContain(ALLOWED_TEXT_REST_CLAUSE);
+    expect(prompt).toMatch(/with its entry text soft and unreadable/);
+    expect(prompt).not.toMatch(/entry text(?! soft and unreadable)/);
+    expect(prompt).not.toContain(NO_READABLE_TEXT);
+    // Not the blurred-print road: its arm's length and step back would shrink the said word past
+    // reading, and its "an engraved name is there too" asks for print nobody said.
+    expect(prompt).not.toContain(BLURRED_PRINT_CLAUSE);
+    expect(prompt).not.toMatch(/arm's-length view/);
+    expect(blurUnsaidPrint(s)).toBe(false);
+    expect(s.blurPrint).toBeUndefined();
+  });
+
+  it("411 scene 17: a redraw for writing goes closer on the said word, once, in the draw it already gets", async () => {
+    const { allowedTextRedraw, ALLOWED_TEXT_REDRAW_START, faultRedrawFor, STEP_BACK_CLAUSE } = await import("./longformVideo");
+    const prompt = buildStillPrompt(fieldGuide());
+    const once = allowedTextRedraw(prompt, "migratorius");
+    expect(once.startsWith(prompt)).toBe(true);
+    expect(once).toContain(`${ALLOWED_TEXT_REDRAW_START} the camera is closer on "migratorius"`);
+    expect(once).not.toContain(STEP_BACK_CLAUSE);
+    expect(allowedTextRedraw(once, "migratorius")).toBe(once);
+    // No extra draw: the changed-prompt fault redraw stays for plain pictures only.
+    expect(
+      faultRedrawFor({ pictureText: "migratorius" }, { writing: true }, { broken: 0, writing: 1 }, new Set(), true)
+    ).toBeUndefined();
+  });
+
+  it("an ask for print that IS the said words, and a picture with no allowed words, are left as they were", () => {
+    // The said words follow the ask: that text is the allowed text, not more print.
+    expect(withAllowedText("a page with the text migratorius in italics", "migratorius")).toMatch(
+      /^a page with the text migratorius in italics The ONLY/
+    );
+    expect(withAllowedText("a label with its text reading 2009", "2009")).toMatch(/^a label with its text reading 2009 The ONLY/);
+    // A pattern is not print: "with its print" is never touched; nor is print already asked soft.
+    expect(withAllowedText("a cushion with its floral print", "HOME")).toMatch(/^a cushion with its floral print The ONLY/);
+    expect(withAllowedText("a page with its text soft and blurred", "HOME")).toMatch(/^a page with its text soft and blurred The ONLY/);
+    // No allowed words, no soft print: byte for byte.
+    const plain = "close-up of an open bird field guide page showing a painted American robin with its entry text";
+    expect(withAllowedText(plain, undefined)).toBe(plain);
+  });
+
+  it("413 scene 2: the heading LOAN under the line \"A loan,\" is the line's own word, not made-up writing", async () => {
+    const { writingTheLineSays } = await import("./longformVideo");
+    expect(writingTheLineSays("LOAN", "A loan,")).toBe(true);
+    expect(writingTheLineSays("'LOAN'", "A loan,")).toBe(true);
+    expect(writingTheLineSays("“LOAN”", "A loan,")).toBe(true);
+    // The other list items of that opening, each with its own word.
+    expect(writingTheLineSays("LEASE", "a lease,")).toBe(true);
+  });
+
+  it("made-up writing is still refused: a word the line never says, a cut-short read, a brand, no line", async () => {
+    const { writingTheLineSays } = await import("./longformVideo");
+    // 411's page, had it carried no allowed word: "American" is nowhere in the line.
+    expect(writingTheLineSays("American Robin", ROBIN_LINE)).toBe(false);
+    expect(writingTheLineSays("LOAN AGREEMENT", "A loan,")).toBe(false);
+    expect(writingTheLineSays("LOAN Borrower Lender Amount", "A loan,")).toBe(false);
+    expect(writingTheLineSays("LOAN …", "A loan,")).toBe(false);
+    expect(writingTheLineSays("$10,000", "starting a business costs ten thousand dollars.")).toBe(false);
+    // A brand the line names is still never drawn readable (`scrubLegibleWriting`).
+    expect(writingTheLineSays("Etsy", "Sell it on Etsy")).toBe(false);
+    expect(writingTheLineSays(undefined, "A loan,")).toBe(false);
+    expect(writingTheLineSays("LOAN", undefined)).toBe(false);
+    // More than six words is a page of text, not a heading.
+    expect(
+      writingTheLineSays("the one printed in the field guides", ROBIN_LINE)
+    ).toBe(false);
+  });
+
+  it("the check reports what it read only where it can excuse it, and never beside an allowed word", async () => {
+    const { READ_WORDS_QUESTION, verdictShape, parseStillDefectVerdict } = await import("./overlayTextScan");
+    expect(READ_WORDS_QUESTION).toMatch(/EVERY word, number or letter a viewer can read/);
+    expect(verdictShape(undefined, "A loan,", false, false, false, false, true)).toContain('"read":"..."');
+    expect(verdictShape(undefined, "A loan,")).not.toContain('"read"');
+    expect(parseStillDefectVerdict('{"writing":true,"read":"LOAN","what":"heading on the papers"}').read).toBe("LOAN");
+    // A "read" beside no writing is no answer.
+    expect("read" in parseStillDefectVerdict('{"writing":false,"read":"LOAN"}')).toBe(false);
+  });
+});

@@ -58,6 +58,7 @@ import {
   oneThingPanels,
   ownTypedPicture,
   ownTypedPanel,
+  saidText,
   showsScreen,
 } from "./shotList";
 import {
@@ -7463,6 +7464,9 @@ export function asksToReadPrint(text: string | undefined): boolean {
  * already soft, a cover or an operator's asset, or a SCREEN: its words are already drawn as soft
  * bars (`SCREEN_TEXT_AS_BARS`) and an arm's-length view would shrink the screen it is about. A split
  * scene is read off its panel (`splitVisual`), which inherits the mark (`buildSplitRightScene`).
+ * A picture whose line says some of the words is not marked, yet its OTHER print is soft too: the
+ * allowed-words rule carries that itself (`withAllowedText` → `ALLOWED_TEXT_REST_CLAUSE`), so the
+ * said words stay readable — the arm's-length view and the step back would shrink them past reading.
  * Returns whether it marked. Mutates the scene.
  */
 export function blurUnsaidPrint(scene: StoryboardScene): boolean {
@@ -7477,8 +7481,37 @@ export function blurUnsaidPrint(scene: StoryboardScene): boolean {
 }
 
 /**
+ * ALLOWED WORDS AND SOFT PRINT GO TOGETHER (2026-10-19, job 411 scene 17). A line that says one word
+ * printed on a thing ("…ends in the word migratorius") allows that word — and the rest of the print
+ * on the same thing was never asked to be soft. The picture was "close-up of an open bird field guide
+ * page … with its entry text", and it came back twice with a sharp heading and two readable paragraphs
+ * of made-up entry text beside the one allowed word, refused for writing both times and shipped. The
+ * blurred-print road (`BLURRED_PRINT_CLAUSE`, arm's length, the step back) is not the answer here: it
+ * shrinks the said word past reading too. So the allowed words are the one sharp writing, and every
+ * other print on the page, label, box or sign falls out of focus around them.
+ */
+export const ALLOWED_TEXT_REST_CLAUSE =
+  "Those words are the one sharp, in-focus writing, large enough to read at a glance. Any other " +
+  "printing — the rest of a page, label, box or sign, or anything else in the frame — is there but " +
+  "small, soft and out of focus, the way a phone blurs print it is not focused on: no other word, " +
+  "letter or number can be read. Never an evenly sharp close-up of a whole page, label or box full " +
+  "of print: the camera is on those words and the rest falls away.";
+
+/**
+ * A description that asks for MORE print than the said words — job 411 scene 17's "with its entry
+ * text" — asks for it a clause before the rule that allows one word, and the picture maker drew the
+ * entry. Only a determiner-led ask ("with its text", "and the printed wording"), never one followed by
+ * what it reads (that is the allowed words) or one already soft, and never a bare "print", which is
+ * also a pattern.
+ */
+const OTHER_PRINT_ASK =
+  /\b(?:with|and|showing|plus)\s+(?:its|the|their|some|his|her)\s+(?:(?:(?:entry|body|printed|descriptive|written|surrounding|other|accompanying)\s+)?(?:text|writing|wording|paragraphs?|printing)|(?:fine|small)\s+print)\b(?!\s*(?:reading|reads|that\s+reads|saying|says|soft|blurred|["'“‘:]))/gi;
+
+/**
  * A picture whose line says the words printed on a thing (`scene.pictureText`) shows exactly those,
- * and nothing else readable: the look's no-writing rule is swapped for it. Unchanged otherwise.
+ * and nothing else readable: the look's no-writing rule is swapped for it, every other print is soft
+ * around them (`ALLOWED_TEXT_REST_CLAUSE`), and a description's ask for more print than that is asked
+ * soft (`OTHER_PRINT_ASK` — unless the allowed words follow it). Unchanged otherwise.
  */
 export function withAllowedText(
   prompt: string,
@@ -7499,10 +7532,62 @@ export function withAllowedText(
   const allowed =
     `The ONLY readable writing anywhere in the frame is exactly "${text}", printed clearly on the ` +
     `thing it belongs to and spelled exactly like that — no other words, letters, numbers, prices ` +
-    `or labels readable on any surface.`;
-  return prompt.includes(NO_READABLE_TEXT)
-    ? prompt.split(NO_READABLE_TEXT).join(allowed)
-    : `${prompt} ${allowed}`;
+    `or labels readable on any surface. ${ALLOWED_TEXT_REST_CLAUSE}`;
+  const said = text.toLowerCase();
+  const framed = prompt.replace(OTHER_PRINT_ASK, (ask: string, at: number, whole: string) =>
+    whole.slice(at + ask.length, at + ask.length + 40).toLowerCase().includes(said)
+      ? ask
+      : `${ask} soft and unreadable`
+  );
+  return framed.includes(NO_READABLE_TEXT)
+    ? framed.split(NO_READABLE_TEXT).join(allowed)
+    : `${framed} ${allowed}`;
+}
+
+/** How the allowed-words redraw's clause starts — found again so it is never added twice. */
+export const ALLOWED_TEXT_REDRAW_START = "CLOSER ON THE SAID WORDS:";
+
+/**
+ * The redraw of a picture allowed some words (`scene.pictureText`) that came back with "writing" —
+ * other print readable, or the allowed words missing or misspelt (job 411 scene 17: the same sharp
+ * page twice, nothing changed between the draws). The blurred-print picture's step back
+ * (`STEP_BACK_CLAUSE`) would shrink the said words too, so this one goes the other way: closer on
+ * them, everything around them out of focus. Rides the re-roll the fault already gets — no extra
+ * draw — and is added once. Pure.
+ */
+export function allowedTextRedraw(prompt: string, text: string): string {
+  if (prompt.includes(ALLOWED_TEXT_REDRAW_START)) return prompt;
+  return (
+    `${prompt} ${ALLOWED_TEXT_REDRAW_START} the camera is closer on "${text.replace(/"/g, "'")}" ` +
+    "than before — those words large, sharp and in focus — and everything around them falls away " +
+    "soft and out of focus, too blurred for any other word, letter or number to be read."
+  );
+}
+
+/**
+ * A WORD THE LINE SAYS IS NOT MADE-UP WRITING (2026-10-19, job 413 scene 2). Under the list item
+ * "A loan," the picture maker put the heading "LOAN" on the loan papers — exactly the word spoken,
+ * the fine print soft — and the check, with no allowed words set (the shot list set none), refused it
+ * for writing three times: two redraws paid for, and a "readable writing" badge for a fault the
+ * picture did not have. The check now reports what it read (`READ_WORDS_QUESTION`) and this decides:
+ * writing made ONLY of words the picture's own line says — the test the planner's allowed words
+ * pass (`saidText`: every word in the line, at most six) — is not counted. Made-up writing still is:
+ * any word the line does not say ("American Robin" over a line naming the robin), a read the check
+ * cut short ("…"), and anything the prompt scrubber never lets into a prompt (`scrubLegibleWriting`:
+ * a brand the line names, a price list, a receipt). Pure.
+ */
+export function writingTheLineSays(read: string | undefined, line: string | undefined): boolean {
+  // Quote marks round what was read are the check's, not the picture's ("'LOAN'" is LOAN) — and the
+  // scrubber drops a quoted word whole, which would read as a change.
+  const words = read
+    ?.replace(/["“”]/g, " ")
+    .replace(/(^|[\s,;:])['‘]+/g, "$1")
+    .replace(/['’]+(?=$|[\s,;:.])/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!words || !line?.trim() || /…|\.\.\./.test(words)) return false;
+  if (scrubLegibleWriting(words) !== words) return false;
+  return !!saidText(words, line);
 }
 
 /**
@@ -11043,7 +11128,8 @@ async function drawValidatedStill(
   // What the check named on the picture before this one (`checkFlags`), to spot a redraw that
   // changed nothing.
   let lastFaults = "";
-  // A blurred-print picture that came back readable is drawn from further back once.
+  // A blurred-print picture that came back readable is drawn from further back once (a picture
+  // allowed words of its line is drawn closer on them instead — `allowedTextRedraw`, added once).
   let steppedBack = false;
   // A content-policy block can't be cleared by resubmitting the same prompt — escalate the
   // ladder instead: aggressively-softened variant, then a Claude policy-safe rewrite, then a
@@ -11311,6 +11397,20 @@ async function drawValidatedStill(
         // glasses and a smile drawn, and nothing asked) — the same call, one more question.
         othersFaceAsked(scene, personFree, square)
       );
+      // A WORD ITS OWN LINE SAYS IS NOT MADE-UP WRITING (`writingTheLineSays`, job 413 scene 2: the
+      // heading "LOAN" under "A loan," refused three times). Decided here, before any redraw or record
+      // reads the verdict; a picture allowed words of its own is held to exactly those instead.
+      if (
+        defects.writing &&
+        !scene.pictureText &&
+        writingTheLineSays(defects.read, scene.cta ? undefined : scene.scriptText ?? scene.narration)
+      ) {
+        console.log(
+          `[Longform] scene ${scene.index} still's only readable writing ("${defects.read}") is words its ` +
+            "own line says → not counted as writing"
+        );
+        defects.writing = false;
+      }
       if (defects.missing) missed.add(buffer);
       // A THING SEEN CUT OPEN (`cutOpenFault`) is drawn from outside from then on, every redraw built
       // again included, and a frame that ships cut open is no memory for later pictures — job 403's
@@ -11445,6 +11545,12 @@ async function drawValidatedStill(
       if (defects.writing && !defects.overlay && scene.blurPrint && !scene.pictureText && !steppedBack) {
         steppedBack = true;
         prompt = `${prompt} ${STEP_BACK_CLAUSE}`;
+      }
+      // …and a picture ALLOWED words of its line goes the other way, once: closer on those words, the
+      // rest out of focus (`allowedTextRedraw`, job 411 scene 17's field-guide page, sharp twice from
+      // one prompt). The same re-roll below — no extra draw.
+      if (defects.writing && !defects.overlay && scene.pictureText) {
+        prompt = allowedTextRedraw(prompt, scene.pictureText);
       }
       if (defects.overlay || defects.writing) {
         const kind = defects.overlay ? "overlaid text" : "readable writing";

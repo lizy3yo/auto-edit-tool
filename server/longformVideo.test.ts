@@ -11186,6 +11186,90 @@ describe("a picture that ships with a fault says so, and two faults get one chan
     expect(out.flaws).toEqual(["writing"]);
   });
 
+  // Job 411 scene 17: one allowed word, and the field-guide page came back sharp twice from one prompt.
+  const fieldGuide = () =>
+    ({
+      index: 17,
+      scriptText: "…the robin’s own scientific name, the one printed in the field guides, ends in the word migratorius…",
+      pictureText: "migratorius",
+      showSubject: "close-up of an open bird field guide page showing a painted American robin with its entry text",
+      visualPrompt: "close-up of an open bird field guide page showing a painted American robin with its entry text",
+    }) as any;
+
+  it("job 411 scene 17: writing on a picture allowed one word redraws closer on that word, once, in the draw it already gets", async () => {
+    const { ALLOWED_TEXT_REDRAW_START, ALLOWED_TEXT_REST_CLAUSE, STEP_BACK_CLAUSE } = await import("./longformVideo");
+    const [a, b, c] = await Promise.all([pngOf("#d11"), pngOf("#d22"), pngOf("#2d2")]);
+    checks({ writing: true, what: "entry paragraphs readable" });
+    const genImage = drawsOf(a, b, c);
+    const out = await generateValidatedStill(fieldGuide(), 4, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(2);
+    const [p1, p2] = genImage.mock.calls.map(c => c[0].prompt as string);
+    expect(p1).toContain(ALLOWED_TEXT_REST_CLAUSE);
+    expect(p1).not.toContain(ALLOWED_TEXT_REDRAW_START);
+    expect(p2.startsWith(p1)).toBe(true);
+    expect(p2.split(ALLOWED_TEXT_REDRAW_START).length - 1).toBe(1);
+    expect(p2).not.toContain(STEP_BACK_CLAUSE);
+    expect(out.buffer.equals(b)).toBe(true);
+    expect(out.flaws).toBeUndefined();
+  });
+
+  it("job 411 scene 17: still sharp after it, the picture is kept saying so — never a third draw", async () => {
+    const { ALLOWED_TEXT_REDRAW_START } = await import("./longformVideo");
+    const [a, b, c] = await Promise.all([pngOf("#e11"), pngOf("#e22"), pngOf("#e33")]);
+    mockScanStillDefects.mockReset();
+    mockScanStillDefects.mockResolvedValue(verdict({ writing: true, what: "entry paragraphs readable" }));
+    const genImage = drawsOf(a, b, c);
+    const out = await generateValidatedStill(fieldGuide(), 4, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(2);
+    expect((genImage.mock.calls[1][0].prompt as string).split(ALLOWED_TEXT_REDRAW_START).length - 1).toBe(1);
+    expect(out.flaws).toEqual(["writing"]);
+  });
+
+  // Job 413 scene 2: "A loan," — the picture maker put the heading "LOAN" on the papers.
+  const loan = () =>
+    ({
+      index: 2,
+      scriptText: "A loan,",
+      listCut: true,
+      showSubject: "a stack of cash and paperwork on a desk",
+      visualPrompt: "Stack of cash and paperwork laid out on a desk, close enough to fill the frame.",
+    }) as any;
+
+  it("job 413 scene 2: the only readable word is the one its line says — shipped on the first draw, no fault", async () => {
+    const [a, b] = await Promise.all([pngOf("#f11"), pngOf("#f22")]);
+    checks({ writing: true, read: "LOAN", what: "LOAN heading on the papers" });
+    const genImage = drawsOf(a, b);
+    const scene = loan();
+    const out = await generateValidatedStill(scene, 4, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(1);
+    expect(out.buffer.equals(a)).toBe(true);
+    expect(out.flaws).toBeUndefined();
+    expect(scene.pictureChecks.map((c: any) => c.flags)).toEqual([[]]);
+  });
+
+  it("job 413 scene 2: a word its line does not say is still made-up writing and is drawn again", async () => {
+    const [a, b] = await Promise.all([pngOf("#f33"), pngOf("#f44")]);
+    checks({ writing: true, read: "LOAN AGREEMENT", what: "heading on the papers" });
+    const genImage = drawsOf(a, b);
+    const scene = loan();
+    const out = await generateValidatedStill(scene, 4, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(2);
+    expect(out.buffer.equals(b)).toBe(true);
+    expect(scene.pictureChecks.map((c: any) => c.flags)).toEqual([["writing"], []]);
+  });
+
+  it("a CTA picture has no line of its own to excuse a word, and a picture allowed words is held to exactly those", async () => {
+    const [a, b, c, d] = await Promise.all([pngOf("#f55"), pngOf("#f66"), pngOf("#f77"), pngOf("#f88")]);
+    checks({ writing: true, read: "LOAN", what: "heading" });
+    const cta = drawsOf(a, b);
+    await generateValidatedStill({ ...loan(), cta: true }, 4, undefined, cta);
+    expect(cta).toHaveBeenCalledTimes(2);
+    checks({ writing: true, read: "LOAN", what: "heading" });
+    const said = drawsOf(c, d);
+    await generateValidatedStill({ ...loan(), pictureText: "cash" }, 4, undefined, said);
+    expect(said).toHaveBeenCalledTimes(2);
+  });
+
   it("job 343 scene 30: 'missing' twice gets NO changed draw (not yet known to help) and says it shipped missing", async () => {
     const [a, b] = await Promise.all([pngOf("#c11"), pngOf("#c22")]);
     checks({ missing: true, what: "a settings page with no opt-out" }, { missing: true, what: "still no opt-out" });
