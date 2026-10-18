@@ -104,7 +104,11 @@ On top of the footage:
 - DimCaption — a striking line over b-roll: {"phrase": phrase (≤10 words), "emphasis"}
 - ArrowCaption — a line pointing at something in the picture ("this one", "that disc", "right here") (over b-roll): {"phrase": phrase (≤10 words), "emphasis"}
 - MythStamp — says a myth over footage (no correction card needed): {"label": "Myth", "at": "@the myth's key words", "phrase": phrase (optional, ≤10 words)}
-- Quote — the host's own advice in one memorable line (over b-roll): {"quote": ONE WHOLE SENTENCE (≤16 words), "author": "the host's name", "emphasis"}
+- Quote — the host's OWN advice or saying, in one memorable line (over b-roll): {"quote": ONE WHOLE SENTENCE (≤16 words), "author": "the host's name", "emphasis"}.
+  It is signed with the host's name, so it is never words the script gives someone ELSE to say: a line
+  the viewer is told to say or ask ("Just ask: Could I get that in writing, please?"), a request to a
+  clerk or a server, or what another person said — signed, it reads as if the host said it. Show such a
+  line as a DimCaption (no name), or nothing
 - HostCaption — the host's punchline while on camera (HOST or SPLIT scene, never under the name tag): {"phrase": phrase (≤8 words), "emphasis"}
 `;
 
@@ -301,6 +305,91 @@ function namesAThingAlone(line: string): boolean {
 export function namesTheDanger(text: string): boolean {
   const line = text.trim().toLowerCase().replace(/[’‘]/g, "'");
   return NAMES_A_DANGER.test(line) || namesAThingAlone(line);
+}
+
+/**
+ * A QUOTE IS THE HOST'S OWN WORDS. The card signs its line with the host's name, so a line the
+ * script hands someone ELSE to say reads as the host saying it: Helena's job 399 (1:23) signed "Could
+ * I keep the rest of the can, please?" with her name, right after "So when the cart reaches your row,
+ * speak up." — the words she tells the VIEWER to say to the crew; signed, she (a flight attendant)
+ * was the one asking for the can.
+ *
+ * HANDS_A_LINE is how the words leading into it hand the viewer a line, at their very end: a speech
+ * verb as a command, at the start of a clause ("speak up", "ask", "just say", "tell them"), with only
+ * a person or a word on how after it ("ask the crew", "say it plainly", "Just ask:"). A speech verb with
+ * a subject is the host speaking ("here's what I tell everyone who asks"), and one followed by what
+ * it is about hands over nothing (Dale's job 389: "…and tell me in the comments which of the three
+ * sells best where you live." before his own signed "Build it well, price it honest, …").
+ * (Joined from parts: where the command starts, the verb, to whom, how.)
+ */
+const HANDS_A_LINE = new RegExp(
+  [
+    "(?:^|[,;:]\\s*|\\b(?:so|then|and|just|simply|always|politely|nicely|kindly|instead|now|you (?:can|could|should|might|may|will|just))\\s+)",
+    "(?:speak|pipe up|say|ask|tell|request|call out|try saying|try asking|go with)",
+    "(?: (?:to )?(?:them|him|her|someone|somebody|anyone|anybody|(?:the|your|a|an) [a-z']+(?: [a-z']+)?))?",
+    "(?: (?:up|out|this|it|that|something like this|something like|like this|like so|for it|nicely|politely|kindly|plainly|simply|directly|out loud|aloud|clearly|instead|first|again))*$",
+  ].join("")
+);
+/** A REQUEST TO SOMEONE, whoever says it: a question asked with "please" (job 399's "Could I keep the
+ * rest of the can, please?"), "would you mind…", "excuse me…", or wanting something with "please"
+ * ("I'd like the aisle seat, please."). Never the host's own saying. */
+const A_REQUEST = /\bplease\b.*\?$|^(?:would|do) you mind\b|^(?:excuse|pardon) me\b|^(?:i|we)(?:'d| would|'ll| will)? (?:like|love|take|have|want|need|prefer)\b.*\bplease\b/;
+/** A line that sounds SAID TO SOMEONE, read once the words before it hand the viewer a line: a
+ * question in the first person ("Can we get the bigger one?"), a word of asking or thanks, or wanting
+ * something ("I'll take the whole jar."). The host's own question to the viewer ("What's the worst
+ * they can say?") and the host's own advice ("Nobody minds being asked twice.") have none of these:
+ * after "speak up" they are still the host's. */
+const SAID_TO_SOMEONE = /\b(?:i|i'm|i'd|i'll|i've|me|my|we|we're|we'd|we'll|us|our)\b.*\?$|\b(?:please|thanks|thank you|excuse me|pardon me)\b|^(?:i|we)(?:'d| would|'ll| will)? (?:like|love|take|have|want|need|prefer)\b/;
+
+/**
+ * Why a Quote's line is NOT the host's own statement — words the narration hands the viewer to say
+ * (`before`, the words leading into it, ends handing a line, and the line sounds said to someone or
+ * the script puts it in quotation marks: `quoted`), or a request to someone at all — or undefined when
+ * it may be signed with the host's name. Pure.
+ */
+export function notTheHostsWords(quote: string, before = "", quoted = false): string | undefined {
+  const norm = (s: string) => s.trim().toLowerCase().replace(/[’‘]/g, "'").replace(/[“”]/g, '"').replace(/\s+/g, " ");
+  const q = norm(quote).replace(/^"+|"+$/g, "").trim();
+  if (A_REQUEST.test(q)) return "it is a request to someone, not a saying of the host's";
+  const lead = norm(before).replace(/[\s"'.,;:!?…-]+$/, "");
+  if (HANDS_A_LINE.test(lead) && (quoted || /^"/.test(norm(quote)) || SAID_TO_SOMEONE.test(q))) {
+    const tail = lead.split(" ").slice(-3).join(" ");
+    return `the narrator hands it to the viewer to say ("…${tail}")`;
+  }
+  return undefined;
+}
+
+/** The words leading into word `first`: back to the end of the sentence before (the same sentence's
+ * opening when the line starts inside one), at most 30 words. Pure. */
+function wordsLeadingInto(words: Word[], first: number): string {
+  const out: string[] = [];
+  for (let i = first - 1; i >= 0 && out.length < 30; i--) {
+    const t = words[i].text.trim();
+    if (out.length && /[.?!]["”')]*$/.test(t)) break;
+    out.unshift(t);
+  }
+  return out.join(" ");
+}
+
+/** Does the SCRIPT open a quotation mark on this line — someone's speech inside the narration? The
+ * film's sound carries no quotation marks (job 399 heard "speak up. Could I keep…"; its script reads
+ * `speak up. "Could I keep…"`). Read from the scenes the line is said over; a straight mark counts as
+ * opening only after a space, a colon or a dash, so the CLOSING mark of the speech before (`"No." Could
+ * I…`) is not one. Pure. */
+export function quotedInScript(film: FilmLayout, from: number, to: number, line: string): boolean {
+  const norm = (s: string) => s.toLowerCase().replace(/[’‘]/g, "'").replace(/\s+/g, " ").trim();
+  const script = norm(
+    film.scenes
+      .filter(s => s.narrationEndSec > from - 0.5 && s.narrationStartSec < to + 0.5)
+      .map(s => s.scriptText ?? "")
+      .join(" ")
+  );
+  const want = norm(line).replace(/^["“”]+|["“”]+$/g, "").trim();
+  for (const w of [want, want.replace(/[.?!,;:]+$/, "")]) {
+    const at = w ? script.indexOf(w) : -1;
+    if (at >= 0) return /(?:“|(?:^|[\s:(—-])")\s*$/.test(script.slice(Math.max(0, at - 4), at));
+  }
+  return false;
 }
 
 /** Keys whose strings are not shown words (or are checked by the resolver already). */
@@ -695,6 +784,24 @@ export async function planGraphics(input: PlanInput): Promise<PlanResult> {
       }
       const mine = next.find(r => r.id === spec.id)!;
       startsAt.set(spec.id, startWordNear(spec, mine.start));
+      // A QUOTE is signed with the host's name, so it must be the host's own words — job 399 signed
+      // "Could I keep the rest of the can, please?", the line the host tells the viewer to say after
+      // "speak up." (`notTheHostsWords`). Read where it resolved: the words leading into it, and
+      // whether the script puts it in quotation marks.
+      if (spec.template === "Quote") {
+        const line = (spec.props.quote as { text?: unknown } | undefined)?.text;
+        const at = mine.sync.find(s => s.element.startsWith('quote "'));
+        const first = at ? words.findIndex(w => w.start === at.wordStart) : -1;
+        const why = typeof line === "string" && first >= 0 ? notTheHostsWords(line, wordsLeadingInto(words, first), quotedInScript(film, at!.wordStart, mine.contentEnd ?? mine.end, line)) : undefined;
+        if (why) {
+          undo();
+          bad(
+            `"${line}" is not the host's own words — ${why}. Signed with the host's name it reads as if the host said it. ` +
+              `Show it as a caption with no name (DimCaption over b-roll), or drop it`
+          );
+          continue;
+        }
+      }
       // A graphic that sits still for seconds between its own words is a frozen frame, not a point.
       const times = [mine.start, ...mine.sync.map(x => x.wordStart), mine.contentEnd ?? mine.start].sort((a, b) => a - b);
       const wait = Math.max(0, ...times.slice(1).map((x, i) => x - times[i]));

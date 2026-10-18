@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { resolveCues, type CueSpec, type ResolvedCue, type Word } from "../cueResolve";
 import { TEMPLATES } from "../registry";
 import { FPS } from "../theme";
-import { listsWhereGraphicsGo, malformedPhrase, missingListCues, namesTheDanger, normalizePhrases, planGraphics, systemPrompt, uncoveredMoments, userPrompt, wordsSaidOver, type PlanMessage } from "./planner";
+import { listsWhereGraphicsGo, malformedPhrase, missingListCues, namesTheDanger, normalizePhrases, notTheHostsWords, planGraphics, quotedInScript, systemPrompt, uncoveredMoments, userPrompt, wordsSaidOver, type PlanMessage } from "./planner";
 
 const W = (s: string, start: number, step = 0.3): Word[] => s.split(" ").map((text, i) => ({ text, start: start + i * step, end: start + i * step + 0.26 }));
 const scene = (index: number, a: number, b: number, extra: Record<string, unknown> = {}) => ({ index, narrationStartSec: a, narrationEndSec: b, scriptText: "", hostPresent: false, cta: false, split: false, hostOpener: false, ...extra });
@@ -550,6 +550,126 @@ describe("a warning says what to avoid, never advises doing it (A4, Helena's job
     const { ask } = asking([bowls]);
     const out = await planGraphics({ words, film: { scenes: [scene(9, 9, 16, { scriptText: "These bowls are not for hot food or the microwave." })] }, ask, ensureIcon: async () => true });
     expect(out.cues.map(c => c.id)).toEqual(["no-hot-food"]);
+    expect(out.rounds[0].problems).toEqual([]);
+  });
+});
+
+describe("a quote is the host's own words, never a line the viewer is told to say (A5, Helena's job 399 'keep-the-can-quote')", () => {
+  // Job 399, 1:18-1:28 as heard. The script (scene 17): "…spent nursing a thimble of ginger ale. So when
+  // the cart reaches your row, speak up. "Could I keep the rest of the can, please?"" — the card showed
+  // the last sentence signed "— HELENA HART": the host, a flight attendant, asking for the can.
+  const heard = T(
+    "nursing@78.55-78.89 a@78.93-78.97 thimble@79.11-79.47 of@79.51-79.57 ginger@79.61-79.91 ale.@80.01-80.23 So@80.89-80.99 when@81.01-81.13 the@81.15-81.23 cart@81.27-81.51 reaches@81.55-81.83 your@81.87-82.01 row,@82.07-82.36 speak@82.72-82.97 up.@83.11-83.17 " +
+      "Could@83.77-83.91 I@83.93-84.01 keep@84.05-84.21 the@84.25-84.33 rest@84.37-84.51 of@84.53-84.59 the@84.61-84.69 can,@84.71-84.99 please?@85.01-85.31 " +
+      "Juice@86.05-86.31 works@86.37-86.59 the@86.65-86.73 same@86.77-86.99 way.@87.05-87.29 If@87.97-88.03 they're@88.07-88.25 running@88.27-88.49"
+  );
+  const s17 = 'I figured that out much too late, after more flights than I care to count spent nursing a thimble of ginger ale. So when the cart reaches your row, speak up. "Could I keep the rest of the can, please?"';
+  const film = {
+    scenes: [
+      scene(17, 73.71, 85.87, { scriptText: s17 }),
+      scene(18, 85.87, 92.12, { scriptText: "Juice works the same way. If they're running short, they'll tell you, and you're no worse off for trying." }),
+    ],
+  };
+  const cuts = [73.71, 85.87, 92.12];
+  // the planner's own cue, as saved on job 399
+  const keepTheCan: CueSpec = { id: "keep-the-can-quote", template: "Quote", start: "Could I keep the rest of", startPad: -0.15, end: "of the can, please", endPad: 0.2, props: { quote: { text: "Could I keep the rest of the can, please?", words: true }, author: "Helena Hart", emphasis: ["can,"] } };
+  const asking = (answers: CueSpec[][]) => {
+    const asked: string[] = [];
+    const ask = async (_system: string, messages: PlanMessage[]) => {
+      asked.push(messages[messages.length - 1].content);
+      return JSON.stringify({ cues: answers[asked.length - 1] ?? [] });
+    };
+    return { ask, asked };
+  };
+
+  it("the line the viewer is told to say is not the host's: refused with its lead-in, and as a request on its own", () => {
+    expect(notTheHostsWords("Could I keep the rest of the can, please?", "So when the cart reaches your row, speak up.")).toMatch(/request to someone/);
+    expect(notTheHostsWords("Could I keep the rest of the can, please?")).toMatch(/request to someone/);
+    // other shapes of a line handed to the viewer, or of a request to someone (neutral)
+    expect(notTheHostsWords("Can we get the bigger one?", "Then ask the clerk.")).toMatch(/hands it to the viewer to say \("…ask the clerk"\)/);
+    expect(notTheHostsWords("Could I see the one in the window?", "So when they come by, speak up.")).toMatch(/hands it to the viewer to say \("…by, speak up"\)/);
+    expect(notTheHostsWords("I'll take the whole jar.", "Just say it:")).toMatch(/hands it to the viewer/);
+    expect(notTheHostsWords("The price is the price.", "So say it plainly.", true)).toMatch(/hands it to the viewer/); // in quotation marks
+    expect(notTheHostsWords("“The price is the price.”", "So say it plainly.")).toMatch(/hands it to the viewer/);
+    expect(notTheHostsWords("Thanks, I'll keep the receipt.", "And tell them.")).toMatch(/hands it to the viewer/);
+    expect(notTheHostsWords("Would you mind holding it for a day?")).toMatch(/request/);
+    expect(notTheHostsWords("Excuse me, is this seat taken?")).toMatch(/request/);
+    expect(notTheHostsWords("I'd like the aisle seat, please.")).toMatch(/request/);
+  });
+
+  it("the host's own sayings still pass — every Quote placed in earlier films, with the words really said before it (jobs 376, 383, 389)", () => {
+    expect(notTheHostsWords("Close the bedroom doors at night.", "One more, and it's free.")).toBeUndefined();
+    expect(notTheHostsWords("Its job is catching the slow part.", "So the alarm's real job was never the flame.")).toBeUndefined();
+    // Dale's lead-in tells the viewer to say something — and what about, so it hands no line over
+    expect(
+      notTheHostsWords(
+        "Build it well, price it honest, and let every piece find its lane.",
+        "For more shop-tested fixes like these, subscribe to Dale Oakfield's Workshop, and tell me in the comments which of the three sells best where you live."
+      )
+    ).toBeUndefined();
+    const template = TEMPLATES.find(t => t.id === "Quote")!.defaultProps as { quote: { text: string } };
+    expect(notTheHostsWords(template.quote.text)).toBeUndefined();
+  });
+
+  it("after 'speak up' or 'ask', the host's own advice or question is still the host's; a speech verb with a subject is the host speaking", () => {
+    expect(notTheHostsWords("Nobody minds being asked twice.", "So speak up.")).toBeUndefined();
+    expect(notTheHostsWords("What's the worst they can say?", "Just ask.")).toBeUndefined();
+    expect(notTheHostsWords("I never sell anything I wouldn't use myself.", "Here's what I tell everyone who asks.")).toBeUndefined();
+    expect(notTheHostsWords("Cheap pine warps in a year.", "Ask the seller about the wood.")).toBeUndefined();
+    expect(notTheHostsWords("Never stop asking for the receipt.", "Don't ask.")).toBeUndefined();
+    // a quoted line with no lead-in handing it over is not refused here
+    expect(notTheHostsWords("Slow is smooth.", "I tell myself the same thing every morning.", true)).toBeUndefined();
+    // "please" in the host's own advice to the viewer, said as a statement
+    expect(notTheHostsWords("Please check your alarms tonight.")).toBeUndefined();
+  });
+
+  it("reads the quotation marks off the script, never a closing mark of the speech before", () => {
+    expect(quotedInScript(film, 83.77, 85.31, "Could I keep the rest of the can, please?")).toBe(true);
+    const curly = { scenes: [scene(1, 0, 10, { scriptText: "So when the cart reaches your row, speak up. “Could I keep the rest of the can, please?”" })] };
+    expect(quotedInScript(curly, 2, 4, "Could I keep the rest of the can, please?")).toBe(true);
+    const closing = { scenes: [scene(1, 0, 10, { scriptText: 'She just said "No." Could I have done more?' })] };
+    expect(quotedInScript(closing, 2, 4, "Could I have done more?")).toBe(false);
+    expect(quotedInScript({ scenes: [scene(1, 0, 10, { scriptText: "One more, and it's free. Close the bedroom doors at night." })] }, 2, 4, "Close the bedroom doors at night.")).toBe(false);
+  });
+
+  it("the prompt's own example agrees with the check", () => {
+    const prompt = systemPrompt({ kept: false });
+    expect(prompt).toContain('"Just ask: Could I get that in writing, please?"');
+    expect(notTheHostsWords("Could I get that in writing, please?", "Just ask:")).toBeDefined();
+  });
+
+  it("job 399's quote is refused and the repair is steered to a caption with no name, which is kept", async () => {
+    const caption: CueSpec = { id: "keep-the-can-caption", template: "DimCaption", start: "Could I keep the rest of", startPad: -0.15, end: "of the can, please", endPad: 0.2, props: { phrase: { text: "Could I keep the rest of the can, please?", words: true }, emphasis: ["please?"] } };
+    const { ask, asked } = asking([[keepTheCan], [caption]]);
+    const out = await planGraphics({ words: heard, cuts, film, ask, ensureIcon: async () => true });
+    expect(out.rounds[0].problems).toEqual([
+      {
+        cue: "keep-the-can-quote",
+        problem: expect.stringMatching(/^"Could I keep the rest of the can, please\?" is not the host's own words — .*Signed with the host's name it reads as if the host said it\. Show it as a caption with no name \(DimCaption over b-roll\), or drop it$/),
+      },
+    ]);
+    expect(asked[1]).toContain("keep-the-can-quote: \"Could I keep the rest of the can, please?\" is not the host's own words");
+    expect(out.cues.map(c => c.id)).toEqual(["keep-the-can-caption"]);
+  });
+
+  it("the same line, unquoted in the script and with no 'please', is still refused by its lead-in", async () => {
+    const plain = T("So@80.89-80.99 when@81.01-81.13 the@81.15-81.23 cart@81.27-81.51 comes,@81.55-81.83 speak@82.72-82.97 up.@83.11-83.17 Could@83.77-83.91 I@83.93-84.01 keep@84.05-84.21 the@84.25-84.33 whole@84.37-84.51 can?@84.53-84.99 Juice@86.05-86.31 works@86.37-86.59 the@86.65-86.73 same@86.77-86.99 way.@87.05-87.29");
+    const plainFilm = { scenes: [scene(17, 73.71, 85.87, { scriptText: "So when the cart comes, speak up. Could I keep the whole can?" }), scene(18, 85.87, 92.12, { scriptText: "Juice works the same way." })] };
+    const quote: CueSpec = { id: "q", template: "Quote", start: "Could I keep the whole", startPad: -0.15, end: "the whole can?", endPad: 0.2, props: { quote: { text: "Could I keep the whole can?", words: true }, author: "The Host" } };
+    const { ask } = asking([[quote]]);
+    const out = await planGraphics({ words: plain, cuts, film: plainFilm, ask, ensureIcon: async () => true });
+    expect(out.rounds[0].problems).toEqual([{ cue: "q", problem: expect.stringContaining('the narrator hands it to the viewer to say ("…comes, speak up")') }]);
+  });
+
+  it("a host's own closing saying on the narrator's words is kept as before (Dale's job 389)", async () => {
+    const words = [
+      ...W("For more shop-tested fixes like these, subscribe to Dale Oakfield's Workshop, and tell me in the comments which of the three sells best where you live.", 220),
+      ...W("Build it well, price it honest, and let every piece find its lane.", 228),
+    ];
+    const closing: CueSpec = { id: "closing-quote", template: "Quote", start: "Build it well, price it", startPad: -0.15, end: "find its lane.", endPad: 0.3, props: { quote: { text: "Build it well, price it honest, and let every piece find its lane.", words: true }, author: "Dale Oakfield", emphasis: ["honest,"] } };
+    const { ask } = asking([[closing]]);
+    const out = await planGraphics({ words, film: { scenes: [scene(50, 219, 233, { scriptText: words.map(w => w.text).join(" ") })] }, ask, ensureIcon: async () => true });
+    expect(out.cues.map(c => c.id)).toEqual(["closing-quote"]);
     expect(out.rounds[0].problems).toEqual([]);
   });
 });

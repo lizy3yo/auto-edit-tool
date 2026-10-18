@@ -2154,3 +2154,27 @@ describe("a warning card may simply name the thing to avoid (round 10 graphics r
     expect(namesTheDanger("Ask while the cart is still working its way back.")).toBe(false);
   });
 });
+
+describe("a quote card signed with the host's name is the host's own words (round 10 graphics review, 2026-10-18)", () => {
+  // 399 keep-the-can-quote (1:23.6-1:25.9, over scene 17): "So when the cart reaches your row, speak up.
+  // "Could I keep the rest of the can, please?"" — the card showed the second sentence signed
+  // "— HELENA HART". Those are the words the host tells the VIEWER to say to the crew; signed by the
+  // host, a flight attendant, it read as her asking for the can. Such a line goes to a caption with no name.
+  it("399: the line the viewer is told to say is refused as a quote, by its lead-in and as a request", async () => {
+    const { notTheHostsWords } = await import("../graphics/src/plan/planner");
+    expect(notTheHostsWords("Could I keep the rest of the can, please?", "So when the cart reaches your row, speak up.")).toBeDefined();
+    expect(notTheHostsWords("Could I keep the whole can?", "So when the cart comes, speak up.")).toBeDefined();
+  });
+
+  it("every quote the planner signed in earlier films still passes, with the words said before it (Frederick 376/383, Dale 389)", async () => {
+    const { notTheHostsWords } = await import("../graphics/src/plan/planner");
+    expect(notTheHostsWords("Close the bedroom doors at night.", "One more, and it's free.")).toBeUndefined();
+    expect(notTheHostsWords("Its job is catching the slow part.", "So the alarm's real job was never the flame.")).toBeUndefined();
+    expect(
+      notTheHostsWords(
+        "Build it well, price it honest, and let every piece find its lane.",
+        "For more shop-tested fixes like these, subscribe to Dale Oakfield's Workshop, and tell me in the comments which of the three sells best where you live."
+      )
+    ).toBeUndefined();
+  });
+});
