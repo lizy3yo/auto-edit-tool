@@ -105,6 +105,20 @@ describe("QA judges a graphic still up after its words by the resolver's own rul
     const stale = { ...c, end: dead.end + 4.7, endFrame: Math.round((dead.end + 4.7) * FPS) };
     expect(stillUpAfterWords(stale, FPS)).toBe(true);
   });
+
+  it("its own sentence counts only as far as it was said while the resolver had the graphic up, never the whole sentence", () => {
+    // A number overlay on a clause of a long sentence leaves mid-sentence (its reading time, then the
+    // end of the word it would cut). Kept on after resolving to the end of that sentence, it is still
+    // up seconds after its words: QA must not excuse it as "the rest of its own sentence".
+    const words = W("He has about 17 summers left if the family average holds through the next ten years.", 30);
+    const [c] = resolveCues([{ id: "summers", template: "BigNumberOverlay", start: "He has about", props: { at: "@17", value: 17, unit: "summers", kicker: "Summers left" } }], words, { fps: FPS });
+    const years = words.at(-1)!;
+    expect(c.end).toBeLessThan(years.start - 1); // it left well before the sentence did
+    expect(c.spokenEnd).toBeLessThanOrEqual(c.end);
+    expect(stillUpAfterWords(c, FPS)).toBe(false);
+    const kept = { ...c, end: years.start, endFrame: Math.round(years.start * FPS) };
+    expect(stillUpAfterWords(kept, FPS)).toBe(true);
+  });
 });
 
 describe("the hold to the cut is one test, with the resolver's limits (holdToCut)", () => {
