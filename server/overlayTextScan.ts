@@ -183,6 +183,12 @@ export interface StillDefectVerdict {
    */
   person?: boolean;
   /**
+   * A FACE on a picture of someone else, whose face is never shown (`OTHER_FACE_QUESTION`, job 410
+   * scene 8: an older passenger in profile with her eye, glasses and a smile). Set only when true,
+   * and only asked when the caller says the picture is one.
+   */
+  face?: boolean;
+  /**
    * The frame shows what its line RULES OUT (`scene.forbids`, from the line check) — the act the
    * line says not to do, the thing it says is not meant, the place it says to keep something away
    * from (`forbiddenQuestion`). Set only when true, and only asked when the caller passes it.
@@ -241,6 +247,7 @@ export function parseStillDefectVerdict(
   const detailWhat = parsed.data?.detail_what;
   const forbidden = parsed.data?.forbidden === true;
   const person = parsed.data?.person === true;
+  const face = parsed.data?.face === true;
   const what = parsed.data?.what;
   return {
     overlay,
@@ -253,11 +260,12 @@ export function parseStillDefectVerdict(
       : {}),
     ...(forbidden ? { forbidden } : {}),
     ...(person ? { person } : {}),
+    ...(face ? { face } : {}),
     messy,
     wrongPlace,
     staged,
     what:
-      (overlay || broken || writing || missing || detail || forbidden || person || messy || wrongPlace || staged) &&
+      (overlay || broken || writing || missing || detail || forbidden || person || face || messy || wrongPlace || staged) &&
       typeof what === "string"
         ? what.slice(0, 80)
         : "",
@@ -613,13 +621,35 @@ export const QR_BACKDROP_PERSON_QUESTION =
   "display stand holding something worn, or a picture or statue of one. Answer false when no part " +
   "of a person is there.";
 
+/**
+ * QUESTION 10, asked only of a picture of SOMEONE ELSE (`scene.otherPerson`, 2026-10-18, job 410
+ * scene 8): an older passenger was drawn in profile with her eye, glasses, nose and a smiling mouth,
+ * under a prompt saying no face is ever shown — and nothing looked. The host's face is checked
+ * beside the host photo (`scanSameHost`); someone else has no photo to compare with, so the question
+ * rides the one check every picture already gets, at no extra call. Stricter than the host's
+ * (`SAME_HOST_SYSTEM` lets a profile pass, since "from the side" is a framing the host prompt asks
+ * for): someone else's prompt asks for the face turned away, and a profile that shows the eye, the
+ * nose and the mouth — a smile on it — is the face. A head turned away with only a cheek showing
+ * (job 405 scene 10, the sleeper turned to the cat) is not.
+ */
+export const OTHER_FACE_QUESTION =
+  "\n\nQUESTION 10 — face: the people in this picture are drawn seen from behind or from the side, " +
+  "their faces turned away or out of frame, so NO face is shown. Is any person's face shown — the " +
+  "eyes, nose and mouth of a face turned toward the camera, from the front or in three-quarter " +
+  "view, or a profile clear enough to make out an eye, the nose and the mouth or what the face is " +
+  "doing (a smile, a frown)? Answer false for the back of a head; a head turned away so only the " +
+  "hair, an ear, the cheek or the edge of the jaw shows; a face cut off by the frame above the mouth " +
+  "or hidden behind something; and a person too small or soft for any feature to be made out. When " +
+  "unsure, answer false.";
+
 /** The JSON shape, listing every question asked (`detail` only beside `missing`). */
 export function verdictShape(
   expect?: string,
   line?: string,
   detail?: boolean,
   forbids?: boolean,
-  noPerson?: boolean
+  noPerson?: boolean,
+  noFace?: boolean
 ): string {
   return (
     '\n\nReturn ONLY this JSON, no prose: {"overlay":true|false,"broken":true|false,' +
@@ -628,6 +658,7 @@ export function verdictShape(
     (expect && detail ? ',"detail":true|false,"detail_what":"..."' : "") +
     (forbids ? ',"forbidden":true|false' : "") +
     (noPerson ? ',"person":true|false' : "") +
+    (noFace ? ',"face":true|false' : "") +
     ',"messy":true|false' +
     (line ? ',"wrong_place":true|false' : "") +
     ',"staged":true|false' +
@@ -688,7 +719,12 @@ export async function scanStillDefects(
    * The picture must show nobody — the backdrop behind the big QR card (`qrBackdrop`) — adds the
    * `person` question (`QR_BACKDROP_PERSON_QUESTION`).
    */
-  noPerson?: boolean
+  noPerson?: boolean,
+  /**
+   * The picture is of someone else, whose face is never shown (`scene.otherPerson`) — adds the
+   * `face` question (`OTHER_FACE_QUESTION`, job 410 scene 8).
+   */
+  noFace?: boolean
 ): Promise<StillDefectVerdict> {
   try {
     const mustShow = expect && required?.length ? required : undefined;
@@ -728,7 +764,8 @@ export async function scanStillDefects(
         // Light the line or the picture's own description names is what was asked for, not staged.
         namedLightQuestion(namedLight(line, expect)) +
         (noPerson ? QR_BACKDROP_PERSON_QUESTION : "") +
-        verdictShape(expect, line, askDetail, !!ruledOut, noPerson),
+        (noFace ? OTHER_FACE_QUESTION : "") +
+        verdictShape(expect, line, askDetail, !!ruledOut, noPerson, noFace),
       userMessage:
         "Is any text stamped over this frame, does it contain obviously impossible structure, " +
         "is there readable writing in the scene, and is it messy or branded?" +
@@ -737,6 +774,7 @@ export async function scanStillDefects(
         (line ? " Is it set where the line says?" : "") +
         (ruledOut ? " Does it show what the line rules out?" : "") +
         (noPerson ? " Is any person, or any part of one, in it?" : "") +
+        (noFace ? " Is anyone's face shown?" : "") +
         " Does it look like an ordinary phone photo?",
       imageInput: image,
       // The verdict is ~40 tokens. The careful model THINKS unless told not to, and thinking
@@ -770,6 +808,8 @@ export async function scanStillDefects(
     if (!ruledOut) delete verdict.forbidden;
     // …nor a "person" on a picture allowed one (a cutaway may show hands at work).
     if (!noPerson) delete verdict.person;
+    // …nor a "face" on a picture nobody asked about (the host's own face is asked beside its photo).
+    if (!noFace) delete verdict.face;
     if (
       verdict.overlay ||
       verdict.broken ||
@@ -778,12 +818,13 @@ export async function scanStillDefects(
       verdict.detail ||
       verdict.forbidden ||
       verdict.person ||
+      verdict.face ||
       verdict.messy ||
       verdict.wrongPlace ||
       verdict.staged
     )
       console.log(
-        `[StillDefects] ${verdict.overlay ? "stamped text" : verdict.broken ? "broken geometry" : verdict.writing ? "readable writing" : verdict.missing ? "named thing missing" : verdict.detail ? `detail not as described (${verdict.detailWhat ?? ""})` : verdict.forbidden ? `shows what the line rules out (${ruledOut})` : verdict.person ? "a person behind the QR card" : verdict.messy ? "brand or clutter" : verdict.wrongPlace ? "wrong place" : "staged look"} detected: ${verdict.what}`
+        `[StillDefects] ${verdict.overlay ? "stamped text" : verdict.broken ? "broken geometry" : verdict.writing ? "readable writing" : verdict.missing ? "named thing missing" : verdict.detail ? `detail not as described (${verdict.detailWhat ?? ""})` : verdict.forbidden ? `shows what the line rules out (${ruledOut})` : verdict.person ? "a person behind the QR card" : verdict.face ? "a face on someone else" : verdict.messy ? "brand or clutter" : verdict.wrongPlace ? "wrong place" : "staged look"} detected: ${verdict.what}`
       );
     return verdict;
   } catch (err: any) {

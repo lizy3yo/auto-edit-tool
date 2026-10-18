@@ -305,7 +305,7 @@ const pluralOf = (n: string) =>
   IRREGULAR_PLURALS[n] ??
   (/(?:ss|ch|sh|x)$/.test(n) ? `${n}es` : /[^aeiou]y$/.test(n) ? `${n.slice(0, -1)}ies` : `${n}s`);
 
-type NounKind = "role" | "generic" | "group" | "self";
+export type NounKind = "role" | "generic" | "group" | "self";
 /** Every form (singular and plural) of every person noun → its singular and kind. */
 const PERSON_NOUN = new Map<string, { lemma: string; kind: NounKind; plural: boolean }>();
 for (const [list, kind] of [
@@ -649,6 +649,22 @@ export function namesSomeone(text: string | undefined): boolean {
   const t = text ?? "";
   if (!t.trim()) return false;
   return !!namedPeople(t) || PERSON_PART.test(withoutAnimalPronouns(t));
+}
+
+/**
+ * A person noun's entry — its singular, its kind (a role or relation, a plain man or woman, a
+ * group, or the host's own word) and the sex the word itself gives — or undefined for any other
+ * word. For reading a SCRIPT's people (`followedPeople`), where `namedPeople`'s picture-description
+ * rules do not fit prose. Pure.
+ */
+export function personNounOf(
+  word: string
+): { lemma: string; kind: NounKind; plural: boolean; sex?: "f" | "m" } | undefined {
+  const w = word.toLowerCase();
+  const e = PERSON_NOUN.get(w);
+  if (!e) return undefined;
+  const sex = FEMALE.has(w) ? ("f" as const) : MALE.has(w) ? ("m" as const) : undefined;
+  return { ...e, ...(sex ? { sex } : {}) };
 }
 
 /** The host's sex as their own look gives it, or undefined when it does not say. */
@@ -1041,6 +1057,14 @@ export function namesOnlyAnimal(text: string): boolean {
 }
 
 /**
+ * Whether the words name an animal at all, a person beside it or not — so a line's "he" may be that
+ * animal ("He can smell every bit of it" over a dog at its owner's coat, job 357 scene 20). Pure.
+ */
+export function namesAnAnimal(text: string | undefined): boolean {
+  return !!(text ?? "").match(ANIMAL);
+}
+
+/**
  * Words naming a part of the body (not a thing used on it — a hair dryer is a thing, and a strand
  * is one only when it is hair, `HAIR_STRAND`: a split panel of "a pearl strand on the dresser" is
  * not about the host's body).
@@ -1090,15 +1114,147 @@ export function onTheBody(text: string): string {
   return `${out}, on the person's own head and body — never loose or lying on a surface.`;
 }
 
+/** Whose face an expression is on: a person, never a thing or an animal ("its eyes closed"). */
+const FACE_OWNER = String.raw`(?:her|his|their|the\s+person's|someone's)`;
+/** Where a face phrase starts: after a comma, a space, or at the very start. */
+const FACE_LEAD = String.raw`(?:,\s*|\s+|^)`;
+/**
+ * What follows an "-ing" word that makes it the VERB ("smiling politely up at…", "frowning as she
+ * reads", "smiling."), not a word before a noun ("a smiling woman", where it is dropped).
+ */
+const AFTER_THE_VERB =
+  /^(?:\s*(?:[,.;:!?)—–]|$)|\s+(?:at|up|down|over|back|across|into|toward|towards|to|as|and|or|but|while|when|with|in|on|from|for|her|his|their|its|a|an|the|this|that|politely|warmly|softly|broadly|kindly|gently|brightly|widely|faintly|slightly|happily|proudly|shyly|sadly|quietly|wryly|[a-z]+(?:ily|fully|ously|ently|antly|ably|ibly|edly|ishly|ively|ately|ingly))\b)/i;
+
+/** Keep a word's capital: "Smiling, she…" → "Nodding, she…". */
+const likeCase = (src: string, out: string): string =>
+  /^[A-Z]/.test(src) ? out.charAt(0).toUpperCase() + out.slice(1) : out;
+
+/**
+ * One family of expression words swapped for a body word. `word` gets the regex's groups and says
+ * what replaces the match and whether it is the "-ing" form, which before a noun ("a smiling woman")
+ * describes the face and is dropped instead (`AFTER_THE_VERB`).
+ */
+function swapExpression(
+  text: string,
+  re: RegExp,
+  word: (groups: string[]) => { to: string; ing: boolean }
+): string {
+  return text.replace(re, (...a: any[]) => {
+    const m = a[0] as string;
+    const whole = a[a.length - 1] as string;
+    const at = a[a.length - 2] as number;
+    const { to, ing } = word(a.slice(1, -2).map(g => (typeof g === "string" ? g : "")));
+    if (ing && !AFTER_THE_VERB.test(whole.slice(at + m.length))) return "";
+    return likeCase(m, to);
+  });
+}
+
+/** smile → nod, frown → lean, wince → flinch: the same word form in the body's words. */
+const NOD: Record<string, string> = { "": "nod", e: "nod", s: "nods", es: "nods", ed: "nodded", ned: "nodded", ing: "nodding", ning: "nodding" };
+const LEAN: Record<string, string> = { "": "lean", s: "leans", es: "leans", ed: "leaned", ing: "leaning" };
+const FLINCH: Record<string, string> = { e: "flinch", es: "flinches", ed: "flinched", ing: "flinching" };
+
+/**
+ * "with a/an <words>" for a phrase whose article was swallowed with the face word: "with an anxious
+ * expression" → "with an anxious set to the shoulders", never "with a anxious".
+ */
+const withA = (words: string, rest: string): string =>
+  `with ${/^[aeiou]/i.test(words) ? "an" : "a"} ${words}${rest}`;
+
+/**
+ * A FACE'S EXPRESSION SAID WITH THE BODY (2026-10-18, job 410 scene 8). A picture whose person shows
+ * no face — someone else (`otherPerson`), the host from behind or the side — was described with
+ * what only a face can show: "an older woman seen from the side smiling politely up at a flight
+ * attendant". A smile can only be drawn on a face, so the picture maker drew one (her eye, glasses,
+ * nose and a smiling mouth in profile) beside a clause saying no face is ever shown. The face words
+ * go and the feeling stays, in the body: smiling → nodding, frowning at → leaning toward, wincing →
+ * flinching, eyes wide or brows raised → drawing back a little, tears in the eyes → head bowed, "her
+ * expression is calm" → "her posture is calm". Only a PERSON'S face is touched — a cat "with its eyes
+ * closed", "tearing cloth into strips", "sunlight beaming through" and the "glare" on a screen keep
+ * their words — and a description with none of it comes back exactly as it was. Pure.
+ */
+export function expressionAsBody(text: string): string {
+  if (!text) return text;
+  // Every phrase that starts on "a"/"an" starts on a WORD: unanchored, the "an" ending "man" began
+  // one, and "a man with a frown" came back "a mwith tense shoulders".
+  const rules: [RegExp, string | ((m: string, words?: string) => string)][] = [
+    // Tears in or down the face.
+    [new RegExp(String.raw`${FACE_LEAD}(?:with\s+)?tears\s+(?:welling\s+(?:up\s+)?in|filling|brimming\s+in|glistening\s+in|in)\s+(?:her|his|their)\s+eyes\b`, "gi"), ", head bowed"],
+    [new RegExp(String.raw`${FACE_LEAD}(?:with\s+)?tears\s+(?:rolling|running|streaming|trickling)\s+down\s+(?:her|his|their)\s+(?:face|cheeks?)\b`, "gi"), ", head bowed"],
+    [/\b(?:teary[- ]eyed|tearful)\s+(?=[a-z])/gi, ""],
+    // A smile, a frown, a look or an expression ON the face.
+    [new RegExp(String.raw`\b(?:with\s+|wearing\s+|wears\s+)?(?:a|an)\s+((?:[a-z-]+\s+){0,2}?)(?:smile|grin)\s+on\s+${FACE_OWNER}\s+face\b`, "gi"), (_m, w = "") => withA(w, "nod")],
+    [new RegExp(String.raw`\b(?:wearing\s+|wears\s+|with\s+)?(?:a|an)\s+(?:[a-z-]+\s+){0,2}?(?:frown|scowl|grimace|wince)(?:\s+on\s+${FACE_OWNER}\s+face)?\b`, "gi"), "with tense shoulders"],
+    [new RegExp(String.raw`\b(?:with\s+)?(?:a|the)\s+look\s+of\s+([a-z-]+(?:\s+[a-z-]+)?)\s+on\s+${FACE_OWNER}\s+face\b`, "gi"), "with $1 in the shoulders"],
+    [new RegExp(String.raw`\b(?:with\s+)?(?:a|an)\s+((?:[a-z-]+\s+){0,2}?)(?:facial\s+)?(?:expression|look)\s+on\s+${FACE_OWNER}\s+face\b`, "gi"), (_m, w = "") => withA(w, "set to the shoulders")],
+    [/\bwith\s+(?:a|an)\s+((?:[a-z-]+\s+){0,2}?)(?:facial\s+)?expression\b/gi, (_m, w = "") => withA(w, "set to the shoulders")],
+    [new RegExp(String.raw`\b(${FACE_OWNER})\s+(?:facial\s+)?expression\b`, "gi"), "$1 posture"],
+    // The eyes, the brows and the mouth.
+    [new RegExp(String.raw`${FACE_LEAD}(?:with\s+)?(?:her|his|their)\s+eyes\s+(?:wide(?:ned)?(?:\s+open)?|widening|open\s+wide)(?:\s+(?:in|with)\s+[a-z]+)?`, "gi"), ", drawing back a little"],
+    [new RegExp(String.raw`${FACE_LEAD}(?:with\s+)?(?:her|his|their)\s+eyes\s+(?:bright|twinkling|sparkling|shining|lit\s+up|crinkl(?:ed|ing))(?:\s+(?:in|with)\s+[a-z]+)?`, "gi"), ", with a small nod"],
+    [new RegExp(String.raw`${FACE_LEAD}(?:with\s+)?(?:her|his|their)\s+eyes\s+(?:narrowed|narrowing|squinting|squinted)\b`, "gi"), ", leaning in"],
+    [new RegExp(String.raw`${FACE_LEAD}(?:with\s+)?(?:her|his|their)\s+eyes\s+(?:closed|shut)\b`, "gi"), ""],
+    [new RegExp(String.raw`${FACE_LEAD}(?:with\s+)?(?:(?:her|his|their)\s+(?:eye)?brows\s+(?:raised|lifted|arched)|(?:raised|lifted|arched)\s+(?:eye)?brows)\b`, "gi"), ", drawing back a little"],
+    [new RegExp(String.raw`${FACE_LEAD}(?:with\s+)?(?:(?:her|his|their)\s+(?:eye)?brows?\s+(?:furrowed|knit(?:ted)?|drawn\s+together)|(?:a\s+)?(?:furrowed|knitted)\s+(?:eye)?brows?)\b`, "gi"), ", leaning in"],
+    [new RegExp(String.raw`${FACE_LEAD}(?:with\s+)?(?:(?:her|his|their)\s+(?:mouth\s+(?:wide\s+open|hanging\s+open|falling\s+open|open|agape)|jaw\s+(?:dropped|dropping|hanging\s+open))|open-mouthed)\b`, "gi"), ", drawing back a little"],
+    [/\s*\bwide[- ]eyed\b/gi, ""],
+  ];
+  let out = text;
+  for (const [re, to] of rules)
+    out = typeof to === "function"
+      ? out.replace(re, to)
+      : to.startsWith(", ")
+      ? // A phrase set off by commas closes with one when the sentence goes on: "a man with raised
+        // eyebrows looking at the tag" → "a man, drawing back a little, looking at the tag".
+        out.replace(re, (...a: any[]) => {
+          const whole = a[a.length - 1] as string;
+          const rest = whole.slice((a[a.length - 2] as number) + (a[0] as string).length);
+          return /^\s+[a-z]/i.test(rest) ? `${to},` : to;
+        })
+      : out.replace(re, to);
+  // The verbs: smiling → nodding, frowning at → leaning toward, wincing → flinching.
+  out = swapExpression(out, /\bsmil(e|es|ed|ing)\b(?!\s+lines?\b)/gi, ([end]) => ({ to: NOD[end], ing: end === "ing" }));
+  out = swapExpression(out, /\bgrin(s|ned|ning)?\b/gi, ([end]) => ({ to: NOD[end], ing: end === "ning" }));
+  out = swapExpression(
+    out,
+    /\bbeaming(?=\s+(?:at|up\s+at|with\s+(?:pride|joy|delight)|proudly|happily|warmly|broadly)\b)/gi,
+    () => ({ to: "nodding", ing: false })
+  );
+  // "frowning in concentration" leans FORWARD in it: "leaning in in concentration", "leaning in into
+  // the sun" was the plain swap.
+  out = swapExpression(
+    out,
+    /\b(?:frown|scowl|glower|squint)(s|ed|ing)?\b(\s+(?:down\s+|up\s+)?(?:at|toward|towards|over|across\s+at)\b)?(?=(\s+in(?:to)?\b)?)/gi,
+    ([end, toward, inNext]) => ({
+      to: `${LEAN[end]} ${toward ? "toward" : inNext ? "forward" : "in"}`,
+      ing: end === "ing" && !toward,
+    })
+  );
+  out = swapExpression(out, /\bglar(ing|es|ed)\s+(?:down\s+|up\s+|across\s+)?at\b/gi, ([end]) => ({ to: `${LEAN[end]} toward`, ing: false }));
+  out = swapExpression(out, /\b(?:winc|grimac)(e|es|ed|ing)\b/gi, ([end]) => ({ to: FLINCH[end], ing: end === "ing" }));
+  if (out === text) return text;
+  out = out
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+([,.;:])/g, "$1")
+    .replace(/,\s*,/g, ",")
+    .replace(/,\s*\./g, ".")
+    .replace(/^\s*,\s*/, "")
+    .trim();
+  return likeCase(text.trim(), out);
+}
+
 /**
  * A description of the HOST with what asks for the face taken out. A picture of the host never
  * shows the face — a drawn one would not match the host on camera — but the description can ask
  * for it anyway: practice job 362 asked for "shadows under her chin, face looking tired …
  * photographed from the shoulders up" and got a full face that is not the host's. The expression
- * goes, and a "from the shoulders up" framing stops at the chin. Pure — unit-tested.
+ * goes, and a "from the shoulders up" framing stops at the chin. The same for SOMEONE ELSE, whose
+ * face is never shown either; a smile, a frown or wide eyes are said with the body instead
+ * (`expressionAsBody`, job 410 scene 8). A description asking for none of it comes back exactly as
+ * it was. Pure — unit-tested.
  */
 export function withoutFaceAsks(text: string): string {
-  return text
+  const out = expressionAsBody(text)
     .replace(
       /,?\s*(?:and\s+)?(?:(?:the|her|his|their|a)\s+)?face\s+(?:look(?:s|ing)?|appear(?:s|ing)?|seem(?:s|ing)?|show(?:s|ing)?)\s+[a-z-]+(?:\s+and\s+[a-z-]+)?/gi,
       ""
@@ -1106,7 +1262,9 @@ export function withoutFaceAsks(text: string): string {
     .replace(
       /,?\s*(?:photographed|framed|seen|shot|shown)\s+from\s+the\s+(?:shoulders|chest|neck|collarbones?)\s+up\b/gi,
       ", framed from the chin down"
-    )
+    );
+  if (out === text) return text;
+  return out
     .replace(/\s{2,}/g, " ")
     .replace(/\s+([,.])/g, "$1")
     .replace(/,\s*,/g, ",")
@@ -1685,6 +1843,9 @@ export function markHostBroll(
     // A face the still check refused stays refused while the picture is still the host's at work.
     const turnedAway = s.hostTurnedAway;
     s.hostTurnedAway = undefined;
+    // …and a face on someone else stays refused while the picture is still someone else's.
+    const othersAway = s.othersTurnedAway;
+    s.othersTurnedAway = undefined;
     // A planner's "someone else" lives and dies with the words it came from (2026-10-18, the
     // audit): "a woman customer" left on a picture of an incense holder (job 361 scene 32), "a
     // woman passenger" on a close-up of a soda can (job 399 scene 4), "a hen" (job 371) — each
@@ -1748,9 +1909,12 @@ export function markHostBroll(
         if (s.showSubject) s.showSubject = hostWordsAsViewer(s.showSubject, viewer);
         if (s.visualPrompt) s.visualPrompt = hostWordsAsViewer(s.visualPrompt, viewer);
       }
-      // No face for anyone in it, so nothing in the words asks for one (`withoutFaceAsks`).
+      // No face for anyone in it, so nothing in the words asks for one (`withoutFaceAsks`) — a smile
+      // or a frown included, said with the body instead (job 410 scene 8). The words the check holds
+      // the picture to are the same words, so it never asks for the smile either.
       if (s.showSubject) s.showSubject = withoutFaceAsks(withoutMirrors(s.showSubject));
       if (s.visualPrompt) s.visualPrompt = withoutFaceAsks(withoutMirrors(s.visualPrompt));
+      s.othersTurnedAway = othersAway;
     } else if (on && eligible && person) {
       s.humanPresent = true;
       s.brollHostLook = look;

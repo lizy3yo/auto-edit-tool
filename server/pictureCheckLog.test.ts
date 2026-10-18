@@ -39,6 +39,8 @@ describe("what kind of picture was checked", () => {
     expect(checkFlags({ missing: true, forbidden: true, staged: true })).toEqual(["missing", "ruled out", "staged"]);
     // A person behind the big QR card (job 402 scene 33), in the order the loop acts on it.
     expect(checkFlags({ writing: true, person: true })).toEqual(["person", "writing"]);
+    // A face on someone else (job 410 scene 8), in the host's words, so a shipped one reads "a drawn face".
+    expect(checkFlags({ staged: true, face: true })).toEqual(["face shown", "staged"]);
   });
 });
 

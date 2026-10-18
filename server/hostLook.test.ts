@@ -660,3 +660,117 @@ describe("a look on the host's own face (the operator's decision on the audit's 
       expect(faceInView(as), as).toBe(as);
   });
 });
+
+describe("a face's expression said with the body, on a picture that shows no face (job 410 scene 8)", () => {
+  // The shot list wrote what only a face can show into a picture of someone else — "smiling politely
+  // up at a flight attendant" — and the picture maker drew her face in profile to show the smile,
+  // beside a clause saying no face is ever shown.
+  it("job 410 scene 8, 402 scene 29, 410 scene 31, 405 scene 10: the feeling stays, in the body", async () => {
+    const { expressionAsBody } = await import("./hostLook");
+    expect(expressionAsBody("an older woman seen from the side smiling politely up at a flight attendant standing in the aisle")).toBe(
+      "an older woman seen from the side nodding politely up at a flight attendant standing in the aisle"
+    );
+    expect(
+      expressionAsBody(
+        "An older woman sitting in her seat seen from the side, looking up and smiling politely at a flight attendant standing in the aisle."
+      )
+    ).toBe(
+      "An older woman sitting in her seat seen from the side, looking up and nodding politely at a flight attendant standing in the aisle."
+    );
+    expect(expressionAsBody("a flight attendant smiling as she hands a cookie packet to an older passenger, seen from the side")).toBe(
+      "a flight attendant nodding as she hands a cookie packet to an older passenger, seen from the side"
+    );
+    expect(expressionAsBody("a flight attendant smiling and handing a cookie to an older passenger at the galley")).toBe(
+      "a flight attendant nodding and handing a cookie to an older passenger at the galley"
+    );
+    expect(
+      expressionAsBody("a person half sitting up in the bed at night, seen from the side, frowning at the tabby cat sitting on the blanket")
+    ).toBe("a person half sitting up in the bed at night, seen from the side, leaning toward the tabby cat sitting on the blanket");
+    // Job 241 scene 6 (an anonymous person at a mirror): "her expression is calm" is her posture.
+    expect(expressionAsBody("Her hair is undone, her expression is calm and unbothered, and she glances at her watch")).toBe(
+      "Her hair is undone, her posture is calm and unbothered, and she glances at her watch"
+    );
+  });
+
+  it("every kind of face word goes the same way, the sentence kept whole", async () => {
+    const { expressionAsBody } = await import("./hostLook");
+    const cases: [string, string][] = [
+      ["a smiling woman handing a mug across the counter", "a woman handing a mug across the counter"],
+      ["Smiling, she hands the jar to a neighbour", "Nodding, she hands the jar to a neighbour"],
+      ["a grinning teenager holding up the fish", "a teenager holding up the fish"],
+      ["an old man on a bench, a warm smile on his face, feeding pigeons", "an old man on a bench, with a warm nod, feeding pigeons"],
+      ["a man reading the bill with a worried look on his face", "a man reading the bill with a worried set to the shoulders"],
+      ["a woman staring at the screen, her eyes wide with surprise", "a woman staring at the screen, drawing back a little"],
+      ["a man with raised eyebrows looking at the price tag", "a man, drawing back a little, looking at the price tag"],
+      ["a woman with tears in her eyes holding the letter", "a woman, head bowed, holding the letter"],
+      ["a customer wincing at the price tag", "a customer flinching at the price tag"],
+      ["a man squinting at the small print on the box", "a man leaning toward the small print on the box"],
+      ["a woman asleep in bed with her eyes closed, the cat on her legs", "a woman asleep in bed, the cat on her legs"],
+    ];
+    for (const [asked, said] of cases) expect(expressionAsBody(asked), asked).toBe(said);
+    // Said once is said: the body words are never read as a face again.
+    for (const [, said] of cases) expect(expressionAsBody(said), said).toBe(said);
+  });
+
+  it("a phrase starts on a whole word, keeps its article, and a frown 'in' something leans forward", async () => {
+    const { expressionAsBody } = await import("./hostLook");
+    const cases: [string, string][] = [
+      // The "an" ending "man"/"woman" began the phrase: "a mwith tense shoulders", "a womwith …".
+      ["a man with a frown reading the bill", "a man with tense shoulders reading the bill"],
+      ["a woman wears a frown as she reads the letter", "a woman with tense shoulders as she reads the letter"],
+      ["a man wearing a smile on his face", "a man with a nod"],
+      // "with a anxious set to the shoulders" was the plain swap.
+      ["an older woman with an anxious expression, reading the letter", "an older woman with an anxious set to the shoulders, reading the letter"],
+      ["a woman with an awkward smile on her face", "a woman with an awkward nod"],
+      ["a man with an uneasy look on his face", "a man with an uneasy set to the shoulders"],
+      // "leaning in in concentration", "leaning in into the sun".
+      ["a man frowning in concentration at the bill", "a man leaning forward in concentration at the bill"],
+      ["a woman squinting into the sun", "a woman leaning forward into the sun"],
+      ["the man frowns", "the man leans in"],
+    ];
+    for (const [asked, said] of cases) expect(expressionAsBody(asked), asked).toBe(said);
+    for (const [, said] of cases) expect(expressionAsBody(said), said).toBe(said);
+    // Clean: an animal's look keeps its words, a word ending in "a" before it included.
+    const dog = "a mama dog with a look of hope on its face beside the bowl";
+    expect(expressionAsBody(dog)).toBe(dog);
+  });
+
+  it("clean: a thing, an animal's face, tearing and light keep their words, byte for byte", async () => {
+    const { expressionAsBody, withoutFaceAsks } = await import("./hostLook");
+    for (const as of [
+      "hands tearing cloth into strips two fingers wide on the work table", // job 144 scene 55
+      "Hands pull the shoji paper too tight, tearing it on the frame", // job 216 scene 55
+      "sunlight beaming through the kitchen window onto the board",
+      "the glare of the screen on the window",
+      "the grey cat with its eyes closed on the owner's legs",
+      "a burlap sack with its mouth open on the barn floor",
+      "a smiley-face sticker on the fridge door",
+      "an older man seen from behind planting a young tree in a backyard", // job 409 scene 18
+      "a woman looking out of the window at the rain",
+      "  hands sanding a board , with dust  ",
+    ]) {
+      expect(expressionAsBody(as), as).toBe(as);
+      expect(withoutFaceAsks(as), as).toBe(as);
+    }
+  });
+
+  it("markHostBroll says it with the body on someone else's picture and the host's from behind, never on the host's own face", () => {
+    const scenes = [
+      pic(8, "an older woman seen from the side smiling politely up at a flight attendant standing in the aisle", {
+        scriptText: "She doesn't. What she knows is which questions flight attendants like hearing, and when to ask them.",
+        humanPresent: true,
+        otherPerson: "an older woman passenger and a flight attendant",
+      }),
+      pic(9, "the host smiling as she hands a jar of jam across the market table", { humanPresent: true }),
+      // A step on the host's own face shows it, and keeps what the face does.
+      pic(10, "the host smiling as she pats concealer under her eyes", { humanPresent: true }),
+    ];
+    markHostBroll(scenes, { hostLook: "a woman in her sixties with short grey hair" }, "https://x/host.png");
+    expect(scenes[0].otherPerson).toBeTruthy();
+    expect(scenes[0].showSubject).toBe("an older woman seen from the side nodding politely up at a flight attendant standing in the aisle");
+    expect(scenes[1].brollHostLook).toBeTruthy();
+    expect(scenes[1].showSubject).toBe("the host nodding as she hands a jar of jam across the market table");
+    expect(scenes[2].hostFaceShown).toBe(true);
+    expect(scenes[2].showSubject).toBe("the host smiling as she pats concealer under her eyes");
+  });
+});

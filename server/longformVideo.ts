@@ -49,6 +49,7 @@ import {
   parseRecurringPeople,
   parseViewerPerson,
   withoutPersonLines,
+  withoutCtaOnlyProps,
   settleVideoKind,
   videoKind,
   fitPicturesToLines,
@@ -57,6 +58,7 @@ import {
   oneThingPanels,
   ownTypedPicture,
   ownTypedPanel,
+  showsScreen,
 } from "./shotList";
 import {
   attachMemory,
@@ -540,6 +542,7 @@ import {
   onTheBody,
   namesSomeone,
   showsSomeoneElse,
+  expressionAsBody,
 } from "./hostLook";
 import {
   assemblePerSceneFilm,
@@ -1648,6 +1651,48 @@ export function parseCtaMarkers(spoken: string): {
     .replace(/\n{3,}/g, "\n\n")
     .trim();
   return { script, spans, errors };
+}
+
+/**
+ * The script's CONTENT and its marked CTA blocks, apart (`spans` from `parseCtaMarkers`: word
+ * offsets into `script`). The style bible and the props list read the content only. Job 409's one
+ * phone was the closing CTA's "lift your phone toward the pattern in the corner of the screen", and
+ * both passes read the whole script: the bible wrote "Props recur: sympathy cards, greeting cards,
+ * a phone", the props list made the phone a key thing "resting face-up on the desk", and it filled
+ * the split panel under "Maybe you have done that arithmetic" (scene 7) and the study shots 14 and
+ * 19, whose lines never speak of one. What a CTA asks the viewer to do (a phone, a link, the
+ * description) is no prop of the film; the CTA's own pictures are made by the CTA path. `cta` is
+ * the blocks' words, for the props-list guard (`withoutCtaOnlyProps`). A script with no marked
+ * block, or nothing outside its blocks, keeps its whole text as content. Pure — unit-tested.
+ */
+export function splitCtaFromContent(
+  script: string,
+  spans: CtaSpan[]
+): { content: string; cta: string } {
+  if (!spans.length) return { content: script, cta: "" };
+  const blockOf = (w: number) => spans.findIndex(s => w >= s.start && w < s.end);
+  const content: string[] = [];
+  const blocks: string[][] = spans.map(() => []);
+  let at = 0;
+  for (const line of script.split("\n")) {
+    const words = line.split(/\s+/).filter(Boolean);
+    const kept: string[] = [];
+    words.forEach((word, k) => {
+      const b = blockOf(at + k);
+      if (b < 0) kept.push(word);
+      else blocks[b].push(word);
+    });
+    // A blank line is a paragraph break and stays; a line wholly outside every block stays as
+    // written. (Markers sit on their own lines, so a line is never split in practice.)
+    if (!words.length || kept.length === words.length) content.push(line);
+    else if (kept.length) content.push(kept.join(" "));
+    at += words.length;
+  }
+  const text = content.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  return {
+    content: text || script,
+    cta: blocks.map(b => b.join(" ")).filter(Boolean).join("\n\n"),
+  };
 }
 
 /**
@@ -6243,10 +6288,13 @@ export function personClauseFor(scene: StoryboardScene, visual: string): string 
   // The host's own face shown: a step of a routine on it, or a look on it (`hostFaceLook`).
   const faceShown = !!scene.brollHostLook && !!scene.hostFaceShown && !scene.otherPerson;
   const others = peopleAskedFor(scene);
+  // A drawing of someone else that showed a face is framed from behind from then on
+  // (`othersTurnedAway`, job 410 scene 8): on the redraw, and on a Regenerate.
+  const turnedFromUs = scene.othersTurnedAway ? ` ${OTHERS_TURNED_AWAY_CLAUSE}` : "";
   const who = scene.otherPerson
     ? scene.hostAmongOthers
-      ? hostWithOthersClause(scene.hostAmongOthers, others.who, others.count, scene.otherPersonLooks)
-      : otherPersonClause(others.who, others.count, scene.otherPersonLooks)
+      ? `${hostWithOthersClause(scene.hostAmongOthers, others.who, others.count, scene.otherPersonLooks)}${turnedFromUs}`
+      : `${otherPersonClause(others.who, others.count, scene.otherPersonLooks)}${turnedFromUs}`
     : scene.brollHostLook
       ? scene.hostFaceShown
         ? hostFaceLook(scene)
@@ -6584,6 +6632,51 @@ export function turnHostAway(prompt: string): string {
   if (prompt.includes(HOST_TURNED_AWAY_CLAUSE) || !prompt.includes(HOST_FRAMING_CLAUSE)) return prompt;
   return prompt.replace(HOST_FRAMING_CLAUSE, HOST_TURNED_AWAY_CLAUSE);
 }
+
+/**
+ * `HOST_TURNED_AWAY_CLAUSE` for SOMEONE ELSE (`scene.othersTurnedAway`, 2026-10-18, job 410 scene
+ * 8): "seen from behind or from the side … the face turned away" came back as an older passenger in
+ * profile, eye, glasses, nose and a smile all drawn. "From the side" leans behind here too, and what
+ * they feel is carried by the body, never a face.
+ */
+export const OTHERS_TURNED_AWAY_CLAUSE =
+  "Everyone in this shot is turned away from the camera — seen from behind, or from the side and a " +
+  "little behind, each head turned the same way as the shoulders — so no face is shown: no eyes, nose " +
+  "or mouth toward the camera, only the back or the side of each head. However the description has " +
+  "them sit, stand, talk or hand something over, the camera is behind or beside them, never in front, " +
+  "and what they feel shows in the body — a nod, a lean, the set of the shoulders — never on a face.";
+
+/**
+ * A picture of someone else's prompt framed from behind, for the redraw after the still check saw a
+ * face (`face`): the clause added once, so whatever an earlier redraw added stays — the same prompt
+ * `buildStillPrompt` writes for a scene marked `othersTurnedAway`. Pure.
+ */
+export function turnOthersAway(prompt: string): string {
+  return prompt.includes(OTHERS_TURNED_AWAY_CLAUSE) ? prompt : `${prompt} ${OTHERS_TURNED_AWAY_CLAUSE}`;
+}
+
+/**
+ * A picture of someone whose face is never drawn: someone else (`otherPerson`), the host at work from
+ * behind, the side or cut at the lips, and anonymous hands — every picture of a person but the host's
+ * own face (`hostFaceShown`). Its words are put through `expressionAsBody` right before the prompt,
+ * so a description written before that rule, or typed into a redo, asks for no smile either. Pure.
+ */
+export function faceNeverShown(scene: StoryboardScene): boolean {
+  // A host take IS the host's face (the prompt preview builds a still prompt for one too).
+  if (!scene.humanPresent || scene.hostPresent) return false;
+  return !!scene.otherPerson || !(scene.brollHostLook && scene.hostFaceShown);
+}
+
+/**
+ * Whether the still check asks a picture if a face shows (`OTHER_FACE_QUESTION`): a picture of
+ * someone else while it still has them in it — never once it is drawn with nobody in it, never a
+ * split's square panel or the picture behind the QR card (no one in either). The host's pictures are
+ * asked beside the host photo instead (`scanSameHost`). Pure.
+ */
+export function othersFaceAsked(scene: StoryboardScene, personFree: boolean, square: boolean): boolean {
+  return !!scene.otherPerson && !!scene.humanPresent && !personFree && !square && !qrBackdrop(scene);
+}
+
 /**
  * One body, two arms. Over-the-shoulder shots of hands at work are where the picture model adds
  * an arm: Norbert's 3-min test (job 232, 2:19) had a hand on the drill, a hand on the strike
@@ -7129,7 +7222,10 @@ export function buildStillPrompt(
   // A host picture framed from the lips down (`hostLipsCut`) keeps none of its own words that turn
   // the host away (`facingTheCamera`): a film drawn before the rule still says "face turned away".
   const lipsCut = !aggressive && hostLipsCut(scene);
-  const facing = (t: string) => (lipsCut ? facingTheCamera(t) : t);
+  // A person whose face is never drawn is never described with one (`faceNeverShown`): job 410
+  // scene 8's "smiling politely up at a flight attendant" drew the face beside the clause hiding it.
+  const unfaced = (t: string) => (!aggressive && faceNeverShown(scene) ? expressionAsBody(t) : t);
+  const facing = (t: string) => (lipsCut ? facingTheCamera(unfaced(t)) : unfaced(t));
   // The framing clause repeats the subject's own words, so a cut view is taken out of them too (job
   // 403 scene 16: "a close shot where cutaway close-up of the white porcelain S-shaped channel").
   const shown = scene.showSubject ? facing(withoutCutaway(scene.showSubject)) : undefined;
@@ -7198,16 +7294,28 @@ export function buildStillPrompt(
  * its own picture, and the picture maker drew two of them as one thing — Dale's job 397: "Coasters,
  * ornaments, small cutting boards" came back as two pictures of the same round discs. The prompt
  * names the item's neighbours so the item is drawn by what makes it different from them. Any list,
- * any channel: the words are the script's own. Pure.
+ * any channel: the words are the script's own.
+ *
+ * AND SET WHERE ITS SENTENCE IS (`scene.listSetting`, job 409): an item is drawn from its own bare
+ * words, which carry no time — "the farmer complains, … the old complain, and the young …", said
+ * inside a passage about a writer of ancient times, came back as a farmer in overalls, an old man on
+ * a park bench and a young man in a hoodie. When the list finder read the sentence as set in another
+ * time or place, the prompt says so, for every item alike. Pure.
  */
 export function listItemClause(scene: StoryboardScene): string {
   const items = scene.listItems;
-  if (!items?.others.length) return "";
+  const setting = scene.listSetting?.trim();
+  const where = setting
+    ? ` Like the sentence it is said in, this picture is set in ${setting.replace(/[.\s]+$/, "")}: anyone ` +
+      `in it is dressed as people were there and then, and the tools, buildings and land belong to ` +
+      `that time and place — nothing from another time or place.`
+    : "";
+  if (!items?.others.length) return where;
   const others = items.others.map(o => `"${o}"`).join(", ");
   return (
     ` This picture is one item of a list said one after another — it shows "${items.own}", drawn so ` +
     `it is clearly that, by the shape and features that make it what it is, and could never be ` +
-    `taken for the other items of the list (${others}), which each get their own picture.`
+    `taken for the other items of the list (${others}), which each get their own picture.${where}`
   );
 }
 
@@ -8506,20 +8614,22 @@ function directionParts(sentence: string): { sep: string; text: string }[] {
  * subject): when that is the print, the sentence goes whole, so nothing is left as a dangling
  * modifier ("Home base: under a window."). A later part naming print goes on its own — a trailing
  * clause, or a list item ("Recurring props: sympathy cards, a clock, a book, a phone." keeps the
- * cards, the clock and the phone). What is kept is re-checked.
+ * cards, the clock and the phone). What is kept is re-checked. `isPrint` is what counts as the print
+ * to take out — every book by default, only an unwanted one for a cutaway (`dropUnwantedBook`).
  */
 function withoutPrintedParts(
-  sentence: string
+  sentence: string,
+  isPrint: (text: string) => boolean = brollDepictsBook
 ): { kept: string; dropped: string[] } | null {
   const body = sentence.replace(/[.!?]+$/, "");
   const end = sentence.slice(body.length);
   const parts = directionParts(body);
-  if (parts.length < 2 || brollDepictsBook(parts[0].text)) return null;
-  const keep = parts.filter((p, i) => i === 0 || !brollDepictsBook(p.text));
+  if (parts.length < 2 || isPrint(parts[0].text)) return null;
+  const keep = parts.filter((p, i) => i === 0 || !isPrint(p.text));
   if (keep.length === parts.length) return null; // the print spans parts — no part to single out
   const kept =
     keep.map((p, i) => (i === 0 ? p.text : p.sep + p.text)).join("").trim() + end;
-  if (brollDepictsBook(kept)) return null;
+  if (isPrint(kept)) return null;
   const dropped = parts.filter(p => !keep.includes(p)).map(p => p.text.trim());
   return { kept, dropped };
 }
@@ -8534,9 +8644,14 @@ function withoutPrintedParts(
  * cost the home base, the places the script travels to and the tone. Text with nothing to drop
  * comes back as it was, byte for byte; what is kept is re-checked whole, and anything still
  * reading as print is dropped entirely (never trust the split) — so this never returns text the
- * guard flags, which is what the old whole-drop promised. Pure — unit-tested.
+ * guard flags, which is what the old whole-drop promised. `isPrint` narrows what is taken out (a
+ * cutaway loses only an unwanted book, `dropUnwantedBook`); the bible keeps the default, every book.
+ * Pure — unit-tested.
  */
-export function withoutPrintedMatter(text: string): {
+export function withoutPrintedMatter(
+  text: string,
+  isPrint: (text: string) => boolean = brollDepictsBook
+): {
   kept: string;
   dropped: string[];
 } {
@@ -8550,20 +8665,20 @@ export function withoutPrintedMatter(text: string): {
   const kept: string[] = [];
   const dropped: string[] = [];
   for (const s of sentences) {
-    if (!brollDepictsBook(s)) {
+    if (!isPrint(s)) {
       kept.push(s);
       continue;
     }
-    const partly = withoutPrintedParts(s);
+    const partly = withoutPrintedParts(s, isPrint);
     if (partly) {
       kept.push(partly.kept);
       dropped.push(...partly.dropped);
     } else dropped.push(s);
   }
   const all = { kept: "", dropped: sentences.length ? sentences : [src] };
-  if (!dropped.length) return brollDepictsBook(src) ? all : { kept: src, dropped };
+  if (!dropped.length) return isPrint(src) ? all : { kept: src, dropped };
   const rest = kept.join(" ");
-  return brollDepictsBook(rest) ? all : { kept: rest, dropped };
+  return isPrint(rest) ? all : { kept: rest, dropped };
 }
 
 /** What a style bible with nothing left after the printed-matter sentences says on the job. */
@@ -8588,6 +8703,216 @@ export function bibleWithoutPrintedMatter(bible: string): {
     bible: kept,
     warning: `Style bible: printed matter left out, the rest kept (${dropped.join(" / ")})`,
   };
+}
+
+/**
+ * Words with "book" in them that name no publication — a checkbook, a notebook, a bookcase. Never
+ * the video's book, and never a reason to take a picture away from its line: job 409 scene 15, the
+ * list item "money,", was "a few folded bills and an open checkbook on the wooden desk", and the old
+ * guard swapped it for the next item's sympathy card. A size or a purse or a laptop is no book
+ * either: job 242's strike plate, "approximately matchbook-sized", lost that clause to the guard;
+ * a pocketbook is a handbag, a MacBook or Chromebook a laptop showing the app. And "book shelf"
+ * written apart is the bookshelf.
+ */
+const NOT_A_PUBLICATION =
+  /\b(?:(?:check|cheque|note|pass|bank|sketch|scrap|log|address|phone|guest|ledger|receipt)[\s-]?books?|(?:match|pocket|mac|chrome)books?|book[\s-]?(?:cases?|shel(?:f|ves)|ends?|marks?|stands?))\b/gi;
+
+/** A booklet is a publication only when it can be the video's own book (`publicationIn`). */
+const BOOKLET = /\bbooklets?\b/gi;
+
+/** "Leafing through" a word set aside above handles that thing, not a book. */
+const HANDLED_THROUGH =
+  /\b(?:leaf|flip|thumb|pag|riffl)\w*(?:s|ing|ed)\s+through\s+((?:[\w'’-]+\s+){0,3})object\b/gi;
+
+/** A word a CTA title may hold that names the book itself ("Guide", "Playbook", "Bible"). */
+const TITLE_PRINT_NOUN = /^(?:\w*books?|booklets?|guides?|manuals?|bibles?|almanacs?|journals?)$/;
+
+/**
+ * Words that name a book by its title rather than by a print noun ("a copy of …", "its cover"). Only
+ * the book's own cover counts — "cover of", "its cover", "front cover" — never covers of anything
+ * else: a quilting channel's "Scrap Quilts That Sell" is also "scrap quilts that sell, draped as bed
+ * covers", and a bare "covers" read that picture as the book.
+ */
+const BOOK_BY_NAME_CUE =
+  /\b(?:cop(?:y|ies)|covers?\s+of|(?:its|front|back)\s+covers?|titled|editions?|volumes?)\b|['’]s\s+covers?\b/i;
+
+/**
+ * A line that speaks of something written or printed — a book, an essay, a letter, a page, what a
+ * field guide prints. A book in its picture is what the line is about, never one the picture made up:
+ * job 409 scene 28, "The essay is called On the Shortness of Life … Seneca says", under the host
+ * reading at the desk; jobs 404 and 411, "the one printed in the field guides", under a field guide's
+ * page. Bare "prints" is left out: paw prints are no print, and neither is "Facebook".
+ */
+const LINE_SPEAKS_OF_PRINT =
+  /\b(?:(?!facebook)\w*books?|booklets?|essays?|letters?|poems?|poetry|verses?|chapters?|pages?|paragraphs?|articles?|novels?|magazines?|newspapers?|journals?|diar(?:y|ies)|manuals?|guides?|recipes?|manuscripts?|scrolls?|catalog(?:ue)?s?|brochures?|pamphlets?|almanacs?|publications?|handouts?|printouts?|encycloped\w*|librar(?:y|ies)|titles?|titled|printed|read|reads|reading|wrote|writes|written|scriptures?|bibles?)\b/i;
+
+/**
+ * The titles of the video's own books — one per CTA block (`ctaBooks`) and the channel's
+ * (`bookTitle`). Pure.
+ */
+export function ctaBookTitles(
+  params: Pick<LongformInputParams, "ctaBooks" | "bookTitle">
+): string[] {
+  const titles = [...(params.ctaBooks ?? []).map(b => b.title), params.bookTitle];
+  return Array.from(new Set(titles.filter((t): t is string => !!t?.trim())));
+}
+
+/**
+ * Whether a line speaks of the HOST'S OWN book — the one the CTA sells — without naming it: "in my
+ * book I walk you through this trick", "the guide I put together", "a digital book". A word of the
+ * CTA's title that names the book counts as well ("my playbook" for "… Lockdown Playbook"). Pure.
+ */
+function speaksOfOwnBook(line: string, titles: string[]): boolean {
+  const nouns = new Set(["e-?books?", "books?", "booklets?"]);
+  const named = new Set(["new", "little", "own", "latest", "free", "digital", "short", "whole", "first", "next", "other"]);
+  for (const t of titles)
+    for (const w of getBookNameTokens(t)) {
+      if (TITLE_PRINT_NOUN.test(w)) nouns.add(`${w.replace(/s$/, "")}s?`);
+      else named.add(w); // "my Lockdown Playbook" — a host drops their own name from the title
+    }
+  const n = `(?:${Array.from(nouns).join("|")})`;
+  // A guide or a handbook someone WROTE is a book; "my guide" alone may be a person who guides.
+  const writ = `(?:${n}|(?:guide|hand|play|work)?books?|guides?|manuals?)`;
+  const adj = String.raw`(?:(?:${Array.from(named).join("|")})\s+){0,3}`;
+  const made = String.raw`(?:I|we)(?:'ve|’ve|\s+have)?\s+(?:wrote|written|put\s+together|made|created|compiled|gathered)`;
+  return new RegExp(
+    [
+      String.raw`\b(?:my|our)\s+${adj}${n}\b`,
+      String.raw`\b${writ}\s+(?:that\s+|which\s+)?${made}\b`,
+      String.raw`\b${made}\s+(?:a|an|the|this|one)\s+${adj}${writ}\b`,
+      String.raw`\b(?:e-?books?|digital\s+(?:book|guide)s?)\b`,
+    ].join("|"),
+    "i"
+  ).test(line ?? "");
+}
+
+/**
+ * Whether words name a CTA title AS A TITLE: every distinctive word of its main part (before a
+ * colon), in order, a word or two apart at most. Stricter than the spoken-line test
+ * (`titleMatcher`, all but one word, any order), because a title is often everyday words: job 351's
+ * "a printed crochet pattern page … on a kitchen table" and job 327's "stack of stitch reference
+ * books on kitchen table" are not "The Kitchen Table Crochet Book". Pure.
+ */
+function namesTitle(text: string, title: string): boolean {
+  const words = getBookNameTokens(title.split(":")[0]);
+  if (!words.length) return false;
+  const stem = (w: string) => `${w.replace(/(es|s)$/, "")}(?:e?s)?`;
+  const gap = String.raw`(?:\W+[\w']+){0,2}?\W+`;
+  return new RegExp(String.raw`\b${words.map(stem).join(gap)}\b`, "i").test(
+    (text ?? "").replace(/[\u2018\u2019]/g, "'")
+  );
+}
+
+/**
+ * Whether words show a PUBLICATION: printed matter (`brollDepictsBook`) with the words that only
+ * carry "book" in their name set aside (`NOT_A_PUBLICATION`), a booklet set aside too unless it can
+ * be the video's own book (`booklets`), and a page on a screen read as the screen it is. A word the
+ * CTA's own title holds always counts ("… Notebook" makes a notebook the book). Pure.
+ */
+function publicationIn(text: string, titleWords: Set<string>, booklets: boolean): boolean {
+  const titled = (m: string) =>
+    titleWords.has(m.toLowerCase().replace(/[\s-]/g, "").replace(/s$/, ""));
+  let t = (text ?? "").replace(NOT_A_PUBLICATION, m => (titled(m) ? m : "object"));
+  if (!booklets) t = t.replace(BOOKLET, m => (titled(m) ? m : "object"));
+  if (showsScreen(t)) t = t.replace(/\bpages?\b/gi, "screen");
+  return brollDepictsBook(t.replace(HANDLED_THROUGH, "holding $1object"));
+}
+
+/**
+ * THE BOOK GUARD FOR A CUTAWAY (2026-10-18, the review of job 409). Its job is to keep the video's
+ * OWN book — the one the CTA sells — out of the b-roll: a line that mentions it without a hard CTA
+ * signal is not flagged `cta`, so the prompt writer drew it, and a positive mention beats the
+ * trailing `NO_BOOK_SUFFIX`. It used to fire on ANY book word, so it took pictures away from the
+ * lines they were for: job 409 scene 28 (the host reading under "The essay is called On the Shortness
+ * of Life"), scene 15 ("an open checkbook" under "money,"), jobs 404 and 411 (a field guide's page
+ * under "the one printed in the field guides"), job 401 scene 27 (the essay's manuscript page).
+ *
+ * True only for a book the picture must not show: the CTA's book named by its title (`namesTitle`,
+ * with a publication or "a copy of"/"its cover"); any publication under a line that speaks of the
+ * host's own book (`speaksOfOwnBook`) or names its title; or a publication the line does not speak
+ * of at all — one the picture made up. Never a book or print the line is about: the line speaks of
+ * print (`LINE_SPEAKS_OF_PRINT`), or `about` — the picture's own "what it must show", written for
+ * this line by the shot list and the line check — shows a publication itself (job 351 scene 10, "If
+ * you've ever opened a star pattern … Round after round of numbers," under a printed pattern page).
+ * Never a word that only has "book" in it either (a checkbook, a notebook, a bookcase; a booklet
+ * unless it can be the CTA's). Pure — unit-tested.
+ */
+export function unwantedCutawayBook(
+  text: string | undefined,
+  line: string | undefined,
+  ctaTitles: string[] = [],
+  about?: string
+): boolean {
+  const t = text ?? "";
+  const said = line ?? "";
+  const titles = ctaTitles.filter(x => x?.trim());
+  const printed = brollDepictsBook(t);
+  if (!printed && !BOOK_BY_NAME_CUE.test(t)) return false;
+  const titleWords = new Set(titles.flatMap(getBookNameTokens));
+  // A title alone is not a book: "The Backyard Birder" (jobs 404/411) is also "a backyard birder".
+  const byName = publicationIn(t, titleWords, true) || BOOK_BY_NAME_CUE.test(t);
+  if (byName && titles.some(x => namesTitle(t, x))) return true;
+  if (!printed) return false;
+  const ownBook = speaksOfOwnBook(said, titles) || titles.some(x => namesTitle(said, x));
+  if (!publicationIn(t, titleWords, ownBook)) return false;
+  if (ownBook) return true;
+  if (LINE_SPEAKS_OF_PRINT.test(said)) return false;
+  // What it must show vouches for the print only when it is not the CTA's book itself.
+  const vouched = !!about?.trim() && publicationIn(about, titleWords, true);
+  return !vouched || titles.some(x => namesTitle(about!, x));
+}
+
+/**
+ * A cutaway that must not show its book (`unwantedCutawayBook`) is drawn from its OWN words with the
+ * book taken out — never from a neighbour's. The guard used to put the nearest cutaway's prompt in
+ * its place (`genericCtaBrollFor`) and leave `showSubject` alone, and `subjectLead` then led the
+ * borrowed prompt with the scene's own subject, so the picture maker drew BOTH: job 409 scene 28 came
+ * back as the host reading at the desk with the next line's farmer through the window, and scene 15's
+ * bills beside the next item's sympathy card — the book still there, as large as before.
+ *
+ * What leads the prompt (`showSubject`) loses the book too, with its print when nothing is left; the
+ * prompt is the rewrite without the book, else the scene's own first prompt (`visualPromptSeed`)
+ * without it, else what it must show, else the video's own subject (`genericCtaBrollFor` with no
+ * neighbours). An exact look or key thing that is that book goes with it. Mutates the scene.
+ */
+export function dropUnwantedBook(
+  scene: StoryboardScene,
+  i: number,
+  ctaTitles: string[],
+  videoSubject?: string
+): void {
+  const line = scene.scriptText ?? scene.narration ?? "";
+  const about = scene.showSubject;
+  const unwanted = (t: string) => unwantedCutawayBook(t, line, ctaTitles, about);
+  const without = (t: string | undefined): string | undefined => {
+    const src = t?.trim();
+    return src ? withoutPrintedMatter(src, unwanted).kept.trim() || undefined : undefined;
+  };
+  if (scene.showSubject?.trim() && unwanted(scene.showSubject)) {
+    scene.showSubject = without(scene.showSubject);
+    if (!scene.showSubject) {
+      scene.pictureText = undefined;
+      scene.blurPrint = undefined;
+    }
+  }
+  // The CTA's title is never the one readable writing allowed in a cutaway (`withAllowedText`).
+  const said = scene.pictureText;
+  if (said && ctaTitles.some(x => namesTitle(said, x))) scene.pictureText = undefined;
+  if (scene.visualPrompt?.trim() && unwanted(scene.visualPrompt)) {
+    scene.visualPrompt =
+      without(scene.visualPrompt) ??
+      without(scene.visualPromptSeed) ??
+      (scene.showSubject?.trim() || genericCtaBrollFor([], i, videoSubject));
+  }
+  if (scene.namedLook && unwanted(scene.namedLook)) scene.namedLook = undefined;
+  if (scene.keyThing && unwanted(scene.keyThing)) {
+    scene.keyThing = undefined;
+    scene.partOf = undefined;
+  }
+  if (scene.otherKeyThings?.some(unwanted)) {
+    const others = scene.otherKeyThings.filter(k => !unwanted(k));
+    scene.otherKeyThings = others.length ? others : undefined;
+  }
 }
 
 /** Calm, generic topic-neutral cutaway subjects — the LAST resort, used only when a CTA cutaway
@@ -10287,7 +10612,9 @@ export function buildClipChain(
   // The same person rule as the still (`buildStillPrompt`): someone else's picture never says
   // "no person is visible" beside the clause that draws them.
   const lipsCut = !scene.hostPresent && hostLipsCut(scene);
-  const facing = (t: string) => (lipsCut ? facingTheCamera(t) : t);
+  // …and no face words for a person whose face is never drawn (`faceNeverShown`).
+  const unfaced = (t: string) => (!scene.hostPresent && faceNeverShown(scene) ? expressionAsBody(t) : t);
+  const facing = (t: string) => (lipsCut ? facingTheCamera(unfaced(t)) : unfaced(t));
   const clipNoFigures =
     !scene.hostPresent && scene.humanPresent && scene.otherPerson
       ? otherPeopleSuffix(peopleInShot(scene))
@@ -10713,6 +11040,10 @@ async function drawValidatedStill(
   // ships only when nothing better came (`personFallback`).
   let personRedraws = 0;
   let personFallback: Drawn | undefined;
+  // A face on someone else (`face`): one redraw framed from behind (`turnOthersAway`); the frame
+  // ships only when nothing better came (`faceFallback`).
+  let faceRedraws = 0;
+  let faceFallback: Drawn | undefined;
   // THE HOST IS THE HOST: a picture of the host that shows someone else is drawn again
   // (`HOST_IDENTITY_REDRAWS`), then drawn with nobody in it — a stranger never ships.
   let hostMisses = 0;
@@ -10988,7 +11319,12 @@ async function drawValidatedStill(
         buffer,
         // Held to what the picture maker was asked for: job 403 scene 16's "cutaway close-up of the
         // white porcelain S-shaped channel" asked QUESTION 4 for the very cut QUESTION 2 calls broken.
-        scene.showSubject ? withoutCutaway(scene.showSubject) : undefined,
+        // Nor is a face its prompt never asked for (`expressionAsBody`) held against it.
+        scene.showSubject
+          ? faceNeverShown(scene)
+            ? expressionAsBody(withoutCutaway(scene.showSubject))
+            : withoutCutaway(scene.showSubject)
+          : undefined,
         scene.cta ? undefined : scene.scriptText ?? scene.narration,
         scene.pictureText,
         scene.namedLook,
@@ -11006,7 +11342,10 @@ async function drawValidatedStill(
         drawnFromOutside(scene),
         // The picture behind the big QR card must show nobody (job 402 scene 33: a hand at the
         // card's edge "held" the code for 19.6 s, and the check never asked).
-        qrBackdrop(scene) && !square
+        qrBackdrop(scene) && !square,
+        // Someone else's face is never shown (job 410 scene 8: an older passenger in profile, her eye,
+        // glasses and a smile drawn, and nothing asked) — the same call, one more question.
+        othersFaceAsked(scene, personFree, square)
       );
       if (defects.missing) missed.add(buffer);
       // A THING SEEN CUT OPEN (`cutOpenFault`) is drawn from outside from then on, every redraw built
@@ -11116,6 +11455,26 @@ async function drawValidatedStill(
         console.warn(
           `[Longform] scene ${scene.index} still shows a person behind the QR card (${defects.what}) → ` +
             "drawing it again with nobody in it"
+        );
+        continue;
+      }
+      // NO FACE ON SOMEONE ELSE (2026-10-18, job 410 scene 8): "seen from the side … the face turned
+      // away" came back as an older passenger in profile — eye, glasses, nose and a smile — and only
+      // the host's pictures were ever checked for a face. One redraw framed from behind
+      // (`turnOthersAway`; `othersTurnedAway` keeps it for a Regenerate) — that fault's last chance, so
+      // it never loses its turn to the attempt budget. A redraw that still shows a face is kept, saying
+      // so ("face shown" on its record and the card). Not on a content-policy rung: its softened prompt
+      // draws no one, and a clause about the people in it would put them back.
+      if (defects.face && faceRedraws < 1) {
+        faceRedraws++;
+        faceFallback ??= drawn;
+        scene.othersTurnedAway = true;
+        if (tier === 0) prompt = turnOthersAway(prompt);
+        lastError = `Still image shows the face of someone other than the host (${defects.what})`;
+        if (attempt === attempts) attempts++;
+        console.warn(
+          `[Longform] scene ${scene.index} still shows ${scene.otherPerson}'s face (${defects.what}) → ` +
+            "drawing them again from behind"
         );
         continue;
       }
@@ -11461,6 +11820,15 @@ async function drawValidatedStill(
         `attempts → shipping it: ${scene.visualPrompt.slice(0, 80)}`
     );
     return ship(personFallback);
+  }
+  // A face on someone else is a sound photo breaking one rule — kept only over broken geometry, and
+  // it ships saying so ("face shown").
+  if (faceFallback) {
+    console.warn(
+      `[Longform] scene ${scene.index} still showed a face on someone else after ${attempts} ` +
+        `attempts → shipping it: ${scene.visualPrompt.slice(0, 80)}`
+    );
+    return shipped(faceFallback);
   }
   if (brokenFallback) {
     console.warn(
@@ -12441,7 +12809,10 @@ async function cutShotsOnWords(
   ctx: {
     jobId: number;
     params: LongformInputParams;
-    spokenScript: string;
+    /** The script with its marked CTA blocks taken out (`splitCtaFromContent`) — what the props
+     *  list reads — and the blocks' own words, for `withoutCtaOnlyProps`. */
+    contentScript: string;
+    ctaScript: string;
     words: WhisperWord[];
     masterDurationSec: number;
   }
@@ -12456,17 +12827,28 @@ async function cutShotsOnWords(
       log(params.hostLook ? `host look: ${params.hostLook}` : "host look: unread — b-roll keeps anonymous hands");
     }
     if (params.continuitySheet == null) {
-      const sheet = (
-        await deriveContinuitySheet(ctx.spokenScript, {
+      // The CONTENT only: a thing the film's CTA asks for (job 409's "lift your phone") is no prop
+      // of the film, and as one it was drawn into pictures that never speak of it.
+      const derived = (
+        await deriveContinuitySheet(ctx.contentScript, {
           subject: params.videoSubject,
           styleBible: params.visualStyleBible,
-          // How the host looks and what they call themself: what tells the call whether "you" is
-          // the host or someone the host's job serves (job 402: a host in a crew uniform).
-          host: params.brollOnly
-            ? undefined
-            : [params.hostLook, params.hostTitle ? `title: ${params.hostTitle}` : ""].filter(Boolean).join("; "),
+          // How the host looks, what they call themself and what they say they do (their own words,
+          // read off the script): what tells the call whether "you" is the host or someone the
+          // host's job serves (job 402: a host in a crew uniform; job 410: no title, and a look
+          // that never named the job).
+          host: params.brollOnly ? undefined : (params.hostLook ?? ""),
+          hostTitle: params.brollOnly ? undefined : params.hostTitle,
+          hostName: params.brollOnly ? undefined : params.hostName,
+          // A person the script follows with no PERSON line, or a look with no man or woman, age
+          // or hair, is asked for once more (jobs 410 and 412) — said in the render log.
+          onNote: m => log(`props list: ${m}`),
         })
       ).replace(/\b(?:cluttered|messy|jumbled|crowded)\b/gi, "tidy");
+      // And what still names a CTA-only thing (a style bible kept from before, on a resume) goes.
+      const { sheet, dropped } = withoutCtaOnlyProps(derived, ctx.contentScript, ctx.ctaScript);
+      if (dropped.length)
+        log(`props list: dropped ${dropped.join(", ")} — named only in a call to action`);
       // The same call names the PEOPLE WHO COME BACK, each with one look (job 399: the passenger
       // the story follows was three different women in 13 s). They are kept apart from the props
       // list, which every shot and picture writer reads as things only, exactly as before.
@@ -16658,6 +17040,23 @@ export async function enhanceBrollPrompts(
   const splitSeedOf = (scene: StoryboardScene): string | undefined =>
     (scene.splitVisualSeed ??= scene.splitVisual);
 
+  // THE VIDEO'S OWN BOOK STAYS OUT OF A CUTAWAY, and nothing else is taken from it. A line that
+  // mentions the book without a hard CTA signal (URL/QR/price) is not flagged cta, so the prompt
+  // writer can write the book in — and a positive mention beats the trailing NO_BOOK_SUFFIX. Only
+  // that book, or one the line never speaks of, is taken out (`unwantedCutawayBook`), and the scene
+  // keeps its own words (`dropUnwantedBook`): a book the line is about stays (job 409 scene 28's
+  // essay, scene 15's checkbook), and a neighbour's prompt is never borrowed.
+  const ctaTitles = ctaBookTitles(params);
+  const guardCutawayBook = (scene: StoryboardScene, i: number): void => {
+    const line = scene.scriptText ?? scene.narration;
+    const about = scene.showSubject;
+    if (
+      unwantedCutawayBook(scene.visualPrompt, line, ctaTitles, about) ||
+      unwantedCutawayBook(about, line, ctaTitles, about)
+    )
+      dropUnwantedBook(scene, i, ctaTitles, subject);
+  };
+
   // Resolves to null when the rewrite landed, or to the caught error when the original was
   // kept. Safe to re-run: `seedOf` latched the seed, so a retry rewrites from the same
   // baseline rather than from the failure fallback, and both guards below are idempotent.
@@ -16743,15 +17142,9 @@ export async function enhanceBrollPrompts(
         );
       }
     }
-    // Book guard for non-CTA cutaways (CTA lane already bans books via sanitizeCtaCutaway):
-    // a narration that mentions the book without a hard CTA signal (URL/QR/price) is not
-    // flagged cta, so the enhancer's script-alignment rule writes a book into the prompt —
-    // and a positive book mention beats the trailing NO_BOOK_SUFFIX negation. Swap in the
-    // same on-topic fallback the CTA lane uses. Runs on both the enhanced and the
-    // LLM-failure/original prompt.
-    if (!isCta && brollDepictsBook(scene.visualPrompt ?? "")) {
-      scene.visualPrompt = genericCtaBrollFor(scenes, i, subject);
-    }
+    // Book guard for non-CTA cutaways (CTA lane already bans books via sanitizeCtaCutaway). Runs on
+    // both the enhanced and the LLM-failure/original prompt.
+    if (!isCta) guardCutawayBook(scene, i);
     return failure;
   };
 
@@ -16800,9 +17193,8 @@ export async function enhanceBrollPrompts(
           typeof entry?.prompt === "string" ? entry.prompt : ""
         );
         if (!enhanced) return void left.push(item);
-        item.scene.visualPrompt = brollDepictsBook(enhanced)
-          ? genericCtaBrollFor(scenes, item.i, subject)
-          : enhanced;
+        item.scene.visualPrompt = enhanced;
+        guardCutawayBook(item.scene, item.i);
       });
       return left;
     } catch (err) {
@@ -17070,15 +17462,18 @@ async function runUnifiedPipeline(
   // threaded into every per-scene prompt so an ambiguous narration noun ("the meat") resolves to
   // the right subject instead of drifting (e.g. a "field dress a deer" video showing chicken).
   params.videoSubject = await deriveVideoSubject(params, spokenScript);
-  // The one physical WORLD the whole video lives in (channel persona + full script), derived HERE —
-  // before storyboarding — so the same world seeds every scene instead of only re-converging them
-  // at the enhancer. Guard preserves an operator's persisted/hand-edited bible on regenerate (same
-  // intent as the beats pass below). The book guard stays at this call site (import cycle), so
-  // printed matter never reaches the seeds — only the words that name it go: job 400 lost its
-  // whole bible to one clause about books, and its Rome pictures lost their look with it
-  // (`bibleWithoutPrintedMatter`).
+  // The script without its marked CTA blocks: the world and the props are the CONTENT's (job 409:
+  // the CTA's "lift your phone" became "Props recur: … a phone" and a key thing on the study desk).
+  const scriptParts = splitCtaFromContent(spokenScript, ctaSpans);
+  // The one physical WORLD the whole video lives in (channel persona + the script's content),
+  // derived HERE — before storyboarding — so the same world seeds every scene instead of only
+  // re-converging them at the enhancer. Guard preserves an operator's persisted/hand-edited bible on
+  // regenerate (same intent as the beats pass below). The book guard stays at this call site
+  // (import cycle), so printed matter never reaches the seeds — only the words that name it go:
+  // job 400 lost its whole bible to one clause about books, and its Rome pictures lost their look
+  // with it (`bibleWithoutPrintedMatter`).
   if (!params.visualStyleBible) {
-    const bible = await deriveStyleBible(params, spokenScript);
+    const bible = await deriveStyleBible(params, scriptParts.content);
     if (bible) {
       const safe = bibleWithoutPrintedMatter(bible);
       if (safe.warning) appendJobWarning(jobId, safe.warning);
@@ -17448,7 +17843,8 @@ async function runUnifiedPipeline(
     scenes = await cutShotsOnWords(scenes, {
       jobId,
       params,
-      spokenScript,
+      contentScript: scriptParts.content,
+      ctaScript: scriptParts.cta,
       words,
       masterDurationSec,
     });

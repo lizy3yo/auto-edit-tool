@@ -6315,3 +6315,314 @@ describe("every key thing its words name keeps its look when a picture is drawn 
     expect(keyThingLookClause(s)).toContain(CARD);
   });
 });
+
+describe("the cutaway book guard keeps out the CTA's book only, and never borrows a neighbour's picture (job 409)", () => {
+  const STOIC = ["The Stoic Way"];
+  const pic = (extra: Partial<StoryboardScene>): StoryboardScene =>
+    ({ index: 0, narration: "n", visualPrompt: "vp", hostPresent: false, ...extra }) as StoryboardScene;
+
+  it("job 409 scene 28: the essay line keeps its reader — no farmer from the next line through the window", async () => {
+    const { unwantedCutawayBook, dropUnwantedBook } = await import("./longformVideo");
+    const line =
+      "The essay is called On the Shortness of Life, and it opens by picking a fight with its own title. Everyone complains that life is too short, Seneca says.";
+    const rewrite = "An older man seen from behind reading an open hardback book at a wooden desk by a window.";
+    expect(unwantedCutawayBook(rewrite, line, STOIC)).toBe(false);
+    expect(unwantedCutawayBook("the host reading a book at the desk in the study", line, STOIC)).toBe(false);
+    // even if a later step calls the guard's rewrite, nothing of the scene is lost
+    const s = pic({ index: 28, scriptText: line, narration: line, showSubject: "the host reading a book at the desk in the study", visualPrompt: rewrite });
+    dropUnwantedBook(s, 27, STOIC, "You're Not Running Out of Time After 60");
+    expect(s.visualPrompt).toBe(rewrite);
+    expect(s.showSubject).toBe("the host reading a book at the desk in the study");
+  });
+
+  it("job 409 scene 15: 'money,' keeps its bills and checkbook — not the next item's sympathy card", async () => {
+    const { unwantedCutawayBook } = await import("./longformVideo");
+    expect(
+      unwantedCutawayBook("a few folded bills and an open checkbook on the wooden desk by the window", "money,", STOIC)
+    ).toBe(false);
+  });
+
+  it("jobs 404/411: the field guide's page stays under 'the one printed in the field guides'", async () => {
+    const { unwantedCutawayBook } = await import("./longformVideo");
+    expect(
+      unwantedCutawayBook(
+        "Close-up of an open field guide page: a painted robin illustration beside short soft grey text bars, with the robin's scientific name printed beneath the illustration",
+        "The funny part is that the robin’s own scientific name, the one printed in the field guides, ends in the word migratorius.",
+        ["The Backyard Birder"]
+      )
+    ).toBe(false);
+  });
+
+  it("the CTA's own book is still taken out of a cutaway — from the scene's own words, never a neighbour's", async () => {
+    const { unwantedCutawayBook, dropUnwantedBook } = await import("./longformVideo");
+    const line = "As I lay out in The Stoic Way, the days are not short.";
+    const s = pic({
+      index: 30,
+      scriptText: line,
+      narration: line,
+      visualPromptSeed: "the wooden desk by the window in the morning",
+      showSubject: "a copy of The Stoic Way on the desk",
+      visualPrompt: "A hardback copy of The Stoic Way on a wooden desk by a window, a mug beside it.",
+    });
+    expect(unwantedCutawayBook(s.visualPrompt, line, STOIC)).toBe(true);
+    dropUnwantedBook(s, 29, STOIC, "You're Not Running Out of Time After 60");
+    expect(s.visualPrompt).toBe("the wooden desk by the window in the morning");
+    expect(s.showSubject).toBeUndefined();
+    // a made-up book under a line that never speaks of one goes too, the rest of the picture kept
+    const card = pic({ scriptText: "grief,", narration: "grief,", visualPrompt: "a plain cream sympathy card on a wooden desk, a stack of hardback books beside it" });
+    dropUnwantedBook(card, 16, STOIC);
+    expect(card.visualPrompt).toBe("a plain cream sympathy card on a wooden desk");
+  });
+
+  it("job 242: a strike plate with 'matchbook-like proportions' keeps them — a word ending in 'book' is no book", async () => {
+    const { unwantedCutawayBook, dropUnwantedBook } = await import("./longformVideo");
+    const line = "and the flat piece of metal around that hole is the strike plate.";
+    const plate =
+      "A factory-standard strike plate removed and laid flat on a wooden work surface in natural light, the small metal plate shown at close range, its flat face and the hole for the bolt visible, the matchbook-like proportions clear, approximately 2 inches by 1 inch.";
+    expect(unwantedCutawayBook(plate, line, ["The Locksmith Way"])).toBe(false);
+    const s = pic({ index: 12, scriptText: line, narration: line, visualPrompt: plate });
+    dropUnwantedBook(s, 12, ["The Locksmith Way"]);
+    expect(s.visualPrompt).toBe(plate);
+  });
+});
+
+describe("a thing only the CTA names is no prop of the film (job 409)", () => {
+  // The closing CTA's "lift your phone toward the pattern in the corner of the screen" was the
+  // script's only phone. Read with the rest of the script, it became the style bible's "Props recur:
+  // … a phone" and a key thing on the study desk, and filled the split panel under "Maybe you have
+  // done that arithmetic" (scene 7) and the study shots 14 and 19.
+  it("the world and the props read the content; the CTA's phone is dropped, a content phone stays", async () => {
+    const { parseCtaMarkers, splitCtaFromContent } = await import("./longformVideo");
+    const { parseKeyThings, withoutCtaOnlyProps } = await import("./shotList");
+    const raw = [
+      "Seventeen. He pays, he walks out to the parking lot, and the number rides home with him in the passenger seat. Maybe you have done that arithmetic.",
+      "===START CTA(The Stoic Way)===",
+      "Getting there is one small motion: lift your phone toward the pattern in the corner of the screen and tap what rises, or find the first line of the description below.",
+      "===END CTA===",
+    ].join("\n");
+    const { script, spans } = parseCtaMarkers(raw);
+    const { content, cta } = splitCtaFromContent(script, spans);
+    expect(content).toBe(
+      "Seventeen. He pays, he walks out to the parking lot, and the number rides home with him in the passenger seat. Maybe you have done that arithmetic."
+    );
+    const sheet = [
+      "HOME: a quiet home study, pale cream walls, a wooden desk by a window, soft gray morning light",
+      "MAIN sympathy card: a plain cream greeting card with a muted gray ribbon print on the front",
+      "phone: a black smartphone with a glass screen and thin silver edges, resting face-up on the desk",
+      "parking lot: a flat paved lot with faint lane lines, a few parked cars, gray overcast sky",
+    ].join("\n");
+    expect(parseKeyThings(withoutCtaOnlyProps(sheet, content, cta).sheet).map(t => t.name)).toEqual([
+      "sympathy card",
+      "parking lot",
+    ]);
+    // A phone the film's own content talks about is still a key thing.
+    const told = `${content} He keeps the phone face-down on the desk so the number cannot reach him.`;
+    expect(parseKeyThings(withoutCtaOnlyProps(sheet, told, cta).sheet).map(t => t.name)).toContain("phone");
+  });
+});
+
+describe("the people the story follows keep one look, and 'you' is read from what the host does (jobs 410, 412)", () => {
+  // Job 410 follows two passengers ("The other was still in row fourteen… He figures she must know
+  // somebody on the crew. She doesn't.") and the props call wrote no PERSON line: the man changed
+  // clothes between scenes 2 and 7. It echoed the host block back as the prop "THE HOST", and with no
+  // host title and a look that never named the job it wrote no VIEWER line, so "you" asking the crew
+  // politely (scene 15) was the host in uniform talking to a colleague. Job 412's VIEWER look gave
+  // no man or woman, age or hair, and the sleeper changed from shot to shot.
+  const script410 =
+    "Two people paid the same fare, boarded the same flight, and sat in the same row. By the time the beverage cart had come and gone, one of them was sitting in an empty row closer to the front, holding the whole can of ginger ale, a second bag of pretzels, and a bottle of water for later. The other was still in row fourteen with a few inches of soda over ice. He figures she must know somebody on the crew. She doesn't. What she knows is which questions flight attendants like hearing, and when to ask them. I'm Helena Hart, and I read the fine print so travelers like us can stop learning these things the hard way.";
+
+  it("job 410: the she and the he are owed a PERSON line each; the host's own words reach the props call", async () => {
+    const { peopleOwed, hostBlockFor } = await import("./shotList");
+    const { hostOwnWords } = await import("./followedPeople");
+    expect(peopleOwed(script410, { people: [], viewer: [] }, { hostName: "Helena Hart" }).uncovered.map(f => f.cue)).toEqual(["she", "he"]);
+    expect(hostBlockFor("a slender woman in her forties, navy blazer with gold pin, striped scarf", undefined, hostOwnWords(script410, { hostName: "Helena Hart" }))).toContain(
+      'in their own words — "I\'m Helena Hart, and I read the fine print so travelers like us can stop learning these things the hard way."'
+    );
+  });
+
+  it("job 410: the host block echoed back is never a key thing", async () => {
+    const { parseKeyThings } = await import("./shotList");
+    const sheet = [
+      "aircraft cabin: narrow rows of blue upholstered seats, a center aisle",
+      "MAIN beverage cart: a metal service cart with wheels",
+      "THE HOST: a slender woman in her forties, fair skin, brown hair pinned back, white blouse, navy blazer with gold pin, striped scarf",
+    ].join("\n");
+    expect(parseKeyThings(sheet).map(k => k.name)).toEqual(["beverage cart"]);
+  });
+
+  it("job 412: the viewer's 'adult of average build, wearing plain pajamas' is owed a whole look", async () => {
+    const { peopleOwed } = await import("./shotList");
+    const viewer = "VIEWER the cat owner: an adult of average build, wearing plain pajamas, lying in the unmade bed in the dim pre-dawn bedroom";
+    expect(peopleOwed("Three in the morning. The house is dark.", { people: [], viewer: [viewer] }).incomplete.map(x => x.gaps)).toEqual([
+      ["man or woman", "an age range", "hair"],
+    ]);
+  });
+
+  it("clean: job 411's robins follow nobody, and a whole look owes nothing", async () => {
+    const { peopleOwed } = await import("./shotList");
+    const robins =
+      "Every fall, the robins that worked your lawn all summer pack up and head for Florida. The song at first light goes quiet, the grass sits empty in the mornings, and nobody sees another robin until spring. I’m Walter, and if you keep an eye on the yard from the kitchen window, this one’s for you.";
+    const sleeper = "VIEWER the cat owner: a woman in her thirties, shoulder-length brown hair, a plain grey sleep shirt";
+    expect(peopleOwed(robins, { people: [], viewer: [sleeper] }, { hostName: "Walter Wren" })).toEqual({ uncovered: [], incomplete: [] });
+  });
+});
+
+describe("the repair keeps job 410's man beside the woman passenger, and adds no one it was not asked for (review)", () => {
+  const woman = "a woman in her seventies, short white hair, a cream cardigan over a blue floral blouse, grey slacks";
+  const man = "a man in his seventies, balding grey hair, an olive-green jacket over a checked shirt, khaki trousers";
+
+  it("job 410: 'the passenger in row fourteen', a man, is added though his name matches her role", async () => {
+    const { mergeRepairedPeople } = await import("./shotList");
+    const merged = mergeRepairedPeople(
+      { people: [`PERSON the passenger in the empty row: ${woman}`], viewer: [] },
+      [],
+      `PERSON the passenger in row fourteen: ${man}`,
+      { uncovered: [{ cue: "he", sex: "m", sentences: [2, 3] }] }
+    );
+    expect(merged.added).toEqual(["the passenger in row fourteen"]);
+  });
+
+  it("clean: a line for someone the check did not find missing is never added", async () => {
+    const { mergeRepairedPeople } = await import("./shotList");
+    const merged = mergeRepairedPeople(
+      { people: [`PERSON the woman passenger: ${woman}`, `PERSON the man passenger: ${man}`], viewer: [] },
+      [],
+      "PERSON the flight attendant: a woman in her thirties, dark hair in a low bun, a navy dress",
+      { uncovered: [] }
+    );
+    expect(merged.added).toEqual([]);
+  });
+});
+
+describe("someone else shows no face: no smile in the words, and the check asks (job 410 scene 8)", () => {
+  // Job 410 scene 8, under "She doesn't. What she knows is which questions flight attendants like
+  // hearing": the shot list wrote "smiling politely up at a flight attendant" into a picture of
+  // another passenger. A smile is drawn on a face, so she came back in profile — eye, glasses, nose
+  // and a smiling mouth — beside a clause saying no face is ever shown, and no check looked.
+  const LOOK =
+    "A slender woman in her late thirties with fair skin and dark hair pinned back, wearing a white blouse, navy blazer with gold pin, and striped scarf";
+  const scene8 = () =>
+    pic(
+      8,
+      "She doesn't. What she knows is which questions flight attendants like hearing, and when to ask them.",
+      "an older woman seen from the side smiling politely up at a flight attendant standing in the aisle",
+      {
+        visualPrompt:
+          "An older woman sitting in her seat seen from the side, looking up and smiling politely at a flight attendant standing in the aisle.",
+        humanPresent: true,
+        otherPerson: "an older woman passenger and a flight attendant",
+        stillImage: true,
+      }
+    );
+
+  it("410-8: the words say it with the body, the prompt asks for no smile, and the still check asks about a face", async () => {
+    const { othersFaceAsked } = await import("./longformVideo");
+    const s = [scene8()];
+    markHostBroll(s, { hostLook: LOOK, hostName: "Helena Hart" }, "https://x/host.png");
+    expect(s[0].otherPerson).toBeTruthy();
+    expect(s[0].showSubject).toBe("an older woman seen from the side nodding politely up at a flight attendant standing in the aisle");
+    expect(s[0].visualPrompt).toBe(
+      "An older woman sitting in her seat seen from the side, looking up and nodding politely at a flight attendant standing in the aisle."
+    );
+    const prompt = buildStillPrompt(s[0]);
+    expect(prompt).not.toMatch(/smil/i);
+    expect(prompt).toMatch(/faces turned away or out of frame so no face is ever shown/);
+    expect(othersFaceAsked(s[0], false, false)).toBe(true);
+  });
+
+  it("410-8 as stored before the rule: a Regenerate's prompt and check words drop the smile too", async () => {
+    const { expressionAsBody } = await import("./hostLook");
+    // The stored scene was marked before this rule, so its words still say "smiling".
+    const stored = scene8();
+    expect(buildStillPrompt(stored)).not.toMatch(/smil/i);
+    expect(expressionAsBody(stored.showSubject!)).toContain("nodding politely up at a flight attendant");
+  });
+
+  it("402-29, 410-31, 405-10: a smile is a nod, a frown at the cat is leaning toward it", async () => {
+    const { expressionAsBody } = await import("./hostLook");
+    expect(expressionAsBody("a flight attendant smiling as she hands a cookie packet to an older passenger, seen from the side")).toBe(
+      "a flight attendant nodding as she hands a cookie packet to an older passenger, seen from the side"
+    );
+    expect(expressionAsBody("a flight attendant smiling and handing a cookie to an older passenger at the galley")).toBe(
+      "a flight attendant nodding and handing a cookie to an older passenger at the galley"
+    );
+    expect(
+      expressionAsBody(
+        "A person half sitting up in bed at night viewed from the side, frowning at a grey and brown tabby cat sitting on the pale blanket beside them."
+      )
+    ).toBe(
+      "A person half sitting up in bed at night viewed from the side, leaning toward a grey and brown tabby cat sitting on the pale blanket beside them."
+    );
+  });
+
+  it("clean: the host tearing cloth, the man planting a tree from behind and the cat at its owner's face keep their words", () => {
+    const tearing = pic(55, "Tear it into strips two fingers wide.", "hands tearing cloth into strips two fingers wide on the work table", {
+      humanPresent: true,
+    }); // job 144 scene 55
+    const planting = pic(18, "He plants it anyway.", "an older man planting a young tree in a backyard on a sunny morning, seen from behind", {
+      humanPresent: true,
+      otherPerson: "an older man",
+    }); // job 409 scene 18
+    const cat = pic(9, "Then it comes up to your face.", "cat lowering face close to owner's face in bed", {
+      humanPresent: true,
+      otherPerson: "the cat owner",
+    }); // job 412 scene 9
+    const words = [tearing, planting, cat].map(s => [s.showSubject, s.visualPrompt]);
+    markHostBroll([tearing, planting, cat], { hostLook: "a man in his sixties with a grey beard" }, "https://x/host.png");
+    expect([tearing, planting, cat].map(s => [s.showSubject, s.visualPrompt])).toEqual(words);
+    expect(buildStillPrompt(tearing)).toContain("hands tearing cloth into strips two fingers wide on the work table");
+    expect(planting.othersTurnedAway).toBeUndefined();
+  });
+});
+
+describe("a list inside a passage of another time is set there; a 'he' of the story is never the host (job 409)", () => {
+  // Job 409, 156-164 s: "The farmer complains, the senator complains, the old complain, and the young
+  // are already rehearsing the complaint" — said inside the passage about a writer of ancient times —
+  // came back as a farmer in overalls, an old man on a park bench and a young man in a hoodie; only
+  // the senator was dressed for the time. Scene 33, "Then he turns the whole thing over in a single
+  // motion: life is not short" (the writer reversing his argument), was the HOST turning a page.
+  const ROME = "ancient Rome, first century AD";
+  const FOUR = ["The farmer complains", "the senator complains", "the old complain", "the young are already rehearsing the complaint"];
+  const TURN = "Then he turns the whole thing over in a single motion: life is not short.";
+  const film = () => [
+    pic(29, "The farmer complains,", "a farmer standing in a field, seen from behind", { humanPresent: true, otherPerson: "a farmer", listCut: true }),
+    pic(30, "the senator complains,", "a senator in robes standing in a hall, seen from the side", { humanPresent: true, otherPerson: "a senator", listCut: true }),
+    pic(31, "the old complain,", "an old man sitting on a bench, seen from behind", { humanPresent: true, otherPerson: "an old man", listCut: true }),
+    pic(32, "and the young are already rehearsing the complaint.", "a young man standing alone in a courtyard, seen from the side", {
+      humanPresent: true,
+      otherPerson: "a young man",
+      listCut: true,
+    }),
+    pic(33, TURN, "the host turning a page slowly at the desk", { humanPresent: true }),
+  ];
+
+  it("409-29..32: every item's prompt is set in the passage's time and place, the planner's picture kept", () => {
+    const r = applySpokenLists(film(), [{ sentence: 20, items: FOUR, setting: ROME }]);
+    const items = r.scenes.filter(s => s.listCut);
+    expect(items).toHaveLength(4);
+    for (const s of items) expect(buildStillPrompt(s)).toContain(`this picture is set in ${ROME}: anyone in it is dressed as people were there and then`);
+    expect(items.map(s => s.showSubject)).toEqual(film().slice(0, 4).map(s => s.showSubject));
+  });
+
+  it("409-33: the line check is told its he/she is not the host", async () => {
+    const { fitPictureNotes } = await import("./shotList");
+    expect(fitPictureNotes(film()[4])).toBe(" (its he/she is not the host)");
+  });
+
+  it("clean: Dale's list of today and a how-to that really turns a board over are left as they were", async () => {
+    const { fitPictureNotes } = await import("./shotList");
+    const dale = [
+      pic(4, "Coasters,", "a stack of round wooden coasters", { listCut: true }),
+      pic(5, "ornaments,", "a few small wooden ornaments", { listCut: true }),
+      pic(6, "small cutting boards.", "small cutting boards leaning on the bench", { listCut: true }),
+    ]; // job 397
+    const r = applySpokenLists(dale, [{ sentence: 0, items: ["Coasters", "ornaments", "small cutting boards"] }]);
+    for (const s of r.scenes) {
+      expect(s.listSetting).toBeUndefined();
+      expect(buildStillPrompt(s)).not.toMatch(/Like the sentence it is said in/);
+    }
+    expect(
+      fitPictureNotes(pic(9, "Turn it over and sand the other side.", "the host's hands turning a board over on the workbench", { humanPresent: true }))
+    ).toBe("");
+  });
+});

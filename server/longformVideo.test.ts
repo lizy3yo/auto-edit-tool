@@ -99,6 +99,9 @@ import {
   genericCtaBrollFor,
   sanitizeCtaCutaway,
   brollDepictsBook,
+  unwantedCutawayBook,
+  dropUnwantedBook,
+  ctaBookTitles,
   enhanceBrollPrompts,
   demoteAllHostsToBroll,
   convertHostSceneToBroll,
@@ -2033,7 +2036,7 @@ describe("brollDepictsBook / non-CTA book guard", () => {
     expect(STILL_BROLL_ENHANCER_SYSTEM).toMatch(/NEVER depict a book/);
   });
 
-  it("swaps a booky enhanced prompt on a non-CTA cutaway for on-topic b-roll", async () => {
+  it("takes the host's own book out of a non-CTA cutaway — from its own words, never a neighbour's", async () => {
     const scenes = [
       sc({
         index: 0,
@@ -2054,9 +2057,12 @@ describe("brollDepictsBook / non-CTA book guard", () => {
             : "a wheelbarrow of dark mulch beside a flower bed in soft light",
         }) as any
     );
-    await enhanceBrollPrompts(scenes, baseParams);
+    await enhanceBrollPrompts(scenes, { ...baseParams, videoSubject: "mulching a flower bed" });
     expect(brollDepictsBook(scenes[0].visualPrompt!)).toBe(false);
-    expect(scenes[0].visualPrompt).toMatch(/wheelbarrow/);
+    // Nothing of its own is left without the book, so the video's own subject — the neighbour's
+    // picture drawn twice is what job 409 shipped.
+    expect(scenes[0].visualPrompt).not.toMatch(/wheelbarrow/);
+    expect(scenes[0].visualPrompt).toMatch(/mulching a flower bed/);
   });
 
   // Regression: the enhancer used to read `scene.visualPrompt` — its OWN previous ≤60-word
@@ -2082,18 +2088,18 @@ describe("brollDepictsBook / non-CTA book guard", () => {
     expect(sent).not.toContain("Original prompt: a damp garden bed");
   });
 
-  it("swaps a booky original prompt even when the enhancer LLM fails", async () => {
+  it("takes the host's own book out of the original prompt even when the enhancer LLM fails", async () => {
     const scenes = [
       sc({
         index: 0,
         narration: "grab my book",
-        visualPrompt: "an older man reading the book in his garden",
+        visualPrompt: "an older man in his garden, the book open on his knee",
       }),
       sc({ index: 1, visualPrompt: "rows of leafy greens in a raised bed" }),
     ];
     mockInvoke.mockRejectedValue(new Error("boom"));
     await enhanceBrollPrompts(scenes, baseParams);
-    expect(scenes[0].visualPrompt).toBe("rows of leafy greens in a raised bed");
+    expect(scenes[0].visualPrompt).toBe("an older man in his garden");
   });
 
   // The splitVisual book guard is the ONLY guard on that field, and splitVisual is now enhanced
@@ -2518,6 +2524,318 @@ describe("brollDepictsBook / non-CTA book guard", () => {
     const { failedScenes } = await enhanceBrollPrompts(scenes, baseParams);
     expect(scenes[0].visualPrompt).toBe("RAW");
     expect(failedScenes).toEqual([2]);
+  });
+});
+
+// The cutaway book guard keeps the video's OWN book out of the b-roll and nothing else (2026-10-18,
+// the review of job 409). It used to fire on any book word and swap the prompt for the nearest
+// neighbour's, while `showSubject` still led the prompt (`subjectLead`): scene 28 came back as the
+// host reading face-on with the next line's farmer through the window, scene 15 as the bills beside
+// the next item's sympathy card. Lines and descriptions are job 409's (Gideon Grant, "The Stoic Way").
+describe("unwantedCutawayBook / dropUnwantedBook — the CTA's book only, the scene's own words", () => {
+  const STOIC = ["The Stoic Way"];
+  const ESSAY_LINE =
+    "The essay is called On the Shortness of Life, and it opens by picking a fight with its own title. Everyone complains that life is too short, Seneca says.";
+  const sc = (extra: Partial<StoryboardScene>): StoryboardScene => ({
+    index: 0,
+    narration: "n",
+    visualPrompt: "vp",
+    hostPresent: false,
+    ...extra,
+  });
+
+  afterEach(() => {
+    mockInvoke.mockReset();
+  });
+
+  it("a book or print the line is about stays (job 409 scene 28, jobs 401/404/411)", () => {
+    expect(unwantedCutawayBook("the host reading a book at the desk in the study", ESSAY_LINE, STOIC)).toBe(false);
+    expect(
+      unwantedCutawayBook(
+        "An older man reading an open hardback book at a wooden desk by a window",
+        ESSAY_LINE,
+        STOIC
+      )
+    ).toBe(false);
+    // job 401 scene 27: the essay's manuscript page under its own title line
+    expect(
+      unwantedCutawayBook(
+        "Close-up of an open aged manuscript page filling the frame, the essay's title written in ink across the top of the page, dense lines of small handwriting below it, soft natural light",
+        "The essay is called On the Shortness of Life, and it opens by picking a fight with its own title.",
+        STOIC
+      )
+    ).toBe(false);
+    // jobs 404 / 411 scene 16-17: a field guide's page under "the one printed in the field guides"
+    expect(
+      unwantedCutawayBook(
+        "close-up of an open bird field guide page showing a painted American robin with its entry text",
+        "The funny part is that the robin’s own scientific name, the one printed in the field guides, ends in the word migratorius, which means just about what it sounds like.",
+        ["The Backyard Birder"]
+      )
+    ).toBe(false);
+  });
+
+  it("a word that only has 'book' in it never fires (job 409 scene 15's checkbook)", () => {
+    expect(
+      unwantedCutawayBook("a few folded bills and an open checkbook on the wooden desk by the window", "money,", STOIC)
+    ).toBe(false);
+    for (const t of [
+      "an open notebook beside a mug on the desk",
+      "a tall bookcase behind the reading chair",
+      "a small booklet on the kitchen table",
+      "hands flipping through a checkbook at the desk",
+      "a phone book on the hall table",
+      "a worn leather pocketbook open on the kitchen counter, a few coupons inside",
+      "a silver MacBook open on the kitchen table showing a plain buy-and-sell app",
+      "a Chromebook on the desk beside a coffee mug",
+      "an empty book shelf on the far wall",
+    ])
+      expect(unwantedCutawayBook(t, "grief,", STOIC)).toBe(false);
+    // job 242 scenes 5 and 12: a strike plate "approximately matchbook-sized" keeps its size —
+    // whole, prompt and all, when the guard looks at it
+    const plateLine = "and the weak spot comes down to a small metal plate";
+    const plate =
+      "A factory-standard strike plate removed from a door frame, laid on a wooden surface in natural light, the small metal plate shown from above at a slight angle, its two short screw holes visible, approximately matchbook-sized, the worn wood around it where it was mounted visible at the edges.";
+    expect(unwantedCutawayBook(plate, plateLine, ["The Locksmith Way"])).toBe(false);
+    const s = sc({ index: 5, narration: plateLine, scriptText: plateLine, visualPrompt: plate });
+    dropUnwantedBook(s, 5, ["The Locksmith Way"]);
+    expect(s.visualPrompt).toBe(plate);
+    // …while a real book beside it still goes
+    expect(unwantedCutawayBook(`${plate} A paperback lies beside it.`, plateLine, ["The Locksmith Way"])).toBe(true);
+    // a page on a screen is the screen (job 397 scene 32's shop settings)
+    expect(
+      unwantedCutawayBook(
+        "a laptop screen with the shop settings page open",
+        "Below $10,000 a year in sales, you can opt out in your shop settings.",
+        ["The Ultimate DIY Woodworking Guide"]
+      )
+    ).toBe(false);
+  });
+
+  it("the CTA's own book still fires — by its title, or under a line about the host's own book", () => {
+    // named in the picture, even under a line that speaks of a book
+    expect(unwantedCutawayBook("a hardback copy of The Stoic Way on the desk by the window", ESSAY_LINE, STOIC)).toBe(true);
+    expect(unwantedCutawayBook("the cover of The Stoic Way propped against a mug", "grief,", STOIC)).toBe(true);
+    expect(unwantedCutawayBook("The Stoic Way's front cover face-up on the desk", "grief,", STOIC)).toBe(true);
+    // covers of anything else are not the book's: a quilting title's everyday words under "bed covers"
+    expect(
+      unwantedCutawayBook(
+        "two scrap quilts that sell at the fair, draped as bed covers over a rail",
+        "Those are the ones folks reach for first.",
+        ["Scrap Quilts That Sell"]
+      )
+    ).toBe(false);
+    // the line speaks of the host's own book: any publication in its picture is that book
+    expect(
+      unwantedCutawayBook("weathered hands leafing through a gardening book on a bench", "In my book I walk you through this trick", [])
+    ).toBe(true);
+    expect(unwantedCutawayBook("a paperback on the bench", "the little book I put together covers the rest", [])).toBe(true);
+    expect(unwantedCutawayBook("a paperback on the bench", "the guide I put together covers the rest", [])).toBe(true);
+    expect(unwantedCutawayBook("a hardback book on the desk", "That is the whole of the Stoic way, and it fits in a day.", STOIC)).toBe(true);
+    // …and a booklet can be that book
+    expect(unwantedCutawayBook("a small booklet on the kitchen table", "In my book I walk you through this trick", [])).toBe(true);
+    // a word of the title that names the book counts as the host's book ("my guide")
+    expect(
+      unwantedCutawayBook("an open spiral-bound manual on the workbench", "My guide has the cut list.", ["The Ultimate DIY Woodworking Guide"])
+    ).toBe(true);
+  });
+
+  it("print the picture's own 'what it must show' asks for is what the line is about (job 351 scene 10)", () => {
+    const PATTERN = "a printed crochet pattern page full of long rows of numbers lying on a kitchen table";
+    const line = "If you've ever opened a star pattern, you know how it looks. Round after round of numbers,";
+    const crochet = ["The Kitchen Table Crochet Book"];
+    expect(unwantedCutawayBook(PATTERN, line, crochet, PATTERN)).toBe(false);
+    // without what the shot list wrote for the line, the words alone do not say "print"
+    expect(unwantedCutawayBook(PATTERN, line, crochet)).toBe(true);
+    // everyday words of a title are not the title (job 327 scene 8: "and a stack of stitch books,")
+    expect(
+      unwantedCutawayBook("stack of stitch reference books on kitchen table", "and a stack of stitch books,", crochet)
+    ).toBe(false);
+    expect(unwantedCutawayBook("a copy of The Kitchen Table Crochet Book beside a skein of yarn", "a skein of yarn,", crochet)).toBe(true);
+  });
+
+  it("a book the line never speaks of fires; the title's words without a book do not", () => {
+    expect(
+      unwantedCutawayBook("a plain cream sympathy card on a wooden desk, a stack of hardback books beside it", "grief,", STOIC)
+    ).toBe(true);
+    // "The Backyard Birder" (jobs 404/411): a birder in a backyard is a person, not the book
+    expect(
+      unwantedCutawayBook("a backyard birder watching robins at the feeder", "Robins stay all winter.", ["The Backyard Birder"])
+    ).toBe(false);
+    expect(unwantedCutawayBook("a black smartphone face-up on the desk", "grief,", STOIC)).toBe(false);
+    expect(unwantedCutawayBook(undefined, "grief,", STOIC)).toBe(false);
+  });
+
+  it("drops only the book from the scene's own words, and keeps what leads the prompt honest", () => {
+    // a part of its own
+    const card = sc({
+      narration: "grief,",
+      visualPrompt: "a plain cream sympathy card on a wooden desk, a stack of hardback books beside it",
+    });
+    dropUnwantedBook(card, 16, STOIC, "You're Not Running Out of Time After 60");
+    expect(card.visualPrompt).toBe("a plain cream sympathy card on a wooden desk");
+
+    // the whole rewrite is the CTA's book: its own first prompt, never the neighbour's
+    const desk = sc({
+      narration: "As I lay out in The Stoic Way, the days are not short.",
+      visualPromptSeed: "the wooden desk by the window in the morning",
+      visualPrompt: "a hardback copy of The Stoic Way on the desk by the window",
+      showSubject: "a copy of The Stoic Way on the desk",
+      pictureText: "The Stoic Way",
+    });
+    dropUnwantedBook(desk, 30, STOIC, "You're Not Running Out of Time After 60");
+    expect(desk.visualPrompt).toBe("the wooden desk by the window in the morning");
+    expect(desk.showSubject).toBeUndefined();
+    expect(desk.pictureText).toBeUndefined();
+    // what it must show keeps the rest, and the title is never the writing allowed on it
+    const sill = sc({
+      narration: "As I lay out in The Stoic Way, the days are not short.",
+      visualPrompt: "the wooden desk by the window in the morning",
+      showSubject: "the wooden desk by the window, a copy of The Stoic Way on it",
+      pictureText: "The Stoic Way",
+    });
+    dropUnwantedBook(sill, 30, STOIC);
+    expect(sill.showSubject).toBe("the wooden desk by the window");
+    expect(sill.pictureText).toBeUndefined();
+    expect(sill.visualPrompt).toBe("the wooden desk by the window in the morning");
+
+    // nothing of its own without the book: the video's own subject, never a neighbour's prompt
+    const bare = sc({ narration: "In my book I walk you through this trick", visualPrompt: "an open gardening book" });
+    dropUnwantedBook(bare, 2, [], "mulching a flower bed");
+    expect(bare.visualPrompt).toMatch(/^mulching a flower bed/);
+    expect(brollDepictsBook(bare.visualPrompt!)).toBe(false);
+
+    // a list keeps its other items — the checkbook too
+    const bills = sc({
+      narration: "money,",
+      visualPrompt: "folded bills, an open checkbook, a copy of The Stoic Way",
+    });
+    dropUnwantedBook(bills, 15, STOIC);
+    expect(bills.visualPrompt).toBe("folded bills, an open checkbook");
+
+    // a key thing or exact look that IS that book goes with it
+    const kept = sc({
+      narration: "In my book I walk you through this trick",
+      visualPrompt: "a trowel on a garden bench, a hardback book beside it",
+      keyThing: "the book",
+      namedLook: "the book: a green hardback with a gold spine",
+    });
+    dropUnwantedBook(kept, 3, []);
+    expect(kept.visualPrompt).toBe("a trowel on a garden bench");
+    expect(kept.keyThing).toBeUndefined();
+    expect(kept.namedLook).toBeUndefined();
+  });
+
+  it("ctaBookTitles lists each CTA block's book and the channel's, once", () => {
+    expect(
+      ctaBookTitles({
+        ctaBooks: [
+          { ctaIndex: 0, bookId: 1, title: "The Stoic Way" },
+          { ctaIndex: 1, bookId: 1, title: "The Stoic Way" },
+        ],
+        bookTitle: "Letters on Time",
+      })
+    ).toEqual(["The Stoic Way", "Letters on Time"]);
+    expect(ctaBookTitles({})).toEqual([]);
+  });
+
+  it("job 409 scenes 28 and 15 keep their own pictures through the batched prompt writer", async () => {
+    // The real neighbourhood: 27 is a host take, 28 the essay line, 29 the list's farmer; 15 the
+    // list item "money," and 16 "grief,". The old guard gave 28 the farmer and 15 the card.
+    const scenes = [
+      sc({
+        index: 15,
+        narration: "money,",
+        scriptText: "money,",
+        listCut: true,
+        showSubject: "a few folded bills and an open checkbook on the wooden desk by the window",
+        visualPrompt: "a few folded bills and an open checkbook on the wooden desk by the window",
+      }),
+      sc({
+        index: 16,
+        narration: "grief,",
+        scriptText: "grief,",
+        listCut: true,
+        showSubject:
+          "close-up of the plain cream sympathy card with a muted gray ribbon print, standing open beside a framed photo on a wooden desk",
+        visualPrompt:
+          "close-up of the plain cream sympathy card with a muted gray ribbon print, standing open beside a framed photo on a wooden desk",
+      }),
+      sc({
+        index: 27,
+        hostPresent: true,
+        narration: "When a man like that sits down to write about time, I pull my chair in closer.",
+        visualPrompt: "the host talking to the camera",
+      }),
+      sc({
+        index: 28,
+        narration: ESSAY_LINE,
+        scriptText: ESSAY_LINE,
+        humanPresent: true,
+        showSubject: "the host reading a book at the desk in the study",
+        visualPrompt: "the host reading a book at the desk in the study",
+      }),
+      sc({
+        index: 29,
+        narration: "The farmer complains,",
+        scriptText: "The farmer complains,",
+        listCut: true,
+        humanPresent: true,
+        showSubject: "a farmer standing in a field, seen from behind",
+        visualPrompt: "a farmer standing in a field, seen from behind",
+      }),
+    ];
+    mockInvoke.mockResolvedValue({
+      text: JSON.stringify([
+        { shot: 1, prompt: "A few folded bills and an open checkbook on a wooden desk by a window." },
+        { shot: 2, prompt: "A plain cream greeting card with a muted gray ribbon print, standing open beside a framed photo on a wooden desk." },
+        { shot: 3, prompt: "An older man seen from behind reading an open hardback book at a wooden desk by a window." },
+        { shot: 4, prompt: "A farmer in an open field, viewed from behind." },
+      ]),
+    } as any);
+    await enhanceBrollPrompts(scenes, {
+      ...baseParams,
+      videoSubject: "You're Not Running Out of Time After 60",
+      ctaBooks: [{ ctaIndex: 0, bookId: 1, title: "The Stoic Way" }],
+    });
+    expect(scenes[0].visualPrompt).toBe("A few folded bills and an open checkbook on a wooden desk by a window.");
+    expect(scenes[0].visualPrompt).not.toMatch(/sympathy|greeting card/);
+    expect(scenes[3].visualPrompt).toBe(
+      "An older man seen from behind reading an open hardback book at a wooden desk by a window."
+    );
+    expect(scenes[3].visualPrompt).not.toMatch(/farmer/);
+    expect(scenes[3].showSubject).toBe("the host reading a book at the desk in the study");
+  });
+
+  it("the CTA's book is still kept out of a non-CTA cutaway the batched writer put it in", async () => {
+    const line = "As I lay out in The Stoic Way, the days are not short.";
+    const scenes = [
+      sc({
+        index: 30,
+        narration: line,
+        scriptText: line,
+        showSubject: "the wooden desk by the window in the morning",
+        visualPrompt: "the wooden desk by the window in the morning",
+      }),
+      sc({
+        index: 31,
+        narration: "The farmer complains,",
+        visualPrompt: "a farmer standing in a field, seen from behind",
+      }),
+    ];
+    mockInvoke.mockResolvedValue({
+      text: JSON.stringify([
+        { shot: 1, prompt: "A hardback copy of The Stoic Way on a wooden desk by a window, a mug beside it." },
+        { shot: 2, prompt: "A farmer in an open field, viewed from behind." },
+      ]),
+    } as any);
+    await enhanceBrollPrompts(scenes, {
+      ...baseParams,
+      ctaBooks: [{ ctaIndex: 0, bookId: 1, title: "The Stoic Way" }],
+    });
+    expect(scenes[0].visualPrompt).toBe("the wooden desk by the window in the morning");
+    expect(scenes[0].visualPrompt).not.toMatch(/farmer/);
+    expect(scenes[0].showSubject).toBe("the wooden desk by the window in the morning");
   });
 });
 
@@ -11329,6 +11647,131 @@ describe("a picture of the host never ships past the host check (job 409 scene 2
       mockScanNearCopy.mockReset();
       mockScanNearCopy.mockResolvedValue({ copy: false, what: "" });
     }
+  });
+});
+
+describe("someone else's face is asked about in the one check, and drawn again from behind (job 410 scene 8)", () => {
+  const pngOf = (bg: string) =>
+    sharp({ create: { width: 8, height: 8, channels: 3, background: bg } }).png().toBuffer();
+  const drawsOf = (...frames: Buffer[]) => {
+    const fn = vi.fn();
+    for (const f of frames) fn.mockResolvedValueOnce({ success: true, fileData: f });
+    return fn;
+  };
+  const clean = { overlay: false, broken: false, what: "" };
+  const checkSays = (...vs: Record<string, unknown>[]) => {
+    mockScanStillDefects.mockReset();
+    for (const v of vs) mockScanStillDefects.mockResolvedValueOnce({ ...clean, ...v } as any);
+    mockScanStillDefects.mockResolvedValue(clean as any);
+  };
+  afterEach(() => {
+    mockScanStillDefects.mockReset();
+    mockScanStillDefects.mockResolvedValue(clean as any);
+  });
+  // Job 410 scene 8 (25.11-31.47): the older passenger drawn in profile, eye, glasses and a smile.
+  const passenger = () =>
+    ({
+      index: 8,
+      scriptText: "She doesn't. What she knows is which questions flight attendants like hearing, and when to ask them.",
+      showSubject: "an older woman seen from the side smiling politely up at a flight attendant standing in the aisle",
+      visualPrompt:
+        "An older woman sitting in her seat seen from the side, looking up and smiling politely at a flight attendant standing in the aisle.",
+      humanPresent: true,
+      otherPerson: "an older woman passenger and a flight attendant",
+      otherPeople: 2,
+      stillImage: true,
+    }) as any;
+
+  it("a face is refused, the redraw is framed from behind, the mark stays, and no second call is made", async () => {
+    const { OTHERS_TURNED_AWAY_CLAUSE } = await import("./longformVideo");
+    const [a, b] = await Promise.all([pngOf("#a81"), pngOf("#a82")]);
+    checkSays({ face: true, what: "woman in profile, smiling" });
+    mockScanSameHost.mockClear();
+    const scene = passenger();
+    const genImage = drawsOf(a, b);
+    const out = await generateValidatedStill(scene, 4, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(2);
+    const [p1, p2] = genImage.mock.calls.map(c => c[0].prompt as string);
+    expect(p1).not.toContain(OTHERS_TURNED_AWAY_CLAUSE);
+    expect(p2.split(OTHERS_TURNED_AWAY_CLAUSE)).toHaveLength(2);
+    expect(scene.othersTurnedAway).toBe(true);
+    expect(scene.pictureChecks.map((c: any) => c.flags)).toEqual([["face shown"], []]);
+    expect(out.buffer.equals(b)).toBe(true);
+    // The question rode the one check of each draw; the host check never ran on someone else.
+    expect(mockScanStillDefects).toHaveBeenCalledTimes(2);
+    expect((mockScanStillDefects.mock.calls[0] as any[])[11]).toBe(true);
+    expect(mockScanSameHost).not.toHaveBeenCalled();
+    // Neither prompt asks for the smile: the words say it with the body.
+    expect(p1).not.toMatch(/smil/i);
+    expect(p1).toContain("nodding politely");
+  });
+
+  it("a redraw that still shows a face is kept after one redraw, and ships saying so", async () => {
+    const [a, b] = await Promise.all([pngOf("#b81"), pngOf("#b82")]);
+    checkSays({ face: true, what: "three-quarter face" }, { face: true, what: "profile" });
+    const genImage = drawsOf(a, b);
+    const out = await generateValidatedStill(passenger(), 4, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(2);
+    expect(out.flaws).toEqual(["face shown"]);
+    expect(out.buffer.equals(b)).toBe(true);
+  });
+
+  it("the face redraw keeps its turn on the last draw, and the face frame ships only over broken geometry", async () => {
+    const [a, b] = await Promise.all([pngOf("#c81"), pngOf("#c82")]);
+    checkSays({ face: true }, { broken: true, what: "a third arm" });
+    const genImage = drawsOf(a, b);
+    const out = await generateValidatedStill(passenger(), 1, undefined, genImage);
+    expect(genImage).toHaveBeenCalledTimes(2);
+    expect(out.buffer.equals(a)).toBe(true);
+    expect(out.flaws).toEqual(["face shown"]);
+  });
+
+  it("clean: the host's own pictures, a split panel and the picture behind the QR card are never asked", async () => {
+    const [a] = await Promise.all([pngOf("#d81")]);
+    checkSays();
+    const host = {
+      ...passenger(),
+      otherPerson: undefined,
+      otherPeople: undefined,
+      showSubject: "the host at a market table handing a jar of jam across",
+      visualPrompt: "The host at a market table handing a jar of jam across.",
+      brollHostLook: "a woman in her sixties with short grey hair",
+      brollHostRef: "https://r2/host.jpg",
+    };
+    await generateValidatedStill(host, 4, undefined, drawsOf(a));
+    expect((mockScanStillDefects.mock.calls[0] as any[])[11]).toBe(false);
+    mockScanStillDefects.mockClear();
+    await generateValidatedStill(passenger(), 4, undefined, drawsOf(a), undefined, undefined, true);
+    expect((mockScanStillDefects.mock.calls[0] as any[])[11]).toBe(false);
+  });
+
+  it("a Regenerate of a marked picture is framed from behind from the start, the clause written once", async () => {
+    const { OTHERS_TURNED_AWAY_CLAUSE, turnOthersAway } = await import("./longformVideo");
+    const marked = { ...passenger(), othersTurnedAway: true };
+    const prompt = buildStillPrompt(marked);
+    expect(prompt.split(OTHERS_TURNED_AWAY_CLAUSE)).toHaveLength(2);
+    expect(turnOthersAway(prompt)).toBe(prompt);
+    expect(buildStillPrompt(passenger())).not.toContain(OTHERS_TURNED_AWAY_CLAUSE);
+  });
+
+  it("who is asked, and whose words lose a smile: someone else in the picture, never a host take or the QR backdrop", async () => {
+    const { othersFaceAsked, faceNeverShown } = await import("./longformVideo");
+    expect(othersFaceAsked(passenger(), false, false)).toBe(true);
+    // Drawn with nobody in it, a split's square panel, the picture behind the big QR card: no one.
+    expect(othersFaceAsked(passenger(), true, false)).toBe(false);
+    expect(othersFaceAsked(passenger(), false, true)).toBe(false);
+    expect(othersFaceAsked({ ...passenger(), qrHero: true }, false, false)).toBe(false);
+    expect(faceNeverShown(passenger())).toBe(true);
+    // A host take is the host's own face: its prompt preview keeps "a slight smile" (job 111 scene 43).
+    const take = {
+      index: 43,
+      hostPresent: true,
+      humanPresent: true,
+      visualPrompt:
+        "The host seated, speaking with a wry smile to camera about customers asking for a matching set of four coasters.",
+    } as any;
+    expect(faceNeverShown(take)).toBe(false);
+    expect(buildStillPrompt(take)).toContain("a wry smile");
   });
 });
 
